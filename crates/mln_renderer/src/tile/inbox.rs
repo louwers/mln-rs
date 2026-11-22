@@ -1,7 +1,7 @@
 //! The one channel through which what arrives for the tiles reaches the
 //! render thread: file responses, the data of GeoJSON and custom sources,
 //! the workers' replies and lost lanes, glyph responses, and the device fonts
-//! chosen for characters. Senders on any thread push events and wake the
+//! chosen for clusters. Senders on any thread push events and wake the
 //! renderer; the tile store takes them in when the renderer updates
 //! (`TileStore::receive`).
 
@@ -42,10 +42,10 @@ pub(crate) enum TileEvent {
     /// The answer to the glyph store's request `id`, for a glyph range. It
     /// applies only while the range still waits for that request.
     Glyphs { font_stack: FontStack, range: GlyphRange, id: u64, result: GlyphResult },
-    /// The device's fonts for characters of `font_stack` that the glyph
-    /// store asked its chooser about. Each applies only while its character
-    /// still waits for a choice.
-    DeviceFonts { font_stack: FontStack, faces: Vec<(char, Option<FontFace>)> },
+    /// The device's fonts for clusters of `font_stack` that the glyph store
+    /// asked its chooser about. Each applies only while its cluster still
+    /// waits for a choice.
+    DeviceFonts { font_stack: FontStack, faces: Vec<(Vec<char>, Option<FontFace>)> },
 }
 
 /// What a GeoJSON or custom source gives a tile.

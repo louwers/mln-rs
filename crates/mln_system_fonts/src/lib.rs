@@ -255,7 +255,7 @@ mod tests {
         println!("found fonts for {ranges:04X?} in {:?}", started.elapsed());
         for script in scripts::SCRIPTS.iter().filter(|script| script.ranges.iter().all(|r| ranges.contains(r))) {
             let sample = shaped_sample(script.probe);
-            let face = SystemFonts.choose(&Vec::new(), script.probe).expect("a font for a shaped script");
+            let face = SystemFonts.choose(&Vec::new(), &[script.probe]).expect("a font for a shaped script");
             let data = face.data.clone().expect("a device face holds its file");
             let font = skrifa::FontRef::from_index(data.as_bytes(), data.face_index()).unwrap();
             let nominal: Vec<u16> =
@@ -273,7 +273,7 @@ mod tests {
     #[test]
     fn a_font_has_the_character_it_is_for() {
         for c in ['a', 'ب', '\u{0915}', '中'] {
-            let Some(face) = SystemFonts.choose(&vec!["Open Sans Bold".to_owned()], c) else { continue };
+            let Some(face) = SystemFonts.choose(&vec!["Open Sans Bold".to_owned()], &[c]) else { continue };
             let data = face.data.expect("a device face holds its file");
             let font = skrifa::FontRef::from_index(data.as_bytes(), data.face_index()).unwrap();
             println!("{c}: {} at {}", face.url, face.weight);

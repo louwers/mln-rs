@@ -84,17 +84,20 @@ fn local(rasterizer: impl LocalGlyphRasterizer + 'static) -> LocalGlyphs {
 }
 
 /// The device's fonts as faces whose files hold their names: `fonts` names
-/// the font of each character, if one draws it. Records each character it
-/// is asked about, and the thread that asked.
+/// the font of each character, if one draws it, and a cluster takes its first
+/// character's unless `clusters` names one for the whole cluster. Records the
+/// first character of each cluster it is asked about, and the thread that
+/// asked.
 struct StubChooser {
     fonts: fn(char) -> Option<&'static str>,
+    clusters: fn(&[char]) -> Option<&'static str>,
     weight: u16,
     asked: Mutex<Vec<(char, ThreadId)>>,
 }
 
 impl StubChooser {
     fn new(fonts: fn(char) -> Option<&'static str>) -> Arc<StubChooser> {
-        Arc::new(StubChooser { fonts, weight: 400, asked: Mutex::default() })
+        Arc::new(StubChooser { fonts, clusters: |_| None, weight: 400, asked: Mutex::default() })
     }
 
     /// The characters asked about, in order.
@@ -104,9 +107,9 @@ impl StubChooser {
 }
 
 impl FontChooser for StubChooser {
-    fn choose(&self, _font_stack: &FontStack, c: char) -> Option<FontFace> {
-        self.asked.lock().push((c, std::thread::current().id()));
-        let font = (self.fonts)(c)?;
+    fn choose(&self, _font_stack: &FontStack, cluster: &[char]) -> Option<FontFace> {
+        self.asked.lock().push((cluster[0], std::thread::current().id()));
+        let font = (self.clusters)(cluster).or_else(|| (self.fonts)(cluster[0]))?;
         Some(FontFace::device(font, self.weight, FontData::from(font.as_bytes().to_vec())))
     }
 }
@@ -1415,8 +1418,8 @@ fn device_type(font: &str) -> GlyphIDType {
 
 /// The glyphs that the device's `fonts` shape `text` as, by character and
 /// font.
-fn shape_with_system_fonts(fonts: fn(char) -> Option<&'static str>, text: &str) -> Vec<(char, GlyphIDType)> {
-    let (test, _) = letter_test(&StubChooser::new(fonts));
+fn shape_with_system_fonts(fonts: &Arc<StubChooser>, text: &str) -> Vec<(char, GlyphIDType)> {
+    let (test, _) = letter_test(fonts);
     test.run_until_answered(system_text(text));
     let text: Vec<char> = text.chars().collect();
     let shaping = test.requestor.shaping.borrow();
@@ -1426,7 +1429,7 @@ fn shape_with_system_fonts(fonts: fn(char) -> Option<&'static str>, text: &str) 
 
 #[test]
 fn the_devices_fonts_shape_each_piece_with_its_font() {
-    let glyphs = shape_with_system_fonts(script_fonts, "ab \u{05D0}\u{05D1}\u{062C} c\u{0301}");
+    let glyphs = shape_with_system_fonts(&StubChooser::new(script_fonts), "ab \u{05D0}\u{05D1}\u{062C} c\u{0301}");
     let chars: String = glyphs.iter().map(|(c, _)| *c).collect();
     // The right-to-left run's pieces in visual order: the Arabic after the
     // Hebrew comes first; the mark stays with the letter before it.
@@ -1439,9 +1442,26 @@ fn the_devices_fonts_shape_each_piece_with_its_font() {
     assert!(glyphs.iter().all(|(_, type_)| ![GlyphIDType::FontPBF, GlyphIDType::SYSTEM].contains(type_)));
 }
 
+// A mark that its character's font lacks takes the cluster to a font that
+// draws both, as a browser does, rather than splitting it across two.
+#[test]
+fn a_cluster_takes_a_font_that_draws_all_of_it() {
+    let fonts = Arc::new(StubChooser {
+        fonts: |_| Some("latin"),
+        clusters: |cluster| (cluster == ['c', '\u{20E3}']).then_some("symbols"),
+        weight: 400,
+        asked: Mutex::default(),
+    });
+    let glyphs = shape_with_system_fonts(&fonts, "bc\u{20E3}");
+    assert_eq!(glyphs.iter().map(|(c, _)| *c).collect::<String>(), "bc\u{20E3}");
+    assert_eq!(glyphs[0].1, device_type("latin"));
+    assert_eq!(glyphs[1].1, device_type("symbols"));
+    assert_eq!(glyphs[2].1, device_type("symbols"));
+}
+
 #[test]
 fn a_character_that_no_device_font_draws_is_left_out() {
-    let glyphs = shape_with_system_fonts(|c| (c != 'b').then_some("latin"), "abc");
+    let glyphs = shape_with_system_fonts(&StubChooser::new(|c| (c != 'b').then_some("latin")), "abc");
     assert_eq!(glyphs.iter().map(|(c, _)| *c).collect::<String>(), "ac");
 }
 
@@ -1521,7 +1541,8 @@ fn a_glyph_waits_for_its_device_font_then_draws_from_it() {
 
 #[test]
 fn a_device_face_loads_at_its_weight() {
-    let bold = Arc::new(StubChooser { fonts: |_| Some("bold"), weight: 700, asked: Mutex::default() });
+    let bold =
+        Arc::new(StubChooser { fonts: |_| Some("bold"), clusters: |_| None, weight: 700, asked: Mutex::default() });
     let (test, engine) = letter_test(&bold);
     let face = FontFace { type_: FONT_FACE, ..FontFace::new("Test Stack", "app://face.ttf", vec![(0, 0xFFFF)]) }
         .with_data(FontData::from(b"font".to_vec()));
@@ -1610,7 +1631,7 @@ fn an_answer_for_an_evicted_stack_is_dropped() {
 
     let revision = test.glyph_store().revision();
     let face = FontFace::device("latin", 400, FontData::from(b"latin".to_vec()));
-    test.glyph_store().take_device_fonts(&test_stack(), vec![('a', Some(face))]);
+    test.glyph_store().take_device_fonts(&test_stack(), vec![(vec!['a'], Some(face))]);
     assert_eq!(test.glyph_store().revision(), revision);
 
     // The wait resolves again, asks again, and is answered.

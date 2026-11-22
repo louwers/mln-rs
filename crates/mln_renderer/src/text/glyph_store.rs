@@ -33,10 +33,11 @@
 // ready waits, parsed in the update after the engine reports back.
 //
 // The device's fonts: text that they shape (`GlyphIDType::SYSTEM`) is
-// shaped a piece at a time, each piece with the face chosen for its first
+// shaped a piece at a time, each piece the clusters (`clusters`) that one
+// face was chosen for, and a local glyph comes from the face chosen for its
 // character. The chooser can block on the platform's font matcher and font
 // files, so it runs on a serial lane of the pool, never here: a resolve that
-// meets a character not chosen yet asks about it and waits, as for a glyph
+// meets a cluster not chosen yet asks about it and waits, as for a glyph
 // range, and the answer arrives in the inbox (`take_device_fonts`). A chosen
 // face holds its font file, and loads, waits for the engine and shapes as
 // the style's faces do.
@@ -111,7 +112,7 @@ struct Entry {
     /// The PBF glyph IDs that no local font has.
     no_local: BTreeSet<GlyphID>,
     /// The device fonts of the characters asked about.
-    device: HashMap<char, DeviceFont>,
+    device: HashMap<Vec<char>, DeviceFont>,
 }
 
 /// Where the device font of a character of a font stack stands.
@@ -186,7 +187,7 @@ pub(crate) struct GlyphStore {
     /// waiting thread.
     choices: TaskGroup,
     /// The characters to ask the chooser about at the end of this resolve.
-    asks: VecMap<FontStack, Vec<char>>,
+    asks: VecMap<FontStack, Vec<Vec<char>>>,
     /// The device faces chosen so far, found by type after the style's faces.
     device_faces: Vec<FontFace>,
     /// Asks the renderer for an update, from any thread, for the engine's
@@ -272,15 +273,15 @@ impl GlyphStore {
         }
     }
 
-    /// Takes in the chooser's answer for characters of `font_stack`. Each
-    /// character still asked about takes its face, which the store keeps,
-    /// and waiting resolves look again. An answer for an evicted stack, or
-    /// for a character not asked about, is dropped.
-    pub(crate) fn take_device_fonts(&mut self, font_stack: &FontStack, faces: Vec<(char, Option<FontFace>)>) {
+    /// Takes in the chooser's answer for clusters of `font_stack`. Each
+    /// cluster still asked about takes its face, which the store keeps, and
+    /// waiting resolves look again. An answer for an evicted stack, or for a
+    /// cluster not asked about, is dropped.
+    pub(crate) fn take_device_fonts(&mut self, font_stack: &FontStack, faces: Vec<(Vec<char>, Option<FontFace>)>) {
         let Some(entry) = self.entries.get_mut(font_stack) else { return };
         let mut changed = false;
-        for (c, face) in faces {
-            let Some(state @ DeviceFont::Asked) = entry.device.get_mut(&c) else { continue };
+        for (cluster, face) in faces {
+            let Some(state @ DeviceFont::Asked) = entry.device.get_mut(&cluster) else { continue };
             *state = DeviceFont::Chosen(face.as_ref().map(|face| face.type_));
             changed = true;
             if let Some(face) = face
@@ -360,13 +361,16 @@ impl GlyphStore {
                 }
             }
             for (font_stack, types) in &dependencies.shapes {
-                for &c in types.get(&GlyphIDType::SYSTEM).into_iter().flatten().flatten() {
-                    match self.device_font(font_stack, c) {
-                        DeviceFont::Asked => waits = true,
-                        DeviceFont::Chosen(Some(type_)) => {
-                            needed.push((font_stack, get_glyph_range(GlyphID::with_type(0, type_))));
+                // The clusters that `shape_with_system_fonts` shapes.
+                for run in types.get(&GlyphIDType::SYSTEM).into_iter().flatten().flat_map(|text| visual_runs(text)) {
+                    for cluster in clusters(&run.text) {
+                        match self.device_font(font_stack, cluster) {
+                            DeviceFont::Asked => waits = true,
+                            DeviceFont::Chosen(Some(type_)) => {
+                                needed.push((font_stack, get_glyph_range(GlyphID::with_type(0, type_))));
+                            }
+                            DeviceFont::Chosen(None) => {}
                         }
-                        DeviceFont::Chosen(None) => {}
                     }
                 }
             }
@@ -501,7 +505,7 @@ impl GlyphStore {
         if glyph.is_none()
             && let Some(c) = glyph_id.char()
         {
-            match self.device_font(font_stack, c) {
+            match self.device_font(font_stack, &[c]) {
                 DeviceFont::Asked => return Source::Waits,
                 DeviceFont::Chosen(Some(type_)) => {
                     match self.face_source(font_stack, type_, glyph_id, since, &mut failed) {
@@ -599,25 +603,18 @@ impl GlyphStore {
     }
 
     /// Shapes `run` with the device's fonts, a piece at a time: each piece
-    /// the characters that one face draws, with the marks and joiners after
-    /// them. A character that no face draws, or whose face doesn't load, is
-    /// left out.
+    /// the clusters that one face was chosen for. A cluster that no face
+    /// draws, or whose face doesn't load, is left out.
     fn shape_with_system_fonts(&self, font_stack: &FontStack, run: &BiDiRun, shaped: &mut ShapedText) {
         let device = self.entries.get(font_stack).map(|entry| &entry.device);
         let mut pieces: Vec<(GlyphIDType, Vec<char>)> = Vec::new();
-        for &c in &run.text {
-            if i18n::extends_previous(c)
-                && let Some((_, piece)) = pieces.last_mut()
-            {
-                piece.push(c);
-                continue;
-            }
-            let Some(DeviceFont::Chosen(Some(type_))) = device.and_then(|device| device.get(&c)).copied() else {
+        for cluster in clusters(&run.text) {
+            let Some(DeviceFont::Chosen(Some(type_))) = device.and_then(|device| device.get(cluster)).copied() else {
                 continue;
             };
             match pieces.last_mut() {
-                Some((last, piece)) if *last == type_ => piece.push(c),
-                _ => pieces.push((type_, vec![c])),
+                Some((last, piece)) if *last == type_ => piece.extend_from_slice(cluster),
+                _ => pieces.push((type_, cluster.to_vec())),
             }
         }
         // A right-to-left run's later pieces lie to the left of its earlier
@@ -632,29 +629,35 @@ impl GlyphStore {
         }
     }
 
-    /// `c`'s device font for `font_stack`: `Chosen(None)` without a chooser;
-    /// `Asked` while it is being chosen, which asks the chooser about it at
-    /// the end of the resolve the first time.
-    fn device_font(&mut self, font_stack: &FontStack, c: char) -> DeviceFont {
+    /// `cluster`'s device font for `font_stack`: `Chosen(None)` without a
+    /// chooser; `Asked` while it is being chosen, which asks the chooser
+    /// about it at the end of the resolve the first time.
+    fn device_font(&mut self, font_stack: &FontStack, cluster: &[char]) -> DeviceFont {
         if self.local.chooser.is_none() {
             return DeviceFont::Chosen(None);
         }
         let entry = self.entries.entry(font_stack.clone()).or_default();
-        *entry.device.entry(c).or_insert_with(|| {
-            self.asks.get_or_insert_with(font_stack, Vec::new).push(c);
-            DeviceFont::Asked
-        })
+        if let Some(&state) = entry.device.get(cluster) {
+            return state;
+        }
+        entry.device.insert(cluster.to_vec(), DeviceFont::Asked);
+        self.asks.get_or_insert_with(font_stack, Vec::new).push(cluster.to_vec());
+        DeviceFont::Asked
     }
 
-    /// Has the chooser choose the device fonts of the characters asked about
+    /// Has the chooser choose the device fonts of the clusters asked about
     /// since the last call, one task per font stack on `choices`, each of
     /// which sends its answer to `inbox`.
     fn ask_device_fonts(&mut self, inbox: &InboxSender) {
         let Some(chooser) = &self.local.chooser else { return };
-        for (font_stack, chars) in std::mem::take(&mut self.asks) {
+        for (font_stack, clusters) in std::mem::take(&mut self.asks) {
             let (chooser, inbox) = (Arc::clone(chooser), inbox.clone());
             self.choices.spawn(move || {
-                let faces = chars.into_iter().map(|c| (c, chooser.choose(&font_stack, c))).collect();
+                let faces = clusters.into_iter().map(|cluster| {
+                    let face = chooser.choose(&font_stack, &cluster);
+                    (cluster, face)
+                });
+                let faces = faces.collect();
                 inbox.send(TileEvent::DeviceFonts { font_stack, faces });
             });
         }
@@ -887,6 +890,12 @@ impl GlyphStore {
         let faces = self.font_faces.iter().flat_map(|faces| faces.iter());
         faces.chain(&self.device_faces).find(|face| face.type_ == type_)
     }
+}
+
+/// `text`'s clusters, which one font draws: each character with the marks
+/// and joiners after it (`i18n::extends_previous`).
+fn clusters(text: &[char]) -> impl Iterator<Item = &[char]> {
+    text.chunk_by(|_, &next| i18n::extends_previous(next))
 }
 
 /// What `response`, which isn't a not-modified one, brought: `None` when it

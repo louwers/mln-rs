@@ -1,12 +1,13 @@
-//! The system's font for each character of a label, which shapes it or
-//! draws its glyph.
+//! The system's font for each cluster of a label, a character and the marks
+//! and joiners after it, which shapes it or draws its glyph.
 //!
-//! The font of a character, for a label in a font stack, is the first font
-//! the stack names that the system has and that has the character, else the
-//! font the system picks for it at the weight and style of the stack's first
-//! name. Each name is looked up once, and a font the system picked for one
-//! character of a class (`class`) serves the others of the class it has, so
-//! that a map's labels look up a few fonts, not one for every character.
+//! The font of a cluster, for a label in a font stack, is the first font the
+//! stack names that the system has and that draws the whole cluster, else
+//! the font the system picks for it at the weight and style of the stack's
+//! first name, else the font of its first character alone. Each name is
+//! looked up once, and a font the system picked for one character of a class
+//! (`class`) serves the others of the class it has, so that a map's labels
+//! look up a few fonts, not one for every character.
 
 use std::sync::Arc;
 
@@ -27,8 +28,9 @@ use crate::{Finder, Query, languages, system};
 pub struct SystemFonts;
 
 impl FontChooser for SystemFonts {
-    fn choose(&self, font_stack: &FontStack, c: char) -> Option<FontFace> {
-        Some(font_for(font_stack, c)?.face.clone())
+    fn choose(&self, font_stack: &FontStack, cluster: &[char]) -> Option<FontFace> {
+        let mut fonts = system().fonts.as_ref()?.lock();
+        Some(font_for(&mut fonts, font_stack, cluster)?.face.clone())
     }
 }
 
@@ -39,8 +41,8 @@ pub(crate) struct SystemFont {
 }
 
 impl SystemFont {
-    fn has_char(&self, c: char) -> bool {
-        self.file.has_char(c)
+    fn draws(&self, cluster: &[char]) -> bool {
+        cluster.iter().all(|&c| self.file.has_char(c))
     }
 }
 
@@ -53,8 +55,8 @@ pub(crate) struct Fonts {
     /// The fonts the system picked for each font stack and class of
     /// characters, in the order found.
     picked: HashMap<(FontStack, u32), Vec<Arc<SystemFont>>>,
-    /// The characters that no font has, for each font stack.
-    missing: HashSet<(FontStack, char)>,
+    /// The clusters that no font draws whole, for each font stack.
+    missing: HashSet<(FontStack, Vec<char>)>,
 }
 
 impl Fonts {
@@ -70,35 +72,35 @@ impl Fonts {
     }
 }
 
-/// The font that draws `c` for a label in `font_stack`.
-pub(crate) fn font_for(font_stack: &FontStack, c: char) -> Option<Arc<SystemFont>> {
-    let mut fonts = system().fonts.as_ref()?.lock();
-    let fonts = &mut *fonts;
+/// The font that draws `cluster` for a label in `font_stack` (see the module
+/// docs).
+fn font_for(fonts: &mut Fonts, font_stack: &FontStack, cluster: &[char]) -> Option<Arc<SystemFont>> {
+    let &c = cluster.first()?;
     let names = names(font_stack);
     let mut named = Vec::with_capacity(names.len());
     for (name, parsed) in &names {
         let font = fonts.named.entry((*name).to_owned()).or_insert_with(|| {
-            first_drawing(&mut fonts.files, named_fonts(&mut fonts.finder, name, parsed), ' ', parsed.weight)
+            first_drawing(&mut fonts.files, named_fonts(&mut fonts.finder, name, parsed), &[' '], parsed.weight)
         });
         named.push(font.clone());
     }
     let key = (font_stack.clone(), class(c));
     let picked = fonts.picked.get(&key).map_or(&[][..], Vec::as_slice);
-    if let Some(font) = first_with(&named, picked, |font| font.has_char(c)) {
+    if let Some(font) = first_with(&named, picked, |font| font.draws(cluster)) {
         return Some(Arc::clone(font));
     }
-    if fonts.missing.contains(&(font_stack.clone(), c)) {
-        return None;
-    }
-    let first = names.first().map_or(FontName { family: "", weight: 400, italic: false }, |(_, parsed)| *parsed);
-    let font = first_drawing(&mut fonts.files, picked_fonts(&mut fonts.finder, &first, c), c, first.weight);
-    match &font {
-        Some(font) => fonts.picked.entry(key).or_default().push(Arc::clone(font)),
-        None => {
-            fonts.missing.insert((font_stack.clone(), c));
+    if !fonts.missing.contains(&(font_stack.clone(), cluster.to_vec())) {
+        let first = names.first().map_or(FontName { family: "", weight: 400, italic: false }, |(_, parsed)| *parsed);
+        let candidates = picked_fonts(&mut fonts.finder, &first, c);
+        if let Some(font) = first_drawing(&mut fonts.files, candidates, cluster, first.weight) {
+            fonts.picked.entry(key).or_default().push(Arc::clone(&font));
+            return Some(font);
         }
+        fonts.missing.insert((font_stack.clone(), cluster.to_vec()));
     }
-    font
+    // A mark that no font draws with its character goes with the
+    // character's font, which draws what it can.
+    if cluster.len() > 1 { font_for(fonts, font_stack, &[c]) } else { None }
 }
 
 /// The first font that has a character, as `has` says: of the stack's
@@ -107,19 +109,20 @@ fn first_with<'a, F>(named: &'a [Option<F>], picked: &'a [F], has: impl Fn(&F) -
     named.iter().flatten().chain(picked).find(|font| has(font))
 }
 
-/// The first of `candidates` that the map can draw `c` from, as a face at
-/// `weight`.
+/// The first of `candidates` that the map can draw `cluster` from, as a face
+/// at `weight`.
 fn first_drawing(
     files: &mut source::Files,
     candidates: Vec<(String, Source)>,
-    c: char,
+    cluster: &[char],
     weight: u16,
 ) -> Option<Arc<SystemFont>> {
     candidates.into_iter().find_map(|(_, source)| {
         let data = files.data(&source)?;
-        let file = FontFile::new(data.clone()).filter(|font| font.has_char(c))?;
+        let file = FontFile::new(data.clone())?;
         let face = FontFace::device(&source.url(), weight, data);
-        Some(Arc::new(SystemFont { file, face }))
+        let font = SystemFont { file, face };
+        font.draws(cluster).then(|| Arc::new(font))
     })
 }
 
@@ -223,7 +226,7 @@ mod tests {
 
     /// The glyph that the face chosen for `c` in `font_stack` maps it to.
     fn chosen_glyph(font_stack: &[&str], c: char) -> Option<Glyph> {
-        let face = SystemFonts.choose(&stack(font_stack), c)?;
+        let face = SystemFonts.choose(&stack(font_stack), &[c])?;
         let data = face.data.expect("a device face holds its file");
         let shaper = Shaper::at_weight(GlyphIDType::face(NonZeroU16::MIN), data, f32::from(face.weight));
         let id = shaper.glyph_of(c).unwrap_or_else(|| panic!("no glyph for {c} in {}", face.url));

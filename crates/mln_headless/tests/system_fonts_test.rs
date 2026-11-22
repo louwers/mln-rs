@@ -23,9 +23,10 @@ struct KhmerFont {
 }
 
 impl FontChooser for KhmerFont {
-    fn choose(&self, _font_stack: &FontStack, c: char) -> Option<FontFace> {
+    fn choose(&self, _font_stack: &FontStack, cluster: &[char]) -> Option<FontFace> {
         self.threads.lock().push(std::thread::current().id());
-        ('\u{1780}'..='\u{17FF}').contains(&c).then(|| FontFace::device("khmer", 400, KHMER.clone()))
+        let khmer = cluster.iter().all(|c| ('\u{1780}'..='\u{17FF}').contains(c));
+        khmer.then(|| FontFace::device("khmer", 400, KHMER.clone()))
     }
 }
 
