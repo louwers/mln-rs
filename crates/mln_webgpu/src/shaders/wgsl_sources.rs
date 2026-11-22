@@ -619,9 +619,7 @@ fn main(in: VertexInput) -> VertexOutput {
 #endif
     out.visibility = ground_visibility(standing_center, projection.ground);
 #else
-#ifndef PROJECTION_GLOBE
     let ele = 0.0;
-#endif
 #endif
     var position: vec4<f32>;
     if (pitch_with_map) {

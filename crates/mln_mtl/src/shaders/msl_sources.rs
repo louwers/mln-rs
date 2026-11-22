@@ -999,9 +999,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #endif
     const float visibility = ground_visibility(standing_center, standing.ground, ground_depth);
 #else
-#if !defined(PROJECTION_GLOBE)
     const float ele = 0.0;
-#endif
 #endif
 
     float4 position;

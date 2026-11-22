@@ -874,9 +874,7 @@ void main() {
 #endif
     frag_visibility = ground_visibility(standing_center, standing.ground);
 #else
-#ifndef PROJECTION_GLOBE
     const float ele = 0.0;
-#endif
 #endif
     if (props.pitch_with_map != 0) {
 #ifdef PROJECTION_GLOBE
