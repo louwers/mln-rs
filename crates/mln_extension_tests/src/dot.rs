@@ -184,9 +184,9 @@ impl Layer for DotLayer {
         laid: LayerBucket<'_, Dot, DotBucket>,
     ) -> Option<Mesh<DotDraw>> {
         let mut mesh = MeshDesc::new(&DOT);
-        mesh.vertices(laid.buffer(&laid.bucket.corners))
-            .indexes(laid.indexes(&laid.bucket.triangles))
-            .paint(laid.binders(&laid.bucket.binders), &cx.layer.evaluated.paint);
+        mesh.vertices(laid.buffer(&laid.bucket.corners)?)
+            .indexes(laid.indexes(&laid.bucket.triangles)?)
+            .paint(laid.binders(&laid.bucket.binders)?, &cx.layer.evaluated.paint);
         Some(cx.res.mesh(&mesh))
     }
 
@@ -196,21 +196,23 @@ impl Layer for DotLayer {
         let (radius, scale) = (paint.dot_radius.constant_or(&0.0), cx.layer.style.data.scale);
         main.block(&DotProps { color, radius, scale, ..DotProps::default() });
         for (tile, laid, mesh) in cx.tiles() {
-            let (at, b) = (tile.project(cx.frame, &TileTransform::default()), laid.binders(&laid.bucket.binders));
+            let Some(b) = laid.binders(&laid.bucket.binders) else { continue };
+            let at = tile.project(cx.frame, &TileTransform::default());
             let (color_t, radius_t) = (b.dot_color.interpolation_factor(zoom), b.dot_radius.interpolation_factor(zoom));
             main.push_at(mesh, &at, Draw::DEFAULT, DotDraw { extrude: cx.frame.pixels_to_clip, color_t, radius_t });
         }
     }
 
     fn query_radius(&self, layer: &LayerValues<Dot>, laid: LayerBucket<'_, Dot, DotBucket>) -> f32 {
-        let largest = laid.binders(&laid.bucket.binders).dot_radius.max();
+        let largest = laid.binders(&laid.bucket.binders).and_then(|b| b.dot_radius.max());
         largest.or(layer.evaluated.paint.dot_radius.constant()).unwrap_or(0.0) * layer.style.data.scale
     }
 
     fn hit(&self, test: &HitTest<'_, Self>) -> Option<f32> {
         let radius = test.feature_value(&test.layer.evaluated.paint.dot_radius) * test.layer.style.data.scale;
         let reach = radius * test.pixels_to_tile_units;
-        let hit = test.geometry.iter().flatten().any(|p| polygon_intersects_buffered_point(test.query_geometry, p, reach));
+        let hit =
+            test.geometry.iter().flatten().any(|p| polygon_intersects_buffered_point(test.query_geometry, p, reach));
         hit.then_some(0.0)
     }
 }

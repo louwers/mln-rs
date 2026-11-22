@@ -643,8 +643,7 @@ impl CrossFadedPaintPropertyBinder<Image> {
     }
 }
 
-/// What a layer's set of binders and [`bind_paint_property`] do
-/// with each binder: a binder writes each feature's values of its property
+/// What a layer's set of binders does with each binder: a binder writes each feature's values of its property
 /// into its place in the interleaved vertices of the set's
 /// [`InterleavedVertexBuffer`], and binds them to its program's attributes.
 pub trait PaintPropertyBinderBase {
@@ -847,10 +846,9 @@ impl<P: PaintBinders> LayerBinders<P> {
         }
     }
 
-    /// The binders of the layer `id`. Panics for a layer of another group.
-    pub(crate) fn of_layer(&self, id: &str) -> &P {
-        let found = self.layers.iter().find(|(layer, _)| layer == id);
-        &found.expect("binders of a layer of their layout's group").1
+    /// The binders of the layer `id`, if it is one of the group's.
+    pub(crate) fn of_layer(&self, id: &str) -> Option<&P> {
+        self.layers.iter().find(|(layer, _)| layer == id).map(|(_, binders)| binders)
     }
 
     /// Each layer's id and binders, to change.

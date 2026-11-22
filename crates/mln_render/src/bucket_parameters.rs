@@ -7,7 +7,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 /// The tile that a layout lays out, and how.
 #[derive(Clone, Debug)]
-pub struct BucketParameters {
+pub(crate) struct BucketParameters {
     pub tile_id: OverscaledTileID,
     pub mode: MapMode,
     pub pixel_ratio: f32,

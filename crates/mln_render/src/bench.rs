@@ -112,7 +112,9 @@ impl TileLayout {
             }
             let mut render_layer = registry
                 .layer_type(layer.info().name)
-                .and_then(|layer_type| layer_type.create_render_layer(layer.style(), &mut crate::gfx::context::Resources::detached()))
+                .and_then(|layer_type| {
+                    layer_type.create_render_layer(layer.style(), &mut crate::gfx::context::Resources::detached())
+                })
                 .ok_or_else(|| Error::invalid_argument(format!("no render layer for {}", layer.get_id())))?;
             render_layer.evaluate(&parameters);
             layers.push(render_layer.evaluated());

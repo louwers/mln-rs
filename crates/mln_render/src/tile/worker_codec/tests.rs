@@ -278,7 +278,12 @@ fn every_geometry_layer_type_crosses() {
     for (layer_id, render_data) in result.layer_render_data.iter() {
         let sent = layers.iter().find(|layer| &layer.style().base().id == layer_id).unwrap();
         assert!(std::ptr::addr_eq(render_data.layer, &raw const **sent));
-        assert!(render_data.bucket.downcast_ref::<crate::tests::fixture_layer::DotBucket>().is_some_and(|b| !b.points.is_empty()));
+        assert!(
+            render_data
+                .bucket
+                .downcast_ref::<crate::tests::fixture_layer::DotBucket>()
+                .is_some_and(|b| !b.points.is_empty())
+        );
     }
 }
 
@@ -303,7 +308,12 @@ fn layouts_cross_with_their_glyphs_and_images() {
     };
     assert_eq!(output.deps.images.keys().collect::<Vec<_>>(), ["interstate_1"]);
     let (_, render_data) = output.result.layer_render_data.iter().next().expect("a bucket");
-    assert!(render_data.bucket.downcast_ref::<crate::tests::fixture_layer::DotBucket>().is_some_and(|b| !b.points.is_empty()));
+    assert!(
+        render_data
+            .bucket
+            .downcast_ref::<crate::tests::fixture_layer::DotBucket>()
+            .is_some_and(|b| !b.points.is_empty())
+    );
 }
 
 /// MLT tile data crosses as its bytes too.
@@ -406,10 +416,7 @@ fn properties_cross_while_a_paint_property_transitions() {
     render_layer.transition(&TransitionParameters::new(Some(start), TransitionOptions::default()));
     render_layer.evaluate(&at(start));
     let transition = TransitionOptions::new(Some(Duration::from_millis(300)), None, true);
-    render_layer.restyle(
-        &TransitionParameters::new(Some(start), transition),
-        convert(&constant).style(),
-    );
+    render_layer.restyle(&TransitionParameters::new(Some(start), transition), convert(&constant).style());
     render_layer.evaluate(&at(start + Duration::from_millis(100)));
     let transitioning = render_layer.evaluated();
     assert!(!EvaluatedLayer::<Dot>::recover(&transitioning).unwrap().paint.dot_color.is_constant());

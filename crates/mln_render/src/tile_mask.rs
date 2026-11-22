@@ -6,4 +6,4 @@ use mln_tile_id::CanonicalTileID;
 /// to it: `(0, 0, 0)` for the whole extent, none for none of it. The engine
 /// leaves out the parts that other, better tiles cover
 /// (`algorithm::update_tile_masks`).
-pub type TileMask = BTreeSet<CanonicalTileID>;
+pub(crate) type TileMask = BTreeSet<CanonicalTileID>;

@@ -116,8 +116,10 @@ fn a_change_tiles_are_laid_out_with_is_relaid() {
 fn a_change_of_data_alone_keeps_the_layer() {
     let plain = new_layer("plain", "p", "");
     let mut edited = plain.clone();
-    crate::layer_type::LayerStyle::<crate::tests::fixture_layer::Plain>::edit_data(edited.style_mut(), |data| *data = 7)
-        .unwrap();
+    crate::layer_type::LayerStyle::<crate::tests::fixture_layer::Plain>::edit_data(edited.style_mut(), |data| {
+        *data = 7
+    })
+    .unwrap();
     let data_changes = LayerChanges::between(&list(&[&plain]), &list(&[&edited]));
     assert_eq!(Some(LayerChange::Data), data_changes.get("p"));
     assert!(!data_changes.order_changed);

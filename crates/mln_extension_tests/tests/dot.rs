@@ -47,10 +47,8 @@ struct Fixture {
 impl Fixture {
     fn new() -> Fixture {
         let runtime = Runtime::new(&RuntimeOptions::default(), registry()).unwrap();
-        let options = MapOptions {
-            map: mln_rs::map::MapCoreOptions { size: SIZE, ..Default::default() },
-            ..Default::default()
-        };
+        let options =
+            MapOptions { map: mln_rs::map::MapCoreOptions { size: SIZE, ..Default::default() }, ..Default::default() };
         let (map, created) = runtime.create_map(options).unwrap();
         created.wait().unwrap();
         wait(map.set_style_json(STYLE));
@@ -157,7 +155,8 @@ fn an_edit_of_the_layers_data_scales_its_dots() {
     assert_eq!(1, fixture.hits(12.0).len());
 
     // The renderer's layer has the data.
-    let scale = wait(fixture.session.query_rendered_layer::<DotLayer, _>("dots", |_, values| Ok(values.style.data.scale)));
+    let scale =
+        wait(fixture.session.query_rendered_layer::<DotLayer, _>("dots", |_, values| Ok(values.style.data.scale)));
     assert_eq!(2.0, scale);
 
     // A style load keeps it.
@@ -173,7 +172,8 @@ fn an_edit_of_the_layers_data_scales_its_dots() {
 #[test]
 fn a_removed_layer_goes_and_a_new_source_draws_its_own_data() {
     let fixture = Fixture::new();
-    let layer = r##"{"id":"dots","type":"dot","source":"points","paint":{"dot-color":"#ff0000","dot-radius":["get","size"]}}"##;
+    let layer =
+        r##"{"id":"dots","type":"dot","source":"points","paint":{"dot-color":"#ff0000","dot-radius":["get","size"]}}"##;
     wait(fixture.map.remove_style_layer("dots"));
     fixture.render();
     assert_eq!(WHITE, fixture.pixel(0));

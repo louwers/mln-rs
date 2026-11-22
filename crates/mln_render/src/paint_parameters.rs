@@ -182,7 +182,7 @@ impl Frame<'_> {
 /// The frame's encode, which a layer's drawing and its offscreen pass draw
 /// through and pass on to the draw services. Outside the engine, it says
 /// which pass draws, at which depth, and where the frame draws the map.
-pub struct PaintParameters<'a> {
+pub(crate) struct PaintParameters<'a> {
     /// The renderer's GPU state, which the encode changes.
     pub(crate) context: &'a mut Resources,
     /// The pass of the backend's `Gpu` that draws draw into, while one

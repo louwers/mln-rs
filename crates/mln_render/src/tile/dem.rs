@@ -17,7 +17,7 @@ use crate::tile_mask::TileMask;
 
 /// A raster-dem tile's DEM, which the tile backfills from its neighbours,
 /// and the geometry that draws it, which the tile masks.
-pub struct DemContents {
+pub(crate) struct DemContents {
     id: SimpleIdentity,
     geometry: MaskedGeometry,
     dem: DemData,
@@ -34,26 +34,26 @@ impl DemContents {
     /// The contents' identity, which tells what the layers keep of them
     /// apart. Contents of a new DEM have a new one.
     #[must_use]
-    pub fn id(&self) -> SimpleIdentity {
+    pub(crate) fn id(&self) -> SimpleIdentity {
         self.id
     }
 
     /// The masked geometry.
     #[must_use]
-    pub fn geometry(&self) -> &MaskedGeometry {
+    pub(crate) fn geometry(&self) -> &MaskedGeometry {
         &self.geometry
     }
 
     /// The DEM, with the border it took from its neighbours.
     #[must_use]
-    pub fn dem(&self) -> &DemData {
+    pub(crate) fn dem(&self) -> &DemData {
         &self.dem
     }
 
     /// The number of times the DEM's border changed, after which the layers
     /// make what they made of the DEM again.
     #[must_use]
-    pub fn dem_generation(&self) -> u64 {
+    pub(crate) fn dem_generation(&self) -> u64 {
         self.dem_generation
     }
 
@@ -68,7 +68,7 @@ impl DemContents {
 
     /// Whether there is a DEM to draw.
     #[must_use]
-    pub fn has_data(&self) -> bool {
+    pub(crate) fn has_data(&self) -> bool {
         self.dem.image().valid()
     }
 

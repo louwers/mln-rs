@@ -6,7 +6,7 @@ use mln_render::layer::{
 };
 use mln_style_types::TranslateAnchorType;
 use mln_style_types::image::ImagePosition;
-use mln_util::constants::{EXTENT, TILE_SIZE_D};
+use mln_util::constants::EXTENT;
 
 use super::Background;
 use super::pattern_atlas::PatternAtlas;
@@ -144,23 +144,14 @@ impl Layer for BackgroundLayer {
             ..BackgroundPatternPropsUBO::default()
         });
         let draw = Draw { depth: Depth::Layer { sub_layer: 0, write: true }, ..Draw::DEFAULT };
-        let zoom = cx.frame.camera.integer_zoom();
         for (tile, (), meshes) in cx.tiles() {
             let at = tile.project(cx.frame, &how);
-            let id = tile.unwrapped_id();
-            let tile_size =
-                (TILE_SIZE_D * mln_map_types::zoom_scale(f64::from(zoom) - f64::from(id.canonical.z))) as i32;
-            let x = (f64::from(tile_size)
-                * (f64::from(id.canonical.x)
-                    + f64::from(id.wrap) * mln_map_types::zoom_scale(f64::from(id.canonical.z))))
-                as i32;
-            let y = tile_size.wrapping_mul(id.canonical.y as i32);
-            let pixels_to_tile_units = id.pixels_to_tile_units(1.0, f32::from(zoom));
+            let origin = tile.pattern_origin(cx.frame);
             let block = BackgroundPatternDrawableUBO {
                 matrix: at.fallback_matrix,
-                pixel_coord_upper: [(x >> 16) as f32, (y >> 16) as f32],
-                pixel_coord_lower: [(x & 0xFFFF) as f32, (y & 0xFFFF) as f32],
-                tile_units_to_pixels: if pixels_to_tile_units == 0.0 { 0.0 } else { 1.0 / pixels_to_tile_units },
+                pixel_coord_upper: origin.upper,
+                pixel_coord_lower: origin.lower,
+                tile_units_to_pixels: origin.tile_units_to_pixels,
                 ..BackgroundPatternDrawableUBO::default()
             };
             main.push_at(&meshes.pattern, &at, draw, block);

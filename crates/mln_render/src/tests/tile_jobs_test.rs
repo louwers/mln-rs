@@ -898,4 +898,3 @@ fn a_worker_lost_during_a_decode() {
     drop(tiles);
     pool.wait();
 }
-

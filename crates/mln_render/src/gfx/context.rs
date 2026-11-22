@@ -158,11 +158,9 @@ impl Resources {
     }
 
     /// `texture`, to change: the meshes that sample it see the change.
-    pub fn texture_mut(&mut self, texture: &crate::draw::Texture) -> TextureMut<'_> {
-        let Some(texture) = self.textures.get_mut(&texture.0) else {
-            unreachable!("a texture handle outlives its entry");
-        };
-        TextureMut::new(texture)
+    /// `None` for a texture that other resources made.
+    pub fn texture_mut(&mut self, texture: &crate::draw::Texture) -> Option<TextureMut<'_>> {
+        Some(TextureMut::new(self.textures.get_mut(&texture.0)?))
     }
 
     /// The size of `texture`, in texels.

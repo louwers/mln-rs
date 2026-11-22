@@ -3,7 +3,6 @@
 //! `Layer`: switched off until their inputs and placement's registration
 //! come back.
 
-
 use std::sync::Arc;
 
 use mln_style::PropertyEvaluationParameters;
@@ -24,7 +23,6 @@ use crate::layer::{
 use crate::layer_drawing::TileDraws;
 use crate::placement::{CollisionGroups, Placed, PlacementContext, PlacementPass, PlacementQuery, Prepared};
 use crate::tile_values::{ChangedBuckets, TileMap};
-
 
 mln_style::properties!(
     /// The paint properties of a `tint` layer.

@@ -13,5 +13,7 @@ pub use mln_render::paint_property_binders;
 pub use mln_style::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 pub use mln_style::properties;
 pub use mln_style::property_table::{PropertyInfo, PropertyTable, PropertyVisitor};
+pub use mln_style_types::image::ImageType;
+pub use mln_text::glyph::GlyphID;
 pub use mln_util::Color;
 pub use mln_util::error::Error;

@@ -37,7 +37,7 @@ enum VertexData {
 /// to a buffer, which frees them, and that buffer. An update gives them new
 /// bytes of as many vertices, which the next upload writes over the
 /// buffer's.
-pub struct Vertices {
+pub(crate) struct Vertices {
     /// The bytes the next upload writes; `Freed` once it wrote them.
     data: VertexData,
     count: usize,
@@ -110,7 +110,7 @@ impl Vertices {
 
     /// The bytes a vertex takes.
     #[must_use]
-    pub fn vertex_size(&self) -> usize {
+    pub(crate) fn vertex_size(&self) -> usize {
         self.vertex_size
     }
 
@@ -123,7 +123,7 @@ impl Vertices {
     /// updated since the last upload, which wrote their bytes. A draw bound
     /// before then binds them again, and its other attributes with them.
     #[must_use]
-    pub fn needs_upload(&self) -> bool {
+    pub(crate) fn needs_upload(&self) -> bool {
         !matches!(self.data, VertexData::Freed)
     }
 
@@ -135,7 +135,7 @@ impl Vertices {
 
     /// The bytes of the vertices while they are in wasm memory.
     #[must_use]
-    pub fn bytes(&self) -> &[u8] {
+    pub(crate) fn bytes(&self) -> &[u8] {
         self.data.bytes().unwrap_or_default()
     }
 

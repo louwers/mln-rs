@@ -77,7 +77,7 @@ struct Entry {
 type Bounds = [i16; 4];
 
 /// A feature index as a tile's layout fills it.
-pub struct FeatureIndexBuilder {
+pub(crate) struct FeatureIndexBuilder {
     /// The rings' entries and boxes, in insertion order.
     entries: Vec<Entry>,
     boxes: Vec<Bounds>,
@@ -90,7 +90,7 @@ pub struct FeatureIndexBuilder {
 impl FeatureIndexBuilder {
     /// An empty index of `tile_data`'s features, sharing the tile data.
     #[must_use]
-    pub fn new(tile_data: Option<TileData>) -> Self {
+    pub(crate) fn new(tile_data: Option<TileData>) -> Self {
         FeatureIndexBuilder {
             entries: Vec::new(),
             boxes: Vec::new(),
@@ -128,7 +128,7 @@ impl FeatureIndexBuilder {
 
     /// Adds the feature at `index` of `source_layer_name`, with the box of
     /// each of its rings that reaches into the tile.
-    pub fn insert(
+    pub(crate) fn insert(
         &mut self,
         geometries: &GeometryCollection,
         index: usize,
@@ -347,13 +347,13 @@ impl FeatureIndex {
             let distance = match region {
                 None => Some(0.0),
                 Some(region) => render_layer.hit(&ErasedHitTest {
-                        query_geometry: region.geometry,
-                        feature: &feature,
-                        geometry: &geometry,
-                        feature_state: &state,
-                        zoom: region.view.zoom() as f32,
-                        camera: region.view,
-                        pixels_to_tile_units: region.pixels_to_tile_units,
+                    query_geometry: region.geometry,
+                    feature: &feature,
+                    geometry: &geometry,
+                    feature_state: &state,
+                    zoom: region.view.zoom() as f32,
+                    camera: region.view,
+                    pixels_to_tile_units: region.pixels_to_tile_units,
                     projector: region.projector,
                 }),
             };

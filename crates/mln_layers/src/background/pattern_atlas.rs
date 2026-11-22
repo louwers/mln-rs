@@ -176,8 +176,10 @@ impl PatternAtlas {
     /// Gives the texture the atlas image, unless the atlas is unchanged
     /// since the last call.
     pub(crate) fn upload(&mut self, res: &mut Resources) {
-        if std::mem::take(&mut self.dirty) {
-            res.texture_mut(&self.texture).set_image(Some(Rc::new(self.atlas_image.clone())));
+        if std::mem::take(&mut self.dirty)
+            && let Some(mut texture) = res.texture_mut(&self.texture)
+        {
+            texture.set_image(Some(Rc::new(self.atlas_image.clone())));
         }
     }
 

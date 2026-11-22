@@ -28,7 +28,7 @@ fn unpack_vector(encoding: RasterEncoding) -> [f32; 4] {
 /// in an image's pixels. It reads back only as `new` can make it
 /// (`from_parts`).
 #[derive(Clone, Debug)]
-pub struct DemData {
+pub(crate) struct DemData {
     pub(crate) dim: i32,
     pub(crate) stride: i32,
     pub(crate) encoding: RasterEncoding,
@@ -203,32 +203,32 @@ impl DemData {
 
     /// The number of elevations along each side, without the border.
     #[must_use]
-    pub fn dim(&self) -> i32 {
+    pub(crate) fn dim(&self) -> i32 {
         self.dim
     }
 
     /// The number of pixels along each side of the image, with the border.
     #[must_use]
-    pub fn stride(&self) -> i32 {
+    pub(crate) fn stride(&self) -> i32 {
         self.stride
     }
 
     /// How the pixels encode the elevations.
     #[must_use]
-    pub fn encoding(&self) -> RasterEncoding {
+    pub(crate) fn encoding(&self) -> RasterEncoding {
         self.encoding
     }
 
     /// The factors that turn a pixel's red, green and blue into an
     /// elevation, and the base shift subtracted from their sum.
     #[must_use]
-    pub fn unpack_vector(&self) -> [f32; 4] {
+    pub(crate) fn unpack_vector(&self) -> [f32; 4] {
         unpack_vector(self.encoding)
     }
 
     /// The image whose pixels encode the elevations, with the border.
     #[must_use]
-    pub fn image(&self) -> &PremultipliedImage {
+    pub(crate) fn image(&self) -> &PremultipliedImage {
         &self.image
     }
 }

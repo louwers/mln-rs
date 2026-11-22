@@ -8,12 +8,12 @@ use crate::tile::raster::RasterLayoutVertex;
 const SEGMENT_QUADS: usize = MAX_SEGMENT_VERTICES / 4;
 
 /// The vertices and indices of the geometry the layers share.
-pub struct RenderStaticData;
+pub(crate) struct RenderStaticData;
 
 impl RenderStaticData {
     /// The tile's four corners, as position-only vertices (`a_pos`).
     #[must_use]
-    pub fn tile_vertices() -> Vec<[i16; 2]> {
+    pub(crate) fn tile_vertices() -> Vec<[i16; 2]> {
         let extent = constants::EXTENT as i16;
         vec![[0, 0], [extent, 0], [0, extent], [extent, extent]]
     }
@@ -21,14 +21,14 @@ impl RenderStaticData {
     /// The two triangles of a quad of four vertices, in the order of
     /// [`tile_vertices`](Self::tile_vertices)' corners.
     #[must_use]
-    pub fn quad_triangle_indices() -> Vec<u16> {
+    pub(crate) fn quad_triangle_indices() -> Vec<u16> {
         vec![0, 1, 2, 1, 2, 3]
     }
 
     /// The tile's four corners, each sampling the same corner of the tile's
     /// data.
     #[must_use]
-    pub fn raster_vertices() -> Vec<RasterLayoutVertex> {
+    pub(crate) fn raster_vertices() -> Vec<RasterLayoutVertex> {
         use geometry::Point;
 
         let e = constants::EXTENT as i16;
@@ -46,7 +46,7 @@ impl RenderStaticData {
     /// vertices after the last's: of corners 0 and 1 above 2 and 3, the
     /// counter-clockwise triangles 0, 2, 1 and 1, 2, 3.
     #[must_use]
-    pub fn quad_indices() -> Vec<u16> {
+    pub(crate) fn quad_indices() -> Vec<u16> {
         (0..SEGMENT_QUADS as u16).flat_map(|quad| [0, 2, 1, 1, 2, 3].map(|index| 4 * quad + index)).collect()
     }
 
@@ -54,7 +54,7 @@ impl RenderStaticData {
     /// buffer, one after the other, from the indices of
     /// [`quad_indices`](Self::quad_indices).
     #[must_use]
-    pub fn quad_segments(quads: usize) -> Vec<SegmentBase> {
+    pub(crate) fn quad_segments(quads: usize) -> Vec<SegmentBase> {
         (0..quads)
             .step_by(SEGMENT_QUADS)
             .map(|first| {
@@ -69,7 +69,7 @@ impl RenderStaticData {
     /// four vertices, such as [`tile_vertices`](Self::tile_vertices) or
     /// [`raster_vertices`](Self::raster_vertices).
     #[must_use]
-    pub fn quad_triangle_segments() -> Vec<SegmentBase> {
+    pub(crate) fn quad_triangle_segments() -> Vec<SegmentBase> {
         vec![SegmentBase::with_lengths(0, 0, 4, 6)]
     }
 }

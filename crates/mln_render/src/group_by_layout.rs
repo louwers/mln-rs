@@ -167,7 +167,11 @@ mod tests {
     }
 
     /// A `T` layer `id` of `source_layer` in "source".
-    fn layer<T: RenderLayer<Style = T> + mln_style::layer_type::StyleLayerType>(id: &str, source_layer: &str, filter: Option<&Filter>) -> Arc<dyn ErasedEvaluatedLayer> {
+    fn layer<T: RenderLayer<Style = T> + mln_style::layer_type::StyleLayerType>(
+        id: &str,
+        source_layer: &str,
+        filter: Option<&Filter>,
+    ) -> Arc<dyn ErasedEvaluatedLayer> {
         let mut layer = Layer::new(Registry::with_builtins().style(), T::INFO.name, id, "source").unwrap();
         layer.set_source_layer(source_layer);
         if let Some(filter) = filter {
@@ -197,50 +201,50 @@ mod tests {
         ids(&groups)
     }
 
-// slice: off     /// Layers group by their keys in the order of their groups' first
-// slice: off     /// layers, as comparing each key with every group's does.
-// slice: off     #[test]
-// slice: off     fn groups_as_comparison_does_in_first_appearance_order() {
-// slice: off         let motorway = filter(r#"["==", ["get", "class"], "motorway"]"#);
-// slice: off         let primary = filter(r#"["==", ["get", "class"], "primary"]"#);
-// slice: off         let layers = [
-// slice: off             dot("a", "roads", Some(&motorway)),
-// slice: off             dot("b", "roads", Some(&primary)),
-// slice: off             dot("c", "roads", Some(&motorway)),
-// slice: off             dot("d", "roads", None),
-// slice: off             dot("e", "water", Some(&motorway)),
-// slice: off             layer::<Tint>("f", "roads", Some(&motorway)),
-// slice: off             dot("g", "roads", Some(&primary)),
-// slice: off             dot("h", "roads", None),
-// slice: off             // An equal filter that isn't shared: a filterable layer's
-// slice: off             // layout differs from another's unless they share the filter.
-// slice: off             dot("i", "roads", Some(&filter(r#"["==", ["get", "class"], "motorway"]"#))),
-// slice: off         ];
-// slice: off         let groups = ids(&group_layers(&layers));
-// slice: off         assert_eq!(groups, [vec!["a", "c"], vec!["b", "g"], vec!["d", "h"], vec!["e"], vec!["f"], vec!["i"]]);
-// slice: off         assert_eq!(groups, grouped_by_comparison(&layers));
-// slice: off     }
+    // slice: off     /// Layers group by their keys in the order of their groups' first
+    // slice: off     /// layers, as comparing each key with every group's does.
+    // slice: off     #[test]
+    // slice: off     fn groups_as_comparison_does_in_first_appearance_order() {
+    // slice: off         let motorway = filter(r#"["==", ["get", "class"], "motorway"]"#);
+    // slice: off         let primary = filter(r#"["==", ["get", "class"], "primary"]"#);
+    // slice: off         let layers = [
+    // slice: off             dot("a", "roads", Some(&motorway)),
+    // slice: off             dot("b", "roads", Some(&primary)),
+    // slice: off             dot("c", "roads", Some(&motorway)),
+    // slice: off             dot("d", "roads", None),
+    // slice: off             dot("e", "water", Some(&motorway)),
+    // slice: off             layer::<Tint>("f", "roads", Some(&motorway)),
+    // slice: off             dot("g", "roads", Some(&primary)),
+    // slice: off             dot("h", "roads", None),
+    // slice: off             // An equal filter that isn't shared: a filterable layer's
+    // slice: off             // layout differs from another's unless they share the filter.
+    // slice: off             dot("i", "roads", Some(&filter(r#"["==", ["get", "class"], "motorway"]"#))),
+    // slice: off         ];
+    // slice: off         let groups = ids(&group_layers(&layers));
+    // slice: off         assert_eq!(groups, [vec!["a", "c"], vec!["b", "g"], vec!["d", "h"], vec!["e"], vec!["f"], vec!["i"]]);
+    // slice: off         assert_eq!(groups, grouped_by_comparison(&layers));
+    // slice: off     }
 
-// slice: off     /// Where the layout ignores the filter, the keys compare filters by
-// slice: off     /// their expressions, so equal filters group whether or not they share
-// slice: off     /// them.
-// slice: off     #[test]
-// slice: off     fn groups_equal_filters_that_are_not_shared() {
-// slice: off         let raster = |id: &str, json: &str| layer::<Tint>(id, "", Some(&filter(json)));
-// slice: off         let layers = [
-// slice: off             raster("a", r#"["==", ["get", "rank"], 0]"#),
-// slice: off             raster("b", r#"["==", ["get", "rank"], 1]"#),
-// slice: off             raster("c", r#"["==", ["get", "rank"], -0.0]"#),
-// slice: off             // A `let` compares its bindings too.
-// slice: off             raster("d", r#"["let", "x", 1, ["==", ["get", "rank"], 2]]"#),
-// slice: off             raster("e", r#"["let", "x", 2, ["==", ["get", "rank"], 2]]"#),
-// slice: off             raster("f", r#"["==", ["get", "rank"], 2]"#),
-// slice: off             raster("g", r#"["==", ["get", "rank"], 1]"#),
-// slice: off         ];
-// slice: off         let groups = ids(&group_layers(&layers));
-// slice: off         assert_eq!(groups, [vec!["a", "c"], vec!["b", "g"], vec!["d"], vec!["e"], vec!["f"]]);
-// slice: off         assert_eq!(groups, grouped_by_comparison(&layers));
-// slice: off     }
+    // slice: off     /// Where the layout ignores the filter, the keys compare filters by
+    // slice: off     /// their expressions, so equal filters group whether or not they share
+    // slice: off     /// them.
+    // slice: off     #[test]
+    // slice: off     fn groups_equal_filters_that_are_not_shared() {
+    // slice: off         let raster = |id: &str, json: &str| layer::<Tint>(id, "", Some(&filter(json)));
+    // slice: off         let layers = [
+    // slice: off             raster("a", r#"["==", ["get", "rank"], 0]"#),
+    // slice: off             raster("b", r#"["==", ["get", "rank"], 1]"#),
+    // slice: off             raster("c", r#"["==", ["get", "rank"], -0.0]"#),
+    // slice: off             // A `let` compares its bindings too.
+    // slice: off             raster("d", r#"["let", "x", 1, ["==", ["get", "rank"], 2]]"#),
+    // slice: off             raster("e", r#"["let", "x", 2, ["==", ["get", "rank"], 2]]"#),
+    // slice: off             raster("f", r#"["==", ["get", "rank"], 2]"#),
+    // slice: off             raster("g", r#"["==", ["get", "rank"], 1]"#),
+    // slice: off         ];
+    // slice: off         let groups = ids(&group_layers(&layers));
+    // slice: off         assert_eq!(groups, [vec!["a", "c"], vec!["b", "g"], vec!["d"], vec!["e"], vec!["f"]]);
+    // slice: off         assert_eq!(groups, grouped_by_comparison(&layers));
+    // slice: off     }
 
     /// Filters that differ only in a final literal, as a style that splits
     /// a source's features among many layers has.

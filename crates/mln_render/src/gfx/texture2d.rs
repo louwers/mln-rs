@@ -17,7 +17,7 @@ use crate::gfx::resources::{Device, SharedGpuTexture};
 /// [`Gpu`](mln_gfx::gpu::Gpu), which the texture lets go of when it
 /// replaces it or drops, and which bindings made of it hold until they go. The context changes it, and lends it to set up as a
 /// `TextureMut`.
-pub struct Texture2D {
+pub(crate) struct Texture2D {
     texture: Option<SharedGpuTexture>,
     size: Size,
     format: TextureFormat,
@@ -45,7 +45,7 @@ impl Texture2D {
 
     /// The texture's size in texels, zero before it has an image.
     #[must_use]
-    pub fn size(&self) -> Size {
+    pub(crate) fn size(&self) -> Size {
         self.size
     }
 

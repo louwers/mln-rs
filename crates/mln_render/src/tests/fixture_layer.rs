@@ -22,8 +22,7 @@ use mln_util::error::Error;
 
 use crate::draw::Draws;
 use crate::layer::{
-    Bucket, BuildCx, EvaluatedLayer, Features, GpuVec, Layer, LayerBinders, Layout, LayoutCx, NewCx, PrepareCx,
-    Upload,
+    Bucket, BuildCx, EvaluatedLayer, Features, GpuVec, Layer, LayerBinders, Layout, LayoutCx, NewCx, PrepareCx, Upload,
 };
 
 mln_style::properties!(

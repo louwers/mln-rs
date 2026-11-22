@@ -136,7 +136,7 @@ impl VertexAttribute {
 /// The attributes whose paint property a draw reads from its uniform
 /// instead, by id.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Uniforms(u16);
+pub(crate) struct Uniforms(u16);
 
 const _: () = assert!(MAX_ATTRIBUTES <= u16::BITS as usize);
 
@@ -163,14 +163,14 @@ impl FromIterator<usize> for Uniforms {
 
 /// Vertex attributes by id.
 #[derive(Default)]
-pub struct VertexAttributeArray {
+pub(crate) struct VertexAttributeArray {
     attrs: [Option<Box<VertexAttribute>>; MAX_ATTRIBUTES],
 }
 
 impl VertexAttributeArray {
     /// No attributes.
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
@@ -189,7 +189,7 @@ impl VertexAttributeArray {
     /// Where the attribute `id` reads vertices of the context's store, if it
     /// does.
     #[must_use]
-    pub fn shared(&self, id: usize) -> Option<&SharedAttribute> {
+    pub(crate) fn shared(&self, id: usize) -> Option<&SharedAttribute> {
         self.get(id).and_then(VertexAttribute::shared)
     }
 
@@ -206,7 +206,7 @@ impl VertexAttributeArray {
 
     /// Makes the attribute `id` read vertices of the context's store as
     /// `shared` says.
-    pub fn set_shared(&mut self, id: usize, shared: SharedAttribute) {
+    pub(crate) fn set_shared(&mut self, id: usize, shared: SharedAttribute) {
         self.set(id, VertexAttribute::Shared(shared));
     }
 
@@ -219,7 +219,7 @@ impl VertexAttributeArray {
 
     /// Where the attributes that read vertices of the context's store read
     /// them, to change.
-    pub fn shared_mut(&mut self) -> impl Iterator<Item = &mut SharedAttribute> {
+    pub(crate) fn shared_mut(&mut self) -> impl Iterator<Item = &mut SharedAttribute> {
         self.attrs.iter_mut().filter_map(|attr| match attr.as_deref_mut()? {
             VertexAttribute::Shared(shared) => Some(shared),
             VertexAttribute::Own { .. } => None,

@@ -14,13 +14,13 @@ use crate::gfx::release::{Release, ReleaseQueue};
 /// Where an entry is in its store: its slot, and which of the entries the
 /// slot held in turn it is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct EntryKey {
+pub(crate) struct EntryKey {
     slot: usize,
     version: u32,
 }
 
 /// The key of an entry of a store, which only the store makes.
-pub trait Key: Copy + Into<StoreKey> {
+pub(crate) trait Key: Copy + Into<StoreKey> {
     fn new(entry: EntryKey) -> Self;
     fn entry(self) -> EntryKey;
 }
@@ -60,7 +60,7 @@ keys! {
 
 /// A key of one of the context's stores.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum StoreKey {
+pub(crate) enum StoreKey {
     Texture(TextureKey),
     Vertices(VerticesKey),
     Mesh(MeshKey),
@@ -68,7 +68,7 @@ pub enum StoreKey {
 
 /// A handle of the store entry `key`, which stays in its store while a
 /// clone of the handle does.
-pub struct Shared<K: Key>(Rc<Holder<K>>);
+pub(crate) struct Shared<K: Key>(Rc<Holder<K>>);
 
 /// What the clones of a [`Shared`] share: the key, and the queue it goes to
 /// once the last of them drops.
@@ -113,7 +113,7 @@ impl<K: Key + std::fmt::Debug> std::fmt::Debug for Shared<K> {
 }
 
 /// A texture of the context's store.
-pub type SharedTexture = Shared<TextureKey>;
+pub(crate) type SharedTexture = Shared<TextureKey>;
 
 /// The slots of a store's chunk.
 const CHUNK: usize = 32;

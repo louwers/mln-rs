@@ -28,8 +28,8 @@ use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer, entry};
 use crate::gfx::context::Resources;
 use crate::image_store::ImageStore;
 use crate::layer::{
-    EvaluateCx, Evaluation, Found, FrameQuery, FrameTile, Hit, HitTest, Layer, LayerValues, NewCx, PrepareCx, TileCx, Tiles, UpdateCx,
-    input,
+    EvaluateCx, Evaluation, Found, FrameQuery, FrameTile, Hit, HitTest, Layer, LayerValues, NewCx, PrepareCx, TileCx,
+    Tiles, UpdateCx, input,
 };
 use crate::paint_parameters::PaintParameters;
 use crate::render_source::{RenderSource, TileOrder};
@@ -447,49 +447,46 @@ impl<L: Layer> RenderLayer for Hosted<L> {
     fn update(&mut self, update: &mut LayerUpdate<'_>) -> bool {
         let start = update.found.len();
         let mut draws = false;
-        match crate::layer::input_source::<L>() {
-            SourceKind::None => {
-                let view = update.view;
-                let parameters = update.update_parameters;
-                let zoom = view.integer_zoom();
-                self.cover = tile_cover(
-                    &TileCoverParameters {
-                        view: view.clone(),
-                        tile_lod_min_radius: parameters.tile_lod_min_radius,
-                        tile_lod_scale: parameters.tile_lod_scale,
-                        tile_lod_pitch_threshold: parameters.tile_lod_pitch_threshold,
-                        tile_lod_mode: parameters.tile_lod_mode,
-                        requested_zoom: None,
-                        round_zoom: false,
-                        max_content_elevation: 0.0,
-                    },
-                    zoom,
-                    ZoomRange::new(0u8, zoom),
-                    None,
-                );
-                self.tile_values.set_tiles(self.cover.iter().copied());
-            }
-            _ => {
-                let mut ids: SmallVec<[OverscaledTileID; 64]> = SmallVec::new();
-                if let Some(source) = update.source
-                    && let Some(order) = source.tile_order(TileOrder::ById)
-                {
-                    let tiles = source.render_tiles();
-                    for &index in order {
-                        let Some(tile) = tiles.get(index) else { continue };
-                        let content = update.contents.get(index).copied().flatten();
-                        let found = content.and_then(|content| {
-                            <L::Input as input::Find<L::Style>>::find(content, &self.values.style.id)
-                        });
-                        draws |= found
-                            .is_some_and(|(data, _)| <L::Input as input::Find<L::Style>>::identity(data).is_some());
-                        update.found.push(FoundTile { tile: index, view: found.map(|(_, place)| place) });
-                        ids.push(*tile.overscaled_tile_id());
-                    }
+        if crate::layer::input_source::<L>() == SourceKind::None {
+            let view = update.view;
+            let parameters = update.update_parameters;
+            let zoom = view.integer_zoom();
+            self.cover = tile_cover(
+                &TileCoverParameters {
+                    view: view.clone(),
+                    tile_lod_min_radius: parameters.tile_lod_min_radius,
+                    tile_lod_scale: parameters.tile_lod_scale,
+                    tile_lod_pitch_threshold: parameters.tile_lod_pitch_threshold,
+                    tile_lod_mode: parameters.tile_lod_mode,
+                    requested_zoom: None,
+                    round_zoom: false,
+                    max_content_elevation: 0.0,
+                },
+                zoom,
+                ZoomRange::new(0u8, zoom),
+                None,
+            );
+            self.tile_values.set_tiles(self.cover.iter().copied());
+        } else {
+            let mut ids: SmallVec<[OverscaledTileID; 64]> = SmallVec::new();
+            if let Some(source) = update.source
+                && let Some(order) = source.tile_order(TileOrder::ById)
+            {
+                let tiles = source.render_tiles();
+                for &index in order {
+                    let Some(tile) = tiles.get(index) else { continue };
+                    let content = update.contents.get(index).copied().flatten();
+                    let found = content.and_then(|content| {
+                        <L::Input as input::Find<L::Style>>::find(content, &self.values.style.id)
+                    });
+                    draws |= found
+                        .is_some_and(|(data, _)| <L::Input as input::Find<L::Style>>::identity(data).is_some());
+                    update.found.push(FoundTile { tile: index, view: found.map(|(_, place)| place) });
+                    ids.push(*tile.overscaled_tile_id());
                 }
-                self.tile_values.set_tiles(ids);
-                self.source_max_zoom = update.source.and_then(RenderSource::max_zoom);
             }
+            self.tile_values.set_tiles(ids);
+            self.source_max_zoom = update.source.and_then(RenderSource::max_zoom);
         }
         self.found = start..update.found.len();
         draws
@@ -518,24 +515,21 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         }
 
         let mut tiles: SmallVec<[Found<'_>; 64]> = SmallVec::new();
-        match crate::layer::input_source::<L>() {
-            SourceKind::None => {
-                for (index, &id) in self.cover.iter().enumerate() {
-                    tiles.push(Found { tile: FrameTile { index, id, unwrapped: id.to_unwrapped() }, at: None });
-                }
+        if crate::layer::input_source::<L>() == SourceKind::None {
+            for (index, &id) in self.cover.iter().enumerate() {
+                tiles.push(Found { tile: FrameTile { index, id, unwrapped: id.to_unwrapped() }, at: None });
             }
-            _ => {
-                let found = found.get(self.found.clone()).unwrap_or_default();
-                for (index, &FoundTile { tile, view }) in found.iter().enumerate() {
-                    let Some(source) = source else { break };
-                    let Some(render_tile) = source.tiles.get(tile) else { continue };
-                    let content = source.contents.get(tile).copied().flatten();
-                    let at = content.zip(view);
-                    let held = at.and_then(|(content, place)| <L::Input as input::Find<L::Style>>::at(content, place));
-                    self.tile_values.show(index, held.and_then(<L::Input as input::Find<L::Style>>::identity));
-                    let id = *render_tile.overscaled_tile_id();
-                    tiles.push(Found { tile: FrameTile { index, id, unwrapped: render_tile.id }, at });
-                }
+        } else {
+            let found = found.get(self.found.clone()).unwrap_or_default();
+            for (index, &FoundTile { tile, view }) in found.iter().enumerate() {
+                let Some(source) = source else { break };
+                let Some(render_tile) = source.tiles.get(tile) else { continue };
+                let content = source.contents.get(tile).copied().flatten();
+                let at = content.zip(view);
+                let held = at.and_then(|(content, place)| <L::Input as input::Find<L::Style>>::at(content, place));
+                self.tile_values.show(index, held.and_then(<L::Input as input::Find<L::Style>>::identity));
+                let id = *render_tile.overscaled_tile_id();
+                tiles.push(Found { tile: FrameTile { index, id, unwrapped: render_tile.id }, at });
             }
         }
 

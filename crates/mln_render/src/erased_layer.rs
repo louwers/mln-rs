@@ -404,10 +404,10 @@ pub(crate) const fn entry<L: Layer>() -> &'static dyn ErasedLayerType {
 /// The data a tile of `contents` holds for a layer of the style type `S`
 /// laid out by `L` at `index` among the layout's layers; `None` where the
 /// layout laid it out as a layer of another type.
-pub(crate) fn laid<'a, S: StyleLayerType, L: Layout<S>>(
-    contents: &'a crate::tile::contents::GeometryContents,
+pub(crate) fn laid<S: StyleLayerType, L: Layout<S>>(
+    contents: &crate::tile::contents::GeometryContents,
     index: usize,
-) -> Option<LayerBucket<'a, S, L::Bucket>> {
+) -> Option<LayerBucket<'_, S, L::Bucket>> {
     let laid = contents.result.layer_render_data.laid(index)?;
     let layer: &dyn Any = laid.layer;
     Some(LayerBucket {

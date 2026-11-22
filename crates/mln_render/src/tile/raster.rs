@@ -23,7 +23,7 @@ use crate::tile_mask::TileMask;
 /// from the data's top left corner.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
-pub struct RasterLayoutVertex {
+pub(crate) struct RasterLayoutVertex {
     /// The position.
     pub a1: [i16; 2],
     /// Where it samples the data.
@@ -33,7 +33,7 @@ pub struct RasterLayoutVertex {
 impl RasterLayoutVertex {
     /// The vertex at `p` that samples the data at `t`.
     #[must_use]
-    pub fn new(p: Point<i16>, t: Point<u16>) -> RasterLayoutVertex {
+    pub(crate) fn new(p: Point<i16>, t: Point<u16>) -> RasterLayoutVertex {
         RasterLayoutVertex { a1: [p.x, p.y], a2: [t.x, t.y] }
     }
 }
@@ -43,7 +43,7 @@ impl RasterLayoutVertex {
 /// draws the tile's quad. An image source's image has the quads that warp it
 /// to its coordinates. Its upload moves the quads' vertices and indices into
 /// the context's stores, which the draws of the tile's layers share.
-pub struct MaskedGeometry {
+pub(crate) struct MaskedGeometry {
     mask: TileMask,
     quads: Quads,
     /// Counts the changes of the quads, which the layers build their draws
@@ -63,7 +63,7 @@ enum Quads {
 
 /// The quads of a [`MaskedGeometry`] in the context's stores, and the
 /// segments that draw them.
-pub struct StoredQuads {
+pub(crate) struct StoredQuads {
     /// The quads' [`RasterLayoutVertex`]es.
     pub vertices: SharedVertices,
     /// The quads' triangles.
@@ -116,14 +116,14 @@ impl MaskedGeometry {
     /// The tiles of the tile's extent that it draws: the whole tile's,
     /// `(0, 0, 0)`, unless better tiles cover some of it.
     #[must_use]
-    pub fn mask(&self) -> &TileMask {
+    pub(crate) fn mask(&self) -> &TileMask {
         &self.mask
     }
 
     /// The quads in the context's stores; `None` where there are none to
     /// draw, and the tile draws its quad.
     #[must_use]
-    pub fn quads(&self) -> Option<&StoredQuads> {
+    pub(crate) fn quads(&self) -> Option<&StoredQuads> {
         match &self.quads {
             Quads::Stored(quads) => Some(quads),
             Quads::Data { vertices, .. } => {
@@ -137,7 +137,7 @@ impl MaskedGeometry {
     /// The number of times the quads changed, after which a layer builds
     /// its draws of them again.
     #[must_use]
-    pub fn generation(&self) -> u64 {
+    pub(crate) fn generation(&self) -> u64 {
         self.generation
     }
 
@@ -210,7 +210,7 @@ impl MaskedGeometry {
 /// A raster tile's image and the geometry that draws it, which the tile
 /// masks, or an image source's image and the geometry that warps it to its
 /// coordinates.
-pub struct RasterContents {
+pub(crate) struct RasterContents {
     id: SimpleIdentity,
     image: Option<Arc<PremultipliedImage>>,
     geometry: MaskedGeometry,
@@ -230,19 +230,19 @@ impl RasterContents {
     /// The contents' identity, which tells what the layers keep of them
     /// apart. Contents of a new image have a new one.
     #[must_use]
-    pub fn id(&self) -> SimpleIdentity {
+    pub(crate) fn id(&self) -> SimpleIdentity {
         self.id
     }
 
     /// The image; `None` for a tile without one.
     #[must_use]
-    pub fn image(&self) -> Option<&Arc<PremultipliedImage>> {
+    pub(crate) fn image(&self) -> Option<&Arc<PremultipliedImage>> {
         self.image.as_ref()
     }
 
     /// The masked geometry.
     #[must_use]
-    pub fn geometry(&self) -> &MaskedGeometry {
+    pub(crate) fn geometry(&self) -> &MaskedGeometry {
         &self.geometry
     }
 
@@ -268,7 +268,7 @@ impl RasterContents {
 
     /// Whether there is an image to draw.
     #[must_use]
-    pub fn has_data(&self) -> bool {
+    pub(crate) fn has_data(&self) -> bool {
         self.image.is_some()
     }
 

@@ -455,9 +455,8 @@ impl<T: StyleLayerType> ErasedLayerStyle for LayerStyle<T> {
 
     fn only_data_differs(&self, other: &dyn ErasedLayerStyle) -> bool {
         size_of::<T::Data>() != 0
-            && LayerStyle::<T>::recover_ref(other).is_some_and(|other| {
-                self.base.same_as(&other.base) && property_table::properties_equal(self, other)
-            })
+            && LayerStyle::<T>::recover_ref(other)
+                .is_some_and(|other| self.base.same_as(&other.base) && property_table::properties_equal(self, other))
     }
 }
 

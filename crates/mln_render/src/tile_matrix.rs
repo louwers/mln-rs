@@ -165,7 +165,7 @@ pub(crate) fn projection_data(tile_id: &UnwrappedTileID, frame: &Frame<'_>, how:
 /// A layer's `*-translate` of `translation` pixels, anchored as `anchor`
 /// says, in the units of the tile `id` in `view`.
 #[must_use]
-pub fn tile_unit_translation(
+pub(crate) fn tile_unit_translation(
     id: &UnwrappedTileID,
     translation: [f32; 2],
     anchor: TranslateAnchorType,
@@ -182,13 +182,13 @@ pub fn tile_unit_translation(
 
 /// The column-major `f32` matrix of `m`, as a uniform block holds it.
 #[must_use]
-pub fn cast_matrix(m: &DMat4) -> [f32; 16] {
+pub(crate) fn cast_matrix(m: &DMat4) -> [f32; 16] {
     m.as_mat4().to_cols_array()
 }
 
 /// The uniform block of `data`, which the programs' projection reads.
 #[must_use]
-pub fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
+pub(crate) fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
     ProjectionUBO {
         matrix: cast_matrix(&data.main_matrix),
         fallback_matrix: cast_matrix(&data.fallback_matrix),
@@ -204,7 +204,7 @@ pub fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
 /// `latitude_scale` is the cosine of the center latitude on the globe and 1
 /// on Mercator.
 #[must_use]
-pub fn globe_extrude_scale(tile_id: &UnwrappedTileID, zoom: f32, latitude_scale: f64) -> f32 {
+pub(crate) fn globe_extrude_scale(tile_id: &UnwrappedTileID, zoom: f32, latitude_scale: f64) -> f32 {
     (f64::from(tile_id.pixels_to_tile_units(1.0, zoom)) / (f64::from(EXTENT) * (1u64 << tile_id.canonical.z) as f64)
         * M2PI
         * latitude_scale) as f32

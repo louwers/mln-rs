@@ -34,10 +34,10 @@ use crate::gfx::vertex_attribute::VertexAttributeArray;
 use crate::paint_parameters::{DepthTest, DrawTarget, PaintParameters, Stencil};
 
 /// The textures a draw binds, by texture id.
-pub type Textures = [Option<SharedTexture>; MAX_TEXTURES];
+pub(crate) type Textures = [Option<SharedTexture>; MAX_TEXTURES];
 
 /// A handle of a draw's GPU objects in the context's store of meshes
-/// ([`Context::add_mesh`]). The objects stay while the handle does, and go
+/// ([`Resources::mesh`](crate::draw::Resources::mesh)). The objects stay while the handle does, and go
 /// once it drops and the GPU is done with them. A draw names the objects
 /// it draws by their mesh ([`Group::push`](crate::draw::Group::push)), with
 /// `B`, the values of the draw's own for its program's storage buffers of an
@@ -86,7 +86,7 @@ const MAX_VERTEX_BUFFERS: usize = 8;
 
 /// What a draw draws: its vertices, and the primitives its segments draw of
 /// them.
-pub struct DrawGeometry {
+pub(crate) struct DrawGeometry {
     /// The vertex attributes, by attribute id.
     pub vertices: VertexAttributeArray,
     /// How many vertices the attributes hold, which an attribute the
@@ -105,7 +105,7 @@ pub struct DrawGeometry {
 /// `count` vertices of `data_type` in `data` as the vertex attribute `id`,
 /// none where there are no vertices.
 #[must_use]
-pub fn raw_vertices(id: usize, data: Vec<u8>, count: usize, data_type: AttributeDataType) -> VertexAttributeArray {
+pub(crate) fn raw_vertices(id: usize, data: Vec<u8>, count: usize, data_type: AttributeDataType) -> VertexAttributeArray {
     let mut attributes = VertexAttributeArray::new();
     if count == 0 || data_type == AttributeDataType::Invalid || data.is_empty() {
         return attributes;
@@ -173,7 +173,7 @@ struct PipelineVariant {
 /// color and cull modes it draws with, and the shader, pipelines, bindings
 /// and geometry it made of them on the context's `Gpu`, which it makes again
 /// when what they are made of changes.
-pub struct DrawObjects {
+pub(crate) struct DrawObjects {
     shader: ShaderKey,
     vertex_attributes: VertexAttributeArray,
     /// The attributes of each instance, for a draw of instances.
@@ -217,7 +217,7 @@ impl DrawObjects {
     /// The objects of a draw of `geometry` with `shader`, in `color_mode`
     /// and `cull_face_mode`, binding `textures`, without buffers of its own.
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         shader: ShaderKey,
         color_mode: ColorMode,
         cull_face_mode: CullFaceMode,

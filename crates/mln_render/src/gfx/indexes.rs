@@ -14,7 +14,7 @@ use crate::gfx::vertices::SharedVertices;
 
 /// A draw's own indexes, which don't change once made: an upload moves them
 /// into their buffer.
-pub struct Indexes {
+pub(crate) struct Indexes {
     len: usize,
     place: Place,
 }
@@ -28,7 +28,7 @@ enum Place {
 impl Indexes {
     /// Indexes holding `indexes`.
     #[must_use]
-    pub fn new(indexes: Vec<u16>) -> Indexes {
+    pub(crate) fn new(indexes: Vec<u16>) -> Indexes {
         Indexes { len: indexes.len(), place: Place::Data(indexes) }
     }
 
@@ -60,7 +60,7 @@ impl Indexes {
 
 /// The indexes a draw binds: its own, or a buffer of `u16`s it shares
 /// through the context's store.
-pub enum DrawIndexes {
+pub(crate) enum DrawIndexes {
     /// The draw's own indexes.
     Own(Indexes),
     /// A buffer of the context's store, which other draws share.
@@ -76,13 +76,13 @@ impl From<Indexes> for DrawIndexes {
 impl DrawIndexes {
     /// The draw's own indexes holding `indexes`.
     #[must_use]
-    pub fn new(indexes: Vec<u16>) -> DrawIndexes {
+    pub(crate) fn new(indexes: Vec<u16>) -> DrawIndexes {
         DrawIndexes::Own(Indexes::new(indexes))
     }
 
     /// The number of indexes, which stays once the upload freed them.
     #[must_use]
-    pub fn len(&self, _context: &Resources) -> usize {
+    pub(crate) fn len(&self, _context: &Resources) -> usize {
         match self {
             DrawIndexes::Own(indexes) => indexes.len(),
             DrawIndexes::Shared(shared) => shared.count(),
@@ -90,7 +90,7 @@ impl DrawIndexes {
     }
 
     /// Writes the indexes to a buffer of `gpu`, unless they have one.
-    pub fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Resources) -> Result<(), GpuError> {
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Resources) -> Result<(), GpuError> {
         match self {
             DrawIndexes::Own(indexes) => indexes.upload(gpu, context.device()),
             DrawIndexes::Shared(shared) => context.upload_index_buffer(gpu, shared).map(drop),
@@ -99,7 +99,7 @@ impl DrawIndexes {
 
     /// The buffer of the indexes, once uploaded.
     #[must_use]
-    pub fn buffer(&self, context: &Resources) -> Option<BufferId> {
+    pub(crate) fn buffer(&self, context: &Resources) -> Option<BufferId> {
         match self {
             DrawIndexes::Own(indexes) => indexes.buffer(),
             DrawIndexes::Shared(shared) => context.vertices(shared)?.buffer(),

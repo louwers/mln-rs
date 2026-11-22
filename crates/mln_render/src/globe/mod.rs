@@ -7,9 +7,8 @@
 //! needs vertices often enough to follow the curve. A line or a polygon is
 //! split wherever it crosses the boundary of a cell of a grid over the tile
 //! ([`subdivide_line`], [`subdivide_ring`], [`subdivide_polygon`]), with
-//! the cells per axis, the granularity, that the layout's
-//! [`subdivision_granularity`](crate::layer::BucketParameters::subdivision_granularity)
-//! gives for the tile's zoom: it splits nothing where the map isn't a
+//! the cells per axis, the granularity, that the style's projection sets
+//! for the tile's zoom: it splits nothing where the map isn't a
 //! globe, and less than 2 splits nothing. A surface that covers the tile,
 //! such as a background or a raster, draws with the tile's grid
 //! ([`tile_grid`], or [`masked_tile_grids`] for the parts its mask keeps),

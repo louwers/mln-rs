@@ -1,67 +1,69 @@
 //! The layer contract: what a crate implements to add a layer type that the
-//! renderer draws.
+//! renderer draws. `mln_extension_tests`' `dot` layer type, which draws a
+//! geometry source's points as discs, is the smallest whole example; the
+//! facade's `mln_rs::layer` gathers every name it uses.
 //!
-//! A layer type has two halves. Its style half is a marker type that
-//! implements `mln_style`'s [`StyleLayerType`]: its name, the kind of source
-//! it draws, its properties, which [`mln_style::properties!`] declares, and
-//! its [`Data`](StyleLayerType::Data). Its render half is a struct that
-//! implements [`Layer`], one value per style layer of the type. A
-//! [`RegistryBuilder`](crate::RegistryBuilder) registers both with
-//! [`add_layer_type::<L>()`](crate::RegistryBuilder::add_layer_type).
+//! A layer type has two halves, which
+//! [`RegistryBuilder::add_layer_type::<L>()`](crate::RegistryBuilder::add_layer_type)
+//! registers together:
 //!
-//! The engine keeps each layer's values ([`LayerValues`]), transitions and
-//! evaluates them, and asks the layer what the evaluation means for its
-//! drawing ([`Layer::evaluate`]). In each frame that draws the layer it runs
-//! [`Layer::update`], then [`Layer::tile`] for each of the frame's tiles that
-//! has data for the layer and no value of it yet, then [`Layer::prepare`],
-//! which pushes the frame's draws ([`Draws`]). The engine sorts, uploads and
-//! draws them: the layer never sees a pass, a depth range, a stencil value
-//! or a uniform buffer.
+//! - **The style half**, a marker type that implements `mln_style`'s
+//!   [`StyleLayerType`]: the type's name, its kind of source, its properties
+//!   ([`mln_style::properties!`] declares them) and its
+//!   [`Data`](StyleLayerType::Data), what an app gives a layer outside the
+//!   style JSON (`Map::edit_style_layer_data`).
+//! - **The render half**, a struct that implements [`Layer`], one value per
+//!   style layer of the type.
 //!
-//! # Tiles
+//! # What a layer type writes
 //!
-//! A layer's [`Input`](Layer::Input) says what it draws from:
+//! 1. Its tiles' data. A layer of a geometry source has the input
+//!    [`Features<L>`]: on a tile worker, its [`Layout`] `L` selects the
+//!    tile's features ([`LayoutCx`]) and builds a [`Bucket`] of them
+//!    ([`BuildCx`]): vertices in [`GpuVec`]s, their triangles in
+//!    [`Indexes`], and the values of its data-driven paint properties in
+//!    [`LayerBinders`], declared with
+//!    [`paint_property_binders!`](crate::paint_property_binders!). A layer
+//!    without a source has the input [`ViewCover`].
+//! 2. Its meshes. [`Layer::tile`] makes the value the layer keeps of a
+//!    frame tile, typically a [`Mesh`](crate::draw::Mesh) of the tile's
+//!    bucket ([`LayerBucket`]) with the program the type declares. The
+//!    engine keeps the values with their tiles and drops them when the
+//!    tiles or their data go.
+//! 3. Its draws. [`Layer::prepare`] pushes a [`Draw`](crate::draw::Draw)
+//!    of each mesh, with its tile's projection and the values of its
+//!    program's blocks, to [`Draws`]. The engine orders, uploads and draws
+//!    them: the layer never sees a pass, a depth range, a stencil value or
+//!    a uniform buffer.
 //!
-//! - [`Features<L>`]: the tiles of a geometry source, whose features the
-//!   layout `L` turns into a [`Bucket`] per tile, on a tile worker.
-//! - [`ViewCover`]: no source; the tiles that cover the view at its integer
-//!   zoom, with nothing in them.
+//! [`Layer::evaluate`] says whether, and how, the layer draws with its
+//! freshly evaluated values; [`Layer::update`] brings up to date what the
+//! layer keeps for all its tiles, such as an atlas of images.
 //!
-//! The layer keeps a [`Tile`](Layer::Tile) value per frame tile, typically
-//! the meshes it draws the tile with. The engine holds the values: it keeps
-//! each with its tile while the tile stays in the frame, moves it when the
-//! map wraps around the antimeridian, and drops it when the tile leaves the
-//! frame or its data is replaced. It drops them all when the layer is
-//! restyled, when the map switches between Mercator and the globe, and when
-//! the layer stops rendering. A bucket that the engine rewrites in place,
-//! for feature state, keeps its value: the meshes over its buffers see the
-//! new data.
+//! # When the hooks run
 //!
-//! # Buckets
-//!
-//! A [`Layout`] runs on a tile worker, from owned inputs to an owned
-//! [`Bucket`]. It selects the tile's features, then builds the bucket:
-//! vertices in [`GpuVec`]s, their primitives in [`Indexes`], and the values of the data-driven
-//! paint properties in [`LayerBinders`], which a struct that
-//! [`paint_property_binders!`](crate::paint_property_binders!) declares
-//! writes per feature. The engine sends the bucket to the renderer's thread,
-//! through the worker codec where the worker has its own memory (so a
-//! bucket implements [`Wire`]: `#[derive(Wire)]`, with
-//! `#[wire(crate = mln_rs::mln_wire)]` through the facade), and uploads it
-//! ([`Bucket::upload`]). A tile's [`LayerBucket`] then gives the bucket's
-//! buffers to the meshes the layer makes.
-//!
-//! # Threads
-//!
-//! The layer, its tile values and every hook but the layout's run on the
-//! renderer's thread. The layout and the bucket are `Send`.
+//! The engine makes the layer ([`Layer::new`]) when it joins the renderer,
+//! again when the renderer makes its shaders again, and drops it when it
+//! leaves the style or the renderer loses its GPU context. It evaluates the
+//! layer whenever its values may have changed, its `Data` included. In
+//! each frame that draws the layer it runs [`update`](Layer::update), then
+//! [`tile`](Layer::tile) for each frame tile with data and no value, then
+//! [`prepare`](Layer::prepare). When the layer stops drawing, its tile
+//! values go and [`stopped`](Layer::stopped) runs. The layer, its values
+//! and every hook but the layout's run on the renderer's thread; the
+//! layout and the bucket are `Send`, and a bucket implements [`Wire`]
+//! (`#[derive(Wire)]`, with `#[wire(crate = mln_rs::mln_wire)]` through
+//! the facade) to cross to a tile worker with memory of its own.
 //!
 //! # Queries
 //!
-//! A rendered-feature query finds a tile's features near the query's
-//! geometry in the tile's feature index, padded by the layer's
+//! A rendered-feature query finds a tile's features near its geometry in
+//! the tile's feature index ([`BuildCx::index`]), padded by the layer's
 //! [`query_radius`](Layer::query_radius), and keeps those the layer
-//! [`hit`](Layer::hit)s, nearest first.
+//! [`hit`](Layer::hit)s; [`hit_frame`](Layer::hit_frame) adds what the
+//! layer draws without tile features. A layer's hits come nearest first.
+//! `RenderSession::query_rendered_layer` reads a layer as its renderer has
+//! it.
 
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -72,18 +74,21 @@ use mln_style::evaluated::Evaluated;
 use mln_style::expression::expr::FeatureState;
 use mln_style::expression::image_expression::UnavailableImages;
 use mln_style::expression::{EvaluationContext, ValueConverter};
-use mln_style_types::image::{ImageDependencies, ImageType};
-use mln_text::glyph::{GlyphDependencies, GlyphID};
-use mln_util::font_stack::FontStack;
-use mln_vec_map::VecSet;
 use mln_style::layer_type::{LayerStyle, PaintSet, SourceKind, StyleLayerType};
 use mln_style_types::TranslateAnchorType;
+use mln_style_types::image::{ImageDependencies, ImageType};
+use mln_text::glyph::{GlyphDependencies, GlyphID};
 use mln_tile::{Feature, TileLayer};
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates, GeometryTileFeature};
+use mln_tile_id::geometry_tile_data::{
+    GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileFeature,
+};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
-use mln_util::geo::ScreenCoordinate;
+use mln_util::constants::TILE_SIZE_D;
 use mln_util::error::Error;
+use mln_util::font_stack::FontStack;
+use mln_util::geo::ScreenCoordinate;
+use mln_vec_map::VecSet;
 use mln_wire::Wire;
 
 pub use crate::bucket_geometry::GpuVec;
@@ -235,7 +240,7 @@ pub(crate) mod input {
 
         /// What `content` holds at `place`, where [`find`](Self::find)
         /// found what it holds for a layer.
-        fn at<'a>(content: TileContent<'a>, place: ViewPlace) -> Option<Self::Data<'a>>
+        fn at(content: TileContent<'_>, place: ViewPlace) -> Option<Self::Data<'_>>
         where
             Self: TileInput<S>;
 
@@ -279,7 +284,7 @@ pub(crate) mod input {
             crate::erased_layer::laid::<S, L>(contents, index)
         }
 
-        fn at<'a>(content: TileContent<'a>, place: ViewPlace) -> Option<<Self as TileInput<S>>::Data<'a>> {
+        fn at(content: TileContent<'_>, place: ViewPlace) -> Option<<Self as TileInput<S>>::Data<'_>> {
             let ViewPlace::Laid(index) = place else {
                 debug_assert!(false, "a tile's own data's place for a laid-out layer");
                 return None;
@@ -303,7 +308,7 @@ pub(crate) mod input {
             None
         }
 
-        fn at<'a>(_content: TileContent<'a>, _place: ViewPlace) -> Option<<Self as TileInput<S>>::Data<'a>> {
+        fn at(_content: TileContent<'_>, _place: ViewPlace) -> Option<<Self as TileInput<S>>::Data<'_>> {
             None
         }
 
@@ -522,6 +527,41 @@ impl FrameTile {
     }
 }
 
+/// Where a tile is in the world's pixels at the camera's integer zoom: the
+/// origin a pattern repeats from, so that it meets itself across tiles.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PatternOrigin {
+    /// The high 16 bits of the tile's north-west corner, x and y, which a
+    /// shader adds to [`lower`](Self::lower) at a precision a float of
+    /// the whole coordinate lacks.
+    pub upper: [f32; 2],
+    /// The low 16 bits of the corner.
+    pub lower: [f32; 2],
+    /// The pixels a tile unit spans at that zoom.
+    pub tile_units_to_pixels: f32,
+}
+
+impl FrameTile {
+    /// Where the tile is in `frame`'s world pixels, which its patterns
+    /// repeat from.
+    #[must_use]
+    pub fn pattern_origin(self, frame: &Frame<'_>) -> PatternOrigin {
+        let (id, zoom) = (self.unwrapped, frame.camera.integer_zoom());
+        let scale = |z: f64| mln_map_types::zoom_scale(z);
+        let tile_size = (TILE_SIZE_D * scale(f64::from(zoom) - f64::from(id.canonical.z))) as i32;
+        let x = (f64::from(tile_size)
+            * (f64::from(id.canonical.x) + f64::from(id.wrap) * scale(f64::from(id.canonical.z))))
+            as i32;
+        let y = tile_size.wrapping_mul(id.canonical.y as i32);
+        let pixels_to_tile_units = id.pixels_to_tile_units(1.0, f32::from(zoom));
+        PatternOrigin {
+            upper: [(x >> 16) as f32, (y >> 16) as f32],
+            lower: [(x & 0xFFFF) as f32, (y & 0xFFFF) as f32],
+            tile_units_to_pixels: if pixels_to_tile_units == 0.0 { 0.0 } else { 1.0 / pixels_to_tile_units },
+        }
+    }
+}
+
 /// A tile's bucket of a layer of the style type `S`, with the layer's values
 /// it was laid out with.
 pub struct LayerBucket<'a, S: StyleLayerType, B> {
@@ -543,26 +583,27 @@ impl<S: StyleLayerType, B> Copy for LayerBucket<'_, S, B> {}
 
 impl<'a, S: StyleLayerType, B> LayerBucket<'a, S, B> {
     /// The buffer that `vec`, one of the bucket's, uploaded into
-    /// ([`Upload::vec`]). Panics for a vector the bucket didn't upload.
+    /// ([`Upload::vec`]); `None` for a vector its `upload` didn't name.
     #[must_use]
-    pub fn buffer<V: bytemuck::Pod>(self, vec: &GpuVec<V>) -> &'a Buffer<V> {
-        self.contents.bucket_geometry.buffer(vec).expect("a vector that its bucket's `upload` didn't name")
+    pub fn buffer<V: bytemuck::Pod>(self, vec: &GpuVec<V>) -> Option<&'a Buffer<V>> {
+        self.contents.bucket_geometry.buffer(vec)
     }
 
     /// The index buffer that `indexes`, the bucket's, uploaded into
-    /// ([`Upload::indexes`]). Panics for indexes the bucket didn't upload.
+    /// ([`Upload::indexes`]); `None` for indexes its `upload` didn't name.
     #[must_use]
-    pub fn indexes(self, indexes: &Indexes) -> &'a IndexBuffer {
-        self.contents.bucket_geometry.indexes(indexes).expect("indexes that their bucket's `upload` didn't name")
+    pub fn indexes(self, indexes: &Indexes) -> Option<&'a IndexBuffer> {
+        self.contents.bucket_geometry.indexes(indexes)
     }
 
-    /// The binders of the layer that the bucket was laid out with among
-    /// `binders`, the bucket's, with the buffer of their values. Panics
-    /// for binders that the bucket didn't upload ([`Upload::binders`]).
+    /// The binders of the layer among `binders`, the bucket's, with the
+    /// buffer their values uploaded into ([`Upload::binders`]); `None` for
+    /// binders that [`BuildCx::binders`] didn't make for the bucket's
+    /// layers.
     #[must_use]
-    pub fn binders<P: PaintBinders>(self, binders: &'a LayerBinders<P>) -> PaintVertices<'a, P> {
-        let of_layer = binders.of_layer(&self.laid_with.style.id);
-        PaintVertices::new(of_layer, self.contents.bucket_geometry.paint(of_layer.vertices()))
+    pub fn binders<P: PaintBinders>(self, binders: &'a LayerBinders<P>) -> Option<PaintVertices<'a, P>> {
+        let of_layer = binders.of_layer(&self.laid_with.style.id)?;
+        Some(PaintVertices::new(of_layer, self.contents.bucket_geometry.paint(of_layer.vertices())))
     }
 
     /// The tile's feature index, which queries search.
@@ -593,8 +634,7 @@ pub struct HitTest<'a, L: Layer> {
     pub camera: &'a View,
     /// The tile units a pixel spans.
     pub pixels_to_tile_units: f32,
-    /// What projects the tile's units onto the screen.
-    pub projector: &'a TileProjector<'a>,
+    pub(crate) projector: &'a TileProjector<'a>,
 }
 
 impl<L: Layer> HitTest<'_, L> {
@@ -626,6 +666,36 @@ impl<L: Layer> HitTest<'_, L> {
             self.camera.angle() as f32,
             self.pixels_to_tile_units,
         )
+    }
+
+    /// `point`, of the tile, on the screen, in the camera's pixels, where a
+    /// layer whose features face the camera compares them with the query's
+    /// geometry, brought there point by point too.
+    #[must_use]
+    pub fn to_screen(&self, point: GeometryCoordinate) -> GeometryCoordinate {
+        let at = self.projector.project(&geometry::Point::new(f64::from(point.x), f64::from(point.y)), 0.0).point;
+        let size = self.camera.size();
+        // Scaled in `f32`, halved in `f64`.
+        GeometryCoordinate::new(
+            (f64::from((at.x as f32 + 1.0) * size.width as f32) * 0.5) as i16,
+            (f64::from((at.y as f32 + 1.0) * size.height as f32) * 0.5) as i16,
+        )
+    }
+
+    /// How far `point`, of the tile, is from the camera, in pixels, as
+    /// [`View::camera_to_center_distance`] is the view's center's.
+    #[must_use]
+    pub fn distance(&self, point: GeometryCoordinate) -> f64 {
+        let at = geometry::Point::new(f64::from(point.x), f64::from(point.y));
+        self.projector.project(&at, 0.0).signed_distance_from_camera
+    }
+
+    /// Whether the globe's horizon hides `point`, of the tile, where a draw
+    /// moved by `translation` ([`translation`](Self::translation)) draws it.
+    #[must_use]
+    pub fn hidden(&self, point: GeometryCoordinate, [dx, dy]: [f32; 2]) -> bool {
+        let at = geometry::Point::new(f64::from(f32::from(point.x) + dx), f64::from(f32::from(point.y) + dy));
+        self.camera.is_globe() && self.projector.project_as_drawn(&at, 0.0).occluded
     }
 
     /// The translation in the tile's units that a draw moves the tile's

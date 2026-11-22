@@ -45,7 +45,7 @@ impl RenderSourceBase {
 
 /// An order a layer draws its source's tiles in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TileOrder {
+pub(crate) enum TileOrder {
     /// By tile id, without the tiles held for fade.
     ById,
     /// By opposite y position, so that the lower of two tiles' overlapping
