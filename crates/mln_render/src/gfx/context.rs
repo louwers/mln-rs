@@ -254,15 +254,23 @@ impl Resources {
     /// alike shares.
     pub fn tile_surface(&mut self, tile: crate::layer::FrameTile, frame: &Frame<'_>) -> TileSurface {
         let canonical = tile.id().canonical;
-        let key = frame
-            .camera
-            .is_globe()
-            .then(|| (canonical.z, canonical.y == 0, u64::from(canonical.y) == (1u64 << canonical.z) - 1));
+        self.surface(frame.camera.is_globe().then_some(&canonical))
+    }
+
+    /// The surface of a tile's extent on Mercator, which every tile shares
+    /// ([`tile_surface`](Self::tile_surface)).
+    pub(crate) fn square_surface(&mut self) -> TileSurface {
+        self.surface(None)
+    }
+
+    /// The surface of `globe_tile` on the globe, or of a tile on Mercator.
+    fn surface(&mut self, globe_tile: Option<&CanonicalTileID>) -> TileSurface {
+        let key = globe_tile.map(|tile| (tile.z, tile.y == 0, u64::from(tile.y) == (1u64 << tile.z) - 1));
         if let Some(surface) = self.surfaces.get(&key) {
             return surface.clone();
         }
-        let surface = if key.is_some() {
-            let grid = crate::globe::tile_grid(&canonical);
+        let surface = if let Some(tile) = globe_tile {
+            let grid = crate::globe::tile_grid(tile);
             TileSurface {
                 vertices: self.buffer(&grid.vertices),
                 triangles: self.index_buffer(grid.triangles.as_flattened()),

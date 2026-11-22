@@ -14,7 +14,6 @@ use crate::globe::grid;
 use crate::handles::TileSurface;
 use crate::mesh_desc::MeshDesc;
 use crate::paint_parameters::{DepthTest, PaintParameters, Stencil};
-use crate::render_static_data::RenderStaticData;
 use crate::shaders::programs;
 use crate::tile_matrix::TileProjection;
 
@@ -141,10 +140,7 @@ fn surface(context: &mut Resources, tile: &UnwrappedTileID, key: MeshKey, globe:
             triangles: context.index_buffer(grid.triangles.as_flattened()),
         }
     } else {
-        TileSurface {
-            vertices: context.buffer(&RenderStaticData::tile_vertices()),
-            triangles: context.index_buffer(&RenderStaticData::quad_triangle_indices()),
-        }
+        context.square_surface()
     }
 }
 
