@@ -21,6 +21,7 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::{BufferKind, PROJECTION_BUFFER, Program, Projection};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::identity::SimpleIdentity;
+use smallvec::SmallVec;
 
 use crate::draw_objects::Mesh;
 use crate::gfx::context::Resources;
@@ -340,9 +341,15 @@ impl Pushes {
     /// one of each draw.
     fn write(&mut self, gpu: &mut dyn Gpu, context: &mut Resources, buffers: &mut UniformBufferArray) {
         let Pushes { pushed, bytes, blocks, block_bytes, scratch, .. } = self;
+        let mut programs: SmallVec<[&'static Program; 4]> = SmallVec::new();
+        for pushed in pushed.iter() {
+            if !programs.iter().any(|program| std::ptr::eq(*program, pushed.program)) {
+                programs.push(pushed.program);
+            }
+        }
         let mut written = [false; FIRST_VERTEX_BUFFER_ID];
         for (block, range) in blocks.iter() {
-            for buffer in pushed.iter().flat_map(|pushed| pushed.program.buffers) {
+            for buffer in programs.iter().flat_map(|program| program.buffers) {
                 if let BufferKind::Uniform(of) = buffer.kind
                     && of.name == block.name
                     && !std::mem::replace(&mut written[buffer.id], true)
@@ -352,32 +359,31 @@ impl Pushes {
             }
         }
         debug_assert!(
-            pushed.iter().all(|pushed| pushed.program.buffers.iter().all(|buffer| match buffer.kind {
+            programs.iter().all(|program| program.buffers.iter().all(|buffer| match buffer.kind {
                 BufferKind::Uniform(of) => blocks.iter().any(|(block, _)| block.name == of.name),
                 _ => true,
             })),
             "a group whose draws read a uniform block that it has no value of"
         );
 
-        let mut ids = [false; FIRST_VERTEX_BUFFER_ID];
-        for pushed in pushed.iter() {
-            for (_, id, _) in blocks_of_each_draw(pushed.program) {
+        let mut strides = [None; FIRST_VERTEX_BUFFER_ID];
+        for program in &programs {
+            for (_, id, stride) in blocks_of_each_draw(program) {
                 debug_assert!(!written[id], "a group whose programs read buffer {id} as a uniform and per draw");
-                ids[id] = true;
+                debug_assert!(
+                    strides[id].is_none_or(|other| other == stride),
+                    "programs of one group whose elements at {id} differ in size"
+                );
+                strides[id].get_or_insert(stride);
             }
         }
-        for id in (0..FIRST_VERTEX_BUFFER_ID).filter(|&id| ids[id]) {
-            let stride = pushed
-                .iter()
-                .find_map(|pushed| blocks_of_each_draw(pushed.program).find(|&(_, at, _)| at == id))
-                .map_or(0, |(_, _, stride)| stride);
+        for (id, stride) in strides.iter().enumerate().filter_map(|(id, stride)| Some((id, (*stride)?))) {
             scratch.clear();
             for pushed in pushed.iter() {
                 let mut start = pushed.blocks;
                 let mut element = None;
-                for (block, at, of) in blocks_of_each_draw(pushed.program) {
+                for (block, at, _) in blocks_of_each_draw(pushed.program) {
                     if at == id {
-                        debug_assert_eq!(of, stride, "programs of one group whose elements at {id} differ in size");
                         element = Some(&bytes[start..start + block.size]);
                     }
                     start += block.size;
@@ -389,7 +395,7 @@ impl Pushes {
             buffers.write_storage(gpu, id, scratch, context.device());
         }
 
-        if pushed.iter().any(|pushed| pushed.program.projection == Projection::PerDraw) {
+        if programs.iter().any(|program| program.projection == Projection::PerDraw) {
             scratch.clear();
             for pushed in pushed.iter() {
                 let block = pushed.projection.filter(|_| pushed.program.projection == Projection::PerDraw);
@@ -618,5 +624,100 @@ impl DrawOrder {
             DrawOrder::BottomUp => parameters.current_layer = parameters.current_layer.saturating_sub(1),
             DrawOrder::TopDown => parameters.current_layer += 1,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+    use mln_tile_id::{CanonicalTileID, OverscaledTileID};
+
+    use super::*;
+    use crate::mesh_desc::MeshDesc;
+    use crate::shaders::programs;
+
+    /// A mesh of a triangle in `context`, made after those made before.
+    fn mesh(context: &mut Resources) -> Mesh {
+        let vertices = context.buffer::<[i16; 2]>(&[[0, 0], [1, 0], [0, 1]]);
+        let triangles = context.index_buffer(&[0, 1, 2]);
+        let mut desc = MeshDesc::new(&programs::GLOBE_DEPTH, &triangles);
+        desc.vertices(&vertices);
+        context.mesh(&desc)
+    }
+
+    /// The projection of the tile `id`, which draws can clip to.
+    fn at(id: OverscaledTileID) -> TileProjection {
+        TileProjection {
+            matrix: [0.0; 16],
+            fallback_matrix: [0.0; 16],
+            translation: [0.0; 2],
+            pixels_to_tile_units: 1.0,
+            globe_extrude_scale: 0.0,
+            block: ProjectionUBO::default(),
+            tile: Some(id),
+        }
+    }
+
+    #[test]
+    fn a_group_draws_by_order_then_by_the_age_of_meshes_then_as_pushed() {
+        crate::tests::with_context(|gpu, context| {
+            let (older, newer) = (mesh(context), mesh(context));
+            let mut group = Group::new();
+            group.begin(0.0, false, false);
+            group
+                .push(&newer, Draw::DEFAULT, ())
+                .push(&older, Draw { order: 1, ..Draw::DEFAULT }, ())
+                .push(&older, Draw::DEFAULT, ())
+                .push(&newer, Draw { order: -1, ..Draw::DEFAULT }, ());
+            group.finish(gpu, context, &(), []);
+            let drawn: Vec<MeshKey> = group.frame.draws.iter().map(|draw| draw.mesh).collect();
+            assert_eq!(drawn, [newer.key(), older.key(), newer.key(), older.key()]);
+        });
+    }
+
+    #[test]
+    fn an_opaque_draw_is_opaque_only_where_its_layer_may_draw_opaque() {
+        crate::tests::with_context(|gpu, context| {
+            let mesh = mesh(context);
+            let mut group = Group::new();
+            for layer_opaque in [false, true] {
+                group.begin(0.0, layer_opaque, false);
+                group.push(&mesh, Draw { opaque: true, ..Draw::DEFAULT }, ()).push(&mesh, Draw::DEFAULT, ());
+                group.finish(gpu, context, &(), []);
+                let opaque: Vec<bool> = group.frame.draws.iter().map(|draw| draw.opaque).collect();
+                assert_eq!(opaque, [layer_opaque, false]);
+            }
+        });
+    }
+
+    #[test]
+    fn a_group_masks_its_layers_tiles_only_where_a_draw_clips() {
+        crate::tests::with_context(|gpu, context| {
+            let mesh = mesh(context);
+            let tile = |x| OverscaledTileID::new(1, 0, CanonicalTileID::new(1, x, 0));
+            let id = tile(0);
+            let tiles = [id.to_unwrapped(), tile(1).to_unwrapped()];
+            let mut group = Group::new();
+            group.begin(0.0, false, false);
+            group.push_at(&mesh, &at(id), Draw::DEFAULT, ());
+            group.finish(gpu, context, &(), tiles);
+            assert_eq!(group.frame.stencil_tiles(), None);
+
+            group.begin(0.0, false, false);
+            group.push_at(&mesh, &at(id), Draw { clip: true, ..Draw::DEFAULT }, ());
+            group.finish(gpu, context, &(), tiles);
+            assert_eq!(group.frame.stencil_tiles(), Some(&tiles[..]));
+            assert_eq!(group.frame.draws[0].tile, Some(id));
+        });
+    }
+
+    #[test]
+    fn a_groups_last_value_of_a_block_is_the_one_it_writes() {
+        let mut group = Group::new();
+        let view = |pixel_ratio| mln_gfx::shaders::layer_ubo::ViewUBO { pixel_ratio, ..Default::default() };
+        group.block(&view(1.0)).block(&view(2.0));
+        let Pushes { blocks, block_bytes, .. } = &group.pushes;
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(bytemuck::from_bytes::<mln_gfx::shaders::layer_ubo::ViewUBO>(&block_bytes[..]).pixel_ratio, 2.0);
     }
 }

@@ -1208,3 +1208,58 @@ macro_rules! paint_property_binders {
         }
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use mln_gfx::shaders::block::UniformBlock;
+    use mln_gfx::shaders::program::{Buffer as ProgramBuffer, Projection, Property, Sources, Stages};
+
+    use super::*;
+
+    mln_gfx::uniform_block! {
+        struct Drawn { pub extrude: [f32; 2], pub color_t: f32, #[padding] pub pad: f32 }
+    }
+
+    mln_gfx::uniform_block! {
+        struct Props { pub color: [f32; 4], pub radius: f32, #[padding] pub pad1: f32, #[padding] pub pad2: [f32; 2] }
+    }
+
+    static PROGRAM: Program = Program {
+        name: "test",
+        buffers: &[
+            ProgramBuffer::storage::<Drawn>("draws", Stages::Vertex),
+            ProgramBuffer::uniform::<Props>("props", 0),
+        ],
+        attributes: &[],
+        instance_attributes: &[],
+        textures: &[],
+        properties: &[Property::color("color", 1)],
+        projection: Projection::None,
+        sources: Sources::NONE,
+    };
+
+    #[test]
+    fn a_mixed_propertys_factor_goes_at_its_member_among_the_blocks_of_each_draw() {
+        assert_eq!(mix_offset(&PROGRAM, "color"), Some(8));
+        assert_eq!(mix_offset(&PROGRAM, "radius"), None);
+        let paint = MeshPaint { mixes: Rc::from([(8, Mix::None)]), uniforms: |_, _| {} };
+        let mut bytes = [0xff; 16];
+        paint.write_mixes(3.5, &mut bytes);
+        assert_eq!(bytes[8..12], 0.0f32.to_ne_bytes());
+        assert_eq!(bytes[..8], [0xff; 8]);
+    }
+
+    #[test]
+    fn a_propertys_uniform_value_goes_at_its_member_of_the_layers_blocks() {
+        fn uniforms(_: &dyn Any, write: &mut dyn FnMut(&[&str], &[u8])) {
+            write(&["color"], bytemuck::bytes_of(&[1.0f32, 0.5, 0.25, 1.0]));
+            // A property the program doesn't read.
+            write(&["radius"], bytemuck::bytes_of(&4.0f32));
+        }
+        let paint = MeshPaint { mixes: Rc::from([]), uniforms };
+        let mut props = Props::default();
+        paint.write_uniforms(&(), &PROGRAM, Props::BLOCK, bytemuck::bytes_of_mut(&mut props));
+        assert_eq!(props.color, [1.0, 0.5, 0.25, 1.0]);
+        assert_eq!(props.radius, 0.0);
+    }
+}

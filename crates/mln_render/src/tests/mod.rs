@@ -336,7 +336,7 @@ pub(crate) fn create_render_source(
 
 /// Runs `f` with the `Gpu` of a headless WebGPU backend, which compiles the
 /// engine's programs, and a context over it, which it then tears down.
-fn with_context(f: impl FnOnce(&mut dyn mln_gfx::gpu::Gpu, &mut crate::gfx::context::Resources)) {
+pub(crate) fn with_context(f: impl FnOnce(&mut dyn mln_gfx::gpu::Gpu, &mut crate::gfx::context::Resources)) {
     use mln_gfx::RendererBackend as _;
     use mln_gfx::gpu::Gpu as _;
     let device = mln_webgpu::Device::new(None).expect("device");

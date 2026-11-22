@@ -14,7 +14,7 @@ use crate::shaders::bindings::{
 };
 use crate::shaders::block::{Block, UniformBlock};
 use crate::shaders::layer_ubo::{ProjectionUBO, ViewUBO};
-use crate::shaders::source::{Stage, glsl, glsl_es, msl, wgsl};
+use crate::shaders::source::{self, Stage, glsl, glsl_es, msl, wgsl};
 
 /// A program: the buffers, vertex attributes and textures its shaders bind,
 /// the paint properties a variant may read from a uniform, and its sources.
@@ -616,6 +616,42 @@ impl Program {
         if let Some(name) = repeated(names) {
             return invalid(format!("two block members or textures are {name} in GLSL ES"));
         }
+        self.check_projection()
+    }
+
+    /// Checks that the projection block that the program's vertex stage
+    /// and prelude read in WGSL, MSL and GLSL is the one its
+    /// [`projection`](Program::projection) names: a draw of a program that
+    /// reads another gets a block of zeros. GLSL ES isn't checked: its
+    /// backend's prelude reads the projection's members itself.
+    fn check_projection(&self) -> Result<(), GpuError> {
+        let Sources { wgsl, msl, glsl, .. } = self.sources;
+        let stages = [
+            ("WGSL", wgsl.map(|source| [source.prelude, source.vertex])),
+            ("MSL", msl.map(|source| [source.prelude, source.source])),
+            ("GLSL", glsl.map(|source| [source.prelude, source.vertex])),
+        ];
+        for (language, texts) in stages {
+            let Some(texts) = texts else { continue };
+            let reads = |name: &str| texts.iter().any(|text| source::identifiers(text).any(|word| word == name));
+            let read = match (reads(PROJECTION_BUFFER.name), reads(DRAW_PROJECTION_BUFFER.name)) {
+                (false, false) => Projection::None,
+                (true, false) => Projection::PerDraw,
+                (false, true) => Projection::Own,
+                (true, true) => {
+                    return Err(GpuError::Invalid(format!(
+                        "program {}: its {language} reads both projections",
+                        self.name
+                    )));
+                }
+            };
+            if read != self.projection {
+                return Err(GpuError::Invalid(format!(
+                    "program {}: its {language} reads the projection {read:?}, but it declares {:?}",
+                    self.name, self.projection
+                )));
+            }
+        }
         Ok(())
     }
 
@@ -748,6 +784,21 @@ mod tests {
             textures: const { &[Texture::new("image")] },
             ..EMPTY
         });
+    }
+
+    #[test]
+    #[cfg(feature = "wgsl")]
+    fn a_program_declares_the_projection_its_vertex_stage_reads() {
+        static READS: wgsl::Wgsl = wgsl::Wgsl {
+            vertex: "let clip = projectTile(pos, projectionVector[drawIndex]);",
+            fragment: "",
+            prelude: "",
+        };
+        let reading = Program { sources: Sources::NONE.wgsl(&READS), ..EMPTY };
+        assert!(reading.check().is_err(), "a program that reads the projection and declares none");
+        assert!(Program { projection: Projection::PerDraw, ..reading }.check().is_ok());
+        assert!(Program { projection: Projection::Own, ..reading }.check().is_err());
+        assert!(Program { projection: Projection::PerDraw, ..EMPTY }.check().is_ok(), "no source to check");
     }
 
     #[test]

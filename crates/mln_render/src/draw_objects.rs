@@ -608,3 +608,37 @@ fn vertex_slots(
     }
     slots
 }
+
+#[cfg(test)]
+mod tests {
+    use mln_gfx::projection_variant::ProjectionVariant;
+
+    use crate::gfx::context::Resources;
+    use crate::mesh_desc::MeshDesc;
+    use crate::shaders::programs;
+
+    #[test]
+    fn a_mesh_draws_in_the_projection_of_the_frame_unless_it_names_one() {
+        let mut context = Resources::detached();
+        let vertices = context.buffer::<[i16; 2]>(&[[0, 0], [1, 0], [0, 1]]);
+        let triangles = context.index_buffer(&[0, 1, 2]);
+        let mut desc = MeshDesc::new(&programs::TILE_DEBUG, &triangles);
+        desc.vertices(&vertices);
+        let follows: crate::draw::Mesh = context.mesh(&desc);
+        desc.projection(ProjectionVariant::Mercator);
+        let pinned: crate::draw::Mesh = context.mesh(&desc);
+
+        let mut shaders = |mesh: &crate::draw::Mesh| {
+            let mut objects = context.take_mesh(mesh.key()).expect("a mesh");
+            let keys = [ProjectionVariant::Mercator, ProjectionVariant::Globe]
+                .map(|variant| objects.shader(&mut context, variant).clone());
+            context.restore_mesh(mesh.key(), objects);
+            keys
+        };
+        let [mercator, globe] = shaders(&follows);
+        assert_ne!(mercator, globe, "a mesh made on Mercator draws the globe's variant on the globe");
+        let [mercator_pinned, globe_pinned] = shaders(&pinned);
+        assert_eq!(mercator_pinned, globe_pinned);
+        assert_eq!(mercator_pinned, mercator);
+    }
+}
