@@ -1,11 +1,11 @@
 use mln_gfx::shaders::block::Bool32;
 
 mln_gfx::uniform_block! {
-    /// The circle shader's per-drawable uniform block.
+    /// A circle draw's block: how far a pixel reaches, in the tile or in
+    /// clip space, the factor that mixes each property's zoom stops, which
+    /// the engine writes, and the radians a pixel spans on the globe.
     pub struct CircleDrawableUBO {
-        pub matrix: [f32; 4 * 4],
         pub extrude_scale: [f32; 2],
-        // Interpolations
         #[glsl_es(lowp)]
         pub color_t: f32,
         #[glsl_es(lowp)]
@@ -29,8 +29,8 @@ mln_gfx::uniform_block! {
 }
 
 mln_gfx::uniform_block! {
-    /// Evaluated properties that do not depend on the tile. The
-    /// colors are the premultiplied `mln::Color` as r, g, b, a floats.
+    /// The layer's block: each property's value where it is the same for
+    /// every feature, which the engine writes, and the alignments.
     pub struct CircleEvaluatedPropsUBO {
         pub color: [f32; 4],
         pub stroke_color: [f32; 4],

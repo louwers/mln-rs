@@ -8,15 +8,18 @@
 // passed in, in the vertices' in-memory layout (native-endian floats and
 // u16s), so the buffer is the GPU vertex data as it uploads.
 
+use std::any::Any;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::block::MemberType;
+use mln_gfx::shaders::program::{BufferKind, Program, PropertyType};
 use mln_style::evaluated::{Evaluated, Faded};
 use mln_style::expression::range::Range;
 use mln_style::expression::{Dependency, EvaluationContext, Image, Value, ValueConverter};
 use mln_style::layer_type::{PaintSet, StyleLayerType};
-use mln_style::property_expression::PropertyExpression;
+use mln_style::property_expression::{PropertyExpression, PropertyExpressionBase};
 use mln_style_types::image::ImagePositions;
 use mln_tile::TileLayer;
 use mln_tile_id::CanonicalTileID;
@@ -459,23 +462,22 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         }
     }
 
-    /// The factor that interpolates between the vertex's two zoom stops; 0
-    /// unless the binder is a composite function. A program reads it as a
-    /// uniform.
-    #[must_use]
-    pub fn interpolation_factor(&self, current_zoom: f32) -> f32 {
+    /// How the factor that mixes a vertex's values at its two zoom stops
+    /// follows the camera's zoom.
+    pub(crate) fn mix(&self) -> Mix {
         match &self.kind {
-            PaintPropertyBinderKind::Constant { .. } | PaintPropertyBinderKind::SourceFunction { .. } => 0.0,
+            PaintPropertyBinderKind::Constant { .. } | PaintPropertyBinderKind::SourceFunction { .. } => Mix::None,
             PaintPropertyBinderKind::CompositeFunction { expression, zoom_range, .. } => {
-                let possibly_rounded_zoom =
-                    if expression.get_use_integer_zoom() { current_zoom.floor() } else { current_zoom };
-
-                mln_math::fmaxf(
-                    0.0,
-                    mln_math::fminf(1.0, expression.interpolation_factor(*zoom_range, possibly_rounded_zoom)),
-                )
+                Mix::Curve { expression: PropertyExpressionBase::clone(expression), zoom_range: *zoom_range }
             }
         }
+    }
+
+    /// The factor that mixes a vertex's values at its two zoom stops at
+    /// `current_zoom`; 0 unless the binder is a composite function.
+    #[must_use]
+    pub fn interpolation_factor(&self, current_zoom: f32) -> f32 {
+        self.mix().factor(current_zoom)
     }
 
     /// Where the property's attribute reads its values in `shared`, the
@@ -495,6 +497,30 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
             // Without an interleaved buffer there are no vertices to read.
             debug_assert_eq!(self.vertex_count(buffer), 0);
             None
+        }
+    }
+}
+
+/// How the factor that mixes a property's values at the two zoom stops
+/// around a tile's zoom follows the camera's zoom.
+#[derive(Clone, Debug)]
+pub enum Mix {
+    /// The values don't depend on the zoom: the factor is 0.
+    None,
+    /// The values are of `expression`'s zoom curve at the ends of
+    /// `zoom_range`.
+    Curve { expression: PropertyExpressionBase, zoom_range: Range<f32> },
+}
+
+impl Mix {
+    /// The factor at the camera's `zoom`, from 0 to 1.
+    pub(crate) fn factor(&self, zoom: f32) -> f32 {
+        match self {
+            Mix::None => 0.0,
+            Mix::Curve { expression, zoom_range } => {
+                let zoom = if expression.get_use_integer_zoom() { zoom.floor() } else { zoom };
+                mln_math::fmaxf(0.0, mln_math::fminf(1.0, expression.interpolation_factor(*zoom_range, zoom)))
+            }
         }
     }
 }
@@ -686,6 +712,12 @@ pub trait PaintPropertyBinderBase {
     /// How many vertices of `buffer` the binder wrote values into: none for
     /// a constant property.
     fn binder_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize;
+    /// How the factor that mixes the values at two zooms follows the
+    /// camera's zoom, for a property whose values mix; `None` for one whose
+    /// don't.
+    fn mix(&self) -> Option<Mix> {
+        None
+    }
     /// The attribute that reads the binder's values in `shared`, the
     /// vertices of `buffer` in the context's store; `None` where it wrote
     /// none.
@@ -729,6 +761,9 @@ impl<T: BinderValue> PaintPropertyBinderBase for PaintPropertyBinder<T> {
     fn binder_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize {
         self.vertex_count(buffer)
     }
+    fn mix(&self) -> Option<Mix> {
+        Some(PaintPropertyBinder::mix(self))
+    }
     fn apply(&self, buffer: &InterleavedVertexBuffer, shared: &SharedVertices) -> Option<SharedAttribute> {
         self.apply_paint_property(buffer, shared)
     }
@@ -769,18 +804,21 @@ fn shared_paint(shared: &SharedVertices, offset: usize, stride: u32, data_type: 
 /// The binders of a layer's data-driven paint properties, which a struct
 /// that [`paint_property_binders!`](crate::paint_property_binders!) declares
 /// implements: they write each feature's values into the vertices that a
-/// mesh's attributes read ([`MeshDesc::paint`](crate::draw::MeshDesc::paint)),
-/// and the factors that mix a value's zoom stops, which a draw's block
-/// holds.
-///
-/// The methods are the macro's: a layer reaches them through
+/// mesh's attributes read ([`MeshDesc::paint`](crate::draw::MeshDesc::paint)).
+/// A layer reaches them through
 /// [`BuildCx::binders`](crate::layer::BuildCx::binders),
-/// [`BuildCx::populate`](crate::layer::BuildCx::populate) and
-/// [`Upload::binders`](crate::layer::Upload::binders).
-pub trait PaintBinders: Clone + Send + Wire + 'static {
+/// [`BuildCx::populate`](crate::layer::BuildCx::populate),
+/// [`Upload::binders`](crate::layer::Upload::binders) and
+/// [`LayerBucket::binders`](crate::layer::LayerBucket::binders); the macro
+/// writes the rest.
+pub trait PaintBinders: BinderSet {}
+
+/// What [`paint_property_binders!`](crate::paint_property_binders!) writes
+/// of a struct of binders, which the engine calls.
+pub trait BinderSet: Clone + Send + Wire + 'static {
     /// The evaluated paint values whose data-driven properties the binders
     /// write.
-    type Paint;
+    type Paint: 'static;
 
     /// The binders of `paint` in a tile at `zoom`.
     fn new(paint: &Self::Paint, zoom: f32) -> Self;
@@ -806,6 +844,104 @@ pub trait PaintBinders: Clone + Send + Wire + 'static {
     /// property of its name, or reads it from its uniform where `paint` is
     /// the same for every feature.
     fn bind(&self, paint: &Self::Paint, bind: &mut Bind<'_>);
+
+    /// Writes the value of each property of `paint` that a program reads
+    /// from its uniform where it is the same for every feature, as `write`
+    /// takes the program's properties' names and the value's bytes.
+    fn uniforms(paint: &Self::Paint, write: &mut dyn FnMut(&[&str], &[u8]));
+}
+
+/// A value of a data-driven paint property as a program reads it from its
+/// uniform, which [`paint_property_binders!`](crate::paint_property_binders!)
+/// writes for each property.
+pub trait UniformValue {
+    /// Writes `value`'s bytes as the uniform holds them, for a value that
+    /// has a uniform.
+    fn write(value: &Evaluated<Self>, write: impl FnOnce(&[u8]))
+    where
+        Self: Sized;
+}
+
+impl UniformValue for f32 {
+    fn write(value: &Evaluated<f32>, write: impl FnOnce(&[u8])) {
+        write(bytemuck::bytes_of(value.uniform()));
+    }
+}
+
+impl UniformValue for Color {
+    fn write(value: &Evaluated<Color>, write: impl FnOnce(&[u8])) {
+        write(bytemuck::bytes_of(&value.uniform().to_float_array()));
+    }
+}
+
+impl UniformValue for Image {
+    /// A pattern has no uniform of its value: its program reads where its
+    /// images are in an atlas.
+    fn write(_value: &Evaluated<Image>, _write: impl FnOnce(&[u8])) {}
+}
+
+/// What the engine writes of a mesh's paint values into its draws' blocks:
+/// the factor that mixes each mixed property's values at two zooms, at its
+/// member `<name>_t` among the bytes of the blocks of each draw, and each
+/// property's value where it is the same for every feature, at its member
+/// `<name>` of the layer's uniform blocks.
+#[derive(Clone)]
+pub(crate) struct MeshPaint {
+    /// The offset of each mixed property's factor among the bytes of the
+    /// blocks of each draw, and how it follows the zoom.
+    pub(crate) mixes: Rc<[(usize, Mix)]>,
+    /// Writes the properties' values that their uniforms hold, of the
+    /// layer's evaluated paint values, for each program property's name.
+    pub(crate) uniforms: fn(&dyn Any, &mut dyn FnMut(&[&str], &[u8])),
+}
+
+/// [`BinderSet::uniforms`] of `paint`, `P::Paint`.
+fn uniforms_of<P: BinderSet>(paint: &dyn Any, write: &mut dyn FnMut(&[&str], &[u8])) {
+    if let Some(paint) = paint.downcast_ref::<P::Paint>() {
+        P::uniforms(paint, write);
+    } else {
+        debug_assert!(false, "a mesh's paint values of another type");
+    }
+}
+
+impl MeshPaint {
+    /// Writes the mix factors at the camera's `zoom` into `blocks`, the
+    /// bytes of a draw's blocks.
+    pub(crate) fn write_mixes(&self, zoom: f32, blocks: &mut [u8]) {
+        for (offset, mix) in self.mixes.iter() {
+            blocks[*offset..*offset + 4].copy_from_slice(&mix.factor(zoom).to_ne_bytes());
+        }
+    }
+
+    /// Writes the uniform values of `paint`, the layer's evaluated paint
+    /// values, into `bytes`, the bytes of the uniform block `block` of
+    /// `program`, at the members of the properties' names.
+    pub(crate) fn write_uniforms(
+        &self,
+        paint: &dyn Any,
+        program: &Program,
+        block: &mln_gfx::shaders::block::Block,
+        bytes: &mut [u8],
+    ) {
+        (self.uniforms)(paint, &mut |names, value| {
+            for name in names {
+                if !program.properties.iter().any(|property| property.name == *name) {
+                    continue;
+                }
+                let fits = |ty: MemberType| match ty {
+                    MemberType::Float => value.len() == 4,
+                    MemberType::Vec4 => value.len() == 16,
+                    _ => false,
+                };
+                if let Some(member) = block.members.iter().find(|member| member.name == *name) {
+                    debug_assert!(fits(member.ty), "the uniform member {name} of a type its property's value isn't");
+                    if fits(member.ty) {
+                        bytes[member.offset..member.offset + value.len()].copy_from_slice(value);
+                    }
+                }
+            }
+        });
+    }
 }
 
 /// A set of binders `P` for each layer of a layout's group, which their
@@ -833,7 +969,7 @@ impl<P: PaintBinders> LayerBinders<P> {
     }
 
     /// Writes `feature`'s values into each layer's binders, as
-    /// [`PaintBinders::populate`] does.
+    /// [`BinderSet::populate`] does.
     pub(crate) fn populate(
         &mut self,
         feature: &dyn GeometryTileFeature,
@@ -860,7 +996,7 @@ impl<P: PaintBinders> LayerBinders<P> {
 /// A layer's binders in a tile's bucket, with the buffer that their values
 /// uploaded into, which a mesh binds
 /// ([`MeshDesc::paint`](crate::draw::MeshDesc::paint)). It reads as the
-/// binders themselves, whose zoom-stop factors a draw's block holds.
+/// binders themselves.
 pub struct PaintVertices<'a, P> {
     binders: &'a P,
     buffer: Option<&'a Buffer<u8>>,
@@ -880,16 +1016,19 @@ impl<'a, P: PaintBinders> PaintVertices<'a, P> {
     }
 
     /// Binds the values to `program`'s properties in `attributes`, or records
-    /// those that `paint` has the same for every feature in `uniforms`.
+    /// those that `paint` has the same for every feature in `uniforms`, and
+    /// returns what the engine writes of them into the draws' blocks.
     pub(crate) fn bind(
         self,
         program: &'static Program,
         paint: &P::Paint,
         attributes: &mut Vec<(usize, SharedAttribute)>,
         uniforms: &mut Uniforms,
-    ) {
+    ) -> MeshPaint {
         let shared = self.buffer.map(|buffer| &buffer.entry);
-        self.binders.bind(paint, &mut Bind { program, shared, attributes, uniforms });
+        let mut mixes = Vec::new();
+        self.binders.bind(paint, &mut Bind { program, shared, attributes, uniforms, mixes: &mut mixes });
+        MeshPaint { mixes: mixes.into(), uniforms: uniforms_of::<P> }
     }
 }
 
@@ -901,19 +1040,22 @@ impl<P> std::ops::Deref for PaintVertices<'_, P> {
     }
 }
 
-/// What [`PaintBinders::bind`] binds the binders' values with.
+/// What [`BinderSet::bind`] binds the binders' values with.
 pub struct Bind<'a> {
     program: &'static Program,
     shared: Option<&'a SharedVertices>,
     attributes: &'a mut Vec<(usize, SharedAttribute)>,
     uniforms: &'a mut Uniforms,
+    mixes: &'a mut Vec<(usize, Mix)>,
 }
 
 impl Bind<'_> {
     /// Binds `binder`'s values among `buffer`'s to the attributes of the
     /// program's properties `properties`, or records them as read from
-    /// their uniforms where `constant` or the binder wrote none. A property
-    /// the program doesn't read is skipped.
+    /// their uniforms where `constant` or the binder wrote none, and
+    /// records where each mixed property's factor goes among the bytes of
+    /// the blocks of each draw. A property the program doesn't read is
+    /// skipped.
     pub fn property(
         &mut self,
         binder: &dyn PaintPropertyBinderBase,
@@ -934,8 +1076,32 @@ impl Bind<'_> {
                 Some(values) => self.attributes.push((property.attribute, values.clone())),
                 None => self.uniforms.insert(property.attribute),
             }
+            if let Some(mix) = binder.mix().filter(|_| matches!(property.ty, PropertyType::Float | PropertyType::Color))
+                && let Some(offset) = mix_offset(self.program, name)
+            {
+                self.mixes.push((offset, mix));
+            }
         }
     }
+}
+
+/// The offset of the member `<name>_t` among the bytes of the blocks of each
+/// draw of `program`, its storage buffers' blocks in order, if one of them
+/// has it.
+fn mix_offset(program: &Program, name: &str) -> Option<usize> {
+    let mut start = 0;
+    for buffer in program.buffers {
+        let BufferKind::Storage { block, .. } = buffer.kind else { continue };
+        if let Some(member) = block
+            .members
+            .iter()
+            .find(|member| member.ty == MemberType::Float && member.name.strip_suffix("_t") == Some(name))
+        {
+            return Some(start + member.offset);
+        }
+        start += block.size;
+    }
+    None
 }
 
 /// Declares the binders of a layer type's data-driven paint properties: a
@@ -954,11 +1120,10 @@ impl Bind<'_> {
 ///
 /// Each field is a property of the evaluated paint set (an
 /// [`mln_style::properties!`] set's `PossiblyEvaluated`), its binder, a
-/// [`PaintPropertyBinder`](crate::layer::PaintPropertyBinder) or a
-/// [`CrossFadedPaintPropertyBinder`](crate::layer::CrossFadedPaintPropertyBinder),
-/// and the names of the program's properties
-/// ([`Property`](mln_gfx::shaders::program::Property)) that read its values:
-/// one, or a pattern's two. The fields are as visible as the struct.
+/// [`PaintPropertyBinder`](crate::layer::PaintPropertyBinder), and the
+/// names of the program's properties
+/// ([`Property`](mln_gfx::shaders::program::Property)) that read its values.
+/// The fields are as visible as the struct.
 #[macro_export]
 macro_rules! paint_property_binders {
     (
@@ -975,7 +1140,9 @@ macro_rules! paint_property_binders {
             $($vis $field: $binder,)+
         }
 
-        impl $crate::layer::PaintBinders for $name {
+        impl $crate::layer::PaintBinders for $name {}
+
+        impl $crate::__private::BinderSet for $name {
             type Paint = $props;
 
             fn new(paint: &$props, zoom: f32) -> Self {
@@ -1033,6 +1200,10 @@ macro_rules! paint_property_binders {
 
             fn bind(&self, paint: &$props, bind: &mut $crate::__private::Bind<'_>) {
                 $(bind.property(&self.$field, &self.vertices, &[$($property),+], paint.$field.is_constant());)+
+            }
+
+            fn uniforms(paint: &$props, write: &mut dyn FnMut(&[&str], &[u8])) {
+                $($crate::__private::UniformValue::write(&paint.$field, |value| write(&[$($property),+], value));)+
             }
         }
     };

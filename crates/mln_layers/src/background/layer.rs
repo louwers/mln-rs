@@ -1,17 +1,11 @@
-use mln_gfx::shaders::program::Program;
-use mln_render::draw::{Buffer, Depth, Draw, Draws, IndexBuffer, Mesh, MeshDesc, Resources};
-use mln_render::globe::tile_grid;
-use mln_render::layer::{
-    EvaluateCx, Evaluation, FrameTile, Layer, NewCx, PrepareCx, TileCx, TileTransform, UpdateCx, ViewCover,
-};
-use mln_style_types::TranslateAnchorType;
+use mln_render::draw::{Depth, Draw, Draws, Mesh, MeshDesc};
+use mln_render::layer::{EvaluateCx, Evaluation, FrameTile, Layer, NewCx, PrepareCx, TileCx, UpdateCx, ViewCover};
 use mln_style_types::image::ImagePosition;
-use mln_util::constants::EXTENT;
 
 use super::Background;
 use super::pattern_atlas::PatternAtlas;
 use super::programs::{BACKGROUND, BACKGROUND_PATTERN};
-use super::ubo::{BackgroundDrawableUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO, BackgroundPropsUBO};
+use super::ubo::{BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO, BackgroundPropsUBO};
 
 /// A background layer: a color or a pattern over each tile that covers the
 /// view.
@@ -21,33 +15,12 @@ pub struct BackgroundLayer {
     /// Where the frame's patterns are in the atlas, from and to, when it
     /// draws a pattern.
     pattern: Option<(ImagePosition, ImagePosition)>,
-    /// A tile's four corners and its two triangles, which every tile draws
-    /// with on Mercator.
-    quad: Geometry,
 }
 
 /// A tile's meshes: of its color and of its pattern.
 pub struct BackgroundTile {
-    color: Mesh<BackgroundDrawableUBO>,
+    color: Mesh,
     pattern: Mesh<BackgroundPatternDrawableUBO>,
-}
-
-/// The vertices and triangles that a tile draws with.
-struct Geometry {
-    vertices: Buffer<[i16; 2]>,
-    triangles: IndexBuffer,
-}
-
-impl Geometry {
-    fn new(res: &mut Resources, vertices: &[[i16; 2]], triangles: &[u16]) -> Self {
-        Geometry { vertices: res.buffer(vertices), triangles: res.index_buffer(triangles) }
-    }
-
-    fn mesh<'a>(&'a self, program: &'static Program) -> MeshDesc<'a> {
-        let mut mesh = MeshDesc::new(program);
-        mesh.vertices(&self.vertices).indexes(&self.triangles);
-        mesh
-    }
 }
 
 impl Layer for BackgroundLayer {
@@ -56,12 +29,7 @@ impl Layer for BackgroundLayer {
     type Tile = BackgroundTile;
 
     fn new(cx: &mut NewCx<'_, Self>) -> Self {
-        let e = EXTENT as i16;
-        BackgroundLayer {
-            patterns: PatternAtlas::new(cx.res),
-            pattern: None,
-            quad: Geometry::new(cx.res, &[[0, 0], [e, 0], [0, e], [e, e]], &[0, 1, 2, 1, 2, 3]),
-        }
+        BackgroundLayer { patterns: PatternAtlas::new(cx.res), pattern: None }
     }
 
     /// Draws nothing where the layer is transparent, and opaque where it
@@ -98,31 +66,25 @@ impl Layer for BackgroundLayer {
     }
 
     fn tile(&mut self, cx: &mut TileCx<'_, Self>, tile: FrameTile, (): ()) -> Option<BackgroundTile> {
-        // A background isn't depth tested, so on the globe its grid needs no
-        // border.
-        let grid = cx.frame.camera.is_globe().then(|| {
-            let grid = tile_grid(&tile.id().canonical);
-            Geometry::new(cx.res, &grid.vertices, grid.triangles.as_flattened())
-        });
-        let geometry = grid.as_ref().unwrap_or(&self.quad);
-        let color = cx.res.mesh(&geometry.mesh(&BACKGROUND));
-        let pattern = cx.res.mesh(geometry.mesh(&BACKGROUND_PATTERN).texture(&self.patterns.texture));
-        Some(BackgroundTile { color, pattern })
+        let surface = cx.res.tile_surface(tile, cx.frame);
+        let mut color = MeshDesc::new(&BACKGROUND, &surface.triangles);
+        color.vertices(&surface.vertices);
+        let mut pattern = MeshDesc::new(&BACKGROUND_PATTERN, &surface.triangles);
+        pattern.vertices(&surface.vertices).texture(&self.patterns.texture, PatternAtlas::SAMPLER);
+        Some(BackgroundTile { color: cx.res.mesh(&color), pattern: cx.res.mesh(&pattern) })
     }
 
     fn prepare(&self, cx: &PrepareCx<'_, Self>, out: &mut Draws) {
         let paint = &cx.layer.evaluated.paint;
         let opacity = *paint.background_opacity.uniform();
         let has_pattern = !paint.background_pattern.faded().to.empty();
-        let how = TileTransform { anchor: TranslateAnchorType::Viewport, ..TileTransform::default() };
         let main = out.main();
         if !has_pattern {
             let color = paint.background_color.uniform().to_float_array();
             main.block(&BackgroundPropsUBO { color, opacity, ..BackgroundPropsUBO::default() });
             let draw = Draw { opaque: true, depth: Depth::Layer { sub_layer: 0, write: true }, ..Draw::DEFAULT };
             for (tile, (), meshes) in cx.tiles() {
-                let at = tile.project(cx.frame, &how);
-                main.push_at(&meshes.color, &at, draw, BackgroundDrawableUBO { matrix: at.fallback_matrix });
+                main.push_at(&meshes.color, &tile.project(cx.frame, &Default::default()), draw, ());
             }
             return;
         }
@@ -145,16 +107,14 @@ impl Layer for BackgroundLayer {
         });
         let draw = Draw { depth: Depth::Layer { sub_layer: 0, write: true }, ..Draw::DEFAULT };
         for (tile, (), meshes) in cx.tiles() {
-            let at = tile.project(cx.frame, &how);
             let origin = tile.pattern_origin(cx.frame);
             let block = BackgroundPatternDrawableUBO {
-                matrix: at.fallback_matrix,
                 pixel_coord_upper: origin.upper,
                 pixel_coord_lower: origin.lower,
                 tile_units_to_pixels: origin.tile_units_to_pixels,
                 ..BackgroundPatternDrawableUBO::default()
             };
-            main.push_at(&meshes.pattern, &at, draw, block);
+            main.push_at(&meshes.pattern, &tile.project(cx.frame, &Default::default()), draw, block);
         }
     }
 }

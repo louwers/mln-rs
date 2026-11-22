@@ -36,6 +36,9 @@ use crate::gfx::texture2d::{Texture2D, TextureMut};
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::vertex_attribute::Uniforms;
 use crate::gfx::vertices::{SharedVertices, VertexStore, Vertices};
+use crate::paint_parameters::Frame;
+use crate::paint_property_binder::MeshPaint;
+use crate::render_static_data::RenderStaticData;
 
 /// The renderer's GPU resources: the buffers, textures and meshes that
 /// layers make and keep handles of, with what the device allows
@@ -44,8 +47,6 @@ use crate::gfx::vertices::{SharedVertices, VertexStore, Vertices};
 /// before its passes.
 pub struct Resources {
     device: Device,
-    /// The projection that meshes made now draw in: the frame's.
-    projection_variant: ProjectionVariant,
     caps: Caps,
     global_uniform_buffers: UniformBufferArray,
     /// The sampler of each state a texture is sampled with.
@@ -74,6 +75,9 @@ pub struct Resources {
     meshes: Store<MeshKey, Box<DrawObjects>>,
     /// The `seq` of the next mesh.
     next_mesh_seq: u64,
+    /// The tiles' surfaces: the extent's quad, and the globe's grid of each
+    /// zoom, by whether it touches the north and the south pole.
+    surfaces: HashMap<Option<(u8, bool, bool)>, crate::handles::TileSurface>,
     /// What a [`destroy_released`](Self::destroy_released) takes from the
     /// queue, and what it destroys, kept for their storage.
     releases: Vec<Release>,
@@ -90,7 +94,6 @@ impl Resources {
     pub(crate) fn new(caps: Caps, pixel_ratio: f32) -> Resources {
         Resources {
             device: Device::default(),
-            projection_variant: ProjectionVariant::Mercator,
             caps,
             global_uniform_buffers: UniformBufferArray::default(),
             samplers: HashMap::default(),
@@ -103,6 +106,7 @@ impl Resources {
             vertices: VertexStore::default(),
             meshes: Store::default(),
             next_mesh_seq: 0,
+            surfaces: HashMap::default(),
             releases: Vec::new(),
             doomed: Vec::new(),
             torn_down: false,
@@ -152,7 +156,7 @@ impl Resources {
         crate::draw::IndexBuffer { buffer: self.buffer(indexes), segments }
     }
 
-    /// A texture, which `setup` gives its format, sampler and first image.
+    /// A texture, which `setup` gives its format and first image.
     pub fn texture(&mut self, setup: impl FnOnce(&mut TextureMut<'_>)) -> crate::draw::Texture {
         crate::draw::Texture(self.add_texture_with(setup))
     }
@@ -163,20 +167,38 @@ impl Resources {
         Some(TextureMut::new(self.textures.get_mut(&texture.0)?))
     }
 
+    /// The surface of `tile` in `frame`'s projection, which every tile
+    /// alike shares.
+    pub fn tile_surface(&mut self, tile: crate::layer::FrameTile, frame: &Frame<'_>) -> crate::handles::TileSurface {
+        let canonical = tile.id().canonical;
+        let key = frame
+            .camera
+            .is_globe()
+            .then(|| (canonical.z, canonical.y == 0, u64::from(canonical.y) == (1u64 << canonical.z) - 1));
+        if let Some(surface) = self.surfaces.get(&key) {
+            return surface.clone();
+        }
+        let surface = match key {
+            None => crate::handles::TileSurface {
+                vertices: self.buffer(&RenderStaticData::tile_vertices()),
+                triangles: self.index_buffer(&RenderStaticData::quad_triangle_indices()),
+            },
+            Some(_) => {
+                let grid = crate::globe::tile_grid(&canonical);
+                crate::handles::TileSurface {
+                    vertices: self.buffer(&grid.vertices),
+                    triangles: self.index_buffer(grid.triangles.as_flattened()),
+                }
+            }
+        };
+        self.surfaces.insert(key, surface.clone());
+        surface
+    }
+
     /// The size of `texture`, in texels.
     #[must_use]
     pub fn size(&self, texture: &crate::draw::Texture) -> Size {
         self.textures.get(&texture.0).map_or_else(|| Size::new(0, 0), Texture2D::size)
-    }
-
-    /// The projection that meshes made now draw in.
-    pub(crate) fn projection_variant(&self) -> ProjectionVariant {
-        self.projection_variant
-    }
-
-    /// Makes `variant` the projection that meshes made from now on draw in.
-    pub(crate) fn set_projection_variant(&mut self, variant: ProjectionVariant) {
-        self.projection_variant = variant;
     }
 
     /// The channel type of a render target's color texture, which draws
@@ -269,12 +291,12 @@ impl Resources {
 
     /// Keeps `objects`, the GPU objects of a draw, while the returned mesh
     /// lasts, made after every mesh the context made before it
-    /// ([`Mesh::seq`]).
-    pub(crate) fn add_mesh<B>(&mut self, objects: DrawObjects) -> Mesh<B> {
+    /// ([`Mesh::seq`]), whose draws' blocks the engine writes `paint` into.
+    pub(crate) fn add_mesh<B>(&mut self, objects: DrawObjects, paint: Option<MeshPaint>) -> Mesh<B> {
         let seq = self.next_mesh_seq;
         self.next_mesh_seq += 1;
         let program = objects.program();
-        Mesh::new(self.meshes.add(Box::new(objects), &self.device.queue), seq, program)
+        Mesh::new(self.meshes.add(Box::new(objects), &self.device.queue), seq, program, paint)
     }
 
     /// Takes the GPU objects of the mesh `key` out of the store, for a draw
@@ -426,14 +448,16 @@ impl Resources {
     }
 
     /// What a draw binds of the texture of `handle`, through `gpu`: the
-    /// texture, made and holding its image, and the sampler of its state.
+    /// texture, made and holding its image, and the sampler of `state`.
     pub(crate) fn texture_binding(
         &mut self,
         gpu: &mut dyn Gpu,
         handle: &SharedTexture,
+        state: SamplerState,
     ) -> Result<(TextureId, SamplerId), GpuError> {
         let Resources { device, textures, samplers, .. } = self;
-        bind(textures, samplers, device, gpu, handle)
+        let texture = textures.get_mut(handle).ok_or(GpuError::UnknownId("texture"))?;
+        Ok((texture.bind(gpu, device)?, sampler(samplers, gpu, state)?))
     }
 
     /// The backend's texture of the texture of `handle`, once made, which
@@ -547,34 +571,14 @@ impl Resources {
     }
 }
 
-/// What a draw binds of the texture of `handle` in `textures`, through
-/// `gpu`: the texture, made through `device` and holding its image, and
-/// the sampler of its state in `samplers`.
-fn bind(
-    textures: &mut Store<TextureKey, Texture2D>,
-    samplers: &mut HashMap<SamplerState, SamplerId>,
-    device: &mut Device,
-    gpu: &mut dyn Gpu,
-    handle: &SharedTexture,
-) -> Result<(TextureId, SamplerId), GpuError> {
-    let texture = textures.get_mut(handle).ok_or(GpuError::UnknownId("texture"))?;
-    let id = texture.bind(gpu, device)?;
-    let sampler = if let Some(sampler) = texture.sampler_id() {
-        sampler
-    } else {
-        let sampler = sampler(samplers, gpu, texture.sampler())?;
-        texture.set_sampler_id(sampler);
-        sampler
-    };
-    Ok((id, sampler))
-}
-
-/// The sampler of `state` in `samplers`, made through `gpu` on first use.
+/// The sampler of `state`, with an anisotropy of at least 1, in
+/// `samplers`, made through `gpu` on first use.
 fn sampler(
     samplers: &mut HashMap<SamplerState, SamplerId>,
     gpu: &mut dyn Gpu,
     state: SamplerState,
 ) -> Result<SamplerId, GpuError> {
+    let state = SamplerState { max_anisotropy: state.max_anisotropy.max(1), ..state };
     if let Some(&sampler) = samplers.get(&state) {
         return Ok(sampler);
     }
@@ -606,6 +610,7 @@ impl Resources {
         self.default_vertex_buffers.clear();
         // The meshes first, which hold entries of the other stores.
         self.meshes.clear();
+        self.surfaces.clear();
         self.textures.clear();
         self.vertices.clear();
         self.release_shaders();

@@ -169,9 +169,9 @@ pub trait Layer: Sized + 'static {
     fn stopped(&mut self) {}
 
     /// How far, in logical pixels, outside a feature of `data` a query
-    /// still hits it with the layer's values `layer`. A tile's query
-    /// geometry grows by its layers' largest radius.
-    fn query_radius(&self, _layer: &LayerValues<Self::Style>, _data: TileData<'_, Self>) -> f32 {
+    /// still hits it with the layer's values `layer`, seen by `camera`. A
+    /// tile's query geometry grows by its layers' largest radius.
+    fn query_radius(&self, _layer: &LayerValues<Self::Style>, _data: TileData<'_, Self>, _camera: &View) -> f32 {
         0.0
     }
 
@@ -219,28 +219,53 @@ impl<S: StyleLayerType> TileInput<S> for ViewCover {
 }
 
 pub(crate) mod input {
+    use mln_map_types::tile_cover::{TileCoverParameters, tile_cover};
     use mln_style::layer_type::{SourceKind, StyleLayerType};
+    use mln_tile_id::OverscaledTileID;
     use mln_util::identity::SimpleIdentity;
+    use mln_util::range::Range as ZoomRange;
+    use smallvec::SmallVec;
 
-    use super::{Features, Layout, TileInput, ViewCover};
-    use crate::render_tile::{TileContent, ViewPlace};
+    use super::{Features, Found, FrameTile, Layout, TileInput, ViewCover};
+    use crate::render_layer::{FrameSourceTiles, LayerUpdate};
+    use crate::render_tile::{FoundTile, TileContent, ViewPlace};
     use crate::tile::contents::GeometryContents;
+    use crate::tile_values::TileMap;
 
-    /// The engine's side of a [`TileInput`]: where a tile holds the input's
-    /// data. It seals [`TileInput`].
+    /// The engine's side of a [`TileInput`]: which tiles a layer of it draws
+    /// in a frame, and what each holds for it. It seals [`TileInput`].
     pub(crate) trait Find<S: StyleLayerType>: crate::erased_layer::LayoutOf<S> {
         /// The kind of source whose tiles hold the input.
         const SOURCE: SourceKind;
 
-        /// What `content` holds for the layer `layer_id`, if anything, and
-        /// where it is in it.
-        fn find<'a>(content: TileContent<'a>, layer_id: &str) -> Option<(Self::Data<'a>, ViewPlace)>
-        where
-            Self: TileInput<S>;
+        /// What the engine keeps of a layer's frame tiles from its update to
+        /// its encode.
+        type Frame: Default;
 
-        /// What `content` holds at `place`, where [`find`](Self::find)
-        /// found what it holds for a layer.
-        fn at(content: TileContent<'_>, place: ViewPlace) -> Option<Self::Data<'_>>
+        /// Finds the frame tiles of the layer `layer_id` in `update`, keeps
+        /// them in `frame` and their ids in `values`. Returns whether one of
+        /// them holds something for the layer to draw.
+        fn update<T>(
+            frame: &mut Self::Frame,
+            update: &mut LayerUpdate<'_>,
+            layer_id: &str,
+            values: &mut TileMap<T>,
+        ) -> bool;
+
+        /// The layer's frame tiles that its update kept in `frame`, with
+        /// where what each holds for it is in `source`'s tiles, whose
+        /// `found` ones the frame's updates found, into `tiles`; drops the
+        /// values in `values` of those whose data changed.
+        fn tiles<'a, T>(
+            frame: &Self::Frame,
+            found: &[FoundTile],
+            source: Option<FrameSourceTiles<'a>>,
+            values: &mut TileMap<T>,
+            tiles: &mut SmallVec<[Found<'a>; 64]>,
+        );
+
+        /// What `found` holds for the layer to draw.
+        fn data(found: Found<'_>) -> Option<Self::Data<'_>>
         where
             Self: TileInput<S>;
 
@@ -251,73 +276,140 @@ pub(crate) mod input {
         {
             None
         }
+    }
 
-        /// What a tile of the view's cover holds; `None` for an input of a
-        /// source's tiles.
-        fn cover<'a>() -> Option<Self::Data<'a>>
-        where
-            Self: TileInput<S>,
-        {
-            None
-        }
+    /// The identity of the bucket that `data` shows a layer to draw, which
+    /// the layer's value of the tile is made of; `None` where it shows
+    /// nothing to draw.
+    fn identity<S: StyleLayerType, B>(data: super::LayerBucket<'_, S, B>) -> Option<SimpleIdentity> {
+        data.laid_with.draws.then_some(data.id)
+    }
 
-        /// The identity of the bucket or contents that `data` shows the
-        /// layer to draw, which the layer's value of the tile is made of;
-        /// `None` where it shows nothing to draw.
-        fn identity(data: Self::Data<'_>) -> Option<SimpleIdentity>
-        where
-            Self: TileInput<S>;
+    /// What `content` holds at `place` for a layer of the style type `S`
+    /// laid out by `L`.
+    fn at<S: StyleLayerType, L: Layout<S>>(
+        content: TileContent<'_>,
+        place: ViewPlace,
+    ) -> Option<super::LayerBucket<'_, S, L::Bucket>> {
+        let ViewPlace::Laid(index) = place else {
+            debug_assert!(false, "a tile's own data's place for a laid-out layer");
+            return None;
+        };
+        let TileContent::Tile(contents) = content else { return None };
+        crate::erased_layer::laid::<S, L>(contents.geometry()?, index)
     }
 
     impl<S: StyleLayerType, L: Layout<S>> Find<S> for Features<L> {
         const SOURCE: SourceKind = SourceKind::Geometry;
 
-        fn find<'a>(content: TileContent<'a>, layer_id: &str) -> Option<(<Self as TileInput<S>>::Data<'a>, ViewPlace)> {
-            let TileContent::Tile(contents) = content else { return None };
-            let contents = contents.geometry()?;
-            let index = contents.result.layer_render_data.find(layer_id)?;
-            Some((crate::erased_layer::laid::<S, L>(contents, index)?, ViewPlace::Laid(index)))
+        /// Where the layer's tiles are among the frame's found tiles.
+        type Frame = std::ops::Range<usize>;
+
+        fn update<T>(
+            frame: &mut Self::Frame,
+            update: &mut LayerUpdate<'_>,
+            layer_id: &str,
+            values: &mut TileMap<T>,
+        ) -> bool {
+            let start = update.found.len();
+            let mut draws = false;
+            let mut ids: SmallVec<[OverscaledTileID; 64]> = SmallVec::new();
+            if let Some(source) = update.source
+                && let Some(order) = source.tile_order()
+            {
+                let tiles = source.render_tiles();
+                for &index in order {
+                    let Some(tile) = tiles.get(index) else { continue };
+                    let content = update.contents.get(index).copied().flatten();
+                    let found = content.and_then(|content| {
+                        let TileContent::Tile(contents) = content else { return None };
+                        let contents = contents.geometry()?;
+                        let place = contents.result.layer_render_data.find(layer_id)?;
+                        Some((crate::erased_layer::laid::<S, L>(contents, place)?, ViewPlace::Laid(place)))
+                    });
+                    draws |= found.is_some_and(|(data, _)| identity(data).is_some());
+                    update.found.push(FoundTile { tile: index, view: found.map(|(_, place)| place) });
+                    ids.push(*tile.overscaled_tile_id());
+                }
+            }
+            values.set_tiles(ids);
+            *frame = start..update.found.len();
+            draws
+        }
+
+        fn tiles<'a, T>(
+            frame: &Self::Frame,
+            found: &[FoundTile],
+            source: Option<FrameSourceTiles<'a>>,
+            values: &mut TileMap<T>,
+            tiles: &mut SmallVec<[Found<'a>; 64]>,
+        ) {
+            let Some(source) = source else { return };
+            for (index, &FoundTile { tile, view }) in found.get(frame.clone()).unwrap_or_default().iter().enumerate() {
+                let Some(render_tile) = source.tiles.get(tile) else { continue };
+                let content = source.contents.get(tile).copied().flatten();
+                let at = content.zip(view);
+                values.show(index, at.and_then(|(content, place)| identity(self::at::<S, L>(content, place)?)));
+                let id = *render_tile.overscaled_tile_id();
+                tiles.push(Found { tile: FrameTile { index, id, unwrapped: render_tile.id }, at });
+            }
+        }
+
+        fn data(found: Found<'_>) -> Option<<Self as TileInput<S>>::Data<'_>> {
+            let (content, place) = found.at?;
+            let data = at::<S, L>(content, place)?;
+            identity(data).is_some().then_some(data)
         }
 
         fn laid<'a>(contents: &'a GeometryContents, layer_id: &str) -> Option<<Self as TileInput<S>>::Data<'a>> {
             let index = contents.result.layer_render_data.find(layer_id)?;
             crate::erased_layer::laid::<S, L>(contents, index)
         }
-
-        fn at(content: TileContent<'_>, place: ViewPlace) -> Option<<Self as TileInput<S>>::Data<'_>> {
-            let ViewPlace::Laid(index) = place else {
-                debug_assert!(false, "a tile's own data's place for a laid-out layer");
-                return None;
-            };
-            let TileContent::Tile(contents) = content else { return None };
-            crate::erased_layer::laid::<S, L>(contents.geometry()?, index)
-        }
-
-        fn identity(data: <Self as TileInput<S>>::Data<'_>) -> Option<SimpleIdentity> {
-            data.laid_with.draws.then_some(data.id)
-        }
     }
 
     impl<S: StyleLayerType> Find<S> for ViewCover {
         const SOURCE: SourceKind = SourceKind::None;
 
-        fn find<'a>(
-            _content: TileContent<'a>,
+        /// The tiles that cover the view at its integer zoom.
+        type Frame = Vec<OverscaledTileID>;
+
+        fn update<T>(
+            frame: &mut Self::Frame,
+            update: &mut LayerUpdate<'_>,
             _layer_id: &str,
-        ) -> Option<(<Self as TileInput<S>>::Data<'a>, ViewPlace)> {
-            None
+            values: &mut TileMap<T>,
+        ) -> bool {
+            let (view, parameters) = (update.view, update.update_parameters);
+            let zoom = view.integer_zoom();
+            let cover = TileCoverParameters {
+                view: view.clone(),
+                tile_lod_min_radius: parameters.tile_lod_min_radius,
+                tile_lod_scale: parameters.tile_lod_scale,
+                tile_lod_pitch_threshold: parameters.tile_lod_pitch_threshold,
+                tile_lod_mode: parameters.tile_lod_mode,
+                requested_zoom: None,
+                round_zoom: false,
+                max_content_elevation: 0.0,
+            };
+            *frame = tile_cover(&cover, zoom, ZoomRange::new(0u8, zoom), None);
+            values.set_tiles(frame.iter().copied());
+            false
         }
 
-        fn at(_content: TileContent<'_>, _place: ViewPlace) -> Option<<Self as TileInput<S>>::Data<'_>> {
-            None
+        fn tiles<'a, T>(
+            frame: &Self::Frame,
+            _found: &[FoundTile],
+            _source: Option<FrameSourceTiles<'a>>,
+            _values: &mut TileMap<T>,
+            tiles: &mut SmallVec<[Found<'a>; 64]>,
+        ) {
+            for (index, &id) in frame.iter().enumerate() {
+                tiles.push(Found { tile: FrameTile { index, id, unwrapped: id.to_unwrapped() }, at: None });
+            }
         }
 
-        fn cover<'a>() -> Option<<Self as TileInput<S>>::Data<'a>> {
+        fn data(_found: Found<'_>) -> Option<<Self as TileInput<S>>::Data<'_>> {
             Some(())
-        }
-
-        fn identity(_data: <Self as TileInput<S>>::Data<'_>) -> Option<SimpleIdentity> {
-            None
         }
     }
 }
@@ -417,12 +509,7 @@ pub(crate) struct Found<'a> {
 impl<'a> Found<'a> {
     /// What the tile holds for a layer `L` to draw.
     pub(crate) fn data<L: Layer>(self) -> Option<TileData<'a, L>> {
-        if input_source::<L>() == SourceKind::None {
-            return <L::Input as input::Find<L::Style>>::cover();
-        }
-        let (content, place) = self.at?;
-        let data = <L::Input as input::Find<L::Style>>::at(content, place)?;
-        <L::Input as input::Find<L::Style>>::identity(data).is_some().then_some(data)
+        <L::Input as input::Find<L::Style>>::data(self)
     }
 }
 
@@ -583,27 +670,28 @@ impl<S: StyleLayerType, B> Copy for LayerBucket<'_, S, B> {}
 
 impl<'a, S: StyleLayerType, B> LayerBucket<'a, S, B> {
     /// The buffer that `vec`, one of the bucket's, uploaded into
-    /// ([`Upload::vec`]); `None` for a vector its `upload` didn't name.
+    /// ([`Upload::vec`]). Panics for a vector that the bucket's `upload`
+    /// didn't name.
     #[must_use]
-    pub fn buffer<V: bytemuck::Pod>(self, vec: &GpuVec<V>) -> Option<&'a Buffer<V>> {
-        self.contents.bucket_geometry.buffer(vec)
+    pub fn buffer<V: bytemuck::Pod>(self, vec: &GpuVec<V>) -> &'a Buffer<V> {
+        self.contents.bucket_geometry.buffer(vec).expect("a vector that the bucket's upload didn't name")
     }
 
     /// The index buffer that `indexes`, the bucket's, uploaded into
-    /// ([`Upload::indexes`]); `None` for indexes its `upload` didn't name.
+    /// ([`Upload::indexes`]). Panics for indexes that the bucket's `upload`
+    /// didn't name.
     #[must_use]
-    pub fn indexes(self, indexes: &Indexes) -> Option<&'a IndexBuffer> {
-        self.contents.bucket_geometry.indexes(indexes)
+    pub fn indexes(self, indexes: &Indexes) -> &'a IndexBuffer {
+        self.contents.bucket_geometry.indexes(indexes).expect("indexes that the bucket's upload didn't name")
     }
 
-    /// The binders of the layer among `binders`, the bucket's, with the
-    /// buffer their values uploaded into ([`Upload::binders`]); `None` for
-    /// binders that [`BuildCx::binders`] didn't make for the bucket's
-    /// layers.
+    /// The layer's binders among `binders`, the bucket's, which
+    /// [`BuildCx::binders`] made for each layer of the bucket's group, with
+    /// the buffer their values uploaded into ([`Upload::binders`]).
     #[must_use]
-    pub fn binders<P: PaintBinders>(self, binders: &'a LayerBinders<P>) -> Option<PaintVertices<'a, P>> {
-        let of_layer = binders.of_layer(&self.laid_with.style.id)?;
-        Some(PaintVertices::new(of_layer, self.contents.bucket_geometry.paint(of_layer.vertices())))
+    pub fn binders<P: PaintBinders>(self, binders: &'a LayerBinders<P>) -> PaintVertices<'a, P> {
+        let of_layer = binders.of_layer(&self.laid_with.style.id).expect("binders of the bucket's layers");
+        PaintVertices::new(of_layer, self.contents.bucket_geometry.paint(of_layer.vertices()))
     }
 
     /// The tile's feature index, which queries search.
@@ -682,29 +770,35 @@ impl<L: Layer> HitTest<'_, L> {
         )
     }
 
-    /// How far `point`, of the tile, is from the camera, in pixels, as
+    /// The points of the feature's geometry, each with how far it is from
+    /// the camera, but those that the globe's horizon hides where a draw
+    /// placed as `how` says draws them.
+    pub fn drawn_points(&self, how: &TileTransform) -> impl Iterator<Item = DrawnPoint> + '_ {
+        let [dx, dy] = if how.viewport_pixels {
+            [0.0, 0.0]
+        } else {
+            crate::tile_matrix::tile_unit_translation(self.projector.tile_id(), how.translate, how.anchor, self.camera)
+        };
+        let globe = self.camera.is_globe();
+        self.geometry.iter().flatten().filter_map(move |&point| {
+            let drawn = geometry::Point::new(f64::from(f32::from(point.x) + dx), f64::from(f32::from(point.y) + dy));
+            if globe && self.projector.project_as_drawn(&drawn, 0.0).occluded {
+                return None;
+            }
+            let at = geometry::Point::new(f64::from(point.x), f64::from(point.y));
+            Some(DrawnPoint { point, distance: self.projector.project(&at, 0.0).signed_distance_from_camera })
+        })
+    }
+}
+
+/// A point of a feature that a layer draws ([`HitTest::drawn_points`]).
+#[derive(Clone, Copy, Debug)]
+pub struct DrawnPoint {
+    /// The point, in its tile's units.
+    pub point: GeometryCoordinate,
+    /// How far the point is from the camera, in pixels, as
     /// [`View::camera_to_center_distance`] is the view's center's.
-    #[must_use]
-    pub fn distance(&self, point: GeometryCoordinate) -> f64 {
-        let at = geometry::Point::new(f64::from(point.x), f64::from(point.y));
-        self.projector.project(&at, 0.0).signed_distance_from_camera
-    }
-
-    /// Whether the globe's horizon hides `point`, of the tile, where a draw
-    /// moved by `translation` ([`translation`](Self::translation)) draws it.
-    #[must_use]
-    pub fn hidden(&self, point: GeometryCoordinate, [dx, dy]: [f32; 2]) -> bool {
-        let at = geometry::Point::new(f64::from(f32::from(point.x) + dx), f64::from(f32::from(point.y) + dy));
-        self.camera.is_globe() && self.projector.project_as_drawn(&at, 0.0).occluded
-    }
-
-    /// The translation in the tile's units that a draw moves the tile's
-    /// geometry by for a `*-translate` of `translate` pixels anchored at
-    /// `anchor`, as [`TileProjection::translation`] holds it.
-    #[must_use]
-    pub fn translation(&self, translate: [f32; 2], anchor: TranslateAnchorType) -> [f32; 2] {
-        crate::tile_matrix::tile_unit_translation(self.projector.tile_id(), translate, anchor, self.camera)
-    }
+    pub distance: f64,
 }
 
 /// A rendered-feature query of a layer `L`, for what it draws without tile

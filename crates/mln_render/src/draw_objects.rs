@@ -13,28 +13,32 @@ use std::marker::PhantomData;
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::draw_mode::DrawMode;
-use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
+use mln_gfx::gfx_types::DrawModeType;
 use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferId, DepthState, Draw, DynamicState, FixedState, GeometryDesc,
     GeometryId, Gpu, GpuError, PipelineId, PipelineKey, SamplerId, Scissor, ShaderId, ShaderKey, StencilState,
     TargetFormats, TextureId, VertexAttribute as GpuVertexAttribute, VertexBufferLayout, VertexStep,
 };
+use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::{FIRST_VERTEX_BUFFER_ID, MAX_TEXTURES};
 use mln_gfx::shaders::program::{Attribute, Program};
 use mln_gfx::shaders::segment::SegmentBase;
+use mln_gfx::texture2d::SamplerState;
 use mln_util::logging::{Event, Log};
 
 use crate::gfx::context::Resources;
-use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::owned::{Held, Owned};
 use crate::gfx::store::{MeshKey, Shared, SharedTexture};
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::upload::{self, AttributeBindingArray};
-use crate::gfx::vertex_attribute::VertexAttributeArray;
+use crate::gfx::vertex_attribute::{Uniforms, VertexAttributeArray};
+use crate::gfx::vertices::SharedVertices;
 use crate::paint_parameters::{DepthTest, DrawTarget, PaintParameters, Stencil};
+use crate::paint_property_binder::MeshPaint;
 
-/// The textures a draw binds, by texture id.
-pub(crate) type Textures = [Option<SharedTexture>; MAX_TEXTURES];
+/// The textures a draw binds, by texture id, each with the sampler it is
+/// sampled with.
+pub(crate) type Textures = [Option<(SharedTexture, SamplerState)>; MAX_TEXTURES];
 
 /// A handle of a draw's GPU objects in the context's store of meshes
 /// ([`Resources::mesh`](crate::draw::Resources::mesh)). The objects stay while the handle does, and go
@@ -46,19 +50,32 @@ pub struct Mesh<B = ()> {
     handle: Shared<MeshKey>,
     seq: u64,
     program: &'static Program,
+    /// What the engine writes of the mesh's paint values into its draws'
+    /// blocks.
+    paint: Option<MeshPaint>,
     blocks: PhantomData<fn(B)>,
 }
 
 impl<B> Mesh<B> {
-    pub(crate) fn new(handle: Shared<MeshKey>, seq: u64, program: &'static Program) -> Mesh<B> {
-        Mesh { handle, seq, program, blocks: PhantomData }
+    pub(crate) fn new(
+        handle: Shared<MeshKey>,
+        seq: u64,
+        program: &'static Program,
+        paint: Option<MeshPaint>,
+    ) -> Mesh<B> {
+        Mesh { handle, seq, program, paint, blocks: PhantomData }
     }
 
     /// When the mesh was made among its context's meshes: a mesh made later
     /// has a greater one.
-    #[must_use]
-    pub fn seq(&self) -> u64 {
+    pub(crate) fn seq(&self) -> u64 {
         self.seq
+    }
+
+    /// What the engine writes of the mesh's paint values into its draws'
+    /// blocks.
+    pub(crate) fn paint(&self) -> Option<&MeshPaint> {
+        self.paint.as_ref()
     }
 
     pub(crate) fn key(&self) -> MeshKey {
@@ -94,29 +111,14 @@ pub(crate) struct DrawGeometry {
     pub vertex_count: usize,
     /// The primitive the segments draw.
     pub mode: DrawMode,
-    /// The indexes of the primitives' vertices.
-    pub indexes: DrawIndexes,
+    /// The `u16` indexes of the primitives' vertices, a buffer of the
+    /// context's store.
+    pub indexes: SharedVertices,
     /// The ranges of the indexes and vertices each draw call draws.
     pub segments: Vec<SegmentBase>,
-    /// The attributes of each instance, for a draw of instances.
+    /// The attributes of each instance, for a draw of instances, as many
+    /// as the fewest any of them holds.
     pub instances: Option<VertexAttributeArray>,
-}
-
-/// `count` vertices of `data_type` in `data` as the vertex attribute `id`,
-/// none where there are no vertices.
-#[must_use]
-pub(crate) fn raw_vertices(
-    id: usize,
-    data: Vec<u8>,
-    count: usize,
-    data_type: AttributeDataType,
-) -> VertexAttributeArray {
-    let mut attributes = VertexAttributeArray::new();
-    if count == 0 || data_type == AttributeDataType::Invalid || data.is_empty() {
-        return attributes;
-    }
-    attributes.set_own(id, data_type, data);
-    attributes
 }
 
 /// The most entries bindings have.
@@ -177,18 +179,19 @@ struct PipelineVariant {
 /// vertices, indexes and segments, the buffers and textures it binds, the
 /// color and cull modes it draws with, and the shader, pipelines, bindings
 /// and geometry it made of them on the context's `Gpu`, which it makes again
-/// when what they are made of changes.
+/// when what they are made of changes, the frame's projection included.
 pub(crate) struct DrawObjects {
-    shader: ShaderKey,
+    program: &'static Program,
+    /// The program's properties that its variant reads from their uniforms.
+    uniforms: Uniforms,
+    /// The projection it draws in, `None` for the frame's.
+    projection: Option<ProjectionVariant>,
+    /// The key of the variant of the program it last drew with, and that
+    /// variant's projection.
+    shader: Option<(ProjectionVariant, ShaderKey)>,
     vertex_attributes: VertexAttributeArray,
     /// The attributes of each instance, for a draw of instances.
     instance_attributes: Option<VertexAttributeArray>,
-    /// Whether the vertex attributes changed since the last upload, which
-    /// then binds them all again; true until the first.
-    vertex_attributes_changed: bool,
-    /// Whether the instance attributes changed since the last upload, as
-    /// `vertex_attributes_changed` says of the vertex attributes.
-    instance_attributes_changed: bool,
     /// The textures it binds, by texture id.
     textures: Textures,
     color_mode: ColorMode,
@@ -196,7 +199,7 @@ pub(crate) struct DrawObjects {
 
     mode: DrawMode,
     segments: Vec<SegmentBase>,
-    indexes: DrawIndexes,
+    indexes: SharedVertices,
     vertex_count: usize,
     attribute_bindings: AttributeBindingArray,
     instance_bindings: AttributeBindingArray,
@@ -219,11 +222,14 @@ pub(crate) struct DrawObjects {
 }
 
 impl DrawObjects {
-    /// The objects of a draw of `geometry` with `shader`, in `color_mode`
-    /// and `cull_face_mode`, binding `textures`, without buffers of its own.
+    /// The objects of a draw of `geometry` with the variant of `program`
+    /// that reads `uniforms` from their uniforms, in `projection` or the
+    /// frame's, in `color_mode` and `cull_face_mode`, binding `textures`.
     #[must_use]
     pub(crate) fn new(
-        shader: ShaderKey,
+        program: &'static Program,
+        uniforms: Uniforms,
+        projection: Option<ProjectionVariant>,
         color_mode: ColorMode,
         cull_face_mode: CullFaceMode,
         geometry: DrawGeometry,
@@ -231,11 +237,12 @@ impl DrawObjects {
     ) -> Self {
         let DrawGeometry { vertices, vertex_count, mode, indexes, segments, instances } = geometry;
         DrawObjects {
-            shader,
+            program,
+            uniforms,
+            projection,
+            shader: None,
             vertex_attributes: vertices,
             instance_attributes: instances,
-            vertex_attributes_changed: true,
-            instance_attributes_changed: true,
             textures,
             color_mode,
             cull_face_mode,
@@ -256,29 +263,41 @@ impl DrawObjects {
 
     /// The program the objects draw with.
     pub(crate) fn program(&self) -> &'static Program {
-        self.shader.program()
+        self.program
+    }
+
+    /// The key of the shader it draws with in a frame of `variant`'s
+    /// projection, made again, with the shader's pipelines, bindings and
+    /// geometry, where it last drew in another.
+    fn shader(&mut self, context: &mut Resources, variant: ProjectionVariant) -> &ShaderKey {
+        let variant = self.projection.unwrap_or(variant);
+        if self.shader.as_ref().is_none_or(|(drawn, _)| *drawn != variant) {
+            self.shader_id = None;
+            self.pipelines.clear();
+            self.bindings = None;
+            self.geometry = None;
+            self.shader = Some((variant, context.shader_key(self.program, self.uniforms, variant)));
+        }
+        &self.shader.as_ref().expect("made above").1
     }
 
     /// Uploads the indexes, vertex attributes and textures, where they
     /// changed since the last upload.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Resources) {
         if let Err(error) = self.upload_in(gpu, context) {
-            Log::error(Event::Render, format!("Uploading a draw of {} failed: {error}", self.shader.program().name));
+            Log::error(Event::Render, format!("Uploading a draw of {} failed: {error}", self.program.name));
         }
     }
 
     fn upload_in(&mut self, gpu: &mut dyn Gpu, context: &mut Resources) -> Result<(), GpuError> {
-        let program = self.shader.program();
-        if self.indexes.buffer(context).is_none() && self.indexes.len(context) == 0 {
-            debug_assert!(false, "a draw of {} has no index data", program.name);
-            return Ok(());
-        }
-        self.indexes.upload(gpu, context)?;
+        let program = self.program;
+        context.upload_index_buffer(gpu, &self.indexes)?;
 
-        // An attribute binds again where its array changed, or where the
-        // upload writes what it reads, which may be new. A failed upload
-        // leaves the attributes changed, so the next binds them again.
-        if self.vertex_attributes_changed || upload::needs_upload(context, program.attributes, &self.vertex_attributes)
+        // The attributes bind at the first upload, and again where the
+        // upload writes what they read, which may be new. A failed upload
+        // leaves no bindings, so the next binds them again.
+        if self.attribute_bindings.is_empty()
+            || upload::needs_upload(context, program.attributes, &self.vertex_attributes)
         {
             let updated = upload::update_attribute_bindings(
                 gpu,
@@ -295,11 +314,11 @@ impl DrawObjects {
             updated?;
         }
 
-        let changed = self.instance_attributes_changed;
+        let unbound = self.instance_bindings.is_empty();
         if let Some(attrs) = self
             .instance_attributes
             .as_mut()
-            .filter(|attrs| changed || upload::needs_upload(context, program.instance_attributes, attrs))
+            .filter(|attrs| unbound || upload::needs_upload(context, program.instance_attributes, attrs))
         {
             let instance_count = attrs.min_count();
             let updated = upload::update_attribute_bindings(
@@ -317,10 +336,7 @@ impl DrawObjects {
             updated?;
         }
 
-        self.vertex_attributes_changed = false;
-        self.instance_attributes_changed = false;
-
-        for texture in self.textures.iter().flatten() {
+        for (texture, _) in self.textures.iter().flatten() {
             if let Err(error) = context.upload_texture(gpu, texture) {
                 Log::error(Event::Render, format!("Uploading a texture failed: {error}"));
             }
@@ -343,7 +359,7 @@ impl DrawObjects {
         global_index: u32,
     ) {
         if let Err(error) = self.draw_in(gpu, parameters, frame, depth, stencil, global_index) {
-            Log::warning(Event::Render, format!("Drawing a draw of {} failed: {error}", self.shader.program().name));
+            Log::warning(Event::Render, format!("Drawing a draw of {} failed: {error}", self.program.name));
         }
     }
 
@@ -359,26 +375,25 @@ impl DrawObjects {
         let Some(DrawTarget { size, targets, scissor }) = parameters.draw_target() else {
             return Ok(());
         };
+        let variant =
+            if parameters.frame.camera.is_globe() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
         let context = &mut *parameters.context;
-        let index_buffer = self.indexes.buffer(context);
-        debug_assert!(
-            index_buffer.is_some(),
-            "a draw of {} draws indexes it didn't upload",
-            self.shader.program().name
-        );
+        let shader = self.shader(context, variant).clone();
+        let index_buffer = context.vertices(&self.indexes).and_then(|indexes| indexes.buffer());
+        debug_assert!(index_buffer.is_some(), "a draw of {} draws indexes it didn't upload", self.program.name);
         let Some(index_buffer) = index_buffer else {
             return Ok(());
         };
 
         let shader_id = match self.shader_id {
             Some(id) => id,
-            None => *self.shader_id.insert(context.shader(gpu, &self.shader)?),
+            None => *self.shader_id.insert(context.shader(gpu, &shader)?),
         };
         let bindings = self.bindings(gpu, context, shader_id, frame)?;
         let slots = if let Some(slots) = &self.vertex_slots {
             slots
         } else {
-            let slots = vertex_slots(self.shader.program(), &self.attribute_bindings, &self.instance_bindings);
+            let slots = vertex_slots(self.program, &self.attribute_bindings, &self.instance_bindings);
             // New buffers in the layouts of the old ones keep the
             // pipelines.
             let layouts = slots.iter().map(|slot| &slot.layout);
@@ -403,11 +418,10 @@ impl DrawObjects {
                     vertex_buffers: &buffers[..slots.len()],
                     index_buffer,
                 })?;
-                let index_held = self.indexes.held();
                 // Of the exact length: geometry is made as tiles come.
-                let len = slots.iter().filter(|slot| slot.held.is_some()).count() + usize::from(index_held.is_some());
+                let len = slots.iter().filter(|slot| slot.held.is_some()).count() + 1;
                 let mut held = Vec::with_capacity(len);
-                held.extend(slots.iter().filter_map(|slot| slot.held.clone()).chain(index_held));
+                held.extend(slots.iter().filter_map(|slot| slot.held.clone()).chain([self.indexes.held()]));
                 self.geometry = Some((context.own(geometry, held), index_buffer));
                 geometry
             }
@@ -424,6 +438,7 @@ impl DrawObjects {
         let (depth, stencil) = (depth.state, stencil.state);
         let mut draws = 0;
         let mode = self.mode;
+        let instances = self.instance_attributes.as_ref().map_or(1, VertexAttributeArray::min_count);
         for segment in &self.segments {
             if segment.index_length == 0 {
                 continue;
@@ -450,7 +465,7 @@ impl DrawObjects {
                 index_count: segment.index_length as u32,
                 base_vertex: segment.vertex_offset as i32,
                 first_instance: segment.base_instance as u32,
-                instance_count: segment.instance_count as u32,
+                instance_count: instances as u32,
                 global_index,
                 dynamic,
             })?;
@@ -473,9 +488,9 @@ impl DrawObjects {
         frame: &UniformBufferArray,
     ) -> Result<BindingsId, GpuError> {
         let mut textures = [None; MAX_TEXTURES];
-        for id in 0..self.shader.program().textures.len() {
-            if let Some(texture) = self.textures.get(id).and_then(Option::as_ref) {
-                textures[id] = Some(context.texture_binding(gpu, texture)?);
+        for id in 0..self.program.textures.len() {
+            if let Some((texture, sampler)) = self.textures.get(id).and_then(Option::as_ref) {
+                textures[id] = Some(context.texture_binding(gpu, texture, *sampler)?);
             }
         }
         let global = context.global_uniform_buffers();
@@ -505,12 +520,13 @@ impl DrawObjects {
                 entries.push(BindGroupEntry::Texture { id: id as u32, texture, sampler });
             }
         }
-        let textures = 0..self.shader.program().textures.len();
+        let textures = 0..self.program.textures.len();
         held.extend(
-            textures.filter_map(|id| context.gpu_texture(self.textures.get(id)?.as_ref()?).cloned().map(Held::Texture)),
+            textures
+                .filter_map(|id| context.gpu_texture(&self.textures.get(id)?.as_ref()?.0).cloned().map(Held::Texture)),
         );
         let bindings = gpu.create_bindings(&BindingsDesc {
-            label: self.shader.program().name,
+            label: self.program.name,
             shader: shader_id,
             entries: entries.as_slice(),
         })?;

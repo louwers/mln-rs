@@ -102,9 +102,6 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(VertexStage in [[stage_in]]) {
-
-    device const BackgroundDrawableUBO& drawable = drawableVector[drawIndex];
-
     return {
         .position = projectTile(float2(in.position.xy), float2(in.position.xy), projectionVector[drawIndex])
     };

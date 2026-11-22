@@ -3,14 +3,14 @@
 //! scales through the layer's data ([`DotData`]).
 
 use mln_rs::layer::AttributeDataType::{Float2, Float4, Short2};
+use mln_rs::layer::intersection_tests::polygon_intersects_buffered_point;
 use mln_rs::layer::source::wgsl::Wgsl;
 use mln_rs::layer::{
     Attribute, Bucket, BuildCx, Color, Draw, Draws, Error, Features, FrameTile, GpuVec, HitTest, Indexes, Layer,
     LayerBinders, LayerBucket, LayerStyle, LayerTypeInfo, LayerValues, Layout, LayoutCx, Mesh, MeshDesc, NewCx,
     NoProperties, PaintPropertyBinder, PrepareCx, Program, Projection, Property, PropertyInfo, PropertyTable,
-    PropertyVisitor, SourceKind, Sources, Stages, StyleLayerType, TileCx, TileTransform, Upload, program,
+    PropertyVisitor, SourceKind, Sources, Stages, StyleLayerType, TileCx, TileTransform, Upload, View, Wire, program,
 };
-use mln_rs::mln_util::intersection_tests::polygon_intersects_buffered_point;
 
 mln_rs::layer::properties!(
     pub mod paint: paint { dot_color: data_driven Color = Color::black(), dot_radius: data_driven f32 = 5.0, }
@@ -61,12 +61,14 @@ mln_rs::layer::paint_property_binders!(
 );
 
 mln_rs::layer::uniform_block! {
-    /// Each draw's: a pixel in clip space, and the mix of each property's zoom stops.
+    /// Each draw's: a pixel in clip space, and the mix of each property's
+    /// zoom stops, which the engine writes.
     pub struct DotDraw { pub extrude: [f32; 2], pub color_t: f32, pub radius_t: f32 }
 }
 
 mln_rs::layer::uniform_block! {
-    /// The layer's: the properties where they are the same for every point, and the scale.
+    /// The layer's: the properties where they are the same for every point,
+    /// which the engine writes, and the scale.
     pub struct DotProps { pub color: [f32; 4], pub radius: f32, pub scale: f32, #[padding] pub pad: [f32; 2] }
 }
 
@@ -122,7 +124,7 @@ struct FragmentInput {
     }),
 };
 
-#[derive(Clone, mln_rs::mln_wire::Wire)]
+#[derive(Clone, Wire)]
 #[wire(crate = mln_rs::mln_wire)]
 pub struct DotBucket {
     corners: GpuVec<[i16; 2]>,
@@ -183,28 +185,23 @@ impl Layer for DotLayer {
         _: FrameTile,
         laid: LayerBucket<'_, Dot, DotBucket>,
     ) -> Option<Mesh<DotDraw>> {
-        let mut mesh = MeshDesc::new(&DOT);
-        mesh.vertices(laid.buffer(&laid.bucket.corners)?)
-            .indexes(laid.indexes(&laid.bucket.triangles)?)
-            .paint(laid.binders(&laid.bucket.binders)?, &cx.layer.evaluated.paint);
+        let mut mesh = MeshDesc::new(&DOT, laid.indexes(&laid.bucket.triangles));
+        mesh.vertices(laid.buffer(&laid.bucket.corners))
+            .paint(laid.binders(&laid.bucket.binders), &cx.layer.evaluated.paint);
         Some(cx.res.mesh(&mesh))
     }
 
     fn prepare(&self, cx: &PrepareCx<'_, Self>, out: &mut Draws) {
-        let (paint, zoom, main) = (&cx.layer.evaluated.paint, cx.frame.camera.zoom() as f32, out.main());
-        let color = paint.dot_color.constant_or(&Color::black()).to_float_array();
-        let (radius, scale) = (paint.dot_radius.constant_or(&0.0), cx.layer.style.data.scale);
-        main.block(&DotProps { color, radius, scale, ..DotProps::default() });
-        for (tile, laid, mesh) in cx.tiles() {
-            let Some(b) = laid.binders(&laid.bucket.binders) else { continue };
+        let main = out.main();
+        main.block(&DotProps { scale: cx.layer.style.data.scale, ..DotProps::default() });
+        for (tile, _, mesh) in cx.tiles() {
             let at = tile.project(cx.frame, &TileTransform::default());
-            let (color_t, radius_t) = (b.dot_color.interpolation_factor(zoom), b.dot_radius.interpolation_factor(zoom));
-            main.push_at(mesh, &at, Draw::DEFAULT, DotDraw { extrude: cx.frame.pixels_to_clip, color_t, radius_t });
+            main.push_at(mesh, &at, Draw::DEFAULT, DotDraw { extrude: cx.frame.pixels_to_clip, ..DotDraw::default() });
         }
     }
 
-    fn query_radius(&self, layer: &LayerValues<Dot>, laid: LayerBucket<'_, Dot, DotBucket>) -> f32 {
-        let largest = laid.binders(&laid.bucket.binders).and_then(|b| b.dot_radius.max());
+    fn query_radius(&self, layer: &LayerValues<Dot>, laid: LayerBucket<'_, Dot, DotBucket>, _: &View) -> f32 {
+        let largest = laid.binders(&laid.bucket.binders).dot_radius.max();
         largest.or(layer.evaluated.paint.dot_radius.constant()).unwrap_or(0.0) * layer.style.data.scale
     }
 

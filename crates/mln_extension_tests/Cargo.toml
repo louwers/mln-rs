@@ -15,7 +15,6 @@ name = "mln_extension_tests"
 doctest = false
 
 [dependencies]
-bytemuck.workspace = true
 mln_rs = { workspace = true, features = ["webgpu"] }
 
 [lints]

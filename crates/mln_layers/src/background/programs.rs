@@ -4,15 +4,12 @@
 use mln_gfx::gfx_types::AttributeDataType::Short2;
 use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Sources, Stages, Texture};
 
-use super::ubo::{BackgroundDrawableUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO, BackgroundPropsUBO};
+use super::ubo::{BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO, BackgroundPropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
 
 pub static BACKGROUND: Program = Program {
     name: "background",
-    buffers: &[
-        Buffer::storage::<BackgroundDrawableUBO>("drawableVector", Stages::Vertex),
-        Buffer::uniform::<BackgroundPropsUBO>("props", 0),
-    ],
+    buffers: &[Buffer::uniform::<BackgroundPropsUBO>("props", 0)],
     attributes: &[Attribute { id: 0, format: Short2 }],
     instance_attributes: &[],
     textures: &[],

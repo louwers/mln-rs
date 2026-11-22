@@ -89,7 +89,19 @@ pub struct IndexBuffer {
 }
 
 /// A texture in the renderer's [`Resources`](crate::draw::Resources), which
-/// a mesh samples ([`MeshDesc::texture`](crate::draw::MeshDesc::texture)),
-/// with the sampler it was given.
+/// a mesh samples ([`MeshDesc::texture`](crate::draw::MeshDesc::texture)).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Texture(pub(crate) SharedTexture);
+
+/// The surface that a tile's geometry covers in a frame's projection, in
+/// the tile's units: its extent's corners on Mercator, and on the globe a
+/// grid that bends with the planet and reaches a pole where the tile
+/// touches one, with the triangles that cover it
+/// ([`Resources::tile_surface`](crate::draw::Resources::tile_surface)).
+#[derive(Clone, Debug)]
+pub struct TileSurface {
+    /// The vertices.
+    pub vertices: Buffer<[i16; 2]>,
+    /// Their triangles.
+    pub triangles: IndexBuffer,
+}

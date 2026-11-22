@@ -411,11 +411,11 @@ impl GeometryContents {
         self.result.set_feature_state(states);
     }
 
-    /// The largest query radius of `layers`' buckets.
-    pub(crate) fn query_padding(&self, layers: &QueryLayers<'_>) -> f32 {
+    /// The largest query radius of `layers`' buckets, seen by `camera`.
+    pub(crate) fn query_padding(&self, layers: &QueryLayers<'_>, camera: &mln_map_types::View) -> f32 {
         let mut query_padding: f32 = 0.0;
         for layer in layers.values() {
-            query_padding = query_padding.max(layer.query_radius(self));
+            query_padding = query_padding.max(layer.query_radius(self, camera));
         }
         query_padding
     }
@@ -441,7 +441,7 @@ impl GeometryContents {
         if self.result.feature_index.data().is_none() {
             return Ok(());
         }
-        let query_padding = self.query_padding(layers);
+        let query_padding = self.query_padding(layers, view);
         let projector = mln_map_types::TileProjector::with_data(
             view,
             &id.to_unwrapped(),

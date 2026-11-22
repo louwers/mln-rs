@@ -94,7 +94,6 @@ struct VertexOutput {
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    let drawable = drawableVector[drawIndex];
     let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
     let clip = projectTileWithPoles(pos, pos, projectionVector[drawIndex]);
     out.position = clip;

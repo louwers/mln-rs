@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use etagere::{AllocId, AtlasAllocator, size2};
 use mln_gfx::gpu::Gpu;
-use mln_gfx::texture2d::{SamplerState, texture_format};
-use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
+use mln_gfx::texture2d::texture_format;
+use mln_gfx::types::{TextureChannelDataType, TexturePixelType};
 use mln_style_types::image::RectU16;
 use mln_text::glyph::Glyph;
 use mln_util::hash::HashMap;
@@ -249,12 +249,6 @@ impl DynamicTexture {
             let texture = context.add_texture_with(|texture| {
                 texture.set_size(self.size);
                 texture.set_format(texture_format(self.pixel_format, TextureChannelDataType::UnsignedByte));
-                texture.set_sampler(SamplerState {
-                    filter: TextureFilterType::Linear,
-                    wrap_u: TextureWrapType::Clamp,
-                    wrap_v: TextureWrapType::Clamp,
-                    ..SamplerState::default()
-                });
             });
             if let Err(error) = context.create_texture(gpu, &texture) {
                 Log::error(Event::Render, format!("Making an atlas texture failed: {error}"));

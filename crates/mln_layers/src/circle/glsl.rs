@@ -75,7 +75,7 @@ void main() {
             const vec4 projected_center = interpolateProjection(circle_center, center_vector, 0.0, projection);
             angle_scale *= (radius + stroke_width) * (projected_center.w / view.camera_to_center_distance);
 #else
-            const vec4 projected_center = drawable.matrix * vec4(circle_center, 0, 1);
+            const vec4 projected_center = projection.fallback_matrix * vec4(circle_center, 0, 1);
 #endif
             corner_position += scaled_extrude * (radius + stroke_width) *
                                (projected_center.w / view.camera_to_center_distance);
@@ -85,7 +85,7 @@ void main() {
         const vec3 corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
         gl_Position = interpolateProjection(corner_position, corner_vector, 0.0, projection);
 #else
-        gl_Position = drawable.matrix * vec4(corner_position, 0, 1);
+        gl_Position = projection.fallback_matrix * vec4(corner_position, 0, 1);
 #endif
     } else {
 #ifdef PROJECTION_GLOBE
@@ -94,7 +94,7 @@ void main() {
             gl_Position.xy = vec2(10000.0);
         }
 #else
-        gl_Position = drawable.matrix * vec4(circle_center, 0, 1);
+        gl_Position = projection.fallback_matrix * vec4(circle_center, 0, 1);
 #endif
 
         const float factor = props.scale_with_map != 0 ? view.camera_to_center_distance : gl_Position.w;

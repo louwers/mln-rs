@@ -40,17 +40,19 @@ pub(crate) struct PatternAtlas {
 }
 
 impl PatternAtlas {
+    /// How the layer's meshes sample the atlas: linear, which its padding
+    /// wraps.
+    pub(crate) const SAMPLER: SamplerState = SamplerState {
+        filter: TextureFilterType::Linear,
+        wrap_u: TextureWrapType::Clamp,
+        wrap_v: TextureWrapType::Clamp,
+        max_anisotropy: 1,
+        mipmapped: false,
+    };
+
     /// An empty atlas, whose texture `res` makes.
     pub(crate) fn new(res: &mut Resources) -> Self {
-        let texture = res.texture(|texture| {
-            texture.set_format(TextureFormat::Rgba8Unorm);
-            texture.set_sampler(SamplerState {
-                filter: TextureFilterType::Linear,
-                wrap_u: TextureWrapType::Clamp,
-                wrap_v: TextureWrapType::Clamp,
-                ..Default::default()
-            });
-        });
+        let texture = res.texture(|texture| texture.set_format(TextureFormat::Rgba8Unorm));
         PatternAtlas {
             allocator: BucketedAtlasAllocator::new(size2(64, 64)),
             patterns: HashMap::default(),

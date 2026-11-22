@@ -1,11 +1,4 @@
 mln_gfx::uniform_block! {
-    /// The background shader's per-drawable uniform block.
-    pub struct BackgroundDrawableUBO {
-        pub matrix: [f32; 4 * 4],
-    }
-}
-
-mln_gfx::uniform_block! {
     /// Evaluated properties that do not depend on the tile.
     /// `color` is the premultiplied `mln::Color` as r, g, b, a floats.
     pub struct BackgroundPropsUBO {
@@ -21,9 +14,9 @@ mln_gfx::uniform_block! {
 }
 
 mln_gfx::uniform_block! {
-    /// The background pattern shader's per-drawable uniform block.
+    /// A pattern draw's block: where its tile is in the world's pixels,
+    /// which the pattern repeats from.
     pub struct BackgroundPatternDrawableUBO {
-        pub matrix: [f32; 4 * 4],
         pub pixel_coord_upper: [f32; 2],
         pub pixel_coord_lower: [f32; 2],
         pub tile_units_to_pixels: f32,

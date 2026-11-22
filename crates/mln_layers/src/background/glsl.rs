@@ -13,8 +13,6 @@ pub(super) const BACKGROUND_SHADER: Glsl = Glsl {
 layout(location = 0) in ivec2 in_position;
 
 void main() {
-    const BackgroundDrawableUBO drawable = drawableVector[drawIndex];
-
     gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector[drawIndex]);
 }
 ",

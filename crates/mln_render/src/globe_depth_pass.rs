@@ -7,21 +7,18 @@ use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::{AttributeDataType, DrawMode};
 use mln_map_types::View;
 use mln_map_types::tile_cover::{TileCoverParameters, tile_cover};
 use mln_util::range::Range;
 
-use crate::draw_objects::{DrawGeometry, DrawObjects, Mesh, Textures, raw_vertices};
+use crate::draw_objects::Mesh;
 use crate::encode::{Depth, Draw, Group};
 use crate::gfx::context::Resources;
-use crate::gfx::indexes::DrawIndexes;
-use crate::gfx::vertex_attribute::Uniforms;
-use crate::globe::{TileGrid, grid, surface_granularity};
+use crate::globe::{grid, surface_granularity};
+use crate::handles::{Buffer, IndexBuffer};
+use crate::mesh_desc::MeshDesc;
 use crate::paint_parameters::PaintParameters;
 use crate::shaders::programs;
-use crate::shaders::programs::ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE;
 use crate::tile_matrix::TileProjection;
 use crate::tile_values::TileMap;
 use crate::update_parameters::UpdateParameters;
@@ -35,12 +32,14 @@ pub(crate) struct GlobeDepthPass {
     /// The frame's draws of them, which draw into depth in the translucent
     /// pass.
     draws: Group,
-    meshes: BTreeMap<(u8, bool, bool), TileGrid>,
+    /// The buffers of each grid, which depends only on the zoom and whether
+    /// the tile touches a pole.
+    grids: BTreeMap<(u8, bool, bool), (Buffer<[i16; 2]>, IndexBuffer)>,
 }
 
 impl Default for GlobeDepthPass {
     fn default() -> Self {
-        GlobeDepthPass { tiles: TileMap::default(), draws: Group::new(), meshes: BTreeMap::new() }
+        GlobeDepthPass { tiles: TileMap::default(), draws: Group::new(), grids: BTreeMap::new() }
     }
 }
 
@@ -59,12 +58,11 @@ impl GlobeDepthPass {
             self.tiles.clear_tiles();
             self.draws.clear();
             if !state.is_globe() {
-                self.meshes.clear();
+                self.grids.clear();
             }
             return;
         }
 
-        let shader = context.shader_key(&programs::GLOBE_DEPTH, Uniforms::default(), ProjectionVariant::Globe);
         let caches = &mut self.tiles;
 
         let zoom = state.integer_zoom();
@@ -88,50 +86,34 @@ impl GlobeDepthPass {
         for (index, tile_id) in tile_cover.iter().enumerate() {
             let value = caches.get_mut(index);
             if value.is_none() {
-                // The grid depends only on the zoom and whether the tile
-                // touches a pole.
                 let canonical = &tile_id.canonical;
                 let key = (canonical.z, canonical.y == 0, canonical.y == (1u32 << canonical.z) - 1);
-                let mesh =
-                    self.meshes.entry(key).or_insert_with(|| grid(canonical, surface_granularity(canonical.z), true));
-                let vertex_count = mesh.vertices.len();
-                let indices = mesh.triangles.as_flattened().to_vec();
-                let vertices = raw_vertices(
-                    ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE,
-                    bytemuck::cast_slice(&mesh.vertices).to_vec(),
-                    vertex_count,
-                    AttributeDataType::Short2,
-                );
-                let geometry = DrawGeometry {
-                    vertices,
-                    vertex_count,
-                    mode: DrawMode::Triangles,
-                    segments: vec![SegmentBase::with_lengths(0, 0, vertex_count, indices.len())],
-                    indexes: DrawIndexes::new(indices),
-                    instances: None,
-                };
+                let (vertices, triangles) = self.grids.entry(key).or_insert_with(|| {
+                    let grid = grid(canonical, surface_granularity(canonical.z), true);
+                    (context.buffer(&grid.vertices), context.index_buffer(grid.triangles.as_flattened()))
+                });
+                let mut mesh = MeshDesc::new(&programs::GLOBE_DEPTH, triangles);
                 // The far hemisphere is clockwise on screen on every backend,
                 // Vulkan included, since its shaders flip Y.
-                let objects = DrawObjects::new(
-                    shader.clone(),
-                    ColorMode::disabled(),
-                    CullFaceMode::back_ccw(),
-                    geometry,
-                    Textures::default(),
-                );
-                *value = Some(context.add_mesh(objects));
+                mesh.vertices(vertices)
+                    .blend(ColorMode::disabled())
+                    .cull(CullFaceMode::back_ccw())
+                    .projection(ProjectionVariant::Globe);
+                *value = Some(context.mesh(&mesh));
             }
             let Some(mesh) = value.as_ref() else {
                 continue;
             };
             let tile = tile_id.to_unwrapped();
             let at = TileProjection::of(&tile, state, &state.projection_data(&tile), None);
-            // The draws draw in the order their meshes were made.
-            let draw =
-                Draw { order: mesh.seq() as i64, depth: Depth::Volume { write: true, once: false }, ..Draw::DEFAULT };
-            self.draws.push_at(mesh, &at, draw, ());
+            self.draws.push_at(
+                mesh,
+                &at,
+                Draw { depth: Depth::Volume { write: true, once: false }, ..Draw::DEFAULT },
+                (),
+            );
         }
-        self.draws.finish(gpu, context, []);
+        self.draws.finish(gpu, context, &(), []);
     }
 
     /// Uploads the meshes of the frame's draws.

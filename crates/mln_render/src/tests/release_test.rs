@@ -6,6 +6,7 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::PROJECTION_BUFFER;
+use mln_gfx::texture2d::SamplerState;
 use mln_util::Color;
 use mln_util::size::Size;
 
@@ -28,7 +29,8 @@ fn bindings_and_geometry_go_before_what_they_were_made_of() {
         context.device().write_uniforms(gpu, &mut ubo, &vec![0; projection], false);
         let ubo_id = ubo.as_ref().expect("a uniform buffer").id();
         let texture = context.add_texture_with(|texture| texture.set_size(Size::new(2, 2)));
-        let (texture_id, sampler) = context.texture_binding(gpu, &texture).expect("the texture");
+        let (texture_id, sampler) =
+            context.texture_binding(gpu, &texture, SamplerState::default()).expect("the texture");
         let vertices = context.add_vertices(vec![[0i16; 2]; 4]);
         let vertices_id = context.upload_vertices(gpu, &vertices).expect("vertices").expect("a buffer");
         let indexes = context.add_vertices(vec![0u16, 1, 2, 3]);
@@ -60,7 +62,7 @@ fn bindings_and_geometry_go_before_what_they_were_made_of() {
         let geometry = context.own(geometry, vec![vertices.held(), indexes.held()]);
         drop((vertices, indexes));
         context.stored_texture_mut(&texture).expect("the texture").set_size(Size::new(4, 4));
-        context.texture_binding(gpu, &texture).expect("the resized texture");
+        context.texture_binding(gpu, &texture, SamplerState::default()).expect("the resized texture");
 
         let stats = context.stats();
         context.destroy_released(gpu);

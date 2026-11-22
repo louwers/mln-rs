@@ -92,9 +92,9 @@ pub(crate) fn update_attribute_bindings(
 
 /// Whether the next upload writes what one of `overrides`' attributes
 /// that the shader's `attributes` read
-/// ([`VertexAttribute::needs_upload`]).
+/// ([`SharedAttribute::needs_upload`]).
 ///
-/// [`VertexAttribute::needs_upload`]: crate::gfx::vertex_attribute::VertexAttribute::needs_upload
+/// [`SharedAttribute::needs_upload`]: crate::gfx::vertex_attribute::SharedAttribute::needs_upload
 pub(crate) fn needs_upload(context: &Resources, attributes: &[Attribute], overrides: &VertexAttributeArray) -> bool {
     attributes
         .iter()

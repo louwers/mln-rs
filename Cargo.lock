@@ -2675,7 +2675,6 @@ dependencies = [
 name = "mln-rs-extension-tests"
 version = "0.0.13"
 dependencies = [
- "bytemuck",
  "mln-rs",
 ]
 

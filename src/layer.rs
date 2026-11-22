@@ -6,7 +6,10 @@
 pub use mln_gfx::gfx_types::AttributeDataType;
 pub use mln_gfx::shaders::program::{self, Attribute, Program, Projection, Property, Sources, Stages};
 pub use mln_gfx::shaders::source;
+pub use mln_gfx::texture2d::SamplerState;
+pub use mln_gfx::types::{TextureFilterType, TextureWrapType};
 pub use mln_gfx::{ColorMode, CullFaceMode, DrawMode, uniform_block};
+pub use mln_map_types::View;
 pub use mln_render::draw::*;
 pub use mln_render::layer::*;
 pub use mln_render::paint_property_binders;
@@ -15,5 +18,6 @@ pub use mln_style::properties;
 pub use mln_style::property_table::{PropertyInfo, PropertyTable, PropertyVisitor};
 pub use mln_style_types::image::ImageType;
 pub use mln_text::glyph::GlyphID;
-pub use mln_util::Color;
 pub use mln_util::error::Error;
+pub use mln_util::{Color, intersection_tests};
+pub use mln_wire::Wire;

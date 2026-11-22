@@ -6,20 +6,15 @@
 // style's order.
 
 use std::any::Any;
-use std::ops::Range;
 use std::sync::Arc;
 
 use mln_gfx::gpu::Gpu;
-use mln_gfx::projection_variant::ProjectionVariant;
 use mln_map_types::View;
-use mln_map_types::tile_cover::{TileCoverParameters, tile_cover};
 use mln_style::expression::Dependency;
 use mln_style::layer_type::{ErasedLayerStyle, LayerStyle, PaintSet, SourceKind, StyleLayerType};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::VisibilityType;
-use mln_tile_id::OverscaledTileID;
 use mln_util::geo::ScreenCoordinate;
-use mln_util::range::Range as ZoomRange;
 use smallvec::SmallVec;
 
 use crate::bucket::ErasedBucket;
@@ -28,11 +23,11 @@ use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer, entry};
 use crate::gfx::context::Resources;
 use crate::image_store::ImageStore;
 use crate::layer::{
-    EvaluateCx, Evaluation, Found, FrameQuery, FrameTile, Hit, HitTest, Layer, LayerValues, NewCx, PrepareCx, TileCx,
-    Tiles, UpdateCx, input,
+    EvaluateCx, Evaluation, Found, FrameQuery, Hit, HitTest, Layer, LayerValues, NewCx, PrepareCx, TileCx, Tiles,
+    UpdateCx, input,
 };
 use crate::paint_parameters::PaintParameters;
-use crate::render_source::{RenderSource, TileOrder};
+use crate::render_source::RenderSource;
 use crate::render_tile::{FoundTile, RenderTile, TileContent};
 use crate::tile::contents::GeometryContents;
 use crate::tile_values::TileMap;
@@ -52,9 +47,9 @@ pub(crate) struct ErasedLayerBucket<'a> {
 /// the engine sees them.
 #[derive(Clone, Copy)]
 pub(crate) struct FrameSourceTiles<'a> {
-    tiles: &'a [RenderTile],
+    pub(crate) tiles: &'a [RenderTile],
     /// What each of `tiles` holds, at its index.
-    contents: &'a [Option<TileContent<'a>>],
+    pub(crate) contents: &'a [Option<TileContent<'a>>],
 }
 
 impl<'a> FrameSourceTiles<'a> {
@@ -88,18 +83,13 @@ pub(crate) struct Hosted<L: Layer> {
     layer: L,
     /// The layer's values of the frame's tiles.
     tile_values: TileMap<L::Tile>,
-    /// The tiles that cover the view, for a layer of [`ViewCover`](crate::layer::ViewCover).
-    cover: Vec<OverscaledTileID>,
+    /// What the layer's update found of its frame tiles.
+    frame_tiles: <L::Input as input::Find<L::Style>>::Frame,
     style_dependencies: Dependency,
     /// Whether the frame draws the layer.
     renderable: bool,
-    /// The projection the layer's tile values are made for.
-    projection_variant: ProjectionVariant,
-    /// Where the tiles the layer's update found are among the frame's
-    /// ([`LayerUpdate::found`]).
-    found: Range<usize>,
-    /// The deepest zoom with tiles of their own in the layer's source.
-    source_max_zoom: Option<u8>,
+    /// Whether the layer's tile values are made for the globe.
+    globe: bool,
     /// The layer's draws of the frame.
     frame_draws: Draws,
 }
@@ -127,11 +117,9 @@ impl<L: Layer> Hosted<L> {
             values,
             layer,
             tile_values: TileMap::default(),
-            cover: Vec::new(),
+            frame_tiles: Default::default(),
             renderable: false,
-            projection_variant: ProjectionVariant::Mercator,
-            found: 0..0,
-            source_max_zoom: None,
+            globe: false,
             frame_draws: Draws::new(),
         }
     }
@@ -162,8 +150,6 @@ pub(crate) struct LayerRecord {
     pub(crate) volume: bool,
     /// Whether the layer's type places its layers.
     pub(crate) places: bool,
-    /// The order the layer draws its source's tiles in.
-    pub(crate) tile_order: TileOrder,
 }
 
 impl LayerRecord {
@@ -184,11 +170,11 @@ impl LayerRecord {
 /// layer's evaluation says and whether it draws. Its own
 /// [`restyle`](Self::restyle), [`evaluate`](Self::evaluate),
 /// [`update`](Self::update) and [`update_draws`](Self::update_draws) take
-/// the place of the layer's, and keep and read the record. It derefs to the
-/// layer for the rest of what the engine does with it.
+/// the place of the layer's, and keep and read the record; the engine does
+/// the rest with the [`layer`](Self::layer) itself.
 pub(crate) struct RecordedLayer {
     record: LayerRecord,
-    layer: Box<dyn RenderLayer>,
+    pub(crate) layer: Box<dyn RenderLayer>,
 }
 
 impl RecordedLayer {
@@ -230,20 +216,6 @@ impl RecordedLayer {
         found: &[FoundTile],
     ) {
         self.layer.update_draws(gpu, paint, self.record.evaluation, images, source, found);
-    }
-}
-
-impl std::ops::Deref for RecordedLayer {
-    type Target = dyn RenderLayer;
-
-    fn deref(&self) -> &(dyn RenderLayer + 'static) {
-        &*self.layer
-    }
-}
-
-impl std::ops::DerefMut for RecordedLayer {
-    fn deref_mut(&mut self) -> &mut (dyn RenderLayer + 'static) {
-        &mut *self.layer
     }
 }
 
@@ -348,8 +320,8 @@ pub(crate) trait RenderLayer: Any {
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder);
 
     /// The query radius of the layer's features in `contents`, a tile's
-    /// layout ([`Layer::query_radius`]).
-    fn query_radius(&self, contents: &GeometryContents) -> f32;
+    /// layout, seen by `camera` ([`Layer::query_radius`]).
+    fn query_radius(&self, contents: &GeometryContents, camera: &View) -> f32;
 
     /// Whether `test`'s feature, as the layer draws it, is hit by the
     /// query's geometry ([`Layer::hit`]).
@@ -397,7 +369,6 @@ impl<L: Layer> RenderLayer for Hosted<L> {
             draws,
             volume: L::VOLUME,
             places: false,
-            tile_order: TileOrder::ById,
         }
     }
 
@@ -445,50 +416,12 @@ impl<L: Layer> RenderLayer for Hosted<L> {
     }
 
     fn update(&mut self, update: &mut LayerUpdate<'_>) -> bool {
-        let start = update.found.len();
-        let mut draws = false;
-        if crate::layer::input_source::<L>() == SourceKind::None {
-            let view = update.view;
-            let parameters = update.update_parameters;
-            let zoom = view.integer_zoom();
-            self.cover = tile_cover(
-                &TileCoverParameters {
-                    view: view.clone(),
-                    tile_lod_min_radius: parameters.tile_lod_min_radius,
-                    tile_lod_scale: parameters.tile_lod_scale,
-                    tile_lod_pitch_threshold: parameters.tile_lod_pitch_threshold,
-                    tile_lod_mode: parameters.tile_lod_mode,
-                    requested_zoom: None,
-                    round_zoom: false,
-                    max_content_elevation: 0.0,
-                },
-                zoom,
-                ZoomRange::new(0u8, zoom),
-                None,
-            );
-            self.tile_values.set_tiles(self.cover.iter().copied());
-        } else {
-            let mut ids: SmallVec<[OverscaledTileID; 64]> = SmallVec::new();
-            if let Some(source) = update.source
-                && let Some(order) = source.tile_order(TileOrder::ById)
-            {
-                let tiles = source.render_tiles();
-                for &index in order {
-                    let Some(tile) = tiles.get(index) else { continue };
-                    let content = update.contents.get(index).copied().flatten();
-                    let found = content
-                        .and_then(|content| <L::Input as input::Find<L::Style>>::find(content, &self.values.style.id));
-                    draws |=
-                        found.is_some_and(|(data, _)| <L::Input as input::Find<L::Style>>::identity(data).is_some());
-                    update.found.push(FoundTile { tile: index, view: found.map(|(_, place)| place) });
-                    ids.push(*tile.overscaled_tile_id());
-                }
-            }
-            self.tile_values.set_tiles(ids);
-            self.source_max_zoom = update.source.and_then(RenderSource::max_zoom);
-        }
-        self.found = start..update.found.len();
-        draws
+        <L::Input as input::Find<L::Style>>::update(
+            &mut self.frame_tiles,
+            update,
+            &self.values.style.id,
+            &mut self.tile_values,
+        )
     }
 
     fn update_draws(
@@ -500,39 +433,22 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         source: Option<FrameSourceTiles<'_>>,
         found: &[FoundTile],
     ) {
-        let variant =
-            if paint.frame.camera.is_globe() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
-        if variant != self.projection_variant {
-            self.projection_variant = variant;
+        let frame = paint.frame;
+        // The tiles of a layer without a source have other geometry on the
+        // globe.
+        if frame.camera.is_globe() != self.globe {
+            self.globe = frame.camera.is_globe();
             self.remove_all_draws();
         }
-        paint.context.set_projection_variant(variant);
-        self.frame_draws.begin(evaluation.opaque, paint.frame.composites_with_frame_depth);
+        self.frame_draws.begin(frame.camera.zoom() as f32, evaluation.opaque, frame.composites_with_frame_depth);
         if !evaluation.draws {
             self.frame_draws.clear();
             return;
         }
 
         let mut tiles: SmallVec<[Found<'_>; 64]> = SmallVec::new();
-        if crate::layer::input_source::<L>() == SourceKind::None {
-            for (index, &id) in self.cover.iter().enumerate() {
-                tiles.push(Found { tile: FrameTile { index, id, unwrapped: id.to_unwrapped() }, at: None });
-            }
-        } else {
-            let found = found.get(self.found.clone()).unwrap_or_default();
-            for (index, &FoundTile { tile, view }) in found.iter().enumerate() {
-                let Some(source) = source else { break };
-                let Some(render_tile) = source.tiles.get(tile) else { continue };
-                let content = source.contents.get(tile).copied().flatten();
-                let at = content.zip(view);
-                let held = at.and_then(|(content, place)| <L::Input as input::Find<L::Style>>::at(content, place));
-                self.tile_values.show(index, held.and_then(<L::Input as input::Find<L::Style>>::identity));
-                let id = *render_tile.overscaled_tile_id();
-                tiles.push(Found { tile: FrameTile { index, id, unwrapped: render_tile.id }, at });
-            }
-        }
+        <L::Input as input::Find<L::Style>>::tiles(&self.frame_tiles, found, source, &mut self.tile_values, &mut tiles);
 
-        let frame = paint.frame;
         let res = &mut *paint.context;
         let Hosted { values, layer, tile_values, frame_draws, .. } = self;
         layer.update(&mut UpdateCx {
@@ -552,7 +468,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         }
         layer
             .prepare(&PrepareCx { layer: values, frame: &frame, res, found: &tiles, values: tile_values }, frame_draws);
-        frame_draws.finish(gpu, res, tiles.iter().map(|found| found.tile.unwrapped));
+        frame_draws.finish(gpu, res, &values.evaluated.paint, tiles.iter().map(|found| found.tile.unwrapped));
     }
 
     fn handle_wrap_jump(&mut self, wrap_delta: i16) {
@@ -606,9 +522,9 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         }
     }
 
-    fn query_radius(&self, contents: &GeometryContents) -> f32 {
+    fn query_radius(&self, contents: &GeometryContents, camera: &View) -> f32 {
         let laid = <L::Input as input::Find<L::Style>>::laid(contents, &self.values.style.id);
-        laid.map_or(0.0, |data| self.layer.query_radius(&self.values, data))
+        laid.map_or(0.0, |data| self.layer.query_radius(&self.values, data, camera))
     }
 
     fn hit(&self, test: &ErasedHitTest<'_>) -> Option<f32> {

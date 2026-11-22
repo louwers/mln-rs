@@ -1225,7 +1225,7 @@ impl SourceTiles {
             // 2 to the power of the zoom's distance above the tile's.
             let scale = (view.scale() / f64::from(1u32 << id.canonical.z)) as f32;
             let query_padding =
-                f64::from(max_pitch_scale_factor * contents.query_padding(layers) * constants::EXTENT as f32)
+                f64::from(max_pitch_scale_factor * contents.query_padding(layers, view) * constants::EXTENT as f32)
                     / constants::TILE_SIZE_D
                     / f64::from(scale);
 

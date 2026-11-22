@@ -390,7 +390,8 @@ impl Renderer {
     }
 
     /// Drops every layer: the renderer's device or target went first, and
-    /// the layers' GPU resources with it. Call it before the renderer goes.
+    /// the layers' GPU resources with it. The next update makes every layer
+    /// of the style again ([`Layer::new`](crate::layer::Layer::new)).
     pub fn lose_context(&mut self) {
         self.orchestrator.leave_layers();
     }

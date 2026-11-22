@@ -63,15 +63,6 @@ impl RenderStaticData {
             })
             .collect()
     }
-
-    /// The segment that draws the two triangles of
-    /// [`quad_triangle_indices`](Self::quad_triangle_indices) over a quad's
-    /// four vertices, such as [`tile_vertices`](Self::tile_vertices) or
-    /// [`raster_vertices`](Self::raster_vertices).
-    #[must_use]
-    pub(crate) fn quad_triangle_segments() -> Vec<SegmentBase> {
-        vec![SegmentBase::with_lengths(0, 0, 4, 6)]
-    }
 }
 
 #[cfg(test)]

@@ -4,15 +4,14 @@
 
 use std::rc::Rc;
 
-use mln_gfx::gpu::{Gpu, GpuError, SamplerId, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage};
+use mln_gfx::gpu::{Gpu, GpuError, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage};
 use mln_gfx::rendering_stats::RenderingStats;
-use mln_gfx::texture2d::SamplerState;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
 use crate::gfx::resources::{Device, SharedGpuTexture};
 
-/// A texture of the renderer: its size, format and sampler state, the image
+/// A texture of the renderer: its size and format, the image
 /// it waits to upload, and once made, a texture of the backend's
 /// [`Gpu`](mln_gfx::gpu::Gpu), which the texture lets go of when it
 /// replaces it or drops, and which bindings made of it hold until they go. The context changes it, and lends it to set up as a
@@ -22,9 +21,6 @@ pub(crate) struct Texture2D {
     size: Size,
     format: TextureFormat,
     render_target: bool,
-    sampler: SamplerState,
-    /// The context's sampler of `sampler`, once a draw bound it.
-    sampler_id: Option<SamplerId>,
     /// The image the next upload writes.
     image: Option<Rc<PremultipliedImage>>,
 }
@@ -37,8 +33,6 @@ impl Texture2D {
             size: Size::new(0, 0),
             format: TextureFormat::Rgba8Unorm,
             render_target: false,
-            sampler: SamplerState::default(),
-            sampler_id: None,
             image: None,
         }
     }
@@ -70,22 +64,6 @@ impl Texture2D {
             self.release();
             self.format = format;
         }
-    }
-
-    /// How shaders sample the texture.
-    #[must_use]
-    pub(crate) fn sampler(&self) -> SamplerState {
-        self.sampler
-    }
-
-    /// The context's sampler of the texture's sampler state, once a draw
-    /// bound it.
-    pub(crate) fn sampler_id(&self) -> Option<SamplerId> {
-        self.sampler_id
-    }
-
-    pub(crate) fn set_sampler_id(&mut self, sampler: SamplerId) {
-        self.sampler_id = Some(sampler);
     }
 
     /// Whether the texture has an image to upload.
@@ -207,16 +185,6 @@ impl<'a> TextureMut<'a> {
     /// shaders sample.
     pub(crate) fn set_render_target(&mut self) {
         self.texture.render_target = true;
-    }
-
-    /// Sets how shaders sample the texture, with an anisotropy of at least 1.
-    pub fn set_sampler(&mut self, sampler: SamplerState) {
-        let texture = &mut *self.texture;
-        let sampler = SamplerState { max_anisotropy: sampler.max_anisotropy.max(1), ..sampler };
-        if sampler != texture.sampler {
-            texture.sampler = sampler;
-            texture.sampler_id = None;
-        }
     }
 
     /// Sets the RGBA image the next upload writes, and the texture's size to

@@ -84,7 +84,7 @@ fn main(in: VertexInput) -> VertexOutput {
             let projected_center = interpolateProjection(circle_center, center_vector, 0.0, projection);
             angle_scale *= radius_with_stroke * (projected_center.w / view.camera_to_center_distance);
 #else
-            let projected_center = drawable.matrix * vec4<f32>(circle_center, 0.0, 1.0);
+            let projected_center = projection.fallback_matrix * vec4<f32>(circle_center, 0.0, 1.0);
 #endif
             corner_position += scaled_extrude * radius_with_stroke *
                                (projected_center.w / view.camera_to_center_distance);
@@ -93,7 +93,7 @@ fn main(in: VertexInput) -> VertexOutput {
         let corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
         position = interpolateProjection(corner_position, corner_vector, 0.0, projection);
 #else
-        position = drawable.matrix * vec4<f32>(corner_position, 0.0, 1.0);
+        position = projection.fallback_matrix * vec4<f32>(corner_position, 0.0, 1.0);
 #endif
     } else {
 #ifdef PROJECTION_GLOBE
@@ -103,7 +103,7 @@ fn main(in: VertexInput) -> VertexOutput {
             position.y = 10000.0;
         }
 #else
-        position = drawable.matrix * vec4<f32>(circle_center, 0.0, 1.0);
+        position = projection.fallback_matrix * vec4<f32>(circle_center, 0.0, 1.0);
 #endif
         var factor = position.w;
         if (scale_with_map) {

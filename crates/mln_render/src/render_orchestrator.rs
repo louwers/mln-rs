@@ -36,7 +36,7 @@ use crate::image_store::ImageStore;
 use crate::paint_parameters::PaintParameters;
 use crate::placement::{CollisionGroups, ErasedFrame, ErasedPlacement, PlacementQuery, Prepared, Schedule};
 use crate::render_layer::{FrameSourceTiles, LayerUpdate, RecordedLayer, RenderLayer};
-use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
+use crate::render_source::{self, RenderSource, RenderTileParameters};
 use crate::render_tile::{FoundTile, RenderTile, TileContent};
 use crate::renderer_event::RendererEvent;
 use crate::sky_pass::FullscreenDraw;
@@ -171,6 +171,9 @@ pub(crate) struct RenderOrchestrator {
     /// Whether the next update makes the render layers again, for new
     /// shaders.
     remake_render_layers: bool,
+    /// Whether the render layers left with the renderer's GPU context, so
+    /// that the next update makes every layer of the style again.
+    layers_left: bool,
     filtered_layers_for_source: Vec<Arc<dyn ErasedEvaluatedLayer>>,
 
     thread_pool: TaskGroup,
@@ -233,6 +236,7 @@ impl RenderOrchestrator {
             longitude: 0.0,
             tile_cache_enabled: true,
             remake_render_layers: false,
+            layers_left: false,
             filtered_layers_for_source: Vec::new(),
             _wait_for_thread_pool: WaitOnDrop(thread_pool.clone()),
             thread_pool,
@@ -353,10 +357,10 @@ impl RenderOrchestrator {
         self.longitude = longitude;
         for (layer, will_render) in self.layers.iter_mut().zip(will_render) {
             if wrap_delta != 0 {
-                layer.handle_wrap_jump(wrap_delta);
+                layer.layer.handle_wrap_jump(wrap_delta);
             }
-            if layer.is_renderable() != will_render {
-                layer.set_renderable(will_render);
+            if layer.layer.is_renderable() != will_render {
+                layer.layer.set_renderable(will_render);
             }
         }
 
@@ -382,7 +386,7 @@ impl RenderOrchestrator {
 
         if let Some(pass) = &mut self.placement {
             let layers: SmallVec<[&dyn RenderLayer; 8]> =
-                self.placing_layers.iter().map(|&index| &*self.layers[index]).collect();
+                self.placing_layers.iter().map(|&index| &*self.layers[index].layer).collect();
             let mut placement_frame = ErasedFrame { layers: &layers, update_parameters, buckets: &mut self.tile_store };
             pass.update_buckets(&mut placement_frame);
         }
@@ -391,20 +395,8 @@ impl RenderOrchestrator {
     }
 
     /// Brings the feature state of the enabled sources' tiles to the
-    /// sources', and
-    /// computes their tiles' matrices for the frame. A source that a layer
-    /// of the frame draws in [`TileOrder::ByY`] sorts its tiles so.
+    /// sources', and computes their tiles' matrices for the frame.
     fn update_render_tiles(&mut self, frame: &FramePlan) {
-        let mut sorted_by_y: SmallVec<[&str; 4]> = SmallVec::new();
-        for (&index, frame_layer) in &frame.layers {
-            if let Some(source) = frame_layer.source.as_deref()
-                && self.layers[index as usize].record().tile_order == TileOrder::ByY
-                && !sorted_by_y.contains(&source)
-            {
-                sorted_by_y.push(source);
-            }
-        }
-
         for (name, render_source) in &mut self.render_sources {
             if render_source.is_enabled() {
                 if let Some((tiles, _)) = render_source.tiles().and_then(|key| self.tile_store.source_mut(key)) {
@@ -416,7 +408,6 @@ impl RenderOrchestrator {
                         transform: &frame.transform,
                         debug_options: frame.debug_options,
                         source_name: name.clone(),
-                        sort_by_y: sorted_by_y.contains(&name.as_str()),
                     },
                 );
             } else {
@@ -618,18 +609,19 @@ impl RenderOrchestrator {
         let render_layers_remade = std::mem::take(&mut self.remake_render_layers);
         if render_layers_remade {
             for render_layer in &mut self.layers {
-                let style = render_layer.shared_style();
+                let style = render_layer.layer.shared_style();
                 let Some(mut new_layer) = create_render_layer(&self.registry, &style, res) else {
                     continue;
                 };
-                new_layer.transition(&clock.added_layer_transition);
+                new_layer.layer.transition(&clock.added_layer_transition);
                 *render_layer = new_layer;
             }
         }
 
-        if layer_changes.order_changed {
+        let rejoin = std::mem::take(&mut self.layers_left);
+        if layer_changes.order_changed || rejoin {
             let mut by_id: HashMap<String, RecordedLayer> =
-                self.layers.drain(..).map(|layer| (layer.id().to_owned(), layer)).collect();
+                self.layers.drain(..).map(|layer| (layer.layer.id().to_owned(), layer)).collect();
 
             // Remove render layers for removed layers.
             for (id, _) in layer_changes.iter().filter(|(_, change)| change.removes()) {
@@ -640,16 +632,26 @@ impl RenderOrchestrator {
             for (id, _) in layer_changes.iter().filter(|(_, change)| change.adds()) {
                 let Some(layer) = layers.get(id) else { continue };
                 if let Some(mut render_layer) = create_render_layer(&self.registry, layer.style(), res) {
-                    render_layer.transition(&clock.added_layer_transition);
+                    render_layer.layer.transition(&clock.added_layer_transition);
                     // A layer added twice keeps its first render layer.
                     by_id.entry(id.to_string()).or_insert(render_layer);
+                }
+            }
+
+            // After the GPU context went, every layer joins again.
+            if rejoin {
+                for layer in layers.iter() {
+                    if let Some(mut render_layer) = create_render_layer(&self.registry, layer.style(), res) {
+                        render_layer.layer.transition(&clock.added_layer_transition);
+                        by_id.entry(layer.get_id().to_owned()).or_insert(render_layer);
+                    }
                 }
             }
 
             // A layer type without a render layer is skipped.
             self.layers = layers.iter().filter_map(|layer| by_id.remove(layer.get_id())).collect();
             self.layer_indexes =
-                self.layers.iter().enumerate().map(|(index, layer)| (layer.id().to_owned(), index)).collect();
+                self.layers.iter().enumerate().map(|(index, layer)| (layer.layer.id().to_owned(), index)).collect();
         }
 
         // Update render layers for changed layers.
@@ -659,11 +661,12 @@ impl RenderOrchestrator {
                 if change.restyles() {
                     render_layer.restyle(&clock.transition, layer.style());
                 } else if change == LayerChange::Data {
-                    render_layer.set_data(layer.style());
+                    render_layer.layer.set_data(layer.style());
                 }
             }
         }
 
+        let render_layers_remade = render_layers_remade || rejoin;
         if render_layers_remade || layer_changes.order_changed || !layer_changes.is_empty() {
             self.tile_store.glyphs().evict(&layer::font_stacks(layers.iter().map(Layer::style)));
         }
@@ -683,42 +686,42 @@ impl RenderOrchestrator {
     ) -> VecSet<String> {
         let mut constants_mask_changed: VecSet<String> = VecSet::new();
         for layer in &mut self.layers {
-            let id = layer.id().to_owned();
+            let id = layer.layer.id().to_owned();
             let layer_added_or_changed =
                 render_layers_remade || layer_changes.get(&id).is_some_and(|change| change != LayerChange::Removed);
             clock.evaluation.layer_changed = layer_added_or_changed;
-            clock.evaluation.has_crossfade = layer.has_crossfade();
+            clock.evaluation.has_crossfade = layer.layer.has_crossfade();
 
             // Only re-evaluate on change of zoom if the style has some
             // reference to it
             let zoom_changed_and_matters = clock.zoom_changed
                 && !layer_added_or_changed
-                && layer.style_dependencies().intersects(Dependency::ZOOM);
+                && layer.layer.style_dependencies().intersects(Dependency::ZOOM);
 
             // Similarly, only re-evaluate on a global state change if the
             // layer references the global state.
             let global_state_changed_and_matters = clock.global_state_changed
                 && !layer_added_or_changed
-                && layer.style_dependencies().intersects(Dependency::GLOBAL_STATE);
+                && layer.layer.style_dependencies().intersects(Dependency::GLOBAL_STATE);
 
             // A running transition may read the changed state too, from a
             // value the layer no longer has.
             if let Some(parameters) = &clock.global_state_transition
                 && !layer_added_or_changed
-                && (global_state_changed_and_matters || layer.has_transition())
+                && (global_state_changed_and_matters || layer.layer.has_transition())
             {
-                layer.transition(parameters);
+                layer.layer.transition(parameters);
             }
 
             if layer_added_or_changed
                 || zoom_changed_and_matters
                 || global_state_changed_and_matters
                 || clock.evaluation.has_crossfade
-                || layer.has_transition()
+                || layer.layer.has_transition()
             {
-                let previous_mask = layer.evaluated().constants_mask();
+                let previous_mask = layer.layer.evaluated().constants_mask();
                 layer.evaluate(&clock.evaluation);
-                if previous_mask != layer.evaluated().constants_mask() {
+                if previous_mask != layer.layer.evaluated().constants_mask() {
                     constants_mask_changed.insert(id);
                 }
             }
@@ -823,15 +826,15 @@ impl RenderOrchestrator {
                     if let Some(style_source) = &style_source
                         && render_source_id == Some(record.source.as_str())
                     {
-                        let style = layer.style();
+                        let style = layer.layer.style();
                         let layer_is_visible = record.visible;
                         let zoom_fits_layer = record.supports_zoom(self.zoom_history.last_zoom);
-                        let layer_id = layer.id().to_owned();
+                        let layer_id = layer.layer.id().to_owned();
                         // A global state change requires a relayout of
                         // this layer's source if one of the changed state
                         // properties is referenced by anything that is
                         // baked into the tile's buckets.
-                        let evaluated = layer.evaluated();
+                        let evaluated = layer.layer.evaluated();
                         let global_state_requires_relayout = {
                             if !clock.global_state_changed
                                 || !(style.layout_dependencies() | evaluated.evaluated_dependencies())
@@ -882,7 +885,7 @@ impl RenderOrchestrator {
                         && !update_parameters.debug_options.contains(MapDebugOptions::OVERDRAW)
                         && layers
                             .first()
-                            .is_some_and(|first| std::ptr::addr_eq(layer.style(), Arc::as_ptr(first.style())))
+                            .is_some_and(|first| std::ptr::addr_eq(layer.layer.style(), Arc::as_ptr(first.style())))
                         && let Some(solid_background) = record.evaluation.solid
                     {
                         frame.background_color = solid_background;
@@ -920,7 +923,7 @@ impl RenderOrchestrator {
         let continuous = update_parameters.mode == MapMode::Continuous;
         let time_point = update_parameters.time_point;
         let layers: SmallVec<[&dyn RenderLayer; 8]> =
-            self.placing_layers.iter().map(|&index| &*self.layers[index]).collect();
+            self.placing_layers.iter().map(|&index| &*self.layers[index].layer).collect();
         let prepared = match &mut self.placement {
             Some(pass) => {
                 pass.prepare(&mut ErasedFrame { layers: &layers, update_parameters, buckets: &mut self.tile_store })
@@ -1008,7 +1011,7 @@ impl RenderOrchestrator {
             return true;
         }
 
-        if self.layers.iter().any(|layer| layer.has_transition()) {
+        if self.layers.iter().any(|layer| layer.layer.has_transition()) {
             return true;
         }
 
@@ -1045,7 +1048,7 @@ impl RenderOrchestrator {
         self.debug_layers.clear();
         self.render_sources.clear();
         self.tile_store.clear();
-        self.leave_layers();
+        self.layers.clear();
         self.layer_indexes.clear();
 
         if let Some(pass) = &mut self.placement {
@@ -1120,7 +1123,7 @@ impl RenderOrchestrator {
     /// Visits the layers' draw groups of the frame, in drawing order.
     pub(crate) fn visit_draw_groups<'a>(&'a self, mut visit: impl FnMut(&'a FrameDraws)) {
         for layer in &self.layers {
-            layer.visit_draw_groups(&mut visit);
+            layer.layer.visit_draw_groups(&mut visit);
         }
     }
 
@@ -1130,7 +1133,7 @@ impl RenderOrchestrator {
     /// overlays.
     pub(crate) fn upload_draws(&mut self, gpu: &mut dyn Gpu, context: &mut Resources) {
         for layer in &mut self.layers {
-            layer.upload(gpu, context);
+            layer.layer.upload(gpu, context);
         }
         self.globe_depth_pass.upload(gpu, context);
         if let Some(sky) = self.sky_pass.sky() {
@@ -1156,12 +1159,12 @@ impl RenderOrchestrator {
         match order {
             DrawOrder::BottomUp => {
                 for layer in &mut self.layers {
-                    layer.render(gpu, parameters, order);
+                    layer.layer.render(gpu, parameters, order);
                 }
             }
             DrawOrder::TopDown => {
                 for layer in self.layers.iter_mut().rev() {
-                    layer.render(gpu, parameters, order);
+                    layer.layer.render(gpu, parameters, order);
                 }
             }
         }
@@ -1196,14 +1199,17 @@ impl RenderOrchestrator {
 
     /// The layer `id`, of the type `L`, with its values.
     pub(crate) fn layer<L: crate::layer::Layer>(&self, id: &str) -> Option<(&L, &crate::layer::LayerValues<L::Style>)> {
-        let layer: &dyn std::any::Any = &**self.layers.get(*self.layer_indexes.get(id)?)?;
+        let layer: &dyn std::any::Any = &*self.layers.get(*self.layer_indexes.get(id)?)?.layer;
         let hosted = layer.downcast_ref::<crate::render_layer::Hosted<L>>()?;
         Some(hosted.parts())
     }
 
-    /// Drops every render layer.
+    /// Drops every render layer, with the GPU context they were made in:
+    /// the next update makes every layer of the style again.
     pub(crate) fn leave_layers(&mut self) {
         self.layers.clear();
+        self.layer_indexes.clear();
+        self.layers_left = true;
     }
 
     /// Makes the draws of the layers the frame draws, and of the sky and
@@ -1272,7 +1278,7 @@ impl RenderOrchestrator {
         };
         let mut layers: HashMap<String, &RecordedLayer> = HashMap::default();
         for layer in render_layers {
-            layers.entry(layer.id().to_owned()).or_insert(layer);
+            layers.entry(layer.layer.id().to_owned()).or_insert(layer);
         }
 
         self.query_rendered_features_in(geometry, options, &layers)
@@ -1291,7 +1297,7 @@ impl RenderOrchestrator {
             if !record.needs_rendering() || !record.supports_zoom(self.zoom_history.last_zoom) {
                 continue;
             }
-            filtered_layers.insert(id.clone(), &***layer);
+            filtered_layers.insert(id.clone(), &*layer.layer);
             source_ids.insert(record.source.clone());
         }
 

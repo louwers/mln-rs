@@ -101,7 +101,9 @@ pub mod __private {
     pub use mln_wire;
 
     pub use crate::bucket::FeatureStates;
-    pub use crate::paint_property_binder::{Bind, InterleavedVertexBuffer, PaintPropertyBinderBase};
+    pub use crate::paint_property_binder::{
+        Bind, BinderSet, InterleavedVertexBuffer, PaintPropertyBinderBase, UniformValue,
+    };
 }
 
 #[cfg(test)]

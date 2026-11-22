@@ -21,7 +21,7 @@ use mln_util::range::Range;
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::gfx::context::Resources;
 use crate::globe::surface_granularity;
-use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters, TileOrder};
+use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters};
 use crate::render_tile::RenderTile;
 use crate::source::{ImageOf, SourceImage};
 use crate::tile::raster::{RasterContents, RasterLayoutVertex};
@@ -378,7 +378,7 @@ impl RenderSource for RenderImageSource {
         if self.loaded() { &self.render_tiles } else { &[] }
     }
 
-    fn tile_order(&self, _order: TileOrder) -> Option<&[usize]> {
+    fn tile_order(&self) -> Option<&[usize]> {
         Some(&self.order[..self.render_tiles().len()])
     }
 

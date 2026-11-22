@@ -11,6 +11,7 @@
 //! texture of its own where it composites, and with no call back into the
 //! layer. [`FrameDraws`] are a group's draws as the engine draws them.
 
+use std::any::Any;
 use std::ops::Range;
 
 use mln_gfx::gpu::Gpu;
@@ -27,6 +28,7 @@ use crate::gfx::store::MeshKey;
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::layer_composite::Composite;
 use crate::paint_parameters::{Composited, DepthTest, PaintParameters, Stencil};
+use crate::paint_property_binder::MeshPaint;
 use crate::render_pass::Pass;
 use crate::tile_matrix::{TileProjection, bind_no_projection};
 
@@ -130,6 +132,9 @@ struct Pushes {
     block_bytes: Vec<u8>,
     /// Where a write of one of the draws' buffers gathers its bytes.
     scratch: Vec<u8>,
+    /// The first pushed mesh's paint values that the engine writes into
+    /// the shared blocks, with its program.
+    paint: Option<(MeshPaint, &'static Program)>,
 }
 
 /// A layer's draws of a frame in one place in the layers' order and depth,
@@ -142,17 +147,27 @@ pub struct Group {
     opaque: bool,
     /// Whether the group can composite with the frame's depth.
     frame_depth: bool,
+    /// The camera's zoom, at which the draws mix their paint values' zoom
+    /// stops.
+    zoom: f32,
 }
 
 impl Group {
     pub(crate) fn new() -> Group {
-        Group { frame: FrameDraws::default(), pushes: Pushes::default(), opaque: false, frame_depth: false }
+        Group { frame: FrameDraws::default(), pushes: Pushes::default(), opaque: false, frame_depth: false, zoom: 0.0 }
     }
 
     /// Adds a draw of `mesh`, not of a tile, with `blocks`, the values of
     /// the draw's own of its program's storage buffers of an element per
     /// draw. Its program's projection block, if it reads one
     /// ([`Projection::PerDraw`]), is zeros.
+    ///
+    /// The members of the blocks that a mesh's paint values are the
+    /// engine's ([`MeshDesc::paint`](crate::draw::MeshDesc::paint)): the
+    /// factor `<name>_t` that mixes each of its program's properties at two
+    /// zooms, in `blocks`, and each property's value where it is the same
+    /// for every feature, `<name>`, in the group's [`block`](Self::block)s.
+    /// The engine writes them, over what the layer gave.
     pub fn push<B: DrawBlocks>(&mut self, mesh: &Mesh<B>, draw: Draw, blocks: B) -> &mut Self {
         self.add(mesh, None, draw, blocks)
     }
@@ -167,13 +182,19 @@ impl Group {
     }
 
     /// Makes `block` the value that the group's draws read of their
-    /// programs' uniform block of its type, written once a frame. A draw of
-    /// a program without one ignores it.
+    /// programs' uniform block of its type in the frame, the last given. A
+    /// draw of a program without one ignores it.
     pub fn block<T: UniformBlock>(&mut self, block: &T) -> &mut Self {
         let Pushes { blocks, block_bytes, .. } = &mut self.pushes;
-        let start = block_bytes.len();
-        block_bytes.extend_from_slice(bytemuck::bytes_of(block));
-        blocks.push((T::BLOCK, start..block_bytes.len()));
+        let bytes = bytemuck::bytes_of(block);
+        match blocks.iter().find(|(given, _)| std::ptr::eq(*given, T::BLOCK)) {
+            Some((_, range)) => block_bytes[range.clone()].copy_from_slice(bytes),
+            None => {
+                let start = block_bytes.len();
+                block_bytes.extend_from_slice(bytes);
+                blocks.push((T::BLOCK, start..block_bytes.len()));
+            }
+        }
         self
     }
 
@@ -203,9 +224,13 @@ impl Group {
             "a draw of {} at a sub-layer past 2",
             program.name
         );
-        let Pushes { pushed, bytes, .. } = &mut self.pushes;
+        let Pushes { pushed, bytes, paint, .. } = &mut self.pushes;
         let start = bytes.len();
         blocks.each_bytes(|block| bytes.extend_from_slice(block));
+        if let Some(mesh_paint) = mesh.paint() {
+            mesh_paint.write_mixes(self.zoom, &mut bytes[start..]);
+            paint.get_or_insert_with(|| (mesh_paint.clone(), program));
+        }
         pushed.push(Pushed {
             draw,
             index: pushed.len() as u32,
@@ -219,12 +244,13 @@ impl Group {
         self
     }
 
-    /// Starts the group's draws of a frame: none, in no composite, which
-    /// may draw in the opaque pass where `opaque`, and composite with the
-    /// frame's depth where `frame_depth`.
-    pub(crate) fn begin(&mut self, opaque: bool, frame_depth: bool) {
+    /// Starts the group's draws of a frame at the camera's `zoom`: none, in
+    /// no composite, which may draw in the opaque pass where `opaque`, and
+    /// composite with the frame's depth where `frame_depth`.
+    pub(crate) fn begin(&mut self, zoom: f32, opaque: bool, frame_depth: bool) {
         self.clear();
         self.frame.composite = None;
+        self.zoom = zoom;
         self.opaque = opaque;
         self.frame_depth = frame_depth;
     }
@@ -236,12 +262,14 @@ impl Group {
     }
 
     /// Makes the pushed draws the frame's, in their order, and, where there
-    /// are any, writes the buffers they read. Draws that clip clip to the
-    /// masks of `tiles`.
+    /// are any, writes the buffers they read, with the uniform values of
+    /// `paint`, the layer's evaluated paint values. Draws that clip clip to
+    /// the masks of `tiles`.
     pub(crate) fn finish(
         &mut self,
         gpu: &mut dyn Gpu,
         context: &mut Resources,
+        paint: &dyn Any,
         tiles: impl IntoIterator<Item = UnwrappedTileID>,
     ) {
         let Group { frame, pushes, opaque, .. } = self;
@@ -259,6 +287,7 @@ impl Group {
             frame.stencil_tiles.extend(tiles);
         }
         if !pushes.pushed.is_empty() {
+            pushes.write_uniforms(paint);
             pushes.write(gpu, context, &mut frame.uniform_buffers);
         }
         pushes.clear();
@@ -291,6 +320,16 @@ impl Pushes {
         self.bytes.clear();
         self.blocks.clear();
         self.block_bytes.clear();
+        self.paint = None;
+    }
+
+    /// Writes the uniform values of `paint`, a layer's evaluated paint
+    /// values, into the shared blocks, as the pushed meshes' paint says.
+    fn write_uniforms(&mut self, paint: &dyn Any) {
+        let Pushes { blocks, block_bytes, paint: Some((mesh_paint, program)), .. } = self else { return };
+        for (block, range) in blocks.iter() {
+            mesh_paint.write_uniforms(paint, program, block, &mut block_bytes[range.clone()]);
+        }
     }
 
     /// Writes to `buffers` the buffers that the draws, in their order,
@@ -300,7 +339,7 @@ impl Pushes {
     /// blocks, or a projection block of zeros where no draw's program reads
     /// one of each draw.
     fn write(&mut self, gpu: &mut dyn Gpu, context: &mut Resources, buffers: &mut UniformBufferArray) {
-        let Pushes { pushed, bytes, blocks, block_bytes, scratch } = self;
+        let Pushes { pushed, bytes, blocks, block_bytes, scratch, .. } = self;
         let mut written = [false; FIRST_VERTEX_BUFFER_ID];
         for (block, range) in blocks.iter() {
             for buffer in pushed.iter().flat_map(|pushed| pushed.program.buffers) {
@@ -365,35 +404,31 @@ impl Pushes {
 
 /// A layer's draws of a frame, in groups: the layer's [`main`](Draws::main)
 /// group in its place in the layers' order. The engine keeps a layer's
-/// groups from frame to frame, with the memory of their draws.
+/// groups from frame to frame, with the memory of their draws: the main
+/// group keeps its place in the layers' order and depth while the layer
+/// renders, in frames it draws nothing in too.
 pub struct Draws {
-    /// The main group, from the layer's first frame with something to draw:
-    /// it then keeps its place in the layers' order and depth while the
-    /// layer renders, in frames it draws nothing in too.
-    main: Option<Group>,
+    main: Group,
 }
 
 impl Draws {
     pub(crate) fn new() -> Draws {
-        Draws { main: None }
+        Draws { main: Group::new() }
     }
 
     /// The group of the layer's draws in its place in the layers' order.
     pub fn main(&mut self) -> &mut Group {
-        self.main.get_or_insert_with(Group::new)
+        &mut self.main
     }
 
-    /// Starts the layer's draws of a frame it has something to draw in, as
-    /// [`Group::begin`] does.
-    pub(crate) fn begin(&mut self, opaque: bool, frame_depth: bool) {
-        self.main().begin(opaque, frame_depth);
+    /// Starts the layer's draws of a frame, as [`Group::begin`] does.
+    pub(crate) fn begin(&mut self, zoom: f32, opaque: bool, frame_depth: bool) {
+        self.main.begin(zoom, opaque, frame_depth);
     }
 
     /// Drops the frame's draws.
     pub(crate) fn clear(&mut self) {
-        if let Some(main) = &mut self.main {
-            main.clear();
-        }
+        self.main.clear();
     }
 
     /// Makes the pushed draws the frame's, as [`Group::finish`] does.
@@ -401,16 +436,15 @@ impl Draws {
         &mut self,
         gpu: &mut dyn Gpu,
         context: &mut Resources,
+        paint: &dyn Any,
         tiles: impl IntoIterator<Item = UnwrappedTileID>,
     ) {
-        if let Some(main) = &mut self.main {
-            main.finish(gpu, context, tiles);
-        }
+        self.main.finish(gpu, context, paint, tiles);
     }
 
     /// The groups, in drawing order.
     pub(crate) fn groups(&self) -> impl Iterator<Item = &Group> {
-        self.main.iter()
+        std::iter::once(&self.main)
     }
 }
 

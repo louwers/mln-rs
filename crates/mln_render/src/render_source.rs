@@ -26,9 +26,6 @@ pub(crate) struct RenderTileParameters<'a> {
     pub(crate) transform: &'a TransformParameters,
     pub(crate) debug_options: MapDebugOptions,
     pub(crate) source_name: String,
-    /// Whether a layer of the frame draws the source's tiles in
-    /// [`TileOrder::ByY`], which `update_render_tiles` then sorts them in.
-    pub(crate) sort_by_y: bool,
 }
 
 /// What every render source has, whatever its type.
@@ -41,16 +38,6 @@ impl RenderSourceBase {
     pub(crate) fn new(style_source: Source) -> Self {
         RenderSourceBase { style_source, enabled: false }
     }
-}
-
-/// An order a layer draws its source's tiles in.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TileOrder {
-    /// By tile id, without the tiles held for fade.
-    ById,
-    /// By opposite y position, so that the lower of two tiles' overlapping
-    /// contents draw over the higher's.
-    ByY,
 }
 
 pub(crate) trait RenderSource {
@@ -93,9 +80,10 @@ pub(crate) trait RenderSource {
         &[]
     }
 
-    /// The source's tiles in `order`, as indexes into `render_tiles`, as of
-    /// the last `update_render_tiles`; `None` for a source without tiles.
-    fn tile_order(&self, _order: TileOrder) -> Option<&[usize]> {
+    /// The source's tiles that its layers draw, by tile id and without the
+    /// tiles held for fade, as indexes into `render_tiles`, as of the last
+    /// `update_render_tiles`; `None` for a source without tiles.
+    fn tile_order(&self) -> Option<&[usize]> {
         None
     }
 

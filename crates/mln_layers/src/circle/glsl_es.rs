@@ -55,7 +55,7 @@ void main(void) {
             vec4 projected_center = interpolateProjection(circle_center, center_vector, 0.0);
             angle_scale *= (radius + stroke_width) * (projected_center.w / u_camera_to_center_distance);
 #else
-            vec4 projected_center = u_matrix * vec4(circle_center, 0, 1);
+            vec4 projected_center = u_projection_fallback_matrix * vec4(circle_center, 0, 1);
 #endif
             corner_position += extrude * (radius + stroke_width) * u_extrude_scale * (projected_center.w / u_camera_to_center_distance);
         }
@@ -64,7 +64,7 @@ void main(void) {
         vec3 corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
         gl_Position = interpolateProjection(corner_position, corner_vector, 0.0);
 #else
-        gl_Position = u_matrix * vec4(corner_position, 0, 1);
+        gl_Position = u_projection_fallback_matrix * vec4(corner_position, 0, 1);
 #endif
     } else {
 #ifdef PROJECTION_GLOBE
@@ -73,7 +73,7 @@ void main(void) {
             gl_Position.xy = vec2(10000.0);
         }
 #else
-        gl_Position = u_matrix * vec4(circle_center, 0, 1);
+        gl_Position = u_projection_fallback_matrix * vec4(circle_center, 0, 1);
 #endif
 
         if (u_scale_with_map) {

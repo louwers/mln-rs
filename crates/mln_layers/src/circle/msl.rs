@@ -69,7 +69,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
             const float4 projected_center = interpolateProjection(circle_center, center_vector, 0.0, projectionVector[drawIndex]);
             angle_scale *= (radius + stroke_width) * (projected_center.w / view.camera_to_center_distance);
 #else
-            const float4 projected_center = drawable.matrix * float4(circle_center, 0, 1);
+            const float4 projected_center = projectionVector[drawIndex].fallback_matrix * float4(circle_center, 0, 1);
 #endif
             corner_position += scaled_extrude * (radius + stroke_width) *
                                (projected_center.w / view.camera_to_center_distance);
@@ -79,7 +79,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
         const float3 corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
         position = interpolateProjection(corner_position, corner_vector, 0.0, projectionVector[drawIndex]);
 #else
-        position = drawable.matrix * float4(corner_position, 0, 1);
+        position = projectionVector[drawIndex].fallback_matrix * float4(corner_position, 0, 1);
 #endif
     } else {
 #if defined(PROJECTION_GLOBE)
@@ -88,7 +88,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
             position.xy = float2(10000.0);
         }
 #else
-        position = drawable.matrix * float4(circle_center, 0, 1);
+        position = projectionVector[drawIndex].fallback_matrix * float4(circle_center, 0, 1);
 #endif
 
         const float factor = props.scale_with_map ? view.camera_to_center_distance : position.w;
