@@ -1,6 +1,6 @@
 use mln_rs::layer::intersection_tests::polygon_intersects_polygon;
 use mln_rs::layer::{
-    Depth, Draw, Draws, EvaluateCx, Evaluation, FrameQuery, GeometryCoordinate, GeometryCoordinates, Hit, Layer, Mesh,
+    Draw, Draws, EvaluateCx, Evaluation, FrameQuery, GeometryCoordinate, GeometryCoordinates, Hit, Layer, Mesh,
     MeshDesc, NewCx, NoTiles, PrepareCx, TileTransform,
 };
 use mln_rs::mln_util::feature::Feature;
@@ -39,7 +39,7 @@ impl Layer for LocationPuckLayer {
             let at = cx.frame.tile(anchor.tile, &TileTransform::default());
             let ground = Ground::new(paint, cx.frame.camera, &anchor);
             for (order, part) in parts(paint).enumerate() {
-                let draw = Draw { order: order as i64, depth: Depth::Off, ..Draw::DEFAULT };
+                let draw = Draw { order: order as i64, ..Draw::DEFAULT };
                 main.push_at(&self.quad, &at, draw, ground.draw(&part, cx.frame.pixel_ratio));
             }
         }

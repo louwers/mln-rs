@@ -59,11 +59,11 @@ impl Layer for ImageProcessLayer {
 
     fn prepare(&self, _cx: &PrepareCx<'_, Self>, out: &mut Draws) {
         let Some((last, passes)) = self.passes[..self.drawn].split_last() else { return };
-        let draw = Draw { depth: Depth::Off, ..Draw::DEFAULT };
+        let scratch = Draw { depth: Depth::Off, ..Draw::DEFAULT };
         for (pass, target) in passes.iter().zip(&self.scratch) {
-            out.target(target).block(&pass.block).push(&pass.mesh, draw, ());
+            out.target(target).block(&pass.block).push(&pass.mesh, scratch, ());
         }
-        out.main().block(&last.block).push(&last.mesh, draw, ());
+        out.main().block(&last.block).push(&last.mesh, Draw::DEFAULT, ());
     }
 }
 
