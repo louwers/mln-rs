@@ -34,16 +34,16 @@ and a style draws it:
 
 ## Properties
 
-| property | default | |
-|---|---|---|
-| `ngon-radius` | 5 | pixels from the center to a corner |
-| `ngon-corners` | 5 | rounded, from 3 to 360 |
-| `ngon-rotate` | 0 | degrees clockwise; 0 puts a corner on top |
-| `ngon-color`, `ngon-opacity` | black, 1 | the fill |
-| `ngon-blur` | 0 | the fraction of the polygon, from its edge in, that fades |
-| `ngon-stroke-width`, `ngon-stroke-color`, `ngon-stroke-opacity` | 0, black, 1 | a stroke outside the fill, as wide along each edge |
-| `ngon-translate`, `ngon-translate-anchor` | `[0, 0]`, `map` | |
-| `ngon-pitch-alignment`, `ngon-pitch-scale` | `viewport`, `map` | |
+| property                                                        | default           |                                                           |
+| --------------------------------------------------------------- | ----------------- | --------------------------------------------------------- |
+| `ngon-radius`                                                   | 5                 | pixels from the center to a corner                        |
+| `ngon-corners`                                                  | 5                 | rounded, from 3 to 360                                    |
+| `ngon-rotate`                                                   | 0                 | degrees clockwise; 0 puts a corner on top                 |
+| `ngon-color`, `ngon-opacity`                                    | black, 1          | the fill                                                  |
+| `ngon-blur`                                                     | 0                 | the fraction of the polygon, from its edge in, that fades |
+| `ngon-stroke-width`, `ngon-stroke-color`, `ngon-stroke-opacity` | 0, black, 1       | a stroke outside the fill, as wide along each edge        |
+| `ngon-translate`, `ngon-translate-anchor`                       | `[0, 0]`, `map`   |                                                           |
+| `ngon-pitch-alignment`, `ngon-pitch-scale`                      | `viewport`, `map` |                                                           |
 
 The first nine are data-driven and may read feature state; the last four are the
 same for every feature, as a circle layer's are, and mean what theirs do. A

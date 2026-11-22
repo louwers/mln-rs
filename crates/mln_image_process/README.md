@@ -45,12 +45,12 @@ and a style draws a glow under its roads:
 
 ## Keys
 
-| key | where | value |
-|---|---|---|
-| `org.maplibre:targets` | the style's root | `[{"id": <name>, "precision": "standard" \| "high"}, ...]`: targets as large as the map, of 8 bits a channel or of half floats |
-| `org.maplibre:destination-target` | any layer | the target it draws into instead of the map |
-| `org.maplibre:source-target` | an image-process layer | the target it reads |
-| `org.maplibre:operations` | an image-process layer | what it does to what it reads, in order |
+| key                               | where                  | value                                                                                                                          |
+| --------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `org.maplibre:targets`            | the style's root       | `[{"id": <name>, "precision": "standard" \| "high"}, ...]`: targets as large as the map, of 8 bits a channel or of half floats |
+| `org.maplibre:destination-target` | any layer              | the target it draws into instead of the map                                                                                    |
+| `org.maplibre:source-target`      | an image-process layer | the target it reads                                                                                                            |
+| `org.maplibre:operations`         | an image-process layer | what it does to what it reads, in order                                                                                        |
 
 A target holds what the layers drawn into it draw in the frame, wherever they
 are among the layers, and nothing that the map doesn't. A layer of 3D geometry,
@@ -63,13 +63,13 @@ Each is an object of its `type` and its parameters, which may follow the zoom.
 They act on premultiplied colors, whose alpha is their coverage, and their sizes
 are logical pixels. What lies past the map's edges is what is at them.
 
-| type | parameters | |
-|---|---|---|
-| `blur` | `size`, 0 to 64 | a Gaussian blur, `size` its standard deviation |
-| `threshold` | `cutoff`, 0 to 255, default 128 | coverage at or above the cutoff made whole and the rest none, antialiased |
-| `color` | `value` | every pixel painted the color, its coverage kept |
-| `opacity` | `value`, 0 to 1 | coverage scaled |
-| `combine` | `target`, `mode`, default `multiply` | the image with another target's: `multiply` keeps it where the other covers, `subtract` where it doesn't, `max` and `min` take the more and the less covered of the two, `over` draws the other over it and `under` beneath it |
+| type        | parameters                           |                                                                                                                                                                                                                                |
+| ----------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `blur`      | `size`, 0 to 64                      | a Gaussian blur, `size` its standard deviation                                                                                                                                                                                 |
+| `threshold` | `cutoff`, 0 to 255, default 128      | coverage at or above the cutoff made whole and the rest none, antialiased                                                                                                                                                      |
+| `color`     | `value`                              | every pixel painted the color, its coverage kept                                                                                                                                                                               |
+| `opacity`   | `value`, 0 to 1                      | coverage scaled                                                                                                                                                                                                                |
+| `combine`   | `target`, `mode`, default `multiply` | the image with another target's: `multiply` keeps it where the other covers, `subtract` where it doesn't, `max` and `min` take the more and the less covered of the two, `over` draws the other over it and `under` beneath it |
 
 Without operations, a layer draws its source target as it is.
 

@@ -11,10 +11,7 @@
       "id": "t"
     }
   ],
-  "center": [
-    20.0,
-    20.0
-  ],
+  "center": [20.0, 20.0],
   "zoom": 3,
   "sources": {
     "shapes": {
@@ -31,26 +28,11 @@
               "type": "Polygon",
               "coordinates": [
                 [
-                  [
-                    17.01171875,
-                    21.47946067
-                  ],
-                  [
-                    20.17578125,
-                    21.47946067
-                  ],
-                  [
-                    20.17578125,
-                    18.50650387
-                  ],
-                  [
-                    17.01171875,
-                    18.50650387
-                  ],
-                  [
-                    17.01171875,
-                    21.47946067
-                  ]
+                  [17.01171875, 21.47946067],
+                  [20.17578125, 21.47946067],
+                  [20.17578125, 18.50650387],
+                  [17.01171875, 18.50650387],
+                  [17.01171875, 21.47946067]
                 ]
               ]
             }
@@ -63,14 +45,8 @@
             "geometry": {
               "type": "LineString",
               "coordinates": [
-                [
-                  15.60546875,
-                  17.50348037
-                ],
-                [
-                  24.39453125,
-                  22.45755118
-                ]
+                [15.60546875, 17.50348037],
+                [24.39453125, 22.45755118]
               ]
             }
           },
@@ -81,10 +57,7 @@
             },
             "geometry": {
               "type": "Point",
-              "coordinates": [
-                22.63671875,
-                19.17195672
-              ]
+              "coordinates": [22.63671875, 19.17195672]
             }
           }
         ]
@@ -103,14 +76,7 @@
       "id": "below",
       "type": "fill",
       "source": "shapes",
-      "filter": [
-        "==",
-        [
-          "get",
-          "kind"
-        ],
-        "square"
-      ],
+      "filter": ["==", ["get", "kind"], "square"],
       "paint": {
         "fill-color": "#f0d060"
       }
@@ -120,14 +86,7 @@
       "type": "circle",
       "org.maplibre:destination-target": "t",
       "source": "shapes",
-      "filter": [
-        "==",
-        [
-          "get",
-          "kind"
-        ],
-        "point"
-      ],
+      "filter": ["==", ["get", "kind"], "point"],
       "paint": {
         "circle-color": "#20a040",
         "circle-radius": 10
@@ -138,14 +97,7 @@
       "type": "line",
       "org.maplibre:destination-target": "t",
       "source": "shapes",
-      "filter": [
-        "==",
-        [
-          "get",
-          "kind"
-        ],
-        "line"
-      ],
+      "filter": ["==", ["get", "kind"], "line"],
       "paint": {
         "line-color": "#c03020",
         "line-width": 4
