@@ -698,15 +698,13 @@ impl TransformState {
         });
     }
 
-    /// Sets the center's altitude, in meters.
+    /// Sets the center's altitude, in meters, which then holds through
+    /// changes of the zoom and the center.
     pub fn set_center_altitude(&mut self, alt_m: f64) {
         if !alt_m.is_finite() {
             return;
         }
-        let view = &self.view;
-        let z =
-            alt_m / Projection::meters_per_pixel_at_latitude(view.center(WrapMode::Unwrapped).latitude(), view.zoom());
-        self.update(|p| p.z = z);
+        self.update(|p| p.center_altitude = alt_m);
     }
 }
 

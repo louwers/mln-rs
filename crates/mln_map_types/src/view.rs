@@ -92,8 +92,9 @@ pub(crate) struct ViewParams {
     /// negated center.
     pub(crate) x: f64,
     pub(crate) y: f64,
-    /// The center's altitude, in pixels at `scale`.
-    pub(crate) z: f64,
+    /// The center's altitude, in meters. It holds through changes of the
+    /// zoom and the center; the matrices derive its pixels.
+    pub(crate) center_altitude: f64,
     pub(crate) scale: f64,
     /// The rotation of the map, in radians counterclockwise: the negated
     /// bearing.
@@ -121,7 +122,7 @@ impl ViewParams {
             padding: EdgeInsets::default(),
             x: 0.0,
             y: 0.0,
-            z: 0.0,
+            center_altitude: 0.0,
             scale: 1.0,
             angle: 0.0,
             pitch: 0.0,
@@ -308,8 +309,24 @@ impl View {
     /// The center's altitude, in meters.
     #[must_use]
     pub fn center_altitude(&self) -> f64 {
-        self.params.z
-            * Projection::meters_per_pixel_at_latitude(self.center(WrapMode::Unwrapped).latitude(), self.zoom())
+        self.params.center_altitude
+    }
+
+    /// Meters per pixel at the zoom, as at the center (GL JS's
+    /// `pixelsPerMeter`, inverted): the scale of every height the matrices
+    /// place, so that a point at the center's altitude draws at the center.
+    fn meters_per_pixel(&self) -> f64 {
+        Projection::meters_per_pixel_at_latitude(self.center(WrapMode::Unwrapped).latitude(), self.zoom())
+    }
+
+    /// The center's altitude in pixels at the zoom.
+    fn center_altitude_pixels(&self) -> f64 {
+        // A center at sea level, as on most maps, spares the conversion's
+        // transcendental functions on every new view.
+        if self.params.center_altitude == 0.0 {
+            return self.params.center_altitude;
+        }
+        self.params.center_altitude / self.meters_per_pixel()
     }
 
     #[must_use]
@@ -455,7 +472,11 @@ impl View {
         let world_size = Projection::world_size(self.params.scale);
         // x and y are the map's position, the camera's negated, from the
         // middle of the world.
-        let center = DVec3::new(0.5 * world_size - self.params.x, 0.5 * world_size - self.params.y, self.params.z);
+        let center = DVec3::new(
+            0.5 * world_size - self.params.x,
+            0.5 * world_size - self.params.y,
+            self.center_altitude_pixels(),
+        );
         // Orient the camera, then move it back from the center along its line
         // of sight.
         let mut camera = CameraPose::from_angles(DVec3::ZERO, self.params.roll, self.params.pitch, self.params.angle);
@@ -531,7 +552,8 @@ impl View {
         let offset = self.center_offset();
 
         let limited_pitch = mln_math::clamp_f64(self.params.pitch, 0.0, max_mercator_horizon_angle());
-        let camera_to_sea_level_distance = camera_to_center_distance + self.params.z.abs() / limited_pitch.cos();
+        let camera_to_sea_level_distance =
+            camera_to_center_distance + self.center_altitude_pixels().abs() / limited_pitch.cos();
 
         // The tangent of the angle from the center of the view, with the
         // padding, to its top edge, in units where 1 is a pixel at the center
@@ -577,11 +599,7 @@ impl View {
         let height = f64::from(params.size.height);
 
         let camera = self.camera_pose();
-        // Meters scale as at the center, which the center's altitude is in,
-        // so that a point at the center's altitude draws at the center (GL
-        // JS's `pixelsPerMeter`).
-        let pixels_per_meter =
-            1.0 / Projection::meters_per_pixel_at_latitude(self.center(WrapMode::Unwrapped).latitude(), self.zoom());
+        let pixels_per_meter = 1.0 / self.meters_per_pixel();
         let world_to_camera =
             camera.world_to_camera(params.scale, pixels_per_meter, params.viewport_mode == ViewportMode::FlippedY);
         let mut camera_to_clip = perspective(self.perspective_fov(), width / height, f64::from(near_z), self.far_z());

@@ -267,3 +267,40 @@ fn the_center_at_its_altitude_draws_at_the_center() {
         assert!((clip.x / clip.w).abs() < 1e-9 && (clip.y / clip.w).abs() < 1e-9, "zoom {zoom}: {clip}");
     }
 }
+
+/// The center's altitude is kept in meters: changes of the zoom and the
+/// center, including a move around an anchor, leave it as it was set, and
+/// the matrices still draw the center at that altitude at the center of
+/// the view.
+#[test]
+fn the_center_altitude_holds_in_meters_through_zoom_and_center_changes() {
+    use mln_util::geo::{ScreenCoordinate, WrapMode};
+
+    let mut state = pitched(60.0);
+    state.set_center_altitude(1200.0);
+    let draws_at_center = |state: &TransformState| {
+        let view = state.view();
+        let center = Projection::project(&view.center(WrapMode::Unwrapped), view.scale());
+        let clip = view.projection_matrix() * DVec4::new(center.x, center.y, 1200.0, 1.0);
+        assert!((clip.x / clip.w).abs() < 1e-9 && (clip.y / clip.w).abs() < 1e-9, "{clip}");
+    };
+    draws_at_center(&state);
+
+    state.set_lat_lng_zoom(&LatLng::new(0.0, -60.0).unwrap(), 12.5);
+    assert_eq!(state.view().center_altitude(), 1200.0);
+    draws_at_center(&state);
+
+    state.set_lat_lng_zoom(&LatLng::new(61.0, 25.0).unwrap(), 12.5);
+    assert_eq!(state.view().center_altitude(), 1200.0);
+    draws_at_center(&state);
+
+    let lat_lng = state.view().screen_coordinate_to_lat_lng(&ScreenCoordinate::new(100.0, 150.0), WrapMode::Unwrapped);
+    state.move_lat_lng(&lat_lng.unwrap(), &ScreenCoordinate::new(300.0, 350.0)).unwrap();
+    assert_ne!(state.view().center(WrapMode::Unwrapped).latitude(), 61.0);
+    assert_eq!(state.view().center_altitude(), 1200.0);
+    draws_at_center(&state);
+
+    state.set_lat_lng_zoom(&state.view().center(WrapMode::Unwrapped), 4.0);
+    assert_eq!(state.view().center_altitude(), 1200.0);
+    draws_at_center(&state);
+}

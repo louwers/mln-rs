@@ -491,15 +491,12 @@ impl Transform {
         }
     }
 
-    /// Moves the center so that `lat_lng` is at `point` again, keeping the
-    /// altitude in meters, which moving the center keeps in pixels.
+    /// Moves the center so that `lat_lng` is at `point` again.
     fn hold_momentum_anchor(&mut self, anchor: Option<(ScreenCoordinate, LatLng)>) {
         let Some((point, lat_lng)) = anchor else { return };
-        let altitude = self.state.view().center_altitude();
         if let Err(e) = self.state.move_lat_lng(&lat_lng, &point) {
             Log::error(Event::General, &e.message);
         }
-        self.state.set_center_altitude(altitude);
     }
 
     // Momentum steps, applied to the state as it stands. Each returns whether
@@ -517,7 +514,6 @@ impl Transform {
             return true;
         }
         let before = self.view().center(WrapMode::Unwrapped);
-        let altitude = self.state.view().center_altitude();
         let steps = f64::min((distance / MAX_STEP).ceil(), MAX_STEPS);
         let step = ScreenCoordinate::new(offset.x / steps, offset.y / steps);
         let bounded = self.state.limits().bounds != LatLngBounds::default();
@@ -545,7 +541,6 @@ impl Transform {
             self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut zoom);
             self.state.set_lat_lng_zoom(&camera.center.unwrap_or(unwrapped), zoom);
         }
-        self.state.set_center_altitude(altitude);
         self.view().center(WrapMode::Unwrapped) != before
     }
 
@@ -578,7 +573,6 @@ impl Transform {
 
     fn step_zoom(&mut self, zoom: f64, anchor: Option<ScreenCoordinate>) -> bool {
         let before = self.state.view().zoom();
-        let altitude = self.state.view().center_altitude();
         let anchor = self.momentum_anchor(anchor);
         let center = self.view().center(WrapMode::Unwrapped);
         let mut target = mln_math::clamp_f64(
@@ -589,10 +583,6 @@ impl Transform {
         let mut camera = CameraOptions { center: Some(center), ..Default::default() };
         self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut target);
         self.state.set_lat_lng_zoom(&camera.center.unwrap_or(center), target);
-        // The altitude in meters holds before the anchor correction, which
-        // reads the projection, and through the correction's change of
-        // center.
-        self.state.set_center_altitude(altitude);
         match anchor {
             // On the globe the zoom around the anchor is the globe's, as in
             // apply_transitions.

@@ -298,8 +298,7 @@ impl Transform {
 
         // Compose the camera before applying constraints. In particular,
         // padding and field of view determine the pitch limit, and center
-        // and zoom jointly determine the geographic bounds and altitude
-        // scale.
+        // and zoom jointly determine the geographic bounds.
         //
         // The angles no command changed stay as they are, so that converting
         // them to degrees and back doesn't move them.
@@ -319,6 +318,8 @@ impl Transform {
             None => self.state.view().pitch(),
         };
         self.state.set_pitch(f64::min(max_pitch_for_padding(&self.state, &padding), pitch));
+        // Before the center, so that the anchor holds at the frame's altitude.
+        self.state.set_center_altitude(camera.center_altitude.unwrap_or_default());
         let mut zoom = camera.zoom.unwrap_or_default();
         self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut zoom);
         self.state.set_lat_lng_zoom(&camera.center.unwrap_or_default(), zoom);
@@ -343,7 +344,6 @@ impl Transform {
                 }
             }
         }
-        self.state.set_center_altitude(camera.center_altitude.unwrap_or_default());
     }
 
     /// Records the fields the running commands move.
