@@ -360,6 +360,108 @@ impl<T: LayerType> Layer<T> {
     }
 }
 
+/// What the engine reads of a render layer to run a frame and answer
+/// queries, kept as plain data beside it ([`RecordedLayer`]), so that
+/// reading a fact takes no dyn call.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct LayerRecord {
+    /// The kind of source the layer's type draws, `None` for a type without
+    /// one.
+    pub(crate) input: SourceKind,
+    /// The id of the layer's source.
+    pub(crate) source: String,
+    /// Whether the layer's visibility isn't `none`.
+    pub(crate) visible: bool,
+    /// The layer's zoom range, from its minimum zoom to before its maximum.
+    pub(crate) min_zoom: f32,
+    pub(crate) max_zoom: f32,
+    /// What the last evaluation of the layer's values said.
+    pub(crate) evaluation: Evaluation,
+    /// Whether the layer draws: its evaluation says so, or since that
+    /// evaluation one of its tiles had a bucket laid out with values that
+    /// draw.
+    pub(crate) draws: bool,
+    /// See [`LayerType::VOLUME`].
+    pub(crate) volume: bool,
+    /// Whether the layer's type places its layers ([`LayerType::PLACEMENT`]).
+    pub(crate) places: bool,
+    /// The order the layer draws its source's tiles in.
+    pub(crate) tile_order: TileOrder,
+}
+
+impl LayerRecord {
+    /// Whether the layer draws at `zoom`. A minimum zoom of 0 is no
+    /// minimum: the globe zooms below 0 toward the poles.
+    pub(crate) fn supports_zoom(&self, zoom: f32) -> bool {
+        let zoom_or_zero = if zoom < 0.0 { 0.0 } else { zoom };
+        self.min_zoom <= zoom_or_zero && zoom < self.max_zoom
+    }
+
+    /// Whether the layer draws and is visible.
+    pub(crate) fn needs_rendering(&self) -> bool {
+        self.draws && self.visible
+    }
+}
+
+/// A render layer with its [`LayerRecord`]. Its own
+/// [`restyle`](Self::restyle), [`evaluate`](Self::evaluate) and
+/// [`update`](Self::update), the layer's calls that change what the record
+/// holds, take the place of the layer's and keep the record up to date. It
+/// derefs to the layer for the rest of what the engine does with it.
+pub(crate) struct RecordedLayer {
+    record: LayerRecord,
+    layer: Box<dyn RenderLayer>,
+}
+
+impl RecordedLayer {
+    pub(crate) fn new(layer: Box<dyn RenderLayer>) -> RecordedLayer {
+        RecordedLayer { record: layer.record(), layer }
+    }
+
+    /// What the engine reads of the layer.
+    pub(crate) fn record(&self) -> &LayerRecord {
+        &self.record
+    }
+
+    /// See [`RenderLayer::restyle`].
+    pub(crate) fn restyle(
+        &mut self,
+        parameters: &TransitionParameters,
+        style: &Arc<dyn ErasedLayerStyle>,
+        ended: &mut EndedHosts,
+    ) {
+        self.layer.restyle(parameters, style, ended);
+        self.record = self.layer.record();
+    }
+
+    /// See [`RenderLayer::evaluate`].
+    pub(crate) fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
+        let evaluation = self.layer.evaluate(parameters);
+        self.record.evaluation = evaluation;
+        self.record.draws = evaluation.draws;
+    }
+
+    /// See [`RenderLayer::update`].
+    pub(crate) fn update(&mut self, update: &mut LayerUpdate<'_>) {
+        self.record.draws = self.layer.update(update);
+        debug_assert_eq!(self.record, self.layer.record(), "a layer's record out of step with the layer");
+    }
+}
+
+impl std::ops::Deref for RecordedLayer {
+    type Target = dyn RenderLayer;
+
+    fn deref(&self) -> &(dyn RenderLayer + 'static) {
+        &*self.layer
+    }
+}
+
+impl std::ops::DerefMut for RecordedLayer {
+    fn deref_mut(&mut self) -> &mut (dyn RenderLayer + 'static) {
+        &mut *self.layer
+    }
+}
+
 /// What the engine does with a render layer, whatever its type: its values,
 /// which this transitions without knowing their type, and its drawing,
 /// which keeps what the layer keeps of its tiles and uploads and draws its
@@ -380,8 +482,8 @@ pub(crate) trait RenderLayer: Any {
         &self.style().base().id
     }
 
-    /// The order the layer draws its source's tiles in.
-    fn tile_order(&self) -> TileOrder;
+    /// The facts about the layer that the engine keeps beside it.
+    fn record(&self) -> LayerRecord;
 
     /// Makes `style`, the changed style of the layer (of the same id and
     /// type), the layer's, drops the draws, which were built for the
@@ -396,11 +498,9 @@ pub(crate) trait RenderLayer: Any {
     fn transition(&mut self, parameters: &TransitionParameters);
 
     /// Evaluates the layer's paint values for a frame of `parameters`, and
-    /// keeps what the layer says of them ([`LayerType::evaluate`]).
-    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters);
-
-    /// What the last evaluation of the layer's values said.
-    fn evaluation(&self) -> Evaluation;
+    /// keeps and returns what the layer says of them
+    /// ([`LayerType::evaluate`]).
+    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) -> Evaluation;
 
     /// Whether a paint value of the layer is still in transition.
     fn has_transition(&self) -> bool;
@@ -412,8 +512,8 @@ pub(crate) trait RenderLayer: Any {
     /// the layer draws, which it adds to `update.found`, draws where one of
     /// their buckets was laid out with values that draw, moves the layer's
     /// values of its tiles to them, and runs the type's
-    /// [`LayerType::update`].
-    fn update(&mut self, update: &mut LayerUpdate<'_>);
+    /// [`LayerType::update`]. Returns whether the layer draws.
+    fn update(&mut self, update: &mut LayerUpdate<'_>) -> bool;
 
     /// The encode's update of the layer's draws: picks the shader variant
     /// for the frame's projection, dropping the draws when it changed; drops
@@ -455,9 +555,6 @@ pub(crate) trait RenderLayer: Any {
     /// What the layer's paint values depend on.
     fn style_dependencies(&self) -> Dependency;
 
-    /// Whether the layer draws ([`update`](Self::update)) and is visible.
-    fn needs_rendering(&self) -> bool;
-
     /// Drops the frame's draws of the layer, its values of its tiles and the
     /// other caches of their GPU objects. The tiles stay.
     fn remove_all_draws(&mut self);
@@ -475,16 +572,6 @@ pub(crate) trait RenderLayer: Any {
     /// of `gpu`, the context's, in `order`, each at its depth.
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder);
 
-    /// Whether the layer draws at `zoom`. A minimum zoom of 0 is no
-    /// minimum: the globe zooms below 0 toward the poles.
-    fn supports_zoom(&self, zoom: f32) -> bool {
-        let zoom_or_zero = if zoom < 0.0 { 0.0 } else { zoom };
-        self.style().base().min_zoom <= zoom_or_zero && zoom < self.style().base().max_zoom
-    }
-
-    /// See [`LayerType::VOLUME`].
-    fn volume(&self) -> bool;
-
     /// Uploads what the layer draws in its [`OffscreenPass`](crate::layer::OffscreenPass),
     /// if the frame draws it.
     fn upload_offscreen(&mut self, gpu: &mut dyn Gpu, context: &mut Context);
@@ -500,9 +587,6 @@ pub(crate) trait RenderLayer: Any {
 
     /// See [`LayerHost::lose_context`](crate::layer::LayerHost::lose_context).
     fn lose_context(&mut self);
-
-    /// Whether the layer's type places its layers ([`LayerType::PLACEMENT`]).
-    fn places(&self) -> bool;
 
     /// Whether `test`'s feature, as the layer draws it, intersects the
     /// query's geometry ([`FeatureQuery::intersects`](crate::layer::FeatureQuery::intersects));
@@ -523,8 +607,20 @@ impl<T: LayerType> RenderLayer for Layer<T> {
         Arc::<EvaluatedLayer<T>>::clone(&self.values.evaluated)
     }
 
-    fn tile_order(&self) -> TileOrder {
-        T::TILE_ORDER
+    fn record(&self) -> LayerRecord {
+        let base = self.values.style.base();
+        LayerRecord {
+            input: T::INFO.source,
+            source: base.source.clone(),
+            visible: base.visibility != VisibilityType::None,
+            min_zoom: base.min_zoom,
+            max_zoom: base.max_zoom,
+            evaluation: self.evaluation,
+            draws: self.draws,
+            volume: T::VOLUME,
+            places: T::PLACEMENT.is_some(),
+            tile_order: T::TILE_ORDER,
+        }
     }
 
     fn restyle(
@@ -550,16 +646,13 @@ impl<T: LayerType> RenderLayer for Layer<T> {
         self.style_dependencies = T::PaintProperties::dependencies(&values.unevaluated);
     }
 
-    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
+    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) -> Evaluation {
         let mut evaluated = self.values.evaluate(parameters);
         let cx = EvaluateCx { layer: &self.values, parameters, evaluated: &mut evaluated };
         self.evaluation = T::evaluate(&mut self.state, cx);
         self.draws = self.evaluation.draws;
         evaluated.draws = self.evaluation.draws;
         self.values.evaluated = Arc::new(evaluated);
-    }
-
-    fn evaluation(&self) -> Evaluation {
         self.evaluation
     }
 
@@ -571,7 +664,7 @@ impl<T: LayerType> RenderLayer for Layer<T> {
         T::PaintProperties::CROSSFADES && self.values.evaluated.crossfade.t != 1.0
     }
 
-    fn update(&mut self, update: &mut LayerUpdate<'_>) {
+    fn update(&mut self, update: &mut LayerUpdate<'_>) -> bool {
         let start = update.found.len();
         let tiles = match update.tiles(T::TILE_ORDER) {
             Some((tiles, order)) => tiles.find::<T>(order, &self.values.style.id, update.found),
@@ -594,6 +687,7 @@ impl<T: LayerType> RenderLayer for Layer<T> {
             picked_tiles: &mut self.picked_tiles,
         };
         T::update(&mut self.state, &mut self.drawing, &mut cx);
+        self.draws
     }
 
     fn update_draws(
@@ -659,10 +753,6 @@ impl<T: LayerType> RenderLayer for Layer<T> {
         self.style_dependencies
     }
 
-    fn needs_rendering(&self) -> bool {
-        self.draws && self.values.style.visibility != VisibilityType::None
-    }
-
     fn remove_all_draws(&mut self) {
         self.tile_values.clear();
         self.drawing.clear();
@@ -684,10 +774,6 @@ impl<T: LayerType> RenderLayer for Layer<T> {
         if self.renderable {
             self.drawing.render(gpu, parameters, order);
         }
-    }
-
-    fn volume(&self) -> bool {
-        T::VOLUME
     }
 
     fn upload_offscreen(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
@@ -716,10 +802,6 @@ impl<T: LayerType> RenderLayer for Layer<T> {
         if let Some(host) = T::host(&mut self.drawing) {
             host.lose_context();
         }
-    }
-
-    fn places(&self) -> bool {
-        T::PLACEMENT.is_some()
     }
 
     fn query_intersects_feature(&self, test: &HitTest<'_>) -> bool {

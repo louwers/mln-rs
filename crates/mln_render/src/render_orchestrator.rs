@@ -35,7 +35,7 @@ use crate::image_store::ImageStore;
 use crate::layer_drawing::{DrawGroup, DrawOrder, SingleDraw};
 use crate::paint_parameters::PaintParameters;
 use crate::placement::{CollisionGroups, ErasedFrame, ErasedPlacement, PlacementQuery, Prepared, Schedule};
-use crate::render_layer::{EndedHosts, FrameSourceTiles, LayerUpdate, RenderLayer};
+use crate::render_layer::{EndedHosts, FrameSourceTiles, LayerUpdate, RecordedLayer, RenderLayer};
 use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
 use crate::render_tile::{FoundTile, RenderTile, TileContent};
 use crate::renderer_event::RendererEvent;
@@ -89,14 +89,14 @@ fn ptr_eq_option<T: ?Sized>(a: Option<&Arc<T>>, b: Option<&Arc<T>>) -> bool {
 /// The render layer of the layer `style`, from its type in `registry`. A
 /// type that the registry lacks breaks the contract that a map and its
 /// renderer register alike; the layer isn't drawn.
-fn create_render_layer(registry: &Registry, style: &Arc<dyn ErasedLayerStyle>) -> Option<Box<dyn RenderLayer>> {
+fn create_render_layer(registry: &Registry, style: &Arc<dyn ErasedLayerStyle>) -> Option<RecordedLayer> {
     let name = style.info().name;
     let render_layer = registry.layer_type(name).and_then(|layer_type| layer_type.create_render_layer(style));
     debug_assert!(render_layer.is_some(), "the renderer's registry has no layer type '{name}'");
     if render_layer.is_none() {
         Log::error(Event::Render, format!("no render layer for layer type '{name}'"));
     }
-    render_layer
+    render_layer.map(RecordedLayer::new)
 }
 
 /// How an update evaluates and transitions the layers, the light and the
@@ -146,7 +146,7 @@ pub(crate) struct RenderOrchestrator {
     /// The render layers, in the style's order: a layer's index is its
     /// place in the drawing order. A layer whose type has no render layer
     /// has none.
-    layers: Vec<Box<dyn RenderLayer>>,
+    layers: Vec<RecordedLayer>,
     /// The index in `layers` of each render layer, by layer id.
     layer_indexes: HashMap<String, usize>,
     render_light: crate::render_light::RenderLight,
@@ -402,7 +402,7 @@ impl RenderOrchestrator {
         let mut sorted_by_y: SmallVec<[&str; 4]> = SmallVec::new();
         for (&index, frame_layer) in &frame.layers {
             if let Some(source) = frame_layer.source.as_deref()
-                && self.layers[index as usize].tile_order() == TileOrder::ByY
+                && self.layers[index as usize].record().tile_order == TileOrder::ByY
                 && !sorted_by_y.contains(&source)
             {
                 sorted_by_y.push(source);
@@ -452,12 +452,13 @@ impl RenderOrchestrator {
                 images: self.tile_store.images(),
                 found: &mut self.found_tiles,
             });
-            if render_layer.places() {
+            let record = render_layer.record();
+            if record.places {
                 self.placing_layers.push(index);
             }
             if frame.opaque_pass_cutoff == 0 {
                 opaque_pass_cutoff_estimation -= 1;
-                if render_layer.volume() {
+                if record.volume {
                     frame.opaque_pass_cutoff = opaque_pass_cutoff_estimation as u32;
                 }
             }
@@ -627,7 +628,7 @@ impl RenderOrchestrator {
         }
 
         if layer_changes.order_changed {
-            let mut by_id: HashMap<String, Box<dyn RenderLayer>> =
+            let mut by_id: HashMap<String, RecordedLayer> =
                 self.layers.drain(..).map(|layer| (layer.id().to_owned(), layer)).collect();
 
             // Remove render layers for removed layers.
@@ -816,17 +817,17 @@ impl RenderOrchestrator {
             let render_source_id = style_source.as_ref().filter(|_| has_render_source).map(Source::id);
 
             for (index, layer) in self.layers.iter().enumerate() {
-                let style = layer.style();
-                let layer_info = style.info();
+                let record = layer.record();
 
-                if layer_info.source != SourceKind::None {
+                if record.input != SourceKind::None {
                     // Every source's pass sees every layer, so the cheap
                     // source check goes before anything else is read.
                     if let Some(style_source) = &style_source
-                        && render_source_id == Some(style.base().source.as_str())
+                        && render_source_id == Some(record.source.as_str())
                     {
-                        let layer_is_visible = style.base().visibility != mln_style_types::VisibilityType::None;
-                        let zoom_fits_layer = layer.supports_zoom(self.zoom_history.last_zoom);
+                        let style = layer.style();
+                        let layer_is_visible = record.visible;
+                        let zoom_fits_layer = record.supports_zoom(self.zoom_history.last_zoom);
                         let layer_id = layer.id().to_owned();
                         // A global state change requires a relayout of
                         // this layer's source if one of the changed state
@@ -873,10 +874,7 @@ impl RenderOrchestrator {
 
                 // Handle layers without source.
                 let is_first_source = source_index == 0;
-                if is_first_source
-                    && style.base().visibility != mln_style_types::VisibilityType::None
-                    && layer.supports_zoom(self.zoom_history.last_zoom)
-                {
+                if is_first_source && record.visible && record.supports_zoom(self.zoom_history.last_zoom) {
                     // On the globe the background is a sphere mesh, not the
                     // backdrop, so it stays a layer, as it does for the
                     // overdraw inspector, which counts its draw.
@@ -884,8 +882,10 @@ impl RenderOrchestrator {
                         && frame.sky.is_none()
                         && !update_parameters.view.is_globe()
                         && !update_parameters.debug_options.contains(MapDebugOptions::OVERDRAW)
-                        && layers.first().is_some_and(|first| std::ptr::addr_eq(style, Arc::as_ptr(first.style())))
-                        && let Some(solid_background) = layer.evaluation().solid
+                        && layers
+                            .first()
+                            .is_some_and(|first| std::ptr::addr_eq(layer.style(), Arc::as_ptr(first.style())))
+                        && let Some(solid_background) = record.evaluation.solid
                     {
                         frame.background_color = solid_background;
                         continue; // This layer is shown with background color,
@@ -1237,7 +1237,7 @@ impl RenderOrchestrator {
             let source_contents = contents.of(source, &self.tile_store);
             let tiles = source.map(|(_, source)| FrameSourceTiles::new(source, source_contents));
             render_layer.update_draws(gpu, paint_parameters, tiles, &self.found_tiles);
-            needs_globe_depth = needs_globe_depth || render_layer.volume();
+            needs_globe_depth = needs_globe_depth || render_layer.record().volume;
         }
         let state = paint_parameters.frame.view;
         let (renderable_size, pixel_ratio) =
@@ -1283,15 +1283,13 @@ impl RenderOrchestrator {
     ) -> Result<Vec<mln_util::feature::Feature>, Error> {
         // A query answers from the layouts that arrived since the update.
         self.receive_tiles();
-        let render_layers: Vec<&dyn RenderLayer> = match &options.layer_ids {
-            Some(layer_ids) => layer_ids
-                .iter()
-                .filter_map(|id| self.layer_indexes.get(id))
-                .map(|&index| &*self.layers[index])
-                .collect(),
-            None => self.layers.iter().map(AsRef::as_ref).collect(),
+        let render_layers: Vec<&RecordedLayer> = match &options.layer_ids {
+            Some(layer_ids) => {
+                layer_ids.iter().filter_map(|id| self.layer_indexes.get(id)).map(|&index| &self.layers[index]).collect()
+            }
+            None => self.layers.iter().collect(),
         };
-        let mut layers = crate::geometry::feature_index::QueryLayers::default();
+        let mut layers: HashMap<String, &RecordedLayer> = HashMap::default();
         for layer in render_layers {
             layers.entry(layer.id().to_owned()).or_insert(layer);
         }
@@ -1303,16 +1301,17 @@ impl RenderOrchestrator {
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
         options: &crate::query::RenderedQueryOptions,
-        layers: &crate::geometry::feature_index::QueryLayers<'_>,
+        layers: &HashMap<String, &RecordedLayer>,
     ) -> Result<Vec<mln_util::feature::Feature>, Error> {
         let mut source_ids: VecSet<String> = VecSet::new();
         let mut filtered_layers = crate::geometry::feature_index::QueryLayers::default();
         for (id, layer) in layers {
-            if !layer.needs_rendering() || !layer.supports_zoom(self.zoom_history.last_zoom) {
+            let record = layer.record();
+            if !record.needs_rendering() || !record.supports_zoom(self.zoom_history.last_zoom) {
                 continue;
             }
-            filtered_layers.insert(id.clone(), *layer);
-            source_ids.insert(layer.style().base().source.clone());
+            filtered_layers.insert(id.clone(), &***layer);
+            source_ids.insert(record.source.clone());
         }
 
         let proj_matrix = self.view.projection_matrix_with(1, false);
@@ -1338,7 +1337,7 @@ impl RenderOrchestrator {
         if let Some(pass) = &self.placement {
             let placing: crate::geometry::feature_index::QueryLayers<'_> = filtered_layers
                 .iter()
-                .filter(|(_, layer)| layer.places())
+                .filter(|(id, _)| layers.get(*id).is_some_and(|layer| layer.record().places))
                 .map(|(id, layer)| (id.clone(), *layer))
                 .collect();
             if !placing.is_empty() {
