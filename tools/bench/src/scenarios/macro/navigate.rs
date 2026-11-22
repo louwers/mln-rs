@@ -140,8 +140,9 @@ fn street_pmtiles_flaky(bench: &mut Bench) {
 /// a nearby CDN. Each leg needs terrain, DEM and street tiles that the one
 /// before didn't, and the drapes of the tiles that arrive draw as they do.
 /// The camera moves as one gesture moves it, which keeps the drapes it drew
-/// at another zoom or bearing, and the last frame ends the gesture, which
-/// draws them again at the zoom and bearing it ends at. It also reports the
+/// at another zoom, and draws those of the hillshade, lit from the viewport,
+/// again in every frame that turns the map; the last frame ends the gesture,
+/// which draws the others again at the zoom it ends at. It also reports the
 /// frames' render passes and draw calls, the drapes they drew, and the most
 /// the terrain held ([`DrawMeter`]).
 fn terrain_3d(bench: &mut Bench) {

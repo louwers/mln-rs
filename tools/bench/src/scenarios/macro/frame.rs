@@ -111,16 +111,17 @@ fn terrain(bench: &mut Bench) {
 }
 
 /// The question: what does a frame over San Francisco's hills in 3D cost,
-/// Liberty draped over the terrain tiles' ground in two stacks with its
+/// Liberty draped over the terrain tiles' ground in four stacks with its
 /// extruded buildings and labels standing between and above them, while the
 /// camera circles Twin Peaks tilted to 65 degrees ([`Path::Terrain3d`])? One
 /// measured unit is one frame: its update, the drapes it draws again, the
 /// surface and the layers that stand on it. The camera moves as a gesture
-/// moves it, which keeps the drapes it drew at another zoom or bearing,
-/// and the last frame ends the gesture, which draws them again where they
-/// differ from what the map at rest shows. It also reports the frames'
-/// render passes and draw calls, the drapes they drew, and the most the
-/// terrain held ([`DrawMeter`]).
+/// moves it, which keeps the drapes it drew at another zoom, and draws
+/// those of the hillshade, lit from the viewport, again in every frame that
+/// turns the map; the last frame ends the gesture, which draws the others
+/// again where they differ from what the map at rest shows. It also reports
+/// the frames' render passes and draw calls, the drapes they drew, and the
+/// most the terrain held ([`DrawMeter`]).
 fn terrain_3d(bench: &mut Bench) {
     let fixtures = Fixtures::open(bench);
     let path = Path::Terrain3d;

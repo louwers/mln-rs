@@ -601,6 +601,13 @@ pub(crate) trait TypedLayer {
         false
     }
 
+    /// Whether the layer, with its values `evaluated`, blends with what is
+    /// under it otherwise than by covering it: a layer blend other than
+    /// `normal`, whose backdrop over terrain is its drape's own texels.
+    fn blends_with_backdrop(&self, _evaluated: &EvaluatedLayer<Self::Type>) -> bool {
+        false
+    }
+
     /// Called in the frame's update of a layer with a source with `tiles`,
     /// the frame's tiles of the source in the order the layer draws them,
     /// each with what it shows the layer: none for an image source. The
@@ -753,6 +760,11 @@ pub(crate) trait LayerParts {
     /// Whether the layer draws a drape by the map's bearing, with its values
     /// of the frame ([`TypedLayer::drapes_by_bearing`]).
     fn drapes_by_bearing(&self) -> bool;
+
+    /// Whether the layer blends with what is under it otherwise than by
+    /// covering it, with its values of the frame
+    /// ([`TypedLayer::blends_with_backdrop`]).
+    fn blends_with_backdrop(&self) -> bool;
 
     /// An empty drawing of the layer's type, which a drape keeps of the
     /// layer.
@@ -979,6 +991,10 @@ impl<L: TypedLayer> LayerParts for L {
 
     fn drapes_by_bearing(&self) -> bool {
         TypedLayer::drapes_by_bearing(self, &self.parts().values.evaluated)
+    }
+
+    fn blends_with_backdrop(&self) -> bool {
+        TypedLayer::blends_with_backdrop(self, &self.parts().values.evaluated)
     }
 
     fn new_drape_drawing(&self) -> DrapeDrawing {

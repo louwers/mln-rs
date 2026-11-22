@@ -52,8 +52,9 @@ pub enum Path {
     /// San Francisco's hills in 3D at zoom 14.25, over
     /// [`Snapshot::terrain_3d_style`]: the camera circles Twin Peaks,
     /// turning a quarter turn and back, tilted between 50 and 65 degrees.
-    /// Its draped layers fall into two stacks, which the extruded buildings
-    /// split. It ends where it starts.
+    /// Its draped layers fall into four stacks: the extruded buildings
+    /// split them, and its hillshade, lit from the viewport, has one of its
+    /// own. It ends where it starts.
     Terrain3d,
     /// Downtown San Francisco at zoom 16, tilted to 60 degrees, where the
     /// labels are dense: the camera turns a full circle in place over

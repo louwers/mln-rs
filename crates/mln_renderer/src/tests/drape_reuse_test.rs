@@ -476,13 +476,20 @@ impl DrapedMap {
     }
 
     /// Draws frames until the renderer waits for nothing but the held tile,
-    /// and then one more. Returns the tiles of the drapes they drew.
+    /// and then one more. Returns the tiles of the drapes of the first stack
+    /// they drew.
     fn settle(&mut self) -> BTreeSet<OverscaledTileID> {
+        self.settle_passes().into_iter().filter(|&(_, stack)| stack == 0).map(|(tile, _)| tile).collect()
+    }
+
+    /// [`settle`](Self::settle), returning the tiles and stacks of the
+    /// drapes the frames drew.
+    fn settle_passes(&mut self) -> BTreeSet<(OverscaledTileID, usize)> {
         let mut drawn = BTreeSet::new();
         for _ in 0..1000 {
-            drawn.extend(self.frame().1);
+            drawn.extend(self.frame_passes().1);
             if self.work.idle(self.tiles.waiting.lock().len()) {
-                drawn.extend(self.frame().1);
+                drawn.extend(self.frame_passes().1);
                 return drawn;
             }
             std::thread::sleep(Duration::from_millis(1));
@@ -1025,8 +1032,7 @@ fn a_byte_cap_holds_with_what_the_drapes_draw_with() {
 }
 
 /// A thick line in the corner of the north-west drape's tile that the view
-/// shows, shifted 20 pixels to the right on screen, so that it draws by the
-/// bearing.
+/// shows, shifted 20 pixels to the east, so that it draws by the zoom.
 const SHIFTED_LINE: &str = r#"{
     "version": 8,
     "sources": {
@@ -1036,7 +1042,7 @@ const SHIFTED_LINE: &str = r#"{
         "id": "shifted",
         "type": "line",
         "source": "shifted",
-        "paint": {"line-width": 8, "line-translate": [20, 0], "line-translate-anchor": "viewport"}
+        "paint": {"line-width": 8, "line-translate": [20, 0]}
     }]
 }"#;
 
@@ -1049,9 +1055,9 @@ fn line_color(map: &mut DrapedMap, color: &str) {
     });
 }
 
-/// While the camera moves, the drapes stale by the bearing keep the
+/// While the camera moves, the drapes stale by the zoom keep the
 /// drawings they were drawn from, though a byte cap would lower their
-/// sides for drapes that then draw nothing: once back at that bearing and
+/// sides for drapes that then draw nothing: once back at that zoom and
 /// drawn again larger, they draw what a new map draws.
 #[test]
 fn a_gesture_keeps_the_drawings_of_the_drapes_it_leaves_stale() {
@@ -1070,14 +1076,14 @@ fn a_gesture_keeps_the_drawings_of_the_drapes_it_leaves_stale() {
     assert_eq!(drapes.iter().map(|&tile| (tile, 512)).collect::<BTreeSet<_>>(), sides(&mut map));
     assert_eq!(drapes.len() + 1, map.renderer.rendering_stats().terrain.drapes);
 
-    // A gesture turns the map while the line's drapes draw again.
+    // A gesture zooms the map while the line's drapes draw again.
     map.camera_moving = true;
-    map.transform.jump_to(&CameraOptions { bearing: Some(90.0), ..Default::default() });
+    map.transform.jump_to(&CameraOptions { zoom: Some(2.05), ..Default::default() });
     line_color(&mut map, "green");
     map.frame();
-    map.transform.jump_to(&CameraOptions { bearing: Some(0.0), ..Default::default() });
+    map.transform.jump_to(&CameraOptions { zoom: Some(2.0), ..Default::default() });
     map.frame();
-    // At rest, back at the bearing they were drawn at, a higher cap gives
+    // At rest, back at the zoom they were drawn at, a higher cap gives
     // the drapes their whole side while the line's draw again.
     map.camera_moving = false;
     map.set_drape_byte_cap(whole);
@@ -1513,23 +1519,46 @@ fn a_rotation_keeps_drapes_that_draw_nothing_by_the_bearing() {
     assert!(passes.is_empty(), "drapes drawn again: {passes:?}");
 }
 
-/// A hillshade lit from the viewport turns its lights with the map: a
-/// rotation keeps its drapes while the camera moves, and draws them again
-/// once at rest, one a frame.
+/// A hillshade lit from the viewport turns its lights with the map: it
+/// drapes in a stack of its own, and every frame of a rotation draws that
+/// stack's drapes again, while the camera moves too, so that none shows the
+/// lights of another bearing and none is left to draw once at rest. The
+/// stack under it keeps its drapes.
 #[test]
-fn a_rotation_draws_a_viewport_lit_hillshade_again_at_rest() {
+fn a_rotation_draws_only_a_viewport_lit_hillshade_again_in_every_frame() {
     let (mut map, drapes) = settled(Tiles::default());
     map.edit(hillshade());
     map.settle();
+    let hillshade: BTreeSet<(OverscaledTileID, usize)> = drapes.iter().map(|&tile| (tile, 1)).collect();
     map.camera_moving = true;
-    map.transform.jump_to(&CameraOptions { bearing: Some(180.0), ..Default::default() });
-    let (_, passes) = map.frame();
-    assert_eq!(drapes, map.drapes(), "the same drapes cover the view");
-    assert!(passes.is_empty(), "drapes drawn while the camera moves: {passes:?}");
+    for bearing in [90.0, 180.0] {
+        map.transform.jump_to(&CameraOptions { bearing: Some(bearing), ..Default::default() });
+        let (full, passes) = map.frame_passes();
+        assert_eq!(drapes, map.drapes(), "the same drapes cover the view at bearing {bearing}");
+        assert_eq!(hillshade, passes, "the drapes drawn at bearing {bearing}");
+        assert!(full, "a frame that drew the hillshade at its bearing");
+    }
+    assert!(map.frame_passes().1.is_empty(), "a drape drawn again at the same bearing");
     map.camera_moving = false;
-    let frames = frames_until_full(&mut map);
-    assert_one_a_frame(&drapes, &frames);
-    assert!(map.frame().1.is_empty());
+    assert!(map.frame_passes().1.is_empty(), "a drape drawn again at rest");
+}
+
+/// A hillshade lit from the map draws the same at every bearing: it shares
+/// the stack of the layers under it, whose drapes a rotation keeps.
+#[test]
+fn a_rotation_keeps_a_map_lit_hillshade() {
+    let (mut map, drapes) = settled(Tiles::default());
+    map.edit(hillshade());
+    map.edit(Edit::SetLayerProperty {
+        layer: "hillshade".to_owned(),
+        name: "hillshade-illumination-anchor".to_owned(),
+        value: serde_json::json!("map"),
+    });
+    assert!(map.settle_passes().iter().all(|&(_, stack)| stack == 0), "one stack");
+    map.transform.jump_to(&CameraOptions { bearing: Some(180.0), ..Default::default() });
+    let (_, passes) = map.frame_passes();
+    assert_eq!(drapes, map.drapes(), "the same drapes cover the view");
+    assert!(passes.is_empty(), "drapes drawn again: {passes:?}");
 }
 
 /// A DEM whose data expires reloads in place when the file source
@@ -1545,8 +1574,9 @@ fn a_reloaded_dem_draws_the_hillshade_drapes_again() {
     assert!(height(&map).abs() < 1.0, "sea level: {}", height(&map));
     assert!(map.frame().1.is_empty());
 
+    // The hillshade, lit from the viewport, drapes in a stack of its own.
     map.tiles.reload_dem_high();
-    assert_eq!(drapes, map.settle());
+    assert_eq!(drapes.iter().map(|&tile| (tile, 1)).collect::<BTreeSet<_>>(), map.settle_passes());
     assert!((height(&map) - 25_000.0).abs() < 1.0, "25 km up: {}", height(&map));
 }
 

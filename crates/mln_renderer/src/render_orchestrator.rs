@@ -44,7 +44,7 @@ use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
 use crate::render_tile::{FoundTile, RenderTile};
 use crate::renderer_event::RendererEvent;
 use crate::sources::render_tile_source::{DebugLayer, DebugLayers};
-use crate::terrain::{DrapeStacks, RenderTerrain};
+use crate::terrain::{DrapeStacks, Draped, Draping, RenderTerrain};
 use crate::text::glyph_store::GlyphStore;
 use crate::text::placement::{Placement, PlacementInputs};
 use crate::tile::contents::Contents;
@@ -1399,9 +1399,13 @@ impl RenderOrchestrator {
             render_layer.update_draws(gpu, paint_parameters, &self.atlases, layer_source);
             needs_globe_depth = needs_globe_depth || render_layer.needs_globe_depth();
         }
-        let drapes = |&index: &u32| (index, self.layers[index as usize].drapes());
+        let draped = |&index: &u32| {
+            let layer = &self.layers[index as usize];
+            let draping = if layer.drapes_by_bearing() { Draping::ByBearing } else { Draping::Fixed };
+            (index, layer.drapes().then(|| Draped { draping, blends: layer.blends_with_backdrop() }))
+        };
         self.stacks =
-            if frame.terrain { DrapeStacks::of(frame.layers.keys().map(drapes)) } else { DrapeStacks::default() };
+            if frame.terrain { DrapeStacks::of(frame.layers.keys().map(draped)) } else { DrapeStacks::default() };
         if let Some(drapes) = self.terrain.begin_drapes(gpu, paint_parameters, self.stacks.len()) {
             let mut contents = SourceContents::default();
             for stack in 0..self.stacks.len() {

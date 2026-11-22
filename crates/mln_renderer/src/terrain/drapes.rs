@@ -279,22 +279,24 @@ struct DrapeKey {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Difference {
     None,
-    /// Only by the camera: the layers' values evaluated at another zoom,
-    /// the zoom, or the bearing a layer draws by.
+    /// Only by the camera: the zoom, or the layers' values evaluated at
+    /// another zoom.
     Camera,
     /// By what the drape shows: its layers, their styles, paint revisions
-    /// or tiles.
+    /// or tiles, or the bearing a layer draws by, which turns what the layer
+    /// draws in every drape of the view at once.
     Content,
 }
 
 impl DrapeKey {
     /// How the texels this key would draw differ from those of a drape
     /// drawn from `drawn`: by its content unless it has the same layers,
-    /// with the same styles and paint revisions, from the same tiles, and
-    /// else by the camera unless they have the same values at the same zoom
-    /// and bearing.
+    /// with the same styles and paint revisions, from the same tiles, at
+    /// the same bearing if a layer draws by it, and else by the camera
+    /// unless they have the same values at the same zoom.
     fn difference(&self, drawn: &DrapeKey) -> Difference {
         let same_content = self.tiles == drawn.tiles
+            && self.bearing == drawn.bearing
             && self.layers.len() == drawn.layers.len()
             && self.layers.iter().zip(&drawn.layers).all(|(layer, drawn)| {
                 Arc::ptr_eq(&layer.style, &drawn.style)
@@ -302,7 +304,6 @@ impl DrapeKey {
                     && layer.tiles == drawn.tiles
             });
         let same_camera = self.zoom == drawn.zoom
-            && self.bearing == drawn.bearing
             && self
                 .layers
                 .iter()
@@ -563,7 +564,9 @@ impl Drapes {
     /// frame, which takes its [`turn`], and those of the tiles whose content
     /// changed, as in GL JS. The others [wait](Self::waiting) for a later
     /// frame. While the camera of a continuous map moves, a drape drawn at
-    /// another zoom or bearing stays.
+    /// another zoom stays. A drape that a layer draws by the bearing differs
+    /// by its content at another bearing, so it draws again in every frame
+    /// that turns the map.
     pub(crate) fn choose(&mut self, at_rest: bool, paced: bool) {
         let at_rest = at_rest || !paced;
         (self.at_rest, self.paced) = (at_rest, paced);

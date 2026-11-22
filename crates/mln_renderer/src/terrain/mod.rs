@@ -89,8 +89,16 @@
 //!   frame's layers that drape, ended by one of the frame's layers that
 //!   doesn't, such as a symbol, circle, heatmap, fill extrusion or custom
 //!   layer. A layer the frame doesn't draw, hidden or out of its zooms,
-//!   splits no stack. A style whose layers don't drape has no stack, and
-//!   then no drapes and no surface.
+//!   splits no stack. Unlike GL JS's, the layers that draw by the map's
+//!   bearing, with something anchored to the viewport (a hillshade's
+//!   lights, as they are by default, or a fill's or line's translation),
+//!   have stacks of their own, apart from the layers under and over them:
+//!   every frame that turns the map draws their drapes again, and only
+//!   theirs. A layer with a layer blend other than `normal` keeps the
+//!   layers of its run under it in its stack, whose drape is its backdrop,
+//!   so that stack isn't split and draws again whole if one of its layers
+//!   draws by the bearing. A style whose layers don't drape has no stack,
+//!   and then no drapes and no surface.
 //! - **Standing layers** (circle, heatmap, fill extrusion and symbol) stand
 //!   on the surface as it draws, whether or not a stack draws it, on the
 //!   globe as on Mercator: over terrain, their draws are of a terrain
@@ -257,11 +265,11 @@
 //!   layers' styles,
 //!   paint revisions and tiles, the overlapping tiles' buckets and
 //!   generations (an image source's bucket and quad, in each copy of the
-//!   image that overlaps the drape's tile), and, with the camera at rest,
-//!   the layers' evaluated values, the zoom, and the bearing where a layer
-//!   draws by it. A change of the style's images, or of the feature
+//!   image that overlaps the drape's tile), the bearing where a layer
+//!   draws by it, and, with the camera at rest, the layers' evaluated
+//!   values and the zoom. A change of the style's images, or of the feature
 //!   state of a bucket a drape shows, draws it again too. While the camera
-//!   of a continuous map moves, a drape drawn at another zoom or bearing
+//!   of a continuous map moves, a drape drawn at another zoom
 //!   stays; a still draws it again. At rest, a
 //!   continuous map draws the drapes stale only by the camera one tile a
 //!   frame, as GL JS does once the zoom settles: the tile drawn longest
@@ -405,7 +413,7 @@ use mln_util::constants;
 use mln_util::dem::DemUnpack;
 use mln_util::geo::{LatLng, WrapMode};
 use mln_util::tileset::RasterEncoding;
-pub(crate) use stacks::DrapeStacks;
+pub(crate) use stacks::{DrapeStacks, Draped, Draping};
 
 use crate::gfx::context::Context;
 use crate::layer_drawing::ChangedBuckets;
