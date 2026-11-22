@@ -68,7 +68,9 @@ use std::sync::Arc;
 
 use mln_map_types::{MapMode, TileProjector, View};
 use mln_style::PropertyEvaluationParameters;
+use mln_style::evaluated::Evaluated;
 use mln_style::expression::expr::FeatureState;
+use mln_style::expression::{EvaluationContext, ValueConverter};
 use mln_style::layer_type::{LayerStyle, PaintSet, SourceKind, StyleLayerType};
 use mln_style_types::TranslateAnchorType;
 use mln_tile::{Feature, TileLayer};
@@ -591,6 +593,18 @@ pub struct HitTest<'a, L: Layer> {
 }
 
 impl<L: Layer> HitTest<'_, L> {
+    /// `value`, one of the layer's evaluated values, for the feature as
+    /// drawn: at the camera's zoom, with the feature's properties and
+    /// state.
+    #[must_use]
+    pub fn feature_value<T: Clone + ValueConverter>(&self, value: &Evaluated<T>) -> T {
+        value.evaluate(&EvaluationContext::with_zoom_feature_state(
+            self.zoom,
+            Some(self.feature),
+            Some(self.feature_state),
+        ))
+    }
+
     /// The query's geometry moved against a layer's `*-translate` of
     /// `translate` pixels, anchored at `anchor`, as the layer's draws move
     /// its features; `None` where the translation is zero.

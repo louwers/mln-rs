@@ -1,14 +1,16 @@
 //! The `dot` layer type: a layer of a geometry source that draws each point
-//! as a disc of a data-driven color and radius, in pixels.
+//! as a disc of a data-driven color and radius, in pixels, which the app
+//! scales through the layer's data ([`DotData`]).
 
 use mln_rs::layer::AttributeDataType::{Float2, Float4, Short2};
 use mln_rs::layer::source::wgsl::Wgsl;
 use mln_rs::layer::{
-    Attribute, Bucket, BuildCx, Color, Draw, Draws, Error, Features, FrameTile, GpuVec, Indexes, Layer, LayerBinders,
-    LayerBucket, LayerStyle, LayerTypeInfo, Layout, LayoutCx, Mesh, MeshDesc, NewCx, NoProperties, PaintPropertyBinder,
-    PrepareCx, Program, Projection, Property, PropertyInfo, PropertyTable, PropertyVisitor, SourceKind, Sources,
-    Stages, StyleLayerType, TileCx, TileTransform, Upload, program,
+    Attribute, Bucket, BuildCx, Color, Draw, Draws, Error, Features, FrameTile, GpuVec, HitTest, Indexes, Layer,
+    LayerBinders, LayerBucket, LayerStyle, LayerTypeInfo, LayerValues, Layout, LayoutCx, Mesh, MeshDesc, NewCx,
+    NoProperties, PaintPropertyBinder, PrepareCx, Program, Projection, Property, PropertyInfo, PropertyTable,
+    PropertyVisitor, SourceKind, Sources, Stages, StyleLayerType, TileCx, TileTransform, Upload, program,
 };
+use mln_rs::mln_util::intersection_tests::polygon_intersects_buffered_point;
 
 mln_rs::layer::properties!(
     pub mod paint: paint { dot_color: data_driven Color = Color::black(), dot_radius: data_driven f32 = 5.0, }
@@ -26,7 +28,7 @@ impl StyleLayerType for Dot {
     );
     type LayoutProperties = NoProperties;
     type PaintProperties = paint::Transitionable;
-    type Data = ();
+    type Data = DotData;
 
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, v: V) -> Option<V::Output> {
         Some(match slot {
@@ -34,6 +36,20 @@ impl StyleLayerType for Dot {
             1 => v.paint(|s| &s.paint.dot_radius, |s| &mut s.paint.dot_radius),
             _ => return None,
         })
+    }
+}
+
+/// What an app gives a dot layer
+/// ([`Map::edit_style_layer_data`](mln_rs::Map::edit_style_layer_data)).
+#[derive(Clone, Debug)]
+pub struct DotData {
+    /// How much larger than its radius each dot draws.
+    pub scale: f32,
+}
+
+impl Default for DotData {
+    fn default() -> Self {
+        DotData { scale: 1.0 }
     }
 }
 
@@ -50,8 +66,8 @@ mln_rs::layer::uniform_block! {
 }
 
 mln_rs::layer::uniform_block! {
-    /// The layer's: the properties where they are the same for every point.
-    pub struct DotProps { pub color: [f32; 4], pub radius: f32, #[padding] pub pad: f32, #[padding] pub pad2: [f32; 2] }
+    /// The layer's: the properties where they are the same for every point, and the scale.
+    pub struct DotProps { pub color: [f32; 4], pub radius: f32, pub scale: f32, #[padding] pub pad: [f32; 2] }
 }
 
 /// Each corner of a point's quad is the point doubled, with the corner's
@@ -91,7 +107,8 @@ struct VertexOutput {
     #property pass color
     out.extrude = glMod2v(corner, vec2<f32>(2.0)) * 2.0 - 1.0;
     let center = projectTile(floor(corner * 0.5), projectionVector[drawIndex]);
-    out.position = center + vec4<f32>(out.extrude * drawable.extrude * $props.radius * center.w, 0.0, 0.0);
+    let radius = $props.radius * props.scale;
+    out.position = center + vec4<f32>(out.extrude * drawable.extrude * radius * center.w, 0.0, 0.0);
     return out;
 }",
         fragment: "
@@ -176,11 +193,24 @@ impl Layer for DotLayer {
     fn prepare(&self, cx: &PrepareCx<'_, Self>, out: &mut Draws) {
         let (paint, zoom, main) = (&cx.layer.evaluated.paint, cx.frame.camera.zoom() as f32, out.main());
         let color = paint.dot_color.constant_or(&Color::black()).to_float_array();
-        main.block(&DotProps { color, radius: paint.dot_radius.constant_or(&0.0), ..DotProps::default() });
+        let (radius, scale) = (paint.dot_radius.constant_or(&0.0), cx.layer.style.data.scale);
+        main.block(&DotProps { color, radius, scale, ..DotProps::default() });
         for (tile, laid, mesh) in cx.tiles() {
             let (at, b) = (tile.project(cx.frame, &TileTransform::default()), laid.binders(&laid.bucket.binders));
             let (color_t, radius_t) = (b.dot_color.interpolation_factor(zoom), b.dot_radius.interpolation_factor(zoom));
             main.push_at(mesh, &at, Draw::DEFAULT, DotDraw { extrude: cx.frame.pixels_to_clip, color_t, radius_t });
         }
+    }
+
+    fn query_radius(&self, layer: &LayerValues<Dot>, laid: LayerBucket<'_, Dot, DotBucket>) -> f32 {
+        let largest = laid.binders(&laid.bucket.binders).dot_radius.max();
+        largest.or(layer.evaluated.paint.dot_radius.constant()).unwrap_or(0.0) * layer.style.data.scale
+    }
+
+    fn hit(&self, test: &HitTest<'_, Self>) -> Option<f32> {
+        let radius = test.feature_value(&test.layer.evaluated.paint.dot_radius) * test.layer.style.data.scale;
+        let reach = radius * test.pixels_to_tile_units;
+        let hit = test.geometry.iter().flatten().any(|p| polygon_intersects_buffered_point(test.query_geometry, p, reach));
+        hit.then_some(0.0)
     }
 }
