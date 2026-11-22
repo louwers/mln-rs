@@ -60,7 +60,7 @@ const VIEWS = [
   // with a hillshade of the same DEM. Then what stands on that ground: a
   // circle and an extrusion on raised ground, and the test's grid of labels,
   // most of them behind ridges. (Fog needs a pitch over 60°, past the
-  // page's limit.)
+  // fixture's.)
   {
     suite: "gljs/render-tests",
     id: "terrain/occlusion-debug",

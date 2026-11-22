@@ -44,6 +44,8 @@ mln_util.workspace = true
 mln_web_host.workspace = true
 mln_webgpu = { workspace = true, optional = true }
 parking_lot.workspace = true
+# The terrain the page adds to a style, and the style's own projection.
+serde_json.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 web-sys = { workspace = true, features = ["MessagePort"] }

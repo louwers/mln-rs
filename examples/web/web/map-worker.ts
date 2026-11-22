@@ -36,6 +36,7 @@ import type {
   TileWorkerReport,
   ToMap,
 } from "./protocol.ts";
+import type { Terrain } from "./styles.ts";
 
 // Every URL this worker fetched, and how many times, and how many fetches
 // are still transferring: the map's fetches look the global `fetch` up at
@@ -319,6 +320,7 @@ async function run({
   camera,
   localIdeographs,
   panic,
+  terrain,
 }: Start): Promise<Handle> {
   const {
     default: init,
@@ -390,7 +392,7 @@ async function run({
 
   if (panic) panic_for_check(panic);
 
-  map.set_style_url(style);
+  map.set_style_url(style, terrainJson(terrain));
   map.jump_to(...camera);
 
   let started = performance.now();
@@ -539,7 +541,7 @@ async function run({
           map.set_pixel_ratio(data.ratio);
           break;
         case "style":
-          map.set_style_url(data.url);
+          map.set_style_url(data.url, terrainJson(data.terrain));
           started = performance.now();
           loaded = null;
           // The page clears both for the new style, so they go again even
@@ -556,6 +558,9 @@ async function run({
           break;
         case "globeFreeBearing":
           map.set_globe_free_bearing(data.on);
+          break;
+        case "projection":
+          map.set_projection(data.projection ?? undefined);
           break;
         case "follow":
           map.follow(...data.camera);
@@ -596,6 +601,10 @@ async function run({
   for (const data of early.splice(0)) handle(data);
   return handle;
 }
+
+// A style's terrain as WebMap::set_style_url takes it.
+const terrainJson = (terrain: Terrain | undefined) =>
+  terrain === undefined ? undefined : JSON.stringify(terrain);
 
 // The frame just drawn, in the task that drew it: the canvas keeps its frame
 // only until it is shown. The rows are RGBA, not premultiplied.

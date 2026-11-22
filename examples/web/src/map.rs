@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use mln_gestures::{GestureEvent, GestureRecognizer, Input, Modes, PointerKind};
-use mln_map::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, MapEvent};
+use mln_map::{AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, MapEvent};
 use mln_runtime::{
     AttachOptions, DemandMode, Error, EventMask, EventType, FrameDemand, FrameDisposition, LogicalExtent, Map,
     MapOptions, RenderSession, RenderTarget, Runtime, RuntimeEvent, RuntimeEventKind, RuntimeOptions, Surface,
@@ -56,6 +56,9 @@ const PHASES: usize = 3;
 struct Reports {
     /// The map finished loading its style.
     loaded: bool,
+    /// A style document loaded since the last frame, which takes the
+    /// page's terrain and projection.
+    style_loaded: bool,
     /// The draw calls of the last frame, and the bytes of the live textures
     /// and of the live buffers after it.
     stats: [f64; 3],
@@ -75,6 +78,7 @@ impl Reports {
             let RuntimeEventKind::Map(event) = &event.kind else { continue };
             match event {
                 MapEvent::LoadingFinished => self.loaded = true,
+                MapEvent::StyleLoaded => self.style_loaded = true,
                 MapEvent::LoadingFailed(error) => {
                     web_sys::console::error_1(&JsValue::from_str(&format!("map failed to load: {error:?}")));
                 }
@@ -125,6 +129,11 @@ pub struct WebMap {
     phases: [f64; PHASES],
     /// The check of the GPU that `start_gpu_check` started.
     gpu_check: GpuCheck,
+    /// The terrain that the page adds to the style (`set_style_url`).
+    terrain: Option<Terrain>,
+    /// The projection type the page draws with, or `None` for the style's
+    /// own (`set_projection`).
+    projection: Option<String>,
 }
 
 #[wasm_bindgen]
@@ -175,6 +184,7 @@ impl WebMap {
         let options = MapOptions {
             map: mln_map::MapOptions { size, pixel_ratio: pixel_ratio as f32, ..Default::default() },
             event_mask: EventMask::NONE
+                .with(EventType::MapStyleLoaded)
                 .with(EventType::MapLoadingFinished)
                 .with(EventType::MapLoadingFailed)
                 .with(EventType::MapRenderFrameFinished),
@@ -183,6 +193,8 @@ impl WebMap {
             ..Default::default()
         };
         let (map, created) = runtime.create_map(options).map_err(js_error)?;
+        // Past the map's default of 60°, where fog shows over terrain.
+        sent(map.set_bounds(BoundOptions { max_pitch: Some(MAX_PITCH), ..Default::default() }));
 
         let redraw = Arc::new(AtomicBool::new(true));
         let redraw_wake = Arc::clone(&redraw);
@@ -224,12 +236,31 @@ impl WebMap {
             tasks: 0.0,
             phases: [0.0; PHASES],
             gpu_check: GpuCheck::default(),
+            terrain: None,
+            projection: None,
         })
     }
 
-    /// Loads a style from a URL.
-    pub fn set_style_url(&self, url: &str) {
+    /// Loads a style from a URL, and adds `terrain` to it once it loads:
+    /// the JSON of web/styles.ts's `Terrain`, which the page's Liberty 3D
+    /// has. Fails when `terrain` isn't one.
+    pub fn set_style_url(&mut self, url: &str, terrain: Option<String>) -> Result<(), JsValue> {
+        self.terrain = terrain.map(|json| Terrain::parse(&json)).transpose().map_err(js_error)?;
         sent(self.map.set_style_url(url));
+        Ok(())
+    }
+
+    /// Draws the map with the style spec's projection type `projection`
+    /// (`mercator`, `vertical-perspective` or `globe`) in place of the
+    /// style's, now and in each style that loads after; `None` goes back to
+    /// the style's own.
+    pub fn set_projection(&mut self, projection: Option<String>) {
+        self.projection = projection.clone();
+        sent(self.map.with_core(move |map| {
+            if let Err(error) = set_projection(map, projection.as_deref()) {
+                log_refused(&error);
+            }
+        }));
     }
 
     /// Moves the camera.
@@ -367,6 +398,9 @@ impl WebMap {
         // on each rather than at its deadlines.
         self.gestures.tick(now);
         self.answer_events();
+        if std::mem::take(&mut self.reports.lock().style_loaded) {
+            self.customize_style();
+        }
         // A demand renders the map once the commands sent before it ran.
         let sent_sequence = self.map.sent_sequence();
         if self.redraw.swap(false, Ordering::SeqCst) || self.force || sent_sequence != self.demanded {
@@ -609,7 +643,97 @@ fn log_refused(error: &Error) {
     Log::error(Event::General, format!("the map refused a command: {error}"));
 }
 
+/// How far the page lets the camera tilt, in degrees.
+const MAX_PITCH: f64 = 85.0;
+
+/// web/styles.ts's `Terrain`.
+#[derive(Clone)]
+struct Terrain {
+    /// The `raster-dem` source's JSON.
+    source: String,
+    exaggeration: f64,
+    /// The layer that the hillshade goes under, if the style has it.
+    hillshade_before: String,
+}
+
+impl Terrain {
+    fn parse(json: &str) -> Result<Terrain, String> {
+        let value: serde_json::Value = serde_json::from_str(json).map_err(|e| format!("terrain: {e}"))?;
+        let source = value.get("source").filter(|source| source.is_object()).ok_or("terrain: no source")?;
+        Ok(Terrain {
+            source: source.to_string(),
+            exaggeration: value["exaggeration"].as_f64().ok_or("terrain: no exaggeration")?,
+            hillshade_before: value["hillshadeBefore"].as_str().unwrap_or_default().to_owned(),
+        })
+    }
+}
+
+/// The ID of the source that `add_terrain` adds.
+const TERRAIN_SOURCE: &str = "terrain";
+
+/// The sky that `add_terrain` gives a style without one: the style spec's
+/// default colours, whose white fog greys the far ground.
+const SKY: &str = r##"{"sky-color":"#88c6fc","horizon-color":"#ffffff","fog-color":"#ffffff","fog-ground-blend":0.5}"##;
+
+/// Adds `terrain` to the style that `map` loaded, unless it has the source
+/// already: the source, a hillshade of it, the style's `terrain` and a sky.
+/// Fails while no style is loaded.
+fn add_terrain(map: &mut mln_map::Map, terrain: &Terrain) -> Result<(), Error> {
+    if map.source(TERRAIN_SOURCE).is_some() {
+        return Ok(());
+    }
+    map.add_source_json(TERRAIN_SOURCE, &terrain.source)?;
+    map.edit_loaded_style(|style| {
+        let hillshade = format!(
+            r##"{{"id":"terrain-hillshade","type":"hillshade","source":"{TERRAIN_SOURCE}","paint":{{"hillshade-exaggeration":0.3,"hillshade-shadow-color":"#473b24"}}}}"##
+        );
+        let before = Some(terrain.hillshade_before.as_str()).filter(|id| style.get_layer(id).is_some());
+        style.add_layer_json(&hillshade, before)?;
+        let root = format!(r#"{{"source":"{TERRAIN_SOURCE}","exaggeration":{}}}"#, terrain.exaggeration);
+        style.set_root_property_json("terrain", &root)?;
+        if style.get_sky().is_none() {
+            style.set_root_property_json("sky", SKY)?;
+        }
+        Ok(())
+    })
+}
+
+/// Sets the style's `projection` to the type `projection`, or for `None`
+/// back to the style document's own. Does nothing while no style is loaded:
+/// the map sets it once one loads.
+fn set_projection(map: &mut mln_map::Map, projection: Option<&str>) -> Result<(), Error> {
+    if !map.style_document_loaded() {
+        return Ok(());
+    }
+    let json = match projection {
+        Some(kind) => serde_json::json!({ "type": kind }).to_string(),
+        None => serde_json::from_str::<serde_json::Value>(map.style().get_json())
+            .ok()
+            .and_then(|document| document.get("projection").cloned())
+            .unwrap_or_default()
+            .to_string(),
+    };
+    map.edit_loaded_style(|style| style.set_root_property_json("projection", &json))
+}
+
 impl WebMap {
+    /// Adds the page's terrain to the style that loaded, and draws it with
+    /// the page's projection. A command that runs once another style has
+    /// started loading changes nothing.
+    fn customize_style(&self) {
+        let (terrain, projection) = (self.terrain.clone(), self.projection.clone());
+        sent(self.map.with_core(move |map| {
+            let edited = terrain.as_ref().map_or(Ok(()), |terrain| add_terrain(map, terrain));
+            let edited = edited.and_then(|()| match &projection {
+                Some(projection) => set_projection(map, Some(projection)),
+                None => Ok(()),
+            });
+            if let Err(error) = edited {
+                log_refused(&error);
+            }
+        }));
+    }
+
     /// Feeds one input to the gesture recognizer, and answers its events.
     /// Returns whether the map used the input.
     fn gesture(&mut self, input: Input, time: f64) -> bool {

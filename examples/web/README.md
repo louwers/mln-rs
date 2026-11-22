@@ -38,6 +38,7 @@ Serve dist/ over HTTP and open `index.html`. It takes these URL parameters
 | `width`, `height`, `ratio`               | a fixed map size in CSS pixels, and pixel ratio                                          |
 | `compare`                                | overlay MapLibre GL JS's map of the same style, right of a draggable divider             |
 | `debug`                                  | the debug overlay: frame rate, frame time by phase, draw calls, memory, requests         |
+| `projection=flat`, `globe` or `handoff`  | Mercator, the sphere at every zoom, or the sphere until zoom 10–12, over the style's     |
 | `freeBearing`                            | free bearing on the globe                                                                |
 | `localIdeographFontFamily=false`         | download CJK glyphs rather than draw them with the browser's fonts                       |
 | `fallbackFontFaces=<json>`               | font files that every font stack falls back to, as a style's `font-faces` entry, unnamed |
@@ -45,8 +46,12 @@ Serve dist/ over HTTP and open `index.html`. It takes these URL parameters
 
 The page draws its own controls over the map: a style picker, a backend
 indicator that switches between WebGPU and WebGL2 where both are available, zoom
-buttons, a compass, attributions, and a panel that lists the gestures and has
-switches for `compare`, `debug` and `freeBearing`.
+buttons, a compass, attributions, and a panel that lists the gestures and has a
+choice of `projection` and switches for `compare`, `debug` and `freeBearing`.
+The style picker's Liberty 3D is OpenFreeMap's Liberty with
+[Mapterhorn](https://mapterhorn.com)'s terrain, a hillshade and a sky added once
+it loads (web/styles.ts). The camera tilts up to 85°, past the map's default of
+60°, where fog shows over terrain.
 
 ## How it runs
 

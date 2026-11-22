@@ -31,6 +31,12 @@
 //                          false (or empty)
 //   compare                MapLibre GL JS's map of the style beside this one
 //                          (compare.ts)
+//   projection=<flat|globe|handoff>
+//                          the projection the map draws with in place of the
+//                          style's: Web Mercator, the sphere at every zoom
+//                          (vertical-perspective), or the sphere handing over
+//                          to Web Mercator between zoom 10 and 12 (globe)
+//                          (default: the style's own)
 //   freeBearing            free bearing on the globe: drags and zooms on it
 //                          turn the bearing with the planet, and a drag
 //                          carries on over a pole (default: off, north
@@ -81,6 +87,7 @@ import {
   type Input,
   type Loaded,
   type Pixels,
+  type ProjectionType,
   type StartTileWorker,
   type ToMap,
 } from "./protocol.ts";
@@ -269,6 +276,7 @@ compiling.then(
         height: size[1],
         ratio,
         style,
+        terrain: current.terrain,
         fallbackFontFaces: params.get("fallbackFontFaces"),
         camera,
         localIdeographs: localFamily !== "" && localFamily !== "false",
@@ -681,13 +689,14 @@ function showStyle() {
 }
 function pickStyle(next: Style) {
   element("styles", HTMLElement).hidePopover();
-  if (next.url === current.url) return;
+  // Not by URL: Liberty 3D shares Liberty's.
+  if (next === current) return;
   current = next;
   loading = true;
   styleName = "";
   showStyle();
   showAttribution([]);
-  toMap({ type: "style", url: next.url });
+  toMap({ type: "style", url: next.url, terrain: next.terrain });
   comparison?.setStyle(next.url);
   setParam("style", next.key);
 }
@@ -825,6 +834,27 @@ freeBearingToggle.addEventListener("change", () =>
   setFreeBearing(freeBearingToggle.checked),
 );
 if (params.has("freeBearing")) setFreeBearing(true);
+
+// The projection, in place of the style's: `?projection=`, a key of
+// PROJECTIONS; the style's own without one.
+const PROJECTIONS: Record<string, ProjectionType | null> = {
+  style: null,
+  flat: "mercator",
+  globe: "vertical-perspective",
+  handoff: "globe",
+};
+const projectionSelect = element("projection-select", HTMLSelectElement);
+function setProjection(key: string) {
+  const projection = PROJECTIONS[key] ?? null;
+  projectionSelect.value = projection === null ? "style" : key;
+  setParam("projection", projection === null ? null : key);
+  toMap({ type: "projection", projection });
+}
+projectionSelect.addEventListener("change", () =>
+  setProjection(projectionSelect.value),
+);
+const projectionParam = params.get("projection");
+if (projectionParam !== null) setProjection(projectionParam);
 
 // The backend control, at the bottom left: the backend's logo and name, and a
 // button to load the page again with the other backend where it can draw.

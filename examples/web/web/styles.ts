@@ -1,6 +1,21 @@
-// The styles the page offers: keyless styles from two providers, which draw
-// vector tiles of two schemas (OpenMapTiles and Shortbread) and satellite
-// imagery in raster tiles. `dark` turns the page's controls dark.
+// The styles the page offers, as the desktop app does
+// (examples/desktop/src/styles.rs): keyless styles from three providers, which
+// draw vector tiles of two schemas (OpenMapTiles and Shortbread), satellite
+// imagery in raster tiles, and Mapterhorn's terrain under one of them. `dark`
+// turns the page's controls dark.
+
+/**
+ * 3D terrain that the map adds to a style that has none once it loads
+ * (WebMap::set_style_url): the `raster-dem` source, the style's `terrain` on
+ * it at `exaggeration`, a hillshade of it under the layer `hillshadeBefore`
+ * if the style has it, and a `sky` where the style has none, so that fog
+ * shows at a high pitch.
+ */
+export interface Terrain {
+  source: Record<string, unknown>;
+  exaggeration: number;
+  hillshadeBefore: string;
+}
 
 /** A style the page can show; `key` is null for one from a URL. */
 export interface Style {
@@ -9,6 +24,7 @@ export interface Style {
   provider: string;
   url: string;
   dark?: boolean;
+  terrain?: Terrain;
 }
 
 const LIBERTY: Style = {
@@ -18,8 +34,26 @@ const LIBERTY: Style = {
   url: "https://tiles.openfreemap.org/styles/liberty",
 };
 
+// Mapterhorn's global Terrarium tiles (mapterhorn.com/data-access), whose
+// TileJSON brings their attribution.
+const MAPTERHORN: Terrain = {
+  source: {
+    type: "raster-dem",
+    url: "https://tiles.mapterhorn.com/tilejson.json",
+  },
+  exaggeration: 1.3,
+  hillshadeBefore: "building",
+};
+
 export const STYLES: Style[] = [
   LIBERTY,
+  {
+    key: "liberty-3d",
+    name: "Liberty 3D",
+    provider: "OpenFreeMap + Mapterhorn",
+    url: LIBERTY.url,
+    terrain: MAPTERHORN,
+  },
   {
     key: "bright",
     name: "Bright",
@@ -61,8 +95,8 @@ export const STYLES: Style[] = [
   },
 ];
 
-// The style for `?style=`: a key of STYLES, or any style's URL, which the
-// page names by the style's own name once it loads.
+// The style for `?style=`: a key of STYLES, or any style's URL (the first of
+// STYLES there), which the page names by the style's own name once it loads.
 export function styleFor(param: string | null): Style {
   if (param === null) return LIBERTY;
   const known = STYLES.find(

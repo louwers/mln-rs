@@ -209,6 +209,29 @@
         <dt>Rotate and tilt</dt>
         <dd>Right-drag, Ctrl-drag, two fingers, or Shift and the arrow keys</dd>
       </dl>
+      <label class="toggle"
+        >Projection
+        <select id="projection-select">
+          <option value="style" title="The projection the style declares">
+            Style
+          </option>
+          <option value="flat" title="Web Mercator at every zoom (mercator)">
+            Flat
+          </option>
+          <option
+            value="globe"
+            title="The sphere at every zoom (vertical-perspective)"
+          >
+            Globe: sphere at every zoom
+          </option>
+          <option
+            value="handoff"
+            title="The sphere, handing over to Web Mercator between zoom 10 and 12 (globe)"
+          >
+            Handoff: sphere, flat by zoom 12
+          </option>
+        </select></label
+      >
       <label
         class="toggle"
         title="Drags and zooms on the globe turn the bearing with the planet, and a drag carries on over a pole"

@@ -6,6 +6,11 @@
 // its own (TileWorkerConnect), and the Web Worker reports there
 // (TileWorkerReport).
 
+import type { Terrain } from "./styles.ts";
+
+/** A projection type of the style spec. */
+export type ProjectionType = "mercator" | "vertical-perspective" | "globe";
+
 /** What the map draws with, each a build of the module. */
 export type Backend = "webgpu" | "webgl2";
 
@@ -85,6 +90,8 @@ export interface Start {
   height: number;
   ratio: number;
   style: string;
+  /** The terrain the map adds to the style (styles.ts). */
+  terrain: Terrain | undefined;
   /** JSON: font files that every font stack falls back to. */
   fallbackFontFaces: string | null;
   camera: Camera;
@@ -110,7 +117,11 @@ export type ToMap =
   | { type: "nextFrame" }
   | { type: "resize"; width: number; height: number }
   | { type: "pixelRatio"; ratio: number }
-  | { type: "style"; url: string }
+  | { type: "style"; url: string; terrain: Terrain | undefined }
+  // The projection the map draws with in place of the style's
+  // (WebMap::set_projection): a style spec projection type, or null for the
+  // style's own.
+  | { type: "projection"; projection: ProjectionType | null }
   | { type: "jumpTo"; camera: Camera }
   | { type: "resetNorth" }
   // Whether drags and zooms on the globe turn the bearing
