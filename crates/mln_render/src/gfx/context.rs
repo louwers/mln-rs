@@ -421,15 +421,15 @@ impl Resources {
     pub(crate) fn destroy_released(&mut self, gpu: &mut dyn Gpu) {
         self.drop_unused_surfaces();
         let Resources { device, textures, buffers, meshes, releases, doomed, .. } = self;
-        // The bindings made of buffers that arrays replaced go first, in
-        // this batch, before those buffers.
-        if !device.retired_epochs.is_empty() {
-            for objects in meshes.values_mut() {
-                objects.drop_retired_bindings(&device.retired_epochs);
-            }
-            device.retired_epochs.clear();
-        }
         loop {
+            // The bindings made of buffers that arrays replaced go in this
+            // batch too, in one pass over the meshes per round.
+            if !device.retired_epochs.is_empty() {
+                for objects in meshes.values_mut() {
+                    objects.drop_retired_bindings(&device.retired_epochs);
+                }
+                device.retired_epochs.clear();
+            }
             device.queue.take_into(releases);
             if releases.is_empty() {
                 break;
@@ -437,11 +437,7 @@ impl Resources {
             for release in releases.drain(..) {
                 match release {
                     Release::Resource(resource) => doomed.push(resource),
-                    Release::Epoch(epoch) => {
-                        for objects in meshes.values_mut() {
-                            objects.drop_retired_bindings(&[epoch]);
-                        }
-                    }
+                    Release::Epoch(epoch) => device.retired_epochs.push(epoch),
                     Release::Entry(StoreKey::Texture(key)) => drop(textures.remove(key)),
                     Release::Entry(StoreKey::Buffer(key)) => drop(buffers.remove(key)),
                     // What the objects hold goes to the queue as they drop,
