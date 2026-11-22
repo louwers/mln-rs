@@ -895,7 +895,7 @@ mod tests {
             group.push(&depth, Draw::DEFAULT, ()).push(&debug, Draw::DEFAULT, ()).push(&depth, Draw::DEFAULT, ());
             group.finish(gpu, context, &(), []);
             let read: Vec<(u16, u32)> = group.frame.draws.iter().map(|draw| (draw.run, draw.element)).collect();
-            assert_eq!(read, [(0, 0), (0, 1), (1, 0)]);
+            assert_eq!(read, [(0, 0), (1, 0), (0, 1)]);
             let programs: Vec<&str> = group.frame.runs.iter().map(|run| run.program.name).collect();
             assert_eq!(programs, [programs::GLOBE_DEPTH.name, programs::TILE_DEBUG.name]);
         });
