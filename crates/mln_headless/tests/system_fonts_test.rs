@@ -1,32 +1,31 @@
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
+use std::thread::ThreadId;
 
 use mln_style::Edit;
-use mln_text::glyph::{FontData, FontFace, Glyph, GlyphID};
-use mln_text::local_glyph_rasterizer::{LocalFont, LocalGlyphRasterizer, LocalGlyphs};
+use mln_text::glyph::{FontData, FontFace};
+use mln_text::local_fonts::{FontChooser, LocalGlyphs};
 use mln_util::font_stack::FontStack;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
+use parking_lot::Mutex;
 
 use crate::gtest_map::style_image;
 use crate::support::MapTest;
 
-const KHMER: &[u8] = include_bytes!("../../mln_text/tests/fixtures/khmer.ttf");
+static KHMER: LazyLock<FontData> =
+    LazyLock::new(|| FontData::from(include_bytes!("../../mln_text/tests/fixtures/khmer.ttf").to_vec()));
 
 /// The device's fonts as one, the Khmer font of `mln_text`'s fixtures, for
-/// Khmer.
-struct KhmerFont;
+/// Khmer. Records the threads it chooses on.
+#[derive(Default)]
+struct KhmerFont {
+    threads: Mutex<Vec<ThreadId>>,
+}
 
-impl LocalGlyphRasterizer for KhmerFont {
-    fn rasterize_glyph(&self, _font_stack: &FontStack, _glyph_id: GlyphID) -> Option<Glyph> {
-        None
-    }
-
-    fn font(&self, _font_stack: &FontStack, c: char) -> Option<LocalFont> {
-        ('\u{1780}'..='\u{17FF}').contains(&c).then(|| LocalFont {
-            key: Arc::from("khmer"),
-            data: FontData::from(KHMER.to_vec()),
-            weight: 400,
-        })
+impl FontChooser for KhmerFont {
+    fn choose(&self, _font_stack: &FontStack, c: char) -> Option<FontFace> {
+        self.threads.lock().push(std::thread::current().id());
+        ('\u{1780}'..='\u{17FF}').contains(&c).then(|| FontFace::device("khmer", 400, KHMER.clone()))
     }
 }
 
@@ -34,7 +33,9 @@ impl LocalGlyphRasterizer for KhmerFont {
 /// device's fonts as a fallback face if `system`, and a red icon "icon".
 fn render(system: bool, text_field: &str) -> Vec<[u8; 4]> {
     let test = MapTest::new();
-    test.frontend().set_local_glyphs(LocalGlyphs { ideographs: false, rasterizer: Some(Arc::new(KhmerFont)) });
+    let khmer = Arc::new(KhmerFont::default());
+    let chooser: Arc<dyn FontChooser> = Arc::<KhmerFont>::clone(&khmer);
+    test.frontend().set_local_glyphs(LocalGlyphs { ideographs: false, chooser: Some(chooser), rasterizer: None });
     if system {
         test.map().set_fallback_font_face_list(vec![FontFace::system(Vec::new())]);
     }
@@ -50,20 +51,28 @@ fn render(system: bool, text_field: &str) -> Vec<[u8; 4]> {
     let icon = PremultipliedImage::from_vec(Size::new(16, 16), [255, 0, 0, 255].repeat(16 * 16));
     test.map().edit_style(|style| style.apply(Edit::AddImage(style_image("icon", icon, 1.0)))).unwrap();
     let image = test.try_render().expect("a render").image;
+    // The frontend renders on this thread.
+    let threads = khmer.threads.lock();
+    assert!(!threads.is_empty());
+    assert!(threads.iter().all(|thread| *thread != std::thread::current().id()), "chose on the render thread");
     image.data.as_chunks::<4>().0.iter().map(|pixel| [pixel[0], pixel[1], pixel[2], pixel[3]]).collect()
 }
 
-const KHMER_TEXT: &str = r#""\u1780\u17D2\u1780""#;
+/// "ខ្មែរ", which the fixture has the glyphs of: a subscript consonant and a
+/// split vowel, which shaping rearranges and positions.
+const KHMER_TEXT: &str = r#""\u1781\u17D2\u1798\u17C2\u179A""#;
 
 // A style without glyph PBFs draws its text from the device's fonts, the
 // ones the labels' `text-font` names first, shaped, as the style spec
-// resolves its fonts; else each character from local glyphs, which this
-// device draws none of.
+// resolves its fonts; else each character from local glyphs, which come from
+// the same fonts, one at a time, unshaped.
 #[test]
 fn a_style_without_glyph_pbfs_shapes_its_text_with_the_devices_fonts() {
-    let ink = |pixels: Vec<[u8; 4]>| pixels.iter().filter(|pixel| pixel[3] != 0).count();
-    assert_eq!(ink(render(false, KHMER_TEXT)), 0);
-    assert!(ink(render(true, KHMER_TEXT)) > 0);
+    let ink = |pixels: &[[u8; 4]]| pixels.iter().filter(|pixel| pixel[3] != 0).count();
+    let (unshaped, shaped) = (render(false, KHMER_TEXT), render(true, KHMER_TEXT));
+    assert!(ink(&unshaped) > 0);
+    assert!(ink(&shaped) > 0);
+    assert_ne!(unshaped, shaped);
 }
 
 #[test]

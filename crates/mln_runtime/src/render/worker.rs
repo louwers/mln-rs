@@ -19,7 +19,7 @@ use mln_renderer::{Registry, Renderer, RendererEvent, RendererEvents, Update, Up
 use mln_style::source_type::SourceData;
 use mln_style::sources::{GeoJSONData, GeoJsonSourceType};
 use mln_text::GlyphCache;
-use mln_text::local_glyph_rasterizer::LocalGlyphs;
+use mln_text::local_fonts::LocalGlyphs;
 use mln_util::error::Error;
 use mln_util::event_queue::Waker;
 use mln_util::image::PremultipliedImage;

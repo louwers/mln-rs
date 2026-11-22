@@ -1,5 +1,5 @@
-//! The system's font for each character of a label: for shaping, and for
-//! local glyphs, one character at a time.
+//! The system's font for each character of a label, which shapes it or
+//! draws its glyph.
 //!
 //! The font of a character, for a label in a font stack, is the first font
 //! the stack names that the system has and that has the character, else the
@@ -8,41 +8,34 @@
 //! character of a class (`class`) serves the others of the class it has, so
 //! that a map's labels look up a few fonts, not one for every character.
 
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use mln_text::FontFile;
 use mln_text::font_name::{self, FontName};
-use mln_text::glyph::{Glyph, GlyphID};
-use mln_text::local_glyph_rasterizer::{LocalFont, LocalGlyphRasterizer};
+use mln_text::glyph::FontFace;
+use mln_text::local_fonts::FontChooser;
 use mln_util::font_stack::FontStack;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::i18n;
-use parking_lot::Mutex;
 
 use crate::source::{self, Source};
-use crate::{Query, languages, system};
+use crate::{Finder, Query, languages, system};
 
-/// The system's fonts for labels (see the module docs): their glyphs, and
-/// the fonts that shape them. Every rasterizer shares the fonts the process
-/// has found.
+/// The system's fonts as a [`FontChooser`] (see the module docs). Every
+/// chooser shares the fonts the process has found.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct SystemGlyphRasterizer;
+pub struct SystemFonts;
 
-impl LocalGlyphRasterizer for SystemGlyphRasterizer {
-    fn rasterize_glyph(&self, font_stack: &FontStack, glyph_id: GlyphID) -> Option<Glyph> {
-        let c = char::from_u32(u32::from(glyph_id.code))?;
-        font_for(font_stack, c)?.file.rasterize_char(c, glyph_id)
-    }
-
-    fn font(&self, font_stack: &FontStack, c: char) -> Option<LocalFont> {
-        Some(font_for(font_stack, c)?.local.clone())
+impl FontChooser for SystemFonts {
+    fn choose(&self, font_stack: &FontStack, c: char) -> Option<FontFace> {
+        Some(font_for(font_stack, c)?.face.clone())
     }
 }
 
 /// A font the system has, at the weight it was found for.
 pub(crate) struct SystemFont {
     file: FontFile,
-    local: LocalFont,
+    face: FontFace,
 }
 
 impl SystemFont {
@@ -51,9 +44,9 @@ impl SystemFont {
     }
 }
 
-/// The fonts found so far.
-#[derive(Default)]
-struct Fonts {
+/// The platform's font matcher, and the fonts found with it so far.
+pub(crate) struct Fonts {
+    pub(crate) finder: Finder,
     files: source::Files,
     /// The font of each font name, if the system has it.
     named: HashMap<String, Option<Arc<SystemFont>>>,
@@ -64,19 +57,29 @@ struct Fonts {
     missing: HashSet<(FontStack, char)>,
 }
 
-static FONTS: LazyLock<Mutex<Fonts>> = LazyLock::new(Mutex::default);
+impl Fonts {
+    /// No fonts found yet with `finder`.
+    pub(crate) fn new(finder: Finder) -> Self {
+        Fonts {
+            finder,
+            files: source::Files::default(),
+            named: HashMap::default(),
+            picked: HashMap::default(),
+            missing: HashSet::default(),
+        }
+    }
+}
 
 /// The font that draws `c` for a label in `font_stack`.
 pub(crate) fn font_for(font_stack: &FontStack, c: char) -> Option<Arc<SystemFont>> {
-    let mut fonts = FONTS.lock();
+    let mut fonts = system().fonts.as_ref()?.lock();
     let fonts = &mut *fonts;
     let names = names(font_stack);
     let mut named = Vec::with_capacity(names.len());
     for (name, parsed) in &names {
-        let font = fonts
-            .named
-            .entry((*name).to_owned())
-            .or_insert_with(|| first_drawing(&mut fonts.files, named_fonts(name, parsed), ' ', parsed.weight));
+        let font = fonts.named.entry((*name).to_owned()).or_insert_with(|| {
+            first_drawing(&mut fonts.files, named_fonts(&mut fonts.finder, name, parsed), ' ', parsed.weight)
+        });
         named.push(font.clone());
     }
     let key = (font_stack.clone(), class(c));
@@ -88,7 +91,7 @@ pub(crate) fn font_for(font_stack: &FontStack, c: char) -> Option<Arc<SystemFont
         return None;
     }
     let first = names.first().map_or(FontName { family: "", weight: 400, italic: false }, |(_, parsed)| *parsed);
-    let font = first_drawing(&mut fonts.files, picked_fonts(&first, c), c, first.weight);
+    let font = first_drawing(&mut fonts.files, picked_fonts(&mut fonts.finder, &first, c), c, first.weight);
     match &font {
         Some(font) => fonts.picked.entry(key).or_default().push(Arc::clone(font)),
         None => {
@@ -104,8 +107,8 @@ fn first_with<'a, F>(named: &'a [Option<F>], picked: &'a [F], has: impl Fn(&F) -
     named.iter().flatten().chain(picked).find(|font| has(font))
 }
 
-/// The first of `candidates` that the map can draw `c` from, at `weight`
-/// if it is a variable font.
+/// The first of `candidates` that the map can draw `c` from, as a face at
+/// `weight`.
 fn first_drawing(
     files: &mut source::Files,
     candidates: Vec<(String, Source)>,
@@ -113,10 +116,10 @@ fn first_drawing(
     weight: u16,
 ) -> Option<Arc<SystemFont>> {
     candidates.into_iter().find_map(|(_, source)| {
-        let data = files.data(&source);
-        let file = FontFile::new(data.clone(), weight).filter(|font| font.has_char(c))?;
-        let key = Arc::from(format!("{}@{weight}", source.url()));
-        Some(Arc::new(SystemFont { file, local: LocalFont { key, data, weight } }))
+        let data = files.data(&source)?;
+        let file = FontFile::new(data.clone()).filter(|font| font.has_char(c))?;
+        let face = FontFace::device(&source.url(), weight, data);
+        Some(Arc::new(SystemFont { file, face }))
     })
 }
 
@@ -140,7 +143,7 @@ fn class(c: char) -> u32 {
 
 /// The fonts of the family that `name` names, if the system has it, the
 /// weight closest to the name's first, with their family name.
-pub(crate) fn named_fonts(name: &str, parsed: &FontName<'_>) -> Vec<(String, Source)> {
+pub(crate) fn named_fonts(finder: &mut Finder, name: &str, parsed: &FontName<'_>) -> Vec<(String, Source)> {
     // Every font has a space, so the lookup finds the family whatever it
     // draws.
     let query = Query {
@@ -151,7 +154,7 @@ pub(crate) fn named_fonts(name: &str, parsed: &FontName<'_>) -> Vec<(String, Sou
         weight: parsed.weight,
         italic: parsed.italic,
     };
-    let mut candidates = drawn(system().candidates(&query), ' ', parsed.weight);
+    let mut candidates = drawn(finder.candidates(&query), ' ', parsed.weight);
     candidates.retain(|(family, ..)| family.eq_ignore_ascii_case(parsed.family));
     nearest(candidates, parsed.weight)
 }
@@ -159,9 +162,8 @@ pub(crate) fn named_fonts(name: &str, parsed: &FontName<'_>) -> Vec<(String, Sou
 /// The fonts the platform picks for `c` in the family, weight and style of
 /// `first`, the font stack's first name, the weight closest to it first,
 /// with their family names.
-pub(crate) fn picked_fonts(first: &FontName<'_>, c: char) -> Vec<(String, Source)> {
-    let system = system();
-    let languages = if class(c) == u32::MAX { languages::for_ideographs(&system.preferred) } else { Vec::new() };
+pub(crate) fn picked_fonts(finder: &mut Finder, first: &FontName<'_>, c: char) -> Vec<(String, Source)> {
+    let languages = if class(c) == u32::MAX { languages::for_ideographs(&system().preferred) } else { Vec::new() };
     let query = Query {
         name: None,
         family: Some(first.family).filter(|family| !family.is_empty()),
@@ -170,7 +172,7 @@ pub(crate) fn picked_fonts(first: &FontName<'_>, c: char) -> Vec<(String, Source
         weight: first.weight,
         italic: first.italic,
     };
-    nearest(drawn(system.candidates(&query), c, first.weight), first.weight)
+    nearest(drawn(finder.candidates(&query), c, first.weight), first.weight)
 }
 
 /// How many of a lookup's candidates to read.
@@ -201,21 +203,43 @@ mod tests {
     // Which fonts the system has depends on the machine, so the tests check
     // the fonts it finds, and pass with none; `--nocapture` lists them.
 
-    use mln_text::font_name;
-    use mln_text::glyph::GlyphID;
-    use mln_text::local_glyph_rasterizer::LocalGlyphRasterizer;
+    use std::num::NonZeroU16;
 
-    use super::{SystemGlyphRasterizer, class, first_with, named_fonts, picked_fonts};
+    use mln_text::glyph::{Glyph, GlyphIDType};
+    use mln_text::local_fonts::FontChooser;
+    use mln_text::{ShapedText, Shaper, font_name};
+
+    use super::{SystemFonts, class, first_with, named_fonts, picked_fonts};
+    use crate::{Finder, system};
 
     fn stack(names: &[&str]) -> Vec<String> {
         names.iter().map(|name| (*name).to_owned()).collect()
+    }
+
+    /// What `f` finds with the platform's font matcher: `None` without one.
+    fn with_finder<R>(f: impl FnOnce(&mut Finder) -> R) -> Option<R> {
+        Some(f(&mut system().fonts.as_ref()?.lock().finder))
+    }
+
+    /// The glyph of `c` that the face chosen for it in `font_stack` draws,
+    /// shaped alone.
+    fn chosen_glyph(font_stack: &[&str], c: char) -> Option<Glyph> {
+        let face = SystemFonts.choose(&stack(font_stack), c)?;
+        let data = face.data.expect("a device face holds its file");
+        let shaper = Shaper::at_weight(GlyphIDType::face(NonZeroU16::MIN), data, f32::from(face.weight));
+        let mut shaped = ShapedText::default();
+        shaper.shape(&[c], false, &mut shaped);
+        let [id] = shaped.glyphs[..] else { panic!("{c} shapes as {:?} in {}", shaped.glyphs, face.url) };
+        assert_ne!(id.code, 0, "{c} in {}", face.url);
+        Some(shaper.rasterize_glyph(id))
     }
 
     #[test]
     fn a_picked_font_has_the_character() {
         for c in ['a', 'ä', 'Ж', 'α', 'א', 'ب', '中', 'あ', '한', 'ሀ'] {
             for name in ["", "Open Sans Regular", "Noto Sans Bold"] {
-                let found = picked_fonts(&font_name::parse(name), c).into_iter().next();
+                let found = with_finder(|finder| picked_fonts(finder, &font_name::parse(name), c).into_iter().next());
+                let found = found.flatten();
                 println!("{c} for {name:?}: {found:?}");
                 if let Some((_, source)) = found {
                     assert!(source.drawn_weight(c, 400).is_some(), "{c} for {name:?}");
@@ -226,14 +250,19 @@ mod tests {
 
     #[test]
     fn a_name_gets_its_family_if_the_system_has_it() {
-        // The family the platform picks for 'a' is one the system has.
-        let Some((family, _)) = picked_fonts(&font_name::parse(""), 'a').into_iter().next() else { return };
-        let name = format!("{family} Bold");
-        let found = named_fonts(&name, &font_name::parse(&name));
-        println!("{name}: {:?}", found.first());
-        assert_ne!(found.len(), 0);
-        assert!(found.iter().all(|(found, _)| found.eq_ignore_ascii_case(&family)));
-        assert_eq!(named_fonts("No Such Font Regular", &font_name::parse("No Such Font Regular")).len(), 0);
+        with_finder(|finder| {
+            // The family the platform picks for 'a' is one the system has.
+            let Some((family, _)) = picked_fonts(finder, &font_name::parse(""), 'a').into_iter().next() else {
+                return;
+            };
+            let name = format!("{family} Bold");
+            let found = named_fonts(finder, &name, &font_name::parse(&name));
+            println!("{name}: {:?}", found.first());
+            assert_ne!(found.len(), 0);
+            assert!(found.iter().all(|(found, _)| found.eq_ignore_ascii_case(&family)));
+            let missing = "No Such Font Regular";
+            assert_eq!(named_fonts(finder, missing, &font_name::parse(missing)).len(), 0);
+        });
     }
 
     // A font the system picked, or a later name's, draws only what the
@@ -252,13 +281,11 @@ mod tests {
     }
 
     #[test]
-    fn the_rasterizer_draws_what_a_font_has() {
+    fn a_chosen_face_draws_its_character() {
         for c in ['a', '中', '한'] {
-            let glyph =
-                SystemGlyphRasterizer.rasterize_glyph(&stack(&["Open Sans Regular"]), GlyphID::new(u32::from(c)));
+            let glyph = chosen_glyph(&["Open Sans Regular"], c);
             println!("{c}: {:?}", glyph.as_ref().map(|glyph| glyph.metrics));
             if let Some(glyph) = glyph {
-                assert_eq!(glyph.id, GlyphID::new(u32::from(c)));
                 assert!(glyph.metrics.advance > 0);
                 assert!(glyph.bitmap.data.iter().any(|&alpha| alpha > 0));
             }
@@ -270,13 +297,15 @@ mod tests {
     #[test]
     fn a_bold_name_draws_bolder_where_the_system_has_a_bolder_font() {
         for c in ['a', 'Ж', 'α', 'א', 'ب'] {
-            let Some((family, _)) = picked_fonts(&font_name::parse(""), c).into_iter().next() else { continue };
+            let picked = with_finder(|finder| picked_fonts(finder, &font_name::parse(""), c).into_iter().next());
+            let Some((family, _)) = picked.flatten() else { continue };
             let ink = |name: &str| {
-                let glyph = SystemGlyphRasterizer.rasterize_glyph(&stack(&[name]), GlyphID::new(u32::from(c)))?;
+                let glyph = chosen_glyph(&[name], c)?;
                 Some(glyph.bitmap.data.iter().map(|&alpha| u64::from(alpha)).sum::<u64>())
             };
             let drawn = |name: &str| {
-                let (_, source) = named_fonts(name, &font_name::parse(name)).into_iter().next()?;
+                let found = with_finder(|finder| named_fonts(finder, name, &font_name::parse(name)).into_iter().next());
+                let (_, source) = found.flatten()?;
                 Some((source.drawn_weight(c, font_name::parse(name).weight)?, source))
             };
             let (regular, bold) = (format!("{family} Regular"), format!("{family} Bold"));

@@ -16,7 +16,7 @@ use mln_style::{
 };
 use mln_style_types::image::Impl as ImageImpl;
 use mln_text::GlyphCache;
-use mln_text::local_glyph_rasterizer::LocalGlyphs;
+use mln_text::local_fonts::LocalGlyphs;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};

@@ -9,7 +9,8 @@ use std::num::NonZeroU16;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicUsize, Ordering};
-use std::time::Duration;
+use std::thread::ThreadId;
+use std::time::{Duration, Instant};
 
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
@@ -17,10 +18,10 @@ use mln_storage::{FileSource, Kind, Resource, Response};
 use mln_text::glyph::{
     FontData, FontFace, GLYPH_RANGES_PER_FONT_STACK, GLYPHS_PER_GLYPH_RANGE, Glyph, GlyphDependencies, GlyphID,
     GlyphIDType, GlyphIDs, GlyphMap, GlyphMetrics, GlyphRange, NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK,
-    ShapeRequests,
+    ShapeRequests, get_glyph_range,
 };
 use mln_text::glyph_cache::GlyphCache;
-use mln_text::local_glyph_rasterizer::{LocalFont, LocalGlyphRasterizer, LocalGlyphs};
+use mln_text::local_fonts::{FontChooser, LocalGlyphRasterizer, LocalGlyphs};
 use mln_text::tagged_string::font_stack_hash;
 use mln_text::{GlyphAdjust, ShapedText};
 use mln_util::error::Error;
@@ -76,9 +77,43 @@ impl LocalGlyphRasterizer for EveryLocalGlyphRasterizer {
     }
 }
 
-/// Local glyphs from `rasterizer`, CJK first.
+/// Local glyphs from `rasterizer`, CJK first, without device fonts, as in
+/// the browser.
 fn local(rasterizer: impl LocalGlyphRasterizer + 'static) -> LocalGlyphs {
-    LocalGlyphs { ideographs: true, rasterizer: Some(Arc::new(rasterizer)) }
+    LocalGlyphs { ideographs: true, chooser: None, rasterizer: Some(Arc::new(rasterizer)) }
+}
+
+/// The device's fonts as faces whose files hold their names: `fonts` names
+/// the font of each character, if one draws it. Records each character it
+/// is asked about, and the thread that asked.
+struct StubChooser {
+    fonts: fn(char) -> Option<&'static str>,
+    weight: u16,
+    asked: Mutex<Vec<(char, ThreadId)>>,
+}
+
+impl StubChooser {
+    fn new(fonts: fn(char) -> Option<&'static str>) -> Arc<StubChooser> {
+        Arc::new(StubChooser { fonts, weight: 400, asked: Mutex::default() })
+    }
+
+    /// The characters asked about, in order.
+    fn asked(&self) -> Vec<char> {
+        self.asked.lock().iter().map(|(c, _)| *c).collect()
+    }
+}
+
+impl FontChooser for StubChooser {
+    fn choose(&self, _font_stack: &FontStack, c: char) -> Option<FontFace> {
+        self.asked.lock().push((c, std::thread::current().id()));
+        let font = (self.fonts)(c)?;
+        Some(FontFace::device(font, self.weight, FontData::from(font.as_bytes().to_vec())))
+    }
+}
+
+/// Local glyphs from `chooser`'s fonts, CJK first.
+fn chooser(chooser: &Arc<StubChooser>) -> LocalGlyphs {
+    LocalGlyphs { ideographs: true, chooser: Some(Arc::<StubChooser>::clone(chooser)), rasterizer: None }
 }
 
 type LoadedFn = Box<dyn FnMut(&FontStack, &GlyphRange)>;
@@ -153,7 +188,8 @@ struct Store {
     inbox: Inbox,
     /// Where the store parses glyph PBFs.
     pool: TaskGroup,
-    file_source: Arc<dyn FileSource>,
+    /// Where it requests from: `None` once the test takes it away.
+    file_source: RefCell<Option<Arc<dyn FileSource>>>,
     waits: RefCell<Vec<Wait>>,
 }
 
@@ -189,6 +225,7 @@ impl Store {
         let pool = TaskGroup::new(&Pool::new(4));
         let store = GlyphStore::new(local, glyph_cache, pool.clone(), engine, Arc::clone(&wake));
         let inbox = Inbox::new(wake);
+        let file_source = RefCell::new(Some(file_source));
         Rc::new(Store { store: RefCell::new(store), observer, inbox, pool, file_source, waits: RefCell::default() })
     }
 
@@ -211,11 +248,17 @@ impl Store {
         self.answer();
     }
 
-    /// Gives the store the responses that arrived.
+    /// Gives the store the responses and device fonts that arrived.
     fn take_responses(&self) {
         while let Some(event) = self.inbox.next() {
-            if let TileEvent::Glyphs { font_stack, range, id, result } = event {
-                self.store.borrow_mut().take_response(&font_stack, range, id, result);
+            match event {
+                TileEvent::Glyphs { font_stack, range, id, result } => {
+                    self.store.borrow_mut().take_response(&font_stack, range, id, result);
+                }
+                TileEvent::DeviceFonts { font_stack, faces } => {
+                    self.store.borrow_mut().take_device_fonts(&font_stack, faces);
+                }
+                _ => {}
             }
         }
         self.report();
@@ -225,11 +268,12 @@ impl Store {
     fn answer(&self) {
         let waits = std::mem::take(&mut *self.waits.borrow_mut());
         let mut answered = Vec::new();
+        let file_source = self.file_source.borrow().clone();
         for mut wait in waits {
             let resolved = self.store.borrow_mut().resolve(
                 &wait.dependencies,
                 &mut wait.wait,
-                Some(&self.file_source),
+                file_source.as_ref(),
                 self.inbox.sender(),
             );
             match resolved {
@@ -318,6 +362,30 @@ impl GlyphStoreTest {
 
     fn end(&self) {
         self.run_loop.stop();
+    }
+
+    /// Runs the test's queue until `done`, as answers arrive from the pool.
+    fn run_until(&self, done: impl Fn() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !done() {
+            assert!(Instant::now() < deadline, "no answer in 10 s");
+            if !self.run_loop.run_once(&mut self.local()) {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
+
+    /// Requests `dependencies` and runs the test's queue until the requestor
+    /// gets them: what it got.
+    fn run_until_answered(&self, dependencies: GlyphDependencies) -> GlyphMap {
+        let answer: Rc<RefCell<Option<GlyphMap>>> = Rc::default();
+        let a = Rc::clone(&answer);
+        *self.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
+            *a.borrow_mut() = Some(glyphs);
+        }));
+        self.request_glyphs(dependencies);
+        self.run_until(|| answer.borrow().is_some());
+        answer.take().expect("an answer")
     }
 
     /// Loads `chars` of `font_stack` from the glyphs.pbf fixture.
@@ -534,7 +602,7 @@ fn a_wait_resolves_a_range_that_failed_during_it_as_missing() {
     let _log = SquelchLog::new();
     test.glyph_store().set_url("test/fixtures/resources/glyphs.pbf");
 
-    let file_source = Arc::clone(&test.store.file_source);
+    let file_source = test.store.file_source.borrow().clone().unwrap();
     let mut wait = GlyphWait::default();
     let inbox = test.store.inbox.sender().clone();
     assert!(test.glyph_store().resolve(&dependencies(&['a']), &mut wait, Some(&file_source), &inbox).is_none());
@@ -1035,13 +1103,7 @@ fn font_face_test(engine: &Arc<DeferredEngine>) -> GlyphStoreTest {
         response.data = Some(Arc::new(b"font".to_vec()));
         Some(response)
     });
-    let face = FontFace {
-        type_: FONT_FACE,
-        name: "Test Stack".to_owned(),
-        url: "test://face.ttf".to_owned(),
-        ranges: vec![],
-        data: None,
-    };
+    let face = FontFace { type_: FONT_FACE, ..FontFace::new("Test Stack", "test://face.ttf", vec![]) };
     test.glyph_store().set_font_faces(Some(Arc::new(vec![face])));
     GlyphStoreTest { squelch_log: Some(SquelchLog::new()), ..test }
 }
@@ -1218,12 +1280,14 @@ fn ideographs_come_from_pbfs_first_unless_local_ideographs_are_set() {
 }
 
 // A local glyph comes from the fallback font faces that cover it before the
-// platform's fonts, one glyph at a time.
+// device's fonts, one glyph at a time, and the device's are asked only about
+// what the faces lack.
 #[test]
-fn a_fallback_face_draws_local_glyphs_before_the_platform() {
+fn a_fallback_face_draws_local_glyphs_before_the_device() {
     let engine = Arc::new(DeferredEngine::default());
+    let katakana = StubChooser::new(|c| (c == 'テ').then_some("font"));
     let test = GlyphStoreTest::with_all(
-        local(KatakanaOnlyLocalGlyphRasterizer),
+        chooser(&katakana),
         ResponseType::Synchronous,
         Arc::default(),
         Arc::<DeferredEngine>::clone(&engine),
@@ -1239,44 +1303,42 @@ fn a_fallback_face_draws_local_glyphs_before_the_platform() {
     test.run_loop.run_once(&mut test.local());
     test.glyph_store().set_url("test/fixtures/resources/glyphs.pbf");
 
-    // The platform's fonts have only テ.
-    let glyphs = answer_at_once(&test, &['中', 'テ']).expect("answered at once, with no glyph PBF");
+    // The device's fonts have only テ.
+    let glyphs = test.run_until_answered(dependencies(&['中', 'テ']));
     let glyphs = &glyphs[&font_stack_hash(&test_stack())];
     assert_eq!(glyphs[&gid('中')].as_ref().expect("the face's glyph").id, gid('中'));
-    assert_eq!(engine.loads.load(Ordering::SeqCst), 1);
-    assert!(glyphs[&gid('テ')].is_some(), "the platform's glyph");
+    assert_eq!(glyphs[&gid('テ')].as_ref().expect("the device's glyph").id, gid('テ'));
+    assert_eq!(katakana.asked(), ['テ']);
+    // The fallback face and the device's font.
+    assert_eq!(engine.loads.load(Ordering::SeqCst), 2);
 }
 
 /// The device's fonts as three: one for Hebrew, one for Arabic and one for
 /// everything else but marks, which none has on its own.
-struct ScriptFonts;
-
-impl LocalGlyphRasterizer for ScriptFonts {
-    fn rasterize_glyph(&self, _font_stack: &FontStack, _glyph_id: GlyphID) -> Option<Glyph> {
-        None
-    }
-
-    fn font(&self, _font_stack: &FontStack, c: char) -> Option<LocalFont> {
-        let key = match c {
-            '\u{0300}'..='\u{036F}' => return None,
-            '\u{0590}'..='\u{05FF}' => "hebrew",
-            '\u{0600}'..='\u{06FF}' => "arabic",
-            _ => "latin",
-        };
-        Some(LocalFont { key: Arc::from(key), data: FontData::from(key.as_bytes().to_vec()), weight: 400 })
+fn script_fonts(c: char) -> Option<&'static str> {
+    match c {
+        '\u{0300}'..='\u{036F}' => None,
+        '\u{0590}'..='\u{05FF}' => Some("hebrew"),
+        '\u{0600}'..='\u{06FF}' => Some("arabic"),
+        _ => Some("latin"),
     }
 }
 
 /// Loads each font as a shaper that draws each character as the glyph of
 /// that index, in its font's type, reversed for right-to-left text.
-struct LetterEngine;
+#[derive(Default)]
+struct LetterEngine {
+    /// The type and weight of each font loaded.
+    loads: Mutex<Vec<(GlyphIDType, u16)>>,
+}
 
 impl FontFaceEngine for LetterEngine {
     fn prepare(&self, ready: Box<dyn FnOnce(Result<(), String>) + Send>) {
         ready(Ok(()));
     }
 
-    fn load(&self, type_: GlyphIDType, _data: FontData, _weight: u16) -> Option<Box<dyn FontFaceShaper>> {
+    fn load(&self, type_: GlyphIDType, _data: FontData, weight: u16) -> Option<Box<dyn FontFaceShaper>> {
+        self.loads.lock().push((type_, weight));
         Some(Box::new(LetterShaper(type_)))
     }
 }
@@ -1298,14 +1360,37 @@ impl FontFaceShaper for LetterShaper {
     }
 }
 
+/// A store on a `LetterEngine` that draws from `fonts`' fonts, with a
+/// synchronous file source.
+fn letter_test(fonts: &Arc<StubChooser>) -> (GlyphStoreTest, Arc<LetterEngine>) {
+    let engine = Arc::new(LetterEngine::default());
+    let test = GlyphStoreTest::with_all(
+        chooser(fonts),
+        ResponseType::Synchronous,
+        Arc::default(),
+        Arc::<LetterEngine>::clone(&engine),
+    );
+    (test, engine)
+}
+
+/// The dependencies of `text`, shaped with the device's fonts.
+fn system_text(text: &str) -> GlyphDependencies {
+    let text: Vec<char> = text.chars().collect();
+    let shapes = VecMap::from([(test_stack(), VecMap::from([(GlyphIDType::SYSTEM, [text].into())]))]);
+    GlyphDependencies { glyphs: VecMap::new(), shapes }
+}
+
+/// The glyph type of the stub chooser's `font` at regular weight.
+fn device_type(font: &str) -> GlyphIDType {
+    FontFace::device(font, 400, FontData::default()).type_
+}
+
 /// The glyphs that the device's fonts shape `text` as, by character and
 /// font.
 fn shape_with_system_fonts(text: &str) -> Vec<(char, GlyphIDType)> {
-    let test =
-        GlyphStoreTest::with_all(local(ScriptFonts), ResponseType::Synchronous, Arc::default(), Arc::new(LetterEngine));
+    let (test, _) = letter_test(&StubChooser::new(script_fonts));
+    test.run_until_answered(system_text(text));
     let text: Vec<char> = text.chars().collect();
-    let shapes = VecMap::from([(test_stack(), VecMap::from([(GlyphIDType::SYSTEM, [text.clone()].into())]))]);
-    test.request_glyphs(GlyphDependencies { glyphs: VecMap::new(), shapes });
     let shaping = test.requestor.shaping.borrow();
     let shaped = &shaping.as_ref().expect("an answer")[&test_stack()][&GlyphIDType::SYSTEM][&text];
     shaped.glyphs.iter().map(|glyph| (char::from_u32(u32::from(glyph.code)).unwrap(), glyph.type_)).collect()
@@ -1326,46 +1411,140 @@ fn the_devices_fonts_shape_each_piece_with_its_font() {
     assert!(glyphs.iter().all(|(_, type_)| ![GlyphIDType::FontPBF, GlyphIDType::SYSTEM].contains(type_)));
 }
 
-/// The device's fonts as one font file, "font".
-struct OneFont;
-
-impl LocalGlyphRasterizer for OneFont {
-    fn rasterize_glyph(&self, _font_stack: &FontStack, _glyph_id: GlyphID) -> Option<Glyph> {
-        None
-    }
-
-    fn font(&self, _font_stack: &FontStack, _c: char) -> Option<LocalFont> {
-        Some(LocalFont { key: Arc::from("font"), data: FontData::from(b"font".to_vec()), weight: 400 })
-    }
-}
-
 #[test]
 fn the_devices_fonts_wait_for_the_engine() {
     let engine = Arc::new(DeferredEngine::default());
+    let one_font = StubChooser::new(|_| Some("font"));
     let test = GlyphStoreTest::with_all(
-        local(OneFont),
+        chooser(&one_font),
         ResponseType::Synchronous,
         Arc::default(),
         Arc::<DeferredEngine>::clone(&engine),
     );
+    let requested = Rc::new(Cell::new(false));
+    let r = Rc::clone(&requested);
+    *test.observer.glyphs_requested.borrow_mut() = Some(Box::new(move |_, _| r.set(true)));
     let available: Rc<RefCell<Option<GlyphMap>>> = Rc::default();
     let a = Rc::clone(&available);
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
         *a.borrow_mut() = Some(glyphs);
     }));
-    let text = vec!['\u{5}', '\u{6}'];
-    let shapes = VecMap::from([(test_stack(), VecMap::from([(GlyphIDType::SYSTEM, [text.clone()].into())]))]);
-    test.request_glyphs(GlyphDependencies { glyphs: VecMap::new(), shapes });
-    test.run_loop.run_once(&mut test.local());
+    test.request_glyphs(system_text("\u{5}\u{6}"));
+    // Chosen, and the chosen face's file parked for the engine.
+    test.run_until(|| requested.get());
     assert!(available.borrow().is_none());
     assert_eq!(engine.loads.load(Ordering::SeqCst), 0);
 
     engine.report(&Ok(()));
-    test.run_loop.run_once(&mut test.local());
-    test.run_loop.run_once(&mut test.local());
-    assert!(available.borrow().is_some());
+    test.run_until(|| available.borrow().is_some());
     assert_eq!(engine.loads.load(Ordering::SeqCst), 1);
     let shaping = test.requestor.shaping.borrow();
-    let shaped = &shaping.as_ref().expect("an answer")[&test_stack()][&GlyphIDType::SYSTEM][&text];
+    let shaped = &shaping.as_ref().expect("an answer")[&test_stack()][&GlyphIDType::SYSTEM][&vec!['\u{5}', '\u{6}']];
     assert_eq!(shaped.glyphs.iter().map(|glyph| glyph.code).collect::<Vec<_>>(), [5, 6]);
+}
+
+#[test]
+fn a_chooser_never_runs_on_the_render_thread() {
+    let fonts = StubChooser::new(|_| Some("latin"));
+    let (test, _) = letter_test(&fonts);
+    test.glyph_store().set_url("");
+    let mut dependencies = system_text("ab");
+    dependencies.glyphs = VecMap::from([(test_stack(), [gid('中')].into_iter().collect())]);
+    test.run_until_answered(dependencies);
+    let asked = fonts.asked.lock();
+    assert!(!asked.is_empty());
+    assert!(asked.iter().all(|(_, thread)| *thread != std::thread::current().id()));
+}
+
+#[test]
+fn a_glyph_waits_for_its_device_font_then_draws_from_it() {
+    let (test, _) = letter_test(&StubChooser::new(|_| Some("font")));
+    test.glyph_store().set_url("");
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let (requested, loaded) = (Rc::clone(&events), Rc::clone(&events));
+    *test.observer.glyphs_requested.borrow_mut() =
+        Some(Box::new(move |_, range| requested.borrow_mut().push(("requested", *range))));
+    *test.observer.glyphs_loaded.borrow_mut() =
+        Some(Box::new(move |_, range| loaded.borrow_mut().push(("loaded", *range))));
+
+    let answer: Rc<RefCell<Option<GlyphMap>>> = Rc::default();
+    let a = Rc::clone(&answer);
+    *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
+        *a.borrow_mut() = Some(glyphs);
+    }));
+    test.request_glyphs(dependencies(&['a']));
+    assert!(answer.borrow().is_none(), "waits for the choice");
+    assert!(events.borrow().is_empty());
+
+    test.run_until(|| answer.borrow().is_some());
+    let glyphs = answer.take().unwrap();
+    let glyph = glyphs[&font_stack_hash(&test_stack())][&gid('a')].clone().expect("the device's glyph");
+    assert_eq!(glyph.id, gid('a'));
+    assert_eq!(glyph.metrics, stub_glyph(gid('a')).metrics);
+    let range = get_glyph_range(GlyphID::with_type(0, device_type("font")));
+    assert_eq!(*events.borrow(), [("requested", range), ("loaded", range)]);
+}
+
+#[test]
+fn a_device_face_loads_at_its_weight() {
+    let bold = Arc::new(StubChooser { fonts: |_| Some("bold"), weight: 700, asked: Mutex::default() });
+    let (test, engine) = letter_test(&bold);
+    let face = FontFace { type_: FONT_FACE, ..FontFace::new("Test Stack", "app://face.ttf", vec![(0, 0xFFFF)]) }
+        .with_data(FontData::from(b"font".to_vec()));
+    test.glyph_store().set_font_faces(Some(Arc::new(vec![face])));
+    let mut dependencies = system_text("a");
+    dependencies.glyphs = VecMap::from([(test_stack(), [GlyphID::with_type(0, FONT_FACE)].into_iter().collect())]);
+    test.run_until_answered(dependencies);
+    let device = FontFace::device("bold", 700, FontData::default()).type_;
+    let mut loads = engine.loads.lock().clone();
+    loads.sort();
+    let mut expected = vec![(FONT_FACE, 400), (device, 700)];
+    expected.sort();
+    assert_eq!(loads, expected);
+}
+
+#[test]
+fn a_device_face_loads_without_a_file_source() {
+    let katakana = StubChooser::new(|c| (c == 'テ').then_some("font"));
+    let (test, engine) = letter_test(&katakana);
+    *test.store.file_source.borrow_mut() = None;
+    let face = FontFace { type_: FONT_FACE, ..FontFace::new("", "app://face.ttf", vec![(0x4E2D, 0x4E2D)]) }
+        .with_data(FontData::from(b"font".to_vec()));
+    test.glyph_store().set_font_faces(Some(Arc::new(vec![face])));
+    test.glyph_store().set_url("");
+
+    let glyphs = test.run_until_answered(dependencies(&['中', 'テ']));
+    let glyphs = &glyphs[&font_stack_hash(&test_stack())];
+    assert!(glyphs[&gid('中')].is_some(), "the fallback face's glyph");
+    assert!(glyphs[&gid('テ')].is_some(), "the device's glyph");
+    assert_eq!(engine.loads.lock().len(), 2);
+}
+
+#[test]
+fn an_answer_for_an_evicted_stack_is_dropped() {
+    let fonts = StubChooser::new(|_| Some("latin"));
+    let (test, _) = letter_test(&fonts);
+    test.request_glyphs(system_text("a"));
+    test.glyph_store().evict(&VecSet::new());
+
+    let revision = test.glyph_store().revision();
+    let face = FontFace::device("latin", 400, FontData::from(b"latin".to_vec()));
+    test.glyph_store().take_device_fonts(&test_stack(), vec![('a', Some(face))]);
+    assert_eq!(test.glyph_store().revision(), revision);
+
+    // The wait resolves again, and asks again.
+    test.store.answer();
+    test.run_until(|| fonts.asked.lock().len() == 2);
+    assert_eq!(fonts.asked(), ['a', 'a']);
+}
+
+#[test]
+fn characters_are_asked_once_per_stack() {
+    let fonts = StubChooser::new(|_| Some("latin"));
+    let (test, _) = letter_test(&fonts);
+    test.request_glyphs(system_text("ab"));
+    test.run_until_answered(system_text("ab"));
+    let mut asked = fonts.asked();
+    asked.sort_unstable();
+    assert_eq!(asked, ['a', 'b']);
 }

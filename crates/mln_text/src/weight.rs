@@ -6,8 +6,8 @@ use skrifa::Font;
 /// the range of the font's `wght` axis. Every label that a font draws comes
 /// out at this one weight, so a font whose default instance is far from
 /// regular (the variable Noto Sans CJK defaults to Thin, 100) still draws as
-/// body text. A local font draws at the weight its font stack names instead
-/// ([`FontFile::new`](crate::FontFile::new)).
+/// body text. A device font loads at its face's `weight` instead
+/// ([`FontFace::device`](crate::glyph::FontFace::device)).
 pub const REGULAR_WEIGHT: f32 = 400.0;
 
 /// `font` at `weight`, clamped to its `wght` axis: `font` itself when it has

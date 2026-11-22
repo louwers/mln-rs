@@ -1,11 +1,11 @@
 //! Where a system font's bytes come from, whether the map can draw a script
-//! with it, and its bytes, mapped the first time the map needs them.
+//! with it, and its bytes, mapped when the font is first chosen.
 
 #![expect(unsafe_code, reason = "memory-mapping a font file is unsafe")]
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use memmap2::Mmap;
 use mln_text::glyph::FontData;
@@ -82,32 +82,28 @@ fn family_name(tables: &[Table]) -> Option<String> {
 /// The font files of the chosen fonts, each shared by the faces that use it.
 #[derive(Default)]
 pub(crate) struct Files {
-    files: HashMap<PathBuf, Arc<LazyFile>>,
+    /// Each file mapped, or `None` where it couldn't be.
+    files: HashMap<PathBuf, Option<Arc<Mmap>>>,
+    /// The font file made of each CoreText font's tables.
     #[cfg(target_vendor = "apple")]
-    fonts: HashMap<crate::apple::Font, Arc<LazyTables>>,
+    fonts: HashMap<crate::apple::Font, Arc<Vec<u8>>>,
 }
 
 impl Files {
-    /// The bytes of `source`'s font, mapped the first time the map needs
-    /// them.
-    pub(crate) fn data(&mut self, source: &Source) -> FontData {
+    /// The bytes of `source`'s font: its file, memory-mapped, whose pages
+    /// the OS reads as the map draws from them, or a file of a CoreText
+    /// font's tables. `None` for a file that can't be mapped, which logs a
+    /// warning once.
+    pub(crate) fn data(&mut self, source: &Source) -> Option<FontData> {
         match source {
             Source::File { path, index } => {
-                let file = self
-                    .files
-                    .entry(path.clone())
-                    .or_insert_with(|| Arc::new(LazyFile { path: path.clone(), map: OnceLock::new() }));
-                let file: Arc<LazyFile> = Arc::clone(file);
-                FontData::new(file).with_face_index(*index)
+                let file = self.files.entry(path.clone()).or_insert_with(|| map(path).map(Arc::new)).clone()?;
+                Some(FontData::new(file).with_face_index(*index))
             }
             #[cfg(target_vendor = "apple")]
             Source::CoreText(font) => {
-                let tables = self
-                    .fonts
-                    .entry(font.clone())
-                    .or_insert_with(|| Arc::new(LazyTables { font: font.clone(), file: OnceLock::new() }));
-                let tables: Arc<LazyTables> = Arc::clone(tables);
-                FontData::new(tables)
+                let file = self.fonts.entry(font.clone()).or_insert_with(|| Arc::new(font.file()));
+                Some(FontData::from(Arc::clone(file)))
             }
         }
     }
@@ -132,35 +128,6 @@ pub(crate) fn drawn_weight(tables: &[Table], probe: char, weight: u16) -> Option
         wght.or_else(|| table(b"OS/2").and_then(|data| Os2::read(data).ok()).map(|os2| os2.us_weight_class()))
             .unwrap_or(400),
     )
-}
-
-/// A font file, mapped the first time the map needs it. A map leaves the
-/// pages the map never reads on disk: a CJK font is tens of megabytes, and a
-/// map's labels use a few thousand of its glyphs.
-struct LazyFile {
-    path: PathBuf,
-    map: OnceLock<Option<Mmap>>,
-}
-
-impl AsRef<[u8]> for LazyFile {
-    fn as_ref(&self) -> &[u8] {
-        self.map.get_or_init(|| map(&self.path)).as_deref().unwrap_or_default()
-    }
-}
-
-/// A font file made of a CoreText font's tables the first time the map needs
-/// it.
-#[cfg(target_vendor = "apple")]
-struct LazyTables {
-    font: crate::apple::Font,
-    file: OnceLock<Vec<u8>>,
-}
-
-#[cfg(target_vendor = "apple")]
-impl AsRef<[u8]> for LazyTables {
-    fn as_ref(&self) -> &[u8] {
-        self.file.get_or_init(|| self.font.file())
-    }
 }
 
 /// The file at `path`, memory-mapped.

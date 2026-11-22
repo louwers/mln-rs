@@ -5,12 +5,14 @@
 //!   glyph PBFs, the scripts they can't shape (the Indic scripts, Sinhala,
 //!   Tibetan, Myanmar and Khmer) that the system has fonts for; in a style
 //!   without, all the text the style's font faces don't draw.
-//! - [`SystemGlyphRasterizer`]: the font of each character of a label, for
-//!   that shaping, and the glyph of any other character, one at a time: a
-//!   glyph a style's PBFs lack, or a CJK character. Either comes from the
-//!   first font that the label's font stack names that the system has and
-//!   that has the character, else from the font the system picks for it, at
-//!   the weight and style that the stack's names imply.
+//! - [`SystemFonts`]: the `FontChooser` that chooses the font of each
+//!   character of a label, for that shaping, and for the glyph of any other
+//!   character, one at a time: a glyph a style's PBFs lack, or a CJK
+//!   character. It is the first font that the label's font stack names that
+//!   the system has and that has the character, else the font the system
+//!   picks for it, at the weight and style that the stack's names imply. The
+//!   chosen font is a `FontFace::device` that holds its file, which the map
+//!   loads as it loads a style's font faces.
 //!
 //! It asks the platform's font matcher, for the user's preferred languages:
 //! fontconfig on Linux and the BSDs, `AFontMatcher` on Android 10 and later,
@@ -20,7 +22,7 @@
 //!
 //! The matcher loads once per process, on a thread of its own
 //! ([`prefetch`]), and each font the first time a map needs it. A font's
-//! file is memory-mapped the first time the map draws from it.
+//! file is mapped when it is first chosen; the OS reads its pages on demand.
 
 use std::sync::OnceLock;
 
@@ -47,7 +49,7 @@ mod directwrite;
 mod fontconfig;
 
 #[cfg(not(target_family = "wasm"))]
-pub use glyphs::SystemGlyphRasterizer;
+pub use glyphs::SystemFonts;
 
 /// The ranges of [`shaped_ranges`], once found.
 static SHAPED: OnceLock<Vec<FontFaceRange>> = OnceLock::new();
@@ -81,7 +83,7 @@ pub fn font_face() -> Option<FontFace> {
     #[cfg(target_family = "wasm")]
     return None;
     #[cfg(not(target_family = "wasm"))]
-    system().finder.is_some().then(|| FontFace::system(shaped_ranges().to_vec()))
+    system().fonts.is_some().then(|| FontFace::system(shaped_ranges().to_vec()))
 }
 
 #[cfg(target_family = "wasm")]
@@ -91,12 +93,12 @@ fn find() -> Vec<FontFaceRange> {
 
 #[cfg(not(target_family = "wasm"))]
 fn find() -> Vec<FontFaceRange> {
-    let Some(finder) = &system().finder else { return Vec::new() };
-    let mut finder = finder.lock();
-    let ranges = find_with(&mut finder);
+    let Some(fonts) = &system().fonts else { return Vec::new() };
+    let mut fonts = fonts.lock();
+    let ranges = find_with(&mut fonts.finder);
     #[cfg(target_os = "android")]
     {
-        let Finder::Android(matcher) = &*finder;
+        let Finder::Android(matcher) = &fonts.finder;
         matcher.prepare();
     }
     ranges
@@ -144,22 +146,14 @@ pub(crate) struct Query<'a> {
     pub(crate) italic: bool,
 }
 
-/// The process's way to find fonts, and the user's languages.
+/// The process's fonts, and the user's languages.
 #[cfg(not(target_family = "wasm"))]
 pub(crate) struct System {
-    /// The platform's font matcher, if it has one.
-    finder: Option<parking_lot::Mutex<Finder>>,
+    /// The platform's font matcher and the fonts found with it, if it has
+    /// one. One lock, so that a lookup and what it finds stay together.
+    pub(crate) fonts: Option<parking_lot::Mutex<glyphs::Fonts>>,
     /// The user's preferred languages, most preferred first.
     pub(crate) preferred: Vec<String>,
-}
-
-#[cfg(not(target_family = "wasm"))]
-impl System {
-    /// The fonts that may draw `query`'s character, best first: none
-    /// without a font matcher.
-    pub(crate) fn candidates(&self, query: &Query<'_>) -> Vec<(String, source::Source)> {
-        self.finder.as_ref().map(|finder| finder.lock().candidates(query)).unwrap_or_default()
-    }
 }
 
 /// The system's fonts, loaded the first time.
@@ -167,7 +161,7 @@ impl System {
 pub(crate) fn system() -> &'static System {
     static SYSTEM: OnceLock<System> = OnceLock::new();
     SYSTEM.get_or_init(|| System {
-        finder: Finder::new().map(parking_lot::Mutex::new),
+        fonts: Finder::new().map(|finder| parking_lot::Mutex::new(glyphs::Fonts::new(finder))),
         preferred: languages::preferred(),
     })
 }
@@ -222,14 +216,11 @@ mod tests {
     // Which fonts it finds depends on the machine, so the tests check the
     // fonts it finds, and pass with none; `--nocapture` lists them.
 
-    use std::num::NonZeroU16;
-
-    use mln_text::glyph::GlyphIDType;
-    use mln_text::local_glyph_rasterizer::LocalGlyphRasterizer;
+    use mln_text::local_fonts::FontChooser;
     use mln_text::{ShapedText, Shaper};
     use skrifa::MetadataProvider;
 
-    use super::{SystemGlyphRasterizer, scripts, shaped_ranges};
+    use super::{SystemFonts, scripts, shaped_ranges};
 
     /// Text of the script of `probe` that its font's shaping rules change:
     /// a conjunct, a split or reordered vowel, or a stack.
@@ -263,29 +254,30 @@ mod tests {
         println!("found fonts for {ranges:04X?} in {:?}", started.elapsed());
         for script in scripts::SCRIPTS.iter().filter(|script| script.ranges.iter().all(|r| ranges.contains(r))) {
             let sample = shaped_sample(script.probe);
-            let font = SystemGlyphRasterizer.font(&Vec::new(), script.probe).expect("a font for a shaped script");
-            let face = skrifa::FontRef::from_index(font.data.as_bytes(), font.data.face_index()).unwrap();
+            let face = SystemFonts.choose(&Vec::new(), script.probe).expect("a font for a shaped script");
+            let data = face.data.clone().expect("a device face holds its file");
+            let font = skrifa::FontRef::from_index(data.as_bytes(), data.face_index()).unwrap();
             let nominal: Vec<u16> =
-                sample.chars().map(|c| face.charmap().map(c).map_or(0, |glyph| glyph.to_u32() as u16)).collect();
-            let shaper =
-                Shaper::at_weight(GlyphIDType::face(NonZeroU16::MIN), font.data.clone(), f32::from(font.weight));
+                sample.chars().map(|c| font.charmap().map(c).map_or(0, |glyph| glyph.to_u32() as u16)).collect();
+            let shaper = Shaper::at_weight(face.type_, data, f32::from(face.weight));
             let mut shaped = ShapedText::default();
             shaper.shape(&sample.chars().collect::<Vec<_>>(), false, &mut shaped);
             let glyphs: Vec<u16> = shaped.glyphs.iter().map(|id| id.code).collect();
             let moved = shaped.adjusts.iter().any(|adjust| adjust.x_offset != 0.0 || adjust.y_offset != 0.0);
-            println!("{}: {sample} {nominal:?} -> {glyphs:?}{}", font.key, if moved { " moved" } else { "" });
-            assert!(glyphs != nominal || moved, "{} doesn't shape {sample}", font.key);
+            println!("{}: {sample} {nominal:?} -> {glyphs:?}{}", face.url, if moved { " moved" } else { "" });
+            assert!(glyphs != nominal || moved, "{} doesn't shape {sample}", face.url);
         }
     }
 
     #[test]
     fn a_font_has_the_character_it_is_for() {
         for c in ['a', 'ب', '\u{0915}', '中'] {
-            let Some(font) = SystemGlyphRasterizer.font(&vec!["Open Sans Bold".to_owned()], c) else { continue };
-            let face = skrifa::FontRef::from_index(font.data.as_bytes(), font.data.face_index()).unwrap();
-            println!("{c}: {} at {}", font.key, font.weight);
-            assert!(face.charmap().map(c).is_some(), "{c} in {}", font.key);
-            assert_eq!(font.weight, 700);
+            let Some(face) = SystemFonts.choose(&vec!["Open Sans Bold".to_owned()], c) else { continue };
+            let data = face.data.expect("a device face holds its file");
+            let font = skrifa::FontRef::from_index(data.as_bytes(), data.face_index()).unwrap();
+            println!("{c}: {} at {}", face.url, face.weight);
+            assert!(font.charmap().map(c).is_some(), "{c} in {}", face.url);
+            assert_eq!(face.weight, 700);
         }
     }
 }

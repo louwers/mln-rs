@@ -17,24 +17,29 @@
 // A character that glyph PBFs can draw takes its glyph from the first
 // source that has it, in the order `pbf_first` gives: the stack's glyph PBF,
 // unless the style has no glyph URL; and local glyphs, from the style's
-// fallback font faces that cover it and then the platform's
-// `LocalGlyphRasterizer` (`LocalGlyphs`). Local glyphs come first for CJK
-// when `LocalGlyphs::ideographs` is set, and otherwise draw what the PBF
-// lacks. Either way the glyph keeps its PBF glyph ID, so the layout doesn't
-// change.
+// fallback font faces that cover it, then the face of the device's font
+// that `LocalGlyphs`' chooser chose for it, then `LocalGlyphs`' rasterizer
+// (the browser's). Local glyphs come first for CJK when
+// `LocalGlyphs::ideographs` is set, and otherwise draw what the PBF lacks.
+// Either way the glyph keeps its PBF glyph ID, so the layout doesn't change.
 //
 // Font faces: the style's "font-faces" are fetched as font files
 // (`Resource::font_face`), or read from the bytes a face holds (an app's
 // fallback faces can), and shaped here, on the render thread, with the
 // `FontFaceEngine` (font_face_engine.rs): mln_text's Shaper (HarfRust)
-// natively, ready at once. Text that the device's fonts shape
-// (`GlyphIDType::SYSTEM`) is shaped the same way, a piece at a time: each
-// piece with the font that `LocalGlyphs`' rasterizer gives for its first
-// character. An engine that needs time to
-// get ready (the browser build loads its shaper as a second wasm module) is
-// asked to as soon as the style has font faces; a font file that arrives
-// before it is ready waits, parsed in the update after the engine reports
-// back.
+// natively, ready at once. An engine that needs time to get ready (the
+// browser build loads its shaper as a second wasm module) is asked to as
+// soon as the style has font faces; a font file that arrives before it is
+// ready waits, parsed in the update after the engine reports back.
+//
+// The device's fonts: text that they shape (`GlyphIDType::SYSTEM`) is
+// shaped a piece at a time, each piece with the face chosen for its first
+// character. The chooser can block on the platform's font matcher and font
+// files, so it runs on a serial lane of the pool, never here: a resolve that
+// meets a character not chosen yet asks about it and waits, as for a glyph
+// range, and the answer arrives in the inbox (`take_device_fonts`). A chosen
+// face holds its font file, and loads, waits for the engine and shapes as
+// the style's faces do.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
@@ -42,12 +47,12 @@ use std::sync::Arc;
 
 use mln_storage::{FileSource, Request, Resource, Response};
 use mln_text::glyph::{
-    FontData, FontFaces, Glyph, GlyphDependencies, GlyphID, GlyphIDType, GlyphMap, GlyphRange, ShapeRequests,
-    face_type, get_glyph_range,
+    FontData, FontFace, FontFaces, Glyph, GlyphDependencies, GlyphID, GlyphIDType, GlyphMap, GlyphRange, ShapeRequests,
+    get_glyph_range,
 };
 use mln_text::glyph_cache::{GlyphCache, GlyphCacheRange};
 use mln_text::glyph_pbf::parse_glyph_pbf;
-use mln_text::local_glyph_rasterizer::LocalGlyphs;
+use mln_text::local_fonts::LocalGlyphs;
 use mln_text::tagged_string::font_stack_hash;
 use mln_text::weight::REGULAR_WEIGHT;
 use mln_text::{BiDiRun, ShapedText, visual_runs};
@@ -105,6 +110,17 @@ struct Entry {
     glyphs: BTreeMap<GlyphID, Arc<Glyph>>,
     /// The PBF glyph IDs that no local font has.
     no_local: BTreeSet<GlyphID>,
+    /// The device fonts of the characters asked about.
+    device: HashMap<char, DeviceFont>,
+}
+
+/// Where the device font of a character of a font stack stands.
+#[derive(Clone, Copy)]
+enum DeviceFont {
+    /// Asked of the chooser, not answered yet.
+    Asked,
+    /// The chosen face's type, or `None` where no device font draws it.
+    Chosen(Option<GlyphIDType>),
 }
 
 impl Entry {
@@ -121,9 +137,6 @@ impl Entry {
         }
     }
 }
-
-/// One of the device's fonts loaded for shaping, with the type of its glyphs.
-type SystemShaper = (GlyphIDType, Rc<dyn FontFaceShaper>);
 
 /// The loaded HarfBuzz shapers of each font stack, by font face type.
 type Shapers = VecMap<FontStack, VecMap<GlyphIDType, Rc<dyn FontFaceShaper>>>;
@@ -168,6 +181,14 @@ pub(crate) struct GlyphStore {
     glyph_cache: Arc<GlyphCache>,
     /// Where glyph PBFs are parsed.
     pool: TaskGroup,
+    /// Where the chooser runs: one choice at a time, off the render thread.
+    /// Never waited on, since `TaskGroup::wait` runs queued tasks on the
+    /// waiting thread.
+    choices: TaskGroup,
+    /// The characters to ask the chooser about at the end of this resolve.
+    asks: VecMap<FontStack, Vec<char>>,
+    /// The device faces chosen so far, found by type after the style's faces.
+    device_faces: Vec<FontFace>,
     /// Asks the renderer for an update, from any thread, for the engine's
     /// report.
     wake: Waker,
@@ -189,18 +210,14 @@ pub(crate) struct GlyphStore {
     /// request each answers.
     deferred_responses: Vec<(FontData, FontStack, GlyphRange, u64)>,
     shapers: Shapers,
-    /// The device's fonts that shaped text, a few, by `LocalFont::key`:
-    /// `None` for one the engine can't read.
-    system_shapers: Vec<(Arc<str>, Option<SystemShaper>)>,
-    /// Whether text of the device's fonts waits for the engine.
-    system_waits: bool,
 }
 
 impl GlyphStore {
     /// A store that draws `local` glyphs, shares `glyph_cache`, parses glyph
-    /// PBFs on `pool` and loads font faces with `engine`. When the engine
-    /// reports back while font files wait for it, it calls `wake`, on the
-    /// engine's thread, for the `update` that takes them in.
+    /// PBFs and chooses device fonts on `pool`, and loads font faces with
+    /// `engine`. When the engine reports back while font files wait for it,
+    /// it calls `wake`, on the engine's thread, for the `update` that takes
+    /// them in.
     pub(crate) fn new(
         local: LocalGlyphs,
         glyph_cache: Arc<GlyphCache>,
@@ -214,7 +231,10 @@ impl GlyphStore {
             events: Vec::new(),
             local,
             glyph_cache,
+            choices: TaskGroup::serial(pool.pool()),
             pool,
+            asks: VecMap::new(),
+            device_faces: Vec::new(),
             wake,
             failures: 0,
             requests: 0,
@@ -225,8 +245,6 @@ impl GlyphStore {
             engine_readiness: Arc::default(),
             deferred_responses: Vec::new(),
             shapers: VecMap::new(),
-            system_shapers: Vec::new(),
-            system_waits: false,
         }
     }
 
@@ -254,14 +272,31 @@ impl GlyphStore {
         }
     }
 
-    /// Takes in the font files that waited for the engine once it reported
-    /// back, and has the text of the device's fonts that waited for it
-    /// resolve again.
-    pub(crate) fn update(&mut self) {
-        if self.system_waits && self.engine_readiness.lock().result.is_some() {
-            self.system_waits = false;
+    /// Takes in the chooser's answer for characters of `font_stack`. Each
+    /// character still asked about takes its face, which the store keeps,
+    /// and waiting resolves look again. An answer for an evicted stack, or
+    /// for a character not asked about, is dropped.
+    pub(crate) fn take_device_fonts(&mut self, font_stack: &FontStack, faces: Vec<(char, Option<FontFace>)>) {
+        let Some(entry) = self.entries.get_mut(font_stack) else { return };
+        let mut changed = false;
+        for (c, face) in faces {
+            let Some(state @ DeviceFont::Asked) = entry.device.get_mut(&c) else { continue };
+            *state = DeviceFont::Chosen(face.as_ref().map(|face| face.type_));
+            changed = true;
+            if let Some(face) = face
+                && !self.device_faces.iter().any(|known| known.type_ == face.type_)
+            {
+                self.device_faces.push(face);
+            }
+        }
+        if changed {
             self.revision += 1;
         }
+    }
+
+    /// Takes in the font files that waited for the engine once it reported
+    /// back.
+    pub(crate) fn update(&mut self) {
         if !self.deferred_responses.is_empty() && self.engine_readiness.lock().result.is_some() {
             for (data, font_stack, range, id) in std::mem::take(&mut self.deferred_responses) {
                 if self.is_loading(&font_stack, range, id) {
@@ -278,11 +313,26 @@ impl GlyphStore {
     }
 
     /// The glyphs of `dependencies`, and the shaping of their font-face
-    /// text, once every range they need is loaded or failed during `wait`.
-    /// Until then `None`, having requested the ranges that need it from
-    /// `file_source`, whose responses go to `inbox`; without one, those
-    /// ranges never load.
+    /// text, once every device font they need is chosen and every range
+    /// loaded or failed during `wait`. Until then `None`, having asked the
+    /// chooser about the characters not chosen yet and requested the ranges
+    /// not loaded from `file_source`, which answer to `inbox`. A range of a
+    /// face that holds its font file loads at once, without a file source;
+    /// without one, the others never load.
     pub(crate) fn resolve(
+        &mut self,
+        dependencies: &GlyphDependencies,
+        wait: &mut GlyphWait,
+        file_source: Option<&Arc<dyn FileSource>>,
+        inbox: &InboxSender,
+    ) -> Option<ResolvedGlyphs> {
+        let resolved = self.resolve_inner(dependencies, wait, file_source, inbox);
+        self.ask_device_fonts(inbox);
+        resolved
+    }
+
+    /// `resolve`, before it asks about the characters this one queued.
+    fn resolve_inner(
         &mut self,
         dependencies: &GlyphDependencies,
         wait: &mut GlyphWait,
@@ -292,27 +342,47 @@ impl GlyphStore {
         let since = *wait.since.get_or_insert(self.failures);
         let mut failed = false;
         loop {
-            let mut to_request: Vec<(FontStack, GlyphRange)> = Vec::new();
             let mut waits = false;
+            let mut needed: Vec<(&FontStack, GlyphRange)> = Vec::new();
             for (font_stack, glyph_ids) in &dependencies.glyphs {
-                let mut ranges: BTreeSet<GlyphRange> = BTreeSet::new();
                 for glyph_id in glyph_ids {
                     let needs = if glyph_id.type_ == GlyphIDType::FontPBF {
-                        self.pbf_glyph(font_stack, *glyph_id, since, &mut failed)
+                        self.pbf_glyph(font_stack, *glyph_id, since, &mut failed, &mut waits)
                     } else {
                         Some(get_glyph_range(*glyph_id))
                     };
-                    ranges.extend(needs);
+                    needed.extend(needs.map(|range| (font_stack, range)));
                 }
-                let entry = self.entries.entry(font_stack.clone()).or_default();
-                for range in ranges {
-                    match entry.ranges.get(&range) {
-                        Some(RangeState::Loaded(_)) => {}
-                        Some(RangeState::Failed { at }) if *at > since => failed = true,
-                        Some(RangeState::Loading { .. }) => waits = true,
-                        // Never requested, or failed before this wait began.
-                        _ => to_request.push((font_stack.clone(), range)),
+            }
+            for (font_stack, types) in &dependencies.shapes {
+                for text in types.get(&GlyphIDType::SYSTEM).into_iter().flatten() {
+                    for (i, &c) in text.iter().enumerate() {
+                        // A character that extends the one before it joins its
+                        // piece (`shape_with_system_fonts`).
+                        if i > 0 && i18n::extends_previous(c) {
+                            continue;
+                        }
+                        match self.device_font(font_stack, c) {
+                            DeviceFont::Asked => waits = true,
+                            DeviceFont::Chosen(Some(type_)) => {
+                                needed.push((font_stack, get_glyph_range(GlyphID::with_type(0, type_))));
+                            }
+                            DeviceFont::Chosen(None) => {}
+                        }
                     }
+                }
+            }
+            needed.sort_unstable();
+            needed.dedup();
+
+            let mut to_request: Vec<(FontStack, GlyphRange)> = Vec::new();
+            for (font_stack, range) in needed {
+                match self.entries.get(font_stack).and_then(|entry| entry.ranges.get(&range)) {
+                    Some(RangeState::Loaded(_)) => {}
+                    Some(RangeState::Failed { at }) if *at > since => failed = true,
+                    Some(RangeState::Loading { .. }) => waits = true,
+                    // Never requested, or failed before this wait began.
+                    _ => to_request.push((font_stack.clone(), range)),
                 }
             }
             if to_request.is_empty() {
@@ -325,11 +395,14 @@ impl GlyphStore {
             // A font file that a face holds loads at once, and the glyphs
             // that waited for it look again.
             for (font_stack, range) in to_request {
-                let Some(file_source) = file_source else {
+                if let Some(data) = self.face(range.type_).and_then(|face| face.data.clone()) {
+                    self.load_held(&font_stack, range, data);
+                } else if let Some(file_source) = file_source {
+                    self.request_range(&font_stack, range, file_source, inbox);
+                } else {
                     waits = true;
                     continue;
-                };
-                self.request_range(&font_stack, range, file_source, inbox);
+                }
                 let entry = self.entries.get(&font_stack);
                 waits |=
                     entry.is_some_and(|entry| matches!(entry.ranges.get(&range), Some(RangeState::Loading { .. })));
@@ -337,10 +410,6 @@ impl GlyphStore {
             if waits {
                 return None;
             }
-        }
-
-        if self.waits_for_engine(&dependencies.shapes) {
-            return None;
         }
 
         let mut glyphs = GlyphMap::new();
@@ -359,15 +428,17 @@ impl GlyphStore {
 
     /// Draws the PBF glyph `glyph_id` of `font_stack` from the first source
     /// that has it, PBF or local (`pbf_first`): `None` once it is drawn or
-    /// known missing, else the range that the next source needs. A range
-    /// that failed during the wait that began at failure `since` counts as
-    /// lacking the glyph, and sets `failed`.
+    /// known missing, or while its device font is being chosen, which sets
+    /// `waits`; else the range that the next source needs. A range that
+    /// failed during the wait that began at failure `since` counts as lacking
+    /// the glyph, and sets `failed`.
     fn pbf_glyph(
         &mut self,
         font_stack: &FontStack,
         glyph_id: GlyphID,
         since: u64,
         failed: &mut bool,
+        waits: &mut bool,
     ) -> Option<GlyphRange> {
         let pbf_first = self.pbf_first(glyph_id);
         for pbf in [pbf_first, !pbf_first] {
@@ -381,6 +452,10 @@ impl GlyphStore {
                 Source::Lacks { failed: true } => *failed = true,
                 Source::Lacks { failed: false } => {}
                 Source::Needs(range) => return Some(range),
+                Source::Waits => {
+                    *waits = true;
+                    return None;
+                }
             }
         }
         None
@@ -407,8 +482,8 @@ impl GlyphStore {
     }
 
     /// Draws the PBF glyph `glyph_id` of `font_stack` from local fonts: the
-    /// style's fallback font faces that cover it, in order, then the
-    /// platform's rasterizer.
+    /// style's fallback font faces that cover it, in order, then the device
+    /// font chosen for it, then the rasterizer.
     fn local_source(&mut self, font_stack: &FontStack, glyph_id: GlyphID, since: u64) -> Source {
         if let Some(entry) = self.entries.get(font_stack) {
             if entry.glyphs.contains_key(&glyph_id) {
@@ -440,6 +515,22 @@ impl GlyphStore {
                 }
                 Some(RangeState::Failed { at }) if *at > since => failed = true,
                 _ => return Source::Needs(range),
+            }
+        }
+        if glyph.is_none()
+            && let Some(c) = glyph_id.char()
+        {
+            match self.device_font(font_stack, c) {
+                DeviceFont::Asked => return Source::Waits,
+                DeviceFont::Chosen(Some(type_)) => {
+                    let range = get_glyph_range(GlyphID::with_type(0, type_));
+                    match self.entries.get(font_stack).and_then(|entry| entry.ranges.get(&range)) {
+                        Some(RangeState::Loaded(_)) => glyph = self.face_glyph(font_stack, type_, glyph_id),
+                        Some(RangeState::Failed { at }) if *at > since => failed = true,
+                        _ => return Source::Needs(range),
+                    }
+                }
+                DeviceFont::Chosen(None) => {}
             }
         }
         let glyph = glyph.or_else(|| {
@@ -513,10 +604,12 @@ impl GlyphStore {
     }
 
     /// Shapes `run` with the device's fonts, a piece at a time: each piece
-    /// the characters that one font draws, with the marks and joiners after
-    /// them. A character that no font has is left out.
-    fn shape_with_system_fonts(&mut self, font_stack: &FontStack, run: &BiDiRun, shaped: &mut ShapedText) {
-        let mut pieces: Vec<(Rc<dyn FontFaceShaper>, Vec<char>)> = Vec::new();
+    /// the characters that one face draws, with the marks and joiners after
+    /// them. A character that no face draws, or whose face doesn't load, is
+    /// left out.
+    fn shape_with_system_fonts(&self, font_stack: &FontStack, run: &BiDiRun, shaped: &mut ShapedText) {
+        let device = self.entries.get(font_stack).map(|entry| &entry.device);
+        let mut pieces: Vec<(GlyphIDType, Vec<char>)> = Vec::new();
         for &c in &run.text {
             if i18n::extends_previous(c)
                 && let Some((_, piece)) = pieces.last_mut()
@@ -524,10 +617,12 @@ impl GlyphStore {
                 piece.push(c);
                 continue;
             }
-            let Some(shaper) = self.system_shaper(font_stack, c) else { continue };
+            let Some(DeviceFont::Chosen(Some(type_))) = device.and_then(|device| device.get(&c)).copied() else {
+                continue;
+            };
             match pieces.last_mut() {
-                Some((last, piece)) if Rc::ptr_eq(last, &shaper) => piece.push(c),
-                _ => pieces.push((shaper, vec![c])),
+                Some((last, piece)) if *last == type_ => piece.push(c),
+                _ => pieces.push((type_, vec![c])),
             }
         }
         // A right-to-left run's later pieces lie to the left of its earlier
@@ -535,43 +630,49 @@ impl GlyphStore {
         if run.rtl {
             pieces.reverse();
         }
-        for (shaper, piece) in pieces {
-            shaper.shape(&piece, run.rtl, shaped);
+        for (type_, piece) in pieces {
+            if let Some(shaper) = self.shaper(font_stack, type_) {
+                shaper.shape(&piece, run.rtl, shaped);
+            }
         }
     }
 
-    /// Whether `shapes` has text of the device's fonts, which load with the
-    /// engine, and the engine isn't ready yet: then it has `update` answer
-    /// once it is.
-    fn waits_for_engine(&mut self, shapes: &ShapeRequests) -> bool {
-        if !shapes.values().any(|types| types.contains_key(&GlyphIDType::SYSTEM)) {
-            return false;
+    /// `c`'s device font for `font_stack`: `Chosen(None)` without a chooser;
+    /// `Asked` while it is being chosen, which asks the chooser about it at
+    /// the end of the resolve the first time.
+    fn device_font(&mut self, font_stack: &FontStack, c: char) -> DeviceFont {
+        if self.local.chooser.is_none() {
+            return DeviceFont::Chosen(None);
         }
-        self.prepare_engine();
-        let mut readiness = self.engine_readiness.lock();
-        if readiness.result.is_some() {
-            return false;
-        }
-        readiness.waiting = true;
-        self.system_waits = true;
-        true
+        let entry = self.entries.entry(font_stack.clone()).or_default();
+        *entry.device.entry(c).or_insert_with(|| {
+            self.asks.get_or_insert_with(font_stack, Vec::new).push(c);
+            DeviceFont::Asked
+        })
     }
 
-    /// The shaper of the device's font that draws `c` for a label in
-    /// `font_stack`, loaded the first time.
-    fn system_shaper(&mut self, font_stack: &FontStack, c: char) -> Option<Rc<dyn FontFaceShaper>> {
-        let font = self.local.rasterizer.as_ref()?.font(font_stack, c)?;
-        if let Some((_, loaded)) = self.system_shapers.iter().find(|(key, _)| *key == font.key) {
-            return loaded.as_ref().map(|(_, shaper)| Rc::clone(shaper));
+    /// Has the chooser choose the device fonts of the characters asked about
+    /// since the last call, one task per font stack on `choices`, each of
+    /// which sends its answer to `inbox`.
+    fn ask_device_fonts(&mut self, inbox: &InboxSender) {
+        let Some(chooser) = &self.local.chooser else { return };
+        for (font_stack, chars) in std::mem::take(&mut self.asks) {
+            let (chooser, inbox) = (Arc::clone(chooser), inbox.clone());
+            self.choices.spawn(move || {
+                let faces = chars.into_iter().map(|c| (c, chooser.choose(&font_stack, c))).collect();
+                inbox.send(TileEvent::DeviceFonts { font_stack, faces });
+            });
         }
-        let type_ = face_type(&font.key, "", &[]);
-        let loaded = matches!(self.engine_readiness.lock().result, Some(Ok(())))
-            .then(|| self.engine.load(type_, font.data, font.weight))
-            .flatten()
-            .map(|shaper| (type_, Rc::<dyn FontFaceShaper>::from(shaper)));
-        let shaper = loaded.as_ref().map(|(_, shaper)| Rc::clone(shaper));
-        self.system_shapers.push((font.key, loaded));
-        shaper
+    }
+
+    /// Loads `range` of `font_stack` from `data`, the font file its face
+    /// holds, without a request.
+    fn load_held(&mut self, font_stack: &FontStack, range: GlyphRange, data: FontData) {
+        self.requests += 1;
+        let id = self.requests;
+        self.set_range(font_stack, range, RangeState::Loading { id, request: None });
+        self.events.push(RendererEvent::GlyphsRequested { font_stack: font_stack.clone(), range });
+        self.process_data(Ok(Some(GlyphData::Font(data))), font_stack, range, id);
     }
 
     fn request_range(
@@ -583,23 +684,15 @@ impl GlyphStore {
     ) {
         self.requests += 1;
         let id = self.requests;
-        if let Some(data) = self.font_face_data(range.type_) {
-            // A face that holds its font file needs no request.
-            self.set_range(font_stack, range, RangeState::Loading { id, request: None });
-            self.events.push(RendererEvent::GlyphsRequested { font_stack: font_stack.clone(), range });
-            self.process_data(Ok(Some(GlyphData::Font(data))), font_stack, range, id);
-            return;
-        }
-
         let resource = if range.type_ == GlyphIDType::FontPBF {
             Resource::glyphs(&self.glyph_url, font_stack, (range.first, range.second))
         } else {
-            let url = self.font_face_url(range.type_);
+            let url = self.face(range.type_).map(|face| face.url.as_str()).unwrap_or_default();
             if url.is_empty() {
                 // The request of an empty URL fails, as the glyphs do.
                 Log::error(Event::Style, format!("font face {} has no URL", range.type_.id()));
             }
-            Resource::font_face(&url)
+            Resource::font_face(url)
         };
 
         self.events.push(RendererEvent::GlyphsRequested { font_stack: font_stack.clone(), range });
@@ -772,12 +865,9 @@ impl GlyphStore {
         true
     }
 
-    /// The shaper of a style or fallback face of `font_stack`, or of one of
-    /// the device's fonts, by the type of its glyphs.
+    /// The loaded shaper of `font_stack`'s face of `type_`.
     fn shaper(&self, font_stack: &FontStack, type_: GlyphIDType) -> Option<Rc<dyn FontFaceShaper>> {
-        let face = self.shapers.get(font_stack).and_then(|shapers| shapers.get(&type_));
-        let system = || self.system_shapers.iter().filter_map(|(_, loaded)| loaded.as_ref()).find(|(t, _)| *t == type_);
-        face.or_else(|| system().map(|(_, shaper)| shaper)).cloned()
+        self.shapers.get(font_stack)?.get(&type_).cloned()
     }
 
     /// Loads the font face `data` for `font_stack`; false, as for an invalid
@@ -786,28 +876,21 @@ impl GlyphStore {
         if !matches!(self.engine_readiness.lock().result, Some(Ok(()))) {
             return false;
         }
-        let Some(shaper) = self.engine.load(type_, data, REGULAR_WEIGHT as u16) else {
+        let weight = self.face(type_).map_or(REGULAR_WEIGHT as u16, |face| face.weight);
+        let Some(shaper) = self.engine.load(type_, data, weight) else {
             return false;
         };
         self.shapers.entry(font_stack.clone()).or_default().insert(type_, Rc::from(shaper));
         true
     }
 
-    fn font_face_url(&self, type_: GlyphIDType) -> String {
-        self.font_faces
-            .iter()
-            .flat_map(|faces| faces.iter())
-            .find(|face| face.type_ == type_)
-            .map(|face| face.url.clone())
-            .unwrap_or_default()
-    }
-
-    /// The font file that the face of `type_` holds, if it holds one.
-    fn font_face_data(&self, type_: GlyphIDType) -> Option<FontData> {
+    /// The style's or app's face of `type_`, else the device's.
+    fn face(&self, type_: GlyphIDType) -> Option<&FontFace> {
         if type_ == GlyphIDType::FontPBF {
             return None;
         }
-        self.font_faces.as_ref()?.iter().find(|face| face.type_ == type_)?.data.clone()
+        let faces = self.font_faces.iter().flat_map(|faces| faces.iter());
+        faces.chain(&self.device_faces).find(|face| face.type_ == type_)
     }
 }
 
@@ -847,4 +930,6 @@ enum Source {
     Lacks { failed: bool },
     /// The range it waits for.
     Needs(GlyphRange),
+    /// Its device font is being chosen.
+    Waits,
 }

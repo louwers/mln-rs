@@ -9,7 +9,7 @@ use mln_gfx::{FrameImage, Handoff, ScissorRect};
 use mln_map_types::MapDebugOptions;
 use mln_style::layers::CustomLayerFrame;
 use mln_text::GlyphCache;
-use mln_text::local_glyph_rasterizer::LocalGlyphs;
+use mln_text::local_fonts::LocalGlyphs;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
 use mln_util::event_queue::Waker;
@@ -144,7 +144,9 @@ struct Encoder {
 
 impl Renderer {
     /// A renderer with a glyph cache of its own, which runs its background
-    /// work on `pool` and draws `local_glyphs` from the device's fonts.
+    /// work on `pool` and draws `local_glyphs`. Its chooser of the device's
+    /// fonts runs there too, one choice at a time, never on the thread that
+    /// calls the renderer.
     ///
     /// `waker` runs, on any thread, when something the renderer waits for
     /// arrives, such as a tile's data or a font engine that got ready: the

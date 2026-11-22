@@ -1,4 +1,4 @@
-// Variable fonts draw at regular weight, and local fonts at the weight a
+// Variable fonts draw at regular weight, and device fonts at the weight a
 // font stack names. The fixtures are Noto Sans CJK JP's
 // variable font, whose default instance is Thin (100), subset to the glyph
 // of "中" and "A", whose advance varies, by fontTools (`fonttools subset
@@ -8,9 +8,9 @@
 
 use std::num::NonZeroU16;
 
-use crate::glyph::{Glyph, GlyphID, GlyphIDType};
+use crate::glyph::{Glyph, GlyphIDType};
 use crate::weight::{REGULAR_WEIGHT, at_weight};
-use crate::{FontFile, GlyphAdjust, ShapedText, Shaper};
+use crate::{GlyphAdjust, ShapedText, Shaper};
 
 const VARIABLE: &[u8] = include_bytes!("../../tests/fixtures/cjk-vf.otf");
 const REGULAR: &[u8] = include_bytes!("../../tests/fixtures/cjk-400.otf");
@@ -60,10 +60,13 @@ fn only_a_font_off_regular_weight_gets_a_location() {
     assert_eq!(at_weight(font(KHMER), REGULAR_WEIGHT).normalized_coords(), []);
 }
 
-/// The glyph of "中" that a local font draws at `weight`.
+/// The glyph of "中" that a device font loaded at `weight` draws.
 fn local(font: &[u8], weight: u16) -> Glyph {
-    let file = FontFile::new(font.to_vec().into(), weight).unwrap();
-    file.rasterize_char('中', GlyphID::new(0x4E2D)).unwrap()
+    let shaper = Shaper::at_weight(GlyphIDType::face(NonZeroU16::MIN), font.to_vec(), f32::from(weight));
+    let mut shaped = ShapedText::default();
+    shaper.shape(&['中'], false, &mut shaped);
+    let [id] = shaped.glyphs[..] else { panic!("one glyph for 中") };
+    shaper.rasterize_glyph(id)
 }
 
 #[test]

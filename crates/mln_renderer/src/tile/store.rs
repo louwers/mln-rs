@@ -399,6 +399,10 @@ impl TileStore {
                 self.ctx.glyphs.take_response(&font_stack, range, id, result);
                 self.ctx.collect_resource_events();
             }
+            TileEvent::DeviceFonts { font_stack, faces } => {
+                self.ctx.glyphs.take_device_fonts(&font_stack, faces);
+                self.ctx.collect_resource_events();
+            }
         }
     }
 
