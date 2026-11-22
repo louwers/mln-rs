@@ -136,8 +136,7 @@ pub struct CollisionIndex {
     groups: Vec<crate::tile::job::SourceKey>,
 }
 
-/// An empty index, which a placement [begins](CollisionIndex::begin)
-/// before it places anything.
+/// An empty index, whose grids the first placement sizes to its view.
 impl Default for CollisionIndex {
     fn default() -> Self {
         CollisionIndex {
