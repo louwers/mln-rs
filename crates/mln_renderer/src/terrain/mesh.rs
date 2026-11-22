@@ -1,18 +1,26 @@
-//! The grid every terrain tile draws, and the skirts that hide the cracks
-//! between neighbors at different zooms.
+//! The grid every terrain tile draws, the skirts that hide the cracks
+//! between neighbors at different zooms, and on the globe the caps that
+//! close the poles.
 
 use mln_util::constants::EXTENT;
 
 /// The quads along each side of a tile's grid (GL JS's terrain `meshSize`).
 pub(crate) const MESH_SIZE: u16 = 128;
 
+/// The y of a vertex at the north pole, which the globe's projection puts
+/// there (GL JS's `NORTH_POLE_Y`).
+pub(crate) const NORTH_POLE_Y: i16 = i16::MIN;
+/// The y of a vertex at the south pole (GL JS's `SOUTH_POLE_Y`).
+pub(crate) const SOUTH_POLE_Y: i16 = i16::MAX;
+
 /// A vertex of the grid: x and y in tile units, 1 on a skirt's lower edge
 /// and 0 elsewhere, and 0.
 pub(crate) type TerrainVertex = [i16; 4];
 
-/// The grid of a terrain tile, which every tile shares: `MESH_SIZE`² quads
-/// over the tile, as GL JS's `getTerrainMesh` makes them, in its vertex and
-/// index order, with or without skirts on its four edges.
+/// The grid of a terrain tile: `MESH_SIZE`² quads over the tile, as GL JS's
+/// `getTerrainMesh` makes them, in its vertex and index order, with or
+/// without skirts on its four edges, and with caps from its north or south
+/// edge to the pole for a tile of the first or last row on the globe.
 pub(crate) struct TerrainMesh {
     pub(crate) vertices: Vec<TerrainVertex>,
     /// Triangles, counterclockwise in clip space.
@@ -20,7 +28,9 @@ pub(crate) struct TerrainMesh {
 }
 
 impl TerrainMesh {
-    pub(crate) fn new(skirts: bool) -> TerrainMesh {
+    /// The grid, with `skirts`, and with a cap to the north and the south
+    /// pole where `poles` says so. A cap takes the place of its edge's skirt.
+    pub(crate) fn new(skirts: bool, poles: [bool; 2]) -> TerrainMesh {
         let size = MESH_SIZE;
         let delta = (EXTENT / i32::from(size)) as i16;
         let mut mesh = TerrainMesh { vertices: Vec::new(), indices: Vec::new() };
@@ -37,36 +47,51 @@ impl TerrainMesh {
                 mesh.indices.extend([i, i + row + 1, i + 1]);
             }
         }
+        // GL JS's caps are its north and south skirts moved to the poles.
+        let [north, south] = poles;
+        let extent = EXTENT as i16;
+        let north = if north { Some([NORTH_POLE_Y, 0]) } else { skirts.then_some([0, 1]) };
+        let south = if south { Some([SOUTH_POLE_Y, 0]) } else { skirts.then_some([extent, 1]) };
+        mesh.add_walls(delta, north, south);
         if skirts {
-            mesh.add_skirts(delta);
+            mesh.add_side_skirts(delta);
         }
         mesh
     }
 
-    /// GL JS's `_buildSkirts` without the globe's poles: a wall hanging from
-    /// each edge, whose lower vertices the vertex stage lowers.
-    fn add_skirts(&mut self, delta: i16) {
+    /// GL JS's `_buildSkirts`' north and south walls: from the grid's first
+    /// and last rows to the vertices at `north` and `south`, each a y and a
+    /// skirt flag (1 for a skirt, whose lower vertices the vertex stage
+    /// lowers, 0 for a cap to a pole); none for `None`.
+    fn add_walls(&mut self, delta: i16, north: Option<[i16; 2]>, south: Option<[i16; 2]>) {
+        let size = MESH_SIZE;
+        let row = size + 1;
+        let mut wall = |wall: Option<[i16; 2]>| {
+            let [y, skirt] = wall?;
+            let start = self.vertices.len() as u16;
+            self.vertices.extend((0..=size as i16).map(|x| [x * delta, y, skirt, 0]));
+            Some(start)
+        };
+        let (top, bottom) = (wall(north), wall(south));
+        let (top_edge, bottom_edge) = (0, row * size);
+        for x in 0..size {
+            if let Some(bottom) = bottom {
+                self.indices.extend([bottom_edge + x, bottom + x, bottom + x + 1]);
+                self.indices.extend([bottom_edge + x, bottom + x + 1, bottom_edge + x + 1]);
+            }
+            if let Some(top) = top {
+                self.indices.extend([top_edge + x, top + x + 1, top + x]);
+                self.indices.extend([top_edge + x, top_edge + x + 1, top + x + 1]);
+            }
+        }
+    }
+
+    /// GL JS's `_buildSkirts`' west and east walls.
+    fn add_side_skirts(&mut self, delta: i16) {
         let size = MESH_SIZE;
         let row = size + 1;
         let extent = EXTENT as i16;
         let len = |vertices: &[TerrainVertex]| vertices.len() as u16;
-
-        // The north and south walls hang from the grid's first and last rows.
-        let top = len(&self.vertices);
-        let top_edge = 0;
-        let bottom = top + row;
-        let bottom_edge = row * size;
-        for y in [0, extent] {
-            for x in 0..=size as i16 {
-                self.vertices.push([x * delta, y, 1, 0]);
-            }
-        }
-        for x in 0..size {
-            self.indices.extend([bottom_edge + x, bottom + x, bottom + x + 1]);
-            self.indices.extend([bottom_edge + x, bottom + x + 1, bottom_edge + x + 1]);
-            self.indices.extend([top_edge + x, top + x + 1, top + x]);
-            self.indices.extend([top_edge + x, top_edge + x + 1, top + x + 1]);
-        }
 
         // The west and east walls have vertices of their own at the top too,
         // in pairs down each side.
@@ -102,7 +127,7 @@ mod tests {
 
     #[test]
     fn the_grid_has_a_vertex_every_64_tile_units() {
-        let mesh = TerrainMesh::new(false);
+        let mesh = TerrainMesh::new(false, [false; 2]);
         assert_eq!(GRID_VERTICES, mesh.vertices.len());
         assert_eq!(3 * GRID_TRIANGLES, mesh.indices.len());
         assert_eq!([0, 0, 0, 0], mesh.vertices[0]);
@@ -113,7 +138,7 @@ mod tests {
 
     #[test]
     fn the_grid_triangles_are_gl_js_triangles() {
-        let mesh = TerrainMesh::new(false);
+        let mesh = TerrainMesh::new(false, [false; 2]);
         // GL JS: (x + y, size + x + y + 1, size + x + y + 2), then
         // (x + y, size + x + y + 2, x + y + 1), along each row.
         assert_eq!([0, 129, 130], triangle(&mesh, 0));
@@ -127,8 +152,8 @@ mod tests {
 
     #[test]
     fn skirts_hang_from_the_four_edges_as_gl_js_builds_them() {
-        let mesh = TerrainMesh::new(true);
-        let flat = TerrainMesh::new(false);
+        let mesh = TerrainMesh::new(true, [false; 2]);
+        let flat = TerrainMesh::new(false, [false; 2]);
         // The grid comes first, unchanged.
         assert_eq!(flat.vertices, mesh.vertices[..GRID_VERTICES]);
         assert_eq!(flat.indices, mesh.indices[..flat.indices.len()]);
@@ -168,7 +193,7 @@ mod tests {
 
     #[test]
     fn only_skirt_vertices_are_flagged_and_they_stand_on_an_edge() {
-        let mesh = TerrainMesh::new(true);
+        let mesh = TerrainMesh::new(true, [false; 2]);
         let sides = GRID_VERTICES + 2 * ROW;
         for (index, &[x, y, skirt, zero]) in mesh.vertices.iter().enumerate() {
             assert_eq!(0, zero);
@@ -195,8 +220,65 @@ mod tests {
     #[test]
     fn every_index_names_a_vertex() {
         for skirts in [false, true] {
-            let mesh = TerrainMesh::new(skirts);
-            assert!(mesh.indices.iter().all(|&i| usize::from(i) < mesh.vertices.len()));
+            for poles in [[false; 2], [true, false], [false, true], [true; 2]] {
+                let mesh = TerrainMesh::new(skirts, poles);
+                assert!(mesh.indices.iter().all(|&i| usize::from(i) < mesh.vertices.len()));
+            }
+        }
+    }
+
+    /// Twice the signed area of a triangle, in tile units, y down: negative
+    /// for the grid's own triangles.
+    fn winding(mesh: &TerrainMesh, [a, b, c]: [u16; 3]) -> i64 {
+        let point = |i: u16| {
+            let [x, y, ..] = mesh.vertices[usize::from(i)];
+            (i64::from(x), i64::from(y))
+        };
+        let ((ax, ay), (bx, by), (cx, cy)) = (point(a), point(b), point(c));
+        (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+    }
+
+    /// The tiles of the first and last rows close the globe: every quad of
+    /// their north or south edge has a triangle to the pole, at sea level and
+    /// facing as the grid does, with skirts or without. A tile without poles,
+    /// as on Mercator, reaches no pole.
+    #[test]
+    fn terrain_meshes_close_the_poles() {
+        let delta = 64;
+        for skirts in [false, true] {
+            let mesh = TerrainMesh::new(skirts, [true; 2]);
+            let triangles: Vec<[u16; 3]> = (0..mesh.indices.len() / 3).map(|n| triangle(&mesh, n)).collect();
+            assert!(winding(&mesh, triangles[0]) < 0);
+            for (edge, pole) in [(0, NORTH_POLE_Y), (8192, SOUTH_POLE_Y)] {
+                for x in 0..MESH_SIZE as i16 {
+                    // The quad from the edge's two vertices to the pole's two.
+                    let (left, right) = ([x * delta, edge, 0, 0], [(x + 1) * delta, edge, 0, 0]);
+                    let (pole_left, pole_right) = ([x * delta, pole, 0, 0], [(x + 1) * delta, pole, 0, 0]);
+                    let quad = [left, right, pole_left, pole_right];
+                    let caps: Vec<&[u16; 3]> = (triangles.iter())
+                        .filter(|triangle| {
+                            let vertices = triangle.map(|i| mesh.vertices[usize::from(i)]);
+                            vertices.iter().all(|vertex| quad.contains(vertex))
+                                && vertices.iter().any(|vertex| vertex[1] == pole)
+                        })
+                        .collect();
+                    assert_eq!(2, caps.len(), "skirts {skirts}, y {edge}, quad {x}");
+                    assert!(caps.iter().all(|&&cap| winding(&mesh, cap) < 0), "skirts {skirts}, y {edge}, quad {x}");
+                    // Together they cover the quad.
+                    let area: i64 = caps.iter().map(|&&cap| winding(&mesh, cap)).sum();
+                    assert_eq!(-2 * i64::from(delta) * (i64::from(pole) - i64::from(edge)).abs(), area);
+                }
+            }
+            for vertex in mesh.vertices.iter().filter(|vertex| vertex[1] == NORTH_POLE_Y || vertex[1] == SOUTH_POLE_Y) {
+                assert_eq!(0, vertex[2], "a pole's vertex hangs no skirt: {vertex:?}");
+            }
+            // The skirts of the west and east edges stay.
+            let hung = mesh.vertices.iter().filter(|vertex| vertex[2] == 1);
+            assert_eq!(if skirts { 2 * (usize::from(MESH_SIZE) + 1) } else { 0 }, hung.count());
+        }
+        for skirts in [false, true] {
+            let mesh = TerrainMesh::new(skirts, [false; 2]);
+            assert!(mesh.vertices.iter().all(|vertex| (0..=8192).contains(&vertex[1])));
         }
     }
 }

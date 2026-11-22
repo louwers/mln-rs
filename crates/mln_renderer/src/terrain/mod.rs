@@ -3,10 +3,16 @@
 //! textures that the surface samples.
 //!
 //! Terrain draws when the style's terrain names a raster-dem source whose
-//! tileset has loaded, on a Mercator view, in continuous and static modes.
-//! In tile mode, and on the globe, the map draws flat. A frame without
-//! terrain takes none of the paths below: its tile covers, matrices and
-//! draws are a flat map's.
+//! tileset has loaded, in continuous and static modes, on every projection:
+//! on Mercator, and on the globe before, through and after its handover to
+//! Mercator. In tile mode the map draws flat. A frame without terrain takes
+//! none of the paths below: its tile covers, matrices and draws are a flat
+//! map's.
+//!
+//! On the globe the camera stands on the sea-level sphere, as GL JS's does,
+//! and a rendered query's line of sight meets the sea-level sphere; the
+//! standing layers and their placement stand on the drawn ground as they do
+//! on Mercator.
 //!
 //! # A frame with terrain
 //!
@@ -50,11 +56,14 @@
 //!
 //! # Contracts
 //!
-//! - **The cover** ([`TerrainCover`]) is GL JS's Mercator `coveringTiles`
-//!   with a zoom for each tile: terrain tiles twice the DEM's tile size, of
-//!   zooms 0 to 22, nearest the center first. Each is culled by a box over
-//!   the elevation range of the DEM under it, with the exaggeration, or by
-//!   GL JS's flat range where none has loaded. While no tile holds the
+//! - **The cover** ([`TerrainCover`]) is GL JS's `coveringTiles` with a
+//!   zoom for each tile: terrain tiles twice the DEM's tile size, of zooms 0
+//!   to 22, nearest the center first. Each is culled by a volume over the
+//!   elevation range of the DEM under it, with the exaggeration, or by GL
+//!   JS's flat range where none has loaded: a box on Mercator, and on the
+//!   globe the globe's convex volume between the spheres of the range's
+//!   lowest and highest ground, whose zooms fall off from the camera to the
+//!   center at its altitude. While no tile holds the
 //!   view's center, the cover keeps the tile under it, undrawn, so that the
 //!   camera has a DEM to stand on.
 //! - **The elevation ranges** ([`ElevationRanges`]) are those of every DEM
@@ -81,13 +90,17 @@
 //!   splits no stack. A style whose layers don't drape has no stack, and
 //!   then no drapes and no surface.
 //! - **Standing layers** (circle, heatmap, fill extrusion and symbol) stand
-//!   on the surface as it draws, whether or not a stack draws it: over
-//!   terrain, their draws are of the [`ProjectionVariant::Terrain`] variant,
-//!   which reads the height of the ground in the vertex stage, under a
-//!   circle's center as it draws (translated), a kernel's, the centroid of a
-//!   fill extrusion's polygon as it draws (GL JS's: the floored mean of its
-//!   rings' vertices), and a symbol's anchor as it draws, by the height rule
-//!   the surface reads its DEM by. A symbol stands its `symbol-height-offset`
+//!   on the surface as it draws, whether or not a stack draws it, on the
+//!   globe as on Mercator: over terrain, their draws are of a terrain
+//!   variant ([`ProjectionVariant::Terrain`] on Mercator,
+//!   [`ProjectionVariant::GlobeTerrain`] on the globe, which raises each
+//!   point by the height along its vertical, as GL JS's
+//!   `projectTileWithElevation` does), which reads the height of the ground
+//!   in the vertex stage, under a circle's center as it draws (translated), a
+//!   kernel's, the centroid of a fill extrusion's polygon as it draws (GL
+//!   JS's: the floored mean of its rings' vertices), and a symbol's anchor as
+//!   it draws, by the height rule the surface reads its DEM by. A symbol
+//!   stands its `symbol-height-offset`
 //!   above that ground, or above sea level where its `symbol-height-anchor`
 //!   is `absolute`, which its draw reads as flat ground; each vertex of a
 //!   map-pitched label along a line stands on the ground under it. Placement
@@ -150,8 +163,9 @@
 //!   standing program's other textures take, so a label's glyphs and icons keep
 //!   0 and 1. A frame without terrain makes no terrain variant, writes no
 //!   ground, binds no ground texture and expands no centroid.
-//! - **What the ground hides.** Fill extrusions hide behind the ground pixel
-//!   by pixel, by the depth they test. A symbol or a circle hides whole, by
+//! - **What the ground hides**, on the globe as on Mercator. Fill
+//!   extrusions hide behind the ground pixel by pixel, by the depth they
+//!   test. A symbol or a circle hides whole, by
 //!   its anchor or center as it draws, raised: in a frame where terrain
 //!   draws and a layer of theirs does, a pass before the
 //!   frame's draws every terrain tile, skirts included, into a texture at the
@@ -159,8 +173,9 @@
 //!   nearest ground, as its eye distance's f32 bits ([`ID_GROUND_DEPTH_TEXTURE`]).
 //!   The terrain variant reads it at the texel nearest where its anchor is
 //!   seen, as GL JS, MapLibre Native and orbis do, and fades the
-//!   feature out over GL JS's ramp in its NDC depth, scaled by the frame's
-//!   near and far planes ([`TerrainPropsUBO::depth_factor`]), averaged with
+//!   feature out over GL JS's ramp in its NDC depth, scaled by the
+//!   terrain's near plane, a fiftieth of the view's height, and the frame's
+//!   far plane ([`TerrainPropsUBO::depth_factor`]), averaged with
 //!   the point 0.01 NDC above where it is hidden more than a little; where no
 //!   ground is drawn, nothing is hidden. The draws read the depth that the
 //!   frame drew: in a frame whose depth pass doesn't draw, as where its
@@ -185,7 +200,15 @@
 //!   what shows of fill extrusions is the depth's to decide.
 //! - **The surface** draws once for each stack, its tiles nearest the
 //!   center first, testing and writing the 3D depth range with less or
-//!   equal and blending its drapes over what is under it. A stack above the
+//!   equal and blending its drapes over what is under it. Each tile's grid
+//!   projects through its projection entry as GL JS's `projectTileFor3D`
+//!   does: on Mercator through the tile's matrix, on the globe each point
+//!   raised along its vertical, blended with Mercator through a handover.
+//!   On the globe the tiles of the first and last rows close the poles at
+//!   sea level, with or without skirts, in the colors of their drapes' edge
+//!   rows; and the planet's sea-level depth, which a flat globe draws before
+//!   its 3D layers, isn't drawn in a frame where the surface draws, whose
+//!   depth is the planet's. A stack above the
 //!   first draws where the first left the nearest ground, and only the
 //!   tiles where it has a drape; the first draws every tile, transparent
 //!   where it has none, for that depth. Where the first
@@ -197,7 +220,8 @@
 //!   past `horizon-fog-blend` toward `horizon-color`, mixed through a gamma
 //!   of 2.2, by a depth that runs from the camera's distance to sea level
 //!   to the far plane, read for each pixel from its distance along the view.
-//!   It fades in from 60° to 70° of pitch, and there is none without a sky,
+//!   It fades in from 60° to 70° of pitch, on the globe as on Mercator, and
+//!   there is none without a sky,
 //!   in an axonometric view, with a ground blend of 1, or where the far
 //!   plane comes before the camera's distance to sea level. A horizon blend
 //!   of 1 fogs with `fog-color` alone. The fog tints what each stack draws
@@ -217,7 +241,10 @@
 //! - **The drapes** ([`Drapes`]): a texture for each drawn tile and stack
 //!   whose layers draw something in the tile, which the stack's draped
 //!   layers draw into with the map's camera, through their own draw
-//!   updates. Where their draw updates make no draw, as a stack of lines
+//!   updates. On the globe they draw as on Mercator, with the camera at a
+//!   projection transition of 0 ([`View::mercator`](mln_map_types::View::mercator)), as GL JS draws its
+//!   drapes, so a draped line at a latitude shows as wide as the Mercator
+//!   tile under it makes it. Where their draw updates make no draw, as a stack of lines
 //!   does in a tile they don't cross, or one whose tiles haven't loaded,
 //!   the drape has no texture and draws no pass until its key changes.
 //!   Each stack's drape of a tile keeps its own key, so a change in one
@@ -243,9 +270,10 @@
 //!   changed draws at once, with the camera-stale drapes of its tile, and a
 //!   still draws them all.
 //! - **The drapes' sides.** A tile's drapes take the power of two that
-//!   covers its longest side on screen, level with the view's center, at
-//!   two texels a logical pixel or one a physical pixel, whichever is
-//!   more: GL JS's side (twice the terrain tile's), or the device's largest
+//!   covers its longest side on screen as it draws, curved on the globe,
+//!   level with the view's center, at two texels a logical pixel or one a
+//!   physical pixel, whichever is more: GL JS's side (twice the terrain
+//!   tile's), or the device's largest
 //!   texture's if that is smaller, where the tile shows at half its size or
 //!   larger, down to a sixteenth of it. Where the drapes with a texture,
 //!   with the depth and stencil of each side and the layer composite of a
@@ -369,7 +397,6 @@ use mln_style::sources::RasterDemSourceType;
 use mln_util::constants;
 use mln_util::dem::DemUnpack;
 use mln_util::geo::{LatLng, WrapMode};
-use mln_util::logging::{Event, Log};
 use mln_util::tileset::RasterEncoding;
 pub(crate) use stacks::DrapeStacks;
 
@@ -459,8 +486,6 @@ pub(crate) struct RenderTerrain {
     /// The depth of the drawn ground, in a frame where a layer that terrain
     /// hides draws.
     ground_depth: Option<GroundDepth>,
-    /// Whether it has logged that terrain doesn't draw on the globe.
-    logged_globe: bool,
     /// The drapes' byte cap in place of [`drapes::BYTE_CAP`].
     #[cfg(test)]
     pub(crate) drape_byte_cap: Option<u64>,
@@ -498,13 +523,6 @@ impl RenderTerrain {
         let source = style.get_source(&terrain.source)?;
         let data = SourceData::<RasterDemSourceType>::recover(source)?;
         let tileset = data.description.as_ref().filter(|tileset| !tileset.tiles.is_empty())?;
-        if parameters.view.is_globe() {
-            if !self.logged_globe {
-                self.logged_globe = true;
-                Log::warning(Event::Render, "Terrain draws flat on the globe");
-            }
-            return None;
-        }
 
         let encoding = tileset.raster_encoding.unwrap_or(RasterEncoding::Mapbox);
         let skirt_length = skirt_length(parameters.terrain_skirt_length, parameters.view.zoom());
@@ -621,8 +639,10 @@ impl RenderTerrain {
         };
         let context = &mut *parameters.context;
         let mut props = self.surface.props;
+        // The ramp's depth is the terrain's: a near plane a fiftieth of the
+        // view's height, as Mercator's under terrain, on either projection.
         let view = parameters.view;
-        let (near, far) = (view.near_z(), view.far_z());
+        let (near, far) = (f64::from(view.size().height) / 50.0, view.far_z());
         props.depth_factor = (2.0 * far * near / (far - near)) as f32;
         let tiles = dem(&cover.source_id);
         let mut textures = mln_util::hash::HashMap::default();
@@ -664,7 +684,7 @@ impl RenderTerrain {
 
     /// Makes the draws of the frame of the last update, a set for each stack
     /// of the drapes the encode began ([`begin_drapes`]), which read the DEM
-    /// textures of the frame's ground ([`PaintParameters::ground`]), sample
+    /// textures of the frame's ground, `ground` ([`prepare_ground`]), sample
     /// their stack's drapes and fog as the frame's `sky` says; and, where a
     /// layer of the frame `hides` behind the ground, the draws of the
     /// ground's depth, with its texture at the frame's logical pixels, which
@@ -674,15 +694,16 @@ impl RenderTerrain {
     /// fails, it makes none of the depth, and the frame fails.
     ///
     /// [`begin_drapes`]: Self::begin_drapes
+    /// [`prepare_ground`]: Self::prepare_ground
     pub(crate) fn update_draws(
         &mut self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
+        ground: Option<&GroundBindings>,
         sky: Option<&EvaluatedSky>,
         hides: bool,
     ) {
-        let ground = parameters.ground.clone();
-        let cover = self.cover.as_ref().zip(ground.as_deref());
+        let cover = self.cover.as_ref().zip(ground);
         self.draws.update(gpu, parameters, cover, self.surface, sky, &self.drapes, hides);
         // The depth keeps its texture, and the draws that bind it their
         // bindings, while the frame's size stays.
@@ -833,7 +854,6 @@ impl RenderTerrain {
             events.push(RendererEvent::TerrainElevation(None));
         }
         *self = RenderTerrain {
-            logged_globe: self.logged_globe,
             #[cfg(test)]
             drape_byte_cap: self.drape_byte_cap,
             ..RenderTerrain::default()

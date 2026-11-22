@@ -1536,6 +1536,47 @@ mod terrain_cover {
         assert!(sea_level.iter().all(|tile| allowance.contains(tile)));
     }
 
+    /// On the globe, ground 3,000 m up under the bottom edge of a pitched
+    /// view rises into it: the cover keeps the tiles there, which a volume at
+    /// sea level culls, as GL JS's globe cover does with a terrain.
+    #[test]
+    fn the_globe_cover_keeps_tiles_its_ranges_raise() {
+        let options = Options { min_zoom: 0, max_zoom: 22, tile_size: 512, reparse_overscaled: false };
+        // The bottom edge of the view sees a row of tiles' north edge,
+        // which the ground there raised by 3,000 m brings into view.
+        let mut transform = Camera { pitch: 60.0, ..Camera::new((512, 512), (10.0, 45.16), 9.0) }.transform();
+        transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+        assert!(transform.view().is_globe());
+        let cover = |ranges: &ElevationRanges| {
+            let (z, overscaled_z, parameters) = source_cover_inputs(&transform, options);
+            terrain_tile_cover(&parameters, z, Range::new(options.min_zoom, options.max_zoom), overscaled_z, ranges)
+        };
+        let mut sea = ElevationRanges::default();
+        sea.insert(cn(0, 0, 0), 0.0, 0.0);
+        let mut mountains = ElevationRanges::default();
+        mountains.insert(cn(0, 0, 0), 0.0, 3000.0);
+        let (sea_level, raised) = (cover(&sea), cover(&mountains));
+        assert_ne!(Vec::<OverscaledTileID>::new(), sea_level);
+
+        for tile in &sea_level {
+            assert!(raised.contains(tile), "{tile}");
+        }
+        let center_y = mln_util::projection::Projection::project(&ll(45.16, 10.0), 1.0 / constants::TILE_SIZE_D).y;
+        let added: Vec<_> = raised.iter().filter(|tile| !sea_level.contains(tile)).collect();
+        assert_ne!(added, Vec::<&OverscaledTileID>::new());
+        for tile in added {
+            let top = f64::from(tile.canonical.y) / f64::from(1u32 << tile.canonical.z);
+            assert!(top > center_y, "{tile} is south of the center");
+        }
+        // Without terrain, the globe's flat allowance culls as before.
+        let (z, overscaled_z, parameters) = source_cover_inputs(&transform, options);
+        let range = Range::new(options.min_zoom, options.max_zoom);
+        assert_eq!(
+            tile_cover(&parameters, z, range, overscaled_z),
+            terrain_tile_cover(&parameters, z, range, overscaled_z, &ElevationRanges::default())
+        );
+    }
+
     #[test]
     fn a_tile_takes_the_range_of_the_dem_tile_it_reads_or_its_nearest_known_ancestor() {
         let mut ranges = ElevationRanges::default();

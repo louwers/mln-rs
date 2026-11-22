@@ -110,7 +110,8 @@ highp float ground_height(highp vec2 pos, highp vec4 dem_coords, highp vec4 unpa
     };
 }
 
-/// The surface's and the probe's uniform block and height rule.
+/// The surface's and the probe's uniform block and height rule, and the
+/// height of the surface's vertices.
 macro_rules! terrain_props {
     () => {
         concat!(
@@ -123,7 +124,17 @@ macro_rules! terrain_props {
 };
 
 ",
-            ground_height!()
+            ground_height!(),
+            r"// The height of the surface's vertex at `pos`, in tile units of a tile
+// that reads its DEM at `dem_coords`: the ground's, or sea level at a pole.
+highp float surface_height(highp vec2 pos, highp vec4 dem_coords) {
+    if (pos.y < GLOBE_POLE_NORTH_Y || pos.y > GLOBE_POLE_SOUTH_Y) {
+        return 0.0;
+    }
+    return ground_height(pos, dem_coords, u_unpack, u_unpack_scale, u_exaggeration);
+}
+
+"
         )
     };
 }
@@ -626,7 +637,11 @@ lowp float stroke_opacity = u_stroke_opacity;
     // translated, if its tile holds its center.
 #ifdef TERRAIN
     highp float ele = standing_height(circle_center + u_projection_translate);
+#ifdef PROJECTION_GLOBE
+    v_visibility = ground_visibility(projectTileWithElevation(circle_center, ele));
+#else
     v_visibility = ground_visibility(u_matrix * vec4(circle_center, ele, 1));
+#endif
 #else
 #ifndef PROJECTION_GLOBE
     highp float ele = 0.0;
@@ -648,7 +663,7 @@ lowp float stroke_opacity = u_stroke_opacity;
             // To counteract the effect for pitch-scale: viewport, we rescale the
             // whole circle based on the pitch scaling effect at its central point
 #ifdef PROJECTION_GLOBE
-            vec4 projected_center = interpolateProjection(circle_center, center_vector, 0.0);
+            vec4 projected_center = interpolateProjection(circle_center, center_vector, ele);
             angle_scale *= (radius + stroke_width) * (projected_center.w / u_camera_to_center_distance);
 #else
             vec4 projected_center = u_matrix * vec4(circle_center, ele, 1);
@@ -658,13 +673,13 @@ lowp float stroke_opacity = u_stroke_opacity;
 
 #ifdef PROJECTION_GLOBE
         vec3 corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
-        gl_Position = interpolateProjection(corner_position, corner_vector, 0.0);
+        gl_Position = interpolateProjection(corner_position, corner_vector, ele);
 #else
         gl_Position = u_matrix * vec4(corner_position, ele, 1);
 #endif
     } else {
 #ifdef PROJECTION_GLOBE
-        gl_Position = projectTile(circle_center);
+        gl_Position = projectTileWithElevation(circle_center, ele);
         if (gl_Position.z / gl_Position.w > 1.0) {
             gl_Position.xy = vec2(10000.0);
         }
@@ -2886,10 +2901,12 @@ void main() {
 ",
 };
 
-/// The terrain's surface: a tile's grid, drawn with the tile's matrix,
-/// raised to the heights of the tile's DEM with its skirts lowered, in the
-/// colors of the tile's drape, fogged as GL JS's terrain is. GL stores the
-/// drape's rows bottom first, so the drape is sampled at `1 - v`.
+/// The terrain's surface: a tile's grid, raised to the heights of the tile's
+/// DEM with its skirts lowered and projected through the tile's projection
+/// block, in the colors of the tile's drape, fogged as GL JS's terrain is. A
+/// pole's vertices stand at sea level in the color of the drape's edge row.
+/// GL stores the drape's rows bottom first, so the drape is sampled at
+/// `1 - v`.
 pub(crate) const TERRAIN_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
         terrain_props!(),
@@ -2897,21 +2914,23 @@ pub(crate) const TERRAIN_SHADER: GlslShaderSource = GlslShaderSource {
 layout (location = 0) in vec4 a_pos;
 
 layout (std140) uniform TerrainDrawableUBO {
-    highp mat4 u_matrix;
     highp vec4 u_dem_coords;
 };
 
 out vec2 v_drape_pos;
 // The distance along the view of the ground before the skirt lowers it, which
-// the fog reads, as in GL JS: the clip w, which is affine in the vertex, so it
-// interpolates exactly.
+// the fog reads, as in GL JS: the clip w.
 out highp float v_view_depth;
 
 void main() {
-    float height = ground_height(a_pos.xy, u_dem_coords, u_unpack, u_unpack_scale, u_exaggeration);
-    gl_Position = u_matrix * vec4(a_pos.xy, height - a_pos.z * u_skirt_length, 1.0);
-    v_drape_pos = vec2(a_pos.x, 8192.0 - a_pos.y) / 8192.0;
-    v_view_depth = u_matrix[0].w * a_pos.x + u_matrix[1].w * a_pos.y + u_matrix[2].w * height + u_matrix[3].w;
+    float height = surface_height(a_pos.xy, u_dem_coords);
+    gl_Position = projectTileFor3D(a_pos.xy, height - a_pos.z * u_skirt_length);
+    vec2 drape_pos = clamp(a_pos.xy / 8192.0, 0.0, 1.0);
+    v_drape_pos = vec2(drape_pos.x, 1.0 - drape_pos.y);
+    v_view_depth = gl_Position.w;
+    if (a_pos.z != 0.0) {
+        v_view_depth = projectTileFor3D(a_pos.xy, height).w;
+    }
 }
 "
     ),
@@ -2968,15 +2987,9 @@ void main() {
 ",
 };
 
-/// Port-only, for the backend conformance cases: probes of the terrain's
-/// height rule. Each probe is a quad at clip positions whose vertices read
-/// the height at a place of a tile, and whose fragments write that height's
-/// bits, least significant byte first, as the texel's channels.
-/// The depth of the terrain's surface: a tile's grid, drawn with the tile's
-/// matrix, raised to the heights of the tile's DEM with its skirts lowered,
-/// as the surface's, whose fragments write the eye distance (the clip w,
-/// which is affine in the vertex, so it interpolates exactly) as its float's
-/// bits, least significant byte first.
+/// The depth of the terrain's surface: a tile's grid, raised and projected
+/// as the surface's, whose fragments write the eye distance (the clip w) as
+/// its float's bits, least significant byte first.
 pub(crate) const TERRAIN_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
         terrain_props!(),
@@ -2984,15 +2997,14 @@ pub(crate) const TERRAIN_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
 layout (location = 0) in vec4 a_pos;
 
 layout (std140) uniform TerrainDrawableUBO {
-    highp mat4 u_matrix;
     highp vec4 u_dem_coords;
 };
 
 out highp float v_eye_distance;
 
 void main() {
-    float height = ground_height(a_pos.xy, u_dem_coords, u_unpack, u_unpack_scale, u_exaggeration);
-    gl_Position = u_matrix * vec4(a_pos.xy, height - a_pos.z * u_skirt_length, 1.0);
+    float height = surface_height(a_pos.xy, u_dem_coords);
+    gl_Position = projectTileFor3D(a_pos.xy, height - a_pos.z * u_skirt_length);
     v_eye_distance = gl_Position.w;
 }
 "
@@ -3009,6 +3021,10 @@ void main() {
 ",
 };
 
+/// Port-only, for the backend conformance cases: probes of the terrain's
+/// height rule. Each probe is a quad at clip positions whose vertices read
+/// the height at a place of a tile, and whose fragments write that height's
+/// bits, least significant byte first, as the texel's channels.
 pub(crate) const TERRAIN_PROBE_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
         terrain_props!(),
@@ -3112,12 +3128,6 @@ mediump float radius = u_radius;
 
     // multiply a_pos by 0.5, since we had it * 2 in order to sneak
     // in extrusion data
-#ifdef PROJECTION_GLOBE
-    vec2 circle_center = floor(a_pos * 0.5);
-    vec3 center_vector = projectToSphere(circle_center, vec2(0.0, 0.0));
-    vec3 corner_vector = globeRotateVector(center_vector, v_extrude * radius * u_globe_extrude_scale);
-    gl_Position = interpolateProjection(circle_center + extrude, corner_vector, 0.0);
-#else
     // The kernel lies flat on the ground under its center, if its tile
     // holds its center.
     vec2 center = floor(a_pos * 0.5);
@@ -3126,12 +3136,17 @@ mediump float radius = u_radius;
 #else
     highp float ele = 0.0;
 #endif
+#ifdef PROJECTION_GLOBE
+    vec3 center_vector = projectToSphere(center, vec2(0.0, 0.0));
+    vec3 corner_vector = globeRotateVector(center_vector, v_extrude * radius * u_globe_extrude_scale);
+    gl_Position = interpolateProjection(center + extrude, corner_vector, ele);
+#else
     gl_Position = u_matrix * vec4(center + extrude, ele, 1);
+#endif
 #ifdef TERRAIN
     if (!tile_holds(center)) {
         gl_Position = ground_dropped();
     }
-#endif
 #endif
 }
 "#

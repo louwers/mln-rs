@@ -482,7 +482,7 @@ fn depth_bindings(gpu: &mut impl Gpu, shader: ShaderId, tile: &DepthTile) -> Res
     let texture = dem_texture(gpu, &tile.dem)?;
     let sampler = gpu.create_sampler(&SamplerState::default())?;
     let dem_coords = [1.0, 0.0, 0.0, tile.dem.dim as f32];
-    let drawable = [TerrainDrawableUBO { matrix: tile.matrix(), dem_coords }];
+    let drawable = [TerrainDrawableUBO { dem_coords }];
     let drawable = bytemuck::cast_slice(&drawable);
     let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;
     let [w0, w1, w2] = tile.dem.unpack.weights;
@@ -494,7 +494,7 @@ fn depth_bindings(gpu: &mut impl Gpu, shader: ShaderId, tile: &DepthTile) -> Res
     };
     let props = bytemuck::bytes_of(&props);
     let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
-    let projection = [ProjectionUBO::default()];
+    let projection = [ProjectionUBO { matrix: tile.matrix(), ..ProjectionUBO::default() }];
     let projection = bytemuck::cast_slice(&projection);
     let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
     gpu.create_bindings(&BindingsDesc {

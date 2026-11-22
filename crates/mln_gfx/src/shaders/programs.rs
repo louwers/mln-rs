@@ -43,13 +43,18 @@ use crate::shaders::shader_defines::{
 };
 
 /// The projection variants of `program`: every program's Mercator and globe
-/// variants, and the terrain variant of a standing layer's program, which
-/// reads the ground ([`ID_GROUND_DEM_TEXTURE`]).
+/// variants, and the terrain variants of a standing layer's program, on
+/// Mercator and on the globe, which read the ground
+/// ([`ID_GROUND_DEM_TEXTURE`]).
 #[must_use]
 pub fn projection_variants(program: &Program) -> &'static [ProjectionVariant] {
     const FLAT: &[ProjectionVariant] = &[ProjectionVariant::Mercator, ProjectionVariant::Globe];
-    const STANDING: &[ProjectionVariant] =
-        &[ProjectionVariant::Mercator, ProjectionVariant::Globe, ProjectionVariant::Terrain];
+    const STANDING: &[ProjectionVariant] = &[
+        ProjectionVariant::Mercator,
+        ProjectionVariant::Globe,
+        ProjectionVariant::Terrain,
+        ProjectionVariant::GlobeTerrain,
+    ];
     const STANDING_PROGRAMS: [&Program; 12] = [
         &CIRCLE,
         &HEATMAP,

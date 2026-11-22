@@ -287,6 +287,7 @@ mod globe {
     use mln_util::range::Range;
 
     use super::TileCoverParameters;
+    use crate::terrain::ElevationRanges;
     use crate::util::tile_lod::{TileZoomFunction, elevation_for_tile_culling};
 
     /// A tile's bounding volume in unit-sphere space: a box at zoom 0 and 1,
@@ -413,12 +414,13 @@ mod globe {
         )
     }
 
-    /// `elevation` in meters grows the volume above the sphere's surface.
-    fn tile_bounding_volume(tile: &CanonicalTileID, elevation: f64) -> ConvexVolume {
+    /// The volume of `tile` from `min_elevation` to `max_elevation`, in
+    /// meters above the sphere's surface.
+    fn tile_bounding_volume(tile: &CanonicalTileID, (min_elevation, max_elevation): (f64, f64)) -> ConvexVolume {
         // Distances from the planet's center in a world where the surface is
         // at 1.
-        let min_radius = f64::min(0.0, elevation) / constants::EARTH_RADIUS_M + 1.0;
-        let max_radius = f64::max(0.0, elevation) / constants::EARTH_RADIUS_M + 1.0;
+        let min_radius = min_elevation / constants::EARTH_RADIUS_M + 1.0;
+        let max_radius = max_elevation / constants::EARTH_RADIUS_M + 1.0;
         if tile.z == 0 {
             return aabb_volume(DVec3::splat(-max_radius), DVec3::splat(max_radius));
         }
@@ -579,11 +581,15 @@ mod globe {
         0
     }
 
+    /// The tiles of the globe view of `state`, each culled by the volume
+    /// over the elevation range of the ground under it in `ranges`, while
+    /// terrain draws, or else GL JS's flat allowance.
     pub(super) fn tile_cover(
         state: &TileCoverParameters,
         z: u8,
         zoom_range: Range<u8>,
         overscaled_z: Option<u8>,
+        ranges: Option<&ElevationRanges>,
     ) -> Vec<OverscaledTileID> {
         #[derive(Clone, Copy, Debug)]
         struct Node {
@@ -639,9 +645,13 @@ mod globe {
         let whole_zoom = |zoom: f64| if state.round_zoom { zoom.round() } else { zoom.floor() };
         let allow_variable_zoom = whole_zoom(requested_center_zoom) > 4.0;
 
-        let center =
-            Projection::project(&transform.center(mln_util::geo::WrapMode::Unwrapped), 1.0 / constants::TILE_SIZE_D);
-        let center_coord = DVec3::new(center.x, center.y, 0.0);
+        let center_lat_lng = transform.center(mln_util::geo::WrapMode::Unwrapped);
+        let center = Projection::project(&center_lat_lng, 1.0 / constants::TILE_SIZE_D);
+        // The center at its altitude, which the camera is above, as GL JS's
+        // `worldFromLngLat(center, elevation)`.
+        let meters_per_world = Projection::altitude_meters_per_pixel(center_lat_lng.latitude(), transform.zoom())
+            * Projection::world_size(transform.scale());
+        let center_coord = DVec3::new(center.x, center.y, transform.center_altitude() / meters_per_world);
         // The globe keeps its center on whichever world copy it has reached,
         // where GL JS keeps it on the first. Wraps, sort keys and tile
         // distances are taken against the center brought back to the first
@@ -671,8 +681,13 @@ mod globe {
             TileZoomFunction::DEFAULT_MAX_ZOOM_LEVELS_ON_SCREEN,
             TileZoomFunction::DEFAULT_TILE_COUNT_MAX_MIN_RATIO,
         );
-        let culling_elevation =
-            elevation_for_tile_culling(transform.pitch() * 180.0 / PI, fov_degrees, 0.0, state.max_content_elevation);
+        let culling_elevation = elevation_for_tile_culling(
+            transform.pitch() * 180.0 / PI,
+            fov_degrees,
+            transform.center_altitude(),
+            state.max_content_elevation,
+        );
+        let allowance = (f64::min(0.0, culling_elevation), f64::max(0.0, culling_elevation));
 
         let mut stack: Vec<Node> = Vec::with_capacity(64);
         let mut result: Vec<ResultTile> = Vec::with_capacity(64);
@@ -680,7 +695,8 @@ mod globe {
 
         while let Some(mut node) = stack.pop() {
             let tile = CanonicalTileID::new(node.zoom, node.x, node.y);
-            let volume = tile_bounding_volume(&tile, culling_elevation);
+            let elevations = ranges.and_then(|ranges| ranges.range(tile)).unwrap_or(allowance);
+            let volume = tile_bounding_volume(&tile, elevations);
 
             if !node.fully_visible {
                 let intersection = is_tile_visible(&frustum, &volume, &culling_horizon);
@@ -808,7 +824,7 @@ pub(crate) fn tile_cover(
     }
 
     if state.view.is_globe() {
-        return globe::tile_cover(state, z, zoom_range, overscaled_z);
+        return globe::tile_cover(state, z, zoom_range, overscaled_z, None);
     }
 
     let children_of = |node: &Node| -> Vec<Node> {
@@ -969,12 +985,13 @@ pub(crate) fn tile_cover(
     ids
 }
 
-/// The cover of a Mercator view over terrain, and of every source while
-/// terrain draws: GL JS `coveringTiles` with
-/// `MercatorCoveringTilesDetailsProvider` and a terrain. Each tile's zoom
-/// falls off with its distance from the camera at any pitch, and each tile is
-/// culled by a box that spans its elevation range in `ranges`, or GL JS's
-/// flat allowance where the range isn't known.
+/// The cover of a view over terrain, and of every source while terrain
+/// draws: GL JS `coveringTiles` with a terrain. On Mercator, with
+/// `MercatorCoveringTilesDetailsProvider`, each tile's zoom falls off with
+/// its distance from the camera at any pitch, and each tile is culled by a box
+/// that spans its elevation range in `ranges`, or GL JS's flat allowance
+/// where the range isn't known. On the globe, the globe's cover, each tile
+/// culled by the volume over its range in the same way.
 ///
 /// `z` is the cover's nominal zoom, at most `zoom_range.max`. A tile at the
 /// range's maximum takes the overscaled zoom it would load at,
@@ -988,6 +1005,9 @@ pub(crate) fn terrain_tile_cover(
     overscaled_z: Option<u8>,
     ranges: &ElevationRanges,
 ) -> Vec<OverscaledTileID> {
+    if state.view.is_globe() {
+        return globe::tile_cover(state, z, zoom_range, overscaled_z, Some(ranges));
+    }
     let fov_degrees = state.view.fov() * 180.0 / std::f64::consts::PI;
     let tile_zoom = TileZoomFunction::new(
         fov_degrees,

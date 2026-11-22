@@ -102,8 +102,9 @@ impl TransformParameters {
     /// draws the map's layers into the tile's texture: an orthographic
     /// projection of the tile's square of the world, in pixels at the
     /// view's scale, onto the whole target, the tile's north edge at clip
-    /// y = 1, every depth at clip z = 0. The view stays the map's, so zoom
-    /// and bearing are the map's.
+    /// y = 1, every depth at clip z = 0. The view stays `view`, so zoom and
+    /// bearing are its own; the drapes give it the map's on Mercator
+    /// ([`View::mercator`]).
     pub(crate) fn for_drape(view: &View, tile: &UnwrappedTileID) -> Self {
         // The tile's square of the world: its corner, and its side.
         let tile_matrix = view.tile_matrix(tile);
@@ -310,11 +311,12 @@ impl<'a> PaintParameters<'a> {
 
     /// The parameters of the encode of a drape, which draws the frame's
     /// layers into a texture of `size` over its tile `tile` with `transform`
-    /// ([`TransformParameters::for_drape`]): with the frame's camera, GPU
-    /// state and values, but its own clip masks and stencil values, its
-    /// layers drawn as a whole into and composited by `layer_composite`, of
-    /// `size`, with their own depth, and the whole target as the scissor.
-    /// The layers draw with depth, front to back in the opaque pass. A map pixel is a pixel of the projection, so
+    /// ([`TransformParameters::for_drape`]): with the transform's view, the
+    /// frame's GPU state and values, but its own clip masks and stencil
+    /// values, its layers drawn as a whole into and composited by
+    /// `layer_composite`, of `size`, with their own depth, and the whole
+    /// target as the scissor. The layers draw with depth, front to back in
+    /// the opaque pass. A map pixel is a pixel of the projection, so
     /// [`pixels_to_gl_units`](Self::pixels_to_gl_units) are its scale.
     pub(crate) fn drape<'b>(
         &'b mut self,
@@ -329,7 +331,7 @@ impl<'a> PaintParameters<'a> {
             context: &mut *self.context,
             open_pass: None,
             transform_params: transform,
-            view: self.view,
+            view: &transform.view,
             camera_moving: self.camera_moving,
             light: self.light,
             static_data: self.static_data,

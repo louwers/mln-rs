@@ -27,6 +27,7 @@ use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::expression::expression::FeatureState;
 use mln_style::sources::{GeoJSONOptions, GeoJsonSourceType, ImageSourceType, image_source};
 use mln_style::{Edit, Style};
+use mln_style_types::ProjectionDefinition;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::geo::{LatLng, WrapMode};
 use mln_util::image::PremultipliedImage;
@@ -1867,16 +1868,46 @@ fn a_map_whose_terrain_turned_off_keeps_no_ground() {
     add_layer(&mut map, &red_circle(LatLng::new(-10.0, 10.0086).unwrap()), None);
     map.settle();
     map.frame();
-    let circle = |map: &DrapedMap| {
-        let variants = map.renderer.projection_variants();
-        variants.into_iter().find_map(|(id, variant)| (id == "circle").then_some(variant))
-    };
-    assert_eq!(Some(ProjectionVariant::Terrain), circle(&map));
+    assert_eq!(Some(ProjectionVariant::Terrain), circle_variant(&map));
     assert_ne!(0, map.renderer.rendering_stats().terrain.mem_dem_textures);
 
     map.edit(Edit::SetTerrain(None));
     map.frame();
-    assert_eq!(Some(ProjectionVariant::Mercator), circle(&map));
+    assert_eq!(Some(ProjectionVariant::Mercator), circle_variant(&map));
+    assert_eq!(0, map.renderer.rendering_stats().terrain.mem_dem_textures);
+}
+
+/// The projection variant the layer "circle" draws with.
+fn circle_variant(map: &DrapedMap) -> Option<ProjectionVariant> {
+    map.renderer.projection_variants().into_iter().find_map(|(id, variant)| (id == "circle").then_some(variant))
+}
+
+/// On a globe with terrain a circle stands on the ground through the globe's
+/// terrain variant; on a globe without terrain it draws the globe's flat
+/// variant, and no terrain variant is made.
+#[test]
+fn a_standing_layer_on_a_globe_with_terrain_draws_the_globe_terrain_variant() {
+    let globe = |terrain: bool| {
+        let mut map = DrapedMap::new(Tiles { high: true, ..Tiles::default() });
+        map.transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+        if !terrain {
+            map.edit(Edit::SetTerrain(None));
+        }
+        add_layer(&mut map, &red_circle(LatLng::new(-10.0, 10.0).unwrap()), None);
+        map.settle();
+        assert!(map.frame().0);
+        let center = SIDE / 2;
+        assert!(red(map.pixel(center, center)), "the circle");
+        map
+    };
+
+    let map = globe(true);
+    assert_eq!(Some(ProjectionVariant::GlobeTerrain), circle_variant(&map));
+    assert_ne!(0, map.renderer.rendering_stats().terrain.mem_dem_textures);
+
+    let map = globe(false);
+    assert_eq!(Some(ProjectionVariant::Globe), circle_variant(&map));
+    assert!(!map.renderer.made_terrain_variant());
     assert_eq!(0, map.renderer.rendering_stats().terrain.mem_dem_textures);
 }
 

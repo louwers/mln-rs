@@ -36,13 +36,14 @@
 
 use std::sync::Arc;
 
-use glam::{DMat4, DVec2, DVec4};
+use geometry::Point;
+use glam::{DMat4, DVec2};
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetFormats, TextureFormat};
 use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_map_types::{MapDebugOptions, View};
+use mln_map_types::{MapDebugOptions, TileProjector, View};
 use mln_style::layer_type::ErasedLayerStyle;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
@@ -137,26 +138,35 @@ fn held_bytes(sizes: &[u32], held: &[Held]) -> u64 {
     bytes
 }
 
+/// The pieces each side of a tile is measured in, so that its length on
+/// screen follows the side where the globe curves it.
+const SIDE_PIECES: u32 = 8;
+
 /// The logical pixels that `tile` spans in `view`, whose projection is
 /// `projection`, level with the view's center: its longest side on
-/// screen, and infinite where it reaches behind the eye, under the camera,
-/// where it shows larger than anywhere.
+/// screen, as the view draws it, and infinite where it reaches behind the
+/// eye, under the camera, where it shows larger than anywhere.
 fn shown_px(view: &View, projection: &DMat4, tile: &UnwrappedTileID) -> f64 {
-    let matrix = *projection * view.tile_matrix(tile);
+    let projector = TileProjector::with_data(view, tile, view.projection_data_with(tile, projection));
     let (altitude, extent) = (view.center_altitude(), f64::from(EXTENT));
     let size = view.size();
     let half = DVec2::new(f64::from(size.width), f64::from(size.height)) / 2.0;
-    let mut corners = [(0.0, 0.0), (extent, 0.0), (extent, extent), (0.0, extent)].into_iter().map(|(x, y)| {
-        let clip = matrix * DVec4::new(x, y, altitude, 1.0);
-        (clip.w > 0.0).then(|| DVec2::new(clip.x, clip.y) / clip.w * half)
-    });
-    let Some(corners) = corners.try_fold(Vec::with_capacity(4), |mut corners, corner| {
-        corners.push(corner?);
-        Some(corners)
-    }) else {
-        return f64::INFINITY;
+    let drawn = |at: DVec2| {
+        let point = projector.project_as_drawn(&Point::new(at.x, at.y), altitude);
+        let Point { x, y } = point.point;
+        (point.signed_distance_from_camera > 0.0).then(|| DVec2::new(x, y) * half)
     };
-    (0..4).map(|k| corners[k].distance(corners[(k + 1) % 4])).fold(0.0, f64::max)
+    let corners = [DVec2::ZERO, DVec2::new(extent, 0.0), DVec2::splat(extent), DVec2::new(0.0, extent)];
+    let mut longest = 0.0f64;
+    for k in 0..4 {
+        let (from, to) = (corners[k], corners[(k + 1) % 4]);
+        let points = (0..=SIDE_PIECES).map(|piece| drawn(from.lerp(to, f64::from(piece) / f64::from(SIDE_PIECES))));
+        let Some(points) = points.collect::<Option<Vec<DVec2>>>() else {
+            return f64::INFINITY;
+        };
+        longest = longest.max(points.windows(2).map(|piece| piece[0].distance(piece[1])).sum());
+    }
+    longest
 }
 
 /// The side of the drape of a tile that spans `shown` logical pixels on
@@ -447,7 +457,9 @@ impl Drapes {
     /// lowers where they would hold more than `byte_cap` bytes. The frame's
     /// draped layers then give their keys ([`key_layer`](Self::key_layer)),
     /// which [`choose`](Self::choose) the drapes whose drawings they then
-    /// update ([`update_layer`](Self::update_layer)).
+    /// update ([`update_layer`](Self::update_layer)). The layers draw into
+    /// the drapes as on Mercator, on the globe too ([`View::mercator`]), as
+    /// GL JS draws its drapes.
     pub(crate) fn begin(
         &mut self,
         (view, projection, pixel_ratio): (&View, &DMat4, f32),
@@ -463,9 +475,10 @@ impl Drapes {
         (self.byte_cap, self.pixel_ratio) = (byte_cap, pixel_ratio);
         let mut kept = std::mem::take(&mut self.drapes);
         self.drapes.reserve(cover.tiles.len());
+        let flat = view.mercator();
         for tile in &cover.tiles {
             let unwrapped = tile.id.to_unwrapped();
-            let transform = TransformParameters::for_drape(view, &unwrapped);
+            let transform = TransformParameters::for_drape(&flat, &unwrapped);
             let shown = shown_px(view, projection, &unwrapped);
             let mut drape = match kept.iter().position(|drape| drape.tile == tile.id) {
                 Some(index) => Drape { transform, shown, ..kept.swap_remove(index) },
@@ -970,6 +983,7 @@ impl Drapes {
 mod tests {
     use mln_map::transform::Transform;
     use mln_map_types::{CameraOptions, ConstrainMode, ViewportMode};
+    use mln_style_types::ProjectionDefinition;
     use mln_tile_id::CanonicalTileID;
     use mln_util::geo::LatLng;
 
@@ -994,6 +1008,56 @@ mod tests {
     /// center.
     fn north_of_center(rows: u32) -> UnwrappedTileID {
         UnwrappedTileID::with_wrap(0, CanonicalTileID::new(9, 256, 256 - rows))
+    }
+
+    /// A view of the globe at `zoom` over 512 by 512 pixels.
+    fn globe(center: LatLng, zoom: f64) -> View {
+        let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
+        transform.resize(Size::new(512, 512)).unwrap();
+        transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+        transform.jump_to(&CameraOptions { center: Some(center), zoom: Some(zoom), ..Default::default() });
+        assert!(transform.view().is_globe());
+        transform.view().clone()
+    }
+
+    /// On the globe, a drape draws its layers as on Mercator: its view isn't
+    /// the globe's, and its tiles project through the Mercator matrix onto
+    /// its texture, as GL JS draws its drapes.
+    #[test]
+    fn a_globe_drape_draws_on_mercator() {
+        let view = globe(LatLng::new(30.0, 20.0).unwrap(), 3.0);
+        let id = OverscaledTileID::new(3, 0, CanonicalTileID::new(3, 4, 3));
+        let cover = TerrainCover {
+            source_id: "dem".to_owned(),
+            tile_size: 512,
+            tiles: vec![crate::terrain::TerrainTile { id, dem: None, dem_loading: false }],
+            center: None,
+            dem_tiles: Vec::new(),
+            standing_dems: Vec::new(),
+            ranges: crate::terrain::ElevationRanges::default(),
+        };
+        let mut drapes = Drapes::default();
+        drapes.begin((&view, &view.projection_matrix(), 1.0), &cover, 1, (BYTE_CAP, 4096));
+        let transform = &drapes.drapes[0].transform;
+        assert!(!transform.view.is_globe());
+        let tile = id.to_unwrapped();
+        let projection = transform.projection_data_for_tile(&tile, false);
+        let mercator = TransformParameters::for_drape(&view.mercator(), &tile);
+        assert_eq!(mercator.proj_matrix * view.mercator().tile_matrix(&tile), projection.main_matrix);
+        assert_eq!(0.0, projection.projection_transition);
+    }
+
+    /// On the globe, a tile's sides curve: the tile of zoom 0, whose corners
+    /// are close together behind the planet, shows about as wide as the
+    /// planet, and its drape takes GL JS's side.
+    #[test]
+    fn a_tile_on_the_globe_spans_its_curved_sides() {
+        let view = globe(LatLng::new(0.0, 0.0).unwrap(), 1.0);
+        let shown = shown_px(&view, &view.projection_matrix(), &UnwrappedTileID::new(0, 0, 0));
+        // The planet is 1024 / π pixels across at zoom 1.
+        let planet = 1024.0 / std::f64::consts::PI;
+        assert!(shown > planet / 2.0, "{shown}");
+        assert_eq!(1024, shown_size(shown, 1.0, 1024));
     }
 
     #[test]

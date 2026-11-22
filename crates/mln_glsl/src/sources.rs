@@ -92,7 +92,8 @@ float ground_height(const vec2 pos, const vec4 dem_coords, const TerrainProps pr
     };
 }
 
-/// The surface's and the probe's uniform block and height rule.
+/// The surface's and the probe's uniform block and height rule, and the
+/// height of the surface's vertices.
 macro_rules! terrain_props {
     () => {
         concat!(
@@ -101,6 +102,15 @@ macro_rules! terrain_props {
 layout(std140, set = LAYER_SET_INDEX, binding = idTerrainPropsUBO) uniform TerrainPropsUBO {
     TerrainProps props;
 } terrain_props;
+
+// The height of the surface's vertex at `pos`, in tile units of a tile that
+// reads its DEM at `dem_coords`: the ground's, or sea level at a pole.
+float surface_height(const vec2 pos, const vec4 dem_coords, const TerrainProps props) {
+    if (pos.y < GLOBE_POLE_NORTH_Y || pos.y > GLOBE_POLE_SOUTH_Y) {
+        return 0.0;
+    }
+    return ground_height(pos, dem_coords, props);
+}
 "
         )
     };
@@ -857,7 +867,12 @@ void main() {
 #ifdef TERRAIN
     const ProjectionUBO standing = projectionVector.projection_ubo[constant.ubo_index];
     const float ele = standing_height(circle_center + standing.translate, standing.ground);
-    frag_visibility = ground_visibility(drawable.matrix * vec4(circle_center, ele, 1), standing.ground);
+#ifdef PROJECTION_GLOBE
+    const vec4 standing_center = projectTileWithElevation(circle_center, ele, standing);
+#else
+    const vec4 standing_center = drawable.matrix * vec4(circle_center, ele, 1);
+#endif
+    frag_visibility = ground_visibility(standing_center, standing.ground);
 #else
 #ifndef PROJECTION_GLOBE
     const float ele = 0.0;
@@ -879,7 +894,7 @@ void main() {
             // To counteract the effect for pitch-scale: viewport, we rescale the
             // whole circle based on the pitch scaling effect at its central point
 #ifdef PROJECTION_GLOBE
-            const vec4 projected_center = interpolateProjection(circle_center, center_vector, 0.0, projection);
+            const vec4 projected_center = interpolateProjection(circle_center, center_vector, ele, projection);
             angle_scale *= (radius + stroke_width) * (projected_center.w / paintParams.camera_to_center_distance);
 #else
             const vec4 projected_center = drawable.matrix * vec4(circle_center, ele, 1);
@@ -890,13 +905,13 @@ void main() {
 
 #ifdef PROJECTION_GLOBE
         const vec3 corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
-        gl_Position = interpolateProjection(corner_position, corner_vector, 0.0, projection);
+        gl_Position = interpolateProjection(corner_position, corner_vector, ele, projection);
 #else
         gl_Position = drawable.matrix * vec4(corner_position, ele, 1);
 #endif
     } else {
 #ifdef PROJECTION_GLOBE
-        gl_Position = projectTile(circle_center, projection);
+        gl_Position = projectTileWithElevation(circle_center, ele, projection);
         if (gl_Position.z / gl_Position.w > 1.0) {
             gl_Position.xy = vec2(10000.0);
         }
@@ -3809,12 +3824,6 @@ void main() {
 
     // multiply a_pos by 0.5, since we had it * 2 in order to sneak
     // in extrusion data
-#ifdef PROJECTION_GLOBE
-    const vec2 circle_center = floor(in_position * 0.5);
-    const vec3 center_vector = projectToSphere(circle_center, vec2(0.0, 0.0), projectionVector.projection_ubo[constant.ubo_index]);
-    const vec3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
-    gl_Position = interpolateProjection(circle_center + scaled_extrude, corner_vector, 0.0, projectionVector.projection_ubo[constant.ubo_index]);
-#else
     // The kernel lies flat on the ground under its center, if its tile
     // holds its center.
     const vec2 center = floor(in_position * 0.5);
@@ -3824,12 +3833,17 @@ void main() {
 #else
     const float ele = 0.0;
 #endif
+#ifdef PROJECTION_GLOBE
+    const vec3 center_vector = projectToSphere(center, vec2(0.0, 0.0), projectionVector.projection_ubo[constant.ubo_index]);
+    const vec3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
+    gl_Position = interpolateProjection(center + scaled_extrude, corner_vector, ele, projectionVector.projection_ubo[constant.ubo_index]);
+#else
     gl_Position = drawable.matrix * vec4(center + scaled_extrude, ele, 1);
+#endif
 #ifdef TERRAIN
     if (!tile_holds(center)) {
         gl_Position = ground_dropped();
     }
-#endif
 #endif
 
 #if !defined(HAS_UNIFORM_u_weight)
@@ -4064,11 +4078,12 @@ pub(crate) const TERRAIN_SHADER_PRELUDE: &str = r"
 
 ";
 
-/// The terrain's surface: a tile's grid, drawn with the tile's matrix from
-/// `drawableVector`, raised to the heights of the tile's DEM with its skirts
-/// lowered, in the colors of the tile's drape, fogged as GL JS's terrain is.
-/// The drape is sampled where the vertex is in the tile: the back end's flip
-/// of Y puts its rows north first.
+/// The terrain's surface: a tile's grid, raised to the heights of the tile's
+/// DEM with its skirts lowered and projected through the tile's entry of
+/// `projectionVector`, in the colors of the tile's drape, fogged as GL JS's
+/// terrain is. A pole's vertices stand at sea level in the color of the
+/// drape's edge row. The drape is sampled where the vertex is in the tile:
+/// the back end's flip of Y puts its rows north first.
 pub(crate) const TERRAIN_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: TERRAIN_SHADER_PRELUDE,
     vertex: concat!(
@@ -4080,8 +4095,7 @@ layout(location = 0) in ivec4 in_pos;
 
 layout(location = 0) out vec2 frag_drape_pos;
 // The distance along the view of the ground before the skirt lowers it, which
-// the fog reads, as in GL JS: the clip w, which is affine in the vertex, so it
-// interpolates exactly.
+// the fog reads, as in GL JS: the clip w.
 layout(location = 1) out float frag_view_depth;
 
 layout(push_constant) uniform Constants {
@@ -4089,7 +4103,6 @@ layout(push_constant) uniform Constants {
 } constant;
 
 struct TerrainDrawableUBO {
-    mat4 matrix;
     vec4 dem_coords;
 };
 
@@ -4097,15 +4110,22 @@ layout(std140, set = LAYER_SET_INDEX, binding = idTerrainDrawableUBO) readonly b
     TerrainDrawableUBO drawable_ubo[];
 } drawableVector;
 
+layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
+    ProjectionUBO projection_ubo[];
+} projectionVector;
+
 void main() {
     const TerrainDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
     const vec2 pos = vec2(in_pos.xy);
     const float skirt = float(in_pos.z);
-    const float height = ground_height(pos, drawable.dem_coords, terrain_props.props);
-    gl_Position = drawable.matrix * vec4(pos, height - skirt * terrain_props.props.skirt_length, 1.0);
-    frag_drape_pos = pos / 8192.0;
-    const mat4 m = drawable.matrix;
-    frag_view_depth = m[0].w * pos.x + m[1].w * pos.y + m[2].w * height + m[3].w;
+    const float height = surface_height(pos, drawable.dem_coords, terrain_props.props);
+    gl_Position = projectTileFor3D(pos, height - skirt * terrain_props.props.skirt_length, projection);
+    frag_drape_pos = clamp(pos / 8192.0, vec2(0.0), vec2(1.0));
+    frag_view_depth = gl_Position.w;
+    if (skirt != 0.0) {
+        frag_view_depth = projectTileFor3D(pos, height, projection).w;
+    }
 }
 "
     ),
@@ -4163,11 +4183,9 @@ void main() {
 ",
 };
 
-/// The depth of the terrain's surface: a tile's grid, drawn with the tile's
-/// matrix from `drawableVector`, raised to the heights of the tile's DEM with
-/// its skirts lowered, as the surface's, whose fragments write the eye
-/// distance (the clip w, which is affine in the vertex, so it interpolates
-/// exactly) as its float's bits, least significant byte first.
+/// The depth of the terrain's surface: a tile's grid, raised and projected
+/// as the surface's, whose fragments write the eye distance (the clip w) as
+/// its float's bits, least significant byte first.
 pub(crate) const TERRAIN_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: TERRAIN_SHADER_PRELUDE,
     vertex: concat!(
@@ -4184,7 +4202,6 @@ layout(push_constant) uniform Constants {
 } constant;
 
 struct TerrainDrawableUBO {
-    mat4 matrix;
     vec4 dem_coords;
 };
 
@@ -4192,12 +4209,17 @@ layout(std140, set = LAYER_SET_INDEX, binding = idTerrainDrawableUBO) readonly b
     TerrainDrawableUBO drawable_ubo[];
 } drawableVector;
 
+layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
+    ProjectionUBO projection_ubo[];
+} projectionVector;
+
 void main() {
     const TerrainDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
     const vec2 pos = vec2(in_pos.xy);
     const float skirt = float(in_pos.z);
-    const float height = ground_height(pos, drawable.dem_coords, terrain_props.props);
-    gl_Position = drawable.matrix * vec4(pos, height - skirt * terrain_props.props.skirt_length, 1.0);
+    const float height = surface_height(pos, drawable.dem_coords, terrain_props.props);
+    gl_Position = projectTileFor3D(pos, height - skirt * terrain_props.props.skirt_length, projection);
     frag_eye_distance = gl_Position.w;
 }
 "

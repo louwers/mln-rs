@@ -10,7 +10,8 @@
     "../testdata/metrics/ignores/platform-all.json",
     "../testdata/metrics/ignores/platform-linux.json",
     "../ignores/rust-port.json",
-    "../ignores/rust-port-1px-outlines.json"
+    "../ignores/rust-port-1px-outlines.json",
+    "../ignores/rust-port-llvmpipe.json"
   ],
   "metric_path": "../testdata/metrics/linux-gcc8-release"
 }

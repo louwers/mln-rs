@@ -1384,7 +1384,8 @@ impl RenderOrchestrator {
         let layers = || frame.layers.keys().map(|&index| &self.layers[index as usize]).filter(|_| frame.terrain);
         let stands = layers().any(|layer| layer.stands());
         let hides = layers().any(|layer| layer.hides_behind_ground());
-        paint_parameters.ground = self.terrain.prepare_ground(paint_parameters, dem, stands);
+        let ground = self.terrain.prepare_ground(paint_parameters, dem, stands);
+        paint_parameters.ground.clone_from(&ground);
         let mut needs_globe_depth = false;
         let mut contents = SourceContents::default();
         for (&index, frame_layer) in &frame.layers {
@@ -1439,14 +1440,13 @@ impl RenderOrchestrator {
         let (renderable_size, pixel_ratio) = (paint_parameters.renderable_size, paint_parameters.pixel_ratio);
         let context = &mut *paint_parameters.context;
         self.sky_pass.update(gpu, context, state, renderable_size, pixel_ratio, frame.sky.as_ref(), &frame.light);
-        self.globe_depth_pass.update(
-            gpu,
-            context,
-            state,
-            update_parameters,
-            needs_globe_depth || self.sky_pass.has_atmosphere(),
-        );
-        self.terrain.update_draws(gpu, paint_parameters, frame.sky.as_ref(), hides);
+        // Where the terrain's surface draws, its depth is the planet's: a
+        // sea-level planet would hide the ground below sea level and the
+        // drawn ground's limb.
+        let surface = !self.stacks.is_empty();
+        let needs_globe_depth = (needs_globe_depth || self.sky_pass.has_atmosphere()) && !surface;
+        self.globe_depth_pass.update(gpu, context, state, update_parameters, needs_globe_depth);
+        self.terrain.update_draws(gpu, paint_parameters, ground.as_deref(), frame.sky.as_ref(), hides);
     }
 
     /// The render layer at `index` in the drawing order.

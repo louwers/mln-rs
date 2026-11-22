@@ -612,7 +612,12 @@ fn main(in: VertexInput) -> VertexOutput {
         return out;
     }
     let ele = standing_height(circle_center + projection.translate, projection.ground);
-    out.visibility = ground_visibility(drawable.matrix * vec4<f32>(circle_center, ele, 1.0), projection.ground);
+#ifdef PROJECTION_GLOBE
+    let standing_center = projectTileWithElevation(circle_center, ele, projection);
+#else
+    let standing_center = drawable.matrix * vec4<f32>(circle_center, ele, 1.0);
+#endif
+    out.visibility = ground_visibility(standing_center, projection.ground);
 #else
 #ifndef PROJECTION_GLOBE
     let ele = 0.0;
@@ -632,7 +637,7 @@ fn main(in: VertexInput) -> VertexOutput {
 #endif
         } else {
 #ifdef PROJECTION_GLOBE
-            let projected_center = interpolateProjection(circle_center, center_vector, 0.0, projection);
+            let projected_center = interpolateProjection(circle_center, center_vector, ele, projection);
             angle_scale *= radius_with_stroke * (projected_center.w / paintParams.camera_to_center_distance);
 #else
             let projected_center = drawable.matrix * vec4<f32>(circle_center, ele, 1.0);
@@ -642,13 +647,13 @@ fn main(in: VertexInput) -> VertexOutput {
         }
 #ifdef PROJECTION_GLOBE
         let corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
-        position = interpolateProjection(corner_position, corner_vector, 0.0, projection);
+        position = interpolateProjection(corner_position, corner_vector, ele, projection);
 #else
         position = drawable.matrix * vec4<f32>(corner_position, ele, 1.0);
 #endif
     } else {
 #ifdef PROJECTION_GLOBE
-        position = projectTile(circle_center, projection);
+        position = projectTileWithElevation(circle_center, ele, projection);
         if (position.z / position.w > 1.0) {
             position.x = 10000.0;
             position.y = 10000.0;
@@ -2685,7 +2690,7 @@ fn main(in: VertexInput) -> VertexOutput {
 #ifdef PROJECTION_GLOBE
     let center_vector = projectToSphere(base, vec2<f32>(0.0, 0.0), projectionVector[globalIndex.value]);
     let corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
-    out.position = interpolateProjection(base + scaled_extrude, corner_vector, 0.0, projectionVector[globalIndex.value]);
+    out.position = interpolateProjection(base + scaled_extrude, corner_vector, ele, projectionVector[globalIndex.value]);
 #else
     out.position = drawable.matrix * vec4<f32>(base + scaled_extrude, ele, 1.0);
 #endif
@@ -2816,9 +2821,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// The terrain's surface: a tile's grid, drawn with the tile's matrix from
-/// `drawableVector`, raised to the heights of the tile's DEM with its skirts
-/// lowered, in the colors of the tile's drape, fogged as GL JS's terrain is.
+/// The terrain's surface: a tile's grid, raised to the heights of the tile's
+/// DEM with its skirts lowered and projected through the tile's entry of
+/// `projectionVector`, in the colors of the tile's drape, fogged as GL JS's
+/// terrain is. A pole's vertices stand at sea level in the color of the
+/// drape's edge row.
 pub(crate) const TERRAIN_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(
         r"
@@ -2833,13 +2840,11 @@ struct VertexOutput {
     // north, as they are drawn.
     @location(0) drape_pos: vec2<f32>,
     // The distance along the view of the ground before the skirt lowers it,
-    // which the fog reads, as in GL JS: the clip w, which is affine in the
-    // vertex, so it interpolates exactly.
+    // which the fog reads, as in GL JS: the clip w.
     @location(1) view_depth: f32,
 };
 
 struct TerrainDrawableUBO {
-    matrix: mat4x4<f32>,
     dem_coords: vec4<f32>,
 };
 
@@ -2850,18 +2855,22 @@ struct GlobalIndexUBO {
 
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<TerrainDrawableUBO>;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     let drawable = drawableVector[globalIndex.value];
+    let projection = projectionVector[globalIndex.value];
     let pos = vec2<f32>(in.pos.xy);
     let skirt = f32(in.pos.z);
-    let height = ground_height(pos, drawable.dem_coords, terrainProps);
+    let height = surface_height(pos, drawable.dem_coords, terrainProps);
     var out: VertexOutput;
-    out.position = drawable.matrix * vec4<f32>(pos, height - skirt * terrainProps.skirt_length, 1.0);
-    out.drape_pos = pos / 8192.0;
-    let m = drawable.matrix;
-    out.view_depth = m[0].w * pos.x + m[1].w * pos.y + m[2].w * height + m[3].w;
+    out.position = projectTileFor3D(pos, height - skirt * terrainProps.skirt_length, projection);
+    out.drape_pos = clamp(pos / 8192.0, vec2<f32>(0.0), vec2<f32>(1.0));
+    out.view_depth = out.position.w;
+    if (skirt != 0.0) {
+        out.view_depth = projectTileFor3D(pos, height, projection).w;
+    }
     return out;
 }
 ",
@@ -2925,11 +2934,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: Some(TERRAIN_PRELUDE),
 };
 
-/// The depth of the terrain's surface: a tile's grid, drawn with the tile's
-/// matrix from `drawableVector`, raised to the heights of the tile's DEM with
-/// its skirts lowered, as the surface's, whose fragments write the eye
-/// distance (the clip w, which is affine in the vertex, so it interpolates
-/// exactly) as its f32's bits, least significant byte first.
+/// The depth of the terrain's surface: a tile's grid, raised and projected
+/// as the surface's, whose fragments write the eye distance (the clip w) as
+/// its f32's bits, least significant byte first.
 pub(crate) const TERRAIN_DEPTH_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(
         r"
@@ -2944,7 +2951,6 @@ struct VertexOutput {
 };
 
 struct TerrainDrawableUBO {
-    matrix: mat4x4<f32>,
     dem_coords: vec4<f32>,
 };
 
@@ -2955,15 +2961,17 @@ struct GlobalIndexUBO {
 
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<TerrainDrawableUBO>;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     let drawable = drawableVector[globalIndex.value];
+    let projection = projectionVector[globalIndex.value];
     let pos = vec2<f32>(in.pos.xy);
     let skirt = f32(in.pos.z);
-    let height = ground_height(pos, drawable.dem_coords, terrainProps);
+    let height = surface_height(pos, drawable.dem_coords, terrainProps);
     var out: VertexOutput;
-    out.position = drawable.matrix * vec4<f32>(pos, height - skirt * terrainProps.skirt_length, 1.0);
+    out.position = projectTileFor3D(pos, height - skirt * terrainProps.skirt_length, projection);
     out.eye_distance = out.position.w;
     return out;
 }
@@ -3023,12 +3031,21 @@ fn main(@location(0) @interpolate(flat) height: f32) -> @location(0) vec4<f32> {
     prelude: Some(TERRAIN_PRELUDE),
 };
 
-/// The surface's and the probe's prelude: the terrain's uniform block and
-/// the height rule.
+/// The surface's and the probe's prelude: the terrain's uniform block, the
+/// height rule, and the height of the surface's vertices.
 const TERRAIN_PRELUDE: &str = concat!(
     ground_height!(),
     r"
 @group(0) @binding(5) var<uniform> terrainProps: TerrainPropsUBO;
+
+// The height of the surface's vertex at `pos`, in tile units of a tile that
+// reads its DEM at `dem_coords`: the ground's, or sea level at a pole.
+fn surface_height(pos: vec2<f32>, dem_coords: vec4<f32>, props: TerrainPropsUBO) -> f32 {
+    if (pos.y < GLOBE_POLE_NORTH_Y || pos.y > GLOBE_POLE_SOUTH_Y) {
+        return 0.0;
+    }
+    return ground_height(pos, dem_coords, props);
+}
 "
 );
 
