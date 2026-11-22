@@ -18,8 +18,8 @@ pub mod background;
 pub mod circle;
 mod color_ramp;
 pub mod color_relief;
-// slice: off #[cfg(feature = "gpu-conformance")]
-// slice: off pub mod conformance;
+#[cfg(feature = "gpu-conformance")]
+pub mod conformance;
 pub mod custom;
 mod features;
 pub mod fill;

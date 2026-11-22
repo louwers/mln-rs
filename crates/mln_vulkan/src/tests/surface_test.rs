@@ -40,7 +40,7 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::ProgramParameters;
 use mln_gfx::types::DepthFunctionType;
 use mln_layers::background::programs::BACKGROUND;
-use mln_layers::background::ubo::{BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPropsUBO};
+use mln_layers::background::ubo::BackgroundPropsUBO;
 use mln_util::Color;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
@@ -181,7 +181,6 @@ struct Scene {
     /// The background's color.
     props: BufferId,
     /// The matrices of the half the background covers.
-    drawable: BufferId,
     projection: BufferId,
     bindings: BindingsId,
 }
@@ -214,7 +213,6 @@ impl Scene {
         let tile_vertices: [[i16; 2]; 4] = [[0, 0], [EXTENT, 0], [0, EXTENT], [EXTENT, EXTENT]];
         let tile_indexes: [u16; 6] = [0, 1, 2, 1, 2, 3];
         let props = buffer(gpu, BufferUsage::Uniform, bytemuck::bytes_of(&BackgroundPropsUBO::zeroed()));
-        let drawable = buffer(gpu, BufferUsage::Storage, bytemuck::bytes_of(&BackgroundDrawableUnionUBO::zeroed()));
         let projection = buffer(gpu, BufferUsage::Storage, bytemuck::bytes_of(&ProjectionUBO::default()));
         let entry = |id: usize, buffer, size: usize| BindGroupEntry::Buffer {
             id: id as u32,
@@ -224,7 +222,6 @@ impl Scene {
         };
         let entries = [
             entry(buffer_id("BackgroundPropsUBO"), props, size_of::<BackgroundPropsUBO>()),
-            entry(buffer_id("BackgroundDrawableUBO"), drawable, size_of::<BackgroundDrawableUnionUBO>()),
             entry(PROJECTION_BUFFER_ID, projection, size_of::<ProjectionUBO>()),
         ];
         let vertices = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&tile_vertices));
@@ -239,7 +236,7 @@ impl Scene {
             .expect("geometry");
         let bindings =
             gpu.create_bindings(&BindingsDesc { label: "background", shader, entries: &entries }).expect("bindings");
-        Scene { shader, layouts, geometry, props, drawable, projection, bindings }
+        Scene { shader, layouts, geometry, props, projection, bindings }
     }
 
     /// Writes the background's color into its buffer, which the frames
@@ -259,9 +256,7 @@ impl Scene {
     /// which the frames before used.
     fn set_half(&self, gpu: &mut VulkanGpu, right: bool) {
         let matrix = half_matrix(right);
-        let drawable = BackgroundDrawableUnionUBO::from_drawable(&BackgroundDrawableUBO { matrix });
         let projection = ProjectionUBO { matrix, fallback_matrix: matrix, ..ProjectionUBO::default() };
-        gpu.write_buffer(self.drawable, 0, bytemuck::bytes_of(&drawable)).expect("buffer write");
         gpu.write_buffer(self.projection, 0, bytemuck::bytes_of(&projection)).expect("buffer write");
     }
 

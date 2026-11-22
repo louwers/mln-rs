@@ -13,7 +13,7 @@ use mln_gfx::shaders::bindings::PROJECTION_BUFFER_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::types::DepthFunctionType;
 use mln_layers::background::programs::BACKGROUND;
-use mln_layers::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
+use mln_layers::background::ubo::BackgroundPropsUBO;
 use mln_layers::conformance::{
     blend_equations, clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures,
     instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace,
@@ -244,11 +244,8 @@ fn background(gpu: &mut GlGpu, props: &BackgroundPropsUBO) -> Background {
         matrix: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
         ..ProjectionUBO::default()
     }];
-    let drawable = [BackgroundDrawableUnionUBO::default()];
     let projection = bytemuck::cast_slice(&projection);
-    let drawable = bytemuck::cast_slice(&drawable);
     let projection_buffer = buffer(gpu, BufferUsage::Storage, projection);
-    let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable);
     let props_buffer = buffer(gpu, BufferUsage::Uniform, bytemuck::bytes_of(props));
     let bindings = gpu
         .create_bindings(&BindingsDesc {
@@ -256,7 +253,6 @@ fn background(gpu: &mut GlGpu, props: &BackgroundPropsUBO) -> Background {
             shader,
             entries: &[
                 whole(PROJECTION_BUFFER_ID, projection_buffer, projection),
-                whole(buffer_id("BackgroundDrawableUBO"), drawable_buffer, drawable),
                 whole(buffer_id("BackgroundPropsUBO"), props_buffer, bytemuck::bytes_of(props)),
             ],
         })

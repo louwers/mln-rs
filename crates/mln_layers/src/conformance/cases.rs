@@ -18,24 +18,18 @@ use mln_gfx::types::{ColorBlendFactorType, DepthFunctionType};
 use mln_util::Color;
 use mln_util::size::Size;
 
-use super::{EXTENT, SIZE, buffer, draw, fixed, position_layout, quad, tile_matrix, whole};
-use crate::background::programs::ID_BACKGROUND_POS_VERTEX_ATTRIBUTE;
-use crate::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
-use crate::fill::programs::{
-    ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE,
+use super::{
+    BACKGROUND_POSITION, EXTENT, SIZE, buffer, attribute_id, buffer_id, draw, fixed, position_layout, quad, tile_matrix,
+    whole,
 };
-use crate::fill::ubo::{FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO};
-use crate::fill_extrusion::programs::{
-    ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE,
-    ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE,
-    ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE,
-};
+use crate::background::programs::{BACKGROUND, BACKGROUND_PATTERN};
+use crate::background::ubo::BackgroundPropsUBO;
+use crate::fill::programs::FILL;
+use crate::fill::ubo::{FillDrawableUBO, FillEvaluatedPropsUBO};
+use crate::fill_extrusion::programs::{FILL_EXTRUSION_INSTANCED, FILL_EXTRUSION_PULLED, FILL_EXTRUSION_WALL};
 use crate::fill_extrusion::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
-use crate::heatmap::programs::{
-    ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
-};
+use crate::heatmap::programs::HEATMAP_TEXTURE;
 use crate::heatmap::ubo::HeatmapTexturePropsUBO;
-use crate::{background, fill, fill_extrusion, heatmap};
 
 const BLACK: Color = Color::black();
 const RGBA8: TargetFormats = TargetFormats { color: Some(TextureFormat::Rgba8Unorm), depth_stencil: None };
@@ -66,19 +60,15 @@ fn solid(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4]) -> Result<S
 fn solid_at(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4], matrix: [f32; 16]) -> Result<Solid, GpuError> {
     let target = target(gpu, format)?;
     let (quad, indices) = quad(gpu)?;
-    let shader = gpu.create_shader(&ShaderKey::new(&background::programs::BACKGROUND, []))?;
+    let shader = gpu.create_shader(&ShaderKey::new(&BACKGROUND, []))?;
     let projection = [ProjectionUBO { matrix, ..ProjectionUBO::default() }];
-    let drawable = [BackgroundDrawableUnionUBO::default()];
     let props = BackgroundPropsUBO { color, opacity: 1.0, ..BackgroundPropsUBO::default() };
-    let (projection, drawable) = (bytemuck::cast_slice(&projection), bytemuck::cast_slice(&drawable));
-    let props = bytemuck::bytes_of(&props);
+    let (projection, props) = (bytemuck::cast_slice(&projection), bytemuck::bytes_of(&props));
     let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
-    let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;
     let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
     let entries = vec![
         whole(PROJECTION_BUFFER.id, projection_buffer, projection),
-        whole(background::programs::DRAWABLE.id, drawable_buffer, drawable),
-        whole(background::programs::PROPS.id, props_buffer, props),
+        whole(buffer_id(&BACKGROUND, "props")?, props_buffer, props),
     ];
     let bindings = gpu.create_bindings(&BindingsDesc { label: "background layer", shader, entries: &entries })?;
     let geometry = background_geometry(gpu, shader, quad, indices)?;
@@ -95,7 +85,7 @@ fn background_geometry(
 ) -> Result<GeometryId, GpuError> {
     gpu.create_geometry(&GeometryDesc {
         shader,
-        layouts: &[position_layout(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)],
+        layouts: &[position_layout(BACKGROUND_POSITION)],
         vertex_buffers: &[(vertices, 0)],
         index_buffer: indices,
     })
@@ -132,7 +122,7 @@ fn background(shader: ShaderId, targets: TargetFormats) -> PipelineDesc<'static>
 /// pipeline of it here reads.
 fn background_layouts() -> &'static [VertexBufferLayout] {
     static LAYOUTS: std::sync::OnceLock<[VertexBufferLayout; 1]> = std::sync::OnceLock::new();
-    LAYOUTS.get_or_init(|| [position_layout(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)])
+    LAYOUTS.get_or_init(|| [position_layout(BACKGROUND_POSITION)])
 }
 
 impl Solid {
@@ -183,14 +173,15 @@ pub fn invalid_calls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let unit = (size_of::<BackgroundPropsUBO>() as u64).next_multiple_of(alignment);
     let uniform =
         gpu.create_buffer(&mln_gfx::gpu::BufferDesc { label: "uniform", usage: BufferUsage::Uniform, size: 2 * unit })?;
+    let props_id = buffer_id(&BACKGROUND, "props")? as u32;
     let props = |buffer, offset, size| BindGroupEntry::Buffer {
-        id: background::programs::PROPS.id as u32,
+        id: props_id,
         buffer,
         offset,
         size,
     };
     let with = |entry: Option<BindGroupEntry>| -> Vec<BindGroupEntry> {
-        frame.entries[..2].iter().copied().chain(entry).collect()
+        frame.entries[..1].iter().copied().chain(entry).collect()
     };
     let shader = frame.shader;
     let mut bindings =
@@ -230,7 +221,7 @@ pub fn invalid_calls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         TargetFormats { depth_stencil: Some(TextureFormat::Depth24PlusStencil8), ..RGBA8 },
     ))?;
     assert!(invalid(&with_draw(gpu, frame.draw(depth_pipeline))), "a pipeline for a depth attachment");
-    let other = gpu.create_shader(&ShaderKey::new(&background::programs::BACKGROUND_PATTERN, []))?;
+    let other = gpu.create_shader(&ShaderKey::new(&BACKGROUND_PATTERN, []))?;
     let other_geometry = background_geometry(gpu, other, frame.quad, frame.indices)?;
     let other_geometry = Draw { geometry: other_geometry, ..frame.draw(frame.pipeline) };
     assert!(invalid(&with_draw(gpu, other_geometry)), "geometry of another shader");
@@ -299,7 +290,7 @@ pub fn foreign_ids<G: Gpu>(first: &mut G, second: &mut G) -> Result<(), GpuError
     let unknown = |result: Result<(), GpuError>, what| matches!(result, Err(GpuError::UnknownId(kind)) if kind == what);
     assert!(unknown(second.write_buffer(theirs.quad, 0, &[0; 4]), "buffer"), "a write to their buffer");
     let entries =
-        [BindGroupEntry::Buffer { id: background::programs::PROPS.id as u32, buffer: theirs.quad, offset: 0, size: 4 }];
+        [BindGroupEntry::Buffer { id: buffer_id(&BACKGROUND, "props")? as u32, buffer: theirs.quad, offset: 0, size: 4 }];
     let bindings = second.create_bindings(&BindingsDesc { label: "theirs", shader: ours.shader, entries: &entries });
     assert!(unknown(bindings.map(drop), "buffer"), "bindings of their buffer");
     let bindings =
@@ -517,10 +508,9 @@ pub fn depth_only(gpu: &mut impl Gpu) -> Result<(), GpuError> {
 /// Where a check doesn't hold.
 pub fn vertex_layouts(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0, 0.0, 0.0, 0.0])?;
-    let shader = gpu.create_shader(&ShaderKey::new(&fill::programs::FILL, []))?;
+    let shader = gpu.create_shader(&ShaderKey::new(&FILL, []))?;
     let projection = [ProjectionUBO { matrix: tile_matrix(1.0), ..ProjectionUBO::default() }];
-    let mut drawable = [FillDrawableUnionUBO::default()];
-    drawable[0].set_fill(&FillDrawableUBO { matrix: tile_matrix(1.0), ..FillDrawableUBO::default() });
+    let drawable = [FillDrawableUBO { matrix: tile_matrix(1.0), ..FillDrawableUBO::default() }];
     let props = FillEvaluatedPropsUBO { opacity: 1.0, ..FillEvaluatedPropsUBO::default() };
     let (projection, drawable) = (bytemuck::cast_slice(&projection), bytemuck::cast_slice(&drawable));
     let props = bytemuck::bytes_of(&props);
@@ -532,8 +522,8 @@ pub fn vertex_layouts(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         shader,
         entries: &[
             whole(PROJECTION_BUFFER.id, projection_buffer, projection),
-            whole(fill::programs::DRAWABLE.id, drawable_buffer, drawable),
-            whole(fill::programs::PROPS.id, props_buffer, props),
+            whole(buffer_id(&FILL, "drawableVector")?, drawable_buffer, drawable),
+            whole(buffer_id(&FILL, "props")?, props_buffer, props),
         ],
     })?;
 
@@ -554,17 +544,17 @@ pub fn vertex_layouts(gpu: &mut impl Gpu) -> Result<(), GpuError> {
 
     let attribute = |id: usize, format, offset| VertexAttribute { id: id as u32, format, offset };
     let layout = |stride, attributes| VertexBufferLayout { stride, step: VertexStep::Vertex, attributes };
-    let pos = attribute(ID_FILL_POS_VERTEX_ATTRIBUTE, AttributeDataType::Short2, 0);
-    let color_layout = layout(16, vec![attribute(ID_FILL_COLOR_VERTEX_ATTRIBUTE, AttributeDataType::Float4, 0)]);
+    let pos = attribute(attribute_id(&FILL, "position")?, AttributeDataType::Short2, 0);
+    let color_layout = layout(16, vec![attribute(attribute_id(&FILL, "color")?, AttributeDataType::Float4, 0)]);
     let separate = (
         vec![
             layout(4, vec![pos]),
-            layout(8, vec![attribute(ID_FILL_OPACITY_VERTEX_ATTRIBUTE, AttributeDataType::Float2, 0)]),
+            layout(8, vec![attribute(attribute_id(&FILL, "opacity")?, AttributeDataType::Float2, 0)]),
             color_layout.clone(),
         ],
         vec![(frame.quad, 0), (opacities, 0), (colors, 0)],
     );
-    let opacity_at_4 = attribute(ID_FILL_OPACITY_VERTEX_ATTRIBUTE, AttributeDataType::Float2, 4);
+    let opacity_at_4 = attribute(attribute_id(&FILL, "opacity")?, AttributeDataType::Float2, 4);
     let interleaved = (vec![layout(12, vec![pos, opacity_at_4]), color_layout], vec![(interleaved, 0), (colors, 0)]);
     for (layouts, buffers) in [separate, interleaved] {
         let pipeline =
@@ -635,9 +625,9 @@ fn wall_frame(
     let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
     let mut entries = vec![
         whole(PROJECTION_BUFFER.id, projection_buffer, projection),
-        whole(fill_extrusion::programs::DRAWABLE.id, drawable_buffer, drawable),
-        whole(fill_extrusion::programs::TILE_PROPS.id, tile_props_buffer, tile_props),
-        whole(fill_extrusion::programs::PROPS.id, props_buffer, props),
+        whole(buffer_id(program, "drawableVector")?, drawable_buffer, drawable),
+        whole(buffer_id(program, "tilePropsVector")?, tile_props_buffer, tile_props),
+        whole(buffer_id(program, "props")?, props_buffer, props),
     ];
     entries.extend_from_slice(more);
     let bindings = gpu.create_bindings(&BindingsDesc { label: "fill extrusion layer", shader, entries: &entries })?;
@@ -679,7 +669,7 @@ pub fn instanced_walls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
 
 /// The texels of the frame of `instanced_walls`.
 fn instanced_wall_texels(gpu: &mut impl Gpu) -> Result<Vec<u8>, GpuError> {
-    let (frame, shader, bindings) = wall_frame(gpu, &fill_extrusion::programs::FILL_EXTRUSION_INSTANCED, &[])?;
+    let (frame, shader, bindings) = wall_frame(gpu, &FILL_EXTRUSION_INSTANCED, &[])?;
     let corners = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&WALL_CORNERS))?;
     let outline = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&wall_outline()))?;
 
@@ -690,17 +680,17 @@ fn instanced_wall_texels(gpu: &mut impl Gpu) -> Result<Vec<u8>, GpuError> {
         VertexBufferLayout {
             stride: 4,
             step: VertexStep::Vertex,
-            attributes: vec![attribute(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, short2, 0)],
+            attributes: vec![attribute(attribute_id(&FILL_EXTRUSION_INSTANCED, "pos")?, short2, 0)],
         },
         instances(
             8,
             vec![
-                attribute(ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ushort2, 4),
-                attribute(ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, short2, 0),
+                attribute(attribute_id(&FILL_EXTRUSION_INSTANCED, "next_decimals_ed")?, ushort2, 4),
+                attribute(attribute_id(&FILL_EXTRUSION_INSTANCED, "next_outline_pos")?, short2, 0),
             ],
         ),
-        instances(8, vec![attribute(ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, short2, 0)]),
-        instances(8, vec![attribute(ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ushort2, 4)]),
+        instances(8, vec![attribute(attribute_id(&FILL_EXTRUSION_INSTANCED, "outline_pos")?, short2, 0)]),
+        instances(8, vec![attribute(attribute_id(&FILL_EXTRUSION_INSTANCED, "decimals_ed")?, ushort2, 4)]),
     ];
     let pipeline =
         gpu.create_pipeline(&PipelineDesc { shader, vertex_buffers: &layouts, ..background(shader, RGBA8) })?;
@@ -728,7 +718,7 @@ fn instanced_wall_texels(gpu: &mut impl Gpu) -> Result<Vec<u8>, GpuError> {
 ///
 /// Where a check doesn't hold.
 pub fn wall_quads(gpu: &mut impl Gpu) -> Result<(), GpuError> {
-    let (frame, shader, bindings) = wall_frame(gpu, &fill_extrusion::programs::FILL_EXTRUSION_WALL, &[])?;
+    let (frame, shader, bindings) = wall_frame(gpu, &FILL_EXTRUSION_WALL, &[])?;
     let mut quads: Vec<i16> = Vec::new();
     for vertex in wall_outline() {
         for corner in WALL_CORNERS {
@@ -744,13 +734,13 @@ pub fn wall_quads(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let (short2, ushort2) = (AttributeDataType::Short2, AttributeDataType::UShort2);
     let layouts = [
         vertices(vec![
-            attribute(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, short2, 0),
-            attribute(ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, short2, 4),
-            attribute(ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ushort2, 8),
+            attribute(attribute_id(&FILL_EXTRUSION_WALL, "pos")?, short2, 0),
+            attribute(attribute_id(&FILL_EXTRUSION_WALL, "outline_pos")?, short2, 4),
+            attribute(attribute_id(&FILL_EXTRUSION_WALL, "decimals_ed")?, ushort2, 8),
         ]),
         vertices(vec![
-            attribute(ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, short2, 4),
-            attribute(ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ushort2, 8),
+            attribute(attribute_id(&FILL_EXTRUSION_WALL, "next_outline_pos")?, short2, 4),
+            attribute(attribute_id(&FILL_EXTRUSION_WALL, "next_decimals_ed")?, ushort2, 8),
         ]),
     ];
     let pipeline =
@@ -786,7 +776,7 @@ pub fn pulled_walls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let outline = wall_outline();
     let outline: &[u8] = bytemuck::cast_slice(&outline);
     let outline_buffer = buffer(gpu, BufferUsage::Vertex, outline)?;
-    let outline = whole(fill_extrusion::programs::WALL_VERTICES.id, outline_buffer, outline);
+    let outline = whole(buffer_id(&FILL_EXTRUSION_PULLED, "wallVertices")?, outline_buffer, outline);
     if !gpu.caps().binds_vertex_buffers {
         let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0; 4])?;
         let entries = [frame.entries.as_slice(), &[outline]].concat();
@@ -795,7 +785,7 @@ pub fn pulled_walls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         return Ok(());
     }
 
-    let (frame, shader, bindings) = wall_frame(gpu, &fill_extrusion::programs::FILL_EXTRUSION_PULLED, &[outline])?;
+    let (frame, shader, bindings) = wall_frame(gpu, &FILL_EXTRUSION_PULLED, &[outline])?;
     // The corners of a wall's quad are in the static quad's order.
     let indices: [u16; 12] = [0, 2, 1, 1, 2, 3, 4, 6, 5, 5, 6, 7];
     let indices = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&indices))?;
@@ -939,8 +929,8 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
     let projection = bytemuck::cast_slice(&projection);
     let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
     let (vertices, indices) = quad(gpu)?;
-    let shader = gpu.create_shader(&ShaderKey::new(&heatmap::programs::HEATMAP_TEXTURE, []))?;
-    let layouts = [position_layout(ID_HEATMAP_POS_VERTEX_ATTRIBUTE)];
+    let shader = gpu.create_shader(&ShaderKey::new(&HEATMAP_TEXTURE, []))?;
+    let layouts = [position_layout(attribute_id(&HEATMAP_TEXTURE, "pos")?)];
     let pipeline = gpu.create_pipeline(&PipelineDesc {
         shader,
         vertex_buffers: &layouts,
@@ -949,10 +939,10 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
     })?;
     let entries = [
         whole(VIEW_BUFFER.id, paint_buffer, paint),
-        whole(heatmap::programs::TEXTURE_PROPS.id, props_buffer, props),
+        whole(buffer_id(&HEATMAP_TEXTURE, "props")?, props_buffer, props),
         whole(PROJECTION_BUFFER.id, projection_buffer, projection),
-        BindGroupEntry::Texture { id: ID_HEATMAP_IMAGE_TEXTURE as u32, texture: image, sampler },
-        BindGroupEntry::Texture { id: ID_HEATMAP_COLOR_RAMP_TEXTURE as u32, texture: image, sampler },
+        BindGroupEntry::Texture { id: 0, texture: image, sampler },
+        BindGroupEntry::Texture { id: 1, texture: image, sampler },
     ];
     let first = gpu.create_bindings(&BindingsDesc { label: "heatmap", shader, entries: &entries })?;
     let second = gpu.create_bindings(&BindingsDesc { label: "heatmap again", shader, entries: &entries })?;
@@ -1097,10 +1087,7 @@ pub fn host_writes<G: Gpu + ?Sized>(
 ) -> Result<mln_gfx::gpu::ReadbackId, GpuError> {
     let target = target(gpu, TextureFormat::Rgba8Unorm)?;
     let (quad, indices) = quad(gpu)?;
-    let shader = gpu.create_shader(&ShaderKey::new(&background::programs::BACKGROUND, []))?;
-    let drawable = [BackgroundDrawableUnionUBO::default()];
-    let drawable = bytemuck::cast_slice(&drawable);
-    let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;
+    let shader = gpu.create_shader(&ShaderKey::new(&BACKGROUND, []))?;
     let props = |color| BackgroundPropsUBO { color, opacity: 1.0, ..BackgroundPropsUBO::default() };
     let props_size = size_of::<BackgroundPropsUBO>() as u64;
     let props_buffer = |gpu: &mut G| {
@@ -1127,9 +1114,8 @@ pub fn host_writes<G: Gpu + ?Sized>(
             shader,
             entries: &[
                 whole(PROJECTION_BUFFER.id, projection_buffer, projection),
-                whole(background::programs::DRAWABLE.id, drawable_buffer, drawable),
                 BindGroupEntry::Buffer {
-                    id: background::programs::PROPS.id as u32,
+                    id: buffer_id(&BACKGROUND, "props")? as u32,
                     buffer: props,
                     offset: 0,
                     size: props_size,

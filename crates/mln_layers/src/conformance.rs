@@ -31,15 +31,15 @@ use mln_gfx::gpu::{
     TextureDesc, TextureFormat, TextureId, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::program::PROJECTION_BUFFER;
+use mln_gfx::shaders::program::{PROJECTION_BUFFER, Program};
 use mln_gfx::types::StencilOpType;
 use mln_util::Color;
 use mln_util::size::Size;
 
 pub use self::cases::*;
-use crate::background;
-use crate::background::programs::ID_BACKGROUND_POS_VERTEX_ATTRIBUTE;
-use crate::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
+
+use crate::background::programs::BACKGROUND;
+use crate::background::ubo::BackgroundPropsUBO;
 
 /// The size of the frame's color texture.
 pub const SIZE: Size = Size { width: 64, height: 32 };
@@ -62,6 +62,25 @@ fn buffer(gpu: &mut (impl Gpu + ?Sized), usage: BufferUsage, data: &[u8]) -> Res
 fn whole(id: usize, buffer: BufferId, data: &[u8]) -> BindGroupEntry {
     BindGroupEntry::Buffer { id: id as u32, buffer, offset: 0, size: data.len() as u64 }
 }
+
+/// The id that `program` binds its buffer `name` at.
+fn buffer_id(program: &Program, name: &str) -> Result<usize, GpuError> {
+    let buffer = program.buffers.iter().find(|buffer| buffer.name == name);
+    buffer.map(|buffer| buffer.id).ok_or_else(|| GpuError::Invalid(format!("{} has no buffer {name}", program.name)))
+}
+
+/// The id that a layout gives `program`'s attribute `name`: its index among
+/// the program's attributes of a vertex, or of an instance.
+fn attribute_id(program: &Program, name: &str) -> Result<usize, GpuError> {
+    let index = |attributes: &[mln_gfx::shaders::program::Attribute]| {
+        attributes.iter().position(|attribute| attribute.name == name)
+    };
+    let index = index(program.attributes).or_else(|| index(program.instance_attributes));
+    index.ok_or_else(|| GpuError::Invalid(format!("{} has no attribute {name}", program.name)))
+}
+
+/// The location of the background program's one attribute, its position.
+const BACKGROUND_POSITION: usize = 0;
 
 fn position_layout(id: usize) -> VertexBufferLayout {
     VertexBufferLayout {
@@ -207,8 +226,8 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
     };
     let (quad, indices) = quad(gpu)?;
 
-    let background_shader = gpu.create_shader(&ShaderKey::new(&background::programs::BACKGROUND, []))?;
-    let background_layouts = [position_layout(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)];
+    let background_shader = gpu.create_shader(&ShaderKey::new(&BACKGROUND, []))?;
+    let background_layouts = [position_layout(BACKGROUND_POSITION)];
     let mask_pipeline = gpu.create_pipeline(&PipelineDesc {
         shader: background_shader,
         vertex_buffers: &background_layouts,
@@ -245,20 +264,13 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
         ProjectionUBO { matrix: tile_matrix(0.0), ..ProjectionUBO::default() },
         ProjectionUBO { matrix: tile_matrix(1.0), ..ProjectionUBO::default() },
     ];
-    let drawables = [BackgroundDrawableUnionUBO::default(); 2];
     let props = BackgroundPropsUBO { color: [1.0, 0.0, 0.0, 1.0], opacity: 1.0, ..BackgroundPropsUBO::default() };
     let projections = bytemuck::cast_slice(&projections);
-    let drawables = bytemuck::cast_slice(&drawables);
     let props = bytemuck::bytes_of(&props);
     let projection_buffer = buffer(gpu, BufferUsage::Storage, projections)?;
-    let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawables)?;
     let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
     let projection_only = vec![whole(PROJECTION_BUFFER.id, projection_buffer, projections)];
-    let entries = [
-        projection_only[0],
-        whole(background::programs::DRAWABLE.id, drawable_buffer, drawables),
-        whole(background::programs::PROPS.id, props_buffer, props),
-    ];
+    let entries = [projection_only[0], whole(buffer_id(&BACKGROUND, "props")?, props_buffer, props)];
     let bindings =
         gpu.create_bindings(&BindingsDesc { label: "background layer", shader: background_shader, entries: &entries })?;
     let background_geometry = gpu.create_geometry(&GeometryDesc {

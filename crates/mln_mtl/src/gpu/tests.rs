@@ -112,7 +112,7 @@ fragment half4 fragmentMain() { return half4(1.0); }
         stride: 4,
         step: VertexStep::Vertex,
         attributes: vec![GpuVertexAttribute {
-            id: program.attributes[0].id as u32,
+            id: 0,
             format: AttributeDataType::Short2,
             offset: 0,
         }],
