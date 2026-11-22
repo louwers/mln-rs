@@ -16,7 +16,7 @@ use mln_util::Color;
 use mln_util::constants::{EARTH_RADIUS_M, EXTENT, M2PI};
 
 use super::properties::FillExtrusionPaintProperties;
-use super::tessellator::Tessellator;
+use crate::tessellator::Tessellator;
 
 mln_render::paint_property_binders!(
     pub(crate) struct FillExtrusionBinders for FillExtrusionPaintProperties::PossiblyEvaluated {

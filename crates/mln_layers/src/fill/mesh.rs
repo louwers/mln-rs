@@ -3,22 +3,22 @@
 
 use geometry::Point;
 use mln_render::globe::{add_tile_border_strips, subdivide_polygon};
-use mln_render::layer::Indexed;
+use mln_render::layer::Indexes;
 use mln_tile::geometry_tile_data::limit_holes;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, classify_rings, signed_area};
 
-use super::bucket::FillLayoutVertex;
 use crate::tessellator::Tessellator;
 
-/// The buffers of a fill bucket that its polygons' meshes go in.
+/// The buffers of a fill bucket that its polygons' meshes go in: the
+/// vertices' positions, where the outline segment that starts at each
+/// vertex ends, the vertex itself where none does, and the triangles and
+/// lines over the vertices.
 pub(crate) struct FillBuffers<'a> {
-    pub(crate) vertices: &'a mut Vec<FillLayoutVertex>,
-    /// Where the outline segment that starts at each vertex ends, the
-    /// vertex itself where none does.
-    pub(crate) outline_ends: &'a mut Vec<FillLayoutVertex>,
-    pub(crate) triangles: Indexed<'a>,
-    pub(crate) lines: Indexed<'a>,
+    pub(crate) vertices: &'a mut Vec<[i16; 2]>,
+    pub(crate) outline_ends: &'a mut Vec<[i16; 2]>,
+    pub(crate) triangles: &'a mut Indexes,
+    pub(crate) lines: &'a mut Indexes,
 }
 
 impl FillBuffers<'_> {
@@ -48,7 +48,7 @@ impl FillBuffers<'_> {
                 if mesh.triangles.is_empty() && mesh.lines.is_empty() {
                     continue;
                 }
-                self.vertices.extend(mesh.vertices.iter().map(|&p| FillLayoutVertex::new(p)));
+                self.vertices.extend(mesh.vertices.iter().map(|&p| [p.x, p.y]));
                 self.triangles.add(self.vertices, first, mesh.triangles.iter().copied());
                 self.lines.add(self.vertices, first, mesh.lines.iter().copied());
                 self.add_outline_ends(first, &mesh.lines);
@@ -86,7 +86,7 @@ impl FillBuffers<'_> {
     ) {
         let first = self.vertices.len();
         for ring in rings {
-            self.vertices.extend(ring.iter().map(|&p| FillLayoutVertex::new(p)));
+            self.vertices.extend(ring.iter().map(|&p| [p.x, p.y]));
         }
         self.triangles.add(self.vertices, first, triangles.iter().copied());
         self.lines.add(self.vertices, first, ring_outlines(rings, outlined.clone()));

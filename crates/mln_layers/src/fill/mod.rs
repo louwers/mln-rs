@@ -2,8 +2,9 @@
 //! polygon features with a color or a pattern, and can outline them.
 
 pub(crate) mod bucket;
+mod layer;
+mod layout;
 pub(crate) mod mesh;
-pub(crate) mod render_layer;
 #[rustfmt::skip]
 mod properties;
 mod glsl;
@@ -13,11 +14,12 @@ pub mod programs;
 pub mod ubo;
 mod wgsl;
 
+pub use layer::FillLayer;
 use mln_style::layer_type::{LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType};
 use mln_style::property_table::{PropertyTable, PropertyVisitor};
 pub use properties::{FillLayoutProperties, FillPaintProperties};
 
-/// The `fill` layer type.
+/// The `fill` layer type's style half.
 pub struct Fill;
 
 impl StyleLayerType for Fill {
@@ -26,7 +28,7 @@ impl StyleLayerType for Fill {
 
     type LayoutProperties = FillLayoutProperties::Unevaluated;
     type PaintProperties = FillPaintProperties::Transitionable;
-    type Extra = ();
+    type Data = ();
 
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {
         properties::visit(slot, visitor)

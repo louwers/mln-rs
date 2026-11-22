@@ -1,4 +1,4 @@
-//! The triangles of a tile's roofs.
+//! The triangles of polygons, which fills and extrusions draw.
 
 use geometry::Point;
 

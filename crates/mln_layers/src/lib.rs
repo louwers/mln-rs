@@ -21,7 +21,8 @@ pub mod circle;
 // slice: off #[cfg(feature = "gpu-conformance")]
 // slice: off pub mod conformance;
 // slice: off pub mod custom;
-// slice: off pub mod fill;
+mod features;
+pub mod fill;
 pub mod fill_extrusion;
 // slice: off pub mod heatmap;
 // slice: off pub mod hillshade;
@@ -31,13 +32,13 @@ pub mod fill_extrusion;
 // slice: off pub mod raster;
 mod shaders;
 pub mod symbol;
-// slice: off mod tessellator;
+mod tessellator;
 
 pub use background::{Background, BackgroundLayer, BackgroundPaintProperties};
 pub use circle::{Circle, CircleLayer, CircleLayoutProperties, CirclePaintProperties};
 // slice: off pub use color_relief::{ColorRelief, ColorReliefPaintProperties};
 // slice: off pub use custom::{Custom, CustomLayerHost};
-// slice: off pub use fill::{Fill, FillLayoutProperties, FillPaintProperties};
+pub use fill::{Fill, FillLayer, FillLayoutProperties, FillPaintProperties};
 pub use fill_extrusion::{
     FillExtrusion, FillExtrusionLayer, FillExtrusionLayoutProperties, FillExtrusionPaintProperties,
 };
@@ -53,7 +54,7 @@ pub use symbol::{Symbol, SymbolLayer, SymbolLayoutProperties, SymbolPaintPropert
 /// call took.
 pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
     builder.add_layer_type::<BackgroundLayer>()?;
-    // slice: off     builder.add_layer_type::<Fill>()?;
+    builder.add_layer_type::<FillLayer>()?;
     // slice: off     builder.add_layer_type::<Line>()?;
     builder.add_layer_type::<CircleLayer>()?;
     builder.add_layer_type::<FillExtrusionLayer>()?;
@@ -70,13 +71,13 @@ pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), Registe
 pub static PROGRAMS: &[&Program] = &[
     &background::programs::BACKGROUND,
     &background::programs::BACKGROUND_PATTERN,
-    // slice: off     &fill::programs::FILL,
-    // slice: off     &fill::programs::FILL_OUTLINE,
-    // slice: off     &fill::programs::FILL_PATTERN,
-    // slice: off     &fill::programs::FILL_OUTLINE_PATTERN,
-    // slice: off     &fill::programs::FILL_OUTLINE_INSTANCED,
-    // slice: off     &fill::programs::FILL_OUTLINE_PULLED,
-    // slice: off     &fill::programs::FILL_OUTLINE_PATTERN_INSTANCED,
+    &fill::programs::FILL,
+    &fill::programs::FILL_OUTLINE,
+    &fill::programs::FILL_PATTERN,
+    &fill::programs::FILL_OUTLINE_PATTERN,
+    &fill::programs::FILL_OUTLINE_INSTANCED,
+    &fill::programs::FILL_OUTLINE_PULLED,
+    &fill::programs::FILL_OUTLINE_PATTERN_INSTANCED,
     // slice: off     &line::programs::LINE,
     // slice: off     &line::programs::LINE_GRADIENT,
     // slice: off     &line::programs::LINE_PATTERN,

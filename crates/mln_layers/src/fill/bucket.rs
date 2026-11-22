@@ -1,274 +1,89 @@
-use std::sync::Arc;
-
-use mln_gfx::shaders::segment::SegmentBase;
+use mln_gfx::gpu::Caps;
 use mln_render::layer::{
-    Bucket, BucketBase, CrossFadedPaintPropertyBinder, EvaluatedLayer, GeometryUpload, GeometryVec, Indexed,
-    PaintPropertyBinder,
+    Bucket, CrossFadedPaintPropertyBinder, GpuVec, Indexes, LayerBinders, PaintPropertyBinder, Upload,
 };
-use mln_style::evaluated::Evaluated;
-use mln_style::expression::{EvaluationContext, Image, Value};
-use mln_style::{PropertyEvaluationParameters, StyleValue as _};
-use mln_style_types::image::ImagePositions;
+use mln_style::expression::Image;
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
+use mln_tile_id::geometry_tile_data::GeometryCollection;
 use mln_util::Color;
-use mln_util::hash::{HashMap, HashSet};
-use mln_util::logging::{Event, Log};
-use mln_util::serialization::sorted;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_vec_map::VecMap;
 
-use super::Fill;
+use super::FillPaintProperties;
 use super::mesh::FillBuffers;
-use super::programs::{
-    ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE,
-    ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE,
-};
-use super::properties::{FillLayoutProperties, FillPaintProperties};
-use crate::pattern_layout::{PatternBucket, PatternLayerMap, PatternLayoutSpec};
 use crate::tessellator::Tessellator;
 
 mln_render::paint_property_binders!(
     pub(crate) struct FillBinders for FillPaintProperties::PossiblyEvaluated {
-        fill_color: PaintPropertyBinder<Color> => [ID_FILL_COLOR_VERTEX_ATTRIBUTE],
-        fill_opacity: PaintPropertyBinder<f32> => [ID_FILL_OPACITY_VERTEX_ATTRIBUTE],
-        fill_outline_color: PaintPropertyBinder<Color> => [ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE],
-        fill_pattern: CrossFadedPaintPropertyBinder<Image> => [ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE],
+        fill_color: PaintPropertyBinder<Color> => ["color"],
+        fill_opacity: PaintPropertyBinder<f32> => ["opacity"],
+        fill_outline_color: PaintPropertyBinder<Color> => ["outline_color"],
+        fill_pattern: CrossFadedPaintPropertyBinder<Image> => ["pattern_from", "pattern_to"],
     }
 );
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
-#[repr(C)]
-pub(crate) struct FillLayoutVertex {
-    pub(crate) a1: [i16; 2],
+/// The width of the lines that outline a fill, in pixels: a device that
+/// draws narrower lines and rasterizes on the GPU draws each segment of an
+/// outline as a quad that covers that width ([`draws_outline_quads`]).
+pub(crate) const LINE_WIDTH: f32 = 2.0;
+
+/// Whether a device of `caps` draws a fill's outlines as quads rather than
+/// as lines. One that rasterizes on the CPU, where a quad costs about as
+/// much as a draw, draws its narrower lines.
+pub(crate) fn draws_outline_quads(caps: &Caps) -> bool {
+    caps.max_line_width < LINE_WIDTH && !caps.cpu_rasterizer
 }
 
-impl FillLayoutVertex {
-    pub(crate) fn new(p: GeometryCoordinate) -> Self {
-        FillLayoutVertex { a1: [p.x, p.y] }
-    }
-}
-
-#[derive(Clone, mln_wire::Wire)]
+/// A tile's fills: the triangles that fill its polygons and the lines that
+/// outline them, over the same vertices.
+#[derive(Clone, Default, mln_wire::Wire)]
 pub struct FillBucket {
-    pub(crate) base: BucketBase,
-
-    pub(crate) basic_lines: GeometryVec<u16>,
-    pub(crate) basic_line_segments: Vec<SegmentBase>,
-
-    pub(crate) vertices: GeometryVec<FillLayoutVertex>,
+    pub(crate) vertices: GpuVec<[i16; 2]>,
     /// Where the outline segment that starts at each vertex ends, the
-    /// vertex itself where none does: an instanced outline draws a segment
-    /// per vertex. A device that draws the outlines as lines discards them.
-    pub(crate) outline_ends: GeometryVec<FillLayoutVertex>,
-    pub(crate) triangles: GeometryVec<u16>,
-    pub(crate) triangle_segments: Vec<SegmentBase>,
-    pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
-
-    pub(crate) paint_property_binders: VecMap<String, FillBinders>,
-
-    #[wire(with = "sorted::map")]
-    sdf_patterns: HashMap<String, bool>,
-    #[wire(with = "sorted::set")]
-    mixed_sdf_pattern_layers: HashSet<String>,
+    /// vertex itself where none does: an outline drawn as quads draws one
+    /// from each vertex.
+    pub(crate) outline_ends: GpuVec<[i16; 2]>,
+    pub(crate) triangles: Indexes,
+    pub(crate) lines: Indexes,
+    pub(crate) binders: LayerBinders<FillBinders>,
+    /// Whether the patterns of each layer with a pattern are SDF images,
+    /// which draw in the layer's fill color.
+    pub(crate) sdf: Vec<(String, bool)>,
 }
-
-static EMPTY_FORMATTED_SECTION: Value = Value::Null;
 
 impl FillBucket {
-    #[must_use]
-    pub(crate) fn new(
-        _layout: &FillLayoutProperties::PossiblyEvaluated,
-        layer_paint_properties: &VecMap<String, Arc<EvaluatedLayer<Fill>>>,
-        zoom: f32,
-        _overscaling: u32,
-    ) -> Self {
-        let mut paint_property_binders = VecMap::new();
-        for (id, properties) in layer_paint_properties {
-            paint_property_binders.entry(id.clone()).or_insert_with(|| FillBinders::new(&properties.paint, zoom));
-        }
-        FillBucket {
-            base: BucketBase::default(),
-            basic_lines: GeometryVec::default(),
-            basic_line_segments: Vec::new(),
-            vertices: GeometryVec::default(),
-            outline_ends: GeometryVec::default(),
-            triangles: GeometryVec::default(),
-            triangle_segments: Vec::new(),
-            subdivision_granularity: SubdivisionGranularitySetting::none(),
-            paint_property_binders,
-            sdf_patterns: HashMap::default(),
-            mixed_sdf_pattern_layers: HashSet::default(),
-        }
-    }
-
-    pub(crate) fn set_subdivision_granularity(&mut self, value: &SubdivisionGranularitySetting) {
-        self.subdivision_granularity = *value;
-    }
-
-    fn generate_buffers(
+    /// Adds the meshes of the polygons of `geometry`, in the tile
+    /// `canonical`, subdivided on a grid of `granularity` cells per axis
+    /// for the globe where it is 2 or more.
+    pub(crate) fn add(
         &mut self,
         geometry: &GeometryCollection,
         canonical: &CanonicalTileID,
+        granularity: u32,
         tessellator: &mut Tessellator,
     ) {
-        let mut buffers = FillBuffers {
+        FillBuffers {
             vertices: self.vertices.get_mut(),
             outline_ends: self.outline_ends.get_mut(),
-            triangles: Indexed { indexes: self.triangles.get_mut(), segments: &mut self.triangle_segments },
-            lines: Indexed { indexes: self.basic_lines.get_mut(), segments: &mut self.basic_line_segments },
-        };
-        let granularity = self.subdivision_granularity.fill.granularity_for_zoom_level(canonical.z);
-        buffers.add_polygons(geometry, canonical, granularity, tessellator);
-    }
-
-    fn populate_binders(
-        &mut self,
-        feature: &dyn GeometryTileFeature,
-        pattern_positions: &ImagePositions,
-        pattern_dependencies: &PatternLayerMap,
-        index: usize,
-        canonical: &CanonicalTileID,
-    ) {
-        let length = self.vertices.len();
-        for (id, binders) in &mut self.paint_property_binders {
-            binders.populate_vertex_vectors(
-                feature,
-                length,
-                index,
-                pattern_positions,
-                pattern_dependencies.get(id),
-                canonical,
-                &EMPTY_FORMATTED_SECTION,
-            );
+            triangles: &mut self.triangles,
+            lines: &mut self.lines,
         }
-    }
-}
-
-impl FillBucket {
-    /// Whether the patterns of the layer `layer_id` are SDF images, which
-    /// draw in the layer's fill color.
-    pub(crate) fn is_sdf_pattern(&self, layer_id: &str) -> bool {
-        self.sdf_patterns.get(layer_id).copied().unwrap_or(false)
-    }
-}
-
-impl PatternBucket for FillBucket {
-    fn add_feature(
-        &mut self,
-        feature: &dyn GeometryTileFeature,
-        geometry: &GeometryCollection,
-        pattern_positions: &ImagePositions,
-        pattern_dependencies: &PatternLayerMap,
-        index: usize,
-        canonical: &CanonicalTileID,
-        tessellator: &mut Tessellator,
-    ) {
-        self.generate_buffers(geometry, canonical, tessellator);
-        self.populate_binders(feature, pattern_positions, pattern_dependencies, index, canonical);
+        .add_polygons(geometry, canonical, granularity, tessellator);
     }
 
-    fn record_sdf_pattern(&mut self, layer_id: &str, sdf: bool) {
-        match self.sdf_patterns.get(layer_id) {
-            None => {
-                self.sdf_patterns.insert(layer_id.to_owned(), sdf);
-            }
-            Some(&existing) => {
-                if existing != sdf && self.mixed_sdf_pattern_layers.insert(layer_id.to_owned()) {
-                    Log::warning(
-                        Event::Style,
-                        format!(
-                            "Style sheet warning: Cannot mix SDF and non-SDF fill patterns in layer \"{layer_id}\""
-                        ),
-                    );
-                }
-            }
-        }
+    /// Whether the patterns of the layer `layer` are SDF images.
+    pub(crate) fn sdf(&self, layer: &str) -> bool {
+        self.sdf.iter().any(|(id, sdf)| id == layer && *sdf)
     }
 }
 
 impl Bucket for FillBucket {
-    fn base(&self) -> &BucketBase {
-        &self.base
-    }
-
-    fn upload(&mut self, geometry: &mut GeometryUpload<'_>) {
-        geometry.move_vertices(&mut self.vertices);
-        geometry.move_indexes(&mut self.triangles);
-        geometry.move_indexes(&mut self.basic_lines);
-        if super::render_layer::draws_outline_quads(geometry.context()) {
-            geometry.move_vertices(&mut self.outline_ends);
-        } else {
-            // Only the instanced outlines read the outline ends.
-            self.outline_ends.discard();
+    fn upload(&mut self, up: &mut Upload<'_>) {
+        up.vec(&mut self.vertices);
+        match up.caps() {
+            Some(caps) if !draws_outline_quads(caps) => self.outline_ends = GpuVec::default(),
+            _ => up.vec(&mut self.outline_ends),
         }
-        for binders in self.paint_property_binders.values_mut() {
-            let depends_on_feature_state = binders.depends_on_feature_state();
-            geometry.move_paint(&mut binders.interleaved_vertex_buffer, depends_on_feature_state);
-        }
-        self.base.set_uploaded(true);
-    }
-
-    fn has_data(&self) -> bool {
-        !self.triangle_segments.is_empty() || !self.basic_line_segments.is_empty()
-    }
-
-    fn update(
-        &mut self,
-        states: &mln_render::layer::FeatureStates,
-        layer: &mln_tile::TileLayer<'_>,
-        layer_id: &str,
-        image_positions: &ImagePositions,
-    ) -> bool {
-        let Some(binders) = self.paint_property_binders.get_mut(layer_id) else {
-            return false;
-        };
-        binders.update_vertex_vectors(states, layer, image_positions);
-        self.base.set_uploaded(false);
-        true
-    }
-}
-
-/// The pattern layout of fill layers.
-pub struct FillLayoutSpec;
-
-impl PatternLayoutSpec for FillLayoutSpec {
-    type Type = Fill;
-    type Bucket = FillBucket;
-    type Layout = FillLayoutProperties::PossiblyEvaluated;
-
-    fn evaluate_layout(layer: &EvaluatedLayer<Fill>, parameters: &PropertyEvaluationParameters) -> Self::Layout {
-        layer.style.layout.evaluate(parameters)
-    }
-    fn pattern_property(layer: &EvaluatedLayer<Fill>) -> &Evaluated<Image> {
-        &layer.paint.fill_pattern
-    }
-    /// Whether the leader's unevaluated layout sets `fill-sort-key`.
-    fn sorted(leader: &EvaluatedLayer<Fill>) -> bool {
-        !leader.style.layout.fill_sort_key.is_undefined()
-    }
-    fn sort_key(
-        layout: &Self::Layout,
-        feature: &dyn GeometryTileFeature,
-        zoom: f32,
-        canonical: &CanonicalTileID,
-    ) -> f32 {
-        layout.fill_sort_key.evaluate(
-            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
-        )
-    }
-    fn constant_sort_key(layout: &Self::Layout) -> Option<f32> {
-        layout.fill_sort_key.constant()
-    }
-    fn create_bucket(
-        layout: &Self::Layout,
-        layer_properties_map: &VecMap<String, Arc<EvaluatedLayer<Fill>>>,
-        zoom: f32,
-        overscaling: u32,
-    ) -> FillBucket {
-        FillBucket::new(layout, layer_properties_map, zoom, overscaling)
-    }
-    fn set_subdivision_granularity(bucket: &mut FillBucket, value: &SubdivisionGranularitySetting) {
-        bucket.set_subdivision_granularity(value);
+        up.indexes(&mut self.triangles);
+        up.indexes(&mut self.lines);
+        up.binders(&mut self.binders);
     }
 }

@@ -10,7 +10,6 @@ mod glsl;
 mod glsl_es;
 mod msl;
 pub mod programs;
-pub(crate) mod tessellator;
 pub mod ubo;
 mod wgsl;
 

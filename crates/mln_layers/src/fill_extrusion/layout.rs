@@ -5,7 +5,8 @@ use mln_util::error::Error;
 
 use super::FillExtrusion;
 use super::bucket::{FillExtrusionBucket, WallQuads, tile_units_per_meter};
-use super::tessellator::Tessellator;
+use crate::features::{uses_pattern, with_patterns};
+use crate::tessellator::Tessellator;
 
 /// The features a tile's extrusions draw, by index, each with its patterns,
 /// and how far their corners round off, in meters.
@@ -20,18 +21,14 @@ impl Layout<FillExtrusion> for FillExtrusionLayout {
     /// Whether a layer of the group has a pattern, whose images it waits
     /// for.
     fn needs_resources(group: &[Arc<EvaluatedLayer<FillExtrusion>>]) -> bool {
-        group.iter().any(|layer| {
-            let pattern = &layer.paint.fill_extrusion_pattern;
-            !pattern.is_constant() || !pattern.faded().to.id().is_empty()
-        })
+        uses_pattern(group, |paint| &paint.fill_extrusion_pattern)
     }
 
     fn new(cx: &mut LayoutCx<'_, FillExtrusion>) -> Result<Self, Error> {
         let layout = cx.layers()[0].style.layout.evaluate(cx.parameters());
         let corner_distance = *layout.fill_extrusion_rounded_corner_distance.uniform();
-        let selected = cx.selected()?;
-        let patterns = cx.need_patterns(|paint| &paint.fill_extrusion_pattern, &selected)?;
-        Ok(FillExtrusionLayout { features: selected.into_iter().zip(patterns).collect(), corner_distance })
+        let features = with_patterns(cx, |paint| &paint.fill_extrusion_pattern, None)?;
+        Ok(FillExtrusionLayout { features, corner_distance })
     }
 
     fn build(self, cx: &mut BuildCx<'_, FillExtrusion>) -> Result<Option<FillExtrusionBucket>, Error> {

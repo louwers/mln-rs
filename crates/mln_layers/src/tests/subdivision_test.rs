@@ -7,7 +7,7 @@ use mln_util::subdivision_granularity::{SubdivisionGranularityExpression, Subdiv
 
 use super::subdivide;
 use crate::fill_extrusion::bucket::FillExtrusionBucket;
-use crate::fill_extrusion::tessellator::Tessellator;
+use crate::tessellator::Tessellator;
 
 /// `EXTENT` as a tile coordinate.
 const EXTENT_I16: i16 = EXTENT as i16;

@@ -26,7 +26,7 @@ fn subdivide(
     granularity: u32,
     outline: bool,
 ) -> mln_render::globe::SubdividedPolygon {
-    let mut tessellator = crate::fill_extrusion::tessellator::Tessellator::default();
+    let mut tessellator = crate::tessellator::Tessellator::default();
     let triangles = tessellator.triangulate(polygon);
     mln_render::globe::subdivide_polygon(polygon, triangles, tile, granularity, outline)
 }

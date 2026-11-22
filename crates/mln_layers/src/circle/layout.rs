@@ -8,6 +8,7 @@ use mln_util::error::Error;
 
 use super::Circle;
 use super::bucket::CircleBucket;
+use crate::features;
 
 /// The features a tile's circles draw, by index, in `circle-sort-key`
 /// order.
@@ -17,27 +18,14 @@ impl Layout<Circle> for CircleLayout {
     type Bucket = CircleBucket;
 
     fn new(cx: &mut LayoutCx<'_, Circle>) -> Result<Self, Error> {
-        let style = &cx.layers()[0].style;
-        let sorted = !style.layout.circle_sort_key.is_undefined();
-        let sort_key = style.layout.evaluate(cx.parameters()).circle_sort_key;
-        let constant = if sorted { sort_key.constant() } else { None };
+        let layout = &cx.layers()[0].style.layout;
+        let key = (!layout.circle_sort_key.is_undefined()).then(|| layout.evaluate(cx.parameters()).circle_sort_key);
         let zoom = f32::from(cx.tile().overscaled_z);
-        let mut features: Vec<(f32, usize)> = Vec::new();
-        for i in cx.selected()? {
-            if sorted && constant.is_none() {
-                let key = sort_key.evaluate(&EvaluationContext::with_zoom_feature(zoom, Some(&cx.feature(i)?)));
-                // Before the first feature whose key isn't less.
-                features.insert(features.partition_point(|&(k, _)| k < key), (key, i));
-            } else {
-                features.push((0.0, i));
-            }
-        }
-        if constant.is_some() {
-            // Each feature goes before the earlier ones of its key, as
-            // inserting it would put it.
-            features.reverse();
-        }
-        Ok(CircleLayout(features.into_iter().map(|(_, i)| i).collect()))
+        let selected = cx.selected()?.into_iter().map(|i| (i, ())).collect();
+        let features = features::sort(selected, key.as_ref(), |key, i| {
+            Ok(key.evaluate(&EvaluationContext::with_zoom_feature(zoom, Some(&cx.feature(i)?))))
+        })?;
+        Ok(CircleLayout(features.into_iter().map(|(i, ())| i).collect()))
     }
 
     fn build(self, cx: &mut BuildCx<'_, Circle>) -> Result<Option<CircleBucket>, Error> {

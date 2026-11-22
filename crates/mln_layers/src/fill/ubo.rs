@@ -1,5 +1,3 @@
-use bytemuck::{Pod, Zeroable};
-
 //
 // Fill
 
@@ -84,42 +82,4 @@ mln_gfx::uniform_block! {
         pub from_scale: f32,
         pub to_scale: f32,
     }
-}
-
-/// Any fill per-draw uniform block, for consolidated UBOs: the bytes of one of
-/// them, the size of the largest, 112 bytes. Members are written with the
-/// `from_*` constructors; the rest stays zero.
-#[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
-#[repr(C, align(16))]
-pub struct FillDrawableUnionUBO {
-    bytes: [u8; 112],
-}
-
-impl Default for FillDrawableUnionUBO {
-    fn default() -> Self {
-        Self::zeroed()
-    }
-}
-
-impl FillDrawableUnionUBO {
-    fn write<T: Pod>(&mut self, member: &T) {
-        let src = bytemuck::bytes_of(member);
-        self.bytes[..src.len()].copy_from_slice(src);
-    }
-    pub fn set_fill(&mut self, ubo: &FillDrawableUBO) {
-        self.write(ubo);
-    }
-    pub fn set_fill_outline(&mut self, ubo: &FillOutlineDrawableUBO) {
-        self.write(ubo);
-    }
-    pub fn set_fill_pattern(&mut self, ubo: &FillPatternDrawableUBO) {
-        self.write(ubo);
-    }
-}
-
-/// Any fill per-tile uniform block, for consolidated UBOs.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-#[repr(C, align(16))]
-pub struct FillTilePropsUnionUBO {
-    pub fill_pattern_tile_props_ubo: FillPatternTilePropsUBO,
 }
