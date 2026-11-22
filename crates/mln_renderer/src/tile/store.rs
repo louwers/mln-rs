@@ -508,10 +508,6 @@ impl TileStore {
         self.ctx.jobs.log_stats();
     }
 
-    pub(crate) fn log_stats(&self) {
-        self.ctx.jobs.log_stats();
-    }
-
     #[cfg(test)]
     pub(crate) fn is_idle(&self) -> bool {
         self.ctx.jobs.is_idle()

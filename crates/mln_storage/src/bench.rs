@@ -41,7 +41,8 @@ impl Transfer {
     /// Answers with an HTTP response: `status`, the response's `headers` in
     /// order, and its `body`, decoded, which only a 200 or 206 reads.
     pub fn respond(self, status: u16, headers: Vec<(String, String)>, body: Vec<u8>) {
-        let transfer = crate::http_file_source::Transfer { status: i64::from(status), headers, body: Ok(body) };
+        let transfer =
+            crate::http_file_source::Transfer { status: i64::from(status), headers, body: Ok(body), stale: false };
         self.0.finish(Ok(transfer));
     }
 

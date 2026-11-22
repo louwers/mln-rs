@@ -519,7 +519,7 @@ impl Client {
             } else {
                 Ok(Vec::new())
             };
-            return Ok(Transfer { status, headers: response_headers, body });
+            return Ok(Transfer { status, headers: response_headers, body, stale: false });
         }
     }
 

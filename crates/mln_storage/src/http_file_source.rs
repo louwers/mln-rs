@@ -47,6 +47,10 @@ pub(crate) struct Transfer {
     pub(crate) status: i64,
     pub(crate) headers: Vec<(String, String)>,
     pub(crate) body: Result<Vec<u8>, Box<ResourceError>>,
+    /// Whether the response is a stored copy of unknown age, which the
+    /// transport fell back on because the server couldn't be reached. It
+    /// counts as expired, so the requester checks it with the server again.
+    pub(crate) stale: bool,
 }
 
 /// A request an `HTTPFileSource` hands to its transport: the resource to
@@ -215,6 +219,10 @@ fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceEr
         let freshness = headers.freshness(now());
         response.caching = Caching { expires: Some(freshness.expires), must_revalidate: freshness.must_revalidate };
         response.no_store = freshness.no_store;
+    }
+    if transfer.stale {
+        let now = now();
+        response.caching.expires = Some(response.caching.expires.map_or(now, |expires| expires.min(now)));
     }
 
     let response_code = transfer.status;
@@ -388,8 +396,28 @@ mod tests {
             status,
             headers: headers.iter().map(|(name, value)| ((*name).to_owned(), (*value).to_owned())).collect(),
             body: Ok(b"tile".to_vec()),
+            stale: false,
         };
         build_response(resource, Ok(transfer))
+    }
+
+    #[test]
+    fn a_stored_copy_of_unknown_age_counts_as_expired() {
+        let resource = Resource::new(Kind::Tile, "http://example.com/tile.pbf".to_owned());
+        let headers = &[("Cache-Control", "max-age=43200")];
+        let before = now();
+        let fresh = response(200, headers, &resource);
+        assert!(fresh.caching.expires.is_some_and(|expires| expires > before));
+        let transfer = Transfer {
+            status: 200,
+            headers: vec![("Cache-Control".to_owned(), "max-age=43200".to_owned())],
+            body: Ok(b"tile".to_vec()),
+            stale: true,
+        };
+        let stale = build_response(&resource, Ok(transfer));
+        assert!(stale.caching.expires.is_some_and(|expires| expires <= now()));
+        assert!(!stale.caching.must_revalidate);
+        assert!(stale.data.is_some() && stale.error.is_none());
     }
 
     fn tile() -> Resource {

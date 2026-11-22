@@ -246,7 +246,7 @@ fn respond(env: &mut Env<'_>, connection: &JObject<'_>, url: &str) -> Result<Exc
         discard_body(env, connection, status);
         Ok(Vec::new())
     };
-    Ok(Exchange::Done(Transfer { status: i64::from(status), headers, body }))
+    Ok(Exchange::Done(Transfer { status: i64::from(status), headers, body, stale: false }))
 }
 
 /// The response headers of `connection`, in order.
