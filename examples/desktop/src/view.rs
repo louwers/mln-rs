@@ -46,10 +46,9 @@ use mln_map::{
 };
 use mln_runtime::{
     CacheDatabaseOperation, Completion, DemandMode, Device, ErrorKind, EventMask, EventType, FrameDemand,
-    FrameDisposition, LogicalExtent, Map, MapOptions, ResourceRequest, Runtime, RuntimeEventKind, RuntimeOptions,
+    FrameDisposition, LogicalExtent, Map, MapOptions, Runtime, RuntimeEventKind, RuntimeOptions,
 };
-use mln_storage::response::Reason;
-use mln_storage::{ResourceError, Response};
+use mln_util::constants::DEFAULT_MAX_CACHE_SIZE;
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, ScreenCoordinate};
 use mln_util::logging::{Event, Log};
@@ -62,6 +61,7 @@ use crate::Args;
 use crate::backend::{self, Kind, WindowSession, WindowSurfaces};
 use crate::benchmark::Benchmark;
 use crate::host::{Inbox, Message, UserEvent};
+use crate::network::Network;
 use crate::overlay::Paint;
 use crate::pacing::{Pacing, Ready, Refreshes};
 use crate::settings::Settings;
@@ -155,16 +155,15 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
         RuntimeOptions { cache_path: Some(cache_db), ..RuntimeOptions::default() }
     };
     let runtime = Runtime::new(&runtime_options).map_err(|e| e.message)?;
-    if !settings.online || benchmark.is_some() {
-        // The cache still serves what it has.
-        log_failure(runtime.set_resource_provider(|request: ResourceRequest| {
-            let mut response = Response::new();
-            response.error = Some(Box::new(ResourceError::new(Reason::Connection, "The application is offline")));
-            let _ = request.respond(response);
-        }));
-        if !settings.online {
-            Log::warning(Event::Setup, "Application is offline.");
+    let network = if benchmark.is_some() { Network::Offline } else { settings.network };
+    if network != Network::Online {
+        log_failure(network.apply(&runtime));
+        if benchmark.is_none() {
+            Log::warning(Event::Setup, format!("Network: {}", network.label()));
         }
+    }
+    if settings.cache_disabled {
+        log_failure(runtime.set_maximum_ambient_cache_size(0));
     }
     let events = Arc::clone(&inbox);
     log_failure(runtime.set_event_handler(move |batch| {
@@ -232,6 +231,8 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
         start,
         pacing: Pacing::new(refreshes, frame_interval, Instant::now()),
         runtime,
+        network,
+        cache_disabled: settings.cache_disabled,
         map: map.clone(),
         surfaces,
         kind: window.kind(),
@@ -361,6 +362,9 @@ struct View {
     pacing: Pacing<DisplayRefreshes>,
 
     runtime: Runtime,
+    network: Network,
+    /// Whether the cache database keeps nothing the map loads.
+    cache_disabled: bool,
     map: Map,
     surfaces: WindowSurfaces,
     /// The backend the map renders with.
@@ -785,6 +789,8 @@ impl View {
             debug: snapshot.as_ref().map_or_else(MapDebugOptions::default, |snapshot| snapshot.debug),
             globe: self.style_info.globe,
             free_bearing: snapshot.as_ref().is_some_and(|snapshot| snapshot.globe_free_bearing),
+            network: self.network,
+            cache_disabled: self.cache_disabled,
             backend: self.kind,
             status: &status,
             box_zoom: self.box_zoom,
@@ -840,6 +846,15 @@ impl View {
                 self.read_style(false);
             }
             Action::SetFreeBearing(free_bearing) => log_failure(self.map.set_globe_free_bearing_enabled(free_bearing)),
+            Action::SetNetwork(network) => {
+                self.network = network;
+                log_failure(network.apply(&self.runtime));
+            }
+            Action::SetCacheDisabled(disabled) => {
+                self.cache_disabled = disabled;
+                let size = if disabled { 0 } else { DEFAULT_MAX_CACHE_SIZE };
+                log_failure(self.runtime.set_maximum_ambient_cache_size(size));
+            }
             Action::ResetCache => self.reset_cache(),
             Action::SetBackend(kind) => {
                 self.next_backend = Some(kind);

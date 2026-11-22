@@ -13,7 +13,7 @@
 //   in the window, timed.
 //
 // Command line: -h/--help, -f/--fullscreen, -b/--benchmark[=PATH], --laps,
-// -o/--offline,
+// -o/--offline, --network NETWORK, --disable-cache,
 // -s/--style URL, -c/--cache FILE, -x/--lon, -y/--lat, -a/--alt, --fov,
 // -z/--zoom, --bearing, -p/--pitch, -r/--roll,
 // -P/--maxPitch, --backend (metal, the default on macOS, webgpu: wgpu, the
@@ -37,6 +37,7 @@ mod host;
 mod metal_layer;
 #[cfg(target_os = "macos")]
 mod metal_overlay;
+mod network;
 mod overlay;
 mod pacing;
 mod settings;
@@ -65,6 +66,9 @@ const USAGE: &str = "  mln-desktop {OPTIONS}
       --laps=[number]                   Laps of the benchmark's path (10; 0: until
                                         the window closes)
       -o, --offline                     Toggle offline
+      --network=[network]               Throttle the network: online, fast-4g, slow-4g,
+                                        3g or offline
+      --disable-cache                   Don't keep what the map loads in the cache
       -s[URL], --style=[URL]            Map stylesheet
       -c[file], --cache=[file]          Cache database file name
       -x[degrees], --lon=[degrees]      Longitude
@@ -94,7 +98,8 @@ pub(crate) struct Args {
     pub(crate) benchmark: Option<mln_bench_workload::paths::Path>,
     /// The benchmark's laps, or `None` for its default.
     pub(crate) laps: Option<usize>,
-    pub(crate) offline: bool,
+    pub(crate) network: network::Network,
+    pub(crate) disable_cache: bool,
     pub(crate) style: Option<String>,
     pub(crate) cache: Option<String>,
     pub(crate) lon: Option<f64>,
@@ -155,7 +160,9 @@ fn parse_args() -> Result<Args, String> {
                 args.laps =
                     Some(laps.parse().map_err(|_| format!("Argument '{name}' received invalid value type '{laps}'"))?);
             }
-            "o" | "offline" => args.offline = true,
+            "o" | "offline" => args.network = network::Network::Offline,
+            "network" => args.network = network::Network::parse(&value(&name)?)?,
+            "disable-cache" => args.disable_cache = true,
             "s" | "style" => args.style = Some(value(&name)?),
             "c" | "cache" => args.cache = Some(value(&name)?),
             "x" | "lon" => args.lon = Some(number(value(&name)?, &name)?),
@@ -189,7 +196,12 @@ fn main() {
         }
     };
 
-    let mut settings = Settings { online: !args.offline, free_bearing: args.free_bearing, ..Default::default() };
+    let mut settings = Settings {
+        network: args.network,
+        cache_disabled: args.disable_cache,
+        free_bearing: args.free_bearing,
+        ..Default::default()
+    };
     for (value, field) in [
         (args.lon, &mut settings.longitude),
         (args.lat, &mut settings.latitude),
