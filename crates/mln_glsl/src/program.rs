@@ -16,8 +16,7 @@ use crate::sources::DRAW_INDEX_DECLARATION;
 /// The source of `stage` of `glsl`, `program`'s GLSL, for naga's GLSL front
 /// end, with `defines` (`#define` lines): the version, the defines, the
 /// structs of the engine's blocks, the stage's prelude, the structs of the
-/// program's blocks, each a storage buffer's element padded to its stride,
-/// the declarations of what the stage or the program's prelude names of
+/// program's blocks, the declarations of what the stage or the program's prelude names of
 /// what the stage may read ([`Program::bindings`], [`declaration`]), and
 /// the program's own prelude and stage with its properties written out
 /// ([`glsl::expand`]). Fails as [`glsl::expand`] does, and for a buffer

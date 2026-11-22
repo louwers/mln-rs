@@ -233,8 +233,7 @@ fn vertex_type(format: AttributeDataType) -> &'static str {
 
 /// The source of `program`'s library, of its MSL `source`: the header, the
 /// structs of the engine's blocks, the prelude, the structs of the
-/// program's blocks, each a storage buffer's element padded to its stride,
-/// and the program's own prelude and source with its properties written
+/// program's blocks, and the program's own prelude and source with its properties written
 /// out ([`msl::expand`]), and each main function with the parameters of
 /// what it names of what its stage may read ([`with_parameters`]). Fails
 /// as [`msl::expand`] does.

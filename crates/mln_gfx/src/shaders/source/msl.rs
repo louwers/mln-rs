@@ -46,20 +46,17 @@ pub struct Msl {
     pub source: &'static str,
 }
 
-/// The structs of the blocks of `buffers`, the engine's or a program's, each
-/// of a storage buffer's element padded to its stride.
+/// The structs of the blocks of `buffers`, the engine's or a program's.
 #[must_use]
 pub fn blocks<'a>(buffers: impl IntoIterator<Item = &'a Buffer>) -> String {
     super::blocks(buffers, declaration)
 }
 
 /// The declaration of `block` in MSL: a struct of its members, aligned to
-/// 16 bytes and padded to `size` bytes, the stride of the storage buffer
-/// whose elements it is, or its own size, which a `static_assert` checks.
-fn declaration(block: &Block, size: usize) -> String {
+/// 16 bytes, of the block's size, which a `static_assert` checks.
+fn declaration(block: &Block) -> String {
     let members = c_like_members(
         block,
-        size,
         |ty| match ty {
             MemberType::Float => "float",
             MemberType::Int | MemberType::Bool => "int",
@@ -71,7 +68,7 @@ fn declaration(block: &Block, size: usize) -> String {
         },
         "float4",
     );
-    let name = block.name;
+    let (name, size) = (block.name, block.size);
     format!("struct alignas(16) {name} {{\n{members}}};\nstatic_assert(sizeof({name}) == {size}, \"wrong size\");\n")
 }
 

@@ -276,7 +276,7 @@ fn buffers_are_the_programs() {
                             Some(block.size)
                         }
                         (BufferKind::Vertices { .. }, Resource::Storage(_)) => None,
-                        (BufferKind::Storage { stride, .. }, Resource::Storage(_)) => Some(stride),
+                        (BufferKind::Storage { block }, Resource::Storage(_)) => Some(block.size),
                         _ => {
                             failures.push(format!("{at}: buffer {} is {resource:?}, not {:?}", buffer.id, buffer.kind));
                             continue;

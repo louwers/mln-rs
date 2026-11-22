@@ -47,21 +47,18 @@ pub struct Glsl {
     pub fragment: &'static str,
 }
 
-/// The structs of the blocks of `buffers`, the engine's or a program's, each
-/// of a storage buffer's element padded to its stride. A buffer of one is a
+/// The structs of the blocks of `buffers`, the engine's or a program's. A
+/// buffer of one is a
 /// `std140` block of one member of the struct, or of an array of them.
 #[must_use]
 pub fn blocks<'a>(buffers: impl IntoIterator<Item = &'a Buffer>) -> String {
     super::blocks(buffers, declaration)
 }
 
-/// The declaration of `block` in the GLSL: a struct of its members, padded
-/// to `size` bytes, the stride of the storage buffer whose elements it is,
-/// or its own size.
-fn declaration(block: &Block, size: usize) -> String {
+/// The declaration of `block` in the GLSL: a struct of its members.
+fn declaration(block: &Block) -> String {
     let members = c_like_members(
         block,
-        size,
         |ty| match ty {
             MemberType::Float => "float",
             MemberType::Int | MemberType::Bool => "int",

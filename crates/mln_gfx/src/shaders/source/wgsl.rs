@@ -48,17 +48,14 @@ pub struct Wgsl {
     pub prelude: &'static str,
 }
 
-/// The structs of the blocks of the engine's buffers and `program`'s,
-/// each of a storage buffer's element padded to its stride.
+/// The structs of the blocks of the engine's buffers and `program`'s.
 #[must_use]
 pub fn blocks(program: &Program) -> String {
     super::blocks(ENGINE_BUFFERS.iter().chain(program.buffers), declaration)
 }
 
-/// The declaration of `block` in WGSL: a struct of its members, padded to
-/// `size` bytes, the stride of the storage buffer whose elements it is, or
-/// its own size.
-fn declaration(block: &Block, size: usize) -> String {
+/// The declaration of `block` in WGSL: a struct of its members.
+fn declaration(block: &Block) -> String {
     let mut text = format!("struct {} {{\n", block.name);
     for member in block.members {
         let ty = match member.ty {
@@ -72,9 +69,6 @@ fn declaration(block: &Block, size: usize) -> String {
             MemberType::Vec4Array(n) => format!("array<vec4<f32>, {n}>"),
         };
         _ = writeln!(text, "    {}: {ty},", member.name);
-    }
-    if size > block.size {
-        _ = writeln!(text, "    stride_pad: array<vec4<f32>, {}>,", (size - block.size) / 16);
     }
     text + "};\n"
 }

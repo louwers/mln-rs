@@ -125,15 +125,14 @@ pub enum BufferKind {
     /// the descriptor set its GLSL declares it in, a draw's own rather than
     /// a layer's, and the Vulkan and D3D12 backends bind either by its id.
     DrawUniform(&'static Block),
-    /// An array of elements `stride` bytes apart, each read as `block`
-    /// padded to the stride, which a shader indexes: by its draw's
+    /// An array of `block`s, which a shader indexes: by its draw's
     /// [`global_index`](crate::gpu::Draw::global_index), as for an element
     /// per draw of a layer, or by an index of its own, as for a value per
     /// feature. GLSL ES has no storage buffers: a draw binds its element as
     /// a uniform block, so a shader reads only that one where
     /// [`Caps::indexes_storage_buffers`](crate::gpu::Caps::indexes_storage_buffers)
     /// is false.
-    Storage { block: &'static Block, stride: usize },
+    Storage { block: &'static Block },
     /// A vertex buffer of vertices of `format` that the vertex stage reads
     /// as a storage buffer, where the backend binds them
     /// ([`Caps::binds_vertex_buffers`](crate::gpu::Caps::binds_vertex_buffers)):
@@ -199,18 +198,8 @@ impl Buffer {
     /// The storage buffer `name` of a `T` per draw, which `stages` read.
     #[must_use]
     pub const fn storage<T: UniformBlock>(name: &'static str, stages: Stages) -> Buffer {
-        Buffer::storage_of::<T, T>(name, stages)
-    }
-
-    /// The storage buffer `name` of an `Element` per draw, each of which
-    /// the shader reads as a `T`, as of a union of the blocks of a layer's
-    /// programs, and which `stages` read.
-    #[must_use]
-    pub const fn storage_of<T: UniformBlock, Element>(name: &'static str, stages: Stages) -> Buffer {
-        assert!(size_of::<T>() <= size_of::<Element>(), "an element holds the block");
-        assert!(size_of::<Element>().is_multiple_of(16), "an element's size is a multiple of 16");
-        let kind = BufferKind::Storage { block: T::BLOCK, stride: size_of::<Element>() };
-        Buffer { id: stages.id(), name, kind }
+        assert!(size_of::<T>().is_multiple_of(16), "a block's size is a multiple of 16");
+        Buffer { id: stages.id(), name, kind: BufferKind::Storage { block: T::BLOCK } }
     }
 
     /// The vertex buffer `name` of vertices of `format`, which the vertex
@@ -235,12 +224,11 @@ impl Buffer {
     }
 
     /// The bytes the shader reads of it: its block, a storage buffer's
-    /// element padded to the stride, or a vertex.
+    /// element, or a vertex.
     #[must_use]
     pub const fn size(&self) -> usize {
         match self.kind {
-            BufferKind::Uniform(block) | BufferKind::DrawUniform(block) => block.size,
-            BufferKind::Storage { stride, .. } => stride,
+            BufferKind::Uniform(block) | BufferKind::DrawUniform(block) | BufferKind::Storage { block } => block.size,
             BufferKind::Vertices { format } => format.stride(),
         }
     }
@@ -272,7 +260,7 @@ pub const VIEW_BUFFER: Buffer = Buffer { id: VIEW_BUFFER_ID, name: "view", kind:
 pub const PROJECTION_BUFFER: Buffer = Buffer {
     id: PROJECTION_BUFFER_ID,
     name: "projectionVector",
-    kind: BufferKind::Storage { block: ProjectionUBO::BLOCK, stride: size_of::<ProjectionUBO>() },
+    kind: BufferKind::Storage { block: ProjectionUBO::BLOCK },
 };
 
 /// The projection block of a draw's own, at the projection block's id, for

@@ -351,12 +351,11 @@ fn every_block_has_its_layout() {
     for (program, _) in sources() {
         for buffer in program.buffers.iter().chain(&engine) {
             let Some(block) = buffer.block() else { continue };
-            if !declared.insert((block.name, buffer.size())) {
+            if !declared.insert(block.name) {
                 continue;
             }
-            // One namespace a block and its stride, as a library declares
-            // each once.
-            _ = writeln!(library, "namespace {}_{} {{", block.name, buffer.size());
+            // One namespace a block, as a library declares each once.
+            _ = writeln!(library, "namespace {} {{", block.name);
             library += &msl::blocks([buffer]);
             for member in block.members {
                 let (name, offset) = (member.name, member.offset);

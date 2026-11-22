@@ -312,24 +312,15 @@ macro_rules! uniform_block {
 }
 
 /// The members of `block` as `<type> <name>;` lines in a C-like shading
-/// language, the types of `ty` and the arrays of `array`, and a
-/// `<vec4 type> stride_pad[<n>];` line that pads the block to `size` bytes,
-/// each line indented by four spaces.
-pub(crate) fn c_like_members(
-    block: &Block,
-    size: usize,
-    ty: impl Fn(MemberType) -> &'static str,
-    vec4: &str,
-) -> String {
+/// language, the types of `ty` and the arrays of `vec4`, each line indented
+/// by four spaces.
+pub(crate) fn c_like_members(block: &Block, ty: impl Fn(MemberType) -> &'static str, vec4: &str) -> String {
     let mut members = String::new();
     for member in block.members {
         match member.ty {
             MemberType::Vec4Array(n) => _ = writeln!(members, "    {vec4} {}[{n}];", member.name),
             other => _ = writeln!(members, "    {} {};", ty(other), member.name),
         }
-    }
-    if size > block.size {
-        _ = writeln!(members, "    {vec4} stride_pad[{}];", (size - block.size) / 16);
     }
     members
 }

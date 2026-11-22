@@ -322,7 +322,7 @@ impl Group {
 /// buffer, or `None` for a block of a draw's own.
 fn blocks_of_each_draw(program: &Program) -> impl Iterator<Item = (&'static Block, usize, Option<usize>)> + '_ {
     program.buffers.iter().filter_map(|buffer| match buffer.kind {
-        BufferKind::Storage { block, stride } => Some((block, buffer.id, Some(stride))),
+        BufferKind::Storage { block } => Some((block, buffer.id, Some(block.size))),
         BufferKind::DrawUniform(block) => Some((block, buffer.id, None)),
         _ => None,
     })
@@ -728,6 +728,27 @@ mod tests {
             group.finish(gpu, context, &(), []);
             let drawn: Vec<MeshKey> = group.frame.draws.iter().map(|draw| draw.mesh).collect();
             assert_eq!(drawn, [newer.key(), older.key(), newer.key(), older.key()]);
+        });
+    }
+
+    #[test]
+    fn a_draw_reads_its_elements_among_those_of_its_programs_draws() {
+        crate::tests::with_context(|gpu, context| {
+            let depth = mesh(context);
+            let vertices = context.buffer::<[i16; 2]>(&[[0, 0], [1, 0], [0, 1]]);
+            let triangles = context.index_buffer(&[0, 1, 2]);
+            let mut desc = MeshDesc::new(&programs::TILE_DEBUG, &triangles);
+            desc.vertices(&vertices);
+            let debug: Mesh = context.mesh(&desc);
+            let mut group = Group::new();
+            group.begin(0.0, false, false);
+            group.block(&crate::shaders::ubo::TileDebugPropsUBO::default());
+            group.push(&depth, Draw::DEFAULT, ()).push(&debug, Draw::DEFAULT, ()).push(&depth, Draw::DEFAULT, ());
+            group.finish(gpu, context, &(), []);
+            let read: Vec<(u16, u32)> = group.frame.draws.iter().map(|draw| (draw.run, draw.element)).collect();
+            assert_eq!(read, [(0, 0), (0, 1), (1, 0)]);
+            let programs: Vec<&str> = group.frame.runs.iter().map(|run| run.program.name).collect();
+            assert_eq!(programs, [programs::GLOBE_DEPTH.name, programs::TILE_DEBUG.name]);
         });
     }
 
