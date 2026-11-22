@@ -1,7 +1,7 @@
 // The camera and options the app starts with, which the command line
 // overrides.
 
-use mln_util::constants::{DEFAULT_FOV, DEFAULT_PITCH_MAX};
+use mln_util::constants::DEFAULT_FOV;
 
 /// The camera and options the app starts with: central Amsterdam, as the
 /// web demo opens.
@@ -33,7 +33,8 @@ impl Default for Settings {
             pitch: 0.0,
             roll: 0.0,
             fov: mln_math::rad2deg(DEFAULT_FOV),
-            max_pitch: mln_math::rad2deg(DEFAULT_PITCH_MAX),
+            // Past the map's default of 60°, where fog shows over terrain.
+            max_pitch: 85.0,
             debug: 0,
             online: true,
             free_bearing: false,

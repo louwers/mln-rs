@@ -23,7 +23,7 @@ use mln_map::MapDebugOptions;
 use mln_util::geo::ScreenCoordinate;
 
 use crate::backend::Kind;
-use crate::styles::Style;
+use crate::styles::{Projection, Style};
 
 /// What the controls ask of the map.
 #[derive(Clone, Copy)]
@@ -35,8 +35,8 @@ pub(crate) enum Action {
     /// Load the style at this index of `Shown::styles`.
     PickStyle(usize),
     SetDebug(MapDebugOptions),
-    /// Draw the map on the globe, or on Mercator.
-    SetGlobe(bool),
+    /// Draw the map with this projection, in place of the style's own.
+    SetProjection(Projection),
     /// Let drags and zooms on the globe turn the bearing with the planet.
     SetFreeBearing(bool),
     /// Empty the cache database.
@@ -57,8 +57,8 @@ pub(crate) struct Shown<'a> {
     /// The sources' attributions, as HTML.
     pub attributions: &'a [String],
     pub debug: MapDebugOptions,
-    /// Whether the style's projection is the globe.
-    pub globe: bool,
+    /// The projection the map draws with.
+    pub projection: Projection,
     /// Whether drags and zooms on the globe turn the bearing.
     pub free_bearing: bool,
     /// The backend the map renders with.
@@ -351,10 +351,15 @@ fn about_panel(ctx: &egui::Context, palette: &Palette, shown: &Shown<'_>, action
             if debug != shown.debug {
                 actions.push(Action::SetDebug(debug));
             }
-            let mut globe = shown.globe;
-            if ui.checkbox(&mut globe, "Globe").on_hover_text("Draw the map on the globe").changed() {
-                actions.push(Action::SetGlobe(globe));
-            }
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Projection");
+                for projection in Projection::ALL {
+                    let picked = ui.radio(shown.projection == projection, projection.name());
+                    if picked.on_hover_text(projection.hint()).clicked() && shown.projection != projection {
+                        actions.push(Action::SetProjection(projection));
+                    }
+                }
+            });
             let mut free_bearing = shown.free_bearing;
             let free_bearing_hint =
                 "Drags and zooms on the globe turn the bearing with the planet, and a drag carries on over a pole";
