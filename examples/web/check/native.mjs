@@ -27,7 +27,8 @@ export async function writeTest(out, name, style, { width, height, base64 }) {
 /**
  * Runs `runner` on the tests in `out` with the fixtures of the cache
  * database at `cache` and the files in `assets` that load in place of
- * them, through the Vulkan driver `icd`; its results go to
+ * them, through the Vulkan driver file `icd`, if any (else the runner's
+ * environment, and its default device, apply); its results go to
  * `out`/results. Returns the runner's exit status and output, and
  * `results`, each test's `{ status, diff, error }` by name, unless the
  * runner wrote no report.
@@ -47,7 +48,7 @@ export async function renderNative({ out, runner, cache, assets, codec, icd }) {
   const args = ["-p", manifest, "--output", path.join(out, "results")];
   if (codec) args.push(`--tileWorkerCodec=${codec}`);
   const native = spawnSync(runner, args, {
-    env: { ...process.env, VK_DRIVER_FILES: icd },
+    env: icd ? { ...process.env, VK_DRIVER_FILES: icd } : process.env,
     encoding: "utf8",
   });
   if (native.error) throw native.error;

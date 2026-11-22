@@ -40,9 +40,10 @@
 //
 // Chromium's WebGPU adapter is SwiftShader, which it bundles, so the
 // frames don't depend on the machine (browser.mjs); the native runner
-// renders through VK_DRIVER_FILES (default
-// /usr/share/vulkan/icd.d/lvp_icd.x86_64.json, lavapipe). Headless Chromium
-// composites WebGPU canvases as white, so the page reads its frame back
+// renders through VK_DRIVER_FILES, which defaults to lavapipe
+// (/usr/share/vulkan/icd.d/lvp_icd.x86_64.json) where that is installed and
+// otherwise stays unset, so the runner draws on the machine's default device.
+// Headless Chromium composites WebGPU canvases as white, so the page reads its frame back
 // itself.
 
 import { existsSync } from "node:fs";
@@ -95,8 +96,9 @@ const { values: options } = parseArgs({
 const workers = Number(options.workers);
 if (!["webgpu", "webgl2"].includes(options.backend))
   throw new Error(`--backend is webgpu or webgl2, not ${options.backend}`);
+const lavapipe = "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json";
 const icd =
-  process.env.VK_DRIVER_FILES ?? "/usr/share/vulkan/icd.d/lvp_icd.x86_64.json";
+  process.env.VK_DRIVER_FILES ?? (existsSync(lavapipe) ? lavapipe : undefined);
 if (!existsSync(path.join(root, "index.html")))
   throw new Error("no dist: run `mise run web:build` first");
 
@@ -126,6 +128,9 @@ try {
   console.log(`${browser.name}`);
   console.log(`WebGPU adapter: ${gpu}`);
   console.log(`WebGL2 renderer: ${await webgl2Renderer(context)}`);
+  console.log(
+    `native device: ${icd ? `Vulkan driver ${icd}` : "the machine's default"}`,
+  );
   if (options.backend === "webgpu" && gpu === "none")
     throw new Error(`${browser.name} has no WebGPU: try --backend webgl2`);
   if (browser.swiftshader && !/swiftshader/.test(gpu ?? ""))
