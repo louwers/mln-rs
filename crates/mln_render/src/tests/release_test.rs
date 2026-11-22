@@ -13,7 +13,6 @@ use mln_util::size::Size;
 use super::with_context;
 use crate::gfx::owned::Held;
 use crate::shaders::programs;
-use crate::shaders::programs::ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE;
 
 // A texture that a resize replaced, and vertices and indexes of the
 // context's stores that their owners let go of, stay while the bindings and
@@ -166,7 +165,7 @@ fn position_layout() -> VertexBufferLayout {
         stride: 4,
         step: VertexStep::Vertex,
         attributes: vec![VertexAttribute {
-            id: ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE as u32,
+            id: 0,
             format: AttributeDataType::Short2,
             offset: 0,
         }],

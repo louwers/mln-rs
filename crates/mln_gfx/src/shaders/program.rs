@@ -36,7 +36,8 @@ use crate::shaders::source::{self, Stage, glsl, glsl_es, msl, wgsl};
 ///   [`attributes`](Program::attributes), and an instance attribute at the
 ///   location after the vertex attributes' of its index in
 ///   [`instance_attributes`](Program::instance_attributes). A draw names an
-///   attribute by its [`id`](Attribute::id).
+///   attribute by its index among those of its step, and a
+///   [`Property`] by its name.
 /// - A texture and its sampler at the slot of its index in
 ///   [`textures`](Program::textures), which a draw names it by, and which
 ///   a fragment stage that names them declares, as the backend writes them
@@ -316,14 +317,22 @@ impl Binding<'_> {
     }
 }
 
-/// A vertex or instance attribute of a program.
+/// A vertex or instance attribute of a program: of a paint property's
+/// values where it has the property's name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Attribute {
-    /// The id a draw names it by, which a layer type chooses for its
-    /// programs.
-    pub id: usize,
+    /// Its name: a [`Property`]'s binds the property's values.
+    pub name: &'static str,
     /// The format a draw without data for it binds.
     pub format: AttributeDataType,
+}
+
+impl Attribute {
+    /// The attribute `name` of `format`.
+    #[must_use]
+    pub const fn new(name: &'static str, format: AttributeDataType) -> Attribute {
+        Attribute { name, format }
+    }
 }
 
 /// A texture a program samples, by its name in the program's shaders.
@@ -364,9 +373,10 @@ impl Texture {
 }
 
 /// A paint property a program reads: from its uniform in a variant that
-/// reads it from there, otherwise from the values a layer binds to its
-/// attribute, which a source reads through the directives that
-/// [`source`](crate::shaders::source#properties) describes.
+/// reads it from there, otherwise from the values a layer binds to the
+/// program's attribute of its name, which a source reads through the
+/// directives that [`source`](crate::shaders::source#properties)
+/// describes.
 ///
 /// A vertex stage mixes the values of a [`Float`](PropertyType::Float) or a
 /// [`Color`](PropertyType::Color) at two zooms by the member `<name>_t` of
@@ -377,10 +387,8 @@ impl Texture {
 /// `vertex_in`.
 #[derive(Clone, Copy, Debug)]
 pub struct Property {
-    /// The name of the uniform, `u_<name>`.
+    /// The name of the uniform, `u_<name>`, and of its attribute.
     pub name: &'static str,
-    /// The id of the attribute a layer binds the property's values to.
-    pub attribute: usize,
     /// What its values per vertex are.
     pub ty: PropertyType,
 }
@@ -401,25 +409,22 @@ pub enum PropertyType {
 }
 
 impl Property {
-    /// The float `u_<name>`, whose values a layer binds to attribute
-    /// `attribute`.
+    /// The float `u_<name>`.
     #[must_use]
-    pub const fn float(name: &'static str, attribute: usize) -> Property {
-        Property { name, attribute, ty: PropertyType::Float }
+    pub const fn float(name: &'static str) -> Property {
+        Property { name, ty: PropertyType::Float }
     }
 
-    /// The color `u_<name>`, whose values a layer binds to attribute
-    /// `attribute`.
+    /// The color `u_<name>`.
     #[must_use]
-    pub const fn color(name: &'static str, attribute: usize) -> Property {
-        Property { name, attribute, ty: PropertyType::Color }
+    pub const fn color(name: &'static str) -> Property {
+        Property { name, ty: PropertyType::Color }
     }
 
-    /// The unmixed `vec4` `u_<name>`, whose values a layer binds to
-    /// attribute `attribute`.
+    /// The unmixed `vec4` `u_<name>`.
     #[must_use]
-    pub const fn vec4(name: &'static str, attribute: usize) -> Property {
-        Property { name, attribute, ty: PropertyType::Vec4 }
+    pub const fn vec4(name: &'static str) -> Property {
+        Property { name, ty: PropertyType::Vec4 }
     }
 }
 
@@ -519,19 +524,30 @@ impl Program {
         ShaderKey::new(self, parameters.chain(uniforms).chain(globe))
     }
 
-    /// The shader location of the attribute `id` that steps by `step`.
+    /// The shader location of the attribute at `index` among those that
+    /// step by `step`.
     #[must_use]
-    pub fn location(&self, step: VertexStep, id: usize) -> Option<usize> {
+    pub fn location(&self, step: VertexStep, index: usize) -> Option<usize> {
         let (attributes, first) = match step {
             VertexStep::Vertex => (self.attributes, 0),
             VertexStep::Instance => (self.instance_attributes, self.attributes.len()),
         };
-        attributes.iter().position(|attribute| attribute.id == id).map(|index| first + index)
+        (index < attributes.len()).then_some(first + index)
+    }
+
+    /// The step and index of the attribute of `property`'s values, the
+    /// attribute of its name.
+    #[must_use]
+    pub fn property_attribute(&self, property: &Property) -> Option<(VertexStep, usize)> {
+        let find = |attributes: &[Attribute]| attributes.iter().position(|attribute| attribute.name == property.name);
+        find(self.attributes)
+            .map(|index| (VertexStep::Vertex, index))
+            .or_else(|| find(self.instance_attributes).map(|index| (VertexStep::Instance, index)))
     }
 
     /// Checks the rules this declaration's doc states, which a backend checks
-    /// before it compiles the program: distinct attribute ids within each
-    /// step, buffers at ids of their kinds, as [`Buffer`]'s constructors
+    /// before it compiles the program: distinct attribute names, an
+    /// attribute of each property's name, buffers at ids of their kinds, as [`Buffer`]'s constructors
     /// give them, each id once, vertex buffers of the formats
     /// [`BufferKind::Vertices`] names, no more attributes and textures than
     /// a program can have, and distinct names of the buffers, the textures
@@ -545,12 +561,14 @@ impl Program {
     /// [`GpuError::Invalid`], naming the rule the program breaks.
     pub fn check(&self) -> Result<(), GpuError> {
         let invalid = |problem: String| Err(GpuError::Invalid(format!("program {}: {problem}", self.name)));
-        for attributes in [self.attributes, self.instance_attributes] {
-            for (index, attribute) in attributes.iter().enumerate() {
-                if attributes[..index].iter().any(|earlier| earlier.id == attribute.id) {
-                    return invalid(format!("two attributes have the id {}", attribute.id));
-                }
+        let attributes: Vec<&Attribute> = self.attributes.iter().chain(self.instance_attributes).collect();
+        for (index, attribute) in attributes.iter().enumerate() {
+            if attributes[..index].iter().any(|earlier| earlier.name == attribute.name) {
+                return invalid(format!("two attributes are named {}", attribute.name));
             }
+        }
+        if let Some(property) = self.properties.iter().find(|property| self.property_attribute(property).is_none()) {
+            return invalid(format!("no attribute of property {}", property.name));
         }
         let attributes = self.attributes.len() + self.instance_attributes.len();
         if attributes > MAX_ATTRIBUTES {
@@ -747,10 +765,11 @@ mod tests {
 
     #[test]
     fn a_program_breaking_a_rule_of_its_declaration_fails_its_check() {
-        const POSITION: Attribute = Attribute { id: 0, format: Short2 };
+        const POSITION: Attribute = Attribute::new("position", Short2);
         assert!(EMPTY.check().is_ok());
         let fails = |program: Program| assert!(program.check().is_err(), "{:?}", program.buffers);
         fails(Program { attributes: &[POSITION, POSITION], ..EMPTY });
+        fails(Program { properties: const { &[Property::color("color")] }, ..EMPTY });
         fails(Program {
             buffers: const { &[Buffer::uniform::<ViewUBO>("props", 0), Buffer::uniform::<ViewUBO>("other", 0)] },
             ..EMPTY

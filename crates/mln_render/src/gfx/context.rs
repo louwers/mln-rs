@@ -473,8 +473,9 @@ impl Resources {
         projection: ProjectionVariant,
     ) -> ShaderKey {
         // Only the program's own properties tell its variants apart.
-        let read = program.properties.iter().filter(move |property| uniforms.contains(property.attribute));
-        let uniforms = read.clone().map(|property| property.attribute).collect();
+        let read = program.properties.iter().enumerate().filter(move |&(index, _)| uniforms.contains(index));
+        let uniforms = read.clone().map(|(index, _)| index).collect();
+        let read = read.map(|(_, property)| property);
         let parameters = &self.program_parameters;
         self.shader_keys
             .entry((program, uniforms, projection))

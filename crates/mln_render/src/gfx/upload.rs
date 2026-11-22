@@ -58,8 +58,8 @@ pub(crate) fn update_attribute_bindings(
 ) -> Result<bool, GpuError> {
     bindings.reserve_exact(attributes.len().saturating_sub(bindings.len()));
     let mut changed = false;
-    for (index, &Attribute { id, format: default, .. }) in attributes.iter().enumerate() {
-        let binding = match overrides.get_mut(id) {
+    for (index, &Attribute { format: default, .. }) in attributes.iter().enumerate() {
+        let binding = match overrides.get_mut(index) {
             Some(attribute) => attribute.binding(gpu, context)?,
             None => None,
         };
@@ -98,5 +98,6 @@ pub(crate) fn update_attribute_bindings(
 pub(crate) fn needs_upload(context: &Resources, attributes: &[Attribute], overrides: &VertexAttributeArray) -> bool {
     attributes
         .iter()
-        .any(|attribute| overrides.get(attribute.id).is_some_and(|attribute| attribute.needs_upload(context)))
+        .enumerate()
+        .any(|(index, _)| overrides.get(index).is_some_and(|attribute| attribute.needs_upload(context)))
 }

@@ -10,7 +10,7 @@ use super::{glsl, glsl_es, msl, wgsl};
 pub static BACKGROUND: Program = Program {
     name: "background",
     buffers: &[Buffer::uniform::<BackgroundPropsUBO>("props", 0)],
-    attributes: &[Attribute { id: 0, format: Short2 }],
+    attributes: &[Attribute::new("position", Short2)],
     instance_attributes: &[],
     textures: &[],
     properties: &[],
@@ -28,7 +28,7 @@ pub static BACKGROUND_PATTERN: Program = Program {
         Buffer::storage::<BackgroundPatternDrawableUBO>("drawableVector", Stages::Vertex),
         Buffer::uniform::<BackgroundPatternPropsUBO>("props", 0),
     ],
-    attributes: &[Attribute { id: 0, format: Short2 }],
+    attributes: &[Attribute::new("position", Short2)],
     instance_attributes: &[],
     textures: &[Texture::new("image")],
     properties: &[],

@@ -13,6 +13,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::gfx_types::AttributeDataType;
+use mln_gfx::gpu::VertexStep;
 use mln_gfx::shaders::block::MemberType;
 use mln_gfx::shaders::program::{BufferKind, Program, PropertyType};
 use mln_style::evaluated::{Evaluated, Faded};
@@ -1069,12 +1070,17 @@ impl Bind<'_> {
             self.shared.and_then(|shared| binder.apply(buffer, shared))
         };
         for name in properties {
-            let Some(property) = self.program.properties.iter().find(|property| property.name == *name) else {
+            let Some((index, property)) =
+                self.program.properties.iter().enumerate().find(|(_, property)| property.name == *name)
+            else {
                 continue;
             };
-            match &values {
-                Some(values) => self.attributes.push((property.attribute, values.clone())),
-                None => self.uniforms.insert(property.attribute),
+            match (&values, self.program.property_attribute(property)) {
+                (Some(values), Some((VertexStep::Vertex, attribute))) => {
+                    self.attributes.push((attribute, values.clone()));
+                }
+                (Some(_), _) => debug_assert!(false, "the values of property {name} in an instance attribute"),
+                (None, _) => self.uniforms.insert(index),
             }
             if let Some(mix) = binder.mix().filter(|_| matches!(property.ty, PropertyType::Float | PropertyType::Color))
                 && let Some(offset) = mix_offset(self.program, name)
@@ -1233,7 +1239,7 @@ mod tests {
         attributes: &[],
         instance_attributes: &[],
         textures: &[],
-        properties: &[Property::color("color", 1)],
+        properties: &[Property::color("color")],
         projection: Projection::None,
         sources: Sources::NONE,
     };

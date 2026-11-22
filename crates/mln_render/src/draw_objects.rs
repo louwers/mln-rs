@@ -21,7 +21,7 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::{FIRST_VERTEX_BUFFER_ID, MAX_TEXTURES};
-use mln_gfx::shaders::program::{Attribute, Program};
+use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::texture2d::SamplerState;
 use mln_util::logging::{Event, Log};
@@ -104,7 +104,7 @@ const MAX_VERTEX_BUFFERS: usize = 8;
 /// What a draw draws: its vertices, and the primitives its segments draw of
 /// them.
 pub(crate) struct DrawGeometry {
-    /// The vertex attributes, by attribute id.
+    /// The vertex attributes, by attribute index.
     pub vertices: VertexAttributeArray,
     /// How many vertices the attributes hold, which an attribute the
     /// shader reads and the draw lacks gets default values for.
@@ -575,10 +575,12 @@ fn vertex_slots(
                 VertexStep::Vertex => program.attributes,
                 VertexStep::Instance => program.instance_attributes,
             };
-            let Some(&Attribute { id, .. }) = attributes.get(index) else { continue };
+            if index >= attributes.len() {
+                continue;
+            }
             let offset = u64::from(binding.vertex_offset) * u64::from(binding.vertex_stride);
             let attribute = GpuVertexAttribute {
-                id: id as u32,
+                id: index as u32,
                 format: binding.attribute.data_type,
                 offset: binding.attribute.offset,
             };

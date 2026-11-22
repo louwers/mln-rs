@@ -178,7 +178,7 @@ pub(crate) fn expand(
             .iter()
             .chain(program.instance_attributes)
             .enumerate()
-            .find(|(_, attribute)| attribute.id == property.attribute)
+            .find(|(_, attribute)| attribute.name == property.name)
             .map(|(location, attribute)| (location, attribute.format));
         Ok(Named { property, attribute, value: None, flat: false, precision: None })
     };
@@ -283,10 +283,10 @@ mod tests {
     static DOT: Program = Program {
         name: "dot",
         buffers: &[Buffer::storage::<DotDrawableUBO>("drawableVector", Stages::Vertex)],
-        attributes: &[Attribute { id: 0, format: Short2 }, Attribute { id: 3, format: Float4 }],
+        attributes: &[Attribute::new("pos", Short2), Attribute::new("color", Float4)],
         instance_attributes: &[],
         textures: &[],
-        properties: &[Property::color("color", 3)],
+        properties: &[Property::color("color")],
         projection: Projection::None,
         sources: Sources::NONE,
     };

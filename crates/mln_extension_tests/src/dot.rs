@@ -73,14 +73,10 @@ pub static DOT: Program = Program {
         program::Buffer::storage::<DotDraw>("draws", Stages::Vertex),
         program::Buffer::uniform::<DotProps>("props", 0),
     ],
-    attributes: &[
-        Attribute { id: 0, format: Short2 },
-        Attribute { id: 1, format: Float4 },
-        Attribute { id: 2, format: Float2 },
-    ],
+    attributes: &[Attribute::new("corner", Short2), Attribute::new("color", Float4), Attribute::new("radius", Float2)],
     instance_attributes: &[],
     textures: &[],
-    properties: &[Property::color("color", 1), Property::float("radius", 2)],
+    properties: &[Property::color("color"), Property::float("radius")],
     projection: Projection::PerDraw,
     sources: Sources::NONE.wgsl(&Wgsl {
         prelude: "",

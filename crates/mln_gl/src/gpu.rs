@@ -198,9 +198,9 @@ pub(crate) struct Program {
     /// The slots of the textures it samples. A texture's sampler reads the
     /// texture unit of its slot.
     pub(crate) textures: Vec<usize>,
-    /// The location of each per-vertex attribute, by id.
+    /// The location of each per-vertex attribute, by index.
     pub(crate) vertex_locations: Vec<(u32, u32)>,
-    /// The location of each per-instance attribute, by id.
+    /// The location of each per-instance attribute, by index.
     instance_locations: Vec<(u32, u32)>,
 }
 
@@ -817,14 +817,16 @@ impl GlGpu {
                         continue;
                     };
                     let at = location as usize;
-                    let (attribute, locations) = match at.checked_sub(vertices) {
-                        None => (declared.attributes.get(at), &mut program.vertex_locations),
-                        Some(at) => (declared.instance_attributes.get(at), &mut program.instance_locations),
+                    let (at, count, locations) = match at.checked_sub(vertices) {
+                        None => (at, vertices, &mut program.vertex_locations),
+                        Some(at) => (at, declared.instance_attributes.len(), &mut program.instance_locations),
                     };
-                    let attribute = attribute.ok_or_else(|| {
-                        GpuError::Invalid(format!("{name} reads an attribute at location {location}, which it lacks"))
-                    })?;
-                    locations.push((attribute.id as u32, location));
+                    if at >= count {
+                        return Err(GpuError::Invalid(format!(
+                            "{name} reads an attribute at location {location}, which it lacks"
+                        )));
+                    }
+                    locations.push((at as u32, location));
                 }
                 program.vertex_locations.sort_unstable_by_key(|&(_, location)| location);
                 program.instance_locations.sort_unstable_by_key(|&(_, location)| location);

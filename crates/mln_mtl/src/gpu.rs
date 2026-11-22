@@ -602,10 +602,10 @@ impl MetalGpu {
             [(VertexStep::Vertex, program.attributes), (VertexStep::Instance, program.instance_attributes)]
                 .into_iter()
                 .flat_map(|(step, infos)| {
-                    infos.iter().map(move |info| VertexBufferLayout {
+                    infos.iter().enumerate().map(move |(index, info)| VertexBufferLayout {
                         stride: info.format.stride() as u32,
                         step,
-                        attributes: vec![GpuVertexAttribute { id: info.id as u32, format: info.format, offset: 0 }],
+                        attributes: vec![GpuVertexAttribute { id: index as u32, format: info.format, offset: 0 }],
                     })
                 })
                 .collect();

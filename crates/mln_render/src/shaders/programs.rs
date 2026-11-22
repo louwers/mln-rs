@@ -6,23 +6,8 @@ use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Sources,
 use super::ubo::{AtmospherePropsUBO, LayerCompositeUBO, SkyPropsUBO, TileDebugPropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
 
-pub(crate) const ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE: usize = 0;
-
-pub(crate) const ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE: usize = 0;
-
-/// The corner of the quad that draws a segment: x is 0 at the segment's
-/// start and 1 at its end, y picks its side.
-pub(crate) const ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE: usize = 0;
-/// Per instance, where the segment starts and ends, in tile units.
-pub(crate) const ID_TILE_DEBUG_START_ATTRIBUTE: usize = 1;
-pub(crate) const ID_TILE_DEBUG_END_ATTRIBUTE: usize = 2;
-
 pub(crate) const ID_LAYER_COMPOSITE_IMAGE_TEXTURE: usize = 0;
 pub(crate) const ID_LAYER_COMPOSITE_BACKDROP_TEXTURE: usize = 1;
-pub(crate) const ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE: usize = 0;
-
-pub(crate) const ID_SKY_POS_VERTEX_ATTRIBUTE: usize = 0;
-pub(crate) const ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE: usize = 0;
 
 pub(crate) const TILE_DEBUG_PROPS: Buffer = Buffer::uniform::<TileDebugPropsUBO>("props", 0);
 pub(crate) const LAYER_COMPOSITE_PROPS: Buffer = Buffer::uniform::<LayerCompositeUBO>("props", 0);
@@ -33,7 +18,7 @@ pub(crate) const ATMOSPHERE_PROPS: Buffer = Buffer::uniform::<AtmospherePropsUBO
 pub(crate) static CLIPPING_MASK: Program = Program {
     name: "clipping-mask",
     buffers: &[],
-    attributes: &[Attribute { id: ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, format: Short2 }],
+    attributes: &[Attribute::new("pos", Short2)],
     instance_attributes: &[],
     textures: &[],
     properties: &[],
@@ -49,7 +34,7 @@ pub(crate) static CLIPPING_MASK: Program = Program {
 pub(crate) static GLOBE_DEPTH: Program = Program {
     name: "globe-depth",
     buffers: &[],
-    attributes: &[Attribute { id: ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, format: Short2 }],
+    attributes: &[Attribute::new("pos", Short2)],
     instance_attributes: &[],
     textures: &[],
     properties: &[],
@@ -65,7 +50,7 @@ pub(crate) static GLOBE_DEPTH: Program = Program {
 pub(crate) static SKY: Program = Program {
     name: "sky",
     buffers: &[SKY_PROPS],
-    attributes: &[Attribute { id: ID_SKY_POS_VERTEX_ATTRIBUTE, format: Short2 }],
+    attributes: &[Attribute::new("pos", Short2)],
     instance_attributes: &[],
     textures: &[],
     properties: &[],
@@ -81,7 +66,7 @@ pub(crate) static SKY: Program = Program {
 pub(crate) static ATMOSPHERE: Program = Program {
     name: "atmosphere",
     buffers: &[ATMOSPHERE_PROPS],
-    attributes: &[Attribute { id: ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, format: Short2 }],
+    attributes: &[Attribute::new("pos", Short2)],
     instance_attributes: &[],
     textures: &[],
     properties: &[],
@@ -97,7 +82,7 @@ pub(crate) static ATMOSPHERE: Program = Program {
 pub(crate) static LAYER_COMPOSITE: Program = Program {
     name: "layer-composite",
     buffers: &[LAYER_COMPOSITE_PROPS],
-    attributes: &[Attribute { id: ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE, format: Short2 }],
+    attributes: &[Attribute::new("pos", Short2)],
     instance_attributes: &[],
     textures: &[Texture::unfilterable("image"), Texture::unfilterable("backdrop")],
     properties: &[],
@@ -117,11 +102,11 @@ pub(crate) static LAYER_COMPOSITE: Program = Program {
 pub(crate) static TILE_DEBUG: Program = Program {
     name: "tile-debug",
     buffers: &[TILE_DEBUG_PROPS],
-    attributes: &[Attribute { id: ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE, format: Short2 }],
-    instance_attributes: &[
-        Attribute { id: ID_TILE_DEBUG_START_ATTRIBUTE, format: Short2 },
-        Attribute { id: ID_TILE_DEBUG_END_ATTRIBUTE, format: Short2 },
-    ],
+    // The corner of the quad that draws a segment: x is 0 at the segment's
+    // start and 1 at its end, y picks its side. Per instance, where the
+    // segment starts and ends, in tile units.
+    attributes: &[Attribute::new("corner", Short2)],
+    instance_attributes: &[Attribute::new("start", Short2), Attribute::new("end", Short2)],
     textures: &[],
     properties: &[],
     projection: Projection::PerDraw,

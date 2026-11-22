@@ -7,7 +7,7 @@ use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::MAX_TEXTURES;
 use mln_gfx::shaders::block::DrawBlocks;
-use mln_gfx::shaders::program::{Attribute, BufferKind, Program, Projection};
+use mln_gfx::shaders::program::{BufferKind, Program, Projection};
 use mln_gfx::texture2d::SamplerState;
 use smallvec::SmallVec;
 
@@ -34,8 +34,8 @@ pub struct MeshDesc<'a> {
     /// The buffers of the instance attributes, in the program's order.
     pub(crate) instances: SmallVec<[Input<'a>; 1]>,
     pub(crate) indexes: &'a IndexBuffer,
-    /// The paint values' attributes, by attribute id, and the properties
-    /// read from their uniforms instead.
+    /// The paint values' attributes, by attribute index, and the
+    /// properties, by index, read from their uniforms instead.
     pub(crate) paint: Vec<(usize, SharedAttribute)>,
     pub(crate) uniforms: Uniforms,
     /// What the engine writes of the paint values into the draws' blocks.
@@ -184,14 +184,16 @@ impl Resources {
         let mut attributes = program
             .attributes
             .iter()
-            .filter(|attribute| program.properties.iter().all(|property| property.attribute != attribute.id));
+            .enumerate()
+            .filter(|(_, attribute)| program.properties.iter().all(|property| property.name != attribute.name))
+            .map(|(index, _)| index);
         for input in &desc.vertices {
             vertex_count = vertex_count.min(input.entry.count());
             bind(&mut vertices, &mut attributes, input);
         }
         let instances = (!desc.instances.is_empty()).then(|| {
             let mut instances = VertexAttributeArray::new();
-            let mut attributes = program.instance_attributes.iter();
+            let mut attributes = 0..program.instance_attributes.len();
             for input in &desc.instances {
                 bind(&mut instances, &mut attributes, input);
             }
@@ -216,15 +218,15 @@ impl Resources {
 }
 
 /// Binds `input`'s attributes, one per format of its vertex, to the next of
-/// `attributes`.
-fn bind<'p>(array: &mut VertexAttributeArray, attributes: &mut impl Iterator<Item = &'p Attribute>, input: &Input<'_>) {
+/// `attributes`, the indexes of the program's attributes.
+fn bind(array: &mut VertexAttributeArray, attributes: &mut impl Iterator<Item = usize>, input: &Input<'_>) {
     let mut offset = 0;
     for &format in input.attributes {
         let Some(attribute) = attributes.next() else {
             debug_assert!(false, "a vertex with more attributes than its program");
             return;
         };
-        array.set_shared(attribute.id, SharedAttribute::new(input.entry.clone(), format, offset, input.stride));
+        array.set_shared(attribute, SharedAttribute::new(input.entry.clone(), format, offset, input.stride));
         offset += format.stride() as u32;
     }
 }

@@ -25,7 +25,6 @@ use crate::globe::grid;
 use crate::paint_parameters::{DepthTest, DrawTarget};
 use crate::render_static_data::RenderStaticData;
 use crate::shaders::programs;
-use crate::shaders::programs::ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE;
 
 /// The vertex layout of the masks' meshes: a tile position of two shorts.
 fn layout() -> VertexBufferLayout {
@@ -33,7 +32,7 @@ fn layout() -> VertexBufferLayout {
         stride: 4,
         step: VertexStep::Vertex,
         attributes: vec![VertexAttribute {
-            id: ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE as u32,
+            id: 0,
             format: AttributeDataType::Short2,
             offset: 0,
         }],

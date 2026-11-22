@@ -1,4 +1,4 @@
-//! The vertex attributes of a draw, by attribute id: each reads vertices of
+//! The vertex attributes of a draw, by attribute index: each reads vertices of
 //! the context's store, which other draws may share.
 
 use mln_gfx::gfx_types::AttributeDataType;
