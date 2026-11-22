@@ -52,10 +52,9 @@
 //! point's vertical above the sea-level sphere: the same heights at the
 //! center decide the altitude, and the eye, its near plane, rays and the
 //! move onto the ground work on the sphere ([`View::ground_under`],
-//! [`TransformState::recenter_on`]). There the globe's drags and zooms
-//! around a point turn the sea-level sphere under the pointer, and the other
-//! anchored moves hold their locations on the sphere at the center's
-//! altitude.
+//! [`TransformState::recenter_on`]). There the moves around an anchor, the
+//! globe's drags and zooms around a point among them, hold the location
+//! under it on the sea-level sphere.
 //!
 //! The terrain moves a camera at rest, as ground loads or changes under it,
 //! the clamp turns on or the terrain goes, without camera events, as in GL
@@ -431,13 +430,17 @@ impl Transform {
 
     /// The height of the plane on which a move around `anchor` holds the
     /// location under it ([`Self::anchor_plane`] for `grabbed`), or else
-    /// the plane at the center's altitude.
+    /// the plane at the center's altitude. On the globe it is sea level, the
+    /// sphere its zooms around a point solve on.
     pub(super) fn anchor_height(
         &mut self,
         grabbed: &ScreenCoordinate,
         anchor: &ScreenCoordinate,
         gesture: bool,
     ) -> f64 {
+        if self.view().is_globe() {
+            return 0.0;
+        }
         self.anchor_plane(grabbed, anchor, gesture).unwrap_or(self.view().center_altitude())
     }
 
