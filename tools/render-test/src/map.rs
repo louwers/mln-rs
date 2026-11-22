@@ -27,7 +27,9 @@ pub fn registry() -> Arc<Registry> {
     static REGISTRY: LazyLock<Arc<Registry>> = LazyLock::new(|| {
         let mut builder = RegistryBuilder::new();
         // An empty builder has no name the types could clash with.
-        let registered = mln_rs::register_builtins(&mut builder).and_then(|()| mln_ngon::register(&mut builder));
+        let registered = mln_rs::register_builtins(&mut builder)
+            .and_then(|()| mln_ngon::register(&mut builder))
+            .and_then(|()| mln_location_puck::register(&mut builder));
         debug_assert_eq!(registered, Ok(()));
         builder.build()
     });

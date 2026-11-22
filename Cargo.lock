@@ -2676,6 +2676,7 @@ name = "mln-rs-extension-tests"
 version = "0.0.13"
 dependencies = [
  "mln-rs",
+ "mln-rs-location-puck",
  "mln-rs-ngon",
  "parking_lot",
 ]
@@ -2872,6 +2873,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-location-puck"
+version = "0.0.13"
+dependencies = [
+ "mln-rs",
+]
+
+[[package]]
 name = "mln-rs-map-types"
 version = "0.0.13"
 dependencies = [
@@ -2979,6 +2987,7 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-headless",
  "mln-rs-image",
+ "mln-rs-location-puck",
  "mln-rs-map-types",
  "mln-rs-math",
  "mln-rs-ngon",

@@ -1,0 +1,54 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 256,
+      "height": 256
+    }
+  },
+  "center": [0, 20],
+  "zoom": 1,
+  "projection": {
+    "type": "globe"
+  },
+  "sources": {},
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#eeeeee"
+      }
+    },
+    {
+      "id": "front",
+      "type": "org.maplibre.location-puck",
+      "paint": {
+        "position": [0, 20],
+        "bearing": 45,
+        "bearing-visible": true,
+        "accuracy-radius": 800000,
+        "accuracy-border-width": 1
+      }
+    },
+    {
+      "id": "side",
+      "type": "org.maplibre.location-puck",
+      "paint": {
+        "position": [55, 35],
+        "bearing": 0,
+        "bearing-visible": true,
+        "accuracy-radius": 800000,
+        "accuracy-border-width": 1
+      }
+    },
+    {
+      "id": "far",
+      "type": "org.maplibre.location-puck",
+      "paint": {
+        "position": [180, 0],
+        "accuracy-radius": 800000
+      }
+    }
+  ]
+}

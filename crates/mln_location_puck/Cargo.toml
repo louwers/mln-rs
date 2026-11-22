@@ -1,0 +1,24 @@
+# The `org.maplibre.location-puck` layer type, written against the mln-rs
+# facade alone, as a crate outside mln-rs writes a layer type. Its render and
+# query tests (render-tests/) run in tools/render-test's suite.
+[package]
+name = "mln-rs-location-puck"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "A layer type for mln-rs that draws a device's location: a puck, its heading and its accuracy"
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+include.workspace = true
+
+[lib]
+name = "mln_location_puck"
+doctest = false
+
+[dependencies]
+mln_rs.workspace = true
+
+[lints]
+workspace = true

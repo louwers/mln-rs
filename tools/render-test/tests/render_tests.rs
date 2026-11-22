@@ -21,7 +21,10 @@ fn render_tests_through_the_codec() {
 
 /// The manifests of the extension layer types' own tests, which expect the
 /// same images on every backend.
-const EXTENSIONS: [(&str, &str); 1] = [("ngon", "../../crates/mln_ngon/render-tests/manifest.json")];
+const EXTENSIONS: [(&str, &str); 2] = [
+    ("ngon", "../../crates/mln_ngon/render-tests/manifest.json"),
+    ("location_puck", "../../crates/mln_location_puck/render-tests/manifest.json"),
+];
 
 #[test]
 fn extension_render_tests() {

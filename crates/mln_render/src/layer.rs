@@ -52,7 +52,8 @@
 //! freshly evaluated values; [`Layer::update`] brings up to date what the
 //! layer keeps for all its tiles, such as an atlas of images.
 //!
-//! A layer without tiles that draws at a geographic position draws
+//! A layer without tiles that draws at a geographic position, as the
+//! `mln_location_puck` crate's `org.maplibre.location-puck` does, draws
 //! around the position's [`Anchor`]s, one in each world copy the frame shows
 //! ([`Frame::anchors`]), in the units of an anchor's tile, which
 //! [`Frame::tile`] projects.

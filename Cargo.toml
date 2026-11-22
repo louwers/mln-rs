@@ -58,6 +58,7 @@ mln_glsl = { package = "mln-rs-glsl", path = "crates/mln_glsl", version = "=0.0.
 mln_headless = { package = "mln-rs-headless", path = "crates/mln_headless", version = "=0.0.13" }
 mln_image = { package = "mln-rs-image", path = "crates/mln_image", version = "=0.0.13" }
 mln_layers = { package = "mln-rs-layers", path = "crates/mln_layers", version = "=0.0.13" }
+mln_location_puck = { package = "mln-rs-location-puck", path = "crates/mln_location_puck", version = "=0.0.13" }
 mln_map_types = { package = "mln-rs-map-types", path = "crates/mln_map_types", version = "=0.0.13" }
 mln_math = { package = "mln-rs-math", path = "crates/mln_math", version = "=0.0.13" }
 mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.13" }

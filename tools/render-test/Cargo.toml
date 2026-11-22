@@ -33,6 +33,7 @@ mln_image.workspace = true
 mln_map_types.workspace = true
 mln_math.workspace = true
 # The extension layer types whose render and query tests the suite runs.
+mln_location_puck.workspace = true
 mln_ngon.workspace = true
 mln_render.workspace = true
 # The map that the tests draw.

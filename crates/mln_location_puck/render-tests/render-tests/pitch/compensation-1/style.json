@@ -1,0 +1,58 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 192,
+      "height": 192
+    }
+  },
+  "center": [0, 0],
+  "zoom": 13,
+  "pitch": 60,
+  "sources": {},
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#eeeeee"
+      }
+    },
+    {
+      "id": "puck-0",
+      "type": "org.maplibre.location-puck",
+      "paint": {
+        "position": [0, -0.004],
+        "bearing": 30,
+        "bearing-visible": true,
+        "shadow-radius": 14,
+        "accuracy-radius": 300,
+        "perspective-compensation": 1
+      }
+    },
+    {
+      "id": "puck-1",
+      "type": "org.maplibre.location-puck",
+      "paint": {
+        "position": [0, 0],
+        "bearing": 30,
+        "bearing-visible": true,
+        "shadow-radius": 14,
+        "accuracy-radius": 300,
+        "perspective-compensation": 1
+      }
+    },
+    {
+      "id": "puck-2",
+      "type": "org.maplibre.location-puck",
+      "paint": {
+        "position": [0, 0.03],
+        "bearing": 30,
+        "bearing-visible": true,
+        "shadow-radius": 14,
+        "accuracy-radius": 300,
+        "perspective-compensation": 1
+      }
+    }
+  ]
+}

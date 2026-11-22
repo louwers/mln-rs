@@ -24,6 +24,7 @@ mln_rs = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
+mln_location_puck.workspace = true
 mln_ngon.workspace = true
 parking_lot.workspace = true
 
