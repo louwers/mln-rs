@@ -1,5 +1,5 @@
 //! The handles of the renderer's resources that a layer keeps: buffers,
-//! textures and samplers.
+//! textures, the targets it draws into and samplers.
 
 use std::cell::Cell;
 use std::marker::PhantomData;
@@ -8,6 +8,7 @@ use std::rc::Rc;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::texture2d::SamplerState;
+use mln_util::Color;
 
 use crate::gfx::buffer_store::SharedBuffer;
 use crate::gfx::store::SharedTexture;
@@ -96,6 +97,30 @@ vertices! {
     [f32; 4] => Float4,
 }
 
+/// A vertex of a surface that an image drapes over
+/// ([`TileSurface`]): where it is, in its tile's units, and where it samples
+/// the image, in tile units from the image's top left corner.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
+pub struct ImageVertex {
+    /// Where the vertex is.
+    pub position: [i16; 2],
+    /// Where it samples the image.
+    pub texture: [u16; 2],
+}
+
+impl ImageVertex {
+    /// The vertex at `p` that samples the image at `t`.
+    #[must_use]
+    pub(crate) fn new(p: geometry::Point<i16>, t: geometry::Point<u16>) -> ImageVertex {
+        ImageVertex { position: [p.x, p.y], texture: [t.x, t.y] }
+    }
+}
+
+impl Vertex for ImageVertex {
+    const ATTRIBUTES: &'static [AttributeDataType] = &[AttributeDataType::Short2, AttributeDataType::Short2];
+}
+
 /// A buffer of `u16` indexes in the renderer's
 /// [`Resources`](crate::draw::Resources), each relative to the first vertex
 /// of its segment, with the segments that draw them: a mesh's primitives
@@ -119,6 +144,27 @@ impl IndexBuffer {
 /// a mesh samples ([`MeshDesc::texture`](crate::draw::MeshDesc::texture)).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Texture(pub(crate) SharedTexture);
+
+/// A texture in the renderer's [`Resources`](crate::draw::Resources) that
+/// a layer's draws draw into before the frame's passes
+/// ([`Draws::target`](crate::draw::Draws::target)), cleared to a color
+/// first, and which its meshes then sample ([`texture`](Self::texture)).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Target {
+    pub(crate) texture: Texture,
+    /// What the target is cleared to before its draws.
+    pub(crate) clear: Color,
+}
+
+impl Target {
+    /// The texture the target's draws draw into, to sample. It stays the
+    /// same texture when the target takes another size
+    /// ([`Resources::resize`](crate::draw::Resources::resize)).
+    #[must_use]
+    pub fn texture(&self) -> &Texture {
+        &self.texture
+    }
+}
 
 /// How meshes sample a texture ([`MeshDesc::texture`](crate::draw::MeshDesc::texture)),
 /// which a layer may change from frame to frame: each mesh bound with the
@@ -162,11 +208,13 @@ impl From<&Sampler> for Sampler {
 /// the tile's units: its extent's corners on Mercator, and on the globe a
 /// grid that bends with the planet and reaches a pole where the tile
 /// touches one, with the triangles that cover it
-/// ([`Resources::tile_surface`](crate::draw::Resources::tile_surface)).
+/// ([`Resources::tile_surface`](crate::draw::Resources::tile_surface)). The
+/// surface of a tile's image has vertices of the image's
+/// ([`ImageVertex`], [`DemTile::surface`](crate::layer::DemTile::surface)).
 #[derive(Clone, Debug)]
-pub struct TileSurface {
+pub struct TileSurface<V = [i16; 2]> {
     /// The vertices.
-    pub vertices: Buffer<[i16; 2]>,
+    pub vertices: Buffer<V>,
     /// Their triangles.
     pub triangles: IndexBuffer,
 }

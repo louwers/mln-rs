@@ -1,7 +1,7 @@
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_util::constants;
 
-use crate::tile::raster::RasterLayoutVertex;
+use crate::handles::ImageVertex;
 
 /// The most quads a segment of [`RenderStaticData::quad_segments`] draws:
 /// as many as its 16-bit indices reach.
@@ -28,16 +28,16 @@ impl RenderStaticData {
     /// The tile's four corners, each sampling the same corner of the tile's
     /// data.
     #[must_use]
-    pub(crate) fn raster_vertices() -> Vec<RasterLayoutVertex> {
+    pub(crate) fn raster_vertices() -> Vec<ImageVertex> {
         use geometry::Point;
 
         let e = constants::EXTENT as i16;
         let t = constants::EXTENT as u16;
         vec![
-            RasterLayoutVertex::new(Point::new(0, 0), Point::new(0, 0)),
-            RasterLayoutVertex::new(Point::new(e, 0), Point::new(t, 0)),
-            RasterLayoutVertex::new(Point::new(0, e), Point::new(0, t)),
-            RasterLayoutVertex::new(Point::new(e, e), Point::new(t, t)),
+            ImageVertex::new(Point::new(0, 0), Point::new(0, 0)),
+            ImageVertex::new(Point::new(e, 0), Point::new(t, 0)),
+            ImageVertex::new(Point::new(0, e), Point::new(0, t)),
+            ImageVertex::new(Point::new(e, e), Point::new(t, t)),
         ]
     }
 

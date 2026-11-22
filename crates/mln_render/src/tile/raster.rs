@@ -16,27 +16,8 @@ use mln_util::image::PremultipliedImage;
 use crate::gfx::buffer_store::SharedBuffer;
 use crate::gfx::context::Resources;
 use crate::gfx::mesh::Indexed;
+use crate::handles::ImageVertex;
 use crate::tile_mask::TileMask;
-
-/// A vertex of the geometry that draws a raster or raster-dem tile's data:
-/// its position in tile units, and where it samples the data, in tile units
-/// from the data's top left corner.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
-#[repr(C)]
-pub(crate) struct RasterLayoutVertex {
-    /// The position.
-    pub a1: [i16; 2],
-    /// Where it samples the data.
-    pub a2: [u16; 2],
-}
-
-impl RasterLayoutVertex {
-    /// The vertex at `p` that samples the data at `t`.
-    #[must_use]
-    pub(crate) fn new(p: Point<i16>, t: Point<u16>) -> RasterLayoutVertex {
-        RasterLayoutVertex { a1: [p.x, p.y], a2: [t.x, t.y] }
-    }
-}
 
 /// The quads a raster or raster-dem tile draws its data with, of the tiles
 /// its mask keeps, or none where the mask keeps the whole tile, which then
@@ -56,7 +37,7 @@ enum Quads {
     /// There are none: the mask keeps the whole tile.
     Whole,
     /// Their vertices and indices, until their upload moves them.
-    Data { vertices: Vec<RasterLayoutVertex>, indices: Vec<u16>, segments: Vec<SegmentBase> },
+    Data { vertices: Vec<ImageVertex>, indices: Vec<u16>, segments: Vec<SegmentBase> },
     /// In the context's stores.
     Stored(StoredQuads),
 }
@@ -64,7 +45,7 @@ enum Quads {
 /// The quads of a [`MaskedGeometry`] in the context's stores, and the
 /// segments that draw them.
 pub(crate) struct StoredQuads {
-    /// The quads' [`RasterLayoutVertex`]es.
+    /// The quads' vertices.
     pub vertices: SharedBuffer,
     /// The quads' triangles.
     pub indexes: SharedBuffer,
@@ -88,7 +69,7 @@ impl Default for MaskedGeometry {
 impl MaskedGeometry {
     /// The quads' vertices, before their upload moves them.
     #[cfg(test)]
-    pub(crate) fn vertices(&self) -> &[RasterLayoutVertex] {
+    pub(crate) fn vertices(&self) -> &[ImageVertex] {
         match &self.quads {
             Quads::Data { vertices, .. } => vertices,
             Quads::Whole | Quads::Stored(_) => &[],
@@ -142,7 +123,7 @@ impl MaskedGeometry {
     }
 
     /// Makes the geometry `vertices` and `indices` in `segments`.
-    pub(crate) fn set(&mut self, vertices: Vec<RasterLayoutVertex>, indices: Vec<u16>, segments: Vec<SegmentBase>) {
+    pub(crate) fn set(&mut self, vertices: Vec<ImageVertex>, indices: Vec<u16>, segments: Vec<SegmentBase>) {
         self.replace(Quads::Data { vertices, indices, segments });
     }
 
@@ -171,7 +152,7 @@ impl MaskedGeometry {
             let (left, top) = ((id.x as i32).wrapping_mul(extent), (id.y as i32).wrapping_mul(extent));
             let first = vertices.len();
             for (x, y) in [(left, top), (left + extent, top), (left, top + extent), (left + extent, top + extent)] {
-                vertices.push(RasterLayoutVertex::new(Point::new(x as i16, y as i16), Point::new(x as u16, y as u16)));
+                vertices.push(ImageVertex::new(Point::new(x as i16, y as i16), Point::new(x as u16, y as u16)));
             }
             let mut triangles = Indexed { indexes: &mut indices, segments: &mut segments };
             triangles.add(&mut vertices, first, [[0, 1, 2], [1, 2, 3]]);
@@ -248,12 +229,7 @@ impl RasterContents {
 
     /// Makes the geometry `vertices` and `indices` in `segments`, which an
     /// image source warps its image with.
-    pub(crate) fn set_geometry(
-        &mut self,
-        vertices: Vec<RasterLayoutVertex>,
-        indices: Vec<u16>,
-        segments: Vec<SegmentBase>,
-    ) {
+    pub(crate) fn set_geometry(&mut self, vertices: Vec<ImageVertex>, indices: Vec<u16>, segments: Vec<SegmentBase>) {
         self.geometry.set(vertices, indices, segments);
     }
 
@@ -309,7 +285,7 @@ mod tests {
         assert_eq!(geometry.indices(), [0, 1, 2, 1, 2, 3, 4, 5, 6, 5, 6, 7]);
         assert_eq!(geometry.segments().len(), 1);
         assert_eq!(geometry.segments()[0].index_length, 12);
-        assert_eq!(geometry.vertices()[7].a1, [8192, 8192]);
-        assert_eq!(geometry.vertices()[4].a2, [4096, 4096]);
+        assert_eq!(geometry.vertices()[7].position, [8192, 8192]);
+        assert_eq!(geometry.vertices()[4].texture, [4096, 4096]);
     }
 }

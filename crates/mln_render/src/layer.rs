@@ -24,8 +24,9 @@
 //!    [`Indexes`], and the values of its data-driven paint properties in
 //!    [`LayerBinders`], declared with
 //!    [`paint_property_binders!`](crate::paint_property_binders!), with the
-//!    images of its patterns ([`LayoutCx::need_patterns`]). A layer
-//!    without a source has the input [`ViewCover`].
+//!    images of its patterns ([`LayoutCx::need_patterns`]). A layer of a
+//!    raster-dem source has the input [`DemTiles`], each tile's elevations
+//!    ([`DemTile`]), and a layer without a source the input [`ViewCover`].
 //! 2. Its meshes. [`Layer::tile`] makes the value the layer keeps of a
 //!    frame tile, typically a [`Mesh`](crate::draw::Mesh) of the tile's
 //!    bucket ([`LayerBucket`]) with the program the type declares. The
@@ -92,13 +93,14 @@ use mln_util::constants::TILE_SIZE_D;
 use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
 use mln_util::geo::ScreenCoordinate;
+use mln_util::image::PremultipliedImage;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use mln_wire::Wire;
 
 pub use crate::bucket_geometry::GpuVec;
 pub use crate::bucket_upload::Upload;
-use crate::draw::{Buffer, Draws, IndexBuffer, Resources, Texture};
+use crate::draw::{Buffer, Draws, ImageVertex, IndexBuffer, Resources, Texture, TileSurface};
 pub use crate::erased_layer::EvaluatedLayer;
 use crate::geometry::feature_index::{FeatureIndex, FeatureIndexBuilder};
 pub use crate::gfx::mesh::Indexes;
@@ -113,6 +115,7 @@ pub use crate::paint_property_binder::{
 pub use crate::render_light::EvaluatedLight;
 use crate::render_tile::{TileContent, ViewPlace};
 use crate::tile::contents::GeometryContents;
+use crate::tile::dem::DemContents;
 pub use crate::tile_matrix::{TileProjection, TileTransform};
 use crate::tile_values::TileMap;
 
@@ -123,7 +126,8 @@ pub trait Layer: Sized + 'static {
     /// The style half: the type's name, source kind, properties and data.
     type Style: StyleLayerType;
 
-    /// What the layer draws from ([`Features`] or [`ViewCover`]). Its kind
+    /// What the layer draws from ([`Features`], [`DemTiles`] or
+    /// [`ViewCover`]). Its kind
     /// of source is the style half's
     /// [`INFO.source`](mln_style::layer_type::LayerTypeInfo::source), or
     /// the registration doesn't compile.
@@ -197,7 +201,7 @@ pub trait Layer: Sized + 'static {
 
 /// What a layer draws from: a kind of tile and what such a tile holds for
 /// the layer, its [`Data`](TileInput::Data). The kinds are the engine's:
-/// [`Features`] and [`ViewCover`].
+/// [`Features`], [`DemTiles`] and [`ViewCover`].
 #[expect(private_bounds, reason = "the engine's tile kinds are the only ones: `input::Find` seals the trait")]
 pub trait TileInput<S: StyleLayerType>: input::Find<S> + 'static {
     /// What a frame tile holds for the layer.
@@ -225,6 +229,53 @@ impl<S: StyleLayerType> TileInput<S> for ViewCover {
     type Data<'a> = ();
 }
 
+/// The tiles of a raster-dem source. A tile's data is its [`DemTile`].
+pub enum DemTiles {}
+
+impl<S: StyleLayerType> TileInput<S> for DemTiles {
+    type Data<'a> = DemTile<'a>;
+}
+
+/// A raster-dem tile's elevations, with the border that its neighbors'
+/// edges gave them, and the parts of the tile that it draws, which the
+/// frame's better tiles leave it. The engine drops the tile's value
+/// ([`Layer::tile`]) once either changes.
+#[derive(Clone, Copy)]
+pub struct DemTile<'a> {
+    contents: &'a DemContents,
+    tile: CanonicalTileID,
+}
+
+impl<'a> DemTile<'a> {
+    /// The elevations, a texel each, which [`unpack`](Self::unpack)
+    /// decodes: [`size`](Self::size) of them per side, inside a border of
+    /// one texel.
+    #[must_use]
+    pub fn image(self) -> &'a PremultipliedImage {
+        self.contents.dem().image()
+    }
+
+    /// The elevations per side of the tile, without the border.
+    #[must_use]
+    pub fn size(self) -> u32 {
+        self.contents.dem().dim() as u32
+    }
+
+    /// The factors that make a texel's red, green and blue, each from 0 to
+    /// 255, its elevation in meters: `r * f[0] + g * f[1] + b * f[2] - f[3]`.
+    #[must_use]
+    pub fn unpack(self) -> [f32; 4] {
+        self.contents.dem().unpack_vector()
+    }
+
+    /// The surface that the elevations drape over in `frame`: the parts of
+    /// the tile that it draws, each vertex sampling the elevations where it
+    /// is in the tile.
+    pub fn surface(self, res: &mut Resources, frame: &Frame<'_>) -> TileSurface<ImageVertex> {
+        res.image_surface(&self.tile, self.contents.geometry(), frame.camera.is_globe())
+    }
+}
+
 pub(crate) mod input {
     use mln_map_types::tile_cover::{TileCoverParameters, tile_cover};
     use mln_style::layer_type::{SourceKind, StyleLayerType};
@@ -233,10 +284,11 @@ pub(crate) mod input {
     use mln_util::range::Range as ZoomRange;
     use smallvec::SmallVec;
 
-    use super::{Features, Found, FrameTile, Layout, TileInput, ViewCover};
+    use super::{DemTile, DemTiles, Features, Found, FrameTile, Layout, TileInput, ViewCover};
     use crate::render_layer::{FrameSourceTiles, LayerUpdate};
     use crate::render_tile::{FoundTile, TileContent, ViewPlace};
-    use crate::tile::contents::GeometryContents;
+    use crate::tile::contents::{Contents, GeometryContents};
+    use crate::tile::dem::DemContents;
     use crate::tile_values::TileMap;
 
     /// The engine's side of a [`TileInput`]: which tiles a layer of it draws
@@ -306,6 +358,66 @@ pub(crate) mod input {
         crate::erased_layer::laid::<S, L>(contents.geometry()?, index)
     }
 
+    /// Finds the layer's frame tiles among `update`'s source's, in the
+    /// order the layer draws them, keeps where they are among the frame's
+    /// found tiles in `frame` and their ids in `values`: `find` says where
+    /// what a tile's content holds for the layer is, and whether it is a
+    /// bucket laid out with values that draw. Returns whether one is.
+    fn update_source<T>(
+        frame: &mut std::ops::Range<usize>,
+        update: &mut LayerUpdate<'_>,
+        values: &mut TileMap<T>,
+        find: impl Fn(TileContent<'_>) -> Option<(ViewPlace, bool)>,
+    ) -> bool {
+        let start = update.found.len();
+        let mut draws = false;
+        let mut ids: SmallVec<[OverscaledTileID; 64]> = SmallVec::new();
+        if let Some(source) = update.source
+            && let Some(order) = source.tile_order()
+        {
+            let tiles = source.render_tiles();
+            let placing;
+            let order = if update.places {
+                placing = crate::placement::tile_order(tiles, update.view.angle() as f32);
+                &placing
+            } else {
+                order
+            };
+            for &index in order {
+                let Some(tile) = tiles.get(index) else { continue };
+                let found = update.contents.get(index).copied().flatten().and_then(&find);
+                draws |= found.is_some_and(|(_, drawn)| drawn);
+                update.found.push(FoundTile { tile: index, view: found.map(|(place, _)| place) });
+                ids.push(*tile.overscaled_tile_id());
+            }
+        }
+        values.set_tiles(ids);
+        *frame = start..update.found.len();
+        draws
+    }
+
+    /// The layer's frame tiles that its update kept in `frame`, into
+    /// `tiles`, as [`Find::tiles`] says: `identity` says what a tile's
+    /// value is made of, at a place in its content.
+    fn source_tiles<'a, T>(
+        frame: &std::ops::Range<usize>,
+        found: &[FoundTile],
+        source: Option<FrameSourceTiles<'a>>,
+        values: &mut TileMap<T>,
+        tiles: &mut SmallVec<[Found<'a>; 64]>,
+        identity: impl Fn(TileContent<'a>, ViewPlace) -> Option<SimpleIdentity>,
+    ) {
+        let Some(source) = source else { return };
+        for (index, &FoundTile { tile, view }) in found.get(frame.clone()).unwrap_or_default().iter().enumerate() {
+            let Some(render_tile) = source.tiles.get(tile) else { continue };
+            let content = source.contents.get(tile).copied().flatten();
+            let at = content.zip(view);
+            values.show(index, at.and_then(|(content, place)| identity(content, place)));
+            let id = *render_tile.overscaled_tile_id();
+            tiles.push(Found { tile: FrameTile { index, id, unwrapped: render_tile.id }, at });
+        }
+    }
+
     impl<S: StyleLayerType, L: Layout<S>> Find<S> for Features<L> {
         const SOURCE: SourceKind = SourceKind::Geometry;
 
@@ -318,37 +430,13 @@ pub(crate) mod input {
             layer_id: &str,
             values: &mut TileMap<T>,
         ) -> bool {
-            let start = update.found.len();
-            let mut draws = false;
-            let mut ids: SmallVec<[OverscaledTileID; 64]> = SmallVec::new();
-            if let Some(source) = update.source
-                && let Some(order) = source.tile_order()
-            {
-                let tiles = source.render_tiles();
-                let placing;
-                let order = if update.places {
-                    placing = crate::placement::tile_order(tiles, update.view.angle() as f32);
-                    &placing
-                } else {
-                    order
-                };
-                for &index in order {
-                    let Some(tile) = tiles.get(index) else { continue };
-                    let content = update.contents.get(index).copied().flatten();
-                    let found = content.and_then(|content| {
-                        let TileContent::Tile(contents) = content else { return None };
-                        let contents = contents.geometry()?;
-                        let place = contents.result.layer_render_data.find(layer_id)?;
-                        Some((crate::erased_layer::laid::<S, L>(contents, place)?, ViewPlace::Laid(place)))
-                    });
-                    draws |= found.is_some_and(|(data, _)| identity(data).is_some());
-                    update.found.push(FoundTile { tile: index, view: found.map(|(_, place)| place) });
-                    ids.push(*tile.overscaled_tile_id());
-                }
-            }
-            values.set_tiles(ids);
-            *frame = start..update.found.len();
-            draws
+            update_source(frame, update, values, |content| {
+                let TileContent::Tile(contents) = content else { return None };
+                let contents = contents.geometry()?;
+                let place = contents.result.layer_render_data.find(layer_id)?;
+                let data = crate::erased_layer::laid::<S, L>(contents, place)?;
+                Some((ViewPlace::Laid(place), identity(data).is_some()))
+            })
         }
 
         fn tiles<'a, T>(
@@ -358,15 +446,7 @@ pub(crate) mod input {
             values: &mut TileMap<T>,
             tiles: &mut SmallVec<[Found<'a>; 64]>,
         ) {
-            let Some(source) = source else { return };
-            for (index, &FoundTile { tile, view }) in found.get(frame.clone()).unwrap_or_default().iter().enumerate() {
-                let Some(render_tile) = source.tiles.get(tile) else { continue };
-                let content = source.contents.get(tile).copied().flatten();
-                let at = content.zip(view);
-                values.show(index, at.and_then(|(content, place)| identity(self::at::<S, L>(content, place)?)));
-                let id = *render_tile.overscaled_tile_id();
-                tiles.push(Found { tile: FrameTile { index, id, unwrapped: render_tile.id }, at });
-            }
+            source_tiles(frame, found, source, values, tiles, |content, place| identity(at::<S, L>(content, place)?));
         }
 
         fn data(found: Found<'_>) -> Option<<Self as TileInput<S>>::Data<'_>> {
@@ -378,6 +458,47 @@ pub(crate) mod input {
         fn laid<'a>(contents: &'a GeometryContents, layer_id: &str) -> Option<<Self as TileInput<S>>::Data<'a>> {
             let index = contents.result.layer_render_data.find(layer_id)?;
             crate::erased_layer::laid::<S, L>(contents, index)
+        }
+    }
+
+    /// A tile's DEM, if `content` is a raster-dem tile's with one.
+    fn dem(content: TileContent<'_>) -> Option<&DemContents> {
+        match content {
+            TileContent::Tile(Contents::Dem(dem)) if dem.has_data() => Some(dem),
+            _ => None,
+        }
+    }
+
+    impl<S: StyleLayerType> Find<S> for DemTiles {
+        const SOURCE: SourceKind = SourceKind::RasterDem;
+
+        /// Where the layer's tiles are among the frame's found tiles.
+        type Frame = std::ops::Range<usize>;
+
+        fn update<T>(
+            frame: &mut Self::Frame,
+            update: &mut LayerUpdate<'_>,
+            _layer_id: &str,
+            values: &mut TileMap<T>,
+        ) -> bool {
+            update_source(frame, update, values, |content| {
+                matches!(content, TileContent::Tile(Contents::Dem(_))).then_some((ViewPlace::Own, false))
+            })
+        }
+
+        fn tiles<'a, T>(
+            frame: &Self::Frame,
+            found: &[FoundTile],
+            source: Option<FrameSourceTiles<'a>>,
+            values: &mut TileMap<T>,
+            tiles: &mut SmallVec<[Found<'a>; 64]>,
+        ) {
+            source_tiles(frame, found, source, values, tiles, |content, _| Some(dem(content)?.id()));
+        }
+
+        fn data(found: Found<'_>) -> Option<<Self as TileInput<S>>::Data<'_>> {
+            let (content, _) = found.at?;
+            Some(DemTile { contents: dem(content)?, tile: found.tile.id.canonical })
         }
     }
 
@@ -500,6 +621,10 @@ pub struct UpdateCx<'a, L: Layer> {
     pub frame: &'a Frame<'a>,
     /// The style's images.
     pub images: &'a ImageStore,
+    /// The deepest zoom at which the layer's source has tiles of its own,
+    /// past which its tiles overscale those; `None` for a layer without a
+    /// source, or before the source knows it.
+    pub source_max_zoom: Option<u8>,
     /// The layer's frame tiles and its values of them.
     pub tiles: Tiles<'a, L>,
     /// The renderer's resources.

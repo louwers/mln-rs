@@ -9,7 +9,7 @@ use mln_gfx::rendering_stats::RenderingStats;
 use mln_util::image::{AlphaImage, PremultipliedImage};
 use mln_util::size::Size;
 
-use crate::gfx::resources::{Device, SharedGpuTexture};
+use crate::gfx::resources::{Device, GpuTexture, SharedGpuTexture};
 
 /// A texture of the renderer: its size and format, the image
 /// it waits to upload, and once made, a texture of the backend's
@@ -21,6 +21,9 @@ pub(crate) struct Texture2D {
     size: Size,
     format: TextureFormat,
     render_target: bool,
+    /// The depth that passes drawing into a render target draw with, of its
+    /// size, once one did.
+    depth: Option<GpuTexture>,
     /// The image the next upload writes.
     image: Option<Pending>,
 }
@@ -50,6 +53,7 @@ impl Texture2D {
             size: Size::new(0, 0),
             format: TextureFormat::Rgba8Unorm,
             render_target: false,
+            depth: None,
             image: None,
         }
     }
@@ -170,10 +174,27 @@ impl Texture2D {
         self.size.width as usize * self.size.height as usize * texel
     }
 
+    /// The depth texture of `format` that a pass drawing into the texture,
+    /// a render target, draws with, made through `gpu` and `device` unless
+    /// it is.
+    pub(crate) fn depth(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        device: &mut Device,
+        format: TextureFormat,
+    ) -> Result<TextureId, GpuError> {
+        if let Some(depth) = &self.depth {
+            return Ok(depth.id());
+        }
+        let depth = device.attachment(gpu, "render target depth", self.size, format)?;
+        Ok(self.depth.insert(depth).id())
+    }
+
     /// Lets go of the backend's texture, which goes once the bindings made
-    /// of it do.
+    /// of it do, and of its depth.
     fn release(&mut self) {
         self.texture = None;
+        self.depth = None;
     }
 }
 

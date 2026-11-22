@@ -50,6 +50,8 @@ pub(crate) struct FrameSourceTiles<'a> {
     pub(crate) tiles: &'a [RenderTile],
     /// What each of `tiles` holds, at its index.
     pub(crate) contents: &'a [Option<TileContent<'a>>],
+    /// See [`RenderSource::max_zoom`].
+    pub(crate) max_zoom: Option<u8>,
 }
 
 impl<'a> FrameSourceTiles<'a> {
@@ -57,7 +59,7 @@ impl<'a> FrameSourceTiles<'a> {
     /// indexes.
     #[must_use]
     pub(crate) fn new(source: &'a dyn RenderSource, contents: &'a [Option<TileContent<'a>>]) -> Self {
-        FrameSourceTiles { tiles: source.render_tiles(), contents }
+        FrameSourceTiles { tiles: source.render_tiles(), contents, max_zoom: source.max_zoom() }
     }
 }
 
@@ -317,9 +319,13 @@ pub(crate) trait RenderLayer: Any {
     /// unless the frame draws the layer.
     fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(&'a FrameDraws));
 
-    /// Uploads the meshes of the layer's draw groups, before the frame draws
-    /// them.
+    /// Uploads the meshes of the layer's draw groups and of its draws into
+    /// its targets, before the frame draws them.
     fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Resources);
+
+    /// Draws the layer's draws into its targets through `gpu`, the
+    /// context's, before the frame's passes.
+    fn render_targets(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>);
 
     /// Draws the pass's draws of the layer's draw groups into the open pass
     /// of `gpu`, the context's, in `order`, each at its depth.
@@ -461,6 +467,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
             layer: values,
             frame: &frame,
             images,
+            source_max_zoom: source.and_then(|source| source.max_zoom),
             tiles: Tiles { found: &tiles, values: tile_values },
             res,
         });
@@ -513,9 +520,15 @@ impl<L: Layer> RenderLayer for Hosted<L> {
 
     fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Resources) {
         if self.renderable {
-            for group in self.frame_draws.groups() {
+            for group in self.frame_draws.target_groups().chain(self.frame_draws.groups()) {
                 group.upload(gpu, context);
             }
+        }
+    }
+
+    fn render_targets(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        if self.renderable {
+            self.frame_draws.render_targets(gpu, parameters);
         }
     }
 

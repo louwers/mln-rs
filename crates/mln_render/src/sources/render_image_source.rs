@@ -21,10 +21,11 @@ use mln_util::range::Range;
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::gfx::context::Resources;
 use crate::globe::surface_granularity;
+use crate::handles::ImageVertex;
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters};
 use crate::render_tile::RenderTile;
 use crate::source::{ImageOf, SourceImage};
-use crate::tile::raster::{RasterContents, RasterLayoutVertex};
+use crate::tile::raster::RasterContents;
 use crate::tile::store::TileStore;
 use crate::tile_parameters::TileParameters;
 
@@ -137,7 +138,7 @@ fn build_image_mesh(image: &mut RasterContents, corners: &GeometryCoordinates, c
             let u = f64::from(i) / f64::from(cells);
             let v = f64::from(j) / f64::from(cells);
             let position = warp_position(corners, &warp, u, v);
-            vertices.push(RasterLayoutVertex::new(
+            vertices.push(ImageVertex::new(
                 Point::new(to_vertex_coordinate(position.x), to_vertex_coordinate(position.y)),
                 Point::new(
                     (u * f64::from(constants::EXTENT)).round() as u16,

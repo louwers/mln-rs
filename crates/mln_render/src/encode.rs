@@ -10,23 +10,26 @@
 //! frame's passes: with the
 //! masks of the layer's tiles in the stencil where its draws clip, into a
 //! texture of its own where it composites, and with no call back into the
-//! layer. [`FrameDraws`] are a group's draws as the engine draws them.
+//! layer. A group of draws into one of the layer's targets draws before the
+//! passes. [`FrameDraws`] are a group's draws as the engine draws them.
 
 use std::any::Any;
 use std::ops::Range;
 
-use mln_gfx::gpu::Gpu;
+use mln_gfx::gpu::{Gpu, Scissor};
 use mln_gfx::shaders::block::{Block, DrawBlocks, UniformBlock};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::{BufferKind, PROJECTION_BUFFER, Program, Projection};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::identity::SimpleIdentity;
+use mln_util::logging::{Event, Log};
 use smallvec::SmallVec;
 
 use crate::draw_objects::Mesh;
 use crate::gfx::context::Resources;
 use crate::gfx::store::MeshKey;
 use crate::gfx::uniform_buffer::UniformBufferArray;
+use crate::handles::Target;
 use crate::layer_composite::Composite;
 use crate::paint_parameters::{Composited, DepthTest, PaintParameters, Stencil};
 use crate::paint_property_binder::MeshPaint;
@@ -417,22 +420,28 @@ impl Pushes {
 }
 
 /// A layer's draws of a frame, in groups: the layer's [`main`](Draws::main)
-/// group in its place in the layers' order, and its
-/// [`overlay`](Draws::overlay) above it. The engine keeps a layer's groups
-/// from frame to frame, with the memory of their draws: each keeps its
-/// place in the layers' order and depth while the layer renders, in frames
-/// it draws nothing in too, the overlay from the first frame that asks for
-/// it.
+/// group in its place in the layers' order, its [`overlay`](Draws::overlay)
+/// above it, and the draws into each of its [`target`](Draws::target)s
+/// before the frame's passes. The engine keeps a layer's groups from frame
+/// to frame, with the memory of their draws: the main group and the overlay
+/// each keep their place in the layers' order and depth while the layer
+/// renders, in frames they draw nothing in too, the overlay from the first
+/// frame that asks for it.
 pub struct Draws {
     main: Group,
     overlay: Option<Group>,
-    /// The overlay's frame, as `begin` started the main group's.
+    /// The groups of the targets that the frame draws into, in the order it
+    /// first asked for them, then spare groups of the last frame's.
+    targets: Vec<(Target, Group)>,
+    /// How many of `targets` the frame asked for.
+    targets_used: usize,
+    /// The frame, as `begin` started the main group's.
     frame: (f32, bool, bool),
 }
 
 impl Draws {
     pub(crate) fn new() -> Draws {
-        Draws { main: Group::new(), overlay: None, frame: (0.0, false, false) }
+        Draws { main: Group::new(), overlay: None, targets: Vec::new(), targets_used: 0, frame: (0.0, false, false) }
     }
 
     /// The group of the layer's draws in its place in the layers' order.
@@ -452,6 +461,31 @@ impl Draws {
         })
     }
 
+    /// The group of the layer's draws into `target`, which draws into it
+    /// before the frame's passes, once they cleared it: in each of the
+    /// frame's passes, at its own depth, with no masks and in no composite.
+    /// The frame draws into the targets of a layer in the order it first
+    /// asked for their groups, after those of the layers below it, and
+    /// clears each that it asked for, whether or not it draws into it.
+    pub fn target(&mut self, target: &Target) -> &mut Group {
+        let index = match self.targets[..self.targets_used].iter().position(|(asked, _)| asked == target) {
+            Some(index) => index,
+            None => {
+                let index = self.targets_used;
+                self.targets_used += 1;
+                if index == self.targets.len() {
+                    self.targets.push((target.clone(), Group::new()));
+                } else {
+                    self.targets[index].0 = target.clone();
+                }
+                let (zoom, opaque, _) = self.frame;
+                self.targets[index].1.begin(zoom, opaque, false);
+                index
+            }
+        };
+        &mut self.targets[index].1
+    }
+
     /// Starts the layer's draws of a frame, as [`Group::begin`] does.
     pub(crate) fn begin(&mut self, zoom: f32, opaque: bool, frame_depth: bool) {
         self.frame = (zoom, opaque, frame_depth);
@@ -459,6 +493,7 @@ impl Draws {
         if let Some(overlay) = &mut self.overlay {
             overlay.begin(zoom, opaque, frame_depth);
         }
+        self.targets_used = 0;
     }
 
     /// Drops the frame's draws.
@@ -467,6 +502,8 @@ impl Draws {
         if let Some(overlay) = &mut self.overlay {
             overlay.clear();
         }
+        self.targets.clear();
+        self.targets_used = 0;
     }
 
     /// Makes the pushed draws the frame's, as [`Group::finish`] does.
@@ -481,11 +518,58 @@ impl Draws {
         if let Some(overlay) = &mut self.overlay {
             overlay.finish(gpu, context, paint, tiles);
         }
+        self.targets.truncate(self.targets_used);
+        for (_, group) in &mut self.targets {
+            debug_assert!(
+                !group.pushes.pushed.iter().any(|pushed| pushed.draw.clip),
+                "a draw into a target that clips"
+            );
+            group.finish(gpu, context, paint, []);
+        }
     }
 
-    /// The groups, bottom to top.
+    /// The groups in the layers' order, bottom to top.
     pub(crate) fn groups(&self) -> impl DoubleEndedIterator<Item = &Group> {
         std::iter::once(&self.main).chain(&self.overlay)
+    }
+
+    /// The groups of the frame's targets, in the order they draw.
+    pub(crate) fn target_groups(&self) -> impl Iterator<Item = &Group> {
+        self.targets.iter().map(|(_, group)| group)
+    }
+
+    /// Draws the groups of the frame's targets into them through `gpu`,
+    /// each in a pass of its own that clears the target first, outside the
+    /// frame's passes.
+    pub(crate) fn render_targets(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        for (target, group) in &self.targets {
+            let size = match parameters.context.target_pass(gpu, target) {
+                Ok(pass) => parameters.begin_pass(gpu, pass).map(|()| pass.size),
+                Err(error) => Err(error),
+            };
+            let size = match size {
+                Ok(size) => size,
+                Err(error) => {
+                    Log::error(Event::Render, format!("Beginning a target's pass failed: {error}"));
+                    continue;
+                }
+            };
+            let frame_scissor = std::mem::replace(
+                &mut parameters.scissor,
+                Scissor { x: 0, y: 0, width: size.width, height: size.height },
+            );
+            for pass in [Pass::Opaque, Pass::Translucent] {
+                parameters.pass = pass;
+                parameters.depth_range_size =
+                    1.0 - (3 * PaintParameters::NUM_SUBLAYERS) as f32 * PaintParameters::DEPTH_EPSILON;
+                parameters.current_layer = 0;
+                group.render(gpu, parameters);
+            }
+            if let Err(error) = parameters.end_pass(gpu) {
+                Log::error(Event::Render, format!("Ending a target's pass failed: {error}"));
+            }
+            parameters.scissor = frame_scissor;
+        }
     }
 }
 

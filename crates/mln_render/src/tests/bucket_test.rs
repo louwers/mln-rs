@@ -5,7 +5,8 @@ use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
 use super::with_context;
-use crate::tile::raster::{RasterContents, RasterLayoutVertex};
+use crate::handles::ImageVertex;
+use crate::tile::raster::RasterContents;
 use crate::tile_mask::TileMask;
 
 // gtest: Buckets.RasterBucket
@@ -48,8 +49,8 @@ fn mask(ids: &[(u8, u32, u32)]) -> TileMask {
     mask
 }
 
-fn raster_vertex(p: (i16, i16), t: (u16, u16)) -> RasterLayoutVertex {
-    RasterLayoutVertex::new(Point::new(p.0, p.1), Point::new(t.0, t.1))
+fn raster_vertex(p: (i16, i16), t: (u16, u16)) -> ImageVertex {
+    ImageVertex::new(Point::new(p.0, p.1), Point::new(t.0, t.1))
 }
 
 // gtest: Buckets.RasterBucketMaskEmpty
@@ -58,7 +59,7 @@ fn raster_bucket_mask_empty() {
     let mut bucket = RasterContents::with_shared_image(None);
     bucket.set_mask(mask(&[]));
     let geometry = bucket.geometry();
-    assert_eq!(Vec::<RasterLayoutVertex>::new(), geometry.vertices());
+    assert_eq!(Vec::<ImageVertex>::new(), geometry.vertices());
     assert_eq!(Vec::<u16>::new(), geometry.indices());
     assert_eq!(Vec::<(usize, usize, usize, usize)>::new(), segment_tuples(geometry.segments()));
 }
@@ -72,7 +73,7 @@ fn raster_bucket_mask_no_children() {
     // A mask of 0/0/0 doesn't produce buffers since we're instead using the
     // global shared buffers.
     let geometry = bucket.geometry();
-    assert_eq!(Vec::<RasterLayoutVertex>::new(), geometry.vertices());
+    assert_eq!(Vec::<ImageVertex>::new(), geometry.vertices());
     assert_eq!(Vec::<u16>::new(), geometry.indices());
     assert_eq!(Vec::<(usize, usize, usize, usize)>::new(), segment_tuples(geometry.segments()));
 }

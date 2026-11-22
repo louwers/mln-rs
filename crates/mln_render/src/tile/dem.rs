@@ -21,18 +21,16 @@ pub(crate) struct DemContents {
     id: SimpleIdentity,
     geometry: MaskedGeometry,
     dem: DemData,
-    /// Counts the changes of the DEM's border.
-    dem_generation: u64,
 }
 
 impl DemContents {
     #[must_use]
     pub(crate) fn new(dem: DemData) -> Self {
-        DemContents { id: SimpleIdentity::new(), geometry: MaskedGeometry::default(), dem, dem_generation: 0 }
+        DemContents { id: SimpleIdentity::new(), geometry: MaskedGeometry::default(), dem }
     }
 
-    /// The contents' identity, which tells what the layers keep of them
-    /// apart. Contents of a new DEM have a new one.
+    /// The contents' identity, which tells what the layers make of them
+    /// apart: contents whose DEM or geometry changed have a new one.
     #[must_use]
     pub(crate) fn id(&self) -> SimpleIdentity {
         self.id
@@ -50,20 +48,24 @@ impl DemContents {
         &self.dem
     }
 
-    /// The number of times the DEM's border changed, after which the layers
-    /// make what they made of the DEM again.
-    #[must_use]
-    pub(crate) fn dem_generation(&self) -> u64 {
-        self.dem_generation
-    }
-
     pub(crate) fn set_mask(&mut self, mask: TileMask) {
+        let generation = self.geometry.generation();
         self.geometry.set_mask(mask);
+        self.renew_if(generation != self.geometry.generation());
     }
 
     /// [`MaskedGeometry::unmask`].
     pub(crate) fn unmask(&mut self) {
+        let generation = self.geometry.generation();
         self.geometry.unmask();
+        self.renew_if(generation != self.geometry.generation());
+    }
+
+    /// Gives the contents a new identity where `changed`.
+    fn renew_if(&mut self, changed: bool) {
+        if changed {
+            self.id = SimpleIdentity::new();
+        }
     }
 
     /// Whether there is a DEM to draw.
@@ -133,5 +135,5 @@ pub(crate) fn backfill_pair(tile: &mut Contents, border: &mut Contents, offset: 
 /// `tile`'s DEM border.
 fn backfill_border(tile: &mut DemContents, border: &DemContents, offset: Offset) {
     tile.dem.backfill_border(&border.dem, offset.dx, offset.dy);
-    tile.dem_generation += 1;
+    tile.renew_if(true);
 }

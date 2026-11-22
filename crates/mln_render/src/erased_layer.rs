@@ -315,6 +315,8 @@ impl<S: StyleLayerType, L: Layout<S>> LayoutOf<S> for Features<L> {
 
 impl<S: StyleLayerType> LayoutOf<S> for crate::layer::ViewCover {}
 
+impl<S: StyleLayerType> LayoutOf<S> for crate::layer::DemTiles {}
+
 /// `group`'s layers as `S` layers' values; fails if one is another type's.
 // Inline for small groups, since a tile's layout recovers each of its groups.
 fn recover_group<S: StyleLayerType>(

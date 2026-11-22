@@ -672,6 +672,9 @@ fn draw(
     num_draw_groups: usize,
     depth_range_size: f32,
 ) {
+    // What the layers draw into their targets, which the passes sample.
+    orchestrator.render_targets(gpu, parameters);
+
     // The frame's pass, cleared to the backdrop, which shows where there are
     // no tiles.
     let color = if parameters.debug_options.contains(MapDebugOptions::OVERDRAW) {

@@ -9,19 +9,23 @@
 //! no `Gpu`: each call that makes, writes or destroys a resource takes the
 //! one the renderer was made for.
 
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use mln_gfx::ColorMode;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::{
-    BufferId, BufferUsage, Caps, Gpu, GpuError, PipelineId, PipelineKey, ResourceId, SamplerId, ShaderId, ShaderKey,
-    TextureFormat, TextureId,
+    BufferId, BufferUsage, Caps, ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadOp, PipelineId,
+    PipelineKey, ResourceId, SamplerId, ShaderId, ShaderKey, TargetFormats, TextureId,
 };
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::shaders::program::{Program, ProgramParameters};
-use mln_gfx::texture2d::SamplerState;
-use mln_gfx::types::TextureChannelDataType;
+use mln_gfx::texture2d::{SamplerState, texture_format};
+use mln_gfx::types::{TextureChannelDataType, TexturePixelType};
+use mln_tile_id::CanonicalTileID;
+use mln_util::Color;
+use mln_util::constants::EXTENT;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -29,6 +33,7 @@ use mln_util::size::Size;
 use crate::draw_objects::{DrawObjects, Mesh};
 use crate::gfx::buffer::{self, Buffer};
 use crate::gfx::buffer_store::{BufferStore, SharedBuffer, StoredBuffer};
+use crate::gfx::mesh::Indexed;
 use crate::gfx::owned::{Held, Owned};
 use crate::gfx::release::{Release, destroy_order};
 use crate::gfx::resources::{Device, SharedGpuTexture};
@@ -36,9 +41,12 @@ use crate::gfx::store::{MeshKey, SharedTexture, Store, StoreKey, TextureKey};
 use crate::gfx::texture2d::{Texture2D, TextureMut};
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::vertex_attribute::Uniforms;
+use crate::handles::{ImageVertex, TileSurface};
 use crate::paint_parameters::Frame;
 use crate::paint_property_binder::MeshPaint;
 use crate::render_static_data::RenderStaticData;
+use crate::tile::raster::MaskedGeometry;
+use crate::tile_mask::TileMask;
 
 /// The renderer's GPU resources: the buffers, textures and meshes that
 /// layers make and keep handles of, with what the device allows
@@ -77,7 +85,13 @@ pub struct Resources {
     next_mesh_seq: u64,
     /// The tiles' surfaces: the extent's quad, and the globe's grid of each
     /// zoom, by whether it touches the north and the south pole.
-    surfaces: HashMap<Option<(u8, bool, bool)>, crate::handles::TileSurface>,
+    surfaces: HashMap<Option<(u8, bool, bool)>, TileSurface>,
+    /// The surface that a whole tile's image drapes over on Mercator.
+    image_quad: Option<TileSurface<ImageVertex>>,
+    /// The globe's grids of the parts of tiles that their masks keep, by
+    /// zoom, poles and mask, each with the last of `grid_uses` it served.
+    masked_grids: BTreeMap<(u8, bool, bool, TileMask), (TileSurface<ImageVertex>, u64)>,
+    grid_uses: u64,
     /// The indexes of quads, each four vertices after the last
     /// ([`quads`](Self::quads)), once a layer asked for them.
     quads: Option<crate::draw::Buffer<u16>>,
@@ -110,6 +124,9 @@ impl Resources {
             meshes: Store::default(),
             next_mesh_seq: 0,
             surfaces: HashMap::default(),
+            image_quad: None,
+            masked_grids: BTreeMap::new(),
+            grid_uses: 0,
             quads: None,
             releases: Vec::new(),
             doomed: Vec::new(),
@@ -171,9 +188,56 @@ impl Resources {
         Some(TextureMut::new(self.textures.get_mut(&texture.0)?))
     }
 
+    /// A target of `size` texels with RGBA channels of `channel`, or of
+    /// unsigned bytes for half floats that the device can't draw into
+    /// ([`Caps::half_float_render_targets`]), cleared to `clear` before the
+    /// draws into it.
+    pub fn target(&mut self, size: Size, channel: TextureChannelDataType, clear: Color) -> crate::draw::Target {
+        let format = texture_format(TexturePixelType::RGBA, self.render_target_type(channel));
+        let texture = self.add_texture_with(|texture| {
+            texture.set_size(size);
+            texture.set_format(format);
+            texture.set_render_target();
+        });
+        crate::draw::Target { texture: crate::draw::Texture(texture), clear }
+    }
+
+    /// The pass that draws into `target`, which clears it to its color and
+    /// its depth, if the device draws targets with one, to 1, making their
+    /// textures through `gpu`.
+    pub(crate) fn target_pass(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        target: &crate::draw::Target,
+    ) -> Result<crate::paint_parameters::OpenPass, GpuError> {
+        let depth_format = self.caps.render_target_depth;
+        let (texture, device) = self.texture_entry(&target.texture.0)?;
+        let color = texture.create(gpu, device)?;
+        let depth = depth_format.map(|format| texture.depth(gpu, device, format)).transpose()?;
+        Ok(crate::paint_parameters::OpenPass {
+            label: "render target",
+            color: Some(ColorAttachment { texture: color, load: LoadOp::Clear(target.clear) }),
+            depth_stencil: depth.map(|depth| DepthStencilAttachment {
+                texture: depth,
+                depth: LoadOp::Clear(1.0),
+                stencil: LoadOp::Load,
+            }),
+            size: texture.size(),
+            targets: TargetFormats { color: Some(texture.format()), depth_stencil: depth.and(depth_format) },
+        })
+    }
+
+    /// Makes `target` `size` texels from its next draws on, unless it is.
+    /// What it held goes, and its meshes sample the new texture.
+    pub fn resize(&mut self, target: &crate::draw::Target, size: Size) {
+        if let Some(mut texture) = self.texture_mut(&target.texture) {
+            texture.set_size(size);
+        }
+    }
+
     /// The surface of `tile` in `frame`'s projection, which every tile
     /// alike shares.
-    pub fn tile_surface(&mut self, tile: crate::layer::FrameTile, frame: &Frame<'_>) -> crate::handles::TileSurface {
+    pub fn tile_surface(&mut self, tile: crate::layer::FrameTile, frame: &Frame<'_>) -> TileSurface {
         let canonical = tile.id().canonical;
         let key = frame
             .camera
@@ -184,18 +248,81 @@ impl Resources {
         }
         let surface = if key.is_some() {
             let grid = crate::globe::tile_grid(&canonical);
-            crate::handles::TileSurface {
+            TileSurface {
                 vertices: self.buffer(&grid.vertices),
                 triangles: self.index_buffer(grid.triangles.as_flattened()),
             }
         } else {
-            crate::handles::TileSurface {
+            TileSurface {
                 vertices: self.buffer(&RenderStaticData::tile_vertices()),
                 triangles: self.index_buffer(&RenderStaticData::quad_triangle_indices()),
             }
         };
         self.surfaces.insert(key, surface.clone());
         surface
+    }
+
+    /// The surface that the image of the tile `tile`, which `geometry`
+    /// masks, drapes over in a frame on the globe or not: the parts of the
+    /// tile that the mask keeps.
+    pub(crate) fn image_surface(
+        &mut self,
+        tile: &CanonicalTileID,
+        geometry: &MaskedGeometry,
+        globe: bool,
+    ) -> TileSurface<ImageVertex> {
+        if globe {
+            return self.masked_grid(tile, geometry.mask());
+        }
+        if let Some(quads) = geometry.quads() {
+            let buffer = crate::draw::Buffer::new(quads.indexes.clone());
+            let triangles = crate::draw::IndexBuffer { buffer, segments: quads.segments.clone() };
+            return TileSurface { vertices: crate::draw::Buffer::new(quads.vertices.clone()), triangles };
+        }
+        if let Some(quad) = &self.image_quad {
+            return quad.clone();
+        }
+        let quad = TileSurface {
+            vertices: self.buffer(&RenderStaticData::raster_vertices()),
+            triangles: self.index_buffer(&RenderStaticData::quad_triangle_indices()),
+        };
+        self.image_quad.insert(quad).clone()
+    }
+
+    /// The globe's grid of the parts of the tile `tile` that `mask` keeps,
+    /// whose texture positions stay inside the tile, so that the rows out
+    /// to a pole sample the tile's edge. Tiles that load go through many
+    /// masks: the grid that served longest ago makes room past 64, so that
+    /// those every frame draws stay.
+    fn masked_grid(&mut self, tile: &CanonicalTileID, mask: &TileMask) -> TileSurface<ImageVertex> {
+        const MAX_GRIDS: usize = 64;
+        let key = (tile.z, tile.y == 0, u64::from(tile.y) == (1u64 << tile.z) - 1, mask.clone());
+        self.grid_uses += 1;
+        if let Some((grid, used)) = self.masked_grids.get_mut(&key) {
+            *used = self.grid_uses;
+            return grid.clone();
+        }
+        if self.masked_grids.len() >= MAX_GRIDS
+            && let Some(oldest) =
+                self.masked_grids.iter().min_by_key(|(_, (_, used))| *used).map(|(key, _)| key.clone())
+        {
+            self.masked_grids.remove(&oldest);
+        }
+        let (mut vertices, mut indexes, mut segments) = (Vec::new(), Vec::new(), Vec::new());
+        for grid in crate::globe::masked_tile_grids(tile, mask) {
+            let first = vertices.len();
+            let clamp = |value: i16| i32::from(value).clamp(0, EXTENT) as u16;
+            vertices.extend(
+                grid.vertices.iter().map(|&[x, y]| ImageVertex { position: [x, y], texture: [clamp(x), clamp(y)] }),
+            );
+            let mut triangles = Indexed { indexes: &mut indexes, segments: &mut segments };
+            triangles.add(&mut vertices, first, grid.triangles.iter().map(|t| t.map(u32::from)));
+        }
+        let buffer = self.buffer(&indexes);
+        let grid =
+            TileSurface { vertices: self.buffer(&vertices), triangles: crate::draw::IndexBuffer { buffer, segments } };
+        self.masked_grids.insert(key, (grid.clone(), self.grid_uses));
+        grid
     }
 
     /// The indexes of `count` quads, each the four vertices after the
@@ -227,12 +354,6 @@ impl Resources {
         } else {
             type_
         }
-    }
-
-    /// The format of a render target's depth texture, `None` for render
-    /// targets without one, where every depth test passes.
-    pub(crate) fn render_target_depth(&self) -> Option<TextureFormat> {
-        self.caps.render_target_depth
     }
 
     /// Bindings or geometry `id` of the context's `Gpu`, made of `held`,

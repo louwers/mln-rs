@@ -1134,10 +1134,9 @@ impl RenderOrchestrator {
         }
     }
 
-    /// Uploads the GPU objects of the frame's draws: the layers' draw
-    /// groups in drawing order, the globe's depth, the sky and the
-    /// atmosphere, what draws into the layers' render targets, and the debug
-    /// overlays.
+    /// Uploads the GPU objects of the frame's draws: the layers' draws into
+    /// their targets and draw groups, in drawing order, the globe's depth,
+    /// the sky and the atmosphere, and the debug overlays.
     pub(crate) fn upload_draws(&mut self, gpu: &mut dyn Gpu, context: &mut Resources) {
         for layer in &mut self.layers {
             layer.layer.upload(gpu, context);
@@ -1151,6 +1150,14 @@ impl RenderOrchestrator {
         }
         for debug in self.debug_layers.values_mut() {
             debug.upload(gpu, context);
+        }
+    }
+
+    /// Draws the layers' draws into their targets, bottom to top, before
+    /// the frame's passes.
+    pub(crate) fn render_targets(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        for layer in &mut self.layers {
+            layer.layer.render_targets(gpu, parameters);
         }
     }
 
