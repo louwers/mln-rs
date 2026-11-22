@@ -8,12 +8,13 @@
 //! `dot-font`. `dot-size` changes nothing but the layout. A `dot` layer
 //! draws nothing.
 //!
-//! The tests' layer types of other sources are switched off
-//! (`fixture_layer_off`).
+//! `mark` is a layer type without a source whose layers place, with a pass
+//! (`MarkPass`) that records the hooks the engine calls. The tests' layer
+//! types of other sources are switched off (`fixture_layer_off`).
 
 use std::sync::Arc;
 
-use mln_style::layer_type::{LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType};
+use mln_style::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 use mln_style::property_table::{PropertyInfo, PropertyTable, PropertyVisitor};
 use mln_style::property_value::StyleValue as _;
 use mln_style_types::image::ImageType;
@@ -23,7 +24,9 @@ use mln_util::error::Error;
 use crate::draw::Draws;
 use crate::layer::{
     Bucket, BuildCx, EvaluatedLayer, Features, GpuVec, Layer, LayerBinders, Layout, LayoutCx, NewCx, PrepareCx, Upload,
+    ViewCover,
 };
+use crate::placement::{CollisionGroups, Placed, PlacementContext, PlacementPass, PlacementQuery, Prepared};
 
 mln_style::properties!(
     /// The layout properties of a `dot` layer.
@@ -187,4 +190,75 @@ impl Layer for Dot {
     }
 
     fn prepare(&self, _cx: &PrepareCx<'_, Self>, _out: &mut Draws) {}
+}
+
+static NO_PROPERTIES: PropertyTable = PropertyTable::new(&[], &[]);
+
+/// The `mark` layer type, both its halves, and with `OTHER` the
+/// `other-mark` one.
+pub(crate) struct Mark<const OTHER: bool = false>;
+
+impl<const OTHER: bool> StyleLayerType for Mark<OTHER> {
+    const INFO: LayerTypeInfo =
+        LayerTypeInfo { name: if OTHER { "other-mark" } else { "mark" }, source: SourceKind::None, from_json: true };
+    const PROPERTIES: &'static PropertyTable = &NO_PROPERTIES;
+
+    type LayoutProperties = NoProperties;
+    type PaintProperties = NoProperties;
+    type Data = ();
+
+    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
+        None
+    }
+}
+
+impl<const OTHER: bool> Layer for Mark<OTHER> {
+    type Style = Mark<OTHER>;
+    type Input = ViewCover;
+    type Tile = ();
+
+    fn new(_cx: &mut NewCx<'_, Self>) -> Self {
+        Mark
+    }
+
+    fn prepare(&self, _cx: &PrepareCx<'_, Self>, _out: &mut Draws) {}
+}
+
+/// The placement pass of `mark` layers: it places nothing, and records the
+/// hooks the engine calls, by name, with the number of layers of those that
+/// see them.
+#[derive(Default)]
+pub(crate) struct MarkPass {
+    /// Whether [`prepare`](PlacementPass::prepare) says a layer has
+    /// something to place.
+    pub(crate) places: bool,
+    pub(crate) calls: Vec<String>,
+}
+
+impl<const OTHER: bool> PlacementPass<Mark<OTHER>> for MarkPass {
+    fn prepare(&mut self, cx: &mut PlacementContext<'_, Mark<OTHER>>) -> Prepared {
+        self.calls.push(format!("prepare {}", cx.layers.len()));
+        Prepared { places: self.places, added: false, changed: true }
+    }
+
+    fn place(&mut self, cx: &mut PlacementContext<'_, Mark<OTHER>>, _groups: CollisionGroups, _fade: f32) -> Placed {
+        self.calls.push(format!("place {}", cx.layers.len()));
+        Placed { changed: false, settled: true }
+    }
+
+    fn update_buckets(&mut self, cx: &mut PlacementContext<'_, Mark<OTHER>>) {
+        self.calls.push(format!("update_buckets {}", cx.layers.len()));
+    }
+
+    fn forget_buckets(&mut self) {
+        self.calls.push("forget_buckets".to_owned());
+    }
+
+    fn reset(&mut self) {
+        self.calls.push("reset".to_owned());
+    }
+
+    fn query_rendered_features(&self, _query: &mut PlacementQuery<'_>) -> Result<(), Error> {
+        Ok(())
+    }
 }

@@ -526,7 +526,7 @@ struct Unknown(Arc<dyn mln_style::layer_type::ErasedLayerStyle>);
 
 impl ErasedEvaluatedLayer for Unknown {
     fn entry(&self) -> &'static dyn crate::erased_layer::ErasedLayerType {
-        crate::erased_layer::entry::<Dot>()
+        crate::erased_layer::entry::<Dot, crate::erased_layer::NoPlacement>()
     }
     fn style(&self) -> &dyn mln_style::layer_type::ErasedLayerStyle {
         &*self.0

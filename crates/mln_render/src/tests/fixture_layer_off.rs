@@ -1,7 +1,6 @@
-//! The tests' layer types of raster, raster-dem and no source (`tint`,
-//! `shade` and the placing `mark`), on the layer contract they had before
-//! `Layer`: switched off until their inputs and placement's registration
-//! come back.
+//! The tests' layer types of raster and raster-dem sources (`tint` and
+//! `shade`), on the layer contract they had before `Layer`: switched off
+//! until their inputs come back.
 
 use std::sync::Arc;
 
@@ -21,7 +20,6 @@ use crate::layer::{
     LayoutParameters, NoBucket, NoLayout, NoTileView, RasterView, Resolved, SourceLayer, layers_by_id,
 };
 use crate::layer_drawing::TileDraws;
-use crate::placement::{CollisionGroups, Placed, PlacementContext, PlacementPass, PlacementQuery, Prepared};
 use crate::tile_values::{ChangedBuckets, TileMap};
 
 mln_style::properties!(
@@ -120,89 +118,5 @@ impl LayerType for Shade {
         _gpu: &mut dyn mln_gfx::gpu::Gpu,
         _cx: &mut DrawContext<'_, '_, Shade>,
     ) {
-    }
-}
-
-/// The `mark` layer type, and with `OTHER` the `other-mark` one.
-pub(crate) struct Mark<const OTHER: bool = false>;
-
-impl<const OTHER: bool> StyleLayerType for Mark<OTHER> {
-    const INFO: LayerTypeInfo =
-        LayerTypeInfo { name: if OTHER { "other-mark" } else { "mark" }, source: SourceKind::None, from_json: true };
-    const PROPERTIES: &'static PropertyTable = &NO_PROPERTIES;
-
-    type LayoutProperties = NoProperties;
-    type PaintProperties = NoProperties;
-    type Extra = ();
-
-    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
-        None
-    }
-}
-
-impl<const OTHER: bool> LayerType for Mark<OTHER> {
-    type Layout = NoLayout;
-    type Bucket = NoBucket;
-    type View<'a> = NoTileView;
-    type Tile = ();
-    type Drawing = TileDraws;
-    type State = ();
-
-    const PLACEMENT: Option<crate::placement::NewPlacement<Self>> = Some(|| Box::new(MarkPass::default()));
-
-    fn new_layer(_layer: &LayerValues<Self>) -> ((), TileDraws) {
-        Default::default()
-    }
-
-    fn evaluate((): &mut (), _cx: EvaluateCx<'_, Self>) -> Evaluation {
-        Evaluation::TRANSLUCENT
-    }
-
-    fn make_draws(
-        _state: &mut (),
-        _drawing: &mut TileDraws,
-        _tile_values: &mut TileMap<()>,
-        _gpu: &mut dyn mln_gfx::gpu::Gpu,
-        _cx: &mut DrawContext<'_, '_, Self>,
-    ) {
-    }
-}
-
-/// The placement pass of `mark` layers: it places nothing, and records the
-/// hooks the engine calls, by name, with the number of layers of those that
-/// see them.
-#[derive(Default)]
-pub(crate) struct MarkPass {
-    /// Whether [`prepare`](PlacementPass::prepare) says a layer has
-    /// something to place.
-    pub(crate) places: bool,
-    pub(crate) calls: Vec<String>,
-}
-
-impl<const OTHER: bool> PlacementPass<Mark<OTHER>> for MarkPass {
-    fn prepare(&mut self, cx: &mut PlacementContext<'_, Mark<OTHER>>) -> Prepared {
-        self.calls.push(format!("prepare {}", cx.layers.len()));
-        Prepared { places: self.places, added: false, changed: true }
-    }
-
-    fn place(&mut self, cx: &mut PlacementContext<'_, Mark<OTHER>>, _groups: CollisionGroups, _fade: f32) -> Placed {
-        self.calls.push(format!("place {}", cx.layers.len()));
-        Placed { changed: false, settled: true }
-    }
-
-    fn update_buckets(&mut self, cx: &mut PlacementContext<'_, Mark<OTHER>>, _changed: &mut ChangedBuckets) {
-        self.calls.push(format!("update_buckets {}", cx.layers.len()));
-    }
-
-    fn forget_buckets(&mut self) {
-        self.calls.push("forget_buckets".to_owned());
-    }
-
-    fn reset(&mut self) {
-        self.calls.push("reset".to_owned());
-    }
-
-    fn query_rendered_features(&self, _query: &mut PlacementQuery<'_>) -> Result<(), Error> {
-        Ok(())
     }
 }

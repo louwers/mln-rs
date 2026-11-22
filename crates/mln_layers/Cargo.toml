@@ -88,9 +88,9 @@ path = "tests/malformed_tiles.rs"
 name = "style_layers"
 path = "tests/style_layers.rs"
 
-# slice: off [[test]]
-# slice: off name = "symbol_style"
-# slice: off path = "tests/symbol_style.rs"
+[[test]]
+name = "symbol_style"
+path = "tests/symbol_style.rs"
 
 # slice: off [[test]]
 # slice: off name = "symbols"

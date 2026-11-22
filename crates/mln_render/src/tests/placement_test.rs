@@ -15,7 +15,7 @@ fn registry() -> Arc<Registry> {
     let mut builder = RegistryBuilder::new();
     mln_style::expression::functions::register_builtin_functions(builder.functions_mut()).unwrap();
     builder.add_layer_type::<Dot>().unwrap();
-    builder.add_layer_type::<Mark>().unwrap();
+    crate::placement::register::<Mark, MarkPass>(&mut builder).unwrap();
     builder.build()
 }
 
@@ -74,7 +74,7 @@ fn calls(mode: MapMode, places: bool) -> Vec<String> {
     let registry = registry();
     let mut orchestrator = orchestrator(Arc::clone(&registry));
     pass(&mut orchestrator).places = places;
-    orchestrator.update(&update(&registry, mode)).expect("a frame");
+    orchestrator.update(&update(&registry, mode), &mut crate::gfx::context::Resources::detached()).expect("a frame");
     std::mem::take(&mut pass(&mut orchestrator).calls)
 }
 
@@ -94,7 +94,7 @@ fn a_still_image_places_and_keeps_nothing_of_the_buckets() {
     assert_eq!(calls(MapMode::Static, false), ["prepare 2", "forget_buckets", "update_buckets 2"]);
 }
 
-/// What `Renderer::placement` reads: the pass, as its type and no other.
+/// What `placement::pass` reads: the pass, as its type and no other.
 #[test]
 fn the_pass_is_reachable_as_its_type() {
     let placing = orchestrator(registry());
@@ -107,6 +107,7 @@ fn the_pass_is_reachable_as_its_type() {
 #[test]
 fn a_registry_has_one_layer_type_that_places() {
     let mut builder = RegistryBuilder::new();
-    builder.add_layer_type::<Mark>().unwrap();
-    assert_eq!(builder.add_layer_type::<Mark<true>>(), Err(RegisterError::RoleTaken("other-mark".to_owned())));
+    crate::placement::register::<Mark, MarkPass>(&mut builder).unwrap();
+    let other = crate::placement::register::<Mark<true>, MarkPass>(&mut builder);
+    assert_eq!(other, Err(RegisterError::RoleTaken("other-mark".to_owned())));
 }

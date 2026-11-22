@@ -57,7 +57,8 @@ use crate::update_parameters::UpdateParameters;
 
 /// Adds the layer type of the layer `L`, as
 /// [`RegistryBuilder::add_layer_type`] does, whose layers place with a pass
-/// `P`, which each renderer makes once. A registry has one placing type.
+/// `P`, which each renderer makes once. Fails too where the builder has a
+/// type whose layers place: a registry has one.
 pub fn register<L: Layer, P: PlacementPass<L> + Default>(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
     builder.add_layer_entry::<L>(crate::erased_layer::entry::<L, Places<P>>())
 }

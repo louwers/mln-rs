@@ -31,7 +31,7 @@ mod source_test;
 // Port-only: the renderer frees what it lets go of on its workers.
 mod drop_on_workers_test;
 // The engine drives a layer type's placement pass on its schedule.
-// slice: off mod placement_test;
+mod placement_test;
 
 mod programs_test;
 // Port-only: malformed vector tiles become tile errors, not panics.

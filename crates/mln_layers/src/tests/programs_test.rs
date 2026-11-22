@@ -7,7 +7,7 @@ use mln_gfx::shaders::program::Program;
 
 use crate::PROGRAMS;
 // slice: off use crate::fill_extrusion::programs::{FILL_EXTRUSION_INSTANCED, FILL_EXTRUSION_PATTERN_INSTANCED};
-// slice: off use crate::symbol::programs::{COLLISION_BOX, COLLISION_CIRCLE};
+use crate::symbol::programs::{COLLISION_BOX, COLLISION_CIRCLE};
 
 /// The sources of `program` in the languages of this build: the backends'
 /// that the tests build with, as all of the platform's in the workspace's
@@ -26,7 +26,7 @@ fn sources(program: &Program) -> Vec<String> {
 /// circles are a debug overlay, which shows its own colors.
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
-    let overlay: [&Program; 0] = [/* slice: off &COLLISION_BOX, &COLLISION_CIRCLE */];
+    let overlay = [&COLLISION_BOX, &COLLISION_CIRCLE];
     for &program in PROGRAMS.iter().filter(|&&program| !overlay.iter().any(|&other| ptr::eq(program, other))) {
         let sources = sources(program);
         assert!(!sources.is_empty(), "{program:?} has no source in this build");

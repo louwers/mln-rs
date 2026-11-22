@@ -7,7 +7,7 @@
 // slice: off mod custom_test;
 // slice: off mod fill_mesh_test;
 // The symbol layer type's format sections that override its paint.
-// slice: off mod format_section_override_test;
+mod format_section_override_test;
 // The globe meshes that the raster layer types keep.
 // slice: off mod globe_mesh_test;
 // The subdivision of polygons for the globe.
