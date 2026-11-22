@@ -62,9 +62,7 @@ impl Layer for NgonLayer {
                 globe_extrude_scale: at.globe_extrude_scale,
                 ..NgonDraw::default()
             };
-            // The polygons of a tile draw over those of the tiles made
-            // before it.
-            main.push_at(mesh, &at, Draw { order: mesh.seq() as i64, ..Draw::DEFAULT }, draw);
+            main.push_at(mesh, &at, Draw::DEFAULT, draw);
         }
     }
 
