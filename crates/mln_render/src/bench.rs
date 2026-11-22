@@ -8,10 +8,11 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState};
+use mln_map_types::MapMode;
+// slice: off use mln_map_types::{MapDebugOptions, TileLodMode, TransformState};
 use mln_storage::Resource;
 use mln_style::Style;
-use mln_style::layer_type::LayerStyle;
+// slice: off use mln_style::layer_type::LayerStyle;
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use mln_style_types::VisibilityType;
 use mln_style_types::image::{ImageMap, ImageType};
@@ -21,29 +22,31 @@ use mln_text::tagged_string::font_stack_hash;
 use mln_tile::TileData;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
-use mln_util::geo::LatLng;
-use mln_util::size::Size;
-use mln_util::time::Instant;
+// slice: off use mln_util::geo::LatLng;
+// slice: off use mln_util::size::Size;
+// slice: off use mln_util::time::Instant;
 use mln_vec_map::VecSet;
 
 use crate::Registry;
-use crate::bucket::{Bucket, LayerFeatureStates};
+use crate::bucket::LayerFeatureStates;
+// slice: off use crate::bucket::Bucket;
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
-use crate::layer::{FrameTile, LayerType};
+// slice: off use crate::layer::{FrameTile, LayerType};
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
-use crate::paint_parameters::TransformParameters;
-use crate::placement::{BucketKey, LaidBuckets, PlacementBuckets, PlacementContext, PlacingLayer};
-use crate::render_layer::{Layer, RenderLayer as _};
-use crate::render_tile::{RenderTile, TileContent};
+// slice: off use crate::paint_parameters::TransformParameters;
+// slice: off use crate::placement::{BucketKey, LaidBuckets, PlacementBuckets, PlacementContext, PlacingLayer};
+// slice: off use crate::render_layer::{Layer, RenderLayer as _};
+// slice: off use crate::render_tile::{RenderTile, TileContent};
 use crate::text::glyph_store::ShapeResults;
-use crate::tile::contents::{Answer, Contents, GeometryContents, LayoutResult};
+use crate::tile::contents::LayoutResult;
+// slice: off use crate::tile::contents::{Answer, Contents, GeometryContents};
 use crate::tile::job::{
     DataInput, DataKey, Job, JobId, JobResult, JobTimes, LayoutJob, Reply, Run, SourceKey, SourceStyle, TileKey,
 };
 use crate::tile::tile_workers::InlineWorkers;
 use crate::tile::worker_codec::{Encoded, MapCodec, WorkerCodec, read_job_id, read_reply_header};
-use crate::update_parameters::UpdateParameters;
+// slice: off use crate::update_parameters::UpdateParameters;
 
 /// A vector tile's layout job, as a tile worker runs it once the tile has
 /// every glyph and image it needs: the selection of each layer's features,
@@ -109,7 +112,7 @@ impl TileLayout {
             }
             let mut render_layer = registry
                 .layer_type(layer.info().name)
-                .and_then(|layer_type| layer_type.create_render_layer(layer.style()))
+                .and_then(|layer_type| layer_type.create_render_layer(layer.style(), &mut crate::gfx::context::Resources::detached()))
                 .ok_or_else(|| Error::invalid_argument(format!("no render layer for {}", layer.get_id())))?;
             render_layer.evaluate(&parameters);
             layers.push(render_layer.evaluated());
@@ -162,7 +165,7 @@ impl TileLayout {
     /// changes: each bucket whose paint depends on feature state evaluates
     /// that paint again for the features that have a state.
     pub fn set_feature_state(&self, laid_out: &mut LaidOut, states: &LayerFeatureStates) {
-        laid_out.result.set_feature_state(states, &self.resolved.patterns);
+        laid_out.result.set_feature_state(states);
     }
 
     fn job(&self, data: TileData) -> JobResult {
@@ -207,145 +210,145 @@ impl LaidOut {
     }
 }
 
-/// The source key of the tiles that a [`PlacementFrame`] shows.
-const FRAME_SOURCE: SourceKey = SourceKey(0);
-
-/// Laid-out tiles in a view, as a renderer's frame shows them to the layers
-/// of the type `T`, whose layers place: the style's visible layers of the
-/// type on a source, each evaluated at the view's zoom and updated with the
-/// tiles as a frame updates it, and the tiles' buckets, which the type's
-/// placement reads and changes.
-pub struct PlacementFrame<T: LayerType> {
-    update: UpdateParameters,
-    tiles: Vec<RenderTile>,
-    /// What each of `tiles` holds, at its index.
-    contents: Vec<Contents>,
-    /// The layers, bottom to top.
-    layers: Vec<Layer<T>>,
-}
-
-impl<T: LayerType> PlacementFrame<T> {
-    /// A view of `size` pixels centered on `center` at `zoom`, of copies of
-    /// `tiles` laid out by the visible layers of the type `T` on `source` in
-    /// `style`, for a continuous map at pixel ratio 1. Fails for a layer of
-    /// the type's name that isn't of the type.
-    pub fn new(
-        style: &Style,
-        source: &str,
-        tiles: &[&LaidOut],
-        center: LatLng,
-        zoom: f64,
-        (width, height): (u32, u32),
-    ) -> Result<PlacementFrame<T>, Error> {
-        let mut state = TransformState::default();
-        state.set_size(Size::new(width, height));
-        state.set_lat_lng_zoom(&center, zoom);
-        let transform = TransformParameters::new(state.view());
-        let render_tiles: Vec<RenderTile> = tiles
-            .iter()
-            .map(|laid_out| {
-                let mut render_tile = RenderTile::of_tile_id(laid_out.id.to_unwrapped(), laid_out.id, false);
-                render_tile.set_projection(&transform);
-                render_tile
-            })
-            .collect();
-        let contents: Vec<Contents> = tiles
-            .iter()
-            .map(|laid_out| {
-                let buckets = laid_out.result.layer_render_data.copy_where(|_| true);
-                let result = LayoutResult::new(buckets, Arc::clone(&laid_out.result.feature_index));
-                Contents::Geometry(GeometryContents::new(result, false, Answer::default(), Dependencies::default()))
-            })
-            .collect();
-
-        let update = UpdateParameters {
-            style_loaded: true,
-            mode: MapMode::Continuous,
-            pixel_ratio: 1.0,
-            debug_options: MapDebugOptions::NO_DEBUG,
-            time_point: Some(Instant::now()),
-            view: state.view().clone(),
-            min_zoom: state.min_zoom(),
-            max_zoom: state.limits().max_zoom,
-            camera_moving: false,
-            style: Arc::new(style.clone()),
-            sprite_loaded: true,
-            feature_states: Arc::default(),
-            file_source: None,
-            prefetch_zoom_delta: 0,
-            still_image_request: false,
-            still_image_request_id: 0,
-            cross_source_collisions: true,
-            fast_pfor_enabled: false,
-            tile_lod_min_radius: 3.0,
-            tile_lod_scale: 1.0,
-            tile_lod_pitch_threshold: mln_math::deg2rad(60.0),
-            tile_lod_zoom_shift: 0.0,
-            tile_lod_mode: TileLodMode::Default,
-            subdivision_granularity: style.get_projection().get_subdivision_granularity(),
-        };
-
-        let parameters = PropertyEvaluationParameters::new(zoom as f32);
-        let mut layers = Vec::new();
-        for layer in style.get_layers() {
-            let base = layer.style().base();
-            if base.source != source || base.visibility == VisibilityType::None || layer.info().name != T::INFO.name {
-                continue;
-            }
-            let style = LayerStyle::<T>::recover(layer.style())
-                .ok_or_else(|| Error::invalid_argument(format!("no render layer for {}", layer.get_id())))?;
-            let mut render_layer = Layer::new(style);
-            render_layer.evaluate(&parameters);
-            let frame_tiles: Vec<FrameTile<'_, T>> = render_tiles
-                .iter()
-                .zip(&contents)
-                .map(|(tile, contents)| FrameTile::find(tile, Some(TileContent::Tile(contents)), layer.get_id()).0)
-                .collect();
-            render_layer.update_tiles(&frame_tiles, &update, FRAME_SOURCE);
-            layers.push(render_layer);
-        }
-        Ok(PlacementFrame { update, tiles: render_tiles, contents, layers })
-    }
-
-    /// Runs `hook` with the frame's placement context: its layers, its
-    /// update and its tiles' buckets, as a renderer runs its placement pass.
-    pub fn with_context<R>(&mut self, hook: impl FnOnce(&mut PlacementContext<'_, T>) -> R) -> R {
-        let layers: Vec<PlacingLayer<'_, T>> = self.layers.iter().map(Layer::placing).collect();
-        let mut buckets = FrameBuckets { tiles: &self.tiles, contents: &mut self.contents };
-        hook(&mut PlacementContext {
-            layers: &layers,
-            update_parameters: &self.update,
-            buckets: PlacementBuckets::new(&mut buckets),
-        })
-    }
-}
-
-/// The buckets of a [`PlacementFrame`]'s tiles, by their keys.
-struct FrameBuckets<'a> {
-    tiles: &'a [RenderTile],
-    contents: &'a mut [Contents],
-}
-
-impl FrameBuckets<'_> {
-    /// The index of the tile that holds `key`'s bucket.
-    fn tile(&self, key: &BucketKey) -> Option<usize> {
-        (key.source == FRAME_SOURCE)
-            .then(|| self.tiles.iter().position(|tile| *tile.overscaled_tile_id() == key.tile))
-            .flatten()
-    }
-}
-
-impl LaidBuckets for FrameBuckets<'_> {
-    fn bucket(&self, key: &BucketKey) -> Option<&dyn Bucket> {
-        self.contents.get(self.tile(key)?)?.geometry()?.result.layer_render_data.bucket(key.bucket)
-    }
-
-    fn bucket_mut(&mut self, key: &BucketKey) -> Option<&mut dyn Bucket> {
-        let tile = self.tile(key)?;
-        self.contents.get_mut(tile)?.geometry_mut()?.result.layer_render_data.bucket_mut(key.bucket)
-    }
-}
-
+// slice: off /// The source key of the tiles that a [`PlacementFrame`] shows.
+// slice: off const FRAME_SOURCE: SourceKey = SourceKey(0);
+// slice: off
+// slice: off /// Laid-out tiles in a view, as a renderer's frame shows them to the layers
+// slice: off /// of the type `T`, whose layers place: the style's visible layers of the
+// slice: off /// type on a source, each evaluated at the view's zoom and updated with the
+// slice: off /// tiles as a frame updates it, and the tiles' buckets, which the type's
+// slice: off /// placement reads and changes.
+// slice: off pub struct PlacementFrame<T: LayerType> {
+// slice: off     update: UpdateParameters,
+// slice: off     tiles: Vec<RenderTile>,
+// slice: off     /// What each of `tiles` holds, at its index.
+// slice: off     contents: Vec<Contents>,
+// slice: off     /// The layers, bottom to top.
+// slice: off     layers: Vec<Layer<T>>,
+// slice: off }
+// slice: off
+// slice: off impl<T: LayerType> PlacementFrame<T> {
+// slice: off     /// A view of `size` pixels centered on `center` at `zoom`, of copies of
+// slice: off     /// `tiles` laid out by the visible layers of the type `T` on `source` in
+// slice: off     /// `style`, for a continuous map at pixel ratio 1. Fails for a layer of
+// slice: off     /// the type's name that isn't of the type.
+// slice: off     pub fn new(
+// slice: off         style: &Style,
+// slice: off         source: &str,
+// slice: off         tiles: &[&LaidOut],
+// slice: off         center: LatLng,
+// slice: off         zoom: f64,
+// slice: off         (width, height): (u32, u32),
+// slice: off     ) -> Result<PlacementFrame<T>, Error> {
+// slice: off         let mut state = TransformState::default();
+// slice: off         state.set_size(Size::new(width, height));
+// slice: off         state.set_lat_lng_zoom(&center, zoom);
+// slice: off         let transform = TransformParameters::new(state.view());
+// slice: off         let render_tiles: Vec<RenderTile> = tiles
+// slice: off             .iter()
+// slice: off             .map(|laid_out| {
+// slice: off                 let mut render_tile = RenderTile::of_tile_id(laid_out.id.to_unwrapped(), laid_out.id, false);
+// slice: off                 render_tile.set_projection(&transform);
+// slice: off                 render_tile
+// slice: off             })
+// slice: off             .collect();
+// slice: off         let contents: Vec<Contents> = tiles
+// slice: off             .iter()
+// slice: off             .map(|laid_out| {
+// slice: off                 let buckets = laid_out.result.layer_render_data.copy_where(|_| true);
+// slice: off                 let result = LayoutResult::new(buckets, Arc::clone(&laid_out.result.feature_index));
+// slice: off                 Contents::Geometry(GeometryContents::new(result, false, Answer::default(), Dependencies::default()))
+// slice: off             })
+// slice: off             .collect();
+// slice: off
+// slice: off         let update = UpdateParameters {
+// slice: off             style_loaded: true,
+// slice: off             mode: MapMode::Continuous,
+// slice: off             pixel_ratio: 1.0,
+// slice: off             debug_options: MapDebugOptions::NO_DEBUG,
+// slice: off             time_point: Some(Instant::now()),
+// slice: off             view: state.view().clone(),
+// slice: off             min_zoom: state.min_zoom(),
+// slice: off             max_zoom: state.limits().max_zoom,
+// slice: off             camera_moving: false,
+// slice: off             style: Arc::new(style.clone()),
+// slice: off             sprite_loaded: true,
+// slice: off             feature_states: Arc::default(),
+// slice: off             file_source: None,
+// slice: off             prefetch_zoom_delta: 0,
+// slice: off             still_image_request: false,
+// slice: off             still_image_request_id: 0,
+// slice: off             cross_source_collisions: true,
+// slice: off             fast_pfor_enabled: false,
+// slice: off             tile_lod_min_radius: 3.0,
+// slice: off             tile_lod_scale: 1.0,
+// slice: off             tile_lod_pitch_threshold: mln_math::deg2rad(60.0),
+// slice: off             tile_lod_zoom_shift: 0.0,
+// slice: off             tile_lod_mode: TileLodMode::Default,
+// slice: off             subdivision_granularity: style.get_projection().get_subdivision_granularity(),
+// slice: off         };
+// slice: off
+// slice: off         let parameters = PropertyEvaluationParameters::new(zoom as f32);
+// slice: off         let mut layers = Vec::new();
+// slice: off         for layer in style.get_layers() {
+// slice: off             let base = layer.style().base();
+// slice: off             if base.source != source || base.visibility == VisibilityType::None || layer.info().name != T::INFO.name {
+// slice: off                 continue;
+// slice: off             }
+// slice: off             let style = LayerStyle::<T>::recover(layer.style())
+// slice: off                 .ok_or_else(|| Error::invalid_argument(format!("no render layer for {}", layer.get_id())))?;
+// slice: off             let mut render_layer = Layer::new(style);
+// slice: off             render_layer.evaluate(&parameters);
+// slice: off             let frame_tiles: Vec<FrameTile<'_, T>> = render_tiles
+// slice: off                 .iter()
+// slice: off                 .zip(&contents)
+// slice: off                 .map(|(tile, contents)| FrameTile::find(tile, Some(TileContent::Tile(contents)), layer.get_id()).0)
+// slice: off                 .collect();
+// slice: off             render_layer.update_tiles(&frame_tiles, &update, FRAME_SOURCE);
+// slice: off             layers.push(render_layer);
+// slice: off         }
+// slice: off         Ok(PlacementFrame { update, tiles: render_tiles, contents, layers })
+// slice: off     }
+// slice: off
+// slice: off     /// Runs `hook` with the frame's placement context: its layers, its
+// slice: off     /// update and its tiles' buckets, as a renderer runs its placement pass.
+// slice: off     pub fn with_context<R>(&mut self, hook: impl FnOnce(&mut PlacementContext<'_, T>) -> R) -> R {
+// slice: off         let layers: Vec<PlacingLayer<'_, T>> = self.layers.iter().map(Layer::placing).collect();
+// slice: off         let mut buckets = FrameBuckets { tiles: &self.tiles, contents: &mut self.contents };
+// slice: off         hook(&mut PlacementContext {
+// slice: off             layers: &layers,
+// slice: off             update_parameters: &self.update,
+// slice: off             buckets: PlacementBuckets::new(&mut buckets),
+// slice: off         })
+// slice: off     }
+// slice: off }
+// slice: off
+// slice: off /// The buckets of a [`PlacementFrame`]'s tiles, by their keys.
+// slice: off struct FrameBuckets<'a> {
+// slice: off     tiles: &'a [RenderTile],
+// slice: off     contents: &'a mut [Contents],
+// slice: off }
+// slice: off
+// slice: off impl FrameBuckets<'_> {
+// slice: off     /// The index of the tile that holds `key`'s bucket.
+// slice: off     fn tile(&self, key: &BucketKey) -> Option<usize> {
+// slice: off         (key.source == FRAME_SOURCE)
+// slice: off             .then(|| self.tiles.iter().position(|tile| *tile.overscaled_tile_id() == key.tile))
+// slice: off             .flatten()
+// slice: off     }
+// slice: off }
+// slice: off
+// slice: off impl LaidBuckets for FrameBuckets<'_> {
+// slice: off     fn bucket(&self, key: &BucketKey) -> Option<&dyn Bucket> {
+// slice: off         self.contents.get(self.tile(key)?)?.geometry()?.result.layer_render_data.bucket(key.bucket)
+// slice: off     }
+// slice: off
+// slice: off     fn bucket_mut(&mut self, key: &BucketKey) -> Option<&mut dyn Bucket> {
+// slice: off         let tile = self.tile(key)?;
+// slice: off         self.contents.get_mut(tile)?.geometry_mut()?.result.layer_render_data.bucket_mut(key.bucket)
+// slice: off     }
+// slice: off }
+// slice: off
 /// A worker instance's codec and the map side's, between which a tile's
 /// job and its reply cross as frames of bytes
 /// (`tile::worker_codec`), as in the browser build.
@@ -531,31 +534,6 @@ mod tests {
             TileLayout::new(&Registry::with_builtins(), &style, "s", |_| true, (0, 0, 0), &data, load).unwrap();
         assert_eq!(*requested.borrow(), ["local://glyphs/Test/0-255.pbf"]);
         assert_eq!(layout.run(data).unwrap().buckets(), 2);
-    }
-
-    #[test]
-    fn feature_state_rewrites_the_buckets_that_depend_on_it() {
-        let (style, data) = (style(), data());
-        let layout = TileLayout::new(
-            &Registry::with_builtins(),
-            &style,
-            "s",
-            |type_| type_ == "dot",
-            (0, 0, 0),
-            &data,
-            |_| None,
-        )
-        .unwrap();
-        let mut laid_out = layout.run(data).unwrap();
-        let patterns = &layout.resolved.patterns;
-
-        let mut states = LayerFeatureStates::default();
-        assert!(laid_out.result.set_feature_state(&states, patterns).is_empty(), "no state, no change");
-        let mut on = mln_style::expression::expr::FeatureState::new();
-        on.insert("on".to_owned(), Value::Bool(true));
-        states.entry("l".to_owned()).or_default().insert("1".to_owned(), on);
-        let roads = laid_out.result.layer_render_data.get("roads").unwrap().bucket.base().id();
-        assert_eq!(laid_out.result.set_feature_state(&states, patterns), [roads]);
     }
 
     #[test]

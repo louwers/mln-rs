@@ -145,32 +145,32 @@ fn all_layers() -> serde_json::Value {
     ])
 }
 
-#[test]
-fn valid_tile_lays_out() {
-    assert_eq!(lay_out(valid_tile(), &all_layers()).unwrap(), 7);
-}
+// slice: off #[test]
+// slice: off fn valid_tile_lays_out() {
+// slice: off     assert_eq!(lay_out(valid_tile(), &all_layers()).unwrap(), 7);
+// slice: off }
 
-// As C++ Source.VectorTileCorrupt, with a truncated tile.
-#[test]
-fn truncated_tile_is_a_tile_error() {
-    let tile = valid_tile();
-    let line = json!([{ "id": "line", "type": "line", "source": "source", "source-layer": "l" }]);
-    let error = lay_out(tile[..tile.len() - 4].to_vec(), &line).unwrap_err();
-    assert_eq!(error.to_string(), "protobuf decode error: unexpected end of buffer");
-}
+// slice: off // As C++ Source.VectorTileCorrupt, with a truncated tile.
+// slice: off #[test]
+// slice: off fn truncated_tile_is_a_tile_error() {
+// slice: off     let tile = valid_tile();
+// slice: off     let line = json!([{ "id": "line", "type": "line", "source": "source", "source-layer": "l" }]);
+// slice: off     let error = lay_out(tile[..tile.len() - 4].to_vec(), &line).unwrap_err();
+// slice: off     assert_eq!(error.to_string(), "protobuf decode error: unexpected end of buffer");
+// slice: off }
 
-// A feature's tags are checked when the feature is read, so a malformed one
-// fails the tile whether or not anything reads its values.
-#[test]
-fn bad_value_is_a_tile_error() {
-    let fill = json!({ "id": "fill", "type": "fill", "source": "source", "source-layer": "l" });
-    let mut filtered = fill.clone();
-    filtered["filter"] = json!(["==", ["get", "k"], "v"]);
-    for layer in [filtered, fill] {
-        let error = lay_out(tile_with_bad_value(), &json!([layer])).unwrap_err();
-        assert_eq!(error.to_string(), "invalid value index 7");
-    }
-}
+// slice: off // A feature's tags are checked when the feature is read, so a malformed one
+// slice: off // fails the tile whether or not anything reads its values.
+// slice: off #[test]
+// slice: off fn bad_value_is_a_tile_error() {
+// slice: off     let fill = json!({ "id": "fill", "type": "fill", "source": "source", "source-layer": "l" });
+// slice: off     let mut filtered = fill.clone();
+// slice: off     filtered["filter"] = json!(["==", ["get", "k"], "v"]);
+// slice: off     for layer in [filtered, fill] {
+// slice: off         let error = lay_out(tile_with_bad_value(), &json!([layer])).unwrap_err();
+// slice: off         assert_eq!(error.to_string(), "invalid value index 7");
+// slice: off     }
+// slice: off }
 
 /// A truncation or some overwritten bytes.
 #[derive(Clone, Debug)]

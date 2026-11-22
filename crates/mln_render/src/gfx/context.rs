@@ -109,6 +109,25 @@ impl Resources {
         }
     }
 
+    /// Resources that no GPU has seen, which a render layer made only to
+    /// evaluate its values joins.
+    #[cfg(any(test, feature = "testing", feature = "bench"))]
+    pub(crate) fn detached() -> Resources {
+        let caps = Caps {
+            buffer_offset_alignment: 256,
+            max_texture_size: 4096,
+            half_float_render_targets: false,
+            clip_depth: mln_util::clip_depth::ClipDepthRange::ZeroToOne,
+            render_target_depth: None,
+            clear_stencil_with_pass: false,
+            cpu_rasterizer: false,
+            max_line_width: 1.0,
+            binds_vertex_buffers: false,
+            indexes_storage_buffers: true,
+        };
+        Resources::new(caps, 1.0)
+    }
+
     /// What the renderer makes its buffers and textures with.
     pub(crate) fn device(&mut self) -> &mut Device {
         &mut self.device

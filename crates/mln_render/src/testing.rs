@@ -78,24 +78,6 @@ fn take_events(store: &mut TileStore) -> Vec<Event> {
         .collect()
 }
 
-/// Resources that no GPU has seen, which a render layer that a test makes
-/// only to evaluate its values joins.
-pub(crate) fn resources() -> crate::gfx::context::Resources {
-    let caps = mln_gfx::gpu::Caps {
-        buffer_offset_alignment: 256,
-        max_texture_size: 4096,
-        half_float_render_targets: false,
-        clip_depth: mln_util::clip_depth::ClipDepthRange::ZeroToOne,
-        render_target_depth: None,
-        clear_stencil_with_pass: false,
-        cpu_rasterizer: false,
-        max_line_width: 1.0,
-        binds_vertex_buffers: false,
-        indexes_storage_buffers: true,
-    };
-    crate::gfx::context::Resources::new(caps, 1.0)
-}
-
 /// The style of `layers`, of the layer types of `registry`, evaluated at
 /// `zoom`. Fails for a layer whose type `registry` lacks.
 fn style(registry: &Registry, layers: &[Layer], zoom: f32) -> Result<Arc<SourceStyle>, Error> {
@@ -105,7 +87,7 @@ fn style(registry: &Registry, layers: &[Layer], zoom: f32) -> Result<Arc<SourceS
         .map(|layer| {
             let mut render_layer = registry
                 .layer_type(layer.info().name)
-                .and_then(|layer_type| layer_type.create_render_layer(layer.style(), &mut resources()))
+                .and_then(|layer_type| layer_type.create_render_layer(layer.style(), &mut crate::gfx::context::Resources::detached()))
                 .ok_or_else(|| Error::invalid_argument(format!("no render layer for {}", layer.get_id())))?;
             render_layer.evaluate(&parameters);
             Ok(render_layer.evaluated())

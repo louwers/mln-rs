@@ -4,7 +4,7 @@
 //! The declarations name only what they import, so the macros' expansions
 //! need nothing else of this crate.
 
-use mln_render::layer::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
+use mln_render::layer::{CrossFadedPaintPropertyBinder, PaintBinders as _, PaintPropertyBinder};
 use mln_style::conversion::Convertible;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::{Functions, Image};
@@ -58,7 +58,7 @@ impl StyleLayerType for Dot {
 
     type LayoutProperties = DotLayoutProperties::Unevaluated;
     type PaintProperties = DotPaintProperties::Transitionable;
-    type Extra = ();
+    type Data = ();
 
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {
         Some(match slot {
@@ -75,10 +75,10 @@ impl StyleLayerType for Dot {
 mln_render::paint_property_binders!(
     /// The binders of a `dot` layer's data-driven paint properties.
     struct DotBinders for DotPaintProperties::PossiblyEvaluated {
-        dot_color: PaintPropertyBinder<Color> => [0],
-        dot_radius: PaintPropertyBinder<f32> => [1],
-        dot_floor_radius: PaintPropertyBinder<f32> => [2],
-        dot_pattern: CrossFadedPaintPropertyBinder<Image> => [3, 4],
+        dot_color: PaintPropertyBinder<Color> => ["color"],
+        dot_radius: PaintPropertyBinder<f32> => ["radius"],
+        dot_floor_radius: PaintPropertyBinder<f32> => ["floor_radius"],
+        dot_pattern: CrossFadedPaintPropertyBinder<Image> => ["pattern_from", "pattern_to"],
     }
 );
 

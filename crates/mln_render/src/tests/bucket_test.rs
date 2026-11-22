@@ -5,7 +5,6 @@ use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
 use super::with_context;
-use crate::gfx::indexes::DrawIndexes;
 use crate::tile::raster::{RasterContents, RasterLayoutVertex};
 use crate::tile_mask::TileMask;
 
