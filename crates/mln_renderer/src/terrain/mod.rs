@@ -89,16 +89,24 @@
 //!   frame's layers that drape, ended by one of the frame's layers that
 //!   doesn't, such as a symbol, circle, heatmap, fill extrusion or custom
 //!   layer. A layer the frame doesn't draw, hidden or out of its zooms,
-//!   splits no stack. Unlike GL JS's, the layers that draw by the map's
-//!   bearing, with something anchored to the viewport (a hillshade's
-//!   lights, as they are by default, or a fill's or line's translation),
-//!   have stacks of their own, apart from the layers under and over them:
-//!   every frame that turns the map draws their drapes again, and only
-//!   theirs. A layer with a layer blend other than `normal` keeps the
-//!   layers of its run under it in its stack, whose drape is its backdrop,
-//!   so that stack isn't split and draws again whole if one of its layers
-//!   draws by the bearing. A style whose layers don't drape has no stack,
-//!   and then no drapes and no surface.
+//!   splits no stack. Unlike GL JS's, a layer with something anchored to
+//!   the viewport, which turns with the map, has a stack apart from the
+//!   layers under and over it ([`Draping`]). A hillshade lit from the
+//!   viewport, as its lights are by default, has a stack to itself, which
+//!   the surface lights: it drapes its slopes as it prepared them, the same
+//!   at every bearing, and the stack's surface draw lights them with the
+//!   hillshade's lights of the frame, as the hillshade's own draw would,
+//!   so a turn of the map draws no drape again. A fill or line translated
+//!   in the viewport draws its drapes by the bearing: every frame that
+//!   turns the map draws them again, and only them. A layer with a layer
+//!   blend other than `normal` keeps the layers of its run under it in its
+//!   stack, whose drape is its backdrop, so that stack isn't split: a
+//!   hillshade in it drapes its colors, and the stack draws again whole
+//!   in every frame that turns the map if one of its layers is anchored to
+//!   the viewport. So does a hillshade's stack on a backend without the
+//!   programs that lighting on the surface takes, and under the overdraw
+//!   inspector, which counts the hillshade's draws. A style whose layers
+//!   don't drape has no stack, and then no drapes and no surface.
 //! - **Standing layers** (circle, heatmap, fill extrusion and symbol) stand
 //!   on the surface as it draws, whether or not a stack draws it, on the
 //!   globe as on Mercator: over terrain, their draws are of a terrain
@@ -209,7 +217,10 @@
 //!   what shows of fill extrusions is the depth's to decide.
 //! - **The surface** draws once for each stack, its tiles nearest the
 //!   center first, testing and writing the 3D depth range with less or
-//!   equal and blending its drapes over what is under it. Each tile's grid
+//!   equal and blending its drapes over what is under it: their colors, or,
+//!   for a stack it lights ([`SurfaceLight`]), the colors that the
+//!   hillshade's lights of the frame give the slopes its drapes hold, at
+//!   the tile's latitudes. Each tile's grid
 //!   projects through its projection entry as GL JS's `projectTileFor3D`
 //!   does: on Mercator through the tile's matrix, on the globe each point
 //!   raised along its vertical, blended with Mercator through a handover.
@@ -399,6 +410,7 @@ pub(crate) use cover::{ElevationRanges, TerrainCover};
 #[cfg(test)]
 pub(crate) use cover::{REMEMBERED_RANGES, TerrainTile, terrain_tile_size};
 pub(crate) use drapes::Drapes;
+pub(crate) use draws::SurfaceLight;
 pub(crate) use elevation::TerrainElevation;
 pub(crate) use ground::{GroundBinding, GroundBindings, TileGround, write_projection};
 use mln_gfx::gpu::Gpu;
@@ -700,10 +712,17 @@ impl RenderTerrain {
         Some(&mut self.drapes)
     }
 
+    /// Whether the surface can light a stack's drapes on this backend, in
+    /// the frame's projection ([`Draping::Lit`]).
+    pub(crate) fn lights(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> bool {
+        self.draws.lights(gpu, parameters)
+    }
+
     /// Makes the draws of the frame of the last update, a set for each stack
     /// of the drapes the encode began ([`begin_drapes`]), which read the DEM
     /// textures of the frame's ground ([`prepare_ground`]), sample
-    /// their stack's drapes and fog as the frame's `sky` says; and, where a
+    /// their stack's drapes, light them with the stack's of `lights` if it
+    /// has one, and fog as the frame's `sky` says; and, where a
     /// layer of the frame `hides` behind the ground, the draws of the
     /// ground's depth, with its texture at the frame's logical pixels, which
     /// [`render_ground_depth`](Self::render_ground_depth) draws. Without a
@@ -718,11 +737,12 @@ impl RenderTerrain {
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         sky: Option<&EvaluatedSky>,
+        lights: &[Option<SurfaceLight>],
         hides: bool,
     ) {
         let ground = parameters.ground.clone();
         let cover = self.cover.as_ref().zip(ground.as_deref());
-        self.draws.update(gpu, parameters, cover, self.surface, sky, &self.drapes, hides);
+        self.draws.update(gpu, parameters, cover, self.surface, sky, (&self.drapes, lights), hides);
         // The depth keeps its texture, and the draws that bind it their
         // bindings, while the frame's size stays.
         let (size, pixel_ratio) = (parameters.renderable_size, parameters.pixel_ratio);

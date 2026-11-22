@@ -198,8 +198,8 @@ impl Snapshot {
     /// hillshading and color relief read the same tiles. Its layers that
     /// drape over the ground fall into stacks between those that stand on
     /// it, from zoom 14 its extruded buildings, and around its hillshade,
-    /// which is lit from the viewport and so has a stack of its own: four
-    /// in all.
+    /// which is lit from the viewport and so has a stack to itself, which
+    /// the surface lights: four in all.
     #[must_use]
     pub fn terrain_3d_style(&self) -> String {
         let mut style: serde_json::Value = serde_json::from_str(&self.terrain_style()).expect("the style is JSON");

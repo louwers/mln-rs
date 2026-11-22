@@ -216,6 +216,10 @@ pub(crate) struct PaintParameters<'a> {
     /// The tile of the drape that the draws go into, whose mask covers the
     /// whole target; `None` for the frame.
     drape_tile: Option<UnwrappedTileID>,
+    /// Whether the drape the draws go into is of a stack that the terrain's
+    /// surface lights ([`Draping::Lit`](crate::terrain::Draping::Lit)): its
+    /// layer then drapes what the surface lights, not its colors.
+    pub(crate) drape_lit: bool,
     /// The tiles whose masks `clear_stencil` draws zero with in the frame,
     /// from [`stencil_clear_tiles`](Self::stencil_clear_tiles); a drape
     /// draws its own tile's.
@@ -286,6 +290,7 @@ impl<'a> PaintParameters<'a> {
             tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
             drape_tile: None,
+            drape_lit: false,
             stencil_clear: StencilClear::new(),
             // The renderer sets these before use.
             current_layer: 0,
@@ -346,6 +351,7 @@ impl<'a> PaintParameters<'a> {
             tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
             drape_tile: Some(tile),
+            drape_lit: false,
             stencil_clear: StencilClear::new(),
             current_layer: 0,
             depth_range_size: 1.0,

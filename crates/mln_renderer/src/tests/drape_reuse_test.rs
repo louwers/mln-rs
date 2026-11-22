@@ -1519,26 +1519,98 @@ fn a_rotation_keeps_drapes_that_draw_nothing_by_the_bearing() {
     assert!(passes.is_empty(), "drapes drawn again: {passes:?}");
 }
 
-/// A hillshade lit from the viewport turns its lights with the map: it
-/// drapes in a stack of its own, and every frame of a rotation draws that
-/// stack's drapes again, while the camera moves too, so that none shows the
-/// lights of another bearing and none is left to draw once at rest. The
-/// stack under it keeps its drapes.
+/// A thick line in the corner of the north-west drape's tile that the view
+/// shows, shifted 20 pixels to the right on screen, so that it draws by the
+/// bearing.
+const VIEWPORT_SHIFTED_LINE: &str = r#"{
+    "version": 8,
+    "sources": {
+        "shifted": {"type": "geojson", "data": {"type": "LineString", "coordinates": [[-6, 2], [-6, 10]]}}
+    },
+    "layers": [{
+        "id": "shifted",
+        "type": "line",
+        "source": "shifted",
+        "paint": {"line-width": 8, "line-translate": [20, 0], "line-translate-anchor": "viewport"}
+    }]
+}"#;
+
+/// A layer that draws by the bearing, as a line translated in the viewport
+/// does, drapes in a stack of its own, and every frame of a rotation draws
+/// that stack's drapes again, while the camera moves too, so that none
+/// shows what another bearing drew and none is left to draw once at rest.
+/// The stack under it keeps its drapes.
 #[test]
-fn a_rotation_draws_only_a_viewport_lit_hillshade_again_in_every_frame() {
+fn a_rotation_draws_only_a_layer_that_draws_by_the_bearing_again_in_every_frame() {
+    let (mut map, drapes) = settled(Tiles::default());
+    add_layer(&mut map, VIEWPORT_SHIFTED_LINE, None);
+    map.settle();
+    // The line's drapes, which a change of its paint draws again.
+    map.edit(Edit::SetLayerProperty {
+        layer: "shifted".to_owned(),
+        name: "line-color".to_owned(),
+        value: serde_json::json!("green"),
+    });
+    let shifted = map.frame_passes().1;
+    assert!(!shifted.is_empty() && shifted.iter().all(|&(_, stack)| stack == 1), "{shifted:?}");
+    map.camera_moving = true;
+    for bearing in [1.0, 2.0] {
+        map.transform.jump_to(&CameraOptions { bearing: Some(bearing), ..Default::default() });
+        let (full, passes) = map.frame_passes();
+        assert_eq!(drapes, map.drapes(), "the same drapes cover the view at bearing {bearing}");
+        assert_eq!(shifted, passes, "the drapes drawn at bearing {bearing}");
+        assert!(full, "a frame that drew the line at its bearing");
+    }
+    assert!(map.frame_passes().1.is_empty(), "a drape drawn again at the same bearing");
+    map.camera_moving = false;
+    assert!(map.frame_passes().1.is_empty(), "a drape drawn again at rest");
+}
+
+/// A hillshade lit from the viewport turns its lights with the map, which
+/// the terrain's surface lights its slopes with: it drapes the slopes in a
+/// stack of its own, and a rotation draws no drape again, while the camera
+/// moves or at rest.
+#[test]
+fn a_rotation_draws_no_drape_of_a_viewport_lit_hillshade_again() {
     let (mut map, drapes) = settled(Tiles::default());
     map.edit(hillshade());
-    map.settle();
-    let hillshade: BTreeSet<(OverscaledTileID, usize)> = drapes.iter().map(|&tile| (tile, 1)).collect();
+    let slopes: BTreeSet<(OverscaledTileID, usize)> = drapes.iter().map(|&tile| (tile, 1)).collect();
+    assert_eq!(slopes, map.settle_passes(), "the hillshade's drapes, in a stack of its own");
+    assert_eq!(2, map.renderer.rendering_stats().terrain.stacks);
     map.camera_moving = true;
     for bearing in [90.0, 180.0] {
         map.transform.jump_to(&CameraOptions { bearing: Some(bearing), ..Default::default() });
         let (full, passes) = map.frame_passes();
-        assert_eq!(drapes, map.drapes(), "the same drapes cover the view at bearing {bearing}");
-        assert_eq!(hillshade, passes, "the drapes drawn at bearing {bearing}");
-        assert!(full, "a frame that drew the hillshade at its bearing");
+        assert!(passes.is_empty(), "drapes drawn at bearing {bearing}: {passes:?}");
+        assert!(full, "a frame that lit the hillshade at its bearing");
     }
-    assert!(map.frame_passes().1.is_empty(), "a drape drawn again at the same bearing");
+    map.camera_moving = false;
+    assert!(map.frame_passes().1.is_empty(), "a drape drawn again at rest");
+}
+
+/// Under a layer that blends with what is under it, a hillshade lit from
+/// the viewport drapes its colors in that layer's stack, for the blend:
+/// every frame of a rotation draws that stack's drapes again, and only
+/// them.
+#[test]
+fn a_rotation_draws_a_viewport_lit_hillshade_under_a_blend_again_in_every_frame() {
+    let (mut map, drapes) = settled(Tiles::default());
+    let Edit::AddLayer { layer, .. } = hillshade() else { unreachable!() };
+    map.edit(Edit::AddLayer { layer, before: Some("fill".to_owned()) });
+    map.edit(Edit::SetLayerProperty {
+        layer: "fill".to_owned(),
+        name: "fill-layer-blend".to_owned(),
+        value: serde_json::json!("multiply"),
+    });
+    map.settle();
+    // The background, the raster, the hillshade and the fill, then the line.
+    assert_eq!(2, map.renderer.rendering_stats().terrain.stacks);
+    let blended: BTreeSet<(OverscaledTileID, usize)> = drapes.iter().map(|&tile| (tile, 0)).collect();
+    map.camera_moving = true;
+    for bearing in [90.0, 180.0] {
+        map.transform.jump_to(&CameraOptions { bearing: Some(bearing), ..Default::default() });
+        assert_eq!(blended, map.frame_passes().1, "the drapes drawn at bearing {bearing}");
+    }
     map.camera_moving = false;
     assert!(map.frame_passes().1.is_empty(), "a drape drawn again at rest");
 }

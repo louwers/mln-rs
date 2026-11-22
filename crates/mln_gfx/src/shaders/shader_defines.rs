@@ -185,6 +185,9 @@ pub const ID_TERRAIN_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO;
 pub const ID_TERRAIN_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
 /// The terrain's fog, which only the surface's program reads.
 pub const ID_TERRAIN_FOG_UBO: usize = ID_TERRAIN_PROPS_UBO + 1; // packed
+/// The lights of a hillshade and the tile's latitudes, which only the
+/// program of a surface that lights a drape of slopes reads.
+pub const ID_TERRAIN_LIGHT_UBO: usize = ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO; // SSBO
 pub const ID_TERRAIN_DEM_TEXTURE: usize = ID_GROUND_DEM_TEXTURE;
 pub const ID_TERRAIN_DRAPE_TEXTURE: usize = 1;
 

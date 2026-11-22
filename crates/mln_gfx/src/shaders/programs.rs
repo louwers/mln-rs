@@ -607,6 +607,17 @@ pub static HILLSHADE: Program = Program {
     properties: &[],
 };
 
+/// A hillshade's tiles as their slopes, as [`HILLSHADE_PREPARE`] prepared
+/// them, unlit: what a hillshade drapes over terrain where the surface
+/// lights it ([`TERRAIN_HILLSHADE`]).
+pub static HILLSHADE_SLOPES: Program = Program {
+    name: "HillshadeSlopesShader",
+    attributes: &[(ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, Short2), (ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, Short2)],
+    instance_attributes: &[],
+    textures: &[ID_HILLSHADE_IMAGE_TEXTURE],
+    properties: &[],
+};
+
 pub static HILLSHADE_PREPARE: Program = Program {
     name: "HillshadePrepareShader",
     attributes: &[(ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, Short2), (ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, Short2)],
@@ -765,6 +776,17 @@ pub static LAYER_COMPOSITE: Program = Program {
 /// tile's drape over it.
 pub static TERRAIN: Program = Program {
     name: "TerrainShader",
+    attributes: &[(ID_TERRAIN_POS_VERTEX_ATTRIBUTE, Short4)],
+    instance_attributes: &[],
+    textures: &[ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE],
+    properties: &[],
+};
+
+/// The terrain's surface with a drape of a hillshade's slopes over it
+/// ([`HILLSHADE_SLOPES`]), which it lights as [`HILLSHADE`] does, with the
+/// lights of the frame.
+pub static TERRAIN_HILLSHADE: Program = Program {
+    name: "TerrainHillshadeShader",
     attributes: &[(ID_TERRAIN_POS_VERTEX_ATTRIBUTE, Short4)],
     instance_attributes: &[],
     textures: &[ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE],

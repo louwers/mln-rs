@@ -40,7 +40,9 @@ use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
-use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainFogUBO, TerrainProjectionUBO, TerrainPropsUBO};
+use mln_gfx::shaders::terrain_ubo::{
+    TerrainDrawableUBO, TerrainFogUBO, TerrainLightUBO, TerrainProjectionUBO, TerrainPropsUBO,
+};
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
 
 use crate::front_end::parse;
@@ -83,11 +85,14 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
     use mln_gfx::shaders::programs::{
-        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_DEPTH,
-        TERRAIN_PROBE, VERTEX_TEXEL,
+        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, HILLSHADE_SLOPES, SKY, TERRAIN,
+        TERRAIN_DEPTH, TERRAIN_HILLSHADE, TERRAIN_PROBE, VERTEX_TEXEL,
     };
-    // The terrain shows its drapes, where the draped layers count their draws.
+    // The terrain shows its drapes, where the draped layers count their
+    // draws: a hillshade's too, which drapes no slopes for the inspector.
     let not_layers = [
+        &HILLSHADE_SLOPES,
+        &TERRAIN_HILLSHADE,
         &CLIPPING_MASK,
         &COLLISION_BOX,
         &COLLISION_CIRCLE,
@@ -279,6 +284,16 @@ fn buffers(program: &Program, variant: ProjectionVariant) -> Vec<(Buffer, usize)
             (LayerStorage(ID_HILLSHADE_TILE_PROPS_UBO), size_of::<HillshadeTilePropsUBO>()),
             (LayerUniform(ID_HILLSHADE_EVALUATED_PROPS_UBO), size_of::<HillshadeEvaluatedPropsUBO>()),
         ],
+        "TerrainHillshadeShader" => vec![
+            (LayerStorage(ID_TERRAIN_DRAWABLE_UBO), size_of::<TerrainDrawableUBO>()),
+            projection,
+            (LayerStorage(ID_TERRAIN_LIGHT_UBO), size_of::<TerrainLightUBO>()),
+            (LayerUniform(ID_TERRAIN_PROPS_UBO), size_of::<TerrainPropsUBO>()),
+            (LayerUniform(ID_TERRAIN_FOG_UBO), size_of::<TerrainFogUBO>()),
+        ],
+        "HillshadeSlopesShader" => {
+            vec![(LayerStorage(ID_HILLSHADE_DRAWABLE_UBO), size_of::<HillshadeDrawableUBO>()), projection]
+        }
         "HillshadePrepareShader" => vec![
             (DrawableUniform(ID_HILLSHADE_PREPARE_DRAWABLE_UBO), size_of::<HillshadePrepareDrawableUBO>()),
             (DrawableUniform(ID_HILLSHADE_PREPARE_TILE_PROPS_UBO), size_of::<HillshadePrepareTilePropsUBO>()),

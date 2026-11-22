@@ -44,7 +44,7 @@ use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
 use crate::render_tile::{FoundTile, RenderTile};
 use crate::renderer_event::RendererEvent;
 use crate::sources::render_tile_source::{DebugLayer, DebugLayers};
-use crate::terrain::{DrapeStacks, Draped, Draping, RenderTerrain};
+use crate::terrain::{DrapeStacks, Draped, Draping, RenderTerrain, SurfaceLight};
 use crate::text::glyph_store::GlyphStore;
 use crate::text::placement::{Placement, PlacementInputs};
 use crate::tile::contents::Contents;
@@ -1399,9 +1399,18 @@ impl RenderOrchestrator {
             render_layer.update_draws(gpu, paint_parameters, &self.atlases, layer_source);
             needs_globe_depth = needs_globe_depth || render_layer.needs_globe_depth();
         }
+        // The overdraw inspector counts the draws of a hillshade's colors.
+        let lights =
+            frame.terrain && !paint_parameters.context.overdraw() && self.terrain.lights(gpu, paint_parameters);
         let draped = |&index: &u32| {
             let layer = &self.layers[index as usize];
-            let draping = if layer.drapes_by_bearing() { Draping::ByBearing } else { Draping::Fixed };
+            let draping = if lights && layer.lights_surface() {
+                Draping::Lit
+            } else if layer.drapes_by_bearing() {
+                Draping::ByBearing
+            } else {
+                Draping::Fixed
+            };
             (index, layer.drapes().then(|| Draped { draping, blends: layer.blends_with_backdrop() }))
         };
         self.stacks =
@@ -1417,7 +1426,7 @@ impl RenderOrchestrator {
                         &self.found_tiles,
                         &mut contents,
                     );
-                    drapes.key_layer(stack, &*self.layers[*index as usize], layer_source);
+                    drapes.key_layer(stack, &*self.layers[*index as usize], layer_source, self.stacks.lit(stack));
                 }
             }
             drapes.choose(!paint_parameters.camera_moving, update_parameters.mode == MapMode::Continuous);
@@ -1431,7 +1440,8 @@ impl RenderOrchestrator {
                         &mut contents,
                     );
                     let render_layer = &mut *self.layers[*index as usize];
-                    drapes.update_layer(stack, gpu, paint_parameters, &self.atlases, render_layer, layer_source);
+                    let lit = self.stacks.lit(stack);
+                    drapes.update_layer(stack, gpu, paint_parameters, &self.atlases, render_layer, layer_source, lit);
                 }
             }
             drapes.finish_update(paint_parameters.context);
@@ -1449,7 +1459,15 @@ impl RenderOrchestrator {
         let surface = !self.stacks.is_empty();
         let needs_globe_depth = (needs_globe_depth || self.sky_pass.has_atmosphere()) && !surface;
         self.globe_depth_pass.update(gpu, context, state, update_parameters, needs_globe_depth);
-        self.terrain.update_draws(gpu, paint_parameters, frame.sky.as_ref(), hides);
+        // What the surface lights each stack's drapes with: its layer's
+        // lights of the frame, for a stack it lights.
+        let lights: SmallVec<[Option<SurfaceLight>; 4]> = (0..self.stacks.len())
+            .map(|stack| {
+                let layer = self.stacks.layers(stack)[0] as usize;
+                self.stacks.lit(stack).then(|| self.layers[layer].surface_light(paint_parameters)).flatten()
+            })
+            .collect();
+        self.terrain.update_draws(gpu, paint_parameters, frame.sky.as_ref(), &lights, hides);
     }
 
     /// The render layer at `index` in the drawing order.

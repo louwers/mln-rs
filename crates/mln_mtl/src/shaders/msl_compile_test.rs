@@ -116,11 +116,14 @@ fn defines<'a>(
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
     use mln_gfx::shaders::programs::{
-        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_DEPTH,
-        TERRAIN_PROBE, VERTEX_TEXEL,
+        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, HILLSHADE_SLOPES, SKY, TERRAIN,
+        TERRAIN_DEPTH, TERRAIN_HILLSHADE, TERRAIN_PROBE, VERTEX_TEXEL,
     };
-    // The terrain shows its drapes, where the draped layers count their draws.
+    // The terrain shows its drapes, where the draped layers count their
+    // draws: a hillshade's too, which drapes no slopes for the inspector.
     let not_layers = [
+        &HILLSHADE_SLOPES,
+        &TERRAIN_HILLSHADE,
         &CLIPPING_MASK,
         &COLLISION_BOX,
         &COLLISION_CIRCLE,
@@ -270,7 +273,7 @@ fn ubo_ids(program: &Program, source: &ShaderSource) -> Vec<(&'static str, usize
             (&[("idHeatmapTexturePropsUBO", ID_HEATMAP_TEXTURE_PROPS_UBO)], "heatmapTextureUBOCount")
         }
         "LayerCompositeShader" => (&[("idLayerCompositeUBO", ID_LAYER_COMPOSITE_UBO)], "layerCompositeUBOCount"),
-        "HillshadeShader" => (
+        "HillshadeShader" | "HillshadeSlopesShader" => (
             &[
                 ("idHillshadeDrawableUBO", ID_HILLSHADE_DRAWABLE_UBO),
                 ("idHillshadeTilePropsUBO", ID_HILLSHADE_TILE_PROPS_UBO),
@@ -302,9 +305,10 @@ fn ubo_ids(program: &Program, source: &ShaderSource) -> Vec<(&'static str, usize
         ),
         "SkyShader" => (&[("idSkyPropsUBO", ID_SKY_PROPS_UBO)], "skyUBOCount"),
         "VertexTexelShader" => (&[], "vertexTexelUBOCount"),
-        "TerrainShader" | "TerrainDepthShader" | "TerrainProbeShader" => (
+        "TerrainShader" | "TerrainHillshadeShader" | "TerrainDepthShader" | "TerrainProbeShader" => (
             &[
                 ("idTerrainDrawableUBO", ID_TERRAIN_DRAWABLE_UBO),
+                ("idTerrainLightUBO", ID_TERRAIN_LIGHT_UBO),
                 ("idTerrainPropsUBO", ID_TERRAIN_PROPS_UBO),
                 ("idTerrainFogUBO", ID_TERRAIN_FOG_UBO),
             ],
@@ -396,6 +400,7 @@ const UBO_SIZES: &[(&str, usize)] = &[
     ("TerrainDrawableUBO", size_of::<terrain_ubo::TerrainDrawableUBO>()),
     ("TerrainPropsUBO", size_of::<terrain_ubo::TerrainPropsUBO>()),
     ("TerrainFogUBO", size_of::<terrain_ubo::TerrainFogUBO>()),
+    ("TerrainLightUBO", size_of::<terrain_ubo::TerrainLightUBO>()),
     ("GroundDrawableUBO", size_of::<terrain_ubo::GroundDrawableUBO>()),
 ];
 

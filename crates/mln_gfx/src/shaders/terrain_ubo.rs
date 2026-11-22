@@ -1,5 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 
+use crate::shaders::hillshade_layer_ubo::{HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO};
 use crate::shaders::layer_ubo::ProjectionUBO;
 
 /// A terrain tile's draw block (16 bytes), an entry of the storage buffer
@@ -17,6 +18,20 @@ pub struct TerrainDrawableUBO {
     /* 16 */
 }
 const _: () = assert!(size_of::<TerrainDrawableUBO>() == 16);
+
+/// What the surface of a terrain tile lights a drape of a hillshade's slopes
+/// with (208 bytes), an entry of the storage buffer that the draws of
+/// [`TERRAIN_HILLSHADE`](crate::shaders::programs::TERRAIN_HILLSHADE) index
+/// by `globalIndex`: the hillshade's blocks, with the terrain tile's
+/// latitudes for the hillshade tile's.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+#[repr(C, align(16))]
+pub struct TerrainLightUBO {
+    /*  0 */ pub tile: HillshadeTilePropsUBO,
+    /* 32 */ pub props: HillshadeEvaluatedPropsUBO,
+    /* 208 */
+}
+const _: () = assert!(size_of::<TerrainLightUBO>() == 13 * 16);
 
 /// The terrain's uniform block (32 bytes): how its DEM's texels decode to
 /// heights, the exaggeration, and how far the skirts reach down.

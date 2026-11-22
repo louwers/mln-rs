@@ -69,6 +69,7 @@ use crate::render_source::RenderSource;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
 use crate::render_tile::FrameTile;
+use crate::terrain::SurfaceLight;
 use crate::tile_matrix::{bind_no_projection, projection_data, to_projection_ubo};
 
 impl LayerType for Hillshade {
@@ -100,6 +101,9 @@ struct BucketTarget {
 pub(crate) struct HillshadeTile {
     draw: KeptDraw,
     geometry_generation: u64,
+    /// Whether the draw is of the tile's slopes, for a drape that the
+    /// terrain's surface lights, not of their colors.
+    slopes: bool,
 }
 
 impl TileObjects for HillshadeTile {
@@ -261,7 +265,7 @@ fn method_to_int(method: HillshadeMethodType) -> i32 {
 }
 
 /// Calculate latitude range for tile
-fn lat_range(id: &UnwrappedTileID) -> [f32; 2] {
+pub(crate) fn lat_range(id: &UnwrappedTileID) -> [f32; 2] {
     let latlng0 = LatLng::from_unwrapped_tile(id.canonical.z, id.canonical.x, id.canonical.y, id.wrap);
     let below = UnwrappedTileID::new(id.canonical.z, i64::from(id.canonical.x), i64::from(id.canonical.y) + 1);
     let latlng1 = LatLng::from_unwrapped_tile(below.canonical.z, below.canonical.x, below.canonical.y, below.wrap);
@@ -324,6 +328,27 @@ impl TypedLayer for RenderHillshadeLayer {
         Some(self.dem_texels)
     }
 
+    /// Lit from the viewport, its lights turn with the map: the surface
+    /// lights its slopes with them, where a drape of its colors would draw
+    /// again in every frame of a rotation.
+    fn lights_surface(&self, evaluated: &EvaluatedLayer<Hillshade>) -> bool {
+        self.drapes_by_bearing(evaluated)
+    }
+
+    fn surface_light(&mut self, parameters: &PaintParameters<'_>) -> Option<SurfaceLight> {
+        let evaluated = &self.values.evaluated;
+        if !self.lights_surface(evaluated) {
+            return None;
+        }
+        let Illumination { props, num_lights } = Self::illumination(&mut self.illumination, evaluated, parameters);
+        Some(SurfaceLight {
+            props,
+            exaggeration: *evaluated.paint.hillshade_exaggeration.uniform(),
+            method: method_to_int(*evaluated.paint.hillshade_method.uniform()),
+            num_lights: num_lights as i32,
+        })
+    }
+
     fn passes(&self, evaluated: &EvaluatedLayer<Hillshade>) -> RenderPass {
         if *evaluated.paint.hillshade_exaggeration.uniform() > 0.0 {
             RenderPass::Translucent | RenderPass::Pass3D
@@ -335,7 +360,9 @@ impl TypedLayer for RenderHillshadeLayer {
     /// Makes the render target of each bucket it has none of, which prepares
     /// its slopes, and the frame's draws of the layer, those of each of its
     /// tiles, which shade the slopes and which it builds for a tile it keeps
-    /// none of, and writes the layer's buffers they read.
+    /// none of, and writes the layer's buffers they read. In a drape that
+    /// the terrain's surface lights, the draws are of the slopes as they
+    /// were prepared.
     fn update_draws(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -346,8 +373,9 @@ impl TypedLayer for RenderHillshadeLayer {
         let context = &mut *paint_parameters.context;
         let hillshade_prepare_shader =
             context.shader_key(&programs::HILLSHADE_PREPARE, Uniforms::default(), ProjectionVariant::Mercator);
-        let hillshade_shader =
-            context.shader_key(&programs::HILLSHADE, Uniforms::default(), self.base.projection_variant);
+        let slopes = paint_parameters.drape_lit;
+        let program = if slopes { &programs::HILLSHADE_SLOPES } else { &programs::HILLSHADE };
+        let hillshade_shader = context.shader_key(program, Uniforms::default(), self.base.projection_variant);
         let color_mode = context.color_mode(ColorMode::alpha_blended());
         let static_data_shared_vertices = &*self
             .static_data_shared_vertices
@@ -450,6 +478,10 @@ impl TypedLayer for RenderHillshadeLayer {
                 }
             };
 
+            // A draw of the other program goes.
+            if entry.value.as_ref().is_some_and(|tile| tile.slopes != slopes) {
+                *entry.value = None;
+            }
             let cached = if let Some(cached) = entry.value {
                 if cached.geometry_generation != geometry_generation {
                     cached.draw.objects.replace_geometry(draw_geometry());
@@ -469,12 +501,18 @@ impl TypedLayer for RenderHillshadeLayer {
                     draw_geometry(),
                     textures,
                 );
-                entry.value.insert(HillshadeTile { draw: KeptDraw::new(objects), geometry_generation })
+                entry.value.insert(HillshadeTile { draw: KeptDraw::new(objects), geometry_generation, slopes })
             };
             let draw = cached.draw.frame_draw(Some(tile_id));
-            let Illumination { num_lights, .. } = *illumination.get_or_insert_with(|| {
-                Self::illumination(&mut self.illumination, &self.values.evaluated, paint_parameters)
-            });
+            // The slopes are unlit.
+            let num_lights = if slopes {
+                0
+            } else {
+                let lit = illumination.get_or_insert_with(|| {
+                    Self::illumination(&mut self.illumination, &self.values.evaluated, paint_parameters)
+                });
+                lit.num_lights
+            };
             let uniforms =
                 Self::uniforms(&self.values.evaluated.paint, &tile_id.to_unwrapped(), num_lights, paint_parameters);
             self.draw_list.push(draw, uniforms);
@@ -485,7 +523,9 @@ impl TypedLayer for RenderHillshadeLayer {
                 writer.uniform(ID_HILLSHADE_EVALUATED_PROPS_UBO, props);
             }
             writer.storage(ID_HILLSHADE_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-            writer.storage(ID_HILLSHADE_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
+            if !slopes {
+                writer.storage(ID_HILLSHADE_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
+            }
             writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
         });
     }

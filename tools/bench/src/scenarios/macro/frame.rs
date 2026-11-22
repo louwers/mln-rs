@@ -116,12 +116,12 @@ fn terrain(bench: &mut Bench) {
 /// camera circles Twin Peaks tilted to 65 degrees ([`Path::Terrain3d`])? One
 /// measured unit is one frame: its update, the drapes it draws again, the
 /// surface and the layers that stand on it. The camera moves as a gesture
-/// moves it, which keeps the drapes it drew at another zoom, and draws
-/// those of the hillshade, lit from the viewport, again in every frame that
-/// turns the map; the last frame ends the gesture, which draws the others
-/// again where they differ from what the map at rest shows. It also reports
-/// the frames' render passes and draw calls, the drapes they drew, and the
-/// most the terrain held ([`DrawMeter`]).
+/// moves it, which keeps the drapes it drew at another zoom, and the last
+/// frame ends the gesture, which draws them again where they differ from
+/// what the map at rest shows. The surface lights the hillshade, lit from
+/// the viewport, in every frame, from drapes of its slopes that a turn of
+/// the map keeps. It also reports the frames' render passes and draw calls,
+/// the drapes they drew, and the most the terrain held ([`DrawMeter`]).
 fn terrain_3d(bench: &mut Bench) {
     let fixtures = Fixtures::open(bench);
     let path = Path::Terrain3d;

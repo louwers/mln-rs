@@ -11,6 +11,11 @@ pub(crate) enum Draping {
     /// By the map's bearing: something of the layer is anchored to the
     /// viewport, so every frame that turns the map draws its drapes again.
     ByBearing,
+    /// Not its colors but what the terrain's surface lights with the
+    /// frame's lights, the same at every bearing: a hillshade lit from the
+    /// viewport, on a backend whose surface lights it. It has a stack to
+    /// itself, whose surface draw lights its drapes.
+    Lit,
 }
 
 /// A frame layer that drapes.
@@ -27,15 +32,17 @@ pub(crate) struct Draped {
 /// them: each a run of consecutive frame layers that drape, ended by a frame
 /// layer that doesn't. A stack also ends where the next layer drapes
 /// otherwise ([`Draping`]), so that a turn of the map draws again only the
-/// layers that draw by the bearing, but not under a layer of its run that
-/// blends with what is under it. Stacks are numbered bottom up from 0.
+/// layers that draw by the bearing, and around a layer that the surface
+/// lights, but not under a layer of its run that blends with what is under
+/// it. Stacks are numbered bottom up from 0.
 #[derive(Default)]
 pub(crate) struct DrapeStacks {
     /// The draped layers' style indexes, stack after stack, each stack in
     /// drawing order.
     layers: SmallVec<[u32; 16]>,
-    /// Where each stack's layers end in `layers`.
-    ends: SmallVec<[usize; 4]>,
+    /// Where each stack's layers end in `layers`, and whether the surface
+    /// lights the stack.
+    ends: SmallVec<[(usize, bool); 4]>,
 }
 
 impl DrapeStacks {
@@ -63,18 +70,22 @@ impl DrapeStacks {
     fn end_run(&mut self, run: &mut SmallVec<[Draped; 16]>) {
         let start = self.layers.len() - run.len();
         // The layers up to the last that blends share a stack, which draws
-        // by the bearing if one of them does.
+        // by the bearing if one of them does: a layer that the surface could
+        // light then drapes its colors there, for the blend.
         let shared = run.iter().rposition(|layer| layer.blends).map_or(1, |last| last + 1).min(run.len());
-        let by_bearing = |layer: &Draped| layer.draping == Draping::ByBearing;
-        let mut stack = if run[..shared].iter().any(by_bearing) { Draping::ByBearing } else { Draping::Fixed };
+        let mut stack = match &run[..shared] {
+            [alone] => alone.draping,
+            shared if shared.iter().any(|layer| layer.draping != Draping::Fixed) => Draping::ByBearing,
+            _ => Draping::Fixed,
+        };
         for (at, layer) in run.iter().enumerate().skip(shared) {
-            if layer.draping != stack {
-                self.ends.push(start + at);
+            if layer.draping != stack || stack == Draping::Lit {
+                self.ends.push((start + at, stack == Draping::Lit));
                 stack = layer.draping;
             }
         }
         if !run.is_empty() {
-            self.ends.push(self.layers.len());
+            self.ends.push((self.layers.len(), stack == Draping::Lit));
         }
         run.clear();
     }
@@ -91,8 +102,14 @@ impl DrapeStacks {
 
     /// The style indexes of the layers of `stack`, in drawing order.
     pub(crate) fn layers(&self, stack: usize) -> &[u32] {
-        let start = stack.checked_sub(1).map_or(0, |previous| self.ends[previous]);
-        &self.layers[start..self.ends[stack]]
+        let start = stack.checked_sub(1).map_or(0, |previous| self.ends[previous].0);
+        &self.layers[start..self.ends[stack].0]
+    }
+
+    /// Whether the surface lights `stack`: it is of one layer, which drapes
+    /// what the surface lights ([`Draping::Lit`]).
+    pub(crate) fn lit(&self, stack: usize) -> bool {
+        self.ends[stack].1
     }
 
     /// The style index of each stack's first layer, where its surface draws,
@@ -109,6 +126,7 @@ mod tests {
     const FIXED: Option<Draped> = Some(Draped { draping: Draping::Fixed, blends: false });
     const TURNS: Option<Draped> = Some(Draped { draping: Draping::ByBearing, blends: false });
     const BLENDS: Option<Draped> = Some(Draped { draping: Draping::Fixed, blends: true });
+    const LIT: Option<Draped> = Some(Draped { draping: Draping::Lit, blends: false });
 
     /// The stacks of `layers`, each with whether it drapes, the same at
     /// every bearing: each stack a list of style indexes.
@@ -122,9 +140,33 @@ mod tests {
         let stacks = DrapeStacks::of(layers.iter().copied());
         assert_eq!(layers.iter().any(|&(_, draped)| draped.is_some()), !stacks.is_empty());
         let split: Vec<Vec<u32>> = (0..stacks.len()).map(|stack| stacks.layers(stack).to_vec()).collect();
+        // The surface lights the stacks of one layer that it lights, alone.
+        for (stack, indexes) in split.iter().enumerate() {
+            let lit = |draped: Option<Draped>| draped.is_some_and(|draped| draped.draping == Draping::Lit);
+            let lights = |index: &u32| layers.iter().any(|&(of, draped)| of == *index && lit(draped));
+            assert_eq!(indexes.len() == 1 && lights(&indexes[0]) && !blended(layers, indexes[0]), stacks.lit(stack));
+        }
         let starts: Vec<u32> = stacks.starts().collect();
         assert_eq!(split.iter().map(|layers| layers[0]).collect::<Vec<_>>(), starts);
         split
+    }
+
+    /// Whether a layer of `layers` after the one of style index `index`, in
+    /// its run, blends with what is under it.
+    fn blended(layers: &[(u32, Option<Draped>)], index: u32) -> bool {
+        let after = layers.iter().skip_while(|&&(of, _)| of != index).skip(1);
+        after.map_while(|&(_, draped)| draped).any(|draped| draped.blends)
+    }
+
+    /// A layer that the surface lights has a stack to itself, and so has
+    /// each of two together; under a layer that blends, it shares that
+    /// layer's stack, which the surface doesn't light.
+    #[test]
+    fn a_layer_the_surface_lights_has_a_stack_to_itself() {
+        assert_eq!(vec![vec![0], vec![1], vec![2]], stacks_of(&[(0, FIXED), (1, LIT), (2, FIXED)]));
+        assert_eq!(vec![vec![0], vec![1]], stacks_of(&[(0, LIT), (1, LIT)]));
+        assert_eq!(vec![vec![0], vec![1], vec![2]], stacks_of(&[(0, TURNS), (1, LIT), (2, TURNS)]));
+        assert_eq!(vec![vec![0, 1, 2], vec![3]], stacks_of(&[(0, FIXED), (1, LIT), (2, BLENDS), (3, LIT)]));
     }
 
     #[test]

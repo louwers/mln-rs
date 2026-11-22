@@ -416,3 +416,45 @@ fn a_hillshade_over_terrain_shows_no_seam_where_its_tiles_meet() {
         uneven.first()
     );
 }
+
+/// A hillshade lit from the viewport, as its lights are by default, shades a
+/// plane slope over terrain as it does on a flat map, at any bearing: the
+/// terrain's surface lights its slopes with the lights of the frame's
+/// bearing, which turn with the map.
+#[test]
+fn a_viewport_lit_hillshade_over_terrain_is_lit_as_on_a_flat_map() {
+    let style = |terrain: bool, bearing: u32| {
+        let terrain = if terrain { r#""terrain": {"source": "dem"},"# } else { "" };
+        format!(
+            r#"{{
+                "version": 8,
+                "center": [0.001, 0.001],
+                "zoom": 16,
+                "bearing": {bearing},
+                {terrain}
+                "sources": {{
+                    "dem": {{"type": "raster-dem", "tiles": ["dem/{{z}}/{{x}}/{{y}}.png"], "tileSize": 256, "minzoom": 13, "maxzoom": 13}}
+                }},
+                "layers": [
+                    {{"id": "background", "type": "background", "paint": {{"background-color": "white"}}}},
+                    {{"id": "hillshade", "type": "hillshade", "source": "dem"}}
+                ]
+            }}"#
+        )
+    };
+    let shade = |terrain: bool, bearing: u32| {
+        let (image, _) = render_over(&style(terrain, bearing), ViewportMode::Default, northward_slope_png)?;
+        Some(pixel(&image, SIDE / 2, SIDE / 2))
+    };
+    let mut shades = Vec::new();
+    for bearing in [0, 120] {
+        let (Some(draped), Some(flat)) = (shade(true, bearing), shade(false, bearing)) else {
+            return;
+        };
+        let near = draped.iter().zip(flat).all(|(a, b)| a.abs_diff(b) <= 2);
+        assert!(near, "at bearing {bearing}, {draped:?} over terrain and {flat:?} on a flat map");
+        shades.push(flat);
+    }
+    let turned = shades[0].iter().zip(shades[1]).any(|(a, b)| a.abs_diff(b) > 16);
+    assert!(turned, "the lights didn't turn with the map: {shades:?}");
+}

@@ -37,6 +37,7 @@ use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, TileOrder};
 use crate::render_tile::{FoundTile, FrameTile, RenderTile, TileStamp, TileView, ViewPlace};
 use crate::sources::render_image_source::ImageSourceRenderData;
+use crate::terrain::SurfaceLight;
 use crate::tile::contents::{Contents, GeometryContents};
 use crate::tile::job::SourceKey;
 use crate::tile_render_data::TileAtlasTextures;
@@ -601,6 +602,22 @@ pub(crate) trait TypedLayer {
         false
     }
 
+    /// What the terrain's surface lights the layer's drapes with in the
+    /// frame of `parameters`, for a layer that, with its values of the
+    /// frame, can drape what the surface lights instead of its colors
+    /// ([`Draping::Lit`](crate::terrain::Draping::Lit)): a hillshade lit
+    /// from the viewport, whose lights turn with the map. `None` for a
+    /// layer that drapes its colors.
+    fn surface_light(&mut self, _parameters: &PaintParameters<'_>) -> Option<SurfaceLight> {
+        None
+    }
+
+    /// Whether the layer has a [`surface_light`](Self::surface_light) with
+    /// its values `evaluated`.
+    fn lights_surface(&self, _evaluated: &EvaluatedLayer<Self::Type>) -> bool {
+        false
+    }
+
     /// The texels a side of each of the layer's tiles that hold all it
     /// shows of the tile, where it shows no more however large it draws: a
     /// drape then takes no more texels than its tiles have across it. `None`
@@ -778,6 +795,14 @@ pub(crate) trait LayerParts {
     /// The texels a side of each of the layer's tiles that hold all it
     /// shows of the tile ([`TypedLayer::drape_texels`]).
     fn drape_texels(&self) -> Option<u32>;
+
+    /// Whether the terrain's surface can light the layer's drapes, with its
+    /// values of the frame ([`TypedLayer::lights_surface`]).
+    fn lights_surface(&self) -> bool;
+
+    /// What the terrain's surface lights the layer's drapes with in the
+    /// frame of `parameters` ([`TypedLayer::surface_light`]).
+    fn surface_light(&mut self, parameters: &PaintParameters<'_>) -> Option<SurfaceLight>;
 
     /// An empty drawing of the layer's type, which a drape keeps of the
     /// layer.
@@ -1012,6 +1037,14 @@ impl<L: TypedLayer> LayerParts for L {
 
     fn drape_texels(&self) -> Option<u32> {
         TypedLayer::drape_texels(self)
+    }
+
+    fn lights_surface(&self) -> bool {
+        TypedLayer::lights_surface(self, &self.parts().values.evaluated)
+    }
+
+    fn surface_light(&mut self, parameters: &PaintParameters<'_>) -> Option<SurfaceLight> {
+        TypedLayer::surface_light(self, parameters)
     }
 
     fn new_drape_drawing(&self) -> DrapeDrawing {

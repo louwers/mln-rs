@@ -9,6 +9,10 @@
 //! by the layer's own draw update ([`LayerParts::update_drape_draws`]), with
 //! the drape's uniforms, clip masks and stencil.
 //!
+//! A drape of a stack that the terrain's surface lights holds a hillshade's
+//! slopes, not its colors, which the surface makes of them with the frame's
+//! lights: such a drape is the same at every bearing.
+//!
 //! A drape draws again only when what its layers would draw it from
 //! differs from what they drew it from ([`DrapeKey`]); while the camera
 //! of a continuous map moves, a drape drawn at another zoom stays, as in
@@ -300,6 +304,9 @@ struct DrapeKey {
     zoom: f64,
     /// The map's bearing, which a layer draws by, or `None`.
     bearing: Option<f64>,
+    /// Whether the terrain's surface lights the drape, whose layer then
+    /// draws what the surface lights, not its colors.
+    lit: bool,
 }
 
 /// How a drape's key differs from the one it was drawn from, least to most
@@ -325,6 +332,7 @@ impl DrapeKey {
     fn difference(&self, drawn: &DrapeKey) -> Difference {
         let same_content = self.tiles == drawn.tiles
             && self.bearing == drawn.bearing
+            && self.lit == drawn.lit
             && self.layers.len() == drawn.layers.len()
             && self.layers.iter().zip(&drawn.layers).all(|(layer, drawn)| {
                 Arc::ptr_eq(&layer.style, &drawn.style)
@@ -556,6 +564,7 @@ impl Drapes {
                 drape.key.tiles.clear();
                 drape.key.zoom = view.zoom();
                 drape.key.bearing = None;
+                drape.key.lit = false;
                 drape.limit = 0;
             }
             self.drapes.push(drape);
@@ -570,8 +579,15 @@ impl Drapes {
 
     /// Adds `layer`, a layer of `stack` that drapes, which draws from
     /// `source`, to the key of every drape of the stack. The stack's layers
-    /// come in drawing order.
-    pub(crate) fn key_layer(&mut self, stack: usize, layer: &dyn RenderLayer, source: Option<LayerSource<'_>>) {
+    /// come in drawing order. The surface lights the stack if `lit`: its
+    /// layer then drapes the same at every bearing.
+    pub(crate) fn key_layer(
+        &mut self,
+        stack: usize,
+        layer: &dyn RenderLayer,
+        source: Option<LayerSource<'_>>,
+        lit: bool,
+    ) {
         let base = layer.base();
         for drape in &mut self.drapes {
             let Some(StackDrape { key, limit, .. }) = drape.stacks.get_mut(stack) else {
@@ -581,7 +597,8 @@ impl Drapes {
             layer.drape_stamps(source, (drape.tile, self.globe), &mut key.tiles);
             let texels = layer.drape_texels();
             *limit = (*limit).max(texels.map_or(u32::MAX, |texels| detail(texels, &drape.tile, &key.tiles[start..])));
-            if layer.drapes_by_bearing() {
+            key.lit = lit;
+            if layer.drapes_by_bearing() && !lit {
                 key.bearing = Some(drape.transform.view.angle());
             }
             key.layers.push(LayerKey {
@@ -667,7 +684,8 @@ impl Drapes {
     /// Makes the draws of `layer`, a layer of `stack` that drapes, in every
     /// drape of the stack that [`choose`](Self::choose) chose, with the
     /// drape's `parameters`, from its `source`. The stack's layers update in
-    /// drawing order.
+    /// drawing order. The surface lights the stack if `lit`.
+    #[expect(clippy::too_many_arguments, reason = "the frame's GPU and atlases, and the layer in its stack")]
     pub(crate) fn update_layer(
         &mut self,
         stack: usize,
@@ -676,6 +694,7 @@ impl Drapes {
         atlases: &Atlases,
         layer: &mut dyn RenderLayer,
         source: Option<LayerSource<'_>>,
+        lit: bool,
     ) {
         let style = Arc::clone(&layer.base().style);
         // The layers' draw updates don't read the composite, which only
@@ -696,6 +715,7 @@ impl Drapes {
                 None => DrapeLayer { style: Arc::clone(&style), drawing: layer.new_drape_drawing() },
             };
             let mut parameters = parameters.drape(transform, clip_masks, layer_composite, size, tile.to_unwrapped());
+            parameters.drape_lit = lit;
             layer.update_drape_draws(gpu, &mut parameters, atlases, source, (*tile, globe), &mut kept.drawing);
             layers.push(kept);
         }
