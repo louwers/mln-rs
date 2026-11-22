@@ -8,12 +8,13 @@
 pub use feature::Value;
 pub use mln_gfx::gfx_types::AttributeDataType;
 pub use mln_gfx::gpu::{Caps, TextureFormat};
+pub use mln_gfx::shaders::block::Bool32;
 pub use mln_gfx::shaders::program::{self, Attribute, Program, Projection, Property, Sources, Stages};
 pub use mln_gfx::shaders::source;
 pub use mln_gfx::texture2d::SamplerState;
 pub use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 pub use mln_gfx::{ColorMode, CullFaceMode, DrawMode, uniform_block};
-pub use mln_map_types::{FrameProjection, View};
+pub use mln_map_types::{FrameProjection, MapMode, View};
 pub use mln_render::draw::*;
 pub use mln_render::layer::*;
 pub use mln_render::paint_property_binders;
