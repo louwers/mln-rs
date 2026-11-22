@@ -10,8 +10,9 @@
 //! map's.
 //!
 //! On the globe the camera stands on the drawn ground as it does on
-//! Mercator, and rendered queries meet it; the standing layers and their
-//! placement stand on it as they do on Mercator.
+//! Mercator, gestures hold the ground they grab, and rendered queries meet
+//! it; the standing layers and their placement stand on it as they do on
+//! Mercator.
 //!
 //! # A frame with terrain
 //!
