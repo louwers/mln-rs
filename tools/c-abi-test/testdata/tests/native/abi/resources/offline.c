@@ -810,7 +810,7 @@ static void a_download_completes_from_provider_served_resources(void) {
 
   // A map reads the downloaded style as a usable cached copy, and only asks
   // the provider to revalidate it. Once the region is invalidated, the copy
-  // has expired, so the map asks for the style again and offers that copy.
+  // has expired, but the map still uses it while it asks for the style again.
   mln_map before = mln_test_create_map(runtime);
   MLN_TEST_OK(mln_test_map_set_style_url(before, offline_style_url));
   TEST_ASSERT_TRUE(mln_test_await_style_loaded(runtime, before));
@@ -834,6 +834,7 @@ static void a_download_completes_from_provider_served_resources(void) {
   MLN_TEST_AWAIT_OK(mln_runtime_invalidate_offline_region(
     runtime, id, &completion.descriptor, NULL
   ));
+  const int64_t invalidated_unix_ms = mln_test_now_unix_ms();
   mln_map after = mln_test_create_map(runtime);
   MLN_TEST_OK(mln_test_map_set_style_url(after, offline_style_url));
   TEST_ASSERT_TRUE(
@@ -843,10 +844,10 @@ static void a_download_completes_from_provider_served_resources(void) {
     mln_test_provider_request_at(provider, offline_style_url, 2);
   TEST_ASSERT_NOT_NULL(refetch);
   TEST_ASSERT_BITS_HIGH(MLN_RESOURCE_REQUEST_PRIOR_EXPIRES, refetch->fields);
-  TEST_ASSERT_EQUAL_INT64(0, refetch->prior_expires_unix_ms);
-  TEST_ASSERT_EQUAL_size_t(
-    sizeof(offline_style_json) - 1, refetch->prior_data_size
+  TEST_ASSERT_LESS_OR_EQUAL_INT64(
+    invalidated_unix_ms, refetch->prior_expires_unix_ms
   );
+  TEST_ASSERT_EQUAL_size_t(0, refetch->prior_data_size);
   const mln_resource_response style = {
     .size = sizeof(mln_resource_response),
     .status = MLN_RESOURCE_RESPONSE_STATUS_OK,

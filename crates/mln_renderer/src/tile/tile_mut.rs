@@ -13,7 +13,7 @@ use mln_storage::{Request, Response};
 use mln_style::custom_tile_loader::SubscriberKey;
 use mln_style::sources::geojson::GeoJSONData;
 use mln_util::error::Error;
-use mln_util::hash::HashSet;
+use mln_util::hash::{HashSet, hash_bytes};
 use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
@@ -26,7 +26,9 @@ use crate::render_orchestrator::drop_on_workers;
 use crate::tile::contents::{Contents, GeometryContents, LayoutResult, release};
 use crate::tile::inbox::{SourceData, TileEvent};
 use crate::tile::job::{DataInput, DataKey, Job, JobId, JobResult, LayoutJob, LayoutOutput, Run, SourceStyle};
-use crate::tile::loading::{self, CustomLoad, CustomLoader, DataOrigin, Fetch, Method, OriginLoad, TilesetAnswered};
+use crate::tile::loading::{
+    self, CustomLoad, CustomLoader, DataOrigin, Fetch, Fetched, Method, OriginLoad, TilesetAnswered,
+};
 use crate::tile::pipeline::{
     DecodeWork, DependencyWait, InFlight, Layout, LayoutData, LayoutWork, Pipeline, Resume, Running, Waiting,
     outdated_by,
@@ -198,37 +200,41 @@ impl<'a> TileMut<'a> {
             Fetch::Network { load: current, .. } if current == load => Method::Network,
             Fetch::Idle | Fetch::Cache { .. } | Fetch::Network { .. } => return,
         };
+        let now = mln_util::chrono::now();
         if method == Method::Network {
             // The request stays open: the file source answers it again after
             // an error, and when the data expires.
             if let Some(error) = res.error.as_ref().filter(|error| error.reason != Reason::NotFound) {
-                // A streak of errors fails the tile once.
+                // A streak of errors reports once.
                 if !std::mem::replace(&mut tileset.failed, true) {
                     self.fail(Error::native(error.message.clone()));
                 }
                 return;
             }
             tileset.failed = false;
-            self.take_response(method, res);
+            // A 304 renews the copy the tile held back, if the file source
+            // didn't deliver it.
+            let delivered = res.not_modified.then(|| tileset.resource.deliver(res.clone()));
+            self.take_response(method, delivered.as_ref().unwrap_or(res));
             return;
         }
         // A cache-only request answers once.
         tileset.fetch = Fetch::Idle;
         tileset.cache_answered = true;
-        // A cache-only request that found nothing isn't an error. It can
-        // still bring expired data that Cache-Control forbids using, which
-        // the network request revalidates.
-        let not_found = res.error.as_ref().is_some_and(|e| e.reason == Reason::NotFound);
-        if not_found {
-            let resource = &mut tileset.resource;
-            resource.prior_modified = res.modified;
-            resource.prior_expires = res.expires;
-            resource.prior_etag = res.etag.clone();
-            resource.prior_data = res.data.clone();
-        }
         self.store.changed();
-        if !not_found {
-            self.take_response(method, res);
+        // A cache-only request that found nothing isn't an error. A copy
+        // shows while it revalidates unless its caching rules forbid that;
+        // then the tile holds it back for the network request to revalidate.
+        // An empty copy has nothing to hold back: the network loads anew.
+        if res.error.is_none() {
+            if res.caching.is_usable(now) {
+                tileset.resource.set_prior(res);
+                self.take_response(method, res);
+            } else if !res.no_content {
+                // The network request carries it, so that a 304 delivers it.
+                tileset.resource.set_prior(res);
+                tileset.resource.prior_data.clone_from(&res.data);
+            }
         }
         if self.tile.load.necessity == TileNecessity::Required
             && matches!(&self.tile.load.origin, OriginLoad::Tileset(tileset) if tileset.is_idle())
@@ -266,7 +272,7 @@ impl<'a> TileMut<'a> {
             *current = Some(load);
         }
         let key = self.source.tile_key(self.tile);
-        if let Some(data) = loading::get_geojson_tile(
+        if let Some(data) = loading::request_geojson_tile(
             data,
             key,
             load,
@@ -481,6 +487,10 @@ impl<'a> TileMut<'a> {
         }
         self.reported = false;
         self.tile.settled = false;
+        // The tile has no data to compare the next with.
+        if let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin {
+            tileset.data_hash = None;
+        }
         let generation = self.source.next();
         if let Pipeline::Layout(layout) = &mut self.tile.pipeline {
             layout.data = None;
@@ -741,45 +751,40 @@ impl<'a> TileMut<'a> {
         let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin else {
             return false;
         };
-        tileset.held = held;
+        let Fetched { modified, caching, etag } = fetched;
         let resource = &mut tileset.resource;
-        (resource.prior_modified, resource.prior_expires, resource.prior_etag) =
-            (fetched.modified, fetched.expires, fetched.etag);
-        // Older data that the cache kept no longer goes with these validators.
-        resource.prior_data = None;
-        (tileset.modified, tileset.expires) = (fetched.modified, fetched.expires);
-        tileset.from_network = true;
+        (resource.prior_modified, resource.prior_etag) = (modified, etag);
+        resource.prior_caching = caching;
+        tileset.took(modified, caching, true);
+        tileset.data_hash = None;
+        tileset.held = held;
         self.take_input(TileInput::Geometry { data: Some(data), missing: false });
         true
     }
 
+    /// Takes a copy of the tile's data that `method` brought, which caching
+    /// rules allow it to show: new data, or, for a 304, the data it has. The
+    /// same bytes as the data it has count as a 304.
     fn take_response(&mut self, method: Method, res: &Response) {
         let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin else {
             return;
         };
-        // A network error leaves the request open (`apply_response`): only
-        // the cache's errors reach here.
-        if let Some(error) = &res.error
-            && error.reason != Reason::NotFound
-        {
-            tileset.failed = true;
-            self.fail(Error::native(error.message.clone()));
-            return;
+        if res.not_modified {
+            tileset.resource.prior_caching = res.caching;
+        } else {
+            tileset.resource.set_prior(res);
         }
-        tileset.failed = false;
-        let resource = &mut tileset.resource;
-        if !res.not_modified {
-            resource.prior_modified = res.modified;
-            resource.prior_etag = res.etag.clone();
+        tileset.took(res.modified, res.caching, method == Method::Network);
+        let hash = res.data.as_deref().filter(|_| !res.no_content).map(|data| hash_bytes(data));
+        let unchanged = res.not_modified || hash.is_some_and(|hash| tileset.data_hash == Some(hash));
+        if !unchanged {
+            tileset.data_hash = hash;
         }
-        resource.prior_expires = res.expires;
-        (tileset.modified, tileset.expires) = (res.modified, res.expires);
-        tileset.from_network = method == Method::Network;
         self.action(match method {
             Method::Network => TileOperation::LoadFromNetwork,
             Method::Cache => TileOperation::LoadFromCache,
         });
-        if res.not_modified {
+        if unchanged {
             // The tile keeps its data: it has done what it can, unless work
             // on that data is under way, which settles it as it ends.
             if !self.tile.pipeline.is_pending(true) {

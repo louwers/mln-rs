@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "resources.h"
 
@@ -41,6 +42,12 @@ mln_status mln_test_clear_resource_provider(mln_runtime runtime) {
     ),
     &completion
   );
+}
+
+int64_t mln_test_now_unix_ms(void) {
+  struct timespec now = {0};
+  (void)timespec_get(&now, TIME_UTC);
+  return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
 }
 
 mln_runtime mln_test_create_caching_runtime(void) {

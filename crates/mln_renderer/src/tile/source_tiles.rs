@@ -281,7 +281,7 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
             return None;
         }
         let parameters = self.update.parameters;
-        let mut found = self.source.cache_pop(id);
+        let mut found = self.source.cache_pop(id, self.ctx);
         if !found && parameters.view.is_globe() {
             found = self.source.cache_pop_any_wrap(id, self.ctx);
         }
@@ -1024,10 +1024,17 @@ impl SourceTiles {
         self.cache_trim(ctx);
     }
 
-    fn cache_pop(&mut self, id: &OverscaledTileID) -> bool {
+    /// Moves cached tile `id` back into the cover, unless caching rules
+    /// forbid using its data: then the tile goes, and one made anew holds its
+    /// data back until it revalidates.
+    fn cache_pop(&mut self, id: &OverscaledTileID, ctx: &mut StoreContext) -> bool {
         let Some(slot) = self.tiles.get_mut(id).filter(|slot| slot.place.is_cached()) else {
             return false;
         };
+        if !slot.tile.load.is_usable(mln_util::chrono::now()) {
+            self.evict(id, ctx);
+            return false;
+        }
         slot.set_place(Place::Cover { order: TileLoadOrder::UNWANTED });
         true
     }
@@ -1057,7 +1064,9 @@ impl SourceTiles {
         else {
             return false;
         };
-        self.cache_pop(&found);
+        if !self.cache_pop(&found, ctx) {
+            return false;
+        }
         self.rekey(&found, *id, ctx);
         true
     }

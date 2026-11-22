@@ -53,7 +53,6 @@ pub const DEFAULT_MAX_CACHE_SIZE: u64 = 50 * 1024 * 1024;
 pub const DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE: usize = 100 * 8192;
 
 pub const DEFAULT_TRANSITION_DURATION: Duration = Duration::from_millis(300);
-pub const CLOCK_SKEW_RETRY_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub const DEFAULT_TRANSITION_EASE: UnitBezier = UnitBezier::new(0.0, 0.0, 0.25, 1.0);
 

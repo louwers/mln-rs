@@ -151,7 +151,7 @@ fn resource_offline_usage_unset() {
     run_loop.run(&mut Rc::clone(&host));
     // Once download completes, invalidate region and try rendering map.
     // Resource requests must not have Offline usage tag.
-    with(&mut |db, _| assert!(db.invalidate_region(region_id).is_none()));
+    with(&mut |db, _| assert!(db.invalidate_region(region_id).is_ok()));
 
     // The map's thread's queue.
     let queue = Queue::new();

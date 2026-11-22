@@ -1,7 +1,7 @@
 // Render sessions that the host's thread drives: the driver work, its wake,
 // and the session's lifecycle without a thread of its own. They follow
-// maplibre-native-ffi's ABI tests (tests/native/abi/render/driver.c at
-// eae96a42c) where those test the same rules for a caller driver.
+// the C ABI suite (tools/c-abi-test/testdata/tests/native/abi/render/
+// driver.c) where it tests the same rules for a caller driver.
 
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};

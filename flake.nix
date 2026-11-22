@@ -19,7 +19,7 @@
         # mise (mise.toml); this adds the C toolchain, for the crates that
         # compile C, and the libraries.
         default = pkgs.mkShell {
-          # tools/c-abi-test builds maplibre-native-ffi's ABI suite with
+          # tools/c-abi-test builds the C ABI suite with
           # CMake, against the Vulkan headers and loader, and for its OpenGL
           # preset EGL and OpenGL ES (libglvnd).
           packages = [ pkgs.cmake ];

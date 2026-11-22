@@ -4,7 +4,8 @@
 //! would on a runtime without a database.
 
 use mln_storage::offline::{
-    OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionStatus,
+    OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionExpiry, OfflineRegionMetadata,
+    OfflineRegionStatus,
 };
 use mln_util::error::Error;
 
@@ -64,6 +65,11 @@ impl<'a> Offline<'a> {
     }
 
     pub fn region_status(&self, region_id: i64) -> Result<Completion<OfflineRegionStatus>, Error> {
+        let _ = region_id;
+        no_database(self.runtime)
+    }
+
+    pub fn region_expiry(&self, region_id: i64) -> Result<Completion<OfflineRegionExpiry>, Error> {
         let _ = region_id;
         no_database(self.runtime)
     }

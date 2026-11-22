@@ -3,6 +3,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use mln_util::chrono::now;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 
 use super::{LocalRequests, TestLoop, req, temp_path};
@@ -253,8 +254,9 @@ fn cache_maintenance() {
     source.put(&resource, &response);
     assert_eq!(response.data, cached_request(&run_loop, &source, &resource).data);
     maintain(|done| source.invalidate_ambient_cache(done)).unwrap();
+    // Stale, but still usable.
     let invalidated = cached_request(&run_loop, &source, &resource);
-    assert_eq!("Cached resource is unusable", invalidated.error.expect("error").message);
+    assert!(!invalidated.caching.is_fresh(now()) && invalidated.caching.is_usable(now()));
 
     source.put(&resource, &response);
     maintain(|done| source.clear_ambient_cache(done)).unwrap();

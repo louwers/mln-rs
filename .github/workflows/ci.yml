@@ -153,9 +153,9 @@ jobs:
   # .config/nextest.toml) on the backends the test jobs don't run, with their
   # coverage: on Linux the Vulkan backend, under Vulkan's validation layer, and
   # the OpenGL backend (OpenGL ES 3.0 through EGL, on Mesa's llvmpipe); on
-  # macOS WebGPU (wgpu on Metal). On Linux, then maplibre-native-ffi's C ABI
-  # suite against crates/mln_c (`mise run test:c-abi`, tools/c-abi-test) under
-  # its preset for the backend.
+  # macOS WebGPU (wgpu on Metal). On Linux, then the C ABI suite against
+  # crates/mln_c (`mise run test:c-abi`, tools/c-abi-test) under its preset for
+  # the backend.
   backend:
     needs: plan
     name: backend (${{ matrix.os }}, ${{ matrix.backend }})

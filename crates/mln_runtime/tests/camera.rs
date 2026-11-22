@@ -1,7 +1,7 @@
 // Camera commands: when their ends report, fits, and the viewport and tile
-// settings. They follow maplibre-native-ffi's ABI tests
-// (tests/native/abi/map/camera.c, camera_transitions.c and options.c at
-// eae96a42c) where those test the same rules.
+// settings. They follow the C ABI suite (tools/c-abi-test/testdata/tests/
+// native/abi/map/camera.c, camera_transitions.c and options.c) where it tests
+// the same rules.
 
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;

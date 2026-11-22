@@ -5,8 +5,9 @@ use ::mln_runtime::{EventMask, Offline};
 use geo_types::Geometry;
 use mln_storage::offline::{
     OfflineGeometryRegionDefinition, OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState,
-    OfflineRegionStatus, OfflineTilePyramidRegionDefinition,
+    OfflineRegionExpiry, OfflineRegionStatus, OfflineTilePyramidRegionDefinition,
 };
+use mln_util::chrono::Timestamp;
 use mln_util::geo::LatLngBounds;
 use mln_util::geometry::for_each_point;
 
@@ -16,11 +17,12 @@ use crate::error::Error;
 use crate::events::offline_status;
 use crate::generated::types::{
     MLN_OFFLINE_REGION_DEFINITION_GEOMETRY, MLN_OFFLINE_REGION_DEFINITION_TILE_PYRAMID,
-    MLN_OFFLINE_REGION_DOWNLOAD_ACTIVE, MLN_OFFLINE_REGION_DOWNLOAD_INACTIVE, mln_buffer_view, mln_completion,
-    mln_diagnostic, mln_lat_lng_bounds, mln_offline_geometry_region_definition, mln_offline_region_definition,
-    mln_offline_region_definition_data, mln_offline_region_download_state, mln_offline_region_id,
-    mln_offline_region_info, mln_offline_region_status, mln_offline_tile_pyramid_region_definition, mln_runtime,
-    mln_runtime_event_flags, mln_status,
+    MLN_OFFLINE_REGION_DOWNLOAD_ACTIVE, MLN_OFFLINE_REGION_DOWNLOAD_INACTIVE, MLN_OFFLINE_REGION_EXPIRY_STALE_AFTER,
+    MLN_OFFLINE_REGION_EXPIRY_USABLE_OFFLINE_UNTIL, mln_buffer_view, mln_completion, mln_diagnostic,
+    mln_lat_lng_bounds, mln_offline_geometry_region_definition, mln_offline_region_definition,
+    mln_offline_region_definition_data, mln_offline_region_download_state, mln_offline_region_expiry,
+    mln_offline_region_id, mln_offline_region_info, mln_offline_region_status,
+    mln_offline_tile_pyramid_region_definition, mln_runtime, mln_runtime_event_flags, mln_status,
 };
 use crate::{abi, buffer, geo, runtime};
 
@@ -141,6 +143,34 @@ impl CompletionValue for mln_offline_region_status {
 
     fn lend<R>(&self, f: impl FnOnce(&[mln_offline_region_status]) -> R) -> R {
         f(core::slice::from_ref(self))
+    }
+}
+
+/// How long a region's resources stay usable: `value` is one
+/// `mln_offline_region_expiry`.
+impl CompletionValue for mln_offline_region_expiry {
+    type Item = mln_offline_region_expiry;
+
+    fn lend<R>(&self, f: impl FnOnce(&[mln_offline_region_expiry]) -> R) -> R {
+        f(core::slice::from_ref(self))
+    }
+}
+
+fn expiry(expiry: &OfflineRegionExpiry) -> mln_offline_region_expiry {
+    let unix_ms = |time: Timestamp| time.secs_since_epoch().saturating_mul(1000);
+    let mut fields = 0;
+    if expiry.stale_after.is_some() {
+        fields |= MLN_OFFLINE_REGION_EXPIRY_STALE_AFTER;
+    }
+    if expiry.usable_offline_until.is_some() {
+        fields |= MLN_OFFLINE_REGION_EXPIRY_USABLE_OFFLINE_UNTIL;
+    }
+    mln_offline_region_expiry {
+        fields,
+        stale_after_unix_ms: expiry.stale_after.map_or(0, unix_ms),
+        usable_offline_until_unix_ms: expiry.usable_offline_until.map_or(0, unix_ms),
+        stale_resource_count: expiry.stale_resource_count,
+        unusable_resource_count: expiry.unusable_resource_count,
     }
 }
 
@@ -411,6 +441,26 @@ pub(crate) unsafe extern "C" fn mln_runtime_get_offline_region_status(
     })
 }
 
+/// `mln_runtime_get_offline_region_expiry()`.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub(crate) unsafe extern "C" fn mln_runtime_get_offline_region_expiry(
+    runtime: mln_runtime,
+    region_id: mln_offline_region_id,
+    completion: *const mln_completion,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, {
+        // SAFETY: the caller's contract.
+        unsafe {
+            operation(runtime, completion, |offline| offline.region_expiry(region_id), |expiry| self::expiry(&expiry))
+        }
+    })
+}
+
 /// `mln_runtime_set_offline_region_observed()`.
 ///
 /// # Safety
@@ -546,6 +596,29 @@ mod tests {
     fn convert(descriptor: &mln_offline_region_definition) -> Result<OfflineRegionDefinition, Error> {
         // SAFETY: a local definition whose views name static text.
         unsafe { definition(descriptor) }
+    }
+
+    #[test]
+    fn an_expiry_sets_the_times_it_has() {
+        let none = expiry(&OfflineRegionExpiry::default());
+        assert_eq!(none.fields, 0);
+        let stale = expiry(&OfflineRegionExpiry {
+            stale_after: Some(Timestamp::from_secs(10)),
+            stale_resource_count: 3,
+            unusable_resource_count: 1,
+            ..OfflineRegionExpiry::default()
+        });
+        assert_eq!(stale.fields, MLN_OFFLINE_REGION_EXPIRY_STALE_AFTER);
+        assert_eq!(
+            (stale.stale_after_unix_ms, stale.stale_resource_count, stale.unusable_resource_count),
+            (10_000, 3, 1)
+        );
+        let offline = expiry(&OfflineRegionExpiry {
+            usable_offline_until: Some(Timestamp::from_secs(20)),
+            ..OfflineRegionExpiry::default()
+        });
+        assert_eq!(offline.fields, MLN_OFFLINE_REGION_EXPIRY_USABLE_OFFLINE_UNTIL);
+        assert_eq!(offline.usable_offline_until_unix_ms, 20_000);
     }
 
     fn message(descriptor: &mln_offline_region_definition) -> String {

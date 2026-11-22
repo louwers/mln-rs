@@ -85,8 +85,9 @@ fn cancel_multiple() {
             r.borrow_mut().take();
             assert_eq!(None, res.error);
             assert_eq!(b"Hello World!", data(&res));
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            // Without caching headers, the response is stale at once.
+            assert!(res.caching.expires.is_some_and(|expires| expires <= now()));
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             stop.stop();
@@ -123,8 +124,8 @@ fn temporary_error() {
                     assert_eq!(Reason::Server, error.reason);
                     assert_eq!("HTTP status code 500", error.message);
                     assert!(res.data.is_none());
-                    assert!(res.expires.is_none());
-                    assert!(!res.must_revalidate);
+                    assert!(res.caching.expires.is_none());
+                    assert!(!res.caching.must_revalidate);
                     assert!(res.modified.is_none());
                     assert!(res.etag.is_none());
                 }
@@ -133,8 +134,9 @@ fn temporary_error() {
                     assert!(0.99 < duration, "Backoff timer didn't wait 1 second");
                     assert_eq!(None, res.error);
                     assert_eq!(b"Hello World!", data(&res));
-                    assert!(res.expires.is_none());
-                    assert!(!res.must_revalidate);
+                    // Without caching headers, the response is stale at once.
+                    assert!(res.caching.expires.is_some_and(|expires| expires <= now()));
+                    assert!(!res.caching.must_revalidate);
                     assert!(res.modified.is_none());
                     assert!(res.etag.is_none());
                     stop.stop();
@@ -175,8 +177,8 @@ fn connection_error() {
             let error = res.error.as_ref().expect("error");
             assert_eq!(Reason::Connection, error.reason);
             assert!(res.data.is_none());
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            assert!(res.caching.expires.is_none());
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
 
@@ -213,8 +215,8 @@ fn timeout() {
             c.set(c.get() + 1);
             assert_eq!(None, res.error);
             assert_eq!(b"Hello World!", data(&res));
-            assert!(res.expires.is_some());
-            assert!(!res.must_revalidate);
+            assert!(res.caching.expires.is_some());
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             if c.get() == 4 {
@@ -229,9 +231,10 @@ fn timeout() {
     assert_eq!(4, counter.get());
 }
 
-// gtest: OnlineFileSource.RetryDelayOnExpiredTile
+/// A response that came expired has no freshness lifetime to revalidate it
+/// at: the source doesn't ask for it again until it is requested anew.
 #[test]
-fn retry_delay_on_expired_tile() {
+fn an_expired_response_is_not_requested_again() {
     let server = HttpServer::new();
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
@@ -240,16 +243,19 @@ fn retry_delay_on_expired_tile() {
     let counter = Rc::new(Cell::new(0));
 
     let resource = Resource::new(Kind::Unknown, server.url("/test?expires=10000"));
-    let (stop, c) = (run_loop.clone(), Rc::clone(&counter));
+    let (handle, c) = (run_loop.handle(), Rc::clone(&counter));
     let _req = fs.request_local(
         &local,
         &resource,
         Box::new(move |res: Response| {
             c.set(c.get() + 1);
             assert_eq!(None, res.error);
-            assert!(now() > res.expires.expect("expires"));
-            assert!(!res.must_revalidate);
-            stop.stop();
+            assert!(now() >= res.caching.expires.expect("expires"));
+            assert!(!res.caching.must_revalidate);
+            // Long enough for a retry after a second, and after two more.
+            handle.post_after(Duration::from_millis(3500), |_| {});
+            let stop = handle.clone();
+            handle.post_after(Duration::from_millis(3500), move |_| stop.stop());
         }),
     );
 
@@ -258,42 +264,25 @@ fn retry_delay_on_expired_tile() {
     assert_eq!(1, counter.get());
 }
 
-// gtest: OnlineFileSource.RetryOnClockSkew
+/// The freshness lifetime counts from the server's `Date`, whatever its
+/// clock says.
 #[test]
-fn retry_on_clock_skew() {
+fn clock_skew() {
     let server = HttpServer::new();
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let fs = online_file_source();
 
-    let counter = Cell::new(0);
-
     let resource = Resource::new(Kind::Unknown, server.url("/clockskew"));
     let stop = run_loop.clone();
-    let _req1 = fs.request_local(
+    let _req = fs.request_local(
         &local,
         &resource,
         Box::new(move |res: Response| {
-            assert!(!res.must_revalidate);
-            let n = counter.get();
-            counter.set(n + 1);
-            match n {
-                0 => {
-                    assert_eq!(None, res.error);
-                    assert!(now() > res.expires.expect("expires"));
-                }
-                1 => {
-                    assert_eq!(None, res.error);
-
-                    let now = now().secs_since_epoch();
-                    let expires = res.expires.expect("expires").secs_since_epoch();
-                    assert!(now + 40 < expires, "Expiration not interpolated to 60s");
-                    assert!(now + 80 > expires, "Expiration not interpolated to 60s");
-
-                    stop.stop();
-                }
-                _ => {}
-            }
+            assert_eq!(None, res.error);
+            let lifetime = res.caching.expires.expect("expires").secs_since_epoch() - now().secs_since_epoch();
+            assert!((58..=60).contains(&lifetime), "a minute's lifetime, not {lifetime}s");
+            stop.stop();
         }),
     );
 
@@ -310,7 +299,7 @@ fn respect_prior_expires() {
 
     // Very long expiration time, should never arrive.
     let mut resource1 = Resource::new(Kind::Unknown, server.url("/test"));
-    resource1.prior_expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 100_000));
+    resource1.prior_caching.expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 100_000));
 
     let _req1 = fs.request_local(&local, &resource1, Box::new(|_: Response| panic!("Should never be called")));
 
@@ -322,7 +311,7 @@ fn respect_prior_expires() {
 
     // Very long expiration time, should never arrive.
     let mut resource3 = Resource::new(Kind::Unknown, server.url("/test"));
-    resource3.prior_expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 100_000));
+    resource3.prior_caching.expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 100_000));
 
     let _req3 = fs.request_local(&local, &resource3, Box::new(|_: Response| panic!("Should never be called")));
 
@@ -340,7 +329,7 @@ fn respect_minimum_update_interval() {
     let start = now();
     let mut resource = Resource::new(Kind::Unknown, server.url("/test"));
     // `start + duration_cast<Seconds>(Milliseconds(100))` = start.
-    resource.prior_expires = Some(start);
+    resource.prior_caching.expires = Some(start);
     resource.minimum_update_interval = Duration::from_secs(1);
 
     let minimum_update_interval = resource.minimum_update_interval;
@@ -408,8 +397,9 @@ fn network_status_change() {
             r.borrow_mut().take();
             assert_eq!(None, res.error);
             assert_eq!(b"Response", data(&res));
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            // Without caching headers, the response is stale at once.
+            assert!(res.caching.expires.is_some_and(|expires| expires <= now()));
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             stop.stop();
@@ -451,8 +441,8 @@ fn network_status_change_preempt() {
             let error = res.error.as_ref().expect("error");
             assert_eq!(Reason::Connection, error.reason);
             assert!(res.data.is_none());
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            assert!(res.caching.expires.is_none());
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
 
@@ -491,12 +481,19 @@ fn network_status_online_offline() {
     run_loop.handle().post_after(Duration::from_millis(100), move |_| online.set(Status::Online));
     fail_after_a_minute(&run_loop, "Going back Online didn't retry the request");
 
+    // Offline, the request fails at once, then loads once back online.
     let req = req();
-    let (r, stop) = (Rc::clone(&req), run_loop.clone());
+    let (r, stop, answers) = (Rc::clone(&req), run_loop.clone(), Rc::new(Cell::new(0)));
     *req.borrow_mut() = Some(fs.request_local(
         &local,
         &resource,
         Box::new(move |res: Response| {
+            answers.set(answers.get() + 1);
+            if answers.get() == 1 {
+                assert_eq!(Reason::Connection, res.error.expect("an error").reason);
+                assert_eq!(network.get(), Status::Offline);
+                return;
+            }
             r.borrow_mut().take();
 
             assert_eq!(None, res.error);
@@ -916,4 +913,35 @@ fn a_header_transform_runs_for_every_attempt() {
 
     run_loop.run();
     assert_eq!(vec![(Kind::Source, target.clone()), (Kind::Source, target)], *urls.lock());
+}
+
+/// Offline, a request for a resource the requester has a copy of waits for
+/// the network quietly, and revalidates the copy once it is back.
+#[test]
+fn offline_a_requester_with_a_copy_keeps_it() {
+    let server = HttpServer::new();
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
+    let network = Arc::new(NetworkStatus::new());
+    let fs = online_file_source_with(&network);
+    network.set(Status::Offline);
+
+    let mut resource = Resource::new(Kind::Unknown, server.url("/test"));
+    resource.prior_etag = Some("a".to_owned());
+    let online = Arc::clone(&network);
+    run_loop.handle().post_after(Duration::from_millis(300), move |_| online.set(Status::Online));
+    fail_after_a_minute(&run_loop, "Going back Online didn't revalidate the copy");
+
+    let stop = run_loop.clone();
+    let _req = fs.request_local(
+        &local,
+        &resource,
+        Box::new(move |res: Response| {
+            assert_eq!(None, res.error, "no error while offline");
+            assert_eq!(network.get(), Status::Online);
+            stop.stop();
+        }),
+    );
+
+    run_loop.run();
 }
