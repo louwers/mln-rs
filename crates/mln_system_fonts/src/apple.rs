@@ -235,13 +235,21 @@ mod tests {
         }
     }
 
+    /// Each language's first font draws the ideograph. Chinese and Japanese
+    /// can get the same font: the Chinese font of CoreText's cascade list
+    /// may have only Apple's `hvgl` outlines, which the map can't read
+    /// (<https://github.com/louwers/mln-rs/issues/737>).
     #[test]
-    fn ideographs_take_a_font_for_the_users_language() {
-        let first =
-            |language: &str| CoreText::default().candidates(&query('\u{4E2D}', &[language.to_owned()])).remove(0);
-        let (japanese, chinese) = (first("ja-JP"), first("zh-Hans"));
-        println!("ja-JP: {japanese:?}\nzh-Hans: {chinese:?}");
-        assert_ne!(japanese.1, chinese.1);
+    fn ideographs_take_a_font_that_draws_them() {
+        for language in ["ja-JP", "zh-Hans"] {
+            let first = CoreText::default().candidates(&query('\u{4E2D}', &[language.to_owned()])).remove(0);
+            println!("{language}: {first:?}");
+            let (_, Source::CoreText(font)) = first else { panic!("a CoreText font") };
+            let file = font.file();
+            let parsed = skrifa::FontRef::new(&file).expect("a font");
+            let glyph = parsed.charmap().map('\u{4E2D}').expect("a glyph for the ideograph");
+            assert!(parsed.outline_glyphs().get(glyph).is_some(), "{language}: no outline for the ideograph");
+        }
     }
 
     #[test]
