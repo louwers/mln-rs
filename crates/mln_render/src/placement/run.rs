@@ -396,11 +396,12 @@ fn layers_of<'a>(
     layers: &'a [RecordedLayer],
     participant: usize,
 ) -> SmallVec<[(&'a dyn RenderLayer, &'a [PlacingTile]); 8]> {
-    frame_layers
-        .iter()
-        .filter(|layer| layer.participant == participant)
-        .map(|layer| (&*layers[layer.layer].layer, &tiles[layer.tiles.clone()]))
-        .collect()
+    let own = frame_layers.iter().filter(|layer| layer.participant == participant);
+    // Sized at once: a filter leaves the length unknown, and the vector would
+    // grow in steps.
+    let mut layers_of = SmallVec::with_capacity(own.clone().count());
+    layers_of.extend(own.map(|layer| (&*layers[layer.layer].layer, &tiles[layer.tiles.clone()])));
+    layers_of
 }
 
 /// Places `layers`, the frame's placing layers, bottom to top, into
