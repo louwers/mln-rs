@@ -18,8 +18,8 @@
 //! the layer's values may have changed. Each frame, it finds the layer's
 //! tiles and runs [`LayerType::update`] with an [`UpdateContext`], and in
 //! the encode runs [`LayerType::make_draws`] with a [`DrawContext`] and the
-//! layer's tile values. The engine then uploads and draws the drawing's
-//! draws.
+//! layer's tile values. The engine then uploads and draws the draws the
+//! layer pushed to the context's [`Draws`], or those of its drawing.
 //!
 //! The style half declares the type's properties with
 //! [`mln_style::properties!`]. A bucket binds the data-driven paint
@@ -95,6 +95,7 @@ use mln_wire::Wire;
 pub use crate::bucket::{Bucket, BucketBase, BucketValue, FeatureStates, NoBucket};
 pub use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 pub use crate::bucket_parameters::BucketParameters;
+use crate::encode::Draws;
 pub use crate::erased_layer::EvaluatedLayer;
 pub use crate::geometry::dem_data::DemData;
 pub use crate::geometry::feature_index::{FeatureIndex, FeatureIndexBuilder};
@@ -121,6 +122,7 @@ pub use crate::tile::dem::DemContents;
 use crate::tile::job::SourceKey;
 pub use crate::tile::raster::{MaskedGeometry, RasterContents, RasterLayoutVertex, StoredQuads};
 pub use crate::tile_mask::TileMask;
+pub use crate::tile_matrix::{TileProjection, TileTransform};
 use crate::tile_values::TileMap;
 use crate::update_parameters::UpdateParameters;
 
@@ -168,7 +170,7 @@ pub trait LayerType: StyleLayerType {
     type State;
 
     /// Whether a layer of the type draws 3D geometry, with draws of
-    /// [`DrawDepth::Volume`](crate::draw::DrawDepth::Volume), whether or not
+    /// [`Depth::Volume`](crate::draw::Depth::Volume), whether or not
     /// it draws in a frame. The layers above the lowest such layer draw
     /// their opaque draws in the translucent pass, and on the globe, the
     /// planet's depth hides 3D geometry behind the horizon while any such
@@ -220,8 +222,10 @@ pub trait LayerType: StyleLayerType {
     /// or picked some. The layer keeps what it makes of a tile in its value
     /// in `tile_values`, at the tile's index in the context's tiles, or for
     /// a layer without a source among those it picked; the value of a tile
-    /// of a source that shows the layer nothing to draw is `None`. It keeps
-    /// the rest in its drawing, with the values of their uniforms.
+    /// of a source that shows the layer nothing to draw is `None`. A type
+    /// whose drawing is `()` pushes the frame's draws to the context's
+    /// [`draws`](DrawContext::draws); another keeps them in its drawing,
+    /// with the values of their uniforms.
     fn make_draws(
         state: &mut Self::State,
         drawing: &mut Self::Drawing,
@@ -535,4 +539,8 @@ pub struct DrawContext<'a, 'f, T: LayerType> {
     pub context: &'a mut Context,
     /// The frame the draws are made for.
     pub frame: DrawFrame<'a>,
+    /// The layer's draws of the frame, which the engine sorts and draws
+    /// once the hook returns, for a type whose
+    /// [`Drawing`](LayerType::Drawing) is `()`.
+    pub draws: &'a mut Draws,
 }

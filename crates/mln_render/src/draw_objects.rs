@@ -12,6 +12,8 @@
 //! buffers (`Caps::binds_vertex_buffers`), as a storage buffer that it
 //! indexes itself (`DrawObjects::read_as_storage`).
 
+use std::marker::PhantomData;
+
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::draw_mode::DrawMode;
@@ -36,28 +38,31 @@ use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::upload::{self, AttributeBindingArray};
 use crate::gfx::vertex_attribute::VertexAttributeArray;
 use crate::gfx::vertices::SharedVertices;
-use crate::paint_parameters::{Depth, DrawTarget, PaintParameters, Stencil};
+use crate::paint_parameters::{DepthTest, DrawTarget, PaintParameters, Stencil};
 
 /// The textures a draw binds, by texture id.
 pub type Textures = [Option<SharedTexture>; MAX_TEXTURES];
 
 /// A handle of a draw's GPU objects in the context's store of meshes
 /// ([`Context::add_mesh`]). The objects stay while the handle does, and go
-/// once it drops and the GPU is done with them. Draws of the frame name the
-/// objects they draw by their mesh ([`FrameDraw::new`](crate::draw::FrameDraw::new)).
-pub struct Mesh {
+/// once it drops and the GPU is done with them. A draw names the objects
+/// it draws by their mesh ([`Group::push`](crate::draw::Group::push)), with
+/// `B`, the values of the draw's own for its program's storage buffers of an
+/// element per draw ([`DrawBlocks`](mln_gfx::shaders::block::DrawBlocks)).
+pub struct Mesh<B = ()> {
     handle: Shared<MeshKey>,
     seq: u64,
+    program: &'static Program,
+    blocks: PhantomData<fn(B)>,
 }
 
-impl Mesh {
-    pub(crate) fn new(handle: Shared<MeshKey>, seq: u64) -> Mesh {
-        Mesh { handle, seq }
+impl<B> Mesh<B> {
+    pub(crate) fn new(handle: Shared<MeshKey>, seq: u64, program: &'static Program) -> Mesh<B> {
+        Mesh { handle, seq, program, blocks: PhantomData }
     }
 
     /// When the mesh was made among its context's meshes: a mesh made later
-    /// has a greater one. A layer's draws of equal priority draw in this
-    /// order.
+    /// has a greater one.
     #[must_use]
     pub fn seq(&self) -> u64 {
         self.seq
@@ -70,11 +75,20 @@ impl Mesh {
     pub(crate) fn key(&self) -> MeshKey {
         self.handle.key()
     }
+
+    /// The program the mesh draws with.
+    pub(crate) fn program(&self) -> &'static Program {
+        self.program
+    }
 }
 
-impl std::fmt::Debug for Mesh {
+impl<B> std::fmt::Debug for Mesh<B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Mesh").field("key", &self.handle.key()).field("seq", &self.seq).finish()
+        f.debug_struct("Mesh")
+            .field("key", &self.handle.key())
+            .field("seq", &self.seq)
+            .field("program", &self.program)
+            .finish_non_exhaustive()
     }
 }
 
@@ -276,6 +290,11 @@ impl DrawObjects {
         self
     }
 
+    /// The program the objects draw with.
+    pub(crate) fn program(&self) -> &'static Program {
+        self.shader.program()
+    }
+
     /// Gives the draw the textures of its tile's atlases, as its
     /// [`AtlasBinding`] says, before it draws.
     pub(crate) fn bind_atlases(&mut self, parameters: &mut PaintParameters<'_>) {
@@ -372,7 +391,7 @@ impl DrawObjects {
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         frame: &UniformBufferArray,
-        depth: Depth,
+        depth: DepthTest,
         stencil: Stencil,
         global_index: u32,
     ) {
@@ -386,7 +405,7 @@ impl DrawObjects {
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         frame: &UniformBufferArray,
-        depth: Depth,
+        depth: DepthTest,
         stencil: Stencil,
         global_index: u32,
     ) -> Result<(), GpuError> {

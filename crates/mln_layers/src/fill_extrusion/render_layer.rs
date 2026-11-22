@@ -32,10 +32,10 @@ use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::{PROJECTION_BUFFER, Program};
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::View;
 use mln_render::draw::{
-    AtlasBinding, BucketGeometry, Composite, Context, DrawDepth, DrawGeometry, DrawList, DrawObjects, DrawPriority,
+    AtlasBinding, BucketGeometry, Composite, Context, Depth, DrawGeometry, DrawList, DrawObjects, DrawPriority,
     EvaluatedLight, FrameDraw, IconFilter, Indexes, Mesh, RenderStaticData, SharedAttribute, SharedIndexes,
     SharedVertices, Texture2D, TileDraws, TileMap, UniformWriter, Uniforms, VertexAttributeArray, bucket_indexes,
     bucket_vertices, cast_matrix, copied_vertices, copy_shared_attributes, derived_vertices, paint_vertices,
@@ -382,8 +382,7 @@ impl LayerType for FillExtrusion {
             for draw in &cached.draws {
                 let mut frame_draw = FrameDraw::new(Some(tile_id), &draw.mesh);
                 frame_draw.priority = draw.priority;
-                frame_draw.depth = DrawDepth::Volume { mask: DepthMaskType::ReadWrite };
-                frame_draw.clip = draw.clip;
+                frame_draw.depth = Depth::Volume { write: true, once: draw.clip };
                 let layout = cached.paint_layout;
                 let uniforms = ExtrusionState::uniforms(tile_id, render_data, binders, &draw.mesh, layout, cx);
                 state.draw_list.push(frame_draw, uniforms);

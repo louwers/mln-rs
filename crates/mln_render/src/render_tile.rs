@@ -14,12 +14,13 @@ use mln_util::identity::SimpleIdentity;
 
 use crate::buckets::debug_bucket::DebugBucket;
 use crate::layer::LayerType;
-use crate::paint_parameters::TransformParameters;
+use crate::paint_parameters::{DrawFrame, TransformParameters};
 use crate::render_source::RenderTileParameters;
 use crate::tile::contents::Contents;
 use crate::tile::dem::DemContents;
 use crate::tile::raster::RasterContents;
 use crate::tile::tile::Tile;
+use crate::tile_matrix::{TileProjection, TileTransform};
 
 pub(crate) struct RenderTile {
     pub(crate) id: UnwrappedTileID,
@@ -355,6 +356,15 @@ impl<'a, T: LayerType> FrameTile<'a, T> {
     #[must_use]
     pub fn unwrapped_id(self) -> UnwrappedTileID {
         self.tile.id
+    }
+
+    /// Where the tile's geometry draws in `frame`, placed as `how` says. A
+    /// draw pushed with it can clip to the tile
+    /// ([`Draw::clip`](crate::draw::Draw::clip)).
+    #[must_use]
+    pub fn project(self, frame: &DrawFrame<'_>, how: &TileTransform) -> TileProjection {
+        let id = self.id();
+        TileProjection::new(&id.to_unwrapped(), frame, how, Some(id))
     }
 
     /// How the frame projects the tile; [`matrix`](Self::matrix) is its

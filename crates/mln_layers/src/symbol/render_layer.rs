@@ -15,7 +15,7 @@ use mln_gfx::shaders::program::{DRAW_PROJECTION_BUFFER, PROJECTION_BUFFER, Progr
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{Projection, ProjectionData};
 use mln_render::draw::{
-    AtlasBinding, BucketChanges, BucketGeometry, Context, DrawDepth, DrawFrame, DrawGeometry, DrawGroup, DrawList,
+    AtlasBinding, BucketChanges, BucketGeometry, Context, Depth, DrawFrame, DrawGeometry, DrawGroup, DrawList,
     DrawObjects, DrawOrder, FrameDraw, FrameDraws, IconFilter, LayerDrawing, Mesh, PaintParameters, SharedAttribute,
     Textures, TileMap, TypedVertices, UniformWriter, Uniforms, VertexAttributeArray, bucket_vertices, cast_matrix,
     copied_indexes, copied_vertices, copy_shared_attributes, paint_vertices, projection_data, tile_unit_translation,
@@ -677,7 +677,7 @@ impl SymbolState {
             for draw in &cached.collision {
                 write_collision_uniforms(gpu, context, draw, &tile_id, frame);
                 let mut frame_draw = FrameDraw::new(Some(tile_id), &draw.mesh);
-                frame_draw.depth = DrawDepth::Off;
+                frame_draw.depth = Depth::Off;
                 self.collision_list.push(frame_draw, ());
             }
         }

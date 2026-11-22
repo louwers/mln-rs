@@ -1,105 +1,33 @@
-//! What a layer keeps of its drawing between frames, and the draws of a
-//! frame.
+//! What a layer that makes its draws itself keeps of its drawing between
+//! frames.
 //!
-//! Each layer type keeps the GPU objects of its draws in the context's
+//! Such a layer type keeps the GPU objects of its draws in the context's
 //! store of meshes, through [`Mesh`] handles in types of its own: those of a
 //! tile in its value of the tile, which the engine keeps in the layer's
 //! [`TileMap`]. Its draw update makes the frame's draws, values
 //! ([`FrameDraw`]) that name the mesh each draws, in a [`DrawList`] with
 //! their uniform values, which it writes to the buffers of their
 //! [`FrameDraws`]. The engine then uploads and draws the meshes the draws
-//! name: [`FrameDraws::upload`] and [`FrameDraws::render`]. A layer type
-//! that draws one group of its tiles' draws keeps them in a [`TileDraws`].
+//! name. A layer type that draws one group of its tiles' draws keeps them in
+//! a [`TileDraws`]. A layer type whose drawing is `()` pushes its draws to
+//! the engine's [`Draws`](crate::draw::Draws) instead.
 
 use mln_gfx::gpu::Gpu;
-use mln_gfx::types::DepthMaskType;
-use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
+use mln_tile_id::UnwrappedTileID;
 use mln_util::identity::SimpleIdentity;
 
 use crate::draw_objects::Mesh;
+use crate::encode::{Depth, FrameDraw, FrameDraws};
 use crate::gfx::context::Context;
-use crate::gfx::store::MeshKey;
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::layer_composite::Composite;
-use crate::paint_parameters::{Composited, Depth, PaintParameters, Stencil};
-use crate::render_pass::RenderPass;
+use crate::paint_parameters::PaintParameters;
 #[cfg(doc)]
 use crate::tile_values::TileMap;
 
 /// The order of a layer's draws that its meshes' order doesn't give: lower
 /// priorities draw first.
 pub type DrawPriority = i64;
-
-/// How a draw tests and writes depth.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DrawDepth {
-    /// It draws without a depth test.
-    Off,
-    /// It tests the depth of a sub-layer of the layer's depth, and writes it
-    /// as `mask` says.
-    Layer {
-        /// The sub-layer, of the three of each layer's depth, the lowest
-        /// first.
-        sub_layer: u8,
-        /// Whether the draw writes the depth it tests.
-        mask: DepthMaskType,
-    },
-    /// It tests the depth range of 3D geometry, which the 3D draws of all
-    /// layers share, and writes it as `mask` says.
-    Volume {
-        /// Whether the draw writes the depth it tests.
-        mask: DepthMaskType,
-    },
-}
-
-/// One draw of a frame: the mesh it draws and the state it draws it with.
-/// Its uniform values are the entries at its index in the storage buffers of
-/// its `FrameDraws`.
-#[derive(Clone, Copy, Debug)]
-pub struct FrameDraw {
-    /// The tile whose draw it is, or `None` for a draw of the layer's.
-    pub tile: Option<OverscaledTileID>,
-    /// The mesh it draws.
-    mesh: MeshKey,
-    /// The mesh's [`Mesh::seq`], which orders draws of the same priority.
-    seq: u64,
-    /// Where the draw is in the layer's order, before its mesh orders it.
-    pub priority: DrawPriority,
-    /// The passes the draw draws in.
-    pub pass: RenderPass,
-    /// How the draw tests and writes depth.
-    pub depth: DrawDepth,
-    /// Whether the draw clips: a draw at the layer's depth to the mask of
-    /// its tile, a 3D one to where none of the layer's 3D draws of the pass
-    /// drew before it, so no pixel blends twice.
-    pub clip: bool,
-}
-
-impl FrameDraw {
-    /// A draw of `mesh`, of `tile` or of the layer for `None`, in the
-    /// translucent pass at the layer's depth, which it reads, without
-    /// clipping. The mesh stays the layer's: it must last until the frame
-    /// draws.
-    #[must_use]
-    pub fn new(tile: Option<OverscaledTileID>, mesh: &Mesh) -> FrameDraw {
-        FrameDraw {
-            tile,
-            mesh: mesh.key(),
-            seq: mesh.seq(),
-            priority: 0,
-            pass: RenderPass::TRANSLUCENT,
-            depth: DrawDepth::Layer { sub_layer: 0, mask: DepthMaskType::ReadOnly },
-            clip: false,
-        }
-    }
-
-    /// The order of the layer's draws: by priority, then by when their
-    /// meshes were made.
-    #[must_use]
-    pub(crate) fn order(&self) -> (DrawPriority, u64) {
-        (self.priority, self.seq)
-    }
-}
 
 /// The draws an update makes for a frame, each with its uniform values of
 /// type `U`, before they become the draws of a `FrameDraws`. The list keeps
@@ -203,217 +131,6 @@ impl<U> UniformWriter<'_, U> {
     }
 }
 
-/// Draws of a frame, and what they share.
-pub struct FrameDraws {
-    /// Tells the draws apart in the layer composite.
-    id: SimpleIdentity,
-    /// The draws, in [`FrameDraw::order`]. A draw's index is the index of its
-    /// entries in the storage buffers, which shaders read as `drawIndex`.
-    draws: Vec<FrameDraw>,
-    /// The buffers the draws bind, by id.
-    pub(crate) uniform_buffers: UniformBufferArray,
-    /// How the draws composite onto the frame in the translucent pass, as one
-    /// surface, after they draw into a texture of their own; `None` where
-    /// they draw straight onto the frame.
-    composite: Option<Composite>,
-    /// The tiles whose masks the stencil buffer holds when the draws draw.
-    /// Draws that don't clip need none, and neither does a layer without
-    /// tiles, whose draws are none.
-    stencil_tiles: Vec<UnwrappedTileID>,
-}
-
-impl Default for FrameDraws {
-    /// No draws, with an id of their own.
-    fn default() -> Self {
-        FrameDraws {
-            id: SimpleIdentity::new(),
-            draws: Vec::new(),
-            uniform_buffers: UniformBufferArray::new(),
-            composite: None,
-            stencil_tiles: Vec::new(),
-        }
-    }
-}
-
-impl FrameDraws {
-    /// Writes `value` to the uniform buffer `id` that the draws bind. A draw
-    /// binds a buffer that the write replaced again when it draws.
-    pub fn write_pod<T: bytemuck::Pod>(&mut self, gpu: &mut dyn Gpu, id: usize, value: &T, context: &mut Context) {
-        let _ = self.uniform_buffers.write_pod(gpu, id, value, context.device());
-    }
-
-    /// Gives the draws, which draw without a projection, a projection block
-    /// of zeros if they have none. GL's programs declare the block whether
-    /// they read it or not, so a draw binds it all the same.
-    pub fn bind_no_projection(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
-        crate::tile_matrix::bind_no_projection(gpu, &mut self.uniform_buffers, context);
-    }
-
-    /// Adds `draw`, which draws after the others.
-    pub fn push(&mut self, draw: FrameDraw) {
-        self.draws.push(draw);
-    }
-
-    /// Drops the draws.
-    pub fn clear(&mut self) {
-        self.draws.clear();
-    }
-
-    /// Makes the draws composite onto the frame as `composite` says, or
-    /// draw straight onto it for `None`.
-    pub fn set_composite(&mut self, composite: Option<Composite>) {
-        self.composite = composite;
-    }
-
-    /// Makes `tiles` those whose masks the stencil buffer holds when the
-    /// draws draw.
-    pub fn set_stencil_tiles(&mut self, tiles: impl IntoIterator<Item = UnwrappedTileID>) {
-        self.stencil_tiles.clear();
-        self.stencil_tiles.extend(tiles);
-    }
-
-    /// How the draws composite onto the frame, with the id that tells them
-    /// apart in the layer composite, if there are any and they composite.
-    #[must_use]
-    pub(crate) fn composited(&self) -> Option<(SimpleIdentity, Composite)> {
-        self.composite.filter(|_| !self.draws.is_empty()).map(|composite| (self.id, composite))
-    }
-
-    /// Uploads the meshes of the draws, in drawing order.
-    pub fn upload(&self, gpu: &mut dyn Gpu, context: &mut Context) {
-        for draw in &self.draws {
-            match context.take_mesh(draw.mesh) {
-                Some(mut objects) => {
-                    objects.upload(gpu, context);
-                    context.restore_mesh(draw.mesh, objects);
-                }
-                None => debug_assert!(false, "a draw of tile {:?} names a mesh that went", draw.tile),
-            }
-        }
-    }
-
-    /// Draws the pass's draws into the open pass of `gpu`, the context's.
-    pub fn render(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        let Some(pass) = self.begin(gpu, parameters) else {
-            return;
-        };
-        for draw in pass.draws() {
-            pass.draw(gpu, parameters, draw);
-        }
-        pass.end(gpu, parameters);
-    }
-
-    /// Begins drawing the draws of `parameters`' pass into the open pass of
-    /// `gpu`, the context's: into the layer composite's texture in the
-    /// translucent pass where they composite, and onto the frame otherwise.
-    /// Where none of the pass's draws is 3D, this draws the masks of the
-    /// tiles that those that clip clip to; 3D draws that clip share one
-    /// stencil value of their own. `None` where there is nothing to draw
-    /// into or there are no draws; [`DrawPass::end`] ends what this begins.
-    pub(crate) fn begin(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> Option<DrawPass<'_>> {
-        if self.draws.is_empty() || parameters.pass_target().is_none() {
-            return None;
-        }
-        let composited = (self.composite.is_some() && parameters.pass == RenderPass::TRANSLUCENT)
-            .then(|| parameters.begin_composited(gpu, self.id))
-            .flatten();
-        let drawing = composited.as_ref().is_none_or(Composited::draws);
-        let draws = if drawing { &self.draws[..] } else { &[] };
-        // A draw for both the opaque and the translucent pass draws in one:
-        // the opaque where its layer draws there, and the translucent
-        // otherwise. Drawn in both, it would cover itself, which the overdraw
-        // inspector shows.
-        let both = RenderPass::OPAQUE | RenderPass::TRANSLUCENT;
-        let drawn_in =
-            if parameters.opaque_pass_enabled_for_layer() { RenderPass::OPAQUE } else { RenderPass::TRANSLUCENT };
-        let skip = if parameters.pass & both != RenderPass::NONE && parameters.pass != drawn_in {
-            both
-        } else {
-            RenderPass::NONE
-        };
-        let mut pass = DrawPass { frame: self, draws, pass: parameters.pass, skip, volume_stencil: None, composited };
-        let (volume, volume_clips) =
-            pass.draws().fold((false, false), |(volume, clips), PassDraw { draw, .. }| match draw.depth {
-                DrawDepth::Volume { .. } => (true, clips || draw.clip),
-                _ => (volume, clips),
-            });
-        if volume {
-            pass.volume_stencil = volume_clips.then(|| parameters.stencil_for_3d(gpu));
-        } else if drawing && !self.stencil_tiles.is_empty() {
-            parameters.render_tile_clipping_masks(gpu, &self.stencil_tiles);
-        }
-        Some(pass)
-    }
-}
-
-/// The draws of a pass of a [`FrameDraws`], from [`FrameDraws::begin`] to
-/// [`DrawPass::end`], which every pass that begins must reach.
-#[must_use = "a pass's draws end with `DrawPass::end`"]
-pub(crate) struct DrawPass<'a> {
-    frame: &'a FrameDraws,
-    /// The frame's draws, none where their layer composite's pass didn't
-    /// begin.
-    draws: &'a [FrameDraw],
-    pass: RenderPass,
-    /// The passes of the draws that draw in another pass: both the opaque
-    /// and the translucent, or none.
-    skip: RenderPass,
-    /// The stencil of the 3D draws that clip.
-    volume_stencil: Option<Stencil>,
-    composited: Option<Composited>,
-}
-
-/// A draw of a [`DrawPass`], as [`DrawPass::draws`] yields it.
-#[derive(Clone, Copy)]
-pub(crate) struct PassDraw<'a> {
-    /// The draw's index among the frame's draws.
-    index: usize,
-    draw: &'a FrameDraw,
-}
-
-impl<'a> DrawPass<'a> {
-    /// The draws of the pass, in drawing order.
-    pub(crate) fn draws(&self) -> impl Iterator<Item = PassDraw<'a>> + use<'a> {
-        let (pass, skip) = (self.pass, self.skip);
-        let draws = self.draws.iter().enumerate();
-        draws
-            .filter(move |(_, draw)| draw.pass & pass != RenderPass::NONE)
-            .filter(move |(_, draw)| skip == RenderPass::NONE || draw.pass & skip != skip)
-            .map(|(index, draw)| PassDraw { index, draw })
-    }
-
-    /// Draws `draw`, one of the pass's, with the GPU objects of its mesh.
-    pub(crate) fn draw(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, draw: PassDraw<'_>) {
-        let PassDraw { index, draw } = draw;
-        let Some(mut objects) = parameters.context.take_mesh(draw.mesh) else {
-            debug_assert!(false, "a draw of tile {:?} names a mesh that went", draw.tile);
-            return;
-        };
-        objects.bind_atlases(parameters);
-        let tile_stencil = || match draw.tile.filter(|_| draw.clip) {
-            Some(tile) => parameters.stencil_for_clipping(&tile.to_unwrapped()),
-            None => Stencil::DISABLED,
-        };
-        let (depth, stencil) = match draw.depth {
-            DrawDepth::Off => (Depth::DISABLED, tile_stencil()),
-            DrawDepth::Layer { sub_layer, mask } => (parameters.depth_for_sublayer(sub_layer, mask), tile_stencil()),
-            DrawDepth::Volume { mask } => {
-                (parameters.depth_for_3d(mask), self.volume_stencil.filter(|_| draw.clip).unwrap_or(Stencil::DISABLED))
-            }
-        };
-        objects.draw(gpu, parameters, &self.frame.uniform_buffers, depth, stencil, index as u32);
-        parameters.context.restore_mesh(draw.mesh, objects);
-    }
-
-    /// Ends the pass's draws: composites what they drew where they drew
-    /// into the layer composite's texture.
-    pub(crate) fn end(self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        if let Some(composited) = self.composited {
-            parameters.end_composited(gpu, composited);
-        }
-    }
-}
-
 /// One mesh and a frame's draw of it, with the buffers it binds.
 pub struct SingleDraw {
     /// Keeps the mesh the draw draws.
@@ -425,7 +142,7 @@ impl SingleDraw {
     /// One draw of `mesh`, of the layer, in the translucent pass at `depth`,
     /// without buffers.
     #[must_use]
-    pub fn new(mesh: Mesh, depth: DrawDepth) -> SingleDraw {
+    pub fn new(mesh: Mesh, depth: Depth) -> SingleDraw {
         let mut frame = FrameDraws::default();
         let mut draw = FrameDraw::new(None, &mesh);
         draw.depth = depth;
@@ -541,6 +258,23 @@ impl TileDraws {
     ) {
         list.finish(self.frame_mut(), gpu, context, write);
     }
+}
+
+/// The drawing of a layer type that pushes its draws to the engine's
+/// [`Draws`](crate::draw::Draws) ([`DrawContext::draws`](crate::layer::DrawContext::draws)),
+/// which keeps nothing.
+impl LayerDrawing for () {
+    fn visit_groups<'a>(&'a self, _visit: &mut dyn FnMut(DrawGroup<'a>)) {}
+
+    fn clear(&mut self) {}
+
+    fn begin_frame(&mut self) {}
+
+    fn clear_frame(&mut self) {}
+
+    fn upload(&mut self, _gpu: &mut dyn Gpu, _context: &mut Context) {}
+
+    fn render(&mut self, _gpu: &mut dyn Gpu, _parameters: &mut PaintParameters<'_>, _order: DrawOrder) {}
 }
 
 impl LayerDrawing for TileDraws {

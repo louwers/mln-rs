@@ -1,6 +1,5 @@
 // The globe's depth, which hides 3D geometry behind the horizon: a draw of
 // each covering tile's mesh into depth only, before the layers' 3D draws.
-// The draws' projections are entries of one storage buffer of the pass's.
 
 use std::collections::BTreeMap;
 
@@ -8,40 +7,41 @@ use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
+use mln_gfx::{AttributeDataType, DrawMode};
 use mln_map_types::View;
 use mln_map_types::tile_cover::{TileCoverParameters, tile_cover};
 use mln_util::range::Range;
 
 use crate::draw_objects::{DrawGeometry, DrawObjects, Mesh, Textures, raw_vertices};
+use crate::encode::{Depth, Draw, Group};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::vertex_attribute::Uniforms;
 use crate::globe::{TileGrid, grid, surface_granularity};
-use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, FrameDraws};
 use crate::paint_parameters::PaintParameters;
 use crate::shaders::programs;
 use crate::shaders::programs::ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE;
-use crate::tile_matrix::to_projection_ubo;
+use crate::tile_matrix::TileProjection;
 use crate::tile_values::TileMap;
 use crate::update_parameters::UpdateParameters;
 
 /// Writes the planet into the depth buffer ahead of the translucent pass, so
 /// that 3D geometry behind the horizon is hidden by the globe the way the 2D
 /// layers are by their clip Z.
-#[derive(Default)]
 pub(crate) struct GlobeDepthPass {
     /// The planet's meshes, one of each tile of the cover.
     tiles: TileMap<Mesh>,
     /// The frame's draws of them, which draw into depth in the translucent
     /// pass.
-    frame: FrameDraws,
-    /// The frame's draws as the update makes them, with their projections.
-    draw_list: DrawList<ProjectionUBO>,
+    draws: Group,
     meshes: BTreeMap<(u8, bool, bool), TileGrid>,
+}
+
+impl Default for GlobeDepthPass {
+    fn default() -> Self {
+        GlobeDepthPass { tiles: TileMap::default(), draws: Group::new(), meshes: BTreeMap::new() }
+    }
 }
 
 impl GlobeDepthPass {
@@ -57,7 +57,7 @@ impl GlobeDepthPass {
     ) {
         if !state.is_globe() || !needed {
             self.tiles.clear_tiles();
-            self.frame.clear();
+            self.draws.clear();
             if !state.is_globe() {
                 self.meshes.clear();
             }
@@ -124,25 +124,24 @@ impl GlobeDepthPass {
             let Some(mesh) = value.as_ref() else {
                 continue;
             };
-            let mut draw = FrameDraw::new(Some(*tile_id), mesh);
-            draw.depth = DrawDepth::Volume { mask: DepthMaskType::ReadWrite };
-            let projection = to_projection_ubo(&state.projection_data(&tile_id.to_unwrapped()));
-            self.draw_list.push(draw, projection);
+            let tile = tile_id.to_unwrapped();
+            let at = TileProjection::of(&tile, state, &state.projection_data(&tile), None);
+            // The draws draw in the order their meshes were made.
+            let draw =
+                Draw { order: mesh.seq() as i64, depth: Depth::Volume { write: true, once: false }, ..Draw::DEFAULT };
+            self.draws.push_at(mesh, &at, draw, ());
         }
-        // The draws draw in the order their meshes were made.
-        self.draw_list.finish(&mut self.frame, gpu, context, |writer| {
-            writer.storage(PROJECTION_BUFFER.id, |projection| *projection);
-        });
+        self.draws.finish(gpu, context, []);
     }
 
     /// Uploads the meshes of the frame's draws.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
-        self.frame.upload(gpu, context);
+        self.draws.upload(gpu, context);
     }
 
     /// Draws the frame's draws of the pass into the open pass of `gpu`, the
     /// context's.
     pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        self.frame.render(gpu, parameters);
+        self.draws.render(gpu, parameters);
     }
 }

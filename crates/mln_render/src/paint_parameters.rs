@@ -1,7 +1,6 @@
 use std::any::Any;
 
 use glam::DMat4;
-use mln_gfx::DepthMaskType;
 use mln_gfx::gpu::{
     ColorAttachment, DepthState, DepthStencilAttachment, Gpu, GpuError, LoadOp, PassDesc, Scissor, StencilState,
     StencilTest, TargetFormats,
@@ -388,9 +387,9 @@ impl<'a> PaintParameters<'a> {
             // composite at the depth of the current layer: layers above
             // that drew into the depth buffer hide them.
             let depth = if self.layer_composite.draws_with_frame_depth(group) {
-                Depth::DISABLED
+                DepthTest::DISABLED
             } else {
-                self.depth_for_sublayer(0, DepthMaskType::ReadOnly)
+                self.depth_for_sublayer(0, false)
             };
             self.layer_composite.draw(gpu, target, depth, self.context, group);
         }
@@ -442,16 +441,16 @@ impl<'a> PaintParameters<'a> {
     }
 
     #[must_use]
-    pub(crate) fn depth_for_sublayer(&self, n: u8, mask: DepthMaskType) -> Depth {
+    pub(crate) fn depth_for_sublayer(&self, n: u8, write: bool) -> DepthTest {
         if !self.opaque_pass_enabled_for_layer() {
-            return Depth::DISABLED;
+            return DepthTest::DISABLED;
         }
 
         // Wrapping unsigned arithmetic, then a float product.
         let steps =
             (1u32.wrapping_add(self.current_layer)).wrapping_mul(Self::NUM_SUBLAYERS as u32).wrapping_add(u32::from(n));
         let depth = self.depth_range_size + steps as f32 * Self::DEPTH_EPSILON;
-        Depth::less_equal(mask, (depth, depth))
+        DepthTest::less_equal(write, (depth, depth))
     }
 
     /// The depth of `depth_for_sublayer(0, ..)` where 2D layers write
@@ -463,8 +462,8 @@ impl<'a> PaintParameters<'a> {
     }
 
     #[must_use]
-    pub(crate) fn depth_for_3d(&self, mask: DepthMaskType) -> Depth {
-        Depth::less_equal(mask, (0.0, self.depth_range_size))
+    pub(crate) fn depth_for_3d(&self, write: bool) -> DepthTest {
+        DepthTest::less_equal(write, (0.0, self.depth_range_size))
     }
 
     pub(crate) fn clear_stencil(&mut self, gpu: &mut dyn Gpu) {
@@ -569,20 +568,20 @@ impl<'a> PaintParameters<'a> {
 
 /// A draw's depth test and write, and the depths that clip z maps to.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Depth {
+pub(crate) struct DepthTest {
     pub(crate) state: DepthState,
     /// From near to far.
     pub(crate) range: (f32, f32),
 }
 
-impl Depth {
+impl DepthTest {
     /// No test and no write, over the whole range.
-    pub(crate) const DISABLED: Depth = Depth { state: DepthState::DISABLED, range: (0.0, 1.0) };
+    pub(crate) const DISABLED: DepthTest = DepthTest { state: DepthState::DISABLED, range: (0.0, 1.0) };
 
-    /// A `LessEqual` test that writes as `mask` says, over `range`.
-    fn less_equal(mask: DepthMaskType, range: (f32, f32)) -> Depth {
-        let state = DepthState { compare: DepthFunctionType::LessEqual, write: mask == DepthMaskType::ReadWrite };
-        Depth { state, range }
+    /// A `LessEqual` test that writes where `write`, over `range`.
+    fn less_equal(write: bool, range: (f32, f32)) -> DepthTest {
+        let state = DepthState { compare: DepthFunctionType::LessEqual, write };
+        DepthTest { state, range }
     }
 }
 

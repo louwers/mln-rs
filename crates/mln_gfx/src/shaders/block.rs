@@ -111,6 +111,48 @@ pub trait UniformBlock: bytemuck::Pod {
     const BLOCK: &'static Block;
 }
 
+/// The values of a draw's own for each of its program's storage buffers of
+/// an element per draw, in the order the program lists those buffers:
+/// none (`()`), one [`UniformBlock`], or a tuple of up to four.
+pub trait DrawBlocks: Copy + 'static {
+    /// The layouts of the blocks, in order.
+    const BLOCKS: &'static [&'static Block];
+
+    /// Calls `f` with the bytes of each block, in order.
+    fn each_bytes(&self, f: impl FnMut(&[u8]));
+}
+
+impl DrawBlocks for () {
+    const BLOCKS: &'static [&'static Block] = &[];
+
+    fn each_bytes(&self, _f: impl FnMut(&[u8])) {}
+}
+
+impl<T: UniformBlock> DrawBlocks for T {
+    const BLOCKS: &'static [&'static Block] = &[T::BLOCK];
+
+    fn each_bytes(&self, mut f: impl FnMut(&[u8])) {
+        f(bytemuck::bytes_of(self));
+    }
+}
+
+/// `DrawBlocks` for the tuple of the blocks `$t`, each the field `$i`.
+macro_rules! tuple_draw_blocks {
+    ($($t:ident $i:tt),+) => {
+        impl<$($t: UniformBlock),+> DrawBlocks for ($($t,)+) {
+            const BLOCKS: &'static [&'static Block] = &[$($t::BLOCK),+];
+
+            fn each_bytes(&self, mut f: impl FnMut(&[u8])) {
+                $(f(bytemuck::bytes_of(&self.$i));)+
+            }
+        }
+    };
+}
+
+tuple_draw_blocks!(A 0, B 1);
+tuple_draw_blocks!(A 0, B 1, C 2);
+tuple_draw_blocks!(A 0, B 1, C 2, D 3);
+
 /// The Rust type of a member of a [`Block`].
 pub trait MemberValue: bytemuck::Pod {
     /// Its type in a block.

@@ -15,7 +15,7 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_render::draw::{
-    Context, DrawDepth, DrawFrame, DrawGeometry, DrawGroup, DrawIndexes, DrawList, DrawObjects, DrawOrder, FrameDraw,
+    Context, Depth, DrawFrame, DrawGeometry, DrawGroup, DrawIndexes, DrawList, DrawObjects, DrawOrder, FrameDraw,
     FrameDraws, LayerDrawing, Mesh, PaintParameters, RenderStaticData, RenderTarget, SharedAttribute, SharedTexture,
     SharedVertices, Textures, TileMap, UniformWriter, Uniforms, VertexAttributeArray, bucket_indexes, bucket_vertices,
     cast_matrix, copied_vertices, globe_extrude_scale, paint_vertices, projection_data, to_projection_ubo,
@@ -334,7 +334,7 @@ impl HeatmapState {
                 continue;
             };
             let mut draw = FrameDraw::new(Some(tile_id), mesh);
-            draw.depth = DrawDepth::Off;
+            draw.depth = Depth::Off;
             tile_draws.push(draw, Self::tile_uniforms(&tile_id, binders, frame));
         }
 

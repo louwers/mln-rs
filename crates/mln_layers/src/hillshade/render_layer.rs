@@ -19,10 +19,10 @@ use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_math::deg2radf;
 use mln_render::draw::{
-    Context, DrawDepth, DrawFrame, DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, Indexes, Mesh,
+    Context, Depth, DrawFrame, DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, Indexes, Mesh,
     PaintParameters, RenderStaticData, RenderTarget, SharedAttribute, SharedIndexes, SharedTexture, SharedVertices,
     SingleDraw, Textures, TileDraws, TileMap, Uniforms, VertexAttributeArray, cast_matrix, copied_vertices,
     projection_data, to_projection_ubo,
@@ -509,7 +509,7 @@ impl DemTarget {
         textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(dem.clone());
         let objects =
             DrawObjects::new(shader.clone(), ColorMode::unblended(), CullFaceMode::disabled(), geometry, textures);
-        let depth = DrawDepth::Layer { sub_layer: 0, mask: DepthMaskType::ReadOnly };
+        let depth = Depth::Layer { sub_layer: 0, write: false };
         let mut prepare = SingleDraw::new(context.add_mesh(objects), depth);
         let extent = f64::from(EXTENT);
         let m =

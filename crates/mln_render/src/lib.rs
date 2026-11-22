@@ -33,6 +33,7 @@ mod buckets;
 mod clip_masks;
 pub mod draw;
 mod draw_objects;
+mod encode;
 mod erased_layer;
 mod erased_source;
 mod frame;

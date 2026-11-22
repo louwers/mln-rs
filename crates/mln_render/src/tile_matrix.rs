@@ -1,6 +1,8 @@
 //! The matrices and projections of a layer's draws of a tile, which their
 //! uniforms hold.
 
+use std::fmt;
+
 use geometry::Point;
 use glam::{DMat4, DVec2, DVec3, Vec2};
 use mln_gfx::gpu::Gpu;
@@ -8,7 +10,7 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_map_types::{ProjectionData, View};
 use mln_style_types::TranslateAnchorType;
-use mln_tile_id::UnwrappedTileID;
+use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants::{EXTENT, M2PI};
 
 use crate::gfx::context::Context;
@@ -27,6 +29,105 @@ pub(crate) fn bind_no_projection(gpu: &mut dyn Gpu, layer_uniforms: &mut Uniform
             bytemuck::bytes_of(&ProjectionUBO::default()),
             context.device(),
         );
+    }
+}
+
+/// How a draw places a tile's geometry. The default places it as the tile
+/// has it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TileTransform {
+    /// A layer's `*-translate`, in pixels.
+    pub translate: [f32; 2],
+    /// What the translation's axes follow: the map or the viewport.
+    pub anchor: TranslateAnchorType,
+    /// Where the geometry's origin is in the tile, in tile units, if not at
+    /// the tile's corner.
+    pub origin: Option<DVec2>,
+    /// Whether to project with the near plane moved out to a tenth of the
+    /// camera's distance to the center, for draws that test the depth of 3D
+    /// geometry, which then spends less of its precision near the camera.
+    pub near_clipped: bool,
+    /// Whether the translation is in viewport pixels rather than tile
+    /// units, for geometry in pixels.
+    pub viewport_pixels: bool,
+    /// Whether to project onto the pixel grid, for geometry that draws
+    /// crisp while the camera stands still.
+    pub aligned: bool,
+}
+
+/// Where a tile's geometry draws in a frame, as a [`TileTransform`] places
+/// it: the matrices a draw's values may hold, and the projection block that
+/// the engine writes for a draw pushed with it
+/// ([`Group::push_at`](crate::draw::Group::push_at)).
+#[derive(Clone, Copy)]
+pub struct TileProjection {
+    /// The matrix from the tile's units to clip space, of the frame's
+    /// projection.
+    pub matrix: [f32; 16],
+    /// The matrix from the tile's units to clip space on Mercator.
+    pub fallback_matrix: [f32; 16],
+    /// The translation in the tile's units, which the globe adds on the
+    /// sphere; zero for a translation in viewport pixels.
+    pub translation: [f32; 2],
+    /// The tile units that a logical pixel spans at the camera's zoom.
+    pub pixels_to_tile_units: f32,
+    /// The radians on the planet that a logical pixel spans at the camera's
+    /// zoom, at the center of the view.
+    pub globe_extrude_scale: f32,
+    /// The projection block of the draws pushed with it.
+    pub(crate) block: ProjectionUBO,
+    /// The tile whose mask a draw pushed with it clips to: the layer's tile
+    /// it was made for.
+    pub(crate) tile: Option<OverscaledTileID>,
+}
+
+impl TileProjection {
+    /// The projection of the tile `tile` in `frame`, placed as `how` says,
+    /// to which draws clip as to `clip_to` where they clip.
+    pub(crate) fn new(
+        tile: &UnwrappedTileID,
+        frame: &DrawFrame<'_>,
+        how: &TileTransform,
+        clip_to: Option<OverscaledTileID>,
+    ) -> TileProjection {
+        let origin = how.origin.map(|origin| Point::new(origin.x, origin.y));
+        let data = projection_data(
+            tile,
+            frame,
+            how.translate,
+            how.anchor,
+            how.near_clipped,
+            how.viewport_pixels,
+            origin,
+            how.aligned,
+        );
+        TileProjection::of(tile, frame.view, &data, clip_to)
+    }
+
+    /// The projection of `data`, the projection of the tile `tile` in a
+    /// frame of `view`, to which draws clip as to `clip_to` where they clip.
+    pub(crate) fn of(
+        tile: &UnwrappedTileID,
+        view: &View,
+        data: &ProjectionData,
+        clip_to: Option<OverscaledTileID>,
+    ) -> TileProjection {
+        let zoom = view.zoom() as f32;
+        TileProjection {
+            matrix: cast_matrix(&data.main_matrix),
+            fallback_matrix: cast_matrix(&data.fallback_matrix),
+            translation: data.translate.as_vec2().to_array(),
+            pixels_to_tile_units: tile.pixels_to_tile_units(1.0, zoom),
+            globe_extrude_scale: globe_extrude_scale(tile, zoom, view.projection().circle_radius_correction(view)),
+            block: to_projection_ubo(data),
+            tile: clip_to,
+        }
+    }
+}
+
+impl fmt::Debug for TileProjection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TileProjection").field("matrix", &self.matrix).field("tile", &self.tile).finish_non_exhaustive()
     }
 }
 

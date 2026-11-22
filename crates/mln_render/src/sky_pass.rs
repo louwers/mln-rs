@@ -5,32 +5,62 @@ use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
+use mln_gfx::{AttributeDataType, DrawMode};
 use mln_map_types::View;
 use mln_style_types::LightAnchorType;
 use mln_util::Color;
 use mln_util::geo::WrapMode;
 use mln_util::size::Size;
 
-use crate::draw_objects::{DrawGeometry, DrawObjects, Textures, raw_vertices};
+use crate::draw_objects::{DrawGeometry, DrawObjects, Mesh, Textures, raw_vertices};
+use crate::encode::{Depth, Draw, Group};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::vertex_attribute::Uniforms;
-use crate::layer_drawing::{DrawDepth, SingleDraw};
+use crate::paint_parameters::PaintParameters;
 use crate::render_light::EvaluatedLight;
 use crate::render_sky::EvaluatedSky;
 use crate::render_static_data::RenderStaticData;
 use crate::shaders::programs;
-use crate::shaders::programs::{
-    ATMOSPHERE_PROPS, ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, ID_SKY_POS_VERTEX_ATTRIBUTE, SKY_PROPS,
-};
+use crate::shaders::programs::{ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, ID_SKY_POS_VERTEX_ATTRIBUTE};
 use crate::shaders::ubo::{AtmospherePropsUBO, SkyPropsUBO};
-use crate::tile_matrix::bind_no_projection;
+
+/// A draw over the whole view, with the group it draws in.
+pub(crate) struct FullscreenDraw {
+    mesh: Mesh,
+    depth: Depth,
+    draws: Group,
+}
+
+impl FullscreenDraw {
+    /// Makes the frame's draw, whose program reads `block`.
+    fn update<T: mln_gfx::shaders::block::UniformBlock>(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        context: &mut Context,
+        block: &T,
+    ) {
+        let draws = &mut self.draws;
+        draws.clear();
+        draws.block(block).push(&self.mesh, Draw { depth: self.depth, ..Draw::DEFAULT }, ());
+        draws.finish(gpu, context, []);
+    }
+
+    /// Uploads the draw's mesh.
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+        self.draws.upload(gpu, context);
+    }
+
+    /// Draws the draw into the open pass of `gpu`, the context's.
+    pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        self.draws.render(gpu, parameters);
+    }
+}
 
 /// A draw of `shader`, which reads the view's corners as the vertex attribute
 /// `vertex_attribute`, in the translucent pass at `depth`, of a mesh in
 /// `context`.
-fn fullscreen_draw(context: &mut Context, shader: ShaderKey, vertex_attribute: usize, depth: DrawDepth) -> SingleDraw {
+fn fullscreen_draw(context: &mut Context, shader: ShaderKey, vertex_attribute: usize, depth: Depth) -> FullscreenDraw {
     let corners: [[i16; 2]; 4] = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
     let vertices = bytemuck::cast_slice(&corners).to_vec();
     let geometry = DrawGeometry {
@@ -43,7 +73,7 @@ fn fullscreen_draw(context: &mut Context, shader: ShaderKey, vertex_attribute: u
     };
     let objects =
         DrawObjects::new(shader, ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, Textures::default());
-    SingleDraw::new(context.add_mesh(objects), depth)
+    FullscreenDraw { mesh: context.add_mesh(objects), depth, draws: Group::new() }
 }
 
 /// The direction of the sun in the globe's frame, where the atmosphere traces
@@ -79,8 +109,8 @@ fn color_components(color: &Color) -> [f32; 4] {
 /// after them, against the globe depth prepass, so the planet correctly occludes it.
 #[derive(Default)]
 pub(crate) struct SkyPass {
-    sky: Option<SingleDraw>,
-    atmosphere: Option<SingleDraw>,
+    sky: Option<FullscreenDraw>,
+    atmosphere: Option<FullscreenDraw>,
 }
 
 impl SkyPass {
@@ -108,7 +138,7 @@ impl SkyPass {
         if projection_transition < 1.0 {
             let sky = self.sky.get_or_insert_with(|| {
                 let shader = context.shader_key(&programs::SKY, Uniforms::default(), ProjectionVariant::Mercator);
-                let depth = DrawDepth::Layer { sub_layer: 0, mask: DepthMaskType::ReadWrite };
+                let depth = Depth::Layer { sub_layer: 0, write: true };
                 fullscreen_draw(context, shader, ID_SKY_POS_VERTEX_ATTRIBUTE, depth)
             });
             let horizon_distance = state.mercator_horizon() * f64::from(pixel_ratio);
@@ -128,8 +158,7 @@ impl SkyPass {
                 sky_horizon_blend: *evaluated.sky_horizon_blend.uniform() * viewport_size.height as f32 * 0.5,
                 sky_blend: projection_transition as f32,
             };
-            sky.write_pod(gpu, SKY_PROPS.id, &props, context);
-            bind_no_projection(gpu, &mut sky.frame.uniform_buffers, context);
+            sky.update(gpu, context, &props);
         } else {
             self.sky = None;
         }
@@ -146,7 +175,7 @@ impl SkyPass {
                 context,
                 shader,
                 ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE,
-                DrawDepth::Volume { mask: DepthMaskType::ReadOnly },
+                Depth::Volume { write: false, once: false },
             )
         });
 
@@ -156,20 +185,19 @@ impl SkyPass {
             camera_position: camera.as_vec3().extend(0.0).to_array(),
             sun_position: sun_position(light, state, atmosphere_blend),
         };
-        atmosphere.write_pod(gpu, ATMOSPHERE_PROPS.id, &props, context);
-        bind_no_projection(gpu, &mut atmosphere.frame.uniform_buffers, context);
+        atmosphere.update(gpu, context, &props);
     }
 
     /// The planar sky, which draws before the layers, if the frame draws it.
     #[must_use]
-    pub(crate) fn sky(&mut self) -> Option<&mut SingleDraw> {
+    pub(crate) fn sky(&mut self) -> Option<&mut FullscreenDraw> {
         self.sky.as_mut()
     }
 
     /// The globe's atmosphere, which draws after the layers, if the frame
     /// draws it.
     #[must_use]
-    pub(crate) fn atmosphere(&mut self) -> Option<&mut SingleDraw> {
+    pub(crate) fn atmosphere(&mut self) -> Option<&mut FullscreenDraw> {
         self.atmosphere.as_mut()
     }
 

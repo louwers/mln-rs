@@ -8,10 +8,10 @@ use mln_gfx::shaders::program::{PROJECTION_BUFFER, Program};
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_render::draw::{
-    AtlasBinding, Composite, Context, DrawDepth, DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw,
-    IconFilter, Indexes, Mesh, RenderStaticData, SharedAttribute, SharedIndexes, SharedVertices, Texture2D, TileDraws,
-    TileMap, UniformWriter, Uniforms, VertexAttributeArray, bucket_indexes, bucket_vertices, cast_matrix,
-    copied_vertices, copy_shared_attributes, paint_vertices, projection_data, to_projection_ubo,
+    AtlasBinding, Composite, Context, Depth, DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, IconFilter,
+    Indexes, Mesh, RenderStaticData, SharedAttribute, SharedIndexes, SharedVertices, Texture2D, TileDraws, TileMap,
+    UniformWriter, Uniforms, VertexAttributeArray, bucket_indexes, bucket_vertices, cast_matrix, copied_vertices,
+    copy_shared_attributes, paint_vertices, projection_data, to_projection_ubo,
 };
 use mln_render::layer::{
     Bucket, DrawContext, EvaluateCx, EvaluatedLayer, Evaluation, FeatureQuery, FrameTile, HitTest, LayerBucket,
@@ -676,7 +676,8 @@ impl LayerType for Fill {
                     continue;
                 };
                 let mut tile_draw = FrameDraw::new(Some(tile_id), &draw.mesh);
-                tile_draw.depth = DrawDepth::Layer { sub_layer: draw.sub_layer, mask: draw.depth };
+                tile_draw.depth =
+                    Depth::Layer { sub_layer: draw.sub_layer, write: draw.depth == DepthMaskType::ReadWrite };
                 tile_draw.clip = true;
                 state.draw_list.push(tile_draw, uniforms);
             }

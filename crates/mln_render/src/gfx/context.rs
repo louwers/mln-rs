@@ -211,26 +211,27 @@ impl Context {
     /// Keeps `objects`, the GPU objects of a draw, while the returned mesh
     /// lasts, made after every mesh the context made before it
     /// ([`Mesh::seq`]).
-    pub fn add_mesh(&mut self, objects: DrawObjects) -> Mesh {
+    pub fn add_mesh<B>(&mut self, objects: DrawObjects) -> Mesh<B> {
         let seq = self.next_mesh_seq;
         self.next_mesh_seq += 1;
-        Mesh::new(self.meshes.add(Box::new(objects), &self.device.queue), seq)
+        let program = objects.program();
+        Mesh::new(self.meshes.add(Box::new(objects), &self.device.queue), seq, program)
     }
 
     /// The GPU objects of `mesh`.
     #[must_use]
-    pub fn mesh(&self, mesh: &Mesh) -> Option<&DrawObjects> {
+    pub fn mesh<B>(&self, mesh: &Mesh<B>) -> Option<&DrawObjects> {
         self.meshes.get(mesh.handle()).map(|objects| &**objects)
     }
 
     /// The GPU objects of `mesh`, to change.
-    pub fn mesh_mut(&mut self, mesh: &Mesh) -> Option<&mut DrawObjects> {
+    pub fn mesh_mut<B>(&mut self, mesh: &Mesh<B>) -> Option<&mut DrawObjects> {
         self.meshes.get_mut(mesh.handle()).map(|objects| &mut **objects)
     }
 
     /// Writes `value` to the uniform buffer `id` of `mesh`'s own, which its
     /// draws bind over their frame's.
-    pub fn write_mesh_uniform<T: bytemuck::Pod>(&mut self, gpu: &mut dyn Gpu, mesh: &Mesh, id: usize, value: &T) {
+    pub fn write_mesh_uniform<B, T: bytemuck::Pod>(&mut self, gpu: &mut dyn Gpu, mesh: &Mesh<B>, id: usize, value: &T) {
         let Context { device, meshes, .. } = self;
         if let Some(objects) = meshes.get_mut(mesh.handle()) {
             objects.write_pod(gpu, id, value, device);

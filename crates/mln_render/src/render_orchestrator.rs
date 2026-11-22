@@ -32,13 +32,14 @@ use crate::frame::{Frame, FrameLayer};
 use crate::gfx::context::Context;
 use crate::globe_depth_pass::GlobeDepthPass;
 use crate::image_store::ImageStore;
-use crate::layer_drawing::{DrawGroup, DrawOrder, SingleDraw};
+use crate::layer_drawing::{DrawGroup, DrawOrder};
 use crate::paint_parameters::PaintParameters;
 use crate::placement::{CollisionGroups, ErasedFrame, ErasedPlacement, PlacementQuery, Prepared, Schedule};
 use crate::render_layer::{EndedHosts, FrameSourceTiles, LayerUpdate, RecordedLayer, RenderLayer};
 use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
 use crate::render_tile::{FoundTile, RenderTile, TileContent};
 use crate::renderer_event::RendererEvent;
+use crate::sky_pass::FullscreenDraw;
 use crate::sources::render_tile_source::{DebugLayer, DebugLayers};
 use crate::text::glyph_store::GlyphStore;
 use crate::tile::inbox::Waker;
@@ -1259,13 +1260,13 @@ impl RenderOrchestrator {
     }
 
     /// The planar sky, which draws before the layers, if the frame draws it.
-    pub(crate) fn sky(&mut self) -> Option<&mut SingleDraw> {
+    pub(crate) fn sky(&mut self) -> Option<&mut FullscreenDraw> {
         self.sky_pass.sky()
     }
 
     /// The globe's atmosphere, which draws after the layers, if the frame
     /// draws it.
-    pub(crate) fn atmosphere(&mut self) -> Option<&mut SingleDraw> {
+    pub(crate) fn atmosphere(&mut self) -> Option<&mut FullscreenDraw> {
         self.sky_pass.atmosphere()
     }
 

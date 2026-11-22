@@ -9,8 +9,6 @@ use geometry::Point;
 use glam::Vec2;
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::MapDebugOptions;
@@ -22,6 +20,7 @@ use mln_util::hash::{HashMap, HashSet};
 use mln_vec_map::VecMap;
 
 use crate::draw_objects::{DrawGeometry, DrawObjects, Mesh, Textures};
+use crate::encode::{Depth, Draw, Group};
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::erased_source::ErasedOrigin;
 use crate::gfx::context::Context;
@@ -30,20 +29,19 @@ use crate::gfx::store::SharedIndexes;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::globe::{subdivide_ring, surface_granularity};
-use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, FrameDraws};
 use crate::paint_parameters::PaintParameters;
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters, TileOrder};
 use crate::render_tile::RenderTile;
 use crate::shaders::programs;
 use crate::shaders::programs::{
-    ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE, ID_TILE_DEBUG_END_ATTRIBUTE, ID_TILE_DEBUG_START_ATTRIBUTE, TILE_DEBUG_PROPS,
+    ID_TILE_DEBUG_CORNER_VERTEX_ATTRIBUTE, ID_TILE_DEBUG_END_ATTRIBUTE, ID_TILE_DEBUG_START_ATTRIBUTE,
 };
 use crate::shaders::ubo::TileDebugPropsUBO;
 use crate::tile::job::SourceKey;
 use crate::tile::source_tiles::{CoverUpdate, SourceTiles};
 use crate::tile::store::TileStore;
 use crate::tile::tile::TileKind;
-use crate::tile_matrix::to_projection_ubo;
+use crate::tile_matrix::TileProjection;
 use crate::tile_parameters::TileParameters;
 
 /// The color and width of a debug overlay's segments: red tile borders, and
@@ -155,22 +153,14 @@ pub(crate) struct DebugLayer {
     /// The overlay's draws, in the order they were made, which is the order
     /// they draw in.
     draws: Vec<DebugDraw>,
-    /// The frame's draws as `update_draws` makes them.
-    draw_list: DrawList<ProjectionUBO>,
     /// The frame's draws of the overlay, with the buffers they read.
-    frame: FrameDraws,
+    frame: Group,
 }
 
 impl DebugLayer {
     #[must_use]
     pub(crate) fn new(type_: DebugType) -> Self {
-        DebugLayer {
-            style: debug_style(type_),
-            quad: None,
-            draws: Vec::new(),
-            draw_list: DrawList::default(),
-            frame: FrameDraws::default(),
-        }
+        DebugLayer { style: debug_style(type_), quad: None, draws: Vec::new(), frame: Group::new() }
     }
 
     /// Uploads the meshes of the frame's draws.
@@ -219,20 +209,18 @@ impl DebugLayer {
     /// Makes the frame's draws of the overlay, and writes the buffers they
     /// read.
     pub(crate) fn update_draws(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        let frame = parameters.frame;
         for draw in &self.draws {
-            let projection = parameters.frame.projection_data_for_tile(&draw.tile.to_unwrapped(), false);
-            let mut frame_draw = FrameDraw::new(None, &draw.mesh);
-            frame_draw.depth = DrawDepth::Off;
-            self.draw_list.push(frame_draw, to_projection_ubo(&projection));
+            let tile = draw.tile.to_unwrapped();
+            let at = TileProjection::of(&tile, frame.view, &frame.projection_data_for_tile(&tile, false), None);
+            let order = Draw { order: draw.mesh.seq() as i64, depth: Depth::Off, ..Draw::DEFAULT };
+            self.frame.push_at(&draw.mesh, &at, order, ());
         }
 
         let (color, width) = self.style;
-        let world_width = (TILE_SIZE * parameters.frame.view.zoom().exp2()) as f32;
-        let properties = TileDebugPropsUBO { color: color.to_float_array(), width, world_width, pad: [0.0; 2] };
-        self.draw_list.finish(&mut self.frame, gpu, parameters.context, |writer| {
-            writer.uniform(TILE_DEBUG_PROPS.id, &properties);
-            writer.storage(PROJECTION_BUFFER.id, |projection| *projection);
-        });
+        let world_width = (TILE_SIZE * frame.view.zoom().exp2()) as f32;
+        self.frame.block(&TileDebugPropsUBO { color: color.to_float_array(), width, world_width, pad: [0.0; 2] });
+        self.frame.finish(gpu, parameters.context, []);
     }
 }
 

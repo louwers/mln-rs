@@ -3,11 +3,11 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::tile_cover::{TileCoverParameters, tile_cover};
 use mln_render::draw::{
-    DrawDepth, DrawFrame, DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, Mesh, RenderPass,
-    RenderStaticData, Textures, TileDraws, TileMap, Uniforms, projection_data, raw_vertices, to_projection_ubo,
+    Depth, DrawFrame, DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, Mesh, RenderPass, RenderStaticData,
+    Textures, TileDraws, TileMap, Uniforms, projection_data, raw_vertices, to_projection_ubo,
 };
 use mln_render::globe::tile_grid;
 use mln_render::layer::{
@@ -186,7 +186,7 @@ impl LayerType for Background {
             }
             let mut draw = FrameDraw::new(Some(*tile_id), mesh);
             draw.pass = draw_passes;
-            draw.depth = DrawDepth::Layer { sub_layer: 0, mask: DepthMaskType::ReadWrite };
+            draw.depth = Depth::Layer { sub_layer: 0, write: true };
             draw_list.push(draw, BackgroundState::uniforms(tile_id, has_pattern, frame));
         }
 

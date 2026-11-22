@@ -42,7 +42,7 @@ use crate::gfx::context::Context;
 use crate::gfx::owned::Owned;
 use crate::gfx::resources::GpuTexture;
 use crate::gfx::vertex_attribute::Uniforms;
-use crate::paint_parameters::{Depth, DrawTarget, OpenPass};
+use crate::paint_parameters::{DepthTest, DrawTarget, OpenPass};
 use crate::render_static_data::RenderStaticData;
 use crate::shaders::programs;
 use crate::shaders::programs::{
@@ -402,7 +402,7 @@ impl LayerComposite {
         &mut self,
         gpu: &mut dyn Gpu,
         target: DrawTarget,
-        depth: Depth,
+        depth: DepthTest,
         context: &mut Context,
         group: SimpleIdentity,
     ) {
@@ -422,7 +422,7 @@ impl LayerComposite {
         }
         let slot = self.groups.len();
         let blend = BlendFunction::Replace;
-        if let Err(error) = self.draw_quad(gpu, target, context, slot, blend, Depth::DISABLED) {
+        if let Err(error) = self.draw_quad(gpu, target, context, slot, blend, DepthTest::DISABLED) {
             Log::warning(Event::Render, format!("Copying the frame failed: {error}"));
         }
     }
@@ -436,7 +436,7 @@ impl LayerComposite {
         context: &mut Context,
         slot: usize,
         blend: BlendFunction,
-        depth: Depth,
+        depth: DepthTest,
     ) -> Result<(), GpuError> {
         let (Some(shader), Some(target), Some(quad), Some(uniforms), Some(projection)) =
             (&self.shader, &self.target, &mut self.quad, &self.uniforms, &self.projection)

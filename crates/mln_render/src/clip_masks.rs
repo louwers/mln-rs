@@ -22,7 +22,7 @@ use crate::gfx::context::Context;
 use crate::gfx::owned::Owned;
 use crate::gfx::vertex_attribute::Uniforms;
 use crate::globe::grid;
-use crate::paint_parameters::{Depth, DrawTarget};
+use crate::paint_parameters::{DepthTest, DrawTarget};
 use crate::render_static_data::RenderStaticData;
 use crate::shaders::programs;
 use crate::shaders::programs::ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE;
@@ -295,7 +295,7 @@ impl ClipMasks {
 
         let full = Scissor { x: 0, y: 0, width: size.width, height: size.height };
         let dynamic = DynamicState {
-            depth_range: Depth::DISABLED.range,
+            depth_range: DepthTest::DISABLED.range,
             scissor: scissor.unwrap_or(full),
             stencil_reference: 0,
             blend_constant: ColorMode::disabled().blend_color,

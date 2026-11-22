@@ -6,7 +6,7 @@
 // `dyn RenderLayer`. The orchestrator owns the render layers, in the
 // style's order.
 
-use std::any::Any;
+use std::any::{Any, TypeId};
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -23,6 +23,7 @@ use smallvec::SmallVec;
 
 use crate::bucket::Bucket;
 use crate::bucket_geometry::BucketGeometry;
+use crate::encode::Draws;
 use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::context::Context;
@@ -273,6 +274,11 @@ pub(crate) struct Layer<T: LayerType> {
     /// Where the tiles the layer's update found are among the frame's
     /// ([`LayerUpdate::found`]).
     found: Range<usize>,
+    /// The layer's draws of the frame, for a type that pushes them there:
+    /// one whose drawing is `()`.
+    frame_draws: Draws,
+    /// Whether the layer's type pushes its draws to `frame_draws`.
+    pushes_draws: bool,
 }
 
 impl<T: LayerType> Layer<T> {
@@ -292,6 +298,8 @@ impl<T: LayerType> Layer<T> {
             renderable: false,
             projection_variant: ProjectionVariant::Mercator,
             found: 0..0,
+            frame_draws: Draws::new(),
+            pushes_draws: TypeId::of::<T::Drawing>() == TypeId::of::<()>(),
         }
     }
 
@@ -326,13 +334,18 @@ impl<T: LayerType> Layer<T> {
     }
 
     /// Starts the frame's draws of the layer, which has something to draw,
-    /// and returns whether its evaluation draws. One that doesn't drops the
-    /// frame's draws, and keeps what it keeps of its tiles.
-    fn begin_frame(&mut self) -> bool {
+    /// and composites with the frame's depth where `frame_depth`, and returns
+    /// whether its evaluation draws. One that doesn't drops the frame's
+    /// draws, and keeps what it keeps of its tiles.
+    fn begin_frame(&mut self, frame_depth: bool) -> bool {
         self.drawing.begin_frame();
+        if self.pushes_draws {
+            self.frame_draws.begin(self.evaluation.opaque, frame_depth);
+        }
         let draws = self.evaluation.draws;
         if !draws {
             self.drawing.clear_frame();
+            self.frame_draws.clear();
         }
         draws
     }
@@ -341,7 +354,7 @@ impl<T: LayerType> Layer<T> {
     /// update found, once it dropped the values of those that show the
     /// layer nothing to draw or other data than before.
     fn make_draws(&mut self, gpu: &mut dyn Gpu, paint: &mut PaintParameters<'_>, tiles: &[FrameTile<'_, T>]) {
-        if !self.begin_frame() {
+        if !self.begin_frame(paint.frame.composites_with_frame_depth) {
             return;
         }
         debug_assert!(tiles.is_empty() || tiles.len() == self.tile_values.len(), "tiles the update didn't find");
@@ -355,8 +368,12 @@ impl<T: LayerType> Layer<T> {
             projection_variant: self.projection_variant,
             context: &mut *paint.context,
             frame: paint.frame,
+            draws: &mut self.frame_draws,
         };
         T::make_draws(&mut self.state, &mut self.drawing, &mut self.tile_values, gpu, &mut cx);
+        if self.pushes_draws {
+            self.frame_draws.finish(gpu, paint.context, tiles.iter().map(|tile| tile.unwrapped_id()));
+        }
     }
 }
 
@@ -722,7 +739,7 @@ impl<T: LayerType> RenderLayer for Layer<T> {
             // has tiles to draw in yet.
             Some(source) if source.image => {
                 self.remove_all_draws();
-                self.begin_frame();
+                self.begin_frame(paint.frame.composites_with_frame_depth);
             }
             _ => self.remove_all_draws(),
         }
@@ -756,23 +773,34 @@ impl<T: LayerType> RenderLayer for Layer<T> {
     fn remove_all_draws(&mut self) {
         self.tile_values.clear();
         self.drawing.clear();
+        self.frame_draws.clear();
     }
 
     fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
         if self.renderable {
             self.drawing.visit_groups(visit);
+            for group in self.frame_draws.groups() {
+                visit(DrawGroup::Draws(&group.frame));
+            }
         }
     }
 
     fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if self.renderable {
             self.drawing.upload(gpu, context);
+            for group in self.frame_draws.groups() {
+                group.upload(gpu, context);
+            }
         }
     }
 
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
         if self.renderable {
             self.drawing.render(gpu, parameters, order);
+            for group in self.frame_draws.groups() {
+                group.render(gpu, parameters);
+                order.step(parameters);
+            }
         }
     }
 
