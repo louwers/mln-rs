@@ -28,7 +28,6 @@ pub mod fill_extrusion;
 // slice: off pub mod hillshade;
 pub mod line;
 // slice: off mod mesh;
-// slice: off mod pattern_layout;
 // slice: off pub mod raster;
 mod shaders;
 pub mod symbol;
