@@ -334,7 +334,7 @@ fn a_layer_warns_once_while_it_draws_otherwise_than_its_style_says() {
     assert_eq!(1, warned());
     // An app edits the style as it goes, which keeps the misrouted line.
     for width in 5..8 {
-        wait(fixture.map.set_style_layer_property("misrouted", "line-width", &width.to_string()));
+        wait(fixture.map.set_style_layer_property("misrouted", "line-width", width.to_string()));
         fixture.render();
     }
     assert_eq!(1, warned());

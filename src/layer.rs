@@ -5,7 +5,6 @@
 //! ([`StyleKey`]), and the names of a program's declaration ([`program`],
 //! with its shaders' [`source`]s).
 
-pub use feature::Value;
 pub use mln_gfx::gfx_types::AttributeDataType;
 pub use mln_gfx::gpu::{Caps, TextureFormat};
 pub use mln_gfx::shaders::block::Bool32;
@@ -23,6 +22,7 @@ pub use mln_style::expression::Functions;
 pub use mln_style::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 pub use mln_style::properties;
 pub use mln_style::property_table::{PropertyInfo, PropertyTable, PropertyVisitor};
+pub use mln_style::property_value::PropertyValue;
 pub use mln_style::style_key::StyleKey;
 pub use mln_style_types::image::ImageType;
 pub use mln_style_types::{LayerBlendType, Rotation, TranslateAnchorType};

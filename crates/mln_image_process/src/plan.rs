@@ -4,8 +4,6 @@
 use std::sync::Arc;
 
 use mln_rs::layer::Size;
-use mln_rs::mln_style::PropertyValue;
-use mln_rs::mln_style::expression::{EvaluationContext, ValueConverter};
 
 use crate::keys::Operation;
 use crate::program::Process;
@@ -49,15 +47,6 @@ impl Pass {
     }
 }
 
-/// The value of `value` at `zoom`, or `default` where it has none.
-fn at<T: Clone + ValueConverter>(value: &PropertyValue<T>, zoom: f32, default: T) -> T {
-    match value {
-        PropertyValue::Undefined => default,
-        PropertyValue::Constant(value) => value.clone(),
-        PropertyValue::Expression(expression) => expression.evaluate(&EvaluationContext::new(zoom), default),
-    }
-}
-
 /// The passes that apply `operations` at `zoom` to a texture of `frame`'s
 /// size, whose logical pixels are `logical`, the last drawing at `frame`'s
 /// size. Scratch passes draw at logical pixels at most.
@@ -66,17 +55,17 @@ pub(crate) fn plan(operations: &[Operation], zoom: f32, frame: Size, logical: Si
     let has_room = |pass: &Pass| pass.ops() < MAX_OPS;
     for operation in operations {
         match operation {
-            Operation::Blur { size } => blur(&mut passes, at(size, zoom, 0.0).clamp(0.0, 64.0), frame, logical),
+            Operation::Blur { size } => blur(&mut passes, size.evaluate_at(zoom, 0.0).clamp(0.0, 64.0), frame, logical),
             Operation::Threshold { cutoff } => {
-                let cutoff = at(cutoff, zoom, 128.0).clamp(0.0, 255.0) / 255.0;
+                let cutoff = cutoff.evaluate_at(zoom, 128.0).clamp(0.0, 255.0) / 255.0;
                 last(&mut passes, frame, has_room).push(1.0, cutoff, [0.0; 4]);
             }
             Operation::Color { value } => {
-                let color = at(value, zoom, mln_rs::layer::Color::white());
+                let color = value.evaluate_at(zoom, mln_rs::layer::Color::white());
                 last(&mut passes, frame, has_room).push(2.0, 0.0, [color.r, color.g, color.b, color.a]);
             }
             Operation::Opacity { value } => {
-                let opacity = at(value, zoom, 1.0).clamp(0.0, 1.0);
+                let opacity = value.evaluate_at(zoom, 1.0).clamp(0.0, 1.0);
                 last(&mut passes, frame, has_room).push(3.0, opacity, [0.0; 4]);
             }
             Operation::Combine { target, mode } => {
@@ -155,6 +144,8 @@ fn taps(block: &mut Process, sigma: f32, step: [f32; 2]) {
 
 #[cfg(test)]
 mod tests {
+    use mln_rs::layer::PropertyValue;
+
     use super::*;
     use crate::keys::Combine;
 

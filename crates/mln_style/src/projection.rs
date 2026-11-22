@@ -5,11 +5,8 @@ use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 #[cfg(test)]
-use crate::conversion::convert_property_value;
-#[cfg(test)]
 use crate::conversion::{Convertible, Error};
 use crate::conversion_impl::make_style_property;
-use crate::expression::EvaluationContext;
 #[cfg(test)]
 use crate::expression::Functions;
 use crate::property_value::{PropertyValue, StyleValue as _};
@@ -37,13 +34,13 @@ impl Projection {
         if name != "type" {
             return Some(Error::new("projection doesn't support this property"));
         }
-        let mut error = Error::default();
-        let Some(type_) = convert_property_value::<ProjectionDefinition>(value, &mut error, false, false, functions)
-        else {
-            return Some(error);
-        };
-        self.set_type(type_);
-        None
+        match PropertyValue::parse(value, functions) {
+            Ok(type_) => {
+                self.set_type(type_);
+                None
+            }
+            Err(error) => Some(error),
+        }
     }
 
     #[must_use]
@@ -86,13 +83,6 @@ impl Projection {
     /// when the style does not set one.
     #[must_use]
     pub fn evaluate(&self, zoom: f32) -> ProjectionDefinition {
-        let definition = match &self.type_ {
-            PropertyValue::Undefined => Projection::get_default_type(),
-            PropertyValue::Constant(definition) => *definition,
-            PropertyValue::Expression(expression) => {
-                expression.evaluate(&EvaluationContext::new(zoom), Projection::get_default_type())
-            }
-        };
-        definition.at_zoom(f64::from(zoom))
+        self.type_.evaluate_at(zoom, Projection::get_default_type()).at_zoom(f64::from(zoom))
     }
 }

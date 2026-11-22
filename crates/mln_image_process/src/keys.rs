@@ -3,14 +3,14 @@
 
 use std::sync::Arc;
 
-use mln_rs::feature::ValueObject;
+use mln_rs::feature::{Value, ValueObject};
 use mln_rs::layer::{
-    Color, Convertible, Destination, Functions, NamedTarget, NamedTargets, StyleKey, TextureChannelDataType, Value,
-    conversion,
+    Color, Convertible, Destination, Functions, NamedTarget, NamedTargets, PropertyValue, StyleKey,
+    TextureChannelDataType, conversion,
 };
-use mln_rs::mln_style::conversion::{Converter, convert_property_value};
+use mln_rs::mln_style::StyleValue;
+use mln_rs::mln_style::conversion::Converter;
 use mln_rs::mln_style::expression::ValueConverter;
-use mln_rs::mln_style::{PropertyValue, StyleValue};
 
 use crate::ImageProcess;
 
@@ -170,9 +170,7 @@ fn param<T: Converter + ValueConverter + Clone>(
     functions: &Arc<Functions>,
 ) -> Result<Option<PropertyValue<T>>, conversion::Error> {
     let Some(member) = object.object_member(name) else { return Ok(None) };
-    let mut e = conversion::Error::default();
-    let value = convert_property_value(&member, &mut e, false, false, functions);
-    value.map(Some).ok_or_else(|| error(format!("{name}: {}", e.message)))
+    PropertyValue::parse(&member, functions).map(Some).map_err(|e| error(format!("{name}: {}", e.message)))
 }
 
 /// The value of `object`'s member `name`, which it must have.

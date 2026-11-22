@@ -6,7 +6,7 @@ use mln_vec_map::VecSet;
 use crate::conversion::{Converter, Convertible, Error, convert_property_value};
 use crate::conversion_impl::{ValueFactory, make_style_property};
 use crate::evaluated::{Evaluated, Evaluation};
-use crate::expression::{Dependency, Functions, Type, ValueConverter, global_state_refs_intersect};
+use crate::expression::{Dependency, EvaluationContext, Functions, Type, ValueConverter, global_state_refs_intersect};
 use crate::property_expression::PropertyExpression;
 use crate::property_table::PropertyInfo;
 use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
@@ -87,6 +87,32 @@ impl<T> PropertyValue<T> {
         match self {
             PropertyValue::Expression(e) => Some(e),
             _ => None,
+        }
+    }
+}
+
+impl<T: Converter + ValueConverter + Clone> PropertyValue<T> {
+    /// The value of `value`, which may follow the zoom but not a feature,
+    /// with its expressions parsed against `functions`: undefined where
+    /// `value` is.
+    ///
+    /// # Errors
+    ///
+    /// Why `value` is no value of `T`.
+    pub fn parse(value: &Convertible<'_>, functions: &Arc<Functions>) -> Result<Self, Error> {
+        let mut error = Error::default();
+        convert_property_value(value, &mut error, false, false, functions).ok_or(error)
+    }
+}
+
+impl<T: Clone + ValueConverter> PropertyValue<T> {
+    /// The value at `zoom`, or `default` where it is undefined.
+    #[must_use]
+    pub fn evaluate_at(&self, zoom: f32, default: T) -> T {
+        match self {
+            PropertyValue::Undefined => default,
+            PropertyValue::Constant(value) => value.clone(),
+            PropertyValue::Expression(expression) => expression.evaluate(&EvaluationContext::new(zoom), default),
         }
     }
 }

@@ -5,7 +5,8 @@ mod support;
 
 use std::sync::Arc;
 
-use mln_rs::layer::{Convertible, Functions, StyleKey, Value, conversion};
+use mln_rs::feature::Value;
+use mln_rs::layer::{Convertible, Functions, StyleKey, conversion};
 use mln_rs::mln_layers::BackgroundLayer;
 use mln_rs::mln_render::RegistryBuilder;
 use mln_rs::mln_util::ErrorKind;

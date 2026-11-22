@@ -7,7 +7,7 @@ use feature::Value;
 use mln_util::{Error as StyleError, ErrorKind};
 
 use super::util::FixtureLog;
-use crate::conversion::{Convertible, Error, convert_property_value};
+use crate::conversion::{Convertible, Error};
 use crate::diff::{LayerChange, StyleDiff};
 use crate::expression::Functions;
 use crate::expression::functions::RegisterError;
@@ -43,8 +43,7 @@ fn string_json(value: &str) -> Value {
 }
 
 fn parse_level(value: &Convertible<'_>, functions: &Arc<Functions>) -> Result<Level, Error> {
-    let mut error = Error::default();
-    convert_property_value(value, &mut error, false, false, functions).map(Level).ok_or(error)
+    PropertyValue::parse(value, functions).map(Level)
 }
 
 fn registry() -> Arc<StyleRegistry> {
