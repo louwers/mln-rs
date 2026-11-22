@@ -10,6 +10,7 @@ mod support;
 use std::sync::{Arc, Once};
 
 use mln_extension_tests::target_copy::{SOURCE_TARGET, TargetCopyLayer};
+use mln_rs::LogicalExtent;
 use mln_rs::feature::ValueObject;
 use mln_rs::layer::{
     Convertible, Destination, Functions, NamedTarget, NamedTargets, StyleKey, TextureChannelDataType, Value, conversion,
@@ -18,7 +19,6 @@ use mln_rs::mln_render::{Registry, RegistryBuilder};
 use mln_rs::mln_util::image::PremultipliedImage;
 use mln_rs::mln_util::logging::{Event, EventSeverity, Log, Observer};
 use mln_rs::mln_util::size::Size;
-use mln_rs::{BackendType, LogicalExtent};
 use parking_lot::Mutex;
 use support::{Fixture, wait};
 
@@ -75,21 +75,8 @@ fn registry(extensions: bool) -> Arc<Registry> {
     builder.build()
 }
 
-/// The backend that `MLN_RENDER_BACKEND` names, or WebGPU: `webgpu`,
-/// `metal`, `vulkan`, `d3d12` or `gl`, OpenGL ES.
-fn backend() -> BackendType {
-    match std::env::var("MLN_RENDER_BACKEND").map(|backend| backend.to_ascii_lowercase()).as_deref() {
-        Ok("metal") => BackendType::Metal,
-        Ok("vulkan") => BackendType::Vulkan,
-        Ok("d3d12") => BackendType::D3D12,
-        Ok("gl") => BackendType::OpenGL,
-        Ok("webgpu") | Err(_) => BackendType::WebGPU,
-        Ok(other) => panic!("MLN_RENDER_BACKEND names no backend: {other}"),
-    }
-}
-
 fn fixture(extensions: bool, style: &str) -> Fixture {
-    Fixture::new(backend(), registry(extensions), style)
+    Fixture::new(registry(extensions), style)
 }
 
 /// The last frame of `fixture`, premultiplied.

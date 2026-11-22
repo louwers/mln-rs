@@ -1,5 +1,7 @@
 //! A runtime of a registry with the extension types, a map of `SIZE` and an
-//! offscreen session of it, through the facade.
+//! offscreen session of it, through the facade, on the backend that
+//! `MLN_RENDER_BACKEND` names (`webgpu`, `metal`, `vulkan`, `d3d12` or `gl`,
+//! OpenGL ES), or WebGPU.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -22,15 +24,15 @@ pub(crate) struct Fixture {
 }
 
 impl Fixture {
-    /// A fixture on `backend`.
-    pub(crate) fn new(backend: BackendType, registry: Arc<Registry>, style: &str) -> Fixture {
+    /// A fixture of `registry` and `style`.
+    pub(crate) fn new(registry: Arc<Registry>, style: &str) -> Fixture {
         let runtime = Runtime::new(&RuntimeOptions::default(), registry).unwrap();
         let options =
             MapOptions { map: mln_rs::map::MapCoreOptions { size: SIZE, ..Default::default() }, ..Default::default() };
         let (map, created) = runtime.create_map(options).unwrap();
         created.wait().unwrap();
         wait(map.set_style_json(style));
-        let device = Device::with_backend(backend, DeviceOptions::default()).unwrap();
+        let device = Device::with_backend(backend(), DeviceOptions::default()).unwrap();
         let target = RenderTarget::Offscreen { size: SIZE, device: Some(device) };
         let (session, attached) = map.attach(target, AttachOptions::default()).unwrap();
         attached.wait().unwrap();
@@ -80,4 +82,16 @@ impl Drop for Fixture {
 
 pub(crate) fn wait<T: Send + 'static>(completion: Result<Completion<T>, Error>) -> T {
     completion.unwrap().wait().unwrap()
+}
+
+/// The backend that `MLN_RENDER_BACKEND` names, or WebGPU.
+fn backend() -> BackendType {
+    match std::env::var("MLN_RENDER_BACKEND").map(|backend| backend.to_ascii_lowercase()).as_deref() {
+        Ok("metal") => BackendType::Metal,
+        Ok("vulkan") => BackendType::Vulkan,
+        Ok("d3d12") => BackendType::D3D12,
+        Ok("gl") => BackendType::OpenGL,
+        Ok("webgpu") | Err(_) => BackendType::WebGPU,
+        Ok(other) => panic!("MLN_RENDER_BACKEND names no backend: {other}"),
+    }
 }

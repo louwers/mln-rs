@@ -1,7 +1,8 @@
 //! The layer contract: what a crate implements to add a layer type that the
-//! renderer draws. `mln_extension_tests`' `dot` layer type, which draws a
-//! geometry source's points as discs, is the smallest whole example; the
-//! facade's `mln_rs::layer` gathers every name it uses.
+//! renderer draws. The `mln_ngon` crate's `org.maplibre.ngon` layer type,
+//! which draws a regular polygon at each point of a geometry source, is a
+//! whole example written against the facade alone, whose `mln_rs::layer`
+//! gathers every name it uses.
 //!
 //! A layer type has two halves, which
 //! [`RegistryBuilder::add_layer_type::<L>()`](crate::RegistryBuilder::add_layer_type)
