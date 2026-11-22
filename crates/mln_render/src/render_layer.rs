@@ -103,9 +103,6 @@ pub(crate) struct Hosted<L: Layer> {
     globe: bool,
     /// The layer's draws of the frame.
     frame_draws: Draws,
-    /// The named target that the frame draws the layer's main group and
-    /// overlay into, by index, or `None` for the map.
-    route: Option<usize>,
 }
 
 impl<L: Layer> Hosted<L> {
@@ -136,7 +133,6 @@ impl<L: Layer> Hosted<L> {
             renderable: false,
             globe: false,
             frame_draws: Draws::new(),
-            route: None,
         }
     }
 }
@@ -488,7 +484,6 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         routes: &mut Routes,
     ) {
         let frame = paint.frame;
-        self.route = None;
         // The tiles of a layer without a source have other geometry on the
         // globe.
         if frame.camera.is_globe() != self.globe {
@@ -505,7 +500,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         <L::Input as input::Find<L::Style>>::tiles(&self.frame_tiles, found, source, &mut self.tile_values, &mut tiles);
 
         let res = &mut *paint.context;
-        let Hosted { values, layer, tile_values, frame_draws, route, .. } = self;
+        let Hosted { values, layer, tile_values, frame_draws, .. } = self;
         layer.update(&mut UpdateCx {
             layer: values,
             frame: &frame,
@@ -515,9 +510,9 @@ impl<L: Layer> RenderLayer for Hosted<L> {
             res,
             targets: routes.reads(),
         });
-        *route = routes.route(index, &values.style.id, values.style.extra(), L::VOLUME);
-        if route.is_some() {
-            frame_draws.route();
+        let route = routes.route(index, &values.style.id, values.style.extra(), L::VOLUME);
+        if let Some(target) = route {
+            frame_draws.route_into(target);
         }
         for found in &tiles {
             let Some(held) = found.data::<L>() else { continue };
@@ -563,7 +558,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
     fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(&'a FrameDraws, bool)) {
         if self.renderable {
             for group in self.frame_draws.groups() {
-                visit(&group.frame, self.route.is_some());
+                visit(&group.frame, self.frame_draws.route().is_some());
             }
         }
     }
@@ -592,7 +587,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         order: DrawOrder,
         into: Option<usize>,
     ) {
-        if !self.renderable || self.route != into {
+        if !self.renderable || self.frame_draws.route() != into {
             return;
         }
         let lends = into.is_none() && self.frame_draws.lends(LendAt::Pass) && parameters.pass == Pass::Translucent;

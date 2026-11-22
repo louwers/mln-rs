@@ -139,6 +139,19 @@ struct Pushes {
     paints: SmallVec<[(&'static Program, MeshPaint); 2]>,
 }
 
+/// Where a group draws.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Place {
+    /// On the map.
+    Map,
+    /// Into a target of the layer's own ([`Draws::target`]), where it
+    /// doesn't composite.
+    Own,
+    /// Into a named target, where it composites with no blend that reads the
+    /// backdrop, with whether the frame refused it such a composite.
+    Named { refused_backdrop: bool },
+}
+
 /// A layer's draws of a frame in one place in the layers' order and depth,
 /// which the engine sorts and draws in each of the frame's passes.
 pub struct Group {
@@ -149,14 +162,8 @@ pub struct Group {
     opaque: bool,
     /// Whether the group can composite with the frame's depth.
     frame_depth: bool,
-    /// Whether the group draws into a target, where it doesn't composite.
-    into_target: bool,
-    /// Whether the group draws into a named target, where it composites
-    /// with no blend that reads the backdrop.
-    named: bool,
-    /// Whether the frame refused the group a composite of a blend that reads
-    /// the backdrop, in a named target.
-    refused_backdrop: bool,
+    /// Where the group draws.
+    place: Place,
     /// The camera's zoom, at which the draws mix their paint values' zoom
     /// stops.
     zoom: f32,
@@ -169,9 +176,7 @@ impl Group {
             pushes: Pushes::default(),
             opaque: false,
             frame_depth: false,
-            into_target: false,
-            named: false,
-            refused_backdrop: false,
+            place: Place::Map,
             zoom: 0.0,
         }
     }
@@ -228,11 +233,13 @@ impl Group {
     /// `luminosity`) in a group that the style draws into a named target
     /// ([`NamedTarget`](crate::draw::NamedTarget)).
     pub fn composite(&mut self, composite: Composite) -> bool {
-        if self.into_target || (composite.frame_depth && !self.frame_depth) {
+        if self.place == Place::Own || (composite.frame_depth && !self.frame_depth) {
             return false;
         }
-        if self.named && composite.reads_backdrop() {
-            self.refused_backdrop = true;
+        if let Place::Named { refused_backdrop } = &mut self.place
+            && composite.reads_backdrop()
+        {
+            *refused_backdrop = true;
             return false;
         }
         self.frame.composite = Some(composite);
@@ -279,23 +286,28 @@ impl Group {
     }
 
     /// Starts the group's draws of a frame at the camera's `zoom`: none, in
-    /// no composite, which may draw in the opaque pass where `opaque`, and
-    /// composite with the frame's depth where `frame_depth`.
-    pub(crate) fn begin(&mut self, zoom: f32, opaque: bool, frame_depth: bool) {
+    /// no composite, into `place`, which may draw in the opaque pass where
+    /// `opaque`, and composite with the frame's depth where `frame_depth`.
+    fn begin_at(&mut self, zoom: f32, opaque: bool, frame_depth: bool, place: Place) {
         self.clear();
         self.frame.composite = None;
         self.zoom = zoom;
         self.opaque = opaque;
         self.frame_depth = frame_depth;
-        self.named = false;
-        self.refused_backdrop = false;
+        self.place = place;
+    }
+
+    /// Starts the group's draws of a frame on the map, as
+    /// [`begin_at`](Self::begin_at) does.
+    pub(crate) fn begin(&mut self, zoom: f32, opaque: bool, frame_depth: bool) {
+        self.begin_at(zoom, opaque, frame_depth, Place::Map);
     }
 
     /// Makes the group of the frame draw into a named target, where it
     /// composites with no blend that reads the backdrop, nor with the
     /// frame's depth.
     fn route(&mut self) {
-        self.named = true;
+        self.place = Place::Named { refused_backdrop: false };
         self.frame_depth = false;
     }
 
@@ -503,8 +515,9 @@ pub struct Draws {
     lends: [bool; 2],
     /// The frame, as `begin` started the main group's.
     frame: (f32, bool, bool),
-    /// Whether the main group and the overlay draw into a named target.
-    routed: bool,
+    /// The named target that the main group and the overlay draw into, by
+    /// index, or `None` for the map.
+    route: Option<usize>,
 }
 
 impl Draws {
@@ -516,7 +529,7 @@ impl Draws {
             targets_used: 0,
             lends: [false; 2],
             frame: (0.0, false, false),
-            routed: false,
+            route: None,
         }
     }
 
@@ -530,7 +543,7 @@ impl Draws {
     /// in the first frame that asks for it.
     pub fn overlay(&mut self) -> &mut Group {
         let (zoom, opaque, frame_depth) = self.frame;
-        let routed = self.routed;
+        let routed = self.route.is_some();
         self.overlay.get_or_insert_with(|| {
             let mut overlay = Group::new();
             overlay.begin(zoom, opaque, frame_depth);
@@ -581,15 +594,14 @@ impl Draws {
         }
         let (zoom, opaque, _) = self.frame;
         let group = &mut self.targets[index].1;
-        group.begin(zoom, opaque, false);
-        group.into_target = true;
+        group.begin_at(zoom, opaque, false, Place::Own);
         index
     }
 
     /// Starts the layer's draws of a frame, as [`Group::begin`] does.
     pub(crate) fn begin(&mut self, zoom: f32, opaque: bool, frame_depth: bool) {
         self.frame = (zoom, opaque, frame_depth);
-        self.routed = false;
+        self.route = None;
         self.main.begin(zoom, opaque, frame_depth);
         if let Some(overlay) = &mut self.overlay {
             overlay.begin(zoom, opaque, frame_depth);
@@ -598,10 +610,10 @@ impl Draws {
         self.lends = [false; 2];
     }
 
-    /// Makes the main group and the overlay of the frame draw into a named
-    /// target, as [`Group::route`] says.
-    pub(crate) fn route(&mut self) {
-        self.routed = true;
+    /// Makes the main group and the overlay of the frame draw into the named
+    /// target at `target`, as [`Group::route`] says.
+    pub(crate) fn route_into(&mut self, target: usize) {
+        self.route = Some(target);
         self.main.route();
         if let Some(overlay) = &mut self.overlay {
             overlay.route();
@@ -611,7 +623,13 @@ impl Draws {
     /// Whether the frame refused a group of the layer a composite of a
     /// blend that reads the backdrop, in a named target.
     pub(crate) fn refused_backdrop(&self) -> bool {
-        self.groups().any(|group| group.refused_backdrop)
+        self.groups().any(|group| group.place == Place::Named { refused_backdrop: true })
+    }
+
+    /// The named target that the main group and the overlay draw into in
+    /// the frame, by index, or `None` for the map.
+    pub(crate) fn route(&self) -> Option<usize> {
+        self.route
     }
 
     /// Drops the frame's draws.
