@@ -25,14 +25,11 @@ fn defines<'a>(overdraw: bool, projection: ProjectionVariant, uniforms: impl Int
     if overdraw {
         defines.push_str("#define OVERDRAW_INSPECTOR\n");
     }
-    match projection {
-        ProjectionVariant::Mercator => {}
-        ProjectionVariant::Globe => {
-            let _ = writeln!(defines, "#define {GLOBE_DEFINE}");
-        }
-        ProjectionVariant::Terrain => {
-            let _ = writeln!(defines, "#define {TERRAIN_DEFINE}");
-        }
+    if projection.is_globe() {
+        let _ = writeln!(defines, "#define {GLOBE_DEFINE}");
+    }
+    if projection.stands() {
+        let _ = writeln!(defines, "#define {TERRAIN_DEFINE}");
     }
     for name in uniforms {
         let _ = writeln!(defines, "#define HAS_UNIFORM_u_{name}");

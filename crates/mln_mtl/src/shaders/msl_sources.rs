@@ -975,7 +975,12 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #if defined(TERRAIN)
     device const ProjectionUBO& standing = projectionVector[uboIndex];
     const float ele = standing_height(circle_center + standing.translate, standing.ground, ground_dem);
-    const float visibility = ground_visibility(drawable.matrix * float4(circle_center, ele, 1), standing.ground, ground_depth);
+#if defined(PROJECTION_GLOBE)
+    const float4 standing_center = projectTileWithElevation(circle_center, ele, standing);
+#else
+    const float4 standing_center = drawable.matrix * float4(circle_center, ele, 1);
+#endif
+    const float visibility = ground_visibility(standing_center, standing.ground, ground_depth);
 #else
     const float ele = 0.0;
 #endif
@@ -997,7 +1002,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
             // To counteract the effect for pitch-scale: viewport, we rescale the
             // whole circle based on the pitch scaling effect at its central point
 #if defined(PROJECTION_GLOBE)
-            const float4 projected_center = interpolateProjection(circle_center, center_vector, 0.0, projectionVector[uboIndex]);
+            const float4 projected_center = interpolateProjection(circle_center, center_vector, ele, projectionVector[uboIndex]);
             angle_scale *= (radius + stroke_width) * (projected_center.w / paintParams.camera_to_center_distance);
 #else
             const float4 projected_center = drawable.matrix * float4(circle_center, ele, 1);
@@ -1008,13 +1013,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
 #if defined(PROJECTION_GLOBE)
         const float3 corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
-        position = interpolateProjection(corner_position, corner_vector, 0.0, projectionVector[uboIndex]);
+        position = interpolateProjection(corner_position, corner_vector, ele, projectionVector[uboIndex]);
 #else
         position = drawable.matrix * float4(corner_position, ele, 1);
 #endif
     } else {
 #if defined(PROJECTION_GLOBE)
-        position = projectTile(circle_center, projectionVector[uboIndex]);
+        position = projectTileWithElevation(circle_center, ele, projectionVector[uboIndex]);
         if (position.z / position.w > 1.0) {
             position.xy = float2(10000.0);
         }
@@ -4134,24 +4139,26 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     // multiply a_pos by 0.5, since we had it * 2 in order to sneak
     // in extrusion data
-#if defined(PROJECTION_GLOBE)
-    const float2 circle_center = floor(float2(vertx.pos) * 0.5);
-    const float3 center_vector = projectToSphere(circle_center, float2(0.0, 0.0), projectionVector[uboIndex]);
-    const float3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
-    const float4 position = interpolateProjection(circle_center + scaled_extrude, corner_vector, 0.0, projectionVector[uboIndex]);
-#else
     // The kernel lies flat on the ground under its center, if its tile
     // holds its center.
     const float2 center = floor(float2(vertx.pos) * 0.5);
 #if defined(TERRAIN)
     device const GroundDrawableUBO& ground = projectionVector[uboIndex].ground;
     const float ele = standing_height(center, ground, ground_dem);
-    const float4 position = tile_holds(center)
-        ? drawable.matrix * float4(center + scaled_extrude, ele, 1)
-        : ground_dropped();
 #else
-    const float4 position = drawable.matrix * float4(center + scaled_extrude, 0, 1);
+    const float ele = 0.0;
 #endif
+#if defined(PROJECTION_GLOBE)
+    const float3 center_vector = projectToSphere(center, float2(0.0, 0.0), projectionVector[uboIndex]);
+    const float3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
+    const float4 projected = interpolateProjection(center + scaled_extrude, corner_vector, ele, projectionVector[uboIndex]);
+#else
+    const float4 projected = drawable.matrix * float4(center + scaled_extrude, ele, 1);
+#endif
+#if defined(TERRAIN)
+    const float4 position = tile_holds(center) ? projected : ground_dropped();
+#else
+    const float4 position = projected;
 #endif
 
     return {

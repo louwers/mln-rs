@@ -175,10 +175,7 @@ impl Buffer {
 /// variant's projection entries carry the ground under its draws.
 fn buffers(program: &Program, variant: ProjectionVariant) -> Vec<(Buffer, usize)> {
     use Buffer::{DrawableUniform, DrawableVertex, Global, LayerStorage, LayerUniform};
-    let projection_size = match variant {
-        ProjectionVariant::Terrain => size_of::<TerrainProjectionUBO>(),
-        ProjectionVariant::Mercator | ProjectionVariant::Globe => size_of::<ProjectionUBO>(),
-    };
+    let projection_size = if variant.stands() { size_of::<TerrainProjectionUBO>() } else { size_of::<ProjectionUBO>() };
     let projection = (LayerStorage(ID_PROJECTION_UBO), projection_size);
     let mut buffers = vec![(Global(ID_GLOBAL_PAINT_PARAMS_UBO), size_of::<GlobalPaintParamsUBO>())];
     let own: Vec<(Buffer, usize)> = match program.name {
@@ -243,10 +240,7 @@ fn buffers(program: &Program, variant: ProjectionVariant) -> Vec<(Buffer, usize)
         ]
         .into_iter()
         // The terrain variant reads the centroids, a word each.
-        .chain(
-            (variant == ProjectionVariant::Terrain)
-                .then_some((DrawableVertex(ID_FILL_EXTRUSION_WALL_CENTROIDS), size_of::<u32>())),
-        )
+        .chain(variant.stands().then_some((DrawableVertex(ID_FILL_EXTRUSION_WALL_CENTROIDS), size_of::<u32>())))
         .collect(),
         "FillExtrusionPatternShader" | "FillExtrusionPatternInstancedShader" | "FillExtrusionPatternWallShader" => {
             vec![
@@ -422,10 +416,9 @@ fn resources_are_in_the_descriptor_set_layouts() {
     for (program, source) in programs() {
         let stands = projection_variants(program).contains(&ProjectionVariant::Terrain);
         for variant in variants(program, false) {
-            // Of a standing layer's program, only the terrain variant reads
+            // Of a standing layer's program, only the terrain variants read
             // the ground's DEM.
-            let reads =
-                |id: usize| !stands || variant.projection == ProjectionVariant::Terrain || id != ID_GROUND_DEM_TEXTURE;
+            let reads = |id: usize| !stands || variant.projection.stands() || id != ID_GROUND_DEM_TEXTURE;
             let table: BTreeSet<u32> = source
                 .textures
                 .iter()
@@ -446,9 +439,9 @@ fn resources_are_in_the_descriptor_set_layouts() {
                         }
                     };
                 // Of the programs that list the ground's depth, only the
-                // terrain variant's vertex stage reads it.
+                // terrain variants' vertex stage reads it.
                 let reads_depth = program.textures.contains(&ID_GROUND_DEPTH_TEXTURE)
-                    && variant.projection == ProjectionVariant::Terrain
+                    && variant.projection.stands()
                     && stage == Stage::Vertex;
                 for (&(set, binding), &resource) in &bindings {
                     if let Err(message) = check_layout(set, binding, resource) {
@@ -646,7 +639,7 @@ fn vertex_inputs_are_the_attribute_tables() {
         for variant in variants(program, true) {
             // A terrain variant may read more than the program's own
             // attributes (`terrain_attributes`).
-            let terrain = variant.projection == ProjectionVariant::Terrain;
+            let terrain = variant.projection.stands();
             let own = |id: usize| program.attributes.iter().chain(program.instance_attributes).any(|&(at, _)| at == id);
             let table: BTreeMap<u32, (ScalarKind, u32)> = all_attributes(source)
                 .filter(|attr| !UNREAD_ATTRIBUTES.contains(&(program.name, attr.index)))

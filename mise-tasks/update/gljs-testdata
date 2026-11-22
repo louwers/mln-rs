@@ -122,6 +122,20 @@ declare -A allowed=(
     # (RADV). Lavapipe shifts every edge by about half a pixel: 1663. Flat:
     # 587 (RADV), 544 (lavapipe). Not explained; seams show at 256 px a row.
     [projection/globe/terrain/fill-seams/checkerboard]=0.026
+    # Each circle draws once, from the tile that holds it, as in GL JS. The
+    # circles near the limb sit up to a pixel from GL JS's, as they do in GL
+    # JS's projection/globe twin without terrain drawn here with each circle
+    # once (911 px; the image is the same to 3 px): 914 of 65536 (RADV), 923
+    # (lavapipe). On the sea-level sphere, each drawn once for every tile
+    # buffer that holds it: 9550.
+    [projection/globe/terrain/circle-planet]=0.0141
+    # As circle-planet: the far circles a pixel from GL JS's, 134 (RADV), 149
+    # (lavapipe); the twin drawn once each, 134. On the sea-level sphere:
+    # 9731.
+    [projection/globe/terrain/circle-pitch-alignment/map-scale-map]=0.0023
+    # As circle-planet: 236 (RADV), 235 (lavapipe); the twin drawn once
+    # each, 236. On the sea-level sphere: 7477.
+    [projection/globe/terrain/circle-pitch-alignment/map-scale-viewport]=0.0037
     # Its labels don't drape and draw as without terrain: 8 of 65536 (RADV),
     # 20 on lavapipe, flat too.
     [projection/globe/terrain/collision-icon-text-translate-map]=0.0004

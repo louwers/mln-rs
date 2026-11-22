@@ -1035,7 +1035,6 @@ mod tests {
             dem_tiles: Vec::new(),
             standing_dems: Vec::new(),
             ranges: crate::terrain::ElevationRanges::default(),
-            globe: true,
         };
         let mut drapes = Drapes::default();
         drapes.begin((&view, &view.projection_matrix(), 1.0), &cover, 1, (BYTE_CAP, 4096));

@@ -396,11 +396,11 @@ impl Context {
             .clone()
     }
 
-    /// Whether it made the key of a variant for `projection` since the keys
-    /// were last cleared.
+    /// Whether it made the key of a variant for a projection that `of`
+    /// holds for since the keys were last cleared.
     #[cfg(test)]
-    pub(crate) fn made_key_for(&self, projection: ProjectionVariant) -> bool {
-        self.shader_keys.keys().any(|&(_, _, made)| made == projection)
+    pub(crate) fn made_key_for(&self, of: impl Fn(ProjectionVariant) -> bool) -> bool {
+        self.shader_keys.keys().any(|&(_, _, made)| of(made))
     }
 
     /// Makes the keys of later variants at `pixel_ratio`, and with the

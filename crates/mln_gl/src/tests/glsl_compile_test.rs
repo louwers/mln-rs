@@ -198,7 +198,7 @@ fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
                         .iter()
                         .find(|info| info.id == block.id)
                         .unwrap_or_else(|| panic!("{what}: block at {} without a table entry", block.id))
-                        .in_variant(variant == ProjectionVariant::Terrain);
+                        .in_variant(variant.stands());
                     assert_eq!(
                         block.size.next_multiple_of(16),
                         info.size,
@@ -216,12 +216,10 @@ fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
                 if i == 0 {
                     assert!(!locations.is_empty(), "{what}: no vertex attributes");
                 }
-                // Only the terrain variant of a standing layer's program reads
+                // Only the terrain variants of a standing layer's program read
                 // the ground's DEM and depth.
                 let reads = |id: usize| {
-                    variant == ProjectionVariant::Terrain
-                        || !stands
-                        || (id != ID_GROUND_DEM_TEXTURE && id != ID_GROUND_DEPTH_TEXTURE)
+                    variant.stands() || !stands || (id != ID_GROUND_DEM_TEXTURE && id != ID_GROUND_DEPTH_TEXTURE)
                 };
                 for info in source.textures.iter().filter(|info| reads(info.id)) {
                     assert!(program.textures.contains(&info.id), "{what}: no sampler {}", info.name);

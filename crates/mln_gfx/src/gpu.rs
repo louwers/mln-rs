@@ -770,7 +770,6 @@ mod tests {
     // program's.
     #[test]
     fn only_a_fill_extrusions_terrain_variant_reads_the_centroid() {
-        use crate::projection_variant::ProjectionVariant;
         use crate::shaders::program_parameters::ProgramParameters;
         use crate::shaders::shader_defines::ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE as CENTROID;
 
@@ -788,9 +787,8 @@ mod tests {
             for &variant in programs::projection_variants(program) {
                 let key = program.variant_key(&parameters, program.properties, variant);
                 let (attributes, instances) = (key.attributes(), key.instance_attributes());
-                let reads = variant == ProjectionVariant::Terrain
-                    && extrusions.contains(&program)
-                    && program != &programs::FILL_EXTRUSION_PULLED;
+                let reads =
+                    variant.stands() && extrusions.contains(&program) && program != &programs::FILL_EXTRUSION_PULLED;
                 let ids = |attributes: &[(usize, AttributeDataType)]| -> Vec<usize> {
                     attributes.iter().map(|&(id, _)| id).collect()
                 };
@@ -811,19 +809,27 @@ mod tests {
     }
 
     // A program without a terrain variant, such as the collision boxes a
-    // standing symbol layer draws, keys its Mercator variant over terrain.
+    // standing symbol layer draws, keys its projection's flat variant over
+    // terrain.
     #[test]
     fn only_a_standing_program_keys_a_terrain_variant() {
-        use crate::projection_variant::ProjectionVariant::{Mercator, Terrain};
+        use crate::projection_variant::ProjectionVariant::{Globe, GlobeTerrain, Mercator, Terrain};
+        use crate::shaders::program::GLOBE_DEFINE;
         use crate::shaders::program_parameters::ProgramParameters;
 
         let parameters = ProgramParameters::new(1.0, false);
         let key = |program: &'static Program, variant| program.variant_key(&parameters, [], variant);
         for program in [&programs::COLLISION_BOX, &programs::COLLISION_CIRCLE, &programs::HEATMAP_TEXTURE] {
             assert_eq!(key(program, Terrain), key(program, Mercator), "{program:?}");
+            assert_eq!(key(program, GlobeTerrain), key(program, Globe), "{program:?}");
         }
         for program in [&programs::SYMBOL_SDF, &programs::CIRCLE] {
-            assert_ne!(key(program, Terrain), key(program, Mercator), "{program:?}");
+            let keys = [Mercator, Globe, Terrain, GlobeTerrain].map(|variant| key(program, variant));
+            for (i, a) in keys.iter().enumerate() {
+                assert!(keys[i + 1..].iter().all(|b| a != b), "{program:?}");
+            }
+            let names: Vec<&str> = keys[3].define_values().map(|(name, _)| name).collect();
+            assert!(names.contains(&GLOBE_DEFINE) && names.contains(&TERRAIN_DEFINE), "{program:?}");
         }
     }
 

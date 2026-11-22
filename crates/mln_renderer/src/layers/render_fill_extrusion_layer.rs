@@ -576,7 +576,7 @@ impl TileBuilder<'_> {
         let vertex_count = bucket.vertices.len();
         // A bucket laid out before the style had terrain has no centroids to
         // stand on: the tile draws once the one laid out for terrain comes.
-        if self.projection_variant == ProjectionVariant::Terrain && bucket.centroids.is_empty() {
+        if self.projection_variant.stands() && bucket.centroids.is_empty() {
             return ExtrusionTile { draws: Vec::new(), paint_layout: 0, atlases: None };
         }
         // A wall from each vertex to the next, but from the last, which
@@ -592,8 +592,7 @@ impl TileBuilder<'_> {
             (vertices, wall_paint(context, geometry, binders, walls))
         });
         // Over terrain, the centroid each vertex's polygon stands on.
-        let centroids = (self.projection_variant == ProjectionVariant::Terrain)
-            .then(|| vertex_centroids(&bucket.centroids, vertex_count));
+        let centroids = (self.projection_variant.stands()).then(|| vertex_centroids(&bucket.centroids, vertex_count));
         let centroid_attribute = |vertices: SharedVertices| {
             SharedAttribute::new(vertices, AttributeDataType::Short2, 0, size_of::<[i16; 2]>() as u32)
         };

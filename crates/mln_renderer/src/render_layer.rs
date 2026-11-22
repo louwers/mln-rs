@@ -547,8 +547,8 @@ pub(crate) trait TypedLayer {
     const DRAPES: bool = false;
 
     /// Whether the layer stands on terrain: over terrain, its draws are of
-    /// the [`ProjectionVariant::Terrain`] variant, which reads the ground
-    /// under them ([`PaintParameters::ground`]).
+    /// a terrain variant ([`ProjectionVariant::stands`]), which reads the
+    /// ground under them ([`PaintParameters::ground`]).
     const STANDS: bool = false;
 
     /// Whether the ground hides the layer's features behind it, each whole
@@ -910,13 +910,7 @@ impl<L: TypedLayer> LayerParts for L {
         atlases: &Atlases,
         source: Option<LayerSource<'_>>,
     ) {
-        let variant = if parameters.view.is_globe() {
-            ProjectionVariant::Globe
-        } else if L::STANDS && parameters.ground.is_some() {
-            ProjectionVariant::Terrain
-        } else {
-            ProjectionVariant::Mercator
-        };
+        let variant = ProjectionVariant::new(parameters.view.is_globe(), L::STANDS && parameters.ground.is_some());
         use_projection_variant(self, variant);
         if <L::Type as StyleLayerType>::INFO.source == SourceKind::None {
             // A layer that keeps tiles draws those its update picked.

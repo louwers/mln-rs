@@ -1381,13 +1381,11 @@ impl RenderOrchestrator {
     ) {
         let (store, render_sources) = (&self.tile_store, &self.render_sources);
         let dem = |id: &str| store.source(render_sources.get(id)?.tiles()?);
-        // The layers that stand on the ground, which they don't on the globe.
-        let standing = self.terrain.ground().is_some();
-        let layers = || frame.layers.keys().map(|&index| &self.layers[index as usize]).filter(|_| standing);
+        let layers = || frame.layers.keys().map(|&index| &self.layers[index as usize]).filter(|_| frame.terrain);
         let stands = layers().any(|layer| layer.stands());
         let hides = layers().any(|layer| layer.hides_behind_ground());
         let ground = self.terrain.prepare_ground(paint_parameters, dem, stands);
-        paint_parameters.ground = ground.clone().filter(|_| standing);
+        paint_parameters.ground.clone_from(&ground);
         let mut needs_globe_depth = false;
         let mut contents = SourceContents::default();
         for (&index, frame_layer) in &frame.layers {

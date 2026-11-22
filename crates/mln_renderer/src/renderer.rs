@@ -274,11 +274,11 @@ impl Renderer {
         (draws.has_shader(), draws.holds_draws())
     }
 
-    /// Whether the renderer made the key of a terrain variant, which a
-    /// standing layer draws with over terrain.
+    /// Whether the renderer made the key of a terrain variant, on Mercator
+    /// or the globe, which a standing layer draws with over terrain.
     #[cfg(test)]
     pub(crate) fn made_terrain_variant(&self) -> bool {
-        self.encoder.context.made_key_for(mln_gfx::projection_variant::ProjectionVariant::Terrain)
+        self.encoder.context.made_key_for(mln_gfx::projection_variant::ProjectionVariant::stands)
     }
 
     /// Whether a draw that the layer `id` keeps reads vertices as the

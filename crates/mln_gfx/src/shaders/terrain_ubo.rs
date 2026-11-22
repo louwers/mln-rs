@@ -35,8 +35,9 @@ pub struct TerrainPropsUBO {
     /* 24 */
     pub skirt_length: f32,
     /// What the standing layers that terrain hides scale the ground's depth
-    /// by, GL JS's in its NDC depth: `2fn / (f − n)` of the frame's main
-    /// projection, or 0 in a frame without the ground's depth.
+    /// by, GL JS's in its NDC depth: `2fn / (f − n)` of the terrain's near
+    /// plane `n`, a fiftieth of the view's height, and the frame's far plane
+    /// `f`, or 0 in a frame without the ground's depth.
     /* 28 */
     pub depth_factor: f32,
     /* 32 */

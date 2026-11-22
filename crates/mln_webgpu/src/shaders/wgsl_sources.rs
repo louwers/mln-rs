@@ -612,7 +612,12 @@ fn main(in: VertexInput) -> VertexOutput {
         return out;
     }
     let ele = standing_height(circle_center + projection.translate, projection.ground);
-    out.visibility = ground_visibility(drawable.matrix * vec4<f32>(circle_center, ele, 1.0), projection.ground);
+#ifdef PROJECTION_GLOBE
+    let standing_center = projectTileWithElevation(circle_center, ele, projection);
+#else
+    let standing_center = drawable.matrix * vec4<f32>(circle_center, ele, 1.0);
+#endif
+    out.visibility = ground_visibility(standing_center, projection.ground);
 #else
     let ele = 0.0;
 #endif
@@ -630,7 +635,7 @@ fn main(in: VertexInput) -> VertexOutput {
 #endif
         } else {
 #ifdef PROJECTION_GLOBE
-            let projected_center = interpolateProjection(circle_center, center_vector, 0.0, projection);
+            let projected_center = interpolateProjection(circle_center, center_vector, ele, projection);
             angle_scale *= radius_with_stroke * (projected_center.w / paintParams.camera_to_center_distance);
 #else
             let projected_center = drawable.matrix * vec4<f32>(circle_center, ele, 1.0);
@@ -640,13 +645,13 @@ fn main(in: VertexInput) -> VertexOutput {
         }
 #ifdef PROJECTION_GLOBE
         let corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
-        position = interpolateProjection(corner_position, corner_vector, 0.0, projection);
+        position = interpolateProjection(corner_position, corner_vector, ele, projection);
 #else
         position = drawable.matrix * vec4<f32>(corner_position, ele, 1.0);
 #endif
     } else {
 #ifdef PROJECTION_GLOBE
-        position = projectTile(circle_center, projection);
+        position = projectTileWithElevation(circle_center, ele, projection);
         if (position.z / position.w > 1.0) {
             position.x = 10000.0;
             position.y = 10000.0;
@@ -2683,7 +2688,7 @@ fn main(in: VertexInput) -> VertexOutput {
 #ifdef PROJECTION_GLOBE
     let center_vector = projectToSphere(base, vec2<f32>(0.0, 0.0), projectionVector[globalIndex.value]);
     let corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
-    out.position = interpolateProjection(base + scaled_extrude, corner_vector, 0.0, projectionVector[globalIndex.value]);
+    out.position = interpolateProjection(base + scaled_extrude, corner_vector, ele, projectionVector[globalIndex.value]);
 #else
     out.position = drawable.matrix * vec4<f32>(base + scaled_extrude, ele, 1.0);
 #endif

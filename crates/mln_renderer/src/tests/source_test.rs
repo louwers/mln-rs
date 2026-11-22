@@ -1575,7 +1575,6 @@ fn flat_terrain() -> crate::terrain::TerrainCover {
         dem_tiles: Vec::new(),
         standing_dems: Vec::new(),
         ranges: crate::terrain::ElevationRanges::default(),
-        globe: false,
     }
 }
 

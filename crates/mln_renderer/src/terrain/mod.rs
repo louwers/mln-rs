@@ -10,9 +10,9 @@
 //! map's.
 //!
 //! On the globe the camera stands on the sea-level sphere, as GL JS's does,
-//! and so do the standing layers, their placement and rendered queries
-//! ([`RenderTerrain::ground`] is `None` there): the surface and its drapes
-//! are what draw on the globe's ground.
+//! and a rendered query's line of sight meets the sea-level sphere; the
+//! standing layers and their placement stand on the drawn ground as they do
+//! on Mercator.
 //!
 //! # A frame with terrain
 //!
@@ -90,13 +90,17 @@
 //!   splits no stack. A style whose layers don't drape has no stack, and
 //!   then no drapes and no surface.
 //! - **Standing layers** (circle, heatmap, fill extrusion and symbol) stand
-//!   on the surface as it draws, whether or not a stack draws it: over
-//!   terrain, their draws are of the [`ProjectionVariant::Terrain`] variant,
-//!   which reads the height of the ground in the vertex stage, under a
-//!   circle's center as it draws (translated), a kernel's, the centroid of a
-//!   fill extrusion's polygon as it draws (GL JS's: the floored mean of its
-//!   rings' vertices), and a symbol's anchor as it draws, by the height rule
-//!   the surface reads its DEM by. A symbol stands its `symbol-height-offset`
+//!   on the surface as it draws, whether or not a stack draws it, on the
+//!   globe as on Mercator: over terrain, their draws are of a terrain
+//!   variant ([`ProjectionVariant::Terrain`] on Mercator,
+//!   [`ProjectionVariant::GlobeTerrain`] on the globe, which raises each
+//!   point by the height along its vertical, as GL JS's
+//!   `projectTileWithElevation` does), which reads the height of the ground
+//!   in the vertex stage, under a circle's center as it draws (translated), a
+//!   kernel's, the centroid of a fill extrusion's polygon as it draws (GL
+//!   JS's: the floored mean of its rings' vertices), and a symbol's anchor as
+//!   it draws, by the height rule the surface reads its DEM by. A symbol
+//!   stands its `symbol-height-offset`
 //!   above that ground, or above sea level where its `symbol-height-anchor`
 //!   is `absolute`, which its draw reads as flat ground; each vertex of a
 //!   map-pitched label along a line stands on the ground under it. Placement
@@ -159,8 +163,9 @@
 //!   standing program's other textures take, so a label's glyphs and icons keep
 //!   0 and 1. A frame without terrain makes no terrain variant, writes no
 //!   ground, binds no ground texture and expands no centroid.
-//! - **What the ground hides.** Fill extrusions hide behind the ground pixel
-//!   by pixel, by the depth they test. A symbol or a circle hides whole, by
+//! - **What the ground hides**, on the globe as on Mercator. Fill
+//!   extrusions hide behind the ground pixel by pixel, by the depth they
+//!   test. A symbol or a circle hides whole, by
 //!   its anchor or center as it draws, raised: in a frame where terrain
 //!   draws and a layer of theirs does, a pass before the
 //!   frame's draws every terrain tile, skirts included, into a texture at the
@@ -168,8 +173,9 @@
 //!   nearest ground, as its eye distance's f32 bits ([`ID_GROUND_DEPTH_TEXTURE`]).
 //!   The terrain variant reads it at the texel nearest where its anchor is
 //!   seen, as GL JS, MapLibre Native and orbis do, and fades the
-//!   feature out over GL JS's ramp in its NDC depth, scaled by the frame's
-//!   near and far planes ([`TerrainPropsUBO::depth_factor`]), averaged with
+//!   feature out over GL JS's ramp in its NDC depth, scaled by the
+//!   terrain's near plane, a fiftieth of the view's height, and the frame's
+//!   far plane ([`TerrainPropsUBO::depth_factor`]), averaged with
 //!   the point 0.01 NDC above where it is hidden more than a little; where no
 //!   ground is drawn, nothing is hidden. The draws read the depth that the
 //!   frame drew: in a frame whose depth pass doesn't draw, as where its
@@ -595,24 +601,22 @@ impl RenderTerrain {
         self.cover.as_ref()
     }
 
-    /// Requests, while the standing layers stand on the terrain's ground, the
-    /// DEM tiles that `tiles`, the ideal tiles of a standing layer's source,
-    /// read off the surface's
+    /// Requests, while terrain draws, the DEM tiles that `tiles`, the ideal
+    /// tiles of a standing layer's source, read off the surface's
     /// ([`TerrainCover::request_standing`]), once their source has updated
     /// and before the terrain's own source does.
     pub(crate) fn request_standing(&mut self, tiles: impl IntoIterator<Item = mln_tile_id::OverscaledTileID>) {
-        if let Some(cover) = self.cover.as_mut().filter(|cover| cover.grounds_standing_layers()) {
+        if let Some(cover) = &mut self.cover {
             cover.request_standing(tiles);
         }
     }
 
     /// The ground the standing layers of the last update stand on, the
     /// ground its cover drew, as [`bind`](Self::bind) left it; `None` while
-    /// terrain doesn't draw, and on the globe, where the standing layers
-    /// stand on the sea-level sphere. [`TerrainElevation::ground`] gives the
-    /// ground under a tile.
+    /// terrain doesn't draw. [`TerrainElevation::ground`] gives the ground
+    /// under a tile.
     pub(crate) fn ground(&self) -> Option<&Arc<TerrainElevation>> {
-        self.elevation.as_ref().filter(|_| self.cover.as_ref().is_some_and(TerrainCover::grounds_standing_layers))
+        self.elevation.as_ref()
     }
 
     /// Makes what the encode's draws of the frame of the last update bind of
@@ -635,8 +639,10 @@ impl RenderTerrain {
         };
         let context = &mut *parameters.context;
         let mut props = self.surface.props;
+        // The ramp's depth is the terrain's: a near plane a fiftieth of the
+        // view's height, as Mercator's under terrain, on either projection.
         let view = parameters.view;
-        let (near, far) = (view.near_z(), view.far_z());
+        let (near, far) = (f64::from(view.size().height) / 50.0, view.far_z());
         props.depth_factor = (2.0 * far * near / (far - near)) as f32;
         let tiles = dem(&cover.source_id);
         let mut textures = mln_util::hash::HashMap::default();

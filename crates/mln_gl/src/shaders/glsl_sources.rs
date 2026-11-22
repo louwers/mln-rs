@@ -637,7 +637,11 @@ lowp float stroke_opacity = u_stroke_opacity;
     // translated, if its tile holds its center.
 #ifdef TERRAIN
     highp float ele = standing_height(circle_center + u_projection_translate);
+#ifdef PROJECTION_GLOBE
+    v_visibility = ground_visibility(projectTileWithElevation(circle_center, ele));
+#else
     v_visibility = ground_visibility(u_matrix * vec4(circle_center, ele, 1));
+#endif
 #else
     highp float ele = 0.0;
 #endif
@@ -657,7 +661,7 @@ lowp float stroke_opacity = u_stroke_opacity;
             // To counteract the effect for pitch-scale: viewport, we rescale the
             // whole circle based on the pitch scaling effect at its central point
 #ifdef PROJECTION_GLOBE
-            vec4 projected_center = interpolateProjection(circle_center, center_vector, 0.0);
+            vec4 projected_center = interpolateProjection(circle_center, center_vector, ele);
             angle_scale *= (radius + stroke_width) * (projected_center.w / u_camera_to_center_distance);
 #else
             vec4 projected_center = u_matrix * vec4(circle_center, ele, 1);
@@ -667,13 +671,13 @@ lowp float stroke_opacity = u_stroke_opacity;
 
 #ifdef PROJECTION_GLOBE
         vec3 corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
-        gl_Position = interpolateProjection(corner_position, corner_vector, 0.0);
+        gl_Position = interpolateProjection(corner_position, corner_vector, ele);
 #else
         gl_Position = u_matrix * vec4(corner_position, ele, 1);
 #endif
     } else {
 #ifdef PROJECTION_GLOBE
-        gl_Position = projectTile(circle_center);
+        gl_Position = projectTileWithElevation(circle_center, ele);
         if (gl_Position.z / gl_Position.w > 1.0) {
             gl_Position.xy = vec2(10000.0);
         }
@@ -3122,12 +3126,6 @@ mediump float radius = u_radius;
 
     // multiply a_pos by 0.5, since we had it * 2 in order to sneak
     // in extrusion data
-#ifdef PROJECTION_GLOBE
-    vec2 circle_center = floor(a_pos * 0.5);
-    vec3 center_vector = projectToSphere(circle_center, vec2(0.0, 0.0));
-    vec3 corner_vector = globeRotateVector(center_vector, v_extrude * radius * u_globe_extrude_scale);
-    gl_Position = interpolateProjection(circle_center + extrude, corner_vector, 0.0);
-#else
     // The kernel lies flat on the ground under its center, if its tile
     // holds its center.
     vec2 center = floor(a_pos * 0.5);
@@ -3136,12 +3134,17 @@ mediump float radius = u_radius;
 #else
     highp float ele = 0.0;
 #endif
+#ifdef PROJECTION_GLOBE
+    vec3 center_vector = projectToSphere(center, vec2(0.0, 0.0));
+    vec3 corner_vector = globeRotateVector(center_vector, v_extrude * radius * u_globe_extrude_scale);
+    gl_Position = interpolateProjection(center + extrude, corner_vector, ele);
+#else
     gl_Position = u_matrix * vec4(center + extrude, ele, 1);
+#endif
 #ifdef TERRAIN
     if (!tile_holds(center)) {
         gl_Position = ground_dropped();
     }
-#endif
 #endif
 }
 "#

@@ -867,7 +867,12 @@ void main() {
 #ifdef TERRAIN
     const ProjectionUBO standing = projectionVector.projection_ubo[constant.ubo_index];
     const float ele = standing_height(circle_center + standing.translate, standing.ground);
-    frag_visibility = ground_visibility(drawable.matrix * vec4(circle_center, ele, 1), standing.ground);
+#ifdef PROJECTION_GLOBE
+    const vec4 standing_center = projectTileWithElevation(circle_center, ele, standing);
+#else
+    const vec4 standing_center = drawable.matrix * vec4(circle_center, ele, 1);
+#endif
+    frag_visibility = ground_visibility(standing_center, standing.ground);
 #else
     const float ele = 0.0;
 #endif
@@ -887,7 +892,7 @@ void main() {
             // To counteract the effect for pitch-scale: viewport, we rescale the
             // whole circle based on the pitch scaling effect at its central point
 #ifdef PROJECTION_GLOBE
-            const vec4 projected_center = interpolateProjection(circle_center, center_vector, 0.0, projection);
+            const vec4 projected_center = interpolateProjection(circle_center, center_vector, ele, projection);
             angle_scale *= (radius + stroke_width) * (projected_center.w / paintParams.camera_to_center_distance);
 #else
             const vec4 projected_center = drawable.matrix * vec4(circle_center, ele, 1);
@@ -898,13 +903,13 @@ void main() {
 
 #ifdef PROJECTION_GLOBE
         const vec3 corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
-        gl_Position = interpolateProjection(corner_position, corner_vector, 0.0, projection);
+        gl_Position = interpolateProjection(corner_position, corner_vector, ele, projection);
 #else
         gl_Position = drawable.matrix * vec4(corner_position, ele, 1);
 #endif
     } else {
 #ifdef PROJECTION_GLOBE
-        gl_Position = projectTile(circle_center, projection);
+        gl_Position = projectTileWithElevation(circle_center, ele, projection);
         if (gl_Position.z / gl_Position.w > 1.0) {
             gl_Position.xy = vec2(10000.0);
         }
@@ -3817,12 +3822,6 @@ void main() {
 
     // multiply a_pos by 0.5, since we had it * 2 in order to sneak
     // in extrusion data
-#ifdef PROJECTION_GLOBE
-    const vec2 circle_center = floor(in_position * 0.5);
-    const vec3 center_vector = projectToSphere(circle_center, vec2(0.0, 0.0), projectionVector.projection_ubo[constant.ubo_index]);
-    const vec3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
-    gl_Position = interpolateProjection(circle_center + scaled_extrude, corner_vector, 0.0, projectionVector.projection_ubo[constant.ubo_index]);
-#else
     // The kernel lies flat on the ground under its center, if its tile
     // holds its center.
     const vec2 center = floor(in_position * 0.5);
@@ -3832,12 +3831,17 @@ void main() {
 #else
     const float ele = 0.0;
 #endif
+#ifdef PROJECTION_GLOBE
+    const vec3 center_vector = projectToSphere(center, vec2(0.0, 0.0), projectionVector.projection_ubo[constant.ubo_index]);
+    const vec3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
+    gl_Position = interpolateProjection(center + scaled_extrude, corner_vector, ele, projectionVector.projection_ubo[constant.ubo_index]);
+#else
     gl_Position = drawable.matrix * vec4(center + scaled_extrude, ele, 1);
+#endif
 #ifdef TERRAIN
     if (!tile_holds(center)) {
         gl_Position = ground_dropped();
     }
-#endif
 #endif
 
 #if !defined(HAS_UNIFORM_u_weight)

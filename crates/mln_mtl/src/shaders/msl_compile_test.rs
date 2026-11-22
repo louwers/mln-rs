@@ -101,10 +101,11 @@ fn defines<'a>(
     if overdraw {
         defines.push(("OVERDRAW_INSPECTOR".to_owned(), String::new()));
     }
-    match projection {
-        ProjectionVariant::Mercator => {}
-        ProjectionVariant::Globe => defines.push((GLOBE_DEFINE.to_owned(), String::new())),
-        ProjectionVariant::Terrain => defines.push((TERRAIN_DEFINE.to_owned(), String::new())),
+    if projection.is_globe() {
+        defines.push((GLOBE_DEFINE.to_owned(), String::new()));
+    }
+    if projection.stands() {
+        defines.push((TERRAIN_DEFINE.to_owned(), String::new()));
     }
     defines.extend(uniforms.into_iter().map(|name| (format!("HAS_UNIFORM_u_{name}"), String::new())));
     defines
