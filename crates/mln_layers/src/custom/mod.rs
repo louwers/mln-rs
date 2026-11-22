@@ -11,11 +11,12 @@
 //!   it, so a renderer that is leaked with copies of the style data, because
 //!   its graphics objects are gone, doesn't keep the host.
 
-pub(crate) mod render_layer;
+mod layer;
 
 use std::any::Any;
 use std::sync::{Arc, Weak};
 
+pub use layer::CustomLayer;
 use mln_map_types::{FrameProjection, MapView};
 use mln_style::layer::Layer;
 use mln_style::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
@@ -80,8 +81,9 @@ pub trait CustomLayerHost: Send + Sync {
     fn context_lost(&self) {}
 }
 
-/// The `custom` layer type, whose layers a [`CustomLayerHost`] draws. Its
-/// layers aren't made from style JSON: [`Custom::layer`] makes one.
+/// The style half of the `custom` layer type, whose layers a
+/// [`CustomLayerHost`] draws. Its layers aren't made from style JSON:
+/// [`Custom::layer`] makes one.
 pub struct Custom;
 
 static PROPERTIES: PropertyTable = PropertyTable::new(&[], &[]);
@@ -92,7 +94,7 @@ impl StyleLayerType for Custom {
 
     type LayoutProperties = NoProperties;
     type PaintProperties = NoProperties;
-    type Extra = CustomHost;
+    type Data = CustomHost;
 
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
         None
@@ -106,7 +108,7 @@ impl Custom {
     #[must_use]
     pub fn layer(registry: &StyleRegistry, id: &str, host: Arc<dyn CustomLayerHost>) -> Layer {
         let mut style = LayerStyle::<Custom>::new(id.to_owned(), String::new());
-        style.extra = CustomHost(Arc::downgrade(&host));
+        style.data = CustomHost(Arc::downgrade(&host));
         Layer::from_style_keeping(Arc::new(style), Arc::clone(registry.functions()), Arc::new(host))
     }
 }

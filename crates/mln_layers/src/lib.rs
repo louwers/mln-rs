@@ -17,10 +17,10 @@ pub mod background;
 // slice: off pub mod bench;
 pub mod circle;
 mod color_ramp;
-// slice: off pub mod color_relief;
+pub mod color_relief;
 // slice: off #[cfg(feature = "gpu-conformance")]
 // slice: off pub mod conformance;
-// slice: off pub mod custom;
+pub mod custom;
 mod features;
 pub mod fill;
 pub mod fill_extrusion;
@@ -28,15 +28,15 @@ pub mod heatmap;
 pub mod hillshade;
 pub mod line;
 mod points;
-// slice: off pub mod raster;
+pub mod raster;
 mod shaders;
 pub mod symbol;
 mod tessellator;
 
 pub use background::{Background, BackgroundLayer, BackgroundPaintProperties};
 pub use circle::{Circle, CircleLayer, CircleLayoutProperties, CirclePaintProperties};
-// slice: off pub use color_relief::{ColorRelief, ColorReliefPaintProperties};
-// slice: off pub use custom::{Custom, CustomLayerHost};
+pub use color_relief::{ColorRelief, ColorReliefLayer, ColorReliefPaintProperties};
+pub use custom::{Custom, CustomLayer, CustomLayerHost};
 pub use fill::{Fill, FillLayer, FillLayoutProperties, FillPaintProperties};
 pub use fill_extrusion::{
     FillExtrusion, FillExtrusionLayer, FillExtrusionLayoutProperties, FillExtrusionPaintProperties,
@@ -46,7 +46,7 @@ pub use hillshade::{Hillshade, HillshadeLayer, HillshadePaintProperties};
 pub use line::{Line, LineLayer, LineLayoutProperties, LinePaintProperties};
 use mln_gfx::shaders::program::Program;
 use mln_render::{RegisterError, RegistryBuilder};
-// slice: off pub use raster::{Raster, RasterPaintProperties};
+pub use raster::{Raster, RasterLayer, RasterPaintProperties};
 pub use symbol::{Symbol, SymbolLayer, SymbolLayoutProperties, SymbolPaintProperties};
 
 /// Adds the layer types of this crate. Fails for a name that an earlier
@@ -58,11 +58,11 @@ pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), Registe
     builder.add_layer_type::<CircleLayer>()?;
     builder.add_layer_type::<FillExtrusionLayer>()?;
     builder.add_layer_type::<HeatmapLayer>()?;
-    // slice: off     builder.add_layer_type::<Raster>()?;
+    builder.add_layer_type::<RasterLayer>()?;
     builder.add_layer_type::<HillshadeLayer>()?;
-    // slice: off     builder.add_layer_type::<ColorRelief>()?;
-    symbol::register(builder)
-    // slice: off     builder.add_layer_type::<Custom>()
+    builder.add_layer_type::<ColorReliefLayer>()?;
+    symbol::register(builder)?;
+    builder.add_layer_type::<CustomLayer>()
 }
 
 /// The programs of this crate's layer types, each with its sources in the
@@ -92,10 +92,10 @@ pub static PROGRAMS: &[&Program] = &[
     &fill_extrusion::programs::FILL_EXTRUSION_PATTERN_WALL,
     &heatmap::programs::HEATMAP,
     &heatmap::programs::HEATMAP_TEXTURE,
-    // slice: off     &raster::programs::RASTER,
+    &raster::programs::RASTER,
     &hillshade::programs::HILLSHADE,
     &hillshade::programs::HILLSHADE_PREPARE,
-    // slice: off     &color_relief::programs::COLOR_RELIEF,
+    &color_relief::programs::COLOR_RELIEF,
     &symbol::programs::SYMBOL_ICON,
     &symbol::programs::SYMBOL_SDF,
     &symbol::programs::SYMBOL_TEXT_AND_ICON,

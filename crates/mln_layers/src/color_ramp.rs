@@ -31,23 +31,9 @@ impl ColorRamp {
     }
 
     /// Makes the ramp of `value` again where it may have changed in a frame
-    /// of `parameters`: for a new or restyled layer, or a change of the
-    /// global state that it reads. An undefined value leaves the ramp.
+    /// of `parameters` ([`changed`]). An undefined value leaves the ramp.
     pub(crate) fn evaluate(&mut self, value: &ColorRampPropertyValue, parameters: &PropertyEvaluationParameters) {
-        let state_differs = match (&self.state, &parameters.global_state) {
-            (None, None) => false,
-            (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
-            _ => true,
-        };
-        let affected = parameters.layer_changed
-            || (state_differs
-                && value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
-                && global_state_refs_intersect(
-                    value.get_global_state_refs(),
-                    parameters.changed_global_state_keys.as_deref(),
-                ));
-        self.state.clone_from(&parameters.global_state);
-        if affected && !value.is_undefined() {
+        if changed(value, &mut self.state, parameters) && !value.is_undefined() {
             let mut image = (*self.image).clone();
             fill(value, &mut image, self.state.as_deref());
             self.image = Rc::new(image);
@@ -69,6 +55,30 @@ impl ColorRamp {
     pub(crate) fn texture(&self) -> &Texture {
         &self.texture
     }
+}
+
+/// Whether the ramp of `value`, a layer's color ramp property's, may have
+/// changed in a frame of `parameters` since one of the global state
+/// `state`: for a new or restyled layer, or a change of the global state
+/// that it reads. Makes `parameters`' global state `state`.
+pub(crate) fn changed(
+    value: &ColorRampPropertyValue,
+    state: &mut Option<Arc<GlobalStateMap>>,
+    parameters: &PropertyEvaluationParameters,
+) -> bool {
+    let state_differs = match (&*state, &parameters.global_state) {
+        (None, None) => false,
+        (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
+        _ => true,
+    };
+    state.clone_from(&parameters.global_state);
+    parameters.layer_changed
+        || (state_differs
+            && value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
+            && global_state_refs_intersect(
+                value.get_global_state_refs(),
+                parameters.changed_global_state_keys.as_deref(),
+            ))
 }
 
 /// Fills `image`, a row of pixels, with `value`'s ramp from 0 to 1, with

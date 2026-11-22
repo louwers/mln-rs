@@ -1,6 +1,5 @@
-//! The programs of the `raster` layer type: the buffers,
-//! attributes, textures and paint properties of its shaders, and their
-//! sources.
+//! The programs of the `raster` layer type: the buffers, attributes and
+//! textures of its shader, and its sources.
 
 use mln_gfx::gfx_types::AttributeDataType::Short2;
 use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Sources, Stages, Texture};
@@ -8,22 +7,14 @@ use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Sources,
 use super::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
 
-// The ids of the programs' textures and vertex attributes.
-pub(crate) const ID_RASTER_IMAGE0_TEXTURE: usize = 0;
-pub(crate) const ID_RASTER_IMAGE1_TEXTURE: usize = 1;
-pub(crate) const ID_RASTER_POS_VERTEX_ATTRIBUTE: usize = 0;
-pub(crate) const ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE: usize = 1;
-
-pub(crate) const DRAWABLE: Buffer = Buffer::storage::<RasterDrawableUBO>("drawableVector", Stages::Vertex);
-pub(crate) const PROPS: Buffer = Buffer::uniform::<RasterEvaluatedPropsUBO>("props", 0);
-
+/// A tile's image, or an image source's.
 pub static RASTER: Program = Program {
     name: "raster",
-    buffers: &[DRAWABLE, PROPS],
-    attributes: &[
-        Attribute { id: ID_RASTER_POS_VERTEX_ATTRIBUTE, format: Short2 },
-        Attribute { id: ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, format: Short2 },
+    buffers: &[
+        Buffer::storage::<RasterDrawableUBO>("drawableVector", Stages::Vertex),
+        Buffer::uniform::<RasterEvaluatedPropsUBO>("props", 0),
     ],
+    attributes: &[Attribute::new("pos", Short2), Attribute::new("texture_pos", Short2)],
     instance_attributes: &[],
     textures: &[Texture::new("image0"), Texture::new("image1")],
     properties: &[],

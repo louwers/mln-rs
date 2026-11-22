@@ -1,7 +1,7 @@
 //! The `color-relief` layer type: a layer of a raster-dem source that
 //! colors its tiles' terrain by elevation.
 
-pub(crate) mod render_layer;
+mod layer;
 #[rustfmt::skip]
 mod properties;
 mod glsl;
@@ -11,11 +11,12 @@ pub mod programs;
 pub mod ubo;
 mod wgsl;
 
+pub use layer::ColorReliefLayer;
 use mln_style::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 use mln_style::property_table::{PropertyTable, PropertyVisitor};
 pub use properties::ColorReliefPaintProperties;
 
-/// The `color-relief` layer type.
+/// The `color-relief` layer type's style half.
 pub struct ColorRelief;
 
 impl StyleLayerType for ColorRelief {
@@ -24,7 +25,7 @@ impl StyleLayerType for ColorRelief {
 
     type LayoutProperties = NoProperties;
     type PaintProperties = ColorReliefPaintProperties::Transitionable;
-    type Extra = ();
+    type Data = ();
 
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {
         properties::visit(slot, visitor)

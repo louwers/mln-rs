@@ -1,4 +1,3 @@
-use std::rc::Rc;
 use std::sync::Arc;
 
 use glam::dcamera::rh::proj::opengl::orthographic;
@@ -114,9 +113,8 @@ impl Layer for HillshadeLayer {
 
     fn tile(&mut self, cx: &mut TileCx<'_, Self>, _tile: FrameTile, dem: DemTile<'_>) -> Option<HillshadeTile> {
         let res = &mut *cx.res;
-        let elevations = res.texture(|texture| texture.set_image(Some(Rc::new(dem.image().clone()))));
         let mut desc = MeshDesc::new(&HILLSHADE_PREPARE, &self.quad);
-        desc.vertices(&self.corners).texture(&elevations, ELEVATIONS).blend(ColorMode::unblended()).screen_space();
+        desc.vertices(&self.corners).texture(dem.texture(), ELEVATIONS).blend(ColorMode::unblended()).screen_space();
         let prepare = res.mesh(&desc);
         let size = Size::new(dem.size(), dem.size());
         let slopes = res.target(size, TextureChannelDataType::UnsignedByte, Color::new(0.0, 0.0, 0.0, 1.0));
