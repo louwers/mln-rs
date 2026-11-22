@@ -24,7 +24,6 @@ use std::sync::Arc;
 use mln_gfx::gpu::{Gpu, GpuError, TextureFormat, TextureId};
 use mln_gfx::types::TextureChannelDataType;
 use mln_util::Color;
-use mln_util::hash::HashSet;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
@@ -64,8 +63,8 @@ pub struct Destination(pub Arc<str>);
 const DEPTH_STENCIL: TextureFormat = TextureFormat::Depth24PlusStencil8;
 
 /// Why a layer draws otherwise than its style says, which the renderer
-/// warns of once per version of the style.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// warns of when it starts to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Warning {
     Undeclared,
     Unread,
@@ -93,8 +92,10 @@ pub(crate) struct Routes {
     /// The depth and stencil of the targets' passes, where the frame's can't
     /// serve them, with its size.
     depth_stencil: Option<(Size, GpuTexture)>,
-    /// The layers and warnings that this version of the style warned of.
-    warned: HashSet<(String, Warning)>,
+    /// The layers that the last frame warned of, each with why.
+    warned: Vec<(Box<str>, Warning)>,
+    /// The layers that this frame warned of so far, each with why.
+    warning: Vec<(Box<str>, Warning)>,
     /// The targets that the layer being updated asked to read.
     asked: Vec<usize>,
     /// The first name that the layer being updated asked to read and the
@@ -116,13 +117,9 @@ pub(crate) struct Routes {
 }
 
 impl Routes {
-    /// Makes the targets those that the style declares, `declared`. A target of a name
-    /// and channel that it declared before keeps its texture. A new version
-    /// of the style warns again.
-    pub(crate) fn sync(&mut self, declared: Option<&NamedTargets>, new_version: bool, res: &mut Resources) {
-        if new_version {
-            self.warned.clear();
-        }
+    /// Makes the targets those that the style declares, `declared`. A target
+    /// of a name and channel that it declared before keeps its texture.
+    pub(crate) fn sync(&mut self, declared: Option<&NamedTargets>, res: &mut Resources) {
         let declared = declared.map_or(&[][..], |targets| &targets.0[..]);
         if self.targets.len() == declared.len() && self.targets.iter().zip(declared).all(|((held, _), new)| held == new)
         {
@@ -148,9 +145,8 @@ impl Routes {
         self.depth_stencil = None;
     }
 
-    /// Whether a layer that draws into `destination` draws into a target
-    /// the style declares, unless it reads what it draws; a layer of 3D
-    /// geometry (`volume`) never does.
+    /// Whether `destination` names a target the style declares, for a layer
+    /// that isn't of 3D geometry (`volume`).
     pub(crate) fn routes(&self, destination: Option<&Destination>, volume: bool) -> bool {
         !volume && destination.is_some_and(|to| self.index(&to.0).is_some())
     }
@@ -161,6 +157,8 @@ impl Routes {
 
     /// Begins the frame's routes, with the targets `size` device pixels.
     pub(crate) fn begin_frame(&mut self, size: Size, res: &mut Resources) {
+        std::mem::swap(&mut self.warned, &mut self.warning);
+        self.warning.clear();
         self.layers.clear();
         self.routed.clear();
         self.reads.clear();
@@ -171,8 +169,7 @@ impl Routes {
         }
     }
 
-    /// What the update of the frame's layer at `index` reads the targets
-    /// through.
+    /// What the update of a frame's layer reads the targets through.
     pub(crate) fn reads(&mut self) -> TargetReads<'_> {
         self.asked.clear();
         self.missed = None;
@@ -184,7 +181,6 @@ impl Routes {
     /// returns the index of the target it draws into, `None` for the map. A
     /// layer of 3D geometry (`volume`) draws on the map. Warns of a target
     /// it asked for that the style doesn't declare.
-    #[inline]
     pub(crate) fn route(
         &mut self,
         index: usize,
@@ -199,18 +195,6 @@ impl Routes {
         if self.targets.is_empty() && destination.is_none() {
             return None;
         }
-        self.route_reading(index, id, destination, volume)
-    }
-
-    /// [`route`](Self::route), with the targets that the layer asked for.
-    #[inline(never)]
-    fn route_reading(
-        &mut self,
-        index: usize,
-        id: &str,
-        destination: Option<&Destination>,
-        volume: bool,
-    ) -> Option<usize> {
         let place = self.layers.len();
         self.layers.push(index);
         let asked = std::mem::take(&mut self.asked);
@@ -265,7 +249,6 @@ impl Routes {
     /// Warns of what the routed layer `id` drew otherwise than its style
     /// says, `draws`: a composite refused, or commands asked to be lent in
     /// the pass.
-    #[inline(never)]
     pub(crate) fn check_routed(&mut self, id: &str, draws: &Draws) {
         if draws.refused_backdrop() {
             self.warn(id, Warning::Backdrop, || "a blend that reads what is behind it needs the map".to_owned());
@@ -275,13 +258,20 @@ impl Routes {
         }
     }
 
-    /// Warns, once for this version of the style, that the layer `id` draws
-    /// otherwise than its style says, as `why` says.
-    #[cold]
+    /// Warns that the layer `id` draws otherwise than its style says, as
+    /// `why` says, unless it did so in the last frame too: a layer's warning
+    /// logs once while it draws so in consecutive frames.
     fn warn(&mut self, id: &str, warning: Warning, why: impl FnOnce() -> String) {
-        if !self.warned.insert((id.to_owned(), warning)) {
+        let of = |held: &(Box<str>, Warning)| *held.0 == *id && held.1 == warning;
+        if self.warning.iter().any(of) {
             return;
         }
+        if let Some(index) = self.warned.iter().position(of) {
+            let held = self.warned.swap_remove(index);
+            self.warning.push(held);
+            return;
+        }
+        self.warning.push((id.into(), warning));
         let does = match warning {
             Warning::Undeclared | Warning::Volume | Warning::Cycle => "draws on the map",
             Warning::Unread => "reads nothing of a target it asked for",
@@ -496,9 +486,9 @@ mod tests {
     fn a_style_keeps_the_textures_of_the_targets_it_still_declares() {
         let mut res = Resources::detached();
         let mut routes = Routes::default();
-        routes.sync(Some(&targets(&["a", "b"])), true, &mut res);
+        routes.sync(Some(&targets(&["a", "b"])), &mut res);
         let b = routes.targets[1].1.clone();
-        routes.sync(Some(&targets(&["b", "c"])), true, &mut res);
+        routes.sync(Some(&targets(&["b", "c"])), &mut res);
         assert_eq!(b, routes.targets[0].1);
         assert_eq!(2, routes.targets.len());
         // The detached resources' device draws no half floats.
@@ -506,7 +496,7 @@ mod tests {
         assert_eq!(Size::new(4, 2), res.size(b.texture()));
         let format = res.stored_texture(&b.texture().0).expect("the texture").format();
         assert_eq!(TextureFormat::Rgba8Unorm, format);
-        routes.sync(None, true, &mut res);
+        routes.sync(None, &mut res);
         assert_eq!(0, routes.targets.len());
     }
 }

@@ -320,8 +320,7 @@ impl RenderOrchestrator {
         if sources_changed {
             self.sources_by_id = sources_by_id(style.get_sources());
         }
-        let new_version = self.style.as_ref().is_none_or(|previous| !Arc::ptr_eq(previous, style));
-        self.routes.sync(style.extra(), new_version, res);
+        self.routes.sync(style.extra(), res);
         self.style = Some(Arc::clone(style));
         let layers = Arc::clone(style.get_layer_list());
 
@@ -1220,9 +1219,6 @@ impl RenderOrchestrator {
         // map: without the opaque pass's depth, each over the last.
         let opaque_pass_cutoff = std::mem::replace(&mut parameters.opaque_pass_cutoff, u32::MAX);
         parameters.pass = Pass::Translucent;
-        parameters.depth_range_size =
-            1.0 - (3 * PaintParameters::NUM_SUBLAYERS) as f32 * PaintParameters::DEPTH_EPSILON;
-        parameters.current_layer = 0;
         for layer in self.routes.writers(target) {
             self.layers[layer].layer.render(gpu, parameters, DrawOrder::BottomUp, Some(target));
         }

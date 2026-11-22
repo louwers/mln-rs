@@ -325,6 +325,27 @@ fn an_edit_adds_and_removes_a_route() {
 }
 
 #[test]
+fn a_layer_warns_once_while_it_draws_otherwise_than_its_style_says() {
+    warnings();
+    let line = LINE.replacen(r#""id":"line""#, r#""id":"misrouted""#, 1);
+    let layers = [layer(BACKGROUND, None, ""), layer(&line, Some("nowhere"), "")];
+    let fixture = fixture(&style(Some(r#"[{"id":"t"}]"#), &layers));
+    let warned = || warnings().iter().filter(|warning| warning.contains("\"misrouted\"")).count();
+    assert_eq!(1, warned());
+    // An app edits the style as it goes, which keeps the misrouted line.
+    for width in 5..8 {
+        wait(fixture.map.set_style_layer_property("misrouted", "line-width", &width.to_string()));
+        fixture.render();
+    }
+    assert_eq!(1, warned());
+    wait(fixture.map.set_style_layer_property("misrouted", "org.maplibre:destination-target", r#""t""#));
+    fixture.render();
+    wait(fixture.map.set_style_layer_property("misrouted", "org.maplibre:destination-target", r#""nowhere""#));
+    fixture.render();
+    assert_eq!(2, warned());
+}
+
+#[test]
 fn a_solid_background_drawn_into_a_target_leaves_the_frame_uncleared() {
     let layers = [layer(BACKGROUND, Some("t"), "")];
     let targets = Some(r#"[{"id":"t"}]"#);
