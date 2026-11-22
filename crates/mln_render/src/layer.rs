@@ -1135,17 +1135,18 @@ impl<L: Layer> HitTest<'_, L> {
         translated.map_or(Cow::Borrowed(self.query_geometry), Cow::Owned)
     }
 
-    /// `point`, of the tile, on the screen, in the camera's pixels, where a
-    /// layer whose features face the camera compares them with the query's
-    /// geometry, brought there point by point too.
+    /// `point`, of the tile, on the screen, in the camera's pixels from its
+    /// top left, as a query's screen geometry is: where a layer whose
+    /// features face the camera compares them with the query's geometry,
+    /// brought there point by point too.
     #[must_use]
     pub fn to_screen(&self, point: GeometryCoordinate) -> GeometryCoordinate {
         let at = self.projector.project(&geometry::Point::new(f64::from(point.x), f64::from(point.y)), 0.0).point;
         let size = self.camera.size();
-        // Scaled in `f32`, halved in `f64`.
+        // Scaled in `f32`, halved in `f64`. Clip space's y goes up.
         GeometryCoordinate::new(
             (f64::from((at.x as f32 + 1.0) * size.width as f32) * 0.5) as i16,
-            (f64::from((at.y as f32 + 1.0) * size.height as f32) * 0.5) as i16,
+            (f64::from((1.0 - at.y as f32) * size.height as f32) * 0.5) as i16,
         )
     }
 
