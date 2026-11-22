@@ -62,9 +62,11 @@
 //!   elevation range of the DEM under it, with the exaggeration, or by GL
 //!   JS's flat range where none has loaded: a box on Mercator, and on the
 //!   globe the globe's convex volume between the spheres of the range's
-//!   lowest and highest ground, whose zooms fall off from the camera to the
-//!   center at its altitude. While no tile holds the
-//!   view's center, the cover keeps the tile under it, undrawn, so that the
+//!   lowest ground and of its highest or the flat range's top, sea level
+//!   or above, whichever is higher, as GL JS's: the globe's horizon plane
+//!   is the sea-level sphere's, which the sea floor under a camera near the
+//!   surface can lie behind. Its zooms fall off from the camera to the
+//!   center at its altitude. While no tile holds the view's center, the cover keeps the tile under it, undrawn, so that the
 //!   camera has a DEM to stand on.
 //! - **The elevation ranges** ([`ElevationRanges`]) are those of every DEM
 //!   tile of the terrain's tileset that has loaded while terrain drew,

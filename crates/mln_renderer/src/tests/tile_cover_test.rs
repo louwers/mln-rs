@@ -1577,6 +1577,25 @@ mod terrain_cover {
         );
     }
 
+    /// On the globe, ground wholly below sea level under the camera stays
+    /// in the cover: at zoom 14 straight down, the horizon plane of the
+    /// sea-level sphere passes some 1,800 m below the center, above a sea
+    /// floor 2,500 m down. As in GL JS, a tile's volume reaches up to sea
+    /// level at least.
+    #[test]
+    fn the_globe_cover_keeps_the_sea_floor_under_the_camera() {
+        let options = Options { min_zoom: 0, max_zoom: 22, tile_size: 512, reparse_overscaled: false };
+        let mut transform = Camera::new((256, 256), (0.0, 0.0), 14.0).transform();
+        transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+        let (z, overscaled_z, parameters) = source_cover_inputs(&transform, options);
+        let range = Range::new(options.min_zoom, options.max_zoom);
+        let mut sea_floor = ElevationRanges::default();
+        sea_floor.insert(cn(0, 0, 0), -2500.0, -2500.0);
+        let cover = terrain_tile_cover(&parameters, z, range, overscaled_z, &sea_floor);
+        assert_eq!(cover, terrain_tile_cover(&parameters, z, range, overscaled_z, &ElevationRanges::default()));
+        assert_ne!(Vec::<OverscaledTileID>::new(), cover);
+    }
+
     #[test]
     fn a_tile_takes_the_range_of_the_dem_tile_it_reads_or_its_nearest_known_ancestor() {
         let mut ranges = ElevationRanges::default();

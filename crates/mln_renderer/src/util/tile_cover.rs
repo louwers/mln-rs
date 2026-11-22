@@ -583,7 +583,8 @@ mod globe {
 
     /// The tiles of the globe view of `state`, each culled by the volume
     /// over the elevation range of the ground under it in `ranges`, while
-    /// terrain draws, or else GL JS's flat allowance.
+    /// terrain draws, up to GL JS's flat allowance at least, or else over
+    /// that allowance.
     pub(super) fn tile_cover(
         state: &TileCoverParameters,
         z: u8,
@@ -695,7 +696,12 @@ mod globe {
 
         while let Some(mut node) = stack.pop() {
             let tile = CanonicalTileID::new(node.zoom, node.x, node.y);
-            let elevations = ranges.and_then(|ranges| ranges.range(tile)).unwrap_or(allowance);
+            // A volume reaches up to the allowance, and so to sea level, at
+            // least, as GL JS's does: the horizon plane is the sea-level
+            // sphere's, which ground wholly below sea level under a camera
+            // near the surface can lie behind.
+            let elevations = (ranges.and_then(|ranges| ranges.range(tile)))
+                .map_or(allowance, |(lowest, highest)| (lowest, highest.max(allowance.1)));
             let volume = tile_bounding_volume(&tile, elevations);
 
             if !node.fully_visible {
