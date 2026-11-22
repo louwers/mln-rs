@@ -5,6 +5,7 @@ use mln_render::layer::{
     EvaluateCx, Evaluation, Features, FrameTile, HitTest, Layer, LayerBucket, LayerValues, NewCx, PaintVertices,
     PrepareCx, TileCx, TileTransform, UpdateCx,
 };
+use mln_style::evaluated::Evaluated;
 use mln_util::Color;
 use mln_util::intersection_tests::polygon_intersects_multi_polygon;
 
@@ -258,7 +259,7 @@ fn has_pattern(layer: &LayerValues<Fill>) -> bool {
 }
 
 /// Whether a fill of `color` at `opacity` covers what is behind it.
-fn opaque(color: &mln_style::evaluated::Evaluated<Color>, opacity: &mln_style::evaluated::Evaluated<f32>) -> bool {
+fn opaque(color: &Evaluated<Color>, opacity: &Evaluated<f32>) -> bool {
     color.constant_or(&Color::default()).a >= 1.0 && opacity.constant_or(&0.0) >= 1.0
 }
 

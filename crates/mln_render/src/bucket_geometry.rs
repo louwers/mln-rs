@@ -368,7 +368,7 @@ mod tests {
         let mut geometry = BucketGeometry::default();
         geometry.upload(&mut vec, false, &[], &mut res);
         geometry.upload_indexes(&mut indexes, false, &[], &mut res);
-        assert!(vec.get().is_empty() && indexes.get().is_empty(), "the data moved to the buffers");
+        assert_eq!((vec.get(), indexes.get()), (&[][..], &[][..]), "the data moved to the buffers");
         assert_eq!((vec.len(), geometry.buffer(&vec).map(Buffer::len)), (2, Some(2)));
         assert_eq!(geometry.indexes(&indexes).map(|uploaded| uploaded.buffer.len()), Some(3));
     }
@@ -385,7 +385,7 @@ mod tests {
         copy_geometry.upload(&mut copy, false, &[], &mut res);
         let mut geometry = BucketGeometry::default();
         geometry.upload(&mut vec, false, &[&copy_geometry], &mut res);
-        assert!(vec.get().is_empty());
+        assert_eq!(vec.get().len(), 0);
         assert!(geometry.buffer(&vec).is_some_and(|buffer| Some(buffer) == copy_geometry.buffer(&copy)));
     }
 

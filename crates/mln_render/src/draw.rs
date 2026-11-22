@@ -17,12 +17,14 @@
 //! Each frame, a layer pushes its draws to [`Draws`], in its main group or
 //! in the overlay above it: a [`Draw`] of one of its meshes, placed in the
 //! layer's order, with the values of its program's blocks of each draw
-//! ([`DrawBlocks`]) and, for a draw of a tile, the tile's projection. The engine writes what the blocks hold of a mesh's
-//! paint values ([`MeshDesc::paint`]), sorts each [`Group`] by the draws'
-//! order, writes each block once for all of the group's draws, places the
-//! group in the layers' order and depth, and draws it in the frame's passes,
-//! as the draws' [`Depth`] and clipping say, onto the frame or as one
-//! surface ([`Composite`]).
+//! ([`DrawBlocks`]) and, for a draw of a tile, the tile's projection. The
+//! engine writes what the blocks hold of a mesh's paint values
+//! ([`MeshDesc::paint`]), sorts each [`Group`] by the draws' order, writes
+//! the blocks of each of the group's programs once for all of its draws,
+//! places the group in the layers' order and depth, and draws it in the
+//! frame's passes, as the draws' [`Depth`] and clipping say, onto the frame
+//! or as one surface ([`Composite`]). A group may draw with any number of
+//! programs, whose blocks differ.
 //!
 //! The resources and their handles belong to the renderer's thread: they
 //! are neither `Send` nor `Sync`.

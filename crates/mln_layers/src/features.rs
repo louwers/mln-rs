@@ -88,7 +88,7 @@ mod tests {
     use crate::Circle;
 
     /// A circle layer's `circle-sort-key` of `value`, evaluated at zoom 0.
-    fn sort_key(value: serde_json::Value) -> Evaluated<f32> {
+    fn sort_key(value: &serde_json::Value) -> Evaluated<f32> {
         let json = json!({"id": "circle", "type": "circle", "source": "s", "layout": {"circle-sort-key": value}});
         let mut error = ConversionError::default();
         let layer = convert_layer(crate::tests::registry().style(), &Convertible::from(&json), &mut error)
@@ -109,7 +109,7 @@ mod tests {
             (Some(json!(["step", ["zoom"], 5, 10, 10])), [2, 1, 0]),
             (Some(json!(["number", ["get", "rank"]])), [1, 2, 0]),
         ] {
-            let key = key.map(sort_key);
+            let key = key.as_ref().map(sort_key);
             let features = (0..3).map(|i| (i, ())).collect();
             let sorted = sort(features, key.as_ref(), |_, i| Ok(ranks[i])).unwrap();
             assert_eq!(sorted.iter().map(|&(i, ())| i).collect::<Vec<_>>(), order, "{key:?}");

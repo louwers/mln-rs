@@ -67,8 +67,9 @@ pub trait Vertex: bytemuck::Pod {
 
     /// The names of the program's attributes that the vertex's attributes
     /// bind to, one for each: an attribute whose program has none of its
-    /// name binds to none. Empty for a vertex whose attributes bind in
-    /// order.
+    /// name binds to none, and one of a paint property's name gives the
+    /// property its values per vertex. Empty for a vertex whose attributes
+    /// bind in order.
     const NAMES: &'static [&'static str] = &[];
 }
 

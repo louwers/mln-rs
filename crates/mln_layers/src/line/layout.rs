@@ -182,7 +182,7 @@ mod tests {
     /// The vertices of a line layer with `layout`, at zoom 10, of one feature
     /// of `type_` per `(properties, line)`.
     fn vertices(
-        layout: serde_json::Value,
+        layout: &serde_json::Value,
         type_: FeatureType,
         features: &[(serde_json::Value, &[(i16, i16)])],
     ) -> Vec<LineVertex> {
@@ -212,8 +212,8 @@ mod tests {
     // gtest: Buckets.LineBucket
     #[test]
     fn a_line_has_a_mesh_and_a_point_none() {
-        assert!(vertices(json!({}), FeatureType::Point, &[(json!({}), &[(0, 0)])]).is_empty());
-        assert!(!vertices(json!({}), FeatureType::LineString, &[(json!({}), &[(0, 0), (1, 1)])]).is_empty());
+        assert_eq!(vertices(&json!({}), FeatureType::Point, &[(json!({}), &[(0, 0)])]).len(), 0);
+        assert_ne!(vertices(&json!({}), FeatureType::LineString, &[(json!({}), &[(0, 0), (1, 1)])]).len(), 0);
     }
 
     #[test]
@@ -230,12 +230,12 @@ mod tests {
             let join = if property == "line-round-limit" { "round" } else { "miter" };
             let line = FeatureType::LineString;
             let constant = |value: &serde_json::Value| {
-                vertices(json!({"line-join": join, property: value}), line, &[(json!({}), CORNER)])
+                vertices(&json!({"line-join": join, property: value}), line, &[(json!({}), CORNER)])
             };
             let (first, second) = (constant(&values[0]), constant(&values[1]));
             assert_ne!(first, second, "{property}: the two values make the same line");
             let data_driven = vertices(
-                json!({"line-join": join, property: ["get", "v"]}),
+                &json!({"line-join": join, property: ["get", "v"]}),
                 line,
                 &[(json!({"v": values[0]}), CORNER), (json!({"v": values[1]}), CORNER)],
             );
