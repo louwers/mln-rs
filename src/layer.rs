@@ -29,7 +29,7 @@ pub use mln_style_types::{LayerBlendType, Rotation, TranslateAnchorType};
 pub use mln_text::glyph::GlyphID;
 pub use mln_tile_id::geometry_tile_data::{GeometryCoordinate, GeometryCoordinates};
 pub use mln_util::error::Error;
-pub use mln_util::geo::LatLng;
+pub use mln_util::geo::{LatLng, ScreenCoordinate};
 pub use mln_util::size::Size;
 pub use mln_util::{Color, intersection_tests};
 pub use mln_wire::Wire;

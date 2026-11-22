@@ -52,6 +52,11 @@
 //! freshly evaluated values; [`Layer::update`] brings up to date what the
 //! layer keeps for all its tiles, such as an atlas of images.
 //!
+//! A layer without tiles that draws at a geographic position draws
+//! around the position's [`Anchor`]s, one in each world copy the frame shows
+//! ([`Frame::anchors`]), in the units of an anchor's tile, which
+//! [`Frame::tile`] projects.
+//!
 //! # When the hooks run
 //!
 //! The engine makes the layer ([`Layer::new`]) when it joins the renderer,
@@ -75,7 +80,9 @@
 //! the tile's feature index ([`BuildCx::index`]), padded by the layer's
 //! [`query_radius`](Layer::query_radius), and keeps those the layer
 //! [`hit`](Layer::hit)s; [`hit_frame`](Layer::hit_frame) adds what the
-//! layer draws without tile features. A layer's hits come nearest first.
+//! layer draws without tile features, which it finds on the screen as the
+//! query's geometry is ([`FrameQuery::to_screen`]). A layer's hits come
+//! nearest first.
 //! `RenderSession::query_rendered_layer` reads a layer as its renderer has
 //! it.
 
@@ -111,6 +118,7 @@ use mln_vec_map::VecSet;
 use mln_wire::Wire;
 
 pub use crate::after_gpu::{AfterGpu, GpuEnd};
+pub use crate::anchor::Anchor;
 pub use crate::bucket_geometry::GpuVec;
 pub use crate::bucket_upload::Upload;
 use crate::draw::{Buffer, Draws, ImageVertex, IndexBuffer, Resources, Texture, TileSurface};

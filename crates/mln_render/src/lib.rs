@@ -21,6 +21,7 @@
 
 mod after_gpu;
 mod algorithm;
+mod anchor;
 #[cfg(feature = "bench")]
 #[doc(hidden)]
 pub mod bench;
