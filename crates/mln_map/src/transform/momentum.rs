@@ -14,6 +14,7 @@ use mln_util::geo::{LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
+use super::anchor::sees_plane;
 use super::transition::Transition;
 use super::{BEARING, CENTER, PITCH, Transform, TransformEvent, ZOOM, max_pitch_for_padding, nanos_from_secs};
 use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
@@ -477,13 +478,15 @@ impl Transform {
     }
 
     /// The anchor `anchor` (from the top left) as a state point, from the
-    /// bottom left, with the `LatLng` under it; `None` without one, or for an
-    /// anchor that has no `LatLng`, which is logged.
-    fn momentum_anchor(&self, anchor: Option<ScreenCoordinate>) -> Option<(ScreenCoordinate, LatLng)> {
+    /// bottom left, with the `LatLng` under it on the plane it holds it on
+    /// and that plane's height ([`Self::anchor_height`]); `None` without
+    /// one, or for an anchor that has no `LatLng`, which is logged.
+    fn momentum_anchor(&self, anchor: Option<ScreenCoordinate>) -> Option<(ScreenCoordinate, LatLng, f64)> {
         let anchor = anchor?;
+        let height = self.anchor_height(&anchor);
         let point = ScreenCoordinate::new(anchor.x, f64::from(self.state.view().size().height) - anchor.y);
-        match self.state.view().screen_coordinate_to_lat_lng(&point, WrapMode::Unwrapped) {
-            Ok(lat_lng) => Some((point, lat_lng)),
+        match self.state.view().screen_coordinate_to_lat_lng_at(&point, height, WrapMode::Unwrapped) {
+            Ok(lat_lng) => Some((point, lat_lng, height)),
             Err(e) => {
                 Log::error(Event::General, &e.message);
                 None
@@ -491,10 +494,16 @@ impl Transform {
         }
     }
 
-    /// Moves the center so that `lat_lng` is at `point` again.
-    fn hold_momentum_anchor(&mut self, anchor: Option<(ScreenCoordinate, LatLng)>) {
-        let Some((point, lat_lng)) = anchor else { return };
-        if let Err(e) = self.state.move_lat_lng(&lat_lng, &point) {
+    /// Moves the center so that `lat_lng`, on the plane at the height the
+    /// anchor holds it on, is at `point` again; on a Mercator view, where the
+    /// camera can hold it there (see `Transform::hold_anchor`), and the step
+    /// moves around the view's center elsewhere.
+    fn hold_momentum_anchor(&mut self, anchor: Option<(ScreenCoordinate, LatLng, f64)>) {
+        let Some((point, lat_lng, height)) = anchor else { return };
+        if !self.view().is_globe() && !sees_plane(self.view(), &point, height) {
+            return;
+        }
+        if let Err(e) = self.state.move_lat_lng_at(&lat_lng, &point, height) {
             Log::error(Event::General, &e.message);
         }
     }
@@ -525,8 +534,9 @@ impl Transform {
             let size = self.state.view().size();
             let center = self.state.view().padding().center_in(size);
             let point = ScreenCoordinate::new(center.x - step.x, center.y - step.y);
-            // A step that has no LatLng is logged and stops.
-            let unwrapped = match self.screen_coordinate_to_lat_lng(&point, WrapMode::Unwrapped) {
+            // A step that has no LatLng is logged and stops. The map moves on
+            // the plane at the center's altitude.
+            let unwrapped = match self.center_moving_on_plane(&point, &center, self.view().center_altitude()) {
                 Ok(lat_lng) => lat_lng,
                 Err(e) => {
                     Log::error(Event::General, &e.message);
@@ -586,7 +596,7 @@ impl Transform {
         match anchor {
             // On the globe the zoom around the anchor is the globe's, as in
             // apply_transitions.
-            Some((point, lat_lng)) if self.globe_on_screen() && self.state.view().zoom() != before => {
+            Some((point, lat_lng, _)) if self.globe_on_screen() && self.state.view().zoom() != before => {
                 let zoom_delta = self.state.view().zoom() - before;
                 VerticalPerspectiveProjection::zoom_around_point(
                     &mut self.state,

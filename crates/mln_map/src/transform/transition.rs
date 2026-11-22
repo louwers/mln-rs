@@ -12,6 +12,7 @@ use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
+use super::anchor::sees_plane;
 use super::momentum::MomentumState;
 use super::{
     ALTITUDE, BEARING, CENTER, CameraCommandId, CommandEnd, FOV, PADDING, PITCH, ROLL, Transform, TransformEvent, ZOOM,
@@ -42,6 +43,9 @@ pub(super) struct Transition {
     frame: FrameFn,
     anchor: Option<ScreenCoordinate>,
     anchor_lat_lng: LatLng,
+    /// The height in meters of the plane the anchor holds its location on
+    /// ([`Transform::anchor_height`]).
+    anchor_height: f64,
     /// Set for a momentum, which moves the camera relative to where it
     /// stands instead of through `frame`.
     pub(super) momentum: Option<MomentumState>,
@@ -80,6 +84,7 @@ impl Transition {
             frame,
             anchor: None,
             anchor_lat_lng: LatLng::default(),
+            anchor_height: 0.0,
             momentum: None,
             stopped: None,
             source,
@@ -171,11 +176,13 @@ impl Transform {
         // transforms. An explicit center takes precedence over an anchor.
         let mut anchor = if camera.center.is_some() { None } else { camera.anchor };
         let mut anchor_lat_lng = LatLng::default();
+        let mut anchor_height = 0.0;
         if let Some(a) = anchor.as_mut() {
+            anchor_height = self.anchor_height(a);
             a.y = f64::from(self.state.view().size().height) - a.y;
             // An anchor that has no LatLng (NaN or infinite) is logged and
             // ignored.
-            match self.state.view().screen_coordinate_to_lat_lng(a, WrapMode::Unwrapped) {
+            match self.state.view().screen_coordinate_to_lat_lng_at(a, anchor_height, WrapMode::Unwrapped) {
                 Ok(lat_lng) => {
                     anchor_lat_lng = lat_lng;
                     fields |= CENTER;
@@ -202,6 +209,7 @@ impl Transform {
             coupled_fields,
             anchor,
             anchor_lat_lng,
+            anchor_height,
             command: self.reporting(),
             ..Transition::new(fields, moving_fields, start, duration, animation, frame, self.source)
         };
@@ -274,9 +282,9 @@ impl Transform {
 
         // An active anchor also applies to immediate changes of other
         // properties.
-        let anchored = self.transitions.iter().rev().find_map(|transition| {
+        let anchored = self.transitions.iter().enumerate().rev().find_map(|(index, transition)| {
             let anchor = transition.anchor.filter(|_| transition.fields & CENTER != 0)?;
-            Some((anchor, transition.anchor_lat_lng))
+            Some((anchor, transition.anchor_lat_lng, transition.anchor_height, index))
         });
 
         // On the globe the anchor is re-read every frame and the zoom around
@@ -285,7 +293,7 @@ impl Transform {
         // LatLng in a frame is logged, and the anchor's location at the
         // start stands in.
         let globe_zoom_around = match anchored {
-            Some((anchor, anchor_lat_lng)) if self.globe_on_screen() => {
+            Some((anchor, anchor_lat_lng, _, _)) if self.globe_on_screen() => {
                 let location =
                     self.state.view().screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped).unwrap_or_else(|e| {
                         Log::error(Event::General, &e.message);
@@ -323,7 +331,7 @@ impl Transform {
         let mut zoom = camera.zoom.unwrap_or_default();
         self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut zoom);
         self.state.set_lat_lng_zoom(&camera.center.unwrap_or_default(), zoom);
-        if let Some((anchor, anchor_lat_lng)) = anchored {
+        if let Some((anchor, anchor_lat_lng, height, index)) = anchored {
             match globe_zoom_around {
                 Some((location, zoom_before)) if self.state.view().zoom() != zoom_before => {
                     let zoom_delta = self.state.view().zoom() - zoom_before;
@@ -335,14 +343,39 @@ impl Transform {
                         self.globe_free_bearing,
                     );
                 }
-                // The anchor had a LatLng at the start; a frame that has none
-                // logs it, as frame_edge_insets does.
-                _ => {
-                    if let Err(e) = self.state.move_lat_lng(&anchor_lat_lng, &anchor) {
-                        Log::error(Event::General, &e.message);
-                    }
-                }
+                _ => self.hold_anchor(&anchor_lat_lng, &anchor, height, &current, index),
             }
+        }
+    }
+
+    /// Moves the center so that `location`, `height` meters up, is at
+    /// `anchor` (y up) again, for the command at `index`. The anchor had a
+    /// `LatLng` at the start; a frame that has none logs it, as
+    /// `frame_edge_insets` does.
+    ///
+    /// On a Mercator view, a frame whose camera can't hold it there
+    /// ([`sees_plane`]), such as one whose pitch carries the anchor above the
+    /// horizon, moves around the view's center instead: the center stays
+    /// where it was, in `before`, and the command gives up its anchor and
+    /// the center.
+    fn hold_anchor(
+        &mut self,
+        location: &LatLng,
+        anchor: &ScreenCoordinate,
+        height: f64,
+        before: &CameraOptions,
+        index: usize,
+    ) {
+        if !self.view().is_globe() && !sees_plane(self.view(), anchor, height) {
+            let zoom = self.view().zoom();
+            self.state.set_lat_lng_zoom(&before.center.unwrap_or_default(), zoom);
+            let transition = &mut self.transitions[index];
+            transition.anchor = None;
+            transition.fields &= !CENTER;
+            return;
+        }
+        if let Err(e) = self.state.move_lat_lng_at(location, anchor, height) {
+            Log::error(Event::General, &e.message);
         }
     }
 
@@ -396,8 +429,11 @@ impl Transform {
     pub(super) fn release_fields(&mut self, fields: u16) -> Vec<Transition> {
         for active in &mut self.transitions {
             let mut replaced = fields;
-            if active.coupled_fields & replaced != 0 {
-                replaced |= active.coupled_fields;
+            // Only the fields it still owns are coupled: one that gave up its
+            // anchor and its center keeps the rest.
+            let coupled = active.coupled_fields & active.fields;
+            if coupled & replaced != 0 {
+                replaced |= coupled;
             }
             active.fields &= !replaced;
             if let Some(momentum) = &mut active.momentum {
