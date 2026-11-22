@@ -46,6 +46,17 @@ use crate::paint_property_statistics::{PaintPropertyStatistics, StatisticValue};
 #[derive(Clone, Debug, Default)]
 pub struct FeaturePatterns(pub(crate) Vec<(String, PatternDependency)>);
 
+impl FeaturePatterns {
+    /// The ids of the images of the feature's pattern for the layer
+    /// `layer`, one zoom level below the tile's, at it and one above, if
+    /// its value differs by feature.
+    #[must_use]
+    pub fn images(&self, layer: &str) -> Option<[&str; 3]> {
+        let (_, images) = self.0.iter().find(|(id, _)| id == layer)?;
+        Some([&images.min, &images.mid, &images.max])
+    }
+}
+
 /// The images of a feature's `*-pattern` value one zoom level below the
 /// tile's, at it, and one above.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

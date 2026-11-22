@@ -153,6 +153,9 @@ impl<'a> MeshDesc<'a> {
     /// ([`PaintVertices::buffer`], [`pulled`](Self::pulled)). The engine
     /// then writes what the program's blocks hold of the properties into
     /// each draw of the mesh ([`Group::push`](crate::draw::Group::push)).
+    ///
+    /// A property whose attribute neither `paint` nor a buffer of the mesh
+    /// binds ([`Vertex::NAMES`]) reads its uniform.
     pub fn paint<P: PaintBinders>(&mut self, paint: PaintVertices<'a, P>, values: &P::Paint) -> &mut Self {
         let MeshDesc { program, paint: attributes, uniforms, mesh_paint, .. } = self;
         *mesh_paint = Some(paint.bind(program, values, attributes, uniforms));
@@ -265,6 +268,19 @@ impl Resources {
         if let Some(instances) = &mut instances {
             bind_inputs(program, program.instance_attributes, instances, &desc.instances);
         }
+        let mut uniforms = desc.uniforms;
+        for (index, property) in program.properties.iter().enumerate() {
+            let bound = match program.property_attribute(property) {
+                Some((VertexStep::Vertex, attribute)) => vertices.get(attribute).is_some(),
+                Some((VertexStep::Instance, attribute)) => {
+                    instances.as_ref().is_some_and(|i| i.get(attribute).is_some())
+                }
+                None => true,
+            };
+            if !bound {
+                uniforms.insert(index);
+            }
+        }
         let mut textures = Textures::default();
         for (slot, (texture, sampler)) in textures.iter_mut().zip(&desc.textures) {
             *slot = Some((texture.0.clone(), *sampler));
@@ -278,8 +294,7 @@ impl Resources {
             segments: desc.indexes.segments.clone(),
             instances,
         };
-        let mut objects =
-            DrawObjects::new(program, desc.uniforms, desc.projection, blend, desc.cull, geometry, textures);
+        let mut objects = DrawObjects::new(program, uniforms, desc.projection, blend, desc.cull, geometry, textures);
         let mut pulled = program.buffers.iter().filter(|buffer| matches!(buffer.kind, BufferKind::Vertices { .. }));
         for entry in &desc.pulled {
             let Some(buffer) = pulled.next() else {

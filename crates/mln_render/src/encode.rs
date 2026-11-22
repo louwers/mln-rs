@@ -4,9 +4,10 @@
 //! of one of its meshes, with the values of the mesh's program's blocks of
 //! each draw ([`DrawBlocks`]) and, for a draw of a tile, the tile's
 //! [`TileProjection`]. The engine then sorts each [`Group`] by the draws'
-//! order, the age of their meshes and when they were pushed, writes each of
-//! its programs' buffers once for all of its draws, places the group in the
-//! layers' order and depth, and draws it in the frame's passes: with the
+//! order, the age of their meshes and when they were pushed, writes the
+//! buffers of each of its programs once for all of the program's draws,
+//! places the group in the layers' order and depth, and draws it in the
+//! frame's passes: with the
 //! masks of the layer's tiles in the stencil where its draws clip, into a
 //! texture of its own where it composites, and with no call back into the
 //! layer. [`FrameDraws`] are a group's draws as the engine draws them.
@@ -15,7 +16,6 @@ use std::any::Any;
 use std::ops::Range;
 
 use mln_gfx::gpu::Gpu;
-use mln_gfx::shaders::bindings::FIRST_VERTEX_BUFFER_ID;
 use mln_gfx::shaders::block::{Block, DrawBlocks, UniformBlock};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::{BufferKind, PROJECTION_BUFFER, Program, Projection};
@@ -133,9 +133,9 @@ struct Pushes {
     block_bytes: Vec<u8>,
     /// Where a write of one of the draws' buffers gathers its bytes.
     scratch: Vec<u8>,
-    /// The first pushed mesh's paint values that the engine writes into
-    /// the shared blocks, with its program.
-    paint: Option<(MeshPaint, &'static Program)>,
+    /// The paint values of the first pushed mesh of each program that has
+    /// any, which the engine writes into the blocks its draws share.
+    paints: SmallVec<[(&'static Program, MeshPaint); 2]>,
 }
 
 /// A layer's draws of a frame in one place in the layers' order and depth,
@@ -224,12 +224,14 @@ impl Group {
             "a draw of {} at a sub-layer past 2",
             program.name
         );
-        let Pushes { pushed, bytes, paint, .. } = &mut self.pushes;
+        let Pushes { pushed, bytes, paints, .. } = &mut self.pushes;
         let start = bytes.len();
         blocks.each_bytes(|block| bytes.extend_from_slice(block));
         if let Some(mesh_paint) = mesh.paint() {
             mesh_paint.write_mixes(self.zoom, &mut bytes[start..]);
-            paint.get_or_insert_with(|| (mesh_paint.clone(), program));
+            if !paints.iter().any(|(of, _)| std::ptr::eq(*of, program)) {
+                paints.push((program, mesh_paint.clone()));
+            }
         }
         pushed.push(Pushed {
             draw,
@@ -275,20 +277,30 @@ impl Group {
         let Group { frame, pushes, opaque, .. } = self;
         pushes.pushed.sort_unstable_by_key(|pushed| (pushed.draw.order, pushed.seq, pushed.index));
         frame.draws.clear();
-        frame.draws.extend(pushes.pushed.iter().map(|pushed| FrameDraw {
-            tile: pushed.tile,
-            mesh: pushed.mesh,
-            opaque: pushed.draw.opaque && *opaque,
-            depth: pushed.draw.depth,
-            clip: pushed.draw.clip,
-        }));
+        let mut counts: SmallVec<[u32; 4]> = SmallVec::new();
+        for pushed in &pushes.pushed {
+            let run = frame.run(pushed.program);
+            counts.resize(counts.len().max(run + 1), 0);
+            let element = counts[run];
+            counts[run] += 1;
+            frame.draws.push(FrameDraw {
+                tile: pushed.tile,
+                mesh: pushed.mesh,
+                run: run as u16,
+                element,
+                opaque: pushed.draw.opaque && *opaque,
+                depth: pushed.draw.depth,
+                clip: pushed.draw.clip,
+            });
+        }
         frame.stencil_tiles.clear();
         if pushes.pushed.iter().any(|pushed| pushed.draw.clip) {
             frame.stencil_tiles.extend(tiles);
         }
-        if !pushes.pushed.is_empty() {
-            pushes.write_uniforms(paint);
-            pushes.write(gpu, context, &mut frame.uniform_buffers);
+        for (run, Run { program, buffers }) in frame.runs.iter_mut().enumerate() {
+            if counts.get(run).is_some_and(|&count| count > 0) {
+                pushes.write(gpu, context, program, buffers, paint);
+            }
         }
         pushes.clear();
     }
@@ -322,109 +334,80 @@ impl Pushes {
         self.bytes.clear();
         self.blocks.clear();
         self.block_bytes.clear();
-        self.paint = None;
+        self.paints.clear();
     }
 
-    /// Writes the uniform values of `paint`, a layer's evaluated paint
-    /// values, into the shared blocks, as the pushed meshes' paint says.
-    fn write_uniforms(&mut self, paint: &dyn Any) {
-        let Pushes { blocks, block_bytes, paint: Some((mesh_paint, program)), .. } = self else { return };
-        for (block, range) in blocks.iter() {
-            mesh_paint.write_uniforms(paint, program, block, &mut block_bytes[range.clone()]);
-        }
-    }
-
-    /// Writes to `buffers` the buffers that the draws, in their order,
-    /// read: each shared block at the ids of the uniform blocks of its
-    /// layout in the draws' programs, the draws' blocks at the ids of their
-    /// programs' storage buffers, an element per draw, and their projection
-    /// blocks, or a projection block of zeros where no draw's program reads
-    /// one of each draw.
-    fn write(&mut self, gpu: &mut dyn Gpu, context: &mut Resources, buffers: &mut UniformBufferArray) {
-        let Pushes { pushed, bytes, blocks, block_bytes, scratch, .. } = self;
-        let mut programs: SmallVec<[&'static Program; 4]> = SmallVec::new();
-        for pushed in pushed.iter() {
-            if !programs.iter().any(|program| std::ptr::eq(*program, pushed.program)) {
-                programs.push(pushed.program);
-            }
-        }
-        let mut written = [false; FIRST_VERTEX_BUFFER_ID];
-        for (block, range) in blocks.iter() {
-            for buffer in programs.iter().flat_map(|program| program.buffers) {
-                if let BufferKind::Uniform(of) = buffer.kind
-                    && of.name == block.name
-                    && !std::mem::replace(&mut written[buffer.id], true)
-                {
-                    buffers.write_uniform(gpu, buffer.id, &block_bytes[range.clone()], context.device());
-                }
-            }
-        }
-        debug_assert!(
-            programs.iter().all(|program| program.buffers.iter().all(|buffer| match buffer.kind {
-                BufferKind::Uniform(of) => blocks.iter().any(|(block, _)| block.name == of.name),
-                _ => true,
-            })),
-            "a group whose draws read a uniform block that it has no value of"
-        );
-
-        let mut strides = [None; FIRST_VERTEX_BUFFER_ID];
-        for program in &programs {
-            for (_, id, stride) in blocks_of_each_draw(program) {
-                let Some(stride) = stride else { continue };
-                debug_assert!(!written[id], "a group whose programs read buffer {id} as a uniform and per draw");
-                debug_assert!(
-                    strides[id].is_none_or(|other| other == stride),
-                    "programs of one group whose elements at {id} differ in size"
-                );
-                strides[id].get_or_insert(stride);
-            }
-        }
-        for (id, stride) in strides.iter().enumerate().filter_map(|(id, stride)| Some((id, (*stride)?))) {
+    /// Writes to `buffers` the buffers that the draws of `program`, in
+    /// their order, read: each shared block at the id of the program's
+    /// uniform block of its layout, with the uniform values of `paint`, the
+    /// layer's evaluated paint values, as the program's meshes' paint says,
+    /// the draws' blocks at the ids of the program's storage buffers, an
+    /// element per draw, and their projection blocks, or a projection block
+    /// of zeros where the program reads none of each draw.
+    fn write(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        context: &mut Resources,
+        program: &'static Program,
+        buffers: &mut UniformBufferArray,
+        paint: &dyn Any,
+    ) {
+        let Pushes { pushed, bytes, blocks, block_bytes, scratch, paints } = self;
+        let mesh_paint = paints.iter().find(|(of, _)| std::ptr::eq(*of, program)).map(|(_, paint)| paint);
+        for buffer in program.buffers {
+            let BufferKind::Uniform(of) = buffer.kind else { continue };
+            let Some((block, range)) = blocks.iter().find(|(block, _)| block.name == of.name) else {
+                debug_assert!(false, "a group whose draws of {} read a uniform block it has no value of", program.name);
+                continue;
+            };
             scratch.clear();
-            for pushed in pushed.iter() {
-                let mut start = pushed.blocks;
-                let mut element = None;
-                for (block, at, _) in blocks_of_each_draw(pushed.program) {
-                    if at == id {
-                        element = Some(&bytes[start..start + block.size]);
-                    }
-                    start += block.size;
-                }
-                let at = scratch.len();
-                scratch.extend_from_slice(element.unwrap_or_default());
-                scratch.resize(at + stride, 0);
+            scratch.extend_from_slice(&block_bytes[range.clone()]);
+            if let Some(mesh_paint) = mesh_paint {
+                mesh_paint.write_uniforms(paint, program, block, scratch);
             }
-            buffers.write_storage(gpu, id, scratch, context.device());
+            buffers.write_uniform(gpu, buffer.id, scratch, context.device());
+        }
+
+        let drawn = || pushed.iter().filter(|pushed| std::ptr::eq(pushed.program, program));
+        let mut start = 0;
+        for (block, id, stride) in blocks_of_each_draw(program) {
+            if let Some(stride) = stride {
+                scratch.clear();
+                for pushed in drawn() {
+                    let at = pushed.blocks + start;
+                    scratch.extend_from_slice(&bytes[at..at + block.size]);
+                    scratch.resize(scratch.len() + stride - block.size, 0);
+                }
+                buffers.write_storage(gpu, id, scratch, context.device());
+            }
+            start += block.size;
         }
 
         // A draw of a program with blocks of its own writes them to its
         // mesh's buffers.
-        for pushed in pushed.iter() {
-            let program = pushed.program;
-            let own = program.projection == Projection::Own;
-            if !own && blocks_of_each_draw(program).all(|(_, _, stride)| stride.is_some()) {
-                continue;
-            }
-            let Some(mut objects) = context.take_mesh(pushed.mesh) else { continue };
-            let mut start = pushed.blocks;
-            for (block, id, stride) in blocks_of_each_draw(program) {
-                if stride.is_none() {
-                    objects.write_own(gpu, id, &bytes[start..start + block.size], context.device());
+        let own = program.projection == Projection::Own;
+        if own || blocks_of_each_draw(program).any(|(_, _, stride)| stride.is_none()) {
+            for pushed in drawn() {
+                let Some(mut objects) = context.take_mesh(pushed.mesh) else { continue };
+                let mut start = pushed.blocks;
+                for (block, id, stride) in blocks_of_each_draw(program) {
+                    if stride.is_none() {
+                        objects.write_own(gpu, id, &bytes[start..start + block.size], context.device());
+                    }
+                    start += block.size;
                 }
-                start += block.size;
+                if own {
+                    let projection = pushed.projection.unwrap_or_default();
+                    objects.write_own(gpu, PROJECTION_BUFFER.id, bytemuck::bytes_of(&projection), context.device());
+                }
+                context.restore_mesh(pushed.mesh, objects);
             }
-            if own {
-                let projection = pushed.projection.unwrap_or_default();
-                objects.write_own(gpu, PROJECTION_BUFFER.id, bytemuck::bytes_of(&projection), context.device());
-            }
-            context.restore_mesh(pushed.mesh, objects);
         }
 
-        if programs.iter().any(|program| program.projection == Projection::PerDraw) {
+        if program.projection == Projection::PerDraw {
             scratch.clear();
-            for pushed in pushed.iter() {
-                let block = pushed.projection.filter(|_| pushed.program.projection == Projection::PerDraw);
-                scratch.extend_from_slice(bytemuck::bytes_of(&block.unwrap_or_default()));
+            for pushed in drawn() {
+                scratch.extend_from_slice(bytemuck::bytes_of(&pushed.projection.unwrap_or_default()));
             }
             buffers.write_storage(gpu, PROJECTION_BUFFER.id, scratch, context.device());
         } else {
@@ -507,14 +490,19 @@ impl Draws {
 }
 
 /// One draw of a frame: the mesh it draws and the state it draws it with.
-/// Its uniform values are the entries at its index in the storage buffers of
-/// its `FrameDraws`.
+/// Its uniform values are the entries at its `element` in the storage
+/// buffers of its program's [`Run`].
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FrameDraw {
     /// The tile whose mask it clips to.
     tile: Option<OverscaledTileID>,
     /// The mesh it draws.
     mesh: MeshKey,
+    /// The index of its program's run among its `FrameDraws`'.
+    run: u16,
+    /// The index of its entries among those of its run, which its shaders
+    /// read as `drawIndex`.
+    element: u32,
     /// Whether it draws in the opaque pass where its layer does.
     opaque: bool,
     /// How the draw tests and writes depth.
@@ -523,16 +511,24 @@ pub(crate) struct FrameDraw {
     clip: bool,
 }
 
+/// The buffers that a group's draws of one program bind, by id, each with
+/// an element per draw of the program where it holds one per draw: the
+/// elements of the programs of a group differ in size.
+struct Run {
+    program: &'static Program,
+    buffers: UniformBufferArray,
+}
+
 /// A group's draws of a frame, as the engine draws them, and what they
 /// share.
 pub(crate) struct FrameDraws {
     /// Tells the draws apart in the layer composite.
     id: SimpleIdentity,
-    /// The draws, in drawing order. A draw's index is the index of its
-    /// entries in the storage buffers, which shaders read as `drawIndex`.
+    /// The draws, in drawing order.
     draws: Vec<FrameDraw>,
-    /// The buffers the draws bind, by id.
-    uniform_buffers: UniformBufferArray,
+    /// The buffers of the draws of each program that the group has drawn
+    /// with, kept from frame to frame.
+    runs: Vec<Run>,
     /// How the draws composite onto the frame in the translucent pass, as one
     /// surface, after they draw into a texture of their own; `None` where
     /// they draw straight onto the frame.
@@ -548,7 +544,7 @@ impl Default for FrameDraws {
         FrameDraws {
             id: SimpleIdentity::new(),
             draws: Vec::new(),
-            uniform_buffers: UniformBufferArray::new(),
+            runs: Vec::new(),
             composite: None,
             stencil_tiles: Vec::new(),
         }
@@ -556,6 +552,14 @@ impl Default for FrameDraws {
 }
 
 impl FrameDraws {
+    /// The index of the run of `program`'s draws, made if there is none.
+    fn run(&mut self, program: &'static Program) -> usize {
+        self.runs.iter().position(|run| std::ptr::eq(run.program, program)).unwrap_or_else(|| {
+            self.runs.push(Run { program, buffers: UniformBufferArray::new() });
+            self.runs.len() - 1
+        })
+    }
+
     /// The tiles whose masks the stencil buffer holds when the draws draw;
     /// `None` where no draw clips.
     #[must_use]
@@ -604,8 +608,8 @@ impl FrameDraws {
         let opaque_in = if parameters.opaque_pass_enabled_for_layer() { Pass::Opaque } else { Pass::Translucent };
         let in_pass = |draw: &FrameDraw| pass == if draw.opaque { opaque_in } else { Pass::Translucent };
         let draws = if drawing { &self.draws[..] } else { &[] };
-        let draws = || draws.iter().enumerate().filter(|(_, draw)| in_pass(draw));
-        let (volume, volume_once) = draws().fold((false, false), |(volume, once), (_, draw)| match draw.depth {
+        let draws = || draws.iter().filter(|draw| in_pass(draw));
+        let (volume, volume_once) = draws().fold((false, false), |(volume, once), draw| match draw.depth {
             Depth::Volume { once: draw_once, .. } => (true, once || draw_once),
             _ => (volume, once),
         });
@@ -617,21 +621,20 @@ impl FrameDraws {
             }
             None
         };
-        for (index, draw) in draws() {
-            self.draw(gpu, parameters, index, draw, volume_stencil);
+        for draw in draws() {
+            self.draw(gpu, parameters, draw, volume_stencil);
         }
         if let Some(composited) = composited {
             parameters.end_composited(gpu, composited);
         }
     }
 
-    /// Draws `draw`, at `index` among the draws, with the GPU objects of its
-    /// mesh; a 3D draw that draws `once` with `volume_stencil`.
+    /// Draws `draw` with the GPU objects of its mesh and the buffers of its
+    /// run; a 3D draw that draws `once` with `volume_stencil`.
     fn draw(
         &self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
-        index: usize,
         draw: &FrameDraw,
         volume_stencil: Option<Stencil>,
     ) {
@@ -650,7 +653,8 @@ impl FrameDraws {
                 (parameters.depth_for_3d(write), volume_stencil.filter(|_| once).unwrap_or(Stencil::DISABLED))
             }
         };
-        objects.draw(gpu, parameters, &self.uniform_buffers, depth, stencil, index as u32);
+        let buffers = &self.runs[usize::from(draw.run)].buffers;
+        objects.draw(gpu, parameters, buffers, depth, stencil, draw.element);
         parameters.context.restore_mesh(draw.mesh, objects);
     }
 }

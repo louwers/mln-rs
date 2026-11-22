@@ -1,5 +1,6 @@
 //! What a bucket names its GPU data to ([`Upload`]).
 
+use mln_gfx::gpu::Caps;
 use mln_tile::TileLayer;
 
 use crate::bucket::FeatureStates;
@@ -26,6 +27,18 @@ pub(crate) enum Kind<'a> {
 }
 
 impl Upload<'_> {
+    /// What the renderer's device allows, where the upload uploads into
+    /// buffers: a bucket names only the vectors that its meshes read on the
+    /// device. `None` where the upload rewrites the binders' values that
+    /// read feature state, and names no vectors.
+    #[must_use]
+    pub fn caps(&self) -> Option<&Caps> {
+        match &self.kind {
+            Kind::Geometry { res, .. } => Some(res.caps()),
+            Kind::FeatureState { .. } => None,
+        }
+    }
+
     /// Names `vec`, which the bucket's meshes read through its buffer
     /// ([`LayerBucket::buffer`](crate::layer::LayerBucket::buffer)).
     pub fn vec<V: bytemuck::Pod>(&mut self, vec: &mut GpuVec<V>) {

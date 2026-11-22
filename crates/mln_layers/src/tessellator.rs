@@ -1,17 +1,14 @@
-//! The scratch of tessellating a bucket's features.
+//! The triangles of a tile's roofs.
 
 use geometry::Point;
 
-use crate::line::mesh::LineScratch;
-
-/// Triangulates polygons with earcut and holds the line mesher's scratch,
-/// keeping their buffers from one feature to the next.
+/// Triangulates polygons with earcut, keeping its buffers from one polygon
+/// to the next.
 #[derive(Default)]
-pub struct Tessellator {
+pub(crate) struct Tessellator {
     earcut: earcut::Earcut<f64>,
     holes: Vec<u32>,
     indices: Vec<u32>,
-    pub(crate) line: LineScratch,
 }
 
 impl Tessellator {
@@ -20,7 +17,7 @@ impl Tessellator {
     /// The indices point into the polygon's rings concatenated in order. A
     /// ring may repeat its first point at the end. A polygon whose outer
     /// ring is empty has no triangles.
-    pub fn triangulate<T: Copy + Into<f64>, R: AsRef<[Point<T>]>>(&mut self, polygon: &[R]) -> &[[u32; 3]] {
+    pub(crate) fn triangulate<T: Copy + Into<f64>, R: AsRef<[Point<T>]>>(&mut self, polygon: &[R]) -> &[[u32; 3]] {
         // earcut indexes out of bounds on an empty outer ring with holes.
         if polygon.first().is_none_or(|ring| ring.as_ref().is_empty()) {
             return &[];

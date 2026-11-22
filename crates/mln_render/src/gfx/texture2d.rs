@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use mln_gfx::gpu::{Gpu, GpuError, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage};
 use mln_gfx::rendering_stats::RenderingStats;
-use mln_util::image::PremultipliedImage;
+use mln_util::image::{AlphaImage, PremultipliedImage};
 use mln_util::size::Size;
 
 use crate::gfx::resources::{Device, SharedGpuTexture};
@@ -22,7 +22,24 @@ pub(crate) struct Texture2D {
     format: TextureFormat,
     render_target: bool,
     /// The image the next upload writes.
-    image: Option<Rc<PremultipliedImage>>,
+    image: Option<Pending>,
+}
+
+/// An image a texture waits to upload, of its format.
+enum Pending {
+    Rgba(Rc<PremultipliedImage>),
+    Alpha(Rc<AlphaImage>),
+}
+
+impl Pending {
+    /// The image's texels and size, `None` for an image without texels.
+    fn texels(&self) -> Option<(&[u8], Size)> {
+        let (valid, data, size) = match self {
+            Pending::Rgba(image) => (image.valid(), &image.data[..], image.size),
+            Pending::Alpha(image) => (image.valid(), &image.data[..], image.size),
+        };
+        valid.then_some((data, size))
+    }
 }
 
 impl Texture2D {
@@ -131,11 +148,13 @@ impl Texture2D {
         write(gpu, &mut device.stats, texture, data, region)
     }
 
-    /// Writes the image [`TextureMut::set_image`] set, if any.
+    /// Writes the image [`TextureMut::set_image`] or
+    /// [`TextureMut::set_alpha_image`] set, if any.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, device: &mut Device) -> Result<(), GpuError> {
-        match self.image.take() {
-            Some(image) if image.valid() => self.upload_data(gpu, device, &image.data, image.size),
-            _ => Ok(()),
+        let Some(image) = self.image.take() else { return Ok(()) };
+        match image.texels() {
+            Some((data, size)) => self.upload_data(gpu, device, data, size),
+            None => Ok(()),
         }
     }
 
@@ -194,7 +213,15 @@ impl<'a> TextureMut<'a> {
             self.set_size(image.size);
             self.set_format(TextureFormat::Rgba8Unorm);
         }
-        self.texture.image = image;
+        self.texture.image = image.map(Pending::Rgba);
+    }
+
+    /// Sets the one-channel image the next upload writes, which shaders
+    /// read as alpha, and the texture's size to the image's.
+    pub fn set_alpha_image(&mut self, image: Rc<AlphaImage>) {
+        self.set_size(image.size);
+        self.set_format(TextureFormat::A8Unorm);
+        self.texture.image = Some(Pending::Alpha(image));
     }
 }
 
