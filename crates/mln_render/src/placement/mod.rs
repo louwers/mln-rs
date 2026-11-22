@@ -188,39 +188,38 @@ pub(crate) fn tile_order(tiles: &[RenderTile], bearing: f32) -> Vec<usize> {
     order
 }
 
-/// The tiles of a placing layer among `found`, the layer's frame tiles of
-/// `source`, whose tiles hold `contents`: those that hold a bucket of it.
+/// Adds to `out` the tiles of a placing layer among `found`, the layer's
+/// frame tiles of `source`, whose tiles hold `contents`: those that hold a
+/// bucket of it.
 pub(crate) fn placing_tiles(
     source: Option<&dyn RenderSource>,
     contents: &[Option<TileContent<'_>>],
     found: &[FoundTile],
-) -> Vec<PlacingTile> {
+    out: &mut Vec<PlacingTile>,
+) {
     let Some((source, key)) = source.and_then(|source| Some((source, source.tiles()?))) else {
-        return Vec::new();
+        return;
     };
     let tiles = source.render_tiles();
-    found
-        .iter()
-        .filter_map(|found| {
-            let Some(ViewPlace::Laid(index)) = found.view else { return None };
-            let tile = tiles.get(found.tile)?;
-            let Some(TileContent::Tile(content)) = contents.get(found.tile).copied().flatten() else { return None };
-            let content = content.geometry()?;
-            Some(PlacingTile {
-                bucket: BucketKey {
-                    bucket: content.result.layer_render_data.bucket_index(index)?,
-                    slot: tile.slot(),
-                    tile: *tile.overscaled_tile_id(),
-                    source: key,
-                },
-                id: tile.id,
-                overscaled_id: *tile.overscaled_tile_id(),
-                held_for_fade: tile.hold_for_fade(),
-                projection: tile.projection,
-                feature_index: Arc::clone(&content.result.feature_index),
-            })
+    out.extend(found.iter().filter_map(|found| {
+        let Some(ViewPlace::Laid(index)) = found.view else { return None };
+        let tile = tiles.get(found.tile)?;
+        let Some(TileContent::Tile(content)) = contents.get(found.tile).copied().flatten() else { return None };
+        let content = content.geometry()?;
+        Some(PlacingTile {
+            bucket: BucketKey {
+                bucket: content.result.layer_render_data.bucket_index(index)?,
+                slot: tile.slot(),
+                tile: *tile.overscaled_tile_id(),
+                source: key,
+            },
+            id: tile.id,
+            overscaled_id: *tile.overscaled_tile_id(),
+            held_for_fade: tile.hold_for_fade(),
+            projection: tile.projection,
+            feature_index: Arc::clone(&content.result.feature_index),
         })
-        .collect()
+    }));
 }
 
 /// What a frame's [`PlacementPass::prepare`] tells the schedule.

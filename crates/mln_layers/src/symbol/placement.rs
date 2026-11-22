@@ -119,53 +119,64 @@ impl PartialEq for BucketPlacementData {
 }
 
 /// The buckets of one of the frame's symbol layers.
+#[derive(Default)]
 pub(crate) struct LayerBuckets {
     pub(crate) id: String,
     /// The buckets the layer places, as their leader, in placement order.
     pub(crate) placement_data: Vec<BucketPlacementData>,
     /// The buckets another layer places and this layer draws.
     pub(crate) follower_data: Vec<BucketPlacementData>,
+    /// The layer's source, which its buckets' data shares.
+    source_id: Arc<str>,
 }
 
 impl LayerBuckets {
-    /// The buckets of each of `cx`'s layers, bottom to top.
-    pub(crate) fn all(cx: &PlacementContext<'_, SymbolLayer>) -> Vec<LayerBuckets> {
-        cx.layers.iter().map(|layer| LayerBuckets::of(layer, &cx.buckets)).collect()
+    /// Makes `layers` the buckets of each of `cx`'s layers, bottom to top,
+    /// in the memory they kept from the frame before.
+    pub(crate) fn fill(layers: &mut Vec<LayerBuckets>, cx: &PlacementContext<'_, SymbolLayer>) {
+        layers.resize_with(cx.layers.len(), LayerBuckets::default);
+        for (layer_buckets, layer) in layers.iter_mut().zip(cx.layers) {
+            layer_buckets.set(layer, &cx.buckets);
+        }
     }
 
-    /// The buckets of `layer`'s tiles, of `buckets`: those it leads, with
-    /// their tiles' feature indexes, in order of sort key, and the others.
-    fn of(layer: &PlacingLayer<'_, SymbolLayer>, buckets: &PlacementBuckets<'_>) -> LayerBuckets {
+    /// Makes these the buckets of `layer`'s tiles, of `buckets`: those it
+    /// leads, with their tiles' feature indexes, in order of sort key, and
+    /// the others.
+    fn set(&mut self, layer: &PlacingLayer<'_, SymbolLayer>, buckets: &PlacementBuckets<'_>) {
         let style = &layer.layer.style;
         let paint = &layer.layer.evaluated.paint;
         let text_translate =
             SymbolTranslate { offset: *paint.text_translate.uniform(), anchor: *paint.text_translate_anchor.uniform() };
         let icon_translate =
             SymbolTranslate { offset: *paint.icon_translate.uniform(), anchor: *paint.icon_translate_anchor.uniform() };
-        let source_id: Arc<str> = Arc::from(style.source.as_str());
-        let mut layer_buckets =
-            LayerBuckets { id: style.id.clone(), placement_data: Vec::new(), follower_data: Vec::new() };
+        if *self.source_id != *style.source {
+            self.source_id = Arc::from(style.source.as_str());
+        }
+        self.id.clone_from(&style.id);
+        self.placement_data.clear();
+        self.follower_data.clear();
+        let LayerBuckets { placement_data, follower_data, source_id, .. } = self;
         for tile in layer.tiles {
             let Some(bucket) = buckets.get::<SymbolBucket>(&tile.bucket) else { continue };
             let data = |feature_index, sort_key_range| BucketPlacementData {
                 bucket: tile.bucket,
                 tile: PlacedTile::of(tile),
                 feature_index,
-                source_id: Arc::clone(&source_id),
+                source_id: Arc::clone(source_id),
                 sort_key_range,
                 text_translate,
                 icon_translate,
             };
             if *bucket.bucket_leader_id != *style.id {
-                layer_buckets.follower_data.push(data(None, None));
+                follower_data.push(data(None, None));
                 continue;
             }
             let feature_index = Some(Arc::clone(&tile.feature_index));
             if bucket.sort_key_ranges.is_empty() {
-                layer_buckets.placement_data.push(data(feature_index, None));
+                placement_data.push(data(feature_index, None));
                 continue;
             }
-            let placement_data = &mut layer_buckets.placement_data;
             for sort_key_range in &bucket.sort_key_ranges {
                 let layer_data = data(feature_index.clone(), Some(*sort_key_range));
                 if placement_data
@@ -186,7 +197,6 @@ impl LayerBuckets {
                 placement_data.insert(sort_position, layer_data);
             }
         }
-        layer_buckets
     }
 }
 
@@ -436,7 +446,7 @@ impl PlacementPass<SymbolLayer> for SymbolPlacement {
     /// first, their cross-tile ids, and takes the inputs of the frame's
     /// placement.
     fn prepare(&mut self, cx: &mut PlacementContext<'_, SymbolLayer>) -> Prepared {
-        self.layers = LayerBuckets::all(cx);
+        LayerBuckets::fill(&mut self.layers, cx);
         let PlacementContext { update_parameters, buckets, .. } = cx;
         let view = &update_parameters.view;
         let longitude = view.center(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;

@@ -165,6 +165,8 @@ pub(crate) struct RenderOrchestrator {
     /// The frame's layers whose type places, by their index in the drawing
     /// order, as the update found them.
     placing_layers: Vec<PlacingLayerTiles>,
+    /// Their tiles, a run of them per layer.
+    placing_tiles: Vec<PlacingTile>,
     background_layer_as_color: bool,
     /// The center's longitude at the last update, which tells a wrap jump.
     longitude: f32,
@@ -226,6 +228,7 @@ impl RenderOrchestrator {
             tile_store,
             schedule: Schedule::default(),
             placing_layers: Vec::new(),
+            placing_tiles: Vec::new(),
             found_tiles: Vec::new(),
             style: None,
             sources_by_id: Vec::new(),
@@ -388,7 +391,7 @@ impl RenderOrchestrator {
         }
 
         if let Some(pass) = &mut self.placement {
-            let layers = placing(&self.layers, &self.placing_layers);
+            let layers = placing(&self.layers, &self.placing_layers, &self.placing_tiles);
             let mut placement_frame = ErasedFrame { layers: &layers, update_parameters, buckets: &mut self.tile_store };
             pass.update_buckets(&mut placement_frame);
         }
@@ -423,6 +426,7 @@ impl RenderOrchestrator {
     /// cutoff.
     fn update_layer_tiles(&mut self, update_parameters: &UpdateParameters, frame: &mut FramePlan) {
         self.placing_layers.clear();
+        self.placing_tiles.clear();
         let mut opaque_pass_cutoff_estimation = frame.layers.len();
         let mut contents = SourceContents::default();
         self.found_tiles.clear();
@@ -444,8 +448,10 @@ impl RenderOrchestrator {
                 places,
             });
             if places {
-                let tiles = crate::placement::placing_tiles(source, source_contents, &self.found_tiles[start..]);
-                self.placing_layers.push(PlacingLayerTiles { layer: index, tiles });
+                let first = self.placing_tiles.len();
+                let found = &self.found_tiles[start..];
+                crate::placement::placing_tiles(source, source_contents, found, &mut self.placing_tiles);
+                self.placing_layers.push(PlacingLayerTiles { layer: index, tiles: first..self.placing_tiles.len() });
             }
             let record = render_layer.record();
             if frame.opaque_pass_cutoff == 0 {
@@ -931,7 +937,7 @@ impl RenderOrchestrator {
     fn place(&mut self, update_parameters: &Arc<UpdateParameters>, frame: &mut FramePlan) {
         let continuous = update_parameters.mode == MapMode::Continuous;
         let time_point = update_parameters.time_point;
-        let layers = placing(&self.layers, &self.placing_layers);
+        let layers = placing(&self.layers, &self.placing_layers, &self.placing_tiles);
         let prepared = match &mut self.placement {
             Some(pass) => {
                 pass.prepare(&mut ErasedFrame { layers: &layers, update_parameters, buckets: &mut self.tile_store })
@@ -1564,11 +1570,12 @@ impl Drop for RenderOrchestrator {
     }
 }
 
-/// The frame's placing layers among `layers`, each with its tiles, as the
-/// placement pass reads them.
+/// The frame's placing layers among `layers`, each with its run of `tiles`,
+/// as the placement pass reads them.
 fn placing<'a>(
     layers: &'a [RecordedLayer],
     placing: &'a [PlacingLayerTiles],
+    tiles: &'a [PlacingTile],
 ) -> SmallVec<[(&'a dyn RenderLayer, &'a [PlacingTile]); 8]> {
-    placing.iter().map(|placing| (&*layers[placing.layer].layer, &placing.tiles[..])).collect()
+    placing.iter().map(|placing| (&*layers[placing.layer].layer, &tiles[placing.tiles.clone()])).collect()
 }

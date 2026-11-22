@@ -48,7 +48,8 @@ impl SymbolView {
         self.0.with_context(|cx| {
             let view = &cx.update_parameters.view;
             let longitude = view.center(WrapMode::Unwrapped).longitude() as f32;
-            let layers = LayerBuckets::all(cx);
+            let mut layers = Vec::new();
+            LayerBuckets::fill(&mut layers, cx);
             let mut added = 0;
             for layer in leaders(&layers).rev() {
                 let placed = &layer.placement_data;
@@ -67,7 +68,8 @@ impl SymbolView {
     /// without one shows nowhere.
     pub fn place(&mut self) -> usize {
         self.0.with_context(|cx| {
-            let layers = LayerBuckets::all(cx);
+            let mut layers = Vec::new();
+            LayerBuckets::fill(&mut layers, cx);
             let inputs = PlacementInputs::new(cx.update_parameters, leaders(&layers), &cx.buckets);
             let groups = CollisionGroups::new(cx.update_parameters.cross_source_collisions);
             let mut placement = Placement::create(Arc::new(inputs), groups, Some(Placement::new_default()));

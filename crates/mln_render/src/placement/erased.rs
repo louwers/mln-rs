@@ -22,10 +22,11 @@ pub(crate) trait LaidBuckets {
 }
 
 /// A placing layer of a frame, by its index among the renderer's layers,
-/// with its tiles that hold a bucket of it.
+/// with where its tiles that hold a bucket of it are among the frame's
+/// placing tiles.
 pub(crate) struct PlacingLayerTiles {
     pub(crate) layer: usize,
-    pub(crate) tiles: Vec<PlacingTile>,
+    pub(crate) tiles: std::ops::Range<usize>,
 }
 
 /// What the engine hands its placement pass of a frame: the frame's layers
