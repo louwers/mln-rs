@@ -51,7 +51,7 @@ mod hosted {
 
     use mln_rs::layer::{
         AfterGpu, Draws, EvaluateCx, Evaluation, GpuEnd, Layer, LayerStyle, LayerTypeInfo, LendAt, Lent, NewCx,
-        NoProperties, NoTiles, PrepareCx, PropertyTable, PropertyVisitor, SourceKind, StyleLayerType,
+        NoProperties, NoTiles, PrepareCx, SourceKind, StyleLayerType,
     };
     use mln_rs::mln_render::{Registry, RegistryBuilder};
     use mln_rs::mln_style::StyleRegistry;
@@ -74,18 +74,12 @@ mod hosted {
 
     struct Hosted;
 
-    static PROPERTIES: PropertyTable = PropertyTable::new(&[], &[]);
 
     impl StyleLayerType for Hosted {
         const INFO: LayerTypeInfo = LayerTypeInfo { name: "hosted", source: SourceKind::None, from_json: false };
-        const PROPERTIES: &'static PropertyTable = &PROPERTIES;
         type LayoutProperties = NoProperties;
         type PaintProperties = NoProperties;
         type Data = Option<Arc<dyn Host>>;
-
-        fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
-            None
-        }
     }
 
     struct HostedLayer {

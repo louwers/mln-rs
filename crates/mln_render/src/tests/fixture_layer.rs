@@ -193,22 +193,16 @@ impl Layer for Dot {
     fn prepare(&self, _cx: &PrepareCx<'_, Self>, _out: &mut Draws) {}
 }
 
-static NO_PROPERTIES: PropertyTable = PropertyTable::new(&[], &[]);
 
 /// The `tint` layer type, both its halves.
 pub(crate) struct Tint;
 
 impl StyleLayerType for Tint {
     const INFO: LayerTypeInfo = LayerTypeInfo { name: "tint", source: SourceKind::Raster, from_json: true };
-    const PROPERTIES: &'static PropertyTable = &NO_PROPERTIES;
 
     type LayoutProperties = NoProperties;
     type PaintProperties = NoProperties;
     type Data = ();
-
-    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
-        None
-    }
 }
 
 impl Layer for Tint {
@@ -228,15 +222,10 @@ pub(crate) struct Shade;
 
 impl StyleLayerType for Shade {
     const INFO: LayerTypeInfo = LayerTypeInfo { name: "shade", source: SourceKind::RasterDem, from_json: true };
-    const PROPERTIES: &'static PropertyTable = &NO_PROPERTIES;
 
     type LayoutProperties = NoProperties;
     type PaintProperties = NoProperties;
     type Data = ();
-
-    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
-        None
-    }
 }
 
 impl Layer for Shade {
@@ -258,15 +247,10 @@ pub(crate) struct Mark<const OTHER: bool = false>;
 impl<const OTHER: bool> StyleLayerType for Mark<OTHER> {
     const INFO: LayerTypeInfo =
         LayerTypeInfo { name: if OTHER { "other-mark" } else { "mark" }, source: SourceKind::None, from_json: true };
-    const PROPERTIES: &'static PropertyTable = &NO_PROPERTIES;
 
     type LayoutProperties = NoProperties;
     type PaintProperties = NoProperties;
     type Data = ();
-
-    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
-        None
-    }
 }
 
 impl<const OTHER: bool> Layer for Mark<OTHER> {

@@ -8,7 +8,7 @@ use std::sync::{Arc, LazyLock};
 
 use mln_rs::layer::{
     AfterGpu, Draws, EvaluateCx, Evaluation, GpuEnd, Layer, LayerStyle, LayerTypeInfo, LendAt, Lent, NewCx,
-    NoProperties, NoTiles, PrepareCx, PropertyTable, PropertyVisitor, SourceKind, StyleLayerType,
+    NoProperties, NoTiles, PrepareCx, SourceKind, StyleLayerType,
 };
 use mln_rs::mln_render::{Registry, RegistryBuilder};
 use mln_rs::mln_style::layer::Layer as StyleLayer;
@@ -43,19 +43,13 @@ pub(crate) fn registry() -> Arc<Registry> {
 /// host.
 struct Custom;
 
-static PROPERTIES: PropertyTable = PropertyTable::new(&[], &[]);
 
 impl StyleLayerType for Custom {
     const INFO: LayerTypeInfo = LayerTypeInfo { name: "custom", source: SourceKind::None, from_json: false };
-    const PROPERTIES: &'static PropertyTable = &PROPERTIES;
 
     type LayoutProperties = NoProperties;
     type PaintProperties = NoProperties;
     type Data = Option<Arc<Host>>;
-
-    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
-        None
-    }
 }
 
 /// A custom layer as a renderer draws it: through its host, whose session

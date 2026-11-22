@@ -10,7 +10,6 @@ use crate::StyleRegistry;
 use crate::edit::Edit;
 use crate::layer::Layer;
 use crate::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
-use crate::property_table::{PropertyTable, PropertyVisitor};
 use crate::style::Style;
 use crate::tests::fixture_layer::Plain;
 
@@ -131,15 +130,10 @@ struct Unregistered<const PLAIN: bool>;
 impl<const PLAIN: bool> StyleLayerType for Unregistered<PLAIN> {
     const INFO: LayerTypeInfo =
         LayerTypeInfo { name: if PLAIN { "plain" } else { "unregistered" }, source: SourceKind::None, from_json: true };
-    const PROPERTIES: &'static PropertyTable = &PropertyTable::new(&[], &[]);
 
     type LayoutProperties = NoProperties;
     type PaintProperties = NoProperties;
     type Data = ();
-
-    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
-        None
-    }
 }
 
 // A layer built outside the style's registry is added only if its type is

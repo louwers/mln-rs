@@ -1669,8 +1669,7 @@ fn cluster_queries_read_a_clustered_source() {
 /// The `panics` layer type, whose layers hit a bug where their data says.
 mod panics {
     use mln_rs::layer::{
-        AfterGpu, Draws, Layer, LayerStyle, LayerTypeInfo, NewCx, NoProperties, NoTiles, PrepareCx, PropertyTable,
-        PropertyVisitor, SourceKind, StyleLayerType,
+        AfterGpu, Draws, Layer, LayerStyle, LayerTypeInfo, NewCx, NoProperties, NoTiles, PrepareCx, SourceKind, StyleLayerType,
     };
     use mln_rs::mln_render::{Registry, RegistryBuilder};
     use mln_rs::mln_style::layer::Layer as StyleLayer;
@@ -1689,18 +1688,12 @@ mod panics {
 
     pub(crate) struct Panics;
 
-    static PROPERTIES: PropertyTable = PropertyTable::new(&[], &[]);
 
     impl StyleLayerType for Panics {
         const INFO: LayerTypeInfo = LayerTypeInfo { name: "panics", source: SourceKind::None, from_json: false };
-        const PROPERTIES: &'static PropertyTable = &PROPERTIES;
         type LayoutProperties = NoProperties;
         type PaintProperties = NoProperties;
         type Data = Bug;
-
-        fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
-            None
-        }
     }
 
     pub(crate) struct PanicsLayer {

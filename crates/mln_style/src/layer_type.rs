@@ -171,7 +171,8 @@ pub trait StyleLayerType: Sized + Send + Sync + 'static {
 
     /// The type's property table: its paint properties, then its layout
     /// properties. //tools/style-codegen generates the built-in types'.
-    const PROPERTIES: &'static PropertyTable;
+    /// None by default.
+    const PROPERTIES: &'static PropertyTable = &PropertyTable::new(&[], &[]);
 
     /// The layout properties, a [`properties!`](crate::properties!) layout
     /// set's `Unevaluated`, or [`NoProperties`].
@@ -187,8 +188,12 @@ pub trait StyleLayerType: Sized + Send + Sync + 'static {
     type Data: Clone + Default + Send + Sync + 'static;
 
     /// Calls `visitor` with the field of the property in `slot` of
-    /// [`PROPERTIES`](Self::PROPERTIES).
-    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output>;
+    /// [`PROPERTIES`](Self::PROPERTIES). A type without properties, which
+    /// has no slot, keeps the default.
+    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
+        debug_assert!(false, "a property of {}, which visits none", Self::INFO.name);
+        None
+    }
 
     fn populate_font_stack(_style: &LayerStyle<Self>, _out: &mut VecSet<FontStack>) {}
 

@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_rs::layer::{
-    AfterGpu, Draws, EvaluateCx, Evaluation, FrameQuery, GpuEnd, Hit, Layer, LayerStyle, LayerTypeInfo, LendAt, Lent,
-    NewCx, NoProperties, NoTiles, PrepareCx, PropertyTable, PropertyVisitor, SourceKind, StyleLayerType, UpdateCx,
+    AfterGpu, Draws, EvaluateCx, Evaluation, FrameQuery, GpuEnd, Hit, Layer, LayerTypeInfo, LendAt, Lent,
+    NewCx, NoProperties, NoTiles, PrepareCx, SourceKind, StyleLayerType, UpdateCx,
 };
 use mln_rs::feature::Identifier;
 use mln_rs::mln_util::feature::Feature;
@@ -21,18 +21,12 @@ pub const HIT_RADIUS: f64 = 4.0;
 /// The `probe` layer type's style half.
 pub struct Probe;
 
-static PROPERTIES: PropertyTable = PropertyTable::new(&[], &[]);
 
 impl StyleLayerType for Probe {
     const INFO: LayerTypeInfo = LayerTypeInfo { name: "probe", source: SourceKind::None, from_json: true };
-    const PROPERTIES: &'static PropertyTable = &PROPERTIES;
     type LayoutProperties = NoProperties;
     type PaintProperties = NoProperties;
     type Data = ProbeEnds;
-
-    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
-        None
-    }
 }
 
 /// How the GPU's work that probe layers gave ended, once they dropped: an
