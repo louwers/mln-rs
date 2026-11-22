@@ -12,9 +12,9 @@ use mln_gfx::texture2d::SamplerState;
 use smallvec::SmallVec;
 
 use crate::draw_objects::{DrawGeometry, DrawObjects, Mesh, Textures};
+use crate::gfx::buffer_store::SharedBuffer;
 use crate::gfx::context::Resources;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
-use crate::gfx::vertices::SharedVertices;
 use crate::handles::{Buffer, IndexBuffer, Texture, Vertex};
 use crate::paint_property_binder::{MeshPaint, PaintBinders, PaintVertices};
 
@@ -52,7 +52,7 @@ pub struct MeshDesc<'a> {
 /// A buffer that a mesh's attributes read, with the formats of its vertex.
 #[derive(Clone, Copy)]
 pub(crate) struct Input<'a> {
-    pub(crate) entry: &'a SharedVertices,
+    pub(crate) entry: &'a SharedBuffer,
     pub(crate) attributes: &'static [AttributeDataType],
     pub(crate) stride: u32,
 }

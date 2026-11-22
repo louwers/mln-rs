@@ -26,9 +26,9 @@ use mln_util::host_bytes::HostBytes;
 use mln_util::identity::SimpleIdentity;
 use mln_util::serialization::payload::{Payload, pod};
 
+use crate::gfx::buffer_store::SharedBuffer;
 use crate::gfx::context::Resources;
 use crate::gfx::mesh::Indexes;
-use crate::gfx::vertices::SharedVertices;
 use crate::handles::{Buffer, IndexBuffer};
 use crate::paint_property_binder::InterleavedVertexBuffer;
 
@@ -157,12 +157,12 @@ impl<T: bytemuck::Pod> GpuVec<T> {
     }
 
     /// The data, moved out into `context`'s store.
-    fn store_vertices(&mut self, context: &mut Resources) -> SharedVertices {
+    fn store_buffer(&mut self, context: &mut Resources) -> SharedBuffer {
         match self.take() {
-            Data::Vec(v) => context.add_vertices(v),
+            Data::Vec(v) => context.add_buffer(v),
             #[cfg(target_family = "wasm")]
-            Data::Host(bytes) => context.add_host_vertices::<T>(bytes),
-            Data::Moved { .. } => context.add_vertices(Vec::<T>::new()),
+            Data::Host(bytes) => context.add_host_buffer::<T>(bytes),
+            Data::Moved { .. } => context.add_buffer(Vec::<T>::new()),
         }
     }
 }
@@ -219,9 +219,10 @@ impl BucketGeometry {
     }
 
     /// Uploads `vec`, a bucket's, into a buffer of `res`, freeing its data
-    /// unless `keep`. Where it uploaded before, or a copy of it in `copies`,
-    /// the geometry of the tile's other world copies, did, it shares that
-    /// buffer, and writes kept data over the buffer's.
+    /// unless `keep`. Where it uploaded before, it writes kept data over the
+    /// buffer's; where a copy of a vector it frees did, in `copies`, the
+    /// geometry of the tile's other world copies, it shares that buffer. A
+    /// kept vector's data may differ by world copy, so each has its own.
     pub(crate) fn upload<V: bytemuck::Pod>(
         &mut self,
         vec: &mut GpuVec<V>,
@@ -232,6 +233,7 @@ impl BucketGeometry {
         if vec.is_moved() {
             return;
         }
+        let copies = if keep { &[] } else { copies };
         if self.buffers.has_or_takes(vec.key, copies.iter().map(|copy| &copy.buffers)) {
             if !keep {
                 vec.discard();
@@ -240,7 +242,7 @@ impl BucketGeometry {
             }
             return;
         }
-        let entry = if keep { res.add_vertices(vec.data().into_owned()) } else { vec.store_vertices(res) };
+        let entry = if keep { res.add_buffer(vec.data().into_owned()) } else { vec.store_buffer(res) };
         let buffer: Rc<dyn Any> = Rc::new(Buffer::<V>::new(entry));
         self.buffers.insert(vec.key, buffer);
     }
@@ -258,7 +260,7 @@ impl BucketGeometry {
             return;
         }
         if !self.buffers.has_or_takes(vec.key, copies.iter().map(|copy| &copy.buffers)) {
-            let buffer = Buffer::new(vec.store_vertices(res));
+            let buffer = Buffer::new(vec.store_buffer(res));
             let uploaded: Rc<dyn Any> = Rc::new(IndexBuffer { buffer, segments: indexes.segments.clone() });
             self.buffers.insert(vec.key, uploaded);
         }

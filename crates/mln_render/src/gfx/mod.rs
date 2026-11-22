@@ -7,6 +7,7 @@
 //! (`mesh`).
 
 pub(crate) mod buffer;
+pub(crate) mod buffer_store;
 pub(crate) mod context;
 pub(crate) mod dynamic_texture;
 pub(crate) mod dynamic_texture_atlas;
@@ -19,4 +20,3 @@ pub(crate) mod texture2d;
 pub(crate) mod uniform_buffer;
 pub(crate) mod upload;
 pub(crate) mod vertex_attribute;
-pub(crate) mod vertices;

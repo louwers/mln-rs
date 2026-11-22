@@ -13,9 +13,9 @@ use mln_util::constants;
 use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
 
+use crate::gfx::buffer_store::SharedBuffer;
 use crate::gfx::context::Resources;
 use crate::gfx::mesh::Indexed;
-use crate::gfx::vertices::SharedVertices;
 use crate::tile_mask::TileMask;
 
 /// A vertex of the geometry that draws a raster or raster-dem tile's data:
@@ -65,9 +65,9 @@ enum Quads {
 /// segments that draw them.
 pub(crate) struct StoredQuads {
     /// The quads' [`RasterLayoutVertex`]es.
-    pub vertices: SharedVertices,
+    pub vertices: SharedBuffer,
     /// The quads' triangles.
-    pub indexes: SharedVertices,
+    pub indexes: SharedBuffer,
     /// The segments that draw the triangles.
     pub segments: Vec<SegmentBase>,
 }
@@ -198,8 +198,8 @@ impl MaskedGeometry {
     pub(crate) fn upload(&mut self, context: &mut Resources) {
         self.quads = match std::mem::replace(&mut self.quads, Quads::Whole) {
             Quads::Data { vertices, indices, segments } if !vertices.is_empty() => {
-                let vertices = context.add_vertices(vertices);
-                let indexes = context.add_vertices(indices);
+                let vertices = context.add_buffer(vertices);
+                let indexes = context.add_buffer(indices);
                 Quads::Stored(StoredQuads { vertices, indexes, segments })
             }
             quads => quads,

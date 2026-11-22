@@ -31,9 +31,9 @@ fn bindings_and_geometry_go_before_what_they_were_made_of() {
         let texture = context.add_texture_with(|texture| texture.set_size(Size::new(2, 2)));
         let (texture_id, sampler) =
             context.texture_binding(gpu, &texture, SamplerState::default()).expect("the texture");
-        let vertices = context.add_vertices(vec![[0i16; 2]; 4]);
-        let vertices_id = context.upload_vertices(gpu, &vertices).expect("vertices").expect("a buffer");
-        let indexes = context.add_vertices(vec![0u16, 1, 2, 3]);
+        let vertices = context.add_buffer(vec![[0i16; 2]; 4]);
+        let vertices_id = context.upload_buffer(gpu, &vertices).expect("vertices").expect("a buffer");
+        let indexes = context.add_buffer(vec![0u16, 1, 2, 3]);
         let indices_id = context.upload_index_buffer(gpu, &indexes).expect("indexes").expect("a buffer");
 
         let shader = context.shader(gpu, &ShaderKey::new(&programs::CLIPPING_MASK, [])).expect("the shader");

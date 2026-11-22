@@ -29,12 +29,14 @@
 //!    frame tile, typically a [`Mesh`](crate::draw::Mesh) of the tile's
 //!    bucket ([`LayerBucket`]) with the program the type declares. The
 //!    engine keeps the values with their tiles and drops them when the
-//!    tiles or their data go.
+//!    tiles or their data go, or the map switches between Mercator and the
+//!    globe.
 //! 3. Its draws. [`Layer::prepare`] pushes a [`Draw`](crate::draw::Draw)
 //!    of each mesh, with its tile's projection and the values of its
-//!    program's blocks, to [`Draws`]. The engine orders, uploads and draws
-//!    them: the layer never sees a pass, a depth range, a stencil value or
-//!    a uniform buffer.
+//!    program's blocks, to [`Draws`]. The engine writes what the blocks
+//!    hold of the mesh's paint values, and orders, uploads and draws them:
+//!    the layer never sees a pass, a depth range, a stencil value or a
+//!    uniform buffer.
 //!
 //! [`Layer::evaluate`] says whether, and how, the layer draws with its
 //! freshly evaluated values; [`Layer::update`] brings up to date what the
@@ -43,8 +45,8 @@
 //! # When the hooks run
 //!
 //! The engine makes the layer ([`Layer::new`]) when it joins the renderer,
-//! again when the renderer makes its shaders again, and drops it when it
-//! leaves the style or the renderer loses its GPU context. It evaluates the
+//! again when the renderer makes its shaders again or after it lost its GPU
+//! context, and drops it when it leaves the style. It evaluates the
 //! layer whenever its values may have changed, its `Data` included. In
 //! each frame that draws the layer it runs [`update`](Layer::update), then
 //! [`tile`](Layer::tile) for each frame tile with data and no value, then
@@ -101,9 +103,7 @@ pub use crate::image_store::ImageStore;
 use crate::layout::filter_groups::FilterGroups;
 pub use crate::layout::tile_layout::Resolved;
 pub use crate::paint_parameters::Frame;
-pub use crate::paint_property_binder::{
-    CrossFadedPaintPropertyBinder, LayerBinders, PaintBinders, PaintPropertyBinder, PaintVertices, PatternDependency,
-};
+pub use crate::paint_property_binder::{LayerBinders, PaintBinders, PaintPropertyBinder, PaintVertices};
 pub use crate::render_light::EvaluatedLight;
 use crate::render_tile::{TileContent, ViewPlace};
 use crate::tile::contents::GeometryContents;

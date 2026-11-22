@@ -31,8 +31,8 @@ use mln_wire::Wire;
 
 use crate::bucket_geometry::GpuVec;
 use crate::erased_layer::EvaluatedLayer;
+use crate::gfx::buffer_store::SharedBuffer;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms};
-use crate::gfx::vertices::SharedVertices;
 use crate::handles::Buffer;
 use crate::paint_property_statistics::{PaintPropertyStatistics, StatisticValue};
 
@@ -485,7 +485,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
     pub(crate) fn apply_paint_property(
         &self,
         buffer: &InterleavedVertexBuffer,
-        shared: &SharedVertices,
+        shared: &SharedBuffer,
     ) -> Option<SharedAttribute> {
         if let Some(vertex_offset) = self.kind.vertex_offset() {
             let raw_size = buffer.stride as u32;
@@ -657,7 +657,7 @@ impl CrossFadedPaintPropertyBinder<Image> {
     pub(crate) fn apply_paint_property(
         &self,
         buffer: &InterleavedVertexBuffer,
-        shared: &SharedVertices,
+        shared: &SharedBuffer,
     ) -> Option<SharedAttribute> {
         if let Some(vertex_offset) = self.kind.vertex_offset() {
             let raw_size = buffer.stride as u32;
@@ -721,7 +721,7 @@ pub trait PaintPropertyBinderBase {
     /// The attribute that reads the binder's values in `shared`, the
     /// vertices of `buffer` in the context's store; `None` where it wrote
     /// none.
-    fn apply(&self, buffer: &InterleavedVertexBuffer, shared: &SharedVertices) -> Option<SharedAttribute>;
+    fn apply(&self, buffer: &InterleavedVertexBuffer, shared: &SharedBuffer) -> Option<SharedAttribute>;
 }
 
 impl<T: BinderValue> PaintPropertyBinderBase for PaintPropertyBinder<T> {
@@ -764,7 +764,7 @@ impl<T: BinderValue> PaintPropertyBinderBase for PaintPropertyBinder<T> {
     fn mix(&self) -> Option<Mix> {
         Some(PaintPropertyBinder::mix(self))
     }
-    fn apply(&self, buffer: &InterleavedVertexBuffer, shared: &SharedVertices) -> Option<SharedAttribute> {
+    fn apply(&self, buffer: &InterleavedVertexBuffer, shared: &SharedBuffer) -> Option<SharedAttribute> {
         self.apply_paint_property(buffer, shared)
     }
 }
@@ -789,7 +789,7 @@ impl PaintPropertyBinderBase for CrossFadedPaintPropertyBinder<Image> {
     fn binder_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize {
         self.vertex_count(buffer)
     }
-    fn apply(&self, buffer: &InterleavedVertexBuffer, shared: &SharedVertices) -> Option<SharedAttribute> {
+    fn apply(&self, buffer: &InterleavedVertexBuffer, shared: &SharedBuffer) -> Option<SharedAttribute> {
         self.apply_paint_property(buffer, shared)
     }
 }
@@ -797,7 +797,7 @@ impl PaintPropertyBinderBase for CrossFadedPaintPropertyBinder<Image> {
 /// An attribute that reads the values at `offset` in each of the `stride`
 /// bytes of `shared`, the vertices of a bucket's paint values, as
 /// `data_type`.
-fn shared_paint(shared: &SharedVertices, offset: usize, stride: u32, data_type: AttributeDataType) -> SharedAttribute {
+fn shared_paint(shared: &SharedBuffer, offset: usize, stride: u32, data_type: AttributeDataType) -> SharedAttribute {
     SharedAttribute::new(shared.clone(), data_type, offset as u32, stride)
 }
 
@@ -1043,7 +1043,7 @@ impl<P> std::ops::Deref for PaintVertices<'_, P> {
 /// What [`BinderSet::bind`] binds the binders' values with.
 pub struct Bind<'a> {
     program: &'static Program,
-    shared: Option<&'a SharedVertices>,
+    shared: Option<&'a SharedBuffer>,
     attributes: &'a mut Vec<(usize, SharedAttribute)>,
     uniforms: &'a mut Uniforms,
     mixes: &'a mut Vec<(usize, Mix)>,

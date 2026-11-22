@@ -6,20 +6,20 @@ use std::marker::PhantomData;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::segment::SegmentBase;
 
+use crate::gfx::buffer_store::SharedBuffer;
 use crate::gfx::store::SharedTexture;
-use crate::gfx::vertices::SharedVertices;
 
 /// A buffer of `V`s in the renderer's [`Resources`](crate::draw::Resources):
 /// vertices that a mesh reads ([`MeshDesc::vertices`](crate::draw::MeshDesc::vertices)),
 /// or, of `u16`s, the indexes of its primitives
 /// ([`MeshDesc::indexes`](crate::draw::MeshDesc::indexes)).
 pub struct Buffer<V> {
-    pub(crate) entry: SharedVertices,
+    pub(crate) entry: SharedBuffer,
     element: PhantomData<fn() -> V>,
 }
 
 impl<V> Buffer<V> {
-    pub(crate) fn new(entry: SharedVertices) -> Buffer<V> {
+    pub(crate) fn new(entry: SharedBuffer) -> Buffer<V> {
         Buffer { entry, element: PhantomData }
     }
 

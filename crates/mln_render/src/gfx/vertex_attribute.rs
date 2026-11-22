@@ -5,9 +5,9 @@ use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::{Gpu, GpuError};
 use mln_gfx::shaders::bindings::MAX_ATTRIBUTES;
 
+use crate::gfx::buffer_store::{SharedBuffer, StoredBuffer};
 use crate::gfx::context::Resources;
 use crate::gfx::upload::{AttributeBinding, AttributeDescriptor};
-use crate::gfx::vertices::{SharedVertices, Vertices};
 
 /// Where an attribute reads vertices of the context's store: at `offset`
 /// in each of `stride` bytes, from the vertex `vertex_offset` on, as
@@ -15,7 +15,7 @@ use crate::gfx::vertices::{SharedVertices, Vertices};
 #[derive(Clone)]
 pub struct SharedAttribute {
     /// The vertices the attribute reads.
-    pub vertices: SharedVertices,
+    pub vertices: SharedBuffer,
     pub(crate) data_type: AttributeDataType,
     /// Where in each vertex the attribute's value is, in bytes.
     pub offset: u32,
@@ -28,7 +28,7 @@ impl SharedAttribute {
     /// The attribute that reads `vertices` at `offset` in each of `stride`
     /// bytes, from the first vertex on, as `data_type`.
     #[must_use]
-    pub fn new(vertices: SharedVertices, data_type: AttributeDataType, offset: u32, stride: u32) -> Self {
+    pub fn new(vertices: SharedBuffer, data_type: AttributeDataType, offset: u32, stride: u32) -> Self {
         SharedAttribute { vertices, data_type, offset, vertex_offset: 0, stride }
     }
 
@@ -48,7 +48,7 @@ impl SharedAttribute {
     /// Whether the next upload writes the vertices the attribute reads:
     /// they are new or updated since their last.
     pub(crate) fn needs_upload(&self, context: &Resources) -> bool {
-        context.vertices(&self.vertices).is_some_and(Vertices::needs_upload)
+        context.stored_buffer(&self.vertices).is_some_and(StoredBuffer::needs_upload)
     }
 
     /// The attribute's binding, of the buffer it reads, which this uploads
@@ -59,12 +59,12 @@ impl SharedAttribute {
         gpu: &mut dyn Gpu,
         context: &mut Resources,
     ) -> Result<Option<AttributeBinding>, GpuError> {
-        let Some(buffer) = context.upload_vertices(gpu, &self.vertices)? else {
+        let Some(buffer) = context.upload_buffer(gpu, &self.vertices)? else {
             return Ok(None);
         };
         debug_assert!(
             context
-                .vertices(&self.vertices)
+                .stored_buffer(&self.vertices)
                 .is_none_or(|vertices| (self.stride as usize) * (self.vertex_offset as usize)
                     < vertices.vertex_size() * vertices.count())
         );

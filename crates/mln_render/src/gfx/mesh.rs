@@ -231,7 +231,7 @@ mod tests {
         let (mut vertices, mut indexes, mut segments) = (Vec::new(), Vec::new(), Vec::new());
         let mut indexed = Indexed { indexes: &mut indexes, segments: &mut segments };
         let mut expected = add_mesh(&mut vertices, &mut indexed, 3, &[[0, 1, 2]]);
-        // Vertices that the segments don't draw, such as another index
+        // StoredBuffer that the segments don't draw, such as another index
         // buffer's.
         vertices.extend([100, 101]);
         expected.extend(add_mesh(&mut vertices, &mut indexed, 3, &[[0, 1, 2]]));

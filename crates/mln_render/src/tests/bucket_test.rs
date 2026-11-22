@@ -20,14 +20,14 @@ fn a_raster_buckets_upload_moves_its_quads_into_the_stores_once_per_mask() {
         bucket.upload(context);
         let geometry = bucket.geometry();
         let quads = geometry.quads().expect("the mask's quads");
-        assert_eq!(context.vertices(&quads.vertices).expect("stored").count(), 8);
+        assert_eq!(context.stored_buffer(&quads.vertices).expect("stored").count(), 8);
         assert!(geometry.vertices().is_empty(), "the upload moves the vertices");
         assert_eq!(quads.vertices.count(), 8);
 
         bucket.set_mask(mask(&[(1, 0, 0)]));
         bucket.upload(context);
         let quads = bucket.geometry().quads().expect("the new mask's quads");
-        assert_eq!(context.vertices(&quads.vertices).expect("stored").count(), 4);
+        assert_eq!(context.stored_buffer(&quads.vertices).expect("stored").count(), 4);
 
         bucket.set_mask(mask(&[(0, 0, 0)]));
         bucket.upload(context);
@@ -181,11 +181,15 @@ fn raster_bucket_mask_complex() {
 #[test]
 fn stored_vertices_free_their_data_once_they_have_a_buffer() {
     with_context(|gpu, context| {
-        let vertices = context.add_vertices(vec![[1i16, 2], [3, 4]]);
-        assert!(context.vertices(&vertices).is_some_and(|stored| stored.needs_upload() && stored.bytes().len() == 8));
+        let vertices = context.add_buffer(vec![[1i16, 2], [3, 4]]);
+        assert!(
+            context.stored_buffer(&vertices).is_some_and(|stored| stored.needs_upload() && stored.bytes().len() == 8)
+        );
 
-        context.upload_vertices(gpu, &vertices).expect("uploads").expect("a buffer");
-        assert!(context.vertices(&vertices).is_some_and(|stored| !stored.needs_upload() && stored.bytes().is_empty()));
+        context.upload_buffer(gpu, &vertices).expect("uploads").expect("a buffer");
+        assert!(
+            context.stored_buffer(&vertices).is_some_and(|stored| !stored.needs_upload() && stored.bytes().is_empty())
+        );
         assert_eq!(vertices.count(), 2);
     });
 }
@@ -196,20 +200,20 @@ fn stored_vertices_free_their_data_once_they_have_a_buffer() {
 #[test]
 fn store_entries_last_as_long_as_their_handles() {
     with_context(|gpu, context| {
-        let vertices = context.add_vertices(vec![[1i16, 2]]);
+        let vertices = context.add_buffer(vec![[1i16, 2]]);
         let held = vertices.clone();
         let texture = context.add_texture();
         let draw_texture = texture.clone();
         drop(vertices);
         drop(texture);
         context.destroy_released(gpu);
-        assert!(context.vertices(&held).is_some());
+        assert!(context.stored_buffer(&held).is_some());
         assert!(context.stored_texture(&draw_texture).is_some());
 
         let key = held.key();
         drop(held);
         drop(draw_texture);
         context.destroy_released(gpu);
-        assert!(!context.has_vertices(key));
+        assert!(!context.has_buffer(key));
     });
 }

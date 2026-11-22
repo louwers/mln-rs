@@ -88,7 +88,7 @@ impl RegistryBuilder {
 }
 
 fn style_half(layer_type: &'static dyn ErasedLayerType) -> &'static dyn ErasedStyleLayerType {
-    layer_type
+    layer_type.style()
 }
 
 fn style_source_half(source_type: &'static dyn ErasedSourceType) -> &'static dyn ErasedStyleSourceType {

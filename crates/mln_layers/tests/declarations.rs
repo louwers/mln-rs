@@ -5,7 +5,7 @@
 //! need nothing else of this crate.
 
 use mln_render::__private::BinderSet as _;
-use mln_render::layer::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
+use mln_render::layer::PaintPropertyBinder;
 use mln_style::conversion::Convertible;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::{Functions, Image};
@@ -79,7 +79,6 @@ mln_render::paint_property_binders!(
         dot_color: PaintPropertyBinder<Color> => ["color"],
         dot_radius: PaintPropertyBinder<f32> => ["radius"],
         dot_floor_radius: PaintPropertyBinder<f32> => ["floor_radius"],
-        dot_pattern: CrossFadedPaintPropertyBinder<Image> => ["pattern_from", "pattern_to"],
     }
 );
 
@@ -135,5 +134,4 @@ fn binders_bind_the_data_driven_properties() {
     assert!(binders.depends_on_feature_state());
     assert_eq!(binders.dot_radius.interpolation_factor(3.5), 0.5);
     assert_eq!(binders.dot_floor_radius.interpolation_factor(3.5), 0.0);
-    assert_eq!(binders.dot_pattern.interpolation_factor(3.5), (0.0, 0.0));
 }

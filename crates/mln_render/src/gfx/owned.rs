@@ -5,14 +5,14 @@ use mln_gfx::gpu::ResourceId;
 use crate::gfx::buffer::Buffer;
 use crate::gfx::release::{Release, ReleaseQueue};
 use crate::gfx::resources::SharedGpuTexture;
-use crate::gfx::store::{Shared, VerticesKey};
+use crate::gfx::store::{BufferKey, Shared};
 
 /// A counted handle of what other owners share, which bindings or geometry
 /// made of it hold.
 #[derive(Clone)]
 #[expect(dead_code, reason = "held for what it keeps, not read")]
 pub(crate) enum Held {
-    Vertices(Shared<VerticesKey>),
+    StoredBuffer(Shared<BufferKey>),
     /// A buffer of default attribute values, which the context shares.
     Buffer(Rc<Buffer>),
     Texture(SharedGpuTexture),

@@ -52,8 +52,8 @@ macro_rules! keys {
 keys! {
     /// A texture of the context's store.
     TextureKey => Texture,
-    /// Vertices of the context's store.
-    VerticesKey => Vertices,
+    /// A buffer of the context's store.
+    BufferKey => Buffer,
     /// A mesh of the context's store.
     MeshKey => Mesh,
 }
@@ -62,7 +62,7 @@ keys! {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StoreKey {
     Texture(TextureKey),
-    Vertices(VerticesKey),
+    Buffer(BufferKey),
     Mesh(MeshKey),
 }
 
@@ -261,7 +261,7 @@ impl<K: Key, V> Store<K, V> {
 mod tests {
     use super::*;
 
-    fn store() -> (Store<VerticesKey, u32>, Rc<ReleaseQueue>) {
+    fn store() -> (Store<BufferKey, u32>, Rc<ReleaseQueue>) {
         (Store::default(), Rc::default())
     }
 

@@ -46,6 +46,9 @@ pub(crate) trait ErasedBucket: Any + Send {
     /// sharing those of `copies`.
     fn upload(&mut self, geometry: &mut BucketGeometry, copies: &[&BucketGeometry], res: &mut Resources);
 
+    /// Marks the bucket's data changed, so that it uploads again.
+    fn changed(&mut self);
+
     /// Rewrites the values of the layer `layer_id` that read feature state
     /// for `states`, the states of `layer`'s features. Where the bucket has
     /// any, it uploads them again.
@@ -73,6 +76,10 @@ impl<B: Bucket> ErasedBucket for Stored<B> {
     fn upload(&mut self, geometry: &mut BucketGeometry, copies: &[&BucketGeometry], res: &mut Resources) {
         self.bucket.upload(&mut Upload { kind: Kind::Geometry { geometry, copies, res } });
         self.uploaded = true;
+    }
+
+    fn changed(&mut self) {
+        self.uploaded = false;
     }
 
     fn set_feature_state(&mut self, states: &FeatureStates, layer: &TileLayer<'_>, layer_id: &str) {

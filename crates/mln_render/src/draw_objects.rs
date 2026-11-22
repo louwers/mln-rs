@@ -26,13 +26,13 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::texture2d::SamplerState;
 use mln_util::logging::{Event, Log};
 
+use crate::gfx::buffer_store::SharedBuffer;
 use crate::gfx::context::Resources;
 use crate::gfx::owned::{Held, Owned};
 use crate::gfx::store::{MeshKey, Shared, SharedTexture};
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::upload::{self, AttributeBindingArray};
 use crate::gfx::vertex_attribute::{Uniforms, VertexAttributeArray};
-use crate::gfx::vertices::SharedVertices;
 use crate::paint_parameters::{DepthTest, DrawTarget, PaintParameters, Stencil};
 use crate::paint_property_binder::MeshPaint;
 
@@ -113,7 +113,7 @@ pub(crate) struct DrawGeometry {
     pub mode: DrawMode,
     /// The `u16` indexes of the primitives' vertices, a buffer of the
     /// context's store.
-    pub indexes: SharedVertices,
+    pub indexes: SharedBuffer,
     /// The ranges of the indexes and vertices each draw call draws.
     pub segments: Vec<SegmentBase>,
     /// The attributes of each instance, for a draw of instances, as many
@@ -199,7 +199,7 @@ pub(crate) struct DrawObjects {
 
     mode: DrawMode,
     segments: Vec<SegmentBase>,
-    indexes: SharedVertices,
+    indexes: SharedBuffer,
     vertex_count: usize,
     attribute_bindings: AttributeBindingArray,
     instance_bindings: AttributeBindingArray,
@@ -379,7 +379,7 @@ impl DrawObjects {
             if parameters.frame.camera.is_globe() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
         let context = &mut *parameters.context;
         let shader = self.shader(context, variant).clone();
-        let index_buffer = context.vertices(&self.indexes).and_then(|indexes| indexes.buffer());
+        let index_buffer = context.stored_buffer(&self.indexes).and_then(|indexes| indexes.buffer());
         debug_assert!(index_buffer.is_some(), "a draw of {} draws indexes it didn't upload", self.program.name);
         let Some(index_buffer) = index_buffer else {
             return Ok(());

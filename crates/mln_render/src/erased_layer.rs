@@ -152,7 +152,10 @@ impl std::fmt::Debug for dyn ErasedEvaluatedLayer {
 }
 
 /// A layer type that the renderer draws, whichever it is.
-pub(crate) trait ErasedLayerType: ErasedStyleLayerType {
+pub(crate) trait ErasedLayerType: Send + Sync + 'static {
+    /// The type's style half.
+    fn style(&self) -> &'static dyn ErasedStyleLayerType;
+
     /// The render layer that draws the layer `style`, or `None` if `style`
     /// is another type's.
     fn create_render_layer(
@@ -192,52 +195,11 @@ pub(crate) trait ErasedLayerType: ErasedStyleLayerType {
 /// The [`ErasedLayerType`] of the layer type `L`, which [`entry`] returns.
 pub(crate) struct LayerEntry<L>(PhantomData<fn() -> L>);
 
-impl<L: Layer> ErasedStyleLayerType for LayerEntry<L> {
-    fn info(&self) -> mln_style::layer_type::LayerTypeInfo {
-        L::Style::INFO
-    }
-
-    fn is_type_of(&self, style: &dyn ErasedLayerStyle) -> bool {
-        style_half::<L>().is_type_of(style)
-    }
-
-    fn create(&self, id: &str, source: &str) -> Arc<dyn ErasedLayerStyle> {
-        style_half::<L>().create(id, source)
-    }
-
-    fn set_property(
-        &self,
-        style: &mut Arc<dyn ErasedLayerStyle>,
-        name: &str,
-        value: &mln_style::conversion::Convertible<'_>,
-        functions: &Arc<mln_style::expression::Functions>,
-    ) -> Result<(), mln_style::property_table::SetPropertyError> {
-        style_half::<L>().set_property(style, name, value, functions)
-    }
-
-    fn mutate_base(
-        &self,
-        style: &mut Arc<dyn ErasedLayerStyle>,
-        f: &mut dyn FnMut(&mut mln_style::layer_type::LayerBase),
-    ) {
-        style_half::<L>().mutate_base(style, f);
-    }
-
-    fn read_style(&self, r: &mut Reader<'_>) -> Option<Arc<dyn ErasedLayerStyle>> {
-        style_half::<L>().read_style(r)
-    }
-
-    fn keep_data(&self, style: &mut Arc<dyn ErasedLayerStyle>, from: &dyn ErasedLayerStyle) {
-        style_half::<L>().keep_data(style, from);
-    }
-}
-
-/// The style half of the layer type `L`.
-fn style_half<L: Layer>() -> &'static LayerTypeEntry<L::Style> {
-    LayerTypeEntry::<L::Style>::INSTANCE
-}
-
 impl<L: Layer> ErasedLayerType for LayerEntry<L> {
+    fn style(&self) -> &'static dyn ErasedStyleLayerType {
+        LayerTypeEntry::<L::Style>::INSTANCE
+    }
+
     fn create_render_layer(
         &self,
         style: &Arc<dyn ErasedLayerStyle>,

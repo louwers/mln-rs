@@ -28,6 +28,7 @@ use mln_util::size::Size;
 
 use crate::draw_objects::{DrawObjects, Mesh};
 use crate::gfx::buffer::{self, Buffer};
+use crate::gfx::buffer_store::{BufferStore, SharedBuffer, StoredBuffer};
 use crate::gfx::owned::{Held, Owned};
 use crate::gfx::release::{Release, destroy_order};
 use crate::gfx::resources::{Device, SharedGpuTexture};
@@ -35,7 +36,6 @@ use crate::gfx::store::{MeshKey, SharedTexture, Store, StoreKey, TextureKey};
 use crate::gfx::texture2d::{Texture2D, TextureMut};
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::vertex_attribute::Uniforms;
-use crate::gfx::vertices::{SharedVertices, VertexStore, Vertices};
 use crate::paint_parameters::Frame;
 use crate::paint_property_binder::MeshPaint;
 use crate::render_static_data::RenderStaticData;
@@ -67,8 +67,8 @@ pub struct Resources {
     /// them hold as [`SharedTexture`]s.
     textures: Store<TextureKey, Texture2D>,
     /// The vertex and index buffers that draws share, which they hold as
-    /// [`SharedVertices`].
-    vertices: VertexStore,
+    /// [`SharedBuffer`].
+    buffers: BufferStore,
     /// The draws' GPU objects, which their makers hold as [`Mesh`]es. Boxed,
     /// so that a draw takes its objects out of the store cheaply while it
     /// uploads and draws them with the context.
@@ -103,7 +103,7 @@ impl Resources {
             pipelines: HashMap::default(),
             default_vertex_buffers: HashMap::default(),
             textures: Store::default(),
-            vertices: VertexStore::default(),
+            buffers: BufferStore::default(),
             meshes: Store::default(),
             next_mesh_seq: 0,
             surfaces: HashMap::default(),
@@ -145,7 +145,7 @@ impl Resources {
 
     /// A buffer of `data`.
     pub fn buffer<V: bytemuck::Pod>(&mut self, data: &[V]) -> crate::draw::Buffer<V> {
-        crate::draw::Buffer::new(self.add_vertices(data.to_vec()))
+        crate::draw::Buffer::new(self.add_buffer(data.to_vec()))
     }
 
     /// An index buffer of `indexes`, one segment of them over the vertices
@@ -243,7 +243,7 @@ impl Resources {
     /// dropped keeps its GPU memory until then. Not while a pass is open on
     /// `gpu`.
     pub(crate) fn destroy_released(&mut self, gpu: &mut dyn Gpu) {
-        let Resources { device, textures, vertices, meshes, releases, doomed, .. } = self;
+        let Resources { device, textures, buffers, meshes, releases, doomed, .. } = self;
         // The bindings made of buffers that arrays replaced go first, in
         // this batch, before those buffers.
         if !device.retired_epochs.is_empty() {
@@ -261,7 +261,7 @@ impl Resources {
                 match release {
                     Release::Resource(resource) => doomed.push(resource),
                     Release::Entry(StoreKey::Texture(key)) => drop(textures.remove(key)),
-                    Release::Entry(StoreKey::Vertices(key)) => drop(vertices.remove(key)),
+                    Release::Entry(StoreKey::Buffer(key)) => drop(buffers.remove(key)),
                     // What the objects hold goes to the queue as they drop,
                     // and goes in this batch.
                     Release::Entry(StoreKey::Mesh(key)) => drop(meshes.remove(key)),
@@ -314,58 +314,55 @@ impl Resources {
 
     /// Keeps `vertices` for the draws that share them, while a clone of the
     /// returned handle lasts.
-    pub(crate) fn add_vertices<V: bytemuck::Pod>(&mut self, vertices: Vec<V>) -> SharedVertices {
-        self.vertices.add(vertices, &self.device.queue)
+    pub(crate) fn add_buffer<V: bytemuck::Pod>(&mut self, vertices: Vec<V>) -> SharedBuffer {
+        self.buffers.add(vertices, &self.device.queue)
     }
 
     /// Keeps the vertices of the type `V` in the JS array `bytes`, as
-    /// [`add_vertices`](Self::add_vertices) does.
+    /// [`add_buffer`](Self::add_buffer) does.
     #[cfg(target_family = "wasm")]
-    pub(crate) fn add_host_vertices<V: bytemuck::Pod>(
-        &mut self,
-        bytes: mln_util::host_bytes::HostBytes,
-    ) -> SharedVertices {
-        self.vertices.add_host::<V>(bytes, &self.device.queue)
+    pub(crate) fn add_host_buffer<V: bytemuck::Pod>(&mut self, bytes: mln_util::host_bytes::HostBytes) -> SharedBuffer {
+        self.buffers.add_host::<V>(bytes, &self.device.queue)
     }
 
     /// The vertices of `shared`.
     #[must_use]
-    pub(crate) fn vertices(&self, shared: &SharedVertices) -> Option<&Vertices> {
-        self.vertices.get(shared)
+    pub(crate) fn stored_buffer(&self, shared: &SharedBuffer) -> Option<&StoredBuffer> {
+        self.buffers.get(shared)
     }
 
     /// Whether the store has the vertices `key`.
     #[cfg(test)]
-    pub(crate) fn has_vertices(&self, key: crate::gfx::store::VerticesKey) -> bool {
-        self.vertices.contains(key)
+    pub(crate) fn has_buffer(&self, key: crate::gfx::store::BufferKey) -> bool {
+        self.buffers.contains(key)
     }
 
     /// Replaces the bytes of `shared` with `bytes`, as many, which the next
     /// upload writes over its buffer's. Returns false, leaving it be, for
     /// another number of bytes.
-    pub(crate) fn rewrite(&mut self, shared: &SharedVertices, bytes: &[u8]) -> bool {
-        self.vertices.rewrite(shared, bytes)
+    pub(crate) fn rewrite(&mut self, shared: &SharedBuffer, bytes: &[u8]) -> bool {
+        self.buffers.rewrite(shared, bytes)
     }
 
     /// The vertex buffer of `shared`, made of them by their first upload
-    /// and written over after an update, as [`Vertices::upload`] says. The
+    /// and written over after an update, as [`StoredBuffer::upload`] says. The
     /// engine uploads the vertices that draws bind.
-    pub(crate) fn upload_vertices(
+    pub(crate) fn upload_buffer(
         &mut self,
         gpu: &mut dyn Gpu,
-        shared: &SharedVertices,
+        shared: &SharedBuffer,
     ) -> Result<Option<BufferId>, GpuError> {
-        self.vertices.upload(gpu, &mut self.device, shared, BufferUsage::Vertex)
+        self.buffers.upload(gpu, &mut self.device, shared, BufferUsage::Vertex)
     }
 
     /// The index buffer of `shared`, `u16`s, as
-    /// [`upload_vertices`](Self::upload_vertices) makes a vertex buffer.
+    /// [`upload_buffer`](Self::upload_buffer) makes a vertex buffer.
     pub(crate) fn upload_index_buffer(
         &mut self,
         gpu: &mut dyn Gpu,
-        shared: &SharedVertices,
+        shared: &SharedBuffer,
     ) -> Result<Option<BufferId>, GpuError> {
-        self.vertices.upload(gpu, &mut self.device, shared, BufferUsage::Index)
+        self.buffers.upload(gpu, &mut self.device, shared, BufferUsage::Index)
     }
 
     /// A texture without a size, made on the GPU by its first upload or the
@@ -612,7 +609,7 @@ impl Resources {
         self.meshes.clear();
         self.surfaces.clear();
         self.textures.clear();
-        self.vertices.clear();
+        self.buffers.clear();
         self.release_shaders();
         let queue = &self.device.queue;
         for (_, sampler) in self.samplers.drain() {

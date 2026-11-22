@@ -34,6 +34,16 @@ impl Upload<'_> {
         }
     }
 
+    /// Names `vec`, as [`vec`](Self::vec) does, keeping its data, which the
+    /// engine uploads again into the same buffer whenever the bucket
+    /// changes, as placement changes it. A tile's world copies each have a
+    /// buffer of their own of it.
+    pub fn kept<V: bytemuck::Pod>(&mut self, vec: &mut GpuVec<V>) {
+        if let Kind::Geometry { geometry, copies, res } = &mut self.kind {
+            geometry.upload(vec, true, copies, res);
+        }
+    }
+
     /// Names `indexes`, which the bucket's meshes draw through their buffer
     /// ([`LayerBucket::indexes`](crate::layer::LayerBucket::indexes)).
     pub fn indexes(&mut self, indexes: &mut Indexes) {

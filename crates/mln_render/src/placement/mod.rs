@@ -161,9 +161,13 @@ impl<'a> PlacementBuckets<'a> {
         self.store.bucket(key)?.downcast_ref()
     }
 
-    /// [`get`](Self::get), to change.
+    /// [`get`](Self::get), to change: the bucket uploads again, and its
+    /// kept vectors ([`Upload::kept`](crate::layer::Upload::kept)) into the
+    /// buffers its meshes read.
     pub fn get_mut<B: Bucket>(&mut self, key: &BucketKey) -> Option<&mut B> {
-        self.store.bucket_mut(key)?.downcast_mut()
+        let bucket = self.store.bucket_mut(key)?;
+        bucket.changed();
+        bucket.downcast_mut()
     }
 }
 
