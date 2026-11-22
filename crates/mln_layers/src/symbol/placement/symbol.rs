@@ -85,7 +85,7 @@ impl Placement {
         if ctx.tile().hold_for_fade {
             return JointPlacement::UNPLACED;
         }
-        collisions.select_layer(ctx.data.layer_index);
+        collisions.select_layer(ctx.data.layer_index as usize);
         self.text_boxes.clear();
         self.icon_boxes.clear();
 

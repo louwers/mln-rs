@@ -19,7 +19,6 @@ use std::collections::BTreeSet;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-use glam::DMat4;
 use mln_map_types::{MapDebugOptions, MapMode, ProjectionData, View};
 use mln_render::placement::{
     Aabb, BucketKey, CollisionIndex, FeatureIndex, Placed, PlacementBuckets, PlacementContext, PlacementPass,
@@ -59,9 +58,8 @@ pub(crate) struct PlacedTile {
     pub(crate) id: UnwrappedTileID,
     pub(crate) overscaled_id: OverscaledTileID,
     pub(crate) hold_for_fade: bool,
-    /// The tile's projection; `matrix` is its main matrix.
+    /// The tile's projection.
     pub(crate) projection: ProjectionData,
-    pub(crate) matrix: DMat4,
 }
 
 impl PlacedTile {
@@ -73,7 +71,6 @@ impl PlacedTile {
             overscaled_id: tile.overscaled_id,
             hold_for_fade: tile.held_for_fade,
             projection: tile.projection,
-            matrix: tile.projection.main_matrix,
         }
     }
 }
@@ -85,7 +82,7 @@ pub(crate) struct BucketPlacementData {
     /// Where the bucket's layer is among the frame's placing layers, bottom
     /// to top, and its tile among the layer's tiles, which name its
     /// symbols' shapes to the collision index.
-    pub(crate) layer_index: usize,
+    pub(crate) layer_index: u32,
     pub(crate) tile_index: u32,
     pub(crate) tile: PlacedTile,
     pub(crate) feature_index: Option<Arc<FeatureIndex>>,
@@ -167,7 +164,7 @@ impl LayerBuckets {
             let Some(bucket) = buckets.get::<SymbolBucket>(&tile.bucket) else { continue };
             let data = |feature_index, sort_key_range| BucketPlacementData {
                 bucket: tile.bucket,
-                layer_index: position,
+                layer_index: position as u32,
                 tile_index: tile_index as u32,
                 tile: PlacedTile::of(tile),
                 feature_index,
@@ -678,7 +675,7 @@ impl Placement {
         index: &CollisionIndex,
         reloaded_placed: &HashSet<BucketKey>,
     ) -> BucketContext<'a> {
-        let (tile_borders, avoid_edges) = self.tile_borders(bucket, index, &data.tile.matrix);
+        let (tile_borders, avoid_edges) = self.tile_borders(bucket, index, &data.tile.projection.main_matrix);
         let options = BucketOptions {
             just_reloaded: bucket.state.just_reloaded && !reloaded_placed.contains(&data.bucket),
             tile_borders,

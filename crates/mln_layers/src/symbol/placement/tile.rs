@@ -99,7 +99,16 @@ impl Placement {
             return true;
         };
         let intersects = |shift| {
-            intersects_tile_edges(index, ctx.view, text_box, shift, &ctx.tile().matrix, ctx.pixel_ratio, borders).flags
+            intersects_tile_edges(
+                index,
+                ctx.view,
+                text_box,
+                shift,
+                &ctx.tile().projection.main_matrix,
+                ctx.pixel_ratio,
+                borders,
+            )
+            .flags
                 != IntersectStatus::NONE
         };
         if tile.populate_intersections {
@@ -272,7 +281,7 @@ impl Placement {
                 ctx.view,
                 collision_box,
                 shift,
-                &render_tile.matrix,
+                &render_tile.projection.main_matrix,
                 ctx.pixel_ratio,
                 &tile_borders,
             );
