@@ -121,9 +121,10 @@ declare -A allowed=(
     # circles near the limb sit up to a pixel from GL JS's, as they do in GL
     # JS's projection/globe twin without terrain drawn here with each circle
     # once (911 px; the image is the same to 3 px): 914 of 65536 (RADV), 923
-    # (lavapipe). On the sea-level sphere, each drawn once for every tile
-    # buffer that holds it: 9550.
-    [projection/globe/terrain/circle-planet]=0.0141
+    # (lavapipe), 912 (Apple M6), 927 (Adreno X1-85 on D3D12). On the
+    # sea-level sphere, each drawn once for every tile buffer that holds it:
+    # 9550.
+    [projection/globe/terrain/circle-planet]=0.0143
     # As circle-planet: the far circles a pixel from GL JS's, 134 (RADV), 149
     # (lavapipe); the twin drawn once each, 134. On the sea-level sphere:
     # 9731.
