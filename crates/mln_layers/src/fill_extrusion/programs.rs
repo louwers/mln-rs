@@ -15,9 +15,14 @@ use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Property
 use super::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
 
-const DRAWABLE: Buffer = Buffer::storage::<FillExtrusionDrawableUBO>("drawableVector", Stages::Vertex);
-const TILE_PROPS: Buffer = Buffer::storage::<FillExtrusionTilePropsUBO>("tilePropsVector", Stages::Both);
-const PROPS: Buffer = Buffer::uniform::<FillExtrusionPropsUBO>("props", 1);
+pub(crate) const DRAWABLE: Buffer = Buffer::storage::<FillExtrusionDrawableUBO>("drawableVector", Stages::Vertex);
+pub(crate) const TILE_PROPS: Buffer = Buffer::storage::<FillExtrusionTilePropsUBO>("tilePropsVector", Stages::Both);
+pub(crate) const PROPS: Buffer = Buffer::uniform::<FillExtrusionPropsUBO>("props", 1);
+/// The bucket's vertices, which the pulled walls read: the position and
+/// `decimals_ed` of each.
+pub(crate) const WALL_VERTICES: Buffer = Buffer::vertices("wallVertices", 0, Short4);
+/// The paint values of the bucket's vertices, which the pulled walls read.
+pub(crate) const WALL_PAINT: Buffer = Buffer::vertices("wallPaint", 1, Float);
 
 /// The corner of the wall quad, or a roof vertex's position.
 const POS: Attribute = Attribute::new("pos", Short2);
@@ -93,14 +98,7 @@ pub static FILL_EXTRUSION_WALL: Program = Program {
 /// from storage buffers, by its index.
 pub static FILL_EXTRUSION_PULLED: Program = Program {
     name: "fill-extrusion-pulled",
-    buffers: &[
-        DRAWABLE,
-        TILE_PROPS,
-        PROPS,
-        // The bucket's vertices: the position and `decimals_ed` of each.
-        Buffer::vertices("wallVertices", 0, Short4),
-        Buffer::vertices("wallPaint", 1, Float),
-    ],
+    buffers: &[DRAWABLE, TILE_PROPS, PROPS, WALL_VERTICES, WALL_PAINT],
     attributes: &[],
     instance_attributes: &[],
     textures: &[],

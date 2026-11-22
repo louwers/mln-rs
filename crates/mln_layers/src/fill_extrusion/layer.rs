@@ -7,13 +7,13 @@ use mln_map_types::View;
 use mln_render::draw::{Buffer, Composite, Depth, Draw, Draws, IndexBuffer, Mesh, MeshDesc, Resources, Texture};
 use mln_render::layer::{
     EvaluateCx, EvaluatedLayer, EvaluatedLight, Evaluation, Features, Frame, FrameTile, HitTest, Layer, LayerBucket,
-    LayerValues, NewCx, PrepareCx, TileCx, TileProjection, TileTransform, UpdateCx,
+    LayerValues, NewCx, PaintVertices, PrepareCx, TileCx, TileProjection, TileTransform, UpdateCx,
 };
 use mln_style_types::{LayerBlendType, LightAnchorType};
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::intersection_tests::polygon_intersects_multi_polygon;
 
-use super::bucket::{FillExtrusionBucket, WALL_CORNERS};
+use super::bucket::{FillExtrusionBinders, FillExtrusionBucket, WALL_CORNERS};
 use super::layout::FillExtrusionLayout;
 use super::programs::{
     FILL_EXTRUSION, FILL_EXTRUSION_INSTANCED, FILL_EXTRUSION_PATTERN, FILL_EXTRUSION_PATTERN_INSTANCED,
@@ -31,19 +31,10 @@ pub struct FillExtrusionLayer {
     strip: IndexBuffer,
 }
 
-/// What the layer keeps of a tile: the meshes of its roofs and of its
-/// walls.
-pub struct ExtrusionTile {
-    parts: Vec<Part>,
-    /// Where the pulled walls' shader finds a vertex's paint values
-    /// ([`FillExtrusionDrawableUBO::paint_layout`]).
-    paint_layout: u32,
-}
-
 /// The meshes of a tile's roofs or walls: in color, and into depth only,
 /// which a translucent layer draws first, so that it blends only its
 /// nearest surface over each pixel.
-struct Part {
+pub struct Part {
     color: Mesh<Blocks>,
     depth: Mesh<Blocks>,
 }
@@ -53,7 +44,8 @@ type Blocks = (FillExtrusionDrawableUBO, FillExtrusionTilePropsUBO);
 impl Layer for FillExtrusionLayer {
     type Style = FillExtrusion;
     type Input = Features<FillExtrusionLayout>;
-    type Tile = ExtrusionTile;
+    /// The tile's roofs, then its walls.
+    type Tile = Vec<Part>;
     const VOLUME: bool = true;
 
     fn new(cx: &mut NewCx<'_, Self>) -> Self {
@@ -71,8 +63,8 @@ impl Layer for FillExtrusionLayer {
         }
         let sampler = pattern_sampler(cx.frame);
         for i in 0..cx.tiles.len() {
-            if let (_, _, Some(tile)) = cx.tiles.get_mut(i) {
-                for part in &tile.parts {
+            if let (_, _, Some(parts)) = cx.tiles.get_mut(i) {
+                for part in parts.iter() {
                     cx.res.set_sampler(&part.color, 0, sampler);
                     cx.res.set_sampler(&part.depth, 0, sampler);
                 }
@@ -85,7 +77,7 @@ impl Layer for FillExtrusionLayer {
         cx: &mut TileCx<'_, Self>,
         _tile: FrameTile,
         laid: LayerBucket<'_, FillExtrusion, FillExtrusionBucket>,
-    ) -> Option<ExtrusionTile> {
+    ) -> Option<Vec<Part>> {
         let (bucket, values, res) = (laid.bucket, &cx.layer.evaluated.paint, &mut *cx.res);
         let pattern = has_pattern(cx.layer);
         let atlas = laid.icon_atlas().filter(|_| pattern).map(|atlas| (atlas, pattern_sampler(cx.frame)));
@@ -97,23 +89,14 @@ impl Layer for FillExtrusionLayer {
         roofs.vertices(vertices).paint(paint, values);
         let mut parts = vec![part(res, &mut roofs, atlas)];
 
-        let mut paint_layout = 0;
-        let quads = res.quads(bucket.walls());
         if bucket.walls() > 0 {
+            let quads = res.quads(bucket.walls());
             let mut walls = if let Some(walls) = &bucket.wall_quads {
                 let program = if pattern { &FILL_EXTRUSION_PATTERN_WALL } else { &FILL_EXTRUSION_WALL };
                 let mut desc = MeshDesc::new(program, &quads);
                 desc.vertices(laid.buffer(&walls.vertices)).paint(laid.binders(&walls.binders), values);
                 desc
             } else if res.caps().binds_vertex_buffers && !pattern {
-                // A wall's shader reads its paint values at the offsets of
-                // this layout's bytes, in words: a vertex's, then its
-                // base's, height's and color's.
-                let words = |bytes: Option<usize>| (bytes.unwrap_or(0) / 4) as u32 & 0xff;
-                paint_layout = words(Some(paint.stride()))
-                    | words(paint.fill_extrusion_base.offset()) << 8
-                    | words(paint.fill_extrusion_height.offset()) << 16
-                    | words(paint.fill_extrusion_color.offset()) << 24;
                 let mut desc = MeshDesc::new(&FILL_EXTRUSION_PULLED, &quads);
                 desc.pulled(vertices);
                 if let Some(buffer) = paint.buffer() {
@@ -133,7 +116,7 @@ impl Layer for FillExtrusionLayer {
             };
             parts.push(part(res, &mut walls, atlas));
         }
-        Some(ExtrusionTile { parts, paint_layout })
+        Some(parts)
     }
 
     fn prepare(&self, cx: &PrepareCx<'_, Self>, out: &mut Draws) {
@@ -156,7 +139,7 @@ impl Layer for FillExtrusionLayer {
             ..TileTransform::default()
         };
         let faded = paint.fill_extrusion_pattern.faded();
-        for (tile, laid, extrusion) in cx.tiles() {
+        for (tile, laid, parts) in cx.tiles() {
             let at = tile.project(frame, &how);
             let atlas = laid.icon_atlas().filter(|_| pattern).map_or_else(Default::default, |atlas| cx.res.size(atlas));
             let tlbr = |id: &str| laid.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
@@ -166,8 +149,9 @@ impl Layer for FillExtrusionLayer {
                 texsize: [atlas.width as f32, atlas.height as f32],
                 ..FillExtrusionTilePropsUBO::default()
             };
-            let blocks = (drawable(tile, &at, frame, extrusion.paint_layout), tile_props);
-            for part in &extrusion.parts {
+            let paint_layout = paint_layout(laid.binders(&laid.bucket.binders));
+            let blocks = (drawable(tile, &at, frame, paint_layout), tile_props);
+            for part in parts {
                 if depth_first {
                     let draw = Draw { order: 0, depth: Depth::Volume { write: true, once: false }, ..Draw::DEFAULT };
                     main.push_at(&part.depth, &at, draw, blocks);
@@ -235,7 +219,20 @@ fn opacity(layer: &EvaluatedLayer<FillExtrusion>) -> f32 {
     layer.paint.fill_extrusion_layer_opacity.uniform() * layer.paint.fill_extrusion_opacity.uniform()
 }
 
-/// The values of a draw of `tile`, projected `at`, in `frame`.
+/// Where the pulled walls' shader finds a vertex's paint values among
+/// `paint`'s ([`FillExtrusionDrawableUBO::paint_layout`]): a byte each of
+/// words, from the lowest, a vertex's, then the offsets of its base, height
+/// and color.
+fn paint_layout(paint: PaintVertices<'_, FillExtrusionBinders>) -> u32 {
+    let words = |bytes: Option<usize>| (bytes.unwrap_or(0) / 4) as u32 & 0xff;
+    words(Some(paint.stride()))
+        | words(paint.fill_extrusion_base.offset()) << 8
+        | words(paint.fill_extrusion_height.offset()) << 16
+        | words(paint.fill_extrusion_color.offset()) << 24
+}
+
+/// The values of a draw of `tile`, projected `at`, in `frame`, whose pulled
+/// walls find their paint values by `paint_layout`.
 fn drawable(tile: FrameTile, at: &TileProjection, frame: &Frame<'_>, paint_layout: u32) -> FillExtrusionDrawableUBO {
     let origin = tile.pattern_origin(frame);
     let tiles = 2f64.powi(i32::from(tile.id().canonical.z));

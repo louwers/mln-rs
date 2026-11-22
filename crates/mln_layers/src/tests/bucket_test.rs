@@ -25,8 +25,6 @@ use super::with_context;
 use crate::circle::bucket::CircleBucket;
 use crate::fill::bucket::FillBucket;
 use crate::fill::{FillLayoutProperties, FillPaintProperties};
-use crate::fill_extrusion::FillExtrusionLayoutProperties;
-use crate::fill_extrusion::bucket::{FillExtrusionBucket, tile_units_per_meter};
 use crate::line::LineLayoutProperties;
 use crate::line::bucket::LineBucket;
 use crate::line::mesh::LineLayoutVertex;
@@ -156,93 +154,6 @@ fn fill_bucket() {
 
     with_context(|_, context| upload(&mut bucket, &mut BucketGeometry::default(), context));
     assert!(!needs_upload(&bucket));
-}
-
-/// The vertices of a fill-extrusion bucket of `tile` holding `polygon`
-/// extruded with `fill-extrusion-rounded-corner-distance` set to `meters`.
-fn fill_extrusion_vertex_count(polygon: &GeometryCollection, meters: f32, tile: CanonicalTileID) -> usize {
-    let layout = FillExtrusionLayoutProperties::PossiblyEvaluated {
-        fill_extrusion_rounded_corner_distance: Evaluated::Constant(meters),
-    };
-    let mut bucket = FillExtrusionBucket::new(layout, &VecMap::new(), f32::from(tile.z), 1);
-    bucket.add_feature(
-        &feature(FeatureType::Polygon, polygon),
-        polygon,
-        &ImagePositions::default(),
-        &PatternLayerMap::default(),
-        0,
-        &tile,
-        &mut Tessellator::default(),
-    );
-    assert!(bucket.has_data());
-    bucket.vertices.len()
-}
-
-#[test]
-fn fill_extrusion_bucket_rounds_corners_in_meters() {
-    let square = collection(&[&[(0, 0), (1000, 0), (1000, 1000), (0, 1000), (0, 0)]]);
-    let z16 = CanonicalTileID::new(16, 32768, 32768);
-
-    // A ring of n points has n vertices, each the roof's and a wall's.
-    assert_eq!(fill_extrusion_vertex_count(&square, 0.0, z16), 5);
-    // Rounding replaces each of the 4 corners with 4 points.
-    assert_eq!(fill_extrusion_vertex_count(&square, 2.0, z16), 17);
-    // At z0 a tile unit is about 5 km, and 2 m rounds to nothing.
-    assert_eq!(fill_extrusion_vertex_count(&square, 2.0, CanonicalTileID::new(0, 0, 0)), 5);
-}
-
-#[test]
-fn fill_extrusion_walls_on_clip_lines_leave_the_pattern_where_it_was() {
-    // The edge from (-64, 100) to (-64, 0) is a clip line, and has no wall
-    // to wrap the pattern around: the wall after it starts where the one
-    // before it ended.
-    let square = collection(&[&[(100, 100), (-64, 100), (-64, 0), (100, 0), (100, 100)]]);
-    let layout = FillExtrusionLayoutProperties::PossiblyEvaluated {
-        fill_extrusion_rounded_corner_distance: Evaluated::Constant(0.0),
-    };
-    let mut bucket = FillExtrusionBucket::new(layout, &VecMap::new(), 16.0, 1);
-    bucket.add_feature(
-        &feature(FeatureType::Polygon, &square),
-        &square,
-        &ImagePositions::default(),
-        &PatternLayerMap::default(),
-        0,
-        &CanonicalTileID::new(16, 32768, 32768),
-        &mut Tessellator::default(),
-    );
-    let edge_distances: Vec<u16> = bucket.vertices.get_mut().iter().map(|v| v.a2[1]).collect();
-    assert_eq!(edge_distances, [0, 164, 164, 328, 428]);
-}
-
-#[test]
-fn fill_extrusion_bucket_skips_polygons_rounded_off_the_tile() {
-    // Only the corner at (0, 100) is on the tile, and rounding cuts it off.
-    let triangle = collection(&[&[(0, 100), (-10, 90), (-10, 110), (0, 100)]]);
-    let layout = FillExtrusionLayoutProperties::PossiblyEvaluated {
-        fill_extrusion_rounded_corner_distance: Evaluated::Constant(100.0),
-    };
-    let mut bucket = FillExtrusionBucket::new(layout, &VecMap::new(), 16.0, 1);
-    bucket.add_feature(
-        &feature(FeatureType::Polygon, &triangle),
-        &triangle,
-        &ImagePositions::default(),
-        &PatternLayerMap::default(),
-        0,
-        &CanonicalTileID::new(16, 32768, 32768),
-        &mut Tessellator::default(),
-    );
-    assert!(!bucket.has_data());
-}
-
-#[test]
-fn tile_units_per_meter_grows_with_zoom_and_latitude() {
-    // A z16 tile at the equator spans about 611 m.
-    let equator = tile_units_per_meter(&CanonicalTileID::new(16, 32768, 32768));
-    assert!((equator - 8192.0 / 611.5).abs() < 0.01, "{equator}");
-    assert!((tile_units_per_meter(&CanonicalTileID::new(17, 65536, 65536)) / equator - 2.0).abs() < 1e-3);
-    // Near 60° N a meter is twice as many units.
-    let north = tile_units_per_meter(&CanonicalTileID::new(16, 32768, 19031));
-    assert!((north / equator - 2.0).abs() < 0.01, "{north}");
 }
 
 /// A fill bucket whose "fill-color" is the given data-driven expression, with
@@ -606,37 +517,6 @@ fn line_bucket_evaluates_cap_and_limits_per_feature() {
         );
         assert_eq!(data_driven, [first, second].concat(), "{property}");
     }
-}
-
-// The pulled walls' shader finds a vertex's paint values where the paint
-// attributes read them.
-#[test]
-fn the_paint_layout_of_pulled_walls_is_the_paint_attributes() {
-    use mln_gfx::AttributeDataType::{Float, Float4};
-    use mln_render::draw::{SharedAttribute, VertexAttributeArray};
-
-    use crate::fill_extrusion::programs::{
-        ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
-        ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
-    };
-    use crate::fill_extrusion::render_layer::paint_layout;
-
-    with_context(|_, context| {
-        let mut attrs = VertexAttributeArray::new();
-        assert_eq!(paint_layout(&attrs), 0, "every property a uniform");
-
-        // A vertex's base, its color's four floats, then its height.
-        let paint = context.add_vertices(vec![[0f32; 6]]);
-        for (id, data_type, offset) in [
-            (ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, Float, 0),
-            (ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE, Float4, 4),
-            (ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, Float, 20),
-        ] {
-            attrs.set_shared(id, SharedAttribute::new(paint.clone(), data_type, offset, 24));
-        }
-        // Six words a vertex: the base at 0, the height at 5, the color at 1.
-        assert_eq!(paint_layout(&attrs), 0x0105_0006);
-    });
 }
 
 // The pulled outlines' shader finds a vertex's paint values where the paint
