@@ -1,124 +1,219 @@
-// The vertices and indices are `GeometryVec`s, which a worker fills and the
-// bucket's upload moves into the context's stores, which its draws read.
-
 use std::f64::consts::PI;
-use std::sync::Arc;
 
 use geometry::Point;
-use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
-use mln_map_types::View;
-use mln_render::globe::{SubdividedPolygon, subdivide_polygon, subdivide_ring};
+use mln_gfx::gfx_types::AttributeDataType::{Short2, UShort2};
+use mln_gfx::shaders::segment::MAX_SEGMENT_VERTICES;
+use mln_render::draw::Vertex;
+use mln_render::globe::{subdivide_polygon, subdivide_ring};
 use mln_render::layer::{
-    Bucket, BucketBase, CrossFadedPaintPropertyBinder, EvaluatedLayer, GeometryUpload, GeometryVec, Indexed,
-    PaintPropertyBinder,
+    Bucket, CrossFadedPaintPropertyBinder, GpuVec, Indexes, LayerBinders, PaintPropertyBinder, Upload,
 };
-use mln_style::PropertyEvaluationParameters;
-use mln_style::evaluated::Evaluated;
-use mln_style::expression::{Image, Value};
-use mln_style_types::LightAnchorType;
-use mln_style_types::image::ImagePositions;
+use mln_style::expression::Image;
 use mln_tile::geometry_tile_data::{is_boundary_edge, is_entirely_outside, limit_holes, round_polygon_corners};
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates, GeometryTileFeature, classify_rings};
+use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates, classify_rings};
 use mln_util::Color;
 use mln_util::constants::{EARTH_RADIUS_M, EXTENT, M2PI};
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_vec_map::VecMap;
 
-use super::FillExtrusion;
-use super::programs::{
-    ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE,
-};
-use super::properties::{FillExtrusionLayoutProperties, FillExtrusionPaintProperties};
-use crate::pattern_layout::{PatternBucket, PatternLayerMap, PatternLayoutSpec};
-use crate::tessellator::Tessellator;
+use super::properties::FillExtrusionPaintProperties;
+use super::tessellator::Tessellator;
 
 mln_render::paint_property_binders!(
     pub(crate) struct FillExtrusionBinders for FillExtrusionPaintProperties::PossiblyEvaluated {
-        fill_extrusion_base: PaintPropertyBinder<f32> => [ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE],
-        fill_extrusion_color: PaintPropertyBinder<Color> => [ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE],
-        fill_extrusion_height: PaintPropertyBinder<f32> => [ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE],
-        fill_extrusion_pattern: CrossFadedPaintPropertyBinder<Image> => [ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE],
+        fill_extrusion_base: PaintPropertyBinder<f32> => ["base"],
+        fill_extrusion_color: PaintPropertyBinder<Color> => ["color"],
+        fill_extrusion_height: PaintPropertyBinder<f32> => ["height"],
+        fill_extrusion_pattern: CrossFadedPaintPropertyBinder<Image> => ["pattern_from", "pattern_to"],
     }
 );
 
-/// A vertex of the roof, and the wall instance from it to the next vertex of
-/// its ring.
+/// A vertex of a roof, or of an outline, where a wall to the next vertex
+/// of its ring starts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
-pub(crate) struct FillExtrusionLayoutVertex {
-    pub(crate) a1: [i16; 2],
-    pub(crate) a2: [u16; 2],
+pub(crate) struct ExtrusionVertex {
+    pub(crate) pos: [i16; 2],
+    /// Whether no wall starts here (bit 0), and the normal the walls on
+    /// either side share (bit 1, then its angle), then the distance along
+    /// the outline that a pattern wraps the walls by.
+    pub(crate) decimals_ed: [u16; 2],
 }
 
-/// A corner of the wall quad every instance draws: x picks the instance's
-/// vertex (0) or the next one (1), y the base (0) or the top (1).
-pub(crate) type FillExtrusionStaticVertex = [i16; 2];
+impl Vertex for ExtrusionVertex {
+    const ATTRIBUTES: &'static [mln_gfx::gfx_types::AttributeDataType] = &[Short2, UShort2];
+}
 
-/// The corners of the wall quad, in the order that the strip indices of
-/// [`WALL_STRIP_INDICES`] and the engine's quad indices draw it: 0 and 1 at
-/// the top, 2 and 3 at the base.
-pub(crate) const WALL_CORNERS: [FillExtrusionStaticVertex; 4] = [[1, 0], [1, 1], [0, 0], [0, 1]];
+/// A corner of a wall quad, x the wall's first (0) or second vertex (1),
+/// y its base (0) or top (1), in the order the quad's indexes draw it:
+/// 0 and 1 at the second vertex, 2 and 3 at the first.
+pub(crate) const WALL_CORNERS: [[i16; 2]; 4] = [[1, 0], [1, 1], [0, 0], [0, 1]];
 
-/// The counter-clockwise triangle strip of the wall quad's corners
-/// ([`WALL_CORNERS`]): the triangles 0, 2, 1 and 1, 2, 3.
-pub(crate) const WALL_STRIP_INDICES: [u16; 4] = [0, 2, 1, 3];
-
-/// A corner of a wall drawn without instancing, and the outline vertex the
-/// wall starts at. A wall reads the next outline vertex four corners
-/// further on.
+/// A vertex of a wall quad of its own: its corner, and the outline vertex
+/// the wall goes from and the next.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
-pub(crate) struct FillExtrusionWallVertex {
-    pub(crate) corner: FillExtrusionStaticVertex,
-    pub(crate) vertex: FillExtrusionLayoutVertex,
+pub(crate) struct WallVertex {
+    pub(crate) corner: [i16; 2],
+    pub(crate) from: ExtrusionVertex,
+    pub(crate) to: ExtrusionVertex,
 }
 
-pub(crate) use mln_render::draw::EvaluatedLight;
-
-/// The quads of the walls of `vertices`: each vertex with each corner of the
-/// static quad, in its order. The quad of the wall from a vertex is its four
-/// corners, and the next four are the next vertex's.
-pub(crate) fn wall_quad_vertices(vertices: &[FillExtrusionLayoutVertex]) -> Vec<FillExtrusionWallVertex> {
-    let corners = WALL_CORNERS;
-    let quads: Vec<FillExtrusionWallVertex> = vertices
-        .iter()
-        .flat_map(|&vertex| corners.iter().map(move |&corner| FillExtrusionWallVertex { corner, vertex }))
-        .collect();
-    quads
+impl Vertex for WallVertex {
+    const ATTRIBUTES: &'static [mln_gfx::gfx_types::AttributeDataType] = &[Short2, Short2, UShort2, Short2, UShort2];
 }
 
-/// The paint values of the quads of `wall_quad_vertices`: those of each of
-/// the first `walls` vertices in `paint`, `stride` bytes each, for each
-/// corner of its wall.
-pub(crate) fn wall_quad_paint(paint: &[u8], stride: usize, walls: usize) -> Vec<u8> {
-    let mut values = Vec::with_capacity(4 * stride * walls);
-    if stride > 0 {
-        for vertex in paint.chunks_exact(stride).take(walls) {
-            for _ in 0..4 {
-                values.extend_from_slice(vertex);
+/// A tile's extrusions of a group of layers: the roofs' triangles over
+/// the vertices, whose outline vertices each start a wall to the next.
+#[derive(Clone, Default, mln_wire::Wire)]
+pub struct FillExtrusionBucket {
+    pub(crate) vertices: GpuVec<ExtrusionVertex>,
+    pub(crate) triangles: Indexes,
+    pub(crate) binders: LayerBinders<FillExtrusionBinders>,
+    /// The walls as quads of their own, where the renderer's device draws
+    /// instances slowly ([`BuildCx::cpu_rasterizer`]).
+    ///
+    /// [`BuildCx::cpu_rasterizer`]: mln_render::layer::BuildCx::cpu_rasterizer
+    pub(crate) wall_quads: Option<WallQuads>,
+}
+
+/// The quads of the walls from each of a bucket's vertices, four vertices
+/// each, with their paint values.
+#[derive(Clone, Default, mln_wire::Wire)]
+pub(crate) struct WallQuads {
+    pub(crate) vertices: GpuVec<WallVertex>,
+    pub(crate) binders: LayerBinders<FillExtrusionBinders>,
+}
+
+impl Bucket for FillExtrusionBucket {
+    fn upload(&mut self, up: &mut Upload<'_>) {
+        up.vec(&mut self.vertices);
+        up.indexes(&mut self.triangles);
+        up.binders(&mut self.binders);
+        if let Some(quads) = &mut self.wall_quads {
+            up.vec(&mut quads.vertices);
+            up.binders(&mut quads.binders);
+        }
+    }
+}
+
+impl FillExtrusionBucket {
+    /// The walls, one from each vertex but the last.
+    pub(crate) fn walls(&self) -> usize {
+        self.vertices.len().saturating_sub(1)
+    }
+
+    /// Extrudes the polygons of `geometry` in `tile`: their roofs, split to
+    /// follow the globe at `granularity`, and their walls, around corners
+    /// rounded off by `corner_distance` in tile units.
+    pub(crate) fn add(
+        &mut self,
+        geometry: &GeometryCollection,
+        tile: &CanonicalTileID,
+        granularity: u32,
+        corner_distance: f64,
+        tessellator: &mut Tessellator,
+    ) {
+        for mut polygon in classify_rings(geometry) {
+            // Earcut slows down with many holes.
+            limit_holes(&mut polygon, 500);
+            if corner_distance > 0.0 {
+                polygon = round_polygon_corners(&polygon, corner_distance);
+            }
+            // The neighbouring tile draws a polygon in this tile's buffer.
+            if polygon.first().is_none_or(|outer| is_entirely_outside(outer)) {
+                continue;
+            }
+            if granularity >= 2 {
+                let rings: Vec<GeometryCoordinates> = polygon.iter().map(|ring| subdivide_ring(ring, granularity)).collect();
+                let roof = subdivide_polygon(&polygon, tessellator.triangulate(&polygon), tile, granularity, false);
+                self.add_outline(&rings, corner_distance > 0.0);
+                let vertices = self.vertices.get_mut();
+                let roof_first = vertices.len();
+                vertices.extend(roof.vertices.iter().map(|&p| roof_vertex(p)));
+                self.triangles.add(vertices, roof_first, roof.triangles.iter().copied());
+            } else {
+                let first = self.vertices.len();
+                self.add_outline(&polygon[..], corner_distance > 0.0);
+                let vertices = self.vertices.get_mut();
+                // A roof too large for a segment copies the vertices it
+                // spreads over several, and copies of the outline's would
+                // draw walls: it gets vertices of its own.
+                let roof_first = if vertices.len() - first <= MAX_SEGMENT_VERTICES {
+                    first
+                } else {
+                    let roof_first = vertices.len();
+                    vertices.extend(polygon.iter().flat_map(|ring| ring.iter().map(|&p| roof_vertex(p))));
+                    roof_first
+                };
+                let roof = tessellator.triangulate(&polygon).iter().map(|&[a, b, c]| [a, c, b]);
+                self.triangles.add(vertices, roof_first, roof);
             }
         }
     }
-    values
+
+    /// Adds the outline of `polygon`: each vertex of a ring starts a wall to
+    /// the next, and the last ends the ring. Edges on the lines the tile was
+    /// clipped at have no walls, and neither do rings in the tile's buffer,
+    /// which the neighbouring tile draws. With `rounded` corners, the walls
+    /// of an arc share their normals.
+    fn add_outline<R: AsRef<[Point<i16>]>>(&mut self, polygon: &[R], rounded: bool) {
+        let vertices = self.vertices.get_mut();
+        for ring in polygon {
+            let ring = ring.as_ref();
+            let outside = is_entirely_outside(ring);
+            let normals = rounded.then(|| shared_wall_normals(ring, |a, b| a != b && !is_boundary_edge(a, b)));
+            let mut edge_distance: usize = 0;
+            for (i, &p) in ring.iter().enumerate() {
+                let next = ring.get(i + 1).copied();
+                let discarded = outside || next.is_none_or(|next| is_boundary_edge(p, next));
+                let normal = normals.as_ref().and_then(|normals| normals[i]);
+                vertices.push(outline_vertex(p, edge_distance as u16, discarded, normal));
+                // Walls that aren't drawn don't move the pattern along.
+                if let Some(next) = next.filter(|_| !discarded) {
+                    let distance = usize::from(dist_u16(p, next));
+                    if edge_distance + distance > usize::from(u16::MAX) {
+                        edge_distance = 0;
+                    }
+                    edge_distance += distance;
+                }
+            }
+        }
+    }
+
+    /// The quads of the walls from each vertex, each corner with the vertex
+    /// and the next.
+    pub(crate) fn wall_quad_vertices(vertices: &[ExtrusionVertex]) -> Vec<WallVertex> {
+        let next = vertices.iter().skip(1).copied().chain(vertices.last().copied());
+        vertices
+            .iter()
+            .zip(next)
+            .flat_map(|(&from, to)| WALL_CORNERS.map(|corner| WallVertex { corner, from, to }))
+            .collect()
+    }
 }
 
-#[derive(Clone, mln_wire::Wire)]
-pub struct FillExtrusionBucket {
-    pub(crate) base: BucketBase,
-    pub(crate) layout: FillExtrusionLayoutProperties::PossiblyEvaluated,
-
-    pub(crate) vertices: GeometryVec<FillExtrusionLayoutVertex>,
-    pub(crate) triangles: GeometryVec<u16>,
-    pub(crate) triangle_segments: Vec<SegmentBase>,
-    pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
-
-    pub(crate) paint_property_binders: VecMap<String, FillExtrusionBinders>,
+/// A roof vertex of its own, which starts no wall.
+fn roof_vertex(p: Point<i16>) -> ExtrusionVertex {
+    outline_vertex(p, 0, true, None)
 }
 
-static EMPTY_FORMATTED_SECTION: Value = Value::Null;
+/// An outline vertex at `p`, `edge_distance` along its ring, whose wall to
+/// the next vertex draws unless `discarded`. Its walls share `normal`, if
+/// any, where they meet.
+pub(crate) fn outline_vertex(
+    p: Point<i16>,
+    edge_distance: u16,
+    discarded: bool,
+    normal: Option<Point<f64>>,
+) -> ExtrusionVertex {
+    // The normal's angle from -π, in 2^14ths of a turn, above a bit that
+    // says there is one.
+    let normal = normal.map_or(0, |n| {
+        let turn = n.y.atan2(n.x) / M2PI + 0.5;
+        (((turn * 16384.0).round() as u16 % 16384) << 2) | 2
+    });
+    ExtrusionVertex { pos: [p.x, p.y], decimals_ed: [normal | u16::from(discarded), edge_distance] }
+}
 
 /// The tile units in a meter at the center of `tile`, the scale that
 /// distances in meters on its features take.
@@ -184,328 +279,100 @@ fn shared_wall_normals(
 
 /// The distance from `a` to `b`, cast to `u16` through a wider integer,
 /// keeping the low bits.
-fn dist_u16(a: Point<f64>, b: Point<f64>) -> u16 {
-    let dx = b.x - a.x;
-    let dy = b.y - a.y;
+fn dist_u16(a: Point<i16>, b: Point<i16>) -> u16 {
+    let dx = f64::from(b.x) - f64::from(a.x);
+    let dy = f64::from(b.y) - f64::from(a.y);
     ((dx * dx + dy * dy).sqrt() as i64) as u16
-}
-
-impl FillExtrusionBucket {
-    #[must_use]
-    pub(crate) fn new(
-        layout: FillExtrusionLayoutProperties::PossiblyEvaluated,
-        layer_paint_properties: &VecMap<String, Arc<EvaluatedLayer<FillExtrusion>>>,
-        zoom: f32,
-        _overscaling: u32,
-    ) -> Self {
-        let mut paint_property_binders = VecMap::new();
-        for (id, properties) in layer_paint_properties {
-            paint_property_binders
-                .entry(id.clone())
-                .or_insert_with(|| FillExtrusionBinders::new(&properties.paint, zoom));
-        }
-        FillExtrusionBucket {
-            base: BucketBase::default(),
-            layout,
-            vertices: GeometryVec::default(),
-            triangles: GeometryVec::default(),
-            triangle_segments: Vec::new(),
-            subdivision_granularity: SubdivisionGranularitySetting::none(),
-            paint_property_binders,
-        }
-    }
-
-    pub(crate) fn set_subdivision_granularity(&mut self, value: &SubdivisionGranularitySetting) {
-        self.subdivision_granularity = *value;
-    }
-
-    /// A vertex at `p`, whose wall to the next vertex is drawn unless
-    /// `is_discarded`. Its walls share `shared_normal`, if any, where they
-    /// meet.
-    #[must_use]
-    pub(crate) fn layout_vertex(
-        p: Point<i16>,
-        edge_distance: u16,
-        is_discarded: bool,
-        shared_normal: Option<Point<f64>>,
-    ) -> FillExtrusionLayoutVertex {
-        // The shared normal's angle from -π, in 2^14ths of a turn, above a
-        // bit that says there is one.
-        let normal = shared_normal.map_or(0, |n| {
-            let turn = n.y.atan2(n.x) / M2PI + 0.5;
-            (((turn * 16384.0).round() as u16 % 16384) << 2) | 2
-        });
-        FillExtrusionLayoutVertex {
-            a1: [p.x, p.y],
-            // The edge distance, which fill-extrusion patterns wrap along.
-            a2: [normal | u16::from(is_discarded), edge_distance],
-        }
-    }
-
-    /// Appends the outline of `polygon`: each vertex of a ring is a wall
-    /// instance up to the next one, the last vertex ends the ring. Edges on
-    /// the lines the tile was clipped at have no walls, and neither do rings
-    /// in the tile's buffer, which the neighbouring tile draws. With rounded
-    /// corners, the walls of an arc share their normals.
-    fn add_outline<R: AsRef<[Point<i16>]>>(&mut self, polygon: &[R]) {
-        let rounded = *self.layout.fill_extrusion_rounded_corner_distance.uniform() > 0.0;
-        let vertices = self.vertices.get_mut();
-        for ring in polygon {
-            let ring = ring.as_ref();
-            let outside = is_entirely_outside(ring);
-            let normals = rounded.then(|| shared_wall_normals(ring, |a, b| a != b && !is_boundary_edge(a, b)));
-            let mut edge_distance: usize = 0;
-            for (i, &p) in ring.iter().enumerate() {
-                let next = ring.get(i + 1).copied();
-                let is_discarded = outside || next.is_none_or(|next| is_boundary_edge(p, next));
-                let p1 = Point::new(f64::from(p.x), f64::from(p.y));
-                let p2 = next.map(|p| Point::new(f64::from(p.x), f64::from(p.y)));
-
-                let shared_normal = normals.as_ref().and_then(|normals| normals[i]);
-                vertices.push(Self::layout_vertex(p, edge_distance as u16, is_discarded, shared_normal));
-
-                // Walls that aren't drawn don't move the pattern along.
-                if let Some(p2) = p2.filter(|_| !is_discarded) {
-                    let dist = usize::from(dist_u16(p1, p2));
-                    if edge_distance + dist > usize::from(u16::MAX) {
-                        edge_distance = 0;
-                    }
-
-                    edge_distance += dist;
-                }
-            }
-        }
-    }
-
-    /// Adds the walls and the roof of one polygon, an outer ring and its
-    /// holes. The roof's vertices are the outline's, unless it is the
-    /// globe's subdivided `roof`, which has vertices of its own.
-    fn add_polygon<R: AsRef<[Point<i16>]>>(
-        &mut self,
-        polygon: &[R],
-        roof: Option<&SubdividedPolygon>,
-        tessellator: &mut Tessellator,
-    ) {
-        let first = self.vertices.len();
-        self.add_outline(polygon);
-        let vertices = self.vertices.get_mut();
-        let mut triangles = Indexed { indexes: self.triangles.get_mut(), segments: &mut self.triangle_segments };
-        // A roof vertex of its own draws no wall.
-        let roof_vertex = |p: Point<i16>| Self::layout_vertex(p, 0, true, None);
-        if let Some(roof) = roof {
-            let roof_first = vertices.len();
-            vertices.extend(roof.vertices.iter().map(|&p| roof_vertex(p)));
-            triangles.add(vertices, roof_first, roof.triangles.iter().copied());
-        } else {
-            // A roof too large for a segment copies the vertices it
-            // spreads over several, and copies of the outline's would
-            // draw walls: it gets vertices of its own.
-            let roof_first = if vertices.len() - first <= MAX_SEGMENT_VERTICES {
-                first
-            } else {
-                let roof_first = vertices.len();
-                vertices.extend(polygon.iter().flat_map(|ring| ring.as_ref().iter().map(|&p| roof_vertex(p))));
-                roof_first
-            };
-            // Counter-clockwise.
-            let roof = tessellator.triangulate(polygon).iter().map(|&[a, b, c]| [a, c, b]);
-            triangles.add(vertices, roof_first, roof);
-        }
-    }
-
-    #[must_use]
-    pub(crate) fn light_color(light: &EvaluatedLight) -> [f32; 3] {
-        let color = light.light_color.uniform();
-        [color.r, color.g, color.b]
-    }
-
-    pub(crate) fn light_position(light: &EvaluatedLight, state: &View) -> [f32; 3] {
-        let light_pos = glam::Vec3::from_array(light.light_position.uniform().get_cartesian());
-        if *light.light_anchor.uniform() == LightAnchorType::Viewport {
-            // A viewport-anchored light turns with the map.
-            (glam::Mat3::from_rotation_z(-state.angle() as f32) * light_pos).to_array()
-        } else {
-            light_pos.to_array()
-        }
-    }
-
-    #[must_use]
-    pub(crate) fn light_intensity(light: &EvaluatedLight) -> f32 {
-        *light.light_intensity.uniform()
-    }
-}
-
-impl PatternBucket for FillExtrusionBucket {
-    fn add_feature(
-        &mut self,
-        feature: &dyn GeometryTileFeature,
-        geometry: &GeometryCollection,
-        pattern_positions: &ImagePositions,
-        pattern_dependencies: &PatternLayerMap,
-        index: usize,
-        canonical: &CanonicalTileID,
-        tessellator: &mut Tessellator,
-    ) {
-        for mut polygon in classify_rings(geometry) {
-            // Optimize polygons with many interior rings for earcut
-            // tessellation.
-            limit_holes(&mut polygon, 500);
-
-            let rounded_corner_distance = f64::from(*self.layout.fill_extrusion_rounded_corner_distance.uniform());
-            if rounded_corner_distance > 0.0 {
-                polygon = round_polygon_corners(&polygon, rounded_corner_distance * tile_units_per_meter(canonical));
-            }
-
-            // The neighbouring tile draws a polygon that lies in this tile's
-            // buffer.
-            if polygon.first().is_none_or(|outer| is_entirely_outside(outer)) {
-                continue;
-            }
-
-            // On the globe the walls follow subdivided rings and the roof is a
-            // subdivided mesh of its own.
-            let granularity = self.subdivision_granularity.fill.granularity_for_zoom_level(canonical.z);
-            if granularity >= 2 {
-                let subdivided_rings: Vec<GeometryCoordinates> =
-                    polygon.iter().map(|ring| subdivide_ring(ring, granularity)).collect();
-                let roof =
-                    subdivide_polygon(&polygon, tessellator.triangulate(&polygon), canonical, granularity, false);
-                self.add_polygon(&subdivided_rings, Some(&roof), tessellator);
-            } else {
-                self.add_polygon(&polygon[..], None, tessellator);
-            }
-        }
-
-        let length = self.vertices.len();
-        for (id, binders) in &mut self.paint_property_binders {
-            binders.populate_vertex_vectors(
-                feature,
-                length,
-                index,
-                pattern_positions,
-                pattern_dependencies.get(id),
-                canonical,
-                &EMPTY_FORMATTED_SECTION,
-            );
-        }
-    }
-}
-
-impl Bucket for FillExtrusionBucket {
-    fn base(&self) -> &BucketBase {
-        &self.base
-    }
-
-    fn upload(&mut self, geometry: &mut GeometryUpload<'_>) {
-        // Walls that aren't instances of the static quad are quads of their
-        // own, made of the vertices and paint values before those move.
-        let walls = self.vertices.len().saturating_sub(1);
-        let wall_quads = !super::render_layer::instanced_walls(geometry.context());
-        if wall_quads {
-            geometry.derive_vertices(&self.vertices, wall_quad_vertices);
-        }
-        geometry.move_vertices(&mut self.vertices);
-        geometry.move_indexes(&mut self.triangles);
-        for binders in self.paint_property_binders.values_mut() {
-            let depends_on_feature_state = binders.depends_on_feature_state();
-            let buffer = &mut binders.interleaved_vertex_buffer;
-            if wall_quads && !depends_on_feature_state {
-                let stride = buffer.stride();
-                geometry.derive_vertices(buffer.vertices(), |paint| wall_quad_paint(paint, stride, walls));
-            }
-            geometry.move_paint(buffer, depends_on_feature_state);
-        }
-        self.base.set_uploaded(true);
-    }
-
-    fn has_data(&self) -> bool {
-        !self.triangle_segments.is_empty()
-    }
-
-    fn update(
-        &mut self,
-        states: &mln_render::layer::FeatureStates,
-        layer: &mln_tile::TileLayer<'_>,
-        layer_id: &str,
-        image_positions: &ImagePositions,
-    ) -> bool {
-        let Some(binders) = self.paint_property_binders.get_mut(layer_id) else {
-            return false;
-        };
-        binders.update_vertex_vectors(states, layer, image_positions);
-        self.base.set_uploaded(false);
-        true
-    }
-}
-
-/// The pattern layout of fill-extrusion layers, which have no sort key.
-pub struct FillExtrusionLayoutSpec;
-
-impl PatternLayoutSpec for FillExtrusionLayoutSpec {
-    type Type = FillExtrusion;
-    type Bucket = FillExtrusionBucket;
-    type Layout = FillExtrusionLayoutProperties::PossiblyEvaluated;
-
-    fn evaluate_layout(
-        layer: &EvaluatedLayer<FillExtrusion>,
-        parameters: &PropertyEvaluationParameters,
-    ) -> Self::Layout {
-        layer.style.layout.evaluate(parameters)
-    }
-
-    fn pattern_property(layer: &EvaluatedLayer<FillExtrusion>) -> &Evaluated<Image> {
-        &layer.paint.fill_extrusion_pattern
-    }
-
-    fn sorted(_leader: &EvaluatedLayer<FillExtrusion>) -> bool {
-        // Fill extrusions have no sort key.
-        false
-    }
-
-    fn sort_key(
-        _layout: &Self::Layout,
-        _feature: &dyn GeometryTileFeature,
-        _zoom: f32,
-        _canonical: &CanonicalTileID,
-    ) -> f32 {
-        // SortKeyPropertyType = void
-        0.0
-    }
-
-    fn constant_sort_key(_layout: &Self::Layout) -> Option<f32> {
-        None
-    }
-
-    fn create_bucket(
-        layout: &Self::Layout,
-        layer_properties_map: &VecMap<String, Arc<EvaluatedLayer<FillExtrusion>>>,
-        zoom: f32,
-        overscaling: u32,
-    ) -> FillExtrusionBucket {
-        FillExtrusionBucket::new(layout.clone(), layer_properties_map, zoom, overscaling)
-    }
-    fn set_subdivision_granularity(bucket: &mut FillExtrusionBucket, value: &SubdivisionGranularitySetting) {
-        bucket.set_subdivision_granularity(value);
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn collection(rings: &[&[(i16, i16)]]) -> GeometryCollection {
+        GeometryCollection::from(
+            rings.iter().map(|ring| ring.iter().map(|&(x, y)| Point::new(x, y)).collect()).collect::<Vec<_>>(),
+        )
+    }
+
+    /// A bucket of `polygon` extruded in `tile` with corners rounded by
+    /// `meters`.
+    fn extrude(polygon: &GeometryCollection, meters: f64, tile: CanonicalTileID) -> FillExtrusionBucket {
+        let mut bucket = FillExtrusionBucket::default();
+        let distance = meters * tile_units_per_meter(&tile);
+        bucket.add(polygon, &tile, 1, distance, &mut Tessellator::default());
+        bucket
+    }
+
     #[test]
-    fn layout_vertex_packs_the_position_and_wall_data() {
-        let v = FillExtrusionBucket::layout_vertex(Point::new(10, 20), 7, true, None);
-        assert_eq!(v.a1, [10, 20]);
-        assert_eq!(v.a2, [1, 7]);
+    fn an_outline_vertex_packs_its_position_and_wall() {
+        let v = outline_vertex(Point::new(10, 20), 7, true, None);
+        assert_eq!(v.pos, [10, 20]);
+        assert_eq!(v.decimals_ed, [1, 7]);
 
         // A normal along +y is three quarters of a turn from -π.
-        let v = FillExtrusionBucket::layout_vertex(Point::new(-2, 2), 9, false, Some(Point::new(0.0, 1.0)));
-        assert_eq!(v.a1, [-2, 2]);
-        assert_eq!(v.a2, [(12288 << 2) | 2, 9]);
+        let v = outline_vertex(Point::new(-2, 2), 9, false, Some(Point::new(0.0, 1.0)));
+        assert_eq!(v.pos, [-2, 2]);
+        assert_eq!(v.decimals_ed, [(12288 << 2) | 2, 9]);
         // -π and π are one direction.
-        let v = FillExtrusionBucket::layout_vertex(Point::new(0, 0), 0, false, Some(Point::new(-1.0, 0.0)));
-        assert_eq!(v.a2[0], 2);
+        let v = outline_vertex(Point::new(0, 0), 0, false, Some(Point::new(-1.0, 0.0)));
+        assert_eq!(v.decimals_ed[0], 2);
+    }
+
+    #[test]
+    fn corners_round_in_meters() {
+        let square = collection(&[&[(0, 0), (1000, 0), (1000, 1000), (0, 1000), (0, 0)]]);
+        let z16 = CanonicalTileID::new(16, 32768, 32768);
+        // A ring of n points has n vertices, each the roof's and a wall's.
+        assert_eq!(extrude(&square, 0.0, z16).vertices.len(), 5);
+        // Rounding replaces each of the 4 corners with 4 points.
+        assert_eq!(extrude(&square, 2.0, z16).vertices.len(), 17);
+        // At z0 a tile unit is about 5 km, and 2 m rounds to nothing.
+        assert_eq!(extrude(&square, 2.0, CanonicalTileID::new(0, 0, 0)).vertices.len(), 5);
+    }
+
+    #[test]
+    fn walls_on_clip_lines_leave_the_pattern_where_it_was() {
+        // The edge from (-64, 100) to (-64, 0) is a clip line, and has no
+        // wall to wrap the pattern around: the wall after it starts where
+        // the one before it ended.
+        let square = collection(&[&[(100, 100), (-64, 100), (-64, 0), (100, 0), (100, 100)]]);
+        let bucket = extrude(&square, 0.0, CanonicalTileID::new(16, 32768, 32768));
+        let edge_distances: Vec<u16> = bucket.vertices.get().iter().map(|v| v.decimals_ed[1]).collect();
+        assert_eq!(edge_distances, [0, 164, 164, 328, 428]);
+    }
+
+    #[test]
+    fn polygons_rounded_off_the_tile_have_no_roof() {
+        // Only the corner at (0, 100) is on the tile, and rounding cuts it
+        // off.
+        let triangle = collection(&[&[(0, 100), (-10, 90), (-10, 110), (0, 100)]]);
+        assert!(extrude(&triangle, 100.0, CanonicalTileID::new(16, 32768, 32768)).triangles.is_empty());
+    }
+
+    #[test]
+    fn a_meter_spans_more_tile_units_with_zoom_and_latitude() {
+        // A z16 tile at the equator spans about 611 m.
+        let equator = tile_units_per_meter(&CanonicalTileID::new(16, 32768, 32768));
+        assert!((equator - 8192.0 / 611.5).abs() < 0.01, "{equator}");
+        assert!((tile_units_per_meter(&CanonicalTileID::new(17, 65536, 65536)) / equator - 2.0).abs() < 1e-3);
+        // Near 60° N a meter is twice as many units.
+        let north = tile_units_per_meter(&CanonicalTileID::new(16, 32768, 19031));
+        assert!((north / equator - 2.0).abs() < 0.01, "{north}");
+    }
+
+    #[test]
+    fn a_wall_quad_holds_its_vertex_and_the_next_at_each_corner() {
+        let vertices: Vec<ExtrusionVertex> =
+            (0..3).map(|i| outline_vertex(Point::new(i, 1), i as u16, i == 2, None)).collect();
+        let quads = FillExtrusionBucket::wall_quad_vertices(&vertices);
+        assert_eq!(quads.len(), 4 * 3);
+        for (i, quad) in quads.chunks(4).enumerate() {
+            for (&corner, vertex) in WALL_CORNERS.iter().zip(quad) {
+                let next = vertices[(i + 1).min(2)];
+                assert_eq!(*vertex, WallVertex { corner, from: vertices[i], to: next });
+            }
+        }
     }
 
     fn normals(ring: &[(i16, i16)]) -> Vec<Option<(f64, f64)>> {

@@ -22,7 +22,7 @@ pub mod circle;
 // slice: off pub mod conformance;
 // slice: off pub mod custom;
 // slice: off pub mod fill;
-// slice: off pub mod fill_extrusion;
+pub mod fill_extrusion;
 // slice: off pub mod heatmap;
 // slice: off pub mod hillshade;
 // slice: off pub mod line;
@@ -38,7 +38,9 @@ pub use circle::{Circle, CircleLayer, CircleLayoutProperties, CirclePaintPropert
 // slice: off pub use color_relief::{ColorRelief, ColorReliefPaintProperties};
 // slice: off pub use custom::{Custom, CustomLayerHost};
 // slice: off pub use fill::{Fill, FillLayoutProperties, FillPaintProperties};
-// slice: off pub use fill_extrusion::{FillExtrusion, FillExtrusionLayoutProperties, FillExtrusionPaintProperties};
+pub use fill_extrusion::{
+    FillExtrusion, FillExtrusionLayer, FillExtrusionLayoutProperties, FillExtrusionPaintProperties,
+};
 // slice: off pub use heatmap::{Heatmap, HeatmapPaintProperties};
 // slice: off pub use hillshade::{Hillshade, HillshadePaintProperties};
 // slice: off pub use line::{Line, LineLayoutProperties, LinePaintProperties};
@@ -54,7 +56,7 @@ pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), Registe
     // slice: off     builder.add_layer_type::<Fill>()?;
     // slice: off     builder.add_layer_type::<Line>()?;
     builder.add_layer_type::<CircleLayer>()?;
-    // slice: off     builder.add_layer_type::<FillExtrusion>()?;
+    builder.add_layer_type::<FillExtrusionLayer>()?;
     // slice: off     builder.add_layer_type::<Heatmap>()?;
     // slice: off     builder.add_layer_type::<Raster>()?;
     // slice: off     builder.add_layer_type::<Hillshade>()?;
@@ -81,13 +83,13 @@ pub static PROGRAMS: &[&Program] = &[
     // slice: off     &line::programs::LINE_SDF,
     // slice: off     &line::programs::LINE_GRADIENT_SDF,
     &circle::programs::CIRCLE,
-    // slice: off     &fill_extrusion::programs::FILL_EXTRUSION,
-    // slice: off     &fill_extrusion::programs::FILL_EXTRUSION_INSTANCED,
-    // slice: off     &fill_extrusion::programs::FILL_EXTRUSION_WALL,
-    // slice: off     &fill_extrusion::programs::FILL_EXTRUSION_PULLED,
-    // slice: off     &fill_extrusion::programs::FILL_EXTRUSION_PATTERN,
-    // slice: off     &fill_extrusion::programs::FILL_EXTRUSION_PATTERN_INSTANCED,
-    // slice: off     &fill_extrusion::programs::FILL_EXTRUSION_PATTERN_WALL,
+    &fill_extrusion::programs::FILL_EXTRUSION,
+    &fill_extrusion::programs::FILL_EXTRUSION_INSTANCED,
+    &fill_extrusion::programs::FILL_EXTRUSION_WALL,
+    &fill_extrusion::programs::FILL_EXTRUSION_PULLED,
+    &fill_extrusion::programs::FILL_EXTRUSION_PATTERN,
+    &fill_extrusion::programs::FILL_EXTRUSION_PATTERN_INSTANCED,
+    &fill_extrusion::programs::FILL_EXTRUSION_PATTERN_WALL,
     // slice: off     &heatmap::programs::HEATMAP,
     // slice: off     &heatmap::programs::HEATMAP_TEXTURE,
     // slice: off     &raster::programs::RASTER,

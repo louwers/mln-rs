@@ -12,7 +12,7 @@ mln_gfx::uniform_block! {
         pub color_t: f32,
         pub pattern_from_t: f32,
         pub pattern_to_t: f32,
-        /// Where `FillExtrusionPulledShader` finds a vertex's paint values in
+        /// Where the pulled walls' shader finds a vertex's paint values in
         /// the buffer it reads them from, in words, a byte each from the
         /// lowest: how many a vertex takes, then the offset in them of its
         /// base, its height and its color.
