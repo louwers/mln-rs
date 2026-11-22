@@ -1,0 +1,89 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 128,
+      "height": 96
+    }
+  },
+  "org.maplibre:targets": [
+    {
+      "id": "t"
+    }
+  ],
+  "center": [20.0, 20.0],
+  "zoom": 3,
+  "sources": {
+    "discs": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Point",
+              "coordinates": [17.36328125, 20.82371053]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Point",
+              "coordinates": [19.47265625, 19.66929426]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Point",
+              "coordinates": [22.63671875, 20.49475573]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Point",
+              "coordinates": [16.8359375, 17.67104516]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#ffffff"
+      }
+    },
+    {
+      "id": "discs",
+      "type": "circle",
+      "org.maplibre:destination-target": "t",
+      "source": "discs",
+      "paint": {
+        "circle-color": "#e07020",
+        "circle-radius": 22,
+        "circle-blur": 1
+      }
+    },
+    {
+      "id": "process",
+      "type": "org.maplibre.image-process",
+      "org.maplibre:source-target": "t",
+      "org.maplibre:operations": [
+        {
+          "type": "threshold",
+          "cutoff": 128
+        }
+      ]
+    }
+  ]
+}

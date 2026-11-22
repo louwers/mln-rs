@@ -21,7 +21,7 @@ use crate::runner::{
 use crate::style_ops;
 
 /// The registry the tests draw with: the built-in layer and source types,
-/// and the extension layer types whose tests the suite runs.
+/// and the extensions whose tests the suite runs.
 #[must_use]
 pub fn registry() -> Arc<Registry> {
     static REGISTRY: LazyLock<Arc<Registry>> = LazyLock::new(|| {
@@ -29,7 +29,8 @@ pub fn registry() -> Arc<Registry> {
         // An empty builder has no name the types could clash with.
         let registered = mln_rs::register_builtins(&mut builder)
             .and_then(|()| mln_ngon::register(&mut builder))
-            .and_then(|()| mln_location_puck::register(&mut builder));
+            .and_then(|()| mln_location_puck::register(&mut builder))
+            .and_then(|()| mln_image_process::register(&mut builder));
         debug_assert_eq!(registered, Ok(()));
         builder.build()
     });

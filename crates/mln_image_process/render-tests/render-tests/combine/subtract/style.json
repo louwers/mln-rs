@@ -1,0 +1,100 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 96,
+      "height": 64
+    }
+  },
+  "org.maplibre:targets": [
+    {
+      "id": "a"
+    },
+    {
+      "id": "b"
+    }
+  ],
+  "center": [20.0, 20.0],
+  "zoom": 3,
+  "sources": {
+    "pair": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "disc"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [19.296875, 20.0]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "square"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [19.6484375, 21.31579594],
+                  [22.4609375, 21.31579594],
+                  [22.4609375, 18.67311369],
+                  [19.6484375, 18.67311369],
+                  [19.6484375, 21.31579594]
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#ffffff"
+      }
+    },
+    {
+      "id": "disc",
+      "type": "circle",
+      "org.maplibre:destination-target": "a",
+      "source": "pair",
+      "filter": ["==", ["get", "kind"], "disc"],
+      "paint": {
+        "circle-color": "#2060d0",
+        "circle-radius": 22
+      }
+    },
+    {
+      "id": "square",
+      "type": "fill",
+      "org.maplibre:destination-target": "b",
+      "source": "pair",
+      "filter": ["==", ["get", "kind"], "square"],
+      "paint": {
+        "fill-color": "#f0a020",
+        "fill-opacity": 0.8
+      }
+    },
+    {
+      "id": "process",
+      "type": "org.maplibre.image-process",
+      "org.maplibre:source-target": "a",
+      "org.maplibre:operations": [
+        {
+          "type": "combine",
+          "target": "b",
+          "mode": "subtract"
+        }
+      ]
+    }
+  ]
+}

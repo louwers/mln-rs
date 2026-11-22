@@ -1,0 +1,4 @@
+{
+  "base_test_path": ".",
+  "cache_path": "../../../tools/render-test/testdata/metrics/cache-style.db"
+}

@@ -34,11 +34,12 @@
 //! ([`Destination`], a value of the layer), where a layer reads it
 //! ([`UpdateCx::target`](crate::layer::UpdateCx::target)). The engine knows
 //! no key that holds these values: an extension declares the keys
-//! ([`StyleKey`](mln_style::style_key::StyleKey)). A group draws into a
-//! named target as onto the map, with the masks of its tiles and within the
-//! frame's scissor, but each draw over the last, without the opaque pass's
-//! depth, with no composite of a blend that reads what is behind it, and
-//! with no commands lent in the pass.
+//! ([`StyleKey`](mln_style::style_key::StyleKey)), as the
+//! `mln_image_process` crate does, with a layer type that reads targets. A
+//! group draws into a named target as onto the map, with the masks of its
+//! tiles and within the frame's scissor, but each draw over the last,
+//! without the opaque pass's depth, with no composite of a blend that reads
+//! what is behind it, and with no commands lent in the pass.
 //!
 //! The resources and their handles belong to the renderer's thread: they
 //! are neither `Send` nor `Sync`.

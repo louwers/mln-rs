@@ -1,0 +1,86 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 160,
+      "height": 96
+    }
+  },
+  "org.maplibre:targets": [
+    {
+      "id": "glow"
+    }
+  ],
+  "center": [20.0, 20.0],
+  "zoom": 3,
+  "sources": {
+    "road": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "LineString",
+              "coordinates": [
+                [13.84765625, 17.50348037],
+                [18.2421875, 21.64294166],
+                [21.7578125, 18.33973174],
+                [26.15234375, 22.45755118]
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#202838"
+      }
+    },
+    {
+      "id": "glow-source",
+      "type": "line",
+      "org.maplibre:destination-target": "glow",
+      "source": "road",
+      "paint": {
+        "line-color": "#ffffff",
+        "line-width": 6
+      }
+    },
+    {
+      "id": "glow",
+      "type": "org.maplibre.image-process",
+      "org.maplibre:source-target": "glow",
+      "org.maplibre:operations": [
+        {
+          "type": "blur",
+          "size": 5
+        },
+        {
+          "type": "color",
+          "value": "#ffd040"
+        },
+        {
+          "type": "opacity",
+          "value": 0.9
+        }
+      ]
+    },
+    {
+      "id": "road",
+      "type": "line",
+      "source": "road",
+      "paint": {
+        "line-color": "#fff4c0",
+        "line-width": 2
+      }
+    }
+  ]
+}

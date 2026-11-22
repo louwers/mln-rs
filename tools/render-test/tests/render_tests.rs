@@ -1,5 +1,5 @@
 // Every render and query test of the shared suite on the Rust renderer, and
-// those of the extension layer types that the runner's registry adds
+// those of the extensions that the runner's registry adds
 // (src/map.rs). The port's ignore file (ignores/rust-port.json) lists what
 // of the shared suite is expected to fail.
 
@@ -19,11 +19,12 @@ fn render_tests_through_the_codec() {
     assert_eq!(suite::run("render_tests_through_the_codec", &["--tileWorkerCodec", "2"], factory), 0);
 }
 
-/// The manifests of the extension layer types' own tests, which expect the
-/// same images on every backend.
-const EXTENSIONS: [(&str, &str); 2] = [
+/// The manifests of the extensions' own tests, which expect the same images
+/// on every backend.
+const EXTENSIONS: [(&str, &str); 3] = [
     ("ngon", "../../crates/mln_ngon/render-tests/manifest.json"),
     ("location_puck", "../../crates/mln_location_puck/render-tests/manifest.json"),
+    ("image_process", "../../crates/mln_image_process/render-tests/manifest.json"),
 ];
 
 #[test]

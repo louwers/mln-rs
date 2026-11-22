@@ -1,0 +1,151 @@
+use std::sync::Arc;
+
+use mln_rs::layer::{
+    Buffer, Color, Depth, Draw, Draws, IndexBuffer, Layer, Mesh, MeshDesc, NewCx, NoTiles, PrepareCx, SamplerState,
+    Size, Target, Texture, TextureChannelDataType, TextureFilterType, TextureWrapType, UpdateCx,
+};
+use mln_rs::mln_util::logging::{Event, Log};
+
+use crate::ImageProcess;
+use crate::keys::{Operations, SourceTarget};
+use crate::plan::plan;
+use crate::program::{PROCESS, Process};
+
+/// How a pass samples its textures: linearly, what lies past their edges
+/// as what is at them.
+const LINEAR: SamplerState = SamplerState {
+    filter: TextureFilterType::Linear,
+    wrap_u: TextureWrapType::Clamp,
+    wrap_v: TextureWrapType::Clamp,
+    max_anisotropy: 1,
+    mipmapped: false,
+};
+
+/// An `org.maplibre.image-process` layer: a quad over what it draws into,
+/// the scratch targets of its passes but the last, and the passes it draws.
+pub struct ImageProcessLayer {
+    corners: Buffer<[i16; 2]>,
+    quad: IndexBuffer,
+    scratch: Vec<Target>,
+    /// The passes of the last frame, then spare ones of earlier frames.
+    passes: Vec<Pass>,
+    /// How many of `passes` the frame draws.
+    drawn: usize,
+    /// The undeclared target the layer last warned it can't read.
+    warned: Option<Arc<str>>,
+}
+
+/// A pass the layer draws: its mesh, with the textures it samples, and its
+/// block.
+struct Pass {
+    textures: [Texture; 2],
+    mesh: Mesh,
+    block: Process,
+}
+
+impl Layer for ImageProcessLayer {
+    type Style = ImageProcess;
+    type Input = NoTiles;
+    type Tile = ();
+
+    fn new(cx: &mut NewCx<'_, Self>) -> Self {
+        ImageProcessLayer {
+            corners: cx.res.buffer(&[[0, 0], [1, 0], [0, 1], [1, 1]]),
+            quad: cx.res.index_buffer(&[0, 1, 2, 1, 2, 3]),
+            scratch: Vec::new(),
+            passes: Vec::new(),
+            drawn: 0,
+            warned: None,
+        }
+    }
+
+    fn update(&mut self, cx: &mut UpdateCx<'_, Self>) {
+        self.drawn = self.update_passes(cx).unwrap_or(0);
+    }
+
+    fn prepare(&self, _cx: &PrepareCx<'_, Self>, out: &mut Draws) {
+        let Some((last, passes)) = self.passes[..self.drawn].split_last() else { return };
+        let draw = Draw { depth: Depth::Off, ..Draw::DEFAULT };
+        for (pass, target) in passes.iter().zip(&self.scratch) {
+            out.target(target).block(&pass.block).push(&pass.mesh, draw, ());
+        }
+        out.main().block(&last.block).push(&last.mesh, draw, ());
+    }
+}
+
+impl ImageProcessLayer {
+    /// Brings the frame's passes up to date, and returns how many it draws:
+    /// `None` where the layer reads a target the style doesn't declare, or
+    /// has no source target.
+    fn update_passes(&mut self, cx: &mut UpdateCx<'_, Self>) -> Option<usize> {
+        let layer = cx.layer;
+        let style = &layer.style;
+        let SourceTarget(source) = style.extra::<SourceTarget>()?;
+        let operations = style.extra::<Operations>().map_or(&[][..], |operations| &operations.0[..]);
+        let frame = cx.frame.target_size;
+        let ratio = cx.frame.pixel_ratio;
+        let logical = Size::new(
+            (frame.width as f32 / ratio).ceil().max(1.0) as u32,
+            (frame.height as f32 / ratio).ceil().max(1.0) as u32,
+        );
+        let passes = plan(operations, cx.frame.camera.zoom() as f32, frame, logical);
+        let mut input = self.read(cx, source)?;
+        for (index, pass) in passes.iter().enumerate() {
+            let other = match &pass.other {
+                Some(other) => self.read(cx, other)?,
+                None => input.clone(),
+            };
+            let next = (index + 1 < passes.len()).then(|| self.scratch(cx, index, pass.size));
+            self.pass(cx, index, [input, other], &pass.block);
+            let Some(next) = next else { break };
+            input = next;
+        }
+        Some(passes.len())
+    }
+
+    /// The named target `name`, which the layer reads in the frame, or
+    /// `None`, with a warning, for a target the style doesn't declare.
+    fn read(&mut self, cx: &mut UpdateCx<'_, Self>, name: &Arc<str>) -> Option<Texture> {
+        let texture = cx.target(name);
+        if texture.is_none() && self.warned.as_ref() != Some(name) {
+            let id = &cx.layer.style.id;
+            let message =
+                format!("Layer \"{id}\" draws nothing: it reads \"{name}\", which is no target the style declares");
+            Log::warning(Event::Render, message);
+            self.warned = Some(Arc::clone(name));
+        }
+        texture
+    }
+
+    /// The texture of the scratch target of the pass at `index`, `size`
+    /// texels.
+    fn scratch(&mut self, cx: &mut UpdateCx<'_, Self>, index: usize, size: Size) -> Texture {
+        if index == self.scratch.len() {
+            let clear = Color::new(0.0, 0.0, 0.0, 0.0);
+            self.scratch.push(cx.res.target(size, TextureChannelDataType::HalfFloat, clear));
+        }
+        let target = &self.scratch[index];
+        cx.res.resize(target, size);
+        target.texture().clone()
+    }
+
+    /// Makes the pass at `index` sample `textures` with `block`, with a mesh
+    /// made again only for other textures.
+    fn pass(&mut self, cx: &mut UpdateCx<'_, Self>, index: usize, textures: [Texture; 2], block: &Process) {
+        if let Some(pass) = self.passes.get_mut(index).filter(|pass| pass.textures == textures) {
+            pass.block = *block;
+            return;
+        }
+        let mesh = {
+            let mut desc = MeshDesc::new(&PROCESS, &self.quad);
+            desc.vertices(&self.corners).texture(&textures[0], LINEAR).texture(&textures[1], LINEAR);
+            cx.res.mesh(&desc)
+        };
+        let pass = Pass { textures, mesh, block: *block };
+        if index == self.passes.len() {
+            self.passes.push(pass);
+        } else {
+            self.passes[index] = pass;
+        }
+    }
+}

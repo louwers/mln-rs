@@ -1,0 +1,105 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 160,
+      "height": 96,
+      "pixelRatio": 2
+    }
+  },
+  "org.maplibre:targets": [
+    {
+      "id": "t"
+    }
+  ],
+  "center": [20.0, 20.0],
+  "zoom": 3,
+  "sources": {
+    "blobs": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Point",
+              "coordinates": [14.90234375, 20.0]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Point",
+              "coordinates": [16.66015625, 19.66929426]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Point",
+              "coordinates": [20.0, 20.98791972]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Point",
+              "coordinates": [23.515625, 19.83473319]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Point",
+              "coordinates": [24.5703125, 18.67311369]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#ffffff"
+      }
+    },
+    {
+      "id": "discs",
+      "type": "circle",
+      "org.maplibre:destination-target": "t",
+      "source": "blobs",
+      "paint": {
+        "circle-color": "#000000",
+        "circle-radius": 9
+      }
+    },
+    {
+      "id": "process",
+      "type": "org.maplibre.image-process",
+      "org.maplibre:source-target": "t",
+      "org.maplibre:operations": [
+        {
+          "type": "blur",
+          "size": 6
+        },
+        {
+          "type": "threshold",
+          "cutoff": 80
+        },
+        {
+          "type": "color",
+          "value": "#108880"
+        }
+      ]
+    }
+  ]
+}

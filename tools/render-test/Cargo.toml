@@ -32,7 +32,8 @@ mln_headless.workspace = true
 mln_image.workspace = true
 mln_map_types.workspace = true
 mln_math.workspace = true
-# The extension layer types whose render and query tests the suite runs.
+# The extensions whose render and query tests the suite runs.
+mln_image_process.workspace = true
 mln_location_puck.workspace = true
 mln_ngon.workspace = true
 mln_render.workspace = true

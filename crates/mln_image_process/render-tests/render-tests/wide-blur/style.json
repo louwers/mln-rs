@@ -1,0 +1,80 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 192,
+      "height": 128
+    }
+  },
+  "org.maplibre:targets": [
+    {
+      "id": "t"
+    }
+  ],
+  "center": [20.0, 20.0],
+  "zoom": 3,
+  "sources": {
+    "spot": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [17.890625, 21.96934787],
+                  [22.109375, 21.96934787],
+                  [22.109375, 18.00570552],
+                  [17.890625, 18.00570552],
+                  [17.890625, 21.96934787]
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#ffffff"
+      }
+    },
+    {
+      "id": "spot",
+      "type": "fill",
+      "org.maplibre:destination-target": "t",
+      "source": "spot",
+      "paint": {
+        "fill-color": "#c02040"
+      }
+    },
+    {
+      "id": "process",
+      "type": "org.maplibre.image-process",
+      "org.maplibre:source-target": "t",
+      "org.maplibre:operations": [
+        {
+          "type": "blur",
+          "size": 30
+        }
+      ]
+    },
+    {
+      "id": "spot-on-map",
+      "type": "line",
+      "source": "spot",
+      "paint": {
+        "line-color": "#c02040",
+        "line-width": 1
+      }
+    }
+  ]
+}
