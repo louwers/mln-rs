@@ -3411,7 +3411,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
 
+#if !defined(HAS_UNIFORM_u_outline_color) || !defined(HAS_UNIFORM_u_opacity)
     device const FillOutlineDrawableUBO& drawable = drawableVector[uboIndex].fillOutlineDrawableUBO;
+#endif
 
     const float2 position = float2(vertx.position);
     const float4 clip = projectTile(position, position, projectionVector[uboIndex]);
@@ -3468,7 +3470,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]]) {
 
     device const FillOutlinePatternDrawableUBO& drawable = drawableVector[uboIndex].fillOutlinePatternDrawableUBO;
+#if defined(HAS_UNIFORM_u_pattern_from) || defined(HAS_UNIFORM_u_pattern_to)
     device const FillOutlinePatternTilePropsUBO& tileProps = tilePropsVector[uboIndex].fillOutlinePatternTilePropsUBO;
+#endif
 
 #if defined(HAS_UNIFORM_u_pattern_from)
     const auto pattern_from = tileProps.pattern_from;
