@@ -339,5 +339,8 @@ fn a_reader_of_an_undeclared_target_draws_nothing() {
     warnings();
     let layers = [layer(BACKGROUND, None, ""), layer(FILL, Some("t"), ""), copy("lost", "elsewhere", None)];
     assert_background(&render(&style(Some(r#"[{"id":"t"}]"#), &layers)));
-    assert_warned("lost", "draws nothing");
+    assert_warned("lost", "reads nothing");
+    let layers = [layer(BACKGROUND, None, ""), copy("lost-untargeted", "elsewhere", None)];
+    assert_background(&render(&style(None, &layers)));
+    assert_warned("lost-untargeted", "reads nothing");
 }

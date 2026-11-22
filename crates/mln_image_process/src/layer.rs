@@ -1,10 +1,7 @@
-use std::sync::Arc;
-
 use mln_rs::layer::{
     Buffer, Color, Depth, Draw, Draws, IndexBuffer, Layer, Mesh, MeshDesc, NewCx, NoTiles, PrepareCx, SamplerState,
     Size, Target, Texture, TextureChannelDataType, TextureFilterType, TextureWrapType, UpdateCx,
 };
-use mln_rs::mln_util::logging::{Event, Log};
 
 use crate::ImageProcess;
 use crate::keys::{Operations, SourceTarget};
@@ -31,8 +28,6 @@ pub struct ImageProcessLayer {
     passes: Vec<Pass>,
     /// How many of `passes` the frame draws.
     drawn: usize,
-    /// The undeclared target the layer last warned it can't read.
-    warned: Option<Arc<str>>,
 }
 
 /// A pass the layer draws: its mesh, with the textures it samples, and its
@@ -55,7 +50,6 @@ impl Layer for ImageProcessLayer {
             scratch: Vec::new(),
             passes: Vec::new(),
             drawn: 0,
-            warned: None,
         }
     }
 
@@ -89,10 +83,10 @@ impl ImageProcessLayer {
             (frame.height as f32 / ratio).ceil().max(1.0) as u32,
         );
         let passes = plan(operations, cx.frame.camera.zoom() as f32, frame, logical);
-        let mut input = self.read(cx, source)?;
+        let mut input = cx.target(source)?;
         for (index, pass) in passes.iter().enumerate() {
             let other = match &pass.other {
-                Some(other) => self.read(cx, other)?,
+                Some(other) => cx.target(other)?,
                 None => input.clone(),
             };
             let next = (index + 1 < passes.len()).then(|| self.scratch(cx, index, pass.size));
@@ -101,20 +95,6 @@ impl ImageProcessLayer {
             input = next;
         }
         Some(passes.len())
-    }
-
-    /// The named target `name`, which the layer reads in the frame, or
-    /// `None`, with a warning, for a target the style doesn't declare.
-    fn read(&mut self, cx: &mut UpdateCx<'_, Self>, name: &Arc<str>) -> Option<Texture> {
-        let texture = cx.target(name);
-        if texture.is_none() && self.warned.as_ref() != Some(name) {
-            let id = &cx.layer.style.id;
-            let message =
-                format!("Layer \"{id}\" draws nothing: it reads \"{name}\", which is no target the style declares");
-            Log::warning(Event::Render, message);
-            self.warned = Some(Arc::clone(name));
-        }
-        texture
     }
 
     /// The texture of the scratch target of the pass at `index`, `size`

@@ -814,7 +814,8 @@ impl<L: Layer> UpdateCx<'_, L> {
     /// The texture of the style's named target `name`
     /// ([`NamedTarget`](crate::draw::NamedTarget)), to sample, as every
     /// layer that draws into it draws it this frame, wherever it is among
-    /// the layers; `None` for a name the style doesn't declare. A layer
+    /// the layers; `None`, with a warning once per version of the style,
+    /// for a name the style doesn't declare. A layer
     /// that samples a named target asks for it in each frame's update: the
     /// frame draws the target before what the layer draws, its own targets
     /// included. A layer that reads the target it draws into draws on the

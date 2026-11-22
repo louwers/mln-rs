@@ -68,6 +68,7 @@ const DEPTH_STENCIL: TextureFormat = TextureFormat::Depth24PlusStencil8;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Warning {
     Undeclared,
+    Unread,
     Volume,
     Cycle,
     Backdrop,
@@ -96,6 +97,9 @@ pub(crate) struct Routes {
     warned: HashSet<(String, Warning)>,
     /// The targets that the layer being updated asked to read.
     asked: Vec<usize>,
+    /// The first name that the layer being updated asked to read and the
+    /// style doesn't declare.
+    missed: Option<Box<str>>,
     /// The frame's layers that draw, by index among the renderer's, in the
     /// layers' order. The routes name a layer by its place among them.
     layers: Vec<usize>,
@@ -171,13 +175,15 @@ impl Routes {
     /// through.
     pub(crate) fn reads(&mut self) -> TargetReads<'_> {
         self.asked.clear();
-        TargetReads { targets: &self.targets, asked: &mut self.asked }
+        self.missed = None;
+        TargetReads { targets: &self.targets, asked: &mut self.asked, missed: &mut self.missed }
     }
 
     /// Routes the frame's layer at `index`, `id`, whose style draws it into
     /// `destination`, once its update read the targets it asked for:
     /// returns the index of the target it draws into, `None` for the map. A
-    /// layer of 3D geometry (`volume`) draws on the map.
+    /// layer of 3D geometry (`volume`) draws on the map. Warns of a target
+    /// it asked for that the style doesn't declare.
     #[inline]
     pub(crate) fn route(
         &mut self,
@@ -186,6 +192,9 @@ impl Routes {
         destination: Option<&Destination>,
         volume: bool,
     ) -> Option<usize> {
+        if let Some(name) = self.missed.take() {
+            self.warn(id, Warning::Unread, || format!("\"{name}\" is no target the style declares"));
+        }
         // Without targets, a layer reads none, and draws on the map.
         if self.targets.is_empty() && destination.is_none() {
             return None;
@@ -268,12 +277,14 @@ impl Routes {
 
     /// Warns, once for this version of the style, that the layer `id` draws
     /// otherwise than its style says, as `why` says.
+    #[cold]
     fn warn(&mut self, id: &str, warning: Warning, why: impl FnOnce() -> String) {
         if !self.warned.insert((id.to_owned(), warning)) {
             return;
         }
         let does = match warning {
             Warning::Undeclared | Warning::Volume | Warning::Cycle => "draws on the map",
+            Warning::Unread => "reads nothing of a target it asked for",
             Warning::Backdrop => "draws into its target without its layer blend",
             Warning::Lend => "draws into its target without the commands it asked to be lent in the pass",
         };
@@ -373,12 +384,17 @@ pub(crate) struct TargetReads<'a> {
     targets: &'a [(NamedTarget, Target)],
     /// The targets the layer asked to read, by index.
     asked: &'a mut Vec<usize>,
+    /// The first name it asked for that the style doesn't declare.
+    missed: &'a mut Option<Box<str>>,
 }
 
 impl TargetReads<'_> {
     /// The texture of the target `name`, which the layer reads in the frame.
     pub(crate) fn read(&mut self, name: &str) -> Option<Texture> {
-        let index = self.targets.iter().position(|(target, _)| *target.name == *name)?;
+        let Some(index) = self.targets.iter().position(|(target, _)| *target.name == *name) else {
+            self.missed.get_or_insert_with(|| name.into());
+            return None;
+        };
         if !self.asked.contains(&index) {
             self.asked.push(index);
         }
