@@ -170,17 +170,20 @@ fn render_tiles(
     still(style, tile, false, &[]).map(|(mut stills, ..)| stills.remove(0).0)
 }
 
+/// Stills, each with the view that drew it, and the map and the frontend
+/// that drew the last.
+type Stills = (Vec<(PremultipliedImage, View)>, Map, HeadlessFrontend);
+
 /// The still image of `style` over the tiles that `tile` makes, as
 /// [`render_tiles`] draws it, with the center standing on the ground if
 /// `clamped`, seen from the style's camera and then at each of `zooms` in
-/// turn: each still with the view that drew it, and the map and the
-/// frontend that drew the last.
+/// turn.
 fn still(
     style: &str,
     tile: impl Fn(&str, &TileData) -> Vec<u8> + Send + Sync + 'static,
     clamped: bool,
     zooms: &[f64],
-) -> Option<(Vec<(PremultipliedImage, View)>, Map, HeadlessFrontend)> {
+) -> Option<Stills> {
     let size = Size::new(SIDE, SIDE);
     let run_loop = Queue::new();
     let pool = Pool::new(4);
