@@ -194,9 +194,12 @@ impl Resources {
     }
 
     /// `texture`, to change: the meshes that sample it see the change.
-    /// `None` for a texture that other resources made.
+    /// `None` for a texture that other resources made, and for a target's
+    /// ([`Target::texture`](crate::draw::Target::texture)), which only its
+    /// draws change.
     pub fn texture_mut(&mut self, texture: &crate::draw::Texture) -> Option<TextureMut<'_>> {
-        Some(TextureMut::new(self.textures.get_mut(&texture.0)?))
+        let texture = self.textures.get_mut(&texture.0).filter(|texture| !texture.is_render_target())?;
+        Some(TextureMut::new(texture))
     }
 
     /// A target of `size` texels with RGBA channels of `channel`, or of
@@ -238,11 +241,12 @@ impl Resources {
         })
     }
 
-    /// Makes `target` `size` texels from its next draws on, unless it is.
-    /// What it held goes, and its meshes sample the new texture.
+    /// Makes `target` `size` texels from its next draws on, unless it
+    /// already is that size. What it held goes, and its meshes sample the
+    /// new texture.
     pub fn resize(&mut self, target: &crate::draw::Target, size: Size) {
-        if let Some(mut texture) = self.texture_mut(&target.texture) {
-            texture.set_size(size);
+        if let Some(texture) = self.textures.get_mut(&target.texture.0) {
+            TextureMut::new(texture).set_size(size);
         }
     }
 

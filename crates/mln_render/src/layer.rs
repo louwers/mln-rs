@@ -1431,7 +1431,9 @@ impl<S: StyleLayerType> BuildCx<'_, S> {
     /// Whether the renderer's device rasterizes on the CPU
     /// ([`Caps::cpu_rasterizer`](mln_gfx::gpu::Caps::cpu_rasterizer)), where
     /// an instance of a mesh costs about as much as a mesh of its own: a
-    /// bucket may hold copies of what it draws as instances elsewhere.
+    /// bucket may hold copies of what it draws as instances elsewhere. A
+    /// bucket is laid out for the renderer whose tiles it is in, and draws
+    /// on that renderer's device.
     #[must_use]
     pub fn cpu_rasterizer(&self) -> bool {
         self.cpu_rasterizer

@@ -419,9 +419,14 @@ impl Pushes {
         }
 
         // A draw of a program with blocks of its own writes them to its
-        // mesh's buffers.
+        // mesh's buffers, so its mesh draws once.
         let own = program.projection == Projection::Own;
         if own || blocks_of_each_draw(program).any(|(_, _, stride)| stride.is_none()) {
+            debug_assert!(
+                drawn().enumerate().all(|(i, pushed)| drawn().take(i).all(|before| before.mesh != pushed.mesh)),
+                "a mesh of {} with blocks of its own that draws twice",
+                program.name
+            );
             for pushed in drawn() {
                 let Some(mut objects) = context.take_mesh(pushed.mesh) else { continue };
                 let mut start = pushed.blocks;

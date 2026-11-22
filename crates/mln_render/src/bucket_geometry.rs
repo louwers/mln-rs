@@ -1,21 +1,19 @@
-// Where a bucket's vertices and indices live once the render thread draws
-// them.
-//
-// Buckets cross from the worker threads, so they hold plain vectors
-// (`GpuVec`). A bucket's upload moves each vector into a buffer of the
-// resources, which the meshes of the bucket's tile share, so the bucket and
-// the meshes don't each keep a copy; the tile keeps the buffers, by the key
-// of the vector they were made of, in a `BucketGeometry`. The stores free
-// the data once it is in a GPU buffer.
-//
-// A copy of a vector keeps its key. The tiles of a tile's other world
-// copies hold copies of its buckets, and the upload of either takes what
-// the other already moved into the stores, freeing its own copy.
-//
-// In the browser, the arrays a bucket gets from a tile worker in another
-// wasm instance stay the JS arrays they arrived in (mln_util::host_bytes)
-// and move to the store as they are, which uploads them from there.
-// Anything that reads or changes them first copies them into wasm memory.
+//! Where a bucket's vertices and indexes are once the renderer's thread
+//! draws them.
+//!
+//! A bucket holds plain vectors ([`GpuVec`]), which cross from the tile
+//! workers. Its upload moves each vector into a buffer of the resources,
+//! which the meshes of the bucket's tile share, and the tile keeps the
+//! buffers by the key of the vector they were made of ([`BucketGeometry`]).
+//! A copy of a vector keeps its key: the tiles of a tile's other world
+//! copies hold copies of its buckets, whose upload shares the buffers that
+//! the first upload made and frees its own copy, but for a vector the bucket
+//! keeps, of which each world copy has a buffer of its own.
+//!
+//! In the browser, the arrays that a bucket gets from a tile worker in
+//! another wasm instance stay the JS arrays they arrived in
+//! (`mln_util::host_bytes`) and upload from there; what reads or changes
+//! them first copies them into wasm memory.
 
 use std::any::Any;
 use std::borrow::Cow;

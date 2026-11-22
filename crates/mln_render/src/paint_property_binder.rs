@@ -99,7 +99,6 @@ impl InterleavedVertexBuffer {
         data.resize(data.len() + added, 0);
         populate(self);
         self.vertex_count += length - self.vertex_count;
-        // The render thread copies the vector when it builds draws.
     }
 
     /// The vertices' size in bytes: their fields' sizes and padding.

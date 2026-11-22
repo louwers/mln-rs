@@ -48,6 +48,11 @@ impl Pending {
 }
 
 impl Texture2D {
+    /// Whether passes draw into the texture.
+    pub(crate) fn is_render_target(&self) -> bool {
+        self.render_target
+    }
+
     /// An RGBA texture without a size.
     pub(crate) fn new() -> Texture2D {
         Texture2D {
