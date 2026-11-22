@@ -26,7 +26,7 @@ mln_map.workspace = true
 mln_renderer.workspace = true
 # The devices and offscreen targets the frontend renders on, of every
 # backend.
-mln_runtime = { workspace = true, features = ["default"] }
+mln_runtime = { workspace = true, features = ["default", "webgpu"] }
 mln_text.workspace = true
 mln_util.workspace = true
 parking_lot.workspace = true

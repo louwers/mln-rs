@@ -12,6 +12,12 @@
 //!
 //! GeoJSON is the `geojson` crate's and feature geometry is `geo_types`'.
 //! Both crates are re-exported.
+//!
+//! Each backend is a feature, which re-exports its crate: `metal`
+//! (`mln_mtl`), `vulkan` (`mln_vulkan`), `d3d12` (`mln_d3d12`), `gl`
+//! (`mln_gl`) and `webgpu` (`mln_webgpu`). All but `webgpu` are on by
+//! default; natively, wgpu renders through the same APIs as the others, so
+//! turn it on to share a wgpu device or surface with the map.
 
 pub use feature;
 pub use geo_types;
@@ -20,18 +26,21 @@ pub use geometry;
 pub use glam;
 pub use mln_conversion;
 /// Empty except on Windows.
+#[cfg(feature = "d3d12")]
 pub use mln_d3d12;
 pub use mln_expression;
 pub use mln_frame_pacer;
 pub use mln_geojson;
 pub use mln_gestures;
 pub use mln_gfx;
+#[cfg(feature = "gl")]
 pub use mln_gl;
 pub use mln_image;
 pub use mln_map;
 pub use mln_map_types;
 pub use mln_math;
 /// Empty except on Apple platforms.
+#[cfg(feature = "metal")]
 pub use mln_mtl;
 pub use mln_renderer;
 // Every runtime type is at the root, so the root can't miss one that a
@@ -49,8 +58,10 @@ pub use mln_tile_id;
 pub use mln_util;
 pub use mln_vec_map;
 /// Empty on Apple platforms and in the browser build.
+#[cfg(feature = "vulkan")]
 pub use mln_vulkan;
 /// Empty except in the browser build.
 pub use mln_web_host;
+#[cfg(feature = "webgpu")]
 pub use mln_webgpu;
 pub use polylabel;

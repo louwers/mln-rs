@@ -16,9 +16,9 @@
 // -o/--offline, --network NETWORK, --disable-cache,
 // -s/--style URL, -c/--cache FILE, -x/--lon, -y/--lat, -a/--alt, --fov,
 // -z/--zoom, --bearing, -p/--pitch, -r/--roll,
-// -P/--maxPitch, --backend (metal, the default on macOS, webgpu: wgpu, the
-// default elsewhere, vulkan, elsewhere than on Apple's platforms, d3d12, on
-// Windows, or opengl: OpenGL ES, on Linux; see backend.rs), and for checking
+// -P/--maxPitch, --backend (metal, on macOS, vulkan, elsewhere than on
+// Apple's platforms, d3d12, on Windows, opengl: OpenGL ES, on Linux, or
+// webgpu: wgpu; by default the library's pick, see backend.rs), and for checking
 // the app:
 // --readback FILE.png (write the map once it is idle, without the controls,
 // see view.rs), --quit-after SECONDS, --gesture-test (scripted input through
@@ -80,9 +80,10 @@ const USAGE: &str = "  mln-desktop {OPTIONS}
       -p[degrees], --pitch=[degrees]    Pitch
       -r[degrees], --roll=[degrees]     Roll
       -P[degrees], --maxPitch=[degrees] Max Pitch
-      --backend=[backend]               Rendering backend: metal (macOS), webgpu,
-                                        vulkan (not macOS), d3d12 (Windows) or
-                                        opengl (Linux)
+      --backend=[backend]               Rendering backend: metal (macOS), vulkan
+                                        (not macOS), d3d12 (Windows), opengl
+                                        (Linux) or webgpu; by default the
+                                        library's pick
       --readback=[file.png]             Write the map once it is idle
       --quit-after=[seconds]            Close the window after this time
       --gesture-test                    Replay scripted input, log the camera, quit
@@ -116,7 +117,8 @@ pub(crate) struct Args {
     pub(crate) gesture_test: bool,
     pub(crate) free_bearing: bool,
     pub(crate) no_system_fonts: bool,
-    pub(crate) backend: backend::Kind,
+    /// `None` renders on the device that the library picks.
+    pub(crate) backend: Option<backend::Kind>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -179,7 +181,7 @@ fn parse_args() -> Result<Args, String> {
             "gesture-test" => args.gesture_test = true,
             "free-bearing" => args.free_bearing = true,
             "no-system-fonts" => args.no_system_fonts = true,
-            "backend" => args.backend = backend::Kind::parse(&value(&name)?)?,
+            "backend" => args.backend = Some(backend::Kind::parse(&value(&name)?)?),
             _ => return Err(format!("Flag could not be matched: {name}")),
         }
     }

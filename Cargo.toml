@@ -194,7 +194,8 @@ pollster = { version = "1.0.1" }
 # The difftests' property tests.
 proptest = { version = "1.12.0" }
 # The windows of window targets (mln_gfx::Window), as winit and others hand them out.
-raw-window-handle = { version = "0.6.2" }
+# `alloc`: an `Arc` of a window is one too.
+raw-window-handle = { version = "0.6.2", features = ["alloc"] }
 regex = { version = "1.13.1" }
 # tools/render-test's JSON (with serde_json), mln_sprite's sprite index, and
 # the types that cross to a tile worker in another wasm instance (rc: the
@@ -352,6 +353,7 @@ objc2-quartz-core = { version = "0.3.2", default-features = false, features = [
   "objc2-metal",
   "CALayer",
   "CAMetalLayer",
+  "CATransaction",
 ] }
 # examples/web: the browser's API through wasm-bindgen (whose CLI must be
 # this exact version).
@@ -422,7 +424,8 @@ gpu-allocator = { version = "0.28.0", default-features = false, features = [
 # Vulkan and HLSL for D3D12. The GLSL front end needs a module that only
 # `wgsl-in` or `spv-in` builds.
 naga = { version = "30.0.1", features = ["glsl-in", "wgsl-in"] }
-# examples/desktop: the CAMetalLayer of the window's view on macOS.
+# The CAMetalLayer of a window's view on Apple platforms: crates/mln_mtl's
+# window surfaces, and examples/desktop's.
 raw-window-metal = { version = "1.1.0" }
 # examples/desktop's window and input. On Linux it loads the X11 and Wayland
 # libraries at run time (`wayland-dlopen`, x11-dl), so builds need no system
@@ -529,6 +532,16 @@ include = ["/src", "/LICENSE.md"]
 keywords = ["maplibre", "map", "vector-tiles", "gis", "rendering"]
 categories = ["graphics", "rendering::engine", "science::geo"]
 
+# The backends that sessions render with (crates/mln_runtime/Cargo.toml),
+# each with its crate re-exported: by default the native ones.
+[features]
+default = ["metal", "vulkan", "d3d12", "gl"]
+webgpu = ["mln_runtime/webgpu", "dep:mln_webgpu"]
+metal = ["mln_runtime/metal", "dep:mln_mtl"]
+vulkan = ["mln_runtime/vulkan", "dep:mln_vulkan"]
+d3d12 = ["mln_runtime/d3d12", "dep:mln_d3d12"]
+gl = ["mln_runtime/gl", "dep:mln_gl"]
+
 [dependencies]
 feature.workspace = true
 geo-types.workspace = true
@@ -536,20 +549,20 @@ geojson.workspace = true
 geometry.workspace = true
 glam.workspace = true
 mln_conversion.workspace = true
-mln_d3d12.workspace = true
+mln_d3d12 = { workspace = true, optional = true }
 mln_expression.workspace = true
 mln_frame_pacer.workspace = true
 mln_geojson.workspace = true
 mln_gestures.workspace = true
 mln_gfx.workspace = true
-mln_gl.workspace = true
+mln_gl = { workspace = true, optional = true }
 mln_image.workspace = true
 mln_map.workspace = true
 mln_map_types.workspace = true
 mln_math.workspace = true
-mln_mtl.workspace = true
+mln_mtl = { workspace = true, optional = true }
 mln_renderer = { workspace = true, features = ["font-face-shaper"] }
-mln_runtime = { workspace = true, features = ["default"] }
+mln_runtime.workspace = true
 mln_sprite.workspace = true
 # The ambient cache, offline regions and mbtiles:// sources, as in C++.
 mln_storage = { workspace = true, features = ["sqlite"] }
@@ -562,9 +575,9 @@ mln_tile.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true
-mln_vulkan.workspace = true
+mln_vulkan = { workspace = true, optional = true }
 mln_web_host.workspace = true
-mln_webgpu.workspace = true
+mln_webgpu = { workspace = true, optional = true }
 polylabel.workspace = true
 
 [lints]

@@ -2,12 +2,12 @@
 // has no surface to give, and what an offscreen session refuses. A window
 // that presents frames is in surfaces_window.rs, which needs a display.
 
+use mln_gfx::window::raw_window_handle::{DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle};
 use mln_map::MapMode;
 use mln_runtime::{
     AttachOptions, Driver, ErrorKind, Map, MapOptions, RenderSessionState, RenderTarget, Runtime, Surface,
 };
 use mln_util::size::Size;
-use wgpu::rwh::{DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle};
 
 use crate::support::{runtime, wait};
 

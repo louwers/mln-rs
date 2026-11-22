@@ -25,10 +25,12 @@ path = "tests/main.rs"
 # The backends that sessions render with, each where its platform has it:
 # Metal on Apple's, Vulkan elsewhere but in the browser, D3D12 on Windows,
 # OpenGL ES natively and the browser's WebGL2, and WebGPU (wgpu, and in the
-# browser the browser's) everywhere. A browser build turns on one of `webgpu`
-# and `gl`, so that it carries one backend and its shaders.
+# browser the browser's) everywhere. By default the native ones: natively,
+# wgpu renders through the same APIs, so it is for hosts that share their
+# wgpu device or surfaces. A browser build turns on one of `webgpu` and
+# `gl`, so that it carries one backend and its shaders.
 [features]
-default = ["webgpu", "metal", "vulkan", "d3d12", "gl"]
+default = ["metal", "vulkan", "d3d12", "gl"]
 webgpu = ["dep:mln_webgpu", "dep:wgpu"]
 metal = ["dep:mln_mtl"]
 vulkan = ["dep:mln_vulkan"]
@@ -133,6 +135,7 @@ libc.workspace = true
 windows = { workspace = true, features = [
   "Win32_Graphics_Direct3D12",
   "Win32_Graphics_DirectComposition",
+  "Win32_Graphics_Gdi",
   "Win32_UI_WindowsAndMessaging",
 ] }
 
