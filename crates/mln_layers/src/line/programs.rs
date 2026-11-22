@@ -3,7 +3,7 @@
 //! sources.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2, UByte4, UShort4};
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources, Stages, Texture};
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Property, Sources, Stages, Texture};
 
 use super::ubo::{
     LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
@@ -77,6 +77,7 @@ pub static LINE: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: LINE_PROPERTIES,
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::LINE_SHADER)
         .msl(&msl::LINE_SHADER)
@@ -105,6 +106,7 @@ pub static LINE_GRADIENT: Program = Program {
         Property::float("offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
         Property::float("width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::LINE_GRADIENT_SHADER)
         .msl(&msl::LINE_GRADIENT_SHADER)
@@ -137,6 +139,7 @@ pub static LINE_PATTERN: Program = Program {
         Property::vec4("pattern_from", ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE),
         Property::vec4("pattern_to", ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::LINE_PATTERN_SHADER)
         .msl(&msl::LINE_PATTERN_SHADER)
@@ -171,6 +174,7 @@ pub static LINE_SDF: Program = Program {
         Property::float("floorwidth", ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
         Property::vec4("dasharray", ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::LINE_SDF_SHADER)
         .msl(&msl::LINE_SDF_SHADER)
@@ -203,6 +207,7 @@ pub static LINE_GRADIENT_SDF: Program = Program {
         Property::float("floorwidth", ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
         Property::vec4("dasharray", ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::LINE_GRADIENT_SDF_SHADER)
         .msl(&msl::LINE_GRADIENT_SDF_SHADER)

@@ -1,7 +1,7 @@
 //! The engine's programs and the binding ids they read.
 
 use mln_gfx::gfx_types::AttributeDataType::Short2;
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Sources, Texture};
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Sources, Texture};
 
 use super::ubo::{AtmospherePropsUBO, LayerCompositeUBO, SkyPropsUBO, TileDebugPropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
@@ -37,6 +37,7 @@ pub(crate) static CLIPPING_MASK: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[],
+    projection: Projection::Own,
     sources: Sources::NONE
         .wgsl(&wgsl::CLIPPING_MASK_PROGRAM)
         .msl(&msl::CLIPPING_MASK_PROGRAM)
@@ -52,6 +53,7 @@ pub(crate) static GLOBE_DEPTH: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::GLOBE_DEPTH_SHADER)
         .msl(&msl::GLOBE_DEPTH_SHADER)
@@ -67,6 +69,7 @@ pub(crate) static SKY: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[],
+    projection: Projection::None,
     sources: Sources::NONE
         .wgsl(&wgsl::SKY_SHADER)
         .msl(&msl::SKY_SHADER)
@@ -82,6 +85,7 @@ pub(crate) static ATMOSPHERE: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[],
+    projection: Projection::None,
     sources: Sources::NONE
         .wgsl(&wgsl::ATMOSPHERE_SHADER)
         .msl(&msl::ATMOSPHERE_SHADER)
@@ -97,6 +101,7 @@ pub(crate) static LAYER_COMPOSITE: Program = Program {
     instance_attributes: &[],
     textures: &[Texture::unfilterable("image"), Texture::unfilterable("backdrop")],
     properties: &[],
+    projection: Projection::None,
     sources: Sources::NONE
         .wgsl(&wgsl::LAYER_COMPOSITE_SHADER)
         .msl(&msl::LAYER_COMPOSITE_SHADER)
@@ -119,6 +124,7 @@ pub(crate) static TILE_DEBUG: Program = Program {
     ],
     textures: &[],
     properties: &[],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::TILE_DEBUG_SHADER)
         .msl(&msl::TILE_DEBUG_SHADER)

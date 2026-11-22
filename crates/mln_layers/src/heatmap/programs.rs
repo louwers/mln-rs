@@ -3,7 +3,7 @@
 //! sources.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Short2};
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources, Stages, Texture};
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Property, Sources, Stages, Texture};
 
 use super::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, HeatmapTexturePropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
@@ -35,6 +35,7 @@ pub static HEATMAP: Program = Program {
         Property::float("weight", ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE),
         Property::float("radius", ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::HEATMAP_SHADER)
         .msl(&msl::HEATMAP_SHADER)
@@ -49,6 +50,7 @@ pub static HEATMAP_TEXTURE: Program = Program {
     instance_attributes: &[],
     textures: &[Texture::new("image"), Texture::new("color_ramp")],
     properties: &[],
+    projection: Projection::None,
     sources: Sources::NONE
         .wgsl(&wgsl::HEATMAP_TEXTURE_SHADER)
         .msl(&msl::HEATMAP_TEXTURE_SHADER)

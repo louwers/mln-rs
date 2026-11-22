@@ -715,7 +715,9 @@ fn declared<'p>(program: &'p Program, stage: Stage, text: &str, defines: &HashMa
 mod tests {
     use mln_gfx::gfx_types::AttributeDataType::{Float, Short4};
     use mln_gfx::shaders::layer_ubo::ViewUBO;
-    use mln_gfx::shaders::program::{Buffer, DRAW_PROJECTION_BUFFER, PROJECTION_BUFFER, Sources, Texture, VIEW_BUFFER};
+    use mln_gfx::shaders::program::{
+        Buffer, DRAW_PROJECTION_BUFFER, PROJECTION_BUFFER, Projection, Sources, Texture, VIEW_BUFFER,
+    };
 
     use super::*;
 
@@ -748,6 +750,7 @@ mod tests {
             instance_attributes: &[],
             textures: &[],
             properties: &[],
+            projection: Projection::PerDraw,
             sources: Sources::NONE,
         };
         let text = "let p = projectionVector[drawIndex]; // view\n#ifdef PAINT\nlet x = paint[0];\n#endif\nprops";
@@ -786,6 +789,7 @@ mod tests {
             instance_attributes: &[],
             textures: &[Texture::new("first"), Texture::unfilterable("second")],
             properties: &[],
+            projection: Projection::None,
             sources: Sources::NONE,
         };
         let text = "textureSample(second, first_sampler, uv)";

@@ -3,7 +3,7 @@
 //! sources.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float, Float2, Float4, Short2, UShort4};
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources, Stages, Texture};
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Property, Sources, Stages, Texture};
 
 use super::ubo::{
     FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO,
@@ -58,6 +58,7 @@ pub static FILL: Program = Program {
         Property::color("color", ID_FILL_COLOR_VERTEX_ATTRIBUTE),
         Property::float("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::FILL_SHADER)
         .msl(&msl::FILL_SHADER)
@@ -79,6 +80,7 @@ pub static FILL_OUTLINE: Program = Program {
         Property::float("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
         Property::color("outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::FILL_OUTLINE_SHADER)
         .glsl_es(&glsl_es::FILL_OUTLINE_SHADER)
@@ -103,6 +105,7 @@ pub static FILL_PATTERN: Program = Program {
         Property::vec4("pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
         Property::vec4("pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::FILL_PATTERN_SHADER)
         .msl(&msl::FILL_PATTERN_SHADER)
@@ -128,6 +131,7 @@ pub static FILL_OUTLINE_PATTERN: Program = Program {
         Property::vec4("pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
         Property::vec4("pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::FILL_OUTLINE_PATTERN_SHADER)
         .glsl_es(&glsl_es::FILL_OUTLINE_PATTERN_SHADER)
@@ -149,6 +153,7 @@ pub static FILL_OUTLINE_INSTANCED: Program = Program {
         Property::float("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
         Property::color("outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::FILL_OUTLINE_INSTANCED_SHADER)
         .msl(&msl::FILL_OUTLINE_INSTANCED_SHADER)
@@ -169,6 +174,7 @@ pub static FILL_OUTLINE_PULLED: Program = Program {
         Property::float("opacity", ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
         Property::color("outline_color", ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::FILL_OUTLINE_PULLED_SHADER)
         .msl(&msl::FILL_OUTLINE_PULLED_SHADER)
@@ -194,6 +200,7 @@ pub static FILL_OUTLINE_PATTERN_INSTANCED: Program = Program {
         Property::vec4("pattern_from", ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
         Property::vec4("pattern_to", ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::FILL_OUTLINE_PATTERN_INSTANCED_SHADER)
         .msl(&msl::FILL_OUTLINE_PATTERN_INSTANCED_SHADER)

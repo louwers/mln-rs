@@ -3,7 +3,7 @@
 //! sources.
 
 use mln_gfx::gfx_types::AttributeDataType::Short2;
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Sources, Stages, Texture};
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Sources, Stages, Texture};
 
 use super::ubo::{
     BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO,
@@ -33,6 +33,7 @@ pub static BACKGROUND: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::BACKGROUND_SHADER)
         .msl(&msl::BACKGROUND_SHADER)
@@ -47,6 +48,7 @@ pub static BACKGROUND_PATTERN: Program = Program {
     instance_attributes: &[],
     textures: &[Texture::new("image")],
     properties: &[],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::BACKGROUND_PATTERN_SHADER)
         .msl(&msl::BACKGROUND_PATTERN_SHADER)

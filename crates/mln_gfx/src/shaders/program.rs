@@ -64,8 +64,26 @@ pub struct Program {
     /// those whose `HAS_UNIFORM_u_<name>` its sources test once written
     /// out, and no others, since a variant defines only these.
     pub properties: &'static [Property],
+    /// Which of the engine's projection blocks its vertex stage reads.
+    pub projection: Projection,
     /// Its source in each shading language it has one in.
     pub sources: Sources,
+}
+
+/// Which of the engine's projection blocks a [`Program`]'s vertex stage
+/// reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Projection {
+    /// None: its geometry is in clip space or the view's, as a quad over
+    /// the whole frame. A draw binds a projection block of zeros all the
+    /// same, since GLSL declares one in every program.
+    None,
+    /// [`PROJECTION_BUFFER`], whose element at the draw's index the engine
+    /// writes from the tile projection the draw was pushed with.
+    PerDraw,
+    /// [`DRAW_PROJECTION_BUFFER`], a block of each draw's own, which the
+    /// draw's maker writes.
+    Own,
 }
 
 /// A buffer a program reads, by its name in the program's shaders.
@@ -687,6 +705,7 @@ mod tests {
         instance_attributes: &[],
         textures: &[],
         properties: &[],
+        projection: Projection::None,
         sources: Sources::NONE,
     };
 

@@ -4,7 +4,7 @@
 // language.
 
 use mln_rs::mln_gfx::gfx_types::AttributeDataType::Float2;
-use mln_rs::mln_gfx::shaders::program::{Attribute, Buffer, Program, Sources, Texture};
+use mln_rs::mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Sources, Texture};
 use mln_rs::mln_gfx::shaders::source::{glsl, glsl_es, msl, wgsl};
 
 mln_rs::mln_gfx::uniform_block! {
@@ -32,6 +32,7 @@ pub(crate) static QUAD: Program = Program {
     instance_attributes: &[Attribute { id: ID_OFFSET, format: Float2 }],
     textures: &[Texture::new("image")],
     properties: &[],
+    projection: Projection::None,
     sources: Sources { wgsl: Some(&WGSL), msl: Some(&MSL), glsl_es: Some(&GLSL_ES), glsl: Some(&GLSL) },
 };
 

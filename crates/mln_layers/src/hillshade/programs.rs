@@ -3,7 +3,7 @@
 //! sources.
 
 use mln_gfx::gfx_types::AttributeDataType::Short2;
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Sources, Stages, Texture};
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Sources, Stages, Texture};
 
 use super::ubo::{
     HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO,
@@ -35,6 +35,7 @@ pub static HILLSHADE: Program = Program {
     instance_attributes: &[],
     textures: &[Texture::new("image")],
     properties: &[],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::HILLSHADE_SHADER)
         .msl(&msl::HILLSHADE_SHADER)
@@ -52,6 +53,7 @@ pub static HILLSHADE_PREPARE: Program = Program {
     instance_attributes: &[],
     textures: &[Texture::new("image")],
     properties: &[],
+    projection: Projection::None,
     sources: Sources::NONE
         .wgsl(&wgsl::HILLSHADE_PREPARE_SHADER)
         .msl(&msl::HILLSHADE_PREPARE_SHADER)

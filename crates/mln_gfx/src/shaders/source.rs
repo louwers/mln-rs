@@ -261,7 +261,7 @@ pub fn identifiers(source: &str) -> impl Iterator<Item = &str> {
 #[expect(unsafe_code, reason = "`uniform_block!` implements bytemuck's `Pod` for the block it declares")]
 mod tests {
     use crate::gfx_types::AttributeDataType::{Float4, Short2};
-    use crate::shaders::program::{Attribute, Buffer, Program, Property, Sources, Stages};
+    use crate::shaders::program::{Attribute, Buffer, Program, Projection, Property, Sources, Stages};
     use crate::shaders::source::wgsl::{self, Wgsl};
 
     crate::uniform_block! {
@@ -287,6 +287,7 @@ mod tests {
         instance_attributes: &[],
         textures: &[],
         properties: &[Property::color("color", 3)],
+        projection: Projection::None,
         sources: Sources::NONE,
     };
 

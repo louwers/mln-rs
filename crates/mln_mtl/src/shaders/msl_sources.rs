@@ -285,7 +285,9 @@ fn matching(text: &str, from: usize, open: char, close: char) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use mln_gfx::gfx_types::AttributeDataType::Short4;
-    use mln_gfx::shaders::program::{Buffer, DRAW_PROJECTION_BUFFER, PROJECTION_BUFFER, Sources, Texture, VIEW_BUFFER};
+    use mln_gfx::shaders::program::{
+        Buffer, DRAW_PROJECTION_BUFFER, PROJECTION_BUFFER, Projection, Sources, Texture, VIEW_BUFFER,
+    };
 
     use super::*;
 
@@ -317,6 +319,7 @@ mod tests {
             instance_attributes: &[],
             textures: &[Texture::new("first"), Texture::new("second")],
             properties: &[],
+            projection: Projection::None,
             sources: Sources::NONE,
         };
         let functions = "void helper(int walls) {}\n\
@@ -343,6 +346,7 @@ mod tests {
             instance_attributes: &[],
             textures: &[],
             properties: &[],
+            projection: Projection::None,
             sources: Sources::NONE,
         };
         let functions = "half4 fragment fragmentMain() {\n    return half4(view.x);\n}";

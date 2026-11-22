@@ -3,7 +3,7 @@
 //! sources.
 
 use mln_gfx::gfx_types::AttributeDataType::Short2;
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Sources, Stages, Texture};
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Sources, Stages, Texture};
 
 use super::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
@@ -29,6 +29,7 @@ pub static COLOR_RELIEF: Program = Program {
     instance_attributes: &[],
     textures: &[Texture::new("image"), Texture::unfilterable("elevation_stops"), Texture::new("color_stops")],
     properties: &[],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::COLOR_RELIEF_SHADER)
         .msl(&msl::COLOR_RELIEF_SHADER)

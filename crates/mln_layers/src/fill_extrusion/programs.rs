@@ -3,7 +3,7 @@
 //! sources.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float, Float2, Float4, Short2, Short4, UShort2, UShort4};
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources, Stages, Texture};
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Property, Sources, Stages, Texture};
 
 use super::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
@@ -51,6 +51,7 @@ pub static FILL_EXTRUSION: Program = Program {
         Property::color("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
         Property::float("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::FILL_EXTRUSION_SHADER)
         .msl(&msl::FILL_EXTRUSION_SHADER)
@@ -77,6 +78,7 @@ pub static FILL_EXTRUSION_INSTANCED: Program = Program {
         Property::color("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
         Property::float("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::FILL_EXTRUSION_INSTANCED_SHADER)
         .msl(&msl::FILL_EXTRUSION_INSTANCED_SHADER)
@@ -106,6 +108,7 @@ pub static FILL_EXTRUSION_WALL: Program = Program {
         Property::color("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
         Property::float("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::FILL_EXTRUSION_INSTANCED_SHADER)
         .glsl_es(&glsl_es::FILL_EXTRUSION_INSTANCED_SHADER)
@@ -126,6 +129,7 @@ pub static FILL_EXTRUSION_PULLED: Program = Program {
         Property::color("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
         Property::float("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::FILL_EXTRUSION_PULLED_SHADER)
         .msl(&msl::FILL_EXTRUSION_PULLED_SHADER)
@@ -151,6 +155,7 @@ pub static FILL_EXTRUSION_PATTERN: Program = Program {
         Property::vec4("pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
         Property::vec4("pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::FILL_EXTRUSION_PATTERN_SHADER)
         .msl(&msl::FILL_EXTRUSION_PATTERN_SHADER)
@@ -179,6 +184,7 @@ pub static FILL_EXTRUSION_PATTERN_INSTANCED: Program = Program {
         Property::vec4("pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
         Property::vec4("pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::FILL_EXTRUSION_PATTERN_INSTANCED_SHADER)
         .msl(&msl::FILL_EXTRUSION_PATTERN_INSTANCED_SHADER)
@@ -209,6 +215,7 @@ pub static FILL_EXTRUSION_PATTERN_WALL: Program = Program {
         Property::vec4("pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
         Property::vec4("pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::FILL_EXTRUSION_PATTERN_INSTANCED_SHADER)
         .glsl_es(&glsl_es::FILL_EXTRUSION_PATTERN_INSTANCED_SHADER)

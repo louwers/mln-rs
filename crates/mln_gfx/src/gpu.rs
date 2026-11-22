@@ -741,7 +741,7 @@ pub fn destroy_unused(gpu: &mut (impl Gpu + ?Sized), resources: impl IntoIterato
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shaders::program::Sources;
+    use crate::shaders::program::{Projection, Sources};
 
     static A: Program = Program {
         name: "A",
@@ -750,6 +750,7 @@ mod tests {
         instance_attributes: &[],
         textures: &[],
         properties: &[],
+        projection: Projection::None,
         sources: Sources::NONE,
     };
     static B: Program = Program { name: "B", ..A };

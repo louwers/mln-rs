@@ -3,7 +3,7 @@
 //! sources.
 
 use mln_gfx::gfx_types::AttributeDataType::Short2;
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Sources, Stages, Texture};
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Sources, Stages, Texture};
 
 use super::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
@@ -27,6 +27,7 @@ pub static RASTER: Program = Program {
     instance_attributes: &[],
     textures: &[Texture::new("image0"), Texture::new("image1")],
     properties: &[],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::RASTER_SHADER)
         .msl(&msl::RASTER_SHADER)

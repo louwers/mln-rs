@@ -3,7 +3,7 @@
 //! sources.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2};
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources, Stages};
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Property, Sources, Stages};
 
 use super::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
@@ -47,6 +47,7 @@ pub static CIRCLE: Program = Program {
         Property::float("stroke_width", ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE),
         Property::float("stroke_opacity", ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::CIRCLE_SHADER)
         .msl(&msl::CIRCLE_SHADER)

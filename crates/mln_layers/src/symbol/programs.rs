@@ -3,7 +3,7 @@
 //! collision boxes and circles, and their sources.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float, Float2, Float3, Float4, Short2, Short4, UShort2, UShort4};
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Property, Sources, Stages, Texture};
+use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Property, Sources, Stages, Texture};
 
 use super::ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
@@ -61,6 +61,7 @@ pub static SYMBOL_ICON: Program = Program {
     instance_attributes: &[],
     textures: &[Texture::new("image")],
     properties: &[Property::float("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE)],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::SYMBOL_ICON_SHADER)
         .msl(&msl::SYMBOL_ICON_SHADER)
@@ -94,6 +95,7 @@ pub static SYMBOL_SDF: Program = Program {
         Property::float("halo_width", ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
         Property::float("halo_blur", ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::SYMBOL_SDF_SHADER)
         .msl(&msl::SYMBOL_SDF_SHADER)
@@ -126,6 +128,7 @@ pub static SYMBOL_TEXT_AND_ICON: Program = Program {
         Property::float("halo_width", ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
         Property::float("halo_blur", ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
     ],
+    projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::SYMBOL_TEXT_AND_ICON_SHADER)
         .msl(&msl::SYMBOL_TEXT_AND_ICON_SHADER)
@@ -147,6 +150,7 @@ pub static COLLISION_BOX: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[],
+    projection: Projection::Own,
     sources: Sources::NONE
         .wgsl(&wgsl::COLLISION_BOX_SHADER)
         .msl(&msl::COLLISION_BOX_SHADER)
@@ -166,6 +170,7 @@ pub static COLLISION_CIRCLE: Program = Program {
     instance_attributes: &[],
     textures: &[],
     properties: &[],
+    projection: Projection::Own,
     sources: Sources::NONE
         .wgsl(&wgsl::COLLISION_CIRCLE_SHADER)
         .msl(&msl::COLLISION_CIRCLE_SHADER)
