@@ -60,23 +60,20 @@ fn only_a_font_off_regular_weight_gets_a_location() {
     assert_eq!(at_weight(font(KHMER), REGULAR_WEIGHT).normalized_coords(), []);
 }
 
-/// The glyph of "中" that a device font loaded at `weight` draws.
-fn local(font: &[u8], weight: u16) -> Glyph {
+/// The glyph of "中" that `font` draws, loaded at `weight`.
+fn drawn_at(font: &[u8], weight: u16) -> Glyph {
     let shaper = Shaper::at_weight(GlyphIDType::face(NonZeroU16::MIN), font.to_vec(), f32::from(weight));
-    let mut shaped = ShapedText::default();
-    shaper.shape(&['中'], false, &mut shaped);
-    let [id] = shaped.glyphs[..] else { panic!("one glyph for 中") };
-    shaper.rasterize_glyph(id)
+    shaper.rasterize_glyph(shaper.glyph_of('中').expect("a glyph for 中"))
 }
 
 #[test]
-fn a_local_variable_font_draws_at_the_weight_asked_for() {
+fn a_variable_font_loaded_at_a_weight_draws_at_it() {
     let close = |a: &Glyph, b: &Glyph| ink(a).abs_diff(ink(b)) * 100 < ink(b);
-    assert!(close(&local(VARIABLE, 100), &local(THIN, 100)));
-    assert!(close(&local(VARIABLE, 400), &local(REGULAR, 400)));
+    assert!(close(&drawn_at(VARIABLE, 100), &drawn_at(THIN, 100)));
+    assert!(close(&drawn_at(VARIABLE, 400), &drawn_at(REGULAR, 400)));
     // Below the axis, the font draws at its lightest; a static font draws
     // at its own weight whatever is asked for.
-    assert_eq!(ink(&local(VARIABLE, 1)), ink(&local(VARIABLE, 100)));
-    assert_eq!(ink(&local(REGULAR, 100)), ink(&local(REGULAR, 900)));
-    assert!(ink(&local(VARIABLE, 900)) > ink(&local(VARIABLE, 400)));
+    assert_eq!(ink(&drawn_at(VARIABLE, 1)), ink(&drawn_at(VARIABLE, 100)));
+    assert_eq!(ink(&drawn_at(REGULAR, 100)), ink(&drawn_at(REGULAR, 900)));
+    assert!(ink(&drawn_at(VARIABLE, 900)) > ink(&drawn_at(VARIABLE, 400)));
 }

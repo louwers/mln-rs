@@ -207,7 +207,7 @@ mod tests {
 
     use mln_text::glyph::{Glyph, GlyphIDType};
     use mln_text::local_fonts::FontChooser;
-    use mln_text::{ShapedText, Shaper, font_name};
+    use mln_text::{Shaper, font_name};
 
     use super::{SystemFonts, class, first_with, named_fonts, picked_fonts};
     use crate::{Finder, system};
@@ -221,16 +221,12 @@ mod tests {
         Some(f(&mut system().fonts.as_ref()?.lock().finder))
     }
 
-    /// The glyph of `c` that the face chosen for it in `font_stack` draws,
-    /// shaped alone.
+    /// The glyph that the face chosen for `c` in `font_stack` maps it to.
     fn chosen_glyph(font_stack: &[&str], c: char) -> Option<Glyph> {
         let face = SystemFonts.choose(&stack(font_stack), c)?;
         let data = face.data.expect("a device face holds its file");
         let shaper = Shaper::at_weight(GlyphIDType::face(NonZeroU16::MIN), data, f32::from(face.weight));
-        let mut shaped = ShapedText::default();
-        shaper.shape(&[c], false, &mut shaped);
-        let [id] = shaped.glyphs[..] else { panic!("{c} shapes as {:?} in {}", shaped.glyphs, face.url) };
-        assert_ne!(id.code, 0, "{c} in {}", face.url);
+        let id = shaper.glyph_of(c).unwrap_or_else(|| panic!("no glyph for {c} in {}", face.url));
         Some(shaper.rasterize_glyph(id))
     }
 

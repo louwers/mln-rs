@@ -117,6 +117,14 @@ impl Shaper {
         self.face.is_valid()
     }
 
+    /// The glyph the font maps `c` to, unshaped: `None` unless it has one
+    /// that the shaper draws, a glyph other than `.notdef` with an outline
+    /// it reads.
+    #[must_use]
+    pub fn glyph_of(&self, c: char) -> Option<GlyphID> {
+        Some(GlyphID::with_type(self.face.glyph_of(c)?, self.type_))
+    }
+
     /// The glyph's coverage at 24 px, before the signed distance field.
     #[must_use]
     pub fn rasterize_glyph(&self, glyph: GlyphID) -> Glyph {

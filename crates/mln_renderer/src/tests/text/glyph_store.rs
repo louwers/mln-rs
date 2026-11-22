@@ -1081,6 +1081,10 @@ impl FontFaceShaper for FakeShaper {
         }
     }
 
+    fn glyph_of(&self, c: char) -> Option<GlyphID> {
+        Some(GlyphID::with_type(u32::from(c) as u16, FONT_FACE))
+    }
+
     fn rasterize(&self, glyph: GlyphID) -> Glyph {
         stub_glyph(glyph)
     }
@@ -1324,12 +1328,18 @@ fn script_fonts(c: char) -> Option<&'static str> {
     }
 }
 
-/// Loads each font as a shaper that draws each character as the glyph of
-/// that index, in its font's type, reversed for right-to-left text.
+/// Loads each font as a shaper that maps each character to the glyph of
+/// that index, in its font's type, and shapes it as that glyph, reversed for
+/// right-to-left text.
 #[derive(Default)]
 struct LetterEngine {
     /// The type and weight of each font loaded.
     loads: Mutex<Vec<(GlyphIDType, u16)>>,
+    /// Whether its fonts fail to load, as files that aren't fonts do.
+    invalid: bool,
+    /// Whether shaping splits each character into its glyph and glyph 1, as
+    /// `ccmp` splits a dotted Arabic letter into its dotless form and dots.
+    splits: bool,
 }
 
 impl FontFaceEngine for LetterEngine {
@@ -1339,20 +1349,33 @@ impl FontFaceEngine for LetterEngine {
 
     fn load(&self, type_: GlyphIDType, _data: FontData, weight: u16) -> Option<Box<dyn FontFaceShaper>> {
         self.loads.lock().push((type_, weight));
-        Some(Box::new(LetterShaper(type_)))
+        (!self.invalid).then(|| -> Box<dyn FontFaceShaper> { Box::new(LetterShaper { type_, splits: self.splits }) })
     }
 }
 
-struct LetterShaper(GlyphIDType);
+struct LetterShaper {
+    type_: GlyphIDType,
+    splits: bool,
+}
 
 impl FontFaceShaper for LetterShaper {
     fn shape(&self, text: &[char], rtl: bool, shaped: &mut ShapedText) {
-        let mut glyphs: Vec<GlyphID> = text.iter().map(|&c| GlyphID::with_type(c as u16, self.0)).collect();
+        let mut glyphs: Vec<GlyphID> = Vec::new();
+        for &c in text {
+            glyphs.push(GlyphID::with_type(c as u16, self.type_));
+            if self.splits {
+                glyphs.push(GlyphID::with_type(1, self.type_));
+            }
+        }
         if rtl {
             glyphs.reverse();
         }
         shaped.adjusts.extend(glyphs.iter().map(|_| GlyphAdjust::new(0.0, 0.0, 10.0)));
         shaped.glyphs.extend(glyphs);
+    }
+
+    fn glyph_of(&self, c: char) -> Option<GlyphID> {
+        Some(GlyphID::with_type(c as u16, self.type_))
     }
 
     fn rasterize(&self, glyph: GlyphID) -> Glyph {
@@ -1363,7 +1386,12 @@ impl FontFaceShaper for LetterShaper {
 /// A store on a `LetterEngine` that draws from `fonts`' fonts, with a
 /// synchronous file source.
 fn letter_test(fonts: &Arc<StubChooser>) -> (GlyphStoreTest, Arc<LetterEngine>) {
-    let engine = Arc::new(LetterEngine::default());
+    letter_test_on(fonts, LetterEngine::default())
+}
+
+/// [`letter_test`], on `engine`.
+fn letter_test_on(fonts: &Arc<StubChooser>, engine: LetterEngine) -> (GlyphStoreTest, Arc<LetterEngine>) {
+    let engine = Arc::new(engine);
     let test = GlyphStoreTest::with_all(
         chooser(fonts),
         ResponseType::Synchronous,
@@ -1385,10 +1413,10 @@ fn device_type(font: &str) -> GlyphIDType {
     FontFace::device(font, 400, FontData::default()).type_
 }
 
-/// The glyphs that the device's fonts shape `text` as, by character and
+/// The glyphs that the device's `fonts` shape `text` as, by character and
 /// font.
-fn shape_with_system_fonts(text: &str) -> Vec<(char, GlyphIDType)> {
-    let (test, _) = letter_test(&StubChooser::new(script_fonts));
+fn shape_with_system_fonts(fonts: fn(char) -> Option<&'static str>, text: &str) -> Vec<(char, GlyphIDType)> {
+    let (test, _) = letter_test(&StubChooser::new(fonts));
     test.run_until_answered(system_text(text));
     let text: Vec<char> = text.chars().collect();
     let shaping = test.requestor.shaping.borrow();
@@ -1398,7 +1426,7 @@ fn shape_with_system_fonts(text: &str) -> Vec<(char, GlyphIDType)> {
 
 #[test]
 fn the_devices_fonts_shape_each_piece_with_its_font() {
-    let glyphs = shape_with_system_fonts("ab \u{05D0}\u{05D1}\u{062C} c\u{0301}");
+    let glyphs = shape_with_system_fonts(script_fonts, "ab \u{05D0}\u{05D1}\u{062C} c\u{0301}");
     let chars: String = glyphs.iter().map(|(c, _)| *c).collect();
     // The right-to-left run's pieces in visual order: the Arabic after the
     // Hebrew comes first; the mark stays with the letter before it.
@@ -1409,6 +1437,12 @@ fn the_devices_fonts_shape_each_piece_with_its_font() {
     assert_ne!(type_of('\u{05D0}'), type_of('a'));
     assert_ne!(type_of('\u{062C}'), type_of('\u{05D0}'));
     assert!(glyphs.iter().all(|(_, type_)| ![GlyphIDType::FontPBF, GlyphIDType::SYSTEM].contains(type_)));
+}
+
+#[test]
+fn a_character_that_no_device_font_draws_is_left_out() {
+    let glyphs = shape_with_system_fonts(|c| (c != 'b').then_some("latin"), "abc");
+    assert_eq!(glyphs.iter().map(|(c, _)| *c).collect::<String>(), "ac");
 }
 
 #[test]
@@ -1520,10 +1554,57 @@ fn a_device_face_loads_without_a_file_source() {
     assert_eq!(engine.loads.lock().len(), 2);
 }
 
+// A device glyph is the glyph its font maps the character to, as a PBF's
+// is, even where shaping the character alone splits it.
+#[test]
+fn a_device_glyph_is_its_fonts_glyph_of_the_character() {
+    let engine = LetterEngine { splits: true, ..LetterEngine::default() };
+    let (test, _) = letter_test_on(&StubChooser::new(|_| Some("arabic")), engine);
+    test.glyph_store().set_url("");
+    let glyphs = test.run_until_answered(dependencies(&['\u{0628}']));
+    let glyph = glyphs[&font_stack_hash(&test_stack())][&gid('\u{0628}')].clone().expect("the device's glyph");
+    assert_eq!(glyph.metrics, stub_glyph(gid('\u{0628}')).metrics);
+}
+
+#[test]
+fn a_cjk_glyph_without_a_device_font_comes_from_the_pbf() {
+    let (test, _) = letter_test(&StubChooser::new(|_| None));
+    let _log = SquelchLog::new();
+    let requested = Rc::new(RefCell::new(Vec::new()));
+    let r = Rc::clone(&requested);
+    *test.observer.glyphs_requested.borrow_mut() = Some(Box::new(move |_, range| r.borrow_mut().push(*range)));
+    test.file_source.set_response(Kind::Glyphs, glyphs_response("test/fixtures/resources/glyphs.pbf"));
+    test.glyph_store().set_url("test/fixtures/resources/glyphs.pbf");
+    test.run_until_answered(dependencies(&['中']));
+    assert_eq!(*requested.borrow(), [get_glyph_range(gid('中'))]);
+}
+
+#[test]
+fn a_device_face_that_fails_to_load_draws_nothing() {
+    let engine = LetterEngine { invalid: true, ..LetterEngine::default() };
+    let (test, _) = letter_test_on(&StubChooser::new(|_| Some("font")), engine);
+    test.glyph_store().set_url("");
+    let loaded = Rc::new(RefCell::new(Vec::new()));
+    let l = Rc::clone(&loaded);
+    *test.observer.glyphs_loaded.borrow_mut() = Some(Box::new(move |_, range| l.borrow_mut().push(*range)));
+    let mut dependencies = system_text("b");
+    dependencies.glyphs = VecMap::from([(test_stack(), [gid('a')].into_iter().collect())]);
+
+    let glyphs = test.run_until_answered(dependencies);
+    assert!(glyphs[&font_stack_hash(&test_stack())][&gid('a')].is_none());
+    let shaping = test.requestor.shaping.borrow();
+    let shaped = &shaping.as_ref().expect("an answer")[&test_stack()][&GlyphIDType::SYSTEM][&vec!['b']];
+    assert_eq!(shaped.glyphs, []);
+    assert_eq!(*loaded.borrow(), [get_glyph_range(GlyphID::with_type(0, device_type("font")))]);
+}
+
 #[test]
 fn an_answer_for_an_evicted_stack_is_dropped() {
     let fonts = StubChooser::new(|_| Some("latin"));
     let (test, _) = letter_test(&fonts);
+    let answered = Rc::new(Cell::new(false));
+    let a = Rc::clone(&answered);
+    *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |_: GlyphMap| a.set(true)));
     test.request_glyphs(system_text("a"));
     test.glyph_store().evict(&VecSet::new());
 
@@ -1532,10 +1613,11 @@ fn an_answer_for_an_evicted_stack_is_dropped() {
     test.glyph_store().take_device_fonts(&test_stack(), vec![('a', Some(face))]);
     assert_eq!(test.glyph_store().revision(), revision);
 
-    // The wait resolves again, and asks again.
+    // The wait resolves again, asks again, since the first choice may have
+    // stopped with its stack, and is answered.
     test.store.answer();
-    test.run_until(|| fonts.asked.lock().len() == 2);
-    assert_eq!(fonts.asked(), ['a', 'a']);
+    test.run_until(|| answered.get());
+    assert_eq!(fonts.asked().last(), Some(&'a'));
 }
 
 #[test]

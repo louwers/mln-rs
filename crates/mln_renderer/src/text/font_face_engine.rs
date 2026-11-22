@@ -19,6 +19,10 @@ pub trait FontFaceShaper {
     /// order, in visual order, and their positions.
     fn shape(&self, text: &[char], rtl: bool, shaped: &mut ShapedText);
 
+    /// The glyph the font maps `c` to, unshaped: `None` unless it has one
+    /// that `rasterize` draws.
+    fn glyph_of(&self, c: char) -> Option<GlyphID>;
+
     /// Rasterizes the glyph: its coverage at 24 px, before the SDF transform.
     fn rasterize(&self, glyph: GlyphID) -> Glyph;
 }
@@ -91,6 +95,10 @@ mod in_process {
     impl FontFaceShaper for Shaper {
         fn shape(&self, text: &[char], rtl: bool, shaped: &mut ShapedText) {
             Shaper::shape(self, text, rtl, shaped);
+        }
+
+        fn glyph_of(&self, c: char) -> Option<GlyphID> {
+            Shaper::glyph_of(self, c)
         }
 
         fn rasterize(&self, glyph: GlyphID) -> Glyph {

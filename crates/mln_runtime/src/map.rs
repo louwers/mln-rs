@@ -56,10 +56,9 @@ pub struct MapOptions {
     /// (`mln_system_fonts::font_face`), from the fonts the labels'
     /// `text-font` names first; and draws from them the glyphs a style's
     /// PBFs lack, and with `local_ideographs`, CJK
-    /// (`mln_system_fonts::SystemFonts`, which chooses them off the render
-    /// thread). On by default. The first
-    /// map that uses them waits for the platform's font matcher to load. In
-    /// the browser, which has no font files to read, the browser draws each
+    /// (`mln_system_fonts::SystemFonts`). On by default. The first map that
+    /// uses them waits for the platform's font matcher to load. In the
+    /// browser, which has no font files to read, the browser draws each
     /// glyph of that text in the font stack's families, then its sans-serif
     /// font, as MapLibre GL JS does, unshaped.
     pub system_fonts: bool,

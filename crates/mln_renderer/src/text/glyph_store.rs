@@ -112,6 +112,9 @@ struct Entry {
     no_local: BTreeSet<GlyphID>,
     /// The device fonts of the characters asked about.
     device: HashMap<char, DeviceFont>,
+    /// Held as long as the entry: the chooser stops choosing for it once
+    /// the store drops it.
+    alive: Arc<()>,
 }
 
 /// Where the device font of a character of a font stack stands.
@@ -346,12 +349,17 @@ impl GlyphStore {
             let mut needed: Vec<(&FontStack, GlyphRange)> = Vec::new();
             for (font_stack, glyph_ids) in &dependencies.glyphs {
                 for glyph_id in glyph_ids {
-                    let needs = if glyph_id.type_ == GlyphIDType::FontPBF {
-                        self.pbf_glyph(font_stack, *glyph_id, since, &mut failed, &mut waits)
+                    let source = if glyph_id.type_ == GlyphIDType::FontPBF {
+                        self.pbf_glyph(font_stack, *glyph_id, since)
                     } else {
-                        Some(get_glyph_range(*glyph_id))
+                        Source::Needs(get_glyph_range(*glyph_id))
                     };
-                    needed.extend(needs.map(|range| (font_stack, range)));
+                    match source {
+                        Source::Has | Source::Lacks { failed: false } => {}
+                        Source::Lacks { failed: true } => failed = true,
+                        Source::Needs(range) => needed.push((font_stack, range)),
+                        Source::Waits => waits = true,
+                    }
                 }
             }
             for (font_stack, types) in &dependencies.shapes {
@@ -427,20 +435,12 @@ impl GlyphStore {
     }
 
     /// Draws the PBF glyph `glyph_id` of `font_stack` from the first source
-    /// that has it, PBF or local (`pbf_first`): `None` once it is drawn or
-    /// known missing, or while its device font is being chosen, which sets
-    /// `waits`; else the range that the next source needs. A range that
-    /// failed during the wait that began at failure `since` counts as lacking
-    /// the glyph, and sets `failed`.
-    fn pbf_glyph(
-        &mut self,
-        font_stack: &FontStack,
-        glyph_id: GlyphID,
-        since: u64,
-        failed: &mut bool,
-        waits: &mut bool,
-    ) -> Option<GlyphRange> {
+    /// that has it, PBF or local (`pbf_first`): the first source's answer
+    /// that isn't `Lacks`, else `Lacks`, failed if either's range failed
+    /// during the wait that began at failure `since`.
+    fn pbf_glyph(&mut self, font_stack: &FontStack, glyph_id: GlyphID, since: u64) -> Source {
         let pbf_first = self.pbf_first(glyph_id);
+        let mut failed = false;
         for pbf in [pbf_first, !pbf_first] {
             let source = if pbf {
                 self.pbf_source(font_stack, glyph_id, since)
@@ -448,17 +448,11 @@ impl GlyphStore {
                 self.local_source(font_stack, glyph_id, since)
             };
             match source {
-                Source::Has => return None,
-                Source::Lacks { failed: true } => *failed = true,
-                Source::Lacks { failed: false } => {}
-                Source::Needs(range) => return Some(range),
-                Source::Waits => {
-                    *waits = true;
-                    return None;
-                }
+                Source::Lacks { failed: lacked } => failed |= lacked,
+                source => return source,
             }
         }
-        None
+        Source::Lacks { failed }
     }
 
     /// Whether the PBF glyph `glyph_id` comes from glyph PBFs before local
@@ -505,16 +499,13 @@ impl GlyphStore {
         let mut failed = false;
         let mut glyph = None;
         for type_ in faces {
-            let range = get_glyph_range(GlyphID::with_type(0, type_));
-            match self.entries.get(font_stack).and_then(|entry| entry.ranges.get(&range)) {
-                Some(RangeState::Loaded(_)) => {
-                    glyph = self.face_glyph(font_stack, type_, glyph_id);
-                    if glyph.is_some() {
-                        break;
-                    }
+            match self.face_source(font_stack, type_, glyph_id, since, &mut failed) {
+                Ok(None) => {}
+                Ok(found) => {
+                    glyph = found;
+                    break;
                 }
-                Some(RangeState::Failed { at }) if *at > since => failed = true,
-                _ => return Source::Needs(range),
+                Err(range) => return Source::Needs(range),
             }
         }
         if glyph.is_none()
@@ -523,11 +514,9 @@ impl GlyphStore {
             match self.device_font(font_stack, c) {
                 DeviceFont::Asked => return Source::Waits,
                 DeviceFont::Chosen(Some(type_)) => {
-                    let range = get_glyph_range(GlyphID::with_type(0, type_));
-                    match self.entries.get(font_stack).and_then(|entry| entry.ranges.get(&range)) {
-                        Some(RangeState::Loaded(_)) => glyph = self.face_glyph(font_stack, type_, glyph_id),
-                        Some(RangeState::Failed { at }) if *at > since => failed = true,
-                        _ => return Source::Needs(range),
+                    match self.face_source(font_stack, type_, glyph_id, since, &mut failed) {
+                        Ok(found) => glyph = found,
+                        Err(range) => return Source::Needs(range),
                     }
                 }
                 DeviceFont::Chosen(None) => {}
@@ -547,18 +536,34 @@ impl GlyphStore {
         }
     }
 
-    /// The glyph of the character that the PBF glyph `glyph_id` names, from
-    /// the loaded font face of `type_`, unshaped.
+    /// The PBF glyph `glyph_id` from `font_stack`'s font face of `type_`:
+    /// `Ok(None)` when the loaded face lacks it, or when the face's file
+    /// failed to load during the wait that began at failure `since`, which
+    /// sets `failed`; `Err` with the face's range while it isn't loaded.
+    fn face_source(
+        &self,
+        font_stack: &FontStack,
+        type_: GlyphIDType,
+        glyph_id: GlyphID,
+        since: u64,
+        failed: &mut bool,
+    ) -> Result<Option<Glyph>, GlyphRange> {
+        let range = get_glyph_range(GlyphID::with_type(0, type_));
+        match self.entries.get(font_stack).and_then(|entry| entry.ranges.get(&range)) {
+            Some(RangeState::Loaded(_)) => Ok(self.face_glyph(font_stack, type_, glyph_id)),
+            Some(RangeState::Failed { at }) if *at > since => {
+                *failed = true;
+                Ok(None)
+            }
+            _ => Err(range),
+        }
+    }
+
+    /// The glyph that the loaded font face of `type_` maps the character of
+    /// the PBF glyph `glyph_id` to, unshaped, as a PBF draws it.
     fn face_glyph(&self, font_stack: &FontStack, type_: GlyphIDType, glyph_id: GlyphID) -> Option<Glyph> {
         let shaper = self.shaper(font_stack, type_)?;
-        let c = glyph_id.char()?;
-        let mut shaped = ShapedText::default();
-        shaper.shape(&[c], false, &mut shaped);
-        let [id] = shaped.glyphs[..] else { return None };
-        if id.code == 0 {
-            return None;
-        }
-        let mut glyph = shaper.rasterize(id);
+        let mut glyph = shaper.rasterize(shaper.glyph_of(glyph_id.char()?)?);
         glyph.bitmap = transform_raster_to_sdf(&glyph.bitmap, 8.0, 0.25);
         Some(glyph)
     }
@@ -653,14 +658,19 @@ impl GlyphStore {
 
     /// Has the chooser choose the device fonts of the characters asked about
     /// since the last call, one task per font stack on `choices`, each of
-    /// which sends its answer to `inbox`.
+    /// which sends its answer to `inbox`. A task stops once the store drops
+    /// its stack's entry, or the store drops.
     fn ask_device_fonts(&mut self, inbox: &InboxSender) {
         let Some(chooser) = &self.local.chooser else { return };
         for (font_stack, chars) in std::mem::take(&mut self.asks) {
+            let Some(entry) = self.entries.get(&font_stack) else { continue };
+            let alive = Arc::downgrade(&entry.alive);
             let (chooser, inbox) = (Arc::clone(chooser), inbox.clone());
             self.choices.spawn(move || {
-                let faces = chars.into_iter().map(|c| (c, chooser.choose(&font_stack, c))).collect();
-                inbox.send(TileEvent::DeviceFonts { font_stack, faces });
+                let choose = |c| (alive.strong_count() > 0).then(|| (c, chooser.choose(&font_stack, c)));
+                if let Some(faces) = chars.into_iter().map(choose).collect() {
+                    inbox.send(TileEvent::DeviceFonts { font_stack, faces });
+                }
             });
         }
     }

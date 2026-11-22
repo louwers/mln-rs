@@ -59,6 +59,16 @@ impl Face {
         )
     }
 
+    /// The index of the glyph the font maps `c` to, if the map can draw it:
+    /// a glyph other than `.notdef`, whose index fits a glyph ID and whose
+    /// outline the map reads.
+    pub(crate) fn glyph_of(&self, c: char) -> Option<u16> {
+        let glyph = self.font()?.charmap().map_unicode(c)?;
+        let index = u16::try_from(glyph.to_u32()).ok().filter(|&index| index != 0)?;
+        self.scaler()?.outline(GlyphId::new(u32::from(index)))?;
+        Some(index)
+    }
+
     #[must_use]
     pub(crate) fn rasterize_glyph(&self, glyph: GlyphID) -> Glyph {
         crate::rasterize::rasterize_glyph(self, glyph)
@@ -86,16 +96,7 @@ impl FontFile {
     /// format the map doesn't read has none.
     #[must_use]
     pub fn has_char(&self, c: char) -> bool {
-        self.glyph_index(c).is_some()
-    }
-
-    /// The index of `c`'s glyph, if the font maps it to a glyph the map can
-    /// draw and the index fits a glyph ID.
-    fn glyph_index(&self, c: char) -> Option<u16> {
-        let glyph = self.face.font()?.charmap().map_unicode(c)?;
-        let index = u16::try_from(glyph.to_u32()).ok().filter(|&index| index != 0)?;
-        self.face.scaler()?.outline(GlyphId::new(u32::from(index)))?;
-        Some(index)
+        self.face.glyph_of(c).is_some()
     }
 }
 

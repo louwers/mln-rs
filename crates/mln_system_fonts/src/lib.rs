@@ -21,8 +21,11 @@
 //! either: the browser draws local glyphs itself (`BrowserGlyphRasterizer`).
 //!
 //! The matcher loads once per process, on a thread of its own
-//! ([`prefetch`]), and each font the first time a map needs it. A font's
-//! file is mapped when it is first chosen; the OS reads its pages on demand.
+//! ([`prefetch`]), and each font the first time a map needs it, off the
+//! render thread. A font's file is mapped when it is first chosen and, on
+//! Unix, read ahead from then on, so that the render thread seldom waits for
+//! the disk as it shapes and draws from it. A CoreText font's tables are
+//! copied into a file then.
 
 use std::sync::OnceLock;
 

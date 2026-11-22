@@ -31,8 +31,7 @@ pub trait FontChooser: Send + Sync {
     /// draws it.
     ///
     /// The face is one [`FontFace::device`] made: it holds its font file, and
-    /// the same font at the same weight always has the same `type_`. A face
-    /// without `data` would be fetched from its `url` like a style's face.
+    /// the same font at the same weight always has the same `type_`.
     fn choose(&self, font_stack: &FontStack, c: char) -> Option<FontFace>;
 }
 

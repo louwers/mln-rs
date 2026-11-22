@@ -90,9 +90,8 @@ pub(crate) struct Files {
 }
 
 impl Files {
-    /// The bytes of `source`'s font: its file, memory-mapped, whose pages
-    /// the OS reads as the map draws from them, or a file of a CoreText
-    /// font's tables. `None` for a file that can't be mapped, which logs a
+    /// The bytes of `source`'s font: its file, memory-mapped and on Unix read
+    /// ahead, or a file of a CoreText font's tables. `None` for a file that can't be mapped, which logs a
     /// warning once.
     pub(crate) fn data(&mut self, source: &Source) -> Option<FontData> {
         match source {
@@ -130,7 +129,7 @@ pub(crate) fn drawn_weight(tables: &[Table], probe: char, weight: u16) -> Option
     )
 }
 
-/// The file at `path`, memory-mapped.
+/// The file at `path`, memory-mapped, and on Unix being read ahead.
 fn map(path: &Path) -> Option<Mmap> {
     let file = File::open(path)
         .inspect_err(|error| Log::warning(Event::Glyph, format!("Couldn't open {}: {error}", path.display())))
@@ -138,9 +137,15 @@ fn map(path: &Path) -> Option<Mmap> {
     // SAFETY: the mapping is read-only, and system font files aren't changed
     // in place: an update replaces a font by renaming a new file over it,
     // which leaves the mapped file as it was.
-    unsafe { Mmap::map(&file) }
+    let mmap = unsafe { Mmap::map(&file) }
         .inspect_err(|error| Log::warning(Event::Glyph, format!("Couldn't map {}: {error}", path.display())))
-        .ok()
+        .ok()?;
+    // The renderer shapes and draws from the file on its thread: the OS
+    // reads it in from here, rather than as each of its pages is first read
+    // there. Only a hint, which may fail harmlessly.
+    #[cfg(unix)]
+    let _ = mmap.advise(memmap2::Advice::WillNeed);
+    Some(mmap)
 }
 
 #[cfg(test)]
