@@ -78,6 +78,7 @@
 //! it.
 
 use std::any::Any;
+use std::borrow::Cow;
 use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -89,8 +90,7 @@ use mln_style::expression::expr::FeatureState;
 use mln_style::expression::image_expression::UnavailableImages;
 use mln_style::expression::{EvaluationContext, Image, Value, ValueConverter};
 use mln_style::layer_type::{LayerStyle, PaintSet, SourceKind, StyleLayerType};
-use mln_style_types::TranslateAnchorType;
-use mln_style_types::image::{ImageDependencies, ImagePosition, ImagePositions, ImageType};
+use mln_style_types::image::{ImageDependencies, ImagePositions, ImageType};
 use mln_text::glyph::{FontFaces, GlyphDependencies, GlyphID, GlyphIDType};
 use mln_tile::{Feature, TileLayer};
 use mln_tile_id::geometry_tile_data::{
@@ -1037,10 +1037,13 @@ impl<'a, S: StyleLayerType, B> LayerBucket<'a, S, B> {
     }
 
     /// Where the pattern `id` that the tile's layout asked for is in its
-    /// [`icon_atlas`](Self::icon_atlas).
+    /// [`icon_atlas`](Self::icon_atlas), as a pattern's shaders read it:
+    /// the texels of its top left and its bottom right corners, or zeros
+    /// for a pattern that the atlas lacks.
     #[must_use]
-    pub fn pattern(self, id: &str) -> Option<&'a ImagePosition> {
-        self.contents.pattern_positions()?.get(id)
+    pub fn pattern(self, id: &str) -> [f32; 4] {
+        let position = self.contents.pattern_positions().and_then(|positions| positions.get(id));
+        position.map_or([0.0; 4], |position| position.tlbr().map(f32::from))
     }
 }
 
@@ -1081,22 +1084,19 @@ impl<L: Layer> HitTest<'_, L> {
         ))
     }
 
-    /// The query's geometry moved against a layer's `*-translate` of
-    /// `translate` pixels, anchored at `anchor`, as the layer's draws move
-    /// its features; `None` where the translation is zero.
+    /// The query's geometry where it meets the tile's geometry drawn as
+    /// `how` places it: moved against `how`'s translation.
     #[must_use]
-    pub fn translated_query_geometry(
-        &self,
-        translate: [f32; 2],
-        anchor: TranslateAnchorType,
-    ) -> Option<GeometryCoordinates> {
-        FeatureIndex::translate_query_geometry(
+    pub fn query_at(&self, how: &TileTransform) -> Cow<'_, GeometryCoordinates> {
+        let angle = self.camera.angle() as f32;
+        let translated = FeatureIndex::translate_query_geometry(
             self.query_geometry,
-            translate,
-            anchor,
-            self.camera.angle() as f32,
+            how.translate,
+            how.anchor,
+            angle,
             self.pixels_to_tile_units,
-        )
+        );
+        translated.map_or(Cow::Borrowed(self.query_geometry), Cow::Owned)
     }
 
     /// `point`, of the tile, on the screen, in the camera's pixels, where a

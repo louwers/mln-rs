@@ -51,11 +51,7 @@ impl Layer for CircleLayer {
 
     fn prepare(&self, cx: &PrepareCx<'_, Self>, out: &mut Draws) {
         let paint = &cx.layer.evaluated.paint;
-        let how = TileTransform {
-            translate: *paint.circle_translate.uniform(),
-            anchor: *paint.circle_translate_anchor.uniform(),
-            ..TileTransform::default()
-        };
+        let how = transform(paint);
         let pitch_with_map = *paint.circle_pitch_alignment.uniform() == AlignmentType::Map;
         let main = out.main();
         main.block(&CircleEvaluatedPropsUBO {
@@ -86,21 +82,15 @@ impl Layer for CircleLayer {
         // its constant value or default.
         let radius = binders.circle_radius.max().or(paint.circle_radius.constant());
         let stroke = binders.circle_stroke_width.max().or(paint.circle_stroke_width.constant());
-        let [x, y] = *paint.circle_translate.uniform();
         radius.unwrap_or(CirclePaintProperties::Defaults::circle_radius())
             + stroke.unwrap_or(CirclePaintProperties::Defaults::circle_stroke_width())
-            + (x * x + y * y).sqrt()
+            + transform(paint).translation_length()
     }
 
     fn hit(&self, test: &HitTest<'_, Self>) -> Option<f32> {
         let paint = &test.layer.evaluated.paint;
-        let how = TileTransform {
-            translate: *paint.circle_translate.uniform(),
-            anchor: *paint.circle_translate_anchor.uniform(),
-            ..TileTransform::default()
-        };
-        let translated = test.translated_query_geometry(how.translate, how.anchor);
-        let query = translated.as_ref().unwrap_or(test.query_geometry);
+        let how = transform(paint);
+        let query = test.query_at(&how);
 
         let size = test.feature_value(&paint.circle_radius) + test.feature_value(&paint.circle_stroke_width);
 
@@ -111,7 +101,7 @@ impl Layer for CircleLayer {
         let align_with_map = *paint.circle_pitch_alignment.uniform() == AlignmentType::Map;
         let on_screen: GeometryCoordinates;
         let query = if align_with_map {
-            query
+            &*query
         } else {
             on_screen = query.iter().map(|p| test.to_screen(*p)).collect();
             &on_screen
@@ -131,4 +121,9 @@ impl Layer for CircleLayer {
             })
             .then_some(0.0)
     }
+}
+
+/// How the layer's `paint` places a tile's circles: moved by its translate.
+fn transform(paint: &CirclePaintProperties::PossiblyEvaluated) -> TileTransform {
+    TileTransform::translated(*paint.circle_translate.uniform(), *paint.circle_translate_anchor.uniform())
 }

@@ -129,20 +129,14 @@ impl Layer for FillExtrusionLayer {
         let depth_first = !composited && (opacity < 1.0 || pattern);
         main.block(&props(layer, frame.light, frame.camera, if composited { 1.0 } else { opacity }));
 
-        let how = TileTransform {
-            translate: *paint.fill_extrusion_translate.uniform(),
-            anchor: *paint.fill_extrusion_translate_anchor.uniform(),
-            volume: true,
-            ..TileTransform::default()
-        };
+        let how = TileTransform { volume: true, ..transform(paint) };
         let faded = paint.fill_extrusion_pattern.faded();
         for (tile, laid, parts) in cx.tiles() {
             let at = tile.project(frame, &how);
             let atlas = laid.icon_atlas().filter(|_| pattern).map_or_else(Default::default, |atlas| cx.res.size(atlas));
-            let tlbr = |id: &str| laid.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
             let tile_props = FillExtrusionTilePropsUBO {
-                pattern_from: tlbr(faded.from.id()),
-                pattern_to: tlbr(faded.to.id()),
+                pattern_from: laid.pattern(faded.from.id()),
+                pattern_to: laid.pattern(faded.to.id()),
                 texsize: [atlas.width as f32, atlas.height as f32],
                 ..FillExtrusionTilePropsUBO::default()
             };
@@ -165,18 +159,12 @@ impl Layer for FillExtrusionLayer {
         _laid: LayerBucket<'_, FillExtrusion, FillExtrusionBucket>,
         _camera: &View,
     ) -> f32 {
-        let [x, y] = *layer.evaluated.paint.fill_extrusion_translate.uniform();
-        (x * x + y * y).sqrt()
+        transform(&layer.evaluated.paint).translation_length()
     }
 
     fn hit(&self, test: &HitTest<'_, Self>) -> Option<f32> {
         let paint = &test.layer.evaluated.paint;
-        let translated = test.translated_query_geometry(
-            *paint.fill_extrusion_translate.uniform(),
-            *paint.fill_extrusion_translate_anchor.uniform(),
-        );
-        let query = translated.as_ref().unwrap_or(test.query_geometry);
-        polygon_intersects_multi_polygon(query, test.geometry).then_some(0.0)
+        polygon_intersects_multi_polygon(&test.query_at(&transform(paint)), test.geometry).then_some(0.0)
     }
 }
 
@@ -276,4 +264,10 @@ fn props(
         to_scale: layer.crossfade.to_scale,
         ..FillExtrusionPropsUBO::default()
     }
+}
+
+/// How the layer's `paint` places a tile's extrusions: moved by its
+/// translate.
+fn transform(paint: &FillExtrusionPaintProperties::PossiblyEvaluated) -> TileTransform {
+    TileTransform::translated(*paint.fill_extrusion_translate.uniform(), *paint.fill_extrusion_translate_anchor.uniform())
 }

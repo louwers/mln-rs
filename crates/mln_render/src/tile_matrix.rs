@@ -66,6 +66,20 @@ pub struct TileTransform {
 }
 
 impl TileTransform {
+    /// Geometry moved by a layer's `*-translate` of `translate` pixels,
+    /// along the axes of `anchor`.
+    #[must_use]
+    pub fn translated(translate: [f32; 2], anchor: TranslateAnchorType) -> TileTransform {
+        TileTransform { translate, anchor, ..TileTransform::default() }
+    }
+
+    /// How far, in pixels, the translation moves geometry.
+    #[must_use]
+    pub fn translation_length(&self) -> f32 {
+        let [x, y] = self.translate;
+        (x * x + y * y).sqrt()
+    }
+
     /// The translation, `translate` anchored as `anchor` says, in the units
     /// of `tile` seen by `camera`.
     #[must_use]

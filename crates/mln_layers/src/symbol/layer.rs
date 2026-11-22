@@ -350,12 +350,7 @@ impl Layer for SymbolLayer {
         let zoom = cx.frame.camera.zoom();
         for (tile, _, value) in cx.tiles() {
             for collision in &value.collision {
-                let how = if collision.text {
-                    translated(&paint.text_translate, &paint.text_translate_anchor)
-                } else {
-                    translated(&paint.icon_translate, &paint.icon_translate_anchor)
-                };
-                let at = tile.project(cx.frame, &how);
+                let at = tile.project(cx.frame, &transform(paint, collision.text));
                 let id = tile.id();
                 let scale = at.pixels_to_tile_units * 2f64.powf(zoom - f64::from(id.overscaled_z)) as f32;
                 let tile_props = CollisionTilePropsUBO {
@@ -381,12 +376,14 @@ fn screen_space(layout: &SymbolLayoutProperties::Unevaluated) -> bool {
         .unwrap_or_else(SymbolLayoutProperties::Defaults::symbol_screen_space)
 }
 
-/// A `*-translate` and its anchor, as a tile's geometry is placed.
-fn translated(
-    translate: &Evaluated<[f32; 2]>,
-    anchor: &Evaluated<mln_style_types::TranslateAnchorType>,
-) -> TileTransform {
-    TileTransform { translate: *translate.uniform(), anchor: *anchor.uniform(), ..TileTransform::default() }
+/// How the layer's `paint` places a tile's text, or its icons: moved by
+/// their translate.
+fn transform(paint: &SymbolPaintProperties::PossiblyEvaluated, text: bool) -> TileTransform {
+    if text {
+        TileTransform::translated(*paint.text_translate.uniform(), *paint.text_translate_anchor.uniform())
+    } else {
+        TileTransform::translated(*paint.icon_translate.uniform(), *paint.icon_translate_anchor.uniform())
+    }
 }
 
 /// What a mesh of a draw of `kind` of a tile's bucket is made of.
@@ -473,11 +470,7 @@ impl SymbolDraw {
         let layout = &cx.layer.style.layout;
         let screen_space = screen_space(layout);
         let is_text = self.kind == Kind::Text;
-        let how = if is_text {
-            translated(&paint.text_translate, &paint.text_translate_anchor)
-        } else {
-            translated(&paint.icon_translate, &paint.icon_translate_anchor)
-        };
+        let how = transform(paint, is_text);
         // The translation stays out of the matrices on every projection: the
         // shader adds it to point anchors, and placement to the positions it
         // lays out (variable anchors, line labels), so it applies once. A

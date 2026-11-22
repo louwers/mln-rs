@@ -9,7 +9,7 @@ use mln_style::evaluated::Evaluated;
 use mln_util::Color;
 use mln_util::intersection_tests::polygon_intersects_multi_polygon;
 
-use super::Fill;
+use super::{Fill, FillPaintProperties};
 use super::bucket::{FillBinders, FillBucket, LINE_WIDTH, draws_outline_quads};
 use super::layout::FillLayout;
 use super::programs::{
@@ -120,11 +120,7 @@ impl Layer for FillLayer {
             to_scale: crossfade.to_scale,
             ..FillEvaluatedPropsUBO::default()
         });
-        let how = TileTransform {
-            translate: *paint.fill_translate.uniform(),
-            anchor: *paint.fill_translate_anchor.uniform(),
-            ..TileTransform::default()
-        };
+        let how = transform(paint);
         let at_depth =
             |sub_layer, write| Draw { depth: Depth::Layer { sub_layer, write }, clip: true, ..Draw::DEFAULT };
         let faded = paint.fill_pattern.faded();
@@ -152,7 +148,6 @@ impl Layer for FillLayer {
                     let atlas = laid.icon_atlas().map(|atlas| cx.res.size(atlas)).filter(|size| !size.is_empty());
                     let Some(atlas) = atlas else { continue };
                     let origin = tile.pattern_origin(frame);
-                    let tlbr = |id: &str| laid.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
                     let blocks = (
                         FillPatternDrawableUBO {
                             matrix,
@@ -162,8 +157,8 @@ impl Layer for FillLayer {
                             ..Default::default()
                         },
                         FillPatternTilePropsUBO {
-                            pattern_from: tlbr(faded.from.id()),
-                            pattern_to: tlbr(faded.to.id()),
+                            pattern_from: laid.pattern(faded.from.id()),
+                            pattern_to: laid.pattern(faded.to.id()),
                             texsize: [atlas.width as f32, atlas.height as f32],
                             sdf: if laid.bucket.sdf(cx.layer.id()) { 1.0 } else { 0.0 },
                             ..Default::default()
@@ -181,16 +176,12 @@ impl Layer for FillLayer {
     }
 
     fn query_radius(&self, layer: &LayerValues<Fill>, _laid: LayerBucket<'_, Fill, FillBucket>, _camera: &View) -> f32 {
-        let [x, y] = *layer.evaluated.paint.fill_translate.uniform();
-        (x * x + y * y).sqrt()
+        transform(&layer.evaluated.paint).translation_length()
     }
 
     fn hit(&self, test: &HitTest<'_, Self>) -> Option<f32> {
         let paint = &test.layer.evaluated.paint;
-        let translated =
-            test.translated_query_geometry(*paint.fill_translate.uniform(), *paint.fill_translate_anchor.uniform());
-        let query = translated.as_ref().unwrap_or(test.query_geometry);
-        polygon_intersects_multi_polygon(query, test.geometry).then_some(0.0)
+        polygon_intersects_multi_polygon(&test.query_at(&transform(paint)), test.geometry).then_some(0.0)
     }
 }
 
@@ -274,4 +265,9 @@ fn paint_layout(paint: PaintVertices<'_, FillBinders>) -> u32 {
     let words = |bytes: usize| (bytes / 4) as u32 & 0xff;
     let stride = if color.is_some() || opacity.is_some() { words(paint.stride()) } else { 0 };
     stride | color.map_or(0, words) << 8 | opacity.map_or(0, words) << 16
+}
+
+/// How the layer's `paint` places a tile's fills: moved by its translate.
+fn transform(paint: &FillPaintProperties::PossiblyEvaluated) -> TileTransform {
+    TileTransform::translated(*paint.fill_translate.uniform(), *paint.fill_translate_anchor.uniform())
 }

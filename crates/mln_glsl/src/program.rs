@@ -16,11 +16,12 @@ use crate::sources::DRAW_INDEX_DECLARATION;
 /// The source of `stage` of `glsl`, `program`'s GLSL, for naga's GLSL front
 /// end, with `defines` (`#define` lines): the version, the defines, the
 /// structs of the engine's blocks, the stage's prelude, the structs of the
-/// program's blocks, the declarations of what the stage or the program's prelude names of
-/// what the stage may read ([`Program::bindings`], [`declaration`]), and
-/// the program's own prelude and stage with its properties written out
-/// ([`glsl::expand`]). Fails as [`glsl::expand`] does, and for a buffer
-/// that [`declaration`] has no binding for.
+/// program's blocks, the declarations of what the stage or the program's
+/// prelude names of what the stage may read ([`Program::bindings`]), each
+/// at the set and binding that [`layout`](crate::layout) gives its id and
+/// kind, and the program's own prelude and stage with its properties
+/// written out ([`glsl::expand`]). Fails as [`glsl::expand`] does, and for
+/// a buffer whose id the layout has no binding of its kind for.
 pub fn compose(program: &Program, glsl: &Glsl, stage: Stage, defines: &str) -> Result<String, GpuError> {
     let source = glsl::expand(program, glsl, stage.into())?;
     let (engine, own) = (glsl::blocks(&ENGINE_BUFFERS), glsl::blocks(program.buffers));

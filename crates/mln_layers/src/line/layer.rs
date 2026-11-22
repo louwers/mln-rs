@@ -157,11 +157,7 @@ impl Layer for LineLayer {
         // its properties.
         let floorwidth = paint.line_floor_width.constant_or(&LinePaintProperties::Defaults::line_floor_width());
         main.block(&LineEvaluatedPropsUBO { floorwidth, ..LineEvaluatedPropsUBO::default() });
-        let how = TileTransform {
-            translate: *paint.line_translate.uniform(),
-            anchor: *paint.line_translate_anchor.uniform(),
-            ..TileTransform::default()
-        };
+        let how = transform(paint);
         let (zoom, integer_zoom) = (camera.zoom() as f32, f32::from(camera.integer_zoom()));
         let pixel_scale = camera.projection().pixel_scale(camera) as f32;
         let draw = Draw { clip: true, ..Draw::DEFAULT };
@@ -180,7 +176,6 @@ impl Layer for LineLayer {
                 LineTile::Pattern(mesh) => {
                     let atlas = laid.icon_atlas().map_or_else(Size::default, |atlas| cx.res.size(atlas));
                     let pattern = paint.line_pattern.faded();
-                    let tlbr = |id: &str| laid.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
                     let binders = laid.binders(&laid.bucket.binders);
                     let blocks = (
                         LinePatternDrawableUBO {
@@ -190,8 +185,8 @@ impl Layer for LineLayer {
                             ..Default::default()
                         },
                         LinePatternTilePropsUBO {
-                            pattern_from: tlbr(pattern.from.id()),
-                            pattern_to: tlbr(pattern.to.id()),
+                            pattern_from: laid.pattern(pattern.from.id()),
+                            pattern_to: laid.pattern(pattern.to.id()),
                             scale: [frame.pixel_ratio, tile_ratio(1.0), crossfade.from_scale, crossfade.to_scale],
                             texsize: [atlas.width as f32, atlas.height as f32],
                             fade: crossfade.t,
@@ -240,23 +235,20 @@ impl Layer for LineLayer {
         let gap = binders.line_gap_width.max().or(paint.line_gap_width.constant());
         let gap = gap.unwrap_or(Defaults::line_gap_width());
         let width = if gap == 0.0 { width } else { gap + 2.0 * width };
-        let [x, y] = *paint.line_translate.uniform();
-        width / 2.0 + offset.abs() + (x * x + y * y).sqrt()
+        width / 2.0 + offset.abs() + transform(paint).translation_length()
     }
 
     fn hit(&self, test: &HitTest<'_, Self>) -> Option<f32> {
         let paint = &test.layer.evaluated.paint;
-        let translated =
-            test.translated_query_geometry(*paint.line_translate.uniform(), *paint.line_translate_anchor.uniform());
-        let query = translated.as_ref().unwrap_or(test.query_geometry);
+        let query = test.query_at(&transform(paint));
         let offset = test.feature_value(&paint.line_offset) * test.pixels_to_tile_units;
         let (width, gap) = (test.feature_value(&paint.line_width), test.feature_value(&paint.line_gap_width));
         let width = if gap == 0.0 { width } else { gap + 2.0 * width };
         let half_width = (f64::from(width) / 2.0 * f64::from(test.pixels_to_tile_units)) as f32;
         let hit = if offset != 0.0 && !test.geometry.is_empty() {
-            polygon_intersects_buffered_multi_line(query, &offset_lines(test.geometry, f64::from(offset)), half_width)
+            polygon_intersects_buffered_multi_line(&query, &offset_lines(test.geometry, f64::from(offset)), half_width)
         } else {
-            polygon_intersects_buffered_multi_line(query, test.geometry, half_width)
+            polygon_intersects_buffered_multi_line(&query, test.geometry, half_width)
         };
         hit.then_some(0.0)
     }
@@ -291,4 +283,9 @@ fn offset_lines(lines: &GeometryCollection, offset: f64) -> Vec<GeometryCoordina
                 .collect()
         })
         .collect()
+}
+
+/// How the layer's `paint` places a tile's lines: moved by its translate.
+fn transform(paint: &LinePaintProperties::PossiblyEvaluated) -> TileTransform {
+    TileTransform::translated(*paint.line_translate.uniform(), *paint.line_translate_anchor.uniform())
 }
