@@ -9,7 +9,7 @@ use mln_style_types::{
     VariableAnchorOffsetCollection, VisibilityType,
 };
 use mln_util::string::to_string_double;
-use mln_util::{Color, Padding};
+use mln_util::{Color, LatLng, Padding};
 use serde::Serialize;
 
 use crate::conversion::value_to_json;
@@ -607,10 +607,24 @@ impl ValueConverter for Rotation {
         Type::Number
     }
     fn to_expression_value(&self) -> Value {
-        (self.get_angle() as f32).to_expression_value()
+        (self.degrees() as f32).to_expression_value()
     }
     fn from_expression_value(value: &Value) -> Option<Self> {
         f32::from_expression_value(value).map(|angle| Rotation::new(f64::from(angle)))
+    }
+}
+
+/// `[longitude, latitude]`, as the style spec writes a coordinate.
+impl ValueConverter for LatLng {
+    fn expression_type() -> Type {
+        Type::array_n(Type::Number, 2)
+    }
+    fn to_expression_value(&self) -> Value {
+        Value::Array(vec![Value::Number(self.longitude()), Value::Number(self.latitude())])
+    }
+    fn from_expression_value(value: &Value) -> Option<Self> {
+        let [longitude, latitude] = <[f64; 2]>::from_expression_value(value)?;
+        LatLng::new(latitude, longitude).ok()
     }
 }
 

@@ -365,3 +365,65 @@ const _: () = {
     assert!(!<DotPaintProperties::Transitionable as PaintSet>::CROSSFADES);
     assert!(!<NoProperties as PaintSet>::CROSSFADES);
 };
+
+/// `property` evaluated `delta` after the tests' start, at zoom `zoom`.
+fn evaluate_at<T>(property: &mut Transitioning<PropertyValue<T>>, delta: Duration, zoom: f32) -> T
+where
+    PropertyValue<T>: crate::property_value::StyleValue<Type = T>,
+    T: mln_util::interpolate::Interpolate + crate::expression::ValueConverter + Clone + Default,
+{
+    let mut zoom_history = ZoomHistory::default();
+    zoom_history.update(zoom, Some(start() + delta));
+    let parameters =
+        PropertyEvaluationParameters::with_zoom_history(zoom_history, Some(start() + delta), Duration::ZERO);
+    property.evaluate(Evaluated::plain, &parameters, T::default()).uniform().clone()
+}
+
+/// A value of `T` converted from `json`, as a property's style value.
+fn convert<T: crate::conversion::Converter + crate::expression::ValueConverter + Clone>(
+    json: &str,
+) -> PropertyValue<T> {
+    let mut error = Error::default();
+    let doc = parse_json(json);
+    convert_property_value(&Convertible::from(&doc), &mut error, false, false, &Functions::with_builtins())
+        .unwrap_or_else(|| panic!("{}", error.message))
+}
+
+#[test]
+fn a_position_is_a_longitude_and_a_latitude_that_follow_zoom_and_transition_in_a_line() {
+    use crate::property_value::StyleValue as _;
+
+    let position = convert::<mln_util::LatLng>("[-122.4, 37.8]");
+    assert_eq!(Some(&mln_util::LatLng::new(37.8, -122.4).unwrap()), position.as_constant());
+    let json = super::util::value_to_json(position.style_property().get_value());
+    assert_eq!(parse_json("[-122.4, 37.8]"), json);
+
+    let by_zoom = convert::<mln_util::LatLng>(
+        r#"["interpolate", ["linear"], ["zoom"], 0, ["literal", [0, 0]], 10, ["literal", [20, 10]]]"#,
+    );
+    let mut by_zoom = Transitioning::new(by_zoom);
+    assert_eq!(mln_util::LatLng::new(5.0, 10.0).unwrap(), evaluate_at(&mut by_zoom, Duration::ZERO, 5.0));
+
+    let transition = TransitionOptions { duration: Some(Duration::from_millis(1000)), ..TransitionOptions::default() };
+    let from = Transitioning::new(PropertyValue::Constant(mln_util::LatLng::new(10.0, 170.0).unwrap()));
+    let to = PropertyValue::Constant(mln_util::LatLng::new(20.0, 190.0).unwrap());
+    let mut moving = Transitioning::with_prior(to, from, &transition, Some(start()));
+    let midway = evaluate_at(&mut moving, Duration::from_millis(500), 0.0);
+    assert_float_eq(10.0 + 10.0 * 0.823_099, midway.latitude() as f32);
+    assert_float_eq(170.0 + 20.0 * 0.823_099, midway.longitude() as f32);
+}
+
+#[test]
+fn a_rotation_transitions_the_shorter_way_around() {
+    use mln_style_types::Rotation;
+
+    assert_eq!(Some(&Rotation::new(350.0)), convert::<Rotation>("-10").as_constant());
+
+    let transition = TransitionOptions { duration: Some(Duration::from_millis(1000)), ..TransitionOptions::default() };
+    let from = Transitioning::new(PropertyValue::Constant(Rotation::new(350.0)));
+    let mut turning =
+        Transitioning::with_prior(PropertyValue::Constant(Rotation::new(10.0)), from, &transition, Some(start()));
+    let midway = evaluate_at(&mut turning, Duration::from_millis(500), 0.0).degrees();
+    assert!((midway - (350.0 + 20.0 * 0.823_099 - 360.0)).abs() < 1e-4, "{midway}");
+    assert_eq!(10.0, evaluate_at(&mut turning, Duration::from_millis(1000), 0.0).degrees());
+}

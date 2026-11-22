@@ -6,6 +6,7 @@
 use geometry::Point;
 
 use crate::color::Color;
+use crate::geo::LatLng;
 use crate::padding::Padding;
 use crate::range::Range;
 
@@ -102,6 +103,17 @@ impl Interpolate for Padding {
             self.right.interpolate_f32(&to.right, t),
             self.bottom.interpolate_f32(&to.bottom, t),
             self.left.interpolate_f32(&to.left, t),
+        )
+    }
+}
+
+/// Latitude and longitude each, as given: a longitude doesn't take the
+/// shorter way across the antimeridian.
+impl Interpolate for LatLng {
+    fn interpolate(&self, to: &Self, t: f64) -> Self {
+        LatLng::new_unchecked(
+            self.latitude().interpolate(&to.latitude(), t),
+            self.longitude().interpolate(&to.longitude(), t),
         )
     }
 }

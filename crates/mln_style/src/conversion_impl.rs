@@ -1,6 +1,6 @@
 use feature::Value;
 use mln_style_types::{Position, ProjectionDefinition, Rotation, VariableAnchorOffsetCollection};
-use mln_util::{Color, Padding};
+use mln_util::{Color, LatLng, Padding};
 
 use crate::color_ramp_property_value::ColorRampPropertyValue;
 use crate::expression::value::to_mbgl_value;
@@ -89,7 +89,14 @@ impl ValueFactory for Position {
 
 impl ValueFactory for Rotation {
     fn make_value(&self) -> Value {
-        Value::Double(self.get_angle())
+        Value::Double(self.degrees())
+    }
+}
+
+/// `[longitude, latitude]`, as the style spec writes a coordinate.
+impl ValueFactory for LatLng {
+    fn make_value(&self) -> Value {
+        Value::Array(vec![Value::Double(self.longitude()), Value::Double(self.latitude())])
     }
 }
 

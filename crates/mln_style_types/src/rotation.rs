@@ -1,51 +1,46 @@
 use mln_util::interpolate::Interpolate;
 
-// Could be made a template class if needed
-// template <size_t Period>
-// size_t period() const noexcept { return Period; }
+/// An angle in degrees, clockwise, from 0 up to 360, which interpolates
+/// along the shorter way around: from 350 to 10 through 0.
 #[derive(Clone, Copy, Debug, Default, PartialEq, mln_wire::Wire)]
 pub struct Rotation {
-    angle: f64,
+    degrees: f64,
 }
 
 impl Rotation {
-    #[must_use]
-    pub fn new(angle: f64) -> Self {
-        Rotation { angle: mln_math::wrap(angle, 0.0, Self::PERIOD) }
-    }
-
     const PERIOD: f64 = 360.0;
 
+    /// `degrees`, brought into 0 up to 360.
     #[must_use]
-    pub fn get_angle(&self) -> f64 {
-        self.angle
+    pub fn new(degrees: f64) -> Self {
+        Rotation { degrees: mln_math::wrap(degrees, 0.0, Self::PERIOD) }
+    }
+
+    /// The angle, from 0 up to 360.
+    #[must_use]
+    pub fn degrees(self) -> f64 {
+        self.degrees
     }
 }
 
 impl From<f64> for Rotation {
-    fn from(angle: f64) -> Self {
-        Rotation::new(angle)
+    fn from(degrees: f64) -> Self {
+        Rotation::new(degrees)
     }
 }
 
-/// Interpolates along the shorter way around the period.
+/// Interpolates along the shorter way around.
 impl Interpolate for Rotation {
     fn interpolate(&self, to: &Self, t: f64) -> Self {
-        let a = self;
-        let b = to;
         let period = Rotation::PERIOD;
-        let a_angle = a.get_angle() % period;
-        let b_angle = b.get_angle() % period;
-
-        if a_angle - b_angle > period * 0.5 {
-            return Rotation::new((a_angle * (1.0 - t) + (b_angle + period) * t) % period);
+        let (from, to) = (self.degrees, to.degrees);
+        if from - to > period * 0.5 {
+            return Rotation::new(from * (1.0 - t) + (to + period) * t);
         }
-
-        if a_angle - b_angle < period * -0.5 {
-            return Rotation::new(((a_angle + period) * (1.0 - t) + b_angle * t) % period);
+        if from - to < period * -0.5 {
+            return Rotation::new((from + period) * (1.0 - t) + to * t);
         }
-
-        Rotation::new(a_angle * (1.0 - t) + b_angle * t)
+        Rotation::new(from * (1.0 - t) + to * t)
     }
 }
 
@@ -55,14 +50,15 @@ mod tests {
 
     #[test]
     fn wraps() {
-        assert_eq!(Rotation::new(370.0).get_angle(), 10.0);
-        assert_eq!(Rotation::new(-10.0).get_angle(), 350.0);
-        assert_eq!(Rotation::new(360.0).get_angle(), 0.0);
+        assert_eq!(Rotation::new(370.0).degrees(), 10.0);
+        assert_eq!(Rotation::new(-10.0).degrees(), 350.0);
+        assert_eq!(Rotation::new(360.0).degrees(), 0.0);
     }
 
     #[test]
     fn interpolates_the_short_way() {
-        let r = Rotation::new(350.0).interpolate(&Rotation::new(10.0), 0.5);
-        assert_eq!(r.get_angle(), 0.0);
+        assert_eq!(Rotation::new(350.0).interpolate(&Rotation::new(10.0), 0.5).degrees(), 0.0);
+        assert_eq!(Rotation::new(10.0).interpolate(&Rotation::new(350.0), 0.25).degrees(), 5.0);
+        assert_eq!(Rotation::new(42.0).interpolate(&Rotation::new(-42.0), 0.5).degrees(), 0.0);
     }
 }
