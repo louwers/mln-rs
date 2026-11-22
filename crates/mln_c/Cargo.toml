@@ -19,10 +19,11 @@ name = "maplibre_native_c"
 crate-type = ["cdylib", "staticlib", "rlib"]
 doctest = false
 
-# The runtime's backends (crates/mln_runtime/Cargo.toml). A browser build
-# turns on one of `webgpu` and `gl` (`mise run c-web:build`).
+# The runtime's backends (crates/mln_runtime/Cargo.toml), by default the
+# native ones. A browser build turns on one of `webgpu` and `gl`
+# (`mise run c-web:build`).
 [features]
-default = ["webgpu", "metal", "vulkan", "d3d12", "gl"]
+default = ["metal", "vulkan", "d3d12", "gl"]
 webgpu = ["mln_runtime/webgpu"]
 metal = ["mln_runtime/metal"]
 vulkan = ["mln_runtime/vulkan", "dep:mln_vulkan"]

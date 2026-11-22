@@ -1,23 +1,27 @@
 // Frames presented to a `CAMetalLayer`. The window stays with the host (such
-// as examples/desktop), which makes the layer and reports framebuffer resizes
-// through `resize`. Each frame's drawable is a texture of the backend's
-// `MetalGpu`, which draws the frame into it on the backend's command queue
-// and presents it after the frame's last submit.
+// as examples/desktop), which makes the layer, or hands over a window whose
+// view the layer goes in (`Layer::of_window`), and reports framebuffer
+// resizes through `resize`. Each frame's drawable is a texture of the
+// backend's `MetalGpu`, which draws the frame into it on the backend's
+// command queue and presents it after the frame's last submit.
 
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::gpu::{
     Gpu as _, ResourceId, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage,
     destroy_unused,
 };
+use mln_gfx::window::Window;
+use mln_gfx::window::raw_window_handle::RawWindowHandle;
+use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
-use objc2::Message;
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::ProtocolObject;
+use objc2::{MainThreadMarker, Message};
 use objc2_core_foundation::CGSize;
 use objc2_metal::{MTLCommandBuffer, MTLDevice, MTLPixelFormat, MTLTexture};
-use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
+use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer, CATransaction};
 
 use crate::Id;
 use crate::gpu::MetalGpu;
@@ -52,7 +56,12 @@ struct Frame {
 
 /// A `CAMetalLayer` that a [`SurfaceTarget`] presents to, which may move to
 /// the thread that renders.
-pub struct Layer(Retained<CAMetalLayer>);
+pub struct Layer {
+    layer: Retained<CAMetalLayer>,
+    /// Whether the layer is a sublayer that [`Layer::of_window`] put in the
+    /// window's view, which the target takes out of the view when it drops.
+    made: bool,
+}
 
 // SAFETY: a target uses its layer on the thread that renders only, to take
 // drawables and set their size and format, which Core Animation allows off
@@ -62,7 +71,7 @@ unsafe impl Send for Layer {}
 impl Layer {
     #[must_use]
     pub fn new(layer: Retained<CAMetalLayer>) -> Layer {
-        Layer(layer)
+        Layer { layer, made: false }
     }
 
     /// The layer `layer` points to, retained.
@@ -73,7 +82,46 @@ impl Layer {
     #[must_use]
     pub unsafe fn from_raw(layer: std::ptr::NonNull<std::ffi::c_void>) -> Layer {
         // SAFETY: the caller's contract.
-        Layer(unsafe { layer.cast::<CAMetalLayer>().as_ref() }.retain())
+        Layer::new(unsafe { layer.cast::<CAMetalLayer>().as_ref() }.retain())
+    }
+
+    /// The `CAMetalLayer` of `window`'s `NSView` or `UIView`: the view's own
+    /// layer where that is one, and otherwise a sublayer that follows the
+    /// view's bounds and scale, which the target that presents to it takes
+    /// out of the view when it drops.
+    ///
+    /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when the window
+    /// has no handle, with [`ErrorKind::Unsupported`](mln_util::ErrorKind)
+    /// for a window of neither view, and with
+    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) off the main thread,
+    /// the only one where `AppKit` and `UIKit` take a view's layers.
+    pub fn of_window(window: &dyn Window) -> Result<Layer, Error> {
+        let handle = window.window_handle().map_err(|e| Error::native(format!("the window has no handle: {e}")))?;
+        let (view, app_kit) = match handle.as_raw() {
+            RawWindowHandle::AppKit(handle) => (handle.ns_view, true),
+            RawWindowHandle::UiKit(handle) => (handle.ui_view, false),
+            other => return Err(Error::unsupported(format!("Metal presents to no {other:?} window"))),
+        };
+        if MainThreadMarker::new().is_none() {
+            return Err(Error::invalid_state(
+                "a window's Metal layer is made on the main thread: attach the window with Driver::CallerThread \
+                 serviced there, or present to a CAMetalLayer of your own",
+            ));
+        }
+        // SAFETY: the view is live while the window is, and this runs on the
+        // main thread.
+        let layer = unsafe {
+            if app_kit {
+                raw_window_metal::Layer::from_ns_view(view)
+            } else {
+                raw_window_metal::Layer::from_ui_view(view)
+            }
+        };
+        let made = !layer.pre_existing();
+        // SAFETY: `into_raw` gives up a +1 retained, non-null CAMetalLayer.
+        let layer = unsafe { Retained::from_raw(layer.into_raw().as_ptr().cast::<CAMetalLayer>()) }
+            .ok_or_else(|| Error::native("the window's view has no layer"))?;
+        Ok(Layer { layer, made })
     }
 }
 
@@ -87,6 +135,9 @@ impl std::fmt::Debug for Layer {
 pub struct SurfaceTarget {
     device: Id<dyn MTLDevice>,
     layer: Retained<CAMetalLayer>,
+    /// Whether the target takes the layer out of its view when it drops
+    /// (`Layer::made`).
+    remove_layer: bool,
     size: Size,
     /// The frame's drawable, from `begin_frame` until `end_frame`.
     frame: Option<Frame>,
@@ -104,7 +155,7 @@ impl SurfaceTarget {
     /// presented without waiting for the display.
     #[must_use]
     pub fn new(backend: &RendererBackend, layer: Layer, framebuffer_size: Size, cap_frame_rate: bool) -> SurfaceTarget {
-        let Layer(layer) = layer;
+        let Layer { layer, made: remove_layer } = layer;
         let device = backend.device().device().clone();
         layer.setDevice(Some(&device));
         layer.setPixelFormat(COLOR_FORMAT);
@@ -116,6 +167,7 @@ impl SurfaceTarget {
         let mut target = SurfaceTarget {
             device,
             layer,
+            remove_layer,
             size: Size::new(0, 0),
             frame: None,
             depth_stencil: None,
@@ -303,6 +355,18 @@ impl FrameTarget for SurfaceTarget {
         }
         if let Some((_, depth_stencil)) = self.depth_stencil.take() {
             destroy_unused(gpu, [ResourceId::Texture(depth_stencil)]);
+        }
+    }
+}
+
+impl Drop for SurfaceTarget {
+    fn drop(&mut self) {
+        if self.remove_layer {
+            // An explicit transaction: the thread that renders may have no
+            // run loop to commit an implicit one.
+            CATransaction::begin();
+            self.layer.removeFromSuperlayer();
+            CATransaction::commit();
         }
     }
 }

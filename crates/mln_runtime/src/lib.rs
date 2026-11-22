@@ -14,9 +14,9 @@
 //! The synchronous, single-thread core that these handles drive is
 //! `mln_map`'s; [`Map::with_core`] runs a closure on it.
 //!
-//! Sessions render with the backends of the crate's features: `webgpu`,
-//! `metal`, `vulkan` and `gl`, each where its platform has it. A session's
-//! [`Device`] picks its backend.
+//! Sessions render with the backends of the crate's features: `metal`,
+//! `vulkan`, `d3d12` and `gl`, on by default, and `webgpu`, each where its
+//! platform has it. A session's [`Device`] picks its backend.
 //!
 //! In the browser (wasm32-unknown-unknown, without threads), a runtime's
 //! thread and its sessions' are the one that made the runtime: their work

@@ -6,10 +6,12 @@
 
 // The matches over the backends' enums list a variant per backend that the
 // build's features and target have, so whether their `_` arm is unreachable,
-// and whether a `let` of one variant is irrefutable, depends on the build.
+// or matches a single variant, and whether a `let` of one variant is
+// irrefutable, depends on the build.
 #![allow(
     unreachable_patterns,
     irrefutable_let_patterns,
+    clippy::match_wildcard_for_single_variants,
     reason = "the backends' variants depend on the build's features and target"
 )]
 #![cfg_attr(
@@ -342,8 +344,10 @@ impl LocalBackend for mln_mtl::RendererBackend {
         overlay: Option<SurfaceOverlay>,
         size: Size,
     ) -> Result<Target<Self>, Error> {
-        let SurfaceKind::MetalLayer(layer) = surface.kind else {
-            return Err(no_surface());
+        let layer = match surface.kind {
+            SurfaceKind::MetalLayer(layer) => layer,
+            SurfaceKind::Window(window) => mln_mtl::Layer::of_window(&*window)?,
+            _ => return Err(no_surface()),
         };
         let overlay =
             overlay_of(
@@ -1313,9 +1317,6 @@ impl LocalTarget {
 /// its backend takes the surface's kind.
 fn default_surface_device(surface: &Surface) -> Result<Device, Error> {
     match surface.kind {
-        SurfaceKind::Window(_) if cfg!(target_vendor = "apple") => {
-            Device::with_backend(super::target::BackendType::WebGPU, DeviceOptions::default())
-        }
         SurfaceKind::Window(_) => Device::new(DeviceOptions::default()),
         #[cfg(all(feature = "metal", target_vendor = "apple"))]
         SurfaceKind::MetalLayer(_) => Device::with_backend(super::target::BackendType::Metal, DeviceOptions::default()),

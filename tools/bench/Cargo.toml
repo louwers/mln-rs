@@ -47,6 +47,7 @@ mln_renderer = { package = "mln-rs-renderer", path = "../../crates/mln_renderer"
 mln_runtime = { package = "mln-rs-runtime", path = "../../crates/mln_runtime", features = [
   "bench",
   "default",
+  "webgpu",
 ] }
 # The file source that reads the fixtures (support/fixtures.rs), and the
 # online file source over the simulated network (support/network.rs).
