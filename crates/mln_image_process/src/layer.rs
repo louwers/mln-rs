@@ -24,10 +24,8 @@ pub struct ImageProcessLayer {
     corners: Buffer<[i16; 2]>,
     quad: IndexBuffer,
     scratch: Vec<Target>,
-    /// The passes of the last frame, then spare ones of earlier frames.
+    /// The passes the frame draws.
     passes: Vec<Pass>,
-    /// How many of `passes` the frame draws.
-    drawn: usize,
 }
 
 /// A pass the layer draws: its mesh, with the textures it samples, and its
@@ -49,16 +47,17 @@ impl Layer for ImageProcessLayer {
             quad: cx.res.index_buffer(&[0, 1, 2, 1, 2, 3]),
             scratch: Vec::new(),
             passes: Vec::new(),
-            drawn: 0,
         }
     }
 
     fn update(&mut self, cx: &mut UpdateCx<'_, Self>) {
-        self.drawn = self.update_passes(cx).unwrap_or(0);
+        let drawn = self.update_passes(cx).unwrap_or(0);
+        self.passes.truncate(drawn);
+        self.scratch.truncate(drawn.saturating_sub(1));
     }
 
     fn prepare(&self, _cx: &PrepareCx<'_, Self>, out: &mut Draws) {
-        let Some((last, passes)) = self.passes[..self.drawn].split_last() else { return };
+        let Some((last, passes)) = self.passes.split_last() else { return };
         for (pass, target) in passes.iter().zip(&self.scratch) {
             out.target(target).block(&pass.block).push(&pass.mesh, Draw::DEFAULT, ());
         }
