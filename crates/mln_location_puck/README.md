@@ -13,6 +13,7 @@ A caller adds it to the registry it starts its runtime with:
 let mut builder = mln_rs::mln_render::RegistryBuilder::new();
 mln_rs::register_builtins(&mut builder)?;
 mln_location_puck::register(&mut builder)?;
+let runtime = mln_rs::Runtime::new(&mln_rs::RuntimeOptions::default(), builder.build())?;
 ```
 
 and an app adds the layer, then sets its paint properties as fixes come in:
@@ -30,9 +31,35 @@ and an app adds the layer, then sets its paint properties as fixes come in:
 }
 ```
 
-The properties transition, the bearing the shorter way around, and a
-rendered-feature query that hits the puck or its arrow returns a point at the
-position.
+## Properties
+
+Each is a paint property, the same for the whole layer, and transitions; the
+bearing turns the shorter way around. Sizes are logical pixels but for
+`accuracy-radius`. A size of 0 hides its part. The parts draw from the bottom
+up: the accuracy circle, the bearing's sector, the shadow, the arrow and the
+puck.
+
+| property | default | |
+|---|---|---|
+| `position` | `[0, 0]` | `[longitude, latitude]` |
+| `bearing` | 0 | the heading, degrees clockwise from north |
+| `bearing-visible` | `false` | whether the arrow and the sector show |
+| `bearing-radius`, `bearing-arrow-color` | 18, white | the arrow |
+| `bearing-accuracy` | 0 | the sector's half width, degrees |
+| `bearing-accuracy-radius`, `bearing-accuracy-color` | 64, translucent blue | the sector, which fades outward |
+| `accuracy-radius` | 0 | the accuracy circle's radius, meters |
+| `accuracy-color` | translucent blue | its fill |
+| `accuracy-border-width`, `accuracy-border-color` | 0, translucent blue | its border |
+| `puck-radius`, `puck-color` | 8, blue | the puck's fill |
+| `puck-border-width`, `puck-border-color` | 2, white | its border, outside the fill |
+| `shadow-radius`, `shadow-color` | 0, translucent black | a soft shadow |
+| `perspective-compensation` | 0.85 | from 0, the puck shrinks with distance as the map does, to 1, it keeps its size |
+| `tilt-displacement` | 0 | under pitch, how far the puck and arrow lift up the screen and the shadow drops, pixels a radian |
+
+Every part lies on the ground, so pitch foreshortens it, and the puck, the arrow
+and the shadow turn with the bearing. It draws in every world copy, on Mercator
+and on the globe. A rendered-feature query that hits the puck or the arrow
+returns a point at the position.
 
 It is written against the mln-rs facade alone, as a layer type outside mln-rs
 is.

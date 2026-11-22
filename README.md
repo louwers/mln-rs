@@ -33,3 +33,22 @@ profile with incremental compilation and debug checks. Use `--profile dev` for
 unoptimized debugging or `--profile release` for shipping optimizations.
 
 `mise tasks` lists every task.
+
+## Extensions
+
+The built-in layer and source types go through the same contracts that a crate
+outside mln-rs implements (the docs of `mln_rs::layer` start there). Three
+first-party extensions, each a crate written against the `mln-rs` facade alone,
+add what a style may declare, and an app adds them to the registry it starts its
+runtime with:
+
+- [`mln-rs-ngon`](crates/mln_ngon): the `org.maplibre.ngon` layer type, a
+  regular polygon at each point of a geometry source.
+- [`mln-rs-location-puck`](crates/mln_location_puck): the
+  `org.maplibre.location-puck` layer type, a device's location, heading and
+  accuracy at one position, without a source.
+- [`mln-rs-image-process`](crates/mln_image_process): named render targets that
+  layers of any type draw into, and the `org.maplibre.image-process` layer type,
+  which blurs, thresholds, colors and combines them.
+
+The desktop and browser demos register all three.

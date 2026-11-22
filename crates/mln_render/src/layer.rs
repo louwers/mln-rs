@@ -2,7 +2,7 @@
 //! renderer draws. The `mln_ngon` crate's `org.maplibre.ngon` layer type,
 //! which draws a regular polygon at each point of a geometry source, is a
 //! whole example written against the facade alone, whose `mln_rs::layer`
-//! gathers every name it uses.
+//! gathers every name it uses. Each part below says where n-gon writes it.
 //!
 //! A layer type has two halves, which
 //! [`RegistryBuilder::add_layer_type::<L>()`](crate::RegistryBuilder::add_layer_type)
@@ -12,9 +12,10 @@
 //!   [`StyleLayerType`]: the type's name, its kind of source, its properties
 //!   ([`mln_style::properties!`] declares them) and its
 //!   [`Data`](StyleLayerType::Data), what an app gives a layer outside the
-//!   style JSON (`Map::edit_style_layer_data`).
+//!   style JSON (`Map::edit_style_layer_data`). n-gon's is `Ngon`, with the
+//!   `paint` module of its thirteen properties.
 //! - **The render half**, a struct that implements [`Layer`], one value per
-//!   style layer of the type.
+//!   style layer of the type: n-gon's `NgonLayer`.
 //!
 //! # What a layer type writes
 //!
@@ -25,28 +26,37 @@
 //!    [`Indexes`], and the values of its data-driven paint properties in
 //!    [`LayerBinders`], declared with
 //!    [`paint_property_binders!`](crate::paint_property_binders!), with the
-//!    images of its patterns ([`LayoutCx::need_patterns`]). A layer of a
-//!    raster or image source has the input [`RasterTiles`], each tile's
-//!    image ([`RasterTile`]), one of a raster-dem source the input
-//!    [`DemTiles`], each tile's elevations ([`DemTile`]), and a layer
-//!    without a source the input [`ViewCover`], the tiles that cover the
-//!    view, or [`NoTiles`].
-//! 2. Its meshes. [`Layer::tile`] makes the value the layer keeps of a
+//!    images of its patterns ([`LayoutCx::need_patterns`]). n-gon's
+//!    `NgonLayout` builds a quad per point. A layer of a raster or image
+//!    source has the input [`RasterTiles`], each tile's image
+//!    ([`RasterTile`]), one of a raster-dem source the input [`DemTiles`],
+//!    each tile's elevations ([`DemTile`]), and a layer without a source the
+//!    input [`ViewCover`], the tiles that cover the view, or [`NoTiles`].
+//! 2. Its programs. A program is a `static`
+//!    [`Program`](mln_gfx::shaders::program::Program) that names the
+//!    buffers, attributes, textures and paint properties its shaders read,
+//!    and carries their sources in each shading language
+//!    ([`mln_gfx::shaders::source`]), so that it draws on every backend. Its
+//!    blocks are structs that [`uniform_block!`](mln_gfx::uniform_block!)
+//!    declares. n-gon's `NGON` reads a block of each draw and one of the
+//!    layer.
+//! 3. Its meshes. [`Layer::tile`] makes the value the layer keeps of a
 //!    frame tile, typically a [`Mesh`](crate::draw::Mesh) of the tile's
-//!    bucket ([`LayerBucket`]) with the program the type declares. The
-//!    engine keeps the values with their tiles and drops them when the
+//!    bucket ([`LayerBucket`]) with one of its programs, as n-gon's does.
+//!    The engine keeps the values with their tiles and drops them when the
 //!    tiles or their data go, or the map switches between Mercator and the
 //!    globe. A type that makes the values of its tiles together, such as in
 //!    an order across them, makes them in [`Layer::update`] instead
 //!    ([`Tiles::get_mut`]).
-//! 3. Its draws. [`Layer::prepare`] pushes a [`Draw`](crate::draw::Draw)
+//! 4. Its draws. [`Layer::prepare`] pushes a [`Draw`](crate::draw::Draw)
 //!    of each mesh, with its tile's projection and the values of its
-//!    program's blocks, to [`Draws`]. The engine writes what the blocks
-//!    hold of the mesh's paint values, and orders, uploads and draws them:
-//!    the layer never sees a pass, a depth range, a stencil value or a
-//!    uniform buffer. A layer that draws with the backend's own commands,
-//!    as a host outside the renderer does, asks for them instead
-//!    ([`Draws::lend`]), and the engine lends them ([`Layer::lend`]).
+//!    program's blocks, to [`Draws`], as n-gon pushes each tile's mesh. The
+//!    engine writes what the blocks hold of the mesh's paint values, and
+//!    orders, uploads and draws them: the layer never sees a pass, a depth
+//!    range, a stencil value or a uniform buffer. A layer that draws with
+//!    the backend's own commands, as a host outside the renderer does, asks
+//!    for them instead ([`Draws::lend`]), and the engine lends them
+//!    ([`Layer::lend`]).
 //!
 //! [`Layer::evaluate`] says whether, and how, the layer draws with its
 //! freshly evaluated values; [`Layer::update`] brings up to date what the
@@ -57,6 +67,15 @@
 //! around the position's [`Anchor`]s, one in each world copy the frame shows
 //! ([`Frame::anchors`]), in the units of an anchor's tile, which
 //! [`Frame::tile`] projects.
+//!
+//! A layer reads what its style declares outside its properties, the values
+//! of the style keys that an extension declares on layers
+//! ([`StyleKey`](mln_style::style_key::StyleKey)), from its style
+//! ([`LayerBase::extra`](mln_style::layer_type::LayerBase::extra)), and it
+//! samples the style's named targets
+//! ([`NamedTarget`](crate::draw::NamedTarget)) that it asks for in its
+//! update ([`UpdateCx::target`]). The `mln_image_process` crate's
+//! `org.maplibre.image-process` layer type does both.
 //!
 //! # When the hooks run
 //!

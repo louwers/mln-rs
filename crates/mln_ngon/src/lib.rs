@@ -1,12 +1,9 @@
-//! The `org.maplibre.ngon` layer type: a layer of a geometry source that
-//! draws a regular polygon at each of its points, with the paint
-//! properties of a circle layer and two more, `ngon-corners` and
-//! `ngon-rotate`. A caller adds it to its registry with [`register`].
+#![doc = include_str!("../README.md")]
 //!
-//! It is written against the `mln_rs` facade alone, as a layer type outside
-//! mln-rs is, and its modules are the parts of one:
+//! # The crate's parts
 //!
-//! - the style half, here: [`Ngon`] and its [`paint`] properties;
+//! - the style half, here: [`Ngon`] and its [`paint`] properties, and
+//!   [`register`];
 //! - the layout, which turns a tile's points into a bucket of quads with
 //!   the values of the data-driven properties (`layout.rs`);
 //! - the program, with its blocks and its shaders in the four shading
@@ -14,25 +11,6 @@
 //!   `glsl_es.rs`);
 //! - the render half, [`NgonLayer`], which makes a mesh of each tile's
 //!   bucket, pushes its draws and hit-tests the polygons (`layer.rs`).
-//!
-//! # Properties
-//!
-//! | property | default | |
-//! |---|---|---|
-//! | `ngon-radius` | 5 | pixels from the center to a corner |
-//! | `ngon-corners` | 5 | rounded, from 3 to 360 |
-//! | `ngon-rotate` | 0 | degrees clockwise; 0 puts a corner on top |
-//! | `ngon-color`, `ngon-opacity` | black, 1 | the fill |
-//! | `ngon-blur` | 0 | the fraction of the polygon, from its edge in, that fades |
-//! | `ngon-stroke-width`, `ngon-stroke-color`, `ngon-stroke-opacity` | 0, black, 1 | a stroke outside the fill, as wide along each edge |
-//! | `ngon-translate`, `ngon-translate-anchor` | `[0, 0]`, `map` | |
-//! | `ngon-pitch-alignment`, `ngon-pitch-scale` | `viewport`, `map` | |
-//!
-//! The first nine are data-driven and may read feature state; the last four
-//! are the same for every feature, as a circle layer's are, and mean what
-//! theirs do. A polygon aligned with the map lies in its plane and turns
-//! with it; one aligned with the viewport keeps a corner up on the screen.
-//! A rendered-feature query hits the polygon as drawn, stroke included.
 
 mod glsl;
 mod glsl_es;

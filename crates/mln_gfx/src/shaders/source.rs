@@ -39,9 +39,11 @@
 //!   reads the uniform, or per vertex the attribute in a vertex stage and the
 //!   varying in a fragment stage.
 //!
-//! A directive is a line of its own. The directives write nothing for a
-//! variant that reads the uniform, except in GLSL ES, whose varying has
-//! the property's own name. What a stage reads per vertex depends on the
+//! A directive is a line of its own, and a line reads one property with
+//! `$` at most: a stage that combines two reads them on lines of their own.
+//! The directives write nothing for a variant that reads the uniform,
+//! except in GLSL ES, whose varying has the property's own name. What a
+//! stage reads per vertex depends on the
 //! property's [`PropertyType`]. Each language's module says what the
 //! directives write there and what more they take. A source still tests
 //! `HAS_UNIFORM_u_<name>` itself where it reads a property another way.
