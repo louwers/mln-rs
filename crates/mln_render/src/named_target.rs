@@ -437,6 +437,19 @@ mod tests {
     }
 
     #[test]
+    fn the_layers_drawn_into_a_target_draw_in_one_pass_in_their_order() {
+        let (mut routes, _res) = routes(&["a"]);
+        for index in 0..5 {
+            assert_eq!(Some(0), layer(&mut routes, index, &[], Some("a")));
+        }
+        assert_eq!(None, layer(&mut routes, 5, &["a"], None));
+        routes.finish_frame();
+        let passes = routes.order().iter().filter(|run| matches!(run, Run::Named(0))).count();
+        assert_eq!(1, passes);
+        assert_eq!(vec![0, 1, 2, 3, 4], routes.writers(0).collect::<Vec<_>>());
+    }
+
+    #[test]
     fn a_route_that_would_read_what_it_draws_draws_on_the_map() {
         let (mut routes, _res) = routes(&["a", "b"]);
         assert_eq!(None, layer(&mut routes, 0, &["a"], Some("a")));
