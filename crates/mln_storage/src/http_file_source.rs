@@ -42,7 +42,7 @@ use crate::request::Responder;
 use crate::resource::{Kind, Resource, TileFormat};
 use crate::response::{Caching, Reason, ResourceError, Response};
 
-/// The `User-Agent` of every network request: the crate's name and version.
+/// The `User-Agent` of every network request
 #[cfg(not(target_family = "wasm"))]
 pub(crate) const USER_AGENT: &str = concat!("mln-rs/", env!("CARGO_PKG_VERSION"));
 
