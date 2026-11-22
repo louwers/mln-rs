@@ -1066,7 +1066,10 @@ pub struct PaintVertices<'a, P: PaintBinders> {
     paint: &'a P::Paint,
 }
 
-#[expect(clippy::expl_impl_clone_on_copy, reason = "a derive would bound the binders by `Copy`, not just their reference")]
+#[expect(
+    clippy::expl_impl_clone_on_copy,
+    reason = "a derive would bound the binders by `Copy`, not just their reference"
+)]
 impl<P: PaintBinders> Clone for PaintVertices<'_, P> {
     fn clone(&self) -> Self {
         *self
