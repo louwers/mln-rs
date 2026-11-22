@@ -102,7 +102,8 @@ impl Layer for HeatmapLayer {
                 globe_extrude_scale: at.globe_extrude_scale,
                 ..HeatmapDrawableUBO::default()
             };
-            heat.push_at(mesh, &at, Draw { depth: Depth::Off, ..Draw::DEFAULT }, draw);
+            // A tile's heat adds to that of the tiles made before it.
+            heat.push_at(mesh, &at, Draw { order: mesh.seq() as i64, depth: Depth::Off, ..Draw::DEFAULT }, draw);
         }
         let size = cx.frame.target_size;
         let matrix = orthographic(0.0, f64::from(size.width), f64::from(size.height), 0.0, -1.0, 1.0);

@@ -210,23 +210,6 @@ impl Resources {
     /// ([`Projection::Own`](mln_gfx::shaders::program::Projection::Own)), draws once a frame:
     /// its draw writes them to the mesh's buffers.
     pub fn mesh<B: DrawBlocks>(&mut self, desc: &MeshDesc<'_>) -> Mesh<B> {
-        let (objects, paint) = self.mesh_objects::<B>(desc);
-        self.add_mesh(objects, paint)
-    }
-
-    /// Makes `mesh` the mesh of `desc`, as [`mesh`](Self::mesh) makes one,
-    /// in its place among the meshes' ages: its draws order among others as
-    /// before.
-    pub fn set_mesh<B: DrawBlocks>(&mut self, mesh: &mut Mesh<B>, desc: &MeshDesc<'_>) {
-        let (objects, paint) = self.mesh_objects::<B>(desc);
-        mesh.replace(objects.program(), paint);
-        drop(self.take_mesh(mesh.key()));
-        self.restore_mesh(mesh.key(), Box::new(objects));
-    }
-
-    /// The GPU objects of a mesh of `desc`, with what the engine writes of
-    /// its paint values, as [`mesh`](Self::mesh) checks them.
-    fn mesh_objects<B: DrawBlocks>(&mut self, desc: &MeshDesc<'_>) -> (DrawObjects, Option<MeshPaint>) {
         let program = desc.program;
         assert!(
             program
@@ -293,7 +276,7 @@ impl Resources {
             };
             objects.pull(buffer.id, (*entry).clone());
         }
-        (objects, desc.mesh_paint.clone())
+        self.add_mesh(objects, desc.mesh_paint.clone())
     }
 }
 

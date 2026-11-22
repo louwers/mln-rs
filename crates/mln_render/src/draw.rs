@@ -11,10 +11,9 @@
 //! the indexes of quads ([`Resources::quads`]) are shared buffers of the
 //! engine's. A bucket's
 //! buffers take in place what changes in its data (feature state,
-//! placement), and meshes over them see it. A mesh made again in its place
-//! ([`Resources::set_mesh`]) keeps its age, and so its draws' order. An
-//! entry of the resources goes once its last handle drops and the GPU is
-//! done with it, and a mesh holds what it was made from.
+//! placement), and meshes over them see it. An entry of the resources goes
+//! once its last handle drops and the GPU is done with it, and a mesh holds
+//! what it was made from.
 //!
 //! Each frame, a layer pushes its draws to [`Draws`], in its main group, in
 //! the overlay above it or into one of its targets, which draw before the

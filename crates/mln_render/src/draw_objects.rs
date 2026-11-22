@@ -68,9 +68,12 @@ impl<B> Mesh<B> {
         Mesh { handle, seq, program, paint, blocks: PhantomData }
     }
 
-    /// When the mesh was made among its context's meshes: a mesh made later
-    /// has a greater one.
-    pub(crate) fn seq(&self) -> u64 {
+    /// When the mesh was made among its renderer's meshes: a mesh made
+    /// later has a greater one. A draw of the mesh that orders by it
+    /// ([`Draw::order`](crate::draw::Draw::order)) draws over the draws of
+    /// the meshes made before it.
+    #[must_use]
+    pub fn seq(&self) -> u64 {
         self.seq
     }
 
@@ -87,13 +90,6 @@ impl<B> Mesh<B> {
     /// The program the mesh draws with.
     pub(crate) fn program(&self) -> &'static Program {
         self.program
-    }
-
-    /// Makes the mesh draw with `program` and write `paint` into its draws'
-    /// blocks, keeping its handle and age.
-    pub(crate) fn replace(&mut self, program: &'static Program, paint: Option<MeshPaint>) {
-        self.program = program;
-        self.paint = paint;
     }
 }
 

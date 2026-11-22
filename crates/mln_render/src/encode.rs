@@ -4,7 +4,7 @@
 //! of one of its meshes, with the values of the mesh's program's blocks of
 //! each draw ([`DrawBlocks`]) and, for a draw of a tile, the tile's
 //! [`TileProjection`]. The engine then sorts each [`Group`] by the draws'
-//! order, the age of their meshes and when they were pushed, writes the
+//! order and when they were pushed, writes the
 //! buffers of each of its programs once for all of the program's draws,
 //! places the group in the layers' order and depth, and draws it in the
 //! frame's passes: with the
@@ -72,9 +72,8 @@ pub enum Depth {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Draw {
     /// Where the draw is among its group's draws, which may hold draws of
-    /// all the layer's tiles: lower orders draw first. Draws of one order
-    /// draw in the order their meshes were made, and draws of one mesh in
-    /// the order they were pushed.
+    /// all the layer's tiles: lower orders draw first, and draws of one
+    /// order in the order they were pushed.
     pub order: i64,
     /// Whether the draw covers what is behind it, so that it may draw in
     /// the opaque pass: it does where its layer's evaluation says the layer
@@ -113,8 +112,6 @@ struct Pushed {
     /// Its index among the group's draws as they were pushed.
     index: u32,
     mesh: MeshKey,
-    /// When its mesh was made.
-    seq: u64,
     program: &'static Program,
     /// The tile whose mask the draw clips to.
     tile: Option<OverscaledTileID>,
@@ -251,7 +248,6 @@ impl Group {
             draw,
             index: pushed.len() as u32,
             mesh: mesh.key(),
-            seq: mesh.seq(),
             program,
             tile: at.and_then(|at| at.tile),
             projection: at.map(|at| at.block),
@@ -289,7 +285,7 @@ impl Group {
         tiles: impl IntoIterator<Item = UnwrappedTileID>,
     ) {
         let Group { frame, pushes, opaque, .. } = self;
-        pushes.pushed.sort_unstable_by_key(|pushed| (pushed.draw.order, pushed.seq, pushed.index));
+        pushes.pushed.sort_unstable_by_key(|pushed| (pushed.draw.order, pushed.index));
         frame.draws.clear();
         let mut counts: SmallVec<[u32; 4]> = SmallVec::new();
         for pushed in &pushes.pushed {
@@ -867,9 +863,10 @@ mod tests {
     }
 
     #[test]
-    fn a_group_draws_by_order_then_by_the_age_of_meshes_then_as_pushed() {
+    fn a_group_draws_by_order_then_as_pushed() {
         crate::tests::with_context(|gpu, context| {
             let (older, newer) = (mesh(context), mesh(context));
+            assert!(older.seq() < newer.seq());
             let mut group = Group::new();
             group.begin(0.0, false, false);
             group
@@ -879,7 +876,7 @@ mod tests {
                 .push(&newer, Draw { order: -1, ..Draw::DEFAULT }, ());
             group.finish(gpu, context, &(), []);
             let drawn: Vec<MeshKey> = group.frame.draws.iter().map(|draw| draw.mesh).collect();
-            assert_eq!(drawn, [newer.key(), older.key(), newer.key(), older.key()]);
+            assert_eq!(drawn, [newer.key(), newer.key(), older.key(), older.key()]);
         });
     }
 

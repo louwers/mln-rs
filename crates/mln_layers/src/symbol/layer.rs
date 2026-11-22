@@ -48,6 +48,10 @@ pub struct SymbolTile {
 /// the buffer's segments or of all of them.
 struct SymbolDraw {
     mesh: Mesh<(SymbolDrawableUBO, SymbolTilePropsUBO)>,
+    /// Where the draw is among the layer's: the draws of a tile draw over
+    /// those of the tiles made before it, and in the order of their
+    /// segments among those made with it.
+    order: i64,
     /// The positions the mesh reads: those of the bucket's leader, or the
     /// layer's own once placement moves them for it.
     positions: Buffer<SymbolDynamicLayoutVertex>,
@@ -201,9 +205,9 @@ impl Layer for SymbolLayer {
     }
 
     /// Makes the draws of the tiles that have none, of all of them in the
-    /// order of their segments, which they then draw in. A kept draw reads
-    /// the positions its layer now has of its own, and filters the icon
-    /// atlas as the frame's camera asks.
+    /// order of their segments, which they then draw in, over the draws
+    /// made before. A kept draw reads the positions its layer now has of its
+    /// own, and filters the icon atlas as the frame's camera asks.
     fn update(&mut self, cx: &mut UpdateCx<'_, Self>) {
         self.still.set(SamplerState { filter: cx.frame.image_filter(), ..GLYPHS });
         let style = &cx.layer.style;
@@ -220,7 +224,7 @@ impl Layer for SymbolLayer {
                     let positions = laid.buffer(buffer.dynamic_attribute_data_for(&style.id));
                     if *positions != draw.positions {
                         let parts = MeshParts::new(laid, draw.kind, draw.segment, screen_space);
-                        cx.res.set_mesh(&mut draw.mesh, &parts.desc(draw.icon_sampler.as_ref()));
+                        draw.mesh = cx.res.mesh(&parts.desc(draw.icon_sampler.as_ref()));
                         draw.positions = positions.clone();
                     }
                 }
@@ -304,8 +308,10 @@ impl Layer for SymbolLayer {
             let parts = MeshParts::new(laid, group.kind, group.segment, screen_space);
             let icon_sampler = parts.icon_slot.map(|_| filter.sampler(&self.still));
             for (is_halo, _) in [(true, halo), (false, fill)].into_iter().filter(|&(_, drawn)| drawn) {
+                let mesh = cx.res.mesh(&parts.desc(icon_sampler.as_ref()));
                 value.draws.push(SymbolDraw {
-                    mesh: cx.res.mesh(&parts.desc(icon_sampler.as_ref())),
+                    order: mesh.seq() as i64,
+                    mesh,
                     positions: parts.positions.clone(),
                     kind: group.kind,
                     halo: is_halo,
@@ -337,7 +343,7 @@ impl Layer for SymbolLayer {
             for draw in &value.draws {
                 if draw.kind.buffer(laid.bucket).segment_has_visible_vertices(draw.segment) {
                     let (at, blocks) = draw.blocks(cx, tile, laid);
-                    main.push_at(&draw.mesh, &at, Draw::DEFAULT, blocks);
+                    main.push_at(&draw.mesh, &at, Draw { order: draw.order, ..Draw::DEFAULT }, blocks);
                 }
             }
         }

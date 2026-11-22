@@ -35,8 +35,9 @@
 //!    bucket ([`LayerBucket`]) with the program the type declares. The
 //!    engine keeps the values with their tiles and drops them when the
 //!    tiles or their data go, or the map switches between Mercator and the
-//!    globe. A type whose meshes order across its tiles makes the values in
-//!    [`Layer::update`] instead ([`Tiles::get_mut`]).
+//!    globe. A type that makes the values of its tiles together, such as in
+//!    an order across them, makes them in [`Layer::update`] instead
+//!    ([`Tiles::get_mut`]).
 //! 3. Its draws. [`Layer::prepare`] pushes a [`Draw`](crate::draw::Draw)
 //!    of each mesh, with its tile's projection and the values of its
 //!    program's blocks, to [`Draws`]. The engine writes what the blocks
