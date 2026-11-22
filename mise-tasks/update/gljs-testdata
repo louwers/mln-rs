@@ -117,11 +117,15 @@ declare -A allowed=(
     [projection/globe/terrain/fill-planet-tiles-no-background]=0.0004
     # The drapes' edges: 56 (RADV), 97 (lavapipe); flat: 191, 192.
     [projection/globe/terrain/line-gradient]=0.0004
-    # The checkers' edges sit up to 0.3 px from GL JS's in the drapes, which
-    # shows on the rows where an edge crosses a pixel's center: 240 of 65536
-    # (RADV). Lavapipe shifts every edge by about half a pixel: 1663. Flat:
-    # 587 (RADV), 544 (lavapipe). Not explained; seams show at 256 px a row.
-    [projection/globe/terrain/fill-seams/checkerboard]=0.026
+    # The whole picture sits up to 0.2 px from GL JS's, 0.05% larger and
+    # 0.1 px lower: the globe's camera, not the drapes, which put the checkers
+    # where the same view drawn flat does, to 0.01 px but for the flat map's
+    # 2 px fill outlines; drawn flat at GL JS's projection/globe twin's zoom,
+    # the picture is 0.2% larger than that twin's. It shows on the rows where
+    # an edge crosses a pixel's center: 240 of 65536 (RADV); flat 587. A seam
+    # shows at 256 px a row. Ignored on the software rasterizers
+    # (rust-port-llvmpipe.json).
+    [projection/globe/terrain/fill-seams/checkerboard]=0.0037
     # Each circle draws once, from the tile that holds it, as in GL JS. The
     # circles near the limb sit up to a pixel from GL JS's, as they do in GL
     # JS's projection/globe twin without terrain drawn here with each circle
