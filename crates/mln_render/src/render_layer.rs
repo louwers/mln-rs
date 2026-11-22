@@ -476,11 +476,10 @@ impl<L: Layer> RenderLayer for Hosted<L> {
                 for &index in order {
                     let Some(tile) = tiles.get(index) else { continue };
                     let content = update.contents.get(index).copied().flatten();
-                    let found = content.and_then(|content| {
-                        <L::Input as input::Find<L::Style>>::find(content, &self.values.style.id)
-                    });
-                    draws |= found
-                        .is_some_and(|(data, _)| <L::Input as input::Find<L::Style>>::identity(data).is_some());
+                    let found = content
+                        .and_then(|content| <L::Input as input::Find<L::Style>>::find(content, &self.values.style.id));
+                    draws |=
+                        found.is_some_and(|(data, _)| <L::Input as input::Find<L::Style>>::identity(data).is_some());
                     update.found.push(FoundTile { tile: index, view: found.map(|(_, place)| place) });
                     ids.push(*tile.overscaled_tile_id());
                 }

@@ -105,7 +105,12 @@ pub(crate) struct DrawGeometry {
 /// `count` vertices of `data_type` in `data` as the vertex attribute `id`,
 /// none where there are no vertices.
 #[must_use]
-pub(crate) fn raw_vertices(id: usize, data: Vec<u8>, count: usize, data_type: AttributeDataType) -> VertexAttributeArray {
+pub(crate) fn raw_vertices(
+    id: usize,
+    data: Vec<u8>,
+    count: usize,
+    data_type: AttributeDataType,
+) -> VertexAttributeArray {
     let mut attributes = VertexAttributeArray::new();
     if count == 0 || data_type == AttributeDataType::Invalid || data.is_empty() {
         return attributes;
