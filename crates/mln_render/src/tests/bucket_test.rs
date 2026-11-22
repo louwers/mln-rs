@@ -6,6 +6,7 @@ use mln_util::size::Size;
 
 use super::with_context;
 use crate::bucket_geometry::{BucketGeometry, GpuVec};
+use crate::gfx::buffer_store::StoredBuffer;
 use crate::gfx::context::Resources;
 use crate::handles::ImageVertex;
 use crate::tile::raster::RasterContents;
@@ -207,7 +208,7 @@ fn a_kept_vector_uploads_again_only_once_it_changed() {
         geometry.upload(&mut vec, true, &[], context);
         let entry = geometry.buffer(&vec).expect("a buffer").entry.clone();
         context.upload_buffer(gpu, &entry).expect("uploads").expect("a buffer");
-        let needs_upload = |context: &Resources| context.stored_buffer(&entry).is_some_and(|s| s.needs_upload());
+        let needs_upload = |context: &Resources| context.stored_buffer(&entry).is_some_and(StoredBuffer::needs_upload);
 
         geometry.upload(&mut vec, true, &[], context);
         assert!(!needs_upload(context), "unchanged");

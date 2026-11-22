@@ -1391,7 +1391,7 @@ pub struct BuildCx<'a, S: StyleLayerType> {
     pub(crate) feature_index: &'a mut FeatureIndexBuilder,
 }
 
-impl<'a, S: StyleLayerType> BuildCx<'a, S> {
+impl<S: StyleLayerType> BuildCx<'_, S> {
     /// The layers of the group, its leader first.
     #[must_use]
     pub fn layers(&self) -> &[Arc<EvaluatedLayer<S>>] {
@@ -1449,12 +1449,11 @@ impl<'a, S: StyleLayerType> BuildCx<'a, S> {
 
     /// The feature at `index` of the tile's source layer.
     pub fn feature(&self, index: usize) -> Result<Feature<'_>, Error> {
-        let layer = match self.decoded.get() {
-            Some(layer) => layer,
-            None => {
-                let layer = self.source_layer.layer()?;
-                self.decoded.get_or_init(|| layer)
-            }
+        let layer = if let Some(layer) = self.decoded.get() {
+            layer
+        } else {
+            let layer = self.source_layer.layer()?;
+            self.decoded.get_or_init(|| layer)
         };
         Ok(layer.feature(index)?)
     }
