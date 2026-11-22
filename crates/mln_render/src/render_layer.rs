@@ -79,9 +79,9 @@ pub(crate) struct LayerUpdate<'a> {
     /// The tiles of the frame's layers, as their updates find them, which
     /// the update adds the layer's to: those the encode draws.
     pub(crate) found: &'a mut Vec<FoundTile>,
-    /// Whether the layer's type places: its tiles are all its source's,
-    /// those held while placement fades them out included, in placement's
-    /// order ([`placement::tile_order`](crate::placement::tile_order)).
+    /// Whether the layer places: its tiles are all its source's, those held
+    /// while placement fades them out included, in placement's order
+    /// ([`placement::tile_order`](crate::placement::tile_order)).
     pub(crate) places: bool,
 }
 
@@ -160,7 +160,7 @@ pub(crate) struct LayerRecord {
     pub(crate) draws: bool,
     /// See [`Layer::VOLUME`].
     pub(crate) volume: bool,
-    /// Whether the layer's type places its layers.
+    /// Whether the layer places ([`Placement::places`](crate::placement::Placement::places)).
     pub(crate) places: bool,
 }
 
@@ -187,16 +187,24 @@ impl LayerRecord {
 pub(crate) struct RecordedLayer {
     record: LayerRecord,
     pub(crate) layer: Box<dyn RenderLayer>,
+    /// Where the participant of the layer's type is among the renderer's,
+    /// for a type whose layers place.
+    participant: Option<usize>,
 }
 
 impl RecordedLayer {
-    pub(crate) fn new(layer: Box<dyn RenderLayer>) -> RecordedLayer {
-        RecordedLayer { record: layer.record(Evaluation::NONE, false), layer }
+    pub(crate) fn new(layer: Box<dyn RenderLayer>, participant: Option<usize>) -> RecordedLayer {
+        RecordedLayer { record: layer.record(Evaluation::NONE, false), layer, participant }
     }
 
     /// What the engine reads of the layer.
     pub(crate) fn record(&self) -> &LayerRecord {
         &self.record
+    }
+
+    /// The renderer's participant that places the layer, if it places.
+    pub(crate) fn placing(&self) -> Option<usize> {
+        self.participant.filter(|_| self.record.places)
     }
 
     /// See [`RenderLayer::restyle`].
@@ -416,7 +424,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
             evaluation,
             draws,
             volume: L::VOLUME,
-            places: self.entry.places(),
+            places: self.entry.places(&*self.values.style),
         }
     }
 

@@ -24,7 +24,6 @@ use mln_util::logging::{Event, Log};
 use mln_util::pool::{Pool, TaskGroup};
 use mln_util::time::Instant;
 use mln_vec_map::{VecMap, VecSet};
-use smallvec::SmallVec;
 
 use crate::Registry;
 use crate::encode::{DrawOrder, FrameDraws};
@@ -35,10 +34,8 @@ use crate::globe_depth_pass::GlobeDepthPass;
 use crate::image_store::ImageStore;
 use crate::named_target::{Routes, Run};
 use crate::paint_parameters::PaintParameters;
-use crate::placement::{
-    CollisionIndex, ErasedFrame, ErasedPlacement, PlacingLayerTiles, PlacingTile, Prepared, Schedule,
-};
-use crate::render_layer::{FrameSourceTiles, LayerUpdate, RecordedLayer, RenderLayer};
+use crate::placement::{PlacementRecord, Placements};
+use crate::render_layer::{FrameSourceTiles, LayerUpdate, RecordedLayer};
 use crate::render_pass::Pass;
 use crate::render_source::{self, RenderSource, RenderTileParameters};
 use crate::render_tile::{FoundTile, RenderTile, TileContent};
@@ -104,7 +101,7 @@ fn create_render_layer(
     if render_layer.is_none() {
         Log::error(Event::Render, format!("no render layer for layer type '{name}'"));
     }
-    render_layer.map(RecordedLayer::new)
+    render_layer.map(|layer| RecordedLayer::new(layer, registry.placing_type(name)))
 }
 
 /// How an update evaluates and transitions the layers, the light and the
@@ -160,20 +157,9 @@ pub(crate) struct RenderOrchestrator {
     render_light: crate::render_light::RenderLight,
     render_sky: Option<crate::render_sky::RenderSky>,
 
-    /// The placement pass of the registry's layer type that places, if it
-    /// has one, and the schedule that drives it.
-    placement: Option<Box<dyn ErasedPlacement>>,
-    schedule: Schedule,
-    /// The current placement's collision index, which queries of the
-    /// placing layers read, and the one the next placement fills, which
-    /// keeps the cells of the one before.
-    placed: CollisionIndex,
-    spare_index: CollisionIndex,
-    /// The frame's layers whose type places, by their index in the drawing
-    /// order, as the update found them.
-    placing_layers: Vec<PlacingLayerTiles>,
-    /// Their tiles, a run of them per layer.
-    placing_tiles: Vec<PlacingTile>,
+    /// The participants of the registry's placing layer types, and the
+    /// engine's side of their placements.
+    placement: Placements,
     background_layer_as_color: bool,
     /// The center's longitude at the last update, which tells a wrap jump.
     longitude: f32,
@@ -229,18 +215,13 @@ impl RenderOrchestrator {
         let tile_store =
             TileStore::new(Box::new(pool_workers), glyph_store, ImageStore::default(), thread_pool.clone(), waker);
         RenderOrchestrator {
-            placement: registry.new_placement(),
+            placement: Placements::new(&registry),
             registry,
             events: Vec::new(),
             zoom_history: ZoomHistory::default(),
             still_image_request_id: 0,
             view: View::default(),
             tile_store,
-            schedule: Schedule::default(),
-            placed: CollisionIndex::default(),
-            spare_index: CollisionIndex::default(),
-            placing_layers: Vec::new(),
-            placing_tiles: Vec::new(),
             found_tiles: Vec::new(),
             style: None,
             sources_by_id: Vec::new(),
@@ -392,7 +373,8 @@ impl RenderOrchestrator {
         self.update_render_tiles(&frame);
         self.update_layer_tiles(update_parameters, &mut frame);
 
-        self.place(update_parameters, &mut frame);
+        self.placement.place(&self.layers, update_parameters, &mut self.tile_store, &mut frame);
+        frame.needs_repaint = clock.continuous && self.has_transitions(update_parameters.time_point);
 
         if !frame.needs_repaint && frame.loaded {
             // Ask the app to remove the unused images it added once the map
@@ -404,15 +386,7 @@ impl RenderOrchestrator {
             }
         }
 
-        if let Some(pass) = &mut self.placement {
-            let layers = placing(&self.layers, &self.placing_layers, &self.placing_tiles);
-            pass.update_buckets(&mut ErasedFrame {
-                layers: &layers,
-                update_parameters,
-                buckets: &mut self.tile_store,
-                placed: &mut self.placed,
-            });
-        }
+        self.placement.update(&self.layers, update_parameters, &mut self.tile_store);
 
         Some(frame)
     }
@@ -440,11 +414,9 @@ impl RenderOrchestrator {
     }
 
     /// Gives each layer of the frame its tiles, in the order it draws them,
-    /// finds those whose type places, and sets the frame's opaque pass
-    /// cutoff.
+    /// finds those that place, and sets the frame's opaque pass cutoff.
     fn update_layer_tiles(&mut self, update_parameters: &UpdateParameters, frame: &mut FramePlan) {
-        self.placing_layers.clear();
-        self.placing_tiles.clear();
+        self.placement.clear_layers();
         let mut opaque_pass_cutoff_estimation = frame.layers.len();
         let mut contents = SourceContents::default();
         self.found_tiles.clear();
@@ -465,11 +437,9 @@ impl RenderOrchestrator {
                 found: &mut self.found_tiles,
                 places,
             });
-            if places {
-                let first = self.placing_tiles.len();
+            if let Some(participant) = render_layer.placing() {
                 let found = &self.found_tiles[start..];
-                crate::placement::placing_tiles(source, source_contents, found, &mut self.placing_tiles);
-                self.placing_layers.push(PlacingLayerTiles { layer: index, tiles: first..self.placing_tiles.len() });
+                self.placement.add_layer((index, participant), source, source_contents, found);
             }
             let record = render_layer.record();
             if frame.opaque_pass_cutoff == 0 {
@@ -825,7 +795,7 @@ impl RenderOrchestrator {
             is_update_synchronous: false,
             font_faces: update_parameters.style.get_font_faces().cloned(),
             glyph_pbfs: !update_parameters.style.get_glyph_url().is_empty(),
-            placement_commits: self.schedule.commits(),
+            placement_commits: self.placement.schedule().commits(),
         };
 
         if !self.sources_by_id.is_empty() {
@@ -950,93 +920,6 @@ impl RenderOrchestrator {
         will_render
     }
 
-    /// Runs the frame's placement on the schedule: for a continuous map,
-    /// when the last placement isn't recent, and for a still image, every
-    /// frame. Sets the frame's fade and repaint parameters.
-    fn place(&mut self, update_parameters: &Arc<UpdateParameters>, frame: &mut FramePlan) {
-        let continuous = update_parameters.mode == MapMode::Continuous;
-        let time_point = update_parameters.time_point;
-        let layers = placing(&self.layers, &self.placing_layers, &self.placing_tiles);
-        let prepared = match &mut self.placement {
-            Some(pass) => pass.prepare(&mut ErasedFrame {
-                layers: &layers,
-                update_parameters,
-                buckets: &mut self.tile_store,
-                placed: &mut self.placed,
-            }),
-            None => Prepared::default(),
-        };
-        let pass = match &mut self.placement {
-            Some(pass) if prepared.places => pass,
-            pass => {
-                frame.placement_fade = 1.0;
-                if continuous {
-                    // Nothing to place: the placement and what the pass
-                    // keeps go.
-                    frame.placement_changed = self.schedule.reset();
-                    self.placed.clear();
-                    if let Some(pass) = pass {
-                        pass.reset();
-                    }
-                    frame.needs_repaint = self.has_transitions(time_point);
-                } else {
-                    // A still image keeps nothing of the buckets between
-                    // frames.
-                    if let Some(pass) = pass {
-                        pass.forget_buckets();
-                    }
-                    frame.placement_changed = false;
-                    frame.needs_repaint = false;
-                }
-                return;
-            }
-        };
-
-        let transition_options = update_parameters.style.get_transition_options();
-        let zoom = update_parameters.view.zoom() as f32;
-        if continuous {
-            let tilted_view = update_parameters.view.pitch() != 0.0;
-            // In a flat view, new buckets show soon: placement runs within a
-            // short period rather than at once, since new buckets usually
-            // come from several tiles in a row, and the short period places
-            // them together. A tilted view places less often, for speed:
-            // what it adds is mostly far away.
-            let period_override = (prepared.added && !tilted_view).then_some(Duration::from_millis(30));
-
-            // Placement runs again, at most once per update period, when it
-            // would place differently, and while the sources hold tiles
-            // that wait for placements to fade out what they show. Until it
-            // may, the frame says when, rather than asking for frames that
-            // would show the same.
-            let stale = prepared.changed || !self.schedule.is_settled() || self.tile_store.has_fading_tiles();
-            let next_placement_at = self.schedule.next_placement_at(zoom, period_override);
-            let due = match (next_placement_at, time_point) {
-                (Some(at), Some(now)) => now >= at,
-                _ => true,
-            };
-            frame.placement_changed = stale && due;
-            if frame.placement_changed {
-                let fade = self.schedule.fade_change(time_point);
-                let indexes = (&mut self.placed, &mut self.spare_index);
-                let placed = place(&mut **pass, &layers, update_parameters, &mut self.tile_store, indexes, fade);
-                self.schedule.commit(update_parameters.mode, transition_options, zoom, time_point, placed);
-            } else if stale {
-                frame.repaint_at = next_placement_at;
-            }
-            frame.placement_fade = self.schedule.fade_change(time_point);
-            frame.needs_repaint = self.has_transitions(time_point);
-        } else {
-            frame.placement_changed = true;
-            let indexes = (&mut self.placed, &mut self.spare_index);
-            let placed = place(&mut **pass, &layers, update_parameters, &mut self.tile_store, indexes, 1.0);
-            self.schedule.commit(update_parameters.mode, transition_options, zoom, time_point, placed);
-            // A still image keeps nothing of the buckets between frames.
-            pass.forget_buckets();
-            frame.placement_fade = 1.0;
-            frame.needs_repaint = false;
-        }
-    }
-
     pub(crate) fn has_transitions(&self, time_point: Option<Instant>) -> bool {
         if self.render_light.has_transition() {
             return true;
@@ -1050,7 +933,7 @@ impl RenderOrchestrator {
             return true;
         }
 
-        if self.schedule.has_transitions(time_point) {
+        if self.placement.schedule().has_transitions(time_point) {
             return true;
         }
 
@@ -1086,9 +969,7 @@ impl RenderOrchestrator {
         self.layers.clear();
         self.layer_indexes.clear();
 
-        if let Some(pass) = &mut self.placement {
-            pass.forget_buckets();
-        }
+        self.placement.forget();
 
         self.tile_store.images_mut().clear();
         self.tile_store.glyphs().evict(&VecSet::new());
@@ -1426,7 +1307,7 @@ impl RenderOrchestrator {
             .map(|(id, layer)| (id.clone(), *layer))
             .collect();
         if !placing.is_empty() {
-            self.placed.query_rendered_features(
+            self.placement.placed().query_rendered_features(
                 geometry,
                 &placing,
                 options,
@@ -1469,14 +1350,14 @@ impl RenderOrchestrator {
         Ok(result)
     }
 
-    /// The renderer's placement pass, if it has one.
-    pub(crate) fn placement(&self) -> Option<&dyn ErasedPlacement> {
-        self.placement.as_deref()
+    /// See [`Renderer::record_placements`](crate::Renderer::record_placements).
+    pub(crate) fn record_placements(&mut self, record: bool) {
+        self.placement.record(record);
     }
 
-    /// [`placement`](Self::placement), to change.
-    pub(crate) fn placement_mut(&mut self) -> Option<&mut (dyn ErasedPlacement + 'static)> {
-        self.placement.as_deref_mut()
+    /// See [`Renderer::placement_records`](crate::Renderer::placement_records).
+    pub(crate) fn placement_records(&self) -> &[PlacementRecord] {
+        self.placement.records()
     }
 
     /// Queries the features of the source `source_id`. `Err`: as
@@ -1644,36 +1525,4 @@ impl Drop for RenderOrchestrator {
         self.tile_store.clear();
         self.thread_pool.wait();
     }
-}
-
-/// Has `pass` place `layers` of `update_parameters`' frame, whose buckets
-/// are in `store`, into the spare of `(placed, spare)`, the current
-/// placement's index and the spare one, which then swap. `fade` is how far
-/// the current placement's fade had come.
-fn place(
-    pass: &mut dyn ErasedPlacement,
-    layers: &[(&dyn RenderLayer, &[PlacingTile])],
-    update_parameters: &UpdateParameters,
-    store: &mut TileStore,
-    (placed, spare): (&mut CollisionIndex, &mut CollisionIndex),
-    fade: f32,
-) -> crate::placement::Placed {
-    spare.begin(&update_parameters.view, update_parameters.mode);
-    let ids = layers.iter().map(|&(layer, tiles)| (layer.id(), tiles));
-    spare.add_layers(ids, store, update_parameters.cross_source_collisions);
-    let mut frame = ErasedFrame { layers, update_parameters, buckets: store, placed: &mut *placed };
-    let result = pass.place(&mut frame, spare, fade);
-    std::mem::swap(placed, spare);
-    spare.clear_records();
-    result
-}
-
-/// The frame's placing layers among `layers`, each with its run of `tiles`,
-/// as the placement pass reads them.
-fn placing<'a>(
-    layers: &'a [RecordedLayer],
-    placing: &'a [PlacingLayerTiles],
-    tiles: &'a [PlacingTile],
-) -> SmallVec<[(&'a dyn RenderLayer, &'a [PlacingTile]); 8]> {
-    placing.iter().map(|placing| (&*layers[placing.layer].layer, &tiles[placing.tiles.clone()])).collect()
 }

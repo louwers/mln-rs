@@ -25,7 +25,7 @@ use crate::bucket::{ErasedBucket, Stored};
 use crate::layer::{Features, Layer, LayerBucket, Layout};
 use crate::layout::layout::{BuildParams, LayoutParameters, SourceLayer};
 use crate::layout::tile_layout::{Built, Resolved};
-use crate::placement::ErasedPlacement;
+use crate::placement::Placement;
 use crate::render_layer::{Hosted, RenderLayer};
 
 /// The values of a layer of the style type `S` for a frame.
@@ -69,7 +69,7 @@ impl<S: Layer<Style = S> + StyleLayerType> EvaluatedLayer<S> {
     /// halves, before its first evaluation: its paint properties' defaults,
     /// not drawing.
     pub(crate) fn new(style: Arc<LayerStyle<S>>) -> Self {
-        EvaluatedLayer::with_paint(entry::<S, NoPlacement>(), style, Default::default())
+        EvaluatedLayer::with_paint(entry::<S, ()>(), style, Default::default())
     }
 }
 
@@ -177,12 +177,9 @@ pub(crate) trait ErasedLayerType: Send + Sync + 'static {
         source_layer: SourceLayer,
     ) -> Result<Option<Box<dyn ErasedLayout>>, Error>;
 
-    /// Whether the type's layers place.
-    fn places(&self) -> bool;
-
-    /// A new placement pass of the type's layers, for a type whose layers
-    /// place.
-    fn new_placement(&self) -> Option<Box<dyn ErasedPlacement>>;
+    /// Whether the layer `style` places ([`Placement::places`]); false for a
+    /// type without placement, or a layer of another type.
+    fn places(&self, style: &dyn ErasedLayerStyle) -> bool;
 
     /// Reads the values that [`ErasedEvaluatedLayer::write`] wrote for a
     /// layer of the type.
@@ -193,30 +190,29 @@ pub(crate) trait ErasedLayerType: Send + Sync + 'static {
 }
 
 /// The [`ErasedLayerType`] of the layer type `L`, which [`entry`] returns,
-/// whose layers place with the pass that `P` makes.
-pub(crate) struct LayerEntry<L, P = NoPlacement>(PhantomData<fn() -> (L, P)>);
+/// whose layers place with the participant `P`, or `()` for a type without
+/// placement.
+pub(crate) struct LayerEntry<L, P>(PhantomData<fn() -> (L, P)>);
 
-/// What makes the placement pass of a layer type's layers, if they place.
-pub(crate) trait NewPlacement<L>: 'static {
-    /// Whether the type's layers place.
-    const PLACES: bool;
-
-    /// A new pass; `None` for a type whose layers don't place.
-    fn new_placement() -> Option<Box<dyn ErasedPlacement>>;
+/// Whether a layer of the type `L` places: `()` for a type without
+/// placement, or the type's [`Placement`].
+pub(crate) trait Places<L: Layer>: 'static {
+    fn places(style: &LayerStyle<L::Style>) -> bool;
 }
 
-/// The [`NewPlacement`] of a layer type whose layers don't place.
-pub(crate) struct NoPlacement;
-
-impl<L> NewPlacement<L> for NoPlacement {
-    const PLACES: bool = false;
-
-    fn new_placement() -> Option<Box<dyn ErasedPlacement>> {
-        None
+impl<L: Layer> Places<L> for () {
+    fn places(_style: &LayerStyle<L::Style>) -> bool {
+        false
     }
 }
 
-impl<L: Layer, P: NewPlacement<L>> ErasedLayerType for LayerEntry<L, P> {
+impl<P: Placement> Places<P::Layer> for P {
+    fn places(style: &LayerStyle<<P::Layer as Layer>::Style>) -> bool {
+        <P as Placement>::places(style)
+    }
+}
+
+impl<L: Layer, P: Places<L>> ErasedLayerType for LayerEntry<L, P> {
     fn style(&self) -> &'static dyn ErasedStyleLayerType {
         LayerTypeEntry::<L::Style>::INSTANCE
     }
@@ -243,12 +239,8 @@ impl<L: Layer, P: NewPlacement<L>> ErasedLayerType for LayerEntry<L, P> {
         <L::Input as LayoutOf<L::Style>>::create(group, parameters, source_layer)
     }
 
-    fn places(&self) -> bool {
-        P::PLACES
-    }
-
-    fn new_placement(&self) -> Option<Box<dyn ErasedPlacement>> {
-        P::new_placement()
+    fn places(&self, style: &dyn ErasedLayerStyle) -> bool {
+        LayerStyle::<L::Style>::recover_ref(style).is_some_and(P::places)
     }
 
     fn read_evaluated(&'static self, r: &mut Reader<'_>) -> Option<Arc<dyn ErasedEvaluatedLayer>> {
@@ -385,9 +377,9 @@ impl<L: 'static, P: 'static> LayerEntry<L, P> {
     const INSTANCE: &'static Self = &LayerEntry(PhantomData);
 }
 
-/// The layer type `L` as a value, whose layers place with the pass `P`
-/// makes.
-pub(crate) const fn entry<L: Layer, P: NewPlacement<L>>() -> &'static dyn ErasedLayerType {
+/// The layer type `L` as a value, whose layers place with the participant
+/// `P`, or `()` for none.
+pub(crate) const fn entry<L: Layer, P: Places<L>>() -> &'static dyn ErasedLayerType {
     LayerEntry::<L, P>::INSTANCE
 }
 
@@ -425,7 +417,7 @@ mod tests {
         let style = Arc::new(LayerStyle::<Dot>::new("dot".to_owned(), "source".to_owned()));
         let crossfade = CrossfadeParameters { from_scale: 2.0, to_scale: 1.0, t: 0.25 };
         let layer: Arc<dyn ErasedEvaluatedLayer> =
-            Arc::new(EvaluatedLayer { style, paint, crossfade, draws: false, entry: entry::<Dot, NoPlacement>() });
+            Arc::new(EvaluatedLayer { style, paint, crossfade, draws: false, entry: entry::<Dot, ()>() });
         let recovered = EvaluatedLayer::<Dot>::recover(&layer).unwrap();
         assert!(std::ptr::addr_eq(Arc::as_ptr(&recovered), Arc::as_ptr(&layer)));
         assert_eq!(*recovered.paint.dot_color.uniform(), Color::white());

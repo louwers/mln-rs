@@ -5,10 +5,10 @@
 //! A tile lays a group of symbol layers out (`layout`) into a bucket of
 //! symbol instances (`bucket`): each feature's anchors along its geometry
 //! (`anchor`), its shaped text and icon as quads (`quads`) and their
-//! collision geometry (`collision_feature`). The type's placement pass
-//! ([`placement::SymbolPlacement`]) places the frame's symbols on the
-//! engine's schedule, gives them ids that hold across tiles of different
-//! zooms, and fades them, and the layer draws them where placement put them
+//! collision geometry (`collision_feature`). The type's participant in
+//! placement (`placement`) places the frame's symbols on the engine's
+//! schedule, gives them ids that hold across tiles of different zooms, and
+//! fades them, and the layer draws them where placement put them
 //! (`projection`, [`SymbolLayer`]).
 
 mod anchor;
@@ -18,7 +18,7 @@ pub(crate) mod format_section_override;
 pub(crate) mod instance;
 mod layer;
 pub(crate) mod layout;
-pub mod placement;
+pub(crate) mod placement;
 mod pool;
 pub mod programs;
 mod projection;
@@ -47,10 +47,9 @@ use self::format_section_override::SymbolLayerPaintPropertyOverrides;
 /// The `symbol` layer type's style half.
 pub struct Symbol;
 
-/// Adds the `symbol` layer type, whose layers place with
-/// [`placement::SymbolPlacement`].
+/// Adds the `symbol` layer type, whose layers place.
 pub fn register(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
-    mln_render::placement::register::<SymbolLayer, placement::SymbolPlacement>(builder)
+    builder.add_placing_layer_type::<placement::SymbolPlacement>()
 }
 
 impl StyleLayerType for Symbol {

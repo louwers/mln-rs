@@ -312,15 +312,19 @@ impl Renderer {
         features
     }
 
-    /// The renderer's placement pass, of its registry's layer type that
-    /// places ([`placement::pass`](crate::placement::pass)).
-    pub(crate) fn placement(&self) -> Option<&dyn crate::placement::ErasedPlacement> {
-        self.orchestrator.placement()
+    /// Keeps the records of what each tile-mode placement decides from now
+    /// on ([`placement_records`](Self::placement_records)), or, with
+    /// `false`, drops them and stops.
+    pub fn record_placements(&mut self, record: bool) {
+        self.orchestrator.record_placements(record);
     }
 
-    /// [`placement`](Self::placement), to change.
-    pub(crate) fn placement_mut(&mut self) -> Option<&mut (dyn crate::placement::ErasedPlacement + 'static)> {
-        self.orchestrator.placement_mut()
+    /// The records of the candidates that the last tile-mode placement
+    /// decided, while the renderer keeps them, in the order the placement
+    /// decided them.
+    #[must_use]
+    pub fn placement_records(&self) -> &[crate::placement::PlacementRecord] {
+        self.orchestrator.placement_records()
     }
 
     /// Logs every render source's tiles and the image manager's state.

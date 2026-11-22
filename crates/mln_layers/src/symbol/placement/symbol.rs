@@ -4,7 +4,7 @@
 use std::num::NonZeroU32;
 
 use glam::Vec2;
-use mln_render::placement::{CollisionIndex, Item, Overlap};
+use mln_render::placement::{CollisionIndex, Item, Overlap, PlacementRecord};
 use mln_style_types::{SymbolAnchorType, TextWritingModeType};
 use mln_text::anchor_alignment;
 
@@ -69,13 +69,14 @@ fn orientation(vertical: bool) -> TextWritingModeType {
 
 impl Placement {
     /// Places `symbol`, the bucket's symbol `index`, into `collisions`, and
-    /// records where.
+    /// records where, in `records` too where tile mode keeps them.
     pub(super) fn place_symbol(
         &mut self,
         index: usize,
         symbol: &SymbolInstance,
         ctx: &BucketContext<'_>,
         collisions: &mut CollisionIndex,
+        records: Option<&mut Vec<PlacementRecord>>,
     ) -> JointPlacement {
         let Some(id) = symbol.cross_tile_id else {
             return JointPlacement::UNPLACED;
@@ -85,7 +86,6 @@ impl Placement {
         if ctx.tile().hold_for_fade {
             return JointPlacement::UNPLACED;
         }
-        collisions.select_layer(ctx.data.layer_index as usize);
         self.text_boxes.clear();
         self.icon_boxes.clear();
 
@@ -156,7 +156,7 @@ impl Placement {
             skip_fade: offscreen || ctx.just_reloaded,
         };
         self.placements.insert(id, placement);
-        self.symbol_placed(symbol, ctx, placement, collisions.padding());
+        self.symbol_placed(symbol, ctx, placement, collisions.padding(), records);
         placement
     }
 

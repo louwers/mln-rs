@@ -166,7 +166,8 @@ impl Context for Tables {
 type RenderedBucket<'a> = (&'a dyn ErasedBucket, Vec<(&'a String, &'a Arc<dyn ErasedEvaluatedLayer>)>);
 
 impl LayoutResult {
-    /// Each bucket with the layers that render it, in layer id order.
+    /// Each bucket with the layers that render it, its leader first, in
+    /// the order of their first layer's id.
     fn buckets(&self) -> Vec<RenderedBucket<'_>> {
         let laid = &self.layer_render_data;
         // Where each of the layout's buckets is among `buckets`.
@@ -174,13 +175,16 @@ impl LayoutResult {
         let mut buckets: Vec<RenderedBucket<'_>> = Vec::new();
         let mut layers: Vec<_> = laid.laid_layers().collect();
         layers.sort_unstable_by_key(|(layer_id, ..)| *layer_id);
-        for (layer_id, bucket_index, layer) in layers {
+        for (layer_id, bucket_index, leads, layer) in layers {
             let Some(bucket) = laid.bucket(bucket_index) else { continue };
             let position = *positions[bucket_index].get_or_insert_with(|| {
                 buckets.push((bucket, Vec::new()));
                 buckets.len() - 1
             });
-            buckets[position].1.push((layer_id, layer));
+            // The layer that leads the bucket goes first, as the reader adds
+            // it.
+            let layers = &mut buckets[position].1;
+            layers.insert(if leads { 0 } else { layers.len() }, (layer_id, layer));
         }
         buckets
     }

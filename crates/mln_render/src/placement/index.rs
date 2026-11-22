@@ -60,7 +60,7 @@ pub struct Item {
     pub feature: u32,
     /// Where queries return the feature among those of its tile: the
     /// greater first, unless the bucket set an order of its own
-    /// ([`PlacementBuckets::set_query_order`](super::PlacementBuckets::set_query_order)).
+    /// ([`PlacementCx::set_query_order`](super::PlacementCx::set_query_order)).
     pub sort: u32,
     /// How the shape was placed, which a later shape placed with
     /// [`Overlap::Cooperative`] reads.
@@ -125,8 +125,7 @@ pub struct CollisionIndex {
     /// The placement's layers, bottom to top.
     layers: Vec<PlacingLayerSlot>,
     /// The record of each tile of each layer, by `first_tile` and the
-    /// tile's index; [`NO_RECORD`] for a tile whose bucket the layer
-    /// doesn't lead.
+    /// tile's index; [`NO_RECORD`] for a tile whose layout lost the layer.
     tile_records: Vec<u32>,
     records: Vec<Record>,
     /// Where each record is, by the address of its tile's feature index
@@ -219,10 +218,7 @@ impl CollisionIndex {
             .tile
             .and_then(|tile| self.tile_records.get(self.layer.first_tile + tile as usize).copied())
             .unwrap_or(NO_RECORD);
-        debug_assert!(
-            item.tile.is_none() || record != NO_RECORD,
-            "an item of a tile whose bucket its layer doesn't lead"
-        );
+        debug_assert!(item.tile.is_none() || record != NO_RECORD, "an item of a tile without a record");
         let entry = Entry {
             record,
             feature: item.feature,
@@ -237,8 +233,7 @@ impl CollisionIndex {
     /// Makes `layer`, among the placement's layers bottom to top, the one
     /// whose shapes follow: they take its source's collision group, and
     /// their [`Item::tile`] indexes its tiles.
-    #[inline]
-    pub fn select_layer(&mut self, layer: usize) {
+    pub(crate) fn select_layer(&mut self, layer: usize) {
         self.layer = self.layers.get(layer).copied().unwrap_or_default();
     }
 
@@ -261,8 +256,9 @@ impl CollisionIndex {
         self.clear_records();
     }
 
-    /// Adds the placement's layers, bottom to top, each by its id with its
-    /// tiles, whose layouts are in `store`. The layers place topmost first,
+    /// Adds the placement's layers, bottom to top, each by its id with the
+    /// tiles whose bucket it leads, whose layouts are in `store`. The layers
+    /// place topmost first,
     /// and each source's layers share a collision group unless
     /// `cross_source_collisions`, where every layer's shapes collide with
     /// every other's.
@@ -291,13 +287,10 @@ impl CollisionIndex {
         }
     }
 
-    /// Adds the record of `tile` of the layer `id`, if the layer leads the
-    /// tile's bucket.
+    /// Adds the record of `tile` of the layer `id`, which leads the tile's
+    /// bucket.
     fn add_record(&mut self, id: &str, tile: &PlacingTile, store: &dyn LaidBuckets) -> Option<u32> {
         let layout = store.layout(&tile.bucket)?;
-        if !layout.feature_index.leads(id) {
-            return None;
-        }
         let leader = layout.layer_render_data.layer(id)?;
         let record = self.records.len() as u32;
         self.by_bucket.insert((Arc::as_ptr(&layout.feature_index) as usize, tile.bucket.bucket), record);

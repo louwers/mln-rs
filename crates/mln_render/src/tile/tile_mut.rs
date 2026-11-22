@@ -598,7 +598,8 @@ impl WorldCopy {
         let shown = tile.shown.as_ref().filter(|shown| shown.contents.is_renderable())?;
         let contents = match &shown.contents {
             Contents::Geometry(contents) => {
-                let layer_render_data = contents.result.layer_render_data.copy_where(|layer| !layer.entry().places());
+                let layer_render_data =
+                    contents.result.layer_render_data.copy_where(|layer| !layer.entry().places(layer.style()));
                 Contents::Geometry(GeometryContents {
                     result: LayoutResult::new(layer_render_data, Arc::clone(&contents.result.feature_index)),
                     missing: contents.missing,

@@ -206,8 +206,8 @@ pub trait TestRunnerImpl {
     fn tile_cover_for_camera(&mut self, _camera: &CameraOptions, _zoom: u8) -> Result<Vec<TileId>, MapError> {
         unsupported("Map::latLngBoundsForCamera + util::tileCover")
     }
-    fn collect_placed_symbol_data(&mut self, _enable: bool) {}
-    fn get_placed_symbols_data(&mut self) -> Vec<PlacedSymbol> {
+    fn record_placements(&mut self, _enable: bool) {}
+    fn placement_records(&mut self) -> Vec<PlacementRecord> {
         Vec::new()
     }
     /// Queries the rendered features at a query test's point or box.
@@ -220,17 +220,19 @@ pub trait TestRunnerImpl {
     }
 }
 
-/// A placed symbol's data, boxes as minX, minY, maxX, maxY.
+/// A candidate that a tile's placement decided, its bounds as minX, minY,
+/// maxX, maxY in the collision grid.
 #[derive(Clone, Debug, PartialEq)]
-pub struct PlacedSymbol {
-    /// Contents of the label
+pub struct PlacementRecord {
+    /// What the candidate shows, such as a label's text.
     pub(crate) key: String,
-    pub(crate) text_collision_box: Option<[f32; 4]>,
-    pub(crate) icon_collision_box: Option<[f32; 4]>,
-    pub(crate) text_placed: bool,
-    pub(crate) icon_placed: bool,
-    pub(crate) intersects_tile_border: bool,
-    pub(crate) viewport_padding: f32,
+    /// The candidate's part, such as `"text"` or `"icon"`.
+    pub(crate) part: &'static str,
+    pub(crate) bounds: [f32; 4],
+    pub(crate) placed: bool,
+    pub(crate) crosses_border: bool,
+    /// Where the viewport's top-left corner is in the collision grid.
+    pub(crate) padding: f32,
     pub(crate) layer: String,
 }
 
@@ -1095,7 +1097,7 @@ struct SymbolLocationAndStatus {
     tile_id: TileId,
     location: [f32; 4],
     placed: bool,
-    is_icon: bool,
+    part: &'static str,
 }
 
 /// The `MapMode::Tile` branch of `TestRunner::run`: one `runTest` per tile
@@ -1142,7 +1144,7 @@ fn render_tiles(
         if let Err(error) = reset {
             return map_error_image(ctx, error);
         }
-        ctx.get_map().collect_placed_symbol_data(true);
+        ctx.get_map().record_placements(true);
         let camera_for_tile = CameraOptions { center: Some(get_tile_center_coordinates(tile_id)), ..camera.clone() };
         if let Err(error) = ctx.get_map().jump_to(&camera_for_tile) {
             return map_error_image(ctx, error);
@@ -1159,28 +1161,25 @@ fn render_tiles(
         let x_offset = get_image_tile_offset(&x_dims, tile_id.x, pixel_ratio);
         let y_offset = get_image_tile_offset(&y_dims, tile_id.y, pixel_ratio);
 
-        let placed_symbols = ctx.get_map().get_placed_symbols_data();
+        let records = ctx.get_map().placement_records();
 
-        let mut find_cut_offs = |metadata: &mut TestMetadata,
-                                 placed_symbol: &PlacedSymbol,
-                                 mut bbox: [f32; 4],
-                                 placed: bool,
-                                 is_icon: bool| {
+        let mut find_cut_offs = |metadata: &mut TestMetadata, record: &PlacementRecord| {
+            let (mut bbox, placed, part) = (record.bounds, record.placed, record.part);
             // box.min.x += xOffset - viewportPadding (unsigned + float)
-            let dx = x_offset as f32 - placed_symbol.viewport_padding;
-            let dy = y_offset as f32 - placed_symbol.viewport_padding;
+            let dx = x_offset as f32 - record.padding;
+            let dy = y_offset as f32 - record.padding;
             bbox[0] += dx;
             bbox[2] += dx;
             bbox[1] += dy;
             bbox[3] += dy;
 
-            let symbols = symbol_index.entry(placed_symbol.key.clone()).or_default();
-            let Some(it) = symbols.iter().find(|a| a.is_icon == is_icon && a.location == bbox) else {
-                symbols.push(SymbolLocationAndStatus { tile_id: *tile_id, location: bbox, placed, is_icon });
+            let symbols = symbol_index.entry(record.key.clone()).or_default();
+            let Some(it) = symbols.iter().find(|a| a.part == part && a.location == bbox) else {
+                symbols.push(SymbolLocationAndStatus { tile_id: *tile_id, location: bbox, placed, part });
                 return;
             };
-            let key = &placed_symbol.key;
-            let kind = if is_icon { "icon" } else { "text" };
+            let key = &record.key;
+            let kind = part;
             let location = format!(
                 "(({}, {}), ({}, {}))",
                 ostream_float(f64::from(bbox[0])),
@@ -1188,24 +1187,24 @@ fn render_tiles(
                 ostream_float(f64::from(bbox[2])),
                 ostream_float(f64::from(bbox[3]))
             );
-            if *tile_id == it.tile_id && is_icon == it.is_icon {
+            if *tile_id == it.tile_id && part == it.part {
                 metadata.duplications_count += 1;
                 let _ = write!(
                     duplications_report,
                     "\n{}. \"{key}\" {kind} {location} from layer: {} at {}",
                     metadata.duplications_count,
-                    placed_symbol.layer,
+                    record.layer,
                     tile_id_string(tile_id)
                 );
                 return;
             }
-            if it.placed != placed && is_icon == it.is_icon {
+            if it.placed != placed && part == it.part {
                 metadata.label_cut_off_found += 1;
                 let _ = write!(
                     cut_off_labels_report,
                     "\n{}. \"{key}\" {kind} {location} from layer: {}{}{} and{}{}",
                     metadata.label_cut_off_found,
-                    placed_symbol.layer,
+                    record.layer,
                     if placed { " is placed at " } else { " is not placed at " },
                     tile_id_string(tile_id),
                     if it.placed { " placed at " } else { " not placed at " },
@@ -1214,15 +1213,8 @@ fn render_tiles(
             }
         };
 
-        for placed_symbol in &placed_symbols {
-            if placed_symbol.intersects_tile_border {
-                if let Some(text_box) = placed_symbol.text_collision_box {
-                    find_cut_offs(ctx.metadata, placed_symbol, text_box, placed_symbol.text_placed, false);
-                }
-                if let Some(icon_box) = placed_symbol.icon_collision_box {
-                    find_cut_offs(ctx.metadata, placed_symbol, icon_box, placed_symbol.icon_placed, true);
-                }
-            }
+        for record in records.iter().filter(|record| record.crosses_border) {
+            find_cut_offs(ctx.metadata, record);
         }
 
         let size = result_for_tile.size;

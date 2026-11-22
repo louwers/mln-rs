@@ -28,14 +28,15 @@ use mln_vec_map::VecSet;
 
 use crate::Registry;
 use crate::bucket::{ErasedBucket, LayerFeatureStates};
-use crate::erased_layer::{ErasedEvaluatedLayer, NoPlacement};
+use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::gfx::context::Resources;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layer::Layer;
 use crate::layout::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::paint_parameters::TransformParameters;
 use crate::placement::{
-    BucketKey, CollisionIndex, LaidBuckets, PlacementBuckets, PlacementContext, PlacingLayer, PlacingTile,
+    BucketKey, CollisionIndex, ErasedPlacement, LaidBuckets, Placed, Placement, PlacementBuckets, PlacementCx,
+    PlacingFrameLayer, PlacingLayer, PlacingTile,
 };
 use crate::render_layer::{Hosted, RenderLayer as _};
 use crate::render_tile::RenderTile;
@@ -214,17 +215,18 @@ impl LaidOut {
 /// The source key of the tiles that a [`PlacementFrame`] shows.
 const FRAME_SOURCE: SourceKey = SourceKey(0);
 
-/// Laid-out tiles in a view, as a renderer's frame shows them to its
-/// placement pass for the layers `L`: the style's visible layers of `L`'s
-/// type on a source, each evaluated at the view's zoom with its tiles that
-/// hold a bucket of it, in the order it places them, and the tiles'
-/// buckets, which placement reads and changes.
+/// Laid-out tiles in a view, as a renderer's frame shows them to the
+/// participant of the layers `L`: the style's visible layers of `L`'s type
+/// on a source, each evaluated at the view's zoom with its tiles that hold a
+/// bucket of it, in the order it places them, and the tiles' buckets, which
+/// placement reads and changes.
 pub struct PlacementFrame<L: Layer> {
     update: UpdateParameters,
     /// Each tile's id and buckets.
     tiles: Vec<(OverscaledTileID, LayoutResult)>,
-    /// The layers, bottom to top, each with its tiles.
-    layers: Vec<(Hosted<L>, Vec<PlacingTile>)>,
+    /// The layers, bottom to top, each with its tiles, those whose bucket it
+    /// leads first, and how many those are.
+    layers: Vec<(Hosted<L>, Vec<PlacingTile>, usize)>,
     /// The current placement's collision index, and the one a placement
     /// fills.
     placed: CollisionIndex,
@@ -302,30 +304,27 @@ impl<L: Layer> PlacementFrame<L> {
             }
             let style = LayerStyle::<L::Style>::recover(layer.style())
                 .ok_or_else(|| Error::invalid_argument(format!("no render layer for {}", layer.get_id())))?;
-            let entry = crate::erased_layer::entry::<L, NoPlacement>();
+            let entry = crate::erased_layer::entry::<L, ()>();
             let mut render_layer = Hosted::<L>::new(entry, style, &mut Resources::detached());
             render_layer.evaluate(&parameters);
-            let placing = order
-                .iter()
-                .filter_map(|&index| {
-                    let (render_tile, (id, result)) = (&render_tiles[index], &tiles[index]);
-                    let laid = result.layer_render_data.find(layer.get_id())?;
-                    Some(PlacingTile {
-                        bucket: BucketKey {
-                            bucket: result.layer_render_data.bucket_index(laid)?,
-                            slot: None,
-                            tile: *id,
-                            source: FRAME_SOURCE,
-                        },
-                        id: render_tile.id,
-                        overscaled_id: *id,
-                        held_for_fade: false,
-                        projection: render_tile.projection,
-                        feature_index: Arc::clone(&result.feature_index),
-                    })
-                })
-                .collect();
-            layers.push((render_layer, placing));
+            let (mut led, mut followers) = (Vec::new(), Vec::new());
+            for &index in &order {
+                let (render_tile, (id, result)) = (&render_tiles[index], &tiles[index]);
+                let buckets = &result.layer_render_data;
+                let Some(laid) = buckets.find(layer.get_id()) else { continue };
+                let Some(bucket) = buckets.bucket_index(laid) else { continue };
+                let tile = PlacingTile {
+                    bucket: BucketKey { bucket, slot: None, tile: *id, source: FRAME_SOURCE },
+                    id: render_tile.id,
+                    overscaled_id: *id,
+                    held_for_fade: false,
+                    projection: render_tile.projection,
+                };
+                if buckets.leads(laid) { led.push(tile) } else { followers.push(tile) }
+            }
+            let leads = led.len();
+            led.append(&mut followers);
+            layers.push((render_layer, led, leads));
         }
         Ok(PlacementFrame {
             update,
@@ -336,35 +335,35 @@ impl<L: Layer> PlacementFrame<L> {
         })
     }
 
-    /// Runs `hook` with the frame's placement context: its layers, its
-    /// update and its tiles' buckets, as a renderer runs its placement pass.
-    pub fn with_context<R>(&mut self, hook: impl FnOnce(&mut PlacementContext<'_, L>) -> R) -> R {
+    /// Runs `hook` with the frame's context of a participant's
+    /// [`prepare`](Placement::prepare) and [`update`](Placement::update): its
+    /// layers, its update and its tiles' buckets.
+    pub fn with_context<R>(&mut self, hook: impl FnOnce(&mut PlacementCx<'_, L>) -> R) -> R {
         let layers: Vec<PlacingLayer<'_, L>> =
-            self.layers.iter().map(|(layer, tiles)| PlacingLayer { layer: layer.parts().1, tiles }).collect();
-        hook(&mut PlacementContext {
-            layers: &layers,
-            update_parameters: &self.update,
-            buckets: PlacementBuckets::new(&mut FrameBuckets(&mut self.tiles), &mut self.placed),
-        })
+            self.layers.iter().map(|(layer, tiles, _)| PlacingLayer { layer: layer.parts().1, tiles }).collect();
+        let mut buckets = FrameBuckets(&mut self.tiles);
+        hook(&mut PlacementCx::new(&layers, &self.update, PlacementBuckets::new(&mut buckets), &mut self.placed))
     }
 
-    /// [`with_context`](Self::with_context), with the collision index of a
-    /// placement of the frame's layers, empty, as a renderer has its
-    /// placement pass place into.
-    pub fn with_index<R>(&mut self, hook: impl FnOnce(&mut PlacementContext<'_, L>, &mut CollisionIndex) -> R) -> R {
-        let layers: Vec<PlacingLayer<'_, L>> =
-            self.layers.iter().map(|(layer, tiles)| PlacingLayer { layer: layer.parts().1, tiles }).collect();
-        let mut buckets = FrameBuckets(&mut self.tiles);
-        self.index.begin(&self.update.view, self.update.mode);
-        let ids = self.layers.iter().map(|(layer, tiles)| (layer.id(), tiles.as_slice()));
-        self.index.add_layers(ids, &buckets, self.update.cross_source_collisions);
-        hook(
-            &mut PlacementContext {
-                layers: &layers,
-                update_parameters: &self.update,
-                buckets: PlacementBuckets::new(&mut buckets, &mut self.placed),
-            },
+    /// Has `participant` place the frame's layers, topmost first, into an
+    /// empty index, as a renderer's placement does, fading on from a
+    /// placement whose fade is done.
+    pub fn place<P: Placement<Layer = L>>(&mut self, participant: &mut P) -> Placed {
+        let layers: Vec<PlacingFrameLayer<'_>> = self
+            .layers
+            .iter()
+            .map(|(layer, tiles, led)| PlacingFrameLayer { layer, participant: 0, tiles: &tiles[..*led] })
+            .collect();
+        let participant: &mut dyn ErasedPlacement = participant;
+        crate::placement::place_round(
+            &mut [participant],
+            &[true],
+            &layers,
+            &self.update,
+            &mut FrameBuckets(&mut self.tiles),
             &mut self.index,
+            1.0,
+            None,
         )
     }
 }

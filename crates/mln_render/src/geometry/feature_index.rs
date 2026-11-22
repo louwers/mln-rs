@@ -183,7 +183,7 @@ fn build_tree(boxes: &[Bounds]) -> Option<RTree<i32>> {
 }
 
 /// A tile's features by their bounding boxes, and the tile data they are in.
-pub struct FeatureIndex {
+pub(crate) struct FeatureIndex {
     /// Indexes `boxes`, once a query has built it; `None` when there are
     /// none.
     tree: OnceLock<Option<RTree<i32>>>,
@@ -295,12 +295,6 @@ impl FeatureIndex {
             self.add_feature(&mut result, (index, source_layer, leader), selection, None)?;
         }
         Ok(result)
-    }
-
-    /// Whether the layer `layer_id` leads a bucket of the layout.
-    #[must_use]
-    pub(crate) fn leads(&self, layer_id: &str) -> bool {
-        self.bucket_layer_ids.contains_key(layer_id)
     }
 
     /// Adds the feature `index` of the source layer `source_layer_name`,

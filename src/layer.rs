@@ -1,6 +1,7 @@
 //! What a layer type's author writes with, from its home crates: the layer
 //! contract ([`mln_render::layer`] and [`mln_render::draw`], whose docs
-//! state it), the style half's names (`mln_style`), including the style
+//! state it), placement for a type whose layers collide ([`placement`]),
+//! the style half's names (`mln_style`), including the style
 //! keys an extension declares outside its layer type's properties
 //! ([`StyleKey`]), and the names of a program's declaration ([`program`],
 //! with its shaders' [`source`]s).
@@ -16,7 +17,7 @@ pub use mln_gfx::{ColorMode, CullFaceMode, DrawMode, uniform_block};
 pub use mln_map_types::{FrameProjection, MapMode, View};
 pub use mln_render::draw::*;
 pub use mln_render::layer::*;
-pub use mln_render::paint_property_binders;
+pub use mln_render::{paint_property_binders, placement};
 pub use mln_style::conversion::{self, Convertible};
 pub use mln_style::expression::Functions;
 pub use mln_style::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};

@@ -11,11 +11,14 @@ use mln_style::source_type::ErasedStyleSourceType;
 use mln_style::style_key::{StyleKey, StyleKeys};
 use mln_vec_map::VecMap;
 
-use crate::erased_layer::{ErasedLayerType, NoPlacement, entry};
+use crate::erased_layer::{ErasedLayerType, entry};
 use crate::erased_source::{self, ErasedSourceType};
 use crate::layer::Layer;
-use crate::placement::ErasedPlacement;
+use crate::placement::{ErasedPlacement, Placement};
 use crate::source::SourceType;
+
+/// A placing layer type's name, and what makes its participant.
+type PlacingType = (&'static str, fn() -> Box<dyn ErasedPlacement>);
 
 /// What a [`Registry`] is built from: the expression functions, the layer
 /// types, the source types and the style keys.
@@ -30,6 +33,7 @@ pub struct RegistryBuilder {
     layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
     source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
     style_keys: StyleKeys,
+    placing_types: Vec<PlacingType>,
 }
 
 impl std::fmt::Debug for RegistryBuilder {
@@ -39,6 +43,7 @@ impl std::fmt::Debug for RegistryBuilder {
             .field("layer_types", &self.layer_types.keys().collect::<Vec<_>>())
             .field("source_types", &self.source_types.keys().collect::<Vec<_>>())
             .field("style_keys", &self.style_keys)
+            .field("placing_types", &self.placing_types.iter().map(|(name, _)| name).collect::<Vec<_>>())
             .finish()
     }
 }
@@ -61,16 +66,23 @@ impl RegistryBuilder {
     /// [`Input`](Layer::Input) is of another kind of source than its style
     /// half's doesn't compile.
     pub fn add_layer_type<L: Layer>(&mut self) -> Result<(), RegisterError> {
-        self.add_layer_entry::<L>(entry::<L, NoPlacement>())
+        self.add_layer_entry::<L>(entry::<L, ()>())
+    }
+
+    /// Adds the layer type of the layer `P::Layer`, as
+    /// [`add_layer_type`](Self::add_layer_type) does, whose layers place with
+    /// the participant `P` ([`placement`](crate::placement)). Each renderer
+    /// makes one `P`.
+    pub fn add_placing_layer_type<P: Placement>(&mut self) -> Result<(), RegisterError> {
+        self.add_layer_entry::<P::Layer>(entry::<P::Layer, P>())?;
+        let name = <<P::Layer as Layer>::Style as StyleLayerType>::INFO.name;
+        self.placing_types.push((name, crate::placement::erase::<P>));
+        Ok(())
     }
 
     /// Adds the layer type of the layer `L`, as `entry` holds it, as
-    /// [`add_layer_type`](Self::add_layer_type) does. Fails too for a second
-    /// type whose layers place.
-    pub(crate) fn add_layer_entry<L: Layer>(
-        &mut self,
-        entry: &'static dyn ErasedLayerType,
-    ) -> Result<(), RegisterError> {
+    /// [`add_layer_type`](Self::add_layer_type) does.
+    fn add_layer_entry<L: Layer>(&mut self, entry: &'static dyn ErasedLayerType) -> Result<(), RegisterError> {
         const {
             assert!(
                 <L::Style as StyleLayerType>::INFO.source as u8 == crate::layer::input_source::<L>() as u8,
@@ -80,9 +92,6 @@ impl RegistryBuilder {
         let name = <L::Style as StyleLayerType>::INFO.name;
         if self.layer_types.contains_key(name) {
             return Err(RegisterError::Duplicate(name.to_owned()));
-        }
-        if entry.places() && self.layer_types.values().any(|layer_type| layer_type.places()) {
-            return Err(RegisterError::RoleTaken(name.to_owned()));
         }
         self.style_keys.add_layer_type::<L::Style>()?;
         self.layer_types.insert(name, entry);
@@ -113,7 +122,13 @@ impl RegistryBuilder {
 
     #[must_use]
     pub fn build(self) -> Arc<Registry> {
-        Registry::new(Arc::new(self.functions), self.layer_types, self.source_types, self.style_keys)
+        Registry::new(
+            Arc::new(self.functions),
+            self.layer_types,
+            self.source_types,
+            self.style_keys,
+            self.placing_types,
+        )
     }
 }
 
@@ -136,6 +151,7 @@ pub struct Registry {
     style: Arc<StyleRegistry>,
     layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
     source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
+    placing_types: Vec<PlacingType>,
 }
 
 impl std::fmt::Debug for Registry {
@@ -170,11 +186,12 @@ impl Registry {
         layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
         source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
         style_keys: StyleKeys,
+        placing_types: Vec<PlacingType>,
     ) -> Arc<Registry> {
         let style_halves = layer_types.values().map(|&layer_type| style_half(layer_type));
         let style_source_halves = source_types.values().map(|&source_type| style_source_half(source_type));
         let style = StyleRegistry::new(functions, style_halves, style_source_halves, style_keys);
-        Arc::new(Registry { style: Arc::new(style), layer_types, source_types })
+        Arc::new(Registry { style: Arc::new(style), layer_types, source_types, placing_types })
     }
 
     #[must_use]
@@ -191,10 +208,16 @@ impl Registry {
         self.layer_types.get(name).copied()
     }
 
-    /// A new placement pass of the layer type whose layers place, if the
-    /// registry has one.
-    pub(crate) fn new_placement(&self) -> Option<Box<dyn ErasedPlacement>> {
-        self.layer_types.values().find_map(|layer_type| layer_type.new_placement())
+    /// A new participant of each placing layer type, in the order they
+    /// registered.
+    pub(crate) fn new_placements(&self) -> Vec<Box<dyn ErasedPlacement>> {
+        self.placing_types.iter().map(|(_, new)| new()).collect()
+    }
+
+    /// The position among [`new_placements`](Self::new_placements) of the
+    /// participant of the layer type `name`, if its layers place.
+    pub(crate) fn placing_type(&self, name: &str) -> Option<usize> {
+        self.placing_types.iter().position(|(placing, _)| *placing == name)
     }
 
     pub(crate) fn source_type(&self, name: &str) -> Option<&'static dyn ErasedSourceType> {

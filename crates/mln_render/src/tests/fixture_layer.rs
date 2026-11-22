@@ -10,9 +10,6 @@
 //!
 //! `tint` is a layer type of a raster source, and `shade` one of a
 //! raster-dem source, both drawing nothing.
-//!
-//! `mark` is a layer type without a source whose layers place, with a pass
-//! (`MarkPass`) that records the hooks the engine calls.
 
 use std::sync::Arc;
 
@@ -26,9 +23,8 @@ use mln_util::error::Error;
 use crate::draw::Draws;
 use crate::layer::{
     Bucket, BuildCx, DemTiles, EvaluatedLayer, Features, GpuVec, Layer, LayerBinders, Layout, LayoutCx, NewCx,
-    PrepareCx, RasterTiles, Upload, ViewCover,
+    PrepareCx, RasterTiles, Upload,
 };
-use crate::placement::{CollisionIndex, Placed, PlacementContext, PlacementPass, Prepared};
 
 mln_style::properties!(
     /// The layout properties of a `dot` layer.
@@ -237,64 +233,4 @@ impl Layer for Shade {
     }
 
     fn prepare(&self, _cx: &PrepareCx<'_, Self>, _out: &mut Draws) {}
-}
-
-/// The `mark` layer type, both its halves, and with `OTHER` the
-/// `other-mark` one.
-pub(crate) struct Mark<const OTHER: bool = false>;
-
-impl<const OTHER: bool> StyleLayerType for Mark<OTHER> {
-    const INFO: LayerTypeInfo =
-        LayerTypeInfo { name: if OTHER { "other-mark" } else { "mark" }, source: SourceKind::None, from_json: true };
-
-    type LayoutProperties = NoProperties;
-    type PaintProperties = NoProperties;
-    type Data = ();
-}
-
-impl<const OTHER: bool> Layer for Mark<OTHER> {
-    type Style = Mark<OTHER>;
-    type Input = ViewCover;
-    type Tile = ();
-
-    fn new(_cx: &mut NewCx<'_, Self>) -> Self {
-        Mark
-    }
-
-    fn prepare(&self, _cx: &PrepareCx<'_, Self>, _out: &mut Draws) {}
-}
-
-/// The placement pass of `mark` layers: it places nothing, and records the
-/// hooks the engine calls, by name, with the number of layers of those that
-/// see them.
-#[derive(Default)]
-pub(crate) struct MarkPass {
-    /// Whether [`prepare`](PlacementPass::prepare) says a layer has
-    /// something to place.
-    pub(crate) places: bool,
-    pub(crate) calls: Vec<String>,
-}
-
-impl<const OTHER: bool> PlacementPass<Mark<OTHER>> for MarkPass {
-    fn prepare(&mut self, cx: &mut PlacementContext<'_, Mark<OTHER>>) -> Prepared {
-        self.calls.push(format!("prepare {}", cx.layers.len()));
-        Prepared { places: self.places, added: false, changed: true }
-    }
-
-    fn place(&mut self, cx: &mut PlacementContext<'_, Mark<OTHER>>, _index: &mut CollisionIndex, _fade: f32) -> Placed {
-        self.calls.push(format!("place {}", cx.layers.len()));
-        Placed { changed: false, settled: true }
-    }
-
-    fn update_buckets(&mut self, cx: &mut PlacementContext<'_, Mark<OTHER>>) {
-        self.calls.push(format!("update_buckets {}", cx.layers.len()));
-    }
-
-    fn forget_buckets(&mut self) {
-        self.calls.push("forget_buckets".to_owned());
-    }
-
-    fn reset(&mut self) {
-        self.calls.push("reset".to_owned());
-    }
 }

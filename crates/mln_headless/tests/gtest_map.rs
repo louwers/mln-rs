@@ -2573,115 +2573,10 @@ fn keep_render_data() {
     }
 }
 
-// Disabled intentionally, no symbol placement occurs in MapTiler streets style
-// gtest: Map.DISABLED_PlacedSymbolData
+// Port-only: a tile mode map's renderer keeps the records of what its
+// placement decided once asked to.
 #[test]
-#[ignore = "DISABLED_ in C++ (no symbol placement occurs in the MapTiler streets style fixture)"]
-fn disabled_placed_symbol_data() {
-    use mln_rs::mln_layers::symbol::placement::PlacedSymbols as _;
-
-    fn is_inside_tile(box_: &mln_render::placement::Aabb, padding: f32, viewport_size: Size) -> bool {
-        if box_.min.x - padding < 0.0 {
-            return false;
-        }
-        if box_.min.y - padding < 0.0 {
-            return false;
-        }
-        if box_.max.x - padding > viewport_size.width as f32 {
-            return false;
-        }
-        if box_.max.y - padding > viewport_size.height as f32 {
-            return false;
-        }
-        true
-    }
-
-    let run_loop = TestLoop::new();
-    let file_source = StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous);
-    let test = MapTest::create(run_loop, file_source, 1.0, MapMode::Tile);
-    let requests_count = Arc::new(AtomicI32::new(0));
-
-    test.file_source.set_response(Kind::Tile, make_response("vector.tile", Some(Arc::clone(&requests_count))));
-    test.file_source.set_response(Kind::Glyphs, make_response("glyphs.pbf", Some(Arc::clone(&requests_count))));
-    test.file_source.set_response(Kind::Style, make_response("style_vector.json", None));
-    test.file_source.set_response(Kind::Source, make_response("source_vector.json", None));
-    test.file_source.set_response(Kind::SpriteJSON, make_response("sprite.json", None));
-    test.file_source.set_response(Kind::SpriteImage, make_response("sprite.png", None));
-
-    // Camera options will give exactly one tile (12/1171/1566)
-    test.map().jump_to(&CameraOptions {
-        zoom: Some(16.0),
-        center: Some(ll(50.072_317, 14.444_827)),
-        ..Default::default()
-    });
-
-    test.map().load_style_url("https://example.com/maps/streets");
-    let viewport_size = test.frontend().size();
-    test.frontend().renderer().collect_placed_symbol_data(true);
-    test.render();
-
-    let placed_symbols = test.frontend().renderer().placed_symbols_data();
-    assert_ne!(placed_symbols, Vec::<mln_rs::mln_layers::symbol::placement::PlacedSymbolData>::new());
-
-    let mut placed_text_inside_tile = 0;
-    let mut placed_text = 0;
-    let mut placed_icon_inside_tile = 0;
-    let mut placed_icon = 0;
-    let mut placed_total = 0;
-
-    let symbol_layers: HashSet<String> = test
-        .map()
-        .style()
-        .get_layers()
-        .filter(|l| l.style().info().name == "symbol")
-        .map(|l| l.get_id().to_owned())
-        .collect();
-
-    for placed_symbol in &placed_symbols {
-        assert!(symbol_layers.contains(&placed_symbol.layer));
-        if placed_symbol.text_placed
-            && let Some(box_) = &placed_symbol.text_collision_box
-        {
-            if is_inside_tile(box_, placed_symbol.viewport_padding, viewport_size) {
-                assert!(!placed_symbol.intersects_tile_border);
-                placed_text_inside_tile += 1;
-            }
-            placed_text += 1;
-        }
-        if placed_symbol.icon_placed
-            && let Some(box_) = &placed_symbol.icon_collision_box
-        {
-            if is_inside_tile(box_, placed_symbol.viewport_padding, viewport_size) {
-                assert!(!placed_symbol.intersects_tile_border);
-                placed_icon_inside_tile += 1;
-            }
-            placed_icon += 1;
-        }
-        placed_total += 1;
-    }
-    assert_eq!(1, placed_text_inside_tile);
-    assert_eq!(28, placed_text);
-
-    assert_eq!(2, placed_icon_inside_tile);
-    assert_eq!(29, placed_icon);
-
-    assert_eq!(50, placed_total);
-    test.frontend().renderer().collect_placed_symbol_data(false);
-    test.render();
-
-    assert_eq!(
-        test.frontend().renderer().placed_symbols_data(),
-        Vec::<mln_rs::mln_layers::symbol::placement::PlacedSymbolData>::new()
-    );
-}
-
-// Port-only: a tile mode map's renderer gives the data of the symbols its
-// placement placed once asked to collect it, through the symbol layer
-// type's placement pass.
-#[test]
-fn placed_symbol_data_of_a_tile() {
-    use mln_rs::mln_layers::symbol::placement::{PlacedSymbols as _, SymbolPlacement};
-
+fn placement_records_of_a_tile() {
     let test = MapTest::with_mode(1.0, MapMode::Tile);
     test.load_json(
         r#"{
@@ -2691,13 +2586,12 @@ fn placed_symbol_data_of_a_tile() {
     }"#,
     );
     test.map().edit_style(|style| style.apply(Edit::AddImage(style_image("marker", red_image(16, 16), 1.0)))).unwrap();
-    assert!(mln_render::placement::pass::<SymbolPlacement>(test.frontend().renderer()).is_some());
-    test.frontend().renderer().collect_placed_symbol_data(true);
+    test.frontend().renderer().record_placements(true);
     test.render();
-    let placed = test.frontend().renderer().placed_symbols_data();
-    assert_eq!(placed.len(), 1, "{placed:?}");
-    assert!(placed[0].icon_placed);
-    assert_eq!(placed[0].layer, "symbol");
+    let records = test.frontend().renderer().placement_records().to_vec();
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!((records[0].part, records[0].placed), ("icon", true));
+    assert_eq!(records[0].layer, "symbol");
 }
 
 // gtest: Map.VolatileSource

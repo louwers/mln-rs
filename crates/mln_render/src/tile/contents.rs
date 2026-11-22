@@ -56,6 +56,9 @@ pub(crate) struct LayoutBuckets {
 struct LaidLayer {
     bucket: usize,
     layer: Arc<dyn ErasedEvaluatedLayer>,
+    /// Whether the layer leads its bucket: it is the first of the layers
+    /// the bucket was laid out for.
+    leads: bool,
 }
 
 impl LayoutBuckets {
@@ -76,8 +79,8 @@ impl LayoutBuckets {
         let mut used = false;
         for (id, layer) in layers {
             self.layers.entry(id).or_insert_with(|| {
+                self.laid.push(LaidLayer { bucket: index, layer, leads: !used });
                 used = true;
-                self.laid.push(LaidLayer { bucket: index, layer });
                 self.laid.len() - 1
             });
         }
@@ -118,6 +121,11 @@ impl LayoutBuckets {
         Some(self.laid.get(index)?.bucket)
     }
 
+    /// Whether the layer at `index` among those laid out leads its bucket.
+    pub(crate) fn leads(&self, index: usize) -> bool {
+        self.laid.get(index).is_some_and(|laid| laid.leads)
+    }
+
     fn layer_bucket<'a>(&'a self, laid: &'a LaidLayer) -> ErasedLayerBucket<'a> {
         ErasedLayerBucket { bucket: &*self.buckets[laid.bucket], layer: &*laid.layer }
     }
@@ -141,12 +149,14 @@ impl LayoutBuckets {
         self.layers.iter().map(|(id, &index)| (id, self.layer_bucket(&self.laid[index])))
     }
 
-    /// The layers laid out, each with the index of its bucket and the values
-    /// it was laid out with, in no order.
-    pub(crate) fn laid_layers(&self) -> impl Iterator<Item = (&String, usize, &Arc<dyn ErasedEvaluatedLayer>)> + '_ {
+    /// The layers laid out, each with the index of its bucket, whether it
+    /// leads it, and the values it was laid out with, in no order.
+    pub(crate) fn laid_layers(
+        &self,
+    ) -> impl Iterator<Item = (&String, usize, bool, &Arc<dyn ErasedEvaluatedLayer>)> + '_ {
         self.layers.iter().map(|(id, &index)| {
             let laid = &self.laid[index];
-            (id, laid.bucket, &laid.layer)
+            (id, laid.bucket, laid.leads, &laid.layer)
         })
     }
 
@@ -198,7 +208,7 @@ impl LayoutBuckets {
                 copy.buckets.push(self.buckets[laid.bucket].clone_bucket());
                 copy.buckets.len() - 1
             });
-            copy.laid.push(LaidLayer { bucket, layer: Arc::clone(&laid.layer) });
+            copy.laid.push(LaidLayer { bucket, layer: Arc::clone(&laid.layer), leads: laid.leads });
             copy.layers.insert(id.clone(), copy.laid.len() - 1);
         }
         copy

@@ -7,8 +7,6 @@
 //! The engine's entry points, which lay tiles out and show them to a frame's
 //! layers, are `mln_render::bench`'s.
 
-use std::sync::Arc;
-
 use mln_render::bench::{LaidOut, PlacementFrame};
 use mln_style::Style;
 use mln_util::error::Error;
@@ -16,7 +14,7 @@ use mln_util::geo::{LatLng, WrapMode};
 
 use crate::symbol::SymbolLayer;
 use crate::symbol::placement::cross_tile_index::CrossTileSymbolIndex;
-use crate::symbol::placement::{LayerBuckets, Placement, PlacementInputs, leaders};
+use crate::symbol::placement::{LayerBuckets, SymbolPlacement, leaders};
 
 /// The symbols of laid-out tiles in a view, as a renderer finds which to
 /// show: the view's symbol layers, each updated with the tiles as a frame
@@ -66,16 +64,12 @@ impl SymbolView {
     /// symbols it shows. Their ids come from [`SymbolView::index`]: a symbol
     /// without one shows nowhere.
     pub fn place(&mut self) -> usize {
-        self.0.with_index(|cx, index| {
-            let mut layers = Vec::new();
-            LayerBuckets::fill(&mut layers, cx);
-            let inputs = PlacementInputs::new(cx.update_parameters, leaders(&layers), &cx.buckets);
-            let mut placement = Placement::create(Arc::new(inputs), Some(Placement::new_default()));
-            // The placement it replaces showed nothing, so it has nothing to
-            // fade from.
-            placement.place(&mut cx.buckets, index, 1.0);
-            placement.shown()
-        })
+        let mut participant = SymbolPlacement::default();
+        self.0.with_context(|cx| participant.prepare_inputs(cx));
+        // The placement it replaces showed nothing, so it has nothing to
+        // fade from.
+        self.0.place(&mut participant);
+        participant.placement.shown()
     }
 }
 

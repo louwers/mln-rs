@@ -7,6 +7,8 @@
 //!
 //! - [`layer`]: a layer type's render half, with what it [`draw`]s with and
 //!   the geometry that drawing on the [`globe`] needs.
+//! - [`placement`]: what of a layer type's layers shows where it would
+//!   collide with what shows already, and how it fades.
 //! - [`source`]: a source type's render half and the data origin of its
 //!   tiles.
 //! - [`RegistryBuilder`]: where both register, with the expression
@@ -15,9 +17,6 @@
 //! The GPU backend that a renderer draws through is `mln_gfx::gpu`'s
 //! `Gpu`. A layer type draws with programs it declares
 //! (`mln_gfx::shaders::program`), and the engine with its own.
-//!
-//! Not a contract yet, and hidden from the documentation: placement, in the
-//! `placement` module. It can change or go in any release.
 
 mod after_gpu;
 mod algorithm;
@@ -53,7 +52,6 @@ mod named_target;
 mod paint_parameters;
 mod paint_property_binder;
 mod paint_property_statistics;
-#[doc(hidden)]
 pub mod placement;
 pub mod query;
 mod registry;
