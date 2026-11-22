@@ -142,6 +142,16 @@ fn render(style: &str) -> Option<PremultipliedImage> {
 /// test fixtures' glyphs for every font and an image "square", a magenta
 /// square 12 px across.
 fn render_over(style: &str, dem: fn(&TileData) -> Vec<u8>) -> Option<PremultipliedImage> {
+    render_tiles(style, move |_, tile| dem(tile))
+}
+
+/// The still image of `style` over the tiles that `tile` makes of each
+/// tile's URL and coordinates, with the glyphs and image of
+/// [`render_over`].
+fn render_tiles(
+    style: &str,
+    tile: impl Fn(&str, &TileData) -> Vec<u8> + Send + Sync + 'static,
+) -> Option<PremultipliedImage> {
     let size = Size::new(SIDE, SIDE);
     let run_loop = Queue::new();
     let pool = Pool::new(4);
@@ -158,7 +168,7 @@ fn render_over(style: &str, dem: fn(&TileData) -> Vec<u8>) -> Option<Premultipli
     let file_source = Arc::new(StubFileSource::new(ResponseType::Synchronous));
     file_source.set_response(Kind::Tile, move |resource: &Resource| {
         let mut response = Response::new();
-        response.data = Some(Arc::new(dem(resource.tile_data.as_ref().expect("a tile"))));
+        response.data = Some(Arc::new(tile(&resource.url, resource.tile_data.as_ref().expect("a tile"))));
         Some(response)
     });
     file_source
@@ -359,5 +369,59 @@ fn a_label_behind_a_ridge_hides_on_the_globe_as_on_mercator() {
         );
         let expected = if shows { 1.0 } else { 0.0 };
         assert!((mercator - expected).abs() <= 0.05, "{north} m north: {mercator} shows on Mercator");
+    }
+}
+
+/// A raster tile of one color: red for the western half of the world,
+/// blue for the eastern.
+fn half_png(tile: &TileData) -> Vec<u8> {
+    let east = f64::from(tile.x) + 0.5 >= 2f64.powi(i32::from(tile.z)) / 2.0;
+    let mut image = PremultipliedImage::new(Size::new(512, 512));
+    for pixel in image.data.as_chunks_mut::<4>().0 {
+        *pixel = if east { [0, 0, 255, 255] } else { [255, 0, 0, 255] };
+    }
+    mln_image::encode_png(&image)
+}
+
+/// Near the antimeridian at zoom 1, a raster drapes on both sides of it, on
+/// the globe as on Mercator: the zoom 0 terrain tile's drape, in the world
+/// copy of the center, holds the western raster tile that the globe's cover
+/// puts in the next copy, as well as the eastern one.
+#[test]
+fn a_raster_drapes_on_both_sides_of_the_antimeridian() {
+    let style = |globe: bool| {
+        let projection = if globe { r#""projection": {"type": "vertical-perspective"},"# } else { "" };
+        format!(
+            r#"{{
+                "version": 8,
+                "center": [179, 0],
+                "zoom": 1,
+                {projection}
+                "terrain": {{"source": "dem"}},
+                "sources": {{
+                    "dem": {{"type": "raster-dem", "tiles": ["dem/{{z}}/{{x}}/{{y}}.png"], "tileSize": 512, "maxzoom": 15}},
+                    "raster": {{"type": "raster", "tiles": ["raster/{{z}}/{{x}}/{{y}}.png"], "tileSize": 512}}
+                }},
+                "layers": [
+                    {{"id": "background", "type": "background", "paint": {{"background-color": "white"}}}},
+                    {{"id": "raster", "type": "raster", "source": "raster", "paint": {{"raster-fade-duration": 0}}}}
+                ]
+            }}"#
+        )
+    };
+    let tiles = |url: &str, tile: &TileData| if url.starts_with("dem/") { sea_level_png(tile) } else { half_png(tile) };
+    for globe in [true, false] {
+        let Some(image) = render_tiles(&style(globe), tiles) else {
+            return;
+        };
+        let pixel = |x: u32| {
+            let start = ((SIDE / 2 * SIDE + x) * 4) as usize;
+            <[u8; 4]>::try_from(&image.data[start..start + 4]).unwrap()
+        };
+        // The antimeridian is a degree east of the center, a few pixels
+        // right of the view's middle.
+        let (west, east) = (pixel(SIDE / 2 - 40), pixel(SIDE / 2 + 40));
+        assert_eq!([0, 0, 255, 255], west, "east of the meridian, west of the view's middle, on the globe: {globe}");
+        assert_eq!([255, 0, 0, 255], east, "west of the meridian, east of the view's middle, on the globe: {globe}");
     }
 }

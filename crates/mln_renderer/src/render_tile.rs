@@ -241,10 +241,15 @@ pub(crate) struct FoundTile {
     pub(crate) view: Option<ViewPlace>,
 }
 
-/// A render tile of a frame, with what it shows a layer of the type `T`.
+/// A render tile of a frame, with what it shows a layer of the type `T`,
+/// and the world copy it draws in.
 pub(crate) struct FrameTile<'a, T: LayerType> {
     pub(crate) tile: &'a RenderTile,
     bucket: Option<T::TileBucket<'a>>,
+    /// The world copy the layer draws the tile in: the render tile's, but
+    /// in a drape on the globe, which draws it in the drape's
+    /// ([`in_wrap`](Self::in_wrap)).
+    wrap: i16,
 }
 
 impl<T: LayerType> Clone for FrameTile<'_, T> {
@@ -265,7 +270,7 @@ impl<'a, T: LayerType> FrameTile<'a, T> {
         layer_id: &str,
     ) -> (Self, Option<ViewPlace>) {
         let found = contents.and_then(|contents| T::TileBucket::find(contents, layer_id));
-        (FrameTile { tile, bucket: found.map(|(bucket, _)| bucket) }, found.map(|(_, place)| place))
+        (FrameTile { tile, bucket: found.map(|(bucket, _)| bucket), wrap: tile.id.wrap }, found.map(|(_, place)| place))
     }
 
     /// The tile `tile`, which shows `contents`, as the layer `layer_id`
@@ -281,7 +286,14 @@ impl<'a, T: LayerType> FrameTile<'a, T> {
         let bucket = contents.zip(view).and_then(|(contents, place)| T::TileBucket::at(contents, place));
         debug_assert_eq!(bucket.is_some(), view.is_some(), "a tile's contents changed since the frame's update");
         debug_assert!(bucket.is_none_or(|bucket| bucket.is_for(layer_id)), "a layer found at another's place");
-        FrameTile { tile, bucket }
+        FrameTile { tile, bucket, wrap: tile.id.wrap }
+    }
+
+    /// The tile drawn in the world copy `wrap`, which shows the same
+    /// place of a world without copies, the globe's.
+    #[must_use]
+    pub(crate) fn in_wrap(self, wrap: i16) -> Self {
+        FrameTile { wrap, ..self }
     }
 
     /// What the tile shows the layer, if anything.
@@ -294,9 +306,9 @@ impl<'a, T: LayerType> FrameTile<'a, T> {
         self.bucket.filter(|bucket| bucket.passes() & pass != RenderPass::None)
     }
 
-    /// The tile's id.
+    /// The tile's id, in the world copy the layer draws it in.
     #[must_use]
     pub(crate) fn id(self) -> OverscaledTileID {
-        *self.tile.overscaled_tile_id()
+        OverscaledTileID { wrap: self.wrap, ..*self.tile.overscaled_tile_id() }
     }
 }

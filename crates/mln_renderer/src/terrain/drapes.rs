@@ -419,6 +419,9 @@ pub(crate) struct Drapes {
     drapes: Vec<Drape>,
     /// The number of stacks of the frame.
     stacks: usize,
+    /// Whether the frame's view is on the globe, where a drape draws the
+    /// tiles over its own whatever their world copy.
+    globe: bool,
     /// The most texels a side of a drape ([`drape_size`]).
     largest: u32,
     /// The physical pixels of the frame's target a logical one.
@@ -471,7 +474,7 @@ impl Drapes {
         if largest != self.largest {
             *self = Drapes { largest, ..Drapes::default() };
         }
-        self.stacks = stacks;
+        (self.stacks, self.globe) = (stacks, view.is_globe());
         (self.byte_cap, self.pixel_ratio) = (byte_cap, pixel_ratio);
         let mut kept = std::mem::take(&mut self.drapes);
         self.drapes.reserve(cover.tiles.len());
@@ -511,7 +514,7 @@ impl Drapes {
                 continue;
             };
             let start = key.tiles.len();
-            layer.drape_stamps(source, drape.tile, &mut key.tiles);
+            layer.drape_stamps(source, (drape.tile, self.globe), &mut key.tiles);
             if layer.drapes_by_bearing() {
                 key.bearing = Some(drape.transform.view.angle());
             }
@@ -613,7 +616,7 @@ impl Drapes {
         // the passes do, nor the drape's size, which `finish_update`
         // settles.
         let layer_composite = &mut LayerComposite::default();
-        let size = Size::new(self.largest, self.largest);
+        let (size, globe) = (Size::new(self.largest, self.largest), self.globe);
         for Drape { tile, transform, stacks, .. } in &mut self.drapes {
             let Some(StackDrape { clip_masks, layers, previous, .. }) =
                 stacks.get_mut(stack).filter(|drape| drape.updated)
@@ -627,7 +630,7 @@ impl Drapes {
                 None => DrapeLayer { style: Arc::clone(&style), drawing: layer.new_drape_drawing() },
             };
             let mut parameters = parameters.drape(transform, clip_masks, layer_composite, size, tile.to_unwrapped());
-            layer.update_drape_draws(gpu, &mut parameters, atlases, source, *tile, &mut kept.drawing);
+            layer.update_drape_draws(gpu, &mut parameters, atlases, source, (*tile, globe), &mut kept.drawing);
             layers.push(kept);
         }
     }

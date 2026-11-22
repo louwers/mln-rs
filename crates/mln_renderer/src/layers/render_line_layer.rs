@@ -380,7 +380,7 @@ impl TypedLayer for RenderLineLayer {
         let frame = self.drawing.frame_mut();
         let paint = &self.values.evaluated.paint;
         frame.set_composite(Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform()));
-        frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.tile.id));
+        frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.id().to_unwrapped()));
 
         let render_pass = RenderPass(self.values.evaluated.render_passes & !RenderPass::Opaque.underlying_type());
         for tile in render_tiles {

@@ -244,7 +244,10 @@
 //!   updates. On the globe they draw as on Mercator, with the camera at a
 //!   projection transition of 0 ([`View::mercator`](mln_map_types::View::mercator)), as GL JS draws its
 //!   drapes, so a draped line at a latitude shows as wide as the Mercator
-//!   tile under it makes it. Where their draw updates make no draw, as a stack of lines
+//!   tile under it makes it. A drape draws the tiles over its own tile: on
+//!   Mercator those of its world copy; on the globe, which has no copies,
+//!   those of any, placed in its own, so that near the antimeridian it
+//!   holds the tiles that the cover puts in the next copy. Where their draw updates make no draw, as a stack of lines
 //!   does in a tile they don't cross, or one whose tiles haven't loaded,
 //!   the drape has no texture and draws no pass until its key changes.
 //!   Each stack's drape of a tile keeps its own key, so a change in one

@@ -359,39 +359,56 @@ impl<'a> FrameSourceTiles<'a> {
     }
 
     /// The tiles of `found`, as [`at`](Self::at) gives them, that overlap
-    /// `tile`: it, its ancestors and its descendants, in its world copy.
+    /// `tile`: it, its ancestors and its descendants, in its world copy, or
+    /// on the `globe`, which has no copies, whatever their copy, each then
+    /// drawn in `tile`'s.
     pub(crate) fn overlapping<T: LayerType>(
         self,
         found: &[FoundTile],
         layer_id: &str,
         tile: UnwrappedTileID,
+        globe: bool,
     ) -> FrameTiles<'a, T> {
-        self.at(self.overlaps(found, tile).map(|(found, _)| found), layer_id)
+        let overlaps = self.overlaps(found, tile, globe).map(|(found, _)| found);
+        let mut tiles: FrameTiles<'a, T> = self.at(overlaps, layer_id);
+        for frame_tile in &mut tiles {
+            *frame_tile = frame_tile.in_wrap(tile.wrap);
+        }
+        tiles
     }
 
     /// What a layer draws of the tiles of `found` that
-    /// [`overlapping`](Self::overlapping) gives, in its order.
-    pub(crate) fn stamps(self, found: &[FoundTile], tile: UnwrappedTileID) -> impl Iterator<Item = TileStamp> {
-        self.overlaps(found, tile).map(move |(&FoundTile { tile, view }, render_tile)| {
-            let contents = self.contents.get(tile).copied().flatten();
+    /// [`overlapping`](Self::overlapping) gives, in its order, under the ids
+    /// it draws them in.
+    pub(crate) fn stamps(
+        self,
+        found: &[FoundTile],
+        tile: UnwrappedTileID,
+        globe: bool,
+    ) -> impl Iterator<Item = TileStamp> {
+        self.overlaps(found, tile, globe).map(move |(&FoundTile { tile: index, view }, render_tile)| {
+            let contents = self.contents.get(index).copied().flatten();
             let stamp = contents.zip(view).and_then(|(contents, place)| contents.stamp(place));
             TileStamp {
-                tile: *render_tile.overscaled_tile_id(),
+                tile: OverscaledTileID { wrap: tile.wrap, ..*render_tile.overscaled_tile_id() },
                 bucket: stamp.map(|(bucket, _)| bucket),
                 generations: stamp.map_or([0, 0], |(_, generations)| generations),
             }
         })
     }
 
-    /// The tiles of `found` that overlap `tile`, with their render tiles.
+    /// The tiles of `found` that overlap `tile`, with their render tiles:
+    /// in its world copy, or, on the `globe`, in any.
     fn overlaps<'f>(
         self,
         found: &'f [FoundTile],
         tile: UnwrappedTileID,
+        globe: bool,
     ) -> impl Iterator<Item = (&'f FoundTile, &'a RenderTile)> {
         found.iter().filter_map(move |found| {
             let render_tile = self.tiles.get(found.tile)?;
             let id = render_tile.id;
+            let tile = if globe { UnwrappedTileID { wrap: id.wrap, ..tile } } else { tile };
             (id == tile || id.is_child_of(&tile) || tile.is_child_of(&id)).then_some((found, render_tile))
         })
     }
@@ -747,30 +764,37 @@ pub(crate) trait LayerParts {
     fn new_drape_drawing(&self) -> DrapeDrawing;
 
     /// The encode's update of the layer's draws into the drape of the
-    /// terrain tile `drape_tile`, which keeps them in `drawing`, one of the
-    /// layer's ([`new_drape_drawing`](Self::new_drape_drawing)): as
+    /// terrain tile `drape`, with whether the frame is on the globe, which
+    /// keeps them in `drawing`, one of the layer's
+    /// ([`new_drape_drawing`](Self::new_drape_drawing)): as
     /// [`update_draws`](Self::update_draws) makes the frame's, with the
     /// drape's `parameters`, from the tiles of `source` the layer's update
-    /// found that overlap `drape_tile`, from the copies of an image source's
-    /// image that overlap it ([`ImageSourceRenderData::overlaps`]), or from
-    /// `drape_tile` itself for a layer without a source, in the Mercator
-    /// projection, a drape's.
+    /// found that overlap the drape's tile
+    /// ([`FrameSourceTiles::overlapping`]), from the copies of an image
+    /// source's image that overlap it ([`ImageSourceRenderData::overlaps`]),
+    /// or from the drape's tile itself for a layer without a source, in the
+    /// Mercator projection, a drape's.
     fn update_drape_draws(
         &mut self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         atlases: &Atlases,
         source: Option<LayerSource<'_>>,
-        drape_tile: OverscaledTileID,
+        drape: (OverscaledTileID, bool),
         drawing: &mut DrapeDrawing,
     );
 
     /// Adds to `stamps` what the layer draws of each tile that
     /// [`update_drape_draws`](Self::update_drape_draws) makes its draws in
-    /// the drape of `drape_tile` from: for an image source, its bucket and
-    /// geometry in each copy of the image that overlaps the drape; none for
-    /// a layer without a source.
-    fn drape_stamps(&self, source: Option<LayerSource<'_>>, drape_tile: OverscaledTileID, stamps: &mut Vec<TileStamp>);
+    /// `drape` from: for an image source, its bucket and geometry in each
+    /// copy of the image that overlaps the drape; none for a layer without
+    /// a source.
+    fn drape_stamps(
+        &self,
+        source: Option<LayerSource<'_>>,
+        drape: (OverscaledTileID, bool),
+        stamps: &mut Vec<TileStamp>,
+    );
 
     /// Records that the buckets in `changed` changed, for the tiles whose
     /// draws were built from them.
@@ -972,7 +996,7 @@ impl<L: TypedLayer> LayerParts for L {
         parameters: &mut PaintParameters<'_>,
         atlases: &Atlases,
         source: Option<LayerSource<'_>>,
-        drape_tile: OverscaledTileID,
+        drape: (OverscaledTileID, bool),
         drawing: &mut DrapeDrawing,
     ) {
         let Some(drawing) = drawing.downcast_mut::<L::Drawing>() else {
@@ -982,15 +1006,20 @@ impl<L: TypedLayer> LayerParts for L {
         // The drape's drawing is the layer's while the layer's hooks make its
         // draws.
         std::mem::swap(self.parts_mut().drawing, drawing);
-        update_drape(self, gpu, parameters, atlases, source, drape_tile);
+        update_drape(self, gpu, parameters, atlases, source, drape);
         std::mem::swap(self.parts_mut().drawing, drawing);
     }
 
-    fn drape_stamps(&self, source: Option<LayerSource<'_>>, drape_tile: OverscaledTileID, stamps: &mut Vec<TileStamp>) {
+    fn drape_stamps(
+        &self,
+        source: Option<LayerSource<'_>>,
+        (drape_tile, globe): (OverscaledTileID, bool),
+        stamps: &mut Vec<TileStamp>,
+    ) {
         match source {
             Some(LayerSource::Tiles(source, found)) => {
                 let found = found.get(self.base().found.clone()).unwrap_or_default();
-                stamps.extend(source.stamps(found, drape_tile.to_unwrapped()));
+                stamps.extend(source.stamps(found, drape_tile.to_unwrapped(), globe));
             }
             Some(LayerSource::Image(image)) => {
                 let drape = drape_tile.to_unwrapped();
@@ -1064,7 +1093,7 @@ fn update_drape<L: TypedLayer>(
     parameters: &mut PaintParameters<'_>,
     atlases: &Atlases,
     source: Option<LayerSource<'_>>,
-    drape_tile: OverscaledTileID,
+    (drape_tile, globe): (OverscaledTileID, bool),
 ) {
     // A drape is flat: the layer's draws are Mercator's.
     use_projection_variant(layer, ProjectionVariant::Mercator);
@@ -1080,7 +1109,7 @@ fn update_drape<L: TypedLayer>(
     let tiles = match source {
         Some(LayerSource::Tiles(source, found)) => {
             let found = found.get(layer.base().found.clone()).unwrap_or_default();
-            source.overlapping::<L::Type>(found, layer.id(), drape_tile.to_unwrapped())
+            source.overlapping::<L::Type>(found, layer.id(), drape_tile.to_unwrapped(), globe)
         }
         Some(LayerSource::Image(image)) => {
             let drape = drape_tile.to_unwrapped();
