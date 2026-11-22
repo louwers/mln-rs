@@ -277,6 +277,11 @@ pub struct SharedBuffer {
 }
 
 impl SharedBuffer {
+    /// Whether this is the buffer's one handle.
+    pub(crate) fn is_only(&self) -> bool {
+        self.handle.is_only()
+    }
+
     /// What geometry made of the vertices holds.
     pub(crate) fn held(&self) -> Held {
         Held::StoredBuffer(self.handle.clone())

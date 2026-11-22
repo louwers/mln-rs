@@ -38,6 +38,11 @@ impl<V> Buffer<V> {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// Whether this is the buffer's one handle.
+    pub(crate) fn is_only(&self) -> bool {
+        self.entry.is_only()
+    }
 }
 
 impl<V> PartialEq for Buffer<V> {

@@ -89,7 +89,9 @@ pub struct Resources {
     /// The `seq` of the next mesh.
     next_mesh_seq: u64,
     /// The tiles' surfaces: the extent's quad, and the globe's grid of each
-    /// zoom, by whether it touches the north and the south pole.
+    /// zoom, by whether it touches the north and the south pole. These, the
+    /// image quad, the masked grids and the quads stay while a mesh holds
+    /// them ([`drop_unused_surfaces`](Self::drop_unused_surfaces)).
     surfaces: HashMap<Option<(u8, bool, bool)>, TileSurface>,
     /// The surface that a whole tile's image drapes over on Mercator.
     image_quad: Option<TileSurface<ImageVertex>>,
@@ -337,6 +339,17 @@ impl Resources {
         self.masked_grids.len()
     }
 
+    /// Drops the shared surfaces and quads that no mesh holds any more.
+    fn drop_unused_surfaces(&mut self) {
+        fn unused<V>(surface: &TileSurface<V>) -> bool {
+            surface.vertices.is_only() && surface.triangles.buffer.is_only()
+        }
+        self.surfaces.retain(|_, surface| !unused(surface));
+        self.image_quad.take_if(|surface| unused(surface));
+        self.masked_grids.retain(|_, (surface, _)| !unused(surface));
+        self.quads.take_if(|quads| quads.is_only());
+    }
+
     /// The indexes of `count` quads, each the four vertices after the
     /// last's, of the corners 0 and 1 above 2 and 3: the counter-clockwise
     /// triangles 0, 2, 1 and 1, 2, 3 of each, in as many segments as their
@@ -393,6 +406,7 @@ impl Resources {
     /// dropped keeps its GPU memory until then. Not while a pass is open on
     /// `gpu`.
     pub(crate) fn destroy_released(&mut self, gpu: &mut dyn Gpu) {
+        self.drop_unused_surfaces();
         let Resources { device, textures, buffers, meshes, releases, doomed, .. } = self;
         // The bindings made of buffers that arrays replaced go first, in
         // this batch, before those buffers.

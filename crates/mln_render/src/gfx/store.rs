@@ -89,6 +89,12 @@ impl<K: Key> Shared<K> {
     pub(crate) fn key(&self) -> K {
         self.0.key
     }
+
+    /// Whether this is the entry's one handle.
+    #[must_use]
+    pub(crate) fn is_only(&self) -> bool {
+        Rc::strong_count(&self.0) == 1
+    }
 }
 
 /// Handles are equal where they hold the same entry.
