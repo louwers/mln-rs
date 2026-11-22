@@ -139,7 +139,7 @@ impl Registry {
             mln_style::expression::functions::register_builtin_functions(builder.functions_mut()).unwrap();
             builder.add_layer_type::<crate::tests::fixture_layer::Dot>().unwrap();
             // slice: off builder.add_layer_type::<crate::tests::fixture_layer::Tint>().unwrap();
-            // slice: off builder.add_layer_type::<crate::tests::fixture_layer::Shade>().unwrap();
+            builder.add_layer_type::<crate::tests::fixture_layer::Shade>().unwrap();
             builder.add_source_type::<Tiles<Geometry>>().unwrap();
             builder.add_source_type::<Tiles<Raster>>().unwrap();
             builder.add_source_type::<Tiles<Dem>>().unwrap();

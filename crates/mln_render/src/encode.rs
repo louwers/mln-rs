@@ -770,7 +770,10 @@ impl DrawOrder {
 #[cfg(test)]
 mod tests {
     use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+    use mln_gfx::types::TextureChannelDataType;
     use mln_tile_id::{CanonicalTileID, OverscaledTileID};
+    use mln_util::Color;
+    use mln_util::size::Size;
 
     use super::*;
     use crate::mesh_desc::MeshDesc;
@@ -870,6 +873,45 @@ mod tests {
             assert_eq!(group.frame.stencil_tiles(), Some(&tiles[..]));
             assert_eq!(group.frame.draws[0].tile, Some(id));
         });
+    }
+
+    #[test]
+    fn a_layers_targets_draw_as_the_frame_first_asked_for_them_apart_from_its_groups() {
+        crate::tests::with_context(|gpu, context| {
+            let mesh = mesh(context);
+            let [first, second] =
+                [0, 1].map(|_| context.target(Size::new(4, 4), TextureChannelDataType::UnsignedByte, Color::black()));
+            let mut draws = Draws::new();
+            draws.begin(0.0, false, false);
+            draws.target(&second).push(&mesh, Draw::DEFAULT, ());
+            draws.target(&first);
+            draws.target(&second).push(&mesh, Draw::DEFAULT, ());
+            draws.finish(gpu, context, &(), []);
+            let drawn: Vec<(bool, usize)> =
+                draws.targets.iter().map(|(target, group)| (*target == second, group.frame.draws.len())).collect();
+            assert_eq!(drawn, [(true, 2), (false, 0)]);
+            assert_eq!(1, draws.groups().count());
+
+            // A frame draws into the targets it asks for alone.
+            draws.begin(0.0, false, false);
+            draws.target(&first);
+            draws.finish(gpu, context, &(), []);
+            let drawn: Vec<bool> = draws.targets.iter().map(|(target, _)| *target == first).collect();
+            assert_eq!(drawn, [true]);
+        });
+    }
+
+    #[test]
+    fn a_target_keeps_its_texture_through_a_resize() {
+        let mut context = Resources::detached();
+        let target = context.target(Size::new(4, 4), TextureChannelDataType::HalfFloat, Color::black());
+        let texture = target.texture().clone();
+        context.resize(&target, Size::new(8, 2));
+        assert_eq!(*target.texture(), texture);
+        assert_eq!(Size::new(8, 2), context.size(target.texture()));
+        // The detached resources' device draws no half floats.
+        let format = context.stored_texture(&target.texture().0).expect("the texture").format();
+        assert_eq!(mln_gfx::gpu::TextureFormat::Rgba8Unorm, format);
     }
 
     #[test]

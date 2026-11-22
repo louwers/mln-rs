@@ -1,6 +1,5 @@
-//! The tests' layer types of raster and raster-dem sources (`tint` and
-//! `shade`), on the layer contract they had before `Layer`: switched off
-//! until their inputs come back.
+//! The tests' layer type of a raster source (`tint`), on the layer contract
+//! it had before `Layer`: switched off until its input comes back.
 
 use std::sync::Arc;
 
@@ -15,9 +14,9 @@ use mln_util::error::Error;
 use mln_vec_map::VecMap;
 
 use crate::layer::{
-    Bucket, BucketBase, BuildParams, DemContents, DrawContext, EvaluateCx, EvaluatedLayer, Evaluation,
-    FeatureIndexBuilder, FeatureStates, GeometryUpload, GeometryVec, LayerBucket, LayerType, LayerValues, Layout,
-    LayoutParameters, NoBucket, NoLayout, NoTileView, RasterView, Resolved, SourceLayer, layers_by_id,
+    Bucket, BucketBase, BuildParams, DrawContext, EvaluateCx, EvaluatedLayer, Evaluation, FeatureIndexBuilder,
+    FeatureStates, GeometryUpload, GeometryVec, LayerBucket, LayerType, LayerValues, Layout, LayoutParameters,
+    NoBucket, NoLayout, NoTileView, RasterView, Resolved, SourceLayer, layers_by_id,
 };
 use crate::layer_drawing::TileDraws;
 use crate::tile_values::{ChangedBuckets, TileMap};
@@ -73,50 +72,6 @@ impl LayerType for Tint {
         _tile_values: &mut TileMap<()>,
         _gpu: &mut dyn mln_gfx::gpu::Gpu,
         _cx: &mut DrawContext<'_, '_, Tint>,
-    ) {
-    }
-}
-
-static NO_PROPERTIES: PropertyTable = PropertyTable::new(&[], &[]);
-
-/// The `shade` layer type.
-pub(crate) struct Shade;
-
-impl StyleLayerType for Shade {
-    const INFO: LayerTypeInfo = LayerTypeInfo { name: "shade", source: SourceKind::RasterDem, from_json: true };
-    const PROPERTIES: &'static PropertyTable = &NO_PROPERTIES;
-
-    type LayoutProperties = NoProperties;
-    type PaintProperties = NoProperties;
-    type Extra = ();
-
-    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
-        None
-    }
-}
-
-impl LayerType for Shade {
-    type Layout = NoLayout;
-    type Bucket = NoBucket;
-    type View<'a> = &'a DemContents;
-    type Tile = ();
-    type Drawing = TileDraws;
-    type State = ();
-
-    fn new_layer(_layer: &LayerValues<Shade>) -> ((), TileDraws) {
-        Default::default()
-    }
-
-    fn evaluate((): &mut (), _cx: EvaluateCx<'_, Shade>) -> Evaluation {
-        Evaluation::TRANSLUCENT
-    }
-
-    fn make_draws(
-        _state: &mut (),
-        _drawing: &mut TileDraws,
-        _tile_values: &mut TileMap<()>,
-        _gpu: &mut dyn mln_gfx::gpu::Gpu,
-        _cx: &mut DrawContext<'_, '_, Shade>,
     ) {
     }
 }

@@ -6,8 +6,6 @@
 mod fill_mesh_test;
 // The symbol layer type's format sections that override its paint.
 mod format_section_override_test;
-// The globe meshes that the raster layer types keep.
-// slice: off mod globe_mesh_test;
 // The subdivision of polygons for the globe.
 mod polygon_subdivision_test;
 // The programs' declarations and sources.
@@ -28,17 +26,6 @@ fn subdivide(
     let triangles = tessellator.triangulate(polygon);
     mln_render::globe::subdivide_polygon(polygon, triangles, tile, granularity, outline)
 }
-// slice: off
-// slice: off /// Runs `f` with the `Gpu` of a headless WebGPU backend, which compiles the
-// slice: off /// built-in layer types' programs, and a context over it, which it then
-// slice: off /// tears down.
-// slice: off fn with_context(f: impl FnOnce(&mut dyn mln_gfx::gpu::Gpu, &mut mln_render::draw::Context)) {
-// slice: off     use mln_gfx::RendererBackend as _;
-// slice: off     let device = mln_webgpu::Device::new(None).expect("device");
-// slice: off     let mut backend = mln_webgpu::RendererBackend::new(&device);
-// slice: off     let gpu = backend.gpu();
-// slice: off     mln_render::testing::with_context(gpu, 1.0, f);
-// slice: off }
 // slice: off
 /// The built-in expression functions and the layer types of this crate, as
 /// this build has them: the tests' layers must be of its types, not of

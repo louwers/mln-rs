@@ -1,6 +1,6 @@
 // `dot`, the tests' layer type.
 pub(crate) mod fixture_layer;
-// slice: off // `tint`, `shade` and `mark`, the tests' layer types of other sources.
+// slice: off // `tint`, the tests' layer type of a raster source.
 // slice: off pub(crate) mod fixture_layer_off;
 // `tiles`, `raster-tiles` and `dem-tiles`, the tests' source types.
 pub(crate) mod fixture_source;
@@ -11,6 +11,9 @@ mod bucket_test;
 // slice: off mod fast_camera_test;
 mod gtest_sky;
 mod gtest_subdivision;
+// The surfaces that tiles' images drape over: the globe's grids of masked
+// tiles, and the quads of masks.
+mod image_surface_test;
 // Raster, DEM and custom geometry tiles, and tile coordinates.
 mod tile;
 // The glyph store and cache, and formatted text.

@@ -145,10 +145,10 @@ fn all_layers() -> serde_json::Value {
     ])
 }
 
-// slice: off #[test]
-// slice: off fn valid_tile_lays_out() {
-// slice: off     assert_eq!(lay_out(valid_tile(), &all_layers()).unwrap(), 7);
-// slice: off }
+#[test]
+fn valid_tile_lays_out() {
+    assert_eq!(lay_out(valid_tile(), &all_layers()).unwrap(), 7);
+}
 
 // As C++ Source.VectorTileCorrupt, with a truncated tile.
 #[test]

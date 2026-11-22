@@ -325,6 +325,12 @@ impl Resources {
         grid
     }
 
+    /// How many grids of masked tiles the resources keep.
+    #[cfg(test)]
+    pub(crate) fn masked_grids(&self) -> usize {
+        self.masked_grids.len()
+    }
+
     /// The indexes of `count` quads, each the four vertices after the
     /// last's, of the corners 0 and 1 above 2 and 3: the counter-clockwise
     /// triangles 0, 2, 1 and 1, 2, 3 of each, in as many segments as their

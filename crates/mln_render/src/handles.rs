@@ -218,3 +218,20 @@ pub struct TileSurface<V = [i16; 2]> {
     /// Their triangles.
     pub triangles: IndexBuffer,
 }
+
+#[cfg(test)]
+mod tests {
+    use mln_gfx::types::TextureFilterType;
+
+    use super::*;
+
+    #[test]
+    fn a_samplers_clones_sample_as_it_last_said_and_a_states_alone() {
+        let nearest = SamplerState::default();
+        let linear = SamplerState { filter: TextureFilterType::Linear, ..nearest };
+        let sampler = Sampler::new(nearest);
+        let (clone, own) = (Sampler::from(&sampler), Sampler::from(nearest));
+        sampler.set(linear);
+        assert_eq!((linear, nearest), (clone.get(), own.get()));
+    }
+}

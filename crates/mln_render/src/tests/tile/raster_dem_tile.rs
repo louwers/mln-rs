@@ -148,3 +148,33 @@ fn decode_and_backfill_through_the_codec() {
     assert_eq!(tiles.errors(), ["raster-dem tiles must be square."]);
     assert!(tiles.tile_at(&ids[1]).is_renderable());
 }
+
+// What the layers make of a DEM goes when its border or the part of the
+// tile it draws changes: its contents take a new identity, and keep it
+// through a mask that changes nothing.
+#[test]
+fn contents_take_a_new_identity_when_their_border_or_mask_changes() {
+    let image = PremultipliedImage::new(Size::new(16, 16));
+    let mut contents = DemContents::new(DemData::new(&image, RasterEncoding::Mapbox).expect("DemData"));
+    let first = contents.id();
+    contents.set_mask([mln_tile_id::CanonicalTileID::new(0, 0, 0)].into());
+    assert_eq!(first, contents.id(), "the whole tile, as before");
+    contents.set_mask([mln_tile_id::CanonicalTileID::new(1, 0, 0)].into());
+    let masked = contents.id();
+    assert_ne!(first, masked);
+    contents.unmask();
+    assert_ne!(masked, contents.id());
+
+    let border = DemContents::new(DemData::new(&image, RasterEncoding::Mapbox).expect("DemData"));
+    let (mut tile, mut border) = (Contents::Dem(contents), Contents::Dem(border));
+    let before = [&tile, &border].map(|contents| match contents {
+        Contents::Dem(dem) => dem.id(),
+        _ => unreachable!(),
+    });
+    crate::tile::dem::backfill_pair(&mut tile, &mut border, crate::tile::dem::Offset { dx: 1, dy: 0 });
+    let after = [&tile, &border].map(|contents| match contents {
+        Contents::Dem(dem) => dem.id(),
+        _ => unreachable!(),
+    });
+    assert!(before.iter().zip(&after).all(|(before, after)| before != after));
+}
