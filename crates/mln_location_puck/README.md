@@ -34,7 +34,8 @@ and an app adds the layer, then sets its paint properties as fixes come in:
 ## Properties
 
 Each is a paint property, the same for the whole layer, and transitions; the
-bearing turns the shorter way around. Sizes are logical pixels but for
+bearing turns, and the position moves, the shorter way around, across the
+antimeridian where that is shorter. Sizes are logical pixels but for
 `accuracy-radius`. A size of 0 hides its part. The parts draw from the bottom
 up: the accuracy circle, the bearing's sector, the shadow, the arrow and the
 puck.

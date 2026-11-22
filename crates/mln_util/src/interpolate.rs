@@ -6,6 +6,7 @@
 use geometry::Point;
 
 use crate::color::Color;
+use crate::constants;
 use crate::geo::LatLng;
 use crate::padding::Padding;
 use crate::range::Range;
@@ -107,14 +108,14 @@ impl Interpolate for Padding {
     }
 }
 
-/// Latitude and longitude each, as given: a longitude doesn't take the
-/// shorter way across the antimeridian.
+/// Latitude and longitude each, the longitude the shorter way around, across
+/// the antimeridian where that is shorter; the result's longitude is
+/// wrapped.
 impl Interpolate for LatLng {
     fn interpolate(&self, to: &Self, t: f64) -> Self {
-        LatLng::new_unchecked(
-            self.latitude().interpolate(&to.latitude(), t),
-            self.longitude().interpolate(&to.longitude(), t),
-        )
+        let (from, degrees) = (self.longitude(), constants::DEGREES_MAX);
+        let delta = (to.longitude() - from + constants::LONGITUDE_MAX).rem_euclid(degrees) - constants::LONGITUDE_MAX;
+        LatLng::new_unchecked(self.latitude().interpolate(&to.latitude(), t), from + delta * t).wrapped()
     }
 }
 
@@ -171,6 +172,19 @@ mod tests {
         assert_eq!(a.interpolate(&b, 0.3), (f64::from(a) * 0.7 + f64::from(b) * 0.3) as f32);
         let arr = [a, b];
         assert_eq!(arr.interpolate(&[b, a], 0.3), arr.interpolate_f32(&[b, a], 0.3f32));
+    }
+
+    #[test]
+    fn a_position_moves_the_shorter_way_across_the_antimeridian() {
+        let longitude = |from: f64, to: f64, t: f64| {
+            let (from, to) = (LatLng::new(10.0, from).unwrap(), LatLng::new(20.0, to).unwrap());
+            from.interpolate(&to, t).longitude()
+        };
+        assert!((longitude(179.9, -179.9, 0.25) - 179.95).abs() < 1e-9);
+        assert!((longitude(179.9, -179.9, 0.75) + 179.95).abs() < 1e-9);
+        assert!((longitude(-179.9, 179.9, 0.25) + 179.95).abs() < 1e-9);
+        assert!((longitude(-10.0, 30.0, 0.5) - 10.0).abs() < 1e-9);
+        assert_eq!(15.0, LatLng::new(10.0, 0.0).unwrap().interpolate(&LatLng::new(20.0, 0.0).unwrap(), 0.5).latitude());
     }
 
     #[test]
