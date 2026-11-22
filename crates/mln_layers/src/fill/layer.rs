@@ -76,6 +76,8 @@ impl Layer for FillLayer {
         }
     }
 
+    /// The frame's first tile made says anew whether the frame's fills
+    /// write depth.
     fn update(&mut self, _cx: &mut UpdateCx<'_, Self>) {
         self.fills_write = None;
     }
