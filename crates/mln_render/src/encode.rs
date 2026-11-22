@@ -30,6 +30,7 @@ use crate::gfx::context::Resources;
 use crate::gfx::store::MeshKey;
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::handles::Target;
+use crate::layer::LendAt;
 use crate::layer_composite::Composite;
 use crate::paint_parameters::{Composited, DepthTest, PaintParameters, Stencil};
 use crate::paint_property_binder::MeshPaint;
@@ -432,11 +433,12 @@ impl Pushes {
 /// A layer's draws of a frame, in groups: the layer's [`main`](Draws::main)
 /// group in its place in the layers' order, its [`overlay`](Draws::overlay)
 /// above it, and the draws into each of its [`target`](Draws::target)s
-/// before the frame's passes. The engine keeps a layer's groups from frame
-/// to frame, with the memory of their draws: the main group and the overlay
-/// each keep their place in the layers' order and depth while the layer
-/// renders, in frames they draw nothing in too, the overlay from the first
-/// frame that asks for it.
+/// before the frame's passes, with the backend's commands that the layer
+/// asks the frame to [`lend`](Draws::lend) it. The engine keeps a layer's
+/// groups from frame to frame, with the memory of their draws: the main
+/// group and the overlay each keep their place in the layers' order and
+/// depth while the layer renders, in frames they draw nothing in too, the
+/// overlay from the first frame that asks for it.
 pub struct Draws {
     main: Group,
     overlay: Option<Group>,
@@ -445,13 +447,23 @@ pub struct Draws {
     targets: Vec<(Target, Group)>,
     /// How many of `targets` the frame asked for.
     targets_used: usize,
+    /// Whether the frame lends the layer the backend's commands before its
+    /// passes, and in its translucent pass.
+    lends: [bool; 2],
     /// The frame, as `begin` started the main group's.
     frame: (f32, bool, bool),
 }
 
 impl Draws {
     pub(crate) fn new() -> Draws {
-        Draws { main: Group::new(), overlay: None, targets: Vec::new(), targets_used: 0, frame: (0.0, false, false) }
+        Draws {
+            main: Group::new(),
+            overlay: None,
+            targets: Vec::new(),
+            targets_used: 0,
+            lends: [false; 2],
+            frame: (0.0, false, false),
+        }
     }
 
     /// The group of the layer's draws in its place in the layers' order.
@@ -483,6 +495,20 @@ impl Draws {
         &mut self.targets[index].1
     }
 
+    /// Asks the frame to lend the layer the backend's commands `at` its
+    /// time ([`Layer::lend`](crate::layer::Layer::lend)): in the translucent
+    /// pass, right after the layer's main group draws, at its depth.
+    pub fn lend(&mut self, at: LendAt) -> &mut Self {
+        self.lends[at as usize] = true;
+        self
+    }
+
+    /// Whether the frame lends the layer the backend's commands `at` its
+    /// time.
+    pub(crate) fn lends(&self, at: LendAt) -> bool {
+        self.lends[at as usize]
+    }
+
     /// Starts the frame's group of `target`, in a spare group if there is
     /// one, and returns its index.
     fn begin_target(&mut self, target: &Target) -> usize {
@@ -508,6 +534,7 @@ impl Draws {
             overlay.begin(zoom, opaque, frame_depth);
         }
         self.targets_used = 0;
+        self.lends = [false; 2];
     }
 
     /// Drops the frame's draws.
@@ -518,6 +545,7 @@ impl Draws {
         }
         self.targets.clear();
         self.targets_used = 0;
+        self.lends = [false; 2];
     }
 
     /// Makes the pushed draws the frame's, as [`Group::finish`] does.
@@ -540,6 +568,11 @@ impl Draws {
             );
             group.finish(gpu, context, paint, []);
         }
+    }
+
+    /// The main group.
+    pub(crate) fn main_group(&self) -> &Group {
+        &self.main
     }
 
     /// The groups in the layers' order, bottom to top.

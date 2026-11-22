@@ -32,6 +32,7 @@ pub(crate) struct Texture2D {
 enum Pending {
     Rgba(Rc<PremultipliedImage>),
     Alpha(Rc<AlphaImage>),
+    Texels(Rc<[u8]>, Size),
 }
 
 impl Pending {
@@ -40,6 +41,7 @@ impl Pending {
         let (valid, data, size) = match self {
             Pending::Rgba(image) => (image.valid(), &image.data[..], image.size),
             Pending::Alpha(image) => (image.valid(), &image.data[..], image.size),
+            Pending::Texels(data, size) => (!data.is_empty() && !size.is_empty(), &data[..], *size),
         };
         valid.then_some((data, size))
     }
@@ -152,8 +154,9 @@ impl Texture2D {
         write(gpu, &mut device.stats, texture, data, region)
     }
 
-    /// Writes the image [`TextureMut::set_image`] or
-    /// [`TextureMut::set_alpha_image`] set, if any.
+    /// Writes the image [`TextureMut::set_image`],
+    /// [`TextureMut::set_alpha_image`] or [`TextureMut::set_texels`] set, if
+    /// any.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, device: &mut Device) -> Result<(), GpuError> {
         let Some(image) = self.image.take() else { return Ok(()) };
         match image.texels() {
@@ -243,6 +246,20 @@ impl<'a> TextureMut<'a> {
         self.set_size(image.size);
         self.set_format(TextureFormat::A8Unorm);
         self.texture.image = Some(Pending::Alpha(image));
+    }
+
+    /// Sets the texels the next upload writes, `data`, `size` texels of
+    /// `format` in rows from the top, and the texture's size and format to
+    /// theirs.
+    pub fn set_texels(&mut self, format: TextureFormat, size: Size, data: Rc<[u8]>) {
+        debug_assert_eq!(
+            format.bytes_per_texel().map(|bytes| bytes as usize * size.width as usize * size.height as usize),
+            Some(data.len()),
+            "texels of another size than their format's"
+        );
+        self.set_size(size);
+        self.set_format(format);
+        self.texture.image = Some(Pending::Texels(data, size));
     }
 }
 

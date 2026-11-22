@@ -6,11 +6,14 @@
 //! DEM arrives, the store backfills it and its renderable neighbours both
 //! ways, so a DEM that reloads refills its border and theirs.
 
+use std::rc::Rc;
+
 use mln_tile_id::OverscaledTileID;
 use mln_util::identity::SimpleIdentity;
 
 use crate::geometry::dem_data::DemData;
 use crate::gfx::context::Resources;
+use crate::handles::Texture;
 use crate::tile::contents::Contents;
 use crate::tile::raster::MaskedGeometry;
 use crate::tile_mask::TileMask;
@@ -21,12 +24,14 @@ pub(crate) struct DemContents {
     id: SimpleIdentity,
     geometry: MaskedGeometry,
     dem: DemData,
+    /// The DEM's texture, once the contents uploaded since its last change.
+    texture: Option<Texture>,
 }
 
 impl DemContents {
     #[must_use]
     pub(crate) fn new(dem: DemData) -> Self {
-        DemContents { id: SimpleIdentity::new(), geometry: MaskedGeometry::default(), dem }
+        DemContents { id: SimpleIdentity::new(), geometry: MaskedGeometry::default(), dem, texture: None }
     }
 
     /// The contents' identity, which tells what the layers make of them
@@ -48,17 +53,21 @@ impl DemContents {
         &self.dem
     }
 
+    /// The DEM's texture, once the contents uploaded since it last changed.
+    #[must_use]
+    pub(crate) fn texture(&self) -> Option<&Texture> {
+        self.texture.as_ref()
+    }
+
     pub(crate) fn set_mask(&mut self, mask: TileMask) {
-        let generation = self.geometry.generation();
-        self.geometry.set_mask(mask);
-        self.renew_if(generation != self.geometry.generation());
+        let changed = self.geometry.set_mask(mask);
+        self.renew_if(changed);
     }
 
     /// [`MaskedGeometry::unmask`].
     pub(crate) fn unmask(&mut self) {
-        let generation = self.geometry.generation();
-        self.geometry.unmask();
-        self.renew_if(generation != self.geometry.generation());
+        let changed = self.geometry.unmask();
+        self.renew_if(changed);
     }
 
     /// Gives the contents a new identity where `changed`.
@@ -75,12 +84,17 @@ impl DemContents {
     }
 
     /// Readies contents with a DEM for their draws, once and again after
-    /// their geometry changes: moves the geometry into `context`'s stores.
-    /// The layers make the DEM's textures.
+    /// they change: makes the DEM's texture in `context`, and moves the
+    /// geometry into its stores.
     pub(crate) fn upload(&mut self, context: &mut Resources) {
-        if self.has_data() {
-            self.geometry.upload(context);
+        if !self.has_data() {
+            return;
         }
+        if self.texture.is_none() {
+            let image = Rc::new(self.dem.image().clone());
+            self.texture = Some(context.texture(|texture| texture.set_image(Some(image))));
+        }
+        self.geometry.upload(context);
     }
 }
 
@@ -135,5 +149,6 @@ pub(crate) fn backfill_pair(tile: &mut Contents, border: &mut Contents, offset: 
 /// `tile`'s DEM border.
 fn backfill_border(tile: &mut DemContents, border: &DemContents, offset: Offset) {
     tile.dem.backfill_border(&border.dem, offset.dx, offset.dy);
+    tile.texture = None;
     tile.renew_if(true);
 }

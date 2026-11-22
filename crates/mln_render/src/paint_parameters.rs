@@ -407,6 +407,13 @@ impl<'a> PaintParameters<'a> {
         self.current_layer >= self.opaque_pass_cutoff && !self.frame.camera.is_globe()
     }
 
+    /// The depth that the 2D layers write at the current layer's place.
+    #[must_use]
+    pub(crate) fn layer_depth(&self) -> f32 {
+        let steps = (1u32.wrapping_add(self.current_layer)).wrapping_mul(Self::NUM_SUBLAYERS as u32);
+        self.depth_range_size + steps as f32 * Self::DEPTH_EPSILON
+    }
+
     #[must_use]
     pub(crate) fn depth_for_sublayer(&self, n: u8, write: bool) -> DepthTest {
         if !self.opaque_pass_enabled_for_layer() {

@@ -1,9 +1,9 @@
-//! A raster tile's contents: its image, and the geometry that draws it,
-//! which the tile masks. An image source's image is of the same kind, with
-//! geometry that warps it to its coordinates. The contents live on the
-//! render thread; the layers that draw them each keep their own texture of
-//! the image, by the contents' id, since each samples it its own way.
+//! A raster tile's contents: its image, with its texture, and the geometry
+//! that draws it, which the tile masks. An image source's image is of the
+//! same kind, with geometry that warps it to its coordinates. The contents
+//! live on the render thread.
 
+use std::rc::Rc;
 use std::sync::Arc;
 
 use geometry::Point;
@@ -16,7 +16,7 @@ use mln_util::image::PremultipliedImage;
 use crate::gfx::buffer_store::SharedBuffer;
 use crate::gfx::context::Resources;
 use crate::gfx::mesh::Indexed;
-use crate::handles::ImageVertex;
+use crate::handles::{ImageVertex, Texture};
 use crate::tile_mask::TileMask;
 
 /// The quads a raster or raster-dem tile draws its data with, of the tiles
@@ -27,9 +27,6 @@ use crate::tile_mask::TileMask;
 pub(crate) struct MaskedGeometry {
     mask: TileMask,
     quads: Quads,
-    /// Counts the changes of the quads, which the layers build their draws
-    /// of the tile again after.
-    generation: u64,
 }
 
 /// Where a mask's quads are.
@@ -62,7 +59,7 @@ fn full_mask() -> TileMask {
 impl Default for MaskedGeometry {
     /// The geometry of the whole tile.
     fn default() -> Self {
-        MaskedGeometry { mask: full_mask(), quads: Quads::Whole, generation: 0 }
+        MaskedGeometry { mask: full_mask(), quads: Quads::Whole }
     }
 }
 
@@ -115,33 +112,22 @@ impl MaskedGeometry {
         }
     }
 
-    /// The number of times the quads changed, after which a layer builds
-    /// its draws of them again.
-    #[must_use]
-    pub(crate) fn generation(&self) -> u64 {
-        self.generation
-    }
-
     /// Makes the geometry `vertices` and `indices` in `segments`.
     pub(crate) fn set(&mut self, vertices: Vec<ImageVertex>, indices: Vec<u16>, segments: Vec<SegmentBase>) {
-        self.replace(Quads::Data { vertices, indices, segments });
+        self.quads = Quads::Data { vertices, indices, segments };
     }
 
-    fn replace(&mut self, quads: Quads) {
-        self.quads = quads;
-        self.generation += 1;
-    }
-
-    /// Makes `mask` the geometry's, with the quads of its tiles.
-    pub(crate) fn set_mask(&mut self, mask: TileMask) {
+    /// Makes `mask` the geometry's, with the quads of its tiles. Returns
+    /// whether the quads changed.
+    pub(crate) fn set_mask(&mut self, mask: TileMask) -> bool {
         if self.mask == mask {
-            return;
+            return false;
         }
         self.mask = mask;
         if self.mask == full_mask() {
             // The whole tile draws the tile's quad, which the layers share.
-            self.replace(Quads::Whole);
-            return;
+            self.quads = Quads::Whole;
+            return true;
         }
 
         let mut vertices = Vec::new();
@@ -158,6 +144,7 @@ impl MaskedGeometry {
             triangles.add(&mut vertices, first, [[0, 1, 2], [1, 2, 3]]);
         }
         self.set(vertices, indices, segments);
+        true
     }
 
     /// Whether the geometry has quads: an image's, or those of a mask that
@@ -167,11 +154,10 @@ impl MaskedGeometry {
         !matches!(self.quads, Quads::Whole)
     }
 
-    /// Makes the whole tile the geometry's mask, unless it is.
-    pub(crate) fn unmask(&mut self) {
-        if self.has_quads() {
-            self.set_mask(full_mask());
-        }
+    /// Makes the whole tile the geometry's mask, unless it is. Returns
+    /// whether the quads changed.
+    pub(crate) fn unmask(&mut self) -> bool {
+        self.has_quads() && self.set_mask(full_mask())
     }
 
     /// Moves the quads into `context`'s stores, unless they are there or
@@ -194,6 +180,8 @@ impl MaskedGeometry {
 pub(crate) struct RasterContents {
     id: SimpleIdentity,
     image: Option<Arc<PremultipliedImage>>,
+    /// The image's texture, once the contents uploaded.
+    texture: Option<Texture>,
     geometry: MaskedGeometry,
 }
 
@@ -205,11 +193,12 @@ impl RasterContents {
 
     #[must_use]
     pub(crate) fn with_shared_image(image: Option<Arc<PremultipliedImage>>) -> Self {
-        RasterContents { id: SimpleIdentity::new(), image, geometry: MaskedGeometry::default() }
+        RasterContents { id: SimpleIdentity::new(), image, texture: None, geometry: MaskedGeometry::default() }
     }
 
-    /// The contents' identity, which tells what the layers keep of them
-    /// apart. Contents of a new image have a new one.
+    /// The contents' identity, which tells what the layers make of them
+    /// apart: contents whose geometry changed have a new one, and so do
+    /// those of a new image.
     #[must_use]
     pub(crate) fn id(&self) -> SimpleIdentity {
         self.id
@@ -219,6 +208,12 @@ impl RasterContents {
     #[must_use]
     pub(crate) fn image(&self) -> Option<&Arc<PremultipliedImage>> {
         self.image.as_ref()
+    }
+
+    /// The image's texture, once the contents uploaded.
+    #[must_use]
+    pub(crate) fn texture(&self) -> Option<&Texture> {
+        self.texture.as_ref()
     }
 
     /// The masked geometry.
@@ -231,15 +226,20 @@ impl RasterContents {
     /// image source warps its image with.
     pub(crate) fn set_geometry(&mut self, vertices: Vec<ImageVertex>, indices: Vec<u16>, segments: Vec<SegmentBase>) {
         self.geometry.set(vertices, indices, segments);
+        self.id = SimpleIdentity::new();
     }
 
     pub(crate) fn set_mask(&mut self, mask: TileMask) {
-        self.geometry.set_mask(mask);
+        if self.geometry.set_mask(mask) {
+            self.id = SimpleIdentity::new();
+        }
     }
 
     /// [`MaskedGeometry::unmask`].
     pub(crate) fn unmask(&mut self) {
-        self.geometry.unmask();
+        if self.geometry.unmask() {
+            self.id = SimpleIdentity::new();
+        }
     }
 
     /// Whether there is an image to draw.
@@ -249,12 +249,15 @@ impl RasterContents {
     }
 
     /// Readies contents with an image for their draws, once and again after
-    /// their geometry changes: moves the geometry into `context`'s stores.
-    /// The layers make the image's texture.
+    /// their geometry changes: makes the image's texture in `context`, and
+    /// moves the geometry into its stores.
     pub(crate) fn upload(&mut self, context: &mut Resources) {
-        if self.has_data() {
-            self.geometry.upload(context);
+        let Some(image) = &self.image else { return };
+        if self.texture.is_none() {
+            let image = Rc::new((**image).clone());
+            self.texture = Some(context.texture(|texture| texture.set_image(Some(image))));
         }
+        self.geometry.upload(context);
     }
 }
 

@@ -218,8 +218,10 @@ impl Renderer {
     /// sources, tiles, layers and placement. Returns the frame to draw,
     /// which the host [renders](Self::render) into a frame of its target,
     /// or `None` when there is nothing to draw: a still image that hasn't
-    /// loaded yet.
-    pub fn update(&mut self, update_parameters: &Arc<UpdateParameters>) -> Option<UpdatedFrame> {
+    /// loaded yet. The work after the GPU of the layers that the update
+    /// let go of ([`AfterGpu`](crate::layer::AfterGpu)) runs once `gpu`
+    /// finished.
+    pub fn update(&mut self, gpu: &mut dyn Gpu, update_parameters: &Arc<UpdateParameters>) -> Option<UpdatedFrame> {
         // The overdraw inspector takes shaders and color modes of its own.
         let overdraw = update_parameters.debug_options.contains(MapDebugOptions::OVERDRAW);
         if overdraw != self.encoder.context.overdraw() {
@@ -229,6 +231,7 @@ impl Renderer {
         let encoder = &mut self.encoder;
         let frame = orchestrator.update(update_parameters, &mut encoder.context);
         report(orchestrator, self.events.as_ref());
+        encoder.context.finish_after_gpu(gpu);
         if std::mem::take(&mut encoder.shaders_replaced) {
             encoder.context.release_shaders();
         }
@@ -386,10 +389,13 @@ impl Renderer {
     }
 
     /// Drops every layer: the renderer's device or target went first, and
-    /// the layers' GPU resources with it. The next update makes every layer
-    /// of the style again ([`Layer::new`](crate::layer::Layer::new)).
+    /// the layers' GPU resources with it. The work after the GPU runs as
+    /// lost ([`GpuEnd::Lost`](crate::layer::GpuEnd::Lost)). The next update
+    /// makes every layer of the style again
+    /// ([`Layer::new`](crate::layer::Layer::new)).
     pub fn lose_context(&mut self) {
         self.orchestrator.leave_layers();
+        self.encoder.context.after_gpu.run(crate::layer::GpuEnd::Lost);
     }
 
     /// Lets go of what the orchestrator caches, destroys what it and the
@@ -414,13 +420,16 @@ impl Renderer {
     }
 
     /// Lets go of the map's data: its sources, tiles and layers, which the
-    /// next update loads again.
-    pub fn clear_data(&mut self) {
+    /// next update loads again. The work after the GPU of the layers runs
+    /// once `gpu` finished.
+    pub fn clear_data(&mut self, gpu: &mut dyn Gpu) {
         self.orchestrator.clear_data();
+        self.encoder.context.finish_after_gpu(gpu);
     }
 
-    /// Destroys the renderer's GPU objects on `gpu`. Returns its rendering
-    /// stats as it leaves them, with all its resources released.
+    /// Destroys the renderer's GPU objects on `gpu`, and runs the work
+    /// after the GPU once `gpu` finished. Returns its rendering stats as it
+    /// leaves them, with all its resources released.
     pub fn tear_down(self, gpu: &mut dyn Gpu) -> RenderingStats {
         let Renderer { mut orchestrator, mut encoder, .. } = self;
         // The layers' GPU objects go to the context's queue.
@@ -429,6 +438,7 @@ impl Renderer {
         encoder.clip_masks = ClipMasks::default();
         encoder.layer_composite = LayerComposite::default();
         encoder.context.tear_down(gpu);
+        encoder.context.finish_after_gpu(gpu);
         encoder.context.stats()
     }
 }

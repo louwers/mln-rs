@@ -243,7 +243,7 @@ impl HeadlessFrontend {
     /// Lets go of the renderer's data, as [`Renderer::clear_data`] does, if
     /// the frontend has a renderer.
     pub fn clear_data(&mut self) {
-        self.target.with_renderer(|renderer, _| renderer.clear_data());
+        self.target.with_renderer(|renderer, gpu| renderer.clear_data(gpu));
     }
 
     /// The backend the frontend draws with.

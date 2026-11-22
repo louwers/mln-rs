@@ -15,6 +15,7 @@ use mln_style::layer_type::{ErasedLayerStyle, LayerStyle, PaintSet, SourceKind, 
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::VisibilityType;
 use mln_util::geo::ScreenCoordinate;
+use mln_util::logging::{Event, Log};
 use smallvec::SmallVec;
 
 use crate::bucket::ErasedBucket;
@@ -23,10 +24,11 @@ use crate::erased_layer::{ErasedEvaluatedLayer, ErasedLayerType, EvaluatedLayer}
 use crate::gfx::context::Resources;
 use crate::image_store::ImageStore;
 use crate::layer::{
-    EvaluateCx, Evaluation, Found, FrameQuery, Hit, HitTest, Layer, LayerValues, NewCx, PrepareCx, TileCx, Tiles,
-    UpdateCx, input,
+    EvaluateCx, Evaluation, Found, FrameQuery, Hit, HitTest, Layer, LayerValues, LendAt, Lent, NewCx, PrepareCx,
+    TileCx, Tiles, UpdateCx, input,
 };
 use crate::paint_parameters::PaintParameters;
+use crate::render_pass::Pass;
 use crate::render_source::RenderSource;
 use crate::render_tile::{FoundTile, RenderTile, TileContent};
 use crate::tile::contents::GeometryContents;
@@ -118,7 +120,8 @@ impl<L: Layer> Hosted<L> {
         let unevaluated = style.paint.untransitioned();
         let evaluated = Arc::new(EvaluatedLayer::with_paint(entry, Arc::clone(&style), Default::default()));
         let values = LayerValues { style, unevaluated, evaluated };
-        let layer = L::new(&mut NewCx { layer: &values, res });
+        let after_gpu = res.after_gpu.clone();
+        let layer = L::new(&mut NewCx { layer: &values, res, after_gpu: &after_gpu });
         Hosted {
             entry,
             style_dependencies: <L::Style as StyleLayerType>::PaintProperties::dependencies(&values.unevaluated),
@@ -344,6 +347,21 @@ pub(crate) trait RenderLayer: Any {
     fn hit_frame(&self, camera: &View, geometry: &[ScreenCoordinate], hits: &mut Vec<Hit>);
 }
 
+/// Lends `layer` the backend's commands of `gpu` `at` the frame's time,
+/// where the frame has them to lend: in a pass, the open one.
+fn lend<L: Layer>(layer: &mut L, gpu: &mut dyn Gpu, parameters: &PaintParameters<'_>, at: LendAt) {
+    let (Some(projection), frame) = (parameters.frame_projection, parameters.frame) else { return };
+    let layer_depth = match at {
+        LendAt::BeforePasses => None,
+        LendAt::Pass if parameters.pass_target().is_some() => Some(f64::from(parameters.layer_depth())),
+        LendAt::Pass => return,
+    };
+    let lent = gpu.lend(&mut |raw| layer.lend(at, Lent { raw, frame: &frame, projection: &projection, layer_depth }));
+    if let Err(error) = lent {
+        Log::error(Event::Render, format!("Lending a layer the backend's commands failed: {error}"));
+    }
+}
+
 /// A [`HitTest`] of a layer of any type.
 pub(crate) struct ErasedHitTest<'a> {
     pub(crate) query_geometry: &'a mln_tile_id::geometry_tile_data::GeometryCoordinates,
@@ -529,6 +547,9 @@ impl<L: Layer> RenderLayer for Hosted<L> {
     fn render_targets(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         if self.renderable {
             self.frame_draws.render_targets(gpu, parameters);
+            if self.frame_draws.lends(LendAt::BeforePasses) {
+                lend(&mut self.layer, gpu, parameters, LendAt::BeforePasses);
+            }
         }
     }
 
@@ -536,13 +557,19 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         if !self.renderable {
             return;
         }
+        let lends = self.frame_draws.lends(LendAt::Pass) && parameters.pass == Pass::Translucent;
+        let Hosted { layer, frame_draws, .. } = self;
+        let main = frame_draws.main_group();
         let mut render = |group: &crate::encode::Group| {
             group.render(gpu, parameters);
+            if lends && std::ptr::eq(group, main) {
+                lend(layer, gpu, parameters, LendAt::Pass);
+            }
             order.step(parameters);
         };
         match order {
-            DrawOrder::BottomUp => self.frame_draws.groups().for_each(&mut render),
-            DrawOrder::TopDown => self.frame_draws.groups().rev().for_each(&mut render),
+            DrawOrder::BottomUp => frame_draws.groups().for_each(&mut render),
+            DrawOrder::TopDown => frame_draws.groups().rev().for_each(&mut render),
         }
     }
 

@@ -1514,7 +1514,7 @@ impl Worker {
 
     pub(crate) fn clear_data(&mut self, outbox: &mut Outbox) -> Result<(), Error> {
         let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
-        gfx.target.with_renderer(|renderer, _| renderer.clear_data()).ok_or_else(target_lost)?;
+        gfx.target.with_renderer(|renderer, gpu| renderer.clear_data(gpu)).ok_or_else(target_lost)?;
         self.rendered_update = 0;
         // The renderer loads what the image needs again, once it tries.
         if let Some(still) = self.still.as_mut() {

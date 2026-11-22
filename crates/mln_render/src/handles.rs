@@ -210,13 +210,22 @@ impl From<&Sampler> for Sampler {
 /// touches one, with the triangles that cover it
 /// ([`Resources::tile_surface`](crate::draw::Resources::tile_surface)). The
 /// surface of a tile's image has vertices of the image's
-/// ([`ImageVertex`], [`DemTile::surface`](crate::layer::DemTile::surface)).
+/// ([`ImageVertex`], [`DemTile::surface`](crate::layer::DemTile::surface),
+/// [`RasterTile::surface`](crate::layer::RasterTile::surface)).
 #[derive(Clone, Debug)]
 pub struct TileSurface<V = [i16; 2]> {
     /// The vertices.
     pub vertices: Buffer<V>,
     /// Their triangles.
     pub triangles: IndexBuffer,
+}
+
+impl TileSurface<ImageVertex> {
+    /// The surface of the quads of an image's masked geometry.
+    pub(crate) fn of_quads(quads: &crate::tile::raster::StoredQuads) -> Self {
+        let triangles = IndexBuffer { buffer: Buffer::new(quads.indexes.clone()), segments: quads.segments.clone() };
+        TileSurface { vertices: Buffer::new(quads.vertices.clone()), triangles }
+    }
 }
 
 #[cfg(test)]

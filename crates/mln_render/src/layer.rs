@@ -25,8 +25,11 @@
 //!    [`LayerBinders`], declared with
 //!    [`paint_property_binders!`](crate::paint_property_binders!), with the
 //!    images of its patterns ([`LayoutCx::need_patterns`]). A layer of a
-//!    raster-dem source has the input [`DemTiles`], each tile's elevations
-//!    ([`DemTile`]), and a layer without a source the input [`ViewCover`].
+//!    raster or image source has the input [`RasterTiles`], each tile's
+//!    image ([`RasterTile`]), one of a raster-dem source the input
+//!    [`DemTiles`], each tile's elevations ([`DemTile`]), and a layer
+//!    without a source the input [`ViewCover`], the tiles that cover the
+//!    view, or [`NoTiles`].
 //! 2. Its meshes. [`Layer::tile`] makes the value the layer keeps of a
 //!    frame tile, typically a [`Mesh`](crate::draw::Mesh) of the tile's
 //!    bucket ([`LayerBucket`]) with the program the type declares. The
@@ -39,7 +42,9 @@
 //!    program's blocks, to [`Draws`]. The engine writes what the blocks
 //!    hold of the mesh's paint values, and orders, uploads and draws them:
 //!    the layer never sees a pass, a depth range, a stencil value or a
-//!    uniform buffer.
+//!    uniform buffer. A layer that draws with the backend's own commands,
+//!    as a host outside the renderer does, asks for them instead
+//!    ([`Draws::lend`]), and the engine lends them ([`Layer::lend`]).
 //!
 //! [`Layer::evaluate`] says whether, and how, the layer draws with its
 //! freshly evaluated values; [`Layer::update`] brings up to date what the
@@ -54,7 +59,9 @@
 //! each frame that draws the layer it runs [`update`](Layer::update), then
 //! [`tile`](Layer::tile) for each frame tile with data and no value, then
 //! [`prepare`](Layer::prepare). When the layer stops drawing, its tile
-//! values go and [`stopped`](Layer::stopped) runs. The layer, its values
+//! values go and [`stopped`](Layer::stopped) runs. What must wait for the
+//! GPU to finish the layer's work, such as freeing what it drew with
+//! outside the renderer, goes to [`AfterGpu`]. The layer, its values
 //! and every hook but the layout's run on the renderer's thread; the
 //! layout and the bucket are `Send`, and a bucket implements [`Wire`]
 //! (`#[derive(Wire)]`, with `#[wire(crate = mln_rs::mln_wire)]` through
@@ -70,10 +77,12 @@
 //! `RenderSession::query_rendered_layer` reads a layer as its renderer has
 //! it.
 
+use std::any::Any;
+use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use mln_map_types::{MapMode, TileProjector, View};
+use mln_map_types::{FrameProjection, MapMode, TileProjector, View};
 use mln_style::PropertyEvaluationParameters;
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::expr::FeatureState;
@@ -98,6 +107,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use mln_wire::Wire;
 
+pub use crate::after_gpu::{AfterGpu, GpuEnd};
 pub use crate::bucket_geometry::GpuVec;
 pub use crate::bucket_upload::Upload;
 use crate::draw::{Buffer, Draws, ImageVertex, IndexBuffer, Resources, Texture, TileSurface};
@@ -116,6 +126,7 @@ pub use crate::render_light::EvaluatedLight;
 use crate::render_tile::{TileContent, ViewPlace};
 use crate::tile::contents::GeometryContents;
 use crate::tile::dem::DemContents;
+use crate::tile::raster::RasterContents;
 pub use crate::tile_matrix::{TileProjection, TileTransform};
 use crate::tile_values::TileMap;
 
@@ -126,9 +137,9 @@ pub trait Layer: Sized + 'static {
     /// The style half: the type's name, source kind, properties and data.
     type Style: StyleLayerType;
 
-    /// What the layer draws from ([`Features`], [`DemTiles`] or
-    /// [`ViewCover`]). Its kind
-    /// of source is the style half's
+    /// What the layer draws from ([`Features`], [`RasterTiles`],
+    /// [`DemTiles`], [`ViewCover`] or [`NoTiles`]). Its kind of source is
+    /// the style half's
     /// [`INFO.source`](mln_style::layer_type::LayerTypeInfo::source), or
     /// the registration doesn't compile.
     type Input: TileInput<Self::Style>;
@@ -175,6 +186,11 @@ pub trait Layer: Sized + 'static {
     /// Pushes the frame's draws of the layer to `out`.
     fn prepare(&self, cx: &PrepareCx<'_, Self>, out: &mut Draws);
 
+    /// Draws with `lent`, the backend's commands, which the frame lends the
+    /// layer `at` the time its [`prepare`](Self::prepare) asked for
+    /// ([`Draws::lend`]).
+    fn lend(&mut self, _at: LendAt, _lent: Lent<'_>) {}
+
     /// Called when the layer stops rendering, once the engine dropped its
     /// tile values: the layer drops what else it keeps for drawing.
     fn stopped(&mut self) {}
@@ -201,7 +217,8 @@ pub trait Layer: Sized + 'static {
 
 /// What a layer draws from: a kind of tile and what such a tile holds for
 /// the layer, its [`Data`](TileInput::Data). The kinds are the engine's:
-/// [`Features`], [`DemTiles`] and [`ViewCover`].
+/// [`Features`], [`RasterTiles`], [`DemTiles`], [`ViewCover`] and
+/// [`NoTiles`].
 #[expect(private_bounds, reason = "the engine's tile kinds are the only ones: `input::Find` seals the trait")]
 pub trait TileInput<S: StyleLayerType>: input::Find<S> + 'static {
     /// What a frame tile holds for the layer.
@@ -229,6 +246,56 @@ impl<S: StyleLayerType> TileInput<S> for ViewCover {
     type Data<'a> = ();
 }
 
+/// No tiles, for a layer without a source that draws what it makes
+/// itself. A tile's data would be [`Infallible`].
+pub enum NoTiles {}
+
+impl<S: StyleLayerType> TileInput<S> for NoTiles {
+    type Data<'a> = Infallible;
+}
+
+/// The tiles of a raster source, or of an image source, which draws its
+/// image in them. A tile's data is its [`RasterTile`].
+pub enum RasterTiles {}
+
+impl<S: StyleLayerType> TileInput<S> for RasterTiles {
+    type Data<'a> = RasterTile<'a>;
+}
+
+/// A raster tile's image, or an image source's image, and the parts of the
+/// tile that it draws: those that the frame's better tiles leave a raster
+/// tile, or where an image source's image is. The engine drops the tile's
+/// value ([`Layer::tile`]) once either changes.
+#[derive(Clone, Copy)]
+pub struct RasterTile<'a> {
+    contents: &'a RasterContents,
+    texture: &'a Texture,
+    tile: CanonicalTileID,
+    /// Whether the image is an image source's.
+    source_image: bool,
+}
+
+impl<'a> RasterTile<'a> {
+    /// The texture of the image.
+    #[must_use]
+    pub fn texture(self) -> &'a Texture {
+        self.texture
+    }
+
+    /// The surface that the image drapes over in `frame`: the parts of the
+    /// tile that it draws, each vertex sampling the image where it is in
+    /// the tile, or an image source's image over its coordinates.
+    pub fn surface(self, res: &mut Resources, frame: &Frame<'_>) -> TileSurface<ImageVertex> {
+        let geometry = self.contents.geometry();
+        if self.source_image
+            && let Some(quads) = geometry.quads()
+        {
+            return TileSurface::of_quads(quads);
+        }
+        res.image_surface(&self.tile, geometry, frame.camera.is_globe())
+    }
+}
+
 /// The tiles of a raster-dem source. A tile's data is its [`DemTile`].
 pub enum DemTiles {}
 
@@ -243,10 +310,17 @@ impl<S: StyleLayerType> TileInput<S> for DemTiles {
 #[derive(Clone, Copy)]
 pub struct DemTile<'a> {
     contents: &'a DemContents,
+    texture: &'a Texture,
     tile: CanonicalTileID,
 }
 
 impl<'a> DemTile<'a> {
+    /// The texture of the elevations' [`image`](Self::image).
+    #[must_use]
+    pub fn texture(self) -> &'a Texture {
+        self.texture
+    }
+
     /// The elevations, a texel each, which [`unpack`](Self::unpack)
     /// decodes: [`size`](Self::size) of them per side, inside a border of
     /// one texel.
@@ -284,11 +358,14 @@ pub(crate) mod input {
     use mln_util::range::Range as ZoomRange;
     use smallvec::SmallVec;
 
-    use super::{DemTile, DemTiles, Features, Found, FrameTile, Layout, TileInput, ViewCover};
+    use super::{
+        DemTile, DemTiles, Features, Found, FrameTile, Layout, NoTiles, RasterTile, RasterTiles, TileInput, ViewCover,
+    };
     use crate::render_layer::{FrameSourceTiles, LayerUpdate};
     use crate::render_tile::{FoundTile, TileContent, ViewPlace};
     use crate::tile::contents::{Contents, GeometryContents};
     use crate::tile::dem::DemContents;
+    use crate::tile::raster::RasterContents;
     use crate::tile_values::TileMap;
 
     /// The engine's side of a [`TileInput`]: which tiles a layer of it draws
@@ -469,6 +546,56 @@ pub(crate) mod input {
         }
     }
 
+    /// A tile's image, if `content` is a raster tile's or an image source's
+    /// with one, and whether it is an image source's.
+    fn raster(content: TileContent<'_>) -> Option<(&RasterContents, bool)> {
+        match content {
+            TileContent::Tile(Contents::Raster(raster)) if raster.has_data() => Some((raster, false)),
+            TileContent::Image(image) if image.has_data() => Some((image, true)),
+            _ => None,
+        }
+    }
+
+    impl<S: StyleLayerType> Find<S> for RasterTiles {
+        const SOURCE: SourceKind = SourceKind::Raster;
+
+        /// Where the layer's tiles are among the frame's found tiles.
+        type Frame = std::ops::Range<usize>;
+
+        fn update<T>(
+            frame: &mut Self::Frame,
+            update: &mut LayerUpdate<'_>,
+            _layer_id: &str,
+            values: &mut TileMap<T>,
+        ) -> bool {
+            update_source(frame, update, values, |content| {
+                matches!(content, TileContent::Tile(Contents::Raster(_)) | TileContent::Image(_))
+                    .then_some((ViewPlace::Own, false))
+            })
+        }
+
+        fn tiles<'a, T>(
+            frame: &Self::Frame,
+            found: &[FoundTile],
+            source: Option<FrameSourceTiles<'a>>,
+            values: &mut TileMap<T>,
+            tiles: &mut SmallVec<[Found<'a>; 64]>,
+        ) {
+            source_tiles(frame, found, source, values, tiles, |content, _| Some(raster(content)?.0.id()));
+        }
+
+        fn data(found: Found<'_>) -> Option<<Self as TileInput<S>>::Data<'_>> {
+            let (content, _) = found.at?;
+            let (contents, source_image) = raster(content)?;
+            // An image source's image draws once it has geometry.
+            if source_image && contents.geometry().quads().is_none() {
+                return None;
+            }
+            let texture = contents.texture()?;
+            Some(RasterTile { contents, texture, tile: found.tile.id.canonical, source_image })
+        }
+    }
+
     impl<S: StyleLayerType> Find<S> for DemTiles {
         const SOURCE: SourceKind = SourceKind::RasterDem;
 
@@ -498,7 +625,37 @@ pub(crate) mod input {
 
         fn data(found: Found<'_>) -> Option<<Self as TileInput<S>>::Data<'_>> {
             let (content, _) = found.at?;
-            Some(DemTile { contents: dem(content)?, tile: found.tile.id.canonical })
+            let contents = dem(content)?;
+            Some(DemTile { contents, texture: contents.texture()?, tile: found.tile.id.canonical })
+        }
+    }
+
+    impl<S: StyleLayerType> Find<S> for NoTiles {
+        const SOURCE: SourceKind = SourceKind::None;
+
+        type Frame = ();
+
+        fn update<T>(
+            (): &mut Self::Frame,
+            _update: &mut LayerUpdate<'_>,
+            _layer_id: &str,
+            values: &mut TileMap<T>,
+        ) -> bool {
+            values.set_tiles([]);
+            false
+        }
+
+        fn tiles<'a, T>(
+            (): &Self::Frame,
+            _found: &[FoundTile],
+            _source: Option<FrameSourceTiles<'a>>,
+            _values: &mut TileMap<T>,
+            _tiles: &mut SmallVec<[Found<'a>; 64]>,
+        ) {
+        }
+
+        fn data(_found: Found<'_>) -> Option<<Self as TileInput<S>>::Data<'_>> {
+            None
         }
     }
 
@@ -575,6 +732,9 @@ pub struct NewCx<'a, L: Layer> {
     pub layer: &'a LayerValues<L::Style>,
     /// The renderer's resources.
     pub res: &'a mut Resources,
+    /// The renderer's work after the GPU, which the layer may keep a clone
+    /// of.
+    pub after_gpu: &'a AfterGpu,
 }
 
 /// What a layer's evaluation reads and writes.
@@ -714,6 +874,34 @@ impl<'a, L: Layer> PrepareCx<'a, L> {
         let found = *self.found.get(i)?;
         Some((found.tile, found.data::<L>()?, self.values.get(found.tile.index)?))
     }
+}
+
+/// When a frame lends a layer the backend's commands ([`Draws::lend`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LendAt {
+    /// Before the frame's passes, after the layers below drew into their
+    /// targets: the frame's commands outside a pass.
+    BeforePasses,
+    /// In the frame's translucent pass, at the layer's place among the
+    /// layers, after the layer's draws there: the open pass.
+    Pass,
+}
+
+/// What a frame lends a layer ([`Layer::lend`]).
+pub struct Lent<'a> {
+    /// The backend's commands, as its `Gpu` lends them: before the passes
+    /// `mln_webgpu::CustomLayerEncoder`, `mln_mtl::CustomLayerEncoder`,
+    /// `mln_gl::CustomLayerEncoder`, `mln_vulkan::CustomLayerEncoder` or
+    /// `mln_d3d12::CustomLayerEncoder`, and in a pass the same crate's
+    /// `CustomLayerPass`, whose docs say what the layer may change.
+    pub raw: &'a mut dyn Any,
+    /// The frame.
+    pub frame: &'a Frame<'a>,
+    /// Where the frame draws the map, and the depth it writes there.
+    pub projection: &'a FrameProjection,
+    /// The depth that the frame's 2D layers write at the layer's place
+    /// among the layers, in a pass; `None` before the passes.
+    pub layer_depth: Option<f64>,
 }
 
 /// One of a layer's frame tiles: where it is among them, and its ids.

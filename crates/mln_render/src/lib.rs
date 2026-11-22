@@ -19,6 +19,7 @@
 //! Not a contract yet, and hidden from the documentation: placement, in the
 //! `placement` module. It can change or go in any release.
 
+mod after_gpu;
 mod algorithm;
 #[cfg(feature = "bench")]
 #[doc(hidden)]
