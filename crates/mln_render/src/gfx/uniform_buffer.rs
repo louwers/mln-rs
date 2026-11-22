@@ -2,11 +2,13 @@ use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::bindings::FIRST_VERTEX_BUFFER_ID;
 
 use crate::gfx::buffer::Buffer;
+use crate::gfx::release::Release;
 use crate::gfx::resources::Device;
 
 /// Uniform and storage buffers by id, which their array owns. A buffer the
-/// array replaces or loses retires the array's epoch, so that the context
-/// drops the bindings made of it before it destroys the buffer.
+/// array replaces or loses, or the array dropping, retires the array's
+/// epoch, so that the context drops the bindings made of it before it
+/// destroys the buffer.
 #[derive(Default)]
 pub(crate) struct UniformBufferArray {
     buffers: [Option<Buffer>; FIRST_VERTEX_BUFFER_ID],
@@ -70,5 +72,13 @@ impl UniformBufferArray {
             self.epoch = device.next_uniform_epoch();
         }
         replaced
+    }
+}
+
+impl Drop for UniformBufferArray {
+    fn drop(&mut self) {
+        if let Some(buffer) = self.buffers.iter().flatten().next() {
+            buffer.release(Release::Epoch(self.epoch));
+        }
     }
 }

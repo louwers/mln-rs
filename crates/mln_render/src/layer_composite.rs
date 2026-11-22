@@ -18,36 +18,27 @@
 
 use mln_gfx::color_mode::{BlendFunction, LinearBlend};
 use mln_gfx::gpu::{
-    BindGroupEntry, BindingsDesc, BindingsId, BufferUsage, ColorAttachment, DepthStencilAttachment, Draw, DynamicState,
-    FixedState, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PipelineKey, SamplerId, Scissor, ShaderId, ShaderKey,
-    StencilState, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureUsage, VertexAttribute,
-    VertexBufferLayout, VertexStep,
+    ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadOp, TargetFormats, TextureFormat, TextureId,
 };
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::bindings::FIRST_VERTEX_BUFFER_ID;
-use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::ColorBlendFactorType;
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawModeType};
+use mln_gfx::ColorMode;
 use mln_style_types::LayerBlendType;
 use mln_util::Color;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use crate::draw_objects::Entries;
-use crate::gfx::buffer::Buffer;
+use crate::draw_objects::Mesh;
+use crate::encode::{Draw, Group};
 use crate::gfx::context::Resources;
-use crate::gfx::owned::Owned;
 use crate::gfx::resources::GpuTexture;
-use crate::gfx::vertex_attribute::Uniforms;
-use crate::paint_parameters::{DepthTest, DrawTarget, OpenPass};
+use crate::handles::{Buffer, IndexBuffer, Texture};
+use crate::mesh_desc::MeshDesc;
+use crate::paint_parameters::{DepthTest, OpenPass, PaintParameters, Stencil};
 use crate::render_static_data::RenderStaticData;
 use crate::shaders::programs;
-use crate::shaders::programs::{
-    ID_LAYER_COMPOSITE_BACKDROP_TEXTURE, ID_LAYER_COMPOSITE_IMAGE_TEXTURE, LAYER_COMPOSITE_PROPS,
-};
 use crate::shaders::ubo::{
     LAYER_COMPOSITE_BLEND_COLOR, LAYER_COMPOSITE_BLEND_LUMINOSITY, LAYER_COMPOSITE_BLEND_MULTIPLY,
     LAYER_COMPOSITE_BLEND_NONE, LAYER_COMPOSITE_BLEND_OVERLAY, LayerCompositeUBO,
@@ -59,16 +50,6 @@ const COLOR: TextureFormat = TextureFormat::Rgba8Unorm;
 /// The format of its depth and stencil, which the layer's tile clipping and
 /// depth tests read as they would the frame's.
 const DEPTH_STENCIL: TextureFormat = TextureFormat::Depth24PlusStencil8;
-
-/// The vertex layout of the quad that covers the frame: a corner of the unit
-/// square in two shorts.
-fn layout() -> VertexBufferLayout {
-    VertexBufferLayout {
-        stride: 4,
-        step: VertexStep::Vertex,
-        attributes: vec![VertexAttribute { id: 0, format: AttributeDataType::Short2, offset: 0 }],
-    }
-}
 
 /// How a draw group's draws composite onto the frame, after they draw
 /// into a texture of their own.
@@ -127,31 +108,28 @@ impl Composite {
     }
 }
 
-/// A texture that passes draw into and draws sample, with the sampler
-/// they sample it with.
-struct Texture {
-    texture: GpuTexture,
-    sampler: SamplerId,
+/// A texture that passes draw into and meshes sample.
+struct Attachment {
+    texture: Texture,
+    id: TextureId,
 }
 
-impl Texture {
-    fn new(gpu: &mut dyn Gpu, context: &mut Resources, size: Size, format: TextureFormat) -> Result<Texture, GpuError> {
-        let usage = TextureUsage { sampled: true, render_target: true, copy_src: true };
-        let desc = TextureDesc { label: "render target", size, format, usage };
-        let bytes = size.width as usize * size.height as usize * format.bytes_per_texel().unwrap_or(4) as usize;
-        let texture = context.device().texture(gpu, &desc, Some(bytes))?;
-        Ok(Texture { texture, sampler: context.sampler(gpu, SamplerState::default())? })
-    }
-
-    fn id(&self) -> TextureId {
-        self.texture.id()
+impl Attachment {
+    fn new(gpu: &mut dyn Gpu, context: &mut Resources, size: Size, format: TextureFormat) -> Result<Self, GpuError> {
+        let texture = context.texture(|texture| {
+            texture.set_size(size);
+            texture.set_format(format);
+            texture.set_render_target();
+        });
+        let id = context.create_texture(gpu, &texture.0)?;
+        Ok(Attachment { texture, id })
     }
 }
 
 /// The textures a composited layer draws into, of one size.
 struct Target {
     size: Size,
-    color: Texture,
+    color: Attachment,
     /// The depth and stencil of the layers that don't draw with the frame's,
     /// from the first frame that composites one.
     depth_stencil: Option<GpuTexture>,
@@ -162,43 +140,33 @@ struct Target {
 /// layer and onto the frame's target at the end.
 struct FrameCopy {
     format: TextureFormat,
-    frame: Texture,
-    backdrop: Texture,
+    frame: Attachment,
+    backdrop: Attachment,
 }
 
 /// The quad that covers the frame.
 struct Quad {
-    vertices: Buffer,
-    indices: Buffer,
-    geometry: Option<Owned<GeometryId>>,
+    vertices: Buffer<[i16; 2]>,
+    indexes: IndexBuffer,
 }
 
 /// The texture that the frame's composited layers draw into, one after
-/// another, and the draw that composites one onto the frame.
+/// another, and the draws that composite one onto the frame.
 #[derive(Default)]
 pub(crate) struct LayerComposite {
-    shader: Option<ShaderKey>,
-    shader_id: Option<ShaderId>,
     target: Option<Target>,
     frame: Option<FrameCopy>,
     quad: Option<Quad>,
     /// The draw groups composited in the frame, by id, in the order of their
-    /// slots of `uniforms`.
+    /// draws.
     groups: Vec<(SimpleIdentity, Composite)>,
-    /// Each group's `LayerCompositeUBO`, at an offset the GPU can bind, and
-    /// then the copy's: one write a frame.
-    uniforms: Option<Buffer>,
-    /// The bytes of `uniforms`, kept between frames.
-    bytes: Vec<u8>,
-    /// A projection the shader doesn't read, for the block that OpenGL's
-    /// prelude declares, which WebGL2 rejects a draw without a buffer for.
-    projection: Option<Buffer>,
-    /// The bindings of each slot of `uniforms`, and what they were made of:
-    /// the epoch of the frame's buffers, the textures and the number of
-    /// slots, the last of which is the copy's. The composite drops them
-    /// when it replaces a buffer or texture they bind.
-    bindings: Vec<Owned<BindingsId>>,
-    bindings_made: Option<(u64, TextureId, Option<TextureId>, usize)>,
+    /// The meshes that draw the quad, by how they blend and whether they
+    /// read the frame's texture rather than the layer's: made of the
+    /// textures they sample, and dropped with them.
+    meshes: Vec<((BlendFunction, bool), Mesh)>,
+    /// The draw of each group, in its order, and then the copy's: each the
+    /// mesh it draws, and its draws' buffers, which hold its block.
+    draws: Vec<(usize, Group)>,
 }
 
 impl LayerComposite {
@@ -222,9 +190,6 @@ impl LayerComposite {
             self.quad = None;
             return;
         }
-        self.shader.get_or_insert_with(|| {
-            context.shader_key(&programs::LAYER_COMPOSITE, Uniforms::default(), ProjectionVariant::Mercator)
-        });
         for &(group, mut composite) in groups {
             if overdraw || (format.is_none() && composite.reads_backdrop()) {
                 composite.blend = LayerBlendType::Normal;
@@ -239,38 +204,56 @@ impl LayerComposite {
             return;
         }
 
-        let size = size_of::<LayerCompositeUBO>();
-        let stride = size.next_multiple_of(context.caps().buffer_offset_alignment as usize);
         let copy = Composite { opacity: 1.0, blend: LayerBlendType::Normal, frame_depth: false };
-        self.bytes.clear();
-        self.bytes.resize((self.groups.len() + 1) * stride, 0);
-        for (slot, composite) in self.groups.iter().map(|&(_, composite)| composite).chain([copy]).enumerate() {
-            let ubo = LayerCompositeUBO {
-                opacity: composite.opacity,
-                blend: composite.shader_blend(),
-                ..LayerCompositeUBO::default()
-            };
-            self.bytes[slot * stride..][..size].copy_from_slice(bytemuck::bytes_of(&ubo));
-        }
-        if context.device().write_uniforms(gpu, &mut self.uniforms, &self.bytes, false) {
-            self.drop_bindings();
-        }
-        if self.projection.is_none() {
-            let projection = ProjectionUBO::default();
-            context.device().write_uniforms(gpu, &mut self.projection, bytemuck::bytes_of(&projection), false);
+        let groups: Vec<_> =
+            self.groups.iter().map(|&(_, composite)| (composite, composite.blend_function(), false)).collect();
+        let slots: Vec<_> = groups
+            .into_iter()
+            .chain([(copy, BlendFunction::Replace, true)])
+            .map(|(composite, blend, of_frame)| (composite, self.mesh(context, blend, of_frame)))
+            .collect();
+        self.draws.truncate(slots.len());
+        self.draws.resize_with(slots.len(), || (0, Group::new()));
+        for ((composite, index), (mesh, draws)) in slots.into_iter().zip(&mut self.draws) {
+            *mesh = index;
+            let ubo =
+                LayerCompositeUBO { opacity: composite.opacity, blend: composite.shader_blend(), ..Default::default() };
+            draws.begin(0.0, false, false);
+            draws.push(&self.meshes[*mesh].1, Draw::DEFAULT, ()).block(&ubo);
+            draws.finish(gpu, context, &(), []);
+            draws.upload(gpu, context);
         }
     }
 
-    /// Drops the textures and the bindings that read them.
+    /// The index of the mesh that blends with `blend`, of the frame's
+    /// texture where `of_frame` and otherwise of the layer's, made if there
+    /// is none. A mesh that blends in the shader reads the frame's copy as
+    /// its backdrop, and otherwise none.
+    fn mesh(&mut self, context: &mut Resources, blend: BlendFunction, of_frame: bool) -> usize {
+        if let Some(index) = self.meshes.iter().position(|(key, _)| *key == (blend, of_frame)) {
+            return index;
+        }
+        let (Some(target), Some(quad)) = (&self.target, &self.quad) else { return 0 };
+        let (image, backdrop) = match &self.frame {
+            Some(frame) if of_frame => (&frame.frame.texture, &frame.frame.texture),
+            Some(frame) => (&target.color.texture, &frame.backdrop.texture),
+            None => (&target.color.texture, &target.color.texture),
+        };
+        let mut mesh = MeshDesc::new(&programs::LAYER_COMPOSITE, &quad.indexes);
+        mesh.vertices(&quad.vertices)
+            .texture(image, SamplerState::default())
+            .texture(backdrop, SamplerState::default())
+            .blend(ColorMode { blend_function: blend, ..ColorMode::alpha_blended() })
+            .projection(ProjectionVariant::Mercator);
+        self.meshes.push(((blend, of_frame), context.mesh(&mesh)));
+        self.meshes.len() - 1
+    }
+
+    /// Drops the textures and the meshes that read them.
     fn drop_textures(&mut self) {
         self.target = None;
         self.frame = None;
-        self.drop_bindings();
-    }
-
-    fn drop_bindings(&mut self) {
-        self.bindings.clear();
-        self.bindings_made = None;
+        self.meshes.clear();
     }
 
     /// Makes the target of `size`, unless it is made, with a depth and
@@ -285,7 +268,7 @@ impl LayerComposite {
     ) -> Result<(), GpuError> {
         if self.target.as_ref().is_none_or(|target| target.size != size) {
             self.drop_textures();
-            let color = Texture::new(gpu, context, size, COLOR)?;
+            let color = Attachment::new(gpu, context, size, COLOR)?;
             self.target = Some(Target { size, color, depth_stencil: None });
         }
         if let Some(target) = self.target.as_mut().filter(|target| target.depth_stencil.is_none())
@@ -297,26 +280,22 @@ impl LayerComposite {
         match frame_format {
             None => {
                 if self.frame.take().is_some() {
-                    self.drop_bindings();
+                    self.meshes.clear();
                 }
             }
             Some(format) if self.frame.as_ref().is_none_or(|frame| frame.format != format) => {
                 self.frame = None;
-                self.drop_bindings();
-                let frame = Texture::new(gpu, context, size, format)?;
-                let backdrop = Texture::new(gpu, context, size, format)?;
+                self.meshes.clear();
+                let frame = Attachment::new(gpu, context, size, format)?;
+                let backdrop = Attachment::new(gpu, context, size, format)?;
                 self.frame = Some(FrameCopy { format, frame, backdrop });
             }
             Some(_) => {}
         }
         if self.quad.is_none() {
             let vertices: [[i16; 2]; 4] = [[0, 0], [1, 0], [0, 1], [1, 1]];
-            let indices = RenderStaticData::quad_triangle_indices();
-            self.quad = Some(Quad {
-                vertices: context.device().buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&vertices))?,
-                indices: context.device().buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&indices))?,
-                geometry: None,
-            });
+            let indexes = context.index_buffer(&RenderStaticData::quad_triangle_indices());
+            self.quad = Some(Quad { vertices: context.buffer(&vertices), indexes });
         }
         Ok(())
     }
@@ -325,7 +304,7 @@ impl LayerComposite {
     /// layer of the frame blends in the shader.
     #[must_use]
     pub(crate) fn frame_texture(&self) -> Option<TextureId> {
-        self.frame.as_ref().map(|frame| frame.frame.id())
+        self.frame.as_ref().map(|frame| frame.frame.id)
     }
 
     /// The pass that copies the frame's texture into the backdrop before the
@@ -339,7 +318,7 @@ impl LayerComposite {
         composite.reads_backdrop().then_some(OpenPass {
             label: "layer composite backdrop",
             color: Some(ColorAttachment {
-                texture: frame.backdrop.id(),
+                texture: frame.backdrop.id,
                 load: LoadOp::Clear(Color::new(0.0, 0.0, 0.0, 0.0)),
             }),
             depth_stencil: None,
@@ -382,7 +361,7 @@ impl LayerComposite {
         Some(OpenPass {
             label: "layer composite",
             color: Some(ColorAttachment {
-                texture: target.color.id(),
+                texture: target.color.id,
                 load: LoadOp::Clear(Color::new(0.0, 0.0, 0.0, 0.0)),
             }),
             depth_stencil,
@@ -391,162 +370,27 @@ impl LayerComposite {
         })
     }
 
-    /// Composites the texture onto the open pass, as the draw group `group`
-    /// does, testing `depth`.
-    pub(crate) fn draw(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        target: DrawTarget,
-        depth: DepthTest,
-        context: &mut Resources,
-        group: SimpleIdentity,
-    ) {
-        let Some(slot) = self.groups.iter().position(|(id, _)| *id == group) else {
-            return;
-        };
-        let blend = self.groups[slot].1.blend_function();
-        if let Err(error) = self.draw_quad(gpu, target, context, slot, blend, depth) {
-            Log::warning(Event::Render, format!("Compositing a layer failed: {error}"));
+    /// Composites the texture onto `parameters`' open pass, as the draw
+    /// group `group` does, testing `depth`.
+    pub(crate) fn draw(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, depth: DepthTest, group: SimpleIdentity) {
+        if let Some(slot) = self.groups.iter().position(|(id, _)| *id == group) {
+            self.draw_slot(gpu, parameters, slot, depth);
         }
     }
 
-    /// Copies the frame's texture onto the open pass, over what it holds.
-    pub(crate) fn copy_frame(&mut self, gpu: &mut dyn Gpu, target: DrawTarget, context: &mut Resources) {
-        if self.frame.is_none() {
-            return;
-        }
-        let slot = self.groups.len();
-        let blend = BlendFunction::Replace;
-        if let Err(error) = self.draw_quad(gpu, target, context, slot, blend, DepthTest::DISABLED) {
-            Log::warning(Event::Render, format!("Copying the frame failed: {error}"));
+    /// Copies the frame's texture onto `parameters`' open pass, over what it
+    /// holds.
+    pub(crate) fn copy_frame(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        if self.frame.is_some() {
+            self.draw_slot(gpu, parameters, self.groups.len(), DepthTest::DISABLED);
         }
     }
 
-    /// Draws the quad with the uniforms of `slot`: a group's, which reads the
+    /// Draws the quad as the draw of `slot` does: a group's, which reads the
     /// layer's texture, or the copy's after them, which reads the frame's.
-    fn draw_quad(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        draw_target: DrawTarget,
-        context: &mut Resources,
-        slot: usize,
-        blend: BlendFunction,
-        depth: DepthTest,
-    ) -> Result<(), GpuError> {
-        let (Some(shader), Some(target), Some(quad), Some(uniforms), Some(projection)) =
-            (&self.shader, &self.target, &mut self.quad, &self.uniforms, &self.projection)
-        else {
-            return Ok(());
-        };
-        let DrawTarget { size, targets, scissor } = draw_target;
-        let shader_id = match self.shader_id {
-            Some(id) => id,
-            None => *self.shader_id.insert(context.shader(gpu, shader)?),
-        };
-
-        let layer = &target.color;
-        let frame = self.frame.as_ref();
-        let slots = self.groups.len() + 1;
-        let made = (context.global_uniform_buffers().epoch(), layer.id(), frame.map(|frame| frame.frame.id()), slots);
-        if self.bindings_made != Some(made) {
-            self.bindings.clear();
-            self.bindings_made = None;
-            let global = context.global_uniform_buffers();
-            let size = size_of::<LayerCompositeUBO>();
-            let stride = size.next_multiple_of(context.caps().buffer_offset_alignment as usize);
-            for slot in 0..slots {
-                // A group's image is the layer's texture and its backdrop the
-                // frame's copy; the copy's image is the frame's texture.
-                let (image, backdrop) = match frame {
-                    Some(frame) if slot + 1 == slots => (&frame.frame, &frame.frame),
-                    Some(frame) => (layer, &frame.backdrop),
-                    None => (layer, layer),
-                };
-                let mut entries = Entries::new();
-                for id in 0..FIRST_VERTEX_BUFFER_ID {
-                    let (buffer, offset, size) = match id {
-                        id if id == LAYER_COMPOSITE_PROPS.id => (uniforms, (slot * stride) as u64, size as u64),
-                        id if id == PROJECTION_BUFFER.id => (projection, 0, projection.size() as u64),
-                        _ => match global.get(id) {
-                            Some(buffer) => (buffer, 0, buffer.size() as u64),
-                            None => continue,
-                        },
-                    };
-                    entries.push(BindGroupEntry::Buffer { id: id as u32, buffer: buffer.id(), offset, size });
-                }
-                for (id, texture) in
-                    [(ID_LAYER_COMPOSITE_IMAGE_TEXTURE, image), (ID_LAYER_COMPOSITE_BACKDROP_TEXTURE, backdrop)]
-                {
-                    entries.push(BindGroupEntry::Texture {
-                        id: id as u32,
-                        texture: texture.id(),
-                        sampler: texture.sampler,
-                    });
-                }
-                let bindings = gpu.create_bindings(&BindingsDesc {
-                    label: "layer composite",
-                    shader: shader_id,
-                    entries: entries.as_slice(),
-                })?;
-                self.bindings.push(context.own(bindings, Vec::new()));
-            }
-            self.bindings_made = Some(made);
-        }
-        let Some(bindings) = self.bindings.get(slot) else {
-            return Ok(());
-        };
-
-        let geometry = if let Some(geometry) = &quad.geometry {
-            geometry.id()
-        } else {
-            let geometry = gpu.create_geometry(&GeometryDesc {
-                shader: shader_id,
-                layouts: &[layout()],
-                vertex_buffers: &[(quad.vertices.id(), 0)],
-                index_buffer: quad.indices.id(),
-            })?;
-            quad.geometry = Some(context.own(geometry, Vec::new()));
-            geometry
-        };
-
-        let pipeline = context.pipeline(
-            gpu,
-            &PipelineKey {
-                shader: shader_id,
-                vertex_buffers: vec![layout()],
-                state: FixedState {
-                    primitive: DrawModeType::Triangles,
-                    cull: CullFaceMode::disabled(),
-                    blend,
-                    color_mask: ColorMode::alpha_blended().mask,
-                    depth: depth.state,
-                    stencil: StencilState::DISABLED,
-                },
-                targets,
-            },
-        )?;
-        let full = Scissor { x: 0, y: 0, width: size.width, height: size.height };
-        gpu.draw(&Draw {
-            pipeline,
-            bindings: bindings.id(),
-            geometry,
-            first_index: 0,
-            index_count: 6,
-            base_vertex: 0,
-            first_instance: 0,
-            instance_count: 1,
-            global_index: 0,
-            dynamic: DynamicState {
-                depth_range: depth.range,
-                scissor: scissor.unwrap_or(full),
-                stencil_reference: 0,
-                blend_constant: Color::default(),
-                line_width: 1.0,
-            },
-        })?;
-        let stats = context.rendering_stats();
-        stats.num_draw_calls += 1;
-        stats.total_draw_calls += 1;
-        Ok(())
+    fn draw_slot(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, slot: usize, depth: DepthTest) {
+        let Some((mesh, draws)) = self.draws.get(slot) else { return };
+        let Some((_, mesh)) = self.meshes.get(*mesh) else { return };
+        draws.draw_mesh(gpu, parameters, mesh, 0, depth, Stencil::DISABLED);
     }
 }

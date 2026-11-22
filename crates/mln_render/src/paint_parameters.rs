@@ -352,9 +352,9 @@ impl<'a> PaintParameters<'a> {
 
     /// Copies the layer composite's frame texture onto the open pass.
     fn copy_frame(&mut self, gpu: &mut dyn Gpu) {
-        if let Some(target) = self.draw_target() {
-            self.layer_composite.copy_frame(gpu, target, self.context);
-        }
+        let layer_composite = std::mem::take(self.layer_composite);
+        layer_composite.copy_frame(gpu, self);
+        *self.layer_composite = layer_composite;
     }
 
     /// Ends the draws `begin_composited` began, and composites what they drew
@@ -371,7 +371,7 @@ impl<'a> PaintParameters<'a> {
         }
         if let Err(error) = self.begin_pass(gpu, frame.loading(LoadOp::Load)) {
             Log::error(Event::Render, format!("Resuming the {} pass failed: {error}", frame.label));
-        } else if began && let Some(target) = self.draw_target() {
+        } else if began {
             // What drew with the frame's depth tested it as it drew, and
             // left its own there, in front of the layer's. The others
             // composite at the depth of the current layer: layers above
@@ -381,7 +381,9 @@ impl<'a> PaintParameters<'a> {
             } else {
                 self.depth_for_sublayer(0, false)
             };
-            self.layer_composite.draw(gpu, target, depth, self.context, group);
+            let layer_composite = std::mem::take(self.layer_composite);
+            layer_composite.draw(gpu, self, depth, group);
+            *self.layer_composite = layer_composite;
         }
     }
 

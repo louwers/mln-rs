@@ -23,6 +23,9 @@ pub(crate) enum Release {
     /// Any other resource of the backend's `Gpu`: bindings, geometry, an
     /// attachment, or one of the context's samplers, pipelines and shaders.
     Resource(ResourceId),
+    /// The epoch of a uniform buffer array that dropped, whose bindings go
+    /// before its buffers.
+    Epoch(u64),
 }
 
 /// The queue that handles and owned resources go to when they drop. The

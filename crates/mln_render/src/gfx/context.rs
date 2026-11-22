@@ -410,6 +410,11 @@ impl Resources {
             for release in releases.drain(..) {
                 match release {
                     Release::Resource(resource) => doomed.push(resource),
+                    Release::Epoch(epoch) => {
+                        for objects in meshes.values_mut() {
+                            objects.drop_retired_bindings(&[epoch]);
+                        }
+                    }
                     Release::Entry(StoreKey::Texture(key)) => drop(textures.remove(key)),
                     Release::Entry(StoreKey::Buffer(key)) => drop(buffers.remove(key)),
                     // What the objects hold goes to the queue as they drop,
@@ -662,11 +667,6 @@ impl Resources {
     pub(crate) fn write_global_uniform_buffer<T: bytemuck::Pod>(&mut self, gpu: &mut dyn Gpu, id: usize, value: &T) {
         let replaced = self.global_uniform_buffers.write_pod(gpu, id, value, &mut self.device);
         debug_assert!(!replaced, "the global uniform buffer {id} written with another type");
-    }
-
-    /// The sampler of `state`, made through `gpu` on first use.
-    pub(crate) fn sampler(&mut self, gpu: &mut dyn Gpu, state: SamplerState) -> Result<SamplerId, GpuError> {
-        sampler(&mut self.samplers, gpu, state)
     }
 
     /// The pipeline of `key`, made through `gpu` on first use.

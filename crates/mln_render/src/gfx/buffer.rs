@@ -49,6 +49,14 @@ impl Buffer {
     }
 }
 
+impl Buffer {
+    /// Queues `release` with the buffer's own, to the context of the
+    /// buffer's device.
+    pub(crate) fn release(&self, release: Release) {
+        self.queue.push(release);
+    }
+}
+
 impl Drop for Buffer {
     fn drop(&mut self) {
         self.queue.push(Release::Buffer(self.id, self.usage, allocated_size(self.usage, self.size)));

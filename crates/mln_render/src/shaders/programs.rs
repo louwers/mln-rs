@@ -6,9 +6,6 @@ use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Sources,
 use super::ubo::{AtmospherePropsUBO, LayerCompositeUBO, SkyPropsUBO, TileDebugPropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
 
-pub(crate) const ID_LAYER_COMPOSITE_IMAGE_TEXTURE: usize = 0;
-pub(crate) const ID_LAYER_COMPOSITE_BACKDROP_TEXTURE: usize = 1;
-
 pub(crate) const TILE_DEBUG_PROPS: Buffer = Buffer::uniform::<TileDebugPropsUBO>("props", 0);
 pub(crate) const LAYER_COMPOSITE_PROPS: Buffer = Buffer::uniform::<LayerCompositeUBO>("props", 0);
 pub(crate) const SKY_PROPS: Buffer = Buffer::uniform::<SkyPropsUBO>("sky", 0);
