@@ -20,16 +20,12 @@ mln_rs::mln_gfx::uniform_block! {
 
 /// The quads' block, which the draws share.
 pub(crate) const PROPS: Buffer = Buffer::uniform::<QuadUBO>("props", 0);
-/// The ids of the quads' corner, which steps per vertex, and offset, which
-/// steps per instance.
-pub(crate) const ID_CORNER: usize = 0;
-pub(crate) const ID_OFFSET: usize = 1;
 
 pub(crate) static QUAD: Program = Program {
     name: "quad",
     buffers: &[PROPS],
-    attributes: &[Attribute { id: ID_CORNER, format: Float2 }],
-    instance_attributes: &[Attribute { id: ID_OFFSET, format: Float2 }],
+    attributes: &[Attribute::new("corner", Float2)],
+    instance_attributes: &[Attribute::new("offset", Float2)],
     textures: &[Texture::new("image")],
     properties: &[],
     projection: Projection::None,

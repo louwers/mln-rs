@@ -22,7 +22,7 @@ use mln_rs::mln_gfx::gpu::{
 use mln_rs::mln_gfx::texture2d::SamplerState;
 use mln_rs::mln_util::Color;
 use mln_rs::mln_util::size::Size;
-use quad::{ID_CORNER, ID_OFFSET, PROPS, QUAD, QuadUBO};
+use quad::{PROPS, QUAD, QuadUBO};
 
 const SIZE: Size = Size { width: 32, height: 32 };
 const BLACK: [u8; 4] = [0, 0, 0, 255];
@@ -97,7 +97,8 @@ fn quads(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         step,
         attributes: vec![VertexAttribute { id, format: AttributeDataType::Float2, offset: 0 }],
     };
-    let layouts = [layout(ID_CORNER as u32, VertexStep::Vertex), layout(ID_OFFSET as u32, VertexStep::Instance)];
+    // Each attribute is the first of those that step as it does.
+    let layouts = [layout(0, VertexStep::Vertex), layout(0, VertexStep::Instance)];
     let targets = TargetFormats { color: Some(TextureFormat::Rgba8Unorm), depth_stencil: None };
     let pipeline = gpu.create_pipeline(&PipelineDesc {
         shader,
