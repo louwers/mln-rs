@@ -410,7 +410,8 @@ fn a_position_is_a_longitude_and_a_latitude_that_follow_zoom_and_transition_in_a
     let mut moving = Transitioning::with_prior(to, from, &transition, Some(start()));
     let midway = evaluate_at(&mut moving, Duration::from_millis(500), 0.0);
     assert_float_eq(10.0 + 10.0 * 0.823_099, midway.latitude() as f32);
-    assert_float_eq(170.0 + 20.0 * 0.823_099, midway.longitude() as f32);
+    // Across the antimeridian, wrapped.
+    assert_float_eq(170.0 + 20.0 * 0.823_099 - 360.0, midway.longitude() as f32);
 }
 
 #[test]
