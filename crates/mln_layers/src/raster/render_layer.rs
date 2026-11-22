@@ -8,93 +8,51 @@ use std::rc::Rc;
 
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_render::draw::{
-    Composite, Context, DrawFrame, DrawGeometry, DrawGroup, DrawIndexes, DrawList, DrawObjects, DrawOrder, FrameDraw,
-    FrameDraws, Indexes, LayerDrawing, Mesh, PaintParameters, RenderStaticData, SharedAttribute, SharedIndexes,
-    SharedTexture, SharedVertices, Textures, TileMap, Uniforms, VertexAttributeArray, cast_matrix, copied_vertices,
-    projection_data, to_projection_ubo,
+    Composite, Context, Draw, DrawFrame, DrawGeometry, DrawIndexes, DrawObjects, Group, Indexes, Mesh,
+    RenderStaticData, SharedAttribute, SharedIndexes, SharedTexture, SharedVertices, Textures, TileMap, Uniforms,
+    VertexAttributeArray, copied_vertices,
 };
 use mln_render::layer::{
     DrawContext, EvaluateCx, Evaluation, LayerType, LayerValues, NoBucket, NoLayout, RasterContents,
-    RasterLayoutVertex, RasterView, UpdateContext,
+    RasterLayoutVertex, RasterView, TileTransform, UpdateContext,
 };
-use mln_style_types::{RasterResamplingType, ResamplingType, TranslateAnchorType};
-use mln_tile_id::UnwrappedTileID;
+use mln_style_types::{RasterResamplingType, ResamplingType};
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
 
 use super::programs::{
-    DRAWABLE, ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE,
-    ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, PROPS,
+    ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE,
+    ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
 };
 use super::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use super::{Raster, programs};
 use crate::mesh::GlobeTileMeshCache;
 
-/// What the layer keeps of a tile: its draw, and the generation of the
-/// contents' geometry it was built of.
+/// What the layer keeps of a tile: its mesh, and the generation of the
+/// contents' geometry it was made of.
 pub struct RasterTile {
-    mesh: Mesh,
+    mesh: Mesh<RasterDrawableUBO>,
     geometry_generation: u64,
 }
 
-/// What the layer keeps of the draws of an image source's image: one for
-/// each tile it is drawn in, with the image's contents and the generation of
-/// its geometry they were built of.
+/// The meshes of an image source's image: one for each tile it is drawn in,
+/// with the image's contents and the generation of its geometry they were
+/// made of.
 #[derive(Default)]
-struct RasterObjects {
-    images: Vec<Mesh>,
+struct ImageMeshes {
+    meshes: Vec<Mesh<RasterDrawableUBO>>,
     image: Option<(SimpleIdentity, u64)>,
 }
 
-/// The layer's drawing: the meshes of an image source's draws, and its
-/// draws of the frame.
-#[derive(Default)]
-pub struct RasterDrawing {
-    objects: RasterObjects,
-    frame: Option<FrameDraws>,
-}
-
-impl LayerDrawing for RasterDrawing {
-    fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
-        if let Some(frame) = &self.frame {
-            visit(DrawGroup::Draws(frame));
-        }
-    }
-
+impl ImageMeshes {
     fn clear(&mut self) {
-        self.objects.images.clear();
-        self.objects.image = None;
-        self.clear_frame();
-    }
-
-    fn begin_frame(&mut self) {
-        self.frame.get_or_insert_default().clear();
-    }
-
-    fn clear_frame(&mut self) {
-        if let Some(frame) = &mut self.frame {
-            frame.clear();
-        }
-    }
-
-    fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
-        if let Some(frame) = &self.frame {
-            frame.upload(gpu, context);
-        }
-    }
-
-    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
-        if let Some(frame) = &self.frame {
-            frame.render(gpu, parameters);
-            order.step(parameters);
-        }
+        self.meshes.clear();
+        self.image = None;
     }
 }
 
@@ -117,12 +75,10 @@ impl StaticGeometry {
     }
 }
 
-/// What a raster layer keeps besides its drawing.
+/// What a raster layer keeps.
 pub struct RasterState {
-    /// The frame's draws as the update makes them, with their uniform blocks
-    /// and projections.
-    draw_list: DrawList<(RasterDrawableUBO, ProjectionUBO)>,
-
+    /// The meshes of an image source's image.
+    images: ImageMeshes,
     static_geometry: Option<StaticGeometry>,
     globe_meshes: GlobeTileMeshCache<RasterLayoutVertex>,
 
@@ -152,106 +108,75 @@ impl RasterState {
         Some(texture)
     }
 
-    /// The draws of `image`, an image source's image, in each of the
-    /// context's tiles, which share the image's geometry and texture, built
-    /// again when the image or its geometry changes.
-    fn update_image(
-        &mut self,
-        drawing: &mut RasterDrawing,
-        gpu: &mut dyn Gpu,
-        contents: &RasterContents,
-        cx: &mut DrawContext<'_, '_, Raster>,
-    ) {
+    /// Pushes the draws of `image`, an image source's image, in each of the
+    /// context's tiles, whose meshes share the image's geometry and texture,
+    /// made again when the image or its geometry changes.
+    fn draw_image(&mut self, contents: &RasterContents, cx: &mut DrawContext<'_, '_, Raster>) {
         let layer = cx.layer;
         let sampler = sampler_state(layer);
-        let RasterState { draw_list, textures, .. } = self;
+        let RasterState { images, textures, .. } = self;
         let raster_shader = cx.context.shader_key(&programs::RASTER, Uniforms::default(), cx.projection_variant);
-        let objects = &mut drawing.objects;
         // An image source's contents always have geometry of their own once
         // they have an image.
         let Some(quads) = contents.geometry().quads() else {
-            objects.images.clear();
-            objects.image = None;
+            images.clear();
             return;
         };
-        let built_of = (contents.id(), contents.geometry().generation());
-        if objects.image != Some(built_of) {
-            objects.images.clear();
-            objects.image = Some(built_of);
+        let made_of = (contents.id(), contents.geometry().generation());
+        if images.image != Some(made_of) {
+            images.meshes.clear();
+            images.image = Some(made_of);
             // Only the image's contents draw: the textures of the images
             // before it go.
             textures.retain(|id, _| *id == contents.id());
         }
         let texture = Self::contents_texture(textures, sampler, cx.context, contents);
         let tiles = cx.tiles;
-        objects.images.truncate(tiles.len());
-        while objects.images.len() < tiles.len() {
+        images.meshes.truncate(tiles.len());
+        while images.meshes.len() < tiles.len() {
             let draw_geometry =
                 raster_geometry(&quads.vertices, quads.vertices.count(), quads.indexes.clone().into(), &quads.segments);
             let color_mode = cx.context.color_mode(ColorMode::alpha_blended());
             let image = new_objects(&raster_shader, color_mode, draw_geometry, texture.as_ref());
-            objects.images.push(cx.context.add_mesh(image));
+            images.meshes.push(cx.context.add_mesh(image));
         }
-        for (tile, mesh) in tiles.iter().zip(&objects.images) {
-            let uniforms = Self::uniforms(&tile.id().to_unwrapped(), &cx.frame);
-            draw_list.push(FrameDraw::new(None, mesh), uniforms);
+        let main = begin_draws(cx.draws.main(), layer);
+        for (tile, mesh) in tiles.iter().zip(&images.meshes) {
+            let at = tile.project(&cx.frame, &transform(&cx.frame));
+            let draw = Draw { order: mesh.seq() as i64, ..Draw::DEFAULT };
+            main.push_at(mesh, &at, draw, RasterDrawableUBO { matrix: at.fallback_matrix });
         }
-
-        self.finish_frame_draws(drawing, layer, gpu, cx.context);
     }
+}
 
-    /// The entries in the layer's storage buffers of a draw of `tile_id`.
-    fn uniforms(tile_id: &UnwrappedTileID, frame: &DrawFrame<'_>) -> (RasterDrawableUBO, ProjectionUBO) {
-        let projection = projection_data(
-            tile_id,
-            frame,
-            [0.0, 0.0],
-            TranslateAnchorType::Viewport,
-            false,
-            false,
-            None,
-            !frame.camera_moving,
-        );
-        (RasterDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) }, to_projection_ubo(&projection))
-    }
+/// How the layer's draws place a tile's geometry: on the pixel grid while
+/// the camera stands still.
+fn transform(frame: &DrawFrame<'_>) -> TileTransform {
+    TileTransform { aligned: !frame.camera_moving, ..TileTransform::default() }
+}
 
-    /// Makes the draws of the draw list the layer's draws of the frame, and
-    /// writes the layer's buffers of them.
-    fn finish_frame_draws(
-        &mut self,
-        drawing: &mut RasterDrawing,
-        layer: &LayerValues<Raster>,
-        gpu: &mut dyn Gpu,
-        context: &mut Context,
-    ) {
-        let evaluated = &layer.evaluated.paint;
-        // The layer draws as one surface for a `raster-layer-blend` other
-        // than `normal`.
-        let composite = Composite::of(1.0, *evaluated.raster_layer_blend.uniform());
-        let Some(frame) = drawing.frame.as_mut() else {
-            return;
-        };
-        frame.set_composite(composite);
-        self.draw_list.finish(frame, gpu, context, |writer| {
-            let props = RasterEvaluatedPropsUBO {
-                spin_weights: spin_weights(*evaluated.raster_hue_rotate.uniform()),
-                tl_parent: [0.0, 0.0],
-                scale_parent: 1.0,
-                buffer_scale: 1.0,
-                fade_t: 1.0,
-                opacity: *evaluated.raster_opacity.uniform(),
-                brightness_low: *evaluated.raster_brightness_min.uniform(),
-                brightness_high: *evaluated.raster_brightness_max.uniform(),
-                saturation_factor: saturation_factor(*evaluated.raster_saturation.uniform()),
-                contrast_factor: contrast_factor(*evaluated.raster_contrast.uniform()),
-                pad1: 0.0,
-                pad2: 0.0,
-            };
-            writer.uniform(PROPS.id, &props);
-            writer.storage(DRAWABLE.id, |(draw_ubo, _)| *draw_ubo);
-            writer.storage(PROJECTION_BUFFER.id, |(_, projection)| *projection);
-        });
+/// `main`, the group of a layer of `layer`'s values, with the block of the
+/// layer's values that its draws share, as one surface for a
+/// `raster-layer-blend` other than `normal`.
+fn begin_draws<'a>(main: &'a mut Group, layer: &LayerValues<Raster>) -> &'a mut Group {
+    let evaluated = &layer.evaluated.paint;
+    if let Some(composite) = Composite::of(1.0, *evaluated.raster_layer_blend.uniform()) {
+        main.composite(composite);
     }
+    main.block(&RasterEvaluatedPropsUBO {
+        spin_weights: spin_weights(*evaluated.raster_hue_rotate.uniform()),
+        tl_parent: [0.0, 0.0],
+        scale_parent: 1.0,
+        buffer_scale: 1.0,
+        fade_t: 1.0,
+        opacity: *evaluated.raster_opacity.uniform(),
+        brightness_low: *evaluated.raster_brightness_min.uniform(),
+        brightness_high: *evaluated.raster_brightness_max.uniform(),
+        saturation_factor: saturation_factor(*evaluated.raster_saturation.uniform()),
+        contrast_factor: contrast_factor(*evaluated.raster_contrast.uniform()),
+        pad1: 0.0,
+        pad2: 0.0,
+    })
 }
 
 /// The sampler of the tile textures of a layer of `layer`'s values.
@@ -346,22 +271,25 @@ impl LayerType for Raster {
     type Bucket = NoBucket;
     type View<'a> = RasterView<'a>;
     type Tile = RasterTile;
-    type Drawing = RasterDrawing;
+    type Drawing = ();
     type State = RasterState;
 
-    fn new_layer(_layer: &LayerValues<Raster>) -> (RasterState, RasterDrawing) {
+    fn new_layer(_layer: &LayerValues<Raster>) -> (RasterState, ()) {
         let state = RasterState {
-            draw_list: DrawList::default(),
+            images: ImageMeshes::default(),
             static_geometry: None,
             globe_meshes: GlobeTileMeshCache::new(),
             textures: HashMap::default(),
             live_contents: HashSet::default(),
         };
-        (state, RasterDrawing::default())
+        (state, ())
     }
 
-    /// Drops the globe's meshes when the frame isn't on the globe.
+    /// Drops the meshes of an image source's image, made for the last
+    /// projection, and the globe's meshes when the frame isn't on the
+    /// globe.
     fn projection_changed(state: &mut RasterState, variant: ProjectionVariant) {
+        state.images.clear();
         if variant == ProjectionVariant::Mercator {
             state.globe_meshes.clear();
         }
@@ -371,15 +299,14 @@ impl LayerType for Raster {
         if *cx.evaluated.paint.raster_opacity.uniform() > 0.0 { Evaluation::TRANSLUCENT } else { Evaluation::NONE }
     }
 
-    /// Makes the frame's draws of the layer: those of an image source's
-    /// image, or one of each of its tiles, which it builds for a tile it
-    /// keeps none of or whose contents' geometry changed since, and writes the
-    /// layer's buffers they read.
+    /// Pushes the frame's draws of the layer: those of an image source's
+    /// image, or one of each of its tiles, whose mesh it makes for a tile it
+    /// keeps none of or whose contents' geometry changed since.
     fn make_draws(
         state: &mut RasterState,
-        drawing: &mut RasterDrawing,
+        _drawing: &mut (),
         tile_values: &mut TileMap<RasterTile>,
-        gpu: &mut dyn Gpu,
+        _gpu: &mut dyn Gpu,
         cx: &mut DrawContext<'_, '_, Raster>,
     ) {
         let image = cx.tiles.iter().find_map(|tile| match tile.view()? {
@@ -387,12 +314,12 @@ impl LayerType for Raster {
             RasterView::Tile(_) => None,
         });
         if let Some(image) = image {
-            state.update_image(drawing, gpu, image, cx);
+            state.draw_image(image, cx);
             return;
         }
         let (render_tiles, layer) = (cx.tiles, cx.layer);
         let sampler = sampler_state(layer);
-        let RasterState { draw_list, static_geometry, globe_meshes, textures, live_contents } = state;
+        let RasterState { static_geometry, globe_meshes, textures, live_contents, .. } = state;
         let raster_shader = cx.context.shader_key(&programs::RASTER, Uniforms::default(), cx.projection_variant);
         let static_geometry = static_geometry.get_or_insert_with(|| StaticGeometry::new(cx.context));
 
@@ -408,6 +335,7 @@ impl LayerType for Raster {
             }
         }
 
+        let main = begin_draws(cx.draws.main(), layer);
         for (index, tile) in render_tiles.iter().enumerate() {
             let tile_id = tile.id();
             let Some(RasterView::Tile(contents)) = tile.view().filter(|view| view.contents().has_data()) else {
@@ -461,23 +389,24 @@ impl LayerType for Raster {
                 *value = Some(built);
             }
 
-            if let Some(cached) = value.as_ref() {
-                let uniforms = RasterState::uniforms(&tile_id.to_unwrapped(), &cx.frame);
-                draw_list.push(FrameDraw::new(Some(tile_id), &cached.mesh), uniforms);
+            if let Some(made) = value.as_ref() {
+                let at = tile.project(&cx.frame, &transform(&cx.frame));
+                let draw = Draw { order: made.mesh.seq() as i64, ..Draw::DEFAULT };
+                main.push_at(&made.mesh, &at, draw, RasterDrawableUBO { matrix: at.fallback_matrix });
             }
         }
-
-        state.finish_frame_draws(drawing, layer, gpu, cx.context);
     }
 
-    /// A layer whose source shows it nothing keeps no textures.
-    fn update(state: &mut RasterState, _drawing: &mut RasterDrawing, cx: &mut UpdateContext<'_, '_, Raster>) {
+    /// A layer whose source shows it nothing keeps no textures or meshes.
+    fn update(state: &mut RasterState, _drawing: &mut (), cx: &mut UpdateContext<'_, '_, Raster>) {
         if cx.tiles.is_empty() {
+            state.images.clear();
             state.textures.clear();
         }
     }
 
     fn release(state: &mut RasterState) {
+        state.images.clear();
         state.textures.clear();
     }
 }

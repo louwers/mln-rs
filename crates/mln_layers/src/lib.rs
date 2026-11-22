@@ -112,9 +112,9 @@ pub static PROGRAMS: &[&Program] = &[
 /// of the values, and `bind(attrs, vertices)` reads them into the mesh's
 /// instance attributes where it has them, else into its vertex attributes,
 /// which then upload again.
-fn refresh_paint_attributes(
+fn refresh_paint_attributes<B>(
     context: &mut Context,
-    mesh: &Mesh,
+    mesh: &Mesh<B>,
     changes: BucketChanges,
     paint: impl FnOnce(&mut Context) -> Option<SharedVertices>,
     bind: impl FnOnce(&mut VertexAttributeArray, Option<&SharedVertices>),

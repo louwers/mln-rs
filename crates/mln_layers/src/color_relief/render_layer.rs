@@ -10,19 +10,17 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_render::draw::{
-    DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, Indexes, Mesh, RenderStaticData, SharedAttribute,
-    SharedIndexes, SharedTexture, SharedVertices, Textures, TileDraws, TileMap, Uniforms, VertexAttributeArray,
-    cast_matrix, copied_vertices, to_projection_ubo,
+    Draw, DrawGeometry, DrawIndexes, DrawObjects, Indexes, Mesh, RenderStaticData, SharedAttribute, SharedIndexes,
+    SharedTexture, SharedVertices, Textures, TileMap, Uniforms, VertexAttributeArray, copied_vertices,
 };
 use mln_render::layer::{
     DemContents, DrawContext, EvaluateCx, Evaluation, LayerType, LayerValues, NoBucket, NoLayout, RasterLayoutVertex,
+    TileTransform,
 };
 use mln_style::StyleValue as _;
 use mln_style::color_ramp_property_value::ColorRampPropertyValue;
@@ -38,35 +36,27 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use super::programs::{
-    DRAWABLE, ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE,
-    ID_COLOR_RELIEF_IMAGE_TEXTURE, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE,
-    PROPS, TILE_PROPS,
+    ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE, ID_COLOR_RELIEF_IMAGE_TEXTURE,
+    ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE,
 };
 use super::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
 use super::{ColorRelief, programs};
 use crate::mesh::GlobeTileMeshCache;
 
-/// What the layer keeps of a tile: the draw that colors its contents' DEM,
+/// The blocks of each draw of the layer's program.
+type ReliefBlocks = (ColorReliefDrawableUBO, ColorReliefTilePropsUBO);
+
+/// What the layer keeps of a tile: the mesh that colors its contents' DEM,
 /// with the generation of the contents' geometry and the DEM's properties it
-/// was built with.
+/// was made with.
 pub struct ReliefTile {
-    mesh: Mesh,
+    mesh: Mesh<ReliefBlocks>,
     geometry_generation: u64,
     tile_props: ColorReliefTilePropsUBO,
 }
 
-/// A draw's entries in the layer's storage buffers.
-struct ReliefUniforms {
-    draw_ubo: ColorReliefDrawableUBO,
-    tile_props: ColorReliefTilePropsUBO,
-    projection: ProjectionUBO,
-}
-
-/// What a color-relief layer keeps besides its drawing.
+/// What a color-relief layer keeps.
 pub struct ReliefState {
-    /// The frame's draws as the update makes them.
-    draw_list: DrawList<ReliefUniforms>,
-
     // Color ramp data
     color_ramp_size: u32,
     color_ramp_changed: bool,
@@ -101,7 +91,6 @@ impl ReliefState {
         // Initialize color ramp data with RGBA format (4 floats per stop)
         let color_ramp_size = 256;
         let mut state = ReliefState {
-            draw_list: DrawList::default(),
             color_ramp_size,
             color_ramp_changed: true,
             color_ramp_global_state: None,
@@ -250,11 +239,11 @@ impl LayerType for ColorRelief {
     type Bucket = NoBucket;
     type View<'a> = &'a DemContents;
     type Tile = ReliefTile;
-    type Drawing = TileDraws;
+    type Drawing = ();
     type State = ReliefState;
 
-    fn new_layer(layer: &LayerValues<ColorRelief>) -> (ReliefState, TileDraws) {
-        (ReliefState::new(layer), TileDraws::default())
+    fn new_layer(layer: &LayerValues<ColorRelief>) -> (ReliefState, ()) {
+        (ReliefState::new(layer), ())
     }
 
     /// Drops the globe's meshes when the frame isn't on the globe.
@@ -294,19 +283,17 @@ impl LayerType for ColorRelief {
         }
     }
 
-    /// Makes the frame's draws of the layer, those of each of its tiles,
-    /// which it builds for a tile it keeps none of, and writes the layer's
-    /// buffers they read.
+    /// Pushes the frame's draws of the layer, one of each of its tiles,
+    /// whose mesh it makes for a tile it keeps none of.
     fn make_draws(
         state: &mut ReliefState,
-        drawing: &mut TileDraws,
+        _drawing: &mut (),
         tile_values: &mut TileMap<ReliefTile>,
         gpu: &mut dyn Gpu,
         cx: &mut DrawContext<'_, '_, ColorRelief>,
     ) {
-        let (frame, render_tiles, values) = (&cx.frame, cx.tiles, cx.layer);
+        let (frame, render_tiles, values) = (cx.frame, cx.tiles, cx.layer);
         let ReliefState {
-            draw_list,
             color_ramp_size,
             color_ramp_changed,
             elevation_stops_data,
@@ -375,6 +362,10 @@ impl LayerType for ColorRelief {
         live_contents.clear();
         live_contents.extend(render_tiles.iter().filter_map(|tile| Some(tile.view()?.id())));
         dem_textures.retain(|id, _| live_contents.contains(id));
+
+        let opacity = *values.evaluated.paint.color_relief_opacity.uniform();
+        let main = cx.draws.main();
+        main.block(&ColorReliefEvaluatedPropsUBO { opacity, pad_eval0: 0.0, pad_eval1: 0.0, pad_eval2: 0.0 });
 
         let dem_sampler = SamplerState {
             filter: match *values.evaluated.paint.resampling.uniform() {
@@ -497,26 +488,14 @@ impl LayerType for ColorRelief {
                 Log::warning(Event::Render, "ColorRelief: DEM image not valid for tile");
             }
 
-            let Some(cached) = value.as_ref() else {
+            let Some(made) = value.as_ref() else {
                 continue;
             };
-            let projection = frame.projection_data_for_tile(&tile_id.to_unwrapped(), false);
-            let uniforms = ReliefUniforms {
-                draw_ubo: ColorReliefDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) },
-                tile_props: cached.tile_props,
-                projection: to_projection_ubo(&projection),
-            };
-            draw_list.push(FrameDraw::new(Some(tile_id), &cached.mesh), uniforms);
+            let at = tile.project(&frame, &TileTransform::default());
+            let draw = Draw { order: made.mesh.seq() as i64, ..Draw::DEFAULT };
+            let blocks = (ColorReliefDrawableUBO { matrix: at.fallback_matrix }, made.tile_props);
+            main.push_at(&made.mesh, &at, draw, blocks);
         }
-
-        let opacity = *values.evaluated.paint.color_relief_opacity.uniform();
-        drawing.finish(draw_list, gpu, cx.context, |writer| {
-            let props = ColorReliefEvaluatedPropsUBO { opacity, pad_eval0: 0.0, pad_eval1: 0.0, pad_eval2: 0.0 };
-            writer.uniform(PROPS.id, &props);
-            writer.storage(DRAWABLE.id, |uniforms| uniforms.draw_ubo);
-            writer.storage(TILE_PROPS.id, |uniforms| uniforms.tile_props);
-            writer.storage(PROJECTION_BUFFER.id, |uniforms| uniforms.projection);
-        });
     }
 
     fn release(state: &mut ReliefState) {

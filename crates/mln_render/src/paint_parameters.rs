@@ -180,7 +180,7 @@ impl DrawFrame<'_> {
     /// The projection of the tile `tile_id` in the frame, pixel-aligned if
     /// `aligned`.
     #[must_use]
-    pub fn projection_data_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> ProjectionData {
+    pub(crate) fn projection_data_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> ProjectionData {
         self.transform.projection_data_for_tile(tile_id, aligned)
     }
 }

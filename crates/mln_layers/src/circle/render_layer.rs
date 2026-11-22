@@ -3,28 +3,24 @@ use std::sync::Arc;
 
 use geometry::Point;
 use mln_gfx::gpu::Gpu;
-use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::TileProjector;
 use mln_render::draw::{
-    DrawFrame, DrawGeometry, DrawList, DrawObjects, FrameDraw, Mesh, SharedAttribute, Textures, TileDraws, TileMap,
-    UniformWriter, Uniforms, VertexAttributeArray, bucket_indexes, bucket_vertices, cast_matrix, globe_extrude_scale,
-    paint_vertices, projection_data, tile_unit_translation, to_projection_ubo,
+    Draw, DrawFrame, DrawGeometry, DrawObjects, Mesh, SharedAttribute, Textures, TileMap, Uniforms,
+    VertexAttributeArray, bucket_indexes, bucket_vertices, paint_vertices, tile_unit_translation,
 };
 use mln_render::layer::{
     Bucket, DrawContext, EvaluateCx, EvaluatedLayer, Evaluation, FeatureQuery, HitTest, LayerBucket, LayerType,
-    LayerValues, LayoutParameters, SourceLayer,
+    LayerValues, LayoutParameters, SourceLayer, TileProjection, TileTransform,
 };
 use mln_style::expression::EvaluationContext;
 use mln_style_types::{AlignmentType, CirclePitchScaleType};
-use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
 use mln_util::error::Error;
 
 use super::bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
 use super::layout::CircleLayout;
-use super::programs::{DRAWABLE, ID_CIRCLE_POS_VERTEX_ATTRIBUTE, PROPS};
+use super::programs::ID_CIRCLE_POS_VERTEX_ATTRIBUTE;
 use super::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use super::{Circle, programs};
 use crate::refresh_paint_attributes;
@@ -51,69 +47,10 @@ fn project_query_geometry(
     query_geometry.iter().map(|p| project_point(*p, projector, size)).collect()
 }
 
-/// What a circle layer keeps besides its drawing.
-#[derive(Default)]
-pub struct CircleState {
-    /// The frame's draws as the update makes them.
-    draw_list: DrawList<CircleUniforms>,
-}
-
-/// The entries in the layer's storage buffers of the draw of `tile_id`,
-/// whose bucket's binders are `binders`, with the layer's values `layer`:
-/// its matrix, the scales of its circles' extrusion, and the
-/// interpolation of the layer's values.
-fn uniforms(
-    layer: &EvaluatedLayer<Circle>,
-    tile_id: &OverscaledTileID,
-    binders: &CircleBinders,
-    frame: &DrawFrame<'_>,
-) -> CircleUniforms {
-    const IN_VIEWPORT_PIXEL_UNITS: bool = false;
-    const NEAR_CLIPPED: bool = false;
+/// The layer's block of its values that don't depend on the tile.
+fn props(layer: &EvaluatedLayer<Circle>) -> CircleEvaluatedPropsUBO {
     let evaluated = &layer.paint;
-    let zoom = frame.view.zoom() as f32;
-    let tile_id = tile_id.to_unwrapped();
-    let projection = projection_data(
-        &tile_id,
-        frame,
-        *evaluated.circle_translate.uniform(),
-        *evaluated.circle_translate_anchor.uniform(),
-        NEAR_CLIPPED,
-        IN_VIEWPORT_PIXEL_UNITS,
-        None,
-        false,
-    );
-
-    let pitch_with_map = *evaluated.circle_pitch_alignment.uniform() == AlignmentType::Map;
-    let pixels_to_tile_units = tile_id.pixels_to_tile_units(1.0, zoom);
-    let latitude_scale = frame.view.projection().circle_radius_correction(frame.view);
-    CircleUniforms {
-        draw_ubo: CircleDrawableUBO {
-            matrix: cast_matrix(&projection.fallback_matrix),
-            extrude_scale: if pitch_with_map {
-                [pixels_to_tile_units, pixels_to_tile_units]
-            } else {
-                frame.pixels_to_gl_units
-            },
-            color_t: binders.circle_color.interpolation_factor(zoom),
-            radius_t: binders.circle_radius.interpolation_factor(zoom),
-            blur_t: binders.circle_blur.interpolation_factor(zoom),
-            opacity_t: binders.circle_opacity.interpolation_factor(zoom),
-            stroke_color_t: binders.circle_stroke_color.interpolation_factor(zoom),
-            stroke_width_t: binders.circle_stroke_width.interpolation_factor(zoom),
-            stroke_opacity_t: binders.circle_stroke_opacity.interpolation_factor(zoom),
-            globe_extrude_scale: globe_extrude_scale(&tile_id, zoom, latitude_scale),
-            pad2: 0.0,
-            pad3: 0.0,
-        },
-        projection: to_projection_ubo(&projection),
-    }
-}
-
-/// Writes the layer's buffers of the frame's draws.
-fn write_uniforms(layer: &EvaluatedLayer<Circle>, writer: &mut UniformWriter<'_, CircleUniforms>) {
-    let evaluated = &layer.paint;
-    let props = CircleEvaluatedPropsUBO {
+    CircleEvaluatedPropsUBO {
         color: evaluated.circle_color.uniform().to_float_array(),
         stroke_color: evaluated.circle_stroke_color.uniform().to_float_array(),
         radius: *evaluated.circle_radius.uniform(),
@@ -124,25 +61,47 @@ fn write_uniforms(layer: &EvaluatedLayer<Circle>, writer: &mut UniformWriter<'_,
         scale_with_map: (*evaluated.circle_pitch_scale.uniform() == CirclePitchScaleType::Map).into(),
         pitch_with_map: (*evaluated.circle_pitch_alignment.uniform() == AlignmentType::Map).into(),
         pad1: 0.0,
-    };
-    writer.uniform(PROPS.id, &props);
-    writer.storage(DRAWABLE.id, |uniforms| uniforms.draw_ubo);
-    writer.storage(PROJECTION_BUFFER.id, |uniforms| uniforms.projection);
+    }
 }
 
-/// A draw's entries in the layer's storage buffers.
-struct CircleUniforms {
-    draw_ubo: CircleDrawableUBO,
-    projection: ProjectionUBO,
+/// The block of the draw of a tile projected as `at`, whose bucket's
+/// binders are `binders`, with the layer's values `layer`: the scales of
+/// its circles' extrusion and the interpolation of the layer's values.
+fn drawable(
+    layer: &EvaluatedLayer<Circle>,
+    binders: &CircleBinders,
+    at: &TileProjection,
+    frame: &DrawFrame<'_>,
+) -> CircleDrawableUBO {
+    let zoom = frame.view.zoom() as f32;
+    let pitch_with_map = *layer.paint.circle_pitch_alignment.uniform() == AlignmentType::Map;
+    CircleDrawableUBO {
+        matrix: at.fallback_matrix,
+        extrude_scale: if pitch_with_map {
+            [at.pixels_to_tile_units, at.pixels_to_tile_units]
+        } else {
+            frame.pixels_to_gl_units
+        },
+        color_t: binders.circle_color.interpolation_factor(zoom),
+        radius_t: binders.circle_radius.interpolation_factor(zoom),
+        blur_t: binders.circle_blur.interpolation_factor(zoom),
+        opacity_t: binders.circle_opacity.interpolation_factor(zoom),
+        stroke_color_t: binders.circle_stroke_color.interpolation_factor(zoom),
+        stroke_width_t: binders.circle_stroke_width.interpolation_factor(zoom),
+        stroke_opacity_t: binders.circle_stroke_opacity.interpolation_factor(zoom),
+        globe_extrude_scale: at.globe_extrude_scale,
+        pad2: 0.0,
+        pad3: 0.0,
+    }
 }
 
 impl LayerType for Circle {
     type Layout = CircleLayout;
     type Bucket = CircleBucket;
     type View<'a> = LayerBucket<'a, Circle>;
-    type Tile = Mesh;
-    type Drawing = TileDraws;
-    type State = CircleState;
+    type Tile = Mesh<CircleDrawableUBO>;
+    type Drawing = ();
+    type State = ();
 
     fn create_layout(
         group: &[Arc<EvaluatedLayer<Circle>>],
@@ -156,11 +115,11 @@ impl LayerType for Circle {
         Some(&Circle)
     }
 
-    fn new_layer(_layer: &LayerValues<Circle>) -> (CircleState, TileDraws) {
-        Default::default()
+    fn new_layer(_layer: &LayerValues<Circle>) -> ((), ()) {
+        ((), ())
     }
 
-    fn evaluate(_state: &mut CircleState, cx: EvaluateCx<'_, Circle>) -> Evaluation {
+    fn evaluate(_state: &mut (), cx: EvaluateCx<'_, Circle>) -> Evaluation {
         let evaluated = &cx.evaluated.paint;
         if (evaluated.circle_radius.constant_or(&1.0) > 0.0 || evaluated.circle_stroke_width.constant_or(&1.0) > 0.0)
             && (evaluated.circle_color.constant_or(&Color::black()).a > 0.0
@@ -174,22 +133,26 @@ impl LayerType for Circle {
         }
     }
 
-    /// Makes the frame's draws of the layer, one of each of its tiles, which
-    /// it builds for a tile it keeps none of, and writes the layer's buffers
-    /// they read.
+    /// Pushes the frame's draws of the layer, one of each of its tiles,
+    /// whose mesh it makes for a tile it keeps none of.
     fn make_draws(
-        state: &mut CircleState,
-        drawing: &mut TileDraws,
-        tile_values: &mut TileMap<Mesh>,
-        gpu: &mut dyn Gpu,
+        _state: &mut (),
+        _drawing: &mut (),
+        tile_values: &mut TileMap<Mesh<CircleDrawableUBO>>,
+        _gpu: &mut dyn Gpu,
         cx: &mut DrawContext<'_, '_, Circle>,
     ) {
         let layer_id = cx.layer.id();
         let layer = &*cx.layer.evaluated;
         let evaluated = &layer.paint;
-        let frame = &cx.frame;
+        let how = TileTransform {
+            translate: *evaluated.circle_translate.uniform(),
+            anchor: *evaluated.circle_translate_anchor.uniform(),
+            ..TileTransform::default()
+        };
+        let main = cx.draws.main();
+        main.block(&props(layer));
         for (index, tile) in cx.tiles.iter().enumerate() {
-            let tile_id = tile.id();
             let render_data = tile.view_to_draw();
             let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
                 continue;
@@ -208,7 +171,7 @@ impl LayerType for Circle {
                 )
             };
 
-            // The draw's attributes read the bucket's vertices in the
+            // The mesh's attributes read the bucket's vertices in the
             // context's store, which upload again when they change.
             let changes = tile_values.take_changes(index);
             let value = tile_values.get_mut(index);
@@ -251,15 +214,13 @@ impl LayerType for Circle {
                 *value = Some(context.add_mesh(objects));
             }
 
-            let Some(draw) = value.as_ref().map(|mesh| FrameDraw::new(Some(tile_id), mesh)) else {
+            let Some(mesh) = value.as_ref() else {
                 continue;
             };
-            state.draw_list.push(draw, uniforms(layer, &tile_id, binders, frame));
+            let at = tile.project(&cx.frame, &how);
+            let draw = Draw { order: mesh.seq() as i64, ..Draw::DEFAULT };
+            main.push_at(mesh, &at, draw, drawable(layer, binders, &at, &cx.frame));
         }
-
-        drawing.finish(&mut state.draw_list, gpu, cx.context, |writer| {
-            write_uniforms(layer, writer);
-        });
     }
 }
 
