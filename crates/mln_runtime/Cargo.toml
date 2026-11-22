@@ -74,6 +74,9 @@ wgpu = { workspace = true, optional = true }
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 mln_storage = { workspace = true, features = ["sqlite"] }
 mln_storage_offline.workspace = true
+# Font faces, the device's fonts among them, shaped in-process: natively
+# there is no second module to load a shaper from.
+mln_renderer = { workspace = true, features = ["font-face-shaper"] }
 
 # The browser build's instance: its pump, tile workers in Web Workers and
 # canvases.
