@@ -110,7 +110,8 @@ fn anchors(camera: &View, at: LatLng) -> impl Iterator<Item = Anchor> + use<> {
     let pixels_to_tile_units = f64::from(EXTENT) / (TILE_SIZE * 2f64.powf(camera.zoom() - f64::from(zoom)));
     let anchors = copies.into_iter().filter_map(move |(wrap, p)| {
         let (x, y) = (p.x * tiles, p.y * tiles);
-        let canonical = CanonicalTileID::new(zoom, x as u32, (y.max(0.0) as u32).min((tiles as u32) - 1));
+        let last = tiles as u32 - 1;
+        let canonical = CanonicalTileID::new(zoom, (x as u32).min(last), (y.max(0.0) as u32).min(last));
         let tile = UnwrappedTileID::with_wrap(wrap, canonical);
         let extent = f64::from(EXTENT);
         let point = [(x - f64::from(canonical.x)) * extent, (y - f64::from(canonical.y)) * extent];
@@ -150,6 +151,22 @@ mod tests {
             (expected.x - actual.x).abs() < 1e-6 && (expected.y - actual.y).abs() < 1e-6,
             "{expected:?} {actual:?}"
         );
+    }
+
+    #[test]
+    fn an_anchor_just_west_of_the_antimeridian_lies_in_a_tile_of_the_zoom() {
+        let state = camera(0.0, 179.0, 3.0, false);
+        // Each projects to the world's east edge.
+        for longitude in [180f64.next_down(), -540.0] {
+            let at = LatLng::saturating(10.0, longitude, WrapMode::Unwrapped);
+            let mut count = 0;
+            for anchor in anchors(state.view(), at) {
+                assert_eq!(7, anchor.tile.canonical.x, "{longitude}");
+                assert_eq!(f64::from(EXTENT), anchor.point[0], "{longitude}");
+                count += 1;
+            }
+            assert_ne!(0, count, "{longitude}");
+        }
     }
 
     #[test]
