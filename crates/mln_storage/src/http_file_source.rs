@@ -6,7 +6,7 @@
 //
 // Request headers as in C++: `Range` for data ranges, `If-None-Match` from
 // the prior etag, else `If-Modified-Since` from the prior modification date,
-// user agent "MapLibreNative/1.0", redirects followed. A tile or image
+// user agent `USER_AGENT`, redirects followed. A tile or image
 // request also sends an `Accept` naming what it decodes as (`accept_header`),
 // so that a server that serves a tileset as either MVT or MLT, such as
 // Martin, sends the format the source's `encoding` names. Then the host's
@@ -41,6 +41,10 @@ use crate::http_header_transform::{HttpHeaderTransform, HttpHeaders};
 use crate::request::Responder;
 use crate::resource::{Kind, Resource, TileFormat};
 use crate::response::{Caching, Reason, ResourceError, Response};
+
+/// The `User-Agent` of every network request: the crate's name and version.
+#[cfg_attr(target_family = "wasm", allow(dead_code))]
+pub(crate) const USER_AGENT: &str = concat!("mln-rs/", env!("CARGO_PKG_VERSION"));
 
 /// The value of `line` if it is the header `name`, matched as an
 /// ASCII-case-insensitive prefix.

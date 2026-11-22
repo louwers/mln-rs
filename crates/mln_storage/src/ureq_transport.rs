@@ -44,7 +44,9 @@ use ureq::unversioned::transport::{
     Transport as UreqTransport,
 };
 
-use crate::http_file_source::{HttpTransport, Transfer, TransferRequest, accept_header, range_header, same_origin};
+use crate::http_file_source::{
+    HttpTransport, Transfer, TransferRequest, USER_AGENT, accept_header, range_header, same_origin,
+};
 use crate::redirect::redirect_url;
 use crate::resource::Resource;
 use crate::response::{Reason, ResourceError};
@@ -464,7 +466,7 @@ impl Client {
             .http_status_as_error(false)
             .max_idle_connections(WORKERS)
             .max_idle_connections_per_host(WORKERS)
-            .user_agent("MapLibreNative/1.0")
+            .user_agent(USER_AGENT)
             .tls_config(tls_config())
             .build();
         // ureq's DefaultConnector with HappyEyeballsConnector for its
@@ -655,6 +657,46 @@ mod tests {
         // The families alternate: the IPv4 address goes second, after
         // HAPPY_EYEBALLS_DELAY.
         assert_eq!([dropped[0], server], attempts.lock()[..2]);
+    }
+
+    /// Answers each connection of `listener` with a redirect to `/next` once,
+    /// then a 200, and sends the `User-Agent` of every request down `agents`.
+    #[test]
+    fn sends_the_user_agent_on_every_request_of_a_redirect() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (agents, received) = mpsc::channel();
+        std::thread::spawn(move || {
+            for response in [
+                "HTTP/1.1 302 Found\r\nLocation: /next\r\nContent-Length: 0\r\n\r\n",
+                "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok",
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0; 1024];
+                while !request.ends_with(b"\r\n\r\n") {
+                    let read = stream.read(&mut buffer).unwrap();
+                    if read == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&buffer[..read]);
+                }
+                let request = String::from_utf8_lossy(&request).into_owned();
+                let agent = request
+                    .lines()
+                    .find_map(|line| line.to_ascii_lowercase().strip_prefix("user-agent: ").map(str::to_owned));
+                agents.send(agent).unwrap();
+                stream.write_all(response.as_bytes()).unwrap();
+            }
+        });
+
+        let transfer = Client::new()
+            .transfer(&Resource::style(&format!("http://{addr}/style.json")), &[("Accept".into(), "*/*".into())])
+            .unwrap();
+        assert_eq!(200, transfer.status);
+        let expected = Some(USER_AGENT.to_ascii_lowercase());
+        assert_eq!(expected, received.recv().unwrap());
+        assert_eq!(expected, received.recv().unwrap());
     }
 
     /// Takes one connection on a loopback port and never answers it.

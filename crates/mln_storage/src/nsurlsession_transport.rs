@@ -5,7 +5,7 @@
 //! The session follows redirects itself and has no URL cache (the ambient
 //! cache is the file source's own). It sends the request headers the ureq
 //! transport sends (`Range`, `If-None-Match` or `If-Modified-Since`,
-//! `Accept`, user agent "MapLibreNative/1.0"), plus `Accept-Encoding:
+//! `Accept`, `User-Agent`), plus `Accept-Encoding:
 //! identity` with a `Range`, since a range of a compressed body can't be
 //! decompressed. The response headers the file source reads go to the
 //! `Transfer`; `NSHTTPURLResponse` joins a header's lines with commas.
@@ -37,7 +37,9 @@ use objc2_foundation::{
 };
 use parking_lot::Mutex;
 
-use crate::http_file_source::{HttpTransport, Transfer, TransferRequest, accept_header, range_header, same_origin};
+use crate::http_file_source::{
+    HttpTransport, Transfer, TransferRequest, USER_AGENT, accept_header, range_header, same_origin,
+};
 use crate::response::{Reason, ResourceError};
 
 /// How long a transfer may go without receiving data before it fails with
@@ -236,7 +238,7 @@ fn url_request(request: &TransferRequest) -> Option<Retained<NSMutableURLRequest
     if let Some(accept) = accept_header(resource, request.headers()) {
         set_header("Accept", accept);
     }
-    set_header("User-Agent", "MapLibreNative/1.0");
+    set_header("User-Agent", USER_AGENT);
     for (name, value) in request.headers() {
         set_header(name, value);
     }
