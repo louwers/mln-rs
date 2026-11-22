@@ -1073,6 +1073,11 @@ fn online_file_source_test() -> MapTest<OnlineFileSource> {
     MapTest::create(run_loop, file_source, 1.0, MapMode::Static)
 }
 
+/// The seconds a style test that loads from the test's HTTP server waits
+/// for the map at most: against a hang, with room for a reply that takes
+/// seconds on a machine that runs many tests at once.
+const SERVER_TIMEOUT: u64 = 30;
+
 // Test for https://github.com/mapbox/mapbox-gl-native/issues/7902
 // gtest: Map.StyleNetworkErrorRetry
 #[test]
@@ -1087,7 +1092,7 @@ fn style_network_error_retry() {
 
     test.map().load_style_url(&server.url("/style-fail-once-500"));
 
-    run_with_timeout(&test.run_loop, 10);
+    run_with_timeout(&test.run_loop, SERVER_TIMEOUT);
 }
 
 // gtest: Map.StyleNotFound
@@ -1112,11 +1117,11 @@ fn style_not_found() {
     // Loaded once the callbacks are set: the map's events reach the observer
     // as the call returns, the reply's too if it came by then.
     test.map().load_style_url(&server.url("/style-fail-once-404"));
-    run_with_timeout(&test.run_loop, 10);
+    run_with_timeout(&test.run_loop, SERVER_TIMEOUT);
 
     // Should also not retry if the response has cache headers.
     test.map().load_style_url(&server.url("/style-fail-once-404-cache"));
-    run_with_timeout(&test.run_loop, 10);
+    run_with_timeout(&test.run_loop, SERVER_TIMEOUT);
 }
 
 // gtest: Map.AddLayer
