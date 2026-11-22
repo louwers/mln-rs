@@ -9,17 +9,17 @@ use super::{
     BucketKey, CollisionGroups, Placed, PlacementBuckets, PlacementContext, PlacementPass, PlacementQuery,
     PlacingLayer, Prepared,
 };
-use crate::bucket::Bucket;
-use crate::layer::LayerType;
-use crate::render_layer::{Layer, RenderLayer};
+use crate::bucket::ErasedBucket;
+use crate::layer::Layer;
+use crate::render_layer::{Hosted, RenderLayer};
 use crate::tile_values::ChangedBuckets;
 use crate::update_parameters::UpdateParameters;
 
 /// The buckets of laid-out tiles, by their keys: the tile store's, or the
 /// copies that the benchmarks hold.
 pub(crate) trait LaidBuckets {
-    fn bucket(&self, key: &BucketKey) -> Option<&dyn Bucket>;
-    fn bucket_mut(&mut self, key: &BucketKey) -> Option<&mut dyn Bucket>;
+    fn bucket(&self, key: &BucketKey) -> Option<&dyn ErasedBucket>;
+    fn bucket_mut(&mut self, key: &BucketKey) -> Option<&mut dyn ErasedBucket>;
 }
 
 /// What the engine hands its placement pass of a frame: the frame's layers
@@ -59,25 +59,22 @@ pub(crate) trait ErasedPlacement {
 }
 
 /// The placement pass of the layer type `T`.
-pub(crate) struct TypedPlacement<T: LayerType>(Box<dyn PlacementPass<T>>);
+pub(crate) struct TypedPlacement<T: Layer>(Box<dyn PlacementPass<T>>);
 
 /// `pass`, as the engine holds it.
-pub(crate) fn typed<T: LayerType>(pass: Box<dyn PlacementPass<T>>) -> Box<dyn ErasedPlacement> {
+pub(crate) fn typed<T: Layer>(pass: Box<dyn PlacementPass<T>>) -> Box<dyn ErasedPlacement> {
     Box::new(TypedPlacement(pass))
 }
 
 /// Runs `hook` with the context of `frame` for a pass of the type `T`: the
 /// frame's layers of the type, as the type sees them.
-fn with_context<T: LayerType, R>(
-    frame: &mut ErasedFrame<'_>,
-    hook: impl FnOnce(&mut PlacementContext<'_, T>) -> R,
-) -> R {
+fn with_context<T: Layer, R>(frame: &mut ErasedFrame<'_>, hook: impl FnOnce(&mut PlacementContext<'_, T>) -> R) -> R {
     let layers: SmallVec<[PlacingLayer<'_, T>; 8]> = frame
         .layers
         .iter()
         .filter_map(|&layer| {
             let layer: &dyn Any = layer;
-            layer.downcast_ref::<Layer<T>>().map(Layer::placing)
+            layer.downcast_ref::<Hosted<T>>().map(Hosted::placing)
         })
         .collect();
     debug_assert_eq!(layers.len(), frame.layers.len(), "a layer of another type than its placement's");
@@ -88,7 +85,7 @@ fn with_context<T: LayerType, R>(
     })
 }
 
-impl<T: LayerType> ErasedPlacement for TypedPlacement<T> {
+impl<T: Layer> ErasedPlacement for TypedPlacement<T> {
     fn prepare(&mut self, frame: &mut ErasedFrame<'_>) -> Prepared {
         with_context(frame, |cx| self.0.prepare(cx))
     }

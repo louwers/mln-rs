@@ -12,7 +12,7 @@ use mln_vec_map::VecSet;
 use mln_wire::{Context, Reader, Request, Wire, Writer};
 
 use crate::Registry;
-use crate::bucket::Bucket;
+use crate::bucket::ErasedBucket;
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::geometry::feature_index::FeatureIndex;
 use crate::tile::contents::{LayoutBuckets, LayoutResult};
@@ -163,7 +163,7 @@ impl Context for Tables {
 
 /// A bucket and the ids of the layers that render it with the properties
 /// they were laid out with.
-type RenderedBucket<'a> = (&'a dyn Bucket, Vec<(&'a String, &'a Arc<dyn ErasedEvaluatedLayer>)>);
+type RenderedBucket<'a> = (&'a dyn ErasedBucket, Vec<(&'a String, &'a Arc<dyn ErasedEvaluatedLayer>)>);
 
 impl LayoutResult {
     /// Each bucket with the layers that render it, in layer id order.

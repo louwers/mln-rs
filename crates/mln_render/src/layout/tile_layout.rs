@@ -157,7 +157,7 @@ pub(crate) struct Built {
 }
 
 /// Groups the layers, builds the layouts of the groups that can need glyphs
-/// or images ([`LayerType::layout_can_need_dependencies`](crate::layer::LayerType::layout_can_need_dependencies)),
+/// or images ([`Layout::needs_resources`](crate::layer::Layout::needs_resources)),
 /// and records what they need. It builds no bucket.
 pub(crate) fn discover(input: &LayoutInput<'_>) -> Result<Discovered, Error> {
     let mut discovered = Discovered {
@@ -248,12 +248,12 @@ pub(crate) fn build(discovered: Discovered, input: &LayoutInput<'_>, resolved: &
         };
         match layout {
             Some(layout) if layout.has_dependencies() => waiting.push(layout),
-            Some(mut layout) => layout.create_bucket(None, &mut built, &build)?,
+            Some(layout) => layout.create_bucket(None, &mut built, &build)?,
             None => {}
         }
     }
 
-    for mut layout in waiting {
+    for layout in waiting {
         layout.create_bucket(Some(resolved), &mut built, &build)?;
     }
     built.buckets.shrink_to_fit();

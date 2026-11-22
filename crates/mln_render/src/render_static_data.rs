@@ -3,7 +3,7 @@ use std::cell::Cell;
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_util::constants;
 
-use crate::gfx::context::Context;
+use crate::gfx::context::Resources;
 use crate::gfx::indexes::{Indexes, SharedIndexes};
 use crate::gfx::store::{IndexesKey, WeakShared};
 use crate::tile::raster::RasterLayoutVertex;
@@ -23,7 +23,7 @@ impl RenderStaticData {
     /// [`quad_indices`](Self::quad_indices) in `context`'s store, which the
     /// layers that draw quads four vertices apart share: they stay in the
     /// store while a layer holds them.
-    pub fn quad_indexes(&self, context: &mut Context) -> SharedIndexes {
+    pub fn quad_indexes(&self, context: &mut Resources) -> SharedIndexes {
         let held = self.quad_indexes.take().upgrade();
         let indexes = held.unwrap_or_else(|| context.add_indexes(Indexes::new(Self::quad_indices())));
         self.quad_indexes.set(indexes.downgrade());

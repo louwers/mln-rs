@@ -3,13 +3,11 @@
 //! what it shows between placements. The built-in symbol type places
 //! through it. Anything here can change or go in any release.
 //!
-//! A layer type whose layers place declares a [`PlacementPass`]
-//! ([`LayerType::PLACEMENT`]): the pass over every layer of the type that
-//! the frame draws, which owns the order it places them in and what it
-//! keeps of their buckets between frames. A registry has at most one such
-//! type: [`add_layer_type`](crate::RegistryBuilder::add_layer_type) refuses
-//! a second. The pass runs on the renderer's thread, and nothing of it
-//! crosses the worker codec.
+//! A layer type whose layers place has a [`PlacementPass`]: the pass over
+//! every layer of the type that the frame draws, which owns the order it
+//! places them in and what it keeps of their buckets between frames. The
+//! pass runs on the renderer's thread, and nothing of it crosses the worker
+//! codec.
 //!
 //! The engine keeps the placement's schedule: it decides each frame
 //! whether the pass places again, keeps the clock its fade runs on, and
@@ -28,33 +26,30 @@ mod groups;
 mod schedule;
 
 use std::any::Any;
-use std::marker::PhantomData;
 
 use mln_style::expression::GlobalStateMap;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::geo::ScreenCoordinate;
 
-pub(crate) use self::erased::{ErasedFrame, ErasedPlacement, LaidBuckets, typed};
+pub(crate) use self::erased::{ErasedFrame, ErasedPlacement, LaidBuckets};
 pub use self::grid::{Aabb, Grid, Shape};
 pub use self::groups::CollisionGroups;
 pub(crate) use self::schedule::Schedule;
-use crate::erased_layer::{recover_bucket, recover_bucket_mut};
 use crate::geometry::feature_index::{FeatureIndex, FeatureSelection, QueryLayers, QueryResults};
-use crate::layer::{LayerType, LayerValues};
+use crate::layer::{Bucket, Layer, LayerValues};
 use crate::query::RenderedQueryOptions;
 use crate::tile::job::SourceKey;
 use crate::tile_values::ChangedBuckets;
 use crate::update_parameters::UpdateParameters;
 
-/// What makes a [`PlacementPass`] of the layer type `T`, which a type whose
-/// layers place declares ([`LayerType::PLACEMENT`]).
+/// What makes a [`PlacementPass`] of the layer type `T`.
 pub type NewPlacement<T> = fn() -> Box<dyn PlacementPass<T>>;
 
 /// The placement pass of the layer type `T`: the capability of a type whose
-/// layers place, which it declares with [`LayerType::PLACEMENT`]. The
-/// engine makes one pass per renderer, and drives it on its schedule.
-pub trait PlacementPass<T: LayerType>: Any {
+/// layers place. The engine makes one pass per renderer, and drives it on
+/// its schedule.
+pub trait PlacementPass<T: Layer>: Any {
     /// Readies the frame's placement, in each frame's update, before the
     /// schedule decides whether to place: brings what the pass keeps of the
     /// layers' buckets from frame to frame up to date with `cx`'s.
@@ -91,22 +86,22 @@ pub trait PlacementPass<T: LayerType>: Any {
 
 /// What a [`PlacementPass`] reads of the frame: its layers of the pass's
 /// type, the frame's update and the buckets of its tiles.
-pub struct PlacementContext<'a, T: LayerType> {
+pub struct PlacementContext<'a, T: Layer> {
     /// The layers of the type that the frame draws, bottom to top.
     pub layers: &'a [PlacingLayer<'a, T>],
     /// The update the frame draws.
     pub update_parameters: &'a UpdateParameters,
     /// The buckets of the frame's tiles, which the layers' updates found.
-    pub buckets: PlacementBuckets<'a, T>,
+    pub buckets: PlacementBuckets<'a>,
 }
 
 /// A layer that a [`PlacementPass`] places: its values, and what its type
 /// keeps of it, which the layer's update filled.
-pub struct PlacingLayer<'a, T: LayerType> {
+pub struct PlacingLayer<'a, T: Layer> {
     /// The layer's values.
-    pub layer: &'a LayerValues<T>,
-    /// What the layer's type keeps of it besides its drawing.
-    pub state: &'a T::State,
+    pub layer: &'a LayerValues<T::Style>,
+    /// The layer.
+    pub state: &'a T,
 }
 
 /// What a frame's [`PlacementPass::prepare`] tells the schedule.
@@ -138,8 +133,7 @@ pub struct Placed {
 }
 
 /// Where a bucket a frame's layer draws is among the frame's tiles, which
-/// the layer's update takes ([`UpdateContext::bucket_key`](crate::layer::UpdateContext::bucket_key))
-/// for its placement to find it by ([`PlacementBuckets`]).
+/// its placement finds it by ([`PlacementBuckets`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BucketKey {
     /// The bucket's index among its tile's buckets.
@@ -151,27 +145,26 @@ pub struct BucketKey {
     pub(crate) source: SourceKey,
 }
 
-/// The buckets of the frame's tiles as a [`PlacementPass`] of the type `T`
-/// reads and changes them, by their [`BucketKey`]s.
-pub struct PlacementBuckets<'a, T: LayerType> {
+/// The buckets of the frame's tiles as a [`PlacementPass`] reads and
+/// changes them, by their [`BucketKey`]s.
+pub struct PlacementBuckets<'a> {
     store: &'a mut dyn LaidBuckets,
-    _type: PhantomData<fn() -> T>,
 }
 
-impl<'a, T: LayerType> PlacementBuckets<'a, T> {
+impl<'a> PlacementBuckets<'a> {
     pub(crate) fn new(store: &'a mut dyn LaidBuckets) -> Self {
-        PlacementBuckets { store, _type: PhantomData }
+        PlacementBuckets { store }
     }
 
-    /// The bucket at `key`, if it is there and is the type's.
+    /// The bucket at `key`, if it is there and is a `B`.
     #[must_use]
-    pub fn get(&self, key: &BucketKey) -> Option<&T::Bucket> {
-        recover_bucket::<T>(self.store.bucket(key)?)
+    pub fn get<B: Bucket>(&self, key: &BucketKey) -> Option<&B> {
+        self.store.bucket(key)?.downcast_ref()
     }
 
     /// [`get`](Self::get), to change.
-    pub fn get_mut(&mut self, key: &BucketKey) -> Option<&mut T::Bucket> {
-        recover_bucket_mut::<T>(self.store.bucket_mut(key)?)
+    pub fn get_mut<B: Bucket>(&mut self, key: &BucketKey) -> Option<&mut B> {
+        self.store.bucket_mut(key)?.downcast_mut()
     }
 }
 

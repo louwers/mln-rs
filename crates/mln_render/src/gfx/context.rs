@@ -38,12 +38,15 @@ use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::vertex_attribute::Uniforms;
 use crate::gfx::vertices::{SharedVertices, TypedVertices, VertexStore, Vertices};
 
-/// The renderer's GPU state over its backend's `Gpu`: the device's caps,
-/// the keys of the programs' shaders, the color modes, the stores of the
-/// textures, indexes and vertices that draws share, and that of the draws'
-/// GPU objects. The renderer owns it and lends it to the frame's hooks.
-pub struct Context {
+/// The renderer's GPU resources: the buffers, textures and meshes that
+/// layers make and keep handles of, with what the device allows
+/// ([`caps`](Self::caps)). The renderer owns them and lends them to a
+/// layer's hooks. Writes to a resource reach the GPU in the frame's encode,
+/// before its passes.
+pub struct Resources {
     device: Device,
+    /// The projection that meshes made now draw in: the frame's.
+    projection_variant: ProjectionVariant,
     caps: Caps,
     global_uniform_buffers: UniformBufferArray,
     /// The sampler of each state a texture is sampled with.
@@ -82,13 +85,14 @@ pub struct Context {
     torn_down: bool,
 }
 
-impl Context {
+impl Resources {
     /// The renderer's state over a `Gpu` of `caps`, for draws at
     /// `pixel_ratio` device pixels per logical pixel.
     #[must_use]
-    pub(crate) fn new(caps: Caps, pixel_ratio: f32) -> Context {
-        Context {
+    pub(crate) fn new(caps: Caps, pixel_ratio: f32) -> Resources {
+        Resources {
             device: Device::default(),
+            projection_variant: ProjectionVariant::Mercator,
             caps,
             global_uniform_buffers: UniformBufferArray::default(),
             samplers: HashMap::default(),
@@ -117,6 +121,41 @@ impl Context {
     #[must_use]
     pub fn caps(&self) -> &Caps {
         &self.caps
+    }
+
+    /// A buffer of `data`.
+    pub fn buffer<V: bytemuck::Pod>(&mut self, data: &[V]) -> crate::draw::Buffer<V> {
+        let vertices = self.add_vertices(data.to_vec());
+        crate::draw::Buffer::new(crate::handles::BufferEntry::Vertices(vertices), data.len())
+    }
+
+    /// A texture, which `setup` gives its format, sampler and first image.
+    pub fn texture(&mut self, setup: impl FnOnce(&mut TextureMut<'_>)) -> crate::draw::Texture {
+        crate::draw::Texture(self.add_texture_with(setup))
+    }
+
+    /// `texture`, to change: the meshes that sample it see the change.
+    pub fn texture_mut(&mut self, texture: &crate::draw::Texture) -> TextureMut<'_> {
+        let Some(texture) = self.textures.get_mut(&texture.0) else {
+            unreachable!("a texture handle outlives its entry");
+        };
+        TextureMut::new(texture)
+    }
+
+    /// The size of `texture`, in texels.
+    #[must_use]
+    pub fn size(&self, texture: &crate::draw::Texture) -> Size {
+        self.textures.get(&texture.0).map_or_else(|| Size::new(0, 0), Texture2D::size)
+    }
+
+    /// The projection that meshes made now draw in.
+    pub(crate) fn projection_variant(&self) -> ProjectionVariant {
+        self.projection_variant
+    }
+
+    /// Makes `variant` the projection that meshes made from now on draw in.
+    pub(crate) fn set_projection_variant(&mut self, variant: ProjectionVariant) {
+        self.projection_variant = variant;
     }
 
     /// The channel type of a render target's color texture, which draws
@@ -161,7 +200,7 @@ impl Context {
     /// dropped keeps its GPU memory until then. Not while a pass is open on
     /// `gpu`.
     pub(crate) fn destroy_released(&mut self, gpu: &mut dyn Gpu) {
-        let Context { device, textures, indexes, vertices, meshes, releases, doomed, .. } = self;
+        let Resources { device, textures, indexes, vertices, meshes, releases, doomed, .. } = self;
         // The bindings made of buffers that arrays replaced go first, in
         // this batch, before those buffers.
         if !device.retired_epochs.is_empty() {
@@ -211,7 +250,7 @@ impl Context {
     /// Keeps `objects`, the GPU objects of a draw, while the returned mesh
     /// lasts, made after every mesh the context made before it
     /// ([`Mesh::seq`]).
-    pub fn add_mesh<B>(&mut self, objects: DrawObjects) -> Mesh<B> {
+    pub(crate) fn add_mesh<B>(&mut self, objects: DrawObjects) -> Mesh<B> {
         let seq = self.next_mesh_seq;
         self.next_mesh_seq += 1;
         let program = objects.program();
@@ -220,19 +259,25 @@ impl Context {
 
     /// The GPU objects of `mesh`.
     #[must_use]
-    pub fn mesh<B>(&self, mesh: &Mesh<B>) -> Option<&DrawObjects> {
+    pub(crate) fn mesh_objects<B>(&self, mesh: &Mesh<B>) -> Option<&DrawObjects> {
         self.meshes.get(mesh.handle()).map(|objects| &**objects)
     }
 
     /// The GPU objects of `mesh`, to change.
-    pub fn mesh_mut<B>(&mut self, mesh: &Mesh<B>) -> Option<&mut DrawObjects> {
+    pub(crate) fn mesh_mut<B>(&mut self, mesh: &Mesh<B>) -> Option<&mut DrawObjects> {
         self.meshes.get_mut(mesh.handle()).map(|objects| &mut **objects)
     }
 
     /// Writes `value` to the uniform buffer `id` of `mesh`'s own, which its
     /// draws bind over their frame's.
-    pub fn write_mesh_uniform<B, T: bytemuck::Pod>(&mut self, gpu: &mut dyn Gpu, mesh: &Mesh<B>, id: usize, value: &T) {
-        let Context { device, meshes, .. } = self;
+    pub(crate) fn write_mesh_uniform<B, T: bytemuck::Pod>(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        mesh: &Mesh<B>,
+        id: usize,
+        value: &T,
+    ) {
+        let Resources { device, meshes, .. } = self;
         if let Some(objects) = meshes.get_mut(mesh.handle()) {
             objects.write_pod(gpu, id, value, device);
         }
@@ -253,7 +298,7 @@ impl Context {
 
     /// Keeps `indexes` for the draws that share them, while a clone of the
     /// returned handle lasts.
-    pub fn add_indexes(&mut self, indexes: Indexes) -> SharedIndexes {
+    pub(crate) fn add_indexes(&mut self, indexes: Indexes) -> SharedIndexes {
         self.indexes.add(indexes, &self.device.queue)
     }
 
@@ -264,13 +309,13 @@ impl Context {
 
     /// Writes the indexes of `handle` to a buffer, unless they have one.
     pub(crate) fn upload_indexes(&mut self, gpu: &mut dyn Gpu, handle: &SharedIndexes) -> Result<(), GpuError> {
-        let Context { device, indexes, .. } = self;
+        let Resources { device, indexes, .. } = self;
         indexes.get_mut(handle).ok_or(GpuError::UnknownId("indexes"))?.upload(gpu, device)
     }
 
     /// Keeps `vertices` for the draws that share them, while a clone of the
     /// returned handle lasts.
-    pub fn add_vertices<V: bytemuck::Pod>(&mut self, vertices: Vec<V>) -> SharedVertices {
+    pub(crate) fn add_vertices<V: bytemuck::Pod>(&mut self, vertices: Vec<V>) -> SharedVertices {
         self.vertices.add(vertices, &self.device.queue)
     }
 
@@ -278,7 +323,7 @@ impl Context {
     /// does, as dynamic vertices, which the holder of the returned handle
     /// updates ([`update_vertices`](Self::update_vertices)), and whose
     /// storage stays across uploads for the next update to fill.
-    pub fn add_dynamic_vertices<V: bytemuck::Pod>(&mut self, vertices: &[V]) -> TypedVertices<V> {
+    pub(crate) fn add_dynamic_vertices<V: bytemuck::Pod>(&mut self, vertices: &[V]) -> TypedVertices<V> {
         self.vertices.add_dynamic(vertices, &self.device.queue)
     }
 
@@ -294,7 +339,7 @@ impl Context {
 
     /// The vertices of `shared`.
     #[must_use]
-    pub fn vertices(&self, shared: &SharedVertices) -> Option<&Vertices> {
+    pub(crate) fn vertices(&self, shared: &SharedVertices) -> Option<&Vertices> {
         self.vertices.get(shared)
     }
 
@@ -307,7 +352,7 @@ impl Context {
     /// Replaces the vertices of `typed` with a copy of `data`, as many, which
     /// the next upload writes over their buffer's. Returns false, leaving
     /// them be, for another number of vertices.
-    pub fn update_vertices<V: bytemuck::Pod>(&mut self, typed: &TypedVertices<V>, data: &[V]) -> bool {
+    pub(crate) fn update_vertices<V: bytemuck::Pod>(&mut self, typed: &TypedVertices<V>, data: &[V]) -> bool {
         self.vertices.update(typed, data)
     }
 
@@ -325,13 +370,13 @@ impl Context {
     /// A texture without a size, made on the GPU by its first upload or the
     /// first pass that draws into it, which the context keeps while a clone
     /// of the returned handle lasts.
-    pub fn add_texture(&mut self) -> SharedTexture {
+    pub(crate) fn add_texture(&mut self) -> SharedTexture {
         self.add_texture_with(|_| {})
     }
 
     /// A texture that `setup` sets up, as [`add_texture`](Self::add_texture)
     /// makes it.
-    pub fn add_texture_with(&mut self, setup: impl FnOnce(&mut TextureMut<'_>)) -> SharedTexture {
+    pub(crate) fn add_texture_with(&mut self, setup: impl FnOnce(&mut TextureMut<'_>)) -> SharedTexture {
         let mut texture = Texture2D::new();
         setup(&mut TextureMut::new(&mut texture));
         self.textures.add(texture, &self.device.queue)
@@ -339,19 +384,19 @@ impl Context {
 
     /// The texture of `handle`.
     #[must_use]
-    pub fn texture(&self, handle: &SharedTexture) -> Option<&Texture2D> {
+    pub(crate) fn stored_texture(&self, handle: &SharedTexture) -> Option<&Texture2D> {
         self.textures.get(handle)
     }
 
     /// The texture of `handle`, to set up.
-    pub fn texture_mut(&mut self, handle: &SharedTexture) -> Option<TextureMut<'_>> {
+    pub(crate) fn stored_texture_mut(&mut self, handle: &SharedTexture) -> Option<TextureMut<'_>> {
         Some(TextureMut::new(self.textures.get_mut(handle)?))
     }
 
     /// The texture of `handle` and what changes it, or the error of a handle
     /// without one.
     fn texture_entry(&mut self, handle: &SharedTexture) -> Result<(&mut Texture2D, &mut Device), GpuError> {
-        let Context { device, textures, .. } = self;
+        let Resources { device, textures, .. } = self;
         Ok((textures.get_mut(handle).ok_or(GpuError::UnknownId("texture"))?, device))
     }
 
@@ -366,7 +411,7 @@ impl Context {
     /// to the whole texture of `handle`, first making it of that size. Empty
     /// `data` leaves the texels unspecified, and an empty size makes no
     /// texture.
-    pub fn upload_texture_data(
+    pub(crate) fn upload_texture_data(
         &mut self,
         gpu: &mut dyn Gpu,
         handle: &SharedTexture,
@@ -408,7 +453,7 @@ impl Context {
         gpu: &mut dyn Gpu,
         handle: &SharedTexture,
     ) -> Result<(TextureId, SamplerId), GpuError> {
-        let Context { device, textures, samplers, .. } = self;
+        let Resources { device, textures, samplers, .. } = self;
         bind(textures, samplers, device, gpu, handle)
     }
 
@@ -421,7 +466,7 @@ impl Context {
     /// The key of the variant of `program` that reads its properties of
     /// `uniforms` from their uniforms, for `projection`, at the context's
     /// pixel ratio.
-    pub fn shader_key(
+    pub(crate) fn shader_key(
         &mut self,
         program: &'static Program,
         uniforms: Uniforms,
@@ -453,7 +498,7 @@ impl Context {
     /// The color mode of a draw into the frame that blends with `mode`: the
     /// overdraw inspector's when it's on.
     #[must_use]
-    pub fn color_mode(&self, mode: ColorMode) -> ColorMode {
+    pub(crate) fn color_mode(&self, mode: ColorMode) -> ColorMode {
         if self.program_parameters.overdraw { ColorMode::overdraw() } else { mode }
     }
 
@@ -559,7 +604,7 @@ fn sampler(
     Ok(sampler)
 }
 
-impl Context {
+impl Resources {
     /// Lets go of the shaders and pipelines the draws made, which the next
     /// [`destroy_released`](Self::destroy_released) destroys after the
     /// bindings and geometry released before it: for a new pixel ratio,
@@ -595,7 +640,7 @@ impl Context {
     }
 }
 
-impl Drop for Context {
+impl Drop for Resources {
     /// A context dropped without its renderer's
     /// [`tear_down`](crate::Renderer::tear_down) leaves what it made to the
     /// `Gpu`, which frees it when it drops, and logs that it did.

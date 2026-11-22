@@ -17,7 +17,7 @@ use mln_util::image::AlphaImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use crate::gfx::context::Context;
+use crate::gfx::context::Resources;
 use crate::gfx::store::SharedTexture;
 
 /// Identifies a bin within a dynamic texture.
@@ -244,7 +244,7 @@ impl DynamicTexture {
     }
 
     /// Makes the GPU texture on first use and uploads the queued images.
-    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Resources) {
         if self.texture.is_none() {
             let texture = context.add_texture_with(|texture| {
                 texture.set_size(self.size);

@@ -5,8 +5,8 @@
 //! types of the [`Registry`] it is made with. Each module of an extension
 //! point states its contract:
 //!
-//! - [`layer`]: a layer type's render half, with the [`draw`] services it
-//!   draws with and the geometry that drawing on the [`globe`] needs.
+//! - [`layer`]: a layer type's render half, with what it [`draw`]s with and
+//!   the geometry that drawing on the [`globe`] needs.
 //! - [`source`]: a source type's render half and the data origin of its
 //!   tiles.
 //! - [`RegistryBuilder`]: where both register, with the expression
@@ -16,11 +16,8 @@
 //! `Gpu`. A layer type draws with programs it declares
 //! (`mln_gfx::shaders::program`), and the engine with its own.
 //!
-//! Not a contract yet, and hidden from the documentation: the symbol type's
-//! placement goes through the `placement` module, `LayerType::PLACEMENT`,
-//! `UpdateContext::bucket_key` and `Renderer::placement`, and the tests and
-//! benchmarks of `mln_layers` through the `testing` and `bench` features.
-//! They can change or go in any release.
+//! Not a contract yet, and hidden from the documentation: placement, in the
+//! `placement` module. It can change or go in any release.
 
 mod algorithm;
 #[cfg(feature = "bench")]
@@ -29,6 +26,7 @@ pub mod bench;
 mod bucket;
 mod bucket_geometry;
 mod bucket_parameters;
+mod bucket_upload;
 mod buckets;
 mod clip_masks;
 pub mod draw;
@@ -43,11 +41,12 @@ mod gfx;
 pub mod globe;
 mod globe_depth_pass;
 mod group_by_layout;
+mod handles;
 mod image_store;
 pub mod layer;
 mod layer_composite;
-mod layer_drawing;
 mod layout;
+mod mesh_desc;
 mod paint_parameters;
 mod paint_property_binder;
 mod paint_property_statistics;
@@ -92,15 +91,18 @@ pub use renderer_event::{
 };
 pub use update_parameters::UpdateParameters;
 
-/// The crates that the expansion of [`paint_property_binders!`] names, so
-/// that a crate that invokes it needn't depend on them.
+/// What the expansion of [`paint_property_binders!`] names: the binders'
+/// internals and the crates it reaches, so that a crate that invokes it
+/// needn't depend on them.
 #[doc(hidden)]
 pub mod __private {
     pub use mln_style;
-    pub use mln_style_types;
     pub use mln_tile;
     pub use mln_tile_id;
     pub use mln_wire;
+
+    pub use crate::bucket::FeatureStates;
+    pub use crate::paint_property_binder::{Bind, InterleavedVertexBuffer, PaintPropertyBinderBase};
 }
 
 #[cfg(test)]

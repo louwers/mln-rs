@@ -28,7 +28,7 @@ use crate::algorithm::update_tile_masks::update_tile_masks;
 use crate::bucket_geometry::BucketGeometry;
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::erased_source::UpdateParts;
-use crate::gfx::context::Context;
+use crate::gfx::context::Resources;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layout::tile_layout::LayoutParams;
 use crate::source::Cover;
@@ -433,7 +433,7 @@ impl SourceTiles {
         id: &OverscaledTileID,
         slot: Option<usize>,
         atlas: &DynamicTextureAtlas,
-        context: &mut Context,
+        context: &mut Resources,
     ) {
         let Some(index) = self.index_at(id, slot) else {
             return;
@@ -1514,7 +1514,7 @@ impl SourceTiles {
 /// Readies the buckets of the geometry tile at `at` of `slots` for the
 /// frame's draws, sharing what the buckets of the tiles at `copies`, its
 /// other world copies, moved into `context`'s stores.
-fn upload_sharing(slots: &mut [Slot], at: usize, copies: &[usize], context: &mut Context) {
+fn upload_sharing(slots: &mut [Slot], at: usize, copies: &[usize], context: &mut Resources) {
     let Some((before, rest)) = slots.split_at_mut_checked(at) else {
         return;
     };

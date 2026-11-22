@@ -5,7 +5,7 @@ use mln_util::Color;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use crate::gfx::context::Context;
+use crate::gfx::context::Resources;
 use crate::gfx::resources::GpuTexture;
 use crate::gfx::store::SharedTexture;
 use crate::paint_parameters::{OpenPass, PaintParameters};
@@ -25,7 +25,7 @@ pub struct RenderTarget {
 
 impl RenderTarget {
     /// A render target of `size` with channel type `type_`.
-    pub fn new(context: &mut Context, size: Size, type_: TextureChannelDataType) -> Self {
+    pub fn new(context: &mut Resources, size: Size, type_: TextureChannelDataType) -> Self {
         RenderTarget { texture: texture(context, size, type_), size, depth: None, type_ }
     }
 
@@ -38,7 +38,7 @@ impl RenderTarget {
     /// Draws into a texture of `size` from now on: a texture of another size
     /// replaces the current one, and [`texture`](Self::texture) returns the
     /// new one.
-    pub fn set_size(&mut self, context: &mut Context, size: Size) {
+    pub fn set_size(&mut self, context: &mut Resources, size: Size) {
         if self.size != size {
             self.texture = texture(context, size, self.type_);
             self.size = size;
@@ -69,9 +69,9 @@ impl RenderTarget {
 
     /// The pass that clears the texture to opaque black and its depth to 1,
     /// making them through `gpu`, the context's.
-    fn pass(&mut self, gpu: &mut dyn Gpu, context: &mut Context) -> Result<OpenPass, GpuError> {
+    fn pass(&mut self, gpu: &mut dyn Gpu, context: &mut Resources) -> Result<OpenPass, GpuError> {
         let color = context.create_texture(gpu, &self.texture)?;
-        let format = context.texture(&self.texture).ok_or(GpuError::UnknownId("texture"))?.format();
+        let format = context.stored_texture(&self.texture).ok_or(GpuError::UnknownId("texture"))?.format();
         let size = self.size;
         if self.depth.is_none()
             && let Some(depth_format) = context.render_target_depth()
@@ -97,7 +97,7 @@ impl RenderTarget {
 
 /// The color texture of a render target of `size`, which draws draw into and
 /// then sample, linear and clamped.
-fn texture(context: &mut Context, size: Size, type_: TextureChannelDataType) -> SharedTexture {
+fn texture(context: &mut Resources, size: Size, type_: TextureChannelDataType) -> SharedTexture {
     let format = texture_format(TexturePixelType::RGBA, context.render_target_type(type_));
     context.add_texture_with(|texture| {
         texture.set_size(size);

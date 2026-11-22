@@ -15,7 +15,7 @@ use mln_util::range::Range;
 
 use crate::draw_objects::{DrawGeometry, DrawObjects, Mesh, Textures, raw_vertices};
 use crate::encode::{Depth, Draw, Group};
-use crate::gfx::context::Context;
+use crate::gfx::context::Resources;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::vertex_attribute::Uniforms;
 use crate::globe::{TileGrid, grid, surface_granularity};
@@ -50,7 +50,7 @@ impl GlobeDepthPass {
     pub(crate) fn update(
         &mut self,
         gpu: &mut dyn Gpu,
-        context: &mut Context,
+        context: &mut Resources,
         state: &View,
         update_parameters: &UpdateParameters,
         needed: bool,
@@ -135,7 +135,7 @@ impl GlobeDepthPass {
     }
 
     /// Uploads the meshes of the frame's draws.
-    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Resources) {
         self.draws.upload(gpu, context);
     }
 

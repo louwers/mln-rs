@@ -27,15 +27,15 @@ use mln_vec_map::{VecMap, VecSet};
 use smallvec::SmallVec;
 
 use crate::Registry;
+use crate::encode::{DrawGroup, DrawOrder};
 use crate::erased_layer::ErasedEvaluatedLayer;
-use crate::frame::{Frame, FrameLayer};
-use crate::gfx::context::Context;
+use crate::frame::{FrameLayer, FramePlan};
+use crate::gfx::context::Resources;
 use crate::globe_depth_pass::GlobeDepthPass;
 use crate::image_store::ImageStore;
-use crate::layer_drawing::{DrawGroup, DrawOrder};
 use crate::paint_parameters::PaintParameters;
 use crate::placement::{CollisionGroups, ErasedFrame, ErasedPlacement, PlacementQuery, Prepared, Schedule};
-use crate::render_layer::{EndedHosts, FrameSourceTiles, LayerUpdate, RecordedLayer, RenderLayer};
+use crate::render_layer::{FrameSourceTiles, LayerUpdate, RecordedLayer, RenderLayer};
 use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
 use crate::render_tile::{FoundTile, RenderTile, TileContent};
 use crate::renderer_event::RendererEvent;
@@ -90,9 +90,13 @@ fn ptr_eq_option<T: ?Sized>(a: Option<&Arc<T>>, b: Option<&Arc<T>>) -> bool {
 /// The render layer of the layer `style`, from its type in `registry`. A
 /// type that the registry lacks breaks the contract that a map and its
 /// renderer register alike; the layer isn't drawn.
-fn create_render_layer(registry: &Registry, style: &Arc<dyn ErasedLayerStyle>) -> Option<RecordedLayer> {
+fn create_render_layer(
+    registry: &Registry,
+    style: &Arc<dyn ErasedLayerStyle>,
+    res: &mut Resources,
+) -> Option<RecordedLayer> {
     let name = style.info().name;
-    let render_layer = registry.layer_type(name).and_then(|layer_type| layer_type.create_render_layer(style));
+    let render_layer = registry.layer_type(name).and_then(|layer_type| layer_type.create_render_layer(style, res));
     debug_assert!(render_layer.is_some(), "the renderer's registry has no layer type '{name}'");
     if render_layer.is_none() {
         Log::error(Event::Render, format!("no render layer for layer type '{name}'"));
@@ -168,9 +172,6 @@ pub(crate) struct RenderOrchestrator {
     /// Whether the next update makes the render layers again, for new
     /// shaders.
     remake_render_layers: bool,
-    /// The hosts of the layers that left since the renderer last
-    /// [took them](Self::take_ended_hosts).
-    ended_hosts: EndedHosts,
     filtered_layers_for_source: Vec<Arc<dyn ErasedEvaluatedLayer>>,
 
     thread_pool: TaskGroup,
@@ -233,7 +234,6 @@ impl RenderOrchestrator {
             longitude: 0.0,
             tile_cache_enabled: true,
             remake_render_layers: false,
-            ended_hosts: Vec::new(),
             filtered_layers_for_source: Vec::new(),
             _wait_for_thread_pool: WaitOnDrop(thread_pool.clone()),
             thread_pool,
@@ -267,9 +267,13 @@ impl RenderOrchestrator {
     /// to the placement. The encode then changes none of this: it changes
     /// only what draws it on the GPU, uploading the tiles' atlas and
     /// buckets and making the layers' draws.
-    pub(crate) fn update(&mut self, update_parameters: &Arc<UpdateParameters>) -> Option<Frame> {
+    pub(crate) fn update(
+        &mut self,
+        update_parameters: &Arc<UpdateParameters>,
+        res: &mut Resources,
+    ) -> Option<FramePlan> {
         let mut frame =
-            Frame::new(&update_parameters.view, update_parameters.camera_moving, update_parameters.debug_options);
+            FramePlan::new(&update_parameters.view, update_parameters.camera_moving, update_parameters.debug_options);
         let mut clock = self.advance_clock(update_parameters);
         let style = &update_parameters.style;
 
@@ -307,7 +311,7 @@ impl RenderOrchestrator {
 
         self.apply_image_diff(&image_diff, update_parameters.sprite_loaded);
 
-        let render_layers_remade = self.apply_layer_changes(&layer_changes, &layers, &clock);
+        let render_layers_remade = self.apply_layer_changes(&layer_changes, &layers, &clock, res);
         let constants_mask_changed = self.evaluate_layers(&layer_changes, render_layers_remade, &mut clock);
         self.apply_source_diff(&source_diff, update_parameters);
 
@@ -399,7 +403,7 @@ impl RenderOrchestrator {
     /// sources', recording the buckets it changes in `changed_buckets`, and
     /// computes their tiles' matrices for the frame. A source that a layer
     /// of the frame draws in [`TileOrder::ByY`] sorts its tiles so.
-    fn update_render_tiles(&mut self, frame: &Frame, changed_buckets: &mut ChangedBuckets) {
+    fn update_render_tiles(&mut self, frame: &FramePlan, changed_buckets: &mut ChangedBuckets) {
         let mut sorted_by_y: SmallVec<[&str; 4]> = SmallVec::new();
         for (&index, frame_layer) in &frame.layers {
             if let Some(source) = frame_layer.source.as_deref()
@@ -433,7 +437,7 @@ impl RenderOrchestrator {
     /// Gives each layer of the frame its tiles, in the order it draws them,
     /// finds those whose type places, and sets the frame's opaque pass
     /// cutoff.
-    fn update_layer_tiles(&mut self, update_parameters: &UpdateParameters, frame: &mut Frame) {
+    fn update_layer_tiles(&mut self, update_parameters: &UpdateParameters, frame: &mut FramePlan) {
         self.placing_layers.clear();
         let mut opaque_pass_cutoff_estimation = frame.layers.len();
         let mut contents = SourceContents::default();
@@ -612,18 +616,23 @@ impl RenderOrchestrator {
     /// Makes, removes and restyles the render layers for the layers that
     /// changed, and puts them in the style's order. Returns whether it made
     /// every render layer again, for new shaders.
-    fn apply_layer_changes(&mut self, layer_changes: &LayerChanges, layers: &LayerList, clock: &FrameClock) -> bool {
+    fn apply_layer_changes(
+        &mut self,
+        layer_changes: &LayerChanges,
+        layers: &LayerList,
+        clock: &FrameClock,
+        res: &mut Resources,
+    ) -> bool {
         // Make each render layer again from its layer, without the relayout
         // that adding the layer would take.
         let render_layers_remade = std::mem::take(&mut self.remake_render_layers);
         if render_layers_remade {
             for render_layer in &mut self.layers {
                 let style = render_layer.shared_style();
-                let Some(mut new_layer) = create_render_layer(&self.registry, &style) else {
+                let Some(mut new_layer) = create_render_layer(&self.registry, &style, res) else {
                     continue;
                 };
                 new_layer.transition(&clock.added_layer_transition);
-                render_layer.leave(&mut self.ended_hosts);
                 *render_layer = new_layer;
             }
         }
@@ -634,15 +643,13 @@ impl RenderOrchestrator {
 
             // Remove render layers for removed layers.
             for (id, _) in layer_changes.iter().filter(|(_, change)| change.removes()) {
-                if let Some(mut removed) = by_id.remove(&**id) {
-                    removed.leave(&mut self.ended_hosts);
-                }
+                by_id.remove(&**id);
             }
 
             // Create render layers for newly added layers.
             for (id, _) in layer_changes.iter().filter(|(_, change)| change.adds()) {
                 let Some(layer) = layers.get(id) else { continue };
-                if let Some(mut render_layer) = create_render_layer(&self.registry, layer.style()) {
+                if let Some(mut render_layer) = create_render_layer(&self.registry, layer.style(), res) {
                     render_layer.transition(&clock.added_layer_transition);
                     // A layer added twice keeps its first render layer.
                     by_id.entry(id.to_string()).or_insert(render_layer);
@@ -651,9 +658,6 @@ impl RenderOrchestrator {
 
             // A layer type without a render layer is skipped.
             self.layers = layers.iter().filter_map(|layer| by_id.remove(layer.get_id())).collect();
-            for mut left in by_id.into_values() {
-                left.leave(&mut self.ended_hosts);
-            }
             self.layer_indexes =
                 self.layers.iter().enumerate().map(|(index, layer)| (layer.id().to_owned(), index)).collect();
         }
@@ -663,7 +667,7 @@ impl RenderOrchestrator {
             if let (Some(&index), Some(layer)) = (self.layer_indexes.get(&**id), layers.get(id)) {
                 let new_layer = layer.style();
                 let render_layer = &mut self.layers[index];
-                render_layer.restyle(&clock.transition, new_layer, &mut self.ended_hosts);
+                render_layer.restyle(&clock.transition, new_layer);
             }
         }
 
@@ -771,7 +775,7 @@ impl RenderOrchestrator {
         layer_changes: &LayerChanges,
         constants_mask_changed: &VecSet<String>,
         clock: &FrameClock,
-        frame: &mut Frame,
+        frame: &mut FramePlan,
     ) -> Vec<bool> {
         let mut tile_parameters = TileParameters {
             pixel_ratio: update_parameters.pixel_ratio,
@@ -919,7 +923,7 @@ impl RenderOrchestrator {
     /// Runs the frame's placement on the schedule: for a continuous map,
     /// when the last placement isn't recent, and for a still image, every
     /// frame. Sets the frame's fade and repaint parameters.
-    fn place(&mut self, update_parameters: &Arc<UpdateParameters>, frame: &mut Frame) {
+    fn place(&mut self, update_parameters: &Arc<UpdateParameters>, frame: &mut FramePlan) {
         let continuous = update_parameters.mode == MapMode::Continuous;
         let time_point = update_parameters.time_point;
         let layers: SmallVec<[&dyn RenderLayer; 8]> =
@@ -1073,7 +1077,7 @@ impl RenderOrchestrator {
 
     /// Makes the GPU textures of the tiles' atlas, and uploads what it
     /// queued.
-    pub(crate) fn upload_tile_atlas(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    pub(crate) fn upload_tile_atlas(&mut self, gpu: &mut dyn Gpu, context: &mut Resources) {
         self.tile_store.atlas().upload(gpu, context);
     }
 
@@ -1131,7 +1135,7 @@ impl RenderOrchestrator {
     /// groups in drawing order, the globe's depth, the sky and the
     /// atmosphere, what draws into the layers' render targets, and the debug
     /// overlays.
-    pub(crate) fn upload_draws(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    pub(crate) fn upload_draws(&mut self, gpu: &mut dyn Gpu, context: &mut Resources) {
         for layer in &mut self.layers {
             layer.upload(gpu, context);
         }
@@ -1141,9 +1145,6 @@ impl RenderOrchestrator {
         }
         if let Some(atmosphere) = self.sky_pass.atmosphere() {
             atmosphere.upload(gpu, context);
-        }
-        for layer in &mut self.layers {
-            layer.upload_offscreen(gpu, context);
         }
         for debug in self.debug_layers.values_mut() {
             debug.upload(gpu, context);
@@ -1174,7 +1175,7 @@ impl RenderOrchestrator {
     }
 
     /// Readies the buckets of the frame's sources for the frame's draws.
-    pub(crate) fn upload_sources(&mut self, context: &mut Context) {
+    pub(crate) fn upload_sources(&mut self, context: &mut Resources) {
         for source in self.render_sources.values_mut() {
             if source.is_enabled() {
                 source.upload(&mut self.tile_store, context);
@@ -1200,17 +1201,9 @@ impl RenderOrchestrator {
         self.debug_layers.values_mut()
     }
 
-    /// Makes every render layer leave, and drops them.
+    /// Drops every render layer.
     pub(crate) fn leave_layers(&mut self) {
-        for mut layer in self.layers.drain(..) {
-            layer.leave(&mut self.ended_hosts);
-        }
-    }
-
-    /// The hosts of the layers that left since the last call, which
-    /// drew and hear that the renderer stopped.
-    pub(crate) fn take_ended_hosts(&mut self) -> EndedHosts {
-        std::mem::take(&mut self.ended_hosts)
+        self.layers.clear();
     }
 
     /// Visits every render layer, in no order.
@@ -1227,7 +1220,7 @@ impl RenderOrchestrator {
         gpu: &mut dyn Gpu,
         update_parameters: &UpdateParameters,
         paint_parameters: &mut PaintParameters<'_>,
-        frame: &Frame,
+        frame: &FramePlan,
     ) {
         let mut needs_globe_depth = false;
         let mut contents = SourceContents::default();
@@ -1237,12 +1230,11 @@ impl RenderOrchestrator {
             let source = source.map(|(id, source)| (id.as_str(), &**source));
             let source_contents = contents.of(source, &self.tile_store);
             let tiles = source.map(|(_, source)| FrameSourceTiles::new(source, source_contents));
-            render_layer.update_draws(gpu, paint_parameters, tiles, &self.found_tiles);
+            render_layer.update_draws(gpu, paint_parameters, self.tile_store.images(), tiles, &self.found_tiles);
             needs_globe_depth = needs_globe_depth || render_layer.record().volume;
         }
-        let state = paint_parameters.frame.view;
-        let (renderable_size, pixel_ratio) =
-            (paint_parameters.frame.renderable_size, paint_parameters.frame.pixel_ratio);
+        let state = paint_parameters.frame.camera;
+        let (renderable_size, pixel_ratio) = (paint_parameters.frame.target_size, paint_parameters.frame.pixel_ratio);
         let context = &mut *paint_parameters.context;
         self.sky_pass.update(gpu, context, state, renderable_size, pixel_ratio, frame.sky.as_ref(), &frame.light);
         self.globe_depth_pass.update(
@@ -1544,15 +1536,6 @@ impl Drop for WaitOnDrop {
 
 impl Drop for RenderOrchestrator {
     fn drop(&mut self) {
-        // Without the renderer's tear-down, the hosts of the layers still
-        // here, and those that left and that the renderer didn't take, lose
-        // their graphics objects.
-        for layer in &mut self.layers {
-            layer.lose_context();
-        }
-        for host in std::mem::take(&mut self.ended_hosts) {
-            host.lose();
-        }
         self.tile_store.log_stats();
         // The render sources and their tiles go before the wait, since
         // their data drops on the thread pool.

@@ -2,8 +2,8 @@
 //! step with the frame.
 //!
 //! The engine keeps a [`TileMap`] for each layer: a slot for each of the
-//! frame's tiles of the layer, holding the layer type's value of the tile
-//! ([`LayerType::Tile`](crate::layer::LayerType::Tile)), if it made one,
+//! frame's tiles of the layer, holding the layer's value of the tile
+//! ([`Layer::Tile`](crate::layer::Layer::Tile)), if it made one,
 //! with the bucket the value was made from and what of that bucket changed
 //! since. The slots are in tile id order, and a layer reaches them in the
 //! order it draws its tiles, through a permutation from that order to the
@@ -19,7 +19,7 @@ use mln_util::identity::SimpleIdentity;
 
 /// What of a bucket's vertex data changed since a tile's draws copied it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct BucketChanges {
+pub(crate) struct BucketChanges {
     /// The values of the paint properties that read feature state.
     pub paint: bool,
     /// The opacities of what a bucket places, which placement sets.
@@ -37,7 +37,7 @@ impl BucketChanges {
 
     /// Whether anything changed.
     #[must_use]
-    pub fn any(self) -> bool {
+    pub(crate) fn any(self) -> bool {
         self != BucketChanges::default()
     }
 }
@@ -54,11 +54,11 @@ impl BitOrAssign for BucketChanges {
 /// The buckets whose vertex data changed, by bucket id, with what changed,
 /// whose draws copy it again.
 #[derive(Default)]
-pub struct ChangedBuckets(HashMap<SimpleIdentity, BucketChanges>);
+pub(crate) struct ChangedBuckets(HashMap<SimpleIdentity, BucketChanges>);
 
 impl ChangedBuckets {
     /// Records that `changes` of the bucket `bucket` changed.
-    pub fn mark(&mut self, bucket: SimpleIdentity, changes: BucketChanges) {
+    pub(crate) fn mark(&mut self, bucket: SimpleIdentity, changes: BucketChanges) {
         if changes.any() {
             *self.0.entry(bucket).or_default() |= changes;
         }
@@ -268,7 +268,7 @@ fn kept_tiles<'a>(
 /// drops it when the tile leaves the frame. Before a layer of a source makes
 /// its draws, the engine drops the value of each tile that shows it nothing
 /// to draw, and of each whose bucket or contents another replaced.
-pub struct TileMap<V> {
+pub(crate) struct TileMap<V> {
     set: TileSet,
     /// Each tile's value, at its slot.
     values: Vec<Option<V>>,
@@ -340,15 +340,21 @@ impl<V> TileMap<V> {
         state.changes = BucketChanges::default();
     }
 
+    /// The value of the tile at `index`, if the layer made one.
+    #[must_use]
+    pub(crate) fn get(&self, index: usize) -> Option<&V> {
+        self.values.get(*self.set.slots.get(index)?)?.as_ref()
+    }
+
     /// The number of tiles the layer draws.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.set.slots.len()
     }
 
     /// Whether the layer draws no tiles.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.set.slots.is_empty()
     }
 
@@ -357,7 +363,7 @@ impl<V> TileMap<V> {
     /// # Panics
     ///
     /// If `index` is out of range.
-    pub fn get_mut(&mut self, index: usize) -> &mut Option<V> {
+    pub(crate) fn get_mut(&mut self, index: usize) -> &mut Option<V> {
         &mut self.values[self.set.slots[index]]
     }
 
@@ -368,12 +374,12 @@ impl<V> TileMap<V> {
     /// # Panics
     ///
     /// If `index` is out of range.
-    pub fn take_changes(&mut self, index: usize) -> BucketChanges {
+    pub(crate) fn take_changes(&mut self, index: usize) -> BucketChanges {
         std::mem::take(&mut self.set.states[self.set.slots[index]].changes)
     }
 
     /// Drops the tiles' values. The tiles stay.
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.values.fill_with(|| None);
     }
 }

@@ -19,7 +19,7 @@ use mln_util::size::Size;
 #[cfg(test)]
 use super::dynamic_texture::QueuedPixels;
 use super::dynamic_texture::{DynamicTexture, DynamicTextureBinId, TextureHandle};
-use crate::gfx::context::Context;
+use crate::gfx::context::Resources;
 use crate::gfx::store::SharedTexture;
 
 const EXTRA_PADDING: u16 = 1;
@@ -497,7 +497,7 @@ impl DynamicTextureAtlas {
     }
 
     /// Makes the pages' GPU textures and uploads what was queued for them.
-    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Resources) {
         self.free_released();
         for page in self.pages.iter_mut().chain(&mut self.dummies) {
             page.texture.upload(gpu, context);

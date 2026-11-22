@@ -10,7 +10,7 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::identity::SimpleIdentity;
 
 use crate::geometry::dem_data::DemData;
-use crate::gfx::context::Context;
+use crate::gfx::context::Resources;
 use crate::tile::contents::Contents;
 use crate::tile::raster::MaskedGeometry;
 use crate::tile_mask::TileMask;
@@ -75,7 +75,7 @@ impl DemContents {
     /// Readies contents with a DEM for their draws, once and again after
     /// their geometry changes: moves the geometry into `context`'s stores.
     /// The layers make the DEM's textures.
-    pub(crate) fn upload(&mut self, context: &mut Context) {
+    pub(crate) fn upload(&mut self, context: &mut Resources) {
         if self.has_data() {
             self.geometry.upload(context);
         }

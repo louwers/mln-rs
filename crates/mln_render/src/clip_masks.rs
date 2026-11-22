@@ -18,7 +18,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::draw_objects::Entries;
 use crate::gfx::buffer::Buffer;
-use crate::gfx::context::Context;
+use crate::gfx::context::Resources;
 use crate::gfx::owned::Owned;
 use crate::gfx::vertex_attribute::Uniforms;
 use crate::globe::grid;
@@ -59,7 +59,7 @@ struct Mesh {
 impl Mesh {
     fn new(
         gpu: &mut dyn Gpu,
-        context: &mut Context,
+        context: &mut Resources,
         vertices: &[u8],
         indices: &[u16],
         segments: Vec<SegmentBase>,
@@ -77,7 +77,7 @@ impl Mesh {
         }
     }
 
-    fn geometry(&mut self, gpu: &mut dyn Gpu, context: &Context, shader: ShaderId) -> Result<GeometryId, GpuError> {
+    fn geometry(&mut self, gpu: &mut dyn Gpu, context: &Resources, shader: ShaderId) -> Result<GeometryId, GpuError> {
         if let Some(geometry) = &self.geometry {
             return Ok(geometry.id());
         }
@@ -126,7 +126,7 @@ impl ClipMasks {
     pub(crate) fn update(
         &mut self,
         gpu: &mut dyn Gpu,
-        context: &mut Context,
+        context: &mut Resources,
         globe: bool,
         tiles: &[UnwrappedTileID],
         projection: impl Fn(&UnwrappedTileID) -> ProjectionUBO,
@@ -210,7 +210,7 @@ impl ClipMasks {
         gpu: &mut dyn Gpu,
         masks: &[(UnwrappedTileID, i32)],
         target: DrawTarget,
-        context: &mut Context,
+        context: &mut Resources,
     ) {
         if let Err(error) = self.draw_in(gpu, masks, target, context) {
             Log::warning(Event::Render, format!("Drawing the clipping masks failed: {error}"));
@@ -222,7 +222,7 @@ impl ClipMasks {
         gpu: &mut dyn Gpu,
         masks: &[(UnwrappedTileID, i32)],
         target: DrawTarget,
-        context: &mut Context,
+        context: &mut Resources,
     ) -> Result<(), GpuError> {
         let (Some(shader), Some(projections)) = (&self.shader, &self.projections) else {
             return Ok(());

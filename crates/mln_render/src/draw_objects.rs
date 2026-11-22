@@ -29,7 +29,7 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_util::logging::{Event, Log};
 
 use crate::gfx::atlas_binding::AtlasBinding;
-use crate::gfx::context::Context;
+use crate::gfx::context::Resources;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::owned::{Held, Owned};
 use crate::gfx::resources::Device;
@@ -306,13 +306,13 @@ impl DrawObjects {
 
     /// Uploads the indexes, vertex attributes, vertices read as storage
     /// buffers and textures, where they changed since the last upload.
-    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Resources) {
         if let Err(error) = self.upload_in(gpu, context) {
             Log::error(Event::Render, format!("Uploading a draw of {} failed: {error}", self.shader.program().name));
         }
     }
 
-    fn upload_in(&mut self, gpu: &mut dyn Gpu, context: &mut Context) -> Result<(), GpuError> {
+    fn upload_in(&mut self, gpu: &mut dyn Gpu, context: &mut Resources) -> Result<(), GpuError> {
         let program = self.shader.program();
         if self.indexes.buffer(context).is_none() && self.indexes.len(context) == 0 {
             debug_assert!(false, "a draw of {} has no index data", program.name);
@@ -522,7 +522,7 @@ impl DrawObjects {
     fn bindings(
         &mut self,
         gpu: &mut dyn Gpu,
-        context: &mut Context,
+        context: &mut Resources,
         shader_id: ShaderId,
         frame: &UniformBufferArray,
     ) -> Result<BindingsId, GpuError> {

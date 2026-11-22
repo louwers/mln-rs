@@ -38,7 +38,7 @@ use mln_util::size::Size;
 
 use crate::draw_objects::Entries;
 use crate::gfx::buffer::Buffer;
-use crate::gfx::context::Context;
+use crate::gfx::context::Resources;
 use crate::gfx::owned::Owned;
 use crate::gfx::resources::GpuTexture;
 use crate::gfx::vertex_attribute::Uniforms;
@@ -140,7 +140,7 @@ struct Texture {
 }
 
 impl Texture {
-    fn new(gpu: &mut dyn Gpu, context: &mut Context, size: Size, format: TextureFormat) -> Result<Texture, GpuError> {
+    fn new(gpu: &mut dyn Gpu, context: &mut Resources, size: Size, format: TextureFormat) -> Result<Texture, GpuError> {
         let usage = TextureUsage { sampled: true, render_target: true, copy_src: true };
         let desc = TextureDesc { label: "render target", size, format, usage };
         let bytes = size.width as usize * size.height as usize * format.bytes_per_texel().unwrap_or(4) as usize;
@@ -215,7 +215,7 @@ impl LayerComposite {
     pub(crate) fn update(
         &mut self,
         gpu: &mut dyn Gpu,
-        context: &mut Context,
+        context: &mut Resources,
         size: Size,
         format: Option<TextureFormat>,
         overdraw: bool,
@@ -284,7 +284,7 @@ impl LayerComposite {
     fn make(
         &mut self,
         gpu: &mut dyn Gpu,
-        context: &mut Context,
+        context: &mut Resources,
         size: Size,
         frame_format: Option<TextureFormat>,
     ) -> Result<(), GpuError> {
@@ -403,7 +403,7 @@ impl LayerComposite {
         gpu: &mut dyn Gpu,
         target: DrawTarget,
         depth: DepthTest,
-        context: &mut Context,
+        context: &mut Resources,
         group: SimpleIdentity,
     ) {
         let Some(slot) = self.groups.iter().position(|(id, _)| *id == group) else {
@@ -416,7 +416,7 @@ impl LayerComposite {
     }
 
     /// Copies the frame's texture onto the open pass, over what it holds.
-    pub(crate) fn copy_frame(&mut self, gpu: &mut dyn Gpu, target: DrawTarget, context: &mut Context) {
+    pub(crate) fn copy_frame(&mut self, gpu: &mut dyn Gpu, target: DrawTarget, context: &mut Resources) {
         if self.frame.is_none() {
             return;
         }
@@ -433,7 +433,7 @@ impl LayerComposite {
         &mut self,
         gpu: &mut dyn Gpu,
         draw_target: DrawTarget,
-        context: &mut Context,
+        context: &mut Resources,
         slot: usize,
         blend: BlendFunction,
         depth: DepthTest,

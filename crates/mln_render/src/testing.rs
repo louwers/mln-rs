@@ -24,7 +24,7 @@ use mln_util::pool::TaskGroup;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::Registry;
-use crate::draw::{Context, SharedVertices};
+use crate::draw::{Resources, SharedVertices};
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::image_store::ImageStore;
 use crate::layer::{EvaluatedLayer, LayerType};
@@ -53,8 +53,8 @@ pub enum Event {
 /// Runs `f` with `gpu` and a context of the draw services over it, for
 /// draws at `pixel_ratio` device pixels per logical pixel, and then tears
 /// the context down.
-pub fn with_context<R>(gpu: &mut dyn Gpu, pixel_ratio: f32, f: impl FnOnce(&mut dyn Gpu, &mut Context) -> R) -> R {
-    let mut context = Context::new(*gpu.caps(), pixel_ratio);
+pub fn with_context<R>(gpu: &mut dyn Gpu, pixel_ratio: f32, f: impl FnOnce(&mut dyn Gpu, &mut Resources) -> R) -> R {
+    let mut context = Resources::new(*gpu.caps(), pixel_ratio);
     let result = f(gpu, &mut context);
     context.tear_down(gpu);
     result
@@ -63,7 +63,7 @@ pub fn with_context<R>(gpu: &mut dyn Gpu, pixel_ratio: f32, f: impl FnOnce(&mut 
 /// The buffer of the vertices of `shared`, which a draw's upload makes or
 /// writes over.
 pub fn upload_vertices(
-    context: &mut Context,
+    context: &mut Resources,
     gpu: &mut dyn Gpu,
     shared: &SharedVertices,
 ) -> Result<Option<BufferId>, GpuError> {

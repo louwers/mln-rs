@@ -4,15 +4,12 @@
 //! of one of its meshes, with the values of the mesh's program's blocks of
 //! each draw ([`DrawBlocks`]) and, for a draw of a tile, the tile's
 //! [`TileProjection`]. The engine then sorts each [`Group`] by the draws'
-//! order, writes each of its programs' buffers once for all of its draws,
-//! places the group in the layers' order and depth, and draws it in the
-//! frame's passes: with the masks of the layer's tiles in the stencil where
-//! its draws clip, into a texture of its own where it composites, and with
-//! no call back into the layer.
-//!
-//! [`FrameDraws`] are a group's draws as the engine draws them, which a
-//! layer that makes its draws with a [`DrawList`](crate::draw::DrawList)
-//! makes itself.
+//! order, the age of their meshes and when they were pushed, writes each of
+//! its programs' buffers once for all of its draws, places the group in the
+//! layers' order and depth, and draws it in the frame's passes: with the
+//! masks of the layer's tiles in the stencil where its draws clip, into a
+//! texture of its own where it composites, and with no call back into the
+//! layer. [`FrameDraws`] are a group's draws as the engine draws them.
 
 use std::ops::Range;
 
@@ -25,7 +22,7 @@ use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::identity::SimpleIdentity;
 
 use crate::draw_objects::Mesh;
-use crate::gfx::context::Context;
+use crate::gfx::context::Resources;
 use crate::gfx::store::MeshKey;
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::layer_composite::Composite;
@@ -67,8 +64,10 @@ pub enum Depth {
 /// draws with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Draw {
-    /// Where the draw is among its group's draws: lower orders draw first,
-    /// and draws of one order in the order they were pushed.
+    /// Where the draw is among its group's draws, which may hold draws of
+    /// all the layer's tiles: lower orders draw first. Draws of one order
+    /// draw in the order their meshes were made, and draws of one mesh in
+    /// the order they were pushed.
     pub order: i64,
     /// Whether the draw draws in the opaque pass where its layer does
     /// (front to back, below the lowest layer of 3D geometry on a flat
@@ -107,6 +106,8 @@ struct Pushed {
     /// Its index among the group's draws as they were pushed.
     index: u32,
     mesh: MeshKey,
+    /// When its mesh was made.
+    seq: u64,
     program: &'static Program,
     /// The tile whose mask the draw clips to.
     tile: Option<OverscaledTileID>,
@@ -221,6 +222,7 @@ impl Group {
             draw,
             index: self.pushed.len() as u32,
             mesh: mesh.key(),
+            seq: mesh.seq(),
             program,
             tile: at.and_then(|at| at.tile),
             projection: at.map(|at| at.block),
@@ -255,17 +257,15 @@ impl Group {
     pub(crate) fn finish(
         &mut self,
         gpu: &mut dyn Gpu,
-        context: &mut Context,
+        context: &mut Resources,
         tiles: impl IntoIterator<Item = UnwrappedTileID>,
     ) {
         let Group { frame, pushed, bytes, blocks, block_bytes, scratch, .. } = self;
-        pushed.sort_unstable_by_key(|pushed| (pushed.draw.order, pushed.index));
+        pushed.sort_unstable_by_key(|pushed| (pushed.draw.order, pushed.seq, pushed.index));
         frame.draws.clear();
         frame.draws.extend(pushed.iter().map(|pushed| FrameDraw {
             tile: pushed.tile,
             mesh: pushed.mesh,
-            seq: 0,
-            priority: pushed.draw.order,
             pass: if pushed.draw.opaque {
                 RenderPass::OPAQUE | RenderPass::TRANSLUCENT
             } else {
@@ -288,7 +288,7 @@ impl Group {
     }
 
     /// Uploads the meshes of the frame's draws.
-    pub(crate) fn upload(&self, gpu: &mut dyn Gpu, context: &mut Context) {
+    pub(crate) fn upload(&self, gpu: &mut dyn Gpu, context: &mut Resources) {
         self.frame.upload(gpu, context);
     }
 
@@ -317,7 +317,7 @@ fn blocks_of_each_draw(program: &Program) -> impl Iterator<Item = (&'static Bloc
 #[expect(clippy::too_many_arguments, reason = "the GPU, the buffers and the parts of a group they're written from")]
 fn write_blocks(
     gpu: &mut dyn Gpu,
-    context: &mut Context,
+    context: &mut Resources,
     buffers: &mut UniformBufferArray,
     pushed: &[Pushed],
     bytes: &[u8],
@@ -422,7 +422,7 @@ impl Draws {
     pub(crate) fn finish(
         &mut self,
         gpu: &mut dyn Gpu,
-        context: &mut Context,
+        context: &mut Resources,
         tiles: impl IntoIterator<Item = UnwrappedTileID>,
     ) {
         if let Some(main) = &mut self.main {
@@ -440,52 +440,22 @@ impl Draws {
 /// Its uniform values are the entries at its index in the storage buffers of
 /// its `FrameDraws`.
 #[derive(Clone, Copy, Debug)]
-pub struct FrameDraw {
+pub(crate) struct FrameDraw {
     /// The tile whose draw it is, or `None` for a draw of the layer's.
-    pub tile: Option<OverscaledTileID>,
+    pub(crate) tile: Option<OverscaledTileID>,
     /// The mesh it draws.
     mesh: MeshKey,
-    /// The mesh's [`Mesh::seq`], which orders draws of the same priority.
-    seq: u64,
-    /// Where the draw is in the layer's order, before its mesh orders it.
-    pub priority: i64,
     /// The passes the draw draws in.
-    pub pass: RenderPass,
+    pub(crate) pass: RenderPass,
     /// How the draw tests and writes depth.
-    pub depth: Depth,
+    pub(crate) depth: Depth,
     /// Whether the draw clips to the mask of its tile, at the layer's depth
     /// or without a depth test.
-    pub clip: bool,
-}
-
-impl FrameDraw {
-    /// A draw of `mesh`, of `tile` or of the layer for `None`, in the
-    /// translucent pass at the layer's depth, which it reads, without
-    /// clipping. The mesh stays the layer's: it must last until the frame
-    /// draws.
-    #[must_use]
-    pub fn new(tile: Option<OverscaledTileID>, mesh: &Mesh) -> FrameDraw {
-        FrameDraw {
-            tile,
-            mesh: mesh.key(),
-            seq: mesh.seq(),
-            priority: 0,
-            pass: RenderPass::TRANSLUCENT,
-            depth: Depth::Layer { sub_layer: 0, write: false },
-            clip: false,
-        }
-    }
-
-    /// The order of the layer's draws: by priority, then by when their
-    /// meshes were made.
-    #[must_use]
-    pub(crate) fn order(&self) -> (i64, u64) {
-        (self.priority, self.seq)
-    }
+    pub(crate) clip: bool,
 }
 
 /// Draws of a frame, and what they share.
-pub struct FrameDraws {
+pub(crate) struct FrameDraws {
     /// Tells the draws apart in the layer composite.
     id: SimpleIdentity,
     /// The draws, in drawing order. A draw's index is the index of its
@@ -517,42 +487,6 @@ impl Default for FrameDraws {
 }
 
 impl FrameDraws {
-    /// Writes `value` to the uniform buffer `id` that the draws bind. A draw
-    /// binds a buffer that the write replaced again when it draws.
-    pub fn write_pod<T: bytemuck::Pod>(&mut self, gpu: &mut dyn Gpu, id: usize, value: &T, context: &mut Context) {
-        let _ = self.uniform_buffers.write_pod(gpu, id, value, context.device());
-    }
-
-    /// Gives the draws, which draw without a projection, a projection block
-    /// of zeros if they have none. GL's programs declare the block whether
-    /// they read it or not, so a draw binds it all the same.
-    pub fn bind_no_projection(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
-        bind_no_projection(gpu, &mut self.uniform_buffers, context);
-    }
-
-    /// Adds `draw`, which draws after the others.
-    pub fn push(&mut self, draw: FrameDraw) {
-        self.draws.push(draw);
-    }
-
-    /// Drops the draws.
-    pub fn clear(&mut self) {
-        self.draws.clear();
-    }
-
-    /// Makes the draws composite onto the frame as `composite` says, or
-    /// draw straight onto it for `None`.
-    pub fn set_composite(&mut self, composite: Option<Composite>) {
-        self.composite = composite;
-    }
-
-    /// Makes `tiles` those whose masks the stencil buffer holds when the
-    /// draws draw.
-    pub fn set_stencil_tiles(&mut self, tiles: impl IntoIterator<Item = UnwrappedTileID>) {
-        self.stencil_tiles.clear();
-        self.stencil_tiles.extend(tiles);
-    }
-
     /// How the draws composite onto the frame, with the id that tells them
     /// apart in the layer composite, if there are any and they composite.
     #[must_use]
@@ -561,7 +495,7 @@ impl FrameDraws {
     }
 
     /// Uploads the meshes of the draws, in drawing order.
-    pub fn upload(&self, gpu: &mut dyn Gpu, context: &mut Context) {
+    pub(crate) fn upload(&self, gpu: &mut dyn Gpu, context: &mut Resources) {
         for draw in &self.draws {
             match context.take_mesh(draw.mesh) {
                 Some(mut objects) => {
@@ -574,7 +508,7 @@ impl FrameDraws {
     }
 
     /// Draws the pass's draws into the open pass of `gpu`, the context's.
-    pub fn render(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+    pub(crate) fn render(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         let Some(pass) = self.begin(gpu, parameters) else {
             return;
         };
@@ -691,6 +625,58 @@ impl<'a> DrawPass<'a> {
     fn end(self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         if let Some(composited) = self.composited {
             parameters.end_composited(gpu, composited);
+        }
+    }
+}
+
+/// What the frame draws of a layer in one place in the layers' order and
+/// depth.
+#[derive(Clone, Copy)]
+pub(crate) enum DrawGroup<'a> {
+    /// Draws of the layer's meshes.
+    Draws(&'a FrameDraws),
+}
+
+impl<'a> DrawGroup<'a> {
+    /// The tiles whose masks the stencil buffer holds when the group draws;
+    /// `None` for a group that needs no masks.
+    #[must_use]
+    pub(crate) fn stencil_tiles(self) -> Option<&'a [UnwrappedTileID]> {
+        match self {
+            DrawGroup::Draws(frame) => Some(&frame.stencil_tiles[..]).filter(|tiles| !tiles.is_empty()),
+        }
+    }
+
+    /// How the group composites onto the frame, with the id that tells it
+    /// apart in the layer composite, if it draws anything and composites.
+    #[must_use]
+    pub(crate) fn composite(self) -> Option<(SimpleIdentity, Composite)> {
+        match self {
+            DrawGroup::Draws(frame) => frame.composited(),
+        }
+    }
+}
+
+/// The order the frame draws the layers' draw groups in, each at a depth
+/// of its own, which [`DrawOrder::step`] moves the encode to after the
+/// group draws.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DrawOrder {
+    /// The layers' order, bottom to top, with the depth going down by one
+    /// after each group, to 0.
+    BottomUp,
+    /// The reverse order, top to bottom, with the depth going up by one
+    /// after each group.
+    TopDown,
+}
+
+impl DrawOrder {
+    /// Moves the encode `parameters` to the depth of the group after the one
+    /// it is at.
+    pub(crate) fn step(self, parameters: &mut PaintParameters<'_>) {
+        match self {
+            DrawOrder::BottomUp => parameters.current_layer = parameters.current_layer.saturating_sub(1),
+            DrawOrder::TopDown => parameters.current_layer += 1,
         }
     }
 }

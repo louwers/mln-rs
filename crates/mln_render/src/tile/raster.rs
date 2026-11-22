@@ -13,7 +13,7 @@ use mln_util::constants;
 use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
 
-use crate::gfx::context::Context;
+use crate::gfx::context::Resources;
 use crate::gfx::indexes::{Indexes, SharedIndexes};
 use crate::gfx::mesh::Indexed;
 use crate::gfx::vertices::SharedVertices;
@@ -196,7 +196,7 @@ impl MaskedGeometry {
 
     /// Moves the quads into `context`'s stores, unless they are there or
     /// there are none.
-    pub(crate) fn upload(&mut self, context: &mut Context) {
+    pub(crate) fn upload(&mut self, context: &mut Resources) {
         self.quads = match std::mem::replace(&mut self.quads, Quads::Whole) {
             Quads::Data { vertices, indices, segments } if !vertices.is_empty() => {
                 let vertices = context.add_vertices(vertices);
@@ -276,7 +276,7 @@ impl RasterContents {
     /// Readies contents with an image for their draws, once and again after
     /// their geometry changes: moves the geometry into `context`'s stores.
     /// The layers make the image's texture.
-    pub(crate) fn upload(&mut self, context: &mut Context) {
+    pub(crate) fn upload(&mut self, context: &mut Resources) {
         if self.has_data() {
             self.geometry.upload(context);
         }

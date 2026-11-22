@@ -17,9 +17,9 @@ use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::pool::TaskGroup;
 
-use crate::bucket::Bucket;
+use crate::bucket::ErasedBucket;
 use crate::erased_source::ErasedOrigin;
-use crate::gfx::context::Context;
+use crate::gfx::context::Resources;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::image_store::ImageStore;
 use crate::layout::tile_layout::{LayoutParams, Resolved};
@@ -325,7 +325,7 @@ impl TileStore {
     /// Readies the buckets of the tiles of `render_tiles`, render tiles of
     /// the source `key`, for the frame's draws, which read what `needs`
     /// says (`SourceTiles::upload_at`).
-    pub(crate) fn upload(&mut self, key: SourceKey, render_tiles: &[RenderTile], context: &mut Context) {
+    pub(crate) fn upload(&mut self, key: SourceKey, render_tiles: &[RenderTile], context: &mut Resources) {
         let Some(tiles) = self.sources.get_mut(&key) else {
             return;
         };
@@ -505,12 +505,12 @@ impl TileStore {
 
 /// The buckets of the tiles' layouts.
 impl LaidBuckets for TileStore {
-    fn bucket(&self, key: &BucketKey) -> Option<&dyn Bucket> {
+    fn bucket(&self, key: &BucketKey) -> Option<&dyn ErasedBucket> {
         let contents = self.sources.get(&key.source)?.contents_at(&key.tile, key.slot)?.geometry()?;
         contents.result.layer_render_data.bucket(key.bucket)
     }
 
-    fn bucket_mut(&mut self, key: &BucketKey) -> Option<&mut dyn Bucket> {
+    fn bucket_mut(&mut self, key: &BucketKey) -> Option<&mut dyn ErasedBucket> {
         let contents = self.sources.get_mut(&key.source)?.contents_at_mut(&key.tile, key.slot)?.geometry_mut()?;
         contents.result.layer_render_data.bucket_mut(key.bucket)
     }

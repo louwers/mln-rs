@@ -10,7 +10,7 @@ use mln_style::Source;
 use mln_style::layer_type::SourceKind;
 
 use crate::erased_layer::ErasedEvaluatedLayer;
-use crate::gfx::context::Context;
+use crate::gfx::context::Resources;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::registry::Registry;
 use crate::render_tile::RenderTile;
@@ -73,7 +73,7 @@ pub(crate) trait RenderSource {
 
     /// Readies the buckets the frame draws, before its layers make their
     /// draws, uploading their indexes through `context`.
-    fn upload(&mut self, store: &mut TileStore, context: &mut Context);
+    fn upload(&mut self, store: &mut TileStore, context: &mut Resources);
 
     /// Updates the source's draws of the debug overlays; a no-op for the
     /// sources that have none (the image source).

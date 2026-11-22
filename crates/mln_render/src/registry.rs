@@ -6,15 +6,14 @@ use std::sync::Arc;
 use mln_style::StyleRegistry;
 use mln_style::expression::Functions;
 use mln_style::expression::functions::RegisterError;
-use mln_style::layer_type::ErasedStyleLayerType;
+use mln_style::layer_type::{ErasedStyleLayerType, StyleLayerType};
 use mln_style::source_type::ErasedStyleSourceType;
 use mln_vec_map::VecMap;
 
 use crate::erased_layer::{ErasedLayerType, entry};
 use crate::erased_source::{self, ErasedSourceType};
-use crate::layer::LayerType;
+use crate::layer::Layer;
 use crate::placement::ErasedPlacement;
-use crate::render_tile::FindView;
 use crate::source::SourceType;
 
 /// What a [`Registry`] is built from: the expression functions, the layer
@@ -53,24 +52,22 @@ impl RegistryBuilder {
         &mut self.functions
     }
 
-    /// Adds the layer type `T`. Fails for a name that an earlier type took, and for a second type whose layers place
-    /// ([`LayerType::PLACEMENT`]). A type whose [`View`](LayerType::View) is
-    /// of another kind of source than its style half's doesn't compile.
-    pub fn add_layer_type<T: LayerType>(&mut self) -> Result<(), RegisterError> {
+    /// Adds the layer type of the layer `L`, both its halves. Fails for a
+    /// name that an earlier type took. A layer whose
+    /// [`Input`](Layer::Input) is of another kind of source than its style
+    /// half's doesn't compile.
+    pub fn add_layer_type<L: Layer>(&mut self) -> Result<(), RegisterError> {
         const {
             assert!(
-                T::INFO.source as u8 == <T::View<'static> as FindView<'static>>::SOURCE as u8,
-                "a layer type's tile view is of another kind of source than its style half's",
+                <L::Style as StyleLayerType>::INFO.source as u8 == crate::layer::input_source::<L>() as u8,
+                "a layer's input is of another kind of source than its style half's",
             );
         }
-        let name = T::INFO.name;
+        let name = <L::Style as StyleLayerType>::INFO.name;
         if self.layer_types.contains_key(name) {
             return Err(RegisterError::Duplicate(name.to_owned()));
         }
-        if T::PLACEMENT.is_some() && self.layer_types.values().any(|layer_type| layer_type.places()) {
-            return Err(RegisterError::RoleTaken(name.to_owned()));
-        }
-        self.layer_types.insert(name, entry::<T>());
+        self.layer_types.insert(name, entry::<L>());
         Ok(())
     }
 

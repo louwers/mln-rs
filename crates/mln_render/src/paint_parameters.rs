@@ -14,8 +14,8 @@ use mln_util::size::Size;
 use mln_vec_map::VecMap;
 
 use crate::clip_masks::ClipMasks;
-use crate::frame::Frame;
-use crate::gfx::context::Context;
+use crate::frame::FramePlan;
+use crate::gfx::context::Resources;
 use crate::layer_composite::LayerComposite;
 use crate::render_light::EvaluatedLight;
 use crate::render_pass::RenderPass;
@@ -142,41 +142,40 @@ impl OpenPass {
     }
 }
 
-/// The frame that a layer's draws are made for: its camera, the target it
-/// draws into, its light, and the static data that draws share.
+/// The frame a layer draws in: its camera, the target it draws into and
+/// its light.
 #[derive(Clone, Copy)]
-pub struct DrawFrame<'a> {
+pub struct Frame<'a> {
     /// The frame's camera.
-    pub view: &'a View,
+    pub camera: &'a View,
     /// Whether a gesture or an animation moves the camera: draws favor speed
     /// over crispness then.
     pub camera_moving: bool,
-    /// The device pixels of the target per logical pixel of the view.
+    /// The device pixels of the target per logical pixel of the camera.
     pub pixel_ratio: f32,
     /// The size of the target, in device pixels.
-    pub renderable_size: Size,
-    /// The clip space units that a logical pixel of the view spans, in x
-    /// and y, where y's sign follows the viewport's orientation.
-    pub pixels_to_gl_units: [f32; 2],
+    pub target_size: Size,
+    /// The clip space units that a logical pixel spans, in x and y, where
+    /// y's sign follows the viewport's orientation.
+    pub pixels_to_clip: [f32; 2],
     /// The style's light, evaluated for the frame.
     pub light: &'a EvaluatedLight,
-    /// The geometry that the layers' draws share.
-    pub static_data: &'a RenderStaticData,
-    /// Whether a layer drawn as a whole ([`Composite`](crate::draw::Composite))
+    /// The geometry that the engine's draws share.
+    pub(crate) static_data: &'a RenderStaticData,
+    /// Whether a group drawn as a whole ([`Composite`](crate::draw::Composite))
     /// can draw with the frame's depth and stencil: the frame has them, and
     /// a pass can draw into them together with the layer composite's
     /// texture.
-    pub composites_with_frame_depth: bool,
+    pub(crate) composites_with_frame_depth: bool,
     /// How far the fade of the current placement has come: from 0 when it
     /// was committed to 1 once its fade is done, and past 1 after that; 1
-    /// where placements don't fade. What placement shows fades in by it
-    /// and what it hides fades out by it.
-    pub placement_fade: f32,
+    /// where placements don't fade.
+    pub(crate) placement_fade: f32,
     /// The frame's projection matrices.
     pub(crate) transform: &'a TransformParameters,
 }
 
-impl DrawFrame<'_> {
+impl Frame<'_> {
     /// The projection of the tile `tile_id` in the frame, pixel-aligned if
     /// `aligned`.
     #[must_use]
@@ -190,13 +189,13 @@ impl DrawFrame<'_> {
 /// which pass draws, at which depth, and where the frame draws the map.
 pub struct PaintParameters<'a> {
     /// The renderer's GPU state, which the encode changes.
-    pub(crate) context: &'a mut Context,
+    pub(crate) context: &'a mut Resources,
     /// The pass of the backend's `Gpu` that draws draw into, while one
     /// is open.
     open_pass: Option<OpenPass>,
 
     /// The frame's camera and target.
-    pub(crate) frame: DrawFrame<'a>,
+    pub(crate) frame: Frame<'a>,
 
     pub(crate) pass: RenderPass,
     pub(crate) debug_options: MapDebugOptions,
@@ -232,11 +231,11 @@ impl<'a> PaintParameters<'a> {
     /// `composites_with_frame_depth` says it can.
     #[expect(clippy::too_many_arguments, reason = "the renderer's GPU state, the frame and where it draws")]
     pub(crate) fn new(
-        context: &'a mut Context,
+        context: &'a mut Resources,
         clip_masks: &'a mut ClipMasks,
         layer_composite: &'a mut LayerComposite,
         composites_with_frame_depth: bool,
-        frame: &'a Frame,
+        frame: &'a FramePlan,
         static_data: &'a RenderStaticData,
         pixel_ratio: f32,
         renderable_size: Size,
@@ -253,12 +252,12 @@ impl<'a> PaintParameters<'a> {
         PaintParameters {
             context,
             open_pass: None,
-            frame: DrawFrame {
-                view: state,
+            frame: Frame {
+                camera: state,
                 camera_moving: frame.camera_moving,
                 pixel_ratio,
-                renderable_size,
-                pixels_to_gl_units,
+                target_size: renderable_size,
+                pixels_to_clip: pixels_to_gl_units,
                 light: &frame.light,
                 static_data,
                 composites_with_frame_depth,
@@ -421,7 +420,7 @@ impl<'a> PaintParameters<'a> {
 
     /// The frame's camera and target.
     #[must_use]
-    pub fn frame(&self) -> DrawFrame<'a> {
+    pub fn frame(&self) -> Frame<'a> {
         self.frame
     }
 
@@ -437,7 +436,7 @@ impl<'a> PaintParameters<'a> {
     /// their Z is the back-hemisphere clip.
     #[must_use]
     pub(crate) fn opaque_pass_enabled_for_layer(&self) -> bool {
-        self.current_layer >= self.opaque_pass_cutoff && !self.frame.view.is_globe()
+        self.current_layer >= self.opaque_pass_cutoff && !self.frame.camera.is_globe()
     }
 
     #[must_use]

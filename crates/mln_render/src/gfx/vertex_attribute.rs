@@ -7,7 +7,7 @@ use mln_gfx::gpu::{BufferUsage, Gpu, GpuError};
 use mln_gfx::shaders::bindings::MAX_ATTRIBUTES;
 
 use crate::gfx::buffer::Buffer;
-use crate::gfx::context::Context;
+use crate::gfx::context::Resources;
 use crate::gfx::upload::{AttributeBinding, AttributeDescriptor};
 use crate::gfx::vertices::{SharedVertices, Vertices};
 
@@ -77,7 +77,7 @@ impl VertexAttribute {
     /// Whether the next upload writes what the attribute reads: its own
     /// values before their first upload, or shared vertices that are new
     /// or updated since theirs.
-    pub(crate) fn needs_upload(&self, context: &Context) -> bool {
+    pub(crate) fn needs_upload(&self, context: &Resources) -> bool {
         match self {
             VertexAttribute::Own { values, .. } => matches!(values, OwnValues::Bytes(_)),
             VertexAttribute::Shared(shared) => context.vertices(&shared.vertices).is_some_and(Vertices::needs_upload),
@@ -90,7 +90,7 @@ impl VertexAttribute {
     pub(crate) fn binding(
         &mut self,
         gpu: &mut dyn Gpu,
-        context: &mut Context,
+        context: &mut Resources,
     ) -> Result<Option<AttributeBinding>, GpuError> {
         match self {
             VertexAttribute::Own { data_type, values, .. } => {

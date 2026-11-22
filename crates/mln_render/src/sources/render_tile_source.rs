@@ -23,7 +23,7 @@ use crate::draw_objects::{DrawGeometry, DrawObjects, Mesh, Textures};
 use crate::encode::{Depth, Draw, Group};
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::erased_source::ErasedOrigin;
-use crate::gfx::context::Context;
+use crate::gfx::context::Resources;
 use crate::gfx::indexes::{DrawIndexes, Indexes};
 use crate::gfx::store::SharedIndexes;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
@@ -67,7 +67,7 @@ const SEGMENT_QUAD: [[i16; 2]; 4] = [[0, 0], [0, 1], [1, 0], [1, 1]];
 /// `quad`, the vertices and indexes of [`SEGMENT_QUAD`]; `None` where there
 /// are none.
 fn segment_objects(
-    context: &mut Context,
+    context: &mut Resources,
     shader: &ShaderKey,
     quad: &(SharedVertices, SharedIndexes),
     segments: impl IntoIterator<Item = Segment>,
@@ -164,7 +164,7 @@ impl DebugLayer {
     }
 
     /// Uploads the meshes of the frame's draws.
-    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Resources) {
         self.frame.upload(gpu, context);
     }
 
@@ -188,7 +188,7 @@ impl DebugLayer {
     /// `source`, spelling `text`; `false` where there are no segments.
     fn add(
         &mut self,
-        context: &mut Context,
+        context: &mut Resources,
         shader: &ShaderKey,
         source: &Rc<str>,
         tile_id: OverscaledTileID,
@@ -212,13 +212,13 @@ impl DebugLayer {
         let frame = parameters.frame;
         for draw in &self.draws {
             let tile = draw.tile.to_unwrapped();
-            let at = TileProjection::of(&tile, frame.view, &frame.projection_data_for_tile(&tile, false), None);
+            let at = TileProjection::of(&tile, frame.camera, &frame.projection_data_for_tile(&tile, false), None);
             let order = Draw { order: draw.mesh.seq() as i64, depth: Depth::Off, ..Draw::DEFAULT };
             self.frame.push_at(&draw.mesh, &at, order, ());
         }
 
         let (color, width) = self.style;
-        let world_width = (TILE_SIZE * frame.view.zoom().exp2()) as f32;
+        let world_width = (TILE_SIZE * frame.camera.zoom().exp2()) as f32;
         self.frame.block(&TileDebugPropsUBO { color: color.to_float_array(), width, world_width, pad: [0.0; 2] });
         self.frame.finish(gpu, parameters.context, []);
     }
@@ -358,7 +358,7 @@ impl RenderSource for RenderTileSource {
         self.order_by_y = Vec::new();
     }
 
-    fn upload(&mut self, store: &mut TileStore, context: &mut Context) {
+    fn upload(&mut self, store: &mut TileStore, context: &mut Resources) {
         store.upload(self.key, &self.render_tiles, context);
     }
 
@@ -373,7 +373,7 @@ impl RenderSource for RenderTileSource {
         }
 
         let source = &self.id;
-        let globe = parameters.frame.view.is_globe();
+        let globe = parameters.frame.camera.is_globe();
         let projection_variant = if globe { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
 
         let shader = parameters.context.shader_key(&programs::TILE_DEBUG, Uniforms::default(), projection_variant);

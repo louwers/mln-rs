@@ -19,7 +19,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 
 use crate::erased_layer::ErasedEvaluatedLayer;
-use crate::gfx::context::Context;
+use crate::gfx::context::Resources;
 use crate::globe::surface_granularity;
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters, TileOrder};
 use crate::render_tile::RenderTile;
@@ -367,7 +367,7 @@ impl RenderSource for RenderImageSource {
 
     fn update_render_tiles(&mut self, _store: &mut TileStore, _parameters: &RenderTileParameters<'_>) {}
 
-    fn upload(&mut self, _store: &mut TileStore, context: &mut Context) {
+    fn upload(&mut self, _store: &mut TileStore, context: &mut Resources) {
         if let Some(image) = &mut self.image {
             image.upload(context);
         }

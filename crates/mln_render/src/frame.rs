@@ -18,7 +18,7 @@ pub(crate) struct FrameLayer {
 
 /// A frame, as its update leaves it for its encode: the camera, the values
 /// that the whole frame draws with, and the layers it draws.
-pub(crate) struct Frame {
+pub(crate) struct FramePlan {
     pub(crate) transform: TransformParameters,
     /// Whether a gesture or an animation moves the camera.
     pub(crate) camera_moving: bool,
@@ -48,10 +48,10 @@ pub(crate) struct Frame {
     pub(crate) started: Instant,
 }
 
-impl Frame {
+impl FramePlan {
     /// A frame of `state` that draws no layers, started now.
     pub(crate) fn new(state: &View, camera_moving: bool, debug_options: MapDebugOptions) -> Self {
-        Frame {
+        FramePlan {
             transform: TransformParameters::new(state),
             camera_moving,
             debug_options,

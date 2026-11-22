@@ -3,7 +3,7 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 
 use crate::draw_objects::Textures;
-use crate::gfx::context::Context;
+use crate::gfx::context::Resources;
 use crate::gfx::store::SharedTexture;
 use crate::paint_parameters::PaintParameters;
 use crate::tile_render_data::TileAtlasTextures;
@@ -78,7 +78,7 @@ impl AtlasBinding {
         let linear_filter_for_icons = match self.icon_filter {
             IconFilter::Linear => true,
             IconFilter::NearestWhenStill { map_aligned } => {
-                parameters.frame.camera_moving || map_aligned || parameters.frame.view.pitch() != 0.0
+                parameters.frame.camera_moving || map_aligned || parameters.frame.camera.pitch() != 0.0
             }
         };
         if self.glyph_texture_id.is_some()
@@ -120,12 +120,12 @@ impl AtlasBinding {
 /// Makes the glyph atlas's texture filter linearly, and the icon atlas's
 /// linearly or not.
 fn set_samplers(
-    context: &mut Context,
+    context: &mut Resources,
     glyph: Option<&SharedTexture>,
     icon: Option<&SharedTexture>,
     linear_filter_for_icons: bool,
 ) {
-    if let Some(mut glyph) = glyph.and_then(|glyph| context.texture_mut(glyph)) {
+    if let Some(mut glyph) = glyph.and_then(|glyph| context.stored_texture_mut(glyph)) {
         glyph.set_sampler(SamplerState {
             filter: TextureFilterType::Linear,
             wrap_u: TextureWrapType::Clamp,
@@ -133,7 +133,7 @@ fn set_samplers(
             ..Default::default()
         });
     }
-    if let Some(mut icon) = icon.and_then(|icon| context.texture_mut(icon)) {
+    if let Some(mut icon) = icon.and_then(|icon| context.stored_texture_mut(icon)) {
         icon.set_sampler(SamplerState {
             filter: if linear_filter_for_icons { TextureFilterType::Linear } else { TextureFilterType::Nearest },
             wrap_u: TextureWrapType::Clamp,

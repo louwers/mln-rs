@@ -9,7 +9,7 @@ use mln_gfx::gpu::{BufferId, BufferUsage, Gpu, GpuError};
 use mln_util::host_bytes::HostBytes;
 
 use crate::gfx::buffer::Buffer;
-use crate::gfx::context::Context;
+use crate::gfx::context::Resources;
 use crate::gfx::owned::Held;
 use crate::gfx::resources::Device;
 pub(crate) use crate::gfx::store::SharedIndexes;
@@ -118,7 +118,7 @@ impl DrawIndexes {
     }
 
     /// The indexes, the draw's own or the store's.
-    fn indexes<'a>(&'a self, context: &'a Context) -> Option<&'a Indexes> {
+    fn indexes<'a>(&'a self, context: &'a Resources) -> Option<&'a Indexes> {
         match self {
             DrawIndexes::Own(indexes) => Some(indexes),
             DrawIndexes::Shared(shared) => context.indexes(shared),
@@ -127,18 +127,18 @@ impl DrawIndexes {
 
     /// The number of indexes, which stays once the upload freed them.
     #[must_use]
-    pub fn len(&self, context: &Context) -> usize {
+    pub fn len(&self, context: &Resources) -> usize {
         self.indexes(context).map_or(0, Indexes::len)
     }
 
     /// Whether the CPU copy of the indexes is still there.
     #[must_use]
-    pub fn has_data(&self, context: &Context) -> bool {
+    pub fn has_data(&self, context: &Resources) -> bool {
         self.indexes(context).is_some_and(Indexes::has_data)
     }
 
     /// Writes the indexes to a buffer of `gpu`, unless they have one.
-    pub fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) -> Result<(), GpuError> {
+    pub fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Resources) -> Result<(), GpuError> {
         match self {
             DrawIndexes::Own(indexes) => indexes.upload(gpu, context.device()),
             DrawIndexes::Shared(shared) => context.upload_indexes(gpu, shared),
@@ -147,7 +147,7 @@ impl DrawIndexes {
 
     /// The buffer of the indexes, once uploaded.
     #[must_use]
-    pub fn buffer(&self, context: &Context) -> Option<BufferId> {
+    pub fn buffer(&self, context: &Resources) -> Option<BufferId> {
         self.indexes(context).and_then(Indexes::buffer)
     }
 

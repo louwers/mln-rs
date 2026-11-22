@@ -14,7 +14,7 @@ use mln_util::size::Size;
 
 use crate::draw_objects::{DrawGeometry, DrawObjects, Mesh, Textures, raw_vertices};
 use crate::encode::{Depth, Draw, Group};
-use crate::gfx::context::Context;
+use crate::gfx::context::Resources;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::vertex_attribute::Uniforms;
 use crate::paint_parameters::PaintParameters;
@@ -37,7 +37,7 @@ impl FullscreenDraw {
     fn update<T: mln_gfx::shaders::block::UniformBlock>(
         &mut self,
         gpu: &mut dyn Gpu,
-        context: &mut Context,
+        context: &mut Resources,
         block: &T,
     ) {
         let draws = &mut self.draws;
@@ -47,7 +47,7 @@ impl FullscreenDraw {
     }
 
     /// Uploads the draw's mesh.
-    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Resources) {
         self.draws.upload(gpu, context);
     }
 
@@ -60,7 +60,12 @@ impl FullscreenDraw {
 /// A draw of `shader`, which reads the view's corners as the vertex attribute
 /// `vertex_attribute`, in the translucent pass at `depth`, of a mesh in
 /// `context`.
-fn fullscreen_draw(context: &mut Context, shader: ShaderKey, vertex_attribute: usize, depth: Depth) -> FullscreenDraw {
+fn fullscreen_draw(
+    context: &mut Resources,
+    shader: ShaderKey,
+    vertex_attribute: usize,
+    depth: Depth,
+) -> FullscreenDraw {
     let corners: [[i16; 2]; 4] = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
     let vertices = bytemuck::cast_slice(&corners).to_vec();
     let geometry = DrawGeometry {
@@ -121,7 +126,7 @@ impl SkyPass {
     pub(crate) fn update(
         &mut self,
         gpu: &mut dyn Gpu,
-        context: &mut Context,
+        context: &mut Resources,
         state: &View,
         viewport_size: Size,
         pixel_ratio: f32,

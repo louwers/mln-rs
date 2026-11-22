@@ -17,12 +17,11 @@ use mln_util::pool::Pool;
 use mln_util::time::Instant;
 
 use crate::clip_masks::ClipMasks;
-use crate::frame::Frame;
-use crate::gfx::context::Context;
+use crate::encode::DrawOrder;
+use crate::frame::FramePlan;
+use crate::gfx::context::Resources;
 use crate::layer_composite::{Composite, LayerComposite};
-use crate::layer_drawing::DrawOrder;
 use crate::paint_parameters::{OpenPass, PaintParameters};
-use crate::render_layer::end_hosts;
 use crate::render_orchestrator::RenderOrchestrator;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
@@ -58,9 +57,7 @@ enum RenderState {
 ///
 /// [`tear_down`](Self::tear_down) frees the renderer's GPU objects. A
 /// renderer dropped without it leaves them to the `Gpu`, which frees them
-/// when it drops, and the hosts its layers draw through
-/// ([`LayerHost`](crate::layer::LayerHost)) hear that their graphics
-/// objects are lost.
+/// when it drops.
 pub struct Renderer {
     orchestrator: RenderOrchestrator,
     encoder: Encoder,
@@ -72,7 +69,7 @@ pub struct Renderer {
 /// [`Renderer::render`] to draw.
 #[must_use = "an updated frame is drawn"]
 pub struct UpdatedFrame {
-    frame: Frame,
+    frame: FramePlan,
     parameters: Arc<UpdateParameters>,
 }
 
@@ -96,7 +93,7 @@ pub struct DrawnFrame {
 struct Encoder {
     /// What the renderer keeps over the backend's `Gpu`, which the
     /// tear-down destroys after what the other fields hold.
-    context: Context,
+    context: Resources,
     pixel_ratio: f32,
     /// Reset in the tear-down, after the orchestrator.
     static_data: RenderStaticData,
@@ -157,7 +154,7 @@ impl Renderer {
                 pool,
             ),
             encoder: Encoder {
-                context: Context::new(*gpu.caps(), pixel_ratio),
+                context: Resources::new(*gpu.caps(), pixel_ratio),
                 pixel_ratio,
                 static_data: RenderStaticData::default(),
                 clip_masks: ClipMasks::default(),
@@ -225,19 +222,17 @@ impl Renderer {
     /// sources, tiles, layers and placement. Returns the frame to draw,
     /// which the host [renders](Self::render) into a frame of its target,
     /// or `None` when there is nothing to draw: a still image that hasn't
-    /// loaded yet. The hosts that layers the update removed or restyled let
-    /// go of end on `gpu`.
-    pub fn update(&mut self, gpu: &mut dyn Gpu, update_parameters: &Arc<UpdateParameters>) -> Option<UpdatedFrame> {
+    /// loaded yet.
+    pub fn update(&mut self, _gpu: &mut dyn Gpu, update_parameters: &Arc<UpdateParameters>) -> Option<UpdatedFrame> {
         // The overdraw inspector takes shaders and color modes of its own.
         let overdraw = update_parameters.debug_options.contains(MapDebugOptions::OVERDRAW);
         if overdraw != self.encoder.context.overdraw() {
             self.replace_shaders(self.encoder.pixel_ratio, overdraw);
         }
         let orchestrator = &mut self.orchestrator;
-        let frame = orchestrator.update(update_parameters);
-        report(orchestrator, self.events.as_ref());
         let encoder = &mut self.encoder;
-        end_hosts(gpu, orchestrator.take_ended_hosts());
+        let frame = orchestrator.update(update_parameters, &mut encoder.context);
+        report(orchestrator, self.events.as_ref());
         if std::mem::take(&mut encoder.shaders_replaced) {
             encoder.context.release_shaders();
         }
@@ -320,9 +315,7 @@ impl Renderer {
 
     /// Not a contract yet (see the crate doc): the renderer's placement
     /// pass, if it is a `P`: the pass of its registry's layer type that
-    /// places
-    /// ([`LayerType::PLACEMENT`](crate::layer::LayerType::PLACEMENT)), for
-    /// the type's own API to reach.
+    /// places, for the type's own API to reach.
     #[doc(hidden)]
     #[must_use]
     pub fn placement<P: 'static>(&self) -> Option<&P> {
@@ -392,12 +385,10 @@ impl Renderer {
         self.orchestrator.tile_cache_enabled()
     }
 
-    /// Tells the hosts that layers draw through
-    /// ([`LayerHost`](crate::layer::LayerHost)) that the renderer's graphics
-    /// objects are lost, so that they forget theirs, and lets go of them.
-    /// Call it before the renderer goes when its device or target went first.
+    /// Drops the layers, whose graphics objects are lost. Call it before the
+    /// renderer goes when its device or target went first.
     pub fn lose_layer_hosts(&mut self) {
-        self.orchestrator.visit_render_layers(crate::render_layer::RenderLayer::lose_context);
+        self.orchestrator.leave_layers();
     }
 
     /// Lets go of what the orchestrator caches, destroys what it and the
@@ -422,28 +413,22 @@ impl Renderer {
     }
 
     /// Lets go of the map's data: its sources, tiles and layers, which the
-    /// next update loads again. The hosts of the layers that go hear
-    /// through `gpu` that the renderer stopped.
-    pub fn clear_data(&mut self, gpu: &mut dyn Gpu) {
+    /// next update loads again.
+    pub fn clear_data(&mut self, _gpu: &mut dyn Gpu) {
         self.orchestrator.clear_data();
-        end_hosts(gpu, self.orchestrator.take_ended_hosts());
     }
 
-    /// Destroys the renderer's GPU objects on `gpu`, and tells its custom
-    /// layers' hosts that it stopped. Returns its rendering stats as it
-    /// leaves them, with all its resources released.
+    /// Destroys the renderer's GPU objects on `gpu`. Returns its rendering
+    /// stats as it leaves them, with all its resources released.
     pub fn tear_down(self, gpu: &mut dyn Gpu) -> RenderingStats {
         let Renderer { mut orchestrator, mut encoder, .. } = self;
-        // The layers' GPU objects go to the context's queue, and their
-        // hosts to the ended ones.
+        // The layers' GPU objects go to the context's queue.
         orchestrator.leave_layers();
-        let ended = orchestrator.take_ended_hosts();
         drop(orchestrator);
         encoder.clip_masks = ClipMasks::default();
         encoder.layer_composite = LayerComposite::default();
         encoder.static_data = RenderStaticData::default();
         encoder.context.tear_down(gpu);
-        end_hosts(gpu, ended);
         encoder.context.stats()
     }
 }
@@ -528,7 +513,7 @@ impl Encoder {
         // - DRAW UPLOAD ---------------------------------------------------
         orchestrator.upload_draws(gpu, parameters.context);
         let draw_groups = DrawGroups::of(orchestrator, &parameters);
-        let (proj_state, transform) = (parameters.frame.view, parameters.frame.transform);
+        let (proj_state, transform) = (parameters.frame.camera, parameters.frame.transform);
         parameters.clip_masks.update(gpu, parameters.context, proj_state.is_globe(), &draw_groups.clip_tiles, |tile| {
             to_projection_ubo(&transform.projection_data_for_tile(tile, false))
         });
@@ -541,10 +526,7 @@ impl Encoder {
             &draw_groups.composited,
         );
         let view = ViewUBO {
-            units_to_pixels: [
-                1.0 / parameters.frame.pixels_to_gl_units[0],
-                1.0 / parameters.frame.pixels_to_gl_units[1],
-            ],
+            units_to_pixels: [1.0 / parameters.frame.pixels_to_clip[0], 1.0 / parameters.frame.pixels_to_clip[1]],
             target_size: [renderable_size.width as f32, renderable_size.height as f32],
             camera_to_center_distance: state.camera_to_center_distance() as f32,
             aspect_ratio: state.size().aspect_ratio(),
@@ -687,18 +669,11 @@ fn draw(
     orchestrator: &mut RenderOrchestrator,
     gpu: &mut dyn Gpu,
     parameters: &mut PaintParameters<'_>,
-    frame: &Frame,
+    frame: &FramePlan,
     image: &FrameImage,
     num_draw_groups: usize,
     depth_range_size: f32,
 ) {
-    // What the layers draw before the first pass, bottom to top, such as
-    // their render targets, which the passes sample, and what custom
-    // layers' hosts record.
-    for &index in frame.layers.keys() {
-        orchestrator.layer_mut(index as usize).render_offscreen(gpu, parameters);
-    }
-
     // The frame's pass, cleared to the backdrop, which shows where there are
     // no tiles.
     let color = if parameters.debug_options.contains(MapDebugOptions::OVERDRAW) {
