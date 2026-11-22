@@ -157,7 +157,10 @@ if [[ -z $commit ]]; then
     }
 fi
 
-selected='^(terrain/.*|projection/globe/terrain/.*|image/.*|regressions/mapbox-gl-js#3010|sky/fog-.*|terrain-shading/default|high-pitch/terrain-pitch95|(fill-layer-blend|fill-layer-opacity|line-layer-blend|line-layer-opacity|line-opacity|raster-layer-blend)/terrain)$'
+# The selection leaves out GL JS's custom layers, which are JavaScript of its
+# own harness that the runner doesn't have: custom-layer-js, and the globe's
+# projection/globe/terrain/custom, the one subdirectory there to start "cu".
+selected='^(terrain/.*|projection/globe/terrain/([^c]|c[^u]).*|image/.*|regressions/mapbox-gl-js#3010|sky/fog-.*|terrain-shading/default|high-pitch/terrain-pitch95|(fill-layer-blend|fill-layer-opacity|line-layer-blend|line-layer-opacity|line-opacity|raster-layer-blend)/terrain)$'
 
 rm -rf "$dest"
 mkdir -p "$dest/render-tests" "$dest/assets"
