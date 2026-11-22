@@ -98,7 +98,7 @@ impl View {
         let (outer_in, outer_out) = sphere_crossings(near, along, high)?;
         let start = outer_in.max(0.0);
         let end = sphere_crossings(near, along, low).map_or(outer_out, |(inner_in, _)| inner_in).min(1.0);
-        if !(start < end) {
+        if start >= end {
             return None;
         }
 
@@ -225,7 +225,7 @@ fn sphere_crossings(origin: DVec3, along: DVec3, radius: f64) -> Option<(f64, f6
     let nearest = -b / a;
     let closest = origin + along * nearest;
     let half_chord_sq = (radius * radius - closest.length_squared()) / a;
-    if !(half_chord_sq >= 0.0) {
+    if half_chord_sq.is_nan() || half_chord_sq < 0.0 {
         return None;
     }
     let half_chord = half_chord_sq.sqrt();
