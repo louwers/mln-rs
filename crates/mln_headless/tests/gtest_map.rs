@@ -1080,10 +1080,12 @@ fn style_network_error_retry() {
     let server = HttpServer::new();
     let test = online_file_source_test();
 
-    test.map().load_style_url(&server.url("/style-fail-once-500"));
-
+    // Set before the load: the map's events reach the observer as the call
+    // returns, the reply's too if it came by then.
     let run_loop = test.run_loop.clone();
     test.observer.did_finish_loading_style_callback.set(move |()| run_loop.stop());
+
+    test.map().load_style_url(&server.url("/style-fail-once-500"));
 
     run_with_timeout(&test.run_loop, 10);
 }
@@ -1093,8 +1095,6 @@ fn style_network_error_retry() {
 fn style_not_found() {
     let server = HttpServer::new();
     let test = online_file_source_test();
-
-    test.map().load_style_url(&server.url("/style-fail-once-404"));
 
     let timer = Rc::new(LoopTimer::new(&test.run_loop));
 
@@ -1109,6 +1109,9 @@ fn style_not_found() {
         });
     }
 
+    // Loaded once the callbacks are set: the map's events reach the observer
+    // as the call returns, the reply's too if it came by then.
+    test.map().load_style_url(&server.url("/style-fail-once-404"));
     run_with_timeout(&test.run_loop, 10);
 
     // Should also not retry if the response has cache headers.
