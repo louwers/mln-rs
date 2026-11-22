@@ -151,6 +151,8 @@ pub struct Group {
     opaque: bool,
     /// Whether the group can composite with the frame's depth.
     frame_depth: bool,
+    /// Whether the group draws into a target, where it doesn't composite.
+    into_target: bool,
     /// The camera's zoom, at which the draws mix their paint values' zoom
     /// stops.
     zoom: f32,
@@ -158,7 +160,14 @@ pub struct Group {
 
 impl Group {
     pub(crate) fn new() -> Group {
-        Group { frame: FrameDraws::default(), pushes: Pushes::default(), opaque: false, frame_depth: false, zoom: 0.0 }
+        Group {
+            frame: FrameDraws::default(),
+            pushes: Pushes::default(),
+            opaque: false,
+            frame_depth: false,
+            into_target: false,
+            zoom: 0.0,
+        }
     }
 
     /// Adds a draw of `mesh`, not of a tile, with `blocks`, the values of
@@ -203,11 +212,12 @@ impl Group {
 
     /// Makes the group's draws draw into a texture of their own in the
     /// translucent pass, which then composites onto the frame as
-    /// `composite` says. Returns false, changing nothing, for a composite
-    /// with the frame's depth ([`Composite::frame_depth`]) where the frame
-    /// can't draw its depth together with that texture.
+    /// `composite` says. Returns false, changing nothing, for a group of
+    /// draws into a target ([`Draws::target`]), and for a composite with
+    /// the frame's depth ([`Composite::frame_depth`]) where the frame can't
+    /// draw its depth together with that texture.
     pub fn composite(&mut self, composite: Composite) -> bool {
-        if composite.frame_depth && !self.frame_depth {
+        if self.into_target || (composite.frame_depth && !self.frame_depth) {
             return false;
         }
         self.frame.composite = Some(composite);
@@ -484,7 +494,9 @@ impl Draws {
             self.targets[index].0 = target.clone();
         }
         let (zoom, opaque, _) = self.frame;
-        self.targets[index].1.begin(zoom, opaque, false);
+        let group = &mut self.targets[index].1;
+        group.begin(zoom, opaque, false);
+        group.into_target = true;
         index
     }
 

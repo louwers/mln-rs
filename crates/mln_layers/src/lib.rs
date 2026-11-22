@@ -27,7 +27,6 @@ pub mod fill_extrusion;
 pub mod heatmap;
 pub mod hillshade;
 pub mod line;
-// slice: off mod mesh;
 mod points;
 // slice: off pub mod raster;
 mod shaders;
