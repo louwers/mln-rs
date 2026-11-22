@@ -149,12 +149,6 @@ mod tests {
         *tiles.get_mut(index)
     }
 
-    /// Records that `tile_id` shows a layer `bucket`.
-    fn show<V>(tiles: &mut TileMap<V>, tile_id: &OverscaledTileID, bucket: SimpleIdentity) {
-        let index = index_of(tiles, tile_id).expect("the tile is the map's");
-        tiles.show(index, Some(bucket));
-    }
-
     /// A tile whose bucket another replaced, or that shows nothing to draw,
     /// drops its value; one that shows the same bucket again keeps it.
     #[test]

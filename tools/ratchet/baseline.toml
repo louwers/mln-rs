@@ -6,6 +6,7 @@
 "crates/mln_image/src/png_writer.rs" = 1
 "crates/mln_layers/src/heatmap/properties.rs" = 1
 "crates/mln_layers/src/symbol/layout.rs" = 2
+"crates/mln_render/src/layer.rs" = 3
 "crates/mln_runtime/src/sprite/sprite_parser.rs" = 1
 "crates/mln_storage/src/offline_database.rs" = 3
 "crates/mln_storage/src/stub_file_source.rs" = 1
@@ -15,6 +16,7 @@
 "crates/mln_style/src/expression/comparison.rs" = 1
 "crates/mln_style/src/expression/dsl.rs" = 1
 "crates/mln_style/src/expression/match_.rs" = 2
+"crates/mln_style/src/properties.rs" = 1
 "crates/mln_text/src/shaper.rs" = 1
 "crates/mln_util/src/image.rs" = 1
 "crates/mln_vec_map/src/lib.rs" = 1

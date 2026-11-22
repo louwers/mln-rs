@@ -29,7 +29,7 @@ macro_rules! keys {
     ($($(#[$meta:meta])* $name:ident => $variant:ident,)*) => {$(
         $(#[$meta])*
         #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-        pub struct $name(EntryKey);
+        pub(crate) struct $name(EntryKey);
 
         impl Key for $name {
             fn new(entry: EntryKey) -> Self {

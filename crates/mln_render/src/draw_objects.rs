@@ -302,14 +302,15 @@ impl DrawObjects {
     /// geometry, where it last drew in another.
     fn shader(&mut self, context: &mut Resources, variant: ProjectionVariant) -> &ShaderKey {
         let variant = self.projection.unwrap_or(variant);
-        if self.shader.as_ref().is_none_or(|(drawn, _)| *drawn != variant) {
+        if self.shader.as_ref().is_some_and(|(drawn, _)| *drawn != variant) {
+            self.shader = None;
             self.shader_id = None;
             self.pipelines.clear();
             self.bindings = None;
             self.geometry = None;
-            self.shader = Some((variant, context.shader_key(self.program, self.uniforms, variant)));
         }
-        &self.shader.as_ref().expect("made above").1
+        let (program, uniforms) = (self.program, self.uniforms);
+        &self.shader.get_or_insert_with(|| (variant, context.shader_key(program, uniforms, variant))).1
     }
 
     /// Uploads the indexes, vertex attributes and textures, where they
