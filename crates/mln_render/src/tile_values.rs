@@ -72,6 +72,7 @@ impl<V> TileMap<V> {
 
     /// The id of the tile at `index`.
     #[must_use]
+    #[cfg(test)]
     pub(crate) fn id(&self, index: usize) -> Option<OverscaledTileID> {
         self.tiles.get(index).map(|entry| entry.id)
     }
@@ -102,6 +103,7 @@ impl<V> TileMap<V> {
 
     /// The number of tiles.
     #[must_use]
+    #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.tiles.len()
     }

@@ -518,6 +518,7 @@ impl Resources {
     /// A texture without a size, made on the GPU by its first upload or the
     /// first pass that draws into it, which the context keeps while a clone
     /// of the returned handle lasts.
+    #[cfg(test)]
     pub(crate) fn add_texture(&mut self) -> SharedTexture {
         self.add_texture_with(|_| {})
     }
@@ -532,11 +533,13 @@ impl Resources {
 
     /// The texture of `handle`.
     #[must_use]
+    #[cfg(test)]
     pub(crate) fn stored_texture(&self, handle: &SharedTexture) -> Option<&Texture2D> {
         self.textures.get(handle)
     }
 
     /// The texture of `handle`, to set up.
+    #[cfg(test)]
     pub(crate) fn stored_texture_mut(&mut self, handle: &SharedTexture) -> Option<TextureMut<'_>> {
         Some(TextureMut::new(self.textures.get_mut(handle)?))
     }
@@ -553,21 +556,6 @@ impl Resources {
     pub(crate) fn create_texture(&mut self, gpu: &mut dyn Gpu, handle: &SharedTexture) -> Result<TextureId, GpuError> {
         let (texture, device) = self.texture_entry(handle)?;
         texture.create(gpu, device)
-    }
-
-    /// Writes `data`, the texels of a texture of `size` in rows from the top,
-    /// to the whole texture of `handle`, first making it of that size. Empty
-    /// `data` leaves the texels unspecified, and an empty size makes no
-    /// texture.
-    pub(crate) fn upload_texture_data(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        handle: &SharedTexture,
-        data: &[u8],
-        size: Size,
-    ) -> Result<(), GpuError> {
-        let (texture, device) = self.texture_entry(handle)?;
-        texture.upload_data(gpu, device, data, size)
     }
 
     /// Writes `data`, the texels of a region of `size` in rows from the top,

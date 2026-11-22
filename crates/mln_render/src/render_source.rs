@@ -93,12 +93,6 @@ pub(crate) trait RenderSource {
         None
     }
 
-    /// Whether the source is an image source, even before its image
-    /// arrives.
-    fn is_image(&self) -> bool {
-        false
-    }
-
     fn set_fast_pfor_enabled(&mut self, _enable: bool) {}
 
     fn dump_debug_logs(&self);

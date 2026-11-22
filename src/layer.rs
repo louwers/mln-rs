@@ -4,12 +4,13 @@
 //! program's declaration ([`program`], with its shaders' [`source`]s).
 
 pub use mln_gfx::gfx_types::AttributeDataType;
+pub use mln_gfx::gpu::TextureFormat;
 pub use mln_gfx::shaders::program::{self, Attribute, Program, Projection, Property, Sources, Stages};
 pub use mln_gfx::shaders::source;
 pub use mln_gfx::texture2d::SamplerState;
 pub use mln_gfx::types::{TextureFilterType, TextureWrapType};
 pub use mln_gfx::{ColorMode, CullFaceMode, DrawMode, uniform_block};
-pub use mln_map_types::View;
+pub use mln_map_types::{FrameProjection, View};
 pub use mln_render::draw::*;
 pub use mln_render::layer::*;
 pub use mln_render::paint_property_binders;

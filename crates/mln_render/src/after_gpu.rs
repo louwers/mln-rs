@@ -26,7 +26,10 @@ pub enum GpuEnd {
 /// The work pushed and not run yet. Work still here when the last
 /// [`AfterGpu`] goes runs as [`GpuEnd::Lost`].
 #[derive(Default)]
-struct Queue(RefCell<Vec<Box<dyn FnOnce(GpuEnd)>>>);
+struct Queue(RefCell<Vec<Work>>);
+
+/// A piece of work after the GPU.
+type Work = Box<dyn FnOnce(GpuEnd)>;
 
 impl AfterGpu {
     /// Runs `work` once the GPU finished the renderer's work so far, or its

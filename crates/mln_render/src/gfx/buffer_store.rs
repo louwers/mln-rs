@@ -135,6 +135,7 @@ impl StoredBuffer {
 
     /// The bytes of the vertices while they are in wasm memory.
     #[must_use]
+    #[cfg(test)]
     pub(crate) fn bytes(&self) -> &[u8] {
         self.data.bytes().unwrap_or_default()
     }

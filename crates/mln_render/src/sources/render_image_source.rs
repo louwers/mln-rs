@@ -387,10 +387,6 @@ impl RenderSource for RenderImageSource {
         self.image.as_ref()
     }
 
-    fn is_image(&self) -> bool {
-        true
-    }
-
     fn dump_debug_logs(&self) {
         Log::info(Event::General, format!("Image source {}: loaded {}", self.base.style_source.id(), self.loaded()));
     }

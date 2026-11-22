@@ -207,18 +207,6 @@ impl DemData {
         self.dim
     }
 
-    /// The number of pixels along each side of the image, with the border.
-    #[must_use]
-    pub(crate) fn stride(&self) -> i32 {
-        self.stride
-    }
-
-    /// How the pixels encode the elevations.
-    #[must_use]
-    pub(crate) fn encoding(&self) -> RasterEncoding {
-        self.encoding
-    }
-
     /// The factors that turn a pixel's red, green and blue into an
     /// elevation, and the base shift subtracted from their sum.
     #[must_use]
