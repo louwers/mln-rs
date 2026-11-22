@@ -722,6 +722,47 @@ mod tests {
     }
 
     #[test]
+    fn a_property_whose_attribute_the_mesh_leaves_unbound_reads_its_uniform() {
+        use mln_gfx::gfx_types::AttributeDataType::{Float, Float4, Short2};
+        use mln_gfx::shaders::program::{Attribute, Program, Projection, Property, Sources};
+
+        static PROGRAM: Program = Program {
+            name: "test",
+            buffers: &[],
+            attributes: &[
+                Attribute::new("pos", Short2),
+                Attribute::new("color", Float4),
+                Attribute::new("width", Float),
+            ],
+            instance_attributes: &[],
+            textures: &[],
+            properties: &[Property::color("color"), Property::float("width")],
+            projection: Projection::None,
+            sources: Sources::NONE,
+        };
+        /// A vertex's width, bound to the program's attribute of its name.
+        #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+        #[repr(C)]
+        struct Width(f32);
+        impl crate::draw::Vertex for Width {
+            const ATTRIBUTES: &'static [mln_gfx::gfx_types::AttributeDataType] = &[Float];
+            const NAMES: &'static [&'static str] = &["width"];
+        }
+
+        let mut context = Resources::detached();
+        let positions = context.buffer::<[i16; 2]>(&[[0, 0], [1, 0], [0, 1]]);
+        let widths = context.buffer(&[Width(1.0); 3]);
+        let triangles = context.index_buffer(&[0, 1, 2]);
+        let mut desc = MeshDesc::new(&PROGRAM, &triangles);
+        desc.vertices(&positions).vertices(&widths);
+        let mesh: crate::draw::Mesh = context.mesh(&desc);
+        let objects = context.take_mesh(mesh.key()).expect("a mesh");
+        assert!(objects.uniforms.contains(0), "the color, which no buffer binds");
+        assert!(!objects.uniforms.contains(1), "the width, which a buffer binds by its name");
+        context.restore_mesh(mesh.key(), objects);
+    }
+
+    #[test]
     fn quads_of_any_count_share_one_buffer_in_segments_of_their_vertices() {
         let mut context = Resources::detached();
         let (few, many) = (context.quads(2), context.quads(20_000));

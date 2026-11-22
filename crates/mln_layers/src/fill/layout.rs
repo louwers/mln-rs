@@ -75,17 +75,87 @@ impl Sdf {
     fn record<'a>(&mut self, cx: &BuildCx<'_, Fill>, layer: &str, images: impl IntoIterator<Item = &'a str>) {
         let Some(resolved) = cx.resolved() else { return };
         for sdf in images.into_iter().filter_map(|id| Some(resolved.patterns.get(id)?.sdf)) {
-            match self.layers.iter().find(|(id, _)| id == layer) {
-                None => self.layers.push((layer.to_owned(), sdf)),
-                Some(&(_, first)) if first != sdf && !self.mixed.iter().any(|id| id == layer) => {
-                    self.mixed.push(layer.to_owned());
-                    Log::warning(
-                        Event::Style,
-                        format!("Style sheet warning: Cannot mix SDF and non-SDF fill patterns in layer \"{layer}\""),
-                    );
+            self.add(layer, sdf);
+        }
+    }
+
+    /// Records that a pattern of the layer `layer` is an SDF image or not,
+    /// and warns once where the layer's patterns mix both.
+    fn add(&mut self, layer: &str, sdf: bool) {
+        match self.layers.iter().find(|(id, _)| id == layer) {
+            None => self.layers.push((layer.to_owned(), sdf)),
+            Some(&(_, first)) if first != sdf && !self.mixed.iter().any(|id| id == layer) => {
+                self.mixed.push(layer.to_owned());
+                Log::warning(
+                    Event::Style,
+                    format!("Style sheet warning: Cannot mix SDF and non-SDF fill patterns in layer \"{layer}\""),
+                );
+            }
+            Some(_) => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use mln_util::logging::{EventSeverity, Observer};
+    use parking_lot::Mutex;
+
+    use super::*;
+
+    /// The warnings logged on the calling thread while it lives.
+    struct Warnings(Arc<Mutex<Vec<String>>>);
+
+    impl Warnings {
+        fn new() -> Warnings {
+            struct Recorder(Arc<Mutex<Vec<String>>>);
+            impl Observer for Recorder {
+                fn on_record(&self, severity: EventSeverity, event: Event, _code: i64, message: &str) -> bool {
+                    if severity == EventSeverity::Warning && event == Event::Style {
+                        self.0.lock().push(message.to_owned());
+                    }
+                    true
                 }
-                Some(_) => {}
+            }
+            let warnings = Arc::new(Mutex::new(Vec::new()));
+            let _ = Log::set_thread_observer(Some(Box::new(Recorder(Arc::clone(&warnings)))));
+            Warnings(warnings)
+        }
+    }
+
+    impl Drop for Warnings {
+        fn drop(&mut self) {
+            let _ = Log::set_thread_observer(None);
+        }
+    }
+
+    // gtest: FillBucket.TracksSDFPatternsPerLayer
+    #[test]
+    fn a_layers_first_pattern_says_whether_its_patterns_are_sdf_images() {
+        let warnings = Warnings::new();
+        let mut sdf = Sdf::default();
+        sdf.add("sdf-layer", true);
+        sdf.add("rgba-layer", false);
+        let bucket = FillBucket { sdf: sdf.layers, ..FillBucket::default() };
+        assert!(bucket.sdf("sdf-layer"));
+        assert!(!bucket.sdf("rgba-layer"));
+        assert!(!bucket.sdf("missing-layer"));
+        assert!(warnings.0.lock().is_empty());
+    }
+
+    // gtest: FillBucket.WarnsOnceForMixedPatternTypesPerBucket
+    #[test]
+    fn a_layer_whose_patterns_mix_sdf_and_other_images_warns_once_per_bucket() {
+        let warnings = Warnings::new();
+        for _ in 0..2 {
+            let mut sdf = Sdf::default();
+            for image in [true, false, false] {
+                sdf.add("mixed-layer", image);
             }
         }
+        let warning = "Style sheet warning: Cannot mix SDF and non-SDF fill patterns in layer \"mixed-layer\"";
+        assert_eq!(*warnings.0.lock(), [warning, warning]);
     }
 }

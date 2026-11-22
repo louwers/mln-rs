@@ -76,3 +76,43 @@ pub(crate) fn sort<T>(
     }
     Ok(sorted.into_iter().map(|(_, feature)| feature).collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use mln_style::PropertyEvaluationParameters;
+    use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
+    use mln_style::layer_type::LayerStyle;
+    use serde_json::json;
+
+    use super::*;
+    use crate::Circle;
+
+    /// A circle layer's `circle-sort-key` of `value`, evaluated at zoom 0.
+    fn sort_key(value: serde_json::Value) -> Evaluated<f32> {
+        let json = json!({"id": "circle", "type": "circle", "source": "s", "layout": {"circle-sort-key": value}});
+        let mut error = ConversionError::default();
+        let layer = convert_layer(crate::tests::registry().style(), &Convertible::from(&json), &mut error)
+            .unwrap_or_else(|| panic!("{}", error.message));
+        let style = LayerStyle::<Circle>::recover_ref(&**layer.style()).expect("a circle layer");
+        style.layout.evaluate(&PropertyEvaluationParameters::new(0.0)).circle_sort_key
+    }
+
+    // Ports test/layout/sort_key.test.cpp's fill, line and circle cases,
+    // whose layouts share the order.
+    #[test]
+    fn features_go_in_their_sort_keys_order_and_reverse_where_it_is_the_same_for_all() {
+        // Three features, ranked 2, 0 and 1.
+        let ranks = [2.0, 0.0, 1.0];
+        for (key, order) in [
+            (None, [0, 1, 2]),
+            (Some(json!(5)), [2, 1, 0]),
+            (Some(json!(["step", ["zoom"], 5, 10, 10])), [2, 1, 0]),
+            (Some(json!(["number", ["get", "rank"]])), [1, 2, 0]),
+        ] {
+            let key = key.map(sort_key);
+            let features = (0..3).map(|i| (i, ())).collect();
+            let sorted = sort(features, key.as_ref(), |_, i| Ok(ranks[i])).unwrap();
+            assert_eq!(sorted.iter().map(|&(i, ())| i).collect::<Vec<_>>(), order, "{key:?}");
+        }
+    }
+}

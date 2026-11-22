@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
-use mln_layers::Circle;
-// slice: off use mln_layers::{Fill, Line, Raster};
+use mln_layers::{Circle, Fill, Line};
+// slice: off use mln_layers::Raster;
 use mln_rs::builtin_registry;
 use mln_style::conversion::Convertible;
 use mln_style::expression::Image;
@@ -73,7 +73,6 @@ macro_rules! paint {
 }
 
 /// Sets a layout property from JSON and checks the value it holds.
-#[allow(unused_macros, reason = "slice: off: the switched-off types' tests use it")]
 macro_rules! layout {
     ($type:ident, $layer:ident, $field:ident, $name:literal, $json:expr, $expected:expr) => {
         set(&mut $layer, $name, $json);
@@ -99,51 +98,51 @@ fn circle_properties() {
     paint!(Circle, layer, circle_translate_anchor, "circle-translate-anchor", r#""map""#, c(TRANSLATE_ANCHOR));
 }
 
-// slice: off // gtest: Layer.FillProperties
-// slice: off #[test]
-// slice: off fn fill_properties() {
-// slice: off     let mut layer = new_layer("fill", "fill", "source");
-// slice: off     assert_eq!("fill", layer.info().name);
-// slice: off
-// slice: off     // Paint properties
-// slice: off
-// slice: off     paint!(Fill, layer, fill_color, "fill-color", RED, c(color()));
-// slice: off     paint!(Fill, layer, fill_outline_color, "fill-outline-color", RED, c(color()));
-// slice: off     paint!(Fill, layer, fill_opacity, "fill-opacity", "1", c(OPACITY));
-// slice: off     paint!(Fill, layer, fill_pattern, "fill-pattern", r#""foo""#, pattern());
-// slice: off     paint!(Fill, layer, fill_antialias, "fill-antialias", "false", c(ANTIALIAS));
-// slice: off     paint!(Fill, layer, fill_translate, "fill-translate", "[0, 0]", c(TRANSLATE));
-// slice: off     paint!(Fill, layer, fill_translate_anchor, "fill-translate-anchor", r#""map""#, c(TRANSLATE_ANCHOR));
-// slice: off }
+// gtest: Layer.FillProperties
+#[test]
+fn fill_properties() {
+    let mut layer = new_layer("fill", "fill", "source");
+    assert_eq!("fill", layer.info().name);
 
-// slice: off // gtest: Layer.LineProperties
-// slice: off #[test]
-// slice: off fn line_properties() {
-// slice: off     let mut layer = new_layer("line", "line", "source");
-// slice: off     assert_eq!("line", layer.info().name);
-// slice: off
-// slice: off     // Layout properties
-// slice: off
-// slice: off     layout!(Line, layer, line_cap, "line-cap", r#""round""#, c(LINE_CAP));
-// slice: off     layout!(Line, layer, line_join, "line-join", r#""miter""#, c(LINE_JOIN));
-// slice: off     layout!(Line, layer, line_miter_limit, "line-miter-limit", "1", c(MITER_LIMIT));
-// slice: off     layout!(Line, layer, line_round_limit, "line-round-limit", "1", c(ROUND_LIMIT));
-// slice: off
-// slice: off     // Paint properties
-// slice: off
-// slice: off     paint!(Line, layer, line_color, "line-color", RED, c(color()));
-// slice: off     paint!(Line, layer, line_opacity, "line-opacity", "1", c(OPACITY));
-// slice: off     paint!(Line, layer, line_translate, "line-translate", "[0, 0]", c(TRANSLATE));
-// slice: off     paint!(Line, layer, line_translate_anchor, "line-translate-anchor", r#""map""#, c(TRANSLATE_ANCHOR));
-// slice: off     paint!(Line, layer, line_width, "line-width", "1", c(WIDTH));
-// slice: off     let unevaluated = style_of::<Line>(&layer).paint.untransitioned();
-// slice: off     assert_eq!(*unevaluated.line_floor_width.get_value(), c(WIDTH), "the floor width follows line-width");
-// slice: off     paint!(Line, layer, line_gap_width, "line-gap-width", "1", c(GAP_WIDTH));
-// slice: off     paint!(Line, layer, line_offset, "line-offset", "1", c(OFFSET));
-// slice: off     paint!(Line, layer, line_blur, "line-blur", "1", c(BLUR));
-// slice: off     paint!(Line, layer, line_dasharray, "line-dasharray", "[]", c(dash_array()));
-// slice: off     paint!(Line, layer, line_pattern, "line-pattern", r#""foo""#, pattern());
-// slice: off }
+    // Paint properties
+
+    paint!(Fill, layer, fill_color, "fill-color", RED, c(color()));
+    paint!(Fill, layer, fill_outline_color, "fill-outline-color", RED, c(color()));
+    paint!(Fill, layer, fill_opacity, "fill-opacity", "1", c(OPACITY));
+    paint!(Fill, layer, fill_pattern, "fill-pattern", r#""foo""#, pattern());
+    paint!(Fill, layer, fill_antialias, "fill-antialias", "false", c(ANTIALIAS));
+    paint!(Fill, layer, fill_translate, "fill-translate", "[0, 0]", c(TRANSLATE));
+    paint!(Fill, layer, fill_translate_anchor, "fill-translate-anchor", r#""map""#, c(TRANSLATE_ANCHOR));
+}
+
+// gtest: Layer.LineProperties
+#[test]
+fn line_properties() {
+    let mut layer = new_layer("line", "line", "source");
+    assert_eq!("line", layer.info().name);
+
+    // Layout properties
+
+    layout!(Line, layer, line_cap, "line-cap", r#""round""#, c(LINE_CAP));
+    layout!(Line, layer, line_join, "line-join", r#""miter""#, c(LINE_JOIN));
+    layout!(Line, layer, line_miter_limit, "line-miter-limit", "1", c(MITER_LIMIT));
+    layout!(Line, layer, line_round_limit, "line-round-limit", "1", c(ROUND_LIMIT));
+
+    // Paint properties
+
+    paint!(Line, layer, line_color, "line-color", RED, c(color()));
+    paint!(Line, layer, line_opacity, "line-opacity", "1", c(OPACITY));
+    paint!(Line, layer, line_translate, "line-translate", "[0, 0]", c(TRANSLATE));
+    paint!(Line, layer, line_translate_anchor, "line-translate-anchor", r#""map""#, c(TRANSLATE_ANCHOR));
+    paint!(Line, layer, line_width, "line-width", "1", c(WIDTH));
+    let unevaluated = style_of::<Line>(&layer).paint.untransitioned();
+    assert_eq!(*unevaluated.line_floor_width.get_value(), c(WIDTH), "the floor width follows line-width");
+    paint!(Line, layer, line_gap_width, "line-gap-width", "1", c(GAP_WIDTH));
+    paint!(Line, layer, line_offset, "line-offset", "1", c(OFFSET));
+    paint!(Line, layer, line_blur, "line-blur", "1", c(BLUR));
+    paint!(Line, layer, line_dasharray, "line-dasharray", "[]", c(dash_array()));
+    paint!(Line, layer, line_pattern, "line-pattern", r#""foo""#, pattern());
+}
 
 // slice: off // gtest: Layer.RasterProperties
 // slice: off #[test]

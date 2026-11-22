@@ -20,8 +20,8 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use serde_json::json;
 
+use crate::Symbol;
 use crate::symbol::bucket::SortKeyRange;
-use crate::{Circle, Fill, Line, Symbol};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum SortKeyType {
@@ -143,61 +143,6 @@ fn create_bucket<T: LayerType>(layer: &Arc<EvaluatedLayer<T>>, shape: Shape) -> 
     let build =
         BuildParams { first_load: true, show_collision_boxes: false, canonical: bucket_parameters.tile_id.canonical };
     layout.create_bucket(Some(&resolved), &mut FeatureIndexBuilder::new(Some(data)), &build).unwrap().unwrap()
-}
-
-/// The features in the order their vertices are, from the x coordinate the
-/// vertices store `coordinate_scale` times.
-fn feature_order(xs: impl Iterator<Item = i16>, coordinate_scale: i16) -> Vec<usize> {
-    let mut order: Vec<usize> = Vec::new();
-    for x in xs {
-        let index = (x / coordinate_scale / 100 - 1) as usize;
-        if order.last() != Some(&index) {
-            order.push(index);
-        }
-    }
-    order
-}
-
-#[test]
-fn fill_order() {
-    for type_ in SORT_KEY_TYPES {
-        let properties =
-            layer::<Fill>(json!({ "id": "fill", "type": "fill", "source": "source" }), "fill-sort-key", type_);
-        let bucket = create_bucket(&properties, Shape::Polygon);
-        assert_eq!(
-            expected_order(type_),
-            feature_order(bucket.vertices.data().iter().map(|v| v.a1[0]), 1),
-            "{type_:?}"
-        );
-    }
-}
-
-#[test]
-fn line_order() {
-    for type_ in SORT_KEY_TYPES {
-        let properties =
-            layer::<Line>(json!({ "id": "line", "type": "line", "source": "source" }), "line-sort-key", type_);
-        let bucket = create_bucket(&properties, Shape::LineString);
-        assert_eq!(
-            expected_order(type_),
-            feature_order(bucket.vertices.data().iter().map(|v| v.a1[0]), 2),
-            "{type_:?}"
-        );
-    }
-}
-
-#[test]
-fn circle_order() {
-    for type_ in SORT_KEY_TYPES {
-        let properties =
-            layer::<Circle>(json!({ "id": "circle", "type": "circle", "source": "source" }), "circle-sort-key", type_);
-        let bucket = create_bucket(&properties, Shape::Point);
-        assert_eq!(
-            expected_order(type_),
-            feature_order(bucket.vertices.data().iter().map(|v| v.a1[0]), 2),
-            "{type_:?}"
-        );
-    }
 }
 
 fn symbol_layer(type_: SortKeyType, z_order: Option<&str>) -> Arc<EvaluatedLayer<Symbol>> {

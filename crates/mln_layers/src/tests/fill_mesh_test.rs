@@ -3,14 +3,12 @@ use std::sync::Arc;
 use geometry::Point;
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_render::globe::{SubdividedPolygon, add_tile_border_strips};
-use mln_render::layer::Indexed;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
 use mln_util::constants::EXTENT;
 
 use super::subdivide;
-use crate::fill::bucket::FillLayoutVertex;
-use crate::fill::mesh::FillBuffers;
+use crate::fill::bucket::FillBucket;
 use crate::tessellator::Tessellator;
 
 /// `EXTENT` as a tile coordinate.
@@ -30,25 +28,27 @@ type Line = [i16; 4];
 /// The buffers of a fill bucket.
 #[derive(Default)]
 struct Buffers {
-    fill_vertices: Vec<FillLayoutVertex>,
+    fill_vertices: Vec<[i16; 2]>,
     fill_indexes: Vec<u16>,
     fill_segments: Vec<SegmentBase>,
     basic_line_indexes: Vec<u16>,
     basic_line_segments: Vec<SegmentBase>,
-    outline_ends: Vec<FillLayoutVertex>,
+    outline_ends: Vec<[i16; 2]>,
 }
 
 /// Adds the polygons of `geometry` to fresh buffers, and checks that the
 /// outline's instances draw the segments its lines do.
 fn generate(geometry: &GeometryCollection, canonical: &CanonicalTileID, granularity: u32) -> Buffers {
-    let mut buffers = Buffers::default();
-    FillBuffers {
-        vertices: &mut buffers.fill_vertices,
-        outline_ends: &mut buffers.outline_ends,
-        triangles: Indexed { indexes: &mut buffers.fill_indexes, segments: &mut buffers.fill_segments },
-        lines: Indexed { indexes: &mut buffers.basic_line_indexes, segments: &mut buffers.basic_line_segments },
-    }
-    .add_polygons(geometry, canonical, granularity, &mut Tessellator::default());
+    let mut bucket = FillBucket::default();
+    bucket.add(geometry, canonical, granularity, &mut Tessellator::default());
+    let buffers = Buffers {
+        fill_vertices: bucket.vertices.get().to_vec(),
+        fill_indexes: bucket.triangles.get().to_vec(),
+        fill_segments: bucket.triangles.segments().to_vec(),
+        basic_line_indexes: bucket.lines.get().to_vec(),
+        basic_line_segments: bucket.lines.segments().to_vec(),
+        outline_ends: bucket.outline_ends.get().to_vec(),
+    };
     let mut lines = drawn_lines(&buffers.fill_vertices, &buffers.basic_line_indexes, &buffers.basic_line_segments);
     lines.retain(|line| line[..2] != line[2..]);
     lines.sort_unstable();
@@ -65,14 +65,14 @@ fn instanced_lines(buffers: &Buffers) -> Vec<Line> {
         .iter()
         .zip(&buffers.outline_ends)
         .filter(|(vertex, end)| vertex != end)
-        .map(|(vertex, end)| [vertex.a1[0], vertex.a1[1], end.a1[0], end.a1[1]])
+        .map(|(vertex, end)| [vertex[0], vertex[1], end[0], end[1]])
         .collect();
     lines.sort_unstable();
     lines
 }
 
 // The triangles and lines a draw of every segment fetches, in order.
-fn drawn_triangles(vertices: &[FillLayoutVertex], indexes: &[u16], segments: &[SegmentBase]) -> Vec<Triangle> {
+fn drawn_triangles(vertices: &[[i16; 2]], indexes: &[u16], segments: &[SegmentBase]) -> Vec<Triangle> {
     let mut triangles = Vec::new();
     for segment in segments {
         assert!(segment.vertex_length <= MAX_SEGMENT_VERTICES);
@@ -80,7 +80,7 @@ fn drawn_triangles(vertices: &[FillLayoutVertex], indexes: &[u16], segments: &[S
         while i + 3 <= segment.index_offset + segment.index_length {
             let mut triangle: Triangle = [0; 6];
             for k in 0..3 {
-                let position = vertices[segment.vertex_offset + usize::from(indexes[i + k])].a1;
+                let position = vertices[segment.vertex_offset + usize::from(indexes[i + k])];
                 triangle[k * 2] = position[0];
                 triangle[k * 2 + 1] = position[1];
             }
@@ -91,14 +91,14 @@ fn drawn_triangles(vertices: &[FillLayoutVertex], indexes: &[u16], segments: &[S
     triangles
 }
 
-fn drawn_lines(vertices: &[FillLayoutVertex], indexes: &[u16], segments: &[SegmentBase]) -> Vec<Line> {
+fn drawn_lines(vertices: &[[i16; 2]], indexes: &[u16], segments: &[SegmentBase]) -> Vec<Line> {
     let mut lines = Vec::new();
     for segment in segments {
         assert!(segment.vertex_length <= MAX_SEGMENT_VERTICES);
         let mut i = segment.index_offset;
         while i + 2 <= segment.index_offset + segment.index_length {
-            let a = vertices[segment.vertex_offset + usize::from(indexes[i])].a1;
-            let b = vertices[segment.vertex_offset + usize::from(indexes[i + 1])].a1;
+            let a = vertices[segment.vertex_offset + usize::from(indexes[i])];
+            let b = vertices[segment.vertex_offset + usize::from(indexes[i + 1])];
             lines.push([a[0], a[1], b[0], b[1]]);
             i += 2;
         }
@@ -224,7 +224,7 @@ fn globe_outline_segments_from_a_shared_vertex() {
         .fill_vertices
         .iter()
         .zip(&buffers.outline_ends)
-        .filter(|(vertex, end)| vertex.a1 == [0, 2000] && vertex != end)
+        .filter(|(vertex, end)| **vertex == [0, 2000] && vertex != end)
         .count();
     assert_eq!(2, segments_from_the_shared_vertex);
 }

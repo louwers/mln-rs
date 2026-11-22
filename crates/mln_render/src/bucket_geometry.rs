@@ -355,3 +355,52 @@ impl<T> Kept<T> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_upload_moves_a_vectors_data_into_a_buffer_and_keeps_its_count() {
+        let mut res = Resources::detached();
+        let (mut vec, mut indexes) = (GpuVec::new(vec![[1i16, 2], [3, 4]]), Indexes::default());
+        indexes.add(&mut vec![0u8; 3], 0, [[0, 1, 2]]);
+        let mut geometry = BucketGeometry::default();
+        geometry.upload(&mut vec, false, &[], &mut res);
+        geometry.upload_indexes(&mut indexes, false, &[], &mut res);
+        assert!(vec.get().is_empty() && indexes.get().is_empty(), "the data moved to the buffers");
+        assert_eq!((vec.len(), geometry.buffer(&vec).map(Buffer::len)), (2, Some(2)));
+        assert_eq!(geometry.indexes(&indexes).map(|uploaded| uploaded.buffer.len()), Some(3));
+    }
+
+    // The buckets of a tile's world copy are copies of the tile's, and the
+    // upload of either shares what the other moved into the buffers, freeing
+    // its own data.
+    #[test]
+    fn a_world_copys_upload_shares_the_buffers_of_its_copy() {
+        let mut res = Resources::detached();
+        let mut vec = GpuVec::new(vec![1.0f32, 2.0]);
+        let mut copy = vec.clone();
+        let mut copy_geometry = BucketGeometry::default();
+        copy_geometry.upload(&mut copy, false, &[], &mut res);
+        let mut geometry = BucketGeometry::default();
+        geometry.upload(&mut vec, false, &[&copy_geometry], &mut res);
+        assert!(vec.get().is_empty());
+        assert!(geometry.buffer(&vec).is_some_and(|buffer| Some(buffer) == copy_geometry.buffer(&copy)));
+    }
+
+    // Data that changes in place, as feature state and placement change it,
+    // stays, and each world copy has a buffer of its own of it.
+    #[test]
+    fn a_kept_vector_keeps_its_data_and_a_buffer_of_each_copys_own() {
+        let mut res = Resources::detached();
+        let mut vec = GpuVec::new(vec![1.0f32, 2.0]);
+        let mut copy = vec.clone();
+        let mut copy_geometry = BucketGeometry::default();
+        copy_geometry.upload(&mut copy, true, &[], &mut res);
+        let mut geometry = BucketGeometry::default();
+        geometry.upload(&mut vec, true, &[&copy_geometry], &mut res);
+        assert_eq!(vec.get(), [1.0, 2.0]);
+        assert!(geometry.buffer(&vec).is_some_and(|buffer| Some(buffer) != copy_geometry.buffer(&copy)));
+    }
+}

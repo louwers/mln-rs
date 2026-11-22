@@ -1,20 +1,18 @@
 //! The tests of the layer types' buckets, layouts and meshes.
 
-// Ports test/gl/bucket.test.cpp (circle, fill, line, symbol; on the WebGPU
-// headless backend) and test/renderer/fill_bucket.test.cpp.
-// slice: off mod bucket_test;
 // The custom layer's host, as its layer keeps it.
 // slice: off mod custom_test;
-// slice: off mod fill_mesh_test;
+// The meshes of fills and their outlines.
+mod fill_mesh_test;
 // The symbol layer type's format sections that override its paint.
 mod format_section_override_test;
 // The globe meshes that the raster layer types keep.
 // slice: off mod globe_mesh_test;
 // The subdivision of polygons for the globe.
-// slice: off mod polygon_subdivision_test;
+mod polygon_subdivision_test;
 // The programs' declarations and sources.
 mod programs_test;
-// Ports test/layout/sort_key.test.cpp.
+// Ports test/layout/sort_key.test.cpp's symbol cases.
 // slice: off mod sort_key_test;
 // The fill-extrusion parts of the subdivision tests.
 mod subdivision_test;

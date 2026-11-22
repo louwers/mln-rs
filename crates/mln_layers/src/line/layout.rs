@@ -146,3 +146,100 @@ impl LineLayout {
         add_line(bucket.vertices.get_mut(), &mut bucket.triangles, scratch, line, &options);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::Cow;
+
+    use feature::{Identifier, PropertyMap, Value};
+    use mln_style::PropertyEvaluationParameters;
+    use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
+    use mln_style::layer_type::LayerStyle;
+    use mln_tile_id::geometry_tile_data::GeometryCollection;
+    use serde_json::json;
+
+    use super::*;
+    use crate::line::mesh::LineVertex;
+
+    /// A feature of `type_` with `properties`.
+    struct Stub(FeatureType, PropertyMap);
+
+    impl GeometryTileFeature for Stub {
+        fn get_type(&self) -> FeatureType {
+            self.0
+        }
+        fn get_value(&self, key: &str) -> Option<Value> {
+            self.1.get(key).cloned()
+        }
+        fn get_id(&self) -> Identifier {
+            Identifier::Null
+        }
+        fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, Error> {
+            Ok(Cow::Owned(GeometryCollection::default()))
+        }
+    }
+
+    /// The vertices of a line layer with `layout`, at zoom 10, of one feature
+    /// of `type_` per `(properties, line)`.
+    fn vertices(
+        layout: serde_json::Value,
+        type_: FeatureType,
+        features: &[(serde_json::Value, &[(i16, i16)])],
+    ) -> Vec<LineVertex> {
+        let json = json!({"type": "line", "id": "line", "source": "s", "layout": layout});
+        let mut error = ConversionError::default();
+        let layer = convert_layer(crate::tests::registry().style(), &Convertible::from(&json), &mut error)
+            .unwrap_or_else(|| panic!("{}", error.message));
+        let style = LayerStyle::<Line>::recover_ref(&**layer.style()).expect("a line layer");
+        let layout = style.layout.evaluate(&PropertyEvaluationParameters::new(10.0));
+        let layout = LineLayout { features: Vec::new(), layout, zoom: 10.0, overscaling: 1 };
+        let (mut bucket, mut scratch) = (LineBucket::default(), LineScratch::default());
+        for (properties, line) in features {
+            let properties = properties.as_object().expect("properties").iter().map(|(key, value)| {
+                let value = match value {
+                    serde_json::Value::String(s) => Value::String(s.clone()),
+                    v => Value::Double(v.as_f64().expect("a string or number")),
+                };
+                (key.clone(), value)
+            });
+            let line: Vec<Point<i16>> = line.iter().map(|&(x, y)| Point::new(x, y)).collect();
+            let feature = Stub(type_, properties.collect());
+            layout.add(&mut bucket, &line, &feature, &CanonicalTileID::new(0, 0, 0), 1, &mut scratch);
+        }
+        bucket.vertices.get().to_vec()
+    }
+
+    // gtest: Buckets.LineBucket
+    #[test]
+    fn a_line_has_a_mesh_and_a_point_none() {
+        assert!(vertices(json!({}), FeatureType::Point, &[(json!({}), &[(0, 0)])]).is_empty());
+        assert!(!vertices(json!({}), FeatureType::LineString, &[(json!({}), &[(0, 0), (1, 1)])]).is_empty());
+    }
+
+    #[test]
+    fn a_lines_cap_and_limits_evaluate_per_feature() {
+        // A sharp corner: its miter length is about 3.2, so a miter limit of
+        // 2 bevels it and 10 doesn't, and a round limit of 1 rounds it and 10
+        // doesn't.
+        const CORNER: &[(i16, i16)] = &[(0, 0), (100, 400), (200, 0)];
+        for (property, values) in [
+            ("line-cap", [json!("butt"), json!("round")]),
+            ("line-miter-limit", [json!(2), json!(10)]),
+            ("line-round-limit", [json!(1), json!(10)]),
+        ] {
+            let join = if property == "line-round-limit" { "round" } else { "miter" };
+            let line = FeatureType::LineString;
+            let constant = |value: &serde_json::Value| {
+                vertices(json!({"line-join": join, property: value}), line, &[(json!({}), CORNER)])
+            };
+            let (first, second) = (constant(&values[0]), constant(&values[1]));
+            assert_ne!(first, second, "{property}: the two values make the same line");
+            let data_driven = vertices(
+                json!({"line-join": join, property: ["get", "v"]}),
+                line,
+                &[(json!({"v": values[0]}), CORNER), (json!({"v": values[1]}), CORNER)],
+            );
+            assert_eq!(data_driven, [first, second].concat(), "{property}");
+        }
+    }
+}
