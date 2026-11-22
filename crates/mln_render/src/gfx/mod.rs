@@ -6,7 +6,6 @@
 //! (`owned`, `uniform_buffer`, `upload`), and the segments that draw meshes
 //! (`mesh`).
 
-pub(crate) mod atlas_binding;
 pub(crate) mod buffer;
 pub(crate) mod context;
 pub(crate) mod dynamic_texture;

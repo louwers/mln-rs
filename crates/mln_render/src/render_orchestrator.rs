@@ -27,7 +27,7 @@ use mln_vec_map::{VecMap, VecSet};
 use smallvec::SmallVec;
 
 use crate::Registry;
-use crate::encode::{DrawGroup, DrawOrder};
+use crate::encode::{DrawOrder, FrameDraws};
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::frame::{FrameLayer, FramePlan};
 use crate::gfx::context::Resources;
@@ -1116,7 +1116,7 @@ impl RenderOrchestrator {
     }
 
     /// Visits the layers' draw groups of the frame, in drawing order.
-    pub(crate) fn visit_draw_groups<'a>(&'a self, mut visit: impl FnMut(DrawGroup<'a>)) {
+    pub(crate) fn visit_draw_groups<'a>(&'a self, mut visit: impl FnMut(&'a FrameDraws)) {
         for layer in &self.layers {
             layer.visit_draw_groups(&mut visit);
         }

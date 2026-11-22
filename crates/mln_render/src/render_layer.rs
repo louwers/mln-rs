@@ -22,7 +22,7 @@ use mln_util::range::Range as ZoomRange;
 use smallvec::SmallVec;
 
 use crate::bucket::ErasedBucket;
-use crate::encode::{DrawGroup, DrawOrder, Draws};
+use crate::encode::{DrawOrder, Draws, FrameDraws};
 use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer, entry};
 use crate::gfx::context::Resources;
 use crate::image_store::ImageStore;
@@ -323,7 +323,7 @@ pub(crate) trait RenderLayer: Any {
 
     /// Visits the layer's draw groups of the frame, in drawing order: none
     /// unless the frame draws the layer.
-    fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>));
+    fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(&'a FrameDraws));
 
     /// Uploads the meshes of the layer's draw groups, before the frame draws
     /// them.
@@ -562,10 +562,10 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         self.frame_draws.clear();
     }
 
-    fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
+    fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(&'a FrameDraws)) {
         if self.renderable {
             for group in self.frame_draws.groups() {
-                visit(DrawGroup::Draws(&group.frame));
+                visit(&group.frame);
             }
         }
     }

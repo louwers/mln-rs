@@ -61,7 +61,6 @@ mod render_pass;
 mod render_sky;
 mod render_source;
 mod render_static_data;
-mod render_target;
 mod render_tile;
 mod renderer;
 mod renderer_event;

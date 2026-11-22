@@ -18,7 +18,6 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::feature::Feature;
 use mln_util::hash::HashMap;
-use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::pool::TaskGroup;
 use mln_vec_map::{VecMap, VecSet};

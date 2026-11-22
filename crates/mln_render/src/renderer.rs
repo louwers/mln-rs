@@ -23,7 +23,7 @@ use crate::gfx::context::Resources;
 use crate::layer_composite::{Composite, LayerComposite};
 use crate::paint_parameters::{OpenPass, PaintParameters};
 use crate::render_orchestrator::RenderOrchestrator;
-use crate::render_pass::RenderPass;
+use crate::render_pass::Pass;
 use crate::renderer_event::{RenderMode, RendererEvent, RendererEvents};
 use crate::tile::worker_codec::RemoteWorkers;
 use crate::tile_matrix::to_projection_ubo;
@@ -641,7 +641,7 @@ impl DrawGroups {
                 groups.clip_tiles.extend(tiles.iter().copied());
                 last = Some(tiles);
             }
-            groups.composited.extend(group.composite());
+            groups.composited.extend(group.composited());
         });
         if last.is_some() {
             groups.clip_tiles.extend(parameters.stencil_clear_tile());
@@ -694,7 +694,7 @@ fn draw(
 
     // The sky.
     if let Some(sky) = orchestrator.sky() {
-        parameters.pass = RenderPass::TRANSLUCENT;
+        parameters.pass = Pass::Translucent;
         parameters.depth_range_size = depth_range_size;
         parameters.current_layer = num_draw_groups as u32 + 1;
         sky.render(gpu, parameters);
@@ -702,7 +702,7 @@ fn draw(
 
     // The opaque pass: front to back with the depth buffer, except on the
     // globe, where 2D layers carry no depth and are painted bottom to top.
-    parameters.pass = RenderPass::OPAQUE;
+    parameters.pass = Pass::Opaque;
     parameters.depth_range_size = depth_range_size;
     if frame.transform.view.is_globe() {
         parameters.current_layer = (num_draw_groups as u32).wrapping_sub(1);
@@ -714,7 +714,7 @@ fn draw(
 
     // The translucent pass. The planet goes into the depth buffer first, so
     // 3D geometry behind the horizon stays hidden.
-    parameters.pass = RenderPass::TRANSLUCENT;
+    parameters.pass = Pass::Translucent;
     parameters.depth_range_size = depth_range_size;
     orchestrator.globe_depth().render(gpu, parameters);
     parameters.current_layer = (num_draw_groups as u32).wrapping_sub(1);
@@ -722,7 +722,7 @@ fn draw(
 
     // The atmosphere.
     if let Some(atmosphere) = orchestrator.atmosphere() {
-        parameters.pass = RenderPass::TRANSLUCENT;
+        parameters.pass = Pass::Translucent;
         parameters.depth_range_size = depth_range_size;
         parameters.current_layer = num_draw_groups as u32 + 1;
         atmosphere.render(gpu, parameters);

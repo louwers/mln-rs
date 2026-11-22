@@ -1,5 +1,3 @@
-use std::any::Any;
-
 use glam::DMat4;
 use mln_gfx::gpu::{
     ColorAttachment, DepthState, DepthStencilAttachment, Gpu, GpuError, LoadOp, PassDesc, Scissor, StencilState,
@@ -18,7 +16,7 @@ use crate::frame::FramePlan;
 use crate::gfx::context::Resources;
 use crate::layer_composite::LayerComposite;
 use crate::render_light::EvaluatedLight;
-use crate::render_pass::RenderPass;
+use crate::render_pass::Pass;
 
 /// A draw group drawing into the layer composite's texture, from
 /// [`PaintParameters::begin_composited`] to
@@ -194,7 +192,7 @@ pub struct PaintParameters<'a> {
     /// The frame's camera and target.
     pub(crate) frame: Frame<'a>,
 
-    pub(crate) pass: RenderPass,
+    pub(crate) pass: Pass,
     pub(crate) debug_options: MapDebugOptions,
 
     /// The masks of the tiles that the frame's draw groups can clip to.
@@ -259,7 +257,7 @@ impl<'a> PaintParameters<'a> {
                 placement_fade: frame.placement_fade,
                 transform: transform_params,
             },
-            pass: RenderPass::OPAQUE,
+            pass: Pass::Opaque,
             debug_options: frame.debug_options,
             clip_masks,
             layer_composite,
@@ -272,12 +270,6 @@ impl<'a> PaintParameters<'a> {
             scissor,
             frame_projection: None,
         }
-    }
-
-    /// The pass the frame draws in now.
-    #[must_use]
-    pub fn pass(&self) -> RenderPass {
-        self.pass
     }
 
     /// The size and formats of the attachments that draws draw into
@@ -403,29 +395,6 @@ impl<'a> PaintParameters<'a> {
         self.copy_frame(gpu);
     }
 
-    /// Runs `f` with `gpu`'s, the context's, commands inside the pass
-    /// begun, after what drew there so far, as a layer's host draws: `f`
-    /// gets the backend's `CustomLayerPass`. Returns whether `f` ran.
-    pub fn lend_pass(&self, gpu: &mut dyn Gpu, f: &mut dyn FnMut(&mut dyn Any)) -> Result<bool, GpuError> {
-        if self.open_pass.is_none() {
-            return Ok(false);
-        }
-        gpu.lend(f).map(|()| true)
-    }
-
-    /// The frame's camera and target.
-    #[must_use]
-    pub fn frame(&self) -> Frame<'a> {
-        self.frame
-    }
-
-    /// Where the frame draws the map, and the depth it writes there: known
-    /// once the frame's draw groups are, before the offscreen passes.
-    #[must_use]
-    pub fn frame_projection(&self) -> Option<FrameProjection> {
-        self.frame_projection
-    }
-
     /// Whether the current layer draws in the opaque pass: front to back,
     /// with depth. On the globe, 2D layers are ordered by draw order alone;
     /// their Z is the back-hemisphere clip.
@@ -445,14 +414,6 @@ impl<'a> PaintParameters<'a> {
             (1u32.wrapping_add(self.current_layer)).wrapping_mul(Self::NUM_SUBLAYERS as u32).wrapping_add(u32::from(n));
         let depth = self.depth_range_size + steps as f32 * Self::DEPTH_EPSILON;
         DepthTest::less_equal(write, (depth, depth))
-    }
-
-    /// The depth of `depth_for_sublayer(0, ..)` where 2D layers write
-    /// depth, whether or not the current layer does.
-    #[must_use]
-    pub fn layer_depth(&self) -> f32 {
-        let steps = (1u32.wrapping_add(self.current_layer)).wrapping_mul(Self::NUM_SUBLAYERS as u32);
-        self.depth_range_size + steps as f32 * Self::DEPTH_EPSILON
     }
 
     #[must_use]

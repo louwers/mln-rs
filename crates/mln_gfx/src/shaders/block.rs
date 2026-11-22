@@ -113,13 +113,29 @@ pub trait UniformBlock: bytemuck::Pod {
 
 /// The values of a draw's own for each of its program's storage buffers of
 /// an element per draw, in the order the program lists those buffers:
-/// none (`()`), one [`UniformBlock`], or a tuple of up to four.
-pub trait DrawBlocks: Copy + 'static {
+/// none (`()`), one [`UniformBlock`], or a tuple of up to four. Only those
+/// implement it, so that its bytes always match its layouts.
+pub trait DrawBlocks: Copy + sealed::Sealed + 'static {
     /// The layouts of the blocks, in order.
     const BLOCKS: &'static [&'static Block];
 
     /// Calls `f` with the bytes of each block, in order.
     fn each_bytes(&self, f: impl FnMut(&[u8]));
+}
+
+mod sealed {
+    /// Seals [`DrawBlocks`](super::DrawBlocks) to the types this module
+    /// implements it for.
+    pub trait Sealed {}
+
+    impl Sealed for () {}
+    impl<T: super::UniformBlock> Sealed for T {}
+    impl<A: super::UniformBlock, B: super::UniformBlock> Sealed for (A, B) {}
+    impl<A: super::UniformBlock, B: super::UniformBlock, C: super::UniformBlock> Sealed for (A, B, C) {}
+    impl<A: super::UniformBlock, B: super::UniformBlock, C: super::UniformBlock, D: super::UniformBlock> Sealed
+        for (A, B, C, D)
+    {
+    }
 }
 
 impl DrawBlocks for () {

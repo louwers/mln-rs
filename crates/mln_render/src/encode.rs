@@ -27,7 +27,7 @@ use crate::gfx::store::MeshKey;
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::layer_composite::Composite;
 use crate::paint_parameters::{Composited, DepthTest, PaintParameters, Stencil};
-use crate::render_pass::RenderPass;
+use crate::render_pass::Pass;
 use crate::tile_matrix::{TileProjection, bind_no_projection};
 
 /// How a draw tests and writes depth.
@@ -113,16 +113,14 @@ struct Pushed {
     tile: Option<OverscaledTileID>,
     /// The projection block of the tile it was pushed with.
     projection: Option<ProjectionUBO>,
-    /// Where its blocks start in the group's bytes.
+    /// Where its blocks start in the pushes' bytes.
     blocks: usize,
 }
 
-/// A layer's draws of a frame in one place in the layers' order and depth,
-/// which the engine sorts and draws in each of the frame's passes.
-pub struct Group {
-    /// The draws, as the engine draws them, once it sorted them.
-    pub(crate) frame: FrameDraws,
-    /// The draws pushed for the frame.
+/// A group's draws of a frame as they were pushed, with the bytes of their
+/// blocks and of the blocks they share.
+#[derive(Default)]
+struct Pushes {
     pushed: Vec<Pushed>,
     /// The bytes of the pushed draws' blocks.
     bytes: Vec<u8>,
@@ -132,6 +130,14 @@ pub struct Group {
     block_bytes: Vec<u8>,
     /// Where a write of one of the draws' buffers gathers its bytes.
     scratch: Vec<u8>,
+}
+
+/// A layer's draws of a frame in one place in the layers' order and depth,
+/// which the engine sorts and draws in each of the frame's passes.
+pub struct Group {
+    /// The draws, as the engine draws them, once it sorted them.
+    pub(crate) frame: FrameDraws,
+    pushes: Pushes,
     /// Whether the group's draws may draw in the opaque pass.
     opaque: bool,
     /// Whether the group can composite with the frame's depth.
@@ -140,16 +146,7 @@ pub struct Group {
 
 impl Group {
     pub(crate) fn new() -> Group {
-        Group {
-            frame: FrameDraws::default(),
-            pushed: Vec::new(),
-            bytes: Vec::new(),
-            blocks: Vec::new(),
-            block_bytes: Vec::new(),
-            scratch: Vec::new(),
-            opaque: false,
-            frame_depth: false,
-        }
+        Group { frame: FrameDraws::default(), pushes: Pushes::default(), opaque: false, frame_depth: false }
     }
 
     /// Adds a draw of `mesh`, not of a tile, with `blocks`, the values of
@@ -173,9 +170,10 @@ impl Group {
     /// programs' uniform block of its type, written once a frame. A draw of
     /// a program without one ignores it.
     pub fn block<T: UniformBlock>(&mut self, block: &T) -> &mut Self {
-        let start = self.block_bytes.len();
-        self.block_bytes.extend_from_slice(bytemuck::bytes_of(block));
-        self.blocks.push((T::BLOCK, start..self.block_bytes.len()));
+        let Pushes { blocks, block_bytes, .. } = &mut self.pushes;
+        let start = block_bytes.len();
+        block_bytes.extend_from_slice(bytemuck::bytes_of(block));
+        blocks.push((T::BLOCK, start..block_bytes.len()));
         self
     }
 
@@ -194,16 +192,6 @@ impl Group {
 
     fn add<B: DrawBlocks>(&mut self, mesh: &Mesh<B>, at: Option<&TileProjection>, draw: Draw, blocks: B) -> &mut Self {
         let program = mesh.program();
-        debug_assert!(
-            blocks_of_each_draw(program).map(|buffer| buffer.0.name).eq(B::BLOCKS.iter().map(|block| block.name)),
-            "a draw of {} with other blocks than its program's of each draw",
-            program.name
-        );
-        debug_assert!(
-            !program.buffers.iter().any(|buffer| matches!(buffer.kind, BufferKind::DrawUniform(_))),
-            "a draw of {}, whose blocks of each draw are its mesh's own",
-            program.name
-        );
         debug_assert!(!draw.opaque || self.opaque, "an opaque draw of a layer whose evaluation draws none");
         debug_assert!(
             !draw.clip
@@ -211,16 +199,17 @@ impl Group {
             "a draw of {} that clips without a tile, or in 3D",
             program.name
         );
-        let start = self.bytes.len();
-        blocks.each_bytes(|bytes| self.bytes.extend_from_slice(bytes));
-        debug_assert_eq!(
-            self.bytes.len() - start,
-            B::BLOCKS.iter().map(|block| block.size).sum::<usize>(),
-            "blocks of other sizes than their layouts"
+        debug_assert!(
+            !matches!(draw.depth, Depth::Layer { sub_layer, .. } if sub_layer > 2),
+            "a draw of {} at a sub-layer past 2",
+            program.name
         );
-        self.pushed.push(Pushed {
+        let Pushes { pushed, bytes, .. } = &mut self.pushes;
+        let start = bytes.len();
+        blocks.each_bytes(|block| bytes.extend_from_slice(block));
+        pushed.push(Pushed {
             draw,
-            index: self.pushed.len() as u32,
+            index: pushed.len() as u32,
             mesh: mesh.key(),
             seq: mesh.seq(),
             program,
@@ -244,47 +233,36 @@ impl Group {
     /// Drops the frame's draws.
     pub(crate) fn clear(&mut self) {
         self.frame.draws.clear();
-        self.pushed.clear();
-        self.bytes.clear();
-        self.blocks.clear();
-        self.block_bytes.clear();
+        self.pushes.clear();
     }
 
     /// Makes the pushed draws the frame's, in their order, and, where there
-    /// are any, writes the buffers they read: the blocks they share, their
-    /// blocks of each draw, at the index of each draw, and their projection
-    /// blocks. Draws that clip clip to the masks of `tiles`.
+    /// are any, writes the buffers they read. Draws that clip clip to the
+    /// masks of `tiles`.
     pub(crate) fn finish(
         &mut self,
         gpu: &mut dyn Gpu,
         context: &mut Resources,
         tiles: impl IntoIterator<Item = UnwrappedTileID>,
     ) {
-        let Group { frame, pushed, bytes, blocks, block_bytes, scratch, .. } = self;
-        pushed.sort_unstable_by_key(|pushed| (pushed.draw.order, pushed.seq, pushed.index));
+        let Group { frame, pushes, .. } = self;
+        pushes.pushed.sort_unstable_by_key(|pushed| (pushed.draw.order, pushed.seq, pushed.index));
         frame.draws.clear();
-        frame.draws.extend(pushed.iter().map(|pushed| FrameDraw {
+        frame.draws.extend(pushes.pushed.iter().map(|pushed| FrameDraw {
             tile: pushed.tile,
             mesh: pushed.mesh,
-            pass: if pushed.draw.opaque {
-                RenderPass::OPAQUE | RenderPass::TRANSLUCENT
-            } else {
-                RenderPass::TRANSLUCENT
-            },
+            opaque: pushed.draw.opaque,
             depth: pushed.draw.depth,
             clip: pushed.draw.clip,
         }));
         frame.stencil_tiles.clear();
-        if pushed.iter().any(|pushed| pushed.draw.clip) {
+        if pushes.pushed.iter().any(|pushed| pushed.draw.clip) {
             frame.stencil_tiles.extend(tiles);
         }
-        if !pushed.is_empty() {
-            write_blocks(gpu, context, &mut frame.uniform_buffers, pushed, bytes, blocks, block_bytes, scratch);
+        if !pushes.pushed.is_empty() {
+            pushes.write(gpu, context, &mut frame.uniform_buffers);
         }
-        pushed.clear();
-        bytes.clear();
-        blocks.clear();
-        block_bytes.clear();
+        pushes.clear();
     }
 
     /// Uploads the meshes of the frame's draws.
@@ -308,80 +286,81 @@ fn blocks_of_each_draw(program: &Program) -> impl Iterator<Item = (&'static Bloc
     })
 }
 
-/// Writes to `buffers` the buffers that `pushed`, a group's draws in their
-/// order, read: each of `blocks`, whose bytes are in `block_bytes`, at the
-/// id of the uniform block of its layout in the draws' programs, the
-/// draws' blocks in `bytes` at the ids of their programs' storage buffers,
-/// an element per draw, and their projection blocks, or a projection block
-/// of zeros where no draw's program reads one of each draw.
-#[expect(clippy::too_many_arguments, reason = "the GPU, the buffers and the parts of a group they're written from")]
-fn write_blocks(
-    gpu: &mut dyn Gpu,
-    context: &mut Resources,
-    buffers: &mut UniformBufferArray,
-    pushed: &[Pushed],
-    bytes: &[u8],
-    blocks: &[(&'static Block, Range<usize>)],
-    block_bytes: &[u8],
-    scratch: &mut Vec<u8>,
-) {
-    let uniform_id = |program: &Program, block: &Block| {
-        program.buffers.iter().find_map(|buffer| match buffer.kind {
-            BufferKind::Uniform(of) if of.name == block.name => Some(buffer.id),
-            _ => None,
-        })
-    };
-    for (block, range) in blocks {
-        if let Some(id) = pushed.iter().find_map(|pushed| uniform_id(pushed.program, block)) {
-            buffers.write_uniform(gpu, id, &block_bytes[range.clone()], context.device());
-        }
+impl Pushes {
+    fn clear(&mut self) {
+        self.pushed.clear();
+        self.bytes.clear();
+        self.blocks.clear();
+        self.block_bytes.clear();
     }
-    debug_assert!(
-        pushed.iter().all(|pushed| pushed.program.buffers.iter().all(|buffer| match buffer.kind {
-            BufferKind::Uniform(of) => blocks.iter().any(|(block, _)| block.name == of.name),
-            _ => true,
-        })),
-        "a group whose draws read a uniform block that it has no value of"
-    );
 
-    let mut ids = [false; FIRST_VERTEX_BUFFER_ID];
-    for pushed in pushed {
-        for (_, id, _) in blocks_of_each_draw(pushed.program) {
-            ids[id] = true;
-        }
-    }
-    for id in (0..FIRST_VERTEX_BUFFER_ID).filter(|&id| ids[id]) {
-        let stride = pushed
-            .iter()
-            .find_map(|pushed| blocks_of_each_draw(pushed.program).find(|&(_, at, _)| at == id))
-            .map_or(0, |(_, _, stride)| stride);
-        scratch.clear();
-        for pushed in pushed {
-            let mut start = pushed.blocks;
-            let mut element = None;
-            for (block, at, of) in blocks_of_each_draw(pushed.program) {
-                if at == id {
-                    debug_assert_eq!(of, stride, "programs of one group whose elements at {id} differ in size");
-                    element = Some(&bytes[start..start + block.size]);
+    /// Writes to `buffers` the buffers that the draws, in their order,
+    /// read: each shared block at the ids of the uniform blocks of its
+    /// layout in the draws' programs, the draws' blocks at the ids of their
+    /// programs' storage buffers, an element per draw, and their projection
+    /// blocks, or a projection block of zeros where no draw's program reads
+    /// one of each draw.
+    fn write(&mut self, gpu: &mut dyn Gpu, context: &mut Resources, buffers: &mut UniformBufferArray) {
+        let Pushes { pushed, bytes, blocks, block_bytes, scratch } = self;
+        let mut written = [false; FIRST_VERTEX_BUFFER_ID];
+        for (block, range) in blocks.iter() {
+            for buffer in pushed.iter().flat_map(|pushed| pushed.program.buffers) {
+                if let BufferKind::Uniform(of) = buffer.kind
+                    && of.name == block.name
+                    && !std::mem::replace(&mut written[buffer.id], true)
+                {
+                    buffers.write_uniform(gpu, buffer.id, &block_bytes[range.clone()], context.device());
                 }
-                start += block.size;
             }
-            let at = scratch.len();
-            scratch.extend_from_slice(element.unwrap_or_default());
-            scratch.resize(at + stride, 0);
         }
-        buffers.write_storage(gpu, id, scratch, context.device());
-    }
+        debug_assert!(
+            pushed.iter().all(|pushed| pushed.program.buffers.iter().all(|buffer| match buffer.kind {
+                BufferKind::Uniform(of) => blocks.iter().any(|(block, _)| block.name == of.name),
+                _ => true,
+            })),
+            "a group whose draws read a uniform block that it has no value of"
+        );
 
-    if pushed.iter().any(|pushed| pushed.program.projection == Projection::PerDraw) {
-        scratch.clear();
-        for pushed in pushed {
-            let block = pushed.projection.filter(|_| pushed.program.projection == Projection::PerDraw);
-            scratch.extend_from_slice(bytemuck::bytes_of(&block.unwrap_or_default()));
+        let mut ids = [false; FIRST_VERTEX_BUFFER_ID];
+        for pushed in pushed.iter() {
+            for (_, id, _) in blocks_of_each_draw(pushed.program) {
+                debug_assert!(!written[id], "a group whose programs read buffer {id} as a uniform and per draw");
+                ids[id] = true;
+            }
         }
-        buffers.write_storage(gpu, PROJECTION_BUFFER.id, scratch, context.device());
-    } else {
-        bind_no_projection(gpu, buffers, context);
+        for id in (0..FIRST_VERTEX_BUFFER_ID).filter(|&id| ids[id]) {
+            let stride = pushed
+                .iter()
+                .find_map(|pushed| blocks_of_each_draw(pushed.program).find(|&(_, at, _)| at == id))
+                .map_or(0, |(_, _, stride)| stride);
+            scratch.clear();
+            for pushed in pushed.iter() {
+                let mut start = pushed.blocks;
+                let mut element = None;
+                for (block, at, of) in blocks_of_each_draw(pushed.program) {
+                    if at == id {
+                        debug_assert_eq!(of, stride, "programs of one group whose elements at {id} differ in size");
+                        element = Some(&bytes[start..start + block.size]);
+                    }
+                    start += block.size;
+                }
+                let at = scratch.len();
+                scratch.extend_from_slice(element.unwrap_or_default());
+                scratch.resize(at + stride, 0);
+            }
+            buffers.write_storage(gpu, id, scratch, context.device());
+        }
+
+        if pushed.iter().any(|pushed| pushed.program.projection == Projection::PerDraw) {
+            scratch.clear();
+            for pushed in pushed.iter() {
+                let block = pushed.projection.filter(|_| pushed.program.projection == Projection::PerDraw);
+                scratch.extend_from_slice(bytemuck::bytes_of(&block.unwrap_or_default()));
+            }
+            buffers.write_storage(gpu, PROJECTION_BUFFER.id, scratch, context.device());
+        } else {
+            bind_no_projection(gpu, buffers, context);
+        }
     }
 }
 
@@ -441,36 +420,35 @@ impl Draws {
 /// its `FrameDraws`.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FrameDraw {
-    /// The tile whose draw it is, or `None` for a draw of the layer's.
-    pub(crate) tile: Option<OverscaledTileID>,
+    /// The tile whose mask it clips to.
+    tile: Option<OverscaledTileID>,
     /// The mesh it draws.
     mesh: MeshKey,
-    /// The passes the draw draws in.
-    pub(crate) pass: RenderPass,
+    /// Whether it draws in the opaque pass where its layer does.
+    opaque: bool,
     /// How the draw tests and writes depth.
-    pub(crate) depth: Depth,
-    /// Whether the draw clips to the mask of its tile, at the layer's depth
-    /// or without a depth test.
-    pub(crate) clip: bool,
+    depth: Depth,
+    /// Whether the draw clips to the mask of its tile.
+    clip: bool,
 }
 
-/// Draws of a frame, and what they share.
+/// A group's draws of a frame, as the engine draws them, and what they
+/// share.
 pub(crate) struct FrameDraws {
     /// Tells the draws apart in the layer composite.
     id: SimpleIdentity,
     /// The draws, in drawing order. A draw's index is the index of its
     /// entries in the storage buffers, which shaders read as `drawIndex`.
-    pub(crate) draws: Vec<FrameDraw>,
+    draws: Vec<FrameDraw>,
     /// The buffers the draws bind, by id.
-    pub(crate) uniform_buffers: UniformBufferArray,
+    uniform_buffers: UniformBufferArray,
     /// How the draws composite onto the frame in the translucent pass, as one
     /// surface, after they draw into a texture of their own; `None` where
     /// they draw straight onto the frame.
     composite: Option<Composite>,
-    /// The tiles whose masks the stencil buffer holds when the draws draw.
-    /// Draws that don't clip need none, and neither does a layer without
-    /// tiles, whose draws are none.
-    pub(crate) stencil_tiles: Vec<UnwrappedTileID>,
+    /// The tiles whose masks the stencil buffer holds when the draws draw:
+    /// none where no draw clips.
+    stencil_tiles: Vec<UnwrappedTileID>,
 }
 
 impl Default for FrameDraws {
@@ -487,6 +465,13 @@ impl Default for FrameDraws {
 }
 
 impl FrameDraws {
+    /// The tiles whose masks the stencil buffer holds when the draws draw;
+    /// `None` where no draw clips.
+    #[must_use]
+    pub(crate) fn stencil_tiles(&self) -> Option<&[UnwrappedTileID]> {
+        Some(&self.stencil_tiles[..]).filter(|tiles| !tiles.is_empty())
+    }
+
     /// How the draws composite onto the frame, with the id that tells them
     /// apart in the layer composite, if there are any and they composite.
     #[must_use]
@@ -507,104 +492,62 @@ impl FrameDraws {
         }
     }
 
-    /// Draws the pass's draws into the open pass of `gpu`, the context's.
+    /// Draws the pass's draws into the open pass of `gpu`, the context's:
+    /// into the layer composite's texture in the translucent pass where they
+    /// composite, and onto the frame otherwise. Where none of the pass's
+    /// draws is 3D, the masks of the tiles that those that clip clip to go
+    /// into the stencil first; 3D draws that draw `once` share one stencil
+    /// value of their own.
     pub(crate) fn render(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        let Some(pass) = self.begin(gpu, parameters) else {
-            return;
-        };
-        for draw in pass.draws() {
-            pass.draw(gpu, parameters, draw);
-        }
-        pass.end(gpu, parameters);
-    }
-
-    /// Begins drawing the draws of `parameters`' pass into the open pass of
-    /// `gpu`, the context's: into the layer composite's texture in the
-    /// translucent pass where they composite, and onto the frame otherwise.
-    /// Where none of the pass's draws is 3D, this draws the masks of the
-    /// tiles that those that clip clip to; 3D draws that draw `once` share
-    /// one stencil value of their own. `None` where there is nothing to draw
-    /// into or there are no draws; [`DrawPass::end`] ends what this begins.
-    fn begin(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> Option<DrawPass<'_>> {
         if self.draws.is_empty() || parameters.pass_target().is_none() {
-            return None;
+            return;
         }
-        let composited = (self.composite.is_some() && parameters.pass == RenderPass::TRANSLUCENT)
+        let composited = (self.composite.is_some() && parameters.pass == Pass::Translucent)
             .then(|| parameters.begin_composited(gpu, self.id))
             .flatten();
         let drawing = composited.as_ref().is_none_or(Composited::draws);
+        let pass = parameters.pass;
+        // An opaque draw draws in one pass: the opaque where its layer draws
+        // there, and the translucent otherwise. Drawn in both, it would
+        // cover itself, which the overdraw inspector shows.
+        let opaque_in = if parameters.opaque_pass_enabled_for_layer() { Pass::Opaque } else { Pass::Translucent };
+        let in_pass = |draw: &FrameDraw| pass == if draw.opaque { opaque_in } else { Pass::Translucent };
         let draws = if drawing { &self.draws[..] } else { &[] };
-        // A draw for both the opaque and the translucent pass draws in one:
-        // the opaque where its layer draws there, and the translucent
-        // otherwise. Drawn in both, it would cover itself, which the overdraw
-        // inspector shows.
-        let both = RenderPass::OPAQUE | RenderPass::TRANSLUCENT;
-        let drawn_in =
-            if parameters.opaque_pass_enabled_for_layer() { RenderPass::OPAQUE } else { RenderPass::TRANSLUCENT };
-        let skip = if parameters.pass & both != RenderPass::NONE && parameters.pass != drawn_in {
-            both
+        let draws = || draws.iter().enumerate().filter(|(_, draw)| in_pass(draw));
+        let (volume, volume_once) = draws().fold((false, false), |(volume, once), (_, draw)| match draw.depth {
+            Depth::Volume { once: draw_once, .. } => (true, once || draw_once),
+            _ => (volume, once),
+        });
+        let volume_stencil = if volume {
+            volume_once.then(|| parameters.stencil_for_3d(gpu))
         } else {
-            RenderPass::NONE
+            if drawing && !self.stencil_tiles.is_empty() {
+                parameters.render_tile_clipping_masks(gpu, &self.stencil_tiles);
+            }
+            None
         };
-        let mut pass = DrawPass { frame: self, draws, pass: parameters.pass, skip, volume_stencil: None, composited };
-        let (volume, volume_once) =
-            pass.draws().fold((false, false), |(volume, once), PassDraw { draw, .. }| match draw.depth {
-                Depth::Volume { once: draw_once, .. } => (true, once || draw_once),
-                _ => (volume, once),
-            });
-        if volume {
-            pass.volume_stencil = volume_once.then(|| parameters.stencil_for_3d(gpu));
-        } else if drawing && !self.stencil_tiles.is_empty() {
-            parameters.render_tile_clipping_masks(gpu, &self.stencil_tiles);
+        for (index, draw) in draws() {
+            self.draw(gpu, parameters, index, draw, volume_stencil);
         }
-        Some(pass)
-    }
-}
-
-/// The draws of a pass of a [`FrameDraws`], from [`FrameDraws::begin`] to
-/// [`DrawPass::end`], which every pass that begins must reach.
-#[must_use = "a pass's draws end with `DrawPass::end`"]
-struct DrawPass<'a> {
-    frame: &'a FrameDraws,
-    /// The frame's draws, none where their layer composite's pass didn't
-    /// begin.
-    draws: &'a [FrameDraw],
-    pass: RenderPass,
-    /// The passes of the draws that draw in another pass: both the opaque
-    /// and the translucent, or none.
-    skip: RenderPass,
-    /// The stencil of the 3D draws that draw `once`.
-    volume_stencil: Option<Stencil>,
-    composited: Option<Composited>,
-}
-
-/// A draw of a [`DrawPass`], as [`DrawPass::draws`] yields it.
-#[derive(Clone, Copy)]
-struct PassDraw<'a> {
-    /// The draw's index among the frame's draws.
-    index: usize,
-    draw: &'a FrameDraw,
-}
-
-impl<'a> DrawPass<'a> {
-    /// The draws of the pass, in drawing order.
-    fn draws(&self) -> impl Iterator<Item = PassDraw<'a>> + use<'a> {
-        let (pass, skip) = (self.pass, self.skip);
-        let draws = self.draws.iter().enumerate();
-        draws
-            .filter(move |(_, draw)| draw.pass & pass != RenderPass::NONE)
-            .filter(move |(_, draw)| skip == RenderPass::NONE || draw.pass & skip != skip)
-            .map(|(index, draw)| PassDraw { index, draw })
+        if let Some(composited) = composited {
+            parameters.end_composited(gpu, composited);
+        }
     }
 
-    /// Draws `draw`, one of the pass's, with the GPU objects of its mesh.
-    fn draw(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, draw: PassDraw<'_>) {
-        let PassDraw { index, draw } = draw;
+    /// Draws `draw`, at `index` among the draws, with the GPU objects of its
+    /// mesh; a 3D draw that draws `once` with `volume_stencil`.
+    fn draw(
+        &self,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        index: usize,
+        draw: &FrameDraw,
+        volume_stencil: Option<Stencil>,
+    ) {
         let Some(mut objects) = parameters.context.take_mesh(draw.mesh) else {
             debug_assert!(false, "a draw of tile {:?} names a mesh that went", draw.tile);
             return;
         };
-        objects.bind_atlases(parameters);
         let tile_stencil = || match draw.tile.filter(|_| draw.clip) {
             Some(tile) => parameters.stencil_for_clipping(&tile.to_unwrapped()),
             None => Stencil::DISABLED,
@@ -613,47 +556,11 @@ impl<'a> DrawPass<'a> {
             Depth::Off => (DepthTest::DISABLED, tile_stencil()),
             Depth::Layer { sub_layer, write } => (parameters.depth_for_sublayer(sub_layer, write), tile_stencil()),
             Depth::Volume { write, once } => {
-                (parameters.depth_for_3d(write), self.volume_stencil.filter(|_| once).unwrap_or(Stencil::DISABLED))
+                (parameters.depth_for_3d(write), volume_stencil.filter(|_| once).unwrap_or(Stencil::DISABLED))
             }
         };
-        objects.draw(gpu, parameters, &self.frame.uniform_buffers, depth, stencil, index as u32);
+        objects.draw(gpu, parameters, &self.uniform_buffers, depth, stencil, index as u32);
         parameters.context.restore_mesh(draw.mesh, objects);
-    }
-
-    /// Ends the pass's draws: composites what they drew where they drew
-    /// into the layer composite's texture.
-    fn end(self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        if let Some(composited) = self.composited {
-            parameters.end_composited(gpu, composited);
-        }
-    }
-}
-
-/// What the frame draws of a layer in one place in the layers' order and
-/// depth.
-#[derive(Clone, Copy)]
-pub(crate) enum DrawGroup<'a> {
-    /// Draws of the layer's meshes.
-    Draws(&'a FrameDraws),
-}
-
-impl<'a> DrawGroup<'a> {
-    /// The tiles whose masks the stencil buffer holds when the group draws;
-    /// `None` for a group that needs no masks.
-    #[must_use]
-    pub(crate) fn stencil_tiles(self) -> Option<&'a [UnwrappedTileID]> {
-        match self {
-            DrawGroup::Draws(frame) => Some(&frame.stencil_tiles[..]).filter(|tiles| !tiles.is_empty()),
-        }
-    }
-
-    /// How the group composites onto the frame, with the id that tells it
-    /// apart in the layer composite, if it draws anything and composites.
-    #[must_use]
-    pub(crate) fn composite(self) -> Option<(SimpleIdentity, Composite)> {
-        match self {
-            DrawGroup::Draws(frame) => frame.composited(),
-        }
     }
 }
 

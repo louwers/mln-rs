@@ -35,7 +35,7 @@ use crate::gfx::store::{MeshKey, SharedTexture, Store, StoreKey, TextureKey};
 use crate::gfx::texture2d::{Texture2D, TextureMut};
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::vertex_attribute::Uniforms;
-use crate::gfx::vertices::{SharedVertices, TypedVertices, VertexStore, Vertices};
+use crate::gfx::vertices::{SharedVertices, VertexStore, Vertices};
 
 /// The renderer's GPU resources: the buffers, textures and meshes that
 /// layers make and keep handles of, with what the device allows
@@ -260,32 +260,6 @@ impl Resources {
         Mesh::new(self.meshes.add(Box::new(objects), &self.device.queue), seq, program)
     }
 
-    /// The GPU objects of `mesh`.
-    #[must_use]
-    pub(crate) fn mesh_objects<B>(&self, mesh: &Mesh<B>) -> Option<&DrawObjects> {
-        self.meshes.get(mesh.handle()).map(|objects| &**objects)
-    }
-
-    /// The GPU objects of `mesh`, to change.
-    pub(crate) fn mesh_mut<B>(&mut self, mesh: &Mesh<B>) -> Option<&mut DrawObjects> {
-        self.meshes.get_mut(mesh.handle()).map(|objects| &mut **objects)
-    }
-
-    /// Writes `value` to the uniform buffer `id` of `mesh`'s own, which its
-    /// draws bind over their frame's.
-    pub(crate) fn write_mesh_uniform<B, T: bytemuck::Pod>(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        mesh: &Mesh<B>,
-        id: usize,
-        value: &T,
-    ) {
-        let Resources { device, meshes, .. } = self;
-        if let Some(objects) = meshes.get_mut(mesh.handle()) {
-            objects.write_pod(gpu, id, value, device);
-        }
-    }
-
     /// Takes the GPU objects of the mesh `key` out of the store, for a draw
     /// to upload or draw them with the context, until
     /// [`restore_mesh`](Self::restore_mesh) puts them back. `None` for a
@@ -303,14 +277,6 @@ impl Resources {
     /// returned handle lasts.
     pub(crate) fn add_vertices<V: bytemuck::Pod>(&mut self, vertices: Vec<V>) -> SharedVertices {
         self.vertices.add(vertices, &self.device.queue)
-    }
-
-    /// Keeps a copy of `vertices`, as [`add_vertices`](Self::add_vertices)
-    /// does, as dynamic vertices, which the holder of the returned handle
-    /// updates ([`update_vertices`](Self::update_vertices)), and whose
-    /// storage stays across uploads for the next update to fill.
-    pub(crate) fn add_dynamic_vertices<V: bytemuck::Pod>(&mut self, vertices: &[V]) -> TypedVertices<V> {
-        self.vertices.add_dynamic(vertices, &self.device.queue)
     }
 
     /// Keeps the vertices of the type `V` in the JS array `bytes`, as
@@ -333,13 +299,6 @@ impl Resources {
     #[cfg(test)]
     pub(crate) fn has_vertices(&self, key: crate::gfx::store::VerticesKey) -> bool {
         self.vertices.contains(key)
-    }
-
-    /// Replaces the vertices of `typed` with a copy of `data`, as many, which
-    /// the next upload writes over their buffer's. Returns false, leaving
-    /// them be, for another number of vertices.
-    pub(crate) fn update_vertices<V: bytemuck::Pod>(&mut self, typed: &TypedVertices<V>, data: &[V]) -> bool {
-        self.vertices.update(typed, data)
     }
 
     /// Replaces the bytes of `shared` with `bytes`, as many, which the next
