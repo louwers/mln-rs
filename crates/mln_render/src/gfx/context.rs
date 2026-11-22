@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use mln_gfx::ColorMode;
+use mln_gfx::shaders::block::DrawBlocks;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::{
     BufferId, BufferUsage, Caps, ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadOp, PipelineId,
@@ -461,7 +462,7 @@ impl Resources {
     /// Keeps `objects`, the GPU objects of a draw, while the returned mesh
     /// lasts, made after every mesh the context made before it
     /// ([`Mesh::seq`]), whose draws' blocks the engine writes `paint` into.
-    pub(crate) fn add_mesh<B>(&mut self, objects: DrawObjects, paint: Option<MeshPaint>) -> Mesh<B> {
+    pub(crate) fn add_mesh<B: DrawBlocks>(&mut self, objects: DrawObjects, paint: Option<MeshPaint>) -> Mesh<B> {
         let seq = self.next_mesh_seq;
         self.next_mesh_seq += 1;
         let program = objects.program();

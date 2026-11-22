@@ -97,7 +97,6 @@ impl Layer for HeatmapLayer {
         for (tile, _, mesh) in cx.tiles() {
             let at = tile.project(cx.frame, &TileTransform::default());
             let draw = HeatmapDrawableUBO {
-                matrix: at.fallback_matrix,
                 extrude_scale: at.pixels_to_tile_units,
                 globe_extrude_scale: at.globe_extrude_scale,
                 ..HeatmapDrawableUBO::default()

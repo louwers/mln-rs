@@ -21,6 +21,7 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::{FIRST_VERTEX_BUFFER_ID, MAX_TEXTURES};
+use mln_gfx::shaders::block::{DrawBlocks, MemberType};
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_util::logging::{Event, Log};
@@ -55,19 +56,30 @@ pub struct Mesh<B = ()> {
     /// What the engine writes of the mesh's paint values into its draws'
     /// blocks.
     paint: Option<MeshPaint>,
+    /// Where the members `matrix` of the draws' blocks are in their bytes.
+    matrices: SmallVec<[usize; 1]>,
     blocks: PhantomData<fn(B)>,
 }
 
-impl<B> Mesh<B> {
+impl<B: DrawBlocks> Mesh<B> {
     pub(crate) fn new(
         handle: Shared<MeshKey>,
         seq: u64,
         program: &'static Program,
         paint: Option<MeshPaint>,
     ) -> Mesh<B> {
-        Mesh { handle, seq, program, paint, blocks: PhantomData }
+        let mut matrices = SmallVec::new();
+        let mut start = 0;
+        for block in B::BLOCKS {
+            let matrix = block.members.iter().find(|member| member.name == "matrix" && member.ty == MemberType::Mat4);
+            matrices.extend(matrix.map(|member| start + member.offset));
+            start += block.size;
+        }
+        Mesh { handle, seq, program, paint, matrices, blocks: PhantomData }
     }
+}
 
+impl<B> Mesh<B> {
     /// When the mesh was made among its renderer's meshes: a mesh made
     /// later has a greater one. A draw of the mesh that orders by it
     /// ([`Draw::order`](crate::draw::Draw::order)) draws over the draws of
@@ -81,6 +93,11 @@ impl<B> Mesh<B> {
     /// blocks.
     pub(crate) fn paint(&self) -> Option<&MeshPaint> {
         self.paint.as_ref()
+    }
+
+    /// Where the members `matrix` of the draws' blocks are in their bytes.
+    pub(crate) fn matrices(&self) -> &[usize] {
+        &self.matrices
     }
 
     pub(crate) fn key(&self) -> MeshKey {

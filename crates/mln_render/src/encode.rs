@@ -186,8 +186,10 @@ impl Group {
     /// Adds a draw of `mesh` projected as `at` says, with `blocks`, as
     /// [`push`](Self::push) does: the engine writes `at` as the projection
     /// block of the draw, for a program that reads one
-    /// ([`Projection::PerDraw`]), and the draw clips to `at`'s tile where it
-    /// clips.
+    /// ([`Projection::PerDraw`]), and `at`'s Mercator matrix
+    /// ([`TileProjection::fallback_matrix`]) as the member `matrix` of
+    /// `blocks`, a `mat4x4<f32>`, where they have one. The draw clips to
+    /// `at`'s tile where it clips.
     pub fn push_at<B: DrawBlocks>(&mut self, mesh: &Mesh<B>, at: &TileProjection, draw: Draw, blocks: B) -> &mut Self {
         self.add(mesh, Some(at), draw, blocks)
     }
@@ -238,6 +240,11 @@ impl Group {
         let Pushes { pushed, bytes, paints, .. } = &mut self.pushes;
         let start = bytes.len();
         blocks.each_bytes(|block| bytes.extend_from_slice(block));
+        if let Some(at) = at {
+            for &matrix in mesh.matrices() {
+                bytes[start + matrix..start + matrix + 64].copy_from_slice(bytemuck::bytes_of(&at.fallback_matrix));
+            }
+        }
         if let Some(mesh_paint) = mesh.paint() {
             mesh_paint.write_mixes(self.zoom, &mut bytes[start..]);
             if !paints.iter().any(|(of, _)| std::ptr::eq(*of, program)) {

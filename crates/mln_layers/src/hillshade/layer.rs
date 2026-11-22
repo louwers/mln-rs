@@ -153,7 +153,7 @@ impl Layer for HillshadeLayer {
                 &value.shade,
                 &at,
                 Draw::DEFAULT,
-                (HillshadeDrawableUBO { matrix: at.fallback_matrix }, props),
+                (HillshadeDrawableUBO::default(), props),
             );
         }
     }

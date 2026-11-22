@@ -161,14 +161,14 @@ impl Layer for LineLayer {
         for (tile, laid, value) in cx.tiles() {
             let at = tile.project(frame, &how);
             let id = tile.unwrapped_id();
-            let (matrix, ratio) = (at.fallback_matrix, pixel_scale / id.pixels_to_tile_units(1.0, zoom));
+            let ratio = pixel_scale / id.pixels_to_tile_units(1.0, zoom);
             let tile_ratio = |scale: f32| 1.0 / id.pixels_to_tile_units(scale, integer_zoom);
             match value {
                 LineTile::Plain(mesh) => {
-                    main.push_at(mesh, &at, draw, LineDrawableUBO { matrix, ratio, ..Default::default() });
+                    main.push_at(mesh, &at, draw, LineDrawableUBO { ratio, ..Default::default() });
                 }
                 LineTile::Gradient(mesh) => {
-                    main.push_at(mesh, &at, draw, LineGradientDrawableUBO { matrix, ratio, ..Default::default() });
+                    main.push_at(mesh, &at, draw, LineGradientDrawableUBO { ratio, ..Default::default() });
                 }
                 LineTile::Pattern(mesh) => {
                     let atlas = laid.icon_atlas().map_or_else(Size::default, |atlas| cx.res.size(atlas));
@@ -176,7 +176,6 @@ impl Layer for LineLayer {
                     let binders = laid.binders(&laid.bucket.binders);
                     let blocks = (
                         LinePatternDrawableUBO {
-                            matrix,
                             ratio,
                             floorwidth_t: binders.line_floor_width.interpolation_factor(zoom),
                             ..Default::default()
@@ -193,7 +192,7 @@ impl Layer for LineLayer {
                     main.push_at(mesh, &at, draw, blocks);
                 }
                 LineTile::Dashed(mesh) => {
-                    let mut drawable = LineSDFDrawableUBO { matrix, ratio, ..Default::default() };
+                    let mut drawable = LineSDFDrawableUBO { ratio, ..Default::default() };
                     let sdfgamma = if let Some(dashes) = laid.bucket.dashes(cx.layer.id()) {
                         // The patterns differ by feature, which an attribute
                         // reads: both samples are of the tile's zoom's

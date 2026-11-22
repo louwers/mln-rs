@@ -62,7 +62,7 @@ impl Layer for RasterLayer {
         let how = TileTransform { aligned: !cx.frame.camera_moving, ..TileTransform::default() };
         for (tile, _, mesh) in cx.tiles() {
             let at = tile.project(cx.frame, &how);
-            main.push_at(mesh, &at, Draw::DEFAULT, RasterDrawableUBO { matrix: at.fallback_matrix });
+            main.push_at(mesh, &at, Draw::DEFAULT, RasterDrawableUBO::default());
         }
     }
 }

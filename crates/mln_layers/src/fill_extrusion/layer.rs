@@ -9,7 +9,7 @@ use mln_render::draw::{
 };
 use mln_render::layer::{
     EvaluateCx, EvaluatedLayer, EvaluatedLight, Evaluation, Features, Frame, FrameTile, HitTest, Layer, LayerBucket,
-    LayerValues, NewCx, PaintVertices, PrepareCx, TileCx, TileProjection, TileTransform, UpdateCx,
+    LayerValues, NewCx, PaintVertices, PrepareCx, TileCx, TileTransform, UpdateCx,
 };
 use mln_style_types::{LayerBlendType, LightAnchorType};
 use mln_util::constants::TILE_SIZE_D;
@@ -146,7 +146,7 @@ impl Layer for FillExtrusionLayer {
                 ..FillExtrusionTilePropsUBO::default()
             };
             let paint_layout = paint_layout(laid.binders(&laid.bucket.binders));
-            let blocks = (drawable(tile, &at, frame, paint_layout), tile_props);
+            let blocks = (drawable(tile, frame, paint_layout), tile_props);
             for part in parts {
                 if depth_first {
                     let draw = Draw { order: 0, depth: Depth::Volume { write: true, once: false }, ..Draw::DEFAULT };
@@ -208,13 +208,12 @@ fn paint_layout(paint: PaintVertices<'_, FillExtrusionBinders>) -> u32 {
         | words(paint.fill_extrusion_color.offset()) << 24
 }
 
-/// The values of a draw of `tile`, projected `at`, in `frame`, whose pulled
-/// walls find their paint values by `paint_layout`.
-fn drawable(tile: FrameTile, at: &TileProjection, frame: &Frame<'_>, paint_layout: u32) -> FillExtrusionDrawableUBO {
+/// The values of a draw of `tile` in `frame`, whose pulled walls find their
+/// paint values by `paint_layout`.
+fn drawable(tile: FrameTile, frame: &Frame<'_>, paint_layout: u32) -> FillExtrusionDrawableUBO {
     let origin = tile.pattern_origin(frame);
     let tiles = 2f64.powi(i32::from(tile.id().canonical.z));
     FillExtrusionDrawableUBO {
-        matrix: at.fallback_matrix,
         pixel_coord_upper: origin.upper,
         pixel_coord_lower: origin.lower,
         height_factor: (-tiles / TILE_SIZE_D / 8.0) as f32,

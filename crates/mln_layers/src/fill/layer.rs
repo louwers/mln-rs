@@ -127,11 +127,10 @@ impl Layer for FillLayer {
         let outline_is_fill_color = cx.layer.unevaluated.fill_outline_color.is_undefined();
         for (tile, laid, value) in cx.tiles() {
             let at = tile.project(frame, &how);
-            let matrix = at.fallback_matrix;
             match value {
                 &FillTile::Color { ref fill, ref outline, write, paint_layout } => {
                     if let Some(fill) = fill {
-                        main.push_at(fill, &at, at_depth(1, write), FillDrawableUBO { matrix, ..Default::default() });
+                        main.push_at(fill, &at, at_depth(1, write), FillDrawableUBO::default());
                     }
                     if let Some(outline) = outline {
                         let draw = at_depth(if outline_is_fill_color { 2 } else { 0 }, false);
@@ -139,7 +138,7 @@ impl Layer for FillLayer {
                             outline,
                             &at,
                             draw,
-                            FillOutlineDrawableUBO { matrix, paint_layout, ..Default::default() },
+                            FillOutlineDrawableUBO { paint_layout, ..Default::default() },
                         );
                     }
                 }
@@ -150,7 +149,6 @@ impl Layer for FillLayer {
                     let origin = tile.pattern_origin(frame);
                     let blocks = (
                         FillPatternDrawableUBO {
-                            matrix,
                             pixel_coord_upper: origin.upper,
                             pixel_coord_lower: origin.lower,
                             tile_ratio: origin.tile_units_to_pixels,

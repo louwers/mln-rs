@@ -106,7 +106,7 @@ impl Layer for ColorReliefLayer {
                 color_ramp_size: self.stops.elevations.len() as i32,
                 ..ColorReliefTilePropsUBO::default()
             };
-            main.push_at(mesh, &at, Draw::DEFAULT, (ColorReliefDrawableUBO { matrix: at.fallback_matrix }, props));
+            main.push_at(mesh, &at, Draw::DEFAULT, (ColorReliefDrawableUBO::default(), props));
         }
     }
 }

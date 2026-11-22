@@ -361,7 +361,7 @@ impl Layer for SymbolLayer {
                     ..CollisionTilePropsUBO::default()
                 };
                 let draw = Draw { order: tile.index() as i64, depth: Depth::Off, ..Draw::DEFAULT };
-                let blocks = (CollisionDrawableUBO { matrix: at.fallback_matrix }, tile_props);
+                let blocks = (CollisionDrawableUBO::default(), tile_props);
                 out.overlay().push_at(&collision.mesh, &at, draw, blocks);
             }
         }
@@ -509,7 +509,6 @@ impl SymbolDraw {
             })
         };
         let drawable = SymbolDrawableUBO {
-            matrix: at.fallback_matrix,
             label_plane_matrix: label_plane.as_mat4().to_cols_array(),
             coord_matrix: gl_coord.as_mat4().to_cols_array(),
             texsize: texture_size(0),
