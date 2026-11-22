@@ -4396,11 +4396,10 @@ enum {
 };
 
 struct alignas(16) TerrainDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float4 dem_coords;
-    /* 80 */
+    /*  0 */ float4 dem_coords;
+    /* 16 */
 };
-static_assert(sizeof(TerrainDrawableUBO) == 5 * 16, "wrong size");
+static_assert(sizeof(TerrainDrawableUBO) == 16, "wrong size");
 
 // Only the surface's fragment stage reads the fog.
 struct alignas(16) TerrainFogUBO {
@@ -4422,16 +4421,37 @@ static_assert(sizeof(TerrainFogUBO) == 4 * 16, "wrong size");
 
 "#;
 
-/// The terrain's surface: a tile's grid, drawn with the tile's matrix, raised
-/// to the heights of the tile's DEM with its skirts lowered, in the colors of
-/// the tile's drape, fogged as GL JS's terrain is. Rows of a pass's texture
-/// are stored north first, as the drape is read.
+/// The height of the surface's vertices: the ground's, or sea level at a
+/// pole. A macro, as `ground_height` is, for the surface's sources.
+macro_rules! surface_height {
+    () => {
+        r"
+// The height of the surface's vertex at `pos`, in tile units of a tile that
+// reads its DEM at `dem_coords`: the ground's, or sea level at a pole.
+static float surface_height(float2 pos, float4 dem_coords, texture2d<float, access::read> dem,
+                            device const TerrainPropsUBO& props) {
+    if (pos.y < GLOBE_POLE_NORTH_Y || pos.y > GLOBE_POLE_SOUTH_Y) {
+        return 0.0;
+    }
+    return ground_height(pos, dem_coords, dem, props);
+}
+"
+    };
+}
+
+/// The terrain's surface: a tile's grid, raised to the heights of the tile's
+/// DEM with its skirts lowered and projected through the tile's entry of
+/// `projectionVector`, in the colors of the tile's drape, fogged as GL JS's
+/// terrain is. A pole's vertices stand at sea level in the color of the
+/// drape's edge row. Rows of a pass's texture are stored north first, as the
+/// drape is read.
 pub(crate) const TERRAIN_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: TERRAIN_PRELUDE,
     source: concat!(
         ground_height!(),
+        surface_height!(),
         r"
 
 struct VertexStage {
@@ -4443,25 +4463,26 @@ struct FragmentStage {
     float4 position [[position, invariant]];
     float2 drape_pos;
     // The distance along the view of the ground before the skirt lowers it,
-    // which the fog reads, as in GL JS: the clip w, which is affine in the
-    // vertex, so it interpolates exactly.
+    // which the fog reads, as in GL JS: the clip w.
     float view_depth;
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const TerrainDrawableUBO* drawableVector [[buffer(idTerrainDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const TerrainPropsUBO& props [[buffer(idTerrainPropsUBO)]],
                                 texture2d<float, access::read> dem [[texture(2)]]) {
     device const TerrainDrawableUBO& drawable = drawableVector[uboIndex];
+    device const ProjectionUBO& projection = projectionVector[uboIndex];
     const float2 pos = float2(vertx.pos.xy);
     const float skirt = float(vertx.pos.z);
-    const float height = ground_height(pos, drawable.dem_coords, dem, props);
-    const float4x4 m = drawable.matrix;
+    const float height = surface_height(pos, drawable.dem_coords, dem, props);
+    const float4 position = projectTileFor3D(pos, height - skirt * props.skirt_length, projection);
     return {
-        .position = m * float4(pos, height - skirt * props.skirt_length, 1.0),
-        .drape_pos = pos / 8192.0,
-        .view_depth = m[0].w * pos.x + m[1].w * pos.y + m[2].w * height + m[3].w,
+        .position = position,
+        .drape_pos = clamp(pos / 8192.0, float2(0.0), float2(1.0)),
+        .view_depth = skirt != 0.0 ? projectTileFor3D(pos, height, projection).w : position.w,
     };
 }
 
@@ -4497,17 +4518,16 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     ),
 };
 
-/// The depth of the terrain's surface: a tile's grid, drawn with the tile's
-/// matrix, raised to the heights of the tile's DEM with its skirts lowered, as
-/// the surface's, whose fragments write the eye distance (the clip w, which is
-/// affine in the vertex, so it interpolates exactly) as its float's bits,
-/// least significant byte first.
+/// The depth of the terrain's surface: a tile's grid, raised and projected as
+/// the surface's, whose fragments write the eye distance (the clip w) as its
+/// float's bits, least significant byte first.
 pub(crate) const TERRAIN_DEPTH_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     prelude: TERRAIN_PRELUDE,
     source: concat!(
         ground_height!(),
+        surface_height!(),
         r"
 
 struct VertexStage {
@@ -4523,13 +4543,14 @@ struct FragmentStage {
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const TerrainDrawableUBO* drawableVector [[buffer(idTerrainDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const TerrainPropsUBO& props [[buffer(idTerrainPropsUBO)]],
                                 texture2d<float, access::read> dem [[texture(2)]]) {
     device const TerrainDrawableUBO& drawable = drawableVector[uboIndex];
     const float2 pos = float2(vertx.pos.xy);
     const float skirt = float(vertx.pos.z);
-    const float height = ground_height(pos, drawable.dem_coords, dem, props);
-    const float4 position = drawable.matrix * float4(pos, height - skirt * props.skirt_length, 1.0);
+    const float height = surface_height(pos, drawable.dem_coords, dem, props);
+    const float4 position = projectTileFor3D(pos, height - skirt * props.skirt_length, projectionVector[uboIndex]);
     return {
         .position = position,
         .eye_distance = position.w,

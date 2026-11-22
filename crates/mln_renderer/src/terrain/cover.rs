@@ -284,6 +284,9 @@ pub(crate) struct TerrainCover {
     /// The ranges that cull the tiles, and every source's tiles; the next
     /// update's cover takes them over.
     pub(crate) ranges: ElevationRanges,
+    /// Whether it covers a globe view, also through its handover to
+    /// Mercator.
+    pub(crate) globe: bool,
 }
 
 impl TerrainCover {
@@ -319,7 +322,22 @@ impl TerrainCover {
             .collect();
         let tile_size = terrain_tile_size(dem_tile_size);
         let standing_dems = Vec::new();
-        TerrainCover { source_id: source_id.to_owned(), tile_size, tiles, center, dem_tiles, standing_dems, ranges }
+        TerrainCover {
+            source_id: source_id.to_owned(),
+            tile_size,
+            tiles,
+            center,
+            dem_tiles,
+            standing_dems,
+            ranges,
+            globe: view.is_globe(),
+        }
+    }
+
+    /// Whether the standing layers stand on the ground it draws: not on the
+    /// globe, where they stand on the sea-level sphere.
+    pub(crate) fn grounds_standing_layers(&self) -> bool {
+        !self.globe
     }
 
     /// Requests the DEM tiles that `tiles`, the ideal tiles of the source of

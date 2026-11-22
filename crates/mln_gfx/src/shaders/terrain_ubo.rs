@@ -2,22 +2,21 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::shaders::layer_ubo::ProjectionUBO;
 
-/// A terrain tile's draw block (80 bytes), an entry of the storage buffer
-/// that the terrain's draws index by `globalIndex`.
+/// A terrain tile's draw block (16 bytes), an entry of the storage buffer
+/// that the terrain's draws index by `globalIndex`. The tile projects
+/// through its entry of
+/// [`ID_PROJECTION_UBO`](crate::shaders::shader_defines::ID_PROJECTION_UBO).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct TerrainDrawableUBO {
-    /// From the tile's units and meters to clip space.
-    /*  0 */
-    pub matrix: [f32; 4 * 4],
     /// Where the tile reads its DEM: the scale and offset that map the
     /// tile's uv to the DEM's (`uv * scale + offset`), then the DEM's width
     /// in pixels. A width of 0 is flat ground.
-    /* 64 */
+    /* 0 */
     pub dem_coords: [f32; 4],
-    /* 80 */
+    /* 16 */
 }
-const _: () = assert!(size_of::<TerrainDrawableUBO>() == 5 * 16);
+const _: () = assert!(size_of::<TerrainDrawableUBO>() == 16);
 
 /// The terrain's uniform block (32 bytes): how its DEM's texels decode to
 /// heights, the exaggeration, and how far the skirts reach down.

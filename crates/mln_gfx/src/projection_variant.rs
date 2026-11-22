@@ -7,6 +7,6 @@ pub enum ProjectionVariant {
     Globe,
     /// Mercator, standing on the terrain's ground: a standing layer's draws
     /// read the height of the ground under them from the DEM. Never on the
-    /// globe, where terrain draws flat.
+    /// globe, where the standing layers stand on the sea-level sphere.
     Terrain,
 }

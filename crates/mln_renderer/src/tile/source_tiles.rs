@@ -1202,7 +1202,7 @@ impl SourceTiles {
             traced.extend(geometry.last().copied());
         }
         let screen_geometry: &[mln_util::geo::ScreenCoordinate] = if traced.is_empty() { geometry } else { &traced };
-        // Terrain draws flat on the globe, so a query there has no ground.
+        // A query of the globe meets the sea-level sphere, over terrain too.
         debug_assert!(!globe || ground.is_none(), "a query of the globe over terrain");
         let mut query_geometry: Vec<geometry::Point<f64>> = match ground {
             Some(ground) => ground.world.clone(),

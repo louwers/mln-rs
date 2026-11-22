@@ -110,7 +110,8 @@ highp float ground_height(highp vec2 pos, highp vec4 dem_coords, highp vec4 unpa
     };
 }
 
-/// The surface's and the probe's uniform block and height rule.
+/// The surface's and the probe's uniform block and height rule, and the
+/// height of the surface's vertices.
 macro_rules! terrain_props {
     () => {
         concat!(
@@ -123,7 +124,17 @@ macro_rules! terrain_props {
 };
 
 ",
-            ground_height!()
+            ground_height!(),
+            r"// The height of the surface's vertex at `pos`, in tile units of a tile
+// that reads its DEM at `dem_coords`: the ground's, or sea level at a pole.
+highp float surface_height(highp vec2 pos, highp vec4 dem_coords) {
+    if (pos.y < GLOBE_POLE_NORTH_Y || pos.y > GLOBE_POLE_SOUTH_Y) {
+        return 0.0;
+    }
+    return ground_height(pos, dem_coords, u_unpack, u_unpack_scale, u_exaggeration);
+}
+
+"
         )
     };
 }
@@ -2884,10 +2895,12 @@ void main() {
 ",
 };
 
-/// The terrain's surface: a tile's grid, drawn with the tile's matrix,
-/// raised to the heights of the tile's DEM with its skirts lowered, in the
-/// colors of the tile's drape, fogged as GL JS's terrain is. GL stores the
-/// drape's rows bottom first, so the drape is sampled at `1 - v`.
+/// The terrain's surface: a tile's grid, raised to the heights of the tile's
+/// DEM with its skirts lowered and projected through the tile's projection
+/// block, in the colors of the tile's drape, fogged as GL JS's terrain is. A
+/// pole's vertices stand at sea level in the color of the drape's edge row.
+/// GL stores the drape's rows bottom first, so the drape is sampled at
+/// `1 - v`.
 pub(crate) const TERRAIN_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
         terrain_props!(),
@@ -2895,21 +2908,23 @@ pub(crate) const TERRAIN_SHADER: GlslShaderSource = GlslShaderSource {
 layout (location = 0) in vec4 a_pos;
 
 layout (std140) uniform TerrainDrawableUBO {
-    highp mat4 u_matrix;
     highp vec4 u_dem_coords;
 };
 
 out vec2 v_drape_pos;
 // The distance along the view of the ground before the skirt lowers it, which
-// the fog reads, as in GL JS: the clip w, which is affine in the vertex, so it
-// interpolates exactly.
+// the fog reads, as in GL JS: the clip w.
 out highp float v_view_depth;
 
 void main() {
-    float height = ground_height(a_pos.xy, u_dem_coords, u_unpack, u_unpack_scale, u_exaggeration);
-    gl_Position = u_matrix * vec4(a_pos.xy, height - a_pos.z * u_skirt_length, 1.0);
-    v_drape_pos = vec2(a_pos.x, 8192.0 - a_pos.y) / 8192.0;
-    v_view_depth = u_matrix[0].w * a_pos.x + u_matrix[1].w * a_pos.y + u_matrix[2].w * height + u_matrix[3].w;
+    float height = surface_height(a_pos.xy, u_dem_coords);
+    gl_Position = projectTileFor3D(a_pos.xy, height - a_pos.z * u_skirt_length);
+    vec2 drape_pos = clamp(a_pos.xy / 8192.0, 0.0, 1.0);
+    v_drape_pos = vec2(drape_pos.x, 1.0 - drape_pos.y);
+    v_view_depth = gl_Position.w;
+    if (a_pos.z != 0.0) {
+        v_view_depth = projectTileFor3D(a_pos.xy, height).w;
+    }
 }
 "
     ),
@@ -2966,15 +2981,9 @@ void main() {
 ",
 };
 
-/// Port-only, for the backend conformance cases: probes of the terrain's
-/// height rule. Each probe is a quad at clip positions whose vertices read
-/// the height at a place of a tile, and whose fragments write that height's
-/// bits, least significant byte first, as the texel's channels.
-/// The depth of the terrain's surface: a tile's grid, drawn with the tile's
-/// matrix, raised to the heights of the tile's DEM with its skirts lowered,
-/// as the surface's, whose fragments write the eye distance (the clip w,
-/// which is affine in the vertex, so it interpolates exactly) as its float's
-/// bits, least significant byte first.
+/// The depth of the terrain's surface: a tile's grid, raised and projected
+/// as the surface's, whose fragments write the eye distance (the clip w) as
+/// its float's bits, least significant byte first.
 pub(crate) const TERRAIN_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
         terrain_props!(),
@@ -2982,15 +2991,14 @@ pub(crate) const TERRAIN_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
 layout (location = 0) in vec4 a_pos;
 
 layout (std140) uniform TerrainDrawableUBO {
-    highp mat4 u_matrix;
     highp vec4 u_dem_coords;
 };
 
 out highp float v_eye_distance;
 
 void main() {
-    float height = ground_height(a_pos.xy, u_dem_coords, u_unpack, u_unpack_scale, u_exaggeration);
-    gl_Position = u_matrix * vec4(a_pos.xy, height - a_pos.z * u_skirt_length, 1.0);
+    float height = surface_height(a_pos.xy, u_dem_coords);
+    gl_Position = projectTileFor3D(a_pos.xy, height - a_pos.z * u_skirt_length);
     v_eye_distance = gl_Position.w;
 }
 "
@@ -3007,6 +3015,10 @@ void main() {
 ",
 };
 
+/// Port-only, for the backend conformance cases: probes of the terrain's
+/// height rule. Each probe is a quad at clip positions whose vertices read
+/// the height at a place of a tile, and whose fragments write that height's
+/// bits, least significant byte first, as the texel's channels.
 pub(crate) const TERRAIN_PROBE_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
         terrain_props!(),

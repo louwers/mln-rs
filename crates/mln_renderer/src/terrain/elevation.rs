@@ -476,6 +476,7 @@ mod tests {
             dem_tiles: Vec::new(),
             standing_dems: Vec::new(),
             ranges: ElevationRanges::default(),
+            globe: false,
         };
         let ground = TerrainElevation::new(&cover, None, DemUnpack::of(RasterEncoding::Terrarium), 1.0);
         for copy in [i16::MAX, i16::MIN] {

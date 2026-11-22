@@ -1,8 +1,8 @@
 //! The terrain's draws: one per terrain tile and stack of draped layers, of
-//! the shared grid, each with the tile's matrix and where it reads its DEM
-//! in an entry of its stack's storage buffer, raised by the DEM's texture,
-//! which the frame's ground made, and sampling the tile's drape of the
-//! stack; and one per terrain tile of the ground's depth.
+//! the shared grid, each with the tile's projection and where it reads its
+//! DEM in entries of its stack's storage buffers, raised by the DEM's
+//! texture, which the frame's ground made, and sampling the tile's drape of
+//! the stack; and one per terrain tile of the ground's depth.
 
 use std::mem::size_of;
 
@@ -19,6 +19,8 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::shaders::terrain_ubo::TerrainDrawableUBO;
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
+use mln_map_types::View;
+use mln_tile_id::CanonicalTileID;
 use mln_util::clip_depth::ClipDepthRange;
 use mln_util::logging::{Event, Log};
 
@@ -33,21 +35,26 @@ use crate::gfx::store::SharedIndexes;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileMap, finish_tiles, tile_objects};
-use crate::layers::cast_matrix;
 use crate::paint_parameters::PaintParameters;
 use crate::render_sky::EvaluatedSky;
+use crate::tile_matrix::to_projection_ubo;
 
-/// The grid, in the context's stores.
+/// A grid, in the context's stores.
 struct SharedMesh {
-    /// Whether it has skirts.
-    skirts: bool,
-    /// The triangles its draws cull: those facing away, whose winding a
-    /// flipped viewport turns round.
-    cull_face_mode: CullFaceMode,
+    /// Whether it has a cap to the north and to the south pole.
+    poles: [bool; 2],
     vertices: SharedVertices,
     vertex_count: usize,
     indexes: SharedIndexes,
     index_count: usize,
+}
+
+/// What a tile's draw reads of its own: where it reads its DEM, and its
+/// projection.
+#[derive(Clone, Copy)]
+struct TileUniforms {
+    drawable: TerrainDrawableUBO,
+    projection: ProjectionUBO,
 }
 
 /// The draws of the terrain's tiles for one stack of draped layers.
@@ -58,22 +65,33 @@ struct StackDraws {
     /// The frame's draws of them.
     frame: LayerDraws,
     /// The frame's draws as the update makes them, with their uniforms.
-    draw_list: DrawList<TerrainDrawableUBO>,
+    draw_list: DrawList<TileUniforms>,
 }
+
+/// How the draws were made: the projection variant of their shaders,
+/// whether their grids have skirts, and the triangles they cull, those
+/// facing away, whose winding a flipped viewport turns round.
+type BuiltFor = (ProjectionVariant, bool, CullFaceMode);
 
 /// The draws of the terrain's tiles, a set for each stack, which draw in the
 /// translucent pass, nearest the center first, testing and writing the 3D
 /// depth range, and a set that draws the ground's depth. The sets share the
-/// grid, the DEM textures and each tile's matrix and DEM coordinates.
+/// grids, the DEM textures and each tile's projection and DEM coordinates.
 #[derive(Default)]
 pub(crate) struct TerrainDraws {
     /// The draws of each of the frame's stacks.
     stacks: Vec<StackDraws>,
     /// The draws of the ground's depth, in a frame that draws it.
     depth: Option<StackDraws>,
-    shader: Option<ShaderKey>,
-    depth_shader: Option<ShaderKey>,
-    mesh: Option<SharedMesh>,
+    /// The surface's shader and the ground depth's, each with the variant
+    /// it is of.
+    shader: Option<(ProjectionVariant, ShaderKey)>,
+    depth_shader: Option<(ProjectionVariant, ShaderKey)>,
+    /// The grids the draws hold: on the globe, the tiles of the first and
+    /// last rows draw grids with caps to the poles.
+    meshes: Vec<SharedMesh>,
+    /// How the draws and the grids were made.
+    built_for: Option<BuiltFor>,
     /// Whether the backend has no shader of the surface, which draws
     /// nothing then.
     unsupported: bool,
@@ -86,7 +104,8 @@ impl TerrainDraws {
     /// `sky` says, and, with `depth`, one of the ground's depth
     /// ([`render_depth`](Self::render_depth)), unless its shader fails,
     /// which fails the frame; or drops the draws and what they share for
-    /// `None`, a frame without terrain.
+    /// `None`, a frame without terrain. Each tile projects as the frame's
+    /// view does, onto the globe on a globe.
     #[expect(clippy::too_many_arguments, reason = "the frame's terrain")]
     pub(crate) fn update(
         &mut self,
@@ -107,35 +126,28 @@ impl TerrainDraws {
             self.depth = None;
         }
         let Some((cover, ground)) = cover.filter(|_| shader.is_some() || depth_shader.is_some()) else {
-            self.mesh = None;
+            self.meshes.clear();
+            self.built_for = None;
             return;
         };
 
         let cull_face_mode = parameters.cull_back_faces();
+        let (view, proj_matrix) = (parameters.view, &parameters.transform_params.proj_matrix);
         let context = &mut *parameters.context;
-        let built_for = (surface.skirts, cull_face_mode);
-        if self.mesh.as_ref().is_some_and(|mesh| (mesh.skirts, mesh.cull_face_mode) != built_for) {
-            // The draws hold the other grid, or cull the other way.
+        let built_for = (variant(view), surface.skirts, cull_face_mode);
+        if self.built_for != Some(built_for) {
+            // The draws hold the other variant's shaders, the other grids,
+            // or cull the other way.
             self.stacks.clear();
             self.depth = None;
-            self.mesh = None;
+            self.meshes.clear();
+            self.built_for = Some(built_for);
         }
-        let mesh = self.mesh.get_or_insert_with(|| {
-            let TerrainMesh { vertices, indices } = TerrainMesh::new(surface.skirts);
-            SharedMesh {
-                skirts: surface.skirts,
-                cull_face_mode,
-                vertex_count: vertices.len(),
-                vertices: context.add_vertices(vertices),
-                index_count: indices.len(),
-                indexes: context.add_indexes(Indexes::new(indices)),
-            }
-        });
 
         // A backend whose clip depth runs from -1 writes the depth of one
-        // whose runs from 0, as fill extrusions do.
-        let remap_clip_z = context.caps().clip_depth == ClipDepthRange::NegativeOneToOne;
-        let (view, proj_matrix) = (parameters.view, &parameters.transform_params.proj_matrix);
+        // whose runs from 0, as fill extrusions do. The globe projects in its
+        // shaders.
+        let remap_clip_z = context.caps().clip_depth == ClipDepthRange::NegativeOneToOne && !view.is_globe();
         let stacks = if shader.is_some() { drapes.stacks() } else { 0 };
         self.stacks.resize_with(stacks, StackDraws::default);
         if depth_shader.is_some() {
@@ -152,22 +164,28 @@ impl TerrainDraws {
                 }
                 None => (ground.flat(), [0.0; 4]),
             };
-            let mut matrix = *proj_matrix * view.tile_matrix(&tile.id.to_unwrapped());
+            let mut projection = view.projection_data_with(&tile.id.to_unwrapped(), proj_matrix);
             if remap_clip_z {
-                zero_to_one_clip_z(&mut matrix);
+                zero_to_one_clip_z(&mut projection.main_matrix);
+                zero_to_one_clip_z(&mut projection.fallback_matrix);
             }
-            let drawable = TerrainDrawableUBO { matrix: cast_matrix(&matrix), dem_coords };
+            let uniforms = TileUniforms {
+                drawable: TerrainDrawableUBO { dem_coords },
+                projection: to_projection_ubo(&projection),
+            };
+            let mesh = mesh(&mut self.meshes, context, surface.skirts, poles(view, tile.id.canonical));
             if let (Some(draws), Some(shader)) = (&mut self.depth, &depth_shader)
                 && let Some(entry) = draws.tiles.entry(&tile.id)
             {
-                let draw = entry.value.get_or_insert_with(|| KeptDraw::new(depth_objects(shader, mesh)));
+                let draw =
+                    entry.value.get_or_insert_with(|| KeptDraw::new(depth_objects(shader, mesh, cull_face_mode)));
                 draw.objects.set_texture(ID_TERRAIN_DEM_TEXTURE, Some(dem_texture));
                 let frame_draw = FrameDraw {
                     priority: index as i64,
                     depth: DrawDepth::Volume { mask: DepthMaskType::ReadWrite },
                     ..draw.frame_draw(Some(tile.id))
                 };
-                draws.draw_list.push(frame_draw, drawable);
+                draws.draw_list.push(frame_draw, uniforms);
             }
             let Some(shader) = &shader else { continue };
             for (stack, draws) in self.stacks.iter_mut().enumerate() {
@@ -185,7 +203,7 @@ impl TerrainDraws {
                         continue;
                     }
                 };
-                let draw = entry.value.get_or_insert_with(|| KeptDraw::new(mesh_objects(shader, mesh)));
+                let draw = entry.value.get_or_insert_with(|| KeptDraw::new(mesh_objects(shader, mesh, cull_face_mode)));
                 draw.objects.set_texture(ID_TERRAIN_DEM_TEXTURE, Some(dem_texture));
                 draw.objects.set_texture(ID_TERRAIN_DRAPE_TEXTURE, Some(&drape));
                 let frame_draw = FrameDraw {
@@ -193,24 +211,22 @@ impl TerrainDraws {
                     depth: DrawDepth::Volume { mask: DepthMaskType::ReadWrite },
                     ..draw.frame_draw(Some(tile.id))
                 };
-                draws.draw_list.push(frame_draw, drawable);
+                draws.draw_list.push(frame_draw, uniforms);
             }
         }
         let fog = terrain_fog(sky, view);
         for StackDraws { tiles, frame, draw_list } in &mut self.stacks {
             finish_tiles(draw_list, frame, tiles, gpu, context, |writer| {
-                writer.storage(ID_TERRAIN_DRAWABLE_UBO, |drawable| *drawable);
-                // GL's program declares the projection block whether it
-                // reads it or not, so every draw binds one of zeros.
-                writer.storage(ID_PROJECTION_UBO, |_| ProjectionUBO::default());
+                writer.storage(ID_TERRAIN_DRAWABLE_UBO, |uniforms| uniforms.drawable);
+                writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
                 writer.uniform(ID_TERRAIN_PROPS_UBO, &surface.props);
                 writer.uniform(ID_TERRAIN_FOG_UBO, &fog);
             });
         }
         if let Some(StackDraws { tiles, frame, draw_list }) = &mut self.depth {
             finish_tiles(draw_list, frame, tiles, gpu, context, |writer| {
-                writer.storage(ID_TERRAIN_DRAWABLE_UBO, |drawable| *drawable);
-                writer.storage(ID_PROJECTION_UBO, |_| ProjectionUBO::default());
+                writer.storage(ID_TERRAIN_DRAWABLE_UBO, |uniforms| uniforms.drawable);
+                writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
                 writer.uniform(ID_TERRAIN_PROPS_UBO, &surface.props);
             });
         }
@@ -221,19 +237,23 @@ impl TerrainDraws {
         self.depth.is_some()
     }
 
-    /// The program of the ground's depth, made on `gpu` the first time it
-    /// makes; `None`, the frame's failure, in a frame where it fails.
+    /// The program of the ground's depth in the frame's projection, made on
+    /// `gpu` the first time it makes; `None`, the frame's failure, in a frame
+    /// where it fails.
     fn depth_shader(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> Option<ShaderKey> {
-        if let Some(shader) = &self.depth_shader {
+        let variant = variant(parameters.view);
+        if let Some((made_for, shader)) = &self.depth_shader
+            && *made_for == variant
+        {
             return Some(shader.clone());
         }
         let context = &mut *parameters.context;
-        let shader = context.shader_key(&programs::TERRAIN_DEPTH, Uniforms::default(), ProjectionVariant::Mercator);
+        let shader = context.shader_key(&programs::TERRAIN_DEPTH, Uniforms::default(), variant);
         if let Err(error) = context.shader(gpu, &shader) {
             context.fail(format!("Making the ground's depth shader failed: {error}"));
             return None;
         }
-        Some(self.depth_shader.insert(shader).clone())
+        Some(self.depth_shader.insert((variant, shader)).1.clone())
     }
 
     /// Whether the backend has the terrain's shader, which this makes on
@@ -242,23 +262,26 @@ impl TerrainDraws {
         self.shader(gpu, parameters).is_some()
     }
 
-    /// The surface's shader, made on `gpu` the first time; `None`, logged
-    /// once, where the backend has none.
+    /// The surface's shader in the frame's projection, made on `gpu` the
+    /// first time; `None`, logged once, where the backend has none.
     fn shader(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> Option<ShaderKey> {
-        if let Some(shader) = &self.shader {
+        let variant = variant(parameters.view);
+        if let Some((made_for, shader)) = &self.shader
+            && *made_for == variant
+        {
             return Some(shader.clone());
         }
         if self.unsupported {
             return None;
         }
         let context = &mut *parameters.context;
-        let shader = context.shader_key(&programs::TERRAIN, Uniforms::default(), ProjectionVariant::Mercator);
+        let shader = context.shader_key(&programs::TERRAIN, Uniforms::default(), variant);
         if let Err(error) = context.shader(gpu, &shader) {
             self.unsupported = true;
             Log::warning(Event::Render, format!("Terrain draws nothing on this backend: {error}"));
             return None;
         }
-        Some(self.shader.insert(shader).clone())
+        Some(self.shader.insert((variant, shader)).1.clone())
     }
 
     /// Whether it made the terrain's shader.
@@ -267,11 +290,11 @@ impl TerrainDraws {
         self.shader.is_some()
     }
 
-    /// Whether it holds draws of the surface, or the grid while it draws no
-    /// ground's depth, which shares it.
+    /// Whether it holds draws of the surface, or the grids while it draws no
+    /// ground's depth, which shares them.
     #[cfg(test)]
     pub(crate) fn holds_draws(&self) -> bool {
-        !self.stacks.is_empty() || (self.mesh.is_some() && self.depth.is_none())
+        !self.stacks.is_empty() || (!self.meshes.is_empty() && self.depth.is_none())
     }
 
     /// Uploads the GPU objects of the frame's draws.
@@ -298,21 +321,56 @@ impl TerrainDraws {
     }
 }
 
+/// The variant of the surface's shaders in `view`: the globe's while it
+/// draws the globe, through its handover to Mercator too.
+fn variant(view: &View) -> ProjectionVariant {
+    if view.is_globe() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator }
+}
+
+/// Whether the grid of `tile` in `view` closes the north and the south
+/// pole: on the globe, for a tile of the first or the last row.
+fn poles(view: &View, tile: CanonicalTileID) -> [bool; 2] {
+    let last = (1u32 << tile.z) - 1;
+    [view.is_globe() && tile.y == 0, view.is_globe() && tile.y == last]
+}
+
+/// The grid of `meshes` with `skirts` and the caps of `poles`, made in the
+/// stores of `context` the first time.
+fn mesh<'a>(meshes: &'a mut Vec<SharedMesh>, context: &mut Context, skirts: bool, poles: [bool; 2]) -> &'a SharedMesh {
+    if let Some(index) = meshes.iter().position(|mesh| mesh.poles == poles) {
+        return &meshes[index];
+    }
+    let TerrainMesh { vertices, indices } = TerrainMesh::new(skirts, poles);
+    meshes.push(SharedMesh {
+        poles,
+        vertex_count: vertices.len(),
+        vertices: context.add_vertices(vertices),
+        index_count: indices.len(),
+        indexes: context.add_indexes(Indexes::new(indices)),
+    });
+    &meshes[meshes.len() - 1]
+}
+
 /// The GPU objects of a tile's draw of the ground's depth, of `mesh` with
-/// `shader`: unblended, without the triangles that face away.
-fn depth_objects(shader: &ShaderKey, mesh: &SharedMesh) -> DrawObjects {
-    grid_objects(shader, mesh, ColorMode::unblended())
+/// `shader`: unblended, culling as `cull_face_mode` says.
+fn depth_objects(shader: &ShaderKey, mesh: &SharedMesh, cull_face_mode: CullFaceMode) -> DrawObjects {
+    grid_objects(shader, mesh, ColorMode::unblended(), cull_face_mode)
 }
 
 /// The GPU objects of a tile's draw of `mesh` with `shader`: alpha-blended,
-/// without the triangles that face away.
-fn mesh_objects(shader: &ShaderKey, mesh: &SharedMesh) -> DrawObjects {
-    grid_objects(shader, mesh, ColorMode::alpha_blended())
+/// culling as `cull_face_mode` says.
+fn mesh_objects(shader: &ShaderKey, mesh: &SharedMesh, cull_face_mode: CullFaceMode) -> DrawObjects {
+    grid_objects(shader, mesh, ColorMode::alpha_blended(), cull_face_mode)
 }
 
 /// The GPU objects of a tile's draw of `mesh` with `shader`, in
-/// `color_mode`, without the triangles that face away.
-fn grid_objects(shader: &ShaderKey, mesh: &SharedMesh, color_mode: ColorMode) -> DrawObjects {
+/// `color_mode`, culling as `cull_face_mode` says.
+fn grid_objects(
+    shader: &ShaderKey,
+    mesh: &SharedMesh,
+    color_mode: ColorMode,
+    cull_face_mode: CullFaceMode,
+) -> DrawObjects {
     let mut vertices = VertexAttributeArray::new();
     vertices.set_shared(
         ID_TERRAIN_POS_VERTEX_ATTRIBUTE,
@@ -326,5 +384,5 @@ fn grid_objects(shader: &ShaderKey, mesh: &SharedMesh, color_mode: ColorMode) ->
         segments: vec![SegmentBase::with_lengths(0, 0, mesh.vertex_count, mesh.index_count)],
         instances: None,
     };
-    DrawObjects::new(shader.clone(), color_mode, mesh.cull_face_mode, geometry, Textures::default())
+    DrawObjects::new(shader.clone(), color_mode, cull_face_mode, geometry, Textures::default())
 }

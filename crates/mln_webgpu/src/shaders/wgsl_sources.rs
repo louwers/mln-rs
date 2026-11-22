@@ -2814,9 +2814,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// The terrain's surface: a tile's grid, drawn with the tile's matrix from
-/// `drawableVector`, raised to the heights of the tile's DEM with its skirts
-/// lowered, in the colors of the tile's drape, fogged as GL JS's terrain is.
+/// The terrain's surface: a tile's grid, raised to the heights of the tile's
+/// DEM with its skirts lowered and projected through the tile's entry of
+/// `projectionVector`, in the colors of the tile's drape, fogged as GL JS's
+/// terrain is. A pole's vertices stand at sea level in the color of the
+/// drape's edge row.
 pub(crate) const TERRAIN_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(
         r"
@@ -2831,13 +2833,11 @@ struct VertexOutput {
     // north, as they are drawn.
     @location(0) drape_pos: vec2<f32>,
     // The distance along the view of the ground before the skirt lowers it,
-    // which the fog reads, as in GL JS: the clip w, which is affine in the
-    // vertex, so it interpolates exactly.
+    // which the fog reads, as in GL JS: the clip w.
     @location(1) view_depth: f32,
 };
 
 struct TerrainDrawableUBO {
-    matrix: mat4x4<f32>,
     dem_coords: vec4<f32>,
 };
 
@@ -2848,18 +2848,22 @@ struct GlobalIndexUBO {
 
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<TerrainDrawableUBO>;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     let drawable = drawableVector[globalIndex.value];
+    let projection = projectionVector[globalIndex.value];
     let pos = vec2<f32>(in.pos.xy);
     let skirt = f32(in.pos.z);
-    let height = ground_height(pos, drawable.dem_coords, terrainProps);
+    let height = surface_height(pos, drawable.dem_coords, terrainProps);
     var out: VertexOutput;
-    out.position = drawable.matrix * vec4<f32>(pos, height - skirt * terrainProps.skirt_length, 1.0);
-    out.drape_pos = pos / 8192.0;
-    let m = drawable.matrix;
-    out.view_depth = m[0].w * pos.x + m[1].w * pos.y + m[2].w * height + m[3].w;
+    out.position = projectTileFor3D(pos, height - skirt * terrainProps.skirt_length, projection);
+    out.drape_pos = clamp(pos / 8192.0, vec2<f32>(0.0), vec2<f32>(1.0));
+    out.view_depth = out.position.w;
+    if (skirt != 0.0) {
+        out.view_depth = projectTileFor3D(pos, height, projection).w;
+    }
     return out;
 }
 ",
@@ -2923,11 +2927,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: Some(TERRAIN_PRELUDE),
 };
 
-/// The depth of the terrain's surface: a tile's grid, drawn with the tile's
-/// matrix from `drawableVector`, raised to the heights of the tile's DEM with
-/// its skirts lowered, as the surface's, whose fragments write the eye
-/// distance (the clip w, which is affine in the vertex, so it interpolates
-/// exactly) as its f32's bits, least significant byte first.
+/// The depth of the terrain's surface: a tile's grid, raised and projected
+/// as the surface's, whose fragments write the eye distance (the clip w) as
+/// its f32's bits, least significant byte first.
 pub(crate) const TERRAIN_DEPTH_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(
         r"
@@ -2942,7 +2944,6 @@ struct VertexOutput {
 };
 
 struct TerrainDrawableUBO {
-    matrix: mat4x4<f32>,
     dem_coords: vec4<f32>,
 };
 
@@ -2953,15 +2954,17 @@ struct GlobalIndexUBO {
 
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<TerrainDrawableUBO>;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     let drawable = drawableVector[globalIndex.value];
+    let projection = projectionVector[globalIndex.value];
     let pos = vec2<f32>(in.pos.xy);
     let skirt = f32(in.pos.z);
-    let height = ground_height(pos, drawable.dem_coords, terrainProps);
+    let height = surface_height(pos, drawable.dem_coords, terrainProps);
     var out: VertexOutput;
-    out.position = drawable.matrix * vec4<f32>(pos, height - skirt * terrainProps.skirt_length, 1.0);
+    out.position = projectTileFor3D(pos, height - skirt * terrainProps.skirt_length, projection);
     out.eye_distance = out.position.w;
     return out;
 }
@@ -3021,12 +3024,21 @@ fn main(@location(0) @interpolate(flat) height: f32) -> @location(0) vec4<f32> {
     prelude: Some(TERRAIN_PRELUDE),
 };
 
-/// The surface's and the probe's prelude: the terrain's uniform block and
-/// the height rule.
+/// The surface's and the probe's prelude: the terrain's uniform block, the
+/// height rule, and the height of the surface's vertices.
 const TERRAIN_PRELUDE: &str = concat!(
     ground_height!(),
     r"
 @group(0) @binding(5) var<uniform> terrainProps: TerrainPropsUBO;
+
+// The height of the surface's vertex at `pos`, in tile units of a tile that
+// reads its DEM at `dem_coords`: the ground's, or sea level at a pole.
+fn surface_height(pos: vec2<f32>, dem_coords: vec4<f32>, props: TerrainPropsUBO) -> f32 {
+    if (pos.y < GLOBE_POLE_NORTH_Y || pos.y > GLOBE_POLE_SOUTH_Y) {
+        return 0.0;
+    }
+    return ground_height(pos, dem_coords, props);
+}
 "
 );
 
