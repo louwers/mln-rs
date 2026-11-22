@@ -203,12 +203,11 @@ impl Resources {
     /// triangles 0, 2, 1 and 1, 2, 3 of each, in as many segments as their
     /// vertices need. Every such index buffer shares one buffer.
     pub fn quads(&mut self, count: usize) -> crate::draw::IndexBuffer {
-        let buffer = match &self.quads {
-            Some(buffer) => buffer.clone(),
-            None => {
-                let buffer = self.buffer(&RenderStaticData::quad_indices());
-                self.quads.insert(buffer).clone()
-            }
+        let buffer = if let Some(buffer) = &self.quads {
+            buffer.clone()
+        } else {
+            let buffer = self.buffer(&RenderStaticData::quad_indices());
+            self.quads.insert(buffer).clone()
         };
         crate::draw::IndexBuffer { buffer, segments: RenderStaticData::quad_segments(count) }
     }

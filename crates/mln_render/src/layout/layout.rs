@@ -123,7 +123,7 @@ pub(crate) fn build_layout<S: StyleLayerType, L: Layout<S>>(
     source_layer: &SourceLayer,
     resolved: Option<&Resolved>,
     built: &mut Built,
-    build: &BuildParams,
+    build: BuildParams,
 ) -> Result<Option<L::Bucket>, Error> {
     let NewLayout { layout, parameters, .. } = layout;
     let mut cx = BuildCx {

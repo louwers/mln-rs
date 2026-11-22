@@ -251,13 +251,13 @@ pub(crate) fn build(discovered: Discovered, input: &LayoutInput<'_>, resolved: &
         };
         match layout {
             Some(layout) if layout.has_dependencies() => waiting.push(layout),
-            Some(layout) => layout.create_bucket(None, &mut built, &build)?,
+            Some(layout) => layout.create_bucket(None, &mut built, build)?,
             None => {}
         }
     }
 
     for layout in waiting {
-        layout.create_bucket(Some(resolved), &mut built, &build)?;
+        layout.create_bucket(Some(resolved), &mut built, build)?;
     }
     built.buckets.shrink_to_fit();
     Ok(built)

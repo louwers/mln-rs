@@ -341,7 +341,7 @@ pub(crate) trait ErasedLayout: Send {
         self: Box<Self>,
         resolved: Option<&Resolved>,
         built: &mut Built,
-        build: &BuildParams,
+        build: BuildParams,
     ) -> Result<(), Error>;
 }
 
@@ -360,7 +360,7 @@ impl<S: StyleLayerType, L: Layout<S>> ErasedLayout for TypedLayout<S, L> {
         self: Box<Self>,
         resolved: Option<&Resolved>,
         built: &mut Built,
-        build: &BuildParams,
+        build: BuildParams,
     ) -> Result<(), Error> {
         let TypedLayout { layout, group, source_layer } = *self;
         let Some(bucket) = crate::layout::layout::build_layout(layout, &group, &source_layer, resolved, built, build)?

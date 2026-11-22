@@ -725,7 +725,7 @@ mod tests {
     fn quads_of_any_count_share_one_buffer_in_segments_of_their_vertices() {
         let mut context = Resources::detached();
         let (few, many) = (context.quads(2), context.quads(20_000));
-        assert!(few.buffer == many.buffer);
+        assert_eq!(few.buffer, many.buffer);
         let lengths = |quads: &crate::draw::IndexBuffer| -> Vec<(usize, usize, usize)> {
             quads.segments.iter().map(|s| (s.vertex_offset, s.vertex_length, s.index_length)).collect()
         };
