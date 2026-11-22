@@ -48,7 +48,7 @@ pub use heatmap::{Heatmap, HeatmapPaintProperties};
 pub use hillshade::{Hillshade, HillshadePaintProperties};
 pub use line::{Line, LineLayoutProperties, LinePaintProperties};
 use mln_gfx::shaders::program::Program;
-use mln_render::draw::{BucketChanges, DrawObjects, VertexAttributeArray};
+use mln_render::draw::{BucketChanges, Context, Mesh, SharedVertices, VertexAttributeArray};
 use mln_render::{RegisterError, RegistryBuilder};
 pub use raster::{Raster, RasterPaintProperties};
 pub use symbol::{Symbol, SymbolLayoutProperties, SymbolPaintProperties};
@@ -107,19 +107,25 @@ pub static PROGRAMS: &[&Program] = &[
     &symbol::programs::COLLISION_CIRCLE,
 ];
 
-/// Copies a bucket's data-driven attributes into a draw again where
-/// `changes` says their values changed: `refresh(attrs)` reads them into its
+/// Copies a bucket's data-driven attributes into `mesh` again where
+/// `changes` says their values changed: `paint(context)` gives the vertices
+/// of the values, and `bind(attrs, vertices)` reads them into the mesh's
 /// instance attributes where it has them, else into its vertex attributes,
 /// which then upload again.
 fn refresh_paint_attributes(
-    objects: &mut DrawObjects,
+    context: &mut Context,
+    mesh: &Mesh,
     changes: BucketChanges,
-    refresh: impl FnOnce(&mut VertexAttributeArray),
+    paint: impl FnOnce(&mut Context) -> Option<SharedVertices>,
+    bind: impl FnOnce(&mut VertexAttributeArray, Option<&SharedVertices>),
 ) {
     if !changes.paint {
         return;
     }
-    refresh(objects.paint_attributes_mut());
+    let paint = paint(context);
+    if let Some(objects) = context.mesh_mut(mesh) {
+        bind(objects.paint_attributes_mut(), paint.as_ref());
+    }
 }
 
 #[cfg(test)]

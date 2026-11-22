@@ -10,8 +10,8 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_render::draw::{
-    AtlasBinding, Composite, Context, DrawGeometry, DrawList, DrawObjects, DrawObjectsMut, FrameDraw, IconFilter,
-    SharedAttribute, SharedTexture, Texture2D, Textures, TileDraws, TileMap, TileObjects, UniformWriter, Uniforms,
+    AtlasBinding, Composite, Context, DrawFrame, DrawGeometry, DrawList, DrawObjects, FrameDraw, IconFilter, Mesh,
+    SharedAttribute, SharedTexture, Texture2D, Textures, TileDraws, TileMap, UniformWriter, Uniforms,
     VertexAttributeArray, bucket_indexes, bucket_vertices, cast_matrix, paint_vertices, projection_data,
     to_projection_ubo,
 };
@@ -25,7 +25,6 @@ use mln_style_types::LineCapType;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
 use mln_util::error::Error;
-use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -62,26 +61,10 @@ enum LineType {
 /// What the layer keeps of a tile: the draw of its bucket's lines, as it was
 /// built for the bucket.
 pub struct LineTile {
-    /// The id of the draw's GPU objects, made with them.
-    id: SimpleIdentity,
-    objects: DrawObjects,
+    mesh: Mesh,
     line_type: LineType,
     /// The ends of the dashes of the bucket, which pick its dash texture.
     dash_cap: DashCap,
-    /// Gives a pattern draw the texture of the tile's icon atlas.
-    atlases: Option<AtlasBinding>,
-}
-
-impl TileObjects for LineTile {
-    type Part = ();
-
-    fn objects(&mut self, (): ()) -> Option<DrawObjectsMut<'_>> {
-        Some(DrawObjectsMut { objects: &mut self.objects, atlases: self.atlases.as_ref() })
-    }
-
-    fn drop_bindings(&mut self) {
-        self.objects.drop_bindings();
-    }
 }
 
 /// A draw's entries in the layer's storage buffers.
@@ -245,7 +228,7 @@ impl LayerType for Line {
     type Bucket = LineBucket;
     type View<'a> = LayerBucket<'a, Line>;
     type Tile = LineTile;
-    type Drawing = TileDraws<LineTile>;
+    type Drawing = TileDraws;
     type State = LineState;
 
     /// Whether a layer of the group has a pattern.
@@ -265,7 +248,7 @@ impl LayerType for Line {
         Some(&Line)
     }
 
-    fn new_layer(_layer: &LayerValues<Line>) -> (LineState, TileDraws<LineTile>) {
+    fn new_layer(_layer: &LayerValues<Line>) -> (LineState, TileDraws) {
         let state = LineState {
             draw_list: DrawList::default(),
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
@@ -317,7 +300,7 @@ impl LayerType for Line {
     /// buffers they read.
     fn make_draws(
         state: &mut LineState,
-        drawing: &mut TileDraws<LineTile>,
+        drawing: &mut TileDraws,
         tile_values: &mut TileMap<LineTile>,
         gpu: &mut dyn Gpu,
         cx: &mut DrawContext<'_, '_, Line>,
@@ -356,11 +339,12 @@ impl LayerType for Line {
             let value = tile_values.get_mut(index);
             let context = &mut *cx.context;
             let cached = if let Some(cached) = value {
-                refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
-                    let buffer = &binders.interleaved_vertex_buffer;
-                    let paint =
-                        paint_vertices(context, render_data.geometry(), buffer, binders.depends_on_feature_state());
-                    binders.bind(evaluated, paint.as_ref(), attrs, &mut Uniforms::default());
+                let buffer = &binders.interleaved_vertex_buffer;
+                let paint = |context: &mut Context| {
+                    paint_vertices(context, render_data.geometry(), buffer, binders.depends_on_feature_state())
+                };
+                refresh_paint_attributes(context, &cached.mesh, changes, paint, |attrs, paint| {
+                    binders.bind(evaluated, paint, attrs, &mut Uniforms::default());
                 });
                 cached
             } else {
@@ -372,14 +356,18 @@ impl LayerType for Line {
                 value.insert(built)
             };
             let tile = tile_id.to_unwrapped();
-            if let Some(uniforms) = LineState::uniforms(tile, render_data, binders, cached, &state.dashes, cx) {
-                let draw = FrameDraw { clip: true, ..FrameDraw::new(Some(tile_id), cached.id) };
+            let (layer, frame) = (&*cx.layer.evaluated, &cx.frame);
+            let uniforms =
+                LineState::uniforms(tile, render_data, binders, cached, &state.dashes, layer, cx.context, frame);
+            if let Some(uniforms) = uniforms {
+                let mut draw = FrameDraw::new(Some(tile_id), &cached.mesh);
+                draw.clip = true;
                 state.draw_list.push(draw, uniforms);
             }
         }
 
         let layer = &cx.layer.evaluated;
-        drawing.finish(&mut state.draw_list, tile_values, gpu, cx.context, |writer| {
+        drawing.finish(&mut state.draw_list, gpu, cx.context, |writer| {
             LineState::write_uniforms(layer, writer);
         });
     }
@@ -387,7 +375,7 @@ impl LayerType for Line {
     /// Makes the dash textures of the tiles' buckets, then the layer's own,
     /// which the encode draws a dashed tile with when its bucket has no
     /// per-feature patterns.
-    fn update(state: &mut LineState, _drawing: &mut TileDraws<LineTile>, cx: &mut UpdateContext<'_, '_, Line>) {
+    fn update(state: &mut LineState, _drawing: &mut TileDraws, cx: &mut UpdateContext<'_, '_, Line>) {
         let (dashes, tiles) = (&mut state.dashes, cx.tiles);
         for tile in tiles {
             let Some(bucket) = tile.view() else {
@@ -547,7 +535,11 @@ impl LineState {
         };
         let color_mode = context.color_mode(ColorMode::alpha_blended());
         let objects = DrawObjects::new(shader, color_mode, CullFaceMode::disabled(), draw_geometry, textures);
-        Some(LineTile { id: SimpleIdentity::new(), objects, line_type, dash_cap: dash_pattern_cap(bucket), atlases })
+        let objects = match atlases {
+            Some(atlases) => objects.with_atlases(atlases),
+            None => objects,
+        };
+        Some(LineTile { mesh: context.add_mesh(objects), line_type, dash_cap: dash_pattern_cap(bucket) })
     }
 
     /// The texture of the color ramp, which every gradient of the layer
@@ -568,22 +560,24 @@ impl LineState {
     }
 
     /// The entries in the layer's storage buffers of `cached`, the draw of
-    /// the tile `tile_id` of `tile_bucket`, whose binders are `binders`, in
-    /// the frame of `cx`: its matrix, the interpolation of the layer's
-    /// values, and where its patterns are. A dashed draw of the layer's dash
-    /// array takes its texture in `dashes` here; `None` where there is none
-    /// yet, and doesn't draw.
+    /// the tile `tile_id` of `tile_bucket`, whose binders are `binders`, of
+    /// a layer with the values `layer`, in `frame`: its matrix, the
+    /// interpolation of the layer's values, and where its patterns are. A
+    /// dashed draw of the layer's dash array takes its texture in `dashes`
+    /// here; `None` where there is none yet, and doesn't draw.
+    #[expect(clippy::too_many_arguments, reason = "the draw, its tile's bucket, the layer and the frame")]
     fn uniforms(
         tile_id: UnwrappedTileID,
         tile_bucket: LayerBucket<'_, Line>,
         binders: &LineBinders,
-        cached: &mut LineTile,
+        cached: &LineTile,
         dashes: &DashTextures,
-        cx: &DrawContext<'_, '_, Line>,
+        layer: &EvaluatedLayer<Line>,
+        context: &mut Context,
+        frame: &DrawFrame<'_>,
     ) -> Option<LineUniforms> {
         const NEAR_CLIPPED: bool = false;
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
-        let (layer, context, frame) = (&*cx.layer.evaluated, &*cx.context, &cx.frame);
         let evaluated = &layer.paint;
         let crossfade = layer.crossfade;
         let state = frame.view;
@@ -633,8 +627,8 @@ impl LineState {
                 pad2: 0.0,
             }),
             LineType::Pattern => {
-                let texture =
-                    cached.objects.texture(ID_LINE_IMAGE_TEXTURE).and_then(|texture| context.texture(texture));
+                let texture = context.mesh(&cached.mesh).and_then(|objects| objects.texture(ID_LINE_IMAGE_TEXTURE));
+                let texture = texture.and_then(|texture| context.texture(texture));
                 let texture_size = texture.map_or(Size::new(0, 0), Texture2D::size);
                 uniforms.draw_ubo.set(&LinePatternDrawableUBO {
                     matrix,
@@ -693,7 +687,10 @@ impl LineState {
                 } else {
                     let dasharray = evaluated.line_dasharray.faded();
                     let dash_pattern = dashes.get(dasharray.from, dasharray.to, cached.dash_cap)?;
-                    cached.objects.set_texture(dash_texture_id, Some(dash_pattern.texture()?));
+                    let dash_texture = dash_pattern.texture()?;
+                    if let Some(objects) = context.mesh_mut(&cached.mesh) {
+                        objects.set_texture(dash_texture_id, Some(dash_texture));
+                    }
 
                     let pos_a = dash_pattern.from();
                     let pos_b = dash_pattern.to();

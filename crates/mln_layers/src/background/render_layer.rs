@@ -6,7 +6,7 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::tile_cover::{TileCoverParameters, tile_cover};
 use mln_render::draw::{
-    DrawDepth, DrawFrame, DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, KeptDraw, RenderPass,
+    DrawDepth, DrawFrame, DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, Mesh, RenderPass,
     RenderStaticData, Textures, TileDraws, TileMap, Uniforms, projection_data, raw_vertices, to_projection_ubo,
 };
 use mln_render::globe::tile_grid;
@@ -124,11 +124,11 @@ impl LayerType for Background {
     type Layout = NoLayout;
     type Bucket = NoBucket;
     type View<'a> = NoTileView;
-    type Tile = KeptDraw;
-    type Drawing = TileDraws<KeptDraw>;
+    type Tile = Mesh;
+    type Drawing = TileDraws;
     type State = BackgroundState;
 
-    fn new_layer(_layer: &LayerValues<Background>) -> (BackgroundState, TileDraws<KeptDraw>) {
+    fn new_layer(_layer: &LayerValues<Background>) -> (BackgroundState, TileDraws) {
         Default::default()
     }
 
@@ -137,8 +137,8 @@ impl LayerType for Background {
     /// layer's buffers they read.
     fn make_draws(
         state: &mut BackgroundState,
-        drawing: &mut TileDraws<KeptDraw>,
-        tile_values: &mut TileMap<KeptDraw>,
+        drawing: &mut TileDraws,
+        tile_values: &mut TileMap<Mesh>,
         gpu: &mut dyn Gpu,
         cx: &mut DrawContext<'_, '_, Background>,
     ) {
@@ -176,21 +176,21 @@ impl LayerType for Background {
         // picked, in its order.
         debug_assert_eq!(tile_cover.len(), tile_values.len(), "a cover the update didn't pick");
         for (index, tile_id) in tile_cover.iter().enumerate().take(tile_values.len()) {
-            let cached = tile_values.get_mut(index).get_or_insert_with(|| {
-                KeptDraw::new(BackgroundState::build_tile(tile_id, shader.clone(), color_mode, variant))
+            let mesh = tile_values.get_mut(index).get_or_insert_with(|| {
+                context.add_mesh(BackgroundState::build_tile(tile_id, shader.clone(), color_mode, variant))
             });
-            if pattern_texture.is_some() {
-                cached.objects.set_texture(ID_BACKGROUND_IMAGE_TEXTURE, pattern_texture);
+            if pattern_texture.is_some()
+                && let Some(objects) = context.mesh_mut(mesh)
+            {
+                objects.set_texture(ID_BACKGROUND_IMAGE_TEXTURE, pattern_texture);
             }
-            let draw = FrameDraw {
-                pass: draw_passes,
-                depth: DrawDepth::Layer { sub_layer: 0, mask: DepthMaskType::ReadWrite },
-                ..cached.frame_draw(Some(*tile_id))
-            };
+            let mut draw = FrameDraw::new(Some(*tile_id), mesh);
+            draw.pass = draw_passes;
+            draw.depth = DrawDepth::Layer { sub_layer: 0, mask: DepthMaskType::ReadWrite };
             draw_list.push(draw, BackgroundState::uniforms(tile_id, has_pattern, frame));
         }
 
-        drawing.finish(draw_list, tile_values, gpu, context, |writer| {
+        drawing.finish(draw_list, gpu, context, |writer| {
             let opacity = *evaluated.background_opacity.uniform();
             if let Some((from, to)) = pattern_positions {
                 let crossfade = &layer.crossfade;
@@ -248,11 +248,7 @@ impl LayerType for Background {
     /// Picks the tiles that cover the view, which the layer draws, having no
     /// source, and packs its patterns, packing again those whose images the
     /// style replaced.
-    fn update(
-        state: &mut BackgroundState,
-        _drawing: &mut TileDraws<KeptDraw>,
-        cx: &mut UpdateContext<'_, '_, Background>,
-    ) {
+    fn update(state: &mut BackgroundState, _drawing: &mut TileDraws, cx: &mut UpdateContext<'_, '_, Background>) {
         let (view, update_parameters) = (cx.view, cx.update_parameters);
         let zoom = view.integer_zoom();
         state.tile_cover = tile_cover(

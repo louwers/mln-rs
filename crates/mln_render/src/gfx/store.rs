@@ -1,5 +1,5 @@
-//! The context's stores of what draws share on the GPU: textures, indexes
-//! and vertices. Each entry is held through [`Shared`] handles, which the
+//! The context's stores of what draws share on the GPU: textures, indexes,
+//! vertices and meshes. Each entry is held through [`Shared`] handles, which the
 //! entry's owner and every draw, bindings or geometry that reads it clone:
 //! the entry stays while a handle to it does, so nothing names one that is
 //! gone. When the last handle drops, its key goes to the renderer's release
@@ -56,6 +56,8 @@ keys! {
     IndexesKey => Indexes,
     /// Vertices of the context's store.
     VerticesKey => Vertices,
+    /// A mesh of the context's store.
+    MeshKey => Mesh,
 }
 
 /// A key of one of the context's stores.
@@ -64,6 +66,7 @@ pub enum StoreKey {
     Texture(TextureKey),
     Indexes(IndexesKey),
     Vertices(VerticesKey),
+    Mesh(MeshKey),
 }
 
 /// A handle of the store entry `key`, which stays in its store while a
@@ -231,6 +234,23 @@ impl<K: Key, V> Store<K, V> {
         let entry = self.slot_mut(handle.key()).and_then(|slot| slot.value.as_mut());
         debug_assert!(entry.is_some(), "a handle outlived its store entry");
         entry
+    }
+
+    /// Takes the entry `key` names out of its slot, which stays the entry's
+    /// until [`restore`](Self::restore) puts it back: the store adds no
+    /// other entry there, and finds none at `key` meanwhile.
+    pub(crate) fn take(&mut self, key: K) -> Option<V> {
+        self.slot_mut(key)?.value.take()
+    }
+
+    /// Puts back the entry that [`take`](Self::take) took from `key`.
+    pub(crate) fn restore(&mut self, key: K, value: V) {
+        let EntryKey { slot, version } = key.entry();
+        let slot = self.chunks.get_mut(slot / CHUNK).and_then(|chunk| chunk.slots.get_mut(slot % CHUNK));
+        match slot {
+            Some(slot) if slot.version == version && slot.value.is_none() => slot.value = Some(value),
+            _ => debug_assert!(false, "an entry restored to a slot it wasn't taken from"),
+        }
     }
 
     /// Whether the store has the entry `key`.

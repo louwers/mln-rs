@@ -35,11 +35,11 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::View;
 use mln_render::draw::{
-    AtlasBinding, BucketGeometry, Composite, Context, DrawDepth, DrawGeometry, DrawList, DrawObjects, DrawObjectsMut,
-    DrawPriority, EvaluatedLight, FrameDraw, IconFilter, Indexes, RenderStaticData, SharedAttribute, SharedIndexes,
-    SharedVertices, Texture2D, TileDraws, TileMap, TileObjects, UniformWriter, Uniforms, VertexAttributeArray,
-    bucket_indexes, bucket_vertices, cast_matrix, copied_vertices, copy_shared_attributes, derived_vertices,
-    paint_vertices, projection_data, to_projection_ubo, zero_to_one_clip_z,
+    AtlasBinding, BucketGeometry, Composite, Context, DrawDepth, DrawGeometry, DrawList, DrawObjects, DrawPriority,
+    EvaluatedLight, FrameDraw, IconFilter, Indexes, Mesh, RenderStaticData, SharedAttribute, SharedIndexes,
+    SharedVertices, Texture2D, TileDraws, TileMap, UniformWriter, Uniforms, VertexAttributeArray, bucket_indexes,
+    bucket_vertices, cast_matrix, copied_vertices, copy_shared_attributes, derived_vertices, paint_vertices,
+    projection_data, to_projection_ubo, zero_to_one_clip_z,
 };
 use mln_render::layer::{
     Bucket, DrawContext, EvaluateCx, EvaluatedLayer, Evaluation, FeatureQuery, HitTest, LayerBucket, LayerType,
@@ -50,7 +50,6 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::clip_depth::ClipDepthRange;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::error::Error;
-use mln_util::identity::SimpleIdentity;
 use mln_util::size::Size;
 
 use super::bucket::{
@@ -72,9 +71,7 @@ use crate::pattern_layout::{PatternLayout, uses_pattern};
 /// A draw the layer keeps of a tile: of its roofs or its walls, into depth
 /// only or in color.
 struct ExtrusionDraw {
-    /// The id of the draw's GPU objects, made with them.
-    id: SimpleIdentity,
-    objects: DrawObjects,
+    mesh: Mesh,
     /// 0 for a draw into depth only, which draws before those in color.
     priority: DrawPriority,
     /// Whether it draws the walls rather than the roofs.
@@ -91,23 +88,6 @@ pub struct ExtrusionTile {
     /// Where the pulled walls' shader finds a vertex's paint values
     /// (`FillExtrusionDrawableUBO::paint_layout`).
     paint_layout: u32,
-    /// Gives the pattern draws the texture of the tile's icon atlas.
-    atlases: Option<AtlasBinding>,
-}
-
-impl TileObjects for ExtrusionTile {
-    /// The index of the draw among the tile's.
-    type Part = usize;
-
-    fn objects(&mut self, index: usize) -> Option<DrawObjectsMut<'_>> {
-        Some(DrawObjectsMut { objects: &mut self.draws.get_mut(index)?.objects, atlases: self.atlases.as_ref() })
-    }
-
-    fn drop_bindings(&mut self) {
-        for draw in &mut self.draws {
-            draw.objects.drop_bindings();
-        }
-    }
 }
 
 /// A draw's entries in the layer's storage buffers.
@@ -234,7 +214,9 @@ fn read_wall_instances(
 }
 
 /// A draw of `geometry` with `shader`, in color with `color_mode` or, without
-/// one, into depth only, which binds the textures of `atlases`.
+/// one, into depth only, which binds the textures of `atlases`, with the
+/// draw it is: its priority, whether it draws the walls, and whether it
+/// clips.
 fn extrusion_draw(
     shader: &ShaderKey,
     walls: bool,
@@ -242,7 +224,7 @@ fn extrusion_draw(
     clip: bool,
     geometry: &SharedGeometry<'_>,
     atlases: Option<&AtlasBinding>,
-) -> ExtrusionDraw {
+) -> (DrawObjects, DrawPriority, bool, bool) {
     let draw_geometry = DrawGeometry {
         vertices: copy_shared_attributes(geometry.vertices),
         vertex_count: if geometry.segments.is_empty() { 0 } else { geometry.vertex_count },
@@ -255,13 +237,17 @@ fn extrusion_draw(
     let color_mode = color_mode.unwrap_or_else(ColorMode::disabled);
     let textures = atlases.map(|atlases| atlases.textures(shader)).unwrap_or_default();
     let objects = DrawObjects::new(shader.clone(), color_mode, CullFaceMode::back_ccw(), draw_geometry, textures);
-    ExtrusionDraw { id: SimpleIdentity::new(), objects, priority: DrawPriority::from(in_color), walls, clip }
+    let objects = match atlases {
+        Some(atlases) => objects.with_atlases(atlases.clone()),
+        None => objects,
+    };
+    (objects, DrawPriority::from(in_color), walls, clip)
 }
 
 /// What a fill-extrusion layer keeps besides its drawing.
 pub struct ExtrusionState {
     /// The frame's draws as the update makes them.
-    draw_list: DrawList<ExtrusionUniforms, usize>,
+    draw_list: DrawList<ExtrusionUniforms>,
 
     /// The wall quad ([`WALL_CORNERS`]) of the
     /// instanced walls.
@@ -284,7 +270,7 @@ impl LayerType for FillExtrusion {
     type Bucket = FillExtrusionBucket;
     type View<'a> = LayerBucket<'a, FillExtrusion>;
     type Tile = ExtrusionTile;
-    type Drawing = TileDraws<ExtrusionTile>;
+    type Drawing = TileDraws;
     type State = ExtrusionState;
     const VOLUME: bool = true;
 
@@ -305,7 +291,7 @@ impl LayerType for FillExtrusion {
         Some(&FillExtrusion)
     }
 
-    fn new_layer(_layer: &LayerValues<FillExtrusion>) -> (ExtrusionState, TileDraws<ExtrusionTile>) {
+    fn new_layer(_layer: &LayerValues<FillExtrusion>) -> (ExtrusionState, TileDraws) {
         let state = ExtrusionState {
             draw_list: DrawList::default(),
             static_data_vertices: None,
@@ -324,7 +310,7 @@ impl LayerType for FillExtrusion {
     /// buffers they read.
     fn make_draws(
         state: &mut ExtrusionState,
-        drawing: &mut TileDraws<ExtrusionTile>,
+        drawing: &mut TileDraws,
         tile_values: &mut TileMap<ExtrusionTile>,
         gpu: &mut dyn Gpu,
         cx: &mut DrawContext<'_, '_, FillExtrusion>,
@@ -393,16 +379,14 @@ impl LayerType for FillExtrusion {
                 }
                 None => value.insert(builder.build(context, render_data, binders, &layer.paint)),
             };
-            for (index, draw) in cached.draws.iter().enumerate() {
-                let frame_draw = FrameDraw {
-                    priority: draw.priority,
-                    depth: DrawDepth::Volume { mask: DepthMaskType::ReadWrite },
-                    clip: draw.clip,
-                    ..FrameDraw::new(Some(tile_id), draw.id)
-                };
+            for draw in &cached.draws {
+                let mut frame_draw = FrameDraw::new(Some(tile_id), &draw.mesh);
+                frame_draw.priority = draw.priority;
+                frame_draw.depth = DrawDepth::Volume { mask: DepthMaskType::ReadWrite };
+                frame_draw.clip = draw.clip;
                 let layout = cached.paint_layout;
-                let uniforms = ExtrusionState::uniforms(tile_id, render_data, binders, &draw.objects, layout, cx);
-                state.draw_list.push_part(frame_draw, index, uniforms);
+                let uniforms = ExtrusionState::uniforms(tile_id, render_data, binders, &draw.mesh, layout, cx);
+                state.draw_list.push(frame_draw, uniforms);
             }
         }
 
@@ -413,7 +397,7 @@ impl LayerType for FillExtrusion {
         // The draws that composite draw opaque: the composite has the
         // layer's opacity.
         let opacity = if composite.is_some() { 1.0 } else { opacity };
-        drawing.finish(&mut state.draw_list, tile_values, gpu, cx.context, |writer| {
+        drawing.finish(&mut state.draw_list, gpu, cx.context, |writer| {
             ExtrusionState::write_uniforms(layer, writer, light, view, opacity);
         });
     }
@@ -471,7 +455,7 @@ impl TileBuilder<'_> {
         let (Some(vertices), Some(triangles)) =
             (bucket_vertices(geometry, &bucket.vertices), bucket_indexes(geometry, &bucket.triangles))
         else {
-            return ExtrusionTile { draws: Vec::new(), paint_layout: 0, atlases: None };
+            return ExtrusionTile { draws: Vec::new(), paint_layout: 0 };
         };
         let vertex_count = bucket.vertices.len();
         // A wall from each vertex to the next, but from the last, which
@@ -589,13 +573,22 @@ impl TileBuilder<'_> {
             draws.push(extrusion_draw(&wall_shader, true, color, clip, &walls_geometry, atlases.as_ref()));
         }
         if self.walls == Walls::Pulled {
-            for draw in draws.iter_mut().filter(|draw| draw.walls) {
-                draw.objects.read_as_storage(WALL_VERTICES.id, Some(vertices.clone()));
-                draw.objects.read_as_storage(WALL_PAINT.id, paint.cloned());
+            for (objects, ..) in draws.iter_mut().filter(|(_, _, walls, _)| *walls) {
+                objects.read_as_storage(WALL_VERTICES.id, Some(vertices.clone()));
+                objects.read_as_storage(WALL_PAINT.id, paint.cloned());
             }
         }
 
-        ExtrusionTile { draws, paint_layout, atlases }
+        let draws = draws
+            .into_iter()
+            .map(|(objects, priority, walls, clip)| ExtrusionDraw {
+                mesh: context.add_mesh(objects),
+                priority,
+                walls,
+                clip,
+            })
+            .collect();
+        ExtrusionTile { draws, paint_layout }
     }
 }
 
@@ -633,22 +626,25 @@ impl TileBuilder<'_> {
         let paint = paint_vertices(context, geometry, buffer, binders.depends_on_feature_state());
         let walls = tile_bucket.bucket.vertices.len().saturating_sub(1);
         let quad_paint = (self.walls == Walls::Quads).then(|| wall_paint(context, geometry, binders, walls)).flatten();
-        for draw in &mut cached.draws {
-            let attrs = draw.objects.paint_attributes_mut();
+        for draw in &cached.draws {
+            let Some(objects) = context.mesh_mut(&draw.mesh) else {
+                continue;
+            };
+            let attrs = objects.paint_attributes_mut();
             binders.bind(evaluated, paint.as_ref(), attrs, &mut Uniforms::default());
             if let (Some(paint), Some(quad_paint)) = (&paint, quad_paint.as_ref().filter(|_| draw.walls)) {
                 read_quad_paint(attrs, paint, quad_paint);
             }
             if self.walls == Walls::Pulled && draw.walls {
                 cached.paint_layout = paint_layout(attrs);
-                draw.objects.read_as_storage(WALL_PAINT.id, paint.clone());
+                objects.read_as_storage(WALL_PAINT.id, paint.clone());
             }
         }
     }
 }
 
 impl ExtrusionState {
-    /// The entries in the layer's storage buffers of a draw of `objects`, a
+    /// The entries in the layer's storage buffers of a draw of `mesh`, a
     /// draw of `tile`, whose bucket's binders are `binders` and whose pulled
     /// walls find their paint values by `paint_layout`, in the frame of
     /// `cx`.
@@ -656,7 +652,7 @@ impl ExtrusionState {
         tile_id: OverscaledTileID,
         tile_bucket: LayerBucket<'_, FillExtrusion>,
         binders: &FillExtrusionBinders,
-        objects: &DrawObjects,
+        mesh: &Mesh,
         paint_layout: u32,
         cx: &DrawContext<'_, '_, FillExtrusion>,
     ) -> ExtrusionUniforms {
@@ -697,7 +693,8 @@ impl ExtrusionState {
         let num_tiles = 2f64.powi(i32::from(tile_id.canonical.z));
         let height_factor = (-num_tiles / TILE_SIZE_D / 8.0) as f32;
 
-        let texture = objects.texture(ID_FILL_EXTRUSION_IMAGE_TEXTURE).and_then(|texture| context.texture(texture));
+        let texture = context.mesh(mesh).and_then(|objects| objects.texture(ID_FILL_EXTRUSION_IMAGE_TEXTURE));
+        let texture = texture.and_then(|texture| context.texture(texture));
         let texture_size = texture.map_or(Size::new(0, 0), Texture2D::size);
         let pattern = evaluated.fill_extrusion_pattern.faded();
         let tlbr = |id: &str| tile_bucket.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));

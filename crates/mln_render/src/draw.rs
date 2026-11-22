@@ -1,13 +1,14 @@
 //! The draw services: what a layer type draws with, the other half of the
 //! [layer type contract](crate::layer).
 //!
-//! A layer keeps the GPU objects of its draws between frames
-//! ([`DrawObjects`]), and makes them again only when what they are made of
-//! changes. It makes them in the renderer's [`Context`], whose stores keep
-//! what draws share: vertices, indexes and textures ([`SharedVertices`],
-//! [`SharedIndexes`], [`SharedTexture`]). A bucket's geometry, which the
-//! engine moves into those stores when it uploads the bucket
-//! ([`BucketGeometry`]), is read with [`bucket_vertices`],
+//! A layer makes the GPU objects of its draws ([`DrawObjects`]) once and
+//! keeps them between frames in the renderer's [`Context`], which holds
+//! them in its store of meshes while the layer holds their [`Mesh`]. It
+//! makes them again only when what they are made of changes. The context's
+//! other stores keep what draws share: vertices, indexes and textures
+//! ([`SharedVertices`], [`SharedIndexes`], [`SharedTexture`]). A bucket's
+//! geometry, which the engine moves into those stores when it uploads the
+//! bucket ([`BucketGeometry`]), is read with [`bucket_vertices`],
 //! [`bucket_indexes`] and [`paint_vertices`]. A draw names its program's
 //! shader by the key the context gives ([`Context::shader_key`]) for one of
 //! the type's programs, each a `static`
@@ -15,19 +16,18 @@
 //!
 //! Each frame, [`LayerType::make_draws`](crate::layer::LayerType::make_draws)
 //! makes the layer's draws of the frame from its
-//! [`DrawContext`](crate::layer::DrawContext): [`FrameDraw`]s with their
-//! uniform values, in a [`DrawList`], which [`DrawList::finish`] orders and
-//! whose values a [`UniformWriter`] writes to the buffers of the layer's
-//! [`LayerDraws`]. The [`DrawFrame`] holds what the draws' uniforms read of
-//! the frame, and [`projection_data`] projects a tile's geometry in it.
+//! [`DrawContext`](crate::layer::DrawContext): [`FrameDraw`]s, each naming
+//! the mesh it draws, with their uniform values, in a [`DrawList`], which
+//! [`DrawList::finish`] orders and whose values a [`UniformWriter`] writes
+//! to the buffers of the layer's [`FrameDraws`]. The [`DrawFrame`] holds
+//! what the draws' uniforms read of the frame, and [`projection_data`]
+//! projects a tile's geometry in it.
 //!
-//! The engine keeps the layer's values of its tiles, which hold the GPU
-//! objects of the tiles' draws, in a [`TileMap`]. The layer's
-//! [`LayerDrawing`] keeps its other draws, and gives the engine its draw
-//! groups ([`DrawGroup`]). The engine places each group in the layers' order
-//! and depth, and uploads and draws it through [`LayerDrawing::upload`] and
-//! [`LayerDrawing::render`], which hand the draws [`PaintParameters`], the
-//! frame's encode.
+//! The engine keeps the layer's values of its tiles, which hold the meshes
+//! of the tiles' draws, in a [`TileMap`]. The layer's [`LayerDrawing`]
+//! keeps its other draws, and gives the engine its draw groups
+//! ([`DrawGroup`]). The engine places each group in the layers' order and
+//! depth, and uploads and draws the meshes its draws name.
 //! [`TileDraws`] is the drawing of a layer that draws one group of its
 //! tiles' draws, and [`SingleDraw`] is one draw with its buffers. Draws that
 //! draw onto the frame as one surface say how with a [`Composite`]; a layer
@@ -44,7 +44,7 @@
 pub use crate::bucket_geometry::{
     BucketGeometry, bucket_indexes, bucket_vertices, copied_indexes, copied_vertices, derived_vertices, paint_vertices,
 };
-pub use crate::draw_objects::{DrawGeometry, DrawObjects, Textures, copy_shared_attributes, raw_vertices};
+pub use crate::draw_objects::{DrawGeometry, DrawObjects, Mesh, Textures, copy_shared_attributes, raw_vertices};
 pub use crate::frame_projection::zero_to_one_clip_z;
 pub use crate::gfx::atlas_binding::{AtlasBinding, IconFilter};
 pub use crate::gfx::context::Context;
@@ -55,8 +55,8 @@ pub use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttribut
 pub use crate::gfx::vertices::{SharedVertices, TypedVertices, Vertices};
 pub use crate::layer_composite::Composite;
 pub use crate::layer_drawing::{
-    DrawDepth, DrawGroup, DrawList, DrawObjectsMut, DrawOrder, DrawPriority, FrameDraw, FrameDraws, KeptDraw,
-    LayerDrawing, LayerDraws, SingleDraw, TileDraws, TileObjects, UniformWriter, finish_tiles, tile_objects,
+    DrawDepth, DrawGroup, DrawList, DrawOrder, DrawPriority, FrameDraw, FrameDraws, LayerDrawing, SingleDraw,
+    TileDraws, UniformWriter,
 };
 pub use crate::paint_parameters::{DrawFrame, PaintParameters};
 pub use crate::render_light::EvaluatedLight;

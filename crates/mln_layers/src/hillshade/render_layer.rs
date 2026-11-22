@@ -19,13 +19,13 @@ use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_math::deg2radf;
 use mln_render::draw::{
-    Context, DrawFrame, DrawGeometry, DrawIndexes, DrawList, DrawObjects, DrawObjectsMut, FrameDraw, Indexes, KeptDraw,
+    Context, DrawDepth, DrawFrame, DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, Indexes, Mesh,
     PaintParameters, RenderStaticData, RenderTarget, SharedAttribute, SharedIndexes, SharedTexture, SharedVertices,
-    SingleDraw, Textures, TileDraws, TileMap, TileObjects, Uniforms, VertexAttributeArray, cast_matrix,
-    copied_vertices, projection_data, to_projection_ubo,
+    SingleDraw, Textures, TileDraws, TileMap, Uniforms, VertexAttributeArray, cast_matrix, copied_vertices,
+    projection_data, to_projection_ubo,
 };
 use mln_render::layer::{
     DemContents, DrawContext, EvaluateCx, EvaluatedLayer, Evaluation, LayerType, LayerValues, NoBucket, NoLayout,
@@ -66,20 +66,8 @@ struct DemTarget {
 /// What the layer keeps of a tile: the draw that shades the slopes of its
 /// contents, with the generation of the contents' geometry it took.
 pub struct HillshadeTile {
-    draw: KeptDraw,
+    mesh: Mesh,
     geometry_generation: u64,
-}
-
-impl TileObjects for HillshadeTile {
-    type Part = ();
-
-    fn objects(&mut self, (): ()) -> Option<DrawObjectsMut<'_>> {
-        self.draw.objects(())
-    }
-
-    fn drop_bindings(&mut self) {
-        self.draw.drop_bindings();
-    }
 }
 
 /// A tile's draw's entries in the layer's storage buffers.
@@ -237,10 +225,10 @@ impl LayerType for Hillshade {
     type Bucket = NoBucket;
     type View<'a> = &'a DemContents;
     type Tile = HillshadeTile;
-    type Drawing = TileDraws<HillshadeTile>;
+    type Drawing = TileDraws;
     type State = HillshadeState;
 
-    fn new_layer(_layer: &LayerValues<Hillshade>) -> (HillshadeState, TileDraws<HillshadeTile>) {
+    fn new_layer(_layer: &LayerValues<Hillshade>) -> (HillshadeState, TileDraws) {
         let state = HillshadeState {
             draw_list: DrawList::default(),
             maxzoom: constants::TERRAIN_RGB_MAXZOOM,
@@ -275,7 +263,7 @@ impl LayerType for Hillshade {
     /// none of, and writes the layer's buffers they read.
     fn make_draws(
         state: &mut HillshadeState,
-        drawing: &mut TileDraws<HillshadeTile>,
+        drawing: &mut TileDraws,
         tile_values: &mut TileMap<HillshadeTile>,
         gpu: &mut dyn Gpu,
         cx: &mut DrawContext<'_, '_, Hillshade>,
@@ -388,13 +376,16 @@ impl LayerType for Hillshade {
 
             let value = tile_values.get_mut(index);
             let cached = if let Some(cached) = value {
-                if cached.geometry_generation != geometry_generation {
-                    cached.draw.objects.replace_geometry(draw_geometry());
-                    cached.geometry_generation = geometry_generation;
+                let geometry = (cached.geometry_generation != geometry_generation).then(&mut draw_geometry);
+                cached.geometry_generation = geometry_generation;
+                if let Some(objects) = context.mesh_mut(&cached.mesh) {
+                    if let Some(geometry) = geometry {
+                        objects.replace_geometry(geometry);
+                    }
+                    // The DEM's render target is made again with its
+                    // generation.
+                    objects.set_texture(ID_HILLSHADE_IMAGE_TEXTURE, Some(render_target_texture));
                 }
-                // The DEM's render target is made again with its
-                // generation.
-                cached.draw.objects.set_texture(ID_HILLSHADE_IMAGE_TEXTURE, Some(render_target_texture));
                 cached
             } else {
                 let mut textures = Textures::default();
@@ -406,9 +397,9 @@ impl LayerType for Hillshade {
                     draw_geometry(),
                     textures,
                 );
-                value.insert(HillshadeTile { draw: KeptDraw::new(objects), geometry_generation })
+                value.insert(HillshadeTile { mesh: context.add_mesh(objects), geometry_generation })
             };
-            let draw = cached.draw.frame_draw(Some(tile_id));
+            let draw = FrameDraw::new(Some(tile_id), &cached.mesh);
             let Illumination { num_lights, .. } = *illumination.get_or_insert_with(|| {
                 HillshadeState::illumination(&mut state.illumination, &cx.layer.evaluated, frame)
             });
@@ -417,7 +408,7 @@ impl LayerType for Hillshade {
             state.draw_list.push(draw, uniforms);
         }
 
-        drawing.finish(&mut state.draw_list, tile_values, gpu, cx.context, |writer| {
+        drawing.finish(&mut state.draw_list, gpu, cx.context, |writer| {
             if let Some(Illumination { props, .. }) = &illumination {
                 writer.uniform(PROPS.id, props);
             }
@@ -428,11 +419,7 @@ impl LayerType for Hillshade {
     }
 
     /// Keeps the source's maximum zoom, which the DEMs' preparation reads.
-    fn update(
-        state: &mut HillshadeState,
-        _drawing: &mut TileDraws<HillshadeTile>,
-        cx: &mut UpdateContext<'_, '_, Hillshade>,
-    ) {
+    fn update(state: &mut HillshadeState, _drawing: &mut TileDraws, cx: &mut UpdateContext<'_, '_, Hillshade>) {
         if let Some(max_zoom) = cx.source_max_zoom() {
             state.maxzoom = max_zoom;
         }
@@ -444,21 +431,21 @@ impl LayerType for Hillshade {
 
     fn offscreen_pass<'a>(
         state: &'a mut HillshadeState,
-        _drawing: &'a mut TileDraws<HillshadeTile>,
-    ) -> Option<&'a mut dyn OffscreenPass<HillshadeTile>> {
+        _drawing: &'a mut TileDraws,
+    ) -> Option<&'a mut dyn OffscreenPass> {
         Some(state)
     }
 }
 
 /// The draws that prepare the DEMs' render targets.
-impl OffscreenPass<HillshadeTile> for HillshadeState {
-    fn upload(&mut self, _tiles: &mut TileMap<HillshadeTile>, gpu: &mut dyn Gpu, context: &mut Context) {
+impl OffscreenPass for HillshadeState {
+    fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         for target in self.render_targets.values_mut() {
             target.prepare.upload(gpu, context);
         }
     }
 
-    fn render(&mut self, _tiles: &mut TileMap<HillshadeTile>, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         for DemTarget { render_target, prepare, .. } in self.render_targets.values_mut() {
             let Some(mut passes) = render_target.begin(gpu, parameters) else {
                 continue;
@@ -522,7 +509,8 @@ impl DemTarget {
         textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(dem.clone());
         let objects =
             DrawObjects::new(shader.clone(), ColorMode::unblended(), CullFaceMode::disabled(), geometry, textures);
-        let mut prepare = SingleDraw::new(objects, FrameDraw::new(None, SimpleIdentity::new()));
+        let depth = DrawDepth::Layer { sub_layer: 0, mask: DepthMaskType::ReadOnly };
+        let mut prepare = SingleDraw::new(context.add_mesh(objects), depth);
         let extent = f64::from(EXTENT);
         let m =
             orthographic(0.0, extent, -extent, 0.0, -1.0, 1.0) * DMat4::from_translation(DVec3::new(0.0, -extent, 0.0));

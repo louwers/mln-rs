@@ -1,6 +1,7 @@
 //! What the renderer keeps over its backend's `Gpu`: its caps, the caches
 //! its draws share, among them the keys of the programs' variants, the
-//! stores of the textures, indexes and vertices they share, the buffers
+//! stores of the textures, indexes and vertices they share and of the draws'
+//! GPU objects (meshes), the buffers
 //! every draw binds, and the device that makes its
 //! buffers and textures, with the rendering stats and the queue of what it
 //! dropped. The renderer owns it, and lends it
@@ -25,21 +26,22 @@ use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
+use crate::draw_objects::{DrawObjects, Mesh};
 use crate::gfx::buffer::{self, Buffer};
 use crate::gfx::indexes::{Indexes, SharedIndexes};
 use crate::gfx::owned::{Held, Owned};
 use crate::gfx::release::{Release, destroy_order};
 use crate::gfx::resources::{Device, SharedGpuTexture};
-use crate::gfx::store::{IndexesKey, SharedTexture, Store, StoreKey, TextureKey};
+use crate::gfx::store::{IndexesKey, MeshKey, SharedTexture, Store, StoreKey, TextureKey};
 use crate::gfx::texture2d::{Texture2D, TextureMut};
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::vertex_attribute::Uniforms;
 use crate::gfx::vertices::{SharedVertices, TypedVertices, VertexStore, Vertices};
 
 /// The renderer's GPU state over its backend's `Gpu`: the device's caps,
-/// the keys of the programs' shaders, the color modes, and the stores of
-/// the textures, indexes and vertices that draws share. The renderer owns
-/// it and lends it to the frame's hooks.
+/// the keys of the programs' shaders, the color modes, the stores of the
+/// textures, indexes and vertices that draws share, and that of the draws'
+/// GPU objects. The renderer owns it and lends it to the frame's hooks.
 pub struct Context {
     device: Device,
     caps: Caps,
@@ -65,6 +67,12 @@ pub struct Context {
     indexes: Store<IndexesKey, Indexes>,
     /// The vertices that draws share, which they hold as [`SharedVertices`].
     vertices: VertexStore,
+    /// The draws' GPU objects, which their makers hold as [`Mesh`]es. Boxed,
+    /// so that a draw takes its objects out of the store cheaply while it
+    /// uploads and draws them with the context.
+    meshes: Store<MeshKey, Box<DrawObjects>>,
+    /// The `seq` of the next mesh.
+    next_mesh_seq: u64,
     /// What a [`destroy_released`](Self::destroy_released) takes from the
     /// queue, and what it destroys, kept for their storage.
     releases: Vec<Release>,
@@ -92,6 +100,8 @@ impl Context {
             textures: Store::default(),
             indexes: Store::default(),
             vertices: VertexStore::default(),
+            meshes: Store::default(),
+            next_mesh_seq: 0,
             releases: Vec::new(),
             doomed: Vec::new(),
             torn_down: false,
@@ -151,7 +161,7 @@ impl Context {
     /// dropped keeps its GPU memory until then. Not while a pass is open on
     /// `gpu`.
     pub(crate) fn destroy_released(&mut self, gpu: &mut dyn Gpu) {
-        let Context { device, textures, indexes, vertices, releases, doomed, .. } = self;
+        let Context { device, textures, indexes, vertices, meshes, releases, doomed, .. } = self;
         loop {
             device.queue.take_into(releases);
             if releases.is_empty() {
@@ -163,6 +173,9 @@ impl Context {
                     Release::Entry(StoreKey::Texture(key)) => drop(textures.remove(key)),
                     Release::Entry(StoreKey::Indexes(key)) => drop(indexes.remove(key)),
                     Release::Entry(StoreKey::Vertices(key)) => drop(vertices.remove(key)),
+                    // What the objects hold goes to the queue as they drop,
+                    // and goes in this batch.
+                    Release::Entry(StoreKey::Mesh(key)) => drop(meshes.remove(key)),
                     Release::Buffer(id, usage, allocated) => {
                         buffer::count(&mut device.stats, usage, allocated, -1);
                         doomed.push(id.into());
@@ -185,6 +198,48 @@ impl Context {
                 debug_assert!(false, "destroying {resource:?} failed: {error}");
             }
         }
+    }
+
+    /// Keeps `objects`, the GPU objects of a draw, while the returned mesh
+    /// lasts, made after every mesh the context made before it
+    /// ([`Mesh::seq`]).
+    pub fn add_mesh(&mut self, objects: DrawObjects) -> Mesh {
+        let seq = self.next_mesh_seq;
+        self.next_mesh_seq += 1;
+        Mesh::new(self.meshes.add(Box::new(objects), &self.device.queue), seq)
+    }
+
+    /// The GPU objects of `mesh`.
+    #[must_use]
+    pub fn mesh(&self, mesh: &Mesh) -> Option<&DrawObjects> {
+        self.meshes.get(mesh.handle()).map(|objects| &**objects)
+    }
+
+    /// The GPU objects of `mesh`, to change.
+    pub fn mesh_mut(&mut self, mesh: &Mesh) -> Option<&mut DrawObjects> {
+        self.meshes.get_mut(mesh.handle()).map(|objects| &mut **objects)
+    }
+
+    /// Writes `value` to the uniform buffer `id` of `mesh`'s own, which its
+    /// draws bind over their frame's.
+    pub fn write_mesh_uniform<T: bytemuck::Pod>(&mut self, gpu: &mut dyn Gpu, mesh: &Mesh, id: usize, value: &T) {
+        let Context { device, meshes, .. } = self;
+        if let Some(objects) = meshes.get_mut(mesh.handle()) {
+            objects.write_pod(gpu, id, value, device);
+        }
+    }
+
+    /// Takes the GPU objects of the mesh `key` out of the store, for a draw
+    /// to upload or draw them with the context, until
+    /// [`restore_mesh`](Self::restore_mesh) puts them back. `None` for a
+    /// mesh that went.
+    pub(crate) fn take_mesh(&mut self, key: MeshKey) -> Option<Box<DrawObjects>> {
+        self.meshes.take(key)
+    }
+
+    /// Puts back the GPU objects that [`take_mesh`](Self::take_mesh) took.
+    pub(crate) fn restore_mesh(&mut self, key: MeshKey, objects: Box<DrawObjects>) {
+        self.meshes.restore(key, objects);
     }
 
     /// Keeps `indexes` for the draws that share them, while a clone of the
@@ -516,6 +571,8 @@ impl Context {
     pub(crate) fn tear_down(&mut self, gpu: &mut dyn Gpu) {
         self.global_uniform_buffers = UniformBufferArray::new();
         self.default_vertex_buffers.clear();
+        // The meshes first, which hold entries of the other stores.
+        self.meshes.clear();
         self.textures.clear();
         self.indexes.clear();
         self.vertices.clear();

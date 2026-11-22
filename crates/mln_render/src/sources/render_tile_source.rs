@@ -21,7 +21,7 @@ use mln_util::constants::{EXTENT, TILE_SIZE};
 use mln_util::hash::{HashMap, HashSet};
 use mln_vec_map::VecMap;
 
-use crate::draw_objects::{DrawGeometry, DrawObjects, Textures};
+use crate::draw_objects::{DrawGeometry, DrawObjects, Mesh, Textures};
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::erased_source::ErasedOrigin;
 use crate::gfx::context::Context;
@@ -30,7 +30,7 @@ use crate::gfx::store::SharedIndexes;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::globe::{subdivide_ring, surface_granularity};
-use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, LayerDraws};
+use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, FrameDraws};
 use crate::paint_parameters::PaintParameters;
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters, TileOrder};
 use crate::render_tile::RenderTile;
@@ -123,7 +123,9 @@ struct DebugDraw {
     tile: OverscaledTileID,
     /// The lines of text the segments spell, of a text overlay.
     text: Option<Vec<String>>,
-    draw: KeptDraw,
+    /// The shader the mesh draws with.
+    shader: ShaderKey,
+    mesh: Mesh,
 }
 
 /// The kinds of debug overlays.
@@ -154,10 +156,9 @@ pub(crate) struct DebugLayer {
     /// they draw in.
     draws: Vec<DebugDraw>,
     /// The frame's draws as `update_draws` makes them.
-    draw_list: DrawList<ProjectionUBO, usize>,
-    /// The frame's draws of the overlay, each of the overlay's draw at its
-    /// index, with the buffers they read.
-    frame: LayerDraws<usize>,
+    draw_list: DrawList<ProjectionUBO>,
+    /// The frame's draws of the overlay, with the buffers they read.
+    frame: FrameDraws,
 }
 
 impl DebugLayer {
@@ -168,24 +169,19 @@ impl DebugLayer {
             quad: None,
             draws: Vec::new(),
             draw_list: DrawList::default(),
-            frame: LayerDraws::default(),
+            frame: FrameDraws::default(),
         }
     }
 
-    /// The GPU objects of the overlay's draw at `index`.
-    fn objects<'a>(draws: &'a mut [DebugDraw], _: &FrameDraw, index: usize) -> Option<DrawObjectsMut<'a>> {
-        Some((&mut draws.get_mut(index)?.draw.objects).into())
-    }
-
-    /// Uploads the GPU objects of the frame's draws.
+    /// Uploads the meshes of the frame's draws.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
-        self.frame.upload(gpu, &mut self.draws[..], Self::objects, context);
+        self.frame.upload(gpu, context);
     }
 
     /// Draws the frame's draws of the pass into the open pass of `gpu`, the
     /// context's.
     pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        self.frame.render(&mut self.draws[..], Self::objects, gpu, parameters);
+        self.frame.render(gpu, parameters);
     }
 
     /// Keeps the draws for which `keep` returns true.
@@ -215,32 +211,28 @@ impl DebugLayer {
         let Some(objects) = segment_objects(context, shader, quad, segments) else {
             return false;
         };
-        let draw = KeptDraw::new(objects);
-        self.draws.push(DebugDraw { source: Rc::clone(source), tile: tile_id, text, draw });
+        let mesh = context.add_mesh(objects);
+        self.draws.push(DebugDraw { source: Rc::clone(source), tile: tile_id, text, shader: shader.clone(), mesh });
         true
     }
 
     /// Makes the frame's draws of the overlay, and writes the buffers they
     /// read.
     pub(crate) fn update_draws(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        for (index, draw) in self.draws.iter().enumerate() {
+        for draw in &self.draws {
             let projection = parameters.frame.projection_data_for_tile(&draw.tile.to_unwrapped(), false);
-            let frame_draw = FrameDraw { depth: DrawDepth::Off, ..draw.draw.frame_draw(None) };
-            self.draw_list.push_part(frame_draw, index, to_projection_ubo(&projection));
+            let mut frame_draw = FrameDraw::new(None, &draw.mesh);
+            frame_draw.depth = DrawDepth::Off;
+            self.draw_list.push(frame_draw, to_projection_ubo(&projection));
         }
 
         let (color, width) = self.style;
         let world_width = (TILE_SIZE * parameters.frame.view.zoom().exp2()) as f32;
         let properties = TileDebugPropsUBO { color: color.to_float_array(), width, world_width, pad: [0.0; 2] };
-        let replaced = self.draw_list.finish(&mut self.frame, gpu, parameters.context, |writer| {
+        self.draw_list.finish(&mut self.frame, gpu, parameters.context, |writer| {
             writer.uniform(TILE_DEBUG_PROPS.id, &properties);
             writer.storage(PROJECTION_BUFFER.id, |projection| *projection);
         });
-        if replaced {
-            for draw in &mut self.draws {
-                draw.draw.objects.drop_bindings();
-            }
-        }
     }
 }
 
@@ -410,7 +402,7 @@ impl RenderSource for RenderTileSource {
             let Some(tile) = new_tiles.get(&draw.tile) else {
                 return false;
             };
-            let same_shader = *draw.draw.objects.shader() == shader;
+            let same_shader = draw.shader == shader;
             let same_text = match (&draw.text, &tile.debug_bucket) {
                 (Some(text), Some(debug_bucket)) => *text == debug_bucket.text,
                 _ => true,

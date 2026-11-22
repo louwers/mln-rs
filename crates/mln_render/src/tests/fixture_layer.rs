@@ -37,7 +37,7 @@ use crate::layer::{
     FeatureIndexBuilder, FeatureStates, GeometryUpload, GeometryVec, LayerBucket, LayerType, LayerValues, Layout,
     LayoutParameters, NoBucket, NoLayout, NoTileView, RasterView, Resolved, SourceLayer, layers_by_id,
 };
-use crate::layer_drawing::{KeptDraw, TileDraws};
+use crate::layer_drawing::TileDraws;
 use crate::placement::{CollisionGroups, Placed, PlacementContext, PlacementPass, PlacementQuery, Prepared};
 use crate::tile_values::{ChangedBuckets, TileMap};
 
@@ -220,8 +220,8 @@ impl LayerType for Dot {
     type Layout = DotLayout;
     type Bucket = DotBucket;
     type View<'a> = LayerBucket<'a, Dot>;
-    type Tile = KeptDraw;
-    type Drawing = TileDraws<KeptDraw>;
+    type Tile = ();
+    type Drawing = TileDraws;
     type State = ();
 
     fn layout_can_need_dependencies(group: &[Arc<EvaluatedLayer<Dot>>]) -> bool {
@@ -285,7 +285,7 @@ impl LayerType for Dot {
         }))
     }
 
-    fn new_layer(_layer: &LayerValues<Dot>) -> ((), TileDraws<KeptDraw>) {
+    fn new_layer(_layer: &LayerValues<Dot>) -> ((), TileDraws) {
         Default::default()
     }
 
@@ -295,8 +295,8 @@ impl LayerType for Dot {
 
     fn make_draws(
         _state: &mut (),
-        _drawing: &mut TileDraws<KeptDraw>,
-        _tile_values: &mut TileMap<KeptDraw>,
+        _drawing: &mut TileDraws,
+        _tile_values: &mut TileMap<()>,
         _gpu: &mut dyn mln_gfx::gpu::Gpu,
         _cx: &mut DrawContext<'_, '_, Dot>,
     ) {
@@ -336,11 +336,11 @@ impl LayerType for Tint {
     type Layout = NoLayout;
     type Bucket = NoBucket;
     type View<'a> = RasterView<'a>;
-    type Tile = KeptDraw;
-    type Drawing = TileDraws<KeptDraw>;
+    type Tile = ();
+    type Drawing = TileDraws;
     type State = ();
 
-    fn new_layer(_layer: &LayerValues<Tint>) -> ((), TileDraws<KeptDraw>) {
+    fn new_layer(_layer: &LayerValues<Tint>) -> ((), TileDraws) {
         Default::default()
     }
 
@@ -350,8 +350,8 @@ impl LayerType for Tint {
 
     fn make_draws(
         _state: &mut (),
-        _drawing: &mut TileDraws<KeptDraw>,
-        _tile_values: &mut TileMap<KeptDraw>,
+        _drawing: &mut TileDraws,
+        _tile_values: &mut TileMap<()>,
         _gpu: &mut dyn mln_gfx::gpu::Gpu,
         _cx: &mut DrawContext<'_, '_, Tint>,
     ) {
@@ -380,11 +380,11 @@ impl LayerType for Shade {
     type Layout = NoLayout;
     type Bucket = NoBucket;
     type View<'a> = &'a DemContents;
-    type Tile = KeptDraw;
-    type Drawing = TileDraws<KeptDraw>;
+    type Tile = ();
+    type Drawing = TileDraws;
     type State = ();
 
-    fn new_layer(_layer: &LayerValues<Shade>) -> ((), TileDraws<KeptDraw>) {
+    fn new_layer(_layer: &LayerValues<Shade>) -> ((), TileDraws) {
         Default::default()
     }
 
@@ -394,8 +394,8 @@ impl LayerType for Shade {
 
     fn make_draws(
         _state: &mut (),
-        _drawing: &mut TileDraws<KeptDraw>,
-        _tile_values: &mut TileMap<KeptDraw>,
+        _drawing: &mut TileDraws,
+        _tile_values: &mut TileMap<()>,
         _gpu: &mut dyn mln_gfx::gpu::Gpu,
         _cx: &mut DrawContext<'_, '_, Shade>,
     ) {
@@ -423,13 +423,13 @@ impl<const OTHER: bool> LayerType for Mark<OTHER> {
     type Layout = NoLayout;
     type Bucket = NoBucket;
     type View<'a> = NoTileView;
-    type Tile = KeptDraw;
-    type Drawing = TileDraws<KeptDraw>;
+    type Tile = ();
+    type Drawing = TileDraws;
     type State = ();
 
     const PLACEMENT: Option<crate::placement::NewPlacement<Self>> = Some(|| Box::new(MarkPass::default()));
 
-    fn new_layer(_layer: &LayerValues<Self>) -> ((), TileDraws<KeptDraw>) {
+    fn new_layer(_layer: &LayerValues<Self>) -> ((), TileDraws) {
         Default::default()
     }
 
@@ -439,8 +439,8 @@ impl<const OTHER: bool> LayerType for Mark<OTHER> {
 
     fn make_draws(
         _state: &mut (),
-        _drawing: &mut TileDraws<KeptDraw>,
-        _tile_values: &mut TileMap<KeptDraw>,
+        _drawing: &mut TileDraws,
+        _tile_values: &mut TileMap<()>,
         _gpu: &mut dyn mln_gfx::gpu::Gpu,
         _cx: &mut DrawContext<'_, '_, Self>,
     ) {

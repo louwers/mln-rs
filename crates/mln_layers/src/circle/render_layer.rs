@@ -8,7 +8,7 @@ use mln_gfx::shaders::program::PROJECTION_BUFFER;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::TileProjector;
 use mln_render::draw::{
-    DrawFrame, DrawGeometry, DrawList, DrawObjects, KeptDraw, SharedAttribute, Textures, TileDraws, TileMap,
+    DrawFrame, DrawGeometry, DrawList, DrawObjects, FrameDraw, Mesh, SharedAttribute, Textures, TileDraws, TileMap,
     UniformWriter, Uniforms, VertexAttributeArray, bucket_indexes, bucket_vertices, cast_matrix, globe_extrude_scale,
     paint_vertices, projection_data, tile_unit_translation, to_projection_ubo,
 };
@@ -140,8 +140,8 @@ impl LayerType for Circle {
     type Layout = CircleLayout;
     type Bucket = CircleBucket;
     type View<'a> = LayerBucket<'a, Circle>;
-    type Tile = KeptDraw;
-    type Drawing = TileDraws<KeptDraw>;
+    type Tile = Mesh;
+    type Drawing = TileDraws;
     type State = CircleState;
 
     fn create_layout(
@@ -156,7 +156,7 @@ impl LayerType for Circle {
         Some(&Circle)
     }
 
-    fn new_layer(_layer: &LayerValues<Circle>) -> (CircleState, TileDraws<KeptDraw>) {
+    fn new_layer(_layer: &LayerValues<Circle>) -> (CircleState, TileDraws) {
         Default::default()
     }
 
@@ -179,8 +179,8 @@ impl LayerType for Circle {
     /// they read.
     fn make_draws(
         state: &mut CircleState,
-        drawing: &mut TileDraws<KeptDraw>,
-        tile_values: &mut TileMap<KeptDraw>,
+        drawing: &mut TileDraws,
+        tile_values: &mut TileMap<Mesh>,
         gpu: &mut dyn Gpu,
         cx: &mut DrawContext<'_, '_, Circle>,
     ) {
@@ -213,9 +213,9 @@ impl LayerType for Circle {
             let changes = tile_values.take_changes(index);
             let value = tile_values.get_mut(index);
             let context = &mut *cx.context;
-            if let Some(cached) = value.as_mut() {
-                refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
-                    binders.bind(evaluated, paint(context).as_ref(), attrs, &mut Uniforms::default());
+            if let Some(mesh) = value.as_ref() {
+                refresh_paint_attributes(context, mesh, changes, paint, |attrs, paint| {
+                    binders.bind(evaluated, paint, attrs, &mut Uniforms::default());
                 });
             } else if !bucket.vertices.is_empty()
                 && let (Some(vertices), Some(indexes)) =
@@ -248,16 +248,16 @@ impl LayerType for Circle {
                     },
                     Textures::default(),
                 );
-                *value = Some(KeptDraw::new(objects));
+                *value = Some(context.add_mesh(objects));
             }
 
-            let Some(draw) = value.as_ref().map(|cached| cached.frame_draw(Some(tile_id))) else {
+            let Some(draw) = value.as_ref().map(|mesh| FrameDraw::new(Some(tile_id), mesh)) else {
                 continue;
             };
             state.draw_list.push(draw, uniforms(layer, &tile_id, binders, frame));
         }
 
-        drawing.finish(&mut state.draw_list, tile_values, gpu, cx.context, |writer| {
+        drawing.finish(&mut state.draw_list, gpu, cx.context, |writer| {
             write_uniforms(layer, writer);
         });
     }

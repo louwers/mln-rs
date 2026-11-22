@@ -73,7 +73,7 @@ impl CustomDrawing {
     }
 }
 
-impl LayerDrawing<()> for CustomDrawing {
+impl LayerDrawing for CustomDrawing {
     fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
         if self.updated {
             visit(DrawGroup::Own);
@@ -89,15 +89,9 @@ impl LayerDrawing<()> for CustomDrawing {
 
     fn clear_frame(&mut self) {}
 
-    fn upload(&mut self, _tiles: &mut TileMap<()>, _gpu: &mut dyn Gpu, _context: &mut Context) {}
+    fn upload(&mut self, _gpu: &mut dyn Gpu, _context: &mut Context) {}
 
-    fn render(
-        &mut self,
-        _tiles: &mut TileMap<()>,
-        gpu: &mut dyn Gpu,
-        parameters: &mut PaintParameters<'_>,
-        order: DrawOrder,
-    ) {
+    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
         if self.updated {
             self.lend_pass(gpu, parameters);
             order.step(parameters);
@@ -134,7 +128,7 @@ impl LayerType for Custom {
     ) {
     }
 
-    fn offscreen_pass<'a>(_state: &'a mut (), drawing: &'a mut CustomDrawing) -> Option<&'a mut dyn OffscreenPass<()>> {
+    fn offscreen_pass<'a>(_state: &'a mut (), drawing: &'a mut CustomDrawing) -> Option<&'a mut dyn OffscreenPass> {
         Some(drawing)
     }
 
@@ -144,8 +138,8 @@ impl LayerType for Custom {
 }
 
 /// The host's prerender, with the frame's projection.
-impl OffscreenPass<()> for CustomDrawing {
-    fn render(&mut self, _tiles: &mut TileMap<()>, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+impl OffscreenPass for CustomDrawing {
+    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         let Some(projection) = parameters.frame_projection() else {
             return;
         };

@@ -17,9 +17,9 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_render::draw::{
-    DrawGeometry, DrawIndexes, DrawList, DrawObjects, DrawObjectsMut, Indexes, KeptDraw, RenderStaticData,
-    SharedAttribute, SharedIndexes, SharedTexture, SharedVertices, Textures, TileDraws, TileMap, TileObjects, Uniforms,
-    VertexAttributeArray, cast_matrix, copied_vertices, to_projection_ubo,
+    DrawGeometry, DrawIndexes, DrawList, DrawObjects, FrameDraw, Indexes, Mesh, RenderStaticData, SharedAttribute,
+    SharedIndexes, SharedTexture, SharedVertices, Textures, TileDraws, TileMap, Uniforms, VertexAttributeArray,
+    cast_matrix, copied_vertices, to_projection_ubo,
 };
 use mln_render::layer::{
     DemContents, DrawContext, EvaluateCx, Evaluation, LayerType, LayerValues, NoBucket, NoLayout, RasterLayoutVertex,
@@ -50,21 +50,9 @@ use crate::mesh::GlobeTileMeshCache;
 /// with the generation of the contents' geometry and the DEM's properties it
 /// was built with.
 pub struct ReliefTile {
-    draw: KeptDraw,
+    mesh: Mesh,
     geometry_generation: u64,
     tile_props: ColorReliefTilePropsUBO,
-}
-
-impl TileObjects for ReliefTile {
-    type Part = ();
-
-    fn objects(&mut self, (): ()) -> Option<DrawObjectsMut<'_>> {
-        self.draw.objects(())
-    }
-
-    fn drop_bindings(&mut self) {
-        self.draw.drop_bindings();
-    }
 }
 
 /// A draw's entries in the layer's storage buffers.
@@ -262,10 +250,10 @@ impl LayerType for ColorRelief {
     type Bucket = NoBucket;
     type View<'a> = &'a DemContents;
     type Tile = ReliefTile;
-    type Drawing = TileDraws<ReliefTile>;
+    type Drawing = TileDraws;
     type State = ReliefState;
 
-    fn new_layer(layer: &LayerValues<ColorRelief>) -> (ReliefState, TileDraws<ReliefTile>) {
+    fn new_layer(layer: &LayerValues<ColorRelief>) -> (ReliefState, TileDraws) {
         (ReliefState::new(layer), TileDraws::default())
     }
 
@@ -311,7 +299,7 @@ impl LayerType for ColorRelief {
     /// buffers they read.
     fn make_draws(
         state: &mut ReliefState,
-        drawing: &mut TileDraws<ReliefTile>,
+        drawing: &mut TileDraws,
         tile_values: &mut TileMap<ReliefTile>,
         gpu: &mut dyn Gpu,
         cx: &mut DrawContext<'_, '_, ColorRelief>,
@@ -445,8 +433,10 @@ impl LayerType for ColorRelief {
                 if let Some(cached) = value.as_mut() {
                     // The DEM and the ramps' textures change with the
                     // DEM's generation and the ramps.
-                    for (id, texture) in textures {
-                        cached.draw.objects.set_texture(id, Some(texture));
+                    if let Some(objects) = context.mesh_mut(&cached.mesh) {
+                        for (id, texture) in textures {
+                            objects.set_texture(id, Some(texture));
+                        }
                     }
                 } else {
                     // The tile's geometry: the globe's mesh of its mask, the
@@ -499,7 +489,7 @@ impl LayerType for ColorRelief {
                         geometry,
                         draw_textures,
                     );
-                    let cached = ReliefTile { draw: KeptDraw::new(objects), geometry_generation, tile_props };
+                    let cached = ReliefTile { mesh: context.add_mesh(objects), geometry_generation, tile_props };
                     *value = Some(cached);
                 }
             } else {
@@ -516,12 +506,11 @@ impl LayerType for ColorRelief {
                 tile_props: cached.tile_props,
                 projection: to_projection_ubo(&projection),
             };
-            let draw = cached.draw.frame_draw(Some(tile_id));
-            draw_list.push(draw, uniforms);
+            draw_list.push(FrameDraw::new(Some(tile_id), &cached.mesh), uniforms);
         }
 
         let opacity = *values.evaluated.paint.color_relief_opacity.uniform();
-        drawing.finish(draw_list, tile_values, gpu, cx.context, |writer| {
+        drawing.finish(draw_list, gpu, cx.context, |writer| {
             let props = ColorReliefEvaluatedPropsUBO { opacity, pad_eval0: 0.0, pad_eval1: 0.0, pad_eval2: 0.0 };
             writer.uniform(PROPS.id, &props);
             writer.storage(DRAWABLE.id, |uniforms| uniforms.draw_ubo);

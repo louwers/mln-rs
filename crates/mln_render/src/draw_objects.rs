@@ -1,10 +1,12 @@
 //! The GPU objects of a draw, which the renderer keeps between frames and
 //! makes again only when what they are made of changes.
 //!
-//! A draw owns what is its own, its own indexes and attribute data, and
-//! holds what it shares with other draws, its textures and the indexes and
-//! vertices of buckets and static geometry, through handles of the context's
-//! stores (`gfx::store`), which keep them while the draw lasts.
+//! The context keeps each draw's objects in its store of meshes, which their
+//! maker holds through a [`Mesh`] handle and a frame's draws name. A draw
+//! owns what is its own, its own indexes and attribute data, and holds what
+//! it shares with other draws, its textures and the indexes and vertices of
+//! buckets and static geometry, through handles of the context's stores
+//! (`gfx::store`), which keep them while the draw lasts.
 //!
 //! A shader reads vertices as attributes, or, where the device binds vertex
 //! buffers (`Caps::binds_vertex_buffers`), as a storage buffer that it
@@ -24,10 +26,12 @@ use mln_gfx::shaders::program::{Attribute, Program};
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_util::logging::{Event, Log};
 
+use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::owned::{Held, Owned};
-use crate::gfx::store::SharedTexture;
+use crate::gfx::resources::Device;
+use crate::gfx::store::{MeshKey, Shared, SharedTexture};
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::upload::{self, AttributeBindingArray};
 use crate::gfx::vertex_attribute::VertexAttributeArray;
@@ -36,6 +40,43 @@ use crate::paint_parameters::{Depth, DrawTarget, PaintParameters, Stencil};
 
 /// The textures a draw binds, by texture id.
 pub type Textures = [Option<SharedTexture>; MAX_TEXTURES];
+
+/// A handle of a draw's GPU objects in the context's store of meshes
+/// ([`Context::add_mesh`]). The objects stay while the handle does, and go
+/// once it drops and the GPU is done with them. Draws of the frame name the
+/// objects they draw by their mesh ([`FrameDraw::new`](crate::draw::FrameDraw::new)).
+pub struct Mesh {
+    handle: Shared<MeshKey>,
+    seq: u64,
+}
+
+impl Mesh {
+    pub(crate) fn new(handle: Shared<MeshKey>, seq: u64) -> Mesh {
+        Mesh { handle, seq }
+    }
+
+    /// When the mesh was made among its context's meshes: a mesh made later
+    /// has a greater one. A layer's draws of equal priority draw in this
+    /// order.
+    #[must_use]
+    pub fn seq(&self) -> u64 {
+        self.seq
+    }
+
+    pub(crate) fn handle(&self) -> &Shared<MeshKey> {
+        &self.handle
+    }
+
+    pub(crate) fn key(&self) -> MeshKey {
+        self.handle.key()
+    }
+}
+
+impl std::fmt::Debug for Mesh {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Mesh").field("key", &self.handle.key()).field("seq", &self.seq).finish()
+    }
+}
 
 /// The most vertex buffers a draw binds, WebGPU's default limit.
 const MAX_VERTEX_BUFFERS: usize = 8;
@@ -149,6 +190,8 @@ pub struct DrawObjects {
     instance_attributes_changed: bool,
     /// The textures it binds, by texture id.
     textures: Textures,
+    /// What gives it the textures of its tile's atlases before each draw.
+    atlases: Option<AtlasBinding>,
     /// The draw's own uniform and storage buffers, by id, which win over
     /// its layer's and the frame's.
     uniform_buffers: UniformBufferArray,
@@ -204,6 +247,7 @@ impl DrawObjects {
             vertex_attributes_changed: true,
             instance_attributes_changed: true,
             textures,
+            atlases: None,
             uniform_buffers: UniformBufferArray::new(),
             storage_vertices: Vec::new(),
             storage_epoch: 0,
@@ -221,6 +265,23 @@ impl DrawObjects {
             pipeline_layouts: Vec::new(),
             bindings: None,
             geometry: None,
+        }
+    }
+
+    /// The objects, which take the textures of their tile's atlases from
+    /// `atlases` before each draw.
+    #[must_use]
+    pub fn with_atlases(mut self, atlases: AtlasBinding) -> Self {
+        self.atlases = Some(atlases);
+        self
+    }
+
+    /// Gives the draw the textures of its tile's atlases, as its
+    /// [`AtlasBinding`] says, before it draws.
+    pub(crate) fn bind_atlases(&mut self, parameters: &mut PaintParameters<'_>) {
+        let DrawObjects { atlases, shader, textures, .. } = self;
+        if let Some(atlases) = atlases {
+            atlases.bind(shader, textures, parameters);
         }
     }
 
@@ -574,10 +635,11 @@ impl DrawObjects {
         self.instance_attributes.is_some()
     }
 
-    /// Replaces the vertex attributes with a copy of those of `other`
-    /// ([`copy_shared_attributes`]), which the next upload binds.
-    pub fn share_vertex_attributes(&mut self, other: &DrawObjects) {
-        *self.vertex_attributes_mut() = copy_shared_attributes(&other.vertex_attributes);
+    /// The vertex attributes. A copy of them ([`copy_shared_attributes`])
+    /// makes another draw read the same vertices.
+    #[must_use]
+    pub fn vertex_attributes(&self) -> &VertexAttributeArray {
+        &self.vertex_attributes
     }
 
     /// The texture it binds as `id`.
@@ -603,24 +665,12 @@ impl DrawObjects {
         self.segments = segments;
     }
 
-    /// Drops the bindings, for an owner that replaces a buffer they bind.
-    // Not inlined: every layer type's loop over its draws calls it.
-    #[inline(never)]
-    pub fn drop_bindings(&mut self) {
-        self.bindings = None;
-    }
-
     /// Writes `value` to the draw's own uniform buffer `id`, which the draw
     /// binds again where the write replaced the buffer.
-    pub fn write_pod<T: bytemuck::Pod>(&mut self, gpu: &mut dyn Gpu, id: usize, value: &T, context: &mut Context) {
-        if self.uniform_buffers.write_pod(gpu, id, value, context.device()) {
-            self.drop_bindings();
+    pub(crate) fn write_pod<T: bytemuck::Pod>(&mut self, gpu: &mut dyn Gpu, id: usize, value: &T, device: &mut Device) {
+        if self.uniform_buffers.write_pod(gpu, id, value, device) {
+            self.bindings = None;
         }
-    }
-
-    #[must_use]
-    pub(crate) fn shader(&self) -> &ShaderKey {
-        &self.shader
     }
 }
 

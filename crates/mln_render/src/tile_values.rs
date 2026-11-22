@@ -227,11 +227,6 @@ impl TileSet {
                 .all(|(&slot, id)| self.ids.get(slot) == Some(id) && !std::mem::replace(&mut taken[slot], true))
     }
 
-    /// The slot of `tile_id`, if it is one of the set's.
-    fn slot_of(&self, tile_id: &OverscaledTileID) -> Option<usize> {
-        self.ids.binary_search(tile_id).ok()
-    }
-
     fn clear(&mut self) {
         self.ids.clear();
         self.states.clear();
@@ -381,18 +376,6 @@ impl<V> TileMap<V> {
     pub fn clear(&mut self) {
         self.values.fill_with(|| None);
     }
-
-    /// The tiles' values, in no particular order.
-    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
-        self.values.iter_mut().flatten()
-    }
-
-    /// The value of the tile `tile_id`, if it is one of those the layer
-    /// draws and has a value: how a frame's draw, which names its tile,
-    /// finds its GPU objects.
-    pub fn find_mut(&mut self, tile_id: &OverscaledTileID) -> Option<&mut V> {
-        self.values.get_mut(self.set.slot_of(tile_id)?)?.as_mut()
-    }
 }
 
 #[cfg(test)]
@@ -415,7 +398,8 @@ mod tests {
 
     /// The value of `tile_id` in `tiles`.
     fn get<V: Copy>(tiles: &mut TileMap<V>, tile_id: &OverscaledTileID) -> Option<V> {
-        tiles.find_mut(tile_id).copied()
+        let index = index_of(tiles, tile_id)?;
+        *tiles.get_mut(index)
     }
 
     /// Records that `tile_id` shows a layer `bucket`.

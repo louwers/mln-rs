@@ -147,7 +147,7 @@ pub trait LayerType: StyleLayerType {
     type View<'a>: TileView<'a>;
 
     /// What a layer of the type keeps of a tile it draws, such as the GPU
-    /// objects of the tile's draws. The engine keeps one for each of the
+    /// meshes of the tile's draws. The engine keeps one for each of the
     /// frame's tiles of the layer, from when the layer makes it
     /// ([`make_draws`](Self::make_draws)): it moves the value with its tile
     /// when the frame's tiles change or the map wraps, drops it when its
@@ -159,9 +159,9 @@ pub trait LayerType: StyleLayerType {
     type Tile: 'static;
 
     /// What a layer of the type keeps of its draws besides its tiles'
-    /// values: GPU objects and its draw groups of the frame, which the
-    /// engine uploads and draws.
-    type Drawing: LayerDrawing<Self::Tile>;
+    /// values: meshes and its draw groups of the frame, whose draws' meshes
+    /// the engine uploads and draws.
+    type Drawing: LayerDrawing;
 
     /// What else a layer of the type keeps from frame to frame, such as a
     /// color ramp or the textures of its tiles.
@@ -254,7 +254,7 @@ pub trait LayerType: StyleLayerType {
     fn offscreen_pass<'a>(
         _state: &'a mut Self::State,
         _drawing: &'a mut Self::Drawing,
-    ) -> Option<&'a mut dyn OffscreenPass<Self::Tile>> {
+    ) -> Option<&'a mut dyn OffscreenPass> {
         None
     }
 
@@ -338,16 +338,16 @@ impl HitTest<'_> {
 /// such as a render target that its draws in the passes sample: the
 /// capability of a type that does, whose layers return it from
 /// [`LayerType::offscreen_pass`]. The engine runs it for a layer the frame
-/// draws, with the layer's values of its tiles, each a `Tile`.
-pub trait OffscreenPass<Tile> {
-    /// Uploads the GPU objects of what the pass draws, after the layers'
-    /// draws upload.
-    fn upload(&mut self, _tiles: &mut TileMap<Tile>, _gpu: &mut dyn Gpu, _context: &mut Context) {}
+/// draws.
+pub trait OffscreenPass {
+    /// Uploads the meshes of what the pass draws, after the layers' draws
+    /// upload.
+    fn upload(&mut self, _gpu: &mut dyn Gpu, _context: &mut Context) {}
 
     /// Draws through `gpu`, the context's, after the frame's uploads and
     /// before its first pass, with no pass open: what it draws into, it
     /// begins and ends a pass of its own for.
-    fn render(&mut self, tiles: &mut TileMap<Tile>, gpu: &mut dyn Gpu, paint: &mut PaintParameters<'_>);
+    fn render(&mut self, gpu: &mut dyn Gpu, paint: &mut PaintParameters<'_>);
 }
 
 /// A host that drew through a layer and that the layer let go of, which

@@ -16,12 +16,12 @@ use mln_map_types::View;
 use mln_map_types::tile_cover::{TileCoverParameters, tile_cover};
 use mln_util::range::Range;
 
-use crate::draw_objects::{DrawGeometry, DrawObjects, Textures, raw_vertices};
+use crate::draw_objects::{DrawGeometry, DrawObjects, Mesh, Textures, raw_vertices};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::vertex_attribute::Uniforms;
 use crate::globe::{TileGrid, grid, surface_granularity};
-use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, finish_tiles, tile_objects};
+use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, FrameDraws};
 use crate::paint_parameters::PaintParameters;
 use crate::shaders::programs;
 use crate::shaders::programs::ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE;
@@ -34,11 +34,11 @@ use crate::update_parameters::UpdateParameters;
 /// layers are by their clip Z.
 #[derive(Default)]
 pub(crate) struct GlobeDepthPass {
-    /// The planet's draws, one of each tile of the cover.
-    tiles: TileMap<KeptDraw>,
+    /// The planet's meshes, one of each tile of the cover.
+    tiles: TileMap<Mesh>,
     /// The frame's draws of them, which draw into depth in the translucent
     /// pass.
-    frame: LayerDraws,
+    frame: FrameDraws,
     /// The frame's draws as the update makes them, with their projections.
     draw_list: DrawList<ProjectionUBO>,
     meshes: BTreeMap<(u8, bool, bool), TileGrid>,
@@ -119,29 +119,30 @@ impl GlobeDepthPass {
                     geometry,
                     Textures::default(),
                 );
-                *value = Some(KeptDraw::new(objects));
+                *value = Some(context.add_mesh(objects));
             }
-            let Some(draw) = value.as_ref() else {
+            let Some(mesh) = value.as_ref() else {
                 continue;
             };
-            let depth = DrawDepth::Volume { mask: DepthMaskType::ReadWrite };
+            let mut draw = FrameDraw::new(Some(*tile_id), mesh);
+            draw.depth = DrawDepth::Volume { mask: DepthMaskType::ReadWrite };
             let projection = to_projection_ubo(&state.projection_data(&tile_id.to_unwrapped()));
-            self.draw_list.push(FrameDraw { depth, ..draw.frame_draw(Some(*tile_id)) }, projection);
+            self.draw_list.push(draw, projection);
         }
-        // The draws draw in the order their GPU objects were made.
-        finish_tiles(&mut self.draw_list, &mut self.frame, &mut self.tiles, gpu, context, |writer| {
+        // The draws draw in the order their meshes were made.
+        self.draw_list.finish(&mut self.frame, gpu, context, |writer| {
             writer.storage(PROJECTION_BUFFER.id, |projection| *projection);
         });
     }
 
-    /// Uploads the GPU objects of the frame's draws.
+    /// Uploads the meshes of the frame's draws.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
-        self.frame.upload(gpu, &mut self.tiles, tile_objects, context);
+        self.frame.upload(gpu, context);
     }
 
     /// Draws the frame's draws of the pass into the open pass of `gpu`, the
     /// context's.
     pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        self.frame.render(&mut self.tiles, tile_objects, gpu, parameters);
+        self.frame.render(gpu, parameters);
     }
 }

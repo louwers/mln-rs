@@ -15,10 +15,10 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_render::draw::{
-    Composite, Context, DrawFrame, DrawGeometry, DrawGroup, DrawIndexes, DrawList, DrawObjects, DrawObjectsMut,
-    DrawOrder, FrameDraw, Indexes, KeptDraw, LayerDrawing, LayerDraws, PaintParameters, RenderStaticData,
-    SharedAttribute, SharedIndexes, SharedTexture, SharedVertices, Textures, TileMap, Uniforms, VertexAttributeArray,
-    cast_matrix, copied_vertices, projection_data, to_projection_ubo,
+    Composite, Context, DrawFrame, DrawGeometry, DrawGroup, DrawIndexes, DrawList, DrawObjects, DrawOrder, FrameDraw,
+    FrameDraws, Indexes, LayerDrawing, Mesh, PaintParameters, RenderStaticData, SharedAttribute, SharedIndexes,
+    SharedTexture, SharedVertices, Textures, TileMap, Uniforms, VertexAttributeArray, cast_matrix, copied_vertices,
+    projection_data, to_projection_ubo,
 };
 use mln_render::layer::{
     DrawContext, EvaluateCx, Evaluation, LayerType, LayerValues, NoBucket, NoLayout, RasterContents,
@@ -40,17 +40,8 @@ use crate::mesh::GlobeTileMeshCache;
 /// What the layer keeps of a tile: its draw, and the generation of the
 /// contents' geometry it was built of.
 pub struct RasterTile {
-    draw: KeptDraw,
+    mesh: Mesh,
     geometry_generation: u64,
-}
-
-/// What a frame's draw of the layer draws.
-#[derive(Clone, Copy)]
-enum RasterPart {
-    /// The draw of its tile.
-    Tile,
-    /// The image source's draw at the index.
-    Image(usize),
 }
 
 /// What the layer keeps of the draws of an image source's image: one for
@@ -58,38 +49,22 @@ enum RasterPart {
 /// its geometry they were built of.
 #[derive(Default)]
 struct RasterObjects {
-    images: Vec<KeptDraw>,
+    images: Vec<Mesh>,
     image: Option<(SimpleIdentity, u64)>,
 }
 
-/// The layer's drawing: the GPU objects of its draws, and its draws of the
-/// frame.
+/// The layer's drawing: the meshes of an image source's draws, and its
+/// draws of the frame.
 #[derive(Default)]
 pub struct RasterDrawing {
     objects: RasterObjects,
-    frame: Option<LayerDraws<RasterPart>>,
+    frame: Option<FrameDraws>,
 }
 
-impl RasterDrawing {
-    /// The GPU objects of `draw`, `part` of the layer's: of a tile's value
-    /// among the layer's `tiles`, or of an image source's draw in `images`.
-    fn objects<'a>(
-        (tiles, images): &'a mut (&mut TileMap<RasterTile>, &mut Vec<KeptDraw>),
-        draw: &FrameDraw,
-        part: RasterPart,
-    ) -> Option<DrawObjectsMut<'a>> {
-        let draw = match part {
-            RasterPart::Tile => &mut tiles.find_mut(&draw.tile?)?.draw,
-            RasterPart::Image(index) => images.get_mut(index)?,
-        };
-        Some((&mut draw.objects).into())
-    }
-}
-
-impl LayerDrawing<RasterTile> for RasterDrawing {
+impl LayerDrawing for RasterDrawing {
     fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
         if let Some(frame) = &self.frame {
-            visit(DrawGroup::Draws(frame.frame()));
+            visit(DrawGroup::Draws(frame));
         }
     }
 
@@ -109,21 +84,15 @@ impl LayerDrawing<RasterTile> for RasterDrawing {
         }
     }
 
-    fn upload(&mut self, tiles: &mut TileMap<RasterTile>, gpu: &mut dyn Gpu, context: &mut Context) {
+    fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if let Some(frame) = &self.frame {
-            frame.upload(gpu, &mut (tiles, &mut self.objects.images), Self::objects, context);
+            frame.upload(gpu, context);
         }
     }
 
-    fn render(
-        &mut self,
-        tiles: &mut TileMap<RasterTile>,
-        gpu: &mut dyn Gpu,
-        parameters: &mut PaintParameters<'_>,
-        order: DrawOrder,
-    ) {
+    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
         if let Some(frame) = &self.frame {
-            frame.render(&mut (tiles, &mut self.objects.images), Self::objects, gpu, parameters);
+            frame.render(gpu, parameters);
             order.step(parameters);
         }
     }
@@ -152,7 +121,7 @@ impl StaticGeometry {
 pub struct RasterState {
     /// The frame's draws as the update makes them, with their uniform blocks
     /// and projections.
-    draw_list: DrawList<(RasterDrawableUBO, ProjectionUBO), RasterPart>,
+    draw_list: DrawList<(RasterDrawableUBO, ProjectionUBO)>,
 
     static_geometry: Option<StaticGeometry>,
     globe_meshes: GlobeTileMeshCache<RasterLayoutVertex>,
@@ -189,7 +158,6 @@ impl RasterState {
     fn update_image(
         &mut self,
         drawing: &mut RasterDrawing,
-        tile_values: &mut TileMap<RasterTile>,
         gpu: &mut dyn Gpu,
         contents: &RasterContents,
         cx: &mut DrawContext<'_, '_, Raster>,
@@ -221,19 +189,15 @@ impl RasterState {
             let draw_geometry =
                 raster_geometry(&quads.vertices, quads.vertices.count(), quads.indexes.clone().into(), &quads.segments);
             let color_mode = cx.context.color_mode(ColorMode::alpha_blended());
-            objects.images.push(KeptDraw::new(new_objects(
-                &raster_shader,
-                color_mode,
-                draw_geometry,
-                texture.as_ref(),
-            )));
+            let image = new_objects(&raster_shader, color_mode, draw_geometry, texture.as_ref());
+            objects.images.push(cx.context.add_mesh(image));
         }
-        for (index, (tile, draw)) in tiles.iter().zip(&objects.images).enumerate() {
+        for (tile, mesh) in tiles.iter().zip(&objects.images) {
             let uniforms = Self::uniforms(&tile.id().to_unwrapped(), &cx.frame);
-            draw_list.push_part(draw.frame_draw(None), RasterPart::Image(index), uniforms);
+            draw_list.push(FrameDraw::new(None, mesh), uniforms);
         }
 
-        self.finish_frame_draws(drawing, tile_values, layer, gpu, cx.context);
+        self.finish_frame_draws(drawing, layer, gpu, cx.context);
     }
 
     /// The entries in the layer's storage buffers of a draw of `tile_id`.
@@ -256,7 +220,6 @@ impl RasterState {
     fn finish_frame_draws(
         &mut self,
         drawing: &mut RasterDrawing,
-        tile_values: &mut TileMap<RasterTile>,
         layer: &LayerValues<Raster>,
         gpu: &mut dyn Gpu,
         context: &mut Context,
@@ -269,7 +232,7 @@ impl RasterState {
             return;
         };
         frame.set_composite(composite);
-        let replaced = self.draw_list.finish(frame, gpu, context, |writer| {
+        self.draw_list.finish(frame, gpu, context, |writer| {
             let props = RasterEvaluatedPropsUBO {
                 spin_weights: spin_weights(*evaluated.raster_hue_rotate.uniform()),
                 tl_parent: [0.0, 0.0],
@@ -288,11 +251,6 @@ impl RasterState {
             writer.storage(DRAWABLE.id, |(draw_ubo, _)| *draw_ubo);
             writer.storage(PROJECTION_BUFFER.id, |(_, projection)| *projection);
         });
-        if replaced {
-            for draw in tile_values.values_mut().map(|tile| &mut tile.draw).chain(&mut drawing.objects.images) {
-                draw.objects.drop_bindings();
-            }
-        }
     }
 }
 
@@ -429,7 +387,7 @@ impl LayerType for Raster {
             RasterView::Tile(_) => None,
         });
         if let Some(image) = image {
-            state.update_image(drawing, tile_values, gpu, image, cx);
+            state.update_image(drawing, gpu, image, cx);
             return;
         }
         let (render_tiles, layer) = (cx.tiles, cx.layer);
@@ -499,18 +457,17 @@ impl LayerType for Raster {
                 };
                 let color_mode = context.color_mode(ColorMode::alpha_blended());
                 let objects = new_objects(&raster_shader, color_mode, draw_geometry, texture.as_ref());
-                let built = RasterTile { draw: KeptDraw::new(objects), geometry_generation };
+                let built = RasterTile { mesh: context.add_mesh(objects), geometry_generation };
                 *value = Some(built);
             }
 
             if let Some(cached) = value.as_ref() {
-                let draw = cached.draw.frame_draw(Some(tile_id));
                 let uniforms = RasterState::uniforms(&tile_id.to_unwrapped(), &cx.frame);
-                draw_list.push_part(draw, RasterPart::Tile, uniforms);
+                draw_list.push(FrameDraw::new(Some(tile_id), &cached.mesh), uniforms);
             }
         }
 
-        state.finish_frame_draws(drawing, tile_values, layer, gpu, cx.context);
+        state.finish_frame_draws(drawing, layer, gpu, cx.context);
     }
 
     /// A layer whose source shows it nothing keeps no textures.

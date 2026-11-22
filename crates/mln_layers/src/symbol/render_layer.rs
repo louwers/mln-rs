@@ -16,10 +16,10 @@ use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{Projection, ProjectionData};
 use mln_render::draw::{
     AtlasBinding, BucketChanges, BucketGeometry, Context, DrawDepth, DrawFrame, DrawGeometry, DrawGroup, DrawList,
-    DrawObjects, DrawObjectsMut, DrawOrder, FrameDraw, IconFilter, KeptDraw, LayerDrawing, LayerDraws, PaintParameters,
-    SharedAttribute, Textures, TileMap, TypedVertices, UniformWriter, Uniforms, VertexAttributeArray, bucket_vertices,
-    cast_matrix, copied_indexes, copied_vertices, copy_shared_attributes, paint_vertices, projection_data,
-    tile_unit_translation, to_projection_ubo,
+    DrawObjects, DrawOrder, FrameDraw, FrameDraws, IconFilter, LayerDrawing, Mesh, PaintParameters, SharedAttribute,
+    Textures, TileMap, TypedVertices, UniformWriter, Uniforms, VertexAttributeArray, bucket_vertices, cast_matrix,
+    copied_indexes, copied_vertices, copy_shared_attributes, paint_vertices, projection_data, tile_unit_translation,
+    to_projection_ubo,
 };
 use mln_render::layer::{
     Bucket, DrawContext, EvaluateCx, EvaluatedLayer, Evaluation, FeatureIndex, LayerBucket, LayerType, LayerValues,
@@ -36,7 +36,6 @@ use mln_util::Color;
 use mln_util::constants::EXTENT;
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
-use mln_util::identity::SimpleIdentity;
 
 use super::programs;
 use super::programs::{
@@ -282,9 +281,8 @@ struct PlacedVertices {
 /// A draw the layer keeps of a tile: the halo or the fill of the text or the
 /// icons of one of the bucket's buffers, or of one of its segments.
 struct SymbolDraw {
-    /// The id of the draw's GPU objects, made with them.
-    id: SimpleIdentity,
-    objects: DrawObjects,
+    /// The draw's mesh, which takes the textures of its tile's atlases.
+    mesh: Mesh,
     /// The vertices placement lays out, which the draw's attributes read.
     placed: PlacedVertices,
     data: SymbolDrawData,
@@ -292,8 +290,6 @@ struct SymbolDraw {
     /// none doesn't draw, and doesn't copy the bucket's attributes again
     /// until it shows some.
     visible: bool,
-    /// Gives the draw the textures of its tile's atlases.
-    atlases: AtlasBinding,
 }
 
 /// What tells apart the draws of a tile that read the same attributes: a
@@ -314,68 +310,34 @@ pub struct SymbolTile {
     collision: Vec<CollisionDraw>,
 }
 
-/// The layer's drawing: its draws of the frame, each of the draw at its
-/// index among its tile's, and as its overlay those of the tiles' collision
-/// boxes and circles, from the first tile that has any, each of the
-/// collision draw at its index among its tile's.
+/// The layer's drawing: its draws of the frame, and as its overlay those of
+/// the tiles' collision boxes and circles, from the first tile that has any.
 #[derive(Default)]
 pub struct SymbolDrawing {
-    frame: Option<LayerDraws<usize>>,
-    overlay: Option<LayerDraws<usize>>,
+    frame: Option<FrameDraws>,
+    overlay: Option<FrameDraws>,
 }
 
 impl SymbolDrawing {
-    /// The GPU objects of `draw`, the draw at `index` of its tile, with what
-    /// gives them the textures of the tile's atlases.
-    fn objects<'a>(tiles: &'a mut TileMap<SymbolTile>, draw: &FrameDraw, index: usize) -> Option<DrawObjectsMut<'a>> {
-        let draw = tiles.find_mut(&draw.tile?)?.draws.get_mut(index)?;
-        Some(DrawObjectsMut { objects: &mut draw.objects, atlases: Some(&draw.atlases) })
-    }
-
-    /// The GPU objects of `draw`, the collision draw at `index` of its tile.
-    fn collision_objects<'a>(
-        tiles: &'a mut TileMap<SymbolTile>,
-        draw: &FrameDraw,
-        index: usize,
-    ) -> Option<DrawObjectsMut<'a>> {
-        Some((&mut tiles.find_mut(&draw.tile?)?.collision.get_mut(index)?.draw.objects).into())
-    }
-
-    /// Draws the pass's draws of the layer's draw group, if it has it, with
-    /// the GPU objects in `tiles`.
-    fn render_frame(
-        &mut self,
-        tiles: &mut TileMap<SymbolTile>,
+    /// Draws the pass's draws of `draws`, a draw group of the layer's, if it
+    /// has it.
+    fn render_group(
+        draws: Option<&FrameDraws>,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         order: DrawOrder,
     ) {
-        if let Some(frame) = &self.frame {
-            frame.render(tiles, Self::objects, gpu, parameters);
-            order.step(parameters);
-        }
-    }
-
-    /// Draws the pass's draws of the overlay, if the layer has it, with the
-    /// GPU objects in `tiles`.
-    fn render_overlay(
-        &mut self,
-        tiles: &mut TileMap<SymbolTile>,
-        gpu: &mut dyn Gpu,
-        parameters: &mut PaintParameters<'_>,
-        order: DrawOrder,
-    ) {
-        if let Some(overlay) = &self.overlay {
-            overlay.render(tiles, Self::collision_objects, gpu, parameters);
+        if let Some(draws) = draws {
+            draws.render(gpu, parameters);
             order.step(parameters);
         }
     }
 }
 
-impl LayerDrawing<SymbolTile> for SymbolDrawing {
+impl LayerDrawing for SymbolDrawing {
     fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
         for draws in [&self.frame, &self.overlay].into_iter().flatten() {
-            visit(DrawGroup::Draws(draws.frame()));
+            visit(DrawGroup::Draws(draws));
         }
     }
 
@@ -393,30 +355,22 @@ impl LayerDrawing<SymbolTile> for SymbolDrawing {
         }
     }
 
-    fn upload(&mut self, tiles: &mut TileMap<SymbolTile>, gpu: &mut dyn Gpu, context: &mut Context) {
-        if let Some(frame) = &self.frame {
-            frame.upload(gpu, tiles, Self::objects, context);
-        }
-        if let Some(overlay) = &self.overlay {
-            overlay.upload(gpu, tiles, Self::collision_objects, context);
+    fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+        for draws in [&self.frame, &self.overlay].into_iter().flatten() {
+            draws.upload(gpu, context);
         }
     }
 
-    fn render(
-        &mut self,
-        tiles: &mut TileMap<SymbolTile>,
-        gpu: &mut dyn Gpu,
-        parameters: &mut PaintParameters<'_>,
-        order: DrawOrder,
-    ) {
+    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
+        let (frame, overlay) = (self.frame.as_ref(), self.overlay.as_ref());
         match order {
             DrawOrder::BottomUp => {
-                self.render_frame(tiles, gpu, parameters, order);
-                self.render_overlay(tiles, gpu, parameters, order);
+                Self::render_group(frame, gpu, parameters, order);
+                Self::render_group(overlay, gpu, parameters, order);
             }
             DrawOrder::TopDown => {
-                self.render_overlay(tiles, gpu, parameters, order);
-                self.render_frame(tiles, gpu, parameters, order);
+                Self::render_group(overlay, gpu, parameters, order);
+                Self::render_group(frame, gpu, parameters, order);
             }
         }
     }
@@ -425,7 +379,7 @@ impl LayerDrawing<SymbolTile> for SymbolDrawing {
 /// A draw of a tile's collision boxes or circles, with the translation of
 /// the symbols they belong to.
 struct CollisionDraw {
-    draw: KeptDraw,
+    mesh: Mesh,
     translate: [f32; 2],
     translate_anchor: TranslateAnchorType,
 }
@@ -437,10 +391,11 @@ struct SymbolUniforms {
     projection: ProjectionUBO,
 }
 
-/// The size of the texture `objects` binds at `texture_id` in `context`,
-/// zero for none.
-fn texture_size(context: &Context, objects: &DrawObjects, texture_id: usize) -> [f32; 2] {
-    objects.texture(texture_id).and_then(|texture| context.texture(texture)).map_or([0.0, 0.0], |texture| {
+/// The size of the texture `mesh` binds at `texture_id` in `context`, zero
+/// for none.
+fn texture_size(context: &Context, mesh: &Mesh, texture_id: usize) -> [f32; 2] {
+    let texture = context.mesh(mesh).and_then(|objects| objects.texture(texture_id));
+    texture.and_then(|texture| context.texture(texture)).map_or([0.0, 0.0], |texture| {
         let size = texture.size();
         [size.width as f32, size.height as f32]
     })
@@ -469,7 +424,10 @@ fn refresh_draws(
     let (before, rest) = draws.split_at_mut(source);
     let Some((source, after)) = rest.split_first_mut() else { return };
     for draw in before.iter_mut().chain(after) {
-        draw.objects.share_vertex_attributes(&source.objects);
+        let attrs = context.mesh(&source.mesh).map(|source| copy_shared_attributes(source.vertex_attributes()));
+        if let (Some(attrs), Some(objects)) = (attrs, context.mesh_mut(&draw.mesh)) {
+            *objects.vertex_attributes_mut() = attrs;
+        }
         draw.placed = source.placed.clone();
     }
 }
@@ -518,28 +476,39 @@ fn refresh_draw(
         return false;
     }
 
-    if copy_attributes {
-        let attrs = draw.objects.vertex_attributes_mut();
+    // The attributes leave the mesh while the context makes what they read.
+    let attrs = context
+        .mesh_mut(&draw.mesh)
+        .filter(|_| copy_attributes)
+        .map(|objects| std::mem::replace(objects.vertex_attributes_mut(), VertexAttributeArray::new()));
+    if let Some(mut attrs) = attrs {
         if refresh.dynamic {
-            set_projected_pos_attribute(context, buffer, layer_id, attrs, &mut draw.placed.projected);
+            set_projected_pos_attribute(context, buffer, layer_id, &mut attrs, &mut draw.placed.projected);
         }
         if refresh.opacity {
-            set_fade_opacity_attribute(context, buffer, attrs, &mut draw.placed.opacity);
+            set_fade_opacity_attribute(context, buffer, &mut attrs, &mut draw.placed.opacity);
         }
         if refresh.paint
             && let Some(paint_props) = bucket.paint_properties.get(layer_id)
         {
-            set_binder_attributes(context, geometry, is_text, paint_props, evaluated, attrs, &mut Uniforms::default());
+            let uniforms = &mut Uniforms::default();
+            set_binder_attributes(context, geometry, is_text, paint_props, evaluated, &mut attrs, uniforms);
+        }
+        if let Some(objects) = context.mesh_mut(&draw.mesh) {
+            *objects.vertex_attributes_mut() = attrs;
         }
     }
 
-    if refresh.sort && !buffer.triangles.is_empty() {
+    if refresh.sort
+        && !buffer.triangles.is_empty()
+        && let Some(objects) = context.mesh_mut(&draw.mesh)
+    {
         let segments = match draw.data.segment {
             Some(i) => buffer.segments.get(i..=i).unwrap_or_default(),
             None => &buffer.segments,
         };
         let segments = segments.to_vec();
-        draw.objects.replace_indexes(copied_indexes(&buffer.triangles), segments);
+        objects.replace_indexes(copied_indexes(&buffer.triangles), segments);
     }
     copy_attributes
 }
@@ -585,9 +554,9 @@ impl SegmentGroup {
 /// What a symbol layer keeps besides its drawing.
 pub struct SymbolState {
     /// The frame's draws as the update makes them.
-    draw_list: DrawList<SymbolUniforms, usize>,
+    draw_list: DrawList<SymbolUniforms>,
     /// The overlay's draws as the update makes them.
-    collision_list: DrawList<(), usize>,
+    collision_list: DrawList<()>,
     /// The segments of the tiles the update builds draws of, as it sorts
     /// them, kept from frame to frame for their memory.
     renderable_segments: Vec<SegmentGroup>,
@@ -697,38 +666,32 @@ impl SymbolState {
             };
             let bucket = tile.view().map(|bucket| bucket.bucket);
             debug_assert!(bucket.is_some() || cached.draws.is_empty());
-            for (index, draw) in cached.draws.iter().enumerate().filter(|(_, draw)| draw.visible) {
+            for draw in cached.draws.iter().filter(|draw| draw.visible) {
                 let Some(uniforms) =
                     bucket.and_then(|bucket| Self::uniforms(layer_id, layer, &tile_id, bucket, draw, context, frame))
                 else {
                     continue;
                 };
-                let frame_draw = FrameDraw::new(Some(tile_id), draw.id);
-                self.draw_list.push_part(frame_draw, index, uniforms);
+                self.draw_list.push(FrameDraw::new(Some(tile_id), &draw.mesh), uniforms);
             }
-            for (index, draw) in cached.collision.iter_mut().enumerate() {
+            for draw in &cached.collision {
                 write_collision_uniforms(gpu, context, draw, &tile_id, frame);
-                let frame_draw = FrameDraw { depth: DrawDepth::Off, ..draw.draw.frame_draw(Some(tile_id)) };
-                self.collision_list.push_part(frame_draw, index, ());
+                let mut frame_draw = FrameDraw::new(Some(tile_id), &draw.mesh);
+                frame_draw.depth = DrawDepth::Off;
+                self.collision_list.push(frame_draw, ());
             }
         }
 
         if let Some(draws) = &mut drawing.frame {
-            if self
-                .draw_list
-                .finish(draws, gpu, context, |writer| write_uniforms(&layer.paint, frame.placement_fade, writer))
-            {
-                for draw in tile_values.values_mut().flat_map(|tile| &mut tile.draws) {
-                    draw.objects.drop_bindings();
-                }
-            }
+            self.draw_list
+                .finish(draws, gpu, context, |writer| write_uniforms(&layer.paint, frame.placement_fade, writer));
         } else {
             self.draw_list.clear();
         }
-        // Each collision draw has its own GPU objects and buffers, so no two
-        // share an order, and the overlay's buffers are none.
+        // Each collision draw has its own mesh and buffers, so no two share
+        // an order, and the overlay's buffers are none.
         if let Some(overlay) = &mut drawing.overlay {
-            let _ = self.collision_list.finish(overlay, gpu, context, |_| {});
+            self.collision_list.finish(overlay, gpu, context, |_| {});
         } else {
             self.collision_list.clear();
         }
@@ -806,7 +769,7 @@ impl SymbolState {
                 Textures::default(),
             );
             collision.push(CollisionDraw {
-                draw: KeptDraw::new(objects),
+                mesh: context.add_mesh(objects),
                 translate: values.translate,
                 translate_anchor: values.translate_anchor,
             });
@@ -931,8 +894,8 @@ impl SymbolState {
                 matrix: cast_matrix(&matrix),
                 label_plane_matrix: cast_matrix(&label_plane_matrix),
                 coord_matrix: cast_matrix(&gl_coord_matrix),
-                texsize: texture_size(context, &draw.objects, ID_SYMBOL_IMAGE_TEXTURE),
-                texsize_icon: texture_size(context, &draw.objects, ID_SYMBOL_IMAGE_ICON_TEXTURE),
+                texsize: texture_size(context, &draw.mesh, ID_SYMBOL_IMAGE_TEXTURE),
+                texsize_icon: texture_size(context, &draw.mesh, ID_SYMBOL_IMAGE_ICON_TEXTURE),
                 is_text_prop: is_text.into(),
                 rotate_symbol: rotate_in_shader.into(),
                 pitch_with_map: pitch_with_map.into(),
@@ -997,7 +960,7 @@ fn write_uniforms(
 fn write_collision_uniforms(
     gpu: &mut dyn Gpu,
     context: &mut Context,
-    draw: &mut CollisionDraw,
+    draw: &CollisionDraw,
     tile_id: &OverscaledTileID,
     frame: &DrawFrame<'_>,
 ) {
@@ -1023,10 +986,10 @@ fn write_collision_uniforms(
     let draw_ubo = CollisionDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) };
     let tile_props_ubo =
         CollisionTilePropsUBO { extrude_scale, overscale_factor: tile_id.overscale_factor() as f32, pad1: 0.0 };
-    let objects = &mut draw.draw.objects;
-    objects.write_pod(gpu, COLLISION_DRAWABLE.id, &draw_ubo, context);
-    objects.write_pod(gpu, COLLISION_TILE_PROPS.id, &tile_props_ubo, context);
-    objects.write_pod(gpu, DRAW_PROJECTION_BUFFER.id, &to_projection_ubo(&projection), context);
+    let mesh = &draw.mesh;
+    context.write_mesh_uniform(gpu, mesh, COLLISION_DRAWABLE.id, &draw_ubo);
+    context.write_mesh_uniform(gpu, mesh, COLLISION_TILE_PROPS.id, &tile_props_ubo);
+    context.write_mesh_uniform(gpu, mesh, DRAW_PROJECTION_BUFFER.id, &to_projection_ubo(&projection));
 }
 
 fn collision_vertex_attributes(context: &mut Context, buffer: &CollisionBuffer) -> VertexAttributeArray {
@@ -1398,11 +1361,11 @@ impl LayerType for Symbol {
                 };
                 let shader = cx.context.shader_key(program, uniforms, symbol_projection_variant);
                 let textures = draw_atlases.textures(&shader);
-                let objects = DrawObjects::new(shader, color_mode, CullFaceMode::disabled(), geometry, textures);
+                let objects = DrawObjects::new(shader, color_mode, CullFaceMode::disabled(), geometry, textures)
+                    .with_atlases(draw_atlases.clone());
 
                 let draw = SymbolDraw {
-                    id: SimpleIdentity::new(),
-                    objects,
+                    mesh: cx.context.add_mesh(objects),
                     placed: placed.clone(),
                     data: SymbolDrawData {
                         is_halo,
@@ -1416,7 +1379,6 @@ impl LayerType for Symbol {
                         segment: group.segment,
                     },
                     visible,
-                    atlases: draw_atlases.clone(),
                 };
                 debug_assert_eq!(tile_id, tile.id(), "a segment group's tile under another id");
                 tile_values.get_mut(group.tile_index).get_or_insert_with(SymbolTile::default).draws.push(draw);

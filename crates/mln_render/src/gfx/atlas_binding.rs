@@ -2,7 +2,7 @@ use mln_gfx::gpu::ShaderKey;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 
-use crate::draw_objects::{DrawObjects, Textures};
+use crate::draw_objects::Textures;
 use crate::gfx::context::Context;
 use crate::gfx::store::SharedTexture;
 use crate::paint_parameters::PaintParameters;
@@ -70,10 +70,11 @@ impl AtlasBinding {
         textures
     }
 
-    /// Gives the draw the atlases' textures before it draws, and sets the
-    /// samplers of the atlases, which the tile's draws share, to filter as
-    /// the binding's [`IconFilter`] asks in the frame.
-    pub(crate) fn bind(&self, objects: &mut DrawObjects, parameters: &mut PaintParameters<'_>) {
+    /// Gives a draw with `shader`, which binds `textures`, the atlases'
+    /// textures before it draws, and sets the samplers of the atlases, which
+    /// the tile's draws share, to filter as the binding's [`IconFilter`] asks
+    /// in the frame.
+    pub(crate) fn bind(&self, shader: &ShaderKey, textures: &mut Textures, parameters: &mut PaintParameters<'_>) {
         let linear_filter_for_icons = match self.icon_filter {
             IconFilter::Linear => true,
             IconFilter::NearestWhenStill { map_aligned } => {
@@ -85,8 +86,12 @@ impl AtlasBinding {
         {
             set_samplers(parameters.context, glyph.as_ref(), icon.as_ref(), linear_filter_for_icons);
         }
-        let samples_icon = self.samples_icon(objects.shader());
-        self.set_textures(samples_icon, |id, texture| objects.set_texture(id, texture));
+        self.set_textures(self.samples_icon(shader), |id, texture| {
+            let slot = &mut textures[id];
+            if slot.as_ref() != texture {
+                *slot = texture.cloned();
+            }
+        });
     }
 
     /// Sets the atlases' textures, those of a shader that samples the icon

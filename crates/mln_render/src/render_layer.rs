@@ -676,13 +676,13 @@ impl<T: LayerType> RenderLayer for Layer<T> {
 
     fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if self.renderable {
-            self.drawing.upload(&mut self.tile_values, gpu, context);
+            self.drawing.upload(gpu, context);
         }
     }
 
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
         if self.renderable {
-            self.drawing.render(&mut self.tile_values, gpu, parameters, order);
+            self.drawing.render(gpu, parameters, order);
         }
     }
 
@@ -694,7 +694,7 @@ impl<T: LayerType> RenderLayer for Layer<T> {
         if self.renderable
             && let Some(pass) = T::offscreen_pass(&mut self.state, &mut self.drawing)
         {
-            pass.upload(&mut self.tile_values, gpu, context);
+            pass.upload(gpu, context);
         }
     }
 
@@ -702,7 +702,7 @@ impl<T: LayerType> RenderLayer for Layer<T> {
         if self.renderable
             && let Some(pass) = T::offscreen_pass(&mut self.state, &mut self.drawing)
         {
-            pass.render(&mut self.tile_values, gpu, parameters);
+            pass.render(gpu, parameters);
         }
     }
 
