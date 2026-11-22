@@ -123,9 +123,16 @@ map over a slow network first, and log the URLs it fetches again
 (`crates/mln_renderer/src/tests/fast_camera_test.rs` tests the gestures' tile
 requests on a modeled network). It also runs mln_gfx's conformance case of
 writes from JS arrays on a GPU of the map's backend, and checks that a panic
-stops the page, and that the GL JS comparison lines up. The page's frames come
-from SwiftShader and the native ones from lavapipe, which match in most views.
+stops the page, and that the GL JS comparison lines up. The page's WebGPU frames
+come from SwiftShader, its WebGL2 ones from the first device ANGLE's Vulkan
+finds, and the native ones from lavapipe, which match in most views.
 check/check.mjs documents the options, and check/views.mjs lists the views.
+
+`--browser firefox` or `webkit` runs the check in Playwright's Firefox or WebKit
+(`playwright-core install firefox webkit`), and `--channel chrome`, `msedge` or
+`moz-firefox` in an installed browser, with `--executable` where Playwright
+doesn't find it. Those draw on the machine's GPU, as Chromium does with `--gpu`.
+Where the browser has no WebGPU, use `--backend webgl2`.
 
 Before the first run, install the Chromium that the lockfile's playwright-core
 pins, and keep lavapipe installed for the native runner (`VK_DRIVER_FILES`):

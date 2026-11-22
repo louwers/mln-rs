@@ -1,4 +1,4 @@
-// Checks the browser build in headless Chromium, offline: loads views of the
+// Checks the browser build in a headless browser, offline: loads views of the
 // render suite's fixtures in the page (web/), reads each frame back from the
 // GPU inside the page, and compares it with the native render-test runner's
 // render of the same view (pixelmatch, as the render tests compare). It
@@ -27,15 +27,23 @@
 //   --codec <n>          render natively with --tileWorkerCodec=<n>
 //   --backend <name>     what the page draws with: webgpu (default), or
 //                        webgl2, the module for browsers without WebGPU
-//   --chromium <path>    another Chromium than playwright-core's (install
-//                        it: `pnpm -C examples/web exec playwright-core
-//                        install --no-shell chromium`)
+//   --browser <name>     chromium (default), firefox or webkit: Playwright's
+//                        build (`pnpm -C examples/web exec playwright-core
+//                        install --no-shell chromium`, or `install firefox
+//                        webkit`)
+//   --channel <name>     an installed browser instead, through Playwright's
+//                        channel: chrome or msedge (Chromium), moz-firefox
+//                        (Firefox)
+//   --executable <path>  the browser's executable, instead of Playwright's or
+//                        the channel's
+//   --gpu                Chromium draws on the machine's GPU, not SwiftShader
 //
-// The page's WebGPU adapter is SwiftShader, which Chromium bundles, so the
-// frames don't depend on the machine; the native runner renders through
-// VK_DRIVER_FILES (default /usr/share/vulkan/icd.d/lvp_icd.x86_64.json,
-// lavapipe). Headless Chromium composites WebGPU canvases as white, so the
-// page reads its frame back itself.
+// Chromium's WebGPU adapter is SwiftShader, which it bundles, so the
+// frames don't depend on the machine (browser.mjs); the native runner
+// renders through VK_DRIVER_FILES (default
+// /usr/share/vulkan/icd.d/lvp_icd.x86_64.json, lavapipe). Headless Chromium
+// composites WebGPU canvases as white, so the page reads its frame back
+// itself.
 
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -44,7 +52,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-import { launch } from "./chromium.mjs";
+import { launch } from "./browser.mjs";
 import { openFixtures } from "./fixtures.mjs";
 import { refetches } from "./interactions.mjs";
 import { renderNative, writeTest } from "./native.mjs";
@@ -54,6 +62,7 @@ import {
   checkPanic,
   firstLines,
   load,
+  webgl2Renderer,
   webgpuAdapter,
 } from "./page.mjs";
 import { startServer } from "./server.mjs";
@@ -74,7 +83,10 @@ const { values: options } = parseArgs({
     "render-test": { type: "string" },
     codec: { type: "string" },
     backend: { type: "string", default: "webgpu" },
-    chromium: { type: "string" },
+    browser: { type: "string", default: "chromium" },
+    channel: { type: "string" },
+    executable: { type: "string" },
+    gpu: { type: "boolean", default: false },
   },
 });
 const workers = Number(options.workers);
@@ -89,15 +101,31 @@ const fixtures = openFixtures(cache);
 const views = selectViews(options.filter, {
   tests: path.join(metrics, "integration/render-tests"),
   fixtures,
+}).filter((view) => {
+  // The pinch is the DevTools protocol's (interactions.mjs), which only
+  // Chromium speaks.
+  const runs =
+    options.browser === "chromium" || view.interaction !== "pan-zoom";
+  if (!runs) console.log(`${view.name}: skipped, its pinch needs Chromium`);
+  return runs;
 });
 const server = await startServer({ root, views, fixtures });
-const browser = await launch(options.chromium);
+const browser = await launch({
+  browser: options.browser,
+  channel: options.channel,
+  executable: options.executable,
+  onGpu: options.gpu,
+});
 const context = { browser, server, workers, backend: options.backend };
 let failures = [];
 try {
   const gpu = await webgpuAdapter(context);
+  console.log(`${browser.name}`);
   console.log(`WebGPU adapter: ${gpu}`);
-  if (!/swiftshader/.test(gpu ?? ""))
+  console.log(`WebGL2 renderer: ${await webgl2Renderer(context)}`);
+  if (options.backend === "webgpu" && gpu === "none")
+    throw new Error(`${browser.name} has no WebGPU: try --backend webgl2`);
+  if (browser.swiftshader && !/swiftshader/.test(gpu ?? ""))
     throw new Error(`the page's WebGPU adapter is ${gpu}, not SwiftShader`);
 
   failures = await compare();
