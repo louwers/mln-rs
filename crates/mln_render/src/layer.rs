@@ -41,7 +41,7 @@
 //!
 //! A [`Layout`] runs on a tile worker, from owned inputs to an owned
 //! [`Bucket`]. It selects the tile's features, then builds the bucket:
-//! vertices and indexes in [`GpuVec`]s, and the values of the data-driven
+//! vertices in [`GpuVec`]s, their primitives in [`Indexes`], and the values of the data-driven
 //! paint properties in [`LayerBinders`], which a struct that
 //! [`paint_property_binders!`](crate::paint_property_binders!) declares
 //! writes per feature. The engine sends the bucket to the renderer's thread,
@@ -49,7 +49,7 @@
 //! bucket implements [`Wire`]: `#[derive(Wire)]`, with
 //! `#[wire(crate = mln_rs::mln_wire)]` through the facade), and uploads it
 //! ([`Bucket::upload`]). A tile's [`LayerBucket`] then gives the bucket's
-//! [`Buffer`](crate::draw::Buffer)s to the meshes the layer makes.
+//! buffers to the meshes the layer makes.
 //!
 //! # Threads
 //!
@@ -80,10 +80,10 @@ use mln_wire::Wire;
 
 pub use crate::bucket_geometry::GpuVec;
 pub use crate::bucket_upload::Upload;
-use crate::draw::{Buffer, Draws, Resources};
+use crate::draw::{Buffer, Draws, IndexBuffer, Resources};
 pub use crate::erased_layer::EvaluatedLayer;
 use crate::geometry::feature_index::{FeatureIndex, FeatureIndexBuilder};
-pub use crate::gfx::mesh::Indexed;
+pub use crate::gfx::mesh::Indexes;
 pub use crate::image_store::ImageStore;
 use crate::layout::filter_groups::FilterGroups;
 pub use crate::layout::tile_layout::Resolved;
@@ -535,6 +535,13 @@ impl<'a, S: StyleLayerType, B> LayerBucket<'a, S, B> {
         self.contents.bucket_geometry.buffer(vec).expect("a vector that its bucket's `upload` didn't name")
     }
 
+    /// The index buffer that `indexes`, the bucket's, uploaded into
+    /// ([`Upload::indexes`]). Panics for indexes the bucket didn't upload.
+    #[must_use]
+    pub fn indexes(self, indexes: &Indexes) -> &'a IndexBuffer {
+        self.contents.bucket_geometry.indexes(indexes).expect("indexes that their bucket's `upload` didn't name")
+    }
+
     /// The binders of the layer that the bucket was laid out with among
     /// `binders`, the bucket's, with the buffer of their values. Panics
     /// for binders that the bucket didn't upload ([`Upload::binders`]).
@@ -759,7 +766,8 @@ impl<S: StyleLayerType> BuildCx<'_, S> {
 /// The engine moves a bucket from the worker to the renderer's thread,
 /// copies it for the tile's other world copies, and uploads it.
 pub trait Bucket: Clone + Send + Wire + 'static {
-    /// Names the bucket's [`GpuVec`]s and [`LayerBinders`] to `up`: the
+    /// Names the bucket's [`GpuVec`]s, [`Indexes`] and [`LayerBinders`] to
+    /// `up`: the
     /// engine uploads them into buffers once the bucket reaches the
     /// renderer's thread, and again where feature state rewrites the
     /// binders' values.

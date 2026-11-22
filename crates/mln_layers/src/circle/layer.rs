@@ -50,7 +50,7 @@ impl Layer for CircleLayer {
         let bucket = laid.bucket;
         let mut mesh = MeshDesc::new(&CIRCLE);
         mesh.vertices(laid.buffer(&bucket.corners))
-            .indexes(laid.buffer(&bucket.triangles), &bucket.segments)
+            .indexes(laid.indexes(&bucket.triangles))
             .paint(laid.binders(&bucket.binders), &cx.layer.evaluated.paint);
         Some(cx.res.mesh(&mesh))
     }

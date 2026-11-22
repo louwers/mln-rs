@@ -49,7 +49,8 @@ impl<V> TileMap<V> {
         // A frame's tens of tiles: the stable sort allocates nothing.
         self.by_id.sort_by_key(|&(id, _)| id);
         for id in tiles {
-            let kept = self.by_id.binary_search_by_key(&id, |&(id, _)| id).ok().map(|at| &mut self.previous[self.by_id[at].1]);
+            let kept =
+                self.by_id.binary_search_by_key(&id, |&(id, _)| id).ok().map(|at| &mut self.previous[self.by_id[at].1]);
             let (made_from, value) = kept.map_or((None, None), |entry| (entry.made_from, entry.value.take()));
             self.tiles.push(Entry { id, made_from, value });
         }

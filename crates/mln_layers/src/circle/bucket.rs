@@ -1,5 +1,4 @@
-use mln_gfx::shaders::segment::SegmentBase;
-use mln_render::layer::{Bucket, GpuVec, LayerBinders, PaintPropertyBinder, Upload};
+use mln_render::layer::{Bucket, GpuVec, Indexes, LayerBinders, PaintPropertyBinder, Upload};
 use mln_util::Color;
 
 use super::CirclePaintProperties;
@@ -21,15 +20,14 @@ mln_render::paint_property_binders!(
 #[derive(Clone, mln_wire::Wire)]
 pub struct CircleBucket {
     pub(crate) corners: GpuVec<[i16; 2]>,
-    pub(crate) triangles: GpuVec<u16>,
-    pub(crate) segments: Vec<SegmentBase>,
+    pub(crate) triangles: Indexes,
     pub(crate) binders: LayerBinders<CircleBinders>,
 }
 
 impl Bucket for CircleBucket {
     fn upload(&mut self, up: &mut Upload<'_>) {
         up.vec(&mut self.corners);
-        up.vec(&mut self.triangles);
+        up.indexes(&mut self.triangles);
         up.binders(&mut self.binders);
     }
 }

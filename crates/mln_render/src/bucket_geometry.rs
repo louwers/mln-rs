@@ -27,8 +27,9 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::serialization::payload::{Payload, pod};
 
 use crate::gfx::context::Resources;
+use crate::gfx::mesh::Indexes;
 use crate::gfx::vertices::SharedVertices;
-use crate::handles::Buffer;
+use crate::handles::{Buffer, IndexBuffer};
 use crate::paint_property_binder::InterleavedVertexBuffer;
 
 /// A bucket's vertices or indexes, which the engine uploads into a
@@ -242,6 +243,26 @@ impl BucketGeometry {
         let entry = if keep { res.add_vertices(vec.data().into_owned()) } else { vec.store_vertices(res) };
         let buffer: Rc<dyn Any> = Rc::new(Buffer::<V>::new(entry));
         self.buffers.insert(vec.key, buffer);
+    }
+
+    /// The index buffer that `indexes`, a bucket's, uploaded into.
+    pub(crate) fn indexes(&self, indexes: &Indexes) -> Option<&IndexBuffer> {
+        self.buffers.get(indexes.indexes.key)?.downcast_ref()
+    }
+
+    /// Uploads `indexes`, a bucket's, into an index buffer of `res`, freeing
+    /// their data, as [`upload`](Self::upload) does a vector.
+    pub(crate) fn upload_indexes(&mut self, indexes: &mut Indexes, copies: &[&BucketGeometry], res: &mut Resources) {
+        let vec = &mut indexes.indexes;
+        if vec.is_moved() {
+            return;
+        }
+        if !self.buffers.has_or_takes(vec.key, copies.iter().map(|copy| &copy.buffers)) {
+            let buffer = Buffer::new(vec.store_vertices(res));
+            let uploaded: Rc<dyn Any> = Rc::new(IndexBuffer { buffer, segments: indexes.segments.clone() });
+            self.buffers.insert(vec.key, uploaded);
+        }
+        vec.discard();
     }
 
     /// Frees the room that the entries' lists keep for more, where it is

@@ -5,6 +5,7 @@ use mln_tile::TileLayer;
 use crate::bucket::FeatureStates;
 use crate::bucket_geometry::{BucketGeometry, GpuVec};
 use crate::gfx::context::Resources;
+use crate::gfx::mesh::Indexes;
 use crate::paint_property_binder::{LayerBinders, PaintBinders};
 
 /// What a bucket names its [`GpuVec`]s and [`LayerBinders`] to, in its
@@ -30,6 +31,14 @@ impl Upload<'_> {
     pub fn vec<V: bytemuck::Pod>(&mut self, vec: &mut GpuVec<V>) {
         if let Kind::Geometry { geometry, copies, res } = &mut self.kind {
             geometry.upload(vec, false, copies, res);
+        }
+    }
+
+    /// Names `indexes`, which the bucket's meshes draw through their buffer
+    /// ([`LayerBucket::indexes`](crate::layer::LayerBucket::indexes)).
+    pub fn indexes(&mut self, indexes: &mut Indexes) {
+        if let Kind::Geometry { geometry, copies, res } = &mut self.kind {
+            geometry.upload_indexes(indexes, copies, res);
         }
     }
 

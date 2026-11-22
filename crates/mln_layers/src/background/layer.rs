@@ -1,6 +1,5 @@
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::segment::SegmentBase;
-use mln_render::draw::{Buffer, Depth, Draw, Draws, Mesh, MeshDesc, Resources};
+use mln_render::draw::{Buffer, Depth, Draw, Draws, IndexBuffer, Mesh, MeshDesc, Resources};
 use mln_render::globe::tile_grid;
 use mln_render::layer::{
     EvaluateCx, Evaluation, FrameTile, Layer, NewCx, PrepareCx, TileCx, TileTransform, UpdateCx, ViewCover,
@@ -38,19 +37,17 @@ pub struct BackgroundTile {
 /// The vertices and triangles that a tile draws with.
 struct Geometry {
     vertices: Buffer<[i16; 2]>,
-    triangles: Buffer<u16>,
-    segments: Vec<SegmentBase>,
+    triangles: IndexBuffer,
 }
 
 impl Geometry {
     fn new(res: &mut Resources, vertices: &[[i16; 2]], triangles: &[u16]) -> Self {
-        let segments = vec![SegmentBase::with_lengths(0, 0, vertices.len(), triangles.len())];
-        Geometry { vertices: res.buffer(vertices), triangles: res.buffer(triangles), segments }
+        Geometry { vertices: res.buffer(vertices), triangles: res.index_buffer(triangles) }
     }
 
     fn mesh<'a>(&'a self, program: &'static Program) -> MeshDesc<'a> {
         let mut mesh = MeshDesc::new(program);
-        mesh.vertices(&self.vertices).indexes(&self.triangles, &self.segments);
+        mesh.vertices(&self.vertices).indexes(&self.triangles);
         mesh
     }
 }

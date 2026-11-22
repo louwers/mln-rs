@@ -4,6 +4,7 @@
 use std::marker::PhantomData;
 
 use mln_gfx::gfx_types::AttributeDataType;
+use mln_gfx::shaders::segment::SegmentBase;
 
 use crate::gfx::store::SharedTexture;
 use crate::gfx::vertices::SharedVertices;
@@ -75,6 +76,16 @@ vertices! {
     [f32; 2] => Float2,
     [f32; 3] => Float3,
     [f32; 4] => Float4,
+}
+
+/// A buffer of `u16` indexes in the renderer's
+/// [`Resources`](crate::draw::Resources), each relative to the first vertex
+/// of its segment, with the segments that draw them: a mesh's primitives
+/// ([`MeshDesc::indexes`](crate::draw::MeshDesc::indexes)).
+#[derive(Clone, Debug)]
+pub struct IndexBuffer {
+    pub(crate) buffer: Buffer<u16>,
+    pub(crate) segments: Vec<SegmentBase>,
 }
 
 /// A texture in the renderer's [`Resources`](crate::draw::Resources), which

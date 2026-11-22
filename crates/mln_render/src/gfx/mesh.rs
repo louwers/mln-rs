@@ -3,31 +3,27 @@
 
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 
-/// The indexes of one kind of primitive, such as triangles or lines, over a
-/// vertex buffer, and the segments that draw them.
+use crate::bucket_geometry::GpuVec;
+
+/// A bucket's indexes of one kind of primitive, such as triangles or lines,
+/// over one of its vertex vectors, in the segments that draw them. The
+/// engine uploads them with the bucket
+/// ([`Upload::indexes`](crate::layer::Upload::indexes)) into the
+/// [`IndexBuffer`](crate::draw::IndexBuffer) that a mesh draws
+/// ([`LayerBucket::indexes`](crate::layer::LayerBucket::indexes)).
 ///
-/// Where a vertex buffer has per-vertex buffers beside it, a mesh larger
+/// Where a vertex vector has per-vertex vectors beside it, a mesh larger
 /// than a segment, whose split copies vertices, must extend them after.
-pub struct Indexed<'a> {
-    /// The indexes, each relative to its segment's first vertex.
-    pub indexes: &'a mut Vec<u16>,
-    /// The segments, each a draw of a run of the indexes.
-    pub segments: &'a mut Vec<SegmentBase>,
+#[derive(Clone, Debug, Default, mln_wire::Wire)]
+pub struct Indexes {
+    pub(crate) indexes: GpuVec<u16>,
+    pub(crate) segments: Vec<SegmentBase>,
 }
 
-impl Indexed<'_> {
+impl Indexes {
     /// Indexes `primitives`, each `N` indices into a mesh whose vertices are
-    /// `vertices[first..]`, which follow every vertex the segments draw, and
-    /// returns where the mesh's first vertex is in its segment: 0 for a mesh
-    /// spread over several, whose first segment starts at it, and for a mesh
-    /// without primitives, which no segment draws.
-    ///
-    /// A mesh that fits in a segment goes in the last one when that ends at
-    /// `first` and has room, or else in a new one. A larger mesh is spread
-    /// over several: the first draws the mesh's leading vertices in place,
-    /// and each later one draws copies, appended to `vertices`, of the
-    /// vertices its primitives use. A mesh without primitives adds no
-    /// segment.
+    /// `vertices[first..]`, as [`add_keyed`](Self::add_keyed) does with a
+    /// sort key of 0.
     pub fn add<V: Copy, const N: usize>(
         &mut self,
         vertices: &mut Vec<V>,
@@ -37,9 +33,57 @@ impl Indexed<'_> {
         self.add_keyed(vertices, first, 0.0, primitives)
     }
 
-    /// [`Indexed::add`] into segments of one sort key, which a draw orders
-    /// by: a mesh continues the last segment only if it has `sort_key`.
+    /// Indexes `primitives`, each `N` indices into a mesh whose vertices are
+    /// `vertices[first..]`, which follow every vertex the segments draw, and
+    /// returns where the mesh's first vertex is in its segment: 0 for a mesh
+    /// spread over several, whose first segment starts at it, and for a mesh
+    /// without primitives, which no segment draws.
+    ///
+    /// A mesh that fits in a segment goes in the last one when that ends at
+    /// `first`, has room and has `sort_key`, or else in a new one. A larger
+    /// mesh is spread over several: the first draws the mesh's leading
+    /// vertices in place, and each later one draws copies, appended to
+    /// `vertices`, of the vertices its primitives use. A mesh without
+    /// primitives adds no segment.
     pub fn add_keyed<V: Copy, const N: usize>(
+        &mut self,
+        vertices: &mut Vec<V>,
+        first: usize,
+        sort_key: f32,
+        primitives: impl IntoIterator<Item = [u32; N]>,
+    ) -> usize {
+        Indexed { indexes: self.indexes.get_mut(), segments: &mut self.segments }
+            .add_keyed(vertices, first, sort_key, primitives)
+    }
+
+    /// Whether no segment draws anything.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.segments.is_empty()
+    }
+}
+
+/// Indexes being added to, in place: [`Indexes`]' parts.
+pub(crate) struct Indexed<'a> {
+    /// The indexes, each relative to its segment's first vertex.
+    pub(crate) indexes: &'a mut Vec<u16>,
+    /// The segments, each a draw of a run of the indexes.
+    pub(crate) segments: &'a mut Vec<SegmentBase>,
+}
+
+impl Indexed<'_> {
+    /// See [`Indexes::add`].
+    pub(crate) fn add<V: Copy, const N: usize>(
+        &mut self,
+        vertices: &mut Vec<V>,
+        first: usize,
+        primitives: impl IntoIterator<Item = [u32; N]>,
+    ) -> usize {
+        self.add_keyed(vertices, first, 0.0, primitives)
+    }
+
+    /// See [`Indexes::add_keyed`].
+    pub(crate) fn add_keyed<V: Copy, const N: usize>(
         &mut self,
         vertices: &mut Vec<V>,
         first: usize,

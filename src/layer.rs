@@ -5,7 +5,6 @@
 
 pub use mln_gfx::gfx_types::AttributeDataType;
 pub use mln_gfx::shaders::program::{self, Attribute, Program, Projection, Property, Sources, Stages};
-pub use mln_gfx::shaders::segment::SegmentBase;
 pub use mln_gfx::shaders::source;
 pub use mln_gfx::{ColorMode, CullFaceMode, DrawMode, uniform_block};
 pub use mln_render::draw::*;

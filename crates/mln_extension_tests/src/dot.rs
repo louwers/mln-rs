@@ -4,10 +4,10 @@
 use mln_rs::layer::AttributeDataType::{Float2, Float4, Short2};
 use mln_rs::layer::source::wgsl::Wgsl;
 use mln_rs::layer::{
-    Attribute, Bucket, BuildCx, Color, Draw, Draws, Error, Features, FrameTile, GpuVec, Indexed, Layer, LayerBinders,
+    Attribute, Bucket, BuildCx, Color, Draw, Draws, Error, Features, FrameTile, GpuVec, Indexes, Layer, LayerBinders,
     LayerBucket, LayerStyle, LayerTypeInfo, Layout, LayoutCx, Mesh, MeshDesc, NewCx, NoProperties, PaintPropertyBinder,
-    PrepareCx, Program, Projection, Property, PropertyInfo, PropertyTable, PropertyVisitor, SegmentBase, SourceKind,
-    Sources, Stages, StyleLayerType, TileCx, TileTransform, Upload, program,
+    PrepareCx, Program, Projection, Property, PropertyInfo, PropertyTable, PropertyVisitor, SourceKind, Sources,
+    Stages, StyleLayerType, TileCx, TileTransform, Upload, program,
 };
 
 mln_rs::layer::properties!(
@@ -109,15 +109,14 @@ struct FragmentInput {
 #[wire(crate = mln_rs::mln_wire)]
 pub struct DotBucket {
     corners: GpuVec<[i16; 2]>,
-    triangles: GpuVec<u16>,
-    segments: Vec<SegmentBase>,
+    triangles: Indexes,
     binders: LayerBinders<DotBinders>,
 }
 
 impl Bucket for DotBucket {
     fn upload(&mut self, up: &mut Upload<'_>) {
         up.vec(&mut self.corners);
-        up.vec(&mut self.triangles);
+        up.indexes(&mut self.triangles);
         up.binders(&mut self.binders);
     }
 }
@@ -133,28 +132,19 @@ impl Layout<Dot> for DotLayout {
     }
 
     fn build(self, cx: &mut BuildCx<'_, Dot>) -> Result<Option<DotBucket>, Error> {
-        let mut b = DotBucket {
-            corners: GpuVec::default(),
-            triangles: GpuVec::default(),
-            segments: Vec::new(),
-            binders: cx.binders(),
-        };
+        let mut b = DotBucket { corners: GpuVec::default(), triangles: Indexes::default(), binders: cx.binders() };
         for i in self.0 {
             let (feature, corners) = (cx.feature(i)?, b.corners.get_mut());
             let geometry = feature.geometry()?;
             for p in geometry.iter().flatten() {
                 let (x, y, first) = (p.x * 2, p.y * 2, corners.len());
                 corners.extend([[x, y], [x | 1, y], [x | 1, y | 1], [x, y | 1]]);
-                Indexed { indexes: b.triangles.get_mut(), segments: &mut b.segments }.add(
-                    corners,
-                    first,
-                    [[0, 1, 2], [0, 3, 2]],
-                );
+                b.triangles.add(corners, first, [[0, 1, 2], [0, 3, 2]]);
             }
             cx.populate(&mut b.binders, i, &feature, corners.len());
             cx.index(i, &geometry);
         }
-        Ok((!b.segments.is_empty()).then_some(b))
+        Ok((!b.triangles.is_empty()).then_some(b))
     }
 }
 
@@ -178,7 +168,7 @@ impl Layer for DotLayer {
     ) -> Option<Mesh<DotDraw>> {
         let mut mesh = MeshDesc::new(&DOT);
         mesh.vertices(laid.buffer(&laid.bucket.corners))
-            .indexes(laid.buffer(&laid.bucket.triangles), &laid.bucket.segments)
+            .indexes(laid.indexes(&laid.bucket.triangles))
             .paint(laid.binders(&laid.bucket.binders), &cx.layer.evaluated.paint);
         Some(cx.res.mesh(&mesh))
     }

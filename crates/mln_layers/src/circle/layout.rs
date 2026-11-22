@@ -1,6 +1,6 @@
 use geometry::Point;
 use mln_map_types::MapMode;
-use mln_render::layer::{BuildCx, GpuVec, Indexed, Layout, LayoutCx};
+use mln_render::layer::{BuildCx, GpuVec, Indexes, Layout, LayoutCx};
 use mln_style::StyleValue as _;
 use mln_style::expression::EvaluationContext;
 use mln_util::constants::EXTENT;
@@ -41,12 +41,8 @@ impl Layout<Circle> for CircleLayout {
     }
 
     fn build(self, cx: &mut BuildCx<'_, Circle>) -> Result<Option<CircleBucket>, Error> {
-        let mut bucket = CircleBucket {
-            corners: GpuVec::default(),
-            triangles: GpuVec::default(),
-            segments: Vec::new(),
-            binders: cx.binders(),
-        };
+        let mut bucket =
+            CircleBucket { corners: GpuVec::default(), triangles: Indexes::default(), binders: cx.binders() };
         // A continuous map leaves the points outside the tile to the tiles
         // they're in. The others draw them all, so that circles from a
         // neighboring tile aren't cut at the tile's edge.
@@ -56,16 +52,15 @@ impl Layout<Circle> for CircleLayout {
             let feature = cx.feature(i)?;
             let geometry = feature.geometry()?;
             let corners = bucket.corners.get_mut();
-            let mut triangles = Indexed { indexes: bucket.triangles.get_mut(), segments: &mut bucket.segments };
             for p in geometry.iter().flatten().filter(|p| !continuous || in_tile(p)) {
                 let (x, y) = (p.x.wrapping_mul(2), p.y.wrapping_mul(2));
                 let first = corners.len();
                 corners.extend([[x, y], [x | 1, y], [x | 1, y | 1], [x, y | 1]]);
-                triangles.add(corners, first, [[0, 1, 2], [0, 3, 2]]);
+                bucket.triangles.add(corners, first, [[0, 1, 2], [0, 3, 2]]);
             }
             cx.populate(&mut bucket.binders, i, &feature, corners.len());
             cx.index(i, &geometry);
         }
-        Ok((!bucket.segments.is_empty()).then_some(bucket))
+        Ok((!bucket.triangles.is_empty()).then_some(bucket))
     }
 }

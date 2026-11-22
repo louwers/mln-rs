@@ -7,7 +7,6 @@ use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::bindings::MAX_TEXTURES;
 use mln_gfx::shaders::block::DrawBlocks;
 use mln_gfx::shaders::program::{BufferKind, Program};
-use mln_gfx::shaders::segment::SegmentBase;
 use smallvec::SmallVec;
 
 use crate::draw_objects::{DrawGeometry, DrawObjects, Mesh, Textures};
@@ -15,7 +14,7 @@ use crate::gfx::context::Resources;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
-use crate::handles::{Buffer, Texture, Vertex};
+use crate::handles::{Buffer, IndexBuffer, Texture, Vertex};
 use crate::paint_property_binder::{PaintBinders, PaintVertices};
 
 /// What a [`Mesh`] is made of: a program, the buffers its attributes read
@@ -33,7 +32,7 @@ pub struct MeshDesc<'a> {
     pub(crate) vertices: SmallVec<[Input<'a>; 2]>,
     /// The buffers of the instance attributes, in the program's order.
     pub(crate) instances: SmallVec<[Input<'a>; 1]>,
-    pub(crate) indexes: Option<(&'a Buffer<u16>, &'a [SegmentBase])>,
+    pub(crate) indexes: Option<&'a IndexBuffer>,
     /// The paint values' attributes, by attribute id, and the properties
     /// read from their uniforms instead.
     pub(crate) paint: Vec<(usize, SharedAttribute)>,
@@ -98,10 +97,10 @@ impl<'a> MeshDesc<'a> {
         self
     }
 
-    /// Draws the primitives of `indexes`, each segment of `segments` a draw
-    /// of a run of them, relative to the segment's first vertex.
-    pub fn indexes(&mut self, indexes: &'a Buffer<u16>, segments: &'a [SegmentBase]) -> &mut Self {
-        self.indexes = Some((indexes, segments));
+    /// Draws the primitives of `indexes`, each of its segments a draw of a
+    /// run of them.
+    pub fn indexes(&mut self, indexes: &'a IndexBuffer) -> &mut Self {
+        self.indexes = Some(indexes);
         self
     }
 
@@ -178,7 +177,7 @@ impl Resources {
             instances
         });
         let (indexes, segments) = match desc.indexes {
-            Some((indexes, segments)) => (DrawIndexes::Shared(indexes.entry.clone()), segments.to_vec()),
+            Some(indexes) => (DrawIndexes::Shared(indexes.buffer.entry.clone()), indexes.segments.clone()),
             None => (DrawIndexes::new(Vec::new()), Vec::new()),
         };
         let mut textures = Textures::default();

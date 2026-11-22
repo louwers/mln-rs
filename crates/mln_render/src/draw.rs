@@ -28,6 +28,6 @@ pub use crate::draw_objects::Mesh;
 pub use crate::encode::{Depth, Draw, Draws, Group};
 pub use crate::gfx::context::Resources;
 pub use crate::gfx::texture2d::TextureMut;
-pub use crate::handles::{Buffer, Texture, Vertex};
+pub use crate::handles::{Buffer, IndexBuffer, Texture, Vertex};
 pub use crate::layer_composite::Composite;
 pub use crate::mesh_desc::MeshDesc;

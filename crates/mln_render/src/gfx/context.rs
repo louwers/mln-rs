@@ -125,6 +125,14 @@ impl Resources {
         crate::draw::Buffer::new(self.add_vertices(data.to_vec()))
     }
 
+    /// An index buffer of `indexes`, one segment of them over the vertices
+    /// they index.
+    pub fn index_buffer(&mut self, indexes: &[u16]) -> crate::draw::IndexBuffer {
+        let vertices = indexes.iter().max().map_or(0, |&last| usize::from(last) + 1);
+        let segments = vec![mln_gfx::shaders::segment::SegmentBase::with_lengths(0, 0, vertices, indexes.len())];
+        crate::draw::IndexBuffer { buffer: self.buffer(indexes), segments }
+    }
+
     /// A texture, which `setup` gives its format, sampler and first image.
     pub fn texture(&mut self, setup: impl FnOnce(&mut TextureMut<'_>)) -> crate::draw::Texture {
         crate::draw::Texture(self.add_texture_with(setup))
