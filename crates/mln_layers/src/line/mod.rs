@@ -2,10 +2,10 @@
 //! line and polygon features.
 
 pub(crate) mod bucket;
-pub(crate) mod dash_array_binder;
 mod dashes;
+mod layer;
+mod layout;
 pub(crate) mod mesh;
-pub(crate) mod render_layer;
 #[rustfmt::skip]
 mod properties;
 mod glsl;
@@ -15,11 +15,12 @@ pub mod programs;
 pub mod ubo;
 mod wgsl;
 
+pub use layer::LineLayer;
 use mln_style::layer_type::{LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType};
 use mln_style::property_table::{PropertyTable, PropertyVisitor};
 pub use properties::{LineLayoutProperties, LinePaintProperties};
 
-/// The `line` layer type.
+/// The `line` layer type's style half.
 pub struct Line;
 
 impl StyleLayerType for Line {
@@ -28,7 +29,7 @@ impl StyleLayerType for Line {
 
     type LayoutProperties = LineLayoutProperties::Unevaluated;
     type PaintProperties = LinePaintProperties::Transitionable;
-    type Extra = ();
+    type Data = ();
 
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {
         properties::visit(slot, visitor)

@@ -16,7 +16,7 @@ pub mod background;
 // slice: off #[doc(hidden)]
 // slice: off pub mod bench;
 pub mod circle;
-// slice: off mod color_ramp;
+mod color_ramp;
 // slice: off pub mod color_relief;
 // slice: off #[cfg(feature = "gpu-conformance")]
 // slice: off pub mod conformance;
@@ -26,7 +26,7 @@ pub mod fill;
 pub mod fill_extrusion;
 // slice: off pub mod heatmap;
 // slice: off pub mod hillshade;
-// slice: off pub mod line;
+pub mod line;
 // slice: off mod mesh;
 // slice: off mod pattern_layout;
 // slice: off pub mod raster;
@@ -44,7 +44,7 @@ pub use fill_extrusion::{
 };
 // slice: off pub use heatmap::{Heatmap, HeatmapPaintProperties};
 // slice: off pub use hillshade::{Hillshade, HillshadePaintProperties};
-// slice: off pub use line::{Line, LineLayoutProperties, LinePaintProperties};
+pub use line::{Line, LineLayer, LineLayoutProperties, LinePaintProperties};
 use mln_gfx::shaders::program::Program;
 use mln_render::{RegisterError, RegistryBuilder};
 // slice: off pub use raster::{Raster, RasterPaintProperties};
@@ -55,7 +55,7 @@ pub use symbol::{Symbol, SymbolLayer, SymbolLayoutProperties, SymbolPaintPropert
 pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
     builder.add_layer_type::<BackgroundLayer>()?;
     builder.add_layer_type::<FillLayer>()?;
-    // slice: off     builder.add_layer_type::<Line>()?;
+    builder.add_layer_type::<LineLayer>()?;
     builder.add_layer_type::<CircleLayer>()?;
     builder.add_layer_type::<FillExtrusionLayer>()?;
     // slice: off     builder.add_layer_type::<Heatmap>()?;
@@ -78,11 +78,11 @@ pub static PROGRAMS: &[&Program] = &[
     &fill::programs::FILL_OUTLINE_INSTANCED,
     &fill::programs::FILL_OUTLINE_PULLED,
     &fill::programs::FILL_OUTLINE_PATTERN_INSTANCED,
-    // slice: off     &line::programs::LINE,
-    // slice: off     &line::programs::LINE_GRADIENT,
-    // slice: off     &line::programs::LINE_PATTERN,
-    // slice: off     &line::programs::LINE_SDF,
-    // slice: off     &line::programs::LINE_GRADIENT_SDF,
+    &line::programs::LINE,
+    &line::programs::LINE_GRADIENT,
+    &line::programs::LINE_PATTERN,
+    &line::programs::LINE_SDF,
+    &line::programs::LINE_GRADIENT_SDF,
     &circle::programs::CIRCLE,
     &fill_extrusion::programs::FILL_EXTRUSION,
     &fill_extrusion::programs::FILL_EXTRUSION_INSTANCED,

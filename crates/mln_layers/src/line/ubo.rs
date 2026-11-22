@@ -1,5 +1,3 @@
-use bytemuck::{Pod, Zeroable};
-
 //
 // Line
 
@@ -171,49 +169,5 @@ mln_gfx::uniform_block! {
         pub pad0: f32,
         #[padding]
         pub pad1: f32,
-    }
-}
-
-/// Any line per-drawable uniform block, for consolidated UBOs: 128 bytes,
-/// the size of `LineSDFDrawableUBO`.
-#[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
-#[repr(C, align(16))]
-pub struct LineDrawableUnionUBO {
-    bytes: [u8; 128],
-}
-
-impl Default for LineDrawableUnionUBO {
-    fn default() -> Self {
-        Self::zeroed()
-    }
-}
-
-impl LineDrawableUnionUBO {
-    /// Assigns one union member (`drawableUBOVector[i].lineDrawableUBO = ...`).
-    pub fn set<T: Pod>(&mut self, member: &T) {
-        let src = bytemuck::bytes_of(member);
-        self.bytes[..src.len()].copy_from_slice(src);
-    }
-}
-
-/// Any line per-tile uniform block, for consolidated UBOs: 64 bytes, the
-/// size of `LinePatternTilePropsUBO`.
-#[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
-#[repr(C, align(16))]
-pub struct LineTilePropsUnionUBO {
-    bytes: [u8; 64],
-}
-
-impl Default for LineTilePropsUnionUBO {
-    fn default() -> Self {
-        Self::zeroed()
-    }
-}
-
-impl LineTilePropsUnionUBO {
-    /// Assigns one union member.
-    pub fn set<T: Pod>(&mut self, member: &T) {
-        let src = bytemuck::bytes_of(member);
-        self.bytes[..src.len()].copy_from_slice(src);
     }
 }

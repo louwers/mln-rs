@@ -1,6 +1,4 @@
 use mln_gfx::draw_mode::DrawMode;
-use mln_gfx::texture2d::SamplerState;
-use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_map_types::View;
 use mln_render::draw::{Buffer, Composite, Depth, Draw, DrawBlocks, Draws, IndexBuffer, Mesh, MeshDesc};
 use mln_render::layer::{
@@ -20,6 +18,7 @@ use super::programs::{
 use super::ubo::{
     FillDrawableUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO, FillPatternTilePropsUBO,
 };
+use crate::features::PATTERN_SAMPLER;
 
 /// A fill layer: each tile's polygons filled with a color or a pattern, and
 /// outlined.
@@ -50,15 +49,6 @@ pub enum FillTile {
 }
 
 type PatternBlocks = (FillPatternDrawableUBO, FillPatternTilePropsUBO);
-
-/// How the patterns sample their tile's atlas.
-const PATTERN_SAMPLER: SamplerState = SamplerState {
-    filter: TextureFilterType::Linear,
-    wrap_u: TextureWrapType::Clamp,
-    wrap_v: TextureWrapType::Clamp,
-    max_anisotropy: 1,
-    mipmapped: false,
-};
 
 impl Layer for FillLayer {
     type Style = Fill;

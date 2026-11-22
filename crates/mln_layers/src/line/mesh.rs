@@ -4,7 +4,9 @@
 
 use geometry::Point;
 use glam::DVec2;
-use mln_render::layer::Indexed;
+use mln_gfx::gfx_types::AttributeDataType;
+use mln_render::draw::Vertex;
+use mln_render::layer::Indexes;
 use mln_style_types::{LineCapType, LineJoinType};
 use mln_util::constants::{EXTENT, TILE_SIZE_D};
 
@@ -12,12 +14,16 @@ use mln_util::constants::{EXTENT, TILE_SIZE_D};
 /// flags in the low bits, then its extrusion and distance along the line.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
-pub(crate) struct LineLayoutVertex {
+pub(crate) struct LineVertex {
     pub(crate) a1: [i16; 2],
     pub(crate) a2: [u8; 4],
 }
 
-impl LineLayoutVertex {
+impl Vertex for LineVertex {
+    const ATTRIBUTES: &'static [AttributeDataType] = &[AttributeDataType::Short2, AttributeDataType::UByte4];
+}
+
+impl LineVertex {
     /// The vertex at `at` that the shader moves by `extrude` times half the
     /// line's width. `round` marks a round cap or join, `up` the side of the
     /// line, and the sign of `end` which way the vertex is moved along the
@@ -29,7 +35,7 @@ impl LineLayoutVertex {
         let dir = u8::from(end >= 0.0) + u8::from(end > 0.0);
         // A byte with 128 for 0, in units of 1/63.
         let byte = |v: f64| ((v * 63.0).round() + 128.0).clamp(0.0, 255.0) as u8;
-        LineLayoutVertex {
+        LineVertex {
             a1: [at.x.wrapping_mul(2) | i16::from(round), at.y.wrapping_mul(2) | i16::from(up)],
             // The direction in the low two bits, then the distance's low 6
             // bits, and its high 8 bits.
@@ -103,8 +109,8 @@ pub(crate) struct LineScratch {
 /// A line of fewer than two distinct points, or a ring of fewer than three,
 /// adds nothing.
 pub(crate) fn add_line(
-    vertices: &mut Vec<LineLayoutVertex>,
-    triangles: &mut Indexed<'_>,
+    vertices: &mut Vec<LineVertex>,
+    triangles: &mut Indexes,
     scratch: &mut LineScratch,
     line: &[Point<i16>],
     options: &LineOptions,
@@ -218,7 +224,7 @@ impl Corner {
 
 /// A triangle strip being added to a line's vertices.
 struct Strip<'a> {
-    vertices: &'a mut Vec<LineLayoutVertex>,
+    vertices: &'a mut Vec<LineVertex>,
     /// The line's first vertex, which the triangles count from.
     first: usize,
     triangles: &'a mut Vec<[u32; 3]>,
@@ -392,7 +398,7 @@ impl Strip<'_> {
             }
             None => self.distance,
         };
-        self.vertices.push(LineLayoutVertex::new(at, extrude, round, up, end, (distance * LINE_DISTANCE_SCALE) as u32));
+        self.vertices.push(LineVertex::new(at, extrude, round, up, end, (distance * LINE_DISTANCE_SCALE) as u32));
         let vertex = (self.vertices.len() - 1 - self.first) as u32;
         if let [Some(a), Some(b)] = self.last {
             self.triangles.push([a, b, vertex]);

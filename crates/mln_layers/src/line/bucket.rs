@@ -1,286 +1,79 @@
-use std::sync::{Arc, Once};
-
-use geometry::Point;
-use mln_gfx::shaders::segment::SegmentBase;
-use mln_render::globe::subdivide_line;
+use mln_gfx::gfx_types::AttributeDataType;
+use mln_render::draw::Vertex;
 use mln_render::layer::{
-    Bucket, BucketBase, CrossFadedPaintPropertyBinder, EvaluatedLayer, GeometryUpload, GeometryVec, Indexed,
-    PaintPropertyBinder,
+    Bucket, CrossFadedPaintPropertyBinder, GpuVec, Indexes, LayerBinders, PaintPropertyBinder, Upload,
 };
-use mln_style::evaluated::Evaluated;
-use mln_style::expression::{EvaluationContext, Image, Value};
-use mln_style::{PropertyEvaluationParameters, StyleValue as _};
-use mln_style_types::image::ImagePositions;
-use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
+use mln_style::expression::Image;
 use mln_util::Color;
-use mln_util::feature::numeric_value_f64;
-use mln_util::geometry::FeatureType;
-use mln_util::logging::{Event, Log};
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_vec_map::VecMap;
 
-use super::Line;
-use super::dash_array_binder::DashArrayBinder;
-use super::mesh::{LineLayoutVertex, LineOptions, add_line};
-use super::programs::{
-    ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE,
-    ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
-    ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE,
-    ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
-};
-use super::properties::{LineLayoutProperties, LinePaintProperties};
-use crate::pattern_layout::{PatternBucket, PatternLayerMap, PatternLayoutSpec};
-use crate::tessellator::Tessellator;
+use super::LinePaintProperties;
+use super::dashes::{DashAtlas, DashCap};
+use super::mesh::LineVertex;
 
 mln_render::paint_property_binders!(
     pub(crate) struct LineBinders for LinePaintProperties::PossiblyEvaluated {
-        line_blur: PaintPropertyBinder<f32> => [ID_LINE_BLUR_VERTEX_ATTRIBUTE],
-        line_color: PaintPropertyBinder<Color> => [ID_LINE_COLOR_VERTEX_ATTRIBUTE],
-        line_floor_width: PaintPropertyBinder<f32> => [ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE],
-        line_gap_width: PaintPropertyBinder<f32> => [ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE],
-        line_offset: PaintPropertyBinder<f32> => [ID_LINE_OFFSET_VERTEX_ATTRIBUTE],
-        line_opacity: PaintPropertyBinder<f32> => [ID_LINE_OPACITY_VERTEX_ATTRIBUTE],
-        line_pattern: CrossFadedPaintPropertyBinder<Image> => [ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE],
-        line_width: PaintPropertyBinder<f32> => [ID_LINE_WIDTH_VERTEX_ATTRIBUTE],
-        line_dasharray: DashArrayBinder => [ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE],
+        line_blur: PaintPropertyBinder<f32> => ["blur"],
+        line_color: PaintPropertyBinder<Color> => ["color"],
+        line_floor_width: PaintPropertyBinder<f32> => ["floorwidth"],
+        line_gap_width: PaintPropertyBinder<f32> => ["gapwidth"],
+        line_offset: PaintPropertyBinder<f32> => ["offset"],
+        line_opacity: PaintPropertyBinder<f32> => ["opacity"],
+        line_pattern: CrossFadedPaintPropertyBinder<Image> => ["pattern_from", "pattern_to"],
+        line_width: PaintPropertyBinder<f32> => ["width"],
     }
 );
 
-#[derive(Clone, mln_wire::Wire)]
+/// A tile's lines: a strip of triangles along each, whose vertices hold
+/// the direction to extrude them in.
+#[derive(Clone, Default, mln_wire::Wire)]
 pub struct LineBucket {
-    pub(crate) base: BucketBase,
-    pub(crate) layout: LineLayoutProperties::PossiblyEvaluated,
-    pub(crate) vertices: GeometryVec<LineLayoutVertex>,
-    pub(crate) triangles: GeometryVec<u16>,
-    pub(crate) segments: Vec<SegmentBase>,
-    pub(crate) paint_property_binders: VecMap<String, LineBinders>,
-    zoom: f32,
-    overscaling: u32,
-    subdivision_granularity: SubdivisionGranularitySetting,
+    pub(crate) vertices: GpuVec<LineVertex>,
+    pub(crate) triangles: Indexes,
+    pub(crate) binders: LayerBinders<LineBinders>,
+    /// The dash patterns of each layer whose `line-dasharray` differs by
+    /// feature.
+    pub(crate) dashes: Vec<FeatureDashes>,
+    /// The ends of the dash patterns that the bucket shares: round where
+    /// its `line-cap` is round for every feature.
+    pub(crate) dash_cap: DashCap,
+}
+
+/// The dash patterns of a layer's features, for a `line-dasharray` that
+/// differs by feature: an atlas of them, and where each vertex's is.
+#[derive(Clone, Default, mln_wire::Wire)]
+pub(crate) struct FeatureDashes {
+    /// The layer's id.
+    pub(crate) layer: String,
+    pub(crate) atlas: DashAtlas,
+    pub(crate) vertices: GpuVec<DashVertex>,
+}
+
+/// Where a vertex's dash pattern is in its [`DashAtlas`]: its middle row,
+/// its rows' span and its length, and a fourth float unused.
+#[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
+pub(crate) struct DashVertex(pub(crate) [f32; 4]);
+
+impl Vertex for DashVertex {
+    const ATTRIBUTES: &'static [AttributeDataType] = &[AttributeDataType::Float4];
+    const NAMES: &'static [&'static str] = &["dasharray"];
 }
 
 impl LineBucket {
-    #[must_use]
-    pub(crate) fn new(
-        layout: LineLayoutProperties::PossiblyEvaluated,
-        layer_paint_properties: &VecMap<String, Arc<EvaluatedLayer<Line>>>,
-        zoom: f32,
-        overscaling: u32,
-    ) -> Self {
-        let mut paint_property_binders = VecMap::new();
-        for (id, properties) in layer_paint_properties {
-            paint_property_binders.entry(id.clone()).or_insert_with(|| {
-                let mut binders = LineBinders::new(&properties.paint, zoom);
-                binders.line_dasharray.set_line_cap(&layout.line_cap);
-                binders
-            });
-        }
-        LineBucket {
-            base: BucketBase::default(),
-            layout,
-            vertices: GeometryVec::default(),
-            triangles: GeometryVec::default(),
-            segments: Vec::new(),
-            paint_property_binders,
-            zoom,
-            overscaling,
-            subdivision_granularity: SubdivisionGranularitySetting::none(),
-        }
-    }
-
-    /// How far outside a feature a query for `layer` still hits it, from
-    /// the layer's current values and the bucket's statistics of them.
-    pub(crate) fn query_radius(&self, layer: &EvaluatedLayer<Line>) -> f32 {
-        let evaluated = &layer.paint;
-        let binders = self.paint_property_binders.get(&layer.style.id);
-        let translate = evaluated.line_translate.uniform();
-        let offset = evaluated_or_max(
-            evaluated.line_offset.constant(),
-            LinePaintProperties::Defaults::line_offset(),
-            binders.and_then(|b| b.line_offset.max()),
-        );
-        let mut line_width = evaluated_or_max(
-            evaluated.line_width.constant(),
-            LinePaintProperties::Defaults::line_width(),
-            binders.and_then(|b| b.line_width.max()),
-        );
-        let gap_width = evaluated_or_max(
-            evaluated.line_gap_width.constant(),
-            LinePaintProperties::Defaults::line_gap_width(),
-            binders.and_then(|b| b.line_gap_width.max()),
-        );
-        if gap_width != 0.0 {
-            line_width = gap_width + 2.0 * line_width;
-        }
-
-        line_width / 2.0 + offset.abs() + (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
-    }
-
-    pub(crate) fn set_subdivision_granularity(&mut self, value: &SubdivisionGranularitySetting) {
-        self.subdivision_granularity = *value;
-    }
-
-    fn add_geometry(
-        &mut self,
-        line: &[Point<i16>],
-        feature: &dyn GeometryTileFeature,
-        canonical: &CanonicalTileID,
-        tessellator: &mut Tessellator,
-    ) {
-        let closed = feature.get_type() == FeatureType::Polygon;
-        if line.len() < if closed { 3 } else { 2 } {
-            // A line layer can't draw a source's points, such as a GeoJSON
-            // `MultiPoint`. The layer and source aren't known here.
-            static WARNED_INVALID_GEOMETRY: Once = Once::new();
-            WARNED_INVALID_GEOMETRY.call_once(|| Log::warning(Event::General, "Invalid geometry in line layer"));
-            return;
-        }
-        let granularity = self.subdivision_granularity.line.granularity_for_zoom_level(canonical.z);
-        let subdivided;
-        let line = if granularity >= 2 {
-            subdivided = subdivide_line(line, granularity);
-            &subdivided
-        } else {
-            line
-        };
-
-        let clip = match (feature.get_value("mapbox_clip_start"), feature.get_value("mapbox_clip_end")) {
-            (Some(start), Some(end)) => numeric_value_f64(&start).zip(numeric_value_f64(&end)),
-            _ => None,
-        };
-        let context =
-            EvaluationContext::with_zoom_feature(self.zoom, Some(feature)).with_canonical_tile_id(Some(canonical));
-        let options = LineOptions {
-            closed,
-            join: self.layout.line_join.evaluate(&context),
-            cap: self.layout.line_cap.evaluate(&context),
-            miter_limit: self.layout.line_miter_limit.evaluate(&context),
-            round_limit: self.layout.line_round_limit.evaluate(&context),
-            overscaling: self.overscaling,
-            clip: clip.filter(|(start, end)| start < end),
-        };
-        let mut triangles = Indexed { indexes: self.triangles.get_mut(), segments: &mut self.segments };
-        add_line(self.vertices.get_mut(), &mut triangles, &mut tessellator.line, line, &options);
-    }
-}
-
-/// A data-driven property's largest value over the bucket's features, from
-/// its binder's `statistics_max`, or else its constant value or default.
-fn evaluated_or_max(evaluated_constant: Option<f32>, default_value: f32, statistics_max: Option<f32>) -> f32 {
-    match statistics_max {
-        Some(max) => max,
-        None => evaluated_constant.unwrap_or(default_value),
-    }
-}
-
-static EMPTY_FORMATTED_SECTION: Value = Value::Null;
-
-impl PatternBucket for LineBucket {
-    fn add_feature(
-        &mut self,
-        feature: &dyn GeometryTileFeature,
-        geometry_collection: &GeometryCollection,
-        pattern_positions: &ImagePositions,
-        pattern_dependencies: &PatternLayerMap,
-        index: usize,
-        canonical: &CanonicalTileID,
-        tessellator: &mut Tessellator,
-    ) {
-        for line in geometry_collection.iter() {
-            self.add_geometry(line, feature, canonical, tessellator);
-        }
-
-        let length = self.vertices.len();
-        for (id, binders) in &mut self.paint_property_binders {
-            binders.populate_vertex_vectors(
-                feature,
-                length,
-                index,
-                pattern_positions,
-                pattern_dependencies.get(id),
-                canonical,
-                &EMPTY_FORMATTED_SECTION,
-            );
-        }
+    /// The dash patterns of the layer `layer`'s features, where its dash
+    /// array differs by feature.
+    pub(crate) fn dashes(&self, layer: &str) -> Option<&FeatureDashes> {
+        self.dashes.iter().find(|dashes| dashes.layer == layer)
     }
 }
 
 impl Bucket for LineBucket {
-    fn base(&self) -> &BucketBase {
-        &self.base
-    }
-
-    fn upload(&mut self, geometry: &mut GeometryUpload<'_>) {
-        geometry.move_vertices(&mut self.vertices);
-        geometry.move_indexes(&mut self.triangles);
-        for binders in self.paint_property_binders.values_mut() {
-            let depends_on_feature_state = binders.depends_on_feature_state();
-            geometry.move_paint(&mut binders.interleaved_vertex_buffer, depends_on_feature_state);
+    fn upload(&mut self, up: &mut Upload<'_>) {
+        up.vec(&mut self.vertices);
+        up.indexes(&mut self.triangles);
+        up.binders(&mut self.binders);
+        for dashes in &mut self.dashes {
+            up.vec(&mut dashes.vertices);
         }
-        self.base.set_uploaded(true);
-    }
-
-    fn has_data(&self) -> bool {
-        !self.segments.is_empty()
-    }
-
-    fn update(
-        &mut self,
-        states: &mln_render::layer::FeatureStates,
-        layer: &mln_tile::TileLayer<'_>,
-        layer_id: &str,
-        image_positions: &ImagePositions,
-    ) -> bool {
-        let Some(binders) = self.paint_property_binders.get_mut(layer_id) else {
-            return false;
-        };
-        binders.update_vertex_vectors(states, layer, image_positions);
-        self.base.set_uploaded(false);
-        true
-    }
-}
-
-/// The pattern layout of line layers.
-pub struct LineLayoutSpec;
-
-impl PatternLayoutSpec for LineLayoutSpec {
-    type Type = Line;
-    type Bucket = LineBucket;
-    type Layout = LineLayoutProperties::PossiblyEvaluated;
-
-    fn evaluate_layout(layer: &EvaluatedLayer<Line>, parameters: &PropertyEvaluationParameters) -> Self::Layout {
-        layer.style.layout.evaluate(parameters)
-    }
-    fn pattern_property(layer: &EvaluatedLayer<Line>) -> &Evaluated<Image> {
-        &layer.paint.line_pattern
-    }
-    /// Whether the leader's unevaluated layout sets `line-sort-key`.
-    fn sorted(leader: &EvaluatedLayer<Line>) -> bool {
-        !leader.style.layout.line_sort_key.is_undefined()
-    }
-    fn sort_key(
-        layout: &Self::Layout,
-        feature: &dyn GeometryTileFeature,
-        zoom: f32,
-        canonical: &CanonicalTileID,
-    ) -> f32 {
-        layout.line_sort_key.evaluate(
-            &EvaluationContext::with_zoom_feature(zoom, Some(feature)).with_canonical_tile_id(Some(canonical)),
-        )
-    }
-    fn constant_sort_key(layout: &Self::Layout) -> Option<f32> {
-        layout.line_sort_key.constant()
-    }
-    fn create_bucket(
-        layout: &Self::Layout,
-        layer_properties_map: &VecMap<String, Arc<EvaluatedLayer<Line>>>,
-        zoom: f32,
-        overscaling: u32,
-    ) -> LineBucket {
-        LineBucket::new(layout.clone(), layer_properties_map, zoom, overscaling)
-    }
-    fn set_subdivision_granularity(bucket: &mut LineBucket, value: &SubdivisionGranularitySetting) {
-        bucket.set_subdivision_granularity(value);
     }
 }

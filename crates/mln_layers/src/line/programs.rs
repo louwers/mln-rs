@@ -1,82 +1,57 @@
-//! The programs of the `line` layer type: the buffers,
-//! attributes, textures and paint properties of its shaders, and their
-//! sources.
+//! The programs of the `line` layer type: the buffers, attributes, textures
+//! and paint properties of its shaders, and their sources.
+//!
+//! A line draws in its color, along its layer's gradient, with its layer's
+//! pattern, or dashed: with the dash array's patterns as signed distance
+//! fields, in its color or along the gradient.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2, UByte4, UShort4};
 use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Property, Sources, Stages, Texture};
 
 use super::ubo::{
-    LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
-    LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO,
+    LineDrawableUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO, LinePatternTilePropsUBO,
+    LineSDFDrawableUBO, LineSDFTilePropsUBO,
 };
 use super::{glsl, glsl_es, msl, wgsl};
 
-// A layer binds one buffer of `LineDrawableUnionUBO`s and one of
-// `LineTilePropsUnionUBO`s for all its programs, each of which reads its own
-// block of them.
-pub(crate) const DRAWABLE: Buffer =
-    Buffer::storage_of::<LineDrawableUBO, LineDrawableUnionUBO>("drawableVector", Stages::Vertex);
-const GRADIENT_DRAWABLE: Buffer =
-    Buffer::storage_of::<LineGradientDrawableUBO, LineDrawableUnionUBO>("drawableVector", Stages::Vertex);
-const PATTERN_DRAWABLE: Buffer =
-    Buffer::storage_of::<LinePatternDrawableUBO, LineDrawableUnionUBO>("drawableVector", Stages::Vertex);
-const SDF_DRAWABLE: Buffer =
-    Buffer::storage_of::<LineSDFDrawableUBO, LineDrawableUnionUBO>("drawableVector", Stages::Vertex);
-pub(crate) const PATTERN_TILE_PROPS: Buffer =
-    Buffer::storage_of::<LinePatternTilePropsUBO, LineTilePropsUnionUBO>("tilePropsVector", Stages::Fragment);
-const SDF_TILE_PROPS: Buffer =
-    Buffer::storage_of::<LineSDFTilePropsUBO, LineTilePropsUnionUBO>("tilePropsVector", Stages::Fragment);
-const _: () = assert!(
-    DRAWABLE.id == GRADIENT_DRAWABLE.id
-        && DRAWABLE.id == PATTERN_DRAWABLE.id
-        && DRAWABLE.id == SDF_DRAWABLE.id
-        && PATTERN_TILE_PROPS.id == SDF_TILE_PROPS.id
-);
-pub(crate) const PROPS: Buffer = Buffer::uniform::<LineEvaluatedPropsUBO>("props", 0);
+const PROPS: Buffer = Buffer::uniform::<LineEvaluatedPropsUBO>("props", 0);
+const SDF_DRAWABLE: Buffer = Buffer::storage::<LineSDFDrawableUBO>("drawableVector", Stages::Vertex);
+const SDF_TILE_PROPS: Buffer = Buffer::storage::<LineSDFTilePropsUBO>("tilePropsVector", Stages::Fragment);
 
-// The ids of the programs' textures and vertex attributes.
-pub(crate) const ID_LINE_IMAGE_TEXTURE: usize = 0;
-pub(crate) const ID_LINE_DASH_TEXTURE: usize = 1;
-pub(crate) const ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE: usize = 0;
-pub(crate) const ID_LINE_DATA_VERTEX_ATTRIBUTE: usize = 1;
+/// A vertex's position, doubled, with its round and up flags in the low
+/// bits.
+const POS_NORMAL: Attribute = Attribute::new("pos_normal", Short2);
+/// A vertex's extrusion, direction and distance along the line.
+const DATA: Attribute = Attribute::new("data", UByte4);
+const COLOR: Attribute = Attribute::new("color", Float4);
+const BLUR: Attribute = Attribute::new("blur", Float2);
+const OPACITY: Attribute = Attribute::new("opacity", Float2);
+const GAP_WIDTH: Attribute = Attribute::new("gapwidth", Float2);
+const OFFSET: Attribute = Attribute::new("offset", Float2);
+const WIDTH: Attribute = Attribute::new("width", Float2);
+const FLOOR_WIDTH: Attribute = Attribute::new("floorwidth", Float2);
+const PATTERN_FROM: Attribute = Attribute::new("pattern_from", UShort4);
+const PATTERN_TO: Attribute = Attribute::new("pattern_to", UShort4);
+/// Where a feature's dash pattern is in its tile's atlas, where the dash
+/// array differs by feature.
+const DASHARRAY: Attribute = Attribute::new("dasharray", Float4);
 
-// Data-driven properties.
-pub(crate) const ID_LINE_COLOR_VERTEX_ATTRIBUTE: usize = 2;
-pub(crate) const ID_LINE_BLUR_VERTEX_ATTRIBUTE: usize = 3;
-pub(crate) const ID_LINE_OPACITY_VERTEX_ATTRIBUTE: usize = 4;
-pub(crate) const ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE: usize = 5;
-pub(crate) const ID_LINE_OFFSET_VERTEX_ATTRIBUTE: usize = 6;
-pub(crate) const ID_LINE_WIDTH_VERTEX_ATTRIBUTE: usize = 7;
-pub(crate) const ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE: usize = 8;
-pub(crate) const ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE: usize = 9;
-pub(crate) const ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE: usize = 10;
-pub(crate) const ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE: usize = 11;
-
-const LINE_PROPERTIES: &[Property] = &[
-    Property::color("color", ID_LINE_COLOR_VERTEX_ATTRIBUTE),
-    Property::float("blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    Property::float("opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    Property::float("gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    Property::float("offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    Property::float("width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-];
+const COLOR_PROPERTY: Property = Property::color("color");
+const BLUR_PROPERTY: Property = Property::float("blur");
+const OPACITY_PROPERTY: Property = Property::float("opacity");
+const GAP_WIDTH_PROPERTY: Property = Property::float("gapwidth");
+const OFFSET_PROPERTY: Property = Property::float("offset");
+const WIDTH_PROPERTY: Property = Property::float("width");
+const FLOOR_WIDTH_PROPERTY: Property = Property::float("floorwidth");
+const DASHARRAY_PROPERTY: Property = Property::vec4("dasharray");
 
 pub static LINE: Program = Program {
     name: "line",
-    buffers: &[DRAWABLE, PROPS],
-    attributes: &[
-        Attribute { id: ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, format: Short2 },
-        Attribute { id: ID_LINE_DATA_VERTEX_ATTRIBUTE, format: UByte4 },
-        Attribute { id: ID_LINE_COLOR_VERTEX_ATTRIBUTE, format: Float4 },
-        Attribute { id: ID_LINE_BLUR_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_OPACITY_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_OFFSET_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_WIDTH_VERTEX_ATTRIBUTE, format: Float2 },
-    ],
+    buffers: &[Buffer::storage::<LineDrawableUBO>("drawableVector", Stages::Vertex), PROPS],
+    attributes: &[POS_NORMAL, DATA, COLOR, BLUR, OPACITY, GAP_WIDTH, OFFSET, WIDTH],
     instance_attributes: &[],
     textures: &[],
-    properties: LINE_PROPERTIES,
+    properties: &[COLOR_PROPERTY, BLUR_PROPERTY, OPACITY_PROPERTY, GAP_WIDTH_PROPERTY, OFFSET_PROPERTY, WIDTH_PROPERTY],
     projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::LINE_SHADER)
@@ -87,25 +62,11 @@ pub static LINE: Program = Program {
 
 pub static LINE_GRADIENT: Program = Program {
     name: "line-gradient",
-    buffers: &[GRADIENT_DRAWABLE, PROPS],
-    attributes: &[
-        Attribute { id: ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, format: Short2 },
-        Attribute { id: ID_LINE_DATA_VERTEX_ATTRIBUTE, format: UByte4 },
-        Attribute { id: ID_LINE_BLUR_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_OPACITY_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_OFFSET_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_WIDTH_VERTEX_ATTRIBUTE, format: Float2 },
-    ],
+    buffers: &[Buffer::storage::<LineGradientDrawableUBO>("drawableVector", Stages::Vertex), PROPS],
+    attributes: &[POS_NORMAL, DATA, BLUR, OPACITY, GAP_WIDTH, OFFSET, WIDTH],
     instance_attributes: &[],
     textures: &[Texture::new("image")],
-    properties: &[
-        Property::float("blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-        Property::float("opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-        Property::float("gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-        Property::float("offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-        Property::float("width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-    ],
+    properties: &[BLUR_PROPERTY, OPACITY_PROPERTY, GAP_WIDTH_PROPERTY, OFFSET_PROPERTY, WIDTH_PROPERTY],
     projection: Projection::PerDraw,
     sources: Sources::NONE
         .wgsl(&wgsl::LINE_GRADIENT_SHADER)
@@ -116,28 +77,22 @@ pub static LINE_GRADIENT: Program = Program {
 
 pub static LINE_PATTERN: Program = Program {
     name: "line-pattern",
-    buffers: &[PATTERN_DRAWABLE, PATTERN_TILE_PROPS, PROPS],
-    attributes: &[
-        Attribute { id: ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, format: Short2 },
-        Attribute { id: ID_LINE_DATA_VERTEX_ATTRIBUTE, format: UByte4 },
-        Attribute { id: ID_LINE_BLUR_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_OPACITY_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_OFFSET_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_WIDTH_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, format: UShort4 },
-        Attribute { id: ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE, format: UShort4 },
+    buffers: &[
+        Buffer::storage::<LinePatternDrawableUBO>("drawableVector", Stages::Vertex),
+        Buffer::storage::<LinePatternTilePropsUBO>("tilePropsVector", Stages::Fragment),
+        PROPS,
     ],
+    attributes: &[POS_NORMAL, DATA, BLUR, OPACITY, GAP_WIDTH, OFFSET, WIDTH, PATTERN_FROM, PATTERN_TO],
     instance_attributes: &[],
     textures: &[Texture::new("image")],
     properties: &[
-        Property::float("blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-        Property::float("opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-        Property::float("gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-        Property::float("offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-        Property::float("width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-        Property::vec4("pattern_from", ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE),
-        Property::vec4("pattern_to", ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE),
+        BLUR_PROPERTY,
+        OPACITY_PROPERTY,
+        GAP_WIDTH_PROPERTY,
+        OFFSET_PROPERTY,
+        WIDTH_PROPERTY,
+        Property::vec4("pattern_from"),
+        Property::vec4("pattern_to"),
     ],
     projection: Projection::PerDraw,
     sources: Sources::NONE
@@ -150,29 +105,18 @@ pub static LINE_PATTERN: Program = Program {
 pub static LINE_SDF: Program = Program {
     name: "line-sdf",
     buffers: &[SDF_DRAWABLE, SDF_TILE_PROPS, PROPS],
-    attributes: &[
-        Attribute { id: ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, format: Short2 },
-        Attribute { id: ID_LINE_DATA_VERTEX_ATTRIBUTE, format: UByte4 },
-        Attribute { id: ID_LINE_COLOR_VERTEX_ATTRIBUTE, format: Float4 },
-        Attribute { id: ID_LINE_BLUR_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_OPACITY_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_OFFSET_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_WIDTH_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE, format: Float4 },
-    ],
+    attributes: &[POS_NORMAL, DATA, COLOR, BLUR, OPACITY, GAP_WIDTH, OFFSET, WIDTH, FLOOR_WIDTH, DASHARRAY],
     instance_attributes: &[],
     textures: &[Texture::new("image")],
     properties: &[
-        Property::color("color", ID_LINE_COLOR_VERTEX_ATTRIBUTE),
-        Property::float("blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-        Property::float("opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-        Property::float("gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-        Property::float("offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-        Property::float("width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-        Property::float("floorwidth", ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
-        Property::vec4("dasharray", ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
+        COLOR_PROPERTY,
+        BLUR_PROPERTY,
+        OPACITY_PROPERTY,
+        GAP_WIDTH_PROPERTY,
+        OFFSET_PROPERTY,
+        WIDTH_PROPERTY,
+        FLOOR_WIDTH_PROPERTY,
+        DASHARRAY_PROPERTY,
     ],
     projection: Projection::PerDraw,
     sources: Sources::NONE
@@ -185,27 +129,17 @@ pub static LINE_SDF: Program = Program {
 pub static LINE_GRADIENT_SDF: Program = Program {
     name: "line-gradient-sdf",
     buffers: &[SDF_DRAWABLE, SDF_TILE_PROPS, PROPS],
-    attributes: &[
-        Attribute { id: ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, format: Short2 },
-        Attribute { id: ID_LINE_DATA_VERTEX_ATTRIBUTE, format: UByte4 },
-        Attribute { id: ID_LINE_BLUR_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_OPACITY_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_OFFSET_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_WIDTH_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE, format: Float2 },
-        Attribute { id: ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE, format: Float4 },
-    ],
+    attributes: &[POS_NORMAL, DATA, BLUR, OPACITY, GAP_WIDTH, OFFSET, WIDTH, FLOOR_WIDTH, DASHARRAY],
     instance_attributes: &[],
     textures: &[Texture::new("image"), Texture::new("image_dash")],
     properties: &[
-        Property::float("blur", ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-        Property::float("opacity", ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-        Property::float("gapwidth", ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-        Property::float("offset", ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-        Property::float("width", ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-        Property::float("floorwidth", ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
-        Property::vec4("dasharray", ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
+        BLUR_PROPERTY,
+        OPACITY_PROPERTY,
+        GAP_WIDTH_PROPERTY,
+        OFFSET_PROPERTY,
+        WIDTH_PROPERTY,
+        FLOOR_WIDTH_PROPERTY,
+        DASHARRAY_PROPERTY,
     ],
     projection: Projection::PerDraw,
     sources: Sources::NONE

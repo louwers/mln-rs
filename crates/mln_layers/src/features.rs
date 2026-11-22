@@ -1,13 +1,25 @@
 //! How the crate's layouts order a tile's features and ask for their
-//! patterns.
+//! patterns, and how the patterns draw.
 
 use std::sync::Arc;
 
+use mln_gfx::texture2d::SamplerState;
+use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_render::layer::{EvaluatedLayer, FeaturePatterns, LayoutCx};
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::{EvaluationContext, Image};
 use mln_style::layer_type::{PaintSet, StyleLayerType};
 use mln_util::error::Error;
+
+/// How a fill's or a line's pattern samples its tile's atlas: linearly,
+/// within the pattern's padding.
+pub(crate) const PATTERN_SAMPLER: SamplerState = SamplerState {
+    filter: TextureFilterType::Linear,
+    wrap_u: TextureWrapType::Clamp,
+    wrap_v: TextureWrapType::Clamp,
+    max_anisotropy: 1,
+    mipmapped: false,
+};
 
 /// Picks a layer type's `*-pattern` property of its evaluated paint values.
 pub(crate) type Pattern<S> = fn(&<<S as StyleLayerType>::PaintProperties as PaintSet>::Evaluated) -> &Evaluated<Image>;
