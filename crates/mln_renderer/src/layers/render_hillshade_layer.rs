@@ -356,7 +356,7 @@ impl TypedLayer for RenderHillshadeLayer {
         // The illumination, which the first draw computes.
         let mut illumination = None;
         for tile in render_tiles {
-            let tile_id = tile.id();
+            let tile_id = tile.draw_id(paint_parameters);
             let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
                 continue;
             };

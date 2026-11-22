@@ -380,11 +380,11 @@ impl TypedLayer for RenderLineLayer {
         let frame = self.drawing.frame_mut();
         let paint = &self.values.evaluated.paint;
         frame.set_composite(Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform()));
-        frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.id().to_unwrapped()));
+        frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.draw_id(paint_parameters).to_unwrapped()));
 
         let render_pass = RenderPass(self.values.evaluated.render_passes & !RenderPass::Opaque.underlying_type());
         for tile in render_tiles {
-            let tile_id = tile.id();
+            let tile_id = tile.draw_id(paint_parameters);
 
             let Some(render_data) = tile.bucket_for_pass(render_pass) else {
                 self.drawing.tiles_mut().drop_value(&tile_id);

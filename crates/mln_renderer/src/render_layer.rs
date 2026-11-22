@@ -360,8 +360,8 @@ impl<'a> FrameSourceTiles<'a> {
 
     /// The tiles of `found`, as [`at`](Self::at) gives them, that overlap
     /// `tile`: it, its ancestors and its descendants, in its world copy, or
-    /// on the `globe`, which has no copies, whatever their copy, each then
-    /// drawn in `tile`'s.
+    /// on the `globe`, which has no copies, whatever their copy. A drape of
+    /// `tile` draws each in `tile`'s copy ([`FrameTile::draw_id`]).
     pub(crate) fn overlapping<T: LayerType>(
         self,
         found: &[FoundTile],
@@ -369,12 +369,7 @@ impl<'a> FrameSourceTiles<'a> {
         tile: UnwrappedTileID,
         globe: bool,
     ) -> FrameTiles<'a, T> {
-        let overlaps = self.overlaps(found, tile, globe).map(|(found, _)| found);
-        let mut tiles: FrameTiles<'a, T> = self.at(overlaps, layer_id);
-        for frame_tile in &mut tiles {
-            *frame_tile = frame_tile.in_wrap(tile.wrap);
-        }
-        tiles
+        self.at(self.overlaps(found, tile, globe).map(|(found, _)| found), layer_id)
     }
 
     /// What a layer draws of the tiles of `found` that
@@ -1126,7 +1121,7 @@ fn update_drape<L: TypedLayer>(
         None => FrameTiles::new(),
     };
     if let Some(kept) = layer.parts_mut().drawing.tiles() {
-        kept.set_tiles(tiles.iter().map(|tile| tile.id()));
+        kept.set_tiles(tiles.iter().map(|tile| tile.draw_id(parameters)));
     }
     if tiles.is_empty() {
         layer.remove_all_draws();

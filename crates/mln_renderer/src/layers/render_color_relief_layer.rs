@@ -429,7 +429,7 @@ impl TypedLayer for RenderColorReliefLayer {
         };
 
         for tile in render_tiles {
-            let tile_id = tile.id();
+            let tile_id = tile.draw_id(paint_parameters);
             let Some(mut entry) = drawing.tiles_mut().entry(&tile_id) else {
                 continue;
             };

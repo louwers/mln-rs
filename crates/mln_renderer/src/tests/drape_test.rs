@@ -203,7 +203,8 @@ fn a_drape_draws_the_tiles_that_overlap_its_tile() {
 /// On the globe, which has no world copies, a drape draws the tiles over
 /// its tile whatever their copy, in its own: near the antimeridian, a
 /// zoom 0 drape in copy 0 draws the western zoom 1 tile that the globe's
-/// cover puts in copy 1, as its west half. A Mercator drape doesn't.
+/// cover puts in copy 1, as its west half, which its key names in the
+/// drape's copy. A Mercator drape doesn't.
 #[test]
 fn a_globe_drape_draws_the_tiles_over_it_of_every_world_copy() {
     let ids = [tile(1, 1, 0, 0), tile(0, 1, 1, 0), tile(1, 2, 0, 1)];
@@ -216,11 +217,14 @@ fn a_globe_drape_draws_the_tiles_over_it_of_every_world_copy() {
     let drawn = |globe: bool| -> Vec<OverscaledTileID> {
         source.overlapping::<Fill>(&found, "fill", drape, globe).iter().map(|tile| tile.id()).collect()
     };
+    let overscaled = |ids: &[UnwrappedTileID]| -> Vec<OverscaledTileID> {
+        ids.iter().map(|id| id.overscale_to(id.canonical.z)).collect()
+    };
+    assert_eq!(overscaled(&ids), drawn(true));
+    assert_eq!(overscaled(&ids[1..2]), drawn(false));
     let in_drape = ids.map(|id| tile(0, id.canonical.z, id.canonical.x, id.canonical.y));
-    assert_eq!(in_drape.map(|id| id.overscale_to(id.canonical.z)).to_vec(), drawn(true));
-    assert_eq!(vec![ids[1].overscale_to(1)], drawn(false));
     let stamped: Vec<OverscaledTileID> = source.stamps(&found, drape, true).map(|stamp| stamp.tile).collect();
-    assert_eq!(drawn(true), stamped);
+    assert_eq!(overscaled(&in_drape), stamped);
 }
 
 /// An image drawn in the tiles `tile_ids` over the box `bounds` of their
