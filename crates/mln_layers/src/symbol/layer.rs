@@ -438,7 +438,7 @@ impl<'a> MeshParts<'a> {
             .vertices(laid.buffer(&buffer.opacity_attribute_data));
         let icon_sampler = icon_sampler.map_or_else(|| GLYPHS.into(), Sampler::clone);
         if self.kind == Kind::Text {
-            desc.paint(laid.binders(&laid.bucket.text_binders), &laid.laid_with.paint);
+            desc.paint(laid.binders(&laid.bucket.text_binders));
             if let Some(glyphs) = laid.glyph_atlas() {
                 desc.texture(glyphs, GLYPHS);
             }
@@ -448,7 +448,7 @@ impl<'a> MeshParts<'a> {
                 desc.texture(icons, &icon_sampler);
             }
         } else {
-            desc.paint(laid.binders(&laid.bucket.icon_binders), &laid.laid_with.paint);
+            desc.paint(laid.binders(&laid.bucket.icon_binders));
             if let Some(icons) = laid.icon_atlas() {
                 desc.texture(icons, icon_sampler);
             }

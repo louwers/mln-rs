@@ -82,7 +82,7 @@ impl Layer for HeatmapLayer {
         let bucket = laid.bucket;
         let mut mesh = MeshDesc::new(&HEATMAP, laid.indexes(&bucket.triangles));
         mesh.vertices(laid.buffer(&bucket.corners))
-            .paint(laid.binders(&bucket.binders), &cx.layer.evaluated.paint)
+            .paint(laid.binders(&bucket.binders))
             .blend(ColorMode::additive());
         Some(cx.res.mesh(&mesh))
     }

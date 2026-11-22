@@ -102,7 +102,7 @@ impl Layer for LineLayer {
         let (vertices, paint) = (laid.buffer(&bucket.vertices), laid.binders(&bucket.binders));
         let desc = |program| {
             let mut desc = MeshDesc::new(program, laid.indexes(&bucket.triangles));
-            desc.vertices(vertices).paint(paint, values);
+            desc.vertices(vertices).paint(paint);
             desc
         };
         let gradient = !cx.layer.unevaluated.line_gradient.get_value().is_undefined();

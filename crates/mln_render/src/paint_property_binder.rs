@@ -1047,25 +1047,26 @@ impl<P: PaintBinders> LayerBinders<P> {
 }
 
 /// A layer's binders in a tile's bucket, with the buffer that their values
-/// uploaded into, which a mesh binds
-/// ([`MeshDesc::paint`](crate::draw::MeshDesc::paint)). It reads as the
-/// binders themselves.
-pub struct PaintVertices<'a, P> {
+/// uploaded into and the layer's paint values that they were made of, which
+/// a mesh binds ([`MeshDesc::paint`](crate::draw::MeshDesc::paint)). It
+/// reads as the binders themselves.
+pub struct PaintVertices<'a, P: PaintBinders> {
     binders: &'a P,
     buffer: Option<&'a Buffer<u8>>,
+    paint: &'a P::Paint,
 }
 
-impl<P> Clone for PaintVertices<'_, P> {
+impl<P: PaintBinders> Clone for PaintVertices<'_, P> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<P> Copy for PaintVertices<'_, P> {}
+impl<P: PaintBinders> Copy for PaintVertices<'_, P> {}
 
 impl<'a, P: PaintBinders> PaintVertices<'a, P> {
-    pub(crate) fn new(binders: &'a P, buffer: Option<&'a Buffer<u8>>) -> Self {
-        PaintVertices { binders, buffer }
+    pub(crate) fn new(binders: &'a P, buffer: Option<&'a Buffer<u8>>, paint: &'a P::Paint) -> Self {
+        PaintVertices { binders, buffer, paint }
     }
 
     /// The buffer of the values, which a program that reads them itself
@@ -1084,23 +1085,23 @@ impl<'a, P: PaintBinders> PaintVertices<'a, P> {
     }
 
     /// Binds the values to `program`'s properties in `attributes`, or records
-    /// those that `paint` has the same for every feature in `uniforms`, and
-    /// returns what the engine writes of them into the draws' blocks.
+    /// those that the paint values they were made of have the same for every
+    /// feature in `uniforms`, and returns what the engine writes of them into
+    /// the draws' blocks.
     pub(crate) fn bind(
         self,
         program: &'static Program,
-        paint: &P::Paint,
         attributes: &mut Vec<(VertexStep, usize, SharedAttribute)>,
         uniforms: &mut Uniforms,
     ) -> MeshPaint {
         let shared = self.buffer.map(|buffer| &buffer.entry);
         let mut mixes = Vec::new();
-        self.binders.bind(paint, &mut Bind { program, shared, attributes, uniforms, mixes: &mut mixes });
+        self.binders.bind(self.paint, &mut Bind { program, shared, attributes, uniforms, mixes: &mut mixes });
         MeshPaint { mixes: mixes.into(), uniforms: uniforms_of::<P> }
     }
 }
 
-impl<P> std::ops::Deref for PaintVertices<'_, P> {
+impl<P: PaintBinders> std::ops::Deref for PaintVertices<'_, P> {
     type Target = P;
 
     fn deref(&self) -> &P {

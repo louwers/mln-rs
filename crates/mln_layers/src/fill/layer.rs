@@ -197,7 +197,7 @@ impl FillLayer {
         let atlas = laid.icon_atlas().filter(|_| pattern);
         let fill = (!bucket.triangles.is_empty()).then(|| {
             let mut desc = MeshDesc::new(if pattern { &FILL_PATTERN } else { &FILL }, laid.indexes(&bucket.triangles));
-            desc.vertices(vertices).paint(paint, values);
+            desc.vertices(vertices).paint(paint);
             if let Some(atlas) = atlas {
                 desc.texture(atlas, PATTERN_SAMPLER);
             }
@@ -234,7 +234,7 @@ impl FillLayer {
                     .instances(laid.buffer(&bucket.outline_ends));
                 desc
             };
-            desc.paint(paint, values);
+            desc.paint(paint);
             if let Some(atlas) = atlas {
                 desc.texture(atlas, PATTERN_SAMPLER);
             }

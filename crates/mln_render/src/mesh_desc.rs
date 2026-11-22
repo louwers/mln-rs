@@ -145,8 +145,8 @@ impl<'a> MeshDesc<'a> {
 
     /// Binds the values of the data-driven paint properties that `paint`
     /// holds to the program's attributes of the properties' names, of a
-    /// vertex or of an instance, and reads those that `values`, the layer's
-    /// evaluated paint values, has the same for every feature from their
+    /// vertex or of an instance, and reads those that the paint values the
+    /// bucket was laid out with have the same for every feature from their
     /// uniforms instead. A program without an attribute of a property's
     /// name reads its values itself, from the paint's buffer
     /// ([`PaintVertices::buffer`], [`pulled`](Self::pulled)). The engine
@@ -155,9 +155,9 @@ impl<'a> MeshDesc<'a> {
     ///
     /// A property whose attribute neither `paint` nor a buffer of the mesh
     /// binds ([`Vertex::NAMES`]) reads its uniform.
-    pub fn paint<P: PaintBinders>(&mut self, paint: PaintVertices<'a, P>, values: &P::Paint) -> &mut Self {
+    pub fn paint<P: PaintBinders>(&mut self, paint: PaintVertices<'a, P>) -> &mut Self {
         let MeshDesc { program, paint: attributes, uniforms, mesh_paint, .. } = self;
-        *mesh_paint = Some(paint.bind(program, values, attributes, uniforms));
+        *mesh_paint = Some(paint.bind(program, attributes, uniforms));
         self
     }
 

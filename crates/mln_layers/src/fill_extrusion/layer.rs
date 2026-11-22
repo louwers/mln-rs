@@ -80,7 +80,7 @@ impl Layer for FillExtrusionLayer {
         _tile: FrameTile,
         laid: LayerBucket<'_, FillExtrusion, FillExtrusionBucket>,
     ) -> Option<Vec<Part>> {
-        let (bucket, values, res) = (laid.bucket, &cx.layer.evaluated.paint, &mut *cx.res);
+        let (bucket, res) = (laid.bucket, &mut *cx.res);
         let pattern = has_pattern(cx.layer);
         let atlas = laid.icon_atlas().filter(|_| pattern).map(|atlas| (atlas, &self.patterns));
         let (vertices, paint) = (laid.buffer(&bucket.vertices), laid.binders(&bucket.binders));
@@ -88,7 +88,7 @@ impl Layer for FillExtrusionLayer {
             if pattern { &FILL_EXTRUSION_PATTERN } else { &FILL_EXTRUSION },
             laid.indexes(&bucket.triangles),
         );
-        roofs.vertices(vertices).paint(paint, values);
+        roofs.vertices(vertices).paint(paint);
         let mut parts = vec![part(res, &mut roofs, atlas)];
 
         if bucket.walls() > 0 {
@@ -96,7 +96,7 @@ impl Layer for FillExtrusionLayer {
             let mut walls = if let Some(walls) = &bucket.wall_quads {
                 let program = if pattern { &FILL_EXTRUSION_PATTERN_WALL } else { &FILL_EXTRUSION_WALL };
                 let mut desc = MeshDesc::new(program, &quads);
-                desc.vertices(laid.buffer(&walls.vertices)).paint(laid.binders(&walls.binders), values);
+                desc.vertices(laid.buffer(&walls.vertices)).paint(laid.binders(&walls.binders));
                 desc
             } else if res.caps().binds_vertex_buffers && !pattern {
                 let mut desc = MeshDesc::new(&FILL_EXTRUSION_PULLED, &quads);
@@ -104,7 +104,7 @@ impl Layer for FillExtrusionLayer {
                 if let Some(buffer) = paint.buffer() {
                     desc.pulled(buffer);
                 }
-                desc.paint(paint, values);
+                desc.paint(paint);
                 desc
             } else {
                 let program = if pattern { &FILL_EXTRUSION_PATTERN_INSTANCED } else { &FILL_EXTRUSION_INSTANCED };
@@ -113,7 +113,7 @@ impl Layer for FillExtrusionLayer {
                     .vertices(&self.corners)
                     .instances(vertices)
                     .instances_from(vertices, 1)
-                    .paint(paint, values);
+                    .paint(paint);
                 desc
             };
             parts.push(part(res, &mut walls, atlas));

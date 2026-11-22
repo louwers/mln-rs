@@ -1014,11 +1014,16 @@ impl<'a, S: StyleLayerType, B> LayerBucket<'a, S, B> {
 
     /// The layer's binders among `binders`, the bucket's, which
     /// [`BuildCx::binders`] made for each layer of the bucket's group, with
-    /// the buffer their values uploaded into ([`Upload::binders`]).
+    /// the buffer their values uploaded into ([`Upload::binders`]) and the
+    /// paint values the bucket was laid out with.
     #[must_use]
-    pub fn binders<P: PaintBinders>(self, binders: &'a LayerBinders<P>) -> PaintVertices<'a, P> {
+    pub fn binders<P: PaintBinders<Paint = <S::PaintProperties as PaintSet>::Evaluated>>(
+        self,
+        binders: &'a LayerBinders<P>,
+    ) -> PaintVertices<'a, P> {
         let of_layer = binders.of_layer(&self.laid_with.style.id).expect("binders of the bucket's layers");
-        PaintVertices::new(of_layer, self.contents.bucket_geometry.paint(of_layer.vertices()))
+        let buffer = self.contents.bucket_geometry.paint(of_layer.vertices());
+        PaintVertices::new(of_layer, buffer, &self.laid_with.paint)
     }
 
     /// The texture of the tile's atlas of glyphs, where the glyphs that its

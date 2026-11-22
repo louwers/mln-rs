@@ -45,7 +45,7 @@ impl Layer for CircleLayer {
     ) -> Option<Mesh<CircleDrawableUBO>> {
         let bucket = laid.bucket;
         let mut mesh = MeshDesc::new(&CIRCLE, laid.indexes(&bucket.triangles));
-        mesh.vertices(laid.buffer(&bucket.corners)).paint(laid.binders(&bucket.binders), &cx.layer.evaluated.paint);
+        mesh.vertices(laid.buffer(&bucket.corners)).paint(laid.binders(&bucket.binders));
         Some(cx.res.mesh(&mesh))
     }
 
