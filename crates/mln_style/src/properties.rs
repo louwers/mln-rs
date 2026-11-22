@@ -272,6 +272,25 @@ macro_rules! __property_data_driven {
     };
 }
 
+/// The [`PropertyInfo`](crate::property_table::PropertyInfo) of the paint
+/// property `$field` of the kind `$kind`.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __property_info {
+    ($field:ident, cross_faded_data_driven) => {
+        $crate::__property_info!($field, data_driven).cross_faded()
+    };
+    ($field:ident, $kind:ident) => {{
+        const NAME: [u8; ::core::stringify!($field).len()] =
+            $crate::property_table::kebab_case(::core::stringify!($field));
+        let info = $crate::property_table::PropertyInfo::paint(match ::core::str::from_utf8(&NAME) {
+            ::core::result::Result::Ok(name) => name,
+            ::core::result::Result::Err(_) => ::core::panic!("a property's name is ASCII"),
+        });
+        if $crate::__property_data_driven!($kind) { info.data_driven() } else { info }
+    }};
+}
+
 /// Declares a property set: the paint or the layout properties of a layer
 /// type, as `mod $module`, one field per property with its kind, its
 /// evaluated type and its default, followed by the paths its types and
@@ -311,6 +330,11 @@ macro_rules! __property_data_driven {
 /// A paint set's `derived { field: kind T = default => source, }` values
 /// aren't style properties: each takes `source`'s value, and transitions with
 /// the style's default transition.
+///
+/// A paint set also writes the table of a layer type without layout
+/// properties: `PROPERTIES`, each property by its field's name with `-`s,
+/// in the set's order, and `visit`, which maps its slots to the fields, for
+/// the type's [`StyleLayerType`](crate::layer_type::StyleLayerType) to name.
 ///
 /// A layer type's [`StyleLayerType`](crate::layer_type::StyleLayerType)
 /// names its sets, and maps the slots of its
@@ -353,6 +377,33 @@ macro_rules! properties {
             pub struct Unevaluated {
                 $(pub $field: $crate::properties::Transitioning<$crate::__property_value!($kind, $t)>,)+
                 $($(pub $dfield: $crate::properties::Transitioning<$crate::__property_value!($dkind, $dt)>,)+)?
+            }
+
+            /// The set's properties, by slot in the set's order: the table
+            /// of a layer type without layout properties.
+            pub static PROPERTIES: $crate::property_table::PropertyTable = {
+                const INFOS: &[$crate::property_table::PropertyInfo] = &[$($crate::__property_info!($field, $kind)),+];
+                $crate::property_table::PropertyTable::unsorted(INFOS)
+            };
+
+            /// Calls `visitor` with the field of the property in `slot` of
+            /// [`PROPERTIES`].
+            pub fn visit<T, V>(slot: usize, visitor: V) -> ::core::option::Option<V::Output>
+            where
+                T: $crate::layer_type::StyleLayerType<PaintProperties = Transitionable>,
+                V: $crate::property_table::PropertyVisitor<$crate::layer_type::LayerStyle<T>>,
+            {
+                let mut at = 0;
+                $(
+                    if slot == at {
+                        return ::core::option::Option::Some(
+                            visitor.paint(|style| &style.paint.$field, |style| &mut style.paint.$field),
+                        );
+                    }
+                    at += 1;
+                )+
+                let _ = at;
+                ::core::option::Option::None
             }
 
             #[derive(Clone, Debug, Default, $crate::__private::mln_wire::Wire)]

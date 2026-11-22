@@ -8,8 +8,8 @@ use mln_rs::layer::source::wgsl::Wgsl;
 use mln_rs::layer::{
     Attribute, Bucket, BuildCx, Color, Draw, Draws, Error, Features, FrameTile, GpuVec, HitTest, Indexes, Layer,
     LayerBinders, LayerBucket, LayerStyle, LayerTypeInfo, LayerValues, Layout, LayoutCx, Mesh, MeshDesc, NewCx,
-    NoProperties, PaintPropertyBinder, PrepareCx, Program, Projection, Property, PropertyInfo, PropertyTable,
-    PropertyVisitor, SourceKind, Sources, Stages, StyleLayerType, TileCx, TileTransform, Upload, View, Wire, program,
+    NoProperties, PaintPropertyBinder, PrepareCx, Program, Projection, Property, PropertyTable, PropertyVisitor,
+    SourceKind, Sources, Stages, StyleLayerType, TileCx, TileTransform, Upload, View, Wire, program,
 };
 
 mln_rs::layer::properties!(
@@ -22,20 +22,13 @@ pub struct Dot;
 
 impl StyleLayerType for Dot {
     const INFO: LayerTypeInfo = LayerTypeInfo { name: "dot", source: SourceKind::Geometry, from_json: true };
-    const PROPERTIES: &'static PropertyTable = &PropertyTable::new(
-        &[PropertyInfo::paint("dot-color").data_driven(), PropertyInfo::paint("dot-radius").data_driven()],
-        &[0, 1],
-    );
+    const PROPERTIES: &'static PropertyTable = &paint::PROPERTIES;
     type LayoutProperties = NoProperties;
     type PaintProperties = paint::Transitionable;
     type Data = DotData;
 
-    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, v: V) -> Option<V::Output> {
-        Some(match slot {
-            0 => v.paint(|s| &s.paint.dot_color, |s| &mut s.paint.dot_color),
-            1 => v.paint(|s| &s.paint.dot_radius, |s| &mut s.paint.dot_radius),
-            _ => return None,
-        })
+    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {
+        paint::visit(slot, visitor)
     }
 }
 

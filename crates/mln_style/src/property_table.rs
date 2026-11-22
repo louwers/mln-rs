@@ -3,7 +3,8 @@
 //! and the C API use.
 //!
 //! A layer type declares its properties with [`properties!`](crate::properties!)
-//! sets and a [`PropertyTable`]. The table lists each property's style-spec
+//! sets and a [`PropertyTable`], which a paint set writes for a type without
+//! layout properties (its `PROPERTIES` and `visit`). The table lists each property's style-spec
 //! name, whether it is paint or layout, and how its value converts
 //! ([`PropertyInfo`]); a property's slot is its index in the table. The
 //! type's [`StyleLayerType::visit_property`](crate::layer_type::StyleLayerType::visit_property)
@@ -122,7 +123,8 @@ impl PropertyInfo {
 #[derive(Debug)]
 pub struct PropertyTable {
     properties: &'static [PropertyInfo],
-    /// The slots, sorted by property name.
+    /// The slots, sorted by property name; empty for a table that finds a
+    /// name by reading them all.
     by_name: &'static [u8],
 }
 
@@ -151,9 +153,20 @@ impl PropertyTable {
         PropertyTable { properties, by_name }
     }
 
+    /// The table of `properties`, which finds a property's name by reading
+    /// them all: of a few properties, as a [`properties!`](crate::properties!)
+    /// set writes it.
+    #[must_use]
+    pub const fn unsorted(properties: &'static [PropertyInfo]) -> Self {
+        PropertyTable { properties, by_name: &[] }
+    }
+
     /// The slot of the property named `name`.
     #[must_use]
     pub(crate) fn find(&self, name: &str) -> Option<usize> {
+        if self.by_name.is_empty() {
+            return self.properties.iter().position(|property| property.name == name);
+        }
         let index = self.by_name.binary_search_by(|&slot| self.properties[usize::from(slot)].name.cmp(name)).ok()?;
         Some(usize::from(self.by_name[index]))
     }
@@ -167,6 +180,21 @@ impl PropertyTable {
         let slot = self.find(name.strip_suffix("-transition")?)?;
         (self.properties[slot].scope == PropertyScope::Paint).then_some((slot, true))
     }
+}
+
+/// `name` with each `_` a `-`, as the style spec names the property of a
+/// field: [`properties!`](crate::properties!) writes its table's names so.
+#[doc(hidden)]
+#[must_use]
+pub const fn kebab_case<const N: usize>(name: &str) -> [u8; N] {
+    let name = name.as_bytes();
+    let mut kebab = [0; N];
+    let mut i = 0;
+    while i < N {
+        kebab[i] = if name[i] == b'_' { b'-' } else { name[i] };
+        i += 1;
+    }
+    kebab
 }
 
 /// Whether `a` sorts before `b`, as `str`'s `Ord` sorts them.
