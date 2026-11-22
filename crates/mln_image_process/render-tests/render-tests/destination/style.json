@@ -115,7 +115,8 @@
       "source": "shapes",
       "filter": ["==", ["get", "kind"], "square"],
       "paint": {
-        "fill-color": "#3070c0"
+        "fill-color": "#3070c0",
+        "fill-antialias": false
       }
     },
     {

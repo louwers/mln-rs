@@ -93,7 +93,7 @@
       "filter": ["==", ["get", "kind"], "area"],
       "paint": {
         "fill-color": "#70a0e0",
-        "fill-outline-color": "#204080"
+        "fill-antialias": false
       }
     },
     {
