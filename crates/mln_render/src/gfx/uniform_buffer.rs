@@ -4,8 +4,9 @@ use mln_gfx::shaders::bindings::FIRST_VERTEX_BUFFER_ID;
 use crate::gfx::buffer::Buffer;
 use crate::gfx::resources::Device;
 
-/// Uniform and storage buffers by id, which their array owns: the owner of
-/// the array drops the bindings made of a buffer that it replaces.
+/// Uniform and storage buffers by id, which their array owns. A buffer the
+/// array replaces or loses retires the array's epoch, so that the context
+/// drops the bindings made of it before it destroys the buffer.
 #[derive(Default)]
 pub(crate) struct UniformBufferArray {
     buffers: [Option<Buffer>; FIRST_VERTEX_BUFFER_ID],
@@ -57,6 +58,9 @@ impl UniformBufferArray {
         let before = slot.as_ref().map(Buffer::id);
         let replaced = device.write_uniforms(gpu, slot, data, storage);
         if slot.as_ref().map(Buffer::id) != before {
+            if before.is_some() {
+                device.retire_uniform_epoch(self.epoch);
+            }
             self.epoch = device.next_uniform_epoch();
         }
         replaced

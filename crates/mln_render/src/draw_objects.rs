@@ -665,6 +665,16 @@ impl DrawObjects {
         self.segments = segments;
     }
 
+    /// Drops the bindings, if they were made of buffers of a uniform buffer
+    /// array at one of the `retired` epochs.
+    pub(crate) fn drop_retired_bindings(&mut self, retired: &[u64]) {
+        if let Some((_, made)) = &self.bindings
+            && [made.global, made.frame, made.own].iter().any(|epoch| retired.contains(epoch))
+        {
+            self.bindings = None;
+        }
+    }
+
     /// Writes `value` to the draw's own uniform buffer `id`, which the draw
     /// binds again where the write replaced the buffer.
     pub(crate) fn write_pod<T: bytemuck::Pod>(&mut self, gpu: &mut dyn Gpu, id: usize, value: &T, device: &mut Device) {

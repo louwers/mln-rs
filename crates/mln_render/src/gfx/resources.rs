@@ -51,6 +51,9 @@ pub(crate) struct Device {
     pub(crate) queue: Rc<ReleaseQueue>,
     /// The last epoch a uniform buffer array took.
     uniform_epoch: u64,
+    /// The epochs of arrays that since lost a buffer, whose bindings the
+    /// context drops before it destroys the buffer.
+    pub(crate) retired_epochs: Vec<u64>,
 }
 
 impl Device {
@@ -59,6 +62,13 @@ impl Device {
     pub(crate) fn next_uniform_epoch(&mut self) -> u64 {
         self.uniform_epoch += 1;
         self.uniform_epoch
+    }
+
+    /// Records that the buffers of a uniform buffer array at `epoch` aren't
+    /// all its own any more: bindings made of them go before the buffer it
+    /// lost.
+    pub(crate) fn retire_uniform_epoch(&mut self, epoch: u64) {
+        self.retired_epochs.push(epoch);
     }
 
     /// A buffer of `gpu` of `usage` holding `data`.

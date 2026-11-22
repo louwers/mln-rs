@@ -162,6 +162,14 @@ impl Context {
     /// `gpu`.
     pub(crate) fn destroy_released(&mut self, gpu: &mut dyn Gpu) {
         let Context { device, textures, indexes, vertices, meshes, releases, doomed, .. } = self;
+        // The bindings made of buffers that arrays replaced go first, in
+        // this batch, before those buffers.
+        if !device.retired_epochs.is_empty() {
+            for objects in meshes.values_mut() {
+                objects.drop_retired_bindings(&device.retired_epochs);
+            }
+            device.retired_epochs.clear();
+        }
         loop {
             device.queue.take_into(releases);
             if releases.is_empty() {

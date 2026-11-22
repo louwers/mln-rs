@@ -276,6 +276,11 @@ impl<K: Key, V> Store<K, V> {
         value
     }
 
+    /// The entries, to change, in no order.
+    pub(crate) fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
+        self.chunks.iter_mut().flat_map(|chunk| chunk.slots.iter_mut()).filter_map(|slot| slot.value.as_mut())
+    }
+
     /// Drops every entry.
     pub(crate) fn clear(&mut self) {
         self.chunks.clear();
