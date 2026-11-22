@@ -85,6 +85,46 @@ declare -A allowed=(
     # 512 px. The label hidden or missing: 1160 (RADV). Seams where DEM tiles
     # of two overscaled zooms meet: 481 (RADV).
     [terrain/symbol-height-offset-occluded-ground]=0.0012
+    # Terrain on the globe. The numbers here are WebGPU's, on RADV and on Mesa
+    # 26.0.8's lavapipe; "flat" is the same fixture before terrain drew on the
+    # globe, which drew the layers on the sphere without drapes.
+    #
+    # The planet's limb is the chords of the surface's grid, where GL JS's
+    # drawn the same way differs by single pixels: 126 of 262144 on RADV and
+    # 128 on lavapipe (flat: 171 on both).
+    [projection/globe/terrain/atmosphere/base]=0.0006
+    # As atmosphere/base: 147 (RADV), 148 (lavapipe); flat: 142, 143.
+    [projection/globe/terrain/atmosphere/light-position-map]=0.0006
+    # As atmosphere/base: 164 (RADV), 165 (lavapipe); flat: 139.
+    [projection/globe/terrain/atmosphere/ligth-position-viewport]=0.0007
+    # Past the handover, on Mercator: the far ridges at pitch 80. 44 of 65536
+    # (RADV), 48 (lavapipe), as on Mercator with no projection set.
+    [terrain/fog-sky-blend-globe]=0.0008
+    # The drapes' edges, sampled with mips and anisotropy, where the globe
+    # turns away (see above). The lines are as wide as GL JS's, where flat
+    # they were wider: 115 of 262144 (RADV), 320 (lavapipe); flat: 65 (RADV),
+    # 25 (lavapipe).
+    [projection/globe/terrain/line-spiral]=0.0013
+    # The drapes' edges: 32 (RADV), 141 (lavapipe); flat: 0, 2.
+    [projection/globe/terrain/line-translate]=0.0006
+    # The drapes' edges: 29 (RADV), 68 (lavapipe); flat: 163, 111.
+    [projection/globe/terrain/fill-planet-pitched]=0.0003
+    # The drapes' edges: 52 (RADV), 259 (lavapipe); flat: 1400, 1573.
+    [projection/globe/terrain/fill-planet-pole]=0.0011
+    # The drapes' edges: 32 (RADV), 72 (lavapipe); flat: 569, 547.
+    [projection/globe/terrain/fill-planet-tiles]=0.0003
+    # The drapes' edges: 34 (RADV), 79 (lavapipe); flat: 578, 561.
+    [projection/globe/terrain/fill-planet-tiles-no-background]=0.0004
+    # The drapes' edges: 56 (RADV), 97 (lavapipe); flat: 191, 192.
+    [projection/globe/terrain/line-gradient]=0.0004
+    # The checkers' edges sit up to 0.3 px from GL JS's in the drapes, which
+    # shows on the rows where an edge crosses a pixel's center: 240 of 65536
+    # (RADV). Lavapipe shifts every edge by about half a pixel: 1663. Flat:
+    # 587 (RADV), 544 (lavapipe). Not explained; seams show at 256 px a row.
+    [projection/globe/terrain/fill-seams/checkerboard]=0.026
+    # Its labels don't drape and draw as without terrain: 8 of 65536 (RADV),
+    # 20 on lavapipe, flat too.
+    [projection/globe/terrain/collision-icon-text-translate-map]=0.0004
 )
 
 checkout="${usage_checkout:-$PWD/../maplibre-gl-js}"
@@ -99,9 +139,7 @@ if [[ -z $commit ]]; then
     }
 fi
 
-selected='^(terrain/.*|image/.*|regressions/mapbox-gl-js#3010|sky/fog-.*|terrain-shading/default|high-pitch/terrain-pitch95|(fill-layer-blend|fill-layer-opacity|line-layer-blend|line-layer-opacity|line-opacity|raster-layer-blend)/terrain)$'
-# Terrain on the globe is out of scope.
-excluded='^terrain/fog-sky-blend-globe$'
+selected='^(terrain/.*|projection/globe/terrain/.*|image/.*|regressions/mapbox-gl-js#3010|sky/fog-.*|terrain-shading/default|high-pitch/terrain-pitch95|(fill-layer-blend|fill-layer-opacity|line-layer-blend|line-layer-opacity|line-opacity|raster-layer-blend)/terrain)$'
 
 rm -rf "$dest"
 mkdir -p "$dest/render-tests" "$dest/assets"
@@ -110,7 +148,7 @@ trap 'rm -f "$assets"' EXIT
 
 while IFS= read -r -d '' style; do
     id="$(dirname "${style#"$integration/render/tests/"}")"
-    if [[ ! $id =~ $selected || $id =~ $excluded ]]; then
+    if [[ ! $id =~ $selected ]]; then
         continue
     fi
     mkdir -p "$dest/render-tests/$id"
