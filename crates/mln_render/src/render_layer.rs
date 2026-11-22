@@ -43,8 +43,6 @@ use crate::update_parameters::UpdateParameters;
 #[derive(Clone, Copy)]
 pub(crate) struct ErasedLayerBucket<'a> {
     pub(crate) bucket: &'a dyn ErasedBucket,
-    /// The index of the bucket among the layout's buckets.
-    pub(crate) bucket_index: usize,
     /// The values of the layer that the bucket was laid out with.
     pub(crate) layer: &'a dyn ErasedEvaluatedLayer,
 }
@@ -77,7 +75,6 @@ pub(crate) struct LayerUpdate<'a> {
     pub(crate) source: Option<&'a dyn RenderSource>,
     /// What each of the source's render tiles holds, at its index.
     pub(crate) contents: &'a [Option<TileContent<'a>>],
-    pub(crate) images: &'a ImageStore,
     /// The tiles of the frame's layers, as their updates find them, which
     /// the update adds the layer's to: those the encode draws.
     pub(crate) found: &'a mut Vec<FoundTile>,
@@ -92,12 +89,6 @@ pub(crate) struct Hosted<L: Layer> {
     tile_values: TileMap<L::Tile>,
     /// The tiles that cover the view, for a layer of [`ViewCover`](crate::layer::ViewCover).
     cover: Vec<OverscaledTileID>,
-    /// What the last evaluation of the layer's values said.
-    evaluation: Evaluation,
-    /// Whether the layer draws: its evaluation says so, or since that
-    /// evaluation one of its tiles had a bucket laid out with values that
-    /// draw.
-    draws: bool,
     style_dependencies: Dependency,
     /// Whether the frame draws the layer.
     renderable: bool,
@@ -131,8 +122,6 @@ impl<L: Layer> Hosted<L> {
             layer,
             tile_values: TileMap::default(),
             cover: Vec::new(),
-            evaluation: Evaluation::NONE,
-            draws: false,
             renderable: false,
             projection_variant: ProjectionVariant::Mercator,
             found: 0..0,
@@ -185,11 +174,12 @@ impl LayerRecord {
     }
 }
 
-/// A render layer with its [`LayerRecord`]. Its own
-/// [`restyle`](Self::restyle), [`evaluate`](Self::evaluate) and
-/// [`update`](Self::update), the layer's calls that change what the record
-/// holds, take the place of the layer's and keep the record up to date. It
-/// derefs to the layer for the rest of what the engine does with it.
+/// A render layer with its [`LayerRecord`], which alone holds what the
+/// layer's evaluation says and whether it draws. Its own
+/// [`restyle`](Self::restyle), [`evaluate`](Self::evaluate),
+/// [`update`](Self::update) and [`update_draws`](Self::update_draws) take
+/// the place of the layer's, and keep and read the record. It derefs to the
+/// layer for the rest of what the engine does with it.
 pub(crate) struct RecordedLayer {
     record: LayerRecord,
     layer: Box<dyn RenderLayer>,
@@ -197,7 +187,7 @@ pub(crate) struct RecordedLayer {
 
 impl RecordedLayer {
     pub(crate) fn new(layer: Box<dyn RenderLayer>) -> RecordedLayer {
-        RecordedLayer { record: layer.record(), layer }
+        RecordedLayer { record: layer.record(Evaluation::NONE, false), layer }
     }
 
     /// What the engine reads of the layer.
@@ -208,7 +198,7 @@ impl RecordedLayer {
     /// See [`RenderLayer::restyle`].
     pub(crate) fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
         self.layer.restyle(parameters, style);
-        self.record = self.layer.record();
+        self.record = self.layer.record(self.record.evaluation, self.record.draws);
     }
 
     /// See [`RenderLayer::evaluate`].
@@ -218,10 +208,22 @@ impl RecordedLayer {
         self.record.draws = evaluation.draws;
     }
 
-    /// See [`RenderLayer::update`].
+    /// See [`RenderLayer::update`]. The layer draws from then on, until
+    /// the next evaluation, where a tile has something for it to draw.
     pub(crate) fn update(&mut self, update: &mut LayerUpdate<'_>) {
-        self.record.draws = self.layer.update(update);
-        debug_assert_eq!(self.record, self.layer.record(), "a layer's record out of step with the layer");
+        self.record.draws |= self.layer.update(update);
+    }
+
+    /// See [`RenderLayer::update_draws`].
+    pub(crate) fn update_draws(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        paint: &mut PaintParameters<'_>,
+        images: &ImageStore,
+        source: Option<FrameSourceTiles<'_>>,
+        found: &[FoundTile],
+    ) {
+        self.layer.update_draws(gpu, paint, self.record.evaluation, images, source, found);
     }
 }
 
@@ -257,8 +259,9 @@ pub(crate) trait RenderLayer: Any {
         &self.style().base().id
     }
 
-    /// The facts about the layer that the engine keeps beside it.
-    fn record(&self) -> LayerRecord;
+    /// The facts about the layer that the engine keeps beside it, with
+    /// `evaluation` and `draws` as the record holds them.
+    fn record(&self, evaluation: Evaluation, draws: bool) -> LayerRecord;
 
     /// Makes `style`, the changed style of the layer (of the same id and
     /// type), the layer's, drops its tile values and draws, which were made
@@ -271,7 +274,7 @@ pub(crate) trait RenderLayer: Any {
     fn transition(&mut self, parameters: &TransitionParameters);
 
     /// Evaluates the layer's paint values for a frame of `parameters`, and
-    /// keeps and returns what the layer says of them ([`Layer::evaluate`]).
+    /// returns what the layer says of them ([`Layer::evaluate`]).
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) -> Evaluation;
 
     /// Whether a paint value of the layer is still in transition.
@@ -282,13 +285,12 @@ pub(crate) trait RenderLayer: Any {
 
     /// The frame's update of the layer: finds the tiles of `update`'s source
     /// the layer draws, which it adds to `update.found`, or the tiles that
-    /// cover the view for a layer of no source, and draws where one of
-    /// their buckets was laid out with values that draw. Returns whether
-    /// the layer draws.
+    /// cover the view for a layer of no source. Returns whether one of
+    /// their buckets was laid out with values that draw.
     fn update(&mut self, update: &mut LayerUpdate<'_>) -> bool;
 
     /// The encode's run of the layer: drops its tile values where the
-    /// frame's projection changed, and where the layer draws, gives the
+    /// frame's projection changed, and where `evaluation` draws, gives the
     /// tiles of `source` that its update found in `found` their data, runs
     /// [`Layer::update`], [`Layer::tile`] for the tiles without a value and
     /// [`Layer::prepare`], and readies the draws it pushed.
@@ -296,6 +298,7 @@ pub(crate) trait RenderLayer: Any {
         &mut self,
         gpu: &mut dyn Gpu,
         paint: &mut PaintParameters<'_>,
+        evaluation: Evaluation,
         images: &ImageStore,
         source: Option<FrameSourceTiles<'_>>,
         found: &[FoundTile],
@@ -367,7 +370,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         Arc::<EvaluatedLayer<L::Style>>::clone(&self.values.evaluated)
     }
 
-    fn record(&self) -> LayerRecord {
+    fn record(&self, evaluation: Evaluation, draws: bool) -> LayerRecord {
         let base = self.values.style.base();
         LayerRecord {
             input: crate::layer::input_source::<L>(),
@@ -375,8 +378,8 @@ impl<L: Layer> RenderLayer for Hosted<L> {
             visible: base.visibility != VisibilityType::None,
             min_zoom: base.min_zoom,
             max_zoom: base.max_zoom,
-            evaluation: self.evaluation,
-            draws: self.draws,
+            evaluation,
+            draws,
             volume: L::VOLUME,
             places: false,
             tile_order: TileOrder::ById,
@@ -406,11 +409,10 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         if Paint::<L>::CROSSFADES {
             evaluated.crossfade = parameters.get_crossfade_parameters();
         }
-        self.evaluation = self.layer.evaluate(EvaluateCx { layer: values, parameters, evaluated: &mut evaluated });
-        self.draws = self.evaluation.draws;
-        evaluated.draws = self.evaluation.draws;
+        let evaluation = self.layer.evaluate(EvaluateCx { layer: values, parameters, evaluated: &mut evaluated });
+        evaluated.draws = evaluation.draws;
         values.evaluated = Arc::new(evaluated);
-        self.evaluation
+        evaluation
     }
 
     fn has_transition(&self) -> bool {
@@ -423,6 +425,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
 
     fn update(&mut self, update: &mut LayerUpdate<'_>) -> bool {
         let start = update.found.len();
+        let mut draws = false;
         match crate::layer::input_source::<L>() {
             SourceKind::None => {
                 let view = update.view;
@@ -457,7 +460,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
                         let found = content.and_then(|content| {
                             <L::Input as input::Find<L::Style>>::find(content, &self.values.style.id)
                         });
-                        self.draws |= found
+                        draws |= found
                             .is_some_and(|(data, _)| <L::Input as input::Find<L::Style>>::identity(data).is_some());
                         update.found.push(FoundTile { tile: index, view: found.map(|(_, place)| place) });
                         ids.push(*tile.overscaled_tile_id());
@@ -468,13 +471,14 @@ impl<L: Layer> RenderLayer for Hosted<L> {
             }
         }
         self.found = start..update.found.len();
-        self.draws
+        draws
     }
 
     fn update_draws(
         &mut self,
         gpu: &mut dyn Gpu,
         paint: &mut PaintParameters<'_>,
+        evaluation: Evaluation,
         images: &ImageStore,
         source: Option<FrameSourceTiles<'_>>,
         found: &[FoundTile],
@@ -486,8 +490,8 @@ impl<L: Layer> RenderLayer for Hosted<L> {
             self.remove_all_draws();
         }
         paint.context.set_projection_variant(variant);
-        self.frame_draws.begin(self.evaluation.opaque, paint.frame.composites_with_frame_depth);
-        if !self.evaluation.draws {
+        self.frame_draws.begin(evaluation.opaque, paint.frame.composites_with_frame_depth);
+        if !evaluation.draws {
             self.frame_draws.clear();
             return;
         }

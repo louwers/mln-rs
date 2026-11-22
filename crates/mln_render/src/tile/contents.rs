@@ -112,7 +112,7 @@ impl LayoutBuckets {
     }
 
     fn layer_bucket<'a>(&'a self, laid: &'a LaidLayer) -> ErasedLayerBucket<'a> {
-        ErasedLayerBucket { bucket: &*self.buckets[laid.bucket], bucket_index: laid.bucket, layer: &*laid.layer }
+        ErasedLayerBucket { bucket: &*self.buckets[laid.bucket], layer: &*laid.layer }
     }
 
     /// The number of layers laid out.
@@ -148,12 +148,12 @@ impl LayoutBuckets {
         self.buckets.len()
     }
 
-    /// The bucket at `index`, as [`ErasedLayerBucket::bucket_index`] gives it.
+    /// The bucket at `index`, among the layout's buckets.
     pub(crate) fn bucket_mut(&mut self, index: usize) -> Option<&mut dyn ErasedBucket> {
         Some(&mut **self.buckets.get_mut(index)?)
     }
 
-    /// The bucket at `index`, as [`ErasedLayerBucket::bucket_index`] gives it.
+    /// The bucket at `index`, among the layout's buckets.
     pub(crate) fn bucket(&self, index: usize) -> Option<&dyn ErasedBucket> {
         Some(&**self.buckets.get(index)?)
     }

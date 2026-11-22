@@ -445,7 +445,6 @@ impl RenderOrchestrator {
                 update_parameters,
                 source,
                 contents: source_contents,
-                images: self.tile_store.images(),
                 found: &mut self.found_tiles,
             });
             let record = render_layer.record();
@@ -1197,13 +1196,6 @@ impl RenderOrchestrator {
         self.layers.clear();
     }
 
-    /// Visits every render layer, in no order.
-    pub(crate) fn visit_render_layers(&mut self, mut f: impl FnMut(&mut dyn RenderLayer)) {
-        for layer in &mut self.layers {
-            f(&mut **layer);
-        }
-    }
-
     /// Makes the draws of the layers the frame draws, and of the sky and
     /// globe depth passes.
     pub(crate) fn update_layer_draws(
@@ -1235,11 +1227,6 @@ impl RenderOrchestrator {
             update_parameters,
             needs_globe_depth || self.sky_pass.has_atmosphere(),
         );
-    }
-
-    /// The render layer at `index` in the drawing order.
-    pub(crate) fn layer_mut(&mut self, index: usize) -> &mut dyn RenderLayer {
-        &mut *self.layers[index]
     }
 
     /// The planar sky, which draws before the layers, if the frame draws it.
