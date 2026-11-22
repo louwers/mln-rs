@@ -562,6 +562,12 @@ impl BindGroups {
         for info in binding_infos {
             grouped.entry(info.group).or_default().push(info);
         }
+        // A pass binds a group at its place in the pipeline's layout, so a
+        // group that a stage declares nothing of, below one it does, is
+        // there and empty: the textures of a program without buffers.
+        for group in 0..grouped.keys().copied().max().unwrap_or_default() {
+            grouped.entry(group).or_default();
+        }
 
         let mut groups = BindGroups { layouts: Vec::new(), order: Vec::new(), bindings: Vec::new() };
         for (group, mut infos) in grouped {
