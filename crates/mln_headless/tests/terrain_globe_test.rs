@@ -318,8 +318,9 @@ fn ink(image: &PremultipliedImage) -> ((f64, f64), f64) {
 /// extrusion on the ridge alike on the globe and on Mercator: each lands
 /// within a pixel of where Mercator draws it, where at sea level it would
 /// draw tens of pixels lower. The extrusion floats 20 m above the crest:
-/// where an extrusion meets the ground on the globe, the globe's depth
-/// precision rags their edge by a pixel or two.
+/// where an extrusion meets the ground on the globe, the ground cuts its
+/// foot a pixel or two differently, within the precision of the globe's
+/// vertex positions, which the shaders place in f32 to a few meters.
 #[test]
 fn standing_layers_at_zoom_14_stand_alike_on_the_globe_and_mercator() {
     let (west, east) = (offset(180.0, -600.0), offset(180.0, 600.0));
