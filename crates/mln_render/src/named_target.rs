@@ -6,6 +6,8 @@
 //! The engine reads both values from the style by their types and knows no
 //! key that holds them: an extension declares the keys
 //! ([`StyleKey`](mln_style::style_key::StyleKey)) and parses their values.
+//! A registry takes one key of each value type, so the extensions of a
+//! registry share one crate's keys of named targets.
 //!
 //! Each frame draws one pass into each named target that a layer draws into
 //! or reads, cleared to transparent, with the draws of every layer routed
@@ -39,6 +41,11 @@ use crate::paint_parameters::OpenPass;
 /// reads it, with RGBA channels of `channel`, or of unsigned bytes for half
 /// floats that the device can't draw into
 /// ([`Caps::half_float_render_targets`](mln_gfx::gpu::Caps::half_float_render_targets)).
+///
+/// On every backend, its texel at `(x, y)` is what the layers drawn into it
+/// drew at the fragment coordinate `(x, y)` of the frame, so a draw of the
+/// frame samples what lies under its fragment at the fragment's coordinate
+/// over [`Frame::target_size`](crate::layer::Frame::target_size).
 #[derive(Clone, Debug, PartialEq)]
 pub struct NamedTarget {
     /// The name that layers draw into it and read it by.

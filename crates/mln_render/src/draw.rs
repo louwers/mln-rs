@@ -35,7 +35,10 @@
 //! ([`UpdateCx::target`](crate::layer::UpdateCx::target)). The engine knows
 //! no key that holds these values: an extension declares the keys
 //! ([`StyleKey`](mln_style::style_key::StyleKey)), as the
-//! `mln_image_process` crate does, with a layer type that reads targets. A
+//! `mln_image_process` crate does, with a layer type that reads targets.
+//! A registry takes one key of each value type, so another extension whose
+//! layers draw into targets or read them registers those keys rather than
+//! its own; registering a key again changes nothing. A
 //! group draws into a named target as onto the map, with the masks of its
 //! tiles and within the frame's scissor, but each draw over the last,
 //! without the opaque pass's depth, with no composite of a blend that reads

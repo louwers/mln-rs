@@ -28,8 +28,9 @@ pub type Parse<T> = fn(&Convertible<'_>, &Arc<Functions>) -> Result<T, Error>;
 /// own type, which its reader evaluates. The style reads a value by its type
 /// ([`Style::extra`](crate::Style::extra),
 /// [`LayerBase::extra`](crate::layer_type::LayerBase::extra)), so a registry
-/// takes one key per value type. Tile workers never see a key: layout can't
-/// read one.
+/// takes one key per value type. A key is the renderer's: a layer reads it
+/// in its render half, never in its layout, to which the worker codec sends
+/// no key and which an edit of keys alone doesn't run again.
 ///
 /// A key's name is `<namespace>:<key>`, which no style spec member is.
 /// Where a member with a `:` in its name isn't a registered key of its place

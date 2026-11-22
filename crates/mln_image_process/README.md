@@ -55,7 +55,14 @@ and a style draws a glow under its roads:
 A target holds what the layers drawn into it draw in the frame, wherever they
 are among the layers, and nothing that the map doesn't. A layer of 3D geometry,
 and one whose route would make a target read what it draws, draws on the map
-instead, with a warning.
+instead, with a warning. A rendered-feature query finds a layer drawn into a
+target as if it drew on the map, even where an operation erased what it drew:
+give the query the layers it means.
+
+An extension of another crate whose layers draw into targets or read them
+registers this crate's `TARGETS` and `DESTINATION` rather than keys of its own:
+a registry takes one key of each value type, and registering a key it holds
+already changes nothing.
 
 ## Operations
 

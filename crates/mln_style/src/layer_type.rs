@@ -249,7 +249,8 @@ impl LayerBase {
     }
 
     /// The value of the layer's style key whose value type is `T`, if the
-    /// layer sets it ([`StyleKey`](crate::StyleKey)).
+    /// layer sets it ([`StyleKey`](crate::StyleKey)), for the layer's render
+    /// half: a layout doesn't read keys.
     #[must_use]
     pub fn extra<T: 'static>(&self) -> Option<&T> {
         self.extras.get()
