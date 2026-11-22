@@ -174,9 +174,8 @@
 //!   nearest ground, as its eye distance's f32 bits ([`ID_GROUND_DEPTH_TEXTURE`]).
 //!   The terrain variant reads it at the texel nearest where its anchor is
 //!   seen, as GL JS, MapLibre Native and orbis do, and fades the
-//!   feature out over GL JS's ramp in its NDC depth, scaled by the
-//!   terrain's near plane, a fiftieth of the view's height, and the frame's
-//!   far plane ([`TerrainPropsUBO::depth_factor`]), averaged with
+//!   feature out over GL JS's ramp in its NDC depth, scaled by the view's
+//!   near and far planes ([`TerrainPropsUBO::depth_factor`]), averaged with
 //!   the point 0.01 NDC above where it is hidden more than a little; where no
 //!   ground is drawn, nothing is hidden. The draws read the depth that the
 //!   frame drew: in a frame whose depth pass doesn't draw, as where its
@@ -646,10 +645,10 @@ impl RenderTerrain {
         };
         let context = &mut *parameters.context;
         let mut props = self.surface.props;
-        // The ramp's depth is the terrain's: a near plane a fiftieth of the
-        // view's height, as Mercator's under terrain, on either projection.
+        // The ramp's depth is the view's, whose near plane both projections'
+        // matrices take while terrain draws.
         let view = parameters.view;
-        let (near, far) = (f64::from(view.size().height) / 50.0, view.far_z());
+        let (near, far) = (view.near_z(), view.far_z());
         props.depth_factor = (2.0 * far * near / (far - near)) as f32;
         let tiles = dem(&cover.source_id);
         let mut textures = mln_util::hash::HashMap::default();
