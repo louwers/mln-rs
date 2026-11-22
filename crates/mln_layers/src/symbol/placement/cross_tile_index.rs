@@ -32,7 +32,7 @@ use mln_render::placement::PlacementBuckets;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::constants::EXTENT;
 use mln_util::hash::HashSet;
-use mln_vec_map::{VecMap, VecSet};
+use mln_vec_map::VecMap;
 
 use crate::symbol::bucket::SymbolBucket;
 use crate::symbol::instance::{SymbolInstance, SymbolInstancePools};
@@ -94,9 +94,9 @@ impl CrossTileSymbolIndex {
         AddLayerResult { buckets_added, buckets_removed }
     }
 
-    /// Forgets the layers not in `used_layers`.
-    pub(crate) fn prune_unused_layers(&mut self, used_layers: &VecSet<String>) {
-        self.layers.retain(|id, _| used_layers.contains(id));
+    /// Forgets the layers that `used` doesn't keep, by their ids.
+    pub(crate) fn prune_unused_layers(&mut self, used: impl Fn(&str) -> bool) {
+        self.layers.retain(|id, _| used(id));
     }
 
     /// Forgets every layer.

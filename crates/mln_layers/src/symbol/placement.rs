@@ -30,7 +30,6 @@ use mln_style::TransitionOptions;
 use mln_style_types::{SymbolAnchorType, TextWritingModeType, TranslateAnchorType};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::hash::{HashMap, HashSet};
-use mln_vec_map::VecSet;
 
 use self::context::{BucketContext, BucketOptions};
 use self::tile::TilePlacementState;
@@ -484,8 +483,8 @@ impl engine::Placement for SymbolPlacement {
                 bucket.state.just_reloaded = false;
             }
         }
-        let used: VecSet<String> = leaders(&self.layers).map(|layer| layer.id.clone()).collect();
-        self.index.prune_unused_layers(&used);
+        let layers = &self.layers;
+        self.index.prune_unused_layers(|id| leaders(layers).any(|layer| layer.id == id));
         self.update_opacities = true;
     }
 
