@@ -239,7 +239,7 @@ fn default_sprite_path() -> String {
 }
 
 fn sprite_style(sprite_path: &str) -> String {
-    format!(r#"{{"version": 8, "sprite": "{sprite_path}", "sources": {{}}, "layers": []}}"#)
+    serde_json::json!({"version": 8, "sprite": sprite_path, "sources": {}, "layers": []}).to_string()
 }
 
 fn successful_response(
