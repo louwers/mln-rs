@@ -42,13 +42,17 @@ impl<V> TileMap<V> {
     /// Makes `tiles`, in the order the layer draws them, the tiles the map
     /// keeps values of: it keeps the values of those it had, and drops the
     /// others.
-    pub(crate) fn set_tiles(&mut self, tiles: impl IntoIterator<Item = OverscaledTileID>) {
+    pub(crate) fn set_tiles(&mut self, tiles: &[OverscaledTileID]) {
+        // Most frames draw the tiles of the frame before, in its order.
+        if self.tiles.len() == tiles.len() && self.tiles.iter().zip(tiles).all(|(entry, id)| entry.id == *id) {
+            return;
+        }
         std::mem::swap(&mut self.tiles, &mut self.previous);
         self.by_id.clear();
         self.by_id.extend(self.previous.iter().enumerate().map(|(index, entry)| (entry.id, index)));
         // A frame's tens of tiles: the stable sort allocates nothing.
         self.by_id.sort_by_key(|&(id, _)| id);
-        for id in tiles {
+        for &id in tiles {
             let kept =
                 self.by_id.binary_search_by_key(&id, |&(id, _)| id).ok().map(|at| &mut self.previous[self.by_id[at].1]);
             let (made_from, value) = kept.map_or((None, None), |entry| (entry.made_from, entry.value.take()));
@@ -156,7 +160,7 @@ mod tests {
         let tile = OverscaledTileID::with_zxy(1, 0, 1, 1, 0);
         let (bucket, other_bucket) = (SimpleIdentity::new(), SimpleIdentity::new());
         let mut tiles = TileMap::<u32>::default();
-        tiles.set_tiles([tile]);
+        tiles.set_tiles(&[tile]);
         tiles.show(0, Some(bucket));
         assert!(set(&mut tiles, &tile, 1));
         tiles.show(0, Some(bucket));
@@ -177,15 +181,15 @@ mod tests {
     fn values_stay_with_their_tiles() {
         let ids: Vec<OverscaledTileID> = (0..6).map(|x| OverscaledTileID::with_zxy(3, 0, 3, x, 2)).collect();
         let mut tiles = TileMap::<u32>::default();
-        tiles.set_tiles([ids[4], ids[1], ids[2]]);
+        tiles.set_tiles(&[ids[4], ids[1], ids[2]]);
         for (index, value) in [4, 1, 2].into_iter().enumerate() {
             *tiles.get_mut(index) = Some(value);
         }
-        tiles.set_tiles([ids[5], ids[2], ids[0], ids[4], ids[3]]);
+        tiles.set_tiles(&[ids[5], ids[2], ids[0], ids[4], ids[3]]);
         let drawn: Vec<Option<u32>> = (0..tiles.len()).map(|index| *tiles.get_mut(index)).collect();
         assert_eq!(vec![None, Some(2), None, Some(4), None], drawn);
         assert!(set(&mut tiles, &ids[0], 0));
-        tiles.set_tiles([ids[4], ids[0]]);
+        tiles.set_tiles(&[ids[4], ids[0]]);
         let values: Vec<Option<u32>> = ids.iter().map(|id| get(&mut tiles, id)).collect();
         assert_eq!(vec![Some(0), None, None, None, Some(4), None], values);
         assert_eq!(Some(4), *tiles.get_mut(0));
@@ -202,11 +206,11 @@ mod tests {
         for from in 0..32 {
             for to in 0..32 {
                 tiles.clear_tiles();
-                tiles.set_tiles(subsets(from));
+                tiles.set_tiles(&subsets(from).collect::<Vec<_>>());
                 for (i, id) in ids.iter().enumerate() {
                     set(&mut tiles, id, i);
                 }
-                tiles.set_tiles(subsets(to).rev());
+                tiles.set_tiles(&subsets(to).rev().collect::<Vec<_>>());
                 let drawn: Vec<Option<usize>> = (0..tiles.len()).map(|index| *tiles.get_mut(index)).collect();
                 let expected: Vec<Option<usize>> = (0..ids.len())
                     .rev()
@@ -225,7 +229,7 @@ mod tests {
     fn values_follow_their_tiles() {
         let (tile, other) = (OverscaledTileID::with_zxy(1, 0, 1, 1, 0), OverscaledTileID::with_zxy(1, 0, 1, 0, 0));
         let mut tiles = TileMap::<u32>::default();
-        tiles.set_tiles([tile, other]);
+        tiles.set_tiles(&[tile, other]);
         assert!(set(&mut tiles, &tile, 1));
         assert!(set(&mut tiles, &other, 2));
         assert!(!set(&mut tiles, &OverscaledTileID::with_zxy(1, 0, 1, 1, 1), 3));
@@ -234,16 +238,16 @@ mod tests {
         let moved = tile.unwrap_to(1);
         assert_eq!(Some(1), get(&mut tiles, &moved));
         assert_eq!(Some(1), *tiles.get_mut(0));
-        tiles.set_tiles([moved]);
+        tiles.set_tiles(&[moved]);
         assert_eq!(None, get(&mut tiles, &other.unwrap_to(1)));
-        tiles.set_tiles([other, moved]);
+        tiles.set_tiles(&[other, moved]);
         assert_eq!(None, get(&mut tiles, &other));
         assert_eq!(Some(1), get(&mut tiles, &moved));
-        tiles.set_tiles([moved]);
+        tiles.set_tiles(&[moved]);
         assert_eq!(Some(1), get(&mut tiles, &moved));
 
         let (high, low) = (tile.unwrap_to(i16::MAX), other.unwrap_to(i16::MAX - 1));
-        tiles.set_tiles([high, low, tile]);
+        tiles.set_tiles(&[high, low, tile]);
         for (index, value) in [3, 4, 5].into_iter().enumerate() {
             *tiles.get_mut(index) = Some(value);
         }

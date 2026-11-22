@@ -82,7 +82,7 @@ impl GlobeDepthPass {
             None,
         );
 
-        caches.set_tiles(tile_cover.iter().copied());
+        caches.set_tiles(&tile_cover);
         for (index, tile_id) in tile_cover.iter().enumerate() {
             let value = caches.get_mut(index);
             if value.is_none() {

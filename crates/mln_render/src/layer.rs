@@ -470,7 +470,7 @@ pub(crate) mod input {
                 ids.push(*tile.overscaled_tile_id());
             }
         }
-        values.set_tiles(ids);
+        values.set_tiles(&ids);
         *frame = start..update.found.len();
         draws
     }
@@ -643,7 +643,7 @@ pub(crate) mod input {
             _layer_id: &str,
             values: &mut TileMap<T>,
         ) -> bool {
-            values.set_tiles([]);
+            values.set_tiles(&[]);
             false
         }
 
@@ -686,7 +686,7 @@ pub(crate) mod input {
                 max_content_elevation: 0.0,
             };
             *frame = tile_cover(&cover, zoom, ZoomRange::new(0u8, zoom), None);
-            values.set_tiles(frame.iter().copied());
+            values.set_tiles(frame);
             false
         }
 
