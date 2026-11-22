@@ -37,7 +37,7 @@ impl Layout<Circle> for CircleLayout {
             let feature = cx.feature(i)?;
             let geometry = feature.geometry()?;
             let corners = bucket.corners.get_mut();
-            let drawn = geometry.iter().flatten().copied().filter(|p| !continuous || points::in_tile(p));
+            let drawn = geometry.iter().flatten().copied().filter(|&p| !continuous || points::in_tile(p));
             points::add_quads(corners, &mut bucket.triangles, drawn);
             cx.populate(&mut bucket.binders, i, &feature, corners.len());
             cx.index(i, &geometry);

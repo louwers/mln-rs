@@ -75,8 +75,8 @@ impl ColorRamp {
 /// `global_state` for its `global-state` expressions.
 fn fill(value: &ColorRampPropertyValue, image: &mut PremultipliedImage, global_state: Option<&GlobalStateMap>) {
     let length = image.bytes();
-    for (i, pixel) in image.data.chunks_exact_mut(4).enumerate() {
+    for (i, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         let color = value.evaluate_ramp((i * 4) as f64 / length as f64, global_state);
-        pixel.copy_from_slice(&[color.r, color.g, color.b, color.a].map(|channel| (channel * 255.0).floor() as u8));
+        *pixel = [color.r, color.g, color.b, color.a].map(|channel| (channel * 255.0).floor() as u8);
     }
 }

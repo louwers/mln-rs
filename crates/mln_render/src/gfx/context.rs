@@ -48,6 +48,10 @@ use crate::render_static_data::RenderStaticData;
 use crate::tile::raster::MaskedGeometry;
 use crate::tile_mask::TileMask;
 
+/// What a tile's grid on the globe depends on: its zoom, whether it touches
+/// the north and the south pole, and the parts of it that its mask keeps.
+type GridKey = (u8, bool, bool, TileMask);
+
 /// The renderer's GPU resources: the buffers, textures and meshes that
 /// layers make and keep handles of, with what the device allows
 /// ([`caps`](Self::caps)). The renderer owns them and lends them to a
@@ -88,9 +92,9 @@ pub struct Resources {
     surfaces: HashMap<Option<(u8, bool, bool)>, TileSurface>,
     /// The surface that a whole tile's image drapes over on Mercator.
     image_quad: Option<TileSurface<ImageVertex>>,
-    /// The globe's grids of the parts of tiles that their masks keep, by
-    /// zoom, poles and mask, each with the last of `grid_uses` it served.
-    masked_grids: BTreeMap<(u8, bool, bool, TileMask), (TileSurface<ImageVertex>, u64)>,
+    /// The globe's grids of the parts of tiles that their masks keep, each
+    /// with the last of `grid_uses` it served.
+    masked_grids: BTreeMap<GridKey, (TileSurface<ImageVertex>, u64)>,
     grid_uses: u64,
     /// The indexes of quads, each four vertices after the last
     /// ([`quads`](Self::quads)), once a layer asked for them.

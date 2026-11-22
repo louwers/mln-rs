@@ -59,7 +59,7 @@ fn masked_grids_keep_those_in_use() {
     let vertices = res.image_surface(&tile, &whole, true).vertices;
     for i in 0..256u32 {
         res.image_surface(&tile, &masked(&[(4, i % 16, i / 16)]), true);
-        assert!(vertices == res.image_surface(&tile, &whole, true).vertices, "{i}");
+        assert_eq!(vertices, res.image_surface(&tile, &whole, true).vertices, "{i}");
     }
 }
 
@@ -130,7 +130,7 @@ fn on_mercator_a_tile_drapes_over_its_quad_or_its_masks_quads() {
     let mut res = Resources::detached();
     let (tile, other) = (CanonicalTileID::new(1, 0, 0), CanonicalTileID::new(3, 2, 2));
     let whole = res.image_surface(&tile, &MaskedGeometry::default(), false);
-    assert!(whole.vertices == res.image_surface(&other, &MaskedGeometry::default(), false).vertices);
+    assert_eq!(whole.vertices, res.image_surface(&other, &MaskedGeometry::default(), false).vertices);
     let (vertices, indices) = contents(&res, &whole);
     let corners: Vec<[i16; 2]> = vertices.iter().map(|vertex| vertex.position).collect();
     assert_eq!(corners, [[0, 0], [EXTENT_I16, 0], [0, EXTENT_I16], [EXTENT_I16, EXTENT_I16]]);

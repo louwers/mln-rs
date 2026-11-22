@@ -21,6 +21,6 @@ pub(crate) fn add_quads(
 }
 
 /// Whether `point` is inside its tile, rather than in a neighbor's buffer.
-pub(crate) fn in_tile(point: &Point<i16>) -> bool {
+pub(crate) fn in_tile(point: Point<i16>) -> bool {
     (0..EXTENT).contains(&i32::from(point.x)) && (0..EXTENT).contains(&i32::from(point.y))
 }

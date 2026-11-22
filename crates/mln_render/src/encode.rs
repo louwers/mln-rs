@@ -468,22 +468,24 @@ impl Draws {
     /// asked for their groups, after those of the layers below it, and
     /// clears each that it asked for, whether or not it draws into it.
     pub fn target(&mut self, target: &Target) -> &mut Group {
-        let index = match self.targets[..self.targets_used].iter().position(|(asked, _)| asked == target) {
-            Some(index) => index,
-            None => {
-                let index = self.targets_used;
-                self.targets_used += 1;
-                if index == self.targets.len() {
-                    self.targets.push((target.clone(), Group::new()));
-                } else {
-                    self.targets[index].0 = target.clone();
-                }
-                let (zoom, opaque, _) = self.frame;
-                self.targets[index].1.begin(zoom, opaque, false);
-                index
-            }
-        };
+        let asked = self.targets[..self.targets_used].iter().position(|(asked, _)| asked == target);
+        let index = asked.unwrap_or_else(|| self.begin_target(target));
         &mut self.targets[index].1
+    }
+
+    /// Starts the frame's group of `target`, in a spare group if there is
+    /// one, and returns its index.
+    fn begin_target(&mut self, target: &Target) -> usize {
+        let index = self.targets_used;
+        self.targets_used += 1;
+        if index == self.targets.len() {
+            self.targets.push((target.clone(), Group::new()));
+        } else {
+            self.targets[index].0 = target.clone();
+        }
+        let (zoom, opaque, _) = self.frame;
+        self.targets[index].1.begin(zoom, opaque, false);
+        index
     }
 
     /// Starts the layer's draws of a frame, as [`Group::begin`] does.

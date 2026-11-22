@@ -27,7 +27,7 @@ impl Layout<Heatmap> for HeatmapLayout {
             points::add_quads(
                 corners,
                 &mut bucket.triangles,
-                geometry.iter().flatten().copied().filter(points::in_tile),
+                geometry.iter().flatten().copied().filter(|&p| points::in_tile(p)),
             );
             cx.populate(&mut bucket.binders, i, &feature, corners.len());
             cx.index(i, &geometry);
