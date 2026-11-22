@@ -47,13 +47,14 @@ static float ground_height(float2 pos, float4 dem_coords, texture2d<float, acces
     };
 }
 
-/// What a standing layer's terrain variant reads of the ground:
-/// `ground_height`, and what reads the ground of its draw in its projection
-/// entry (`ProjectionUBO::ground`). Only the variant's vertex function takes
-/// the DEM texture.
+/// What a standing layer's terrain variant reads of the ground, within
+/// `#if defined(TERRAIN)`: `ground_height`, and what reads the ground of its
+/// draw in its projection entry (`ProjectionUBO::ground`). Only the variant's
+/// vertex function takes the DEM texture.
 macro_rules! standing_ground {
     () => {
         concat!(
+            "\n#if defined(TERRAIN)\n",
             ground_height!(),
             r#"
 // The height of the ground in meters at `pos`, in tile units of the draw's
@@ -62,7 +63,21 @@ static float standing_height(float2 pos, device const GroundDrawableUBO& ground,
                              texture2d<float, access::read> dem) {
     return ground_height(pos, ground.dem_coords, dem, ground.props);
 }
+#endif
+"#
+        )
+    };
+}
 
+/// What the terrain variant of a program that draws point features reads of
+/// the ground, within `#if defined(TERRAIN)`: `standing_ground`, and which of
+/// the tiles that hold a copy of a point draws it.
+macro_rules! standing_point {
+    () => {
+        concat!(
+            standing_ground!(),
+            r#"
+#if defined(TERRAIN)
 // Whether a point feature whose untranslated anchor is at `pos`, in tile
 // units, is in the draw's tile, from 0 to under the extent on both axes:
 // only the tile that holds it draws it, not a neighbour whose buffer holds a
@@ -75,18 +90,19 @@ static bool tile_holds(float2 pos) {
 static float4 ground_dropped() {
     return float4(-2.0, -2.0, -2.0, 1.0);
 }
-
+#endif
 "#
         )
     };
 }
 
 /// What a terrain variant of a program that terrain hides reads of the
-/// ground's depth: `ground_visibility`. Only the variant's vertex function
-/// takes the depth texture.
+/// ground's depth, within `#if defined(TERRAIN)`: `ground_visibility`. Only
+/// the variant's vertex function takes the depth texture.
 macro_rules! ground_visibility {
     () => {
         r#"
+#if defined(TERRAIN)
 // The eye distance of the ground drawn at `texel` of `depth`, which holds its
 // float's bits, least significant byte first; 0 where no ground is drawn.
 static float ground_depth_at(texture2d<float, access::read> depth, int2 texel) {
@@ -126,6 +142,7 @@ static float ground_visibility(float4 clip, device const GroundDrawableUBO& grou
     }
     return (visibility + ground_depth_opacity(depth, ndc + float2(0.0, 0.01), clip.w, depth_factor)) / 2.0;
 }
+#endif
 
 "#
     };
@@ -876,7 +893,7 @@ static_assert(sizeof(CircleEvaluatedPropsUBO) == 4 * 16, "wrong size");
 
 "#,
     source: concat!(
-        standing_ground!(),
+        standing_point!(),
         ground_visibility!(),
         r"
 
@@ -4057,7 +4074,7 @@ static_assert(sizeof(HeatmapEvaluatedPropsUBO) == 16, "wrong size");
 
 "#,
     source: concat!(
-        standing_ground!(),
+        standing_point!(),
         r#"
 
 struct VertexStage {
@@ -7084,7 +7101,7 @@ static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
 
 "#,
     source: concat!(
-        standing_ground!(),
+        standing_point!(),
         ground_visibility!(),
         r"
 
@@ -7382,7 +7399,7 @@ static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
 
 "#,
     source: concat!(
-        standing_ground!(),
+        standing_point!(),
         ground_visibility!(),
         r"
 
@@ -7757,7 +7774,7 @@ static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
 
 "#,
     source: concat!(
-        standing_ground!(),
+        standing_point!(),
         ground_visibility!(),
         r"
 
