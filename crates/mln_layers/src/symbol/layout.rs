@@ -742,7 +742,7 @@ impl Layout<Symbol> for SymbolLayout {
 
     /// Once its glyphs and images resolved, applies the shaping of the text
     /// that font faces draw and prepares the symbols, and has no bucket
-    /// without symbols. A layout without features has an empty bucket.
+    /// with nothing to draw.
     fn build(mut self, cx: &mut BuildCx<'_, Symbol>) -> Result<Option<SymbolBucket>, Error> {
         if !self.features.is_empty()
             && let Some(resolved) = cx.resolved()
@@ -755,7 +755,8 @@ impl Layout<Symbol> for SymbolLayout {
                 return Ok(None);
             }
         }
-        Ok(Some(self.build_bucket(cx)))
+        let bucket = self.build_bucket(cx);
+        Ok(bucket.has_data().then_some(bucket))
     }
 }
 
