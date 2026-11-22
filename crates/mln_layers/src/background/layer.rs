@@ -24,8 +24,6 @@ pub struct BackgroundLayer {
     /// A tile's four corners and its two triangles, which every tile draws
     /// with on Mercator.
     quad: Geometry,
-    /// Whether the last evaluation found the layer opaque.
-    opaque: bool,
 }
 
 /// A tile's meshes: of its color and of its pattern.
@@ -63,7 +61,6 @@ impl Layer for BackgroundLayer {
             patterns: PatternAtlas::new(cx.res),
             pattern: None,
             quad: Geometry::new(cx.res, &[[0, 0], [e, 0], [0, e], [e, e]], &[0, 1, 2, 1, 2, 3]),
-            opaque: false,
         }
     }
 
@@ -80,7 +77,6 @@ impl Layer for BackgroundLayer {
         } else {
             Evaluation::OPAQUE
         };
-        self.opaque = evaluation.opaque;
         let pattern = !paint.background_pattern.faded().from.empty();
         let solid = if pattern || opacity <= 0.0 { None } else { Some(color * opacity) };
         Evaluation { solid, ..evaluation }
@@ -123,7 +119,7 @@ impl Layer for BackgroundLayer {
         if !has_pattern {
             let color = paint.background_color.uniform().to_float_array();
             main.block(&BackgroundPropsUBO { color, opacity, ..BackgroundPropsUBO::default() });
-            let draw = Draw { opaque: self.opaque, depth: Depth::Layer { sub_layer: 0, write: true }, ..Draw::DEFAULT };
+            let draw = Draw { opaque: true, depth: Depth::Layer { sub_layer: 0, write: true }, ..Draw::DEFAULT };
             for (tile, (), meshes) in cx.tiles() {
                 let at = tile.project(cx.frame, &how);
                 main.push_at(&meshes.color, &at, draw, BackgroundDrawableUBO { matrix: at.fallback_matrix });

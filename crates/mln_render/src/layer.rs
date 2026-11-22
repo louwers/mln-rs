@@ -349,9 +349,9 @@ pub struct EvaluateCx<'a, L: Layer> {
 pub struct Evaluation {
     /// Whether the layer draws anything.
     pub draws: bool,
-    /// Whether the layer may push opaque draws
-    /// ([`Draw::opaque`](crate::draw::Draw::opaque)), which the frame draws
-    /// front to back before it blends the rest.
+    /// Whether the layer's opaque draws
+    /// ([`Draw::opaque`](crate::draw::Draw::opaque)) may draw in the opaque
+    /// pass, which the frame draws front to back before it blends the rest.
     pub opaque: bool,
     /// The one solid color the layer is, which the frame clears to instead
     /// of drawing the layer when it is the style's bottom layer.

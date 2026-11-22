@@ -69,13 +69,13 @@ pub struct Draw {
     /// draw in the order their meshes were made, and draws of one mesh in
     /// the order they were pushed.
     pub order: i64,
-    /// Whether the draw draws in the opaque pass where its layer does
-    /// (front to back, below the lowest layer of 3D geometry on a flat
-    /// map), and otherwise in the translucent pass: it draws once, in one of
-    /// the two. A draw that isn't draws in the translucent pass. Only a
-    /// layer whose evaluation says it may draw there
-    /// ([`Evaluation::opaque`](crate::layer::Evaluation::opaque)) pushes
-    /// such a draw.
+    /// Whether the draw covers what is behind it, so that it may draw in
+    /// the opaque pass: it does where its layer's evaluation says the layer
+    /// may ([`Evaluation::opaque`](crate::layer::Evaluation::opaque)) and
+    /// the layer draws there (front to back, below the lowest layer of 3D
+    /// geometry on a flat map), and otherwise in the translucent pass. It
+    /// draws once, in one of the two. A draw that isn't opaque draws in the
+    /// translucent pass.
     pub opaque: bool,
     /// How the draw tests and writes depth.
     pub depth: Depth,
@@ -192,7 +192,6 @@ impl Group {
 
     fn add<B: DrawBlocks>(&mut self, mesh: &Mesh<B>, at: Option<&TileProjection>, draw: Draw, blocks: B) -> &mut Self {
         let program = mesh.program();
-        debug_assert!(!draw.opaque || self.opaque, "an opaque draw of a layer whose evaluation draws none");
         debug_assert!(
             !draw.clip
                 || (matches!(draw.depth, Depth::Off | Depth::Layer { .. }) && at.is_some_and(|at| at.tile.is_some())),
@@ -245,13 +244,13 @@ impl Group {
         context: &mut Resources,
         tiles: impl IntoIterator<Item = UnwrappedTileID>,
     ) {
-        let Group { frame, pushes, .. } = self;
+        let Group { frame, pushes, opaque, .. } = self;
         pushes.pushed.sort_unstable_by_key(|pushed| (pushed.draw.order, pushed.seq, pushed.index));
         frame.draws.clear();
         frame.draws.extend(pushes.pushed.iter().map(|pushed| FrameDraw {
             tile: pushed.tile,
             mesh: pushed.mesh,
-            opaque: pushed.draw.opaque,
+            opaque: pushed.draw.opaque && *opaque,
             depth: pushed.draw.depth,
             clip: pushed.draw.clip,
         }));
