@@ -24,8 +24,7 @@ use crate::encode::{Depth, Draw, Group};
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::erased_source::ErasedOrigin;
 use crate::gfx::context::Resources;
-use crate::gfx::indexes::{DrawIndexes, Indexes};
-use crate::gfx::store::SharedIndexes;
+use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::globe::{subdivide_ring, surface_granularity};
@@ -69,7 +68,7 @@ const SEGMENT_QUAD: [[i16; 2]; 4] = [[0, 0], [0, 1], [1, 0], [1, 1]];
 fn segment_objects(
     context: &mut Resources,
     shader: &ShaderKey,
-    quad: &(SharedVertices, SharedIndexes),
+    quad: &(SharedVertices, SharedVertices),
     segments: impl IntoIterator<Item = Segment>,
 ) -> Option<DrawObjects> {
     let ends: Vec<[i16; 4]> = segments.into_iter().map(|[a, b]| [a.x, a.y, b.x, b.y]).collect();
@@ -149,7 +148,7 @@ pub(crate) struct DebugLayer {
     style: (Color, f32),
     /// The vertices and indexes of [`SEGMENT_QUAD`] that the overlay's
     /// draws share, once a draw needs them.
-    quad: Option<(SharedVertices, SharedIndexes)>,
+    quad: Option<(SharedVertices, SharedVertices)>,
     /// The overlay's draws, in the order they were made, which is the order
     /// they draw in.
     draws: Vec<DebugDraw>,
@@ -196,7 +195,7 @@ impl DebugLayer {
         segments: impl IntoIterator<Item = Segment>,
     ) -> bool {
         let quad = self.quad.get_or_insert_with(|| {
-            (context.add_vertices(SEGMENT_QUAD.to_vec()), context.add_indexes(Indexes::new(vec![0, 1, 2, 3])))
+            (context.add_vertices(SEGMENT_QUAD.to_vec()), context.add_vertices(vec![0u16, 1, 2, 3]))
         });
         let Some(objects) = segment_objects(context, shader, quad, segments) else {
             return false;

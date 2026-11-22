@@ -3,7 +3,6 @@ use std::rc::Rc;
 use mln_gfx::gpu::ResourceId;
 
 use crate::gfx::buffer::Buffer;
-use crate::gfx::indexes::SharedIndexes;
 use crate::gfx::release::{Release, ReleaseQueue};
 use crate::gfx::resources::SharedGpuTexture;
 use crate::gfx::store::{Shared, VerticesKey};
@@ -14,7 +13,6 @@ use crate::gfx::store::{Shared, VerticesKey};
 #[expect(dead_code, reason = "held for what it keeps, not read")]
 pub(crate) enum Held {
     Vertices(Shared<VerticesKey>),
-    Indexes(SharedIndexes),
     /// A buffer of default attribute values, which the context shares.
     Buffer(Rc<Buffer>),
     Texture(SharedGpuTexture),

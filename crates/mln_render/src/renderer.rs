@@ -24,7 +24,6 @@ use crate::layer_composite::{Composite, LayerComposite};
 use crate::paint_parameters::{OpenPass, PaintParameters};
 use crate::render_orchestrator::RenderOrchestrator;
 use crate::render_pass::RenderPass;
-use crate::render_static_data::RenderStaticData;
 use crate::renderer_event::{RenderMode, RendererEvent, RendererEvents};
 use crate::tile::worker_codec::RemoteWorkers;
 use crate::tile_matrix::to_projection_ubo;
@@ -95,8 +94,6 @@ struct Encoder {
     /// tear-down destroys after what the other fields hold.
     context: Resources,
     pixel_ratio: f32,
-    /// Reset in the tear-down, after the orchestrator.
-    static_data: RenderStaticData,
     /// Kept across frames; dropped in the tear-down.
     clip_masks: ClipMasks,
     /// What layers drawn as a whole draw into and composite with, between
@@ -156,7 +153,6 @@ impl Renderer {
             encoder: Encoder {
                 context: Resources::new(*gpu.caps(), pixel_ratio),
                 pixel_ratio,
-                static_data: RenderStaticData::default(),
                 clip_masks: ClipMasks::default(),
                 layer_composite: LayerComposite::default(),
                 shaders_replaced: false,
@@ -427,7 +423,6 @@ impl Renderer {
         drop(orchestrator);
         encoder.clip_masks = ClipMasks::default();
         encoder.layer_composite = LayerComposite::default();
-        encoder.static_data = RenderStaticData::default();
         encoder.context.tear_down(gpu);
         encoder.context.stats()
     }
@@ -459,7 +454,6 @@ impl Encoder {
             stats.num_draw_calls = 0;
             stats.num_frames += 1;
         }
-        let static_data = &self.static_data;
 
         if self.render_state == RenderState::Never {
             emit(events, RendererEvent::RenderMapStarted);
@@ -489,7 +483,6 @@ impl Encoder {
             &mut self.layer_composite,
             composites_with_frame_depth,
             &frame,
-            static_data,
             self.pixel_ratio,
             renderable_size,
             scissor,

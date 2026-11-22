@@ -1,11 +1,6 @@
-use std::cell::Cell;
-
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_util::constants;
 
-use crate::gfx::context::Resources;
-use crate::gfx::indexes::{Indexes, SharedIndexes};
-use crate::gfx::store::{IndexesKey, WeakShared};
 use crate::tile::raster::RasterLayoutVertex;
 
 /// The most quads a segment of [`RenderStaticData::quad_segments`] draws:
@@ -13,23 +8,9 @@ use crate::tile::raster::RasterLayoutVertex;
 const SEGMENT_QUADS: usize = MAX_SEGMENT_VERTICES / 4;
 
 /// The vertices and indices of the geometry the layers share.
-#[derive(Default)]
-pub struct RenderStaticData {
-    /// `quad_indexes`, while a layer holds them.
-    quad_indexes: Cell<WeakShared<IndexesKey>>,
-}
+pub struct RenderStaticData;
 
 impl RenderStaticData {
-    /// [`quad_indices`](Self::quad_indices) in `context`'s store, which the
-    /// layers that draw quads four vertices apart share: they stay in the
-    /// store while a layer holds them.
-    pub fn quad_indexes(&self, context: &mut Resources) -> SharedIndexes {
-        let held = self.quad_indexes.take().upgrade();
-        let indexes = held.unwrap_or_else(|| context.add_indexes(Indexes::new(Self::quad_indices())));
-        self.quad_indexes.set(indexes.downgrade());
-        indexes
-    }
-
     /// The tile's four corners, as position-only vertices (`a_pos`).
     #[must_use]
     pub fn tile_vertices() -> Vec<[i16; 2]> {

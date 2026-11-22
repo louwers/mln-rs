@@ -3,7 +3,8 @@ use std::sync::Arc;
 use mln_headless::HeadlessFrontend;
 use mln_map_types::{BoundOptions, ProjectionMode};
 use mln_render::tile::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
-use mln_rs::mln_layers::symbol::placement::PlacedSymbols as _;
+// slice: off
+// use mln_rs::mln_layers::symbol::placement::PlacedSymbols as _;
 use mln_runtime::map::{MapCore, MapCoreOptions};
 use mln_storage::{FileSource, FileSourceExt};
 use mln_style::Edit;
@@ -162,28 +163,36 @@ impl TestRunnerImpl for Impl {
             .collect())
     }
 
-    fn collect_placed_symbol_data(&mut self, enable: bool) {
-        self.frontend.renderer().collect_placed_symbol_data(enable);
+    // slice: off
+    fn collect_placed_symbol_data(&mut self, _enable: bool) {}
+
+    // slice: off
+    fn get_placed_symbols_data(&mut self) -> Vec<crate::runner::PlacedSymbol> {
+        Vec::new()
     }
 
-    fn get_placed_symbols_data(&mut self) -> Vec<crate::runner::PlacedSymbol> {
-        let to_box = |b: &mln_render::placement::Aabb| [b.min.x, b.min.y, b.max.x, b.max.y];
-        self.frontend
-            .renderer()
-            .placed_symbols_data()
-            .iter()
-            .map(|data| crate::runner::PlacedSymbol {
-                key: data.key.clone(),
-                text_collision_box: data.text_collision_box.as_ref().map(to_box),
-                icon_collision_box: data.icon_collision_box.as_ref().map(to_box),
-                text_placed: data.text_placed,
-                icon_placed: data.icon_placed,
-                intersects_tile_border: data.intersects_tile_border,
-                viewport_padding: data.viewport_padding,
-                layer: data.layer.clone(),
-            })
-            .collect()
-    }
+    // fn collect_placed_symbol_data(&mut self, enable: bool) {
+    //     self.frontend.renderer().collect_placed_symbol_data(enable);
+    // }
+    //
+    // fn get_placed_symbols_data(&mut self) -> Vec<crate::runner::PlacedSymbol> {
+    //     let to_box = |b: &mln_render::placement::Aabb| [b.min.x, b.min.y, b.max.x, b.max.y];
+    //     self.frontend
+    //         .renderer()
+    //         .placed_symbols_data()
+    //         .iter()
+    //         .map(|data| crate::runner::PlacedSymbol {
+    //             key: data.key.clone(),
+    //             text_collision_box: data.text_collision_box.as_ref().map(to_box),
+    //             icon_collision_box: data.icon_collision_box.as_ref().map(to_box),
+    //             text_placed: data.text_placed,
+    //             icon_placed: data.icon_placed,
+    //             intersects_tile_border: data.intersects_tile_border,
+    //             viewport_padding: data.viewport_padding,
+    //             layer: data.layer.clone(),
+    //         })
+    //         .collect()
+    // }
 
     fn jump_to(&mut self, camera: &CameraOptions) -> Result<(), MapError> {
         let camera = mln_map_types::CameraOptions {

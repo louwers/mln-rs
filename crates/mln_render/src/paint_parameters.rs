@@ -19,7 +19,6 @@ use crate::gfx::context::Resources;
 use crate::layer_composite::LayerComposite;
 use crate::render_light::EvaluatedLight;
 use crate::render_pass::RenderPass;
-use crate::render_static_data::RenderStaticData;
 
 /// A draw group drawing into the layer composite's texture, from
 /// [`PaintParameters::begin_composited`] to
@@ -160,8 +159,6 @@ pub struct Frame<'a> {
     pub pixels_to_clip: [f32; 2],
     /// The style's light, evaluated for the frame.
     pub light: &'a EvaluatedLight,
-    /// The geometry that the engine's draws share.
-    pub(crate) static_data: &'a RenderStaticData,
     /// Whether a group drawn as a whole ([`Composite`](crate::draw::Composite))
     /// can draw with the frame's depth and stencil: the frame has them, and
     /// a pass can draw into them together with the layer composite's
@@ -236,7 +233,6 @@ impl<'a> PaintParameters<'a> {
         layer_composite: &'a mut LayerComposite,
         composites_with_frame_depth: bool,
         frame: &'a FramePlan,
-        static_data: &'a RenderStaticData,
         pixel_ratio: f32,
         renderable_size: Size,
         scissor: Scissor,
@@ -259,7 +255,6 @@ impl<'a> PaintParameters<'a> {
                 target_size: renderable_size,
                 pixels_to_clip: pixels_to_gl_units,
                 light: &frame.light,
-                static_data,
                 composites_with_frame_depth,
                 placement_fade: frame.placement_fade,
                 transform: transform_params,

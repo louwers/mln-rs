@@ -28,7 +28,7 @@ use mln_util::serialization::payload::{Payload, pod};
 
 use crate::gfx::context::Resources;
 use crate::gfx::vertices::SharedVertices;
-use crate::handles::{Buffer, BufferEntry};
+use crate::handles::Buffer;
 use crate::paint_property_binder::InterleavedVertexBuffer;
 
 /// A bucket's vertices or indexes, which the engine uploads into a
@@ -217,12 +217,14 @@ impl BucketGeometry {
         self.buffer(vertices.vertices())
     }
 
-    /// Uploads `vec`, a bucket's, into a buffer of `res`, unless it uploaded
-    /// before. Where a copy of it in `copies`, the geometry of the tile's
-    /// other world copies, uploaded, this frees it and shares the copy's.
+    /// Uploads `vec`, a bucket's, into a buffer of `res`, freeing its data
+    /// unless `keep`. Where it uploaded before, or a copy of it in `copies`,
+    /// the geometry of the tile's other world copies, did, it shares that
+    /// buffer, and writes kept data over the buffer's.
     pub(crate) fn upload<V: bytemuck::Pod>(
         &mut self,
         vec: &mut GpuVec<V>,
+        keep: bool,
         copies: &[&BucketGeometry],
         res: &mut Resources,
     ) {
@@ -230,13 +232,16 @@ impl BucketGeometry {
             return;
         }
         if self.buffers.has_or_takes(vec.key, copies.iter().map(|copy| &copy.buffers)) {
-            vec.discard();
-        } else {
-            let len = vec.len();
-            let vertices = vec.store_vertices(res);
-            let buffer: Rc<dyn Any> = Rc::new(Buffer::<V>::new(BufferEntry::Vertices(vertices), len));
-            self.buffers.insert(vec.key, buffer);
+            if !keep {
+                vec.discard();
+            } else if let Some(buffer) = self.buffer(vec) {
+                res.rewrite(&buffer.entry, bytemuck::cast_slice(&vec.data()));
+            }
+            return;
         }
+        let entry = if keep { res.add_vertices(vec.data().into_owned()) } else { vec.store_vertices(res) };
+        let buffer: Rc<dyn Any> = Rc::new(Buffer::<V>::new(entry));
+        self.buffers.insert(vec.key, buffer);
     }
 
     /// Frees the room that the entries' lists keep for more, where it is

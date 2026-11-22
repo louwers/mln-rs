@@ -48,7 +48,6 @@ use crate::tile::store::{StoreEvent, TileStore};
 use crate::tile::tile_workers::PoolWorkers;
 use crate::tile::worker_codec::RemoteWorkers;
 use crate::tile_parameters::TileParameters;
-use crate::tile_values::ChangedBuckets;
 use crate::update_parameters::UpdateParameters;
 
 /// The keys whose values differ between two global state snapshots. Values
@@ -366,10 +365,7 @@ impl RenderOrchestrator {
             return None;
         }
 
-        // The buckets whose vertex data the frame's feature state and
-        // placement change, which the draws that copied it copy again.
-        let mut changed_buckets = ChangedBuckets::default();
-        self.update_render_tiles(&frame, &mut changed_buckets);
+        self.update_render_tiles(&frame);
         self.update_layer_tiles(update_parameters, &mut frame);
 
         self.place(update_parameters, &mut frame);
@@ -388,22 +384,17 @@ impl RenderOrchestrator {
             let layers: SmallVec<[&dyn RenderLayer; 8]> =
                 self.placing_layers.iter().map(|&index| &*self.layers[index]).collect();
             let mut placement_frame = ErasedFrame { layers: &layers, update_parameters, buckets: &mut self.tile_store };
-            pass.update_buckets(&mut placement_frame, &mut changed_buckets);
-        }
-        if !changed_buckets.is_empty() {
-            for layer in &mut self.layers {
-                layer.mark_changed(&changed_buckets);
-            }
+            pass.update_buckets(&mut placement_frame);
         }
 
         Some(frame)
     }
 
     /// Brings the feature state of the enabled sources' tiles to the
-    /// sources', recording the buckets it changes in `changed_buckets`, and
+    /// sources', and
     /// computes their tiles' matrices for the frame. A source that a layer
     /// of the frame draws in [`TileOrder::ByY`] sorts its tiles so.
-    fn update_render_tiles(&mut self, frame: &FramePlan, changed_buckets: &mut ChangedBuckets) {
+    fn update_render_tiles(&mut self, frame: &FramePlan) {
         let mut sorted_by_y: SmallVec<[&str; 4]> = SmallVec::new();
         for (&index, frame_layer) in &frame.layers {
             if let Some(source) = frame_layer.source.as_deref()
@@ -417,7 +408,7 @@ impl RenderOrchestrator {
         for (name, render_source) in &mut self.render_sources {
             if render_source.is_enabled() {
                 if let Some((tiles, _)) = render_source.tiles().and_then(|key| self.tile_store.source_mut(key)) {
-                    tiles.coalesce_feature_state(changed_buckets);
+                    tiles.coalesce_feature_state();
                 }
                 render_source.update_render_tiles(
                     &mut self.tile_store,

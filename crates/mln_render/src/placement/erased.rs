@@ -12,7 +12,6 @@ use super::{
 use crate::bucket::ErasedBucket;
 use crate::layer::Layer;
 use crate::render_layer::{Hosted, RenderLayer};
-use crate::tile_values::ChangedBuckets;
 use crate::update_parameters::UpdateParameters;
 
 /// The buckets of laid-out tiles, by their keys: the tile store's, or the
@@ -40,7 +39,7 @@ pub(crate) trait ErasedPlacement {
     fn place(&mut self, frame: &mut ErasedFrame<'_>, groups: CollisionGroups, fade: f32) -> Placed;
 
     /// See [`PlacementPass::update_buckets`].
-    fn update_buckets(&mut self, frame: &mut ErasedFrame<'_>, changed: &mut ChangedBuckets);
+    fn update_buckets(&mut self, frame: &mut ErasedFrame<'_>);
 
     /// See [`PlacementPass::forget_buckets`].
     fn forget_buckets(&mut self);
@@ -94,8 +93,8 @@ impl<T: Layer> ErasedPlacement for TypedPlacement<T> {
         with_context(frame, |cx| self.0.place(cx, groups, fade))
     }
 
-    fn update_buckets(&mut self, frame: &mut ErasedFrame<'_>, changed: &mut ChangedBuckets) {
-        with_context(frame, |cx| self.0.update_buckets(cx, changed));
+    fn update_buckets(&mut self, frame: &mut ErasedFrame<'_>) {
+        with_context(frame, |cx| self.0.update_buckets(cx));
     }
 
     fn forget_buckets(&mut self) {

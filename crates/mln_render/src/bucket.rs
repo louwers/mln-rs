@@ -3,7 +3,6 @@
 
 use std::any::Any;
 
-use mln_style_types::image::ImagePositions;
 use mln_tile::TileLayer;
 use mln_util::identity::SimpleIdentity;
 use mln_wire::Writer;
@@ -48,15 +47,9 @@ pub(crate) trait ErasedBucket: Any + Send {
     fn upload(&mut self, geometry: &mut BucketGeometry, copies: &[&BucketGeometry], res: &mut Resources);
 
     /// Rewrites the values of the layer `layer_id` that read feature state
-    /// for `states`, the states of `layer`'s features, and returns whether
-    /// the bucket has any, which then upload again.
-    fn update(
-        &mut self,
-        states: &FeatureStates,
-        layer: &TileLayer<'_>,
-        layer_id: &str,
-        patterns: &ImagePositions,
-    ) -> bool;
+    /// for `states`, the states of `layer`'s features. Where the bucket has
+    /// any, it uploads them again.
+    fn set_feature_state(&mut self, states: &FeatureStates, layer: &TileLayer<'_>, layer_id: &str);
 
     /// How far above the ground the bucket's highest content is raised.
     fn max_elevation(&self) -> f32;
@@ -82,20 +75,12 @@ impl<B: Bucket> ErasedBucket for Stored<B> {
         self.uploaded = true;
     }
 
-    fn update(
-        &mut self,
-        states: &FeatureStates,
-        layer: &TileLayer<'_>,
-        layer_id: &str,
-        _patterns: &ImagePositions,
-    ) -> bool {
+    fn set_feature_state(&mut self, states: &FeatureStates, layer: &TileLayer<'_>, layer_id: &str) {
         let mut upload = Upload { kind: Kind::FeatureState { states, layer, layer_id, rewrote: false } };
         self.bucket.upload(&mut upload);
-        let Kind::FeatureState { rewrote, .. } = upload.kind else { unreachable!() };
-        if rewrote {
+        if let Kind::FeatureState { rewrote: true, .. } = upload.kind {
             self.uploaded = false;
         }
-        rewrote
     }
 
     fn max_elevation(&self) -> f32 {

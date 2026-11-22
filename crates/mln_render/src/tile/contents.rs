@@ -39,7 +39,6 @@ use crate::tile::dem::DemContents;
 use crate::tile::raster::RasterContents;
 use crate::tile_mask::TileMask;
 use crate::tile_render_data::TileAtlasTextures;
-use crate::tile_values::{BucketChanges, ChangedBuckets};
 
 /// A layout's buckets, each once, and the bucket of each layer it laid out,
 /// with the values it laid the layer out with. The layers of a layout group
@@ -221,40 +220,23 @@ impl LayoutResult {
     }
 
     /// Brings the buckets' feature state to `states`, for the features of
-    /// the data they were built from; `pattern_positions` are where the
-    /// layout's patterns are in its atlas. Returns the ids of the buckets
-    /// whose vertex data changed.
-    pub(crate) fn set_feature_state(
-        &mut self,
-        states: &LayerFeatureStates,
-        pattern_positions: &ImagePositions,
-    ) -> Vec<SimpleIdentity> {
-        let mut changed = Vec::new();
+    /// the data they were built from.
+    pub(crate) fn set_feature_state(&mut self, states: &LayerFeatureStates) {
         let Some(layers) = self.feature_index.data() else {
-            return changed;
+            return;
         };
-        if states.is_empty() {
-            return changed;
-        }
         let LayoutBuckets { buckets, laid, layers: ids } = &mut self.layer_render_data;
         for (layer_id, &index) in ids.iter() {
             let laid = &laid[index];
             let source_layer_id = &laid.layer.style().base().source_layer;
+            let Some(feature_states) = states.get(source_layer_id).filter(|states| !states.is_empty()) else {
+                continue;
+            };
             // The worker got the layer from the same data.
             if let Ok(Some(source_layer)) = layers.layer(source_layer_id) {
-                let Some(feature_states) = states.get(source_layer_id) else {
-                    continue;
-                };
-                if feature_states.is_empty() {
-                    continue;
-                }
-                let bucket = &mut buckets[laid.bucket];
-                if bucket.update(feature_states, &source_layer, layer_id, pattern_positions) {
-                    changed.push(bucket.id());
-                }
+                buckets[laid.bucket].set_feature_state(feature_states, &source_layer, layer_id);
             }
         }
-        changed
     }
 }
 
@@ -424,14 +406,10 @@ impl GeometryContents {
     }
 
     /// Brings the buckets' feature state to `states`, for the features of
-    /// the data they were built from, and adds the buckets whose vertex data
-    /// that changed to `changed`.
-    pub(crate) fn set_feature_state(&mut self, states: &LayerFeatureStates, changed: &mut ChangedBuckets) {
-        let no_patterns = ImagePositions::default();
-        let pattern_positions = self.answer.atlases.as_ref().map_or(&no_patterns, |atlases| &atlases.pattern_positions);
-        for id in self.result.set_feature_state(states, pattern_positions) {
-            changed.mark(id, BucketChanges { paint: true, ..BucketChanges::default() });
-        }
+    /// the data they were built from. A bucket whose values changed uploads
+    /// them again, into the buffers its meshes read.
+    pub(crate) fn set_feature_state(&mut self, states: &LayerFeatureStates) {
+        self.result.set_feature_state(states);
     }
 
     /// The largest query radius of `layers`' buckets.

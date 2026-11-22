@@ -39,7 +39,6 @@ use crate::tile::store::{SourceInfo, StoreContext};
 use crate::tile::tile::{Tile, TileKind, TileLoadOrder, TileNecessity, TileUpdateParameters};
 use crate::tile::tile_mut::{TileMut, WorldCopy, retire};
 use crate::tile_parameters::TileParameters;
-use crate::tile_values::ChangedBuckets;
 
 /// How many times the tiles in view the cache keeps, at least.
 const VIEWS_CACHED: usize = 3;
@@ -1056,14 +1055,12 @@ impl SourceTiles {
     }
 
     /// Brings the rendered tiles' buckets up to date with the source's
-    /// feature state, and adds the buckets whose vertex data that changed to
-    /// `changed`.
-    pub(crate) fn coalesce_feature_state(&mut self, changed: &mut ChangedBuckets) {
+    /// feature state.
+    pub(crate) fn coalesce_feature_state(&mut self) {
         let keys: BTreeSet<OverscaledTileID> = self.rendered.values().map(|entry| entry.key).collect();
         let SourceTiles { info, tiles, .. } = self;
         info.feature_state.coalesce_changes(
             tiles.values_mut().filter(|slot| keys.contains(&slot.tile.id)).filter_map(|slot| slot.tile.shown.as_mut()),
-            changed,
         );
     }
 

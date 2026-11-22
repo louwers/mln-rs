@@ -10,16 +10,14 @@ use mln_util::hash::HashMap;
 use mln_vec_map::VecMap;
 
 use crate::bucket::{FeatureStates, LayerFeatureStates};
-use crate::tile_values::ChangedBuckets;
 
 /// What holds a source's feature state: a tile's buckets.
 pub(crate) trait FeatureStateTarget {
     /// The [`SourceFeatureState`] version the buckets hold; 0 for buckets
     /// that have none.
     fn feature_state_version(&mut self) -> &mut u64;
-    /// Brings the buckets to `states`, and adds those whose vertex data that
-    /// changed to `changed`.
-    fn set_feature_state(&mut self, states: &LayerFeatureStates, changed: &mut ChangedBuckets);
+    /// Brings the buckets to `states`.
+    fn set_feature_state(&mut self, states: &LayerFeatureStates);
 }
 
 /// The feature state of a map's sources, as the map's updates carry it: by
@@ -396,11 +394,9 @@ impl SourceFeatureState {
     /// version gets this frame's changes; a tile with new buckets, or one that
     /// was not rendered in a frame with changes, gets the whole state; a tile
     /// that is up to date gets nothing.
-    /// The buckets whose vertex data that changed go in `changed`.
     pub(crate) fn coalesce_changes<'a, T: FeatureStateTarget + 'a>(
         &mut self,
         tiles: impl IntoIterator<Item = &'a mut T>,
-        changed: &mut ChangedBuckets,
     ) {
         let mut changes: LayerFeatureStates = LayerFeatureStates::default();
         let state_changes = std::mem::take(&mut self.state_changes);
@@ -451,7 +447,7 @@ impl SourceFeatureState {
                 continue;
             }
             let previous = !changes.is_empty() && tile_version != 0 && tile_version + 1 == self.version;
-            tile.set_feature_state(if previous { &changes } else { &self.current_states }, changed);
+            tile.set_feature_state(if previous { &changes } else { &self.current_states });
             *tile.feature_state_version() = self.version;
         }
     }
@@ -606,7 +602,7 @@ mod tests {
         fn feature_state_version(&mut self) -> &mut u64 {
             &mut self.version
         }
-        fn set_feature_state(&mut self, states: &LayerFeatureStates, _changed: &mut ChangedBuckets) {
+        fn set_feature_state(&mut self, states: &LayerFeatureStates) {
             self.applied.borrow_mut().push(states.clone());
         }
     }
@@ -618,7 +614,7 @@ mod tests {
     }
 
     fn render_frame(state: &mut SourceFeatureState, tiles: &mut [&mut StubTile]) {
-        state.coalesce_changes(tiles.iter_mut().map(|tile| &mut **tile), &mut ChangedBuckets::default());
+        state.coalesce_changes(tiles.iter_mut().map(|tile| &mut **tile));
     }
 
     // gtest: SourceFeatureState.CoalesceChanges

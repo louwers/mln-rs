@@ -1,9 +1,11 @@
-//! The vertices that draws bind from the context's store: a bucket's, which
-//! a tile's draws share, and those a layer makes for its draws. Draws hold
-//! them as [`SharedVertices`]; only the holder of a [`TypedVertices`], who
-//! made them as dynamic vertices of a type, can replace them with new
-//! vertices of it. Only the store makes either, of the entries it adds, so a
-//! handle's count and vertex type are its entry's.
+//! The buffers that draws read from the context's store: a bucket's
+//! vertices and indexes, which a tile's draws share, and those a layer
+//! makes for its draws. Draws hold them as [`SharedVertices`]; only the
+//! holder of a [`TypedVertices`], who made them as dynamic vertices of a
+//! type, can replace them with new vertices of it. Only the store makes
+//! either, of the entries it adds, so a handle's count and vertex type are
+//! its entry's. An entry is a vertex or an index buffer as its first upload
+//! says: a GPU buffer is one or the other.
 
 use std::marker::PhantomData;
 use std::rc::Rc;
@@ -143,6 +145,12 @@ impl Vertices {
         !matches!(self.data, VertexData::Written(_) | VertexData::Freed)
     }
 
+    /// The GPU buffer, once an upload made it.
+    #[must_use]
+    pub(crate) fn buffer(&self) -> Option<BufferId> {
+        self.buffer.as_ref().map(Buffer::id)
+    }
+
     /// The bytes of the vertices while they are in wasm memory.
     #[must_use]
     pub fn bytes(&self) -> &[u8] {
@@ -175,12 +183,21 @@ impl Vertices {
         };
     }
 
-    /// The buffer of the vertices of `gpu` through `device`: made of them
-    /// by the first upload, and written over by the upload after an update,
+    /// The buffer of the vertices of `gpu` through `device`, of `usage`,
+    /// which every upload of them names: made of them by the first upload, and written over by the upload after an update,
     /// each of which frees their bytes, or keeps dynamic vertices' for the
     /// next update; `None` where there are none.
-    fn upload(&mut self, gpu: &mut dyn Gpu, device: &mut Device) -> Result<Option<BufferId>, GpuError> {
+    fn upload(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        device: &mut Device,
+        usage: BufferUsage,
+    ) -> Result<Option<BufferId>, GpuError> {
         if let Some(buffer) = &self.buffer {
+            if buffer.usage() != usage {
+                debug_assert!(false, "a buffer read as {usage:?} after it was uploaded as {:?}", buffer.usage());
+                return Err(GpuError::Invalid(format!("a {:?} buffer read as {usage:?}", buffer.usage())));
+            }
             let id = buffer.id();
             if let Some(bytes) = self.data.bytes() {
                 device.write(gpu, buffer, bytes)?;
@@ -195,13 +212,13 @@ impl Vertices {
         }
         let buffer = match &self.data {
             #[cfg(target_family = "wasm")]
-            VertexData::Host(bytes) => device.buffer_from_host(gpu, BufferUsage::Vertex, bytes)?,
+            VertexData::Host(bytes) => device.buffer_from_host(gpu, usage, bytes)?,
             data => {
                 let Some(bytes) = data.bytes() else {
                     debug_assert!(false, "vertices without data or a buffer");
                     return Err(GpuError::Invalid("vertices without data or a buffer".to_owned()));
                 };
-                device.buffer(gpu, BufferUsage::Vertex, &bytes[..size])?
+                device.buffer(gpu, usage, &bytes[..size])?
             }
         };
         let id = buffer.id();
@@ -267,15 +284,22 @@ impl VertexStore {
         entry.update(bytemuck::cast_slice(data))
     }
 
-    /// The buffer of the vertices of `shared`, as [`Vertices::upload`]
-    /// makes it.
+    /// Replaces the bytes of `shared` with `bytes`, as [`Vertices::update`]
+    /// does.
+    pub(crate) fn rewrite(&mut self, shared: &SharedVertices, bytes: &[u8]) -> bool {
+        self.0.get_mut(&shared.handle).is_some_and(|entry| entry.update(bytes))
+    }
+
+    /// The buffer of `shared`, of `usage`, as [`Vertices::upload`] makes
+    /// it.
     pub(crate) fn upload(
         &mut self,
         gpu: &mut dyn Gpu,
         device: &mut Device,
         shared: &SharedVertices,
+        usage: BufferUsage,
     ) -> Result<Option<BufferId>, GpuError> {
-        self.0.get_mut(&shared.handle).ok_or(GpuError::UnknownId("vertices"))?.upload(gpu, device)
+        self.0.get_mut(&shared.handle).ok_or(GpuError::UnknownId("vertices"))?.upload(gpu, device, usage)
     }
 
     /// Takes out the vertices `key`, whose last handle dropped.

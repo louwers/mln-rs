@@ -28,11 +28,10 @@ use mln_util::size::Size;
 
 use crate::draw_objects::{DrawObjects, Mesh};
 use crate::gfx::buffer::{self, Buffer};
-use crate::gfx::indexes::{Indexes, SharedIndexes};
 use crate::gfx::owned::{Held, Owned};
 use crate::gfx::release::{Release, destroy_order};
 use crate::gfx::resources::{Device, SharedGpuTexture};
-use crate::gfx::store::{IndexesKey, MeshKey, SharedTexture, Store, StoreKey, TextureKey};
+use crate::gfx::store::{MeshKey, SharedTexture, Store, StoreKey, TextureKey};
 use crate::gfx::texture2d::{Texture2D, TextureMut};
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::vertex_attribute::Uniforms;
@@ -66,9 +65,8 @@ pub struct Resources {
     /// The renderer's textures, which their owners and the draws that bind
     /// them hold as [`SharedTexture`]s.
     textures: Store<TextureKey, Texture2D>,
-    /// The indexes that draws share, which they hold as [`SharedIndexes`].
-    indexes: Store<IndexesKey, Indexes>,
-    /// The vertices that draws share, which they hold as [`SharedVertices`].
+    /// The vertex and index buffers that draws share, which they hold as
+    /// [`SharedVertices`].
     vertices: VertexStore,
     /// The draws' GPU objects, which their makers hold as [`Mesh`]es. Boxed,
     /// so that a draw takes its objects out of the store cheaply while it
@@ -102,7 +100,6 @@ impl Resources {
             pipelines: HashMap::default(),
             default_vertex_buffers: HashMap::default(),
             textures: Store::default(),
-            indexes: Store::default(),
             vertices: VertexStore::default(),
             meshes: Store::default(),
             next_mesh_seq: 0,
@@ -125,8 +122,7 @@ impl Resources {
 
     /// A buffer of `data`.
     pub fn buffer<V: bytemuck::Pod>(&mut self, data: &[V]) -> crate::draw::Buffer<V> {
-        let vertices = self.add_vertices(data.to_vec());
-        crate::draw::Buffer::new(crate::handles::BufferEntry::Vertices(vertices), data.len())
+        crate::draw::Buffer::new(self.add_vertices(data.to_vec()))
     }
 
     /// A texture, which `setup` gives its format, sampler and first image.
@@ -200,7 +196,7 @@ impl Resources {
     /// dropped keeps its GPU memory until then. Not while a pass is open on
     /// `gpu`.
     pub(crate) fn destroy_released(&mut self, gpu: &mut dyn Gpu) {
-        let Resources { device, textures, indexes, vertices, meshes, releases, doomed, .. } = self;
+        let Resources { device, textures, vertices, meshes, releases, doomed, .. } = self;
         // The bindings made of buffers that arrays replaced go first, in
         // this batch, before those buffers.
         if !device.retired_epochs.is_empty() {
@@ -218,7 +214,6 @@ impl Resources {
                 match release {
                     Release::Resource(resource) => doomed.push(resource),
                     Release::Entry(StoreKey::Texture(key)) => drop(textures.remove(key)),
-                    Release::Entry(StoreKey::Indexes(key)) => drop(indexes.remove(key)),
                     Release::Entry(StoreKey::Vertices(key)) => drop(vertices.remove(key)),
                     // What the objects hold goes to the queue as they drop,
                     // and goes in this batch.
@@ -296,23 +291,6 @@ impl Resources {
         self.meshes.restore(key, objects);
     }
 
-    /// Keeps `indexes` for the draws that share them, while a clone of the
-    /// returned handle lasts.
-    pub(crate) fn add_indexes(&mut self, indexes: Indexes) -> SharedIndexes {
-        self.indexes.add(indexes, &self.device.queue)
-    }
-
-    /// The indexes of `handle`.
-    pub(crate) fn indexes(&self, handle: &SharedIndexes) -> Option<&Indexes> {
-        self.indexes.get(handle)
-    }
-
-    /// Writes the indexes of `handle` to a buffer, unless they have one.
-    pub(crate) fn upload_indexes(&mut self, gpu: &mut dyn Gpu, handle: &SharedIndexes) -> Result<(), GpuError> {
-        let Resources { device, indexes, .. } = self;
-        indexes.get_mut(handle).ok_or(GpuError::UnknownId("indexes"))?.upload(gpu, device)
-    }
-
     /// Keeps `vertices` for the draws that share them, while a clone of the
     /// returned handle lasts.
     pub(crate) fn add_vertices<V: bytemuck::Pod>(&mut self, vertices: Vec<V>) -> SharedVertices {
@@ -356,15 +334,32 @@ impl Resources {
         self.vertices.update(typed, data)
     }
 
-    /// The buffer of the vertices of `shared`, made of them by their first
-    /// upload and written over after an update, as [`Vertices::upload`]
-    /// says. The engine uploads the vertices that draws bind.
+    /// Replaces the bytes of `shared` with `bytes`, as many, which the next
+    /// upload writes over its buffer's. Returns false, leaving it be, for
+    /// another number of bytes.
+    pub(crate) fn rewrite(&mut self, shared: &SharedVertices, bytes: &[u8]) -> bool {
+        self.vertices.rewrite(shared, bytes)
+    }
+
+    /// The vertex buffer of `shared`, made of them by their first upload
+    /// and written over after an update, as [`Vertices::upload`] says. The
+    /// engine uploads the vertices that draws bind.
     pub(crate) fn upload_vertices(
         &mut self,
         gpu: &mut dyn Gpu,
         shared: &SharedVertices,
     ) -> Result<Option<BufferId>, GpuError> {
-        self.vertices.upload(gpu, &mut self.device, shared)
+        self.vertices.upload(gpu, &mut self.device, shared, BufferUsage::Vertex)
+    }
+
+    /// The index buffer of `shared`, `u16`s, as
+    /// [`upload_vertices`](Self::upload_vertices) makes a vertex buffer.
+    pub(crate) fn upload_index_buffer(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        shared: &SharedVertices,
+    ) -> Result<Option<BufferId>, GpuError> {
+        self.vertices.upload(gpu, &mut self.device, shared, BufferUsage::Index)
     }
 
     /// A texture without a size, made on the GPU by its first upload or the
@@ -628,7 +623,6 @@ impl Resources {
         // The meshes first, which hold entries of the other stores.
         self.meshes.clear();
         self.textures.clear();
-        self.indexes.clear();
         self.vertices.clear();
         self.release_shaders();
         let queue = &self.device.queue;

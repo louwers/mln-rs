@@ -1,5 +1,5 @@
-//! The context's stores of what draws share on the GPU: textures, indexes,
-//! vertices and meshes. Each entry is held through [`Shared`] handles, which the
+//! The context's stores of what draws share on the GPU: textures, buffers
+//! and meshes. Each entry is held through [`Shared`] handles, which the
 //! entry's owner and every draw, bindings or geometry that reads it clone:
 //! the entry stays while a handle to it does, so nothing names one that is
 //! gone. When the last handle drops, its key goes to the renderer's release
@@ -52,8 +52,6 @@ macro_rules! keys {
 keys! {
     /// A texture of the context's store.
     TextureKey => Texture,
-    /// Indexes of the context's store.
-    IndexesKey => Indexes,
     /// Vertices of the context's store.
     VerticesKey => Vertices,
     /// A mesh of the context's store.
@@ -64,7 +62,6 @@ keys! {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StoreKey {
     Texture(TextureKey),
-    Indexes(IndexesKey),
     Vertices(VerticesKey),
     Mesh(MeshKey),
 }
@@ -142,9 +139,6 @@ impl<K: Key + std::fmt::Debug> std::fmt::Debug for Shared<K> {
 
 /// A texture of the context's store.
 pub type SharedTexture = Shared<TextureKey>;
-
-/// Indexes of the context's store.
-pub type SharedIndexes = Shared<IndexesKey>;
 
 /// The slots of a store's chunk.
 const CHUNK: usize = 32;

@@ -14,7 +14,6 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
 
 use crate::gfx::context::Resources;
-use crate::gfx::indexes::{Indexes, SharedIndexes};
 use crate::gfx::mesh::Indexed;
 use crate::gfx::vertices::SharedVertices;
 use crate::tile_mask::TileMask;
@@ -68,7 +67,7 @@ pub struct StoredQuads {
     /// The quads' [`RasterLayoutVertex`]es.
     pub vertices: SharedVertices,
     /// The quads' triangles.
-    pub indexes: SharedIndexes,
+    pub indexes: SharedVertices,
     /// The segments that draw the triangles.
     pub segments: Vec<SegmentBase>,
 }
@@ -200,7 +199,7 @@ impl MaskedGeometry {
         self.quads = match std::mem::replace(&mut self.quads, Quads::Whole) {
             Quads::Data { vertices, indices, segments } if !vertices.is_empty() => {
                 let vertices = context.add_vertices(vertices);
-                let indexes = context.add_indexes(Indexes::new(indices));
+                let indexes = context.add_vertices(indices);
                 Quads::Stored(StoredQuads { vertices, indexes, segments })
             }
             quads => quads,

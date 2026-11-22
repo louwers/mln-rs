@@ -29,7 +29,7 @@ impl Upload<'_> {
     /// ([`LayerBucket::buffer`](crate::layer::LayerBucket::buffer)).
     pub fn vec<V: bytemuck::Pod>(&mut self, vec: &mut GpuVec<V>) {
         if let Kind::Geometry { geometry, copies, res } = &mut self.kind {
-            geometry.upload(vec, copies, res);
+            geometry.upload(vec, false, copies, res);
         }
     }
 
@@ -39,7 +39,10 @@ impl Upload<'_> {
         match &mut self.kind {
             Kind::Geometry { geometry, copies, res } => {
                 for (_, binders) in binders.iter_mut() {
-                    geometry.upload(binders.vertices_mut().vertices_mut(), copies, res);
+                    // Values that feature state rewrites stay, and upload
+                    // again into the same buffer.
+                    let keep = binders.depends_on_feature_state();
+                    geometry.upload(binders.vertices_mut().vertices_mut(), keep, copies, res);
                 }
             }
             Kind::FeatureState { states, layer, layer_id, rewrote } => {

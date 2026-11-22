@@ -40,7 +40,6 @@ use crate::geometry::feature_index::{FeatureIndex, FeatureSelection, QueryLayers
 use crate::layer::{Bucket, Layer, LayerValues};
 use crate::query::RenderedQueryOptions;
 use crate::tile::job::SourceKey;
-use crate::tile_values::ChangedBuckets;
 use crate::update_parameters::UpdateParameters;
 
 /// What makes a [`PlacementPass`] of the layer type `T`.
@@ -64,9 +63,9 @@ pub trait PlacementPass<T: Layer>: Any {
     fn place(&mut self, cx: &mut PlacementContext<'_, T>, groups: CollisionGroups, fade: f32) -> Placed;
 
     /// Brings `cx`'s layers' buckets to the current placement, in each
-    /// frame's update after the schedule placed or didn't, and adds what it
-    /// changed of them to `changed`.
-    fn update_buckets(&mut self, cx: &mut PlacementContext<'_, T>, changed: &mut ChangedBuckets);
+    /// frame's update after the schedule placed or didn't. A bucket it
+    /// changes uploads again, into the buffers its meshes read.
+    fn update_buckets(&mut self, cx: &mut PlacementContext<'_, T>);
 
     /// Forgets what it keeps of the layers' buckets from frame to frame,
     /// keeping the current placement, which the next one fades from: the

@@ -30,7 +30,7 @@ use crate::bucket_geometry::GpuVec;
 use crate::erased_layer::EvaluatedLayer;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms};
 use crate::gfx::vertices::SharedVertices;
-use crate::handles::{Buffer, BufferEntry};
+use crate::handles::Buffer;
 use crate::paint_property_statistics::{PaintPropertyStatistics, StatisticValue};
 
 /// The images of a feature's `*-pattern` value one zoom level below the
@@ -890,10 +890,7 @@ impl<'a, P: PaintBinders> PaintVertices<'a, P> {
         attributes: &mut Vec<(usize, SharedAttribute)>,
         uniforms: &mut Uniforms,
     ) {
-        let shared = match self.buffer.map(|buffer| &buffer.entry) {
-            Some(BufferEntry::Vertices(shared)) => Some(shared),
-            Some(BufferEntry::Indexes(_)) | None => None,
-        };
+        let shared = self.buffer.map(|buffer| &buffer.entry);
         self.binders.bind(paint, &mut Bind { program, shared, attributes, uniforms });
     }
 }

@@ -31,7 +31,6 @@ use crate::tile::raster::RasterContents;
 use crate::tile::store::{SourceInfo, StoreContext};
 use crate::tile::tile::{Shown, Tile, TileInput, TileNecessity, TileOperation, TileUpdateParameters};
 use crate::tile::tile_workers::{InlineWorkers, Lane, ReplyBody};
-use crate::tile_values::ChangedBuckets;
 
 /// A tile, its source and the store, borrowed for a transition.
 pub(crate) struct TileMut<'a> {
@@ -355,9 +354,7 @@ impl<'a> TileMut<'a> {
         let shown = contents.map(|mut contents| {
             let mut version = 0;
             if let Some(geometry) = contents.geometry_mut() {
-                // New buckets, which no draws copied yet.
-                let mut changed = ChangedBuckets::default();
-                geometry.set_feature_state(self.source.feature_state.current_states(), &mut changed);
+                geometry.set_feature_state(self.source.feature_state.current_states());
                 version = self.source.feature_state.version();
             }
             Shown::new(contents, version)

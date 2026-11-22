@@ -14,7 +14,8 @@ use crate::draw_objects::{DrawGeometry, DrawObjects, Mesh, Textures};
 use crate::gfx::context::Resources;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
-use crate::handles::{Buffer, BufferEntry, Texture, Vertex};
+use crate::gfx::vertices::SharedVertices;
+use crate::handles::{Buffer, Texture, Vertex};
 use crate::paint_property_binder::{PaintBinders, PaintVertices};
 
 /// What a [`Mesh`] is made of: a program, the buffers its attributes read
@@ -47,7 +48,7 @@ pub struct MeshDesc<'a> {
 /// A buffer that a mesh's attributes read, with the formats of its vertex.
 #[derive(Clone, Copy)]
 pub(crate) struct Input<'a> {
-    pub(crate) entry: &'a BufferEntry,
+    pub(crate) entry: &'a SharedVertices,
     pub(crate) len: usize,
     pub(crate) attributes: &'static [AttributeDataType],
     pub(crate) stride: u32,
@@ -177,10 +178,7 @@ impl Resources {
             instances
         });
         let (indexes, segments) = match desc.indexes {
-            Some((Buffer { entry: BufferEntry::Indexes(indexes), .. }, segments)) => {
-                (DrawIndexes::from(indexes.clone()), segments.to_vec())
-            }
-            Some(_) => todo!("index buffers in the store of every buffer"),
+            Some((indexes, segments)) => (DrawIndexes::Shared(indexes.entry.clone()), segments.to_vec()),
             None => (DrawIndexes::new(Vec::new()), Vec::new()),
         };
         let mut textures = Textures::default();
@@ -208,16 +206,13 @@ fn bind<'p>(
     attributes: &mut impl Iterator<Item = &'p mln_gfx::shaders::program::Attribute>,
     input: &Input<'_>,
 ) {
-    let BufferEntry::Vertices(shared) = input.entry else {
-        todo!("vertex buffers in the store of every buffer");
-    };
     let mut offset = 0;
     for &format in input.attributes {
         let Some(attribute) = attributes.next() else {
             debug_assert!(false, "a vertex with more attributes than its program");
             return;
         };
-        array.set_shared(attribute.id, SharedAttribute::new(shared.clone(), format, offset, input.stride));
+        array.set_shared(attribute.id, SharedAttribute::new(input.entry.clone(), format, offset, input.stride));
         offset += format.stride() as u32;
     }
 }

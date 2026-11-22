@@ -34,7 +34,7 @@ use crate::paint_parameters::PaintParameters;
 use crate::render_source::{RenderSource, TileOrder};
 use crate::render_tile::{FoundTile, RenderTile, TileContent};
 use crate::tile::contents::GeometryContents;
-use crate::tile_values::{ChangedBuckets, TileMap};
+use crate::tile_values::TileMap;
 use crate::update_parameters::UpdateParameters;
 
 /// A layer's bucket in a layout, which the layers of its layout group
@@ -301,10 +301,6 @@ pub(crate) trait RenderLayer: Any {
         found: &[FoundTile],
     );
 
-    /// Records that the buckets in `changed` changed, for the tiles whose
-    /// values were made from them.
-    fn mark_changed(&mut self, changed: &ChangedBuckets);
-
     /// Moves the layer's value of each tile to the tile `wrap_delta` world
     /// copies east of it: the tiles are the same ones under new ids once the
     /// map's center has crossed the antimeridian, and their values stay.
@@ -538,10 +534,6 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         layer
             .prepare(&PrepareCx { layer: values, frame: &frame, res, found: &tiles, values: tile_values }, frame_draws);
         frame_draws.finish(gpu, res, tiles.iter().map(|found| found.tile.unwrapped));
-    }
-
-    fn mark_changed(&mut self, changed: &ChangedBuckets) {
-        self.tile_values.mark_changed(changed);
     }
 
     fn handle_wrap_jump(&mut self, wrap_delta: i16) {

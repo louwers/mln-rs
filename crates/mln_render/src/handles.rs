@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 
 use mln_gfx::gfx_types::AttributeDataType;
 
-use crate::gfx::store::{SharedIndexes, SharedTexture};
+use crate::gfx::store::SharedTexture;
 use crate::gfx::vertices::SharedVertices;
 
 /// A buffer of `V`s in the renderer's [`Resources`](crate::draw::Resources):
@@ -13,45 +13,37 @@ use crate::gfx::vertices::SharedVertices;
 /// or, of `u16`s, the indexes of its primitives
 /// ([`MeshDesc::indexes`](crate::draw::MeshDesc::indexes)).
 pub struct Buffer<V> {
-    pub(crate) entry: BufferEntry,
-    len: usize,
+    pub(crate) entry: SharedVertices,
     element: PhantomData<fn() -> V>,
 }
 
-/// Where a [`Buffer`]'s data is in the renderer's stores.
-#[derive(Clone)]
-pub(crate) enum BufferEntry {
-    Vertices(SharedVertices),
-    Indexes(SharedIndexes),
-}
-
 impl<V> Buffer<V> {
-    pub(crate) fn new(entry: BufferEntry, len: usize) -> Buffer<V> {
-        Buffer { entry, len, element: PhantomData }
+    pub(crate) fn new(entry: SharedVertices) -> Buffer<V> {
+        Buffer { entry, element: PhantomData }
     }
 
     /// The number of `V`s in the buffer.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.len
+        self.entry.count()
     }
 
     /// Whether the buffer holds none.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.len == 0
+        self.len() == 0
     }
 }
 
 impl<V> Clone for Buffer<V> {
     fn clone(&self) -> Self {
-        Buffer { entry: self.entry.clone(), len: self.len, element: PhantomData }
+        Buffer { entry: self.entry.clone(), element: PhantomData }
     }
 }
 
 impl<V> std::fmt::Debug for Buffer<V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Buffer").field("len", &self.len).finish_non_exhaustive()
+        f.debug_struct("Buffer").field("len", &self.len()).finish_non_exhaustive()
     }
 }
 
