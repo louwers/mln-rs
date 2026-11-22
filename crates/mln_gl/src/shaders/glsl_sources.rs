@@ -831,8 +831,10 @@ layout(std140) uniform ColorReliefEvaluatedPropsUBO {
     highp float pad_eval2;
 };
 
-uniform sampler2D u_image;
-uniform sampler2D u_elevation_stops;
+// highp: a sampler is lowp by default in GLSL ES, and a driver may then
+// read the DEM's bytes and the stops' elevations too coarsely to decode.
+uniform highp sampler2D u_image;
+uniform highp sampler2D u_elevation_stops;
 uniform sampler2D u_color_stops;
 
 in vec2 v_pos;
@@ -2783,7 +2785,9 @@ precision highp float;
 #endif
 
 in vec2 v_pos;
-uniform sampler2D u_image;
+// highp: a sampler is lowp by default in GLSL ES, and a driver may then
+// read the DEM's bytes too coarsely to decode.
+uniform highp sampler2D u_image;
 layout (std140) uniform HillshadePrepareTilePropsUBO {
     highp vec4 u_unpack;
     highp vec2 u_dimension;
