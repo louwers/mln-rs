@@ -5,7 +5,7 @@
       "description": "Tests that tiny seams caused by improper stencil mask border handling are not visible.",
       "width": 256,
       "height": 256,
-      "allowed": 0.0037
+      "allowed": 0.00025
     }
   },
   "sky": {

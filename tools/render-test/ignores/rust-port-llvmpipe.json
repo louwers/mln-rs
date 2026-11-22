@@ -1,3 +1,0 @@
-{
-  "gljs/render-tests/projection/globe/terrain/fill-seams/checkerboard": "Mesa 26.0.8's lavapipe puts the checkers' edges where RADV does, to 0.01 px, but samples the drapes a little softer: a pixel inside a square next to an edge comes out 5% grey where RADV's is black. Against GL JS's picture, which sits 0.1 px off ours (the globe's camera), pixelmatch then counts 1663 of 65536 px rather than RADV's 240, where 242 are allowed"
-}
