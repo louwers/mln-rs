@@ -57,11 +57,14 @@ const MAPTERHORN: Terrain = {
   },
   hillshadeBefore: "building",
   // The style spec's default colors, whose white fog greys the far ground.
+  // The globe's atmosphere fades out by zoom 7: it scatters along each line of
+  // sight to the sea-level sphere, so up close it would whiten the mountains.
   sky: {
     "sky-color": "#88c6fc",
     "horizon-color": "#ffffff",
     "fog-color": "#ffffff",
     "fog-ground-blend": 0.5,
+    "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, 5, 1, 7, 0],
   },
 };
 

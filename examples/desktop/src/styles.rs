@@ -83,8 +83,10 @@ pub(crate) fn style_for(url: &str) -> Style {
 }
 
 /// The sky that [`add_terrain`] gives a style without one: the style spec's
-/// default colours, whose white fog greys the far ground.
-const SKY: &str = r##"{"sky-color":"#88c6fc","horizon-color":"#ffffff","fog-color":"#ffffff","fog-ground-blend":0.5}"##;
+/// default colours, whose white fog greys the far ground. The globe's
+/// atmosphere fades out by zoom 7: it scatters along each line of sight to the
+/// sea-level sphere, so up close it would whiten the mountains.
+const SKY: &str = r##"{"sky-color":"#88c6fc","horizon-color":"#ffffff","fog-color":"#ffffff","fog-ground-blend":0.5,"atmosphere-blend":["interpolate",["linear"],["zoom"],0,1,5,1,7,0]}"##;
 
 /// The ID of the source that [`add_terrain`] adds.
 pub(crate) const TERRAIN_SOURCE: &str = "terrain";
