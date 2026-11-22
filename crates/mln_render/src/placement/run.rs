@@ -42,16 +42,27 @@ pub(crate) struct PlacingFrameLayer<'a> {
 }
 
 /// What the engine compares of a frame with the current placement, to tell
-/// whether placing again would place from other inputs.
+/// whether placing again would place from other inputs, besides the buckets
+/// the layers lead.
+#[derive(PartialEq)]
 struct Inputs {
     mode: MapMode,
     view: View,
     transition_options: TransitionOptions,
     cross_source_collisions: bool,
     collision_boxes: bool,
-    /// The buckets the layers lead, each with the address of its layout's
-    /// feature index.
-    led: Vec<(BucketKey, usize)>,
+}
+
+impl Inputs {
+    fn of(update_parameters: &UpdateParameters) -> Self {
+        Inputs {
+            mode: update_parameters.mode,
+            view: update_parameters.view.clone(),
+            transition_options: update_parameters.style.get_transition_options(),
+            cross_source_collisions: update_parameters.cross_source_collisions,
+            collision_boxes: collision_boxes(update_parameters),
+        }
+    }
 }
 
 /// Whether `update_parameters` show collision shapes.
@@ -75,16 +86,21 @@ pub(crate) struct Placements {
     tiles: Vec<PlacingTile>,
     /// The tiles of the layer being added whose bucket another layer leads.
     followers: Vec<PlacingTile>,
-    /// The frame's led buckets, as [`Inputs::led`] has them.
+    /// The buckets the frame's layers lead, each with the address of its
+    /// layout's feature index.
     led: Vec<(BucketKey, usize)>,
     /// The last frame's and this frame's led buckets, by their layout's
     /// address and their index in it, sorted: a continuous map places soon
-    /// where a frame has one the frame before didn't.
+    /// where a frame has one the frame before didn't. A layout that takes
+    /// the address of one dropped since counts as seen, which delays its
+    /// placement by no more than the schedule's period.
     seen: Vec<(usize, usize)>,
     seen_now: Vec<(usize, usize)>,
     /// What a continuous map's current placement placed from; `None` before
-    /// the first and after a reset.
+    /// the first and after a reset. Its feature indexes stay alive in the
+    /// index's records, so their addresses aren't reused while compared.
     committed: Option<Inputs>,
+    committed_led: Vec<(BucketKey, usize)>,
     /// The records of the last placement, while the renderer keeps them.
     records: Option<Vec<PlacementRecord>>,
 }
@@ -104,6 +120,7 @@ impl Placements {
             seen: Vec::new(),
             seen_now: Vec::new(),
             committed: None,
+            committed_led: Vec::new(),
             records: None,
         }
     }
@@ -260,7 +277,8 @@ impl Placements {
             if frame.placement_changed {
                 let fade = self.schedule.fade_change(time_point);
                 let placed = self.run(layers, &places, update_parameters, store, fade);
-                self.commit_inputs(update_parameters);
+                self.committed = Some(Inputs::of(update_parameters));
+                self.committed_led.clone_from(&self.led);
                 self.schedule.commit(update_parameters.mode, transition_options, zoom, time_point, placed);
             } else if stale {
                 frame.repaint_at = next_placement_at;
@@ -343,13 +361,7 @@ impl Placements {
     /// Whether placing now would place from other inputs than the current
     /// placement did, as far as the engine knows them.
     fn changed(&self, update_parameters: &UpdateParameters) -> bool {
-        let Some(committed) = &self.committed else { return true };
-        committed.mode != update_parameters.mode
-            || committed.view != update_parameters.view
-            || committed.transition_options != update_parameters.style.get_transition_options()
-            || committed.cross_source_collisions != update_parameters.cross_source_collisions
-            || committed.collision_boxes != collision_boxes(update_parameters)
-            || committed.led != self.led
+        self.committed.as_ref() != Some(&Inputs::of(update_parameters)) || self.committed_led != self.led
     }
 
     /// Whether the frame's layers lead a bucket the last frame's didn't.
@@ -360,30 +372,6 @@ impl Placements {
         let added = self.seen_now.iter().any(|bucket| self.seen.binary_search(bucket).is_err());
         std::mem::swap(&mut self.seen, &mut self.seen_now);
         added
-    }
-
-    /// Keeps the frame's inputs as those of the current placement.
-    fn commit_inputs(&mut self, update_parameters: &UpdateParameters) {
-        let inputs = Inputs {
-            mode: update_parameters.mode,
-            view: View::default(),
-            transition_options: update_parameters.style.get_transition_options(),
-            cross_source_collisions: update_parameters.cross_source_collisions,
-            collision_boxes: collision_boxes(update_parameters),
-            led: Vec::new(),
-        };
-        let committed = match &mut self.committed {
-            Some(committed) => {
-                committed.mode = inputs.mode;
-                committed.transition_options = inputs.transition_options;
-                committed.cross_source_collisions = inputs.cross_source_collisions;
-                committed.collision_boxes = inputs.collision_boxes;
-                committed
-            }
-            committed => committed.insert(inputs),
-        };
-        committed.view.clone_from(&update_parameters.view);
-        committed.led.clone_from(&self.led);
     }
 }
 
