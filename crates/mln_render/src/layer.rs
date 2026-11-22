@@ -62,13 +62,6 @@
 //! geometry in the tile's feature index, padded by the layer's
 //! [`query_radius`](Layer::query_radius), and keeps those the layer
 //! [`hit`](Layer::hit)s, nearest first.
-//!
-//! # Not built yet
-//!
-//! Inputs of raster and raster-dem tiles, layers without tiles, the
-//! overlay group, groups drawn into textures of the layer's own and lends
-//! of the encoder to a host are parts of this contract that no layer type
-//! uses yet; they are left out until one does.
 
 use std::marker::PhantomData;
 use std::sync::Arc;
