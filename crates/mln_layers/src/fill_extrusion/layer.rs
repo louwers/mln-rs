@@ -4,7 +4,9 @@ use mln_gfx::draw_mode::DrawMode;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_map_types::View;
-use mln_render::draw::{Buffer, Composite, Depth, Draw, Draws, IndexBuffer, Mesh, MeshDesc, Resources, Texture};
+use mln_render::draw::{
+    Buffer, Composite, Depth, Draw, Draws, IndexBuffer, Mesh, MeshDesc, Resources, Sampler, Texture,
+};
 use mln_render::layer::{
     EvaluateCx, EvaluatedLayer, EvaluatedLight, Evaluation, Features, Frame, FrameTile, HitTest, Layer, LayerBucket,
     LayerValues, NewCx, PaintVertices, PrepareCx, TileCx, TileProjection, TileTransform, UpdateCx,
@@ -29,6 +31,8 @@ pub struct FillExtrusionLayer {
     /// vertex, and its triangle strip.
     corners: Buffer<[i16; 2]>,
     strip: IndexBuffer,
+    /// How the tiles' patterns sample their atlas in the frame.
+    patterns: Sampler,
 }
 
 /// The meshes of a tile's roofs or walls: in color, and into depth only,
@@ -49,7 +53,11 @@ impl Layer for FillExtrusionLayer {
     const VOLUME: bool = true;
 
     fn new(cx: &mut NewCx<'_, Self>) -> Self {
-        FillExtrusionLayer { corners: cx.res.buffer(&WALL_CORNERS), strip: cx.res.index_buffer(&[0, 2, 1, 3]) }
+        FillExtrusionLayer {
+            corners: cx.res.buffer(&WALL_CORNERS),
+            strip: cx.res.index_buffer(&[0, 2, 1, 3]),
+            patterns: Sampler::new(SamplerState::default()),
+        }
     }
 
     fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
@@ -58,18 +66,7 @@ impl Layer for FillExtrusionLayer {
 
     /// Filters the patterns as the frame asks.
     fn update(&mut self, cx: &mut UpdateCx<'_, Self>) {
-        if !has_pattern(cx.layer) {
-            return;
-        }
-        let sampler = pattern_sampler(cx.frame);
-        for i in 0..cx.tiles.len() {
-            if let (_, _, Some(parts)) = cx.tiles.get_mut(i) {
-                for part in parts.iter() {
-                    cx.res.set_sampler(&part.color, 0, sampler);
-                    cx.res.set_sampler(&part.depth, 0, sampler);
-                }
-            }
-        }
+        self.patterns.set(pattern_sampler(cx.frame));
     }
 
     fn tile(
@@ -80,7 +77,7 @@ impl Layer for FillExtrusionLayer {
     ) -> Option<Vec<Part>> {
         let (bucket, values, res) = (laid.bucket, &cx.layer.evaluated.paint, &mut *cx.res);
         let pattern = has_pattern(cx.layer);
-        let atlas = laid.icon_atlas().filter(|_| pattern).map(|atlas| (atlas, pattern_sampler(cx.frame)));
+        let atlas = laid.icon_atlas().filter(|_| pattern).map(|atlas| (atlas, &self.patterns));
         let (vertices, paint) = (laid.buffer(&bucket.vertices), laid.binders(&bucket.binders));
         let mut roofs = MeshDesc::new(
             if pattern { &FILL_EXTRUSION_PATTERN } else { &FILL_EXTRUSION },
@@ -185,7 +182,7 @@ impl Layer for FillExtrusionLayer {
 
 /// The meshes of a part of `desc`, culled to the faces toward the camera,
 /// sampling `atlas` where the layer has a pattern.
-fn part<'a>(res: &mut Resources, desc: &mut MeshDesc<'a>, atlas: Option<(&'a Texture, SamplerState)>) -> Part {
+fn part<'a>(res: &mut Resources, desc: &mut MeshDesc<'a>, atlas: Option<(&'a Texture, &Sampler)>) -> Part {
     desc.cull(CullFaceMode::back_ccw());
     if let Some((atlas, sampler)) = atlas {
         desc.texture(atlas, sampler);

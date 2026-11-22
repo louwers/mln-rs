@@ -23,7 +23,7 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::{FIRST_VERTEX_BUFFER_ID, MAX_TEXTURES};
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::texture2d::SamplerState;
+
 use mln_util::logging::{Event, Log};
 use smallvec::SmallVec;
 
@@ -35,12 +35,13 @@ use crate::gfx::store::{MeshKey, Shared, SharedTexture};
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::upload::{self, AttributeBindingArray};
 use crate::gfx::vertex_attribute::{Uniforms, VertexAttributeArray};
+use crate::handles::Sampler;
 use crate::paint_parameters::{DepthTest, DrawTarget, PaintParameters, Stencil};
 use crate::paint_property_binder::MeshPaint;
 
 /// The textures a draw binds, by texture id, each with the sampler it is
 /// sampled with.
-pub(crate) type Textures = [Option<(SharedTexture, SamplerState)>; MAX_TEXTURES];
+pub(crate) type Textures = [Option<(SharedTexture, Sampler)>; MAX_TEXTURES];
 
 /// A handle of a draw's GPU objects in the context's store of meshes
 /// ([`Resources::mesh`](crate::draw::Resources::mesh)). The objects stay while the handle does, and go
@@ -296,13 +297,6 @@ impl DrawObjects {
         self.pulled.push((id, buffer, None));
     }
 
-    /// Samples the texture at `slot` as `sampler` says, from the next draw.
-    pub(crate) fn set_sampler(&mut self, slot: usize, sampler: SamplerState) {
-        if let Some(Some((_, bound))) = self.textures.get_mut(slot) {
-            *bound = sampler;
-        }
-    }
-
     /// The key of the shader it draws with in a frame of `variant`'s
     /// projection, made again, with the shader's pipelines, bindings and
     /// geometry, where it last drew in another.
@@ -531,7 +525,7 @@ impl DrawObjects {
         let mut textures = [None; MAX_TEXTURES];
         for id in 0..self.program.textures.len() {
             if let Some((texture, sampler)) = self.textures.get(id).and_then(Option::as_ref) {
-                textures[id] = Some(context.texture_binding(gpu, texture, *sampler)?);
+                textures[id] = Some(context.texture_binding(gpu, texture, sampler.get())?);
             }
         }
         let global = context.global_uniform_buffers();

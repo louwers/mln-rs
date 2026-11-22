@@ -1,10 +1,13 @@
-//! The handles of the renderer's resources that a layer keeps: buffers and
-//! textures.
+//! The handles of the renderer's resources that a layer keeps: buffers,
+//! textures and samplers.
 
+use std::cell::Cell;
 use std::marker::PhantomData;
+use std::rc::Rc;
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::segment::SegmentBase;
+use mln_gfx::texture2d::SamplerState;
 
 use crate::gfx::buffer_store::SharedBuffer;
 use crate::gfx::store::SharedTexture;
@@ -116,6 +119,44 @@ impl IndexBuffer {
 /// a mesh samples ([`MeshDesc::texture`](crate::draw::MeshDesc::texture)).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Texture(pub(crate) SharedTexture);
+
+/// How meshes sample a texture ([`MeshDesc::texture`](crate::draw::MeshDesc::texture)),
+/// which a layer may change from frame to frame: each mesh bound with the
+/// sampler, or a clone of it, samples as it last said, from its next draw
+/// on. A [`SamplerState`] converts into a sampler that nothing else changes.
+#[derive(Clone, Debug)]
+pub struct Sampler(Rc<Cell<SamplerState>>);
+
+impl Sampler {
+    /// A sampler that samples as `state` says.
+    #[must_use]
+    pub fn new(state: SamplerState) -> Sampler {
+        Sampler(Rc::new(Cell::new(state)))
+    }
+
+    /// How the sampler samples.
+    #[must_use]
+    pub fn get(&self) -> SamplerState {
+        self.0.get()
+    }
+
+    /// Samples as `state` says from now on.
+    pub fn set(&self, state: SamplerState) {
+        self.0.set(state);
+    }
+}
+
+impl From<SamplerState> for Sampler {
+    fn from(state: SamplerState) -> Sampler {
+        Sampler::new(state)
+    }
+}
+
+impl From<&Sampler> for Sampler {
+    fn from(sampler: &Sampler) -> Sampler {
+        sampler.clone()
+    }
+}
 
 /// The surface that a tile's geometry covers in a frame's projection, in
 /// the tile's units: its extent's corners on Mercator, and on the globe a

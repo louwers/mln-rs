@@ -9,14 +9,13 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::MAX_TEXTURES;
 use mln_gfx::shaders::block::DrawBlocks;
 use mln_gfx::shaders::program::{Attribute, BufferKind, Program};
-use mln_gfx::texture2d::SamplerState;
 use smallvec::SmallVec;
 
 use crate::draw_objects::{DrawGeometry, DrawObjects, Mesh, Textures};
 use crate::gfx::buffer_store::SharedBuffer;
 use crate::gfx::context::Resources;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
-use crate::handles::{Buffer, IndexBuffer, Texture, Vertex};
+use crate::handles::{Buffer, IndexBuffer, Sampler, Texture, Vertex};
 use crate::paint_property_binder::{MeshPaint, PaintBinders, PaintVertices};
 
 /// What a [`Mesh`] is made of: a program, the indexes of its primitives and
@@ -44,7 +43,7 @@ pub struct MeshDesc<'a> {
     pub(crate) uniforms: Uniforms,
     /// What the engine writes of the paint values into the draws' blocks.
     pub(crate) mesh_paint: Option<MeshPaint>,
-    pub(crate) textures: SmallVec<[(&'a Texture, SamplerState); 2]>,
+    pub(crate) textures: SmallVec<[(&'a Texture, Sampler); 2]>,
     pub(crate) primitive: DrawMode,
     /// The blend, `None` for the default.
     pub(crate) blend: Option<ColorMode>,
@@ -163,10 +162,10 @@ impl<'a> MeshDesc<'a> {
     }
 
     /// Binds `texture` to the program's next texture, in the program's
-    /// order, sampled as `sampler` says.
-    pub fn texture(&mut self, texture: &'a Texture, sampler: SamplerState) -> &mut Self {
+    /// order, sampled as `sampler` says in each frame.
+    pub fn texture(&mut self, texture: &'a Texture, sampler: impl Into<Sampler>) -> &mut Self {
         debug_assert!(self.textures.len() < MAX_TEXTURES, "more textures than a mesh binds");
-        self.textures.push((texture, sampler));
+        self.textures.push((texture, sampler.into()));
         self
     }
 
@@ -225,15 +224,6 @@ impl Resources {
         self.restore_mesh(mesh.key(), Box::new(objects));
     }
 
-    /// Samples `mesh`'s texture at `slot` of its program's as `sampler`
-    /// says, from its next draw on.
-    pub fn set_sampler<B>(&mut self, mesh: &Mesh<B>, slot: usize, sampler: SamplerState) {
-        if let Some(mut objects) = self.take_mesh(mesh.key()) {
-            objects.set_sampler(slot, sampler);
-            self.restore_mesh(mesh.key(), objects);
-        }
-    }
-
     /// The GPU objects of a mesh of `desc`, with what the engine writes of
     /// its paint values, as [`mesh`](Self::mesh) checks them.
     fn mesh_objects<B: DrawBlocks>(&mut self, desc: &MeshDesc<'_>) -> (DrawObjects, Option<MeshPaint>) {
@@ -283,7 +273,7 @@ impl Resources {
         }
         let mut textures = Textures::default();
         for (slot, (texture, sampler)) in textures.iter_mut().zip(&desc.textures) {
-            *slot = Some((texture.0.clone(), *sampler));
+            *slot = Some((texture.0.clone(), sampler.clone()));
         }
         let blend = desc.blend.unwrap_or_else(|| self.color_mode(ColorMode::alpha_blended()));
         let geometry = DrawGeometry {

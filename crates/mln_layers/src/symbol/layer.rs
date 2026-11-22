@@ -6,7 +6,7 @@ use mln_gfx::draw_mode::DrawMode;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_render::draw::{Buffer, Depth, Draw, Draws, IndexBuffer, Mesh, MeshDesc, Resources};
+use mln_render::draw::{Buffer, Depth, Draw, Draws, IndexBuffer, Mesh, MeshDesc, Resources, Sampler};
 use mln_render::layer::{
     EvaluateCx, Evaluation, Features, FrameTile, Layer, LayerBucket, NewCx, PrepareCx, TileProjection, TileTransform,
     UpdateCx,
@@ -31,7 +31,11 @@ use super::{Symbol, SymbolLayoutProperties, SymbolPaintProperties};
 /// A symbol layer: the draws of its tiles' text and icons where placement
 /// shows them and, over them where the map's debug options show them, the
 /// boxes and circles they collide with.
-pub struct SymbolLayer;
+pub struct SymbolLayer {
+    /// How the icon atlas samples in the frame where an image drawn at its
+    /// own size may stay sharp ([`IconFilter::NearestWhenStill`]).
+    still: Sampler,
+}
 
 /// What the layer keeps of a tile: the draws of its bucket's text and
 /// icons, and the meshes of its collision boxes and circles.
@@ -50,8 +54,8 @@ struct SymbolDraw {
     kind: Kind,
     halo: bool,
     segment: Option<usize>,
-    /// Where the mesh samples the tile's icon atlas, and how it filters it.
-    icon_atlas: Option<(usize, IconFilter)>,
+    /// How the mesh samples the tile's icon atlas, if it does.
+    icon_sampler: Option<Sampler>,
 }
 
 /// A mesh of a tile's collision boxes or circles, of its text or its icons.
@@ -91,14 +95,13 @@ enum IconFilter {
 }
 
 impl IconFilter {
-    /// The sampler of the icon atlas in a frame whose camera moves or is
-    /// pitched, or not.
-    fn sampler(self, moving: bool) -> SamplerState {
-        let linear = match self {
-            IconFilter::Linear => true,
-            IconFilter::NearestWhenStill { map_aligned } => moving || map_aligned,
-        };
-        SamplerState { filter: if linear { TextureFilterType::Linear } else { TextureFilterType::Nearest }, ..GLYPHS }
+    /// The sampler of the icon atlas, which is `still` where an image may
+    /// stay sharp.
+    fn sampler(self, still: &Sampler) -> Sampler {
+        match self {
+            IconFilter::NearestWhenStill { map_aligned: false } => still.clone(),
+            IconFilter::Linear | IconFilter::NearestWhenStill { map_aligned: true } => GLYPHS.into(),
+        }
     }
 }
 
@@ -174,7 +177,7 @@ impl Layer for SymbolLayer {
     type Tile = SymbolTile;
 
     fn new(_cx: &mut NewCx<'_, Self>) -> Self {
-        SymbolLayer
+        SymbolLayer { still: Sampler::new(GLYPHS) }
     }
 
     /// The text of a `text-field` with format sections takes the values its
@@ -205,6 +208,8 @@ impl Layer for SymbolLayer {
     /// atlas as the frame's camera asks.
     fn update(&mut self, cx: &mut UpdateCx<'_, Self>) {
         let moving = cx.frame.camera_moving || cx.frame.camera.pitch() != 0.0;
+        let filter = if moving { TextureFilterType::Linear } else { TextureFilterType::Nearest };
+        self.still.set(SamplerState { filter, ..GLYPHS });
         let style = &cx.layer.style;
         let screen_space = screen_space(&style.layout);
         let sort_by_key = style.layout.symbol_sort_key.is_expression();
@@ -219,12 +224,8 @@ impl Layer for SymbolLayer {
                     let positions = laid.buffer(buffer.dynamic_attribute_data_for(&style.id));
                     if *positions != draw.positions {
                         let parts = MeshParts::new(laid, draw.kind, draw.segment, screen_space);
-                        let sampler = draw.icon_atlas.map(|(_, filter)| filter.sampler(moving));
-                        cx.res.set_mesh(&mut draw.mesh, &parts.desc(sampler));
+                        cx.res.set_mesh(&mut draw.mesh, &parts.desc(draw.icon_sampler.as_ref()));
                         draw.positions = positions.clone();
-                    }
-                    if let Some((slot, filter)) = draw.icon_atlas {
-                        cx.res.set_sampler(&draw.mesh, slot, filter.sampler(moving));
                     }
                 }
                 continue;
@@ -305,16 +306,15 @@ impl Layer for SymbolLayer {
             }
             let filter = first_filter(group.tile_id, group.kind == Kind::Text, own);
             let parts = MeshParts::new(laid, group.kind, group.segment, screen_space);
-            let icon_atlas = parts.icon_slot.map(|slot| (slot, filter));
-            let sampler = icon_atlas.map(|(_, filter)| filter.sampler(moving));
+            let icon_sampler = parts.icon_slot.map(|_| filter.sampler(&self.still));
             for (is_halo, _) in [(true, halo), (false, fill)].into_iter().filter(|&(_, drawn)| drawn) {
                 value.draws.push(SymbolDraw {
-                    mesh: cx.res.mesh(&parts.desc(sampler)),
+                    mesh: cx.res.mesh(&parts.desc(icon_sampler.as_ref())),
                     positions: parts.positions.clone(),
                     kind: group.kind,
                     halo: is_halo,
                     segment: group.segment,
-                    icon_atlas,
+                    icon_sampler: icon_sampler.clone(),
                 });
             }
         }
@@ -431,13 +431,13 @@ impl<'a> MeshParts<'a> {
     }
 
     /// The mesh, which samples the icon atlas with `icon_sampler`.
-    fn desc(&self, icon_sampler: Option<SamplerState>) -> MeshDesc<'_> {
+    fn desc(&self, icon_sampler: Option<&Sampler>) -> MeshDesc<'_> {
         let (laid, buffer) = (self.laid, self.kind.buffer(self.laid.bucket));
         let mut desc = MeshDesc::new(self.program, &self.indexes);
         desc.vertices(laid.buffer(&buffer.attribute_data))
             .vertices(self.positions)
             .vertices(laid.buffer(&buffer.opacity_attribute_data));
-        let icon_sampler = icon_sampler.unwrap_or(GLYPHS);
+        let icon_sampler = icon_sampler.map_or_else(|| GLYPHS.into(), Sampler::clone);
         if self.kind == Kind::Text {
             desc.paint(laid.binders(&laid.bucket.text_binders), &laid.laid_with.paint);
             if let Some(glyphs) = laid.glyph_atlas() {
@@ -446,7 +446,7 @@ impl<'a> MeshParts<'a> {
             if self.icon_slot.is_some()
                 && let Some(icons) = laid.icon_atlas()
             {
-                desc.texture(icons, icon_sampler);
+                desc.texture(icons, &icon_sampler);
             }
         } else {
             desc.paint(laid.binders(&laid.bucket.icon_binders), &laid.laid_with.paint);
@@ -504,7 +504,7 @@ impl SymbolDraw {
         let texture_size = |slot: usize| {
             let texture = match (self.kind, slot) {
                 (Kind::Text, 0) => laid.glyph_atlas(),
-                (Kind::Text, _) => laid.icon_atlas().filter(|_| self.icon_atlas.is_some()),
+                (Kind::Text, _) => laid.icon_atlas().filter(|_| self.icon_sampler.is_some()),
                 (_, 0) => laid.icon_atlas(),
                 _ => None,
             };
