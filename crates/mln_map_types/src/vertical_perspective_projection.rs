@@ -4,7 +4,7 @@ use geometry::Point;
 use glam::dcamera::rh::proj::opengl::perspective;
 use glam::{DMat3, DMat4, DQuat, DVec3, DVec4, EulerRot, Vec3Swizzles, Vec4Swizzles};
 use mln_tile_id::UnwrappedTileID;
-use mln_util::constants::{EXTENT, LATITUDE_MAX};
+use mln_util::constants::{EXTENT, LATITUDE_MAX, TILE_SIZE_D};
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 use mln_util::interpolate::interpolate;
 use mln_util::projection::Projection;
@@ -179,17 +179,23 @@ impl VerticalPerspectiveProjection {
     }
 
     /// The view-projection matrix that takes unit-sphere positions to clip
-    /// space.
+    /// space. The camera looks at the center raised by its altitude along
+    /// its vertical, at the scale of heights Mercator places it by
+    /// ([`View::center_altitude_pixels`]), so a point at the center's
+    /// altitude draws at the center of the view on both projections. Its
+    /// near plane is half a pixel from the eye, or the terrain's
+    /// ([`View::near_z`]) while terrain draws.
     #[must_use]
     pub fn globe_view_projection_matrix(view: &View, radius: f64) -> DMat4 {
         let size = view.size();
         let camera_to_center_distance = view.camera_to_center_distance();
         let center = view.center(WrapMode::Unwrapped);
+        let near = if view.terrain_min_elevation().is_some() { view.near_z() } else { 0.5 };
 
         let mut projection = perspective(
             view.perspective_fov(),
             f64::from(size.width) / f64::from(size.height),
-            0.5,
+            near,
             camera_to_center_distance + radius * 2.0,
         );
         // Move the vanishing point to the center of the padded view.
@@ -206,20 +212,21 @@ impl VerticalPerspectiveProjection {
             * DMat4::from_rotation_z(view.roll())
             * DMat4::from_rotation_x(-view.pitch())
             * DMat4::from_rotation_z(-view.angle())
-            * DMat4::from_translation(DVec3::new(0.0, 0.0, -radius))
+            * DMat4::from_translation(DVec3::new(0.0, 0.0, -(radius + view.center_altitude_pixels())))
             * DMat4::from_rotation_x(mln_math::deg2rad(center.latitude()))
             * DMat4::from_rotation_y(-mln_math::deg2rad(center.longitude()))
             * DMat4::from_scale(DVec3::splat(radius))
     }
 
     /// The plane (as ax + by + cz + d) that separates the visible hemisphere
-    /// from the back of the globe.
+    /// of the sea-level sphere, seen from the camera, from the back of the
+    /// globe.
     #[must_use]
     pub fn clipping_plane(view: &View, radius: f64) -> DVec4 {
         let pitch = view.pitch();
         let distance_camera_to_b = view.camera_to_center_distance() / radius;
         let distance_camera_to_a = pitch.sin() * distance_camera_to_b;
-        let distance_a_to_c = pitch.cos() * distance_camera_to_b + 1.0;
+        let distance_a_to_c = pitch.cos() * distance_camera_to_b + 1.0 + view.center_altitude_pixels() / radius;
         let distance_camera_to_c =
             (distance_camera_to_a * distance_camera_to_a + distance_a_to_c * distance_a_to_c).sqrt();
         let tangent_plane_distance_to_c = 1.0 / distance_camera_to_c;
@@ -235,7 +242,8 @@ impl VerticalPerspectiveProjection {
         plane.extend(-tangent_plane_distance_to_c) / plane.length()
     }
 
-    /// Camera position in unit-sphere space.
+    /// Camera position in unit-sphere space, back from the center at its
+    /// altitude.
     #[must_use]
     pub fn camera_position(view: &View, radius: f64) -> DVec3 {
         let center = view.center(WrapMode::Unwrapped);
@@ -243,7 +251,7 @@ impl VerticalPerspectiveProjection {
         position = rotate_z(position, -view.roll());
         position = rotate_x(position, view.pitch());
         position = rotate_z(position, view.angle());
-        position += DVec3::Z;
+        position += DVec3::Z * (1.0 + view.center_altitude_pixels() / radius);
         position = rotate_x(position, -mln_math::deg2rad(center.latitude()));
         rotate_y(position, mln_math::deg2rad(center.longitude()))
     }
@@ -269,20 +277,39 @@ impl VerticalPerspectiveProjection {
         LatLng::with_mode(latitude, longitude, WrapMode::Wrapped).ok()
     }
 
-    /// Unit-sphere point under a screen pixel (y up, as `TransformState`
-    /// takes it); pixels off the globe snap to the nearest point on the
-    /// horizon.
-    pub(crate) fn screen_coordinate_to_surface(view: &View, point: &ScreenCoordinate) -> DVec3 {
-        let origin = view.globe_camera_position();
+    /// The Web Mercator point at zoom 0 under the unit-sphere point `point`,
+    /// in the world copy nearest the view's center, and its height in meters
+    /// above the sea-level sphere; `None` for a point that isn't a number.
+    pub(crate) fn sphere_point_to_world(view: &View, point: DVec3) -> Option<DVec3> {
+        let length = point.length();
+        let location = Self::surface_vector_to_lat_lng(point / length)?;
+        let world = Projection::project(&view.lat_lng_near_center(&location), 1.0 / TILE_SIZE_D);
+        Some(DVec3::new(world.x, world.y, (length - 1.0) * Self::GLOBE_RADIUS_METERS))
+    }
+
+    /// The direction from the planet's center, as a unit-sphere point, of
+    /// where the ray through a screen pixel (y up, as `TransformState` takes
+    /// it) meets the sphere `height` meters above sea level; pixels off that
+    /// sphere snap to the nearest point on its horizon. It solves on the unit
+    /// sphere with the camera scaled by 1 / (1 + height / R), which at
+    /// height 0 is the sea-level sphere's math to the bit.
+    pub(crate) fn screen_coordinate_to_surface(view: &View, point: &ScreenCoordinate, height: f64) -> DVec3 {
+        let scale = 1.0 + height / Self::GLOBE_RADIUS_METERS;
+        let origin = view.globe_camera_position() / scale;
         let direction = ray_direction_from_pixel(view, point, &view.inverse_globe_view_projection_matrix());
 
         if let Some(t) = ray_sphere_intersection(origin, direction) {
             return (origin + direction * t).normalize();
         }
 
-        // The ray misses the globe: take the nearest point on the horizon, the
-        // circle where the clipping plane cuts the sphere.
-        let plane = view.globe_clipping_plane();
+        // The ray misses the sphere: take the nearest point on the horizon,
+        // the circle where the clipping plane cuts it.
+        let plane = if height == 0.0 {
+            view.globe_clipping_plane()
+        } else {
+            let distance = origin.length();
+            (origin / distance).extend(-1.0 / distance)
+        };
         let normal = plane.xyz();
         let distance_to_intersection = -point_plane_signed_distance(plane, origin) / direction.dot(normal);
 
@@ -307,20 +334,24 @@ impl VerticalPerspectiveProjection {
         ray_sphere_intersection(view.globe_camera_position(), direction).is_some()
     }
 
+    /// The location under a screen pixel (y up) on the sphere `height`
+    /// meters above sea level ([`Self::screen_coordinate_to_surface`]).
     pub(crate) fn screen_coordinate_to_lat_lng(
         view: &View,
         point: &ScreenCoordinate,
+        height: f64,
         wrap_mode: WrapMode,
     ) -> Option<LatLng> {
-        let lat_lng = Self::surface_vector_to_lat_lng(Self::screen_coordinate_to_surface(view, point))?;
+        let lat_lng = Self::surface_vector_to_lat_lng(Self::screen_coordinate_to_surface(view, point, height))?;
         Some(if wrap_mode == WrapMode::Wrapped { lat_lng.wrapped() } else { lat_lng })
     }
 
-    /// The screen point of a location on the globe and its clip-space
-    /// position.
+    /// The screen point (y up) of a location `height` meters above sea level
+    /// on the globe, raised along its vertical, and its clip-space position.
     #[must_use]
-    pub fn lat_lng_to_screen_coordinate(view: &View, lat_lng: &LatLng) -> (ScreenCoordinate, DVec4) {
-        let clip = view.globe_view_projection_matrix() * Self::surface_vector(lat_lng).extend(1.0);
+    pub fn lat_lng_to_screen_coordinate(view: &View, lat_lng: &LatLng, height: f64) -> (ScreenCoordinate, DVec4) {
+        let sphere = Self::surface_vector(lat_lng) * (1.0 + height / Self::GLOBE_RADIUS_METERS);
+        let clip = view.globe_view_projection_matrix() * sphere.extend(1.0);
         let size = view.size();
         let point = Point::new(
             (clip.x / clip.w * 0.5 + 0.5) * f64::from(size.width),
@@ -329,18 +360,22 @@ impl VerticalPerspectiveProjection {
         (point, clip)
     }
 
-    /// The center that puts `lat_lng` under `anchor` with the bearing
-    /// unchanged, if one exists.
+    /// The center that puts `lat_lng`, on the sphere `height` meters above
+    /// sea level, under `anchor` with the bearing unchanged, if one exists.
     pub(crate) fn center_for_location_at_point(
         view: &View,
         lat_lng: &LatLng,
         anchor: &ScreenCoordinate,
+        height: f64,
     ) -> Option<LatLng> {
         // GL JS `setLocationAtPoint`: solve the rotation that carries the
-        // surface point under the pixel onto the target.
+        // surface point under the pixel onto the target. Turning the planet
+        // carries every sphere about its center with it, so the solve takes
+        // the direction of the point under the pixel on the sphere at
+        // `height`.
         const LIMIT: f64 = PI * 0.5;
         let center = view.center(WrapMode::Unwrapped);
-        let vec_to_pixel_current = Self::screen_coordinate_to_surface(view, anchor);
+        let vec_to_pixel_current = Self::screen_coordinate_to_surface(view, anchor, height);
         let vec_to_target = Self::surface_vector(lat_lng);
 
         let rotated_pixel_vector = rotate_x(
@@ -474,7 +509,7 @@ impl VerticalPerspectiveProjection {
         );
 
         let mut exact_center =
-            Self::center_for_location_at_point(state.view(), zoom_location, anchor).unwrap_or(center);
+            Self::center_for_location_at_point(state.view(), zoom_location, anchor, 0.0).unwrap_or(center);
         if on_pole {
             exact_center = LatLng::saturating(exact_center.latitude(), center.longitude(), WrapMode::Unwrapped);
         }
@@ -638,7 +673,7 @@ impl VerticalPerspectiveProjection {
         // from the edge on. GL JS takes the sweep from the screen with y down.
         let pole_latitude = if center.latitude() >= 0.0 { 90.0 } else { -90.0 };
         let (pole, _) =
-            Self::lat_lng_to_screen_coordinate(view, &LatLng::saturating(pole_latitude, 0.0, WrapMode::Unwrapped));
+            Self::lat_lng_to_screen_coordinate(view, &LatLng::saturating(pole_latitude, 0.0, WrapMode::Unwrapped), 0.0);
         let rx = point.x - pole.x;
         let ry = pole.y - point.y;
         let ramp = (1.0 - (LATITUDE_MAX - center.latitude().abs()) / DIAL_RAMP_DEGREES).clamp(0.0, 1.0);
@@ -682,7 +717,7 @@ impl VerticalPerspectiveProjection {
         {
             return None;
         }
-        let held = Self::center_for_location_at_point(view, location, point)?;
+        let held = Self::center_for_location_at_point(view, location, point, 0.0)?;
         // A pixel of cursor travel turns the center 1 / (cos(latitude) *
         // cos(longitude from the center)) times as far as it does for a
         // location at the center.
@@ -830,7 +865,7 @@ fn pan_surface_vector(view: &View, point: &ScreenCoordinate) -> DVec3 {
     let Some(PanFalloff { toward_camera: u, distance, lateral, lateral_length: s, angle, handover_angle }) =
         pan_falloff(view, point)
     else {
-        return VerticalPerspectiveProjection::screen_coordinate_to_surface(view, point);
+        return VerticalPerspectiveProjection::screen_coordinate_to_surface(view, point, 0.0);
     };
     let sin_handover = distance * handover_angle.sin();
     let target_at_handover = sin_handover.clamp(-1.0, 1.0).asin() - handover_angle;

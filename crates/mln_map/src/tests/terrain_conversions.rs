@@ -400,11 +400,12 @@ fn a_projection_reports_the_height_of_its_ground() {
     assert_eq!(None, MapProjection::new(&flat).terrain_elevation(&peak), "without terrain");
 }
 
-/// A projection of a globe's view has no terrain, whatever terrain it is
-/// given: it reads no height, and converts as the flat projection of the
-/// same view.
+/// A projection of a globe's view converts on the terrain it is given, as
+/// on Mercator: it reads the ground's height, a pixel unprojects onto the
+/// ground 1000 m up, away from where the sea-level sphere meets its line of
+/// sight, and that location projects back to the pixel on the ground.
 #[test]
-fn a_projection_of_a_globe_view_has_no_terrain() {
+fn a_projection_of_a_globe_view_converts_on_its_terrain() {
     let run_loop = Queue::<()>::new();
     let mut map = pitchable(
         r#"{"version": 8, "center": [10, 20], "zoom": 3, "sources": {}, "layers": [],
@@ -418,10 +419,12 @@ fn a_projection_of_a_globe_view_has_no_terrain() {
 
     let flat = MapProjection::from_view(&view).unwrap();
     let globe = MapProjection::from_view(&view).unwrap().with_terrain(ground);
-    assert_eq!(None, globe.terrain_elevation(&center()));
+    assert_eq!(Some(1000.0), globe.terrain_elevation(&center()));
     for pixel in lower_half() {
-        let expected = flat.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).unwrap();
-        assert_eq!(expected, globe.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).unwrap(), "{pixel:?}");
-        assert_eq!(flat.pixel_for_lat_lng(&expected), globe.pixel_for_lat_lng(&expected), "{expected:?}");
+        let on_ground = globe.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).unwrap();
+        let at_sea_level = flat.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).unwrap();
+        let moved = (on_ground.latitude() - at_sea_level.latitude()).hypot(on_ground.longitude() - at_sea_level.longitude());
+        assert!(moved > 1e-4, "{pixel:?} meets the ground {moved} degrees from sea level");
+        assert_same_pixel(pixel, globe.pixel_for_lat_lng(&on_ground), 0.01, "back on the ground");
     }
 }

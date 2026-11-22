@@ -324,7 +324,7 @@ impl View {
     }
 
     /// The center's altitude in pixels at the zoom.
-    fn center_altitude_pixels(&self) -> f64 {
+    pub(crate) fn center_altitude_pixels(&self) -> f64 {
         // A center at sea level, as on most maps, spares the conversion's
         // transcendental functions on every new view.
         if self.params.center_altitude == 0.0 {
@@ -491,8 +491,14 @@ impl View {
     /// Where the camera's eye is: its Web Mercator point at zoom 0 (from 0
     /// to 1 across, y south) and its altitude in meters, of the meters the
     /// view places heights in ([`center_altitude`](Self::center_altitude)).
+    /// On the globe it is the point under the eye, in the world copy nearest
+    /// the center, and the eye's height above the sea-level sphere.
     #[must_use]
     pub fn eye_position(&self) -> DVec3 {
+        if self.is_globe() && self.is_valid() {
+            let eye = self.matrices.globe_camera_position;
+            return VerticalPerspectiveProjection::sphere_point_to_world(self, eye).unwrap_or(eye);
+        }
         let position = self.camera_pose().position;
         let world_size = Projection::world_size(self.params.scale);
         DVec3::new(position.x, position.y, position.z * world_size * self.meters_per_pixel())
@@ -501,18 +507,26 @@ impl View {
     /// A 3 by 3 grid over the projection matrix's near plane, its corners,
     /// the middles of its edges and its center, in the units of
     /// [`eye_position`](Self::eye_position): the renderer drops what is
-    /// nearer, so ground above a point shows as a hole into it. All are the
-    /// eye while the view shows nothing.
+    /// nearer, so ground above a point shows as a hole into it. On the globe
+    /// it is the globe matrix's near plane. All are the eye while the view
+    /// shows nothing.
     #[must_use]
     pub fn near_plane_points(&self) -> [DVec3; 9] {
         let eye = self.eye_position();
         if self.matrices.projection == DMat4::ZERO {
             return [eye; 9];
         }
+        let clip = |index: usize| DVec3::new((index % 3) as f64 - 1.0, (index / 3) as f64 - 1.0, -1.0);
+        if self.is_globe() {
+            let inverse = self.matrices.inv_globe_view_projection;
+            return std::array::from_fn(|index| {
+                let point = inverse.project_point3(clip(index));
+                VerticalPerspectiveProjection::sphere_point_to_world(self, point).unwrap_or(eye)
+            });
+        }
         let world_size = Projection::world_size(self.params.scale);
         std::array::from_fn(|index| {
-            let clip = DVec3::new((index % 3) as f64 - 1.0, (index / 3) as f64 - 1.0, -1.0);
-            let point = self.matrices.inv_projection.project_point3(clip);
+            let point = self.matrices.inv_projection.project_point3(clip(index));
             DVec3::new(point.x / world_size, point.y / world_size, point.z)
         })
     }
@@ -599,7 +613,7 @@ impl View {
     /// The distance from the camera to the near plane of the projection
     /// matrix, in pixels: 1, or a fiftieth of the view's height while
     /// terrain draws, as in GL JS, for the depth precision raised ground
-    /// needs.
+    /// needs. The globe's matrix takes it while terrain draws too.
     #[must_use]
     pub fn near_z(&self) -> f64 {
         match self.params.terrain_min_elevation {
@@ -847,8 +861,8 @@ impl View {
     }
 
     /// The screen point of a location `height` meters above sea level,
-    /// measured from the bottom edge (y up). The globe places it on its
-    /// surface, whatever the height.
+    /// measured from the bottom edge (y up). The globe raises it along its
+    /// vertical.
     #[must_use]
     pub fn lat_lng_to_screen_coordinate_at(&self, lat_lng: &LatLng, height: f64) -> ScreenCoordinate {
         self.clip_point_at(lat_lng, height).0
@@ -871,7 +885,7 @@ impl View {
         }
 
         if self.is_globe() {
-            return VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(self, lat_lng);
+            return VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(self, lat_lng, height);
         }
 
         let pt = Projection::project(lat_lng, self.params.scale);
@@ -899,7 +913,8 @@ impl View {
         }
 
         if self.is_globe() {
-            return match VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(self, point, WrapMode::Unwrapped) {
+            return match VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(self, point, 0.0, WrapMode::Unwrapped)
+            {
                 Some(lat_lng) => TileCoordinate::from_lat_lng(f64::from(at_zoom), &lat_lng),
                 None => TileCoordinate { p: Point::new(0.0, 0.0), z: 0.0 },
             };
@@ -950,8 +965,10 @@ impl View {
     /// The location where the line of sight through `point`, measured from
     /// the bottom edge (y up), meets the plane `height` meters above sea
     /// level; where the line doesn't descend, as at sea level, the point it
-    /// passes a little way from the camera. The globe meets its surface,
-    /// whatever the height. Fails as [`screen_coordinate_to_lat_lng`].
+    /// passes a little way from the camera. The globe meets the sphere
+    /// `height` meters above sea level, and a line that misses it the
+    /// nearest point of that sphere's horizon. Fails as
+    /// [`screen_coordinate_to_lat_lng`].
     ///
     /// [`screen_coordinate_to_lat_lng`]: Self::screen_coordinate_to_lat_lng
     pub fn screen_coordinate_to_lat_lng_at(
@@ -968,7 +985,7 @@ impl View {
             if !point.x.is_finite() || !point.y.is_finite() {
                 return Err(Error::invalid_argument("screen coordinate must not be infinite"));
             }
-            return VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(self, point, wrap_mode)
+            return VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(self, point, height, wrap_mode)
                 .ok_or_else(|| Error::invalid_argument("the camera shows no location"));
         }
         let coord = if self.params.size.is_empty() {

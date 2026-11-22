@@ -193,9 +193,8 @@ typedef struct mln_map_projection_terrain_elevation_result {
   uint32_t size;
   /**
    * Whether the projection has the ground's height at the coordinate. It has
-   * none without terrain, while the map draws a globe, where the map hasn't
-   * drawn the ground, such as off the screen, and while the ground's data
-   * there loads.
+   * none without terrain, where the map hasn't drawn the ground, such as off
+   * the screen, and while the ground's data there loads.
    */
   bool has_elevation;
   /**

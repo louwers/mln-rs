@@ -2,10 +2,11 @@
 
 use geometry::Point;
 use glam::{DVec2, DVec3};
-use mln_util::constants::TILE_SIZE_D;
+use mln_util::constants::{LATITUDE_MAX, TILE_SIZE_D};
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 use mln_util::projection::Projection;
 
+use crate::vertical_perspective_projection::VerticalPerspectiveProjection;
 use crate::{Elevation, View};
 
 /// How far apart, in pixels at the zoom across the ground, a ray samples the
@@ -55,12 +56,67 @@ impl View {
     /// frame drew ([`Elevation::surface_at`]) every 4 pixels across the
     /// ground within the band of its heights, at most 512 times, which a
     /// long line spaces closer near the eye, and bisects the first step
-    /// that ends under the ground. `None` where the line meets no drawn
-    /// ground, on the globe, and while the view shows nothing.
+    /// that ends under the ground. On the globe the band lies between the
+    /// spheres of the lowest and highest heights, a point's height is
+    /// measured up its vertical from the sea-level sphere, and the hit's
+    /// [`world`](GroundHit::world) is in the world copy nearest the view's
+    /// center; past the Mercator range, where the globe closes its poles at
+    /// sea level, drawn ground is at sea level. `None` where the line meets
+    /// no drawn ground, and while the view shows nothing.
     #[must_use]
     pub fn ground_under(&self, point: &ScreenCoordinate, ground: &dyn Elevation) -> Option<GroundHit> {
+        if self.is_globe() {
+            return self.ground_under_on_globe(point, ground);
+        }
         let (near, far) = self.line_of_sight(point)?;
         self.ground_along(near, far, ground)
+    }
+
+    /// [`ground_under`](Self::ground_under) on the globe, in unit-sphere
+    /// space.
+    fn ground_under_on_globe(&self, point: &ScreenCoordinate, ground: &dyn Elevation) -> Option<GroundHit> {
+        let size = self.size();
+        if size.is_empty() {
+            return None;
+        }
+        let (low, high) = ground.range()?;
+        let radius = |height: f64| 1.0 + height / VerticalPerspectiveProjection::GLOBE_RADIUS_METERS;
+        let (low, high) = (radius(low - BAND_PADDING), radius(high + BAND_PADDING));
+
+        // The line of sight from the near plane to the far plane.
+        let inverse = self.inverse_globe_view_projection_matrix();
+        let ndc = DVec2::new(point.x / f64::from(size.width) * 2.0 - 1.0, point.y / f64::from(size.height) * 2.0 - 1.0);
+        let near = inverse.project_point3(ndc.extend(-1.0));
+        let along = inverse.project_point3(ndc.extend(1.0)) - near;
+        if !(near.is_finite() && along.is_finite()) {
+            return None;
+        }
+
+        // The stretch of it within the shell of the ground's heights: from
+        // where it enters the outer sphere, or the near plane inside it, to
+        // where it enters the inner sphere, or else leaves the outer one.
+        let (outer_in, outer_out) = sphere_crossings(near, along, high)?;
+        let start = outer_in.max(0.0);
+        let end = sphere_crossings(near, along, low).map_or(outer_out, |(inner_in, _)| inner_in).min(1.0);
+        if !(start < end) {
+            return None;
+        }
+
+        let point_at = |t: f64| near + along * t;
+        let max_y = mln_math::deg2rad(LATITUDE_MAX).sin();
+        let sample = |t: f64| {
+            let point = point_at(t);
+            let world = VerticalPerspectiveProjection::sphere_point_to_world(self, point)?;
+            let surface = ground.surface_at(world.truncate())?;
+            Some((world, if point.y.abs() > max_y * point.length() { 0.0 } else { surface }))
+        };
+        // The ground the band spans, from the directions of its ends.
+        let globe_radius = VerticalPerspectiveProjection::globe_radius_pixels(
+            Projection::world_size(self.scale()),
+            self.center(WrapMode::Unwrapped).latitude(),
+        );
+        let band_px = (point_at(start).normalize() - point_at(end).normalize()).length() * globe_radius;
+        march(start, end, band_px / STEP_PX, BISECTION_PX * (end - start) / band_px, sample)
     }
 
     /// Where the line from `near` to `far`, each a Web Mercator point at
@@ -91,49 +147,88 @@ impl View {
         };
 
         let point_at = |t: f64| near + along * t;
-        let surface = |t: f64| ground.surface_at(point_at(t).truncate());
-        let below = |t: f64| surface(t).is_some_and(|surface| point_at(t).z <= surface + HIT_EPSILON);
-
-        let length_px = along.truncate().length() * Projection::world_size(self.scale());
-        let steps = (length_px * (end - start) / STEP_PX).ceil();
-        let samples = steps.clamp(1.0, f64::from(MAX_SAMPLES)) as u32;
-        let capped = steps > f64::from(MAX_SAMPLES);
-        let sample = |i: u32| {
-            let f = f64::from(i) / f64::from(samples);
-            start + (end - start) * if capped { f * f } else { f }
+        let sample = |t: f64| {
+            let point = point_at(t);
+            Some((point, ground.surface_at(point.truncate())?))
         };
-
-        let mut above = !below(start);
-        let mut previous = start;
-        for i in 1..=samples {
-            let t = sample(i);
-            if !above {
-                above = !below(t);
-            } else if below(t) {
-                let (mut lo, mut hi) = (previous, t);
-                // A line that runs straight down needs no bisection: its
-                // surface doesn't change along it.
-                let tolerance = BISECTION_PX / length_px;
-                for _ in 0..MAX_BISECTIONS {
-                    if hi - lo <= tolerance {
-                        break;
-                    }
-                    let mid = f64::midpoint(lo, hi);
-                    if below(mid) {
-                        hi = mid;
-                    } else {
-                        lo = mid;
-                    }
-                }
-                // `hi` is under drawn ground.
-                let (t, height) =
-                    refine(lo, hi, |t| point_at(t).z, surface).unwrap_or_else(|| (hi, surface(hi).unwrap_or_default()));
-                return Some(GroundHit { world: point_at(t).truncate(), height });
-            }
-            previous = t;
-        }
-        None
+        let length_px = along.truncate().length() * Projection::world_size(self.scale());
+        march(start, end, length_px * (end - start) / STEP_PX, BISECTION_PX / length_px, sample)
     }
+}
+
+/// Where a line, from `start` to `end` of its parameter, first enters the
+/// ground from above, or next enters it where it starts under it: `sample`
+/// gives the line's Web Mercator point at zoom 0 and height in meters at a
+/// parameter, with the surface's height there, or `None` where no ground
+/// was drawn. It samples the line `steps` times, at most 512, spaced closer
+/// toward `start` where it would take more, and bisects the first step that
+/// ends under the ground to within `tolerance` of the parameter.
+fn march(
+    start: f64,
+    end: f64,
+    steps: f64,
+    tolerance: f64,
+    sample: impl Fn(f64) -> Option<(DVec3, f64)>,
+) -> Option<GroundHit> {
+    let surface = |t: f64| sample(t).map(|(_, surface)| surface);
+    let below = |t: f64| sample(t).is_some_and(|(point, surface)| point.z <= surface + HIT_EPSILON);
+
+    let steps = steps.ceil();
+    let samples = steps.clamp(1.0, f64::from(MAX_SAMPLES)) as u32;
+    let capped = steps > f64::from(MAX_SAMPLES);
+    let at = |i: u32| {
+        let f = f64::from(i) / f64::from(samples);
+        start + (end - start) * if capped { f * f } else { f }
+    };
+
+    let mut above = !below(start);
+    let mut previous = start;
+    for i in 1..=samples {
+        let t = at(i);
+        if !above {
+            above = !below(t);
+        } else if below(t) {
+            let (mut lo, mut hi) = (previous, t);
+            // A line that runs straight down needs no bisection: its surface
+            // doesn't change along it.
+            for _ in 0..MAX_BISECTIONS {
+                if hi - lo <= tolerance {
+                    break;
+                }
+                let mid = f64::midpoint(lo, hi);
+                if below(mid) {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                }
+            }
+            // `hi` is under drawn ground.
+            let height_at = |t: f64| sample(t).map_or(f64::NAN, |(point, _)| point.z);
+            let (t, height) = refine(lo, hi, height_at, surface).unwrap_or_else(|| (hi, surface(hi).unwrap_or_default()));
+            let point = sample(t).map_or(DVec3::NAN, |(point, _)| point);
+            return Some(GroundHit { world: point.truncate(), height });
+        }
+        previous = t;
+    }
+    None
+}
+
+/// Where a line from `origin` along `along` crosses the sphere of `radius`
+/// about the planet's center, in units of `along`: where it goes in and
+/// where it comes out, `None` where it misses.
+fn sphere_crossings(origin: DVec3, along: DVec3, radius: f64) -> Option<(f64, f64)> {
+    let a = along.length_squared();
+    let b = origin.dot(along);
+    // The line's nearest point to the center, then the half chord either side
+    // of it, which stays exact where |origin| is near `radius`.
+    let nearest = -b / a;
+    let closest = origin + along * nearest;
+    let half_chord_sq = (radius * radius - closest.length_squared()) / a;
+    if !(half_chord_sq >= 0.0) {
+        return None;
+    }
+    let half_chord = half_chord_sq.sqrt();
+    Some((nearest - half_chord, nearest + half_chord))
 }
 
 /// Where between `lo`, above the ground, and `hi`, under it, a line of

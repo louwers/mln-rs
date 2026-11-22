@@ -4114,9 +4114,8 @@ pub struct mln_map_projection_camera_result {
 pub struct mln_map_projection_terrain_elevation_result {
     pub size: u32,
     /** Whether the projection has the ground's height at the coordinate. It has
- none without terrain, while the map draws a globe, where the map hasn't
- drawn the ground, such as off the screen, and while the ground's data
- there loads.*/
+ none without terrain, where the map hasn't drawn the ground, such as off
+ the screen, and while the ground's data there loads.*/
     pub has_elevation: bool,
     /** The ground's height, in meters above sea level with the terrain's
  exaggeration; 0 where the terrain's source has no data. Read it only

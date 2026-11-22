@@ -9,6 +9,7 @@ mod terrain_anchors;
 mod terrain_camera;
 mod terrain_conversions;
 mod terrain_gestures;
+mod terrain_globe;
 mod terrain_overlap;
 mod terrain_rest;
 

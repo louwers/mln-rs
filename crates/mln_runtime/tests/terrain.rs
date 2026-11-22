@@ -12,9 +12,8 @@ fn near(a: LatLng, b: LatLng, tolerance: f64) -> bool {
 }
 
 /// The map's projection converts on the ground the renderer last drew,
-/// 1000 m up here, and reads its height there; it reads none before the
-/// first still draws the ground, off the drawn tiles, and on the globe,
-/// where terrain doesn't draw.
+/// 1000 m up here, and reads its height there, on the globe too; it reads
+/// none before the first still draws the ground and off the drawn tiles.
 #[test]
 fn a_maps_projection_meets_and_reads_the_drawn_ground() {
     let runtime = runtime();
@@ -52,7 +51,8 @@ fn a_maps_projection_meets_and_reads_the_drawn_ground() {
     wait(map.update_camera(CameraUpdate { camera, ..Default::default() }));
     wait(map.request_still_image());
     assert!(map.snapshot().unwrap().globe_rendering);
-    assert_eq!(None, map.projection().unwrap().terrain_elevation(&center), "on the globe");
+    let elevation = map.projection().unwrap().terrain_elevation(&center).expect("the center was drawn on the globe");
+    assert!((elevation - 1000.0).abs() <= 0.1, "{elevation} on the globe");
 
     drop(session);
     wait(map.release());

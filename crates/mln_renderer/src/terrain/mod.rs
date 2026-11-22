@@ -9,10 +9,9 @@
 //! none of the paths below: its tile covers, matrices and draws are a flat
 //! map's.
 //!
-//! On the globe the camera stands on the sea-level sphere, as GL JS's does,
-//! and a rendered query's line of sight meets the sea-level sphere; the
-//! standing layers and their placement stand on the drawn ground as they do
-//! on Mercator.
+//! On the globe the camera stands on the drawn ground as it does on
+//! Mercator, and rendered queries meet it; the standing layers and their
+//! placement stand on it as they do on Mercator.
 //!
 //! # A frame with terrain
 //!
@@ -353,7 +352,10 @@
 //!   ground that frame drew ([`RenderTerrain::ground`]): each point of its
 //!   screen geometry, a box's corners included, is where its line of sight
 //!   first meets the surface as drawn, the ray the map's conversions use,
-//!   or the flat map's point at sea level where it meets none. Each source
+//!   or the flat map's point at sea level where it meets none. On the globe
+//!   the ray runs between the spheres of the drawn ground's lowest and
+//!   highest heights, each height measured up its vertical
+//!   ([`View::ground_under`](mln_map_types::View::ground_under)). Each source
 //!   then tests its tiles' features there as on a flat map: the layers that
 //!   drape, the footprints of fill extrusions and circles aligned with the
 //!   map. Circles aligned with the viewport, or scaled with it, are tested

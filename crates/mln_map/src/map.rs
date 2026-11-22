@@ -1581,8 +1581,8 @@ impl Map {
     }
 
     /// The terrain the camera stands on: the ground the renderer last drew,
-    /// while the style has terrain on a Mercator view outside tile mode,
-    /// where terrain draws; else none, which turns the camera's rules over
+    /// while the style has terrain outside tile mode, where terrain draws,
+    /// on every projection; else none, which turns the camera's rules over
     /// terrain off.
     fn terrain_ground(&mut self) -> Option<TerrainGround> {
         // The renderer tells of the ground only after it draws an update
@@ -1590,8 +1590,7 @@ impl Map {
         if self.style.get_terrain().is_none() {
             self.elevation = None;
         }
-        let applies =
-            self.style.get_terrain().is_some() && self.mode != MapMode::Tile && !self.transform.view().is_globe();
+        let applies = self.style.get_terrain().is_some() && self.mode != MapMode::Tile;
         applies.then(|| TerrainGround { elevation: self.elevation.clone(), clamped: self.center_clamped_to_ground })
     }
 
@@ -1956,7 +1955,7 @@ fn globe_bounds(transform: &Transform) -> Result<LatLngBounds, Error> {
     let on_screen = |pole: &LatLng| {
         // In front of the camera and inside its depth range, as GL JS's
         // isSurfacePointOnScreen asks.
-        let (_, clip) = VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(transform.state().view(), pole);
+        let (_, clip) = VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(transform.state().view(), pole, 0.0);
         if clip[3] <= 0.0 || (clip[2] / clip[3]).abs() >= 1.0 {
             return false;
         }

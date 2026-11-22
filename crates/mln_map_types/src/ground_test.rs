@@ -268,3 +268,101 @@ fn height_zero_matches_the_flat_conversions_bit_for_bit() {
         }
     }
 }
+
+/// Meters a degree of latitude spans on the globe's sphere.
+const METERS_PER_DEGREE: f64 = 6_371_008.8 * std::f64::consts::PI / 180.0;
+
+/// The latitude 1 km north of [`CENTER`], where [`plateau`] rises.
+fn plateau_edge() -> f64 {
+    CENTER.0 + 1000.0 / METERS_PER_DEGREE
+}
+
+/// Sea level, with a plateau 600 m high north of [`plateau_edge`].
+fn plateau() -> Ground {
+    let surface = |world: DVec2| {
+        let edge = self::world(&LatLng::new(plateau_edge(), CENTER.1).unwrap()).y;
+        Some(if world.y < edge { 600.0 } else { 0.0 })
+    };
+    Ground { surface, range: (0.0, 600.0) }
+}
+
+/// [`view`] on the globe, under `vertical-perspective`.
+fn globe_view(pitch: f64, center_altitude: f64, lowest: f64) -> View {
+    let mut state = MapView {
+        camera: Camera {
+            center: LatLng::new(CENTER.0, CENTER.1).unwrap(),
+            center_altitude,
+            zoom: 13.0,
+            pitch,
+            fov: 36.87,
+            ..Camera::default()
+        },
+        extent: LogicalExtent::new(Size::new(512, 512), 1.0),
+        projection_mode: ProjectionMode::default(),
+        viewport: crate::Viewport::default(),
+        projection: ProjectionDefinition::new(mln_style_types::ProjectionType::VerticalPerspective),
+    }
+    .to_state()
+    .unwrap();
+    state.set_terrain_min_elevation(Some(lowest));
+    assert!(state.view().is_globe());
+    state.view().clone()
+}
+
+/// How far apart two locations, `height` meters up, are on the globe, in
+/// meters.
+fn meters_apart(a: &LatLng, b: &LatLng, height: f64) -> f64 {
+    let vector = crate::VerticalPerspectiveProjection::surface_vector;
+    (vector(a) - vector(b)).length() * (6_371_008.8 + height)
+}
+
+/// On the globe, a ray meets a plateau where the sphere puts it: within a
+/// centimeter of where its line of sight meets the sphere of the plateau's
+/// height, or of sea level in front of the plateau, or else on the
+/// plateau's face. Each hit draws back at its pixel.
+#[test]
+fn a_globe_ray_meets_a_plateau_where_the_sphere_puts_it() {
+    let ground = plateau();
+    let view = globe_view(65.0, 0.0, 0.0);
+    let (mut on_top, mut in_front, mut on_face) = (0, 0, 0);
+    for pixel in pixels() {
+        let hit = view.ground_under(&pixel, &ground).unwrap_or_else(|| panic!("ground under {pixel:?}"));
+        let location = hit.location(WrapMode::Unwrapped);
+        let on_sphere = |height: f64| view.screen_coordinate_to_lat_lng_at(&pixel, height, WrapMode::Unwrapped).unwrap();
+        let (top, sea) = (on_sphere(600.0), on_sphere(0.0));
+        if top.latitude() > plateau_edge() {
+            assert_eq!(600.0, hit.height, "{pixel:?}");
+            let off = meters_apart(&location, &top, 600.0);
+            assert!(off < 0.01, "{pixel:?} meets the plateau {off} m from the sphere's point");
+            on_top += 1;
+        } else if sea.latitude() < plateau_edge() {
+            assert_eq!(0.0, hit.height, "{pixel:?}");
+            let off = meters_apart(&location, &sea, 0.0);
+            assert!(off < 0.01, "{pixel:?} meets sea level {off} m from the sphere's point");
+            in_front += 1;
+        } else {
+            let off = (location.latitude() - plateau_edge()).abs() * METERS_PER_DEGREE;
+            assert!(off < 0.05, "{pixel:?} meets the plateau's face {off} m from it");
+            on_face += 1;
+            continue;
+        }
+        assert_draws_at(&view, &hit, &pixel);
+    }
+    assert!(on_top > 16 && in_front > 16 && on_face > 0, "{on_top} on top, {in_front} in front, {on_face} on the face");
+}
+
+/// On the globe, a ray that passes over the ground meets none: one above
+/// the horizon, and one that passes over the drawn ground to ground no tile
+/// drew.
+#[test]
+fn a_globe_ray_over_the_ground_meets_none() {
+    let ground = plateau();
+    let high = globe_view(85.0, 0.0, 0.0);
+    assert_eq!(None, high.ground_under(&ScreenCoordinate::new(256.0, 500.0), &ground));
+    assert!(high.ground_under(&ScreenCoordinate::new(256.0, 10.0), &ground).is_some());
+
+    let south = Ground { surface: |world| (world.y > south_of_center(0.0)).then_some(1000.0), range: (1000.0, 1000.0) };
+    let view = globe_view(60.0, 1000.0, 1000.0);
+    assert_eq!(None, view.ground_under(&ScreenCoordinate::new(256.0, 400.0), &south));
+    assert!(view.ground_under(&ScreenCoordinate::new(256.0, 100.0), &south).is_some());
+}

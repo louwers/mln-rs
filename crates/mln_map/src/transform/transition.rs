@@ -322,7 +322,10 @@ fn end_camera(frame: &CameraOptions, target: &CameraOptions, fields: u16) -> Cam
 /// at any altitude lies on the line through this center along it: the
 /// center ends where that line first meets the ground, or where it meets
 /// none, at `altitude`. A camera that can't hold the anchor moves around its
-/// center, as the frames do (see `Transform::hold_anchor`).
+/// center, as the frames do (see `Transform::hold_anchor`). On the globe,
+/// which has no straight line of sight to hold the anchor's location on, the
+/// end is the center that `camera` places, and the frames' anchor turns the
+/// planet from it.
 fn anchored_end(
     state: &TransformState,
     camera: &CameraOptions,

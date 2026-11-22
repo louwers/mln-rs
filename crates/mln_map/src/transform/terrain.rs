@@ -48,6 +48,15 @@
 //! before the renderer drew any, the altitude stays where it is, and heads
 //! on from there once that ground is known.
 //!
+//! The rules are the same on the globe, where heights stand along each
+//! point's vertical above the sea-level sphere: the same heights at the
+//! center decide the altitude, and the eye, its near plane, rays and the
+//! move onto the ground work on the sphere ([`View::ground_under`],
+//! [`TransformState::recenter_on`]). There the globe's drags and zooms
+//! around a point turn the sea-level sphere under the pointer, and the other
+//! anchored moves hold their locations on the sphere at the center's
+//! altitude.
+//!
 //! The terrain moves a camera at rest, as ground loads or changes under it,
 //! the clamp turns on or the terrain goes, without camera events, as in GL
 //! JS: the map's snapshots show those moves. Everything else that the
@@ -58,6 +67,8 @@
 use std::sync::Arc;
 
 use glam::{DVec2, DVec3};
+#[cfg(doc)]
+use mln_map_types::TransformState;
 use mln_map_types::{CameraOptions, Elevation, View};
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::error::Error;
@@ -92,7 +103,7 @@ const NEAR_CENTER: f64 = 1e-2;
 const MAX_ANCHOR_RISE: f64 = 0.9;
 
 /// The terrain the camera stands on, which the map hands the transform
-/// while its style's terrain draws on a Mercator view.
+/// while its style's terrain draws, on any projection.
 #[derive(Clone, Debug)]
 pub struct TerrainGround {
     /// The ground the renderer last drew, or `None` before it drew any:

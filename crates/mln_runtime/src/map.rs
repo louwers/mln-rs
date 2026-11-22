@@ -469,7 +469,7 @@ impl Map {
     /// on the terrain its camera stands on in that state, so its conversions
     /// and its [`terrain_elevation`](MapProjection::terrain_elevation) meet
     /// the ground that the renderer last drew, as the map's own conversions
-    /// do. Without terrain, which includes the globe, it converts on the
+    /// do, on the globe as on Mercator. Without terrain it converts on the
     /// flat map. The projection is the caller's and doesn't follow the map.
     ///
     /// Fails as [`snapshot`](Self::snapshot) does.
