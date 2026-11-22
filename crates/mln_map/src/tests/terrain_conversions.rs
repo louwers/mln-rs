@@ -423,7 +423,8 @@ fn a_projection_of_a_globe_view_converts_on_its_terrain() {
     for pixel in lower_half() {
         let on_ground = globe.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).unwrap();
         let at_sea_level = flat.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).unwrap();
-        let moved = (on_ground.latitude() - at_sea_level.latitude()).hypot(on_ground.longitude() - at_sea_level.longitude());
+        let moved =
+            (on_ground.latitude() - at_sea_level.latitude()).hypot(on_ground.longitude() - at_sea_level.longitude());
         assert!(moved > 1e-4, "{pixel:?} meets the ground {moved} degrees from sea level");
         assert_same_pixel(pixel, globe.pixel_for_lat_lng(&on_ground), 0.01, "back on the ground");
     }

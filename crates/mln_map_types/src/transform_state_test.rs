@@ -818,8 +818,9 @@ fn the_globe_camera_looks_at_the_center_at_its_altitude() {
         let mut state = state.clone();
         state.set_center_altitude(altitude);
         let view = state.view();
-        let center = crate::VerticalPerspectiveProjection::surface_vector(&view.center(mln_util::geo::WrapMode::Unwrapped))
-            * (1.0 + altitude / GLOBE_RADIUS);
+        let center =
+            crate::VerticalPerspectiveProjection::surface_vector(&view.center(mln_util::geo::WrapMode::Unwrapped))
+                * (1.0 + altitude / GLOBE_RADIUS);
         let clip = view.globe_view_projection_matrix() * center.extend(1.0);
         assert!((clip.x / clip.w).abs() < 1e-9 && (clip.y / clip.w).abs() < 1e-9, "{altitude} m: {clip}");
         // The eye is the camera's distance from that center.
@@ -858,8 +859,7 @@ fn the_globe_eye_and_near_plane_are_the_cameras() {
     assert!((eye.z - height).abs() < 1e-6, "the eye {} m up, not {height}", eye.z);
 
     let eye = on_sphere(eye);
-    let raised_center =
-        crate::VerticalPerspectiveProjection::surface_vector(&center) * (1.0 + 1500.0 / GLOBE_RADIUS);
+    let raised_center = crate::VerticalPerspectiveProjection::surface_vector(&center) * (1.0 + 1500.0 / GLOBE_RADIUS);
     let forward = (raised_center - eye).normalize();
     let points = view.near_plane_points();
     let middle = on_sphere(points[4]) - eye;
@@ -969,8 +969,7 @@ fn recentering_on_the_globe_keeps_the_eye() {
     let b = eye.dot(forward);
     let t = -b - (b * b - eye.length_squared() + radius * radius).sqrt();
     let point = eye + forward * t;
-    let location =
-        crate::VerticalPerspectiveProjection::surface_vector_to_lat_lng(point.normalize()).unwrap();
+    let location = crate::VerticalPerspectiveProjection::surface_vector_to_lat_lng(point.normalize()).unwrap();
     let world = Projection::project(&location, 1.0 / mln_util::constants::TILE_SIZE_D);
     let hit = crate::GroundHit { world: glam::DVec2::new(world.x, world.y), height: 1000.0 };
 

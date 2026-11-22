@@ -913,8 +913,12 @@ impl View {
         }
 
         if self.is_globe() {
-            return match VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(self, point, 0.0, WrapMode::Unwrapped)
-            {
+            return match VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(
+                self,
+                point,
+                0.0,
+                WrapMode::Unwrapped,
+            ) {
                 Some(lat_lng) => TileCoordinate::from_lat_lng(f64::from(at_zoom), &lat_lng),
                 None => TileCoordinate { p: Point::new(0.0, 0.0), z: 0.0 },
             };

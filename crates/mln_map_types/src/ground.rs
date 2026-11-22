@@ -204,7 +204,8 @@ fn march(
             }
             // `hi` is under drawn ground.
             let height_at = |t: f64| sample(t).map_or(f64::NAN, |(point, _)| point.z);
-            let (t, height) = refine(lo, hi, height_at, surface).unwrap_or_else(|| (hi, surface(hi).unwrap_or_default()));
+            let (t, height) =
+                refine(lo, hi, height_at, surface).unwrap_or_else(|| (hi, surface(hi).unwrap_or_default()));
             let point = sample(t).map_or(DVec3::NAN, |(point, _)| point);
             return Some(GroundHit { world: point.truncate(), height });
         }

@@ -328,7 +328,8 @@ fn a_globe_ray_meets_a_plateau_where_the_sphere_puts_it() {
     for pixel in pixels() {
         let hit = view.ground_under(&pixel, &ground).unwrap_or_else(|| panic!("ground under {pixel:?}"));
         let location = hit.location(WrapMode::Unwrapped);
-        let on_sphere = |height: f64| view.screen_coordinate_to_lat_lng_at(&pixel, height, WrapMode::Unwrapped).unwrap();
+        let on_sphere =
+            |height: f64| view.screen_coordinate_to_lat_lng_at(&pixel, height, WrapMode::Unwrapped).unwrap();
         let (top, sea) = (on_sphere(600.0), on_sphere(0.0));
         if top.latitude() > plateau_edge() {
             assert_eq!(600.0, hit.height, "{pixel:?}");

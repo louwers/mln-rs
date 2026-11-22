@@ -1955,7 +1955,8 @@ fn globe_bounds(transform: &Transform) -> Result<LatLngBounds, Error> {
     let on_screen = |pole: &LatLng| {
         // In front of the camera and inside its depth range, as GL JS's
         // isSurfacePointOnScreen asks.
-        let (_, clip) = VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(transform.state().view(), pole, 0.0);
+        let (_, clip) =
+            VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(transform.state().view(), pole, 0.0);
         if clip[3] <= 0.0 || (clip[2] / clip[3]).abs() >= 1.0 {
             return false;
         }

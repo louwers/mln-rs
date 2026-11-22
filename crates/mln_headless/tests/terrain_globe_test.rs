@@ -510,13 +510,20 @@ fn the_fog_tints_the_ground_alike_on_the_globe_and_mercator() {
 /// white background, a square `side` meters across of each of `squares`,
 /// draped, and with `standing`, a cyan circle 100 m south and 150 m east of
 /// the center and a magenta icon 100 m north and 100 m west of it.
-fn crest_style(projection: Option<&str>, zoom: f64, squares: &[([u8; 3], f64, f64)], side: f64, standing: bool) -> String {
+fn crest_style(
+    projection: Option<&str>,
+    zoom: f64,
+    squares: &[([u8; 3], f64, f64)],
+    side: f64,
+    standing: bool,
+) -> String {
     let projection = projection.map_or_else(String::new, |type_| format!(r#""projection": {{"type": "{type_}"}},"#));
     let (lon, lat) = CENTER;
     let mut sources = vec![
         r#""dem": {"type": "raster-dem", "tiles": ["dem/{z}/{x}/{y}.png"], "tileSize": 256, "maxzoom": 15}"#.to_owned(),
     ];
-    let mut layers = vec![r#"{"id": "background", "type": "background", "paint": {"background-color": "white"}}"#.to_owned()];
+    let mut layers =
+        vec![r#"{"id": "background", "type": "background", "paint": {"background-color": "white"}}"#.to_owned()];
     for (index, &([r, g, b], north, east)) in squares.iter().enumerate() {
         sources.push(format!(r#""square{index}": {{"type": "geojson", "data": {}}}"#, square(north, east, side)));
         layers.push(format!(

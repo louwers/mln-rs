@@ -861,7 +861,8 @@ impl TransformState {
         let center = VerticalPerspectiveProjection::surface_vector(&view.center(WrapMode::Unwrapped))
             * radius(view.center_altitude());
         let forward = (center - eye).normalize();
-        let target = VerticalPerspectiveProjection::surface_vector(&hit.location(WrapMode::Unwrapped)) * radius(hit.height);
+        let target =
+            VerticalPerspectiveProjection::surface_vector(&hit.location(WrapMode::Unwrapped)) * radius(hit.height);
         let distance = (target - eye).dot(forward);
         if !(distance.is_finite() && distance > 0.0) {
             return None;
