@@ -1,6 +1,6 @@
 use mln_rs::layer::{
-    Buffer, Color, Depth, Draw, Draws, IndexBuffer, Layer, Mesh, MeshDesc, NewCx, NoTiles, PrepareCx, SamplerState,
-    Size, Target, Texture, TextureChannelDataType, TextureFilterType, TextureWrapType, UpdateCx,
+    Buffer, Color, Draw, Draws, IndexBuffer, Layer, Mesh, MeshDesc, NewCx, NoTiles, PrepareCx, SamplerState, Size,
+    Target, Texture, TextureChannelDataType, TextureFilterType, TextureWrapType, UpdateCx,
 };
 
 use crate::ImageProcess;
@@ -59,9 +59,8 @@ impl Layer for ImageProcessLayer {
 
     fn prepare(&self, _cx: &PrepareCx<'_, Self>, out: &mut Draws) {
         let Some((last, passes)) = self.passes[..self.drawn].split_last() else { return };
-        let scratch = Draw { depth: Depth::Off, ..Draw::DEFAULT };
         for (pass, target) in passes.iter().zip(&self.scratch) {
-            out.target(target).block(&pass.block).push(&pass.mesh, scratch, ());
+            out.target(target).block(&pass.block).push(&pass.mesh, Draw::DEFAULT, ());
         }
         out.main().block(&last.block).push(&last.mesh, Draw::DEFAULT, ());
     }
