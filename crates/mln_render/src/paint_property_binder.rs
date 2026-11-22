@@ -1181,8 +1181,9 @@ fn mix_offset(program: &Program, name: &str) -> Option<usize> {
 ///
 /// Each field is a property of the evaluated paint set (an
 /// [`mln_style::properties!`] set's `PossiblyEvaluated`), its binder, a
-/// [`PaintPropertyBinder`](crate::layer::PaintPropertyBinder), and the
-/// names of the program's properties
+/// [`PaintPropertyBinder`](crate::layer::PaintPropertyBinder), or a
+/// [`CrossFadedPaintPropertyBinder`](crate::layer::CrossFadedPaintPropertyBinder)
+/// of a `*-pattern` property, and the names of the program's properties
 /// ([`Property`](mln_gfx::shaders::program::Property)) that read its values.
 /// The fields are as visible as the struct.
 #[macro_export]
