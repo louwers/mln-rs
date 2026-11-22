@@ -219,7 +219,7 @@ pub(crate) fn build(discovered: Discovered, input: &LayoutInput<'_>, resolved: &
     // Room for every layer of the groups, of which those with data keep it.
     built.buckets = LayoutBuckets::with_capacity(groups.iter().map(|group| group.layers.len()).sum());
     let LayoutParams { first_load, show_collision_boxes, .. } = input.params;
-    let build = BuildParams { first_load, show_collision_boxes, canonical: input.id.canonical };
+    let build = BuildParams { first_load, show_collision_boxes };
     let bucket_parameters = input.bucket_parameters();
 
     let mut waiting = Vec::new();

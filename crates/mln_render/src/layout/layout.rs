@@ -12,7 +12,6 @@ use mln_style::layer_type::StyleLayerType;
 use mln_style_types::image::ImageDependencies;
 use mln_text::glyph::GlyphDependencies;
 use mln_tile::{TileData, TileLayer};
-use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::error::Error;
 use mln_vec_map::VecSet;
@@ -49,11 +48,8 @@ impl SourceLayer {
 pub(crate) struct BuildParams {
     /// Whether the tile has had no layout yet.
     pub(crate) first_load: bool,
-    /// Whether the map shows collision boxes, which only the types that
-    /// place read.
+    /// Whether the map shows collision boxes.
     pub(crate) show_collision_boxes: bool,
-    /// The tile the bucket is of.
-    pub(crate) canonical: CanonicalTileID,
 }
 
 /// What a tile's layout reads, and where it records the glyphs and images
