@@ -565,8 +565,7 @@ shader_source!(
 );
 
 /// The source of each built-in program that has MSL: those the renderer
-/// draws with on Metal, which leaves out the fill outlines as lines, which
-/// Metal draws no wider than 1 px, and the fill extrusion walls of devices
+/// draws with on Metal, which leaves out the fill extrusion walls of devices
 /// that rasterize on the CPU.
 pub(crate) static BUILT_INS: &[(&Program, &ShaderSource)] = &[
     (&programs::BACKGROUND, &BACKGROUND_SHADER),
