@@ -89,7 +89,7 @@ impl Composite {
     }
 
     /// Whether the shader blends with the backdrop, a copy of the frame.
-    fn reads_backdrop(self) -> bool {
+    pub(crate) fn reads_backdrop(self) -> bool {
         self.shader_blend() != LAYER_COMPOSITE_BLEND_NONE
     }
 

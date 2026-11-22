@@ -446,6 +446,13 @@ impl<'a> PaintParameters<'a> {
         DepthTest::less_equal(write, (0.0, self.depth_range_size))
     }
 
+    /// Forgets the masks of the stencil, for a pass that begins with it
+    /// cleared.
+    pub(crate) fn reset_stencil(&mut self) {
+        self.next_stencil_id = 1;
+        self.tile_clipping_mask_ids.clear();
+    }
+
     pub(crate) fn clear_stencil(&mut self, gpu: &mut dyn Gpu) {
         self.next_stencil_id = 1;
         self.tile_clipping_mask_ids.clear();

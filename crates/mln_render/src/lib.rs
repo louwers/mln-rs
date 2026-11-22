@@ -48,6 +48,7 @@ pub mod layer;
 mod layer_composite;
 mod layout;
 mod mesh_desc;
+mod named_target;
 mod paint_parameters;
 mod paint_property_binder;
 mod paint_property_statistics;

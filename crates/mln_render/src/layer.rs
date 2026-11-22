@@ -120,6 +120,7 @@ pub use crate::image_store::ImageStore;
 use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::SourceLayer;
 pub use crate::layout::tile_layout::Resolved;
+use crate::named_target::TargetReads;
 pub use crate::paint_parameters::Frame;
 use crate::paint_property_binder::PatternDependency;
 pub use crate::paint_property_binder::{
@@ -156,7 +157,8 @@ pub trait Layer: Sized + 'static {
     /// draws in a frame. The layers above the lowest such layer draw their
     /// opaque draws in the translucent pass, and on the globe the planet's
     /// depth hides 3D geometry behind the horizon while any such layer
-    /// renders.
+    /// renders. Such a layer draws on the map, never into a named target
+    /// ([`NamedTarget`](crate::draw::NamedTarget)).
     const VOLUME: bool = false;
 
     /// The layer for the values `cx.layer`, before they transition. It may
@@ -795,6 +797,21 @@ pub struct UpdateCx<'a, L: Layer> {
     pub tiles: Tiles<'a, L>,
     /// The renderer's resources.
     pub res: &'a mut Resources,
+    pub(crate) targets: TargetReads<'a>,
+}
+
+impl<L: Layer> UpdateCx<'_, L> {
+    /// The texture of the style's named target `name`
+    /// ([`NamedTarget`](crate::draw::NamedTarget)), to sample, as every
+    /// layer that draws into it draws it this frame, wherever it is among
+    /// the layers; `None` for a name the style doesn't declare. A layer
+    /// that samples a named target asks for it in each frame's update: the
+    /// frame draws the target before what the layer draws, its own targets
+    /// included. A layer that reads the target it draws into draws on the
+    /// map instead, as does one that reads a target drawn from its own.
+    pub fn target(&mut self, name: &str) -> Option<Texture> {
+        self.targets.read(name)
+    }
 }
 
 /// A layer's frame tiles, in render order, with its values of them.
@@ -893,8 +910,8 @@ impl<'a, L: Layer> PrepareCx<'a, L> {
 /// When a frame lends a layer the backend's commands ([`Draws::lend`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LendAt {
-    /// Before the frame's passes, after the layers below drew into their
-    /// targets: the frame's commands outside a pass.
+    /// Before the frame's passes, right after the layer drew into its
+    /// targets ([`Draws::target`]): the frame's commands outside a pass.
     BeforePasses,
     /// In the frame's translucent pass, at the layer's place among the
     /// layers, after the layer's draws there: the open pass.

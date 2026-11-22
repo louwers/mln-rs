@@ -16,7 +16,7 @@ use mln_gfx::ColorMode;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::{
     BufferId, BufferUsage, Caps, ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadOp, PipelineId,
-    PipelineKey, ResourceId, SamplerId, ShaderId, ShaderKey, TargetFormats, TextureId,
+    PipelineKey, ResourceId, SamplerId, ShaderId, ShaderKey, TargetFormats, TextureFormat, TextureId,
 };
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::rendering_stats::RenderingStats;
@@ -217,27 +217,35 @@ impl Resources {
     }
 
     /// The pass that draws into `target`, which clears it to its color and
-    /// its depth, if the device draws targets with one, to 1, making their
-    /// textures through `gpu`.
+    /// its depth to 1, making their textures through `gpu`: the depth and
+    /// stencil `depth_stencil` of its format, whose stencil it clears to 0
+    /// too, or else the target's own depth, if the device draws targets with
+    /// one.
     pub(crate) fn target_pass(
         &mut self,
         gpu: &mut dyn Gpu,
         target: &crate::draw::Target,
+        depth_stencil: Option<(TextureId, TextureFormat)>,
     ) -> Result<crate::paint_parameters::OpenPass, GpuError> {
         let depth_format = self.caps.render_target_depth;
         let (texture, device) = self.texture_entry(&target.texture.0)?;
         let color = texture.create(gpu, device)?;
-        let depth = depth_format.map(|format| texture.depth(gpu, device, format)).transpose()?;
+        let (depth, stencil) = if let Some(depth_stencil) = depth_stencil {
+            (Some(depth_stencil), LoadOp::Clear(0))
+        } else {
+            let depth = depth_format.map(|format| texture.depth(gpu, device, format)).transpose()?;
+            (depth.zip(depth_format), LoadOp::Load)
+        };
         Ok(crate::paint_parameters::OpenPass {
             label: "render target",
             color: Some(ColorAttachment { texture: color, load: LoadOp::Clear(target.clear) }),
-            depth_stencil: depth.map(|depth| DepthStencilAttachment {
+            depth_stencil: depth.map(|(depth, _)| DepthStencilAttachment {
                 texture: depth,
                 depth: LoadOp::Clear(1.0),
-                stencil: LoadOp::Load,
+                stencil,
             }),
             size: texture.size(),
-            targets: TargetFormats { color: Some(texture.format()), depth_stencil: depth.and(depth_format) },
+            targets: TargetFormats { color: Some(texture.format()), depth_stencil: depth.map(|(_, format)| format) },
         })
     }
 

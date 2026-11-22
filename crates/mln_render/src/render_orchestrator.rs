@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_gfx::gpu::Gpu;
+use mln_gfx::gpu::{Gpu, TextureFormat, TextureId};
 use mln_map_types::{MapDebugOptions, MapMode, View};
 use mln_style::diff::{ItemChanges, LayerChange, LayerChanges, StyleDiff, sources_by_id};
 use mln_style::expression::{Dependency, GlobalStateMap};
@@ -33,11 +33,13 @@ use crate::frame::{FrameLayer, FramePlan};
 use crate::gfx::context::Resources;
 use crate::globe_depth_pass::GlobeDepthPass;
 use crate::image_store::ImageStore;
+use crate::named_target::{Routes, Run};
 use crate::paint_parameters::PaintParameters;
 use crate::placement::{
     CollisionGroups, ErasedFrame, ErasedPlacement, PlacementQuery, PlacingLayerTiles, PlacingTile, Prepared, Schedule,
 };
 use crate::render_layer::{FrameSourceTiles, LayerUpdate, RecordedLayer, RenderLayer};
+use crate::render_pass::Pass;
 use crate::render_source::{self, RenderSource, RenderTileParameters};
 use crate::render_tile::{FoundTile, RenderTile, TileContent};
 use crate::renderer_event::RendererEvent;
@@ -187,6 +189,9 @@ pub(crate) struct RenderOrchestrator {
     /// The debug overlays.
     debug_layers: DebugLayers,
 
+    /// The style's named targets, and the frame's routes into them.
+    routes: Routes,
+
     globe_depth_pass: GlobeDepthPass,
     sky_pass: crate::sky_pass::SkyPass,
 
@@ -249,6 +254,7 @@ impl RenderOrchestrator {
             globe_depth_pass: GlobeDepthPass::default(),
             sky_pass: crate::sky_pass::SkyPass::default(),
             debug_layers: VecMap::new(),
+            routes: Routes::default(),
         }
     }
 
@@ -314,6 +320,8 @@ impl RenderOrchestrator {
         if sources_changed {
             self.sources_by_id = sources_by_id(style.get_sources());
         }
+        let new_version = self.style.as_ref().is_none_or(|previous| !Arc::ptr_eq(previous, style));
+        self.routes.sync(style.extra(), new_version, res);
         self.style = Some(Arc::clone(style));
         let layers = Arc::clone(style.get_layer_list());
 
@@ -895,6 +903,7 @@ impl RenderOrchestrator {
                     // backdrop, so it stays a layer, as it does for the
                     // overdraw inspector, which counts its draw.
                     if self.background_layer_as_color
+                        && !self.routes.routes(layer.layer.style().base().extra(), record.volume)
                         && frame.sky.is_none()
                         && !update_parameters.view.is_globe()
                         && !update_parameters.debug_options.contains(MapDebugOptions::OVERDRAW)
@@ -1134,8 +1143,9 @@ impl RenderOrchestrator {
         Some(self.tile_store.source_mut(key)?.0)
     }
 
-    /// Visits the layers' draw groups of the frame, in drawing order.
-    pub(crate) fn visit_draw_groups<'a>(&'a self, mut visit: impl FnMut(&'a FrameDraws)) {
+    /// Visits the layers' draw groups of the frame, in drawing order, each
+    /// with whether it draws into a named target.
+    pub(crate) fn visit_draw_groups<'a>(&'a self, mut visit: impl FnMut(&'a FrameDraws, bool)) {
         for layer in &self.layers {
             layer.layer.visit_draw_groups(&mut visit);
         }
@@ -1160,11 +1170,65 @@ impl RenderOrchestrator {
         }
     }
 
-    /// Draws the layers' draws into their targets, bottom to top, before
-    /// the frame's passes.
-    pub(crate) fn render_targets(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        for layer in &mut self.layers {
-            layer.layer.render_targets(gpu, parameters);
+    /// Draws what the frame draws before its passes: the layers' draws into
+    /// their own targets, bottom to top, and the passes of the named targets
+    /// that they draw into or read, each where the frame's routes order it.
+    /// A named target's pass draws with `frame_depth`, the frame's depth and
+    /// stencil and their format, where a pass can draw into them with any
+    /// color.
+    pub(crate) fn render_targets(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        frame_depth: Option<(TextureId, TextureFormat)>,
+    ) {
+        if self.routes.order().is_empty() {
+            for layer in &mut self.layers {
+                layer.layer.render_targets(gpu, parameters);
+            }
+            return;
+        }
+        for index in 0..self.routes.order().len() {
+            match self.routes.order()[index] {
+                Run::Own(layer) => self.layers[layer].layer.render_targets(gpu, parameters),
+                Run::Named(target) => self.render_named_target(gpu, parameters, target, frame_depth),
+            }
+        }
+        parameters.reset_stencil();
+    }
+
+    /// Draws the pass of the named target at `target`: the draws of the
+    /// layers routed into it, bottom to top, all in its translucent pass,
+    /// within the frame's scissor.
+    fn render_named_target(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        target: usize,
+        frame_depth: Option<(TextureId, TextureFormat)>,
+    ) {
+        let began = match self.routes.pass(gpu, parameters.context, target, frame_depth) {
+            Ok(pass) => parameters.begin_pass(gpu, pass),
+            Err(error) => Err(error),
+        };
+        if let Err(error) = began {
+            Log::error(Event::Render, format!("Beginning a named target's pass failed: {error}"));
+            return;
+        }
+        parameters.reset_stencil();
+        // The layers draw as above the lowest layer of 3D geometry on the
+        // map: without the opaque pass's depth, each over the last.
+        let opaque_pass_cutoff = std::mem::replace(&mut parameters.opaque_pass_cutoff, u32::MAX);
+        parameters.pass = Pass::Translucent;
+        parameters.depth_range_size =
+            1.0 - (3 * PaintParameters::NUM_SUBLAYERS) as f32 * PaintParameters::DEPTH_EPSILON;
+        parameters.current_layer = 0;
+        for layer in self.routes.writers(target) {
+            self.layers[layer].layer.render(gpu, parameters, DrawOrder::BottomUp, Some(target));
+        }
+        parameters.opaque_pass_cutoff = opaque_pass_cutoff;
+        if let Err(error) = parameters.end_pass(gpu) {
+            Log::error(Event::Render, format!("Ending a named target's pass failed: {error}"));
         }
     }
 
@@ -1180,12 +1244,12 @@ impl RenderOrchestrator {
         match order {
             DrawOrder::BottomUp => {
                 for layer in &mut self.layers {
-                    layer.layer.render(gpu, parameters, order);
+                    layer.layer.render(gpu, parameters, order, None);
                 }
             }
             DrawOrder::TopDown => {
                 for layer in self.layers.iter_mut().rev() {
-                    layer.layer.render(gpu, parameters, order);
+                    layer.layer.render(gpu, parameters, order, None);
                 }
             }
         }
@@ -1231,6 +1295,7 @@ impl RenderOrchestrator {
         self.layers.clear();
         self.layer_indexes.clear();
         self.layers_left = true;
+        self.routes.lose();
     }
 
     /// Makes the draws of the layers the frame draws, and of the sky and
@@ -1244,15 +1309,19 @@ impl RenderOrchestrator {
     ) {
         let mut needs_globe_depth = false;
         let mut contents = SourceContents::default();
+        self.routes.begin_frame(paint_parameters.frame.target_size, paint_parameters.context);
         for (&index, frame_layer) in &frame.layers {
-            let render_layer = &mut self.layers[index as usize];
+            let index = index as usize;
+            let render_layer = &mut self.layers[index];
             let source = frame_layer.source.as_ref().and_then(|id| self.render_sources.get_key_value(id));
             let source = source.map(|(id, source)| (id.as_str(), &**source));
             let source_contents = contents.of(source, &self.tile_store);
             let tiles = source.map(|(_, source)| FrameSourceTiles::new(source, source_contents));
-            render_layer.update_draws(gpu, paint_parameters, self.tile_store.images(), tiles, &self.found_tiles);
+            let images = self.tile_store.images();
+            render_layer.update_draws(gpu, paint_parameters, images, tiles, &self.found_tiles, index, &mut self.routes);
             needs_globe_depth = needs_globe_depth || render_layer.record().volume;
         }
+        self.routes.finish_frame();
         let state = paint_parameters.frame.camera;
         let (renderable_size, pixel_ratio) = (paint_parameters.frame.target_size, paint_parameters.frame.pixel_ratio);
         let context = &mut *paint_parameters.context;

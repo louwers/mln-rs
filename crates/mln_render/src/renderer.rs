@@ -631,11 +631,11 @@ impl Encoder {
     }
 }
 
-/// What the frame's draw groups need of the passes: their number, which sets
-/// the passes' depth range; the masks of the tiles they clip to and, when
-/// any of them uses the stencil buffer, of the tile that clears it; and the
-/// groups drawn as a whole, each into the layer composite's texture and then
-/// onto the frame.
+/// What the frame's draw groups need of the passes: the number of those
+/// that draw on the map, which sets the passes' depth range; the masks of
+/// the tiles they clip to and, when any of them uses the stencil buffer, of
+/// the tile that clears it; and the groups drawn as a whole, each into the
+/// layer composite's texture and then onto the frame or its named target.
 struct DrawGroups {
     count: usize,
     clip_tiles: Vec<UnwrappedTileID>,
@@ -648,8 +648,10 @@ impl DrawGroups {
     fn of(orchestrator: &RenderOrchestrator, parameters: &PaintParameters<'_>) -> DrawGroups {
         let mut groups = DrawGroups { count: 0, clip_tiles: Vec::new(), composited: Vec::new() };
         let mut last: Option<&[UnwrappedTileID]> = None;
-        orchestrator.visit_draw_groups(|group| {
-            groups.count += 1;
+        orchestrator.visit_draw_groups(|group, routed| {
+            if !routed {
+                groups.count += 1;
+            }
             if let Some(tiles) = group.stencil_tiles()
                 && last.is_none_or(|last| last != tiles)
             {
@@ -682,8 +684,11 @@ fn draw(
     num_draw_groups: usize,
     depth_range_size: f32,
 ) {
-    // What the layers draw into their targets, which the passes sample.
-    orchestrator.render_targets(gpu, parameters);
+    // What the layers draw into their targets and the named targets, which
+    // the passes sample.
+    let frame_depth =
+        image.depth_stencil.filter(|_| parameters.frame.composites_with_frame_depth).zip(image.targets.depth_stencil);
+    orchestrator.render_targets(gpu, parameters, frame_depth);
 
     // The frame's pass, cleared to the backdrop, which shows where there are
     // no tiles.

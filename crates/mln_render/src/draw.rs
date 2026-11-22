@@ -29,6 +29,17 @@
 //! programs, whose blocks differ. A layer that draws with the backend's own
 //! commands asks the frame to lend them ([`Draws::lend`]).
 //!
+//! A style may declare named targets ([`NamedTargets`], a value of its root)
+//! and draw a layer's main group and overlay into one instead of the map
+//! ([`Destination`], a value of the layer), where a layer reads it
+//! ([`UpdateCx::target`](crate::layer::UpdateCx::target)). The engine knows
+//! no key that holds these values: an extension declares the keys
+//! ([`StyleKey`](mln_style::style_key::StyleKey)). A group draws into a
+//! named target as onto the map, with the masks of its tiles and within the
+//! frame's scissor, but each draw over the last, without the opaque pass's
+//! depth, with no composite of a blend that reads what is behind it, and
+//! with no commands lent in the pass.
+//!
 //! The resources and their handles belong to the renderer's thread: they
 //! are neither `Send` nor `Sync`.
 
@@ -41,3 +52,4 @@ pub use crate::gfx::texture2d::TextureMut;
 pub use crate::handles::{Buffer, ImageVertex, IndexBuffer, Sampler, Target, Texture, TileSurface, Vertex};
 pub use crate::layer_composite::Composite;
 pub use crate::mesh_desc::MeshDesc;
+pub use crate::named_target::{Destination, NamedTarget, NamedTargets};

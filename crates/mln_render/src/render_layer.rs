@@ -27,6 +27,7 @@ use crate::layer::{
     EvaluateCx, Evaluation, Found, FrameQuery, Hit, HitTest, Layer, LayerValues, LendAt, Lent, NewCx, PrepareCx,
     TileCx, Tiles, UpdateCx, input,
 };
+use crate::named_target::{Routes, Warning};
 use crate::paint_parameters::PaintParameters;
 use crate::render_pass::Pass;
 use crate::render_source::RenderSource;
@@ -102,6 +103,9 @@ pub(crate) struct Hosted<L: Layer> {
     globe: bool,
     /// The layer's draws of the frame.
     frame_draws: Draws,
+    /// The named target that the frame draws the layer's main group and
+    /// overlay into, by index, or `None` for the map.
+    route: Option<usize>,
 }
 
 impl<L: Layer> Hosted<L> {
@@ -132,6 +136,7 @@ impl<L: Layer> Hosted<L> {
             renderable: false,
             globe: false,
             frame_draws: Draws::new(),
+            route: None,
         }
     }
 }
@@ -218,6 +223,7 @@ impl RecordedLayer {
     }
 
     /// See [`RenderLayer::update_draws`].
+    #[expect(clippy::too_many_arguments, reason = "the layer's frame, each from another part of the renderer")]
     pub(crate) fn update_draws(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -225,8 +231,11 @@ impl RecordedLayer {
         images: &ImageStore,
         source: Option<FrameSourceTiles<'_>>,
         found: &[FoundTile],
+        index: usize,
+        routes: &mut Routes,
     ) {
-        self.layer.update_draws(gpu, paint, self.record.evaluation, images, source, found);
+        let evaluation = self.record.evaluation;
+        self.layer.update_draws(gpu, paint, evaluation, images, source, found, index, routes);
     }
 }
 
@@ -283,11 +292,14 @@ pub(crate) trait RenderLayer: Any {
     /// their buckets was laid out with values that draw.
     fn update(&mut self, update: &mut LayerUpdate<'_>) -> bool;
 
-    /// The encode's run of the layer: drops its tile values where the
-    /// frame's projection changed, and where `evaluation` draws, gives the
-    /// tiles of `source` that its update found in `found` their data, runs
-    /// [`Layer::update`], [`Layer::tile`] for the tiles without a value and
-    /// [`Layer::prepare`], and readies the draws it pushed.
+    /// The encode's run of the layer, the frame's layer at `index`: drops
+    /// its tile values where the frame's projection changed, and where
+    /// `evaluation` draws, gives the tiles of `source` that its update found
+    /// in `found` their data, runs [`Layer::update`], routes the layer
+    /// through `routes` with the named targets it read, runs [`Layer::tile`]
+    /// for the tiles without a value and [`Layer::prepare`], and readies the
+    /// draws it pushed.
+    #[expect(clippy::too_many_arguments, reason = "the layer's frame, each from another part of the renderer")]
     fn update_draws(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -296,6 +308,8 @@ pub(crate) trait RenderLayer: Any {
         images: &ImageStore,
         source: Option<FrameSourceTiles<'_>>,
         found: &[FoundTile],
+        index: usize,
+        routes: &mut Routes,
     );
 
     /// Moves the layer's value of each tile to the tile `wrap_delta` world
@@ -317,9 +331,10 @@ pub(crate) trait RenderLayer: Any {
     /// The tiles stay.
     fn remove_all_draws(&mut self);
 
-    /// Visits the layer's draw groups of the frame, in drawing order: none
-    /// unless the frame draws the layer.
-    fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(&'a FrameDraws));
+    /// Visits the layer's draw groups of the frame, in drawing order, each
+    /// with whether it draws into a named target: none unless the frame
+    /// draws the layer.
+    fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(&'a FrameDraws, bool));
 
     /// Uploads the meshes of the layer's draw groups and of its draws into
     /// its targets, before the frame draws them.
@@ -330,8 +345,16 @@ pub(crate) trait RenderLayer: Any {
     fn render_targets(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>);
 
     /// Draws the pass's draws of the layer's draw groups into the open pass
-    /// of `gpu`, the context's, in `order`, each at its depth.
-    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder);
+    /// of `gpu`, the context's, in `order`, each at its depth, where the
+    /// frame draws them `into` the pass: the named target of that index, or
+    /// with `None` the map's.
+    fn render(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        order: DrawOrder,
+        into: Option<usize>,
+    );
 
     /// The query radius of the layer's features in `contents`, a tile's
     /// layout, seen by `camera` ([`Layer::query_radius`]).
@@ -461,8 +484,11 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         images: &ImageStore,
         source: Option<FrameSourceTiles<'_>>,
         found: &[FoundTile],
+        index: usize,
+        routes: &mut Routes,
     ) {
         let frame = paint.frame;
+        self.route = None;
         // The tiles of a layer without a source have other geometry on the
         // globe.
         if frame.camera.is_globe() != self.globe {
@@ -479,7 +505,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         <L::Input as input::Find<L::Style>>::tiles(&self.frame_tiles, found, source, &mut self.tile_values, &mut tiles);
 
         let res = &mut *paint.context;
-        let Hosted { values, layer, tile_values, frame_draws, .. } = self;
+        let Hosted { values, layer, tile_values, frame_draws, route, .. } = self;
         layer.update(&mut UpdateCx {
             layer: values,
             frame: &frame,
@@ -487,7 +513,12 @@ impl<L: Layer> RenderLayer for Hosted<L> {
             source_max_zoom: source.and_then(|source| source.max_zoom),
             tiles: Tiles { found: &tiles, values: tile_values },
             res,
+            targets: routes.reads(),
         });
+        *route = routes.route(index, &values.style.id, values.style.extra(), L::VOLUME);
+        if route.is_some() {
+            frame_draws.route();
+        }
         for found in &tiles {
             let Some(held) = found.data::<L>() else { continue };
             let index = found.tile.index;
@@ -499,6 +530,15 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         layer
             .prepare(&PrepareCx { layer: values, frame: &frame, res, found: &tiles, values: tile_values }, frame_draws);
         frame_draws.finish(gpu, res, &values.evaluated.paint, tiles.iter().map(|found| found.tile.unwrapped));
+        if route.is_some() {
+            let id = &values.style.id;
+            if frame_draws.refused_backdrop() {
+                routes.warn(id, Warning::Backdrop, || "a blend that reads what is behind it needs the map".to_owned());
+            }
+            if frame_draws.lends(LendAt::Pass) {
+                routes.warn(id, Warning::Lend, || "a named target's pass lends no commands".to_owned());
+            }
+        }
     }
 
     fn handle_wrap_jump(&mut self, wrap_delta: i16) {
@@ -526,10 +566,10 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         self.frame_draws.clear();
     }
 
-    fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(&'a FrameDraws)) {
+    fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(&'a FrameDraws, bool)) {
         if self.renderable {
             for group in self.frame_draws.groups() {
-                visit(&group.frame);
+                visit(&group.frame, self.route.is_some());
             }
         }
     }
@@ -551,11 +591,17 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         }
     }
 
-    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
-        if !self.renderable {
+    fn render(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        order: DrawOrder,
+        into: Option<usize>,
+    ) {
+        if !self.renderable || self.route != into {
             return;
         }
-        let lends = self.frame_draws.lends(LendAt::Pass) && parameters.pass == Pass::Translucent;
+        let lends = into.is_none() && self.frame_draws.lends(LendAt::Pass) && parameters.pass == Pass::Translucent;
         let Hosted { layer, frame_draws, .. } = self;
         let main = frame_draws.main_group();
         let mut render = |group: &crate::encode::Group| {
