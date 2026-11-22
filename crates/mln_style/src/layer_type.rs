@@ -184,7 +184,7 @@ pub trait StyleLayerType: Sized + Send + Sync + 'static {
     /// such as a custom layer's host. Layout doesn't read it: tile workers
     /// get its `Default`, and a change to it alone doesn't lay the layer out
     /// again. What layout reads belongs in a layout property.
-    type Extra: Clone + Default + Send + Sync + 'static;
+    type Data: Clone + Default + Send + Sync + 'static;
 
     /// Calls `visitor` with the field of the property in `slot` of
     /// [`PROPERTIES`](Self::PROPERTIES).
@@ -260,9 +260,9 @@ pub struct LayerStyle<T: StyleLayerType> {
     pub(crate) base: LayerBase,
     pub layout: T::LayoutProperties,
     pub paint: T::PaintProperties,
-    /// What else the layer holds ([`StyleLayerType::Extra`]).
+    /// What else the layer holds ([`StyleLayerType::Data`]).
     #[wire(skip)]
-    pub extra: T::Extra,
+    pub data: T::Data,
 }
 
 // Written out: `derive(Clone)` would require `T: Clone` of the marker type.
@@ -272,7 +272,7 @@ impl<T: StyleLayerType> Clone for LayerStyle<T> {
             base: self.base.clone(),
             layout: self.layout.clone(),
             paint: self.paint.clone(),
-            extra: self.extra.clone(),
+            data: self.data.clone(),
         }
     }
 }
@@ -297,7 +297,7 @@ impl<T: StyleLayerType> LayerStyle<T> {
             base: LayerBase::new(layer_id, source_id),
             layout: T::LayoutProperties::default(),
             paint: T::PaintProperties::default(),
-            extra: T::Extra::default(),
+            data: T::Data::default(),
         }
     }
 

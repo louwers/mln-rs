@@ -34,7 +34,7 @@ impl StyleLayerType for Plain {
 
     type LayoutProperties = NoProperties;
     type PaintProperties = PlainPaintProperties::Transitionable;
-    type Extra = ();
+    type Data = ();
 
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {
         Some(match slot {
@@ -93,7 +93,7 @@ impl StyleLayerType for Dot {
 
     type LayoutProperties = DotLayoutProperties::Unevaluated;
     type PaintProperties = DotPaintProperties::Transitionable;
-    type Extra = ();
+    type Data = ();
 
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {
         Some(match slot {
@@ -120,7 +120,7 @@ impl StyleLayerType for Shade {
 
     type LayoutProperties = NoProperties;
     type PaintProperties = NoProperties;
-    type Extra = ();
+    type Data = ();
 
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
         None

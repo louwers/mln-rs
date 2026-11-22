@@ -135,7 +135,7 @@ impl<const PLAIN: bool> StyleLayerType for Unregistered<PLAIN> {
 
     type LayoutProperties = NoProperties;
     type PaintProperties = NoProperties;
-    type Extra = ();
+    type Data = ();
 
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
         None
