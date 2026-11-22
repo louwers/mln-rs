@@ -219,7 +219,7 @@ impl Renderer {
     /// which the host [renders](Self::render) into a frame of its target,
     /// or `None` when there is nothing to draw: a still image that hasn't
     /// loaded yet.
-    pub fn update(&mut self, _gpu: &mut dyn Gpu, update_parameters: &Arc<UpdateParameters>) -> Option<UpdatedFrame> {
+    pub fn update(&mut self, update_parameters: &Arc<UpdateParameters>) -> Option<UpdatedFrame> {
         // The overdraw inspector takes shaders and color modes of its own.
         let overdraw = update_parameters.debug_options.contains(MapDebugOptions::OVERDRAW);
         if overdraw != self.encoder.context.overdraw() {
@@ -389,9 +389,9 @@ impl Renderer {
         self.orchestrator.layer::<L>(id)
     }
 
-    /// Drops the layers, whose graphics objects are lost. Call it before the
-    /// renderer goes when its device or target went first.
-    pub fn lose_layer_hosts(&mut self) {
+    /// Drops every layer: the renderer's device or target went first, and
+    /// the layers' GPU resources with it. Call it before the renderer goes.
+    pub fn lose_context(&mut self) {
         self.orchestrator.leave_layers();
     }
 
@@ -418,7 +418,7 @@ impl Renderer {
 
     /// Lets go of the map's data: its sources, tiles and layers, which the
     /// next update loads again.
-    pub fn clear_data(&mut self, _gpu: &mut dyn Gpu) {
+    pub fn clear_data(&mut self) {
         self.orchestrator.clear_data();
     }
 

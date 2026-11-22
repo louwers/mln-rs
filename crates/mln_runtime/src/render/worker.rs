@@ -1514,7 +1514,7 @@ impl Worker {
 
     pub(crate) fn clear_data(&mut self, outbox: &mut Outbox) -> Result<(), Error> {
         let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
-        gfx.target.with_renderer(|renderer, gpu| renderer.clear_data(gpu)).ok_or_else(target_lost)?;
+        gfx.target.with_renderer(|renderer, _| renderer.clear_data()).ok_or_else(target_lost)?;
         self.rendered_update = 0;
         // The renderer loads what the image needs again, once it tries.
         if let Some(still) = self.still.as_mut() {
@@ -1590,12 +1590,12 @@ impl Worker {
             state.viewed_teardown |= viewed;
             (state.keep_graphics, viewed, state.lifecycle == RenderSessionState::Abandoned)
         };
-        // The host's graphics objects may be gone, and the layers'
-        // hosts with them, so they forget theirs instead of destroying them.
+        // The host's graphics objects may be gone, and the layers' GPU
+        // resources with them.
         if (keep || abandoned)
             && let Some(renderer) = gfx.target.renderer_mut()
         {
-            renderer.lose_layer_hosts();
+            renderer.lose_context();
         }
         if keep {
             // The host's graphics objects behind them may be gone already.

@@ -95,6 +95,12 @@ impl Fixture {
         image.data[offset..offset + 4].try_into().unwrap()
     }
 
+    /// How many pixels east of the center the longitude `longitude` is, on
+    /// the equator at zoom 0.
+    fn east_pixels(&self, longitude: f64) -> u32 {
+        (longitude / 360.0 * 512.0).round() as u32
+    }
+
     /// The ids of the features drawn at the pixel `x` pixels right of the
     /// center, by layer.
     fn hits(&self, x: f64) -> Vec<(String, mln_rs::feature::Identifier)> {
@@ -162,4 +168,30 @@ fn an_edit_of_the_layers_data_scales_its_dots() {
     // The data of another type's layer is no dot's.
     let error = fixture.map.edit_style_layer_data::<Dot>("background", |_| Ok(())).unwrap().wait().unwrap_err();
     assert_eq!(mln_rs::mln_util::ErrorKind::NotFound, error.kind);
+}
+
+#[test]
+fn a_removed_layer_goes_and_a_new_source_draws_its_own_data() {
+    let fixture = Fixture::new();
+    let layer = r##"{"id":"dots","type":"dot","source":"points","paint":{"dot-color":"#ff0000","dot-radius":["get","size"]}}"##;
+    wait(fixture.map.remove_style_layer("dots"));
+    fixture.render();
+    assert_eq!(WHITE, fixture.pixel(0));
+    let error = fixture.session.query_rendered_layer::<DotLayer, _>("dots", |_, _| Ok(())).unwrap().wait().unwrap_err();
+    assert_eq!(mln_rs::mln_util::ErrorKind::NotFound, error.kind);
+
+    wait(fixture.map.add_style_layer_json(layer, None));
+    fixture.render_loaded();
+    assert_eq!(RED, fixture.pixel(0));
+
+    // The layer's source changes to one whose only point is east of the
+    // center.
+    let east = r#"{"type":"geojson","data":{"type":"Feature","properties":{"size":4},
+        "geometry":{"type":"Point","coordinates":[5,0]}}}"#;
+    wait(fixture.map.add_style_source_json("east", east));
+    wait(fixture.map.set_style_layer_property("dots", "source", "\"east\""));
+    fixture.render_loaded();
+    assert_eq!(WHITE, fixture.pixel(0));
+    let east_px = fixture.east_pixels(5.0);
+    assert_eq!(RED, fixture.pixel(east_px));
 }

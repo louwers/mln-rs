@@ -670,7 +670,7 @@ impl<B: LocalBackend> Gfx for BackendGfx<B> {
         let target = self.frames.target()?;
         let mut gpu = self.backend.gpu();
         let gpu = &mut *gpu;
-        let frame = renderer.update(gpu, update)?;
+        let frame = renderer.update(update)?;
         let image = target.begin_frame(gpu)?;
         let drawn = renderer.render(gpu, &image, frame);
         let handoff = target.end_frame(gpu);
