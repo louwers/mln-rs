@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+#MISE description="Refresh the image render tests copied from MapLibre GL JS"
+#USAGE arg "[checkout]" help="A maplibre-gl-js checkout (default ../maplibre-gl-js)"
+#USAGE flag "--commit <sha>" help="The checkout's commit, if it isn't a git checkout"
+# Copies the render tests of image sources, which GL JS warps as mln-rs does
+# where MapLibre Native's own tests expect two affine triangles, with their
+# expected images, from test/integration/render/tests, and the images they
+# load from test/integration/assets, to
+# tools/render-test/testdata/metrics/integration/gljs. That directory is
+# mln-rs's own: `mise run update:testdata` leaves it alone, and this task
+# rewrites it whole. Fixtures that GL JS adds to the selection come along; add
+# those that don't pass to an ignore file in tools/render-test/ignores.
+#
+# GL JS's tests allow a difference of 0.00025 unless they say otherwise,
+# where the runner's default is stricter, so the copy of a test that sets no
+# `allowed` sets GL JS's, and the copy of a test in `allowed` below sets its
+# own. That and the formatting are the only changes to a style.json.
+#
+# Glyphs and sprites aren't copied: the cache the runner reads already has
+# the ones these tests use (tools/render-test/testdata/metrics/cache-style.db).
+set -euo pipefail
+
+# Tests that draw as GL JS's but differ by more than they allow, by id, each
+# with its own allowance and a comment on the pixels that differ and why.
+# None do.
+declare -A allowed=()
+
+checkout="${usage_checkout:-$PWD/../maplibre-gl-js}"
+integration="$checkout/test/integration"
+dest=tools/render-test/testdata/metrics/integration/gljs
+
+commit="${usage_commit:-}"
+if [[ -z $commit ]]; then
+    commit="$(git -C "$checkout" rev-parse HEAD)" || {
+        echo "$checkout isn't a git checkout: pass its commit with --commit" >&2
+        exit 1
+    }
+fi
+
+selected='^(image/.*|regressions/mapbox-gl-js#3010)$'
+
+rm -rf "$dest"
+mkdir -p "$dest/render-tests" "$dest/assets"
+assets="$(mktemp)"
+trap 'rm -f "$assets"' EXIT
+
+while IFS= read -r -d '' style; do
+    id="$(dirname "${style#"$integration/render/tests/"}")"
+    if [[ ! $id =~ $selected ]]; then
+        continue
+    fi
+    mkdir -p "$dest/render-tests/$id"
+    cp "$(dirname "$style")"/expected*.png "$dest/render-tests/$id/"
+    jq --indent 2 --argjson allowed "${allowed[$id]:-null}" \
+        '.metadata.test.allowed = ($allowed // .metadata.test.allowed // 0.00025)' \
+        "$style" >"$dest/render-tests/$id/style.json"
+    jq -r '.. | strings | select(startswith("local://")) | ltrimstr("local://")' "$style" >>"$assets"
+done < <(find "$integration/render/tests" -name style.json -print0 | sort -z)
+
+for id in "${!allowed[@]}"; do
+    if [[ ! -f $dest/render-tests/$id/style.json ]]; then
+        echo "allowed names $id, which isn't copied" >&2
+        exit 1
+    fi
+done
+
+# Each local:// URL names a file, or a template of tiles: every file that
+# fits it is copied.
+sort -u "$assets" | while IFS= read -r url; do
+    case $url in glyphs/* | sprites/*) continue ;; esac
+    pattern="$(sed -e 's/[.]/\\./g' -e 's/{[zxy]}/[0-9]+/g' <<<"$url")"
+    files="$(cd "$integration/assets" && find . -type f | sed 's|^\./||' | grep -E "^$pattern$" || true)"
+    if [[ -z $files ]]; then
+        echo "no asset for local://$url" >&2
+        exit 1
+    fi
+    printf '%s\n' "$files"
+done | sort -u | rsync -a --files-from=- "$integration/assets"/ "$dest/assets"/
+
+cp "$checkout/LICENSE.txt" "$dest/"
+cat >"$dest/README.md" <<EOF
+Render tests copied from MapLibre GL JS at commit $commit, with the assets they
+load, by \`mise run update:gljs-testdata\`. Don't edit them here.
+EOF
+echo "copied from $checkout ($commit): $(find "$dest/render-tests" -name style.json | wc -l) tests, $(find "$dest/assets" -type f | wc -l) assets"

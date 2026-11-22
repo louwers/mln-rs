@@ -11,10 +11,9 @@ use mln_map_types::tile_coordinate::TileCoordinatePoint;
 use mln_style::Source;
 use mln_style::source_type::SourceData;
 use mln_style::sources::ImageSourceType;
-use mln_tile_id::{GeometryCoordinate, GeometryCoordinates, UnwrappedTileID};
+use mln_tile_id::{GeometryCoordinates, UnwrappedTileID};
 use mln_util::constants;
 use mln_util::geo::LatLngBounds;
-use mln_util::interpolate::Interpolate;
 use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -45,9 +44,38 @@ impl Default for ImageWarp {
     }
 }
 
+/// The cells across a side of the grid that draws a warp blended towards
+/// the bilinear one, GL JS's `SUBDIVIDED_QUAD_GRANULARITY`.
+const BLENDED_WARP_CELLS: u32 = 16;
+
+fn is_parallelogram(corners: &GeometryCoordinates) -> bool {
+    let [top_left, top_right, bottom_right, bottom_left] =
+        [corners[0], corners[1], corners[2], corners[3]].map(|p| (i32::from(p.x), i32::from(p.y)));
+    top_left.0 + bottom_right.0 == top_right.0 + bottom_left.0
+        && top_left.1 + bottom_right.1 == top_right.1 + bottom_left.1
+}
+
+/// The corner of a concave quad of `corners` (top left, top right, bottom
+/// right, bottom left) that points into it, by its index; `None` for a
+/// quad that isn't concave.
+fn concave_corner(corners: &GeometryCoordinates) -> Option<usize> {
+    let point = |i: usize| (i64::from(corners[i % 4].x), i64::from(corners[i % 4].y));
+    // Which way the outline turns at each corner: a concave quad turns
+    // against the other three at one.
+    let turns = [0, 1, 2, 3].map(|i| {
+        let ((ax, ay), (bx, by), (cx, cy)) = (point(i + 3), point(i), point(i + 1));
+        ((bx - ax) * (cy - by) - (by - ay) * (cx - bx)).signum()
+    });
+    (0..4).find(|&i| turns[i] != 0 && (0..4).all(|j| j == i || turns[j] == -turns[i]))
+}
+
 fn image_warp(corners: &GeometryCoordinates) -> ImageWarp {
     const PROJECTIVE_FORESHORTENING: f64 = 4.0;
     const BILINEAR_FORESHORTENING: f64 = 512.0;
+    // A parallelogram is warped affinely either way.
+    if is_parallelogram(corners) {
+        return ImageWarp::default();
+    }
     let top_left = corners[0];
     let top_right = corners[1];
     let bottom_right = corners[2];
@@ -56,10 +84,6 @@ fn image_warp(corners: &GeometryCoordinates) -> ImageWarp {
     let (tr_x, tr_y) = (i32::from(top_right.x), i32::from(top_right.y));
     let (br_x, br_y) = (i32::from(bottom_right.x), i32::from(bottom_right.y));
     let (bl_x, bl_y) = (i32::from(bottom_left.x), i32::from(bottom_left.y));
-    // A parallelogram is warped affinely either way.
-    if tl_x + br_x == tr_x + bl_x && tl_y + br_y == tr_y + bl_y {
-        return ImageWarp::default();
-    }
     let sum_x = f64::from(tl_x - tr_x + br_x - bl_x);
     let sum_y = f64::from(tl_y - tr_y + br_y - bl_y);
     let right_x = f64::from(tr_x - br_x);
@@ -94,56 +118,59 @@ fn image_warp(corners: &GeometryCoordinates) -> ImageWarp {
     ImageWarp { perspective_x, perspective_y, blend }
 }
 
-// Where the unit-square point (u, v) lands on the corners: where a
-// projective warp puts it, blended with where a bilinear one does by
-// `warp.blend`.
-fn warp_position(corners: &GeometryCoordinates, warp: &ImageWarp, u: f64, v: f64) -> Point<f64> {
-    let point = |p: GeometryCoordinate| Point::new(f64::from(p.x), f64::from(p.y));
-    let top_left = point(corners[0]);
-    let top_right = point(corners[1]);
-    let bottom_right = point(corners[2]);
-    let bottom_left = point(corners[3]);
-    let bilinear = top_left.interpolate(&top_right, u).interpolate(&bottom_left.interpolate(&bottom_right, u), v);
-    let denominator = warp.perspective_x * u + warp.perspective_y * v + 1.0;
-    // The homography's columns: the top edge and the left edge, each scaled
-    // by the denominator's change along it.
-    let across_top = Point::new(
-        top_right.x - top_left.x + top_right.x * warp.perspective_x,
-        top_right.y - top_left.y + top_right.y * warp.perspective_x,
-    );
-    let down_left = Point::new(
-        bottom_left.x - top_left.x + bottom_left.x * warp.perspective_y,
-        bottom_left.y - top_left.y + bottom_left.y * warp.perspective_y,
-    );
-    let projective = Point::new(
-        (across_top.x * u + down_left.x * v + top_left.x) / denominator,
-        (across_top.y * u + down_left.y * v + top_left.y) / denominator,
-    );
-    projective.interpolate(&bilinear, warp.blend)
+/// Where the raster shader puts the unit square that a draw's vertices span
+/// (0 to `EXTENT` on both axes), in its tile's units: onto the quad of four
+/// corners, warped by an [`ImageWarp`]. The shader evaluates the warp per
+/// vertex and interpolates the texture coordinates projectively, so a
+/// projective warp draws exactly on two triangles.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ImageQuad {
+    /// The top left corner's x and y, and the top right's.
+    pub(crate) coords_top: [f32; 4],
+    /// The bottom left corner's x and y, and the bottom right's.
+    pub(crate) coords_bottom: [f32; 4],
+    /// The warp's perspective terms and its blend towards the bilinear warp,
+    /// then padding.
+    pub(crate) warp: [f32; 4],
+}
+
+impl ImageQuad {
+    /// The quad of a tile itself, which draws the vertices where they are.
+    pub(crate) const TILE: ImageQuad = {
+        let extent = constants::EXTENT as f32;
+        ImageQuad {
+            coords_top: [0.0, 0.0, extent, 0.0],
+            coords_bottom: [0.0, extent, extent, extent],
+            warp: [0.0, 0.0, 1.0, 0.0],
+        }
+    };
+
+    fn new(corners: &GeometryCoordinates, warp: &ImageWarp) -> ImageQuad {
+        let [top_left, top_right, bottom_right, bottom_left] =
+            [corners[0], corners[1], corners[2], corners[3]].map(|p| [f32::from(p.x), f32::from(p.y)]);
+        ImageQuad {
+            coords_top: [top_left[0], top_left[1], top_right[0], top_right[1]],
+            coords_bottom: [bottom_left[0], bottom_left[1], bottom_right[0], bottom_right[1]],
+            warp: [warp.perspective_x as f32, warp.perspective_y as f32, warp.blend as f32, 0.0],
+        }
+    }
 }
 
 fn to_vertex_coordinate(value: f64) -> i16 {
     mln_math::clamp_f64(value.round(), f64::from(i16::MIN), f64::from(i16::MAX)) as i16
 }
 
-// The image quad as a grid of `cells` x `cells`, textured edge to edge; one
-// cell is the flat quad.
-fn build_image_mesh(bucket: &mut RasterBucket, corners: &GeometryCoordinates, cells: u32) {
-    let warp = image_warp(corners);
+// The unit square as a grid of `cells` x `cells`, textured edge to edge,
+// which the raster shader puts on the image's quad, each cell split along
+// its diagonal from the top right, or from the top left if `from_top_left`.
+fn build_image_mesh(bucket: &mut RasterBucket, cells: u32, from_top_left: bool) {
     let rows = cells + 1;
+    let extent = constants::EXTENT as u32;
     let mut vertices = Vec::with_capacity((rows * rows) as usize);
     for j in 0..rows {
         for i in 0..rows {
-            let u = f64::from(i) / f64::from(cells);
-            let v = f64::from(j) / f64::from(cells);
-            let position = warp_position(corners, &warp, u, v);
-            vertices.push(RasterLayoutVertex::new(
-                Point::new(to_vertex_coordinate(position.x), to_vertex_coordinate(position.y)),
-                Point::new(
-                    (u * f64::from(constants::EXTENT)).round() as u16,
-                    (v * f64::from(constants::EXTENT)).round() as u16,
-                ),
-            ));
+            let (x, y) = ((i * extent / cells) as u16, (j * extent / cells) as u16);
+            vertices.push(RasterLayoutVertex::new(Point::new(x as i16, y as i16), Point::new(x, y)));
         }
     }
     let mut indices: Vec<u16> = Vec::with_capacity((cells * cells * 6) as usize);
@@ -153,8 +180,13 @@ fn build_image_mesh(bucket: &mut RasterBucket, corners: &GeometryCoordinates, ce
             let top_right = top_left.wrapping_add(1);
             let bottom_left = top_left.wrapping_add(rows as u16);
             let bottom_right = bottom_left.wrapping_add(1);
-            indices.extend_from_slice(&[top_left, top_right, bottom_left]);
-            indices.extend_from_slice(&[top_right, bottom_left, bottom_right]);
+            if from_top_left {
+                indices.extend_from_slice(&[top_left, top_right, bottom_right]);
+                indices.extend_from_slice(&[top_left, bottom_right, bottom_left]);
+            } else {
+                indices.extend_from_slice(&[top_left, top_right, bottom_left]);
+                indices.extend_from_slice(&[top_right, bottom_left, bottom_right]);
+            }
         }
     }
     let segments = vec![SegmentBase::with_lengths(0, 0, vertices.len(), indices.len())];
@@ -169,6 +201,9 @@ pub(crate) struct ImageSourceRenderData<'a> {
     /// The tile the image draws in, in each world copy it draws in: one
     /// canonical tile under different wraps.
     pub(crate) tile_ids: &'a [UnwrappedTileID],
+    /// Where the bucket's vertices draw, in the tile units of `tile_ids`'
+    /// canonical tile.
+    pub(crate) quad: ImageQuad,
 }
 
 pub(crate) struct RenderImageSource {
@@ -176,6 +211,7 @@ pub(crate) struct RenderImageSource {
     bucket: Option<RasterBucket>,
     tile_ids: Vec<UnwrappedTileID>,
     mesh_corners: GeometryCoordinates,
+    quad: ImageQuad,
     mesh_cells: u32,
 }
 
@@ -187,6 +223,7 @@ impl RenderImageSource {
             bucket: None,
             tile_ids: Vec::new(),
             mesh_corners: GeometryCoordinates::new(),
+            quad: ImageQuad::TILE,
             mesh_cells: 0,
         }
     }
@@ -342,10 +379,19 @@ impl RenderSource for RenderImageSource {
             return;
         }
 
-        // Calculate Geometry Coordinates based on tile cover at ideal zoom
+        // The corners in the units of the cover's first tile, rounded to the
+        // nearest unit as GL JS rounds them, so that an edge falls on the
+        // pixels GL JS draws it on.
+        let tile = tile_cover_ids[0];
+        let scale = 2.0f64.powi(i32::from(tile.canonical.z));
+        let extent = f64::from(constants::EXTENT);
         let geom_coords: GeometryCoordinates = tile_coordinates
             .iter()
-            .map(|tile_coords| TileCoordinate::to_geometry_coordinate(&tile_cover_ids[0], tile_coords))
+            .map(|point| {
+                let x = point.x * scale - f64::from(tile.canonical.x) - f64::from(tile.wrap) * scale;
+                let y = point.y * scale - f64::from(tile.canonical.y);
+                Point::new(to_vertex_coordinate(x * extent), to_vertex_coordinate(y * extent))
+            })
             .collect();
 
         // A changed image gets a new bucket, whose id tells the layers to
@@ -356,14 +402,24 @@ impl RenderSource for RenderImageSource {
         };
 
         // The globe bends the quad over the sphere with the tile mesh
-        // granularity of its tile.
+        // granularity of its tile. Two triangles draw a parallelogram's
+        // affine warp and a projective warp exactly; one blended towards the
+        // bilinear warp is neither, and would bend along their diagonal, so
+        // it draws on a grid. A concave quad's bilinear warp folds over
+        // itself, out of the quad: it draws on two triangles split along the
+        // diagonal inside it.
+        let warp = image_warp(&geom_coords);
+        let concave = concave_corner(&geom_coords);
         let cells = if view.is_globe() {
             SubdivisionGranularitySetting::globe().tile.granularity_for_zoom_level(self.tile_ids[0].canonical.z)
+        } else if warp.blend > 0.0 && !is_parallelogram(&geom_coords) && concave.is_none() {
+            BLENDED_WARP_CELLS
         } else {
             1
         };
         if !bucket.geometry().has_quads() || geom_coords != self.mesh_corners || cells != self.mesh_cells {
-            build_image_mesh(bucket, &geom_coords, cells);
+            build_image_mesh(bucket, cells, matches!(concave, Some(0 | 2)));
+            self.quad = ImageQuad::new(&geom_coords, &warp);
             self.mesh_corners = geom_coords;
             self.mesh_cells = cells;
         }
@@ -382,7 +438,7 @@ impl RenderSource for RenderImageSource {
         // coordinates, and an image shrunk out of sight or out of view draws
         // nowhere.
         let tile_ids: &[UnwrappedTileID] = if self.base.enabled && self.loaded() { &self.tile_ids } else { &[] };
-        Some(ImageSourceRenderData { bucket: self.bucket.as_ref(), tile_ids })
+        Some(ImageSourceRenderData { bucket: self.bucket.as_ref(), tile_ids, quad: self.quad })
     }
 
     fn dump_debug_logs(&self) {

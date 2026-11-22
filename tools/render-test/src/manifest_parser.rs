@@ -14,6 +14,7 @@ pub(crate) struct Manifest {
     test_root_path: String,
     result_path: String,
     cache_path: String,
+    asset_path: String,
     ignores: Vec<(String, String)>,
     test_paths: Vec<TestPaths>,
     /// Iterated in sorted order.
@@ -46,6 +47,12 @@ impl Manifest {
     #[must_use]
     pub(crate) fn get_cache_path(&self) -> &str {
         &self.cache_path
+    }
+    /// Port-only: the directory whose files stand in for the cache's
+    /// `local://` resources, or empty.
+    #[must_use]
+    pub(crate) fn get_asset_path(&self) -> &str {
+        &self.asset_path
     }
     #[must_use]
     pub(crate) fn get_probes(&self) -> &BTreeSet<String> {
@@ -143,6 +150,16 @@ impl ManifestParser {
             };
             manifest.cache_path = filesystem::join(&get_valid_path(&manifest.manifest_path, "."), cache_path);
             if manifest.cache_path.is_empty() {
+                return None;
+            }
+        }
+        if let Some(asset_path_value) = document.get("asset_path") {
+            let Some(asset_path) = asset_path_value.as_str() else {
+                invalid("asset_path");
+                return None;
+            };
+            manifest.asset_path = get_valid_path(&manifest.manifest_path, asset_path);
+            if manifest.asset_path.is_empty() {
                 return None;
             }
         }
