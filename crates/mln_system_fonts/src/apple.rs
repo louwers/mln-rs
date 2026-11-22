@@ -10,6 +10,7 @@
 use std::hash::{Hash, Hasher};
 use std::ptr::NonNull;
 
+use mln_util::hash::HashMap;
 use objc2_core_foundation::{CFArray, CFRetained, CFString};
 use objc2_core_text::{CTFont, CTFontDescriptor, CTFontSymbolicTraits, CTFontTableOptions, CTFontUIFontType};
 
@@ -69,78 +70,90 @@ impl Font {
 
     /// A font file of all its tables.
     pub(crate) fn file(&self) -> Vec<u8> {
-        // SAFETY: a valid font.
-        let Some(tags) = (unsafe { self.font.available_tables(CTFontTableOptions::NoOptions) }) else {
-            return Vec::new();
-        };
-        let tables = (0..tags.count())
-            .filter_map(|i| {
-                // SAFETY: the array holds `CTFontTableTag`s as its values,
-                // not objects, and `i` is within it.
-                let tag = (unsafe { tags.value_at_index(i) } as usize as u32).to_be_bytes();
-                Some((tag, self.table(tag)?))
-            })
-            .collect();
-        sfnt::build(tables)
+        sfnt::build(table_tags(&self.font).into_iter().filter_map(|tag| Some((tag, self.table(tag)?))).collect())
     }
 }
 
-/// The fonts that may draw `query`'s character, best first: the font of
-/// its name or family, if the system has it, then those of the cascade list
-/// that have the character, at its weight and style where they have them.
-pub(crate) fn candidates(query: &Query<'_>) -> Vec<(String, Source)> {
-    let languages: Vec<CFRetained<CFString>> = query.languages.iter().map(|tag| CFString::from_str(tag)).collect();
-    let languages = CFArray::from_retained_objects(&languages);
-    let mut units = [0; 2];
-    let length = query.probe.encode_utf16(&mut units).len();
-    let covers = |font: &CTFont| {
-        let (mut probe, mut glyphs) = (units, [0; 2]);
-        let probe = &mut probe[..length];
-        // SAFETY: the probe and its glyphs are `probe.len()` long.
-        unsafe {
-            font.glyphs_for_characters(
-                NonNull::new_unchecked(probe.as_mut_ptr()),
-                NonNull::new_unchecked(glyphs.as_mut_ptr()),
-                probe.len() as isize,
-            )
-        }
+/// The tags of `font`'s tables.
+fn table_tags(font: &CTFont) -> Vec<[u8; 4]> {
+    // SAFETY: a valid font.
+    let Some(tags) = (unsafe { font.available_tables(CTFontTableOptions::NoOptions) }) else {
+        return Vec::new();
     };
-    let mut traits = CTFontSymbolicTraits::empty();
-    if query.weight >= 600 {
-        traits |= CTFontSymbolicTraits::TraitBold;
-    }
-    if query.italic {
-        traits |= CTFontSymbolicTraits::TraitItalic;
-    }
-    // SAFETY: a valid font and null matrix; a copy with traits the font's
-    // family lacks is `None`.
-    let styled = |font: CFRetained<CTFont>| -> CFRetained<CTFont> {
-        if traits.is_empty() {
-            return font;
-        }
-        unsafe { font.copy_with_symbolic_traits(0.0, std::ptr::null(), traits, traits) }.unwrap_or(font)
-    };
-    let source = |font: CFRetained<CTFont>| -> (String, Source) {
-        // SAFETY: a valid font.
-        let (family, name) = unsafe { (font.family_name().to_string(), font.post_script_name().to_string()) };
-        (family, Source::CoreText(Font { name, font }))
-    };
+    (0..tags.count())
+        .map(|i| {
+            // SAFETY: the array holds `CTFontTableTag`s as its values, not
+            // objects, and `i` is within it.
+            (unsafe { tags.value_at_index(i) } as usize as u32).to_be_bytes()
+        })
+        .collect()
+}
 
-    // CoreText finds a font by its PostScript or full name, and falls back to
-    // another for a name it lacks.
-    let named = [query.name, query.family].into_iter().flatten().find_map(|name| {
-        // SAFETY: a valid name and a null matrix.
-        let font = unsafe { CTFont::with_name(&CFString::from_str(name), 0.0, std::ptr::null()) };
-        // SAFETY: a valid font.
-        let family = unsafe { font.family_name() }.to_string();
-        query.family.is_some_and(|asked| asked.eq_ignore_ascii_case(&family)).then_some(font)
-    });
-    // SAFETY: the arguments are valid CoreText and CoreFoundation objects;
-    // the cascade list holds font descriptors.
-    unsafe {
+/// Whether `font` has outlines that the map draws: `glyf`, `CFF ` or
+/// `CFF2`. Some of the system's fonts have only Apple's own, and reading
+/// their tables to find out would copy tens of megabytes each.
+fn has_outlines(font: &CTFont) -> bool {
+    table_tags(font).iter().any(|tag| matches!(tag, b"glyf" | b"CFF " | b"CFF2"))
+}
+
+/// CoreText's font matcher. It keeps each cascade list it makes, which
+/// takes milliseconds, since a map asks for one for every character that
+/// the fonts it has found lack.
+#[derive(Default)]
+pub(crate) struct CoreText {
+    /// The fonts of the cascade list of a font, by its PostScript name, for
+    /// languages and symbolic traits, with their family names.
+    cascades: HashMap<(String, Vec<String>, u32), Cascade>,
+}
+
+/// The fonts of a cascade list, with their family names.
+type Cascade = Vec<(String, Font)>;
+
+impl CoreText {
+    /// The fonts that may draw `query`'s character, best first: the font of
+    /// its name or family, if the system has it, then those of the cascade list
+    /// that have the character, at its weight and style where they have them.
+    pub(crate) fn candidates(&mut self, query: &Query<'_>) -> Vec<(String, Source)> {
+        let mut units = [0; 2];
+        let length = query.probe.encode_utf16(&mut units).len();
+        let covers = |font: &CTFont| {
+            let (mut probe, mut glyphs) = (units, [0; 2]);
+            let probe = &mut probe[..length];
+            // SAFETY: the probe and its glyphs are `probe.len()` long.
+            unsafe {
+                font.glyphs_for_characters(
+                    NonNull::new_unchecked(probe.as_mut_ptr()),
+                    NonNull::new_unchecked(glyphs.as_mut_ptr()),
+                    probe.len() as isize,
+                )
+            }
+        };
+        let mut traits = CTFontSymbolicTraits::empty();
+        if query.weight >= 600 {
+            traits |= CTFontSymbolicTraits::TraitBold;
+        }
+        if query.italic {
+            traits |= CTFontSymbolicTraits::TraitItalic;
+        }
+        let source = |font: CFRetained<CTFont>| -> (String, Source) {
+            // SAFETY: a valid font.
+            let (family, name) = unsafe { (font.family_name().to_string(), font.post_script_name().to_string()) };
+            (family, Source::CoreText(Font { name, font }))
+        };
+
+        // CoreText finds a font by its PostScript or full name, and falls back to
+        // another for a name it lacks.
+        let named = [query.name, query.family].into_iter().flatten().find_map(|name| {
+            // SAFETY: a valid name and a null matrix.
+            let font = unsafe { CTFont::with_name(&CFString::from_str(name), 0.0, std::ptr::null()) };
+            // SAFETY: a valid font.
+            let family = unsafe { font.family_name() }.to_string();
+            query.family.is_some_and(|asked| asked.eq_ignore_ascii_case(&family)).then_some(font)
+        });
         let base = match &named {
             Some(font) => font.clone(),
-            None => match CTFont::new_ui_font_for_language(CTFontUIFontType::System, 0.0, None) {
+            // SAFETY: a valid font type and no language.
+            None => match unsafe { CTFont::new_ui_font_for_language(CTFontUIFontType::System, 0.0, None) } {
                 Some(font) => font,
                 None => return Vec::new(),
             },
@@ -149,15 +162,49 @@ pub(crate) fn candidates(query: &Query<'_>) -> Vec<(String, Source)> {
         if let Some(named) = named.filter(|font| covers(font)) {
             candidates.push(source(named));
         }
+        // SAFETY: a valid font.
+        let key = (unsafe { base.post_script_name() }.to_string(), query.languages.to_vec(), traits.0);
+        let cascade = self.cascades.entry(key).or_insert_with(|| cascade(&base, query.languages, traits));
+        candidates.extend(
+            cascade
+                .iter()
+                .filter(|(_, font)| covers(&font.font))
+                .map(|(family, font)| (family.clone(), Source::CoreText(font.clone()))),
+        );
+        candidates
+    }
+}
+
+/// The fonts of `base`'s default cascade list for `languages` that have
+/// outlines the map draws, with `traits` where their families have them, and
+/// their family names.
+fn cascade(base: &CTFont, languages: &[String], traits: CTFontSymbolicTraits) -> Cascade {
+    let languages: Vec<CFRetained<CFString>> = languages.iter().map(|tag| CFString::from_str(tag)).collect();
+    let languages = CFArray::from_retained_objects(&languages);
+    // SAFETY: a valid font and null matrix; a copy with traits the font's
+    // family lacks is `None`.
+    let styled = |font: CFRetained<CTFont>| -> CFRetained<CTFont> {
+        if traits.is_empty() {
+            return font;
+        }
+        unsafe { font.copy_with_symbolic_traits(0.0, std::ptr::null(), traits, traits) }.unwrap_or(font)
+    };
+    // SAFETY: the arguments are valid CoreText and CoreFoundation objects;
+    // the cascade list holds font descriptors.
+    unsafe {
         let Some(cascade) = base.default_cascade_list_for_languages(Some(languages.as_opaque())) else {
-            return candidates;
+            return Vec::new();
         };
         let cascade: &CFArray<CTFontDescriptor> = cascade.cast_unchecked();
-        candidates.extend(cascade.iter().filter_map(|descriptor| {
-            let font = styled(CTFont::with_font_descriptor(&descriptor, 0.0, std::ptr::null()));
-            covers(&font).then(|| source(font))
-        }));
-        candidates
+        cascade
+            .iter()
+            .map(|descriptor| styled(CTFont::with_font_descriptor(&descriptor, 0.0, std::ptr::null())))
+            .filter(|font| has_outlines(font))
+            .map(|font| {
+                let (family, name) = (font.family_name().to_string(), font.post_script_name().to_string());
+                (family, Font { name, font })
+            })
+            .collect()
     }
 }
 
@@ -165,7 +212,7 @@ pub(crate) fn candidates(query: &Query<'_>) -> Vec<(String, Source)> {
 mod tests {
     use skrifa::MetadataProvider;
 
-    use super::candidates;
+    use super::{CoreText, has_outlines};
     use crate::Query;
     use crate::scripts::SCRIPTS;
     use crate::source::Source;
@@ -178,16 +225,20 @@ mod tests {
     fn every_script_has_a_font_that_draws_it() {
         for script in SCRIPTS {
             let languages = [script.language.to_owned()];
-            let found = candidates(&query(script.probe, &languages));
+            let found = CoreText::default().candidates(&query(script.probe, &languages));
             println!("{:04X}: {:?}", u32::from(script.probe), found.first());
             let (_, source) = found.first().unwrap_or_else(|| panic!("no font for {:04X}", u32::from(script.probe)));
             assert!(source.drawn_weight(script.probe, 400).is_some());
+            let outlined =
+                |(_, source): &(String, Source)| matches!(source, Source::CoreText(font) if has_outlines(&font.font));
+            assert!(found.iter().all(outlined), "a font without outlines for {:04X}", u32::from(script.probe));
         }
     }
 
     #[test]
     fn ideographs_take_a_font_for_the_users_language() {
-        let first = |language: &str| candidates(&query('\u{4E2D}', &[language.to_owned()])).remove(0);
+        let first =
+            |language: &str| CoreText::default().candidates(&query('\u{4E2D}', &[language.to_owned()])).remove(0);
         let (japanese, chinese) = (first("ja-JP"), first("zh-Hans"));
         println!("ja-JP: {japanese:?}\nzh-Hans: {chinese:?}");
         assert_ne!(japanese.1, chinese.1);
@@ -195,14 +246,20 @@ mod tests {
 
     #[test]
     fn a_font_asked_for_by_name_comes_first() {
-        let found = candidates(&Query { name: Some("Helvetica Bold"), family: Some("Helvetica"), ..query('a', &[]) });
+        let found = CoreText::default().candidates(&Query {
+            name: Some("Helvetica Bold"),
+            family: Some("Helvetica"),
+            ..query('a', &[])
+        });
         println!("{:?}", found.first());
         assert_eq!(found.first().map(|(family, _)| family.as_str()), Some("Helvetica"));
     }
 
     #[test]
     fn a_font_file_from_tables_reads_back() {
-        let (_, Source::CoreText(font)) = candidates(&query('\u{4E2D}', &["ja-JP".to_owned()])).remove(0) else {
+        let (_, Source::CoreText(font)) =
+            CoreText::default().candidates(&query('\u{4E2D}', &["ja-JP".to_owned()])).remove(0)
+        else {
             panic!("a CoreText font");
         };
         let file = font.file();

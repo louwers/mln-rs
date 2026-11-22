@@ -92,8 +92,8 @@ fn find() -> Vec<FontFaceRange> {
 #[cfg(not(target_family = "wasm"))]
 fn find() -> Vec<FontFaceRange> {
     let Some(finder) = &system().finder else { return Vec::new() };
-    let finder = finder.lock();
-    let ranges = find_with(&finder);
+    let mut finder = finder.lock();
+    let ranges = find_with(&mut finder);
     #[cfg(target_os = "android")]
     {
         let Finder::Android(matcher) = &*finder;
@@ -104,7 +104,7 @@ fn find() -> Vec<FontFaceRange> {
 
 /// The ranges of the scripts that `finder` has a font for.
 #[cfg(not(target_family = "wasm"))]
-fn find_with(finder: &Finder) -> Vec<FontFaceRange> {
+fn find_with(finder: &mut Finder) -> Vec<FontFaceRange> {
     let mut ranges = Vec::new();
     for script in scripts::SCRIPTS {
         let languages = [script.language.to_owned()];
@@ -176,7 +176,7 @@ pub(crate) fn system() -> &'static System {
 #[cfg(not(target_family = "wasm"))]
 pub(crate) enum Finder {
     #[cfg(target_vendor = "apple")]
-    CoreText,
+    CoreText(apple::CoreText),
     #[cfg(windows)]
     DirectWrite(directwrite::DirectWrite),
     #[cfg(target_os = "android")]
@@ -190,7 +190,7 @@ impl Finder {
     /// The platform's font matcher, or `None` where it has none.
     fn new() -> Option<Finder> {
         #[cfg(target_vendor = "apple")]
-        return Some(Finder::CoreText);
+        return Some(Finder::CoreText(apple::CoreText::default()));
         #[cfg(windows)]
         return directwrite::DirectWrite::new().map(Finder::DirectWrite);
         #[cfg(target_os = "android")]
@@ -203,10 +203,10 @@ impl Finder {
 
     /// The fonts that may draw `query`'s character, best first, with their
     /// family names. Some may lack it.
-    pub(crate) fn candidates(&self, query: &Query<'_>) -> Vec<(String, source::Source)> {
+    pub(crate) fn candidates(&mut self, query: &Query<'_>) -> Vec<(String, source::Source)> {
         match self {
             #[cfg(target_vendor = "apple")]
-            Finder::CoreText => apple::candidates(query),
+            Finder::CoreText(core_text) => core_text.candidates(query),
             #[cfg(windows)]
             Finder::DirectWrite(fallback) => fallback.candidates(query),
             #[cfg(target_os = "android")]
