@@ -614,7 +614,9 @@ fn main(in: VertexInput) -> VertexOutput {
     let ele = standing_height(circle_center + projection.translate, projection.ground);
     out.visibility = ground_visibility(drawable.matrix * vec4<f32>(circle_center, ele, 1.0), projection.ground);
 #else
+#ifndef PROJECTION_GLOBE
     let ele = 0.0;
+#endif
 #endif
     var position: vec4<f32>;
     if (pitch_with_map) {

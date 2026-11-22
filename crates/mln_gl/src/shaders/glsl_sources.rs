@@ -628,7 +628,9 @@ lowp float stroke_opacity = u_stroke_opacity;
     highp float ele = standing_height(circle_center + u_projection_translate);
     v_visibility = ground_visibility(u_matrix * vec4(circle_center, ele, 1));
 #else
+#ifndef PROJECTION_GLOBE
     highp float ele = 0.0;
+#endif
 #endif
     if (u_pitch_with_map) {
 #ifdef PROJECTION_GLOBE

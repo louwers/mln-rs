@@ -859,7 +859,9 @@ void main() {
     const float ele = standing_height(circle_center + standing.translate, standing.ground);
     frag_visibility = ground_visibility(drawable.matrix * vec4(circle_center, ele, 1), standing.ground);
 #else
+#ifndef PROJECTION_GLOBE
     const float ele = 0.0;
+#endif
 #endif
     if (props.pitch_with_map != 0) {
 #ifdef PROJECTION_GLOBE
