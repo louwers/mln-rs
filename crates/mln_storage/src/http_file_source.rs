@@ -43,7 +43,7 @@ use crate::resource::{Kind, Resource, TileFormat};
 use crate::response::{Caching, Reason, ResourceError, Response};
 
 /// The `User-Agent` of every network request: the crate's name and version.
-#[cfg_attr(target_family = "wasm", allow(dead_code))]
+#[cfg(not(target_family = "wasm"))]
 pub(crate) const USER_AGENT: &str = concat!("mln-rs/", env!("CARGO_PKG_VERSION"));
 
 /// The value of `line` if it is the header `name`, matched as an
