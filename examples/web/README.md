@@ -108,9 +108,9 @@ doesn't have. `--module` picks mln_web_webgl or mln_web_shaper instead.
 
 `mise run web:check` tests the browser build against the native renderer:
 
-1. It loads views of the render test suite in headless Chromium, through
+1. It loads views of the render test suites in headless Chromium, through
    Playwright, offline, with every fixture served from the suite's cache
-   database.
+   database or GL JS's suite's assets.
 2. The page reads each frame back from the canvas, in the task that drew it. A
    screenshot won't do, because headless Chromium composites WebGPU canvases as
    white.

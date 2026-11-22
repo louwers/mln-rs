@@ -2,9 +2,9 @@
 // page can follow. The real-world styles (vector tiles with fills, lines,
 // icons and labels), raster tiles, raster-dem tiles (hillshade and color
 // relief, whose borders the map side backfills from the neighbouring tiles),
-// raster with GeoJSON, and labels in font faces (complex scripts and
+// raster with GeoJSON, labels in font faces (complex scripts and
 // right-to-left text, which the map shapes with the shaper module it loads
-// for them).
+// for them), and 3D terrain.
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -55,30 +55,118 @@ const VIEWS = [
     center: [-122.4591064453125, 37.77071473849609], // z15 x 5237.5, y 12666
     zoom: 15.9,
   },
+  // 3D terrain, from GL JS's terrain/occlusion-debug: raster tiles draped
+  // over a DEM (decoded in the tile workers) at exaggeration 3 and pitch 60,
+  // with a hillshade of the same DEM. Then what stands on that ground: a
+  // circle and an extrusion on raised ground, and the test's grid of labels,
+  // most of them behind ridges. (Fog needs a pitch over 60°, past the
+  // page's limit.)
+  {
+    suite: "gljs/render-tests",
+    id: "terrain/occlusion-debug",
+    name: "terrain/draped",
+    edit: draped,
+  },
+  {
+    suite: "gljs/render-tests",
+    id: "terrain/occlusion-debug",
+    name: "terrain/standing",
+    edit: standing,
+  },
 ];
+
+/** The test's raster tiles and a hillshade, draped over its terrain. */
+function draped(style) {
+  style.layers = style.layers.filter(({ type }) => type !== "symbol");
+  style.layers.push({
+    id: "hillshade",
+    type: "hillshade",
+    source: style.terrain.source,
+    paint: { "hillshade-exaggeration": 0.3 },
+  });
+  return style;
+}
+
+/** `draped`, with a circle, an extrusion and the test's labels on it. */
+function standing(style) {
+  const labels = style.layers.filter(({ type }) => type === "symbol");
+  draped(style);
+  style.sources.circle = {
+    type: "geojson",
+    data: { type: "Point", coordinates: [11.54, 47.366] },
+  };
+  style.sources.building = {
+    type: "geojson",
+    data: {
+      type: "Polygon",
+      coordinates: [
+        [
+          [11.512, 47.343],
+          [11.518, 47.343],
+          [11.518, 47.347],
+          [11.512, 47.347],
+          [11.512, 47.343],
+        ],
+      ],
+    },
+  };
+  style.layers.push(
+    {
+      id: "circle",
+      type: "circle",
+      source: "circle",
+      paint: {
+        "circle-radius": 16,
+        "circle-color": "#3050d0",
+        "circle-stroke-width": 3,
+        "circle-stroke-color": "#ffffff",
+      },
+    },
+    {
+      id: "building",
+      type: "fill-extrusion",
+      source: "building",
+      paint: {
+        "fill-extrusion-color": "#c07030",
+        "fill-extrusion-height": 400,
+      },
+    },
+    ...labels,
+  );
+  return style;
+}
 
 /**
  * The views whose names match `filter`, each with its render test's style
- * from `tests` (the suite's render-tests directory), with the test's
- * operations followed so that the camera is in the style. The page can't
- * follow other operations or test options, so a view must not have them.
- * `fixtures` gives the styles that a `setStyle` operation names.
+ * from `integration` (the suites' directory: the view's `suite`, by default
+ * render-tests), with the test's operations followed so that the camera is
+ * in the style, then the view's `edit`. The page can't follow other
+ * operations or test options, so a view must not have them. `fixtures`
+ * gives the styles that a `setStyle` operation names.
  */
-export function selectViews(filter, { tests, fixtures }) {
+export function selectViews(filter, { integration, fixtures }) {
   const pattern = new RegExp(filter);
   const views = VIEWS.filter(({ id, name = id }) => pattern.test(name)).map(
-    (entry) => view(entry, { tests, fixtures }),
+    (entry) => view(entry, { integration, fixtures }),
   );
   if (views.length === 0) throw new Error(`no view matches ${filter}`);
   return views;
 }
 
 function view(
-  { id, name = id, interaction, allowed = THRESHOLD, ...camera },
-  { tests, fixtures },
+  {
+    suite = "render-tests",
+    id,
+    name = id,
+    interaction,
+    edit = (style) => style,
+    allowed = THRESHOLD,
+    ...camera
+  },
+  { integration, fixtures },
 ) {
   const test = JSON.parse(
-    readFileSync(path.join(tests, id, "style.json"), "utf8"),
+    readFileSync(path.join(integration, suite, id, "style.json"), "utf8"),
   );
   const metadata = test.metadata?.test ?? {};
   for (const key of Object.keys(metadata)) {
@@ -105,7 +193,7 @@ function view(
         `${id}: the page can't follow the operation ${operation}`,
       );
   }
-  style = structuredClone(style);
+  style = edit(structuredClone(style));
   if (camera.center) style.center = camera.center;
   if (camera.zoom !== undefined) style.zoom = camera.zoom;
   style.center ??= [0, 0];
