@@ -4,7 +4,6 @@
 // shared, as it is while the style still holds the original, and leaves it
 // alone when the value doesn't change.
 
-use std::any::Any;
 use std::sync::Arc;
 
 use feature::{Value, ValueObject};
@@ -48,8 +47,6 @@ pub enum PropertyScope {
 pub struct Layer {
     style: Arc<dyn ErasedLayerStyle>,
     functions: Arc<Functions>,
-    /// What the style data refers to weakly, which the layer keeps.
-    kept: Option<Arc<dyn Any + Send + Sync>>,
 }
 
 impl Layer {
@@ -58,9 +55,9 @@ impl Layer {
     ///
     /// # Errors
     ///
-    /// When `registry` has no layer type named `type_`, or one that only
-    /// another constructor makes, such as the custom layer type, whose
-    /// layers need a host.
+    /// When `registry` has no layer type named `type_`, or one whose layers
+    /// aren't made from style JSON
+    /// ([`LayerTypeInfo::from_json`](crate::layer_type::LayerTypeInfo::from_json)).
     pub fn new(registry: &StyleRegistry, type_: &str, id: &str, source: &str) -> Result<Layer, mln_util::Error> {
         let Some(layer_type) = registry.layer_type(type_) else {
             return Err(mln_util::Error::invalid_argument(format!("unknown layer type '{type_}'")));
@@ -75,21 +72,7 @@ impl Layer {
     /// `functions`.
     #[must_use]
     pub fn from_style(style: Arc<dyn ErasedLayerStyle>, functions: Arc<Functions>) -> Layer {
-        Layer { style, functions, kept: None }
-    }
-
-    /// The layer of `style`, as [`from_style`](Self::from_style) makes it,
-    /// which keeps `kept` while the layer or a copy of it lasts. Style data
-    /// that refers to something only weakly, such as a custom layer's host,
-    /// gives it to its layer to keep: a renderer leaked with copies of the
-    /// style data then doesn't keep it.
-    #[must_use]
-    pub fn from_style_keeping(
-        style: Arc<dyn ErasedLayerStyle>,
-        functions: Arc<Functions>,
-        kept: Arc<dyn Any + Send + Sync>,
-    ) -> Layer {
-        Layer { style, functions, kept: Some(kept) }
+        Layer { style, functions }
     }
 
     #[must_use]
@@ -161,15 +144,11 @@ impl Layer {
         Value::Object(result)
     }
 
-    /// A layer named `id` with this layer's members and properties but its
-    /// paint properties, which keeps what this layer keeps.
+    /// A layer named `id` with this layer's members, properties but its
+    /// paint properties, and data.
     #[must_use]
     pub fn clone_ref(&self, id: &str) -> Layer {
-        Layer {
-            style: self.style.copy_without_paint(id),
-            functions: Arc::clone(&self.functions),
-            kept: self.kept.clone(),
-        }
+        Layer { style: self.style.copy_without_paint(id), functions: Arc::clone(&self.functions) }
     }
 
     /// Sets the property `name` (a property of the layer's type, its

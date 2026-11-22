@@ -1,6 +1,5 @@
 //! The built-in registrations: the style specification's expression
-//! functions, layer types and source types, and the custom layer and source
-//! types.
+//! functions, layer types and source types, and the custom source types.
 
 use std::sync::{Arc, LazyLock};
 

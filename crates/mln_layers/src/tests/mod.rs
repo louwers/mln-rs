@@ -1,7 +1,5 @@
 //! The tests of the layer types' buckets, layouts and meshes.
 
-// The custom layer's host, as its layer keeps it.
-mod custom_test;
 // The meshes of fills and their outlines.
 mod fill_mesh_test;
 // The symbol layer type's format sections that override its paint.

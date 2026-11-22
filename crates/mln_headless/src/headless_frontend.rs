@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use mln_gfx::rendering_stats::RenderingStats;
-use mln_render::{Renderer, RendererEvent, RendererEvents, UpdateParameters};
+use mln_render::{Registry, Renderer, RendererEvent, RendererEvents, UpdateParameters};
 use mln_runtime::map::{MapCore, UpdateReader};
 use mln_runtime::{BackendRef, BackendType, Device, DeviceOptions, GlApi, LocalTarget};
 use mln_text::GlyphCache;
@@ -39,8 +39,10 @@ pub struct RenderResult {
 /// latest one again. Once the map is gone, `render_update` tears the
 /// renderer down, and the frontend makes another when next used.
 ///
-/// Its renderer draws the built-in layer types (`mln_rs::builtin_registry`),
-/// so the maps it draws parse their styles against the same registry.
+/// Its renderer draws the layer types of its registry, the built-ins
+/// (`mln_rs::builtin_registry`) unless set
+/// ([`set_registry`](Self::set_registry)), so the maps it draws parse their
+/// styles against the same registry.
 pub struct HeadlessFrontend {
     size: Size,
     pixel_ratio: f32,
@@ -48,6 +50,8 @@ pub struct HeadlessFrontend {
     glyph_cache: Arc<GlyphCache>,
     /// The local fonts the renderer draws from: none unless set.
     local_glyphs: LocalGlyphs,
+    /// The layer types the renderer draws.
+    registry: Arc<Registry>,
     /// The calling thread's queue, which [`render`](Self::render) runs.
     queue: Queue<()>,
     /// Where the renderer's background work runs.
@@ -134,6 +138,7 @@ impl HeadlessFrontend {
             target,
             glyph_cache,
             local_glyphs: LocalGlyphs::default(),
+            registry: mln_rs::builtin_registry(),
             queue: queue.clone(),
             pool: pool.clone(),
             reports_to: Arc::default(),
@@ -147,6 +152,16 @@ impl HeadlessFrontend {
     /// with a new renderer, which lays out the map again.
     pub fn set_local_glyphs(&mut self, local: LocalGlyphs) {
         self.local_glyphs = local;
+        if let Some(stats) = self.target.tear_down_renderer() {
+            self.stats = stats;
+        }
+        self.drawn = 0;
+    }
+
+    /// Draws the layer types of `registry` rather than the built-ins: with a
+    /// new renderer, which lays out the map again.
+    pub fn set_registry(&mut self, registry: Arc<Registry>) {
+        self.registry = registry;
         if let Some(stats) = self.target.tear_down_renderer() {
             self.stats = stats;
         }
@@ -210,7 +225,7 @@ impl HeadlessFrontend {
 
     /// The renderer, made on first use, which reports to the attached map.
     pub fn renderer(&mut self) -> &mut Renderer {
-        let HeadlessFrontend { target, pixel_ratio, glyph_cache, local_glyphs, pool, reports_to, .. } = self;
+        let HeadlessFrontend { target, pixel_ratio, glyph_cache, local_glyphs, registry, pool, reports_to, .. } = self;
         target.renderer_or(|gpu| {
             let reports_to = Arc::clone(reports_to);
             let events = reports_to.lock().clone();
@@ -220,7 +235,7 @@ impl HeadlessFrontend {
                 local_glyphs.clone(),
                 Arc::clone(glyph_cache),
                 mln_render::text::font_face_engine::default_engine(),
-                mln_rs::builtin_registry(),
+                Arc::clone(registry),
                 Arc::new(move || {
                     let events = reports_to.lock().clone();
                     if let Some(events) = events {

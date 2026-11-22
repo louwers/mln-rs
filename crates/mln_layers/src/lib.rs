@@ -20,7 +20,6 @@ mod color_ramp;
 pub mod color_relief;
 #[cfg(feature = "gpu-conformance")]
 pub mod conformance;
-pub mod custom;
 mod features;
 pub mod fill;
 pub mod fill_extrusion;
@@ -36,7 +35,6 @@ mod tessellator;
 pub use background::{Background, BackgroundLayer, BackgroundPaintProperties};
 pub use circle::{Circle, CircleLayer, CircleLayoutProperties, CirclePaintProperties};
 pub use color_relief::{ColorRelief, ColorReliefLayer, ColorReliefPaintProperties};
-pub use custom::{Custom, CustomLayer, CustomLayerHost};
 pub use fill::{Fill, FillLayer, FillLayoutProperties, FillPaintProperties};
 pub use fill_extrusion::{
     FillExtrusion, FillExtrusionLayer, FillExtrusionLayoutProperties, FillExtrusionPaintProperties,
@@ -61,8 +59,7 @@ pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), Registe
     builder.add_layer_type::<RasterLayer>()?;
     builder.add_layer_type::<HillshadeLayer>()?;
     builder.add_layer_type::<ColorReliefLayer>()?;
-    symbol::register(builder)?;
-    builder.add_layer_type::<CustomLayer>()
+    symbol::register(builder)
 }
 
 /// The programs of this crate's layer types, each with its sources in the

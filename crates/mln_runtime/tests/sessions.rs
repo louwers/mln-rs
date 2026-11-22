@@ -11,7 +11,6 @@ use std::sync::mpsc::channel;
 use mln_map_types::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, MapMode};
 use mln_render::TileOperation;
 use mln_rs::ClusterQueries;
-use mln_rs::mln_layers::Custom;
 use mln_runtime::map::MapEvent;
 use mln_runtime::{
     AttachOptions, DemandMode, Device, DeviceOptions, Driver, ErrorKind, EventMask, FrameDemand, FrameDisposition,
@@ -1667,21 +1666,98 @@ fn cluster_queries_read_a_clustered_source() {
 
 // MARK: - Panics
 
-/// A custom layer whose drawing hits a bug.
-struct PanickingLayer;
+/// The `panics` layer type, whose layers hit a bug where their data says.
+mod panics {
+    use mln_rs::layer::{
+        AfterGpu, Draws, Layer, LayerStyle, LayerTypeInfo, NewCx, NoProperties, NoTiles, PrepareCx, PropertyTable,
+        PropertyVisitor, SourceKind, StyleLayerType,
+    };
+    use mln_rs::mln_render::{Registry, RegistryBuilder};
+    use mln_rs::mln_style::layer::Layer as StyleLayer;
 
-impl mln_layers::CustomLayerHost for PanickingLayer {
-    fn prerender(&self, _parameters: &mut mln_layers::custom::CustomLayerPrerenderParameters<'_>) {
-        panic!("a bug in the library");
+    use super::Arc;
+
+    /// Where a layer hits its bug.
+    #[derive(Clone, Copy, Default)]
+    pub(crate) enum Bug {
+        /// In each frame that draws it.
+        #[default]
+        Drawing,
+        /// Once the GPU finished what it drew, after it left the renderer.
+        Teardown,
     }
+
+    pub(crate) struct Panics;
+
+    static PROPERTIES: PropertyTable = PropertyTable::new(&[], &[]);
+
+    impl StyleLayerType for Panics {
+        const INFO: LayerTypeInfo = LayerTypeInfo { name: "panics", source: SourceKind::None, from_json: false };
+        const PROPERTIES: &'static PropertyTable = &PROPERTIES;
+        type LayoutProperties = NoProperties;
+        type PaintProperties = NoProperties;
+        type Data = Bug;
+
+        fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
+            None
+        }
+    }
+
+    pub(crate) struct PanicsLayer {
+        bug: Bug,
+        after_gpu: AfterGpu,
+    }
+
+    impl Layer for PanicsLayer {
+        type Style = Panics;
+        type Input = NoTiles;
+        type Tile = ();
+
+        fn new(cx: &mut NewCx<'_, Self>) -> Self {
+            PanicsLayer { bug: cx.layer.style.data, after_gpu: cx.after_gpu.clone() }
+        }
+
+        fn prepare(&self, _cx: &PrepareCx<'_, Self>, _out: &mut Draws) {
+            assert!(matches!(self.bug, Bug::Teardown), "a bug in the library");
+        }
+    }
+
+    impl Drop for PanicsLayer {
+        fn drop(&mut self) {
+            if let Bug::Teardown = self.bug {
+                self.after_gpu.push(|_| panic!("a bug in the library"));
+            }
+        }
+    }
+
+    /// The built-in registrations and the `panics` layer type.
+    pub(crate) fn registry() -> Arc<Registry> {
+        let mut builder = RegistryBuilder::new();
+        mln_rs::register_builtins(&mut builder).unwrap();
+        builder.add_layer_type::<PanicsLayer>().unwrap();
+        builder.build()
+    }
+
+    /// A layer `panics` of the type, which hits `bug`.
+    pub(crate) fn layer(registry: &Registry, bug: Bug) -> StyleLayer {
+        let mut style = LayerStyle::<Panics>::new("panics".to_owned(), String::new());
+        style.data = bug;
+        StyleLayer::from_style(Arc::new(style), Arc::clone(registry.style().functions()))
+    }
+}
+
+/// A runtime whose maps can have `panics` layers.
+fn panicking_runtime() -> crate::support::TestRuntime {
+    let options = mln_runtime::RuntimeOptions::default();
+    crate::support::TestRuntime(Runtime::new(&options, panics::registry()).unwrap())
 }
 
 #[test]
 fn a_panic_on_the_sessions_thread_fails_the_session() {
-    let runtime = runtime();
+    let runtime = panicking_runtime();
     let map = red_map(&runtime);
     let session = attach(&map);
-    wait(map.add_style_layer(Custom::layer(map.registry().style(), "panics", Arc::new(PanickingLayer)), None));
+    wait(map.add_style_layer(panics::layer(map.registry(), panics::Bug::Drawing), None));
     demand(&session, DemandMode::Force, 1);
     let result = take_one(&session);
     assert_eq!((Some(1), FrameDisposition::Failed), (result.token, result.disposition));
@@ -1715,21 +1791,12 @@ fn a_runtime_that_a_panic_stopped_ends_the_work_of_its_sessions() {
     wait(map.release());
 }
 
-/// A custom layer whose teardown hits a bug.
-struct PanickingTeardown;
-
-impl mln_layers::CustomLayerHost for PanickingTeardown {
-    fn deinitialize(&self) {
-        panic!("a bug in the library");
-    }
-}
-
 #[test]
 fn a_panic_in_a_detach_still_detaches_the_session() {
-    let runtime = runtime();
+    let runtime = panicking_runtime();
     let map = red_map(&runtime);
     let session = attach(&map);
-    wait(map.add_style_layer(Custom::layer(map.registry().style(), "panics", Arc::new(PanickingTeardown)), None));
+    wait(map.add_style_layer(panics::layer(map.registry(), panics::Bug::Teardown), None));
     demand(&session, DemandMode::Force, 1);
     assert_eq!(FrameDisposition::Rendered, take_one(&session).disposition);
     wait(session.detach());
