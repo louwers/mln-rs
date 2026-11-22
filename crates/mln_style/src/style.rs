@@ -11,7 +11,7 @@ use crate::filter::Filter;
 use crate::image;
 use crate::layer::Layer;
 use crate::layer_list::LayerList;
-use crate::layer_type::SourceKind;
+use crate::layer_type::{LayerStyle, SourceKind, StyleLayerType};
 use crate::light::Light;
 use crate::map::camera::CameraOptions;
 use crate::parser::Parser;
@@ -450,6 +450,45 @@ impl Style {
             }
         }
         Ok(())
+    }
+
+    /// Changes the [`Data`](StyleLayerType::Data) of the layer `id`, a
+    /// layer of the type `T`, with `edit`. Fails with
+    /// [`ErrorKind::NotFound`](mln_util::ErrorKind) for a layer the style
+    /// lacks or of another type, and with what `edit` fails with, which
+    /// leaves the layer as it was.
+    pub fn edit_layer_data<T: StyleLayerType>(
+        &mut self,
+        id: &str,
+        edit: impl FnOnce(&mut T::Data) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        self.update_layer(id, |layer| {
+            LayerStyle::<T>::edit_data(layer.style_mut(), edit).unwrap_or_else(|| {
+                Err(Error::not_found(format!("layer \"{id}\" is not a layer of the type \"{}\"", T::INFO.name)))
+            })
+        })
+    }
+
+    /// Gives each layer the [`Data`](StyleLayerType::Data) of the layer of
+    /// `old` with its id and type, as a style that replaces `old` keeps it:
+    /// data isn't in the style's JSON.
+    pub fn keep_layer_data(&mut self, old: &Style) {
+        let mut layers: Option<LayerList> = None;
+        for (index, layer) in self.layers.iter().enumerate() {
+            let Some(before) = old.layers.get(layer.get_id()) else { continue };
+            let layer_type = layer.style().layer_type();
+            if !layer_type.is_type_of(&**before.style()) {
+                continue;
+            }
+            let mut kept = layer.clone();
+            layer_type.keep_data(kept.style_mut(), &**before.style());
+            if !Arc::ptr_eq(kept.style(), layer.style()) {
+                layers.get_or_insert_with(|| (*self.layers).clone()).replace(index, kept);
+            }
+        }
+        if let Some(layers) = layers {
+            self.layers = Arc::new(layers);
+        }
     }
 
     /// Whether `other` is the same version as `self`: every part is the same

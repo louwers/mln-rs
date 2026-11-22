@@ -75,6 +75,7 @@ use mln_tile::{Feature, TileLayer};
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates, GeometryTileFeature};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
+use mln_util::geo::ScreenCoordinate;
 use mln_util::error::Error;
 use mln_wire::Wire;
 
@@ -168,6 +169,11 @@ pub trait Layer: Sized + 'static {
     fn hit(&self, _test: &HitTest<'_, Self>) -> Option<f32> {
         None
     }
+
+    /// Adds to `hits` what the query's geometry hits of what the layer
+    /// draws without tile features, such as a mark it places itself. The
+    /// engine asks only a layer that rendered in the last frame.
+    fn hit_frame(&self, _query: &FrameQuery<'_, Self>, _hits: &mut Vec<Hit>) {}
 }
 
 /// What a layer draws from: a kind of tile and what such a tile holds for
@@ -610,6 +616,28 @@ impl<L: Layer> HitTest<'_, L> {
     pub fn translation(&self, translate: [f32; 2], anchor: TranslateAnchorType) -> [f32; 2] {
         crate::tile_matrix::tile_unit_translation(self.projector.tile_id(), translate, anchor, self.camera)
     }
+}
+
+/// A rendered-feature query of a layer `L`, for what it draws without tile
+/// features ([`Layer::hit_frame`]).
+pub struct FrameQuery<'a, L: Layer> {
+    /// The layer's values.
+    pub layer: &'a LayerValues<L::Style>,
+    /// The camera of the last frame.
+    pub camera: &'a View,
+    /// The query's geometry in the camera's logical pixels: one point, or
+    /// a closed ring.
+    pub geometry: &'a [ScreenCoordinate],
+}
+
+/// A feature a query hits, and how far from the query: in pixels, 0 inside
+/// it. A layer's hits come nearest first, in the order found among equals.
+#[derive(Clone, Debug)]
+pub struct Hit {
+    /// The feature. The engine names its layer.
+    pub feature: mln_util::feature::Feature,
+    /// The distance from the query, in pixels.
+    pub distance: f32,
 }
 
 /// How a group of layers of the style type `S` that share their layout

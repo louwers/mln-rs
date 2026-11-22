@@ -238,6 +238,23 @@ impl LayerBase {
         }
     }
 
+    /// Whether `other` has the same members.
+    fn same_as(&self, other: &LayerBase) -> bool {
+        let same_expression = match (&self.visibility_expression, &other.visibility_expression) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b) || a == b,
+            (None, None) => true,
+            _ => false,
+        };
+        same_expression
+            && self.id == other.id
+            && self.source == other.source
+            && self.source_layer == other.source_layer
+            && self.filter == other.filter
+            && self.min_zoom == other.min_zoom
+            && self.max_zoom == other.max_zoom
+            && self.visibility == other.visibility
+    }
+
     pub(crate) fn get_filter_dependencies(&self) -> Dependency {
         match &self.filter.expression {
             Some(expression) => expression.dependencies(),
@@ -376,6 +393,11 @@ pub trait ErasedLayerStyle: Any + Send + Sync {
 
     /// Writes the value for its type's [`ErasedStyleLayerType::read_style`].
     fn write(&self, w: &mut Writer);
+
+    /// Whether `other` is a layer of the same type with the same members
+    /// and properties, which may differ from `self` in its
+    /// [`Data`](StyleLayerType::Data). False for a type without data.
+    fn only_data_differs(&self, other: &dyn ErasedLayerStyle) -> bool;
 }
 
 impl<T: StyleLayerType> ErasedLayerStyle for LayerStyle<T> {
@@ -430,6 +452,13 @@ impl<T: StyleLayerType> ErasedLayerStyle for LayerStyle<T> {
     fn write(&self, w: &mut Writer) {
         Wire::write(self, w);
     }
+
+    fn only_data_differs(&self, other: &dyn ErasedLayerStyle) -> bool {
+        size_of::<T::Data>() != 0
+            && LayerStyle::<T>::recover_ref(other).is_some_and(|other| {
+                self.base.same_as(&other.base) && property_table::properties_equal(self, other)
+            })
+    }
 }
 
 fn layout_difference<T: StyleLayerType>(a: &LayerStyle<T>, b: &LayerStyle<T>) -> bool {
@@ -473,6 +502,11 @@ pub trait ErasedStyleLayerType: Send + Sync + 'static {
     /// Reads the value that [`ErasedLayerStyle::write`] wrote for a layer of
     /// the type.
     fn read_style(&self, r: &mut Reader<'_>) -> Option<Arc<dyn ErasedLayerStyle>>;
+
+    /// Gives `style`, which must be of the type, the
+    /// [`Data`](StyleLayerType::Data) of `from` where `from` is of the type
+    /// too, copying `style` first if it is shared.
+    fn keep_data(&self, style: &mut Arc<dyn ErasedLayerStyle>, from: &dyn ErasedLayerStyle);
 }
 
 /// The [`ErasedStyleLayerType`] of `T`, which [`style_entry`] returns.
@@ -517,6 +551,26 @@ impl<T: StyleLayerType> ErasedStyleLayerType for LayerTypeEntry<T> {
 
     fn read_style(&self, r: &mut Reader<'_>) -> Option<Arc<dyn ErasedLayerStyle>> {
         Some(Arc::new(LayerStyle::<T>::read(r)?))
+    }
+
+    fn keep_data(&self, style: &mut Arc<dyn ErasedLayerStyle>, from: &dyn ErasedLayerStyle) {
+        if size_of::<T::Data>() == 0 {
+            return;
+        }
+        if let Some(from) = LayerStyle::<T>::recover_ref(from)
+            && let Some(style) = ErasedSlot::<T>(style, PhantomData).make_mut()
+        {
+            style.data = from.data.clone();
+        }
+    }
+}
+
+impl<T: StyleLayerType> LayerStyle<T> {
+    /// Changes the [`Data`](StyleLayerType::Data) of `style` with `edit`,
+    /// copying `style` first if it is shared; `None` where `style` is
+    /// another type's.
+    pub fn edit_data<R>(style: &mut Arc<dyn ErasedLayerStyle>, edit: impl FnOnce(&mut T::Data) -> R) -> Option<R> {
+        ErasedSlot::<T>(style, PhantomData).make_mut().map(|style| edit(&mut style.data))
     }
 }
 

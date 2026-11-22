@@ -1597,6 +1597,28 @@ impl RenderSession {
         self.operation(move |worker, _| worker.rendered_source(&source_id, read))
     }
 
+    /// Reads the layer `layer_id` with `read`, as the session's renderer has
+    /// it after its last render, whether or not it drew: the layer of the
+    /// type `L` and its values. A layer type's render-side state, such as
+    /// where it last drew a mark, is read so.
+    ///
+    /// Completes with [`ErrorKind::NotFound`](mln_util::ErrorKind) when the
+    /// renderer has no such layer of the type `L`, and with what `read`
+    /// fails with.
+    pub fn query_rendered_layer<L: mln_render::layer::Layer, R: Send + 'static>(
+        &self,
+        layer_id: impl Into<String>,
+        read: impl FnOnce(&L, &mln_render::layer::LayerValues<L::Style>) -> Result<R, Error> + Send + 'static,
+    ) -> Result<Completion<R>, Error> {
+        let layer_id = layer_id.into();
+        self.operation(move |worker, _| {
+            let (layer, values) = worker.renderer()?.layer::<L>(&layer_id).ok_or_else(|| {
+                Error::not_found(format!("the session's renderer has no layer {layer_id} of its type"))
+            })?;
+            read(layer, values)
+        })
+    }
+
     /// Detaches the session from its map and frees its graphics objects. The
     /// demands on their way finish as
     /// [`FrameDisposition::TargetNotReady`](super::FrameDisposition). Once

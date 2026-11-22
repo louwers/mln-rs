@@ -1297,15 +1297,16 @@ impl SourceTiles {
                     let start = canonical_tile_start.get(&layer_id).copied().unwrap_or(0);
                     let layer_result = result.entry(layer_id).or_default();
                     let end = layer_result.len();
-                    for feature in features {
+                    for hit in features {
                         // `other == feature` compares the GeoJSON feature
                         // base: id, geometry and properties.
+                        let feature = &hit.feature;
                         if !layer_result[start..end].iter().any(|other| {
-                            other.id == feature.id
-                                && other.geometry == feature.geometry
-                                && other.properties == feature.properties
+                            other.feature.id == feature.id
+                                && other.feature.geometry == feature.geometry
+                                && other.feature.properties == feature.properties
                         }) {
-                            layer_result.push(feature);
+                            layer_result.push(hit);
                         }
                     }
                 }

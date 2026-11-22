@@ -97,6 +97,11 @@ impl Layer {
         &self.style
     }
 
+    /// The style data, to change.
+    pub(crate) fn style_mut(&mut self) -> &mut Arc<dyn ErasedLayerStyle> {
+        &mut self.style
+    }
+
     /// Changes the base members, copying the style data if it is shared.
     fn mutate_base(&mut self, f: &mut dyn FnMut(&mut LayerBase)) {
         self.style.layer_type().mutate_base(&mut self.style, f);

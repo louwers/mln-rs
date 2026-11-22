@@ -653,11 +653,14 @@ impl RenderOrchestrator {
         }
 
         // Update render layers for changed layers.
-        for (id, _) in layer_changes.iter().filter(|(_, change)| change.restyles()) {
+        for (id, change) in layer_changes.iter() {
             if let (Some(&index), Some(layer)) = (self.layer_indexes.get(&**id), layers.get(id)) {
-                let new_layer = layer.style();
                 let render_layer = &mut self.layers[index];
-                render_layer.restyle(&clock.transition, new_layer);
+                if change.restyles() {
+                    render_layer.restyle(&clock.transition, layer.style());
+                } else if change == LayerChange::Data {
+                    render_layer.set_data(layer.style());
+                }
             }
         }
 
@@ -1191,6 +1194,13 @@ impl RenderOrchestrator {
         self.debug_layers.values_mut()
     }
 
+    /// The layer `id`, of the type `L`, with its values.
+    pub(crate) fn layer<L: crate::layer::Layer>(&self, id: &str) -> Option<(&L, &crate::layer::LayerValues<L::Style>)> {
+        let layer: &dyn std::any::Any = &**self.layers.get(*self.layer_indexes.get(id)?)?;
+        let hosted = layer.downcast_ref::<crate::render_layer::Hosted<L>>()?;
+        Some(hosted.parts())
+    }
+
     /// Drops every render layer.
     pub(crate) fn leave_layers(&mut self) {
         self.layers.clear();
@@ -1322,6 +1332,14 @@ impl RenderOrchestrator {
             }
         }
 
+        for (id, layer) in &filtered_layers {
+            let mut hits = Vec::new();
+            layer.hit_frame(&self.view, geometry, &mut hits);
+            if !hits.is_empty() {
+                results_by_layer.entry(id.clone()).or_default().extend(hits);
+            }
+        }
+
         let mut result = Vec::new();
 
         if results_by_layer.is_empty() {
@@ -1335,11 +1353,13 @@ impl RenderOrchestrator {
             if !filtered_layers.contains_key(id) {
                 continue;
             }
-            if let Some(mut features) = results_by_layer.remove(id) {
-                for feature in &mut features {
+            if let Some(mut hits) = results_by_layer.remove(id) {
+                hits.sort_by(|a, b| a.distance.total_cmp(&b.distance));
+                result.extend(hits.into_iter().map(|hit| {
+                    let mut feature = hit.feature;
                     id.clone_into(&mut feature.layer);
-                }
-                result.extend(features);
+                    feature
+                }));
             }
         }
 

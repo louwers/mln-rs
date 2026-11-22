@@ -216,6 +216,10 @@ impl<L: Layer> ErasedStyleLayerType for LayerEntry<L> {
     fn read_style(&self, r: &mut Reader<'_>) -> Option<Arc<dyn ErasedLayerStyle>> {
         style_half::<L>().read_style(r)
     }
+
+    fn keep_data(&self, style: &mut Arc<dyn ErasedLayerStyle>, from: &dyn ErasedLayerStyle) {
+        style_half::<L>().keep_data(style, from);
+    }
 }
 
 /// The style half of the layer type `L`.

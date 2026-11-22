@@ -381,6 +381,14 @@ impl Renderer {
         self.orchestrator.tile_cache_enabled()
     }
 
+    /// The style's layer `id` as the renderer has it, a layer of the type
+    /// `L`, with its values; `None` for a layer it doesn't have or of
+    /// another type.
+    #[must_use]
+    pub fn layer<L: crate::layer::Layer>(&self, id: &str) -> Option<(&L, &crate::layer::LayerValues<L::Style>)> {
+        self.orchestrator.layer::<L>(id)
+    }
+
     /// Drops the layers, whose graphics objects are lost. Call it before the
     /// renderer goes when its device or target went first.
     pub fn lose_layer_hosts(&mut self) {

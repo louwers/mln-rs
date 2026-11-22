@@ -59,8 +59,8 @@ fn remove() {
 // gtest: StyleDiff.Compare
 #[test]
 fn compare() {
-    let old = [new_layer("plain", "id-1", "src-1"), new_layer("plain", "id-2", "src-2")];
-    let new = [new_layer("plain", "id-1", "src-1"), new_layer("plain", "id-2", "src-2")];
+    let old = [new_layer("dot", "id-1", "src-1"), new_layer("dot", "id-2", "src-2")];
+    let new = [new_layer("dot", "id-1", "src-1"), new_layer("dot", "id-2", "src-2")];
     let changes = LayerChanges::between(&list(&[&old[0], &old[1]]), &list(&[&new[0], &new[1]]));
     assert_eq!(Some(LayerChange::Restyled), changes.get("id-1"));
     assert_eq!(Some(LayerChange::Restyled), changes.get("id-2"));
@@ -112,6 +112,22 @@ fn a_change_tiles_are_laid_out_with_is_relaid() {
     }
 }
 
+#[test]
+fn a_change_of_data_alone_keeps_the_layer() {
+    let plain = new_layer("plain", "p", "");
+    let mut edited = plain.clone();
+    crate::layer_type::LayerStyle::<crate::tests::fixture_layer::Plain>::edit_data(edited.style_mut(), |data| *data = 7)
+        .unwrap();
+    let data_changes = LayerChanges::between(&list(&[&plain]), &list(&[&edited]));
+    assert_eq!(Some(LayerChange::Data), data_changes.get("p"));
+    assert!(!data_changes.order_changed);
+    assert!(!LayerChange::Data.relayouts() && !LayerChange::Data.restyles());
+
+    // With a property changed too, the layer is restyled.
+    let restyled = changed(edited, "plain-opacity", "0.5");
+    assert_eq!(changes(&[&plain], &[&restyled]), [("p".to_owned(), LayerChange::Restyled)]);
+}
+
 // `StyleDiff::between`: what changed between two versions of a style.
 
 mod versions {
@@ -156,6 +172,26 @@ mod versions {
         assert_eq!(["a", "c"], *keys(&diff.sources.added));
         assert_eq!(["i"], *keys(&diff.images.added));
         assert!(diff.sources.removed.is_empty() && diff.images.removed.is_empty());
+    }
+
+    #[test]
+    fn a_layer_keeps_its_data_in_a_style_that_replaces_its_own() {
+        use crate::tests::fixture_layer::{Dot, Plain};
+        use crate::tests::util::style_of;
+
+        let mut old = style();
+        old.edit_layer_data::<Plain>("bg", |data| {
+            *data = 7;
+            Ok(())
+        })
+        .unwrap();
+        let error = old.edit_layer_data::<Dot>("bg", |_| Ok(())).unwrap_err();
+        assert_eq!(mln_util::ErrorKind::NotFound, error.kind);
+        let mut new = style();
+        new.keep_layer_data(&old);
+        assert_eq!(7, style_of::<Plain>(new.get_layer("bg").unwrap()).data);
+        // The same properties and the kept data: only the data may differ.
+        assert_eq!(Some(LayerChange::Data), StyleDiff::between(Some(&old), &new).layers.get("bg"));
     }
 
     #[test]

@@ -342,7 +342,8 @@ impl MapCore {
                     self.renderer_fully_loaded = false;
                     self.emit(MapEvent::LoadingStarted);
                 }
-                LoadEvent::Parsed(style) => {
+                LoadEvent::Parsed(mut style) => {
+                    style.keep_layer_data(&self.style);
                     self.style = Arc::new(style);
                     self.watch_sources();
                     // A style that loads takes every source's feature state

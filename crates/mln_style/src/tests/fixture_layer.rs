@@ -1,7 +1,7 @@
 //! Layer types for the tests of this crate, which can't reach the built-in
 //! layer types outside it: `plain`, a layer type without a source, whose
 //! paint properties are a constant color and opacity and a cross-faded
-//! pattern, `dot`, a layer type of a geometry source with data-driven paint
+//! pattern and whose data is a number, `dot`, a layer type of a geometry source with data-driven paint
 //! and layout properties and a constant layout property, and `shade`, a
 //! layer type of a raster-dem source.
 
@@ -34,7 +34,8 @@ impl StyleLayerType for Plain {
 
     type LayoutProperties = NoProperties;
     type PaintProperties = PlainPaintProperties::Transitionable;
-    type Data = ();
+    /// What an app gives a `plain` layer.
+    type Data = u32;
 
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {
         Some(match slot {

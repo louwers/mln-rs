@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use mln_style::image::Impl as StyleImage;
+use mln_style::layer_type::StyleLayerType;
 use mln_style::{Edit, Source, SourceInstance, TransitionOptions};
 use mln_util::error::Error;
 use mln_util::geo::LatLngBounds;
@@ -464,6 +465,25 @@ impl Map {
     /// The style's layers, from bottom to top.
     pub fn style_layers(&self) -> Result<Completion<Vec<LayerInfo>>, Error> {
         self.query(|map| Ok(map.style().get_layers().map(layer_info).collect()))
+    }
+
+    /// Changes the [`Data`](mln_style::layer_type::StyleLayerType::Data) of
+    /// the style's layer `layer_id`, a layer of the type `S`, with `edit`:
+    /// a new version of the style, which the renderer takes without laying
+    /// the layer out again or restarting its transitions. A layer keeps its
+    /// data when a new style with a layer of its id and type replaces the
+    /// style.
+    ///
+    /// Completes with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
+    /// while the style isn't loaded, with `NotFound` when the style has no
+    /// such layer of the type `S`, and with what `edit` fails with.
+    pub fn edit_style_layer_data<S: StyleLayerType>(
+        &self,
+        layer_id: impl Into<String>,
+        edit: impl FnOnce(&mut S::Data) -> Result<(), Error> + Send + 'static,
+    ) -> Result<Completion<Applied>, Error> {
+        let layer_id = layer_id.into();
+        self.command(move |map| map.edit_loaded_style(|style| style.edit_layer_data::<S>(&layer_id, edit)))
     }
 
     /// Moves a layer below `before_layer_id`, or above every layer. See

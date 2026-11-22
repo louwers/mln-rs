@@ -26,6 +26,10 @@ pub enum LayerChange {
     /// In both, with other values that tiles are laid out with, so its
     /// source lays them out again.
     Relaid,
+    /// In both, with other [`Data`](crate::layer_type::StyleLayerType::Data)
+    /// alone: the layer keeps its tiles and its transitions, and evaluates
+    /// again.
+    Data,
 }
 
 impl LayerChange {
@@ -91,7 +95,13 @@ impl LayerChanges {
             if Arc::ptr_eq(before, after) {
                 continue;
             }
-            let change = if before.layout_difference(&**after) { LayerChange::Relaid } else { LayerChange::Restyled };
+            let change = if after.only_data_differs(&**before) {
+                LayerChange::Data
+            } else if before.layout_difference(&**after) {
+                LayerChange::Relaid
+            } else {
+                LayerChange::Restyled
+            };
             changes.push((Arc::from(layer.get_id()), change));
         }
         for layer in old.iter() {
@@ -101,7 +111,7 @@ impl LayerChanges {
         }
         changes.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
         let changes: VecMap<Arc<str>, LayerChange> = changes.into_iter().collect();
-        let order_changed = order_changed || changes.values().any(|change| !change.restyles());
+        let order_changed = order_changed || changes.values().any(|change| change.adds() || change.removes());
         LayerChanges { changes, order_changed }
     }
 

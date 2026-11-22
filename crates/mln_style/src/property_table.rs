@@ -495,6 +495,33 @@ pub(crate) fn layout_properties_differ<S: Properties>(a: &S, b: &S, section_over
     })
 }
 
+/// Whether `a` and `b` have the same value, and transition, of every
+/// property.
+pub(crate) fn properties_equal<S: Properties>(a: &S, b: &S) -> bool {
+    struct Equal<'a, S> {
+        a: &'a S,
+        b: &'a S,
+    }
+
+    impl<S> PropertyVisitor<S> for Equal<'_, S> {
+        type Output = bool;
+
+        fn paint<V: StyleValue>(
+            self,
+            get: fn(&S) -> &Transitionable<V>,
+            _: fn(&mut S) -> &mut Transitionable<V>,
+        ) -> bool {
+            get(self.a) == get(self.b)
+        }
+
+        fn layout<V: StyleValue>(self, get: fn(&S) -> &V, _: fn(&mut S) -> &mut V) -> bool {
+            get(self.a) == get(self.b)
+        }
+    }
+
+    (0..S::TABLE.properties.len()).all(|slot| S::visit(slot, Equal { a, b }).unwrap_or(true))
+}
+
 /// Each defined property of `owner` and paint property transition, in table
 /// order, with its name and scope.
 pub(crate) fn defined_properties<S: Properties>(owner: &S) -> Vec<(String, PropertyScope, StyleProperty)> {

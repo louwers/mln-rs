@@ -18,6 +18,7 @@ use mln_style::layer_type::{ErasedLayerStyle, LayerStyle, PaintSet, SourceKind, 
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::VisibilityType;
 use mln_tile_id::OverscaledTileID;
+use mln_util::geo::ScreenCoordinate;
 use mln_util::range::Range as ZoomRange;
 use smallvec::SmallVec;
 
@@ -27,7 +28,7 @@ use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer, entry};
 use crate::gfx::context::Resources;
 use crate::image_store::ImageStore;
 use crate::layer::{
-    EvaluateCx, Evaluation, Found, FrameTile, HitTest, Layer, LayerValues, NewCx, PrepareCx, TileCx, Tiles, UpdateCx,
+    EvaluateCx, Evaluation, Found, FrameQuery, FrameTile, Hit, HitTest, Layer, LayerValues, NewCx, PrepareCx, TileCx, Tiles, UpdateCx,
     input,
 };
 use crate::paint_parameters::PaintParameters;
@@ -107,6 +108,11 @@ impl<L: Layer> Hosted<L> {
     /// The layer as its type's placement pass sees it.
     pub(crate) fn placing(&self) -> crate::placement::PlacingLayer<'_, L> {
         crate::placement::PlacingLayer { layer: &self.values, state: &self.layer }
+    }
+
+    /// The layer and its values.
+    pub(crate) fn parts(&self) -> (&L, &LayerValues<L::Style>) {
+        (&self.layer, &self.values)
     }
 
     /// The render layer of the layer `style`, before its values transition,
@@ -269,6 +275,11 @@ pub(crate) trait RenderLayer: Any {
     /// values. A style of another type leaves the layer's.
     fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>);
 
+    /// Makes `style`, the layer's style with other
+    /// [`Data`](StyleLayerType::Data) alone, the layer's. Its tile values
+    /// and transitions stay.
+    fn set_data(&mut self, style: &Arc<dyn ErasedLayerStyle>);
+
     /// Begins transitions for the paint values that changed since the last
     /// frame, to those of the layer's style.
     fn transition(&mut self, parameters: &TransitionParameters);
@@ -343,6 +354,10 @@ pub(crate) trait RenderLayer: Any {
     /// Whether `test`'s feature, as the layer draws it, is hit by the
     /// query's geometry ([`Layer::hit`]).
     fn hit(&self, test: &ErasedHitTest<'_>) -> Option<f32>;
+
+    /// Adds to `hits` what `geometry`, in `camera`'s pixels, hits of what
+    /// the layer draws without tile features ([`Layer::hit_frame`]).
+    fn hit_frame(&self, camera: &View, geometry: &[ScreenCoordinate], hits: &mut Vec<Hit>);
 }
 
 /// A [`HitTest`] of a layer of any type.
@@ -392,6 +407,12 @@ impl<L: Layer> RenderLayer for Hosted<L> {
             self.values.style = recovered;
         }
         self.transition(parameters);
+    }
+
+    fn set_data(&mut self, style: &Arc<dyn ErasedLayerStyle>) {
+        if let Some(recovered) = LayerStyle::recover(style) {
+            self.values.style = recovered;
+        }
     }
 
     fn transition(&mut self, parameters: &TransitionParameters) {
@@ -609,5 +630,11 @@ impl<L: Layer> RenderLayer for Hosted<L> {
             pixels_to_tile_units: test.pixels_to_tile_units,
             projector: test.projector,
         })
+    }
+
+    fn hit_frame(&self, camera: &View, geometry: &[ScreenCoordinate], hits: &mut Vec<Hit>) {
+        if self.renderable {
+            self.layer.hit_frame(&FrameQuery { layer: &self.values, camera, geometry }, hits);
+        }
     }
 }

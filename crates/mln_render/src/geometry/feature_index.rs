@@ -24,6 +24,7 @@ use mln_util::feature::{Feature, feature_id_to_string};
 use mln_util::hash::{HashMap, HashSet};
 use mln_vec_map::VecMap;
 
+use crate::layer::Hit;
 use crate::placement::IndexedFeature;
 use crate::query::RenderedQueryOptions;
 use crate::render_layer::{ErasedHitTest, RenderLayer};
@@ -56,8 +57,9 @@ pub(crate) struct QueryRegion<'a> {
     pub(crate) padding: f32,
 }
 
-/// The features a query found, by layer id.
-pub(crate) type QueryResults = HashMap<String, Vec<Feature>>;
+/// The features a query found, by layer id, each with its distance from
+/// the query.
+pub(crate) type QueryResults = HashMap<String, Vec<Hit>>;
 
 /// A box of a feature index: one ring of a feature.
 #[derive(Clone, Debug, PartialEq)]
@@ -342,9 +344,9 @@ impl FeatureIndex {
             // we use the float camera zoom here, not the integer tile ID zoom,
             // because for the query we take into account the actual rendered
             // size of the geometry (#2781)
-            let intersects = region.is_none_or(|region| {
-                render_layer
-                    .hit(&ErasedHitTest {
+            let distance = match region {
+                None => Some(0.0),
+                Some(region) => render_layer.hit(&ErasedHitTest {
                         query_geometry: region.geometry,
                         feature: &feature,
                         geometry: &geometry,
@@ -352,13 +354,10 @@ impl FeatureIndex {
                         zoom: region.view.zoom() as f32,
                         camera: region.view,
                         pixels_to_tile_units: region.pixels_to_tile_units,
-                        projector: region.projector,
-                    })
-                    .is_some()
-            });
-            if !intersects {
-                continue;
-            }
+                    projector: region.projector,
+                }),
+            };
+            let Some(distance) = distance else { continue };
 
             // Match layer filters and source queries, including overzoomed tiles.
             if let Some(filter) = &options.filter {
@@ -374,7 +373,7 @@ impl FeatureIndex {
             converted.source = render_layer.style().base().source.clone();
             converted.source_layer = source_layer_id.clone();
             converted.state = state.clone();
-            result.entry(layer_id.clone()).or_default().push(converted);
+            result.entry(layer_id.clone()).or_default().push(Hit { feature: converted, distance });
         }
         Ok(())
     }
