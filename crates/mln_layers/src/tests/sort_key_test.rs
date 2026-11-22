@@ -1,27 +1,18 @@
 use std::sync::Arc;
 
 use feature::{Feature, Identifier, PropertyMap, Value};
-use geo_types::{Geometry, LineString, Point, Polygon};
-use mln_map_types::MapMode;
-use mln_render::layer::{
-    BucketParameters, BuildParams, EvaluatedLayer, FeatureIndexBuilder, FilterGroups, LayerType, Layout,
-    LayoutParameters, Resolved, SourceLayer,
-};
-use mln_render::testing::evaluated_layer;
-use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
-use mln_style::expression::image_expression::UnavailableImages;
-use mln_style::layer_type::LayerStyle;
-use mln_style_types::image::{ImageDependencies, ImagePosition, ImagePositions, Impl as ImageImpl, RectU16};
-use mln_text::glyph::GlyphDependencies;
-use mln_tile_id::OverscaledTileID;
+use geo_types::{Geometry, Point};
+use mln_render::bench::{PlacementFrame, TileLayout};
+use mln_style::{Edit, Style};
+use mln_style_types::image::Impl as ImageImpl;
+use mln_tile::TileData;
+use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_vec_map::VecSet;
 use serde_json::json;
 
-use crate::Symbol;
-use crate::symbol::bucket::SortKeyRange;
+use crate::symbol::SymbolLayer;
+use crate::symbol::bucket::{SortKeyRange, SymbolBucket};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum SortKeyType {
@@ -52,114 +43,56 @@ fn expected_order(type_: SortKeyType) -> Vec<usize> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum Shape {
-    Polygon,
-    LineString,
-    Point,
-}
-
-/// The values of a `T` layer of the given style JSON, with `sort_key_name`
-/// set to the sort key of `type_`.
-fn layer<T: LayerType>(mut json: serde_json::Value, sort_key_name: &str, type_: SortKeyType) -> Arc<EvaluatedLayer<T>> {
+/// Runs `check` with the bucket of a symbol layer of icons `marker` with
+/// `layout`, and `symbol-sort-key` the sort key of `type_`, over three
+/// points with ranks 2, 0 and 1 at x = 100, 200 and 300, and y 300, 200 and
+/// 100.
+fn with_bucket(mut layout: serde_json::Value, type_: SortKeyType, check: impl FnOnce(&SymbolBucket)) {
+    layout["icon-image"] = json!("marker");
+    layout["icon-allow-overlap"] = json!(true);
     if let Some(sort_key) = sort_key(type_) {
-        json["layout"][sort_key_name] = sort_key;
+        layout["symbol-sort-key"] = sort_key;
     }
-    let mut error = ConversionError::default();
-    let layer = convert_layer(super::registry().style(), &Convertible::from(&json), &mut error)
-        .unwrap_or_else(|| panic!("{}", error.message));
-    Arc::new(evaluated_layer(LayerStyle::recover(layer.style()).unwrap(), Default::default()))
-}
+    let json = json!({
+        "version": 8,
+        "sources": {"s": {"type": "vector", "tiles": ["local://{z}-{x}-{y}.mvt"]}},
+        "layers": [{"id": "symbol", "type": "symbol", "source": "s", "source-layer": "", "layout": layout}],
+    });
+    let mut style = Style::from_json(super::registry().style(), &json.to_string(), None).unwrap();
+    let marker = ImageImpl::new(
+        "marker".to_owned(),
+        PremultipliedImage::new(Size::new(16, 16)),
+        1.0,
+        false,
+        Vec::new(),
+        Vec::new(),
+        None,
+        None,
+        None,
+    );
+    style.apply(Edit::AddImage(Arc::new(marker.unwrap()))).unwrap();
 
-/// Lays out three features with ranks 2, 0, 1 at x = 100, 200, 300 and
-/// returns the layer's bucket.
-fn create_bucket<T: LayerType>(layer: &Arc<EvaluatedLayer<T>>, shape: Shape) -> T::Bucket {
-    let ranks = [2.0, 0.0, 1.0];
-    let features = ranks
-        .iter()
+    let features = [2.0, 0.0, 1.0]
+        .into_iter()
         .enumerate()
-        .map(|(i, &rank)| {
-            let x = ((i + 1) * 100) as i16;
-            let geometry = match shape {
-                Shape::Polygon => Geometry::Polygon(Polygon::new(
-                    LineString::from(vec![(x, 10), (x, 20), (x + 10, 20), (x, 10)]),
-                    vec![],
-                )),
-                Shape::LineString => Geometry::LineString(LineString::from(vec![(x, 10), (x, 20)])),
-                Shape::Point => Geometry::Point(Point::new(x, 300 - (i as i16) * 100)),
-            };
-            Feature {
-                geometry: Some(geometry),
-                properties: Arc::new(PropertyMap::from_iter([("rank".to_owned(), Value::Double(rank))])),
-                id: Identifier::Null,
-            }
+        .map(|(i, rank)| Feature {
+            geometry: Some(Geometry::Point(Point::new(((i + 1) * 100) as i16, 300 - (i as i16) * 100))),
+            properties: Arc::new(PropertyMap::from_iter([("rank".to_owned(), Value::Double(rank))])),
+            id: Identifier::Null,
         })
         .collect();
-    let data = mln_tile::TileData::Features(Arc::new(features));
-    let bucket_parameters = BucketParameters {
-        tile_id: OverscaledTileID::from_zxy(0, 0, 0),
-        mode: MapMode::Continuous,
-        pixel_ratio: 1.0,
-        global_state: None,
-        subdivision_granularity: SubdivisionGranularitySetting::none(),
-    };
-    let available_images = VecSet::from_iter(["marker".to_owned()]);
-    let mut layout = T::create_layout(
-        std::slice::from_ref(layer),
-        &mut LayoutParameters {
-            bucket_parameters: &bucket_parameters,
-            font_faces: None,
-            glyph_pbfs: true,
-            glyph_dependencies: &mut GlyphDependencies::default(),
-            image_dependencies: &mut ImageDependencies::default(),
-            available_images: &available_images,
-            unavailable_images: &UnavailableImages::new(),
-            filter_groups: &mut FilterGroups::default(),
-        },
-        SourceLayer::new(data.clone(), ""),
-    )
-    .unwrap()
-    .unwrap();
-
-    let marker = Arc::new(
-        ImageImpl::new(
-            "marker".to_owned(),
-            PremultipliedImage::new(Size::new(16, 16)),
-            1.0,
-            false,
-            Vec::new(),
-            Vec::new(),
-            None,
-            None,
-            None,
-        )
-        .unwrap(),
-    );
-    let positions = ImagePositions::from_iter([(
-        "marker".to_owned(),
-        ImagePosition::new(RectU16 { x: 0, y: 0, w: 18, h: 18 }, &marker),
-    )]);
-    let resolved = Resolved { icons: positions.clone(), patterns: positions, ..Resolved::default() };
-    let build =
-        BuildParams { first_load: true, show_collision_boxes: false, canonical: bucket_parameters.tile_id.canonical };
-    layout.create_bucket(Some(&resolved), &mut FeatureIndexBuilder::new(Some(data)), &build).unwrap().unwrap()
-}
-
-fn symbol_layer(type_: SortKeyType, z_order: Option<&str>) -> Arc<EvaluatedLayer<Symbol>> {
-    let mut json = json!({
-        "id": "symbol", "type": "symbol", "source": "source",
-        "layout": { "icon-image": "marker", "icon-allow-overlap": true }
-    });
-    if let Some(z_order) = z_order {
-        json["layout"]["symbol-z-order"] = json!(z_order);
-    }
-    layer(json, "symbol-sort-key", type_)
+    let data = TileData::Features(Arc::new(features));
+    let layout = TileLayout::new(super::registry(), &style, "s", |_| true, (0, 0, 0), &data, |_| None).unwrap();
+    let laid_out = layout.run(data).unwrap();
+    let center = LatLng::new(0.0, 0.0).unwrap();
+    let mut frame = PlacementFrame::<SymbolLayer>::new(&style, "s", &[&laid_out], center, 0.0, (512, 512)).unwrap();
+    frame.with_context(|cx| check(cx.buckets.get::<SymbolBucket>(&cx.layers[0].tiles[0].bucket).unwrap()));
 }
 
 #[test]
 fn symbol_order() {
     for type_ in SORT_KEY_TYPES {
-        let bucket = create_bucket(&symbol_layer(type_, None), Shape::Point);
+        with_bucket(json!({}), type_, |bucket| {
         let order: Vec<usize> = bucket.state.symbol_instances.iter().map(|symbol| symbol.data_feature_index).collect();
         assert_eq!(expected_order(type_), order, "{type_:?}");
         // An explicit constant key still disables viewport-Y sorting for symbol-z-order:auto.
@@ -173,16 +106,18 @@ fn symbol_order() {
             }
             SortKeyType::DataDriven => assert_eq!(bucket.sort_key_ranges.len(), 3),
         }
+        });
     }
 }
 
 #[test]
 fn symbol_viewport_y() {
     for type_ in SORT_KEY_TYPES {
-        let bucket = create_bucket(&symbol_layer(type_, Some("viewport-y")), Shape::Point);
+        with_bucket(json!({"symbol-z-order": "viewport-y"}), type_, |bucket| {
         assert!(bucket.sort_features_by_y, "{type_:?}");
         assert!(bucket.sort_key_ranges.is_empty(), "{type_:?}");
         let order: Vec<usize> = bucket.state.symbol_instances.iter().map(|symbol| symbol.data_feature_index).collect();
         assert_eq!(vec![0, 1, 2], order, "{type_:?}");
+        });
     }
 }

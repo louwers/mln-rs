@@ -6,8 +6,7 @@ use std::sync::Arc;
 
 use feature::{Feature, Identifier, PropertyMap, Value};
 use geo_types::{Geometry, LineString, Point, Polygon};
-use mln_render::bench::TileLayout;
-// slice: off use mln_render::bench::Codec;
+use mln_render::bench::{Codec, TileLayout};
 use mln_rs::builtin_registry;
 use mln_style::layer_type::SourceKind;
 use mln_style::{Edit, Style};
@@ -98,25 +97,25 @@ fn every_geometry_layer_type_lays_out() {
     assert_eq!(fills.unwrap().run(data).unwrap().buckets(), fill_layers);
 }
 
-// slice: off /// The buckets of a job behind the codec, the second time too, when the
-// slice: off /// worker has the style's values, are those of the job run directly, with
-// slice: off /// the patterns of the style's image.
-// slice: off #[test]
-// slice: off fn layouts_cross_as_they_were_laid_out() {
-// slice: off     let (style, data) = (style(), data());
-// slice: off     let layout = TileLayout::new(&builtin_registry(), &style, "s", |_| true, (0, 0, 0), &data, |_| None).unwrap();
-// slice: off     let direct = layout.run(data.clone()).unwrap();
-// slice: off     let without_images = style_without_images();
-// slice: off     let without_patterns =
-// slice: off         TileLayout::new(&builtin_registry(), &without_images, "s", |_| true, (0, 0, 0), &data, |_| None).unwrap();
-// slice: off     assert_ne!(
-// slice: off         without_patterns.run(data.clone()).unwrap().encoded().unwrap(),
-// slice: off         direct.encoded().unwrap(),
-// slice: off         "the layout draws the patterns of the style's image",
-// slice: off     );
-// slice: off     let mut codec = Codec::new(builtin_registry());
-// slice: off     for _ in 0..2 {
-// slice: off         let reply = codec.send(&layout, data.clone()).unwrap().run();
-// slice: off         assert_eq!(codec.reply(&reply).unwrap().encoded().unwrap(), direct.encoded().unwrap());
-// slice: off     }
-// slice: off }
+/// The buckets of a job behind the codec, the second time too, when the
+/// worker has the style's values, are those of the job run directly, with
+/// the patterns of the style's image.
+#[test]
+fn layouts_cross_as_they_were_laid_out() {
+    let (style, data) = (style(), data());
+    let layout = TileLayout::new(&builtin_registry(), &style, "s", |_| true, (0, 0, 0), &data, |_| None).unwrap();
+    let direct = layout.run(data.clone()).unwrap();
+    let without_images = style_without_images();
+    let without_patterns =
+        TileLayout::new(&builtin_registry(), &without_images, "s", |_| true, (0, 0, 0), &data, |_| None).unwrap();
+    assert_ne!(
+        without_patterns.run(data.clone()).unwrap().encoded().unwrap(),
+        direct.encoded().unwrap(),
+        "the layout draws the patterns of the style's image",
+    );
+    let mut codec = Codec::new(builtin_registry());
+    for _ in 0..2 {
+        let reply = codec.send(&layout, data.clone()).unwrap().run();
+        assert_eq!(codec.reply(&reply).unwrap().encoded().unwrap(), direct.encoded().unwrap());
+    }
+}

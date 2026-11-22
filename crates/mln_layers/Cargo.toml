@@ -63,6 +63,8 @@ mln_runtime = { package = "mln-rs-runtime", path = "../mln_runtime", default-fea
 mln_render = { workspace = true, features = ["bench", "testing"] }
 # The built-in registrations that the tests' styles parse against.
 mln_rs = { package = "mln-rs", path = "../..", default-features = false }
+# The source types of the unit tests' styles.
+mln_sources.workspace = true
 mln_webgpu = { package = "mln-rs-webgpu", path = "../mln_webgpu" }
 mlt-core.workspace = true
 parking_lot.workspace = true
@@ -92,9 +94,9 @@ path = "tests/style_layers.rs"
 name = "symbol_style"
 path = "tests/symbol_style.rs"
 
-# slice: off [[test]]
-# slice: off name = "symbols"
-# slice: off path = "tests/symbols.rs"
+[[test]]
+name = "symbols"
+path = "tests/symbols.rs"
 
 [lints]
 workspace = true

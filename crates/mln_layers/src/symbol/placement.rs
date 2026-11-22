@@ -128,6 +128,11 @@ pub(crate) struct LayerBuckets {
 }
 
 impl LayerBuckets {
+    /// The buckets of each of `cx`'s layers, bottom to top.
+    pub(crate) fn all(cx: &PlacementContext<'_, SymbolLayer>) -> Vec<LayerBuckets> {
+        cx.layers.iter().map(|layer| LayerBuckets::of(layer, &cx.buckets)).collect()
+    }
+
     /// The buckets of `layer`'s tiles, of `buckets`: those it leads, with
     /// their tiles' feature indexes, in order of sort key, and the others.
     fn of(layer: &PlacingLayer<'_, SymbolLayer>, buckets: &PlacementBuckets<'_>) -> LayerBuckets {
@@ -431,10 +436,10 @@ impl PlacementPass<SymbolLayer> for SymbolPlacement {
     /// first, their cross-tile ids, and takes the inputs of the frame's
     /// placement.
     fn prepare(&mut self, cx: &mut PlacementContext<'_, SymbolLayer>) -> Prepared {
-        let PlacementContext { layers, update_parameters, buckets } = cx;
+        self.layers = LayerBuckets::all(cx);
+        let PlacementContext { update_parameters, buckets, .. } = cx;
         let view = &update_parameters.view;
         let longitude = view.center(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
-        self.layers = layers.iter().map(|layer| LayerBuckets::of(layer, buckets)).collect();
         let mut prepared = Prepared::default();
         let mut removed = false;
         for layer in leaders(&self.layers).rev() {

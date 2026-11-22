@@ -12,9 +12,9 @@
 //! features turn on. [`PROGRAMS`] lists the programs.
 
 pub mod background;
-// slice: off #[cfg(feature = "bench")]
-// slice: off #[doc(hidden)]
-// slice: off pub mod bench;
+#[cfg(feature = "bench")]
+#[doc(hidden)]
+pub mod bench;
 pub mod circle;
 mod color_ramp;
 pub mod color_relief;

@@ -10,8 +10,8 @@ mod format_section_override_test;
 mod polygon_subdivision_test;
 // The programs' declarations and sources.
 mod programs_test;
-// Ports test/layout/sort_key.test.cpp's symbol cases.
-// slice: off mod sort_key_test;
+// The order of symbols with sort keys.
+mod sort_key_test;
 // The fill-extrusion parts of the subdivision tests.
 mod subdivision_test;
 
@@ -27,13 +27,14 @@ fn subdivide(
     mln_render::globe::subdivide_polygon(polygon, triangles, tile, granularity, outline)
 }
 
-/// The built-in expression functions and the layer types of this crate, as
-/// this build has them: the tests' layers must be of its types, not of
-/// those of the copy of this crate that the facade registers.
+/// The built-in expression functions and source types, and the layer types
+/// of this crate, as this build has them: the tests' layers must be of its
+/// types, not of those of the copy of this crate that the facade registers.
 pub(crate) fn registry() -> &'static std::sync::Arc<mln_render::Registry> {
     static REGISTRY: std::sync::LazyLock<std::sync::Arc<mln_render::Registry>> = std::sync::LazyLock::new(|| {
         let mut builder = mln_render::RegistryBuilder::new();
         mln_style::expression::functions::register_builtin_functions(builder.functions_mut()).unwrap();
+        mln_sources::register_source_types(&mut builder).unwrap();
         crate::register_layer_types(&mut builder).unwrap();
         builder.build()
     });

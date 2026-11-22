@@ -2853,6 +2853,7 @@ dependencies = [
  "mln-rs-polylabel",
  "mln-rs-render",
  "mln-rs-runtime",
+ "mln-rs-sources",
  "mln-rs-style",
  "mln-rs-style-types",
  "mln-rs-text",
