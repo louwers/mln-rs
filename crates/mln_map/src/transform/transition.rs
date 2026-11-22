@@ -72,8 +72,9 @@ pub(super) struct Transition {
     along: Along,
     anchor: Option<ScreenCoordinate>,
     anchor_lat_lng: LatLng,
-    /// The height in meters of the plane the anchor holds its location on
-    /// ([`Transform::anchor_height`]): 0, the flat map, without terrain.
+    /// The height in meters of the plane, or on the globe the sphere, the
+    /// anchor holds its location on ([`Transform::anchor_height`]): 0, the
+    /// flat map, without terrain.
     anchor_height: f64,
     /// Set for a momentum, which moves the camera relative to where it
     /// stands instead of through `frame`.
@@ -339,7 +340,7 @@ fn anchored_end(
     let current = state.camera_options(None);
     let mut camera = CameraOptions { center_altitude: Some(altitude), ..*camera };
     place(&mut state, &current, &mut camera);
-    if !sees_plane(state.view(), anchor, height) {
+    if state.view().is_globe() || !sees_plane(state.view(), anchor, height) {
         return state.view().center(WrapMode::Wrapped);
     }
     // The anchor had a location at the start, so it has one here.
@@ -479,15 +480,18 @@ impl Transform {
             Some((anchor, transition.anchor_lat_lng, transition.anchor_height, index))
         });
 
-        // On the globe the anchor is re-read every frame and the zoom around
-        // it is GL JS's blend of the exact solution and a damped heuristic;
-        // the exact solution alone jumps near the horizon. An anchor with no
-        // LatLng in a frame is logged, and the anchor's location at the
-        // start stands in.
+        // On the globe the anchor is re-read every frame, on the sphere at
+        // its height, and the zoom around it is GL JS's blend of the exact
+        // solution and a damped heuristic; the exact solution alone jumps
+        // near the horizon. An anchor with no LatLng in a frame is logged,
+        // and the anchor's location at the start stands in.
         let globe_zoom_around = match anchored {
-            Some((anchor, anchor_lat_lng, _, _)) if self.globe_on_screen() => {
-                let location =
-                    self.state.view().screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped).unwrap_or_else(|e| {
+            Some((anchor, anchor_lat_lng, height, _)) if self.globe_on_screen() => {
+                let location = self
+                    .state
+                    .view()
+                    .screen_coordinate_to_lat_lng_at(&anchor, height, WrapMode::Unwrapped)
+                    .unwrap_or_else(|e| {
                         Log::error(Event::General, &e.message);
                         anchor_lat_lng
                     });
@@ -507,6 +511,7 @@ impl Transform {
                         &mut self.state,
                         &anchor,
                         &location,
+                        height,
                         zoom_delta,
                         self.globe_free_bearing,
                     );

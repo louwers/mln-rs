@@ -3294,6 +3294,7 @@ fn drag_center_matches_gljs() {
             transform.state().view(),
             &sc(point.0, 480.0 - point.1),
             &sc(pan_delta.0, -pan_delta.1),
+            0.0,
         );
         assert_near(expected.0, center.latitude(), 1e-7);
         assert_near(
@@ -3580,6 +3581,7 @@ fn free_bearing_drag_matches_gljs() {
             transform.state().view(),
             &sc(anchor.0, 480.0 - anchor.1),
             &sc(pan_delta.0, -pan_delta.1),
+            0.0,
         );
         assert_near(expected.0, drag.center.latitude(), 1e-6);
         assert_near(

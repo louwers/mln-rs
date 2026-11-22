@@ -209,6 +209,8 @@ pub struct Transform {
 #[derive(Clone, Copy, Debug)]
 struct GlobeDragHold {
     location: LatLng,
+    /// The height in meters of the sphere `location` is on.
+    height: f64,
     cursor: ScreenCoordinate,
     camera: CameraOptions,
     size: Size,
@@ -350,12 +352,12 @@ impl Transform {
     }
 
     /// Moves the map by `offset`. A drag on the globe turns the planet so
-    /// that the location under `anchor` follows the cursor. On a Mercator
-    /// view the ground under the cursor before the move follows it, on the
-    /// plane at that ground's height: sea level on the flat map, the drawn
-    /// ground over terrain ([`Self::set_terrain`]); without an anchor, or
-    /// with one that grabs no ground, the map moves on the plane at the
-    /// center's altitude. With the bearing
+    /// that the location under `anchor` follows the cursor. The ground under
+    /// the cursor before the move follows it, on the plane at that ground's
+    /// height, or on the globe the sphere: sea level on the flat map, the
+    /// drawn ground over terrain ([`Self::set_terrain`]); without an anchor,
+    /// or with one that grabs no ground, the map moves on the plane or the
+    /// sphere at the center's altitude. With the bearing
     /// held, steps that follow one another, each starting at the `anchor` of
     /// the one before with the camera as it left it, hold the location the
     /// first of them grabbed, wherever
@@ -467,8 +469,29 @@ impl Transform {
             // grabbed. A step the exact center isn't for doesn't hold: the
             // step after it grabs anew, so the drag goes from one way to the
             // other without a jump.
+            //
+            // The location is on the sphere at the height of the ground the
+            // drag grabbed, or else at the center's altitude, as the planes
+            // of a drag on Mercator are.
+            let from = anchor.map(|anchor| ScreenCoordinate::new(anchor.x - offset.x, anchor.y - offset.y));
+            let held = self.globe_drag_hold.take().filter(|held| {
+                from.is_some_and(|from| (held.cursor.x - from.x).hypot(held.cursor.y - from.y) < 1e-3)
+                    && !self.globe_free_bearing
+                    && held.size == size
+                    && held.camera == self.camera_options(None)
+            });
+            let gesture = self.source != CameraChangeSource::Command;
+            let height = match (held, anchor.zip(from)) {
+                (Some(held), _) => held.height,
+                (None, Some((anchor, from))) => self.anchor_height(&from, &anchor, gesture),
+                (None, None) => self.view().center_altitude(),
+            };
             let on_globe = |state: &TransformState, point: &ScreenCoordinate| {
-                VerticalPerspectiveProjection::screen_coordinate_hits_globe(state.view(), &flipped(state, point))
+                VerticalPerspectiveProjection::screen_coordinate_hits_globe(
+                    state.view(),
+                    &flipped(state, point),
+                    height,
+                )
             };
             let grab = match anchor {
                 Some(anchor) if on_globe(&self.state, &anchor) => anchor,
@@ -476,30 +499,23 @@ impl Transform {
             };
             let pan_delta = ScreenCoordinate::new(offset.x, -offset.y);
             let mut camera = CameraOptions::default();
-            let held = self.globe_drag_hold.take();
-            let hold = match anchor {
-                Some(anchor) if !self.globe_free_bearing && on_globe(&self.state, &anchor) => {
-                    let from = ScreenCoordinate::new(anchor.x - offset.x, anchor.y - offset.y);
+            let hold = match anchor.zip(from) {
+                Some((anchor, from)) if !self.globe_free_bearing && on_globe(&self.state, &anchor) => {
                     let location = match held {
-                        Some(held)
-                            if (held.cursor.x - from.x).hypot(held.cursor.y - from.y) < 1e-3
-                                && held.size == size
-                                && held.camera == self.camera_options(None) =>
-                        {
-                            Some(held.location)
-                        }
-                        _ if on_globe(&self.state, &from) => self
+                        Some(held) => Some(held.location),
+                        None if on_globe(&self.state, &from) => self
                             .state
                             .view()
-                            .screen_coordinate_to_lat_lng(&flipped(&self.state, &from), WrapMode::Unwrapped)
+                            .screen_coordinate_to_lat_lng_at(&flipped(&self.state, &from), height, WrapMode::Unwrapped)
                             .ok(),
-                        _ => None,
+                        None => None,
                     };
                     location.and_then(|location| {
                         VerticalPerspectiveProjection::drag_center_holding(
                             self.state.view(),
                             &location,
                             &flipped(&self.state, &anchor),
+                            height,
                         )
                         .map(|center| (location, anchor, center))
                     })
@@ -513,11 +529,17 @@ impl Transform {
                     self.state.view(),
                     &flipped(&self.state, &grab),
                     &pan_delta,
+                    height,
                 );
                 camera = CameraOptions { bearing: Some(drag.bearing), ..camera };
                 drag.center
             } else {
-                VerticalPerspectiveProjection::drag_center(self.state.view(), &flipped(&self.state, &grab), &pan_delta)
+                VerticalPerspectiveProjection::drag_center(
+                    self.state.view(),
+                    &flipped(&self.state, &grab),
+                    &pan_delta,
+                    height,
+                )
             };
             center = self.state.constrained_center(&center, self.view().zoom());
             let zoom = self.view().zoom()
@@ -528,6 +550,7 @@ impl Transform {
             self.ease_to(&CameraOptions { center: Some(center), zoom: Some(zoom), ..camera }, animation);
             self.globe_drag_hold = hold.map(|(location, cursor, _)| GlobeDragHold {
                 location,
+                height,
                 cursor,
                 camera: self.camera_options(None),
                 size,

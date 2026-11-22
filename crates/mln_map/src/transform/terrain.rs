@@ -54,7 +54,8 @@
 //! move onto the ground work on the sphere ([`View::ground_under`],
 //! [`TransformState::recenter_on`]). There the moves around an anchor, the
 //! globe's drags and zooms around a point among them, hold the location
-//! under it on the sea-level sphere.
+//! under it on the sphere at the height of the ground it grabbed, as on
+//! Mercator they hold it on the plane at that height.
 //!
 //! The terrain moves a camera at rest, as ground loads or changes under it,
 //! the clamp turns on or the terrain goes, without camera events, as in GL
@@ -68,7 +69,7 @@ use std::sync::Arc;
 use glam::{DVec2, DVec3};
 #[cfg(doc)]
 use mln_map_types::TransformState;
-use mln_map_types::{CameraOptions, Elevation, View};
+use mln_map_types::{CameraOptions, Elevation, VerticalPerspectiveProjection, View};
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
@@ -392,10 +393,12 @@ impl Transform {
     /// so that the map moves as far for each pixel throughout; for a
     /// command, the height of the ground its own line of sight meets.
     ///
+    /// On the globe the plane is the sphere at that height.
+    ///
     /// `None`, for the plane at the center's altitude, where the pointer
     /// grabbed no drawn ground, before the renderer drew any, for a pivot
-    /// (`grabbed` is `anchor`) at the view's center, on the globe, and where
-    /// the plane can't hold the anchor or the grabbed point ([`sees_plane`]).
+    /// (`grabbed` is `anchor`) at the view's center, and where the plane
+    /// can't hold the anchor or the grabbed point ([`sees_plane`]).
     pub(super) fn anchor_plane(
         &mut self,
         grabbed: &ScreenCoordinate,
@@ -428,19 +431,15 @@ impl Transform {
         (!pivot && sees(anchor) && sees(grabbed)).then_some(height)
     }
 
-    /// The height of the plane on which a move around `anchor` holds the
-    /// location under it ([`Self::anchor_plane`] for `grabbed`), or else
-    /// the plane at the center's altitude. On the globe it is sea level, the
-    /// sphere its zooms around a point solve on.
+    /// The height of the plane, or on the globe the sphere, on which a move
+    /// around `anchor` holds the location under it ([`Self::anchor_plane`]
+    /// for `grabbed`), or else the center's altitude.
     pub(super) fn anchor_height(
         &mut self,
         grabbed: &ScreenCoordinate,
         anchor: &ScreenCoordinate,
         gesture: bool,
     ) -> f64 {
-        if self.view().is_globe() {
-            return 0.0;
-        }
         self.anchor_plane(grabbed, anchor, gesture).unwrap_or(self.view().center_altitude())
     }
 
@@ -481,12 +480,18 @@ impl Transform {
 /// of the eye, before the far plane, where the view draws the ground, and
 /// the plane stands less than nine tenths of the way up from the center to
 /// the eye, where the line meets it at a depth deep enough to solve on. It
-/// asks the line itself, which a roll turns away from the screen's rows.
+/// asks the line itself, which a roll turns away from the screen's rows. On
+/// the globe the plane is the sphere at that height, which the line must
+/// meet in front of the eye.
 pub(super) fn sees_plane(view: &View, point: &ScreenCoordinate, height: f64) -> bool {
-    let Some((near, far)) = view.line_of_sight(point) else { return false };
     let altitude = view.center_altitude();
     let eye = view.eye_position().z;
-    far.z < near.z && far.z <= height && height < eye && height - altitude < MAX_ANCHOR_RISE * (eye - altitude)
+    let below_eye = height < eye && height - altitude < MAX_ANCHOR_RISE * (eye - altitude);
+    if view.is_globe() {
+        return below_eye && VerticalPerspectiveProjection::screen_coordinate_hits_globe(view, point, height);
+    }
+    let Some((near, far)) = view.line_of_sight(point) else { return false };
+    far.z < near.z && far.z <= height && below_eye
 }
 
 /// The location under `point` of `view`, measured from the bottom edge (y

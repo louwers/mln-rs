@@ -560,18 +560,21 @@ impl Transform {
 
     /// One pan step on the globe, as a drag around the view center
     /// ([`Self::move_by_with_anchor`] without an anchor) makes it: the
-    /// planet turns, the bearing too when it is free, and the zoom keeps the
-    /// planet's size as the latitude changes.
+    /// planet turns, on the sphere at the center's altitude, the bearing too
+    /// when it is free, and the zoom keeps the planet's size as the latitude
+    /// changes.
     fn step_globe_pan(&mut self, step: &ScreenCoordinate) {
-        let size = self.state.view().size();
-        let view_center = self.state.view().padding().center_in(size);
+        let view = self.state.view();
+        let size = view.size();
+        let view_center = view.padding().center_in(size);
         let grab = ScreenCoordinate::new(view_center.x, f64::from(size.height) - view_center.y);
         let pan_delta = ScreenCoordinate::new(step.x, -step.y);
+        let height = view.center_altitude();
         let (center, bearing) = if self.globe_free_bearing {
-            let drag = VerticalPerspectiveProjection::drag_camera(self.state.view(), &grab, &pan_delta);
+            let drag = VerticalPerspectiveProjection::drag_camera(view, &grab, &pan_delta, height);
             (drag.center, Some(drag.bearing))
         } else {
-            (VerticalPerspectiveProjection::drag_center(self.state.view(), &grab, &pan_delta), None)
+            (VerticalPerspectiveProjection::drag_center(view, &grab, &pan_delta, height), None)
         };
         let center = self.state.constrained_center(&center, self.view().zoom());
         let zoom = self.view().zoom()
@@ -600,12 +603,13 @@ impl Transform {
         match anchor {
             // On the globe the zoom around the anchor is the globe's, as in
             // apply_transitions.
-            Some((point, lat_lng, _)) if self.globe_on_screen() && self.state.view().zoom() != before => {
+            Some((point, lat_lng, height)) if self.globe_on_screen() && self.state.view().zoom() != before => {
                 let zoom_delta = self.state.view().zoom() - before;
                 VerticalPerspectiveProjection::zoom_around_point(
                     &mut self.state,
                     &point,
                     &lat_lng,
+                    height,
                     zoom_delta,
                     self.globe_free_bearing,
                 );

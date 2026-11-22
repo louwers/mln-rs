@@ -1180,6 +1180,7 @@ impl SourceTiles {
             VerticalPerspectiveProjection::screen_coordinate_hits_globe(
                 view,
                 &mln_util::geo::ScreenCoordinate::new(p.x, height - p.y),
+                0.0,
             )
         };
 
