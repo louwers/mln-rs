@@ -1,7 +1,8 @@
 // The comparison with MapLibre GL JS: a GL JS map of the same style over the
 // page's canvas, clipped to the right of a divider, so that each side shows
-// one map and takes the input on its own side. The page imports this module
-// the first time a comparison opens, so GL JS loads only then.
+// one map and takes the input on its own side. GL JS's map has the terrain
+// and the projection that the page's map adds to the style. The page imports
+// this module the first time a comparison opens, so GL JS loads only then.
 //
 // The map that last took input leads, and the other jumps to its camera. A
 // follower's camera changes don't move the leader, so the maps don't echo
@@ -12,12 +13,20 @@
 // stylesheet makes its container `position: relative`, which would undo the
 // layer's fixed inset and leave the map no height.
 
-import { Map as GlMap, getVersion, setWorkerUrl } from "maplibre-gl";
+import {
+  Map as GlMap,
+  getVersion,
+  type LayerSpecification,
+  type ProjectionSpecification,
+  setWorkerUrl,
+  type StyleSpecification,
+} from "maplibre-gl";
 
 import "maplibre-gl/dist/maplibre-gl.css";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 
-import type { Camera } from "./protocol.ts";
+import type { Camera, ProjectionType } from "./protocol.ts";
+import type { Style, Terrain } from "./styles.ts";
 
 // The bundle moves GL JS away from its worker, so the page says where it is.
 setWorkerUrl(workerUrl);
@@ -27,9 +36,44 @@ export interface Comparison {
   cameraChanged(camera: Camera): void;
   /** Makes the page's map lead without input on its canvas: its zoom buttons and compass. */
   lead(): void;
-  setStyle(url: string): void;
+  setStyle(style: Style): void;
+  /** Draws with `projection`, or for null with the style's own. */
+  setProjection(projection: ProjectionType | null): void;
   /** Removes GL JS's map and the divider. */
   remove(): void;
+}
+
+/**
+ * `style` with `terrain` added as the page's map adds it (styles.ts's
+ * `Terrain`, WebMap's `add_terrain`), drawn with `projection` unless that is
+ * null.
+ */
+function withTerrain(
+  style: StyleSpecification,
+  terrain: Terrain | undefined,
+  projection: ProjectionSpecification | undefined,
+): StyleSpecification {
+  const next = { ...style };
+  if (projection) next.projection = projection;
+  if (!terrain || "terrain" in style.sources) return next;
+  next.sources = { ...style.sources, terrain: terrain.source };
+  const hillshade: LayerSpecification = {
+    id: "terrain-hillshade",
+    type: "hillshade",
+    source: "terrain",
+    paint: terrain.hillshade,
+  };
+  const before = style.layers.findIndex(
+    (layer) => layer.id === terrain.hillshadeBefore,
+  );
+  next.layers = style.layers.toSpliced(
+    before < 0 ? style.layers.length : before,
+    0,
+    hillshade,
+  );
+  next.terrain = { source: "terrain", exaggeration: terrain.exaggeration };
+  next.sky ??= terrain.sky;
+  return next;
 }
 
 // Where the divider sits, as a fraction of the page's width. It stays when the
@@ -37,20 +81,22 @@ export interface Comparison {
 let split = 0.5;
 
 /**
- * Opens a comparison over `canvas` (the page's map) with `style`, at
- * `camera`. `follow(camera)` moves the page's map to GL JS's camera while
- * GL JS leads; `stop()` stops the page's map's own motion when GL JS takes
- * the lead.
+ * Opens a comparison over `canvas` (the page's map) with `style` drawn with
+ * `projection`, at `camera`. `follow(camera)` moves the page's map to GL JS's
+ * camera while GL JS leads; `stop()` stops the page's map's own motion when
+ * GL JS takes the lead.
  */
 export function compare(
   canvas: HTMLCanvasElement,
   {
     style,
+    projection,
     camera,
     follow,
     stop,
   }: {
-    style: string;
+    style: Style;
+    projection: ProjectionType | null;
     camera: Camera;
     follow: (camera: Camera) => void;
     stop: () => void;
@@ -77,14 +123,27 @@ export function compare(
   const [lat, lon, zoom, bearing, pitch] = camera;
   const map = new GlMap({
     container,
-    style,
     center: [lon, lat],
     zoom,
     bearing,
     pitch,
+    // The page's map's (map.rs's MAX_PITCH).
+    maxPitch: 85,
     // The page shows the style's attribution for both maps.
     attributionControl: false,
   });
+  // The style and projection of the page's map, which a change of either
+  // loads again: GL JS diffs the new style against the one it draws.
+  const show = () =>
+    map.setStyle(style.url, {
+      transformStyle: (_, next) =>
+        withTerrain(
+          next,
+          style.terrain,
+          projection === null ? undefined : { type: projection },
+        ),
+    });
+  show();
   map.on("error", ({ error }) => console.warn("MapLibre GL JS:", error));
 
   let leader: "mln" | "gl" = "mln";
@@ -149,8 +208,13 @@ export function compare(
     lead() {
       lead("mln");
     },
-    setStyle(url) {
-      map.setStyle(url);
+    setStyle(next) {
+      style = next;
+      show();
+    },
+    setProjection(next) {
+      projection = next;
+      show();
     },
     remove() {
       listening.abort();

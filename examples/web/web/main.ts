@@ -697,7 +697,7 @@ function pickStyle(next: Style) {
   showStyle();
   showAttribution([]);
   toMap({ type: "style", url: next.url, terrain: next.terrain });
-  comparison?.setStyle(next.url);
+  comparison?.setStyle(next);
   setParam("style", next.key);
 }
 // Sets (or, for null, removes) a URL parameter, keeping the camera's hash.
@@ -786,6 +786,8 @@ function showAttribution(entries: string[]) {
 // The comparison with GL JS (compare.ts), which loads when it first opens.
 let comparison: Comparison | null = null;
 let comparing = false;
+// The projection in place of the style's (setProjection), or null.
+let currentProjection: ProjectionType | null = null;
 const compareToggle = element("compare-toggle", HTMLInputElement);
 async function setComparing(on: boolean) {
   if (on === comparing) return;
@@ -799,9 +801,11 @@ async function setComparing(on: boolean) {
   }
   try {
     const { compare } = await import("./compare.ts");
-    const style = current.url;
+    const style = current;
+    const projection = currentProjection;
     const opened = compare(canvas, {
       style,
+      projection,
       camera: latestCamera,
       follow: (next) => toMap({ type: "follow", camera: next }),
       stop: () => toMap({ type: "stop" }),
@@ -812,7 +816,9 @@ async function setComparing(on: boolean) {
       return;
     }
     comparison = opened;
-    if (current.url !== style) comparison.setStyle(current.url);
+    if (current !== style) comparison.setStyle(current);
+    if (currentProjection !== projection)
+      comparison.setProjection(currentProjection);
   } catch (error) {
     console.error("the comparison failed to open:", error);
     if (comparing) setComparing(false);
@@ -848,7 +854,9 @@ function setProjection(key: string) {
   const projection = PROJECTIONS[key] ?? null;
   projectionSelect.value = projection === null ? "style" : key;
   setParam("projection", projection === null ? null : key);
+  currentProjection = projection;
   toMap({ type: "projection", projection });
+  comparison?.setProjection(projection);
 }
 projectionSelect.addEventListener("change", () =>
   setProjection(projectionSelect.value),

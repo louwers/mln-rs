@@ -652,28 +652,36 @@ struct Terrain {
     /// The `raster-dem` source's JSON.
     source: String,
     exaggeration: f64,
+    /// The hillshade layer's paint, as JSON.
+    hillshade: String,
     /// The layer that the hillshade goes under, if the style has it.
     hillshade_before: String,
+    /// The sky for a style without one, as JSON.
+    sky: String,
 }
 
 impl Terrain {
     fn parse(json: &str) -> Result<Terrain, String> {
         let value: serde_json::Value = serde_json::from_str(json).map_err(|e| format!("terrain: {e}"))?;
-        let source = value.get("source").filter(|source| source.is_object()).ok_or("terrain: no source")?;
+        let object = |key: &str| {
+            value
+                .get(key)
+                .filter(|value| value.is_object())
+                .map(ToString::to_string)
+                .ok_or(format!("terrain: no {key}"))
+        };
         Ok(Terrain {
-            source: source.to_string(),
+            source: object("source")?,
             exaggeration: value["exaggeration"].as_f64().ok_or("terrain: no exaggeration")?,
+            hillshade: object("hillshade")?,
             hillshade_before: value["hillshadeBefore"].as_str().unwrap_or_default().to_owned(),
+            sky: object("sky")?,
         })
     }
 }
 
 /// The ID of the source that `add_terrain` adds.
 const TERRAIN_SOURCE: &str = "terrain";
-
-/// The sky that `add_terrain` gives a style without one: the style spec's
-/// default colours, whose white fog greys the far ground.
-const SKY: &str = r##"{"sky-color":"#88c6fc","horizon-color":"#ffffff","fog-color":"#ffffff","fog-ground-blend":0.5}"##;
 
 /// Adds `terrain` to the style that `map` loaded, unless it has the source
 /// already: the source, a hillshade of it, the style's `terrain` and a sky.
@@ -685,14 +693,15 @@ fn add_terrain(map: &mut mln_map::Map, terrain: &Terrain) -> Result<(), Error> {
     map.add_source_json(TERRAIN_SOURCE, &terrain.source)?;
     map.edit_loaded_style(|style| {
         let hillshade = format!(
-            r##"{{"id":"terrain-hillshade","type":"hillshade","source":"{TERRAIN_SOURCE}","paint":{{"hillshade-exaggeration":0.3,"hillshade-shadow-color":"#473b24"}}}}"##
+            r#"{{"id":"terrain-hillshade","type":"hillshade","source":"{TERRAIN_SOURCE}","paint":{}}}"#,
+            terrain.hillshade
         );
         let before = Some(terrain.hillshade_before.as_str()).filter(|id| style.get_layer(id).is_some());
         style.add_layer_json(&hillshade, before)?;
         let root = format!(r#"{{"source":"{TERRAIN_SOURCE}","exaggeration":{}}}"#, terrain.exaggeration);
         style.set_root_property_json("terrain", &root)?;
         if style.get_sky().is_none() {
-            style.set_root_property_json("sky", SKY)?;
+            style.set_root_property_json("sky", &terrain.sky)?;
         }
         Ok(())
     })

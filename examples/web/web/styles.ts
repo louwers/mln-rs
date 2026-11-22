@@ -4,17 +4,26 @@
 // imagery in raster tiles, and Mapterhorn's terrain under one of them. `dark`
 // turns the page's controls dark.
 
+import type {
+  HillshadeLayerSpecification,
+  RasterDEMSourceSpecification,
+  SkySpecification,
+} from "maplibre-gl";
+
 /**
  * 3D terrain that the map adds to a style that has none once it loads
- * (WebMap::set_style_url): the `raster-dem` source, the style's `terrain` on
- * it at `exaggeration`, a hillshade of it under the layer `hillshadeBefore`
- * if the style has it, and a `sky` where the style has none, so that fog
- * shows at a high pitch.
+ * (WebMap::set_style_url), as does GL JS's map in the comparison
+ * (compare.ts): the `raster-dem` source, the style's `terrain` on it at
+ * `exaggeration`, a hillshade of it with the paint `hillshade` under the
+ * layer `hillshadeBefore` if the style has it, and `sky` where the style has
+ * none, so that fog shows at a high pitch.
  */
 export interface Terrain {
-  source: Record<string, unknown>;
+  source: RasterDEMSourceSpecification;
   exaggeration: number;
+  hillshade: HillshadeLayerSpecification["paint"];
   hillshadeBefore: string;
+  sky: SkySpecification;
 }
 
 /** A style the page can show; `key` is null for one from a URL. */
@@ -42,7 +51,18 @@ const MAPTERHORN: Terrain = {
     url: "https://tiles.mapterhorn.com/tilejson.json",
   },
   exaggeration: 1.3,
+  hillshade: {
+    "hillshade-exaggeration": 0.3,
+    "hillshade-shadow-color": "#473b24",
+  },
   hillshadeBefore: "building",
+  // The style spec's default colors, whose white fog greys the far ground.
+  sky: {
+    "sky-color": "#88c6fc",
+    "horizon-color": "#ffffff",
+    "fog-color": "#ffffff",
+    "fog-ground-blend": 0.5,
+  },
 };
 
 export const STYLES: Style[] = [
