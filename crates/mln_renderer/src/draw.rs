@@ -234,7 +234,7 @@ impl DrawObjects {
     /// buffers and textures, where they changed since the last upload.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if let Err(error) = self.upload_in(gpu, context) {
-            Log::error(Event::Render, format!("Uploading a draw of {} failed: {error}", self.shader.program().name));
+            Log::error(Event::Render, format!("Uploading {} failed: {error}", self.shader.program().name));
         }
     }
 
@@ -322,7 +322,7 @@ impl DrawObjects {
         global_index: u32,
     ) {
         if let Err(error) = self.draw_in(gpu, parameters, frame, depth_mode, stencil_mode, global_index) {
-            Log::warning(Event::Render, format!("Drawing a draw of {} failed: {error}", self.shader.program().name));
+            Log::warning(Event::Render, format!("Drawing {} failed: {error}", self.shader.program().name));
         }
     }
 
@@ -725,7 +725,11 @@ fn vertex_slots(
     if slots.len() > MAX_VERTEX_BUFFERS {
         Log::warning(
             Event::Render,
-            format!("{} reads {} vertex buffers, past the {MAX_VERTEX_BUFFERS} a draw may", program.name, slots.len()),
+            format!(
+                "{} uses {} vertex buffers, exceeding the limit of {MAX_VERTEX_BUFFERS}",
+                program.name,
+                slots.len()
+            ),
         );
         slots.truncate(MAX_VERTEX_BUFFERS);
     }

@@ -1658,7 +1658,6 @@ impl Drop for RenderOrchestrator {
         for host in std::mem::take(&mut self.ended_hosts) {
             host.context_lost();
         }
-        self.tile_store.log_stats();
         // The render sources and their tiles go before the wait, since
         // their data drops on the thread pool.
         self.render_sources.clear();

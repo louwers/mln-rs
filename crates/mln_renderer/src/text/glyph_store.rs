@@ -673,12 +673,12 @@ impl GlyphStore {
             let range_name = if range.type_ == GlyphIDType::FontPBF {
                 format!("{}-{}", range.first, range.second)
             } else {
-                format!("{}(font file)", range.type_.id())
+                format!("{} (font file)", range.type_.id())
             };
             Log::error(
                 Event::Style,
                 format!(
-                    "Failed to load glyph range {range_name} for font stack {}:( {error})",
+                    "Failed to load glyph range {range_name} for font stack {}: {error}",
                     mln_util::font_stack::font_stack_to_string(font_stack)
                 ),
             );

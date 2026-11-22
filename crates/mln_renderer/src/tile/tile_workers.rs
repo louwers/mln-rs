@@ -12,7 +12,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use mln_util::hash::HashMap;
-use mln_util::logging::{Event, EventSeverity, Log};
+use mln_util::logging::{Event, Log};
 use mln_util::pool::TaskGroup;
 
 use crate::tile::inbox::{InboxSender, TileEvent};
@@ -284,7 +284,7 @@ impl Jobs {
         self.workers.submit(lane, run, inbox);
     }
 
-    /// Logs what the jobs did, at debug level.
+    /// Logs what the jobs did, for `dump_debug_logs`.
     pub(crate) fn log_stats(&self) {
         let JobStats { submitted, received, needs_deps, needs_data, discover, build } = self.stats;
         if submitted == 0 {
@@ -294,19 +294,17 @@ impl Jobs {
         let share = |part: u64, whole: u64| if whole == 0 { 0.0 } else { part as f64 * 100.0 / whole as f64 };
         let layout = discover + build;
         let discover_share = if layout.is_zero() { 0.0 } else { discover.as_secs_f64() * 100.0 / layout.as_secs_f64() };
-        Log::record(
-            EventSeverity::Debug,
-            Event::Timing,
-            -1,
-            &format!(
-                "tile jobs: {submitted} submitted, {received} replied, {:.1}% NeedsDeps, {:.1}% NeedsData, \
-                 discovery {discover_share:.1}% of {:.1} ms layout, {} B sent and {} B received per job",
-                share(needs_deps, received),
-                share(needs_data, received),
-                layout.as_secs_f64() * 1000.0,
-                sent / submitted,
-                got / received.max(1),
-            ),
+        let mut line = format!(
+            "tile jobs: {submitted} submitted, {received} replied, {:.1}% NeedsDeps, {:.1}% NeedsData, \
+             discovery {discover_share:.1}% of {:.1} ms layout",
+            share(needs_deps, received),
+            share(needs_data, received),
+            layout.as_secs_f64() * 1000.0,
         );
+        if sent > 0 || got > 0 {
+            use std::fmt::Write as _;
+            let _ = write!(line, ", {} B sent and {} B received per job", sent / submitted, got / received.max(1));
+        }
+        Log::info(Event::Timing, line);
     }
 }

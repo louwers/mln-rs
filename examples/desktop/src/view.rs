@@ -30,11 +30,9 @@
 // For checking frames without screenshots: `--readback <file.png>` writes
 // the map once it is idle (or at exit), as an offscreen session on the
 // window's device renders it, without the controls; `--quit-after <seconds>`
-// closes the window; the style report prints once the style's layers and the
-// sources that the map didn't load.
+// closes the window.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -109,6 +107,10 @@ pub(crate) struct StyleInfo {
     attributions: Vec<String>,
     /// Whether the style's projection is the globe.
     globe: bool,
+    /// How many layers the style has.
+    layers: usize,
+    /// How many sources the style has.
+    sources: usize,
 }
 
 impl StyleInfo {
@@ -124,7 +126,13 @@ impl StyleInfo {
         let globe = projection
             .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
             .is_some_and(|projection| projection["type"] == "globe");
-        StyleInfo { name: style.get_name().to_owned(), attributions, globe }
+        StyleInfo {
+            name: style.get_name().to_owned(),
+            attributions,
+            globe,
+            layers: style.get_layers().len(),
+            sources: style.get_sources().len(),
+        }
     }
 }
 
@@ -154,7 +162,9 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
             response.error = Some(Box::new(ResourceError::new(Reason::Connection, "The application is offline")));
             let _ = request.respond(response);
         }));
-        Log::warning(Event::Setup, "Application is offline.");
+        if !settings.online {
+            Log::warning(Event::Setup, "Application is offline.");
+        }
     }
     let events = Arc::clone(&inbox);
     log_failure(runtime.set_event_handler(move |batch| {
@@ -196,7 +206,6 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
     let paint = Rc::new(RefCell::new(Paint::default()));
     let window = WindowSession::attach(args.backend, None, &map, &surfaces, map_size, Rc::clone(&paint), &inbox)
         .map_err(|e| e.message)?;
-    Log::info(Event::Render, format!("Rendering with {}", window.adapter(&paint.borrow())));
 
     let style_url = match &args.style {
         Some(style) if !style.contains("://") => format!("file://{style}"),
@@ -261,7 +270,6 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
         gesture_test: args.gesture_test.then_some(GestureTest { step: 0, next_at: None }),
         readback_path: args.readback.as_ref().map(PathBuf::from),
         quit_at: args.quit_after.map(|s| Instant::now() + Duration::from_secs_f64(s)),
-        style_reported: false,
     };
     if let Some(benchmark) = &view.benchmark {
         log_failure(view.map.set_style_json(benchmark.style()));
@@ -420,7 +428,6 @@ struct View {
     gesture_test: Option<GestureTest>,
     readback_path: Option<PathBuf>,
     quit_at: Option<Instant>,
-    style_reported: bool,
 }
 
 impl View {
@@ -443,18 +450,17 @@ impl View {
         let name = if style.name.is_empty() { style.url.clone() } else { style.name.clone() };
         let _ = self.proxy.send_event(UserEvent::SetTitle(format!("mln-rs: {name}")));
         self.style = style;
-        self.style_reported = false;
         self.style_loaded = false;
     }
 
     /// Reads what the controls show of the map's style, once the commands
     /// sent before have run.
-    fn read_style(&self) {
+    fn read_style(&self, loaded: bool) {
         let inbox = Arc::clone(&self.inbox);
         match self.map.with_core(StyleInfo::read) {
             Ok(read) => read.on_complete(move |info| {
                 if let Ok(info) = info {
-                    inbox.send(Message::Style(info));
+                    inbox.send(Message::Style { info, loaded });
                 }
             }),
             Err(e) => Log::warning(Event::General, e.message),
@@ -558,7 +564,7 @@ impl View {
     /// When a frame is due without input: the controls' repaint, the gesture
     /// test's next step, or the quit timer.
     fn next_deadline(&self) -> Option<Instant> {
-        let test = self.gesture_test.as_ref().and_then(|t| t.next_at.or(self.style_reported.then_some(self.start)));
+        let test = self.gesture_test.as_ref().and_then(|t| t.next_at.or(self.style_loaded.then_some(self.start)));
         [self.ui_repaint_at, test, self.quit_at, self.gestures_deadline].into_iter().flatten().min()
     }
 
@@ -610,7 +616,7 @@ impl View {
                 self.dirty = false;
             }
             Err(e) => {
-                Log::error(Event::Render, format!("The render session takes no frames: {e}"));
+                Log::error(Event::Render, format!("Failed to request a frame: {e}"));
                 self.quit = true;
             }
         }
@@ -639,12 +645,15 @@ impl View {
             Message::Close => self.quit = true,
             Message::Map(MapEvent::StyleLoaded) => {
                 self.style_loaded = true;
-                self.read_style();
+                self.read_style(true);
             }
-            Message::Map(MapEvent::SourceChanged { .. }) => self.read_style(),
+            Message::Map(MapEvent::SourceChanged { .. }) => self.read_style(false),
             Message::Map(MapEvent::Idle) => self.idle = true,
             Message::Map(_) => {}
-            Message::Style(info) => {
+            Message::Style { info, loaded } => {
+                if loaded {
+                    self.log_loaded_style(&info);
+                }
                 self.style_info = info;
                 self.ui_repaint_at = Some(Instant::now());
             }
@@ -827,7 +836,7 @@ impl View {
             Action::SetGlobe(globe) => {
                 let projection = if globe { r#"{"type":"globe"}"# } else { r#"{"type":"mercator"}"# };
                 log_failure(self.map.set_style_root_property("projection", projection));
-                self.read_style();
+                self.read_style(false);
             }
             Action::SetFreeBearing(free_bearing) => log_failure(self.map.set_globe_free_bearing_enabled(free_bearing)),
             Action::ResetCache => self.reset_cache(),
@@ -879,7 +888,6 @@ impl View {
             paint.resend_textures(&self.ui);
             paint.renderer = None;
         }
-        Log::info(Event::Render, format!("Rendering with {}", window.adapter(&self.paint.borrow())));
         self.kind = kind;
         self.window = Some(window);
         // The controls take egui's textures before the map's next frame.
@@ -917,19 +925,34 @@ impl View {
         }
     }
 
-    /// The checks after each frame: the style report, the gesture test, the
-    /// readback and the quit timer.
+    /// Logs a one-line summary when a style finishes loading.
+    fn log_loaded_style(&self, info: &StyleInfo) {
+        let label = if let Some(benchmark) = &self.benchmark {
+            format!("\"{}\"", benchmark.name())
+        } else if !self.style.name.is_empty() {
+            format!("\"{}\"", self.style.name)
+        } else if !info.name.is_empty() {
+            format!("\"{}\"", info.name)
+        } else if !self.style.url.is_empty() {
+            self.style.url.clone()
+        } else {
+            "(unnamed)".to_owned()
+        };
+        let plural = |n, word| if n == 1 { format!("{n} {word}") } else { format!("{n} {word}s") };
+        Log::info(
+            Event::Style,
+            format!("Loaded style {label} ({}, {})", plural(info.layers, "layer"), plural(info.sources, "source")),
+        );
+    }
+
+    /// The checks after each frame: the gesture test, the readback and the
+    /// quit timer.
     fn after_frame(&mut self) {
-        if self.style_reported {
+        if self.style_loaded {
             self.run_gesture_test();
         }
 
-        if self.style_loaded && !self.style_reported {
-            self.style_reported = true;
-            report_style(&self.map);
-        }
-
-        if self.readback_path.is_some() && self.idle && self.style_reported {
+        if self.readback_path.is_some() && self.idle && self.style_loaded {
             self.read_back();
         }
 
@@ -971,67 +994,6 @@ impl View {
             self.quit = true;
         }
     }
-}
-
-/// Prints once how many layers of each type the style has, and which
-/// sources the map didn't load, with the layers on them.
-fn report_style(map: &Map) {
-    let queried = (|| -> Result<_, Error> {
-        let (json, layers, sources) = (map.loaded_style_json()?, map.style_layers()?, map.style_sources()?);
-        Ok((json.wait()?, layers.wait()?, sources.wait()?))
-    })();
-    let (json, layers, sources) = match queried {
-        Ok(queried) => queried,
-        Err(e) => {
-            Log::warning(Event::General, format!("Can't report on the style: {e}"));
-            return;
-        }
-    };
-    let json: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
-    let declared_sources: BTreeMap<String, String> = json
-        .get("sources")
-        .and_then(|s| s.as_object())
-        .map(|sources| {
-            sources
-                .iter()
-                .map(|(id, s)| (id.clone(), s.get("type").and_then(|t| t.as_str()).unwrap_or("?").to_owned()))
-                .collect()
-        })
-        .unwrap_or_default();
-    let loaded_sources: Vec<String> = sources.into_iter().map(|source| source.id).collect();
-
-    let mut by_type: BTreeMap<&'static str, usize> = BTreeMap::new();
-    let mut unloaded_source: BTreeMap<String, usize> = BTreeMap::new();
-    for layer in &layers {
-        *by_type.entry(layer.layer_type).or_default() += 1;
-        if let Some(source) = layer.source_id.as_ref().filter(|source| !loaded_sources.contains(source)) {
-            let source_type = declared_sources.get(source).map_or("missing", String::as_str);
-            *unloaded_source.entry(format!("{} on {source_type} source '{source}'", layer.layer_type)).or_default() +=
-                1;
-        }
-    }
-    let unloaded_sources: Vec<String> = declared_sources
-        .iter()
-        .filter(|(id, _)| !loaded_sources.contains(id))
-        .map(|(id, t)| format!("{id} ({t})"))
-        .collect();
-    let list = |m: Vec<(String, usize)>| {
-        if m.is_empty() {
-            return "none".to_owned();
-        }
-        m.iter().map(|(k, v)| format!("{k} x{v}")).collect::<Vec<_>>().join(", ")
-    };
-    Log::info(
-        Event::General,
-        format!(
-            "Style \"{}\": {} layers: {}. On sources the map didn't load: {}. Sources the map didn't load: {}.",
-            json.get("name").and_then(|name| name.as_str()).unwrap_or_default(),
-            layers.len(),
-            list(by_type.into_iter().map(|(k, v)| (k.to_owned(), v)).collect()),
-            list(unloaded_source.into_iter().collect()),
-            if unloaded_sources.is_empty() { "none".to_owned() } else { unloaded_sources.join(", ") },
-        ),
-    );
 }
 
 /// Scripted input (`--gesture-test`).

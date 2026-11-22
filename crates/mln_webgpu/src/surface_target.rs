@@ -173,10 +173,6 @@ impl SurfaceTarget {
             wgpu::TextureFormat::Depth24PlusStencil8
         };
 
-        let info = device.adapter_info();
-        let name = if info.name.is_empty() { "<unknown>" } else { &info.name };
-        Log::info(Event::Render, format!("WebGPU: Selected adapter backend = {}, name = {name}", info.backend));
-
         Ok(SurfaceTarget {
             state: Box::new(State {
                 current: None,
