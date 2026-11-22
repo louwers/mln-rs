@@ -1,15 +1,22 @@
 //! The `probe` layer type: a layer without a source that draws with the
 //! backend's own commands, as a host outside the renderer does. It keeps
-//! what the last frame lent it ([`ProbeLayer::lent`]), and counts the ends
-//! of the GPU's work that it gave in its data ([`ProbeEnds`]).
+//! what the last frame lent it ([`ProbeLayer::lent`]), counts the ends of
+//! the GPU's work that it gave in its data ([`ProbeEnds`]), and is hit by a
+//! query at the center of the view, as a mark it drew there would be.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_rs::layer::{
-    AfterGpu, Draws, EvaluateCx, Evaluation, GpuEnd, Layer, LayerStyle, LayerTypeInfo, LendAt, Lent, NewCx,
-    NoProperties, NoTiles, PrepareCx, PropertyTable, PropertyVisitor, SourceKind, StyleLayerType, UpdateCx,
+    AfterGpu, Draws, EvaluateCx, Evaluation, FrameQuery, GpuEnd, Hit, Layer, LayerStyle, LayerTypeInfo, LendAt, Lent,
+    NewCx, NoProperties, NoTiles, PrepareCx, PropertyTable, PropertyVisitor, SourceKind, StyleLayerType, UpdateCx,
 };
+use mln_rs::feature::Identifier;
+use mln_rs::mln_util::feature::Feature;
+
+/// How far from the view's center, in logical pixels, a query point hits a
+/// probe layer.
+pub const HIT_RADIUS: f64 = 4.0;
 
 /// The `probe` layer type's style half.
 pub struct Probe;
@@ -82,6 +89,18 @@ impl Layer for ProbeLayer {
 
     fn lend(&mut self, at: LendAt, lent: Lent<'_>) {
         self.lent.push((at, lent.layer_depth));
+    }
+
+    /// One feature, of id 1, where the query's first point is within
+    /// [`HIT_RADIUS`] of the view's center.
+    fn hit_frame(&self, query: &FrameQuery<'_, Self>, hits: &mut Vec<Hit>) {
+        let size = query.camera.size();
+        let Some(point) = query.geometry.first() else { return };
+        let (dx, dy) = (point.x - f64::from(size.width) / 2.0, point.y - f64::from(size.height) / 2.0);
+        let distance = dx.hypot(dy);
+        if distance <= HIT_RADIUS {
+            hits.push(Hit { feature: Feature { id: Identifier::Uint(1), ..Feature::default() }, distance: distance as f32 });
+        }
     }
 }
 

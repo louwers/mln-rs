@@ -3,7 +3,6 @@
 
 use std::fmt;
 
-use geometry::Point;
 use glam::dcamera::rh::proj::opengl::orthographic;
 use glam::{DMat4, DVec2, DVec3, Vec2};
 use mln_gfx::gpu::Gpu;
@@ -42,18 +41,12 @@ pub struct TileTransform {
     pub translate: [f32; 2],
     /// What the translation's axes follow: the map or the viewport.
     pub anchor: TranslateAnchorType,
-    /// Where the geometry's origin is in the tile, in tile units, if not at
-    /// the tile's corner.
-    pub origin: Option<DVec2>,
     /// Whether the geometry is 3D, drawn with
     /// [`Depth::Volume`](crate::draw::Depth::Volume): projected with the
     /// near plane moved out to a tenth of the camera's distance to the
     /// center, which spends less of the depth's precision near the camera,
     /// into the depth that the frame's 3D geometry shares on every backend.
     pub volume: bool,
-    /// Whether the translation is in viewport pixels rather than tile
-    /// units, for geometry in pixels.
-    pub viewport_pixels: bool,
     /// Whether to project onto the pixel grid, for geometry that draws
     /// crisp while the camera stands still.
     pub aligned: bool,
@@ -100,7 +93,7 @@ pub struct TileProjection {
     /// The matrix from the tile's units to clip space on Mercator.
     pub fallback_matrix: [f32; 16],
     /// The translation in the tile's units, which the globe adds on the
-    /// sphere; zero for a translation in viewport pixels.
+    /// sphere.
     pub translation: [f32; 2],
     /// The tile units that a logical pixel spans at the camera's zoom.
     pub pixels_to_tile_units: f32,
@@ -142,43 +135,10 @@ impl fmt::Debug for TileProjection {
     }
 }
 
-/// The matrix that draws geometry of the tile `tile_id` in `frame`:
-/// translated by `translation`, anchored as `anchor` says, in tile units or
-/// viewport pixels, from `origin` in the tile where it has one, and
-/// projected with the near-clipped or pixel-aligned projection matrix where
-/// those say so.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the tile, the frame and the translation, origin, clipping and alignment options of its matrix"
-)]
-pub(crate) fn tile_matrix(
-    tile_id: &UnwrappedTileID,
-    frame: &Frame<'_>,
-    translation: [f32; 2],
-    anchor: TranslateAnchorType,
-    near_clipped: bool,
-    in_viewport_pixel_units: bool,
-    origin: Option<Point<f64>>,
-    aligned: bool,
-) -> DMat4 {
-    tile_matrix_for(
-        tile_id,
-        frame.camera,
-        frame.transform,
-        translation,
-        anchor,
-        origin,
-        near_clipped,
-        in_viewport_pixel_units,
-        aligned,
-    )
-}
-
 /// The projection of geometry of the tile `tile_id` in `frame`, placed as
-/// `how` says: the tile's matrix, translated by its `*-translate` in tile
-/// units or viewport pixels, from its origin, and projected with the
-/// near-clipped or pixel-aligned projection matrix where it says so, plus
-/// the tile's other projection fields.
+/// `how` says: the tile's matrix, projected with the near-clipped or
+/// pixel-aligned projection matrix where it says so and translated by its
+/// `*-translate` in tile units, plus the tile's other projection fields.
 #[must_use]
 pub(crate) fn projection_data(tile_id: &UnwrappedTileID, frame: &Frame<'_>, how: &TileTransform) -> ProjectionData {
     if how.screen_space {
@@ -188,9 +148,12 @@ pub(crate) fn projection_data(tile_id: &UnwrappedTileID, frame: &Frame<'_>, how:
             orthographic(0.0, extent, -extent, 0.0, 0.0, 1.0) * DMat4::from_translation(DVec3::new(x, y - extent, 0.0));
         return Projection::Mercator.projection_data(frame.camera, tile_id, &matrix);
     }
-    let origin = how.origin.map(|origin| Point::new(origin.x, origin.y));
-    let (translation, anchor) = (how.translate, how.anchor);
-    let matrix = tile_matrix(tile_id, frame, translation, anchor, how.volume, how.viewport_pixels, origin, how.aligned);
+    let tile_matrix = frame.camera.tile_matrix(tile_id);
+    let mut matrix = with_projection_matrix(&tile_matrix, frame.transform, how.volume, how.aligned);
+    let [x, y] = tile_unit_translation(tile_id, how.translate, how.anchor, frame.camera);
+    if how.translate != [0.0, 0.0] {
+        matrix *= DMat4::from_translation(DVec3::new(f64::from(x), f64::from(y), 0.0));
+    }
     let mut data = frame.camera.projection_data_for_matrix(tile_id, &matrix);
     // OpenGL's clip depth runs from -1: its 3D geometry writes the depth
     // that the other backends' does. The globe projects in its shaders.
@@ -198,10 +161,7 @@ pub(crate) fn projection_data(tile_id: &UnwrappedTileID, frame: &Frame<'_>, how:
         zero_to_one_clip_z(&mut data.main_matrix);
         zero_to_one_clip_z(&mut data.fallback_matrix);
     }
-    if !how.viewport_pixels {
-        let translate = tile_unit_translation(tile_id, translation, anchor, frame.camera);
-        data.translate = DVec2::new(f64::from(translate[0]), f64::from(translate[1]));
-    }
+    data.translate = DVec2::new(f64::from(x), f64::from(y));
     // A draw's depth range keeps the layers apart, so the shader's depth
     // offset stays 0.
     data
@@ -255,31 +215,6 @@ pub(crate) fn globe_extrude_scale(tile_id: &UnwrappedTileID, zoom: f32, latitude
         * latitude_scale) as f32
 }
 
-/// [`tile_matrix`] in `view`, projected with the
-/// matrices of `transform_params`.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the tile, the transform and the translation, origin, clipping and alignment options of its matrix"
-)]
-pub(crate) fn tile_matrix_for(
-    tile_id: &UnwrappedTileID,
-    view: &View,
-    transform_params: &TransformParameters,
-    translation: [f32; 2],
-    anchor: TranslateAnchorType,
-    origin: Option<Point<f64>>,
-    near_clipped: bool,
-    in_viewport_pixel_units: bool,
-    aligned: bool,
-) -> DMat4 {
-    let mut tile_matrix = view.tile_matrix(tile_id);
-    if let Some(origin) = origin {
-        tile_matrix *= DMat4::from_translation(DVec3::new(origin.x, origin.y, 0.0));
-    }
-    let tile_matrix = with_projection_matrix(&tile_matrix, transform_params, near_clipped, aligned);
-    translate_vtx_matrix(tile_id, &tile_matrix, translation, anchor, view, in_viewport_pixel_units)
-}
-
 /// `matrix` projected with the frame's projection matrix: the pixel-aligned
 /// one if `aligned`, else the near-clipped one if `near_clipped`.
 pub(crate) fn with_projection_matrix(
@@ -300,37 +235,3 @@ pub(crate) fn with_projection_matrix(
     *proj_matrix_ref * *matrix
 }
 
-pub(crate) fn translate_vtx_matrix(
-    id: &UnwrappedTileID,
-    tile_matrix: &DMat4,
-    translation: [f32; 2],
-    anchor: TranslateAnchorType,
-    state: &View,
-    in_viewport_pixel_units: bool,
-) -> DMat4 {
-    if translation[0] == 0.0 && translation[1] == 0.0 {
-        return *tile_matrix;
-    }
-
-    let angle: f32 = if in_viewport_pixel_units {
-        if anchor == TranslateAnchorType::Map { state.angle() as f32 } else { 0.0 }
-    } else if anchor == TranslateAnchorType::Viewport {
-        (-state.angle()) as f32
-    } else {
-        0.0
-    };
-
-    let translate = Vec2::from_angle(angle).rotate(Vec2::new(translation[0], translation[1]));
-
-    let offset = if in_viewport_pixel_units {
-        DVec3::new(f64::from(translate.x), f64::from(translate.y), 0.0)
-    } else {
-        let zoom = state.zoom() as f32;
-        DVec3::new(
-            f64::from(id.pixels_to_tile_units(translate.x, zoom)),
-            f64::from(id.pixels_to_tile_units(translate.y, zoom)),
-            0.0,
-        )
-    };
-    *tile_matrix * DMat4::from_translation(offset)
-}

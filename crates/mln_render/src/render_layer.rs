@@ -304,8 +304,7 @@ pub(crate) trait RenderLayer: Any {
     fn handle_wrap_jump(&mut self, wrap_delta: i16);
 
     /// Includes the layer in the frame's drawing or excludes it. A layer
-    /// excluded drops its draws and its tiles with their values, and hears
-    /// that it stopped ([`Layer::stopped`]).
+    /// excluded drops its draws and its tiles with their values.
     fn set_renderable(&mut self, renderable: bool);
 
     /// Whether the frame draws the layer.
@@ -511,7 +510,6 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         if !renderable {
             self.remove_all_draws();
             self.tile_values.clear_tiles();
-            self.layer.stopped();
         }
     }
 

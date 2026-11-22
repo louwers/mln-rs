@@ -60,7 +60,7 @@
 //! each frame that draws the layer it runs [`update`](Layer::update), then
 //! [`tile`](Layer::tile) for each frame tile with data and no value, then
 //! [`prepare`](Layer::prepare). When the layer stops drawing, its tile
-//! values go and [`stopped`](Layer::stopped) runs. What must wait for the
+//! values go. What must wait for the
 //! GPU to finish the layer's work, such as freeing what it drew with
 //! outside the renderer, goes to [`AfterGpu`]. The layer, its values
 //! and every hook but the layout's run on the renderer's thread; the
@@ -193,10 +193,6 @@ pub trait Layer: Sized + 'static {
     /// layer `at` the time its [`prepare`](Self::prepare) asked for
     /// ([`Draws::lend`]).
     fn lend(&mut self, _at: LendAt, _lent: Lent<'_>) {}
-
-    /// Called when the layer stops rendering, once the engine dropped its
-    /// tile values: the layer drops what else it keeps for drawing.
-    fn stopped(&mut self) {}
 
     /// How far, in logical pixels, outside a feature of `data` a query
     /// still hits it with the layer's values `layer`, seen by `camera`. A
@@ -835,12 +831,6 @@ impl<L: Layer> Tiles<'_, L> {
         self.found.is_empty()
     }
 
-    /// Drops the values of all the tiles, which the frame then makes again
-    /// ([`Layer::tile`]).
-    pub fn clear(&mut self) {
-        self.values.clear();
-    }
-
     /// The `i`th tile, what it holds for the layer to draw, and the layer's
     /// value of it.
     pub fn get_mut(&mut self, i: usize) -> (FrameTile, Option<TileData<'_, L>>, &mut Option<L::Tile>) {
@@ -1127,11 +1117,8 @@ impl<L: Layer> HitTest<'_, L> {
     /// the camera, but those that the globe's horizon hides where a draw
     /// placed as `how` says draws them.
     pub fn drawn_points(&self, how: &TileTransform) -> impl Iterator<Item = DrawnPoint> + '_ {
-        let [dx, dy] = if how.viewport_pixels {
-            [0.0, 0.0]
-        } else {
-            crate::tile_matrix::tile_unit_translation(self.projector.tile_id(), how.translate, how.anchor, self.camera)
-        };
+        let [dx, dy] =
+            crate::tile_matrix::tile_unit_translation(self.projector.tile_id(), how.translate, how.anchor, self.camera);
         let globe = self.camera.is_globe();
         self.geometry.iter().flatten().filter_map(move |&point| {
             let drawn = geometry::Point::new(f64::from(f32::from(point.x) + dx), f64::from(f32::from(point.y) + dy));
