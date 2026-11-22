@@ -44,7 +44,7 @@ impl UniformBufferArray {
         data: &T,
         device: &mut Device,
     ) -> bool {
-        self.write(gpu, id, bytemuck::bytes_of(data), false, device)
+        self.write_uniform(gpu, id, bytemuck::bytes_of(data), device)
     }
 
     /// Writes `data`, the bytes of a block, to the uniform buffer `id`, as

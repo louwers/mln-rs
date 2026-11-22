@@ -431,7 +431,7 @@ impl<L: Layer> Tiles<'_, L> {
     /// value of it.
     pub fn get_mut(&mut self, i: usize) -> (FrameTile, Option<TileData<'_, L>>, &mut Option<L::Tile>) {
         let found = self.found[i];
-        (found.tile, found.data::<L>(), self.values.get_mut(i))
+        (found.tile, found.data::<L>(), self.values.get_mut(found.tile.index))
     }
 }
 
@@ -468,7 +468,7 @@ impl<'a, L: Layer> PrepareCx<'a, L> {
     #[must_use]
     pub fn tile(&self, i: usize) -> Option<(FrameTile, TileData<'a, L>, &'a L::Tile)> {
         let found = *self.found.get(i)?;
-        Some((found.tile, found.data::<L>()?, self.values.get(i)?))
+        Some((found.tile, found.data::<L>()?, self.values.get(found.tile.index)?))
     }
 }
 
@@ -504,7 +504,8 @@ impl FrameTile {
     /// ([`Draw::clip`](crate::draw::Draw::clip)).
     #[must_use]
     pub fn project(self, frame: &Frame<'_>, how: &TileTransform) -> TileProjection {
-        TileProjection::new(&self.unwrapped, frame, how, Some(self.id))
+        let data = crate::tile_matrix::projection_data(&self.unwrapped, frame, how);
+        TileProjection::of(&self.unwrapped, frame.camera, &data, Some(self.id))
     }
 }
 

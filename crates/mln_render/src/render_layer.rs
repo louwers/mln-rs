@@ -528,8 +528,9 @@ impl<L: Layer> RenderLayer for Hosted<L> {
             tiles: Tiles { found: &tiles, values: tile_values },
             res,
         });
-        for (index, found) in tiles.iter().enumerate() {
+        for found in &tiles {
             let Some(held) = found.data::<L>() else { continue };
+            let index = found.tile.index;
             if tile_values.get(index).is_none() {
                 let cx = &mut TileCx { layer: values, frame: &frame, res };
                 *tile_values.get_mut(index) = layer.tile(cx, found.tile, held);

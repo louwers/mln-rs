@@ -151,10 +151,10 @@ impl Resources {
                 .buffers
                 .iter()
                 .filter_map(|buffer| match buffer.kind {
-                    BufferKind::Storage { block, .. } => Some(block.name),
+                    BufferKind::Storage { block, .. } => Some((block.name, block.size)),
                     _ => None,
                 })
-                .eq(B::BLOCKS.iter().map(|block| block.name)),
+                .eq(B::BLOCKS.iter().map(|block| (block.name, block.size))),
             "a mesh of {} whose draws give other blocks than its program's of each draw",
             program.name
         );

@@ -82,28 +82,6 @@ pub struct TileProjection {
 }
 
 impl TileProjection {
-    /// The projection of the tile `tile` in `frame`, placed as `how` says,
-    /// to which draws clip as to `clip_to` where they clip.
-    pub(crate) fn new(
-        tile: &UnwrappedTileID,
-        frame: &Frame<'_>,
-        how: &TileTransform,
-        clip_to: Option<OverscaledTileID>,
-    ) -> TileProjection {
-        let origin = how.origin.map(|origin| Point::new(origin.x, origin.y));
-        let data = projection_data(
-            tile,
-            frame,
-            how.translate,
-            how.anchor,
-            how.near_clipped,
-            how.viewport_pixels,
-            origin,
-            how.aligned,
-        );
-        TileProjection::of(tile, frame.camera, &data, clip_to)
-    }
-
     /// The projection of `data`, the projection of the tile `tile` in a
     /// frame of `view`, to which draws clip as to `clip_to` where they clip.
     pub(crate) fn of(
@@ -163,31 +141,19 @@ pub(crate) fn tile_matrix(
     )
 }
 
-/// The projection of geometry of the tile `tile_id` in `frame`, at `origin`
-/// in the tile where it has one: the tile's matrix, translated by
-/// `translation` anchored as `anchor` says, in tile units or viewport pixels,
-/// and projected with the near-clipped or pixel-aligned projection matrix
-/// where those say so, plus the tile's other projection fields.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the tile, the frame and the translation, origin, clipping and alignment options of its projection"
-)]
+/// The projection of geometry of the tile `tile_id` in `frame`, placed as
+/// `how` says: the tile's matrix, translated by its `*-translate` in tile
+/// units or viewport pixels, from its origin, and projected with the
+/// near-clipped or pixel-aligned projection matrix where it says so, plus
+/// the tile's other projection fields.
 #[must_use]
-pub fn projection_data(
-    tile_id: &UnwrappedTileID,
-    frame: &Frame<'_>,
-    translation: [f32; 2],
-    anchor: TranslateAnchorType,
-    near_clipped: bool,
-    in_viewport_pixel_units: bool,
-    origin: Option<Point<f64>>,
-    aligned: bool,
-) -> ProjectionData {
-    let mut data = frame.camera.projection_data_for_matrix(
-        tile_id,
-        &tile_matrix(tile_id, frame, translation, anchor, near_clipped, in_viewport_pixel_units, origin, aligned),
-    );
-    if !in_viewport_pixel_units {
+pub(crate) fn projection_data(tile_id: &UnwrappedTileID, frame: &Frame<'_>, how: &TileTransform) -> ProjectionData {
+    let origin = how.origin.map(|origin| Point::new(origin.x, origin.y));
+    let (translation, anchor) = (how.translate, how.anchor);
+    let matrix =
+        tile_matrix(tile_id, frame, translation, anchor, how.near_clipped, how.viewport_pixels, origin, how.aligned);
+    let mut data = frame.camera.projection_data_for_matrix(tile_id, &matrix);
+    if !how.viewport_pixels {
         let translate = tile_unit_translation(tile_id, translation, anchor, frame.camera);
         data.translate = DVec2::new(f64::from(translate[0]), f64::from(translate[1]));
     }

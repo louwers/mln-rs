@@ -212,8 +212,7 @@ impl DebugLayer {
         for draw in &self.draws {
             let tile = draw.tile.to_unwrapped();
             let at = TileProjection::of(&tile, frame.camera, &frame.projection_data_for_tile(&tile, false), None);
-            let order = Draw { order: draw.mesh.seq() as i64, depth: Depth::Off, ..Draw::DEFAULT };
-            self.frame.push_at(&draw.mesh, &at, order, ());
+            self.frame.push_at(&draw.mesh, &at, Draw { depth: Depth::Off, ..Draw::DEFAULT }, ());
         }
 
         let (color, width) = self.style;
