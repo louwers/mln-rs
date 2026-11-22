@@ -4,6 +4,7 @@
 //! [`FeatureIndex`], which is only read after. Most tiles are never queried,
 //! so the index builds its R-tree at its first query.
 
+use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::sync::{Arc, OnceLock};
 
@@ -11,7 +12,7 @@ use geo_index::rtree::sort::HilbertSort;
 use geo_index::rtree::{RTree, RTreeBuilder, RTreeIndex};
 use geometry::Point;
 use mln_map_types::tile_coordinate::TileCoordinate;
-use mln_map_types::{TileProjector, View};
+use mln_map_types::{TileProjector, VerticalPerspectiveProjection, View};
 use mln_style::expression::expression::FeatureState;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style_types::TranslateAnchorType;
@@ -65,6 +66,36 @@ pub(crate) struct QueryRegion<'a> {
     /// `geometry` was met at, in order ([`QueryGround::heights`]), which a
     /// translation of the geometry keeps.
     pub(crate) heights: Option<&'a [f64]>,
+}
+
+/// The screen points, from the top left of `view`, that a query of
+/// `geometry` tests. Past the globe's limb a query meets the planet only at
+/// the horizon, and a point there stands for the nearest horizon point, so
+/// a query's corners alone would cut the limb off: on the globe, the edges
+/// of a geometry that reaches past the planet are followed in steps.
+pub(crate) fn query_screen_geometry<'a>(view: &View, geometry: &'a [ScreenCoordinate]) -> Cow<'a, [ScreenCoordinate]> {
+    const STEPS: i32 = 32;
+    let height = f64::from(view.size().height);
+    let on_planet = |p: &ScreenCoordinate| {
+        VerticalPerspectiveProjection::screen_coordinate_hits_globe(
+            view,
+            &ScreenCoordinate::new(p.x, height - p.y),
+            0.0,
+        )
+    };
+    if !view.is_globe() || geometry.len() < 2 || geometry.iter().all(on_planet) {
+        return Cow::Borrowed(geometry);
+    }
+    let mut traced = Vec::with_capacity((geometry.len() - 1) * STEPS as usize + 1);
+    for edge in geometry.windows(2) {
+        let (from, to) = (edge[0], edge[1]);
+        for k in 0..STEPS {
+            let t = f64::from(k) / f64::from(STEPS);
+            traced.push(ScreenCoordinate::new(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t));
+        }
+    }
+    traced.extend(geometry.last().copied());
+    Cow::Owned(traced)
 }
 
 /// Where the points of a query over terrain meet the ground the frame drew.

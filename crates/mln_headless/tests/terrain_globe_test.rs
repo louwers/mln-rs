@@ -647,6 +647,53 @@ fn a_rendered_query_on_the_globe_finds_the_draped_fill_where_it_draws() {
     assert_eq!(0, query(x, top - 4.0), "nothing above the square's top edge at {top}");
 }
 
+/// A query of the whole view of the globe at zoom 0, which the planet's
+/// limb lies inside of, finds a red fill drawn 60° north, past where the
+/// view's corners meet the horizon, over level ground as without terrain.
+#[test]
+fn a_query_of_the_whole_globe_finds_a_fill_past_its_corners_over_terrain() {
+    use mln_renderer::query::RenderedQueryOptions;
+    use mln_util::geo::ScreenCoordinate;
+
+    for terrain in [true, false] {
+        let style = format!(
+            r#"{{
+                "version": 8,
+                "center": [0, 0],
+                "zoom": 0,
+                "projection": {{"type": "vertical-perspective"}},
+                {}
+                "sources": {{
+                    "dem": {{"type": "raster-dem", "tiles": ["dem/{{z}}/{{x}}/{{y}}.png"], "tileSize": 256, "maxzoom": 15}},
+                    "fill": {{"type": "geojson", "data": {{"type": "Polygon",
+                        "coordinates": [[[-10, 57], [10, 57], [10, 63], [-10, 63], [-10, 57]]]}}}}
+                }},
+                "layers": [
+                    {{"id": "background", "type": "background", "paint": {{"background-color": "white"}}}},
+                    {{"id": "fill", "type": "fill", "source": "fill", "paint": {{"fill-color": "rgb(255, 0, 0)"}}}}
+                ]
+            }}"#,
+            if terrain { r#""terrain": {"source": "dem"},"# } else { "" },
+        );
+        let Some((mut stills, _, mut frontend)) = still(&style, |_, tile| sea_level_png(tile), false, &[]) else {
+            return;
+        };
+        let (_, count) = centroid(&stills.remove(0).0, [255, 0, 0]);
+        assert!(count > 20, "terrain {terrain}: the fill shows: {count} px");
+        let options = RenderedQueryOptions::new(Some(vec!["fill".to_owned()]), None);
+        let corner = f64::from(SIDE);
+        let found = frontend
+            .renderer()
+            .query_rendered_features_in_box(
+                &ScreenCoordinate::new(0.0, 0.0),
+                &ScreenCoordinate::new(corner, corner),
+                &options,
+            )
+            .unwrap();
+        assert_eq!(1, found.len(), "terrain {terrain}: the whole view's query finds the fill");
+    }
+}
+
 /// Squares 300 m across on a ridge 3 km either side of its crest: one on
 /// the crest at the center, two down its side that faces the camera.
 const HANDOVER_SQUARES: [([u8; 3], f64, f64); 3] =
