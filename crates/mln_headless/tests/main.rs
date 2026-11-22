@@ -40,6 +40,8 @@ mod placement_test;
 mod pixel_ratio_test;
 // Map::set_size and HeadlessFrontend::set_size with a heatmap, which draws into a texture of its own.
 mod resize_test;
+// A frame whose stencil values overflow, with several world copies in view.
+mod stencil_overflow_test;
 // Text that the device's fonts shape, with a font file standing in for them.
 mod system_fonts_test;
 // Tiles reloading as their data expires, over an online file source.

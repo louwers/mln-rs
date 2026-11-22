@@ -603,6 +603,7 @@ impl Encoder {
         // - DRAW UPLOAD ---------------------------------------------------
         orchestrator.upload_draws(gpu, parameters.context);
         let draw_groups = DrawGroups::of(orchestrator, &parameters);
+        parameters.stencil_clear.clone_from(&draw_groups.stencil_clear);
         let (proj_state, transform) = (parameters.view, parameters.transform_params);
         parameters.clip_masks.update(gpu, parameters.context, proj_state.is_globe(), &draw_groups.clip_tiles, |tile| {
             to_projection_ubo(&transform.projection_data_for_tile(tile, false))
@@ -739,9 +740,13 @@ impl Encoder {
 /// any of them uses the stencil buffer, of the tile that clears it; and the
 /// groups drawn as a whole, each into the layer composite's texture and then
 /// onto the frame.
+#[derive(Default)]
 struct DrawGroups {
     count: usize,
     clip_tiles: Vec<UnwrappedTileID>,
+    /// The tiles whose masks clear the stencil buffer, also in
+    /// `clip_tiles` ([`PaintParameters::stencil_clear_tiles`]).
+    stencil_clear: Vec<UnwrappedTileID>,
     composited: Vec<(SimpleIdentity, Composite)>,
 }
 
@@ -749,7 +754,7 @@ impl DrawGroups {
     /// The draw groups of `orchestrator`'s layers. Draw groups of one source
     /// clip to the same tiles, which are added once.
     fn of(orchestrator: &RenderOrchestrator, parameters: &PaintParameters<'_>) -> DrawGroups {
-        let mut groups = DrawGroups { count: 0, clip_tiles: Vec::new(), composited: Vec::new() };
+        let mut groups = DrawGroups::default();
         let mut last: Option<&[UnwrappedTileID]> = None;
         orchestrator.visit_draw_groups(|group| {
             groups.count += 1;
@@ -761,9 +766,8 @@ impl DrawGroups {
             }
             groups.composited.extend(group.composite());
         });
-        if last.is_some() {
-            groups.clip_tiles.extend(parameters.stencil_clear_tile());
-        }
+        groups.stencil_clear = parameters.stencil_clear_tiles(&groups.clip_tiles);
+        groups.clip_tiles.extend_from_slice(&groups.stencil_clear);
         if !groups.clip_tiles.is_sorted() {
             groups.clip_tiles.sort_unstable();
         }
