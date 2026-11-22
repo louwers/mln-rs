@@ -37,7 +37,7 @@
 use std::sync::Arc;
 
 use geometry::Point;
-use glam::{DMat4, DVec2};
+use glam::{DMat4, DVec2, DVec4};
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetFormats, TextureFormat};
 use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
@@ -138,33 +138,56 @@ fn held_bytes(sizes: &[u32], held: &[Held]) -> u64 {
     bytes
 }
 
-/// The pieces each side of a tile is measured in, so that its length on
-/// screen follows the side where the globe curves it.
+/// The pieces each side of a tile is measured in on the globe, so that its
+/// length on screen follows the side where the globe curves it.
 const SIDE_PIECES: u32 = 8;
 
 /// The logical pixels that `tile` spans in `view`, whose projection is
 /// `projection`, level with the view's center: its longest side on
 /// screen, as the view draws it, and infinite where it reaches behind the
-/// eye, under the camera, where it shows larger than anywhere.
+/// eye, under the camera, where it shows larger than anywhere. On
+/// Mercator, whose sides are straight, the side between two corners; on
+/// the globe, the side through [`SIDE_PIECES`] pieces.
 fn shown_px(view: &View, projection: &DMat4, tile: &UnwrappedTileID) -> f64 {
-    let projector = TileProjector::with_data(view, tile, view.projection_data_with(tile, projection));
-    let (altitude, extent) = (view.center_altitude(), f64::from(EXTENT));
-    let size = view.size();
+    let (altitude, size) = (view.center_altitude(), view.size());
     let half = DVec2::new(f64::from(size.width), f64::from(size.height)) / 2.0;
-    let drawn = |at: DVec2| {
-        let point = projector.project_as_drawn(&Point::new(at.x, at.y), altitude);
-        let Point { x, y } = point.point;
-        (point.signed_distance_from_camera > 0.0).then(|| DVec2::new(x, y) * half)
-    };
+    if view.is_globe() {
+        let projector = TileProjector::with_data(view, tile, view.projection_data_with(tile, projection));
+        longest_side(SIDE_PIECES, |at| {
+            let point = projector.project_as_drawn(&Point::new(at.x, at.y), altitude);
+            let Point { x, y } = point.point;
+            (point.signed_distance_from_camera > 0.0).then(|| DVec2::new(x, y) * half)
+        })
+    } else {
+        let matrix = *projection * view.tile_matrix(tile);
+        longest_side(1, |at| {
+            let clip = matrix * DVec4::new(at.x, at.y, altitude, 1.0);
+            (clip.w > 0.0).then(|| DVec2::new(clip.x, clip.y) / clip.w * half)
+        })
+    }
+}
+
+/// The length of the longest side of a tile, each through `pieces` pieces
+/// between the points `drawn` draws at, in tile units; infinite where it
+/// draws one of them nowhere.
+fn longest_side(pieces: u32, drawn: impl Fn(DVec2) -> Option<DVec2>) -> f64 {
+    let extent = f64::from(EXTENT);
     let corners = [DVec2::ZERO, DVec2::new(extent, 0.0), DVec2::splat(extent), DVec2::new(0.0, extent)];
+    let [Some(a), Some(b), Some(c), Some(d)] = corners.map(&drawn) else {
+        return f64::INFINITY;
+    };
     let mut longest = 0.0f64;
-    for k in 0..4 {
-        let (from, to) = (corners[k], corners[(k + 1) % 4]);
-        let points = (0..=SIDE_PIECES).map(|piece| drawn(from.lerp(to, f64::from(piece) / f64::from(SIDE_PIECES))));
-        let Some(points) = points.collect::<Option<Vec<DVec2>>>() else {
-            return f64::INFINITY;
-        };
-        longest = longest.max(points.windows(2).map(|piece| piece[0].distance(piece[1])).sum());
+    for (k, (from, to)) in [(a, b), (b, c), (c, d), (d, a)].into_iter().enumerate() {
+        let (mut length, mut last) = (0.0, from);
+        for piece in 1..pieces {
+            let at = corners[k].lerp(corners[(k + 1) % 4], f64::from(piece) / f64::from(pieces));
+            let Some(point) = drawn(at) else {
+                return f64::INFINITY;
+            };
+            length += last.distance(point);
+            last = point;
+        }
+        longest = longest.max(length + last.distance(to));
     }
     longest
 }
