@@ -27,7 +27,7 @@ use crate::layer::{
     EvaluateCx, Evaluation, Found, FrameQuery, Hit, HitTest, Layer, LayerValues, LendAt, Lent, NewCx, PrepareCx,
     TileCx, Tiles, UpdateCx, input,
 };
-use crate::named_target::{Routes, Warning};
+use crate::named_target::Routes;
 use crate::paint_parameters::PaintParameters;
 use crate::render_pass::Pass;
 use crate::render_source::RenderSource;
@@ -531,13 +531,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
             .prepare(&PrepareCx { layer: values, frame: &frame, res, found: &tiles, values: tile_values }, frame_draws);
         frame_draws.finish(gpu, res, &values.evaluated.paint, tiles.iter().map(|found| found.tile.unwrapped));
         if route.is_some() {
-            let id = &values.style.id;
-            if frame_draws.refused_backdrop() {
-                routes.warn(id, Warning::Backdrop, || "a blend that reads what is behind it needs the map".to_owned());
-            }
-            if frame_draws.lends(LendAt::Pass) {
-                routes.warn(id, Warning::Lend, || "a named target's pass lends no commands".to_owned());
-            }
+            routes.check_routed(&values.style.id, frame_draws);
         }
     }
 

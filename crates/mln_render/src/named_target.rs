@@ -28,9 +28,11 @@ use mln_util::hash::HashSet;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
+use crate::encode::Draws;
 use crate::gfx::context::Resources;
 use crate::gfx::resources::GpuTexture;
 use crate::handles::{Target, Texture};
+use crate::layer::LendAt;
 use crate::paint_parameters::OpenPass;
 
 /// A render target that the style declares: as large as the frame, in
@@ -64,7 +66,7 @@ const DEPTH_STENCIL: TextureFormat = TextureFormat::Depth24PlusStencil8;
 /// Why a layer draws otherwise than its style says, which the renderer
 /// warns of once per version of the style.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum Warning {
+enum Warning {
     Undeclared,
     Volume,
     Cycle,
@@ -176,7 +178,24 @@ impl Routes {
     /// `destination`, once its update read the targets it asked for:
     /// returns the index of the target it draws into, `None` for the map. A
     /// layer of 3D geometry (`volume`) draws on the map.
+    #[inline]
     pub(crate) fn route(
+        &mut self,
+        index: usize,
+        id: &str,
+        destination: Option<&Destination>,
+        volume: bool,
+    ) -> Option<usize> {
+        // Without targets, a layer reads none, and draws on the map.
+        if self.targets.is_empty() && destination.is_none() {
+            return None;
+        }
+        self.route_reading(index, id, destination, volume)
+    }
+
+    /// [`route`](Self::route), with the targets that the layer asked for.
+    #[inline(never)]
+    fn route_reading(
         &mut self,
         index: usize,
         id: &str,
@@ -234,9 +253,22 @@ impl Routes {
         false
     }
 
+    /// Warns of what the routed layer `id` drew otherwise than its style
+    /// says, `draws`: a composite refused, or commands asked to be lent in
+    /// the pass.
+    #[inline(never)]
+    pub(crate) fn check_routed(&mut self, id: &str, draws: &Draws) {
+        if draws.refused_backdrop() {
+            self.warn(id, Warning::Backdrop, || "a blend that reads what is behind it needs the map".to_owned());
+        }
+        if draws.lends(LendAt::Pass) {
+            self.warn(id, Warning::Lend, || "a named target's pass lends no commands".to_owned());
+        }
+    }
+
     /// Warns, once for this version of the style, that the layer `id` draws
     /// otherwise than its style says, as `why` says.
-    pub(crate) fn warn(&mut self, id: &str, warning: Warning, why: impl FnOnce() -> String) {
+    fn warn(&mut self, id: &str, warning: Warning, why: impl FnOnce() -> String) {
         if !self.warned.insert((id.to_owned(), warning)) {
             return;
         }
