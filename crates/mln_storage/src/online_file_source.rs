@@ -706,12 +706,6 @@ impl OnlineFileSource {
         self.queue.post(move |core| core.http_file_source.set_http_header_transform(transform));
     }
 
-    /// Holds the core until the guard drops (`crate::tests::pause`).
-    #[cfg(test)]
-    pub(crate) fn pause(&self) -> crate::tests::Paused {
-        crate::tests::pause(|hold| self.queue.post(move |_| hold()))
-    }
-
     /// Whether a thread, or the caller, runs the source's core.
     #[cfg(not(target_family = "wasm"))]
     fn is_running(&self) -> bool {

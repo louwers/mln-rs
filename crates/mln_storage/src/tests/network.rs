@@ -171,11 +171,15 @@ impl Network {
 
 impl TestLoop {
     /// [`run`](Self::run)s the loop, and `network` after each of its turns
-    /// and whenever the network's source has something to do.
+    /// and whenever the network's source has something to do. A run that
+    /// is still going after a minute fails the test instead of hanging.
     pub(crate) fn run_with_network(&self, network: &mut Network) {
         let queue = self.handle();
-        network.driver.set_waker(Some(Arc::new(move || queue.wake())));
-        self.handle().run_with(&mut self.dispatcher(), |_| network.run());
+        let hung = queue.post_after(Duration::from_secs(60), |_| panic!("the test loop ran for a minute"));
+        let waker = queue.clone();
+        network.driver.set_waker(Some(Arc::new(move || waker.wake())));
+        queue.run_with(&mut self.dispatcher(), |_| network.run());
         network.driver.set_waker(None);
+        queue.cancel(hung);
     }
 }

@@ -23,7 +23,6 @@ use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, mpsc};
-use std::time::Duration;
 
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
@@ -89,12 +88,6 @@ impl TestLoop {
 
     pub(crate) fn stop(&self) {
         self.queue.stop();
-    }
-
-    /// Fails the test with `message` if it still runs after `delay`: a test
-    /// that waits for something that never comes fails instead of hanging.
-    pub(crate) fn fail_after(&self, delay: Duration, message: &'static str) {
-        self.queue.post_after(delay, move |_| panic!("{message}"));
     }
 }
 
