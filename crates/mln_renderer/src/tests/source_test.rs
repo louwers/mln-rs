@@ -1535,6 +1535,63 @@ fn raster_dem_borders_across_a_world_wrap() {
     }
 }
 
+/// A raster-dem source seen past its maxzoom draws its deepest tiles
+/// larger, as a raster source does: zooming in keeps the maxzoom's tiles,
+/// each with that zoom in its id, and requests none again.
+#[test]
+fn raster_dem_tiles_past_the_maxzoom_stay_at_their_zoom() {
+    use crate::tests::tile::dem_png;
+
+    let mut test = SourceTest::new();
+    test.transform.resize(Size::new(256, 256)).unwrap();
+    let file_source = StubFileSource::on_queue(&test.run_loop, ResponseType::Asynchronous);
+    let requests = Arc::new(AtomicUsize::new(0));
+    {
+        let requests = Arc::clone(&requests);
+        file_source.set_response(Kind::Tile, move |resource| {
+            let tile = resource.tile_data.as_ref()?;
+            requests.fetch_add(1, Ordering::SeqCst);
+            let mut response = Response::new();
+            response.data = Some(dem_png(tile.x as u32));
+            Some(response)
+        });
+    }
+    let layers = Tiled::RasterDEM.layers();
+    let tileset = PartialTileset { max_zoom: Some(3), ..tiles_tileset() };
+    let source = crate::tests::ready(Tiled::RasterDEM.source(None, tileset));
+    let mut store = test.store();
+    let mut render_source = crate::tests::create_render_source(&source, &mut store);
+    let fs: Arc<dyn FileSource> = file_source;
+
+    let mut relayout = true;
+    // The view sees the middle of tile 3/4/3 alone.
+    for zoom in [3.0, 4.0, 5.0, 6.0] {
+        test.transform.jump_to(&CameraOptions {
+            center: Some(LatLng::new(21.9, 22.5).unwrap()),
+            zoom: Some(zoom),
+            ..Default::default()
+        });
+        let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            let mut parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
+            parameters.prefetch_zoom_delta = 0;
+            render_source.update(&mut store, source.clone(), &layers, true, relayout, &parameters);
+            relayout = false;
+            if render_source.is_loaded(&store) {
+                break;
+            }
+            assert!(mln_util::time::Instant::now() < deadline, "the tiles didn't load at zoom {zoom}");
+            test.run_loop.run_once(&mut ());
+            crate::tests::update(&mut store);
+            std::thread::yield_now();
+        }
+        let tiles = render_source.tiles().and_then(|key| store.source(key)).expect("the source's tiles");
+        let cover: Vec<OverscaledTileID> = tiles.cover().map(|tile| tile.id).collect();
+        assert_eq!(vec![OverscaledTileID::with_zxy(3, 0, 3, 4, 3)], cover, "at zoom {zoom}");
+        assert_eq!(1, requests.load(Ordering::SeqCst), "tile requests by zoom {zoom}");
+    }
+}
+
 /// A flat map `width` pixels wide and 256 high at `zoom`, centered at the
 /// equator and `lng`.
 fn image_view(width: u32, zoom: f64, lng: f64) -> SourceTest {
