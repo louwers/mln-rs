@@ -836,7 +836,7 @@ impl RenderOrchestrator {
                 if record.input != SourceKind::None {
                     // Every source's pass sees every layer, so the cheap
                     // source check goes before anything else is read.
-                    if render_source_id == Some(record.source.as_str()) {
+                    if render_source_id == Some(layer.style().base().source.as_str()) {
                         let style = layer.style();
                         let layer_is_visible = record.visible;
                         let zoom_fits_layer = record.supports_zoom(self.zoom_history.last_zoom);
@@ -1281,7 +1281,7 @@ impl RenderOrchestrator {
                 continue;
             }
             filtered_layers.insert(id.clone(), *layer);
-            source_ids.insert(record.source.clone());
+            source_ids.insert(layer.style().base().source.clone());
         }
 
         let proj_matrix = self.view.projection_matrix_with(1, false);

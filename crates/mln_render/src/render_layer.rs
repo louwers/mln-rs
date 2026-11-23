@@ -154,8 +154,6 @@ pub(crate) struct LayerRecord {
     /// The kind of source the layer's type draws, `None` for a type without
     /// one.
     pub(crate) input: SourceKind,
-    /// The id of the layer's source.
-    pub(crate) source: String,
     /// Whether the layer's visibility isn't `none`.
     pub(crate) visible: bool,
     /// The layer's zoom range, from its minimum zoom to before its maximum.
@@ -185,7 +183,6 @@ impl LayerRecord {
         let base = style.base();
         LayerRecord {
             input: crate::layer::input_source::<L>(),
-            source: base.source.clone(),
             visible: base.visibility != VisibilityType::None,
             min_zoom: base.min_zoom,
             max_zoom: base.max_zoom,
