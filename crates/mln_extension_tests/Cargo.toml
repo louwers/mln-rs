@@ -1,6 +1,7 @@
 # Small layer and source types written against the facade alone, as an
 # author outside the engine writes them, and the tests that render with
-# them and with the first-party extension crates, as a caller adds them.
+# them and with the first-party extension crates, as a caller adds them,
+# and that load the built-in sources' tiles as a host sees them.
 [package]
 name = "mln-rs-extension-tests"
 version.workspace = true
