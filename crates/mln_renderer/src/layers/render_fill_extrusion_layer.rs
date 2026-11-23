@@ -94,6 +94,20 @@ use crate::tile_matrix::{projection_data, to_projection_ubo};
 /// The pass the layer's draws draw in.
 const RENDER_PASS: RenderPass = RenderPass::Translucent;
 
+/// How far behind its surfaces a draw into depth only writes their depth, in
+/// the clip space depth that runs from 0 to 1: 16 steps of a 24-bit depth
+/// buffer.
+///
+/// Every tile whose buffer reaches a wall draws it, each with its own matrix,
+/// which rounds the wall's depth its own way in the last bits, and places a
+/// pattern on it its own way. Were the depth pass exact, a draw in color would
+/// pass the depth test only where its own tile's copy rounded nearest, and a
+/// patterned wall would mix the tiles' patterns in bands that depend on the
+/// GPU. Set back, every copy passes, and the first to draw a pixel, which the
+/// layer's stencil then keeps, draws all of it. Surfaces closer than this
+/// draw in the order of their draws rather than of their depth.
+const DEPTH_PASS_SETBACK: f64 = 1.0 / (1 << 20) as f64;
+
 /// A draw the layer keeps of a tile: of its roofs or its walls, into depth
 /// only or in color.
 struct ExtrusionDraw {
@@ -457,8 +471,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
                     ..FrameDraw::new(Some(tile_id), draw.id)
                 };
                 let layout = cached.paint_layout;
-                let uniforms =
-                    Self::uniforms(layer, tile_id, render_data, binders, &draw.objects, layout, paint_parameters);
+                let uniforms = Self::uniforms(layer, tile_id, render_data, binders, draw, layout, paint_parameters);
                 self.draw_list.push_part(frame_draw, index, uniforms);
             }
         }
@@ -720,16 +733,16 @@ impl TileBuilder<'_> {
 }
 
 impl RenderFillExtrusionLayer {
-    /// The entries in the layer's storage buffers of a draw of `objects`, a
-    /// draw of `tile`, whose bucket's binders are `binders` and whose pulled
-    /// walls find their paint values by `paint_layout`, with the layer's
-    /// values `layer`.
+    /// The entries in the layer's storage buffers of `draw`, a draw of
+    /// `tile`, whose bucket's binders are `binders` and whose pulled walls
+    /// find their paint values by `paint_layout`, with the layer's values
+    /// `layer`.
     fn uniforms(
         layer: &EvaluatedLayer<FillExtrusion>,
         tile_id: OverscaledTileID,
         tile_bucket: LayerBucket<'_, FillExtrusion>,
         binders: &FillExtrusionBinders,
-        objects: &DrawObjects,
+        draw: &ExtrusionDraw,
         paint_layout: u32,
         parameters: &PaintParameters<'_>,
     ) -> ExtrusionUniforms {
@@ -750,6 +763,13 @@ impl RenderFillExtrusionLayer {
             None,
             false,
         );
+        if draw.priority == 0 {
+            // z + setback * w: x, y and w, and so the pixels the draw
+            // covers, stay those of the draw in color.
+            for matrix in [&mut projection.main_matrix, &mut projection.fallback_matrix] {
+                matrix.set_row(2, matrix.row(2) + DEPTH_PASS_SETBACK * matrix.row(3));
+            }
+        }
         // A backend whose clip depth runs from -1 writes the depth of one
         // whose runs from 0 (`frame_projection`). The globe projects in its
         // shaders.
@@ -769,8 +789,10 @@ impl RenderFillExtrusionLayer {
         let num_tiles = 2f64.powi(i32::from(tile_id.canonical.z));
         let height_factor = (-num_tiles / TILE_SIZE_D / 8.0) as f32;
 
-        let texture =
-            objects.texture(ID_FILL_EXTRUSION_IMAGE_TEXTURE).and_then(|texture| parameters.context.texture(texture));
+        let texture = draw
+            .objects
+            .texture(ID_FILL_EXTRUSION_IMAGE_TEXTURE)
+            .and_then(|texture| parameters.context.texture(texture));
         let texture_size = texture.map_or(Size::new(0, 0), Texture2D::size);
         let pattern = evaluated.fill_extrusion_pattern.faded();
         let tlbr = |id: &str| tile_bucket.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
