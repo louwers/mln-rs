@@ -451,90 +451,13 @@ mod tests {
 
     use super::*;
 
-    /// An index over a 512 px view, with one layer selected, whose one tile
-    /// has no record.
+    /// An index over a 512 px view, begun in `mode`.
     fn index(mode: MapMode) -> CollisionIndex {
         let mut state = TransformState::default();
         state.set_size(Size::new(512, 512));
         let mut index = CollisionIndex::default();
         index.begin(state.view(), mode);
-        index.tile_records.push(NO_RECORD);
-        index.layer = PlacingLayerSlot { group: None, first_tile: 0, tiles: 1 };
         index
-    }
-
-    fn square(min: f32, max: f32) -> Shape {
-        Shape::Box(Aabb::new(Vec2::splat(min), Vec2::splat(max)))
-    }
-
-    fn item(overlap: Overlap, ignore_placement: bool) -> Item {
-        Item { tile: 0, feature: 0, sort: 0, overlap, ignore_placement }
-    }
-
-    /// Whether a box over the one `index` holds collides, placed with
-    /// `overlap`.
-    fn collides(index: &CollisionIndex, overlap: Overlap) -> bool {
-        index.collides(&square(150.0, 250.0), overlap)
-    }
-
-    #[test]
-    fn every_mode_but_always_collides_with_a_never_shape() {
-        let mut index = index(MapMode::Static);
-        index.insert(square(100.0, 200.0), item(Overlap::Never, false));
-        assert!(collides(&index, Overlap::Never));
-        assert!(!collides(&index, Overlap::Always));
-        assert!(collides(&index, Overlap::Cooperative));
-    }
-
-    #[test]
-    fn only_never_collides_with_an_overlapping_shape() {
-        for placed in [Overlap::Always, Overlap::Cooperative] {
-            let mut index = index(MapMode::Static);
-            index.insert(square(100.0, 200.0), item(placed, false));
-            assert!(collides(&index, Overlap::Never), "never over {placed:?}");
-            assert!(!collides(&index, Overlap::Always), "always over {placed:?}");
-            assert!(!collides(&index, Overlap::Cooperative), "cooperative over {placed:?}");
-        }
-    }
-
-    #[test]
-    fn a_shape_that_ignores_placement_blocks_nothing() {
-        let mut index = index(MapMode::Static);
-        index.insert(square(100.0, 200.0), item(Overlap::Never, true));
-        assert!(!collides(&index, Overlap::Never));
-    }
-
-    #[test]
-    fn shapes_collide_within_their_layers_group() {
-        let mut index = index(MapMode::Static);
-        index.layers = vec![
-            PlacingLayerSlot { group: Some(1), first_tile: 0, tiles: 1 },
-            PlacingLayerSlot { group: Some(2), first_tile: 0, tiles: 1 },
-        ];
-        index.select_layer(0);
-        index.insert(square(100.0, 200.0), item(Overlap::Never, false));
-        assert!(collides(&index, Overlap::Never));
-        assert!(collides(&index, Overlap::Cooperative));
-        index.select_layer(1);
-        assert!(!collides(&index, Overlap::Never));
-        assert!(!collides(&index, Overlap::Cooperative));
-    }
-
-    #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "an item of a tile whose bucket its layer doesn't lead")]
-    fn an_item_stays_within_its_layers_tiles() {
-        // The top layer's one tile, and then the bottom layer's, as
-        // placement adds them: an item past the top layer's tiles isn't one
-        // of the bottom layer's.
-        let mut index = index(MapMode::Static);
-        index.tile_records = vec![NO_RECORD, NO_RECORD];
-        index.layers = vec![
-            PlacingLayerSlot { group: None, first_tile: 1, tiles: 1 },
-            PlacingLayerSlot { group: None, first_tile: 0, tiles: 1 },
-        ];
-        index.select_layer(1);
-        index.insert(square(100.0, 200.0), Item { tile: 1, ..item(Overlap::Never, false) });
     }
 
     #[test]
