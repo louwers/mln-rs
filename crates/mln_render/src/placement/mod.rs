@@ -31,6 +31,15 @@
 //! tile; rendered-feature queries of the placing layers return the features
 //! of the current placement's shapes that the query touches.
 //!
+//! In a continuous map, what a placement shows fades in and what it hides
+//! fades out. A participant keeps each item's [`Opacity`], steps it at each
+//! placement by how far the fade of the one before had come
+//! ([`PlaceCx::fade`]), [adds](Placed::add) it to what the placement
+//! changed, and writes it into a vector its bucket keeps
+//! ([`Upload::keep`](crate::layer::Upload::keep)) as a vertex value
+//! ([`Opacity::vertex`]), which its shader fades on between placements by
+//! the frame's [`placement_fade`](crate::layer::Frame::placement_fade).
+//!
 //! A placing layer draws the tiles that its source holds while what
 //! placement showed of them fades out, besides those of the frame, and a
 //! tile's world copy doesn't draw it before the copy's own layout lands,
