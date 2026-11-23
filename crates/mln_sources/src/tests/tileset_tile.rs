@@ -312,3 +312,23 @@ fn a_request_takes_the_tiles_order() {
     tiles.set_necessity(&tile(), TileNecessity::Required);
     assert!(file_source.resource().order.get() > 0);
 }
+
+/// A response that arrives as the tile stops its request, on becoming
+/// optional, changes nothing: the tile stays without data, and asks again
+/// when required again.
+#[test]
+fn a_response_to_a_stopped_request_changes_nothing() {
+    let test = TileTest::new();
+    let (mut tiles, file_source) = held_tile::<VectorKind>(&test, TileKind::Geometry, tiles_tileset());
+    tiles.set_necessity(&tile(), TileNecessity::Required);
+    // The response waits for the store's next update.
+    file_source.respond(water());
+    tiles.set_necessity(&tile(), TileNecessity::Optional);
+    tiles.update();
+    tiles.update();
+    assert!(!tiles.is_renderable(&tile()));
+    assert!(!actions(&mut tiles).contains(&TileOperation::LoadFromNetwork));
+
+    tiles.set_necessity(&tile(), TileNecessity::Required);
+    assert_eq!(file_source.pending(), 1);
+}
