@@ -3294,6 +3294,7 @@ fn drag_center_matches_gljs() {
             transform.state().view(),
             &sc(point.0, 480.0 - point.1),
             &sc(pan_delta.0, -pan_delta.1),
+            0.0,
         );
         assert_near(expected.0, center.latitude(), 1e-7);
         assert_near(
@@ -3580,6 +3581,7 @@ fn free_bearing_drag_matches_gljs() {
             transform.state().view(),
             &sc(anchor.0, 480.0 - anchor.1),
             &sc(pan_delta.0, -pan_delta.1),
+            0.0,
         );
         assert_near(expected.0, drag.center.latitude(), 1e-6);
         assert_near(
@@ -5519,6 +5521,66 @@ fn anchored_moves_on_a_raised_pitched_flat_map_hold_their_ground() {
     }
     let camera = transform.camera_options(None);
     assert_eq!((Some(11.5), Some(1000.0)), (camera.zoom, camera.center_altitude), "the ease ends where it asked");
+}
+
+/// An 800 by 600 map under `projection` at (45, 7), zoom 13, pitched 60
+/// degrees, with its center `altitude` meters up.
+fn raised_at_zoom_13(projection: &str, altitude: f64) -> Transform {
+    let mut transform = new_transform();
+    transform.resize(Size::new(800, 600)).unwrap();
+    transform.set_projection_definition(&ProjectionDefinition::from_name(projection));
+    transform.jump_to(&CameraOptions {
+        center: Some(ll(45.0, 7.0)),
+        zoom: Some(13.0),
+        pitch: Some(60.0),
+        center_altitude: Some(altitude),
+        ..Default::default()
+    });
+    transform
+}
+
+/// A pan without an anchor on a pitched globe whose center stands 3000 m up
+/// moves the center as far down the screen as Mercator's pan at the same
+/// camera does: solved on the sea-level sphere, it moved it more than twice
+/// as far.
+#[test]
+fn a_pan_of_a_raised_globe_moves_the_center_as_far_as_on_mercator() {
+    let pan = |projection: &str| {
+        let mut transform = raised_at_zoom_13(projection, 3000.0);
+        let center = transform.view().center(WrapMode::Unwrapped);
+        transform.move_by(&sc(0.0, 50.0), &AnimationOptions::default()).unwrap();
+        let view = transform.view();
+        flip_y(view, &view.lat_lng_to_screen_coordinate_at(&center, 3000.0))
+    };
+    let (globe, mercator) = (pan("vertical-perspective"), pan("mercator"));
+    let off = (globe.x - mercator.x).hypot(globe.y - mercator.y);
+    assert!(off < ABOUT_A_PIXEL, "the globe's center lands at {globe:?}, Mercator's at {mercator:?}");
+}
+
+/// On a pitched globe, a drag keeps the ground it grabbed, at sea level,
+/// under the pointer, and its center 3000 m up moves it no differently.
+#[test]
+fn a_drag_on_a_raised_globe_keeps_the_grabbed_ground_under_the_pointer() {
+    for altitude in [0.0, 3000.0] {
+        let mut transform = raised_at_zoom_13("vertical-perspective", altitude);
+        let mut pointer = sc(600.0, 520.0);
+        let grabbed = flat_ground_under(&transform, pointer);
+        for step in 0..20 {
+            let offset = sc(-6.0, -12.0);
+            pointer = sc(pointer.x + offset.x, pointer.y + offset.y);
+            let phase = if step == 0 { GesturePhase::Begin } else { GesturePhase::Update };
+            transform
+                .apply_camera_delta(&CameraDelta {
+                    offset: Some(offset),
+                    anchor: Some(pointer),
+                    phase,
+                    ..CameraDelta::default()
+                })
+                .unwrap();
+            let off = off_by(&transform, &grabbed, pointer);
+            assert!(off < ABOUT_A_PIXEL, "{altitude} m, step {step}: the grabbed ground is {off} px off");
+        }
+    }
 }
 
 /// Where the flat map's old rule and its plane agree, on a map seen from

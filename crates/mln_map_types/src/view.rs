@@ -710,23 +710,39 @@ impl View {
     /// The screen point of a location, measured from the bottom edge (y up).
     #[must_use]
     pub fn lat_lng_to_screen_coordinate(&self, lat_lng: &LatLng) -> ScreenCoordinate {
-        self.lat_lng_to_screen_coordinate_with_clip(lat_lng).0
+        self.lat_lng_to_screen_coordinate_at(lat_lng, 0.0)
+    }
+
+    /// The screen point of a location `height` meters above sea level,
+    /// measured from the bottom edge (y up). The globe raises it along its
+    /// vertical.
+    #[must_use]
+    pub fn lat_lng_to_screen_coordinate_at(&self, lat_lng: &LatLng, height: f64) -> ScreenCoordinate {
+        self.clip_point_at(lat_lng, height).0
     }
 
     /// The screen point of a location and its clip-space position, whose w
     /// is negative behind the camera. Both are zero while the size is empty.
     #[must_use]
     pub fn lat_lng_to_screen_coordinate_with_clip(&self, lat_lng: &LatLng) -> (ScreenCoordinate, DVec4) {
+        self.clip_point_at(lat_lng, 0.0)
+    }
+
+    /// [`lat_lng_to_screen_coordinate_with_clip`] of a location `height`
+    /// meters above sea level.
+    ///
+    /// [`lat_lng_to_screen_coordinate_with_clip`]: Self::lat_lng_to_screen_coordinate_with_clip
+    fn clip_point_at(&self, lat_lng: &LatLng, height: f64) -> (ScreenCoordinate, DVec4) {
         if self.params.size.is_empty() {
             return (ScreenCoordinate::new(0.0, 0.0), DVec4::ZERO);
         }
 
         if self.is_globe() {
-            return VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(self, lat_lng);
+            return VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(self, lat_lng, height);
         }
 
         let pt = Projection::project(lat_lng, self.params.scale);
-        let p = self.matrices.coord * DVec4::new(pt.x / TILE_SIZE_D, pt.y / TILE_SIZE_D, 0.0, 1.0);
+        let p = self.matrices.coord * DVec4::new(pt.x / TILE_SIZE_D, pt.y / TILE_SIZE_D, height, 1.0);
         (ScreenCoordinate::new(p.x / p.w, f64::from(self.params.size.height) - p.y / p.w), p)
     }
 
@@ -750,7 +766,12 @@ impl View {
         }
 
         if self.is_globe() {
-            return match VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(self, point, WrapMode::Unwrapped) {
+            return match VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(
+                self,
+                point,
+                0.0,
+                WrapMode::Unwrapped,
+            ) {
                 Some(lat_lng) => TileCoordinate::from_lat_lng(f64::from(at_zoom), &lat_lng),
                 None => TileCoordinate { p: Point::new(0.0, 0.0), z: 0.0 },
             };
@@ -800,11 +821,11 @@ impl View {
 
     /// The location where the line of sight through `point`, measured from
     /// the bottom edge (y up), meets the plane `height` meters above sea
-    /// level on a Mercator view; where the line doesn't descend, as at sea
-    /// level, the point it passes a little way from the camera. The globe
-    /// reads its points on the sea-level sphere only. Fails as
-    /// [`screen_coordinate_to_lat_lng`], and on the globe for a `height`
-    /// other than 0.
+    /// level; where the line doesn't descend, as at sea level, the point it
+    /// passes a little way from the camera. The globe meets the sphere
+    /// `height` meters above sea level, and a line that misses it the
+    /// nearest point of that sphere's horizon. Fails as
+    /// [`screen_coordinate_to_lat_lng`].
     ///
     /// [`screen_coordinate_to_lat_lng`]: Self::screen_coordinate_to_lat_lng
     pub fn screen_coordinate_to_lat_lng_at(
@@ -815,16 +836,13 @@ impl View {
     ) -> Result<LatLng, Error> {
         // Without a size the point is Mercator's, as the tile coordinate is.
         if self.is_globe() && !self.params.size.is_empty() {
-            if height != 0.0 {
-                return Err(Error::invalid_argument("the globe reads points at sea level only"));
-            }
             if point.x.is_nan() || point.y.is_nan() {
                 return Err(Error::invalid_argument("screen coordinate must not be NaN"));
             }
             if !point.x.is_finite() || !point.y.is_finite() {
                 return Err(Error::invalid_argument("screen coordinate must not be infinite"));
             }
-            return VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(self, point, wrap_mode)
+            return VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(self, point, height, wrap_mode)
                 .ok_or_else(|| Error::invalid_argument("the camera shows no location"));
         }
         let coord = if self.params.size.is_empty() {

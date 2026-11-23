@@ -394,30 +394,6 @@ fn the_line_of_sight_runs_from_the_near_plane_to_the_far_plane() {
     assert!(far.z >= near.z, "{near} {far}");
 }
 
-/// The globe reads and holds locations on the sea-level sphere only: a plane
-/// at another height fails, and sea level is the globe's own solve.
-#[test]
-fn the_globe_refuses_a_plane_above_sea_level() {
-    use mln_style_types::ProjectionType;
-    use mln_util::geo::{ScreenCoordinate, WrapMode};
-
-    let mut state = pitched(30.0);
-    state.set_projection_definition(&ProjectionDefinition::new(ProjectionType::Globe));
-    let point = ScreenCoordinate::new(200.0, 220.0);
-    let view = state.view();
-    assert!(view.screen_coordinate_to_lat_lng_at(&point, 100.0, WrapMode::Unwrapped).is_err());
-    let location = view.screen_coordinate_to_lat_lng_at(&point, 0.0, WrapMode::Unwrapped).unwrap();
-    assert!(state.center_for_lat_lng_at(&location, &point, 100.0).is_err());
-    assert!(view.line_of_sight(&point).is_none());
-    let mut moved = state.clone();
-    assert!(moved.move_lat_lng_at(&location, &point, 100.0).is_err());
-    assert_eq!(state, moved);
-    moved.move_lat_lng_at(&location, &point, 0.0).unwrap();
-    let mut held = state.clone();
-    held.move_lat_lng(&location, &point).unwrap();
-    assert_eq!(held, moved);
-}
-
 /// A 512 by 512 view of latitude 52.5, longitude 13.4 at `zoom`, pitched
 /// 60 degrees and turned 20, its center `center_altitude` meters up, under
 /// `projection`.
@@ -466,6 +442,68 @@ fn the_globe_draws_the_center_at_its_altitude_at_the_center() {
         );
         let distance = (view.globe_camera_position() - center).length() * radius;
         assert!((distance - view.camera_to_center_distance()).abs() < 1e-6, "zoom {zoom}: {distance}");
+    }
+}
+
+/// On the globe, a location at a height converts to the screen and back,
+/// raised along its vertical, away from where it draws at sea level: within
+/// a hundredth of a pixel wherever the line of sight meets the sphere at
+/// that height, and at height 0 as the sea-level conversions, to the bit.
+#[test]
+fn globe_conversions_at_a_height_undo_each_other() {
+    use mln_style_types::ProjectionType;
+    use mln_util::geo::{ScreenCoordinate, WrapMode};
+
+    let state = raised(ProjectionDefinition::new(ProjectionType::VerticalPerspective), 14.0, 1000.0);
+    let view = state.view();
+    for row in 0..=8 {
+        for column in 0..=8 {
+            let pixel = ScreenCoordinate::new(64.0 * f64::from(column), 30.0 * f64::from(row));
+            let flat = view.screen_coordinate_to_lat_lng(&pixel, WrapMode::Unwrapped).unwrap();
+            let at = view.screen_coordinate_to_lat_lng_at(&pixel, 0.0, WrapMode::Unwrapped).unwrap();
+            assert_eq!(flat, at);
+            assert_eq!(view.lat_lng_to_screen_coordinate(&flat), view.lat_lng_to_screen_coordinate_at(&at, 0.0));
+            for height in [-300.0, 1000.0, 2500.0] {
+                let location = view.screen_coordinate_to_lat_lng_at(&pixel, height, WrapMode::Unwrapped).unwrap();
+                let back = view.lat_lng_to_screen_coordinate_at(&location, height);
+                let off = (back.x - pixel.x).hypot(back.y - pixel.y);
+                assert!(off < 0.01, "{height} m: {pixel:?} comes back {off} px off");
+                // At sea level the location draws elsewhere, by its height.
+                let sea = view.lat_lng_to_screen_coordinate(&location);
+                let parallax = (sea.x - pixel.x).hypot(sea.y - pixel.y);
+                assert!(parallax > 10.0, "{height} m: {pixel:?} is {parallax} px from where it draws at sea level");
+            }
+        }
+    }
+}
+
+/// On the globe, moving a location on the sphere at a height to a point
+/// puts it there at that height, with the zoom, the angles and the center's
+/// altitude kept.
+#[test]
+fn moving_a_location_on_a_sphere_puts_it_at_the_point() {
+    use mln_style_types::ProjectionType;
+    use mln_util::geo::{ScreenCoordinate, WrapMode};
+
+    use crate::VerticalPerspectiveProjection;
+
+    let state = raised(ProjectionDefinition::new(ProjectionType::VerticalPerspective), 14.0, 400.0);
+    let (from, to) = (ScreenCoordinate::new(140.0, 120.0), ScreenCoordinate::new(380.0, 200.0));
+    for height in [0.0, 400.0, 1500.0] {
+        let mut moved = state.clone();
+        let location = moved.view().screen_coordinate_to_lat_lng_at(&from, height, WrapMode::Unwrapped).unwrap();
+        moved.move_lat_lng_at(&location, &to, height).unwrap();
+        // Where the location, raised along its vertical, draws.
+        let raised = VerticalPerspectiveProjection::surface_vector(&location)
+            * (1.0 + height / VerticalPerspectiveProjection::GLOBE_RADIUS_METERS);
+        let clip = moved.view().globe_view_projection_matrix() * raised.extend(1.0);
+        let landed = ((clip.x / clip.w + 1.0) * 256.0, (clip.y / clip.w + 1.0) * 256.0);
+        assert!((landed.0 - to.x).hypot(landed.1 - to.y) < 1e-2, "{height} m: {landed:?}");
+        let (before, after) = (state.view(), moved.view());
+        assert_eq!(
+            (before.angle(), before.pitch(), before.center_altitude()),
+            (after.angle(), after.pitch(), after.center_altitude())
+        );
     }
 }
 

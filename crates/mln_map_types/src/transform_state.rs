@@ -619,16 +619,15 @@ impl TransformState {
     /// is at `anchor`, a point measured from the bottom edge (y up): the
     /// center moves across the ground, with the zoom, the angles and the
     /// center's altitude kept. At height 0 it is
-    /// [`move_lat_lng`](Self::move_lat_lng). The globe holds locations on
-    /// the sea-level sphere only. Fails as `move_lat_lng` does, and on the
-    /// globe for a `height` other than 0.
+    /// [`move_lat_lng`](Self::move_lat_lng). The globe turns to hold
+    /// `lat_lng` on the sphere `height` meters above sea level, keeping the
+    /// planet's size on the screen. Fails as `move_lat_lng` does.
     pub fn move_lat_lng_at(&mut self, lat_lng: &LatLng, anchor: &ScreenCoordinate, height: f64) -> Result<(), Error> {
         let view = &self.view;
         if view.is_globe() {
-            if height != 0.0 {
-                return Err(Error::invalid_argument("the globe holds locations at sea level only"));
-            }
-            if let Some(center) = VerticalPerspectiveProjection::center_for_location_at_point(view, lat_lng, anchor) {
+            if let Some(center) =
+                VerticalPerspectiveProjection::center_for_location_at_point(view, lat_lng, anchor, height)
+            {
                 let target = self.constrained_center(&center, view.zoom());
                 let zoom = view.zoom()
                     + VerticalPerspectiveProjection::zoom_adjustment(
@@ -653,10 +652,11 @@ impl TransformState {
     /// Mercator view: the current center moved across the ground by as far
     /// as `lat_lng` is from the location the line of sight through `anchor`
     /// meets at that height (GL JS's `getCameraForLocationAtPoint`). On the
-    /// globe it is the center that holds `lat_lng` on the sea-level sphere,
-    /// or fails where none does; before the globe has a size, its points are
-    /// Mercator's, as [`crate::View::screen_coordinate_to_lat_lng_at`] reads
-    /// them. Fails as [`move_lat_lng_at`](Self::move_lat_lng_at) does.
+    /// globe it is the center that holds `lat_lng` on the sphere at that
+    /// height, or fails where none does; before the globe has a size, its
+    /// points are Mercator's, as
+    /// [`crate::View::screen_coordinate_to_lat_lng_at`] reads them. Fails as
+    /// [`move_lat_lng_at`](Self::move_lat_lng_at) does.
     pub fn center_for_lat_lng_at(
         &self,
         lat_lng: &LatLng,
@@ -665,10 +665,7 @@ impl TransformState {
     ) -> Result<LatLng, Error> {
         let view = &self.view;
         if view.is_globe() && !view.size().is_empty() {
-            if height != 0.0 {
-                return Err(Error::invalid_argument("the globe holds locations at sea level only"));
-            }
-            return VerticalPerspectiveProjection::center_for_location_at_point(view, lat_lng, anchor)
+            return VerticalPerspectiveProjection::center_for_location_at_point(view, lat_lng, anchor, height)
                 .ok_or_else(|| Error::invalid_argument("no center holds the location at the point"));
         }
         let scale = view.scale();

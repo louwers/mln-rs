@@ -67,7 +67,11 @@ pub(crate) fn query_screen_geometry<'a>(view: &View, geometry: &'a [ScreenCoordi
     const STEPS: i32 = 32;
     let height = f64::from(view.size().height);
     let on_planet = |p: &ScreenCoordinate| {
-        VerticalPerspectiveProjection::screen_coordinate_hits_globe(view, &ScreenCoordinate::new(p.x, height - p.y))
+        VerticalPerspectiveProjection::screen_coordinate_hits_globe(
+            view,
+            &ScreenCoordinate::new(p.x, height - p.y),
+            0.0,
+        )
     };
     if !view.is_globe() || geometry.len() < 2 || geometry.iter().all(on_planet) {
         return Cow::Borrowed(geometry);
