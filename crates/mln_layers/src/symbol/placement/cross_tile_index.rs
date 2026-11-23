@@ -456,9 +456,11 @@ mod tests {
         camera_at(0.0, 0.0, 0.0, false)
     }
 
-    // gtest: CrossTileSymbolLayerIndex.addBucket
+    /// A symbol takes the id of a symbol of a parent or child tile with its
+    /// key near its position, and a new id without one; a removed tile's
+    /// symbols match no more.
     #[test]
-    fn add_bucket() {
+    fn a_symbol_takes_the_id_of_its_match_in_a_parent_or_child_tile() {
         let any_camera = any_camera();
         let mut max_bucket_instance_id = 0u32;
         let mut index = LayerIndex::default();
@@ -541,7 +543,6 @@ mod tests {
         assert_eq!(cross_tile_id(&grandchild_bucket, 1), Some(5));
     }
 
-    // gtest: CrossTileSymbolLayerIndex.tileMovedToAnotherWrapKeepsItsSymbols
     #[test]
     fn tile_moved_to_another_wrap_keeps_its_symbols() {
         let any_camera = any_camera();
@@ -570,9 +571,10 @@ mod tests {
         assert!(!index.remove_stale_buckets(&current_ids));
     }
 
-    // gtest: CrossTileSymbolLayerIndex.resetIDs
+    /// A tile added again after its removal takes the ids of the symbols
+    /// that it matches now, not the ones it had.
     #[test]
-    fn reset_ids() {
+    fn a_tile_added_again_takes_the_ids_it_matches_now() {
         let any_camera = any_camera();
         let mut index = LayerIndex::default();
         let mut ids = IdAllocator::default();
@@ -615,9 +617,10 @@ mod tests {
         assert_eq!(cross_tile_id(&main_bucket, 0), Some(2));
     }
 
-    // gtest: CrossTileSymbolLayerIndex.noDuplicatesWithinZoomLevel
+    /// Each id of a parent's symbols goes to one symbol of a child tile:
+    /// a third symbol that matches the same place gets a new one.
     #[test]
-    fn no_duplicates_within_zoom_level() {
+    fn a_parents_id_goes_to_one_symbol_of_a_child_tile() {
         let any_camera = any_camera();
         let mut index = LayerIndex::default();
         let mut ids = IdAllocator::default();
@@ -663,9 +666,10 @@ mod tests {
         assert_eq!(cross_tile_id(&child_bucket, 2), Some(3)); // C' gets new ID
     }
 
-    // gtest: CrossTileSymbolLayerIndex.bucketReplacement
+    /// A tile's new bucket takes the ids of its old bucket's symbols, each
+    /// once.
     #[test]
-    fn bucket_replacement() {
+    fn a_tiles_new_bucket_takes_the_ids_of_its_old_one() {
         let any_camera = any_camera();
         let mut index = LayerIndex::default();
         let mut ids = IdAllocator::default();
@@ -759,16 +763,17 @@ mod tests {
         assert_ne!(back_revision, revision);
     }
 
-    // gtest: CrossTileSymbolLayerIndex.offscreenSymbols
+    /// An overscaled tile's symbols off the screen get no id until the
+    /// camera shows them.
     #[test]
-    fn offscreen_symbols() {
+    fn an_overscaled_tiles_symbols_off_the_screen_get_no_id() {
         expect_offscreen_symbols_skipped(false);
     }
 
-    // gtest: CrossTileSymbolLayerIndex.offscreenSymbolsOnTheGlobe
-    // On the globe the anchors go through the sphere, not the tile matrix.
+    /// As `an_overscaled_tiles_symbols_off_the_screen_get_no_id`, on the
+    /// globe, where the anchors go through the sphere, not the tile matrix.
     #[test]
-    fn offscreen_symbols_on_the_globe() {
+    fn an_overscaled_tiles_symbols_off_the_screen_get_no_id_on_the_globe() {
         expect_offscreen_symbols_skipped(true);
     }
 }
