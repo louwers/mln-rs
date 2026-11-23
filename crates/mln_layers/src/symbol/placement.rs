@@ -199,34 +199,17 @@ pub(crate) struct SymbolPlacement {
     /// Whether the buckets' opacities follow the placement again in the
     /// frame's update: their buckets changed, or they placed again.
     update_opacities: bool,
+    /// The buckets of the layer being placed.
+    placing: LayerBuckets,
     /// The cross-tile ids of the symbols that the layer being updated has
     /// shown already.
     shown: HashSet<NonZeroU32>,
-    /// Where among `layers` the search for the layer being placed starts:
-    /// the engine places the layers topmost first.
-    next_layer: usize,
 }
 
+#[cfg(feature = "bench")]
 impl SymbolPlacement {
-    /// Where `layer`'s buckets are among the frame's.
-    fn layer_position(&mut self, layer: &PlacingLayer<'_, SymbolLayer>) -> Option<usize> {
-        let id = layer.layer.id();
-        let below = self.next_layer.min(self.layers.len());
-        let position = self.layers[..below]
-            .iter()
-            .rposition(|buckets| buckets.id == id)
-            .or_else(|| self.layers.iter().rposition(|buckets| buckets.id == id))?;
-        debug_assert!(
-            self.layers[position].placed.iter().all(|placed| placed.tile < layer.tiles.len()),
-            "the layer leads other buckets than the engine says"
-        );
-        self.next_layer = position;
-        Some(position)
-    }
-
     /// Reads `cx`'s layers, as [`prepare`](engine::Placement::prepare)
     /// does, without indexing their symbols.
-    #[cfg(feature = "bench")]
     pub(crate) fn prepare_layers(&mut self, cx: &PlacementCx<'_, SymbolLayer>) {
         LayerBuckets::fill(&mut self.layers, cx);
     }
@@ -266,17 +249,16 @@ impl engine::Placement for SymbolPlacement {
 
     fn begin(&mut self, cx: &mut PlaceCx<'_>) {
         self.placement.begin(cx);
-        self.next_layer = self.layers.len();
     }
 
     fn place_crossing(&mut self, layer: &PlacingLayer<'_, SymbolLayer>, cx: &mut PlaceCx<'_>) {
-        let Some(position) = self.layer_position(layer) else { return };
-        self.placement.place_crossing(&self.layers[position], layer.tiles, cx);
+        self.placing.set(layer, &cx.buckets);
+        self.placement.place_crossing(&self.placing, layer.tiles, cx);
     }
 
     fn place(&mut self, layer: &PlacingLayer<'_, SymbolLayer>, cx: &mut PlaceCx<'_>) {
-        let Some(position) = self.layer_position(layer) else { return };
-        self.placement.place_layer(&self.layers[position], layer.tiles, cx);
+        self.placing.set(layer, &cx.buckets);
+        self.placement.place_layer(&self.placing, layer.tiles, cx);
     }
 
     /// Commits the placement, and marks the buckets it placed since their
