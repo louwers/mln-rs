@@ -10,8 +10,8 @@ use mln_style::source_type::SourceData;
 
 use super::{ClusterProperties, GeoJSONOptions, GeoJsonSourceOptions, GeoJsonSourceType};
 
-// The C++ `static_cast<uint8_t/uint16_t/size_t>(float)` of out-of-range
-// values is UB; the port saturates (`as`).
+// Numbers too large or too small for an option's integer type saturate
+// (`as`).
 
 /// Converts a GeoJSON source's options, whose `clusterProperties`
 /// expressions parse against `functions`.
@@ -58,8 +58,6 @@ pub fn convert_geojson_options(
         }
     }
 
-    // Quirk kept: C++ tests `if (toBool(v))`, i.e. that the optional is
-    // engaged, so `false` is accepted too.
     if let Some(cluster_value) = value.object_member("cluster") {
         if let Some(b) = cluster_value.to_bool() {
             options.cluster = b;
@@ -208,8 +206,7 @@ pub(crate) fn convert_geojson_source(
     }
 }
 
-/// Reads GeoJSON from JSON bytes, reporting the `geojson` crate's error
-/// (C++: rapidjson's `GetParseError_En(code) + " at offset N"`).
+/// Reads GeoJSON from JSON bytes, reporting the `geojson` crate's error.
 pub(crate) fn convert_json_geojson(json: &[u8], error: &mut Error) -> Option<GeoJson> {
     match serde_json::from_slice(json) {
         Ok(geojson) => Some(geojson),

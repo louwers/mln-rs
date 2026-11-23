@@ -1,4 +1,4 @@
-//! A Rust port of the MapLibre Native map rendering core.
+//! A map renderer: maps styled with the MapLibre Style Spec, drawn on the GPU.
 //!
 //! The root holds the thread-safe handles of `mln_runtime`: a [`Runtime`]
 //! and its [`Map`]s, whose commands run on the runtime's thread and report

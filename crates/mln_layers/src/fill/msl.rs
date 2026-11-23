@@ -248,8 +248,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     return half4(1.0);
 #endif
 
-    // The outline fades over a pixel from the line, as in the GL and Vulkan
-    // shaders; the C++ Metal source leaves `alpha` out here.
+    // The outline fades over a pixel from the line.
     const float dist = length(in.pos - in.position.xy);
     const float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
 

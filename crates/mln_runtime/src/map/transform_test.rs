@@ -1,8 +1,7 @@
-// The C++ AnimationOptions callbacks capture the Transform by reference and
-// assert on it. Here the transform reports each command's end as an event,
-// which the tests find by the command's transition id (`EndLog`) right after
-// the call that ended it. The checks of the C++ frame callbacks run after
-// each `update_transitions` that leaves the command running.
+// The transform reports each command's end as an event, which the tests find
+// by the command's transition id (`EndLog`) right after the call that ended
+// it. A test's checks of a running command run after each
+// `update_transitions` that leaves the command running.
 //
 // Commands start at the frame time that `start_clock` sets, so a test steps
 // them from a start it knows.
@@ -96,8 +95,8 @@ fn assert_vec3_near_1e5(arg: DVec3, vec: DVec3) {
     assert!(arg.abs_diff_eq(vec, ABS_DOUBLE_ERROR), "{arg:?} vs {vec:?}");
 }
 
-/// The C++ tests' setters of one limit each, which leave the limits as they
-/// were where C++ ignores the value.
+/// Setters of one limit each, which leave the limits as they were when the
+/// transform refuses the value.
 trait LimitSetters {
     fn limits(&self) -> CameraLimits;
     fn set_one_limit(&mut self, limits: CameraLimits) {
@@ -1240,7 +1239,7 @@ fn lat_lng_bounds() {
     assert_double_eq(transform.view().center(WrapMode::Wrapped).longitude(), 120.0);
 }
 
-// Port-only: the floor screen bounds set is the zoom a request below it
+// The floor screen bounds set is the zoom a request below it
 // settles on, wherever the center is; the width decides on a square screen
 // and the height on a tall one.
 #[test]
@@ -3626,7 +3625,7 @@ fn free_bearing_drag_keeps_the_location_under_the_cursor() {
     }
 }
 
-// Port-only: with the bearing held, the steps of a drag hold the location
+// With the bearing held, the steps of a drag hold the location
 // the first of them grabbed, until something else moves the camera. The step
 // after that grabs the location then under the cursor, and doesn't bring the
 // first one back.
@@ -4026,7 +4025,7 @@ fn mercator_camera_center_is_on_the_transforms_world_copy() {
     assert_near(300.0, point.y, 1e-6);
 }
 
-// Port-only: from infinite padding, the insets interpolate to NaN
+// From infinite padding, the insets interpolate to NaN
 // (inf - inf), for which the C++ EdgeInsets constructor throws out of the
 // animation frame (uncaught). The port logs it and keeps the insets.
 #[test]
@@ -4046,7 +4045,7 @@ fn padding_interpolated_to_nan_keeps_the_insets() {
     assert_eq!(transform.state().view().padding(), infinite);
 }
 
-// Port-only: a screen coordinate without a LatLng is the C++ LatLng
+// A screen coordinate without a LatLng is the C++ LatLng
 // constructor's std::domain_error, returned instead of thrown.
 #[test]
 fn nan_screen_coordinates_are_errors() {
@@ -4065,7 +4064,7 @@ fn nan_screen_coordinates_are_errors() {
     assert_eq!(transform.view().center(WrapMode::Wrapped), center);
 }
 
-// Port-only: the globe returns the errors Mercator does for a NaN point,
+// The globe returns the errors Mercator does for a NaN point,
 // immediate or animated, and ignores a NaN anchor.
 #[test]
 fn nan_screen_coordinates_are_errors_on_the_globe() {
@@ -4089,7 +4088,7 @@ fn nan_screen_coordinates_are_errors_on_the_globe() {
     assert_eq!(transform.view().center(WrapMode::Wrapped), center);
 }
 
-// Port-only: before its first resize a globe map moves and answers as
+// Before its first resize a globe map moves and answers as
 // Mercator does.
 #[test]
 fn unsized_globe_moves_as_mercator() {
@@ -4511,8 +4510,8 @@ fn glide<T>(velocity: T, decay: MomentumDecay) -> MomentumGlide<T> {
     MomentumGlide { velocity, decay }
 }
 
-/// A glide from `velocity` with the C++ header's plain friction, which the
-/// ported gtests use, rather than a part's own.
+/// A glide from `velocity` with the default friction, rather than a part's
+/// own.
 fn plain<T>(velocity: T) -> MomentumGlide<T> {
     glide(velocity, MomentumDecay::DEFAULT)
 }
@@ -4630,7 +4629,7 @@ fn momentum_pans_its_distance_on_screen() {
     assert!(!transform.in_transition());
 }
 
-// Port-only: momentum pans the globe as a drag around the view center does,
+// Momentum pans the globe as a drag around the view center does,
 // and its zoom keeps the planet's size as the latitude changes.
 #[test]
 fn momentum_pans_the_globe_as_a_drag_does() {
@@ -4651,7 +4650,7 @@ fn momentum_pans_the_globe_as_a_drag_does() {
     );
 }
 
-// Port-only: momentum zoom on the globe keeps to the latitude's minimum
+// Momentum zoom on the globe keeps to the latitude's minimum
 // zoom, which is below the map's toward the poles, as an ease does.
 #[test]
 fn momentum_zoom_keeps_the_globes_minimum_at_the_latitude() {
@@ -5309,7 +5308,7 @@ fn a_turn_around_an_anchor_keeps_the_ground_under_it() {
     assert_near(under.y, anchor.y, 1e-6);
 }
 
-// Port-only: a drag through apply_camera_delta holds the point its anchor
+// A drag through apply_camera_delta holds the point its anchor
 // names, as move_by_with_anchor does. On the globe the planet turns to keep
 // the grabbed location under the cursor, which a drag around the view center
 // doesn't; on a flat map seen from straight above at sea level every point

@@ -216,11 +216,8 @@ pub fn parse_sprite(id: &str, image: &PremultipliedImage, json: &[u8]) -> Result
         }
     }
 
-    // C++: assert([&images] { std::sort(images.begin(), images.end());
-    // return std::unique(images.begin(), images.end()) == images.end(); }());
-    // The assertion sorts `images` (by id) as a side effect, so builds with
-    // assertions return them sorted and NDEBUG builds in document order.
-    // Ported as is: debug_assertions plays the role of !NDEBUG.
+    // Debug builds check that the ids are unique, and return the images
+    // sorted by id; release builds return them in document order.
     if cfg!(debug_assertions) {
         images.sort_by(|a, b| a.id.cmp(&b.id));
         assert!(images.windows(2).all(|w| w[0].id != w[1].id), "duplicate sprite image ids");

@@ -1,10 +1,8 @@
-// Deviation: C++ groups into an `unordered_map` keyed by `LayoutGroupKey`
-// and the worker iterates it in hash order; the port keeps the groups in
-// the order their first layer appears. Groups are independent (one bucket
-// each); only the feature index's sort indices, used by queries, follow
-// the group order. C++ hashes the filter by its pointer, so filters that
-// are equal without being shared seldom meet in a bucket; the port hashes
-// the filter's structure and groups them.
+// The groups keep the order their first layer appears in. Groups are
+// independent (one bucket each); only the feature index's sort indices,
+// used by queries, follow the group order. The filter is hashed by its
+// structure, so layers with equal filters share a group even when the
+// filters aren't shared.
 
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;

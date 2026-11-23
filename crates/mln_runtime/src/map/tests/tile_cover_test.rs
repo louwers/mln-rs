@@ -694,8 +694,7 @@ mod tile_cover {
         assert_eq!(6, covering_zoom_level(4.6, true, 256));
     }
 
-    /// Sets up `transform` for a globe test. C++ defaults `pitch` and
-    /// `bearing` to 0.
+    /// Sets up `transform` for a globe test.
     fn set_up_globe(transform: &mut Transform, size: Size, center: LatLng, zoom: f64, pitch: f64, bearing: f64) {
         transform.resize(size).unwrap();
         transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));

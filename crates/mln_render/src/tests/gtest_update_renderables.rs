@@ -1,8 +1,7 @@
-// C++ logs `RenderTileAction`s with a reference to the tile object and
-// compares them by address. The port's `update_renderables` names tiles by
-// their storage key, so the mock gives every MockTileData a serial number and
-// `TileRef` (key + serial) stands in for the address: a tile re-created under
-// the same key compares unequal, like a new allocation in C++.
+// `update_renderables` names tiles by their storage key, so the mock gives
+// every MockTileData a serial number and logs each action with a `TileRef`
+// (key + serial): a tile re-created under the same key compares unequal to
+// the one it replaces.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -844,7 +843,6 @@ fn use_overzoomed_tile_after_maxzoom() {
     // Now remove the best match.
     source.log.clear();
     source.data_tiles.remove(&oid(2, 0, (2, 0, 0)));
-    // C++: tile_2_2_0_0 = nullptr;
 
     // Use the overzoomed tile even though it doesn't match the zoom level.
     source.update_renderables(None);
@@ -885,7 +883,6 @@ fn ascend_to_non_overzoomed_tiles() {
     // Then, swap it with a non-overzoomed tile.
     source.log.clear();
     source.data_tiles.remove(&oid(3, 0, (2, 0, 0)));
-    // C++: tile_3_2_0_0 = nullptr;
     let tile_2_2_0_0 = source.create_tile_data(oid(2, 0, (2, 0, 0)));
     source.tile_mut(tile_2_2_0_0).renderable = true;
     source.update_renderables(None);
@@ -905,7 +902,6 @@ fn ascend_to_non_overzoomed_tiles() {
     // Then, swap it with a parent tile.
     source.log.clear();
     source.data_tiles.remove(&oid(2, 0, (2, 0, 0)));
-    // C++: tile_2_2_0_0 = nullptr;
     let tile_1_1_0_0 = source.create_tile_data(oid(1, 0, (1, 0, 0)));
     source.tile_mut(tile_1_1_0_0).renderable = true;
     source.update_renderables(None);
