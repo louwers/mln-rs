@@ -144,6 +144,28 @@ fn a_new_value_reaches_both_layers() {
     assert_eq!(RED, pixel(&image, 2, 2));
 }
 
+/// A new version that comes while the source holds stamps reaches every
+/// tile, those that kept theirs included, as the source lets go.
+#[test]
+fn a_version_that_comes_while_held_reaches_every_tile_as_the_hold_ends() {
+    let fixture = Fixture::new(registry(), STYLE);
+    let [before, _] = drawn(&fixture);
+    edit_stamps(&fixture, |data| {
+        data.options.version = 1;
+        data.options.hold = true;
+    });
+    fixture.render();
+    let [held, _] = drawn(&fixture);
+    assert_eq!(held, before, "the tiles keep their stamps while the source holds new ones");
+
+    edit_stamps(&fixture, |data| data.options.hold = false);
+    fixture.render_loaded();
+    let [fill, mark] = drawn(&fixture);
+    assert_eq!(fill, mark);
+    assert_eq!(tiles(&fill), tiles(&before));
+    assert!(fill.iter().all(|&(_, _, version)| version == 1), "{fill:?}");
+}
+
 /// While a tile waits for its value, a parent with one draws in its place,
 /// under the children that have theirs once they come.
 #[test]

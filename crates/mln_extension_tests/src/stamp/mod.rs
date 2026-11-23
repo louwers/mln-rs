@@ -23,6 +23,7 @@ use mln_rs::source::conversion::Error;
 use mln_rs::source::{
     CanonicalTileID, Convertible, Cover, DataOrigin, Functions, LoadContext, OriginUpdate, OverscaledTileID, Range,
     Source, SourceData, SourceKind, SourceType, SourceTypeInfo, StyleSourceType, Supply, ValueKind, ValueTiles,
+    WorldCopy,
 };
 
 use self::program::{RECT, RectDraw};
@@ -71,17 +72,24 @@ impl StyleSourceType for StampSource {
     type Description = ();
 
     fn from_json(value: &Convertible<'_>, _functions: &Arc<Functions>, error: &mut Error) -> Option<SourceData<Self>> {
-        let version = match value.object_member("version") {
-            Some(version) => version.to_number().filter(|version| *version >= 0.0)? as u32,
+        let version = match value.object_member("version").map(|version| version.to_number()) {
             None => 0,
+            Some(Some(version)) if version >= 0.0 => version as u32,
+            Some(_) => return invalid(error, "version must be a non-negative number"),
         };
-        let hold = match value.object_member("hold") {
-            Some(hold) => hold.to_bool()?,
+        let hold = match value.object_member("hold").map(|hold| hold.to_bool()) {
             None => false,
+            Some(Some(hold)) => hold,
+            Some(None) => return invalid(error, "hold must be a boolean"),
         };
-        error.message.clear();
         Some(SourceData::new(StampOptions { version, hold }))
     }
+}
+
+/// No source, for the reason `message`, which `error` takes.
+fn invalid<T>(error: &mut Error, message: &str) -> Option<T> {
+    message.clone_into(&mut error.message);
+    None
 }
 
 impl SourceType for StampSource {
@@ -93,7 +101,7 @@ impl SourceType for StampSource {
 }
 
 /// Where a stamp source's tiles get their stamps: from the origin itself,
-/// as each tile starts, unless the source holds them.
+/// unless the source holds them.
 #[derive(Default)]
 struct StampOrigin {
     /// The source's members as of its last version.
@@ -101,36 +109,35 @@ struct StampOrigin {
 }
 
 impl StampOrigin {
-    fn deliver(&self, cx: &mut LoadContext<'_, '_, Self>) {
-        cx.deliver(Some(Arc::new(Stamp::of(cx.id().canonical, self.options.version))));
+    /// Gives the tile, whose stamp is of the version `held`, a stamp of the
+    /// source's version, unless it has one or the source holds stamps.
+    fn stamp(&self, held: &mut Option<u32>, cx: &mut LoadContext<'_, '_, Self>) {
+        let version = self.options.version;
+        if self.options.hold || *held == Some(version) {
+            return;
+        }
+        *held = Some(version);
+        cx.deliver(Some(Arc::new(Stamp::of(cx.id().canonical, version))));
     }
 }
 
 impl DataOrigin for StampOrigin {
     type Data = ValueTiles<Stamp>;
-    type Tile = ();
+    /// The version of the tile's stamp, `None` until it has one.
+    type Tile = Option<u32>;
     type Reply = Infallible;
 
-    /// A new version gives every tile a new stamp, and the source letting
-    /// go of its tiles gives those that wait theirs; the cached tiles go.
+    /// A new version gives every tile a new stamp, and the cached tiles go;
+    /// while the source holds stamps, the tiles wait for theirs until it
+    /// lets go.
     fn update(&mut self, update: &mut OriginUpdate<'_, Self>) -> Option<Cover> {
         let options = SourceData::<StampSource>::recover(update.source())?.options.clone();
-        let new_version = options.version != self.options.version;
         if options != self.options {
-            self.options = options;
-            if !self.options.hold {
-                update.update_tiles(
-                    |_| true,
-                    |(), cx| {
-                        if new_version || !cx.is_renderable() {
-                            self.deliver(cx);
-                        }
-                    },
-                );
-            }
-            if new_version {
+            if options.version != self.options.version {
                 update.clear_cache();
             }
+            self.options = options;
+            update.update_tiles(|_| true, |held, cx| self.stamp(held, cx));
         }
         Some(Cover {
             tile_size: 32,
@@ -145,16 +152,19 @@ impl DataOrigin for StampOrigin {
 
     /// A tile in a new world copy takes the stamp of the same tile in
     /// another; any other gets its own, unless the source holds it.
-    fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, copy: Option<&()>) {
-        if copy.is_some() && cx.take_copy() {
-            return;
+    fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, copy: Option<WorldCopy<'_, Option<u32>>>) -> Option<u32> {
+        if let Some(copy) = copy {
+            let held = *copy.state();
+            if copy.take(cx) {
+                return held;
+            }
         }
-        if !self.options.hold {
-            self.deliver(cx);
-        }
+        let mut held = None;
+        self.stamp(&mut held, cx);
+        held
     }
 
-    fn receive(&mut self, (): &mut (), reply: Infallible, _cx: &mut LoadContext<'_, '_, Self>) {
+    fn receive(&mut self, _held: &mut Option<u32>, reply: Infallible, _cx: &mut LoadContext<'_, '_, Self>) {
         match reply {}
     }
 }
