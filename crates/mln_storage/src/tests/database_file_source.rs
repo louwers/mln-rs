@@ -27,7 +27,7 @@ fn volatile_resource() {
 
     let resource = Rc::new(RefCell::new(Resource::with_tile_data(
         Kind::Unknown,
-        "http://127.0.0.1:3000/test",
+        "http://example.invalid/test",
         None,
         LoadingMethod::CacheOnly,
     )));
@@ -85,7 +85,7 @@ fn volatile_resource_is_not_stored() {
 
     let mut resource = Resource::with_tile_data(
         Kind::Unknown,
-        "http://127.0.0.1:3000/volatile-not-stored",
+        "http://example.invalid/volatile-not-stored",
         None,
         LoadingMethod::CacheOnly,
     );

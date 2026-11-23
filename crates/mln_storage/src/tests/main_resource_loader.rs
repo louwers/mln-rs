@@ -33,11 +33,11 @@ const JAN_1_2015: Timestamp = Timestamp::from_secs(1_420_070_400);
 /// - `/test`: "Hello World!", without caching headers;
 /// - `/load/<n>`: "Request <n>";
 /// - `/cache`: "Response <n>" for the n-th request, fresh for 30 seconds;
-/// - `/revalidate-same`: "Response" with an ETag that must be revalidated,
-///   and a 304 to a revalidation of that ETag, fresh for a minute and
+/// - `/revalidate-same`: "Response" with an `ETag` that must be revalidated,
+///   and a 304 to a revalidation of that `ETag`, fresh for a minute and
 ///   then to be revalidated (C++: a second);
 /// - `/revalidate-modified`: the same with `Last-Modified`;
-/// - `/revalidate-etag`: "Response <n>" and a new ETag each time, which
+/// - `/revalidate-etag`: "Response <n>" and a new `ETag` each time, which
 ///   must be revalidated.
 fn routes() -> impl Fn(&Resource) -> Reply + Send + Sync + 'static {
     let (cached, etagged) = (AtomicU32::new(0), AtomicU32::new(0));
@@ -96,8 +96,10 @@ impl TestSources {
     fn serving(network: Network) -> Self {
         let online: Arc<dyn FileSource> = Arc::<OnlineFileSource>::clone(&network.source);
         let database = Arc::new(DatabaseFileSource::new(":memory:", Some(Arc::clone(&online))));
-        let loader =
-            Loader::builder(&super::pool()).network(online).database(Arc::<DatabaseFileSource>::clone(&database)).build();
+        let loader = Loader::builder(&super::pool())
+            .network(online)
+            .database(Arc::<DatabaseFileSource>::clone(&database))
+            .build();
         TestSources { loader: Rc::new(loader), database, network }
     }
 }
@@ -852,7 +854,8 @@ fn cached_resource_low_priority() {
     let dbfs = database_file_source(&file_sources);
 
     // Expired copies of requests 3 and 4.
-    let resource = |n: u32| Resource::with_tile_data(Kind::Unknown, url(&format!("/load/{n}")), None, LoadingMethod::All);
+    let resource =
+        |n: u32| Resource::with_tile_data(Kind::Unknown, url(&format!("/load/{n}")), None, LoadingMethod::All);
     for n in [3, 4] {
         let mut response = Response::new();
         response.caching.expires = Some(one_hour_ago());

@@ -88,7 +88,7 @@ fn cancel() {
     let (request, answers) = network.request(&resource("/test"));
     drop(request);
     network.run();
-    assert!(network.server.requested().is_empty());
+    assert_eq!(Vec::<String>::new(), network.server.requested());
     assert!(answers.lock().is_empty());
 
     // Nor does one dropped before the source took it.
@@ -96,7 +96,7 @@ fn cancel() {
     drop(request);
     network.source.load(&resource("/test"), responder);
     network.run();
-    assert!(network.server.requested().is_empty());
+    assert_eq!(Vec::<String>::new(), network.server.requested());
 }
 
 // gtest: OnlineFileSource.CancelMultiple
@@ -327,7 +327,7 @@ fn network_status_change() {
     assert_eq!(2, network.server.requested().len(), "the retry is in flight");
     network.status.reachable();
     network.run();
-    assert!(network.server.requested().is_empty(), "no second transfer");
+    assert_eq!(Vec::<String>::new(), network.server.requested(), "no second transfer");
 
     for transfer in network.server.held() {
         transfer.respond(200, Vec::new(), b"Response".to_vec());
@@ -338,7 +338,7 @@ fn network_status_change() {
     assert_eq!(None, answers[1].error);
     assert_eq!(b"Response", data(&answers[1]));
     assert_uncached(&answers[1]);
-    assert!(network.server.requested().is_empty());
+    assert_eq!(Vec::<String>::new(), network.server.requested());
 }
 
 // Tests that a change in network status preempts the backoff of a request
@@ -376,7 +376,7 @@ fn network_status_online_offline() {
     network.run();
     assert_eq!(1, answers.lock().len());
     assert_eq!(Reason::Connection, answers.lock()[0].error.as_ref().expect("an error").reason);
-    assert!(network.server.requested().is_empty());
+    assert_eq!(Vec::<String>::new(), network.server.requested());
 
     network.status.set(Status::Online);
     network.run();
@@ -435,11 +435,8 @@ fn low_high_priority_requests() {
     network.source.set_maximum_concurrent_requests(1);
     let mut low = resource("/load/2");
     low.set_priority(Priority::Low);
-    let _requests = [
-        network.request(&resource("/load/1")),
-        network.request(&low),
-        network.request(&resource("/load/3")),
-    ];
+    let _requests =
+        [network.request(&resource("/load/1")), network.request(&low), network.request(&resource("/load/3"))];
 
     answer_in_turn(&mut network);
     assert_eq!([url("/load/1"), url("/load/3"), url("/load/2")].to_vec(), network.server.requested());
@@ -462,8 +459,12 @@ fn low_high_priority_requests_many() {
 
     answer_in_turn(&mut network);
     // The first starts at once; the regular ones go before the low ones.
-    let expected: Vec<String> =
-        [0].into_iter().chain((2..20).step_by(2)).chain((1..20).step_by(2)).map(|n| url(&format!("/load/{n}"))).collect();
+    let expected: Vec<String> = [0]
+        .into_iter()
+        .chain((2..20).step_by(2))
+        .chain((1..20).step_by(2))
+        .map(|n| url(&format!("/load/{n}")))
+        .collect();
     assert_eq!(expected, network.server.requested());
 }
 
@@ -481,7 +482,8 @@ fn pending_requests_start_by_order() {
             resource
         })
         .collect();
-    let mut requests: Vec<Option<Request>> = resources.iter().map(|resource| Some(network.request(resource).0)).collect();
+    let mut requests: Vec<Option<Request>> =
+        resources.iter().map(|resource| Some(network.request(resource).0)).collect();
     // The first request starts; the others wait for it.
     network.run();
 
@@ -529,7 +531,7 @@ fn failed_resource_transform() {
     assert_eq!(Reason::Other, error.reason);
     assert_eq!("No credential", error.message);
     assert!(answers[0].data.is_none());
-    assert!(network.server.requested().is_empty());
+    assert_eq!(Vec::<String>::new(), network.server.requested());
 }
 
 // A retry of a request that the resource transform failed asks the transform
@@ -540,14 +542,16 @@ fn retry_failed_resource_transform() {
     let mut network = hello();
     let transforms = Arc::new(AtomicU32::new(0));
     let counter = Arc::clone(&transforms);
-    network.source.set_resource_transform(Some(Arc::new(move |_kind: Kind, original: &str, finished: FinishedCallback| {
-        assert_eq!(url("/delayed"), original);
-        if counter.fetch_add(1, Ordering::SeqCst) == 0 {
-            finished(Err(ResourceError::new(Reason::Connection, "Offline")));
-        } else {
-            finished(Ok(url("/test")));
-        }
-    })));
+    network.source.set_resource_transform(Some(Arc::new(
+        move |_kind: Kind, original: &str, finished: FinishedCallback| {
+            assert_eq!(url("/delayed"), original);
+            if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+                finished(Err(ResourceError::new(Reason::Connection, "Offline")));
+            } else {
+                finished(Ok(url("/test")));
+            }
+        },
+    )));
 
     let (_request, answers) = network.request(&resource("/delayed"));
     network.run();
@@ -575,9 +579,11 @@ fn a_header_transform_runs_for_every_attempt() {
     let mut network = temporary_error();
     let target = url("/temporary-error");
     let rewritten = target.clone();
-    network.source.set_resource_transform(Some(Arc::new(move |_kind: Kind, _url: &str, finished: FinishedCallback| {
-        finished(Ok(rewritten.clone()));
-    })));
+    network.source.set_resource_transform(Some(Arc::new(
+        move |_kind: Kind, _url: &str, finished: FinishedCallback| {
+            finished(Ok(rewritten.clone()));
+        },
+    )));
     let urls = Arc::new(Mutex::new(Vec::new()));
     let seen = Arc::clone(&urls);
     network.source.set_http_header_transform(HttpHeaderTransform::new(Some(Arc::new(move |kind: Kind, url: &str| {
@@ -607,7 +613,7 @@ fn offline_a_requester_with_a_copy_keeps_it() {
     let (_request, answers) = network.request(&resource);
     network.run();
     assert!(answers.lock().is_empty(), "no error while offline");
-    assert!(network.server.requested().is_empty());
+    assert_eq!(Vec::<String>::new(), network.server.requested());
 
     network.status.set(Status::Online);
     network.run();

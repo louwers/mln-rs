@@ -131,8 +131,7 @@ pub(crate) struct Network {
 impl Network {
     /// A network whose server answers by `route`.
     pub(crate) fn serving(route: impl Fn(&Resource) -> Reply + Send + Sync + 'static) -> Network {
-        let server =
-            Arc::new(Server { route: Box::new(route), held: Mutex::default(), requested: Mutex::default() });
+        let server = Arc::new(Server { route: Box::new(route), held: Mutex::default(), requested: Mutex::default() });
         let clock = TestClock { base: Instant::now(), elapsed: Arc::default() };
         let time = clock.clone();
         let time: Clock = Arc::new(move || time.now());

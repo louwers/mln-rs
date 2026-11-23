@@ -13,9 +13,6 @@
 pub mod android;
 mod archive_tilejson;
 mod asset_file_source;
-#[cfg(all(any(test, feature = "bench"), not(target_family = "wasm")))]
-#[doc(hidden)]
-pub mod simulated_network;
 #[cfg(feature = "sqlite")]
 pub mod database_file_source;
 #[cfg(target_family = "wasm")]
@@ -50,6 +47,9 @@ pub mod resource;
 mod resource_options;
 pub mod resource_transform;
 pub mod response;
+#[cfg(all(any(test, feature = "bench"), not(target_family = "wasm")))]
+#[doc(hidden)]
+pub mod simulated_network;
 #[cfg(any(test, feature = "stub-file-source"))]
 pub mod stub_file_source;
 #[cfg(not(any(target_family = "wasm", target_vendor = "apple", target_os = "android")))]
