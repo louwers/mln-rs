@@ -280,7 +280,7 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
         let current = self.data.as_ref().is_some_and(|current| {
             current.tileset == tileset
                 && current.encoding == encoding
-                && same_file_source(current.file_source.as_ref(), file_source.as_ref())
+                && crate::same(current.file_source.as_ref(), file_source.as_ref())
         });
         if !current {
             self.data =
@@ -407,15 +407,6 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
 fn fail<O: DataOrigin>(tile: &mut TilesetTile, error: Error, cx: &mut LoadContext<'_, '_, O>) {
     tile.from_network = false;
     cx.fail(error);
-}
-
-/// Whether `a` and `b` are both absent or the same file source.
-fn same_file_source(a: Option<&Arc<dyn FileSource>>, b: Option<&Arc<dyn FileSource>>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => std::ptr::addr_eq(Arc::as_ptr(a), Arc::as_ptr(b)),
-        _ => false,
-    }
 }
 
 impl TilesetData {

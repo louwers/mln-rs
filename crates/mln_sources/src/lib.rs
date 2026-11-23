@@ -45,5 +45,16 @@ pub fn register_source_types(builder: &mut RegistryBuilder) -> Result<(), Regist
     builder.add_source_type::<CustomVectorSourceType>()
 }
 
+/// Whether `a` and `b` are both absent or the same object, as an origin
+/// tells the data or file source of a new version of its source from its
+/// last.
+fn same<T: ?Sized>(a: Option<&std::sync::Arc<T>>, b: Option<&std::sync::Arc<T>>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests;

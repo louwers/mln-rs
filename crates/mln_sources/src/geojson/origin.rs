@@ -30,15 +30,6 @@ struct GeoJsonOrigin {
     synchronous: bool,
 }
 
-/// Whether `a` and `b` are both empty or both the same object.
-fn same_data(a: Option<&Arc<dyn GeoJSONData>>, b: Option<&Arc<dyn GeoJSONData>>) -> bool {
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => std::ptr::addr_eq(Arc::as_ptr(a), Arc::as_ptr(b)),
-        _ => false,
-    }
-}
-
 impl DataOrigin for GeoJsonOrigin {
     type Data = GeometryTiles;
     /// The engine keeps which of a tile's loads is the latest.
@@ -55,7 +46,7 @@ impl DataOrigin for GeoJsonOrigin {
             update.clear_tiles();
         }
         let data = source.description.clone();
-        if !same_data(self.data.as_ref(), data.as_ref()) {
+        if !crate::same(self.data.as_ref(), data.as_ref()) {
             self.data.clone_from(&data);
             if update.mode() != MapMode::Continuous {
                 // Clearing the tiles in order to avoid render tests being
