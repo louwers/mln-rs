@@ -10,7 +10,7 @@
 //! it; a failed tile loads again when the engine retries it, unless the
 //! script says otherwise ([`Retry`]); a tile that starts from another world
 //! copy takes that copy, which counts as data, unless the script refuses
-//! copies; and each delivery comes with the times the script sets.
+//! copies.
 
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -30,7 +30,7 @@ use parking_lot::Mutex;
 use crate::erased_source::ErasedOrigin;
 use crate::source::{
     Cover, DataOrigin, DemTiles, GeometryTiles, LoadContext, OriginUpdate, RasterTiles, Replier, SourceType, Supply,
-    TileKind, TileNecessity, TileOperation, TileTimes, ValueTiles, WorldCopy,
+    TileKind, TileNecessity, TileOperation, ValueTiles, WorldCopy,
 };
 
 /// The kind of a scripted source's tiles, whose cover picks a view's tiles
@@ -211,7 +211,6 @@ struct ScriptState {
     retry: Retry,
     refuses_copies: bool,
     failed_loads_stay_open: bool,
-    times: TileTimes,
 }
 
 impl Script {
@@ -249,11 +248,6 @@ impl Script {
     /// its tile's load: the tile has done what it can.
     pub(crate) fn end_failed_loads(&self) {
         self.0.lock().failed_loads_stay_open = false;
-    }
-
-    /// Has each delivery from now on come with `times`.
-    pub(crate) fn set_times(&self, times: TileTimes) {
-        self.0.lock().times = times;
     }
 
     /// The loads begun since the last call, oldest first.
@@ -420,8 +414,6 @@ impl<K: Kind> DataOrigin for ScriptedOrigin<K> {
         };
         tile.answered = true;
         cx.report(TileOperation::LoadFromNetwork);
-        let times = self.script.0.lock().times;
-        cx.set_times(times);
         match item {
             Some(item) => cx.deliver(item),
             None => cx.missing(),
