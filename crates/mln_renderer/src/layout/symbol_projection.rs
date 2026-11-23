@@ -584,12 +584,20 @@ pub(crate) fn reproject_line_labels(
             continue;
         }
 
-        let perspective_ratio = 0.5 + 0.5 * (anchor.signed_distance_from_camera as f32 / camera_to_center);
-        let font_size = evaluate_size_for_feature(&sizes, symbol);
-        let font_size = if alignment.pitch_with_map {
-            font_size * perspective_ratio * tile_projector.pitched_text_correction(&tile_anchor) as f32
+        // The shaders scale the glyphs by the anchor's perspective ratio, so
+        // they are spaced along the line by it too.
+        let camera_to_anchor = anchor.signed_distance_from_camera as f32;
+        let distance_ratio = if alignment.pitch_with_map {
+            camera_to_anchor / camera_to_center
         } else {
-            font_size / perspective_ratio
+            camera_to_center / camera_to_anchor
+        };
+        let perspective_ratio = (0.5 + 0.5 * distance_ratio).clamp(0.0, 4.0);
+        let font_size = evaluate_size_for_feature(&sizes, symbol) * perspective_ratio;
+        let font_size = if alignment.pitch_with_map {
+            font_size * tile_projector.pitched_text_correction(&tile_anchor) as f32
+        } else {
+            font_size
         };
 
         let mut label = placer.begin(LineLabel::new(symbol, pools), font_size);
@@ -612,11 +620,16 @@ mod tests {
     use geometry::Point;
     use glam::Vec2;
     use mln_map::transform::Transform;
-    use mln_map_types::{ConstrainMode, TileProjector, ViewportMode};
-    use mln_tile_id::UnwrappedTileID;
+    use mln_map_types::{ConstrainMode, TileProjector, TransformState, View, ViewportMode};
+    use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
+    use mln_util::geo::LatLng;
     use mln_util::size::Size;
 
-    use super::{LabelPlaneProjector, LineLabel, LinePlacer, PlacedGlyph, TileDistance, Unplaced, WritingModes};
+    use super::{
+        LabelPlaneProjector, LineLabel, LineLabelAlignment, LinePlacer, PlacedGlyph, PlacedSymbol, PlacedSymbolPools,
+        SymbolSizeBinder, TileDistance, Unplaced, WritingModes, reproject_line_labels,
+    };
+    use crate::util::pool::PoolRange;
 
     /// A 512 px square map at zoom 0, where tile 0/0/0 fills the viewport
     /// and a pixel is 16 tile units.
@@ -699,5 +712,78 @@ mod tests {
         for (x, expected) in xs.iter().zip([246.0, 256.0, 266.0]) {
             assert!((x - expected).abs() < 1e-3, "{xs:?}");
         }
+    }
+
+    /// Tile 12/2000/1500, in a 512 px square view of its middle at zoom
+    /// 12.5, pitched 60° and turned 0.4 rad.
+    fn pitched_tile() -> (OverscaledTileID, View) {
+        let tile = OverscaledTileID::new(12, 0, CanonicalTileID::new(12, 2000, 1500));
+        let mut state = TransformState::default();
+        state.set_size(Size::new(512, 512));
+        let n = std::f64::consts::PI * (1.0 - 2.0 * 1500.5 / 4096.0);
+        let center = LatLng::new(n.sinh().atan().to_degrees(), 2000.5 / 4096.0 * 360.0 - 180.0).unwrap();
+        state.set_lat_lng_zoom(&center, 12.5);
+        state.set_pitch(60f64.to_radians());
+        state.set_angle(0.4);
+        (tile, state.view().clone())
+    }
+
+    /// The 24 px line label `glyph_offsets` along `line` from `anchor`, with
+    /// its line's pools.
+    fn line_label(anchor: Vec2, line: &[Point<i16>], glyph_offsets: &[f32]) -> (PlacedSymbol, PlacedSymbolPools) {
+        let mut pools = PlacedSymbolPools::default();
+        let vertices: Vec<Vec2> = line.iter().map(|&p| super::tile_point(p)).collect();
+        let symbol = PlacedSymbol {
+            anchor_point: anchor,
+            segment: 0,
+            lower_size: 24.0,
+            upper_size: 24.0,
+            line_offset: [0.0; 2],
+            writing_modes: WritingModes { horizontal: true, vertical: false },
+            line: PoolRange::extend(&mut pools.lines, line.iter().copied()),
+            tile_distances: PoolRange::extend(&mut pools.tile_distances, vertices.iter().map(|v| v.distance(anchor))),
+            glyph_offsets: PoolRange::extend(&mut pools.glyph_offsets, glyph_offsets.iter().copied()),
+            start_index: 0,
+            angle: 0.0,
+            height_offset: 0.0,
+            hidden: false,
+        };
+        (symbol, pools)
+    }
+
+    /// A viewport-pitched label along a line away from the view's center is
+    /// spaced by the size its glyphs draw at, which the shaders scale by
+    /// 0.5 + 0.5 × the camera's distance to the center over its distance to
+    /// the anchor.
+    #[test]
+    fn a_viewport_label_is_spaced_by_the_size_its_glyphs_draw_at() {
+        let (tile, view) = pitched_tile();
+        let projector = TileProjector::new(&view, &tile.to_unwrapped());
+        // Below the view's center, nearer the camera.
+        let anchor = Vec2::new(4100.0, 7200.0);
+        let (symbol, pools) = line_label(anchor, &[Point::new(1000, 7200), Point::new(7000, 7200)], &[-40.0, 40.0]);
+        let alignment = LineLabelAlignment { pitch_with_map: false, rotate_with_map: true, keep_upright: false };
+        let size = SymbolSizeBinder::Constant { layout_size: 24.0, covering_ranges: None, expression: None };
+        let mut vertices = Vec::new();
+        reproject_line_labels(
+            &mut vertices,
+            std::slice::from_ref(&symbol),
+            &pools,
+            &projector,
+            &size,
+            Vec2::ZERO,
+            alignment,
+        );
+        let glyphs: Vec<Vec2> =
+            vertices.iter().step_by(4).map(|vertex| Vec2::new(vertex.a1[0], vertex.a1[1])).collect();
+        let [first, last] = glyphs[..] else { panic!("two glyphs: {glyphs:?}") };
+        assert!(first.is_finite() && last.is_finite(), "both glyphs show: {glyphs:?}");
+        let font_size = first.distance(last) / 80.0 * 24.0;
+
+        let projected = projector.project(&Point::new(f64::from(anchor.x), f64::from(anchor.y)), 0.0);
+        let camera_to_anchor = projected.signed_distance_from_camera / view.camera_to_center_distance();
+        let drawn = 24.0 * (0.5 + 0.5 / camera_to_anchor) as f32;
+        assert!((font_size - drawn).abs() < 1e-3 * drawn, "{font_size} px, drawn at {drawn} px");
+        assert!(camera_to_anchor < 0.8, "{camera_to_anchor} of the camera's distance to the center");
     }
 }
