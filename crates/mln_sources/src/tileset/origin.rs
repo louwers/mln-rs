@@ -1,6 +1,10 @@
 //! The render half of tileset sources: their tiles load through the map's
 //! file source. A tile's first request only looks in the cache; a required
-//! tile then asks the network, unless it has fresh data from there.
+//! tile then asks the network, unless it has data from there that never
+//! expires. The network request stays open while the tile is required: the
+//! file source answers it again as it retries an error or revalidates data
+//! that expired. The cache's copy shows at once unless caching rules forbid
+//! using it stale; then the tile holds it back until a 304 renews it.
 
 use std::marker::PhantomData;
 use std::sync::{Arc, Weak};
@@ -11,7 +15,7 @@ use mln_render::source::{
     Cover, DataOrigin, DemTiles, GeometryTiles, LoadContext, OriginUpdate, RasterTiles, SourceType, Supply, TileKind,
     TileNecessity, TileOperation, TileTimes, WorldCopy,
 };
-use mln_storage::resource::TileFormat;
+use mln_storage::resource::{Priority, TileFormat};
 use mln_storage::response::{Caching, Reason};
 use mln_storage::{Data, FileSource, LoadingMethod, Request, Resource, Response, StoragePolicy};
 use mln_style::Source;
@@ -23,7 +27,7 @@ use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::chrono::Timestamp;
 use mln_util::constants;
 use mln_util::error::Error;
-use mln_util::hash::HashMap;
+use mln_util::hash::{HashMap, hash_bytes};
 use mln_util::tileset::{RasterEncoding, Scheme, Tileset, VectorEncoding};
 
 use super::{TilesetKind, TilesetSourceType, round_zoom};
@@ -36,40 +40,44 @@ impl<K: TilesetKind> SourceType for TilesetSourceType<K> {
     }
 }
 
+/// A tile's item, and the data at the tileset's last zoom that the tile
+/// holds for the tiles cut from it, if it is that data.
+type Item<K> = (<K as TileKind>::Item, Option<Arc<Ancestor>>);
+
 /// The kinds of tiles a tileset's are, and what a tile's data delivers of
 /// each.
 pub(crate) trait TilesetTiles: TileKind {
     /// Tile `id`'s item of `data`, which a response brought: `network`, if
     /// it came from the network.
-    fn item(tiles: &mut TilesetData, id: &OverscaledTileID, data: Data, network: Option<&Response>) -> Self::Item;
+    fn item(tiles: &mut TilesetData, id: &OverscaledTileID, data: Data, network: Option<&Response>) -> Item<Self>;
 
-    /// Tile `id`'s item cut from an ancestor that another tile's load
-    /// brought fresh from the network, with what that load knew of it: only
-    /// vector tiles are cut.
-    fn cut_in_memory(_tiles: &mut TilesetData, _id: &OverscaledTileID) -> Option<(Self::Item, Fetched)> {
+    /// Tile `id`'s item from data at the tileset's last zoom that another
+    /// tile's load brought fresh from the network, with what that load knew
+    /// of it: only vector tiles share their data so.
+    fn in_memory(_tiles: &mut TilesetData, _id: &OverscaledTileID) -> Option<(Item<Self>, Fetched)> {
         None
     }
 }
 
 impl TilesetTiles for GeometryTiles {
-    fn item(tiles: &mut TilesetData, id: &OverscaledTileID, data: Data, network: Option<&Response>) -> TileData {
+    fn item(tiles: &mut TilesetData, id: &OverscaledTileID, data: Data, network: Option<&Response>) -> Item<Self> {
         tiles.decode(id, data, network.map(Fetched::of))
     }
 
-    fn cut_in_memory(tiles: &mut TilesetData, id: &OverscaledTileID) -> Option<(TileData, Fetched)> {
-        tiles.cut_in_memory(id, mln_util::chrono::now())
+    fn in_memory(tiles: &mut TilesetData, id: &OverscaledTileID) -> Option<(Item<Self>, Fetched)> {
+        tiles.in_memory(id, mln_util::chrono::now())
     }
 }
 
 impl TilesetTiles for RasterTiles {
-    fn item(_tiles: &mut TilesetData, _id: &OverscaledTileID, data: Data, _network: Option<&Response>) -> Data {
-        data
+    fn item(_tiles: &mut TilesetData, _id: &OverscaledTileID, data: Data, _network: Option<&Response>) -> Item<Self> {
+        (data, None)
     }
 }
 
 impl TilesetTiles for DemTiles {
-    fn item(tiles: &mut TilesetData, _: &OverscaledTileID, data: Data, _: Option<&Response>) -> (Data, RasterEncoding) {
-        (data, tiles.tileset.raster_encoding.unwrap_or(RasterEncoding::Mapbox))
+    fn item(tiles: &mut TilesetData, _: &OverscaledTileID, data: Data, _: Option<&Response>) -> Item<Self> {
+        ((data, tiles.tileset.raster_encoding.unwrap_or(RasterEncoding::Mapbox)), None)
     }
 }
 
@@ -165,11 +173,16 @@ impl<K: TilesetKind> TilesetOrigin<K> {
         }
     }
 
-    /// Requests the tile's data with `method`, unless it can be cut from an
-    /// ancestor in memory.
-    fn request(&mut self, tile: &mut TilesetTile, method: Method, cx: &mut LoadContext<'_, '_, Self>) {
-        if self.take_cut_in_memory(tile, cx) {
-            return;
+    /// Requests the tile's data with `method`, unless it can take it from
+    /// another tile's in memory. A required tile that takes data from
+    /// memory that expires still asks the network, which the file source
+    /// holds until the data expires.
+    fn request(&mut self, tile: &mut TilesetTile, mut method: Method, cx: &mut LoadContext<'_, '_, Self>) {
+        if !tile.is_fresh(mln_util::chrono::now()) && self.take_in_memory(tile, cx) {
+            if cx.necessity() != TileNecessity::Required || tile.has_lasting_data() {
+                return;
+            }
+            method = Method::Network;
         }
         let Some(file_source) = self.data.as_ref().and_then(|data| data.file_source.clone()) else {
             fail(tile, Error::native("Can't load tile."), cx);
@@ -180,37 +193,49 @@ impl<K: TilesetKind> TilesetOrigin<K> {
             Method::Network => TileOperation::RequestedFromNetwork,
         });
         let replier = cx.begin_load();
-        // One response per request: a reload is a new request.
-        let (request, responder) = Request::once(move |response| replier.send(response));
+        // A cache-only request answers once; a network request stays open
+        // while the tile is required.
+        let (request, responder) = match method {
+            Method::Cache => Request::once(move |response| replier.send(response)),
+            Method::Network => Request::new(move |response| replier.send(response)),
+        };
         let params = self.params;
         file_source.load(tile.resource_for(method, params), responder);
         debug_assert!(tile.is_idle(), "one request at a time");
+        // A new request's errors are a new streak, which fails the tile.
+        tile.failed = false;
         tile.fetch = match method {
             Method::Cache => Fetch::Cache { request },
             Method::Network => Fetch::Network { request, params },
         };
     }
 
-    /// A tile cut from an ancestor that another tile's load brought fresh
-    /// from the network takes its data from that, as that load's answer,
-    /// instead of loading the ancestor again.
-    fn take_cut_in_memory(&mut self, tile: &mut TilesetTile, cx: &mut LoadContext<'_, '_, Self>) -> bool {
+    /// A tile whose data at its tileset's last zoom another tile's load
+    /// brought fresh from the network, whether a tile cut from it or the
+    /// tile itself, takes its data from that, as that load's answer, instead
+    /// of loading it again.
+    fn take_in_memory(&mut self, tile: &mut TilesetTile, cx: &mut LoadContext<'_, '_, Self>) -> bool {
         let Some(data) = &mut self.data else {
             return false;
         };
-        let Some((item, fetched)) = K::Data::cut_in_memory(data, cx.id()) else {
+        let Some(((item, held), fetched)) = K::Data::in_memory(data, cx.id()) else {
             return false;
         };
+        let Fetched { modified, caching, etag } = fetched;
         let resource = &mut tile.resource;
-        (resource.prior_modified, resource.prior_caching, resource.prior_etag) =
-            (fetched.modified, fetched.caching, fetched.etag);
-        tile.from_network = true;
-        cx.set_times(TileTimes { modified: fetched.modified, expires: fetched.caching.expires });
+        (resource.prior_modified, resource.prior_etag) = (modified, etag);
+        resource.prior_caching = caching;
+        tile.took(modified, caching, true, cx);
+        tile.data_hash = None;
+        tile.held = held;
         cx.deliver(Some(item));
         true
     }
 
-    /// Takes in `res`, which a request with `method` brought.
+    /// Takes a copy of the tile's data that a request with `method`
+    /// brought, which caching rules allow it to show: new data, or, for a
+    /// 304, the data it has. The same bytes as the data it has count as a
+    /// 304.
     fn take_response(
         &mut self,
         tile: &mut TilesetTile,
@@ -218,30 +243,26 @@ impl<K: TilesetKind> TilesetOrigin<K> {
         res: &Response,
         cx: &mut LoadContext<'_, '_, Self>,
     ) {
-        if let Some(error) = &res.error
-            && error.reason != Reason::NotFound
-        {
-            tile.fetch = Fetch::Failed;
-            fail(tile, Error::native(error.message.clone()), cx);
-            return;
+        if res.not_modified {
+            tile.resource.prior_caching = res.caching;
+        } else {
+            tile.resource.set_prior(res);
         }
-        let resource = &mut tile.resource;
-        if !res.not_modified {
-            resource.prior_modified = res.modified;
-            resource.prior_etag = res.etag.clone();
-        }
-        resource.prior_caching = res.caching;
         let from_network = method == Method::Network;
-        tile.from_network = from_network;
-        cx.set_times(TileTimes { modified: res.modified, expires: res.caching.expires });
+        tile.took(res.modified, res.caching, from_network, cx);
+        let hash = res.data.as_deref().filter(|_| !res.no_content).map(|data| hash_bytes(data));
+        let unchanged = res.not_modified || hash.is_some_and(|hash| tile.data_hash == Some(hash));
+        if !unchanged {
+            tile.data_hash = hash;
+        }
         cx.report(match method {
             Method::Network => TileOperation::LoadFromNetwork,
             Method::Cache => TileOperation::LoadFromCache,
         });
-        if res.not_modified {
+        if unchanged {
             cx.keep_data();
         } else if let Some(data) = &mut self.data {
-            data.deliver::<K>(cx, res, from_network);
+            tile.held = data.deliver::<K>(cx, res, from_network);
         }
     }
 }
@@ -329,7 +350,7 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
         };
         let mut resource = Resource::tile(url, self.pixel_ratio, x, y, z, scheme, format, LoadingMethod::CacheOnly);
         resource.order = cx.order();
-        let mut tile = TilesetTile { resource, fetch: Fetch::Idle, from_network: false };
+        let mut tile = TilesetTile::new(resource);
         // A copy made at another pixel ratio is of another resource.
         let taken = copy.filter(|copy| copy.state().resource.url == tile.resource.url).and_then(|copy| {
             let state = copy.state();
@@ -342,45 +363,60 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
         tile
     }
 
-    /// Applies the response to the tile's request: a cache-only request's
-    /// is followed by a network one while the tile is required.
+    /// Applies a response to the tile's request: a cache-only request's
+    /// is followed by a network one while the tile is required. A network
+    /// request stays open: the file source answers it again after an error,
+    /// and when the data expires.
     fn receive(&mut self, tile: &mut TilesetTile, res: Response, cx: &mut LoadContext<'_, '_, Self>) {
         let method = match tile.fetch {
             Fetch::Cache { .. } => Method::Cache,
             Fetch::Network { .. } => Method::Network,
-            Fetch::Idle | Fetch::Failed => return,
+            Fetch::Idle => return,
         };
-        tile.stop();
         if method == Method::Network {
+            if let Some(error) = res.error.as_ref().filter(|error| error.reason != Reason::NotFound) {
+                // A streak of errors reports once.
+                if !std::mem::replace(&mut tile.failed, true) {
+                    fail(tile, Error::native(error.message.clone()), cx);
+                }
+                return;
+            }
+            tile.failed = false;
+            // A 304 renews the copy the tile held back, if the file source
+            // didn't deliver it.
+            let res = tile.resource.deliver(res);
             self.take_response(tile, method, &res, cx);
             return;
         }
+        // A cache-only request answers once.
+        tile.stop();
         cx.tried_optional();
-        // A cache-only request that found nothing isn't an error. It can
-        // still bring expired data that Cache-Control forbids using, which
-        // the network request revalidates.
-        let not_found = res.error.as_ref().is_some_and(|e| e.reason == Reason::NotFound);
-        if not_found {
-            let resource = &mut tile.resource;
-            resource.prior_modified = res.modified;
-            resource.prior_caching = res.caching;
-            resource.prior_etag = res.etag.clone();
-            resource.prior_data = res.data.clone();
-        }
         cx.changed();
-        if !not_found {
-            self.take_response(tile, method, &res, cx);
+        // A cache-only request that found nothing isn't an error. A copy
+        // shows while it revalidates unless its caching rules forbid that;
+        // then the tile holds it back for the network request to revalidate.
+        // An empty copy has nothing to hold back: the network loads anew.
+        if res.error.is_none() {
+            if res.caching.is_usable(mln_util::chrono::now()) {
+                tile.resource.set_prior(&res);
+                self.take_response(tile, method, &res, cx);
+            } else if !res.no_content {
+                // The network request carries it, so that a 304 delivers it.
+                tile.resource.set_prior(&res);
+                tile.resource.prior_data.clone_from(&res.data);
+            }
         }
         if cx.necessity() == TileNecessity::Required && tile.is_idle() {
             self.request(tile, Method::Network, cx);
         }
     }
 
-    /// A required tile loads from the network, unless it has fresh data
-    /// from there; an optional one stops a network request. A required
-    /// tile's network request made with other parameters than the source's
-    /// is made again: the cover sets each tile's necessity as each update
-    /// first retains it, so the request restarts then.
+    /// A required tile asks the network, unless it has data from there that
+    /// never expires; an optional one stops a network request, with the file
+    /// source's retries and revalidations. A required tile's network request
+    /// made with other parameters than the source's is made again: the cover
+    /// sets each tile's necessity as each update first retains it, so the
+    /// request restarts then.
     fn set_necessity(&mut self, tile: &mut TilesetTile, previous: TileNecessity, cx: &mut LoadContext<'_, '_, Self>) {
         let required = cx.necessity() == TileNecessity::Required;
         if required && matches!(tile.fetch, Fetch::Network { params, .. } if params != self.params) {
@@ -391,7 +427,7 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
             return;
         }
         if required {
-            if tile.is_idle() && !tile.is_fresh(mln_util::chrono::now()) {
+            if tile.is_idle() && !tile.has_lasting_data() {
                 self.request(tile, Method::Network, cx);
             }
         } else if matches!(tile.fetch, Fetch::Network { .. }) {
@@ -400,25 +436,28 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
         }
     }
 
-    /// Requests a tile whose last response was an error again.
+    /// Requests a tile whose network request's last answer was an error
+    /// again, now rather than after the file source's backoff.
     fn retry(&mut self, tile: &mut TilesetTile, cx: &mut LoadContext<'_, '_, Self>) {
-        if matches!(tile.fetch, Fetch::Failed) {
-            tile.fetch = Fetch::Idle;
+        if tile.failed {
+            tile.stop();
             self.request(tile, Method::Network, cx);
         }
     }
 
     /// The tile's data failed to lay out or decode: it isn't fresh, so the
-    /// tile loads it again when required again.
+    /// tile loads it again when required again, and no longer holds it for
+    /// the tiles cut from it.
     fn failed(&mut self, tile: &mut TilesetTile, _cx: &mut LoadContext<'_, '_, Self>) {
-        tile.from_network = false;
+        tile.drop_data();
     }
 }
 
 /// Fails the tile with `error`. Its data isn't fresh: the tile loads it
-/// again when required again.
+/// again when required again, and no longer holds it for the tiles cut from
+/// it.
 fn fail<O: DataOrigin>(tile: &mut TilesetTile, error: Error, cx: &mut LoadContext<'_, '_, O>) {
-    tile.from_network = false;
+    tile.drop_data();
     cx.fail(error);
 }
 
@@ -427,42 +466,60 @@ impl TilesetData {
     /// `K` brought, from the network or only the cache. A 404, unlike an
     /// empty response (204, or no tile in an archive), says the tileset has
     /// no tile here: a vector tile is then empty, as in GL JS, and a raster
-    /// tile missing. A sparse tileset's empty tiles are missing.
+    /// tile missing. A sparse tileset's empty tiles are missing. Returns the
+    /// data at the tileset's last zoom that the tile holds for the tiles cut
+    /// from it, if it delivered that data.
     fn deliver<K: TilesetKind>(
         &mut self,
         cx: &mut LoadContext<'_, '_, TilesetOrigin<K>>,
         res: &Response,
         network: bool,
-    ) {
+    ) -> Option<Arc<Ancestor>> {
         let not_found = res.tile_not_found || res.error.as_ref().is_some_and(|e| e.reason == Reason::NotFound);
         let empty = res.no_content || not_found;
         if empty && (self.tileset.sparse || (not_found && !is_vector::<K>())) {
             cx.missing();
-            return;
+            return None;
         }
         let data = if empty { None } else { res.data.clone() };
-        cx.deliver(data.map(|data| K::Data::item(self, cx.id(), data, network.then_some(res))));
+        let (item, held) = match data.map(|data| K::Data::item(self, cx.id(), data, network.then_some(res))) {
+            Some((item, held)) => (Some(item), held),
+            None => (None, None),
+        };
+        cx.deliver(item);
+        held
     }
 
-    /// Tile `id`'s data, from `data`: of its ancestor if it is cut from one,
-    /// which `fetched` brought from the network if it isn't `None`.
-    fn decode(&mut self, id: &OverscaledTileID, data: Data, fetched: Option<Fetched>) -> TileData {
+    /// Tile `id`'s data, from `data`, which `fetched` brought from the
+    /// network if it isn't `None`: of its ancestor if it is cut from one. A
+    /// tile at the tileset's last zoom shares its data with the tiles cut
+    /// from it, and holds it for them, as the second value.
+    fn decode(&mut self, id: &OverscaledTileID, data: Data, fetched: Option<Fetched>) -> Item<GeometryTiles> {
+        let loaded = loaded_tile(&self.tileset, id);
         match Cut::of(&id.canonical, self.tileset.zoom_range.max) {
             Some(cut) => {
-                let ancestor = self.ancestors.get(loaded_tile(&self.tileset, id), data, self.encoding, fetched);
-                TileData::Cut(Arc::new(CutData::new(ancestor, cut)))
+                let ancestor = self.ancestors.get(loaded, data, self.encoding, fetched);
+                (TileData::Cut(Arc::new(CutData::new(ancestor, cut))), None)
             }
-            None => self.encoding.decode(data),
+            None if loaded.z == self.tileset.zoom_range.max => {
+                let ancestor = self.ancestors.get(loaded, data, self.encoding, fetched);
+                (ancestor.data().clone(), Some(ancestor))
+            }
+            None => (self.encoding.decode(data), None),
         }
     }
 
-    /// Tile `id`'s data cut from its ancestor, if another tile's load brought
-    /// that from the network and it hasn't expired at `now`, with what that
-    /// load knew of it.
-    fn cut_in_memory(&mut self, id: &OverscaledTileID, now: Timestamp) -> Option<(TileData, Fetched)> {
-        let cut = Cut::of(&id.canonical, self.tileset.zoom_range.max)?;
+    /// Tile `id`'s data from another tile's, if that load brought it from
+    /// the network and it hasn't expired at `now`, with what that load knew
+    /// of it: cut from its ancestor at the tileset's last zoom, or for a
+    /// tile at that zoom, its own, which it then holds.
+    fn in_memory(&mut self, id: &OverscaledTileID, now: Timestamp) -> Option<(Item<GeometryTiles>, Fetched)> {
         let (ancestor, fetched) = self.ancestors.fresh(loaded_tile(&self.tileset, id), now)?;
-        Some((TileData::Cut(Arc::new(CutData::new(ancestor, cut))), fetched))
+        let item = match Cut::of(&id.canonical, self.tileset.zoom_range.max) {
+            Some(cut) => (TileData::Cut(Arc::new(CutData::new(ancestor, cut))), None),
+            None => (ancestor.data().clone(), Some(ancestor)),
+        };
+        Some((item, fetched))
     }
 }
 
@@ -487,7 +544,7 @@ fn loaded_tile(tileset: &Tileset, id: &OverscaledTileID) -> CanonicalTileID {
 }
 
 /// The ancestors that a tileset's cut tiles share, by their tile id, while
-/// a tile cut from them holds them. A tile cut from an ancestor whose data
+/// a tile cut from them, or the tile at the last zoom itself, holds them. A tile cut from an ancestor whose data
 /// is fresh from the network takes it as it is; otherwise it loads the
 /// ancestor, and those whose loads bring the same data share it, decoded
 /// once.
@@ -538,21 +595,33 @@ fn encoded(data: &TileData) -> Option<&[u8]> {
 }
 
 /// A tileset tile's requests: one that only looks in the cache, then, while
-/// the tile is required, one to the network. Dropping it cancels them.
+/// the tile is required, one to the network, which stays open. Dropping it
+/// cancels them.
 pub(crate) struct TilesetTile {
     resource: Resource,
     fetch: Fetch,
+    /// The current request's last answer was an error. Nothing asks again
+    /// until the tile is required or the engine retries it, unless a network
+    /// request is open, which the file source answers again.
+    failed: bool,
+    /// What caching rules allow for the data the tile has.
+    caching: Caching,
     /// The tile's data came from the network, rather than only the cache,
-    /// and didn't fail to lay out or decode. It expires when the resource's
-    /// `prior_caching` says.
+    /// and didn't fail to lay out or decode.
     from_network: bool,
+    /// For a tile at its tileset's last zoom, its data, which the tiles cut
+    /// from it find while it holds it.
+    held: Option<Arc<Ancestor>>,
+    /// The tile has data of its own, shown or on its way.
+    has_data: bool,
+    /// A hash of the bytes the tile last took, so that the same bytes again,
+    /// as a revalidation without validators brings, aren't laid out again.
+    data_hash: Option<u64>,
 }
 
 /// The tile's request; dropping it cancels it.
 enum Fetch {
     Idle,
-    /// The last response was an error: `retry` asks again.
-    Failed,
     Cache {
         #[expect(dead_code, reason = "dropping the request cancels it")]
         request: Request,
@@ -572,15 +641,31 @@ enum Method {
 }
 
 impl TilesetTile {
+    /// A tile without data, whose requests are for `resource`.
+    fn new(resource: Resource) -> Self {
+        TilesetTile {
+            resource,
+            fetch: Fetch::Idle,
+            failed: false,
+            caching: Caching::default(),
+            from_network: false,
+            held: None,
+            has_data: false,
+            data_hash: None,
+        }
+    }
+
     /// The resource to request with `method`, whose network loads follow
     /// `params`. Instead of one request that loads from both, a cache-only
-    /// request comes first, then a network-only one.
+    /// request comes first, then a network-only one, which waits behind the
+    /// requests of tiles without data if the tile has some.
     fn resource_for(&mut self, method: Method, params: NetworkParams) -> &Resource {
         let resource = &mut self.resource;
         match method {
             Method::Cache => resource.loading_method = LoadingMethod::CacheOnly,
             Method::Network => {
                 resource.loading_method = LoadingMethod::NetworkOnly;
+                resource.priority = if self.has_data { Priority::Low } else { Priority::Regular };
                 resource.minimum_update_interval = params.minimum_update_interval;
                 resource.storage_policy =
                     if params.volatile { StoragePolicy::Volatile } else { StoragePolicy::Permanent };
@@ -590,23 +675,53 @@ impl TilesetTile {
     }
 
     /// Takes the validators of `copy`, the same tile's in another world
-    /// copy, as a cache's answer.
+    /// copy, with its data's caching rules and the hash of its bytes, as a
+    /// cache's answer.
     fn take_validators(&mut self, copy: &TilesetTile) {
-        let (resource, copy) = (&mut self.resource, &copy.resource);
-        resource.prior_modified = copy.prior_modified;
-        resource.prior_caching = copy.prior_caching;
-        resource.prior_etag.clone_from(&copy.prior_etag);
-        resource.prior_data.clone_from(&copy.prior_data);
+        let resource = &mut self.resource;
+        resource.prior_modified = copy.resource.prior_modified;
+        resource.prior_caching = copy.resource.prior_caching;
+        resource.prior_etag.clone_from(&copy.resource.prior_etag);
+        (self.caching, self.data_hash, self.has_data) = (copy.caching, copy.data_hash, true);
+    }
+
+    /// Records that the tile took data last modified at `modified`, under
+    /// `caching`, from the network if `from_network`. A copy it held back
+    /// goes.
+    fn took<O: DataOrigin>(
+        &mut self,
+        modified: Option<Timestamp>,
+        caching: Caching,
+        from_network: bool,
+        cx: &mut LoadContext<'_, '_, O>,
+    ) {
+        (self.caching, self.from_network, self.has_data) = (caching, from_network, true);
+        self.resource.prior_data = None;
+        cx.set_times(TileTimes { modified, expires: caching.expires, usable_until: caching.usable_until() });
+    }
+
+    /// The tile's data failed: it isn't fresh, and the tile no longer holds
+    /// it for the tiles cut from it.
+    fn drop_data(&mut self) {
+        self.from_network = false;
+        self.held = None;
     }
 
     /// Whether the tile's data came from the network and hasn't expired at
     /// `now`. Data without an expiry stays fresh.
     fn is_fresh(&self, now: Timestamp) -> bool {
-        self.from_network && self.resource.prior_caching.is_fresh(now)
+        self.from_network && self.caching.is_fresh(now)
+    }
+
+    /// Whether a required tile needn't ask the network: its data came from
+    /// there and never expires. Data that expires is asked for again, which
+    /// the file source holds until it does.
+    fn has_lasting_data(&self) -> bool {
+        self.from_network && self.caching.expires.is_none()
     }
 
     fn is_idle(&self) -> bool {
-        matches!(self.fetch, Fetch::Idle | Fetch::Failed)
+        matches!(self.fetch, Fetch::Idle)
     }
 
     /// Drops the request under way. A response it sent before it stopped
@@ -621,15 +736,13 @@ mod tests {
     use super::*;
 
     fn tile(url: &str) -> TilesetTile {
-        TilesetTile {
-            resource: Resource::tile(url, 1.0, 0, 0, 0, Scheme::XYZ, TileFormat::Mvt, LoadingMethod::CacheOnly),
-            fetch: Fetch::Idle,
-            from_network: false,
-        }
+        TilesetTile::new(Resource::tile(url, 1.0, 0, 0, 0, Scheme::XYZ, TileFormat::Mvt, LoadingMethod::CacheOnly))
     }
 
     /// A tile that takes its world copy takes the validators of the copy's
-    /// resource, as a cache's answer.
+    /// resource, its data's caching rules and the hash of its bytes, as a
+    /// cache's answer, and has data. A copy that the copy holds back for a
+    /// 304 stays the copy's.
     #[test]
     fn a_world_copy_takes_the_validators() {
         let mut copy = tile("a");
@@ -637,12 +750,15 @@ mod tests {
         copy.resource.prior_caching.expires = Some(Timestamp::from_secs(2));
         copy.resource.prior_etag = Some("etag".to_owned());
         copy.resource.prior_data = Some(Arc::new(vec![1]));
+        copy.caching.expires = Some(Timestamp::from_secs(3));
+        copy.data_hash = Some(4);
         let mut new = tile("a");
         new.take_validators(&copy);
         let (resource, copy_resource) = (&new.resource, &copy.resource);
         assert_eq!(resource.prior_modified, copy_resource.prior_modified);
         assert_eq!(resource.prior_caching, copy_resource.prior_caching);
         assert_eq!(resource.prior_etag, copy_resource.prior_etag);
-        assert_eq!(resource.prior_data, copy_resource.prior_data);
+        assert_eq!(resource.prior_data, None);
+        assert_eq!((new.caching, new.data_hash, new.has_data), (copy.caching, copy.data_hash, true));
     }
 }

@@ -8,8 +8,9 @@ use std::time::Duration;
 use mln_map_types::{MapMode, TransformState};
 use mln_render::source::{TileNecessity, TileOperation};
 use mln_render::testing::{Event, OneSource, OriginTiles, View};
+use mln_storage::resource::{Priority, TileFormat};
 use mln_storage::response::Reason;
-use mln_storage::{FileSource, Resource, ResourceError, Responder, Response, StoragePolicy};
+use mln_storage::{FileSource, LoadingMethod, Resource, ResourceError, Responder, Response, StoragePolicy};
 use mln_style::layer_type::SourceKind;
 use mln_style::source_type::SourceCommon;
 use mln_style::{Layer, Source};
@@ -22,33 +23,50 @@ use parking_lot::Mutex;
 
 use super::{TileTest, errors, ready, registry, view_state};
 use crate::tileset::origin::{TilesetOrigin, VectorTileEncoding};
-use crate::tileset::{RasterKind, TilesetKind, VectorKind};
+use crate::tileset::{RasterDemKind, RasterKind, TilesetKind, VectorKind};
 use crate::vector_source;
 
-/// A file source whose requests wait until the test answers them.
+/// A file source whose requests wait until the test answers them, without
+/// a cache, or with one ([`Held::with_cache`]).
 #[derive(Default)]
-struct Held(Mutex<Vec<(Resource, Responder)>>);
+struct Held {
+    requests: Mutex<Vec<(Resource, Responder)>>,
+    cache: bool,
+}
 
 impl Held {
-    /// Answers the oldest request with `response`.
-    fn respond(&self, response: Response) {
-        let (_, responder) = self.0.lock().remove(0);
+    /// A file source with a cache, which answers cache-only requests.
+    fn with_cache() -> Self {
+        Held { cache: true, ..Held::default() }
+    }
+
+    /// Answers the oldest request with `response`; returns what it asked
+    /// for.
+    fn respond(&self, response: Response) -> Resource {
+        let (resource, responder) = self.requests.lock().remove(0);
         responder.send(response);
+        resource
+    }
+
+    /// Takes the oldest request's responder, through which the test answers
+    /// it as often as it likes.
+    fn take(&self) -> Responder {
+        self.requests.lock().remove(0).1
     }
 
     fn pending(&self) -> usize {
-        self.0.lock().len()
+        self.requests.lock().len()
     }
 
     /// The resource of the oldest request.
     fn resource(&self) -> Resource {
-        self.0.lock()[0].0.clone()
+        self.requests.lock()[0].0.clone()
     }
 
     /// The requests of tile `url` so far, oldest first: each one's
     /// resource, and whether its requester stopped it.
     fn requests(&self, url: &str) -> Vec<(Resource, bool)> {
-        let requests = self.0.lock();
+        let requests = self.requests.lock();
         let of_tile = requests.iter().filter(|(resource, _)| resource.url == url);
         of_tile.map(|(resource, responder)| (resource.clone(), responder.is_cancelled())).collect()
     }
@@ -56,11 +74,15 @@ impl Held {
 
 impl FileSource for Held {
     fn load(&self, resource: &Resource, responder: Responder) {
-        self.0.lock().push((resource.clone(), responder));
+        self.requests.lock().push((resource.clone(), responder));
     }
 
     fn can_request(&self, _resource: &Resource) -> bool {
         true
+    }
+
+    fn supports_cache_only(&self) -> bool {
+        self.cache
     }
 }
 
@@ -71,6 +93,16 @@ fn water() -> Response {
     let mut response = Response::new();
     response.data = Some(Arc::new(std::fs::read(path).expect("the tile")));
     response.etag = Some("a".to_owned());
+    response
+}
+
+/// `water()` with other bytes: an unknown field the tile's reader skips.
+fn water_changed() -> Response {
+    let mut response = water();
+    let mut bytes = response.data.as_deref().unwrap().clone();
+    // Field 15, a varint of 1.
+    bytes.extend_from_slice(&[0x78, 0x01]);
+    response.data = Some(Arc::new(bytes));
     response
 }
 
@@ -118,16 +150,32 @@ fn a_cut_tile_takes_a_fresh_ancestor_from_memory() {
 /// out a circle layer of the "water" source layer.
 fn held_tile<K: TilesetKind>(test: &TileTest, tileset: Tileset) -> (OriginTiles, Arc<Held>) {
     let file_source = Arc::new(Held::default());
-    let file_source_dyn: Arc<dyn FileSource> = Arc::<Held>::clone(&file_source);
-    let origin = TilesetOrigin::<K>::loaded(tileset, VectorTileEncoding::Mvt, Some(file_source_dyn));
+    (held_tile_from::<K>(test, tileset, VectorTileEncoding::Mvt, &file_source), file_source)
+}
+
+/// Tile 0/0/0 of a tileset source of kind `K`, whose tiles (of `tileset`,
+/// in `encoding`) load through `file_source`, as [`held_tile`].
+fn held_tile_from<K: TilesetKind>(
+    test: &TileTest,
+    tileset: Tileset,
+    encoding: VectorTileEncoding,
+    file_source: &Arc<Held>,
+) -> OriginTiles {
+    let file_source_dyn: Arc<dyn FileSource> = Arc::<Held>::clone(file_source);
+    let origin = TilesetOrigin::<K>::loaded(tileset, encoding, Some(file_source_dyn));
     let mut tiles = OriginTiles::new(&test.thread_pool, origin, &[tile()], MapMode::Continuous);
     if K::INFO.layer_kind == SourceKind::Geometry {
-        let registry = registry();
-        let mut layer = Layer::new(registry.style(), "circle", "water", "source").unwrap();
-        layer.set_source_layer("water");
-        tiles.set_layers(&registry, &[layer]).unwrap();
+        set_water_layer(&mut tiles);
     }
-    (tiles, file_source)
+    tiles
+}
+
+/// Has `tiles` lay out a circle layer of the "water" source layer.
+fn set_water_layer(tiles: &mut OriginTiles) {
+    let registry = registry();
+    let mut layer = Layer::new(registry.style(), "circle", "water", "source").unwrap();
+    layer.set_source_layer("water");
+    tiles.set_layers(&registry, &[layer]).unwrap();
 }
 
 /// The tile that [`held_tile`] makes.
@@ -231,16 +279,19 @@ fn a_failed_load_is_requested_again_on_retry() {
     assert_ne!(tiles.features(&tile(), "water").unwrap(), Vec::new());
 }
 
-/// A tile required again loads again only if its data isn't fresh from the
-/// network: data without an expiry, or whose expiry is to come, stays fresh.
-/// The reload asks with the data's validators, and a "not modified" answer
-/// keeps the data.
+/// A tile required again keeps network data without an expiry, as a local
+/// file's: it doesn't request it again. Data that expires is requested
+/// again, with its validators and its expiry, which the online file source
+/// holds the request until, and a "not modified" answer keeps the data.
 #[test]
-fn a_tile_required_again_reloads_only_stale_data() {
+fn a_tile_required_again_asks_again_for_data_that_expires() {
     let test = TileTest::new();
-    let mut later = water();
-    later.caching.expires = Some(Timestamp::from_secs(i64::MAX));
-    for (response, reloads) in [(water(), false), (later, false), (expired(water()), true)] {
+    let later = Timestamp::from_secs(i64::MAX);
+    let mut until_later = water();
+    until_later.caching.expires = Some(later);
+    for (response, expires) in
+        [(water(), None), (until_later, Some(later)), (expired(water()), Some(Timestamp::from_secs(0)))]
+    {
         let (mut tiles, file_source) = held_tile::<VectorKind>(&test, tiles_tileset());
         tiles.set_necessity(&tile(), TileNecessity::Required);
         answer(&mut tiles, &file_source, response);
@@ -248,9 +299,11 @@ fn a_tile_required_again_reloads_only_stale_data() {
 
         tiles.set_necessity(&tile(), TileNecessity::Optional);
         tiles.set_necessity(&tile(), TileNecessity::Required);
-        assert_eq!(file_source.pending(), usize::from(reloads));
-        if reloads {
-            assert_eq!(file_source.resource().prior_etag.as_deref(), Some("a"));
+        assert_eq!(file_source.pending(), usize::from(expires.is_some()), "a request only for data that expires");
+        if expires.is_some() {
+            let resource = file_source.resource();
+            assert_eq!(resource.prior_caching.expires, expires, "held until the data expires");
+            assert_eq!(resource.prior_etag.as_deref(), Some("a"));
             let mut not_modified = Response::new();
             not_modified.not_modified = true;
             answer(&mut tiles, &file_source, not_modified);
@@ -282,9 +335,14 @@ fn a_not_modified_reload_keeps_the_data() {
     tiles.set_necessity(&tile(), TileNecessity::Required);
     assert_eq!(file_source.pending(), 1);
     assert!(tiles.is_complete(&tile()), "a reload keeps the tile complete");
-    answer(&mut tiles, &file_source, not_modified());
+    let responder = file_source.take();
+    responder.send(not_modified());
+    tiles.update();
+    tiles.update();
     assert_eq!(actions(&mut tiles), [RequestedFromNetwork, LoadFromNetwork], "no new contents");
     assert!(tiles.is_complete(&tile()));
+    assert!(!responder.is_cancelled(), "the request stays open for the next revalidation");
+    assert_eq!(file_source.pending(), 0);
 
     // The answer is all the retry brings, and the tile completes.
     tiles.set_necessity(&tile(), TileNecessity::Optional);
@@ -469,4 +527,181 @@ fn a_world_copy_of_another_resource_loads_its_own() {
     assert_eq!(requests.len(), 1, "the new world copy loads its own tile");
     assert_eq!(requests[0].0.prior_etag, None, "with no validators of the copy's");
     assert!(!tiles.is_loaded(), "the new world copy waits for its own tile");
+}
+
+/// The tile at a tileset's last zoom and the tiles cut from it share what
+/// either brought fresh from the network: whichever comes second takes it
+/// from memory, without a request.
+#[test]
+fn a_tile_at_the_last_zoom_and_its_cut_tiles_share_their_data() {
+    let test = TileTest::new();
+    let (whole, cut) = (OverscaledTileID::from_zxy(0, 0, 0), OverscaledTileID::from_zxy(1, 0, 0));
+    for (first, second) in [(whole, cut), (cut, whole)] {
+        let file_source = Arc::new(Held::default());
+        let file_source_dyn: Arc<dyn FileSource> = Arc::<Held>::clone(&file_source);
+        let tileset = Tileset { zoom_range: Range::new(0, 0), ..tiles_tileset() };
+        let origin = TilesetOrigin::<VectorKind>::loaded(tileset, VectorTileEncoding::Mvt, Some(file_source_dyn));
+        let mut tiles = OriginTiles::new(&test.thread_pool, origin, &[whole, cut], MapMode::Static);
+        set_water_layer(&mut tiles);
+        tiles.set_necessity(&first, TileNecessity::Required);
+        answer(&mut tiles, &file_source, water());
+        assert!(tiles.is_complete(&first));
+
+        tiles.set_necessity(&second, TileNecessity::Required);
+        assert_eq!(file_source.pending(), 0, "{second:?} after {first:?}");
+        tiles.update();
+        tiles.update();
+        assert!(tiles.is_complete(&second));
+    }
+}
+
+/// A connection error.
+fn connection_error() -> Response {
+    let mut response = Response::new();
+    response.error = Some(Box::new(ResourceError::new(Reason::Connection, "offline")));
+    response
+}
+
+/// A required tile's network request stays open, and the tile takes each
+/// answer the file source gives it: after errors, of which a streak fails
+/// the tile once, its retry's data; when the data expires, a revalidation's
+/// "not modified", which keeps the data, the same bytes again, which keep it
+/// too, an error, which keeps it, or new data, which lays out again.
+#[test]
+fn a_tile_takes_every_answer_to_its_open_request() {
+    use TileOperation::{EndParse, Error, LoadFromNetwork, RequestedFromNetwork, StartParse};
+
+    let test = TileTest::new();
+    let (mut tiles, file_source) = held_tile::<VectorKind>(&test, tiles_tileset());
+    tiles.set_necessity(&tile(), TileNecessity::Required);
+    let responder = file_source.take();
+    responder.send(connection_error());
+    responder.send(connection_error());
+    tiles.update();
+    assert_eq!(actions(&mut tiles), [StartParse, RequestedFromNetwork, Error], "one error for the streak");
+    assert!(tiles.is_complete(&tile()), "a failed tile has done what it can for now");
+
+    // The retry's answer.
+    responder.send(water());
+    tiles.update();
+    tiles.update();
+    assert_eq!(actions(&mut tiles), [LoadFromNetwork, StartParse, EndParse]);
+    assert!(tiles.is_renderable(&tile()) && tiles.is_complete(&tile()));
+
+    // Revalidations: unchanged, the same bytes again, failed, then new data.
+    responder.send(not_modified());
+    tiles.update();
+    assert_eq!(actions(&mut tiles), [LoadFromNetwork]);
+    responder.send(water());
+    tiles.update();
+    assert_eq!(actions(&mut tiles), [LoadFromNetwork], "the same bytes aren't laid out again");
+    responder.send(connection_error());
+    tiles.update();
+    assert_eq!(actions(&mut tiles), [Error]);
+    assert!(tiles.is_renderable(&tile()), "a failed revalidation keeps the data");
+    responder.send(water_changed());
+    tiles.update();
+    tiles.update();
+    assert_eq!(actions(&mut tiles), [LoadFromNetwork, StartParse, EndParse]);
+    assert!(tiles.is_renderable(&tile()) && tiles.is_complete(&tile()));
+
+    assert!(!responder.is_cancelled(), "the request stays open");
+    assert_eq!(file_source.pending(), 0, "no new request");
+    tiles.set_necessity(&tile(), TileNecessity::Optional);
+    assert!(responder.is_cancelled(), "an optional tile drops it");
+}
+
+/// A tile that becomes optional while its failed request waits for the file
+/// source's retry cancels it, and requests anew when required again.
+#[test]
+fn an_optional_tile_stops_retrying() {
+    let test = TileTest::new();
+    let (mut tiles, file_source) = held_tile::<VectorKind>(&test, tiles_tileset());
+    tiles.set_necessity(&tile(), TileNecessity::Required);
+    let responder = file_source.take();
+    responder.send(connection_error());
+    tiles.update();
+
+    tiles.set_necessity(&tile(), TileNecessity::Optional);
+    assert!(responder.is_cancelled());
+    tiles.set_necessity(&tile(), TileNecessity::Required);
+    assert_eq!(file_source.pending(), 1, "a new request");
+}
+
+/// A required vector tile whose file source's cache answers with `cached`.
+fn tile_with_cached(test: &TileTest, file_source: &Arc<Held>, cached: Response) -> OriginTiles {
+    let mut tiles = held_tile_from::<VectorKind>(test, tiles_tileset(), VectorTileEncoding::Mvt, file_source);
+    tiles.set_necessity(&tile(), TileNecessity::Required);
+    assert_eq!(LoadingMethod::CacheOnly, file_source.respond(cached).loading_method);
+    tiles.update();
+    tiles.update();
+    tiles
+}
+
+/// `response`, expired, which must revalidate before it shows.
+fn must_revalidate(response: Response) -> Response {
+    let mut response = expired(response);
+    response.caching.must_revalidate = true;
+    response
+}
+
+/// A stale copy from the cache that must revalidate waits for the network,
+/// which a 304 shows it after.
+#[test]
+fn a_stale_copy_that_must_revalidate_waits_for_the_network() {
+    let test = TileTest::new();
+    let file_source = Arc::new(Held::with_cache());
+    let mut tiles = tile_with_cached(&test, &file_source, must_revalidate(water()));
+    assert!(!tiles.is_renderable(&tile()), "held back");
+    let network = file_source.resource();
+    assert_eq!((LoadingMethod::NetworkOnly, Priority::Regular), (network.loading_method, network.priority));
+    assert_eq!(Some("a"), network.prior_etag.as_deref());
+
+    answer(&mut tiles, &file_source, not_modified());
+    assert!(tiles.is_renderable(&tile()) && tiles.is_complete(&tile()));
+}
+
+/// A stale copy shows while it revalidates, and stays when the server can't
+/// be reached, which the tile reports; one that must revalidate never shows.
+#[test]
+fn a_stale_copy_shows_until_it_revalidates() {
+    use TileOperation::Error;
+
+    let test = TileTest::new();
+    let file_source = Arc::new(Held::with_cache());
+    let mut tiles = tile_with_cached(&test, &file_source, expired(water()));
+    assert!(tiles.is_renderable(&tile()), "shown at once");
+    let network = file_source.resource();
+    assert_eq!((LoadingMethod::NetworkOnly, Priority::Low), (network.loading_method, network.priority));
+    tiles.take_events();
+    file_source.respond(connection_error());
+    tiles.update();
+    assert!(tiles.is_renderable(&tile()));
+    assert_eq!(actions(&mut tiles), [Error]);
+
+    let mut tiles = tile_with_cached(&test, &file_source, must_revalidate(water()));
+    tiles.take_events();
+    file_source.respond(connection_error());
+    tiles.update();
+    assert!(!tiles.is_renderable(&tile()));
+    assert_eq!(actions(&mut tiles), [Error]);
+}
+
+/// The format that a request for a tile of a tileset of the kind `K`, in
+/// `encoding`, names.
+fn requested_format<K: TilesetKind>(encoding: VectorTileEncoding) -> Option<TileFormat> {
+    let test = TileTest::new();
+    let file_source = Arc::new(Held::default());
+    let mut tiles = held_tile_from::<K>(&test, tiles_tileset(), encoding, &file_source);
+    tiles.set_necessity(&tile(), TileNecessity::Required);
+    file_source.resource().tile_data.map(|tile| tile.format)
+}
+
+#[test]
+fn a_tile_request_names_the_format_its_source_decodes() {
+    let mlt = VectorTileEncoding::Mlt { fast_pfor_enabled: false };
+    assert_eq!(Some(TileFormat::Mvt), requested_format::<VectorKind>(VectorTileEncoding::Mvt));
+    assert_eq!(Some(TileFormat::Mlt), requested_format::<VectorKind>(mlt));
+    assert_eq!(Some(TileFormat::Image), requested_format::<RasterKind>(VectorTileEncoding::Mvt));
+    assert_eq!(Some(TileFormat::Image), requested_format::<RasterDemKind>(VectorTileEncoding::Mvt));
 }
