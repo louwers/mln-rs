@@ -3,25 +3,28 @@
 // (tools/c-abi-test/testdata/tests/native/abi/resources/offline.c).
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
-use httpmock::MockServer;
-use mln_storage::OnlineFileSource;
 use mln_storage::offline::{
     OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionObserver, OfflineRegionStatus,
     OfflineTilePyramidRegionDefinition,
 };
 use mln_storage::offline_database::{DatabaseError, OfflineDatabase};
+use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_storage::{Kind, Resource, Response};
+use mln_util::chrono::{Timestamp, now};
 use mln_util::geo::{LatLng, LatLngBounds};
 
 use super::TempDir;
 use crate::database_file_source::{DatabaseFileSourceExt, RegionDatabase, region_database};
 
 /// How long a test waits for a callback or a status before it fails as
-/// hung. Generous: a download from the local server takes seconds where
-/// the platform's HTTP stack is slow to reach it, and longer under load.
-const TIMEOUT: Duration = Duration::from_secs(60);
+/// hung.
+const TIMEOUT: Duration = Duration::from_secs(10);
+
+const STYLE_URL: &str = "http://example.invalid/style.json";
 
 /// Calls `operation` with a callback and waits for its result.
 fn wait<T: Send + 'static>(operation: impl FnOnce(Box<dyn FnOnce(T) + Send>)) -> T {
@@ -30,9 +33,10 @@ fn wait<T: Send + 'static>(operation: impl FnOnce(Box<dyn FnOnce(T) + Send>)) ->
     rx.recv_timeout(TIMEOUT).expect("callback")
 }
 
-/// A database file source with its database in `dir`.
-fn database_file_source(dir: &TempDir) -> RegionDatabase {
-    region_database(&dir.path("cache.db"), Some(Arc::new(OnlineFileSource::new(Arc::default()))), super::registry())
+/// A database file source with its database in `dir`, whose regions
+/// download through `network`.
+fn database_file_source(dir: &TempDir, network: &Arc<StubFileSource>) -> RegionDatabase {
+    region_database(&dir.path("cache.db"), Some(Arc::<StubFileSource>::clone(network)), super::registry())
 }
 
 fn definition(style_url: &str) -> OfflineRegionDefinition {
@@ -40,14 +44,26 @@ fn definition(style_url: &str) -> OfflineRegionDefinition {
     OfflineTilePyramidRegionDefinition::new(style_url, bounds, 0.0, 0.0, 1.0, false).unwrap().into()
 }
 
-/// A server with a style that has no subresources.
-fn style_server() -> MockServer {
-    let server = MockServer::start();
-    server.mock(|when, then| {
-        when.method("GET").path("/style.json");
-        then.status(200).body(r#"{"version":8,"sources":{},"layers":[]}"#);
+/// A style that has no subresources, fresh for an hour.
+fn style() -> Response {
+    let mut response = Response::new();
+    response.data = Some(Arc::new(br#"{"version":8,"sources":{},"layers":[]}"#.to_vec()));
+    response.caching.expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 3600));
+    response
+}
+
+/// A network of `type_` that answers the style with [`style`], and counts
+/// the requests it answers.
+fn style_network(type_: ResponseType) -> (Arc<StubFileSource>, Arc<AtomicUsize>) {
+    let network = Arc::new(StubFileSource::new(type_));
+    let answered = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&answered);
+    network.set_response(Kind::Style, move |resource: &Resource| {
+        assert_eq!(STYLE_URL, resource.url);
+        count.fetch_add(1, Ordering::SeqCst);
+        Some(style())
     });
-    server
+    (network, answered)
 }
 
 /// Sends every status the region reports.
@@ -78,11 +94,10 @@ fn wait_until_complete(statuses: &Receiver<OfflineRegionStatus>) -> OfflineRegio
 #[test]
 fn a_region_lives_from_creation_to_deletion() {
     let dir = TempDir::new();
-    let source = database_file_source(&dir);
-    let server = style_server();
-    let style_url = server.url("/style.json");
+    let (network, _) = style_network(ResponseType::Synchronous);
+    let source = database_file_source(&dir, &network);
 
-    let region = wait(|done| source.create_offline_region(&definition(&style_url), &b"one".to_vec(), done)).unwrap();
+    let region = wait(|done| source.create_offline_region(&definition(STYLE_URL), &b"one".to_vec(), done)).unwrap();
     assert_eq!(b"one", region.metadata.as_slice());
     assert_eq!(vec![region.clone()], wait(|done| source.list_offline_regions(done)).unwrap());
     assert_eq!(Some(region.clone()), wait(|done| source.get_offline_region(region.id, done)).unwrap());
@@ -125,55 +140,62 @@ fn a_region_lives_from_creation_to_deletion() {
 #[test]
 fn a_deleted_region_stops_downloading() {
     let dir = TempDir::new();
-    let source = database_file_source(&dir);
-    let server = MockServer::start();
-    let style = server.mock(|when, then| {
-        when.method("GET").path("/style.json");
-        then.status(200).delay(Duration::from_millis(200)).body(r#"{"version":8,"sources":{},"layers":[]}"#);
-    });
+    let (network, answered) = style_network(ResponseType::Manual);
+    let source = database_file_source(&dir, &network);
 
-    let region =
-        wait(|done| source.create_offline_region(&definition(&server.url("/style.json")), &Vec::new(), done)).unwrap();
+    let region = wait(|done| source.create_offline_region(&definition(STYLE_URL), &Vec::new(), done)).unwrap();
     let statuses = observe(&source, &region);
     wait(|done| source.set_offline_region_download_state(region.id, OfflineRegionDownloadState::Active, done)).unwrap();
     assert_eq!(OfflineRegionDownloadState::Active, statuses.recv_timeout(TIMEOUT).unwrap().download_state);
+    // The download has requested the style by the time the database answers
+    // a call made after the activation.
+    wait(|done| source.get_offline_region_status(region.id, done)).unwrap();
     wait(|done| source.delete_offline_region(region.id, done)).unwrap();
 
-    // The style answers after the deletion; the download it belonged to is
-    // gone, so the observer hears nothing more.
-    std::thread::sleep(Duration::from_millis(400));
+    // The style answers after the deletion, unless the deletion cancelled
+    // its request; the download it belonged to is gone, so the observer
+    // hears nothing more once the database has run what the answer sent.
+    network.respond_to_all();
+    wait(|done| source.list_offline_regions(done)).unwrap();
     assert!(statuses.try_recv().is_err());
-    assert!(style.calls() <= 1);
+    assert!(answered.load(Ordering::SeqCst) <= 1);
 }
 
 // The C ABI suite's a_download_refreshes_an_invalidated_region:
 // a download after invalidating the region revalidates the style with the
-// server, and a 304 keeps it.
+// network, and a 304 keeps it.
 #[test]
 fn a_download_refreshes_an_invalidated_region() {
     let dir = TempDir::new();
-    let source = database_file_source(&dir);
-    let server = MockServer::start();
-    let revalidated = server.mock(|when, then| {
-        when.method("GET").path("/style.json").header("If-None-Match", "\"style-1\"");
-        then.status(304).header("Cache-Control", "max-age=3600");
+    let network = Arc::new(StubFileSource::new(ResponseType::Synchronous));
+    let (fetched, revalidated) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    let (fetches, revalidations) = (Arc::clone(&fetched), Arc::clone(&revalidated));
+    network.set_response(Kind::Style, move |resource: &Resource| {
+        if resource.prior_etag.as_deref() == Some("\"style-1\"") {
+            revalidations.fetch_add(1, Ordering::SeqCst);
+            let mut not_modified = Response::new();
+            not_modified.not_modified = true;
+            not_modified.caching.expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 3600));
+            return Some(not_modified);
+        }
+        fetches.fetch_add(1, Ordering::SeqCst);
+        let mut response = style();
+        response.etag = Some("\"style-1\"".to_owned());
+        Some(response)
     });
-    let fetched = server.mock(|when, then| {
-        when.method("GET").path("/style.json");
-        then.status(200).header("ETag", "\"style-1\"").body(r#"{"version":8,"sources":{},"layers":[]}"#);
-    });
+    let source = database_file_source(&dir, &network);
+    let calls = || (fetched.load(Ordering::SeqCst), revalidated.load(Ordering::SeqCst));
 
-    let region =
-        wait(|done| source.create_offline_region(&definition(&server.url("/style.json")), &Vec::new(), done)).unwrap();
+    let region = wait(|done| source.create_offline_region(&definition(STYLE_URL), &Vec::new(), done)).unwrap();
     let statuses = observe(&source, &region);
     wait(|done| source.set_offline_region_download_state(region.id, OfflineRegionDownloadState::Active, done)).unwrap();
     let downloaded = wait_until_complete(&statuses);
-    assert_eq!((1, 0), (fetched.calls(), revalidated.calls()));
+    assert_eq!((1, 0), calls());
 
     wait(|done| source.invalidate_offline_region(region.id, done)).unwrap();
     wait(|done| source.set_offline_region_download_state(region.id, OfflineRegionDownloadState::Active, done)).unwrap();
     let refreshed = wait_until_complete(&statuses);
-    assert_eq!((1, 1), (fetched.calls(), revalidated.calls()));
+    assert_eq!((1, 1), calls());
     assert_eq!(downloaded.completed_resource_count, refreshed.completed_resource_count);
     assert_eq!(downloaded.completed_resource_size, refreshed.completed_resource_size);
 }
@@ -185,7 +207,8 @@ fn merging_copies_the_regions_of_another_database() {
     let side_region = OfflineDatabase::new(&side_path)
         .create_region(&definition("http://example.com/style.json"), &b"side".to_vec())
         .unwrap();
-    let source = database_file_source(&dir);
+    let (network, _) = style_network(ResponseType::Synchronous);
+    let source = database_file_source(&dir, &network);
 
     let merged = wait(|done| source.merge_offline_regions(&side_path, done)).unwrap();
     assert_eq!(1, merged.len());
