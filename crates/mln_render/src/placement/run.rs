@@ -247,11 +247,11 @@ impl Placements {
 
         if !places.contains(&true) {
             frame.placement_fade = 1.0;
+            // Nothing to place: queries find nothing placed.
+            self.placed.clear();
             if continuous {
-                // Nothing to place: the placement and what the participants
-                // keep go.
+                // The placement and what the participants keep go.
                 frame.placement_changed = self.schedule.reset();
-                self.placed.clear();
                 self.committed = None;
                 self.seen.clear();
                 for participant in &mut self.participants {
