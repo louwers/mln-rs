@@ -1470,6 +1470,9 @@ fn invalidating_makes_copies_stale() {
     }
 
     db.invalidate_region(region.id).unwrap();
+    // Invalidating expires the copies at its own clock's second, which can
+    // be later than `now`.
+    let now = mln_util::chrono::now();
 
     for (y, before) in cases.iter().enumerate() {
         let caching = db.get(&tile(y)).unwrap().caching;
