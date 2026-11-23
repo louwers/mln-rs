@@ -1,15 +1,22 @@
 //! `mln-bench compare <ref>`: this checkout, uncommitted changes included,
-//! against a Git ref, both sides running this checkout's harness.
+//! against a Git ref, both sides running this checkout's harness, or with
+//! `--own-harness` each side its own.
 //!
 //! The ref is checked out in a Git worktree under `<target>/bench-compare`,
 //! which the next comparison reuses, with this checkout's harness laid over
 //! it: `tools/bench`, and the libraries' `bench` modules, the entry points
 //! that micro scenarios call. Both sides build with this checkout's
 //! toolchain and `profile.toml`, so they differ only in the libraries. When
-//! the harness doesn't build against the ref, the comparison stops: it never
-//! runs the ref's own harness, whose scenarios may differ from this one's.
-//! Every run reports its harness id (build.rs), and the comparison refuses
-//! runs whose ids differ.
+//! the harness doesn't build against the ref, the comparison stops. Every
+//! run reports its harness id (build.rs), and the comparison refuses runs
+//! whose ids differ.
+//!
+//! With `--own-harness`, the ref builds as it is, its own harness included,
+//! with this checkout's toolchain and `profile.toml`: for a ref whose
+//! libraries this checkout's harness doesn't build against, such as one
+//! from before a change to a `bench` module's API. The sides compare the
+//! scenarios both harnesses have, by name, and the report warns that their
+//! harnesses differ, so that a change can come from either harness.
 //!
 //! Counts: each side runs once per scenario, and the ref's runs are kept
 //! under `<target>/bench-compare/samples`, by commit, to measure how much a
@@ -72,6 +79,8 @@ pub(crate) struct Options {
     pub(crate) rounds: Option<usize>,
     /// The load average over which rounds don't run.
     pub(crate) max_load: f64,
+    /// Whether the ref runs its own harness instead of this checkout's.
+    pub(crate) own_harness: bool,
 }
 
 /// Which way a metric moved, when it moved beyond its noise. Lower is
@@ -121,7 +130,14 @@ pub(crate) struct ScenarioComparison {
 pub(crate) struct Comparison {
     pub(crate) base: String,
     pub(crate) base_commit: String,
+    /// The harness ids of this checkout's runs and of the base's, which
+    /// differ only with `--own-harness`.
     pub(crate) harness: String,
+    pub(crate) base_harness: String,
+    /// The scenarios of the filters that only the base's harness has, and
+    /// that only this checkout's has, which aren't compared.
+    pub(crate) only_base: Vec<String>,
+    pub(crate) only_this: Vec<String>,
     pub(crate) rounds: Option<usize>,
     /// With rounds, where the system keeps a load average: the machine's
     /// before the rounds and after them. The one after counts the rounds'
@@ -147,17 +163,17 @@ impl Comparison {
 /// Builds both sides, runs the scenarios `options.filters` selects and
 /// compares them.
 pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
-    let scenarios = scenarios::select(&options.filters);
-    if scenarios.is_empty() {
+    let selected = scenarios::select(&options.filters);
+    if selected.is_empty() {
         return Err("no scenario matches the filters".to_owned());
     }
     if let Some(rounds) = options.rounds {
-        let needed = min_rounds(scenarios.len());
+        let needed = min_rounds(selected.len());
         if rounds < needed {
             return Err(format!(
                 "--rounds {rounds} can't tell a time's change from noise among {} scenarios: that takes at least {needed} \
                  rounds, or fewer scenarios (--filter)",
-                scenarios.len()
+                selected.len()
             ));
         }
     }
@@ -169,6 +185,7 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
         return Err(format!("{} has no tools/bench to compare with", root.display()));
     }
     let commit = git(&root, &["rev-parse", "--verify", &format!("{}^{{commit}}", options.base)])?;
+    let own = options.own_harness;
 
     eprintln!("mln-bench: building this checkout");
     let candidate = build(&root, &root.join("Cargo.toml"), None, None)?;
@@ -178,25 +195,55 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
     std::fs::create_dir_all(&work).map_err(|error| format!("{}: {error}", work.display()))?;
     let _lock = lock(&work)?;
 
-    eprintln!("mln-bench: building {} ({}) with this checkout's harness", options.base, short(&commit));
+    let whose = if own { "its own" } else { "this checkout's" };
+    eprintln!("mln-bench: building {} ({}) with {whose} harness", options.base, short(&commit));
     let tree = work.join("tree");
-    prepare_tree(&root, &tree, &commit)?;
+    prepare_tree(&root, &tree, &commit, !own)?;
     let base_target = work.join("target");
     let base = build(&root, &tree.join("Cargo.toml"), Some(&base_target), None).map_err(|error| {
-        format!(
-            "{error}\n\nThis checkout's harness, with its libraries' bench modules, doesn't build against {} ({}), \
-             so there's nothing to compare. A scenario or entry point that needs library code the base lacks can't be \
-             compared with it: commit that code with the scenario, then compare later changes with that commit \
-             (tools/bench/README.md).",
-            options.base,
-            short(&commit)
-        )
+        if own {
+            format!(
+                "{error}\n\nThe harness of {} ({}) doesn't build with this checkout's toolchain and profile.toml.",
+                options.base,
+                short(&commit)
+            )
+        } else {
+            format!(
+                "{error}\n\nThis checkout's harness, with its libraries' bench modules, doesn't build against {} ({}). \
+                 Compare with each side's own harness instead (--own-harness), or commit the library code a scenario \
+                 or entry point needs with it, then compare later changes with that commit (tools/bench/README.md).",
+                options.base,
+                short(&commit)
+            )
+        }
     })?;
     // Both builds of the ref link to the same path, so each is copied out.
     let base = keep_binary(&base, &work.join("bin/base"))?;
-    eprintln!("mln-bench: building {} ({}) again, with its code at other addresses", options.base, short(&commit));
-    let probe = build(&root, &tree.join("Cargo.toml"), Some(&base_target), Some("layout-probe"))?;
-    let probe = keep_binary(&probe, &work.join("bin/probe"))?;
+    let probe = if own && !has_layout_probe(&tree) {
+        eprintln!(
+            "mln-bench: the harness of {} has no layout probe, so its instructions' noise comes from the probes of \
+             refs compared before",
+            options.base
+        );
+        None
+    } else {
+        eprintln!("mln-bench: building {} ({}) again, with its code at other addresses", options.base, short(&commit));
+        let probe = build(&root, &tree.join("Cargo.toml"), Some(&base_target), Some("layout-probe"))?;
+        Some(keep_binary(&probe, &work.join("bin/probe"))?)
+    };
+    let (scenarios, only_base, only_this) = if own {
+        match_scenarios(&selected, &scenario_names(&base, &options.filters)?)
+    } else {
+        (selected, vec![], vec![])
+    };
+    for (side, names) in [(options.base.as_str(), &only_base), ("this checkout", &only_this)] {
+        if !names.is_empty() {
+            eprintln!("mln-bench: only {side}'s harness has {}, which isn't compared", names.join(", "));
+        }
+    }
+    if scenarios.is_empty() {
+        return Err(format!("no scenario of the filters is in both harnesses, this checkout's and {}'s", options.base));
+    }
 
     let _measuring = host::measuring(options.rounds.is_some())?;
     let load_before = options.rounds.and_then(|_| host::load_average());
@@ -213,40 +260,51 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
     let samples_path = work.join("samples").join(format!("{commit}.json"));
     let mut samples = read_samples(&samples_path);
     eprintln!("mln-bench: a first run of each scenario on each side, not counted");
-    warm_up(&base, &scenarios)?;
-    warm_up(&candidate, &scenarios)?;
+    let base_harness = harness_of(&warm_up(&base, &scenarios)?)?;
+    let harness = harness_of(&warm_up(&candidate, &scenarios)?)?;
+    if base_harness != harness {
+        if !own {
+            return Err(format!(
+                "the sides ran different harness builds ({base_harness} and {harness}), so they can't be compared"
+            ));
+        }
+        let changes = git(&root, &["diff", "--stat", &commit, "--", "tools/bench", "crates/*/src/bench.rs"])?;
+        eprintln!(
+            "mln-bench: warning: the sides run different harnesses, so a change can come from the harness as well as \
+             the libraries:\n {changes}"
+        );
+    }
     let probe_key = |scenario: &Scenario| format!("{} (layout probe)", scenario.name);
-    let unprobed: Vec<&Scenario> = scenarios
-        .iter()
-        .copied()
-        .filter(|scenario| {
-            samples
-                .get(&probe_key(scenario))
-                .is_none_or(|runs| !runs.iter().any(|run| run.harness == env!("MLN_BENCH_HARNESS")))
-        })
-        .collect();
-    if !unprobed.is_empty() {
-        eprintln!("mln-bench: the ref's layout probe, once per scenario");
-        warm_up(&probe, &unprobed)?;
-        for scenario in &unprobed {
-            let run = run_in_process(&probe, scenario.name, None)?;
-            samples.insert(probe_key(scenario), vec![run]);
+    if let Some(probe) = &probe {
+        let unprobed: Vec<&Scenario> = scenarios
+            .iter()
+            .copied()
+            .filter(|scenario| {
+                samples.get(&probe_key(scenario)).is_none_or(|runs| !runs.iter().any(|run| run.harness == base_harness))
+            })
+            .collect();
+        if !unprobed.is_empty() {
+            eprintln!("mln-bench: the ref's layout probe, once per scenario");
+            warm_up(probe, &unprobed)?;
+            for scenario in &unprobed {
+                let run = run_in_process(probe, scenario.name, None)?;
+                samples.insert(probe_key(scenario), vec![run]);
+            }
         }
     }
+    let changed_while_running =
+        |scenario: &Scenario| format!("{}: a side's harness changed while it ran", scenario.name);
     let mut comparisons = Vec::new();
     for (index, scenario) in scenarios.iter().enumerate() {
         let (base_runs, mut candidate_runs) = run_sides(scenario, index, &base, &candidate, options.rounds)?;
-        let harness = candidate_runs[0].harness.clone();
-        let harness = &harness;
-        if let Some(run) = base_runs.iter().chain(&candidate_runs).find(|run| &run.harness != harness) {
-            return Err(format!(
-                "{}: the sides ran different harness builds ({} and {harness}), so they can't be compared",
-                scenario.name, run.harness
-            ));
+        if base_runs.iter().any(|run| run.harness != base_harness)
+            || candidate_runs.iter().any(|run| run.harness != harness)
+        {
+            return Err(changed_while_running(scenario));
         }
         let kept = samples.entry(scenario.name.to_owned()).or_default();
         let environment = &base_runs[0].environment;
-        kept.retain(|run| &run.harness == harness && &run.environment == environment);
+        kept.retain(|run| run.harness == base_harness && &run.environment == environment);
         let mut base_counts = kept.clone();
         base_counts.extend(base_runs.iter().cloned());
         while base_counts.len() < SPREAD_RUNS {
@@ -265,8 +323,8 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
             while candidate_runs.len() < CONFIRM_RUNS {
                 eprintln!("mln-bench: {}: this checkout again, to confirm its changes", scenario.name);
                 let run = run_in_process(&candidate, scenario.name, None)?;
-                if &run.harness != harness {
-                    return Err(format!("{}: this checkout's harness changed while it ran", scenario.name));
+                if run.harness != harness {
+                    return Err(changed_while_running(scenario));
                 }
                 candidate_runs.push(run);
             }
@@ -280,11 +338,60 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
     Ok(Comparison {
         base: options.base.clone(),
         base_commit: commit,
-        harness: env!("MLN_BENCH_HARNESS").to_owned(),
+        harness,
+        base_harness,
+        only_base,
+        only_this,
         rounds: options.rounds,
         load: load_before.zip(host::load_average()).map(|(before, after)| Load { before, after }),
         scenarios: comparisons,
     })
+}
+
+/// The harness id that every one of `runs`, a binary's, reports.
+fn harness_of(runs: &[Run]) -> Result<String, String> {
+    let harness = runs.first().map(|run| run.harness.clone()).ok_or("no runs")?;
+    match runs.iter().find(|run| run.harness != harness) {
+        Some(run) => Err(format!("one binary reported two harness ids, {harness} and {}", run.harness)),
+        None => Ok(harness),
+    }
+}
+
+/// The names of the scenarios that `filters` select in the harness `binary`.
+fn scenario_names(binary: &Path, filters: &[String]) -> Result<Vec<String>, String> {
+    #[derive(Deserialize)]
+    struct Listed {
+        name: String,
+    }
+    let mut command = Command::new(binary);
+    command.args(["list", "--json"]);
+    for filter in filters {
+        command.args(["--filter", filter]);
+    }
+    let output = command.stderr(Stdio::inherit()).output().map_err(|error| format!("{}: {error}", binary.display()))?;
+    if !output.status.success() {
+        return Err(format!("{} list failed ({})", binary.display(), output.status));
+    }
+    let listed: Vec<Listed> =
+        serde_json::from_slice(&output.stdout).map_err(|error| format!("{} list: {error}", binary.display()))?;
+    Ok(listed.into_iter().map(|listed| listed.name).collect())
+}
+
+/// The scenarios of `selected`, this checkout's, that the base's harness has
+/// too, by name, in this checkout's order; then the names of those only the
+/// base has, and of those only this checkout has.
+fn match_scenarios<'a>(selected: &[&'a Scenario], base: &[String]) -> (Vec<&'a Scenario>, Vec<String>, Vec<String>) {
+    let (both, only_this): (Vec<&Scenario>, Vec<&Scenario>) =
+        selected.iter().partition(|scenario| base.iter().any(|name| name == scenario.name));
+    let only_base =
+        base.iter().filter(|name| selected.iter().all(|scenario| scenario.name != *name)).cloned().collect();
+    (both, only_base, only_this.iter().map(|scenario| scenario.name.to_owned()).collect())
+}
+
+/// Whether the harness of the checkout at `tree` has the `layout-probe`
+/// feature.
+fn has_layout_probe(tree: &Path) -> bool {
+    std::fs::read_to_string(tree.join("tools/bench/Cargo.toml")).is_ok_and(|manifest| manifest.contains("layout-probe"))
 }
 
 /// The fewest rounds with which a time can move beyond its noise when `tests`
@@ -384,6 +491,9 @@ fn layout_noise(samples: &Path, scenario: &str, environment: &Environment) -> BT
         };
         let (base, probe) = (of(scenario), of(&format!("{scenario} (layout probe)")));
         let Some(probe) = probe.first() else { continue };
+        // Only the base's runs of the probe's harness: another harness's
+        // differ by more than where the code lies.
+        let base: Vec<&Run> = base.into_iter().filter(|run| run.harness == probe.harness).collect();
         for metric in probe.metrics.iter().filter(|metric| metric.name.starts_with("instructions")) {
             let values: Vec<f64> = base.iter().filter_map(|run| run.metric(&metric.name)).map(|m| m.value).collect();
             if values.is_empty() {
@@ -515,7 +625,20 @@ pub(crate) fn text(comparison: &Comparison) -> String {
         comparison.base,
         short(&comparison.base_commit)
     );
-    let _ = writeln!(out, "harness {} on both sides", comparison.harness);
+    if comparison.base_harness == comparison.harness {
+        let _ = writeln!(out, "harness {} on both sides", comparison.harness);
+    } else {
+        let _ = writeln!(
+            out,
+            "harness {} on the base and {} on this checkout, each side's own: a change can come from either harness",
+            comparison.base_harness, comparison.harness
+        );
+    }
+    for (side, names) in [("the base", &comparison.only_base), ("this checkout", &comparison.only_this)] {
+        if !names.is_empty() {
+            let _ = writeln!(out, "only {side}'s harness has, not compared: {}", names.join(", "));
+        }
+    }
     let _ = writeln!(
         out,
         "noise: a count's larger range over either side's runs, and for instructions the most a build laid out \
@@ -657,15 +780,17 @@ fn keep_binary(built: &Path, kept: &Path) -> Result<PathBuf, String> {
 }
 
 /// Checks `commit` out at `tree`, a worktree of the checkout's repository,
-/// and lays this checkout's harness over it: `tools/bench`, as a member of
-/// its workspace, and each library's `bench` module, in place of the
-/// commit's. A file is written only where its contents differ, so that
-/// Cargo builds again only what changed since the last comparison.
-fn prepare_tree(root: &Path, tree: &Path, commit: &str) -> Result<(), String> {
+/// with `tools/bench` a member of its workspace, and with `overlay` lays
+/// this checkout's harness over it: `tools/bench`, and each library's
+/// `bench` module, in place of the commit's. A file is written only where
+/// its contents differ, so that Cargo builds again only what changed since
+/// the last comparison.
+fn prepare_tree(root: &Path, tree: &Path, commit: &str, overlay: bool) -> Result<(), String> {
     if tree.join(".git").exists() {
-        // The tree keeps the harness of the last comparison when it has the
-        // commit already.
-        if git(tree, &["rev-parse", "HEAD"]).ok().as_deref() != Some(commit) {
+        // With the overlay, the tree keeps the harness of the last
+        // comparison when it has the commit already. Without, it goes back
+        // to the commit's: checking out writes only the files that differ.
+        if !overlay || git(tree, &["rev-parse", "HEAD"]).ok().as_deref() != Some(commit) {
             git(tree, &["checkout", "-q", "--force", "--detach", commit])?;
             git(tree, &["clean", "-q", "-d", "--force"])?;
         }
@@ -676,18 +801,30 @@ fn prepare_tree(root: &Path, tree: &Path, commit: &str) -> Result<(), String> {
         let path = tree.to_str().ok_or("a path that isn't UTF-8")?;
         git(root, &["worktree", "add", "-q", "--force", "--detach", path, commit])?;
     }
-    sync_dir(&root.join("tools/bench"), &tree.join("tools/bench"))?;
-    let modules = bench_modules(root)?;
-    for module in &modules {
-        write_if_changed(&tree.join(module), &read(&root.join(module))?)?;
-    }
-    // A module that only the commit has goes back to the commit's.
-    for module in bench_modules(tree)? {
-        if !modules.contains(&module) {
-            let path = module.to_str().ok_or("a path that isn't UTF-8")?.replace('\\', "/");
-            if git(tree, &["checkout", "-q", commit, "--", &path]).is_err() {
-                let path = tree.join(&module);
-                std::fs::remove_file(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+    if overlay {
+        sync_dir(&root.join("tools/bench"), &tree.join("tools/bench"))?;
+        let modules = bench_modules(root)?;
+        for module in &modules {
+            let path = tree.join(module);
+            if !path.parent().is_some_and(Path::is_dir) {
+                return Err(format!(
+                    "{} has no {}, so this checkout's harness, which calls its {}, can't build against it: compare \
+                     with each side's own harness instead (--own-harness)",
+                    short(commit),
+                    module.parent().unwrap_or(module).display(),
+                    module.display()
+                ));
+            }
+            write_if_changed(&path, &read(&root.join(module))?)?;
+        }
+        // A module that only the commit has goes back to the commit's.
+        for module in bench_modules(tree)? {
+            if !modules.contains(&module) {
+                let path = module.to_str().ok_or("a path that isn't UTF-8")?.replace('\\', "/");
+                if git(tree, &["checkout", "-q", commit, "--", &path]).is_err() {
+                    let path = tree.join(&module);
+                    std::fs::remove_file(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+                }
             }
         }
     }
@@ -996,6 +1133,94 @@ mod tests {
         assert_eq!(verdict(heap_run(50.0, 30.0)), (Some(Moved::Less), Some(Moved::More)));
         // A higher start, with the same growth: more in all.
         assert_eq!(verdict(heap_run(120.0, 10.0)), (Some(Moved::More), None));
+    }
+
+    #[test]
+    fn matches_the_sides_scenarios_by_name() {
+        const fn scenario(name: &'static str) -> Scenario {
+            Scenario { name, kind: Kind::Micro, question: "?", run: |_| {} }
+        }
+        let (a, b, c) = (scenario("micro/a"), scenario("micro/b"), scenario("micro/c"));
+        let base = ["micro/c".to_owned(), "micro/old".to_owned(), "micro/a".to_owned()];
+        let (both, only_base, only_this) = match_scenarios(&[&a, &b, &c], &base);
+        assert_eq!(both.iter().map(|scenario| scenario.name).collect::<Vec<_>>(), ["micro/a", "micro/c"]);
+        assert_eq!(only_base, ["micro/old"]);
+        assert_eq!(only_this, ["micro/b"]);
+    }
+
+    /// Runs `git args` in `dir`, as a committer of its own.
+    fn git_in(dir: &Path, args: &[&str]) -> String {
+        let identity =
+            ["-c", "user.name=mln-bench", "-c", "user.email=mln-bench@localhost", "-c", "commit.gpgsign=false"];
+        let output = Command::new("git").arg("-C").arg(dir).args(identity).args(args).output().unwrap();
+        assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    }
+
+    fn write(path: &Path, contents: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
+
+    fn contents(path: &Path) -> String {
+        std::fs::read_to_string(path).unwrap()
+    }
+
+    #[test]
+    fn prepares_the_refs_tree_with_this_checkouts_harness_or_its_own() {
+        let (repository, work) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (root, tree) = (repository.path(), work.path().join("tree"));
+        git_in(root, &["init", "-q"]);
+        write(&root.join("Cargo.toml"), "[workspace]\nmembers = [\n  \"crates/*\",\n]\n");
+        write(&root.join("crates/lib/src/bench.rs"), "the ref's");
+        write(&root.join("tools/bench/src/main.rs"), "the ref's");
+        git_in(root, &["add", "-A"]);
+        git_in(root, &["commit", "-q", "-m", "the ref"]);
+        let commit = git_in(root, &["rev-parse", "HEAD"]);
+        write(&root.join("crates/lib/src/bench.rs"), "this checkout's");
+        write(&root.join("tools/bench/src/main.rs"), "this checkout's");
+        write(&root.join("tools/bench/src/new.rs"), "this checkout's");
+
+        let (module, harness, new) = (
+            tree.join("crates/lib/src/bench.rs"),
+            tree.join("tools/bench/src/main.rs"),
+            tree.join("tools/bench/src/new.rs"),
+        );
+        prepare_tree(root, &tree, &commit, false).unwrap();
+        assert_eq!((contents(&module), contents(&harness)), ("the ref's".to_owned(), "the ref's".to_owned()));
+        assert!(!new.exists());
+        assert!(contents(&tree.join("Cargo.toml")).contains("\"tools/bench\""));
+
+        prepare_tree(root, &tree, &commit, true).unwrap();
+        assert_eq!(
+            (contents(&module), contents(&harness)),
+            ("this checkout's".to_owned(), "this checkout's".to_owned())
+        );
+        assert!(new.exists());
+
+        // The tree of the same commit, used again without the overlay, goes
+        // back to the ref's harness.
+        prepare_tree(root, &tree, &commit, false).unwrap();
+        assert_eq!((contents(&module), contents(&harness)), ("the ref's".to_owned(), "the ref's".to_owned()));
+        assert!(!new.exists());
+    }
+
+    #[test]
+    fn the_overlay_of_a_module_whose_crate_the_ref_lacks_points_to_the_refs_own_harness() {
+        let (repository, work) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (root, tree) = (repository.path(), work.path().join("tree"));
+        git_in(root, &["init", "-q"]);
+        write(&root.join("Cargo.toml"), "[workspace]\nmembers = [\n  \"crates/*\",\n]\n");
+        write(&root.join("crates/lib/src/bench.rs"), "the ref's");
+        write(&root.join("tools/bench/src/main.rs"), "the ref's");
+        git_in(root, &["add", "-A"]);
+        git_in(root, &["commit", "-q", "-m", "the ref"]);
+        let commit = git_in(root, &["rev-parse", "HEAD"]);
+        write(&root.join("crates/new/src/bench.rs"), "this checkout's");
+
+        let error = prepare_tree(root, &tree, &commit, true).unwrap_err();
+        assert!(error.contains("--own-harness"), "{error}");
+        prepare_tree(root, &tree, &commit, false).unwrap();
     }
 
     #[test]

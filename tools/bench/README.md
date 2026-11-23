@@ -31,11 +31,12 @@ until the window closes, for a profiler). The fixtures and the paths come from
 ## Running
 
 ```sh
-mise run bench                         # every scenario
-mise run bench -- --filter micro/      # those whose names contain micro/
-mise run bench:list                    # the scenarios and their questions
-mise run bench:compare main            # this checkout against main
-mise run bench:fixtures                # install the map data, once
+mise run bench                                # every scenario
+mise run bench -- --filter micro/             # those whose names contain micro/
+mise run bench:list                           # the scenarios and their questions
+mise run bench:compare main                   # this checkout against main
+mise run bench:compare main -- --own-harness  # each side with its own harness
+mise run bench:fixtures                       # install the map data, once
 ```
 
 `mise run bench` builds with the `benchmark` profile (`profile.toml`) and runs
@@ -343,14 +344,27 @@ So both sides run this checkout's scenarios on their own libraries. Both build
 with this checkout's toolchain and `profile.toml`, and no path of either
 checkout ends up in a binary, so the same source builds the same binary on both
 sides. Each run reports its harness id, a hash of the harness's files and the
-compiler, and the comparison refuses runs whose ids differ.
+compiler, and the comparison refuses runs whose ids differ, unless each side
+runs its own harness (below).
 
 When this checkout's harness doesn't build against the ref, the comparison
-stops. It never runs the ref's own harness instead. This happens when a change
-adds a scenario or entry point that needs library code the ref lacks, or changes
-the internals an entry point calls. Commit what the harness needs first, then
+stops: when a change adds a scenario or entry point that needs library code the
+ref lacks, changes the internals an entry point calls, or moves a library that a
+`bench` module belongs to. Either commit what the harness needs first, then
 compare the change you want to measure with that commit
-(`mise run bench:compare HEAD~1`).
+(`mise run bench:compare HEAD~1`), or compare with each side's own harness.
+
+`mln-bench compare --own-harness <ref>`
+(`mise run bench:compare <ref> -- --own-harness`) builds the ref as it is, its
+own `tools/bench` and `bench` modules included, with this checkout's toolchain
+and `profile.toml`. It compares the scenarios that both harnesses have, by name,
+and lists those that only one has. The sides' harness ids differ, so it warns
+and prints what changed in the harness since the ref
+(`git diff --stat <ref> -- tools/bench 'crates/*/src/bench.rs'`): a change in a
+scenario whose code differs can come from its harness rather than the libraries,
+and a metric that only one side's harness reports shows no change. A ref whose
+harness lacks the layout probe takes its instructions' noise from the probes of
+refs compared before.
 
 ### Counts
 

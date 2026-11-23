@@ -34,16 +34,13 @@ pub(crate) fn run_in_process(binary: &Path, scenario: &str, image: Option<&Path>
     serde_json::from_str(&json).map_err(|error| format!("{scenario}'s report: {error}"))
 }
 
-/// Runs each of `scenarios` once in a process of `binary`, and drops what it
-/// reports. The first process of a newly built binary to run some code
-/// does more work than later ones: on macOS the system checks each page of
-/// the binary's code the first time a process reads it, and caches the GPU
-/// code it compiles for each binary.
-pub(crate) fn warm_up(binary: &Path, scenarios: &[&Scenario]) -> Result<(), String> {
-    for scenario in scenarios {
-        run_in_process(binary, scenario.name, None)?;
-    }
-    Ok(())
+/// Runs each of `scenarios` once in a process of `binary`, and returns what
+/// they report, which no measurement counts. The first process of a newly
+/// built binary to run some code does more work than later ones: on macOS
+/// the system checks each page of the binary's code the first time a
+/// process reads it, and caches the GPU code it compiles for each binary.
+pub(crate) fn warm_up(binary: &Path, scenarios: &[&Scenario]) -> Result<Vec<Run>, String> {
+    scenarios.iter().map(|scenario| run_in_process(binary, scenario.name, None)).collect()
 }
 
 /// Fails unless this binary was built as `profile.toml` builds it, with the
