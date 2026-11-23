@@ -546,10 +546,10 @@ fn loaded_tile(tileset: &Tileset, id: &OverscaledTileID) -> CanonicalTileID {
 }
 
 /// The ancestors that a tileset's cut tiles share, by their tile id, while
-/// a tile cut from them, or the tile at the last zoom itself, holds them. A tile cut from an ancestor whose data
-/// is fresh from the network takes it as it is; otherwise it loads the
-/// ancestor, and those whose loads bring the same data share it, decoded
-/// once.
+/// a tile cut from them, or the tile at the last zoom itself, holds them. A
+/// tile cut from an ancestor whose data is fresh from the network takes it
+/// as it is; otherwise it loads the ancestor, and those whose loads bring
+/// the same data share it, decoded once.
 #[derive(Default)]
 struct Ancestors(HashMap<CanonicalTileID, Held>);
 

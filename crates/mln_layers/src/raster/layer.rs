@@ -59,6 +59,7 @@ impl Layer for RasterLayer {
         }
         // Every tile of a source draws on the same quad.
         let quad = cx.tiles().next().map_or(ImageQuad::TILE, |(_, raster, _)| raster.quad());
+        debug_assert!(cx.tiles().all(|(_, raster, _)| raster.quad() == quad), "tiles of one source on other quads");
         main.block(&props(paint, &quad));
         // On the pixel grid while the camera stands still.
         let how = TileTransform { aligned: !cx.frame.camera_moving, ..TileTransform::default() };

@@ -30,11 +30,11 @@
 //!    `NgonLayout` builds a quad per point. A layer of a raster or image
 //!    source has the input [`RasterTiles`], each tile's image
 //!    ([`RasterTile`]) and the quad it warps onto ([`ImageQuad`]), one of a
-//!    raster-dem source the input [`DemTiles`],
-//!    each tile's elevations ([`DemTile`]), one of a source whose type
-//!    delivers a value of its own for each tile the input [`ValueTiles<V>`],
-//!    each tile's `&V`, and a layer without a source the input
-//!    [`ViewCover`], the tiles that cover the view, or [`NoTiles`].
+//!    raster-dem source the input [`DemTiles`], each tile's elevations
+//!    ([`DemTile`]), one of a source whose type delivers a value of its own
+//!    for each tile the input [`ValueTiles<V>`], each tile's `&V`, and a
+//!    layer without a source the input [`ViewCover`], the tiles that cover
+//!    the view, or [`NoTiles`].
 //! 2. Its programs. A program is a `static`
 //!    [`Program`](mln_gfx::shaders::program::Program) that names the
 //!    buffers, attributes, textures and paint properties its shaders read,
@@ -304,6 +304,11 @@ impl<S: StyleLayerType> TileInput<S> for NoTiles {
 /// The tiles of a raster source, or of an image source, which draws its
 /// image in them. A tile's data is its [`RasterTile`]. A source type of
 /// raster tiles names it as its [`Data`](crate::source::SourceType::Data).
+///
+/// A layer draws each tile's [surface](RasterTile::surface) on the tile's
+/// [quad](RasterTile::quad), by the warp that [`ImageQuad`] states: an image
+/// source's surface is the unit square, which drawn as it is covers the
+/// whole tile.
 pub enum RasterTiles {}
 
 impl<S: StyleLayerType> TileInput<S> for RasterTiles {
