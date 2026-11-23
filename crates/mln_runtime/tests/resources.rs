@@ -18,7 +18,7 @@ use mln_storage::response::Caching;
 use mln_storage::{ResourceError, Response};
 use mln_util::geo::{LatLng, LatLngBounds};
 
-use crate::support::{EMPTY_STYLE, EventLog, TempDir, map, runtime, wait, wait_err};
+use crate::support::{EMPTY_STYLE, EventLog, TempDir, map, result_of, runtime, wait, wait_err};
 
 fn style_response() -> Response {
     Response { data: Some(Arc::new(EMPTY_STYLE.as_bytes().to_vec())), ..Response::default() }
@@ -44,25 +44,32 @@ fn a_provider_serves_a_scheme_the_library_cant_load() {
 fn a_provider_answers_later_from_another_thread() {
     let runtime = runtime();
     wait(runtime.set_resource_provider(|request: ResourceRequest| {
+        // The thread answers once this call has returned and dropped
+        // `returned`.
+        let (returned, call_returned) = std::sync::mpsc::channel::<()>();
         std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(20));
+            let _ = call_returned.recv();
             request.respond(style_response()).unwrap();
         });
+        drop(returned);
     }));
     let map = map(&runtime);
     wait(map.set_style_url("custom://late"));
 }
 
-/// Answers inside its call, then stays in the call a while before it marks
-/// the call done.
+/// Answers inside its call, says so, and stays in the call until the test
+/// lets it return.
 struct AnswersInline {
+    answered: parking_lot::Mutex<std::sync::mpsc::Sender<()>>,
+    release: parking_lot::Mutex<std::sync::mpsc::Receiver<()>>,
     returned: Arc<AtomicBool>,
 }
 
 impl ResourceProvider for AnswersInline {
     fn request(&self, request: ResourceRequest) {
         request.respond(style_response()).unwrap();
-        std::thread::sleep(Duration::from_millis(100));
+        self.answered.lock().send(()).unwrap();
+        let _ = self.release.lock().recv_timeout(crate::support::TIMEOUT);
         self.returned.store(true, Ordering::SeqCst);
     }
 }
@@ -70,12 +77,25 @@ impl ResourceProvider for AnswersInline {
 #[test]
 fn an_answer_inside_the_providers_call_arrives_after_the_call_returns() {
     let runtime = runtime();
+    let (answered, on_answer) = std::sync::mpsc::channel();
+    let (release, on_release) = std::sync::mpsc::channel();
     let returned = Arc::new(AtomicBool::new(false));
-    wait(runtime.set_resource_provider(AnswersInline { returned: Arc::clone(&returned) }));
+    let provider = AnswersInline {
+        answered: parking_lot::Mutex::new(answered),
+        release: parking_lot::Mutex::new(on_release),
+        returned: Arc::clone(&returned),
+    };
+    wait(runtime.set_resource_provider(provider));
     let map = map(&runtime);
-    wait(map.set_style_url("custom://inline"));
+    let load = map.set_style_url("custom://inline").unwrap();
+    on_answer.recv_timeout(crate::support::TIMEOUT).unwrap();
+    // The map's thread takes this command before an answer sent to it once
+    // the call has returned.
+    assert_eq!("", wait(map.loaded_style_json()));
     // A host that answers in its callback, then records something, finds
     // the record there once the map has the answer.
+    drop(release);
+    result_of(load).unwrap();
     assert_eq!(EMPTY_STYLE, wait(map.loaded_style_json()));
     assert!(returned.load(Ordering::SeqCst));
 }
@@ -136,26 +156,23 @@ impl ResourceProvider for Routed {
 }
 
 #[test]
-fn a_provider_passes_through_or_leaves_what_it_doesnt_serve() {
-    let server = MockServer::start();
-    let style = server.mock(|when, then| {
-        when.method("GET").path("/style.json");
-        then.status(200).body(EMPTY_STYLE);
-    });
+fn a_provider_leaves_what_it_doesnt_serve_to_the_library() {
     let runtime = runtime();
     let served = Arc::new(AtomicUsize::new(0));
     wait(runtime.set_resource_provider(Routed { prefix: "custom://", served: Arc::clone(&served) }));
     let map = map(&runtime);
-    wait(map.set_style_url(server.url("/style.json")));
-    assert_eq!((0, 1), (served.load(Ordering::SeqCst), style.calls()));
-
-    wait(runtime.set_resource_provider(|request: ResourceRequest| request.pass_through().unwrap()));
-    wait(runtime.run_cache_database_operation(CacheDatabaseOperation::Clear));
-    wait(map.set_style_url(server.url("/style.json?again")));
-    assert_eq!(2, style.calls());
+    wait(map.set_style_url("custom://style.json"));
+    assert_eq!(1, served.load(Ordering::SeqCst));
+    // The library loads only `http` and `https`, so it fails this request at
+    // once, and says that the provider declined it.
+    let error = wait_err(map.set_style_url("other://style.json"));
+    assert!(error.message.contains("the registered resource provider declined"), "{}", error.message);
+    assert_eq!(1, served.load(Ordering::SeqCst));
 
     wait(runtime.clear_resource_provider());
-    assert_eq!(ErrorKind::Native, wait_err(map.set_style_url("custom://styles/empty")).kind);
+    let error = wait_err(map.set_style_url("custom://other.json"));
+    assert!(error.message.contains("register a resource provider"), "{}", error.message);
+    assert_eq!(1, served.load(Ordering::SeqCst));
 }
 
 #[test]
@@ -233,30 +250,28 @@ fn a_cancelled_request_calls_back_and_takes_no_answer() {
     assert_eq!(ErrorKind::InvalidState, request.respond(style_response()).unwrap_err().kind);
 }
 
+/// A resource transform sees the requests that the library loads, of any
+/// scheme while it is set, and can fail them. That a URL it rewrites is
+/// the one loaded is the online file source's rule, which its own tests
+/// check.
 #[test]
-fn a_resource_transform_rewrites_or_fails_requests() {
-    let server = MockServer::start();
-    server.mock(|when, then| {
-        when.method("GET").path("/style.json");
-        then.status(200).body(EMPTY_STYLE);
-    });
+fn a_resource_transform_sees_every_scheme_and_can_fail_requests() {
     let runtime = runtime();
-    let base = server.base_url();
+    let seen = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let record = Arc::clone(&seen);
     wait(runtime.set_resource_transform(move |kind, url, done| {
-        if url.contains("blocked") {
-            done(Err(ResourceError::new(mln_storage::response::Reason::Other, "blocked by the transform")));
-        } else {
-            assert_eq!(Kind::Style, kind);
-            done(Ok(url.replace("http://nowhere.invalid", &base)));
-        }
+        record.lock().push((kind, url.to_owned()));
+        done(Err(ResourceError::new(mln_storage::response::Reason::Other, "blocked by the transform")));
     }));
     let map = map(&runtime);
-    wait(map.set_style_url("http://nowhere.invalid/style.json"));
-    let error = wait_err(map.set_style_url("http://nowhere.invalid/blocked.json"));
+    let error = wait_err(map.set_style_url("jar://archive/style.json"));
     assert!(error.message.contains("blocked by the transform"), "{}", error.message);
+    assert_eq!(vec![(Kind::Style, "jar://archive/style.json".to_owned())], *seen.lock());
 
     wait(runtime.clear_resource_transform());
-    assert_eq!(ErrorKind::Native, wait_err(map.set_style_url("http://nowhere.invalid/style.json?2")).kind);
+    let error = wait_err(map.set_style_url("jar://archive/style.json?2"));
+    assert!(error.message.contains(r#"unsupported URL scheme "jar""#), "{}", error.message);
+    assert_eq!(1, seen.lock().len());
 }
 
 #[test]
@@ -448,21 +463,23 @@ fn a_merge_takes_only_a_readable_database_file() {
 
 #[test]
 fn an_offline_region_downloads_and_reports_its_progress() {
-    let server = MockServer::start();
-    server.mock(|when, then| {
-        when.method("GET").path("/style.json");
-        then.status(200).body(EMPTY_STYLE);
-    });
     let dir = TempDir::new();
     let options = RuntimeOptions { cache_path: Some(dir.path("cache.db")), ..RuntimeOptions::default() };
     let runtime = mln_rs::start_runtime(&options).unwrap();
+    let requested = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let record = Arc::clone(&requested);
+    wait(runtime.set_resource_provider(move |request: ResourceRequest| {
+        record.lock().push(request.resource().url.clone());
+        // A style that expired long ago, which needn't revalidate first.
+        let caching = Caching { expires: Some(mln_util::chrono::Timestamp::from_secs(1)), must_revalidate: false };
+        request.respond(Response { caching, ..style_response() }).unwrap();
+    }));
     let log = EventLog::install(&runtime);
     let offline = runtime.offline();
 
     let bounds = LatLngBounds::hull(LatLng::new(1.0, 2.0).unwrap(), LatLng::new(3.0, 4.0).unwrap());
-    let definition = OfflineTilePyramidRegionDefinition::new(server.url("/style.json"), bounds, 0.0, 0.0, 1.0, false)
-        .unwrap()
-        .into();
+    let definition =
+        OfflineTilePyramidRegionDefinition::new("custom://style.json", bounds, 0.0, 0.0, 1.0, false).unwrap().into();
     let region = wait(offline.create_region(definition, b"one".to_vec()));
     let id = region.id;
     assert_eq!(vec![region.clone()], wait(offline.regions()));
@@ -480,11 +497,11 @@ fn an_offline_region_downloads_and_reports_its_progress() {
     let done = done.expect("the download finishes");
     assert_eq!(EventSource::Runtime, done.source);
     assert!(wait(offline.region_status(id)).complete());
+    assert_eq!(vec!["custom://style.json".to_owned()], *requested.lock());
 
-    // The style came without caching headers, so it was stale on arrival,
-    // and stays usable.
+    // The style was stale on arrival, and stays usable.
     let expiry = wait(offline.region_expiry(id));
-    assert!(expiry.stale_after.is_some());
+    assert_eq!(Some(mln_util::chrono::Timestamp::from_secs(1)), expiry.stale_after);
     assert_eq!(None, expiry.usable_offline_until);
     assert_eq!((1, 0), (expiry.stale_resource_count, expiry.unusable_resource_count));
 

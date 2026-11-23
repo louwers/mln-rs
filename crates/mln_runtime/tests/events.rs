@@ -3,15 +3,17 @@
 // event_generations.c) where it tests the same rules.
 
 use std::sync::Arc;
-use std::time::Duration;
 
-use httpmock::MockServer;
 use mln_render::RendererEvent;
 use mln_runtime::map::MapEvent;
-use mln_runtime::{ErrorKind, EventMask, EventSource, EventType, MapOptions, RuntimeEvent, RuntimeEventKind};
+use mln_runtime::{
+    ErrorKind, EventMask, EventSource, EventType, MapOptions, ResourceRequest, RuntimeEvent, RuntimeEventKind,
+};
+use mln_storage::response::Reason;
+use mln_storage::{ResourceError, Response};
 use parking_lot::Mutex;
 
-use crate::support::{EMPTY_STYLE, EventLog, map, map_options, runtime, wait, wait_err};
+use crate::support::{EMPTY_STYLE, EventLog, map, map_options, result_of, runtime, wait, wait_err};
 
 fn is_map_event(event: &RuntimeEvent, event_type: EventType) -> bool {
     event.kind.event_type() == event_type
@@ -149,47 +151,50 @@ fn a_style_that_fails_to_parse_fails_its_load_and_keeps_the_style() {
 
 #[test]
 fn a_style_url_loads_and_names_the_style() {
-    let server = MockServer::start();
-    server.mock(|when, then| {
-        when.method("GET").path("/style.json");
-        then.status(200).body(EMPTY_STYLE);
-    });
-    server.mock(|when, then| {
-        when.method("GET").path("/broken.json");
-        then.status(200).body("{");
-    });
     let runtime = runtime();
+    wait(runtime.set_resource_provider(|request: ResourceRequest| {
+        let response = match request.resource().url.as_str() {
+            "custom://style.json" => Response { data: Some(Arc::new(EMPTY_STYLE.into())), ..Response::default() },
+            "custom://broken.json" => Response { data: Some(Arc::new(b"{".to_vec())), ..Response::default() },
+            _ => Response {
+                error: Some(Box::new(ResourceError::new(Reason::NotFound, "not found"))),
+                ..Response::default()
+            },
+        };
+        request.respond(response).unwrap();
+    }));
     let map = map(&runtime);
-    let url = server.url("/style.json");
+    let url = "custom://style.json".to_owned();
     wait(map.set_style_url(&url));
     assert_eq!(Some(url), wait(map.style_url()));
     assert_eq!(EMPTY_STYLE, wait(map.loaded_style_json()));
 
     wait(map.set_style_json(EMPTY_STYLE));
     assert_eq!(None, wait(map.style_url()));
-    assert_eq!(ErrorKind::Native, wait_err(map.set_style_url(server.url("/missing.json"))).kind);
+    assert_eq!(ErrorKind::Native, wait_err(map.set_style_url("custom://missing.json")).kind);
     // The URL is the argument, which a document that fails to parse doesn't
     // make invalid.
-    assert_eq!(ErrorKind::Native, wait_err(map.set_style_url(server.url("/broken.json"))).kind);
+    assert_eq!(ErrorKind::Native, wait_err(map.set_style_url("custom://broken.json")).kind);
 }
 
 #[test]
 fn a_new_style_load_cancels_the_one_in_progress() {
-    let server = MockServer::start();
-    server.mock(|when, then| {
-        when.method("GET").path("/slow.json");
-        then.status(200).delay(Duration::from_millis(300)).body(EMPTY_STYLE);
-    });
     let runtime = runtime();
+    // Holds every request unanswered.
+    let (requests, held) = std::sync::mpsc::channel();
+    let requests = Mutex::new(requests);
+    wait(runtime.set_resource_provider(move |request: ResourceRequest| requests.lock().send(request).unwrap()));
     let map = map(&runtime);
-    let slow = map.set_style_url(server.url("/slow.json")).unwrap();
+    let slow = map.set_style_url("custom://slow.json").unwrap();
+    let _first = held.recv_timeout(crate::support::TIMEOUT).unwrap();
     let fast = map.set_style_json(EMPTY_STYLE).unwrap();
-    assert_eq!(ErrorKind::Cancelled, slow.wait().unwrap_err().kind);
-    fast.wait().unwrap();
+    assert_eq!(ErrorKind::Cancelled, result_of(slow).unwrap_err().kind);
+    result_of(fast).unwrap();
 
-    let pending = map.set_style_url(server.url("/slow.json")).unwrap();
+    let pending = map.set_style_url("custom://slow.json").unwrap();
+    let _second = held.recv_timeout(crate::support::TIMEOUT).unwrap();
     wait(map.release());
-    assert_eq!(ErrorKind::Cancelled, pending.wait().unwrap_err().kind);
+    assert_eq!(ErrorKind::Cancelled, result_of(pending).unwrap_err().kind);
 }
 
 #[test]
