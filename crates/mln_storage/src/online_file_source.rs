@@ -176,12 +176,9 @@ impl OnlineRequest {
     /// its retry's backoff; else when the data expires, if it came fresh. A
     /// response that came stale, as one without a freshness lifetime,
     /// isn't asked for again until it is requested anew.
-    fn update_interval(&self, response: &Response, connection_backoff: Option<Duration>) -> Option<Duration> {
+    fn update_interval(&self, response: &Response) -> Option<Duration> {
         if response.error.is_some() {
-            return match connection_backoff {
-                Some(backoff) if self.failed_request_reason == Reason::Connection => Some(backoff),
-                _ => error_retry_timeout(self.failed_request_reason, self.failed_requests, self.retry_after),
-            };
+            return error_retry_timeout(self.failed_request_reason, self.failed_requests, self.retry_after);
         }
         response
             .caching
@@ -221,9 +218,6 @@ pub struct OnlineCore {
     /// A task that tells the core the network is reachable again is on its
     /// way.
     reachable: Arc<AtomicBool>,
-    /// Replaces the backoff after a connection error, so that a test can
-    /// tell the retries it starts apart from the backoff's.
-    connection_backoff: Option<Duration>,
     /// The clock that the deadlines go by, in place of the system's
     /// (`crate::simulated_network`).
     #[cfg(all(any(test, feature = "bench"), not(target_family = "wasm")))]
@@ -512,7 +506,6 @@ impl OnlineCore {
     }
 
     fn completed(&mut self, id: u64, response: Response) {
-        let connection_backoff = self.connection_backoff;
         let Some(req) = self.requests.get_mut(&id) else { return };
         if let Some(error) = &response.error {
             if error.reason == Reason::NotFound {
@@ -527,7 +520,7 @@ impl OnlineCore {
         }
         // After an error, the request retries, even while the requester
         // shows a stale copy.
-        let interval = req.update_interval(&response, connection_backoff);
+        let interval = req.update_interval(&response);
 
         let resource = &mut req.resource;
         let response = resource.deliver(response);
@@ -649,7 +642,6 @@ impl OnlineFileSource {
             resource_transform: None,
             network,
             reachable,
-            connection_backoff: None,
             #[cfg(all(any(test, feature = "bench"), not(target_family = "wasm")))]
             clock: None,
         };
@@ -718,13 +710,6 @@ impl OnlineFileSource {
     #[cfg(test)]
     pub(crate) fn pause(&self) -> crate::tests::Paused {
         crate::tests::pause(|hold| self.queue.post(move |_| hold()))
-    }
-
-    /// Waits `backoff` to retry a request that failed with a connection
-    /// error, in place of the exponential backoff.
-    #[cfg(test)]
-    pub(crate) fn set_connection_backoff(&self, backoff: Duration) {
-        self.queue.post(move |core| core.connection_backoff = Some(backoff));
     }
 
     /// Whether a thread, or the caller, runs the source's core.
@@ -1019,15 +1004,13 @@ mod tests {
     #[test]
     fn a_replaced_or_cancelled_deadline_leaves_the_queue() {
         let (_source, mut core) = core(1);
-        core.connection_backoff = Some(Duration::from_secs(3600));
         let _request = request(&mut core, 1, &url("/retry"));
         pass_deadline(&mut core, 1);
         let generation = transfer(&core, 1).expect("the request's transfer");
         let mut response = Response::new();
         response.error = Some(Box::new(ResourceError::new(Reason::Connection, "refused")));
         core.transferred(generation, &response);
-        let retry = core.queue.next_deadline().expect("the retry");
-        assert!(retry > Instant::now() + Duration::from_secs(60));
+        let retry = core.queue.next_deadline().expect("the retry, after its backoff");
 
         core.network_is_reachable_again();
         let again = core.queue.next_deadline().expect("the retry, at once");
