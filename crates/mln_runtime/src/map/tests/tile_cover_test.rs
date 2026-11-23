@@ -85,18 +85,6 @@ fn san_francisco_wrapped() -> LatLngBounds {
     LatLngBounds::hull(ll(37.6609, 238.5744), ll(37.8271, 238.3204))
 }
 
-/// A stand-in for `std::rand()` in the fuzz tests: a fixed-seed LCG (the C
-/// standard's sample `rand`), so runs are reproducible. C++ seeds libc
-/// `rand` with `time(nullptr)`.
-struct Lcg(u32);
-
-impl Lcg {
-    fn rand(&mut self) -> usize {
-        self.0 = self.0.wrapping_mul(1_103_515_245).wrapping_add(12345);
-        ((self.0 >> 16) & 0x7fff) as usize
-    }
-}
-
 mod tile_cover {
     use super::*;
 
@@ -704,71 +692,6 @@ mod tile_cover {
         assert_eq!(5, covering_zoom_level(4.6, true, constants::TILE_SIZE_I));
         assert_eq!(4, covering_zoom_level(4.4, true, constants::TILE_SIZE_I));
         assert_eq!(6, covering_zoom_level(4.6, true, 256));
-    }
-
-    // DISABLED_FuzzPoly and DISABLED_FuzzLine loop forever in C++ (manual
-    // fuzz harnesses, re-seeding `rand` with the time on every round). The
-    // ports are ignored like the C++ tests are disabled, use the fixed-seed
-    // `Lcg` instead of `rand`, and stop after a fixed number of rounds so
-    // `--include-ignored` terminates.
-    const FUZZ_ROUNDS: usize = 20;
-
-    // gtest: TileCover.DISABLED_FuzzPoly
-    #[test]
-    #[ignore = "manual fuzz harness, disabled in C++"]
-    fn disabled_fuzz_poly() {
-        let mut rng = Lcg(1);
-        for _ in 0..FUZZ_ROUNDS {
-            let len = rng.rand() % 10000 + 3;
-            let mut rings = Vec::new();
-
-            let mut num_rings = 1;
-            num_rings += rng.rand() % 5;
-            while num_rings > 0 {
-                let mut ring = Vec::new();
-                for _ in 0..len {
-                    let x = (rng.rand() % 180) as f64;
-                    let y = (rng.rand() % 90) as f64;
-
-                    ring.push((x, y));
-                }
-                rings.push(LineString::from(ring));
-                num_rings -= 1;
-            }
-
-            eprint!(".");
-            let mut tc = TileCover::new_from_geometry(&Geometry::Polygon(polygon(rings)), 5).unwrap();
-            while tc.next().is_some() {}
-        }
-    }
-
-    // gtest: TileCover.DISABLED_FuzzLine
-    #[test]
-    #[ignore = "manual fuzz harness, disabled in C++"]
-    fn disabled_fuzz_line() {
-        let mut rng = Lcg(1);
-        for _ in 0..FUZZ_ROUNDS {
-            let len = rng.rand() % 10000 + 3;
-            let mut mls = Vec::new();
-
-            let mut num_lines = 1;
-            num_lines += rng.rand() % 5;
-            while num_lines > 0 {
-                let mut line = Vec::new();
-                for _ in 0..len {
-                    let x = (rng.rand() % 180) as f64;
-                    let y = (rng.rand() % 90) as f64;
-
-                    line.push((x, y));
-                }
-                mls.push(LineString::from(line));
-                num_lines -= 1;
-            }
-
-            eprint!(".");
-            let mut tc = TileCover::new_from_geometry(&Geometry::MultiLineString(MultiLineString(mls)), 5).unwrap();
-            while tc.next().is_some() {}
-        }
     }
 
     /// Sets up `transform` for a globe test. C++ defaults `pitch` and

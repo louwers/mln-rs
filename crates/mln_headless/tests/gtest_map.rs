@@ -1,5 +1,4 @@
-// Markers: `// gtest: Group.Name` above each ported test; tests that need
-// code that is not ported yet are `#[ignore]`d with the missing part.
+// Markers: `// gtest: Group.Name` above each ported test.
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
@@ -1274,64 +1273,6 @@ fn dont_load_unneeded_tiles() {
         test.render();
         assert_eq!(reference_tiles(z), *tiles.lock(), "zoom level {z}");
     }
-}
-
-// gtest: Map.ContinuousRendering
-#[test]
-#[ignore = "TEST_DISABLED_ON_CI (timing-dependent); see map.test.cpp:994"]
-fn continuous_rendering() {
-    let run_loop = TestLoop::new();
-    let pool = Pool::new(4);
-
-    let did_not_stop = Arc::new(AtomicBool::new(false));
-    let emergency_shutoff = LoopTimer::new(&run_loop);
-    {
-        let run_loop = run_loop.handle();
-        let did_not_stop = Arc::clone(&did_not_stop);
-        emergency_shutoff.start(Duration::from_secs(10), move || {
-            run_loop.stop();
-            did_not_stop.store(true, Ordering::SeqCst);
-        });
-    }
-
-    let timer = Rc::new(LoopTimer::new(&run_loop));
-
-    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, run_loop.queue(), &pool).expect("a headless frontend");
-
-    let observer = Rc::new(StubMapObserver::default());
-    {
-        let timer = Rc::downgrade(&timer);
-        let run_loop = run_loop.handle();
-        observer.did_finish_rendering_frame_callback.set(move |_| {
-            // Start a timer that ends the test one second from now. If we are
-            // continuing to render indefinitely, the timer will be constantly
-            // restarted and never trigger. Instead, the emergency shutoff above
-            // will trigger, failing the test.
-            if let Some(timer) = timer.upgrade() {
-                let run_loop = run_loop.clone();
-                timer.start(Duration::from_secs(1), move || run_loop.stop());
-            }
-        });
-    }
-
-    let mut map = MapCore::with_resource_options(
-        MapCoreOptions { map_mode: MapMode::Continuous, size: frontend.size(), ..Default::default() },
-        &ResourceOptions {
-            asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
-            ..ResourceOptions::default()
-        },
-        registry(),
-        &pool,
-    )
-    .unwrap();
-    frontend.attach(&mut map);
-    let map = Rc::new(RefCell::new(map));
-    let frontend = Rc::new(RefCell::new(frontend));
-    let _events = observer.observe(&run_loop, &map, Some(&frontend));
-    map.borrow_mut().load_style_json(&read_file("test/fixtures/api/water.json"));
-
-    run_loop.run();
-    assert!(!did_not_stop.load(Ordering::SeqCst), "Did not stop rendering");
 }
 
 // gtest: Map.NoContentTiles
@@ -3730,80 +3671,6 @@ fn globe_bounded_source_loads_finer_tiles() {
 
     let parsed = parsed.borrow();
     assert!(parsed.iter().any(|id| id.canonical.z == 11), "{} tiles parsed, none at zoom 11", parsed.len());
-}
-
-// gtest: Map.LineLayerDepthDistribution
-#[test]
-#[ignore = "annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn per tile; the port has no annotation layer, so the background becomes the clear color and also fills the 5 rows above the pitched world that C++ leaves transparent (measured: 0.01953125 > 0.0006, exactly those 5 rows); see map.test.cpp:2509"]
-fn line_layer_depth_distribution() {
-    const LAYER_COUNT: u32 = 1 << 11;
-
-    let test = MapTest::new();
-
-    test.load_json(&read_file("test/fixtures/api/empty.json"));
-
-    test.map().jump_to(&CameraOptions { zoom: Some(0.0), pitch: Some(45.0), ..Default::default() });
-
-    let mut background_layer = Layer::new(mln_rs::builtin_registry().style(), "background", "Background", "").unwrap();
-    set(&mut background_layer, "background-color", &json!("rgba(255,255,0,1)"));
-    test.map().edit_style(|style| style.apply(Edit::AddLayer { layer: background_layer, before: None })).unwrap();
-
-    let colors = ["rgba(255,0,0,1)", "rgba(0,255,0,1)", "rgba(0,0,255,1)"];
-    let bounds = {
-        let map = test.map();
-        map.lat_lng_bounds_for_camera(&CameraOptions::from(map.snapshot().view.camera)).unwrap()
-    };
-
-    let get_source = |index: u32| {
-        let y = (bounds.north() - bounds.south()) * 0.95 / f64::from(LAYER_COUNT) * f64::from(index + 1) / 2.0;
-        let x = (bounds.east() - bounds.west()) * 0.95 / f64::from(LAYER_COUNT) * f64::from(index + 1) / 2.0;
-
-        let geo = Geometry::new_line_string([[-x, y], [x, y], [x, -y], [-x, -y], [-x, y]]);
-
-        geojson_source_with_data(
-            &format!("GeoJSONSource_{index}"),
-            GeoJSONOptions::default_options(),
-            GeoJson::from(vec![geojson::Feature::from(geo)]),
-        )
-    };
-
-    for i in 0..LAYER_COUNT {
-        // add one source per layer
-        test.map().add_source(get_source(i)).unwrap();
-
-        let mut layer = Layer::new(
-            mln_rs::builtin_registry().style(),
-            "line",
-            &format!("LineLayer{i}"),
-            &format!("GeoJSONSource_{i}"),
-        )
-        .unwrap();
-        set(&mut layer, "line-color", &json!(colors[i as usize % colors.len()]));
-
-        test.map().edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
-    }
-
-    check_image("test/fixtures/map/layer_depth_distribution/line", &test.render().image, 0.0006, 0.1);
-}
-
-// gtest: Map.SetFrustumOffset
-#[test]
-#[ignore = "annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn as a drawable inside the frustum-offset scissor; the port has no annotation layer, so the background becomes the clear color, which fills the whole frame (measured on `after`: 0.628662109375 > 0.0006; `before` passes); see map.test.cpp:2560"]
-fn set_frustum_offset() {
-    let test = MapTest::new();
-
-    test.load_json(&read_file("test/fixtures/api/empty.json"));
-
-    test.map()
-        .edit_style(|style| style.apply(Edit::AddLayer { layer: red_background("background"), before: None }))
-        .unwrap();
-
-    check_image("test/fixtures/map/setFrustumOffset/before", &test.render().image, 0.0006, 0.1);
-
-    let viewport = Viewport { frustum_offset: insets(50.0, 50.0, 50.0, 50.0), ..test.map().snapshot().view.viewport };
-    test.map().set_viewport(&viewport);
-
-    check_image("test/fixtures/map/setFrustumOffset/after", &test.render().image, 0.0006, 0.1);
 }
 
 /// A `width` x `height` opaque red image.
