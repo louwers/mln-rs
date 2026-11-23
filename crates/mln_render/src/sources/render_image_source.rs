@@ -269,7 +269,8 @@ impl RenderImageSource {
         // A wrap does not move a tile on the globe, so the image draws once
         // there, in the world copy the cover chose.
         let globe = view.is_globe();
-        // Add additional wrapped tile ids if necessary
+        // The image draws in each world copy whose quad overlaps the view's
+        // tiles.
         let zoom_range = Range::new(0u8, zoom);
         let ideal_tiles = tile_cover(
             &TileCoverParameters {
@@ -292,14 +293,24 @@ impl RenderImageSource {
                     || covering_tile.canonical.is_child_of(&tile.canonical)
                     || tile.canonical.is_child_of(&covering_tile.canonical)
                 {
+                    // The copy that puts this covering tile on the view's
+                    // tile: where the quad crosses the antimeridian, the
+                    // covering tile may lie in the world next to the
+                    // first's, and one view tile may see two copies. A
+                    // copy too many worlds from the first has no tile id.
+                    let wrap = i32::from(tile.wrap) - i32::from(covering_tile.wrap) + i32::from(tile_cover_ids[0].wrap);
+                    let Ok(wrap) = i16::try_from(wrap) else {
+                        continue;
+                    };
                     has_visible_tile = true;
-                    let wrapped_tile_id = UnwrappedTileID::with_wrap(tile.wrap, tile_cover_ids[0].canonical);
+                    let wrapped_tile_id = UnwrappedTileID::with_wrap(wrap, tile_cover_ids[0].canonical);
                     if globe {
                         self.tile_ids = vec![wrapped_tile_id];
-                    } else if tile.wrap != 0 && !self.tile_ids.contains(&wrapped_tile_id) {
+                        break;
+                    }
+                    if !self.tile_ids.contains(&wrapped_tile_id) {
                         self.tile_ids.push(wrapped_tile_id);
                     }
-                    break;
                 }
             }
             if globe && has_visible_tile {
@@ -341,8 +352,10 @@ impl RenderSource for RenderImageSource {
         &self.base
     }
 
+    // A source that draws nowhere holds no frame back: the style tracks
+    // the load of its image.
     fn is_loaded(&self, _store: &TileStore) -> bool {
-        self.loaded()
+        !self.base.enabled || self.loaded()
     }
 
     fn update(
@@ -355,10 +368,12 @@ impl RenderSource for RenderImageSource {
         parameters: &TileParameters<'_>,
     ) {
         self.place(style_source, needs_rendering, parameters);
-        // The image draws in the tiles it was last placed in, also once it
-        // is too small to see.
+        // A disabled source's tile ids and corners may be of other
+        // coordinates, and an image shrunk out of sight or out of view draws
+        // nowhere.
         self.render_tiles.clear();
-        self.render_tiles.extend(self.tile_ids.iter().map(|&id| {
+        let tile_ids = if self.base.enabled { &self.tile_ids[..] } else { &[] };
+        self.render_tiles.extend(tile_ids.iter().map(|&id| {
             let tile_id = OverscaledTileID::new(id.canonical.z, id.wrap, id.canonical);
             RenderTile::of_tile_id(id, tile_id, false)
         }));

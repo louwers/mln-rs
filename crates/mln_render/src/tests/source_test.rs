@@ -843,3 +843,114 @@ fn raster_dem_borders_across_a_world_wrap() {
         assert_eq!(west.get(-1, y), east.get(15, y), "row {y} of the west tile's border");
     }
 }
+
+/// `picture`, the tests' image source type: an image at four corners.
+struct Picture;
+
+impl mln_style::source_type::StyleSourceType for Picture {
+    const INFO: mln_style::source_type::SourceTypeInfo = mln_style::source_type::SourceTypeInfo {
+        name: "picture",
+        layer_kind: mln_style::layer_type::SourceKind::Raster,
+        from_json: false,
+    };
+    /// The corners: top left, top right, bottom right, bottom left.
+    type Options = [LatLng; 4];
+    type Description = Arc<mln_util::image::PremultipliedImage>;
+}
+
+/// The image of `source`, if it is a picture.
+fn picture_of(source: &Source) -> Option<crate::source::SourceImage<'_>> {
+    let data = mln_style::source_type::SourceData::<Picture>::recover(source)?;
+    Some(crate::source::SourceImage { image: data.description.as_ref(), coordinates: data.options })
+}
+
+/// A flat map `width` pixels wide and 256 high at `zoom`, centered at the
+/// equator and `lng`.
+fn image_view(width: u32, zoom: f64, lng: f64) -> SourceTest {
+    let mut test = SourceTest::new();
+    test.transform.resize(Size::new(width, 256)).unwrap();
+    test.transform.jump_to(&CameraOptions {
+        center: Some(LatLng::new(0.0, lng).unwrap()),
+        zoom: Some(zoom),
+        ..Default::default()
+    });
+    test
+}
+
+/// An image source with an image, from `west` to `east` and from 10° north
+/// to 10° south, updated for `test`'s view.
+fn image_seen_by(test: &SourceTest, west: f64, east: f64) -> crate::sources::render_image_source::RenderImageSource {
+    let corners =
+        [(10.0, west), (10.0, east), (-10.0, east), (-10.0, west)].map(|(lat, lng)| LatLng::new(lat, lng).unwrap());
+    let image = mln_util::image::PremultipliedImage::from_vec(Size::new(1, 1), vec![255, 0, 0, 255]);
+    let data = mln_style::source_type::SourceData::<Picture>::with_description(corners, Arc::new(image));
+    let source = Source::new("image", data);
+    let mut store = test.store();
+    let mut render_source = crate::sources::render_image_source::RenderImageSource::new(source.clone(), picture_of);
+    render_source.update(&mut store, source, &[], true, false, &test.tile_parameters_with(MapMode::Static));
+    render_source
+}
+
+/// The world copies the image of [`image_seen_by`] draws in, by wrap.
+fn image_copies(test: &SourceTest, west: f64, east: f64) -> Vec<i16> {
+    let render_source = image_seen_by(test, west, east);
+    let mut wraps: Vec<i16> = render_source.render_tiles().iter().map(|tile| tile.id.wrap).collect();
+    wraps.sort_unstable();
+    wraps
+}
+
+/// A view of zoom 0 480 px wide sees from -168.75° to 168.75°: both ends
+/// of an image from 150° to 200°, the east one in the world copy west of
+/// the image's own, through the one root tile.
+#[test]
+fn an_image_draws_in_every_world_copy_one_view_tile_sees() {
+    let test = image_view(480, 0.0, 0.0);
+    assert_eq!(vec![-1, 0], image_copies(&test, 150.0, 200.0));
+}
+
+/// An image wider than the world draws in each copy that reaches the view:
+/// from -200° to 200°, its own and those a world east and west of it.
+#[test]
+fn an_image_wider_than_the_world_draws_in_each_copy_in_view() {
+    let test = image_view(480, 0.0, 0.0);
+    let wraps = image_copies(&test, -200.0, 200.0);
+    assert_eq!(3, wraps.len(), "{wraps:?}");
+    assert!(wraps.windows(2).all(|pair| pair[1] == pair[0] + 1), "{wraps:?}");
+}
+
+/// A view of three world copies sees four copies of an image from 150° to
+/// 200°: one in each world, and the east end of the westernmost.
+#[test]
+fn a_view_of_three_worlds_draws_an_image_in_each() {
+    let test = image_view(3 * 512, 0.0, 0.0);
+    assert_eq!(vec![-2, -1, 0, 1], image_copies(&test, 150.0, 200.0));
+}
+
+/// An image in the world copy east of the view's draws in the view's.
+#[test]
+fn an_image_in_another_world_copy_draws_in_the_views() {
+    let test = image_view(256, 3.0, 15.0);
+    let wraps = image_copies(&test, 370.0, 380.0);
+    assert!(wraps.contains(&0), "{wraps:?}");
+}
+
+/// The wrap of a copy stays in range whatever the wraps it comes from: an
+/// image 32768 worlds west of the view's draws in the view's.
+#[test]
+fn an_image_far_west_draws_in_the_views_world() {
+    let test = image_view(256, 3.0, 15.0);
+    let worlds = 32768.0 * 360.0;
+    let wraps = image_copies(&test, 10.0 - worlds, 20.0 - worlds);
+    assert!(wraps.contains(&0), "{wraps:?}");
+}
+
+/// An image source that draws nowhere holds no frame back: the style tracks
+/// its image's own load.
+#[test]
+fn an_image_out_of_view_is_loaded() {
+    let test = image_view(256, 3.0, 15.0);
+    let store = test.store();
+    let out_of_view = image_seen_by(&test, 100.0, 110.0);
+    assert!(out_of_view.render_tiles().is_empty());
+    assert!(out_of_view.is_loaded(&store));
+}
