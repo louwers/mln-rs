@@ -187,18 +187,20 @@ impl VerticalPerspectiveProjection {
 
     /// The view-projection matrix that takes unit-sphere positions to clip
     /// space. It draws the center, at its altitude, at the center of the
-    /// padded view.
+    /// padded view. Its near plane is half a pixel from the eye, or the
+    /// terrain's ([`View::near_z`]) while terrain draws.
     #[must_use]
     pub fn globe_view_projection_matrix(view: &View, radius: f64) -> DMat4 {
         let size = view.size();
         let camera_to_center_distance = view.camera_to_center_distance();
         let center = view.center(WrapMode::Unwrapped);
+        let near = if view.terrain_min_elevation().is_some() { view.near_z() } else { 0.5 };
         let center_radius = Self::center_radius(view);
 
         let mut projection = perspective(
             view.perspective_fov(),
             f64::from(size.width) / f64::from(size.height),
-            0.5,
+            near,
             camera_to_center_distance + radius * (center_radius + 1.0),
         );
         // Move the vanishing point to the center of the padded view.

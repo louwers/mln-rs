@@ -75,25 +75,25 @@ impl TransformParameters {
     pub(crate) fn new(view: &View) -> Self {
         let state = view.clone();
         // Update the default matrices to the current viewport dimensions.
-        let proj_matrix = state.projection_matrix_with(1, false);
+        let proj_matrix = state.projection_matrix_with(state.near_z(), false);
 
         // Also compute a projection matrix that aligns with the current pixel
         // grid, taking into account odd viewport sizes.
-        let aligned_proj_matrix = state.projection_matrix_with(1, true);
+        let aligned_proj_matrix = state.projection_matrix_with(state.near_z(), true);
 
         // Calculate a second projection matrix with the near plane moved
         // further, to a tenth of the far value, so as not to waste depth
         // buffer precision on very close empty space, for layer types
         // (fill-extrusion) that use the depth buffer to emulate real-world
         // space.
-        let near_z = (0.1 * state.camera_to_center_distance()) as u16;
-        let near_clipped_proj_matrix = state.projection_matrix_with(near_z, false);
+        let near_clipped_near_z = f64::from((0.1 * state.camera_to_center_distance()) as u16);
+        let near_clipped_proj_matrix = state.projection_matrix_with(near_clipped_near_z, false);
 
         TransformParameters {
             proj_matrix,
             aligned_proj_matrix,
             near_clipped_proj_matrix,
-            near_clipped_near_z: f64::from(near_z),
+            near_clipped_near_z,
             view: state,
         }
     }

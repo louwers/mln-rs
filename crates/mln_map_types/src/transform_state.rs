@@ -744,6 +744,17 @@ impl TransformState {
         }
         self.update(|p| p.center_altitude = alt_m);
     }
+
+    /// Sets the lowest ground near the center while terrain draws, in
+    /// meters, exaggerated, or `None` without terrain. With it, the view's
+    /// near and far planes fit raised and sunken ground; without it, they
+    /// fit the flat map. A height that isn't finite changes nothing.
+    pub fn set_terrain_min_elevation(&mut self, min_elevation: Option<f64>) {
+        if min_elevation.is_some_and(|min| !min.is_finite()) {
+            return;
+        }
+        self.update(|p| p.terrain_min_elevation = min_elevation);
+    }
 }
 
 #[cfg(test)]

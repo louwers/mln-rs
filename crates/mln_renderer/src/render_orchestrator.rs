@@ -1434,7 +1434,7 @@ impl RenderOrchestrator {
             source_ids.insert(layer.base().style.base().source.clone());
         }
 
-        let proj_matrix = self.view.projection_matrix_with(1, false);
+        let proj_matrix = self.view.projection_matrix_with(self.view.near_z(), false);
 
         // Traced once for every source. Symbols are found where they were
         // placed, on the screen, so they take the geometry as it is.
