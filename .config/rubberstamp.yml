@@ -2,14 +2,13 @@
 # pull request push needs.
 version: 1
 context: >-
-  mln-rs is a Rust implementation of MapLibre Native, a map renderer targeting
-  desktop, mobile, and the browser. `src/` is the `mln-rs` facade crate,
-  `crates/` holds the workspace libraries (including `mln_renderer`,
-  `mln_style`, `mln_expression`, `mln_map`, `mln_c` for the C API, `mln_vulkan`,
-  `mln_gl`, `mln_mtl`, `mln_d3d12`, `mln_webgpu`, `mln_web_host`, and
-  `mln_web_shaper`), `vendor/` holds ported third-party crates, `examples/`
-  holds the desktop and browser demo apps, `tools/` holds developer and test
-  tooling, and `mise.toml` / `mise-tasks/` define the build and test tasks.
+  mln-rs is a Rust implementation of MapLibre Native targeting desktop, mobile,
+  and the browser. `src/` is the `mln-rs` facade crate, `crates/` holds the
+  workspace libraries (core map/style/renderer crates, per-backend renderers,
+  browser crates, and `mln_c` for the C API), `vendor/` holds ported
+  dependencies, `examples/` holds the desktop and browser apps, `tools/` holds
+  developer and test tooling, and `mise.toml` / `mise-tasks/` define build and
+  test tasks.
 
 # `tools/ci/jobs.json` maps each unit to the CI jobs it runs. A unit's rule
 # applies it unconditionally when a changed file matches, using GitHub Actions
@@ -18,22 +17,18 @@ ci:
   workflow: .github/workflows/ci.yml
   threshold: 0.6
   context: >-
-    `lint` and `commits` always run without waiting on the plan. `lint` runs
-    formatting, `jactionlint`, `shellcheck`, `ratchet`, host/wasm32/i686 clippy,
-    license checks, rustdoc, MSRV, C ABI header codegen checks, and the unit
-    tests for `tools/ci/`. Changes that only affect documentation, linters,
-    formatting, or `tools/ci/` tests need no other units unless they change a
-    job's behavior.
+    `lint` and `commits` always run without waiting on the plan; `lint` covers
+    formatting, linters, cross-target clippy, docs, MSRV, C ABI codegen checks,
+    and `tools/ci/` tests. Changes limited to documentation, formatting, or
+    those checks need no units.
 
-    `linux-x64` runs the full workspace test suite, render suite, backend-only
-    Vulkan and OpenGL ES suites, and the native C ABI suite: it is the general
-    correctness check for shared Rust code, map and style logic, rendering, and
-    the C library. Another unit matters only when a change reaches what it alone
-    builds or runs: Apple/Metal code or shared GPU/shader abstractions for
-    `macos`, browser WASM/WebGPU/WebGL2/JS/TS or rendered output for `web`, or
-    Cargo manifests and file additions/deletions/renames for `package`.
+    `linux-x64` is the general check for shared Rust code, rendering, and the C
+    library. Another unit matters only when a change reaches what it alone
+    builds or runs: Metal or Apple platform code for `macos`, browser builds or
+    rendered web output for `web`, or Cargo manifests and file
+    additions/deletions/renames for `package`.
 
-    A change to a job's definition in `.github/workflows/ci.yml`,
+    Changing a job's definition in `.github/workflows/ci.yml`,
     `tools/ci/jobs.json`, or `.github/actions/setup-ci-deps/` puts the units
     that run that job at risk. Release, sanitizer, and GitHub Pages workflows do
     not run on pull requests. The `main` branch runs every unit after merge, so
@@ -42,77 +37,48 @@ ci:
   units:
     linux-x64:
       covers: >-
-        Linux x64 workspace tests and render suite on WebGPU (lavapipe),
-        backend-only tests on Vulkan (with Vulkan validation) and OpenGL ES 3.0
-        (EGL on llvmpipe), and the native C ABI test suite (`tools/c-abi-test`)
-        for Vulkan and OpenGL. General correctness check for shared Rust crates,
-        styles, expressions, rendering, and the C library. Docs-only, web-only,
-        or macOS/Windows-only changes do not need it.
-      rules:
-        - if:
-            files:
-              - crates/mln_vulkan/**
-              - crates/mln_gl/**
-              - crates/mln_c/**
-              - tools/c-abi-test/**
-              - .github/actions/lavapipe/**
-              - mise-tasks/ci/test
-              - mise-tasks/test/c-abi
-          then: apply
+        Linux x64 workspace and render tests on WebGPU (lavapipe), backend-only
+        tests on Vulkan (with validation) and OpenGL ES (EGL/llvmpipe), and the
+        native C ABI suite. This is the general correctness check for shared
+        Rust crates, rendering, and the C library. Docs-only, browser-only, or
+        macOS/Windows-only changes do not need it.
     macos:
       covers: >-
-        macOS ARM64 clippy, workspace tests and render suite on Metal (under
-        Metal API validation), and backend-only tests on WebGPU (wgpu on Metal).
-        Catches Metal backend, shader/GPU abstraction (`mln_gfx`, `mln_webgpu`,
-        `mln_renderer`), Apple platform (`CoreText`, `CVDisplayLink`,
-        `CAMetalLayer`), and macOS CI setup issues. Platform-independent style,
-        expression, geojson, tile, or Linux-only changes that `linux-x64`
-        already tests do not need it.
+        macOS ARM64 clippy, workspace and render tests on Metal (with API
+        validation), and backend-only tests on WebGPU (wgpu on Metal). Catches
+        Metal backend, Apple platform, shared GPU/shader abstraction, and macOS
+        CI issues. Platform-independent or Linux-only changes that `linux-x64`
+        already covers do not need it.
       rules:
         - if:
             files:
               - crates/mln_mtl/**
-              - crates/mln_frame_pacer/src/apple.rs
-              - crates/mln_system_fonts/src/apple.rs
-              - examples/desktop/src/metal_*
           then: apply
     web:
       covers: >-
-        Browser WASM builds (WebGPU and WebGL2 modules) checked in headless
-        Chromium against native renders, the `crates/mln_c` browser Web Worker
-        packages, TypeScript typechecking, and wheel unit tests in
-        `examples/web`. Catches wasm32, WebGPU/WebGL2 browser rendering, JS/TS
-        page integration, and shared map/renderer regressions visible in the
-        browser. Native-only backends (`mln_vulkan`, `mln_mtl`, `mln_d3d12`),
-        native C ABI tests, desktop-only code, or docs-only changes do not need
-        it.
+        Browser WASM builds (WebGPU and WebGL2) checked in headless Chromium
+        against native renders, the C library's browser packages, TypeScript
+        typechecking, and web unit tests. Catches wasm32, browser rendering,
+        JS/TS integration, and shared map or renderer changes visible in the
+        browser. Native-only backends, native C ABI tests, desktop-only code, or
+        docs-only changes do not need it.
       rules:
         - if:
             files:
-              - crates/mln_web_host/**
-              - crates/mln_web_shaper/**
-              - crates/mln_c/web-check/**
+              - crates/mln_web_*/**
               - examples/web/**
-              - examples/styles.json
-              - mise-tasks/web/**
-              - mise-tasks/c-web/**
-              - tools/wasm-size/**
-              - tools/web-wasm-opt.sh
-              - tools/zig-cc-wasm32.sh
           then: apply
     package:
       covers: >-
         Runs `cargo package --locked` for every publishable crate and builds all
-        workspace test targets (`mise run ci:package`). Catches manifest errors,
-        broken path/version dependencies, and file additions, deletions, or
-        renames that `crates.io` packaging would reject. Ordinary edits to
-        existing source files that do not change Cargo manifests or add, delete,
-        or rename files do not need it.
+        workspace test targets. Catches manifest errors, broken dependencies,
+        and file additions, deletions, or renames that `crates.io` packaging
+        would reject. Ordinary edits to existing source files that do not touch
+        manifests or add, delete, or rename files do not need it.
       rules:
         - if:
             files:
               - Cargo.toml
               - Cargo.lock
               - "**/Cargo.toml"
-              - mise-tasks/package
           then: apply
