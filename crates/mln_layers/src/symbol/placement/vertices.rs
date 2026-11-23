@@ -2,18 +2,18 @@
 //! quads draw, for labels that follow lines, take variable anchors or turn
 //! upright.
 
-use std::collections::BTreeSet;
 use std::num::NonZeroU32;
 
 use geometry::Point;
 use glam::Vec2;
 use mln_map_types::{TileProjector, View};
-use mln_render::placement::Overlap;
+use mln_render::placement::{Overlap, PlacingTile};
 use mln_style_types::{AlignmentType, IconTextFitType, TextRotationAlignmentType, TextWritingModeType};
 use mln_util::constants::ONE_EM;
+use mln_util::hash::HashSet;
 
 use super::context::translation;
-use super::{BucketPlacementData, JointOpacityState, Placement, VariableOffset};
+use super::{JointOpacityState, LayerBuckets, Shown, VariableOffset};
 use crate::symbol::bucket::{Buffer, CollisionBuffer, SymbolBucket, SymbolBucketState};
 use crate::symbol::instance::{Justification, SymbolInstance, TextPart};
 use crate::symbol::placement::CircleKey;
@@ -44,7 +44,7 @@ fn orientation(vertical: bool) -> TextWritingModeType {
     if vertical { TextWritingModeType::Vertical } else { TextWritingModeType::Horizontal }
 }
 
-impl Placement {
+impl Shown {
     /// The orientation the symbol `id` shows in, where its bucket places
     /// either.
     fn orientation_of(&self, allow_vertical: bool, id: Option<NonZeroU32>) -> Option<TextWritingModeType> {
@@ -84,7 +84,7 @@ impl Placement {
         &self,
         bucket: &mut SymbolBucket,
         view: &View,
-        seen_cross_tile_ids: &mut BTreeSet<NonZeroU32>,
+        seen_cross_tile_ids: &mut HashSet<NonZeroU32>,
     ) {
         let layout = &*bucket.layout;
         let variable_placement = bucket.has_variable_text_anchors();
@@ -187,24 +187,27 @@ impl Placement {
         bucket.sort_features(view.angle() as f32);
     }
 
-    /// Lays out where the bucket's labels draw, for those that follow their
-    /// lines, take variable anchors or turn upright. With a layer ID, lays out that layer's own positions, which it
-    /// needs only at another translation than the leader's.
+    /// Lays out where the bucket of `layer` on `tile` draws its labels,
+    /// for those that follow their lines, take variable anchors or turn
+    /// upright. For a `follower`, a layer that draws a bucket another layer
+    /// leads, it lays out the layer's own positions, which it needs only at
+    /// another translation than the leader's.
     pub(crate) fn update_bucket_positions(
         &self,
         bucket: &mut SymbolBucket,
         view: &View,
-        data: &BucketPlacementData,
-        layer_id: Option<&str>,
+        layer: &LayerBuckets,
+        tile: &PlacingTile,
+        follower: bool,
     ) {
+        let layer_id = follower.then_some(layer.id.as_str());
         let layout = &*bucket.layout;
-        let tile = &data.tile;
         let along_line = *layout.symbol_placement.uniform() != mln_style_types::SymbolPlacementType::Point;
         let has_text = bucket.has_text_data();
         let has_variable_anchors = bucket.has_variable_text_anchors() && has_text;
         let screen_space = *layout.symbol_screen_space.uniform();
-        let text_translation = translation(&tile.id, &data.text_translate, view, screen_space);
-        let icon_translation = translation(&tile.id, &data.icon_translate, view, screen_space);
+        let text_translation = translation(&tile.id, &layer.text_translate, view, screen_space);
+        let icon_translation = translation(&tile.id, &layer.icon_translate, view, screen_space);
         let state = &mut bucket.state;
         match layer_id {
             None => {
@@ -264,7 +267,7 @@ impl Placement {
                 );
             }
         } else if has_variable_anchors {
-            self.lay_out_variable_anchors(bucket, view, data, layer_id, &tile_projector, text_translation);
+            self.lay_out_variable_anchors(bucket, view, tile, layer_id, &tile_projector, text_translation);
         } else if bucket.allow_vertical_placement && has_text {
             self.lay_out_orientations(bucket, layer_id);
         }
@@ -276,13 +279,12 @@ impl Placement {
         &self,
         bucket: &mut SymbolBucket,
         view: &View,
-        data: &BucketPlacementData,
+        tile: &PlacingTile,
         layer_id: Option<&str>,
         tile_projector: &TileProjector<'_>,
         translation: Vec2,
     ) {
         let layout = &*bucket.layout;
-        let tile = &data.tile;
         let zoom = view.zoom() as f32;
         let text_size = bucket.text_size_binder.evaluate_for_zoom(zoom);
         let tile_scale = 2f64.powf(view.zoom() - f64::from(tile.overscaled_id.overscaled_z)) as f32;

@@ -83,7 +83,7 @@ impl Placement {
         };
         // A tile held to fade out shows none of its symbols, and doesn't
         // keep a tile that replaces it from placing them.
-        if ctx.tile().hold_for_fade {
+        if ctx.tile.held_for_fade {
             return JointPlacement::UNPLACED;
         }
         self.text_boxes.clear();
@@ -113,7 +113,7 @@ impl Placement {
 
         let bucket_instance_id = ctx.bucket.bucket_instance_id;
         let item = |overlap, ignore_placement| Item {
-            tile: Some(ctx.data.tile_index),
+            tile: Some(ctx.placed.tile as u32),
             feature: symbol.data_feature_index as u32,
             sort: symbol.sort_index,
             overlap,
@@ -137,14 +137,14 @@ impl Placement {
             && !self.text_boxes.is_empty()
         {
             let key = CircleKey { bucket_instance_id, symbol: index, text: true };
-            self.collision_circles.insert(key, self.text_boxes.clone());
+            self.next.collision_circles.insert(key, self.text_boxes.clone());
         }
         if ctx.bucket.has_icon_collision_circle_data()
             && along_line(symbol.icon.as_ref().map(|icon| &icon.collision))
             && !self.icon_boxes.is_empty()
         {
             let key = CircleKey { bucket_instance_id, symbol: index, text: false };
-            self.collision_circles.insert(key, self.icon_boxes.clone());
+            self.next.collision_circles.insert(key, self.icon_boxes.clone());
         }
 
         // A symbol behind the planet's horizon stays hidden even where it
@@ -155,7 +155,7 @@ impl Placement {
             icon: (place_icon || ctx.always_show_icon) && !icon_result.occluded,
             skip_fade: offscreen || ctx.just_reloaded,
         };
-        self.placements.insert(id, placement);
+        self.next.placements.insert(id, placement);
         self.symbol_placed(symbol, ctx, placement, collisions.padding(), records);
         placement
     }
@@ -196,7 +196,7 @@ impl Placement {
                     &mut this.text_boxes,
                 );
                 if result.placed {
-                    this.placed_orientations.entry(id).or_insert(orientation(vertical));
+                    this.next.placed_orientations.entry(id).or_insert(orientation(vertical));
                 }
                 PlacedText { result, vertical, shift: None }
             })
@@ -217,9 +217,9 @@ impl Placement {
             });
             // A label that didn't place fades from where it was.
             if !placed.result.placed
-                && let Some(offset) = self.prev_placement().and_then(|prev| prev.variable_offsets.get(&id)).copied()
+                && let Some(offset) = self.prev().and_then(|prev| prev.variable_offsets.get(&id)).copied()
             {
-                self.variable_offsets.insert(id, offset);
+                self.next.variable_offsets.insert(id, offset);
             }
             placed
         } else {
@@ -227,9 +227,9 @@ impl Placement {
         };
         if ctx.bucket.allow_vertical_placement
             && !placed.result.placed
-            && let Some(prev) = self.prev_placement().and_then(|prev| prev.placed_orientations.get(&id)).copied()
+            && let Some(prev) = self.prev().and_then(|prev| prev.placed_orientations.get(&id)).copied()
         {
-            self.placed_orientations.insert(id, prev);
+            self.next.placed_orientations.insert(id, prev);
         }
         Some(placed)
     }
@@ -265,7 +265,7 @@ impl Placement {
         anchors: Vec<SymbolAnchorType>,
         ctx: &BucketContext<'_>,
     ) -> Vec<SymbolAnchorType> {
-        let Some(prev_anchor) = self.prev_placement().and_then(|prev| prev.variable_offsets.get(&id)).map(|o| o.anchor)
+        let Some(prev_anchor) = self.prev().and_then(|prev| prev.variable_offsets.get(&id)).map(|o| o.anchor)
         else {
             return anchors;
         };
@@ -345,9 +345,9 @@ impl Placement {
                     }
                 }
                 if result.placed {
-                    self.variable_offsets.entry(id).or_insert(offset);
+                    self.next.variable_offsets.entry(id).or_insert(offset);
                     if ctx.bucket.allow_vertical_placement {
-                        self.placed_orientations.entry(id).or_insert(orientation(vertical));
+                        self.next.placed_orientations.entry(id).or_insert(orientation(vertical));
                     }
                     return PlacedText { result, vertical, shift: Some(shift) };
                 }

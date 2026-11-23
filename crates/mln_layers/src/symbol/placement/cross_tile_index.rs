@@ -28,7 +28,7 @@ use std::sync::Arc;
 use geometry::Point;
 use glam::{I64Vec2, Vec2};
 use mln_map_types::{TileProjector, View};
-use mln_render::placement::PlacementBuckets;
+use mln_render::placement::{PlacementBuckets, PlacingTile};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::constants::EXTENT;
 use mln_util::hash::HashSet;
@@ -36,7 +36,6 @@ use mln_vec_map::VecMap;
 
 use crate::symbol::bucket::SymbolBucket;
 use crate::symbol::instance::{SymbolInstance, SymbolInstancePools};
-use crate::symbol::placement::BucketPlacementData;
 
 /// What adding a layer to the index changed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -60,14 +59,14 @@ pub(crate) struct CrossTileSymbolIndex {
 }
 
 impl CrossTileSymbolIndex {
-    /// Gives the symbols of `placed`, the buckets in `buckets` that the
+    /// Gives the symbols of the buckets in `buckets` on `tiles`, which the
     /// layer `layer_id` places, their cross-tile ids, and forgets the
     /// buckets of the layer it no longer places. `lng` is the view's
     /// unwrapped longitude.
-    pub(crate) fn index_layer(
+    pub(crate) fn index_layer<'a>(
         &mut self,
         layer_id: &str,
-        placed: &[BucketPlacementData],
+        tiles: impl IntoIterator<Item = &'a PlacingTile>,
         lng: f32,
         view: &View,
         buckets: &mut PlacementBuckets<'_>,
@@ -77,15 +76,14 @@ impl CrossTileSymbolIndex {
 
         self.current_bucket_ids.clear();
         let mut buckets_added = false;
-        for item in placed {
-            let Some(bucket) = buckets.get_mut::<SymbolBucket>(&item.bucket) else {
+        for tile in tiles {
+            let Some(bucket) = buckets.get_mut::<SymbolBucket>(&tile.bucket) else {
                 continue;
             };
             if bucket.bucket_instance_id == 0 {
                 self.last_bucket_instance_id += 1;
                 bucket.bucket_instance_id = self.last_bucket_instance_id;
             }
-            let tile = &item.tile;
             let projector = TileProjector::with_data(view, &tile.id, tile.projection);
             buckets_added |= index.add_bucket(tile.overscaled_id, &projector, bucket, &mut self.ids);
             self.current_bucket_ids.insert(bucket.bucket_instance_id);

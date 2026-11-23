@@ -680,7 +680,9 @@ impl SymbolBucket {
         // If the symbols are allowed to overlap sort them by their vertical
         // screen position. The index array buffer is rewritten to reference
         // the (unchanged) vertices in the sorted order.
-        for index in symbols_by_viewport_y(&state.symbol_instances, angle) {
+        let mut order = Vec::new();
+        symbols_by_viewport_y(&state.symbol_instances, angle, &mut order);
+        for index in order {
             let symbol = &state.symbol_instances[index];
             symbols_sort_order.push(symbol.data_feature_index as u32);
             if let Some(text) = &symbol.text {
@@ -783,20 +785,19 @@ fn add_placed_symbol(triangles: &mut Vec<u16>, placed_symbol: &PlacedSymbol) {
     }
 }
 
-/// Returns the indices of `symbol_instances`, sorted by viewport Y at
+/// Makes `order` the indices of `symbol_instances`, sorted by viewport Y at
 /// `angle`, then by descending data feature index. Equal keys keep their
 /// index order.
-#[must_use]
-pub(crate) fn symbols_by_viewport_y(symbol_instances: &[SymbolInstance], angle: f32) -> Vec<usize> {
-    let mut result: Vec<usize> = (0..symbol_instances.len()).collect();
+pub(crate) fn symbols_by_viewport_y(symbol_instances: &[SymbolInstance], angle: f32, order: &mut Vec<usize>) {
+    order.clear();
+    order.extend(0..symbol_instances.len());
     let sin = angle.sin();
     let cos = angle.cos();
-    result.sort_by_key(|&i| {
+    order.sort_by_key(|&i| {
         let s = &symbol_instances[i];
         let p = s.anchor.point;
         ((sin * p.x + cos * p.y).round() as i64, Reverse(s.data_feature_index))
     });
-    result
 }
 
 impl Bucket for SymbolBucket {

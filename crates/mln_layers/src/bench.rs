@@ -14,7 +14,7 @@ use mln_util::geo::{LatLng, WrapMode};
 
 use crate::symbol::SymbolLayer;
 use crate::symbol::placement::cross_tile_index::CrossTileSymbolIndex;
-use crate::symbol::placement::{LayerBuckets, SymbolPlacement, leaders};
+use crate::symbol::placement::{LayerBuckets, SymbolPlacement};
 
 /// The symbols of laid-out tiles in a view, as a renderer finds which to
 /// show: the view's symbol layers, each updated with the tiles as a frame
@@ -43,14 +43,14 @@ impl SymbolView {
     /// how many layers added a bucket.
     pub fn index(&mut self, index: &mut SymbolIndex) -> usize {
         self.0.with_context(|cx| {
-            let view = &cx.update_parameters.view;
+            let view = cx.view;
             let longitude = view.center(WrapMode::Unwrapped).longitude() as f32;
             let mut layers = Vec::new();
             LayerBuckets::fill(&mut layers, cx);
             let mut added = 0;
-            for layer in leaders(&layers).rev() {
-                let placed = &layer.placement_data;
-                if index.0.index_layer(&layer.id, placed, longitude, view, &mut cx.buckets).buckets_added {
+            for (layer, placing) in layers.iter().zip(cx.layers).rev().filter(|(layer, _)| !layer.placed.is_empty()) {
+                let tiles = layer.placed.iter().map(|placed| &placing.tiles[placed.tile]);
+                if index.0.index_layer(&layer.id, tiles, longitude, view, &mut cx.buckets).buckets_added {
                     added += 1;
                 }
             }
@@ -65,11 +65,11 @@ impl SymbolView {
     /// without one shows nowhere.
     pub fn place(&mut self) -> usize {
         let mut participant = SymbolPlacement::default();
-        self.0.with_context(|cx| participant.prepare_inputs(cx));
+        self.0.with_context(|cx| participant.prepare_layers(cx));
         // The placement it replaces showed nothing, so it has nothing to
         // fade from.
         self.0.place(&mut participant);
-        participant.placement.shown()
+        participant.placement.current.count()
     }
 }
 

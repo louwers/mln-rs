@@ -4,14 +4,14 @@
 use glam::Vec2;
 use mln_map_types::{ProjectionData, TileProjector, View};
 use mln_render::layer::TileTransform;
-use mln_render::placement::Overlap;
+use mln_render::placement::{CollisionIndex, Overlap, PlacingTile};
 use mln_style_types::{
     AlignmentType, IconTextFitType, SymbolPlacementType, SymbolZOrderType, TextRotationAlignmentType,
 };
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::{EXTENT, TILE_SIZE_D};
 
-use super::{BucketPlacementData, PlacedTile, SymbolTranslate};
+use super::{LayerBuckets, PlacedBucket, Placement, SymbolTranslate};
 use crate::symbol::SymbolLayoutProperties;
 use crate::symbol::bucket::{SymbolBucket, ZoomEvaluatedSize, symbols_by_viewport_y};
 use crate::symbol::placement::collision::{CollisionBoundaries, PartCollision, icon_overlap, text_overlap};
@@ -39,22 +39,11 @@ fn without_horizon(mut data: ProjectionData) -> ProjectionData {
     data
 }
 
-/// What a placement decides of a bucket before it places its symbols.
-#[derive(Clone, Copy)]
-pub(crate) struct BucketOptions {
-    /// The bucket's symbols skip their fade in.
-    pub(crate) just_reloaded: bool,
-    /// The tile's borders, in tile mode.
-    pub(crate) tile_borders: Option<CollisionBoundaries>,
-    pub(crate) avoid_edges: Option<CollisionBoundaries>,
-    /// Debug drawing shows the collision boxes.
-    pub(crate) debug: bool,
-}
-
 /// What placing the symbols of one bucket reads.
 pub(crate) struct BucketContext<'a> {
     pub(crate) bucket: &'a SymbolBucket,
-    pub(crate) data: &'a BucketPlacementData,
+    pub(crate) placed: &'a PlacedBucket,
+    pub(crate) tile: &'a PlacingTile,
     pub(crate) view: &'a View,
     /// The bucket's symbols skip their fade in: placement hasn't placed it
     /// since its tile showed it.
@@ -96,15 +85,20 @@ pub(crate) struct BucketContext<'a> {
 }
 
 impl<'a> BucketContext<'a> {
+    /// The context of `bucket`, `layer`'s bucket `placed` on `tile`, as
+    /// `placement` places it in `view` into `index`.
     pub(crate) fn new(
-        data: &'a BucketPlacementData,
+        placement: &Placement,
+        layer: &LayerBuckets,
+        placed: &'a PlacedBucket,
+        tile: &'a PlacingTile,
         bucket: &'a SymbolBucket,
         view: &'a View,
-        placement_zoom: f32,
-        options: BucketOptions,
+        index: &CollisionIndex,
     ) -> Self {
-        let BucketOptions { just_reloaded, tile_borders, avoid_edges, debug } = options;
-        let tile = &data.tile;
+        let (tile_borders, avoid_edges) = placement.tile_borders(bucket, index, &tile.projection.main_matrix);
+        let just_reloaded = bucket.state.just_reloaded && !placement.reloaded.contains(&tile.bucket);
+        let placement_zoom = placement.zoom;
         let overscaled_id = tile.overscaled_id;
         let pixels_to_tile_units = tile.id.pixels_to_tile_units(1.0, placement_zoom);
         // In doubles, where the tile's overscaled zoom sits far below.
@@ -117,8 +111,8 @@ impl<'a> BucketContext<'a> {
         let rotate_icon_with_map = *layout.icon_rotation_alignment.uniform() == AlignmentType::Map;
         let pitch_icon_with_map = *layout.icon_pitch_alignment.uniform() == AlignmentType::Map;
         let screen_space = *layout.symbol_screen_space.uniform();
-        let text_translation = translation(&tile.id, &data.text_translate, view, screen_space);
-        let icon_translation = translation(&tile.id, &data.icon_translate, view, screen_space);
+        let text_translation = translation(&tile.id, &layer.text_translate, view, screen_space);
+        let icon_translation = translation(&tile.id, &layer.icon_translate, view, screen_space);
         let projection = if screen_space { without_horizon(tile.projection) } else { tile.projection };
         let tile_projector = TileProjector::with_data(view, &tile.id, projection);
         let plane = |pitch, rotate, translation| {
@@ -132,7 +126,8 @@ impl<'a> BucketContext<'a> {
         let has_icons = bucket.has_icon_data() || bucket.has_sdf_icon_data();
         BucketContext {
             bucket,
-            data,
+            placed,
+            tile,
             view,
             just_reloaded,
             bearing: view.angle() as f32,
@@ -156,16 +151,12 @@ impl<'a> BucketContext<'a> {
             has_icon_text_fit: *layout.icon_text_fit.uniform() != IconTextFitType::None,
             tile_borders,
             avoid_edges,
-            debug,
+            debug: placement.debug,
         }
     }
 
     pub(crate) fn layout(&self) -> &'a SymbolLayoutProperties::PossiblyEvaluated {
         &self.bucket.layout
-    }
-
-    pub(crate) fn tile(&self) -> &'a PlacedTile {
-        &self.data.tile
     }
 
     /// How the bucket's text collides.
@@ -201,16 +192,18 @@ impl<'a> BucketContext<'a> {
         }
     }
 
-    /// The indices of the bucket's symbols in its sort key range, in the
-    /// order to place them: foreground first where they sort by viewport y.
-    pub(crate) fn bucket_symbols(&self) -> Vec<usize> {
+    /// Makes `order` the indices of the bucket's symbols in its sort key
+    /// range, in the order to place them: foreground first where they sort
+    /// by viewport y.
+    pub(crate) fn bucket_symbols(&self, order: &mut Vec<usize>) {
         let symbols = &self.bucket.state.symbol_instances;
         if *self.layout().symbol_z_order.uniform() == SymbolZOrderType::ViewportY {
-            let mut order = symbols_by_viewport_y(symbols, self.bearing);
+            symbols_by_viewport_y(symbols, self.bearing, order);
             order.reverse();
-            return order;
+            return;
         }
-        self.bucket.symbols_in(self.data.sort_key_range.as_ref(), symbols.len()).collect()
+        order.clear();
+        order.extend(self.bucket.symbols_in(self.placed.sort_key_range.as_ref(), symbols.len()));
     }
 
     /// Whether the bucket places its text along lines.
