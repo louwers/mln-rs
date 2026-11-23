@@ -9,7 +9,7 @@ use mln_style_types::{SymbolAnchorType, TextWritingModeType};
 use mln_text::anchor_alignment;
 
 use super::context::BucketContext;
-use super::{CircleKey, JointPlacement, Placement, VariableOffset};
+use super::{CircleKey, JointPlacement, Placement, VariableOffset, orientation};
 use crate::symbol::collision_feature::CollisionFeature;
 use crate::symbol::instance::{IconPart, SymbolInstance, TextPart};
 use crate::symbol::placement::collision::{self, LabelRun, PartCollision, PlacedFeatureResult};
@@ -60,11 +60,6 @@ struct VariableLabel<'a> {
     icon_feature: Option<&'a CollisionFeature>,
     anchors: &'a [SymbolAnchorType],
     run: &'a LabelRun<'a>,
-}
-
-/// The orientation a label placed `vertical` has.
-fn orientation(vertical: bool) -> TextWritingModeType {
-    if vertical { TextWritingModeType::Vertical } else { TextWritingModeType::Horizontal }
 }
 
 impl Placement {

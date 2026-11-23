@@ -339,6 +339,11 @@ impl engine::Placement for SymbolPlacement {
     }
 }
 
+/// The orientation of `vertical` text, or of an icon fitted to it.
+fn orientation(vertical: bool) -> TextWritingModeType {
+    if vertical { TextWritingModeType::Vertical } else { TextWritingModeType::Horizontal }
+}
+
 /// A symbol's text or icon feature, whose projected collision circles debug
 /// drawing shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

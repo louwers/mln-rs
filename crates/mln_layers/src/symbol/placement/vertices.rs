@@ -13,7 +13,7 @@ use mln_util::constants::ONE_EM;
 use mln_util::hash::HashSet;
 
 use super::context::translation;
-use super::{JointOpacityState, LayerBuckets, Shown, VariableOffset};
+use super::{JointOpacityState, LayerBuckets, Shown, VariableOffset, orientation};
 use crate::symbol::bucket::{Buffer, CollisionBuffer, SymbolBucket, SymbolBucketState};
 use crate::symbol::instance::{Justification, SymbolInstance, TextPart};
 use crate::symbol::placement::CircleKey;
@@ -37,11 +37,6 @@ fn collision_buffer(state: &mut SymbolBucketState, along_line: bool, text: bool)
         (false, false) => state.icon_collision_box.as_mut(),
     }
     .filter(|buffer| buffer.has_data())
-}
-
-/// The orientation a run of `vertical` text or its icon shows in.
-fn orientation(vertical: bool) -> TextWritingModeType {
-    if vertical { TextWritingModeType::Vertical } else { TextWritingModeType::Horizontal }
 }
 
 impl Shown {
