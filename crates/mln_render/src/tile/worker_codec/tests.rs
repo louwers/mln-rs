@@ -430,6 +430,24 @@ fn properties_cross_while_a_paint_property_transitions() {
     assert!(std::ptr::addr_eq(output.result.layer_render_data.get("water").unwrap().layer, &raw const *transitioning));
 }
 
+/// The layer that leads a bucket of a layout group, the first in the
+/// style, still leads it once the layout crosses, though another layer of
+/// its group has the id that sorts first.
+#[test]
+fn a_shared_buckets_leader_crosses() {
+    let leader = r#"{"id": "water-z", "type": "dot", "source": "s", "source-layer": "water",
+        "paint": {"dot-color": "red"}}"#;
+    let follower = r#"{"id": "water-a", "type": "dot", "source": "s", "source-layer": "water",
+        "paint": {"dot-color": "blue"}}"#;
+    let result = cross(&layers(&[leader, follower]), &tile_data());
+    let buckets = &result.layer_render_data;
+    let (leader, follower) = (buckets.find("water-z").unwrap(), buckets.find("water-a").unwrap());
+    assert_eq!(buckets.bucket_count(), 1, "the layers share their bucket");
+    assert_eq!(buckets.bucket_index(leader), buckets.bucket_index(follower));
+    assert!(buckets.leads(leader));
+    assert!(!buckets.leads(follower));
+}
+
 /// A layout's render data has the layers of its job, not of a job sent
 /// since.
 #[test]
