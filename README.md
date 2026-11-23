@@ -11,7 +11,10 @@
 [![Codecov](https://img.shields.io/codecov/c/github/louwers/mln-rs)](https://app.codecov.io/gh/louwers/mln-rs)
 [![](https://img.shields.io/badge/Slack-%23maplibre--native--rust--port-2EB67D?logo=slack)](https://slack.openstreetmap.us/)
 
-An experimental Rust port of [MapLibre Native](https://github.com/maplibre/maplibre-native). See the [onboarding discussion](https://github.com/maplibre/maplibre/issues/557) for the motivation behind this project.
+An experimental Rust port of
+[MapLibre Native](https://github.com/maplibre/maplibre-native). See the
+[onboarding discussion](https://github.com/maplibre/maplibre/issues/557) for the
+motivation behind this project.
 
 ## Getting Started
 
