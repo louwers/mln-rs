@@ -5,8 +5,9 @@
 // a continuous map reports the failure once, shows what did draw, draws
 // again only now and then, goes idle once the failure lasts, and shows the
 // map once the device works. A still whose target can't make its textures
-// ends with the error too, and so does one whose extension layers or named
-// target fail.
+// ends with the error too, and so does one whose extension layers, named
+// target or lend to a layer fail. The still after a failed submission
+// draws the layers' targets again.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -121,6 +122,10 @@ enum Fail {
     Shaders(&'static str),
     /// Submitting the frame.
     Submits,
+    /// Lending a layer the backend's commands, the frame's lend of this
+    /// number from 0: a [`lending`] layer's lend before the passes is 0,
+    /// its lend in the pass 1.
+    Lends(usize),
 }
 
 /// A GPU that fails what `fail` says, and does the rest on `gpu`.
@@ -129,6 +134,8 @@ struct Failing<'a> {
     fail: Fail,
     /// Whether the pass open is one whose draws fail.
     failing_pass: bool,
+    /// How many lends the frame asked for.
+    lends: usize,
 }
 
 fn failed<T>() -> Result<T, GpuError> {
@@ -176,7 +183,7 @@ impl Gpu for Failing<'_> {
         match self.fail {
             Fail::Passes(label) if desc.label == label => return failed(),
             Fail::DrawsIn(label) => self.failing_pass = desc.label == label,
-            Fail::Passes(_) | Fail::Shaders(_) | Fail::Submits => {}
+            Fail::Passes(_) | Fail::Shaders(_) | Fail::Submits | Fail::Lends(_) => {}
         }
         self.gpu.begin_pass(desc)
     }
@@ -190,7 +197,11 @@ impl Gpu for Failing<'_> {
         self.gpu.draw(draw)
     }
     fn lend(&mut self, f: &mut dyn FnMut(&mut dyn std::any::Any)) -> Result<(), GpuError> {
-        self.gpu.lend(f)
+        self.lends += 1;
+        match self.fail {
+            Fail::Lends(lend) if lend + 1 == self.lends => failed(),
+            _ => self.gpu.lend(f),
+        }
     }
     fn end_pass(&mut self) -> Result<(), GpuError> {
         self.failing_pass = false;
@@ -292,7 +303,11 @@ impl FailingMap {
             let failing = self.failing > 0;
             let drawn = if failing {
                 self.failing -= 1;
-                self.renderer.render(&mut Failing { gpu, fail: self.fail, failing_pass: false }, &image, frame)
+                self.renderer.render(
+                    &mut Failing { gpu, fail: self.fail, failing_pass: false, lends: 0 },
+                    &image,
+                    frame,
+                )
             } else {
                 self.renderer.render(gpu, &image, frame)
             };
@@ -389,6 +404,28 @@ fn a_still_whose_frame_fails_ends_with_the_error() {
         assert_eq!(2, map.frames(), "{fail:?}");
         assert!(new == image, "the next still after {fail:?} draws other pixels than a new map's");
     }
+}
+
+/// The still after one whose submission failed draws the hillshade's slopes
+/// again, which a map that never failed keeps from its first still. The
+/// draw counts tell it where the pixels can't: a GPU may still submit the
+/// failed frame's commands with the next one.
+#[test]
+fn the_still_after_a_failed_submission_prepares_its_slopes_again() {
+    let draw_calls = |map: &FailingMap| map.renderer.rendering_stats().num_draw_calls;
+    let mut new = FailingMap::new(MapMode::Static, Fail::DrawsIn("none"));
+    let first = new.still().expect("a new map's still never ended").expect("a new map's still");
+    let prepared = draw_calls(&new);
+    let second = new.still().expect("a new map's second still never ended").expect("a new map's second still");
+    let kept = draw_calls(&new);
+    assert!(first == second && kept < prepared, "a new map's second still draws {kept} times, its first {prepared}");
+
+    let mut map = FailingMap::new(MapMode::Static, Fail::Submits);
+    map.failing = 1;
+    assert_failed(map.still(), map.fail);
+    let image = map.still().expect("the next still never ended").expect("the next still");
+    assert!(first == image, "the next still draws other pixels than a new map's");
+    assert_eq!(prepared, draw_calls(&map), "the next still draws other than a new map's first");
 }
 
 /// A still whose frames fail in every frame ends with the GPU's error, in
@@ -502,6 +539,76 @@ fn a_still_whose_extension_or_named_target_fails_ends_with_the_error() {
         let mut map = FailingMap::with_registry(MapMode::Static, EXTENDED_STYLE, fail, extended_registry());
         let loaded = map.still().expect("the first still never ended").expect("the first still");
         assert!(new == loaded, "{fail:?}: the first still draws other pixels than a new map's");
+        map.failing = 1;
+        assert_failed(map.still(), fail);
+        let image = map.still().expect("the next still never ended").expect("the next still");
+        assert!(new == image, "the next still after {fail:?} draws other pixels than a new map's");
+    }
+}
+
+/// The `lending` layer type, whose layers ask for the backend's commands
+/// before the frame's passes and in the pass, as a host that draws with
+/// them does, and draw nothing with them.
+mod lending {
+    use mln_rs::layer::{
+        Draws, EvaluateCx, Evaluation, Layer, LayerTypeInfo, LendAt, Lent, NewCx, NoProperties, NoTiles, PrepareCx,
+        SourceKind, StyleLayerType,
+    };
+
+    pub(super) struct Lending;
+
+    impl StyleLayerType for Lending {
+        const INFO: LayerTypeInfo = LayerTypeInfo { name: "lending", source: SourceKind::None, from_json: true };
+        type LayoutProperties = NoProperties;
+        type PaintProperties = NoProperties;
+        type Data = ();
+    }
+
+    pub(super) struct LendingLayer;
+
+    impl Layer for LendingLayer {
+        type Style = Lending;
+        type Input = NoTiles;
+        type Tile = ();
+
+        fn new(_cx: &mut NewCx<'_, Self>) -> Self {
+            LendingLayer
+        }
+
+        fn evaluate(&mut self, _cx: EvaluateCx<'_, Self>) -> Evaluation {
+            Evaluation::TRANSLUCENT
+        }
+
+        fn prepare(&self, _cx: &PrepareCx<'_, Self>, out: &mut Draws) {
+            out.lend(LendAt::BeforePasses).lend(LendAt::Pass);
+        }
+
+        fn lend(&mut self, _at: LendAt, _lent: Lent<'_>) {}
+    }
+}
+
+/// A still whose one frame fails as it lends a layer the backend's
+/// commands, before the passes or in the pass, ends with the GPU's error. A
+/// still asked for right after draws what a map that never failed draws.
+#[test]
+fn a_still_whose_lend_fails_ends_with_the_error() {
+    let registry = || {
+        let mut builder = RegistryBuilder::new();
+        mln_rs::register_builtins(&mut builder).unwrap();
+        builder.add_layer_type::<lending::LendingLayer>().unwrap();
+        builder.build()
+    };
+    let style = style().replacen(
+        r#"{"id": "background", "type": "background", "paint": {"background-color": "white"}}"#,
+        r#"{"id": "background", "type": "background", "paint": {"background-color": "white"}},
+            {"id": "lending", "type": "lending"}"#,
+        1,
+    );
+    assert!(style.contains(r#""type": "lending""#), "the style has no lending layer");
+    let mut new = FailingMap::with_registry(MapMode::Static, &style, Fail::DrawsIn("none"), registry());
+    let new = new.still().expect("a new map's still never ended").expect("a new map's still");
+    for fail in [Fail::Lends(0), Fail::Lends(1)] {
+        let mut map = FailingMap::with_registry(MapMode::Static, &style, fail, registry());
         map.failing = 1;
         assert_failed(map.still(), fail);
         let image = map.still().expect("the next still never ended").expect("the next still");

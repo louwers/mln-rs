@@ -1,8 +1,8 @@
 // Frames that fail on the GPU, through a session's own WebGPU device: a
 // layer that records a draw that WebGPU rejects in the pass the frame lends
-// it fails the frame's submit, as a device out of memory would fail it. A still image ends with
-// the error, and a continuous map reports it once, shows what drew, and
-// draws again later.
+// it fails the frame's submit, as a device out of memory would fail it. A
+// still image ends with the error, and a continuous map reports it once,
+// shows what drew, and draws again later.
 
 #![cfg(all(feature = "webgpu", not(target_family = "wasm")))]
 
