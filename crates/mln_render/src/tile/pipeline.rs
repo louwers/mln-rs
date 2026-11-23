@@ -1,6 +1,7 @@
 //! How a tile's data becomes its contents: a geometry tile lays it out, a
-//! raster or raster-dem tile decodes its image. Each has at most one job in
-//! flight, for one generation of its inputs; `TileMut` drives them.
+//! raster or raster-dem tile decodes its image, and a value tile shows its
+//! value as it is. Each has at most one job in flight, for one generation of
+//! its inputs; `TileMut` drives them.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -21,6 +22,8 @@ use crate::tile::tile_workers::Lane;
 pub(crate) enum Pipeline {
     Layout(Box<Layout>),
     Decode(Decode),
+    /// A value tile's, which has no work.
+    Value,
 }
 
 pub(crate) struct Layout {
@@ -127,12 +130,13 @@ pub(crate) fn outdated_by(result: &JobResult, then: &VecSet<String>, now: &VecSe
 
 impl Pipeline {
     /// The pipeline of a tile of a source of `kind`: a raster or raster-dem
-    /// tile decodes, any other lays out.
+    /// tile decodes, a value tile has none, any other lays out.
     pub(crate) fn new(kind: SourceKind, generation: u64, params: LayoutParams) -> Self {
         match kind {
             SourceKind::Raster | SourceKind::RasterDem => {
                 Pipeline::Decode(Decode { generation, dem: None, work: DecodeWork::Current })
             }
+            SourceKind::Value(_) => Pipeline::Value,
             SourceKind::Geometry | SourceKind::None => Pipeline::Layout(Box::new(Layout {
                 generation,
                 data: None,
@@ -146,7 +150,7 @@ impl Pipeline {
     pub(crate) fn layout(&self) -> Option<&Layout> {
         match self {
             Pipeline::Layout(layout) => Some(layout),
-            Pipeline::Decode(_) => None,
+            Pipeline::Decode(_) | Pipeline::Value => None,
         }
     }
 
@@ -154,6 +158,7 @@ impl Pipeline {
         match self {
             Pipeline::Layout(layout) => layout.generation,
             Pipeline::Decode(decode) => decode.generation,
+            Pipeline::Value => 0,
         }
     }
 
@@ -171,6 +176,7 @@ impl Pipeline {
             Pipeline::Decode(decode) => {
                 matches!(decode.work, DecodeWork::Queued(_) | DecodeWork::Running { image: Some(_), .. })
             }
+            Pipeline::Value => false,
         }
     }
 
@@ -183,6 +189,7 @@ impl Pipeline {
                 LayoutWork::Current | LayoutWork::Running(_) => false,
             },
             Pipeline::Decode(decode) => matches!(decode.work, DecodeWork::Queued(_)),
+            Pipeline::Value => false,
         }
     }
 
@@ -196,6 +203,7 @@ impl Pipeline {
                 DecodeWork::Running { job, .. } => Some(job),
                 DecodeWork::Current | DecodeWork::Queued(_) => None,
             },
+            Pipeline::Value => None,
         }
     }
 
@@ -208,7 +216,7 @@ impl Pipeline {
                 | LayoutWork::Ready(Resume { lane: Some(lane), .. }) => Some(*lane),
                 LayoutWork::Current | LayoutWork::Outdated | LayoutWork::Ready(_) => None,
             },
-            Pipeline::Decode(_) => self.in_flight().map(|job| job.lane),
+            Pipeline::Decode(_) | Pipeline::Value => self.in_flight().map(|job| job.lane),
         }
     }
 }

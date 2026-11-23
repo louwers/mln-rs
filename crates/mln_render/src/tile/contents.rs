@@ -4,6 +4,7 @@
 //! tile data, the resolved glyphs and images, and the leases on their atlas
 //! bins), so queries and feature state read what is drawn.
 
+use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -19,6 +20,7 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::feature::Feature;
 use mln_util::hash::HashMap;
+use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 use mln_util::pool::TaskGroup;
 use mln_vec_map::{VecMap, VecSet};
@@ -537,8 +539,25 @@ pub(crate) enum Contents {
     Raster(RasterContents),
     /// A raster-dem tile's DEM.
     Dem(DemContents),
-    /// A raster tile without data: it draws nothing in its place.
+    /// A value tile's value.
+    Value(ValueContents),
+    /// A raster or value tile without data: it draws nothing in its place.
     Empty,
+}
+
+/// A value that a source type's origin delivered to a tile, shared by the
+/// layers that view it and by the tile's world copies, with the identity
+/// of the delivery, which a layer's value of the tile is made from.
+#[derive(Clone)]
+pub(crate) struct ValueContents {
+    pub(crate) value: Arc<dyn Any + Send + Sync>,
+    pub(crate) id: SimpleIdentity,
+}
+
+impl ValueContents {
+    pub(crate) fn new(value: Arc<dyn Any + Send + Sync>) -> Self {
+        ValueContents { value, id: SimpleIdentity::new() }
+    }
 }
 
 impl Contents {
@@ -547,21 +566,21 @@ impl Contents {
     pub(crate) fn is_renderable(&self) -> bool {
         match self {
             Contents::Geometry(contents) => !contents.missing,
-            Contents::Raster(_) | Contents::Dem(_) | Contents::Empty => true,
+            Contents::Raster(_) | Contents::Dem(_) | Contents::Value(_) | Contents::Empty => true,
         }
     }
 
     pub(crate) fn geometry(&self) -> Option<&GeometryContents> {
         match self {
             Contents::Geometry(contents) => Some(contents),
-            Contents::Raster(_) | Contents::Dem(_) | Contents::Empty => None,
+            Contents::Raster(_) | Contents::Dem(_) | Contents::Value(_) | Contents::Empty => None,
         }
     }
 
     pub(crate) fn geometry_mut(&mut self) -> Option<&mut GeometryContents> {
         match self {
             Contents::Geometry(contents) => Some(contents),
-            Contents::Raster(_) | Contents::Dem(_) | Contents::Empty => None,
+            Contents::Raster(_) | Contents::Dem(_) | Contents::Value(_) | Contents::Empty => None,
         }
     }
 
@@ -571,7 +590,7 @@ impl Contents {
         match self {
             Contents::Raster(raster) => raster.geometry().has_quads(),
             Contents::Dem(dem) => dem.geometry().has_quads(),
-            Contents::Geometry(_) | Contents::Empty => false,
+            Contents::Geometry(_) | Contents::Value(_) | Contents::Empty => false,
         }
     }
 
@@ -581,7 +600,7 @@ impl Contents {
         match self {
             Contents::Raster(raster) => raster.unmask(),
             Contents::Dem(dem) => dem.unmask(),
-            Contents::Geometry(_) | Contents::Empty => {}
+            Contents::Geometry(_) | Contents::Value(_) | Contents::Empty => {}
         }
     }
 
@@ -589,7 +608,7 @@ impl Contents {
         match self {
             Contents::Raster(raster) => raster.set_mask(mask),
             Contents::Dem(dem) => dem.set_mask(mask),
-            Contents::Geometry(_) | Contents::Empty => {}
+            Contents::Geometry(_) | Contents::Value(_) | Contents::Empty => {}
         }
     }
 

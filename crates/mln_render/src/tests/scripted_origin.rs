@@ -1,5 +1,5 @@
-//! The tests' source types, `scripted`, `scripted-raster` and
-//! `scripted-dem`, whose tiles load what the test sends them. The origin
+//! The tests' source types, `scripted`, `scripted-raster`, `scripted-dem`
+//! and `scripted-value`, whose tiles load what the test sends them. The origin
 //! records each hook the engine calls, and hands the test each load it
 //! begins as a [`ScriptedLoad`], which the test answers with a [`Reply`].
 //!
@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use mln_storage::{Data, RequestOrder};
 use mln_style::Source;
-use mln_style::layer_type::SourceKind;
+use mln_style::layer_type::{SourceKind, ValueKind};
 use mln_style::source_type::{SourceData, SourceTypeInfo, StyleSourceType};
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
@@ -29,7 +29,7 @@ use parking_lot::Mutex;
 use crate::erased_source::ErasedOrigin;
 use crate::source::{
     Cover, DataOrigin, DemTiles, GeometryTiles, LoadContext, OriginUpdate, RasterTiles, Replier, SourceType, Supply,
-    TileKind, TileNecessity, TileOperation,
+    TileKind, TileNecessity, TileOperation, ValueTiles,
 };
 
 /// The kind of a scripted source's tiles, whose cover picks a view's tiles
@@ -52,6 +52,10 @@ pub(crate) trait Kind: Send + Sync + 'static {
 pub(crate) struct Geometry;
 pub(crate) struct Raster;
 pub(crate) struct Dem;
+pub(crate) struct Value;
+
+/// What a `scripted-value` tile holds: the bytes [`Reply::Bytes`] sent it.
+pub(crate) struct ScriptedValue(pub(crate) Data);
 
 const fn info(name: &'static str, layer_kind: SourceKind) -> SourceTypeInfo {
     SourceTypeInfo { name, layer_kind, from_json: false }
@@ -91,6 +95,17 @@ impl Kind for Dem {
 
     fn bytes(bytes: Data) -> (Data, RasterEncoding) {
         (bytes, RasterEncoding::Mapbox)
+    }
+}
+
+impl Kind for Value {
+    const INFO: SourceTypeInfo = info("scripted-value", SourceKind::Value(ValueKind::of::<ScriptedValue>()));
+    type Data = ValueTiles<ScriptedValue>;
+    const ROUND_ZOOM: bool = false;
+    const OVERSCALE: bool = false;
+
+    fn bytes(bytes: Data) -> Arc<ScriptedValue> {
+        Arc::new(ScriptedValue(bytes))
     }
 }
 
@@ -170,7 +185,8 @@ pub(crate) enum Retry {
 /// What a test sends a tile's load.
 pub(crate) enum Reply {
     /// Encoded data: a vector tile (MVT) for a geometry tile, an image for
-    /// a raster or raster-dem one.
+    /// a raster or raster-dem one, the bytes of a value tile's
+    /// [`ScriptedValue`].
     Bytes(Data),
     /// A geometry tile's data.
     Tile(TileData),
@@ -203,6 +219,7 @@ impl Script {
         match kind {
             SourceKind::Raster => Box::new(ScriptedOrigin::<Raster>::new(script, String::new())),
             SourceKind::RasterDem => Box::new(ScriptedOrigin::<Dem>::new(script, String::new())),
+            SourceKind::Value(_) => Box::new(ScriptedOrigin::<Value>::new(script, String::new())),
             SourceKind::Geometry | SourceKind::None => Box::new(ScriptedOrigin::<Geometry>::new(script, String::new())),
         }
     }

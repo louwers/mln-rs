@@ -13,13 +13,14 @@ use mln_storage::Data;
 use mln_style::layer_type::SourceKind;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
+use mln_util::identity::SimpleIdentity;
 use mln_util::pool::TaskGroup;
 use serde_json::json;
 
 use super::tile_jobs_test::{Manual, icons, layer, points};
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::query::SourceQueryOptions;
-use crate::tests::scripted_origin::{Call, Reply, Retry, Script};
+use crate::tests::scripted_origin::{Call, Reply, Retry, Script, ScriptedValue};
 use crate::tests::tile::{dem_png, png};
 use crate::tests::{OneTile, style, tile_store};
 use crate::tile::contents::Contents;
@@ -29,6 +30,9 @@ use crate::tile::job::{DataInput, Job, Run, TileKey};
 use crate::tile::pipeline::LayoutWork;
 use crate::tile::tile::{TileNecessity, TileOperation};
 use crate::tile::tile_workers::{InlineWorkers, TileWorkers};
+
+/// The kind of the scripted value tiles.
+const VALUE: SourceKind = SourceKind::Value(mln_style::layer_type::ValueKind::of::<ScriptedValue>());
 
 /// The bytes of a vector tile with a "water" layer.
 fn water() -> Data {
@@ -689,4 +693,90 @@ fn a_world_copy_takes_its_copy() {
     tiles.set_necessity(&refused, TileNecessity::Required);
     let loads = script.take_loads();
     assert_eq!(loads.iter().map(|load| load.tile).collect::<Vec<_>>(), [refused]);
+}
+
+/// The value that tile `id` of `tiles`, a value tile, shows, and the
+/// identity of its delivery.
+fn shown_value(tiles: &OneTile, id: &OverscaledTileID) -> (Arc<dyn std::any::Any + Send + Sync>, SimpleIdentity) {
+    match tiles.tile_at(id).contents() {
+        Some(Contents::Value(value)) => (Arc::clone(&value.value), value.id),
+        _ => panic!("the tile shows no value"),
+    }
+}
+
+/// The bytes of the value that `value`, a scripted value, holds.
+fn value_bytes(value: &Arc<dyn std::any::Any + Send + Sync>) -> &Data {
+    &value.downcast_ref::<ScriptedValue>().expect("a scripted value").0
+}
+
+/// A value tile shows each value its origin delivers at once, with no job,
+/// as a new delivery that layers make their tile values of again, and lets
+/// go of the value it showed before. An empty value tile draws nothing in
+/// its place, and a missing one lets another zoom level's draw.
+#[test]
+fn a_value_tile_shows_each_delivery_at_once() {
+    use TileOperation::{EndParse, LoadFromNetwork, StartParse};
+    let test = Test::new();
+    let manual = Manual::default();
+    let store = tile_store(&test.pool, Box::new(manual.clone()));
+    let id = OverscaledTileID::from_zxy(0, 0, 0);
+    let mut tile = OneTile::with_script(store, VALUE, &Script::default(), &[id], MapMode::Continuous);
+    tile.set_necessity(&id, TileNecessity::Required);
+    let [load] = <[_; 1]>::try_from(tile.script.take_loads()).ok().expect("one load");
+    tile.actions();
+
+    let first: Data = Arc::new(vec![1]);
+    load.reply(Reply::Bytes(Arc::clone(&first)));
+    tile.update();
+    assert_eq!(tile.actions(), [LoadFromNetwork, StartParse, EndParse]);
+    assert!(tile.tile().is_complete() && tile.tile().is_renderable());
+    let (value, first_id) = shown_value(&tile, &id);
+    assert!(Arc::ptr_eq(value_bytes(&value), &first), "the tile shows the value it was given");
+    drop(value);
+
+    let second: Data = Arc::new(vec![2]);
+    load.reply(Reply::Bytes(Arc::clone(&second)));
+    tile.update();
+    assert_eq!(tile.actions(), [LoadFromNetwork, StartParse, EndParse]);
+    let (value, second_id) = shown_value(&tile, &id);
+    assert!(Arc::ptr_eq(value_bytes(&value), &second));
+    assert_ne!(first_id, second_id, "each delivery is new to the layers");
+    assert_eq!(Arc::strong_count(&first), 1, "the tile let go of the value before");
+    drop(value);
+    assert_eq!(manual.submitted(), 0, "a value has no job");
+
+    load.reply(Reply::Empty);
+    tile.update();
+    assert!(matches!(tile.tile().contents(), Some(Contents::Empty)) && tile.tile().is_renderable());
+    load.reply(Reply::Missing);
+    tile.update();
+    assert!(tile.tile().is_complete() && !tile.tile().is_renderable(), "another zoom level draws in its place");
+
+    load.reply(Reply::Bytes(Arc::clone(&second)));
+    tile.update();
+    tile.drop_tile();
+    assert_eq!(Arc::strong_count(&second), 1, "the value goes with its tile");
+}
+
+/// A value tile that starts from the same tile in another world copy shows
+/// and takes that tile's value itself, which loads nothing.
+#[test]
+fn a_value_tiles_world_copy_shares_its_value() {
+    let test = Test::new();
+    let script = Script::default();
+    let store = tile_store(&test.pool, Box::new(InlineWorkers));
+    let loaded = OverscaledTileID::from_zxy(0, 0, 0);
+    let mut tiles = OneTile::with_script(store, VALUE, &script, &[loaded], MapMode::Continuous);
+    tiles.set_necessity(&loaded, TileNecessity::Required);
+    script.answer(|_| Reply::Bytes(Arc::new(vec![1])));
+    tiles.update();
+    script.take_calls();
+
+    let copy = OverscaledTileID::with_zxy(0, 1, 0, 0, 0);
+    tiles.add_from_copy(copy);
+    assert!(script.take_calls().contains(&Call::TookCopy(copy)));
+    assert!(tiles.tile_at(&copy).is_complete() && tiles.tile_at(&copy).is_renderable());
+    assert!(Arc::ptr_eq(&shown_value(&tiles, &copy).0, &shown_value(&tiles, &loaded).0));
+    tiles.set_necessity(&copy, TileNecessity::Required);
+    assert!(script.take_loads().is_empty(), "the tile that took its copy loads nothing");
 }

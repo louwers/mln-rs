@@ -181,7 +181,9 @@ pub enum RegisterError {
     EvalMismatch(String),
     #[error("\"{0}\" claims a role that another registration has")]
     RoleTaken(String),
-    #[error("source type \"{0}\" supplies another kind of data than its style half names")]
+    /// A source type whose data, or a layer type whose input, is of another
+    /// kind than its style half names.
+    #[error("\"{0}\" takes another kind of data than its style half names")]
     SourceKind(String),
 }
 

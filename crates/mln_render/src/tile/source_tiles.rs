@@ -437,7 +437,7 @@ impl SourceTiles {
             }
             Some(Contents::Raster(raster)) => return raster.upload(context),
             Some(Contents::Dem(dem)) => return dem.upload(context),
-            Some(Contents::Empty) | None => return,
+            Some(Contents::Value(_) | Contents::Empty) | None => return,
         };
         let mut same: SmallVec<[usize; 4]> = same_place(&self.tiles, &id);
         same.retain(|&mut at| at != index);
@@ -577,7 +577,7 @@ impl SourceTiles {
             // So are the tiles that went on loading in the cache.
             self.cache_release_loading(ctx, |_| false);
             self.rendered.clear();
-            if self.info.kind != SourceKind::Geometry {
+            if is_image(self.info.kind) {
                 std::mem::swap(&mut self.masked, &mut self.masked_before);
                 self.masked.clear();
                 self.unmask_stopped();
@@ -816,7 +816,7 @@ impl SourceTiles {
             }
         }
 
-        if self.info.kind != SourceKind::Geometry {
+        if is_image(self.info.kind) {
             let renderables: Vec<(UnwrappedTileID, bool)> =
                 self.rendered.iter().map(|(id, entry)| (*id, entry.needs_rendering)).collect();
             let masks = update_tile_masks(&renderables);
@@ -1519,4 +1519,10 @@ fn upload_sharing(slots: &mut [Slot], at: usize, copies: &[usize], context: &mut
         .filter_map(|slot| Some(&slot.tile.contents()?.geometry()?.bucket_geometry))
         .collect();
     geometry.upload(&shared, context);
+}
+
+/// Whether tiles of `kind` are images, which draw each where the frame's
+/// better tiles leave them: masked.
+fn is_image(kind: SourceKind) -> bool {
+    matches!(kind, SourceKind::Raster | SourceKind::RasterDem)
 }

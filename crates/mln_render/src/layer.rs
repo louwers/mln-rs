@@ -30,8 +30,10 @@
 //!    `NgonLayout` builds a quad per point. A layer of a raster or image
 //!    source has the input [`RasterTiles`], each tile's image
 //!    ([`RasterTile`]), one of a raster-dem source the input [`DemTiles`],
-//!    each tile's elevations ([`DemTile`]), and a layer without a source the
-//!    input [`ViewCover`], the tiles that cover the view, or [`NoTiles`].
+//!    each tile's elevations ([`DemTile`]), one of a source whose type
+//!    delivers a value of its own for each tile the input [`ValueTiles<V>`],
+//!    each tile's `&V`, and a layer without a source the input
+//!    [`ViewCover`], the tiles that cover the view, or [`NoTiles`].
 //! 2. Its programs. A program is a `static`
 //!    [`Program`](mln_gfx::shaders::program::Program) that names the
 //!    buffers, attributes, textures and paint properties its shaders read,
@@ -183,10 +185,11 @@ pub trait Layer: Sized + 'static {
     type Style: StyleLayerType;
 
     /// What the layer draws from ([`Features`], [`RasterTiles`],
-    /// [`DemTiles`], [`ViewCover`] or [`NoTiles`]). Its kind of source is
-    /// the style half's
+    /// [`DemTiles`], [`ValueTiles`], [`ViewCover`] or [`NoTiles`]). Its kind
+    /// of source is the style half's
     /// [`INFO.source`](mln_style::layer_type::LayerTypeInfo::source), or
-    /// the registration doesn't compile.
+    /// the registration doesn't compile, or, for values of another type,
+    /// fails.
     type Input: TileInput<Self::Style>;
 
     /// What the layer keeps of each frame tile it draws, such as the meshes
@@ -259,8 +262,8 @@ pub trait Layer: Sized + 'static {
 
 /// What a layer draws from: a kind of tile and what such a tile holds for
 /// the layer, its [`Data`](TileInput::Data). The kinds are the engine's:
-/// [`Features`], [`RasterTiles`], [`DemTiles`], [`ViewCover`] and
-/// [`NoTiles`].
+/// [`Features`], [`RasterTiles`], [`DemTiles`], [`ValueTiles`],
+/// [`ViewCover`] and [`NoTiles`].
 #[expect(private_bounds, reason = "the engine's tile kinds are the only ones: `input::Find` seals the trait")]
 pub trait TileInput<S: StyleLayerType>: input::Find<S> + 'static {
     /// What a frame tile holds for the layer.
@@ -395,20 +398,41 @@ impl<'a> DemTile<'a> {
     }
 }
 
+/// The tiles of a source whose type delivers a value of its own type `V`
+/// for each tile, which layers of any type view as it is: there is no
+/// layout and no bucket. A tile's data is its `&V`. A source type of such
+/// tiles names it as its [`Data`](crate::source::SourceType::Data), and a
+/// layer type that views them names it as its [`Input`](Layer::Input); both
+/// halves name the kind as [`SourceKind::Value`] of
+/// [`ValueKind::of::<V>()`](mln_style::layer_type::ValueKind::of). The
+/// engine drops a layer's value of a tile ([`Layer::tile`]) as the tile
+/// takes in a new `V`.
+///
+/// Tiles overlap by what their values reach past their edges, and a parent
+/// that draws while its children load lies under them, so a layer that
+/// draws what a tile holds clips its draws to the tile
+/// ([`Draw::clip`](crate::draw::Draw::clip)).
+pub struct ValueTiles<V>(PhantomData<fn() -> V>);
+
+impl<S: StyleLayerType, V: Send + Sync + 'static> TileInput<S> for ValueTiles<V> {
+    type Data<'a> = &'a V;
+}
+
 pub(crate) mod input {
     use mln_map_types::tile_cover::{TileCoverParameters, tile_cover};
-    use mln_style::layer_type::{SourceKind, StyleLayerType};
+    use mln_style::layer_type::{SourceKind, StyleLayerType, ValueKind};
     use mln_tile_id::OverscaledTileID;
     use mln_util::identity::SimpleIdentity;
     use mln_util::range::Range as ZoomRange;
     use smallvec::SmallVec;
 
     use super::{
-        DemTile, DemTiles, Features, Found, FrameTile, Layout, NoTiles, RasterTile, RasterTiles, TileInput, ViewCover,
+        DemTile, DemTiles, Features, Found, FrameTile, Layout, NoTiles, RasterTile, RasterTiles, TileInput, ValueTiles,
+        ViewCover,
     };
     use crate::render_layer::{FrameSourceTiles, LayerUpdate};
     use crate::render_tile::{FoundTile, TileContent, ViewPlace};
-    use crate::tile::contents::{Contents, GeometryContents};
+    use crate::tile::contents::{Contents, GeometryContents, ValueContents};
     use crate::tile::dem::DemContents;
     use crate::tile::raster::RasterContents;
     use crate::tile_values::TileMap;
@@ -672,6 +696,47 @@ pub(crate) mod input {
             let (content, _) = found.at?;
             let contents = dem(content)?;
             Some(DemTile { contents, texture: contents.texture()?, tile: found.tile.id.canonical })
+        }
+    }
+
+    /// A tile's value, if `content` is a value tile's.
+    fn value(content: TileContent<'_>) -> Option<&ValueContents> {
+        match content {
+            TileContent::Tile(Contents::Value(value)) => Some(value),
+            _ => None,
+        }
+    }
+
+    impl<S: StyleLayerType, V: Send + Sync + 'static> Find<S> for ValueTiles<V> {
+        const SOURCE: SourceKind = SourceKind::Value(ValueKind::of::<V>());
+
+        /// Where the layer's tiles are among the frame's found tiles.
+        type Frame = std::ops::Range<usize>;
+
+        fn update<T>(
+            frame: &mut Self::Frame,
+            update: &mut LayerUpdate<'_>,
+            _layer_id: &str,
+            values: &mut TileMap<T>,
+        ) -> bool {
+            update_source(frame, update, values, |content| value(content).map(|_| (ViewPlace::Own, false)))
+        }
+
+        fn tiles<'a, T>(
+            frame: &Self::Frame,
+            found: &[FoundTile],
+            source: Option<FrameSourceTiles<'a>>,
+            values: &mut TileMap<T>,
+            tiles: &mut SmallVec<[Found<'a>; 64]>,
+        ) {
+            source_tiles(frame, found, source, values, tiles, |content, _| Some(value(content)?.id));
+        }
+
+        /// `None` for a tile whose value is of another type, as one of a
+        /// source that replaced the layer's: the style checks a layer's
+        /// kind only as the layer joins it.
+        fn data(found: Found<'_>) -> Option<<Self as TileInput<S>>::Data<'_>> {
+            value(found.at?.0)?.value.downcast_ref::<V>()
         }
     }
 

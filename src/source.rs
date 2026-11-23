@@ -14,7 +14,7 @@ pub use mln_storage::{Data, FileSource, RequestOrder, Resource};
 pub use mln_style::Edit;
 pub use mln_style::conversion::{self, Convertible};
 pub use mln_style::expression::Functions;
-pub use mln_style::layer_type::SourceKind;
+pub use mln_style::layer_type::{SourceKind, ValueKind};
 pub use mln_style::source_type::{
     Described, Load, OfflineResources, Source, SourceCommon, SourceData, SourceTypeInfo, StyleSourceType,
 };

@@ -21,7 +21,7 @@ use mln_vec_map::VecSet;
 use crate::erased_source::ErasedOrigin;
 use crate::layout::tile_layout::{Dependencies, LayoutParams};
 use crate::render_orchestrator::drop_on_workers;
-use crate::tile::contents::{Contents, GeometryContents, LayoutResult, release};
+use crate::tile::contents::{Contents, GeometryContents, LayoutResult, ValueContents, release};
 use crate::tile::dem::DemContents;
 use crate::tile::job::{DataInput, DataKey, Job, JobId, JobResult, LayoutJob, LayoutOutput, Run, SourceStyle, TileKey};
 use crate::tile::loading::TileTimes;
@@ -146,8 +146,8 @@ impl<'a> TileMut<'a> {
         if let Some(data) = data {
             self.change_layout(|layout| layout.data = Some(data));
         } else {
-            // A raster or raster-dem tile shows all it will: its parse
-            // starts and ends at once.
+            // A raster, raster-dem or value tile shows all it will: its
+            // parse starts and ends at once.
             self.action(TileOperation::StartParse);
             self.action(TileOperation::EndParse);
         }
@@ -196,7 +196,14 @@ impl<'a> TileMut<'a> {
         match self.tile.pipeline {
             Pipeline::Layout(_) => self.take_data(None, true),
             Pipeline::Decode(_) => self.take_image(None, true),
+            Pipeline::Value => self.install(None),
         }
+    }
+
+    /// Takes in a value tile's value, which a load delivered, and shows it at
+    /// once: `None` for an empty tile, which shows nothing.
+    pub(crate) fn take_value(&mut self, value: Option<Arc<dyn Any + Send + Sync>>) {
+        self.install(Some(value.map_or(Contents::Empty, |value| Contents::Value(ValueContents::new(value)))));
     }
 
     /// Takes in a raster or raster-dem tile's encoded image, which a load
@@ -315,6 +322,7 @@ impl<'a> TileMut<'a> {
             match &mut self.tile.pipeline {
                 Pipeline::Layout(layout) => layout.work = LayoutWork::Outdated,
                 Pipeline::Decode(decode) => decode.requeue(),
+                Pipeline::Value => {}
             }
             drop_on_workers(&self.store.pool, body);
         } else if let Some(result) = self.store.jobs.decode(lane, body) {
@@ -339,6 +347,7 @@ impl<'a> TileMut<'a> {
                 decode.generation = generation;
                 decode.requeue();
             }
+            Pipeline::Value => {}
         }
     }
 
@@ -504,6 +513,7 @@ impl<'a> TileMut<'a> {
                 decode.work = DecodeWork::Running { job: in_flight(id, lane), image: Some(image) };
                 (lane, id, job)
             }
+            Pipeline::Value => return None,
         };
         Some((lane, Run { id, job, superseded }))
     }
@@ -528,6 +538,8 @@ impl<'a> TileMut<'a> {
                     }
                 };
             }
+            // A value tile has no jobs.
+            Pipeline::Value => return,
         };
         let Running { job, known, answer, images } = match std::mem::replace(&mut layout.work, LayoutWork::Outdated) {
             LayoutWork::Running(running) => running,
@@ -613,8 +625,8 @@ pub(crate) struct WorldCopy<'a> {
 }
 
 /// What a new tile that takes its world copy settles on: the data a
-/// geometry tile lays out (none for a raster or raster-dem tile, which shows
-/// all it will), and the copy's times.
+/// geometry tile lays out (none for a raster, raster-dem or value tile,
+/// which shows all it will), and the copy's times.
 struct CopyAnswer {
     data: Option<LayoutData>,
     times: TileTimes,
@@ -625,7 +637,7 @@ impl<'a> WorldCopy<'a> {
     /// its buckets, apart from those of the layers that are placed: these
     /// hold what placement made of them where their tile is. A raster or
     /// raster-dem tile's copy has a bucket of its own, since each is masked
-    /// where it is.
+    /// where it is. A value tile's copy shares its value.
     pub(crate) fn of(tile: &'a Tile) -> Option<WorldCopy<'a>> {
         let shown = tile.shown.as_ref().filter(|shown| shown.contents.is_renderable())?;
         let contents = match &shown.contents {
@@ -643,6 +655,7 @@ impl<'a> WorldCopy<'a> {
             }
             Contents::Raster(raster) => Contents::Raster(RasterContents::with_shared_image(raster.image().cloned())),
             Contents::Dem(dem) => Contents::Dem(DemContents::new(dem.dem().clone())),
+            Contents::Value(value) => Contents::Value(value.clone()),
             Contents::Empty => Contents::Empty,
         };
         // The contents are of the tile's latest data: the copy lays the data
@@ -650,7 +663,7 @@ impl<'a> WorldCopy<'a> {
         // shown.
         let data = match &tile.pipeline {
             Pipeline::Layout(layout) => layout.data.clone().map(Some),
-            Pipeline::Decode(_) => (!tile.is_pending()).then_some(None),
+            Pipeline::Decode(_) | Pipeline::Value => (!tile.is_pending()).then_some(None),
         };
         let world_copy = matches!(contents, Contents::Geometry(_));
         Some(WorldCopy {

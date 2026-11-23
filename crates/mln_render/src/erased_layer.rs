@@ -313,6 +313,8 @@ impl<S: StyleLayerType> LayoutOf<S> for crate::layer::RasterTiles {}
 
 impl<S: StyleLayerType> LayoutOf<S> for crate::layer::NoTiles {}
 
+impl<S: StyleLayerType, V> LayoutOf<S> for crate::layer::ValueTiles<V> {}
+
 /// `group`'s layers as `S` layers' values; fails if one is another type's.
 // Inline for small groups, since a tile's layout recovers each of its groups.
 fn recover_group<S: StyleLayerType>(

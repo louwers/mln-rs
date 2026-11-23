@@ -21,7 +21,7 @@ pub use mln_render::{paint_property_binders, placement};
 pub use mln_style::conversion::{self, Convertible};
 pub use mln_style::evaluated::Evaluated;
 pub use mln_style::expression::Functions;
-pub use mln_style::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
+pub use mln_style::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType, ValueKind};
 pub use mln_style::properties;
 pub use mln_style::property_table::{PropertyInfo, PropertyTable, PropertyVisitor};
 pub use mln_style::property_value::PropertyValue;

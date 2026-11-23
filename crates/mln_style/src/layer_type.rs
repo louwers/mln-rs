@@ -7,7 +7,7 @@
 //! value gets back to its type only through [`LayerStyle::recover`] and
 //! [`LayerStyle::recover_ref`].
 
-use std::any::Any;
+use std::any::{Any, TypeId};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -37,6 +37,39 @@ pub enum SourceKind {
     Geometry,
     Raster,
     RasterDem,
+    /// Tiles of a value of a source type's own type, which the layers of
+    /// that value's type view.
+    Value(ValueKind),
+}
+
+/// The type of the value that a source type's tiles hold, which the style
+/// compares to tell whether a layer type views a source's tiles.
+#[derive(Clone, Copy)]
+pub struct ValueKind {
+    id: TypeId,
+    name: fn() -> &'static str,
+}
+
+impl ValueKind {
+    /// The kind of tiles that hold a `V`.
+    #[must_use]
+    pub const fn of<V: 'static>() -> ValueKind {
+        ValueKind { id: TypeId::of::<V>(), name: std::any::type_name::<V> }
+    }
+}
+
+impl PartialEq for ValueKind {
+    fn eq(&self, other: &ValueKind) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for ValueKind {}
+
+impl std::fmt::Debug for ValueKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str((self.name)())
+    }
 }
 
 /// What the engine needs to know about a layer type besides its properties.

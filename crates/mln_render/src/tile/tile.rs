@@ -192,6 +192,7 @@ impl Tile {
             SourceKind::Geometry => "Geometry",
             SourceKind::Raster => "Raster",
             SourceKind::RasterDem => "RasterDEM",
+            SourceKind::Value(_) => "Value",
         };
         let yes = |value: bool| if value { "yes" } else { "no" };
         Log::info(Event::General, format!("Tile::Kind: {kind}"));

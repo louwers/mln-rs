@@ -6,7 +6,7 @@ use std::sync::Arc;
 use mln_style::StyleRegistry;
 use mln_style::expression::Functions;
 use mln_style::expression::functions::RegisterError;
-use mln_style::layer_type::{ErasedStyleLayerType, StyleLayerType};
+use mln_style::layer_type::{ErasedStyleLayerType, SourceKind, StyleLayerType};
 use mln_style::source_type::ErasedStyleSourceType;
 use mln_style::style_key::{StyleKey, StyleKeys};
 use mln_vec_map::VecMap;
@@ -61,10 +61,10 @@ impl RegistryBuilder {
     }
 
     /// Adds the layer type of the layer `L`, both its halves. Fails for a
-    /// name that an earlier type took, and for a property named as a style
-    /// key. A layer whose
-    /// [`Input`](Layer::Input) is of another kind of source than its style
-    /// half's doesn't compile.
+    /// name that an earlier type took, for a property named as a style key,
+    /// and for a layer whose [`Input`](Layer::Input) views values of another
+    /// type than its style half names. A layer whose input is of another
+    /// kind of source than its style half's doesn't compile.
     pub fn add_layer_type<L: Layer>(&mut self) -> Result<(), RegisterError> {
         self.add_layer_entry::<L>(entry::<L, ()>())
     }
@@ -85,11 +85,15 @@ impl RegistryBuilder {
     fn add_layer_entry<L: Layer>(&mut self, entry: &'static dyn ErasedLayerType) -> Result<(), RegisterError> {
         const {
             assert!(
-                <L::Style as StyleLayerType>::INFO.source as u8 == crate::layer::input_source::<L>() as u8,
+                same_kind(<L::Style as StyleLayerType>::INFO.source, crate::layer::input_source::<L>()),
                 "a layer's input is of another kind of source than its style half's",
             );
         }
         let name = <L::Style as StyleLayerType>::INFO.name;
+        // A value's type compares only at run time.
+        if <L::Style as StyleLayerType>::INFO.source != crate::layer::input_source::<L>() {
+            return Err(RegisterError::SourceKind(name.to_owned()));
+        }
         if self.layer_types.contains_key(name) {
             return Err(RegisterError::Duplicate(name.to_owned()));
         }
@@ -136,6 +140,19 @@ impl RegistryBuilder {
             self.placing_types,
         )
     }
+}
+
+/// Whether `a` and `b` are the same kind of source, whatever type of value
+/// two kinds of value tiles hold.
+const fn same_kind(a: SourceKind, b: SourceKind) -> bool {
+    matches!(
+        (a, b),
+        (SourceKind::None, SourceKind::None)
+            | (SourceKind::Geometry, SourceKind::Geometry)
+            | (SourceKind::Raster, SourceKind::Raster)
+            | (SourceKind::RasterDem, SourceKind::RasterDem)
+            | (SourceKind::Value(_), SourceKind::Value(_))
+    )
 }
 
 fn style_half(layer_type: &'static dyn ErasedLayerType) -> &'static dyn ErasedStyleLayerType {
@@ -245,14 +262,14 @@ impl mln_wire::Context for &Registry {
 #[cfg(test)]
 mod tests {
     use mln_style::conversion::Error;
-    use mln_style::layer_type::{NoProperties, SourceKind};
+    use mln_style::layer_type::{NoProperties, SourceKind, ValueKind};
     use mln_style::property_table::{PropertyInfo, PropertyTable};
     use mln_style::source_type::{SourceTypeInfo, StyleSourceType};
     use mln_style::{LayerTypeInfo, Source};
 
     use super::*;
     use crate::draw::Draws;
-    use crate::layer::{NewCx, PrepareCx, ViewCover};
+    use crate::layer::{NewCx, PrepareCx, ValueTiles, ViewCover};
     use crate::source::{GeometryTiles, Supply};
     use crate::tests::fixture_layer::Dot;
     use crate::tests::scripted_origin::{Geometry, Scripted};
@@ -291,6 +308,37 @@ mod tests {
         let mut builder = RegistryBuilder::new();
         assert_eq!(builder.add_source_type::<Mismatched>(), Err(RegisterError::SourceKind("mismatched".to_owned())));
         assert!(builder.build().source_type("mismatched").is_none());
+    }
+
+    /// A layer type whose style half views values of one type, while its
+    /// render half views another's.
+    struct Viewer;
+
+    impl StyleLayerType for Viewer {
+        const INFO: LayerTypeInfo =
+            LayerTypeInfo { name: "viewer", source: SourceKind::Value(ValueKind::of::<u8>()), from_json: true };
+        type LayoutProperties = NoProperties;
+        type PaintProperties = NoProperties;
+        type Data = ();
+    }
+
+    impl Layer for Viewer {
+        type Style = Viewer;
+        type Input = ValueTiles<u16>;
+        type Tile = ();
+
+        fn new(_cx: &mut NewCx<'_, Self>) -> Self {
+            Viewer
+        }
+
+        fn prepare(&self, _cx: &PrepareCx<'_, Self>, _out: &mut Draws) {}
+    }
+
+    #[test]
+    fn a_layer_type_that_views_another_value_than_its_style_half_fails_to_register() {
+        let mut builder = RegistryBuilder::new();
+        assert_eq!(builder.add_layer_type::<Viewer>(), Err(RegisterError::SourceKind("viewer".to_owned())));
+        assert!(builder.build().layer_type("viewer").is_none());
     }
 
     #[test]

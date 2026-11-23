@@ -10,10 +10,27 @@
 //!
 //! A source [supplies](SourceType::supply) the renderer one of the engine's
 //! kinds of data, its type's [`Data`](SourceType::Data): tiles of
-//! [geometry](GeometryTiles), of [raster images](RasterTiles) or of
-//! [raster-dem elevations](DemTiles), or, for raster data, one image at four
-//! coordinates ([`SourceImage`]). A new source of data is a source type; a
-//! new kind of data is a change to the engine.
+//! [geometry](GeometryTiles), of [raster images](RasterTiles), of
+//! [raster-dem elevations](DemTiles) or of a [value of its own](ValueTiles),
+//! or, for raster data, one image at four coordinates ([`SourceImage`]). A
+//! new source of data is a source type; a new kind of data that the
+//! engine lays out or decodes for any layer is a change to the engine.
+//!
+//! A source type whose data only its own layer types draw delivers a value
+//! of a type of its own for each tile, an `Arc<V>` of [`ValueTiles<V>`],
+//! which its origin makes once, wherever it likes, and which the layers that
+//! view it share as it is, with no layout and no bucket. Both halves of the
+//! source type name the kind as
+//! [`SourceKind::Value`](mln_style::layer_type::SourceKind::Value) of
+//! [`ValueKind::of::<V>()`](mln_style::layer_type::ValueKind::of), as the
+//! layer types that view it do ([`crate::layer::ValueTiles`]), so that a
+//! style whose layer views a source of another kind skips the layer with an
+//! error. The engine keeps a value as it keeps any tile's data: a tile shows
+//! the value of its latest delivery at once, a parent or children stand in
+//! for a tile without one, a tile in a new world copy shows the value of the
+//! same tile in another, and the value goes with its tile. A value doesn't
+//! change once delivered: a tile that needs another is delivered a new one,
+//! of which the layers make their tile values again.
 //!
 //! A source's tiles get their data from its [`DataOrigin`]. The engine
 //! decides which tiles the view needs, keeps them, and lays out or decodes
@@ -64,7 +81,7 @@ use mln_util::range::Range;
 use mln_util::tileset::RasterEncoding;
 
 use crate::erased_source::{ErasedOrigin, UpdateParts, typed};
-pub use crate::layer::{DemTiles, RasterTiles};
+pub use crate::layer::{DemTiles, RasterTiles, ValueTiles};
 use crate::tile::inbox::{InboxSender, TileEvent};
 use crate::tile::job::TileKey;
 pub use crate::tile::loading::TileTimes;
@@ -114,7 +131,7 @@ impl Supply<RasterTiles> {
 
 /// A kind of tile data, and what a tile's load delivers of it, its
 /// [`Item`](Self::Item). The kinds are the engine's: [`GeometryTiles`],
-/// [`RasterTiles`] and [`DemTiles`].
+/// [`RasterTiles`], [`DemTiles`] and [`ValueTiles`].
 #[expect(private_bounds, reason = "the engine's kinds are the only ones: `kind::Deliver` seals the trait")]
 pub trait TileKind: kind::Deliver + 'static {
     /// What a load delivers to a tile of the kind.
@@ -141,10 +158,18 @@ impl TileKind for DemTiles {
     type Item = (Data, RasterEncoding);
 }
 
-pub(crate) mod kind {
-    use mln_style::layer_type::SourceKind;
+/// A load delivers a tile's value, which the layers that view it share as
+/// it is, and which the tile's world copies share too.
+impl<V: Send + Sync + 'static> TileKind for ValueTiles<V> {
+    type Item = Arc<V>;
+}
 
-    use super::{DemTiles, GeometryTiles, RasterTiles, TileKind};
+pub(crate) mod kind {
+    use std::sync::Arc;
+
+    use mln_style::layer_type::{SourceKind, ValueKind};
+
+    use super::{DemTiles, GeometryTiles, RasterTiles, TileKind, ValueTiles};
     use crate::tile::tile_mut::TileMut;
 
     /// The engine's side of a [`TileKind`]: the kind of source it is, and
@@ -179,6 +204,14 @@ pub(crate) mod kind {
 
         fn deliver(tile: &mut TileMut<'_>, item: Option<<Self as TileKind>::Item>) {
             tile.take_image(item.map(|(data, encoding)| (data, Some(encoding))), false);
+        }
+    }
+
+    impl<V: Send + Sync + 'static> Deliver for ValueTiles<V> {
+        const KIND: SourceKind = SourceKind::Value(ValueKind::of::<V>());
+
+        fn deliver(tile: &mut TileMut<'_>, item: Option<<Self as TileKind>::Item>) {
+            tile.take_value(item.map(|value| -> Arc<dyn std::any::Any + Send + Sync> { value }));
         }
     }
 }
@@ -415,8 +448,9 @@ impl<'a, 't, O: DataOrigin + ?Sized> LoadContext<'a, 't, O> {
         Replier { inbox: self.tile.store().inbox.clone(), tile, load, reply: PhantomData }
     }
 
-    /// Gives the tile what a load brought, which it lays out or decodes:
-    /// `None` for an empty tile, which shows nothing.
+    /// Gives the tile what a load brought, which it lays out or decodes, or
+    /// shows at once if it is a value: `None` for an empty tile, which
+    /// shows nothing.
     pub fn deliver(&mut self, item: Option<<O::Data as TileKind>::Item>) {
         <O::Data as kind::Deliver>::deliver(self.tile, item);
     }
@@ -442,7 +476,8 @@ impl<'a, 't, O: DataOrigin + ?Sized> LoadContext<'a, 't, O> {
 
     /// In [`DataOrigin::start`], settles the new tile on the contents of
     /// its world copy, which it shows, as its load's answer: a geometry
-    /// tile lays out the copy's data for itself. Returns false, and changes
+    /// tile lays out the copy's data for itself, and a value tile shares the
+    /// copy's value. Returns false, and changes
     /// nothing, for a tile that didn't start from a copy, or whose copy has
     /// no data to give, as one with a decode still pending.
     pub fn take_copy(&mut self) -> bool {
@@ -450,8 +485,9 @@ impl<'a, 't, O: DataOrigin + ?Sized> LoadContext<'a, 't, O> {
     }
 
     /// Drops a geometry tile's data and style, so that it lays out anew once
-    /// it has both again. A raster or DEM tile's decodes keep running, so an
-    /// origin of image tiles doesn't call it.
+    /// it has both again. A raster or DEM tile's decodes keep running, and a
+    /// value tile keeps its value, so an origin of other tiles doesn't call
+    /// it.
     pub fn reset(&mut self) {
         self.tile.reset();
     }
