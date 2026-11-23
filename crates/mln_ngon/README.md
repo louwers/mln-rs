@@ -82,7 +82,8 @@ do, and a query hits each as drawn. Otherwise:
 - A polygon that shows fades in, and one that a placement hides fades out, over
   the style's transition, but a tile's polygons show or hide at once the first
   time a placement places them, so a polygon that a new tile hides disappears
-  rather than fading. Those of a tile that the map no longer needs fade out.
+  rather than fading. Until then, they all show. Those of a tile that the map no
+  longer needs fade out.
 - A rendered-feature query hits a polygon that places where it touches its
   circle's bounding box, and doesn't hit one that a placement hides.
 - In tile mode, the polygons whose circle crosses their tile's border place

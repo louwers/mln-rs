@@ -114,7 +114,8 @@ fn place(layer: &PlacingLayer<'_, NgonLayer>, cx: &mut PlaceCx<'_>, crossing: Op
         });
         // A continuous map's points fade on from where the placement before
         // left them; those of a bucket it didn't place show or hide at once.
-        let placed = if cx.mode == MapMode::Continuous { bucket.opacity.len() } else { 0 };
+        let laid = bucket.opacity.len();
+        let placed = if cx.mode == MapMode::Continuous { laid } else { 0 };
         bucket.opacity.resize(bucket.points.len(), Opacity::new(false, true));
         for (i, point) in bucket.points.iter().enumerate() {
             let at = project(f32::from(point.at[0]) + dx, f32::from(point.at[1]) + dy);
@@ -139,8 +140,13 @@ fn place(layer: &PlacingLayer<'_, NgonLayer>, cx: &mut PlaceCx<'_>, crossing: Op
             let prev = (i < placed).then(|| bucket.opacity[i]);
             let next = prev.map_or(Opacity::new(shows, true), |prev| prev.step(cx.fade, shows));
             cx.placed.add(prev, next);
+            // The bucket draws its points shown until they first place, and
+            // only a changed vector uploads again.
+            let drawn = if i < laid { bucket.opacity[i] } else { Opacity::new(true, true) };
+            if next.vertex() != drawn.vertex() {
+                bucket.fade.get_mut()[4 * i..4 * i + 4].fill(next.vertex());
+            }
             bucket.opacity[i] = next;
-            bucket.fade.get_mut()[4 * i..4 * i + 4].fill(next.vertex());
             if let Some(records) = &mut cx.records {
                 let (layer, padding) = (layer.layer.id().to_owned(), cx.index.padding());
                 records.push(PlacementRecord {
