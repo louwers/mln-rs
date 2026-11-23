@@ -378,14 +378,14 @@ impl Group {
     ) {
         let Some(run) = self.frame.runs.iter().find(|run| std::ptr::eq(run.program, mesh.program())) else { return };
         let Some(mut objects) = parameters.context.take_mesh(mesh.key()) else { return };
-        objects.draw(gpu, parameters, &run.buffers, depth, stencil, element);
+        let _ = objects.draw(gpu, parameters, &run.buffers, depth, stencil, element);
         parameters.context.restore_mesh(mesh.key(), objects);
     }
 
     /// Draws the pass's draws of the frame into the open pass of `gpu`, the
-    /// context's.
-    pub(crate) fn render(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        self.frame.render(gpu, parameters);
+    /// context's. Returns whether none failed.
+    pub(crate) fn render(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> bool {
+        self.frame.render(gpu, parameters)
     }
 }
 
@@ -682,9 +682,11 @@ impl Draws {
 
     /// Draws the groups of the frame's targets into them through `gpu`,
     /// each in a pass of its own that clears the target first, outside the
-    /// frame's passes.
+    /// frame's passes. A target whose pass and draws didn't fail holds
+    /// them ([`Resources::is_drawn`]).
     pub(crate) fn render_targets(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         for (target, group) in &self.targets {
+            parameters.context.set_drawn(target, false);
             let size = match parameters.context.target_pass(gpu, target, None) {
                 Ok(pass) => parameters.begin_pass(gpu, pass).map(|()| pass.size),
                 Err(error) => Err(error),
@@ -700,17 +702,20 @@ impl Draws {
                 &mut parameters.scissor,
                 Scissor { x: 0, y: 0, width: size.width, height: size.height },
             );
+            let mut drawn = true;
             for pass in [Pass::Opaque, Pass::Translucent] {
                 parameters.pass = pass;
                 parameters.depth_range_size =
                     1.0 - (3 * PaintParameters::NUM_SUBLAYERS) as f32 * PaintParameters::DEPTH_EPSILON;
                 parameters.current_layer = 0;
-                group.render(gpu, parameters);
+                drawn &= group.render(gpu, parameters);
             }
             if let Err(error) = parameters.end_pass(gpu) {
                 Log::error(Event::Render, format!("Ending a target's pass failed: {error}"));
+                drawn = false;
             }
             parameters.scissor = frame_scissor;
+            parameters.context.set_drawn(target, drawn);
         }
     }
 }
@@ -818,10 +823,10 @@ impl FrameDraws {
     /// composite, and onto the frame otherwise. Where none of the pass's
     /// draws is 3D, the masks of the tiles that those that clip clip to go
     /// into the stencil first; 3D draws that draw `once` share one stencil
-    /// value of their own.
-    pub(crate) fn render(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+    /// value of their own. Returns whether no draw failed.
+    pub(crate) fn render(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> bool {
         if self.draws.is_empty() || parameters.pass_target().is_none() {
-            return;
+            return true;
         }
         let composited = (self.composite.is_some() && parameters.pass == Pass::Translucent)
             .then(|| parameters.begin_composited(gpu, self.id))
@@ -847,26 +852,29 @@ impl FrameDraws {
             }
             None
         };
+        let mut drawn = true;
         for draw in draws() {
-            self.draw(gpu, parameters, draw, volume_stencil);
+            drawn &= self.draw(gpu, parameters, draw, volume_stencil);
         }
         if let Some(composited) = composited {
             parameters.end_composited(gpu, composited);
         }
+        drawn
     }
 
     /// Draws `draw` with the GPU objects of its mesh and the buffers of its
-    /// run; a 3D draw that draws `once` with `volume_stencil`.
+    /// run; a 3D draw that draws `once` with `volume_stencil`. Returns
+    /// whether it didn't fail.
     fn draw(
         &self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         draw: &FrameDraw,
         volume_stencil: Option<Stencil>,
-    ) {
+    ) -> bool {
         let Some(mut objects) = parameters.context.take_mesh(draw.mesh) else {
             debug_assert!(false, "a draw of tile {:?} names a mesh that went", draw.tile);
-            return;
+            return false;
         };
         let tile_stencil = || match draw.tile.filter(|_| draw.clip) {
             Some(tile) => parameters.stencil_for_clipping(&tile.to_unwrapped()),
@@ -880,8 +888,9 @@ impl FrameDraws {
             }
         };
         let buffers = &self.runs[usize::from(draw.run)].buffers;
-        objects.draw(gpu, parameters, buffers, depth, stencil, draw.element);
+        let drawn = objects.draw(gpu, parameters, buffers, depth, stencil, draw.element);
         parameters.context.restore_mesh(draw.mesh, objects);
+        drawn
     }
 }
 

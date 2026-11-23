@@ -27,8 +27,9 @@ use super::ubo::{
 use super::{Hillshade, HillshadePaintProperties};
 use crate::resampling;
 
-/// A hillshade layer: each tile's slopes, prepared from its elevations into
-/// a target of the tile's, and shaded as lit from the layer's light sources.
+/// A hillshade layer: each tile's slopes, prepared once from its elevations
+/// into a target of the tile's, and shaded as lit from the layer's light
+/// sources.
 pub struct HillshadeLayer {
     /// The tile's quad, which prepares its slopes.
     corners: Buffer<ImageVertex>,
@@ -127,7 +128,9 @@ impl Layer for HillshadeLayer {
         let to_texture =
             orthographic(0.0, extent, -extent, 0.0, -1.0, 1.0) * DMat4::from_translation(DVec3::new(0.0, -extent, 0.0));
         let to_texture = HillshadePrepareDrawableUBO { matrix: to_texture.as_mat4().to_cols_array() };
-        for (tile, dem, value) in cx.tiles() {
+        // The slopes depend on nothing but the tile's elevations and zoom, so
+        // a target that holds them keeps them.
+        for (tile, dem, value) in cx.tiles().filter(|(_, _, value)| !cx.res.is_drawn(&value.slopes)) {
             let stride = dem.image().size.width as f32;
             let props = HillshadePrepareTilePropsUBO {
                 unpack: dem.unpack(),

@@ -21,6 +21,8 @@ pub(crate) struct Texture2D {
     size: Size,
     format: TextureFormat,
     render_target: bool,
+    /// Whether the backend's texture holds what a pass drew into it.
+    drawn: bool,
     /// The depth that passes drawing into a render target draw with, of its
     /// size, once one did.
     depth: Option<GpuTexture>,
@@ -53,6 +55,18 @@ impl Texture2D {
         self.render_target
     }
 
+    /// Whether the backend's texture holds what a pass drew into it, since
+    /// the pass ([`set_drawn`](Self::set_drawn)).
+    pub(crate) fn is_drawn(&self) -> bool {
+        self.drawn && self.texture.is_some()
+    }
+
+    /// Says whether a pass drew into the backend's texture without a
+    /// failure: what it drew stays until the texture goes.
+    pub(crate) fn set_drawn(&mut self, drawn: bool) {
+        self.drawn = drawn;
+    }
+
     /// An RGBA texture without a size.
     pub(crate) fn new() -> Texture2D {
         Texture2D {
@@ -60,6 +74,7 @@ impl Texture2D {
             size: Size::new(0, 0),
             format: TextureFormat::Rgba8Unorm,
             render_target: false,
+            drawn: false,
             depth: None,
             image: None,
         }
@@ -202,6 +217,7 @@ impl Texture2D {
     /// of it do, and of its depth.
     fn release(&mut self) {
         self.texture = None;
+        self.drawn = false;
         self.depth = None;
     }
 }

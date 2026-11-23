@@ -403,7 +403,7 @@ impl DrawObjects {
     /// Draws the segments into `parameters`' open pass on `gpu`, the
     /// context's, with `depth` and `stencil`, binding the buffers
     /// of the draws in `frame`. Shaders read the draw's entries in those
-    /// storage buffers at `global_index`.
+    /// storage buffers at `global_index`. Returns whether it didn't fail.
     pub(crate) fn draw(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -412,10 +412,12 @@ impl DrawObjects {
         depth: DepthTest,
         stencil: Stencil,
         global_index: u32,
-    ) {
-        if let Err(error) = self.draw_in(gpu, parameters, frame, depth, stencil, global_index) {
+    ) -> bool {
+        let drawn = self.draw_in(gpu, parameters, frame, depth, stencil, global_index);
+        if let Err(error) = &drawn {
             Log::warning(Event::Render, format!("Drawing {} failed: {error}", self.program.name));
         }
+        drawn.is_ok()
     }
 
     fn draw_in(

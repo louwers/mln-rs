@@ -249,6 +249,24 @@ impl Resources {
         })
     }
 
+    /// Whether `target` holds what a frame drew into it: its pass and its
+    /// draws ended without a failure, and it kept its texture since. What
+    /// it holds stays until the frame draws into it again
+    /// ([`Draws::target`](crate::draw::Draws::target)), so a layer whose
+    /// draws into a target don't change from frame to frame draws into it
+    /// until it holds them.
+    #[must_use]
+    pub fn is_drawn(&self, target: &crate::draw::Target) -> bool {
+        self.textures.get(&target.texture.0).is_some_and(Texture2D::is_drawn)
+    }
+
+    /// Says whether the frame's pass and draws into `target` failed.
+    pub(crate) fn set_drawn(&mut self, target: &crate::draw::Target, drawn: bool) {
+        if let Some(texture) = self.textures.get_mut(&target.texture.0) {
+            texture.set_drawn(drawn);
+        }
+    }
+
     /// Makes `target` `size` texels from its next draws on, unless it
     /// already is that size. What it held goes, and its meshes sample the
     /// new texture.
