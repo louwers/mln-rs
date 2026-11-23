@@ -75,7 +75,10 @@
 //! A placing layer draws the tiles that its source holds while what
 //! placement showed of them fades out, besides those of the frame, and a
 //! tile's world copy doesn't draw it before the copy's own layout lands,
-//! since its bucket holds what placement made of it where its tile is.
+//! since its bucket holds what placement made of it where its tile is. Such
+//! a tile is [held for fade](PlacingTile::held_for_fade): its items show
+//! none, so a participant inserts none of them and steps their opacities
+//! toward hidden.
 //!
 //! # Queries
 //!
@@ -137,8 +140,10 @@ pub trait Placement: Default + 'static {
 
     /// Whether a layer of `style` places. A layer that doesn't is drawn,
     /// copied to world copies and queried as a layer of a type without
-    /// placement. It is read from the style, so a change to it lays the
-    /// layer out again.
+    /// placement. It may read only the layer's filter, visibility and
+    /// layout properties, since only a change to those lays the layer out
+    /// again: until it is, a tile laid out the other way keeps what its
+    /// layout made of it.
     #[must_use]
     fn places(_style: &LayerStyle<<Self::Layer as Layer>::Style>) -> bool {
         true
@@ -158,7 +163,8 @@ pub trait Placement: Default + 'static {
     fn place_crossing(&mut self, _layer: &PlacingLayer<'_, Self::Layer>, _cx: &mut PlaceCx<'_>) {}
 
     /// Places `layer`'s items: each shows where its shapes collide with
-    /// nothing in `cx.index`, which it then inserts them in. The layer's
+    /// nothing in `cx.index`, which it then inserts them in, but none of a
+    /// tile [held for fade](PlacingTile::held_for_fade) shows. The layer's
     /// [`tiles`](PlacingLayer::tiles) are those whose bucket it leads.
     fn place(&mut self, layer: &PlacingLayer<'_, Self::Layer>, cx: &mut PlaceCx<'_>);
 
@@ -272,7 +278,8 @@ pub struct PlacingTile {
     /// The tile's id.
     pub overscaled_id: OverscaledTileID,
     /// Whether the frame no longer needs the tile, which it keeps while
-    /// what placement showed of it fades out.
+    /// what placement showed of it fades out: none of its items show, and
+    /// their opacities only step toward hidden.
     pub held_for_fade: bool,
     /// How the frame projects the tile: a
     /// [`TileProjector`](mln_map_types::TileProjector) of it projects the
@@ -301,8 +308,11 @@ pub(crate) fn tile_order(tiles: &[RenderTile], bearing: f32) -> Vec<usize> {
 /// [module docs](self) list it).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Prepared {
-    /// Whether the layers' buckets include some the participant hadn't
-    /// seen, which a continuous map with a flat view places soon.
+    /// Whether the participant can place items it couldn't before, which a
+    /// continuous map with a flat view places soon. The engine knows when a
+    /// layer leads a bucket that no layer led the frame before; a
+    /// participant says so for reasons of its own, such as symbols of an
+    /// overscaled tile that came into view.
     pub added: bool,
     /// Whether placing now would place from other inputs than the current
     /// placement did, which a continuous map places again for.
