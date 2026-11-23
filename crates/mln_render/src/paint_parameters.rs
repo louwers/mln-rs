@@ -7,7 +7,6 @@ use mln_gfx::types::{DepthFunctionType, StencilOpType, TextureFilterType};
 use mln_map_types::{ClipDepthRange, FrameProjection, MapDebugOptions, ProjectionData, View, ViewportMode};
 use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
 use mln_util::identity::SimpleIdentity;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_vec_map::VecMap;
 
@@ -329,7 +328,7 @@ impl<'a> PaintParameters<'a> {
         };
         let restarted = self.end_pass(gpu).and_then(|()| self.begin_pass(gpu, pass.loading(stencil)));
         if let Err(error) = restarted {
-            Log::error(Event::Render, format!("Restarting the {} pass failed: {error}", pass.label));
+            self.context.fail(format!("Restarting the {} pass failed: {error}", pass.label));
         }
     }
 
@@ -359,7 +358,7 @@ impl<'a> PaintParameters<'a> {
         drawn = drawn.and_then(|()| self.begin_pass(gpu, composite));
         let began = drawn.is_ok();
         if let Err(error) = drawn {
-            Log::error(Event::Render, format!("Beginning the layer composite's pass failed: {error}"));
+            self.context.fail(format!("Beginning the layer composite's pass failed: {error}"));
         }
         let frame_stencil = (began && own_stencil).then(|| {
             (std::mem::take(&mut self.tile_clipping_mask_ids), std::mem::replace(&mut self.next_stencil_id, 1))
@@ -384,10 +383,10 @@ impl<'a> PaintParameters<'a> {
             self.next_stencil_id = next_stencil_id;
         }
         if began && let Err(error) = self.end_pass(gpu) {
-            Log::error(Event::Render, format!("Ending the layer composite's pass failed: {error}"));
+            self.context.fail(format!("Ending the layer composite's pass failed: {error}"));
         }
         if let Err(error) = self.begin_pass(gpu, frame.loading(LoadOp::Load)) {
-            Log::error(Event::Render, format!("Resuming the {} pass failed: {error}", frame.label));
+            self.context.fail(format!("Resuming the {} pass failed: {error}", frame.label));
         } else if began {
             // What drew with the frame's depth tested it as it drew, and
             // left its own there, in front of the layer's. The others
@@ -407,15 +406,14 @@ impl<'a> PaintParameters<'a> {
     /// Ends the frame's pass, which drew into the layer composite's frame
     /// texture, and begins `present`, which the texture is copied into.
     /// Does nothing where the frame drew into its target.
-    pub(crate) fn present_frame(&mut self, gpu: &mut dyn Gpu, present: OpenPass) {
+    pub(crate) fn present_frame(&mut self, gpu: &mut dyn Gpu, present: OpenPass) -> Result<(), GpuError> {
         if self.layer_composite.frame_texture().is_none() {
-            return;
+            return Ok(());
         }
-        if let Err(error) = self.end_pass(gpu).and_then(|()| self.begin_pass(gpu, present)) {
-            Log::error(Event::Render, format!("Beginning the frame's copy failed: {error}"));
-            return;
-        }
+        self.end_pass(gpu)?;
+        self.begin_pass(gpu, present)?;
         self.copy_frame(gpu);
+        Ok(())
     }
 
     /// Whether the current layer draws in the opaque pass: front to back,

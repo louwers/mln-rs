@@ -227,20 +227,30 @@ pub const MLN_RUNTIME_EVENT_MAP_LOADING_FAILED: mln_runtime_event_type = 7;
 /** The map rendered a complete frame and has nothing left to load, animate,
  or redraw.*/
 pub const MLN_RUNTIME_EVENT_MAP_IDLE: mln_runtime_event_type = 8;
-/** The map rendered a complete frame and has nothing left to load, animate,
- or redraw.*/
+/** Rendering a frame failed on the GPU, as when the device runs out of
+ memory or the driver rejects a shader. The frame shows what did render.
+ A map in MLN_MAP_MODE_CONTINUOUS raises it once for a run of failed
+ frames, and renders again shortly in case the failure passes.*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_ERROR: mln_runtime_event_type = 9;
-/** The map rendered a complete frame and has nothing left to load, animate,
- or redraw.*/
+/** Rendering a frame failed on the GPU, as when the device runs out of
+ memory or the driver rejects a shader. The frame shows what did render.
+ A map in MLN_MAP_MODE_CONTINUOUS raises it once for a run of failed
+ frames, and renders again shortly in case the failure passes.*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_FRAME_STARTED: mln_runtime_event_type = 10;
-/** The map rendered a complete frame and has nothing left to load, animate,
- or redraw.*/
+/** Rendering a frame failed on the GPU, as when the device runs out of
+ memory or the driver rejects a shader. The frame shows what did render.
+ A map in MLN_MAP_MODE_CONTINUOUS raises it once for a run of failed
+ frames, and renders again shortly in case the failure passes.*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_FRAME_FINISHED: mln_runtime_event_type = 11;
-/** The map rendered a complete frame and has nothing left to load, animate,
- or redraw.*/
+/** Rendering a frame failed on the GPU, as when the device runs out of
+ memory or the driver rejects a shader. The frame shows what did render.
+ A map in MLN_MAP_MODE_CONTINUOUS raises it once for a run of failed
+ frames, and renders again shortly in case the failure passes.*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_MAP_STARTED: mln_runtime_event_type = 12;
-/** The map rendered a complete frame and has nothing left to load, animate,
- or redraw.*/
+/** Rendering a frame failed on the GPU, as when the device runs out of
+ memory or the driver rejects a shader. The frame shows what did render.
+ A map in MLN_MAP_MODE_CONTINUOUS raises it once for a run of failed
+ frames, and renders again shortly in case the failure passes.*/
 pub const MLN_RUNTIME_EVENT_MAP_RENDER_MAP_FINISHED: mln_runtime_event_type = 13;
 /// The style uses an image that it doesn't have.
 pub const MLN_RUNTIME_EVENT_MAP_STYLE_IMAGE_MISSING: mln_runtime_event_type = 14;

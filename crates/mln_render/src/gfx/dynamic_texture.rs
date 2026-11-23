@@ -14,7 +14,6 @@ use mln_style_types::image::RectU16;
 use mln_text::glyph::Glyph;
 use mln_util::hash::HashMap;
 use mln_util::image::AlphaImage;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::gfx::context::Resources;
@@ -251,7 +250,7 @@ impl DynamicTexture {
                 texture.set_format(texture_format(self.pixel_format, TextureChannelDataType::UnsignedByte));
             });
             if let Err(error) = context.create_texture(gpu, &texture) {
-                Log::error(Event::Render, format!("Making an atlas texture failed: {error}"));
+                context.fail(format!("Making an atlas texture failed: {error}"));
             }
             self.texture = Some(texture);
         }
@@ -273,7 +272,7 @@ impl DynamicTexture {
             };
             let size = Size::new(u32::from(rect.w), u32::from(rect.h));
             if let Err(error) = context.upload_texture_region(gpu, texture, data, size, rect.x, rect.y) {
-                Log::error(Event::Render, format!("Uploading to an atlas texture failed: {error}"));
+                context.fail(format!("Uploading to an atlas texture failed: {error}"));
             }
         }
         self.images_to_upload.clear();

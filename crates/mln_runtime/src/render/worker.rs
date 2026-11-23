@@ -355,6 +355,23 @@ struct RenderedFrame {
     slot: Option<(usize, Option<Published>)>,
 }
 
+/// Takes the still image off the reports in `events` of a frame that ends
+/// none: one drawn for a host's demand, or one that a surface `dropped`,
+/// which has no picture to complete it with. A dropped frame that failed
+/// keeps it, so that its error fails the still image it was drawn for.
+fn disown_still(events: &mut [RendererEvent], for_demand: bool, dropped: bool) {
+    if !for_demand && !dropped {
+        return;
+    }
+    for event in events {
+        if let RendererEvent::RenderFrameFinished { still_image_request_id, error, .. } = event
+            && (for_demand || (dropped && error.is_none()))
+        {
+            *still_image_request_id = 0;
+        }
+    }
+}
+
 /// Work that waits for the work sent before it: resizes that haven't
 /// landed, and demands that wait for the map's commands.
 struct Behind {
@@ -878,7 +895,9 @@ impl Worker {
     /// the image's frame. One that draws nothing, because a resource that
     /// the image needs is still loading, waits for the map's next update,
     /// and one that finds the ring full parks until the host releases a
-    /// frame. A host's demands neither replace nor wait for it. Ending the
+    /// frame. An offscreen target that can't begin a frame fails the image
+    /// rather than waits. A host's demands neither replace nor wait for it.
+    /// Ending the
     /// demands on their way ends it too, until the session can render again:
     /// a barrier demands the image again once it ran, a new target once it
     /// lands, and the next session once it attaches.
@@ -909,11 +928,22 @@ impl Worker {
         // the image waits.
         let asks = update.parameters.still_image_request && update.parameters.still_image_request_id == pending;
         let tried = self.still.as_ref().and_then(|still| still.tried);
-        if !asks
-            || tried == Some(update.generation)
-            || self.retargeting()
-            || !self.gfx.as_mut().is_some_and(|gfx| gfx.target.ready_for_frame())
-        {
+        if !asks || tried == Some(update.generation) || self.retargeting() {
+            return;
+        }
+        if !self.gfx.as_mut().is_some_and(|gfx| gfx.target.ready_for_frame()) {
+            // An offscreen target that can't begin a frame won't by waiting:
+            // the map fails the image on the error, with the demand's result
+            // queued first.
+            if self.gfx.as_ref().is_some_and(|gfx| gfx.target.is_offscreen()) {
+                self.still = None;
+                self.still_rendered = pending;
+                self.publish(&FrameResult::unrendered(None, FrameDisposition::NoUpdate, update.generation), outbox);
+                let error = Error::invalid_state(
+                    "the offscreen target has no pixels at its size and scale factor, or more than the device's textures take",
+                );
+                self.forward(vec![RendererEvent::ResourceError(error)]);
+            }
             return;
         }
         if self.fail_if_device_lost(outbox) {
@@ -931,16 +961,24 @@ impl Worker {
         };
         let frame = self.render(None, &update, slot);
         // A tile that failed during the frame counts as loaded, so the frame
-        // drew the map without it, but the map fails the image on the error.
-        let fails = frame.events.iter().any(|event| matches!(event, RendererEvent::ResourceError(_)));
-        match frame.result.disposition {
-            FrameDisposition::Rendered if fails => {
-                self.still_failing.set(pending);
-                if let Some((slot, _)) = frame.slot {
-                    self.end_slot(slot, None);
-                }
-                self.forward(frame.events);
+        // drew the map without it, but the map fails the image on the error,
+        // as it does on the image's frame's own failure on the GPU. The
+        // demand ends first, so that the image fails with its result queued.
+        let fails = frame.events.iter().any(|event| match event {
+            RendererEvent::ResourceError(_) => true,
+            RendererEvent::RenderFrameFinished { error, still_image_request_id, .. } => {
+                error.is_some() && *still_image_request_id == pending
             }
+            _ => false,
+        });
+        if fails {
+            self.still = None;
+            self.still_rendered = pending;
+            let result = FrameResult::unrendered(None, FrameDisposition::NoUpdate, update.generation);
+            self.publish_frame(frame.slot.map(|(slot, _)| (slot, None)), &result, outbox);
+            return self.forward(frame.events);
+        }
+        match frame.result.disposition {
             FrameDisposition::Rendered => {
                 self.still = None;
                 self.still_rendered = pending;
@@ -985,7 +1023,8 @@ impl Worker {
     /// has loaded, and a surface without a texture to render into takes no
     /// frame. A frame that a surface drops, having had no image for it after
     /// all, finishes as not ready, and the next demand draws the map again.
-    /// Only the still image's own frame completes the image.
+    /// Only the still image's own frame completes the image or fails it
+    /// ([`disown_still`]).
     fn render(&mut self, token: Option<u64>, update: &Update, slot: Option<usize>) -> RenderedFrame {
         let ready = self.gfx.as_mut().is_some_and(|gfx| gfx.target.ready_for_frame());
         let Some(gfx) = self.gfx.as_mut().filter(|_| ready) else {
@@ -1009,13 +1048,7 @@ impl Worker {
         }
         let mut events = self.renderer_events.take();
         let dropped = gfx.target.is_presenting() && matches!(handoff, Some(Handoff::Dropped));
-        if token.is_some() || dropped {
-            for event in &mut events {
-                if let RendererEvent::RenderFrameFinished { still_image_request_id, .. } = event {
-                    *still_image_request_id = 0;
-                }
-            }
-        }
+        disown_still(&mut events, token.is_some(), dropped);
         if dropped {
             let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
             return RenderedFrame { result, events, slot: None };
@@ -1663,6 +1696,53 @@ impl Worker {
         // A target that views keep stops the queue once they end.
         if self.shared.driver == Driver::CoreWorker && self.viewed.is_none() {
             self.shared.queue.stop();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use mln_render::{RenderMode, RendererEvent};
+    use mln_util::error::Error;
+
+    use super::disown_still;
+
+    /// The still image that a frame of the image's update, failed or not,
+    /// ends once its report reaches the map.
+    fn still_ended(failed: bool, for_demand: bool, dropped: bool) -> u64 {
+        let mut events = [RendererEvent::RenderFrameFinished {
+            mode: RenderMode::Full,
+            needs_repaint: false,
+            repaint_at: None,
+            placement_changed: false,
+            still_image_request_id: 7,
+            update_id: 0,
+            stats: Arc::default(),
+            error: failed.then(|| Box::new(Error::native("the device was reset"))),
+        }];
+        disown_still(&mut events, for_demand, dropped);
+        let [RendererEvent::RenderFrameFinished { still_image_request_id, .. }] = events else { unreachable!() };
+        still_image_request_id
+    }
+
+    /// A frame that failed ends the still it was drawn for, whether or not
+    /// a surface dropped it, so that the still fails rather than waits.
+    #[test]
+    fn a_failed_frame_of_the_still_ends_it_whatever_its_handoff() {
+        assert_eq!(7, still_ended(true, false, false));
+        assert_eq!(7, still_ended(true, false, true));
+    }
+
+    /// A dropped frame that drew ends no still, which is drawn again, and a
+    /// frame for a host's demand ends none, failed or not.
+    #[test]
+    fn a_dropped_frame_that_drew_or_a_frame_for_a_demand_ends_no_still() {
+        assert_eq!(7, still_ended(false, false, false));
+        assert_eq!(0, still_ended(false, false, true));
+        for (failed, dropped) in [(false, false), (true, false), (false, true), (true, true)] {
+            assert_eq!(0, still_ended(failed, true, dropped), "failed {failed}, dropped {dropped}");
         }
     }
 }

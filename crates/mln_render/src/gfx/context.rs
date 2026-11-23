@@ -432,6 +432,13 @@ impl Resources {
         &mut self.device.stats
     }
 
+    /// Logs `message`, why something of the frame being encoded failed on
+    /// the GPU, and keeps it as the frame's failure unless one came first
+    /// ([`Device::fail`]).
+    pub(crate) fn fail(&mut self, message: String) {
+        self.device.fail(message);
+    }
+
     /// The rendering stats now. What the renderer released counts until the
     /// next [`destroy_released`](Self::destroy_released) destroys it.
     pub(crate) fn stats(&self) -> RenderingStats {

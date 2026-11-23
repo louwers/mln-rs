@@ -4,6 +4,7 @@
 
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use geo_types::Geometry;
 use glam::{DMat4, DVec3};
@@ -36,6 +37,10 @@ use crate::map::rendering_stats_view::{RenderingStatsView, RenderingStatsViewOpt
 use crate::map::style_loader::{LoadEvent, StyleLoader};
 use crate::map::transform::{CameraCommandId, CommandEnd, FrameClock, Transform, TransformEvent};
 use crate::map::update_slot::{UpdateReader, UpdateSlot};
+
+/// How long a continuous map waits to draw again after the first of a run
+/// of frames that failed on the GPU, in case the failure passes.
+const RETRY_DELAY: Duration = Duration::from_millis(200);
 
 /// Where a still image that [`MapCore::render_still`] asked for stands.
 #[derive(Debug, PartialEq)]
@@ -91,6 +96,8 @@ pub struct MapCore {
     /// When the last frame said the map changes next on its own, until an
     /// update goes out.
     repaint_at: Option<Instant>,
+    /// Whether the last frame of a continuous map failed on the GPU.
+    render_failing: bool,
     /// A still image that [`MapCore::render_still`] asked for, until it ends.
     still_image: StillImage,
     /// Counts the still image requests, so the renderer can tell a new one.
@@ -161,6 +168,7 @@ impl MapCore {
             loading: false,
             renderer_fully_loaded: false,
             repaint_at: None,
+            render_failing: false,
             still_image: StillImage::None,
             still_image_request_id: 0,
             update_id: 0,
@@ -436,8 +444,13 @@ impl MapCore {
                 still_image_request_id,
                 update_id,
                 stats,
+                error,
             } => {
                 self.repaint_at = repaint_at.filter(|_| continuous && !needs_repaint);
+                match error {
+                    Some(error) => self.on_render_failure(*error, still_image_request_id),
+                    None => self.render_failing = false,
+                }
                 self.on_render_frame_finished(
                     mode,
                     needs_repaint,
@@ -484,8 +497,22 @@ impl MapCore {
                 self.emit(MapEvent::GlyphsError { font_stack, range, error });
             }
             RendererEvent::TileAction { op, id, source_id } => self.emit(MapEvent::TileAction { op, id, source_id }),
-            RendererEvent::RenderError(error) => self.emit(MapEvent::RenderError(error)),
         }
+    }
+
+    /// Reports a frame that failed on the GPU, and fails the still image it
+    /// was drawn for. A continuous map reports a run of failed frames once,
+    /// and draws again after [`RETRY_DELAY`] unless a frame comes sooner.
+    fn on_render_failure(&mut self, error: Error, still_image_request_id: u64) {
+        if self.mode == MapMode::Continuous {
+            if std::mem::replace(&mut self.render_failing, true) {
+                return;
+            }
+            self.repaint_at.get_or_insert(Instant::now() + RETRY_DELAY);
+        } else if still_image_request_id != 0 && still_image_request_id == self.still_image_request_id {
+            self.on_resource_error(error.clone());
+        }
+        self.emit(MapEvent::RenderError(error));
     }
 
     /// Fails the still image being rendered.

@@ -9,6 +9,7 @@ mod devices;
 mod driver;
 mod events;
 mod exported;
+mod failures;
 mod feature_state;
 // Rings and surfaces of the backends that report a frame's depth.
 #[cfg(any(

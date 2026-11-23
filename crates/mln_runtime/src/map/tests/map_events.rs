@@ -10,6 +10,7 @@ use mln_render::RendererEvent;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Response};
 use mln_style::Edit;
+use mln_util::error::{Error, ErrorKind};
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::queue::Queue;
@@ -49,6 +50,7 @@ fn full_frame(map: &MapCore) -> RendererEvent {
         still_image_request_id: 0,
         update_id: latest_update(map),
         stats: Arc::default(),
+        error: None,
     }
 }
 
@@ -190,6 +192,7 @@ fn a_frame_waiting_for_a_placement_asks_for_no_update_until_then() {
         still_image_request_id: 0,
         update_id: latest_update(map),
         stats: Arc::default(),
+        error: None,
     };
     let finished = |map: &mut MapCore| {
         let events = map.drain_events();
@@ -353,6 +356,7 @@ fn a_still_image_completes_with_a_full_frame() {
         still_image_request_id,
         update_id: 0,
         stats: Arc::clone(&stats),
+        error: None,
     };
     report(&map, frame(mln_render::RenderMode::Partial, 1));
     map.process_events();
@@ -396,4 +400,97 @@ fn a_continuous_map_goes_idle_once_on_the_frame_of_its_last_update() {
     report(&map, full_frame(&map));
     map.process_events();
     assert_eq!(1, idles(&mut map));
+}
+
+/// The report of a frame of `map`'s latest update for the still image
+/// `still_image_request_id`, or for none with 0, with everything loaded,
+/// that failed on the GPU with `message`, if it did.
+fn failed_frame(map: &MapCore, still_image_request_id: u64, message: Option<&str>) -> RendererEvent {
+    RendererEvent::RenderFrameFinished {
+        mode: mln_render::RenderMode::Full,
+        needs_repaint: false,
+        repaint_at: None,
+        placement_changed: false,
+        still_image_request_id,
+        update_id: latest_update(map),
+        stats: Arc::default(),
+        error: message.map(|message| Box::new(Error::native(message))),
+    }
+}
+
+/// The render errors in `events`.
+fn render_errors(events: &[MapEvent]) -> Vec<String> {
+    let errors = events.iter().filter_map(|event| match event {
+        MapEvent::RenderError(error) => Some(error.message.clone()),
+        _ => None,
+    });
+    errors.collect()
+}
+
+/// A frame that failed fails the still image it was drawn for, with its
+/// error, and no other: not one asked for after that image ended, which a
+/// late frame of the first would otherwise fail before it drew, nor one
+/// that waits while a frame of the host's own fails. Each failed frame
+/// reports its error.
+#[test]
+fn a_failed_frame_fails_only_the_still_image_it_was_drawn_for() {
+    let run_loop = Queue::<()>::new();
+    let mut map = map(MapCoreOptions { map_mode: MapMode::Static, ..Default::default() }, &run_loop);
+    map.load_style_json(STYLE);
+    map.process_events();
+    map.render_still().unwrap();
+    report(&map, failed_frame(&map, 1, Some("the GPU failed")));
+    map.process_events();
+    let ended = map.take_still_image().expect("the image ended").expect_err("the image succeeded");
+    assert_eq!(("the GPU failed", ErrorKind::Native), (ended.message.as_str(), ended.kind));
+    assert_eq!(vec!["the GPU failed".to_owned()], render_errors(&map.drain_events()));
+
+    // The first image ends, by a resource that failed, before its frame
+    // does; that frame, failed, doesn't fail the next image.
+    map.render_still().unwrap();
+    report(&map, RendererEvent::ResourceError(Error::native("a tile failed")));
+    map.process_events();
+    assert!(map.take_still_image().expect("the image ended").is_err());
+    map.render_still().unwrap();
+    report(&map, failed_frame(&map, 2, Some("late")));
+    report(&map, failed_frame(&map, 0, Some("the host's frame")));
+    map.process_events();
+    assert_eq!(map.take_still_image(), None, "a frame of another image failed this one");
+    assert_eq!(vec!["late".to_owned(), "the host's frame".to_owned()], render_errors(&map.drain_events()));
+    report(&map, failed_frame(&map, 3, None));
+    map.process_events();
+    assert_eq!(map.take_still_image(), Some(Ok(())));
+}
+
+/// A continuous map reports the first of a run of failed frames only. It
+/// draws the first again a little later, and goes idle on the next frame,
+/// failed or not, as on a frame that drew whole. A frame that draws without
+/// failing ends the run.
+#[test]
+fn a_continuous_map_reports_a_run_of_failures_once_and_retries_once() {
+    let run_loop = Queue::<()>::new();
+    let mut map = map(MapCoreOptions { map_mode: MapMode::Continuous, ..Default::default() }, &run_loop);
+    map.load_style_json(STYLE);
+    map.process_events();
+    map.drain_events();
+    let idle = |events: &[MapEvent]| events.iter().any(|event| matches!(event, MapEvent::Idle));
+    let fail = |map: &mut MapCore, message| {
+        let before = Instant::now();
+        report(map, failed_frame(map, 0, Some(message)));
+        map.process_events();
+        let events = map.drain_events();
+        (render_errors(&events), idle(&events), map.repaint_at().map(|at| at - before))
+    };
+
+    let (errors, went_idle, retry) = fail(&mut map, "the GPU failed");
+    assert_eq!((vec!["the GPU failed".to_owned()], false), (errors, went_idle));
+    assert!(retry.is_some_and(|retry| retry > Duration::ZERO && retry < Duration::from_secs(1)), "{retry:?}");
+    map.trigger_repaint();
+    assert_eq!((Vec::new(), true, None), fail(&mut map, "the GPU failed"));
+
+    report(&map, failed_frame(&map, 0, None));
+    map.process_events();
+    assert!(idle(&map.drain_events()));
+    let (errors, went_idle, retry) = fail(&mut map, "again");
+    assert_eq!((vec!["again".to_owned()], false, true), (errors, went_idle, retry.is_some()));
 }

@@ -43,8 +43,9 @@ impl Drop for GpuTexture {
 pub(crate) type SharedGpuTexture = Rc<GpuTexture>;
 
 /// What the renderer makes its buffers and textures with: the rendering
-/// stats that count them, the queue that they go to when they drop, and the
-/// epochs of its uniform buffer arrays.
+/// stats that count them, the queue that they go to when they drop, the
+/// epochs of its uniform buffer arrays, and what failed on the GPU in the
+/// frame being encoded.
 #[derive(Default)]
 pub(crate) struct Device {
     pub(crate) stats: RenderingStats,
@@ -54,9 +55,29 @@ pub(crate) struct Device {
     /// The epochs of arrays that since lost a buffer, whose bindings the
     /// context drops before it destroys the buffer.
     pub(crate) retired_epochs: Vec<u64>,
+    /// Why the first GPU failure since [`take_failure`](Self::take_failure)
+    /// failed.
+    failure: Option<String>,
 }
 
 impl Device {
+    /// Logs `message`, why something of the frame being encoded failed on
+    /// the GPU, and keeps it as the frame's failure unless one came first.
+    pub(crate) fn fail(&mut self, message: String) {
+        Log::error(Event::Render, &message);
+        self.failure.get_or_insert(message);
+    }
+
+    /// Whether something failed since the last [`take_failure`](Self::take_failure).
+    pub(crate) fn failed(&self) -> bool {
+        self.failure.is_some()
+    }
+
+    /// Why the first GPU failure since the last call failed, if one did.
+    pub(crate) fn take_failure(&mut self) -> Option<String> {
+        self.failure.take()
+    }
+
     /// An epoch for a uniform buffer array that changed, one that no array
     /// of the device has had, and never 0.
     pub(crate) fn next_uniform_epoch(&mut self) -> u64 {
@@ -128,15 +149,18 @@ impl Device {
         let usage = if storage { BufferUsage::Storage } else { BufferUsage::Uniform };
         if let Some(buffer) = slot.as_ref().filter(|buffer| buffer.usage() == usage && buffer.size() >= data.len()) {
             if let Err(error) = self.write(gpu, buffer, data) {
-                Log::error(Event::Render, format!("Writing a buffer failed: {error}"));
+                self.fail(format!("Writing a buffer failed: {error}"));
             }
             return false;
         }
         let replaced = slot.is_some();
-        *slot = self
-            .buffer(gpu, usage, data)
-            .inspect_err(|error| Log::error(Event::Render, format!("Making a buffer failed: {error}")))
-            .ok();
+        *slot = match self.buffer(gpu, usage, data) {
+            Ok(buffer) => Some(buffer),
+            Err(error) => {
+                self.fail(format!("Making a buffer failed: {error}"));
+                None
+            }
+        };
         replaced
     }
 
