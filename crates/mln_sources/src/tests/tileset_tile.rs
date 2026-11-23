@@ -3,22 +3,26 @@
 //! when they load again.
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use mln_map_types::MapMode;
+use mln_map_types::{MapMode, TransformState};
 use mln_render::source::{TileKind, TileNecessity, TileOperation};
-use mln_render::testing::{Event, OriginTiles};
+use mln_render::testing::{Event, OneSource, OriginTiles, View};
 use mln_storage::response::Reason;
-use mln_storage::{FileSource, Resource, ResourceError, Responder, Response};
-use mln_style::Layer;
+use mln_storage::{FileSource, Resource, ResourceError, Responder, Response, StoragePolicy};
+use mln_style::source_type::SourceCommon;
+use mln_style::{Layer, Source};
 use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::Timestamp;
+use mln_util::geo::LatLng;
 use mln_util::range::Range;
-use mln_util::tileset::Tileset;
+use mln_util::tileset::{PartialTileset, Tileset};
 use parking_lot::Mutex;
 
-use super::{TileTest, errors, registry};
+use super::{TileTest, errors, ready, registry, view_state};
 use crate::tileset::origin::{TilesetOrigin, VectorTileEncoding};
 use crate::tileset::{RasterKind, TilesetKind, VectorKind};
+use crate::vector_source;
 
 /// A file source whose requests wait until the test answers them.
 #[derive(Default)]
@@ -38,6 +42,14 @@ impl Held {
     /// The resource of the oldest request.
     fn resource(&self) -> Resource {
         self.0.lock()[0].0.clone()
+    }
+
+    /// The requests of tile `url` so far, oldest first: each one's
+    /// resource, and whether its requester stopped it.
+    fn requests(&self, url: &str) -> Vec<(Resource, bool)> {
+        let requests = self.0.lock();
+        let of_tile = requests.iter().filter(|(resource, _)| resource.url == url);
+        of_tile.map(|(resource, responder)| (resource.clone(), responder.is_cancelled())).collect()
     }
 }
 
@@ -331,4 +343,99 @@ fn a_response_to_a_stopped_request_changes_nothing() {
 
     tiles.set_necessity(&tile(), TileNecessity::Required);
     assert_eq!(file_source.pending(), 1);
+}
+
+/// A vector source "source" whose tiles are at `{z}/{x}/{y}`, the render
+/// source of it, drawn by a circle layer, and a file source that holds its
+/// tiles' requests.
+fn held_source(test: &TileTest) -> (Source, OneSource, Arc<Held>) {
+    let tileset = PartialTileset { tiles: Some(vec!["{z}/{x}/{y}".to_owned()]), ..Default::default() };
+    let source = ready(vector_source("source", None, tileset));
+    let registry = registry();
+    let mut layer = Layer::new(registry.style(), "circle", "water", "source").unwrap();
+    layer.set_source_layer("water");
+    let render_source = OneSource::new(&registry, &source, &[layer], &test.thread_pool).unwrap();
+    (source, render_source, Arc::new(Held::default()))
+}
+
+/// What a [`held_source`] updates for: `state`, its tiles loading through
+/// `file_source`.
+fn held_view<'a>(state: &'a TransformState, file_source: &Arc<Held>) -> View<'a> {
+    let file_source: Arc<dyn FileSource> = Arc::<Held>::clone(file_source);
+    View { state, mode: MapMode::Continuous, file_source: Some(file_source), needs_relayout: false }
+}
+
+/// `source` after `change` to its common members.
+fn with_common(source: &Source, change: fn(&mut SourceCommon)) -> Source {
+    let mut common = *source.common();
+    change(&mut common);
+    source.with_common(common)
+}
+
+/// What a network request asks of `resource`'s data's freshness: its
+/// minimum update interval, and whether it stays out of the offline cache.
+fn freshness_of(resource: &Resource) -> (Duration, bool) {
+    (resource.minimum_update_interval, resource.storage_policy == StoragePolicy::Volatile)
+}
+
+/// What `common` asks of its tiles' network requests, as [`freshness_of`].
+fn freshness_in(common: &SourceCommon) -> (Duration, bool) {
+    (common.minimum_tile_update_interval, common.volatile)
+}
+
+/// A required tile's network request is made again, with the source's new
+/// minimum update interval or volatility, as the next update retains the
+/// tile; an update that changes neither makes no request.
+#[test]
+fn a_network_request_restarts_when_the_update_interval_changes() {
+    let changes: [fn(&mut SourceCommon); 2] =
+        [|common| common.minimum_tile_update_interval = Duration::from_secs(1), |common| common.volatile = true];
+    for (i, change) in changes.into_iter().enumerate() {
+        let test = TileTest::new();
+        let (source, mut tiles, file_source) = held_source(&test);
+        let state = view_state(0.0);
+        let view = held_view(&state, &file_source);
+        tiles.update(&source, &view);
+        let requests = file_source.requests("0/0/0");
+        assert_eq!(requests.len(), 1, "case {i}");
+        assert_eq!(freshness_of(&requests[0].0), freshness_in(source.common()), "case {i}");
+
+        let source = with_common(&source, change);
+        tiles.update(&source, &view);
+        let requests = file_source.requests("0/0/0");
+        assert_eq!(requests.len(), 2, "case {i}");
+        assert!(requests[0].1, "case {i}: the request before stops");
+        assert!(!requests[1].1, "case {i}");
+        assert_eq!(freshness_of(&requests[1].0), freshness_in(source.common()), "case {i}");
+
+        tiles.update(&source, &view);
+        assert_eq!(file_source.requests("0/0/0").len(), 2, "case {i}");
+    }
+}
+
+/// So is the request of a tile that left the view while it loaded, and went
+/// on loading in the cache, while the update interval changed: as the view
+/// comes back and retains it.
+#[test]
+fn a_network_request_restarts_when_the_update_interval_changes_while_it_loads_in_the_cache() {
+    let test = TileTest::new();
+    let (source, mut tiles, file_source) = held_source(&test);
+    let here = view_state(2.0);
+    // A tile to the east: tile 2/1/1 leaves the view, next to its tiles.
+    let mut east = TransformState::clone(&here);
+    east.set_lat_lng_zoom(&LatLng::new(0.0, 90.0).unwrap(), 2.0);
+    tiles.update(&source, &held_view(&here, &file_source));
+    assert_eq!(file_source.requests("2/1/1").len(), 1);
+
+    let source = with_common(&source, |common| common.minimum_tile_update_interval = Duration::from_secs(1));
+    tiles.update(&source, &held_view(&east, &file_source));
+    let requests = file_source.requests("2/1/1");
+    assert_eq!(requests.len(), 1, "the cache doesn't retain the tile");
+    assert!(!requests[0].1, "the tile goes on loading in the cache");
+
+    tiles.update(&source, &held_view(&here, &file_source));
+    let requests = file_source.requests("2/1/1");
+    assert_eq!(requests.len(), 2);
+    assert!(requests[0].1, "the request before stops");
+    assert_eq!(freshness_of(&requests[1].0), freshness_in(source.common()));
 }

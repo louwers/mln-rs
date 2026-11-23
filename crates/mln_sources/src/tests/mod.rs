@@ -15,10 +15,14 @@ mod tileset_tile;
 
 use std::sync::Arc;
 
+use mln_map_types::{ConstrainMode, TransformState, ViewportMode};
 use mln_render::testing::{Event, OriginTiles};
 use mln_render::{Registry, RegistryBuilder};
-use mln_style::StyleRegistry;
+use mln_style::source_type::Load;
+use mln_style::{Source, StyleRegistry};
+use mln_util::geo::LatLng;
 use mln_util::pool::{Pool, TaskGroup};
+use mln_util::size::Size;
 
 /// The built-in expression functions, the layer types of `mln_layers` and
 /// this crate's source types.
@@ -33,6 +37,25 @@ pub(crate) fn registry() -> Arc<Registry> {
 /// What styles parse against: [`registry`]'s style half.
 pub(crate) fn style_registry() -> Arc<StyleRegistry> {
     Arc::clone(registry().style())
+}
+
+/// A 512 by 512 view at `zoom` over the center of the world.
+pub(crate) fn view_state(zoom: f64) -> TransformState {
+    let mut state = TransformState::new(ConstrainMode::HeightOnly, ViewportMode::Default);
+    state.set_size(Size::new(512, 512));
+    state.set_lat_lng_zoom(&LatLng::default(), zoom);
+    state
+}
+
+/// `source` with the description that its type knows without a fetch, such
+/// as the tileset a style lists, as the map's loader gives it.
+pub(crate) fn ready(source: Source) -> Source {
+    match source.data().plan_load() {
+        Load::Ready(description) => {
+            source.with_description(Some(description)).expect("a description of the source's type")
+        }
+        _ => source,
+    }
 }
 
 pub(crate) fn parse_json(json: &str) -> serde_json::Value {

@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use geojson::GeoJson;
-use mln_map_types::{ConstrainMode, MapMode, TransformState, ViewportMode};
+use mln_map_types::{MapMode, TransformState};
 use mln_render::testing::{Event, OneSource, View};
 use mln_storage::response::Reason;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
@@ -16,26 +16,16 @@ use mln_style::source_type::{Load, SourceData};
 use mln_style::{Edit, Layer, Source, Style};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
-use mln_util::geo::LatLng;
 use mln_util::pool::{Pool, TaskGroup};
-use mln_util::size::Size;
 use mln_util::tileset::{PartialTileset, Tileset};
 
-use super::{registry, style_registry};
+use super::{ready, registry, style_registry, view_state};
 use crate::custom::{geometry, vector};
 use crate::geojson::{GeoJSONOptions, GeoJsonSourceType, create_geojson_data, geojson_source};
 use crate::{
     CustomGeometrySourceHandle, CustomVectorSourceHandle, TileDataFormat, VectorSourceType, raster_dem_source,
     raster_source, vector_source,
 };
-
-/// A 512 by 512 view at `zoom` over the center of the world.
-fn view_state(zoom: f64) -> TransformState {
-    let mut state = TransformState::new(ConstrainMode::HeightOnly, ViewportMode::Default);
-    state.set_size(Size::new(512, 512));
-    state.set_lat_lng_zoom(&LatLng::default(), zoom);
-    state
-}
 
 /// What a render source updates for: `state` in `mode`, with `file_source`.
 fn view(state: &TransformState, mode: MapMode, file_source: Option<Arc<dyn FileSource>>) -> View<'_> {
@@ -71,17 +61,6 @@ fn edited(source: &Source, edit: Edit) -> Source {
     style.apply(Edit::AddSource(source.clone())).unwrap();
     style.apply(edit).unwrap();
     style.get_source(source.id()).unwrap().clone()
-}
-
-/// `source` with the description that its type knows without a fetch, such
-/// as the tileset a style lists, as the map's loader gives it.
-fn ready(source: Source) -> Source {
-    match source.data().plan_load() {
-        Load::Ready(description) => {
-            source.with_description(Some(description)).expect("a description of the source's type")
-        }
-        _ => source,
-    }
 }
 
 /// Steps `source`'s tiles until `done` is true of an event they report.
