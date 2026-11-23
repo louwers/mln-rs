@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use mln_rs::LogicalExtent;
 use mln_rs::mln_image::encode_png;
-use mln_rs::mln_map_types::MapMode;
+use mln_rs::mln_map_types::{CameraOptions, CameraUpdate, MapMode};
 use mln_rs::mln_render::RenderMode;
 use mln_rs::mln_render::source::TileOperation;
 use mln_rs::mln_sources::VectorSourceType;
@@ -20,6 +20,7 @@ use mln_rs::mln_style::Edit;
 use mln_rs::mln_style::source_type::SourceCommon;
 use mln_rs::mln_tile_id::OverscaledTileID;
 use mln_rs::mln_util::chrono::Timestamp;
+use mln_rs::mln_util::geo::LatLng;
 use mln_rs::mln_util::image::PremultipliedImage;
 use mln_rs::mln_util::size::Size;
 
@@ -197,6 +198,26 @@ fn kind_style(kind: &str, members: &str) -> String {
         r##"{{"version":8,"transition":{{"duration":0}},"sources":{{"tiles":{source}}},
         "layers":[{{"id":"white","type":"background","paint":{{"background-color":"#ffffff"}}}},{layer}]}}"##
     )
+}
+
+/// A raster-dem source seen past its maxzoom draws its deepest tiles
+/// larger, as a raster source does: zooming in keeps the maxzoom's tile,
+/// with that zoom in its id, and requests it once.
+#[test]
+fn raster_dem_tiles_past_the_maxzoom_stay_at_their_zoom() {
+    const DEEPEST: &str = "test://tiles/1/1/0";
+    let host = Host::new(MapMode::Continuous, &kind_style("raster-dem", ""));
+    host.network.answer_with(|_| Some(red_png()));
+    set_common(&host, SourceCommon { prefetch_zoom_delta: Some(0), ..SourceCommon::default() });
+    for zoom in [1.0, 2.0, 3.0, 4.0] {
+        // The view sees the middle of tile 1/1/0 alone.
+        let camera = CameraOptions { center: LatLng::new(45.0, 90.0).ok(), zoom: Some(zoom), ..Default::default() };
+        host.command(host.map.update_camera(CameraUpdate { camera, ..Default::default() }));
+        host.settle();
+        assert_eq!(host.network.requests(DEEPEST).len(), 1, "tile requests by zoom {zoom}");
+        let overscaled = OverscaledTileID::with_zxy(zoom as u8, 0, 1, 1, 0);
+        assert!(zoom == 1.0 || host.actions(overscaled).is_empty(), "no tile {overscaled:?}");
+    }
 }
 
 /// A red PNG.

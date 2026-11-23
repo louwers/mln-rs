@@ -310,9 +310,10 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
             zoom_range,
             bounds: tileset.bounds,
             round_zoom: round_zoom::<K>(),
-            // Past the tileset's last zoom, raster tiles are its last zoom's
-            // drawn larger.
-            overscale: K::INFO.layer_kind != SourceKind::Raster,
+            // Past the tileset's last zoom, raster and raster-dem tiles are
+            // its last zoom's drawn larger: they would be the same at every
+            // zoom past it.
+            overscale: is_vector::<K>(),
             prefetch: true,
             synchronous: false,
         })
