@@ -20,6 +20,10 @@ pub const EXTENT: i32 = 8192;
 
 pub const M2PI: f64 = std::f64::consts::PI * 2.0;
 pub const EARTH_RADIUS_M: f64 = 6_378_137.0;
+/// The earth's mean radius, of the sphere that heights scale on: a meter
+/// of altitude is as many pixels as a meter along the ground of that
+/// sphere, as in GL JS, whose terrain's expected images are drawn so.
+pub const EARTH_MEAN_RADIUS_M: f64 = 6_371_008.8;
 pub const LATITUDE_MAX: f64 = 85.051_128_779_806_6;
 pub const LONGITUDE_MAX: f64 = 180.0;
 pub const DEGREES_MAX: f64 = 360.0;

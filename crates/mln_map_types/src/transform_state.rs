@@ -132,7 +132,7 @@ impl TransformState {
 
         let mercator_z = position.z + dz * travel;
         let alt_m = mercator_z
-            * Projection::meters_per_pixel_at_latitude(self.view.center(WrapMode::Unwrapped).latitude(), 0.0)
+            * Projection::altitude_meters_per_pixel(self.view.center(WrapMode::Unwrapped).latitude(), 0.0)
             * TILE_SIZE_D;
         self.set_center_altitude(alt_m);
         self.set_angle(new_bearing);

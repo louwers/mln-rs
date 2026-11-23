@@ -316,7 +316,7 @@ impl View {
     /// `pixelsPerMeter`, inverted): the scale of every height the matrices
     /// place, so that a point at the center's altitude draws at the center.
     fn meters_per_pixel(&self) -> f64 {
-        Projection::meters_per_pixel_at_latitude(self.center(WrapMode::Unwrapped).latitude(), self.zoom())
+        Projection::altitude_meters_per_pixel(self.center(WrapMode::Unwrapped).latitude(), self.zoom())
     }
 
     /// The center's altitude in pixels at the zoom.

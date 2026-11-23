@@ -98,9 +98,10 @@ fn parses_our_manifest() {
             format!("{INTEGRATION}/render-tests/background-color/default/"),
             // platform-linux first, as in C++'s OpenGL manifest: the runner
             // checks the paths from the last one, so a platform-linux-opengl
-            // baseline wins where both exist.
+            // baseline wins where both exist, and mln-rs's own wins over both.
             "testdata/metrics/expectations/platform-linux/render-tests/background-color/default/".to_string(),
             "testdata/metrics/expectations/platform-linux-opengl/render-tests/background-color/default/".to_string(),
+            "expectations/render-tests/background-color/default/".to_string(),
         ]
     );
     assert_eq!(

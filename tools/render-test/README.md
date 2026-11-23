@@ -16,7 +16,9 @@ tests, to `target/tmp/render_tests/` and
 The tests render on WebGPU, or on the backend that `MLN_RENDER_BACKEND` names:
 `vulkan`, `d3d12` (Windows; DXC's `dxcompiler.dll` on the DLL search path),
 `gl`, `gl-desktop`, or `metal` (macOS). Each backend takes the expectations and
-ignores of its manifest in `manifests/`.
+ignores of its manifest in `manifests/`. Every manifest lists `expectations/`
+last, so its images win over the copied ones: mln-rs's own expected images, for
+tests whose copied image mln-rs differs from on purpose.
 
 The tests in `testdata/metrics/integration/gljs` are MapLibre GL JS's tests of
 image sources, with the images they load in `gljs/assets`: a manifest's
