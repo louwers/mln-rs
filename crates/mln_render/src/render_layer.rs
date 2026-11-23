@@ -102,6 +102,7 @@ pub(crate) struct Hosted<L: Layer> {
     globe: bool,
     /// The layer's draws of the frame.
     frame_draws: Draws,
+    /// What the engine reads of the layer.
     record: LayerRecord,
     /// Where the participant of the layer's type is among the renderer's,
     /// for a type whose layers place.
