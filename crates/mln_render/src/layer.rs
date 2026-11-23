@@ -1575,7 +1575,9 @@ impl<S: StyleLayerType> BuildCx<'_, S> {
     }
 
     /// Adds `geometry`, the geometry of the feature at `index`, to the
-    /// tile's feature index, which queries search.
+    /// tile's feature index, which queries search. A layer type that places
+    /// the feature ([`placement`](crate::placement)) leaves it out: queries
+    /// find what placement shows of it.
     pub fn index(&mut self, index: usize, geometry: &GeometryCollection) {
         let leader = &self.layers[0].style;
         self.feature_index.insert(geometry, index, &leader.source_layer, &leader.id);

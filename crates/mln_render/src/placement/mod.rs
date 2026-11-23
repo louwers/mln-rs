@@ -29,7 +29,10 @@
 //! [says so](Prepared::changed). A still image places every frame. What a
 //! placement inserts in its index stands for an [`Item`], a feature of a
 //! tile; rendered-feature queries of the placing layers return the features
-//! of the current placement's shapes that the query touches.
+//! of the current placement's shapes whose bounding box the query touches,
+//! besides those that their layout indexed
+//! ([`BuildCx::index`](crate::layer::BuildCx::index)), which a layer type
+//! leaves out for the features it places.
 //!
 //! In a continuous map, what a placement shows fades in and what it hides
 //! fades out. A participant keeps each item's [`Opacity`], steps it at each
@@ -180,8 +183,9 @@ pub struct PlaceCx<'a> {
     pub view: &'a View,
     pub mode: MapMode,
     /// How far the fade of the placement this one replaces had come: 0 as
-    /// it started, 1 and past once it was done. A continuous map's
-    /// opacities fade on from where they were by as much.
+    /// it started, 1 and past once it was done, and 1 in a still image. A
+    /// continuous map's opacities fade on from where they were by as much;
+    /// a still image's show at once.
     pub fade: f32,
     /// Whether the map's debug options show collision shapes.
     pub collision_boxes: bool,
@@ -222,7 +226,10 @@ pub struct PlacingTile {
     /// Whether the frame no longer needs the tile, which it keeps while
     /// what placement showed of it fades out.
     pub held_for_fade: bool,
-    /// How the frame projects the tile.
+    /// How the frame projects the tile: a
+    /// [`TileProjector`](mln_map_types::TileProjector) of it projects the
+    /// tile's points into the normalized device coordinates that
+    /// [`CollisionIndex::to_grid`] takes.
     pub projection: ProjectionData,
 }
 
