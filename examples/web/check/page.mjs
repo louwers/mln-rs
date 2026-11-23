@@ -35,7 +35,24 @@ export async function webgpuAdapter({ browser, server }) {
   const session = await browser.open(`${server.origin}/blank`);
   try {
     return await session.evaluate(
-      `navigator.gpu?.requestAdapter().then((a) => (a ? \`\${a.info.vendor} \${a.info.architecture}\` : 'none'))`,
+      `navigator.gpu?.requestAdapter().then((a) => (a ? \`\${a.info.vendor} \${a.info.architecture}\` : 'none')) ?? 'none'`,
+    );
+  } finally {
+    await session.close();
+  }
+}
+
+/** The renderer of the page's WebGL2, as the browser names it, or `"none"`. */
+export async function webgl2Renderer({ browser, server }) {
+  const session = await browser.open(`${server.origin}/blank`);
+  try {
+    return await session.evaluate(
+      `(() => {
+        const gl = new OffscreenCanvas(1, 1).getContext('webgl2');
+        if (!gl) return 'none';
+        const info = gl.getExtension('WEBGL_debug_renderer_info');
+        return gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER);
+      })()`,
     );
   } finally {
     await session.close();
