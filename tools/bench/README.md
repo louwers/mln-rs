@@ -362,18 +362,19 @@ and lists those that only one has. The sides' harness ids differ, so it warns
 and prints what changed in the harness since the ref
 (`git diff --stat <ref> -- tools/bench 'crates/*/src/bench.rs'`): a change in a
 scenario whose code differs can come from its harness rather than the libraries,
-and a metric that only one side's harness reports shows no change. A ref whose
-harness lacks the layout probe takes its instructions' noise from the probes of
-refs compared before.
+and a metric that only one side's harness reports shows no change.
 
 ### Counts
 
 Each side runs once per scenario by default. The ref's runs are kept in
 `target/bench-compare/samples`, by commit, and the ref runs again only until it
 has three: the first comparison with a commit costs two extra runs per scenario,
-later ones none. The ref is also built a second time with the harness's
-`layout-probe` feature, which adds code that never runs and so moves the rest,
-and each scenario runs once on that build.
+later ones none. The ref is also built a second time, as a layout probe, with
+code that never runs: the harness's `layout-probe` feature, which moves the code
+after it, and a function added to every library, which the linker drops but
+whose edit lays out the library's code otherwise, as any edit to it does. Each
+scenario runs once on that build, which the comparison makes only for a ref and
+harness it has no probe of yet.
 
 A count's noise is the larger range of either side's runs; for instructions,
 also the most that the layout probe of any ref compared so far moved them, since

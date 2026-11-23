@@ -24,13 +24,12 @@
 //! next time; the ref runs again only until it has [`SPREAD_RUNS`] of them.
 //! A scenario whose counts move beyond their noise runs again on this
 //! checkout, until it has [`CONFIRM_RUNS`], and its counts come from those
-//! runs. The
-//! instructions a scenario retires also move with where the compiler and
-//! linker put its code, which any edit to the binary can change, by up to a
-//! few percent in some scenarios: each ref is built a second time with the
-//! harness's `layout-probe` feature, which only moves code, and the most
-//! that any stored probe has moved a scenario's instructions counts as
-//! their noise too. The report shows every metric's change and its noise,
+//! runs. The instructions a scenario retires also move with where the
+//! compiler and linker put its code, which any edit to the binary can
+//! change, by up to a few percent in some scenarios: each ref is built a
+//! second time, as a probe, with code that never runs added to the harness
+//! and to every library ([`build_probe`]), and the most that any stored
+//! probe has moved a scenario's instructions counts as their noise too. The report shows every metric's change and its noise,
 //! and marks a count that moved by over [`NOISE_FACTOR`] times its noise,
 //! however little: one that repeats exactly is marked for any change. The
 //! reader weighs what matters.
@@ -217,20 +216,8 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
             )
         }
     })?;
-    // Both builds of the ref link to the same path, so each is copied out.
+    // The ref's builds link to the same path, so each is copied out.
     let base = keep_binary(&base, &work.join("bin/base"))?;
-    let probe = if own && !has_layout_probe(&tree) {
-        eprintln!(
-            "mln-bench: the harness of {} has no layout probe, so its instructions' noise comes from the probes of \
-             refs compared before",
-            options.base
-        );
-        None
-    } else {
-        eprintln!("mln-bench: building {} ({}) again, with its code at other addresses", options.base, short(&commit));
-        let probe = build(&root, &tree.join("Cargo.toml"), Some(&base_target), Some("layout-probe"))?;
-        Some(keep_binary(&probe, &work.join("bin/probe"))?)
-    };
     let (scenarios, only_base, only_this) = if own {
         match_scenarios(&selected, &scenario_names(&base, &options.filters)?)
     } else {
@@ -275,21 +262,21 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
         );
     }
     let probe_key = |scenario: &Scenario| format!("{} (layout probe)", scenario.name);
-    if let Some(probe) = &probe {
-        let unprobed: Vec<&Scenario> = scenarios
-            .iter()
-            .copied()
-            .filter(|scenario| {
-                samples.get(&probe_key(scenario)).is_none_or(|runs| !runs.iter().any(|run| run.harness == base_harness))
-            })
-            .collect();
-        if !unprobed.is_empty() {
-            eprintln!("mln-bench: the ref's layout probe, once per scenario");
-            warm_up(probe, &unprobed)?;
-            for scenario in &unprobed {
-                let run = run_in_process(probe, scenario.name, None)?;
-                samples.insert(probe_key(scenario), vec![run]);
-            }
+    let unprobed: Vec<&Scenario> = scenarios
+        .iter()
+        .copied()
+        .filter(|scenario| {
+            samples.get(&probe_key(scenario)).is_none_or(|runs| !runs.iter().any(|run| run.harness == base_harness))
+        })
+        .collect();
+    if !unprobed.is_empty() {
+        eprintln!("mln-bench: building {} ({}) again, with its code laid out otherwise", options.base, short(&commit));
+        let probe = build_probe(&root, &tree, &work)?;
+        eprintln!("mln-bench: the ref's layout probe, once per scenario");
+        warm_up(&probe, &unprobed)?;
+        for scenario in &unprobed {
+            let run = run_in_process(&probe, scenario.name, None)?;
+            samples.insert(probe_key(scenario), vec![run]);
         }
     }
     let changed_while_running =
@@ -388,10 +375,79 @@ fn match_scenarios<'a>(selected: &[&'a Scenario], base: &[String]) -> (Vec<&'a S
     (both, only_base, only_this.iter().map(|scenario| scenario.name.to_owned()).collect())
 }
 
-/// Whether the harness of the checkout at `tree` has the `layout-probe`
-/// feature.
-fn has_layout_probe(tree: &Path) -> bool {
-    std::fs::read_to_string(tree.join("tools/bench/Cargo.toml")).is_ok_and(|manifest| manifest.contains("layout-probe"))
+/// Builds the harness of the ref's tree at `tree` with its code laid out
+/// otherwise, in a target directory of its own under `work`: with the
+/// harness's `layout-probe` feature, where it has one, which adds code, and
+/// with a function that nothing calls added to each library
+/// ([`pad_libraries`]), which the linker drops but whose edit lays out the
+/// library's code otherwise, as any edit to the library does. The tree's libraries are
+/// as they were afterwards, their modification times included, so that the
+/// base's build doesn't build them again.
+fn build_probe(root: &Path, tree: &Path, work: &Path) -> Result<PathBuf, String> {
+    let harness = std::fs::read_to_string(tree.join("tools/bench/Cargo.toml")).unwrap_or_default();
+    let features = harness.contains("layout-probe").then_some("layout-probe");
+    let padded = pad_libraries(tree)?;
+    let built = build(root, &tree.join("Cargo.toml"), Some(&work.join("probe-target")), features);
+    for (path, contents, modified) in padded {
+        let restore = || -> std::io::Result<()> {
+            std::fs::write(&path, &contents)?;
+            File::options().write(true).open(&path)?.set_modified(modified)
+        };
+        restore().map_err(|error| format!("{}: {error}", path.display()))?;
+    }
+    keep_binary(&built?, &work.join("bin/probe"))
+}
+
+/// What [`pad_libraries`] adds to each library.
+const PAD: &str = "\n/// Never called: `mln-bench compare`'s layout probe.\n#[doc(hidden)]\npub fn \
+                   mln_bench_layout_probe(x: u64) -> u64 {\n    x.wrapping_mul(0x9e37_79b9_7f4a_7c15)\n}\n";
+
+/// The root files of the libraries of the checkout at `tree`: `crates/*`
+/// and `vendor/*`, but procedural macros, which can export nothing else.
+fn library_roots(tree: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut roots = Vec::new();
+    for group in ["crates", "vendor"] {
+        let Ok(entries) = std::fs::read_dir(tree.join(group)) else { continue };
+        for entry in entries {
+            let dir = entry.map_err(|error| error.to_string())?.path();
+            let lib = dir.join("src/lib.rs");
+            let manifest = std::fs::read_to_string(dir.join("Cargo.toml")).unwrap_or_default();
+            if lib.is_file() && !manifest.contains("proc-macro = true") {
+                roots.push(lib);
+            }
+        }
+    }
+    Ok(roots)
+}
+
+/// Adds a function that nothing calls to each library of the checkout at
+/// `tree`, and returns each file it changed with its contents and
+/// modification time before.
+fn pad_libraries(tree: &Path) -> Result<Vec<(PathBuf, Vec<u8>, std::time::SystemTime)>, String> {
+    let mut padded = Vec::new();
+    for lib in library_roots(tree)? {
+        let contents = read(&lib)?;
+        let modified = std::fs::metadata(&lib)
+            .and_then(|metadata| metadata.modified())
+            .map_err(|error| format!("{}: {error}", lib.display()))?;
+        let mut with_pad = contents.clone();
+        with_pad.extend_from_slice(PAD.as_bytes());
+        std::fs::write(&lib, with_pad).map_err(|error| format!("{}: {error}", lib.display()))?;
+        padded.push((lib, contents, modified));
+    }
+    Ok(padded)
+}
+
+/// Takes the pads off the libraries of the checkout at `tree` that a probe's
+/// build left them with, when it stopped before it restored them.
+fn unpad_libraries(tree: &Path) -> Result<(), String> {
+    for lib in library_roots(tree)? {
+        let contents = read(&lib)?;
+        if let Some(unpadded) = contents.strip_suffix(PAD.as_bytes()) {
+            std::fs::write(&lib, unpadded).map_err(|error| format!("{}: {error}", lib.display()))?;
+        }
+    }
+    Ok(())
 }
 
 /// The fewest rounds with which a time can move beyond its noise when `tests`
@@ -801,6 +857,7 @@ fn prepare_tree(root: &Path, tree: &Path, commit: &str, overlay: bool) -> Result
         let path = tree.to_str().ok_or("a path that isn't UTF-8")?;
         git(root, &["worktree", "add", "-q", "--force", "--detach", path, commit])?;
     }
+    unpad_libraries(tree)?;
     if overlay {
         sync_dir(&root.join("tools/bench"), &tree.join("tools/bench"))?;
         let modules = bench_modules(root)?;
@@ -1221,6 +1278,27 @@ mod tests {
         let error = prepare_tree(root, &tree, &commit, true).unwrap_err();
         assert!(error.contains("--own-harness"), "{error}");
         prepare_tree(root, &tree, &commit, false).unwrap();
+    }
+
+    #[test]
+    fn pads_each_library_but_procedural_macros_and_takes_the_pads_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let tree = dir.path();
+        write(&tree.join("crates/lib/Cargo.toml"), "[package]\nname = \"lib\"\n");
+        write(&tree.join("crates/lib/src/lib.rs"), "//! A library.\n");
+        write(&tree.join("vendor/dep/Cargo.toml"), "[package]\nname = \"dep\"\n");
+        write(&tree.join("vendor/dep/src/lib.rs"), "//! A vendored library.\n");
+        write(&tree.join("crates/derive/Cargo.toml"), "[lib]\nproc-macro = true\n");
+        write(&tree.join("crates/derive/src/lib.rs"), "//! Macros.\n");
+
+        let padded = pad_libraries(tree).unwrap();
+        assert_eq!(padded.len(), 2);
+        assert!(contents(&tree.join("crates/lib/src/lib.rs")).ends_with(PAD));
+        assert!(contents(&tree.join("vendor/dep/src/lib.rs")).ends_with(PAD));
+        assert_eq!(contents(&tree.join("crates/derive/src/lib.rs")), "//! Macros.\n");
+        unpad_libraries(tree).unwrap();
+        assert_eq!(contents(&tree.join("crates/lib/src/lib.rs")), "//! A library.\n");
+        assert_eq!(contents(&tree.join("vendor/dep/src/lib.rs")), "//! A vendored library.\n");
     }
 
     #[test]
