@@ -1,11 +1,12 @@
-//! Port-only: what a tileset source's tiles load, beyond what the engine's
-//! tests cover with their fixture source.
+//! Port-only: how a tileset source's tiles load: from the cache, then the
+//! network while required; what each kind of response leaves them with; and
+//! when they load again.
 
 use std::sync::Arc;
 
 use mln_map_types::MapMode;
-use mln_render::source::{TileKind, TileNecessity};
-use mln_render::testing::OriginTiles;
+use mln_render::source::{TileKind, TileNecessity, TileOperation};
+use mln_render::testing::{Event, OriginTiles};
 use mln_storage::response::Reason;
 use mln_storage::{FileSource, Resource, ResourceError, Responder, Response};
 use mln_style::Layer;
@@ -175,6 +176,31 @@ fn empty_and_missing_tiles_by_kind() {
     }
 }
 
+/// A response that the server failed to give, with `message`.
+fn failed(message: &str) -> Response {
+    let mut response = Response::new();
+    response.error = Some(Box::new(ResourceError::new(Reason::Other, message)));
+    response
+}
+
+/// A "not modified" answer, whose data has expired again.
+fn not_modified() -> Response {
+    let mut response = expired(Response::new());
+    response.not_modified = true;
+    response
+}
+
+/// What `tiles` reported their tiles' loads did since the last call.
+fn actions(tiles: &mut OriginTiles) -> Vec<TileOperation> {
+    let events = tiles.take_events().into_iter();
+    events
+        .filter_map(|event| match event {
+            Event::Action(op) => Some(op),
+            Event::Changed | Event::Error { .. } => None,
+        })
+        .collect()
+}
+
 /// A failed load reports its error and asks again only as the engine
 /// retries it.
 #[test]
@@ -182,9 +208,7 @@ fn a_failed_load_is_requested_again_on_retry() {
     let test = TileTest::new();
     let (mut tiles, file_source) = held_tile::<VectorKind>(&test, TileKind::Geometry, tiles_tileset());
     tiles.set_necessity(&tile(), TileNecessity::Required);
-    let mut failed = Response::new();
-    failed.error = Some(Box::new(ResourceError::new(Reason::Other, "failed")));
-    answer(&mut tiles, &file_source, failed);
+    answer(&mut tiles, &file_source, failed("failed"));
     assert_eq!(errors(&mut tiles), ["failed"]);
     assert_eq!(file_source.pending(), 0);
 
@@ -196,12 +220,15 @@ fn a_failed_load_is_requested_again_on_retry() {
 }
 
 /// A tile required again loads again only if its data isn't fresh from the
-/// network. The reload asks with the data's validators, and a "not
-/// modified" answer keeps the data.
+/// network: data without an expiry, or whose expiry is to come, stays fresh.
+/// The reload asks with the data's validators, and a "not modified" answer
+/// keeps the data.
 #[test]
 fn a_tile_required_again_reloads_only_stale_data() {
     let test = TileTest::new();
-    for (response, reloads) in [(water(), false), (expired(water()), true)] {
+    let mut later = water();
+    later.expires = Some(Timestamp::from_secs(i64::MAX));
+    for (response, reloads) in [(water(), false), (later, false), (expired(water()), true)] {
         let (mut tiles, file_source) = held_tile::<VectorKind>(&test, TileKind::Geometry, tiles_tileset());
         tiles.set_necessity(&tile(), TileNecessity::Required);
         answer(&mut tiles, &file_source, response);
@@ -219,6 +246,61 @@ fn a_tile_required_again_reloads_only_stale_data() {
         }
         assert_ne!(tiles.features(&tile(), "water").unwrap(), Vec::new());
     }
+}
+
+/// A reload that the server answers "not modified" keeps the data the tile
+/// has: the tile stays complete while it reloads, and shows no new contents.
+/// A revalidation that fails, retried and answered "not modified", completes
+/// the tile without new contents too.
+#[test]
+fn a_not_modified_reload_keeps_the_data() {
+    use TileOperation::{EndParse, LoadFromNetwork, RequestedFromNetwork};
+
+    let test = TileTest::new();
+    let (mut tiles, file_source) = held_tile::<VectorKind>(&test, TileKind::Geometry, tiles_tileset());
+    tiles.set_necessity(&tile(), TileNecessity::Required);
+    answer(&mut tiles, &file_source, expired(water()));
+    assert!(tiles.is_complete(&tile()));
+    let shown = tiles.features(&tile(), "water").unwrap();
+    assert_ne!(shown, Vec::new());
+    tiles.take_events();
+
+    // Required again, the tile revalidates its expired data.
+    tiles.set_necessity(&tile(), TileNecessity::Optional);
+    tiles.set_necessity(&tile(), TileNecessity::Required);
+    assert_eq!(file_source.pending(), 1);
+    assert!(tiles.is_complete(&tile()), "a reload keeps the tile complete");
+    answer(&mut tiles, &file_source, not_modified());
+    assert_eq!(actions(&mut tiles), [RequestedFromNetwork, LoadFromNetwork], "no new contents");
+    assert!(tiles.is_complete(&tile()));
+
+    // The answer is all the retry brings, and the tile completes.
+    tiles.set_necessity(&tile(), TileNecessity::Optional);
+    tiles.set_necessity(&tile(), TileNecessity::Required);
+    answer(&mut tiles, &file_source, failed("offline"));
+    tiles.retry_failed();
+    assert!(!tiles.is_complete(&tile()), "the tile waits for the retry");
+    answer(&mut tiles, &file_source, not_modified());
+    assert!(tiles.is_complete(&tile()));
+    assert!(!actions(&mut tiles).contains(&EndParse), "no new contents");
+    assert_eq!(tiles.features(&tile(), "water").unwrap(), shown);
+}
+
+/// A tile whose data failed to lay out loads it again when required again,
+/// though the data has no expiry.
+#[test]
+fn a_tile_whose_data_fails_to_lay_out_is_requested_again() {
+    let test = TileTest::new();
+    let (mut tiles, file_source) = held_tile::<VectorKind>(&test, TileKind::Geometry, tiles_tileset());
+    tiles.set_necessity(&tile(), TileNecessity::Required);
+    let mut response = Response::new();
+    response.data = Some(Arc::new(b"not a tile".to_vec()));
+    answer(&mut tiles, &file_source, response);
+    assert_eq!(errors(&mut tiles).len(), 1);
+
+    tiles.set_necessity(&tile(), TileNecessity::Optional);
+    tiles.set_necessity(&tile(), TileNecessity::Required);
+    assert_eq!(file_source.pending(), 1);
 }
 
 /// A tile's requests start in the tile's place among the requests that

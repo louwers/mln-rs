@@ -9,8 +9,9 @@ use std::time::Duration;
 use geojson::GeoJson;
 use mln_map_types::{ConstrainMode, MapMode, TransformState, ViewportMode};
 use mln_render::testing::{Event, OneSource, View};
-use mln_storage::FileSource;
+use mln_storage::response::Reason;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_storage::{FileSource, Kind, ResourceError, Response};
 use mln_style::source_type::{Load, SourceData};
 use mln_style::{Edit, Layer, Source, Style};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
@@ -136,6 +137,193 @@ fn raster_tile_attribution() {
 fn raster_dem_tile_attribution() {
     let mapbox = "<a href='https://www.mapbox.com/about/maps/' target='_blank'>&copy; Mapbox</a> ";
     tile_attribution(raster_dem_source, mapbox);
+}
+
+/// The three kinds of tileset sources.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Tiled {
+    Raster,
+    RasterDem,
+    Vector,
+}
+
+/// The render source of a tileset source "source" of the kind `kind`, whose
+/// tiles `file_source` answers, drawn by a layer of the type that draws such
+/// tiles (raster, hillshade or circle), after an update over `state`.
+fn tile_case(kind: Tiled, workers: &Workers, state: &TransformState, file_source: StubFileSource) -> OneSource {
+    let tileset = PartialTileset { tiles: Some(vec!["tiles".to_owned()]), ..Default::default() };
+    let (source, layer) = match kind {
+        Tiled::Raster => (
+            raster_source("source", None, tileset, 512),
+            Layer::new(registry().style(), "raster", "id", "source").unwrap(),
+        ),
+        Tiled::RasterDem => (
+            raster_dem_source("source", None, tileset, 512),
+            Layer::new(registry().style(), "hillshade", "id", "source").unwrap(),
+        ),
+        Tiled::Vector => (vector_source("source", None, tileset), layer("circle")),
+    };
+    let source = ready(source);
+    let mut render_source = OneSource::new(&registry(), &source, &[layer], &workers.0).unwrap();
+    let file_source: Arc<dyn FileSource> = Arc::new(file_source);
+    render_source.update(&source, &view(state, MapMode::Continuous, Some(file_source)));
+    render_source
+}
+
+/// A file source that answers each tile's request at once with what
+/// `response` makes.
+fn answering(response: impl Fn() -> Option<Response> + Send + Sync + 'static) -> StubFileSource {
+    let file_source = StubFileSource::new(ResponseType::Synchronous);
+    file_source.set_response(Kind::Tile, move |_| response());
+    file_source
+}
+
+/// A tile whose response has no content changes, empty, without an error.
+fn tile_empty(kind: Tiled) {
+    let (workers, state) = (Workers::new(), view_state(0.0));
+    let file_source = answering(|| {
+        let mut response = Response::new();
+        response.no_content = true;
+        Some(response)
+    });
+    let mut render_source = tile_case(kind, &workers, &state, file_source);
+    run_until(&mut render_source, |event| match event {
+        Event::Changed => true,
+        Event::Error { error, .. } => panic!("{error}"),
+        Event::Action(_) => false,
+    });
+}
+
+/// A tile whose request fails reports the failure as its error.
+fn tile_fail(kind: Tiled) {
+    let (workers, state) = (Workers::new(), view_state(0.0));
+    let file_source = answering(|| {
+        let mut response = Response::new();
+        response.error = Some(Box::new(ResourceError::new(Reason::Other, "Failed by the test case")));
+        Some(response)
+    });
+    let mut render_source = tile_case(kind, &workers, &state, file_source);
+    run_until(&mut render_source, |event| match event {
+        Event::Error { tile, error } => {
+            assert_eq!(OverscaledTileID::from_zxy(0, 0, 0), tile);
+            assert_eq!("Failed by the test case", error.to_string());
+            true
+        }
+        Event::Changed | Event::Action(_) => false,
+    });
+}
+
+/// A tile whose data doesn't decode reports why as its error.
+fn tile_corrupt(kind: Tiled) {
+    let (workers, state) = (Workers::new(), view_state(0.0));
+    let file_source = answering(|| {
+        let mut response = Response::new();
+        response.data = Some(Arc::new(b"CORRUPTED".to_vec()));
+        Some(response)
+    });
+    let mut render_source = tile_case(kind, &workers, &state, file_source);
+    run_until(&mut render_source, |event| match event {
+        Event::Error { tile, error } => {
+            assert_eq!(OverscaledTileID::from_zxy(0, 0, 0), tile);
+            if kind == Tiled::Vector {
+                assert_eq!(error.to_string(), "protobuf decode error: invalid wire type: 7");
+            } else {
+                // Not asserting on platform-specific error text.
+                assert_ne!(error.to_string(), "");
+            }
+            true
+        }
+        Event::Changed | Event::Action(_) => false,
+    });
+}
+
+/// A tile whose request isn't answered neither changes nor fails.
+fn tile_cancel(kind: Tiled) {
+    let (workers, state) = (Workers::new(), view_state(0.0));
+    let requested = Arc::new(AtomicBool::new(false));
+    let asked = Arc::clone(&requested);
+    let file_source = answering(move || {
+        asked.store(true, Ordering::SeqCst);
+        None
+    });
+    let mut render_source = tile_case(kind, &workers, &state, file_source);
+    render_source.step();
+    assert!(requested.load(Ordering::SeqCst));
+    for event in render_source.take_events() {
+        assert!(matches!(event, Event::Action(_)), "{event:?}");
+    }
+}
+
+// gtest: Source.RasterTileEmpty
+#[test]
+fn raster_tile_empty() {
+    tile_empty(Tiled::Raster);
+}
+
+// gtest: Source.RasterDEMTileEmpty
+#[test]
+fn raster_dem_tile_empty() {
+    tile_empty(Tiled::RasterDem);
+}
+
+// gtest: Source.VectorTileEmpty
+#[test]
+fn vector_tile_empty() {
+    tile_empty(Tiled::Vector);
+}
+
+// gtest: Source.RasterTileFail
+#[test]
+fn raster_tile_fail() {
+    tile_fail(Tiled::Raster);
+}
+
+// gtest: Source.RasterDEMTileFail
+#[test]
+fn raster_dem_tile_fail() {
+    tile_fail(Tiled::RasterDem);
+}
+
+// gtest: Source.VectorTileFail
+#[test]
+fn vector_tile_fail() {
+    tile_fail(Tiled::Vector);
+}
+
+// gtest: Source.RasterTileCorrupt
+#[test]
+fn raster_tile_corrupt() {
+    tile_corrupt(Tiled::Raster);
+}
+
+// gtest: Source.RasterDEMTileCorrupt
+#[test]
+fn raster_dem_tile_corrupt() {
+    tile_corrupt(Tiled::RasterDem);
+}
+
+// gtest: Source.VectorTileCorrupt
+#[test]
+fn vector_tile_corrupt() {
+    tile_corrupt(Tiled::Vector);
+}
+
+// gtest: Source.RasterTileCancel
+#[test]
+fn raster_tile_cancel() {
+    tile_cancel(Tiled::Raster);
+}
+
+// gtest: Source.RasterDEMTileCancel
+#[test]
+fn raster_dem_tile_cancel() {
+    tile_cancel(Tiled::RasterDem);
+}
+
+// gtest: Source.VectorTileCancel
+#[test]
+fn vector_tile_cancel() {
+    tile_cancel(Tiled::Vector);
 }
 
 /// The loaded custom geometry source "source", whose provider runs on
