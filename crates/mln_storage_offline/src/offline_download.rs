@@ -335,7 +335,9 @@ impl OfflineDownload {
                     continue;
                 }
                 // A source without tile URLs has no tiles to download.
-                OfflineResources::Tiles { tileset, tile_size, round_zoom, .. } => (Some(tileset), tile_size, round_zoom),
+                OfflineResources::Tiles { tileset, tile_size, round_zoom, .. } => {
+                    (Some(tileset), tile_size, round_zoom)
+                }
                 OfflineResources::TileJson { url, tile_size, round_zoom } => {
                     result.required_resource_count += 1;
                     let source_response = db.get(&Resource::source(&url));

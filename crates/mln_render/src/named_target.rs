@@ -69,8 +69,7 @@ pub struct NamedTargets(pub Vec<NamedTarget>);
 pub struct Destination(pub Arc<str>);
 
 /// The style's root `org.maplibre:targets`, which every registry holds.
-pub(crate) static TARGETS: StyleKey<NamedTargets> =
-    StyleKey::root("org.maplibre:targets", parse_targets, targets_json);
+pub(crate) static TARGETS: StyleKey<NamedTargets> = StyleKey::root("org.maplibre:targets", parse_targets, targets_json);
 
 /// A layer's `org.maplibre:destination-target`, on a layer of any type,
 /// which every registry holds.

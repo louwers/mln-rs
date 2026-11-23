@@ -130,12 +130,12 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use mln_map_types::{FrameProjection, MapMode, TileProjector, View};
-use mln_style::{PropertyEvaluationParameters, Style};
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::expr::FeatureState;
 use mln_style::expression::image_expression::UnavailableImages;
 use mln_style::expression::{EvaluationContext, Image, Value, ValueConverter};
 use mln_style::layer_type::{LayerStyle, PaintSet, SourceKind, StyleLayerType};
+use mln_style::{PropertyEvaluationParameters, Style};
 use mln_style_types::image::{ImageDependencies, ImagePositions, ImageType};
 use mln_text::glyph::{FontFaces, GlyphDependencies, GlyphID, GlyphIDType};
 use mln_tile::{Feature, TileLayer};

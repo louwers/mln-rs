@@ -6,8 +6,8 @@ mod support;
 
 use std::sync::Arc;
 
-use mln_rs::feature::Value;
 use mln_rs::DemandMode;
+use mln_rs::feature::Value;
 use mln_rs::layer::{
     Convertible, Draws, EvaluateCx, Evaluation, Functions, Layer, LayerTypeInfo, NewCx, NoProperties, NoTiles,
     PrepareCx, SourceKind, StyleKey, StyleLayerType, UpdateCx, conversion,
