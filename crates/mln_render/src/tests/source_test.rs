@@ -22,8 +22,9 @@ use parking_lot::Mutex;
 use crate::Registry;
 use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::render_source::RenderSource;
+use crate::source::TileNecessity;
 use crate::tests::fixture_layer::{Dot, Shade, Tint};
-use crate::tests::scripted_origin::{self, Dem, Geometry, Raster, Reply, Script, ScriptedLoad};
+use crate::tests::scripted_origin::{self, Call, Dem, Geometry, Raster, Reply, Script, ScriptedLoad};
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::{StoreEvent, TileStore};
 use crate::tile_parameters::TileParameters;
@@ -193,6 +194,48 @@ fn tile_out_of_view_keeps_loading() {
     assert!(turned.len() > unturned.len(), "turning shows other tiles");
     let back = turn(&mut test, 0.0, false);
     assert_eq!(turned, back, "no tile loads again");
+}
+
+/// A tile that the view leaves far behind while it loads is made optional,
+/// which stops its load, before it goes.
+#[test]
+fn a_tile_left_far_behind_stops_loading_before_it_goes() {
+    let mut test = SourceTest::new();
+    test.transform.resize(Size::new(256, 256)).unwrap();
+    let script = Script::default();
+    let layers = Tiled::Vector.layers();
+    let source = Tiled::Vector.source(&script, all_zooms());
+    let mut store = test.store();
+    let mut render_source = crate::tests::create_render_source(&source, &mut store);
+    let mut jump = |test: &mut SourceTest, longitude: f64, needs_relayout: bool| {
+        test.transform.jump_to(&CameraOptions {
+            center: Some(LatLng::new(0.0, longitude).unwrap()),
+            zoom: Some(6.0),
+            ..Default::default()
+        });
+        let parameters = test.tile_parameters_with(MapMode::Continuous);
+        render_source.update(&mut store, source.clone(), &layers, true, needs_relayout, &parameters);
+    };
+
+    jump(&mut test, 0.0, true);
+    let loads = script.take_loads();
+    script.take_calls();
+    jump(&mut test, 90.0, false);
+    let calls = script.take_calls();
+    let dropped: Vec<OverscaledTileID> = calls
+        .iter()
+        .filter_map(|call| match call {
+            Call::Dropped(id) => Some(*id),
+            _ => None,
+        })
+        .collect();
+    assert!(!dropped.is_empty(), "the view left tiles far behind");
+    for id in &dropped {
+        let optional = calls.iter().position(|call| *call == Call::SetNecessity(*id, TileNecessity::Optional));
+        let gone = calls.iter().position(|call| *call == Call::Dropped(*id));
+        assert!(optional.is_some_and(|optional| Some(optional) < gone), "{id:?} in {calls:?}");
+    }
+    assert!(loads.iter().filter(|load| dropped.contains(&load.tile)).all(ScriptedLoad::is_stopped));
 }
 
 /// The loads of a view's tiles stand in the order the view needs them:

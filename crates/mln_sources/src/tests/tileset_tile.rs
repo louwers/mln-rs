@@ -349,7 +349,13 @@ fn a_response_to_a_stopped_request_changes_nothing() {
 /// source of it, drawn by a circle layer, and a file source that holds its
 /// tiles' requests.
 fn held_source(test: &TileTest) -> (Source, OneSource, Arc<Held>) {
-    let tileset = PartialTileset { tiles: Some(vec!["{z}/{x}/{y}".to_owned()]), ..Default::default() };
+    held_source_at(test, "{z}/{x}/{y}")
+}
+
+/// A vector source "source" whose tiles are at `template`, as
+/// [`held_source`].
+fn held_source_at(test: &TileTest, template: &str) -> (Source, OneSource, Arc<Held>) {
+    let tileset = PartialTileset { tiles: Some(vec![template.to_owned()]), ..Default::default() };
     let source = ready(vector_source("source", None, tileset));
     let registry = registry();
     let mut layer = Layer::new(registry.style(), "circle", "water", "source").unwrap();
@@ -362,7 +368,7 @@ fn held_source(test: &TileTest) -> (Source, OneSource, Arc<Held>) {
 /// `file_source`.
 fn held_view<'a>(state: &'a TransformState, file_source: &Arc<Held>) -> View<'a> {
     let file_source: Arc<dyn FileSource> = Arc::<Held>::clone(file_source);
-    View { state, mode: MapMode::Continuous, file_source: Some(file_source), needs_relayout: false }
+    View { state, mode: MapMode::Continuous, pixel_ratio: 1.0, file_source: Some(file_source), needs_relayout: false }
 }
 
 /// `source` after `change` to its common members.
@@ -438,4 +444,29 @@ fn a_network_request_restarts_when_the_update_interval_changes_while_it_loads_in
     assert_eq!(requests.len(), 2);
     assert!(requests[0].1, "the request before stops");
     assert_eq!(freshness_of(&requests[1].0), freshness_in(source.common()));
+}
+
+/// A tile in a new world copy whose resource is another than its copy's,
+/// as after the pixel ratio changed, doesn't take the copy's data and
+/// validators: it loads its own.
+#[test]
+fn a_world_copy_of_another_resource_loads_its_own() {
+    let test = TileTest::new();
+    let (source, mut tiles, file_source) = held_source_at(&test, "{z}/{x}/{y}{ratio}");
+    let state = view_state(0.0);
+    tiles.update(&source, &held_view(&state, &file_source));
+    assert_eq!(file_source.requests("0/0/0").len(), 1);
+    file_source.respond(water());
+    while !tiles.is_loaded() {
+        tiles.step();
+    }
+
+    // 170 degrees east shows tile 0/0/0 of the next world copy too.
+    let mut east = TransformState::clone(&state);
+    east.set_lat_lng_zoom(&LatLng::new(0.0, 170.0).unwrap(), 0.0);
+    tiles.update(&source, &View { pixel_ratio: 2.0, ..held_view(&east, &file_source) });
+    let requests = file_source.requests("0/0/0@2x");
+    assert_eq!(requests.len(), 1, "the new world copy loads its own tile");
+    assert_eq!(requests[0].0.prior_etag, None, "with no validators of the copy's");
+    assert!(!tiles.is_loaded(), "the new world copy waits for its own tile");
 }

@@ -231,10 +231,12 @@ impl OriginTiles {
     }
 }
 
-/// What a [`OneSource`] updates for: the map's view, mode and file source.
+/// What a [`OneSource`] updates for: the map's view, mode, pixel ratio and
+/// file source.
 pub struct View<'a> {
     pub state: &'a TransformState,
     pub mode: MapMode,
+    pub pixel_ratio: f32,
     pub file_source: Option<Arc<dyn FileSource>>,
     /// Whether the source's tiles lay out anew, as at the style's first
     /// update.
@@ -268,7 +270,7 @@ impl OneSource {
     /// `view`, then starts its tiles' jobs, as a frame does.
     pub fn update(&mut self, source: &Source, view: &View<'_>) {
         let parameters = TileParameters {
-            pixel_ratio: 1.0,
+            pixel_ratio: view.pixel_ratio,
             debug_options: MapDebugOptions::NO_DEBUG,
             view: view.state.view(),
             min_zoom: view.state.min_zoom(),

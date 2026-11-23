@@ -29,7 +29,7 @@ use crate::{
 
 /// What a render source updates for: `state` in `mode`, with `file_source`.
 fn view(state: &TransformState, mode: MapMode, file_source: Option<Arc<dyn FileSource>>) -> View<'_> {
-    View { state, mode, file_source, needs_relayout: true }
+    View { state, mode, pixel_ratio: 1.0, file_source, needs_relayout: true }
 }
 
 /// A pool for the tiles' work, which the test waits for as it ends.
