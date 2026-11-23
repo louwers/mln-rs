@@ -43,7 +43,12 @@ impl Fixture {
 
     /// Renders one frame, whether or not the map changed.
     pub(crate) fn render(&self) -> mln_rs::FrameResult {
-        self.session.demand_frame(FrameDemand::new(DemandMode::Force, 0)).unwrap();
+        self.render_on(DemandMode::Force)
+    }
+
+    /// Renders one frame on a demand of `mode`, which must draw one.
+    pub(crate) fn render_on(&self, mode: DemandMode) -> mln_rs::FrameResult {
+        self.session.demand_frame(FrameDemand::new(mode, 0)).unwrap();
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if let Some(result) = self.session.drain_frame_results().unwrap().into_iter().next() {

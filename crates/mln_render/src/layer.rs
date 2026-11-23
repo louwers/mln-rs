@@ -72,9 +72,10 @@
 //! [`Frame::tile`] projects.
 //!
 //! A layer reads what its style declares outside its properties, the values
-//! of the style keys that an extension declares on layers
-//! ([`StyleKey`](mln_style::style_key::StyleKey)), from its style
-//! ([`LayerBase::extra`](mln_style::layer_type::LayerBase::extra)), and it
+//! of the style keys that an extension declares
+//! ([`StyleKey`](mln_style::style_key::StyleKey)): a layer's keys from its
+//! style ([`LayerBase::extra`](mln_style::layer_type::LayerBase::extra)),
+//! and the style root's in its update ([`UpdateCx::root`]). It
 //! samples the style's named targets
 //! ([`NamedTarget`](crate::draw::NamedTarget)) that it asks for in its
 //! update ([`UpdateCx::target`]). The `mln_image_process` crate's
@@ -129,7 +130,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use mln_map_types::{FrameProjection, MapMode, TileProjector, View};
-use mln_style::PropertyEvaluationParameters;
+use mln_style::{PropertyEvaluationParameters, Style};
 use mln_style::evaluated::Evaluated;
 use mln_style::expression::expr::FeatureState;
 use mln_style::expression::image_expression::UnavailableImages;
@@ -921,10 +922,21 @@ pub struct UpdateCx<'a, L: Layer> {
     pub tiles: Tiles<'a, L>,
     /// The renderer's resources.
     pub res: &'a mut Resources,
+    pub(crate) style: &'a Style,
     pub(crate) targets: TargetReads<'a>,
 }
 
 impl<L: Layer> UpdateCx<'_, L> {
+    /// The style's value of its root key of the type `T`
+    /// ([`StyleKey::root`](mln_style::style_key::StyleKey::root)); `None`
+    /// where the style doesn't set it or the registry has no such key. An
+    /// edit of a root key alone runs no evaluation, but the next frame's
+    /// update reads the new value.
+    #[must_use]
+    pub fn root<T: 'static>(&self) -> Option<&T> {
+        self.style.extra()
+    }
+
     /// The texture of the style's named target `name`
     /// ([`NamedTarget`](crate::draw::NamedTarget)), to sample, as every
     /// layer that draws into it draws it this frame, wherever it is among

@@ -12,7 +12,7 @@ use mln_gfx::gpu::Gpu;
 use mln_map_types::View;
 use mln_style::expression::Dependency;
 use mln_style::layer_type::{ErasedLayerStyle, LayerStyle, PaintSet, SourceKind, StyleLayerType};
-use mln_style::{PropertyEvaluationParameters, TransitionParameters};
+use mln_style::{PropertyEvaluationParameters, Style, TransitionParameters};
 use mln_style_types::VisibilityType;
 use mln_util::geo::ScreenCoordinate;
 use smallvec::SmallVec;
@@ -267,7 +267,8 @@ pub(crate) trait RenderLayer: Any {
     /// The encode's run of the layer, the frame's layer at `index`: drops
     /// its tile values where the frame's projection changed, and where its
     /// evaluation draws, gives the tiles of `source` that its update found
-    /// in `found` their data, runs [`Layer::update`], routes the layer
+    /// in `found` their data, runs [`Layer::update`] with the root keys of
+    /// `style`, the frame's version, routes the layer
     /// through `routes` with the named targets it read, runs [`Layer::tile`]
     /// for the tiles without a value and [`Layer::prepare`], and readies the
     /// draws it pushed.
@@ -280,6 +281,7 @@ pub(crate) trait RenderLayer: Any {
         source: Option<FrameSourceTiles<'_>>,
         found: &[FoundTile],
         index: usize,
+        style: &Style,
         routes: &mut Routes,
     );
 
@@ -452,6 +454,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         source: Option<FrameSourceTiles<'_>>,
         found: &[FoundTile],
         index: usize,
+        style: &Style,
         routes: &mut Routes,
     ) {
         let (frame, evaluation) = (paint.frame, self.record.evaluation);
@@ -479,6 +482,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
             source_max_zoom: source.and_then(|source| source.max_zoom),
             tiles: Tiles { found: &tiles, values: tile_values },
             res,
+            style,
             targets: routes.reads(),
         });
         let route = routes.route(index, &values.style.id, values.style.extra(), L::VOLUME);

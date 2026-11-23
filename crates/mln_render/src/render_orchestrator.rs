@@ -1212,7 +1212,16 @@ impl RenderOrchestrator {
             let source_contents = contents.of(source, &self.tile_store);
             let tiles = source.map(|(_, source)| FrameSourceTiles::new(source, source_contents));
             let images = self.tile_store.images();
-            render_layer.update_draws(gpu, paint_parameters, images, tiles, &self.found_tiles, index, &mut self.routes);
+            render_layer.update_draws(
+                gpu,
+                paint_parameters,
+                images,
+                tiles,
+                &self.found_tiles,
+                index,
+                &update_parameters.style,
+                &mut self.routes,
+            );
             needs_globe_depth = needs_globe_depth || render_layer.record().volume;
         }
         self.routes.finish_frame();

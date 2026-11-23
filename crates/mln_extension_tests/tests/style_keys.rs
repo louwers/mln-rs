@@ -1,12 +1,17 @@
 //! Style keys declared through the facade: a map's style reads them, its
-//! edits change them, and a layer's renderer gets a change to its keys.
+//! edits change them, a layer's renderer gets a change to its keys, and a
+//! layer's update reads the root's.
 
 mod support;
 
 use std::sync::Arc;
 
 use mln_rs::feature::Value;
-use mln_rs::layer::{Convertible, Functions, StyleKey, conversion};
+use mln_rs::DemandMode;
+use mln_rs::layer::{
+    Convertible, Draws, EvaluateCx, Evaluation, Functions, Layer, LayerTypeInfo, NewCx, NoProperties, NoTiles,
+    PrepareCx, SourceKind, StyleKey, StyleLayerType, UpdateCx, conversion,
+};
 use mln_rs::mln_layers::BackgroundLayer;
 use mln_rs::mln_render::RegistryBuilder;
 use mln_rs::mln_util::ErrorKind;
@@ -27,8 +32,43 @@ fn string(value: &Convertible<'_>, _: &Arc<Functions>) -> Result<String, convers
     value.to_string().ok_or_else(|| conversion::Error::new("expected a name"))
 }
 
+/// A layer type whose layers keep the theme that their last update read.
+struct Themed;
+
+impl StyleLayerType for Themed {
+    const INFO: LayerTypeInfo = LayerTypeInfo { name: "test-themed", source: SourceKind::None, from_json: true };
+    type LayoutProperties = NoProperties;
+    type PaintProperties = NoProperties;
+    type Data = ();
+}
+
+struct ThemedLayer {
+    theme: Option<String>,
+}
+
+impl Layer for ThemedLayer {
+    type Style = Themed;
+    type Input = NoTiles;
+    type Tile = ();
+
+    fn new(_cx: &mut NewCx<'_, Self>) -> Self {
+        ThemedLayer { theme: None }
+    }
+
+    fn evaluate(&mut self, _cx: EvaluateCx<'_, Self>) -> Evaluation {
+        Evaluation::TRANSLUCENT
+    }
+
+    fn update(&mut self, cx: &mut UpdateCx<'_, Self>) {
+        self.theme = cx.root::<Theme>().map(|theme| theme.0.clone());
+    }
+
+    fn prepare(&self, _cx: &PrepareCx<'_, Self>, _out: &mut Draws) {}
+}
+
 const STYLE: &str = r##"{"version":8,"test:theme":"night","sources":{},"layers":[
-    {"id":"background","type":"background","test:group":"base","paint":{"background-color":"#ffffff"}}]}"##;
+    {"id":"background","type":"background","test:group":"base","paint":{"background-color":"#ffffff"}},
+    {"id":"themed","type":"test-themed"}]}"##;
 
 fn fixture() -> Fixture {
     let mut builder = RegistryBuilder::new();
@@ -36,7 +76,13 @@ fn fixture() -> Fixture {
     builder.add_style_key(&THEME).unwrap();
     builder.add_style_key(&GROUP).unwrap();
     builder.add_style_key(&GROUP).unwrap();
+    builder.add_layer_type::<ThemedLayer>().unwrap();
     Fixture::new(builder.build(), STYLE)
+}
+
+/// The theme that the layer `themed` read in its last update.
+fn read_theme(fixture: &Fixture) -> Option<String> {
+    wait(fixture.session.query_rendered_layer::<ThemedLayer, _>("themed", |layer, _| Ok(layer.theme.clone())))
 }
 
 /// The group of the layer `background` as its renderer has it.
@@ -70,4 +116,19 @@ fn a_map_edits_the_keys_of_its_styles_root() {
 
     let error = fixture.map.set_style_root_property("test:themes", r#""day""#).unwrap().wait().unwrap_err();
     assert_eq!(ErrorKind::InvalidArgument, error.kind, "{}", error.message);
+}
+
+#[test]
+fn a_layers_update_reads_the_root_keys_of_the_frames_style() {
+    let fixture = fixture();
+    assert_eq!(Some("night".to_owned()), read_theme(&fixture));
+
+    // The edit alone brings a frame, whose update reads the new value.
+    wait(fixture.map.set_style_root_property("test:theme", r#""day""#));
+    fixture.render_on(DemandMode::WaitForUpdate);
+    assert_eq!(Some("day".to_owned()), read_theme(&fixture));
+
+    wait(fixture.map.set_style_root_property("test:theme", "null"));
+    fixture.render_on(DemandMode::WaitForUpdate);
+    assert_eq!(None, read_theme(&fixture));
 }
