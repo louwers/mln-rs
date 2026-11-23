@@ -336,7 +336,9 @@ pub(crate) fn render_layer(
 ) -> Box<dyn crate::render_layer::RenderLayer> {
     let registry = crate::Registry::with_builtins();
     let layer_type = registry.layer_type(style.info().name).expect("a built-in layer type");
-    layer_type.create_render_layer(style, &mut crate::gfx::context::Resources::detached()).expect("a layer of its type")
+    layer_type
+        .create_render_layer(style, &mut crate::gfx::context::Resources::detached(), None)
+        .expect("a layer of its type")
 }
 
 /// The render source of `source`, through the tests' registry.

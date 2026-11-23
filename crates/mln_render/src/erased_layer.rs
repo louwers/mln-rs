@@ -156,12 +156,14 @@ pub(crate) trait ErasedLayerType: Send + Sync + 'static {
     /// The type's style half.
     fn style(&self) -> &'static dyn ErasedStyleLayerType;
 
-    /// The render layer that draws the layer `style`, or `None` if `style`
-    /// is another type's.
+    /// The render layer that draws the layer `style`, placing through the
+    /// renderer's participant at `participant` if the type places, or
+    /// `None` if `style` is another type's.
     fn create_render_layer(
         &'static self,
         style: &Arc<dyn ErasedLayerStyle>,
         res: &mut crate::gfx::context::Resources,
+        participant: Option<usize>,
     ) -> Option<Box<dyn RenderLayer>>;
 
     /// [`Layout::needs_resources`]; false for a type that doesn't lay out,
@@ -221,9 +223,10 @@ impl<L: Layer, P: Places<L>> ErasedLayerType for LayerEntry<L, P> {
         &'static self,
         style: &Arc<dyn ErasedLayerStyle>,
         res: &mut crate::gfx::context::Resources,
+        participant: Option<usize>,
     ) -> Option<Box<dyn RenderLayer>> {
         let style = LayerStyle::<L::Style>::recover(style)?;
-        Some(Box::new(Hosted::<L>::new(self, style, res)))
+        Some(Box::new(Hosted::<L>::new(self, style, res, participant)))
     }
 
     fn layout_can_need_dependencies(&self, group: &[Arc<dyn ErasedEvaluatedLayer>]) -> bool {

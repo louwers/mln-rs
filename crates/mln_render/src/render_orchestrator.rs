@@ -35,7 +35,7 @@ use crate::image_store::ImageStore;
 use crate::named_target::{Routes, Run};
 use crate::paint_parameters::PaintParameters;
 use crate::placement::{PlacementRecord, Placements};
-use crate::render_layer::{FrameSourceTiles, LayerUpdate, RecordedLayer};
+use crate::render_layer::{FrameSourceTiles, LayerUpdate, RenderLayer};
 use crate::render_pass::Pass;
 use crate::render_source::{self, RenderSource, RenderTileParameters};
 use crate::render_tile::{FoundTile, RenderTile, TileContent};
@@ -94,14 +94,16 @@ fn create_render_layer(
     registry: &Registry,
     style: &Arc<dyn ErasedLayerStyle>,
     res: &mut Resources,
-) -> Option<RecordedLayer> {
+) -> Option<Box<dyn RenderLayer>> {
     let name = style.info().name;
-    let render_layer = registry.layer_type(name).and_then(|layer_type| layer_type.create_render_layer(style, res));
+    let participant = registry.placing_type(name);
+    let render_layer =
+        registry.layer_type(name).and_then(|layer_type| layer_type.create_render_layer(style, res, participant));
     debug_assert!(render_layer.is_some(), "the renderer's registry has no layer type '{name}'");
     if render_layer.is_none() {
         Log::error(Event::Render, format!("no render layer for layer type '{name}'"));
     }
-    render_layer.map(|layer| RecordedLayer::new(layer, registry.placing_type(name)))
+    render_layer
 }
 
 /// How an update evaluates and transitions the layers, the light and the
@@ -151,7 +153,7 @@ pub(crate) struct RenderOrchestrator {
     /// The render layers, in the style's order: a layer's index is its
     /// place in the drawing order. A layer whose type has no render layer
     /// has none.
-    layers: Vec<RecordedLayer>,
+    layers: Vec<Box<dyn RenderLayer>>,
     /// The index in `layers` of each render layer, by layer id.
     layer_indexes: HashMap<String, usize>,
     render_light: crate::render_light::RenderLight,
@@ -361,10 +363,10 @@ impl RenderOrchestrator {
         self.longitude = longitude;
         for (layer, will_render) in self.layers.iter_mut().zip(will_render) {
             if wrap_delta != 0 {
-                layer.layer.handle_wrap_jump(wrap_delta);
+                layer.handle_wrap_jump(wrap_delta);
             }
-            if layer.layer.is_renderable() != will_render {
-                layer.layer.set_renderable(will_render);
+            if layer.is_renderable() != will_render {
+                layer.set_renderable(will_render);
             }
         }
 
@@ -612,19 +614,19 @@ impl RenderOrchestrator {
         let render_layers_remade = std::mem::take(&mut self.remake_render_layers);
         if render_layers_remade {
             for render_layer in &mut self.layers {
-                let style = render_layer.layer.shared_style();
+                let style = render_layer.shared_style();
                 let Some(mut new_layer) = create_render_layer(&self.registry, &style, res) else {
                     continue;
                 };
-                new_layer.layer.transition(&clock.added_layer_transition);
+                new_layer.transition(&clock.added_layer_transition);
                 *render_layer = new_layer;
             }
         }
 
         let rejoin = std::mem::take(&mut self.layers_left);
         if layer_changes.order_changed || rejoin {
-            let mut by_id: HashMap<String, RecordedLayer> =
-                self.layers.drain(..).map(|layer| (layer.layer.id().to_owned(), layer)).collect();
+            let mut by_id: HashMap<String, Box<dyn RenderLayer>> =
+                self.layers.drain(..).map(|layer| (layer.id().to_owned(), layer)).collect();
 
             // Remove render layers for removed layers.
             for (id, _) in layer_changes.iter().filter(|(_, change)| change.removes()) {
@@ -635,7 +637,7 @@ impl RenderOrchestrator {
             for (id, _) in layer_changes.iter().filter(|(_, change)| change.adds()) {
                 let Some(layer) = layers.get(id) else { continue };
                 if let Some(mut render_layer) = create_render_layer(&self.registry, layer.style(), res) {
-                    render_layer.layer.transition(&clock.added_layer_transition);
+                    render_layer.transition(&clock.added_layer_transition);
                     // A layer added twice keeps its first render layer.
                     by_id.entry(id.to_string()).or_insert(render_layer);
                 }
@@ -645,7 +647,7 @@ impl RenderOrchestrator {
             if rejoin {
                 for layer in layers.iter() {
                     if let Some(mut render_layer) = create_render_layer(&self.registry, layer.style(), res) {
-                        render_layer.layer.transition(&clock.added_layer_transition);
+                        render_layer.transition(&clock.added_layer_transition);
                         by_id.entry(layer.get_id().to_owned()).or_insert(render_layer);
                     }
                 }
@@ -654,7 +656,7 @@ impl RenderOrchestrator {
             // A layer type without a render layer is skipped.
             self.layers = layers.iter().filter_map(|layer| by_id.remove(layer.get_id())).collect();
             self.layer_indexes =
-                self.layers.iter().enumerate().map(|(index, layer)| (layer.layer.id().to_owned(), index)).collect();
+                self.layers.iter().enumerate().map(|(index, layer)| (layer.id().to_owned(), index)).collect();
         }
 
         // Update render layers for changed layers.
@@ -664,7 +666,7 @@ impl RenderOrchestrator {
                 if change.restyles() {
                     render_layer.restyle(&clock.transition, layer.style());
                 } else if change == LayerChange::Data {
-                    render_layer.layer.set_data(layer.style());
+                    render_layer.set_data(layer.style());
                 }
             }
         }
@@ -689,42 +691,42 @@ impl RenderOrchestrator {
     ) -> VecSet<String> {
         let mut constants_mask_changed: VecSet<String> = VecSet::new();
         for layer in &mut self.layers {
-            let id = layer.layer.id().to_owned();
+            let id = layer.id().to_owned();
             let layer_added_or_changed =
                 render_layers_remade || layer_changes.get(&id).is_some_and(|change| change != LayerChange::Removed);
             clock.evaluation.layer_changed = layer_added_or_changed;
-            clock.evaluation.has_crossfade = layer.layer.has_crossfade();
+            clock.evaluation.has_crossfade = layer.has_crossfade();
 
             // Only re-evaluate on change of zoom if the style has some
             // reference to it
             let zoom_changed_and_matters = clock.zoom_changed
                 && !layer_added_or_changed
-                && layer.layer.style_dependencies().intersects(Dependency::ZOOM);
+                && layer.style_dependencies().intersects(Dependency::ZOOM);
 
             // Similarly, only re-evaluate on a global state change if the
             // layer references the global state.
             let global_state_changed_and_matters = clock.global_state_changed
                 && !layer_added_or_changed
-                && layer.layer.style_dependencies().intersects(Dependency::GLOBAL_STATE);
+                && layer.style_dependencies().intersects(Dependency::GLOBAL_STATE);
 
             // A running transition may read the changed state too, from a
             // value the layer no longer has.
             if let Some(parameters) = &clock.global_state_transition
                 && !layer_added_or_changed
-                && (global_state_changed_and_matters || layer.layer.has_transition())
+                && (global_state_changed_and_matters || layer.has_transition())
             {
-                layer.layer.transition(parameters);
+                layer.transition(parameters);
             }
 
             if layer_added_or_changed
                 || zoom_changed_and_matters
                 || global_state_changed_and_matters
                 || clock.evaluation.has_crossfade
-                || layer.layer.has_transition()
+                || layer.has_transition()
             {
-                let previous_mask = layer.layer.evaluated().constants_mask();
+                let previous_mask = layer.evaluated().constants_mask();
                 layer.evaluate(&clock.evaluation);
-                if previous_mask != layer.layer.evaluated().constants_mask() {
+                if previous_mask != layer.evaluated().constants_mask() {
                     constants_mask_changed.insert(id);
                 }
             }
@@ -829,15 +831,15 @@ impl RenderOrchestrator {
                     if let Some(style_source) = &style_source
                         && render_source_id == Some(record.source.as_str())
                     {
-                        let style = layer.layer.style();
+                        let style = layer.style();
                         let layer_is_visible = record.visible;
                         let zoom_fits_layer = record.supports_zoom(self.zoom_history.last_zoom);
-                        let layer_id = layer.layer.id().to_owned();
+                        let layer_id = layer.id().to_owned();
                         // A global state change requires a relayout of
                         // this layer's source if one of the changed state
                         // properties is referenced by anything that is
                         // baked into the tile's buckets.
-                        let evaluated = layer.layer.evaluated();
+                        let evaluated = layer.evaluated();
                         let global_state_requires_relayout = {
                             if !clock.global_state_changed
                                 || !(style.layout_dependencies() | evaluated.evaluated_dependencies())
@@ -883,13 +885,13 @@ impl RenderOrchestrator {
                     // backdrop, so it stays a layer, as it does for the
                     // overdraw inspector, which counts its draw.
                     if self.background_layer_as_color
-                        && !self.routes.routes(layer.layer.style().base().extra(), record.volume)
+                        && !self.routes.routes(layer.style().base().extra(), record.volume)
                         && frame.sky.is_none()
                         && !update_parameters.view.is_globe()
                         && !update_parameters.debug_options.contains(MapDebugOptions::OVERDRAW)
                         && layers
                             .first()
-                            .is_some_and(|first| std::ptr::addr_eq(layer.layer.style(), Arc::as_ptr(first.style())))
+                            .is_some_and(|first| std::ptr::addr_eq(layer.style(), Arc::as_ptr(first.style())))
                         && let Some(solid_background) = record.evaluation.solid
                     {
                         frame.background_color = solid_background;
@@ -928,7 +930,7 @@ impl RenderOrchestrator {
             return true;
         }
 
-        if self.layers.iter().any(|layer| layer.layer.has_transition()) {
+        if self.layers.iter().any(|layer| layer.has_transition()) {
             return true;
         }
 
@@ -1039,7 +1041,7 @@ impl RenderOrchestrator {
     /// with whether it draws into a named target.
     pub(crate) fn visit_draw_groups<'a>(&'a self, mut visit: impl FnMut(&'a FrameDraws, bool)) {
         for layer in &self.layers {
-            layer.layer.visit_draw_groups(&mut visit);
+            layer.visit_draw_groups(&mut visit);
         }
     }
 
@@ -1048,7 +1050,7 @@ impl RenderOrchestrator {
     /// the sky and the atmosphere, and the debug overlays.
     pub(crate) fn upload_draws(&mut self, gpu: &mut dyn Gpu, context: &mut Resources) {
         for layer in &mut self.layers {
-            layer.layer.upload(gpu, context);
+            layer.upload(gpu, context);
         }
         self.globe_depth_pass.upload(gpu, context);
         if let Some(sky) = self.sky_pass.sky() {
@@ -1076,13 +1078,13 @@ impl RenderOrchestrator {
     ) {
         if self.routes.order().is_empty() {
             for layer in &mut self.layers {
-                layer.layer.render_targets(gpu, parameters);
+                layer.render_targets(gpu, parameters);
             }
             return;
         }
         for index in 0..self.routes.order().len() {
             match self.routes.order()[index] {
-                Run::Own(layer) => self.layers[layer].layer.render_targets(gpu, parameters),
+                Run::Own(layer) => self.layers[layer].render_targets(gpu, parameters),
                 Run::Named(target) => self.render_named_target(gpu, parameters, target, frame_depth),
             }
         }
@@ -1113,7 +1115,7 @@ impl RenderOrchestrator {
         let opaque_pass_cutoff = std::mem::replace(&mut parameters.opaque_pass_cutoff, u32::MAX);
         parameters.pass = Pass::Translucent;
         for layer in self.routes.writers(target) {
-            self.layers[layer].layer.render(gpu, parameters, DrawOrder::BottomUp, Some(target));
+            self.layers[layer].render(gpu, parameters, DrawOrder::BottomUp, Some(target));
         }
         parameters.opaque_pass_cutoff = opaque_pass_cutoff;
         if let Err(error) = parameters.end_pass(gpu) {
@@ -1133,12 +1135,12 @@ impl RenderOrchestrator {
         match order {
             DrawOrder::BottomUp => {
                 for layer in &mut self.layers {
-                    layer.layer.render(gpu, parameters, order, None);
+                    layer.render(gpu, parameters, order, None);
                 }
             }
             DrawOrder::TopDown => {
                 for layer in self.layers.iter_mut().rev() {
-                    layer.layer.render(gpu, parameters, order, None);
+                    layer.render(gpu, parameters, order, None);
                 }
             }
         }
@@ -1173,7 +1175,7 @@ impl RenderOrchestrator {
 
     /// The layer `id`, of the type `L`, with its values.
     pub(crate) fn layer<L: crate::layer::Layer>(&self, id: &str) -> Option<(&L, &crate::layer::LayerValues<L::Style>)> {
-        let layer: &dyn std::any::Any = &*self.layers.get(*self.layer_indexes.get(id)?)?.layer;
+        let layer: &dyn std::any::Any = &**self.layers.get(*self.layer_indexes.get(id)?)?;
         let hosted = layer.downcast_ref::<crate::render_layer::Hosted<L>>()?;
         Some(hosted.parts())
     }
@@ -1249,15 +1251,17 @@ impl RenderOrchestrator {
     ) -> Result<Vec<mln_util::feature::Feature>, Error> {
         // A query answers from the layouts that arrived since the update.
         self.receive_tiles();
-        let render_layers: Vec<&RecordedLayer> = match &options.layer_ids {
-            Some(layer_ids) => {
-                layer_ids.iter().filter_map(|id| self.layer_indexes.get(id)).map(|&index| &self.layers[index]).collect()
-            }
-            None => self.layers.iter().collect(),
+        let render_layers: Vec<&dyn RenderLayer> = match &options.layer_ids {
+            Some(layer_ids) => layer_ids
+                .iter()
+                .filter_map(|id| self.layer_indexes.get(id))
+                .map(|&index| &*self.layers[index])
+                .collect(),
+            None => self.layers.iter().map(|layer| &**layer).collect(),
         };
-        let mut layers: HashMap<String, &RecordedLayer> = HashMap::default();
+        let mut layers: HashMap<String, &dyn RenderLayer> = HashMap::default();
         for layer in render_layers {
-            layers.entry(layer.layer.id().to_owned()).or_insert(layer);
+            layers.entry(layer.id().to_owned()).or_insert(layer);
         }
 
         self.query_rendered_features_in(geometry, options, &layers)
@@ -1267,7 +1271,7 @@ impl RenderOrchestrator {
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
         options: &crate::query::RenderedQueryOptions,
-        layers: &HashMap<String, &RecordedLayer>,
+        layers: &HashMap<String, &dyn RenderLayer>,
     ) -> Result<Vec<mln_util::feature::Feature>, Error> {
         let mut source_ids: VecSet<String> = VecSet::new();
         let mut filtered_layers = crate::geometry::feature_index::QueryLayers::default();
@@ -1276,7 +1280,7 @@ impl RenderOrchestrator {
             if !record.needs_rendering() || !record.supports_zoom(self.zoom_history.last_zoom) {
                 continue;
             }
-            filtered_layers.insert(id.clone(), &*layer.layer);
+            filtered_layers.insert(id.clone(), *layer);
             source_ids.insert(record.source.clone());
         }
 

@@ -18,7 +18,7 @@ use super::{
 };
 use crate::Registry;
 use crate::frame::FramePlan;
-use crate::render_layer::{RecordedLayer, RenderLayer};
+use crate::render_layer::RenderLayer;
 use crate::render_source::RenderSource;
 use crate::render_tile::{FoundTile, TileContent, ViewPlace};
 use crate::tile::store::TileStore;
@@ -226,7 +226,7 @@ impl Placements {
     /// tiles. Sets the frame's fade and when it repaints for placement.
     pub(crate) fn place(
         &mut self,
-        layers: &[RecordedLayer],
+        layers: &[Box<dyn RenderLayer>],
         update_parameters: &UpdateParameters,
         store: &mut TileStore,
         frame: &mut FramePlan,
@@ -239,7 +239,7 @@ impl Placements {
             let frame = &mut ErasedFrame {
                 layers: &self.layers,
                 tiles: &self.tiles,
-                recorded: layers,
+                render_layers: layers,
                 view: &update_parameters.view,
                 buckets: &mut *store,
                 placed: &mut self.placed,
@@ -327,7 +327,7 @@ impl Placements {
     /// placement.
     pub(crate) fn update(
         &mut self,
-        layers: &[RecordedLayer],
+        layers: &[Box<dyn RenderLayer>],
         update_parameters: &UpdateParameters,
         store: &mut dyn LaidBuckets,
     ) {
@@ -335,7 +335,7 @@ impl Placements {
             let frame = &mut ErasedFrame {
                 layers: &self.layers,
                 tiles: &self.tiles,
-                recorded: layers,
+                render_layers: layers,
                 view: &update_parameters.view,
                 buckets: &mut *store,
                 placed: &mut self.placed,
@@ -357,7 +357,7 @@ impl Placements {
     /// the current one.
     fn run(
         &mut self,
-        layers: &[RecordedLayer],
+        layers: &[Box<dyn RenderLayer>],
         places: &[bool],
         update_parameters: &UpdateParameters,
         store: &mut dyn LaidBuckets,
@@ -367,7 +367,7 @@ impl Placements {
             .layers
             .iter()
             .map(|layer| PlacingFrameLayer {
-                layer: &*layers[layer.layer].layer,
+                layer: &*layers[layer.layer],
                 participant: layer.participant,
                 tiles: &self.tiles[layer.tiles.start..layer.tiles.start + layer.led],
             })

@@ -102,6 +102,10 @@ pub(crate) struct Hosted<L: Layer> {
     globe: bool,
     /// The layer's draws of the frame.
     frame_draws: Draws,
+    record: LayerRecord,
+    /// Where the participant of the layer's type is among the renderer's,
+    /// for a type whose layers place.
+    participant: Option<usize>,
 }
 
 impl<L: Layer> Hosted<L> {
@@ -111,11 +115,14 @@ impl<L: Layer> Hosted<L> {
     }
 
     /// The render layer of the layer `style`, of the type `entry`, before
-    /// its values transition, which joins the renderer of `res`.
+    /// its values transition, which joins the renderer of `res`, and places
+    /// through the renderer's participant at `participant`, if its type has
+    /// one.
     pub(crate) fn new(
         entry: &'static dyn ErasedLayerType,
         style: Arc<LayerStyle<L::Style>>,
         res: &mut Resources,
+        participant: Option<usize>,
     ) -> Self {
         let unevaluated = style.paint.untransitioned();
         let evaluated = Arc::new(EvaluatedLayer::with_paint(entry, Arc::clone(&style), Default::default()));
@@ -123,6 +130,8 @@ impl<L: Layer> Hosted<L> {
         let after_gpu = res.after_gpu.handle().clone();
         let layer = L::new(&mut NewCx { layer: &values, res, after_gpu: &after_gpu });
         Hosted {
+            record: LayerRecord::new::<L>(entry, &values.style, Evaluation::NONE, false),
+            participant,
             entry,
             style_dependencies: <L::Style as StyleLayerType>::PaintProperties::dependencies(&values.unevaluated),
             values,
@@ -137,8 +146,8 @@ impl<L: Layer> Hosted<L> {
 }
 
 /// What the engine reads of a render layer to run a frame and answer
-/// queries, kept as plain data beside it ([`RecordedLayer`]), so that
-/// reading a fact takes no dyn call.
+/// queries ([`RenderLayer::record`]). The layer's restyle, evaluation and
+/// update keep it.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct LayerRecord {
     /// The kind of source the layer's type draws, `None` for a type without
@@ -164,6 +173,28 @@ pub(crate) struct LayerRecord {
 }
 
 impl LayerRecord {
+    /// The record of a layer of the type `L`, of the style `style` and the
+    /// type `entry`, with `evaluation` and `draws`.
+    fn new<L: Layer>(
+        entry: &dyn ErasedLayerType,
+        style: &LayerStyle<L::Style>,
+        evaluation: Evaluation,
+        draws: bool,
+    ) -> Self {
+        let base = style.base();
+        LayerRecord {
+            input: crate::layer::input_source::<L>(),
+            source: base.source.clone(),
+            visible: base.visibility != VisibilityType::None,
+            min_zoom: base.min_zoom,
+            max_zoom: base.max_zoom,
+            evaluation,
+            draws,
+            volume: L::VOLUME,
+            places: entry.places(style),
+        }
+    }
+
     /// Whether the layer draws at `zoom`. A minimum zoom of 0 is no
     /// minimum: the globe zooms below 0 toward the poles.
     pub(crate) fn supports_zoom(&self, zoom: f32) -> bool {
@@ -174,71 +205,6 @@ impl LayerRecord {
     /// Whether the layer draws and is visible.
     pub(crate) fn needs_rendering(&self) -> bool {
         self.draws && self.visible
-    }
-}
-
-/// A render layer with its [`LayerRecord`], which alone holds what the
-/// layer's evaluation says and whether it draws. Its own
-/// [`restyle`](Self::restyle), [`evaluate`](Self::evaluate),
-/// [`update`](Self::update) and [`update_draws`](Self::update_draws) take
-/// the place of the layer's, and keep and read the record; the engine does
-/// the rest with the [`layer`](Self::layer) itself.
-pub(crate) struct RecordedLayer {
-    record: LayerRecord,
-    pub(crate) layer: Box<dyn RenderLayer>,
-    /// Where the participant of the layer's type is among the renderer's,
-    /// for a type whose layers place.
-    participant: Option<usize>,
-}
-
-impl RecordedLayer {
-    pub(crate) fn new(layer: Box<dyn RenderLayer>, participant: Option<usize>) -> RecordedLayer {
-        RecordedLayer { record: layer.record(Evaluation::NONE, false), layer, participant }
-    }
-
-    /// What the engine reads of the layer.
-    pub(crate) fn record(&self) -> &LayerRecord {
-        &self.record
-    }
-
-    /// The renderer's participant that places the layer, if it places.
-    pub(crate) fn placing(&self) -> Option<usize> {
-        self.participant.filter(|_| self.record.places)
-    }
-
-    /// See [`RenderLayer::restyle`].
-    pub(crate) fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
-        self.layer.restyle(parameters, style);
-        self.record = self.layer.record(self.record.evaluation, self.record.draws);
-    }
-
-    /// See [`RenderLayer::evaluate`].
-    pub(crate) fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let evaluation = self.layer.evaluate(parameters);
-        self.record.evaluation = evaluation;
-        self.record.draws = evaluation.draws;
-    }
-
-    /// See [`RenderLayer::update`]. The layer draws from then on, until
-    /// the next evaluation, where a tile has something for it to draw.
-    pub(crate) fn update(&mut self, update: &mut LayerUpdate<'_>) {
-        self.record.draws |= self.layer.update(update);
-    }
-
-    /// See [`RenderLayer::update_draws`].
-    #[expect(clippy::too_many_arguments, reason = "the layer's frame, each from another part of the renderer")]
-    pub(crate) fn update_draws(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        paint: &mut PaintParameters<'_>,
-        images: &ImageStore,
-        source: Option<FrameSourceTiles<'_>>,
-        found: &[FoundTile],
-        index: usize,
-        routes: &mut Routes,
-    ) {
-        let evaluation = self.record.evaluation;
-        self.layer.update_draws(gpu, paint, evaluation, images, source, found, index, routes);
     }
 }
 
@@ -260,14 +226,17 @@ pub(crate) trait RenderLayer: Any {
         &self.style().base().id
     }
 
-    /// The facts about the layer that the engine keeps beside it, with
-    /// `evaluation` and `draws` as the record holds them.
-    fn record(&self, evaluation: Evaluation, draws: bool) -> LayerRecord;
+    /// What the engine reads of the layer.
+    fn record(&self) -> &LayerRecord;
+
+    /// The renderer's participant that places the layer, if it places.
+    fn placing(&self) -> Option<usize>;
 
     /// Makes `style`, the changed style of the layer (of the same id and
     /// type), the layer's, drops its tile values and draws, which were made
     /// for the previous style's values, and begins transitions to the new
-    /// values. A style of another type leaves the layer's.
+    /// values. A style of another type leaves the layer's. The record is
+    /// made again, with its evaluation and whether it draws.
     fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>);
 
     /// Makes `style`, the layer's style with other
@@ -280,8 +249,9 @@ pub(crate) trait RenderLayer: Any {
     fn transition(&mut self, parameters: &TransitionParameters);
 
     /// Evaluates the layer's paint values for a frame of `parameters`, and
-    /// returns what the layer says of them ([`Layer::evaluate`]).
-    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) -> Evaluation;
+    /// records what the layer says of them ([`Layer::evaluate`]), which
+    /// says whether it draws until the next evaluation.
+    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters);
 
     /// Whether a paint value of the layer is still in transition.
     fn has_transition(&self) -> bool;
@@ -291,13 +261,14 @@ pub(crate) trait RenderLayer: Any {
 
     /// The frame's update of the layer: finds the tiles of `update`'s source
     /// the layer draws, which it adds to `update.found`, or the tiles that
-    /// cover the view for a layer of no source. Returns whether one of
-    /// their buckets was laid out with values that draw.
-    fn update(&mut self, update: &mut LayerUpdate<'_>) -> bool;
+    /// cover the view for a layer of no source. Where one of their buckets
+    /// was laid out with values that draw, the layer draws from then on,
+    /// until the next evaluation.
+    fn update(&mut self, update: &mut LayerUpdate<'_>);
 
     /// The encode's run of the layer, the frame's layer at `index`: drops
-    /// its tile values where the frame's projection changed, and where
-    /// `evaluation` draws, gives the tiles of `source` that its update found
+    /// its tile values where the frame's projection changed, and where its
+    /// evaluation draws, gives the tiles of `source` that its update found
     /// in `found` their data, runs [`Layer::update`], routes the layer
     /// through `routes` with the named targets it read, runs [`Layer::tile`]
     /// for the tiles without a value and [`Layer::prepare`], and readies the
@@ -307,7 +278,6 @@ pub(crate) trait RenderLayer: Any {
         &mut self,
         gpu: &mut dyn Gpu,
         paint: &mut PaintParameters<'_>,
-        evaluation: Evaluation,
         images: &ImageStore,
         source: Option<FrameSourceTiles<'_>>,
         found: &[FoundTile],
@@ -413,19 +383,12 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         Arc::<EvaluatedLayer<L::Style>>::clone(&self.values.evaluated)
     }
 
-    fn record(&self, evaluation: Evaluation, draws: bool) -> LayerRecord {
-        let base = self.values.style.base();
-        LayerRecord {
-            input: crate::layer::input_source::<L>(),
-            source: base.source.clone(),
-            visible: base.visibility != VisibilityType::None,
-            min_zoom: base.min_zoom,
-            max_zoom: base.max_zoom,
-            evaluation,
-            draws,
-            volume: L::VOLUME,
-            places: self.entry.places(&*self.values.style),
-        }
+    fn record(&self) -> &LayerRecord {
+        &self.record
+    }
+
+    fn placing(&self) -> Option<usize> {
+        self.participant.filter(|_| self.record.places)
     }
 
     fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
@@ -434,6 +397,8 @@ impl<L: Layer> RenderLayer for Hosted<L> {
             self.values.style = recovered;
         }
         self.transition(parameters);
+        let LayerRecord { evaluation, draws, .. } = self.record;
+        self.record = LayerRecord::new::<L>(self.entry, &self.values.style, evaluation, draws);
     }
 
     fn set_data(&mut self, style: &Arc<dyn ErasedLayerStyle>) {
@@ -449,7 +414,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         self.style_dependencies = <L::Style as StyleLayerType>::PaintProperties::dependencies(&values.unevaluated);
     }
 
-    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) -> Evaluation {
+    fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
         type Paint<L> = <<L as Layer>::Style as StyleLayerType>::PaintProperties;
         let values = &mut self.values;
         let paint = Paint::<L>::evaluate_with_previous(&mut values.unevaluated, parameters, &values.evaluated.paint);
@@ -460,7 +425,8 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         let evaluation = self.layer.evaluate(EvaluateCx { layer: values, parameters, evaluated: &mut evaluated });
         evaluated.draws = evaluation.draws;
         values.evaluated = Arc::new(evaluated);
-        evaluation
+        self.record.evaluation = evaluation;
+        self.record.draws = evaluation.draws;
     }
 
     fn has_transition(&self) -> bool {
@@ -471,27 +437,26 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         <L::Style as StyleLayerType>::PaintProperties::CROSSFADES && self.values.evaluated.crossfade.t != 1.0
     }
 
-    fn update(&mut self, update: &mut LayerUpdate<'_>) -> bool {
-        <L::Input as input::Find<L::Style>>::update(
+    fn update(&mut self, update: &mut LayerUpdate<'_>) {
+        self.record.draws |= <L::Input as input::Find<L::Style>>::update(
             &mut self.frame_tiles,
             update,
             &self.values.style.id,
             &mut self.tile_values,
-        )
+        );
     }
 
     fn update_draws(
         &mut self,
         gpu: &mut dyn Gpu,
         paint: &mut PaintParameters<'_>,
-        evaluation: Evaluation,
         images: &ImageStore,
         source: Option<FrameSourceTiles<'_>>,
         found: &[FoundTile],
         index: usize,
         routes: &mut Routes,
     ) {
-        let frame = paint.frame;
+        let (frame, evaluation) = (paint.frame, self.record.evaluation);
         // The tiles of a layer without a source have other geometry on the
         // globe.
         if frame.camera.is_globe() != self.globe {

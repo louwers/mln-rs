@@ -11,7 +11,7 @@ use super::{
 };
 use crate::bucket::ErasedBucket;
 use crate::layer::{Layer, LayerValues};
-use crate::render_layer::{Hosted, RecordedLayer, RenderLayer};
+use crate::render_layer::{Hosted, RenderLayer};
 use crate::tile::contents::LayoutResult;
 
 /// The buckets of laid-out tiles, by their keys: the tile store's, or the
@@ -34,7 +34,7 @@ pub(crate) struct ErasedFrame<'a> {
     /// Their tiles, a run per layer.
     pub(crate) tiles: &'a [PlacingTile],
     /// The renderer's layers, which `layers` index.
-    pub(crate) recorded: &'a [RecordedLayer],
+    pub(crate) render_layers: &'a [Box<dyn RenderLayer>],
     pub(crate) view: &'a View,
     pub(crate) buckets: &'a mut dyn LaidBuckets,
     /// The current placement's index.
@@ -87,14 +87,14 @@ fn with_cx<P: Placement, R>(
     frame: &mut ErasedFrame<'_>,
     hook: impl FnOnce(&mut PlacementCx<'_, P::Layer>) -> R,
 ) -> R {
-    let (tiles, recorded) = (frame.tiles, frame.recorded);
+    let (tiles, render_layers) = (frame.tiles, frame.render_layers);
     let own = frame.layers.iter().filter(|layer| layer.participant == participant);
     // Sized at once: a filter leaves the length unknown, and the vector would
     // grow in steps.
     let mut typed: SmallVec<[PlacingLayer<'_, P::Layer>; 8]> = SmallVec::with_capacity(own.clone().count());
     typed.extend(own.filter_map(|layer| {
         let (tiles, followers) = tiles[layer.tiles.clone()].split_at(layer.led);
-        Some(PlacingLayer { layer: values::<P>(&*recorded[layer.layer].layer)?, tiles, followers })
+        Some(PlacingLayer { layer: values::<P>(&*render_layers[layer.layer])?, tiles, followers })
     }));
     let buckets = PlacementBuckets::new(&mut *frame.buckets);
     hook(&mut PlacementCx::new(&typed, frame.view, buckets, &mut *frame.placed))
