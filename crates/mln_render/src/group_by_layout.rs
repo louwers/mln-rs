@@ -10,7 +10,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use mln_style::expression::Expr;
-use mln_style::layer_type::{ErasedLayerStyle, LayerTypeInfo};
+use mln_style::layer_type::ErasedLayerStyle;
 use mln_style_types::VisibilityType;
 use mln_util::hash::{HashMap, RandomState};
 
@@ -18,7 +18,7 @@ use crate::erased_layer::ErasedEvaluatedLayer;
 
 pub(crate) struct LayoutGroupKey {
     // Direct comparable fields (fast path)
-    pub(crate) type_info: LayerTypeInfo,
+    pub(crate) type_name: &'static str,
     pub(crate) source: String,
     pub(crate) source_layer: String,
     pub(crate) min_zoom: f32,
@@ -39,7 +39,7 @@ pub(crate) struct LayoutGroupKey {
 impl PartialEq for LayoutGroupKey {
     fn eq(&self, other: &Self) -> bool {
         // Fast path: compare types and scalars first
-        if self.type_info.name != other.type_info.name {
+        if self.type_name != other.type_name {
             return false;
         }
         if self.min_zoom != other.min_zoom {
@@ -94,7 +94,7 @@ fn create_group_key(style: &Arc<dyn ErasedLayerStyle>) -> LayoutGroupKey {
     style.base().visibility.hash(&mut state);
     style.base().filter.expression_hash().hash(&mut state);
     LayoutGroupKey {
-        type_info: style.info(),
+        type_name: style.info().name,
         source: style.base().source.clone(),
         source_layer: style.base().source_layer.clone(),
         min_zoom: style.base().min_zoom,
