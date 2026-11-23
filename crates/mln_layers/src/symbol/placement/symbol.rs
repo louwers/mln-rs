@@ -177,7 +177,9 @@ impl Placement {
             pools: &state.text.pools,
             font_size: evaluate_size_for_feature(&ctx.text_size, run),
         };
-        let anchors = text.anchors();
+        let mut anchors = std::mem::take(&mut self.anchors);
+        anchors.clear();
+        anchors.extend(text.variable_anchors.iter().flatten().map(|pair| pair.anchor_type));
         let placed = if anchors.is_empty() {
             self.place_in_writing_modes(text, ctx, |this, vertical| {
                 if vertical && !(ctx.bucket.allow_vertical_placement && text.vertical_collision.is_some()) {
@@ -201,7 +203,7 @@ impl Placement {
                 PlacedText { result, vertical, shift: None }
             })
         } else if !text.collision.along_line && !state.symbol_instance_pools.boxes(&text.collision).is_empty() {
-            let anchors = self.anchors_in_order(id, anchors, ctx);
+            self.order_anchors(id, &mut anchors, ctx);
             let placed = self.place_in_writing_modes(text, ctx, |this, vertical| {
                 if vertical && !(ctx.bucket.allow_vertical_placement && text.vertical_collision.is_some()) {
                     return PlacedText::default();
@@ -223,8 +225,10 @@ impl Placement {
             }
             placed
         } else {
+            self.anchors = anchors;
             return None;
         };
+        self.anchors = anchors;
         if ctx.bucket.allow_vertical_placement
             && !placed.result.placed
             && let Some(prev) = self.prev().and_then(|prev| prev.placed_orientations.get(&id)).copied()
@@ -257,24 +261,23 @@ impl Placement {
         PlacedText { vertical: false, ..placed }
     }
 
-    /// `anchors` in the order to try them: a label placed before tries its
-    /// anchor first, and in a tilted view that one alone.
-    fn anchors_in_order(
-        &self,
-        id: NonZeroU32,
-        anchors: Vec<SymbolAnchorType>,
-        ctx: &BucketContext<'_>,
-    ) -> Vec<SymbolAnchorType> {
+    /// Puts `anchors`, the variable anchors of the label `id`, in the order
+    /// to try them: a label placed before tries its anchor first, and in a
+    /// tilted view that one alone.
+    fn order_anchors(&self, id: NonZeroU32, anchors: &mut Vec<SymbolAnchorType>, ctx: &BucketContext<'_>) {
         let Some(prev_anchor) = self.prev().and_then(|prev| prev.variable_offsets.get(&id)).map(|o| o.anchor)
         else {
-            return anchors;
+            return;
         };
         if anchors.first().is_none_or(|first| *first == prev_anchor) || !anchors.contains(&prev_anchor) {
-            return anchors;
+            return;
         }
-        let rest = anchors.iter().copied().filter(|anchor| *anchor != prev_anchor);
-        let tilted = ctx.view.pitch() != 0.0;
-        std::iter::once(prev_anchor).chain(rest.filter(|_| !tilted)).collect()
+        if ctx.view.pitch() == 0.0 {
+            anchors.retain(|anchor| *anchor != prev_anchor);
+        } else {
+            anchors.clear();
+        }
+        anchors.insert(0, prev_anchor);
     }
 
     /// Places `label`'s text, `vertical` or not, at the first of its

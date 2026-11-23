@@ -210,11 +210,6 @@ pub(crate) struct TextPart {
 }
 
 impl TextPart {
-    /// The variable anchors in the order to try them.
-    pub(crate) fn anchors(&self) -> Vec<SymbolAnchorType> {
-        self.variable_anchors.iter().flatten().map(|anchor_offset| anchor_offset.anchor_type).collect()
-    }
-
     /// The collision feature of `vertical` text.
     pub(crate) fn collision(&self, vertical: bool) -> &CollisionFeature {
         if vertical { self.vertical_collision.as_ref().unwrap_or(&self.collision) } else { &self.collision }

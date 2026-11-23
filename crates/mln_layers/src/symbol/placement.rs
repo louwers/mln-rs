@@ -401,10 +401,12 @@ pub(crate) struct Placement {
     /// The cross-tile ids of the symbols that the layer being placed placed
     /// already; in tile mode, those of every layer, in both rounds.
     seen: HashSet<NonZeroU32>,
-    /// The projected boxes of the symbol being placed, and the order of
-    /// the symbols of the bucket being placed, kept for their memory.
+    /// The projected boxes of the symbol being placed, the variable anchors
+    /// of its label, and the order of the symbols of the bucket being
+    /// placed, kept for their memory.
     text_boxes: Vec<Option<Shape>>,
     icon_boxes: Vec<Option<Shape>>,
+    anchors: Vec<SymbolAnchorType>,
     order: Vec<usize>,
 }
 
