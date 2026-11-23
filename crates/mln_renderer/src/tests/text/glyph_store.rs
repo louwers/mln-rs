@@ -1594,6 +1594,39 @@ fn a_device_face_loads_without_a_file_source() {
     assert_eq!(engine.loads.lock().len(), 2);
 }
 
+/// A later wait requests a fallback face's file that failed to load again
+/// and draws the face's glyphs once it loads.
+#[test]
+fn a_fallback_face_that_failed_to_load_is_requested_again() {
+    let (test, _) = letter_test(&StubChooser::new(|_| None));
+    let _log = SquelchLog::new();
+    let requests = Arc::new(AtomicU32::new(0));
+    let r = Arc::clone(&requests);
+    test.file_source.set_response(Kind::Glyphs, move |resource: &Resource| {
+        assert_eq!(resource.url, "app://face.ttf");
+        let mut response = Response::new();
+        if r.fetch_add(1, Ordering::SeqCst) == 0 {
+            response.error = Some(Box::new(ResourceError::new(Reason::Other, "Failed by the test case")));
+        } else {
+            response.data = Some(Arc::new(b"font".to_vec()));
+        }
+        Some(response)
+    });
+    let face = FontFace { type_: FONT_FACE, ..FontFace::new("", "app://face.ttf", vec![(0x4E2D, 0x4E2D)]) };
+    test.glyph_store().set_font_faces(Some(Arc::new(vec![face])));
+    test.glyph_store().set_url("");
+    let range = (test_stack(), get_glyph_range(GlyphID::with_type(0, FONT_FACE)));
+
+    let glyphs = test.run_until_answered(dependencies(&['中']));
+    assert!(glyphs[&font_stack_hash(&test_stack())][&gid('中')].is_none());
+    assert_eq!(*test.requestor.failed.borrow(), VecSet::from([range.clone()]), "the answer names the face");
+
+    let glyphs = test.run_until_answered(dependencies(&['中']));
+    assert!(glyphs[&font_stack_hash(&test_stack())][&gid('中')].is_some(), "the face's glyph");
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
+    assert_eq!(test.glyph_store().take_recovered(), VecSet::from([range]));
+}
+
 // A device glyph is the glyph its font maps the character to, as a PBF's
 // is, even where shaping the character alone splits it.
 #[test]

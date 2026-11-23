@@ -116,7 +116,7 @@ struct Entry {
     /// Local glyphs and the glyphs of font files. PBF glyphs are in the
     /// ranges.
     glyphs: BTreeMap<GlyphID, Arc<Glyph>>,
-    /// The PBF glyph IDs that no local font has.
+    /// The PBF glyph IDs that no local font has, of the faces that loaded.
     no_local: BTreeSet<GlyphID>,
     /// The device fonts of the characters asked about.
     device: HashMap<Vec<char>, DeviceFont>,
@@ -547,7 +547,11 @@ impl GlyphStore {
             entry.glyphs.insert(glyph_id, Arc::new(Glyph { id: glyph_id, ..glyph }));
             Source::Has
         } else {
-            entry.no_local.insert(glyph_id);
+            // A face that failed may have the glyph: a later wait requests
+            // its file again.
+            if failed.is_empty() {
+                entry.no_local.insert(glyph_id);
+            }
             Source::Lacks { failed }
         }
     }
