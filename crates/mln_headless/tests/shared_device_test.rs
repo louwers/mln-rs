@@ -1,6 +1,8 @@
 // Frontends on one device, as maplibre-native-ffi's offscreen device shares
 // it: each draws its own map, in turn.
 
+use std::sync::Arc;
+
 use mln_headless::HeadlessFrontend;
 use mln_map_types::MapMode;
 use mln_runtime::map::{MapCore, MapCoreOptions};
@@ -13,7 +15,7 @@ fn render_on(device: &mln_runtime::Device, color: &str) -> Vec<u8> {
     let size = Size::new(64, 64);
     let run_loop = Queue::new();
     let pool = Pool::new(4);
-    let mut frontend = HeadlessFrontend::with_device(device.clone(), size, 1.0, Default::default(), &run_loop, &pool)
+    let mut frontend = HeadlessFrontend::with_device(device.clone(), size, 1.0, Arc::default(), &run_loop, &pool)
         .expect("a headless frontend");
     let mut map = MapCore::with_resource_options(
         MapCoreOptions { map_mode: MapMode::Static, size, ..Default::default() },
