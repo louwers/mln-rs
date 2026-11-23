@@ -56,6 +56,9 @@ const PHASES: usize = 3;
 struct Reports {
     /// The map finished loading its style.
     loaded: bool,
+    /// A style document loaded since the last frame, which takes the
+    /// page's projection.
+    style_loaded: bool,
     /// The draw calls of the last frame, and the bytes of the live textures
     /// and of the live buffers after it.
     stats: [f64; 3],
@@ -75,6 +78,7 @@ impl Reports {
             let RuntimeEventKind::Map(event) = &event.kind else { continue };
             match event {
                 MapEvent::LoadingFinished => self.loaded = true,
+                MapEvent::StyleLoaded => self.style_loaded = true,
                 MapEvent::LoadingFailed(error) => {
                     web_sys::console::error_1(&JsValue::from_str(&format!("map failed to load: {error:?}")));
                 }
@@ -125,6 +129,9 @@ pub struct WebMap {
     phases: [f64; PHASES],
     /// The check of the GPU that `start_gpu_check` started.
     gpu_check: GpuCheck,
+    /// The projection type the page draws with, or `None` for the style's
+    /// own (`set_projection`).
+    projection: Option<String>,
 }
 
 #[wasm_bindgen]
@@ -175,6 +182,7 @@ impl WebMap {
         let options = MapOptions {
             map: mln_map::MapOptions { size, pixel_ratio: pixel_ratio as f32, ..Default::default() },
             event_mask: EventMask::NONE
+                .with(EventType::MapStyleLoaded)
                 .with(EventType::MapLoadingFinished)
                 .with(EventType::MapLoadingFailed)
                 .with(EventType::MapRenderFrameFinished),
@@ -224,12 +232,26 @@ impl WebMap {
             tasks: 0.0,
             phases: [0.0; PHASES],
             gpu_check: GpuCheck::default(),
+            projection: None,
         })
     }
 
     /// Loads a style from a URL.
     pub fn set_style_url(&self, url: &str) {
         sent(self.map.set_style_url(url));
+    }
+
+    /// Draws the map with the style spec's projection type `projection`
+    /// (`mercator`, `vertical-perspective` or `globe`) in place of the
+    /// style's, now and in each style that loads after; `None` goes back to
+    /// the style's own.
+    pub fn set_projection(&mut self, projection: Option<String>) {
+        self.projection = projection.clone();
+        sent(self.map.with_core(move |map| {
+            if let Err(error) = set_projection(map, projection.as_deref()) {
+                log_refused(&error);
+            }
+        }));
     }
 
     /// Moves the camera.
@@ -367,6 +389,17 @@ impl WebMap {
         // on each rather than at its deadlines.
         self.gestures.tick(now);
         self.answer_events();
+        if std::mem::take(&mut self.reports.lock().style_loaded)
+            && let Some(projection) = self.projection.clone()
+        {
+            // A command that runs once another style has started loading
+            // changes nothing.
+            sent(self.map.with_core(move |map| {
+                if let Err(error) = set_projection(map, Some(&projection)) {
+                    log_refused(&error);
+                }
+            }));
+        }
         // A demand renders the map once the commands sent before it ran.
         let sent_sequence = self.map.sent_sequence();
         if self.redraw.swap(false, Ordering::SeqCst) || self.force || sent_sequence != self.demanded {
@@ -607,6 +640,26 @@ fn sent<T>(result: Result<T, Error>) -> Option<T> {
 
 fn log_refused(error: &Error) {
     Log::error(Event::General, format!("the map refused a command: {error}"));
+}
+
+/// Sets the style's `projection` to the type `projection`, or for `None`
+/// back to the style document's own. Does nothing while no style is loaded:
+/// the map sets it once one loads. Fails for a type other than `mercator`,
+/// `vertical-perspective` and `globe`.
+fn set_projection(map: &mut mln_map::Map, projection: Option<&str>) -> Result<(), Error> {
+    if !map.style_document_loaded() {
+        return Ok(());
+    }
+    let json = match projection {
+        Some(kind @ ("mercator" | "vertical-perspective" | "globe")) => format!(r#"{{"type":"{kind}"}}"#),
+        Some(kind) => return Err(Error::invalid_argument(format!("no projection type {kind:?}"))),
+        // The style parser's JSON tree, which the module has already.
+        None => serde_json::from_str::<serde_json_borrow::Value<'_>>(map.style().get_json())
+            .ok()
+            .and_then(|document| serde_json::to_string(document.get("projection")).ok())
+            .unwrap_or_else(|| "null".to_owned()),
+    };
+    map.edit_loaded_style(|style| style.set_root_property_json("projection", &json))
 }
 
 impl WebMap {

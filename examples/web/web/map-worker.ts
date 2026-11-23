@@ -557,6 +557,9 @@ async function run({
         case "globeFreeBearing":
           map.set_globe_free_bearing(data.on);
           break;
+        case "projection":
+          map.set_projection(data.projection ?? undefined);
+          break;
         case "follow":
           map.follow(...data.camera);
           break;
