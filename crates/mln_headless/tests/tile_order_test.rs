@@ -1,10 +1,11 @@
-// Where circles of two tiles overlap, the frame's order of its tiles stacks
-// them, whatever views came before.
+// Where circles, or n-gons, of two tiles overlap, the frame's order of its
+// tiles stacks them, whatever views came before.
 
 use std::sync::Arc;
 
 use mln_headless::HeadlessFrontend;
 use mln_map_types::{CameraOptions, MapMode};
+use mln_render::{Registry, RegistryBuilder};
 use mln_runtime::map::{MapCore, MapCoreOptions};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_util::error::ErrorKind;
@@ -25,9 +26,18 @@ fn longitude(pixels: f64) -> f64 {
     pixels * 360.0 / (512.0 * 2f64.powf(ZOOM))
 }
 
-/// Two circles, blue just west of the meridian and red just east of it,
-/// each in its own tile, which overlap on the meridian.
-fn style() -> String {
+/// The layer types that draw points: the built-in `circle` and `mln_ngon`'s,
+/// whose draws reach the engine through the layer contract alone.
+fn registry() -> Arc<Registry> {
+    let mut builder = RegistryBuilder::new();
+    mln_rs::register_builtins(&mut builder).unwrap();
+    mln_ngon::register(&mut builder).unwrap();
+    builder.build()
+}
+
+/// Two points of the layer `points`, blue just west of the meridian and red
+/// just east of it, each in its own tile, which overlap on the meridian.
+fn style(points: &str) -> String {
     let point = |lng: f64, color: &str| {
         format!(
             r#"{{"type": "Feature", "properties": {{"color": "{color}"}},
@@ -48,20 +58,15 @@ fn style() -> String {
             }},
             "layers": [
                 {{"id": "background", "type": "background", "paint": {{"background-color": "white"}}}},
-                {{
-                    "id": "circles",
-                    "type": "circle",
-                    "source": "points",
-                    "paint": {{"circle-color": ["get", "color"], "circle-radius": 10}}
-                }}
+                {points}
             ]
         }}"#
     )
 }
 
-/// The still of the map of [`style`] seen from each longitude of `centers`
-/// in turn: the last one; `None` without a device.
-fn render(centers: &[f64]) -> Option<PremultipliedImage> {
+/// The still of the map of [`style`] with `points` seen from each longitude
+/// of `centers` in turn: the last one; `None` without a device.
+fn render(points: &str, centers: &[f64]) -> Option<PremultipliedImage> {
     let size = Size::new(SIDE, SIDE);
     let (queue, pool) = (Queue::new(), Pool::new(4));
     let device = match mln_headless::harness_device() {
@@ -74,11 +79,13 @@ fn render(centers: &[f64]) -> Option<PremultipliedImage> {
     };
     let mut frontend =
         HeadlessFrontend::with_device(device, size, 1.0, Arc::default(), &queue, &pool).expect("a frontend");
+    let registry = registry();
+    frontend.set_registry(Arc::clone(&registry));
     let file_source = Arc::new(StubFileSource::new(ResponseType::Synchronous));
     let options = MapCoreOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() };
-    let mut map = MapCore::new(file_source, options, crate::support::registry(), &pool).unwrap();
+    let mut map = MapCore::new(file_source, options, Arc::clone(registry.style()), &pool).unwrap();
     frontend.attach(&mut map);
-    map.load_style_json(&style());
+    map.load_style_json(&style(points));
     let mut image = None;
     for &lng in centers {
         let center = LatLng::new(LATITUDE, lng).unwrap();
@@ -94,19 +101,44 @@ fn middle(image: &PremultipliedImage) -> [u8; 4] {
     image.data[i..i + 4].try_into().unwrap()
 }
 
+const CIRCLES: &str = r#"{
+    "id": "circles",
+    "type": "circle",
+    "source": "points",
+    "paint": {"circle-color": ["get", "color"], "circle-radius": 10}
+}"#;
+
+const NGONS: &str = r#"{
+    "id": "ngons",
+    "type": "org.maplibre.ngon",
+    "source": "points",
+    "paint": {"ngon-color": ["get", "color"], "ngon-radius": 10, "ngon-corners": 6}
+}"#;
+
 /// The overlap of the circles shows the same circle in a fresh view of the
 /// meridian as after a view of only the west tile, or only the east one.
 #[test]
 fn circles_of_two_tiles_stack_alike_however_the_view_is_reached() {
+    stack_alike_however_the_view_is_reached(CIRCLES);
+}
+
+/// As [`circles_of_two_tiles_stack_alike_however_the_view_is_reached`], for
+/// an extension's layer type that draws points.
+#[test]
+fn ngons_of_two_tiles_stack_alike_however_the_view_is_reached() {
+    stack_alike_however_the_view_is_reached(NGONS);
+}
+
+fn stack_alike_however_the_view_is_reached(points: &str) {
     let (west, east) = (longitude(-256.0), longitude(256.0));
-    let views = [&[0.0][..], &[west, 0.0], &[east, 0.0]].map(render);
+    let views = [&[0.0][..], &[west, 0.0], &[east, 0.0]].map(|centers| render(points, centers));
     let Some(overlaps) = views.iter().map(|view| view.as_ref().map(middle)).collect::<Option<Vec<_>>>() else {
         return;
     };
     for &[r, g, b, _] in &overlaps {
         assert!(
             (r > 200 && g < 60 && b < 60) || (r < 60 && g < 60 && b > 200),
-            "a circle at the overlap, not {:?}",
+            "a point at the overlap, not {:?}",
             [r, g, b]
         );
     }

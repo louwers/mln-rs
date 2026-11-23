@@ -66,9 +66,9 @@ impl Layer for CircleLayer {
                 globe_extrude_scale: at.globe_extrude_scale,
                 ..CircleDrawableUBO::default()
             };
-            // The circles of a tile draw over those of the tiles made
-            // before it.
-            main.push_at(mesh, &at, Draw { order: mesh.seq() as i64, ..Draw::DEFAULT }, draw);
+            // The circles of a tile draw over those of the tiles before it
+            // in the frame's order, whatever views came before.
+            main.push_at(mesh, &at, Draw::DEFAULT, draw);
         }
     }
 
