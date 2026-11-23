@@ -69,3 +69,79 @@ fn a_removed_layer_goes_and_a_new_source_draws_its_own_data() {
     assert_eq!(WHITE, pixel(&fixture, 0));
     assert_eq!(RED, pixel(&fixture, 14));
 }
+
+/// A white map at `zoom` with the n-gon layer `layer` over the points at the
+/// longitudes `longitudes`, on the equator, whose properties fade over
+/// `fade` milliseconds.
+fn points_style(zoom: f64, fade: u32, longitudes: &[f64], layer: &str) -> String {
+    let features: Vec<String> = longitudes
+        .iter()
+        .map(|longitude| {
+            format!(
+                r#"{{"type":"Feature","properties":{{"r":6}},"geometry":{{"type":"Point","coordinates":[{longitude},0]}}}}"#
+            )
+        })
+        .collect();
+    format!(
+        r##"{{"version":8,"zoom":{zoom},"transition":{{"duration":{fade}}},
+        "sources":{{"points":{{"type":"geojson","data":{{"type":"FeatureCollection","features":[{}]}}}}}},
+        "layers":[{{"id":"background","type":"background","paint":{{"background-color":"#ffffff"}}}},{layer}]}}"##,
+        features.join(",")
+    )
+}
+
+/// Red squares of radius 6, their sides level, that collide with each
+/// other, sized by a feature property.
+const COLLIDING: &str = r##"{"id":"ngons","type":"org.maplibre.ngon","source":"points",
+    "layout":{"ngon-allow-overlap":false,"ngon-ignore-placement":false},
+    "paint":{"ngon-color":"#ff0000","ngon-radius":["get","r"],"ngon-corners":4,"ngon-rotate":45}}"##;
+
+/// Zoom 0 draws 1.40625 degrees of longitude in 2 pixels.
+const TWO_PIXELS: f64 = 1.406_25;
+
+#[test]
+fn colliding_ngons_fade_until_the_map_goes_idle() {
+    // Squares 4 pixels apart: the first shows, and the second, which it
+    // hides, would reach 8 pixels right of the center.
+    let fixture = Fixture::new(registry(), &points_style(0.0, 300, &[0.0, 2.0 * TWO_PIXELS], COLLIDING));
+    assert_eq!(RED, pixel(&fixture, 0));
+    assert_eq!(WHITE, pixel(&fixture, 6));
+    assert!(!fixture.render().needs_repaint, "the map placed again with nothing to change");
+}
+
+#[test]
+fn placement_follows_the_zoom() {
+    let fixture = Fixture::new(registry(), &points_style(0.0, 0, &[0.0, 2.0 * TWO_PIXELS], COLLIDING));
+    assert_eq!(WHITE, pixel(&fixture, 6));
+
+    // At zoom 2 the squares are 16 pixels apart, and both show.
+    let zoom = |zoom| {
+        let camera = mln_rs::mln_map_types::CameraOptions { zoom: Some(zoom), ..Default::default() };
+        wait(fixture.map.update_camera(mln_rs::mln_map_types::CameraUpdate { camera, ..Default::default() }));
+        fixture.render_loaded();
+    };
+    zoom(2.0);
+    assert_eq!(RED, pixel(&fixture, 0));
+    assert_eq!(RED, pixel(&fixture, 16));
+
+    zoom(0.0);
+    assert_eq!(RED, pixel(&fixture, 0));
+    assert_eq!(WHITE, pixel(&fixture, 6));
+}
+
+#[test]
+fn a_layer_that_doesnt_collide_draws_in_a_new_world_copy_at_once() {
+    // A point at 170 degrees west, which the map shows only once it looks
+    // across the antimeridian.
+    let fixture = Fixture::new(registry(), &points_style(0.0, 0, &[-170.0], LAYER));
+    assert_eq!(WHITE, pixel(&fixture, 16));
+
+    // Centered at 179 degrees east, the map shows the point in the world
+    // copy east of the antimeridian, 11 degrees or 16 pixels right of the
+    // center, from the tile that it laid out west of it.
+    let center = mln_rs::mln_util::geo::LatLng::new(0.0, 179.0).ok();
+    let camera = mln_rs::mln_map_types::CameraOptions { center, ..Default::default() };
+    wait(fixture.map.update_camera(mln_rs::mln_map_types::CameraUpdate { camera, ..Default::default() }));
+    fixture.render();
+    assert_eq!(RED, pixel(&fixture, 16));
+}
