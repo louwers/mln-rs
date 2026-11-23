@@ -37,10 +37,11 @@ unoptimized debugging or `--profile release` for shipping optimizations.
 ## Extensions
 
 The built-in layer and source types go through the same contracts that a crate
-outside mln-rs implements (the docs of `mln_rs::layer` start there). Three
-first-party extensions, each a crate written against the `mln-rs` facade alone,
-add what a style may declare, and an app adds them to the registry it starts its
-runtime with:
+outside mln-rs implements (the docs of `mln_rs::layer` and `mln_rs::source`
+start there). A source type may give each tile a value of its own type, which
+layer types written for it draw from directly. Three first-party extensions,
+each a crate written against the `mln-rs` facade alone, add what a style may
+declare, and an app adds them to the registry it starts its runtime with:
 
 - [`mln-rs-ngon`](crates/mln_ngon): the `org.maplibre.ngon` layer type, a
   regular polygon at each point of a geometry source, which may collide with

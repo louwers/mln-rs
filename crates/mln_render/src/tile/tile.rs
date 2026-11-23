@@ -13,12 +13,14 @@ use crate::tile::contents::Contents;
 use crate::tile::loading::Load;
 use crate::tile::pipeline::{Layout, Pipeline};
 
-/// An optional tile only takes low-cost actions to get its data, such as
-/// loading stale data from the cache; a required one loads it from the
-/// network and keeps it fresh.
+/// How much the view needs a tile, which its origin may act on: an origin
+/// with a cheap way to get data may try only that for an optional tile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TileNecessity {
+    /// The view can do without the tile: it is a fallback, a prefetch, or
+    /// waits in the cache.
     Optional,
+    /// The view needs the tile.
     Required,
 }
 

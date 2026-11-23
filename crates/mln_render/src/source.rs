@@ -1,69 +1,140 @@
 //! The source type contract: what a crate implements to add a source type
-//! that the renderer draws.
+//! whose sources the renderer draws. The `mln_extension_tests` crate's
+//! `stamp` source type, whose tiles each hold a value that its origin makes
+//! from the tile's id, is a whole example written against the facade alone,
+//! whose `mln_rs::source` gathers every name it uses; the built-in source
+//! types of `mln_sources` go through the same contract, and its tileset
+//! origin is the example of one that loads through the map's file source.
 //!
-//! A source type is a marker type that implements `mln_style`'s
-//! `StyleSourceType`, its style half, and [`SourceType`], its render half. A
-//! [`RegistryBuilder`](crate::RegistryBuilder) registers it by name with
-//! [`add_source_type`](crate::RegistryBuilder::add_source_type), which
-//! fails for a name that another type took, and for a type whose halves
-//! name different kinds of data.
+//! A source type has two halves, which
+//! [`RegistryBuilder::add_source_type::<T>()`](crate::RegistryBuilder::add_source_type)
+//! registers together. It fails for a name that another type took, and for
+//! a type whose halves name different kinds of data.
 //!
-//! A source [supplies](SourceType::supply) the renderer one of the engine's
-//! kinds of data, its type's [`Data`](SourceType::Data): tiles of
-//! [geometry](GeometryTiles), of [raster images](RasterTiles), of
-//! [raster-dem elevations](DemTiles) or of a [value of its own](ValueTiles),
-//! or, for raster data, one image at four coordinates ([`SourceImage`]). A
-//! new source of data is a source type; a new kind of data that the
-//! engine lays out or decodes for any layer is a change to the engine.
+//! - **The style half**, a marker type that implements `mln_style`'s
+//!   [`StyleSourceType`]: the type's name and its kind of data
+//!   ([`SourceTypeInfo`](mln_style::source_type::SourceTypeInfo)), the
+//!   options it reads from style JSON, and how the map loads what the style
+//!   doesn't hold itself, such as a TileJSON or GeoJSON data, into the
+//!   source's description. stamp's is `StampSource`, with its `version` and
+//!   `hold` members.
+//! - **The render half**, [`SourceType`] on the same marker type: what a
+//!   source of the type supplies the renderer.
 //!
-//! A source type whose data only its own layer types draw delivers a value
-//! of a type of its own for each tile, an `Arc<V>` of [`ValueTiles<V>`],
-//! which its origin makes once, wherever it likes, and which the layers that
-//! view it share as it is, with no layout and no bucket. Both halves of the
-//! source type name the kind as
+//! # What a source type writes
+//!
+//! 1. Its kind of data, the [`Data`](SourceType::Data) that its sources
+//!    supply: tiles of [geometry](GeometryTiles), which the engine lays out
+//!    into the buckets of the layers that draw them, of
+//!    [raster images](RasterTiles) or of [raster-dem elevations](DemTiles),
+//!    which it decodes, or of a [value of the type's own](ValueTiles),
+//!    which the layers that view it share as it is. A new kind of data that
+//!    the engine lays out or decodes for any layer is a change to the
+//!    engine, not a source type.
+//! 2. Its [supply](SourceType::supply), made once as a source joins the
+//!    renderer's style: tiles that a [`DataOrigin`] loads
+//!    ([`Supply::tiles`]), or, for raster data, one image at four
+//!    coordinates that the engine reads from each version of the source
+//!    ([`Supply::image`]), as the image source type supplies.
+//! 3. Its origin. [`DataOrigin::update`] takes in the source as the style
+//!    has it and returns what its tiles [`Cover`]: their size, zoom levels
+//!    and bounds, and how the engine picks a view's tiles of them.
+//!    [`DataOrigin::start`] starts each new tile and returns the origin's
+//!    state of it, its [`Tile`](DataOrigin::Tile), which the engine keeps
+//!    with the tile and drops as the tile goes, which lets go of what it
+//!    holds. Through the tile's [`LoadContext`] the origin
+//!    [begins a load](LoadContext::begin_load), whose [`Replier`] sends what
+//!    the load gets back from any thread to [`DataOrigin::receive`], and
+//!    [delivers](LoadContext::deliver) what it brought: an
+//!    [item](TileKind::Item) of the source's kind, nothing for an empty
+//!    tile, or [missing](LoadContext::missing) for a tile the source doesn't
+//!    have. stamp's origin delivers each tile's value in `start`, with no
+//!    load. An origin that loads cheaply first, or retries, or keeps what
+//!    it loaded fresh, also writes [`set_necessity`](DataOrigin::set_necessity),
+//!    [`retry`](DataOrigin::retry) and [`failed`](DataOrigin::failed), as
+//!    the tileset's does.
+//! 4. Its commands, if an app edits or reads its sources outside the
+//!    style JSON. They go through the map's typed source paths
+//!    (`Map::command_style_source`, `Map::query_style_source`,
+//!    `Map::set_style_source_data`, with `Map::apply_style_edit` for an
+//!    [`Edit`](mln_style::Edit)), as `mln_sources`' GeoJSON and custom
+//!    commands do.
+//!
+//! # When the hooks run
+//!
+//! The engine runs [`SourceType::supply`] and every hook of the origin one
+//! at a time on the renderer's thread, never one from within another, so an
+//! origin and its tiles' states needn't be `Send`. In each of the
+//! renderer's updates, it first hands each tile the replies that arrived
+//! for its latest load ([`receive`](DataOrigin::receive)), then, per
+//! source, runs [`update`](DataOrigin::update) with the source as the style
+//! has it, the same version until the style changes it, so the origin tells
+//! a new version from the last it took in and then clears or loads its
+//! tiles again ([`OriginUpdate`]). With the cover `update` returns, the
+//! engine works out the view's tiles: it [starts](DataOrigin::start) those
+//! it makes, and sets the [necessity](DataOrigin::set_necessity) of each it
+//! keeps, as it first keeps it in the update and as it lets it go into its
+//! cache. The engine runs [`retry`](DataOrigin::retry) on required tiles
+//! when the map retries failed loads, and before each still image, and
+//! [`failed`](DataOrigin::failed) when what a tile took in fails to lay out
+//! or decode.
+//!
+//! A load's work runs wherever the origin puts it: on the renderer's pool
+//! ([`LoadContext::pool`]), which runs on the renderer's thread in the
+//! browser, on a file source's threads, or in a host's callback. Its
+//! [`Replier`] and its replies are `Send`, and a replier sends as many
+//! replies as its load has. What the tiles take in lays out or decodes on
+//! the tile workers, through the worker codec where they run apart, or in
+//! the update that delivers it for a [synchronous](Cover::synchronous)
+//! cover; an origin's own types and values never cross the codec.
+//!
+//! # What the engine owns
+//!
+//! The engine owns how MapLibre loads tiles; the origin owns where their
+//! data comes from. The engine decides which tiles the view needs, in which
+//! order their requests start ([`LoadContext::order`]), and which it keeps
+//! in its cache and evicts. It draws a tile's parent or children while the
+//! tile has nothing to show, makes a tile in a new world copy show the same
+//! tile's contents in another, which [`LoadContext::take_copy`] makes the
+//! new tile's answer, and hands a reply to the origin only while its load
+//! is the tile's latest. It lays out and decodes what tiles take in, knows
+//! when a tile has done what it can, and starts a failed tile over when its
+//! retry loads anew. How data is requested, cached, revalidated, kept fresh
+//! and retried is the origin's.
+//!
+//! # Necessity
+//!
+//! A tile is required while the view needs it, and optional while it is
+//! only a fallback or a prefetch the view can do without, or waits in the
+//! cache. Necessity is a hint: an origin with a cheap way to get data, such
+//! as a cache, may try only that while the tile is optional, and say when
+//! it did ([`LoadContext::tried_optional`]), so that a parent can stand in;
+//! it asks for more as the tile becomes required, and stops as it becomes
+//! optional, as the tileset's origin does with its network requests, and
+//! the custom source's with its host's. An origin without one loads every
+//! tile as it starts and ignores necessity.
+//!
+//! # Tile data of a source type's own
+//!
+//! A source type whose data only its own layer types draw supplies
+//! [`ValueTiles<V>`]: its origin delivers an `Arc<V>` for each tile, which
+//! it makes once, wherever it likes, and the layers that view the source
+//! share it as it is, each tile's `&V`, with no layout and no bucket. Both
+//! halves of the source type name the kind as
 //! [`SourceKind::Value`](mln_style::layer_type::SourceKind::Value) of
 //! [`ValueKind::of::<V>()`](mln_style::layer_type::ValueKind::of), as the
-//! layer types that view it do ([`crate::layer::ValueTiles`]), so that a
-//! style whose layer views a source of another kind skips the layer with an
-//! error. The engine keeps a value as it keeps any tile's data: a tile shows
-//! the value of its latest delivery at once, a parent or children stand in
-//! for a tile without one, a tile in a new world copy shows the value of the
-//! same tile in another, and the value goes with its tile. A value doesn't
-//! change once delivered: a tile that needs another is delivered a new one,
-//! of which the layers make their tile values again.
-//!
-//! A source's tiles get their data from its [`DataOrigin`]. The engine
-//! decides which tiles the view needs, keeps them, and lays out or decodes
-//! what they load. In each of the renderer's updates, the origin takes in
-//! the source as the style has it ([`DataOrigin::update`]), acts on a new
-//! version, and says what its tiles cover ([`Cover`]). It
-//! [starts](DataOrigin::start) each new tile, making the
-//! [state](DataOrigin::Tile) it keeps of it, which the engine drops as the
-//! tile goes, and owns the tile's loading through hooks that the engine
-//! calls as a reply to one of its loads arrives, as its
-//! [necessity](TileNecessity) changes, when it retries after a failure, and
-//! when what the tile took in fails to lay out or decode. Each hook gets the
-//! tile's [`LoadContext`]: through it the origin starts a load, whose
-//! [`Replier`] sends its replies from any thread, and gives the tile what
-//! the load brought, an [item](TileKind::Item) of the source's kind. The
-//! engine hands a reply to the origin only while its load is the tile's
-//! latest ([`LoadContext::begin_load`]). How data is cached, revalidated and
-//! kept fresh is the origin's own.
-//!
-//! Necessity is a hint: an optional tile is one the view can do without, so
-//! an origin with a cheap way to get data, such as a cache, may try only
-//! that while the tile is optional. An origin without one loads every tile
-//! as it starts and ignores necessity.
-//!
-//! The engine runs [`SourceType::supply`] and the origin's hooks one at a
-//! time on the renderer's thread, so an origin and its tiles' states
-//! needn't be `Send`. A load's work can run anywhere, as on the renderer's
-//! pool ([`LoadContext::pool`]): its [`Replier`] and its replies are `Send`.
-//! What the tiles take in lays out or decodes on the tile workers, through
-//! the worker codec where they run apart, or in the update for a
-//! [synchronous](Cover::synchronous) cover; an origin's own types don't
-//! cross the codec.
-
+//! style halves of the layer types that view it do, with the input
+//! [`crate::layer::ValueTiles`], so that a style whose layer views a source
+//! of another kind, or of values of another type, leaves the layer out
+//! with an error. A tile shows the value of its latest delivery at once, a
+//! parent or children draw for a tile without one, a tile in a new world
+//! copy shares its copy's value, and the value goes with its tile. A value
+//! doesn't change once delivered: a tile that needs another gets a new one,
+//! from which the layers make their tile values again. Tiles overlap by a
+//! parent drawn under its loading children, so a layer clips its draws to
+//! its tile ([`Draw::clip`](crate::draw::Draw::clip)). stamp's `Stamp` is
+//! such a value, and its `stamp-fill` and `stamp-mark` layer types both
+//! draw from it.
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -322,11 +393,14 @@ pub struct OriginUpdate<'a, O: ?Sized> {
 }
 
 impl<'a, O: DataOrigin> OriginUpdate<'a, O> {
+    /// The source as the style has it now.
     #[must_use]
     pub fn source(&self) -> &'a Source {
         self.parts.source
     }
 
+    /// Whether the map draws continuously or still images, which a tile
+    /// shows only once it has done what it can.
     #[must_use]
     pub fn mode(&self) -> MapMode {
         self.parts.parameters.mode
@@ -405,11 +479,14 @@ impl<'a, 't, O: DataOrigin + ?Sized> LoadContext<'a, 't, O> {
         LoadContext { tile, origin: PhantomData }
     }
 
+    /// The tile's id, with its world copy and the zoom it draws at.
     #[must_use]
     pub fn id(&self) -> &OverscaledTileID {
         &self.tile.tile().id
     }
 
+    /// How much the view needs the tile now: a hint, which an origin
+    /// without a cheaper way to get data ignores.
     #[must_use]
     pub fn necessity(&self) -> TileNecessity {
         self.tile.tile().load.necessity

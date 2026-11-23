@@ -1,10 +1,12 @@
 //! What a source type's author writes with, from its home crates: the
 //! source type contract ([`mln_render::source`], whose doc states it), the
-//! style half's names (`mln_style`), and the values their signatures name.
-//! A source type registers with
+//! style half's names (`mln_style`), and the values their signatures name,
+//! with [`ValueKind`] for a type whose tiles hold a value of its own, which
+//! layer types view through [`mln_render::layer::ValueTiles`]. A source type
+//! registers with
 //! [`RegistryBuilder::add_source_type`](mln_render::RegistryBuilder::add_source_type).
 //! With the `runtime` feature, its own commands go through a map's generic
-//! source paths, such as `Map::add_style_source`, `Map::apply_style_edit`,
+//! source paths: `Map::add_style_source`, `Map::apply_style_edit`,
 //! `Map::command_style_source`, `Map::query_style_source` and
 //! `Map::set_style_source_data`.
 
