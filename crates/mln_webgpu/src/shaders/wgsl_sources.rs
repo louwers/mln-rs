@@ -5024,8 +5024,8 @@ struct VertexInput {
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
-    @location(0) pos0: vec2<f32>,
-    @location(1) pos1: vec2<f32>,
+    @location(0) pos0: vec3<f32>,
+    @location(1) pos1: vec3<f32>,
 };
 
 struct RasterDrawableUBO {
@@ -5045,6 +5045,9 @@ struct RasterEvaluatedPropsUBO {
     contrast_factor: f32,
     pad1: f32,
     pad2: f32,
+    coords_top: vec4<f32>,
+    coords_bottom: vec4<f32>,
+    image_warp: vec4<f32>,
 };
 
 struct GlobalIndexUBO {
@@ -5061,14 +5064,30 @@ struct GlobalIndexUBO {
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     let drawable = drawableVector[globalIndex.value];
-    let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
+    // The vertices span the unit square, which the warp puts on the quad
+    // of the corners: blended from the projective warp towards the
+    // bilinear one, whose homogeneous denominator is one at the top left.
+    let fractional = vec2<f32>(f32(in.position.x), f32(in.position.y)) / 8192.0;
+    let top_left = props.coords_top.xy;
+    let top_right = props.coords_top.zw;
+    let bottom_left = props.coords_bottom.xy;
+    let bottom_right = props.coords_bottom.zw;
+    let bilinear = mix(mix(top_left, top_right, fractional.x), mix(bottom_left, bottom_right, fractional.x), fractional.y);
+    let denominator = dot(props.image_warp.xy, fractional) + 1.0;
+    let across_top = top_right - top_left + props.image_warp.x * top_right;
+    let down_left = bottom_left - top_left + props.image_warp.y * bottom_left;
+    let projective = (across_top * fractional.x + down_left * fractional.y + top_left) / denominator;
+    let pos = mix(projective, bilinear, props.image_warp.z);
     let clip = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
     out.position = clip;
 
+    // The texture coordinates weighted by the reciprocal of the
+    // denominator, blended as the position is, interpolate projectively.
+    let weight = mix(1.0 / denominator, 1.0, props.image_warp.z);
     let tex = vec2<f32>(f32(in.texcoord.x), f32(in.texcoord.y));
     let pos0 = (((tex / 8192.0) - vec2<f32>(0.5, 0.5)) / props.buffer_scale) + vec2<f32>(0.5, 0.5);
-    out.pos0 = pos0;
-    out.pos1 = pos0 * props.scale_parent + props.tl_parent;
+    out.pos0 = vec3<f32>(pos0 * weight, weight);
+    out.pos1 = vec3<f32>((pos0 * props.scale_parent + props.tl_parent) * weight, weight);
 
     return out;
 }
@@ -5077,8 +5096,8 @@ fn main(in: VertexInput) -> VertexOutput {
     fragment: Some(
         r"
 struct FragmentInput {
-    @location(0) pos0: vec2<f32>,
-    @location(1) pos1: vec2<f32>,
+    @location(0) pos0: vec3<f32>,
+    @location(1) pos1: vec3<f32>,
 };
 
 struct RasterEvaluatedPropsUBO {
@@ -5094,6 +5113,9 @@ struct RasterEvaluatedPropsUBO {
     contrast_factor: f32,
     pad1: f32,
     pad2: f32,
+    coords_top: vec4<f32>,
+    coords_bottom: vec4<f32>,
+    image_warp: vec4<f32>,
 };
 
 @group(0) @binding(5) var<uniform> props: RasterEvaluatedPropsUBO;
@@ -5107,8 +5129,8 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
 
-    var color0 = textureSample(image0, texture_sampler, in.pos0);
-    var color1 = textureSample(image1, texture_sampler, in.pos1);
+    var color0 = textureSample(image0, texture_sampler, in.pos0.xy / in.pos0.z);
+    var color1 = textureSample(image1, texture_sampler, in.pos1.xy / in.pos1.z);
 
     if (color0.a > 0.0) {
         color0 = vec4<f32>(color0.rgb / color0.a, color0.a);
