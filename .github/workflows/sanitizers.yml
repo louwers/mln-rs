@@ -32,7 +32,7 @@ jobs:
       MLN_VULKAN_VALIDATION: abort
       MINUTES: ${{ inputs.minutes || '20' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install lavapipe
         uses: ./.github/actions/lavapipe
@@ -41,7 +41,7 @@ jobs:
 
       # The tools that mise.toml pins, Rust from rust-toolchain.toml among
       # them, at the versions mise.lock records.
-      - uses: jdx/mise-action@v5
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
 
       - name: Test
         run: mise run test:asan "$MINUTES"

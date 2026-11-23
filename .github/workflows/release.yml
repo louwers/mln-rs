@@ -33,7 +33,7 @@ jobs:
     outputs:
       released: ${{ steps.version.outputs.released }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           sparse-checkout: /Cargo.toml
@@ -76,7 +76,7 @@ jobs:
           echo "::error::Run the release from ${{ github.event.repository.default_branch }}."
           exit 1
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The history, to find the commit that set the version.
           fetch-depth: 0
@@ -126,7 +126,7 @@ jobs:
       - name: Publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-          USER_AGENT: mln-rs-release (https://github.com/louwers/mln-rs)
+          USER_AGENT: mln-rs-release (https://github.com/maplibre/mln-rs)
         run: |
           set -o pipefail
           while true; do

@@ -1,3 +1,5 @@
 # jactionlint (https://jactionlint.jdx.dev), which hk runs: the checks of
-# actionlint.
+# actionlint, plus commit pinning for third-party actions.
 profile: correctness
+rules:
+  unpinned-uses: error

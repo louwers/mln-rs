@@ -2,7 +2,7 @@ name: pages
 
 # Builds the browser build and its page (`mise run web:build --profile release`,
 # examples/web/README.md) and deploys the page, examples/web/dist, to GitHub
-# Pages (https://louwers.github.io/mln-rs/). It needs no COOP/COEP headers,
+# Pages (https://maplibre.org/mln-rs/). It needs no COOP/COEP headers,
 # so Pages serves it as is. Publishing only: CI's web job checks the build.
 
 on:
@@ -33,22 +33,22 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       # The tools that mise.toml pins, Rust from rust-toolchain.toml among
       # them, at the versions mise.lock records.
-      - uses: jdx/mise-action@v5
+      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Build
         run: mise run web:build --profile release
 
-      - uses: actions/configure-pages@v6
-      - uses: actions/upload-pages-artifact@v5
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: examples/web/dist
       - id: deploy
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

@@ -172,7 +172,7 @@ run_windows = "cargo run -q -p mln-rs-ratchet -- {{ usage.args | default(value=[
 
 [tasks.release]
 description = "Run the release workflow on main again, to finish a release that failed part way (RELEASING.md)"
-run = "gh workflow run release.yml --repo louwers/mln-rs --ref main"
+run = "gh workflow run release.yml --repo maplibre/mln-rs --ref main"
 
 [tasks.udeps]
 description = "Find unused dependencies"
