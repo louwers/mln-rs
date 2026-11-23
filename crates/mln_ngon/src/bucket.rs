@@ -131,7 +131,7 @@ impl Layout<Ngon> for NgonLayout {
                     bucket.points.push(NgonPoint { at: [p.x, p.y], feature: i as u32, size });
                 }
             }
-            cx.populate(&mut bucket.binders, i, &feature, corners.len());
+            cx.populate(&mut bucket.binders, i, &feature, corners.len(), None, None);
             // Queries find the polygons that place through placement.
             if !self.places {
                 cx.index(i, &geometry);

@@ -41,7 +41,7 @@ use crate::paint_property_statistics::{PaintPropertyStatistics, StatisticValue};
 /// value differs by feature, which
 /// [`LayoutCx::need_patterns`](crate::layer::LayoutCx::need_patterns) asks
 /// for and
-/// [`BuildCx::populate_patterns`](crate::layer::BuildCx::populate_patterns)
+/// [`BuildCx::populate`](crate::layer::BuildCx::populate)
 /// writes where they are.
 #[derive(Clone, Debug, Default)]
 pub struct FeaturePatterns(pub(crate) Vec<(String, PatternDependency)>);

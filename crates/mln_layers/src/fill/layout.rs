@@ -51,7 +51,7 @@ impl Layout<Fill> for FillLayout {
             let feature = cx.feature(*i)?;
             let geometry = feature.geometry()?;
             bucket.add(&geometry, &tile, granularity, &mut tessellator);
-            cx.populate_patterns(&mut bucket.binders, *i, &feature, bucket.vertices.len(), patterns);
+            cx.populate(&mut bucket.binders, *i, &feature, bucket.vertices.len(), None, Some(patterns));
             cx.index(*i, &geometry);
         }
         bucket.sdf = sdf.layers;

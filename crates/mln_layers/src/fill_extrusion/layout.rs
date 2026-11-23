@@ -43,9 +43,9 @@ impl Layout<FillExtrusion> for FillExtrusionLayout {
             let geometry = feature.geometry()?;
             bucket.add(&geometry, &tile, granularity, corner_distance, &mut tessellator);
             let vertices = bucket.vertices.len();
-            cx.populate_patterns(&mut bucket.binders, *i, &feature, vertices, patterns);
+            cx.populate(&mut bucket.binders, *i, &feature, vertices, None, Some(patterns));
             if let Some(quads) = &mut bucket.wall_quads {
-                cx.populate_patterns(&mut quads.binders, *i, &feature, 4 * vertices, patterns);
+                cx.populate(&mut quads.binders, *i, &feature, 4 * vertices, None, Some(patterns));
             }
             cx.index(*i, &geometry);
         }

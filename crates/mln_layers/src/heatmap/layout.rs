@@ -29,7 +29,7 @@ impl Layout<Heatmap> for HeatmapLayout {
                 &mut bucket.triangles,
                 geometry.iter().flatten().copied().filter(|&p| points::in_tile(p)),
             );
-            cx.populate(&mut bucket.binders, i, &feature, corners.len());
+            cx.populate(&mut bucket.binders, i, &feature, corners.len(), None, None);
             cx.index(i, &geometry);
         }
         Ok((!bucket.triangles.is_empty()).then_some(bucket))

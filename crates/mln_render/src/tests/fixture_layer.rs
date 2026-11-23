@@ -170,7 +170,7 @@ impl Layout<Dot> for DotLayout {
             let feature = cx.feature(i)?;
             let geometry = feature.geometry()?;
             bucket.points.get_mut().extend(geometry.iter().flatten().map(|p| [p.x, p.y]));
-            cx.populate(&mut bucket.binders, i, &feature, bucket.points.len());
+            cx.populate(&mut bucket.binders, i, &feature, bucket.points.len(), None, None);
             cx.index(i, &geometry);
         }
         Ok((!bucket.points.is_empty()).then_some(bucket))

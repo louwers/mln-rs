@@ -77,7 +77,7 @@ impl Layout<Line> for LineLayout {
                 self.add(&mut bucket, line, &feature, &tile, granularity, &mut scratch);
             }
             let vertices = bucket.vertices.len();
-            cx.populate_patterns(&mut bucket.binders, *i, &feature, vertices, patterns);
+            cx.populate(&mut bucket.binders, *i, &feature, vertices, None, Some(patterns));
             let context = self.context(&feature, &tile);
             let cap = if self.layout.line_cap.evaluate(&context) == LineCapType::Round {
                 DashCap::Round

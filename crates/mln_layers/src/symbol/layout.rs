@@ -1111,7 +1111,7 @@ impl BucketWriter<'_, '_> {
             icon.run = add(quads.icon.as_deref().unwrap_or_default(), WritingModes::NONE);
             icon.vertical_run = quads.vertical_icon.as_deref().map(|run_quads| add(run_quads, WritingModes::VERTICAL));
             let length = buffer.attribute_data.len();
-            self.cx.populate(self.icon_binders, symbol.data_feature_index, feature, length);
+            self.cx.populate(self.icon_binders, symbol.data_feature_index, feature, length, None, None);
         }
 
         if let Some(text) = &mut symbol.text
@@ -1128,7 +1128,7 @@ impl BucketWriter<'_, '_> {
             let mut section = None;
             let mut populate_section = |section: usize, length: usize| {
                 let section = section_options_to_value(&formatted_text.sections()[section]);
-                cx.populate_section(text_binders, feature.index, feature, length, &section);
+                cx.populate(text_binders, feature.index, feature, length, Some(&section), None);
             };
             let mut add = |run_quads: &[SymbolQuad], writing_modes| {
                 let info = run(size, text_offset, writing_modes, line, tile_distances);

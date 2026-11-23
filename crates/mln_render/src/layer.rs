@@ -1450,7 +1450,7 @@ impl<S: StyleLayerType> LayoutCx<'_, S> {
     /// by index, a value that differs by feature, one zoom level below the
     /// tile's, at it and one above, which a pattern crossing zoom levels
     /// fades between. Returns each feature's patterns, in order, which its
-    /// binders' values take ([`BuildCx::populate_patterns`]).
+    /// binders' values take ([`BuildCx::populate`]).
     pub fn need_patterns(
         &mut self,
         pattern: fn(&<S::PaintProperties as PaintSet>::Evaluated) -> &Evaluated<Image>,
@@ -1619,54 +1619,27 @@ impl<S: StyleLayerType> BuildCx<'_, S> {
 
     /// Writes the values of `feature`, the feature at `index`, into
     /// `binders` for the vertices up to `vertices`, those added since the
-    /// last call.
+    /// last call. `section` is the options of the section of the feature's
+    /// formatted text that the vertices draw, which a property's
+    /// `["get", ..]` of the section reads; `patterns` the feature's patterns
+    /// ([`LayoutCx::need_patterns`]), which the values take where the
+    /// layout's resolved patterns put them.
     pub fn populate<P: PaintBinders>(
         &self,
         binders: &mut LayerBinders<P>,
         index: usize,
         feature: &dyn GeometryTileFeature,
         vertices: usize,
+        section: Option<&Value>,
+        patterns: Option<&FeaturePatterns>,
     ) {
-        binders.populate(
-            feature,
-            index,
-            vertices,
-            &self.tile.canonical,
-            &Value::Null,
-            &ImagePositions::default(),
-            &FeaturePatterns::default(),
-        );
-    }
-
-    /// Writes the values of `feature`, as [`populate`](Self::populate) does,
-    /// with its `patterns` ([`LayoutCx::need_patterns`]) where the layout's
-    /// resolved patterns put them.
-    pub fn populate_patterns<P: PaintBinders>(
-        &self,
-        binders: &mut LayerBinders<P>,
-        index: usize,
-        feature: &dyn GeometryTileFeature,
-        vertices: usize,
-        patterns: &FeaturePatterns,
-    ) {
-        let none = ImagePositions::default();
-        let positions = self.resolved.map_or(&none, |resolved| &resolved.patterns);
-        binders.populate(feature, index, vertices, &self.tile.canonical, &Value::Null, positions, patterns);
-    }
-
-    /// Writes the values of `feature`, as [`populate`](Self::populate) does,
-    /// for vertices that draw `section`, a section of its formatted text,
-    /// whose options a property's `["get", ..]` of the section reads.
-    pub fn populate_section<P: PaintBinders>(
-        &self,
-        binders: &mut LayerBinders<P>,
-        index: usize,
-        feature: &dyn GeometryTileFeature,
-        vertices: usize,
-        section: &Value,
-    ) {
-        let (positions, patterns) = (ImagePositions::default(), FeaturePatterns::default());
-        binders.populate(feature, index, vertices, &self.tile.canonical, section, &positions, &patterns);
+        let (null, no_positions, no_patterns) = (Value::Null, ImagePositions::default(), FeaturePatterns::default());
+        let (positions, patterns) = match patterns {
+            Some(patterns) => (self.resolved.map_or(&no_positions, |resolved| &resolved.patterns), patterns),
+            None => (&no_positions, &no_patterns),
+        };
+        let section = section.unwrap_or(&null);
+        binders.populate(feature, index, vertices, &self.tile.canonical, section, positions, patterns);
     }
 
     /// Adds `geometry`, the geometry of the feature at `index`, to the
