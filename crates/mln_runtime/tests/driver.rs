@@ -261,7 +261,8 @@ fn a_released_session_detaches_at_its_next_service() {
     take_one(&driver, &session);
 
     let released = session.release().unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(20));
+    // The runtime's thread has handled what the release sent it.
+    wait(map.with_core(|_| ()));
     assert!(!released.is_complete(), "the session retired before its detach was serviced");
     assert_eq!(ErrorKind::InvalidState, session.snapshot().unwrap_err().kind);
     serviced(&driver, released).unwrap();

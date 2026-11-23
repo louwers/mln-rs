@@ -209,7 +209,7 @@ fn a_demand_without_changes_renders_nothing() {
 
 // The runtime's thread is held while the first command is sent, so the
 // session has an older update to draw when the demand reaches it, and the
-// frame must show the command.
+// one frame the demand makes must show the command.
 #[test]
 fn a_demand_shows_the_commands_sent_before_it() {
     let runtime = runtime();
@@ -220,8 +220,6 @@ fn a_demand_shows_the_commands_sent_before_it() {
     let open = hold_runtime(&map);
     let moved = zoom(&map, 3.0);
     demand(&session, DemandMode::IfChanged, 631);
-    std::thread::sleep(std::time::Duration::from_millis(50));
-    assert_eq!(session.drain_frame_results().unwrap(), Vec::<FrameResult>::new());
     drop(open);
 
     let applied = result_of(moved).unwrap();

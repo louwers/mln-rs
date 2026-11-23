@@ -249,7 +249,9 @@ fn a_disposed_runtime_shuts_down_after_its_last_map() {
 
 #[test]
 fn a_runtime_whose_handles_all_drop_shuts_down() {
-    let runtime = runtime();
+    // A plain handle: the tests' runtime would wait on its drop for the map
+    // to let go.
+    let runtime = mln_rs::start_runtime(&RuntimeOptions::default()).unwrap();
     let dropped = Arc::new(AtomicBool::new(false));
     wait(runtime.set_resource_provider(DropFlag(Arc::clone(&dropped))));
     let map = map(&runtime);
