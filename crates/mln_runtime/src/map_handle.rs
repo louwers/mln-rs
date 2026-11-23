@@ -1096,7 +1096,7 @@ impl Map {
     /// such source, and [`ErrorKind::InvalidState`](mln_util::ErrorKind)
     /// when a layer uses it or the style isn't loaded. The source's features
     /// lose their state, and what the map kept for the source
-    /// ([`add_style_source_keeping`](Self::add_style_source_keeping)) drops
+    /// ([`add_style_source`](Self::add_style_source)) drops
     /// before the completion.
     pub fn remove_style_source(&self, source_id: impl Into<String>) -> Result<Completion<Applied>, Error> {
         let source_id = source_id.into();

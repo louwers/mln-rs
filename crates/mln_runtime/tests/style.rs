@@ -8,13 +8,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use mln_rs::mln_sources::custom::TileOptions;
 use mln_rs::mln_sources::{
     CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType, RasterSourceType,
-    TileDataFormat, VectorSourceType,
+    TileDataFormat, TilesetSettings, VectorSourceType,
 };
-use mln_rs::mln_style::source_type::StyleSourceType;
+use mln_rs::mln_style::source_type::{SourceData, StyleSourceType};
 use mln_rs::{
     CustomSourceCallbacks, CustomSourceCommands, GeoJsonSourceCommands, GeoJsonSourceSettings, ImageSourceCommands,
 };
-use mln_runtime::{ErrorKind, Map, PrepareSourceData, ResourceRequest};
+use mln_runtime::{ErrorKind, Map, NewSourceData, PrepareSourceData, ResourceRequest};
 use mln_storage::response::Reason;
 use mln_storage::{ResourceError, Response};
 use mln_style::expression::Functions;
@@ -61,13 +61,15 @@ fn a_source_reports_its_url_attribution_and_tiles() {
         (remote.source_type, remote.url.as_deref()),
         (RasterSourceType::INFO.name, Some("fixture://tiles.json"))
     );
-    assert!(remote.tiles.is_none() && remote.attribution.is_none());
-    assert_eq!(remote.tile_size, Some(512));
+    let tileset = TilesetSettings::of(&remote.source).unwrap();
+    assert!(tileset.inline_tileset.is_none() && remote.attribution.is_none());
+    assert_eq!(tileset.tile_size, 512);
 
     let inline = wait(map.style_source("inline")).unwrap();
     assert_eq!((inline.url.as_deref(), inline.attribution.as_deref()), (None, Some("Fixture tiles")));
-    assert_eq!(inline.tiles.unwrap().urls, ["fixture://a/{z}/{x}/{y}.mvt", "fixture://b/{z}/{x}/{y}.mvt"]);
-    assert!(inline.vector_encoding.is_some());
+    let tileset = TilesetSettings::of(&inline.source).unwrap();
+    assert_eq!(tileset.inline_tileset.unwrap().tiles, ["fixture://a/{z}/{x}/{y}.mvt", "fixture://b/{z}/{x}/{y}.mvt"]);
+    assert!(tileset.vector_encoding.is_some());
 
     assert_eq!(wait(map.style_source("geojson")).unwrap().url.as_deref(), Some("fixture://second.geojson"));
     assert!(wait(map.style_source("missing")).is_none());
@@ -119,7 +121,7 @@ fn a_geojson_source_reports_the_options_its_data_needs() {
     // The same options add a source of their own.
     wait(map.add_geojson_source("added", options.clone()));
     assert_eq!(wait(map.geojson_source_settings("added")), options);
-    assert!(wait(map.style_source("clustered")).unwrap().vector_encoding.is_none());
+    assert!(TilesetSettings::of(&wait(map.style_source("clustered")).unwrap().source).is_none());
 }
 
 #[test]
@@ -229,12 +231,12 @@ fn a_url_cancels_only_the_geojson_data_waiting_before_it() {
     // The data being built holds its background thread until released.
     let (release, held) = std::sync::mpsc::channel::<()>();
     let building = map
-        .set_style_source_data("points", move |_| {
+        .set_style_source_data("points", "a GeoJSON source", move |_: &SourceData<GeoJsonSourceType>| {
             let work: PrepareSourceData = Box::new(move || {
                 let _ = held.recv();
                 Ok(GeoJsonSourceType::set_data("points", None))
             });
-            Ok(work)
+            Ok(NewSourceData::InBackground(work))
         })
         .unwrap();
     let before = map.set_geojson_source_data("points", point_collection("before")).unwrap();
@@ -248,6 +250,29 @@ fn a_url_cancels_only_the_geojson_data_waiting_before_it() {
     release.send(()).unwrap();
     assert_eq!(building.wait().unwrap_err().kind, ErrorKind::Cancelled);
     after.wait().unwrap();
+}
+
+#[test]
+fn an_edit_that_keeps_the_geojson_data_leaves_the_data_waiting() {
+    let (_runtime, map) = styled_map();
+    wait(map.add_geojson_source("points", GeoJsonSourceSettings::default()));
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let building = map
+        .set_style_source_data("points", "a GeoJSON source", move |_: &SourceData<GeoJsonSourceType>| {
+            let work: PrepareSourceData = Box::new(move || {
+                let _ = held.recv();
+                Ok(GeoJsonSourceType::set_data("points", None))
+            });
+            Ok(NewSourceData::InBackground(work))
+        })
+        .unwrap();
+    let waiting = map.set_geojson_source_data("points", point_collection("waiting")).unwrap();
+    // A new tiling mode doesn't replace the source's data.
+    wait(map.set_geojson_source_synchronous_tiling("points", true));
+    assert!(!waiting.is_complete());
+    release.send(()).unwrap();
+    building.wait().unwrap();
+    waiting.wait().unwrap();
 }
 
 #[test]

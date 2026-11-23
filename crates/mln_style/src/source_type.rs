@@ -23,7 +23,7 @@ use mln_storage::{Data, Resource};
 use mln_util::constants;
 use mln_util::logging::{Event, Log};
 use mln_util::pool::Respond;
-use mln_util::tileset::{Tileset, VectorEncoding};
+use mln_util::tileset::Tileset;
 
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
@@ -41,21 +41,6 @@ pub struct SourceTypeInfo {
     pub layer_kind: SourceKind,
     /// Whether style JSON can create a source of the type.
     pub from_json: bool,
-}
-
-/// What a source reports about itself, whichever its type. A member that
-/// the type doesn't have is `None`.
-#[derive(Clone, Debug, Default)]
-pub struct SourceSummary {
-    /// The URL that the source loads its description from.
-    pub url: Option<String>,
-    /// The size of the source's tiles, in pixels.
-    pub tile_size: Option<u16>,
-    /// The tileset that the style lists, for a tileset source without a URL.
-    pub inline_tileset: Option<Tileset>,
-    /// How a vector source's tiles are encoded: as its loaded tileset says,
-    /// else as the style does.
-    pub vector_encoding: Option<VectorEncoding>,
 }
 
 /// What an offline download of a source fetches.
@@ -150,14 +135,10 @@ pub trait StyleSourceType: Sized + Send + Sync + 'static {
         None
     }
 
-    fn summary(_source: &SourceData<Self>) -> SourceSummary {
-        SourceSummary::default()
-    }
-
-    /// Whether the map prepares data set for the source in the command that
-    /// sets it, rather than on a background thread.
-    fn is_update_synchronous(_source: &SourceData<Self>) -> bool {
-        false
+    /// The URL that `source` loads its data or description from, if it has
+    /// one.
+    fn url(_source: &SourceData<Self>) -> Option<&str> {
+        None
     }
 
     /// What an offline download fetches for the source.
@@ -268,9 +249,8 @@ pub trait ErasedSource: Any + Send + Sync {
 
     fn attribution(&self) -> Option<String>;
 
-    fn summary(&self) -> SourceSummary;
-
-    fn is_update_synchronous(&self) -> bool;
+    /// [`StyleSourceType::url`].
+    fn url(&self) -> Option<&str>;
 
     fn offline(&self) -> OfflineResources;
 
@@ -336,12 +316,8 @@ impl<T: StyleSourceType> ErasedSource for SourceData<T> {
         T::attribution(self)
     }
 
-    fn summary(&self) -> SourceSummary {
-        T::summary(self)
-    }
-
-    fn is_update_synchronous(&self) -> bool {
-        T::is_update_synchronous(self)
+    fn url(&self) -> Option<&str> {
+        T::url(self)
     }
 
     fn offline(&self) -> OfflineResources {

@@ -10,12 +10,12 @@ use mln_sources::custom::TileOptions;
 use mln_sources::{
     CustomGeometrySourceType, CustomSourceCallbacks, CustomSourceCommands, CustomVectorSourceType,
     GeoJsonSourceCommands, GeoJsonSourceSettings, GeoJsonSourceType, ImageSourceCommands, ImageSourceType,
-    RasterDemSourceType, RasterSourceType, TileDataFormat, VectorSourceType,
+    RasterDemSourceType, RasterSourceType, TileDataFormat, TilesetSettings, VectorSourceType,
 };
+use mln_style::TransitionOptions;
 use mln_style::expression::Functions;
 use mln_style::image::{ImageContent, Impl as StyleImage, TextFit};
 use mln_style::source_type::StyleSourceType;
-use mln_style::{Source, TransitionOptions};
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::geo::{LatLng, LatLngBounds};
@@ -509,19 +509,24 @@ fn from_geojson_options(
 }
 
 /// What the C API reports about a source: its C type, what the runtime
-/// reports about it, and a GeoJSON source's options.
+/// reports about it, and a tileset or GeoJSON source's settings.
 struct ReportedSource {
     source_type: mln_style_source_type,
     info: SourceInfo,
+    tileset: Option<TilesetSettings>,
     geojson: Option<GeoJsonSourceSettings>,
 }
 
 impl ReportedSource {
-    /// What the C API reports about `source`, or `None` for a source of a
-    /// type that the C API doesn't name.
-    fn of(source: &Source) -> Option<Self> {
-        let source_type = source_type(source.info().name)?;
-        Some(ReportedSource { source_type, info: SourceInfo::of(source), geojson: GeoJsonSourceSettings::of(source) })
+    /// What the C API reports about the source of `info`, or `None` for a
+    /// source of a type that the C API doesn't name.
+    fn of(info: SourceInfo) -> Option<Self> {
+        Some(ReportedSource {
+            source_type: source_type(info.source_type)?,
+            tileset: TilesetSettings::of(&info.source),
+            geojson: GeoJsonSourceSettings::of(&info.source),
+            info,
+        })
     }
 }
 
@@ -542,7 +547,10 @@ impl LentSource {
             id: LentText::new(&info.id),
             attribution: LentText::new(info.attribution.as_deref().unwrap_or_default()),
             url: LentText::new(info.url.as_deref().unwrap_or_default()),
-            tile_urls: info.tiles.iter().flat_map(|tiles| &tiles.urls).map(|url| LentText::new(url)).collect(),
+            tile_urls: (source.tileset.iter().filter_map(|tileset| tileset.inline_tileset.as_ref()))
+                .flat_map(|tileset| &tileset.tiles)
+                .map(|url| LentText::new(url))
+                .collect(),
             cluster_properties: LentText::new(
                 source.geojson.as_ref().and_then(|geojson| geojson.cluster_properties.as_deref()).unwrap_or_default(),
             ),
@@ -553,7 +561,7 @@ impl LentSource {
     /// The C view, valid while `self` and `tile_urls`, the views of its
     /// tile URLs, are.
     fn item(&self, tile_urls: &[mln_buffer_view]) -> mln_style_source_info {
-        let info = &self.source.info;
+        let (info, tileset) = (&self.source.info, self.source.tileset.as_ref());
         let mut fields = 0;
         let mut tile_json = mln_style_source_tile_info {
             tile_urls: core::ptr::null(),
@@ -567,7 +575,7 @@ impl LentSource {
             northeast: mln_lat_lng { latitude: 0.0, longitude: 0.0 },
         };
         let mut raster_encoding = MLN_STYLE_RASTER_DEM_ENCODING_MAPBOX;
-        if let Some(tiles) = &info.tiles {
+        if let Some(tiles) = tileset.and_then(|tileset| tileset.inline_tileset.as_ref()) {
             fields |= MLN_STYLE_SOURCE_INFO_TILE_JSON;
             tile_json = mln_style_source_tile_info {
                 tile_urls: if tile_urls.is_empty() { core::ptr::null() } else { tile_urls.as_ptr() },
@@ -597,10 +605,12 @@ impl LentSource {
                 raster_encoding = encoding;
             }
         }
-        if info.tile_size.is_some() {
+        let tile_size = tileset.map(|tileset| tileset.tile_size);
+        let encoding = tileset.and_then(|tileset| tileset.vector_encoding);
+        if tile_size.is_some() {
             fields |= MLN_STYLE_SOURCE_INFO_TILE_SIZE;
         }
-        if info.vector_encoding.is_some() {
+        if encoding.is_some() {
             fields |= MLN_STYLE_SOURCE_INFO_VECTOR_ENCODING;
         }
         let geo_json = match &self.source.geojson {
@@ -620,8 +630,8 @@ impl LentSource {
             url: self.url.view(),
             tile_json,
             bounds: area,
-            tile_size: info.tile_size.map_or(0, u32::from),
-            vector_encoding: info.vector_encoding.map_or(MLN_STYLE_VECTOR_TILE_ENCODING_MVT, vector_encoding),
+            tile_size: tile_size.map_or(0, u32::from),
+            vector_encoding: encoding.map_or(MLN_STYLE_VECTOR_TILE_ENCODING_MVT, vector_encoding),
             raster_encoding,
             geo_json,
         }
@@ -873,8 +883,8 @@ pub(crate) unsafe extern "C" fn mln_map_get_style_source(
             query(
                 map,
                 completion,
-                |map| map.with_core(move |map| map.source(&id).and_then(ReportedSource::of)),
-                |source| LentSources(source.into_iter().map(LentSource::new).collect()),
+                |map| map.style_source(id),
+                |source| LentSources(source.and_then(ReportedSource::of).into_iter().map(LentSource::new).collect()),
             )
         }
     })
@@ -915,12 +925,9 @@ pub(crate) unsafe extern "C" fn mln_map_list_style_sources(
     export!(out_diagnostic, {
         // SAFETY: the caller's contract.
         unsafe {
-            query(
-                map,
-                completion,
-                |map| map.with_core(|map| map.sources().filter_map(ReportedSource::of).collect::<Vec<_>>()),
-                |sources| LentSources(sources.into_iter().map(LentSource::new).collect()),
-            )
+            query(map, completion, ::mln_runtime::Map::style_sources, |sources| {
+                LentSources(sources.into_iter().filter_map(ReportedSource::of).map(LentSource::new).collect())
+            })
         }
     })
 }

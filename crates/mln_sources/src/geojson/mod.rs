@@ -12,9 +12,7 @@ use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::expression::expr::evaluate_accumulated;
 use mln_style::expression::{Expr, Functions, from_expression_value};
 use mln_style::layer_type::SourceKind;
-use mln_style::source_type::{
-    Described, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,
-};
+use mln_style::source_type::{Described, Load, OfflineResources, Source, SourceData, SourceTypeInfo, StyleSourceType};
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::error::Error;
@@ -313,6 +311,9 @@ impl GeoJSONDataBuilder {
 /// The GeoJSON source type.
 pub struct GeoJsonSourceType;
 
+/// What an edit or command for a source of another type says it isn't.
+const GEOJSON: &str = "a GeoJSON source";
+
 /// A GeoJSON source's options.
 #[derive(Clone, Debug)]
 pub struct GeoJsonSourceOptions {
@@ -396,12 +397,8 @@ impl StyleSourceType for GeoJsonSourceType {
         source.options.options.attribution.clone()
     }
 
-    fn summary(source: &SourceData<Self>) -> SourceSummary {
-        SourceSummary { url: source.options.url.clone(), ..SourceSummary::default() }
-    }
-
-    fn is_update_synchronous(source: &SourceData<Self>) -> bool {
-        source.options.synchronous_update
+    fn url(source: &SourceData<Self>) -> Option<&str> {
+        source.options.url.as_deref()
     }
 
     fn offline(source: &SourceData<Self>) -> OfflineResources {
@@ -417,7 +414,7 @@ impl GeoJsonSourceType {
     /// `url`. Its data stays until the URL's arrives.
     pub fn set_url(id: impl Into<String>, url: impl Into<String>) -> Edit {
         let url = url.into();
-        Edit::update_source::<Self>(id, "a GeoJSON source", |data| {
+        Edit::update_source::<Self>(id, GEOJSON, |data| {
             data.options.url = Some(url);
             data.load += 1;
             true
@@ -427,7 +424,7 @@ impl GeoJsonSourceType {
     /// The edit that replaces the data of the GeoJSON source `id`, which no
     /// longer loads it from a URL.
     pub fn set_data(id: impl Into<String>, geojson: Option<Arc<dyn GeoJSONData>>) -> Edit {
-        Edit::update_source::<Self>(id, "a GeoJSON source", |data| {
+        Edit::update_source::<Self>(id, GEOJSON, |data| {
             data.options.url = None;
             data.description = geojson;
             data.load += 1;
@@ -439,7 +436,7 @@ impl GeoJsonSourceType {
     /// out in the call that asks for them, in place of its
     /// `synchronous_update` option.
     pub fn set_synchronous(id: impl Into<String>, synchronous: bool) -> Edit {
-        Edit::update_source::<Self>(id, "a GeoJSON source", move |data| {
+        Edit::update_source::<Self>(id, GEOJSON, move |data| {
             let changed = data.options.synchronous_update != synchronous;
             data.options.synchronous_update = synchronous;
             changed

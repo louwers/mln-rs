@@ -8,8 +8,7 @@ use mln_util::LatLng;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 
-use super::{ImageSourceOptions, ImageSourceType};
-use crate::not_a;
+use super::{IMAGE, ImageSourceOptions, ImageSourceType};
 
 /// A runtime map's commands for its image sources. A command for a source
 /// of another type completes with
@@ -59,11 +58,14 @@ impl ImageSourceCommands for Map {
         image: PremultipliedImage,
     ) -> Result<Completion<Applied>, Error> {
         let source_id = source_id.into();
-        self.add_style_source(move |_| {
-            let options = ImageSourceOptions { url: None, coordinates };
-            let data = SourceData::<ImageSourceType>::with_description(options, Arc::new(image));
-            Ok(Source::new(&source_id, data))
-        })
+        self.add_style_source(
+            move |_| {
+                let options = ImageSourceOptions { url: None, coordinates };
+                let data = SourceData::<ImageSourceType>::with_description(options, Arc::new(image));
+                Ok(Source::new(&source_id, data))
+            },
+            None,
+        )
     }
 
     fn set_image_source_url(
@@ -91,10 +93,6 @@ impl ImageSourceCommands for Map {
     }
 
     fn image_source_coordinates(&self, source_id: impl Into<String>) -> Result<Completion<[LatLng; 4]>, Error> {
-        self.query_style_source(source_id, |source| {
-            let data =
-                SourceData::<ImageSourceType>::recover(source).ok_or_else(|| not_a(source.id(), "an image source"))?;
-            Ok(data.options.coordinates)
-        })
+        self.query_style_source(source_id, IMAGE, |data: &SourceData<ImageSourceType>| Ok(data.options.coordinates))
     }
 }

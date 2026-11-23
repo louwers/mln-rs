@@ -11,6 +11,7 @@ use mln_rs::mln_sources::GeoJsonSourceType;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Response};
 use mln_style::expression::expr::FeatureState;
+use mln_style::source_type::SourceData;
 use mln_util::ErrorKind;
 use mln_util::queue::Queue;
 use mln_util::size::Size;
@@ -293,7 +294,8 @@ fn each_reader_wakes_until_it_drops() {
 
 /// Whether `update`'s only source updates synchronously.
 fn publishes_synchronous(update: &Update) -> bool {
-    update.parameters.style.get_sources().iter().next().expect("a source").data().is_update_synchronous()
+    let source = update.parameters.style.get_sources().iter().next().expect("a source");
+    SourceData::<GeoJsonSourceType>::recover(source).expect("a GeoJSON source").options.synchronous_update
 }
 
 fn set_override_synchronous_update(map: &mut MapCore, value: bool) {

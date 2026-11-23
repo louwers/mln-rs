@@ -324,7 +324,9 @@ fn a_geojson_build_keeps_the_synchronous_update_override() {
 
     run_until(&mut map, &run_loop, MapCore::style_loaded);
     assert_eq!(1, feature_count(&map, "source"));
-    assert!(!map.source("source").unwrap().data().is_update_synchronous());
+    assert!(
+        !SourceData::<GeoJsonSourceType>::recover(map.source("source").unwrap()).unwrap().options.synchronous_update
+    );
 }
 
 // gtest: Source.ImageSourceImageUpdate

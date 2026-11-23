@@ -4,16 +4,15 @@
 use std::sync::Arc;
 
 use geojson::{GeoJson, GeometryValue};
-use mln_runtime::{Applied, Completion, Map, PrepareSourceData, RenderSession};
+use mln_runtime::{Applied, Completion, Map, NewSourceData, PrepareSourceData, RenderSession};
 use mln_style::expression::Functions;
 use mln_style::source_type::{Source, SourceData};
 use mln_util::error::Error;
 
 use super::{
-    ClusterProperties, Features, GeoJSONData, GeoJSONOptions, GeoJsonSourceType, convert_geojson_options,
+    ClusterProperties, Features, GEOJSON, GeoJSONData, GeoJSONOptions, GeoJsonSourceType, convert_geojson_options,
     geojson_source, parse_geojson,
 };
-use crate::not_a;
 
 /// The options of a GeoJSON source as the API gives and reports them, which
 /// stay fixed for as long as the style holds the source. The defaults are
@@ -190,10 +189,6 @@ fn check_clusterable(geojson: &GeoJson) -> Result<(), Error> {
     }
 }
 
-fn geojson_data(source: &Source) -> Result<&SourceData<GeoJsonSourceType>, Error> {
-    SourceData::recover(source).ok_or_else(|| not_a(source.id(), "a GeoJSON source"))
-}
-
 /// A runtime map's commands for its GeoJSON sources.
 pub trait GeoJsonSourceCommands {
     /// Adds a GeoJSON source with no data and `settings`, which stay fixed
@@ -265,10 +260,13 @@ impl GeoJsonSourceCommands for Map {
     ) -> Result<Completion<Applied>, Error> {
         settings.check()?;
         let source_id = source_id.into();
-        self.add_style_source(move |map| {
-            let options = settings.into_core(map.style().registry().functions())?;
-            Ok(geojson_source(&source_id, Arc::new(options)))
-        })
+        self.add_style_source(
+            move |map| {
+                let options = settings.into_core(map.style().registry().functions())?;
+                Ok(geojson_source(&source_id, Arc::new(options)))
+            },
+            None,
+        )
     }
 
     fn set_geojson_source_url(
@@ -276,8 +274,7 @@ impl GeoJsonSourceCommands for Map {
         source_id: impl Into<String>,
         url: impl Into<String>,
     ) -> Result<Completion<Applied>, Error> {
-        let source_id = source_id.into();
-        self.replace_style_source_data(source_id.clone(), GeoJsonSourceType::set_url(source_id, url))
+        self.apply_style_edit(GeoJsonSourceType::set_url(source_id, url))
     }
 
     fn set_geojson_source_data(
@@ -285,19 +282,24 @@ impl GeoJsonSourceCommands for Map {
         source_id: impl Into<String>,
         json: impl Into<String>,
     ) -> Result<Completion<Applied>, Error> {
-        let json = json.into();
-        self.set_style_source_data(source_id, move |source| {
-            let data = geojson_data(source)?;
+        let (source_id, json) = (source_id.into(), json.into());
+        let id = source_id.clone();
+        self.set_style_source_data(source_id, GEOJSON, move |data: &SourceData<GeoJsonSourceType>| {
             let geojson = parse_geojson(&json)?;
             if data.options.options.cluster {
                 check_clusterable(&geojson)?;
             }
-            let (id, builder) = (source.id().to_owned(), data.options.data_builder());
+            let builder = data.options.data_builder();
             let work: PrepareSourceData = Box::new(move || {
                 let data = builder.build(geojson)?;
                 Ok(GeoJsonSourceType::set_data(id, Some(data)))
             });
-            Ok(work)
+            // Synchronous tiling prepares the data in the command too.
+            Ok(if data.options.synchronous_update {
+                NewSourceData::Now(work)
+            } else {
+                NewSourceData::InBackground(work)
+            })
         })
     }
 
@@ -313,8 +315,8 @@ impl GeoJsonSourceCommands for Map {
         &self,
         source_id: impl Into<String>,
     ) -> Result<Completion<GeoJsonSourceSettings>, Error> {
-        self.query_style_source(source_id, |source| {
-            Ok(GeoJsonSourceSettings::from_core(&geojson_data(source)?.options.options))
+        self.query_style_source(source_id, GEOJSON, |data: &SourceData<GeoJsonSourceType>| {
+            Ok(GeoJsonSourceSettings::from_core(&data.options.options))
         })
     }
 }

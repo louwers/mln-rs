@@ -68,19 +68,24 @@ fn loading_corrupt() {
     assert_eq!("expected value at line 1 column 1", error.to_string());
 }
 
+/// Whether `source`, a GeoJSON source, lays out its tiles synchronously.
+fn is_synchronous(source: &Source) -> bool {
+    SourceData::<GeoJsonSourceType>::recover(source).unwrap().options.synchronous_update
+}
+
 // gtest: Source.GeoJSONSourceSynchronousUpdateOverrideReplacesTheOption
 #[test]
 fn geojson_source_synchronous_update_override_replaces_the_option() {
     let options = GeoJSONOptions { synchronous_update: true, ..Default::default() };
     let mut style = style_with(geojson_source("source", Arc::new(options)));
-    let synchronous = |style: &Style, id: &str| style.get_source(id).unwrap().data().is_update_synchronous();
+    let synchronous = |style: &Style, id: &str| is_synchronous(style.get_source(id).unwrap());
     assert!(synchronous(&style, "source"));
 
     let published = style.get_source("source").unwrap().clone();
     style.apply(GeoJsonSourceType::set_synchronous("source", false)).unwrap();
     assert!(!synchronous(&style, "source"));
     // The version the renderer may hold keeps its mode.
-    assert!(published.data().is_update_synchronous());
+    assert!(is_synchronous(&published));
 
     // Setting the mode the source has changes nothing.
     let before = style.get_source("source").unwrap().clone();

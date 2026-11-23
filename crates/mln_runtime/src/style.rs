@@ -8,27 +8,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use mln_style::image::Impl as StyleImage;
 use mln_style::layer_type::StyleLayerType;
+use mln_style::source_type::{SourceData, StyleSourceType};
 use mln_style::{Edit, Source, SourceInstance, TransitionOptions};
 use mln_util::error::Error;
-use mln_util::geo::LatLngBounds;
 use mln_util::hash::HashMap;
-use mln_util::range::Range;
-use mln_util::tileset::{RasterEncoding, Scheme, VectorEncoding};
 
 use crate::completion::{Completion, Resolver};
 use crate::map_handle::{Applied, Map, MapEntry, MapId, apply_command, flush, missing_map, style_not_loaded};
 use crate::runtime::{Background, Outbox, RuntimeCore, post};
-
-/// The tiles that a source lists in the style itself, rather than at a URL.
-#[derive(Clone, Debug, PartialEq)]
-pub struct SourceTiles {
-    pub urls: Vec<String>,
-    pub zoom_range: Range<u8>,
-    pub scheme: Scheme,
-    pub bounds: Option<LatLngBounds>,
-    pub vector_encoding: Option<VectorEncoding>,
-    pub raster_encoding: Option<RasterEncoding>,
-}
 
 /// A source of the map's style.
 #[derive(Clone, Debug)]
@@ -42,36 +29,24 @@ pub struct SourceInfo {
     /// The source's attribution. A tile source with a URL has none until its
     /// TileJSON loads.
     pub attribution: Option<String>,
+    /// The URL the source loads its data or description from.
     pub url: Option<String>,
-    /// The tiles a tile source lists in the style itself.
-    pub tiles: Option<SourceTiles>,
-    /// A tile source's tile size.
-    pub tile_size: Option<u16>,
-    /// A vector source's tile format.
-    pub vector_encoding: Option<VectorEncoding>,
+    /// The source itself, from which its type's own settings read the rest,
+    /// such as `mln_sources`' `TilesetSettings`.
+    pub source: Source,
 }
 
 impl SourceInfo {
     /// What the API reports about `source`.
     #[must_use]
     pub fn of(source: &Source) -> SourceInfo {
-        let summary = source.data().summary();
         SourceInfo {
             id: source.id().to_owned(),
             source_type: source.info().name,
             is_volatile: source.common().volatile,
             attribution: source.data().attribution().filter(|attribution| !attribution.is_empty()),
-            url: summary.url,
-            tiles: summary.inline_tileset.map(|tileset| SourceTiles {
-                urls: tileset.tiles,
-                zoom_range: tileset.zoom_range,
-                scheme: tileset.scheme,
-                bounds: tileset.bounds,
-                vector_encoding: tileset.vector_encoding,
-                raster_encoding: tileset.raster_encoding,
-            }),
-            tile_size: summary.tile_size,
-            vector_encoding: summary.vector_encoding,
+            url: source.data().url().map(str::to_owned),
+            source: source.clone(),
         }
     }
 }
@@ -93,14 +68,20 @@ pub struct LayerInfo {
 }
 
 /// The work that prepares data for a style source, such as a GeoJSON
-/// source's features, and makes the edit that gives the source the data:
-/// what [`Map::set_style_source_data`] runs. The work runs on a background
-/// thread, or on the runtime's thread for a source whose updates are
-/// synchronous.
+/// source's features, and makes the edit that gives the source the data.
 pub type PrepareSourceData = Box<dyn FnOnce() -> Result<Edit, Error> + Send>;
 
-/// What a map keeps for a source that [`Map::add_style_source_keeping`]
-/// added, until the source leaves the style.
+/// The work that prepares a source's new data, as a source type's command
+/// gives it to [`Map::set_style_source_data`], and where it runs.
+pub enum NewSourceData {
+    /// In the command, before later commands run.
+    Now(PrepareSourceData),
+    /// On a background thread.
+    InBackground(PrepareSourceData),
+}
+
+/// What a map keeps for a source that [`Map::add_style_source`] added with
+/// something to keep, until the source leaves the style.
 struct KeptForSource {
     id: String,
     instance: SourceInstance,
@@ -115,7 +96,7 @@ pub(crate) struct KeptForSources(Vec<KeptForSource>);
 
 /// The data of one source that a background thread prepares: the data being
 /// prepared, and the newest data that waits to follow it.
-struct SourceDataUpdate {
+struct PendingData {
     /// The source the data is for; a source that replaced it under its id
     /// doesn't take it.
     instance: SourceInstance,
@@ -133,7 +114,7 @@ struct Building {
 
 /// The sources whose new data is still being prepared, by source ID.
 #[derive(Default)]
-pub(crate) struct SourceDataUpdates(HashMap<String, SourceDataUpdate>);
+pub(crate) struct SourceDataUpdates(HashMap<String, PendingData>);
 
 /// Lets go of what the map keeps for the sources that left the style, and
 /// cancels the data being prepared or waiting for them. What the map kept drops from the outbox, so before
@@ -195,6 +176,14 @@ fn source_not_found(id: &str) -> Error {
 
 fn find_source<'a>(map: &'a crate::map::MapCore, id: &str) -> Result<&'a Source, Error> {
     map.source(id).ok_or_else(|| source_not_found(id))
+}
+
+/// The data of `source`, a `T` source. Fails with `InvalidArgument` for a
+/// source of another type, which isn't `kind`, as in `source "water" is not
+/// a GeoJSON source`.
+fn typed<'a, T: StyleSourceType>(source: &'a Source, kind: &str) -> Result<&'a SourceData<T>, Error> {
+    SourceData::recover(source)
+        .ok_or_else(|| Error::invalid_argument(format!("source {} is not {kind}", quote(source.id()))))
 }
 
 /// The source `id`, if it's still the source `instance`.
@@ -274,6 +263,12 @@ impl Map {
     /// runtime's thread, in the command's place among the map's commands,
     /// with the map, which gives its thread pool and registry.
     ///
+    /// The map keeps `kept`, such as the host's callbacks that the source
+    /// refers to weakly, until the source leaves the style by its removal, a
+    /// style load or the map's release. `kept` drops on the runtime's thread
+    /// with the runtime's state unborrowed, before the completion of what
+    /// removed the source, or of this command when it fails.
+    ///
     /// Completes with what `make` fails with,
     /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) while the style
     /// isn't loaded, and `AlreadyExists` when the style has a source with the
@@ -281,30 +276,20 @@ impl Map {
     pub fn add_style_source(
         &self,
         make: impl FnOnce(&crate::map::MapCore) -> Result<Source, Error> + Send + 'static,
-    ) -> Result<Completion<Applied>, Error> {
-        self.command(move |map| add_source(map, make).map(drop))
-    }
-
-    /// Adds the source that `make` makes, as
-    /// [`add_style_source`](Self::add_style_source) does, and keeps `kept`,
-    /// such as the host's callbacks that the source refers to weakly, until
-    /// the source leaves the style by its removal, a style load or the map's
-    /// release. `kept` drops on the runtime's thread with the runtime's state
-    /// unborrowed, before the completion of what removed the source, or of
-    /// this command when it fails.
-    pub fn add_style_source_keeping(
-        &self,
-        make: impl FnOnce(&crate::map::MapCore) -> Result<Source, Error> + Send + 'static,
-        kept: Box<dyn Any + Send>,
+        kept: Option<Box<dyn Any + Send>>,
     ) -> Result<Completion<Applied>, Error> {
         self.send(
             move |entry, outbox| match add_source(&mut entry.core, make) {
                 Ok((id, instance)) => {
-                    entry.kept_for_sources.0.push(KeptForSource { id, instance, _kept: kept });
+                    if let Some(kept) = kept {
+                        entry.kept_for_sources.0.push(KeptForSource { id, instance, _kept: kept });
+                    }
                     Ok(())
                 }
                 Err(error) => {
-                    outbox.push(move || drop(kept));
+                    if let Some(kept) = kept {
+                        outbox.push(move || drop(kept));
+                    }
                     Err(error)
                 }
             },
@@ -316,30 +301,20 @@ impl Map {
     /// for its sources. Completes with what the edit fails with, and with
     /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) while the style isn't
     /// loaded.
-    pub fn apply_style_edit(&self, edit: Edit) -> Result<Completion<Applied>, Error> {
-        self.command(move |map| map.edit_loaded_style(|style| style.apply(edit)))
-    }
-
-    /// Applies `edit`, which replaces the data of the source `source_id`,
-    /// such as a new URL, as [`apply_style_edit`](Self::apply_style_edit)
-    /// does. Once it applied, the data that a
+    ///
+    /// An edit that replaces a source's data, such as a new URL, grows its
+    /// [`load`](mln_style::source_type::SourceData::load): the data that a
     /// [`set_style_source_data`](Self::set_style_source_data) sent before
-    /// and that waits to be prepared completes with
-    /// [`ErrorKind::Cancelled`](mln_util::ErrorKind). The data being
+    /// and that waits to be prepared then completes with
+    /// [`ErrorKind::Cancelled`](mln_util::ErrorKind), and the data being
     /// prepared finds out once it's ready.
-    pub fn replace_style_source_data(
-        &self,
-        source_id: impl Into<String>,
-        edit: Edit,
-    ) -> Result<Completion<Applied>, Error> {
-        let source_id = source_id.into();
+    pub fn apply_style_edit(&self, edit: Edit) -> Result<Completion<Applied>, Error> {
         self.send(
             move |entry, outbox| {
+                let waiting = waiting_loads(entry);
                 entry.core.edit_loaded_style(|style| style.apply(edit))?;
-                if let Some((_, resolver)) =
-                    entry.source_data_updates.0.get_mut(&source_id).and_then(|update| update.waiting.take())
-                {
-                    outbox.resolve(resolver, Err(Error::cancelled("an edit replaced the source's data")));
+                for (id, load) in waiting {
+                    cancel_replaced(entry, &id, load, outbox);
                 }
                 Ok(())
             },
@@ -347,57 +322,61 @@ impl Map {
         )
     }
 
-    /// Runs `act` on the style's source `source_id` on the runtime's thread,
-    /// in the command's place among the map's commands: a command that acts
-    /// through the source without editing the style, such as an answer to a
-    /// custom source's request for a tile.
+    /// Runs `act` on the data of the style's source `source_id`, a `T`
+    /// source, on the runtime's thread, in the command's place among the
+    /// map's commands: a command that acts through the source without
+    /// editing the style, such as an answer to a custom source's request
+    /// for a tile.
     ///
     /// Completes with [`ErrorKind::NotFound`](mln_util::ErrorKind) when the
-    /// style has no such source, and with what `act` fails with.
-    pub fn command_style_source(
+    /// style has no such source, with `InvalidArgument` when it isn't a `T`
+    /// source, as in `source "water" is not {kind}`, and with what `act`
+    /// fails with.
+    pub fn command_style_source<T: StyleSourceType>(
         &self,
         source_id: impl Into<String>,
-        act: impl FnOnce(&Source) -> Result<(), Error> + Send + 'static,
+        kind: &'static str,
+        act: impl FnOnce(&SourceData<T>) -> Result<(), Error> + Send + 'static,
     ) -> Result<Completion<Applied>, Error> {
         let source_id = source_id.into();
-        self.command(move |map| act(find_source(map, &source_id)?))
+        self.command(move |map| act(typed(find_source(map, &source_id)?, kind)?))
     }
 
-    /// Reads the style's source `source_id` with `read` on the runtime's
-    /// thread, in the query's place among the map's commands.
-    ///
-    /// Completes with [`ErrorKind::NotFound`](mln_util::ErrorKind) when the
-    /// style has no such source, and with what `read` fails with.
-    pub fn query_style_source<T: Send + 'static>(
+    /// Reads the data of the style's source `source_id`, a `T` source, with
+    /// `read` on the runtime's thread, in the query's place among the map's
+    /// commands. Completes as
+    /// [`command_style_source`](Self::command_style_source) does.
+    pub fn query_style_source<T: StyleSourceType, R: Send + 'static>(
         &self,
         source_id: impl Into<String>,
-        read: impl FnOnce(&Source) -> Result<T, Error> + Send + 'static,
-    ) -> Result<Completion<T>, Error> {
+        kind: &'static str,
+        read: impl FnOnce(&SourceData<T>) -> Result<R, Error> + Send + 'static,
+    ) -> Result<Completion<R>, Error> {
         let source_id = source_id.into();
-        self.query(move |map| read(find_source(map, &source_id)?))
+        self.query(move |map| read(typed(find_source(map, &source_id)?, kind)?))
     }
 
-    /// Gives the source `source_id` data that a background thread prepares.
-    /// On the runtime's thread, in the command's place among the map's
-    /// commands, `data` checks the source and makes the work that prepares
-    /// its data, which a background thread then runs. The command completes once the
-    /// source holds the data. Later commands don't wait for it. While the
-    /// source is still preparing earlier data, only the newest data waits to
-    /// follow it. A source whose updates are synchronous
-    /// (`is_update_synchronous`) prepares the data before later commands run.
+    /// Gives the source `source_id`, a `T` source, new data. On the
+    /// runtime's thread, in the command's place among the map's commands,
+    /// `data` reads the source's data and makes the work that prepares the
+    /// new data, which runs in the command or on a background thread. The
+    /// command completes once the source holds the data. Later commands
+    /// don't wait for work in the background. While the source is still
+    /// preparing earlier data in the background, only the newest data waits
+    /// to follow it.
     ///
     /// Completes with [`ErrorKind::InvalidState`](mln_util::ErrorKind) while
-    /// the style isn't loaded, with `NotFound` when the style has no such
-    /// source, with what `data` or the preparation fails with, and with
-    /// `Cancelled` when newer data replaces it while it waits, when
-    /// [`replace_style_source_data`](Self::replace_style_source_data) comes
-    /// while it waits, or when an edit that replaces the source's data (that
-    /// grows its `load`), the source's removal, a style load or the map's
-    /// release comes before the data is ready.
-    pub fn set_style_source_data(
+    /// the style isn't loaded, with `NotFound` and `InvalidArgument` as
+    /// [`command_style_source`](Self::command_style_source) does, with what
+    /// `data` or the preparation fails with, and with `Cancelled` when newer
+    /// data replaces it while it waits, or when an edit that replaces the
+    /// source's data (that grows its `load`), the source's removal, a style
+    /// load or the map's release comes before the data is ready.
+    pub fn set_style_source_data<T: StyleSourceType>(
         &self,
         source_id: impl Into<String>,
-        data: impl FnOnce(&Source) -> Result<PrepareSourceData, Error> + Send + 'static,
+        kind: &'static str,
+        data: impl FnOnce(&SourceData<T>) -> Result<NewSourceData, Error> + Send + 'static,
     ) -> Result<Completion<Applied>, Error> {
         let source_id = source_id.into();
         self.post(move |core, outbox, id, sequence, resolver| {
@@ -410,7 +389,7 @@ impl Map {
                 id,
                 sequence,
                 outbox,
-                move |entry, outbox| match queue_data(entry, id, &source_id, data, resolver, background, outbox) {
+                move |entry, outbox| match queue_data(entry, id, &source_id, kind, data, resolver, background, outbox) {
                     Ok(installed) => installed,
                     Err((error, resolver)) => {
                         outbox.resolve(resolver, Err(error));
@@ -522,37 +501,60 @@ fn add_source(
     Ok((id, instance))
 }
 
-/// Takes new data for the source `source_id`, whose work `data` checks the
-/// source for and makes: prepares it now for a source whose updates are synchronous, and returns
-/// its resolver for the command to resolve once it ran; otherwise starts
-/// preparing it, or leaves it waiting behind the data being prepared. An
-/// error returns the resolver with it.
-fn queue_data(
+/// The sources whose data waits to be prepared, with their `load`, which
+/// [`cancel_replaced`] compares after an edit.
+fn waiting_loads(entry: &MapEntry) -> Vec<(String, u64)> {
+    let updates = entry.source_data_updates.0.iter().filter(|(_, update)| update.waiting.is_some());
+    updates
+        .filter_map(|(id, update)| Some((id.clone(), current_source(&entry.core, id, update.instance)?.data().load())))
+        .collect()
+}
+
+/// Cancels the data that waits for the source `id` if its `load` is no
+/// longer `load`: an edit replaced the source's data.
+fn cancel_replaced(entry: &mut MapEntry, id: &str, load: u64, outbox: &mut Outbox) {
+    let Some(update) = entry.source_data_updates.0.get_mut(id) else { return };
+    let current = current_source(&entry.core, id, update.instance).map(|source| source.data().load());
+    if current != Some(load)
+        && let Some((_, resolver)) = update.waiting.take()
+    {
+        outbox.resolve(resolver, Err(Error::cancelled("an edit replaced the source's data")));
+    }
+}
+
+/// Takes new data for the source `source_id`, a `T` source, whose work
+/// `data` makes from its data: prepares it now, and returns its resolver
+/// for the command to resolve once it ran; or starts preparing it in the
+/// background, or leaves it waiting behind the data being prepared. An error returns
+/// the resolver with it.
+#[expect(clippy::too_many_arguments, reason = "one command's state, taken apart")]
+fn queue_data<T: StyleSourceType>(
     entry: &mut MapEntry,
     map_id: MapId,
     source_id: &str,
-    data: impl FnOnce(&Source) -> Result<PrepareSourceData, Error>,
+    kind: &str,
+    data: impl FnOnce(&SourceData<T>) -> Result<NewSourceData, Error>,
     resolver: Resolver<Applied>,
     background: Background,
     outbox: &mut Outbox,
 ) -> Result<Option<Resolver<Applied>>, (Error, Resolver<Applied>)> {
-    let found = (|| {
+    let made = (|| {
         require_loaded(&entry.core)?;
         let source = find_source(&entry.core, source_id)?;
-        Ok((source, data(source)?))
+        Ok((source, data(typed(source, kind)?)?))
     })();
-    let (source, work) = match found {
-        Ok(found) => found,
+    let (source, work) = match made {
+        Ok((source, NewSourceData::InBackground(work))) => (source, work),
+        Ok((_, NewSourceData::Now(work))) => {
+            return match work().and_then(|edit| entry.core.edit_style(|style| style.apply(edit))) {
+                Ok(()) => Ok(Some(resolver)),
+                Err(error) => Err((error, resolver)),
+            };
+        }
         Err(error) => return Err((error, resolver)),
     };
-    if source.data().is_update_synchronous() {
-        return match work().and_then(|edit| entry.core.edit_style(|style| style.apply(edit))) {
-            Ok(()) => Ok(Some(resolver)),
-            Err(error) => Err((error, resolver)),
-        };
-    }
     let instance = source.instance();
-    let update = entry.source_data_updates.0.entry(source_id.to_owned()).or_insert_with(|| SourceDataUpdate {
+    let update = entry.source_data_updates.0.entry(source_id.to_owned()).or_insert_with(|| PendingData {
         instance,
         building: None,
         waiting: None,
@@ -569,7 +571,7 @@ fn queue_data(
 /// Runs `work`, which prepares data for `update`'s source, `source`, on a
 /// background thread, then installs the data from the runtime's thread.
 fn start_data(
-    update: &mut SourceDataUpdate,
+    update: &mut PendingData,
     map_id: MapId,
     source: &Source,
     work: PrepareSourceData,

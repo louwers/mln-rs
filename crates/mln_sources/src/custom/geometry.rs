@@ -104,11 +104,14 @@ impl CustomGeometrySourceHandle {
     /// The handle of `source`, if it's a custom geometry source.
     #[must_use]
     pub fn of(source: &Source) -> Option<Self> {
-        let data = SourceData::<CustomGeometrySourceType>::recover(source)?;
-        Some(CustomGeometrySourceHandle {
+        SourceData::recover(source).map(Self::new)
+    }
+
+    pub(crate) fn new(data: &SourceData<CustomGeometrySourceType>) -> Self {
+        CustomGeometrySourceHandle {
             provider: Arc::downgrade(&data.options.provider),
             tile_options: Arc::clone(&data.options.tile_options),
-        })
+        }
     }
 
     /// Hands over the tile's features. The GeoJSON is cut to the tile on the

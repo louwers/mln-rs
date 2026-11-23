@@ -4,7 +4,7 @@ use std::sync::{Arc, Weak};
 
 use geojson::GeoJson;
 use mln_runtime::{Applied, Completion, Map};
-use mln_style::source_type::Source;
+use mln_style::source_type::SourceData;
 use mln_tile_id::CanonicalTileID;
 use mln_util::error::Error;
 use mln_util::geo::LatLngBounds;
@@ -13,9 +13,8 @@ use mln_util::range::Range;
 use super::geometry::{self, CustomGeometrySourceHandle};
 use super::provider::TileFunction;
 use super::vector::{self, CustomVectorSourceHandle};
-use super::{TileDataFormat, TileOptions};
+use super::{CustomGeometrySourceType, CustomVectorSourceType, TileDataFormat, TileOptions};
 use crate::geojson::parse_geojson;
-use crate::not_a;
 
 /// The callbacks of a custom source, which run on a library thread. A map
 /// asks for a tile with `fetch_tile`, and answers come back through the
@@ -70,12 +69,26 @@ fn feature_collection(geojson: GeoJson) -> GeoJson {
     }
 }
 
-fn custom_geometry(source: &Source) -> Result<CustomGeometrySourceHandle, Error> {
-    CustomGeometrySourceHandle::of(source).ok_or_else(|| not_a(source.id(), "a custom geometry source"))
+/// Runs `act` with the handle of the custom geometry source `source_id`.
+fn command_geometry(
+    map: &Map,
+    source_id: impl Into<String>,
+    act: impl FnOnce(CustomGeometrySourceHandle) -> Result<(), Error> + Send + 'static,
+) -> Result<Completion<Applied>, Error> {
+    map.command_style_source(source_id, "a custom geometry source", |data: &SourceData<CustomGeometrySourceType>| {
+        act(CustomGeometrySourceHandle::new(data))
+    })
 }
 
-fn custom_vector(source: &Source) -> Result<CustomVectorSourceHandle, Error> {
-    CustomVectorSourceHandle::of(source).ok_or_else(|| not_a(source.id(), "a custom vector source"))
+/// Runs `act` with the handle of the custom vector source `source_id`.
+fn command_vector(
+    map: &Map,
+    source_id: impl Into<String>,
+    act: impl FnOnce(CustomVectorSourceHandle) -> Result<(), Error> + Send + 'static,
+) -> Result<Completion<Applied>, Error> {
+    map.command_style_source(source_id, "a custom vector source", |data: &SourceData<CustomVectorSourceType>| {
+        act(CustomVectorSourceHandle::new(data))
+    })
 }
 
 /// A runtime map's commands for its custom geometry and custom vector
@@ -187,12 +200,12 @@ impl CustomSourceCommands for Map {
         let (source_id, callbacks) = (source_id.into(), Arc::new(callbacks));
         let (fetch_tile_function, cancel_tile_function) = tile_functions(&callbacks);
         let options = geometry::Options { fetch_tile_function, cancel_tile_function, zoom_range, tile_options };
-        self.add_style_source_keeping(
+        self.add_style_source(
             move |map| {
                 geometry::create(&source_id, options, map.pool())
                     .map_err(|error| Error::invalid_argument(error.to_string()))
             },
-            Box::new(callbacks),
+            Some(Box::new(callbacks)),
         )
     }
 
@@ -205,10 +218,7 @@ impl CustomSourceCommands for Map {
         let (source_id, callbacks) = (source_id.into(), Arc::new(callbacks));
         let (fetch_tile_function, cancel_tile_function) = tile_functions(&callbacks);
         let options = vector::Options { fetch_tile_function, cancel_tile_function, zoom_range };
-        self.add_style_source_keeping(
-            move |map| Ok(vector::create(&source_id, options, map.pool())),
-            Box::new(callbacks),
-        )
+        self.add_style_source(move |map| Ok(vector::create(&source_id, options, map.pool())), Some(Box::new(callbacks)))
     }
 
     fn set_custom_geometry_source_tile_data(
@@ -218,9 +228,9 @@ impl CustomSourceCommands for Map {
         json: impl Into<String>,
     ) -> Result<Completion<Applied>, Error> {
         let json = json.into();
-        self.command_style_source(source_id, move |source| {
+        command_geometry(self, source_id, move |handle| {
             let geojson = feature_collection(parse_geojson(&json)?);
-            custom_geometry(source)?.set_tile_data(tile_id, geojson);
+            handle.set_tile_data(tile_id, geojson);
             Ok(())
         })
     }
@@ -232,8 +242,8 @@ impl CustomSourceCommands for Map {
         message: impl Into<String>,
     ) -> Result<Completion<Applied>, Error> {
         let message = message.into();
-        self.command_style_source(source_id, move |source| {
-            custom_geometry(source)?.set_tile_error(tile_id, Error::native(message));
+        command_geometry(self, source_id, move |handle| {
+            handle.set_tile_error(tile_id, Error::native(message));
             Ok(())
         })
     }
@@ -243,8 +253,8 @@ impl CustomSourceCommands for Map {
         source_id: impl Into<String>,
         tile_id: CanonicalTileID,
     ) -> Result<Completion<Applied>, Error> {
-        self.command_style_source(source_id, move |source| {
-            custom_geometry(source)?.invalidate_tile(tile_id);
+        command_geometry(self, source_id, move |handle| {
+            handle.invalidate_tile(tile_id);
             Ok(())
         })
     }
@@ -254,8 +264,8 @@ impl CustomSourceCommands for Map {
         source_id: impl Into<String>,
         bounds: LatLngBounds,
     ) -> Result<Completion<Applied>, Error> {
-        self.command_style_source(source_id, move |source| {
-            custom_geometry(source)?.invalidate_region(bounds);
+        command_geometry(self, source_id, move |handle| {
+            handle.invalidate_region(bounds);
             Ok(())
         })
     }
@@ -267,8 +277,8 @@ impl CustomSourceCommands for Map {
         data: Option<Vec<u8>>,
         format: TileDataFormat,
     ) -> Result<Completion<Applied>, Error> {
-        self.command_style_source(source_id, move |source| {
-            custom_vector(source)?.set_tile_data(tile_id, data.map(Arc::new), format);
+        command_vector(self, source_id, move |handle| {
+            handle.set_tile_data(tile_id, data.map(Arc::new), format);
             Ok(())
         })
     }
@@ -280,8 +290,8 @@ impl CustomSourceCommands for Map {
         message: impl Into<String>,
     ) -> Result<Completion<Applied>, Error> {
         let message = message.into();
-        self.command_style_source(source_id, move |source| {
-            custom_vector(source)?.set_tile_error(tile_id, Error::native(message));
+        command_vector(self, source_id, move |handle| {
+            handle.set_tile_error(tile_id, Error::native(message));
             Ok(())
         })
     }
@@ -291,8 +301,8 @@ impl CustomSourceCommands for Map {
         source_id: impl Into<String>,
         tile_id: CanonicalTileID,
     ) -> Result<Completion<Applied>, Error> {
-        self.command_style_source(source_id, move |source| {
-            custom_vector(source)?.invalidate_tile(tile_id);
+        command_vector(self, source_id, move |handle| {
+            handle.invalidate_tile(tile_id);
             Ok(())
         })
     }
@@ -302,8 +312,8 @@ impl CustomSourceCommands for Map {
         source_id: impl Into<String>,
         bounds: LatLngBounds,
     ) -> Result<Completion<Applied>, Error> {
-        self.command_style_source(source_id, move |source| {
-            custom_vector(source)?.invalidate_region(bounds);
+        command_vector(self, source_id, move |handle| {
+            handle.invalidate_region(bounds);
             Ok(())
         })
     }

@@ -59,8 +59,11 @@ impl CustomVectorSourceHandle {
     /// The handle of `source`, if it's a custom vector source.
     #[must_use]
     pub fn of(source: &Source) -> Option<Self> {
-        let data = SourceData::<CustomVectorSourceType>::recover(source)?;
-        Some(CustomVectorSourceHandle { provider: Arc::downgrade(&data.options.provider) })
+        SourceData::recover(source).map(Self::new)
+    }
+
+    pub(crate) fn new(data: &SourceData<CustomVectorSourceType>) -> Self {
+        CustomVectorSourceHandle { provider: Arc::downgrade(&data.options.provider) }
     }
 
     /// Hands over the tile's encoded bytes. `None` is a tile without data.

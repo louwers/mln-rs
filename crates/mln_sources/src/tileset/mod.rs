@@ -10,9 +10,7 @@ use mln_storage::{Data, Resource};
 use mln_style::conversion::{Convertible, Error};
 use mln_style::expression::Functions;
 use mln_style::layer_type::SourceKind;
-use mln_style::source_type::{
-    Described, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,
-};
+use mln_style::source_type::{Described, Load, OfflineResources, Source, SourceData, SourceTypeInfo, StyleSourceType};
 use mln_util::constants;
 use mln_util::pool::Respond;
 use mln_util::tileset::{PartialTileset, Tileset, VectorEncoding};
@@ -163,18 +161,8 @@ impl<K: TilesetKind> StyleSourceType for TilesetSourceType<K> {
         source.description.as_ref().map(|tileset| tileset.attribution.clone())
     }
 
-    fn summary(source: &SourceData<Self>) -> SourceSummary {
-        let options = &source.options;
-        let vector_encoding = (K::INFO.layer_kind == SourceKind::Geometry).then(|| {
-            let loaded = source.description.as_ref().and_then(|tileset| tileset.vector_encoding);
-            loaded.or(options.tileset.vector_encoding).unwrap_or(VectorEncoding::Mapbox)
-        });
-        SourceSummary {
-            url: options.url.clone(),
-            tile_size: Some(options.tile_size),
-            inline_tileset: options.inline_tileset(),
-            vector_encoding,
-        }
+    fn url(source: &SourceData<Self>) -> Option<&str> {
+        source.options.url.as_deref()
     }
 
     fn offline(source: &SourceData<Self>) -> OfflineResources {
@@ -190,6 +178,42 @@ impl<K: TilesetKind> StyleSourceType for TilesetSourceType<K> {
 
     fn offline_tileset(source: &SourceData<Self>, tilejson: &[u8]) -> Result<Tileset, String> {
         source.options.tileset_with_tilejson(tilejson, K::INFO.layer_kind)
+    }
+}
+
+/// What a vector, raster or raster-dem source says about its tiles.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TilesetSettings {
+    /// The size of the source's tiles, in pixels.
+    pub tile_size: u16,
+    /// The tileset the style lists, for a source without a URL.
+    pub inline_tileset: Option<Tileset>,
+    /// How a vector source's tiles are encoded: as its loaded tileset says,
+    /// else as the style does. `None` for raster and raster-dem sources.
+    pub vector_encoding: Option<VectorEncoding>,
+}
+
+impl TilesetSettings {
+    /// The settings of `source`, if it's a vector, raster or raster-dem
+    /// source.
+    #[must_use]
+    pub fn of(source: &Source) -> Option<Self> {
+        Self::of_kind::<VectorKind>(source)
+            .or_else(|| Self::of_kind::<RasterKind>(source))
+            .or_else(|| Self::of_kind::<RasterDemKind>(source))
+    }
+
+    fn of_kind<K: TilesetKind>(source: &Source) -> Option<Self> {
+        let SourceData { options, description, .. } = SourceData::<TilesetSourceType<K>>::recover(source)?;
+        let vector_encoding = (K::INFO.layer_kind == SourceKind::Geometry).then(|| {
+            let loaded = description.as_ref().and_then(|tileset| tileset.vector_encoding);
+            loaded.or(options.tileset.vector_encoding).unwrap_or(VectorEncoding::Mapbox)
+        });
+        Some(TilesetSettings {
+            tile_size: options.tile_size,
+            inline_tileset: options.inline_tileset(),
+            vector_encoding,
+        })
     }
 }
 

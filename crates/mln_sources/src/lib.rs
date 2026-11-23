@@ -29,8 +29,8 @@ pub use image::ImageSourceCommands;
 pub use image::{ImageSourceType, image_source};
 use mln_render::{RegisterError, RegistryBuilder};
 pub use tileset::{
-    RasterDemSourceType, RasterSourceType, TilesetSourceType, VectorSourceType, raster_dem_source, raster_source,
-    vector_source,
+    RasterDemSourceType, RasterSourceType, TilesetSettings, TilesetSourceType, VectorSourceType, raster_dem_source,
+    raster_source, vector_source,
 };
 
 /// Adds the style specification's source types and the custom source types.
@@ -43,13 +43,6 @@ pub fn register_source_types(builder: &mut RegistryBuilder) -> Result<(), Regist
     builder.add_source_type::<ImageSourceType>()?;
     builder.add_source_type::<CustomGeometrySourceType>()?;
     builder.add_source_type::<CustomVectorSourceType>()
-}
-
-/// The error of a command for the source `id`, which isn't `kind`, as in
-/// `source "water" is not a GeoJSON source`.
-#[cfg(feature = "runtime")]
-fn not_a(id: &str, kind: &str) -> mln_util::Error {
-    mln_util::Error::invalid_argument(format!("source \"{id}\" is not {kind}"))
 }
 
 #[cfg(test)]
