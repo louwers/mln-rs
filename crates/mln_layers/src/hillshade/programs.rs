@@ -39,7 +39,8 @@ pub static HILLSHADE_PREPARE: Program = Program {
     ],
     attributes: &[Attribute::new("pos", Short2), Attribute::new("texture_pos", Short2)],
     instance_attributes: &[],
-    textures: &[Texture::new("image")],
+    // The elevations' bytes, which the shader decodes.
+    textures: &[Texture::new("image").precise()],
     properties: &[],
     projection: Projection::None,
     sources: Sources::NONE

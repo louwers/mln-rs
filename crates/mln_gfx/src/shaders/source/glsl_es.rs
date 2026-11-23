@@ -73,6 +73,14 @@ pub fn texture_name(texture: &Texture) -> String {
     format!("u_{}", texture.name)
 }
 
+/// The declaration of `texture` in GLSL ES: a `uniform sampler2D` of its
+/// name, `highp` if the texture is [`precise`](Texture::precise).
+#[must_use]
+pub fn texture_declaration(texture: &Texture) -> String {
+    let precision = if texture.precise { "highp " } else { "" };
+    format!("uniform {precision}sampler2D {};\n", texture_name(texture))
+}
+
 /// The declarations of `blocks`: each a `std140` uniform block whose
 /// members are in the program's scope, named as [`Block`] says.
 #[must_use]

@@ -1,7 +1,6 @@
 //! The GLSL ES preludes of every shader, and how a stage composes them with
 //! the blocks it reads and the program's GLSL ES.
 
-use std::fmt::Write as _;
 use std::ptr;
 
 use mln_gfx::gpu::{GpuError, ShaderKey};
@@ -248,18 +247,16 @@ fn projects(vertex: &HashSet<&str>) -> bool {
 }
 
 /// The declarations of the textures of `program` that `text`, a `stage`,
-/// names and may sample ([`Program::bindings`]): each a `uniform sampler2D`
-/// of its GLSL ES name.
+/// names and may sample ([`Program::bindings`]), as
+/// [`glsl_es::texture_declaration`] writes them.
 fn textures(program: &Program, stage: Stage, text: &str) -> String {
     let named: HashSet<&str> = identifiers(text).collect();
     let textures = program.bindings(stage).filter_map(|binding| match binding {
-        Binding::Texture(_, texture) => Some(glsl_es::texture_name(texture)),
+        Binding::Texture(_, texture) => Some(texture),
         _ => None,
     });
-    textures.filter(|name| named.contains(name.as_str())).fold(String::new(), |mut declarations, name| {
-        _ = writeln!(declarations, "uniform sampler2D {name};");
-        declarations
-    })
+    let named = textures.filter(|texture| named.contains(glsl_es::texture_name(texture).as_str()));
+    named.map(glsl_es::texture_declaration).collect()
 }
 
 /// The vertex and fragment shaders of `key`'s program: `#version 300 es`,

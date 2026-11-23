@@ -215,6 +215,29 @@ fn every_program_links_and_matches_its_declaration(backend: &mut RendererBackend
     assert!(compiled >= 2 * programs().len());
 }
 
+/// A texture whose texels a shader decodes, a DEM's elevations or the
+/// elevations of color relief's stops, is declared `highp`: a sampler is
+/// `lowp` by default in GLSL ES, and llvmpipe then reads a DEM's bytes too
+/// coarsely to decode, which bands a hillshade. The others keep the default.
+#[test]
+fn precise_textures_sample_at_high_precision() {
+    for (program, [_, fragment]) in compiled_stages() {
+        for texture in program.textures {
+            let name = glsl_es::texture_name(texture);
+            let highp = fragment.contains(&format!("uniform highp sampler2D {name};"));
+            let declared = highp || fragment.contains(&format!("uniform sampler2D {name};"));
+            assert!(declared, "{}: {name} isn't declared", program.name);
+            assert_eq!(highp, texture.precise, "{}: {name}", program.name);
+        }
+    }
+    let precise: BTreeSet<(&str, &str)> = programs()
+        .iter()
+        .flat_map(|(program, _)| program.textures.iter().filter(|texture| texture.precise).map(|t| (program.name, t.name)))
+        .collect();
+    let decoded = [("color-relief", "elevation_stops"), ("color-relief", "image"), ("hillshade-prepare", "image")];
+    assert_eq!(precise, BTreeSet::from(decoded));
+}
+
 /// No source declares a block or a texture: the backend declares a stage's
 /// blocks, from their layouts, and its textures.
 #[test]

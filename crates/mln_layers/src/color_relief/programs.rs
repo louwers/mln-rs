@@ -17,7 +17,13 @@ pub static COLOR_RELIEF: Program = Program {
     ],
     attributes: &[Attribute::new("pos", Short2), Attribute::new("texture_pos", Short2)],
     instance_attributes: &[],
-    textures: &[Texture::new("image"), Texture::unfilterable("elevation_stops"), Texture::new("color_stops")],
+    // The elevations' bytes, which the shader decodes, and the elevations
+    // of the stops, which it compares them with.
+    textures: &[
+        Texture::new("image").precise(),
+        Texture::unfilterable("elevation_stops").precise(),
+        Texture::new("color_stops"),
+    ],
     properties: &[],
     projection: Projection::PerDraw,
     sources: Sources::NONE

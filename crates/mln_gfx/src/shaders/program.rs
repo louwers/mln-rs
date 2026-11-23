@@ -338,19 +338,31 @@ pub struct Texture {
     /// texture of a format that can't be filtered, as `Rgba32Float`, or one
     /// whose shaders only read texels of it.
     pub filterable: bool,
+    /// Whether its shaders need its texels at full precision, as numbers to
+    /// decode rather than colors: GLSL ES then samples it with a `highp`
+    /// sampler, where a sampler is `lowp` by default and a driver may read
+    /// its bytes too coarsely. The other languages sample every texture at
+    /// full precision.
+    pub precise: bool,
 }
 
 impl Texture {
     /// The filterable texture `name`.
     #[must_use]
     pub const fn new(name: &'static str) -> Texture {
-        Texture { name, filterable: true }
+        Texture { name, filterable: true, precise: false }
     }
 
     /// The unfilterable texture `name`.
     #[must_use]
     pub const fn unfilterable(name: &'static str) -> Texture {
-        Texture { name, filterable: false }
+        Texture { name, filterable: false, precise: false }
+    }
+
+    /// The texture, sampled at full precision ([`precise`](Self::precise)).
+    #[must_use]
+    pub const fn precise(self) -> Texture {
+        Texture { precise: true, ..self }
     }
 
     /// The name its shaders read its sampler by, `<name>_sampler`.
