@@ -56,21 +56,22 @@ BEGIN {
           "gemini-code-assist[bot] greptile-apps[bot] factory-droid[bot] " \
           "coderabbitai[bot] amazon-q-developer[bot]", logins, " ")
     for (i in logins) ai_logins[logins[i]] = 1
-    # Domains whose addresses only AI tools commit as.
-    split("anthropic.com openai.com cursor.com ampcode.com warp.dev " \
-          "opencode.ai factory.ai devin.ai cognition.ai aider.chat " \
-          "windsurf.com codeium.com x.ai", domains, " ")
-    for (i in domains) ai_domains[domains[i]] = 1
-    # Whole names, once normalized, of AI tools.
-    split("claude|copilot|codex|chatgpt|openai|anthropic|cursor|cursor agent|" \
-          "amp|warp|opencode|gemini|devin|devin ai|aider|jules|junie|kiro|" \
-          "windsurf|cline|grok", names, "|")
+    # The addresses AI tools commit as. Not whole domains: the staff of AI
+    # companies commit from them too.
+    split("noreply@anthropic.com noreply@openai.com copilot@github.com " \
+          "cursoragent@cursor.com amp@ampcode.com agent@warp.dev " \
+          "noreply@opencode.ai noreply@aider.chat", addresses, " ")
+    for (i in addresses) ai_addresses[addresses[i]] = 1
+    # Whole names, once normalized, of AI tools. Not ones that are also
+    # given names, such as Claude, Devin or Jules.
+    split("copilot|codex|chatgpt|openai|anthropic|cursor|cursor agent|" \
+          "claude code|opencode|gemini|aider|windsurf|devin ai", names, "|")
     for (i in names) ai_names[names[i]] = 1
     failed = 0
 }
 
 # Why an identity ("Name <email>") is rejected, or "" when it is not.
-function rejection(identity,    name, email, login, domain) {
+function rejection(identity,    name, email, login) {
     name = identity
     email = ""
     if (match(identity, /<[^>]*>/)) {
@@ -91,12 +92,9 @@ function rejection(identity,    name, email, login, domain) {
         sub(/@.*/, "", login)
         sub(/^[0-9]+\+/, "", login)
     }
-    domain = email
-    sub(/^[^@]*@?/, "", domain)
 
-    if (login in ai_logins || email == "copilot@github.com")
-        return "an AI tool\047s account"
-    if (domain in ai_domains) return "an AI tool\047s address"
+    if (login in ai_logins) return "an AI tool\047s account"
+    if (email in ai_addresses) return "an AI tool\047s address"
     if (name in ai_names) return "an AI tool\047s name"
     # A tool and its model: "Claude Opus 5.5", "GitHub Copilot Autofix",
     # "GPT-5", "GLM 5.2".
