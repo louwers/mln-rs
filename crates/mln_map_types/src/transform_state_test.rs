@@ -267,3 +267,153 @@ fn the_center_at_its_altitude_draws_at_the_center() {
         assert!((clip.x / clip.w).abs() < 1e-9 && (clip.y / clip.w).abs() < 1e-9, "zoom {zoom}: {clip}");
     }
 }
+
+/// The center's altitude is kept in meters: changes of the zoom and the
+/// center, including a move around an anchor, leave it as it was set, and
+/// the matrices still draw the center at that altitude at the center of
+/// the view.
+#[test]
+fn the_center_altitude_holds_in_meters_through_zoom_and_center_changes() {
+    use mln_util::geo::{ScreenCoordinate, WrapMode};
+
+    let mut state = pitched(60.0);
+    state.set_center_altitude(1200.0);
+    let draws_at_center = |state: &TransformState| {
+        let view = state.view();
+        let center = Projection::project(&view.center(WrapMode::Unwrapped), view.scale());
+        let clip = view.projection_matrix() * DVec4::new(center.x, center.y, 1200.0, 1.0);
+        assert!((clip.x / clip.w).abs() < 1e-9 && (clip.y / clip.w).abs() < 1e-9, "{clip}");
+    };
+    draws_at_center(&state);
+
+    state.set_lat_lng_zoom(&LatLng::new(0.0, -60.0).unwrap(), 12.5);
+    assert_eq!(state.view().center_altitude(), 1200.0);
+    draws_at_center(&state);
+
+    state.set_lat_lng_zoom(&LatLng::new(61.0, 25.0).unwrap(), 12.5);
+    assert_eq!(state.view().center_altitude(), 1200.0);
+    draws_at_center(&state);
+
+    let lat_lng = state.view().screen_coordinate_to_lat_lng(&ScreenCoordinate::new(100.0, 150.0), WrapMode::Unwrapped);
+    state.move_lat_lng(&lat_lng.unwrap(), &ScreenCoordinate::new(300.0, 350.0)).unwrap();
+    assert_ne!(state.view().center(WrapMode::Unwrapped).latitude(), 61.0);
+    assert_eq!(state.view().center_altitude(), 1200.0);
+    draws_at_center(&state);
+
+    state.set_lat_lng_zoom(&state.view().center(WrapMode::Unwrapped), 4.0);
+    assert_eq!(state.view().center_altitude(), 1200.0);
+    draws_at_center(&state);
+}
+
+/// Where `view`'s projection matrix draws `lat_lng`, `height` meters above
+/// sea level, measured from the bottom edge (y up).
+fn drawn_at(view: &crate::View, lat_lng: &LatLng, height: f64) -> mln_util::geo::ScreenCoordinate {
+    let point = Projection::project(lat_lng, view.scale());
+    let clip = view.projection_matrix() * DVec4::new(point.x, point.y, height, 1.0);
+    let size = view.size();
+    mln_util::geo::ScreenCoordinate::new(
+        f64::midpoint(clip.x / clip.w, 1.0) * f64::from(size.width),
+        f64::midpoint(clip.y / clip.w, 1.0) * f64::from(size.height),
+    )
+}
+
+/// The line of sight through a point meets the plane at a height where the
+/// projection matrix draws the location it reads there, at that height; at
+/// sea level the location is `screen_coordinate_to_lat_lng`'s, to the bit.
+#[test]
+fn a_point_reads_the_location_its_line_of_sight_meets_on_a_plane() {
+    use mln_util::geo::{ScreenCoordinate, WrapMode};
+
+    let mut state = pitched(55.0);
+    state.set_lat_lng_zoom(&LatLng::new(30.0, 20.0).unwrap(), 12.0);
+    state.set_center_altitude(400.0);
+    let view = state.view();
+    let point = ScreenCoordinate::new(140.0, 120.0);
+    for height in [-300.0, 0.0, 400.0, 1500.0] {
+        let location = view.screen_coordinate_to_lat_lng_at(&point, height, WrapMode::Unwrapped).unwrap();
+        let drawn = drawn_at(view, &location, height);
+        assert!((drawn.x - point.x).hypot(drawn.y - point.y) < 1e-6, "{height} m: {drawn:?}");
+    }
+    assert_eq!(
+        view.screen_coordinate_to_lat_lng(&point, WrapMode::Unwrapped),
+        view.screen_coordinate_to_lat_lng_at(&point, 0.0, WrapMode::Unwrapped)
+    );
+}
+
+/// Moving a location on a plane above sea level to a point puts it there,
+/// at that height, with the zoom, the angles and the center's altitude
+/// kept; at sea level it is `move_lat_lng`, to the bit.
+#[test]
+fn moving_a_location_on_a_plane_puts_it_at_the_point() {
+    use mln_util::geo::{ScreenCoordinate, WrapMode};
+
+    let mut state = pitched(55.0);
+    state.set_lat_lng_zoom(&LatLng::new(30.0, 20.0).unwrap(), 12.0);
+    state.set_center_altitude(400.0);
+    let (from, to) = (ScreenCoordinate::new(140.0, 120.0), ScreenCoordinate::new(380.0, 200.0));
+    for height in [0.0, 400.0, 1500.0] {
+        let mut moved = state.clone();
+        let location = moved.view().screen_coordinate_to_lat_lng_at(&from, height, WrapMode::Unwrapped).unwrap();
+        moved.move_lat_lng_at(&location, &to, height).unwrap();
+        // The center's altitude in meters draws a little higher or lower at
+        // the center's new latitude.
+        let landed = drawn_at(moved.view(), &location, height);
+        assert!((landed.x - to.x).hypot(landed.y - to.y) < 1e-2, "{height} m: {landed:?}");
+        let (before, after) = (state.view(), moved.view());
+        assert_eq!(
+            (before.zoom(), before.angle(), before.pitch(), before.center_altitude()),
+            (after.zoom(), after.angle(), after.pitch(), after.center_altitude())
+        );
+        if height == 0.0 {
+            let mut flat = state.clone();
+            flat.move_lat_lng(&location, &to).unwrap();
+            assert_eq!(flat, moved);
+        }
+    }
+}
+
+/// The line of sight through the view's center descends through the center
+/// at its altitude, from the near plane to the far plane; through a point
+/// above the horizon of a steep view it rises.
+#[test]
+fn the_line_of_sight_runs_from_the_near_plane_to_the_far_plane() {
+    use mln_util::geo::{ScreenCoordinate, WrapMode};
+
+    let mut state = pitched(60.0);
+    state.set_center_altitude(700.0);
+    let view = state.view();
+    let (near, far) = view.line_of_sight(&ScreenCoordinate::new(256.0, 256.0)).unwrap();
+    assert!(far.z < near.z && far.z < 700.0 && 700.0 < near.z, "{near} {far}");
+    let center = Projection::project(&view.center(WrapMode::Unwrapped), 1.0 / mln_util::constants::TILE_SIZE_D);
+    let along = (700.0 - near.z) / (far.z - near.z);
+    let at = near + (far - near) * along;
+    assert!((at.x - center.x).abs() < 1e-12 && (at.y - center.y).abs() < 1e-12, "{at} against {center:?}");
+
+    let steep = pitched(85.0);
+    let (near, far) = steep.view().line_of_sight(&ScreenCoordinate::new(256.0, 500.0)).unwrap();
+    assert!(far.z >= near.z, "{near} {far}");
+}
+
+/// The globe reads and holds locations on the sea-level sphere only: a plane
+/// at another height fails, and sea level is the globe's own solve.
+#[test]
+fn the_globe_refuses_a_plane_above_sea_level() {
+    use mln_style_types::ProjectionType;
+    use mln_util::geo::{ScreenCoordinate, WrapMode};
+
+    let mut state = pitched(30.0);
+    state.set_projection_definition(&ProjectionDefinition::new(ProjectionType::Globe));
+    let point = ScreenCoordinate::new(200.0, 220.0);
+    let view = state.view();
+    assert!(view.screen_coordinate_to_lat_lng_at(&point, 100.0, WrapMode::Unwrapped).is_err());
+    let location = view.screen_coordinate_to_lat_lng_at(&point, 0.0, WrapMode::Unwrapped).unwrap();
+    assert!(state.center_for_lat_lng_at(&location, &point, 100.0).is_err());
+    assert!(view.line_of_sight(&point).is_none());
+    let mut moved = state.clone();
+    assert!(moved.move_lat_lng_at(&location, &point, 100.0).is_err());
+    assert_eq!(state, moved);
+    moved.move_lat_lng_at(&location, &point, 0.0).unwrap();
+    let mut held = state.clone();
+    held.move_lat_lng(&location, &point).unwrap();
+    assert_eq!(held, moved);
+}
