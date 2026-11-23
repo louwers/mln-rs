@@ -236,3 +236,34 @@ fn equal_zoom_limits_just_below_the_least_zoom_the_view_allows_apply() {
     let zoom = 0.999_999_999_9;
     state.set_limits(CameraLimits { min_zoom: zoom, max_zoom: zoom, ..*state.limits() }).unwrap();
 }
+
+/// Meters scale as at the center, as the center's altitude does, so a point
+/// at the center's altitude draws at the center of the view, even where the
+/// camera is far from the center, over another latitude (GL JS's
+/// `pixelsPerMeter`).
+#[test]
+fn the_center_at_its_altitude_draws_at_the_center() {
+    for (zoom, center_altitude) in [(0.0, 9000.0), (3.0, -4000.0), (14.0, 1200.0)] {
+        let state = MapView {
+            camera: Camera {
+                center: LatLng::new(20.0, 10.0).unwrap(),
+                center_altitude,
+                zoom,
+                pitch: 60.0,
+                bearing: 45.0,
+                fov: mln_math::rad2deg(DEFAULT_FOV),
+                ..Camera::default()
+            },
+            extent: LogicalExtent::new(Size::new(512, 512), 1.0),
+            projection_mode: ProjectionMode::default(),
+            viewport: Viewport::default(),
+            projection: ProjectionDefinition::default(),
+        }
+        .to_state()
+        .unwrap();
+        let view = state.view();
+        let center = Projection::project(&view.center(mln_util::geo::WrapMode::Unwrapped), view.scale());
+        let clip = view.projection_matrix() * DVec4::new(center.x, center.y, center_altitude, 1.0);
+        assert!((clip.x / clip.w).abs() < 1e-9 && (clip.y / clip.w).abs() < 1e-9, "zoom {zoom}: {clip}");
+    }
+}
