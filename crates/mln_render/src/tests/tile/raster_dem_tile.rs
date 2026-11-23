@@ -116,6 +116,20 @@ fn missing_and_empty() {
     assert!(dem(&tiles, &id).is_none());
 }
 
+// A DEM decodes in the encoding that its load delivered with it, which each
+// load names anew.
+#[test]
+fn a_dem_decodes_in_the_encoding_delivered_with_it() {
+    let test = RasterTileTest::new();
+    let mut tiles = test.pool_tiles(DEM);
+    let id = tiles.id;
+    for encoding in [RasterEncoding::Terrarium, RasterEncoding::Mapbox] {
+        tiles.with(|tile| tile.take_image(Some((png(16, 16), Some(encoding))), false));
+        tiles.settle(&[id]);
+        assert_eq!(dem(&tiles, &id).expect("a DEM").dem().encoding, encoding);
+    }
+}
+
 // Port-only: raster-dem tiles whose jobs run in worker instances on other threads get their DEMs
 // back through the codec, borders included, and the store backfills neighbours from each other as
 // their DEMs arrive.

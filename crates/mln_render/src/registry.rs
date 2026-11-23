@@ -247,11 +247,13 @@ mod tests {
     use mln_style::conversion::Error;
     use mln_style::layer_type::{NoProperties, SourceKind};
     use mln_style::property_table::{PropertyInfo, PropertyTable};
+    use mln_style::source_type::{SourceTypeInfo, StyleSourceType};
     use mln_style::{LayerTypeInfo, Source};
 
     use super::*;
     use crate::draw::Draws;
     use crate::layer::{NewCx, PrepareCx, ViewCover};
+    use crate::source::{GeometryTiles, Supply};
     use crate::tests::fixture_layer::Dot;
     use crate::tests::scripted_origin::{Geometry, Scripted};
 
@@ -263,6 +265,32 @@ mod tests {
             builder.add_source_type::<Scripted<Geometry>>(),
             Err(RegisterError::Duplicate("scripted".to_owned()))
         );
+    }
+
+    /// A source type whose style half says its layers draw raster tiles,
+    /// while its render half supplies geometry tiles.
+    struct Mismatched;
+
+    impl StyleSourceType for Mismatched {
+        const INFO: SourceTypeInfo =
+            SourceTypeInfo { name: "mismatched", layer_kind: SourceKind::Raster, from_json: false };
+        type Options = ();
+        type Description = ();
+    }
+
+    impl SourceType for Mismatched {
+        type Data = GeometryTiles;
+
+        fn supply(source: &Source) -> Supply<GeometryTiles> {
+            Scripted::<Geometry>::supply(source)
+        }
+    }
+
+    #[test]
+    fn a_source_type_of_another_kind_than_its_info_fails_to_register() {
+        let mut builder = RegistryBuilder::new();
+        assert_eq!(builder.add_source_type::<Mismatched>(), Err(RegisterError::SourceKind("mismatched".to_owned())));
+        assert!(builder.build().source_type("mismatched").is_none());
     }
 
     #[test]
