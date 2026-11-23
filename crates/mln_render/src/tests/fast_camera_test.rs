@@ -538,3 +538,34 @@ fn a_tile_that_fails_in_the_cache_is_requested_again_on_its_return() {
     let again = scene.network.requested_again();
     assert!(parked.iter().all(|tile| again.contains_key(tile)), "loaded anew: {parked:?}, {again:?}");
 }
+
+/// A tile that leaves the view while it loads, and whose load ends in an
+/// error that nothing retries, as a custom source's host reports one, has
+/// done what it can: it waits in the cache next to the view, and comes back
+/// as it was, without loading anew.
+#[test]
+fn a_tile_whose_load_ends_in_an_error_in_the_cache_comes_back_as_it_was() {
+    let mut scene = Scene::new(Size::new(1024, 768));
+    scene.network.script.end_failed_loads();
+    let view = z14_point(8418.5, 5384.5);
+    scene.frames_until_complete(6.0, (40.0, 60.0));
+    for _ in 0..LATENCY - 1 {
+        scene.frame(14.0, view);
+    }
+    // As in the test above, the centre column fails in the cache.
+    scene.network.set_failing(true);
+    scene.frame(14.0, z14_point(8417.4, 5384.5));
+    scene.network.set_failing(false);
+    let parked: BTreeSet<String> =
+        scene.network.failed().into_iter().filter(|tile| tile.starts_with("vector/14/8419/")).collect();
+    assert!(!parked.is_empty(), "the column that left failed in the cache");
+    scene.network.script.take_calls();
+
+    scene.frame(14.0, view);
+    let again = scene.network.requested_again();
+    assert!(parked.iter().all(|tile| !again.contains_key(tile)), "none loaded anew: {parked:?}, {again:?}");
+    let calls = scene.network.script.take_calls();
+    let column = |id: &mln_tile_id::OverscaledTileID| id.canonical.z == 14 && id.canonical.x == 8419;
+    let made = calls.iter().filter(|call| matches!(call, Call::Start(id) | Call::Dropped(id) if column(id)));
+    assert_eq!(0, made.count(), "the column's tiles neither went nor were made anew: {calls:?}");
+}

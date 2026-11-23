@@ -245,6 +245,12 @@ impl Script {
         self.0.lock().failed_loads_stay_open = true;
     }
 
+    /// Has a load that fails stop, as a custom source's host error ends
+    /// its tile's load: the tile has done what it can.
+    pub(crate) fn end_failed_loads(&self) {
+        self.0.lock().failed_loads_stay_open = false;
+    }
+
     /// Has each delivery from now on come with `times`.
     pub(crate) fn set_times(&self, times: TileTimes) {
         self.0.lock().times = times;
@@ -397,12 +403,14 @@ impl<K: Kind> DataOrigin for ScriptedOrigin<K> {
         // `None` for a missing tile.
         let item = match reply {
             Reply::Fail(message) => {
-                if !self.script.0.lock().failed_loads_stay_open {
+                if self.script.0.lock().failed_loads_stay_open {
+                    cx.fail_retrying(Error::native(message));
+                } else {
                     tile.answered = false;
                     tile.stop();
                     tile.closed = true;
+                    cx.fail(Error::native(message));
                 }
-                cx.fail(Error::native(message));
                 return;
             }
             Reply::Bytes(bytes) => Some(Some(K::bytes(bytes))),

@@ -375,9 +375,11 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
         };
         if method == Method::Network {
             if let Some(error) = res.error.as_ref().filter(|error| error.reason != Reason::NotFound) {
-                // A streak of errors reports once.
+                // A streak of errors reports once. The request stays open,
+                // for the file source's retry.
                 if !std::mem::replace(&mut tile.failed, true) {
-                    fail(tile, Error::native(error.message.clone()), cx);
+                    tile.drop_data();
+                    cx.fail_retrying(Error::native(error.message.clone()));
                 }
                 return;
             }

@@ -94,20 +94,21 @@
 //! The engine owns how MapLibre loads tiles; the origin owns where their
 //! data comes from. The engine decides which tiles the view needs, in which
 //! order their requests start ([`LoadContext::order`]), and which it keeps
-//! in its cache and evicts: a tile with nothing to show whose origin said it
-//! [failed](LoadContext::fail) isn't loading, so the cache lets go of it,
-//! and a cached tile whose data its origin said may no longer be shown
-//! ([`TileTimes::usable_until`]) goes rather than come back. While a tile
-//! has nothing to show, it draws the tile's children or parent that can
-//! draw; it makes a missing parent only once the tile has loaded, or has
+//! in its cache and evicts: a tile with nothing to show whose origin said
+//! its load [failed and waits for a retry](LoadContext::fail_retrying)
+//! isn't loading, so the cache lets go of it, and a cached tile whose data
+//! its origin said may no longer be shown ([`TileTimes::usable_until`])
+//! goes rather than come back. While a tile has nothing to show, it draws
+//! the tile's children or parent that can draw; it makes a missing parent
+//! only once the tile has loaded, or has
 //! [tried](LoadContext::tried_optional) what it can while optional, so a
 //! parent never loads for a tile that loads at once. It makes a tile in a
 //! new world copy show the same tile's contents in another, which
-//! [`WorldCopy::take`] makes the new tile's answer, and hands a reply to the
-//! origin only while its load is the tile's latest. It lays out and decodes
-//! what tiles take in, knows when a tile has done what it can, and starts a
-//! failed tile over when its retry loads anew. How data is requested,
-//! cached, revalidated, kept fresh and retried is the origin's.
+//! [`WorldCopy::take`] makes the new tile's answer, and hands a reply to
+//! the origin only while its load is the tile's latest. It lays out and
+//! decodes what tiles take in, knows when a tile has done what it can, and
+//! starts a failed tile over when its retry loads anew. How data is
+//! requested, cached, revalidated, kept fresh and retried is the origin's.
 //!
 //! # Necessity
 //!
@@ -392,8 +393,9 @@ pub trait DataOrigin: 'static {
 
     /// The engine couldn't lay out or decode what the tile last took in, and
     /// reported the error; the tile keeps what it shows. Not called for the
-    /// origin's own [`LoadContext::fail`], nor for a layout that runs, and
-    /// fails, within the hook that delivered, as a
+    /// origin's own [`LoadContext::fail`] or
+    /// [`fail_retrying`](LoadContext::fail_retrying), nor for a layout that
+    /// runs, and fails, within the hook that delivered, as a
     /// [synchronous](Cover::synchronous) cover's does.
     fn failed(&mut self, _tile: &mut Self::Tile, _cx: &mut LoadContext<'_, '_, Self>) {}
 }
@@ -569,13 +571,21 @@ impl<'a, 't, O: DataOrigin + ?Sized> LoadContext<'a, 't, O> {
     }
 
     /// The tile couldn't load: it keeps what it shows, and the engine
-    /// reports `error`. Until the origin begins a load or gives the tile
-    /// anything ([`begin_load`](Self::begin_load), [`deliver`](Self::deliver),
-    /// [`missing`](Self::missing), [`keep_data`](Self::keep_data) or
-    /// [`WorldCopy::take`]), the tile counts as failed rather than loading:
-    /// out of the view, one with nothing to show goes rather than wait in
-    /// the cache, and is made anew if the view comes back.
+    /// reports `error`.
     pub fn fail(&mut self, error: Error) {
+        self.tile.fail(error);
+    }
+
+    /// The tile's load failed, and waits to be tried again, as a network
+    /// request that stays open while its file source backs off: as
+    /// [`fail`](Self::fail), and until the origin begins a load or gives the
+    /// tile anything ([`begin_load`](Self::begin_load),
+    /// [`deliver`](Self::deliver), [`missing`](Self::missing),
+    /// [`keep_data`](Self::keep_data) or [`WorldCopy::take`]), the tile
+    /// counts as failed rather than loading: out of the view, one with
+    /// nothing to show goes rather than wait in the cache for the retry, and
+    /// is made anew if the view comes back.
+    pub fn fail_retrying(&mut self, error: Error) {
         self.tile.tile_mut().load.failed = true;
         self.tile.fail(error);
     }

@@ -46,9 +46,10 @@ pub(crate) struct Load {
     pub(crate) current: Option<u64>,
     /// The tile has done what it can while optional.
     pub(crate) tried_optional: bool,
-    /// The origin's last word on the tile was that it couldn't load
-    /// ([`LoadContext::fail`](crate::source::LoadContext::fail)), and
-    /// nothing has begun or brought anything since. Such a tile isn't
+    /// The origin's last word on the tile was that its load failed and
+    /// waits for a retry
+    /// ([`LoadContext::fail_retrying`](crate::source::LoadContext::fail_retrying)),
+    /// and nothing has begun or brought anything since. Such a tile isn't
     /// loading: the cache lets go of it rather than wait for it.
     pub(crate) failed: bool,
     pub(crate) times: TileTimes,
