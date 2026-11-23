@@ -785,20 +785,37 @@ impl FileSource for OnlineFileSource {
 mod tests {
     use std::sync::mpsc;
 
-    use mln_test_server::closed_port_url;
     use parking_lot::Mutex;
 
     use super::*;
+    use crate::http_file_source::{HttpTransport, TransferRequest};
     use crate::resource::Kind;
     use crate::resource_transform::FinishedCallback;
 
+    /// Keeps each transfer in flight, unanswered.
+    #[derive(Default)]
+    struct Unanswered(Mutex<Vec<TransferRequest>>);
+
+    impl HttpTransport for Unanswered {
+        fn start(&self, request: TransferRequest) {
+            self.0.lock().push(request);
+        }
+    }
+
     /// A core that no thread runs, whose tasks the test runs or calls
-    /// itself, and the source whose drop ends it.
+    /// itself, whose transfers stay in flight, and the source whose drop
+    /// ends it.
     fn core(maximum: u32) -> (OnlineFileSource, OnlineCore) {
         let (source, core) = OnlineFileSource::with_core(Arc::new(NetworkStatus::new()));
         let mut core = core();
+        core.http_file_source = HTTPFileSource::with_transport(Arc::new(Unanswered::default()));
         core.maximum_concurrent_requests = maximum;
         (source, core)
+    }
+
+    /// The URL of `path` on a server that never answers.
+    fn url(path: &str) -> String {
+        format!("http://example.invalid{path}")
     }
 
     fn request(core: &mut OnlineCore, id: u64, url: &str) -> Request {
@@ -828,8 +845,8 @@ mod tests {
     #[test]
     fn a_stale_transfer_response_is_dropped() {
         let (_source, mut core) = core(1);
-        let _first = request(&mut core, 1, &closed_port_url("/stale-1"));
-        let _second = request(&mut core, 2, &closed_port_url("/stale-2"));
+        let _first = request(&mut core, 1, &url("/stale-1"));
+        let _second = request(&mut core, 2, &url("/stale-2"));
         pass_deadline(&mut core, 1);
         pass_deadline(&mut core, 2);
         let first = transfer(&core, 1).expect("the first request's transfer");
@@ -876,7 +893,7 @@ mod tests {
     #[test]
     fn requests_for_one_resource_share_its_transfer() {
         let (_source, mut core) = core(1);
-        let url = closed_port_url("/shared");
+        let url = url("/shared");
         let (_first, first) = counted(&mut core, 1, tile(&url));
         let (_second, second) = counted(&mut core, 2, tile(&url));
         pass_deadline(&mut core, 1);
@@ -896,7 +913,7 @@ mod tests {
     #[test]
     fn a_shared_transfer_stops_with_its_last_request() {
         let (_source, mut core) = core(2);
-        let url = closed_port_url("/shared");
+        let url = url("/shared");
         let (_first, _) = counted(&mut core, 1, tile(&url));
         let (_second, second) = counted(&mut core, 2, tile(&url));
         pass_deadline(&mut core, 1);
@@ -916,10 +933,10 @@ mod tests {
     #[test]
     fn waiting_requests_join_the_transfer_they_share_when_it_starts() {
         let (_source, mut core) = core(1);
-        let url = closed_port_url("/shared");
-        let (_other, _) = counted(&mut core, 1, tile(&closed_port_url("/other")));
-        let (_first, first) = counted(&mut core, 2, tile(&url));
-        let (_second, second) = counted(&mut core, 3, tile(&url));
+        let (_other, _) = counted(&mut core, 1, tile(&url("/other")));
+        let shared = url("/shared");
+        let (_first, first) = counted(&mut core, 2, tile(&shared));
+        let (_second, second) = counted(&mut core, 3, tile(&shared));
         for id in 1..=3 {
             pass_deadline(&mut core, id);
         }
@@ -939,7 +956,7 @@ mod tests {
     #[test]
     fn requests_of_other_validators_or_bytes_transfer_apart() {
         let (_source, mut core) = core(4);
-        let url = closed_port_url("/apart");
+        let url = url("/apart");
         let mut validated = tile(&url);
         validated.prior_etag = Some("\"v1\"".to_owned());
         let mut ranged = tile(&url);
@@ -968,7 +985,7 @@ mod tests {
         assert_eq!(Some(generation), core.requests[&1].transforming);
         assert_eq!(original, core.requests[&1].resource.url);
 
-        let url = closed_port_url("/transformed");
+        let url = url("/transformed");
         let finished = answers.lock().pop().expect("the transform's callback");
         finished(Ok(url.clone()));
         let queue = core.queue.clone();
@@ -982,7 +999,7 @@ mod tests {
     #[test]
     fn an_update_interval_past_instants_range_never_fires() {
         let (_source, mut core) = core(1);
-        let mut resource = Resource::new(Kind::Tile, closed_port_url("/forever"));
+        let mut resource = Resource::new(Kind::Tile, url("/forever"));
         resource.minimum_update_interval = Duration::MAX;
         let (_request, responder) = Request::new(|_| {});
         core.request(1, resource, responder);
@@ -1003,7 +1020,7 @@ mod tests {
     fn a_replaced_or_cancelled_deadline_leaves_the_queue() {
         let (_source, mut core) = core(1);
         core.connection_backoff = Some(Duration::from_secs(3600));
-        let _request = request(&mut core, 1, &closed_port_url("/retry"));
+        let _request = request(&mut core, 1, &url("/retry"));
         pass_deadline(&mut core, 1);
         let generation = transfer(&core, 1).expect("the request's transfer");
         let mut response = Response::new();

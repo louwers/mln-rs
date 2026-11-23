@@ -12,6 +12,7 @@ mod local_file_source;
 mod main_resource_loader;
 #[cfg(feature = "sqlite")]
 mod mbtiles_file_source;
+mod network;
 mod offline;
 #[cfg(feature = "sqlite")]
 mod offline_database;
