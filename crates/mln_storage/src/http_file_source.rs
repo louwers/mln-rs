@@ -407,8 +407,8 @@ impl HTTPFileSource {
         HTTPFileSource { transport: std::sync::OnceLock::new(), header_transform: HttpHeaderTransform::default() }
     }
 
-    /// An HTTP file source over `transport` (`crate::bench`).
-    #[cfg(all(feature = "bench", not(target_family = "wasm")))]
+    /// An HTTP file source over `transport` (`crate::simulated_network`).
+    #[cfg(all(any(test, feature = "bench"), not(target_family = "wasm")))]
     #[must_use]
     pub(crate) fn with_transport(transport: Arc<dyn HttpTransport>) -> Self {
         HTTPFileSource {

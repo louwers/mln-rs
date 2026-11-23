@@ -1,14 +1,15 @@
-//! The online file source over a network that the benchmarks
-//! (`tools/bench`) simulate: its transfers go to a [`Transport`] of theirs,
-//! its deadlines (retries after errors, revalidations) go by a [`Clock`] of
-//! theirs, and its core runs on their thread when they call
-//! [`OnlineDriver::run`], so that its limit on requests in flight, their
-//! priorities, cancellation and backoff run as they do in an application,
-//! on a schedule that only the benchmark advances. Built only with the
-//! `bench` feature, and hidden from the documentation: it isn't API.
+//! The online file source over a simulated network: its transfers go to a
+//! [`Transport`] of the caller's, its deadlines (retries after errors,
+//! revalidations) go by a [`Clock`] of the caller's, and its core runs on
+//! the caller's thread when it calls [`OnlineDriver::run`], so that its
+//! limit on requests in flight, their priorities, cancellation and backoff
+//! run as they do in an application, on a schedule that only the caller
+//! advances. The benchmarks (`tools/bench`, with the `bench` feature) and
+//! this crate's tests run it. Hidden from the documentation: it isn't API.
 
 use std::sync::Arc;
 
+use mln_util::queue::Waker;
 use mln_util::time::Instant;
 
 use crate::http_file_source::{HttpTransport, TransferRequest};
@@ -88,6 +89,13 @@ impl OnlineDriver {
         }
         ran
     }
+
+    /// Calls `waker`, from the posting thread, whenever the source has a
+    /// task for [`run`](Self::run): a request, a cancellation or a
+    /// transfer's answer. The clock's moves don't call it.
+    pub fn set_waker(&self, waker: Option<Waker>) {
+        self.queue.set_waker(waker);
+    }
 }
 
 impl Drop for OnlineDriver {
@@ -96,13 +104,17 @@ impl Drop for OnlineDriver {
     }
 }
 
-/// An online file source, always online, whose transfers go to `transport`,
-/// whose deadlines go by `clock`, and whose core runs only in the returned
-/// driver's [`run`](OnlineDriver::run).
+/// An online file source whose requests follow `network`, whose transfers
+/// go to `transport`, whose deadlines go by `clock`, and whose core runs
+/// only in the returned driver's [`run`](OnlineDriver::run).
 #[must_use]
-pub fn online_file_source(transport: Arc<dyn Transport>, clock: Clock) -> (OnlineFileSource, OnlineDriver) {
+pub fn online_file_source(
+    network: &Arc<NetworkStatus>,
+    transport: Arc<dyn Transport>,
+    clock: Clock,
+) -> (OnlineFileSource, OnlineDriver) {
     let (source, queue, core) =
-        OnlineFileSource::driven(Arc::new(NetworkStatus::new()), Arc::new(Adapter(transport)), Arc::clone(&clock));
+        OnlineFileSource::driven(Arc::clone(network), Arc::new(Adapter(transport)), Arc::clone(&clock));
     (source, OnlineDriver { queue, core, clock })
 }
 
@@ -140,7 +152,7 @@ mod tests {
             let elapsed = Arc::clone(&elapsed);
             Arc::new(move || base + Duration::from_millis(elapsed.load(Ordering::SeqCst)))
         };
-        let (source, mut driver) = online_file_source(Arc::<Held>::clone(&held), clock);
+        let (source, mut driver) = online_file_source(&Arc::default(), Arc::<Held>::clone(&held), clock);
         let answers: Arc<Mutex<Vec<Response>>> = Arc::default();
         let saved = Arc::clone(&answers);
         let (_request, responder) = Request::new(move |response| saved.lock().push(response));

@@ -225,9 +225,9 @@ pub struct OnlineCore {
     /// tell the retries it starts apart from the backoff's.
     connection_backoff: Option<Duration>,
     /// The clock that the deadlines go by, in place of the system's
-    /// (`crate::bench`).
-    #[cfg(all(feature = "bench", not(target_family = "wasm")))]
-    clock: Option<crate::bench::Clock>,
+    /// (`crate::simulated_network`).
+    #[cfg(all(any(test, feature = "bench"), not(target_family = "wasm")))]
+    clock: Option<crate::simulated_network::Clock>,
 }
 
 impl OnlineCore {
@@ -476,9 +476,9 @@ impl OnlineCore {
     /// Requests the resource again after `timeout`, or never for `None`.
     fn schedule(&mut self, id: u64, timeout: Option<Duration>) {
         // The time that deadlines go by.
-        #[cfg(all(feature = "bench", not(target_family = "wasm")))]
+        #[cfg(all(any(test, feature = "bench"), not(target_family = "wasm")))]
         let now = self.clock.as_ref().map_or_else(Instant::now, |clock| clock());
-        #[cfg(not(all(feature = "bench", not(target_family = "wasm"))))]
+        #[cfg(not(all(any(test, feature = "bench"), not(target_family = "wasm"))))]
         let now = Instant::now();
         let pending = self.pending_requests.contains(id);
         let offline = self.network.get() == Status::Offline;
@@ -561,8 +561,9 @@ pub struct OnlineFileSource {
     _reachability: Subscription,
     #[cfg(not(target_family = "wasm"))]
     thread: Option<std::thread::JoinHandle<()>>,
-    /// The caller runs the core, rather than a thread (`crate::bench`).
-    #[cfg(all(feature = "bench", not(target_family = "wasm")))]
+    /// The caller runs the core, rather than a thread
+    /// (`crate::simulated_network`).
+    #[cfg(all(any(test, feature = "bench"), not(target_family = "wasm")))]
     driven: bool,
 }
 
@@ -649,7 +650,7 @@ impl OnlineFileSource {
             network,
             reachable,
             connection_backoff: None,
-            #[cfg(all(feature = "bench", not(target_family = "wasm")))]
+            #[cfg(all(any(test, feature = "bench"), not(target_family = "wasm")))]
             clock: None,
         };
         let source = OnlineFileSource {
@@ -659,7 +660,7 @@ impl OnlineFileSource {
             _reachability: reachability,
             #[cfg(not(target_family = "wasm"))]
             thread: None,
-            #[cfg(all(feature = "bench", not(target_family = "wasm")))]
+            #[cfg(all(any(test, feature = "bench"), not(target_family = "wasm")))]
             driven: false,
         };
         (source, core)
@@ -667,12 +668,12 @@ impl OnlineFileSource {
 
     /// A source whose core the caller runs on its own thread, as
     /// [`local`](Self::local)'s, whose transfers go to `transport` and
-    /// whose deadlines go by `clock` (`crate::bench`).
-    #[cfg(all(feature = "bench", not(target_family = "wasm")))]
+    /// whose deadlines go by `clock` (`crate::simulated_network`).
+    #[cfg(all(any(test, feature = "bench"), not(target_family = "wasm")))]
     pub(crate) fn driven(
         network: Arc<NetworkStatus>,
         transport: Arc<dyn crate::http_file_source::HttpTransport>,
-        clock: crate::bench::Clock,
+        clock: crate::simulated_network::Clock,
     ) -> (Self, OnlineQueue, OnlineCore) {
         let (mut source, core) = Self::with_core(network);
         source.driven = true;
@@ -729,7 +730,7 @@ impl OnlineFileSource {
     /// Whether a thread, or the caller, runs the source's core.
     #[cfg(not(target_family = "wasm"))]
     fn is_running(&self) -> bool {
-        #[cfg(all(feature = "bench", not(target_family = "wasm")))]
+        #[cfg(all(any(test, feature = "bench"), not(target_family = "wasm")))]
         if self.driven {
             return true;
         }
