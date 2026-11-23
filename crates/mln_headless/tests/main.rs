@@ -51,3 +51,5 @@ mod stencil_overflow_test;
 mod system_fonts_test;
 // Tiles reloading as their data expires, over an online file source.
 mod tile_expiry_test;
+// Features of two tiles that overlap stack in the frame's order of its tiles.
+mod tile_order_test;

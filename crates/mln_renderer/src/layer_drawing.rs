@@ -457,6 +457,22 @@ impl TileObjects for KeptDraw {
     }
 }
 
+/// A tile's one draw, without an id of its own: the layer's draws of the
+/// frame all carry the id of its draws ([`LayerDraws::id`]), so they draw in
+/// the order the layer pushes them, that of the frame's tiles, however long
+/// each was kept.
+impl TileObjects for DrawObjects {
+    type Part = ();
+
+    fn objects(&mut self, (): ()) -> Option<DrawObjectsMut<'_>> {
+        Some(self.into())
+    }
+
+    fn drop_bindings(&mut self) {
+        DrawObjects::drop_bindings(self);
+    }
+}
+
 /// Makes the draws of `list` those of `layer`, as [`DrawList::finish`]
 /// does, and drops the bindings of the draws of `tiles` where that replaced
 /// a buffer they bind.
@@ -502,8 +518,10 @@ pub(crate) enum DrawDepth {
 pub(crate) struct FrameDraw {
     /// The tile whose draw it is, or `None` for a draw of the layer's.
     pub(crate) tile: Option<OverscaledTileID>,
-    /// The id of the draw's GPU objects, which orders the draws by when
-    /// their objects were made.
+    /// The id that orders the layer's draws of one priority: that of the
+    /// draw's GPU objects, which orders them by when the objects were made,
+    /// or one that the layer's draws share ([`LayerDraws::id`]), which keeps
+    /// them in the order the layer pushed them.
     pub(crate) id: SimpleIdentity,
     pub(crate) priority: DrawPriority,
     /// The passes the draw draws in.
@@ -531,8 +549,7 @@ impl FrameDraw {
         }
     }
 
-    /// The order of the layer's draws: by priority, then by the id of their
-    /// GPU objects, which is the order the objects were made in.
+    /// The order of the layer's draws: by priority, then by their id.
     #[must_use]
     pub(crate) fn order(&self) -> (DrawPriority, SimpleIdentity) {
         (self.priority, self.id)
@@ -894,6 +911,14 @@ impl<P> Default for LayerDraws<P> {
 }
 
 impl<P: Copy> LayerDraws<P> {
+    /// The id of the draws ([`FrameDraws`]'), which a layer whose draws all
+    /// carry it as theirs ([`FrameDraw::id`]) draws in the order it pushed
+    /// them.
+    #[must_use]
+    pub(crate) fn id(&self) -> SimpleIdentity {
+        self.frame.id
+    }
+
     /// The draws, with what they share.
     #[must_use]
     pub(crate) fn frame(&self) -> &FrameDraws {
