@@ -116,7 +116,7 @@ mln_storage = { workspace = true, features = ["stub-file-source"] }
 mln_rs = { package = "mln-rs", path = "../..", default-features = false, features = [
   "runtime",
 ] }
-# Serves the styles of the resource tests.
+# The HTTP server of the tests of the runtime's network thread and wiring.
 httpmock.workspace = true
 pollster.workspace = true
 

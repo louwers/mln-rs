@@ -17,7 +17,6 @@ members = [
   "tools/ratchet",
   "tools/render-test",
   "tools/style-codegen",
-  "tools/test-server",
   "tools/unicode-tables",
   "tools/wasm-size",
   "vendor/*",
@@ -120,7 +119,8 @@ harfrust = { version = "0.15.0" }
 httpdate = { version = "1.0.3" }
 # Percent-decoding (mln_storage's file sources).
 percent-encoding = { version = "2.3.1" }
-# The HTTP test server of the tests (tools/test-server).
+# The local HTTP servers of the HTTP client's tests and of the runtime's
+# tests of its network wiring.
 httpmock = { version = "0.9.0", default-features = false }
 # decodeWEBP (platform/default/src/mln/util/webp_reader.cpp); pure Rust.
 image-webp = { version = "0.2.4" }

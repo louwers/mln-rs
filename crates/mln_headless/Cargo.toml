@@ -48,8 +48,6 @@ feature = { package = "mln-rs-feature", path = "../../vendor/feature" }
 geo-types.workspace = true
 geojson.workspace = true
 glam.workspace = true
-# tile_expiry_test's tile server.
-httpmock.workspace = true
 mln_image = { package = "mln-rs-image", path = "../mln_image" }
 # gpu_failure_test's extension layers and named target.
 mln_image_process.workspace = true
@@ -62,7 +60,6 @@ mln_sources.workspace = true
 mln_storage = { workspace = true, features = ["sqlite", "stub-file-source"] }
 mln_style = { workspace = true, features = ["dsl"] }
 mln_style_types.workspace = true
-mln_test_server = { package = "mln-rs-test-server", path = "../../tools/test-server" }
 mln_text = { package = "mln-rs-text", path = "../mln_text" }
 mln_tile_id.workspace = true
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
