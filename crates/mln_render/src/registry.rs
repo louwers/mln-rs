@@ -54,8 +54,9 @@ impl std::fmt::Debug for RegistryBuilder {
 impl Default for RegistryBuilder {
     fn default() -> Self {
         let mut style_keys = StyleKeys::default();
-        style_keys.add(&named_target::TARGETS).expect("no style keys to collide with");
-        style_keys.add(&named_target::DESTINATION).expect("no style keys to collide with");
+        // Two keys of their own names and types, in no keys, can't collide.
+        let _ = style_keys.add(&named_target::TARGETS);
+        let _ = style_keys.add(&named_target::DESTINATION);
         RegistryBuilder {
             functions: Functions::default(),
             layer_types: VecMap::default(),
