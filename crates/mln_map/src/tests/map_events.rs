@@ -35,6 +35,24 @@ fn report(map: &Map, event: RendererEvent) {
     map.renderer_events().push(event);
 }
 
+/// The `update_id` of the map's latest update, which a frame of it names.
+fn latest_update(map: &Map) -> u64 {
+    map.update_reader().latest().map_or(0, |update| update.parameters.update_id)
+}
+
+/// The report of a `Full` frame of `map`'s latest update.
+fn full_frame(map: &Map) -> RendererEvent {
+    RendererEvent::RenderFrameFinished {
+        mode: mln_renderer::RenderMode::Full,
+        needs_repaint: false,
+        repaint_at: None,
+        placement_changed: false,
+        still_image_request_id: 0,
+        update_id: latest_update(map),
+        stats: Arc::default(),
+    }
+}
+
 const STYLE: &str = r#"{"version": 8, "center": [10, 20], "zoom": 3, "sources": {}, "layers": []}"#;
 
 #[test]
@@ -164,12 +182,13 @@ fn a_frame_waiting_for_a_placement_asks_for_no_update_until_then() {
     map.load_style_json(STYLE);
     map.process_events();
     map.drain_events();
-    let frame = |repaint_at| RendererEvent::RenderFrameFinished {
+    let frame = |map: &Map, repaint_at| RendererEvent::RenderFrameFinished {
         mode: mln_renderer::RenderMode::Full,
         needs_repaint: false,
         repaint_at,
         placement_changed: false,
         still_image_request_id: 0,
+        update_id: latest_update(map),
         stats: Arc::default(),
     };
     let finished = |map: &mut Map| {
@@ -185,7 +204,7 @@ fn a_frame_waiting_for_a_placement_asks_for_no_update_until_then() {
     map.set_frame_time(Some(now.checked_sub(Duration::from_millis(20)).unwrap()));
     let at = now.checked_sub(Duration::from_millis(10)).unwrap();
     let updates = map.update_generation();
-    report(&map, frame(Some(at)));
+    report(&map, frame(&map, Some(at)));
     map.process_events();
     assert_eq!(map.update_generation(), updates, "no update until the owner repaints");
     assert_eq!(map.repaint_at(), Some(at));
@@ -195,7 +214,7 @@ fn a_frame_waiting_for_a_placement_asks_for_no_update_until_then() {
     assert_eq!(map.repaint_at(), None);
     let update = map.update_reader().latest().expect("an update");
     assert!(update.parameters.time_point >= Some(at), "the repaint shows the map at its time");
-    report(&map, frame(None));
+    report(&map, frame(&map, None));
     map.process_events();
     assert_eq!(finished(&mut map), (Some(true), true));
 }
@@ -215,14 +234,6 @@ fn a_frame_report_adds_no_update_while_the_frame_clock_samples_an_animation() {
         animation: AnimationOptions { duration: Some(Duration::from_secs(60)), ..Default::default() },
         ..Default::default()
     });
-    let frame = || RendererEvent::RenderFrameFinished {
-        mode: mln_renderer::RenderMode::Full,
-        needs_repaint: false,
-        repaint_at: None,
-        placement_changed: false,
-        still_image_request_id: 0,
-        stats: Arc::default(),
-    };
     let moving =
         |events: &[MapEvent]| events.iter().filter(|event| matches!(event, MapEvent::CameraIsChanging)).count();
 
@@ -232,7 +243,7 @@ fn a_frame_report_adds_no_update_while_the_frame_clock_samples_an_animation() {
     assert_eq!(map.update_generation(), updates + 1);
     map.process_events();
     map.drain_events();
-    report(&map, frame());
+    report(&map, full_frame(&map));
     map.process_events();
     let events = map.drain_events();
     assert_eq!(map.update_generation(), updates + 1);
@@ -241,7 +252,7 @@ fn a_frame_report_adds_no_update_while_the_frame_clock_samples_an_animation() {
     map.set_frame_time(None);
     map.drain_events();
     let updates = map.update_generation();
-    report(&map, frame());
+    report(&map, full_frame(&map));
     map.process_events();
     let events = map.drain_events();
     assert_eq!(map.update_generation(), updates + 1);
@@ -340,6 +351,7 @@ fn a_still_image_completes_with_a_full_frame() {
         repaint_at: None,
         placement_changed: false,
         still_image_request_id,
+        update_id: 0,
         stats: Arc::clone(&stats),
     };
     report(&map, frame(mln_renderer::RenderMode::Partial, 1));
@@ -361,4 +373,27 @@ fn a_still_image_completes_with_a_full_frame() {
     report(&map, frame(mln_renderer::RenderMode::Full, 2));
     map.process_events();
     assert_eq!(map.take_still_image(), Some(Ok(())));
+}
+
+/// A frame whose tile's wake reaches the map after the frame took the tile
+/// in, but before its report, leaves the map idle only once: the frame of
+/// the map's answer to the wake does, and the earlier frame doesn't.
+#[test]
+fn a_continuous_map_goes_idle_once_on_the_frame_of_its_last_update() {
+    let run_loop = Queue::<()>::new();
+    let mut map = map(MapOptions { map_mode: MapMode::Continuous, ..Default::default() }, &run_loop);
+    map.load_style_json(STYLE);
+    map.process_events();
+    map.drain_events();
+    let idles = |map: &mut Map| map.drain_events().iter().filter(|event| matches!(event, MapEvent::Idle)).count();
+    let frame = full_frame(&map);
+    let updates = map.update_generation();
+    report(&map, RendererEvent::Invalidate);
+    report(&map, frame);
+    map.process_events();
+    assert_eq!(map.update_generation(), updates + 1, "the wake makes an update");
+    assert_eq!(0, idles(&mut map), "a frame of an earlier update left the map idle");
+    report(&map, full_frame(&map));
+    map.process_events();
+    assert_eq!(1, idles(&mut map));
 }
