@@ -96,6 +96,8 @@ pub struct Map {
     still_image: StillImage,
     /// Counts the still image requests, so the renderer can tell a new one.
     still_image_request_id: u64,
+    /// The `update_id` of the last update the map made.
+    update_id: u64,
 
     /// Grows with each change to the map's state.
     generation: u64,
@@ -193,6 +195,7 @@ impl Map {
             repaint_at: None,
             still_image: StillImage::None,
             still_image_request_id: 0,
+            update_id: 0,
             generation: 1,
             renderer_events,
             events,
@@ -449,10 +452,18 @@ impl Map {
                 repaint_at,
                 placement_changed,
                 still_image_request_id,
+                update_id,
                 stats,
             } => {
                 self.repaint_at = repaint_at.filter(|_| continuous && !needs_repaint);
-                self.on_render_frame_finished(mode, needs_repaint, placement_changed, still_image_request_id, stats);
+                self.on_render_frame_finished(
+                    mode,
+                    needs_repaint,
+                    placement_changed,
+                    still_image_request_id,
+                    update_id,
+                    stats,
+                );
             }
             RendererEvent::RenderMapStarted => {
                 if continuous {
@@ -502,12 +513,17 @@ impl Map {
         }
     }
 
+    /// Handles the end of a frame. Only a `Full` frame of the map's last
+    /// update leaves a continuous map idle: the map may have made an update
+    /// since the renderer took the frame's, such as its answer to a tile that
+    /// the frame itself took in, and that update's frame is still to come.
     fn on_render_frame_finished(
         &mut self,
         mode: mln_renderer::RenderMode,
         needs_repaint: bool,
         placement_changed: bool,
         still_image_request_id: u64,
+        update_id: u64,
         stats: Arc<RenderingStats>,
     ) {
         let fully_loaded = mode == mln_renderer::RenderMode::Full;
@@ -534,7 +550,11 @@ impl Map {
             let animating = self.transform.in_transition();
             if needs_repaint || (animating && self.transform.frame_time().is_none()) {
                 self.on_update();
-            } else if !animating && self.renderer_fully_loaded && self.repaint_at.is_none() {
+            } else if !animating
+                && self.renderer_fully_loaded
+                && self.repaint_at.is_none()
+                && update_id == self.update_id
+            {
                 self.emit(MapEvent::Idle);
             }
         } else if self.renderer_fully_loaded
@@ -582,6 +602,7 @@ impl Map {
         let projection = self.projection_at(self.transform.view().zoom());
         self.transform.set_projection_definition(&projection);
 
+        self.update_id += 1;
         let params = UpdateParameters {
             style_loaded: self.style_loaded(),
             mode: self.mode,
@@ -599,6 +620,7 @@ impl Map {
             prefetch_zoom_delta: self.tile.prefetch_zoom_delta,
             still_image_request: self.still_image == StillImage::Pending,
             still_image_request_id: self.still_image_request_id,
+            update_id: self.update_id,
             cross_source_collisions: self.cross_source_collisions,
             fast_pfor_enabled: self.fast_pfor_enabled,
             tile_lod_min_radius: self.tile.lod_min_radius,

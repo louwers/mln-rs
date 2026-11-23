@@ -83,7 +83,9 @@ pub enum MapEvent {
     LoadingFinished,
     /// The style failed to load.
     LoadingFailed(StyleLoadError),
-    /// Everything has loaded and no transition runs.
+    /// A complete frame of the map's last update drew: everything has
+    /// loaded, no transition runs, and no frame follows until something
+    /// changes the map.
     Idle,
     /// A layer or a drawable failed to render.
     RenderError(Error),

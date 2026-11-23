@@ -49,6 +49,10 @@ pub enum RendererEvent {
         /// updates completes it, not one of an earlier update that a renderer
         /// on another thread drew late.
         still_image_request_id: u64,
+        /// The [`update_id`] of the update that the frame drew.
+        ///
+        /// [`update_id`]: crate::UpdateParameters::update_id
+        update_id: u64,
         /// The context's counters after the frame.
         stats: Arc<RenderingStats>,
     },

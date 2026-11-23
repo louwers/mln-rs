@@ -281,6 +281,7 @@ impl SymbolView {
             prefetch_zoom_delta: 0,
             still_image_request: false,
             still_image_request_id: 0,
+            update_id: 0,
             cross_source_collisions: true,
             fast_pfor_enabled: false,
             tile_lod_min_radius: 3.0,
