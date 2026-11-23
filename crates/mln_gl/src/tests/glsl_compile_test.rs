@@ -232,7 +232,9 @@ fn precise_textures_sample_at_high_precision() {
     }
     let precise: BTreeSet<(&str, &str)> = programs()
         .iter()
-        .flat_map(|(program, _)| program.textures.iter().filter(|texture| texture.precise).map(|t| (program.name, t.name)))
+        .flat_map(|(program, _)| {
+            program.textures.iter().filter(|texture| texture.precise).map(|t| (program.name, t.name))
+        })
         .collect();
     let decoded = [("color-relief", "elevation_stops"), ("color-relief", "image"), ("hillshade-prepare", "image")];
     assert_eq!(precise, BTreeSet::from(decoded));
