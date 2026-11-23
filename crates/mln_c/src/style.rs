@@ -47,15 +47,16 @@ use crate::generated::types::{
     MLN_STYLE_SOURCE_INFO_GEO_JSON, MLN_STYLE_SOURCE_INFO_RASTER_ENCODING, MLN_STYLE_SOURCE_INFO_TILE_JSON,
     MLN_STYLE_SOURCE_INFO_TILE_SIZE, MLN_STYLE_SOURCE_INFO_VECTOR_ENCODING, MLN_STYLE_SOURCE_TYPE_CUSTOM_GEOMETRY,
     MLN_STYLE_SOURCE_TYPE_CUSTOM_VECTOR, MLN_STYLE_SOURCE_TYPE_GEO_JSON, MLN_STYLE_SOURCE_TYPE_IMAGE,
-    MLN_STYLE_SOURCE_TYPE_RASTER, MLN_STYLE_SOURCE_TYPE_RASTER_DEM, MLN_STYLE_SOURCE_TYPE_VECTOR,
-    MLN_STYLE_TILE_SCHEME_TMS, MLN_STYLE_TILE_SCHEME_XYZ, MLN_STYLE_TRANSITION_OPTION_DELAY,
-    MLN_STYLE_TRANSITION_OPTION_DURATION, MLN_STYLE_TRANSITION_OPTION_ENABLE_PLACEMENT_TRANSITIONS,
-    MLN_STYLE_VECTOR_TILE_ENCODING_MLT, MLN_STYLE_VECTOR_TILE_ENCODING_MVT, mln_buffer_view, mln_canonical_tile_id,
-    mln_completion, mln_custom_geometry_source_options, mln_custom_vector_source_options, mln_diagnostic,
-    mln_geo_json_source_options, mln_image_content, mln_image_stretch, mln_lat_lng, mln_lat_lng_bounds, mln_map,
-    mln_premultiplied_rgba8_image, mln_status, mln_style_image_info, mln_style_image_options, mln_style_image_text_fit,
-    mln_style_layer_info, mln_style_source_info, mln_style_source_tile_info, mln_style_source_type,
-    mln_style_transition_options, mln_style_vector_tile_encoding,
+    MLN_STYLE_SOURCE_TYPE_RASTER, MLN_STYLE_SOURCE_TYPE_RASTER_DEM, MLN_STYLE_SOURCE_TYPE_UNKNOWN,
+    MLN_STYLE_SOURCE_TYPE_VECTOR, MLN_STYLE_TILE_SCHEME_TMS, MLN_STYLE_TILE_SCHEME_XYZ,
+    MLN_STYLE_TRANSITION_OPTION_DELAY, MLN_STYLE_TRANSITION_OPTION_DURATION,
+    MLN_STYLE_TRANSITION_OPTION_ENABLE_PLACEMENT_TRANSITIONS, MLN_STYLE_VECTOR_TILE_ENCODING_MLT,
+    MLN_STYLE_VECTOR_TILE_ENCODING_MVT, mln_buffer_view, mln_canonical_tile_id, mln_completion,
+    mln_custom_geometry_source_options, mln_custom_vector_source_options, mln_diagnostic, mln_geo_json_source_options,
+    mln_image_content, mln_image_stretch, mln_lat_lng, mln_lat_lng_bounds, mln_map, mln_premultiplied_rgba8_image,
+    mln_status, mln_style_image_info, mln_style_image_options, mln_style_image_text_fit, mln_style_layer_info,
+    mln_style_source_info, mln_style_source_tile_info, mln_style_source_type, mln_style_transition_options,
+    mln_style_vector_tile_encoding,
 };
 use crate::map::{self, command, query};
 use crate::{abi, buffer, geo, parse_thread};
@@ -456,9 +457,9 @@ impl<T: Send + 'static> CompletionValue for Plain<T> {
     }
 }
 
-/// The C type of a source of the type named `name`, or `None` for a type
-/// that the C API doesn't name.
-fn source_type(name: &str) -> Option<mln_style_source_type> {
+/// The C type of a source of the type named `name`: UNKNOWN for a type that
+/// the C API doesn't name, such as an extension's.
+fn source_type(name: &str) -> mln_style_source_type {
     [
         (VectorSourceType::INFO.name, MLN_STYLE_SOURCE_TYPE_VECTOR),
         (RasterSourceType::INFO.name, MLN_STYLE_SOURCE_TYPE_RASTER),
@@ -470,6 +471,7 @@ fn source_type(name: &str) -> Option<mln_style_source_type> {
     ]
     .into_iter()
     .find_map(|(type_name, source_type)| (type_name == name).then_some(source_type))
+    .unwrap_or(MLN_STYLE_SOURCE_TYPE_UNKNOWN)
 }
 
 const fn vector_encoding(encoding: VectorEncoding) -> mln_style_vector_tile_encoding {
@@ -518,15 +520,14 @@ struct ReportedSource {
 }
 
 impl ReportedSource {
-    /// What the C API reports about the source of `info`, or `None` for a
-    /// source of a type that the C API doesn't name.
-    fn of(info: SourceInfo) -> Option<Self> {
-        Some(ReportedSource {
-            source_type: source_type(info.source_type)?,
+    /// What the C API reports about the source of `info`.
+    fn of(info: SourceInfo) -> Self {
+        ReportedSource {
+            source_type: source_type(info.source_type),
             tileset: TilesetSettings::of(&info.source),
             geojson: GeoJsonSourceSettings::of(&info.source),
             info,
-        })
+        }
     }
 }
 
@@ -884,7 +885,9 @@ pub(crate) unsafe extern "C" fn mln_map_get_style_source(
                 map,
                 completion,
                 |map| map.style_source(id),
-                |source| LentSources(source.and_then(ReportedSource::of).into_iter().map(LentSource::new).collect()),
+                |source| {
+                    LentSources(source.into_iter().map(|info| LentSource::new(ReportedSource::of(info))).collect())
+                },
             )
         }
     })
@@ -926,7 +929,7 @@ pub(crate) unsafe extern "C" fn mln_map_list_style_sources(
         // SAFETY: the caller's contract.
         unsafe {
             query(map, completion, ::mln_runtime::Map::style_sources, |sources| {
-                LentSources(sources.into_iter().filter_map(ReportedSource::of).map(LentSource::new).collect())
+                LentSources(sources.into_iter().map(|info| LentSource::new(ReportedSource::of(info))).collect())
             })
         }
     })
@@ -2003,6 +2006,10 @@ pub(crate) unsafe extern "C" fn mln_map_get_style_transition_options(
 
 #[cfg(test)]
 mod tests {
+    use mln_style::Source;
+    use mln_style::layer_type::SourceKind;
+    use mln_style::source_type::{SourceData, SourceTypeInfo};
+
     use super::*;
 
     fn pixels(width: u32, height: u32, stride: u32, bytes: &[u8]) -> mln_premultiplied_rgba8_image {
@@ -2102,5 +2109,22 @@ mod tests {
         assert!(check(r#"{"total":5}"#).unwrap_err().message().contains("GeoJSON source options"));
         assert!(check(r#"{"total":NaN}"#).unwrap_err().message().contains("cluster_properties"));
         assert_eq!(check("").unwrap(), GeoJsonSourceSettings::default());
+    }
+
+    #[test]
+    fn a_source_of_a_type_the_api_does_not_name_is_unknown() {
+        struct Elsewhere;
+        impl StyleSourceType for Elsewhere {
+            const INFO: SourceTypeInfo =
+                SourceTypeInfo { name: "org.example.elsewhere", layer_kind: SourceKind::Geometry, from_json: false };
+            type Options = ();
+            type Description = ();
+        }
+
+        let source = Source::new("extension", SourceData::<Elsewhere>::new(()));
+        let lent = LentSource::new(ReportedSource::of(SourceInfo::of(&source)));
+        let item = lent.item(&[]);
+        assert_eq!((item.type_, item.fields), (MLN_STYLE_SOURCE_TYPE_UNKNOWN, 0));
+        assert_eq!(lent.id.view().size, "extension".len());
     }
 }
