@@ -102,8 +102,9 @@ pub trait StyleSourceType: Sized + Send + Sync + 'static {
     type Description: Clone + Send + Sync + 'static;
 
     /// The data of a source from its style JSON `value`, whose expressions
-    /// parse against `functions`. Only a type whose [`INFO`](Self::INFO)
-    /// has `from_json` is asked.
+    /// parse against `functions`, or `None` with `error`'s message (a
+    /// [`conversion::Error`](crate::conversion::Error)) set to why it isn't
+    /// one. Only a type whose [`INFO`](Self::INFO) has `from_json` is asked.
     fn from_json(_value: &Convertible<'_>, _functions: &Arc<Functions>, error: &mut Error) -> Option<SourceData<Self>> {
         error.message = "invalid source type".to_owned();
         None

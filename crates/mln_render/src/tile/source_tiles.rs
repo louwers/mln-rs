@@ -1429,8 +1429,8 @@ impl SourceTiles {
         }
     }
 
-    /// Has the origin take in `source`, a new version of its source, for an
-    /// update of `parameters`. Returns what the tiles cover, or `None`
+    /// Has the origin take in `source`, its source as the style has it, for
+    /// an update of `parameters`. Returns what the tiles cover, or `None`
     /// while the source has nothing to make tiles from.
     pub(crate) fn update_origin(
         &mut self,

@@ -25,7 +25,9 @@ pub(crate) mod origin;
 #[expect(private_bounds, reason = "a tileset's tiles are of the kinds the tileset can deliver")]
 pub trait TilesetKind: Send + Sync + 'static {
     const INFO: SourceTypeInfo;
-    /// The kind of data the tiles are: the kind `INFO` names.
+    /// The kind of data the tiles are: the kind `INFO` names, one of those
+    /// a tileset delivers ([`GeometryTiles`], [`RasterTiles`] and
+    /// [`DemTiles`]), and not a value of a source type's own.
     type Data: TilesetTiles;
 }
 

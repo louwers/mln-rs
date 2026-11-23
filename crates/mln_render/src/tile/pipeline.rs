@@ -137,6 +137,8 @@ impl Pipeline {
                 Pipeline::Decode(Decode { generation, dem: None, work: DecodeWork::Current })
             }
             SourceKind::Value(_) => Pipeline::Value,
+            // A source's kind is its origin's `TileKind`, never `None`, which
+            // only a layer without a source names.
             SourceKind::Geometry | SourceKind::None => Pipeline::Layout(Box::new(Layout {
                 generation,
                 data: None,

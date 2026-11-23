@@ -2,9 +2,10 @@
 //! whose sources the renderer draws. The `mln_extension_tests` crate's
 //! `stamp` source type, whose tiles each hold a value that its origin makes
 //! from the tile's id, is a whole example written against the facade alone,
-//! whose `mln_rs::source` gathers every name it uses; the built-in source
-//! types of `mln_sources` go through the same contract, and its tileset
-//! origin is the example of one that loads through the map's file source.
+//! whose `mln_rs::source` gathers the names it uses but the registry's; the
+//! built-in source types of `mln_sources` go through the same contract, and
+//! its tileset origin is the example of one that loads through the map's
+//! file source.
 //!
 //! A source type has two halves, which
 //! [`RegistryBuilder::add_source_type::<T>()`](crate::RegistryBuilder::add_source_type)
@@ -111,11 +112,12 @@
 //! only a fallback or a prefetch the view can do without, or waits in the
 //! cache. Necessity is a hint: an origin with a cheap way to get data, such
 //! as a cache, may try only that while the tile is optional, and say when
-//! it did ([`LoadContext::tried_optional`]), so that a parent can stand in;
-//! it asks for more as the tile becomes required, and stops as it becomes
-//! optional, as the tileset's origin does with its network requests, and
-//! the custom source's with its host's. An origin without one loads every
-//! tile as it starts and ignores necessity.
+//! it did ([`LoadContext::tried_optional`]), so that the engine makes and
+//! loads a parent to stand in; it asks for more as the tile becomes
+//! required, and stops as it becomes optional, as the tileset's origin does
+//! with its network requests, and the custom source's with its host's. An
+//! origin without one loads every tile as it starts and ignores necessity:
+//! a parent draws for its loading tiles only if the cover already has it.
 //!
 //! # Tile data of a source type's own
 //!
@@ -130,8 +132,9 @@
 //! [`crate::layer::ValueTiles`], so that a style whose layer views a source
 //! of another kind, or of values of another type, leaves the layer out
 //! with an error. A tile shows the value of its latest delivery at once, a
-//! parent or children draw for a tile without one, a tile in a new world
-//! copy shares its copy's value, and the value goes with its tile. A value
+//! parent or children with a value draw for a tile without one, as above, a
+//! tile in a new world copy shares its copy's value, and the value goes
+//! with its tile. A value
 //! doesn't change once delivered: a tile that needs another gets a new one,
 //! from which the layers make their tile values again. Tiles overlap by a
 //! parent drawn under its loading children, so a layer clips its draws to
@@ -322,7 +325,9 @@ pub struct Cover {
     /// something shows while the view's tiles load.
     pub prefetch: bool,
     /// Whether the tiles lay out on the renderer's thread in the update that
-    /// gives them their data, rather than on the tile workers.
+    /// gives them their data, rather than on the tile workers. What the
+    /// origin delivers during [`DataOrigin::update`] follows the last cover's
+    /// value, since the engine takes this one only as `update` returns it.
     pub synchronous: bool,
 }
 
@@ -390,8 +395,9 @@ pub trait DataOrigin: 'static {
     fn failed(&mut self, _tile: &mut Self::Tile, _cx: &mut LoadContext<'_, '_, Self>) {}
 }
 
-/// A [`DataOrigin`]'s update: the source's new version, what the map says
-/// of its tiles, and the tiles, which the origin can clear or load again.
+/// A [`DataOrigin`]'s update: the source as the style has it, what the map
+/// says of its tiles, and the tiles, which the origin can clear or load
+/// again.
 pub struct OriginUpdate<'a, O: ?Sized> {
     pub(crate) parts: UpdateParts<'a>,
     pub(crate) origin: PhantomData<fn(&mut O)>,
@@ -435,18 +441,25 @@ impl<'a, O: DataOrigin> OriginUpdate<'a, O> {
         self.parts.needs_relayout
     }
 
-    /// Whether MLT tiles decode FastPFOR-compressed streams.
+    /// Whether MLT tiles decode FastPFOR-compressed streams: an origin that
+    /// delivers [`TileData::Mlt`] passes it to its
+    /// [`MltTile`](mln_tile::MltTile), whose streams otherwise fail to
+    /// decode as the tile lays out.
     #[must_use]
     pub fn fast_pfor_enabled(&self) -> bool {
         self.parts.parameters.fast_pfor_enabled
     }
 
-    /// Lets go of every tile.
+    /// Lets go of every tile. The origin's state of each drops, with no
+    /// [`set_necessity`](DataOrigin::set_necessity) before.
     pub fn clear_tiles(&mut self) {
         self.parts.tiles.clear_all(self.parts.ctx);
     }
 
-    /// Lets go of the cached tiles, those the view no longer needs.
+    /// Lets go of the cached tiles, those the view no longer needs. The
+    /// origin's state of each drops, with no
+    /// [`set_necessity`](DataOrigin::set_necessity) before, even for a tile
+    /// that was still loading.
     pub fn clear_cache(&mut self) {
         self.parts.tiles.cache_clear(self.parts.ctx);
     }
