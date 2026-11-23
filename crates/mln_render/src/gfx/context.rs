@@ -152,7 +152,7 @@ impl Resources {
 
     /// Resources that no GPU has seen, which a render layer made only to
     /// evaluate its values joins.
-    #[cfg(any(test, feature = "testing", feature = "bench"))]
+    #[cfg(any(test, feature = "bench"))]
     pub(crate) fn detached() -> Resources {
         let caps = Caps {
             buffer_offset_alignment: 256,

@@ -321,7 +321,7 @@ fn style_replaced_mid_load() {
     let script = Script::default();
     let new_key = tile.store.add_source("source".to_owned(), script.origin(SourceKind::Geometry));
     assert_ne!(new_key, old_key, "keys aren't reused");
-    crate::testing::seed(&mut tile.store, new_key, &[id], params);
+    crate::tests::seed(&mut tile.store, new_key, &[id], params);
     tile.key = new_key;
     tile.script = script;
     tile.set_style(&style(&layers));

@@ -29,10 +29,6 @@ font-face-shaper = []
 # `bench`, the entry points to internal stages that the benchmarks
 # (tools/bench) measure. Not API: hidden from the documentation.
 bench = []
-# `testing`, what the tests of the crates that add layer and source types
-# (mln_layers, mln_sources) drive the engine's parts with. Not API: hidden
-# from the documentation.
-testing = []
 
 [dependencies]
 bytemuck = { workspace = true, features = ["extern_crate_alloc"] }

@@ -51,7 +51,50 @@ pub(crate) fn pool() -> mln_util::pool::Pool {
     mln_util::pool::Pool::new(4)
 }
 
-pub(crate) use crate::testing::{tile_store, update};
+/// A tile store whose jobs run on `workers` and which frees and parses
+/// glyphs on `pool`, with no images and no sprite loaded.
+pub(crate) fn tile_store(
+    pool: &mln_util::pool::TaskGroup,
+    workers: Box<dyn crate::tile::tile_workers::TileWorkers>,
+) -> crate::tile::store::TileStore {
+    let glyphs = crate::text::glyph_store::GlyphStore::new(
+        mln_text::local_fonts::LocalGlyphs::default(),
+        std::sync::Arc::default(),
+        pool.clone(),
+        crate::text::font_face_engine::default_engine(),
+        std::sync::Arc::new(|| {}),
+    );
+    crate::tile::store::TileStore::new(
+        workers,
+        glyphs,
+        crate::image_store::ImageStore::default(),
+        pool.clone(),
+        std::sync::Arc::new(|| {}),
+    )
+}
+
+/// One update of `store`'s tiles, as the renderer's: gives the images asked
+/// for their update, takes in what arrived and starts the next jobs.
+/// Returns whether a tile of a source with synchronous updates laid out.
+pub(crate) fn update(store: &mut crate::tile::store::TileStore) -> bool {
+    store.images_mut().begin_update();
+    store.receive();
+    store.drive()
+}
+
+/// Adds tiles `ids` to the source `key` of `store`, laid out with `params`,
+/// which its origin starts as a cover starts them, without world copies.
+pub(crate) fn seed(
+    store: &mut crate::tile::store::TileStore,
+    key: crate::tile::job::SourceKey,
+    ids: &[mln_tile_id::OverscaledTileID],
+    params: crate::layout::tile_layout::LayoutParams,
+) {
+    let Some((source, ctx)) = store.source_mut(key) else { return };
+    for id in ids {
+        source.add_tile(*id, params, false, ctx);
+    }
+}
 
 /// Port-only: a tile store whose jobs run on `pool`.
 pub(crate) fn pool_store(pool: &mln_util::pool::TaskGroup) -> crate::tile::store::TileStore {
@@ -108,7 +151,7 @@ impl OneTile {
         let key = store.add_source("source".to_owned(), script.origin(kind));
         let mut tiles = OneTile { store, key, id: ids[0], script: script.clone(), mode };
         let params = tiles.params();
-        crate::testing::seed(&mut tiles.store, key, ids, params);
+        seed(&mut tiles.store, key, ids, params);
         tiles
     }
 
@@ -136,7 +179,7 @@ impl OneTile {
     /// says once it is required.
     pub(crate) fn add(&mut self, id: mln_tile_id::OverscaledTileID) {
         let params = self.params();
-        crate::testing::seed(&mut self.store, self.key, &[id], params);
+        seed(&mut self.store, self.key, &[id], params);
     }
 
     /// Adds another tile, `id`, to the source, which starts from the same
