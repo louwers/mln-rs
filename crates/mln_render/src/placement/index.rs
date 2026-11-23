@@ -385,16 +385,25 @@ impl CollisionIndex {
             (tile.canonical.z, tile.canonical.y, tile.wrap, tile.canonical.x)
         };
         hits.sort_by(|a, b| tile_order(a.record).cmp(&tile_order(b.record)).then(a.record.cmp(&b.record)));
+        let mut ranks: Vec<(u32, usize)> = Vec::new();
         for hits in hits.chunk_by_mut(|a, b| a.record == b.record) {
             let record = &self.records[hits[0].record as usize];
             match &record.order {
                 Some(order) => {
-                    // A feature with several shapes sorts by its first.
-                    let mut rank: HashMap<u32, usize> = HashMap::default();
-                    for (position, &feature) in order.iter().enumerate().rev() {
-                        rank.insert(feature, position);
+                    // Each hit feature's first place in the order, found in
+                    // one pass over it; a feature it lacks goes last.
+                    ranks.clear();
+                    ranks.extend(hits.iter().map(|entry| (entry.feature, order.len())));
+                    ranks.sort_unstable();
+                    ranks.dedup_by_key(|(feature, _)| *feature);
+                    for (position, feature) in order.iter().enumerate() {
+                        if let Ok(at) = ranks.binary_search_by_key(feature, |(feature, _)| *feature) {
+                            ranks[at].1 = ranks[at].1.min(position);
+                        }
                     }
-                    let rank = |entry: &Entry| rank.get(&entry.feature).copied().unwrap_or(order.len());
+                    let rank = |entry: &Entry| {
+                        ranks.binary_search_by_key(&entry.feature, |(feature, _)| *feature).map_or(order.len(), |at| ranks[at].1)
+                    };
                     hits.sort_by_key(|entry| Reverse(rank(entry)));
                 }
                 None => hits.sort_by_key(|entry| Reverse(entry.sort)),
