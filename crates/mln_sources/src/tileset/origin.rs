@@ -9,7 +9,7 @@ use std::time::Duration;
 use mln_map_types::MapMode;
 use mln_render::source::{
     Cover, DataOrigin, DemTiles, GeometryTiles, LoadContext, OriginUpdate, RasterTiles, SourceType, Supply, TileKind,
-    TileNecessity, TileOperation, TileTimes,
+    TileNecessity, TileOperation, TileTimes, WorldCopy,
 };
 use mln_storage::response::Reason;
 use mln_storage::{Data, FileSource, LoadingMethod, Request, Resource, Response, StoragePolicy};
@@ -309,7 +309,7 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
 
     /// A tile that starts from its copy in another world copy takes the
     /// copy's validators with its contents, as a cache's answer.
-    fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, copy: Option<&TilesetTile>) -> TilesetTile {
+    fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, copy: Option<WorldCopy<'_, TilesetTile>>) -> TilesetTile {
         // The source makes no tiles while it has no data, nor of a tileset
         // without tiles: such a tile can't load.
         let (url, canonical, scheme) = match &self.data {
@@ -322,9 +322,14 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
         let mut resource = Resource::tile(url, self.pixel_ratio, x, y, z, scheme, LoadingMethod::CacheOnly);
         resource.order = cx.order();
         let mut tile = TilesetTile { resource, fetch: Fetch::Idle, from_network: false };
-        match copy {
-            Some(copy) if copy.resource.url == tile.resource.url && cx.take_copy() => tile.take_validators(copy),
-            _ => self.start_loading(&mut tile, cx),
+        // A copy made at another pixel ratio is of another resource.
+        let taken = copy.filter(|copy| copy.state().resource.url == tile.resource.url).and_then(|copy| {
+            let state = copy.state();
+            copy.take(cx).then_some(state)
+        });
+        match taken {
+            Some(copy) => tile.take_validators(copy),
+            None => self.start_loading(&mut tile, cx),
         }
         tile
     }

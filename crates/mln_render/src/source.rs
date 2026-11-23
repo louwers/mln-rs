@@ -93,11 +93,14 @@
 //! The engine owns how MapLibre loads tiles; the origin owns where their
 //! data comes from. The engine decides which tiles the view needs, in which
 //! order their requests start ([`LoadContext::order`]), and which it keeps
-//! in its cache and evicts. It draws a tile's parent or children while the
-//! tile has nothing to show, makes a tile in a new world copy show the same
-//! tile's contents in another, which [`LoadContext::take_copy`] makes the
-//! new tile's answer, and hands a reply to the origin only while its load
-//! is the tile's latest. It lays out and decodes what tiles take in, knows
+//! in its cache and evicts. While a tile has nothing to show, it draws the
+//! tile's children or parent that can draw; it makes a missing parent
+//! only once the tile has loaded, or has [tried](LoadContext::tried_optional)
+//! what it can while optional, so a parent never loads for a tile that
+//! loads at once. It makes a tile in a new world copy show the same tile's
+//! contents in another, which [`WorldCopy::take`] makes the new tile's
+//! answer, and hands a reply to the origin only while its load is the
+//! tile's latest. It lays out and decodes what tiles take in, knows
 //! when a tile has done what it can, and starts a failed tile over when its
 //! retry loads anew. How data is requested, cached, revalidated, kept fresh
 //! and retried is the origin's.
@@ -158,7 +161,7 @@ use crate::tile::inbox::{InboxSender, TileEvent};
 use crate::tile::job::TileKey;
 pub use crate::tile::loading::TileTimes;
 pub use crate::tile::tile::{TileNecessity, TileOperation};
-use crate::tile::tile_mut::TileMut;
+use crate::tile::tile_mut::{CopyAnswer, TileMut};
 
 /// The render half of a source type, whose style half is its
 /// [`StyleSourceType`]: what its sources supply the renderer.
@@ -353,13 +356,15 @@ pub trait DataOrigin: 'static {
     /// the engine leaves its tiles as they are and makes no new ones.
     fn update(&mut self, update: &mut OriginUpdate<'_, Self>) -> Option<Cover>;
 
-    /// Starts a new tile, required or not, and returns the origin's state
-    /// of it. On a flat map, `copy` is the origin's state of the same tile
-    /// in another world copy, whose contents the new tile already shows:
-    /// [`cx.take_copy()`](LoadContext::take_copy) settles the tile on them,
-    /// as its load's answer. Otherwise the origin delivers the tile's data
-    /// at once, starts a load, or waits until the tile is needed.
-    fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, copy: Option<&Self::Tile>) -> Self::Tile;
+    /// Starts a new tile and returns the origin's state of it. The tile
+    /// starts optional; the cover sets how much it needs it
+    /// ([`set_necessity`](Self::set_necessity)) as it retains it, after
+    /// this. On a flat map, `copy` is the same tile in another world copy,
+    /// whose contents the new tile already shows, and
+    /// [`copy.take(cx)`](WorldCopy::take) settles the tile on them, as its
+    /// load's answer. Otherwise the origin delivers the tile's data at once,
+    /// starts a load, or waits until the tile is needed.
+    fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, copy: Option<WorldCopy<'_, Self::Tile>>) -> Self::Tile;
 
     /// Takes in `reply`, which came for the tile's latest load.
     fn receive(&mut self, tile: &mut Self::Tile, reply: Self::Reply, cx: &mut LoadContext<'_, '_, Self>);
@@ -555,39 +560,71 @@ impl<'a, 't, O: DataOrigin + ?Sized> LoadContext<'a, 't, O> {
         self.tile.keep_data();
     }
 
-    /// In [`DataOrigin::start`], settles the new tile on the contents of
-    /// its world copy, which it shows, as its load's answer: a geometry
-    /// tile lays out the copy's data for itself, and a value tile shares the
-    /// copy's value. Returns false, and changes
-    /// nothing, for a tile that didn't start from a copy, or whose copy has
-    /// no data to give, as one with a decode still pending.
-    pub fn take_copy(&mut self) -> bool {
-        self.tile.take_copy()
-    }
-
-    /// Drops a geometry tile's data and style, so that it lays out anew once
-    /// it has both again. A raster or DEM tile's decodes keep running, and a
-    /// value tile keeps its value, so an origin of other tiles doesn't call
-    /// it.
-    pub fn reset(&mut self) {
-        self.tile.reset();
-    }
-
     /// The tile has done what it can while optional, such as looking in a
-    /// cache: a parent of a tile that needs it may stand in for it.
+    /// cache. From then on, while it has nothing to show, the engine makes
+    /// its parent if the cover lacks one, and loads it to stand in; for a
+    /// tile that hasn't said so, only a parent the cover has stands in.
     pub fn tried_optional(&mut self) {
         self.tile.tile_mut().load.tried_optional = true;
     }
 
     /// Reports what the tile's load did: requested from the cache or the
-    /// network, or loaded from either.
+    /// network, or loaded from either. The engine reports the rest of a
+    /// tile's operations itself.
     pub fn report(&mut self, op: TileOperation) {
+        debug_assert!(
+            matches!(
+                op,
+                TileOperation::RequestedFromCache
+                    | TileOperation::RequestedFromNetwork
+                    | TileOperation::LoadFromCache
+                    | TileOperation::LoadFromNetwork
+            ),
+            "an origin reports its loads' requests and answers, not {op:?}"
+        );
         self.tile.action(op);
     }
 
     /// The tile changed: the renderer needs a frame.
     pub fn changed(&mut self) {
         self.tile.store_mut().changed();
+    }
+}
+
+impl<O: DataOrigin<Data = GeometryTiles> + ?Sized> LoadContext<'_, '_, O> {
+    /// Drops the tile's data and style, so that it lays out anew once it
+    /// has both again.
+    pub fn reset(&mut self) {
+        self.tile.reset();
+    }
+}
+
+/// The same tile in another world copy, from whose contents a new tile
+/// starts ([`DataOrigin::start`]): the origin's state of it, and what
+/// taking it settles the new tile on.
+pub struct WorldCopy<'a, T> {
+    pub(crate) state: &'a T,
+    pub(crate) answer: Option<CopyAnswer>,
+}
+
+impl<'a, T> WorldCopy<'a, T> {
+    /// The origin's state of the copy.
+    #[must_use]
+    pub fn state(&self) -> &'a T {
+        self.state
+    }
+
+    /// Settles the new tile on the copy's contents, which it shows, as its
+    /// load's answer: a geometry tile lays out the copy's data for itself,
+    /// and a raster, raster-dem or value tile keeps what it shows. Returns
+    /// false, and changes nothing, if the copy has no data to give, as one
+    /// whose decode is still pending.
+    pub fn take<O: DataOrigin<Tile = T> + ?Sized>(self, cx: &mut LoadContext<'_, '_, O>) -> bool {
+        let Some(answer) = self.answer else {
+            return false;
+        };
+        cx.tile.take_copy(answer);
+        true
     }
 }
 

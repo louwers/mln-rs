@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use mln_render::source::{
-    Cover, DataOrigin, GeometryTiles, LoadContext, OriginUpdate, Replier, SourceType, Supply, TileNecessity,
+    Cover, DataOrigin, GeometryTiles, LoadContext, OriginUpdate, Replier, SourceType, Supply, TileNecessity, WorldCopy,
 };
 use mln_style::Source;
 use mln_style::source_type::{SourceData, StyleSourceType};
@@ -195,7 +195,7 @@ impl<T: CustomSource> DataOrigin for CustomOrigin<T> {
     }
 
     /// A custom tile waits until it is required.
-    fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, _copy: Option<&CustomTile>) -> CustomTile {
+    fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, _copy: Option<WorldCopy<'_, CustomTile>>) -> CustomTile {
         CustomTile { id: *cx.id(), loader: self.loader.clone(), subscription: Subscription::Unsubscribed }
     }
 

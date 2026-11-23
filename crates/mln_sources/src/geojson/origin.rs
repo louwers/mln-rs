@@ -5,7 +5,9 @@
 use std::sync::Arc;
 
 use mln_map_types::MapMode;
-use mln_render::source::{Cover, DataOrigin, GeometryTiles, LoadContext, OriginUpdate, Replier, SourceType, Supply};
+use mln_render::source::{
+    Cover, DataOrigin, GeometryTiles, LoadContext, OriginUpdate, Replier, SourceType, Supply, WorldCopy,
+};
 use mln_style::Source;
 use mln_style::source_type::SourceData;
 use mln_tile::TileData;
@@ -71,7 +73,7 @@ impl DataOrigin for GeoJsonOrigin {
         })
     }
 
-    fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, _copy: Option<&()>) {
+    fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, _copy: Option<WorldCopy<'_, ()>>) {
         if let Some(data) = &self.data {
             load(data, self.synchronous, false, cx);
         }

@@ -43,9 +43,6 @@ pub(crate) struct TileMut<'a> {
     reported: bool,
     /// The tile showed new contents.
     pub(super) installed: bool,
-    /// While its origin starts a new tile from another world copy, what
-    /// taking the copy settles it on.
-    copy: Option<CopyAnswer>,
 }
 
 impl<'a> TileMut<'a> {
@@ -58,7 +55,7 @@ impl<'a> TileMut<'a> {
         f: impl FnOnce(&mut TileMut<'a>) -> R,
     ) -> (R, bool) {
         let reported = tile.is_pending();
-        let mut tile = TileMut { source, tile, store, reported, installed: false, copy: None };
+        let mut tile = TileMut { source, tile, store, reported, installed: false };
         let result = f(&mut tile);
         tile.report();
         (result, tile.installed)
@@ -118,28 +115,23 @@ impl<'a> TileMut<'a> {
     /// Starts a new tile: from `copy`, of the tile in another world copy,
     /// it shows the copy's contents at once, and its origin may take them
     /// as its answer.
-    pub(crate) fn start(&mut self, copy: Option<WorldCopy<'_>>) {
-        let mut copy_state = None;
-        if let Some(WorldCopy { shown, answer, state }) = copy {
+    pub(crate) fn start(&mut self, copy: Option<CopyStart<'_>>) {
+        let mut origin_copy = None;
+        if let Some(CopyStart { shown, answer, state }) = copy {
             self.tile.shown = Some(shown);
             self.installed = true;
             self.store.changed();
-            self.copy = answer;
-            copy_state = state;
+            origin_copy = state.map(|state| (state, answer));
         }
         if let Some(mut origin) = self.source.origin.take() {
-            self.tile.load.state = Some(origin.start(copy_state, self));
+            self.tile.load.state = Some(origin.start(origin_copy, self));
             self.source.origin = Some(origin);
         }
-        self.copy = None;
     }
 
     /// Settles a tile that starts from another world copy on the copy's
-    /// contents, which it shows. Returns false if there is no copy to take.
-    pub(crate) fn take_copy(&mut self) -> bool {
-        let Some(CopyAnswer { data, times }) = self.copy.take() else {
-            return false;
-        };
+    /// contents, which it shows, as `answer` says.
+    pub(crate) fn take_copy(&mut self, CopyAnswer { data, times }: CopyAnswer) {
         self.tile.settled = true;
         self.tile.load.times = times;
         self.tile.load.tried_optional = true;
@@ -151,7 +143,6 @@ impl<'a> TileMut<'a> {
             self.action(TileOperation::StartParse);
             self.action(TileOperation::EndParse);
         }
-        true
     }
 
     /// Sets how much the cover needs the tile, which its origin acts on.
@@ -615,7 +606,7 @@ impl<'a> TileMut<'a> {
 /// What a new tile starts with from the tile in another world copy: what
 /// that tile shows, what taking it settles the new tile on, and the origin's
 /// state of that tile.
-pub(crate) struct WorldCopy<'a> {
+pub(crate) struct CopyStart<'a> {
     shown: Shown,
     /// `None` if the copy has no data to give: a geometry tile without
     /// data, or a raster or raster-dem tile whose decode is pending, whose
@@ -627,18 +618,18 @@ pub(crate) struct WorldCopy<'a> {
 /// What a new tile that takes its world copy settles on: the data a
 /// geometry tile lays out (none for a raster, raster-dem or value tile,
 /// which shows all it will), and the copy's times.
-struct CopyAnswer {
+pub(crate) struct CopyAnswer {
     data: Option<LayoutData>,
     times: TileTimes,
 }
 
-impl<'a> WorldCopy<'a> {
+impl<'a> CopyStart<'a> {
     /// A copy of `tile`, if it is renderable. A geometry tile's copy draws
     /// its buckets, apart from those of the layers that are placed: these
     /// hold what placement made of them where their tile is. A raster or
     /// raster-dem tile's copy has a bucket of its own, since each is masked
     /// where it is. A value tile's copy shares its value.
-    pub(crate) fn of(tile: &'a Tile) -> Option<WorldCopy<'a>> {
+    pub(crate) fn of(tile: &'a Tile) -> Option<CopyStart<'a>> {
         let shown = tile.shown.as_ref().filter(|shown| shown.contents.is_renderable())?;
         let contents = match &shown.contents {
             Contents::Geometry(contents) => {
@@ -666,7 +657,7 @@ impl<'a> WorldCopy<'a> {
             Pipeline::Decode(_) | Pipeline::Value => (!tile.is_pending()).then_some(None),
         };
         let world_copy = matches!(contents, Contents::Geometry(_));
-        Some(WorldCopy {
+        Some(CopyStart {
             shown: Shown {
                 contents,
                 feature_state_version: shown.feature_state_version,

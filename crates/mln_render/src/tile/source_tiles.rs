@@ -38,7 +38,7 @@ use crate::tile::dem;
 use crate::tile::job::SourceStyle;
 use crate::tile::store::{SourceInfo, StoreContext};
 use crate::tile::tile::{Tile, TileLoadOrder, TileNecessity};
-use crate::tile::tile_mut::{TileMut, WorldCopy, retire};
+use crate::tile::tile_mut::{CopyStart, TileMut, retire};
 use crate::tile_parameters::TileParameters;
 
 /// How many times the tiles in view the cache keeps, at least.
@@ -1489,12 +1489,12 @@ fn same_place(tiles: &VecMap<OverscaledTileID, Slot>, id: &OverscaledTileID) -> 
 /// in another world copy. The copy's buckets, copies of the tile's, draw
 /// the geometry that the first of either to upload moves into the context's
 /// stores (`SourceTiles::upload_at`).
-fn world_copy<'a>(tiles: &'a VecMap<OverscaledTileID, Slot>, id: &OverscaledTileID) -> Option<WorldCopy<'a>> {
+fn world_copy<'a>(tiles: &'a VecMap<OverscaledTileID, Slot>, id: &OverscaledTileID) -> Option<CopyStart<'a>> {
     let tile = same_place(tiles, id)
         .into_iter()
         .filter_map(|at| Some(&tiles.get_index(at)?.1.tile))
         .find(|tile| tile.id.wrap != id.wrap && tile.is_renderable())?;
-    WorldCopy::of(tile)
+    CopyStart::of(tile)
 }
 
 /// Readies the buckets of the geometry tile at `at` of `slots` for the

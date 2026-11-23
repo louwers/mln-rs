@@ -29,7 +29,7 @@ use parking_lot::Mutex;
 use crate::erased_source::ErasedOrigin;
 use crate::source::{
     Cover, DataOrigin, DemTiles, GeometryTiles, LoadContext, OriginUpdate, RasterTiles, Replier, SourceType, Supply,
-    TileKind, TileNecessity, TileOperation, ValueTiles,
+    TileKind, TileNecessity, TileOperation, ValueTiles, WorldCopy,
 };
 
 /// The kind of a scripted source's tiles, whose cover picks a view's tiles
@@ -363,11 +363,11 @@ impl<K: Kind> DataOrigin for ScriptedOrigin<K> {
 
     /// A tile takes its copy, unless the script refuses copies, or waits
     /// until it is required.
-    fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, copy: Option<&ScriptedTile>) -> ScriptedTile {
+    fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, copy: Option<WorldCopy<'_, ScriptedTile>>) -> ScriptedTile {
         let id = *cx.id();
         self.script.record(Call::Start(id));
         let refuses = self.script.0.lock().refuses_copies;
-        let answered = copy.is_some() && !refuses && cx.take_copy();
+        let answered = !refuses && copy.is_some_and(|copy| copy.take(cx));
         if answered {
             self.script.record(Call::TookCopy(id));
         }

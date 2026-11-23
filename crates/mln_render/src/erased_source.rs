@@ -10,11 +10,11 @@ use mln_style::Source;
 use mln_style::layer_type::SourceKind;
 use mln_style::source_type::{ErasedStyleSourceType, SourceTypeEntry};
 
-use crate::source::{Cover, DataOrigin, LoadContext, OriginUpdate, SourceType, Supplied, kind};
+use crate::source::{Cover, DataOrigin, LoadContext, OriginUpdate, SourceType, Supplied, WorldCopy, kind};
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::StoreContext;
 use crate::tile::tile::TileNecessity;
-use crate::tile::tile_mut::TileMut;
+use crate::tile::tile_mut::{CopyAnswer, TileMut};
 use crate::tile_parameters::TileParameters;
 
 /// A source type, whichever it is, that the renderer draws.
@@ -50,7 +50,9 @@ pub(crate) trait ErasedOrigin {
     /// The kind of data the origin delivers, its [`Data`](DataOrigin::Data).
     fn kind(&self) -> SourceKind;
     fn update(&mut self, parts: UpdateParts<'_>) -> Option<Cover>;
-    fn start(&mut self, copy: Option<&dyn Any>, tile: &mut TileMut<'_>) -> Box<dyn Any>;
+    /// `copy` is the origin's state of the same tile in another world copy,
+    /// and what taking that copy settles the new tile on.
+    fn start(&mut self, copy: Option<(&dyn Any, Option<CopyAnswer>)>, tile: &mut TileMut<'_>) -> Box<dyn Any>;
     fn receive(&mut self, state: &mut dyn Any, reply: Box<dyn Any + Send>, tile: &mut TileMut<'_>);
     fn set_necessity(&mut self, state: &mut dyn Any, previous: TileNecessity, tile: &mut TileMut<'_>);
     fn retry(&mut self, state: &mut dyn Any, tile: &mut TileMut<'_>);
@@ -73,8 +75,8 @@ impl<O: DataOrigin> ErasedOrigin for O {
         DataOrigin::update(self, &mut OriginUpdate { parts, origin: PhantomData })
     }
 
-    fn start(&mut self, copy: Option<&dyn Any>, tile: &mut TileMut<'_>) -> Box<dyn Any> {
-        let copy = copy.and_then(<dyn Any>::downcast_ref);
+    fn start(&mut self, copy: Option<(&dyn Any, Option<CopyAnswer>)>, tile: &mut TileMut<'_>) -> Box<dyn Any> {
+        let copy = copy.and_then(|(state, answer)| Some(WorldCopy { state: state.downcast_ref()?, answer }));
         Box::new(DataOrigin::start(self, &mut LoadContext::<O>::new(tile), copy))
     }
 
