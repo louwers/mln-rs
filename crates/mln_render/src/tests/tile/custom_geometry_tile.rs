@@ -14,8 +14,9 @@ use super::RasterTileTest;
 use crate::Registry;
 use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::query::SourceQueryOptions;
+use crate::tests::OneTile;
 use crate::tests::fixture_layer::Dot;
-use crate::tests::{Given, OneTile};
+use crate::tests::scripted_origin::Script;
 use crate::tile::contents::Contents;
 use crate::tile::tile::TileKind;
 use crate::tile::tile_workers::InlineWorkers;
@@ -30,8 +31,14 @@ fn root() -> OverscaledTileID {
 fn invoke_tile_changed() {
     let test = RasterTileTest::new();
     let store = crate::tests::tile_store(&test.thread_pool, Box::new(InlineWorkers));
-    let mut tiles =
-        OneTile::with_origin(store, TileKind::Geometry, true, Given, &[root()], mln_map_types::MapMode::Static);
+    let mut tiles = OneTile::with_script(
+        store,
+        TileKind::Geometry,
+        true,
+        &Script::default(),
+        &[root()],
+        mln_map_types::MapMode::Static,
+    );
 
     let layer = Layer::new(Registry::with_builtins().style(), "dot", "circle", "source").unwrap();
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =

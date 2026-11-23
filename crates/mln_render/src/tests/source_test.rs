@@ -1,63 +1,48 @@
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use mln_map_types::{
     CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, TransformState, ViewportMode,
 };
 use mln_runtime::map::transform::Transform;
-use mln_storage::response::{Reason, ResourceError};
-use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{FileSource, Kind, RequestOrder, Resource, Responder, Response};
 use mln_style::Source;
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
 use mln_style_types::ProjectionDefinition;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::constants::TILE_SIZE_I;
-use mln_util::error::Error;
 use mln_util::geo::LatLng;
 use mln_util::logging::{Event, EventSeverity, Log, Observer as LogObserver};
 use mln_util::pool::TaskGroup;
-use mln_util::queue::Queue;
+use mln_util::range::Range;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_util::tileset::Tileset;
 use parking_lot::Mutex;
 
 use crate::Registry;
 use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::render_source::RenderSource;
 use crate::tests::fixture_layer::{Dot, Shade, Tint};
-use crate::tests::fixture_source::{self, Dem, Geometry, Raster};
+use crate::tests::scripted_origin::{self, Dem, Geometry, Raster, Reply, Script, ScriptedLoad};
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::{StoreEvent, TileStore};
 use crate::tile_parameters::TileParameters;
 
 struct SourceTest {
-    run_loop: Queue<()>,
     transform: Transform,
     thread_pool: TaskGroup,
-    /// Set by `end_handle`'s calls.
-    ended: Arc<AtomicBool>,
 }
 
 /// The tile parameters for `map_mode`, from a transform state the caller
 /// owns.
-fn tile_parameters(
-    state: &TransformState,
-    map_mode: MapMode,
-    file_source: Option<Arc<dyn FileSource>>,
-) -> TileParameters<'_> {
+fn tile_parameters(state: &TransformState, map_mode: MapMode) -> TileParameters<'_> {
     TileParameters {
         pixel_ratio: 1.0,
         debug_options: MapDebugOptions::NO_DEBUG,
         view: state.view(),
         min_zoom: state.min_zoom(),
         max_zoom: state.limits().max_zoom,
-        file_source,
+        file_source: None,
         mode: map_mode,
         prefetch_zoom_delta: 0,
         tile_lod_min_radius: 3.0,
@@ -80,51 +65,16 @@ impl SourceTest {
         let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
         transform.resize(Size::new(512, 512)).unwrap();
         transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(0.0), ..Default::default() });
-        SourceTest {
-            run_loop: Queue::new(),
-            transform,
-            thread_pool: TaskGroup::new(&crate::tests::pool()),
-            ended: Arc::default(),
-        }
+        SourceTest { transform, thread_pool: TaskGroup::new(&crate::tests::pool()) }
     }
 
-    fn tile_parameters_with(&self, map_mode: MapMode, file_source: Option<Arc<dyn FileSource>>) -> TileParameters<'_> {
-        tile_parameters(self.transform.state(), map_mode, file_source)
+    fn tile_parameters_with(&self, map_mode: MapMode) -> TileParameters<'_> {
+        tile_parameters(self.transform.state(), map_mode)
     }
 
     /// A tile store whose jobs run on the thread pool.
     fn store(&self) -> TileStore {
         crate::tests::pool_store(&self.thread_pool)
-    }
-
-    /// Ends the test; usable from `'static` callbacks.
-    fn end_handle(&self) -> impl Fn() + Clone + Send + Sync + 'static {
-        let handle = self.run_loop.clone();
-        let ended = Arc::clone(&self.ended);
-        move || {
-            ended.store(true, Ordering::SeqCst);
-            handle.stop();
-        }
-    }
-
-    /// Runs the loop, and `store`'s updates as the renderer's, until the
-    /// test ends; `on_event` gets what the store reports.
-    fn run_with(&self, store: &mut TileStore, mut on_event: impl FnMut(&mut TileStore, StoreEvent)) {
-        let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
-        while !self.ended.load(Ordering::SeqCst) {
-            assert!(mln_util::time::Instant::now() < deadline, "the test didn't end");
-            self.run_loop.run_once(&mut ());
-            crate::tests::update(store);
-            for event in store.take_events() {
-                on_event(store, event);
-            }
-            std::thread::yield_now();
-        }
-    }
-
-    /// As `run_with`, with `observer` observing the store.
-    fn run_observed(&self, store: &mut TileStore, observer: &StubStoreObserver) {
-        self.run_with(store, |_, event| observer.dispatch(event));
     }
 }
 
@@ -134,36 +84,32 @@ impl Drop for SourceTest {
     }
 }
 
-type OnTileChanged = Box<dyn Fn()>;
-type OnTileError = Box<dyn Fn(&str, &OverscaledTileID, Error)>;
-
-/// Hears what a tile store reports of its sources' tiles.
-#[derive(Default)]
-struct StubStoreObserver {
-    tile_changed: RefCell<Option<OnTileChanged>>,
-    tile_error: RefCell<Option<OnTileError>>,
-}
-
-impl StubStoreObserver {
-    /// Calls the callback for `event`.
-    fn dispatch(&self, event: StoreEvent) {
-        match event {
-            StoreEvent::Changed => {
-                if let Some(f) = &*self.tile_changed.borrow() {
-                    f();
-                }
-            }
-            StoreEvent::Error { source, tile, error } => {
-                if let Some(f) = &*self.tile_error.borrow() {
-                    f(&source, &tile, error);
-                }
-            }
-            StoreEvent::Action { .. } => {}
+/// Answers the loads that `script`'s tiles began with what `reply` makes
+/// of each tile, and runs `store`'s updates as the renderer's, until
+/// `on_event` returns true for what the store reports.
+fn run_until(
+    store: &mut TileStore,
+    script: &Script,
+    mut reply: impl FnMut(&OverscaledTileID) -> Reply,
+    mut on_event: impl FnMut(&mut TileStore, StoreEvent) -> bool,
+) {
+    let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        assert!(mln_util::time::Instant::now() < deadline, "the test didn't end");
+        script.answer(&mut reply);
+        crate::tests::update(store);
+        let mut ended = false;
+        for event in store.take_events() {
+            ended |= on_event(store, event);
         }
+        if ended {
+            return;
+        }
+        std::thread::yield_now();
     }
 }
 
-/// The three tiled source types that each case runs for.
+/// The three kinds of tiled sources.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Tiled {
     Raster,
@@ -193,206 +139,41 @@ impl Tiled {
         vec![properties]
     }
 
-    /// The source "source" of `tileset`'s tiles, 512 pixels wide.
-    fn source(self, tileset: Tileset) -> Source {
+    /// The source "source" of tiles 512 pixels wide, of zoom levels
+    /// `zoom_range`, which load as `script` says.
+    fn source(self, script: &Script, zoom_range: Range<u8>) -> Source {
         match self {
-            Tiled::Raster => fixture_source::source::<Raster>("source", tileset, TILE_SIZE_I),
-            Tiled::RasterDEM => fixture_source::source::<Dem>("source", tileset, TILE_SIZE_I),
-            Tiled::Vector => fixture_source::source::<Geometry>("source", tileset, TILE_SIZE_I),
-        }
-    }
-
-    fn type_name(self) -> &'static str {
-        match self {
-            Tiled::Raster => "raster-tiles",
-            Tiled::RasterDEM => "dem-tiles",
-            Tiled::Vector => "tiles",
+            Tiled::Raster => scripted_origin::source::<Raster>("source", script, TILE_SIZE_I, zoom_range),
+            Tiled::RasterDEM => scripted_origin::source::<Dem>("source", script, TILE_SIZE_I, zoom_range),
+            Tiled::Vector => scripted_origin::source::<Geometry>("source", script, TILE_SIZE_I, zoom_range),
         }
     }
 }
 
-fn tiles_tileset() -> Tileset {
-    Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() }
+/// The zoom levels of a tileset that doesn't name them.
+fn all_zooms() -> Range<u8> {
+    Range::new(0, 22)
 }
 
-/// The shared body of the `<Type>Tile<Case>` tests: a source of `kind`
-/// whose tiles get `tile_response`, a render source observed by `observer`,
-/// one update, then `test.run()`. Returns the name of the render source's
-/// type.
-fn run_tile_case(
-    test: &SourceTest,
-    kind: Tiled,
-    file_source: Arc<StubFileSource>,
-    observer: &StubStoreObserver,
-) -> &'static str {
-    let layers = kind.layers();
-    let source = kind.source(tiles_tileset());
-
-    let mut store = test.store();
-    let mut render_source = crate::tests::create_render_source(&source, &mut store);
-    let fs: Arc<dyn FileSource> = file_source;
-    render_source.update(
-        &mut store,
-        source.clone(),
-        &layers,
-        true,
-        true,
-        &test.tile_parameters_with(MapMode::Continuous, Some(fs)),
-    );
-
-    test.run_observed(&mut store, observer);
-    render_source.base().style_source.info().name
-}
-
-fn tile_empty(kind: Tiled) {
-    let test = SourceTest::new();
-    let file_source = StubFileSource::on_queue(&test.run_loop, ResponseType::Asynchronous);
-    file_source.set_response(Kind::Tile, |_resource| {
-        let mut response = Response::new();
-        response.no_content = true;
-        Some(response)
-    });
-
-    let observer = Rc::new(StubStoreObserver::default());
-    let changed = Rc::new(RefCell::new(false));
-    {
-        let changed = Rc::clone(&changed);
-        let end = test.end_handle();
-        *observer.tile_changed.borrow_mut() = Some(Box::new(move || {
-            *changed.borrow_mut() = true;
-            end();
-        }));
-    }
-    *observer.tile_error.borrow_mut() = Some(Box::new(|_, _, _| panic!("Should never be called")));
-
-    run_tile_case(&test, kind, file_source, &observer);
-    assert!(*changed.borrow());
-}
-
-fn tile_fail(kind: Tiled) {
-    let test = SourceTest::new();
-    let file_source = StubFileSource::on_queue(&test.run_loop, ResponseType::Asynchronous);
-    file_source.set_response(Kind::Tile, |_resource| {
-        let mut response = Response::new();
-        response.error = Some(Box::new(ResourceError::new(Reason::Other, "Failed by the test case")));
-        Some(response)
-    });
-
-    let observer = Rc::new(StubStoreObserver::default());
-    let failed = Rc::new(RefCell::new(false));
-    {
-        let failed = Rc::clone(&failed);
-        let end = test.end_handle();
-        *observer.tile_error.borrow_mut() = Some(Box::new(move |source_id, tile_id, error| {
-            assert_eq!("source", source_id);
-            assert_eq!(OverscaledTileID::from_zxy(0, 0, 0), *tile_id);
-            assert_eq!("Failed by the test case", error.to_string());
-            *failed.borrow_mut() = true;
-            end();
-        }));
-    }
-
-    // The observer gets the source id, so the type is checked here.
-    assert_eq!(kind.type_name(), run_tile_case(&test, kind, file_source, &observer));
-    assert!(*failed.borrow());
-}
-
-fn tile_corrupt(kind: Tiled) {
-    let test = SourceTest::new();
-    let file_source = StubFileSource::on_queue(&test.run_loop, ResponseType::Asynchronous);
-    file_source.set_response(Kind::Tile, |_resource| {
-        let mut response = Response::new();
-        response.data = Some(Arc::new(b"CORRUPTED".to_vec()));
-        Some(response)
-    });
-
-    let observer = Rc::new(StubStoreObserver::default());
-    let failed = Rc::new(RefCell::new(false));
-    {
-        let failed = Rc::clone(&failed);
-        let end = test.end_handle();
-        *observer.tile_error.borrow_mut() = Some(Box::new(move |source_id, tile_id, error| {
-            assert_eq!("source", source_id);
-            assert_eq!(OverscaledTileID::from_zxy(0, 0, 0), *tile_id);
-            if kind == Tiled::Vector {
-                assert_eq!(error.to_string(), "protobuf decode error: invalid wire type: 7");
-            } else {
-                // Not asserting on platform-specific error text.
-                assert_ne!(error.to_string(), "");
-            }
-            *failed.borrow_mut() = true;
-            end();
-        }));
-    }
-
-    assert_eq!(kind.type_name(), run_tile_case(&test, kind, file_source, &observer));
-    assert!(*failed.borrow());
-}
-
-fn tile_cancel(kind: Tiled) {
-    let test = SourceTest::new();
-    let file_source = StubFileSource::on_queue(&test.run_loop, ResponseType::Asynchronous);
-    let requested = Arc::new(AtomicBool::new(false));
-    {
-        let requested = Arc::clone(&requested);
-        let end = test.end_handle();
-        file_source.set_response(Kind::Tile, move |_resource| {
-            requested.store(true, Ordering::SeqCst);
-            end();
-            None
-        });
-    }
-
-    let observer = Rc::new(StubStoreObserver::default());
-    *observer.tile_changed.borrow_mut() = Some(Box::new(|| panic!("Should never be called")));
-    *observer.tile_error.borrow_mut() = Some(Box::new(|_, _, _| panic!("Should never be called")));
-
-    run_tile_case(&test, kind, file_source, &observer);
-    assert!(requested.load(Ordering::SeqCst));
-}
-
-/// A file source whose tile requests never answer, as tiles in flight: it
-/// records each request's tile and order, and each cancellation.
-#[derive(Default)]
-struct PendingTileSource {
-    requested: Arc<Mutex<Vec<(i8, i32, i32)>>>,
-    orders: Arc<Mutex<Vec<RequestOrder>>>,
-    cancelled: Arc<Mutex<Vec<(i8, i32, i32)>>>,
-}
-
-impl FileSource for PendingTileSource {
-    fn load(&self, resource: &Resource, responder: Responder) {
-        let data = resource.tile_data.as_ref().expect("only tiles are requested");
-        let tile = (data.z, data.x, data.y);
-        self.requested.lock().push(tile);
-        self.orders.lock().push(resource.order.clone());
-        let cancelled = Arc::clone(&self.cancelled);
-        responder.on_cancel(move || cancelled.lock().push(tile));
-        // The request stays open until it's cancelled.
-        std::mem::forget(responder);
-    }
-
-    fn can_request(&self, _resource: &Resource) -> bool {
-        true
-    }
+/// The tiles of `loads`, in the order the loads began.
+fn loaded_tiles(loads: &[ScriptedLoad]) -> Vec<CanonicalTileID> {
+    loads.iter().map(|load| load.tile.canonical).collect()
 }
 
 /// A tile that leaves the view while it loads goes on loading, and is the
 /// one the view gets back when it turns back, as a map rotated back and
-/// forth does at its corners: its request is neither cancelled nor made
-/// again.
+/// forth does at its corners: its load is neither stopped nor begun again.
 #[test]
 fn tile_out_of_view_keeps_loading() {
     let mut test = SourceTest::new();
     test.transform.resize(Size::new(1024, 128)).unwrap();
-    let file_source = Arc::new(PendingTileSource::default());
-    let (requested, cancelled) = (Arc::clone(&file_source.requested), Arc::clone(&file_source.cancelled));
+    let script = Script::default();
     let layers = Tiled::Vector.layers();
-    let source = Tiled::Vector.source(tiles_tileset());
+    let source = Tiled::Vector.source(&script, all_zooms());
     let mut store = test.store();
     let mut render_source = crate::tests::create_render_source(&source, &mut store);
-    let fs: Arc<dyn FileSource> = file_source;
-    // Requests made so far, after an update with the camera at `bearing`.
+    let mut loads = Vec::new();
+    // The tiles loaded so far, after an update with the camera at `bearing`.
     let mut turn = |test: &mut SourceTest, bearing: f64, needs_relayout: bool| {
         test.transform.jump_to(&CameraOptions {
             center: Some(LatLng::new(20.0, 20.0).unwrap()),
@@ -400,20 +181,21 @@ fn tile_out_of_view_keeps_loading() {
             bearing: Some(bearing),
             ..Default::default()
         });
-        let parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
+        let parameters = test.tile_parameters_with(MapMode::Continuous);
         render_source.update(&mut store, source.clone(), &layers, true, needs_relayout, &parameters);
-        requested.lock().clone()
+        loads.extend(script.take_loads());
+        assert!(loads.iter().all(|load| !load.is_stopped()), "no load stops");
+        loaded_tiles(&loads)
     };
 
     let unturned = turn(&mut test, 0.0, true);
     let turned = turn(&mut test, 90.0, false);
     assert!(turned.len() > unturned.len(), "turning shows other tiles");
     let back = turn(&mut test, 0.0, false);
-    assert_eq!(turned, back, "no tile is requested again");
-    assert!(cancelled.lock().is_empty(), "no request is cancelled");
+    assert_eq!(turned, back, "no tile loads again");
 }
 
-/// The requests for a view's tiles stand in the order the view needs them:
+/// The loads of a view's tiles stand in the order the view needs them:
 /// the coarse cover's, then the ideal cover's from the centre outwards. A
 /// tile that leaves the view while it loads, and goes on loading next to it,
 /// stands behind them all until the view comes back to it.
@@ -424,33 +206,33 @@ fn tile_requests_follow_the_view() {
     // One ideal tile wide and several tall, so that a move of one tile to
     // the side leaves every ideal tile behind, next to the new ones.
     test.transform.resize(Size::new(256, 1024)).unwrap();
-    let file_source = Arc::new(PendingTileSource::default());
-    let (requested, orders) = (Arc::clone(&file_source.requested), Arc::clone(&file_source.orders));
+    let script = Script::default();
     let layers = Tiled::Vector.layers();
-    let source = Tiled::Vector.source(tiles_tileset());
+    let source = Tiled::Vector.source(&script, all_zooms());
     let mut store = test.store();
     let mut render_source = crate::tests::create_render_source(&source, &mut store);
-    let fs: Arc<dyn FileSource> = file_source;
-    // The tiles requested so far and where their requests stand now, after
-    // an update with the camera at `center`.
+    let mut loads = Vec::new();
+    // The tiles loaded so far and where their loads stand now, after an
+    // update with the camera at `center`.
     let mut look_at = |test: &mut SourceTest, center: LatLng, needs_relayout: bool| {
         test.transform.jump_to(&CameraOptions { center: Some(center), zoom: Some(6.0), ..Default::default() });
-        let mut parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
+        let mut parameters = test.tile_parameters_with(MapMode::Continuous);
         parameters.prefetch_zoom_delta = 4;
         render_source.update(&mut store, source.clone(), &layers, true, needs_relayout, &parameters);
-        let orders: Vec<u32> = orders.lock().iter().map(RequestOrder::get).collect();
-        (requested.lock().clone(), orders)
+        loads.extend(script.take_loads());
+        let orders: Vec<u32> = loads.iter().map(ScriptedLoad::order).collect();
+        (loaded_tiles(&loads), orders)
     };
 
     // The middle of the zoom 6 tile column `x`.
     let column = |x: f64| LatLng::new(20.0, -180.0 + (x + 0.5) * 360.0 / 64.0).unwrap();
     let here = column(35.0);
     let (tiles, first) = look_at(&mut test, here, true);
-    let coarse: Vec<u32> = tiles.iter().zip(&first).filter(|(tile, _)| tile.0 == 2).map(|(_, order)| *order).collect();
-    let ideal: Vec<u32> = tiles.iter().zip(&first).filter(|(tile, _)| tile.0 == 6).map(|(_, order)| *order).collect();
+    let coarse: Vec<u32> = tiles.iter().zip(&first).filter(|(tile, _)| tile.z == 2).map(|(_, order)| *order).collect();
+    let ideal: Vec<u32> = tiles.iter().zip(&first).filter(|(tile, _)| tile.z == 6).map(|(_, order)| *order).collect();
     assert_eq!(coarse.len() + ideal.len(), tiles.len());
     assert!(!coarse.is_empty() && ideal.len() > 1, "the view has coarse tiles and several ideal ones");
-    assert!(coarse.iter().all(|order| *order > 0), "a tile's request comes after the requests that set no order");
+    assert!(coarse.iter().all(|order| *order > 0), "a tile's load comes after the requests that set no order");
     assert!(coarse.iter().max() < ideal.iter().min(), "the coarse tiles come first");
     assert!(ideal.is_sorted_by(|a, b| a < b), "the ideal tiles come in the cover's order");
     assert!(ideal.iter().all(|order| *order < UNWANTED));
@@ -459,7 +241,7 @@ fn tile_requests_follow_the_view() {
     let (tiles, second) = look_at(&mut test, column(36.0), false);
     assert!(tiles.len() > first.len(), "the new view needs other tiles");
     for ((tile, before), after) in first_tiles.iter().zip(&first).zip(&second) {
-        if tile.0 == 6 {
+        if tile.z == 6 {
             assert_eq!(*after, UNWANTED, "the tiles left behind come last");
         } else {
             assert_eq!(after, before, "the coarse tile stays in view");
@@ -468,81 +250,9 @@ fn tile_requests_follow_the_view() {
     assert!(second[first.len()..].iter().all(|order| *order < UNWANTED));
 
     let (back_tiles, back) = look_at(&mut test, here, false);
-    assert_eq!(back_tiles, tiles, "no tile is requested again");
+    assert_eq!(back_tiles, tiles, "no tile loads again");
     assert_eq!(back[..first.len()], first, "the first view's tiles stand as they did");
     assert!(back[first.len()..].iter().all(|order| *order == UNWANTED));
-}
-
-// gtest: Source.RasterTileEmpty
-#[test]
-fn raster_tile_empty() {
-    tile_empty(Tiled::Raster);
-}
-
-// gtest: Source.RasterDEMTileEmpty
-#[test]
-fn raster_dem_tile_empty() {
-    tile_empty(Tiled::RasterDEM);
-}
-
-// gtest: Source.VectorTileEmpty
-#[test]
-fn vector_tile_empty() {
-    tile_empty(Tiled::Vector);
-}
-
-// gtest: Source.RasterTileFail
-#[test]
-fn raster_tile_fail() {
-    tile_fail(Tiled::Raster);
-}
-
-// gtest: Source.RasterDEMTileFail
-#[test]
-fn raster_dem_tile_fail() {
-    tile_fail(Tiled::RasterDEM);
-}
-
-// gtest: Source.VectorTileFail
-#[test]
-fn vector_tile_fail() {
-    tile_fail(Tiled::Vector);
-}
-
-// gtest: Source.RasterTileCorrupt
-#[test]
-fn raster_tile_corrupt() {
-    tile_corrupt(Tiled::Raster);
-}
-
-// gtest: Source.RasterDEMTileCorrupt
-#[test]
-fn raster_dem_tile_corrupt() {
-    tile_corrupt(Tiled::RasterDEM);
-}
-
-// gtest: Source.VectorTileCorrupt
-#[test]
-fn vector_tile_corrupt() {
-    tile_corrupt(Tiled::Vector);
-}
-
-// gtest: Source.RasterTileCancel
-#[test]
-fn raster_tile_cancel() {
-    tile_cancel(Tiled::Raster);
-}
-
-// gtest: Source.RasterDEMTileCancel
-#[test]
-fn raster_dem_tile_cancel() {
-    tile_cancel(Tiled::RasterDEM);
-}
-
-// gtest: Source.VectorTileCancel
-#[test]
-fn vector_tile_cancel() {
-    tile_cancel(Tiled::Vector);
 }
 
 type Records = Arc<Mutex<Vec<((EventSeverity, Event, String), bool)>>>;
@@ -597,31 +307,9 @@ fn set_max_parent_overscale_factor() {
     test.transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(8.0), ..Default::default() });
     let log = FixtureLog::new();
 
-    let file_source = StubFileSource::on_queue(&test.run_loop, ResponseType::Asynchronous);
-    {
-        let end = test.end_handle();
-        file_source.set_response(Kind::Tile, move |res| {
-            let z = res.tile_data.as_ref().unwrap().z;
-            if z == 5 {
-                let end = end.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(Duration::from_millis(10));
-                    end();
-                });
-            }
-            // No tiles above zoom level 5 should be requested.
-            assert!(5 <= i32::from(z), "requested z{z}");
-            // The tileset has no tiles (HTTP 404), so the source requests parents in their place.
-            // An empty raster tile (HTTP 204) would be drawn, empty, instead.
-            let mut response = Response::new();
-            response.no_content = true;
-            response.tile_not_found = true;
-            Some(response)
-        });
-    }
-
+    let script = Script::default();
     let layers = Tiled::Raster.layers();
-    let source = Tiled::Raster.source(tiles_tileset());
+    let source = Tiled::Raster.source(&script, all_zooms());
     let mut common = *source.common();
     assert_eq!(None, common.max_overscale_factor);
     common.max_overscale_factor = Some(3);
@@ -629,15 +317,26 @@ fn set_max_parent_overscale_factor() {
 
     let mut store = test.store();
     let mut render_source = crate::tests::create_render_source(&style_source, &mut store);
-    let fs: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
-    let parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
+    let parameters = test.tile_parameters_with(MapMode::Continuous);
     render_source.update(&mut store, style_source.clone(), &layers, true, true, &parameters);
 
-    // Each tile that changes updates the source again.
-    test.run_with(&mut store, |store, event| {
-        if matches!(event, StoreEvent::Changed) {
-            render_source.update(store, style_source.clone(), &layers, true, true, &parameters);
+    let loaded_z5 = std::cell::Cell::new(false);
+    let reply = |id: &OverscaledTileID| {
+        // No tiles above zoom level 5 load.
+        assert!(id.canonical.z >= 5, "loaded z{}", id.canonical.z);
+        loaded_z5.set(loaded_z5.get() || id.canonical.z == 5);
+        // No tile is there, so the source loads parents in their place. An
+        // empty raster tile would be drawn, empty, instead.
+        Reply::Missing
+    };
+    // Each tile that changes updates the source again, until a tile of zoom
+    // level 5 has loaded.
+    run_until(&mut store, &script, reply, |store, event| {
+        if !matches!(event, StoreEvent::Changed) {
+            return false;
         }
+        render_source.update(store, style_source.clone(), &layers, true, true, &parameters);
+        loaded_z5.get()
     });
 
     assert_eq!(
@@ -653,52 +352,34 @@ fn raster_dem_tile_rounds_covering_zoom() {
     let mut test = SourceTest::new();
     test.transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(4.6), ..Default::default() });
 
-    let requested_zooms = Arc::new(Mutex::new(Vec::<i8>::new()));
-    let file_source = StubFileSource::on_queue(&test.run_loop, ResponseType::Asynchronous);
-    {
-        let requested_zooms = Arc::clone(&requested_zooms);
-        file_source.set_response(Kind::Tile, move |res| {
-            requested_zooms.lock().push(res.tile_data.as_ref().unwrap().z);
-            let mut response = Response::new();
-            response.no_content = true;
-            Some(response)
-        });
-    }
-
+    let script = Script::default();
     let layers = Tiled::RasterDEM.layers();
-    let source = Tiled::RasterDEM.source(tiles_tileset());
-
+    let source = Tiled::RasterDEM.source(&script, all_zooms());
     let mut store = test.store();
     let mut render_source = crate::tests::create_render_source(&source, &mut store);
-    let fs: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
-    render_source.update(
-        &mut store,
-        source.clone(),
-        &layers,
-        true,
-        true,
-        &test.tile_parameters_with(MapMode::Continuous, Some(fs)),
-    );
+    let parameters = test.tile_parameters_with(MapMode::Continuous);
+    render_source.update(&mut store, source.clone(), &layers, true, true, &parameters);
 
-    let end = test.end_handle();
-    test.run_with(&mut store, |_, event| {
-        if matches!(event, StoreEvent::Changed) {
-            end();
-        }
-    });
+    let mut zooms = Vec::new();
+    let reply = |id: &OverscaledTileID| {
+        zooms.push(id.canonical.z);
+        Reply::Empty
+    };
+    run_until(&mut store, &script, reply, |_, event| matches!(event, StoreEvent::Changed));
 
-    assert!(!requested_zooms.lock().is_empty());
-    for &z in requested_zooms.lock().iter() {
+    assert_ne!(zooms, Vec::<u8>::new());
+    for z in zooms {
         assert_eq!(5, z);
     }
 }
 
-/// A vector source drawn with the camera of a map, whose tile requests are
+/// A vector source drawn with the camera of a map, whose tiles' loads are
 /// answered only when the test says so.
 struct TurningSource {
     test: SourceTest,
-    file_source: Arc<StubFileSource>,
-    requests: Arc<AtomicUsize>,
+    script: Script,
+    /// The loads answered so far.
+    answered: usize,
     source: Source,
     store: TileStore,
     render_source: Box<dyn RenderSource>,
@@ -720,28 +401,14 @@ impl TurningSource {
         let mut test = SourceTest::new();
         test.transform.resize(size).unwrap();
         test.transform.set_projection_definition(&ProjectionDefinition::from_name(projection));
-        let file_source = Arc::new(StubFileSource::new(ResponseType::Manual));
-        let requests = Arc::new(AtomicUsize::new(0));
-        {
-            let requests = Arc::clone(&requests);
-            file_source.set_response(Kind::Tile, move |_| {
-                requests.fetch_add(1, Ordering::SeqCst);
-                let mut response = Response::new();
-                response.no_content = true;
-                Some(response)
-            });
-        }
-        let source = Tiled::Vector.source(Tileset {
-            tiles: vec!["tiles".to_owned()],
-            zoom_range: mln_util::range::Range::new(min_zoom, 14),
-            ..Default::default()
-        });
+        let script = Script::default();
+        let source = Tiled::Vector.source(&script, Range::new(min_zoom, 14));
         let mut store = crate::tests::tile_store(&test.thread_pool, Box::new(crate::tile::tile_workers::InlineWorkers));
         let render_source = crate::tests::create_render_source(&source, &mut store);
         TurningSource {
             test,
-            file_source,
-            requests,
+            script,
+            answered: 0,
             source,
             store,
             render_source,
@@ -769,8 +436,7 @@ impl TurningSource {
     /// Updates the source at this camera, as a frame does in which its
     /// layers are visible, or (with `false`) hidden.
     fn update_rendering(&mut self, needs_rendering: bool) {
-        let file_source: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&self.file_source);
-        let mut parameters = self.test.tile_parameters_with(MapMode::Continuous, Some(file_source));
+        let mut parameters = self.test.tile_parameters_with(MapMode::Continuous);
         parameters.prefetch_zoom_delta = self.prefetch_zoom_delta;
         parameters.placement_commits = self.placement_commits;
         let (store, source, layers) = (&mut self.store, self.source.clone(), &self.layers);
@@ -778,13 +444,13 @@ impl TurningSource {
     }
 
     /// How many tiles the source caches, each checked to wait behind the
-    /// view's: its jobs and its request.
+    /// view's: its jobs and its loads.
     fn cached_unwanted(&self) -> usize {
         let unwanted = crate::tile::tile::TileLoadOrder::UNWANTED;
         let cached: Vec<_> = self.pyramid().slots().filter(|slot| slot.place().is_cached()).collect();
         for slot in &cached {
             assert_eq!(slot.place().order(), unwanted, "tile {}'s jobs", slot.tile.id);
-            assert_eq!(slot.tile.load.order.get(), unwanted.value(), "tile {}'s request", slot.tile.id);
+            assert_eq!(slot.tile.load.order.get(), unwanted.value(), "tile {}'s load", slot.tile.id);
         }
         cached.len()
     }
@@ -794,10 +460,12 @@ impl TurningSource {
     fn load(&mut self, longitude: f64, zoom: f64) {
         self.update(longitude, zoom);
         for _ in 0..100 {
-            self.file_source.respond_to_all();
-            while self.test.run_loop.run_once(&mut ()) {}
+            // A load the tile stopped waiting for is never answered.
+            for load in self.script.take_loads().into_iter().filter(|load| !load.is_stopped()) {
+                self.answered += 1;
+                load.reply(Reply::Empty);
+            }
             self.test.thread_pool.wait();
-            while self.test.run_loop.run_once(&mut ()) {}
             crate::tests::update(&mut self.store);
             self.update(longitude, zoom);
             if self.pyramid().is_loaded() {
@@ -958,7 +626,7 @@ fn globe_base_level_requests() {
     assert_eq!(Vec::<CanonicalTileID>::new(), mercator.tiles_at(1));
     assert_eq!(4, globe.tiles_at(1).len());
     let view = globe.pyramid().cover().count() - 4;
-    assert_eq!(view + 4, globe.requests.load(Ordering::SeqCst));
+    assert_eq!(view + 4, globe.answered);
 }
 
 #[test]
@@ -1033,23 +701,16 @@ fn raster_dem_borders_across_a_world_wrap() {
         zoom: Some(2.0),
         ..Default::default()
     });
-    let file_source = StubFileSource::on_queue(&test.run_loop, ResponseType::Asynchronous);
-    file_source.set_response(Kind::Tile, |resource| {
-        let tile = resource.tile_data.as_ref()?;
-        let mut response = Response::new();
-        response.data = Some(dem_png(tile.x as u32));
-        Some(response)
-    });
+    let script = Script::default();
     let layers = Tiled::RasterDEM.layers();
-    let source = Tiled::RasterDEM.source(tiles_tileset());
+    let source = Tiled::RasterDEM.source(&script, all_zooms());
     let mut store = test.store();
     let mut render_source = crate::tests::create_render_source(&source, &mut store);
-    let fs: Arc<dyn FileSource> = file_source;
     let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
     let mut relayout = true;
     loop {
         // The store backfills the tiles as their DEMs arrive.
-        let parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
+        let parameters = test.tile_parameters_with(MapMode::Continuous);
         render_source.update(&mut store, source.clone(), &layers, true, relayout, &parameters);
         relayout = false;
         let key = render_source.tiles().expect("the source's tiles");
@@ -1057,7 +718,7 @@ fn raster_dem_borders_across_a_world_wrap() {
             break;
         }
         assert!(mln_util::time::Instant::now() < deadline, "the tiles didn't load");
-        test.run_loop.run_once(&mut ());
+        script.answer(|id| Reply::Bytes(dem_png(id.canonical.x)));
         crate::tests::update(&mut store);
         std::thread::yield_now();
     }

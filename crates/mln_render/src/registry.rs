@@ -166,16 +166,16 @@ impl Registry {
     /// registry.
     #[cfg(test)]
     pub(crate) fn with_builtins() -> Arc<Registry> {
-        use crate::tests::fixture_source::{Dem, Geometry, Raster, Tiles};
+        use crate::tests::scripted_origin::{Dem, Geometry, Raster, Scripted};
         static BUILTINS: std::sync::LazyLock<Arc<Registry>> = std::sync::LazyLock::new(|| {
             let mut builder = RegistryBuilder::new();
             mln_style::expression::functions::register_builtin_functions(builder.functions_mut()).unwrap();
             builder.add_layer_type::<crate::tests::fixture_layer::Dot>().unwrap();
             builder.add_layer_type::<crate::tests::fixture_layer::Tint>().unwrap();
             builder.add_layer_type::<crate::tests::fixture_layer::Shade>().unwrap();
-            builder.add_source_type::<Tiles<Geometry>>().unwrap();
-            builder.add_source_type::<Tiles<Raster>>().unwrap();
-            builder.add_source_type::<Tiles<Dem>>().unwrap();
+            builder.add_source_type::<Scripted<Geometry>>().unwrap();
+            builder.add_source_type::<Scripted<Raster>>().unwrap();
+            builder.add_source_type::<Scripted<Dem>>().unwrap();
             builder.build()
         });
         Arc::clone(&BUILTINS)
@@ -247,13 +247,16 @@ mod tests {
     use crate::draw::Draws;
     use crate::layer::{NewCx, PrepareCx, ViewCover};
     use crate::tests::fixture_layer::Dot;
-    use crate::tests::fixture_source::{Geometry, Tiles};
+    use crate::tests::scripted_origin::{Geometry, Scripted};
 
     #[test]
     fn a_source_type_registers_once() {
         let mut builder = RegistryBuilder::new();
-        builder.add_source_type::<Tiles<Geometry>>().unwrap();
-        assert_eq!(builder.add_source_type::<Tiles<Geometry>>(), Err(RegisterError::Duplicate("tiles".to_owned())));
+        builder.add_source_type::<Scripted<Geometry>>().unwrap();
+        assert_eq!(
+            builder.add_source_type::<Scripted<Geometry>>(),
+            Err(RegisterError::Duplicate("scripted".to_owned()))
+        );
     }
 
     #[test]

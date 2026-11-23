@@ -17,7 +17,8 @@ use mln_util::pool::TaskGroup;
 use crate::Registry;
 use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::tests::fixture_layer::Dot;
-use crate::tests::{Given, OneTile, style};
+use crate::tests::scripted_origin::Script;
+use crate::tests::{OneTile, style};
 use crate::tile::tile::{TileInput, TileKind};
 use crate::tile::tile_workers::TileWorkers;
 
@@ -35,7 +36,8 @@ impl GeoJSONTileTest {
     /// updates; the tiles get their features before their style.
     fn tiles(&self, ids: &[OverscaledTileID], workers: Box<dyn TileWorkers>, synchronous: bool) -> OneTile {
         let store = crate::tests::tile_store(&self.thread_pool, workers);
-        let mut tiles = OneTile::with_origin(store, TileKind::Geometry, true, Given, ids, MapMode::Continuous);
+        let mut tiles =
+            OneTile::with_script(store, TileKind::Geometry, true, &Script::default(), ids, MapMode::Continuous);
         let key = tiles.key;
         tiles.store.source_mut(key).expect("the source").0.info.synchronous = synchronous;
         for id in ids {

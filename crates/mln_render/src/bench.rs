@@ -514,10 +514,10 @@ mod tests {
     use feature::{Feature, Identifier, PropertyMap, Value};
     use geo_types::{Geometry, LineString, Point};
     use mln_style::edit::Edit;
-    use mln_util::tileset::Tileset;
+    use mln_util::range::Range;
 
     use super::*;
-    use crate::tests::fixture_source::{self, Geometry as Features};
+    use crate::tests::scripted_origin::{self, Geometry as Features, Script};
 
     fn feature(id: u64, geometry: Geometry<i16>) -> Feature<i16, Arc<PropertyMap>> {
         let mut properties = PropertyMap::new();
@@ -526,7 +526,7 @@ mod tests {
     }
 
     /// A style of a `dot` layer whose color depends on feature state, and
-    /// one of labels, over the fixture source `s`.
+    /// one of labels, over the scripted source `s`.
     fn style() -> Style {
         let mut style = Style::from_json(
             Registry::with_builtins().style(),
@@ -534,8 +534,8 @@ mod tests {
             None,
         )
         .unwrap();
-        let tileset = Tileset { tiles: vec!["local://tiles/{z}-{x}-{y}.mvt".to_owned()], ..Default::default() };
-        style.apply(Edit::AddSource(fixture_source::source::<Features>("s", tileset, 512))).unwrap();
+        let source = scripted_origin::source::<Features>("s", &Script::default(), 512, Range::new(0, 22));
+        style.apply(Edit::AddSource(source)).unwrap();
         style
             .add_layer_json(
                 r#"{"id": "roads", "type": "dot", "source": "s", "source-layer": "l",

@@ -4,26 +4,22 @@
 // built from while newer data lays out; and a tile that leaves and comes
 // back, or a source replaced, never takes what was meant for the one before.
 
-use std::any::Any;
 use std::sync::Arc;
 
 use feature::{Feature, PropertyMap};
 use geo_types::{Geometry, Point};
 use mln_map_types::MapMode;
-use mln_storage::response::{Reason, ResourceError};
-use mln_storage::{FileSource, Resource, Responder, Response};
+use mln_storage::Data;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
-use mln_util::chrono::Timestamp;
 use mln_util::pool::TaskGroup;
-use mln_util::tileset::{RasterEncoding, Tileset};
-use parking_lot::Mutex;
+use mln_util::tileset::RasterEncoding;
 use serde_json::json;
 
 use super::tile_jobs_test::{Manual, icons, layer, points};
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::query::SourceQueryOptions;
-use crate::tests::fixture_source::{self, Fetch, Fetched, FetchedLoad};
+use crate::tests::scripted_origin::{Call, Reply, Script};
 use crate::tests::tile::{dem_png, png};
 use crate::tests::{OneTile, style, tile_store};
 use crate::tile::contents::Contents;
@@ -34,53 +30,11 @@ use crate::tile::pipeline::LayoutWork;
 use crate::tile::tile::{TileKind, TileNecessity, TileOperation};
 use crate::tile::tile_workers::{InlineWorkers, TileWorkers};
 
-/// A file source whose requests wait until the test answers them.
-#[derive(Default)]
-struct Held(Mutex<Vec<Responder>>);
-
-impl Held {
-    /// Answers the oldest request with `response`.
-    fn respond(&self, response: Response) {
-        let responder = self.0.lock().remove(0);
-        responder.send(response);
-    }
-
-    fn pending(&self) -> usize {
-        self.0.lock().len()
-    }
-}
-
-impl FileSource for Held {
-    fn load(&self, _resource: &Resource, responder: Responder) {
-        self.0.lock().push(responder);
-    }
-
-    fn can_request(&self, _resource: &Resource) -> bool {
-        true
-    }
-}
-
-/// A response with the bytes of a vector tile with a "water" layer.
-fn water() -> Response {
+/// The bytes of a vector tile with a "water" layer.
+fn water() -> Data {
     let path = std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
         .join("testdata/test/fixtures/map/issue12432/0-0-0.mvt");
-    let mut response = Response::new();
-    response.data = Some(Arc::new(std::fs::read(path).expect("the tile")));
-    response.etag = Some("a".to_owned());
-    response
-}
-
-/// `response`, expired: a tile that has it requests it again when required.
-fn expired(mut response: Response) -> Response {
-    response.expires = Some(Timestamp::from_secs(0));
-    response
-}
-
-/// A `not_modified` answer whose data has expired again.
-fn not_modified() -> Response {
-    let mut response = expired(Response::new());
-    response.not_modified = true;
-    response
+    Arc::new(std::fs::read(path).expect("the tile"))
 }
 
 fn water_layer(id: &str, color: &str) -> Arc<dyn ErasedEvaluatedLayer> {
@@ -109,15 +63,12 @@ impl Test {
         Test { pool: TaskGroup::new(&crate::tests::pool()) }
     }
 
-    /// Tile 0/0/0 of a tileset whose tiles `file_source` answers, whose
-    /// jobs run on `workers`.
-    fn tileset_tile(&self, file_source: &Arc<Held>, workers: Box<dyn TileWorkers>) -> OneTile {
+    /// Tile 0/0/0 of a source whose tiles load as their script says once
+    /// required, whose jobs run on `workers`.
+    fn scripted_tile(&self, workers: Box<dyn TileWorkers>) -> OneTile {
         let store = tile_store(&self.pool, workers);
-        let file_source: Arc<dyn FileSource> = Arc::<Held>::clone(file_source);
-        let tileset = Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() };
-        let origin = Fetched::<fixture_source::Geometry>::loaded(tileset, file_source);
         let id = OverscaledTileID::from_zxy(0, 0, 0);
-        OneTile::with_origin(store, TileKind::Geometry, false, origin, &[id], MapMode::Static)
+        OneTile::with_script(store, TileKind::Geometry, false, &Script::default(), &[id], MapMode::Static)
     }
 
     /// Tile 0/0/0 of a source of its own, whose jobs run on `workers`.
@@ -130,17 +81,6 @@ impl Test {
 impl Drop for Test {
     fn drop(&mut self) {
         self.pool.wait();
-    }
-}
-
-/// Whether `tile`'s load waits for a network request, or (with `false`) for
-/// no request at all.
-fn requesting_network(tile: &OneTile, pending: bool) -> bool {
-    let load: &dyn Any = &*tile.tile().load.state;
-    match load.downcast_ref::<FetchedLoad>() {
-        Some(load) if pending => matches!(load.fetch, Fetch::Network { .. }),
-        Some(load) => load.is_idle(),
-        None => false,
     }
 }
 
@@ -167,17 +107,17 @@ fn job_style(run: &Run) -> &Arc<crate::tile::job::SourceStyle> {
 #[test]
 fn a_style_edit_while_the_data_loads() {
     let test = Test::new();
-    let file_source = Arc::new(Held::default());
     let manual = Manual::default();
-    let mut tile = test.tileset_tile(&file_source, Box::new(manual.clone()));
+    let mut tile = test.scripted_tile(Box::new(manual.clone()));
     let id = tile.id;
     tile.set_style(&style(&[water_layer("water", "red")]));
     tile.set_necessity(&id, TileNecessity::Required);
-    assert_eq!(file_source.pending(), 1);
+    let loads = tile.script.take_loads();
+    assert_eq!(loads.len(), 1);
 
     let edited = style(&[water_layer("water", "blue")]);
     tile.set_style(&edited);
-    file_source.respond(water());
+    loads[0].reply(Reply::Bytes(water()));
     tile.update();
     assert_eq!(manual.submitted(), 1, "the data applied");
     let run = manual.take();
@@ -185,117 +125,6 @@ fn a_style_edit_while_the_data_loads() {
     manual.reply(InlineWorkers::run(run));
     tile.update();
     assert!(tile.shows_layout() && tile.tile().is_complete());
-}
-
-/// A reload that the server answers `not_modified` keeps the data the tile
-/// has: the tile neither changes nor lays out again.
-#[test]
-fn a_not_modified_reload_keeps_the_data() {
-    let test = Test::new();
-    let file_source = Arc::new(Held::default());
-    let manual = Manual::default();
-    let mut tile = test.tileset_tile(&file_source, Box::new(manual.clone()));
-    let id = tile.id;
-    tile.set_style(&style(&[water_layer("water", "red")]));
-    tile.set_necessity(&id, TileNecessity::Required);
-    file_source.respond(expired(water()));
-    tile.update();
-    manual.run();
-    tile.update();
-    assert!(tile.tile().is_complete());
-    let key = tile.layout().data.as_ref().expect("data").key;
-    let shown_layout = |tile: &OneTile| {
-        let contents = tile.tile().contents().and_then(Contents::geometry).expect("contents");
-        Arc::clone(&contents.result.feature_index)
-    };
-    let shown = shown_layout(&tile);
-
-    // Required again, the tile revalidates its expired data.
-    tile.set_necessity(&id, TileNecessity::Optional);
-    tile.set_necessity(&id, TileNecessity::Required);
-    assert_eq!(file_source.pending(), 1);
-    assert!(requesting_network(&tile, true));
-    assert!(tile.tile().is_complete(), "a reload keeps the tile complete");
-    file_source.respond(not_modified());
-    tile.update();
-    assert!(requesting_network(&tile, false));
-    assert_eq!(tile.layout().data.as_ref().expect("data").key, key, "the same data");
-    assert_eq!(manual.submitted(), 1, "nothing to lay out again");
-    assert!(Arc::ptr_eq(&shown_layout(&tile), &shown), "the same contents");
-    assert!(tile.tile().is_complete());
-
-    // A revalidation that fails, retried and answered `not_modified`: the
-    // answer is all the retry brings, and the tile completes.
-    tile.set_necessity(&id, TileNecessity::Optional);
-    tile.set_necessity(&id, TileNecessity::Required);
-    let mut failed = Response::new();
-    failed.error = Some(Box::new(ResourceError::new(Reason::Connection, "offline")));
-    file_source.respond(failed);
-    tile.update();
-    tile.store.retry_failed();
-    assert!(!tile.tile().is_complete(), "the tile waits for the retry");
-    file_source.respond(not_modified());
-    tile.update();
-    assert_eq!(manual.submitted(), 1, "nothing to lay out again");
-    assert!(tile.tile().is_complete());
-}
-
-/// A tile required again keeps network data that hasn't expired, or that
-/// has no expiry, as a local file's: it neither requests nor lays it out
-/// again.
-#[test]
-fn fresh_data_is_kept_when_required_again() {
-    let test = Test::new();
-    let file_source = Arc::new(Held::default());
-    let manual = Manual::default();
-    let mut tile = test.tileset_tile(&file_source, Box::new(manual.clone()));
-    let id = tile.id;
-    tile.set_style(&style(&[water_layer("water", "red")]));
-    for expires in [None, Some(Timestamp::from_secs(i64::MAX))] {
-        tile.set_necessity(&id, TileNecessity::Optional);
-        tile.set_necessity(&id, TileNecessity::Required);
-        let mut response = water();
-        response.expires = expires;
-        file_source.respond(response);
-        tile.update();
-        manual.run();
-        tile.update();
-        assert!(tile.tile().is_complete());
-
-        tile.set_necessity(&id, TileNecessity::Optional);
-        tile.set_necessity(&id, TileNecessity::Required);
-        assert_eq!(file_source.pending(), 0, "no request");
-        assert!(tile.tile().is_complete());
-        // Expired, so the next round requests it again.
-        tile.with(|tile| {
-            tile.tile_mut().load.freshness.expires = Some(Timestamp::from_secs(0));
-        });
-    }
-    assert_eq!(manual.submitted(), 2, "one layout per response");
-}
-
-/// A tile whose data failed to lay out requests it again when required
-/// again, though the data has no expiry.
-#[test]
-fn failed_data_is_requested_again() {
-    let test = Test::new();
-    let file_source = Arc::new(Held::default());
-    let manual = Manual::default();
-    let mut tile = test.tileset_tile(&file_source, Box::new(manual.clone()));
-    let id = tile.id;
-    tile.set_style(&style(&[water_layer("water", "red")]));
-    tile.set_necessity(&id, TileNecessity::Required);
-    let mut response = Response::new();
-    response.data = Some(Arc::new(b"not a tile".to_vec()));
-    file_source.respond(response);
-    tile.update();
-    manual.run();
-    tile.update();
-    assert!(tile.actions().contains(&TileOperation::Error));
-
-    tile.set_necessity(&id, TileNecessity::Optional);
-    tile.set_necessity(&id, TileNecessity::Required);
-    assert_eq!(file_source.pending(), 1);
 }
 
 /// A tile let go of while its job runs, and made again before the job
@@ -441,16 +270,12 @@ fn source_data_racing_eviction() {
     let event = |load, ids: &[u64]| TileEvent::Load {
         tile: TileKey { source: key, id },
         load,
-        reply: Box::new(Some(features(ids))),
+        reply: Box::new(Reply::Tile(features(ids))),
     };
     inbox.send(event(old_load, &[1]));
     tile.update();
     assert!(tile.layout().data.as_ref().is_none(), "the old tile's data goes nowhere");
-    inbox.send(TileEvent::Load {
-        tile: TileKey { source: key, id },
-        load: old_load,
-        reply: Box::new(None::<TileData>),
-    });
+    inbox.send(TileEvent::Load { tile: TileKey { source: key, id }, load: old_load, reply: Box::new(Reply::Empty) });
     inbox.send(event(new_load, &[2]));
     // One update starts the layout, whose reply the next takes in.
     tile.update();
@@ -471,31 +296,26 @@ fn source_data_racing_eviction() {
 #[test]
 fn style_replaced_mid_load() {
     let test = Test::new();
-    let file_source = Arc::new(Held::default());
     let manual = Manual::default();
-    let mut tile = test.tileset_tile(&file_source, Box::new(manual.clone()));
+    let mut tile = test.scripted_tile(Box::new(manual.clone()));
     let id = tile.id;
     let layers = [water_layer("water", "red")];
     tile.set_style(&style(&layers));
     tile.set_necessity(&id, TileNecessity::Required);
-    file_source.respond(expired(water()));
+    let [load] = <[_; 1]>::try_from(tile.script.take_loads()).ok().expect("one load");
+    load.reply(Reply::Bytes(water()));
     tile.update();
     let old_job = manual.take();
-    // A reload under way.
-    tile.set_necessity(&id, TileNecessity::Optional);
-    tile.set_necessity(&id, TileNecessity::Required);
-    let reload = file_source.0.lock().remove(0);
 
     // The new style's source of the same id.
     let params = tile.tile_params();
     let old_key = tile.key;
     tile.store.remove_source(old_key);
     assert!(old_job.superseded.load(std::sync::atomic::Ordering::Relaxed));
-    assert!(reload.is_cancelled(), "the old tile's request goes with it");
-    let file_source_dyn: Arc<dyn FileSource> = Arc::<Held>::clone(&file_source);
-    let tileset = Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() };
-    let origin = Fetched::<fixture_source::Geometry>::loaded(tileset, file_source_dyn);
-    let new_key = tile.store.add_source("source".to_owned(), TileKind::Geometry, false, Box::new(origin));
+    assert!(load.is_stopped(), "the old tile's load goes with it");
+    assert!(tile.script.take_calls().contains(&Call::Retire(id)));
+    let script = Script::default();
+    let new_key = tile.store.add_source("source".to_owned(), TileKind::Geometry, false, Box::new(script.origin()));
     assert_ne!(new_key, old_key, "keys aren't reused");
     let (source, ctx) = tile.store.source_mut(new_key).expect("the source");
     let new_tile = source.info.new_tile(id, params).expect("a tile");
@@ -504,24 +324,20 @@ fn style_replaced_mid_load() {
         tile.start_load();
     });
     tile.key = new_key;
+    tile.script = script;
     tile.set_style(&style(&layers));
 
-    // The old job's reply, and an old response sent before the cancel.
+    // The old job's reply, and an old reply sent as the source went.
     manual.reply(InlineWorkers::run(old_job));
-    tile.store.inbox().send(TileEvent::Load {
-        tile: TileKey { source: old_key, id },
-        load: 1,
-        reply: Box::new(water()),
-    });
+    load.reply(Reply::Bytes(water()));
     tile.update();
     assert!(tile.store.source(old_key).is_none());
-    assert!(
-        tile.tile().contents().is_none() && tile.layout().data.as_ref().is_none() && requesting_network(&tile, false)
-    );
+    assert!(tile.tile().contents().is_none() && tile.layout().data.as_ref().is_none());
+    assert!(tile.script.take_loads().is_empty(), "the new tile loads nothing yet");
     assert_eq!(manual.submitted(), 1, "nothing for the new tile yet");
 
     tile.set_necessity(&id, TileNecessity::Required);
-    file_source.respond(water());
+    tile.script.answer(|_| Reply::Bytes(water()));
     tile.update();
     manual.run();
     tile.update();
@@ -637,7 +453,7 @@ fn data_from_the_inbox_starts_a_job_at_once() {
     let inbox = tile.store.inbox().clone();
     // From another thread, as a GeoJSON source's tiles cut on a pool answer.
     std::thread::spawn(move || {
-        let reply = Box::new(Some(features(&[1])));
+        let reply = Box::new(Reply::Tile(features(&[1])));
         inbox.send(TileEvent::Load { tile: TileKey { source: key, id }, load, reply });
     })
     .join()
@@ -699,21 +515,18 @@ fn a_retried_load_starts_parsing_again() {
     use TileOperation::{EndParse, Error, LoadFromNetwork, RequestedFromNetwork, StartParse};
 
     let test = Test::new();
-    let file_source = Arc::new(Held::default());
-    let mut tile = test.tileset_tile(&file_source, Box::new(InlineWorkers));
+    let mut tile = test.scripted_tile(Box::new(InlineWorkers));
     let id = tile.id;
     tile.set_style(&style(&[water_layer("water", "red")]));
     tile.set_necessity(&id, TileNecessity::Required);
-    let mut failed = Response::new();
-    failed.error = Some(Box::new(ResourceError::new(Reason::Connection, "offline")));
-    file_source.respond(failed);
+    tile.script.answer(|_| Reply::Fail("offline".to_owned()));
     tile.update();
     assert_eq!(tile.actions(), [StartParse, RequestedFromNetwork, Error]);
     assert!(tile.tile().is_complete() && !tile.tile().is_pending());
 
     tile.store.retry_failed();
     assert_eq!(tile.actions(), [RequestedFromNetwork, StartParse]);
-    file_source.respond(water());
+    tile.script.answer(|_| Reply::Bytes(water()));
     tile.update();
     tile.update();
     assert_eq!(tile.actions(), [LoadFromNetwork, EndParse]);

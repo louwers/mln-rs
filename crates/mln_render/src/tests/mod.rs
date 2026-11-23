@@ -1,7 +1,8 @@
 // `dot`, `tint`, `shade` and `mark`, the tests' layer types.
 pub(crate) mod fixture_layer;
-// `tiles`, `raster-tiles` and `dem-tiles`, the tests' source types.
-pub(crate) mod fixture_source;
+// `scripted`, `scripted-raster` and `scripted-dem`, the tests' source types,
+// whose tiles load what the test sends them.
+pub(crate) mod scripted_origin;
 // Ports test/gl/bucket.test.cpp (raster; on the WebGPU headless backend).
 // mln_layers' tests port the circle, fill, line and symbol parts.
 mod bucket_test;
@@ -26,8 +27,9 @@ mod gtest_update_renderables;
 mod gtest_tile_range;
 // test/tile/geojson_tile.test.cpp, over features the test gives the tiles.
 mod geojson_tile_test;
-// test/style/source.test.cpp, but for the cases of the built-in source
-// types (in mln_sources): needs the map's Transform (mln_runtime, above this crate).
+// test/style/source.test.cpp's cases of the tile cover, over scripted
+// sources; mln_sources has the built-in source types' cases. Needs the map's
+// Transform (mln_runtime, above this crate).
 mod source_test;
 // Port-only: the renderer frees what it lets go of on its workers.
 mod drop_on_workers_test;
@@ -64,6 +66,8 @@ pub(crate) struct OneTile {
     pub(crate) store: crate::tile::store::TileStore,
     pub(crate) key: crate::tile::job::SourceKey,
     pub(crate) id: mln_tile_id::OverscaledTileID,
+    /// What the source's tiles load.
+    pub(crate) script: scripted_origin::Script,
     mode: mln_map_types::MapMode,
 }
 
@@ -75,8 +79,9 @@ impl OneTile {
         id: mln_tile_id::OverscaledTileID,
         mode: mln_map_types::MapMode,
     ) -> Self {
-        let key = store.add_source("s".to_owned(), kind, false, Box::new(Given));
-        let mut tiles = OneTile { store, key, id, mode };
+        let script = scripted_origin::Script::default();
+        let key = store.add_source("s".to_owned(), kind, false, Box::new(script.origin()));
+        let mut tiles = OneTile { store, key, id, script, mode };
         tiles.add(id);
         tiles
     }
@@ -92,19 +97,19 @@ impl OneTile {
         }
     }
 
-    /// Tiles `ids` of a source of `kind` whose data comes from `origin`, in
+    /// Tiles `ids` of a source of `kind` whose data `script` gives, in
     /// `store`, laid out for `mode`; `single_layer` for a source whose data
     /// has one layer. Their loads start as a cover starts them.
-    pub(crate) fn with_origin(
+    pub(crate) fn with_script(
         mut store: crate::tile::store::TileStore,
         kind: crate::tile::tile::TileKind,
         single_layer: bool,
-        origin: impl crate::source::DataOrigin,
+        script: &scripted_origin::Script,
         ids: &[mln_tile_id::OverscaledTileID],
         mode: mln_map_types::MapMode,
     ) -> Self {
-        let key = store.add_source("source".to_owned(), kind, single_layer, Box::new(origin));
-        let mut tiles = OneTile { store, key, id: ids[0], mode };
+        let key = store.add_source("source".to_owned(), kind, single_layer, Box::new(script.origin()));
+        let mut tiles = OneTile { store, key, id: ids[0], script: script.clone(), mode };
         let params = tiles.params();
         crate::testing::seed(&mut tiles.store, key, ids, params);
         tiles
@@ -130,12 +135,14 @@ impl OneTile {
             .count()
     }
 
-    /// Adds another tile, `id`, to the source, which loads nothing itself.
+    /// Adds another tile, `id`, to the source, which loads as the script
+    /// says once it is required.
     pub(crate) fn add(&mut self, id: mln_tile_id::OverscaledTileID) {
         let params = self.params();
         let (source, _) = self.store.source_mut(self.key).expect("the source");
         let generation = source.info.next();
-        let load = crate::tile::loading::Load::new(Box::new(GivenLoad), mln_storage::RequestOrder::default());
+        let order = mln_storage::RequestOrder::default();
+        let load = crate::tile::loading::Load::new(Box::new(self.script.tile(id, order.clone())), order);
         let pipeline = crate::tile::pipeline::Pipeline::new(source.info.kind, generation, params);
         let tile = crate::tile::tile::Tile::new(id, load, pipeline);
         source.insert(tile);
@@ -266,39 +273,6 @@ impl OneTile {
     pub(crate) fn drop_tile_at(&mut self, id: &mln_tile_id::OverscaledTileID) {
         let (source, ctx) = self.store.source_mut(self.key).expect("the source");
         source.release(id, ctx);
-    }
-}
-
-/// Port-only: the origin of a test's tiles, which load nothing themselves:
-/// the test gives them their data, or sends it as the reply to a load it
-/// makes the tile's latest.
-pub(crate) struct Given;
-
-pub(crate) struct GivenLoad;
-
-impl crate::source::TileLoad for GivenLoad {}
-
-impl crate::source::DataOrigin for Given {
-    type Load = GivenLoad;
-    type Reply = Option<mln_tile::TileData>;
-
-    fn update(&mut self, _update: &mut crate::source::OriginUpdate<'_, Self>) -> Option<crate::source::Cover> {
-        None
-    }
-
-    fn new_load(&mut self, _tile: &crate::source::NewTile<'_>) -> Option<GivenLoad> {
-        Some(GivenLoad)
-    }
-
-    fn start(&mut self, _load: &mut GivenLoad, _cx: &mut crate::source::LoadContext<'_, '_, Self::Reply>) {}
-
-    fn receive(
-        &mut self,
-        _load: &mut GivenLoad,
-        data: Option<mln_tile::TileData>,
-        cx: &mut crate::source::LoadContext<'_, '_, Self::Reply>,
-    ) {
-        cx.deliver(crate::source::TileInput::Geometry { data, missing: false });
     }
 }
 

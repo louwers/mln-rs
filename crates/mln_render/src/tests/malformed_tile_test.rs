@@ -6,8 +6,6 @@ use std::time::Duration;
 
 use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
 use mln_runtime::map::transform::Transform;
-use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{FileSource, Kind, Response};
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer_type::LayerStyle;
 use mln_style_types::image::Impl as ImageImpl;
@@ -16,17 +14,16 @@ use mln_util::constants::TILE_SIZE_I;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::TaskGroup;
-use mln_util::queue::Queue;
+use mln_util::range::Range;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_util::tileset::Tileset;
 use proptest::prelude::*;
 use serde_json::json;
 
 use crate::Registry;
 use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::tests::fixture_layer::Dot;
-use crate::tests::fixture_source::{self, Geometry};
+use crate::tests::scripted_origin::{self, Geometry, Reply, Script};
 use crate::tile::store::StoreEvent;
 use crate::tile_parameters::TileParameters;
 
@@ -52,22 +49,14 @@ fn layer(json: &serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer> {
 /// Loads the z0 tile of a vector source whose tiles are `tile`, with
 /// `layers`, and returns what the render source reports.
 fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
-    let tileset = Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() };
-    let run_loop = Queue::new();
     let thread_pool = TaskGroup::new(&crate::tests::pool());
     let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
     transform.resize(Size::new(512, 512)).unwrap();
     transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(0.0), ..Default::default() });
 
-    let file_source = StubFileSource::on_queue(&run_loop, ResponseType::Asynchronous);
+    let script = Script::default();
     let tile = Arc::new(tile);
-    file_source.set_response(Kind::Tile, move |_resource| {
-        let mut response = Response::new();
-        response.data = Some(Arc::clone(&tile));
-        Some(response)
-    });
-
-    let style_source = fixture_source::source::<Geometry>("source", tileset, TILE_SIZE_I);
+    let style_source = scripted_origin::source::<Geometry>("source", &script, TILE_SIZE_I, Range::new(0, 22));
     // A loaded sprite with the icon "v" answers the icon layer's request,
     // and missing icons stay missing.
     let mut store = crate::tests::pool_store(&thread_pool);
@@ -78,7 +67,6 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
     ));
     store.images_mut().set_loaded(true);
     let mut render_source = crate::tests::create_render_source(&style_source, &mut store);
-    let file_source: Arc<dyn FileSource> = file_source;
     render_source.update(
         &mut store,
         style_source,
@@ -91,7 +79,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
             view: transform.view(),
             min_zoom: transform.state().min_zoom(),
             max_zoom: transform.state().limits().max_zoom,
-            file_source: Some(file_source),
+            file_source: None,
             mode: MapMode::Continuous,
             prefetch_zoom_delta: 0,
             tile_lod_min_radius: 3.0,
@@ -113,7 +101,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
     // fails.
     let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
     let outcome = loop {
-        run_loop.run_once(&mut ());
+        script.answer(|_| Reply::Bytes(Arc::clone(&tile)));
         crate::tests::update(&mut store);
         let outcome = store.take_events().into_iter().find_map(|event| match event {
             StoreEvent::Changed => Some(Outcome::Loaded),

@@ -2,44 +2,42 @@
 //! zoom or pan asks for tiles that the next frame no longer shows; the view
 //! the camera stops at must not wait for them.
 //!
-//! The harness updates a vector source drawn by a fill layer and a raster
-//! source, as a map's frames do, over a network that has `SLOTS` requests in
-//! flight at once, as the online file source does, and answers each
-//! `LATENCY` frames after it got a slot, fresh for an hour. It counts the
-//! frames until the view the camera stops at has all its tiles, or the
-//! requests each tile got.
+//! The harness updates a vector source drawn by a dot layer and a raster
+//! source, as a map's frames do. Their tiles load as a scripted origin's do:
+//! a required tile loads once, and a tile that becomes optional stops its
+//! load. A network has `SLOTS` loads in flight at once, as the online file
+//! source does, and answers each `LATENCY` frames after it got a slot. The
+//! harness counts the frames until the view the camera stops at has all its
+//! tiles, or the loads each tile began.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
 use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
 use mln_runtime::map::transform::Transform;
-use mln_storage::{FileSource, Resource, Responder, Response};
+use mln_storage::Data;
 use mln_style::Source;
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
-use mln_util::chrono::{Timestamp, now};
 use mln_util::constants::{DEFAULT_MAXIMUM_CONCURRENT_REQUESTS, TILE_SIZE_I};
 use mln_util::geo::LatLng;
 use mln_util::pool::TaskGroup;
-use mln_util::queue::Queue;
+use mln_util::range::Range;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_util::tileset::PartialTileset;
-use parking_lot::Mutex;
 
 use crate::Registry;
 use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::render_source::RenderSource;
 use crate::tests::fixture_layer::{Dot, Tint};
-use crate::tests::fixture_source::{self, Geometry, Raster};
+use crate::tests::scripted_origin::{self, Call, Geometry, Raster, Reply, Script, ScriptedLoad};
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::TileStore;
 use crate::tile_parameters::TileParameters;
 
-/// The requests in flight at once.
+/// The loads in flight at once.
 const SLOTS: usize = DEFAULT_MAXIMUM_CONCURRENT_REQUESTS as usize;
-/// The frames a request in flight takes: 100 ms at 60 frames a second.
+/// The frames a load in flight takes: 100 ms at 60 frames a second.
 const LATENCY: usize = 6;
 
 fn read_file(relative: &str) -> Vec<u8> {
@@ -49,102 +47,73 @@ fn read_file(relative: &str) -> Vec<u8> {
 
 // MARK: - The network
 
-/// An open request: the tile's `source/z/x/y`, the callback until the
-/// network answers, and the frame it got a slot in.
+/// An open load: its tile's `source/z/x/y`, the load until the network
+/// answers it, and the frame it got a slot in.
 struct Pending {
     tile: String,
-    responder: Responder,
+    load: ScriptedLoad,
     in_flight_since: Option<usize>,
 }
 
-/// The open requests, in the order they were made, the frames ended, and
-/// how many requests each tile got.
-#[derive(Default)]
-struct Requests {
+/// Answers every tile of the vector source with the same vector tile, and
+/// every tile of the raster source with the same image: the open loads, in
+/// the order the tiles began them, the frames ended, and how many loads
+/// each tile began.
+struct Network {
+    script: Script,
     open: VecDeque<Pending>,
     frame: usize,
     made: BTreeMap<String, usize>,
-}
-
-/// Answers every tile of the vector source with the same vector tile, and
-/// every tile of the raster source with the same image.
-struct Network {
-    requests: Mutex<Requests>,
-    vector_tile: Arc<Vec<u8>>,
-    raster_tile: Arc<Vec<u8>>,
+    vector_tile: Data,
+    raster_tile: Data,
 }
 
 impl Network {
-    fn new() -> Self {
+    fn new(script: Script) -> Self {
         Network {
-            requests: Mutex::default(),
+            script,
+            open: VecDeque::new(),
+            frame: 0,
+            made: BTreeMap::new(),
             vector_tile: Arc::new(read_file("test/fixtures/map/issue12432/0-0-0.mvt")),
             raster_tile: Arc::new(read_file("test/fixtures/annotations/emerald.png")),
         }
     }
 
-    /// Ends a frame: the requests that have been open the longest take the
-    /// free slots, and those in flight for `LATENCY` frames are answered.
-    fn end_frame(&self) {
-        // Answered with the lock released: an answer's callback may request
-        // again.
-        let answered: VecDeque<Pending> = {
-            let mut requests = self.requests.lock();
-            let frame = requests.frame;
-            requests.frame += 1;
-            requests.open.retain(|pending| !pending.responder.is_cancelled());
-            for pending in requests.open.iter_mut().take(SLOTS) {
-                pending.in_flight_since.get_or_insert(frame);
-            }
-            let (answered, open) = std::mem::take(&mut requests.open)
-                .into_iter()
-                .partition(|pending| pending.in_flight_since.is_some_and(|since| frame + 1 - since >= LATENCY));
-            requests.open = open;
-            answered
-        };
+    /// Ends a frame: the loads begun since wait behind the open ones, the
+    /// loads that have been open the longest take the free slots, and those
+    /// in flight for `LATENCY` frames are answered.
+    fn end_frame(&mut self) {
+        for load in self.script.take_loads() {
+            let id = load.tile.canonical;
+            let tile = format!("{}/{}/{}/{}", load.source, id.z, id.x, id.y);
+            *self.made.entry(tile.clone()).or_default() += 1;
+            self.open.push_back(Pending { tile, load, in_flight_since: None });
+        }
+        let frame = self.frame;
+        self.frame += 1;
+        self.open.retain(|pending| !pending.load.is_stopped());
+        for pending in self.open.iter_mut().take(SLOTS) {
+            pending.in_flight_since.get_or_insert(frame);
+        }
+        let (answered, open): (VecDeque<Pending>, _) = std::mem::take(&mut self.open)
+            .into_iter()
+            .partition(|pending| pending.in_flight_since.is_some_and(|since| frame + 1 - since >= LATENCY));
+        self.open = open;
         for pending in answered {
-            // An earlier answer in the batch may have cancelled it.
-            if pending.responder.is_cancelled() {
-                continue;
-            }
-            let mut response = Response::new();
-            let data = if pending.tile.starts_with("vector") { &self.vector_tile } else { &self.raster_tile };
-            response.data = Some(Arc::clone(data));
-            response.expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 3600));
-            pending.responder.send(response);
+            let data = if pending.load.source == "vector" { &self.vector_tile } else { &self.raster_tile };
+            pending.load.reply(Reply::Bytes(Arc::clone(data)));
         }
     }
 
-    /// The tiles of the open requests, oldest first.
+    /// The tiles of the open loads, oldest first.
     fn open_requests(&self) -> Vec<String> {
-        let requests = self.requests.lock();
-        requests.open.iter().filter(|pending| !pending.responder.is_cancelled()).map(|p| p.tile.clone()).collect()
+        self.open.iter().filter(|pending| !pending.load.is_stopped()).map(|pending| pending.tile.clone()).collect()
     }
 
-    /// The tiles requested more than once, and how many times.
+    /// The tiles that began more than one load, and how many.
     fn requested_again(&self) -> BTreeMap<String, usize> {
-        let requests = self.requests.lock();
-        requests.made.iter().filter(|(_, count)| **count > 1).map(|(tile, count)| (tile.clone(), *count)).collect()
-    }
-}
-
-impl FileSource for Network {
-    fn load(&self, resource: &Resource, responder: Responder) {
-        let data = resource.tile_data.as_ref().expect("only tiles are requested");
-        let source = resource.url.split('/').next().unwrap_or_default();
-        let tile = format!("{source}/{}/{}/{}", data.z, data.x, data.y);
-        // A tile that is still fresh, which the online file source holds
-        // until it expires: never answered.
-        if resource.prior_expires.is_some_and(|expires| expires > now()) {
-            return;
-        }
-        let mut requests = self.requests.lock();
-        *requests.made.entry(tile.clone()).or_default() += 1;
-        requests.open.push_back(Pending { tile, responder, in_flight_since: None });
-    }
-
-    fn can_request(&self, _resource: &Resource) -> bool {
-        true
+        self.made.iter().filter(|(_, count)| **count > 1).map(|(tile, count)| (tile.clone(), *count)).collect()
     }
 }
 
@@ -154,9 +123,8 @@ impl FileSource for Network {
 /// a raster source of 256-pixel tiles up to zoom 6, as the Liberty style
 /// draws its land and water at low zoom levels.
 struct Scene {
-    run_loop: Queue<()>,
     thread_pool: TaskGroup,
-    network: Arc<Network>,
+    network: Network,
     transform: Transform,
     vector: Source,
     raster: Source,
@@ -170,15 +138,11 @@ struct Scene {
 
 impl Scene {
     fn new(size: Size) -> Self {
-        let run_loop = Queue::new();
         let thread_pool = TaskGroup::new(&crate::tests::pool());
-        let network = Arc::new(Network::new());
-
-        let tileset = |url: &str, max_zoom| {
-            PartialTileset { tiles: Some(vec![url.to_owned()]), max_zoom: Some(max_zoom), ..Default::default() }.into()
-        };
-        let vector = fixture_source::source::<Geometry>("vector", tileset("vector/{z}/{x}/{y}", 14), TILE_SIZE_I);
-        let raster = fixture_source::source::<Raster>("raster", tileset("raster/{z}/{x}/{y}", 6), 256);
+        let script = Script::default();
+        let vector = scripted_origin::source::<Geometry>("vector", &script, TILE_SIZE_I, Range::new(0, 14));
+        let raster = scripted_origin::source::<Raster>("raster", &script, 256, Range::new(0, 6));
+        let network = Network::new(script);
 
         let mut fill = Layer::new(Registry::with_builtins().style(), "dot", "water", "vector").unwrap();
         fill.set_source_layer("water");
@@ -196,7 +160,6 @@ impl Scene {
             vector_render_source: crate::tests::create_render_source(&vector, &mut store),
             raster_render_source: crate::tests::create_render_source(&raster, &mut store),
             store,
-            run_loop,
             thread_pool,
             network,
             transform,
@@ -228,14 +191,13 @@ impl Scene {
             bearing: Some(bearing),
             ..Default::default()
         });
-        let file_source: Arc<dyn FileSource> = Arc::<Network>::clone(&self.network);
         let parameters = TileParameters {
             pixel_ratio: 1.0,
             debug_options: MapDebugOptions::NO_DEBUG,
             view: self.transform.view(),
             min_zoom: self.transform.state().min_zoom(),
             max_zoom: self.transform.state().limits().max_zoom,
-            file_source: Some(file_source),
+            file_source: None,
             mode: MapMode::Continuous,
             // The map's default.
             prefetch_zoom_delta: 4,
@@ -264,10 +226,9 @@ impl Scene {
         // anything left to do.
         loop {
             self.thread_pool.wait();
-            let ran = self.run_loop.run_once(&mut ());
             crate::tests::update(&mut self.store);
             let work = self.pyramids().iter().any(|source| source.slots().any(|slot| slot.tile.has_work()));
-            if !ran && !work && self.store.is_idle() {
+            if !work && self.store.is_idle() {
                 break;
             }
         }
@@ -290,8 +251,8 @@ impl Scene {
         panic!("the view didn't complete in 500 frames; open requests: {:?}", self.network.open_requests());
     }
 
-    /// The frames that the requests for the view's tiles take at most, in
-    /// batches of `SLOTS`, with a batch to spare for the requests in flight
+    /// The frames that the loads of the view's tiles take at most, in
+    /// batches of `SLOTS`, with a batch to spare for the loads in flight
     /// when the camera stopped.
     fn frames_needed(&self) -> usize {
         let tiles: usize = self.pyramids().iter().map(|source| source.cover().count()).sum();
@@ -432,4 +393,6 @@ fn pan_to_a_new_world_copy_draws_it_at_once() {
         assert!(scene.is_complete(), "the copies' tiles laid out the data of the loaded ones");
     }
     assert_eq!(BTreeMap::new(), scene.network.requested_again());
+    let calls = scene.network.script.take_calls();
+    assert!(calls.iter().any(|call| matches!(call, Call::TakeWorldCopy(_))), "the new copies took the loaded ones'");
 }
