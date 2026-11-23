@@ -25,23 +25,22 @@ jobs:
   # the ci workflow's vulkan leg runs them. No Rust cache: the build is a
   # nightly one with its own std, and the cache stays the ci workflow's.
   asan:
-    runs-on: ubuntu-26.04
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 60
     env:
       MLN_RENDER_BACKEND: vulkan
       MLN_VULKAN_VALIDATION: abort
       MINUTES: ${{ inputs.minutes || '20' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install lavapipe
-        uses: ./.github/actions/lavapipe
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
         with:
-          validation-layer: true
+          persist-credentials: false
 
-      # The tools that mise.toml pins, Rust from rust-toolchain.toml among
-      # them, at the versions mise.lock records.
-      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+      - uses: ./.github/actions/setup-ci-deps
+        with:
+          lavapipe: "true"
+          lavapipe-validation-layer: "true"
+          rust-cache: "false"
 
       - name: Test
         run: mise run test:asan "$MINUTES"

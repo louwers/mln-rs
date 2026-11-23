@@ -24,7 +24,7 @@ jobs:
   # ci:plan`): the macOS test and backend jobs, web, and the packaging. Pushes
   # to main and manual runs run everything.
   plan:
-    runs-on: ubuntu-26.04
+    runs-on: blacksmith-2vcpu-ubuntu-2604
     timeout-minutes: 5
     outputs:
       test: ${{ steps.plan.outputs.test }}
@@ -33,7 +33,7 @@ jobs:
       package: ${{ steps.plan.outputs.package }}
     steps:
       # The pull request's merge commit and its first parent, the base.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
         with:
           fetch-depth: 2
           persist-credentials: false
@@ -48,8 +48,8 @@ jobs:
           fi
           cat "$plan"
           grep -E '^(web|package)=' "$plan" >> "$GITHUB_OUTPUT"
-          linux='"os":"linux","runner":"ubuntu-26.04"'
-          macos='"os":"macos","runner":"macos-26"'
+          linux='"os":"linux","runner":"blacksmith-4vcpu-ubuntu-2604"'
+          macos='"os":"macos","runner":"blacksmith-6vcpu-macos-26"'
           test="{$linux,\"backend\":\"webgpu\"}"
           backend="{$linux,\"backend\":\"vulkan\"},{$linux,\"backend\":\"gl\"}"
           if grep -qx macos=true "$plan"; then
@@ -67,26 +67,23 @@ jobs:
   # errors (mise.toml denies them in CI).
   lint:
     needs: plan
-    runs-on: ubuntu-26.04
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-ci-deps
+        with:
+          save-toolchains: "true"
+          save-rust-cache: ${{ github.ref == 'refs/heads/main' }}
 
       # libclang for `mise run generate:c-abi`.
       - name: Install system packages
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libclang-dev
-
-      # The tools that mise.toml pins, Rust from rust-toolchain.toml among
-      # them, at the versions mise.lock records.
-      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
-
-      # Saves from main only, so pull requests restore main's dependencies
-      # rather than each filling the cache with its own.
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Lint
         run: mise run ci:lint
@@ -109,21 +106,22 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install lavapipe
-        if: runner.os == 'Linux'
-        uses: ./.github/actions/lavapipe
-
-      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
-
-      # For cargo-llvm-cov.
-      - name: Install llvm-tools
-        run: rustup component add llvm-tools-preview
-
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # Blacksmith's checkout mirrors only on its Linux runners.
+      - if: runner.os == 'Linux'
+        uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          persist-credentials: false
+      - if: runner.os != 'Linux'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-ci-deps
+        with:
+          save-toolchains: ${{ matrix.os == 'macos' }}
+          save-rust-cache: ${{ github.ref == 'refs/heads/main' }}
+          llvm-tools: "true"
+          lavapipe: ${{ runner.os == 'Linux' }}
 
       - name: Clippy
         if: runner.os == 'macOS'
@@ -165,9 +163,22 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: runner.os == 'Linux'
+        uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
+        with:
+          persist-credentials: false
+      - if: runner.os != 'Linux'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      # For the C ABI suite.
+      - uses: ./.github/actions/setup-ci-deps
+        with:
+          save-rust-cache: ${{ github.ref == 'refs/heads/main' }}
+          llvm-tools: "true"
+
+      # For the C ABI suite. Installed before lavapipe so apt does not
+      # downgrade the pinned Vulkan loader or Mesa EGL packages.
       - name: Install system packages
         if: runner.os == 'Linux'
         run: |
@@ -180,15 +191,6 @@ jobs:
         with:
           validation-layer: ${{ matrix.backend == 'vulkan' }}
           egl: ${{ matrix.backend == 'gl' }}
-
-      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
-
-      - name: Install llvm-tools
-        run: rustup component add llvm-tools-preview
-
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Test
         run: mise run ci:test --backend-only ${{ matrix.backend }}
@@ -226,25 +228,22 @@ jobs:
   web:
     needs: plan
     if: needs.plan.outputs.web == 'true'
-    runs-on: ubuntu-26.04
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # Lavapipe for the native runner's renders.
-      - name: Install lavapipe
-        uses: ./.github/actions/lavapipe
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
+        with:
+          persist-credentials: false
 
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ hashFiles('examples/web/pnpm-lock.yaml') }}
 
-      - uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
-
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: ./.github/actions/setup-ci-deps
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          lavapipe: "true"
+          save-rust-cache: ${{ github.ref == 'refs/heads/main' }}
 
       # The Chromium that examples/web's playwright-core pins, which both
       # checks use. The runner's own Chrome brings the system libraries it
@@ -303,11 +302,11 @@ jobs:
   # whose authors a squash merge makes co-authors, and on main the pushed
   # commits, whose messages the merge dialog may have changed.
   commits:
-    runs-on: ubuntu-26.04
+    runs-on: blacksmith-2vcpu-ubuntu-2604
     timeout-minutes: 5
     steps:
       # Every commit, without their files' contents.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
         with:
           fetch-depth: 0
           filter: blob:none
@@ -331,7 +330,7 @@ jobs:
   ci-passed:
     needs: [plan, lint, test, backend, web, commits]
     if: always()
-    runs-on: ubuntu-26.04
+    runs-on: blacksmith-2vcpu-ubuntu-2604
     permissions: {}
     steps:
       - name: The jobs' results

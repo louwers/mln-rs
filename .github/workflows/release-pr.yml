@@ -23,7 +23,7 @@ jobs:
   # default branch, whichever branch the workflow runs on. A scheduled run's
   # event says neither, so this asks the API.
   repository:
-    runs-on: ubuntu-26.04
+    runs-on: blacksmith-2vcpu-ubuntu-2604
     timeout-minutes: 5
     outputs:
       fork: ${{ steps.repository.outputs.fork }}
@@ -39,13 +39,13 @@ jobs:
   release-pr:
     needs: repository
     if: needs.repository.outputs.fork == 'false'
-    runs-on: ubuntu-26.04
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 90
     permissions:
       contents: write # the pull request's branch
       pull-requests: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
         with:
           ref: ${{ needs.repository.outputs.default-branch }}
           # The commits since the last release.

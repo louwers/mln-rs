@@ -3,3 +3,9 @@
 profile: correctness
 rules:
   unpinned-uses: error
+# Blacksmith runner labels are not in the GitHub-hosted catalog.
+self-hosted-runner:
+  labels:
+    - blacksmith-2vcpu-ubuntu-2604
+    - blacksmith-4vcpu-ubuntu-2604
+    - blacksmith-6vcpu-macos-26
