@@ -2,6 +2,7 @@
 
 use std::any::Any;
 
+use mln_map_types::View;
 use smallvec::SmallVec;
 
 use super::{
@@ -11,7 +12,6 @@ use crate::bucket::ErasedBucket;
 use crate::layer::{Layer, LayerValues};
 use crate::render_layer::{Hosted, RenderLayer};
 use crate::tile::contents::LayoutResult;
-use crate::update_parameters::UpdateParameters;
 
 /// The buckets of laid-out tiles, by their keys: the tile store's, or the
 /// copies that the benchmarks hold.
@@ -28,7 +28,7 @@ pub(crate) trait LaidBuckets {
 /// What the engine hands a participant's [`prepare`](Placement::prepare)
 /// and [`update`](Placement::update) of a frame, besides its layers.
 pub(crate) struct ErasedFrame<'a> {
-    pub(crate) update_parameters: &'a UpdateParameters,
+    pub(crate) view: &'a View,
     pub(crate) buckets: &'a mut dyn LaidBuckets,
     /// The current placement's index.
     pub(crate) placed: &'a mut CollisionIndex,
@@ -79,7 +79,7 @@ fn with_cx<P: Placement, R>(
     let mut typed: SmallVec<[PlacingLayer<'_, P::Layer>; 8]> = SmallVec::with_capacity(layers.len());
     typed.extend(layers.iter().filter_map(|&(layer, tiles)| Some(PlacingLayer { layer: values::<P>(layer)?, tiles })));
     let buckets = PlacementBuckets::new(&mut *frame.buckets);
-    hook(&mut PlacementCx::new(&typed, frame.update_parameters, buckets, &mut *frame.placed))
+    hook(&mut PlacementCx::new(&typed, frame.view, buckets, &mut *frame.placed))
 }
 
 impl<P: Placement> ErasedPlacement for P {

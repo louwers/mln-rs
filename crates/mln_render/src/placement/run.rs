@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use mln_map_types::{MapDebugOptions, MapMode, View};
 use mln_style::TransitionOptions;
+use mln_tile_id::UnwrappedTileID;
 use smallvec::SmallVec;
 
 use super::{
@@ -42,9 +43,8 @@ pub(crate) struct PlacingFrameLayer<'a> {
 }
 
 /// What the engine compares of a frame with the current placement, to tell
-/// whether placing again would place from other inputs, besides the buckets
-/// the layers lead.
-#[derive(PartialEq)]
+/// whether placing again would place from other inputs, besides the tiles
+/// whose bucket the layers lead.
 struct Inputs {
     mode: MapMode,
     view: View,
@@ -63,6 +63,27 @@ impl Inputs {
             collision_boxes: collision_boxes(update_parameters),
         }
     }
+
+    /// Whether these are `update_parameters`' inputs.
+    fn are(&self, update_parameters: &UpdateParameters) -> bool {
+        let Inputs { mode, view, transition_options, cross_source_collisions, collision_boxes: boxes } = self;
+        *mode == update_parameters.mode
+            && *view == update_parameters.view
+            && *transition_options == update_parameters.style.get_transition_options()
+            && *cross_source_collisions == update_parameters.cross_source_collisions
+            && *boxes == collision_boxes(update_parameters)
+    }
+}
+
+/// A tile whose bucket a frame's layer leads, as the engine compares it
+/// with the current placement's: the bucket, the address of its layout's
+/// feature index, where the tile draws and whether it is held for fade.
+#[derive(Clone, Copy, PartialEq)]
+struct Led {
+    key: BucketKey,
+    layout: usize,
+    id: UnwrappedTileID,
+    held_for_fade: bool,
 }
 
 /// Whether `update_parameters` show collision shapes.
@@ -86,9 +107,8 @@ pub(crate) struct Placements {
     tiles: Vec<PlacingTile>,
     /// The tiles of the layer being added whose bucket another layer leads.
     followers: Vec<PlacingTile>,
-    /// The buckets the frame's layers lead, each with the address of its
-    /// layout's feature index.
-    led: Vec<(BucketKey, usize)>,
+    /// The tiles whose bucket the frame's layers lead.
+    led: Vec<Led>,
     /// The last frame's and this frame's led buckets, by their layout's
     /// address and their index in it, sorted: a continuous map places soon
     /// where a frame has one the frame before didn't. A layout that takes
@@ -100,7 +120,7 @@ pub(crate) struct Placements {
     /// the first and after a reset. Its feature indexes stay alive in the
     /// index's records, so their addresses aren't reused while compared.
     committed: Option<Inputs>,
-    committed_led: Vec<(BucketKey, usize)>,
+    committed_led: Vec<Led>,
     /// The records of the last placement, while the renderer keeps them.
     records: Option<Vec<PlacementRecord>>,
 }
@@ -183,7 +203,12 @@ impl Placements {
                     projection: tile.projection,
                 };
                 if buckets.leads(index) {
-                    self.led.push((placing.bucket, Arc::as_ptr(&content.result.feature_index) as usize));
+                    self.led.push(Led {
+                        key: placing.bucket,
+                        layout: Arc::as_ptr(&content.result.feature_index) as usize,
+                        id: placing.id,
+                        held_for_fade: placing.held_for_fade,
+                    });
                     self.tiles.push(placing);
                 } else {
                     self.followers.push(placing);
@@ -212,7 +237,7 @@ impl Placements {
         let mut places: SmallVec<[bool; 4]> = SmallVec::new();
         for (index, participant) in self.participants.iter_mut().enumerate() {
             let own = layers_of(&self.layers, &self.tiles, layers, index);
-            let frame = &mut ErasedFrame { update_parameters, buckets: &mut *store, placed: &mut self.placed };
+            let frame = &mut ErasedFrame { view: &update_parameters.view, buckets: &mut *store, placed: &mut self.placed };
             let own_prepared = participant.prepare(&own, frame);
             prepared.added |= own_prepared.added;
             prepared.changed |= own_prepared.changed;
@@ -247,12 +272,8 @@ impl Placements {
             for (participant, _) in self.participants.iter_mut().zip(&places).filter(|(_, places)| !**places) {
                 participant.forget(true);
             }
-            let changed = self.changed(update_parameters);
-            let added = self.added();
-            debug_assert!(!changed || prepared.changed, "the engine saw a change that the participants didn't");
-            debug_assert!(!added || prepared.added, "the engine saw a bucket added that the participants didn't");
-            let changed = changed || prepared.changed;
-            let added = added || prepared.added;
+            let changed = self.changed(update_parameters) || prepared.changed;
+            let added = self.added() || prepared.added;
 
             let tilted_view = update_parameters.view.pitch() != 0.0;
             // In a flat view, new buckets show soon: placement runs within a
@@ -306,8 +327,8 @@ impl Placements {
     ) {
         for (index, participant) in self.participants.iter_mut().enumerate() {
             let own = layers_of(&self.layers, &self.tiles, layers, index);
-            participant
-                .update(&own, &mut ErasedFrame { update_parameters, buckets: &mut *store, placed: &mut self.placed });
+            let frame = &mut ErasedFrame { view: &update_parameters.view, buckets: &mut *store, placed: &mut self.placed };
+            participant.update(&own, frame);
         }
     }
 
@@ -361,13 +382,13 @@ impl Placements {
     /// Whether placing now would place from other inputs than the current
     /// placement did, as far as the engine knows them.
     fn changed(&self, update_parameters: &UpdateParameters) -> bool {
-        self.committed.as_ref() != Some(&Inputs::of(update_parameters)) || self.committed_led != self.led
+        self.committed.as_ref().is_none_or(|committed| !committed.are(update_parameters)) || self.committed_led != self.led
     }
 
     /// Whether the frame's layers lead a bucket the last frame's didn't.
     fn added(&mut self) -> bool {
         self.seen_now.clear();
-        self.seen_now.extend(self.led.iter().map(|(key, layout)| (*layout, key.bucket)));
+        self.seen_now.extend(self.led.iter().map(|led| (led.layout, led.key.bucket)));
         self.seen_now.sort_unstable();
         let added = self.seen_now.iter().any(|bucket| self.seen.binary_search(bucket).is_err());
         std::mem::swap(&mut self.seen, &mut self.seen_now);

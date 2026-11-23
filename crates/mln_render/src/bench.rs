@@ -342,7 +342,7 @@ impl<L: Layer> PlacementFrame<L> {
         let layers: Vec<PlacingLayer<'_, L>> =
             self.layers.iter().map(|(layer, tiles, _)| PlacingLayer { layer: layer.parts().1, tiles }).collect();
         let mut buckets = FrameBuckets(&mut self.tiles);
-        hook(&mut PlacementCx::new(&layers, &self.update, PlacementBuckets::new(&mut buckets), &mut self.placed))
+        hook(&mut PlacementCx::new(&layers, &self.update.view, PlacementBuckets::new(&mut buckets), &mut self.placed))
     }
 
     /// Has `participant` place the frame's layers, topmost first, into an

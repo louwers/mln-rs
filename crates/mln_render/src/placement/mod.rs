@@ -23,12 +23,13 @@
 //!
 //! A frame of a continuous map places when its schedule is due and placing
 //! would show something else: the view, the map mode, the style's
-//! transitions, cross-source collisions, the collision debug option, the
-//! layers' buckets or their layouts changed, or a participant
-//! [says so](Prepared::changed). A still image places every frame. What a placement inserts in its index stands
-//! for an [`Item`], a feature of a tile; rendered-feature queries of the
-//! placing layers return the features of the current placement's shapes
-//! that the query touches.
+//! transitions, cross-source collisions or the collision debug option
+//! changed; a layer leads other tiles' buckets, from other layouts, or
+//! their tiles draw elsewhere or are held for fade now; or a participant
+//! [says so](Prepared::changed). A still image places every frame. What a
+//! placement inserts in its index stands for an [`Item`], a feature of a
+//! tile; rendered-feature queries of the placing layers return the features
+//! of the current placement's shapes that the query touches.
 //!
 //! A placing layer draws the tiles that its source holds while what
 //! placement showed of them fades out, besides those of the frame, and a
@@ -58,7 +59,6 @@ pub(crate) use self::schedule::Schedule;
 use crate::layer::{Bucket, Layer, LayerValues};
 use crate::render_tile::RenderTile;
 use crate::tile::job::SourceKey;
-use crate::update_parameters::UpdateParameters;
 
 /// A placing layer type's part of placement: per layer, it turns the
 /// features of the layer's tiles into [`Shape`]s, shows those that collide
@@ -128,13 +128,13 @@ pub trait Placement: Default + 'static {
 
 /// What a [`Placement`] reads in [`prepare`](Placement::prepare) and
 /// [`update`](Placement::update): its type's layers that the frame draws,
-/// the frame's update and the buckets of its tiles.
+/// the frame's view and the buckets of its tiles.
 pub struct PlacementCx<'a, L: Layer> {
     /// The layers of the type that the frame draws and that place, bottom
     /// to top, each with every tile that holds a bucket of it.
     pub layers: &'a [PlacingLayer<'a, L>],
-    /// The update the frame draws.
-    pub update_parameters: &'a UpdateParameters,
+    /// The view the frame draws.
+    pub view: &'a View,
     /// The buckets of the frame's tiles.
     pub buckets: PlacementBuckets<'a>,
     /// The current placement's index.
@@ -144,11 +144,11 @@ pub struct PlacementCx<'a, L: Layer> {
 impl<'a, L: Layer> PlacementCx<'a, L> {
     pub(crate) fn new(
         layers: &'a [PlacingLayer<'a, L>],
-        update_parameters: &'a UpdateParameters,
+        view: &'a View,
         buckets: PlacementBuckets<'a>,
         placed: &'a mut CollisionIndex,
     ) -> Self {
-        PlacementCx { layers, update_parameters, buckets, placed }
+        PlacementCx { layers, view, buckets, placed }
     }
 
     /// Has queries of the current placement return the features of the
@@ -232,8 +232,9 @@ pub(crate) fn tile_order(tiles: &[RenderTile], bearing: f32) -> Vec<usize> {
     order
 }
 
-/// What a [`Placement::prepare`] says of the participant's own inputs: the
-/// engine compares the rest.
+/// What a [`Placement::prepare`] says of the participant's own inputs,
+/// such as its layers' paint values: the engine compares the rest (the
+/// [module docs](self) list it).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Prepared {
     /// Whether the layers' buckets include some the participant hadn't
@@ -262,6 +263,72 @@ pub struct Placed {
 impl Default for Placed {
     fn default() -> Self {
         Placed { changed: false, settled: true }
+    }
+}
+
+impl Placed {
+    /// Adds an item of a continuous map's placement whose opacity went from
+    /// `prev`, the current placement's, or `None` for an item it didn't
+    /// have, to `next`: the placement changed what shows where the item is
+    /// placed now and wasn't, or the other way around, and it isn't settled
+    /// unless `next` is.
+    pub fn add(&mut self, prev: Option<Opacity>, next: Opacity) {
+        self.changed |= prev.map_or(next.placed, |prev| prev.placed != next.placed);
+        self.settled &= next.is_settled();
+    }
+}
+
+/// An item's opacity from one placement of a continuous map to the next:
+/// a placed item fades in, toward 1, and one not placed fades out, toward
+/// 0, each placement by how far the fade of the one before had come
+/// ([`PlaceCx::fade`]). Between placements, the shader fades it on by the
+/// frame's [`placement_fade`](crate::layer::Frame::placement_fade).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Opacity {
+    /// From 0, hidden, to 1.
+    pub opacity: f32,
+    /// Whether the item is placed, and so fades in.
+    pub placed: bool,
+}
+
+impl Opacity {
+    /// The opacity of an item that the placement before didn't have,
+    /// placed as `placed`: shown at once where it is placed and
+    /// `skip_fade`, as an item that shows as its tile does, and otherwise
+    /// at 0.
+    #[must_use]
+    pub fn new(placed: bool, skip_fade: bool) -> Self {
+        Opacity { opacity: if skip_fade && placed { 1.0 } else { 0.0 }, placed }
+    }
+
+    /// The opacity faded on by `fade` toward where it went, now placed as
+    /// `placed`.
+    #[must_use]
+    pub fn step(self, fade: f32, placed: bool) -> Self {
+        let step = if self.placed { fade } else { -fade };
+        Opacity { opacity: (self.opacity + step).clamp(0.0, 1.0), placed }
+    }
+
+    /// Whether the item has faded out.
+    #[must_use]
+    pub fn is_hidden(self) -> bool {
+        self.opacity == 0.0 && !self.placed
+    }
+
+    /// Whether the opacity is at the end of its fade.
+    #[must_use]
+    pub fn is_settled(self) -> bool {
+        self.opacity == if self.placed { 1.0 } else { 0.0 }
+    }
+
+    /// The opacity as one vertex attribute value: `opacity` in 1/127 steps,
+    /// times 2, plus 1 where the item is placed. A shader reads the
+    /// opacity as `floor(value / 2) / 127` and fades it on by the frame's
+    /// [`placement_fade`](crate::layer::Frame::placement_fade), up where
+    /// `value` is odd and down where it is even, clamped to 0 and 1.
+    #[must_use]
+    pub fn vertex(self) -> f32 {
+        ((u32::from((self.opacity * 127.0) as u8) << 1) | u32::from(self.placed)) as f32
     }
 }
 
@@ -326,5 +393,36 @@ impl<'a> PlacementBuckets<'a> {
         let bucket = self.store.bucket_mut(key)?;
         bucket.changed();
         bucket.downcast_mut()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Opacity, Placed};
+
+    #[test]
+    fn an_opacity_fades_toward_where_it_goes() {
+        let shown = Opacity::new(true, true);
+        assert_eq!(shown.opacity, 1.0);
+        assert!(shown.is_settled());
+        let faded = Opacity::new(false, false).step(0.5, false);
+        assert_eq!(faded.opacity, 0.0);
+        assert!(faded.is_hidden() && faded.is_settled());
+        let fading_in = Opacity::new(true, false).step(0.25, true);
+        assert_eq!(fading_in.opacity, 0.25);
+        assert!(!fading_in.is_settled());
+        assert_eq!(Opacity { opacity: 1.0, placed: true }.vertex(), 255.0);
+        assert_eq!(Opacity { opacity: 0.5, placed: false }.vertex(), 126.0);
+    }
+
+    #[test]
+    fn a_placement_changes_where_an_item_shows_or_hides_anew() {
+        let (shown, hidden) = (Opacity::new(true, true), Opacity::new(false, true));
+        let mut placed = Placed::default();
+        placed.add(Some(shown), shown.step(1.0, true));
+        placed.add(None, hidden);
+        assert_eq!(placed, Placed::default(), "nothing shows or hides anew");
+        placed.add(Some(shown), shown.step(0.5, false));
+        assert_eq!(placed, Placed { changed: true, settled: false });
     }
 }
