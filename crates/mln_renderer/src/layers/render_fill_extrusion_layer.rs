@@ -68,6 +68,7 @@ use crate::buckets::fill_extrusion_bucket::{
 };
 use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::frame_projection::zero_to_one_clip_z;
+use crate::geometry::feature_index::QueryRegion;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{Indexes, SharedIndexes};
@@ -499,26 +500,22 @@ impl RenderLayer for RenderFillExtrusionLayer {
     // query
     fn query_intersects_feature(
         &self,
-        query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
+        region: &QueryRegion<'_>,
         _feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
         geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
-        _zoom: f32,
-        view: &View,
-        pixels_to_tile_units: f32,
-        _projector: &mln_map_types::TileProjector<'_>,
         _feature_state: &mln_style::expression::expression::FeatureState,
     ) -> bool {
         let evaluated = &self.values.evaluated.paint;
         let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(
-            query_geometry,
+            region.geometry,
             *evaluated.fill_extrusion_translate.uniform(),
             *evaluated.fill_extrusion_translate_anchor.uniform(),
-            view.angle() as f32,
-            pixels_to_tile_units,
+            region.view.angle() as f32,
+            region.pixels_to_tile_units,
         );
 
         mln_util::intersection_tests::polygon_intersects_multi_polygon(
-            translated_query_geometry.as_ref().unwrap_or(query_geometry),
+            translated_query_geometry.as_ref().unwrap_or(region.geometry),
             geometry,
         )
     }

@@ -11,7 +11,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO, ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
 };
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
-use mln_map_types::{TileProjector, View};
+use mln_map_types::TileProjector;
 use mln_style::expression::EvaluationContext;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Circle;
@@ -25,6 +25,7 @@ use crate::bucket::Bucket;
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
+use crate::geometry::feature_index::QueryRegion;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::layer_drawing::{DrawList, FrameDraw, TileDraws, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
@@ -306,17 +307,15 @@ impl RenderLayer for RenderCircleLayer {
     // query
     fn query_intersects_feature(
         &self,
-        query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
+        region: &QueryRegion<'_>,
         feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
         geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
-        zoom: f32,
-        view: &View,
-        pixels_to_tile_units: f32,
-        projector: &TileProjector<'_>,
         feature_state: &mln_style::expression::expression::FeatureState,
     ) -> bool {
         use crate::geometry::feature_index::FeatureIndex;
 
+        let QueryRegion { geometry: query_geometry, view, projector, pixels_to_tile_units, .. } = *region;
+        let zoom = view.zoom() as f32;
         let evaluated = &self.values.evaluated.paint;
         // Translate query geometry
         let translated = FeatureIndex::translate_query_geometry(

@@ -391,18 +391,8 @@ impl FeatureIndex {
             // because for the query we take into account the actual rendered
             // size of the geometry (#2781)
             let intersects = needs_cross_tile_index
-                || region.is_some_and(|region| {
-                    render_layer.query_intersects_feature(
-                        region.geometry,
-                        &feature,
-                        &geometry,
-                        region.view.zoom() as f32,
-                        region.view,
-                        region.pixels_to_tile_units,
-                        region.projector,
-                        &state,
-                    )
-                });
+                || region
+                    .is_some_and(|region| render_layer.query_intersects_feature(region, &feature, &geometry, &state));
             if !intersects {
                 continue;
             }
