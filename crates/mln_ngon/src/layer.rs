@@ -8,7 +8,7 @@ use mln_rs::layer::{
 };
 use mln_rs::mln_style_types::{AlignmentType, CirclePitchScaleType};
 
-use crate::layout::{NgonBucket, NgonLayout};
+use crate::bucket::{NgonBucket, NgonLayout};
 use crate::program::{NGON, NgonDraw, NgonProps};
 use crate::{Ngon, paint};
 
@@ -41,7 +41,9 @@ impl Layer for NgonLayer {
     ) -> Option<Mesh<NgonDraw>> {
         let bucket = laid.bucket;
         let mut mesh = MeshDesc::new(&NGON, laid.indexes(&bucket.triangles));
-        mesh.vertices(laid.buffer(&bucket.corners)).paint(laid.binders(&bucket.binders));
+        mesh.vertices(laid.buffer(&bucket.corners))
+            .vertices(laid.buffer(&bucket.fade))
+            .paint(laid.binders(&bucket.binders));
         Some(cx.res.mesh(&mesh))
     }
 
@@ -53,6 +55,7 @@ impl Layer for NgonLayer {
         main.block(&NgonProps {
             scale_with_map: (*paint.ngon_pitch_scale.uniform() == CirclePitchScaleType::Map).into(),
             pitch_with_map: pitch_with_map.into(),
+            fade: cx.frame.placement_fade,
             ..NgonProps::default()
         });
         for (tile, _, mesh) in cx.tiles() {
@@ -118,13 +121,20 @@ impl Layer for NgonLayer {
 
 /// How the layer's `paint` places a tile's polygons: moved by its
 /// translate.
-fn transform(paint: &paint::PossiblyEvaluated) -> TileTransform {
+pub(crate) fn transform(paint: &paint::PossiblyEvaluated) -> TileTransform {
     TileTransform::translated(*paint.ngon_translate.uniform(), *paint.ngon_translate_anchor.uniform())
 }
 
 /// The corners of a polygon whose `ngon-corners` is `value`.
 fn corners(value: f32) -> u32 {
     value.round().clamp(3.0, 360.0) as u32
+}
+
+/// The distance from the center of a polygon of `radius`, `stroke_width`
+/// and `corners`, as its properties give them, to its stroke's corners.
+pub(crate) fn outer_radius(radius: f32, stroke_width: f32, corners: f32) -> f32 {
+    let corners = self::corners(corners) as f32;
+    radius.max(0.0) + stroke_width.max(0.0) / (PI / corners).cos()
 }
 
 /// A feature's polygon, in pixels.
@@ -141,7 +151,7 @@ impl Shape {
     /// edge, which is as far from each edge of the fill as the stroke is
     /// wide.
     fn outer_radius(&self) -> f32 {
-        self.radius + self.stroke_width / (PI / self.corners as f32).cos()
+        outer_radius(self.radius, self.stroke_width, self.corners as f32)
     }
 
     /// The corners of the stroke's outer edge around `center`, `size` from

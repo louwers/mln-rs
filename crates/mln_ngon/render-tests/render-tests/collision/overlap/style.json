@@ -1,0 +1,327 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 192,
+      "height": 192
+    }
+  },
+  "center": [45, -40.97989807],
+  "zoom": 2,
+  "sources": {
+    "points": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "row": "strict",
+              "z": "lower"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [36.9140625, -31.95216224]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "row": "strict",
+              "z": "upper"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [39.0234375, -31.95216224]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "row": "ignored",
+              "z": "lower"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [36.9140625, -36.59788913]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "row": "ignored",
+              "z": "upper"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [39.0234375, -36.59788913]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "row": "overlap",
+              "z": "lower"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [36.9140625, -40.97989807]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "row": "overlap",
+              "z": "upper"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [39.0234375, -40.97989807]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "row": "default",
+              "z": "lower"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [36.9140625, -45.08903557]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "row": "default",
+              "z": "upper"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [39.0234375, -45.08903557]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "row": "lower-ignored",
+              "z": "lower"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [36.9140625, -48.92249926]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "row": "lower-ignored",
+              "z": "upper"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [39.0234375, -48.92249926]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "row": "thin",
+              "z": "thin"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [53.4375, -37.16031655]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "row": "thin",
+              "z": "thin"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [53.4375, -39.09596294]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "row": "thin",
+              "z": "thin"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [53.4375, -40.97989807]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "row": "thin",
+              "z": "thin"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [53.4375, -42.81152175]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "row": "thin",
+              "z": "thin"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [53.4375, -44.59046718]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#f1faee"
+      }
+    },
+    {
+      "id": "lower-strict",
+      "type": "org.maplibre.ngon",
+      "source": "points",
+      "filter": [
+        "all",
+        ["==", ["get", "z"], "lower"],
+        ["in", ["get", "row"], ["literal", ["strict", "ignored", "default"]]]
+      ],
+      "layout": {
+        "ngon-allow-overlap": false,
+        "ngon-ignore-placement": false
+      },
+      "paint": {
+        "ngon-radius": 12,
+        "ngon-corners": 4,
+        "ngon-color": "#457b9d",
+        "ngon-rotate": 45
+      }
+    },
+    {
+      "id": "lower-overlap",
+      "type": "org.maplibre.ngon",
+      "source": "points",
+      "filter": [
+        "all",
+        ["==", ["get", "z"], "lower"],
+        ["in", ["get", "row"], ["literal", ["overlap"]]]
+      ],
+      "layout": {
+        "ngon-allow-overlap": true,
+        "ngon-ignore-placement": false
+      },
+      "paint": {
+        "ngon-radius": 12,
+        "ngon-corners": 4,
+        "ngon-color": "#457b9d",
+        "ngon-rotate": 45
+      }
+    },
+    {
+      "id": "lower-ignored",
+      "type": "org.maplibre.ngon",
+      "source": "points",
+      "filter": [
+        "all",
+        ["==", ["get", "z"], "lower"],
+        ["in", ["get", "row"], ["literal", ["lower-ignored"]]]
+      ],
+      "layout": {
+        "ngon-allow-overlap": false,
+        "ngon-ignore-placement": true
+      },
+      "paint": {
+        "ngon-radius": 12,
+        "ngon-corners": 4,
+        "ngon-color": "#457b9d",
+        "ngon-rotate": 45
+      }
+    },
+    {
+      "id": "thin",
+      "type": "org.maplibre.ngon",
+      "source": "points",
+      "filter": ["==", ["get", "z"], "thin"],
+      "layout": {
+        "ngon-allow-overlap": false,
+        "ngon-ignore-placement": false
+      },
+      "paint": {
+        "ngon-radius": 12,
+        "ngon-corners": 6,
+        "ngon-color": "#2a9d8f"
+      }
+    },
+    {
+      "id": "upper-strict",
+      "type": "org.maplibre.ngon",
+      "source": "points",
+      "filter": [
+        "all",
+        ["==", ["get", "z"], "upper"],
+        [
+          "in",
+          ["get", "row"],
+          ["literal", ["strict", "overlap", "lower-ignored"]]
+        ]
+      ],
+      "layout": {
+        "ngon-allow-overlap": false,
+        "ngon-ignore-placement": false
+      },
+      "paint": {
+        "ngon-radius": 12,
+        "ngon-corners": 3,
+        "ngon-color": "#e63946"
+      }
+    },
+    {
+      "id": "upper-ignored",
+      "type": "org.maplibre.ngon",
+      "source": "points",
+      "filter": [
+        "all",
+        ["==", ["get", "z"], "upper"],
+        ["in", ["get", "row"], ["literal", ["ignored"]]]
+      ],
+      "layout": {
+        "ngon-allow-overlap": false,
+        "ngon-ignore-placement": true
+      },
+      "paint": {
+        "ngon-radius": 12,
+        "ngon-corners": 3,
+        "ngon-color": "#e63946"
+      }
+    },
+    {
+      "id": "upper-default",
+      "type": "org.maplibre.ngon",
+      "source": "points",
+      "filter": [
+        "all",
+        ["==", ["get", "z"], "upper"],
+        ["in", ["get", "row"], ["literal", ["default"]]]
+      ],
+      "paint": {
+        "ngon-radius": 12,
+        "ngon-corners": 3,
+        "ngon-color": "#e63946"
+      }
+    }
+  ]
+}

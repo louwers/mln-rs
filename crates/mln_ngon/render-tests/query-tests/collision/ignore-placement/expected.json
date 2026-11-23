@@ -1,0 +1,15 @@
+[
+  {
+    "type": "Feature",
+    "geometry": {
+      "type": "Point",
+      "coordinates": [45.0, -46.07323062540836]
+    },
+    "id": 3,
+    "properties": {
+      "name": "ignored"
+    },
+    "source": "points",
+    "state": {}
+  }
+]

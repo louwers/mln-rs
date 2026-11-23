@@ -1,0 +1,126 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "mapMode": "tile"
+    }
+  },
+  "center": [90, 40.97989807],
+  "zoom": 2,
+  "glyphs": "local://glyphs/{fontstack}/{range}.pbf",
+  "sources": {
+    "points": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "alone"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [90.703125, 52.90890205]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "label",
+              "name": "Border"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [90.0, 40.97989807]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "low"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [90.0, 40.97989807]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "label",
+              "name": "Hidden"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [90.0, 26.43122806]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "high"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [89.296875, 26.43122806]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#f1faee"
+      }
+    },
+    {
+      "id": "low",
+      "type": "org.maplibre.ngon",
+      "source": "points",
+      "filter": ["in", ["get", "kind"], ["literal", ["low", "alone"]]],
+      "layout": {
+        "ngon-allow-overlap": false,
+        "ngon-ignore-placement": false
+      },
+      "paint": {
+        "ngon-radius": 20,
+        "ngon-corners": 6,
+        "ngon-color": "#457b9d"
+      }
+    },
+    {
+      "id": "labels",
+      "type": "symbol",
+      "source": "points",
+      "filter": ["==", ["get", "kind"], "label"],
+      "layout": {
+        "text-field": ["get", "name"],
+        "text-font": ["Open Sans Semibold", "Arial Unicode MS Bold"],
+        "text-size": 16
+      },
+      "paint": {
+        "text-color": "#1d3557"
+      }
+    },
+    {
+      "id": "high",
+      "type": "org.maplibre.ngon",
+      "source": "points",
+      "filter": ["==", ["get", "kind"], "high"],
+      "layout": {
+        "ngon-allow-overlap": false,
+        "ngon-ignore-placement": false
+      },
+      "paint": {
+        "ngon-radius": 20,
+        "ngon-corners": 5,
+        "ngon-color": "#e63946"
+      }
+    }
+  ]
+}

@@ -20,6 +20,7 @@ layout(location = 0) in ivec2 in_position;
 #property attribute stroke_color
 #property attribute stroke_width
 #property attribute stroke_opacity
+layout(location = 10) in float in_fade_opacity;
 
 // Where the fragment is from the polygon's center, in its pixels, with y
 // down: in the tile's plane or the viewport's.
@@ -33,6 +34,8 @@ layout(location = 0) out vec2 frag_local;
 #property varying stroke_color 7
 #property varying stroke_width 8
 #property varying stroke_opacity 9
+// How much of the polygon shows, as placement fades it.
+layout(location = 10) out float frag_fade;
 
 void main() {
     NgonDraw drawable = draws[drawIndex];
@@ -90,6 +93,11 @@ void main() {
     }
 
     frag_local = extrude * size;
+    // The opacity that placement left the point at, and whether it fades
+    // in, faded on since.
+    float steps = floor(in_fade_opacity * 0.5);
+    float fade = in_fade_opacity - 2.0 * steps > 0.5 ? props.fade : -props.fade;
+    frag_fade = clamp(steps / 127.0 + fade, 0.0, 1.0);
     #property pass color
     #property pass radius
     #property pass corners
@@ -112,6 +120,7 @@ layout(location = 0) in vec2 frag_local;
 #property varying stroke_color 7
 #property varying stroke_width 8
 #property varying stroke_opacity 9
+layout(location = 10) in float frag_fade;
 
 layout(location = 0) out vec4 out_color;
 
@@ -143,7 +152,7 @@ void main() {
     vec4 fill = $props.color * fill_opacity;
     float stroke_opacity = $props.stroke_opacity;
     vec4 stroke = $props.stroke_color * stroke_opacity;
-    out_color = coverage * mix(fill, stroke, stroke_t);
+    out_color = coverage * frag_fade * mix(fill, stroke, stroke_t);
 #endif
 }
 ",

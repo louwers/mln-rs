@@ -23,6 +23,7 @@ struct VertexStage {
     #property attribute stroke_color
     #property attribute stroke_width
     #property attribute stroke_opacity
+    float fade_opacity [[attribute(10)]];
 };
 
 struct FragmentStage {
@@ -39,6 +40,8 @@ struct FragmentStage {
     #property varying stroke_color float4
     #property varying stroke_width float
     #property varying stroke_opacity float
+    // How much of the polygon shows, as placement fades it.
+    float fade;
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]]) {
@@ -97,9 +100,15 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
         position.xy += scaled_extrude * size * factor;
     }
 
+    // The opacity that placement left the point at, and whether it fades
+    // in, faded on since.
+    const float steps = floor(vertex_in.fade_opacity * 0.5);
+    const float fade = vertex_in.fade_opacity - 2.0 * steps > 0.5 ? props.fade : -props.fade;
+
     return {
         .position = position,
         .local = extrude * size,
+        .fade = clamp(steps / 127.0 + fade, 0.0, 1.0),
         #property pass color
         #property pass radius
         #property pass corners
@@ -140,7 +149,7 @@ float4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     const float4 fill = float4($props.color) * fill_opacity;
     const float stroke_opacity = $props.stroke_opacity;
     const float4 stroke = float4($props.stroke_color) * stroke_opacity;
-    return coverage * mix(fill, stroke, stroke_t);
+    return coverage * in.fade * mix(fill, stroke, stroke_t);
 #endif
 }
 ",

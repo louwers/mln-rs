@@ -2,9 +2,12 @@ use mln_rs::layer::source::glsl_es::Glsl;
 
 pub(crate) const NGON: Glsl = Glsl {
     vertex: r"layout (location = 0) in vec2 a_pos;
+layout (location = 10) in float a_fade_opacity;
 // Where the fragment is from the polygon's center, in its pixels, with y
 // down: in the tile's plane or the viewport's.
 out vec2 v_local;
+// How much of the polygon shows, as placement fades it.
+out float v_fade;
 
 #property attribute color
 #property varying color
@@ -84,9 +87,15 @@ void main(void) {
     }
 
     v_local = extrude * size;
+    // The opacity that placement left the point at, and whether it fades
+    // in, faded on since.
+    float steps = floor(a_fade_opacity * 0.5);
+    float fade = a_fade_opacity - 2.0 * steps > 0.5 ? u_fade : -u_fade;
+    v_fade = clamp(steps / 127.0 + fade, 0.0, 1.0);
 }
 ",
     fragment: r"in vec2 v_local;
+in float v_fade;
 
 #property varying color
 #property varying radius
@@ -128,7 +137,7 @@ void main() {
     float coverage = 1.0 - smoothstep(-fade, 0.0, along - outer_edge);
     float stroke_t = stroke < 0.01 ? 0.0 : smoothstep(-fade, 0.0, along - fill_edge);
 
-    fragColor = coverage * mix(color * opacity, stroke_color * stroke_opacity, stroke_t);
+    fragColor = coverage * v_fade * mix(color * opacity, stroke_color * stroke_opacity, stroke_t);
 
 #ifdef OVERDRAW_INSPECTOR
     fragColor = vec4(1.0);

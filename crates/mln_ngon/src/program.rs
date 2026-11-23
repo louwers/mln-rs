@@ -1,4 +1,4 @@
-use mln_rs::layer::AttributeDataType::{Float2, Float4, Short2};
+use mln_rs::layer::AttributeDataType::{Float, Float2, Float4, Short2};
 use mln_rs::layer::{Attribute, Bool32, Program, Projection, Property, Sources, Stages, program};
 
 use crate::{glsl, glsl_es, msl, wgsl};
@@ -24,7 +24,9 @@ mln_rs::layer::uniform_block! {
 
 mln_rs::layer::uniform_block! {
     /// The layer's block: each property's value where it is the same for
-    /// every feature, which the engine writes, and the alignments.
+    /// every feature, which the engine writes, the alignments, and how far
+    /// the placement's fade has come
+    /// ([`Frame::placement_fade`](mln_rs::layer::Frame::placement_fade)).
     pub(crate) struct NgonProps {
         pub color: [f32; 4],
         pub stroke_color: [f32; 4],
@@ -37,8 +39,7 @@ mln_rs::layer::uniform_block! {
         pub stroke_opacity: f32,
         pub scale_with_map: Bool32,
         pub pitch_with_map: Bool32,
-        #[padding]
-        pub pad1: f32,
+        pub fade: f32,
         #[padding]
         pub pad2: f32,
         #[padding]
@@ -47,7 +48,9 @@ mln_rs::layer::uniform_block! {
 }
 
 /// Draws a polygon over each quad of a point: the quad's corners are the
-/// point doubled, with the corner's right and bottom sides in the low bits.
+/// point doubled, with the corner's right and bottom sides in the low bits,
+/// each with its opacity as placement left it
+/// ([`Opacity::vertex`](mln_rs::layer::placement::Opacity::vertex)).
 pub(crate) static NGON: Program = Program {
     name: "ngon",
     buffers: &[
@@ -65,6 +68,7 @@ pub(crate) static NGON: Program = Program {
         Attribute::new("stroke_color", Float4),
         Attribute::new("stroke_width", Float2),
         Attribute::new("stroke_opacity", Float2),
+        Attribute::new("fade_opacity", Float),
     ],
     instance_attributes: &[],
     textures: &[],

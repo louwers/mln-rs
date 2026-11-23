@@ -21,6 +21,7 @@ struct VertexInput {
     #property attribute stroke_color
     #property attribute stroke_width
     #property attribute stroke_opacity
+    @location(10) fade_opacity: f32,
 };
 
 struct VertexOutput {
@@ -37,6 +38,8 @@ struct VertexOutput {
     #property varying stroke_color 7
     #property varying stroke_width 8
     #property varying stroke_opacity 9
+    // How much of the polygon shows, as placement fades it.
+    @location(10) fade: f32,
 };
 
 @vertex
@@ -117,6 +120,11 @@ fn main(in: VertexInput) -> VertexOutput {
 
     out.position = position;
     out.local = extrude * size;
+    // The opacity that placement left the point at, and whether it fades
+    // in, faded on since.
+    let steps = floor(in.fade_opacity * 0.5);
+    let fade = select(-props.fade, props.fade, in.fade_opacity - 2.0 * steps > 0.5);
+    out.fade = clamp(steps / 127.0 + fade, 0.0, 1.0);
     return out;
 }
 ",
@@ -132,6 +140,7 @@ struct FragmentInput {
     #property varying stroke_color 7
     #property varying stroke_width 8
     #property varying stroke_opacity 9
+    @location(10) fade: f32,
 };
 
 @fragment
@@ -163,7 +172,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let fill = $props.color * fill_opacity;
     let stroke_opacity = $props.stroke_opacity;
     let stroke = $props.stroke_color * stroke_opacity;
-    return coverage * mix(fill, stroke, stroke_t);
+    return coverage * in.fade * mix(fill, stroke, stroke_t);
 #endif
 }
 ",

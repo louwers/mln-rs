@@ -1,0 +1,87 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 128,
+      "height": 128,
+      "queryGeometry": [76, 64]
+    }
+  },
+  "center": [45, -40.97989807],
+  "zoom": 2,
+  "sources": {
+    "points": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "name": "placed"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [43.9453125, -40.97989807]
+            },
+            "id": 1
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "name": "hidden"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [46.0546875, -40.97989807]
+            },
+            "id": 2
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "name": "ignored"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [45.0, -46.07323063]
+            },
+            "id": 3
+          }
+        ]
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "ignored",
+      "type": "org.maplibre.ngon",
+      "source": "points",
+      "filter": ["==", ["get", "name"], "ignored"],
+      "layout": {
+        "ngon-allow-overlap": false,
+        "ngon-ignore-placement": true
+      },
+      "paint": {
+        "ngon-radius": 12,
+        "ngon-corners": 4,
+        "ngon-color": "#e63946"
+      }
+    },
+    {
+      "id": "stops",
+      "type": "org.maplibre.ngon",
+      "source": "points",
+      "filter": ["!=", ["get", "name"], "ignored"],
+      "layout": {
+        "ngon-allow-overlap": false,
+        "ngon-ignore-placement": false
+      },
+      "paint": {
+        "ngon-radius": 12,
+        "ngon-corners": 4,
+        "ngon-color": "#457b9d"
+      }
+    }
+  ]
+}
