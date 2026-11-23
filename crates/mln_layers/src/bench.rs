@@ -18,8 +18,13 @@ use crate::symbol::placement::{LayerBuckets, SymbolPlacement};
 
 /// The symbols of laid-out tiles in a view, as a renderer finds which to
 /// show: the view's symbol layers, each updated with the tiles as a frame
-/// updates it, and the tiles' buckets.
-pub struct SymbolView(PlacementFrame<SymbolLayer>);
+/// updates it, the tiles' buckets, and the buckets each layer leads.
+pub struct SymbolView {
+    frame: PlacementFrame<SymbolLayer>,
+    /// Each of the frame's layers' buckets, bottom to top, as the symbol
+    /// participant finds them when it prepares a frame.
+    layers: Vec<LayerBuckets>,
+}
 
 impl SymbolView {
     /// A view of `size` pixels centered on `center` at `zoom`, of `tiles`
@@ -33,7 +38,10 @@ impl SymbolView {
         zoom: f64,
         size: (u32, u32),
     ) -> Result<SymbolView, Error> {
-        PlacementFrame::new(style, source, tiles, center, zoom, size).map(SymbolView)
+        let mut frame = PlacementFrame::new(style, source, tiles, center, zoom, size)?;
+        let mut layers = Vec::new();
+        frame.with_context(|cx| LayerBuckets::fill(&mut layers, cx));
+        Ok(SymbolView { frame, layers })
     }
 
     /// Adds the view's symbol buckets to `index`, as a renderer does before
@@ -42,11 +50,10 @@ impl SymbolView {
     /// drops the buckets of each layer that the view no longer has. Returns
     /// how many layers added a bucket.
     pub fn index(&mut self, index: &mut SymbolIndex) -> usize {
-        self.0.with_context(|cx| {
+        let layers = &self.layers;
+        self.frame.with_context(|cx| {
             let view = cx.view;
             let longitude = view.center(WrapMode::Unwrapped).longitude() as f32;
-            let mut layers = Vec::new();
-            LayerBuckets::fill(&mut layers, cx);
             let mut added = 0;
             for (layer, placing) in layers.iter().zip(cx.layers).rev().filter(|(layer, _)| !layer.placed.is_empty()) {
                 let tiles = layer.placed.iter().map(|placed| &placing.tiles[placed.tile]);
@@ -65,10 +72,10 @@ impl SymbolView {
     /// without one shows nowhere.
     pub fn place(&mut self) -> usize {
         let mut participant = SymbolPlacement::default();
-        self.0.with_context(|cx| participant.prepare_layers(cx));
+        self.frame.with_context(|cx| participant.prepare_layers(cx));
         // The placement it replaces showed nothing, so it has nothing to
         // fade from.
-        self.0.place(&mut participant);
+        self.frame.place(&mut participant);
         participant.placement.current.count()
     }
 }

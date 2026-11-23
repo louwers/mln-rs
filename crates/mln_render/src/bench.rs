@@ -236,6 +236,9 @@ pub struct PlacementFrame<L: Layer> {
     /// fills.
     placed: CollisionIndex,
     index: CollisionIndex,
+    /// The memory of [`PlacementFrame::with_context`]'s list of layers,
+    /// empty between calls, so that a call allocates none.
+    spare: Vec<PlacingLayer<'static, L>>,
 }
 
 impl<L: Layer> PlacementFrame<L> {
@@ -338,6 +341,7 @@ impl<L: Layer> PlacementFrame<L> {
             layers,
             placed: CollisionIndex::default(),
             index: CollisionIndex::default(),
+            spare: Vec::new(),
         })
     }
 
@@ -345,16 +349,20 @@ impl<L: Layer> PlacementFrame<L> {
     /// [`prepare`](Placement::prepare) and [`update`](Placement::update): its
     /// layers, its update and its tiles' buckets.
     pub fn with_context<R>(&mut self, hook: impl FnOnce(&mut PlacementCx<'_, L>) -> R) -> R {
-        let layers: Vec<PlacingLayer<'_, L>> = self
-            .layers
-            .iter()
-            .map(|(layer, tiles, led)| {
-                let (tiles, followers) = tiles.split_at(*led);
-                PlacingLayer { layer: layer.parts().1, tiles, followers }
-            })
-            .collect();
+        let mut layers = recycle(std::mem::take(&mut self.spare));
+        layers.extend(self.layers.iter().map(|(layer, tiles, led)| {
+            let (tiles, followers) = tiles.split_at(*led);
+            PlacingLayer { layer: layer.parts().1, tiles, followers }
+        }));
         let mut buckets = FrameBuckets(&mut self.tiles);
-        hook(&mut PlacementCx::new(&layers, &self.update.view, PlacementBuckets::new(&mut buckets), &mut self.placed))
+        let result = hook(&mut PlacementCx::new(
+            &layers,
+            &self.update.view,
+            PlacementBuckets::new(&mut buckets),
+            &mut self.placed,
+        ));
+        self.spare = recycle(layers);
+        result
     }
 
     /// Has `participant` place the frame's layers, topmost first, into an
@@ -378,6 +386,14 @@ impl<L: Layer> PlacementFrame<L> {
             None,
         )
     }
+}
+
+/// `vec`'s memory, emptied, as a vector of `U`, a type of the same size and
+/// alignment, such as `T` with other lifetimes: collecting a vector's
+/// iterator into a vector of such a type reuses its memory.
+fn recycle<T, U>(mut vec: Vec<T>) -> Vec<U> {
+    vec.clear();
+    vec.into_iter().filter_map(|_| None).collect()
 }
 
 /// The buckets of a [`PlacementFrame`]'s tiles, by their keys.
