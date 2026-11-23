@@ -77,6 +77,8 @@ pub struct Resources {
     /// The buffers of default attribute values, one per format, with the
     /// vertex count each covers.
     default_vertex_buffers: HashMap<AttributeDataType, (usize, Rc<Buffer>)>,
+    /// How many times one of `default_vertex_buffers` was replaced.
+    default_vertex_generation: u64,
     /// The renderer's textures, which their owners and the draws that bind
     /// them hold as [`SharedTexture`]s.
     textures: Store<TextureKey, Texture2D>,
@@ -133,6 +135,7 @@ impl Resources {
             shaders: HashMap::default(),
             pipelines: HashMap::default(),
             default_vertex_buffers: HashMap::default(),
+            default_vertex_generation: 0,
             textures: Store::default(),
             buffers: BufferStore::default(),
             meshes: Store::default(),
@@ -772,7 +775,8 @@ impl Resources {
     /// A vertex buffer of at least `vertex_count` default values of
     /// `format`, for an attribute a draw has no data for: zeros, or ones
     /// for `Float2` and `Float4`. The context keeps one per format, grown
-    /// geometrically; geometry made of a replaced smaller one keeps it.
+    /// geometrically; a draw bound to a replaced smaller one keeps it until
+    /// it binds again ([`default_vertex_generation`](Self::default_vertex_generation)).
     pub(crate) fn default_vertex_buffer(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -792,8 +796,17 @@ impl Resources {
             }
         }
         let buffer = Rc::new(self.device.buffer(gpu, BufferUsage::Vertex, &data)?);
-        self.default_vertex_buffers.insert(format, (count, Rc::clone(&buffer)));
+        if self.default_vertex_buffers.insert(format, (count, Rc::clone(&buffer))).is_some() {
+            self.default_vertex_generation += 1;
+        }
         Ok(buffer)
+    }
+
+    /// A count that changes whenever [`default_vertex_buffer`](Self::default_vertex_buffer)
+    /// replaces a buffer: a draw bound at another count binds again, to let
+    /// go of the replaced one.
+    pub(crate) fn default_vertex_generation(&self) -> u64 {
+        self.default_vertex_generation
     }
 }
 

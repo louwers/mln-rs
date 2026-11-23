@@ -243,6 +243,9 @@ pub(crate) struct DrawObjects {
     vertex_count: usize,
     attribute_bindings: AttributeBindingArray,
     instance_bindings: AttributeBindingArray,
+    /// The context's [`default_vertex_generation`](Resources::default_vertex_generation)
+    /// when the bindings were made.
+    defaults: u64,
     /// The vertex buffers of the bindings, `None` until a draw after either
     /// changes computes them.
     vertex_slots: Option<Vec<VertexSlot>>,
@@ -295,6 +298,7 @@ impl DrawObjects {
             vertex_count,
             attribute_bindings: Vec::new(),
             instance_bindings: Vec::new(),
+            defaults: 0,
             vertex_slots: None,
             shader_id: None,
             pipelines: Vec::new(),
@@ -345,9 +349,12 @@ impl DrawObjects {
         context.upload_index_buffer(gpu, &self.indexes)?;
 
         // The attributes bind at the first upload, and again where the
-        // upload writes what they read, which may be new. A failed upload
+        // upload writes what they read, which may be new, or where a buffer
+        // of default values they may read was replaced. A failed upload
         // leaves no bindings, so the next binds them again.
+        let defaults_replaced = self.defaults != context.default_vertex_generation();
         if self.attribute_bindings.is_empty()
+            || defaults_replaced
             || upload::needs_upload(context, program.attributes, &self.vertex_attributes)
         {
             let updated = upload::update_attribute_bindings(
@@ -366,11 +373,9 @@ impl DrawObjects {
         }
 
         let unbound = self.instance_bindings.is_empty();
-        if let Some(attrs) = self
-            .instance_attributes
-            .as_mut()
-            .filter(|attrs| unbound || upload::needs_upload(context, program.instance_attributes, attrs))
-        {
+        if let Some(attrs) = self.instance_attributes.as_mut().filter(|attrs| {
+            unbound || defaults_replaced || upload::needs_upload(context, program.instance_attributes, attrs)
+        }) {
             let instance_count = attrs.min_count();
             let updated = upload::update_attribute_bindings(
                 gpu,
@@ -386,6 +391,7 @@ impl DrawObjects {
             }
             updated?;
         }
+        self.defaults = context.default_vertex_generation();
 
         for (_, buffer, uploaded) in &mut self.pulled {
             *uploaded = context.upload_buffer(gpu, buffer)?;

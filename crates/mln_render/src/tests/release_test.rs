@@ -167,3 +167,51 @@ fn position_layout() -> VertexBufferLayout {
         attributes: vec![VertexAttribute { id: 0, format: AttributeDataType::Short2, offset: 0 }],
     }
 }
+
+// A draw bound to a buffer of default values that a larger draw's replaced
+// binds again at its next upload, which lets the replaced buffer go.
+#[test]
+fn a_draw_lets_go_of_a_replaced_buffer_of_default_values() {
+    use mln_gfx::color_mode::ColorMode;
+    use mln_gfx::cull_face_mode::CullFaceMode;
+    use mln_gfx::draw_mode::DrawMode;
+
+    use crate::draw_objects::{DrawGeometry, DrawObjects};
+    use crate::gfx::vertex_attribute::VertexAttributeArray;
+
+    with_context(|gpu, context| {
+        let indexes = context.add_buffer(vec![0u16, 1, 2]);
+        // Draws of the clipping mask without its positions, which read a
+        // buffer of default values for `vertex_count` vertices.
+        let draw_of = |vertex_count| {
+            let geometry = DrawGeometry {
+                vertices: VertexAttributeArray::new(),
+                vertex_count,
+                mode: DrawMode::Triangles,
+                indexes: indexes.clone(),
+                segments: Vec::new(),
+                instances: None,
+            };
+            let (color, cull) = (ColorMode::unblended(), CullFaceMode::disabled());
+            DrawObjects::new(
+                &programs::CLIPPING_MASK,
+                Default::default(),
+                None,
+                color,
+                cull,
+                geometry,
+                Default::default(),
+            )
+        };
+        let (mut small, mut large) = (draw_of(4), draw_of(64));
+        small.upload(gpu, context);
+        large.upload(gpu, context);
+        context.destroy_released(gpu);
+        let both = context.stats();
+        small.upload(gpu, context);
+        context.destroy_released(gpu);
+        let after = context.stats();
+        assert_eq!(after.num_buffers, both.num_buffers - 1, "the replaced buffer went");
+        assert_eq!(after.mem_buffers, both.mem_buffers - 4 * 4, "the replaced buffer's 4 positions went");
+    });
+}
