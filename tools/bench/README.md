@@ -250,21 +250,24 @@ id.
 
 ## Metrics
 
-Lower is better for every metric. Each is a **count** of work, a **time**, or a
-count **per unit** of work.
+Lower is better for every metric. Each is a **count** of work, a **time**, a
+count **per unit** of work, or the **context** the work started from.
 
 Every scenario reports these, over the parts of its run it measures (its setup
 is left out):
 
-| metric          | kind  | what                                                                          |
-| --------------- | ----- | ----------------------------------------------------------------------------- |
-| `instructions`  | count | retired by every thread of the process (macOS and Linux only)                 |
-| `allocations`   | count | heap allocations of every thread                                              |
-| `allocated`     | count | the bytes those allocations asked for                                         |
-| `peak_heap`     | count | the most heap bytes live at once, above those live when measuring began       |
-| `retained_heap` | count | the heap bytes live at the end, above those live when measuring began         |
-| `wall`, `cpu`   | time  | wall-clock time, and the CPU time of every thread of the process              |
-| `gpu`           | time  | the GPU's time in the render passes of the frames drawn (scenarios that draw) |
+| metric               | kind    | what                                                                          |
+| -------------------- | ------- | ----------------------------------------------------------------------------- |
+| `instructions`       | count   | retired by every thread of the process (macOS and Linux only)                 |
+| `allocations`        | count   | heap allocations of every thread                                              |
+| `allocated`          | count   | the bytes those allocations asked for                                         |
+| `start_heap`         | context | the heap bytes live when measuring began: what the setup left                 |
+| `peak_heap`          | count   | the most heap bytes live at once, above `start_heap`                          |
+| `absolute_peak_heap` | count   | the most heap bytes live at once, in all                                      |
+| `retained_heap`      | count   | the heap bytes live at the end, above `start_heap`                            |
+| `absolute_end_heap`  | count   | the heap bytes live at the end, in all                                        |
+| `wall`, `cpu`        | time    | wall-clock time, and the CPU time of every thread of the process              |
+| `gpu`                | time    | the GPU's time in the render passes of the frames drawn (scenarios that draw) |
 
 `gpu` adds up the time from each render pass's beginning to its end, from the
 GPU's timestamp queries, where the device has them: WebGPU on Vulkan, D3D12 or
@@ -363,9 +366,13 @@ also the most that the layout probe of any ref compared so far moved them, since
 one build of moved code shows too little of how far they move. The report shows
 every count's change and noise, and marks a change over twice the noise, however
 small: a count that repeats exactly is marked for any change. Whether a change
-matters is the reader's call. A scenario with a marked count runs twice more on
-this checkout, and its counts come from all three runs, so that a change that
-doesn't repeat isn't marked.
+matters is the reader's call. `start_heap`, the context, shows its change and
+noise but is never marked. The heap's peak and end are marked both above
+`start_heap` and in all, since a change in what the setup leaves moves the one
+and not the other: a setup that leaves less, with work moved from it into the
+measured parts, shows as growth above a smaller start while less is live in all.
+A scenario with a marked count runs twice more on this checkout, and its counts
+come from all three runs, so that a change that doesn't repeat isn't marked.
 
 ### Times
 

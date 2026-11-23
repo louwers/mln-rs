@@ -37,12 +37,16 @@ pub(crate) struct Scenario {
 }
 
 /// Whether a metric counts work, which repeats across runs, or times it,
-/// which doesn't.
+/// which doesn't, or counts what the measured work started from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum MetricKind {
     Count,
     Time,
+    /// A count of the state that the scenario's setup left, such as the
+    /// heap live when measuring began: what the counts start from, which
+    /// `mln-bench compare` shows beside them and never marks.
+    Context,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,16 +73,31 @@ pub(crate) struct Metric {
 ///   system counts them;
 /// - `allocations` and `allocated`: heap allocations of every thread and
 ///   the bytes they asked for;
-/// - `peak_heap` and `retained_heap`: the most heap bytes live at once, and
-///   those live at the end, above what was live when measuring began;
+/// - `start_heap`: the heap bytes live when measuring began, what the
+///   scenario's setup left (a [`MetricKind::Context`]);
+/// - `peak_heap` and `absolute_peak_heap`: the most heap bytes live at
+///   once, above `start_heap` and in all;
+/// - `retained_heap` and `absolute_end_heap`: the heap bytes live at the
+///   end, above `start_heap` and in all;
 /// - `wall` and `cpu`: wall-clock time, and the CPU time of every thread;
 /// - `gpu`: the time the GPU spent in the render passes of the frames
 ///   drawn, where the device times them ([`meter::gpu_time`]).
 ///
 /// Each covers only what runs inside [`Bench::measure`], on every thread of
 /// the process while it runs.
-pub(crate) const STANDARD_METRICS: [&str; 8] =
-    ["instructions", "allocations", "allocated", "peak_heap", "retained_heap", "wall", "cpu", "gpu"];
+pub(crate) const STANDARD_METRICS: [&str; 11] = [
+    "instructions",
+    "allocations",
+    "allocated",
+    "start_heap",
+    "peak_heap",
+    "absolute_peak_heap",
+    "retained_heap",
+    "absolute_end_heap",
+    "wall",
+    "cpu",
+    "gpu",
+];
 
 /// What one measured part counted, and how long it took.
 #[derive(Clone, Copy)]
@@ -96,7 +115,7 @@ struct Part {
 #[derive(Default)]
 pub(crate) struct Bench {
     /// Live heap bytes when the first measured part began.
-    baseline: Option<i64>,
+    start_heap: Option<i64>,
     measuring: bool,
     /// `None` once a part ran where the counters couldn't be read.
     instructions: Option<u64>,
@@ -107,8 +126,10 @@ pub(crate) struct Bench {
     per_part: bool,
     allocations: u64,
     allocated: u64,
+    /// The most live heap bytes at once during any measured part, and those
+    /// live at the end of the last.
     peak_heap: i64,
-    retained_heap: i64,
+    end_heap: i64,
     wall: Duration,
     cpu: Duration,
     own: Vec<Metric>,
@@ -132,15 +153,16 @@ impl Bench {
     /// Runs `work` as a measured part of the scenario: the standard metrics
     /// add up over every part. Setup stays outside, and so does anything a
     /// scenario does between parts, such as reading back an image. The heap
-    /// metrics count from the live bytes when the first part began, so what
-    /// a scenario allocates in its setup counts in neither, and `peak_heap`
-    /// is the most live at once during any part.
+    /// metrics count the live bytes when the first part began, the most live
+    /// at once during any part and those live at the end of the last, so
+    /// that what a scenario allocates in its setup shows apart from what its
+    /// parts do.
     pub(crate) fn measure<R>(&mut self, work: impl FnOnce() -> R) -> R {
         assert!(!self.measuring, "measure() inside measure()");
         self.measuring = true;
         let heap = meter::heap();
-        if self.baseline.is_none() {
-            self.baseline = Some(heap.live);
+        if self.start_heap.is_none() {
+            self.start_heap = Some(heap.live);
         }
         meter::reset_peak();
         // The clocks last at the start and first at the end, so that they
@@ -157,7 +179,6 @@ impl Bench {
         // A device made during the part starts timing at zero.
         let gpu = meter::gpu_time().map(|end| end.saturating_sub(gpu.unwrap_or_default()));
         let end = meter::heap();
-        let baseline = self.baseline.unwrap_or_default();
 
         self.instructions = self.instructions.zip(instructions).map(|(total, part)| total + part);
         let part = Part {
@@ -170,8 +191,8 @@ impl Bench {
         self.parts.push(part);
         self.allocations += part.allocations;
         self.allocated += part.allocated;
-        self.peak_heap = self.peak_heap.max(meter::peak() - baseline);
-        self.retained_heap = end.live - baseline;
+        self.peak_heap = self.peak_heap.max(meter::peak());
+        self.end_heap = end.live;
         self.wall += wall;
         self.cpu += cpu;
         self.measuring = false;
@@ -222,17 +243,21 @@ impl Bench {
 
     /// The standard metrics, then the scenario's own.
     pub(crate) fn finish(self) -> Vec<Metric> {
-        assert!(self.baseline.is_some(), "the scenario measured nothing");
+        let start_heap = self.start_heap.expect("the scenario measured nothing");
         let count =
             |name: &str, unit, value: f64| Metric { name: name.to_owned(), kind: MetricKind::Count, unit, value };
+        let bytes = |name: &str, value: i64| count(name, Unit::Bytes, value as f64);
         let mut metrics = Vec::new();
         if let Some(instructions) = self.instructions {
             metrics.push(count("instructions", Unit::Count, instructions as f64));
         }
         metrics.push(count("allocations", Unit::Count, self.allocations as f64));
         metrics.push(count("allocated", Unit::Bytes, self.allocated as f64));
-        metrics.push(count("peak_heap", Unit::Bytes, self.peak_heap as f64));
-        metrics.push(count("retained_heap", Unit::Bytes, self.retained_heap as f64));
+        metrics.push(Metric { kind: MetricKind::Context, ..bytes("start_heap", start_heap) });
+        metrics.push(bytes("peak_heap", self.peak_heap - start_heap));
+        metrics.push(bytes("absolute_peak_heap", self.peak_heap));
+        metrics.push(bytes("retained_heap", self.end_heap - start_heap));
+        metrics.push(bytes("absolute_end_heap", self.end_heap));
         let time = |name: &str, value| Metric { name: name.to_owned(), kind: MetricKind::Time, unit: Unit::Ms, value };
         metrics.push(time("wall", ms(self.wall)));
         metrics.push(time("cpu", ms(self.cpu)));
@@ -314,6 +339,24 @@ mod tests {
         assert!(get("allocated") >= 4096.0);
         assert_eq!(get("things"), 3.0);
         drop(kept);
+    }
+
+    #[test]
+    fn the_heap_of_the_setup_counts_apart_from_the_parts() {
+        let mut bench = Bench::new();
+        let setup = std::hint::black_box(vec![0u8; 1 << 20]);
+        let kept = bench.measure(|| std::hint::black_box(vec![1u8; 1 << 16]));
+        let metrics = bench.finish();
+        let get = |name: &str| metrics.iter().find(|metric| metric.name == name).unwrap();
+        let value = |name: &str| get(name).value;
+        assert_eq!(get("start_heap").kind, MetricKind::Context);
+        assert!(value("start_heap") >= f64::from(1 << 20));
+        for growth in ["peak_heap", "retained_heap"] {
+            assert!((f64::from(1 << 16)..f64::from(1 << 20)).contains(&value(growth)), "{growth}: {}", value(growth));
+        }
+        assert!(value("absolute_peak_heap") >= f64::from((1 << 20) + (1 << 16)));
+        assert!(value("absolute_end_heap") >= f64::from((1 << 20) + (1 << 16)));
+        drop((setup, kept));
     }
 
     #[test]

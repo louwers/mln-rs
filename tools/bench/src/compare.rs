@@ -434,7 +434,7 @@ fn compare_scenario(
     }
     let mut metrics: Vec<MetricComparison> = Vec::new();
     for (name, kind, unit) in names {
-        let base = if kind == MetricKind::Count { values(base_counts, name) } else { values(base_runs, name) };
+        let base = if kind == MetricKind::Time { values(base_runs, name) } else { values(base_counts, name) };
         let candidate = values(candidate_runs, name);
         let base_median = (!base.is_empty()).then(|| median(&base));
         let candidate_median = (!candidate.is_empty()).then(|| median(&candidate));
@@ -451,14 +451,14 @@ fn compare_scenario(
             moved: None,
         };
         if let (Some(b), Some(c)) = (base_median, candidate_median)
-            && kind == MetricKind::Count
+            && kind != MetricKind::Time
         {
             let mut spread = range(&base).max(range(&candidate));
             if let Some(moved) = base_side.layout.get(name) {
                 spread = spread.max(moved * b.abs());
             }
             comparison.noise = Some(relative(spread, b));
-            if (c - b).abs() > NOISE_FACTOR * spread {
+            if kind == MetricKind::Count && (c - b).abs() > NOISE_FACTOR * spread {
                 comparison.moved = Some(if c > b { Moved::More } else { Moved::Less });
             }
         }
@@ -519,7 +519,8 @@ pub(crate) fn text(comparison: &Comparison) -> String {
     let _ = writeln!(
         out,
         "noise: a count's larger range over either side's runs, and for instructions the most a build laid out \
-         differently moved them; a change over {NOISE_FACTOR}x its noise is marked more or less"
+         differently moved them; a change over {NOISE_FACTOR}x its noise is marked more or less, except in \
+         start_heap, which the setup left"
     );
     match comparison.rounds {
         Some(rounds) => {
@@ -808,20 +809,35 @@ mod tests {
 
     fn run_with(instructions: f64, allocations: f64, wall: f64) -> Run {
         let count = |name: &str, kind, value| Metric { name: name.to_owned(), kind, unit: Unit::Count, value };
+        run_of(vec![
+            count("instructions", MetricKind::Count, instructions),
+            count("allocations", MetricKind::Count, allocations),
+            count("allocations_per_tile", MetricKind::Count, allocations / 10.0),
+            Metric { name: "wall".to_owned(), kind: MetricKind::Time, unit: Unit::Ms, value: wall },
+            Metric { name: "cpu".to_owned(), kind: MetricKind::Time, unit: Unit::Ms, value: wall },
+            Metric { name: "gpu".to_owned(), kind: MetricKind::Time, unit: Unit::Ms, value: 1.0 },
+        ])
+    }
+
+    fn run_of(metrics: Vec<Metric>) -> Run {
         Run {
             scenario: "micro/test/case".to_owned(),
             kind: Kind::Micro,
             harness: "h".to_owned(),
             environment: Environment::machine(),
-            metrics: vec![
-                count("instructions", MetricKind::Count, instructions),
-                count("allocations", MetricKind::Count, allocations),
-                count("allocations_per_tile", MetricKind::Count, allocations / 10.0),
-                Metric { name: "wall".to_owned(), kind: MetricKind::Time, unit: Unit::Ms, value: wall },
-                Metric { name: "cpu".to_owned(), kind: MetricKind::Time, unit: Unit::Ms, value: wall },
-                Metric { name: "gpu".to_owned(), kind: MetricKind::Time, unit: Unit::Ms, value: 1.0 },
-            ],
+            metrics,
         }
+    }
+
+    /// A run whose heap held `start` bytes when measuring began and at most
+    /// `growth` more during it.
+    fn heap_run(start: f64, growth: f64) -> Run {
+        let bytes = |name: &str, kind, value| Metric { name: name.to_owned(), kind, unit: Unit::Bytes, value };
+        run_of(vec![
+            bytes("start_heap", MetricKind::Context, start),
+            bytes("peak_heap", MetricKind::Count, growth),
+            bytes("absolute_peak_heap", MetricKind::Count, start + growth),
+        ])
     }
 
     const SCENARIO: Scenario = Scenario { name: "micro/test/case", kind: Kind::Micro, question: "?", run: |_| {} };
@@ -962,6 +978,24 @@ mod tests {
         let comparison = compare_scenario(&SCENARIO, &base(&base_runs, &none), &[untimed], None);
         assert!(comparison.not_comparable.is_some());
         assert_eq!(moved(&comparison, "instructions"), None);
+    }
+
+    #[test]
+    fn the_heap_moves_by_its_absolute_peak_and_its_growth_never_its_start() {
+        let none = BTreeMap::new();
+        let runs = [heap_run(100.0, 10.0), heap_run(100.0, 10.0), heap_run(100.0, 10.0)];
+        let verdict = |candidate: Run| {
+            let comparison = compare_scenario(&SCENARIO, &base(&runs, &none), &[candidate], None);
+            let start = comparison.metrics.iter().find(|metric| metric.name == "start_heap").unwrap();
+            assert!(start.noise.is_some() && start.moved.is_none());
+            (moved(&comparison, "absolute_peak_heap"), moved(&comparison, "peak_heap"))
+        };
+        // A lower start, with the same growth: less in all, the same growth.
+        assert_eq!(verdict(heap_run(50.0, 10.0)), (Some(Moved::Less), None));
+        // A lower start doesn't hide more growth.
+        assert_eq!(verdict(heap_run(50.0, 30.0)), (Some(Moved::Less), Some(Moved::More)));
+        // A higher start, with the same growth: more in all.
+        assert_eq!(verdict(heap_run(120.0, 10.0)), (Some(Moved::More), None));
     }
 
     #[test]
