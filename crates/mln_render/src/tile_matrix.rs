@@ -56,6 +56,14 @@ pub struct TileTransform {
     /// Its meshes draw in Mercator's projection
     /// ([`MeshDesc::screen_space`](crate::draw::MeshDesc::screen_space)).
     pub screen_space: bool,
+    /// How far behind the geometry, in the clip depth that runs from 0 to
+    /// 1, its draws write its depth, through the matrices' z row, which
+    /// leaves the pixels they cover as they are; 0 writes it where it is.
+    /// Several tiles may draw the same 3D surface, each with its own matrix
+    /// that rounds the surface's depth its own way: a draw into depth alone
+    /// set back by a few steps of the depth buffer lets each copy's draw in
+    /// color pass a test of less or equal against it.
+    pub setback: f64,
 }
 
 impl TileTransform {
@@ -155,6 +163,12 @@ pub(crate) fn projection_data(tile_id: &UnwrappedTileID, frame: &Frame<'_>, how:
         matrix *= DMat4::from_translation(DVec3::new(f64::from(x), f64::from(y), 0.0));
     }
     let mut data = frame.camera.projection_data_for_matrix(tile_id, &matrix);
+    if how.setback != 0.0 {
+        // z + setback * w: x, y and w stay as they are.
+        for matrix in [&mut data.main_matrix, &mut data.fallback_matrix] {
+            matrix.set_row(2, matrix.row(2) + how.setback * matrix.row(3));
+        }
+    }
     // OpenGL's clip depth runs from -1: its 3D geometry writes the depth
     // that the other backends' does. The globe projects in its shaders.
     if how.volume && frame.clip_depth == ClipDepthRange::NegativeOneToOne && !frame.camera.is_globe() {

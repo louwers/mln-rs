@@ -24,6 +24,21 @@ use super::programs::{
 use super::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
 use super::{FillExtrusion, FillExtrusionPaintProperties};
 
+/// How far behind its surfaces the layer's draws into depth alone write
+/// their depth, in the clip depth that runs from 0 to 1: 16 steps of a
+/// 24-bit depth buffer.
+///
+/// Every tile whose buffer reaches a wall draws it, each with its own
+/// matrix, which rounds the wall's depth its own way in the last bits, and
+/// places a pattern on it its own way. Were the depth pass exact, a draw in
+/// color would pass the depth test only where its own tile's copy rounded
+/// nearest, and a patterned wall would mix the tiles' patterns in bands that
+/// depend on the GPU. Set back, every copy passes, and the first to draw a
+/// pixel, which the layer's stencil then keeps, draws all of it. Surfaces
+/// closer than this draw in the order of their draws rather than of their
+/// depth.
+const DEPTH_PASS_SETBACK: f64 = 1.0 / (1 << 20) as f64;
+
 /// A fill-extrusion layer: each tile's roofs and walls, drawn into the
 /// depth of the frame's 3D geometry.
 pub struct FillExtrusionLayer {
@@ -135,9 +150,11 @@ impl Layer for FillExtrusionLayer {
         main.block(&props(layer, frame.light, frame.camera, if composited { 1.0 } else { opacity }));
 
         let how = TileTransform { volume: true, ..transform(paint) };
+        let set_back = TileTransform { setback: DEPTH_PASS_SETBACK, ..how };
         let faded = paint.fill_extrusion_pattern.faded();
         for (tile, laid, parts) in cx.tiles() {
             let at = tile.project(frame, &how);
+            let behind = depth_first.then(|| tile.project(frame, &set_back));
             let atlas = laid.icon_atlas().filter(|_| pattern).map_or_else(Default::default, |atlas| cx.res.size(atlas));
             let tile_props = FillExtrusionTilePropsUBO {
                 pattern_from: laid.pattern(faded.from.id()),
@@ -148,9 +165,9 @@ impl Layer for FillExtrusionLayer {
             let paint_layout = paint_layout(laid.binders(&laid.bucket.binders));
             let blocks = (drawable(tile, frame, paint_layout), tile_props);
             for part in parts {
-                if depth_first {
+                if let Some(behind) = &behind {
                     let draw = Draw { order: 0, depth: Depth::Volume { write: true, once: false }, ..Draw::DEFAULT };
-                    main.push_at(&part.depth, &at, draw, blocks);
+                    main.push_at(&part.depth, behind, draw, blocks);
                 }
                 let draw = Draw { order: 1, depth: Depth::Volume { write: true, once: depth_first }, ..Draw::DEFAULT };
                 main.push_at(&part.color, &at, draw, blocks);
