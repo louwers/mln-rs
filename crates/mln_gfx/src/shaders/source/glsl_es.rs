@@ -34,7 +34,7 @@ use mln_util::hash::HashSet;
 
 use crate::gpu::GpuError;
 use crate::shaders::block::{Block, Member, MemberType};
-use crate::shaders::program::{Buffer, Program, PropertyType, Texture, VIEW_BUFFER};
+use crate::shaders::program::{Program, ProgramBuffer, ProgramTexture, PropertyType, VIEW_BUFFER};
 use crate::shaders::source::{Named, Stage, expand as expand_properties, from_uniform, identifiers, per_vertex};
 
 /// The GLSL of a program.
@@ -64,19 +64,19 @@ pub fn stage_blocks(program: &Program, text: &str) -> Vec<&'static Block> {
         let mut members = block.members.iter().filter(|member| !member.padding);
         members.any(|member| identifiers.contains(member_name(block, member).as_str()))
     };
-    [&VIEW_BUFFER].into_iter().chain(program.buffers).filter_map(Buffer::block).filter(names).collect()
+    [&VIEW_BUFFER].into_iter().chain(program.buffers).filter_map(ProgramBuffer::block).filter(names).collect()
 }
 
 /// The name of `texture` in GLSL ES, in the program's scope: `u_<name>`.
 #[must_use]
-pub fn texture_name(texture: &Texture) -> String {
+pub fn texture_name(texture: &ProgramTexture) -> String {
     format!("u_{}", texture.name)
 }
 
 /// The declaration of `texture` in GLSL ES: a `uniform sampler2D` of its
-/// name, `highp` if the texture is [`precise`](Texture::precise).
+/// name, `highp` if the texture is [`precise`](ProgramTexture::precise).
 #[must_use]
-pub fn texture_declaration(texture: &Texture) -> String {
+pub fn texture_declaration(texture: &ProgramTexture) -> String {
     let precision = if texture.precise { "highp " } else { "" };
     format!("uniform {precision}sampler2D {};\n", texture_name(texture))
 }
@@ -176,7 +176,7 @@ fn uniform(program: &Program, named: &Named<'_>) -> Result<&'static Member, GpuE
     program
         .buffers
         .iter()
-        .filter_map(Buffer::block)
+        .filter_map(ProgramBuffer::block)
         .find_map(|block| block.members.iter().find(|member| member_name(block, member) == name))
         .ok_or_else(|| GpuError::Invalid(format!("{} has no uniform {name}", program.name)))
 }

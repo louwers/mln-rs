@@ -1,6 +1,6 @@
 //! The ids that the backends bind buffers at, and how many buffers, textures
 //! and vertex attributes a program can have. A program names its buffers by
-//! their [`Buffer`](crate::shaders::program::Buffer)s, whose constructors
+//! their [`ProgramBuffer`](crate::shaders::program::ProgramBuffer)s, whose constructors
 //! give them their ids, and the engine's by theirs
 //! ([`ENGINE_BUFFERS`](crate::shaders::program::ENGINE_BUFFERS)): the ids
 //! here are the layout that the backends' bindings and those constructors

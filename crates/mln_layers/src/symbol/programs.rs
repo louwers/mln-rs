@@ -3,18 +3,22 @@
 //! collision boxes and circles, and their sources.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float, Float2, Float3, Float4, Short2, Short4, UShort2, UShort4};
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Property, Sources, Stages, Texture};
+use mln_gfx::shaders::program::{
+    Attribute, Program, ProgramBuffer, ProgramTexture, Projection, Property, Sources, Stages,
+};
 
 use super::ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
 use super::{glsl, glsl_es, msl, wgsl};
 
-const DRAWABLE: Buffer = Buffer::storage::<SymbolDrawableUBO>("drawableVector", Stages::Vertex);
-const TILE_PROPS: Buffer = Buffer::storage::<SymbolTilePropsUBO>("tilePropsVector", Stages::Fragment);
-const PROPS: Buffer = Buffer::uniform::<SymbolEvaluatedPropsUBO>("props", 0);
-const COLLISION_DRAWABLE: Buffer = Buffer::draw_uniform::<CollisionDrawableUBO>("drawable", Stages::Vertex);
-const COLLISION_TILE_PROPS: Buffer = Buffer::draw_uniform::<CollisionTilePropsUBO>("tileProps", Stages::Both);
+const DRAWABLE: ProgramBuffer = ProgramBuffer::storage::<SymbolDrawableUBO>("drawableVector", Stages::Vertex);
+const TILE_PROPS: ProgramBuffer = ProgramBuffer::storage::<SymbolTilePropsUBO>("tilePropsVector", Stages::Fragment);
+const PROPS: ProgramBuffer = ProgramBuffer::uniform::<SymbolEvaluatedPropsUBO>("props", 0);
+const COLLISION_DRAWABLE: ProgramBuffer =
+    ProgramBuffer::draw_uniform::<CollisionDrawableUBO>("drawable", Stages::Vertex);
+const COLLISION_TILE_PROPS: ProgramBuffer =
+    ProgramBuffer::draw_uniform::<CollisionTilePropsUBO>("tileProps", Stages::Both);
 
 pub static SYMBOL_ICON: Program = Program {
     name: "symbol-icon",
@@ -30,7 +34,7 @@ pub static SYMBOL_ICON: Program = Program {
         Attribute::new("height_offset", Float),
     ],
     instance_attributes: &[],
-    textures: &[Texture::new("image")],
+    textures: &[ProgramTexture::new("image")],
     properties: &[Property::float("opacity")],
     projection: Projection::PerDraw,
     sources: Sources::NONE
@@ -58,7 +62,7 @@ pub static SYMBOL_SDF: Program = Program {
         Attribute::new("height_offset", Float),
     ],
     instance_attributes: &[],
-    textures: &[Texture::new("image")],
+    textures: &[ProgramTexture::new("image")],
     properties: &[
         Property::float("opacity"),
         Property::color("fill_color"),
@@ -91,7 +95,7 @@ pub static SYMBOL_TEXT_AND_ICON: Program = Program {
         Attribute::new("height_offset", Float),
     ],
     instance_attributes: &[],
-    textures: &[Texture::new("glyph_image"), Texture::new("icon_image")],
+    textures: &[ProgramTexture::new("glyph_image"), ProgramTexture::new("icon_image")],
     properties: &[
         Property::float("opacity"),
         Property::color("fill_color"),

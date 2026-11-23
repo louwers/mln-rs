@@ -722,7 +722,7 @@ mod tests {
     use mln_gfx::gfx_types::AttributeDataType::{Float, Short4};
     use mln_gfx::shaders::layer_ubo::ViewUBO;
     use mln_gfx::shaders::program::{
-        Buffer, DRAW_PROJECTION_BUFFER, PROJECTION_BUFFER, Projection, Sources, Texture, VIEW_BUFFER,
+        DRAW_PROJECTION_BUFFER, PROJECTION_BUFFER, ProgramBuffer, ProgramTexture, Projection, Sources, VIEW_BUFFER,
     };
 
     use super::*;
@@ -751,7 +751,7 @@ mod tests {
     fn a_stage_declares_the_buffers_it_names() {
         static PROGRAM: Program = Program {
             name: "pulled",
-            buffers: &[Buffer::uniform::<ViewUBO>("props", 0), Buffer::vertices("paint", 0, Float)],
+            buffers: &[ProgramBuffer::uniform::<ViewUBO>("props", 0), ProgramBuffer::vertices("paint", 0, Float)],
             attributes: &[],
             instance_attributes: &[],
             textures: &[],
@@ -777,11 +777,11 @@ mod tests {
     #[test]
     fn a_vertex_buffer_is_an_array_of_its_words() {
         assert_eq!(
-            declaration(&Binding::Buffer(&Buffer::vertices("walls", 0, Short4)), 2),
+            declaration(&Binding::Buffer(&ProgramBuffer::vertices("walls", 0, Short4)), 2),
             "@group(0) @binding(7) var<storage, read> walls: array<u32>;"
         );
         assert_eq!(
-            declaration(&Binding::Buffer(&Buffer::vertices("paint", 1, Float)), 2),
+            declaration(&Binding::Buffer(&ProgramBuffer::vertices("paint", 1, Float)), 2),
             "@group(0) @binding(8) var<storage, read> paint: array<f32>;"
         );
     }
@@ -793,7 +793,7 @@ mod tests {
             buffers: &[],
             attributes: &[],
             instance_attributes: &[],
-            textures: &[Texture::new("first"), Texture::unfilterable("second")],
+            textures: &[ProgramTexture::new("first"), ProgramTexture::unfilterable("second")],
             properties: &[],
             projection: Projection::None,
             sources: Sources::NONE,

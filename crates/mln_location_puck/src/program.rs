@@ -1,5 +1,5 @@
 use mln_rs::layer::AttributeDataType::Short2;
-use mln_rs::layer::{Attribute, Program, Projection, Sources, Stages, program};
+use mln_rs::layer::{Attribute, Program, ProgramBuffer, Projection, Sources, Stages};
 
 use crate::{glsl, glsl_es, msl, wgsl};
 
@@ -31,7 +31,7 @@ mln_rs::layer::uniform_block! {
 /// are its unit square's.
 pub(crate) static PUCK: Program = Program {
     name: "location-puck",
-    buffers: &[program::Buffer::storage::<PartDraw>("draws", Stages::Vertex)],
+    buffers: &[ProgramBuffer::storage::<PartDraw>("draws", Stages::Vertex)],
     attributes: &[Attribute::new("pos", Short2)],
     instance_attributes: &[],
     textures: &[],

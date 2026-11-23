@@ -285,7 +285,7 @@ fn matching(text: &str, from: usize, open: char, close: char) -> Option<usize> {
 mod tests {
     use mln_gfx::gfx_types::AttributeDataType::Short4;
     use mln_gfx::shaders::program::{
-        Buffer, DRAW_PROJECTION_BUFFER, PROJECTION_BUFFER, Projection, Sources, Texture, VIEW_BUFFER,
+        DRAW_PROJECTION_BUFFER, PROJECTION_BUFFER, ProgramBuffer, ProgramTexture, Projection, Sources, VIEW_BUFFER,
     };
 
     use super::*;
@@ -304,7 +304,7 @@ mod tests {
             "device const ProjectionUBO& drawProjection [[buffer(4)]]"
         );
         assert_eq!(
-            parameter(Binding::Buffer(&Buffer::vertices("walls", 0, Short4))),
+            parameter(Binding::Buffer(&ProgramBuffer::vertices("walls", 0, Short4))),
             "device const short4* walls [[buffer(7)]]"
         );
     }
@@ -313,10 +313,10 @@ mod tests {
     fn a_main_function_has_the_parameters_of_what_its_body_names_and_its_stage_may_read() {
         static PROGRAM: Program = Program {
             name: "walls",
-            buffers: &[Buffer::vertices("walls", 0, Short4)],
+            buffers: &[ProgramBuffer::vertices("walls", 0, Short4)],
             attributes: &[],
             instance_attributes: &[],
-            textures: &[Texture::new("first"), Texture::new("second")],
+            textures: &[ProgramTexture::new("first"), ProgramTexture::new("second")],
             properties: &[],
             projection: Projection::None,
             sources: Sources::NONE,

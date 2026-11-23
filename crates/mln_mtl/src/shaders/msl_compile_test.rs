@@ -12,7 +12,7 @@ use std::fmt::Write as _;
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::bindings::DRAW_INDEX_ID;
-use mln_gfx::shaders::program::{Buffer, GLOBE_DEFINE, PROJECTION_BUFFER, Program, VIEW_BUFFER};
+use mln_gfx::shaders::program::{GLOBE_DEFINE, PROJECTION_BUFFER, Program, ProgramBuffer, VIEW_BUFFER};
 use mln_gfx::shaders::source::msl::{self, Msl};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -320,7 +320,7 @@ fn no_source_declares_a_block() {
     let engine = [VIEW_BUFFER, PROJECTION_BUFFER];
     for (program, source) in sources() {
         let text = [source.prelude, source.source].concat();
-        for block in program.buffers.iter().chain(&engine).filter_map(Buffer::block) {
+        for block in program.buffers.iter().chain(&engine).filter_map(ProgramBuffer::block) {
             assert!(!text.contains(&format!(" {} {{", block.name)), "{} declares {}", program.name, block.name);
         }
     }

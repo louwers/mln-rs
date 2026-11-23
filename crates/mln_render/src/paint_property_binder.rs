@@ -1313,7 +1313,7 @@ macro_rules! paint_property_binders {
 #[cfg(test)]
 mod tests {
     use mln_gfx::shaders::block::UniformBlock;
-    use mln_gfx::shaders::program::{Buffer as ProgramBuffer, Projection, Property, Sources, Stages};
+    use mln_gfx::shaders::program::{ProgramBuffer, Projection, Property, Sources, Stages};
 
     use super::*;
 

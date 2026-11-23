@@ -1,5 +1,5 @@
 use mln_rs::layer::AttributeDataType::Short2;
-use mln_rs::layer::{Attribute, Program, Projection, Sources, program};
+use mln_rs::layer::{Attribute, Program, ProgramBuffer, ProgramTexture, Projection, Sources};
 
 use crate::{glsl, glsl_es, msl, wgsl};
 
@@ -29,10 +29,10 @@ mln_rs::layer::uniform_block! {
 /// `image` and, for a combine, the target `other`.
 pub(crate) static PROCESS: Program = Program {
     name: "image-process",
-    buffers: &[program::Buffer::uniform::<Process>("process", 0)],
+    buffers: &[ProgramBuffer::uniform::<Process>("process", 0)],
     attributes: &[Attribute::new("pos", Short2)],
     instance_attributes: &[],
-    textures: &[program::Texture::new("image"), program::Texture::new("other")],
+    textures: &[ProgramTexture::new("image"), ProgramTexture::new("other")],
     properties: &[],
     projection: Projection::None,
     sources: Sources::NONE.wgsl(&wgsl::PROCESS).msl(&msl::PROCESS).glsl_es(&glsl_es::PROCESS).glsl(&glsl::PROCESS),

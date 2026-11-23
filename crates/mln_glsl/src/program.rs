@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::GpuError;
-use mln_gfx::shaders::program::{Binding, Buffer, BufferKind, ENGINE_BUFFERS, Program};
+use mln_gfx::shaders::program::{Binding, BufferKind, ENGINE_BUFFERS, Program, ProgramBuffer};
 use mln_gfx::shaders::source::glsl::{self, Glsl};
 use mln_gfx::shaders::source::identifiers;
 
@@ -59,7 +59,7 @@ pub fn compose(program: &Program, glsl: &Glsl, stage: Stage, defines: &str) -> R
 /// `std430` one. The blocks have no instance names, so a stage reads the
 /// buffer by its name alone. Fails for an id that the layout has no binding
 /// of its kind for.
-pub(crate) fn declaration(buffer: &Buffer) -> Result<String, GpuError> {
+pub(crate) fn declaration(buffer: &ProgramBuffer) -> Result<String, GpuError> {
     let (set, binding) = match buffer.kind {
         BufferKind::Uniform(_) => match global_uniform_binding(buffer.id) {
             Some(binding) => (DescriptorSetType::Global, Some(binding)),

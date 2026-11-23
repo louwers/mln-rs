@@ -2,7 +2,7 @@
 //! and textures of its shader, and its sources.
 
 use mln_gfx::gfx_types::AttributeDataType::Short2;
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Sources, Stages, Texture};
+use mln_gfx::shaders::program::{Attribute, Program, ProgramBuffer, ProgramTexture, Projection, Sources, Stages};
 
 use super::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
@@ -11,18 +11,18 @@ use super::{glsl, glsl_es, msl, wgsl};
 pub static COLOR_RELIEF: Program = Program {
     name: "color-relief",
     buffers: &[
-        Buffer::storage::<ColorReliefDrawableUBO>("drawableVector", Stages::Vertex),
-        Buffer::storage::<ColorReliefTilePropsUBO>("tilePropsVector", Stages::Both),
-        Buffer::uniform::<ColorReliefEvaluatedPropsUBO>("props", 1),
+        ProgramBuffer::storage::<ColorReliefDrawableUBO>("drawableVector", Stages::Vertex),
+        ProgramBuffer::storage::<ColorReliefTilePropsUBO>("tilePropsVector", Stages::Both),
+        ProgramBuffer::uniform::<ColorReliefEvaluatedPropsUBO>("props", 1),
     ],
     attributes: &[Attribute::new("pos", Short2), Attribute::new("texture_pos", Short2)],
     instance_attributes: &[],
     // The elevations' bytes, which the shader decodes, and the elevations
     // of the stops, which it compares them with.
     textures: &[
-        Texture::new("image").precise(),
-        Texture::unfilterable("elevation_stops").precise(),
-        Texture::new("color_stops"),
+        ProgramTexture::new("image").precise(),
+        ProgramTexture::unfilterable("elevation_stops").precise(),
+        ProgramTexture::new("color_stops"),
     ],
     properties: &[],
     projection: Projection::PerDraw,

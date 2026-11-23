@@ -56,7 +56,9 @@
 pub use mln_gfx::gfx_types::AttributeDataType;
 pub use mln_gfx::gpu::{Caps, TextureFormat};
 pub use mln_gfx::shaders::block::Bool32;
-pub use mln_gfx::shaders::program::{self, Attribute, Program, Projection, Property, Sources, Stages};
+pub use mln_gfx::shaders::program::{
+    self, Attribute, Program, ProgramBuffer, ProgramTexture, Projection, Property, Sources, Stages,
+};
 pub use mln_gfx::shaders::source;
 pub use mln_gfx::texture2d::SamplerState;
 pub use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};

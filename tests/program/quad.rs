@@ -4,7 +4,7 @@
 // language.
 
 use mln_rs::mln_gfx::gfx_types::AttributeDataType::Float2;
-use mln_rs::mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Sources, Texture};
+use mln_rs::mln_gfx::shaders::program::{Attribute, Program, ProgramBuffer, ProgramTexture, Projection, Sources};
 use mln_rs::mln_gfx::shaders::source::{glsl, glsl_es, msl, wgsl};
 
 mln_rs::mln_gfx::uniform_block! {
@@ -19,14 +19,14 @@ mln_rs::mln_gfx::uniform_block! {
 }
 
 /// The quads' block, which the draws share.
-pub(crate) const PROPS: Buffer = Buffer::uniform::<QuadUBO>("props", 0);
+pub(crate) const PROPS: ProgramBuffer = ProgramBuffer::uniform::<QuadUBO>("props", 0);
 
 pub(crate) static QUAD: Program = Program {
     name: "quad",
     buffers: &[PROPS],
     attributes: &[Attribute::new("corner", Float2)],
     instance_attributes: &[Attribute::new("offset", Float2)],
-    textures: &[Texture::new("image")],
+    textures: &[ProgramTexture::new("image")],
     properties: &[],
     projection: Projection::None,
     sources: Sources { wgsl: Some(&WGSL), msl: Some(&MSL), glsl_es: Some(&GLSL_ES), glsl: Some(&GLSL) },

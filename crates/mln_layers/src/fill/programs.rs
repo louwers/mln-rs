@@ -8,23 +8,28 @@
 //! bucket's vertices, outline ends and paint values by index.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float, Float2, Float4, Short2, UShort4};
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Property, Sources, Stages, Texture};
+use mln_gfx::shaders::program::{
+    Attribute, Program, ProgramBuffer, ProgramTexture, Projection, Property, Sources, Stages,
+};
 
 use super::ubo::{
     FillDrawableUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO, FillPatternTilePropsUBO,
 };
 use super::{glsl, glsl_es, msl, wgsl};
 
-const DRAWABLE: Buffer = Buffer::storage::<FillDrawableUBO>("drawableVector", Stages::Vertex);
-const OUTLINE_DRAWABLE: Buffer = Buffer::storage::<FillOutlineDrawableUBO>("drawableVector", Stages::Vertex);
-const PATTERN_DRAWABLE: Buffer = Buffer::storage::<FillPatternDrawableUBO>("drawableVector", Stages::Vertex);
-const PATTERN_TILE_PROPS: Buffer = Buffer::storage::<FillPatternTilePropsUBO>("tilePropsVector", Stages::Both);
-const PROPS: Buffer = Buffer::uniform::<FillEvaluatedPropsUBO>("props", 1);
+const DRAWABLE: ProgramBuffer = ProgramBuffer::storage::<FillDrawableUBO>("drawableVector", Stages::Vertex);
+const OUTLINE_DRAWABLE: ProgramBuffer =
+    ProgramBuffer::storage::<FillOutlineDrawableUBO>("drawableVector", Stages::Vertex);
+const PATTERN_DRAWABLE: ProgramBuffer =
+    ProgramBuffer::storage::<FillPatternDrawableUBO>("drawableVector", Stages::Vertex);
+const PATTERN_TILE_PROPS: ProgramBuffer =
+    ProgramBuffer::storage::<FillPatternTilePropsUBO>("tilePropsVector", Stages::Both);
+const PROPS: ProgramBuffer = ProgramBuffer::uniform::<FillEvaluatedPropsUBO>("props", 1);
 /// The bucket's vertices, their outline ends and their paint values, which
 /// the pulled outlines read.
-const OUTLINE_VERTICES: Buffer = Buffer::vertices("outlineVertices", 0, Short2);
-const OUTLINE_ENDS: Buffer = Buffer::vertices("outlineEnds", 1, Short2);
-const OUTLINE_PAINT: Buffer = Buffer::vertices("outlinePaint", 2, Float);
+const OUTLINE_VERTICES: ProgramBuffer = ProgramBuffer::vertices("outlineVertices", 0, Short2);
+const OUTLINE_ENDS: ProgramBuffer = ProgramBuffer::vertices("outlineEnds", 1, Short2);
+const OUTLINE_PAINT: ProgramBuffer = ProgramBuffer::vertices("outlinePaint", 2, Float);
 
 /// A vertex's position.
 const POSITION: Attribute = Attribute::new("position", Short2);
@@ -81,7 +86,7 @@ pub static FILL_PATTERN: Program = Program {
     buffers: &[PATTERN_DRAWABLE, PATTERN_TILE_PROPS, PROPS],
     attributes: &[POSITION, COLOR, PATTERN_FROM, PATTERN_TO, OPACITY],
     instance_attributes: &[],
-    textures: &[Texture::new("image")],
+    textures: &[ProgramTexture::new("image")],
     properties: PATTERNED,
     projection: Projection::PerDraw,
     sources: Sources::NONE
@@ -96,7 +101,7 @@ pub static FILL_OUTLINE_PATTERN: Program = Program {
     buffers: &[PATTERN_DRAWABLE, PATTERN_TILE_PROPS, PROPS],
     attributes: &[POSITION, COLOR, PATTERN_FROM, PATTERN_TO, OPACITY],
     instance_attributes: &[],
-    textures: &[Texture::new("image")],
+    textures: &[ProgramTexture::new("image")],
     properties: PATTERNED,
     projection: Projection::PerDraw,
     sources: Sources::NONE
@@ -142,7 +147,7 @@ pub static FILL_OUTLINE_PATTERN_INSTANCED: Program = Program {
     buffers: &[PATTERN_DRAWABLE, PATTERN_TILE_PROPS, PROPS],
     attributes: &[CORNER],
     instance_attributes: &[COLOR, PATTERN_FROM, PATTERN_TO, OPACITY, OUTLINE_POS, OUTLINE_END],
-    textures: &[Texture::new("image")],
+    textures: &[ProgramTexture::new("image")],
     properties: PATTERNED,
     projection: Projection::PerDraw,
     sources: Sources::NONE

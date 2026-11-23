@@ -2,7 +2,9 @@
 //! textures and paint properties of its shaders, and their sources.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Short2};
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Property, Sources, Stages, Texture};
+use mln_gfx::shaders::program::{
+    Attribute, Program, ProgramBuffer, ProgramTexture, Projection, Property, Sources, Stages,
+};
 
 use super::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, HeatmapTexturePropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
@@ -11,8 +13,8 @@ use super::{glsl, glsl_es, msl, wgsl};
 pub static HEATMAP: Program = Program {
     name: "heatmap",
     buffers: &[
-        Buffer::storage::<HeatmapDrawableUBO>("drawableVector", Stages::Vertex),
-        Buffer::uniform::<HeatmapEvaluatedPropsUBO>("props", 0),
+        ProgramBuffer::storage::<HeatmapDrawableUBO>("drawableVector", Stages::Vertex),
+        ProgramBuffer::uniform::<HeatmapEvaluatedPropsUBO>("props", 0),
     ],
     attributes: &[Attribute::new("pos", Short2), Attribute::new("weight", Float2), Attribute::new("radius", Float2)],
     instance_attributes: &[],
@@ -29,10 +31,10 @@ pub static HEATMAP: Program = Program {
 /// The target's heat, colored through the ramp onto the frame.
 pub static HEATMAP_TEXTURE: Program = Program {
     name: "heatmap-texture",
-    buffers: &[Buffer::uniform::<HeatmapTexturePropsUBO>("props", 0)],
+    buffers: &[ProgramBuffer::uniform::<HeatmapTexturePropsUBO>("props", 0)],
     attributes: &[Attribute::new("pos", Short2)],
     instance_attributes: &[],
-    textures: &[Texture::new("image"), Texture::new("color_ramp")],
+    textures: &[ProgramTexture::new("image"), ProgramTexture::new("color_ramp")],
     properties: &[],
     projection: Projection::None,
     sources: Sources::NONE

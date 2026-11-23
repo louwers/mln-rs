@@ -10,19 +10,23 @@
 //! reads the bucket's vertices and paint values by index.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float, Float2, Float4, Short2, Short4, UShort2, UShort4};
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Property, Sources, Stages, Texture};
+use mln_gfx::shaders::program::{
+    Attribute, Program, ProgramBuffer, ProgramTexture, Projection, Property, Sources, Stages,
+};
 
 use super::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
 
-pub(crate) const DRAWABLE: Buffer = Buffer::storage::<FillExtrusionDrawableUBO>("drawableVector", Stages::Vertex);
-pub(crate) const TILE_PROPS: Buffer = Buffer::storage::<FillExtrusionTilePropsUBO>("tilePropsVector", Stages::Both);
-pub(crate) const PROPS: Buffer = Buffer::uniform::<FillExtrusionPropsUBO>("props", 1);
+pub(crate) const DRAWABLE: ProgramBuffer =
+    ProgramBuffer::storage::<FillExtrusionDrawableUBO>("drawableVector", Stages::Vertex);
+pub(crate) const TILE_PROPS: ProgramBuffer =
+    ProgramBuffer::storage::<FillExtrusionTilePropsUBO>("tilePropsVector", Stages::Both);
+pub(crate) const PROPS: ProgramBuffer = ProgramBuffer::uniform::<FillExtrusionPropsUBO>("props", 1);
 /// The bucket's vertices, which the pulled walls read: the position and
 /// `decimals_ed` of each.
-pub(crate) const WALL_VERTICES: Buffer = Buffer::vertices("wallVertices", 0, Short4);
+pub(crate) const WALL_VERTICES: ProgramBuffer = ProgramBuffer::vertices("wallVertices", 0, Short4);
 /// The paint values of the bucket's vertices, which the pulled walls read.
-pub(crate) const WALL_PAINT: Buffer = Buffer::vertices("wallPaint", 1, Float);
+pub(crate) const WALL_PAINT: ProgramBuffer = ProgramBuffer::vertices("wallPaint", 1, Float);
 
 /// The corner of the wall quad, or a roof vertex's position.
 const POS: Attribute = Attribute::new("pos", Short2);
@@ -115,7 +119,7 @@ pub static FILL_EXTRUSION_PATTERN: Program = Program {
     buffers: &[DRAWABLE, TILE_PROPS, PROPS],
     attributes: &[POS, DECIMALS_ED, BASE, HEIGHT, PATTERN_FROM, PATTERN_TO],
     instance_attributes: &[],
-    textures: &[Texture::new("image")],
+    textures: &[ProgramTexture::new("image")],
     properties: PATTERNED,
     projection: Projection::PerDraw,
     sources: Sources::NONE
@@ -130,7 +134,7 @@ pub static FILL_EXTRUSION_PATTERN_INSTANCED: Program = Program {
     buffers: &[DRAWABLE, TILE_PROPS, PROPS],
     attributes: &[POS],
     instance_attributes: PATTERN_WALL,
-    textures: &[Texture::new("image")],
+    textures: &[ProgramTexture::new("image")],
     properties: PATTERNED,
     projection: Projection::PerDraw,
     sources: Sources::NONE
@@ -156,7 +160,7 @@ pub static FILL_EXTRUSION_PATTERN_WALL: Program = Program {
         NEXT_DECIMALS_ED,
     ],
     instance_attributes: &[],
-    textures: &[Texture::new("image")],
+    textures: &[ProgramTexture::new("image")],
     properties: PATTERNED,
     projection: Projection::PerDraw,
     sources: Sources::NONE

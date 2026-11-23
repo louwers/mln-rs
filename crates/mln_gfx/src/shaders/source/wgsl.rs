@@ -30,7 +30,7 @@ use crate::shaders::source::{Named, Stage, expand as expand_properties, per_vert
 /// ([`Program::bindings`](crate::shaders::program::Program::bindings)),
 /// `prelude` and the stage's source. The backend declares `drawIndex`, the
 /// draw's index into the storage buffers it reads, and the buffers, each by its
-/// [`name`](crate::shaders::program::Buffer::name) at its id in group 0: a
+/// [`name`](crate::shaders::program::ProgramBuffer::name) at its id in group 0: a
 /// block as a `var<uniform>`, and an array of the elements, or of the
 /// vertices' 32-bit words, of a storage buffer as a `var<storage, read>`.
 /// It declares the program's textures and their samplers in group 1, by

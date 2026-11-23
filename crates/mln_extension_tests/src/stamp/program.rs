@@ -6,7 +6,7 @@ use mln_rs::layer::source::glsl::Glsl;
 use mln_rs::layer::source::glsl_es::Glsl as GlslEs;
 use mln_rs::layer::source::msl::Msl;
 use mln_rs::layer::source::wgsl::Wgsl;
-use mln_rs::layer::{Attribute, Program, Projection, Sources, Stages, program};
+use mln_rs::layer::{Attribute, Program, ProgramBuffer, Projection, Sources, Stages};
 
 mln_rs::layer::uniform_block! {
     /// A draw's block: its rectangle of the tile, left, top, right and
@@ -21,7 +21,7 @@ mln_rs::layer::uniform_block! {
 /// square's.
 pub(crate) static RECT: Program = Program {
     name: "stamp-rect",
-    buffers: &[program::Buffer::storage::<RectDraw>("draws", Stages::Vertex)],
+    buffers: &[ProgramBuffer::storage::<RectDraw>("draws", Stages::Vertex)],
     attributes: &[Attribute::new("pos", Short2)],
     instance_attributes: &[],
     textures: &[],

@@ -1,15 +1,15 @@
 //! The engine's programs and the binding ids they read.
 
 use mln_gfx::gfx_types::AttributeDataType::Short2;
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Sources, Texture};
+use mln_gfx::shaders::program::{Attribute, Program, ProgramBuffer, ProgramTexture, Projection, Sources};
 
 use super::ubo::{AtmospherePropsUBO, LayerCompositeUBO, SkyPropsUBO, TileDebugPropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
 
-pub(crate) const TILE_DEBUG_PROPS: Buffer = Buffer::uniform::<TileDebugPropsUBO>("props", 0);
-pub(crate) const LAYER_COMPOSITE_PROPS: Buffer = Buffer::uniform::<LayerCompositeUBO>("props", 0);
-pub(crate) const SKY_PROPS: Buffer = Buffer::uniform::<SkyPropsUBO>("sky", 0);
-pub(crate) const ATMOSPHERE_PROPS: Buffer = Buffer::uniform::<AtmospherePropsUBO>("atmosphere", 0);
+pub(crate) const TILE_DEBUG_PROPS: ProgramBuffer = ProgramBuffer::uniform::<TileDebugPropsUBO>("props", 0);
+pub(crate) const LAYER_COMPOSITE_PROPS: ProgramBuffer = ProgramBuffer::uniform::<LayerCompositeUBO>("props", 0);
+pub(crate) const SKY_PROPS: ProgramBuffer = ProgramBuffer::uniform::<SkyPropsUBO>("sky", 0);
+pub(crate) const ATMOSPHERE_PROPS: ProgramBuffer = ProgramBuffer::uniform::<AtmospherePropsUBO>("atmosphere", 0);
 
 /// The tile's clipping mask, drawn into the stencil buffer.
 pub(crate) static CLIPPING_MASK: Program = Program {
@@ -81,7 +81,7 @@ pub(crate) static LAYER_COMPOSITE: Program = Program {
     buffers: &[LAYER_COMPOSITE_PROPS],
     attributes: &[Attribute::new("pos", Short2)],
     instance_attributes: &[],
-    textures: &[Texture::unfilterable("image"), Texture::unfilterable("backdrop")],
+    textures: &[ProgramTexture::unfilterable("image"), ProgramTexture::unfilterable("backdrop")],
     properties: &[],
     projection: Projection::None,
     sources: Sources::NONE

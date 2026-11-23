@@ -17,7 +17,7 @@
 
 use crate::gpu::GpuError;
 use crate::shaders::block::{Block, MemberType, c_like_members};
-use crate::shaders::program::{Buffer, Program, PropertyType};
+use crate::shaders::program::{Program, ProgramBuffer, PropertyType};
 use crate::shaders::source::{Named, Stage, expand as expand_properties, per_vertex};
 
 /// The GLSL of a program.
@@ -30,7 +30,7 @@ use crate::shaders::source::{Named, Stage, expand as expand_properties, per_vert
 /// layer's storage buffers, is a push constant. A buffer's declaration is a block
 /// without an instance name, at the set and binding of its id and kind in
 /// `mln_glsl`'s layout, whose one member has the buffer's
-/// [`name`](crate::shaders::program::Buffer::name): the buffer's block, or
+/// [`name`](crate::shaders::program::ProgramBuffer::name): the buffer's block, or
 /// an array of the elements, or of the vertices' 32-bit words, of a storage
 /// buffer. A fragment stage's declarations also have the program's textures
 /// and their samplers, by their names, a
@@ -51,7 +51,7 @@ pub struct Glsl {
 /// buffer of one is a
 /// `std140` block of one member of the struct, or of an array of them.
 #[must_use]
-pub fn blocks<'a>(buffers: impl IntoIterator<Item = &'a Buffer>) -> String {
+pub fn blocks<'a>(buffers: impl IntoIterator<Item = &'a ProgramBuffer>) -> String {
     super::blocks(buffers, declaration)
 }
 

@@ -2,14 +2,14 @@
 //! textures of its shaders, and their sources.
 
 use mln_gfx::gfx_types::AttributeDataType::Short2;
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Sources, Stages, Texture};
+use mln_gfx::shaders::program::{Attribute, Program, ProgramBuffer, ProgramTexture, Projection, Sources, Stages};
 
 use super::ubo::{BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO, BackgroundPropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
 
 pub static BACKGROUND: Program = Program {
     name: "background",
-    buffers: &[Buffer::uniform::<BackgroundPropsUBO>("props", 0)],
+    buffers: &[ProgramBuffer::uniform::<BackgroundPropsUBO>("props", 0)],
     attributes: &[Attribute::new("position", Short2)],
     instance_attributes: &[],
     textures: &[],
@@ -25,12 +25,12 @@ pub static BACKGROUND: Program = Program {
 pub static BACKGROUND_PATTERN: Program = Program {
     name: "background-pattern",
     buffers: &[
-        Buffer::storage::<BackgroundPatternDrawableUBO>("drawableVector", Stages::Vertex),
-        Buffer::uniform::<BackgroundPatternPropsUBO>("props", 0),
+        ProgramBuffer::storage::<BackgroundPatternDrawableUBO>("drawableVector", Stages::Vertex),
+        ProgramBuffer::uniform::<BackgroundPatternPropsUBO>("props", 0),
     ],
     attributes: &[Attribute::new("position", Short2)],
     instance_attributes: &[],
-    textures: &[Texture::new("image")],
+    textures: &[ProgramTexture::new("image")],
     properties: &[],
     projection: Projection::PerDraw,
     sources: Sources::NONE

@@ -134,7 +134,7 @@ impl<'a> MeshDesc<'a> {
 
     /// Binds `buffer` to the program's next vertex buffer that its vertex
     /// stage reads as a storage buffer
-    /// ([`Buffer::vertices`](mln_gfx::shaders::program::Buffer::vertices)),
+    /// ([`Buffer::vertices`](mln_gfx::shaders::program::ProgramBuffer::vertices)),
     /// in the program's order, to read any of its vertices by index. A
     /// program reads such buffers only where the backend binds them
     /// ([`Caps::binds_vertex_buffers`](mln_gfx::gpu::Caps::binds_vertex_buffers)).

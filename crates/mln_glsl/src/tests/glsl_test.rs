@@ -15,7 +15,7 @@ use mln_gfx::shaders::bindings::{
     FIRST_UNIFORM_ID, FIRST_VERTEX_BUFFER_ID, FRAGMENT_STORAGE_ID, MAX_TEXTURES, PROJECTION_BUFFER_ID,
     VERTEX_STORAGE_ID, VIEW_BUFFER_ID,
 };
-use mln_gfx::shaders::program::{Attribute, Buffer as ProgramBuffer, BufferKind, ENGINE_BUFFERS, Program};
+use mln_gfx::shaders::program::{Attribute, BufferKind, ENGINE_BUFFERS, Program, ProgramBuffer};
 use mln_gfx::shaders::source::glsl::{self, Glsl};
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
 

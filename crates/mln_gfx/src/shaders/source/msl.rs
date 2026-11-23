@@ -19,7 +19,7 @@
 
 use crate::gpu::GpuError;
 use crate::shaders::block::{Block, MemberType, c_like_members};
-use crate::shaders::program::{Buffer, Program, PropertyType};
+use crate::shaders::program::{Program, ProgramBuffer, PropertyType};
 use crate::shaders::source::{Named, Stage, expand as expand_properties, per_vertex};
 
 /// The MSL of a program. Its library compiles from the backend's prelude,
@@ -29,7 +29,7 @@ use crate::shaders::source::{Named, Stage, expand as expand_properties, per_vert
 /// ([`Program::bindings`](crate::shaders::program::Program::bindings)),
 /// which the backend adds after its own: `drawIndex`, the draw's index into
 /// its layer's storage buffers, and the buffers, each by its
-/// [`name`](crate::shaders::program::Buffer::name) at the buffer index of
+/// [`name`](crate::shaders::program::ProgramBuffer::name) at the buffer index of
 /// its id, a reference to a block and a pointer to the elements or the
 /// vertices of a storage buffer, and the program's textures and their
 /// samplers by their names, a `texture2d<float, access::sample>` and a
@@ -48,7 +48,7 @@ pub struct Msl {
 
 /// The structs of the blocks of `buffers`, the engine's or a program's.
 #[must_use]
-pub fn blocks<'a>(buffers: impl IntoIterator<Item = &'a Buffer>) -> String {
+pub fn blocks<'a>(buffers: impl IntoIterator<Item = &'a ProgramBuffer>) -> String {
     super::blocks(buffers, declaration)
 }
 

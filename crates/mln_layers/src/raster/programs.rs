@@ -2,7 +2,7 @@
 //! textures of its shader, and its sources.
 
 use mln_gfx::gfx_types::AttributeDataType::Short2;
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Sources, Stages, Texture};
+use mln_gfx::shaders::program::{Attribute, Program, ProgramBuffer, ProgramTexture, Projection, Sources, Stages};
 
 use super::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
@@ -11,12 +11,12 @@ use super::{glsl, glsl_es, msl, wgsl};
 pub static RASTER: Program = Program {
     name: "raster",
     buffers: &[
-        Buffer::storage::<RasterDrawableUBO>("drawableVector", Stages::Vertex),
-        Buffer::uniform::<RasterEvaluatedPropsUBO>("props", 0),
+        ProgramBuffer::storage::<RasterDrawableUBO>("drawableVector", Stages::Vertex),
+        ProgramBuffer::uniform::<RasterEvaluatedPropsUBO>("props", 0),
     ],
     attributes: &[Attribute::new("pos", Short2), Attribute::new("texture_pos", Short2)],
     instance_attributes: &[],
-    textures: &[Texture::new("image0"), Texture::new("image1")],
+    textures: &[ProgramTexture::new("image0"), ProgramTexture::new("image1")],
     properties: &[],
     projection: Projection::PerDraw,
     sources: Sources::NONE

@@ -1,5 +1,5 @@
 use mln_rs::layer::AttributeDataType::{Float, Float2, Float4, Short2};
-use mln_rs::layer::{Attribute, Bool32, Program, Projection, Property, Sources, Stages, program};
+use mln_rs::layer::{Attribute, Bool32, Program, ProgramBuffer, Projection, Property, Sources, Stages};
 
 use crate::{glsl, glsl_es, msl, wgsl};
 
@@ -54,8 +54,8 @@ mln_rs::layer::uniform_block! {
 pub(crate) static NGON: Program = Program {
     name: "ngon",
     buffers: &[
-        program::Buffer::storage::<NgonDraw>("draws", Stages::Vertex),
-        program::Buffer::uniform::<NgonProps>("props", 0),
+        ProgramBuffer::storage::<NgonDraw>("draws", Stages::Vertex),
+        ProgramBuffer::uniform::<NgonProps>("props", 0),
     ],
     attributes: &[
         Attribute::new("pos", Short2),

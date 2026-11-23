@@ -6,7 +6,9 @@
 //! fields, in its color or along the gradient.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2, UByte4, UShort4};
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Property, Sources, Stages, Texture};
+use mln_gfx::shaders::program::{
+    Attribute, Program, ProgramBuffer, ProgramTexture, Projection, Property, Sources, Stages,
+};
 
 use super::ubo::{
     LineDrawableUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO, LinePatternTilePropsUBO,
@@ -14,9 +16,10 @@ use super::ubo::{
 };
 use super::{glsl, glsl_es, msl, wgsl};
 
-const PROPS: Buffer = Buffer::uniform::<LineEvaluatedPropsUBO>("props", 0);
-const SDF_DRAWABLE: Buffer = Buffer::storage::<LineSDFDrawableUBO>("drawableVector", Stages::Vertex);
-const SDF_TILE_PROPS: Buffer = Buffer::storage::<LineSDFTilePropsUBO>("tilePropsVector", Stages::Fragment);
+const PROPS: ProgramBuffer = ProgramBuffer::uniform::<LineEvaluatedPropsUBO>("props", 0);
+const SDF_DRAWABLE: ProgramBuffer = ProgramBuffer::storage::<LineSDFDrawableUBO>("drawableVector", Stages::Vertex);
+const SDF_TILE_PROPS: ProgramBuffer =
+    ProgramBuffer::storage::<LineSDFTilePropsUBO>("tilePropsVector", Stages::Fragment);
 
 /// A vertex's position, doubled, with its round and up flags in the low
 /// bits.
@@ -47,7 +50,7 @@ const DASHARRAY_PROPERTY: Property = Property::vec4("dasharray");
 
 pub static LINE: Program = Program {
     name: "line",
-    buffers: &[Buffer::storage::<LineDrawableUBO>("drawableVector", Stages::Vertex), PROPS],
+    buffers: &[ProgramBuffer::storage::<LineDrawableUBO>("drawableVector", Stages::Vertex), PROPS],
     attributes: &[POS_NORMAL, DATA, COLOR, BLUR, OPACITY, GAP_WIDTH, OFFSET, WIDTH],
     instance_attributes: &[],
     textures: &[],
@@ -62,10 +65,10 @@ pub static LINE: Program = Program {
 
 pub static LINE_GRADIENT: Program = Program {
     name: "line-gradient",
-    buffers: &[Buffer::storage::<LineGradientDrawableUBO>("drawableVector", Stages::Vertex), PROPS],
+    buffers: &[ProgramBuffer::storage::<LineGradientDrawableUBO>("drawableVector", Stages::Vertex), PROPS],
     attributes: &[POS_NORMAL, DATA, BLUR, OPACITY, GAP_WIDTH, OFFSET, WIDTH],
     instance_attributes: &[],
-    textures: &[Texture::new("image")],
+    textures: &[ProgramTexture::new("image")],
     properties: &[BLUR_PROPERTY, OPACITY_PROPERTY, GAP_WIDTH_PROPERTY, OFFSET_PROPERTY, WIDTH_PROPERTY],
     projection: Projection::PerDraw,
     sources: Sources::NONE
@@ -78,13 +81,13 @@ pub static LINE_GRADIENT: Program = Program {
 pub static LINE_PATTERN: Program = Program {
     name: "line-pattern",
     buffers: &[
-        Buffer::storage::<LinePatternDrawableUBO>("drawableVector", Stages::Vertex),
-        Buffer::storage::<LinePatternTilePropsUBO>("tilePropsVector", Stages::Fragment),
+        ProgramBuffer::storage::<LinePatternDrawableUBO>("drawableVector", Stages::Vertex),
+        ProgramBuffer::storage::<LinePatternTilePropsUBO>("tilePropsVector", Stages::Fragment),
         PROPS,
     ],
     attributes: &[POS_NORMAL, DATA, BLUR, OPACITY, GAP_WIDTH, OFFSET, WIDTH, PATTERN_FROM, PATTERN_TO],
     instance_attributes: &[],
-    textures: &[Texture::new("image")],
+    textures: &[ProgramTexture::new("image")],
     properties: &[
         BLUR_PROPERTY,
         OPACITY_PROPERTY,
@@ -107,7 +110,7 @@ pub static LINE_SDF: Program = Program {
     buffers: &[SDF_DRAWABLE, SDF_TILE_PROPS, PROPS],
     attributes: &[POS_NORMAL, DATA, COLOR, BLUR, OPACITY, GAP_WIDTH, OFFSET, WIDTH, FLOOR_WIDTH, DASHARRAY],
     instance_attributes: &[],
-    textures: &[Texture::new("image")],
+    textures: &[ProgramTexture::new("image")],
     properties: &[
         COLOR_PROPERTY,
         BLUR_PROPERTY,
@@ -131,7 +134,7 @@ pub static LINE_GRADIENT_SDF: Program = Program {
     buffers: &[SDF_DRAWABLE, SDF_TILE_PROPS, PROPS],
     attributes: &[POS_NORMAL, DATA, BLUR, OPACITY, GAP_WIDTH, OFFSET, WIDTH, FLOOR_WIDTH, DASHARRAY],
     instance_attributes: &[],
-    textures: &[Texture::new("image"), Texture::new("image_dash")],
+    textures: &[ProgramTexture::new("image"), ProgramTexture::new("image_dash")],
     properties: &[
         BLUR_PROPERTY,
         OPACITY_PROPERTY,

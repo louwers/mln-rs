@@ -2,7 +2,7 @@
 //! textures of its shaders, and their sources.
 
 use mln_gfx::gfx_types::AttributeDataType::Short2;
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Sources, Stages, Texture};
+use mln_gfx::shaders::program::{Attribute, Program, ProgramBuffer, ProgramTexture, Projection, Sources, Stages};
 
 use super::ubo::{
     HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO,
@@ -14,13 +14,13 @@ use super::{glsl, glsl_es, msl, wgsl};
 pub static HILLSHADE: Program = Program {
     name: "hillshade",
     buffers: &[
-        Buffer::storage::<HillshadeDrawableUBO>("drawableVector", Stages::Vertex),
-        Buffer::storage::<HillshadeTilePropsUBO>("tilePropsVector", Stages::Fragment),
-        Buffer::uniform::<HillshadeEvaluatedPropsUBO>("props", 0),
+        ProgramBuffer::storage::<HillshadeDrawableUBO>("drawableVector", Stages::Vertex),
+        ProgramBuffer::storage::<HillshadeTilePropsUBO>("tilePropsVector", Stages::Fragment),
+        ProgramBuffer::uniform::<HillshadeEvaluatedPropsUBO>("props", 0),
     ],
     attributes: &[Attribute::new("pos", Short2), Attribute::new("texture_pos", Short2)],
     instance_attributes: &[],
-    textures: &[Texture::new("image")],
+    textures: &[ProgramTexture::new("image")],
     properties: &[],
     projection: Projection::PerDraw,
     sources: Sources::NONE
@@ -34,13 +34,13 @@ pub static HILLSHADE: Program = Program {
 pub static HILLSHADE_PREPARE: Program = Program {
     name: "hillshade-prepare",
     buffers: &[
-        Buffer::draw_uniform::<HillshadePrepareDrawableUBO>("drawable", Stages::Vertex),
-        Buffer::draw_uniform::<HillshadePrepareTilePropsUBO>("tileProps", Stages::Both),
+        ProgramBuffer::draw_uniform::<HillshadePrepareDrawableUBO>("drawable", Stages::Vertex),
+        ProgramBuffer::draw_uniform::<HillshadePrepareTilePropsUBO>("tileProps", Stages::Both),
     ],
     attributes: &[Attribute::new("pos", Short2), Attribute::new("texture_pos", Short2)],
     instance_attributes: &[],
     // The elevations' bytes, which the shader decodes.
-    textures: &[Texture::new("image").precise()],
+    textures: &[ProgramTexture::new("image").precise()],
     properties: &[],
     projection: Projection::None,
     sources: Sources::NONE

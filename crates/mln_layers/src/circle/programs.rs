@@ -2,7 +2,7 @@
 //! paint properties of its shaders, and their sources.
 
 use mln_gfx::gfx_types::AttributeDataType::{Float2, Float4, Short2};
-use mln_gfx::shaders::program::{Attribute, Buffer, Program, Projection, Property, Sources, Stages};
+use mln_gfx::shaders::program::{Attribute, Program, ProgramBuffer, Projection, Property, Sources, Stages};
 
 use super::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
@@ -10,8 +10,8 @@ use super::{glsl, glsl_es, msl, wgsl};
 pub static CIRCLE: Program = Program {
     name: "circle",
     buffers: &[
-        Buffer::storage::<CircleDrawableUBO>("drawableVector", Stages::Vertex),
-        Buffer::uniform::<CircleEvaluatedPropsUBO>("props", 0),
+        ProgramBuffer::storage::<CircleDrawableUBO>("drawableVector", Stages::Vertex),
+        ProgramBuffer::uniform::<CircleEvaluatedPropsUBO>("props", 0),
     ],
     attributes: &[
         Attribute::new("pos", Short2),

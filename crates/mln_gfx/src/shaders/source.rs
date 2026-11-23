@@ -7,8 +7,8 @@
 //! of its own, of the helpers the shaders share, with the declarations of
 //! the blocks of the engine's buffers and the program's, which it writes
 //! from their [`Block`]s, and with the declarations of the buffers and
-//! textures that a stage names, which it writes from their [`Buffer`]s and
-//! [`Texture`](crate::shaders::program::Texture)s: a source declares no
+//! textures that a stage names, which it writes from their [`ProgramBuffer`]s and
+//! [`ProgramTexture`](crate::shaders::program::ProgramTexture)s: a source declares no
 //! block, buffer or texture itself, and reads a buffer or a texture by its
 //! name.
 //!
@@ -53,7 +53,7 @@ use std::fmt::Write as _;
 use crate::gfx_types::AttributeDataType;
 use crate::gpu::GpuError;
 use crate::shaders::block::Block;
-use crate::shaders::program::{Buffer, Program, Property, PropertyType};
+use crate::shaders::program::{Program, ProgramBuffer, Property, PropertyType};
 
 pub mod glsl;
 pub mod glsl_es;
@@ -121,7 +121,7 @@ impl<'a> Named<'a> {
 /// The declarations that `declaration` writes of the blocks of `buffers`,
 /// each once.
 pub(crate) fn blocks<'a>(
-    buffers: impl IntoIterator<Item = &'a Buffer>,
+    buffers: impl IntoIterator<Item = &'a ProgramBuffer>,
     declaration: impl Fn(&Block) -> String,
 ) -> String {
     let mut written: Vec<&str> = Vec::new();
@@ -168,7 +168,7 @@ pub(crate) fn expand(
             .ok_or_else(|| GpuError::Invalid(format!("{} has no property {name}", program.name)))?;
         let mix = format!("{name}_t");
         let mixed = matches!(property.ty, PropertyType::Float | PropertyType::Color);
-        let blocks = || program.buffers.iter().filter_map(Buffer::block);
+        let blocks = || program.buffers.iter().filter_map(ProgramBuffer::block);
         if mixed && !blocks().any(|block| block.members.iter().any(|member| member.name == mix)) {
             return Err(GpuError::Invalid(format!("{} has no block with {mix}, which mixes {name}", program.name)));
         }
@@ -262,7 +262,7 @@ pub fn identifiers(source: &str) -> impl Iterator<Item = &str> {
 #[expect(unsafe_code, reason = "`uniform_block!` implements bytemuck's `Pod` for the block it declares")]
 mod tests {
     use crate::gfx_types::AttributeDataType::{Float4, Short2};
-    use crate::shaders::program::{Attribute, Buffer, Program, Projection, Property, Sources, Stages};
+    use crate::shaders::program::{Attribute, Program, ProgramBuffer, Projection, Property, Sources, Stages};
     use crate::shaders::source::wgsl::{self, Wgsl};
 
     crate::uniform_block! {
@@ -283,7 +283,7 @@ mod tests {
 
     static DOT: Program = Program {
         name: "dot",
-        buffers: &[Buffer::storage::<DotDrawableUBO>("drawableVector", Stages::Vertex)],
+        buffers: &[ProgramBuffer::storage::<DotDrawableUBO>("drawableVector", Stages::Vertex)],
         attributes: &[Attribute::new("pos", Short2), Attribute::new("color", Float4)],
         instance_attributes: &[],
         textures: &[],

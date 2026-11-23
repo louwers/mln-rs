@@ -11,7 +11,7 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gfx_types::DrawModeType;
 use mln_gfx::gpu::{DepthState, FixedState, StencilState, VertexAttribute, VertexBufferLayout, VertexStep};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::program::{Buffer, ENGINE_BUFFERS, Program, ProgramParameters};
+use mln_gfx::shaders::program::{ENGINE_BUFFERS, Program, ProgramBuffer, ProgramParameters};
 use mln_gfx::shaders::source::wgsl::{self, Wgsl};
 use mln_gfx::types::DepthFunctionType;
 
@@ -134,7 +134,7 @@ fn no_source_declares_a_block() {
     let engine = &ENGINE_BUFFERS;
     for (program, source) in programs() {
         let text = [PRELUDE, source.prelude, source.vertex, source.fragment].concat();
-        for block in program.buffers.iter().chain(engine).filter_map(Buffer::block) {
+        for block in program.buffers.iter().chain(engine).filter_map(ProgramBuffer::block) {
             assert!(!text.contains(&format!("struct {} {{", block.name)), "{} declares {}", program.name, block.name);
         }
     }
