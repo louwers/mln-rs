@@ -131,8 +131,7 @@ impl Placement {
     /// Whether a symbol crossing the borders that didn't place places again
     /// with the rest, to try its other variable anchors.
     fn should_retry_placement(&self, placement: JointPlacement, ctx: &BucketContext<'_>) -> bool {
-        self.crossing() && !placement.placed()
-            && ctx.bucket.has_variable_text_anchors()
+        self.crossing() && !placement.placed() && ctx.bucket.has_variable_text_anchors()
     }
 
     /// Adds to `records` the parts of `symbol`, placed as `placement`, in

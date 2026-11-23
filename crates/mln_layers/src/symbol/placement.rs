@@ -111,9 +111,8 @@ impl LayerBuckets {
                 // After every range of a sort key no greater, as ranges of
                 // equal keys keep their order.
                 let at = self.placed.partition_point(|lhs| {
-                    lhs.sort_key_range.is_none_or(|lhs| {
-                        range.sort_key.partial_cmp(&lhs.sort_key) != Some(std::cmp::Ordering::Less)
-                    })
+                    lhs.sort_key_range
+                        .is_none_or(|lhs| range.sort_key.partial_cmp(&lhs.sort_key) != Some(std::cmp::Ordering::Less))
                 });
                 self.placed.insert(at, placed);
             }

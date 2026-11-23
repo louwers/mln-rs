@@ -260,8 +260,7 @@ impl Placement {
     /// to try them: a label placed before tries its anchor first, and in a
     /// tilted view that one alone.
     fn order_anchors(&self, id: NonZeroU32, anchors: &mut Vec<SymbolAnchorType>, ctx: &BucketContext<'_>) {
-        let Some(prev_anchor) = self.prev().and_then(|prev| prev.variable_offsets.get(&id)).map(|o| o.anchor)
-        else {
+        let Some(prev_anchor) = self.prev().and_then(|prev| prev.variable_offsets.get(&id)).map(|o| o.anchor) else {
             return;
         };
         if anchors.first().is_none_or(|first| *first == prev_anchor) || !anchors.contains(&prev_anchor) {

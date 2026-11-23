@@ -237,7 +237,8 @@ impl Placements {
         let mut places: SmallVec<[bool; 4]> = SmallVec::new();
         for (index, participant) in self.participants.iter_mut().enumerate() {
             let own = layers_of(&self.layers, &self.tiles, layers, index);
-            let frame = &mut ErasedFrame { view: &update_parameters.view, buckets: &mut *store, placed: &mut self.placed };
+            let frame =
+                &mut ErasedFrame { view: &update_parameters.view, buckets: &mut *store, placed: &mut self.placed };
             let own_prepared = participant.prepare(&own, frame);
             prepared.added |= own_prepared.added;
             prepared.changed |= own_prepared.changed;
@@ -327,7 +328,8 @@ impl Placements {
     ) {
         for (index, participant) in self.participants.iter_mut().enumerate() {
             let own = layers_of(&self.layers, &self.tiles, layers, index);
-            let frame = &mut ErasedFrame { view: &update_parameters.view, buckets: &mut *store, placed: &mut self.placed };
+            let frame =
+                &mut ErasedFrame { view: &update_parameters.view, buckets: &mut *store, placed: &mut self.placed };
             participant.update(&own, frame);
         }
     }
@@ -382,7 +384,8 @@ impl Placements {
     /// Whether placing now would place from other inputs than the current
     /// placement did, as far as the engine knows them.
     fn changed(&self, update_parameters: &UpdateParameters) -> bool {
-        self.committed.as_ref().is_none_or(|committed| !committed.are(update_parameters)) || self.committed_led != self.led
+        self.committed.as_ref().is_none_or(|committed| !committed.are(update_parameters))
+            || self.committed_led != self.led
     }
 
     /// Whether the frame's layers lead a bucket the last frame's didn't.
