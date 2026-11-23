@@ -1104,7 +1104,7 @@ impl RenderOrchestrator {
             Err(error) => Err(error),
         };
         if let Err(error) = began {
-            Log::error(Event::Render, format!("Beginning a named target's pass failed: {error}"));
+            parameters.context.fail(format!("Beginning a named target's pass failed: {error}"));
             return;
         }
         parameters.reset_stencil();
@@ -1117,7 +1117,7 @@ impl RenderOrchestrator {
         }
         parameters.opaque_pass_cutoff = opaque_pass_cutoff;
         if let Err(error) = parameters.end_pass(gpu) {
-            Log::error(Event::Render, format!("Ending a named target's pass failed: {error}"));
+            parameters.context.fail(format!("Ending a named target's pass failed: {error}"));
         }
     }
 

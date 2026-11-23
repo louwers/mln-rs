@@ -336,7 +336,7 @@ impl DrawObjects {
     /// changed since the last upload.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Resources) {
         if let Err(error) = self.upload_in(gpu, context) {
-            Log::error(Event::Render, format!("Uploading {} failed: {error}", self.program.name));
+            context.fail(format!("Uploading {} failed: {error}", self.program.name));
         }
     }
 
@@ -393,7 +393,7 @@ impl DrawObjects {
 
         for (texture, _) in self.textures.iter().flatten() {
             if let Err(error) = context.upload_texture(gpu, texture) {
-                Log::error(Event::Render, format!("Uploading a texture failed: {error}"));
+                context.fail(format!("Uploading a texture failed: {error}"));
             }
         }
 
@@ -403,7 +403,8 @@ impl DrawObjects {
     /// Draws the segments into `parameters`' open pass on `gpu`, the
     /// context's, with `depth` and `stencil`, binding the buffers
     /// of the draws in `frame`. Shaders read the draw's entries in those
-    /// storage buffers at `global_index`. Returns whether it didn't fail.
+    /// storage buffers at `global_index`. A draw that fails fails the frame
+    /// ([`Resources::fail`]).
     pub(crate) fn draw(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -412,12 +413,10 @@ impl DrawObjects {
         depth: DepthTest,
         stencil: Stencil,
         global_index: u32,
-    ) -> bool {
-        let drawn = self.draw_in(gpu, parameters, frame, depth, stencil, global_index);
-        if let Err(error) = &drawn {
-            Log::warning(Event::Render, format!("Drawing {} failed: {error}", self.program.name));
+    ) {
+        if let Err(error) = self.draw_in(gpu, parameters, frame, depth, stencil, global_index) {
+            parameters.context.fail(format!("Drawing {} failed: {error}", self.program.name));
         }
-        drawn.is_ok()
     }
 
     fn draw_in(
@@ -440,10 +439,11 @@ impl DrawObjects {
         let turned = camera.viewport_mode() == ViewportMode::FlippedY && !camera.is_globe();
         let context = &mut *parameters.context;
         let shader = self.shader(context, variant).clone();
-        let index_buffer = context.stored_buffer(&self.indexes).and_then(StoredBuffer::buffer);
-        debug_assert!(index_buffer.is_some(), "a draw of {} draws indexes it didn't upload", self.program.name);
-        let Some(index_buffer) = index_buffer else {
-            return Ok(());
+        let Some(index_buffer) = context.stored_buffer(&self.indexes).and_then(StoredBuffer::buffer) else {
+            // Only a failed upload, which failed the frame, leaves a draw
+            // without its indexes.
+            debug_assert!(context.failed(), "a draw of {} draws indexes it didn't upload", self.program.name);
+            return Err(GpuError::Invalid("its indexes aren't uploaded".to_owned()));
         };
 
         let shader_id = match self.shader_id {

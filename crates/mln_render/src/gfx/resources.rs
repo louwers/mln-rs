@@ -58,6 +58,8 @@ pub(crate) struct Device {
     /// Why the first GPU failure since [`take_failure`](Self::take_failure)
     /// failed.
     failure: Option<String>,
+    /// How many failures there were.
+    failures: u64,
 }
 
 impl Device {
@@ -65,12 +67,19 @@ impl Device {
     /// the GPU, and keeps it as the frame's failure unless one came first.
     pub(crate) fn fail(&mut self, message: String) {
         Log::error(Event::Render, &message);
+        self.failures += 1;
         self.failure.get_or_insert(message);
     }
 
     /// Whether something failed since the last [`take_failure`](Self::take_failure).
     pub(crate) fn failed(&self) -> bool {
         self.failure.is_some()
+    }
+
+    /// How many failures there were so far, to tell whether something
+    /// failed between two calls.
+    pub(crate) fn failures(&self) -> u64 {
+        self.failures
     }
 
     /// Why the first GPU failure since the last call failed, if one did.

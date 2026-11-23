@@ -15,7 +15,6 @@ use mln_style::layer_type::{ErasedLayerStyle, LayerStyle, PaintSet, SourceKind, 
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::VisibilityType;
 use mln_util::geo::ScreenCoordinate;
-use mln_util::logging::{Event, Log};
 use smallvec::SmallVec;
 
 use crate::bucket::ErasedBucket;
@@ -374,8 +373,9 @@ pub(crate) trait RenderLayer: Any {
 }
 
 /// Lends `layer` the backend's commands of `gpu` `at` the frame's time,
-/// where the frame has them to lend: in a pass, the open one.
-fn lend<L: Layer>(layer: &mut L, gpu: &mut dyn Gpu, parameters: &PaintParameters<'_>, at: LendAt) {
+/// where the frame has them to lend: in a pass, the open one. A lend that
+/// fails fails the frame.
+fn lend<L: Layer>(layer: &mut L, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, at: LendAt) {
     let (Some(projection), frame) = (parameters.frame_projection, parameters.frame) else { return };
     let layer_depth = match at {
         LendAt::BeforePasses => None,
@@ -384,7 +384,7 @@ fn lend<L: Layer>(layer: &mut L, gpu: &mut dyn Gpu, parameters: &PaintParameters
     };
     let lent = gpu.lend(&mut |raw| layer.lend(at, Lent { raw, frame: &frame, projection: &projection, layer_depth }));
     if let Err(error) = lent {
-        Log::error(Event::Render, format!("Lending a layer the backend's commands failed: {error}"));
+        parameters.context.fail(format!("Lending a layer the backend's commands failed: {error}"));
     }
 }
 

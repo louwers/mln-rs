@@ -585,6 +585,9 @@ impl Encoder {
         if let Err(error) = &submitted {
             parameters.context.fail(format!("Submitting the frame failed: {error}"));
         }
+        // What a failed submission drew into the layers' targets didn't
+        // reach them: the layers draw into them again.
+        parameters.context.submitted(submitted.is_ok());
         let error = parameters.context.device().take_failure().map(Error::native);
         drop(parameters);
 

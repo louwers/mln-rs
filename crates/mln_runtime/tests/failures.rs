@@ -115,8 +115,10 @@ fn broken_map(runtime: &Runtime, mode: MapMode) -> Option<(Map, RenderSession, A
 
 /// A map of `mode` and `size` with a red background.
 fn red_map(runtime: &Runtime, mode: MapMode, size: Size) -> Map {
-    let options =
-        MapOptions { map: mln_runtime::map::MapCoreOptions { size, map_mode: mode, ..Default::default() }, ..Default::default() };
+    let options = MapOptions {
+        map: mln_runtime::map::MapCoreOptions { size, map_mode: mode, ..Default::default() },
+        ..Default::default()
+    };
     let (map, created) = runtime.create_map(options).unwrap();
     result_of(created).unwrap();
     wait(map.set_style_json(STYLE));

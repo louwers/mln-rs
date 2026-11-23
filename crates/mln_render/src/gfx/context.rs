@@ -110,6 +110,10 @@ pub struct Resources {
     /// Whether [`tear_down`](Self::tear_down) destroyed what the context
     /// made.
     torn_down: bool,
+    /// The textures of the targets that the frame being encoded drew into
+    /// without a failure, until its submission
+    /// ([`submitted`](Self::submitted)).
+    drawn_targets: Vec<crate::draw::Texture>,
     /// The work that waits for the GPU to finish what the context gave it.
     pub(crate) after_gpu: AfterGpuQueue,
 }
@@ -141,6 +145,7 @@ impl Resources {
             releases: Vec::new(),
             doomed: Vec::new(),
             torn_down: false,
+            drawn_targets: Vec::new(),
             after_gpu: AfterGpuQueue::new(),
         }
     }
@@ -249,21 +254,38 @@ impl Resources {
         })
     }
 
-    /// Whether `target` holds what a frame drew into it: its pass and its
-    /// draws ended without a failure, and it kept its texture since. What
-    /// it holds stays until the frame draws into it again
-    /// ([`Draws::target`](crate::draw::Draws::target)), so a layer whose
-    /// draws into a target don't change from frame to frame draws into it
-    /// until it holds them.
+    /// Whether `target` holds what a frame drew into it: its pass, its
+    /// draws and the frame's submission ended without a failure, and it
+    /// kept its texture since. What it holds stays until the frame draws
+    /// into it again ([`Draws::target`](crate::draw::Draws::target)), so a
+    /// layer whose draws into a target don't change from frame to frame
+    /// draws into it until it holds them.
     #[must_use]
     pub fn is_drawn(&self, target: &crate::draw::Target) -> bool {
         self.textures.get(&target.texture.0).is_some_and(Texture2D::is_drawn)
     }
 
-    /// Says whether the frame's pass and draws into `target` failed.
+    /// Says whether the frame's pass and draws into `target` ended without
+    /// a failure; one that did holds them once the frame's submission
+    /// doesn't fail either ([`submitted`](Self::submitted)).
     pub(crate) fn set_drawn(&mut self, target: &crate::draw::Target, drawn: bool) {
         if let Some(texture) = self.textures.get_mut(&target.texture.0) {
             texture.set_drawn(drawn);
+            if drawn {
+                self.drawn_targets.push(target.texture.clone());
+            }
+        }
+    }
+
+    /// Ends the submission of the frame being encoded, which failed unless
+    /// `ok`: then the targets that the frame drew into hold nothing, and
+    /// the layers draw into them again.
+    pub(crate) fn submitted(&mut self, ok: bool) {
+        let Resources { textures, drawn_targets, .. } = self;
+        for texture in drawn_targets.drain(..) {
+            if !ok && let Some(texture) = textures.get_mut(&texture.0) {
+                texture.set_drawn(false);
+            }
         }
     }
 
@@ -437,6 +459,18 @@ impl Resources {
     /// ([`Device::fail`]).
     pub(crate) fn fail(&mut self, message: String) {
         self.device.fail(message);
+    }
+
+    /// Whether something failed since the frame's failure was last taken
+    /// ([`Device::take_failure`]).
+    pub(crate) fn failed(&self) -> bool {
+        self.device.failed()
+    }
+
+    /// How many failures there were so far, to tell whether something
+    /// failed between two calls.
+    pub(crate) fn failures(&self) -> u64 {
+        self.device.failures()
     }
 
     /// The rendering stats now. What the renderer released counts until the
