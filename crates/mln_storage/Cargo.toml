@@ -99,7 +99,6 @@ mln_runtime = { package = "mln-rs-runtime", path = "../mln_runtime", default-fea
 ] }
 # The built-in registrations of the tests' maps.
 mln_rs = { package = "mln-rs", path = "../..", default-features = false }
-mln_test_server = { package = "mln-rs-test-server", path = "../../tools/test-server" }
 
 [lints]
 workspace = true

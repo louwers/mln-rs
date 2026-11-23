@@ -3123,7 +3123,6 @@ dependencies = [
  "mln-rs-feature",
  "mln-rs-headless",
  "mln-rs-runtime",
- "mln-rs-test-server",
  "mln-rs-util",
  "mln-rs-vec-map",
  "objc2 0.6.5",
