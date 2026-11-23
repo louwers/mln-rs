@@ -2,7 +2,7 @@
 //! WebP decoders stay out of the wasm module.
 //!
 //! `createImageBitmap` decodes without premultiplying or converting colours,
-//! as libpng and libwebp decode for C++, and its straight RGBA8 texels are
+//! as the Rust decoders decode, and its straight RGBA8 texels are
 //! read back through a `VideoFrame` or a canvas (`read_bitmap`), then
 //! premultiplied as the Rust decoders premultiply them. The decoding and the
 //! readback are Orbis's (github.com/sargunv/orbis, crates/orb-web's host).
@@ -39,15 +39,16 @@ impl ImageDecoder for BrowserDecoder {
             };
             done(match image {
                 Ok(image) => Ok(premultiply(image)),
-                // `decodeWEBP`: an empty image, and a warning.
+                // A WebP image that doesn't decode is empty, with a warning,
+                // as the Rust decoder makes it.
                 Err(_) if kind == ImageType::Webp => {
-                    Log::warning(Event::Image, "Failed to decode WebP image contents!");
+                    Log::warning(Event::Image, "couldn't decode a WebP image");
                     Ok(PremultipliedImage::default())
                 }
                 Err(error) => {
                     let error = error.as_string().unwrap_or_else(|| format!("{error:?}"));
                     Err(Error::invalid_argument(match kind {
-                        // `decodePNG`'s prefix.
+                        // The Rust PNG decoder's message.
                         ImageType::Png => format!("failed to read invalid png: '{error}'"),
                         _ => format!("failed to read invalid {kind:?} image: '{error}'"),
                     }))

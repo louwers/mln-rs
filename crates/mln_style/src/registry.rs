@@ -109,7 +109,7 @@ impl StyleRegistry {
         error: &mut Error,
     ) -> Option<Layer> {
         let Some(layer_type) = self.layer_type(type_) else {
-            error.message = format!("Unsupported layer type! Null factory for type: {type_}");
+            error.message = format!("unknown layer type '{type_}'");
             return None;
         };
         let info = layer_type.info();

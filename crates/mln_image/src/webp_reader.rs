@@ -11,22 +11,22 @@ use mln_util::premultiply::premultiply;
 use mln_util::size::Size;
 
 /// Decodes WebP `data`. Logs a warning and returns an empty image when the
-/// data can't be decoded, as C++ does.
+/// data can't be decoded.
 #[must_use]
 pub(crate) fn decode_webp(data: &[u8]) -> PremultipliedImage {
     let Ok(mut decoder) = image_webp::WebPDecoder::new(Cursor::new(data)) else {
-        Log::warning(Event::Image, "Failed to decode WebP image header!");
+        Log::warning(Event::Image, "couldn't read a WebP image's header");
         return PremultipliedImage::default();
     };
 
     let (width, height) = decoder.dimensions();
     let Some(buffer_size) = decoder.output_buffer_size() else {
-        Log::warning(Event::Image, "Failed to decode WebP image contents!");
+        Log::warning(Event::Image, "couldn't decode a WebP image");
         return PremultipliedImage::default();
     };
     let mut buffer = vec![0u8; buffer_size];
     if decoder.read_image(&mut buffer).is_err() {
-        Log::warning(Event::Image, "Failed to decode WebP image contents!");
+        Log::warning(Event::Image, "couldn't decode a WebP image");
         return PremultipliedImage::default();
     }
 
