@@ -12,6 +12,7 @@ use mln_text::GlyphCache;
 use mln_text::local_fonts::LocalGlyphs;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
+use mln_util::error::Error;
 use mln_util::event_queue::Waker;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
@@ -104,6 +105,8 @@ pub struct UpdatedFrame {
 /// [`Renderer::finish_frame`] once the target handed it off.
 #[must_use = "a drawn frame is finished once its target handed it off"]
 pub struct DrawnFrame {
+    /// Why the frame failed on the GPU, if it did.
+    error: Option<Error>,
     mode: RenderMode,
     needs_repaint: bool,
     /// When the frame's placement wants the next frame, if it does.
@@ -142,6 +145,15 @@ struct Encoder {
     /// Where the last frame drew the map.
     frame_projection: Option<FrameProjection>,
     timings: RenderTimings,
+}
+
+impl DrawnFrame {
+    /// Why the frame failed on the GPU, if it did. Its image then lacks what
+    /// failed, or holds nothing.
+    #[must_use]
+    pub fn error(&self) -> Option<&Error> {
+        self.error.as_ref()
+    }
 }
 
 impl Renderer {
@@ -305,17 +317,18 @@ impl Renderer {
     /// Draws `frame`, which the last [`update`](Self::update) returned, into
     /// `image`, textures of `gpu` that the host's target began a frame with,
     /// and submits the frame's passes. Returns the frame, which the host
-    /// ends on its target and then [finishes](Self::finish_frame).
+    /// ends on its target, whether or not it failed ([`DrawnFrame::error`]),
+    /// and then [finishes](Self::finish_frame).
     pub fn render(&mut self, gpu: &mut dyn Gpu, image: &FrameImage, frame: UpdatedFrame) -> DrawnFrame {
         self.encoder.encode(gpu, &mut self.orchestrator, self.events.as_ref(), image, frame)
     }
 
     /// Ends `frame`, which [`render`](Self::render) drew, once the host's
     /// target handed it off as `handoff`: destroys what the frame replaced
-    /// and reports the frame with its rendering stats.
-    #[expect(clippy::needless_pass_by_value, reason = "a frame is finished once: the call takes it")]
+    /// and reports the frame with its rendering stats, and with its error
+    /// if it failed.
     pub fn finish_frame(&mut self, gpu: &mut dyn Gpu, frame: DrawnFrame, handoff: Handoff) {
-        self.encoder.finish(gpu, self.events.as_ref(), &frame, handoff);
+        self.encoder.finish(gpu, self.events.as_ref(), frame, handoff);
     }
 
     /// Drops `value` on the renderer's workers instead of this
@@ -345,7 +358,7 @@ impl Renderer {
         &mut self,
         geometry: &[mln_util::geo::ScreenCoordinate],
         options: &crate::query::RenderedQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
+    ) -> Result<Vec<mln_util::feature::Feature>, Error> {
         let features = self.orchestrator.query_rendered_features(geometry, options);
         report(&mut self.orchestrator, self.events.as_ref());
         features
@@ -355,7 +368,7 @@ impl Renderer {
         &mut self,
         point: &mln_util::geo::ScreenCoordinate,
         options: &crate::query::RenderedQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
+    ) -> Result<Vec<mln_util::feature::Feature>, Error> {
         self.query_rendered_features(&[*point], options)
     }
 
@@ -364,7 +377,7 @@ impl Renderer {
         min: &mln_util::geo::ScreenCoordinate,
         max: &mln_util::geo::ScreenCoordinate,
         options: &crate::query::RenderedQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
+    ) -> Result<Vec<mln_util::feature::Feature>, Error> {
         use mln_util::geo::ScreenCoordinate;
         self.query_rendered_features(
             &[*min, ScreenCoordinate::new(max.x, min.y), *max, ScreenCoordinate::new(min.x, max.y), *min],
@@ -376,7 +389,7 @@ impl Renderer {
         &mut self,
         source_id: &str,
         options: &crate::query::SourceQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
+    ) -> Result<Vec<mln_util::feature::Feature>, Error> {
         let features = self.orchestrator.query_source_features(source_id, options);
         report(&mut self.orchestrator, self.events.as_ref());
         features
@@ -394,7 +407,7 @@ impl Renderer {
         extension: &str,
         extension_field: &str,
         args: Option<&feature::PropertyMap>,
-    ) -> Result<crate::query::FeatureExtensionValue, mln_util::error::Error> {
+    ) -> Result<crate::query::FeatureExtensionValue, Error> {
         self.orchestrator.query_feature_extensions(source_id, feature, extension, extension_field, args)
     }
 
@@ -653,16 +666,22 @@ impl Encoder {
         });
         draw(orchestrator, gpu, &mut parameters, &frame, image, draw_groups.count, depth_range_size);
         let start_rendering = Instant::now();
-        if let Err(error) = parameters.end_pass(gpu).and_then(|()| gpu.flush(false)) {
-            Log::error(Event::Render, format!("Submitting the frame failed: {error}"));
+        let submitted = parameters.end_pass(gpu).and_then(|()| gpu.flush(false));
+        if let Err(error) = &submitted {
+            parameters.context.fail(format!("Submitting the frame failed: {error}"));
         }
+        let error = parameters.context.device().take_failure().map(Error::native);
         drop(parameters);
+        if submitted.is_err() {
+            orchestrator.visit_render_layers(|layer| layer.prepare_again());
+        }
 
         self.timings.layers = layers_updated - uploaded;
         self.timings.upload = (uploaded - start) + (layers_uploaded - layers_updated);
         self.frame_projection = Some(frame_projection);
         DrawnFrame {
             mode: if frame.loaded { RenderMode::Full } else { RenderMode::Partial },
+            error,
             needs_repaint: frame.needs_repaint,
             repaint_at: frame.repaint_at,
             placement_changed: frame.placement_changed,
@@ -683,8 +702,9 @@ impl Encoder {
     /// The end of a frame that [`encode`](Self::encode) drew, once its
     /// target handed it off as `handoff`: destroys what the uploads and the
     /// passes replaced, and reports the frame with the rendering stats.
-    fn finish(&mut self, gpu: &mut dyn Gpu, events: Option<&RendererEvents>, frame: &DrawnFrame, handoff: Handoff) {
+    fn finish(&mut self, gpu: &mut dyn Gpu, events: Option<&RendererEvents>, frame: DrawnFrame, handoff: Handoff) {
         let DrawnFrame {
+            error,
             mode,
             needs_repaint,
             repaint_at,
@@ -696,7 +716,7 @@ impl Encoder {
             updated,
             layers_uploaded,
             start_rendering,
-        } = *frame;
+        } = frame;
         let submitted = Instant::now();
         let context = &mut self.context;
         {
@@ -728,6 +748,7 @@ impl Encoder {
                 still_image_request_id,
                 update_id,
                 stats,
+                error: error.map(Box::new),
             },
         );
 
@@ -833,7 +854,7 @@ fn draw(
         targets: image.targets,
     };
     if let Err(error) = parameters.begin_pass(gpu, pass) {
-        Log::error(Event::Render, format!("Beginning the frame's pass failed: {error}"));
+        parameters.context.fail(format!("Beginning the frame's pass failed: {error}"));
     }
 
     // The sky.
@@ -881,16 +902,16 @@ fn draw(
 
     // The frame, where it drew into the layer composite's texture, copied
     // into the target.
-    parameters.present_frame(
-        gpu,
-        OpenPass {
-            label: "main buffer",
-            color: Some(ColorAttachment { texture: image.color, load: LoadOp::Clear(Color::new(0.0, 0.0, 0.0, 0.0)) }),
-            depth_stencil: None,
-            size: image.size,
-            targets: TargetFormats { color: image.targets.color, depth_stencil: None },
-        },
-    );
+    let present = OpenPass {
+        label: "main buffer",
+        color: Some(ColorAttachment { texture: image.color, load: LoadOp::Clear(Color::new(0.0, 0.0, 0.0, 0.0)) }),
+        depth_stencil: None,
+        size: image.size,
+        targets: TargetFormats { color: image.targets.color, depth_stencil: None },
+    };
+    if let Err(error) = parameters.present_frame(gpu, present) {
+        parameters.context.fail(format!("Copying the frame into its target failed: {error}"));
+    }
 }
 
 /// Pushes what `orchestrator` reported since the last call to `events`, the

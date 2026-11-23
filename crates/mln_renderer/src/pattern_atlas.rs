@@ -4,7 +4,6 @@ use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_style_types::image::{ImagePosition, Impl as ImageImpl, RectU16};
 use mln_util::hash::HashMap;
 use mln_util::image::PremultipliedImage;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::gfx::context::Context;
@@ -157,7 +156,7 @@ impl PatternAtlas {
         };
         let image = &self.atlas_image;
         if let Err(error) = context.upload_texture_data(gpu, texture, &image.data, image.size) {
-            Log::error(Event::Render, format!("Uploading the pattern atlas failed: {error}"));
+            context.fail(format!("Uploading the pattern atlas failed: {error}"));
         }
         self.dirty = false;
     }

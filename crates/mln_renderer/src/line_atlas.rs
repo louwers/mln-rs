@@ -245,7 +245,7 @@ impl DashPatternTexture {
             });
         });
         if let Err(error) = context.upload_texture_data(gpu, &texture, &image.data, image.size) {
-            Log::error(Event::Render, format!("Uploading a dash pattern failed: {error}"));
+            context.fail(format!("Uploading a dash pattern failed: {error}"));
         }
         self.texture = Some(texture);
     }

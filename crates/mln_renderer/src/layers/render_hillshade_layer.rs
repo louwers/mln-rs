@@ -5,7 +5,7 @@
 // hillshade_bucket.rs), and a tile's draw takes the bucket's masked geometry
 // again only when it changed. The slopes depend on nothing but the bucket's
 // DEM and its tile's zoom, so each target is prepared once, by the first
-// frame whose prepare draw and pass don't fail.
+// frame whose prepare draw, pass and submission don't fail.
 
 use std::collections::hash_map::Entry;
 use std::mem::offset_of;
@@ -138,6 +138,8 @@ pub(crate) struct RenderHillshadeLayer {
     /// Each bucket's render target, by bucket id. They draw while the layer
     /// is renderable.
     bucket_render_targets: HashMap<SimpleIdentity, BucketTarget>,
+    /// The buckets whose targets the last frame prepared.
+    prepared_in_frame: Vec<SimpleIdentity>,
     /// The buckets of the frame's tiles, which keep their render targets.
     live_buckets: HashSet<SimpleIdentity>,
     /// The illumination of the evaluation the draws last drew with, before
@@ -158,6 +160,7 @@ impl RenderHillshadeLayer {
             static_data_indices: None,
             globe_meshes: GlobeTileMeshCache::new(),
             bucket_render_targets: HashMap::default(),
+            prepared_in_frame: Vec::new(),
             live_buckets: HashSet::default(),
             illumination: None,
         }
@@ -505,10 +508,11 @@ impl RenderLayer for RenderHillshadeLayer {
 
     /// Prepares the slopes of the targets that don't hold them yet.
     fn render_targets(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        self.prepared_in_frame.clear();
         if !self.base.is_renderable {
             return;
         }
-        for target in self.bucket_render_targets.values_mut().filter(|target| !target.prepared) {
+        for (&bucket, target) in self.bucket_render_targets.iter_mut().filter(|(_, target)| !target.prepared) {
             parameters.current_layer = 0;
             let Some(mut passes) = target.render_target.begin(gpu, parameters) else {
                 continue;
@@ -520,6 +524,17 @@ impl RenderLayer for RenderHillshadeLayer {
             // A target whose draw or pass failed prepares again in the next
             // frame.
             target.prepared = passes.end(gpu, parameters) && drawn;
+            if target.prepared {
+                self.prepared_in_frame.push(bucket);
+            }
+        }
+    }
+
+    fn prepare_again(&mut self) {
+        for bucket in self.prepared_in_frame.drain(..) {
+            if let Some(target) = self.bucket_render_targets.get_mut(&bucket) {
+                target.prepared = false;
+            }
         }
     }
 }

@@ -29,7 +29,6 @@ use mln_util::Color;
 use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use super::{cast_matrix, refresh_paint_attributes};
@@ -172,7 +171,7 @@ fn dash_atlas_texture(gpu: &mut dyn Gpu, context: &mut Context, binders: &LineBi
         });
     });
     if let Err(error) = context.upload_texture_data(gpu, &texture, &image.data, image.size) {
-        Log::error(Event::Render, format!("Uploading the dash patterns failed: {error}"));
+        context.fail(format!("Uploading the dash patterns failed: {error}"));
         return None;
     }
     Some(texture)

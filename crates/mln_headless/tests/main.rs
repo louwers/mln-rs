@@ -12,6 +12,9 @@ mod debug_options_test;
 mod empty_tile_test;
 // A viewport flipped upside down draws the map upside down.
 mod flipped_viewport_test;
+// Frames that fail on the GPU: stills that end with the error, and
+// continuous maps that report it once and draw again later.
+mod gpu_failure_test;
 // gtests-core: test/api/{annotations,api_misuse,custom_geometry_source,
 // custom_layer}.test.cpp and test/api/recycle_map.cpp.
 mod gtest_api;

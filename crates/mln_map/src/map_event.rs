@@ -87,7 +87,9 @@ pub enum MapEvent {
     /// loaded, no transition runs, and no frame follows until something
     /// changes the map.
     Idle,
-    /// A layer or a drawable failed to render.
+    /// A frame failed on the GPU, and lacks what failed. The still image it
+    /// was drawn for fails with the error. A continuous map reports a run of
+    /// failed frames once, and soon draws again, in case the failure passes.
     RenderError(Error),
     RenderFrameStarted,
     RenderFrameFinished(RenderFrameStatus),

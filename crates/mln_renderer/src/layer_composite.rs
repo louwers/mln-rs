@@ -40,7 +40,6 @@ use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMode, DrawModeTyp
 use mln_style_types::LayerBlendType;
 use mln_util::Color;
 use mln_util::identity::SimpleIdentity;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::draw::Entries;
@@ -234,7 +233,7 @@ impl LayerComposite {
         }
         let frame_format = format.filter(|_| self.groups.iter().any(|(_, c)| c.reads_backdrop()));
         if let Err(error) = self.make(gpu, context, size, frame_format) {
-            Log::warning(Event::Render, format!("Making the layer composite's textures failed: {error}"));
+            context.fail(format!("Making the layer composite's textures failed: {error}"));
             self.groups.clear();
             self.drop_textures();
             return;
@@ -407,20 +406,22 @@ impl LayerComposite {
         };
         let blend = self.groups[slot].1.blend_function();
         if let Err(error) = self.draw_quad(gpu, target, context, slot, blend, depth) {
-            Log::warning(Event::Render, format!("Compositing a layer failed: {error}"));
+            context.fail(format!("Compositing a layer failed: {error}"));
         }
     }
 
     /// Copies the frame's texture onto the open pass, over what it holds.
-    pub(crate) fn copy_frame(&mut self, gpu: &mut dyn Gpu, target: DrawTarget, context: &mut Context) {
+    pub(crate) fn copy_frame(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        target: DrawTarget,
+        context: &mut Context,
+    ) -> Result<(), GpuError> {
         if self.frame.is_none() {
-            return;
+            return Ok(());
         }
         let slot = self.groups.len();
-        let blend = BlendFunction::Replace;
-        if let Err(error) = self.draw_quad(gpu, target, context, slot, blend, DepthMode::disabled()) {
-            Log::warning(Event::Render, format!("Copying the frame failed: {error}"));
-        }
+        self.draw_quad(gpu, target, context, slot, BlendFunction::Replace, DepthMode::disabled())
     }
 
     /// Draws the quad with the uniforms of `slot`: a group's, which reads the
