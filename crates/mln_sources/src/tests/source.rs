@@ -231,3 +231,28 @@ fn vector_source_style_encoding_applies_to_tile_json() {
     let source = converted_source(r#"{"type": "vector", "url": "url", "encoding": "mlt"}"#).unwrap();
     assert_eq!(Some(VectorEncoding::MLT), tileset_loaded_from_tilejson::<VectorKind>(&source).vector_encoding);
 }
+
+/// What a TileJSON with `attribution` gives a raster or raster-dem source
+/// that `make` makes: the attribution, and new metadata.
+fn tile_attribution(make: fn(&str, Option<String>, PartialTileset, u16) -> Source, attribution: &str) {
+    let source = make("source", Some("url".to_owned()), PartialTileset::default(), 512);
+    let tilejson = format!(r#"{{ "tilejson": "2.1.0", "attribution": "{attribution}", "tiles": [ "tiles" ] }}"#);
+    let described = described(&source, tilejson.as_bytes());
+    assert_eq!(Some(attribution.to_owned()), described.data().attribution());
+    assert!(described.metadata_changed_from(&source));
+}
+
+// gtest: Source.RasterTileAttribution
+#[test]
+fn raster_tile_attribution() {
+    let mapbox_osm = "<a href='https://www.mapbox.com/about/maps/' target='_blank'>&copy; Mapbox</a> \
+                      <a href='http://www.openstreetmap.org/about/' target='_blank'>©️ OpenStreetMap</a>";
+    tile_attribution(raster_source, mapbox_osm);
+}
+
+// gtest: Source.RasterDEMTileAttribution
+#[test]
+fn raster_dem_tile_attribution() {
+    let mapbox = "<a href='https://www.mapbox.com/about/maps/' target='_blank'>&copy; Mapbox</a> ";
+    tile_attribution(raster_dem_source, mapbox);
+}

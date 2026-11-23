@@ -40,11 +40,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-# The built-in layer types, which lay the tests' tiles out.
+# The built-in layer types, which the tests' styles parse against.
 mln_layers = { package = "mln-rs-layers", path = "../mln_layers" }
-# The drivers of the tests' tiles.
-mln_render = { workspace = true, features = ["testing"] }
-mln_storage = { workspace = true, features = ["stub-file-source"] }
 
 [lints]
 workspace = true

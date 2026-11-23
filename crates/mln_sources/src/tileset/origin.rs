@@ -151,17 +151,6 @@ impl<K: TilesetKind> TilesetOrigin<K> {
         TilesetOrigin { tileset, data, params: NetworkParams::default(), pixel_ratio: 1.0, kind: PhantomData }
     }
 
-    /// An origin whose tiles load from `tileset` in `encoding` through
-    /// `file_source`, as if a source of it had updated.
-    #[cfg(test)]
-    pub(crate) fn loaded(
-        tileset: Tileset,
-        encoding: VectorTileEncoding,
-        file_source: Option<Arc<dyn FileSource>>,
-    ) -> Self {
-        Self::new(Some(TilesetData { tileset, encoding, file_source, ancestors: Ancestors::default() }))
-    }
-
     /// Starts a new tile's loading, whose first request only looks in the
     /// cache, even for a required tile, so that it can go on if the tile
     /// becomes optional.

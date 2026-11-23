@@ -376,6 +376,37 @@ mod tests {
         fn invalidate_tile_data(&self) {}
     }
 
+    /// A tile that ignores what the provider sends it.
+    struct Ignored;
+
+    impl CustomTileSubscriber<u32> for Ignored {
+        fn set_tile_data(&self, _data: u32) {}
+        fn set_tile_error(&self, _error: Error) {}
+        fn invalidate_tile_data(&self) {}
+    }
+
+    // gtest: CustomVectorTile.FetchFailedTileAgain
+    // A tile that the host failed to load asks the host again when a tile
+    // next needs it, though a tile still subscribes to it: one that still
+    // shows older data doesn't cancel when it leaves the view.
+    #[test]
+    fn a_failed_tile_is_fetched_again() {
+        let pool = Pool::local();
+        let fetches = Arc::new(Mutex::new(0));
+        let counted = Arc::clone(&fetches);
+        let fetch: TileFunction = Arc::new(move |_: &CanonicalTileID| *counted.lock() += 1);
+        let provider = CustomProvider::<u32>::new(Some(fetch), None, &pool);
+        let id = OverscaledTileID::new(0, 0, CanonicalTileID::new(0, 0, 0));
+        provider.fetch_tile(id, 0, Box::new(Ignored));
+        pool.run_all();
+        assert_eq!(*fetches.lock(), 1);
+
+        provider.set_tile_error(id.canonical, Error::native("failed"));
+        provider.fetch_tile(id, 0, Box::new(Ignored));
+        pool.run_all();
+        assert_eq!(*fetches.lock(), 2);
+    }
+
     // The host's fetches run on a pool thread, in the order the tiles asked,
     // and a fetch that answers from inside itself doesn't deadlock.
     #[test]

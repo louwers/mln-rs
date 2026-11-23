@@ -92,13 +92,6 @@ impl<T> CustomOrigin<T> {
         CustomOrigin { source: None, loader: None, fast_pfor_enabled: false, last_key: 0, source_type: PhantomData }
     }
 
-    /// An origin whose tiles take their data from `loader`, as if a source
-    /// of it had updated.
-    #[cfg(test)]
-    pub(crate) fn with_loader(loader: Arc<dyn CustomLoader>) -> Self {
-        CustomOrigin { loader: Some(loader), ..CustomOrigin::new() }
-    }
-
     /// Asks the provider for tile `id`'s data, which `subscription` sends.
     fn fetch(&self, id: OverscaledTileID, subscription: &Subscribed) {
         if let Some(loader) = &self.loader {
