@@ -20,10 +20,16 @@ doctest = false
 mln_gfx.workspace = true
 naga.workspace = true
 
+[target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dev-dependencies]
+mln_gfx = { workspace = true, features = ["gpu-conformance"] }
+
 [features]
 # `variants`, the sets of defines that the backends' tests compile each
 # program with.
 variants = []
+# The programs that only `mln_gfx::gpu::conformance` draws with, for the
+# backends' tests.
+gpu-conformance = ["mln_gfx/gpu-conformance"]
 
 [lints]
 workspace = true

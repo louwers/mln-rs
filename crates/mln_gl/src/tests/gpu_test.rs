@@ -4,9 +4,9 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures, instanced_walls,
-    invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace, vertex_layouts,
-    wall_quads,
+    clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, imported_textures,
+    instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace,
+    vertex_layouts, wall_quads, written_vertex_texels,
 };
 use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState,
@@ -81,6 +81,22 @@ fn depth_only_through_gpu() {
         return;
     };
     depth_only(&mut gpu).expect("the frame");
+}
+
+#[test]
+fn written_vertex_texels_through_gpu() {
+    let Some(mut gpu) = gpu() else {
+        return;
+    };
+    written_vertex_texels(&mut gpu).expect("the frame");
+}
+
+#[test]
+fn drawn_vertex_texels_through_gpu() {
+    let Some(mut gpu) = gpu() else {
+        return;
+    };
+    drawn_vertex_texels(&mut gpu).expect("the frames");
 }
 
 #[test]

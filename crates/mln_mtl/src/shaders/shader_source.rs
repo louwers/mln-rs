@@ -47,6 +47,8 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, LAYER_COMPOSITE_UBO_COUNT, LINE_LAYER_UBO_COUNT,
     RASTER_LAYER_UBO_COUNT, SKY_LAYER_UBO_COUNT, SYMBOL_LAYER_UBO_COUNT,
 };
+#[cfg(test)]
+use mln_gfx::shaders::shader_defines::{ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE};
 
 use super::msl_sources;
 
@@ -108,6 +110,8 @@ const LINE_UBO_COUNT: usize = LINE_LAYER_UBO_COUNT;
 const RASTER_UBO_COUNT: usize = RASTER_LAYER_UBO_COUNT;
 const SKY_UBO_COUNT: usize = SKY_LAYER_UBO_COUNT;
 const SYMBOL_UBO_COUNT: usize = SYMBOL_LAYER_UBO_COUNT;
+#[cfg(test)]
+const VERTEX_TEXEL_UBO_COUNT: usize = DRAWABLE_RESERVED_UBO_COUNT;
 
 const fn attr(index: usize, data_type: AttributeDataType, buffer_index: usize, id: usize) -> AttributeInfo {
     AttributeInfo { index, data_type, buffer_index, id }
@@ -337,6 +341,12 @@ shader_source!(
     &[tex(0, ID_LAYER_COMPOSITE_IMAGE_TEXTURE), tex(1, ID_LAYER_COMPOSITE_BACKDROP_TEXTURE)]
 );
 
+#[cfg(test)]
+const VERTEX_TEXEL_ATTRIBUTES: &[AttributeInfo] =
+    &[attr(0, Short4, VERTEX_TEXEL_UBO_COUNT, ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE)];
+#[cfg(test)]
+shader_source!(VERTEX_TEXEL_SHADER, VERTEX_TEXEL_ATTRIBUTES, &[tex(0, ID_VERTEX_TEXEL_TEXTURE)]);
+
 const HILLSHADE_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, HILLSHADE_UBO_COUNT, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),
     attr(1, Short2, HILLSHADE_UBO_COUNT, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE),
@@ -530,4 +540,6 @@ pub(crate) static BUILT_INS: &[(&Program, &ShaderSource)] = &[
     (&programs::ATMOSPHERE, &ATMOSPHERE_SHADER),
     (&programs::GLOBE_DEPTH, &GLOBE_DEPTH_SHADER),
     (&programs::LAYER_COMPOSITE, &LAYER_COMPOSITE_SHADER),
+    #[cfg(test)]
+    (&programs::VERTEX_TEXEL, &VERTEX_TEXEL_SHADER),
 ];

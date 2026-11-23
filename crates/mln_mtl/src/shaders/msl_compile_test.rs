@@ -98,8 +98,11 @@ fn defines<'a>(overdraw: bool, globe: bool, uniforms: impl IntoIterator<Item = &
 /// inspector, which counts its draws.
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
-    use mln_gfx::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY};
-    let not_layers = [&CLIPPING_MASK, &COLLISION_BOX, &COLLISION_CIRCLE, &GLOBE_DEPTH, &SKY, &ATMOSPHERE];
+    use mln_gfx::shaders::programs::{
+        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, VERTEX_TEXEL,
+    };
+    let not_layers =
+        [&CLIPPING_MASK, &COLLISION_BOX, &COLLISION_CIRCLE, &GLOBE_DEPTH, &SKY, &ATMOSPHERE, &VERTEX_TEXEL];
     for &(program, source) in BUILT_INS {
         if !not_layers.contains(&program) {
             assert!(full_source(source).contains("OVERDRAW_INSPECTOR"), "{}", program.name);
@@ -238,6 +241,7 @@ fn ubo_ids(program: &Program, source: &ShaderSource) -> Vec<(&'static str, usize
             (&[("idHeatmapTexturePropsUBO", ID_HEATMAP_TEXTURE_PROPS_UBO)], "heatmapTextureUBOCount")
         }
         "LayerCompositeShader" => (&[("idLayerCompositeUBO", ID_LAYER_COMPOSITE_UBO)], "layerCompositeUBOCount"),
+        "VertexTexelShader" => (&[], "vertexTexelUBOCount"),
         "HillshadeShader" => (
             &[
                 ("idHillshadeDrawableUBO", ID_HILLSHADE_DRAWABLE_UBO),

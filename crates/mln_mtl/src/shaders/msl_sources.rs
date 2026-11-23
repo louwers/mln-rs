@@ -3823,6 +3823,45 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
+/// Port-only, for the backend conformance cases: quads at clip positions,
+/// each vertex colored by the texel of `image` it names, which the vertex
+/// function reads.
+#[cfg(test)]
+pub(crate) const VERTEX_TEXEL_SHADER: MslShaderSource = MslShaderSource {
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
+    prelude: r"
+
+enum {
+    vertexTexelUBOCount = drawableReservedUBOCount
+};
+
+",
+    source: r"
+
+struct VertexStage {
+    short4 pos_texel [[attribute(0)]];
+};
+
+struct FragmentStage {
+    float4 position [[position, invariant]];
+    float4 color;
+};
+
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+                                texture2d<float, access::read> image [[texture(0)]]) {
+    return {
+        .position = float4(float2(vertx.pos_texel.xy), 0.0, 1.0),
+        .color = image.read(uint2(vertx.pos_texel.zw)),
+    };
+}
+
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
+    return half4(in.color);
+}
+",
+};
+
 pub(crate) const HILLSHADE_PREPARE_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",

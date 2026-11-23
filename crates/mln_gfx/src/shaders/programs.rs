@@ -36,6 +36,8 @@ use crate::shaders::shader_defines::{
     ID_SYMBOL_OPACITY_ATTRIBUTE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE,
     ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
 };
+#[cfg(feature = "gpu-conformance")]
+use crate::shaders::shader_defines::{ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE};
 
 const fn property(name: &'static str, attribute: usize) -> Property {
     Property { name, attribute }
@@ -666,5 +668,16 @@ pub static LAYER_COMPOSITE: Program = Program {
     attributes: &[(ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE, Short2)],
     instance_attributes: &[],
     textures: &[ID_LAYER_COMPOSITE_IMAGE_TEXTURE, ID_LAYER_COMPOSITE_BACKDROP_TEXTURE],
+    properties: &[],
+};
+
+/// For the backend conformance cases: quads whose vertex stage reads their
+/// color from a texture, by texel. The renderer doesn't draw with it.
+#[cfg(feature = "gpu-conformance")]
+pub static VERTEX_TEXEL: Program = Program {
+    name: "VertexTexelShader",
+    attributes: &[(ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, Short4)],
+    instance_attributes: &[],
+    textures: &[ID_VERTEX_TEXEL_TEXTURE],
     properties: &[],
 };

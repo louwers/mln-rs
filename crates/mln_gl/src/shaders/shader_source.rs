@@ -86,6 +86,8 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_OPACITY_ATTRIBUTE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE,
     ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_SYMBOL_TILE_PROPS_UBO,
 };
+#[cfg(test)]
+use mln_gfx::shaders::shader_defines::{ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE};
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
@@ -316,6 +318,15 @@ shader_source!(
     ],
     &[attr("a_pos", ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE)],
     &[tex("u_image", ID_LAYER_COMPOSITE_IMAGE_TEXTURE), tex("u_backdrop", ID_LAYER_COMPOSITE_BACKDROP_TEXTURE)]
+);
+
+// Vertex texel
+#[cfg(test)]
+shader_source!(
+    VERTEX_TEXEL_SHADER,
+    &[element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO)],
+    &[attr("a_pos_texel", ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE)],
+    &[tex("u_image", ID_VERTEX_TEXEL_TEXTURE)]
 );
 
 // Fill
@@ -895,4 +906,6 @@ pub(crate) static BUILT_INS: &[(&Program, &ShaderSource)] = &[
     (&programs::SYMBOL_SDF, &SYMBOL_SDF_SHADER),
     (&programs::SYMBOL_TEXT_AND_ICON, &SYMBOL_TEXT_AND_ICON_SHADER),
     (&programs::LAYER_COMPOSITE, &LAYER_COMPOSITE_SHADER),
+    #[cfg(test)]
+    (&programs::VERTEX_TEXEL, &VERTEX_TEXEL_SHADER),
 ];

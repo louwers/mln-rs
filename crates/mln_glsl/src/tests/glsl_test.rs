@@ -79,8 +79,11 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
 /// inspector, which counts its draws.
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
-    use mln_gfx::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY};
-    let not_layers = [&CLIPPING_MASK, &COLLISION_BOX, &COLLISION_CIRCLE, &GLOBE_DEPTH, &SKY, &ATMOSPHERE];
+    use mln_gfx::shaders::programs::{
+        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, VERTEX_TEXEL,
+    };
+    let not_layers =
+        [&CLIPPING_MASK, &COLLISION_BOX, &COLLISION_CIRCLE, &GLOBE_DEPTH, &SKY, &ATMOSPHERE, &VERTEX_TEXEL];
     for &(program, source) in BUILT_INS {
         if !not_layers.contains(&program) {
             assert!(
@@ -236,6 +239,7 @@ fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
             vec![(LayerUniform(ID_HEATMAP_TEXTURE_PROPS_UBO), size_of::<HeatmapTexturePropsUBO>())]
         }
         "LayerCompositeShader" => vec![(LayerUniform(ID_LAYER_COMPOSITE_UBO), size_of::<LayerCompositeUBO>())],
+        "VertexTexelShader" => vec![],
         "HillshadeShader" => vec![
             (LayerStorage(ID_HILLSHADE_DRAWABLE_UBO), size_of::<HillshadeDrawableUBO>()),
             projection,
@@ -361,9 +365,10 @@ fn check_layout(set: u32, binding: u32, resource: Resource) -> Result<(), String
 
 // Every resource a stage declares has a binding of its kind in the
 // descriptor set layouts, the global set holds the paint parameters alone,
-// the textures of a fragment stage are the ones of the texture table, each
-// with its sampler, and the push constants are the general pipeline layout's
-// index or, for the clipping mask, its matrices.
+// the stages declare the textures of the texture table between them, a
+// fragment stage each of its own with its sampler and a vertex stage none,
+// since it fetches texels, and the push constants are the general pipeline
+// layout's index or, for the clipping mask, its matrices.
 #[test]
 fn resources_are_in_the_descriptor_set_layouts() {
     assert_eq!(DescriptorSetType::Global.set_index(), 0);
@@ -373,7 +378,9 @@ fn resources_are_in_the_descriptor_set_layouts() {
 
     let mut failures = Vec::new();
     for (program, source) in programs() {
+        let table: BTreeSet<u32> = source.textures.iter().map(|texture| image_texture_binding(texture.index)).collect();
         for variant in variants(program, false) {
+            let mut declared = BTreeSet::new();
             for stage in STAGES {
                 let mut fail = |message: String| {
                     failures.push(format!("{} ({}, {stage:?}): {message}", program.name, variant.name));
@@ -404,23 +411,30 @@ fn resources_are_in_the_descriptor_set_layouts() {
                         .collect()
                 };
                 let (textures, samplers) = (bindings_of(Resource::Texture), bindings_of(Resource::Sampler));
-                let table = |binding: fn(usize) -> u32| -> BTreeSet<u32> {
-                    match stage {
-                        Stage::Vertex => BTreeSet::new(),
-                        Stage::Fragment => source.textures.iter().map(|texture| binding(texture.index)).collect(),
+                if !textures.is_subset(&table) {
+                    fail(format!("textures at {textures:?}, the table has {table:?}"));
+                }
+                let sampled: BTreeSet<u32> = match stage {
+                    Stage::Vertex => BTreeSet::new(),
+                    Stage::Fragment => {
+                        textures.iter().map(|&binding| image_sampler_binding(binding as usize)).collect()
                     }
                 };
-                if textures != table(image_texture_binding) {
-                    fail(format!("textures at {textures:?}, the table has {:?}", table(image_texture_binding)));
+                if samplers != sampled {
+                    fail(format!("samplers at {samplers:?}, not {sampled:?}"));
                 }
-                if samplers != table(image_sampler_binding) {
-                    fail(format!("samplers at {samplers:?}, the table has {:?}", table(image_sampler_binding)));
-                }
+                declared.extend(textures);
 
                 let expected_push_constants = push_constants.map(|_| UBO_INDEX_PUSH_CONSTANT_SIZE);
                 if push_constants != expected_push_constants {
                     fail(format!("push constants of {push_constants:?} bytes, not {expected_push_constants:?}"));
                 }
+            }
+            if declared != table {
+                failures.push(format!(
+                    "{} ({}): textures at {declared:?}, the table has {table:?}",
+                    program.name, variant.name
+                ));
             }
         }
     }

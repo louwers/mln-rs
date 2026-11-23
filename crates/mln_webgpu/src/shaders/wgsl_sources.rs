@@ -2750,6 +2750,44 @@ fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
+/// Port-only, for the backend conformance cases: quads at clip positions,
+/// each vertex colored by the texel of `image_texture` it names, which the
+/// vertex stage loads.
+#[cfg(test)]
+pub(crate) const VERTEX_TEXEL_SHADER: WgslShaderSource = WgslShaderSource {
+    vertex: Some(
+        r"
+struct VertexInput {
+    @location(0) pos_texel: vec4<i32>,
+};
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) color: vec4<f32>,
+};
+
+@group(0) @binding(1) var image_texture: texture_2d<f32>;
+
+@vertex
+fn main(in: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+    out.position = vec4<f32>(vec2<f32>(in.pos_texel.xy), 0.0, 1.0);
+    out.color = textureLoad(image_texture, in.pos_texel.zw, 0);
+    return out;
+}
+",
+    ),
+    fragment: Some(
+        r"
+@fragment
+fn main(@location(0) color: vec4<f32>) -> @location(0) vec4<f32> {
+    return color;
+}
+",
+    ),
+    prelude: None,
+};
+
 pub(crate) const HILLSHADE_PREPARE_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(
         r"

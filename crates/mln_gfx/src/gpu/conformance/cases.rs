@@ -6,14 +6,15 @@ use std::any::Any;
 use mln_util::Color;
 use mln_util::size::Size;
 
-use super::{EXTENT, SIZE, buffer, draw, fixed, position_layout, quad, tile_matrix, whole};
+use super::{EXTENT, SIZE, buffer, draw, dynamic, fixed, position_layout, quad, tile_matrix, whole};
 use crate::color_mode::ColorMode;
 use crate::gfx_types::{AttributeDataType, DrawModeType};
 use crate::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferId, BufferUsage, ColorAttachment, DepthState,
-    DepthStencilAttachment, Draw, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc, PipelineDesc, PipelineId,
-    ResourceId, ShaderId, ShaderKey, StencilState, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion,
-    TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep, read_texels,
+    DepthStencilAttachment, Draw, DynamicState, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc,
+    PipelineDesc, PipelineId, ResourceId, Scissor, ShaderId, ShaderKey, StencilState, TargetFormats, TextureDesc,
+    TextureFormat, TextureId, TextureRegion, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
+    read_texels,
 };
 use crate::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use crate::shaders::fill_extrusion_layer_ubo::{
@@ -33,6 +34,7 @@ use crate::shaders::shader_defines::{
     ID_FILL_EXTRUSION_TILE_PROPS_UBO, ID_FILL_EXTRUSION_WALL_VERTICES, ID_FILL_OPACITY_VERTEX_ATTRIBUTE,
     ID_FILL_POS_VERTEX_ATTRIBUTE, ID_GLOBAL_PAINT_PARAMS_UBO, ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE,
     ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_TEXTURE_PROPS_UBO, ID_PROJECTION_UBO,
+    ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE,
 };
 use crate::stencil_mode::StencilMode;
 use crate::texture2d::SamplerState;
@@ -479,6 +481,137 @@ pub fn depth_only(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         assert_eq!(texel(&pixels, SIZE.width - 1, y), red);
     }
     Ok(())
+}
+
+/// Red, green, blue and white: the texels of a 2×2 texture, row by row from
+/// the top.
+const QUADRANTS: [[u8; 4]; 4] = [[255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255], [255, 255, 255, 255]];
+
+/// Checks that a vertex stage reads a texture by texel after a write to
+/// it: [`vertex_texels`] of a sampled texture that [`QUADRANTS`] are written
+/// to, in the same flush. Returns the error of a call that should succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn written_vertex_texels(gpu: &mut impl Gpu) -> Result<(), GpuError> {
+    let size = Size::new(2, 2);
+    let texture = gpu.create_texture(&TextureDesc {
+        label: "written",
+        size,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsage { sampled: true, ..TextureUsage::default() },
+    })?;
+    gpu.write_texture(texture, TextureRegion::whole(size), QUADRANTS.as_flattened())?;
+    check_vertex_texels(&vertex_texels(gpu, texture)?, QUADRANTS);
+    Ok(())
+}
+
+/// Checks that a vertex stage reads a texture by texel after a pass draws
+/// into it: [`vertex_texels`] of a 2×2 render target that a pass clears to
+/// blue and draws red into the left column of, in the same flush. (A
+/// backend may store what a pass draws bottom row first, so the rows are
+/// alike.) Returns the error of a call that should succeed.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+pub fn drawn_vertex_texels(gpu: &mut impl Gpu) -> Result<(), GpuError> {
+    let size = Size::new(2, 2);
+    let texture = gpu.create_texture(&TextureDesc {
+        label: "drawn",
+        size,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsage { sampled: true, render_target: true, ..TextureUsage::default() },
+    })?;
+    let red = solid_at(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 1.0], tile_matrix(0.0))?;
+    gpu.begin_pass(&PassDesc {
+        label: "drawn",
+        color: Some(ColorAttachment { texture, load: LoadOp::Clear(Color::new_unchecked(0.0, 0.0, 1.0, 1.0)) }),
+        depth_stencil: None,
+    })?;
+    let scissor = Scissor { x: 0, y: 0, width: size.width, height: size.height };
+    gpu.draw(&Draw { dynamic: DynamicState { scissor, ..dynamic() }, ..red.draw(red.pipeline) })?;
+    gpu.end_pass()?;
+    let (red, blue) = ([255, 0, 0, 255], [0, 0, 255, 255]);
+    check_vertex_texels(&vertex_texels(gpu, texture)?, [red, blue, red, blue]);
+    Ok(())
+}
+
+/// The texels of a target of [`SIZE`] that the vertex texel shader draws
+/// `texture`, of 2×2 texels, into: a quad over each quarter of the target,
+/// whose vertices read the color of the texel there, so that each quarter
+/// has the color of its texel.
+fn vertex_texels(gpu: &mut impl Gpu, texture: TextureId) -> Result<Vec<u8>, GpuError> {
+    let target = target(gpu, TextureFormat::Rgba8Unorm)?;
+    let shader = gpu.create_shader(&ShaderKey::new(&programs::VERTEX_TEXEL, []))?;
+    let sampler = gpu.create_sampler(&SamplerState::default())?;
+    // GL's shaders declare the projection block, which must be bound though
+    // this shader doesn't read it.
+    let projection = [ProjectionUBO::default()];
+    let projection = bytemuck::cast_slice(&projection);
+    let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
+    let bindings = gpu.create_bindings(&BindingsDesc {
+        label: "vertex texels",
+        shader,
+        entries: &[
+            BindGroupEntry::Texture { id: ID_VERTEX_TEXEL_TEXTURE as u32, texture, sampler },
+            whole(ID_PROJECTION_UBO, projection_buffer, projection),
+        ],
+    })?;
+
+    // Each vertex is its clip position, then the texel it reads.
+    let mut vertices: Vec<[i16; 4]> = Vec::new();
+    let mut indices: Vec<u16> = Vec::new();
+    for (texel_y, y) in [(0, 0), (1, -1)] {
+        for (texel_x, x) in [(0, -1), (1, 0)] {
+            let first = vertices.len() as u16;
+            indices.extend([0, 1, 2, 1, 2, 3].map(|i| first + i));
+            for [dx, dy] in [[0, 0], [1, 0], [0, 1], [1, 1]] {
+                vertices.push([x + dx, y + dy, texel_x, texel_y]);
+            }
+        }
+    }
+    let vertices = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&vertices))?;
+    let index_count = indices.len() as u32;
+    let indices = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&indices))?;
+    let layouts = [VertexBufferLayout {
+        stride: 8,
+        step: VertexStep::Vertex,
+        attributes: vec![VertexAttribute {
+            id: ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE as u32,
+            format: AttributeDataType::Short4,
+            offset: 0,
+        }],
+    }];
+    let geometry = gpu.create_geometry(&GeometryDesc {
+        shader,
+        layouts: &layouts,
+        vertex_buffers: &[(vertices, 0)],
+        index_buffer: indices,
+    })?;
+    let pipeline =
+        gpu.create_pipeline(&PipelineDesc { shader, vertex_buffers: &layouts, ..background(shader, RGBA8) })?;
+    gpu.begin_pass(&PassDesc {
+        label: "vertex texels",
+        color: Some(ColorAttachment { texture: target, load: LoadOp::Clear(BLACK) }),
+        depth_stencil: None,
+    })?;
+    gpu.draw(&draw(pipeline, bindings, geometry, index_count))?;
+    gpu.end_pass()?;
+    read(gpu, target)
+}
+
+/// Checks that each quarter of `pixels`, the texels of [`vertex_texels`],
+/// has the color of its texel of `texels`, row by row from the top.
+fn check_vertex_texels(pixels: &[u8], texels: [[u8; 4]; 4]) {
+    let (half_width, half_height) = (SIZE.width / 2, SIZE.height / 2);
+    for y in 0..SIZE.height {
+        for x in 0..SIZE.width {
+            let expected = texels[(y / half_height * 2 + x / half_width) as usize];
+            assert_eq!(texel(pixels, x, y), expected, "the texel the vertices at ({x}, {y}) read");
+        }
+    }
 }
 
 /// Checks that a pipeline reads its attributes from whichever vertex

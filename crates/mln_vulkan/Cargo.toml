@@ -44,7 +44,7 @@ libc.workspace = true
 # they compile the programs with.
 [target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dev-dependencies]
 mln_gfx = { workspace = true, features = ["gpu-conformance"] }
-mln_glsl = { workspace = true, features = ["variants"] }
+mln_glsl = { workspace = true, features = ["gpu-conformance", "variants"] }
 
 [lints]
 workspace = true

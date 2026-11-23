@@ -39,6 +39,8 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_OPACITY_ATTRIBUTE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE,
     ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
 };
+#[cfg(any(test, feature = "gpu-conformance"))]
+use mln_gfx::shaders::shader_defines::{ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE};
 
 use crate::front_end::Stage;
 use crate::sources;
@@ -366,6 +368,11 @@ shader_source!(
     &[tex(0, ID_LAYER_COMPOSITE_IMAGE_TEXTURE), tex(1, ID_LAYER_COMPOSITE_BACKDROP_TEXTURE)]
 );
 
+#[cfg(any(test, feature = "gpu-conformance"))]
+const VERTEX_TEXEL_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short4, ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE)];
+#[cfg(any(test, feature = "gpu-conformance"))]
+shader_source!(VERTEX_TEXEL_SHADER, VERTEX_TEXEL_ATTRIBUTES, &[tex(0, ID_VERTEX_TEXEL_TEXTURE)]);
+
 const HILLSHADE_ATTRIBUTES: &[AttributeInfo] =
     &[attr(0, Short2, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE), attr(1, Short2, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE)];
 const HILLSHADE_PREPARE_ATTRIBUTES: &[AttributeInfo] =
@@ -553,4 +560,6 @@ pub static BUILT_INS: &[(&Program, &ShaderSource)] = &[
     (&programs::ATMOSPHERE, &ATMOSPHERE_SHADER),
     (&programs::GLOBE_DEPTH, &GLOBE_DEPTH_SHADER),
     (&programs::LAYER_COMPOSITE, &LAYER_COMPOSITE_SHADER),
+    #[cfg(any(test, feature = "gpu-conformance"))]
+    (&programs::VERTEX_TEXEL, &VERTEX_TEXEL_SHADER),
 ];
