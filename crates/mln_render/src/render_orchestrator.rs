@@ -41,6 +41,7 @@ use crate::render_source::{RenderSource, RenderTileParameters};
 use crate::render_tile::{FoundTile, RenderTile, TileContent};
 use crate::renderer_event::RendererEvent;
 use crate::sky_pass::FullscreenDraw;
+use crate::source::MapSettings;
 use crate::sources::render_tile_source::{DebugLayer, DebugLayers};
 use crate::text::glyph_store::GlyphStore;
 use crate::tile::inbox::Waker;
@@ -789,13 +790,16 @@ impl RenderOrchestrator {
         frame: &mut FramePlan,
     ) -> Vec<bool> {
         let tile_parameters = TileParameters {
-            pixel_ratio: update_parameters.pixel_ratio,
+            map: MapSettings {
+                mode: update_parameters.mode,
+                pixel_ratio: update_parameters.pixel_ratio,
+                max_zoom: update_parameters.max_zoom,
+                file_source: update_parameters.file_source.clone(),
+                fast_pfor_enabled: update_parameters.fast_pfor_enabled,
+            },
             debug_options: update_parameters.debug_options,
             view: &update_parameters.view,
             min_zoom: update_parameters.min_zoom,
-            max_zoom: update_parameters.max_zoom,
-            file_source: update_parameters.file_source.clone(),
-            mode: update_parameters.mode,
             prefetch_zoom_delta: update_parameters.prefetch_zoom_delta,
             tile_lod_min_radius: update_parameters.tile_lod_min_radius,
             tile_lod_scale: update_parameters.tile_lod_scale,
@@ -805,7 +809,6 @@ impl RenderOrchestrator {
             subdivision_granularity: update_parameters.subdivision_granularity,
             cpu_rasterizer,
             global_state: self.global_state.clone(),
-            fast_pfor_enabled: update_parameters.fast_pfor_enabled,
             font_faces: update_parameters.style.get_font_faces().cloned(),
             glyph_pbfs: !update_parameters.style.get_glyph_url().is_empty(),
             placement_commits: self.placement.schedule().commits(),

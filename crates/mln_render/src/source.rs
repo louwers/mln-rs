@@ -400,6 +400,26 @@ pub trait DataOrigin: 'static {
     fn failed(&mut self, _tile: &mut Self::Tile, _cx: &mut LoadContext<'_, '_, Self>) {}
 }
 
+/// What the map says of its tiles, which an origin reads as it updates
+/// ([`OriginUpdate::map`]).
+#[derive(Clone)]
+pub struct MapSettings {
+    /// Whether the map draws continuously or still images, which a tile
+    /// shows only once it has done what it can.
+    pub mode: MapMode,
+    /// The map's pixel ratio, which a raster tile's resource may ask for.
+    pub pixel_ratio: f32,
+    /// The map's highest zoom level.
+    pub max_zoom: f64,
+    /// Where the map's resources load from, if anywhere.
+    pub file_source: Option<Arc<dyn FileSource>>,
+    /// Whether MLT tiles decode FastPFOR-compressed streams: an origin that
+    /// delivers [`TileData::Mlt`] passes it to its
+    /// [`MltTile`](mln_tile::MltTile), whose streams otherwise fail to
+    /// decode as the tile lays out.
+    pub fast_pfor_enabled: bool,
+}
+
 /// A [`DataOrigin`]'s update: the source as the style has it, what the map
 /// says of its tiles, and the tiles, which the origin can clear or load
 /// again.
@@ -415,44 +435,16 @@ impl<'a, O: DataOrigin> OriginUpdate<'a, O> {
         self.parts.source
     }
 
-    /// Whether the map draws continuously or still images, which a tile
-    /// shows only once it has done what it can.
+    /// What the map says of its tiles.
     #[must_use]
-    pub fn mode(&self) -> MapMode {
-        self.parts.parameters.mode
-    }
-
-    /// The map's pixel ratio, which a raster tile's resource may ask for.
-    #[must_use]
-    pub fn pixel_ratio(&self) -> f32 {
-        self.parts.parameters.pixel_ratio
-    }
-
-    /// The map's highest zoom level.
-    #[must_use]
-    pub fn max_zoom(&self) -> f64 {
-        self.parts.parameters.max_zoom
-    }
-
-    /// Where the map's resources load from, if anywhere.
-    #[must_use]
-    pub fn file_source(&self) -> Option<&Arc<dyn FileSource>> {
-        self.parts.parameters.file_source.as_ref()
+    pub fn map(&self) -> &MapSettings {
+        &self.parts.parameters.map
     }
 
     /// Whether the source's tiles lay out again.
     #[must_use]
     pub fn needs_relayout(&self) -> bool {
         self.parts.needs_relayout
-    }
-
-    /// Whether MLT tiles decode FastPFOR-compressed streams: an origin that
-    /// delivers [`TileData::Mlt`] passes it to its
-    /// [`MltTile`](mln_tile::MltTile), whose streams otherwise fail to
-    /// decode as the tile lays out.
-    #[must_use]
-    pub fn fast_pfor_enabled(&self) -> bool {
-        self.parts.parameters.fast_pfor_enabled
     }
 
     /// Lets go of every tile. The origin's state of each drops, with no

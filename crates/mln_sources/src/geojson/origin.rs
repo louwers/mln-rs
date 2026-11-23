@@ -50,7 +50,7 @@ impl DataOrigin for GeoJsonOrigin {
         let data = source.description.clone();
         if !crate::same(self.data.as_ref(), data.as_ref()) {
             self.data.clone_from(&data);
-            if update.mode() != MapMode::Continuous {
+            if update.map().mode != MapMode::Continuous {
                 // Clearing the tiles in order to avoid render tests being
                 // flaky.
                 update.clear_tiles();

@@ -30,6 +30,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use crate::Registry;
 use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::render_source::RenderSource;
+use crate::source::MapSettings;
 use crate::tests::fixture_layer::{Dot, Tint};
 use crate::tests::scripted_origin::{self, Call, Geometry, Raster, Reply, Script, ScriptedLoad};
 use crate::tile::source_tiles::SourceTiles;
@@ -237,13 +238,16 @@ impl Scene {
             ..Default::default()
         });
         let parameters = TileParameters {
-            pixel_ratio: 1.0,
+            map: MapSettings {
+                mode: MapMode::Continuous,
+                pixel_ratio: 1.0,
+                max_zoom: self.transform.state().limits().max_zoom,
+                file_source: None,
+                fast_pfor_enabled: false,
+            },
             debug_options: MapDebugOptions::NO_DEBUG,
             view: self.transform.view(),
             min_zoom: self.transform.state().min_zoom(),
-            max_zoom: self.transform.state().limits().max_zoom,
-            file_source: None,
-            mode: MapMode::Continuous,
             // The map's default.
             prefetch_zoom_delta: 4,
             tile_lod_min_radius: 3.0,
@@ -254,7 +258,6 @@ impl Scene {
             subdivision_granularity: SubdivisionGranularitySetting::none(),
             cpu_rasterizer: false,
             global_state: None,
-            fast_pfor_enabled: false,
             font_faces: None,
             glyph_pbfs: true,
             placement_commits: 0,

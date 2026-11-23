@@ -282,8 +282,8 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
             return Some(*id);
         }
         let params = LayoutParams {
-            mode: parameters.mode,
-            pixel_ratio: parameters.pixel_ratio,
+            mode: parameters.map.mode,
+            pixel_ratio: parameters.map.pixel_ratio,
             show_collision_boxes: parameters.debug_options.contains(MapDebugOptions::COLLISION),
             cpu_rasterizer: parameters.cpu_rasterizer,
             subdivision_granularity: parameters.subdivision_granularity,
@@ -323,10 +323,11 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
             }
             // A new pixel ratio lays the tile out again, without the
             // relayout that drops the cached tiles.
+            let pixel_ratio = parameters.map.pixel_ratio;
             let pixel_ratio_changed =
-                tile.tile().pipeline.layout().is_some_and(|layout| layout.params.pixel_ratio != parameters.pixel_ratio);
+                tile.tile().pipeline.layout().is_some_and(|layout| layout.params.pixel_ratio != pixel_ratio);
             if needs_relayout || pixel_ratio_changed {
-                tile.set_style(style, parameters.pixel_ratio, parameters.subdivision_granularity);
+                tile.set_style(style, pixel_ratio, parameters.subdivision_granularity);
             }
         });
     }
@@ -598,7 +599,7 @@ impl SourceTiles {
         let zoom = mln_math::clamp_f64(
             parameters.view.zoom() + parameters.tile_lod_zoom_shift,
             parameters.min_zoom,
-            parameters.max_zoom,
+            parameters.map.max_zoom,
         );
 
         let style_source = update.style_source;
@@ -633,7 +634,7 @@ impl SourceTiles {
                 tile_zoom = ideal_zoom;
             }
 
-            if parameters.mode == MapMode::Continuous && cover.prefetch {
+            if parameters.map.mode == MapMode::Continuous && cover.prefetch {
                 // Lower zoom levels show something sooner, for some bandwidth.
                 let prefetch_zoom_delta: u8 = source_prefetch_zoom_delta.unwrap_or(parameters.prefetch_zoom_delta);
                 if prefetch_zoom_delta != 0 {
@@ -657,7 +658,7 @@ impl SourceTiles {
             // load. The source's whole first level stays loaded with the
             // prefetched tiles, ahead of them, and is drawn only where the
             // search for a loaded parent reaches it.
-            if parameters.mode == MapMode::Continuous
+            if parameters.map.mode == MapMode::Continuous
                 && cover.prefetch
                 && keeps_globe_base_level(parameters, zoom_range, tile_zoom, max_parent_tile_overscale_factor)
             {
@@ -667,7 +668,7 @@ impl SourceTiles {
                 base_tiles.append(&mut pan_tiles);
                 pan_tiles = base_tiles;
             }
-            if parameters.mode == MapMode::Tile && !cover.round_zoom && ideal_tiles.len() > 1 {
+            if parameters.map.mode == MapMode::Tile && !cover.round_zoom && ideal_tiles.len() > 1 {
                 Log::warning(
                     Event::General,
                     format!(
@@ -766,7 +767,7 @@ impl SourceTiles {
             let size = parameters.view.size();
             let conservative_cache_size = (f64::max(f64::from(size.width) / f64::from(tile_size), 1.0)
                 * f64::max(f64::from(size.height) / f64::from(tile_size), 1.0)
-                * (parameters.max_zoom - parameters.min_zoom + 1.0)
+                * (parameters.map.max_zoom - parameters.min_zoom + 1.0)
                 * 0.5) as usize;
             // A tilted view holds more tiles than its size suggests, and as it
             // turns it passes over more again.

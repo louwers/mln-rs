@@ -22,7 +22,7 @@ use parking_lot::Mutex;
 use crate::Registry;
 use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::render_source::RenderSource;
-use crate::source::TileNecessity;
+use crate::source::{MapSettings, TileNecessity};
 use crate::tests::fixture_layer::{Dot, Shade, Tint};
 use crate::tests::scripted_origin::{self, Call, Dem, Geometry, Raster, Reply, Script, ScriptedLoad};
 use crate::tile::source_tiles::SourceTiles;
@@ -38,13 +38,16 @@ struct SourceTest {
 /// owns.
 fn tile_parameters(state: &TransformState, map_mode: MapMode) -> TileParameters<'_> {
     TileParameters {
-        pixel_ratio: 1.0,
+        map: MapSettings {
+            mode: map_mode,
+            pixel_ratio: 1.0,
+            max_zoom: state.limits().max_zoom,
+            file_source: None,
+            fast_pfor_enabled: false,
+        },
         debug_options: MapDebugOptions::NO_DEBUG,
         view: state.view(),
         min_zoom: state.min_zoom(),
-        max_zoom: state.limits().max_zoom,
-        file_source: None,
-        mode: map_mode,
         prefetch_zoom_delta: 0,
         tile_lod_min_radius: 3.0,
         tile_lod_scale: 1.0,
@@ -54,7 +57,6 @@ fn tile_parameters(state: &TransformState, map_mode: MapMode) -> TileParameters<
         subdivision_granularity: SubdivisionGranularitySetting::none(),
         cpu_rasterizer: false,
         global_state: None,
-        fast_pfor_enabled: false,
         font_faces: None,
         glyph_pbfs: true,
         placement_commits: 0,

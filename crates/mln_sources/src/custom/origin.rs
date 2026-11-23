@@ -174,7 +174,7 @@ impl<T: CustomSource> DataOrigin for CustomOrigin<T> {
         let (loader, tile_size, zoom_range) = T::parts(data);
         if self.loader.is_none() || !same {
             self.loader = Some(loader);
-            self.fast_pfor_enabled = update.fast_pfor_enabled();
+            self.fast_pfor_enabled = update.map().fast_pfor_enabled;
         }
         Some(Cover {
             tile_size,

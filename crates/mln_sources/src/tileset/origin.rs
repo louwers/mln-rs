@@ -264,13 +264,13 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
     fn update(&mut self, update: &mut OriginUpdate<'_, Self>) -> Option<Cover> {
         let data = SourceData::<TilesetSourceType<K>>::recover(update.source())?;
         self.params = NetworkParams::of(update.source().common());
-        self.pixel_ratio = update.pixel_ratio();
+        self.pixel_ratio = update.map().pixel_ratio;
         let loaded = data.description.as_ref();
         // In Continuous mode, keep the existing tiles if the new tileset is
         // not yet available, thus providing smart style transitions without
         // flickering. In other modes, allow clearing the tiles first, before
         // the early return in order to avoid render tests being flaky.
-        let can_update_tileset = loaded.is_some() || update.mode() != MapMode::Continuous;
+        let can_update_tileset = loaded.is_some() || update.map().mode != MapMode::Continuous;
         if can_update_tileset && self.tileset.as_ref() != loaded {
             self.tileset = loaded.cloned();
             // TODO: this removes existing buckets, and will cause flickering.
@@ -283,11 +283,11 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
         let tileset = self.tileset.as_ref().filter(|tileset| !tileset.tiles.is_empty())?;
         let encoding = if is_vector::<K>() && tileset.vector_encoding == Some(VectorEncoding::MLT) {
             // The encoding is decided once, from the first tileset (`isMLT`).
-            VectorTileEncoding::Mlt { fast_pfor_enabled: update.fast_pfor_enabled() }
+            VectorTileEncoding::Mlt { fast_pfor_enabled: update.map().fast_pfor_enabled }
         } else {
             VectorTileEncoding::Mvt
         };
-        let file_source = update.file_source().cloned();
+        let file_source = update.map().file_source.clone();
         let current = self.data.as_ref().is_some_and(|current| {
             current.tileset == *tileset
                 && current.encoding == encoding
@@ -302,7 +302,7 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
         if is_vector::<K>() {
             // Past the tileset's last zoom, tiles are cut from its tiles until
             // the last few zooms the map can reach, which draw them scaled up.
-            let max_zoom = update.max_zoom().floor() as i32 - i32::from(OVERSCALED_ZOOMS);
+            let max_zoom = update.map().max_zoom.floor() as i32 - i32::from(OVERSCALED_ZOOMS);
             zoom_range.max = zoom_range.max.max(max_zoom.clamp(0, i32::from(u8::MAX)) as u8);
         }
         Some(Cover {
