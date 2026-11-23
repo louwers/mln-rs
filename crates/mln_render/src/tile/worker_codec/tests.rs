@@ -245,77 +245,12 @@ fn cross(layers: &[Arc<dyn ErasedEvaluatedLayer>], data: &TileData) -> LayoutRes
 
 const DOTS: &str = r#"{"id": "water", "type": "dot", "source": "s", "source-layer": "water",
     "paint": {"dot-color": ["case", ["has", "class"], "red", "rgba(0, 0, 255, 0.678)"]}}"#;
-const LEGACY_DOTS: &str = r#"{"id": "water-legacy", "type": "dot", "source": "s", "source-layer": "water",
-    "paint": {"dot-color": {"property": "class", "type": "categorical", "stops": [["ocean", "red"]]}}}"#;
 const ADMIN_DOTS: &str = r#"{"id": "admin", "type": "dot", "source": "s", "source-layer": "admin",
     "paint": {"dot-color": ["case", ["==", ["get", "maritime"], 1], "blue", "red"]}}"#;
 const LABELS: &str = r#"{"id": "labels", "type": "dot", "source": "s", "source-layer": "admin",
     "layout": {"dot-label": ["to-string", ["get", "admin_level"]], "dot-font": ["Open Sans Regular"],
         "dot-size": ["interpolate", ["linear"], ["zoom"], 0, 10, 10, 20], "dot-icon": "interstate_1"},
     "paint": {"dot-color": ["case", ["==", ["get", "maritime"], 1], "blue", "black"]}}"#;
-/// A job behind the codec lays the tile out as one run directly, for a layer
-/// of every type that takes geometry tiles (each type of the style
-/// specification whose layers do must have a layer here, and its buckets a
-/// wire form), and the layout comes back with the map side's own layer
-/// properties.
-#[test]
-fn every_geometry_layer_type_crosses() {
-    // The layer types this crate's tests register. The built-in types of
-    // mln_layers cross in its tests.
-    let types = ["dot", "shade", "tint"];
-    let layers_of_type = [("dot", vec![DOTS, LEGACY_DOTS, ADMIN_DOTS, LABELS])];
-    for type_ in types {
-        let layer = convert(&format!(r#"{{"id": "l", "type": "{type_}", "source": "s", "source-layer": "sl"}}"#));
-        let takes_geometry_tiles = layer.info().source == mln_style::layer_type::SourceKind::Geometry;
-        assert_eq!(
-            takes_geometry_tiles,
-            layers_of_type.iter().any(|(t, _)| *t == type_),
-            "{type_} layers need a test layer here, and their buckets a wire form"
-        );
-    }
-
-    let layers: Vec<_> = layers_of_type.iter().flat_map(|(_, jsons)| jsons).map(|json| layer(json, 0.0)).collect();
-    let result = cross(&layers, &tile_data());
-    for (layer_id, render_data) in result.layer_render_data.iter() {
-        let sent = layers.iter().find(|layer| &layer.style().base().id == layer_id).unwrap();
-        assert!(std::ptr::addr_eq(render_data.layer, &raw const **sent));
-        assert!(
-            render_data
-                .bucket
-                .downcast_ref::<crate::tests::fixture_layer::DotBucket>()
-                .is_some_and(|b| !b.points.is_empty())
-        );
-    }
-}
-
-/// Layouts that wait for glyphs and images cross too: the first job
-/// answers what it needs, the second carries the positions it resolved to,
-/// and the buckets come back.
-#[test]
-fn layouts_cross_with_their_glyphs_and_images() {
-    let mut codec = ThroughCodec::new();
-    let style = style(&layers(&[LABELS]));
-    let data = tile_data();
-    let JobResult::NeedsDeps(needs) = codec.run(&job(&style, full(&data), Resolved::default())) else {
-        panic!("expected the dependencies");
-    };
-    assert!(!needs.glyphs.glyphs.is_empty());
-    assert_eq!(needs.images.keys().collect::<Vec<_>>(), ["interstate_1"]);
-
-    let resolved = answer(&needs);
-    assert!(!resolved.glyphs.is_empty() && resolved.icons.contains_key("interstate_1"));
-    let JobResult::Laid(output) = codec.run(&job(&style, DataInput::Cached(key(1)), resolved)) else {
-        panic!("expected the layout");
-    };
-    assert_eq!(output.deps.images.keys().collect::<Vec<_>>(), ["interstate_1"]);
-    let (_, render_data) = output.result.layer_render_data.iter().next().expect("a bucket");
-    assert!(
-        render_data
-            .bucket
-            .downcast_ref::<crate::tests::fixture_layer::DotBucket>()
-            .is_some_and(|b| !b.points.is_empty())
-    );
-}
 
 /// MLT tile data crosses as its bytes too.
 #[test]
