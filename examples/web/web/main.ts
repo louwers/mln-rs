@@ -31,6 +31,12 @@
 //                          false (or empty)
 //   compare                MapLibre GL JS's map of the style beside this one
 //                          (compare.ts)
+//   projection=<flat|globe|handoff>
+//                          the projection the map draws with in place of the
+//                          style's: Web Mercator, the sphere at every zoom
+//                          (vertical-perspective), or the sphere handing over
+//                          to Web Mercator between zoom 11 and 12 (globe)
+//                          (default: the style's own)
 //   freeBearing            free bearing on the globe: drags and zooms on it
 //                          turn the bearing with the planet, and a drag
 //                          carries on over a pole (default: off, north
@@ -81,6 +87,7 @@ import {
   type Input,
   type Loaded,
   type Pixels,
+  type ProjectionType,
   type StartTileWorker,
   type ToMap,
 } from "./protocol.ts";
@@ -777,6 +784,8 @@ function showAttribution(entries: string[]) {
 // The comparison with GL JS (compare.ts), which loads when it first opens.
 let comparison: Comparison | null = null;
 let comparing = false;
+// The projection in place of the style's (setProjection), or null.
+let currentProjection: ProjectionType | null = null;
 const compareToggle = element("compare-toggle", HTMLInputElement);
 async function setComparing(on: boolean) {
   if (on === comparing) return;
@@ -791,8 +800,10 @@ async function setComparing(on: boolean) {
   try {
     const { compare } = await import("./compare.ts");
     const style = current.url;
+    const projection = currentProjection;
     const opened = compare(canvas, {
       style,
+      projection,
       camera: latestCamera,
       follow: (next) => toMap({ type: "follow", camera: next }),
       stop: () => toMap({ type: "stop" }),
@@ -804,6 +815,8 @@ async function setComparing(on: boolean) {
     }
     comparison = opened;
     if (current.url !== style) comparison.setStyle(current.url);
+    if (currentProjection !== projection)
+      comparison.setProjection(currentProjection);
   } catch (error) {
     console.error("the comparison failed to open:", error);
     if (comparing) setComparing(false);
@@ -825,6 +838,29 @@ freeBearingToggle.addEventListener("change", () =>
   setFreeBearing(freeBearingToggle.checked),
 );
 if (params.has("freeBearing")) setFreeBearing(true);
+
+// The projection, in place of the style's: `?projection=`, a key of
+// PROJECTIONS; the style's own without one.
+const PROJECTIONS: Record<string, ProjectionType | null> = {
+  style: null,
+  flat: "mercator",
+  globe: "vertical-perspective",
+  handoff: "globe",
+};
+const projectionSelect = element("projection-select", HTMLSelectElement);
+function setProjection(key: string) {
+  const projection = PROJECTIONS[key] ?? null;
+  projectionSelect.value = projection === null ? "style" : key;
+  setParam("projection", projection === null ? null : key);
+  currentProjection = projection;
+  toMap({ type: "projection", projection });
+  comparison?.setProjection(projection);
+}
+projectionSelect.addEventListener("change", () =>
+  setProjection(projectionSelect.value),
+);
+const projectionParam = params.get("projection");
+if (projectionParam !== null) setProjection(projectionParam);
 
 // The backend control, at the bottom left: the backend's logo and name, and a
 // button to load the page again with the other backend where it can draw.

@@ -6,6 +6,9 @@
 // its own (TileWorkerConnect), and the Web Worker reports there
 // (TileWorkerReport).
 
+/** A projection type of the style spec. */
+export type ProjectionType = "mercator" | "vertical-perspective" | "globe";
+
 /** What the map draws with, each a build of the module. */
 export type Backend = "webgpu" | "webgl2";
 
@@ -113,6 +116,10 @@ export type ToMap =
   | { type: "style"; url: string }
   | { type: "jumpTo"; camera: Camera }
   | { type: "resetNorth" }
+  // The projection the map draws with in place of the style's
+  // (WebMap::set_projection): a style spec projection type, or null for the
+  // style's own.
+  | { type: "projection"; projection: ProjectionType | null }
   // Whether drags and zooms on the globe turn the bearing
   // (WebMap::set_globe_free_bearing).
   | { type: "globeFreeBearing"; on: boolean }

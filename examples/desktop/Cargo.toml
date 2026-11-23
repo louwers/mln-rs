@@ -74,8 +74,9 @@ egui_glow.workspace = true
 mln_gl.workspace = true
 
 # Loads the OpenFreeMap Liberty style over HTTPS through a runtime's map, as
-# the app does, and parses it. Needs network access, so it is ignored by
-# default: `cargo test -p mln-rs-desktop -- --ignored`.
+# the app does, and parses it, then sets the projections that the controls
+# offer (src/styles.rs). Needs network access, so it is ignored by default:
+# `cargo test -p mln-rs-desktop -- --ignored`.
 [[test]]
 name = "liberty_style_test"
 path = "tests/liberty_style_test.rs"
