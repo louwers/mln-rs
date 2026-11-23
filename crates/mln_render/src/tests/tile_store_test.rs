@@ -533,3 +533,32 @@ fn a_retried_load_starts_parsing_again() {
     assert_eq!(tile.actions(), [LoadFromNetwork, EndParse]);
     assert!(tile.shows_layout() && tile.tile().is_complete());
 }
+
+/// The origin hears when the engine can't lay out or decode what its tile
+/// took in, and not when the origin failed the tile itself.
+#[test]
+fn a_layout_failure_reaches_the_origin() {
+    let test = Test::new();
+    for kind in [TileKind::Geometry, TileKind::Raster] {
+        let store = tile_store(&test.pool, Box::new(InlineWorkers));
+        let id = OverscaledTileID::from_zxy(0, 0, 0);
+        let mut tile = OneTile::with_script(store, kind, &Script::default(), &[id], MapMode::Static);
+        tile.set_style(&style(&[water_layer("water", "red")]));
+        tile.set_necessity(&id, TileNecessity::Required);
+        tile.script.answer(|_| Reply::Fail("offline".to_owned()));
+        tile.update();
+        assert!(tile.actions().contains(&TileOperation::Error), "{kind:?}");
+        assert!(!tile.script.take_calls().contains(&Call::Failed(id)), "{kind:?}: the origin's own failure");
+
+        tile.store.retry_failed();
+        tile.script.answer(|_| Reply::Bytes(Arc::new(b"not a tile".to_vec())));
+        tile.update();
+        tile.update();
+        assert!(tile.actions().contains(&TileOperation::Error), "{kind:?}");
+        assert_eq!(
+            tile.script.take_calls().iter().filter(|call| **call == Call::Failed(id)).count(),
+            1,
+            "{kind:?}: the engine's failure"
+        );
+    }
+}

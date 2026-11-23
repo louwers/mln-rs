@@ -2,7 +2,6 @@
 //! newer data or work is pending.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use mln_map_types::MapMode;
 use mln_storage::Data;
@@ -83,15 +82,6 @@ pub enum TileOperation {
     Cancelled,
     /// No operation has taken place
     NullOp,
-}
-
-/// How a tile's network loads keep its data fresh, as its source says.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct TileUpdateParameters {
-    /// How long a tile waits before it loads again after its data expires.
-    pub minimum_update_interval: Duration,
-    /// Whether the tile's data stays out of the offline cache.
-    pub is_volatile: bool,
 }
 
 /// The kinds of tiles: the engine lays out a geometry tile's features into

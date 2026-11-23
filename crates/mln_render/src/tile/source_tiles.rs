@@ -36,7 +36,7 @@ use crate::tile::contents::Contents;
 use crate::tile::dem;
 use crate::tile::job::SourceStyle;
 use crate::tile::store::{SourceInfo, StoreContext};
-use crate::tile::tile::{Tile, TileKind, TileLoadOrder, TileNecessity, TileUpdateParameters};
+use crate::tile::tile::{Tile, TileKind, TileLoadOrder, TileNecessity};
 use crate::tile::tile_mut::{TileMut, WorldCopy, retire};
 use crate::tile_parameters::TileParameters;
 
@@ -218,8 +218,6 @@ struct CoverContext<'s, 'a, 'p> {
     update: &'s CoverUpdate<'a, 'p>,
     tile_range: Option<TileRange>,
     needs_relayout: bool,
-    minimum_update_interval: std::time::Duration,
-    is_volatile: bool,
     /// The ideal pass renders; the pan pass doesn't.
     render: bool,
     /// The tiles the pass has retained, nearest the view's centre first,
@@ -318,15 +316,10 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
                 slot.set_place(Place::Cover { order });
             }
         }
-        let update_parameters = TileUpdateParameters {
-            minimum_update_interval: self.minimum_update_interval,
-            is_volatile: self.is_volatile,
-        };
         let parameters = self.update.parameters;
         let (style, needs_relayout) = (self.style, self.needs_relayout);
         self.source.update(key, self.ctx, |tile| {
             if first {
-                tile.set_update_parameters(update_parameters);
                 tile.set_necessity(necessity);
             }
             // A new pixel ratio lays the tile out again, without the
@@ -364,8 +357,8 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
         self.tile(key).is_some_and(Tile::is_renderable)
     }
 
-    fn has_tried_cache(&self, key: &OverscaledTileID) -> bool {
-        self.tile(key).is_some_and(|tile| tile.load.cache_answered)
+    fn has_tried_optional(&self, key: &OverscaledTileID) -> bool {
+        self.tile(key).is_some_and(|tile| tile.load.tried_optional)
     }
 
     fn is_loaded(&self, key: &OverscaledTileID) -> bool {
@@ -621,8 +614,6 @@ impl SourceTiles {
 
         let source_prefetch_zoom_delta = style_source.common().prefetch_zoom_delta;
         let max_parent_tile_overscale_factor = style_source.common().max_overscale_factor;
-        let minimum_update_interval = style_source.common().minimum_tile_update_interval;
-        let is_volatile = style_source.common().volatile;
 
         let mut ideal_tiles: Vec<OverscaledTileID> = Vec::new();
         let mut pan_tiles: Vec<OverscaledTileID> = Vec::new();
@@ -729,8 +720,6 @@ impl SourceTiles {
                 update,
                 tile_range,
                 needs_relayout: relayout,
-                minimum_update_interval,
-                is_volatile,
                 render: false,
                 pass_rank: 0,
             };

@@ -22,14 +22,14 @@ use crate::source::TileLoad;
 use crate::tile::contents::{Contents, GeometryContents, LayoutResult, release};
 use crate::tile::dem::DemContents;
 use crate::tile::job::{DataInput, DataKey, Job, JobId, JobResult, LayoutJob, LayoutOutput, Run, SourceStyle, TileKey};
-use crate::tile::loading::{Detached, Freshness, Load};
+use crate::tile::loading::{Detached, Load};
 use crate::tile::pipeline::{
     DecodeWork, DependencyWait, InFlight, Layout, LayoutData, LayoutWork, Pipeline, Resume, Running, Waiting,
     outdated_by,
 };
 use crate::tile::raster::RasterContents;
 use crate::tile::store::{SourceInfo, StoreContext};
-use crate::tile::tile::{Shown, Tile, TileInput, TileNecessity, TileOperation, TileUpdateParameters};
+use crate::tile::tile::{Shown, Tile, TileInput, TileNecessity, TileOperation};
 use crate::tile::tile_workers::{InlineWorkers, Lane, ReplyBody};
 
 /// A tile, its source and the store, borrowed for a transition.
@@ -143,12 +143,6 @@ impl<'a> TileMut<'a> {
         self.with_origin(|origin, load, tile| origin.set_necessity(load, previous, tile));
     }
 
-    pub(crate) fn set_update_parameters(&mut self, parameters: TileUpdateParameters) {
-        if std::mem::replace(&mut self.tile.load.update_parameters, parameters) != parameters {
-            self.with_origin(|origin, load, tile| origin.update_parameters_changed(load, tile));
-        }
-    }
-
     /// Retries a required tile's failed loads.
     pub(crate) fn retry_failed_load(&mut self) {
         if self.tile.load.necessity == TileNecessity::Required {
@@ -200,14 +194,18 @@ impl<'a> TileMut<'a> {
         self.report();
     }
 
-    /// The tile couldn't load or lay out: it keeps what it shows.
+    /// The tile couldn't load: it keeps what it shows.
     pub(crate) fn fail(&mut self, error: Error) {
         self.tile.settled = true;
-        // Data that failed isn't fresh: the tile requests it again when
-        // required again.
-        self.tile.load.freshness.from_network = false;
         self.action(TileOperation::Error);
         self.store.error(&self.source.id, self.tile.id, error);
+    }
+
+    /// The tile couldn't lay out or decode what its origin delivered: it
+    /// keeps what it shows, and the origin hears of it.
+    fn fail_work(&mut self, error: Error) {
+        self.fail(error);
+        self.with_origin(|origin, load, tile| origin.failed(load, tile));
     }
 
     pub(crate) fn set_style(
@@ -497,9 +495,9 @@ impl<'a> TileMut<'a> {
                     JobResult::Dem(dem) => {
                         self.install(Some(Contents::Dem(DemContents::new(dem))));
                     }
-                    JobResult::Failed(error) => self.fail(error),
+                    JobResult::Failed(error) => self.fail_work(error),
                     JobResult::Laid(_) | JobResult::NeedsDeps(_) | JobResult::NeedsData => {
-                        self.fail(Error::native("a raster tile's decode answered as a layout"));
+                        self.fail_work(Error::native("a raster tile's decode answered as a layout"));
                     }
                 };
             }
@@ -561,15 +559,15 @@ impl<'a> TileMut<'a> {
                     Event::General,
                     format!("Tile {} asked again for the dependencies it was given", job.id.tile.id),
                 );
-                self.fail(Error::native("a layout asked again for the dependencies it was given"));
+                self.fail_work(Error::native("a layout asked again for the dependencies it was given"));
             }
             JobResult::Failed(error) => {
                 layout.work = LayoutWork::Current;
-                self.fail(error);
+                self.fail_work(error);
             }
             JobResult::Raster(_) | JobResult::Dem(_) => {
                 layout.work = LayoutWork::Current;
-                self.fail(Error::native("a geometry tile's layout answered as a decode"));
+                self.fail_work(Error::native("a geometry tile's layout answered as a decode"));
             }
         }
     }
@@ -619,9 +617,8 @@ impl WorldCopy {
         let answered =
             data.is_some() && origin.is_some_and(|origin| origin.take_world_copy(&mut *new.state, &*tile.load.state));
         if answered {
-            let Freshness { modified, expires, .. } = tile.load.freshness;
-            new.freshness = Freshness { modified, expires, from_network: false };
-            new.cache_answered = true;
+            new.times = tile.load.times;
+            new.tried_optional = true;
         }
         let world_copy = matches!(contents, Contents::Geometry(_));
         Some(WorldCopy {

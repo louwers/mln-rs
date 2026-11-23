@@ -50,8 +50,8 @@ pub(crate) trait ErasedOrigin {
     fn start(&mut self, load: &mut dyn TileLoad, tile: &mut TileMut<'_>);
     fn receive(&mut self, load: &mut dyn TileLoad, reply: Box<dyn Any + Send>, tile: &mut TileMut<'_>);
     fn set_necessity(&mut self, load: &mut dyn TileLoad, previous: TileNecessity, tile: &mut TileMut<'_>);
-    fn update_parameters_changed(&mut self, load: &mut dyn TileLoad, tile: &mut TileMut<'_>);
     fn retry(&mut self, load: &mut dyn TileLoad, tile: &mut TileMut<'_>);
+    fn failed(&mut self, load: &mut dyn TileLoad, tile: &mut TileMut<'_>);
     fn take_world_copy(&self, load: &mut dyn TileLoad, from: &dyn TileLoad) -> bool;
 }
 
@@ -92,15 +92,15 @@ impl<O: DataOrigin> ErasedOrigin for O {
         }
     }
 
-    fn update_parameters_changed(&mut self, load: &mut dyn TileLoad, tile: &mut TileMut<'_>) {
-        if let Some(load) = typed::<O>(load) {
-            DataOrigin::update_parameters_changed(self, load, &mut LoadContext::new(tile));
-        }
-    }
-
     fn retry(&mut self, load: &mut dyn TileLoad, tile: &mut TileMut<'_>) {
         if let Some(load) = typed::<O>(load) {
             DataOrigin::retry(self, load, &mut LoadContext::new(tile));
+        }
+    }
+
+    fn failed(&mut self, load: &mut dyn TileLoad, tile: &mut TileMut<'_>) {
+        if let Some(load) = typed::<O>(load) {
+            DataOrigin::failed(self, load, &mut LoadContext::new(tile));
         }
     }
 

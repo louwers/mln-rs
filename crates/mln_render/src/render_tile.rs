@@ -83,7 +83,7 @@ impl RenderTile {
     /// created for.
     pub(crate) fn update(&mut self, tile: &Tile, needs_rendering: bool, parameters: &RenderTileParameters<'_>) {
         self.needs_rendering = needs_rendering;
-        let (modified, expires) = (tile.load.freshness.modified, tile.load.freshness.expires);
+        let (modified, expires) = (tile.load.times.modified, tile.load.times.expires);
 
         let needs_debug_bucket = match &self.debug_bucket {
             None => true,

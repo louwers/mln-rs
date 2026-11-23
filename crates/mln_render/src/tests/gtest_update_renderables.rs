@@ -154,7 +154,7 @@ impl RenderablesContext for Callbacks<'_> {
         self.data_tiles[tile].renderable
     }
 
-    fn has_tried_cache(&self, tile: &OverscaledTileID) -> bool {
+    fn has_tried_optional(&self, tile: &OverscaledTileID) -> bool {
         self.data_tiles[tile].tried_optional
     }
 

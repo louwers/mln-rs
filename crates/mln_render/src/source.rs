@@ -19,13 +19,14 @@
 //! ([`DataOrigin::update`]) and says what its tiles cover ([`Cover`]). It
 //! keeps a [`TileLoad`] of each tile, and owns the tile's loading through
 //! hooks that the engine calls as the tile starts, as its
-//! [necessity](TileNecessity) and [update parameters](TileUpdateParameters)
-//! change, when it retries after a failure, and when a reply to one of its
-//! loads arrives. Each hook gets the tile's [`LoadContext`]: through it the
-//! origin starts a load, whose [`Replier`] sends its replies from any
-//! thread, and gives the tile what the load brought as a [`TileInput`] of
-//! the tile's kind. The engine hands a reply to the origin only while its
-//! load is the tile's latest ([`LoadContext::begin_load`]).
+//! [necessity](TileNecessity) changes, when it retries after a failure, when
+//! a reply to one of its loads arrives, and when what the tile took in
+//! fails to lay out or decode. Each hook gets the tile's [`LoadContext`]:
+//! through it the origin starts a load, whose [`Replier`] sends its replies
+//! from any thread, and gives the tile what the load brought as a
+//! [`TileInput`] of the tile's kind. The engine hands a reply to the origin
+//! only while its load is the tile's latest ([`LoadContext::begin_load`]).
+//! How data is cached, revalidated and kept fresh is the origin's own.
 //!
 //! The engine runs [`SourceType::supply`] and the origin's hooks one at a
 //! time on the renderer's thread, so an origin and its tiles' loads needn't
@@ -56,8 +57,8 @@ use mln_util::tileset::RasterEncoding;
 use crate::erased_source::{ErasedOrigin, UpdateParts, typed};
 use crate::tile::inbox::{InboxSender, TileEvent};
 use crate::tile::job::TileKey;
-pub use crate::tile::loading::Freshness;
-pub use crate::tile::tile::{TileInput, TileKind, TileNecessity, TileOperation, TileUpdateParameters};
+pub use crate::tile::loading::TileTimes;
+pub use crate::tile::tile::{TileInput, TileKind, TileNecessity, TileOperation};
 use crate::tile::tile_mut::TileMut;
 
 /// The render half of a source type, whose style half is its
@@ -136,9 +137,8 @@ pub struct Cover {
 /// source's data, and how it loads.
 ///
 /// The tile hooks ([`start`](Self::start), [`receive`](Self::receive),
-/// [`set_necessity`](Self::set_necessity),
-/// [`update_parameters_changed`](Self::update_parameters_changed) and
-/// [`retry`](Self::retry)) get the tile's [`Load`](Self::Load) and its
+/// [`set_necessity`](Self::set_necessity), [`retry`](Self::retry) and
+/// [`failed`](Self::failed)) get the tile's [`Load`](Self::Load) and its
 /// [`LoadContext`]. The engine calls none of the hooks from within another.
 pub trait DataOrigin: 'static {
     /// What the origin keeps of each tile's loading.
@@ -177,12 +177,15 @@ pub trait DataOrigin: 'static {
     ) {
     }
 
-    /// The tile's [update parameters](LoadContext::update_parameters)
-    /// changed.
-    fn update_parameters_changed(&mut self, _load: &mut Self::Load, _cx: &mut LoadContext<'_, '_, Self::Reply>) {}
-
     /// The engine retries the required tile's failed loads.
     fn retry(&mut self, _load: &mut Self::Load, _cx: &mut LoadContext<'_, '_, Self::Reply>) {}
+
+    /// The engine couldn't lay out or decode what the tile last took in, and
+    /// reported the error; the tile keeps what it shows. Not called for the
+    /// origin's own [`LoadContext::fail`], nor for a layout that runs, and
+    /// fails, within the hook that delivered, as a
+    /// [synchronous](Cover::synchronous) cover's does.
+    fn failed(&mut self, _load: &mut Self::Load, _cx: &mut LoadContext<'_, '_, Self::Reply>) {}
 
     /// Has `load`, of a new tile, take what `from` brought, the load of the
     /// same tile in another world copy, whose contents the new tile starts
@@ -334,21 +337,10 @@ impl<'a, 't, R: Send + 'static> LoadContext<'a, 't, R> {
         self.tile.tile().load.necessity
     }
 
-    /// How the tile's network loads keep its data fresh.
-    #[must_use]
-    pub fn update_parameters(&self) -> TileUpdateParameters {
-        self.tile.tile().load.update_parameters
-    }
-
-    /// When the tile's data was modified, when it expires, and whether it
-    /// came from the network.
-    #[must_use]
-    pub fn freshness(&self) -> Freshness {
-        self.tile.tile().load.freshness
-    }
-
-    pub fn set_freshness(&mut self, freshness: Freshness) {
-        self.tile.tile_mut().load.freshness = freshness;
+    /// Sets when the tile's data was modified and when it expires, which
+    /// the tile debug overlay shows.
+    pub fn set_times(&mut self, times: TileTimes) {
+        self.tile.tile_mut().load.times = times;
     }
 
     /// Whether the tile can draw, if only some of its layers.
@@ -380,8 +372,8 @@ impl<'a, 't, R: Send + 'static> LoadContext<'a, 't, R> {
         self.tile.take_input(input);
     }
 
-    /// The tile couldn't load: it keeps what it shows, and its data isn't
-    /// fresh.
+    /// The tile couldn't load: it keeps what it shows, and the engine
+    /// reports `error`.
     pub fn fail(&mut self, error: Error) {
         self.tile.fail(error);
     }
@@ -405,10 +397,10 @@ impl<'a, 't, R: Send + 'static> LoadContext<'a, 't, R> {
         self.tile.reset();
     }
 
-    /// The cache answered the tile: an optional tile has done what it can,
-    /// and a parent of a tile that needs it stands in for it.
-    pub fn cache_answered(&mut self) {
-        self.tile.tile_mut().load.cache_answered = true;
+    /// The tile has done what it can while optional, such as looking in a
+    /// cache: a parent of a tile that needs it may stand in for it.
+    pub fn tried_optional(&mut self) {
+        self.tile.tile_mut().load.tried_optional = true;
     }
 
     /// Reports what the tile's load did: requested from the cache or the

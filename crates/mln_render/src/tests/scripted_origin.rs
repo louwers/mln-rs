@@ -122,8 +122,8 @@ pub(crate) enum Call {
     Start(OverscaledTileID),
     Receive(OverscaledTileID),
     SetNecessity(OverscaledTileID, TileNecessity),
-    UpdateParametersChanged(OverscaledTileID),
     Retry(OverscaledTileID),
+    Failed(OverscaledTileID),
     TakeWorldCopy(OverscaledTileID),
     Retire(OverscaledTileID),
 }
@@ -348,16 +348,16 @@ impl DataOrigin for ScriptedOrigin {
         }
     }
 
-    fn update_parameters_changed(&mut self, tile: &mut ScriptedTile, _cx: &mut LoadContext<'_, '_, Reply>) {
-        self.script.record(Call::UpdateParametersChanged(tile.id));
-    }
-
     fn retry(&mut self, tile: &mut ScriptedTile, cx: &mut LoadContext<'_, '_, Reply>) {
         self.script.record(Call::Retry(tile.id));
         if tile.needs_load() {
             cx.unsettle();
             self.begin(tile, cx);
         }
+    }
+
+    fn failed(&mut self, tile: &mut ScriptedTile, _cx: &mut LoadContext<'_, '_, Reply>) {
+        self.script.record(Call::Failed(tile.id));
     }
 
     fn take_world_copy(&self, tile: &mut ScriptedTile, _from: &ScriptedTile) -> bool {

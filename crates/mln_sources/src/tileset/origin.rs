@@ -4,17 +4,18 @@
 
 use std::marker::PhantomData;
 use std::sync::{Arc, Weak};
+use std::time::Duration;
 
 use mln_map_types::MapMode;
 use mln_render::source::{
-    Cover, DataOrigin, Freshness, LoadContext, NewTile, OriginUpdate, SourceType, Supply, TileInput, TileKind,
-    TileLoad, TileNecessity, TileOperation, TileUpdateParameters,
+    Cover, DataOrigin, LoadContext, NewTile, OriginUpdate, SourceType, Supply, TileInput, TileKind, TileLoad,
+    TileNecessity, TileOperation, TileTimes,
 };
 use mln_storage::response::Reason;
 use mln_storage::{Data, FileSource, LoadingMethod, Request, Resource, Response, StoragePolicy};
 use mln_style::Source;
 use mln_style::layer_type::SourceKind;
-use mln_style::source_type::SourceData;
+use mln_style::source_type::{SourceCommon, SourceData};
 use mln_tile::TileData;
 use mln_tile::cut::{Ancestor, Cut, CutData};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
@@ -34,7 +35,9 @@ impl<K: TilesetKind> SourceType for TilesetSourceType<K> {
             SourceKind::RasterDem => TileKind::Dem(RasterEncoding::Mapbox),
             SourceKind::Geometry | SourceKind::None => TileKind::Geometry,
         };
-        Supply::tiles(kind, TilesetOrigin::<K> { tileset: None, data: None, kind: PhantomData })
+        let origin =
+            TilesetOrigin::<K> { tileset: None, data: None, params: NetworkParams::default(), kind: PhantomData };
+        Supply::tiles(kind, origin)
     }
 }
 
@@ -72,7 +75,24 @@ pub(crate) struct TilesetOrigin<K> {
     tileset: Option<Tileset>,
     /// `None` while the source has no tiles.
     data: Option<TilesetData>,
+    /// What the source's last version says of network requests.
+    params: NetworkParams,
     kind: PhantomData<fn() -> K>,
+}
+
+/// How a tile's network requests keep its data fresh, as its source says.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct NetworkParams {
+    /// How long a tile waits before it loads again after its data expires.
+    minimum_update_interval: Duration,
+    /// Whether the tile's data stays out of the offline cache.
+    volatile: bool,
+}
+
+impl NetworkParams {
+    fn of(common: &SourceCommon) -> Self {
+        NetworkParams { minimum_update_interval: common.minimum_tile_update_interval, volatile: common.volatile }
+    }
 }
 
 /// What a tileset source's tiles load from.
@@ -93,7 +113,7 @@ impl<K: TilesetKind> TilesetOrigin<K> {
         file_source: Option<Arc<dyn FileSource>>,
     ) -> Self {
         let data = TilesetData { tileset: tileset.clone(), encoding, file_source, ancestors: Ancestors::default() };
-        TilesetOrigin { tileset: Some(tileset), data: Some(data), kind: PhantomData }
+        TilesetOrigin { tileset: Some(tileset), data: Some(data), params: NetworkParams::default(), kind: PhantomData }
     }
 
     /// Requests the tile's data with `method`, unless it can be cut from an
@@ -103,7 +123,7 @@ impl<K: TilesetKind> TilesetOrigin<K> {
             return;
         }
         let Some(file_source) = self.data.as_ref().and_then(|data| data.file_source.clone()) else {
-            cx.fail(Error::native("Can't load tile."));
+            fail(load, Error::native("Can't load tile."), cx);
             return;
         };
         cx.report(match method {
@@ -113,11 +133,12 @@ impl<K: TilesetKind> TilesetOrigin<K> {
         let replier = cx.begin_load();
         // One response per request: a reload is a new request.
         let (request, responder) = Request::once(move |response| replier.send(response));
-        file_source.load(load.resource_for(method, cx.update_parameters()), responder);
+        let params = self.params;
+        file_source.load(load.resource_for(method, params), responder);
         debug_assert!(load.is_idle(), "one request at a time");
         load.fetch = match method {
             Method::Cache => Fetch::Cache { request },
-            Method::Network => Fetch::Network { request },
+            Method::Network => Fetch::Network { request, params },
         };
     }
 
@@ -134,7 +155,8 @@ impl<K: TilesetKind> TilesetOrigin<K> {
         let resource = &mut load.resource;
         (resource.prior_modified, resource.prior_expires, resource.prior_etag) =
             (fetched.modified, fetched.expires, fetched.etag);
-        cx.set_freshness(Freshness { modified: fetched.modified, expires: fetched.expires, from_network: true });
+        load.from_network = true;
+        cx.set_times(TileTimes { modified: fetched.modified, expires: fetched.expires });
         cx.deliver(TileInput::Geometry { data: Some(tile_data), missing: false });
         true
     }
@@ -151,7 +173,7 @@ impl<K: TilesetKind> TilesetOrigin<K> {
             && error.reason != Reason::NotFound
         {
             load.fetch = Fetch::Failed;
-            cx.fail(Error::native(error.message.clone()));
+            fail(load, Error::native(error.message.clone()), cx);
             return;
         }
         let resource = &mut load.resource;
@@ -161,7 +183,8 @@ impl<K: TilesetKind> TilesetOrigin<K> {
         }
         resource.prior_expires = res.expires;
         let from_network = method == Method::Network;
-        cx.set_freshness(Freshness { modified: res.modified, expires: res.expires, from_network });
+        load.from_network = from_network;
+        cx.set_times(TileTimes { modified: res.modified, expires: res.expires });
         cx.report(match method {
             Method::Network => TileOperation::LoadFromNetwork,
             Method::Cache => TileOperation::LoadFromCache,
@@ -181,6 +204,7 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
 
     fn update(&mut self, update: &mut OriginUpdate<'_, Self>) -> Option<Cover> {
         let data = SourceData::<TilesetSourceType<K>>::recover(update.source())?;
+        self.params = NetworkParams::of(update.source().common());
         let loaded = data.description.clone();
         // In Continuous mode, keep the existing tiles if the new tileset is
         // not yet available, thus providing smart style transitions without
@@ -251,12 +275,12 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
             LoadingMethod::CacheOnly,
         );
         resource.order = tile.order();
-        Some(TilesetLoad { resource, fetch: Fetch::Idle })
+        Some(TilesetLoad { resource, fetch: Fetch::Idle, from_network: false })
     }
 
     fn start(&mut self, load: &mut TilesetLoad, cx: &mut LoadContext<'_, '_, Response>) {
         match self.data.as_ref().map(|data| data.file_source.as_ref()) {
-            Some(None) => cx.fail(Error::native("Can't load tile.")),
+            Some(None) => fail(load, Error::native("Can't load tile."), cx),
             // The first request only looks in the cache, even for a required
             // tile, so that it can go on if the tile becomes optional.
             Some(Some(file_source)) if file_source.supports_cache_only() => self.request(load, Method::Cache, cx),
@@ -277,7 +301,7 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
             self.take_response(load, method, &res, cx);
             return;
         }
-        cx.cache_answered();
+        cx.tried_optional();
         // A cache-only request that found nothing isn't an error. It can
         // still bring expired data that Cache-Control forbids using, which
         // the network request revalidates.
@@ -299,31 +323,31 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
     }
 
     /// A required tile loads from the network, unless it has fresh data
-    /// from there; an optional one stops a network request.
+    /// from there; an optional one stops a network request. A required
+    /// tile's network request made with other parameters than the source's
+    /// is made again: the cover sets each tile's necessity as each update
+    /// first retains it, so the request restarts then.
     fn set_necessity(
         &mut self,
         load: &mut TilesetLoad,
         previous: TileNecessity,
         cx: &mut LoadContext<'_, '_, Response>,
     ) {
+        let required = cx.necessity() == TileNecessity::Required;
+        if required && matches!(load.fetch, Fetch::Network { params, .. } if params != self.params) {
+            load.stop();
+            self.request(load, Method::Network, cx);
+        }
         if previous == cx.necessity() {
             return;
         }
-        if cx.necessity() == TileNecessity::Required {
-            if load.is_idle() && !cx.freshness().is_fresh(mln_util::chrono::now()) {
+        if required {
+            if load.is_idle() && !load.is_fresh(mln_util::chrono::now()) {
                 self.request(load, Method::Network, cx);
             }
         } else if matches!(load.fetch, Fetch::Network { .. }) {
             // Only a network-only request is aborted.
             load.stop();
-        }
-    }
-
-    /// A network request under way is made again with the new parameters.
-    fn update_parameters_changed(&mut self, load: &mut TilesetLoad, cx: &mut LoadContext<'_, '_, Response>) {
-        if matches!(load.fetch, Fetch::Network { .. }) {
-            load.stop();
-            self.request(load, Method::Network, cx);
         }
     }
 
@@ -334,6 +358,12 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
             cx.unsettle();
             self.request(load, Method::Network, cx);
         }
+    }
+
+    /// The tile's data failed to lay out or decode: it isn't fresh, so the
+    /// tile loads it again when required again.
+    fn failed(&mut self, load: &mut TilesetLoad, _cx: &mut LoadContext<'_, '_, Response>) {
+        load.from_network = false;
     }
 
     /// Takes the validators of `from`'s resource, of the same tile, as a
@@ -349,6 +379,13 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
         resource.prior_data.clone_from(&from.prior_data);
         true
     }
+}
+
+/// Fails the tile with `error`. Its data isn't fresh: the tile loads it
+/// again when required again.
+fn fail(load: &mut TilesetLoad, error: Error, cx: &mut LoadContext<'_, '_, Response>) {
+    load.from_network = false;
+    cx.fail(error);
 }
 
 /// Whether `a` and `b` are both absent or the same file source.
@@ -477,6 +514,10 @@ fn encoded(data: &TileData) -> Option<&[u8]> {
 pub(crate) struct TilesetLoad {
     resource: Resource,
     fetch: Fetch,
+    /// The tile's data came from the network, rather than only the cache,
+    /// and didn't fail to lay out or decode. It expires when the resource's
+    /// `prior_expires` says.
+    from_network: bool,
 }
 
 impl TileLoad for TilesetLoad {}
@@ -493,6 +534,8 @@ enum Fetch {
     Network {
         #[expect(dead_code, reason = "dropping the request cancels it")]
         request: Request,
+        /// What the request was made with.
+        params: NetworkParams,
     },
 }
 
@@ -504,20 +547,26 @@ enum Method {
 
 impl TilesetLoad {
     /// The resource to request with `method`, whose network loads follow
-    /// `parameters`. Instead of one request that loads from both, a
-    /// cache-only request comes first, then a network-only one.
-    fn resource_for(&mut self, method: Method, parameters: TileUpdateParameters) -> &Resource {
+    /// `params`. Instead of one request that loads from both, a cache-only
+    /// request comes first, then a network-only one.
+    fn resource_for(&mut self, method: Method, params: NetworkParams) -> &Resource {
         let resource = &mut self.resource;
         match method {
             Method::Cache => resource.loading_method = LoadingMethod::CacheOnly,
             Method::Network => {
                 resource.loading_method = LoadingMethod::NetworkOnly;
-                resource.minimum_update_interval = parameters.minimum_update_interval;
+                resource.minimum_update_interval = params.minimum_update_interval;
                 resource.storage_policy =
-                    if parameters.is_volatile { StoragePolicy::Volatile } else { StoragePolicy::Permanent };
+                    if params.volatile { StoragePolicy::Volatile } else { StoragePolicy::Permanent };
             }
         }
         &self.resource
+    }
+
+    /// Whether the tile's data came from the network and hasn't expired at
+    /// `now`. Data without an expiry stays fresh.
+    fn is_fresh(&self, now: Timestamp) -> bool {
+        self.from_network && self.resource.prior_expires.is_none_or(|expires| expires > now)
     }
 
     fn is_idle(&self) -> bool {
@@ -542,6 +591,7 @@ mod tests {
         TilesetLoad {
             resource: Resource::tile(url, 1.0, 0, 0, 0, Scheme::XYZ, LoadingMethod::CacheOnly),
             fetch: Fetch::Idle,
+            from_network: false,
         }
     }
 
@@ -549,7 +599,12 @@ mod tests {
     /// of the same resource, as a cache's answer.
     #[test]
     fn a_world_copy_takes_the_validators() {
-        let origin = TilesetOrigin::<VectorKind> { tileset: None, data: None, kind: PhantomData };
+        let origin = TilesetOrigin::<VectorKind> {
+            tileset: None,
+            data: None,
+            params: NetworkParams::default(),
+            kind: PhantomData,
+        };
         let mut from = load("a");
         from.resource.prior_modified = Some(Timestamp::from_secs(1));
         from.resource.prior_expires = Some(Timestamp::from_secs(2));

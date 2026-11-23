@@ -22,7 +22,7 @@ pub(crate) trait RenderablesContext {
     fn prefetched_tiles(&self) -> Vec<PrefetchedTile>;
 
     fn is_renderable(&self, tile: &OverscaledTileID) -> bool;
-    fn has_tried_cache(&self, tile: &OverscaledTileID) -> bool;
+    fn has_tried_optional(&self, tile: &OverscaledTileID) -> bool;
     fn is_loaded(&self, tile: &OverscaledTileID) -> bool;
 }
 
@@ -63,7 +63,7 @@ pub(crate) fn update_renderables<C: RenderablesContext>(
             ctx.render_tile(&ideal_render_tile_id, &ideal_tile);
         } else {
             // We are now attempting to load child and parent tiles.
-            let mut parent_has_tried_optional = ctx.has_tried_cache(&ideal_tile);
+            let mut parent_has_tried_optional = ctx.has_tried_optional(&ideal_tile);
             let mut parent_is_loaded = ctx.is_loaded(&ideal_tile);
 
             // The tile isn't loaded yet, but retain it anyway because it's an
@@ -149,7 +149,7 @@ pub(crate) fn update_renderables<C: RenderablesContext>(
                         // Save the current values, since they're the parent
                         // of the next iteration of the parent tile ascent
                         // loop.
-                        parent_has_tried_optional = ctx.has_tried_cache(&tile);
+                        parent_has_tried_optional = ctx.has_tried_optional(&tile);
                         parent_is_loaded = ctx.is_loaded(&tile);
 
                         if ctx.is_renderable(&tile) {
