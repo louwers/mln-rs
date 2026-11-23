@@ -2,7 +2,9 @@
 //! renderer draws. The `mln_ngon` crate's `org.maplibre.ngon` layer type,
 //! which draws a regular polygon at each point of a geometry source, is a
 //! whole example written against the facade alone, whose `mln_rs::layer`
-//! gathers every name it uses. Each part below says where n-gon writes it.
+//! gathers every name it uses and shows the smallest layer type in an
+//! example that compiles and runs. Each part below says where n-gon writes
+//! it.
 //!
 //! A layer type has two halves, which
 //! [`RegistryBuilder::add_layer_type::<L>()`](crate::RegistryBuilder::add_layer_type)

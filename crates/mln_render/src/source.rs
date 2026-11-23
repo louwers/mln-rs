@@ -2,7 +2,8 @@
 //! whose sources the renderer draws. The `mln_extension_tests` crate's
 //! `stamp` source type, whose tiles each hold a value that its origin makes
 //! from the tile's id, is a whole example written against the facade alone,
-//! whose `mln_rs::source` gathers the names it uses but the registry's; the
+//! whose `mln_rs::source` gathers the names it uses but the registry's and
+//! shows a small source type in an example that compiles and runs; the
 //! built-in source types of `mln_sources` go through the same contract, and
 //! its tileset origin is the example of one that loads through the map's
 //! file source.

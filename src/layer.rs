@@ -5,6 +5,53 @@
 //! keys an extension declares outside its layer type's properties
 //! ([`StyleKey`]), and the names of a program's declaration ([`program`],
 //! with its shaders' [`source`]s).
+//!
+//! The smallest layer type, whose layers draw nothing, has both halves, a
+//! registry that adds them and a style that loads a layer of it; the
+//! `mln_ngon` crate's `org.maplibre.ngon` is a whole one that draws:
+//!
+//! ```
+//! use mln_rs::layer::{
+//!     Draws, Layer, LayerTypeInfo, NewCx, NoProperties, NoTiles, PrepareCx, SourceKind, StyleLayerType,
+//! };
+//! use mln_rs::mln_render::RegistryBuilder;
+//! use mln_rs::mln_style::Style;
+//!
+//! /// The style half: the type's name, its kind of source and its
+//! /// properties.
+//! struct Empty;
+//!
+//! impl StyleLayerType for Empty {
+//!     const INFO: LayerTypeInfo = LayerTypeInfo { name: "org.example.empty", source: SourceKind::None, from_json: true };
+//!     type LayoutProperties = NoProperties;
+//!     type PaintProperties = NoProperties;
+//!     type Data = ();
+//! }
+//!
+//! /// The render half, one value per style layer of the type.
+//! struct EmptyLayer;
+//!
+//! impl Layer for EmptyLayer {
+//!     type Style = Empty;
+//!     type Input = NoTiles;
+//!     type Tile = ();
+//!
+//!     fn new(_cx: &mut NewCx<'_, Self>) -> Self {
+//!         EmptyLayer
+//!     }
+//!
+//!     fn prepare(&self, _cx: &PrepareCx<'_, Self>, _out: &mut Draws) {}
+//! }
+//!
+//! let mut builder = RegistryBuilder::new();
+//! builder.add_layer_type::<EmptyLayer>()?;
+//! let registry = builder.build();
+//!
+//! let json = r#"{"version":8,"sources":{},"layers":[{"id":"nothing","type":"org.example.empty"}]}"#;
+//! let style = Style::from_json(registry.style(), json, None)?;
+//! assert!(style.get_layer("nothing").is_some());
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
 
 pub use mln_gfx::gfx_types::AttributeDataType;
 pub use mln_gfx::gpu::{Caps, TextureFormat};
