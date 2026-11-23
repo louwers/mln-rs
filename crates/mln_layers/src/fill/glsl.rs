@@ -23,7 +23,7 @@ layout(location = 0) in ivec2 in_position;
 void main() {
     const FillDrawableUBO drawable = drawableVector[drawIndex];
 
-#if !defined(HAS_UNIFORM_u_color)
+#if !defined(HAS_UNIFORM_color)
     frag_color = vec4(unpack_mix_color(in_color, drawable.color_t));
 #endif
 
@@ -62,13 +62,13 @@ pub(super) const FILL_OUTLINE_SHADER: Glsl = Glsl {
 
 layout(location = 0) in ivec2 in_position;
 
-#if !defined(HAS_UNIFORM_u_outline_color)
+#if !defined(HAS_UNIFORM_outline_color)
 layout(location = 1) in vec4 in_color;
 #endif
 
 #property attribute opacity
 
-#if !defined(HAS_UNIFORM_u_outline_color)
+#if !defined(HAS_UNIFORM_outline_color)
 layout(location = 0) out vec4 frag_color;
 #endif
 
@@ -79,7 +79,7 @@ layout(location = 2) out vec2 frag_position;
 void main() {
     const FillOutlineDrawableUBO drawable = drawableVector[drawIndex];
 
-#if !defined(HAS_UNIFORM_u_outline_color)
+#if !defined(HAS_UNIFORM_outline_color)
     frag_color = vec4(unpack_mix_color(in_color, drawable.outline_color_t));
 #endif
 
@@ -93,7 +93,7 @@ void main() {
 ",
     fragment: r"
 
-#if !defined(HAS_UNIFORM_u_outline_color)
+#if !defined(HAS_UNIFORM_outline_color)
 layout(location = 0) in vec4 frag_color;
 #endif
 
@@ -110,7 +110,7 @@ void main() {
     return;
 #endif
 
-#if defined(HAS_UNIFORM_u_outline_color)
+#if defined(HAS_UNIFORM_outline_color)
     const vec4 color = props.outline_color;
 #else
     const vec4 color = frag_color;
@@ -156,13 +156,13 @@ void main() {
 
     #property pass color
 
-#if defined(HAS_UNIFORM_u_pattern_from)
+#if defined(HAS_UNIFORM_pattern_from)
     const vec4 frag_pattern_from = tileProps.pattern_from;
 #else
     frag_pattern_from = in_pattern_from;
 #endif
 
-#if defined(HAS_UNIFORM_u_pattern_to)
+#if defined(HAS_UNIFORM_pattern_to)
     const vec4 frag_pattern_to = tileProps.pattern_to;
 #else
     frag_pattern_to = in_pattern_to;
@@ -287,13 +287,13 @@ void main() {
 
     #property pass color
 
-#if defined(HAS_UNIFORM_u_pattern_from)
+#if defined(HAS_UNIFORM_pattern_from)
     const vec4 frag_pattern_from = tileProps.pattern_from;
 #else
     frag_pattern_from = in_pattern_from;
 #endif
 
-#if defined(HAS_UNIFORM_u_pattern_to)
+#if defined(HAS_UNIFORM_pattern_to)
     const vec4 frag_pattern_to = tileProps.pattern_to;
 #else
     frag_pattern_to = in_pattern_to;
@@ -461,13 +461,13 @@ layout(location = 0) in ivec2 in_position;
 layout(location = 3) in ivec2 in_outline_pos;
 layout(location = 4) in ivec2 in_outline_end;
 
-#if !defined(HAS_UNIFORM_u_outline_color)
+#if !defined(HAS_UNIFORM_outline_color)
 layout(location = 1) in vec4 in_color;
 #endif
 
 #property attribute opacity
 
-#if !defined(HAS_UNIFORM_u_outline_color)
+#if !defined(HAS_UNIFORM_outline_color)
 layout(location = 0) out vec4 frag_color;
 #endif
 
@@ -480,7 +480,7 @@ layout(location = 2) out vec2 frag_position;
 void main() {
     const FillOutlineDrawableUBO drawable = drawableVector[drawIndex];
 
-#if !defined(HAS_UNIFORM_u_outline_color)
+#if !defined(HAS_UNIFORM_outline_color)
     frag_color = vec4(unpack_mix_color(in_color, drawable.outline_color_t));
 #endif
 
@@ -541,13 +541,13 @@ void main() {
 
     #property pass color
 
-#if defined(HAS_UNIFORM_u_pattern_from)
+#if defined(HAS_UNIFORM_pattern_from)
     const vec4 frag_pattern_from = tileProps.pattern_from;
 #else
     frag_pattern_from = in_pattern_from;
 #endif
 
-#if defined(HAS_UNIFORM_u_pattern_to)
+#if defined(HAS_UNIFORM_pattern_to)
     const vec4 frag_pattern_to = tileProps.pattern_to;
 #else
     frag_pattern_to = in_pattern_to;
@@ -587,11 +587,11 @@ pub(super) const FILL_OUTLINE_PULLED_SHADER: Glsl = Glsl {
 // The fill's vertices and the ends of the outline segments that start at
 // them, a word each: x and y in its halves.
 
-#if !defined(HAS_UNIFORM_u_outline_color) || !defined(HAS_UNIFORM_u_opacity)
+#if !defined(HAS_UNIFORM_outline_color) || !defined(HAS_UNIFORM_opacity)
 // The fill's paint values, interleaved as the fill reads them.
 #endif
 
-#if !defined(HAS_UNIFORM_u_outline_color)
+#if !defined(HAS_UNIFORM_outline_color)
 layout(location = 0) out vec4 frag_color;
 #endif
 
@@ -615,14 +615,14 @@ void main() {
     // The segment's paint values are its start's.
     const uint paint_layout = drawable.paint_layout;
     const uint paint = segment * (paint_layout & 0xffu);
-#if !defined(HAS_UNIFORM_u_outline_color)
+#if !defined(HAS_UNIFORM_outline_color)
     const uint color_at = paint + ((paint_layout >> 8u) & 0xffu);
     const vec4 outline_color = vec4(outlinePaint[color_at], outlinePaint[color_at + 1u],
                                     outlinePaint[color_at + 2u], outlinePaint[color_at + 3u]);
     frag_color = vec4(unpack_mix_color(outline_color, drawable.outline_color_t));
 #endif
 
-#if !defined(HAS_UNIFORM_u_opacity)
+#if !defined(HAS_UNIFORM_opacity)
     const uint opacity_at = paint + ((paint_layout >> 16u) & 0xffu);
     const vec2 opacity = vec2(outlinePaint[opacity_at], outlinePaint[opacity_at + 1u]);
     frag_opacity = unpack_mix_float(opacity, drawable.opacity_t);

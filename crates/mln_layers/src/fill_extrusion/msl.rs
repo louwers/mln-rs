@@ -199,13 +199,13 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]]) {
     // base, height and color, a byte each from the lowest.
     const uint paint_layout = drawable.paint_layout;
     device const float* paint = wallPaint + wall_index * (paint_layout & 0xff);
-#if !defined(HAS_UNIFORM_u_base)
+#if !defined(HAS_UNIFORM_base)
     vertex_in.base = float2(*(device const packed_float2*)(paint + ((paint_layout >> 8) & 0xff)));
 #endif
-#if !defined(HAS_UNIFORM_u_height)
+#if !defined(HAS_UNIFORM_height)
     vertex_in.height = float2(*(device const packed_float2*)(paint + ((paint_layout >> 16) & 0xff)));
 #endif
-#if !defined(HAS_UNIFORM_u_color)
+#if !defined(HAS_UNIFORM_color)
     vertex_in.color = float4(*(device const packed_float4*)(paint + (paint_layout >> 24)));
 #endif
 
@@ -266,10 +266,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
             .pos_a          = float2(0.0),
             .pos_b          = float2(0.0),
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
+#if !defined(HAS_UNIFORM_pattern_from)
             .pattern_from   = float4(0.0),
 #endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
+#if !defined(HAS_UNIFORM_pattern_to)
             .pattern_to     = float4(0.0),
 #endif
         };
@@ -300,10 +300,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
         .pos_a          = float2(1.0),
         .pos_b          = float2(1.0),
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
+#if !defined(HAS_UNIFORM_pattern_from)
         .pattern_from   = float4(1.0),
 #endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
+#if !defined(HAS_UNIFORM_pattern_to)
         .pattern_to     = float4(1.0),
 #endif
     };
@@ -350,10 +350,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
         .pos_a          = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, pos),
         .pos_b          = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, pos),
 
-#if !defined(HAS_UNIFORM_u_pattern_from)
+#if !defined(HAS_UNIFORM_pattern_from)
         .pattern_from   = pattern_from,
 #endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
+#if !defined(HAS_UNIFORM_pattern_to)
         .pattern_to     = pattern_to,
 #endif
     };
@@ -449,10 +449,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
         .lighting       = float4(1.0),
         .pos_a          = float2(1.0),
         .pos_b          = float2(1.0),
-#if !defined(HAS_UNIFORM_u_pattern_from)
+#if !defined(HAS_UNIFORM_pattern_from)
         .pattern_from   = float4(1.0),
 #endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
+#if !defined(HAS_UNIFORM_pattern_to)
         .pattern_to     = float4(1.0),
 #endif
     };
@@ -496,10 +496,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     return {
         .position       = position,
         .lighting       = lighting,
-#if !defined(HAS_UNIFORM_u_pattern_from)
+#if !defined(HAS_UNIFORM_pattern_from)
         .pattern_from   = pattern_from,
 #endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
+#if !defined(HAS_UNIFORM_pattern_to)
         .pattern_to     = pattern_to,
 #endif
         .pos_a          = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, pos),

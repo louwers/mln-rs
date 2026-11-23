@@ -45,7 +45,7 @@ fn main(in: VertexInput) -> VertexOutput {
 #else
     out.position = drawable.matrix * vec4<f32>(base + scaled_extrude, 0.0, 1.0);
 #endif
-#ifndef HAS_UNIFORM_u_weight
+#ifndef HAS_UNIFORM_weight
     out.weight = weight;
 #endif
     out.extrude = extrude;

@@ -1,7 +1,7 @@
 //! Compiles every built-in program's MSL with the system's
 //! Metal compiler, the way `MetalGpu` does: its `library_source`,
 //! MSL 2.4, fast math, the `ProgramParameters` defines, a
-//! `HAS_UNIFORM_u_<name>` define per property passed as a uniform, and
+//! `HAS_UNIFORM_<name>` define per property passed as a uniform, and
 //! `PROJECTION_GLOBE` for the globe variant. Also checks that the shaders'
 //! pipelines build with the vertex layouts their programs declare, in both
 //! projection variants, and that what they bind is what their programs
@@ -67,9 +67,9 @@ fn full_source(program: &Program, msl: &Msl) -> String {
     library_source(program, msl).expect("expands")
 }
 
-/// The `<name>`s of the `HAS_UNIFORM_u_<name>` the shader tests.
+/// The `<name>`s of the `HAS_UNIFORM_<name>` the shader tests.
 fn uniform_properties(text: &str) -> BTreeSet<String> {
-    const PREFIX: &str = "HAS_UNIFORM_u_";
+    const PREFIX: &str = "HAS_UNIFORM_";
     let mut names = BTreeSet::new();
     let mut rest = text;
     while let Some(start) = rest.find(PREFIX) {
@@ -91,7 +91,7 @@ fn defines<'a>(overdraw: bool, globe: bool, uniforms: impl IntoIterator<Item = &
     if globe {
         defines.push((GLOBE_DEFINE.to_owned(), String::new()));
     }
-    defines.extend(uniforms.into_iter().map(|name| (format!("HAS_UNIFORM_u_{name}"), String::new())));
+    defines.extend(uniforms.into_iter().map(|name| (format!("HAS_UNIFORM_{name}"), String::new())));
     defines
 }
 

@@ -64,7 +64,7 @@ void main() {
     gl_Position = drawable.matrix * vec4(floor(in_position * 0.5) + scaled_extrude, 0, 1);
 #endif
 
-#if !defined(HAS_UNIFORM_u_weight)
+#if !defined(HAS_UNIFORM_weight)
     frag_weight = weight;
 #endif
     frag_extrude = extrude;

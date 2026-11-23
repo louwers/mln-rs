@@ -89,7 +89,7 @@ out highp float v_lineprogress;
 #property varying width
 #property attribute floorwidth
 #property varying floorwidth
-#ifndef HAS_UNIFORM_u_dasharray
+#ifndef HAS_UNIFORM_dasharray
 layout (location = 8) in highp vec4 a_dasharray;
 flat out highp float v_dash_width;
 #endif
@@ -102,7 +102,7 @@ void main() {
 #property pass blur
 #property pass opacity
 mediump float gapwidth = $u_gapwidth;
-    #ifndef HAS_UNIFORM_u_offset
+    #ifndef HAS_UNIFORM_offset
 mediump float offset = unpack_mix_vec2(a_offset, u_offset_t);
 #else
 lowp float offset = u_offset;
@@ -164,7 +164,7 @@ lowp float offset = u_offset;
     float extrude_length_with_perspective = length(projected_extrude.xy / gl_Position.w * u_units_to_pixels);
     v_gamma_scale = extrude_length_without_perspective / extrude_length_with_perspective;
 
-#ifdef HAS_UNIFORM_u_dasharray
+#ifdef HAS_UNIFORM_dasharray
     highp vec2 patternscale_a = u_patternscale_a;
     highp vec2 patternscale_b = u_patternscale_b;
     highp float tex_y_a = u_tex_y_a;
@@ -198,7 +198,7 @@ in highp float v_lineprogress;
 #property varying opacity
 #property varying width
 #property varying floorwidth
-#ifndef HAS_UNIFORM_u_dasharray
+#ifndef HAS_UNIFORM_dasharray
 flat in highp float v_dash_width;
 #endif
 
@@ -229,7 +229,7 @@ void main() {
     float sdfdist_a = texture(u_image_dash, v_tex_a).a;
     float sdfdist_b = texture(u_image_dash, v_tex_b).a;
     float sdfdist = mix(sdfdist_a, sdfdist_b, u_mix);
-#ifdef HAS_UNIFORM_u_dasharray
+#ifdef HAS_UNIFORM_dasharray
     highp float sdfgamma = u_sdfgamma;
 #else
     highp float sdfgamma = u_sdfgamma / v_dash_width;
@@ -446,7 +446,7 @@ mediump float width = $u_width;
 #property pass pattern_from
 #property pass pattern_to
 
-#ifndef HAS_UNIFORM_u_width
+#ifndef HAS_UNIFORM_width
     v_floorwidth = unpack_mix_vec2(a_width, u_floorwidth_t);
 #else
     v_floorwidth = u_floorwidth;
@@ -640,7 +640,7 @@ out float v_gamma_scale;
 #property varying width
 #property attribute floorwidth
 #property varying floorwidth
-#ifndef HAS_UNIFORM_u_dasharray
+#ifndef HAS_UNIFORM_dasharray
 layout (location = 9) in highp vec4 a_dasharray;
 flat out highp float v_dash_width;
 #endif
@@ -711,7 +711,7 @@ lowp float offset = $u_offset;
     float extrude_length_with_perspective = length(projected_extrude.xy / gl_Position.w * u_units_to_pixels);
     v_gamma_scale = extrude_length_without_perspective / extrude_length_with_perspective;
 
-#ifdef HAS_UNIFORM_u_dasharray
+#ifdef HAS_UNIFORM_dasharray
     highp vec2 patternscale_a = u_patternscale_a;
     highp vec2 patternscale_b = u_patternscale_b;
     highp float tex_y_a = u_tex_y_a;
@@ -745,7 +745,7 @@ in float v_gamma_scale;
 #property varying opacity
 #property varying width
 #property varying floorwidth
-#ifndef HAS_UNIFORM_u_dasharray
+#ifndef HAS_UNIFORM_dasharray
 flat in highp float v_dash_width;
 #endif
 
@@ -777,7 +777,7 @@ void main() {
     float sdfdist_a = texture(u_image, v_tex_a).a;
     float sdfdist_b = texture(u_image, v_tex_b).a;
     float sdfdist = mix(sdfdist_a, sdfdist_b, u_mix);
-#ifdef HAS_UNIFORM_u_dasharray
+#ifdef HAS_UNIFORM_dasharray
     highp float sdfgamma = u_sdfgamma;
 #else
     highp float sdfgamma = u_sdfgamma / v_dash_width;

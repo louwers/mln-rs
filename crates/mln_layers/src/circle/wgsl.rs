@@ -44,14 +44,14 @@ fn main(in: VertexInput) -> VertexOutput {
     let scaled_extrude = extrude * drawable.extrude_scale;
     let circle_center = floor(pos_f * 0.5);
 
-#ifdef HAS_UNIFORM_u_radius
+#ifdef HAS_UNIFORM_radius
     let radius = props.radius;
 #else
     let radius = unpack_mix_float(in.radius, drawable.radius_t);
     out.radius = radius;
 #endif
 
-#ifdef HAS_UNIFORM_u_stroke_width
+#ifdef HAS_UNIFORM_stroke_width
     let stroke_width = props.stroke_width;
 #else
     let stroke_width = unpack_mix_float(in.stroke_width, drawable.stroke_width_t);

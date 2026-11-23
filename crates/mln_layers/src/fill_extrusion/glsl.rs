@@ -257,7 +257,7 @@ invariant gl_Position;
 // The bucket's vertices, two words each: the position's x and y in the
 // halves of the first, decimals_ed's in those of the second.
 
-#if !defined(HAS_UNIFORM_u_color) || !defined(HAS_UNIFORM_u_base) || !defined(HAS_UNIFORM_u_height)
+#if !defined(HAS_UNIFORM_color) || !defined(HAS_UNIFORM_base) || !defined(HAS_UNIFORM_height)
 // The bucket's paint values, interleaved as the roofs read them.
 #endif
 
@@ -280,15 +280,15 @@ void main() {
     // The wall's paint values are its outline vertex's.
     const uint paint_layout = drawableVector[drawIndex].paint_layout;
     const uint paint = wall * (paint_layout & 0xffu);
-#if !defined(HAS_UNIFORM_u_base)
+#if !defined(HAS_UNIFORM_base)
     const uint base_at = paint + ((paint_layout >> 8u) & 0xffu);
     const vec2 in_base = vec2(wallPaint[base_at], wallPaint[base_at + 1u]);
 #endif
-#if !defined(HAS_UNIFORM_u_height)
+#if !defined(HAS_UNIFORM_height)
     const uint height_at = paint + ((paint_layout >> 16u) & 0xffu);
     const vec2 in_height = vec2(wallPaint[height_at], wallPaint[height_at + 1u]);
 #endif
-#if !defined(HAS_UNIFORM_u_color)
+#if !defined(HAS_UNIFORM_color)
     const uint color_at = paint + (paint_layout >> 24u);
     const vec4 in_color = vec4(wallPaint[color_at], wallPaint[color_at + 1u],
                                wallPaint[color_at + 2u], wallPaint[color_at + 3u]);
@@ -342,23 +342,23 @@ void main() {
     frag_lighting = vec4(1.0);
     frag_pos_a = vec2(0.0);
     frag_pos_b = vec2(0.0);
-#if !defined(HAS_UNIFORM_u_pattern_from)
+#if !defined(HAS_UNIFORM_pattern_from)
     frag_pattern_from = vec4(0.0);
 #endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
+#if !defined(HAS_UNIFORM_pattern_to)
     frag_pattern_to = vec4(0.0);
 #endif
     return;
 #else
 
-#if defined(HAS_UNIFORM_u_pattern_from)
+#if defined(HAS_UNIFORM_pattern_from)
     const vec4 pattern_from = tileProps.pattern_from;
 #else
     const vec4 pattern_from = in_pattern_from;
     frag_pattern_from = in_pattern_from;
 #endif
 
-#if defined(HAS_UNIFORM_u_pattern_to)
+#if defined(HAS_UNIFORM_pattern_to)
     const vec4 pattern_to = tileProps.pattern_to;
 #else
     const vec4 pattern_to = in_pattern_to;
@@ -520,23 +520,23 @@ void main() {
     frag_lighting = vec4(1.0);
     frag_pos_a = vec2(0.0);
     frag_pos_b = vec2(0.0);
-#if !defined(HAS_UNIFORM_u_pattern_from)
+#if !defined(HAS_UNIFORM_pattern_from)
     frag_pattern_from = vec4(0.0);
 #endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
+#if !defined(HAS_UNIFORM_pattern_to)
     frag_pattern_to = vec4(0.0);
 #endif
     return;
 #else
 
-#if defined(HAS_UNIFORM_u_pattern_from)
+#if defined(HAS_UNIFORM_pattern_from)
     const vec4 pattern_from = tileProps.pattern_from;
 #else
     const vec4 pattern_from = in_pattern_from;
     frag_pattern_from = in_pattern_from;
 #endif
 
-#if defined(HAS_UNIFORM_u_pattern_to)
+#if defined(HAS_UNIFORM_pattern_to)
     const vec4 pattern_to = tileProps.pattern_to;
 #else
     const vec4 pattern_to = in_pattern_to;

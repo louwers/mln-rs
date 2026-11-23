@@ -26,10 +26,10 @@ fn programs() -> Vec<(&'static Program, &'static Wgsl)> {
     programs.filter_map(|&program| Some((program, program.sources.wgsl?))).collect()
 }
 
-/// The names after the `HAS_UNIFORM_u_` that `program`'s WGSL, `wgsl`,
+/// The names after the `HAS_UNIFORM_` that `program`'s WGSL, `wgsl`,
 /// tests once its properties are written out.
 fn uniforms(program: &Program, wgsl: &Wgsl) -> BTreeSet<String> {
-    const PREFIX: &str = "HAS_UNIFORM_u_";
+    const PREFIX: &str = "HAS_UNIFORM_";
     let mut names = BTreeSet::new();
     let [vertex, fragment] = wgsl::expand(program, wgsl).expect("expands");
     for text in [wgsl.prelude, &vertex, &fragment] {

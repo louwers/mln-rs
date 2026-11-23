@@ -94,10 +94,10 @@ fn main(in: VertexInput) -> VertexOutput {
     // Fragment positions use a top-left origin, while NDC Y points up.
     out.v_pos = (ndcXY * vec2<f32>(1.0, -1.0) + vec2<f32>(1.0, 1.0)) * 0.5 * view.target_size;
     #property pass color
-#ifndef HAS_UNIFORM_u_pattern_from
+#ifndef HAS_UNIFORM_pattern_from
     out.pattern_from = pattern_from;
 #endif
-#ifndef HAS_UNIFORM_u_pattern_to
+#ifndef HAS_UNIFORM_pattern_to
     out.pattern_to = pattern_to;
 #endif
     #property pass opacity
@@ -185,7 +185,7 @@ struct VertexInput {
 
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
-#ifndef HAS_UNIFORM_u_outline_color
+#ifndef HAS_UNIFORM_outline_color
     @location(0) color: vec4<f32>,
 #endif
     #property varying opacity 1
@@ -205,7 +205,7 @@ fn main(in: VertexInput) -> VertexOutput {
     out.position = clip;
     out.pos = (ndcXY * vec2<f32>(1.0, -1.0) + vec2<f32>(1.0)) * 0.5 * view.target_size;
 
-#ifndef HAS_UNIFORM_u_outline_color
+#ifndef HAS_UNIFORM_outline_color
     out.color = unpack_mix_color(in.outline_color, drawable.outline_color_t);
 #endif
     #property pass opacity
@@ -217,7 +217,7 @@ fn main(in: VertexInput) -> VertexOutput {
 
 struct FragmentInput {
     @builtin(position) position: vec4<f32>,
-#ifndef HAS_UNIFORM_u_outline_color
+#ifndef HAS_UNIFORM_outline_color
     @location(0) color: vec4<f32>,
 #endif
     #property varying opacity 1
@@ -231,7 +231,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #endif
 
     var color: vec4<f32>;
-#ifdef HAS_UNIFORM_u_outline_color
+#ifdef HAS_UNIFORM_outline_color
     color = props.outline_color;
 #else
     color = in.color;
@@ -319,10 +319,10 @@ fn main(in: VertexInput) -> VertexOutput {
         pos
     );
     #property pass color
-#ifndef HAS_UNIFORM_u_pattern_from
+#ifndef HAS_UNIFORM_pattern_from
     out.pattern_from = pattern_from;
 #endif
-#ifndef HAS_UNIFORM_u_pattern_to
+#ifndef HAS_UNIFORM_pattern_to
     out.pattern_to = pattern_to;
 #endif
     #property pass opacity
@@ -518,7 +518,7 @@ macro_rules! plain_declarations {
         r"
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
-#ifndef HAS_UNIFORM_u_outline_color
+#ifndef HAS_UNIFORM_outline_color
     @location(0) color: vec4<f32>,
 #endif
     #property varying opacity 1
@@ -557,7 +557,7 @@ fn main(in: VertexInput) -> VertexOutput {
     out.position = corner.position;
     out.pos = corner.pos;
 
-#ifndef HAS_UNIFORM_u_outline_color
+#ifndef HAS_UNIFORM_outline_color
     out.color = unpack_mix_color(in.outline_color, drawable.outline_color_t);
 #endif
     #property pass opacity
@@ -604,13 +604,13 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     // The segment's paint values are its start's.
     let paint_layout = drawable.paint_layout;
     let paint = segment * (paint_layout & 0xffu);
-#ifndef HAS_UNIFORM_u_outline_color
+#ifndef HAS_UNIFORM_outline_color
     let color_at = paint + ((paint_layout >> 8u) & 0xffu);
     let outline_color = vec4<f32>(outlinePaint[color_at], outlinePaint[color_at + 1u],
                                   outlinePaint[color_at + 2u], outlinePaint[color_at + 3u]);
     out.color = unpack_mix_color(outline_color, drawable.outline_color_t);
 #endif
-#ifndef HAS_UNIFORM_u_opacity
+#ifndef HAS_UNIFORM_opacity
     let opacity_at = paint + ((paint_layout >> 16u) & 0xffu);
     out.opacity = unpack_mix_float(vec2<f32>(outlinePaint[opacity_at], outlinePaint[opacity_at + 1u]),
                                    drawable.opacity_t);
@@ -683,10 +683,10 @@ fn main(in: VertexInput) -> VertexOutput {
                                   props.to_scale * display_size_b, drawable.tile_ratio, pos);
     out.v_pos = corner.pos;
     #property pass color
-#ifndef HAS_UNIFORM_u_pattern_from
+#ifndef HAS_UNIFORM_pattern_from
     out.pattern_from = pattern_from;
 #endif
-#ifndef HAS_UNIFORM_u_pattern_to
+#ifndef HAS_UNIFORM_pattern_to
     out.pattern_to = pattern_to;
 #endif
     #property pass opacity

@@ -224,7 +224,7 @@ void main() {
     const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? props.fade_change : -props.fade_change;
     const float fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
-#if defined(HAS_UNIFORM_u_opacity)
+#if defined(HAS_UNIFORM_opacity)
     const float visibility = fade_opacity;
 #else
     const float visibility = unpack_mix_float(in_opacity, drawable.opacity_t) * fade_opacity;
@@ -351,7 +351,7 @@ void main() {
 
     const SymbolTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
-#if defined(HAS_UNIFORM_u_opacity)
+#if defined(HAS_UNIFORM_opacity)
     const float opacity = (tileProps.is_text != 0 ? props.text_opacity : props.icon_opacity) * frag_opacity;
 #else
     const float opacity = frag_opacity; // fade_opacity is baked in for this case
@@ -411,7 +411,7 @@ void main() {
     const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? props.fade_change : -props.fade_change;
     const float fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
-#if defined(HAS_UNIFORM_u_opacity)
+#if defined(HAS_UNIFORM_opacity)
     const float visibility = fade_opacity;
 #else
     const float opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
@@ -521,18 +521,18 @@ void main() {
     const vec2 tex_origin = vec2(in_tex_origin);
     frag_tex = (a_tex - tex_origin) / drawable.texsize;
     frag_tex_origin = tex_origin / drawable.texsize;
-#if defined(HAS_UNIFORM_u_opacity)
+#if defined(HAS_UNIFORM_opacity)
     frag_fade_opacity = fade_opacity;
 #else
     frag_fade_opacity = fade_opacity * opacity;
 #endif
 
-#if defined(HAS_UNIFORM_u_halo_width)
+#if defined(HAS_UNIFORM_halo_width)
     const float halo_width = drawable.is_text_prop != 0 ? props.text_halo_width : props.icon_halo_width;
 #else
     const float halo_width = unpack_mix_float(in_halo_width, drawable.halo_width_t);
 #endif
-#if defined(HAS_UNIFORM_u_halo_blur)
+#if defined(HAS_UNIFORM_halo_blur)
     const float halo_blur = drawable.is_text_prop != 0 ? props.text_halo_blur : props.icon_halo_blur;
 #else
     const float halo_blur = unpack_mix_float(in_halo_blur, drawable.halo_blur_t);
@@ -572,17 +572,17 @@ void main() {
 
     const SymbolTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
-#if defined(HAS_UNIFORM_u_fill_color)
+#if defined(HAS_UNIFORM_fill_color)
     const vec4 fill_color = tileProps.is_text != 0 ? props.text_fill_color : props.icon_fill_color;
 #else
     const vec4 fill_color = frag_fill_color;
 #endif
-#if defined(HAS_UNIFORM_u_halo_color)
+#if defined(HAS_UNIFORM_halo_color)
     const vec4 halo_color = tileProps.is_text != 0 ? props.text_halo_color : props.icon_halo_color;
 #else
     const vec4 halo_color = frag_halo_color;
 #endif
-#if defined(HAS_UNIFORM_u_opacity)
+#if defined(HAS_UNIFORM_opacity)
     const float opacity = (tileProps.is_text != 0 ? props.text_opacity : props.icon_opacity) * frag_fade_opacity;
 #else
     const float opacity = frag_fade_opacity;
@@ -659,7 +659,7 @@ void main() {
     const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? props.fade_change : -props.fade_change;
     const float fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
-#if defined(HAS_UNIFORM_u_opacity)
+#if defined(HAS_UNIFORM_opacity)
     const float visibility = fade_opacity;
 #else
     const float opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
@@ -773,18 +773,18 @@ void main() {
     const vec2 tex_origin = vec2(in_tex_origin);
     frag_tex = (a_tex - tex_origin) / texsize;
     frag_tex_origin = tex_origin / texsize;
-#if defined(HAS_UNIFORM_u_opacity)
+#if defined(HAS_UNIFORM_opacity)
     frag_fade_opacity = fade_opacity;
 #else
     frag_fade_opacity = fade_opacity * opacity;
 #endif
 
-#if defined(HAS_UNIFORM_u_halo_width)
+#if defined(HAS_UNIFORM_halo_width)
     const float halo_width = drawable.is_text_prop != 0 ? props.text_halo_width : props.icon_halo_width;
 #else
     const float halo_width = unpack_mix_float(in_halo_width, drawable.halo_width_t);
 #endif
-#if defined(HAS_UNIFORM_u_halo_blur)
+#if defined(HAS_UNIFORM_halo_blur)
     const float halo_blur = drawable.is_text_prop != 0 ? props.text_halo_blur : props.icon_halo_blur;
 #else
     const float halo_blur = unpack_mix_float(in_halo_blur, drawable.halo_blur_t);
@@ -825,17 +825,17 @@ void main() {
 
     const SymbolTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
-#if defined(HAS_UNIFORM_u_fill_color)
+#if defined(HAS_UNIFORM_fill_color)
     const vec4 fill_color = tileProps.is_text != 0 ? props.text_fill_color : props.icon_fill_color;
 #else
     const vec4 fill_color = frag_fill_color;
 #endif
-#if defined(HAS_UNIFORM_u_halo_color)
+#if defined(HAS_UNIFORM_halo_color)
     const vec4 halo_color = tileProps.is_text != 0 ? props.text_halo_color : props.icon_halo_color;
 #else
     const vec4 halo_color = frag_halo_color;
 #endif
-#if defined(HAS_UNIFORM_u_opacity)
+#if defined(HAS_UNIFORM_opacity)
     const float opacity = (tileProps.is_text != 0 ? props.text_opacity : props.icon_opacity) * frag_fade_opacity;
 #else
     const float opacity = frag_fade_opacity;

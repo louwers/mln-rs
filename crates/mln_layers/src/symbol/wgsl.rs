@@ -239,7 +239,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let fade_change = select(-props.fade_change, props.fade_change, raw_fade_opacity.y > 0.5);
     let fade_opacity = max(0.0, min(1.0, raw_fade_opacity.x + fade_change));
 
-#ifdef HAS_UNIFORM_u_opacity
+#ifdef HAS_UNIFORM_opacity
     let final_opacity = fade_opacity;
 #else
     let paint_opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
@@ -350,7 +350,7 @@ fn main(in: VertexInput) -> VertexOutput {
     out.tex = (a_tex - tex_origin) / drawable.texsize;
     out.tex_origin = tex_origin / drawable.texsize;
     out.fade_opacity = fade_opacity;
-#ifndef HAS_UNIFORM_u_opacity
+#ifndef HAS_UNIFORM_opacity
     out.opacity = final_opacity;
 #endif
 
@@ -372,7 +372,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #endif
 
     let tileProps = tilePropsVector[drawIndex];
-#ifdef HAS_UNIFORM_u_opacity
+#ifdef HAS_UNIFORM_opacity
     let base_opacity = select(props.icon_opacity, props.text_opacity, tileProps.is_text != 0u);
     let opacity = base_opacity * in.fade_opacity;
 #else
@@ -430,7 +430,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let fade_change = select(-props.fade_change, props.fade_change, fade_opacity.y > 0.5);
     let fo = max(0.0, min(1.0, fade_opacity.x + fade_change));
 
-#ifdef HAS_UNIFORM_u_opacity
+#ifdef HAS_UNIFORM_opacity
     let visibility = fo;
 #else
     let opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
@@ -540,7 +540,7 @@ fn main(in: VertexInput) -> VertexOutput {
     out.tex = (a_tex - tex_origin) / drawable.texsize;
     out.tex_origin = tex_origin / drawable.texsize;
     let gamma_scale = position.w;
-#ifdef HAS_UNIFORM_u_opacity
+#ifdef HAS_UNIFORM_opacity
     out.fade_opacity = fo;
 #else
     out.fade_opacity = fo * opacity;
@@ -549,12 +549,12 @@ fn main(in: VertexInput) -> VertexOutput {
     // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
     // halo: the same over a quad but for the clip w, which interpolates
     // linearly.
-#ifndef HAS_UNIFORM_u_halo_width
+#ifndef HAS_UNIFORM_halo_width
     let halo_width = unpack_mix_float(in.halo_width, drawable.halo_width_t);
 #else
     let halo_width = select(props.icon_halo_width, props.text_halo_width, drawable.is_text_prop != 0u);
 #endif
-#ifndef HAS_UNIFORM_u_halo_blur
+#ifndef HAS_UNIFORM_halo_blur
     let halo_blur = unpack_mix_float(in.halo_blur, drawable.halo_blur_t);
 #else
     let halo_blur = select(props.icon_halo_blur, props.text_halo_blur, drawable.is_text_prop != 0u);
@@ -587,17 +587,17 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #endif
 
     let tileProps = tilePropsVector[drawIndex];
-#ifndef HAS_UNIFORM_u_fill_color
+#ifndef HAS_UNIFORM_fill_color
     let fill_color = in.fill_color;
 #else
     let fill_color = select(props.icon_fill_color, props.text_fill_color, tileProps.is_text != 0u);
 #endif
-#ifndef HAS_UNIFORM_u_halo_color
+#ifndef HAS_UNIFORM_halo_color
     let halo_color = in.halo_color;
 #else
     let halo_color = select(props.icon_halo_color, props.text_halo_color, tileProps.is_text != 0u);
 #endif
-#ifndef HAS_UNIFORM_u_opacity
+#ifndef HAS_UNIFORM_opacity
     let opacity = in.fade_opacity;
 #else
     let opacity = select(props.icon_opacity, props.text_opacity, tileProps.is_text != 0u) * in.fade_opacity;
@@ -679,7 +679,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let fade_change = select(-props.fade_change, props.fade_change, fade_opacity.y > 0.5);
     let fo = max(0.0, min(1.0, fade_opacity.x + fade_change));
 
-#ifdef HAS_UNIFORM_u_opacity
+#ifdef HAS_UNIFORM_opacity
     let visibility = fo;
 #else
     let opacity = unpack_mix_float(in.opacity, drawable.opacity_t);
@@ -791,7 +791,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let tex_origin = vec2<f32>(f32(in.tex_origin.x), f32(in.tex_origin.y));
     out.tex = (a_tex - tex_origin) * inv_tex;
     out.tex_origin = tex_origin * inv_tex;
-#ifdef HAS_UNIFORM_u_opacity
+#ifdef HAS_UNIFORM_opacity
     out.fade_opacity = fo;
 #else
     out.fade_opacity = fo * opacity;
@@ -800,12 +800,12 @@ fn main(in: VertexInput) -> VertexOutput {
     // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
     // halo: the same over a quad but for the clip w, which interpolates
     // linearly.
-#ifndef HAS_UNIFORM_u_halo_width
+#ifndef HAS_UNIFORM_halo_width
     let halo_width = unpack_mix_float(in.halo_width, drawable.halo_width_t);
 #else
     let halo_width = select(props.icon_halo_width, props.text_halo_width, drawable.is_text_prop != 0u);
 #endif
-#ifndef HAS_UNIFORM_u_halo_blur
+#ifndef HAS_UNIFORM_halo_blur
     let halo_blur = unpack_mix_float(in.halo_blur, drawable.halo_blur_t);
 #else
     let halo_blur = select(props.icon_halo_blur, props.text_halo_blur, drawable.is_text_prop != 0u);
@@ -841,17 +841,17 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #endif
 
     let tileProps = tilePropsVector[drawIndex];
-#ifndef HAS_UNIFORM_u_fill_color
+#ifndef HAS_UNIFORM_fill_color
     let fill_color = in.fill_color;
 #else
     let fill_color = select(props.icon_fill_color, props.text_fill_color, tileProps.is_text != 0u);
 #endif
-#ifndef HAS_UNIFORM_u_halo_color
+#ifndef HAS_UNIFORM_halo_color
     let halo_color = in.halo_color;
 #else
     let halo_color = select(props.icon_halo_color, props.text_halo_color, tileProps.is_text != 0u);
 #endif
-#ifndef HAS_UNIFORM_u_opacity
+#ifndef HAS_UNIFORM_opacity
     let opacity = in.fade_opacity;
 #else
     let opacity = select(props.icon_opacity, props.text_opacity, tileProps.is_text != 0u) * in.fade_opacity;

@@ -290,7 +290,7 @@ pub struct ShaderKey {
 
 impl ShaderKey {
     /// `program` with `defines`, in any order and with repeats: names such
-    /// as `PROJECTION_GLOBE` or `HAS_UNIFORM_u_color`, or `NAME=value` for
+    /// as `PROJECTION_GLOBE` or `HAS_UNIFORM_color`, or `NAME=value` for
     /// a define with a value, such as `DEVICE_PIXEL_RATIO=2.0`.
     #[must_use]
     pub fn new(program: &'static Program, defines: impl IntoIterator<Item = String>) -> ShaderKey {

@@ -73,7 +73,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
 
     return {
         .position    = position,
-#if !defined(HAS_UNIFORM_u_weight)
+#if !defined(HAS_UNIFORM_weight)
         .weight      = weight,
 #endif
         .extrude     = extrude,

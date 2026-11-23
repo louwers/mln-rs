@@ -599,7 +599,7 @@ fn wall_frame(
     let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0, 0.0, 0.0, 0.0])?;
     let shader = gpu.create_shader(&ShaderKey::new(
         program,
-        ["HAS_UNIFORM_u_color", "HAS_UNIFORM_u_base", "HAS_UNIFORM_u_height"].map(String::from),
+        ["HAS_UNIFORM_color", "HAS_UNIFORM_base", "HAS_UNIFORM_height"].map(String::from),
     ))?;
     // At clip depth 0.5.
     let s = 2.0 / EXTENT;

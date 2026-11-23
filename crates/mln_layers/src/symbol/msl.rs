@@ -239,7 +239,7 @@ struct FragmentStage {
     float2 tex;
     float2 tex_origin [[flat]];
 
-#if defined(HAS_UNIFORM_u_opacity)
+#if defined(HAS_UNIFORM_opacity)
     // We only need to pass `fade_opacity` separately if opacity is a
     // uniform, otherwise it's multiplied into fragment opacity, below.
     half fade_opacity;
@@ -257,7 +257,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     const float fade_change = raw_fade_opacity[1] > 0.5 ? props.fade_change : -props.fade_change;
     const float fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
 
-#if defined(HAS_UNIFORM_u_opacity)
+#if defined(HAS_UNIFORM_opacity)
     const half fo = half(fade_opacity);
 #else
     const half fo = half(unpack_mix_float(vertex_in.opacity, drawable.opacity_t) * fade_opacity);
@@ -366,7 +366,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
         .position     = position,
         .tex          = (a_tex - tex_origin) / drawable.texsize,
         .tex_origin   = tex_origin / drawable.texsize,
-#if defined(HAS_UNIFORM_u_opacity)
+#if defined(HAS_UNIFORM_opacity)
         .fade_opacity = fo,
 #else
         .opacity      = fo,
@@ -379,7 +379,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     return half4(1.0);
 #endif
 
-#if defined(HAS_UNIFORM_u_opacity)
+#if defined(HAS_UNIFORM_opacity)
     device const SymbolTilePropsUBO& tileProps = tilePropsVector[drawIndex];
     const float opacity = (tileProps.is_text ? props.text_opacity : props.icon_opacity) * in.fade_opacity;
 #else
@@ -452,7 +452,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     const float2 fade_opacity = unpack_opacity(vertex_in.fade_opacity);
     const float fade_change = (fade_opacity[1] > 0.5) ? props.fade_change : -props.fade_change;
     const half fo = half(max(0.0, min(1.0, fade_opacity[0] + fade_change)));
-#if defined(HAS_UNIFORM_u_opacity)
+#if defined(HAS_UNIFORM_opacity)
     const half visibility = fo;
 #else
     const half opacity = half(unpack_mix_float(vertex_in.opacity, drawable.opacity_t));
@@ -567,12 +567,12 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
     // halo: the same over a quad but for the clip w, which interpolates
     // linearly.
-#if defined(HAS_UNIFORM_u_halo_width)
+#if defined(HAS_UNIFORM_halo_width)
     const float halo_width = drawable.is_text_prop ? props.text_halo_width : props.icon_halo_width;
 #else
     const float halo_width = unpack_mix_float(vertex_in.halo_width, drawable.halo_width_t);
 #endif
-#if defined(HAS_UNIFORM_u_halo_blur)
+#if defined(HAS_UNIFORM_halo_blur)
     const float halo_blur = drawable.is_text_prop ? props.text_halo_blur : props.icon_halo_blur;
 #else
     const float halo_blur = unpack_mix_float(vertex_in.halo_blur, drawable.halo_blur_t);
@@ -581,7 +581,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     const float haloBlurGamma = drawable.is_halo_pass ? halo_blur * 1.19 / SDF_PX : 0.0;
     const float gamma_scaled = (haloBlurGamma + EDGE_GAMMA) / (fontScale * drawable.gamma_scale) * position.w;
     const float halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
-#if defined(HAS_UNIFORM_u_opacity)
+#if defined(HAS_UNIFORM_opacity)
     const half visible_opacity = fo;
 #else
     const half visible_opacity = fo * opacity;
@@ -606,17 +606,17 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 
     device const SymbolTilePropsUBO& tileProps = tilePropsVector[drawIndex];
 
-#if defined(HAS_UNIFORM_u_fill_color)
+#if defined(HAS_UNIFORM_fill_color)
     const half4 fill_color = half4(tileProps.is_text ? props.text_fill_color : props.icon_fill_color);
 #else
     const half4 fill_color = in.fill_color;
 #endif
-#if defined(HAS_UNIFORM_u_halo_color)
+#if defined(HAS_UNIFORM_halo_color)
     const half4 halo_color = half4(tileProps.is_text ? props.text_halo_color : props.icon_halo_color);
 #else
     const half4 halo_color = in.halo_color;
 #endif
-#if defined(HAS_UNIFORM_u_opacity)
+#if defined(HAS_UNIFORM_opacity)
     const float opacity = (tileProps.is_text ? props.text_opacity : props.icon_opacity) * in.fade_opacity;
 #else
     const float opacity = in.fade_opacity;
@@ -705,7 +705,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     const float2 fade_opacity = unpack_opacity(vertex_in.fade_opacity);
     const float fade_change = (fade_opacity[1] > 0.5) ? props.fade_change : -props.fade_change;
     const half fo = half(max(0.0, min(1.0, fade_opacity[0] + fade_change)));
-#if defined(HAS_UNIFORM_u_opacity)
+#if defined(HAS_UNIFORM_opacity)
     const half visibility = fo;
 #else
     const half opacity = half(unpack_mix_float(vertex_in.opacity, drawable.opacity_t));
@@ -823,12 +823,12 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
     // halo: the same over a quad but for the clip w, which interpolates
     // linearly.
-#if defined(HAS_UNIFORM_u_halo_width)
+#if defined(HAS_UNIFORM_halo_width)
     const float halo_width = drawable.is_text_prop ? props.text_halo_width : props.icon_halo_width;
 #else
     const float halo_width = unpack_mix_float(vertex_in.halo_width, drawable.halo_width_t);
 #endif
-#if defined(HAS_UNIFORM_u_halo_blur)
+#if defined(HAS_UNIFORM_halo_blur)
     const float halo_blur = drawable.is_text_prop ? props.text_halo_blur : props.icon_halo_blur;
 #else
     const float halo_blur = unpack_mix_float(vertex_in.halo_blur, drawable.halo_blur_t);
@@ -837,7 +837,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     const float haloBlurGamma = drawable.is_halo_pass ? halo_blur * 1.19 / SDF_PX : 0.0;
     const float gamma_scaled = (haloBlurGamma + EDGE_GAMMA) / (fontScale * drawable.gamma_scale) * position.w;
     const float halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
-#if defined(HAS_UNIFORM_u_opacity)
+#if defined(HAS_UNIFORM_opacity)
     const half visible_opacity = fo;
 #else
     const half visible_opacity = fo * opacity;
@@ -863,17 +863,17 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 
     device const SymbolTilePropsUBO& tileProps = tilePropsVector[drawIndex];
 
-#if defined(HAS_UNIFORM_u_fill_color)
+#if defined(HAS_UNIFORM_fill_color)
     const half4 fill_color = half4(tileProps.is_text ? props.text_fill_color : props.icon_fill_color);
 #else
     const half4 fill_color = in.fill_color;
 #endif
-#if defined(HAS_UNIFORM_u_halo_color)
+#if defined(HAS_UNIFORM_halo_color)
     const half4 halo_color = half4(tileProps.is_text ? props.text_halo_color : props.icon_halo_color);
 #else
     const half4 halo_color = in.halo_color;
 #endif
-#if defined(HAS_UNIFORM_u_opacity)
+#if defined(HAS_UNIFORM_opacity)
     const half opacity = half(tileProps.is_text ? props.text_opacity : props.icon_opacity) * in.fade_opacity;
 #else
     const half opacity = in.fade_opacity;

@@ -62,7 +62,7 @@ pub struct Program {
     pub textures: &'static [ProgramTexture],
     /// The paint properties it reads, each from its uniform or per vertex
     /// as a variant says ([`source`](crate::shaders::source#properties)):
-    /// those whose `HAS_UNIFORM_u_<name>` its sources test once written
+    /// those whose `HAS_UNIFORM_<name>` its sources test once written
     /// out, and no others, since a variant defines only these.
     pub properties: &'static [Property],
     /// Which of the engine's projection blocks its vertex stage reads.
@@ -515,7 +515,7 @@ impl Program {
     /// The key of the variant compiled with `parameters` that reads
     /// `uniforms`, properties of the program, from their uniforms, for
     /// `variant`'s projection. It has the parameters'
-    /// [`defines`](ProgramParameters::defines), a `HAS_UNIFORM_u_<name>` define for
+    /// [`defines`](ProgramParameters::defines), a `HAS_UNIFORM_<name>` define for
     /// each of `uniforms`, and the globe's define for its variant.
     #[must_use]
     pub fn variant_key<'a>(
@@ -525,7 +525,7 @@ impl Program {
         variant: ProjectionVariant,
     ) -> ShaderKey {
         let parameters = parameters.defines();
-        let uniforms = uniforms.into_iter().map(|property| format!("HAS_UNIFORM_u_{}", property.name));
+        let uniforms = uniforms.into_iter().map(|property| format!("HAS_UNIFORM_{}", property.name));
         let globe = (variant == ProjectionVariant::Globe).then(|| GLOBE_DEFINE.to_owned());
         ShaderKey::new(self, parameters.chain(uniforms).chain(globe))
     }

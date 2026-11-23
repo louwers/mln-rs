@@ -122,7 +122,7 @@ mod tests {
         defines.insert("A".to_owned(), true);
         let src = "x\n#ifdef A\na\n#else\nnot_a\n#endif\n#ifndef B\nno_b\n#endif\n  #  ifdef  B  \nb\n#endif\ny";
         assert_eq!(preprocess_wgsl(src, &defines), "x\na\nno_b\ny\n");
-        assert_eq!(get_directive_argument("#ifdef   HAS_UNIFORM_u_color  "), "HAS_UNIFORM_u_color");
+        assert_eq!(get_directive_argument("#ifdef   HAS_UNIFORM_color  "), "HAS_UNIFORM_color");
         assert!(!is_directive("#ifdefX", "ifdef"));
     }
 }

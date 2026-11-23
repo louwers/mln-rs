@@ -25,7 +25,7 @@
 //!
 //! A variant of a program reads each of its
 //! [`properties`](crate::shaders::program::Program::properties) from its
-//! uniform where the variant defines `HAS_UNIFORM_u_<name>`, and per vertex
+//! uniform where the variant defines `HAS_UNIFORM_<name>`, and per vertex
 //! otherwise. A source doesn't write both ways out: it names the property in
 //! one of these, which the backend writes out for both kinds of variant from
 //! the program's [`Property`] and its attribute:
@@ -46,7 +46,7 @@
 //! stage reads per vertex depends on the
 //! property's [`PropertyType`]. Each language's module says what the
 //! directives write there and what more they take. A source still tests
-//! `HAS_UNIFORM_u_<name>` itself where it reads a property another way.
+//! `HAS_UNIFORM_<name>` itself where it reads a property another way.
 
 use std::fmt::Write as _;
 
@@ -135,16 +135,16 @@ pub(crate) fn blocks<'a>(
     text
 }
 
-/// `text` between `#ifndef HAS_UNIFORM_u_<name>` and `#endif`, for the
+/// `text` between `#ifndef HAS_UNIFORM_<name>` and `#endif`, for the
 /// variants that read `named` per vertex.
 pub(crate) fn per_vertex(named: &Named<'_>, text: &str) -> String {
-    format!("#ifndef HAS_UNIFORM_u_{}\n{text}\n#endif", named.name())
+    format!("#ifndef HAS_UNIFORM_{}\n{text}\n#endif", named.name())
 }
 
-/// `text` between `#ifdef HAS_UNIFORM_u_<name>` and `#endif`, for the
+/// `text` between `#ifdef HAS_UNIFORM_<name>` and `#endif`, for the
 /// variants that read `named` from its uniform.
 pub(crate) fn from_uniform(named: &Named<'_>, text: &str) -> String {
-    format!("#ifdef HAS_UNIFORM_u_{}\n{text}\n#endif", named.name())
+    format!("#ifdef HAS_UNIFORM_{}\n{text}\n#endif", named.name())
 }
 
 /// `text` with the property directives and `$`s of `program`'s
@@ -222,7 +222,7 @@ pub(crate) fn expand(
             let per_vertex = value(&named)?;
             _ = write!(
                 out,
-                "#ifdef HAS_UNIFORM_u_{name}\n{before}{uniform}{rest}\n#else\n{before}{per_vertex}{rest}\n#endif{newline}"
+                "#ifdef HAS_UNIFORM_{name}\n{before}{uniform}{rest}\n#else\n{before}{per_vertex}{rest}\n#endif{newline}"
             );
         } else {
             out.push_str(line);
@@ -300,7 +300,7 @@ mod tests {
             prelude: "",
         };
         let [vertex, fragment] = wgsl::expand(&DOT, &source).expect("expands");
-        let per_vertex = |text: &str| format!("#ifndef HAS_UNIFORM_u_color\n{text}\n#endif\n");
+        let per_vertex = |text: &str| format!("#ifndef HAS_UNIFORM_color\n{text}\n#endif\n");
         assert_eq!(
             vertex,
             [
@@ -312,7 +312,7 @@ mod tests {
         );
         assert_eq!(
             fragment,
-            "#ifdef HAS_UNIFORM_u_color\nlet color = props.color * 2.0;\n#else\nlet color = in.color * 2.0;\n#endif"
+            "#ifdef HAS_UNIFORM_color\nlet color = props.color * 2.0;\n#else\nlet color = in.color * 2.0;\n#endif"
         );
     }
 

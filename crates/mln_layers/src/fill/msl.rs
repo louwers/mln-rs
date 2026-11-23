@@ -127,7 +127,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
 
     const auto pattern_to   = $tileProps.pattern_to;
 
-#if !defined(HAS_UNIFORM_u_opacity)
+#if !defined(HAS_UNIFORM_opacity)
     const auto opacity      = unpack_mix_float(vertex_in.opacity, drawable.opacity_t);
 #endif
 
@@ -157,13 +157,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
         .v_pos          = corner.pos,
 
         #property pass color
-#if !defined(HAS_UNIFORM_u_pattern_from)
+#if !defined(HAS_UNIFORM_pattern_from)
         .pattern_from   = pattern_from,
 #endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
+#if !defined(HAS_UNIFORM_pattern_to)
         .pattern_to     = pattern_to,
 #endif
-#if !defined(HAS_UNIFORM_u_opacity)
+#if !defined(HAS_UNIFORM_opacity)
         .opacity        = half(opacity),
 #endif
     };
@@ -182,7 +182,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 
     const auto opacity        = $props.opacity;
 
-#if defined(HAS_UNIFORM_u_color)
+#if defined(HAS_UNIFORM_color)
     const auto color          = half4(props.color);
 #else
     const auto color          = in.color;
@@ -252,7 +252,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     const float dist = length(in.pos - in.position.xy);
     const float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
 
-#if defined(HAS_UNIFORM_u_outline_color)
+#if defined(HAS_UNIFORM_outline_color)
     const half4 color = half4(props.outline_color);
 #else
     const half4 color = in.outline_color;
@@ -354,11 +354,11 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]]) {
     return {
         .position       = corner.position,
         .pos            = corner.pos,
-#if !defined(HAS_UNIFORM_u_outline_color)
+#if !defined(HAS_UNIFORM_outline_color)
         .outline_color  = half4(unpack_mix_color(float4(*(device const packed_float4*)(paint + ((paint_layout >> 8) & 0xff))),
                                                  drawable.outline_color_t)),
 #endif
-#if !defined(HAS_UNIFORM_u_opacity)
+#if !defined(HAS_UNIFORM_opacity)
         .opacity        = half(unpack_mix_float(float2(*(device const packed_float2*)(paint + ((paint_layout >> 16) & 0xff))),
                                                 drawable.opacity_t)),
 #endif
@@ -417,13 +417,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     device const FillPatternDrawableUBO& drawable = drawableVector[drawIndex];
     device const FillPatternTilePropsUBO& tileProps = tilePropsVector[drawIndex];
 
-#if defined(HAS_UNIFORM_u_pattern_from)
+#if defined(HAS_UNIFORM_pattern_from)
     const auto pattern_from = float4(tileProps.pattern_from);
 #else
     const auto pattern_from = float4(vertex_in.pattern_from);
 #endif
 
-#if defined(HAS_UNIFORM_u_pattern_to)
+#if defined(HAS_UNIFORM_pattern_to)
     const auto pattern_to   = float4(tileProps.pattern_to);
 #else
     const auto pattern_to   = float4(vertex_in.pattern_to);
@@ -448,10 +448,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
         .v_pos_a        = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, postion),
         .v_pos_b        = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, postion),
         #property pass color
-#if !defined(HAS_UNIFORM_u_pattern_from)
+#if !defined(HAS_UNIFORM_pattern_from)
         .pattern_from   = pattern_from,
 #endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
+#if !defined(HAS_UNIFORM_pattern_to)
         .pattern_to     = pattern_to,
 #endif
         #property pass opacity
@@ -471,7 +471,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 
     const auto opacity        = $props.opacity;
 
-#if defined(HAS_UNIFORM_u_color)
+#if defined(HAS_UNIFORM_color)
     const auto color          = half4(props.color);
 #else
     const auto color          = in.color;
@@ -559,7 +559,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     return half4(1.0);
 #endif
 
-#if defined(HAS_UNIFORM_u_color)
+#if defined(HAS_UNIFORM_color)
     const half4 color = half4(props.color);
 #else
     const half4 color = in.color;

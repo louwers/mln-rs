@@ -163,7 +163,7 @@ fn directive(program: &Program, named: &Named<'_>, role: &str, stage: Stage) -> 
             per_vertex(named, &format!("{flat}{direction} {precision} {ty} {name};"))
         }
         "pass" if stage == Stage::Vertex => {
-            format!("#ifndef HAS_UNIFORM_u_{name}\n{name} = {};\n#else\n{local}\n#endif", value(named, stage)?)
+            format!("#ifndef HAS_UNIFORM_{name}\n{name} = {};\n#else\n{local}\n#endif", value(named, stage)?)
         }
         "uniform" => from_uniform(named, &local),
         _ => return Err(GpuError::Invalid(format!("no GLSL ES property directive {role} for {name}"))),

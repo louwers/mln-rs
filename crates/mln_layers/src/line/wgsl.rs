@@ -68,14 +68,14 @@ struct VertexOutput {
     @location(4) v_tex_b: vec2<f32>,
     #property varying blur 5
     #property varying opacity 6
-#ifndef HAS_UNIFORM_u_floorwidth
+#ifndef HAS_UNIFORM_floorwidth
     @location(7) v_floorwidth: f32,
 #endif
     @location(8) v_lineprogress: f32,
 #ifdef PROJECTION_GLOBE
     @location(9) v_tile_x: f32,
 #endif
-#ifndef HAS_UNIFORM_u_dasharray
+#ifndef HAS_UNIFORM_dasharray
     @location(10) @interpolate(flat) v_dash_width: f32,
 #endif
 };
@@ -107,7 +107,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let gapwidth = $props.gapwidth / 2.0;
     let offset = -$props.offset;
     let width = $props.width;
-#ifdef HAS_UNIFORM_u_floorwidth
+#ifdef HAS_UNIFORM_floorwidth
     let floorwidth = props.floorwidth;
 #else
     let floorwidth = unpack_mix_float(in.floorwidth, drawable.floorwidth_t);
@@ -152,7 +152,7 @@ fn main(in: VertexInput) -> VertexOutput {
     var patternscale_b = drawable.patternscale_b;
     var tex_y_a = drawable.tex_y_a;
     var tex_y_b = drawable.tex_y_b;
-#ifndef HAS_UNIFORM_u_dasharray
+#ifndef HAS_UNIFORM_dasharray
     // The dash attribute: the pattern's middle row, row span and length.
     patternscale_a = vec2<f32>(drawable.patternscale_a.x / in.dasharray.z, -in.dasharray.y / 2.0 / drawable.atlas_height);
     patternscale_b = vec2<f32>(drawable.patternscale_b.x / in.dasharray.z, patternscale_a.y);
@@ -192,14 +192,14 @@ struct FragmentInput {
     @location(4) v_tex_b: vec2<f32>,
     #property varying blur 5
     #property varying opacity 6
-#ifndef HAS_UNIFORM_u_floorwidth
+#ifndef HAS_UNIFORM_floorwidth
     @location(7) v_floorwidth: f32,
 #endif
     @location(8) v_lineprogress: f32,
 #ifdef PROJECTION_GLOBE
     @location(9) v_tile_x: f32,
 #endif
-#ifndef HAS_UNIFORM_u_dasharray
+#ifndef HAS_UNIFORM_dasharray
     @location(10) @interpolate(flat) v_dash_width: f32,
 #endif
 };
@@ -217,7 +217,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let tileProps = tilePropsVector[drawIndex];
     let blur = $props.blur;
     let opacity = $props.opacity;
-#ifdef HAS_UNIFORM_u_floorwidth
+#ifdef HAS_UNIFORM_floorwidth
     let floorwidth = props.floorwidth;
 #else
     let floorwidth = in.v_floorwidth;
@@ -236,7 +236,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let dist_b = textureSample(image_dash, image_dash_sampler, in.v_tex_b).r;
     let sdfdist = mix(dist_a, dist_b, tileProps.mix);
     var sdfgamma = tileProps.sdfgamma;
-#ifndef HAS_UNIFORM_u_dasharray
+#ifndef HAS_UNIFORM_dasharray
     sdfgamma = sdfgamma / in.v_dash_width;
 #endif
 
@@ -419,7 +419,7 @@ struct VertexOutput {
     #property varying opacity 5
     #property varying pattern_from 6 flat
     #property varying pattern_to 7 flat
-#ifndef HAS_UNIFORM_u_width
+#ifndef HAS_UNIFORM_width
     @location(8) v_floorwidth: f32,
 #endif
 #ifdef PROJECTION_GLOBE
@@ -451,7 +451,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let gapwidth = $props.gapwidth * 0.5;
     let offset = -$props.offset;
     // The floor width comes from the width's attribute.
-#ifdef HAS_UNIFORM_u_width
+#ifdef HAS_UNIFORM_width
     let width = props.width;
 #else
     let width = unpack_mix_float(in.width, drawable.width_t);
@@ -509,7 +509,7 @@ struct FragmentInput {
     #property varying opacity 5
     #property varying pattern_from 6 flat
     #property varying pattern_to 7 flat
-#ifndef HAS_UNIFORM_u_width
+#ifndef HAS_UNIFORM_width
     @location(8) v_floorwidth: f32,
 #endif
 #ifdef PROJECTION_GLOBE
@@ -533,7 +533,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let pattern_to = $tileProps.pattern_to;
     let blur = $props.blur;
     let opacity = $props.opacity;
-#ifdef HAS_UNIFORM_u_width
+#ifdef HAS_UNIFORM_width
     let floorwidth = max(props.floorwidth, 1e-6);
 #else
     let floorwidth = max(in.v_floorwidth, 1e-6);
@@ -624,13 +624,13 @@ struct VertexOutput {
     #property varying color 5
     #property varying blur 6
     #property varying opacity 7
-#ifndef HAS_UNIFORM_u_floorwidth
+#ifndef HAS_UNIFORM_floorwidth
     @location(8) v_floorwidth: f32,
 #endif
 #ifdef PROJECTION_GLOBE
     @location(9) v_tile_x: f32,
 #endif
-#ifndef HAS_UNIFORM_u_dasharray
+#ifndef HAS_UNIFORM_dasharray
     @location(10) @interpolate(flat) v_dash_width: f32,
 #endif
 };
@@ -661,7 +661,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let gapwidth = $props.gapwidth / 2.0;
     let offset = -$props.offset;
     let width = $props.width;
-#ifdef HAS_UNIFORM_u_floorwidth
+#ifdef HAS_UNIFORM_floorwidth
     let floorwidth = props.floorwidth;
 #else
     let floorwidth = unpack_mix_float(in.floorwidth, drawable.floorwidth_t);
@@ -706,7 +706,7 @@ fn main(in: VertexInput) -> VertexOutput {
     var patternscale_b = drawable.patternscale_b;
     var tex_y_a = drawable.tex_y_a;
     var tex_y_b = drawable.tex_y_b;
-#ifndef HAS_UNIFORM_u_dasharray
+#ifndef HAS_UNIFORM_dasharray
     // The dash attribute: the pattern's middle row, row span and length.
     patternscale_a = vec2<f32>(drawable.patternscale_a.x / in.dasharray.z, -in.dasharray.y / 2.0 / drawable.atlas_height);
     patternscale_b = vec2<f32>(drawable.patternscale_b.x / in.dasharray.z, patternscale_a.y);
@@ -746,13 +746,13 @@ struct FragmentInput {
     #property varying color 5
     #property varying blur 6
     #property varying opacity 7
-#ifndef HAS_UNIFORM_u_floorwidth
+#ifndef HAS_UNIFORM_floorwidth
     @location(8) v_floorwidth: f32,
 #endif
 #ifdef PROJECTION_GLOBE
     @location(9) v_tile_x: f32,
 #endif
-#ifndef HAS_UNIFORM_u_dasharray
+#ifndef HAS_UNIFORM_dasharray
     @location(10) @interpolate(flat) v_dash_width: f32,
 #endif
 };
@@ -771,7 +771,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let color = $props.color;
     let blur = $props.blur;
     let opacity = $props.opacity;
-#ifdef HAS_UNIFORM_u_floorwidth
+#ifdef HAS_UNIFORM_floorwidth
     let floorwidth = props.floorwidth;
 #else
     let floorwidth = in.v_floorwidth;
@@ -790,7 +790,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let dist_b = textureSample(image, image_sampler, in.v_tex_b).r;
     let sdfdist = mix(dist_a, dist_b, tileProps.mix);
     var sdfgamma = tileProps.sdfgamma;
-#ifndef HAS_UNIFORM_u_dasharray
+#ifndef HAS_UNIFORM_dasharray
     sdfgamma = sdfgamma / in.v_dash_width;
 #endif
 

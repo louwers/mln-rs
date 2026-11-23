@@ -407,7 +407,7 @@ layout(location = 3) out float frag_linesofar;
 #property varying pattern_from 6 flat
 
 #property varying pattern_to 7 flat
-#if !defined(HAS_UNIFORM_u_width)
+#if !defined(HAS_UNIFORM_width)
 layout(location = 8) out float frag_floorwidth;
 #endif
 
@@ -431,7 +431,7 @@ void main() {
     #property pass pattern_from
 
     #property pass pattern_to
-#ifndef HAS_UNIFORM_u_width
+#ifndef HAS_UNIFORM_width
     frag_floorwidth = unpack_mix_float(in_width, drawable.floorwidth_t);
 #endif
 
@@ -505,7 +505,7 @@ layout(location = 3) in float frag_linesofar;
 #property varying pattern_from 6 flat
 
 #property varying pattern_to 7 flat
-#if !defined(HAS_UNIFORM_u_width)
+#if !defined(HAS_UNIFORM_width)
 layout(location = 8) in float frag_floorwidth;
 #endif
 
@@ -553,7 +553,7 @@ void main() {
     const vec2 pattern_size_a = vec2(display_size_a.x * fromScale / tileZoomRatio, display_size_a.y);
     const vec2 pattern_size_b = vec2(display_size_b.x * toScale / tileZoomRatio, display_size_b.y);
 
-#if defined(HAS_UNIFORM_u_width)
+#if defined(HAS_UNIFORM_width)
     const float floorwidth = props.floorwidth;
 #else
     const float floorwidth = frag_floorwidth;
@@ -642,7 +642,7 @@ layout(location = 4) out vec2 frag_tex_b;
 layout(location = 9) out float frag_tile_x;
 #endif
 
-#if !defined(HAS_UNIFORM_u_dasharray)
+#if !defined(HAS_UNIFORM_dasharray)
 layout(location = 10) flat out float frag_dash_width;
 #endif
 
@@ -655,7 +655,7 @@ void main() {
 
     #property pass opacity
 
-#ifndef HAS_UNIFORM_u_floorwidth
+#ifndef HAS_UNIFORM_floorwidth
     const float floorwidth = unpack_mix_float(in_floorwidth, drawable.floorwidth_t);
     frag_floorwidth = floorwidth;
 #else
@@ -720,7 +720,7 @@ void main() {
 
     frag_width2 = vec2(outset, inset);
 
-#ifdef HAS_UNIFORM_u_dasharray
+#ifdef HAS_UNIFORM_dasharray
     const vec2 patternscale_a = drawable.patternscale_a;
     const vec2 patternscale_b = drawable.patternscale_b;
     const float tex_y_a = drawable.tex_y_a;
@@ -762,7 +762,7 @@ layout(location = 0) out vec4 out_color;
 layout(location = 9) in float frag_tile_x;
 #endif
 
-#if !defined(HAS_UNIFORM_u_dasharray)
+#if !defined(HAS_UNIFORM_dasharray)
 layout(location = 10) flat in float frag_dash_width;
 #endif
 
@@ -798,7 +798,7 @@ void main() {
     const float sdfdist_a = texture(sampler2D(image, image_sampler), frag_tex_a).a;
     const float sdfdist_b = texture(sampler2D(image, image_sampler), frag_tex_b).a;
     const float sdfdist = mix(sdfdist_a, sdfdist_b, tileProps.mix);
-#ifdef HAS_UNIFORM_u_dasharray
+#ifdef HAS_UNIFORM_dasharray
     const float sdfgamma = tileProps.sdfgamma;
 #else
     const float sdfgamma = tileProps.sdfgamma / frag_dash_width;
@@ -852,7 +852,7 @@ layout(location = 5) out float frag_lineprogress;
 layout(location = 9) out float frag_tile_x;
 #endif
 
-#if !defined(HAS_UNIFORM_u_dasharray)
+#if !defined(HAS_UNIFORM_dasharray)
 layout(location = 10) flat out float frag_dash_width;
 #endif
 
@@ -863,7 +863,7 @@ void main() {
 
     #property pass opacity
 
-#ifndef HAS_UNIFORM_u_floorwidth
+#ifndef HAS_UNIFORM_floorwidth
     const float floorwidth = unpack_mix_float(in_floorwidth, drawable.floorwidth_t);
     frag_floorwidth = floorwidth;
 #else
@@ -929,7 +929,7 @@ void main() {
 
     frag_width2 = vec2(outset, inset);
 
-#ifdef HAS_UNIFORM_u_dasharray
+#ifdef HAS_UNIFORM_dasharray
     const vec2 patternscale_a = drawable.patternscale_a;
     const vec2 patternscale_b = drawable.patternscale_b;
     const float tex_y_a = drawable.tex_y_a;
@@ -968,7 +968,7 @@ layout(location = 5) in float frag_lineprogress;
 layout(location = 9) in float frag_tile_x;
 #endif
 
-#if !defined(HAS_UNIFORM_u_dasharray)
+#if !defined(HAS_UNIFORM_dasharray)
 layout(location = 10) flat in float frag_dash_width;
 #endif
 
@@ -1004,7 +1004,7 @@ void main() {
     const float sdfdist_a = texture(sampler2D(image_dash, image_dash_sampler), frag_tex_a).a;
     const float sdfdist_b = texture(sampler2D(image_dash, image_dash_sampler), frag_tex_b).a;
     const float sdfdist = mix(sdfdist_a, sdfdist_b, tileProps.mix);
-#ifdef HAS_UNIFORM_u_dasharray
+#ifdef HAS_UNIFORM_dasharray
     const float sdfgamma = tileProps.sdfgamma;
 #else
     const float sdfgamma = tileProps.sdfgamma / frag_dash_width;

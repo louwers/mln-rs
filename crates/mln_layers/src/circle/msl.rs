@@ -106,13 +106,13 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
         .antialiasblur  = antialiasblur,
 
         #property pass color
-#if !defined(HAS_UNIFORM_u_radius)
+#if !defined(HAS_UNIFORM_radius)
         .radius         = radius,
 #endif
         #property pass blur
         #property pass opacity
         #property pass stroke_color
-#if !defined(HAS_UNIFORM_u_stroke_width)
+#if !defined(HAS_UNIFORM_stroke_width)
         .stroke_width   = half(stroke_width),
 #endif
         #property pass stroke_opacity
@@ -124,7 +124,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     return half4(1.0);
 #endif
 
-#if defined(HAS_UNIFORM_u_color)
+#if defined(HAS_UNIFORM_color)
     const half4 color = half4(props.color);
 #else
     const half4 color = in.color;
@@ -132,7 +132,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     const float radius = $props.radius;
     const float blur = $props.blur;
     const float opacity = $props.opacity;
-#if defined(HAS_UNIFORM_u_stroke_color)
+#if defined(HAS_UNIFORM_stroke_color)
     const half4 stroke_color = half4(props.stroke_color);
 #else
     const half4 stroke_color = in.stroke_color;

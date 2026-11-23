@@ -29,7 +29,7 @@ fn defines<'a>(overdraw: bool, globe: bool, uniforms: impl IntoIterator<Item = &
         let _ = writeln!(defines, "#define {GLOBE_DEFINE}");
     }
     for name in uniforms {
-        let _ = writeln!(defines, "#define HAS_UNIFORM_u_{name}");
+        let _ = writeln!(defines, "#define HAS_UNIFORM_{name}");
     }
     defines
 }

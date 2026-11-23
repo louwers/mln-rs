@@ -110,7 +110,7 @@ void main() {
 
     #property pass color
 
-#if !defined(HAS_UNIFORM_u_radius)
+#if !defined(HAS_UNIFORM_radius)
     frag_radius = radius;
 #endif
 
@@ -120,7 +120,7 @@ void main() {
 
     #property pass stroke_color
 
-#if !defined(HAS_UNIFORM_u_stroke_width)
+#if !defined(HAS_UNIFORM_stroke_width)
     frag_stroke_width = stroke_width;
 #endif
 

@@ -1,6 +1,6 @@
 //! Parses and validates every program's GLSL with naga, as the backends
 //! compose it: `#version 450`, the `ProgramParameters` defines, a
-//! `HAS_UNIFORM_u_<name>` define per property passed as a uniform,
+//! `HAS_UNIFORM_<name>` define per property passed as a uniform,
 //! `PROJECTION_GLOBE` for the globe variant, then the stage's prelude, the
 //! shader's prelude and the stage's source. Also checks that the buffers,
 //! textures, samplers and vertex inputs the GLSL declares are the ones the
@@ -42,7 +42,7 @@ const STAGES: [Stage; 2] = [Stage::Vertex, Stage::Fragment];
 /// program declares it.
 #[test]
 fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
-    const PREFIX: &str = "HAS_UNIFORM_u_";
+    const PREFIX: &str = "HAS_UNIFORM_";
     for (program, source) in programs() {
         let mut tested = BTreeSet::new();
         let [vertex, fragment] = STAGES.map(|stage| glsl::expand(program, source, stage.into()).expect("expands"));

@@ -156,10 +156,10 @@ fn lighting_of(normal: vec3<f32>, t: f32, baseValue: f32, heightValue: f32) -> v
 // `patternPos` of the pattern's plane.
 fn set_pattern(out: ptr<function, VertexOutput>, drawable: FillExtrusionDrawableUBO,
                patternFrom: vec4<f32>, patternTo: vec4<f32>, patternPos: vec2<f32>) {
-#ifndef HAS_UNIFORM_u_pattern_from
+#ifndef HAS_UNIFORM_pattern_from
     (*out).pattern_from = patternFrom;
 #endif
-#ifndef HAS_UNIFORM_u_pattern_to
+#ifndef HAS_UNIFORM_pattern_to
     (*out).pattern_to = patternTo;
 #endif
 
@@ -200,13 +200,13 @@ macro_rules! base_and_height {
 macro_rules! patterns {
     () => {
         r"
-#ifdef HAS_UNIFORM_u_pattern_from
+#ifdef HAS_UNIFORM_pattern_from
     let patternFrom = tilePropsVector[drawIndex].pattern_from;
 #else
     let patternFrom = vec4<f32>(in.pattern_from);
 #endif
 
-#ifdef HAS_UNIFORM_u_pattern_to
+#ifdef HAS_UNIFORM_pattern_to
     let patternTo = tilePropsVector[drawIndex].pattern_to;
 #else
     let patternTo = vec4<f32>(in.pattern_to);
@@ -347,13 +347,13 @@ struct VertexInput {
     decimals_ed: vec2<u32>,
     next_outline_pos: vec2<i32>,
     next_decimals_ed: vec2<u32>,
-#ifndef HAS_UNIFORM_u_color
+#ifndef HAS_UNIFORM_color
     color: vec4<f32>,
 #endif
-#ifndef HAS_UNIFORM_u_base
+#ifndef HAS_UNIFORM_base
     base: vec2<f32>,
 #endif
-#ifndef HAS_UNIFORM_u_height
+#ifndef HAS_UNIFORM_height
     height: vec2<f32>,
 #endif
 };
@@ -387,15 +387,15 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     // The wall's paint values are its outline vertex's.
     let paint_layout = drawable.paint_layout;
     let paint = wall * (paint_layout & 0xffu);
-#ifndef HAS_UNIFORM_u_base
+#ifndef HAS_UNIFORM_base
     let base_at = paint + ((paint_layout >> 8u) & 0xffu);
     in.base = vec2<f32>(wallPaint[base_at], wallPaint[base_at + 1u]);
 #endif
-#ifndef HAS_UNIFORM_u_height
+#ifndef HAS_UNIFORM_height
     let height_at = paint + ((paint_layout >> 16u) & 0xffu);
     in.height = vec2<f32>(wallPaint[height_at], wallPaint[height_at + 1u]);
 #endif
-#ifndef HAS_UNIFORM_u_color
+#ifndef HAS_UNIFORM_color
     let color_at = paint + (paint_layout >> 24u);
     in.color = vec4<f32>(wallPaint[color_at], wallPaint[color_at + 1u],
                          wallPaint[color_at + 2u], wallPaint[color_at + 3u]);

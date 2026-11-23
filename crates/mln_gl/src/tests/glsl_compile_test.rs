@@ -47,10 +47,10 @@ fn programs() -> Vec<(&'static Program, &'static Glsl)> {
     programs.filter_map(|&program| Some((program, program.sources.glsl_es?))).collect()
 }
 
-/// The names after `HAS_UNIFORM_u_` in `program`'s GLSL, `source`, once its
+/// The names after `HAS_UNIFORM_` in `program`'s GLSL, `source`, once its
 /// properties are written out.
 fn uniforms(program: &Program, source: &Glsl) -> BTreeSet<String> {
-    const PREFIX: &str = "HAS_UNIFORM_u_";
+    const PREFIX: &str = "HAS_UNIFORM_";
     let mut names = BTreeSet::new();
     for glsl in glsl_es::expand(program, source).expect("expands") {
         for (start, _) in glsl.match_indices(PREFIX) {

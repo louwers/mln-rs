@@ -398,7 +398,7 @@ void main() {
     gl_Position = projectTile(a_pos, a_pos);
 }
 ",
-    fragment: r"#ifndef HAS_UNIFORM_u_color
+    fragment: r"#ifndef HAS_UNIFORM_color
 in highp vec4 color;
 #endif
 #property varying opacity lowp

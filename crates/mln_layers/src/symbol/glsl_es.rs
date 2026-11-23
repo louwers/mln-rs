@@ -190,7 +190,7 @@ void main() {
     vec2 fade_opacity = unpack_opacity(a_fade_opacity);
     float fade_change = fade_opacity[1] > 0.5 ? u_fade_change : -u_fade_change;
     v_fade_opacity = max(0.0, min(1.0, fade_opacity[0] + fade_change));
-#ifndef HAS_UNIFORM_u_opacity
+#ifndef HAS_UNIFORM_opacity
     lowp float opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
     v_fade_opacity *= opacity;
 #else
@@ -306,7 +306,7 @@ flat in highp vec2 v_tex_origin;
 in float v_fade_opacity;
 
 void main() {
-#ifdef HAS_UNIFORM_u_opacity
+#ifdef HAS_UNIFORM_opacity
     lowp float alpha = (u_is_text ? u_text_opacity : u_icon_opacity) * v_fade_opacity;
 #else
     lowp float alpha = v_fade_opacity;
@@ -479,7 +479,7 @@ lowp float halo_blur = $u_halo_blur;
     float halo_blur_gamma = u_is_halo_pass ? halo_blur * 1.19 / SDF_PX : 0.0;
     float gamma_scaled = (halo_blur_gamma + EDGE_GAMMA) / (fontScale * u_gamma_scale) * gl_Position.w;
     float halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
-#ifndef HAS_UNIFORM_u_opacity
+#ifndef HAS_UNIFORM_opacity
     interpolated_fade_opacity *= opacity;
 #endif
 
@@ -507,7 +507,7 @@ void main() {
 
 #property uniform fill_color highp
 #property uniform halo_color highp
-#ifdef HAS_UNIFORM_u_opacity
+#ifdef HAS_UNIFORM_opacity
     lowp float opacity = u_opacity;
 #else
     lowp float opacity = 1.0;
@@ -702,7 +702,7 @@ lowp float halo_blur = $u_halo_blur;
     float halo_blur_gamma = u_is_halo_pass ? halo_blur * 1.19 / SDF_PX : 0.0;
     float gamma_scaled = (halo_blur_gamma + EDGE_GAMMA) / (fontScale * u_gamma_scale) * gl_Position.w;
     float halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
-#ifndef HAS_UNIFORM_u_opacity
+#ifndef HAS_UNIFORM_opacity
     interpolated_fade_opacity *= opacity;
 #endif
 
@@ -734,7 +734,7 @@ void main() {
 
 #property uniform fill_color highp
 #property uniform halo_color highp
-#ifdef HAS_UNIFORM_u_opacity
+#ifdef HAS_UNIFORM_opacity
     lowp float opacity = u_opacity;
 #else
     lowp float opacity = 1.0;

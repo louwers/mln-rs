@@ -100,7 +100,7 @@ struct FragmentStage {
     #property varying blur float
     #property varying opacity float
     #property varying floorwidth float
-#if !defined(HAS_UNIFORM_u_dasharray)
+#if !defined(HAS_UNIFORM_dasharray)
     float dash_width [[flat]];
 #endif
 };
@@ -164,7 +164,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     const float extrude_length_without_perspective = length(dist);
     const float extrude_length_with_perspective = length(projected_extrude.xy / position.w * view.units_to_pixels);
 
-#if defined(HAS_UNIFORM_u_dasharray)
+#if defined(HAS_UNIFORM_dasharray)
     const float2 patternscale_a = drawable.patternscale_a;
     const float2 patternscale_b = drawable.patternscale_b;
     const float tex_y_a = drawable.tex_y_a;
@@ -191,10 +191,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
 
         #property pass blur
         #property pass opacity
-#if !defined(HAS_UNIFORM_u_floorwidth)
+#if !defined(HAS_UNIFORM_floorwidth)
         .floorwidth   = floorwidth,
 #endif
-#if !defined(HAS_UNIFORM_u_dasharray)
+#if !defined(HAS_UNIFORM_dasharray)
         .dash_width   = vertex_in.dasharray.z,
 #endif
     };
@@ -229,7 +229,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     const float sdfdist_a = image_dash.sample(image_dash_sampler, in.tex_a).a;
     const float sdfdist_b = image_dash.sample(image_dash_sampler, in.tex_b).a;
     const float sdfdist = mix(sdfdist_a, sdfdist_b, tileProps.mix);
-#if defined(HAS_UNIFORM_u_dasharray)
+#if defined(HAS_UNIFORM_dasharray)
     const float sdfgamma = tileProps.sdfgamma;
 #else
     const float sdfgamma = tileProps.sdfgamma / in.dash_width;
@@ -299,10 +299,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
 
     device const LineGradientDrawableUBO& drawable = drawableVector[drawIndex];
 
-#if !defined(HAS_UNIFORM_u_blur)
+#if !defined(HAS_UNIFORM_blur)
     const auto blur     = unpack_mix_float(vertex_in.blur,     drawable.blur_t);
 #endif
-#if !defined(HAS_UNIFORM_u_opacity)
+#if !defined(HAS_UNIFORM_opacity)
     const auto opacity  = unpack_mix_float(vertex_in.opacity,  drawable.opacity_t);
 #endif
     const auto gapwidth = $props.gapwidth / 2;
@@ -364,10 +364,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
         .gamma_scale  = half(extrude_length_without_perspective / extrude_length_with_perspective),
         .lineprogress = v_lineprogress,
 
-#if !defined(HAS_UNIFORM_u_blur)
+#if !defined(HAS_UNIFORM_blur)
         .blur         = half(blur),
 #endif
-#if !defined(HAS_UNIFORM_u_opacity)
+#if !defined(HAS_UNIFORM_opacity)
         .opacity      = half(opacity),
 #endif
     };
@@ -384,12 +384,12 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     return half4(1.0);
 #endif
 
-#if defined(HAS_UNIFORM_u_blur)
+#if defined(HAS_UNIFORM_blur)
     const float blur = props.blur;
 #else
     const float blur = float(in.blur);
 #endif
-#if defined(HAS_UNIFORM_u_opacity)
+#if defined(HAS_UNIFORM_opacity)
     const float opacity = props.opacity;
 #else
     const float opacity = float(in.opacity);
@@ -464,7 +464,7 @@ struct FragmentStage {
     #property varying opacity half
     #property varying pattern_from float4 flat
     #property varying pattern_to float4 flat
-#if !defined(HAS_UNIFORM_u_width)
+#if !defined(HAS_UNIFORM_width)
     float floorwidth;
 #endif
 };
@@ -479,7 +479,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
 
     const auto width    = $props.width;
 
-#if !defined(HAS_UNIFORM_u_width)
+#if !defined(HAS_UNIFORM_width)
     const auto floorwidth = unpack_mix_float(vertex_in.width, drawable.floorwidth_t);
 #endif
 
@@ -543,7 +543,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
         #property pass opacity
         #property pass pattern_from
         #property pass pattern_to
-#if !defined(HAS_UNIFORM_u_width)
+#if !defined(HAS_UNIFORM_width)
         .floorwidth   = floorwidth,
 #endif
     };
@@ -587,7 +587,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     const float2 pattern_size_a = float2(display_size_a.x * fromScale / tileZoomRatio, display_size_a.y);
     const float2 pattern_size_b = float2(display_size_b.x * toScale / tileZoomRatio, display_size_b.y);
 
-#if defined(HAS_UNIFORM_u_width)
+#if defined(HAS_UNIFORM_width)
     const float floorwidth = props.floorwidth;
 #else
     const float floorwidth = in.floorwidth;
@@ -683,7 +683,7 @@ struct FragmentStage {
     #property varying blur float
     #property varying opacity float
     #property varying floorwidth float
-#if !defined(HAS_UNIFORM_u_dasharray)
+#if !defined(HAS_UNIFORM_dasharray)
     float dash_width [[flat]];
 #endif
 };
@@ -746,7 +746,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     const float extrude_length_without_perspective = length(dist);
     const float extrude_length_with_perspective = length(projected_extrude.xy / position.w * view.units_to_pixels);
 
-#if defined(HAS_UNIFORM_u_dasharray)
+#if defined(HAS_UNIFORM_dasharray)
     const float2 patternscale_a = drawable.patternscale_a;
     const float2 patternscale_b = drawable.patternscale_b;
     const float tex_y_a = drawable.tex_y_a;
@@ -773,10 +773,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
         #property pass color
         #property pass blur
         #property pass opacity
-#if !defined(HAS_UNIFORM_u_floorwidth)
+#if !defined(HAS_UNIFORM_floorwidth)
         .floorwidth   = floorwidth,
 #endif
-#if !defined(HAS_UNIFORM_u_dasharray)
+#if !defined(HAS_UNIFORM_dasharray)
         .dash_width   = vertex_in.dasharray.z,
 #endif
     };
@@ -796,7 +796,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 
     device const LineSDFTilePropsUBO& tileProps = tilePropsVector[drawIndex];
 
-#if defined(HAS_UNIFORM_u_color)
+#if defined(HAS_UNIFORM_color)
     const auto color     = props.color;
 #else
     const float4 color = in.color;
@@ -818,7 +818,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     const float sdfdist_a = image.sample(image_sampler, in.tex_a).a;
     const float sdfdist_b = image.sample(image_sampler, in.tex_b).a;
     const float sdfdist = mix(sdfdist_a, sdfdist_b, tileProps.mix);
-#if defined(HAS_UNIFORM_u_dasharray)
+#if defined(HAS_UNIFORM_dasharray)
     const float sdfgamma = tileProps.sdfgamma;
 #else
     const float sdfgamma = tileProps.sdfgamma / in.dash_width;
@@ -960,7 +960,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     return half4(1.0);
 #endif
 
-#if defined(HAS_UNIFORM_u_color)
+#if defined(HAS_UNIFORM_color)
     const auto color     = props.color;
 #else
     const float4 color = in.color;
