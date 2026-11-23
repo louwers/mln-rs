@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Checks that no commit names an AI tool, or a bot this repository doesn't
-# use, as its author, its committer or a `Co-authored-by:` trailer. MapLibre's
-# AI policy (https://github.com/maplibre/maplibre/blob/main/AI_POLICY.md)
-# keeps the human contributor the author; credit a tool with an
-# `Assisted-by:` trailer instead, which this leaves alone. A squash merge
-# turns each commit's author into a co-author, so the authors of a pull
-# request's commits count as much as its trailers.
+# Checks that no commit names an AI tool as its author, its committer or a
+# `Co-authored-by:` trailer. MapLibre's AI policy
+# (https://github.com/maplibre/maplibre/blob/main/AI_POLICY.md) keeps the
+# human contributor the author; credit a tool with an `Assisted-by:` trailer
+# instead, which this leaves alone. A squash merge turns each commit's author
+# into a co-author, so the authors of a pull request's commits count as much
+# as its trailers. Other bots, and people's own bot accounts, pass.
 #
 #   check-commit-authors.sh <revision-range>   each commit in the range
 #   check-commit-authors.sh --message <file>   a message being committed,
@@ -49,11 +49,13 @@ commits | awk '
 BEGIN {
     RS = "\036"
     FS = "\037"
-    # The bots that commit to this repository: Dependabot, and the release
-    # workflow (github-actions, or the MapLibre release-plz app).
-    allowed_bots["dependabot[bot]"] = 1
-    allowed_bots["github-actions[bot]"] = 1
-    allowed_bots["maplibre-release-plz[bot]"] = 1
+    # The GitHub accounts of AI tools, and of the apps that commit for them.
+    split("copilot copilot-swe-agent[bot] github-advanced-security[bot] " \
+          "claude[bot] cursor[bot] devin-ai-integration[bot] " \
+          "chatgpt-codex-connector[bot] google-labs-jules[bot] " \
+          "gemini-code-assist[bot] greptile-apps[bot] factory-droid[bot] " \
+          "coderabbitai[bot] amazon-q-developer[bot]", logins, " ")
+    for (i in logins) ai_logins[logins[i]] = 1
     # Domains whose addresses only AI tools commit as.
     split("anthropic.com openai.com cursor.com ampcode.com warp.dev " \
           "opencode.ai factory.ai devin.ai cognition.ai aider.chat " \
@@ -68,20 +70,18 @@ BEGIN {
 }
 
 # Why an identity ("Name <email>") is rejected, or "" when it is not.
-function rejection(identity,    raw, name, email, login, domain) {
-    raw = identity
+function rejection(identity,    name, email, login, domain) {
+    name = identity
     email = ""
     if (match(identity, /<[^>]*>/)) {
-        raw = substr(identity, 1, RSTART - 1)
+        name = substr(identity, 1, RSTART - 1)
         email = tolower(substr(identity, RSTART + 1, RLENGTH - 2))
     }
-    raw = tolower(raw)
-    gsub(/^[ \t]+|[ \t]+$/, "", raw)
-    # Without parenthesized notes such as "(1m context)", and with
-    # punctuation other than version dots and "[bot]" as spaces.
-    name = raw
-    gsub(/\([^)]*\)/, " ", name)
-    gsub(/[^]a-z0-9.[]+/, " ", name)
+    # Lowercase, without parenthesized notes such as "(1m context)" or a
+    # "[bot]" suffix, and with punctuation other than version dots as spaces.
+    name = tolower(name)
+    gsub(/\([^)]*\)|\[bot\]/, " ", name)
+    gsub(/[^a-z0-9.]+/, " ", name)
     gsub(/^ +| +$/, "", name)
 
     # The GitHub account of a noreply address: [<id>+]<login>@users.noreply.github.com.
@@ -94,19 +94,13 @@ function rejection(identity,    raw, name, email, login, domain) {
     domain = email
     sub(/^[^@]*@?/, "", domain)
 
-    if (login ~ /(\[bot\]|-bot)$/ || name ~ /(\[bot\]|[- ]bot)$/) {
-        if (!(login in allowed_bots) && !(raw in allowed_bots))
-            return "a bot this repository does not use"
-        return ""
-    }
+    if (login in ai_logins || email == "copilot@github.com")
+        return "an AI tool\047s account"
     if (domain in ai_domains) return "an AI tool\047s address"
-    if (login == "copilot" || email == "copilot@github.com")
-        return "GitHub Copilot\047s account"
     if (name in ai_names) return "an AI tool\047s name"
-    # A tool and its model, or an account for an agent: "Claude Opus 5.5",
-    # "GitHub Copilot Autofix", "GPT-5", "GLM 5.2", "someone-agent".
+    # A tool and its model: "Claude Opus 5.5", "GitHub Copilot Autofix",
+    # "GPT-5", "GLM 5.2".
     if (name ~ /^(anthropic )?claude (opus|sonnet|haiku|fable|code|instant)( |$)/ ||
-        name ~ / agent$/ ||
         name ~ /^(github )?copilot( |$)/ ||
         name ~ /^(openai |google |xai )?(gpt|chatgpt|codex|gemini|grok|glm|qwen|deepseek|llama|mistral|claude) ?[0-9]/)
         return "an AI tool\047s name"

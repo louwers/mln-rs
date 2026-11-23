@@ -298,8 +298,8 @@ jobs:
             ${{ runner.temp }}/web-check-webgl2
           if-no-files-found: ignore
 
-  # That no commit credits an AI tool or a bot as its author, committer or
-  # co-author (tools/check-commit-authors.sh): a pull request's own commits,
+  # That no commit credits an AI tool as its author, committer or co-author
+  # (tools/check-commit-authors.sh): a pull request's own commits,
   # whose authors a squash merge makes co-authors, and on main the pushed
   # commits, whose messages the merge dialog may have changed.
   commits:
