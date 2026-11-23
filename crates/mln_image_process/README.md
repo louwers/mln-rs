@@ -1,13 +1,13 @@
 # mln-rs-image-process
 
-Named render targets for [mln-rs](https://crates.io/crates/mln-rs) styles, and
-the `org.maplibre.image-process` layer type that processes them: a style
-declares targets at its root, draws layers of any type into one instead of the
-map, and an image-process layer reads a target through blurs, thresholds, colors
-and combinations with other targets, and draws the result over the map in its
-place, or into a target of its own.
+The `org.maplibre.image-process` layer type for
+[mln-rs](https://crates.io/crates/mln-rs) styles, which processes named render
+targets: a style declares targets at its root and draws layers of any type into
+one instead of the map, and an image-process layer reads a target through blurs,
+thresholds, colors and combinations with other targets, and draws the result
+over the map in its place, or into a target of its own.
 
-A caller adds the keys and the layer type to the registry it starts its runtime
+A caller adds the layer type and its keys to the registry it starts its runtime
 with (`mln_rs::Runtime::new`):
 
 ```rust
@@ -58,17 +58,15 @@ and a style draws a glow under its roads:
 | `org.maplibre:source-target`      | an image-process layer | the target it reads                                                                                                            |
 | `org.maplibre:operations`         | an image-process layer | what it does to what it reads, in order                                                                                        |
 
+Every registry holds the first two keys, of the engine's named targets; this
+crate adds the last two.
+
 A target holds what the layers drawn into it draw in the frame, wherever they
 are among the layers, and nothing that the map doesn't. A layer of 3D geometry,
 and one whose route would make a target read what it draws, draws on the map
 instead, with a warning. A rendered-feature query finds a layer drawn into a
 target as if it drew on the map, even where an operation erased what it drew:
 give the query the layers it means.
-
-An extension of another crate whose layers draw into targets or read them
-registers this crate's `TARGETS` and `DESTINATION` rather than keys of its own:
-a registry takes one key of each value type, and registering a key it holds
-already changes nothing.
 
 ## Operations
 
@@ -86,14 +84,13 @@ are logical pixels. What lies past the map's edges is what is at them.
 
 Without operations, a layer draws its source target as it is.
 
-A registry without these keys loads a style that uses them with a warning for
-each member it doesn't know and each image-process layer, which it leaves out,
-and draws every other layer on the map.
+A registry without this crate loads a style that uses it with a warning for each
+image-process layer, which it leaves out, and draws the layers routed into
+targets into them, where nothing reads them.
 
 It is written against the mln-rs facade alone, as an extension outside mln-rs
 is: the engine draws layers into the targets and orders the frame's passes by
-what reads what, and this crate names the keys that drive it and the layer type
-that reads them.
+what reads what, and this crate's layer type reads them.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering

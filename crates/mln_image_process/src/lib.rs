@@ -2,8 +2,8 @@
 //!
 //! # The crate's parts
 //!
-//! - the style keys and the values they parse to (`keys.rs`): [`TARGETS`],
-//!   [`DESTINATION`], [`SOURCE`] and [`OPERATIONS`];
+//! - the style keys and the values they parse to (`keys.rs`): [`SOURCE`]
+//!   and [`OPERATIONS`];
 //! - the style half, here: [`ImageProcess`], and [`register`];
 //! - the passes that an image-process layer's operations make (`plan.rs`);
 //! - the program, with its block and its shaders in the four shading
@@ -21,7 +21,7 @@ mod plan;
 mod program;
 mod wgsl;
 
-pub use keys::{Combine, DESTINATION, OPERATIONS, Operation, Operations, SOURCE, SourceTarget, TARGETS};
+pub use keys::{Combine, OPERATIONS, Operation, Operations, SOURCE, SourceTarget};
 pub use layer::ImageProcessLayer;
 use mln_rs::layer::{LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 use mln_rs::mln_render::{RegisterError, RegistryBuilder};
@@ -42,8 +42,6 @@ impl StyleLayerType for ImageProcess {
 /// Adds the style keys and the `org.maplibre.image-process` layer type to
 /// `builder`.
 pub fn register(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
-    builder.add_style_key(&TARGETS)?;
-    builder.add_style_key(&DESTINATION)?;
     builder.add_style_key(&SOURCE)?;
     builder.add_style_key(&OPERATIONS)?;
     builder.add_layer_type::<ImageProcessLayer>()

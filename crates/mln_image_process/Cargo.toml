@@ -1,13 +1,13 @@
-# The `org.maplibre.image-process` layer type and the style keys of named
-# render targets, written against the mln-rs facade alone, as a crate outside
-# mln-rs writes a layer type. Its render tests (render-tests/) run in
+# The `org.maplibre.image-process` layer type, which reads named render
+# targets, written against the mln-rs facade alone, as a crate outside mln-rs
+# writes a layer type. Its render tests (render-tests/) run in
 # tools/render-test's suite.
 [package]
 name = "mln-rs-image-process"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Named render targets for mln-rs styles, and a layer type that blurs, thresholds, colors and combines them"
+description = "A layer type for mln-rs styles that blurs, thresholds, colors and combines named render targets"
 license.workspace = true
 repository.workspace = true
 keywords.workspace = true

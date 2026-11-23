@@ -3,11 +3,10 @@
 //! ([`Destination`]) and other layers read
 //! ([`UpdateCx::target`](crate::layer::UpdateCx::target)).
 //!
-//! The engine reads both values from the style by their types and knows no
-//! key that holds them: an extension declares the keys
-//! ([`StyleKey`](mln_style::style_key::StyleKey)) and parses their values.
-//! A registry takes one key of each value type, so the extensions of a
-//! registry share one crate's keys of named targets.
+//! Every registry holds the two style keys of these values: the root's
+//! `org.maplibre:targets`, `[{"id": <name>, "precision": "standard" |
+//! "high"}, ...]`, and a layer's `org.maplibre:destination-target`, the name
+//! of the target it draws into.
 //!
 //! Each frame draws one pass into each named target that a layer draws into
 //! or reads, cleared to transparent, with the draws of every layer routed
@@ -23,8 +22,12 @@ use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::sync::Arc;
 
+use feature::{Value, ValueObject};
 use mln_gfx::gpu::{Gpu, GpuError, TextureFormat, TextureId};
 use mln_gfx::types::TextureChannelDataType;
+use mln_style::conversion::{Convertible, Error};
+use mln_style::expression::Functions;
+use mln_style::style_key::StyleKey;
 use mln_util::Color;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -55,15 +58,74 @@ pub struct NamedTarget {
 }
 
 /// The style's named targets, in the order it declares them: the value of
-/// the style's root that the engine reads. Of two targets of one name, the
+/// the style's root `org.maplibre:targets`. Of two targets of one name, the
 /// first is the target.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NamedTargets(pub Vec<NamedTarget>);
 
 /// Where a layer draws: into the named target of this name instead of the
-/// map. The value of a layer that the engine reads.
+/// map. The value of a layer's `org.maplibre:destination-target`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Destination(pub Arc<str>);
+
+/// The style's root `org.maplibre:targets`, which every registry holds.
+pub(crate) static TARGETS: StyleKey<NamedTargets> =
+    StyleKey::root("org.maplibre:targets", parse_targets, targets_json);
+
+/// A layer's `org.maplibre:destination-target`, on a layer of any type,
+/// which every registry holds.
+pub(crate) static DESTINATION: StyleKey<Destination> =
+    StyleKey::layer("org.maplibre:destination-target", parse_destination, |to| Value::String(to.0.to_string()));
+
+fn name(value: &Convertible<'_>) -> Result<Arc<str>, Error> {
+    value.to_string().map(Into::into).ok_or_else(|| Error::new("expected a target's id"))
+}
+
+fn parse_targets(value: &Convertible<'_>, _: &Arc<Functions>) -> Result<NamedTargets, Error> {
+    if !value.is_array() {
+        return Err(Error::new("expected an array of targets"));
+    }
+    let mut targets: Vec<NamedTarget> = Vec::new();
+    for i in 0..value.array_length() {
+        let target = value.array_member(i);
+        let at = |message: String| Error::new(format!("[{i}]: {message}"));
+        let unknown = |member: &str, _: &Convertible<'_>| {
+            (!["id", "precision"].contains(&member)).then(|| at(format!("no member \"{member}\"")))
+        };
+        if let Some(error) = target.each_member(unknown) {
+            return Err(error);
+        }
+        let name = target.object_member("id").ok_or_else(|| at("expected an id".to_owned()))?;
+        let name = self::name(&name).map_err(|e| at(e.message))?;
+        if targets.iter().any(|target| target.name == name) {
+            return Err(at(format!("a second target \"{name}\"")));
+        }
+        let channel = match target.object_member("precision").map(|precision| precision.to_string()) {
+            None => TextureChannelDataType::UnsignedByte,
+            Some(Some(precision)) if precision == "standard" => TextureChannelDataType::UnsignedByte,
+            Some(Some(precision)) if precision == "high" => TextureChannelDataType::HalfFloat,
+            Some(_) => return Err(at("expected a precision of \"standard\" or \"high\"".to_owned())),
+        };
+        targets.push(NamedTarget { name, channel });
+    }
+    Ok(NamedTargets(targets))
+}
+
+fn targets_json(targets: &NamedTargets) -> Value {
+    let target = |target: &NamedTarget| {
+        let mut json = ValueObject::new();
+        json.insert("id".to_owned(), Value::String(target.name.to_string()));
+        if target.channel == TextureChannelDataType::HalfFloat {
+            json.insert("precision".to_owned(), Value::String("high".to_owned()));
+        }
+        Value::Object(json)
+    };
+    Value::Array(targets.0.iter().map(target).collect())
+}
+
+fn parse_destination(value: &Convertible<'_>, _: &Arc<Functions>) -> Result<Destination, Error> {
+    name(value).map(Destination)
+}
 
 /// The depth and stencil format of the targets' passes where the frame's
 /// can't serve them.

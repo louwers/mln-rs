@@ -29,20 +29,16 @@
 //! programs, whose blocks differ. A layer that draws with the backend's own
 //! commands asks the frame to lend them ([`Draws::lend`]).
 //!
-//! A style may declare named targets ([`NamedTargets`], a value of its root)
-//! and draw a layer's main group and overlay into one instead of the map
-//! ([`Destination`], a value of the layer), where a layer reads it
-//! ([`UpdateCx::target`](crate::layer::UpdateCx::target)). The engine knows
-//! no key that holds these values: an extension declares the keys
-//! ([`StyleKey`](mln_style::style_key::StyleKey)), as the
-//! `mln_image_process` crate does, with a layer type that reads targets.
-//! A registry takes one key of each value type, so another extension whose
-//! layers draw into targets or read them registers those keys rather than
-//! its own; registering a key again changes nothing. A
-//! group draws into a named target as onto the map, with the masks of its
-//! tiles and within the frame's scissor, but each draw over the last,
-//! without the opaque pass's depth, with no composite of a blend that reads
-//! what is behind it, and with no commands lent in the pass.
+//! A style may declare named targets ([`NamedTargets`], its root's
+//! `org.maplibre:targets`) and draw a layer's main group and overlay into
+//! one instead of the map ([`Destination`], the layer's
+//! `org.maplibre:destination-target`), where a layer reads it
+//! ([`UpdateCx::target`](crate::layer::UpdateCx::target)), as the
+//! `mln_image_process` crate's layer type does. A group draws into a named
+//! target as onto the map, with the masks of its tiles and within the
+//! frame's scissor, but each draw over the last, without the opaque pass's
+//! depth, with no composite of a blend that reads what is behind it, and
+//! with no commands lent in the pass.
 //!
 //! The resources and their handles belong to the renderer's thread: they
 //! are neither `Send` nor `Sync`.

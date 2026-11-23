@@ -1,8 +1,8 @@
-//! The `mln_image_process` crate's keys through the facade: a map reads,
-//! writes and refuses their JSON, and a runtime whose registry has only the
-//! built-ins loads a style of them with a warning for each key and for the
-//! image-process layer type, and draws the layers that the style routes into
-//! targets on the map.
+//! The `mln_image_process` crate's keys and the engine's keys of named
+//! targets through the facade: a map reads, writes and refuses their JSON,
+//! and a runtime whose registry has only the built-ins loads a style of them
+//! with a warning for the image-process layer type, and draws the layers
+//! that the style routes into targets into them.
 
 mod support;
 
@@ -115,17 +115,19 @@ fn render(style: &str) -> PremultipliedImage {
 }
 
 #[test]
-fn a_registry_without_the_crate_draws_the_layers_routed_into_targets_on_the_map() {
+fn a_registry_without_the_crate_leaves_out_its_layer_and_draws_into_the_targets() {
     warnings();
     let image = render(&style(true));
     let warnings = warnings();
-    for name in ["org.maplibre:targets", "org.maplibre:destination-target", "org.maplibre.image-process"] {
-        assert!(warnings.iter().any(|warning| warning.contains(name)), "no warning of {name} in {warnings:#?}");
+    assert!(warnings.iter().any(|warning| warning.contains("org.maplibre.image-process")), "{warnings:#?}");
+    for name in ["org.maplibre:targets", "org.maplibre:destination-target"] {
+        assert!(!warnings.iter().any(|warning| warning.contains(name)), "a warning of {name} in {warnings:#?}");
     }
-    assert_eq!(image.data, render(&style(false)).data, "the map differs from the style without the keys");
 
-    // The square and the line are on the map, in their own colors.
+    // The square and the line draw into the target, which nothing reads.
+    assert!(image.data.chunks(4).all(|pixel| pixel == [0xff; 4]), "the map isn't all white");
+    let drawn = render(&style(false));
     for color in [[0x30, 0x70, 0xc0, 0xff], [0xc0, 0x30, 0x20, 0xff]] {
-        assert!(image.data.chunks(4).any(|pixel| pixel == color), "no pixel of {color:02x?}");
+        assert!(drawn.data.chunks(4).any(|pixel| pixel == color), "no pixel of {color:02x?} on the map");
     }
 }

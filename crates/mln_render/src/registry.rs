@@ -14,6 +14,7 @@ use mln_vec_map::VecMap;
 use crate::erased_layer::{ErasedLayerType, entry};
 use crate::erased_source::{self, ErasedSourceType};
 use crate::layer::Layer;
+use crate::named_target;
 use crate::placement::{ErasedPlacement, Placement};
 use crate::source::SourceType;
 
@@ -26,8 +27,10 @@ type PlacingType = (&'static str, fn() -> Box<dyn ErasedPlacement>);
 /// An app fills a builder by explicit calls and builds the [`Registry`]
 /// once. Tile workers in other wasm instances make the same calls, since
 /// they run the app's own module. Each registration is by name and fails
-/// for a name taken already ([`RegisterError`]).
-#[derive(Default)]
+/// for a name taken already ([`RegisterError`]). A builder starts with the
+/// style keys of named targets
+/// ([`NamedTargets`](crate::draw::NamedTargets),
+/// [`Destination`](crate::draw::Destination)).
 pub struct RegistryBuilder {
     functions: Functions,
     layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
@@ -45,6 +48,21 @@ impl std::fmt::Debug for RegistryBuilder {
             .field("style_keys", &self.style_keys)
             .field("placing_types", &self.placing_types.iter().map(|(name, _)| name).collect::<Vec<_>>())
             .finish()
+    }
+}
+
+impl Default for RegistryBuilder {
+    fn default() -> Self {
+        let mut style_keys = StyleKeys::default();
+        style_keys.add(&named_target::TARGETS).expect("no style keys to collide with");
+        style_keys.add(&named_target::DESTINATION).expect("no style keys to collide with");
+        RegistryBuilder {
+            functions: Functions::default(),
+            layer_types: VecMap::default(),
+            source_types: VecMap::default(),
+            style_keys,
+            placing_types: Vec::new(),
+        }
     }
 }
 

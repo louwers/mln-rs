@@ -1,27 +1,15 @@
-//! The style keys: the targets a style declares, the target a layer draws
-//! into, and what an `org.maplibre.image-process` layer reads and does.
+//! The style keys of what an `org.maplibre.image-process` layer reads and
+//! does.
 
 use std::sync::Arc;
 
 use mln_rs::feature::{Value, ValueObject};
-use mln_rs::layer::{
-    Color, Convertible, Destination, Functions, NamedTarget, NamedTargets, PropertyValue, StyleKey,
-    TextureChannelDataType, conversion,
-};
+use mln_rs::layer::{Color, Convertible, Functions, PropertyValue, StyleKey, conversion};
 use mln_rs::mln_style::StyleValue;
 use mln_rs::mln_style::conversion::Converter;
 use mln_rs::mln_style::expression::ValueConverter;
 
 use crate::ImageProcess;
-
-/// The root `org.maplibre:targets`: `[{"id": <name>, "precision":
-/// "standard" | "high"}, ...]`.
-pub static TARGETS: StyleKey<NamedTargets> = StyleKey::root("org.maplibre:targets", parse_targets, targets_json);
-
-/// A layer's `org.maplibre:destination-target`, on a layer of any type: the
-/// name of the target it draws into instead of the map.
-pub static DESTINATION: StyleKey<Destination> =
-    StyleKey::layer("org.maplibre:destination-target", parse_destination, |to| Value::String(to.0.to_string()));
 
 /// An `org.maplibre.image-process` layer's `org.maplibre:source-target`.
 pub static SOURCE: StyleKey<SourceTarget> =
@@ -106,47 +94,6 @@ fn only(object: &Convertible<'_>, members: &[&str]) -> Result<(), conversion::Er
     object
         .each_member(|name, _| (!members.contains(&name)).then(|| error(format!("no member \"{name}\""))))
         .map_or(Ok(()), Err)
-}
-
-fn parse_targets(value: &Convertible<'_>, _: &Arc<Functions>) -> Result<NamedTargets, conversion::Error> {
-    if !value.is_array() {
-        return Err(error("expected an array of targets"));
-    }
-    let mut targets: Vec<NamedTarget> = Vec::new();
-    for i in 0..value.array_length() {
-        let target = value.array_member(i);
-        let at = |message: String| error(format!("[{i}]: {message}"));
-        only(&target, &["id", "precision"]).map_err(|e| at(e.message))?;
-        let name = target.object_member("id").ok_or_else(|| at("expected an id".to_owned()))?;
-        let name = string(&name, "a target's id").map_err(|e| at(e.message))?;
-        if targets.iter().any(|target| target.name == name) {
-            return Err(at(format!("a second target \"{name}\"")));
-        }
-        let channel = match target.object_member("precision").map(|precision| precision.to_string()) {
-            None => TextureChannelDataType::UnsignedByte,
-            Some(Some(precision)) if precision == "standard" => TextureChannelDataType::UnsignedByte,
-            Some(Some(precision)) if precision == "high" => TextureChannelDataType::HalfFloat,
-            Some(_) => return Err(at("expected a precision of \"standard\" or \"high\"".to_owned())),
-        };
-        targets.push(NamedTarget { name, channel });
-    }
-    Ok(NamedTargets(targets))
-}
-
-fn targets_json(targets: &NamedTargets) -> Value {
-    let target = |target: &NamedTarget| {
-        let mut json = ValueObject::new();
-        json.insert("id".to_owned(), Value::String(target.name.to_string()));
-        if target.channel == TextureChannelDataType::HalfFloat {
-            json.insert("precision".to_owned(), Value::String("high".to_owned()));
-        }
-        Value::Object(json)
-    };
-    Value::Array(targets.0.iter().map(target).collect())
-}
-
-fn parse_destination(value: &Convertible<'_>, _: &Arc<Functions>) -> Result<Destination, conversion::Error> {
-    string(value, "a target's id").map(Destination)
 }
 
 fn parse_source(value: &Convertible<'_>, _: &Arc<Functions>) -> Result<SourceTarget, conversion::Error> {
