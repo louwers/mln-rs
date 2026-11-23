@@ -484,6 +484,40 @@ const TWO_LAYER_TILE: &[u8] = &[
     b'l', b's', 0x12, 0x0b, 0x08, 0x02, 0x18, 0x01, 0x22, 0x05, 0x09, 0x80, 0x20, 0x80, 0x20, 0x28, 0x80, 0x20,
 ];
 
+/// A source layer "bad" whose one point feature's tag names value 7 of a
+/// layer that has none, to append to a tile.
+const BAD_VALUE_LAYER: &[u8] = &[
+    0x1a, 0x1a, 0x78, 0x02, 0x0a, 0x03, b'b', b'a', b'd', 0x12, 0x0b, 0x12, 0x02, 0x00, 0x07, 0x18, 0x01, 0x22, 0x03,
+    0x09, 0x00, 0x00, 0x1a, 0x01, b'k', 0x28, 0x80, 0x20,
+];
+
+/// A source query fails with the error of a feature it can't read, though
+/// the tile laid out from its other source layers, which still answer.
+#[test]
+fn a_source_query_of_an_unreadable_feature_fails() {
+    let test = MapTest::new();
+    test.file_source.set_response(Kind::Tile, |_| {
+        let mut response = mln_storage::Response::new();
+        response.data = Some(Arc::new([TWO_LAYER_TILE, BAD_VALUE_LAYER].concat()));
+        Some(response)
+    });
+    test.load_json(
+        r#"{
+          "version": 8,
+          "sources": { "tiles": { "type": "vector", "tiles": ["http://example.com/{z}/{x}/{y}.pbf"], "maxzoom": 0 } },
+          "layers": [{ "id": "dots", "type": "circle", "source": "tiles", "source-layer": "points" }]
+        }"#,
+    );
+    test.render();
+
+    let query = |source_layer: &str| {
+        let options = SourceQueryOptions::new(Some(layers(&[source_layer])), None);
+        test.frontend().renderer().query_source_features("tiles", &options)
+    };
+    assert_eq!(query("points").unwrap().len(), 1);
+    assert_eq!(query("bad").unwrap_err().to_string(), "invalid value index 7");
+}
+
 // Not a C++ test: ffi patch 0048 has none. Ports the source-layer checks of
 // maplibre-native-ffi's `source_queries_read_the_named_source_layers` ABI
 // test.
