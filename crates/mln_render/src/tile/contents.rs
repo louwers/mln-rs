@@ -54,11 +54,18 @@ pub(crate) struct LayoutBuckets {
 /// A layer a layout laid out: the index of its bucket, and its values.
 #[derive(Clone)]
 struct LaidLayer {
-    bucket: usize,
-    layer: Arc<dyn ErasedEvaluatedLayer>,
+    /// A `u32`, so that `leads` takes no room of its own.
+    bucket: u32,
     /// Whether the layer leads its bucket: it is the first of the layers
     /// the bucket was laid out for.
     leads: bool,
+    layer: Arc<dyn ErasedEvaluatedLayer>,
+}
+
+impl LaidLayer {
+    fn bucket(&self) -> usize {
+        self.bucket as usize
+    }
 }
 
 impl LayoutBuckets {
@@ -75,7 +82,7 @@ impl LayoutBuckets {
         bucket: Box<dyn ErasedBucket>,
         layers: impl IntoIterator<Item = (String, Arc<dyn ErasedEvaluatedLayer>)>,
     ) {
-        let index = self.buckets.len();
+        let index = self.buckets.len() as u32;
         let mut used = false;
         for (id, layer) in layers {
             self.layers.entry(id).or_insert_with(|| {
@@ -118,7 +125,7 @@ impl LayoutBuckets {
     /// `index` among those laid out.
     #[inline]
     pub(crate) fn bucket_index(&self, index: usize) -> Option<usize> {
-        Some(self.laid.get(index)?.bucket)
+        Some(self.laid.get(index)?.bucket())
     }
 
     /// Whether the layer at `index` among those laid out leads its bucket.
@@ -127,7 +134,7 @@ impl LayoutBuckets {
     }
 
     fn layer_bucket<'a>(&'a self, laid: &'a LaidLayer) -> ErasedLayerBucket<'a> {
-        ErasedLayerBucket { bucket: &*self.buckets[laid.bucket], layer: &*laid.layer }
+        ErasedLayerBucket { bucket: &*self.buckets[laid.bucket()], layer: &*laid.layer }
     }
 
     /// The number of layers laid out.
@@ -156,7 +163,7 @@ impl LayoutBuckets {
     ) -> impl Iterator<Item = (&String, usize, bool, &Arc<dyn ErasedEvaluatedLayer>)> + '_ {
         self.layers.iter().map(|(id, &index)| {
             let laid = &self.laid[index];
-            (id, laid.bucket, laid.leads, &laid.layer)
+            (id, laid.bucket(), laid.leads, &laid.layer)
         })
     }
 
@@ -198,15 +205,15 @@ impl LayoutBuckets {
     /// A copy of the layers that `keep` keeps, and of their buckets.
     pub(crate) fn copy_where(&self, mut keep: impl FnMut(&Arc<dyn ErasedEvaluatedLayer>) -> bool) -> Self {
         let mut copy = LayoutBuckets::with_capacity(self.laid.len());
-        let mut copied: Vec<Option<usize>> = vec![None; self.buckets.len()];
+        let mut copied: Vec<Option<u32>> = vec![None; self.buckets.len()];
         for (id, &index) in &self.layers {
             let laid = &self.laid[index];
             if !keep(&laid.layer) {
                 continue;
             }
-            let bucket = *copied[laid.bucket].get_or_insert_with(|| {
-                copy.buckets.push(self.buckets[laid.bucket].clone_bucket());
-                copy.buckets.len() - 1
+            let bucket = *copied[laid.bucket()].get_or_insert_with(|| {
+                copy.buckets.push(self.buckets[laid.bucket()].clone_bucket());
+                copy.buckets.len() as u32 - 1
             });
             copy.laid.push(LaidLayer { bucket, layer: Arc::clone(&laid.layer), leads: laid.leads });
             copy.layers.insert(id.clone(), copy.laid.len() - 1);
@@ -255,7 +262,7 @@ impl LayoutResult {
             };
             // The worker got the layer from the same data.
             if let Ok(Some(source_layer)) = layers.layer(source_layer_id) {
-                buckets[laid.bucket].set_feature_state(feature_states, &source_layer, layer_id);
+                buckets[laid.bucket()].set_feature_state(feature_states, &source_layer, layer_id);
             }
         }
     }
