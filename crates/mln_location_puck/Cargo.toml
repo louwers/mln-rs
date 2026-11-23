@@ -15,7 +15,6 @@ include.workspace = true
 
 [lib]
 name = "mln_location_puck"
-doctest = false
 
 [dependencies]
 mln_rs.workspace = true

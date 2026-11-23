@@ -8,13 +8,19 @@ and combinations with other targets, and draws the result over the map in its
 place, or into a target of its own.
 
 A caller adds the keys and the layer type to the registry it starts its runtime
-with:
+with (`mln_rs::Runtime::new`):
 
 ```rust
-let mut builder = mln_rs::mln_render::RegistryBuilder::new();
-mln_rs::register_builtins(&mut builder)?;
-mln_image_process::register(&mut builder)?;
-let runtime = mln_rs::Runtime::new(&mln_rs::RuntimeOptions::default(), builder.build())?;
+use std::sync::Arc;
+
+use mln_rs::mln_render::{RegisterError, Registry, RegistryBuilder};
+
+fn registry() -> Result<Arc<Registry>, RegisterError> {
+    let mut builder = RegistryBuilder::new();
+    mln_rs::register_builtins(&mut builder)?;
+    mln_image_process::register(&mut builder)?;
+    Ok(builder.build())
+}
 ```
 
 and a style draws a glow under its roads:

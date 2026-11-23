@@ -6,13 +6,20 @@ draws a regular polygon, of 3 to 360 corners, at each of its points. It has the
 paint properties of a circle layer, named `ngon-*`, and two more: `ngon-corners`
 and `ngon-rotate`. Its polygons may collide with labels and with each other.
 
-A caller adds it to the registry it starts its runtime with:
+A caller adds it to the registry it starts its runtime with
+(`mln_rs::Runtime::new`):
 
 ```rust
-let mut builder = mln_rs::mln_render::RegistryBuilder::new();
-mln_rs::register_builtins(&mut builder)?;
-mln_ngon::register(&mut builder)?;
-let runtime = mln_rs::Runtime::new(&mln_rs::RuntimeOptions::default(), builder.build())?;
+use std::sync::Arc;
+
+use mln_rs::mln_render::{RegisterError, Registry, RegistryBuilder};
+
+fn registry() -> Result<Arc<Registry>, RegisterError> {
+    let mut builder = RegistryBuilder::new();
+    mln_rs::register_builtins(&mut builder)?;
+    mln_ngon::register(&mut builder)?;
+    Ok(builder.build())
+}
 ```
 
 and a style draws it:
