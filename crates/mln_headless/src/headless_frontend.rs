@@ -277,6 +277,12 @@ impl HeadlessFrontend {
         // error that fails it.
         map.process_events();
         map.render_still()?;
+        // A target that can't begin a frame won't by waiting.
+        if !self.target.ready_for_frame() {
+            return Err(Error::invalid_state(
+                "the offscreen target has no pixels at its size and scale factor, or more than the device's textures take",
+            ));
+        }
 
         let queue = self.queue.clone();
         let mut idle_since = mln_util::time::Instant::now();

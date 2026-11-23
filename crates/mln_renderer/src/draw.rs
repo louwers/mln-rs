@@ -234,7 +234,7 @@ impl DrawObjects {
     /// buffers and textures, where they changed since the last upload.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if let Err(error) = self.upload_in(gpu, context) {
-            Log::error(Event::Render, format!("Uploading {} failed: {error}", self.shader.program().name));
+            context.fail(format!("Uploading {} failed: {error}", self.shader.program().name));
         }
     }
 
@@ -301,7 +301,7 @@ impl DrawObjects {
 
         for texture in self.textures.iter().flatten() {
             if let Err(error) = context.upload_texture(gpu, texture) {
-                Log::error(Event::Render, format!("Uploading a texture failed: {error}"));
+                context.fail(format!("Uploading a texture failed: {error}"));
             }
         }
 
@@ -311,7 +311,9 @@ impl DrawObjects {
     /// Draws the segments into `parameters`' open pass on `gpu`, the
     /// context's, with `depth_mode` and `stencil_mode`, binding the buffers
     /// of the draws in `frame`. Shaders read the draw's entries in those
-    /// storage buffers at `global_index`. Returns whether it didn't fail.
+    /// storage buffers at `global_index`. Returns whether it didn't fail; a
+    /// draw that fails fails the frame
+    /// ([`Context::fail`](crate::gfx::context::Context::fail)).
     pub(crate) fn draw(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -323,7 +325,7 @@ impl DrawObjects {
     ) -> bool {
         let drawn = self.draw_in(gpu, parameters, frame, depth_mode, stencil_mode, global_index);
         if let Err(error) = &drawn {
-            Log::warning(Event::Render, format!("Drawing {} failed: {error}", self.shader.program().name));
+            parameters.context.fail(format!("Drawing {} failed: {error}", self.shader.program().name));
         }
         drawn.is_ok()
     }
@@ -341,14 +343,15 @@ impl DrawObjects {
             return Ok(());
         };
         let context = &mut *parameters.context;
-        let index_buffer = self.indexes.buffer(context);
-        debug_assert!(
-            index_buffer.is_some(),
-            "a draw of {} draws indexes it didn't upload",
-            self.shader.program().name
-        );
-        let Some(index_buffer) = index_buffer else {
-            return Ok(());
+        let Some(index_buffer) = self.indexes.buffer(context) else {
+            // Only a failed upload, which failed the frame, leaves a draw
+            // without its indexes.
+            debug_assert!(
+                context.device().failed(),
+                "a draw of {} draws indexes it didn't upload",
+                self.shader.program().name
+            );
+            return Err(GpuError::Invalid("its indexes aren't uploaded".to_owned()));
         };
 
         let shader_id = match self.shader_id {

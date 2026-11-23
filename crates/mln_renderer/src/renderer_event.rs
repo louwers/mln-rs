@@ -35,7 +35,8 @@ pub enum RendererEvent {
     RenderFrameStarted,
     /// The renderer drew a frame.
     RenderFrameFinished {
-        /// `Full` when everything the frame shows has loaded.
+        /// `Full` when everything the frame shows has loaded, though some of
+        /// it may have failed to draw (`error`).
         mode: RenderMode,
         /// The frame has transitions still running.
         needs_repaint: bool,
@@ -55,6 +56,10 @@ pub enum RendererEvent {
         update_id: u64,
         /// The context's counters after the frame.
         stats: Arc<RenderingStats>,
+        /// Why the frame failed on the GPU, if it did
+        /// ([`DrawnFrame::error`](crate::DrawnFrame::error)): its image
+        /// lacks what failed. Boxed, so that the events don't grow for it.
+        error: Option<Box<Error>>,
     },
     /// The renderer drew its first frame with everything loaded.
     RenderMapFinished,
@@ -84,8 +89,6 @@ pub enum RendererEvent {
         id: OverscaledTileID,
         source_id: String,
     },
-    /// A layer or a draw failed to render.
-    RenderError(Error),
 }
 
 /// The queue a renderer pushes its events to.
