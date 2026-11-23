@@ -1196,7 +1196,17 @@ fn mix_offset(program: &Program, name: &str) -> Option<usize> {
 /// values of the property into the vertices that a program's attributes
 /// read, and implements [`PaintBinders`](crate::layer::PaintBinders).
 ///
-/// ```ignore
+/// ```
+/// # mln_style::properties!(
+/// #     pub mod paint: paint {
+/// #         ngon_color: data_driven Color = Color::black(),
+/// #         ngon_radius: data_driven f32 = 5.0,
+/// #     }
+/// #     use mln_util::Color;
+/// # );
+/// use mln_render::layer::PaintPropertyBinder;
+/// use mln_util::Color;
+///
 /// mln_render::paint_property_binders!(
 ///     pub struct NgonBinders for paint::PossiblyEvaluated {
 ///         ngon_color: PaintPropertyBinder<Color> => ["color"],

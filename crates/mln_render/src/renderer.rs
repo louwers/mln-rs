@@ -47,12 +47,24 @@ enum RenderState {
 /// does to the target that the renderer draws into. A frame runs in the
 /// host, with one `Gpu` lent to all of it:
 ///
-/// ```ignore
-/// let frame = renderer.update(gpu, &update)?;
+/// ```
+/// # use std::sync::Arc;
+/// # use mln_gfx::frame::FrameTarget;
+/// # use mln_gfx::gpu::Gpu;
+/// # use mln_render::{Renderer, UpdateParameters};
+/// # fn frame(
+/// #     renderer: &mut Renderer,
+/// #     gpu: &mut (dyn Gpu + 'static),
+/// #     target: &mut impl FrameTarget<Gpu = dyn Gpu>,
+/// #     update: &Arc<UpdateParameters>,
+/// # ) -> Option<()> {
+/// let frame = renderer.update(gpu, update)?;
 /// let image = target.begin_frame(gpu)?;
 /// let drawn = renderer.render(gpu, &image, frame);
 /// let handoff = target.end_frame(gpu);
 /// renderer.finish_frame(gpu, drawn, handoff);
+/// # Some(())
+/// # }
 /// ```
 ///
 /// [`tear_down`](Self::tear_down) frees the renderer's GPU objects. A

@@ -13,7 +13,7 @@ use crate::generated::types::{MLN_STATUS_OK, mln_diagnostic, mln_status};
 
 /// The body of a C entry point that returns `mln_status`:
 ///
-/// ```ignore
+/// ```text
 /// export!(out_diagnostic, non_null(out_queue), {
 ///     // ... returns Result<(), Error>, so `?` works
 /// })

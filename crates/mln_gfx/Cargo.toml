@@ -14,8 +14,6 @@ autotests = false
 
 [lib]
 name = "mln_gfx"
-# The doc comments have no examples to run.
-doctest = false
 
 [features]
 # The programs' sources in each shading language that a backend of the build

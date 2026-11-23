@@ -296,7 +296,7 @@ macro_rules! __property_info {
 /// evaluated type and its default, followed by the paths its types and
 /// defaults need:
 ///
-/// ```ignore
+/// ```
 /// mln_style::properties!(
 ///     /// The paint properties of an `org.maplibre.ngon` layer.
 ///     pub mod paint: paint {

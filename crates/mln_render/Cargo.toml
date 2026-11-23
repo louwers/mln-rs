@@ -14,8 +14,6 @@ autotests = false
 
 [lib]
 name = "mln_render"
-# The doc comments have no examples to run.
-doctest = false
 
 [features]
 default = ["font-face-shaper"]

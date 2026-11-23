@@ -12,13 +12,28 @@
 //! [`PropertyVisitor`], so that reading, converting and comparing a value
 //! needs no downcast:
 //!
-//! ```ignore
+//! ```
+//! use mln_style::property_table::{PropertyInfo, PropertyTable, PropertyVisitor};
+//!
+//! mln_style::properties!(
+//!     pub mod paint: paint {
+//!         dot_color: data_driven Color = Color::black(),
+//!         dot_opacity: constant f32 = 1.0,
+//!     }
+//!     use mln_util::Color;
+//! );
+//!
+//! /// What a `LayerStyle<Dot>` holds of the type's paint properties.
+//! struct DotStyle {
+//!     paint: paint::Transitionable,
+//! }
+//!
 //! static PROPERTIES: PropertyTable = PropertyTable::new(
 //!     &[PropertyInfo::paint("dot-color").data_driven(), PropertyInfo::paint("dot-opacity")],
 //!     &[0, 1],
 //! );
 //!
-//! fn visit_property<V: PropertyVisitor<LayerStyle<Dot>>>(slot: usize, visitor: V) -> Option<V::Output> {
+//! fn visit_property<V: PropertyVisitor<DotStyle>>(slot: usize, visitor: V) -> Option<V::Output> {
 //!     Some(match slot {
 //!         0 => visitor.paint(|s| &s.paint.dot_color, |s| &mut s.paint.dot_color),
 //!         1 => visitor.paint(|s| &s.paint.dot_opacity, |s| &mut s.paint.dot_opacity),

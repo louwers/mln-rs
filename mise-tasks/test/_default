@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-#MISE description="Run every test, including the render, query and expression suites"
+#MISE description="Run every test, including the render, query and expression suites and the doc comments' examples"
 # The tests' headless frontends render with WebGPU, or with the backend
 # MLN_RENDER_BACKEND names: webgpu, metal, vulkan, d3d12, gl (OpenGL ES) or
 # gl-desktop (desktop OpenGL). A test that hangs is ended after ten minutes
-# (.config/nextest.toml).
+# (.config/nextest.toml). Arguments go to nextest, and with any the doc
+# comments' examples (`mise run test:doc`) don't run.
 set -euo pipefail
 source tools/dev-shell.sh
 dev_shell cargo nextest run --workspace "$@"
+if (($# == 0)); then
+    mise run test:doc
+fi

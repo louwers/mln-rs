@@ -12,8 +12,6 @@ include.workspace = true
 
 [lib]
 name = "mln_style"
-# The doc comments have no examples to run.
-doctest = false
 
 [features]
 # `dsl`, the functions that build expressions in the tests of this crate's

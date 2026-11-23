@@ -5,7 +5,8 @@
 # vulkan runs under Vulkan's validation layer and metal under Metal's API
 # validation, and either aborts on an error. The render suite through the
 # worker codec, which doesn't depend on the backend or the platform, runs with
-# every test on Linux only.
+# every test on Linux only, as do the doc comments' examples, without
+# coverage (it needs a nightly Rust for them).
 set -euo pipefail
 source tools/dev-shell.sh
 filter=()
@@ -25,3 +26,6 @@ mkdir -p target/llvm-cov
 cargo llvm-cov clean --workspace
 dev_shell cargo llvm-cov nextest --no-report --workspace ${filter[@]+"${filter[@]}"}
 cargo llvm-cov report --workspace --lcov --output-path target/llvm-cov/lcov.info
+if [[ ${usage_backend_only:-false} != true && "$(uname -s)" == Linux ]]; then
+    mise run test:doc
+fi

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Run the examples in the doc comments, which nextest doesn't run"
+# The packages whose doc comments have examples. `cargo test --doc` runs a
+# named package's examples whatever its `doctest` key says.
+set -euo pipefail
+source tools/dev-shell.sh
+dev_shell cargo test --doc -p mln-rs -p mln-rs-render -p mln-rs-style -p mln-rs-gfx
