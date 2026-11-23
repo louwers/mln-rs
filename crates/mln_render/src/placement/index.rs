@@ -33,7 +33,8 @@ const VIEWPORT_PADDING_TILE: f32 = 1024.0;
 /// The width of a grid cell, in pixels.
 const CELL_SIZE: f32 = 25.0;
 
-/// The record of a shape that stands for no tile's feature.
+/// The record of a tile whose layout lost its layer, whose shapes queries
+/// don't find.
 const NO_RECORD: u32 = u32::MAX;
 
 /// How a shape may overlap the shapes placed before it.
@@ -52,9 +53,8 @@ pub enum Overlap {
 #[derive(Clone, Copy, Debug)]
 pub struct Item {
     /// The index, among its layer's tiles, of the tile whose feature the
-    /// shape is. A shape without one blocks and is blocked as any other,
-    /// but queries don't find it.
-    pub tile: Option<u32>,
+    /// shape is.
+    pub tile: u32,
     /// The feature's index in its tile's source layer, which queries look
     /// up.
     pub feature: u32,
@@ -214,11 +214,9 @@ impl CollisionIndex {
     /// Places `shape`, which stands for `item`.
     #[inline]
     pub fn insert(&mut self, shape: Shape, item: Item) {
-        let record = item
-            .tile
-            .and_then(|tile| self.tile_records.get(self.layer.first_tile + tile as usize).copied())
-            .unwrap_or(NO_RECORD);
-        debug_assert!(item.tile.is_none() || record != NO_RECORD, "an item of a tile without a record");
+        let record = self.tile_records.get(self.layer.first_tile + item.tile as usize).copied();
+        debug_assert!(record.is_some(), "an item of a tile that its layer doesn't have");
+        let record = record.unwrap_or(NO_RECORD);
         let entry = Entry {
             record,
             feature: item.feature,
@@ -435,12 +433,14 @@ mod tests {
 
     use super::*;
 
-    /// An index over a 512 px view, with one layer of no tiles selected.
+    /// An index over a 512 px view, with one layer selected, whose one tile
+    /// has no record.
     fn index(mode: MapMode) -> CollisionIndex {
         let mut state = TransformState::default();
         state.set_size(Size::new(512, 512));
         let mut index = CollisionIndex::default();
         index.begin(state.view(), mode);
+        index.tile_records.push(NO_RECORD);
         index
     }
 
@@ -449,7 +449,7 @@ mod tests {
     }
 
     fn item(overlap: Overlap, ignore_placement: bool) -> Item {
-        Item { tile: None, feature: 0, sort: 0, overlap, ignore_placement }
+        Item { tile: 0, feature: 0, sort: 0, overlap, ignore_placement }
     }
 
     /// Whether a box over the one `index` holds collides, placed with

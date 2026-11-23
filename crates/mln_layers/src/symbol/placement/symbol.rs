@@ -108,7 +108,7 @@ impl Placement {
 
         let bucket_instance_id = ctx.bucket.bucket_instance_id;
         let item = |overlap, ignore_placement| Item {
-            tile: Some(ctx.placed.tile as u32),
+            tile: ctx.placed.tile as u32,
             feature: symbol.data_feature_index as u32,
             sort: symbol.sort_index,
             overlap,

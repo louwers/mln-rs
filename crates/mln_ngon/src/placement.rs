@@ -133,8 +133,7 @@ fn place(layer: &PlacingLayer<'_, NgonLayer>, cx: &mut PlaceCx<'_>, crossing: Op
                 && cx.index.in_grid(&bounds)
                 && !cx.index.collides(&shape, overlap);
             if shows {
-                let item =
-                    Item { tile: Some(t as u32), feature: point.feature, sort: i as u32, overlap, ignore_placement };
+                let item = Item { tile: t as u32, feature: point.feature, sort: i as u32, overlap, ignore_placement };
                 cx.index.insert(shape, item);
             }
             let prev = (i < placed).then(|| bucket.opacity[i]);
