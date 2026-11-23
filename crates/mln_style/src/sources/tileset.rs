@@ -55,7 +55,9 @@ impl TilesetKind for RasterDemKind {
         layer_kind: SourceKind::RasterDem,
         from_json: true,
         round_zoom: true,
-        overscale: true,
+        // As a raster source's: a DEM tile is the same at every zoom past
+        // the maxzoom, so the map draws it larger rather than load it again.
+        overscale: false,
         prefetch: true,
     };
 }
