@@ -110,10 +110,15 @@ run = [
   "cargo clippy --target i686-unknown-linux-gnu -p mln-rs-c",
 ]
 
+[tasks."ci:test-scripts"]
+description = "Run unit tests for CI scripts in tools/ci/"
+run = "python3 -m unittest discover -s tools/ci -p '*_test.py'"
+
 [tasks."ci:lint"]
-description = "Run what CI's lint job runs: `check`, the docs, the browser and 32-bit builds, the minimum Rust and the generated C declarations"
+description = "Run what CI's lint job runs: `check`, CI script tests, the docs, the browser and 32-bit builds, the minimum Rust and the generated C declarations"
 run = [
   "mise run check",
+  "mise run ci:test-scripts",
   "mise run docs",
   "mise run check:wasm",
   "mise run check:32bit",
@@ -123,7 +128,7 @@ run = [
 ]
 
 [tasks."ci:package"]
-description = "Run what CI's lint job runs when a change can change the packages"
+description = "Run what CI's package job runs when a change can change the packages"
 run = ["mise run package", "mise run ci:assert-clean"]
 
 [tasks.docs]
