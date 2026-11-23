@@ -4329,8 +4329,14 @@ fn global_state_change_transitions_paint_property() {
     assert!(changed[0] > 200, "{changed:?}");
     assert!(changed[2] < 55, "{changed:?}");
 
-    // Once the transition has run its course, the new state shows.
-    std::thread::sleep(Duration::from_millis(200));
+    // Once the transition has run its course and the map is idle, the new
+    // state shows.
+    {
+        let run_loop = test.run_loop.clone();
+        test.observer.did_become_idle_callback.set(move |()| run_loop.stop());
+    }
+    run_with_timeout(&test.run_loop, 60);
+    test.observer.did_become_idle_callback.clear();
     let finished = render_center_pixel(&test);
     assert!(finished[0] < 10, "{finished:?}");
     assert!(finished[2] > 240, "{finished:?}");

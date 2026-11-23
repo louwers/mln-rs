@@ -72,7 +72,6 @@ fn a_fix_moves_the_puck_and_turns_its_arrow_through_north() {
             assert_eq!(WHITE, pixel(&fixture, x, y - 12.0), "north of the puck, heading {bearing}");
             assert_eq!(BLACK, pixel(&fixture, x, y + 14.0), "south of the puck, heading {bearing}");
         }
-        std::thread::sleep(Duration::from_millis(50));
     }
     assert!(midway > 0, "no frame drew the transition under way");
 }
