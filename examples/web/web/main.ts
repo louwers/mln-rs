@@ -91,7 +91,7 @@ import {
   type StartTileWorker,
   type ToMap,
 } from "./protocol.ts";
-import { STYLES, type Style, styleFor } from "./styles.ts";
+import { STYLES, type Style, sameStyle, styleFor } from "./styles.ts";
 import { wheelDelta } from "./wheel.ts";
 
 declare global {
@@ -243,7 +243,7 @@ const camera: Camera = cameraFromHash(location.hash) ?? [
   number("pitch", 0),
 ];
 let current = styleFor(params.get("style"));
-const style = current.url;
+const style = current.source;
 // The map's Web Worker fetches the style and what it needs first meanwhile.
 toMap({ type: "preload", style, ratio, zoom: camera[2] });
 
@@ -669,13 +669,17 @@ const styleList = element("style-list", HTMLElement);
 let loading = true;
 let styleName = "";
 function showStyle() {
-  element("style-name", HTMLElement).textContent =
-    current.key === null ? styleName || current.name : current.name;
-  element("style-detail", HTMLElement).textContent = fatal
+  const name = current.key === null ? styleName || current.name : current.name;
+  element("style-name", HTMLElement).textContent = name;
+  const detail = element("style-detail", HTMLElement);
+  detail.textContent = fatal
     ? "Stopped"
     : loading
       ? "Loading…"
-      : current.provider;
+      : current.provider === name
+        ? ""
+        : current.provider;
+  detail.hidden = detail.textContent === "";
   document.documentElement.dataset.theme = current.dark ? "dark" : "light";
   for (const option of styleList.querySelectorAll<HTMLElement>(
     ".style-option",
@@ -688,14 +692,14 @@ function showStyle() {
 }
 function pickStyle(next: Style) {
   element("styles", HTMLElement).hidePopover();
-  if (next.url === current.url) return;
+  if (sameStyle(next, current)) return;
   current = next;
   loading = true;
   styleName = "";
   showStyle();
   showAttribution([]);
-  toMap({ type: "style", url: next.url });
-  comparison?.setStyle(next.url);
+  toMap({ type: "style", style: next.source });
+  comparison?.setStyle(next.source);
   setParam("style", next.key);
 }
 // Sets (or, for null, removes) a URL parameter, keeping the camera's hash.
@@ -706,26 +710,58 @@ function setParam(name: string, value: string | null) {
   url.hash = writtenHash;
   history.replaceState(history.state, "", url);
 }
+// Group styles by provider, collecting single-style providers under "Other".
+const providerCounts = new Map<string, number>();
+for (const option of STYLES) {
+  providerCounts.set(
+    option.provider,
+    (providerCounts.get(option.provider) ?? 0) + 1,
+  );
+}
+const styleGroups = new Map<string, Style[]>();
+for (const option of STYLES) {
+  const heading =
+    (providerCounts.get(option.provider) ?? 0) > 1 ? option.provider : "Other";
+  const group = styleGroups.get(heading);
+  if (group) group.push(option);
+  else styleGroups.set(heading, [option]);
+}
 styleList.replaceChildren(
-  ...STYLES.map((option) => {
-    const name = document.createElement("span");
-    name.className = "style-name";
-    name.textContent = option.name;
-    const provider = document.createElement("span");
-    provider.className = "style-detail";
-    provider.textContent = option.provider;
-    const text = document.createElement("span");
-    text.className = "style-text";
-    text.append(name, provider);
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "style-option";
-    button.dataset.key = option.key ?? "";
-    button.append(text);
-    button.addEventListener("click", () => pickStyle(option));
-    const item = document.createElement("li");
-    item.append(button);
-    return item;
+  ...[...styleGroups].map(([heading, options]) => {
+    const title = document.createElement("div");
+    title.className = "style-group-title";
+    title.textContent = heading;
+    const list = document.createElement("ul");
+    list.className = "style-group-list";
+    list.append(
+      ...options.map((option) => {
+        const name = document.createElement("span");
+        name.className = "style-name";
+        name.textContent = option.name;
+        const text = document.createElement("span");
+        text.className = "style-text";
+        text.append(name);
+        if (heading === "Other" && option.provider !== option.name) {
+          const provider = document.createElement("span");
+          provider.className = "style-detail";
+          provider.textContent = option.provider;
+          text.append(provider);
+        }
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "style-option";
+        button.dataset.key = option.key ?? "";
+        button.append(text);
+        button.addEventListener("click", () => pickStyle(option));
+        const item = document.createElement("li");
+        item.append(button);
+        return item;
+      }),
+    );
+    const section = document.createElement("section");
+    section.className = "style-group";
+    section.append(title, list);
+    return section;
   }),
 );
 showStyle();
@@ -799,10 +835,10 @@ async function setComparing(on: boolean) {
   }
   try {
     const { compare } = await import("./compare.ts");
-    const style = current.url;
+    const style = current;
     const projection = currentProjection;
     const opened = compare(canvas, {
-      style,
+      style: style.source,
       projection,
       camera: latestCamera,
       follow: (next) => toMap({ type: "follow", camera: next }),
@@ -814,7 +850,7 @@ async function setComparing(on: boolean) {
       return;
     }
     comparison = opened;
-    if (current.url !== style) comparison.setStyle(current.url);
+    if (!sameStyle(current, style)) comparison.setStyle(current.source);
     if (currentProjection !== projection)
       comparison.setProjection(currentProjection);
   } catch (error) {

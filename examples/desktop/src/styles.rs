@@ -1,56 +1,95 @@
-// The styles the app offers, as the web demo does (examples/web/web/styles.ts):
-// keyless styles from two providers, which draw two tile schemas
-// (OpenMapTiles and Shortbread). And the projections it draws them with.
+// The styles the app offers, from the shared catalog (examples/styles.json)
+// that the web demo reads too. And the projections it draws them with.
 
 use mln_util::error::Error;
 
+const STYLES_JSON: &str = include_str!("../../styles.json");
+
+/// Where a style loads from: a URL or a style document's JSON text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum StyleSource {
+    Url(String),
+    Json(String),
+}
+
 /// A style the app can show.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Style {
+    /// Names the style on the command line (`--style <key>`); `None` for a
+    /// custom URL or path.
+    pub key: Option<String>,
     pub name: String,
     pub provider: String,
-    pub url: String,
+    pub source: StyleSource,
     /// Dark: the controls turn dark with it.
     pub dark: bool,
 }
 
-const STYLES: [(&str, &str, &str, bool); 6] = [
-    ("Liberty", "OpenFreeMap", "https://tiles.openfreemap.org/styles/liberty", false),
-    ("Bright", "OpenFreeMap", "https://tiles.openfreemap.org/styles/bright", false),
-    ("Positron", "OpenFreeMap", "https://tiles.openfreemap.org/styles/positron", false),
-    ("Dark Matter", "OpenFreeMap", "https://tiles.openfreemap.org/styles/dark", true),
-    ("Fiord", "OpenFreeMap", "https://tiles.openfreemap.org/styles/fiord", true),
-    ("Colorful", "VersaTiles", "https://tiles.versatiles.org/assets/styles/colorful/style.json", false),
-];
-
-/// The styles of the picker, Liberty first.
-pub(crate) fn styles() -> Vec<Style> {
-    STYLES
-        .iter()
-        .map(|&(name, provider, url, dark)| Style {
-            name: name.to_owned(),
-            provider: provider.to_owned(),
-            url: url.to_owned(),
-            dark,
+fn parse_catalog() -> (String, Vec<Style>) {
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(STYLES_JSON) else {
+        return (String::new(), Vec::new());
+    };
+    let default = root.get("default").and_then(serde_json::Value::as_str).unwrap_or_default().to_owned();
+    let styles = root
+        .get("styles")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let key = entry.get("key")?.as_str()?.to_owned();
+            let name = entry.get("name")?.as_str()?.to_owned();
+            let provider = entry.get("provider")?.as_str()?.to_owned();
+            let source = if let Some(url) = entry.get("url").and_then(serde_json::Value::as_str) {
+                StyleSource::Url(url.to_owned())
+            } else {
+                StyleSource::Json(entry.get("json")?.to_string())
+            };
+            let dark = entry.get("dark").and_then(serde_json::Value::as_bool).unwrap_or(false);
+            Some(Style { key: Some(key), name, provider, source, dark })
         })
-        .collect()
+        .collect();
+    (default, styles)
 }
 
-/// The style at `url`: one of the picker's, or another, which the app names
-/// by the style's own name once it loads (`name` is empty until then).
-pub(crate) fn style_for(url: &str) -> Style {
-    styles().into_iter().find(|style| style.url == url).unwrap_or_else(|| Style {
-        name: String::new(),
-        provider: url
-            .split("://")
-            .nth(1)
-            .and_then(|rest| rest.split('/').next())
-            .filter(|host| !host.is_empty())
-            .unwrap_or("local file")
-            .to_owned(),
-        url: url.to_owned(),
-        dark: false,
-    })
+/// The styles of the picker, in `examples/styles.json`'s order.
+pub(crate) fn styles() -> Vec<Style> {
+    parse_catalog().1
+}
+
+/// The default style from `examples/styles.json`.
+pub(crate) fn default_style() -> Style {
+    let (default_key, list) = parse_catalog();
+    list.iter()
+        .find(|style| style.key.as_deref() == Some(default_key.as_str()))
+        .or_else(|| list.first())
+        .cloned()
+        .unwrap_or_else(|| Style {
+            key: None,
+            name: String::new(),
+            provider: String::new(),
+            source: StyleSource::Json("{}".to_owned()),
+            dark: false,
+        })
+}
+
+/// The style named by `spec`: a key or URL from `examples/styles.json`, or
+/// another URL or local file path, which the app names by the style's own name
+/// once it loads (`name` is empty until then).
+pub(crate) fn style_for(spec: &str) -> Style {
+    if let Some(known) = styles().into_iter().find(|style| {
+        style.key.as_deref() == Some(spec) || matches!(&style.source, StyleSource::Url(url) if url == spec)
+    }) {
+        return known;
+    }
+    let url = if spec.contains("://") { spec.to_owned() } else { format!("file://{spec}") };
+    let provider = url
+        .split("://")
+        .nth(1)
+        .and_then(|rest| rest.split('/').next())
+        .filter(|host| !host.is_empty())
+        .unwrap_or("local file")
+        .to_owned();
+    Style { key: None, name: String::new(), provider, source: StyleSource::Url(url), dark: false }
 }
 
 /// The projection the app draws the map with.
@@ -108,5 +147,43 @@ impl Projection {
             Projection::Handoff => r#"{"type":"globe"}"#.to_owned(),
         };
         map.edit_loaded_style(|style| style.set_root_property_json("projection", &projection))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mln_util::hash::HashSet;
+
+    use super::*;
+
+    #[test]
+    fn shared_catalog_is_valid() {
+        let catalog = styles();
+        assert!(!catalog.is_empty(), "examples/styles.json must list at least one style");
+
+        let mut keys = HashSet::default();
+        for style in &catalog {
+            let key = style.key.as_deref().expect("catalog styles have keys");
+            assert_ne!(key, "");
+            assert!(keys.insert(key), "duplicate style key: {key}");
+            assert!(!style.name.is_empty(), "style {key} missing name");
+            assert!(!style.provider.is_empty(), "style {key} missing provider");
+            match &style.source {
+                StyleSource::Url(url) => assert!(url.starts_with("https://"), "style {key} url: {url}"),
+                StyleSource::Json(json) => {
+                    let parsed: serde_json::Value =
+                        serde_json::from_str(json).unwrap_or_else(|e| panic!("style {key} has invalid JSON: {e}"));
+                    assert_eq!(parsed["version"], 8, "style {key} must be style spec v8");
+                }
+            }
+        }
+
+        let default = default_style();
+        assert_eq!(default.key.as_deref(), Some("liberty"));
+        assert_eq!(style_for("americana").key.as_deref(), Some("americana"));
+        assert_eq!(style_for("osm-carto").key.as_deref(), Some("osm-carto"));
+        assert!(matches!(style_for("osm-carto").source, StyleSource::Json(_)));
+        assert_eq!(style_for("https://tiles.openfreemap.org/styles/liberty"), default);
+        assert_eq!(style_for("/tmp/custom.json").source, StyleSource::Url("file:///tmp/custom.json".to_owned()));
     }
 }

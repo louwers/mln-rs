@@ -8,6 +8,10 @@ import { defineConfig } from "vite";
 export default defineConfig({
   root: "web",
   base: "./",
+  server: {
+    // Allow importing shared catalog files such as ../styles.json in dev mode.
+    fs: { allow: [".."] },
+  },
   build: {
     outDir: "../dist",
     emptyOutDir: true,

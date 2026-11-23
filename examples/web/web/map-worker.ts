@@ -33,6 +33,7 @@ import type {
   Input,
   Loaded,
   Start,
+  StyleSource,
   TileWorkerReport,
   ToMap,
 } from "./protocol.ts";
@@ -184,14 +185,23 @@ function preload(url: unknown): Promise<Response> | undefined {
   return response;
 }
 
-function preloadStyle(url: string, ratio: number, zoom: number) {
+function preloadStyle(style: StyleSource, ratio: number, zoom: number) {
+  if ("json" in style) {
+    try {
+      const parsed: unknown = JSON.parse(style.json);
+      if (isRecord(parsed)) preloadParts(parsed, ratio, zoom);
+    } catch {
+      // Malformed JSON is reported when the map loads it.
+    }
+    return;
+  }
   // A clone to read: the map takes the original.
-  preload(url)
+  preload(style.url)
     ?.then((response): Promise<unknown> | undefined =>
       response.ok ? response.clone().json() : undefined,
     )
-    .then((style) => {
-      if (isRecord(style)) preloadParts(style, ratio, zoom);
+    .then((parsed) => {
+      if (isRecord(parsed)) preloadParts(parsed, ratio, zoom);
     })
     .catch(() => {});
 }
@@ -390,7 +400,7 @@ async function run({
 
   if (panic) panic_for_check(panic);
 
-  map.set_style_url(style);
+  applyStyle(map, style);
   map.jump_to(...camera);
 
   let started = performance.now();
@@ -539,7 +549,7 @@ async function run({
           map.set_pixel_ratio(data.ratio);
           break;
         case "style":
-          map.set_style_url(data.url);
+          applyStyle(map, data.style);
           started = performance.now();
           loaded = null;
           // The page clears both for the new style, so they go again even
@@ -598,6 +608,11 @@ async function run({
     });
   for (const data of early.splice(0)) handle(data);
   return handle;
+}
+
+function applyStyle(map: WebMap, style: StyleSource) {
+  if ("url" in style) map.set_style_url(style.url);
+  else map.set_style_json(style.json);
 }
 
 // The frame just drawn, in the task that drew it: the canvas keeps its frame

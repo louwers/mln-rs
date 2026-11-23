@@ -249,16 +249,32 @@ button {
 }
 
 .style-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px;
+}
+
+.style-group-title {
+  padding: 4px 10px 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.style-group-list {
   list-style: none;
   margin: 0;
-  padding: 6px;
+  padding: 0;
 }
 
 .style-option {
   display: flex;
   align-items: center;
   width: 100%;
-  padding: 6px 10px;
+  padding: 5px 10px;
   border: 0;
   border-radius: var(--radius);
   background: none;

@@ -29,20 +29,20 @@ mice and trackpads in each browser yet.
 Serve dist/ over HTTP and open `index.html`. It takes these URL parameters
 (web/main.ts):
 
-| Parameter                                | Effect                                                                                   |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `style=<key or URL>`                     | a style from web/styles.ts, or any style URL (default: OpenFreeMap Liberty)              |
-| `lat`, `lon`, `zoom`, `bearing`, `pitch` | the starting camera, unless the URL hash has one (`#zoom/lat/lon[/bearing/pitch]`)       |
-| `backend=webgpu` or `webgl2`             | the renderer (default: WebGPU where the browser has it)                                  |
-| `workers=<n>`                            | the number of tile workers (default: up to 4)                                            |
-| `width`, `height`, `ratio`               | a fixed map size in CSS pixels, and pixel ratio                                          |
-| `compare`                                | overlay MapLibre GL JS's map of the same style, right of a draggable divider             |
-| `debug`                                  | the debug overlay: frame rate, frame time by phase, draw calls, memory, requests         |
-| `projection=flat`, `globe` or `handoff`  | Mercator, the sphere at every zoom, or the sphere until zoom 11–12, over the style's     |
-| `freeBearing`                            | free bearing on the globe                                                                |
-| `localIdeographFontFamily=false`         | download CJK glyphs rather than draw them with the browser's fonts                       |
-| `fallbackFontFaces=<json>`               | font files that every font stack falls back to, as a style's `font-faces` entry, unnamed |
-| `panic=map` or `panic=tile`              | make the map's or the first tile worker's wasm instance panic at startup, for the check  |
+| Parameter                                | Effect                                                                                               |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `style=<key or URL>`                     | a style from [examples/styles.json](../styles.json), or any style URL (default: OpenFreeMap Liberty) |
+| `lat`, `lon`, `zoom`, `bearing`, `pitch` | the starting camera, unless the URL hash has one (`#zoom/lat/lon[/bearing/pitch]`)                   |
+| `backend=webgpu` or `webgl2`             | the renderer (default: WebGPU where the browser has it)                                              |
+| `workers=<n>`                            | the number of tile workers (default: up to 4)                                                        |
+| `width`, `height`, `ratio`               | a fixed map size in CSS pixels, and pixel ratio                                                      |
+| `compare`                                | overlay MapLibre GL JS's map of the same style, right of a draggable divider                         |
+| `debug`                                  | the debug overlay: frame rate, frame time by phase, draw calls, memory, requests                     |
+| `projection=flat`, `globe` or `handoff`  | Mercator, the sphere at every zoom, or the sphere until zoom 11–12, over the style's                 |
+| `freeBearing`                            | free bearing on the globe                                                                            |
+| `localIdeographFontFamily=false`         | download CJK glyphs rather than draw them with the browser's fonts                                   |
+| `fallbackFontFaces=<json>`               | font files that every font stack falls back to, as a style's `font-faces` entry, unnamed             |
+| `panic=map` or `panic=tile`              | make the map's or the first tile worker's wasm instance panic at startup, for the check              |
 
 The page draws its own controls over the map: a style picker, a backend
 indicator that switches between WebGPU and WebGL2 where both are available, zoom

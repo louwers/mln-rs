@@ -69,7 +69,7 @@ const USAGE: &str = "  mln-desktop {OPTIONS}
       --network=[network]               Throttle the network: online, fast-4g, slow-4g,
                                         3g or offline
       --disable-cache                   Don't keep what the map loads in the cache
-      -s[URL], --style=[URL]            Map stylesheet
+      -s[STYLE], --style=[STYLE]        Map stylesheet (catalog key, URL, or file)
       -c[file], --cache=[file]          Cache database file name
       -x[degrees], --lon=[degrees]      Longitude
       -y[degrees], --lat=[degrees]      Latitude
