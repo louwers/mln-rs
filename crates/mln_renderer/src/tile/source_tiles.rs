@@ -1100,6 +1100,9 @@ impl SourceTiles {
         );
     }
 
+    /// The features the source's rendered tiles draw in `geometry`, screen
+    /// points from the top left, traced past the globe's limb
+    /// ([`query_screen_geometry`](crate::geometry::feature_index::query_screen_geometry)).
     pub(crate) fn query_rendered_features(
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
@@ -1130,26 +1133,7 @@ impl SourceTiles {
             )
         };
 
-        // Past the planet's edge a query meets the planet only at the horizon,
-        // and a point there stands for the nearest horizon point, so a query's
-        // corners alone would cut the planet's limb off; its edges are followed
-        // in steps.
-        let mut traced: Vec<mln_util::geo::ScreenCoordinate> = Vec::new();
-        if globe && geometry.len() > 1 && !geometry.iter().all(on_planet) {
-            const STEPS: i32 = 32;
-            for i in 0..geometry.len() - 1 {
-                for k in 0..STEPS {
-                    let t = f64::from(k) / f64::from(STEPS);
-                    traced.push(mln_util::geo::ScreenCoordinate::new(
-                        geometry[i].x + (geometry[i + 1].x - geometry[i].x) * t,
-                        geometry[i].y + (geometry[i + 1].y - geometry[i].y) * t,
-                    ));
-                }
-            }
-            traced.extend(geometry.last().copied());
-        }
-        let screen_geometry: &[mln_util::geo::ScreenCoordinate] = if traced.is_empty() { geometry } else { &traced };
-        let mut query_geometry: Vec<geometry::Point<f64>> = screen_geometry.iter().map(to_world).collect();
+        let mut query_geometry: Vec<geometry::Point<f64>> = geometry.iter().map(to_world).collect();
 
         // The bounding box of points, of which the geometry has at least one.
         let envelope = |points: &mut dyn Iterator<Item = (f64, f64)>| {

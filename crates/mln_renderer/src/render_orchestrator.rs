@@ -1436,11 +1436,14 @@ impl RenderOrchestrator {
 
         let proj_matrix = self.view.projection_matrix_with(1, false);
 
+        // Traced once for every source. Symbols are found where they were
+        // placed, on the screen, so they take the geometry as it is.
+        let traced = crate::geometry::feature_index::query_screen_geometry(&self.view, geometry);
         let mut results_by_layer = crate::geometry::feature_index::QueryResults::default();
         for source_id in &source_ids {
             if let Some(source) = self.source_tiles(source_id) {
                 let source_results = source.query_rendered_features(
-                    geometry,
+                    &traced,
                     &self.view,
                     &filtered_layers,
                     options,
