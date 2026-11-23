@@ -417,3 +417,87 @@ fn the_globe_refuses_a_plane_above_sea_level() {
     held.move_lat_lng(&location, &point).unwrap();
     assert_eq!(held, moved);
 }
+
+/// A 512 by 512 view of latitude 52.5, longitude 13.4 at `zoom`, pitched
+/// 60 degrees and turned 20, its center `center_altitude` meters up, under
+/// `projection`.
+fn raised(projection: ProjectionDefinition, zoom: f64, center_altitude: f64) -> TransformState {
+    MapView {
+        camera: Camera {
+            center: LatLng::new(52.5, 13.4).unwrap(),
+            center_altitude,
+            zoom,
+            pitch: 60.0,
+            bearing: 20.0,
+            fov: mln_math::rad2deg(DEFAULT_FOV),
+            ..Camera::default()
+        },
+        extent: LogicalExtent::new(Size::new(512, 512), 1.0),
+        projection_mode: ProjectionMode::default(),
+        viewport: Viewport::default(),
+        projection,
+    }
+    .to_state()
+    .unwrap()
+}
+
+/// The globe's camera looks at the center raised by its altitude: the
+/// center, as high as that, draws at the center of the view, and the eye is
+/// the camera's distance from it.
+#[test]
+fn the_globe_draws_the_center_at_its_altitude_at_the_center() {
+    use mln_style_types::ProjectionType;
+    use mln_util::geo::WrapMode;
+
+    use crate::VerticalPerspectiveProjection;
+
+    const GLOBE_RADIUS: f64 = 6_371_008.8;
+    let globe = ProjectionDefinition::new(ProjectionType::VerticalPerspective);
+    for (zoom, center_altitude) in [(3.0, 9000.0), (8.0, -400.0), (14.0, 3000.0)] {
+        let state = raised(globe, zoom, center_altitude);
+        let view = state.view();
+        let center = VerticalPerspectiveProjection::surface_vector(&view.center(WrapMode::Unwrapped))
+            * (1.0 + center_altitude / GLOBE_RADIUS);
+        let clip = view.globe_view_projection_matrix() * center.extend(1.0);
+        assert!((clip.x / clip.w).abs() < 1e-9 && (clip.y / clip.w).abs() < 1e-9, "zoom {zoom}: {clip}");
+        let radius = VerticalPerspectiveProjection::globe_radius_pixels(
+            Projection::world_size(view.scale()),
+            view.center(WrapMode::Unwrapped).latitude(),
+        );
+        let distance = (view.globe_camera_position() - center).length() * radius;
+        assert!((distance - view.camera_to_center_distance()).abs() < 1e-6, "zoom {zoom}: {distance}");
+    }
+}
+
+/// At zoom 12, where the `globe` preset hands over to Mercator, the globe
+/// draws the ground under a raised center where Mercator does, as it does
+/// under a center at sea level: the handover doesn't slide the map by the
+/// center's altitude.
+#[test]
+fn the_globe_hands_over_to_mercator_with_the_center_raised() {
+    use mln_style_types::ProjectionType;
+    use mln_util::geo::ScreenCoordinate;
+
+    let globe = ProjectionDefinition::new(ProjectionType::VerticalPerspective);
+    let farthest_apart = |center_altitude: f64| {
+        let mercator = raised(ProjectionDefinition::default(), 12.0, center_altitude);
+        let globe = raised(globe, 12.0, center_altitude);
+        let mut farthest: f64 = 0.0;
+        for row in 0..=8 {
+            for column in 0..=8 {
+                // The ground that Mercator draws across the lower half of the
+                // view, below its horizon.
+                let pixel = ScreenCoordinate::new(64.0 * f64::from(column), 32.0 * f64::from(row));
+                let location =
+                    mercator.view().screen_coordinate_to_lat_lng(&pixel, mln_util::geo::WrapMode::Unwrapped).unwrap();
+                let drawn = globe.view().lat_lng_to_screen_coordinate(&location);
+                farthest = farthest.max((drawn.x - pixel.x).hypot(drawn.y - pixel.y));
+            }
+        }
+        farthest
+    };
+    let at_sea_level = farthest_apart(0.0);
+    let raised = farthest_apart(3000.0);
+    assert!(at_sea_level < 2.0, "{at_sea_level} px apart at sea level");
+    assert!(raised < at_sea_level + 1.0, "{raised} px apart with the center 3000 m up");
+}
