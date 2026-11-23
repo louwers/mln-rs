@@ -52,8 +52,9 @@ pub enum Overlap {
 /// What a shape inserted in a [`CollisionIndex`] stands for.
 #[derive(Clone, Copy, Debug)]
 pub struct Item {
-    /// The index, among its layer's tiles, of the tile whose feature the
-    /// shape is.
+    /// The index, among its layer's [`tiles`](super::PlacingLayer::tiles),
+    /// of the tile whose feature the shape is. Queries don't find the shape
+    /// of an item past them.
     pub tile: u32,
     /// The feature's index in its tile's source layer, which queries look
     /// up.
@@ -97,11 +98,12 @@ struct Record {
 }
 
 /// A placing layer of a placement, as the index places its shapes: their
-/// collision group, and where its tiles' records are.
+/// collision group, and where its tiles' records are and how many.
 #[derive(Clone, Copy, Debug, Default)]
 struct PlacingLayerSlot {
     group: Option<u16>,
     first_tile: usize,
+    tiles: u32,
 }
 
 /// The shapes a placement places, in viewport pixels plus
@@ -214,8 +216,10 @@ impl CollisionIndex {
     /// Places `shape`, which stands for `item`.
     #[inline]
     pub fn insert(&mut self, shape: Shape, item: Item) {
-        let record = self.tile_records.get(self.layer.first_tile + item.tile as usize).copied();
-        debug_assert!(record.is_some(), "an item of a tile that its layer doesn't have");
+        let layer = &self.layer;
+        let record = (item.tile < layer.tiles).then(|| self.tile_records.get(layer.first_tile + item.tile as usize));
+        let record = record.flatten().copied();
+        debug_assert!(record.is_some(), "an item of a tile whose bucket its layer doesn't lead");
         let record = record.unwrap_or(NO_RECORD);
         let entry = Entry {
             record,
@@ -277,7 +281,8 @@ impl CollisionIndex {
                 });
                 group as u16 + 1
             });
-            self.layers[position] = PlacingLayerSlot { group, first_tile: self.tile_records.len() };
+            let first_tile = self.tile_records.len();
+            self.layers[position] = PlacingLayerSlot { group, first_tile, tiles: tiles.len() as u32 };
             for tile in tiles {
                 let record = self.add_record(id, tile, store).unwrap_or(NO_RECORD);
                 self.tile_records.push(record);
@@ -450,6 +455,7 @@ mod tests {
         let mut index = CollisionIndex::default();
         index.begin(state.view(), mode);
         index.tile_records.push(NO_RECORD);
+        index.layer = PlacingLayerSlot { group: None, first_tile: 0, tiles: 1 };
         index
     }
 
@@ -498,8 +504,8 @@ mod tests {
     fn shapes_collide_within_their_layers_group() {
         let mut index = index(MapMode::Static);
         index.layers = vec![
-            PlacingLayerSlot { group: Some(1), first_tile: 0 },
-            PlacingLayerSlot { group: Some(2), first_tile: 0 },
+            PlacingLayerSlot { group: Some(1), first_tile: 0, tiles: 1 },
+            PlacingLayerSlot { group: Some(2), first_tile: 0, tiles: 1 },
         ];
         index.select_layer(0);
         index.insert(square(100.0, 200.0), item(Overlap::Never, false));
@@ -508,6 +514,23 @@ mod tests {
         index.select_layer(1);
         assert!(!collides(&index, Overlap::Never));
         assert!(!collides(&index, Overlap::Cooperative));
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "an item of a tile whose bucket its layer doesn't lead")]
+    fn an_item_stays_within_its_layers_tiles() {
+        // The top layer's one tile, and then the bottom layer's, as
+        // placement adds them: an item past the top layer's tiles isn't one
+        // of the bottom layer's.
+        let mut index = index(MapMode::Static);
+        index.tile_records = vec![NO_RECORD, NO_RECORD];
+        index.layers = vec![
+            PlacingLayerSlot { group: None, first_tile: 1, tiles: 1 },
+            PlacingLayerSlot { group: None, first_tile: 0, tiles: 1 },
+        ];
+        index.select_layer(1);
+        index.insert(square(100.0, 200.0), Item { tile: 1, ..item(Overlap::Never, false) });
     }
 
     #[test]
