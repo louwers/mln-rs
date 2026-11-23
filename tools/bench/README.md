@@ -362,22 +362,30 @@ and lists those that only one has. The sides' harness ids differ, so it warns
 and prints what changed in the harness since the ref
 (`git diff --stat <ref> -- tools/bench 'crates/*/src/bench.rs'`): a change in a
 scenario whose code differs can come from its harness rather than the libraries,
-and a metric that only one side's harness reports shows no change. A ref whose
-harness lacks the layout probe takes its instructions' noise from the probes of
-refs compared before.
+and a metric that only one side's harness reports shows no change.
 
 ### Counts
 
 Each side runs once per scenario by default. The ref's runs are kept in
 `target/bench-compare/samples`, by commit, and the ref runs again only until it
 has three: the first comparison with a commit costs two extra runs per scenario,
-later ones none. The ref is also built a second time with the harness's
-`layout-probe` feature, which adds code that never runs and so moves the rest,
-and each scenario runs once on that build.
+later ones none.
+
+A scenario's instructions also move with the bytes of its binary, by up to a few
+percent in some scenarios, while the code it runs stays the same: on macOS, a
+binary that differs only in its symbol table, signed again, gives different
+counts, each repeating exactly from run to run. Any edit moves them so, and so
+does building the same source in another directory. The ref is therefore built
+eight more times, as probes: each with the harness's `layout-probe` feature,
+which adds code that never runs and so moves the rest, and with the harness's
+symbols renamed by a `-C metadata` of its own. Each scenario runs once on each
+probe, which the comparison builds only for a ref and harness it has no probes
+of yet: the first comparison with a commit costs eight builds of the harness
+crate and eight runs per scenario.
 
 A count's noise is the larger range of either side's runs; for instructions,
-also the most that the layout probe of any ref compared so far moved them, since
-one build of moved code shows too little of how far they move. The report shows
+also the most that any probe of any ref compared so far moved them, since how
+far a build moves them differs from build to build. The report shows
 every count's change and noise, and marks a change over twice the noise, however
 small: a count that repeats exactly is marked for any change. Whether a change
 matters is the reader's call. `start_heap`, the context, shows its change and
@@ -595,9 +603,9 @@ run. The runner and the build see to it:
   (`profile.toml`), where they otherwise seed each process from the clock.
 - Each of the workspace's crates, the harness and the libraries, compiles as one
   codegen unit, so that how the compiler splits and inlines the code a scenario
-  runs doesn't change with an edit elsewhere in its crate. Where the code lies
-  still moves instructions, which a comparison measures with its layout probe
-  instead.
+  runs doesn't change with an edit elsewhere in its crate. The bytes of the
+  binary still move instructions, which a comparison measures with its probes
+  instead ([Counts](#counts)).
 - The first process of a newly built binary to run some code does more work than
   later ones: on macOS the system checks each page of the binary's code the
   first time a process reads it, and caches the GPU code it compiles for each

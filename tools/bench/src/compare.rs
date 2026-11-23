@@ -24,13 +24,14 @@
 //! next time; the ref runs again only until it has [`SPREAD_RUNS`] of them.
 //! A scenario whose counts move beyond their noise runs again on this
 //! checkout, until it has [`CONFIRM_RUNS`], and its counts come from those
-//! runs. The
-//! instructions a scenario retires also move with where the compiler and
-//! linker put its code, which any edit to the binary can change, by up to a
-//! few percent in some scenarios: each ref is built a second time with the
-//! harness's `layout-probe` feature, which only moves code, and the most
-//! that any stored probe has moved a scenario's instructions counts as
-//! their noise too. The report shows every metric's change and its noise,
+//! runs. The instructions a scenario retires also move with the bytes of
+//! its binary, by up to a few percent in some scenarios, though the code
+//! it runs is the same: any edit moves them, and so can building the same
+//! source in another directory. Each ref is therefore built again
+//! [`PROBES`] times, as probes whose bytes differ but whose scenarios run
+//! the same code ([`build`]), and the most that any stored probe has moved
+//! a scenario's instructions counts as their noise too. The report shows
+//! every metric's change and its noise,
 //! and marks a count that moved by over [`NOISE_FACTOR`] times its noise,
 //! however little: one that repeats exactly is marked for any change. The
 //! reader weighs what matters.
@@ -65,6 +66,10 @@ const KEPT_RUNS: usize = 8;
 const CONFIRM_RUNS: usize = 3;
 /// How many times its noise a count must move by to be marked.
 const NOISE_FACTOR: f64 = 2.0;
+/// The builds of a ref whose runs give its instructions' noise: how far
+/// they move differs from build to build, and only the most of several
+/// builds bounds how far another build moves them.
+const PROBES: usize = 8;
 /// A time is marked when its Holm-adjusted p-value is below this.
 const ALPHA: f64 = 0.05;
 /// The times that rounds test, each on its own: the wall-clock time, and
@@ -188,7 +193,7 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
     let own = options.own_harness;
 
     eprintln!("mln-bench: building this checkout");
-    let candidate = build(&root, &root.join("Cargo.toml"), None, None)?;
+    let candidate = build(&root, &root.join("Cargo.toml"), None, None, None)?;
     // <target>/benchmark/mln-bench: the comparison works in <target>.
     let target = candidate.parent().and_then(Path::parent).ok_or("the binary's target directory")?;
     let work = target.join("bench-compare");
@@ -200,7 +205,7 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
     let tree = work.join("tree");
     prepare_tree(&root, &tree, &commit, !own)?;
     let base_target = work.join("target");
-    let base = build(&root, &tree.join("Cargo.toml"), Some(&base_target), None).map_err(|error| {
+    let base = build(&root, &tree.join("Cargo.toml"), Some(&base_target), None, None).map_err(|error| {
         if own {
             format!(
                 "{error}\n\nThe harness of {} ({}) doesn't build with this checkout's toolchain and profile.toml.",
@@ -217,20 +222,8 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
             )
         }
     })?;
-    // Both builds of the ref link to the same path, so each is copied out.
+    // The ref's builds link to the same path, so each is copied out.
     let base = keep_binary(&base, &work.join("bin/base"))?;
-    let probe = if own && !has_layout_probe(&tree) {
-        eprintln!(
-            "mln-bench: the harness of {} has no layout probe, so its instructions' noise comes from the probes of \
-             refs compared before",
-            options.base
-        );
-        None
-    } else {
-        eprintln!("mln-bench: building {} ({}) again, with its code at other addresses", options.base, short(&commit));
-        let probe = build(&root, &tree.join("Cargo.toml"), Some(&base_target), Some("layout-probe"))?;
-        Some(keep_binary(&probe, &work.join("bin/probe"))?)
-    };
     let (scenarios, only_base, only_this) = if own {
         match_scenarios(&selected, &scenario_names(&base, &options.filters)?)
     } else {
@@ -275,22 +268,32 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
         );
     }
     let probe_key = |scenario: &Scenario| format!("{} (layout probe)", scenario.name);
-    if let Some(probe) = &probe {
-        let unprobed: Vec<&Scenario> = scenarios
-            .iter()
-            .copied()
-            .filter(|scenario| {
-                samples.get(&probe_key(scenario)).is_none_or(|runs| !runs.iter().any(|run| run.harness == base_harness))
-            })
-            .collect();
-        if !unprobed.is_empty() {
-            eprintln!("mln-bench: the ref's layout probe, once per scenario");
-            warm_up(probe, &unprobed)?;
-            for scenario in &unprobed {
-                let run = run_in_process(probe, scenario.name, None)?;
-                samples.insert(probe_key(scenario), vec![run]);
+    let probes_of = |samples: &Samples, scenario: &Scenario| {
+        samples.get(&probe_key(scenario)).map_or(0, |runs| runs.iter().filter(|run| run.harness == base_harness).count())
+    };
+    let unprobed: Vec<&Scenario> =
+        scenarios.iter().copied().filter(|scenario| probes_of(&samples, scenario) < PROBES).collect();
+    if !unprobed.is_empty() {
+        for scenario in &unprobed {
+            if let Some(runs) = samples.get_mut(&probe_key(scenario)) {
+                runs.retain(|run| run.harness != base_harness);
             }
         }
+        // With the harness's `layout-probe` feature, where it has one, the
+        // probes' code after the harness lies at other addresses too.
+        let manifest = std::fs::read_to_string(tree.join("tools/bench/Cargo.toml")).unwrap_or_default();
+        let features = manifest.contains("layout-probe").then_some("layout-probe");
+        for index in 0..PROBES {
+            eprintln!("mln-bench: probe {} of {PROBES} of {} ({})", index + 1, options.base, short(&commit));
+            let probe = build(&root, &tree.join("Cargo.toml"), Some(&base_target), features, Some(index))?;
+            let probe = keep_binary(&probe, &work.join("bin/probe"))?;
+            warm_up(&probe, &unprobed)?;
+            for scenario in &unprobed {
+                let run = run_in_process(&probe, scenario.name, None)?;
+                samples.entry(probe_key(scenario)).or_default().push(run);
+            }
+        }
+        write_samples(&samples_path, &samples)?;
     }
     let changed_while_running =
         |scenario: &Scenario| format!("{}: a side's harness changed while it ran", scenario.name);
@@ -388,12 +391,6 @@ fn match_scenarios<'a>(selected: &[&'a Scenario], base: &[String]) -> (Vec<&'a S
     (both, only_base, only_this.iter().map(|scenario| scenario.name.to_owned()).collect())
 }
 
-/// Whether the harness of the checkout at `tree` has the `layout-probe`
-/// feature.
-fn has_layout_probe(tree: &Path) -> bool {
-    std::fs::read_to_string(tree.join("tools/bench/Cargo.toml")).is_ok_and(|manifest| manifest.contains("layout-probe"))
-}
-
 /// The fewest rounds with which a time can move beyond its noise when `tests`
 /// scenarios each test it: Holm's adjustment multiplies the smallest
 /// p-value by `tests`, and with n rounds per side the smallest p-value of a
@@ -471,16 +468,15 @@ struct Base<'a> {
     runs: &'a [Run],
     /// These and kept ones, for counts.
     counts: &'a [Run],
-    /// The most that a stored layout probe moved each of the scenario's
+    /// The most that a stored probe moved each of the scenario's
     /// instruction counts, as a fraction of the base ([`layout_noise`]).
     layout: &'a BTreeMap<String, f64>,
 }
 
-/// How far moving the code moves each instruction count of `scenario` in
-/// `environment`: for each, the largest fraction of the base's median that
-/// the layout probe of any ref compared so far moved it by, from the kept
-/// runs in `samples`. How far it moves differs from build to build, so one
-/// probe alone tells too little.
+/// How far another build of the same code moves each instruction count of
+/// `scenario` in `environment`: for each, the largest fraction of the
+/// base's median that any probe of any ref compared so far moved it by,
+/// from the kept runs in `samples`.
 fn layout_noise(samples: &Path, scenario: &str, environment: &Environment) -> BTreeMap<String, f64> {
     let mut noise: BTreeMap<String, f64> = BTreeMap::new();
     let Ok(entries) = std::fs::read_dir(samples) else { return noise };
@@ -489,20 +485,22 @@ fn layout_noise(samples: &Path, scenario: &str, environment: &Environment) -> BT
         let of = |key: &str| -> Vec<&Run> {
             kept.get(key).into_iter().flatten().filter(|run| &run.environment == environment).collect()
         };
-        let (base, probe) = (of(scenario), of(&format!("{scenario} (layout probe)")));
-        let Some(probe) = probe.first() else { continue };
-        // Only the base's runs of the probe's harness: another harness's
-        // differ by more than where the code lies.
-        let base: Vec<&Run> = base.into_iter().filter(|run| run.harness == probe.harness).collect();
-        for metric in probe.metrics.iter().filter(|metric| metric.name.starts_with("instructions")) {
-            let values: Vec<f64> = base.iter().filter_map(|run| run.metric(&metric.name)).map(|m| m.value).collect();
-            if values.is_empty() {
-                continue;
+        let base = of(scenario);
+        for probe in of(&format!("{scenario} (layout probe)")) {
+            // Only the base's runs of the probe's harness: another harness's
+            // differ by more than the build.
+            let base: Vec<&Run> = base.iter().copied().filter(|run| run.harness == probe.harness).collect();
+            for metric in probe.metrics.iter().filter(|metric| metric.name.starts_with("instructions")) {
+                let values: Vec<f64> =
+                    base.iter().filter_map(|run| run.metric(&metric.name)).map(|m| m.value).collect();
+                if values.is_empty() {
+                    continue;
+                }
+                let median = median(&values);
+                let moved = relative(metric.value - median, median).abs();
+                let largest = noise.entry(metric.name.clone()).or_default();
+                *largest = largest.max(moved);
             }
-            let median = median(&values);
-            let moved = relative(metric.value - median, median).abs();
-            let largest = noise.entry(metric.name.clone()).or_default();
-            *largest = largest.max(moved);
         }
     }
     noise
@@ -728,14 +726,24 @@ fn short(commit: &str) -> &str {
 
 /// Builds the harness of the workspace `manifest` with the benchmark profile
 /// of this checkout, with this checkout's toolchain, and the harness's
-/// `features`, and returns the binary.
-fn build(root: &Path, manifest: &Path, target_dir: Option<&Path>, features: Option<&str>) -> Result<PathBuf, String> {
+/// `features`, and returns the binary. With `probe`, it builds that probe of
+/// [`PROBES`]: the harness crate gets another `-C metadata`, which renames
+/// its symbols, so the binary's bytes differ while every scenario runs the
+/// same code.
+fn build(
+    root: &Path,
+    manifest: &Path,
+    target_dir: Option<&Path>,
+    features: Option<&str>,
+    probe: Option<usize>,
+) -> Result<PathBuf, String> {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| OsString::from("cargo"));
     let mut command = Command::new(cargo);
     // The checkout's directory, whose rust-toolchain.toml rustup reads.
     command
         .current_dir(root)
-        .args(["build", "--profile", "benchmark", "--config"])
+        .arg(if probe.is_some() { "rustc" } else { "build" })
+        .args(["--profile", "benchmark", "--config"])
         .arg(root.join("tools/bench/profile.toml"))
         .args(["-p", "mln-rs-bench", "--bin", "mln-bench", "--message-format", "json-render-diagnostics"])
         .arg("--manifest-path")
@@ -749,6 +757,10 @@ fn build(root: &Path, manifest: &Path, target_dir: Option<&Path>, features: Opti
     }
     if let Some(features) = features {
         command.args(["--features", features]);
+    }
+    if let Some(probe) = probe {
+        // `cargo rustc` passes these to the harness crate alone.
+        command.arg("--").arg("-C").arg(format!("metadata=mln-bench-probe-{probe}"));
     }
     let output = command
         .stdin(Stdio::null())
@@ -1035,10 +1047,11 @@ mod tests {
     fn layout_noise_is_the_most_any_stored_probe_moved_a_count() {
         let dir = tempfile::tempdir().unwrap();
         let environment = Environment::machine();
-        for (commit, probe) in [("a", 1010.0), ("b", 1030.0)] {
+        // The ref "b" moved most in its last probe.
+        for (commit, probes) in [("a", [1010.0, 995.0, 1000.0]), ("b", [1005.0, 990.0, 1030.0])] {
             let samples = Samples::from([
                 ("micro/test/case".to_owned(), vec![run(1000.0, 1.0), run(1000.0, 1.0)]),
-                ("micro/test/case (layout probe)".to_owned(), vec![run(probe, 1.0)]),
+                ("micro/test/case (layout probe)".to_owned(), probes.map(|probe| run(probe, 1.0)).to_vec()),
             ]);
             write_samples(&dir.path().join(format!("{commit}.json")), &samples).unwrap();
         }
