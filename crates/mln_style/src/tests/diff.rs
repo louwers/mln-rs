@@ -114,6 +114,18 @@ fn a_change_tiles_are_laid_out_with_is_relaid() {
     }
 }
 
+/// Filters parsed apart are equal when their expressions are, so a layer
+/// that keeps an equal filter is only restyled.
+#[test]
+fn an_equal_filter_parsed_again_is_no_change() {
+    let filtered = || changed(new_layer("line", "l", "s"), "filter", r#"["==", ["get", "class"], "road"]"#);
+    let old = filtered();
+    let new = changed(filtered(), "line-color", r##""#ff0000""##);
+    assert_eq!(changes(&[&old], &[&new]), [("l".to_owned(), LayerChange::Restyled)]);
+    let refiltered = changed(old.clone(), "filter", r#"["==", ["get", "class"], "road"]"#);
+    assert!(Arc::ptr_eq(old.style(), refiltered.style()), "setting an equal filter changes nothing");
+}
+
 // `StyleDiff::between`: what changed between two versions of a style.
 
 mod versions {

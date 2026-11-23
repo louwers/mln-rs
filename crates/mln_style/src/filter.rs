@@ -107,11 +107,11 @@ impl Filter {
 }
 
 impl PartialEq for Filter {
-    /// Quirk kept: two set filters compare their `shared_ptr`s, i.e. by
-    /// identity, not by expression equality.
+    /// Two filters are equal when their expressions are, whether or not
+    /// they share them.
     fn eq(&self, other: &Self) -> bool {
         match (&self.expression, &other.expression) {
-            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b) || **a == **b,
             (None, None) => true,
             _ => false,
         }

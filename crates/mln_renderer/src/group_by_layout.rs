@@ -2,9 +2,8 @@
 // and the worker iterates it in hash order; the port keeps the groups in
 // the order their first layer appears. Groups are independent (one bucket
 // each); only the feature index's sort indices, used by queries, follow
-// the group order. C++ hashes the filter by its pointer, so filters that
-// are equal without being shared seldom meet in a bucket; the port hashes
-// the filter's structure and groups them.
+// the group order. Filters key the groups by their expressions, so layers
+// with equal filters share a bucket whether or not they share the filter.
 
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -212,34 +211,35 @@ mod tests {
             layer::<Fill>("f", "roads", Some(&motorway)),
             circle("g", "roads", Some(&primary)),
             circle("h", "roads", None),
-            // An equal filter that isn't shared: a filterable layer's
-            // layout differs from another's unless they share the filter.
+            // An equal filter that isn't shared.
             circle("i", "roads", Some(&filter(r#"["==", ["get", "class"], "motorway"]"#))),
         ];
         let groups = ids(&group_layers(&layers));
-        assert_eq!(groups, [vec!["a", "c"], vec!["b", "g"], vec!["d", "h"], vec!["e"], vec!["f"], vec!["i"]]);
+        assert_eq!(groups, [vec!["a", "c", "i"], vec!["b", "g"], vec!["d", "h"], vec!["e"], vec!["f"]]);
         assert_eq!(groups, grouped_by_comparison(&layers));
     }
 
-    /// Where the layout ignores the filter, the keys compare filters by
-    /// their expressions, so equal filters group whether or not they share
-    /// them.
+    /// Equal filters group whether or not they share their expressions, both
+    /// where the layout ignores the filter and where it doesn't.
     #[test]
     fn groups_equal_filters_that_are_not_shared() {
-        let raster = |id: &str, json: &str| layer::<Raster>(id, "", Some(&filter(json)));
-        let layers = [
-            raster("a", r#"["==", ["get", "rank"], 0]"#),
-            raster("b", r#"["==", ["get", "rank"], 1]"#),
-            raster("c", r#"["==", ["get", "rank"], -0.0]"#),
-            // A `let` compares its bindings too.
-            raster("d", r#"["let", "x", 1, ["==", ["get", "rank"], 2]]"#),
-            raster("e", r#"["let", "x", 2, ["==", ["get", "rank"], 2]]"#),
-            raster("f", r#"["==", ["get", "rank"], 2]"#),
-            raster("g", r#"["==", ["get", "rank"], 1]"#),
-        ];
-        let groups = ids(&group_layers(&layers));
-        assert_eq!(groups, [vec!["a", "c"], vec!["b", "g"], vec!["d"], vec!["e"], vec!["f"]]);
-        assert_eq!(groups, grouped_by_comparison(&layers));
+        fn check(new_layer: impl Fn(&str, &str) -> Arc<dyn ErasedEvaluatedLayer>) {
+            let layers = [
+                new_layer("a", r#"["==", ["get", "rank"], 0]"#),
+                new_layer("b", r#"["==", ["get", "rank"], 1]"#),
+                new_layer("c", r#"["==", ["get", "rank"], -0.0]"#),
+                // A `let` compares its bindings too.
+                new_layer("d", r#"["let", "x", 1, ["==", ["get", "rank"], 2]]"#),
+                new_layer("e", r#"["let", "x", 2, ["==", ["get", "rank"], 2]]"#),
+                new_layer("f", r#"["==", ["get", "rank"], 2]"#),
+                new_layer("g", r#"["==", ["get", "rank"], 1]"#),
+            ];
+            let groups = ids(&group_layers(&layers));
+            assert_eq!(groups, [vec!["a", "c"], vec!["b", "g"], vec!["d"], vec!["e"], vec!["f"]]);
+            assert_eq!(groups, grouped_by_comparison(&layers));
+        }
+        check(|id, json| layer::<Raster>(id, "", Some(&filter(json))));
+        check(|id, json| circle(id, "roads", Some(&filter(json))));
     }
 
     /// Filters that differ only in a final literal, as a style that splits
