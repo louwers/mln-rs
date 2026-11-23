@@ -10,8 +10,9 @@
 //!
 //! Each extension point is one module, whose doc states its contract:
 //! layer types ([`mln_render::layer`], drawing with [`mln_render::draw`]
-//! and, on the globe, [`mln_render::globe`], whose author's names [`layer`]
-//! gathers), source types and their tiles'
+//! and, on the globe, [`mln_render::globe`], and placing where they collide
+//! with labels with [`mln_render::placement`], whose author's names
+//! [`layer`] gathers), source types and their tiles'
 //! data origins ([`mln_render::source`]), expression functions
 //! ([`mln_style::expression::functions`]), the programs a layer type draws
 //! with, which carry their shader sources ([`mln_gfx::shaders::program`]),

@@ -1,5 +1,11 @@
 //! Placement: which of the frame's marks show, each where it collides with
 //! nothing that shows already, and how what shows fades between placements.
+//! The `mln_ngon` crate's `NgonPlacement`, which places the polygons of the
+//! `org.maplibre.ngon` layers that collide, is a whole participant written
+//! against the facade alone; the built-in symbol layers take part the same
+//! way, so labels and n-gons collide with each other.
+//!
+//! # Participants
 //!
 //! A layer type whose layers place registers a participant, a
 //! [`Placement`], with
@@ -8,31 +14,49 @@
 //! thread, and calls it for every layer of the type that the frame draws and
 //! that [places](Placement::places). Nothing of it crosses the worker codec.
 //!
-//! The engine keeps the schedule: each frame it decides whether to place
-//! again, keeps the clock that what shows fades on, and makes the
-//! placement's [`CollisionIndex`]. A placement visits every placing layer of
-//! every type, topmost first, one call per layer, so a layer's shapes give
-//! way to those of the layers above it. Without the map's cross-source
-//! collisions, they give way only to those of layers on their source. Each
-//! layer's call places shapes of the features of the tiles whose bucket it
-//! leads: a layer whose layout another layer of its group leads draws that
-//! layer's bucket and places nothing of its own. In tile mode, a first round
-//! visits every layer for the shapes that cross their tile's borders
-//! ([`Placement::place_crossing`]), so neighboring tiles agree on them, and
-//! a second round visits every layer for the rest.
+//! The engine owns what is the same for every participant: the schedule,
+//! which decides when to place and keeps the clock that what shows fades on;
+//! each placement's [`CollisionIndex`], with its grids, padding, overlap
+//! rule and collision groups; the order the layers place in; committing a
+//! placement; the rendered-feature queries of the placing layers; and tile
+//! mode's records. A participant owns what its type places: it turns its
+//! layers' features into [`Shape`]s, decides which show, and keeps what
+//! each of its items showed as, which its buckets draw.
+//!
+//! # A frame
+//!
+//! Each frame, the engine calls, for every participant:
+//!
+//! 1. [`prepare`](Placement::prepare), which brings what the participant
+//!    keeps up to date with the frame's buckets and says whether its own
+//!    inputs changed.
+//! 2. When the schedule places: [`begin`](Placement::begin), for each type
+//!    that has a layer leading a tile's bucket; for each such layer of every
+//!    type, topmost first, [`place`](Placement::place), after
+//!    [`place_crossing`](Placement::place_crossing) for each of them in tile
+//!    mode; and [`commit`](Placement::commit), for each type that began.
+//!    A type with nothing to place [forgets](Placement::forget) instead.
+//! 3. [`update`](Placement::update), which brings its buckets to the
+//!    current placement.
+//!
+//! A still image places every frame, and every type forgets after it.
+//!
+//! The layers place topmost first, so a layer's shapes give way to those of
+//! the layers above it, whatever their types. Without the map's
+//! cross-source collisions, they give way only to those of layers on their
+//! source. Each layer's call places shapes of the features of the tiles
+//! whose bucket it leads: a layer whose layout another layer of its group
+//! leads draws that layer's bucket and places nothing of its own.
 //!
 //! A frame of a continuous map places when its schedule is due and placing
 //! would show something else: the view, the map mode, the style's
 //! transitions, cross-source collisions or the collision debug option
 //! changed; a layer leads other tiles' buckets, from other layouts, or
 //! their tiles draw elsewhere or are held for fade now; or a participant
-//! [says so](Prepared::changed). A still image places every frame. What a
-//! placement inserts in its index stands for an [`Item`], a feature of a
-//! tile; rendered-feature queries of the placing layers return the features
-//! of the current placement's shapes whose bounding box the query touches,
-//! besides those that their layout indexed
-//! ([`BuildCx::index`](crate::layer::BuildCx::index)), which a layer type
-//! leaves out for the features it places.
+//! [says so](Prepared::changed). So a participant compares only what of its
+//! own decides where its shapes are, such as its layers' paint values.
+//!
+//! # Fades
 //!
 //! In a continuous map, what a placement shows fades in and what it hides
 //! fades out. A participant keeps each item's [`Opacity`], steps it at each
@@ -42,11 +66,37 @@
 //! ([`Upload::keep`](crate::layer::Upload::keep)) as a vertex value
 //! ([`Opacity::vertex`]), which its shader fades on between placements by
 //! the frame's [`placement_fade`](crate::layer::Frame::placement_fade).
+//! Opacities kept in the bucket, in a field the worker codec skips
+//! (`#[wire(skip)]`), go with their tile, and each world copy has its own.
+//! A still image's fade is 1, so its opacities reach their end at once.
 //!
 //! A placing layer draws the tiles that its source holds while what
 //! placement showed of them fades out, besides those of the frame, and a
 //! tile's world copy doesn't draw it before the copy's own layout lands,
 //! since its bucket holds what placement made of it where its tile is.
+//!
+//! # Queries
+//!
+//! What a placement inserts in its index stands for an [`Item`], a feature
+//! of a tile. Rendered-feature queries of the placing layers return the
+//! features of the current placement's shapes whose bounding box the query
+//! touches, besides those that their layout indexed
+//! ([`BuildCx::index`](crate::layer::BuildCx::index)), which a layer type
+//! leaves out for the features it places.
+//!
+//! # Tile mode
+//!
+//! A still image of a tile places as far past the tile's borders as its
+//! [`padding`](CollisionIndex::padding) reaches, so that neighboring tiles,
+//! drawn apart, agree on what crosses them. A first round visits every
+//! layer for the shapes that cross their tile's borders
+//! ([`Placement::place_crossing`]), and a second round visits every layer
+//! for the rest. What crosses is the participant's to say: n-gon projects
+//! its tile's corners into the grid and places first the circles whose
+//! bounds reach across the square they make. While the renderer keeps them
+//! ([`Renderer::record_placements`](crate::Renderer::record_placements)),
+//! participants record each candidate they decide
+//! ([`PlaceCx::records`]), which checks that tiles agree read.
 
 mod erased;
 mod grid;
@@ -75,17 +125,8 @@ use crate::tile::job::SourceKey;
 /// A placing layer type's part of placement: per layer, it turns the
 /// features of the layer's tiles into [`Shape`]s, shows those that collide
 /// with nothing in the placement's [`CollisionIndex`] and inserts them, and
-/// it keeps what each of its items showed as, which its buckets draw.
-///
-/// Each frame, the engine first [prepares](Self::prepare) every type. When
-/// the schedule places, it then [begins](Self::begin) the placement for
-/// each type that has a layer leading a tile's bucket, calls
-/// [`place`](Self::place) for each such layer of every type, topmost first
-/// (in tile mode after [`place_crossing`](Self::place_crossing) for each of
-/// them), and [commits](Self::commit) it for each type that began it. Then,
-/// each frame, it has every type [`update`](Self::update) its buckets. A type
-/// that has nothing to place [forgets](Self::forget) in place of placing,
-/// and a still image's frame has every type forget after it placed.
+/// it keeps what each of its items showed as, which its buckets draw. The
+/// [module docs](self#a-frame) say when the engine calls each hook.
 pub trait Placement: Default + 'static {
     /// The layer type whose layers place.
     type Layer: Layer;
@@ -181,6 +222,8 @@ pub struct PlaceCx<'a> {
     pub index: &'a mut CollisionIndex,
     /// The view placed in.
     pub view: &'a View,
+    /// The map's mode: in [`MapMode::Tile`], the placement has a crossing
+    /// round ([`Placement::place_crossing`]) before the rest.
     pub mode: MapMode,
     /// How far the fade of the placement this one replaces had come: 0 as
     /// it started, 1 and past once it was done, and 1 in a still image. A
@@ -283,11 +326,12 @@ impl Default for Placed {
 }
 
 impl Placed {
-    /// Adds an item of a continuous map's placement whose opacity went from
-    /// `prev`, the current placement's, or `None` for an item it didn't
-    /// have, to `next`: the placement changed what shows where the item is
-    /// placed now and wasn't, or the other way around, and it isn't settled
-    /// unless `next` is.
+    /// Adds an item whose opacity went from `prev`, the current
+    /// placement's, or `None` for an item it didn't have, to `next`: the
+    /// placement changed what shows where the item is placed now and
+    /// wasn't, or the other way around, and it isn't settled unless `next`
+    /// is. A still image's placement reads neither, so a participant may
+    /// add its items in every mode.
     pub fn add(&mut self, prev: Option<Opacity>, next: Opacity) {
         self.changed |= prev.map_or(next.placed, |prev| prev.placed != next.placed);
         self.settled &= next.is_settled();
@@ -354,8 +398,9 @@ impl Opacity {
 pub struct PlacementRecord {
     /// The layer placed, or the layer that leads its bucket.
     pub layer: String,
-    /// What the candidate shows, which names it across tiles, such as a
-    /// label's text.
+    /// What the candidate shows, such as a label's text. Checks match a
+    /// candidate across tiles by its key, part and bounds, so a candidate
+    /// that its bounds name may leave it empty.
     pub key: String,
     /// Which of the candidate's parts this is, such as `"text"` or
     /// `"icon"`.

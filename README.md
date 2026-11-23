@@ -43,7 +43,8 @@ add what a style may declare, and an app adds them to the registry it starts its
 runtime with:
 
 - [`mln-rs-ngon`](crates/mln_ngon): the `org.maplibre.ngon` layer type, a
-  regular polygon at each point of a geometry source.
+  regular polygon at each point of a geometry source, which may collide with
+  labels and with each other.
 - [`mln-rs-location-puck`](crates/mln_location_puck): the
   `org.maplibre.location-puck` layer type, a device's location, heading and
   accuracy at one position, without a source.

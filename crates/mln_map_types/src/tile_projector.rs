@@ -24,13 +24,19 @@ impl<'a> TileProjector<'a> {
         TileProjector { view, tile_id: *tile_id, data }
     }
 
-    /// GL JS's `projectTileCoordinates`, for queries and label placement.
+    /// Where `point`, in tile units `elevation` meters above the surface,
+    /// is: in normalized device coordinates, how far it is from the camera,
+    /// and whether the planet hides it. While the map hands over between
+    /// Mercator and the globe, this is where the point is on the globe,
+    /// which placement and rendered-feature queries place and hit at.
     #[must_use]
     pub fn project(&self, point: &Point<f64>, elevation: f64) -> ProjectedTilePoint {
         self.view.projection().project_tile_point(&self.data, &self.tile_id, point, elevation)
     }
 
-    /// Where the renderer draws the point, for the rendered feature capture.
+    /// Where the vertex shaders draw `point`: [`project`](Self::project)'s
+    /// place, except while the map hands over between Mercator and the
+    /// globe, which the shaders blend.
     #[must_use]
     pub fn project_as_drawn(&self, point: &Point<f64>, elevation: f64) -> ProjectedTilePoint {
         self.view.projection().drawn_tile_point(&self.data, &self.tile_id, point, elevation)

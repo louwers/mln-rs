@@ -94,6 +94,18 @@
 //! (`#[derive(Wire)]`, with `#[wire(crate = mln_rs::mln_wire)]` through
 //! the facade) to cross to a tile worker with memory of its own.
 //!
+//! # Placement
+//!
+//! A layer type whose marks show only where they collide with nothing that
+//! shows already, labels and other types' marks included, registers with
+//! [`RegistryBuilder::add_placing_layer_type`](crate::RegistryBuilder::add_placing_layer_type)
+//! and a participant in placement, whose contract [`crate::placement`]
+//! states. n-gon's `NgonPlacement` places the polygons of the layers whose
+//! `ngon-allow-overlap` or `ngon-ignore-placement` is false: it keeps each
+//! polygon's opacity in its bucket and writes it into a vector that its
+//! shader fades by, and its layout leaves those polygons out of the tile's
+//! feature index, since queries find them through placement.
+//!
 //! # Queries
 //!
 //! A rendered-feature query finds a tile's features near its geometry in
