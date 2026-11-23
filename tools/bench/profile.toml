@@ -17,25 +17,28 @@
 # Incremental compilation stays off: it partitions code by what earlier
 # builds did, so the same source could compile to different instructions in
 # two target directories.
+#
+# The workspace's crates, the harness and the libraries, each compile as
+# one codegen unit. Split into several, a crate's code is partitioned by the
+# size of all of it, and so is the generic code it instantiates, such as the
+# JSON parsing of serde_json: an edit anywhere in a crate, even to a
+# function nothing calls, can then change how the compiler inlines the
+# code a scenario runs, and its instruction count with it, by more than a
+# verdict's threshold. Crates from outside the workspace, which a
+# comparison's sides share, keep several units, so that they build faster.
 [profile.benchmark]
 inherits = "release"
 opt-level = 3
 lto = false
-codegen-units = 16
+codegen-units = 1
 incremental = false
 debug = false
 debug-assertions = false
 overflow-checks = false
 panic = "unwind"
 
-# The harness itself compiles as one unit. It holds the scenarios' copies of
-# generic code, such as the JSON parsing of serde_json, and how many units
-# split it depends on the size of every library's code. Split into several,
-# an edit to a library a scenario never calls can change how the compiler
-# inlines the scenario's code, and its instruction count with it, by more
-# than a verdict's threshold.
-[profile.benchmark.package.mln-rs-bench]
-codegen-units = 1
+[profile.benchmark.package."*"]
+codegen-units = 16
 
 # `mln_bench_fixed_hash` gives the libraries' hash maps a fixed seed
 # (mln_util::hash), so that a scenario hashes the same way in every process:

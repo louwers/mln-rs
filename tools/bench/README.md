@@ -593,10 +593,11 @@ run. The runner and the build see to it:
   lets it, macOS and Linux (`src/aslr.rs`).
 - The libraries' hash maps take a fixed seed in the benchmark build
   (`profile.toml`), where they otherwise seed each process from the clock.
-- The harness compiles as one codegen unit, so that how the compiler splits and
-  inlines the scenarios' code doesn't change with the size of libraries they
-  don't call. Where the code lies still moves instructions, which a comparison
-  measures with its layout probe instead.
+- Each of the workspace's crates, the harness and the libraries, compiles as one
+  codegen unit, so that how the compiler splits and inlines the code a scenario
+  runs doesn't change with an edit elsewhere in its crate. Where the code lies
+  still moves instructions, which a comparison measures with its layout probe
+  instead.
 - The first process of a newly built binary to run some code does more work than
   later ones: on macOS the system checks each page of the binary's code the
   first time a process reads it, and caches the GPU code it compiles for each
