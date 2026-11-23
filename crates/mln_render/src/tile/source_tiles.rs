@@ -438,7 +438,7 @@ impl SourceTiles {
             Some(Contents::Dem(dem)) => return dem.upload(context),
             Some(Contents::Empty) | None => return,
         };
-        let mut same: SmallVec<[usize; 4]> = self.same_place(&id);
+        let mut same: SmallVec<[usize; 4]> = same_place(&self.tiles, &id);
         same.retain(|&mut at| at != index);
         let slots = self.tiles.values_mut().into_slice();
         upload_sharing(slots, index, &same, context);
@@ -453,12 +453,6 @@ impl SourceTiles {
                 upload_sharing(slots, copy, &others, context);
             }
         }
-    }
-
-    /// The indexes of the tiles that are `id` in any world copy, `id`'s own
-    /// among them if there is one.
-    fn same_place(&self, id: &OverscaledTileID) -> SmallVec<[usize; 4]> {
-        same_place(&self.tiles, id)
     }
 
     pub(crate) fn slots(&self) -> impl Iterator<Item = &Slot> + '_ {
@@ -951,8 +945,7 @@ impl SourceTiles {
     /// Moves the tile cached under any wrap of `id` into the cover under
     /// `id`'s: on the globe every wrap of a tile is the same piece of it.
     fn cache_pop_any_wrap(&mut self, id: &OverscaledTileID, ctx: &mut StoreContext) -> bool {
-        let Some(found) = self
-            .same_place(id)
+        let Some(found) = same_place(&self.tiles, id)
             .into_iter()
             .filter_map(|at| self.tiles.get_index(at))
             .find(|(_, slot)| slot.place.is_cached())
