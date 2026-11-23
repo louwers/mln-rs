@@ -534,9 +534,8 @@ pub(crate) mod input {
         let start = update.found.len();
         let mut draws = false;
         let mut ids: SmallVec<[OverscaledTileID; 64]> = SmallVec::new();
-        if let Some(source) = update.source
-            && let Some(order) = source.tile_order()
-        {
+        if let Some(source) = update.source {
+            let order = source.tile_order();
             let tiles = source.render_tiles();
             let placing;
             let order = if update.places {

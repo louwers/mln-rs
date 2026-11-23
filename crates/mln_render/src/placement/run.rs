@@ -181,7 +181,7 @@ impl Placements {
     pub(crate) fn add_layer(
         &mut self,
         (layer, participant): (usize, usize),
-        source: Option<&dyn RenderSource>,
+        source: Option<&RenderSource>,
         contents: &[Option<TileContent<'_>>],
         found: &[FoundTile],
     ) {

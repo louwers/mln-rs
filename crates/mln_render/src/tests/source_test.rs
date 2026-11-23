@@ -183,7 +183,7 @@ fn tile_out_of_view_keeps_loading() {
             ..Default::default()
         });
         let parameters = test.tile_parameters_with(MapMode::Continuous);
-        render_source.update(&mut store, source.clone(), &layers, true, needs_relayout, &parameters);
+        render_source.update(&mut store, &source, &layers, true, needs_relayout, &parameters);
         loads.extend(script.take_loads());
         assert!(loads.iter().all(|load| !load.is_stopped()), "no load stops");
         loaded_tiles(&loads)
@@ -214,7 +214,7 @@ fn a_tile_left_far_behind_stops_loading_before_it_goes() {
             ..Default::default()
         });
         let parameters = test.tile_parameters_with(MapMode::Continuous);
-        render_source.update(&mut store, source.clone(), &layers, true, needs_relayout, &parameters);
+        render_source.update(&mut store, &source, &layers, true, needs_relayout, &parameters);
     };
 
     jump(&mut test, 0.0, true);
@@ -261,7 +261,7 @@ fn tile_requests_follow_the_view() {
         test.transform.jump_to(&CameraOptions { center: Some(center), zoom: Some(6.0), ..Default::default() });
         let mut parameters = test.tile_parameters_with(MapMode::Continuous);
         parameters.prefetch_zoom_delta = 4;
-        render_source.update(&mut store, source.clone(), &layers, true, needs_relayout, &parameters);
+        render_source.update(&mut store, &source, &layers, true, needs_relayout, &parameters);
         loads.extend(script.take_loads());
         let orders: Vec<u32> = loads.iter().map(ScriptedLoad::order).collect();
         (loaded_tiles(&loads), orders)
@@ -361,7 +361,7 @@ fn set_max_parent_overscale_factor() {
     let mut store = test.store();
     let mut render_source = crate::tests::create_render_source(&style_source, &mut store);
     let parameters = test.tile_parameters_with(MapMode::Continuous);
-    render_source.update(&mut store, style_source.clone(), &layers, true, true, &parameters);
+    render_source.update(&mut store, &style_source, &layers, true, true, &parameters);
 
     let loaded_z5 = std::cell::Cell::new(false);
     let reply = |id: &OverscaledTileID| {
@@ -378,7 +378,7 @@ fn set_max_parent_overscale_factor() {
         if !matches!(event, StoreEvent::Changed) {
             return false;
         }
-        render_source.update(store, style_source.clone(), &layers, true, true, &parameters);
+        render_source.update(store, &style_source, &layers, true, true, &parameters);
         loaded_z5.get()
     });
 
@@ -401,7 +401,7 @@ fn raster_dem_tile_rounds_covering_zoom() {
     let mut store = test.store();
     let mut render_source = crate::tests::create_render_source(&source, &mut store);
     let parameters = test.tile_parameters_with(MapMode::Continuous);
-    render_source.update(&mut store, source.clone(), &layers, true, true, &parameters);
+    render_source.update(&mut store, &source, &layers, true, true, &parameters);
 
     let mut zooms = Vec::new();
     let reply = |id: &OverscaledTileID| {
@@ -425,7 +425,7 @@ struct TurningSource {
     answered: usize,
     source: Source,
     store: TileStore,
-    render_source: Box<dyn RenderSource>,
+    render_source: RenderSource,
     layers: Vec<Arc<dyn ErasedEvaluatedLayer>>,
     prefetch_zoom_delta: u8,
     latitude: f64,
@@ -482,7 +482,7 @@ impl TurningSource {
         let mut parameters = self.test.tile_parameters_with(MapMode::Continuous);
         parameters.prefetch_zoom_delta = self.prefetch_zoom_delta;
         parameters.placement_commits = self.placement_commits;
-        let (store, source, layers) = (&mut self.store, self.source.clone(), &self.layers);
+        let (store, source, layers) = (&mut self.store, &self.source, &self.layers);
         self.render_source.update(store, source, layers, needs_rendering, false, &parameters);
     }
 
@@ -781,7 +781,7 @@ fn raster_dem_borders_across_a_world_wrap() {
     loop {
         // The store backfills the tiles as their DEMs arrive.
         let parameters = test.tile_parameters_with(MapMode::Continuous);
-        render_source.update(&mut store, source.clone(), &layers, true, relayout, &parameters);
+        render_source.update(&mut store, &source, &layers, true, relayout, &parameters);
         relayout = false;
         let key = render_source.tiles().expect("the source's tiles");
         if store.source(key).is_some_and(|source| source.slots().next().is_some()) && render_source.is_loaded(&store) {
@@ -854,9 +854,8 @@ fn image_seen_by(test: &SourceTest, west: f64, east: f64) -> crate::sources::ren
     let image = mln_util::image::PremultipliedImage::from_vec(Size::new(1, 1), vec![255, 0, 0, 255]);
     let data = mln_style::source_type::SourceData::<Picture>::with_description(corners, Arc::new(image));
     let source = Source::new("image", data);
-    let mut store = test.store();
     let mut render_source = crate::sources::render_image_source::RenderImageSource::new(source.clone(), picture_of);
-    render_source.update(&mut store, source, &[], true, false, &test.tile_parameters_with(MapMode::Static));
+    render_source.update(&source, true, &test.tile_parameters_with(MapMode::Static));
     render_source
 }
 
@@ -918,8 +917,7 @@ fn an_image_far_west_draws_in_the_views_world() {
 #[test]
 fn an_image_out_of_view_is_loaded() {
     let test = image_view(256, 3.0, 15.0);
-    let store = test.store();
     let out_of_view = image_seen_by(&test, 100.0, 110.0);
     assert!(out_of_view.render_tiles().is_empty());
-    assert!(out_of_view.is_loaded(&store));
+    assert!(out_of_view.is_loaded());
 }

@@ -25,7 +25,7 @@ use crate::globe::{subdivide_ring, surface_granularity};
 use crate::handles::{Buffer, IndexBuffer, Vertex};
 use crate::mesh_desc::MeshDesc;
 use crate::paint_parameters::PaintParameters;
-use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters};
+use crate::render_source::RenderTileParameters;
 use crate::render_tile::RenderTile;
 use crate::shaders::programs;
 use crate::shaders::ubo::TileDebugPropsUBO;
@@ -200,73 +200,62 @@ impl DebugLayer {
 /// which keeps the tiles, with the render tiles of the last
 /// `update_render_tiles`.
 pub(crate) struct RenderTileSource {
-    pub(crate) base: RenderSourceBase,
+    /// Whether the frame's layers draw the source.
+    pub(crate) enabled: bool,
     /// The source's id, which its debug overlays' draws carry.
     id: Rc<str>,
-    key: SourceKey,
+    pub(crate) key: SourceKey,
     /// The deepest zoom of the last cover, `None` before the first.
-    max_zoom: Option<u8>,
-    render_tiles: Vec<RenderTile>,
+    pub(crate) max_zoom: Option<u8>,
+    /// The render tiles of the last `update_render_tiles`.
+    pub(crate) render_tiles: Vec<RenderTile>,
     /// The render tiles by tile id, without those held for fade, as
     /// indexes into them.
-    order_by_id: Vec<usize>,
+    pub(crate) order_by_id: Vec<usize>,
 }
 
 impl RenderTileSource {
-    /// The render source of `style_source`, whose tiles go in `store` and
+    /// The render source of the source `id`, whose tiles go in `store` and
     /// get their data through `origin`.
-    pub(crate) fn new(style_source: Source, origin: Box<dyn ErasedOrigin>, store: &mut TileStore) -> Self {
-        let key = store.add_source(style_source.id().to_owned(), origin);
+    pub(crate) fn new(id: &str, origin: Box<dyn ErasedOrigin>, store: &mut TileStore) -> Self {
         RenderTileSource {
-            id: Rc::from(style_source.id()),
-            base: RenderSourceBase::new(style_source),
-            key,
+            enabled: false,
+            id: Rc::from(id),
+            key: store.add_source(id.to_owned(), origin),
             max_zoom: None,
             render_tiles: Vec::new(),
             order_by_id: Vec::new(),
         }
     }
-}
 
-impl RenderSource for RenderTileSource {
-    fn base(&self) -> &RenderSourceBase {
-        &self.base
-    }
-
-    fn is_loaded(&self, store: &TileStore) -> bool {
+    pub(crate) fn is_loaded(&self, store: &TileStore) -> bool {
         store.source(self.key).is_none_or(SourceTiles::is_loaded)
     }
 
-    fn update(
+    /// Brings the source's tiles to `style_source` for `layers`.
+    pub(crate) fn update(
         &mut self,
         store: &mut TileStore,
-        style_source: Source,
+        style_source: &Source,
         layers: &[Arc<dyn ErasedEvaluatedLayer>],
         needs_rendering: bool,
         needs_relayout: bool,
         parameters: &TileParameters<'_>,
     ) {
-        self.base.style_source = style_source;
-        self.base.enabled = needs_rendering;
+        self.enabled = needs_rendering;
         let Some((source, ctx)) = store.source_mut(self.key) else {
             return;
         };
-        let Some(cover) = source.update_origin(&self.base.style_source, ctx, parameters, needs_relayout) else {
+        let Some(cover) = source.update_origin(style_source, ctx, parameters, needs_relayout) else {
             return;
         };
         self.max_zoom = Some(cover.zoom_range.max);
-        let update = CoverUpdate {
-            layers,
-            needs_rendering,
-            needs_relayout,
-            parameters,
-            style_source: &self.base.style_source,
-            cover,
-        };
+        let update = CoverUpdate { layers, needs_rendering, needs_relayout, parameters, style_source, cover };
         source.update_cover(&update, ctx);
     }
 
-    fn update_render_tiles(&mut self, store: &mut TileStore, parameters: &RenderTileParameters<'_>) {
+    /// Makes the source's render tiles of the frame.
+    pub(crate) fn update_render_tiles(&mut self, store: &mut TileStore, parameters: &RenderTileParameters<'_>) {
         self.render_tiles.clear();
         if let Some(source) = store.source(self.key) {
             self.render_tiles.reserve(source.rendered_count());
@@ -282,17 +271,23 @@ impl RenderSource for RenderTileSource {
         self.order_by_id.extend((0..tiles.len()).filter(|&i| !tiles[i].hold_for_fade()));
     }
 
-    fn release_render_data(&mut self) {
+    /// Releases the render data from the last `update_render_tiles` while
+    /// the source is disabled.
+    pub(crate) fn release_render_data(&mut self) {
         self.render_tiles = Vec::new();
         self.order_by_id = Vec::new();
     }
 
-    fn upload(&mut self, store: &mut TileStore, context: &mut Resources) {
-        store.upload(self.key, &self.render_tiles, context);
+    /// Readies the buckets the frame draws, uploading their indexes through
+    /// `context`, if the source is enabled.
+    pub(crate) fn upload(&mut self, store: &mut TileStore, context: &mut Resources) {
+        if self.enabled {
+            store.upload(self.key, &self.render_tiles, context);
+        }
     }
 
     /// Updates the source's draws of the debug overlays.
-    fn update_debug_draws(&self, debug_layers: &mut DebugLayers, parameters: &mut PaintParameters<'_>) {
+    pub(crate) fn update_debug_draws(&self, debug_layers: &mut DebugLayers, parameters: &mut PaintParameters<'_>) {
         if !parameters
             .debug_options
             .contains(MapDebugOptions::TIMESTAMPS | MapDebugOptions::PARSE_STATUS | MapDebugOptions::TILE_BORDERS)
@@ -384,23 +379,5 @@ impl RenderSource for RenderTileSource {
             // if tile borders are not required, erase their overlay
             debug_layers.remove(&DebugType::Border);
         }
-    }
-
-    fn tiles(&self) -> Option<SourceKey> {
-        Some(self.key)
-    }
-
-    fn render_tiles(&self) -> &[RenderTile] {
-        &self.render_tiles
-    }
-
-    fn tile_order(&self) -> Option<&[usize]> {
-        Some(&self.order_by_id)
-    }
-
-    fn dump_debug_logs(&self) {}
-
-    fn max_zoom(&self) -> Option<u8> {
-        self.max_zoom
     }
 }

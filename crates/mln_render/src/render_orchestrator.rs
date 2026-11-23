@@ -37,13 +37,14 @@ use crate::paint_parameters::PaintParameters;
 use crate::placement::{PlacementRecord, Placements};
 use crate::render_layer::{FrameSourceTiles, LayerUpdate, RenderLayer};
 use crate::render_pass::Pass;
-use crate::render_source::{self, RenderSource, RenderTileParameters};
+use crate::render_source::{RenderSource, RenderTileParameters};
 use crate::render_tile::{FoundTile, RenderTile, TileContent};
 use crate::renderer_event::RendererEvent;
 use crate::sky_pass::FullscreenDraw;
 use crate::sources::render_tile_source::{DebugLayer, DebugLayers};
 use crate::text::glyph_store::GlyphStore;
 use crate::tile::inbox::Waker;
+use crate::tile::job::SourceKey;
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::{StoreEvent, TileStore};
 use crate::tile::tile_workers::PoolWorkers;
@@ -146,10 +147,10 @@ pub(crate) struct RenderOrchestrator {
     /// The version of the style the last update drew, or `None` before
     /// the first and after `clear_data`: no layers, sources or images.
     style: Option<Arc<Style>>,
-    /// The style's sources in id order, the order of the per-source pass.
-    sources_by_id: Vec<Source>,
-
-    render_sources: HashMap<String, Box<dyn RenderSource>>,
+    /// The style's sources in id order, the order of the per-source pass,
+    /// each with its render source: `None` for a source type that the
+    /// registry lacks.
+    sources: Vec<(Source, Option<RenderSource>)>,
     /// The render layers, in the style's order: a layer's index is its
     /// place in the drawing order. A layer whose type has no render layer
     /// has none.
@@ -226,8 +227,7 @@ impl RenderOrchestrator {
             tile_store,
             found_tiles: Vec::new(),
             style: None,
-            sources_by_id: Vec::new(),
-            render_sources: HashMap::default(),
+            sources: Vec::new(),
             layers: Vec::new(),
             layer_indexes: HashMap::default(),
             render_light: crate::render_light::RenderLight::new(Arc::default()),
@@ -307,9 +307,6 @@ impl RenderOrchestrator {
             .map(|previous| DropOnWorkers::new(Arc::clone(previous), self.thread_pool.clone()));
         let StyleDiff { layers: layer_changes, sources: source_diff, images: image_diff } =
             StyleDiff::between(self.style.as_deref(), style);
-        if sources_changed {
-            self.sources_by_id = sources_by_id(style.get_sources());
-        }
         self.routes.sync(style.extra(), res);
         self.style = Some(Arc::clone(style));
         let layers = Arc::clone(style.get_layer_list());
@@ -318,7 +315,10 @@ impl RenderOrchestrator {
 
         let render_layers_remade = self.apply_layer_changes(&layer_changes, &layers, &clock, res);
         let constants_mask_changed = self.evaluate_layers(&layer_changes, render_layers_remade, &mut clock);
-        self.apply_source_diff(&source_diff, update_parameters);
+        if sources_changed {
+            self.apply_source_diff(&source_diff, style);
+        }
+        self.set_feature_states(update_parameters);
 
         // A still image fails at the first resource error, and nothing
         // requests a failed resource again on its own: each new still image
@@ -399,9 +399,10 @@ impl RenderOrchestrator {
     /// Brings the feature state of the enabled sources' tiles to the
     /// sources', and computes their tiles' matrices for the frame.
     fn update_render_tiles(&mut self, frame: &FramePlan) {
-        for (name, render_source) in &mut self.render_sources {
-            if render_source.is_enabled() {
-                if let Some((tiles, _)) = render_source.tiles().and_then(|key| self.tile_store.source_mut(key)) {
+        for (style_source, render_source) in &mut self.sources {
+            let Some(RenderSource::Tiles(render_source)) = render_source else { continue };
+            if render_source.enabled {
+                if let Some((tiles, _)) = self.tile_store.source_mut(render_source.key) {
                     tiles.coalesce_feature_state();
                 }
                 render_source.update_render_tiles(
@@ -409,7 +410,7 @@ impl RenderOrchestrator {
                     &RenderTileParameters {
                         transform: &frame.transform,
                         debug_options: frame.debug_options,
-                        source_name: name.clone(),
+                        source_name: style_source.id(),
                     },
                 );
             } else {
@@ -428,8 +429,7 @@ impl RenderOrchestrator {
         for (&index, frame_layer) in &frame.layers {
             let index = index as usize;
             let render_layer = &mut self.layers[index];
-            let source = frame_layer.source.as_ref().and_then(|id| self.render_sources.get_key_value(id));
-            let source = source.map(|(id, source)| (id.as_str(), &**source));
+            let source = frame_layer.source.and_then(|index| Some((index, self.sources[index].1.as_ref()?)));
             let source_contents = contents.of(source, &self.tile_store);
             let source = source.map(|(_, source)| source);
             let places = render_layer.record().places;
@@ -735,30 +735,41 @@ impl RenderOrchestrator {
     }
 
     /// Makes and removes the render sources for the sources that changed,
-    /// and gives every source the update's feature state.
-    fn apply_source_diff(&mut self, source_diff: &ItemChanges<Source>, update_parameters: &UpdateParameters) {
+    /// and puts them in the id order of `style`'s sources.
+    fn apply_source_diff(&mut self, source_diff: &ItemChanges<Source>, style: &Style) {
+        let mut kept: HashMap<String, RenderSource> = (self.sources.drain(..))
+            .filter_map(|(source, render_source)| Some((source.id().to_owned(), render_source?)))
+            .collect();
         for id in source_diff.removed.keys() {
-            if let Some(key) = self.render_sources.remove(id).and_then(|source| source.tiles()) {
+            if let Some(key) = kept.remove(id).and_then(|source| source.tiles()) {
                 self.tile_store.remove_source(key);
             }
         }
-
         for (id, style_source) in &source_diff.added {
-            if self.render_sources.contains_key(id) {
-                continue;
-            }
-            if let Some(render_source) = render_source::create(&self.registry, style_source, &mut self.tile_store) {
-                self.render_sources.insert(id.clone(), render_source);
+            if !kept.contains_key(id)
+                && let Some(render_source) = RenderSource::new(&self.registry, style_source, &mut self.tile_store)
+            {
+                kept.insert(id.clone(), render_source);
             }
         }
+        self.sources = sources_by_id(style.get_sources())
+            .into_iter()
+            .map(|source| {
+                let render_source = kept.remove(source.id());
+                (source, render_source)
+            })
+            .collect();
+    }
 
-        // The update carries the map's whole feature state, so a render
-        // source, whether new, kept or rebuilt after `clear_data`, shows the
-        // state of the update it renders. A source whose state the update
-        // didn't change does nothing.
-        for (id, render_source) in &self.render_sources {
-            if let Some((source, _)) = render_source.tiles().and_then(|key| self.tile_store.source_mut(key)) {
-                source.info.feature_state.set_states(update_parameters.feature_states.get(id));
+    /// Gives every source the update's feature state. The update carries
+    /// the map's whole feature state, so a render source, whether new, kept
+    /// or rebuilt after `clear_data`, shows the state of the update it
+    /// renders. A source whose state the update didn't change does nothing.
+    fn set_feature_states(&mut self, update_parameters: &UpdateParameters) {
+        for (style_source, render_source) in &self.sources {
+            let key = render_source.as_ref().and_then(RenderSource::tiles);
+            if let Some((source, _)) = key.and_then(|key| self.tile_store.source_mut(key)) {
+                source.info.feature_state.set_states(update_parameters.feature_states.get(style_source.id()));
             }
         }
     }
@@ -800,7 +811,7 @@ impl RenderOrchestrator {
             placement_commits: self.placement.schedule().commits(),
         };
 
-        if !self.sources_by_id.is_empty() {
+        if !self.sources.is_empty() {
             self.filtered_layers_for_source.reserve(layers.len());
         }
 
@@ -809,18 +820,15 @@ impl RenderOrchestrator {
         // Each source in turn takes its layers. The layers without a source
         // go with the first, and with no sources the loop runs once for
         // them.
-        let source_count = std::cmp::max(self.sources_by_id.len(), 1);
+        let source_count = std::cmp::max(self.sources.len(), 1);
         for source_index in 0..source_count {
-            let style_source = self.sources_by_id.get(source_index).cloned();
             let mut source_needs_rendering = false;
             let mut source_needs_relayout = false;
-            // The layers of a source type without a render source are
-            // skipped.
-            let has_render_source =
-                style_source.as_ref().is_some_and(|style_source| self.render_sources.contains_key(style_source.id()));
             // The id of the source whose layers this pass takes, if it has a
-            // render source.
-            let render_source_id = style_source.as_ref().filter(|_| has_render_source).map(Source::id);
+            // render source: the layers of a source type without one are
+            // skipped.
+            let render_source_id = (self.sources.get(source_index))
+                .and_then(|(style_source, render_source)| render_source.as_ref().map(|_| style_source.id()));
 
             for (index, layer) in self.layers.iter().enumerate() {
                 let record = layer.record();
@@ -828,9 +836,7 @@ impl RenderOrchestrator {
                 if record.input != SourceKind::None {
                     // Every source's pass sees every layer, so the cheap
                     // source check goes before anything else is read.
-                    if let Some(style_source) = &style_source
-                        && render_source_id == Some(record.source.as_str())
-                    {
+                    if render_source_id == Some(record.source.as_str()) {
                         let style = layer.style();
                         let layer_is_visible = record.visible;
                         let zoom_fits_layer = record.supports_zoom(self.zoom_history.last_zoom);
@@ -866,11 +872,10 @@ impl RenderOrchestrator {
                             self.filtered_layers_for_source.push(evaluated);
                             if zoom_fits_layer {
                                 source_needs_rendering = true;
-                                let source_id = style_source.id().to_owned();
                                 frame
                                     .layers
                                     .entry(index as u32)
-                                    .or_insert_with(|| FrameLayer { source: Some(source_id) });
+                                    .or_insert_with(|| FrameLayer { source: Some(source_index) });
                                 will_render[index] = true;
                             }
                         }
@@ -902,19 +907,17 @@ impl RenderOrchestrator {
                     will_render[index] = true;
                 }
             }
-            if let Some(style_source) = &style_source {
-                let filtered_layers = std::mem::take(&mut self.filtered_layers_for_source);
-                if let Some(source) = self.render_sources.get_mut(style_source.id()) {
+            if let Some((style_source, render_source)) = self.sources.get_mut(source_index) {
+                if let Some(source) = render_source {
                     source.update(
                         &mut self.tile_store,
-                        style_source.clone(),
-                        &filtered_layers,
+                        style_source,
+                        &self.filtered_layers_for_source,
                         source_needs_rendering,
                         source_needs_relayout,
                         &tile_parameters,
                     );
                 }
-                self.filtered_layers_for_source = filtered_layers;
                 self.filtered_layers_for_source.clear();
             }
         }
@@ -948,13 +951,7 @@ impl RenderOrchestrator {
             return false;
         }
 
-        for source in self.render_sources.values() {
-            if !source.is_loaded(&self.tile_store) {
-                return false;
-            }
-        }
-
-        true
+        self.sources.iter().filter_map(|(_, source)| source.as_ref()).all(|source| source.is_loaded(&self.tile_store))
     }
 
     pub(crate) fn clear_data(&mut self) {
@@ -962,10 +959,8 @@ impl RenderOrchestrator {
         // global state, light and sky stay, so the next update doesn't
         // transition them again.
         self.style = None;
-        self.sources_by_id.clear();
-
         self.debug_layers.clear();
-        self.render_sources.clear();
+        self.sources.clear();
         self.tile_store.clear();
         self.layers.clear();
         self.layer_indexes.clear();
@@ -1027,13 +1022,19 @@ impl RenderOrchestrator {
         }
     }
 
+    /// The key of the tiles of source `id`, if it has any.
+    fn source_key(&self, id: &str) -> Option<SourceKey> {
+        let index = self.sources.binary_search_by(|(source, _)| source.id().cmp(id)).ok()?;
+        self.sources[index].1.as_ref()?.tiles()
+    }
+
     /// The tiles of source `id`, if it has any.
     fn source_tiles(&self, id: &str) -> Option<&SourceTiles> {
-        self.tile_store.source(self.render_sources.get(id)?.tiles()?)
+        self.tile_store.source(self.source_key(id)?)
     }
 
     fn source_tiles_mut(&mut self, id: &str) -> Option<&mut SourceTiles> {
-        let key = self.render_sources.get(id)?.tiles()?;
+        let key = self.source_key(id)?;
         Some(self.tile_store.source_mut(key)?.0)
     }
 
@@ -1148,18 +1149,18 @@ impl RenderOrchestrator {
 
     /// Readies the buckets of the frame's sources for the frame's draws.
     pub(crate) fn upload_sources(&mut self, context: &mut Resources) {
-        for source in self.render_sources.values_mut() {
-            if source.is_enabled() {
-                source.upload(&mut self.tile_store, context);
-            }
+        for source in self.sources.iter_mut().filter_map(|(_, source)| source.as_mut()) {
+            source.upload(&mut self.tile_store, context);
         }
     }
 
     /// Updates the debug overlays' draws from the sources' tiles, and makes
     /// their draws of the frame.
     pub(crate) fn update_debug_layers(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        for source in self.render_sources.values() {
-            if source.is_enabled() {
+        for (_, source) in &self.sources {
+            if let Some(RenderSource::Tiles(source)) = source
+                && source.enabled
+            {
                 source.update_debug_draws(&mut self.debug_layers, parameters);
             }
         }
@@ -1204,8 +1205,7 @@ impl RenderOrchestrator {
         for (&index, frame_layer) in &frame.layers {
             let index = index as usize;
             let render_layer = &mut self.layers[index];
-            let source = frame_layer.source.as_ref().and_then(|id| self.render_sources.get_key_value(id));
-            let source = source.map(|(id, source)| (id.as_str(), &**source));
+            let source = frame_layer.source.and_then(|index| Some((index, self.sources[index].1.as_ref()?)));
             let source_contents = contents.of(source, &self.tile_store);
             let tiles = source.map(|(_, source)| FrameSourceTiles::new(source, source_contents));
             let images = self.tile_store.images();
@@ -1379,8 +1379,10 @@ impl RenderOrchestrator {
     }
 
     pub(crate) fn dump_debug_logs(&self) {
-        for source in self.render_sources.values() {
-            source.dump_debug_logs();
+        for (_, source) in &self.sources {
+            if let Some(RenderSource::Image(source)) = source {
+                source.dump_debug_logs();
+            }
         }
         self.tile_store.dump_debug_logs();
     }
@@ -1452,24 +1454,21 @@ impl RenderOrchestrator {
 /// of a phase of the frame, which go through their sources in runs.
 #[derive(Default)]
 struct SourceContents<'a> {
-    source: Option<&'a str>,
+    /// The index of the source among the orchestrator's.
+    source: Option<usize>,
     contents: Vec<Option<TileContent<'a>>>,
 }
 
 impl<'a> SourceContents<'a> {
-    /// What the render tiles of `source`, an id and its render source,
-    /// hold: an image source's image, or their contents in `store`; none for
-    /// no source.
-    fn of(
-        &mut self,
-        source: Option<(&'a str, &'a dyn RenderSource)>,
-        store: &'a TileStore,
-    ) -> &[Option<TileContent<'a>>] {
-        let Some((id, source)) = source else {
+    /// What the render tiles of `source`, an index among the
+    /// orchestrator's sources and its render source, hold: an image source's
+    /// image, or their contents in `store`; none for no source.
+    fn of(&mut self, source: Option<(usize, &'a RenderSource)>, store: &'a TileStore) -> &[Option<TileContent<'a>>] {
+        let Some((index, source)) = source else {
             return &[];
         };
-        if self.source != Some(id) {
-            self.source = Some(id);
+        if self.source != Some(index) {
+            self.source = Some(index);
             self.contents.clear();
             let image = source.image();
             let tiles = source.tiles().and_then(|key| store.source(key));
@@ -1523,7 +1522,7 @@ impl Drop for RenderOrchestrator {
     fn drop(&mut self) {
         // The render sources and their tiles go before the wait, since
         // their data drops on the thread pool.
-        self.render_sources.clear();
+        self.sources.clear();
         self.tile_store.clear();
         self.thread_pool.wait();
     }

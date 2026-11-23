@@ -175,8 +175,8 @@ struct Scene {
     raster: Source,
     fill_layers: Vec<Arc<dyn ErasedEvaluatedLayer>>,
     raster_layers: Vec<Arc<dyn ErasedEvaluatedLayer>>,
-    vector_render_source: Box<dyn RenderSource>,
-    raster_render_source: Box<dyn RenderSource>,
+    vector_render_source: RenderSource,
+    raster_render_source: RenderSource,
     store: TileStore,
     laid_out: bool,
 }
@@ -263,8 +263,8 @@ impl Scene {
         let relayout = !self.laid_out;
         self.laid_out = true;
         let store = &mut self.store;
-        self.vector_render_source.update(store, self.vector.clone(), &self.fill_layers, true, relayout, &parameters);
-        self.raster_render_source.update(store, self.raster.clone(), &self.raster_layers, true, relayout, &parameters);
+        self.vector_render_source.update(store, &self.vector, &self.fill_layers, true, relayout, &parameters);
+        self.raster_render_source.update(store, &self.raster, &self.raster_layers, true, relayout, &parameters);
 
         self.network.end_frame();
         // Until neither the tile workers nor the replies they sent have

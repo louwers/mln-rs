@@ -1,7 +1,6 @@
-// A render source is the renderer's side of a style source: what every one
-// has is `RenderSourceBase`, what each type does the `RenderSource` trait. A
-// source's tiles are in the renderer's tile store, which the source's
-// methods are given.
+// A render source is the renderer's side of a style source: a view into the
+// renderer's tile store, which keeps a source's tiles, or an image source's
+// image.
 
 use std::sync::Arc;
 
@@ -10,12 +9,12 @@ use mln_style::Source;
 
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::gfx::context::Resources;
-use crate::paint_parameters::{PaintParameters, TransformParameters};
+use crate::paint_parameters::TransformParameters;
 use crate::registry::Registry;
 use crate::render_tile::RenderTile;
 use crate::source::Supplied;
 use crate::sources::render_image_source::RenderImageSource;
-use crate::sources::render_tile_source::{DebugLayers, RenderTileSource};
+use crate::sources::render_tile_source::RenderTileSource;
 use crate::tile::job::SourceKey;
 use crate::tile::raster::RasterContents;
 use crate::tile::store::TileStore;
@@ -24,98 +23,111 @@ use crate::tile_parameters::TileParameters;
 pub(crate) struct RenderTileParameters<'a> {
     pub(crate) transform: &'a TransformParameters,
     pub(crate) debug_options: MapDebugOptions,
-    pub(crate) source_name: String,
+    pub(crate) source_name: &'a str,
 }
 
-/// What every render source has, whatever its type.
-pub(crate) struct RenderSourceBase {
-    pub(crate) style_source: Source,
-    pub(crate) enabled: bool,
+/// The render source of a style source, by what its type supplies.
+pub(crate) enum RenderSource {
+    Tiles(RenderTileSource),
+    Image(Box<RenderImageSource>),
 }
 
-impl RenderSourceBase {
-    pub(crate) fn new(style_source: Source) -> Self {
-        RenderSourceBase { style_source, enabled: false }
+impl RenderSource {
+    /// The render source of a style source through its type in `registry`,
+    /// whose tiles, if it has any, `store` keeps. `None` for a type that the
+    /// registry lacks, which breaks the contract that a map and its
+    /// renderer register the same types.
+    pub(crate) fn new(registry: &Registry, source: &Source, store: &mut TileStore) -> Option<Self> {
+        let name = source.info().name;
+        let Some(source_type) = registry.source_type(name) else {
+            debug_assert!(false, "the renderer's registry has no source type '{name}'");
+            return None;
+        };
+        Some(match source_type.supply(source) {
+            Supplied::Tiles(origin) => RenderSource::Tiles(RenderTileSource::new(source.id(), origin, store)),
+            Supplied::Image(image_of) => {
+                RenderSource::Image(Box::new(RenderImageSource::new(source.clone(), image_of)))
+            }
+        })
     }
-}
 
-pub(crate) trait RenderSource {
-    fn base(&self) -> &RenderSourceBase;
+    pub(crate) fn is_loaded(&self, store: &TileStore) -> bool {
+        match self {
+            RenderSource::Tiles(source) => source.is_loaded(store),
+            RenderSource::Image(source) => source.is_loaded(),
+        }
+    }
 
-    fn is_loaded(&self, store: &TileStore) -> bool;
-
-    fn update(
+    /// Brings the source to `style_source`, the source's version of the
+    /// frame, for `layers`, the frame's layers of it.
+    pub(crate) fn update(
         &mut self,
         store: &mut TileStore,
-        style_source: Source,
+        style_source: &Source,
         layers: &[Arc<dyn ErasedEvaluatedLayer>],
         needs_rendering: bool,
         needs_relayout: bool,
         parameters: &TileParameters<'_>,
-    );
-
-    /// Makes the source's render tiles of the frame.
-    fn update_render_tiles(&mut self, store: &mut TileStore, parameters: &RenderTileParameters<'_>);
-
-    /// Readies the buckets the frame draws, before its layers make their
-    /// draws, uploading their indexes through `context`.
-    fn upload(&mut self, store: &mut TileStore, context: &mut Resources);
-
-    /// Updates the source's draws of the debug overlays; a no-op for the
-    /// sources that have none (the image source).
-    fn update_debug_draws(&self, _debug_layers: &mut DebugLayers, _parameters: &mut PaintParameters<'_>) {}
-
-    /// Releases the render data from the last `update_render_tiles` while
-    /// the source is disabled.
-    fn release_render_data(&mut self) {}
-
-    /// The source's tiles in the tile store, for a source with tiles.
-    fn tiles(&self) -> Option<SourceKey> {
-        None
+    ) {
+        match self {
+            RenderSource::Tiles(source) => {
+                source.update(store, style_source, layers, needs_rendering, needs_relayout, parameters);
+            }
+            RenderSource::Image(source) => source.update(style_source, needs_rendering, parameters),
+        }
     }
 
-    /// The source's render tiles, as of the last `update_render_tiles`.
-    fn render_tiles(&self) -> &[RenderTile] {
-        &[]
+    /// Readies what the frame draws of an enabled source, before its layers
+    /// make their draws, uploading through `context`.
+    pub(crate) fn upload(&mut self, store: &mut TileStore, context: &mut Resources) {
+        match self {
+            RenderSource::Tiles(source) => source.upload(store, context),
+            RenderSource::Image(source) => source.upload(context),
+        }
+    }
+
+    /// The source's tiles in the tile store, for a source with tiles.
+    pub(crate) fn tiles(&self) -> Option<SourceKey> {
+        match self {
+            RenderSource::Tiles(source) => Some(source.key),
+            RenderSource::Image(_) => None,
+        }
+    }
+
+    /// The source's render tiles of the frame.
+    pub(crate) fn render_tiles(&self) -> &[RenderTile] {
+        match self {
+            RenderSource::Tiles(source) => &source.render_tiles,
+            RenderSource::Image(source) => source.render_tiles(),
+        }
     }
 
     /// The source's tiles that its layers draw, by tile id and without the
-    /// tiles held for fade, as indexes into `render_tiles`, as of the last
-    /// `update_render_tiles`; `None` for a source without tiles.
-    fn tile_order(&self) -> Option<&[usize]> {
-        None
+    /// tiles held for fade, as indexes into
+    /// [`render_tiles`](Self::render_tiles).
+    pub(crate) fn tile_order(&self) -> &[usize] {
+        match self {
+            RenderSource::Tiles(source) => &source.order_by_id,
+            RenderSource::Image(source) => source.tile_order(),
+        }
     }
 
     /// An image source's image, which each of its render tiles shows;
     /// `None` for other sources and before the image arrives.
-    fn image(&self) -> Option<&RasterContents> {
-        None
+    pub(crate) fn image(&self) -> Option<&RasterContents> {
+        match self {
+            RenderSource::Tiles(_) => None,
+            RenderSource::Image(source) => source.image.as_ref(),
+        }
     }
-
-    fn dump_debug_logs(&self);
 
     /// The deepest zoom that has tiles of its own, as the source's last
     /// [`Cover`](crate::source::Cover) says; `None` for a source without
     /// tiles or before its first cover.
-    fn max_zoom(&self) -> Option<u8>;
-
-    fn is_enabled(&self) -> bool {
-        self.base().enabled
+    pub(crate) fn max_zoom(&self) -> Option<u8> {
+        match self {
+            RenderSource::Tiles(source) => source.max_zoom,
+            RenderSource::Image(_) => None,
+        }
     }
-}
-
-/// Creates the render source of a style source through its type in
-/// `registry`, whose tiles, if it has any, `store` keeps. `None` for a type
-/// that the registry lacks, which breaks the contract that a map and its
-/// renderer register the same types.
-pub(crate) fn create(registry: &Registry, source: &Source, store: &mut TileStore) -> Option<Box<dyn RenderSource>> {
-    let name = source.info().name;
-    let Some(source_type) = registry.source_type(name) else {
-        debug_assert!(false, "the renderer's registry has no source type '{name}'");
-        return None;
-    };
-    Some(match source_type.supply(source) {
-        Supplied::Tiles(origin) => Box::new(RenderTileSource::new(source.clone(), origin, store)),
-        Supplied::Image(image_of) => Box::new(RenderImageSource::new(source.clone(), image_of)),
-    })
 }

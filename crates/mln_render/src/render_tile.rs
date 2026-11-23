@@ -103,7 +103,7 @@ impl RenderTile {
                 modified,
                 expires,
                 parameters.debug_options,
-                &parameters.source_name,
+                parameters.source_name,
             )));
         } else if parameters.debug_options == MapDebugOptions::NO_DEBUG {
             self.debug_bucket = None;

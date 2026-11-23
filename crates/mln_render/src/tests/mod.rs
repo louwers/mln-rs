@@ -345,8 +345,8 @@ pub(crate) fn render_layer(
 pub(crate) fn create_render_source(
     source: &mln_style::Source,
     store: &mut crate::tile::store::TileStore,
-) -> Box<dyn crate::render_source::RenderSource> {
-    crate::render_source::create(&crate::registry::Registry::with_builtins(), source, store)
+) -> crate::render_source::RenderSource {
+    crate::render_source::RenderSource::new(&crate::registry::Registry::with_builtins(), source, store)
         .expect("a source type of the tests")
 }
 

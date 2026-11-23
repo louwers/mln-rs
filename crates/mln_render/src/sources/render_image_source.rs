@@ -18,15 +18,12 @@ use mln_util::geo::LatLngBounds;
 use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 
-use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::gfx::context::Resources;
 use crate::globe::surface_granularity;
 use crate::handles::ImageVertex;
-use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters};
 use crate::render_tile::RenderTile;
 use crate::source::{ImageOf, SourceImage};
 use crate::tile::raster::{ImageQuad, RasterContents};
-use crate::tile::store::TileStore;
 use crate::tile_parameters::TileParameters;
 
 // The mapping from the unit square onto the image's corners: the perspective
@@ -168,10 +165,13 @@ fn build_image_mesh(image: &mut RasterContents, quad: ImageQuad, cells: u32, fro
 }
 
 pub(crate) struct RenderImageSource {
-    base: RenderSourceBase,
+    /// The source's version of the last update.
+    style_source: Source,
+    /// Whether the frame draws the image.
+    enabled: bool,
     /// Reads the image of each version of the source.
     image_of: ImageOf,
-    image: Option<RasterContents>,
+    pub(crate) image: Option<RasterContents>,
     tile_ids: Vec<UnwrappedTileID>,
     /// The render tiles of `tile_ids`, and their indexes in order.
     render_tiles: Vec<RenderTile>,
@@ -184,7 +184,8 @@ impl RenderImageSource {
     #[must_use]
     pub(crate) fn new(style_source: Source, image_of: ImageOf) -> Self {
         RenderImageSource {
-            base: RenderSourceBase::new(style_source),
+            style_source,
+            enabled: false,
             image_of,
             image: None,
             tile_ids: Vec::new(),
@@ -203,29 +204,29 @@ impl RenderImageSource {
     }
 
     fn source_image(&self) -> Option<SourceImage<'_>> {
-        (self.image_of)(&self.base.style_source)
+        (self.image_of)(&self.style_source)
     }
 
     /// Brings the source to `style_source` for a frame of `parameters`: the
     /// tiles the image is drawn in, and its image's mesh.
-    fn place(&mut self, style_source: Source, needs_rendering: bool, parameters: &TileParameters<'_>) {
-        self.base.enabled = needs_rendering;
+    fn place(&mut self, style_source: &Source, needs_rendering: bool, parameters: &TileParameters<'_>) {
+        self.enabled = needs_rendering;
         if !needs_rendering {
             return;
         }
 
         let view = parameters.view;
-        self.base.style_source = style_source;
+        self.style_source = style_source.clone();
 
         let Some(source) = self.source_image() else {
-            self.base.enabled = false;
+            self.enabled = false;
             return;
         };
         let coords = source.coordinates;
         let image = source.image.cloned();
 
         let Some(image) = image.filter(|image| image.valid()) else {
-            self.base.enabled = false;
+            self.enabled = false;
             return;
         };
 
@@ -252,8 +253,8 @@ impl RenderImageSource {
 
         // Only enable if the long side of the image is > 2 pixels. Resulting
         // in a display of at least 2 x 1 px image
-        self.base.enabled = d_max * 2.0f64.powf(view.zoom()) * constants::TILE_SIZE_D > 2.0;
-        if !self.base.enabled {
+        self.enabled = d_max * 2.0f64.powf(view.zoom()) * constants::TILE_SIZE_D > 2.0;
+        if !self.enabled {
             return;
         }
 
@@ -265,7 +266,7 @@ impl RenderImageSource {
         // The cover is empty, for example, when the image lies wholly outside
         // the latitudes a Web Mercator map can show (beyond about ±85.05°).
         if tile_cover_ids.is_empty() {
-            self.base.enabled = false;
+            self.enabled = false;
             return;
         }
         self.tile_ids.push(tile_cover_ids[0]);
@@ -323,8 +324,8 @@ impl RenderImageSource {
             }
         }
 
-        self.base.enabled = has_visible_tile;
-        if !self.base.enabled {
+        self.enabled = has_visible_tile;
+        if !self.enabled {
             return;
         }
 
@@ -373,34 +374,22 @@ impl RenderImageSource {
             self.mesh_cells = cells;
         }
     }
-}
 
-impl RenderSource for RenderImageSource {
-    fn base(&self) -> &RenderSourceBase {
-        &self.base
+    /// Whether the frame can draw the image. A source that draws nowhere
+    /// holds no frame back: the style tracks the load of its image.
+    pub(crate) fn is_loaded(&self) -> bool {
+        !self.enabled || self.loaded()
     }
 
-    // A source that draws nowhere holds no frame back: the style tracks
-    // the load of its image.
-    fn is_loaded(&self, _store: &TileStore) -> bool {
-        !self.base.enabled || self.loaded()
-    }
-
-    fn update(
-        &mut self,
-        _store: &mut TileStore,
-        style_source: Source,
-        _layers: &[Arc<dyn ErasedEvaluatedLayer>],
-        needs_rendering: bool,
-        _needs_relayout: bool,
-        parameters: &TileParameters<'_>,
-    ) {
+    /// Brings the source to `style_source`, the tiles it draws in and their
+    /// render tiles.
+    pub(crate) fn update(&mut self, style_source: &Source, needs_rendering: bool, parameters: &TileParameters<'_>) {
         self.place(style_source, needs_rendering, parameters);
         // A disabled source's tile ids and corners may be of other
         // coordinates, and an image shrunk out of sight or out of view draws
         // nowhere.
         self.render_tiles.clear();
-        let tile_ids = if self.base.enabled { &self.tile_ids[..] } else { &[] };
+        let tile_ids = if self.enabled { &self.tile_ids[..] } else { &[] };
         self.render_tiles.extend(tile_ids.iter().map(|&id| {
             let tile_id = OverscaledTileID::new(id.canonical.z, id.wrap, id.canonical);
             RenderTile::of_tile_id(id, tile_id, false)
@@ -409,32 +398,26 @@ impl RenderSource for RenderImageSource {
         self.order.extend(0..self.render_tiles.len());
     }
 
-    fn update_render_tiles(&mut self, _store: &mut TileStore, _parameters: &RenderTileParameters<'_>) {}
-
-    fn upload(&mut self, _store: &mut TileStore, context: &mut Resources) {
-        if let Some(image) = &mut self.image {
+    /// Uploads the image's texture, if the frame draws it.
+    pub(crate) fn upload(&mut self, context: &mut Resources) {
+        if self.enabled
+            && let Some(image) = &mut self.image
+        {
             image.upload(context);
         }
     }
 
     /// The tiles the image is drawn in, once it has arrived.
-    fn render_tiles(&self) -> &[RenderTile] {
+    pub(crate) fn render_tiles(&self) -> &[RenderTile] {
         if self.loaded() { &self.render_tiles } else { &[] }
     }
 
-    fn tile_order(&self) -> Option<&[usize]> {
-        Some(&self.order[..self.render_tiles().len()])
+    /// The indexes of [`render_tiles`](Self::render_tiles), in order.
+    pub(crate) fn tile_order(&self) -> &[usize] {
+        &self.order[..self.render_tiles().len()]
     }
 
-    fn image(&self) -> Option<&RasterContents> {
-        self.image.as_ref()
-    }
-
-    fn dump_debug_logs(&self) {
-        Log::info(Event::General, format!("Image source {}: loaded {}", self.base.style_source.id(), self.loaded()));
-    }
-
-    fn max_zoom(&self) -> Option<u8> {
-        None
+    pub(crate) fn dump_debug_logs(&self) {
+        Log::info(Event::General, format!("Image source {}: loaded {}", self.style_source.id(), self.loaded()));
     }
 }

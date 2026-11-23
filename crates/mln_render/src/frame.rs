@@ -12,8 +12,9 @@ use crate::render_sky::EvaluatedSky;
 /// A layer the frame draws.
 #[derive(Clone)]
 pub(crate) struct FrameLayer {
-    /// The id of the layer's render source, `None` for a layer without one.
-    pub(crate) source: Option<String>,
+    /// The index of the layer's source among the renderer's, `None` for a
+    /// layer without one.
+    pub(crate) source: Option<usize>,
 }
 
 /// A frame, as its update leaves it for its encode: the camera, the values

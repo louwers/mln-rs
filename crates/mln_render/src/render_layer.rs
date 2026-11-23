@@ -60,7 +60,7 @@ impl<'a> FrameSourceTiles<'a> {
     /// The render tiles of `source`, which hold `contents`, at their
     /// indexes.
     #[must_use]
-    pub(crate) fn new(source: &'a dyn RenderSource, contents: &'a [Option<TileContent<'a>>]) -> Self {
+    pub(crate) fn new(source: &'a RenderSource, contents: &'a [Option<TileContent<'a>>]) -> Self {
         FrameSourceTiles { tiles: source.render_tiles(), contents, max_zoom: source.max_zoom() }
     }
 }
@@ -72,7 +72,7 @@ pub(crate) struct LayerUpdate<'a> {
     pub(crate) update_parameters: &'a UpdateParameters,
     /// The layer's source, `None` for a layer without one or a source type
     /// the renderer has no render source for.
-    pub(crate) source: Option<&'a dyn RenderSource>,
+    pub(crate) source: Option<&'a RenderSource>,
     /// What each of the source's render tiles holds, at its index.
     pub(crate) contents: &'a [Option<TileContent<'a>>],
     /// The tiles of the frame's layers, as their updates find them, which
