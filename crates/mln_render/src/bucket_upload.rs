@@ -55,6 +55,28 @@ impl Upload<'_> {
         }
     }
 
+    /// Names `vec`, as [`vec`](Self::vec) does, keeping its data, which the
+    /// bucket changes on the renderer's thread ([`GpuVec::get_mut`]), as a
+    /// placing type's buckets do in placement
+    /// ([`PlacementBuckets::get_mut`](crate::placement::PlacementBuckets::get_mut)):
+    /// the engine then uploads it again into the same buffer. A tile's
+    /// world copies each have a buffer of their own of it. Its length stays
+    /// the one it first uploaded with, as the buffer's and its meshes' do.
+    pub fn keep<V: bytemuck::Pod>(&mut self, vec: &mut GpuVec<V>) {
+        if let Kind::Geometry { geometry, copies, res } = &mut self.kind {
+            geometry.upload(vec, true, copies, res);
+        }
+    }
+
+    /// Names `indexes`, as [`indexes`](Self::indexes) does, keeping them,
+    /// as [`keep`](Self::keep) keeps a vector, for the bucket to order anew
+    /// ([`Indexes::get_mut`]).
+    pub fn keep_indexes(&mut self, indexes: &mut Indexes) {
+        if let Kind::Geometry { geometry, copies, res } = &mut self.kind {
+            geometry.upload_indexes(indexes, true, copies, res);
+        }
+    }
+
     /// Names `binders`, whose values the bucket's meshes read
     /// ([`LayerBucket::binders`](crate::layer::LayerBucket::binders)).
     pub fn binders<P: PaintBinders>(&mut self, binders: &mut LayerBinders<P>) {

@@ -44,7 +44,7 @@ mln_gfx::uniform_block! {
 
 mln_gfx::uniform_block! {
     /// The symbol shader's evaluated properties uniform block, and how far the
-    /// placement's fade has come (`DrawFrame::placement_fade`). The colors are
+    /// placement's fade has come (`Frame::placement_fade`). The colors are
     /// premultiplied r, g, b, a floats.
     pub struct SymbolEvaluatedPropsUBO {
         pub text_fill_color: [f32; 4],

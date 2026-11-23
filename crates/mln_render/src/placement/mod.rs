@@ -55,10 +55,7 @@ pub(crate) use self::run::Placements;
 #[cfg(feature = "bench")]
 pub(crate) use self::run::{PlacingFrameLayer, place_round};
 pub(crate) use self::schedule::Schedule;
-use crate::bucket_upload::Upload;
-use crate::gfx::mesh::Indexes;
-use crate::layer::{Bucket, GpuVec, Layer, LayerValues};
-use crate::paint_parameters::Frame;
+use crate::layer::{Bucket, Layer, LayerValues};
 use crate::render_tile::RenderTile;
 use crate::tile::job::SourceKey;
 use crate::update_parameters::UpdateParameters;
@@ -321,40 +318,13 @@ impl<'a> PlacementBuckets<'a> {
         self.store.bucket(key)?.downcast_ref()
     }
 
-    /// [`get`](Self::get), to change: the bucket's kept vectors ([`keep`])
+    /// [`get`](Self::get), to change: the bucket's kept vectors
+    /// ([`Upload::keep`](crate::layer::Upload::keep))
     /// that the participant changes upload again, into the buffers its
     /// meshes read.
     pub fn get_mut<B: Bucket>(&mut self, key: &BucketKey) -> Option<&mut B> {
         let bucket = self.store.bucket_mut(key)?;
         bucket.changed();
         bucket.downcast_mut()
-    }
-}
-
-/// How far the fade of the current placement has come in `frame`: 0 as it
-/// starts, 1 and past once it is done.
-#[must_use]
-pub fn fade(frame: &Frame<'_>) -> f32 {
-    frame.placement_fade
-}
-
-/// Names `vec` to `up`, as [`Upload::vec`] does, keeping its data, which
-/// the participant changes ([`GpuVec::get_mut`]) in the buckets it takes
-/// ([`PlacementBuckets::get_mut`]): the engine then uploads it again into
-/// the same buffer. A tile's world copies each have a buffer of their own
-/// of it. Its length stays the one it first uploaded with, as the buffer's
-/// and its meshes' do.
-pub fn keep<V: bytemuck::Pod>(up: &mut Upload<'_>, vec: &mut GpuVec<V>) {
-    if let crate::bucket_upload::Kind::Geometry { geometry, copies, res } = &mut up.kind {
-        geometry.upload(vec, true, copies, res);
-    }
-}
-
-/// Names `indexes` to `up`, as [`Upload::indexes`] does, keeping them, as
-/// [`keep`] keeps a vector: the participant orders them anew
-/// ([`Indexes::get_mut`]).
-pub fn keep_indexes(up: &mut Upload<'_>, indexes: &mut Indexes) {
-    if let crate::bucket_upload::Kind::Geometry { geometry, copies, res } = &mut up.kind {
-        geometry.upload_indexes(indexes, true, copies, res);
     }
 }

@@ -166,8 +166,9 @@ pub struct Frame<'a> {
     pub(crate) clip_depth: ClipDepthRange,
     /// How far the fade of the current placement has come: from 0 when it
     /// was committed to 1 once its fade is done, and past 1 after that; 1
-    /// where placements don't fade.
-    pub(crate) placement_fade: f32,
+    /// where placements don't fade. What placement showed or hid shows at
+    /// an opacity this far from where it was, toward where it goes.
+    pub placement_fade: f32,
     /// The frame's projection matrices.
     pub(crate) transform: &'a TransformParameters,
 }

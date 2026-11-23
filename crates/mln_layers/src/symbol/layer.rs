@@ -11,7 +11,6 @@ use mln_render::layer::{
     EvaluateCx, Evaluation, Features, FrameTile, Layer, LayerBucket, NewCx, PrepareCx, TileProjection, TileTransform,
     UpdateCx,
 };
-use mln_render::placement;
 use mln_style::StyleValue as _;
 use mln_style::evaluated::Evaluated;
 use mln_style_types::{AlignmentType, IconTextFitType, SymbolPlacementType, TextRotationAlignmentType};
@@ -335,7 +334,7 @@ impl Layer for SymbolLayer {
             icon_opacity: *paint.icon_opacity.uniform(),
             icon_halo_width: *paint.icon_halo_width.uniform(),
             icon_halo_blur: *paint.icon_halo_blur.uniform(),
-            fade_change: placement::fade(cx.frame),
+            fade_change: cx.frame.placement_fade,
             ..SymbolEvaluatedPropsUBO::default()
         });
         for (tile, laid, value) in cx.tiles() {

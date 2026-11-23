@@ -75,7 +75,7 @@ impl<T> GpuVec<T> {
     }
 
     /// The data, which is gone once it uploaded unless the bucket keeps it
-    /// ([`placement::keep`](crate::placement::keep)).
+    /// ([`Upload::keep`](crate::layer::Upload::keep)).
     #[must_use]
     pub fn get(&self) -> &[T] {
         match &self.data {
@@ -90,7 +90,7 @@ impl<T> GpuVec<T> {
     }
 
     /// The data, to fill before it uploads, or to change where placement
-    /// keeps it ([`placement::keep`](crate::placement::keep)), which then
+    /// keeps it ([`Upload::keep`](crate::layer::Upload::keep)), which then
     /// uploads again.
     pub fn get_mut(&mut self) -> &mut Vec<T>
     where
