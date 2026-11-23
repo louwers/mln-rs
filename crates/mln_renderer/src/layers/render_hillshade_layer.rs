@@ -625,8 +625,16 @@ impl RenderHillshadeLayer {
         num_lights: usize,
         parameters: &PaintParameters<'_>,
     ) -> HillshadeUniforms {
-        let projection =
-            projection_data(tile_id, parameters, [0.0, 0.0], TranslateAnchorType::Viewport, false, false, None, true);
+        let projection = projection_data(
+            tile_id,
+            parameters,
+            [0.0, 0.0],
+            TranslateAnchorType::Viewport,
+            false,
+            false,
+            None,
+            !parameters.camera_moving,
+        );
         HillshadeUniforms {
             draw_ubo: HillshadeDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) },
             tile_props: HillshadeTilePropsUBO {
