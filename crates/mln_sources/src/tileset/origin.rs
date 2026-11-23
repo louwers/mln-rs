@@ -254,14 +254,14 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
         let data = SourceData::<TilesetSourceType<K>>::recover(update.source())?;
         self.params = NetworkParams::of(update.source().common());
         self.pixel_ratio = update.pixel_ratio();
-        let loaded = data.description.clone();
+        let loaded = data.description.as_ref();
         // In Continuous mode, keep the existing tiles if the new tileset is
         // not yet available, thus providing smart style transitions without
         // flickering. In other modes, allow clearing the tiles first, before
         // the early return in order to avoid render tests being flaky.
         let can_update_tileset = loaded.is_some() || update.mode() != MapMode::Continuous;
-        if can_update_tileset && self.tileset != loaded {
-            self.tileset = loaded;
+        if can_update_tileset && self.tileset.as_ref() != loaded {
+            self.tileset = loaded.cloned();
             // TODO: this removes existing buckets, and will cause flickering.
             // Should instead refresh tile data in place.
             update.clear_tiles();
@@ -269,7 +269,7 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
         }
         // A tileset without tiles makes no tiles, and the source counts as
         // loaded until its tiles are set.
-        let tileset = self.tileset.clone().filter(|tileset| !tileset.tiles.is_empty())?;
+        let tileset = self.tileset.as_ref().filter(|tileset| !tileset.tiles.is_empty())?;
         let encoding = if is_vector::<K>() && tileset.vector_encoding == Some(VectorEncoding::MLT) {
             // The encoding is decided once, from the first tileset (`isMLT`).
             VectorTileEncoding::Mlt { fast_pfor_enabled: update.fast_pfor_enabled() }
@@ -278,7 +278,7 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
         };
         let file_source = update.file_source().cloned();
         let current = self.data.as_ref().is_some_and(|current| {
-            current.tileset == tileset
+            current.tileset == *tileset
                 && current.encoding == encoding
                 && crate::same(current.file_source.as_ref(), file_source.as_ref())
         });
