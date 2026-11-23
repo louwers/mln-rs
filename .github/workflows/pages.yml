@@ -10,10 +10,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
 
 # One run at a time; a newer push replaces the one waiting, so the latest
 # commit deploys next. In-flight runs finish, so that pushes coming faster
@@ -29,6 +30,10 @@ jobs:
   deploy:
     runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 30
+    permissions:
+      contents: read
+      pages: write # deploy-pages publishes the page
+      id-token: write # deploy-pages authenticates to Pages with OIDC
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
@@ -37,9 +42,11 @@ jobs:
         with:
           persist-credentials: false
 
+      # No Rust cache: a cache entry that another job saved could end up in
+      # the published page.
       - uses: ./.github/actions/setup-ci-deps
         with:
-          save-rust-cache: "true"
+          rust-cache: "false"
 
       - name: Build
         run: mise run web:build --profile release

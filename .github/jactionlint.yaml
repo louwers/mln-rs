@@ -1,11 +1,29 @@
-# jactionlint (https://jactionlint.jdx.dev), which hk runs: the checks of
-# actionlint, plus commit pinning for third-party actions.
-profile: correctness
+# jactionlint (https://jactionlint.jdx.dev), which hk runs: the default
+# profile, with these of the pedantic one.
+profile: default
 rules:
-  unpinned-uses: error
+  # Every workflow sets `defaults.run.shell: bash`, which runs with pipefail.
+  require-shell: error
+  # Also an expression that no attacker controls, such as a matrix value.
+  template-injection:
+    pedantic: true
+  secrets-outside-env:
+    level: warn
+    # Uploads coverage only.
+    allow: [CODECOV_TOKEN]
+  undocumented-permissions: warn
+  concurrency-limits: warn
+  dependabot-missing-actions-update: warn
 # Blacksmith runner labels are not in the GitHub-hosted catalog.
 self-hosted-runner:
   labels:
     - blacksmith-2vcpu-ubuntu-2604
     - blacksmith-4vcpu-ubuntu-2604
     - blacksmith-6vcpu-macos-26
+ignores:
+  - rule: use-trusted-publishing
+    file: .github/workflows/release.yml
+    job: release
+    reason:
+      Trusted publishing needs each crate configured on crates.io first. Until
+      then the token lives in the release environment.

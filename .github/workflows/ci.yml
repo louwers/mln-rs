@@ -13,6 +13,10 @@ concurrency:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 env:
   # Keep every mise command (including task-scoped tool auto-installs such as
   # zig) locked to mise.lock so CI never resolves unlocked tools or rewrites
@@ -129,7 +133,9 @@ jobs:
 
       - name: Test
         if: ${{ !cancelled() }}
-        run: mise run ci:test ${{ matrix.backend }}
+        env:
+          BACKEND: ${{ matrix.backend }}
+        run: mise run ci:test "$BACKEND"
 
       # The render suites' reports and actual/diff images.
       - name: Upload the render test results
@@ -193,7 +199,9 @@ jobs:
           egl: ${{ matrix.backend == 'gl' }}
 
       - name: Test
-        run: mise run ci:test --backend-only ${{ matrix.backend }}
+        env:
+          BACKEND: ${{ matrix.backend }}
+        run: mise run ci:test --backend-only "$BACKEND"
 
       - name: Test the C ABI
         if: ${{ !cancelled() && runner.os == 'Linux' }}
@@ -331,6 +339,7 @@ jobs:
     needs: [plan, lint, test, backend, web, commits]
     if: always()
     runs-on: blacksmith-2vcpu-ubuntu-2604
+    timeout-minutes: 5
     permissions: {}
     steps:
       - name: The jobs' results

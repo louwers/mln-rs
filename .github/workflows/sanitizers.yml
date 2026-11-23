@@ -17,6 +17,16 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
+# One run at a time; a scheduled run waits for a manual one that is still
+# running.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 env:
   MISE_LOCKED: "1"
 

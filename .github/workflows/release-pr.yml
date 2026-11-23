@@ -18,6 +18,10 @@ concurrency:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   # Forks open no release pull request, and the pull request is for the
   # default branch, whichever branch the workflow runs on. A scheduled run's
@@ -41,9 +45,11 @@ jobs:
     if: needs.repository.outputs.fork == 'false'
     runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 90
+    # Holds RELEASE_PLZ_TOKEN.
+    environment: release
     permissions:
       contents: write # the pull request's branch
-      pull-requests: write
+      pull-requests: write # the release pull request
     steps:
       - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
         with:

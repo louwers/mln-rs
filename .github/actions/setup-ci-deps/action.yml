@@ -58,10 +58,13 @@ runs:
     - name: Compute toolchain cache key
       id: toolchain-key
       shell: bash
+      env:
+        FILES_HASH:
+          ${{ hashFiles('mise.toml', 'mise.lock', 'rust-toolchain.toml') }}
       run: |
-        prefix="toolchains-v1-${{ runner.os }}-${{ runner.arch }}-${ImageOS:-unknown}"
+        prefix="toolchains-v1-${RUNNER_OS}-${RUNNER_ARCH}-${ImageOS:-unknown}"
         echo "prefix=${prefix}" >> "$GITHUB_OUTPUT"
-        echo "key=${prefix}-${{ hashFiles('mise.toml', 'mise.lock', 'rust-toolchain.toml') }}" >> "$GITHUB_OUTPUT"
+        echo "key=${prefix}-${FILES_HASH}" >> "$GITHUB_OUTPUT"
 
     - name: Restore toolchains
       id: toolchains
