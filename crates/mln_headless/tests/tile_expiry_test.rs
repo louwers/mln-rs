@@ -1,13 +1,13 @@
-// A map that stays on one view reloads its tiles as their data expires, and
-// shows the tiles the server has by then (#644).
+// A map that stays on one view shows each answer that its tiles' open
+// requests get, as the file source revalidates their data when it expires
+// (#644). When the online file source revalidates, and how it reads the
+// servers' caching headers, are its own tests' rules.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use httpmock::MockServer;
 use mln_map_types::MapMode;
-use mln_storage::network_status::NetworkStatus;
-use mln_storage::online_file_source::OnlineFileSource;
+use mln_storage::{Kind, Response};
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
@@ -16,95 +16,51 @@ use crate::support::*;
 const GREEN: [u8; 4] = [0, 255, 0, 255];
 const BLUE: [u8; 4] = [0, 0, 255, 255];
 
-fn png(color: [u8; 4]) -> Vec<u8> {
+fn png(color: [u8; 4]) -> Response {
     let mut image = PremultipliedImage::new(Size::new(4, 4));
     for pixel in image.data.as_chunks_mut::<4>().0 {
         pixel.copy_from_slice(&color);
     }
-    mln_image::encode_png(&image)
+    let mut response = Response::new();
+    response.data = Some(Arc::new(mln_image::encode_png(&image)));
+    response
 }
 
-/// Runs the map's loop until its centre pixel is `color`. The deadline only
-/// catches a map that never gets there: a loaded machine, as under the whole
-/// suite, can take several times longer than the few seconds it takes alone.
-fn wait_for_center(test: &MapTest<OnlineFileSource>, color: [u8; 4]) {
+/// Answers every tile request that `test`'s file source holds with
+/// `response`, then runs the map until it is idle, and returns its centre
+/// pixel.
+fn answer_tiles(test: &MapTest<FakeFileSource>, response: &Response) -> [u8; 4] {
     let deadline = Instant::now() + Duration::from_secs(60);
-    loop {
-        run_within(&test.run_loop, Duration::from_millis(100));
-        let image = test.frontend().read_still_image();
-        if !image.data.is_empty() && center_pixel(&image) == color {
-            return;
-        }
-        assert!(Instant::now() < deadline, "the centre never turned {color:?}");
+    while test.file_source.respond_all(Kind::Tile, response) == 0 {
+        assert!(Instant::now() < deadline, "no open tile request");
+        run_within(&test.run_loop, Duration::from_millis(10));
     }
+    {
+        let run_loop = test.run_loop.clone();
+        test.observer.did_become_idle_callback.set(move |()| run_loop.stop());
+    }
+    run_with_timeout(&test.run_loop, 60);
+    test.observer.did_become_idle_callback.clear();
+    center_pixel(&test.frontend().read_still_image())
 }
 
 #[test]
-fn a_tile_reloads_when_its_data_expires() {
-    let server = MockServer::start();
-    let tiles = r"^/\d+/\d+/\d+\.png$";
-    let mut first = server.mock(|when, then| {
-        when.method("GET").path_matches(tiles);
-        then.status(200).header("Cache-Control", "max-age=1").body(png(GREEN));
-    });
-    let file_source = Arc::new(OnlineFileSource::new(Arc::new(NetworkStatus::new())));
-    let test = MapTest::create(TestLoop::new(), file_source, 1.0, MapMode::Continuous);
-    test.load_json(&format!(
-        r#"{{
+fn a_tile_shows_each_answer_to_its_open_request() {
+    let test = MapTest::create(TestLoop::new(), Arc::new(FakeFileSource::new()), 1.0, MapMode::Continuous);
+    test.load_json(
+        r#"{
   "version": 8,
   "center": [0, 0],
   "zoom": 0,
-  "sources": {{ "tiles": {{ "type": "raster", "tileSize": 256, "tiles": ["{}"] }} }},
-  "layers": [{{ "id": "tiles", "type": "raster", "source": "tiles", "paint": {{ "raster-fade-duration": 0 }} }}]
-}}"#,
-        server.url("/{z}/{x}/{y}.png")
-    ));
-    wait_for_center(&test, GREEN);
+  "sources": { "tiles": { "type": "raster", "tileSize": 256, "tiles": ["test://tiles/{z}/{x}/{y}.png"] } },
+  "layers": [{ "id": "tiles", "type": "raster", "source": "tiles", "paint": { "raster-fade-duration": 0 } }]
+}"#,
+    );
+    assert_eq!(GREEN, answer_tiles(&test, &png(GREEN)));
+    let requests = test.file_source.requests_len();
 
-    // The server's tiles change; the map's expire a second after they came.
-    first.delete();
-    server.mock(|when, then| {
-        when.method("GET").path_matches(tiles);
-        then.status(200).header("Cache-Control", "max-age=3600").body(png(BLUE));
-    });
-    wait_for_center(&test, BLUE);
-}
-
-/// A map on one view asks again for no tile that the server's caching
-/// headers say is fresh, whatever their order: here tile.openstreetmap.org's,
-/// whose `Expires`, after `max-age`, is in the past.
-#[test]
-fn fresh_tiles_are_not_requested_again() {
-    let server = MockServer::start();
-    let tiles = r"^/\d+/\d+/\d+\.png$";
-    let fetched = server.mock(|when, then| {
-        when.method("GET").path_matches(tiles);
-        then.status(200)
-            .header("ETag", "\"a\"")
-            .header("Cache-Control", "max-age=88823, stale-while-revalidate=604800, stale-if-error=604800")
-            .header("Expires", "Wed, 18 Nov 2026 02:37:39 GMT")
-            .header("Age", "67981")
-            .body(png(GREEN));
-    });
-    let file_source = Arc::new(OnlineFileSource::new(Arc::new(NetworkStatus::new())));
-    let test = MapTest::create(TestLoop::new(), file_source, 1.0, MapMode::Continuous);
-    test.load_json(&format!(
-        r#"{{
-  "version": 8,
-  "center": [0, 0],
-  "zoom": 0,
-  "sources": {{ "tiles": {{ "type": "raster", "tileSize": 256, "tiles": ["{}"] }} }},
-  "layers": [{{ "id": "tiles", "type": "raster", "source": "tiles", "paint": {{ "raster-fade-duration": 0 }} }}]
-}}"#,
-        server.url("/{z}/{x}/{y}.png")
-    ));
-    wait_for_center(&test, GREEN);
-    let loaded = fetched.calls();
-    // Long enough for the retries, after one second and three, of tiles taken
-    // for expired.
-    let start = Instant::now();
-    while start.elapsed() < Duration::from_millis(3500) {
-        run_within(&test.run_loop, Duration::from_millis(100));
-    }
-    assert_eq!(loaded, fetched.calls(), "no tile requested again");
+    // The file source answers the same requests again, as it does when it
+    // revalidates data that expired and the server has new data.
+    assert_eq!(BLUE, answer_tiles(&test, &png(BLUE)));
+    assert_eq!(requests, test.file_source.requests_len(), "no new request");
 }

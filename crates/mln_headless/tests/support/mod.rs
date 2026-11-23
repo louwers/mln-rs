@@ -402,6 +402,20 @@ impl FakeFileSource {
             None => false,
         }
     }
+
+    /// Answers every pending request of `kind`; returns how many there were.
+    pub(crate) fn respond_all(&self, kind: Kind, response: &Response) -> usize {
+        let responders: Vec<Responder> = self
+            .list()
+            .iter()
+            .filter(|entry| entry.resource.kind == kind)
+            .map(|entry| entry.responder.clone())
+            .collect();
+        for responder in &responders {
+            responder.send(response.clone());
+        }
+        responders.len()
+    }
 }
 
 impl Default for FakeFileSource {

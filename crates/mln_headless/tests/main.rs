@@ -48,5 +48,5 @@ mod shared_device_test;
 mod stencil_overflow_test;
 // Text that the device's fonts shape, with a font file standing in for them.
 mod system_fonts_test;
-// Tiles reloading as their data expires, over an online file source.
+// Tiles showing each answer to their open requests, as their data expires.
 mod tile_expiry_test;
