@@ -1,11 +1,11 @@
 use mln_map_types::MapMode;
+use mln_style::layer_type::SourceKind;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::pool::TaskGroup;
 
 use crate::query::SourceQueryOptions;
 use crate::tests::OneTile;
-use crate::tile::tile::TileKind;
 use crate::tile::tile_workers::InlineWorkers;
 
 struct VectorTileTest {
@@ -19,7 +19,7 @@ impl VectorTileTest {
 
     fn mvt_tile(&self) -> OneTile {
         let store = crate::tests::tile_store(&self.thread_pool, Box::new(InlineWorkers));
-        OneTile::new(store, TileKind::Geometry, OverscaledTileID::from_zxy(0, 0, 0), MapMode::Continuous)
+        OneTile::new(store, SourceKind::Geometry, OverscaledTileID::from_zxy(0, 0, 0), MapMode::Continuous)
     }
 }
 

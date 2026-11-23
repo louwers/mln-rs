@@ -297,7 +297,8 @@ impl<S: StyleLayerType> TileInput<S> for NoTiles {
 }
 
 /// The tiles of a raster source, or of an image source, which draws its
-/// image in them. A tile's data is its [`RasterTile`].
+/// image in them. A tile's data is its [`RasterTile`]. A source type of
+/// raster tiles names it as its [`Data`](crate::source::SourceType::Data).
 pub enum RasterTiles {}
 
 impl<S: StyleLayerType> TileInput<S> for RasterTiles {
@@ -338,7 +339,9 @@ impl<'a> RasterTile<'a> {
     }
 }
 
-/// The tiles of a raster-dem source. A tile's data is its [`DemTile`].
+/// The tiles of a raster-dem source. A tile's data is its [`DemTile`]. A
+/// source type of raster-dem tiles names it as its
+/// [`Data`](crate::source::SourceType::Data).
 pub enum DemTiles {}
 
 impl<S: StyleLayerType> TileInput<S> for DemTiles {

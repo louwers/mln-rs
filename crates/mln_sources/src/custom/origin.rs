@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use mln_render::source::{
-    Cover, DataOrigin, LoadContext, OriginUpdate, Replier, SourceType, Supply, TileInput, TileKind, TileNecessity,
+    Cover, DataOrigin, GeometryTiles, LoadContext, OriginUpdate, Replier, SourceType, Supply, TileNecessity,
 };
 use mln_style::Source;
 use mln_style::source_type::{SourceData, StyleSourceType};
@@ -25,14 +25,18 @@ use super::{
 use crate::geojson::TileFeatures;
 
 impl SourceType for CustomGeometrySourceType {
-    fn supply(_source: &Source) -> Supply {
-        Supply::tiles(TileKind::Geometry, CustomOrigin::<Self>::new())
+    type Data = GeometryTiles;
+
+    fn supply(_source: &Source) -> Supply<GeometryTiles> {
+        Supply::tiles(CustomOrigin::<Self>::new())
     }
 }
 
 impl SourceType for CustomVectorSourceType {
-    fn supply(_source: &Source) -> Supply {
-        Supply::tiles(TileKind::Geometry, CustomOrigin::<Self>::new())
+    type Data = GeometryTiles;
+
+    fn supply(_source: &Source) -> Supply<GeometryTiles> {
+        Supply::tiles(CustomOrigin::<Self>::new())
     }
 }
 
@@ -158,6 +162,7 @@ impl Drop for CustomTile {
 }
 
 impl<T: CustomSource> DataOrigin for CustomOrigin<T> {
+    type Data = GeometryTiles;
     type Tile = CustomTile;
     type Reply = CustomReply;
 
@@ -190,13 +195,13 @@ impl<T: CustomSource> DataOrigin for CustomOrigin<T> {
     }
 
     /// A custom tile waits until it is required.
-    fn start(&mut self, cx: &mut LoadContext<'_, '_, CustomReply>, _copy: Option<&CustomTile>) -> CustomTile {
+    fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, _copy: Option<&CustomTile>) -> CustomTile {
         CustomTile { id: *cx.id(), loader: self.loader.clone(), subscription: Subscription::Unsubscribed }
     }
 
-    fn receive(&mut self, tile: &mut CustomTile, reply: CustomReply, cx: &mut LoadContext<'_, '_, CustomReply>) {
+    fn receive(&mut self, tile: &mut CustomTile, reply: CustomReply, cx: &mut LoadContext<'_, '_, Self>) {
         match reply {
-            CustomReply::Data(data) => cx.deliver(TileInput::Geometry { data, missing: false }),
+            CustomReply::Data(data) => cx.deliver(data),
             CustomReply::Error(error) => cx.fail(error),
             CustomReply::Stale => {
                 tile.subscription = match std::mem::replace(&mut tile.subscription, Subscription::Unsubscribed) {
@@ -210,12 +215,7 @@ impl<T: CustomSource> DataOrigin for CustomOrigin<T> {
 
     /// A required tile fetches, subscribing anew if it isn't subscribed;
     /// an optional one cancels, unless it is renderable.
-    fn set_necessity(
-        &mut self,
-        tile: &mut CustomTile,
-        previous: TileNecessity,
-        cx: &mut LoadContext<'_, '_, CustomReply>,
-    ) {
+    fn set_necessity(&mut self, tile: &mut CustomTile, previous: TileNecessity, cx: &mut LoadContext<'_, '_, Self>) {
         let subscribed = matches!(tile.subscription, Subscription::Subscribed(_));
         if previous == cx.necessity() && subscribed {
             return;

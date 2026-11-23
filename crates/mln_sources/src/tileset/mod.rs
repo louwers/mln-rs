@@ -5,6 +5,7 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use mln_render::source::{DemTiles, GeometryTiles, RasterTiles};
 use mln_storage::{Data, Resource};
 use mln_style::conversion::{Convertible, Error};
 use mln_style::expression::Functions;
@@ -17,13 +18,17 @@ use mln_util::pool::Respond;
 use mln_util::tileset::{PartialTileset, Tileset, VectorEncoding};
 
 use self::conversion::{convert_tileset, optional_member};
+use self::origin::TilesetTiles;
 
 pub(crate) mod conversion;
 pub(crate) mod origin;
 
 /// Which of the tileset source types a [`TilesetSourceType`] is.
+#[expect(private_bounds, reason = "a tileset's tiles are of the kinds the tileset can deliver")]
 pub trait TilesetKind: Send + Sync + 'static {
     const INFO: SourceTypeInfo;
+    /// The kind of data the tiles are: the kind `INFO` names.
+    type Data: TilesetTiles;
 }
 
 pub struct VectorKind;
@@ -32,15 +37,18 @@ pub struct RasterDemKind;
 
 impl TilesetKind for VectorKind {
     const INFO: SourceTypeInfo = SourceTypeInfo { name: "vector", layer_kind: SourceKind::Geometry, from_json: true };
+    type Data = GeometryTiles;
 }
 
 impl TilesetKind for RasterKind {
     const INFO: SourceTypeInfo = SourceTypeInfo { name: "raster", layer_kind: SourceKind::Raster, from_json: true };
+    type Data = RasterTiles;
 }
 
 impl TilesetKind for RasterDemKind {
     const INFO: SourceTypeInfo =
         SourceTypeInfo { name: "raster-dem", layer_kind: SourceKind::RasterDem, from_json: true };
+    type Data = DemTiles;
 }
 
 /// Whether a view's tiles of the kind `K` are of the zoom level nearest the

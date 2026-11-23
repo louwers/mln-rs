@@ -1,3 +1,4 @@
+use mln_style::layer_type::SourceKind;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
@@ -10,10 +11,9 @@ use crate::tests::OneTile;
 use crate::tile::contents::Contents;
 use crate::tile::dem::DemContents;
 use crate::tile::job::JobResult;
-use crate::tile::tile::TileKind;
 use crate::tile::tile_workers::InlineWorkers;
 
-const DEM: TileKind = TileKind::Dem(RasterEncoding::Mapbox);
+const DEM: SourceKind = SourceKind::RasterDem;
 
 fn tiles(test: &RasterTileTest) -> OneTile {
     test.tiles(DEM, OverscaledTileID::from_zxy(0, 0, 0), Box::new(InlineWorkers))

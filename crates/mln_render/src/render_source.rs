@@ -7,14 +7,13 @@ use std::sync::Arc;
 
 use mln_map_types::MapDebugOptions;
 use mln_style::Source;
-use mln_style::layer_type::SourceKind;
 
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::gfx::context::Resources;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::registry::Registry;
 use crate::render_tile::RenderTile;
-use crate::source::{Supplied, Supply, TileKind};
+use crate::source::Supplied;
 use crate::sources::render_image_source::RenderImageSource;
 use crate::sources::render_tile_source::{DebugLayers, RenderTileSource};
 use crate::tile::job::SourceKey;
@@ -115,18 +114,8 @@ pub(crate) fn create(registry: &Registry, source: &Source, store: &mut TileStore
         debug_assert!(false, "the renderer's registry has no source type '{name}'");
         return None;
     };
-    let Supply(supplied) = source_type.supply(source);
-    debug_assert!(
-        matches!(
-            (&supplied, source.info().layer_kind),
-            (Supplied::Tiles { kind: TileKind::Geometry, .. }, SourceKind::Geometry)
-                | (Supplied::Tiles { kind: TileKind::Raster, .. } | Supplied::Image(_), SourceKind::Raster)
-                | (Supplied::Tiles { kind: TileKind::Dem(_), .. }, SourceKind::RasterDem)
-        ),
-        "source type '{name}' supplies data of another kind than its layers draw"
-    );
-    Some(match supplied {
-        Supplied::Tiles { kind, origin } => Box::new(RenderTileSource::new(source.clone(), kind, origin, store)),
+    Some(match source_type.supply(source) {
+        Supplied::Tiles(origin) => Box::new(RenderTileSource::new(source.clone(), origin, store)),
         Supplied::Image(image_of) => Box::new(RenderImageSource::new(source.clone(), image_of)),
     })
 }

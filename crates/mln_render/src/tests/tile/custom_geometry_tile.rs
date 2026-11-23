@@ -7,7 +7,7 @@ use std::sync::Arc;
 use feature::Feature;
 use geo_types::Point;
 use mln_style::layer::Layer;
-use mln_style::layer_type::LayerStyle;
+use mln_style::layer_type::{LayerStyle, SourceKind};
 use mln_tile_id::OverscaledTileID;
 
 use super::RasterTileTest;
@@ -18,7 +18,6 @@ use crate::tests::OneTile;
 use crate::tests::fixture_layer::Dot;
 use crate::tests::scripted_origin::Script;
 use crate::tile::contents::Contents;
-use crate::tile::tile::TileKind;
 use crate::tile::tile_workers::InlineWorkers;
 
 /// The root tile's id.
@@ -31,8 +30,13 @@ fn root() -> OverscaledTileID {
 fn invoke_tile_changed() {
     let test = RasterTileTest::new();
     let store = crate::tests::tile_store(&test.thread_pool, Box::new(InlineWorkers));
-    let mut tiles =
-        OneTile::with_script(store, TileKind::Geometry, &Script::default(), &[root()], mln_map_types::MapMode::Static);
+    let mut tiles = OneTile::with_script(
+        store,
+        SourceKind::Geometry,
+        &Script::default(),
+        &[root()],
+        mln_map_types::MapMode::Static,
+    );
 
     let layer = Layer::new(Registry::with_builtins().style(), "dot", "circle", "source").unwrap();
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =

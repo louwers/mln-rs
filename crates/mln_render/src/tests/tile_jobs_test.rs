@@ -15,6 +15,7 @@ use mln_map_types::MapMode;
 use mln_storage::FileSource;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
+use mln_style::layer_type::SourceKind;
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use mln_style_types::image::Impl as ImageImpl;
 use mln_tile::TileData;
@@ -38,7 +39,6 @@ use crate::tests::{OneTile, style, tile_store};
 use crate::tile::contents::Contents;
 use crate::tile::inbox::{Inbox, InboxSender, TileEvent};
 use crate::tile::job::{DataInput, Job, JobId, JobResult, JobTimes, LayoutJob, Reply, Run};
-use crate::tile::tile::TileKind;
 use crate::tile::tile_workers::{InlineWorkers, Lane, PoolWorkers, ReplyBody, TileWorkers};
 use crate::tile::worker_codec::{Encoded, RemoteWorkers, ReplySink, TileWorkerHost, WorkerInstances};
 
@@ -162,7 +162,7 @@ impl Test {
         }
         store.images_mut().set_loaded(true);
         let id = OverscaledTileID::new(0, 0, CanonicalTileID::new(0, 0, 0));
-        let tile = OneTile::new(store, TileKind::Geometry, id, MapMode::Static);
+        let tile = OneTile::new(store, SourceKind::Geometry, id, MapMode::Static);
         Test { thread_pool, tile, asked: Vec::new(), resource_events: Vec::new() }
     }
 
@@ -816,7 +816,7 @@ fn a_newer_generation_supersedes_the_job_in_flight() {
 
 /// A raster tile of `kind`, `x`/0 of zoom 1, and a second one at `x + 1`,
 /// whose jobs run on `workers`.
-fn raster_tiles(pool: &TaskGroup, workers: Box<dyn TileWorkers>, kind: TileKind) -> OneTile {
+fn raster_tiles(pool: &TaskGroup, workers: Box<dyn TileWorkers>, kind: SourceKind) -> OneTile {
     let store = tile_store(pool, workers);
     let mut tiles = OneTile::new(store, kind, OverscaledTileID::from_zxy(1, 0, 0), MapMode::Static);
     tiles.add(OverscaledTileID::from_zxy(1, 1, 0));
@@ -838,7 +838,7 @@ fn raster_size(tiles: &OneTile, x: u32) -> Option<Size> {
 fn raster_decodes_apply_in_any_order() {
     let pool = TaskGroup::new(&crate::tests::pool());
     let manual = Manual::default();
-    let mut tiles = raster_tiles(&pool, Box::new(manual.clone()), TileKind::Raster);
+    let mut tiles = raster_tiles(&pool, Box::new(manual.clone()), SourceKind::Raster);
     let ids = [OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0)];
     for (id, size) in ids.iter().zip([16, 32]) {
         tiles.set_image(id, Some(png(size, size)));
@@ -877,7 +877,7 @@ fn raster_decodes_apply_in_any_order() {
 fn a_worker_lost_during_a_decode() {
     let pool = TaskGroup::new(&crate::tests::pool());
     let instances = Instances::new(1);
-    let kind = TileKind::Dem(mln_util::tileset::RasterEncoding::Mapbox);
+    let kind = SourceKind::RasterDem;
     let mut tiles = raster_tiles(&pool, instances.workers(), kind);
     let id = tiles.id;
     tiles.set_image(&id, Some(png(16, 16)));

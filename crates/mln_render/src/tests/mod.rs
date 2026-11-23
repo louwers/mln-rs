@@ -75,12 +75,12 @@ impl OneTile {
     /// Tile `id` of kind `kind` in `store`, laid out for `mode`.
     pub(crate) fn new(
         mut store: crate::tile::store::TileStore,
-        kind: crate::tile::tile::TileKind,
+        kind: mln_style::layer_type::SourceKind,
         id: mln_tile_id::OverscaledTileID,
         mode: mln_map_types::MapMode,
     ) -> Self {
         let script = scripted_origin::Script::default();
-        let key = store.add_source("s".to_owned(), kind, Box::new(script.origin(kind)));
+        let key = store.add_source("s".to_owned(), script.origin(kind));
         let mut tiles = OneTile { store, key, id, script, mode };
         tiles.add(id);
         tiles
@@ -102,12 +102,12 @@ impl OneTile {
     /// them.
     pub(crate) fn with_script(
         mut store: crate::tile::store::TileStore,
-        kind: crate::tile::tile::TileKind,
+        kind: mln_style::layer_type::SourceKind,
         script: &scripted_origin::Script,
         ids: &[mln_tile_id::OverscaledTileID],
         mode: mln_map_types::MapMode,
     ) -> Self {
-        let key = store.add_source("source".to_owned(), kind, Box::new(script.origin(kind)));
+        let key = store.add_source("source".to_owned(), script.origin(kind));
         let mut tiles = OneTile { store, key, id: ids[0], script: script.clone(), mode };
         let params = tiles.params();
         crate::testing::seed(&mut tiles.store, key, ids, params);
@@ -191,26 +191,23 @@ impl OneTile {
 
     /// Gives a geometry tile `data`, as a load of its own.
     pub(crate) fn set_data(&mut self, data: Option<mln_tile::TileData>) {
-        self.with(|tile| tile.take_input(crate::tile::tile::TileInput::Geometry { data, missing: false }));
+        self.with(|tile| tile.take_data(data, false));
     }
 
-    /// Gives raster tile `id` the image `data`, as a load of its own.
+    /// Gives raster or raster-dem tile `id` the image `data`, as a load of
+    /// its own; a DEM's elevations are in the Mapbox encoding.
     pub(crate) fn set_image(&mut self, id: &mln_tile_id::OverscaledTileID, data: Option<mln_storage::Data>) {
-        self.with_at(id, |tile| tile.take_input(crate::tile::tile::TileInput::Image { data, missing: false }));
+        let dem =
+            self.store.source(self.key).expect("the source").info.kind == mln_style::layer_type::SourceKind::RasterDem;
+        let encoding = dem.then_some(mln_util::tileset::RasterEncoding::Mapbox);
+        self.with_at(id, |tile| tile.take_image(data.map(|data| (data, encoding)), false));
     }
 
     /// Gives tile `id` no data, as a load that finds the tileset has no
     /// tile there.
     pub(crate) fn set_missing(&mut self, id: &mln_tile_id::OverscaledTileID) {
-        let input = match self.store.source(self.key).expect("the source").info.kind {
-            crate::tile::tile::TileKind::Geometry => {
-                crate::tile::tile::TileInput::Geometry { data: None, missing: true }
-            }
-            crate::tile::tile::TileKind::Raster | crate::tile::tile::TileKind::Dem(_) => {
-                crate::tile::tile::TileInput::Image { data: None, missing: true }
-            }
-        };
-        self.with_at(id, |tile| tile.take_input(input));
+        #[expect(clippy::redundant_closure_for_method_calls, reason = "`with_at` takes a tile of any lifetime")]
+        self.with_at(id, |tile| tile.take_missing());
     }
 
     /// What the store reported its tiles went through since the last call.

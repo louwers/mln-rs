@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use mln_image::decoder;
-use mln_render::source::{SourceImage, SourceType, Supply};
+use mln_render::source::{RasterTiles, SourceImage, SourceType, Supply};
 use mln_storage::{Data, Resource};
 use mln_style::Edit;
 use mln_style::conversion::{Convertible, Error, convert};
@@ -125,7 +125,9 @@ pub fn image_source(id: &str, coordinates: [LatLng; 4]) -> Source {
 }
 
 impl SourceType for ImageSourceType {
-    fn supply(_source: &Source) -> Supply {
+    type Data = RasterTiles;
+
+    fn supply(_source: &Source) -> Supply<RasterTiles> {
         Supply::image(image_of)
     }
 }

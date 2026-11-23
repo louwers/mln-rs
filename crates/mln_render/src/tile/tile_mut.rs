@@ -9,10 +9,13 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use mln_storage::Data;
+use mln_tile::TileData;
 use mln_util::error::Error;
 use mln_util::hash::HashSet;
 use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_util::tileset::RasterEncoding;
 use mln_vec_map::VecSet;
 
 use crate::erased_source::ErasedOrigin;
@@ -28,7 +31,7 @@ use crate::tile::pipeline::{
 };
 use crate::tile::raster::RasterContents;
 use crate::tile::store::{SourceInfo, StoreContext};
-use crate::tile::tile::{Shown, Tile, TileInput, TileNecessity, TileOperation};
+use crate::tile::tile::{Shown, Tile, TileNecessity, TileOperation};
 use crate::tile::tile_workers::{InlineWorkers, Lane, ReplyBody};
 
 /// A tile, its source and the store, borrowed for a transition.
@@ -177,42 +180,49 @@ impl<'a> TileMut<'a> {
         self.with_origin(|origin, state, tile| origin.receive(state, reply, tile));
     }
 
-    /// Takes in what a load delivered. A raster tile without an image shows
-    /// nothing at once, renderable unless `missing`.
-    pub(crate) fn take_input(&mut self, input: TileInput) {
-        debug_assert!(
-            matches!(
-                (&input, &self.tile.pipeline),
-                (TileInput::Geometry { .. }, Pipeline::Layout(_)) | (TileInput::Image { .. }, Pipeline::Decode(_))
-            ),
-            "a tile takes input of its kind"
-        );
-        match input {
-            TileInput::Geometry { data, missing } => {
-                let key = DataKey { source: self.source.key, tile: self.tile.id.canonical, load: self.source.next() };
-                self.change_layout(|layout| layout.data = Some(LayoutData { key, data, missing }));
-            }
-            TileInput::Image { data, missing } => {
-                let Pipeline::Decode(decode) = &mut self.tile.pipeline else {
-                    return;
-                };
-                let has_image = data.is_some();
-                decode.generation = self.source.next();
-                decode.work = match std::mem::replace(&mut decode.work, DecodeWork::Current) {
-                    // A decode in flight goes on, stale, until it replies.
-                    DecodeWork::Running { job, .. } => {
-                        job.superseded.store(true, Ordering::Relaxed);
-                        DecodeWork::Running { job, image: data }
-                    }
-                    DecodeWork::Current | DecodeWork::Queued(_) => data.map_or(DecodeWork::Current, DecodeWork::Queued),
-                };
-                if !has_image {
-                    self.install((!missing).then_some(Contents::Empty));
-                }
-            }
-        }
+    /// Takes in a geometry tile's `data`, which a load delivered: `None` for
+    /// an empty tile, or, if `missing`, for one the source doesn't have.
+    pub(crate) fn take_data(&mut self, data: Option<TileData>, missing: bool) {
+        let key = DataKey { source: self.source.key, tile: self.tile.id.canonical, load: self.source.next() };
+        self.change_layout(|layout| layout.data = Some(LayoutData { key, data, missing }));
         // A request that follows, such as for the network after the cache's
         // data, comes after the parse it starts.
+        self.report();
+    }
+
+    /// Takes in a load's answer that the source has no tile here: a tile of
+    /// another zoom level draws in its place.
+    pub(crate) fn take_missing(&mut self) {
+        match self.tile.pipeline {
+            Pipeline::Layout(_) => self.take_data(None, true),
+            Pipeline::Decode(_) => self.take_image(None, true),
+        }
+    }
+
+    /// Takes in a raster or raster-dem tile's encoded image, which a load
+    /// delivered, with the encoding of a DEM's elevations. A tile without
+    /// one shows nothing at once, renderable unless `missing`.
+    pub(crate) fn take_image(&mut self, image: Option<(Data, Option<RasterEncoding>)>, missing: bool) {
+        let Pipeline::Decode(decode) = &mut self.tile.pipeline else {
+            return;
+        };
+        let has_image = image.is_some();
+        let data = image.map(|(data, dem)| {
+            decode.dem = dem;
+            data
+        });
+        decode.generation = self.source.next();
+        decode.work = match std::mem::replace(&mut decode.work, DecodeWork::Current) {
+            // A decode in flight goes on, stale, until it replies.
+            DecodeWork::Running { job, .. } => {
+                job.superseded.store(true, Ordering::Relaxed);
+                DecodeWork::Running { job, image: data }
+            }
+            DecodeWork::Current | DecodeWork::Queued(_) => data.map_or(DecodeWork::Current, DecodeWork::Queued),
+        };
+        if !has_image {
+            self.install((!missing).then_some(Contents::Empty));
+        }
         self.report();
     }
 

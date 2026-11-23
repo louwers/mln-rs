@@ -5,9 +5,7 @@
 use std::sync::Arc;
 
 use mln_map_types::MapMode;
-use mln_render::source::{
-    Cover, DataOrigin, LoadContext, OriginUpdate, Replier, SourceType, Supply, TileInput, TileKind,
-};
+use mln_render::source::{Cover, DataOrigin, GeometryTiles, LoadContext, OriginUpdate, Replier, SourceType, Supply};
 use mln_style::Source;
 use mln_style::source_type::SourceData;
 use mln_tile::TileData;
@@ -18,8 +16,10 @@ use parking_lot::Mutex;
 use super::{GeoJSONData, GeoJsonSourceType, TileFeatures};
 
 impl SourceType for GeoJsonSourceType {
-    fn supply(_source: &Source) -> Supply {
-        Supply::tiles(TileKind::Geometry, GeoJsonOrigin { data: None, synchronous: false })
+    type Data = GeometryTiles;
+
+    fn supply(_source: &Source) -> Supply<GeometryTiles> {
+        Supply::tiles(GeoJsonOrigin { data: None, synchronous: false })
     }
 }
 
@@ -40,6 +40,7 @@ fn same_data(a: Option<&Arc<dyn GeoJSONData>>, b: Option<&Arc<dyn GeoJSONData>>)
 }
 
 impl DataOrigin for GeoJsonOrigin {
+    type Data = GeometryTiles;
     /// The engine keeps which of a tile's loads is the latest.
     type Tile = ();
     type Reply = TileData;
@@ -79,27 +80,27 @@ impl DataOrigin for GeoJsonOrigin {
         })
     }
 
-    fn start(&mut self, cx: &mut LoadContext<'_, '_, TileData>, _copy: Option<&()>) {
+    fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, _copy: Option<&()>) {
         if let Some(data) = &self.data {
             load(data, self.synchronous, false, cx);
         }
     }
 
-    fn receive(&mut self, (): &mut (), data: TileData, cx: &mut LoadContext<'_, '_, TileData>) {
-        cx.deliver(TileInput::Geometry { data: Some(data), missing: false });
+    fn receive(&mut self, (): &mut (), data: TileData, cx: &mut LoadContext<'_, '_, Self>) {
+        cx.deliver(Some(data));
     }
 }
 
 /// Loads the tile's features from `data`, cut on the renderer's pool unless
 /// `synchronous`. With `relayout`, the tile first drops its data and style.
-fn load(data: &Arc<dyn GeoJSONData>, synchronous: bool, relayout: bool, cx: &mut LoadContext<'_, '_, TileData>) {
+fn load(data: &Arc<dyn GeoJSONData>, synchronous: bool, relayout: bool, cx: &mut LoadContext<'_, '_, GeoJsonOrigin>) {
     if relayout {
         cx.reset();
     }
     let replier = cx.begin_load();
     let pool = (!synchronous).then(|| cx.pool());
     if let Some(features) = get_tile(data, cx.id().canonical, replier, pool) {
-        cx.deliver(TileInput::Geometry { data: Some(features), missing: false });
+        cx.deliver(Some(features));
     }
 }
 

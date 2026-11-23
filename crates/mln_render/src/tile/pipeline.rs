@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use mln_storage::Data;
+use mln_style::layer_type::SourceKind;
 use mln_tile::TileData;
 use mln_util::tileset::RasterEncoding;
 use mln_vec_map::VecSet;
@@ -15,7 +16,6 @@ use crate::layout::tile_layout::{Dependencies, LayoutParams};
 use crate::text::glyph_store::GlyphWait;
 use crate::tile::contents::Answer;
 use crate::tile::job::{DataKey, JobId, JobResult, SourceStyle};
-use crate::tile::tile::TileKind;
 use crate::tile::tile_workers::Lane;
 
 pub(crate) enum Pipeline {
@@ -95,7 +95,8 @@ pub(crate) struct Resume {
 
 pub(crate) struct Decode {
     pub(crate) generation: u64,
-    /// The DEM's encoding; `None` for a raster image.
+    /// The encoding of the elevations in the last delivered image; `None`
+    /// for a raster image.
     pub(crate) dem: Option<RasterEncoding>,
     pub(crate) work: DecodeWork,
 }
@@ -125,18 +126,20 @@ pub(crate) fn outdated_by(result: &JobResult, then: &VecSet<String>, now: &VecSe
 }
 
 impl Pipeline {
-    pub(crate) fn new(kind: TileKind, generation: u64, params: LayoutParams) -> Self {
-        let decode = |dem| Pipeline::Decode(Decode { generation, dem, work: DecodeWork::Current });
+    /// The pipeline of a tile of a source of `kind`: a raster or raster-dem
+    /// tile decodes, any other lays out.
+    pub(crate) fn new(kind: SourceKind, generation: u64, params: LayoutParams) -> Self {
         match kind {
-            TileKind::Geometry => Pipeline::Layout(Box::new(Layout {
+            SourceKind::Raster | SourceKind::RasterDem => {
+                Pipeline::Decode(Decode { generation, dem: None, work: DecodeWork::Current })
+            }
+            SourceKind::Geometry | SourceKind::None => Pipeline::Layout(Box::new(Layout {
                 generation,
                 data: None,
                 style: None,
                 params,
                 work: LayoutWork::Outdated,
             })),
-            TileKind::Raster => decode(None),
-            TileKind::Dem(encoding) => decode(Some(encoding)),
         }
     }
 

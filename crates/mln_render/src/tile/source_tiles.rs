@@ -9,6 +9,7 @@ use std::sync::Arc;
 use mln_map_types::tile_cover::{TileCoverParameters, covering_zoom_level, globe_level_cover, tile_cover};
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, VerticalPerspectiveProjection};
 use mln_style::Source;
+use mln_style::layer_type::SourceKind;
 use mln_style::property_value::PropertyValue;
 use mln_tile_id::tile_range::TileRange;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
@@ -36,7 +37,7 @@ use crate::tile::contents::Contents;
 use crate::tile::dem;
 use crate::tile::job::SourceStyle;
 use crate::tile::store::{SourceInfo, StoreContext};
-use crate::tile::tile::{Tile, TileKind, TileLoadOrder, TileNecessity};
+use crate::tile::tile::{Tile, TileLoadOrder, TileNecessity};
 use crate::tile::tile_mut::{TileMut, WorldCopy, retire};
 use crate::tile_parameters::TileParameters;
 
@@ -525,7 +526,7 @@ impl SourceTiles {
     }
 
     fn contents_installed(&mut self, id: &OverscaledTileID) {
-        let dem = matches!(self.info.kind, TileKind::Dem(_));
+        let dem = self.info.kind == SourceKind::RasterDem;
         if !dem || !self.tile(id).is_some_and(Tile::is_renderable) {
             return;
         }
@@ -576,7 +577,7 @@ impl SourceTiles {
             // So are the tiles that went on loading in the cache.
             self.cache_release_loading(ctx, |_| false);
             self.rendered.clear();
-            if self.info.kind != TileKind::Geometry {
+            if self.info.kind != SourceKind::Geometry {
                 std::mem::swap(&mut self.masked, &mut self.masked_before);
                 self.masked.clear();
                 self.unmask_stopped();
@@ -815,7 +816,7 @@ impl SourceTiles {
             }
         }
 
-        if self.info.kind != TileKind::Geometry {
+        if self.info.kind != SourceKind::Geometry {
             let renderables: Vec<(UnwrappedTileID, bool)> =
                 self.rendered.iter().map(|(id, entry)| (*id, entry.needs_rendering)).collect();
             let masks = update_tile_masks(&renderables);

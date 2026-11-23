@@ -181,6 +181,8 @@ pub enum RegisterError {
     EvalMismatch(String),
     #[error("\"{0}\" claims a role that another registration has")]
     RoleTaken(String),
+    #[error("source type \"{0}\" supplies another kind of data than its style half names")]
+    SourceKind(String),
 }
 
 /// The expression functions that parsing resolves names against.

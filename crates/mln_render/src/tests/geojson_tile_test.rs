@@ -7,7 +7,7 @@ use feature::Feature;
 use geo_types::Point;
 use mln_map_types::MapMode;
 use mln_style::layer::Layer;
-use mln_style::layer_type::LayerStyle;
+use mln_style::layer_type::{LayerStyle, SourceKind};
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
@@ -19,7 +19,6 @@ use crate::erased_layer::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::tests::fixture_layer::Dot;
 use crate::tests::scripted_origin::Script;
 use crate::tests::{OneTile, style};
-use crate::tile::tile::{TileInput, TileKind};
 use crate::tile::tile_workers::TileWorkers;
 
 struct GeoJSONTileTest {
@@ -36,11 +35,11 @@ impl GeoJSONTileTest {
     /// updates; the tiles get their features before their style.
     fn tiles(&self, ids: &[OverscaledTileID], workers: Box<dyn TileWorkers>, synchronous: bool) -> OneTile {
         let store = crate::tests::tile_store(&self.thread_pool, workers);
-        let mut tiles = OneTile::with_script(store, TileKind::Geometry, &Script::default(), ids, MapMode::Continuous);
+        let mut tiles = OneTile::with_script(store, SourceKind::Geometry, &Script::default(), ids, MapMode::Continuous);
         let key = tiles.key;
         tiles.store.source_mut(key).expect("the source").0.info.synchronous = synchronous;
         for id in ids {
-            tiles.with_at(id, |tile| tile.take_input(point_features()));
+            tiles.with_at(id, |tile| tile.take_data(Some(point_features()), false));
         }
         tiles
     }
@@ -57,9 +56,9 @@ impl Drop for GeoJSONTileTest {
 }
 
 /// A point's features, as a load delivers them.
-fn point_features() -> TileInput {
+fn point_features() -> TileData {
     let features = vec![Feature { geometry: Some(Point::new(0i16, 0).into()), ..Feature::default() }];
-    TileInput::Geometry { data: Some(TileData::Features(Arc::new(features))), missing: false }
+    TileData::Features(Arc::new(features))
 }
 
 fn dot_layer_properties() -> Arc<dyn ErasedEvaluatedLayer> {
@@ -91,7 +90,7 @@ fn issue_7648() {
     tiles.settle(&[root()]);
     assert!(tiles.changes() >= 1);
 
-    tiles.with(|tile| tile.take_input(point_features()));
+    tiles.with(|tile| tile.take_data(Some(point_features()), false));
     // Once present, the bucket should never "disappear", which would cause
     // flickering.
     while !tiles.tile().is_complete() {
@@ -160,7 +159,7 @@ fn update_through_the_codec() {
         assert!(tiles.with_at(id, |tile| tile.parts().1.layer_properties_updated(&layer_properties)));
     }
 
-    tiles.with_at(&ids[0], |tile| tile.take_input(point_features()));
+    tiles.with_at(&ids[0], |tile| tile.take_data(Some(point_features()), false));
     assert!(!tiles.tile_at(&ids[0]).is_complete());
     tiles.settle(&ids[..1]);
     assert!(tiles.tile_at(&ids[0]).is_renderable());

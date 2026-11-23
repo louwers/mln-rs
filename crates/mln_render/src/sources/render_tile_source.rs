@@ -32,7 +32,6 @@ use crate::shaders::ubo::TileDebugPropsUBO;
 use crate::tile::job::SourceKey;
 use crate::tile::source_tiles::{CoverUpdate, SourceTiles};
 use crate::tile::store::TileStore;
-use crate::tile::tile::TileKind;
 use crate::tile_matrix::TileProjection;
 use crate::tile_parameters::TileParameters;
 
@@ -214,15 +213,10 @@ pub(crate) struct RenderTileSource {
 }
 
 impl RenderTileSource {
-    /// The render source of `style_source`, whose tiles of `kind` go in `store`
-    /// and get their data through `origin`.
-    pub(crate) fn new(
-        style_source: Source,
-        kind: TileKind,
-        origin: Box<dyn ErasedOrigin>,
-        store: &mut TileStore,
-    ) -> Self {
-        let key = store.add_source(style_source.id().to_owned(), kind, origin);
+    /// The render source of `style_source`, whose tiles go in `store` and
+    /// get their data through `origin`.
+    pub(crate) fn new(style_source: Source, origin: Box<dyn ErasedOrigin>, store: &mut TileStore) -> Self {
+        let key = store.add_source(style_source.id().to_owned(), origin);
         RenderTileSource {
             id: Rc::from(style_source.id()),
             base: RenderSourceBase::new(style_source),

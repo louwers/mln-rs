@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use mln_map_types::MapMode;
 use mln_render::source::{
-    Cover, DataOrigin, LoadContext, OriginUpdate, SourceType, Supply, TileInput, TileKind, TileNecessity,
-    TileOperation, TileTimes,
+    Cover, DataOrigin, DemTiles, GeometryTiles, LoadContext, OriginUpdate, RasterTiles, SourceType, Supply, TileKind,
+    TileNecessity, TileOperation, TileTimes,
 };
 use mln_storage::response::Reason;
 use mln_storage::{Data, FileSource, LoadingMethod, Request, Resource, Response, StoragePolicy};
@@ -28,14 +28,47 @@ use mln_util::tileset::{RasterEncoding, Scheme, Tileset, VectorEncoding};
 use super::{TilesetKind, TilesetSourceType, round_zoom};
 
 impl<K: TilesetKind> SourceType for TilesetSourceType<K> {
-    fn supply(_source: &Source) -> Supply {
-        let kind = match K::INFO.layer_kind {
-            SourceKind::Raster => TileKind::Raster,
-            // The tileset decides the encoding once it loads.
-            SourceKind::RasterDem => TileKind::Dem(RasterEncoding::Mapbox),
-            SourceKind::Geometry | SourceKind::None => TileKind::Geometry,
-        };
-        Supply::tiles(kind, TilesetOrigin::<K>::new(None))
+    type Data = K::Data;
+
+    fn supply(_source: &Source) -> Supply<K::Data> {
+        Supply::tiles(TilesetOrigin::<K>::new(None))
+    }
+}
+
+/// The kinds of tiles a tileset's are, and what a tile's data delivers of
+/// each.
+pub(crate) trait TilesetTiles: TileKind {
+    /// Tile `id`'s item of `data`, which a response brought: `network`, if
+    /// it came from the network.
+    fn item(tiles: &mut TilesetData, id: &OverscaledTileID, data: Data, network: Option<&Response>) -> Self::Item;
+
+    /// Tile `id`'s item cut from an ancestor that another tile's load
+    /// brought fresh from the network, with what that load knew of it: only
+    /// vector tiles are cut.
+    fn cut_in_memory(_tiles: &mut TilesetData, _id: &OverscaledTileID) -> Option<(Self::Item, Fetched)> {
+        None
+    }
+}
+
+impl TilesetTiles for GeometryTiles {
+    fn item(tiles: &mut TilesetData, id: &OverscaledTileID, data: Data, network: Option<&Response>) -> TileData {
+        tiles.decode(id, data, network.map(Fetched::of))
+    }
+
+    fn cut_in_memory(tiles: &mut TilesetData, id: &OverscaledTileID) -> Option<(TileData, Fetched)> {
+        tiles.cut_in_memory(id, mln_util::chrono::now())
+    }
+}
+
+impl TilesetTiles for RasterTiles {
+    fn item(_tiles: &mut TilesetData, _id: &OverscaledTileID, data: Data, _network: Option<&Response>) -> Data {
+        data
+    }
+}
+
+impl TilesetTiles for DemTiles {
+    fn item(tiles: &mut TilesetData, _: &OverscaledTileID, data: Data, _: Option<&Response>) -> (Data, RasterEncoding) {
+        (data, tiles.tileset.raster_encoding.unwrap_or(RasterEncoding::Mapbox))
     }
 }
 
@@ -96,7 +129,7 @@ impl NetworkParams {
 }
 
 /// What a tileset source's tiles load from.
-struct TilesetData {
+pub(crate) struct TilesetData {
     tileset: Tileset,
     encoding: VectorTileEncoding,
     file_source: Option<Arc<dyn FileSource>>,
@@ -123,7 +156,7 @@ impl<K: TilesetKind> TilesetOrigin<K> {
     /// Starts a new tile's loading, whose first request only looks in the
     /// cache, even for a required tile, so that it can go on if the tile
     /// becomes optional.
-    fn start_loading(&mut self, tile: &mut TilesetTile, cx: &mut LoadContext<'_, '_, Response>) {
+    fn start_loading(&mut self, tile: &mut TilesetTile, cx: &mut LoadContext<'_, '_, Self>) {
         match self.data.as_ref().map(|data| data.file_source.as_ref()) {
             Some(None) => fail(tile, Error::native("Can't load tile."), cx),
             Some(Some(file_source)) if file_source.supports_cache_only() => self.request(tile, Method::Cache, cx),
@@ -133,7 +166,7 @@ impl<K: TilesetKind> TilesetOrigin<K> {
 
     /// Requests the tile's data with `method`, unless it can be cut from an
     /// ancestor in memory.
-    fn request(&mut self, tile: &mut TilesetTile, method: Method, cx: &mut LoadContext<'_, '_, Response>) {
+    fn request(&mut self, tile: &mut TilesetTile, method: Method, cx: &mut LoadContext<'_, '_, Self>) {
         if self.take_cut_in_memory(tile, cx) {
             return;
         }
@@ -160,11 +193,11 @@ impl<K: TilesetKind> TilesetOrigin<K> {
     /// A tile cut from an ancestor that another tile's load brought fresh
     /// from the network takes its data from that, as that load's answer,
     /// instead of loading the ancestor again.
-    fn take_cut_in_memory(&mut self, tile: &mut TilesetTile, cx: &mut LoadContext<'_, '_, Response>) -> bool {
+    fn take_cut_in_memory(&mut self, tile: &mut TilesetTile, cx: &mut LoadContext<'_, '_, Self>) -> bool {
         let Some(data) = &mut self.data else {
             return false;
         };
-        let Some((tile_data, fetched)) = data.cut_in_memory(cx.id(), mln_util::chrono::now()) else {
+        let Some((item, fetched)) = K::Data::cut_in_memory(data, cx.id()) else {
             return false;
         };
         let resource = &mut tile.resource;
@@ -172,7 +205,7 @@ impl<K: TilesetKind> TilesetOrigin<K> {
             (fetched.modified, fetched.expires, fetched.etag);
         tile.from_network = true;
         cx.set_times(TileTimes { modified: fetched.modified, expires: fetched.expires });
-        cx.deliver(TileInput::Geometry { data: Some(tile_data), missing: false });
+        cx.deliver(Some(item));
         true
     }
 
@@ -182,7 +215,7 @@ impl<K: TilesetKind> TilesetOrigin<K> {
         tile: &mut TilesetTile,
         method: Method,
         res: &Response,
-        cx: &mut LoadContext<'_, '_, Response>,
+        cx: &mut LoadContext<'_, '_, Self>,
     ) {
         if let Some(error) = &res.error
             && error.reason != Reason::NotFound
@@ -207,13 +240,13 @@ impl<K: TilesetKind> TilesetOrigin<K> {
         if res.not_modified {
             cx.keep_data();
         } else if let Some(data) = &mut self.data {
-            let input = data.input(is_vector::<K>(), cx.id(), res, from_network);
-            cx.deliver(input);
+            data.deliver::<K>(cx, res, from_network);
         }
     }
 }
 
 impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
+    type Data = K::Data;
     type Tile = TilesetTile;
     type Reply = Response;
 
@@ -243,7 +276,6 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
         } else {
             VectorTileEncoding::Mvt
         };
-        update.set_dem_encoding(tileset.raster_encoding.unwrap_or(RasterEncoding::Mapbox));
         let file_source = update.file_source().cloned();
         let current = self.data.as_ref().is_some_and(|current| {
             current.tileset == tileset
@@ -277,7 +309,7 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
 
     /// A tile that starts from its copy in another world copy takes the
     /// copy's validators with its contents, as a cache's answer.
-    fn start(&mut self, cx: &mut LoadContext<'_, '_, Response>, copy: Option<&TilesetTile>) -> TilesetTile {
+    fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, copy: Option<&TilesetTile>) -> TilesetTile {
         // The source makes no tiles while it has no data, nor of a tileset
         // without tiles: such a tile can't load.
         let (url, canonical, scheme) = match &self.data {
@@ -299,7 +331,7 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
 
     /// Applies the response to the tile's request: a cache-only request's
     /// is followed by a network one while the tile is required.
-    fn receive(&mut self, tile: &mut TilesetTile, res: Response, cx: &mut LoadContext<'_, '_, Response>) {
+    fn receive(&mut self, tile: &mut TilesetTile, res: Response, cx: &mut LoadContext<'_, '_, Self>) {
         let method = match tile.fetch {
             Fetch::Cache { .. } => Method::Cache,
             Fetch::Network { .. } => Method::Network,
@@ -336,12 +368,7 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
     /// tile's network request made with other parameters than the source's
     /// is made again: the cover sets each tile's necessity as each update
     /// first retains it, so the request restarts then.
-    fn set_necessity(
-        &mut self,
-        tile: &mut TilesetTile,
-        previous: TileNecessity,
-        cx: &mut LoadContext<'_, '_, Response>,
-    ) {
+    fn set_necessity(&mut self, tile: &mut TilesetTile, previous: TileNecessity, cx: &mut LoadContext<'_, '_, Self>) {
         let required = cx.necessity() == TileNecessity::Required;
         if required && matches!(tile.fetch, Fetch::Network { params, .. } if params != self.params) {
             tile.stop();
@@ -361,7 +388,7 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
     }
 
     /// Requests a tile whose last response was an error again.
-    fn retry(&mut self, tile: &mut TilesetTile, cx: &mut LoadContext<'_, '_, Response>) {
+    fn retry(&mut self, tile: &mut TilesetTile, cx: &mut LoadContext<'_, '_, Self>) {
         if matches!(tile.fetch, Fetch::Failed) {
             tile.fetch = Fetch::Idle;
             self.request(tile, Method::Network, cx);
@@ -370,14 +397,14 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
 
     /// The tile's data failed to lay out or decode: it isn't fresh, so the
     /// tile loads it again when required again.
-    fn failed(&mut self, tile: &mut TilesetTile, _cx: &mut LoadContext<'_, '_, Response>) {
+    fn failed(&mut self, tile: &mut TilesetTile, _cx: &mut LoadContext<'_, '_, Self>) {
         tile.from_network = false;
     }
 }
 
 /// Fails the tile with `error`. Its data isn't fresh: the tile loads it
 /// again when required again.
-fn fail(tile: &mut TilesetTile, error: Error, cx: &mut LoadContext<'_, '_, Response>) {
+fn fail<O: DataOrigin>(tile: &mut TilesetTile, error: Error, cx: &mut LoadContext<'_, '_, O>) {
     tile.from_network = false;
     cx.fail(error);
 }
@@ -392,22 +419,25 @@ fn same_file_source(a: Option<&Arc<dyn FileSource>>, b: Option<&Arc<dyn FileSour
 }
 
 impl TilesetData {
-    /// What response `res` to a tileset tile's request delivers, from the
-    /// network or only the cache. A 404, unlike an empty response (204, or
-    /// no tile in an archive), says the tileset has no tile here: a vector
-    /// tile is then empty, as in GL JS, and a raster tile missing. A sparse
-    /// tileset's empty tiles are missing.
-    fn input(&mut self, vector: bool, id: &OverscaledTileID, res: &Response, network: bool) -> TileInput {
+    /// Delivers what response `res` to a request for a tile of the kind
+    /// `K` brought, from the network or only the cache. A 404, unlike an
+    /// empty response (204, or no tile in an archive), says the tileset has
+    /// no tile here: a vector tile is then empty, as in GL JS, and a raster
+    /// tile missing. A sparse tileset's empty tiles are missing.
+    fn deliver<K: TilesetKind>(
+        &mut self,
+        cx: &mut LoadContext<'_, '_, TilesetOrigin<K>>,
+        res: &Response,
+        network: bool,
+    ) {
         let not_found = res.tile_not_found || res.error.as_ref().is_some_and(|e| e.reason == Reason::NotFound);
         let empty = res.no_content || not_found;
-        let missing = empty && (self.tileset.sparse || (not_found && !vector));
-        let data = if empty { None } else { res.data.clone() };
-        if vector {
-            let fetched = network.then(|| Fetched::of(res));
-            TileInput::Geometry { data: data.map(|data| self.decode(id, data, fetched)), missing }
-        } else {
-            TileInput::Image { data, missing }
+        if empty && (self.tileset.sparse || (not_found && !is_vector::<K>())) {
+            cx.missing();
+            return;
         }
+        let data = if empty { None } else { res.data.clone() };
+        cx.deliver(data.map(|data| K::Data::item(self, cx.id(), data, network.then_some(res))));
     }
 
     /// Tile `id`'s data, from `data`: of its ancestor if it is cut from one,
@@ -434,7 +464,7 @@ impl TilesetData {
 
 /// What a load from the network knew of the data it brought.
 #[derive(Clone, Debug)]
-struct Fetched {
+pub(crate) struct Fetched {
     modified: Option<Timestamp>,
     expires: Option<Timestamp>,
     etag: Option<String>,

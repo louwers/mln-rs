@@ -12,6 +12,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_storage::FileSource;
+use mln_style::layer_type::SourceKind;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
@@ -35,7 +36,7 @@ use crate::tile::job::{SourceKey, TileKey};
 use crate::tile::loading::Load;
 use crate::tile::pipeline::{Pipeline, Resume, Waiting};
 use crate::tile::source_tiles::{Slot, SourceTiles};
-use crate::tile::tile::{Tile, TileKind, TileLoadOrder, TileOperation};
+use crate::tile::tile::{Tile, TileLoadOrder, TileOperation};
 use crate::tile::tile_workers::{Jobs, TileWorkers};
 
 #[derive(Debug)]
@@ -137,7 +138,8 @@ impl StoreContext {
 pub(crate) struct SourceInfo {
     pub(crate) key: SourceKey,
     pub(crate) id: String,
-    pub(crate) kind: TileKind,
+    /// The kind of data the origin delivers.
+    pub(crate) kind: SourceKind,
     /// Where the tiles get their data: out of the source only while it runs
     /// one of its hooks.
     pub(crate) origin: Option<Box<dyn ErasedOrigin>>,
@@ -150,11 +152,11 @@ pub(crate) struct SourceInfo {
 }
 
 impl SourceInfo {
-    pub(crate) fn new(key: SourceKey, id: String, kind: TileKind, origin: Box<dyn ErasedOrigin>) -> Self {
+    pub(crate) fn new(key: SourceKey, id: String, origin: Box<dyn ErasedOrigin>) -> Self {
         SourceInfo {
             key,
             id,
-            kind,
+            kind: origin.kind(),
             origin: Some(origin),
             counter: 0,
             synchronous: false,
@@ -270,12 +272,12 @@ impl TileStore {
         }
     }
 
-    /// Adds a source after the others in the style's order, whose tiles of
-    /// `kind` get their data from `origin`.
-    pub(crate) fn add_source(&mut self, id: String, kind: TileKind, origin: Box<dyn ErasedOrigin>) -> SourceKey {
+    /// Adds a source after the others in the style's order, whose tiles get
+    /// their data from `origin`.
+    pub(crate) fn add_source(&mut self, id: String, origin: Box<dyn ErasedOrigin>) -> SourceKey {
         self.next_source += 1;
         let key = SourceKey(self.next_source);
-        let mut source = SourceTiles::new(SourceInfo::new(key, id, kind, origin));
+        let mut source = SourceTiles::new(SourceInfo::new(key, id, origin));
         source.set_cache_enabled(self.cache_enabled);
         self.sources.insert(key, source);
         self.order.push(key);

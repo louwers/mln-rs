@@ -26,18 +26,27 @@ use mln_util::range::Range;
 use mln_util::tileset::RasterEncoding;
 use parking_lot::Mutex;
 
+use crate::erased_source::ErasedOrigin;
 use crate::source::{
-    Cover, DataOrigin, LoadContext, OriginUpdate, Replier, SourceType, Supply, TileInput, TileKind, TileNecessity,
-    TileOperation,
+    Cover, DataOrigin, DemTiles, GeometryTiles, LoadContext, OriginUpdate, RasterTiles, Replier, SourceType, Supply,
+    TileKind, TileNecessity, TileOperation,
 };
 
 /// The kind of a scripted source's tiles, whose cover picks a view's tiles
 /// as the tileset source type of the same kind does.
 pub(crate) trait Kind: Send + Sync + 'static {
     const INFO: SourceTypeInfo;
-    const TILES: TileKind;
+    type Data: TileKind;
     const ROUND_ZOOM: bool;
     const OVERSCALE: bool;
+
+    /// What [`Reply::Bytes`] delivers.
+    fn bytes(bytes: Data) -> <Self::Data as TileKind>::Item;
+
+    /// What [`Reply::Tile`] delivers: nothing but to a geometry tile.
+    fn tile(_data: TileData) -> Option<<Self::Data as TileKind>::Item> {
+        None
+    }
 }
 
 pub(crate) struct Geometry;
@@ -50,23 +59,39 @@ const fn info(name: &'static str, layer_kind: SourceKind) -> SourceTypeInfo {
 
 impl Kind for Geometry {
     const INFO: SourceTypeInfo = info("scripted", SourceKind::Geometry);
-    const TILES: TileKind = TileKind::Geometry;
+    type Data = GeometryTiles;
     const ROUND_ZOOM: bool = false;
     const OVERSCALE: bool = true;
+
+    fn bytes(bytes: Data) -> TileData {
+        TileData::Mvt(mln_tile::MvtTile::new(bytes))
+    }
+
+    fn tile(data: TileData) -> Option<TileData> {
+        Some(data)
+    }
 }
 
 impl Kind for Raster {
     const INFO: SourceTypeInfo = info("scripted-raster", SourceKind::Raster);
-    const TILES: TileKind = TileKind::Raster;
+    type Data = RasterTiles;
     const ROUND_ZOOM: bool = true;
     const OVERSCALE: bool = false;
+
+    fn bytes(bytes: Data) -> Data {
+        bytes
+    }
 }
 
 impl Kind for Dem {
     const INFO: SourceTypeInfo = info("scripted-dem", SourceKind::RasterDem);
-    const TILES: TileKind = TileKind::Dem(RasterEncoding::Mapbox);
+    type Data = DemTiles;
     const ROUND_ZOOM: bool = true;
     const OVERSCALE: bool = true;
+
+    fn bytes(bytes: Data) -> (Data, RasterEncoding) {
+        (bytes, RasterEncoding::Mapbox)
+    }
 }
 
 /// A scripted source type of tiles of the kind `K`.
@@ -88,15 +113,14 @@ impl<K: Kind> StyleSourceType for Scripted<K> {
 }
 
 impl<K: Kind> SourceType for Scripted<K> {
-    fn supply(source: &Source) -> Supply {
+    type Data = K::Data;
+
+    fn supply(source: &Source) -> Supply<K::Data> {
         let options = SourceData::<Self>::recover(source).map(|data| &data.options);
-        let origin = ScriptedOrigin {
-            script: options.map(|options| options.script.clone()).unwrap_or_default(),
-            tiles: K::TILES,
-            cover: options.map(|options| options.cover),
-            source: source.id().to_owned(),
-        };
-        Supply::tiles(K::TILES, origin)
+        let script = options.map(|options| options.script.clone()).unwrap_or_default();
+        let mut origin = ScriptedOrigin::<K>::new(script, source.id().to_owned());
+        origin.cover = options.map(|options| options.cover);
+        Supply::tiles(origin)
     }
 }
 
@@ -172,10 +196,15 @@ struct ScriptState {
 }
 
 impl Script {
-    /// An origin of tiles of `tiles` that follow the script and cover
-    /// nothing, for tiles that a test makes itself.
-    pub(crate) fn origin(&self, tiles: TileKind) -> ScriptedOrigin {
-        ScriptedOrigin { script: self.clone(), tiles, cover: None, source: String::new() }
+    /// An origin of tiles of a source of `kind` that follow the script and
+    /// cover nothing, for tiles that a test makes itself.
+    pub(crate) fn origin(&self, kind: SourceKind) -> Box<dyn ErasedOrigin> {
+        let script = self.clone();
+        match kind {
+            SourceKind::Raster => Box::new(ScriptedOrigin::<Raster>::new(script, String::new())),
+            SourceKind::RasterDem => Box::new(ScriptedOrigin::<Dem>::new(script, String::new())),
+            SourceKind::Geometry | SourceKind::None => Box::new(ScriptedOrigin::<Geometry>::new(script, String::new())),
+        }
     }
 
     /// Has the origins do what `retry` says as the engine retries a failed
@@ -242,12 +271,12 @@ impl ScriptedLoad {
     }
 }
 
-/// The origin of a scripted source's tiles.
-pub(crate) struct ScriptedOrigin {
+/// The origin of a scripted source's tiles of the kind `K`.
+pub(crate) struct ScriptedOrigin<K> {
     script: Script,
-    tiles: TileKind,
     cover: Option<Cover>,
     source: String,
+    kind: PhantomData<fn() -> K>,
 }
 
 /// A scripted tile's state.
@@ -285,9 +314,13 @@ impl Drop for ScriptedTile {
     }
 }
 
-impl ScriptedOrigin {
+impl<K: Kind> ScriptedOrigin<K> {
+    fn new(script: Script, source: String) -> Self {
+        ScriptedOrigin { script, cover: None, source, kind: PhantomData }
+    }
+
     /// Begins a load of `tile`, which the test answers.
-    fn begin(&self, tile: &mut ScriptedTile, cx: &mut LoadContext<'_, '_, Reply>) {
+    fn begin(&self, tile: &mut ScriptedTile, cx: &mut LoadContext<'_, '_, Self>) {
         tile.stop();
         tile.closed = false;
         cx.report(TileOperation::RequestedFromNetwork);
@@ -300,7 +333,8 @@ impl ScriptedOrigin {
     }
 }
 
-impl DataOrigin for ScriptedOrigin {
+impl<K: Kind> DataOrigin for ScriptedOrigin<K> {
+    type Data = K::Data;
     type Tile = ScriptedTile;
     type Reply = Reply;
 
@@ -312,7 +346,7 @@ impl DataOrigin for ScriptedOrigin {
 
     /// A tile takes its copy, unless the script refuses copies, or waits
     /// until it is required.
-    fn start(&mut self, cx: &mut LoadContext<'_, '_, Reply>, copy: Option<&ScriptedTile>) -> ScriptedTile {
+    fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, copy: Option<&ScriptedTile>) -> ScriptedTile {
         let id = *cx.id();
         self.script.record(Call::Start(id));
         let refuses = self.script.0.lock().refuses_copies;
@@ -324,13 +358,13 @@ impl DataOrigin for ScriptedOrigin {
     }
 
     /// A reply after its load stopped goes nowhere.
-    fn receive(&mut self, tile: &mut ScriptedTile, reply: Reply, cx: &mut LoadContext<'_, '_, Reply>) {
+    fn receive(&mut self, tile: &mut ScriptedTile, reply: Reply, cx: &mut LoadContext<'_, '_, Self>) {
         if tile.closed {
             return;
         }
         self.script.record(Call::Receive(tile.id));
-        let geometry = self.tiles == TileKind::Geometry;
-        let (data, image, missing) = match reply {
+        // `None` for a missing tile.
+        let item = match reply {
             Reply::Fail(message) => {
                 tile.answered = false;
                 tile.stop();
@@ -338,22 +372,20 @@ impl DataOrigin for ScriptedOrigin {
                 cx.fail(Error::native(message));
                 return;
             }
-            Reply::Bytes(bytes) if geometry => (Some(TileData::Mvt(mln_tile::MvtTile::new(bytes))), None, false),
-            Reply::Bytes(image) => (None, Some(image), false),
-            Reply::Tile(data) => (Some(data), None, false),
-            Reply::Empty => (None, None, false),
-            Reply::Missing => (None, None, true),
+            Reply::Bytes(bytes) => Some(Some(K::bytes(bytes))),
+            Reply::Tile(data) => Some(K::tile(data)),
+            Reply::Empty => Some(None),
+            Reply::Missing => None,
         };
         tile.answered = true;
         cx.report(TileOperation::LoadFromNetwork);
-        cx.deliver(if geometry {
-            TileInput::Geometry { data, missing }
-        } else {
-            TileInput::Image { data: image, missing }
-        });
+        match item {
+            Some(item) => cx.deliver(item),
+            None => cx.missing(),
+        }
     }
 
-    fn set_necessity(&mut self, tile: &mut ScriptedTile, previous: TileNecessity, cx: &mut LoadContext<'_, '_, Reply>) {
+    fn set_necessity(&mut self, tile: &mut ScriptedTile, previous: TileNecessity, cx: &mut LoadContext<'_, '_, Self>) {
         self.script.record(Call::SetNecessity(tile.id, cx.necessity()));
         if previous == cx.necessity() {
             return;
@@ -370,7 +402,7 @@ impl DataOrigin for ScriptedOrigin {
         }
     }
 
-    fn retry(&mut self, tile: &mut ScriptedTile, cx: &mut LoadContext<'_, '_, Reply>) {
+    fn retry(&mut self, tile: &mut ScriptedTile, cx: &mut LoadContext<'_, '_, Self>) {
         self.script.record(Call::Retry(tile.id));
         if !tile.needs_load() {
             return;
@@ -381,16 +413,12 @@ impl DataOrigin for ScriptedOrigin {
             Retry::Nothing => {}
             Retry::Deliver => {
                 tile.answered = true;
-                cx.deliver(if self.tiles == TileKind::Geometry {
-                    TileInput::Geometry { data: None, missing: false }
-                } else {
-                    TileInput::Image { data: None, missing: false }
-                });
+                cx.deliver(None);
             }
         }
     }
 
-    fn failed(&mut self, tile: &mut ScriptedTile, _cx: &mut LoadContext<'_, '_, Reply>) {
+    fn failed(&mut self, tile: &mut ScriptedTile, _cx: &mut LoadContext<'_, '_, Self>) {
         self.script.record(Call::Failed(tile.id));
     }
 }

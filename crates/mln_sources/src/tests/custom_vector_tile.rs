@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_map_types::MapMode;
-use mln_render::source::{TileKind, TileNecessity};
+use mln_render::source::TileNecessity;
 use mln_render::testing::OriginTiles;
 use mln_style::layer::Layer;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
@@ -50,7 +50,7 @@ fn recorder() -> (Arc<Mutex<Vec<CanonicalTileID>>>, TileFunction) {
 /// Tiles `ids` of a custom vector source whose provider is `loader`.
 fn tiles(test: &TileTest, ids: &[OverscaledTileID], loader: Arc<CustomVectorProvider>) -> OriginTiles {
     let origin = CustomOrigin::<CustomVectorSourceType>::with_loader(loader);
-    OriginTiles::new(&test.thread_pool, TileKind::Geometry, origin, ids, MapMode::Static)
+    OriginTiles::new(&test.thread_pool, origin, ids, MapMode::Static)
 }
 
 /// A subscriber that ignores what the loader sends it.

@@ -4,8 +4,7 @@
 use std::sync::Arc;
 
 use mln_map_types::MapMode;
-use mln_storage::Data;
-use mln_tile::TileData;
+use mln_style::layer_type::SourceKind;
 use mln_tile_id::OverscaledTileID;
 use mln_util::logging::{Event, Log};
 
@@ -82,25 +81,6 @@ pub enum TileOperation {
     Cancelled,
     /// No operation has taken place
     NullOp,
-}
-
-/// The kinds of tiles: the engine lays out a geometry tile's features into
-/// its layers' buckets, and decodes a raster tile's image and a raster-dem
-/// tile's elevations, in the encoding it names.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum TileKind {
-    Geometry,
-    Raster,
-    Dem(mln_util::tileset::RasterEncoding),
-}
-
-/// What a load delivers: a geometry tile's data or a raster or raster-dem
-/// tile's encoded image. `data` is `None` for a tile without any (204, no
-/// tile in an archive); `missing`, the source has no tile here, so a tile of
-/// another zoom level draws in its place.
-pub enum TileInput {
-    Geometry { data: Option<TileData>, missing: bool },
-    Image { data: Option<Data>, missing: bool },
 }
 
 pub(crate) struct Shown {
@@ -206,11 +186,12 @@ impl Tile {
         self.shown.as_mut().is_some_and(|shown| shown.contents.layer_properties_updated(layer_properties))
     }
 
-    pub(crate) fn dump_debug_logs(&self, kind: TileKind) {
+    pub(crate) fn dump_debug_logs(&self, kind: SourceKind) {
         let kind = match kind {
-            TileKind::Geometry => "Geometry",
-            TileKind::Raster => "Raster",
-            TileKind::Dem(_) => "RasterDEM",
+            SourceKind::None => "None",
+            SourceKind::Geometry => "Geometry",
+            SourceKind::Raster => "Raster",
+            SourceKind::RasterDem => "RasterDEM",
         };
         let yes = |value: bool| if value { "yes" } else { "no" };
         Log::info(Event::General, format!("Tile::Kind: {kind}"));

@@ -14,11 +14,11 @@ mod tile_coordinate;
 use std::sync::Arc;
 
 use mln_map_types::MapMode;
+use mln_style::layer_type::SourceKind;
 use mln_tile_id::OverscaledTileID;
 use mln_util::pool::{Pool, TaskGroup};
 
 use crate::tests::OneTile;
-use crate::tile::tile::TileKind;
 use crate::tile::tile_workers::TileWorkers;
 
 /// The fixture shared by `RasterTileTest` and `RasterDEMTileTest`
@@ -37,20 +37,20 @@ impl RasterTileTest {
     }
 
     /// Tile `id` of `kind`, whose jobs run on `workers`.
-    pub(crate) fn tiles(&self, kind: TileKind, id: OverscaledTileID, workers: Box<dyn TileWorkers>) -> OneTile {
+    pub(crate) fn tiles(&self, kind: SourceKind, id: OverscaledTileID, workers: Box<dyn TileWorkers>) -> OneTile {
         let store = crate::tests::tile_store(&self.thread_pool, workers);
         OneTile::new(store, kind, id, MapMode::Static)
     }
 
     /// Tile 0/0/0 of `kind`, whose jobs run on the thread pool.
-    pub(crate) fn pool_tiles(&self, kind: TileKind) -> OneTile {
+    pub(crate) fn pool_tiles(&self, kind: SourceKind) -> OneTile {
         let store = crate::tests::pool_store(&self.thread_pool);
         OneTile::new(store, kind, OverscaledTileID::from_zxy(0, 0, 0), MapMode::Static)
     }
 
     /// Tiles 1/0/0 and 1/1/0 of `kind`, whose jobs run in `count` worker
     /// instances on threads, reached only through the worker codec.
-    pub(crate) fn remote_tiles(&self, kind: TileKind, count: usize) -> OneTile {
+    pub(crate) fn remote_tiles(&self, kind: SourceKind, count: usize) -> OneTile {
         let workers = Box::new(remote_workers(count));
         let mut tiles = self.tiles(kind, OverscaledTileID::from_zxy(1, 0, 0), workers);
         tiles.add(OverscaledTileID::from_zxy(1, 1, 0));

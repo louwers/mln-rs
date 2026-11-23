@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_map_types::MapMode;
-use mln_render::source::{TileKind, TileNecessity, TileOperation};
+use mln_render::source::{TileNecessity, TileOperation};
 use mln_render::testing::{Event, OriginTiles};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
@@ -50,7 +50,7 @@ fn recorder() -> (Arc<Mutex<Vec<CanonicalTileID>>>, TileFunction) {
 /// Tiles `ids` of a custom geometry source whose provider is `loader`.
 fn tiles(test: &TileTest, ids: &[OverscaledTileID], loader: Arc<CustomGeometryProvider>) -> OriginTiles {
     let origin = CustomOrigin::<CustomGeometrySourceType>::with_loader(loader);
-    OriginTiles::new(&test.thread_pool, TileKind::Geometry, origin, ids, MapMode::Static)
+    OriginTiles::new(&test.thread_pool, origin, ids, MapMode::Static)
 }
 
 /// The root tile's id.

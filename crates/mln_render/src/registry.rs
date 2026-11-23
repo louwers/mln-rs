@@ -110,9 +110,15 @@ impl RegistryBuilder {
         self.style_keys.add(key)
     }
 
-    /// Adds the source type `T`. Fails for a name that an earlier type took.
+    /// Adds the source type `T`, both its halves. Fails for a name that an
+    /// earlier type took, and for a type whose
+    /// [`Data`](SourceType::Data) is of another kind than its style half's
+    /// [`layer_kind`](mln_style::source_type::SourceTypeInfo::layer_kind).
     pub fn add_source_type<T: SourceType>(&mut self) -> Result<(), RegisterError> {
         let name = T::INFO.name;
+        if T::INFO.layer_kind != <T::Data as crate::source::kind::Deliver>::KIND {
+            return Err(RegisterError::SourceKind(name.to_owned()));
+        }
         if self.source_types.contains_key(name) {
             return Err(RegisterError::Duplicate(name.to_owned()));
         }
@@ -238,10 +244,10 @@ impl mln_wire::Context for &Registry {
 
 #[cfg(test)]
 mod tests {
-    use mln_style::LayerTypeInfo;
     use mln_style::conversion::Error;
     use mln_style::layer_type::{NoProperties, SourceKind};
     use mln_style::property_table::{PropertyInfo, PropertyTable};
+    use mln_style::{LayerTypeInfo, Source};
 
     use super::*;
     use crate::draw::Draws;

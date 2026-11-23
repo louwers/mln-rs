@@ -24,7 +24,7 @@ use crate::image_store::ImageStore;
 use crate::layout::tile_layout::LayoutParams;
 use crate::query::SourceQueryOptions;
 use crate::render_source::RenderSource;
-use crate::source::{DataOrigin, TileKind, TileNecessity, TileOperation};
+use crate::source::{DataOrigin, TileNecessity, TileOperation};
 use crate::text::font_face_engine::default_engine;
 use crate::text::glyph_store::GlyphStore;
 use crate::tile::job::{SourceKey, SourceStyle};
@@ -119,18 +119,12 @@ pub struct OriginTiles {
 }
 
 impl OriginTiles {
-    /// Tiles `ids` of a source of `kind` whose data comes from `origin`, in
-    /// a store that frees on `pool`, laid out for `mode`. The origin starts
-    /// them as a cover starts them.
-    pub fn new(
-        pool: &TaskGroup,
-        kind: TileKind,
-        origin: impl DataOrigin,
-        ids: &[OverscaledTileID],
-        mode: MapMode,
-    ) -> Self {
+    /// Tiles `ids` of a source whose data comes from `origin`, in a store
+    /// that frees on `pool`, laid out for `mode`. The origin starts them as
+    /// a cover starts them.
+    pub fn new(pool: &TaskGroup, origin: impl DataOrigin, ids: &[OverscaledTileID], mode: MapMode) -> Self {
         let mut store = tile_store(pool, Box::new(InlineWorkers));
-        let key = store.add_source("source".to_owned(), kind, Box::new(origin));
+        let key = store.add_source("source".to_owned(), Box::new(origin));
         let params = LayoutParams {
             mode,
             pixel_ratio: 1.0,

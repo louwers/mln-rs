@@ -6,10 +6,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mln_map_types::{MapMode, TransformState};
-use mln_render::source::{TileKind, TileNecessity, TileOperation};
+use mln_render::source::{TileNecessity, TileOperation};
 use mln_render::testing::{Event, OneSource, OriginTiles, View};
 use mln_storage::response::Reason;
 use mln_storage::{FileSource, Resource, ResourceError, Responder, Response, StoragePolicy};
+use mln_style::layer_type::SourceKind;
 use mln_style::source_type::SourceCommon;
 use mln_style::{Layer, Source};
 use mln_tile_id::OverscaledTileID;
@@ -92,8 +93,7 @@ fn a_cut_tile_takes_a_fresh_ancestor_from_memory() {
         let tileset = Tileset { tiles: vec!["tiles".to_owned()], zoom_range: Range::new(0, 0), ..Default::default() };
         let origin = TilesetOrigin::<VectorKind>::loaded(tileset, VectorTileEncoding::Mvt, Some(file_source_dyn));
         let (left, right) = (OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0));
-        let mut tiles =
-            OriginTiles::new(&test.thread_pool, TileKind::Geometry, origin, &[left, right], MapMode::Static);
+        let mut tiles = OriginTiles::new(&test.thread_pool, origin, &[left, right], MapMode::Static);
         let mut layer = Layer::new(registry.style(), "circle", "water", "source").unwrap();
         layer.set_source_layer("water");
         tiles.set_layers(&registry, &[layer]).unwrap();
@@ -116,12 +116,12 @@ fn a_cut_tile_takes_a_fresh_ancestor_from_memory() {
 /// Tile 0/0/0 of a tileset source of kind `K`, whose tiles (of `tileset`)
 /// load through a new [`Held`], and that file source. A geometry tile lays
 /// out a circle layer of the "water" source layer.
-fn held_tile<K: TilesetKind>(test: &TileTest, kind: TileKind, tileset: Tileset) -> (OriginTiles, Arc<Held>) {
+fn held_tile<K: TilesetKind>(test: &TileTest, tileset: Tileset) -> (OriginTiles, Arc<Held>) {
     let file_source = Arc::new(Held::default());
     let file_source_dyn: Arc<dyn FileSource> = Arc::<Held>::clone(&file_source);
     let origin = TilesetOrigin::<K>::loaded(tileset, VectorTileEncoding::Mvt, Some(file_source_dyn));
-    let mut tiles = OriginTiles::new(&test.thread_pool, kind, origin, &[tile()], MapMode::Continuous);
-    if kind == TileKind::Geometry {
+    let mut tiles = OriginTiles::new(&test.thread_pool, origin, &[tile()], MapMode::Continuous);
+    if K::INFO.layer_kind == SourceKind::Geometry {
         let registry = registry();
         let mut layer = Layer::new(registry.style(), "circle", "water", "source").unwrap();
         layer.set_source_layer("water");
@@ -168,17 +168,17 @@ fn empty_and_missing_tiles_by_kind() {
     let test = TileTest::new();
     let sparse = Tileset { sparse: true, ..tiles_tileset() };
     let cases = [
-        (TileKind::Geometry, no_content(), tiles_tileset(), true),
-        (TileKind::Geometry, not_found(), tiles_tileset(), true),
-        (TileKind::Geometry, no_content(), sparse.clone(), false),
-        (TileKind::Raster, no_content(), tiles_tileset(), true),
-        (TileKind::Raster, not_found(), tiles_tileset(), false),
-        (TileKind::Raster, no_content(), sparse, false),
+        (SourceKind::Geometry, no_content(), tiles_tileset(), true),
+        (SourceKind::Geometry, not_found(), tiles_tileset(), true),
+        (SourceKind::Geometry, no_content(), sparse.clone(), false),
+        (SourceKind::Raster, no_content(), tiles_tileset(), true),
+        (SourceKind::Raster, not_found(), tiles_tileset(), false),
+        (SourceKind::Raster, no_content(), sparse, false),
     ];
     for (i, (kind, response, tileset, renderable)) in cases.into_iter().enumerate() {
         let (mut tiles, file_source) = match kind {
-            TileKind::Geometry => held_tile::<VectorKind>(&test, kind, tileset),
-            _ => held_tile::<RasterKind>(&test, kind, tileset),
+            SourceKind::Geometry => held_tile::<VectorKind>(&test, tileset),
+            _ => held_tile::<RasterKind>(&test, tileset),
         };
         tiles.set_necessity(&tile(), TileNecessity::Required);
         answer(&mut tiles, &file_source, response);
@@ -218,7 +218,7 @@ fn actions(tiles: &mut OriginTiles) -> Vec<TileOperation> {
 #[test]
 fn a_failed_load_is_requested_again_on_retry() {
     let test = TileTest::new();
-    let (mut tiles, file_source) = held_tile::<VectorKind>(&test, TileKind::Geometry, tiles_tileset());
+    let (mut tiles, file_source) = held_tile::<VectorKind>(&test, tiles_tileset());
     tiles.set_necessity(&tile(), TileNecessity::Required);
     answer(&mut tiles, &file_source, failed("failed"));
     assert_eq!(errors(&mut tiles), ["failed"]);
@@ -241,7 +241,7 @@ fn a_tile_required_again_reloads_only_stale_data() {
     let mut later = water();
     later.expires = Some(Timestamp::from_secs(i64::MAX));
     for (response, reloads) in [(water(), false), (later, false), (expired(water()), true)] {
-        let (mut tiles, file_source) = held_tile::<VectorKind>(&test, TileKind::Geometry, tiles_tileset());
+        let (mut tiles, file_source) = held_tile::<VectorKind>(&test, tiles_tileset());
         tiles.set_necessity(&tile(), TileNecessity::Required);
         answer(&mut tiles, &file_source, response);
         assert!(tiles.is_complete(&tile()));
@@ -269,7 +269,7 @@ fn a_not_modified_reload_keeps_the_data() {
     use TileOperation::{EndParse, LoadFromNetwork, RequestedFromNetwork};
 
     let test = TileTest::new();
-    let (mut tiles, file_source) = held_tile::<VectorKind>(&test, TileKind::Geometry, tiles_tileset());
+    let (mut tiles, file_source) = held_tile::<VectorKind>(&test, tiles_tileset());
     tiles.set_necessity(&tile(), TileNecessity::Required);
     answer(&mut tiles, &file_source, expired(water()));
     assert!(tiles.is_complete(&tile()));
@@ -303,7 +303,7 @@ fn a_not_modified_reload_keeps_the_data() {
 #[test]
 fn a_tile_whose_data_fails_to_lay_out_is_requested_again() {
     let test = TileTest::new();
-    let (mut tiles, file_source) = held_tile::<VectorKind>(&test, TileKind::Geometry, tiles_tileset());
+    let (mut tiles, file_source) = held_tile::<VectorKind>(&test, tiles_tileset());
     tiles.set_necessity(&tile(), TileNecessity::Required);
     let mut response = Response::new();
     response.data = Some(Arc::new(b"not a tile".to_vec()));
@@ -320,7 +320,7 @@ fn a_tile_whose_data_fails_to_lay_out_is_requested_again() {
 #[test]
 fn a_request_takes_the_tiles_order() {
     let test = TileTest::new();
-    let (mut tiles, file_source) = held_tile::<VectorKind>(&test, TileKind::Geometry, tiles_tileset());
+    let (mut tiles, file_source) = held_tile::<VectorKind>(&test, tiles_tileset());
     tiles.set_necessity(&tile(), TileNecessity::Required);
     assert!(file_source.resource().order.get() > 0);
 }
@@ -331,7 +331,7 @@ fn a_request_takes_the_tiles_order() {
 #[test]
 fn a_response_to_a_stopped_request_changes_nothing() {
     let test = TileTest::new();
-    let (mut tiles, file_source) = held_tile::<VectorKind>(&test, TileKind::Geometry, tiles_tileset());
+    let (mut tiles, file_source) = held_tile::<VectorKind>(&test, tiles_tileset());
     tiles.set_necessity(&tile(), TileNecessity::Required);
     // The response waits for the store's next update.
     file_source.respond(water());

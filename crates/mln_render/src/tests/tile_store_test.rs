@@ -10,10 +10,10 @@ use feature::{Feature, PropertyMap};
 use geo_types::{Geometry, Point};
 use mln_map_types::MapMode;
 use mln_storage::Data;
+use mln_style::layer_type::SourceKind;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_util::pool::TaskGroup;
-use mln_util::tileset::RasterEncoding;
 use serde_json::json;
 
 use super::tile_jobs_test::{Manual, icons, layer, points};
@@ -27,7 +27,7 @@ use crate::tile::dem::DemContents;
 use crate::tile::inbox::TileEvent;
 use crate::tile::job::{DataInput, Job, Run, TileKey};
 use crate::tile::pipeline::LayoutWork;
-use crate::tile::tile::{TileKind, TileNecessity, TileOperation};
+use crate::tile::tile::{TileNecessity, TileOperation};
 use crate::tile::tile_workers::{InlineWorkers, TileWorkers};
 
 /// The bytes of a vector tile with a "water" layer.
@@ -68,13 +68,13 @@ impl Test {
     fn scripted_tile(&self, workers: Box<dyn TileWorkers>) -> OneTile {
         let store = tile_store(&self.pool, workers);
         let id = OverscaledTileID::from_zxy(0, 0, 0);
-        OneTile::with_script(store, TileKind::Geometry, &Script::default(), &[id], MapMode::Static)
+        OneTile::with_script(store, SourceKind::Geometry, &Script::default(), &[id], MapMode::Static)
     }
 
     /// Tile 0/0/0 of a source of its own, whose jobs run on `workers`.
     fn tile(&self, workers: Box<dyn TileWorkers>) -> OneTile {
         let store = tile_store(&self.pool, workers);
-        OneTile::new(store, TileKind::Geometry, OverscaledTileID::from_zxy(0, 0, 0), MapMode::Static)
+        OneTile::new(store, SourceKind::Geometry, OverscaledTileID::from_zxy(0, 0, 0), MapMode::Static)
     }
 }
 
@@ -315,8 +315,7 @@ fn style_replaced_mid_load() {
     assert!(load.is_stopped(), "the old tile's load goes with it");
     assert!(tile.script.take_calls().contains(&Call::Dropped(id)));
     let script = Script::default();
-    let new_key =
-        tile.store.add_source("source".to_owned(), TileKind::Geometry, Box::new(script.origin(TileKind::Geometry)));
+    let new_key = tile.store.add_source("source".to_owned(), script.origin(SourceKind::Geometry));
     assert_ne!(new_key, old_key, "keys aren't reused");
     crate::testing::seed(&mut tile.store, new_key, &[id], params);
     tile.key = new_key;
@@ -348,7 +347,7 @@ fn dem_backfill_as_dems_arrive() {
     let test = Test::new();
     let store = tile_store(&test.pool, Box::new(InlineWorkers));
     let (left, right) = (OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0));
-    let mut tiles = OneTile::new(store, TileKind::Dem(RasterEncoding::Mapbox), right, MapMode::Static);
+    let mut tiles = OneTile::new(store, SourceKind::RasterDem, right, MapMode::Static);
     tiles.add(left);
     // Each update starts the decode, whose reply the next takes in.
     tiles.set_image(&right, Some(png(16, 16)));
@@ -364,7 +363,7 @@ fn dem_backfill_as_dems_arrive() {
     // The world's one tile at zoom 0 is in the first and the last row.
     let store = tile_store(&test.pool, Box::new(InlineWorkers));
     let root = OverscaledTileID::from_zxy(0, 0, 0);
-    let mut root_tile = OneTile::new(store, TileKind::Dem(RasterEncoding::Mapbox), root, MapMode::Static);
+    let mut root_tile = OneTile::new(store, SourceKind::RasterDem, root, MapMode::Static);
     root_tile.set_image(&root, Some(png(16, 16)));
     root_tile.update();
     root_tile.update();
@@ -397,7 +396,7 @@ fn a_reloaded_dem_refills_both_borders() {
     let test = Test::new();
     let store = tile_store(&test.pool, Box::new(InlineWorkers));
     let (left, right) = (OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0));
-    let mut tiles = OneTile::new(store, TileKind::Dem(RasterEncoding::Mapbox), right, MapMode::Static);
+    let mut tiles = OneTile::new(store, SourceKind::RasterDem, right, MapMode::Static);
     tiles.add(left);
     for id in [left, right] {
         tiles.set_image(&id, Some(dem_png(1)));
@@ -426,7 +425,7 @@ fn dem_borders_across_the_antimeridian_at_zoom_1() {
     let store = tile_store(&test.pool, Box::new(InlineWorkers));
     let west = OverscaledTileID::with_zxy(1, -1, 1, 1, 0);
     let east = OverscaledTileID::from_zxy(1, 0, 0);
-    let mut tiles = OneTile::new(store, TileKind::Dem(RasterEncoding::Mapbox), east, MapMode::Static);
+    let mut tiles = OneTile::new(store, SourceKind::RasterDem, east, MapMode::Static);
     tiles.add(west);
     for (id, seed) in [(west, 1), (east, 2)] {
         tiles.set_image(&id, Some(dem_png(seed)));
@@ -534,7 +533,7 @@ fn a_retried_load_starts_parsing_again() {
 #[test]
 fn a_layout_failure_reaches_the_origin() {
     let test = Test::new();
-    for kind in [TileKind::Geometry, TileKind::Raster] {
+    for kind in [SourceKind::Geometry, SourceKind::Raster] {
         let store = tile_store(&test.pool, Box::new(InlineWorkers));
         let id = OverscaledTileID::from_zxy(0, 0, 0);
         let mut tile = OneTile::with_script(store, kind, &Script::default(), &[id], MapMode::Static);
@@ -593,7 +592,7 @@ fn a_reply_to_an_older_load_is_dropped() {
 fn failed_tile(test: &Test, script: &Script, workers: Box<dyn TileWorkers>) -> OneTile {
     let store = tile_store(&test.pool, workers);
     let id = OverscaledTileID::from_zxy(0, 0, 0);
-    let mut tile = OneTile::with_script(store, TileKind::Geometry, script, &[id], MapMode::Static);
+    let mut tile = OneTile::with_script(store, SourceKind::Geometry, script, &[id], MapMode::Static);
     tile.set_style(&style(&[water_layer("water", "red")]));
     tile.set_necessity(&id, TileNecessity::Required);
     tile.script.answer(|_| Reply::Fail("offline".to_owned()));
@@ -657,7 +656,7 @@ fn a_world_copy_takes_its_copy() {
     let script = Script::default();
     let store = tile_store(&test.pool, Box::new(InlineWorkers));
     let loaded = OverscaledTileID::from_zxy(0, 0, 0);
-    let mut tiles = OneTile::with_script(store, TileKind::Geometry, &script, &[loaded], MapMode::Static);
+    let mut tiles = OneTile::with_script(store, SourceKind::Geometry, &script, &[loaded], MapMode::Static);
     let red = style(&[water_layer("water", "red")]);
     tiles.set_style(&red);
     tiles.set_necessity(&loaded, TileNecessity::Required);
