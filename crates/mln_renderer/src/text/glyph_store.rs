@@ -24,6 +24,8 @@
 // (the browser's). Local glyphs come first for CJK when
 // `LocalGlyphs::ideographs` is set, and otherwise draw what the PBF lacks.
 // Either way the glyph keeps its PBF glyph ID, so the layout doesn't change.
+// A glyph drawn because a source before it failed stands in until a failed
+// range of its stack loads; the next resolve then draws it again.
 //
 // Font faces: the style's "font-faces" are fetched as font files
 // (`Resource::font_face`), or read from the bytes a face holds (an app's
@@ -118,6 +120,10 @@ struct Entry {
     glyphs: BTreeMap<GlyphID, Arc<Glyph>>,
     /// The PBF glyph IDs that no local font has, of the faces that loaded.
     no_local: BTreeSet<GlyphID>,
+    /// The local glyphs in `glyphs` drawn because a source before theirs
+    /// failed. They go once a failed range of the stack loads, so that the
+    /// next resolve draws them from the first source again.
+    stand_ins: BTreeSet<GlyphID>,
     /// The device fonts of the characters asked about.
     device: HashMap<Vec<char>, DeviceFont>,
 }
@@ -371,8 +377,7 @@ impl GlyphStore {
                         Source::Needs(get_glyph_range(*glyph_id))
                     };
                     match source {
-                        Source::Has => {}
-                        Source::Lacks { failed: ranges } => {
+                        Source::Has { failed: ranges } | Source::Lacks { failed: ranges } => {
                             failed.extend(ranges.into_iter().map(|range| (font_stack.clone(), range)));
                         }
                         Source::Needs(range) => needed.push((font_stack, range)),
@@ -465,6 +470,17 @@ impl GlyphStore {
             };
             match source {
                 Source::Lacks { failed: lacked } => failed.extend(lacked),
+                Source::Has { failed: lacked } => {
+                    failed.extend(lacked);
+                    if !pbf && let Some(entry) = self.entries.get_mut(font_stack) {
+                        if failed.is_empty() {
+                            entry.stand_ins.remove(&glyph_id);
+                        } else {
+                            entry.stand_ins.insert(glyph_id);
+                        }
+                    }
+                    return Source::Has { failed };
+                }
                 source => return source,
             }
         }
@@ -484,7 +500,9 @@ impl GlyphStore {
         }
         let range = get_glyph_range(glyph_id);
         match self.entries.get(font_stack).and_then(|entry| entry.ranges.get(&range)) {
-            Some(RangeState::Loaded(Some(glyphs))) if glyphs.contains_key(&glyph_id) => Source::Has,
+            Some(RangeState::Loaded(Some(glyphs))) if glyphs.contains_key(&glyph_id) => {
+                Source::Has { failed: Vec::new() }
+            }
             Some(RangeState::Loaded(_)) => Source::Lacks { failed: Vec::new() },
             Some(RangeState::Failed { at }) if *at > since => Source::Lacks { failed: vec![range] },
             _ => Source::Needs(range),
@@ -496,8 +514,10 @@ impl GlyphStore {
     /// font chosen for it, then the rasterizer.
     fn local_source(&mut self, font_stack: &FontStack, glyph_id: GlyphID, since: u64) -> Source {
         if let Some(entry) = self.entries.get(font_stack) {
-            if entry.glyphs.contains_key(&glyph_id) {
-                return Source::Has;
+            // A stand-in's sources are looked at again, so that a failed
+            // face is requested again.
+            if entry.glyphs.contains_key(&glyph_id) && !entry.stand_ins.contains(&glyph_id) {
+                return Source::Has { failed: Vec::new() };
             }
             if entry.no_local.contains(&glyph_id) {
                 return Source::Lacks { failed: Vec::new() };
@@ -538,6 +558,10 @@ impl GlyphStore {
                 DeviceFont::Chosen(None) => {}
             }
         }
+        if glyph.is_none() && self.entries.get(font_stack).is_some_and(|entry| entry.glyphs.contains_key(&glyph_id)) {
+            // The stand-in the rasterizer drew.
+            return Source::Has { failed };
+        }
         let glyph = glyph.or_else(|| {
             let rasterizer = self.local.rasterizer.as_ref()?;
             rasterizer.rasterize_glyph(font_stack, glyph_id).map(to_sdf)
@@ -545,7 +569,7 @@ impl GlyphStore {
         let entry = self.entries.entry(font_stack.clone()).or_default();
         if let Some(glyph) = glyph {
             entry.glyphs.insert(glyph_id, Arc::new(Glyph { id: glyph_id, ..glyph }));
-            Source::Has
+            Source::Has { failed }
         } else {
             // A face that failed may have the glyph: a later wait requests
             // its file again.
@@ -818,6 +842,11 @@ impl GlyphStore {
         } else {
             if self.has_failed(font_stack, range) {
                 self.recovered.insert((font_stack.clone(), range));
+                if let Some(entry) = self.entries.get_mut(font_stack) {
+                    for glyph_id in std::mem::take(&mut entry.stand_ins) {
+                        entry.glyphs.remove(&glyph_id);
+                    }
+                }
             }
             self.set_range(font_stack, range, RangeState::Loaded(range_glyphs));
             self.events.push(RendererEvent::GlyphsLoaded { font_stack: font_stack.clone(), range });
@@ -967,8 +996,9 @@ fn to_sdf(mut glyph: Glyph) -> Glyph {
 
 /// What a source of a PBF glyph has of it.
 enum Source {
-    /// The glyph, now in the store.
-    Has,
+    /// The glyph, now in the store: `failed` holds the ranges of the
+    /// sources before it that failed during the wait.
+    Has { failed: Vec<GlyphRange> },
     /// Not the glyph: `failed` holds the ranges that would have had it
     /// and failed during the wait.
     Lacks { failed: Vec<GlyphRange> },

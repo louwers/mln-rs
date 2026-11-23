@@ -522,6 +522,21 @@ fn fails_first_then_glyphs() -> impl Fn(&Resource) -> Option<Response> + Send + 
     }
 }
 
+/// A file source response that fails on the first request and serves
+/// `data` after that.
+fn fails_first_then(data: &'static [u8]) -> impl Fn(&Resource) -> Option<Response> + Send + Sync {
+    let loads = AtomicU32::new(0);
+    move |_: &Resource| {
+        let mut response = Response::new();
+        if loads.fetch_add(1, Ordering::SeqCst) == 0 {
+            response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "Failed by the test case")));
+        } else {
+            response.data = Some(Arc::new(data.to_vec()));
+        }
+        Some(response)
+    }
+}
+
 fn count_requests(test: &GlyphStoreTest) -> Arc<AtomicU32> {
     let requests = Arc::new(AtomicU32::new(0));
     let r = Arc::clone(&requests);
@@ -1624,6 +1639,64 @@ fn a_fallback_face_that_failed_to_load_is_requested_again() {
     let glyphs = test.run_until_answered(dependencies(&['中']));
     assert!(glyphs[&font_stack_hash(&test_stack())][&gid('中')].is_some(), "the face's glyph");
     assert_eq!(requests.load(Ordering::SeqCst), 2);
+    assert_eq!(test.glyph_store().take_recovered(), VecSet::from([range]));
+}
+
+/// Local fonts with every glyph, drawn wider than any other source's, so
+/// that a test tells them apart.
+struct WideLocalGlyphRasterizer;
+
+impl LocalGlyphRasterizer for WideLocalGlyphRasterizer {
+    fn rasterize_glyph(&self, _font_stack: &FontStack, glyph_id: GlyphID) -> Option<Glyph> {
+        let glyph = stub_glyph(glyph_id);
+        Some(Glyph { metrics: GlyphMetrics { advance: 99, ..glyph.metrics }, ..glyph })
+    }
+}
+
+/// The advance of `c`'s glyph in `glyphs`, which has it.
+fn advance(glyphs: &GlyphMap, c: char) -> u32 {
+    glyphs[&font_stack_hash(&test_stack())][&gid(c)].as_ref().expect("the glyph").metrics.advance
+}
+
+/// The rasterizer stands in for a fallback face whose file failed to load,
+/// until a later wait loads the file and draws the face's glyph.
+#[test]
+fn a_rasterized_glyph_stands_in_for_a_face_that_failed_to_load() {
+    let local = LocalGlyphs { ideographs: true, chooser: None, rasterizer: Some(Arc::new(WideLocalGlyphRasterizer)) };
+    let test =
+        GlyphStoreTest::with_all(local, ResponseType::Synchronous, Arc::default(), Arc::new(LetterEngine::default()));
+    let _log = SquelchLog::new();
+    test.file_source.set_response(Kind::Glyphs, fails_first_then(b"font"));
+    let face = FontFace { type_: FONT_FACE, ..FontFace::new("", "app://face.ttf", vec![(0x4E2D, 0x4E2D)]) };
+    test.glyph_store().set_font_faces(Some(Arc::new(vec![face])));
+    test.glyph_store().set_url("");
+    let range = (test_stack(), get_glyph_range(GlyphID::with_type(0, FONT_FACE)));
+
+    let glyphs = test.run_until_answered(dependencies(&['中']));
+    assert_eq!(advance(&glyphs, '中'), 99, "the rasterizer's glyph");
+    assert_eq!(*test.requestor.failed.borrow(), VecSet::from([range.clone()]), "the answer names the face");
+
+    let glyphs = test.run_until_answered(dependencies(&['中']));
+    assert_ne!(advance(&glyphs, '中'), 99, "the face's glyph");
+    assert_eq!(test.glyph_store().take_recovered(), VecSet::from([range]));
+}
+
+/// A local glyph stands in for a glyph PBF that failed to load, until a
+/// later wait loads the PBF and draws its glyph.
+#[test]
+fn a_local_glyph_stands_in_for_a_range_that_failed_to_load() {
+    let test = GlyphStoreTest::with(local(WideLocalGlyphRasterizer), ResponseType::Synchronous);
+    let _log = SquelchLog::new();
+    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs());
+    test.glyph_store().set_url("test/fixtures/resources/glyphs.pbf");
+    let range = (test_stack(), GlyphRange::new(0, 255, GlyphIDType::FontPBF));
+
+    let glyphs = test.run_until_answered(dependencies(&['a']));
+    assert_eq!(advance(&glyphs, 'a'), 99, "the rasterizer's glyph");
+    assert_eq!(*test.requestor.failed.borrow(), VecSet::from([range.clone()]), "the answer names the range");
+
+    let glyphs = test.run_until_answered(dependencies(&['a']));
+    assert_ne!(advance(&glyphs, 'a'), 99, "the PBF's glyph");
     assert_eq!(test.glyph_store().take_recovered(), VecSet::from([range]));
 }
 
