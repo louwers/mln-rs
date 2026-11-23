@@ -176,8 +176,8 @@ fn a_draw_lets_go_of_a_replaced_buffer_of_default_values() {
     use mln_gfx::cull_face_mode::CullFaceMode;
     use mln_gfx::draw_mode::DrawMode;
 
-    use crate::draw_objects::{DrawGeometry, DrawObjects};
-    use crate::gfx::vertex_attribute::VertexAttributeArray;
+    use crate::draw_objects::{DrawGeometry, DrawObjects, Textures};
+    use crate::gfx::vertex_attribute::{Uniforms, VertexAttributeArray};
 
     with_context(|gpu, context| {
         let indexes = context.add_buffer(vec![0u16, 1, 2]);
@@ -195,12 +195,12 @@ fn a_draw_lets_go_of_a_replaced_buffer_of_default_values() {
             let (color, cull) = (ColorMode::unblended(), CullFaceMode::disabled());
             DrawObjects::new(
                 &programs::CLIPPING_MASK,
-                Default::default(),
+                Uniforms::default(),
                 None,
                 color,
                 cull,
                 geometry,
-                Default::default(),
+                Textures::default(),
             )
         };
         let (mut small, mut large) = (draw_of(4), draw_of(64));
