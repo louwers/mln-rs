@@ -1,13 +1,15 @@
 //! The background layer type's style half: its properties.
 
 use mln_layers::Background;
-use mln_rs::builtin_registry;
 use mln_style::PropertyValue;
 use mln_style::conversion::Convertible;
 use mln_style::expression::Image;
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
 use mln_util::Color;
+
+mod support;
+use support::builtin_registry;
 
 // gtest: Layer.BackgroundProperties
 #[test]

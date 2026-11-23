@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use mln_layers::{Circle, Fill, Line, Raster};
-use mln_rs::builtin_registry;
 use mln_style::conversion::Convertible;
 use mln_style::expression::Image;
 use mln_style::layer::Layer;
@@ -12,6 +11,9 @@ use mln_style::layer_type::{LayerStyle, StyleLayerType};
 use mln_style::property_value::PropertyValue;
 use mln_style_types::{LineCapType, LineJoinType, TranslateAnchorType};
 use mln_util::Color;
+
+mod support;
+use support::builtin_registry;
 
 /// A layer of the built-in type `type_`.
 fn new_layer(type_: &str, id: &str, source: &str) -> Layer {

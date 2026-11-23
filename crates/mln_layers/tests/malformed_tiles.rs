@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use mln_render::bench::TileLayout;
-use mln_rs::builtin_registry;
 use mln_style::{Edit, Style};
 use mln_style_types::image::Impl as ImageImpl;
 use mln_tile::{MvtTile, TileData};
@@ -13,6 +12,9 @@ use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use proptest::prelude::*;
 use serde_json::json;
+
+mod support;
+use support::builtin_registry;
 
 /// The layout of the z0 tile `tile` by `layers`, layers of the source
 /// `source` and the source layer `l`, with the icon `v`.

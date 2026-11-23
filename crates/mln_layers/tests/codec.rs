@@ -7,13 +7,15 @@ use std::sync::Arc;
 use feature::{Feature, Identifier, PropertyMap, Value};
 use geo_types::{Geometry, LineString, Point, Polygon};
 use mln_render::bench::{Codec, TileLayout};
-use mln_rs::builtin_registry;
 use mln_style::layer_type::SourceKind;
 use mln_style::{Edit, Style};
 use mln_style_types::image::Impl as ImageImpl;
 use mln_tile::TileData;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
+
+mod support;
+use support::builtin_registry;
 
 /// A layer of each geometry layer type of this crate, with data-driven,
 /// zoom-dependent and pattern values, over source `s`.

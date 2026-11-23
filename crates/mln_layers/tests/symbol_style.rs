@@ -4,12 +4,14 @@
 use std::path::PathBuf;
 
 use feature::Value;
-use mln_rs::builtin_registry;
 use mln_style::Style;
 use mln_style::conversion::{Convertible, Error, convert_layer, value_to_json};
 use mln_style::layer::{FontStack, Layer};
 use mln_style::parser::Parser;
 use mln_vec_map::VecSet;
+
+mod support;
+use support::builtin_registry;
 
 fn parse_json(json: &str) -> serde_json::Value {
     serde_json::from_str(json).unwrap()
