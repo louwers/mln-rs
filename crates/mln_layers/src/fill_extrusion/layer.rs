@@ -9,13 +9,13 @@ use mln_render::draw::{
 };
 use mln_render::layer::{
     EvaluateCx, EvaluatedLayer, EvaluatedLight, Evaluation, Features, Frame, FrameTile, HitTest, Layer, LayerBucket,
-    LayerValues, NewCx, PaintVertices, PrepareCx, TileCx, TileTransform, UpdateCx,
+    LayerValues, NewCx, PrepareCx, TileCx, TileTransform, UpdateCx,
 };
 use mln_style_types::{LayerBlendType, LightAnchorType};
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::intersection_tests::polygon_intersects_multi_polygon;
 
-use super::bucket::{FillExtrusionBinders, FillExtrusionBucket, WALL_CORNERS};
+use super::bucket::{FillExtrusionBucket, WALL_CORNERS};
 use super::layout::FillExtrusionLayout;
 use super::programs::{
     FILL_EXTRUSION, FILL_EXTRUSION_INSTANCED, FILL_EXTRUSION_PATTERN, FILL_EXTRUSION_PATTERN_INSTANCED,
@@ -162,7 +162,13 @@ impl Layer for FillExtrusionLayer {
                 texsize: [atlas.width as f32, atlas.height as f32],
                 ..FillExtrusionTilePropsUBO::default()
             };
-            let paint_layout = paint_layout(laid.binders(&laid.bucket.binders));
+            let paint = laid.binders(&laid.bucket.binders);
+            let offsets = [
+                paint.fill_extrusion_base.offset(),
+                paint.fill_extrusion_height.offset(),
+                paint.fill_extrusion_color.offset(),
+            ];
+            let paint_layout = paint_layout(paint.stride(), offsets);
             let blocks = (drawable(tile, frame, paint_layout), tile_props);
             for part in parts {
                 if let Some(behind) = &behind {
@@ -213,16 +219,15 @@ fn opacity(layer: &EvaluatedLayer<FillExtrusion>) -> f32 {
     layer.paint.fill_extrusion_layer_opacity.uniform() * layer.paint.fill_extrusion_opacity.uniform()
 }
 
-/// Where the pulled walls' shader finds a vertex's paint values among
-/// `paint`'s ([`FillExtrusionDrawableUBO::paint_layout`]): a byte each of
-/// words, from the lowest, a vertex's, then the offsets of its base, height
-/// and color.
-fn paint_layout(paint: PaintVertices<'_, FillExtrusionBinders>) -> u32 {
+/// Where the pulled walls' shader finds a vertex's paint values, which take
+/// `stride` bytes, with the base's, the height's and the color's at their
+/// `offsets` where they differ by feature
+/// ([`FillExtrusionDrawableUBO::paint_layout`]): a byte each of words, from
+/// the lowest, a vertex's, then the offsets of its base, height and color.
+fn paint_layout(stride: usize, offsets: [Option<usize>; 3]) -> u32 {
     let words = |bytes: Option<usize>| (bytes.unwrap_or(0) / 4) as u32 & 0xff;
-    words(Some(paint.stride()))
-        | words(paint.fill_extrusion_base.offset()) << 8
-        | words(paint.fill_extrusion_height.offset()) << 16
-        | words(paint.fill_extrusion_color.offset()) << 24
+    let [base, height, color] = offsets.map(words);
+    words(Some(stride)) | base << 8 | height << 16 | color << 24
 }
 
 /// The values of a draw of `tile` in `frame`, whose pulled walls find their
@@ -281,4 +286,15 @@ fn transform(paint: &FillExtrusionPaintProperties::PossiblyEvaluated) -> TileTra
         *paint.fill_extrusion_translate.uniform(),
         *paint.fill_extrusion_translate_anchor.uniform(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::paint_layout;
+
+    #[test]
+    fn the_pulled_walls_paint_layout_packs_words_from_the_lowest_byte() {
+        assert_eq!(8 | 2 << 16 | 4 << 24, paint_layout(32, [Some(0), Some(8), Some(16)]));
+        assert_eq!(2 | 1 << 24, paint_layout(8, [None, None, Some(4)]));
+    }
 }

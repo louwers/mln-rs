@@ -2,14 +2,14 @@ use mln_gfx::draw_mode::DrawMode;
 use mln_map_types::View;
 use mln_render::draw::{Buffer, Composite, Depth, Draw, DrawBlocks, Draws, IndexBuffer, Mesh, MeshDesc};
 use mln_render::layer::{
-    EvaluateCx, Evaluation, Features, FrameTile, HitTest, Layer, LayerBucket, LayerValues, NewCx, PaintVertices,
-    PrepareCx, TileCx, TileTransform, UpdateCx,
+    EvaluateCx, Evaluation, Features, FrameTile, HitTest, Layer, LayerBucket, LayerValues, NewCx, PrepareCx, TileCx,
+    TileTransform, UpdateCx,
 };
 use mln_style::evaluated::Evaluated;
 use mln_util::Color;
 use mln_util::intersection_tests::polygon_intersects_multi_polygon;
 
-use super::bucket::{FillBinders, FillBucket, LINE_WIDTH, draws_outline_quads};
+use super::bucket::{FillBucket, LINE_WIDTH, draws_outline_quads};
 use super::layout::FillLayout;
 use super::programs::{
     FILL, FILL_OUTLINE, FILL_OUTLINE_INSTANCED, FILL_OUTLINE_PATTERN, FILL_OUTLINE_PATTERN_INSTANCED,
@@ -102,7 +102,12 @@ impl Layer for FillLayer {
         let (fill, outline) = self.meshes(cx, laid, false);
         let caps = cx.res.caps();
         let pulled = draws_outline_quads(caps) && caps.binds_vertex_buffers;
-        let paint_layout = if pulled { paint_layout(laid.binders(&bucket.binders)) } else { 0 };
+        let paint_layout = if pulled {
+            let paint = laid.binders(&bucket.binders);
+            paint_layout(paint.stride(), paint.fill_outline_color.offset(), paint.fill_opacity.offset())
+        } else {
+            0
+        };
         Some(FillTile::Color { fill, outline, write, paint_layout })
     }
 
@@ -249,18 +254,32 @@ fn opaque(color: &Evaluated<Color>, opacity: &Evaluated<f32>) -> bool {
     color.constant_or(&Color::default()).a >= 1.0 && opacity.constant_or(&0.0) >= 1.0
 }
 
-/// Where the pulled outlines' shader finds a vertex's paint values among
-/// `paint`'s ([`FillOutlineDrawableUBO::paint_layout`]): a byte each of
-/// words, from the lowest, a vertex's, then the offsets of its outline color
-/// and opacity.
-fn paint_layout(paint: PaintVertices<'_, FillBinders>) -> u32 {
-    let (color, opacity) = (paint.fill_outline_color.offset(), paint.fill_opacity.offset());
+/// Where the pulled outlines' shader finds a vertex's paint values, which
+/// take `stride` bytes, with the outline color's and the opacity's at their
+/// offsets where they differ by feature
+/// ([`FillOutlineDrawableUBO::paint_layout`]): a byte each of words, from
+/// the lowest, a vertex's, then the offsets of its outline color and
+/// opacity.
+fn paint_layout(stride: usize, color: Option<usize>, opacity: Option<usize>) -> u32 {
     let words = |bytes: usize| (bytes / 4) as u32 & 0xff;
-    let stride = if color.is_some() || opacity.is_some() { words(paint.stride()) } else { 0 };
+    let stride = if color.is_some() || opacity.is_some() { words(stride) } else { 0 };
     stride | color.map_or(0, words) << 8 | opacity.map_or(0, words) << 16
 }
 
 /// How the layer's `paint` places a tile's fills: moved by its translate.
 fn transform(paint: &FillPaintProperties::PossiblyEvaluated) -> TileTransform {
     TileTransform::translated(*paint.fill_translate.uniform(), *paint.fill_translate_anchor.uniform())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::paint_layout;
+
+    #[test]
+    fn the_pulled_outlines_paint_layout_packs_words_from_the_lowest_byte() {
+        assert_eq!(6 | 2 << 8 | 4 << 16, paint_layout(24, Some(8), Some(16)));
+        assert_eq!(4 | 3 << 16, paint_layout(16, None, Some(12)));
+        // Without values of each feature, the outline reads its uniforms.
+        assert_eq!(0, paint_layout(24, None, None));
+    }
 }
