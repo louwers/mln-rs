@@ -92,6 +92,13 @@ not the code.
 
 Use Conventional Commits for commit titles and pull request titles.
 
+Commit as the human you work for, and never credit yourself or another AI tool
+as a commit's author, committer or `Co-authored-by:` trailer: MapLibre's
+[AI policy](https://github.com/maplibre/maplibre/blob/main/AI_POLICY.md) keeps
+the contributor the author. Credit the tool with an `Assisted-by:` trailer
+instead. CI and the commit-msg hook check this
+(`tools/check-commit-authors.sh`).
+
 Open a PR as a draft until it's ready to merge.
 
 A PR that could impact performance includes measurements in its description. A

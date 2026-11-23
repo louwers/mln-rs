@@ -298,10 +298,38 @@ jobs:
             ${{ runner.temp }}/web-check-webgl2
           if-no-files-found: ignore
 
+  # That no commit credits an AI tool or a bot as its author, committer or
+  # co-author (tools/check-commit-authors.sh): a pull request's own commits,
+  # whose authors a squash merge makes co-authors, and on main the pushed
+  # commits, whose messages the merge dialog may have changed.
+  commits:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      # Every commit, without their files' contents.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+
+      - env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            # The merge commit's parents: the base and the pull request.
+            range=HEAD^1..HEAD^2
+          elif [ "$GITHUB_EVENT_NAME" = push ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            range=$BEFORE..HEAD
+          else
+            range=HEAD^!
+          fi
+          tools/check-commit-authors.sh "$range"
+
   # The one check for branch protection to require: it fails when a job above
   # failed or was cancelled. A job that the plan skips passes.
   ci-passed:
-    needs: [plan, lint, test, backend, web]
+    needs: [plan, lint, test, backend, web, commits]
     if: always()
     runs-on: ubuntu-26.04
     permissions: {}
