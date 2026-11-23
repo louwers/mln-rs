@@ -6,9 +6,10 @@
 //! Every tile loads the same way: a required tile without data and without a
 //! load begins one; a load stays open for further replies until a failure,
 //! a newer load, the tile becoming optional or the tile going stops it; a
-//! failed tile loads again when the engine retries it; and a tile that
-//! starts as another world copy's takes that copy's answer, which counts as
-//! data.
+//! failed tile loads again when the engine retries it, unless the script
+//! says otherwise ([`Retry`]); and a tile that starts from another world
+//! copy takes that copy, which counts as data, unless the script refuses
+//! copies.
 
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -26,8 +27,8 @@ use mln_util::tileset::RasterEncoding;
 use parking_lot::Mutex;
 
 use crate::source::{
-    Cover, DataOrigin, LoadContext, NewTile, OriginUpdate, Replier, SourceType, Supply, TileInput, TileKind, TileLoad,
-    TileNecessity, TileOperation,
+    Cover, DataOrigin, LoadContext, OriginUpdate, Replier, SourceType, Supply, TileInput, TileKind, TileNecessity,
+    TileOperation,
 };
 
 /// The kind of a scripted source's tiles, whose cover picks a view's tiles
@@ -114,18 +115,32 @@ pub(crate) fn source<K: Kind>(id: &str, script: &Script, tile_size: u16, zoom_ra
     Source::new(id, SourceData::<Scripted<K>>::new(ScriptOptions { script: script.clone(), cover }))
 }
 
-/// A hook the engine called, and the tile it called it for.
+/// A hook the engine called, and the tile it called it for; or what the
+/// origin did of its own.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Call {
     Update,
-    NewLoad(OverscaledTileID),
     Start(OverscaledTileID),
+    /// The tile, which started from another world copy, took that copy.
+    TookCopy(OverscaledTileID),
     Receive(OverscaledTileID),
     SetNecessity(OverscaledTileID, TileNecessity),
     Retry(OverscaledTileID),
     Failed(OverscaledTileID),
-    TakeWorldCopy(OverscaledTileID),
-    Retire(OverscaledTileID),
+    /// The engine dropped the origin's state of the tile.
+    Dropped(OverscaledTileID),
+}
+
+/// What a scripted origin does as the engine retries a failed tile.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Retry {
+    /// Begins a load, which the test answers.
+    #[default]
+    Load,
+    /// Nothing, as an origin without retries.
+    Nothing,
+    /// Delivers no data at once, without a load.
+    Deliver,
 }
 
 /// What a test sends a tile's load.
@@ -152,6 +167,8 @@ pub(crate) struct Script(Arc<Mutex<ScriptState>>);
 struct ScriptState {
     calls: Vec<Call>,
     loads: Vec<ScriptedLoad>,
+    retry: Retry,
+    refuses_copies: bool,
 }
 
 impl Script {
@@ -161,9 +178,16 @@ impl Script {
         ScriptedOrigin { script: self.clone(), tiles, cover: None, source: String::new() }
     }
 
-    /// The origin's state of a new tile `id`, which a test makes itself.
-    pub(crate) fn tile(&self, id: OverscaledTileID, order: RequestOrder) -> ScriptedTile {
-        ScriptedTile { script: self.clone(), id, order, open: None, answered: false, closed: false }
+    /// Has the origins do what `retry` says as the engine retries a failed
+    /// tile.
+    pub(crate) fn set_retry(&self, retry: Retry) {
+        self.0.lock().retry = retry;
+    }
+
+    /// Has the tiles that start from another world copy load anew, rather
+    /// than take the copy.
+    pub(crate) fn refuse_copies(&self) {
+        self.0.lock().refuses_copies = true;
     }
 
     /// The loads begun since the last call, oldest first.
@@ -254,15 +278,10 @@ impl ScriptedTile {
     }
 }
 
-impl TileLoad for ScriptedTile {
-    fn retire(&mut self, tile: &OverscaledTileID) {
-        self.script.record(Call::Retire(*tile));
-    }
-}
-
 impl Drop for ScriptedTile {
     fn drop(&mut self) {
         self.stop();
+        self.script.record(Call::Dropped(self.id));
     }
 }
 
@@ -282,7 +301,7 @@ impl ScriptedOrigin {
 }
 
 impl DataOrigin for ScriptedOrigin {
-    type Load = ScriptedTile;
+    type Tile = ScriptedTile;
     type Reply = Reply;
 
     fn update(&mut self, update: &mut OriginUpdate<'_, Self>) -> Option<Cover> {
@@ -291,14 +310,17 @@ impl DataOrigin for ScriptedOrigin {
         self.cover
     }
 
-    fn new_load(&mut self, tile: &NewTile<'_>) -> Option<ScriptedTile> {
-        self.script.record(Call::NewLoad(*tile.id()));
-        Some(self.script.tile(*tile.id(), tile.order()))
-    }
-
-    /// A tile waits until it is required.
-    fn start(&mut self, tile: &mut ScriptedTile, _cx: &mut LoadContext<'_, '_, Reply>) {
-        self.script.record(Call::Start(tile.id));
+    /// A tile takes its copy, unless the script refuses copies, or waits
+    /// until it is required.
+    fn start(&mut self, cx: &mut LoadContext<'_, '_, Reply>, copy: Option<&ScriptedTile>) -> ScriptedTile {
+        let id = *cx.id();
+        self.script.record(Call::Start(id));
+        let refuses = self.script.0.lock().refuses_copies;
+        let answered = copy.is_some() && !refuses && cx.take_copy();
+        if answered {
+            self.script.record(Call::TookCopy(id));
+        }
+        ScriptedTile { script: self.script.clone(), id, order: cx.order(), open: None, answered, closed: false }
     }
 
     /// A reply after its load stopped goes nowhere.
@@ -350,19 +372,25 @@ impl DataOrigin for ScriptedOrigin {
 
     fn retry(&mut self, tile: &mut ScriptedTile, cx: &mut LoadContext<'_, '_, Reply>) {
         self.script.record(Call::Retry(tile.id));
-        if tile.needs_load() {
-            cx.unsettle();
-            self.begin(tile, cx);
+        if !tile.needs_load() {
+            return;
+        }
+        let retry = self.script.0.lock().retry;
+        match retry {
+            Retry::Load => self.begin(tile, cx),
+            Retry::Nothing => {}
+            Retry::Deliver => {
+                tile.answered = true;
+                cx.deliver(if self.tiles == TileKind::Geometry {
+                    TileInput::Geometry { data: None, missing: false }
+                } else {
+                    TileInput::Image { data: None, missing: false }
+                });
+            }
         }
     }
 
     fn failed(&mut self, tile: &mut ScriptedTile, _cx: &mut LoadContext<'_, '_, Reply>) {
         self.script.record(Call::Failed(tile.id));
-    }
-
-    fn take_world_copy(&self, tile: &mut ScriptedTile, _from: &ScriptedTile) -> bool {
-        self.script.record(Call::TakeWorldCopy(tile.id));
-        tile.answered = true;
-        true
     }
 }

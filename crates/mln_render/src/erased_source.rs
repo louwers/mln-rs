@@ -1,7 +1,7 @@
 //! The source type contract erased: the registry holds each source type as
 //! `&'static dyn ErasedSourceType` ([`entry`]), and the tile store each
-//! source's data origin as `Box<dyn ErasedOrigin>`, whose tiles keep their
-//! loads as `Box<dyn TileLoad>`.
+//! source's data origin as `Box<dyn ErasedOrigin>`, whose tiles keep the
+//! origin's state of them as `Box<dyn Any>`.
 
 use std::any::Any;
 use std::marker::PhantomData;
@@ -9,7 +9,7 @@ use std::marker::PhantomData;
 use mln_style::Source;
 use mln_style::source_type::{ErasedStyleSourceType, SourceTypeEntry};
 
-use crate::source::{Cover, DataOrigin, LoadContext, NewTile, OriginUpdate, SourceType, Supply, TileLoad};
+use crate::source::{Cover, DataOrigin, LoadContext, OriginUpdate, SourceType, Supply};
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::StoreContext;
 use crate::tile::tile::TileNecessity;
@@ -43,23 +43,21 @@ pub(crate) struct UpdateParts<'a> {
 }
 
 /// A data origin, whichever its type. Each method is the [`DataOrigin`]
-/// hook of its name, with the tile's load downcast to the origin's.
+/// hook of its name, with the origin's state of the tile downcast to the
+/// origin's [`Tile`](DataOrigin::Tile).
 pub(crate) trait ErasedOrigin {
     fn update(&mut self, parts: UpdateParts<'_>) -> Option<Cover>;
-    fn new_load(&mut self, tile: &NewTile<'_>) -> Option<Box<dyn TileLoad>>;
-    fn start(&mut self, load: &mut dyn TileLoad, tile: &mut TileMut<'_>);
-    fn receive(&mut self, load: &mut dyn TileLoad, reply: Box<dyn Any + Send>, tile: &mut TileMut<'_>);
-    fn set_necessity(&mut self, load: &mut dyn TileLoad, previous: TileNecessity, tile: &mut TileMut<'_>);
-    fn retry(&mut self, load: &mut dyn TileLoad, tile: &mut TileMut<'_>);
-    fn failed(&mut self, load: &mut dyn TileLoad, tile: &mut TileMut<'_>);
-    fn take_world_copy(&self, load: &mut dyn TileLoad, from: &dyn TileLoad) -> bool;
+    fn start(&mut self, copy: Option<&dyn Any>, tile: &mut TileMut<'_>) -> Box<dyn Any>;
+    fn receive(&mut self, state: &mut dyn Any, reply: Box<dyn Any + Send>, tile: &mut TileMut<'_>);
+    fn set_necessity(&mut self, state: &mut dyn Any, previous: TileNecessity, tile: &mut TileMut<'_>);
+    fn retry(&mut self, state: &mut dyn Any, tile: &mut TileMut<'_>);
+    fn failed(&mut self, state: &mut dyn Any, tile: &mut TileMut<'_>);
 }
 
-/// `load` as a load of `O`'s, which every tile of a source has.
-pub(crate) fn typed<O: DataOrigin>(load: &mut dyn TileLoad) -> Option<&mut O::Load> {
-    let load: &mut dyn Any = load;
-    let typed = load.downcast_mut();
-    debug_assert!(typed.is_some(), "a tile's load is of its source's origin");
+/// `state` as a tile's state of `O`'s, which every tile of a source has.
+pub(crate) fn typed<O: DataOrigin>(state: &mut dyn Any) -> Option<&mut O::Tile> {
+    let typed = state.downcast_mut();
+    debug_assert!(typed.is_some(), "a tile's state is of its source's origin");
     typed
 }
 
@@ -68,47 +66,33 @@ impl<O: DataOrigin> ErasedOrigin for O {
         DataOrigin::update(self, &mut OriginUpdate { parts, origin: PhantomData })
     }
 
-    fn new_load(&mut self, tile: &NewTile<'_>) -> Option<Box<dyn TileLoad>> {
-        let load = DataOrigin::new_load(self, tile)?;
-        Some(Box::new(load))
+    fn start(&mut self, copy: Option<&dyn Any>, tile: &mut TileMut<'_>) -> Box<dyn Any> {
+        let copy = copy.and_then(<dyn Any>::downcast_ref);
+        Box::new(DataOrigin::start(self, &mut LoadContext::new(tile), copy))
     }
 
-    fn start(&mut self, load: &mut dyn TileLoad, tile: &mut TileMut<'_>) {
-        if let Some(load) = typed::<O>(load) {
-            DataOrigin::start(self, load, &mut LoadContext::new(tile));
-        }
-    }
-
-    fn receive(&mut self, load: &mut dyn TileLoad, reply: Box<dyn Any + Send>, tile: &mut TileMut<'_>) {
+    fn receive(&mut self, state: &mut dyn Any, reply: Box<dyn Any + Send>, tile: &mut TileMut<'_>) {
         // A replier sends only its load's replies, of its origin's type.
-        if let (Some(load), Ok(reply)) = (typed::<O>(load), reply.downcast::<O::Reply>()) {
-            DataOrigin::receive(self, load, *reply, &mut LoadContext::new(tile));
+        if let (Some(state), Ok(reply)) = (typed::<O>(state), reply.downcast::<O::Reply>()) {
+            DataOrigin::receive(self, state, *reply, &mut LoadContext::new(tile));
         }
     }
 
-    fn set_necessity(&mut self, load: &mut dyn TileLoad, previous: TileNecessity, tile: &mut TileMut<'_>) {
-        if let Some(load) = typed::<O>(load) {
-            DataOrigin::set_necessity(self, load, previous, &mut LoadContext::new(tile));
+    fn set_necessity(&mut self, state: &mut dyn Any, previous: TileNecessity, tile: &mut TileMut<'_>) {
+        if let Some(state) = typed::<O>(state) {
+            DataOrigin::set_necessity(self, state, previous, &mut LoadContext::new(tile));
         }
     }
 
-    fn retry(&mut self, load: &mut dyn TileLoad, tile: &mut TileMut<'_>) {
-        if let Some(load) = typed::<O>(load) {
-            DataOrigin::retry(self, load, &mut LoadContext::new(tile));
+    fn retry(&mut self, state: &mut dyn Any, tile: &mut TileMut<'_>) {
+        if let Some(state) = typed::<O>(state) {
+            DataOrigin::retry(self, state, &mut LoadContext::new(tile));
         }
     }
 
-    fn failed(&mut self, load: &mut dyn TileLoad, tile: &mut TileMut<'_>) {
-        if let Some(load) = typed::<O>(load) {
-            DataOrigin::failed(self, load, &mut LoadContext::new(tile));
-        }
-    }
-
-    fn take_world_copy(&self, load: &mut dyn TileLoad, from: &dyn TileLoad) -> bool {
-        let from: &dyn Any = from;
-        match (typed::<O>(load), from.downcast_ref()) {
-            (Some(load), Some(from)) => DataOrigin::take_world_copy(self, load, from),
-            _ => false,
+    fn failed(&mut self, state: &mut dyn Any, tile: &mut TileMut<'_>) {
+        if let Some(state) = typed::<O>(state) {
+            DataOrigin::failed(self, state, &mut LoadContext::new(tile));
         }
     }
 }

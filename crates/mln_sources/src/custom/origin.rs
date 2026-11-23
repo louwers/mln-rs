@@ -7,8 +7,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use mln_render::source::{
-    Cover, DataOrigin, LoadContext, NewTile, OriginUpdate, Replier, SourceType, Supply, TileInput, TileKind, TileLoad,
-    TileNecessity,
+    Cover, DataOrigin, LoadContext, OriginUpdate, Replier, SourceType, Supply, TileInput, TileKind, TileNecessity,
 };
 use mln_style::Source;
 use mln_style::source_type::{SourceData, StyleSourceType};
@@ -115,9 +114,12 @@ pub(crate) enum CustomReply {
     Stale,
 }
 
-/// A custom tile's subscription to its provider.
-pub(crate) struct CustomLoad {
-    loader: Arc<dyn CustomLoader>,
+/// A custom tile's subscription to its provider, which the provider
+/// forgets as the tile drops.
+pub(crate) struct CustomTile {
+    id: OverscaledTileID,
+    /// The provider of the source's version that made the tile.
+    loader: Option<Arc<dyn CustomLoader>>,
     subscription: Subscription,
 }
 
@@ -147,17 +149,16 @@ impl Subscription {
     }
 }
 
-impl TileLoad for CustomLoad {
-    /// The provider forgets the tile.
-    fn retire(&mut self, tile: &OverscaledTileID) {
-        if let Some(key) = self.subscription.key() {
-            self.loader.remove(*tile, key);
+impl Drop for CustomTile {
+    fn drop(&mut self) {
+        if let (Some(loader), Some(key)) = (&self.loader, self.subscription.key()) {
+            loader.remove(self.id, key);
         }
     }
 }
 
 impl<T: CustomSource> DataOrigin for CustomOrigin<T> {
-    type Load = CustomLoad;
+    type Tile = CustomTile;
     type Reply = CustomReply;
 
     /// Points the tiles at the source's provider. New options, zoom range
@@ -188,20 +189,17 @@ impl<T: CustomSource> DataOrigin for CustomOrigin<T> {
         })
     }
 
-    fn new_load(&mut self, _tile: &NewTile<'_>) -> Option<CustomLoad> {
-        let loader = Arc::clone(self.loader.as_ref()?);
-        Some(CustomLoad { loader, subscription: Subscription::Unsubscribed })
+    /// A custom tile waits until it is required.
+    fn start(&mut self, cx: &mut LoadContext<'_, '_, CustomReply>, _copy: Option<&CustomTile>) -> CustomTile {
+        CustomTile { id: *cx.id(), loader: self.loader.clone(), subscription: Subscription::Unsubscribed }
     }
 
-    /// A custom tile waits until it is required.
-    fn start(&mut self, _load: &mut CustomLoad, _cx: &mut LoadContext<'_, '_, CustomReply>) {}
-
-    fn receive(&mut self, load: &mut CustomLoad, reply: CustomReply, cx: &mut LoadContext<'_, '_, CustomReply>) {
+    fn receive(&mut self, tile: &mut CustomTile, reply: CustomReply, cx: &mut LoadContext<'_, '_, CustomReply>) {
         match reply {
             CustomReply::Data(data) => cx.deliver(TileInput::Geometry { data, missing: false }),
             CustomReply::Error(error) => cx.fail(error),
             CustomReply::Stale => {
-                load.subscription = match std::mem::replace(&mut load.subscription, Subscription::Unsubscribed) {
+                tile.subscription = match std::mem::replace(&mut tile.subscription, Subscription::Unsubscribed) {
                     Subscription::Subscribed(replier) => Subscription::Stale(replier),
                     other => other,
                 };
@@ -214,28 +212,28 @@ impl<T: CustomSource> DataOrigin for CustomOrigin<T> {
     /// an optional one cancels, unless it is renderable.
     fn set_necessity(
         &mut self,
-        load: &mut CustomLoad,
+        tile: &mut CustomTile,
         previous: TileNecessity,
         cx: &mut LoadContext<'_, '_, CustomReply>,
     ) {
-        let subscribed = matches!(load.subscription, Subscription::Subscribed(_));
+        let subscribed = matches!(tile.subscription, Subscription::Subscribed(_));
         if previous == cx.necessity() && subscribed {
             return;
         }
         let id = *cx.id();
         if cx.necessity() == TileNecessity::Required {
-            match &load.subscription {
+            match &tile.subscription {
                 Subscription::Subscribed(subscribed) => self.fetch(id, subscribed),
                 Subscription::Stale(_) | Subscription::Unsubscribed => {
                     if self.loader.is_some() {
                         self.last_key += 1;
                         let subscribed = Subscribed { key: self.last_key, replier: cx.begin_load() };
                         self.fetch(id, &subscribed);
-                        load.subscription = Subscription::Subscribed(subscribed);
+                        tile.subscription = Subscription::Subscribed(subscribed);
                     }
                 }
             }
-        } else if let Some(key) = load.subscription.key()
+        } else if let Some(key) = tile.subscription.key()
             && !cx.is_renderable()
             && let Some(loader) = &self.loader
         {

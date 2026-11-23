@@ -138,13 +138,7 @@ impl OneTile {
     /// says once it is required.
     pub(crate) fn add(&mut self, id: mln_tile_id::OverscaledTileID) {
         let params = self.params();
-        let (source, _) = self.store.source_mut(self.key).expect("the source");
-        let generation = source.info.next();
-        let order = mln_storage::RequestOrder::default();
-        let load = crate::tile::loading::Load::new(Box::new(self.script.tile(id, order.clone())), order);
-        let pipeline = crate::tile::pipeline::Pipeline::new(source.info.kind, generation, params);
-        let tile = crate::tile::tile::Tile::new(id, load, pipeline);
-        source.insert(tile);
+        crate::testing::seed(&mut self.store, self.key, &[id], params);
     }
 
     pub(crate) fn tile(&self) -> &crate::tile::tile::Tile {

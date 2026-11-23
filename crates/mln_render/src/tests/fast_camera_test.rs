@@ -394,5 +394,5 @@ fn pan_to_a_new_world_copy_draws_it_at_once() {
     }
     assert_eq!(BTreeMap::new(), scene.network.requested_again());
     let calls = scene.network.script.take_calls();
-    assert!(calls.iter().any(|call| matches!(call, Call::TakeWorldCopy(_))), "the new copies took the loaded ones'");
+    assert!(calls.iter().any(|call| matches!(call, Call::TookCopy(_))), "the new copies took the loaded ones'");
 }

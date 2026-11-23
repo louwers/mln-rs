@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use mln_map_types::MapMode;
 use mln_render::source::{
-    Cover, DataOrigin, LoadContext, NewTile, OriginUpdate, Replier, SourceType, Supply, TileInput, TileKind, TileLoad,
+    Cover, DataOrigin, LoadContext, OriginUpdate, Replier, SourceType, Supply, TileInput, TileKind,
 };
 use mln_style::Source;
 use mln_style::source_type::SourceData;
@@ -39,13 +39,9 @@ fn same_data(a: Option<&Arc<dyn GeoJSONData>>, b: Option<&Arc<dyn GeoJSONData>>)
     }
 }
 
-/// A GeoJSON tile's load: the engine keeps which is the latest.
-struct GeoJsonLoad;
-
-impl TileLoad for GeoJsonLoad {}
-
 impl DataOrigin for GeoJsonOrigin {
-    type Load = GeoJsonLoad;
+    /// The engine keeps which of a tile's loads is the latest.
+    type Tile = ();
     type Reply = TileData;
 
     fn update(&mut self, update: &mut OriginUpdate<'_, Self>) -> Option<Cover> {
@@ -68,7 +64,7 @@ impl DataOrigin for GeoJsonOrigin {
                 update.clear_cache();
                 let max_z = source.options.get_zoom_range().max;
                 let relayout = update.needs_relayout();
-                update.update_tiles(|id| id.canonical.z <= max_z, |_, cx| load(data, synchronous, relayout, cx));
+                update.update_tiles(|id| id.canonical.z <= max_z, |(), cx| load(data, synchronous, relayout, cx));
             }
         }
         data?;
@@ -83,17 +79,13 @@ impl DataOrigin for GeoJsonOrigin {
         })
     }
 
-    fn new_load(&mut self, _tile: &NewTile<'_>) -> Option<GeoJsonLoad> {
-        self.data.as_ref().map(|_| GeoJsonLoad)
-    }
-
-    fn start(&mut self, _load: &mut GeoJsonLoad, cx: &mut LoadContext<'_, '_, TileData>) {
+    fn start(&mut self, cx: &mut LoadContext<'_, '_, TileData>, _copy: Option<&()>) {
         if let Some(data) = &self.data {
             load(data, self.synchronous, false, cx);
         }
     }
 
-    fn receive(&mut self, _load: &mut GeoJsonLoad, data: TileData, cx: &mut LoadContext<'_, '_, TileData>) {
+    fn receive(&mut self, (): &mut (), data: TileData, cx: &mut LoadContext<'_, '_, TileData>) {
         cx.deliver(TileInput::Geometry { data: Some(data), missing: false });
     }
 }

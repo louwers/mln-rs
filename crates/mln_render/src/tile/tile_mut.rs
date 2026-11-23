@@ -18,11 +18,10 @@ use mln_vec_map::VecSet;
 use crate::erased_source::ErasedOrigin;
 use crate::layout::tile_layout::{Dependencies, LayoutParams};
 use crate::render_orchestrator::drop_on_workers;
-use crate::source::TileLoad;
 use crate::tile::contents::{Contents, GeometryContents, LayoutResult, release};
 use crate::tile::dem::DemContents;
 use crate::tile::job::{DataInput, DataKey, Job, JobId, JobResult, LayoutJob, LayoutOutput, Run, SourceStyle, TileKey};
-use crate::tile::loading::{Detached, Load};
+use crate::tile::loading::TileTimes;
 use crate::tile::pipeline::{
     DecodeWork, DependencyWait, InFlight, Layout, LayoutData, LayoutWork, Pipeline, Resume, Running, Waiting,
     outdated_by,
@@ -41,6 +40,9 @@ pub(crate) struct TileMut<'a> {
     reported: bool,
     /// The tile showed new contents.
     pub(super) installed: bool,
+    /// While its origin starts a new tile from another world copy, what
+    /// taking the copy settles it on.
+    copy: Option<CopyAnswer>,
 }
 
 impl<'a> TileMut<'a> {
@@ -53,7 +55,7 @@ impl<'a> TileMut<'a> {
         f: impl FnOnce(&mut TileMut<'a>) -> R,
     ) -> (R, bool) {
         let reported = tile.is_pending();
-        let mut tile = TileMut { source, tile, store, reported, installed: false };
+        let mut tile = TileMut { source, tile, store, reported, installed: false, copy: None };
         let result = f(&mut tile);
         tile.report();
         (result, tile.installed)
@@ -89,44 +91,55 @@ impl<'a> TileMut<'a> {
         self.source.tile_key(self.tile)
     }
 
-    /// Runs `f` with the tile's origin's load, out of the tile for it.
-    pub(crate) fn with_load<R>(&mut self, f: impl FnOnce(&mut dyn TileLoad, &mut Self) -> R) -> R {
-        let mut load = std::mem::replace(&mut self.tile.load.state, Box::new(Detached));
-        let result = f(&mut *load, self);
-        self.tile.load.state = load;
-        result
+    /// Runs `f` with the origin's state of the tile, out of the tile for
+    /// it; nothing for a tile without one.
+    pub(crate) fn with_state(&mut self, f: impl FnOnce(&mut dyn Any, &mut Self)) {
+        let Some(mut state) = self.tile.load.state.take() else {
+            return;
+        };
+        f(&mut *state, self);
+        self.tile.load.state = Some(state);
     }
 
-    /// Runs `f` with the source's origin and the tile's load, out of the
-    /// source and the tile for it; nothing while the origin is out for its
-    /// update.
-    fn with_origin(&mut self, f: impl FnOnce(&mut dyn ErasedOrigin, &mut dyn TileLoad, &mut Self)) {
+    /// Runs `f` with the source's origin and its state of the tile, out of
+    /// the source and the tile for it; nothing while the origin is out for
+    /// its update.
+    fn with_origin(&mut self, f: impl FnOnce(&mut dyn ErasedOrigin, &mut dyn Any, &mut Self)) {
         let Some(mut origin) = self.source.origin.take() else {
             return;
         };
-        self.with_load(|load, tile| f(&mut *origin, load, tile));
+        self.with_state(|state, tile| f(&mut *origin, state, tile));
         self.source.origin = Some(origin);
     }
 
-    /// Starts a new tile's load.
-    pub(crate) fn start_load(&mut self) {
-        self.with_origin(|origin, load, tile| origin.start(load, tile));
+    /// Starts a new tile: from `copy`, of the tile in another world copy,
+    /// it shows the copy's contents at once, and its origin may take them
+    /// as its answer.
+    pub(crate) fn start(&mut self, copy: Option<WorldCopy<'_>>) {
+        let mut copy_state = None;
+        if let Some(WorldCopy { shown, answer, state }) = copy {
+            self.tile.shown = Some(shown);
+            self.installed = true;
+            self.store.changed();
+            self.copy = answer;
+            copy_state = state;
+        }
+        if let Some(mut origin) = self.source.origin.take() {
+            self.tile.load.state = Some(origin.start(copy_state, self));
+            self.source.origin = Some(origin);
+        }
+        self.copy = None;
     }
 
-    /// Starts a new tile from `copy`, of the tile in another world copy: it
-    /// shows the copy's contents at once. If its load took the copy's
-    /// answer, it lays out the data for contents of its own; otherwise it
-    /// loads as any new tile.
-    pub(crate) fn start_as_copy(&mut self, copy: WorldCopy) {
-        let WorldCopy { shown, answered, data } = copy;
-        self.tile.shown = Some(shown);
-        self.installed = true;
-        self.store.changed();
-        if !answered {
-            self.start_load();
-            return;
-        }
+    /// Settles a tile that starts from another world copy on the copy's
+    /// contents, which it shows. Returns false if there is no copy to take.
+    pub(crate) fn take_copy(&mut self) -> bool {
+        let Some(CopyAnswer { data, times }) = self.copy.take() else {
+            return false;
+        };
         self.tile.settled = true;
+        self.tile.load.times = times;
+        self.tile.load.tried_optional = true;
         if let Some(data) = data {
             self.change_layout(|layout| layout.data = Some(data));
         } else {
@@ -135,24 +148,33 @@ impl<'a> TileMut<'a> {
             self.action(TileOperation::StartParse);
             self.action(TileOperation::EndParse);
         }
+        true
     }
 
     /// Sets how much the cover needs the tile, which its origin acts on.
     pub(crate) fn set_necessity(&mut self, necessity: TileNecessity) {
         let previous = std::mem::replace(&mut self.tile.load.necessity, necessity);
-        self.with_origin(|origin, load, tile| origin.set_necessity(load, previous, tile));
+        self.with_origin(|origin, state, tile| origin.set_necessity(state, previous, tile));
     }
 
-    /// Retries a required tile's failed loads.
+    /// Retries a required tile's failed loads. A retry that begins a load
+    /// or delivers starts the tile over: it hasn't done what it can until
+    /// that ends. One that does neither leaves it as it was.
     pub(crate) fn retry_failed_load(&mut self) {
-        if self.tile.load.necessity == TileNecessity::Required {
-            self.with_origin(|origin, load, tile| origin.retry(load, tile));
+        if self.tile.load.necessity != TileNecessity::Required {
+            return;
+        }
+        let before = (self.tile.load.current, self.tile.pipeline.generation());
+        let settled = std::mem::replace(&mut self.tile.settled, false);
+        self.with_origin(|origin, state, tile| origin.retry(state, tile));
+        if (self.tile.load.current, self.tile.pipeline.generation()) == before {
+            self.tile.settled |= settled;
         }
     }
 
     /// Takes in `reply`, which came for the tile's latest load.
     pub(crate) fn receive(&mut self, reply: Box<dyn Any + Send>) {
-        self.with_origin(|origin, load, tile| origin.receive(load, reply, tile));
+        self.with_origin(|origin, state, tile| origin.receive(state, reply, tile));
     }
 
     /// Takes in what a load delivered. A raster tile without an image shows
@@ -205,7 +227,7 @@ impl<'a> TileMut<'a> {
     /// keeps what it shows, and the origin hears of it.
     fn fail_work(&mut self, error: Error) {
         self.fail(error);
-        self.with_origin(|origin, load, tile| origin.failed(load, tile));
+        self.with_origin(|origin, state, tile| origin.failed(state, tile));
     }
 
     pub(crate) fn set_style(
@@ -323,11 +345,6 @@ impl<'a> TileMut<'a> {
         if !self.tile.pipeline.is_pending(true) {
             self.tile.settled = true;
         }
-    }
-
-    /// The tile loads again after a failure.
-    pub(crate) fn unsettle(&mut self) {
-        self.tile.settled = false;
     }
 
     pub(crate) fn action(&mut self, op: TileOperation) {
@@ -574,21 +591,32 @@ impl<'a> TileMut<'a> {
 }
 
 /// What a new tile starts with from the tile in another world copy: what
-/// that tile shows, whether the new tile's load took that tile's answer and,
-/// if it did, the data a geometry tile lays out.
-pub(crate) struct WorldCopy {
+/// that tile shows, what taking it settles the new tile on, and the origin's
+/// state of that tile.
+pub(crate) struct WorldCopy<'a> {
     shown: Shown,
-    answered: bool,
-    data: Option<LayoutData>,
+    /// `None` if the copy has no data to give: a geometry tile without
+    /// data, or a raster or raster-dem tile whose decode is pending, whose
+    /// image is newer than the one shown.
+    answer: Option<CopyAnswer>,
+    state: Option<&'a dyn Any>,
 }
 
-impl WorldCopy {
-    /// A copy of `tile`, if it is renderable, for `new`, a new tile's load
-    /// from `origin`. A geometry tile's copy draws its buckets, apart from
-    /// those of the layers that are placed: these hold what placement made
-    /// of them where their tile is. A raster or raster-dem tile's copy has
-    /// a bucket of its own, since each is masked where it is.
-    pub(crate) fn of(tile: &Tile, origin: Option<&dyn ErasedOrigin>, new: &mut Load) -> Option<WorldCopy> {
+/// What a new tile that takes its world copy settles on: the data a
+/// geometry tile lays out (none for a raster or raster-dem tile, which shows
+/// all it will), and the copy's times.
+struct CopyAnswer {
+    data: Option<LayoutData>,
+    times: TileTimes,
+}
+
+impl<'a> WorldCopy<'a> {
+    /// A copy of `tile`, if it is renderable. A geometry tile's copy draws
+    /// its buckets, apart from those of the layers that are placed: these
+    /// hold what placement made of them where their tile is. A raster or
+    /// raster-dem tile's copy has a bucket of its own, since each is masked
+    /// where it is.
+    pub(crate) fn of(tile: &'a Tile) -> Option<WorldCopy<'a>> {
         let shown = tile.shown.as_ref().filter(|shown| shown.contents.is_renderable())?;
         let contents = match &shown.contents {
             Contents::Geometry(contents) => {
@@ -614,12 +642,6 @@ impl WorldCopy {
             Pipeline::Layout(layout) => layout.data.clone().map(Some),
             Pipeline::Decode(_) => (!tile.is_pending()).then_some(None),
         };
-        let answered =
-            data.is_some() && origin.is_some_and(|origin| origin.take_world_copy(&mut *new.state, &*tile.load.state));
-        if answered {
-            new.times = tile.load.times;
-            new.tried_optional = true;
-        }
         let world_copy = matches!(contents, Contents::Geometry(_));
         Some(WorldCopy {
             shown: Shown {
@@ -628,14 +650,14 @@ impl WorldCopy {
                 answer_outdated: shown.answer_outdated,
                 world_copy,
             },
-            answered,
-            data: data.flatten().filter(|_| answered),
+            answer: data.map(|data| CopyAnswer { data, times: tile.load.times }),
+            state: tile.load.state.as_deref(),
         })
     }
 }
 
-/// Lets go of `tile`: its job needn't run, its origin's load lets go of it
-/// and drops, and its contents are freed.
+/// Lets go of `tile`: its job needn't run, its origin's state of it drops,
+/// and its contents are freed.
 pub(crate) fn retire(source: &SourceInfo, mut tile: Tile, store: &mut StoreContext) {
     if tile.is_pending() {
         store.action(&source.id, tile.id, TileOperation::Cancelled);
@@ -643,7 +665,6 @@ pub(crate) fn retire(source: &SourceInfo, mut tile: Tile, store: &mut StoreConte
     if let Some(job) = tile.pipeline.in_flight() {
         job.superseded.store(true, Ordering::Relaxed);
     }
-    tile.load.state.retire(&tile.id);
     if let Some(shown) = tile.shown.take() {
         release(shown.contents, &store.pool);
     }

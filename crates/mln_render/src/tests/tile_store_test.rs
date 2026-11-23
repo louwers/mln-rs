@@ -313,17 +313,12 @@ fn style_replaced_mid_load() {
     tile.store.remove_source(old_key);
     assert!(old_job.superseded.load(std::sync::atomic::Ordering::Relaxed));
     assert!(load.is_stopped(), "the old tile's load goes with it");
-    assert!(tile.script.take_calls().contains(&Call::Retire(id)));
+    assert!(tile.script.take_calls().contains(&Call::Dropped(id)));
     let script = Script::default();
     let new_key =
         tile.store.add_source("source".to_owned(), TileKind::Geometry, Box::new(script.origin(TileKind::Geometry)));
     assert_ne!(new_key, old_key, "keys aren't reused");
-    let (source, ctx) = tile.store.source_mut(new_key).expect("the source");
-    let new_tile = source.info.new_tile(id, params).expect("a tile");
-    source.insert(new_tile);
-    source.update(&id, ctx, |tile| {
-        tile.start_load();
-    });
+    crate::testing::seed(&mut tile.store, new_key, &[id], params);
     tile.key = new_key;
     tile.script = script;
     tile.set_style(&style(&layers));

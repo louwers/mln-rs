@@ -11,7 +11,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_storage::{FileSource, RequestOrder};
+use mln_storage::FileSource;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
@@ -27,7 +27,6 @@ use crate::placement::{BucketKey, LaidBuckets};
 use crate::render_orchestrator::drop_on_workers;
 use crate::render_tile::RenderTile;
 use crate::renderer_event::RendererEvent;
-use crate::source::NewTile;
 use crate::source_state::SourceFeatureState;
 use crate::text::glyph_store::GlyphStore;
 use crate::tile::contents::{Answer, LayoutResult, TileAtlases};
@@ -168,13 +167,10 @@ impl SourceInfo {
         self.counter
     }
 
-    /// A new tile `id`, unless the origin has nothing to make tiles from.
-    pub(crate) fn new_tile(&mut self, id: OverscaledTileID, params: LayoutParams) -> Option<Tile> {
-        let order = RequestOrder::default();
-        let tile = NewTile { id: &id, pixel_ratio: params.pixel_ratio, order: &order };
-        let load = Load::new(self.origin.as_mut()?.new_load(&tile)?, order);
+    /// A new tile `id`, which its origin has yet to start.
+    pub(crate) fn new_tile(&mut self, id: OverscaledTileID, params: LayoutParams) -> Tile {
         let generation = self.next();
-        Some(Tile::new(id, load, Pipeline::new(self.kind, generation, params)))
+        Tile::new(id, Load::new(), Pipeline::new(self.kind, generation, params))
     }
 
     pub(crate) fn tile_key(&self, tile: &Tile) -> TileKey {

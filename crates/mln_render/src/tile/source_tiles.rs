@@ -284,18 +284,12 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
             subdivision_granularity: parameters.subdivision_granularity,
             first_load: true,
         };
-        let mut tile = self.source.info.new_tile(*id, params)?;
         // A flat map draws each world copy of a tile from a tile of its own,
         // which starts from a loaded copy rather than leave its world bare
         // until it has loaded and laid out the same data.
-        let copy = if parameters.view.is_globe() { None } else { self.source.world_copy(&mut tile) };
-        self.source.insert(tile);
+        self.source.add_tile(*id, params, !parameters.view.is_globe(), self.ctx);
         let style = self.style;
         self.source.update(id, self.ctx, |tile| {
-            match copy {
-                Some(copy) => tile.start_as_copy(copy),
-                None => tile.start_load(),
-            }
             tile.set_style(style, params.pixel_ratio, params.subdivision_granularity);
         });
         Some(*id)
@@ -462,25 +456,9 @@ impl SourceTiles {
     }
 
     /// The indexes of the tiles that are `id` in any world copy, `id`'s own
-    /// among them if there is one. The tiles are in order of zoom, then
-    /// world copy, then place, so each world copy's tile is a search away.
+    /// among them if there is one.
     fn same_place(&self, id: &OverscaledTileID) -> SmallVec<[usize; 4]> {
-        let keys = self.tiles.keys().as_slice();
-        let mut found = SmallVec::new();
-        let mut at = keys.partition_point(|key| key.overscaled_z < id.overscaled_z);
-        while let Some(&OverscaledTileID { overscaled_z, wrap, .. }) = keys.get(at) {
-            if overscaled_z != id.overscaled_z {
-                break;
-            }
-            let rest = keys.get(at..).unwrap_or_default();
-            let end = at + rest.partition_point(|key| key.overscaled_z == overscaled_z && key.wrap == wrap);
-            let place = OverscaledTileID { wrap, ..*id };
-            if let Ok(offset) = keys.get(at..end).unwrap_or_default().binary_search(&place) {
-                found.push(at + offset);
-            }
-            at = end;
-        }
-        found
+        same_place(&self.tiles, id)
     }
 
     pub(crate) fn slots(&self) -> impl Iterator<Item = &Slot> + '_ {
@@ -491,9 +469,24 @@ impl SourceTiles {
         self.tiles.values().filter(|slot| !slot.place.is_cached()).map(|slot| &slot.tile)
     }
 
-    pub(crate) fn insert(&mut self, tile: Tile) {
-        tile.load.set_order(TileLoadOrder::UNWANTED);
-        self.tiles.insert(tile.id, Slot { tile, place: Place::Cover { order: TileLoadOrder::UNWANTED } });
+    /// Adds a new tile `id` to the cover, laid out with `params`, which its
+    /// origin starts before it joins the tiles: from its copy in another
+    /// world copy, if `from_copy` and one is renderable.
+    pub(crate) fn add_tile(
+        &mut self,
+        id: OverscaledTileID,
+        params: LayoutParams,
+        from_copy: bool,
+        store: &mut StoreContext,
+    ) {
+        let mut tile = self.info.new_tile(id, params);
+        let SourceTiles { info, tiles, .. } = self;
+        let copy = if from_copy { world_copy(tiles, &id) } else { None };
+        let ((), installed) = TileMut::with(info, &mut tile, store, |tile| tile.start(copy));
+        self.tiles.insert(id, Slot { tile, place: Place::Cover { order: TileLoadOrder::UNWANTED } });
+        if installed {
+            self.contents_installed(&id);
+        }
     }
 
     #[must_use]
@@ -953,20 +946,6 @@ impl SourceTiles {
         };
         slot.set_place(Place::Cover { order: TileLoadOrder::UNWANTED });
         true
-    }
-
-    /// A copy, for `new`, of a renderable tile that is `new` in another
-    /// world copy. The copy's buckets, copies of the tile's, draw the
-    /// geometry that the first of either to upload moves into the context's
-    /// stores (`upload_at`).
-    pub(crate) fn world_copy(&self, new: &mut Tile) -> Option<WorldCopy> {
-        let id = new.id;
-        let tile = self
-            .same_place(&id)
-            .into_iter()
-            .filter_map(|at| Some(&self.tiles.get_index(at)?.1.tile))
-            .find(|tile| tile.id.wrap != id.wrap && tile.is_renderable())?;
-        WorldCopy::of(tile, self.info.origin.as_deref(), &mut new.load)
     }
 
     /// Moves the tile cached under any wrap of `id` into the cover under
@@ -1488,6 +1467,40 @@ impl SourceTiles {
     pub(crate) fn has_fading_tiles(&self) -> bool {
         self.rendered.values().any(Rendered::is_held)
     }
+}
+
+/// The indexes of `tiles` that are `id` in any world copy, `id`'s own among
+/// them if there is one. The tiles are in order of zoom, then world copy,
+/// then place, so each world copy's tile is a search away.
+fn same_place(tiles: &VecMap<OverscaledTileID, Slot>, id: &OverscaledTileID) -> SmallVec<[usize; 4]> {
+    let keys = tiles.keys().as_slice();
+    let mut found = SmallVec::new();
+    let mut at = keys.partition_point(|key| key.overscaled_z < id.overscaled_z);
+    while let Some(&OverscaledTileID { overscaled_z, wrap, .. }) = keys.get(at) {
+        if overscaled_z != id.overscaled_z {
+            break;
+        }
+        let rest = keys.get(at..).unwrap_or_default();
+        let end = at + rest.partition_point(|key| key.overscaled_z == overscaled_z && key.wrap == wrap);
+        let place = OverscaledTileID { wrap, ..*id };
+        if let Ok(offset) = keys.get(at..end).unwrap_or_default().binary_search(&place) {
+            found.push(at + offset);
+        }
+        at = end;
+    }
+    found
+}
+
+/// A copy, for a new tile `id`, of a renderable tile of `tiles` that is `id`
+/// in another world copy. The copy's buckets, copies of the tile's, draw
+/// the geometry that the first of either to upload moves into the context's
+/// stores (`SourceTiles::upload_at`).
+fn world_copy<'a>(tiles: &'a VecMap<OverscaledTileID, Slot>, id: &OverscaledTileID) -> Option<WorldCopy<'a>> {
+    let tile = same_place(tiles, id)
+        .into_iter()
+        .filter_map(|at| Some(&tiles.get_index(at)?.1.tile))
+        .find(|tile| tile.id.wrap != id.wrap && tile.is_renderable())?;
+    WorldCopy::of(tile)
 }
 
 /// Readies the buckets of the geometry tile at `at` of `slots` for the

@@ -99,18 +99,11 @@ fn style(registry: &Registry, layers: &[Layer], zoom: f32) -> Result<Arc<SourceS
 }
 
 /// Adds tiles `ids` to the source `key` of `store`, laid out with `params`,
-/// and starts their loads as a cover starts them. A tile that the source's
-/// origin makes no load of is left out.
+/// which its origin starts as a cover starts them, without world copies.
 pub(crate) fn seed(store: &mut TileStore, key: SourceKey, ids: &[OverscaledTileID], params: LayoutParams) {
     let Some((source, ctx)) = store.source_mut(key) else { return };
     for id in ids {
-        let Some(tile) = source.info.new_tile(*id, params) else {
-            continue;
-        };
-        source.insert(tile);
-        source.update(id, ctx, |tile| {
-            tile.start_load();
-        });
+        source.add_tile(*id, params, false, ctx);
     }
 }
 
@@ -127,9 +120,8 @@ pub struct OriginTiles {
 
 impl OriginTiles {
     /// Tiles `ids` of a source of `kind` whose data comes from `origin`, in
-    /// a store that frees on `pool`, laid out for `mode`. Their loads start
-    /// as a cover starts them. A tile that `origin` makes no load of is left
-    /// out.
+    /// a store that frees on `pool`, laid out for `mode`. The origin starts
+    /// them as a cover starts them.
     pub fn new(
         pool: &TaskGroup,
         kind: TileKind,

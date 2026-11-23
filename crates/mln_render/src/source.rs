@@ -17,27 +17,33 @@
 //! decides which tiles the view needs, keeps them, and lays out or decodes
 //! what they load. With each new version of the source, the origin updates
 //! ([`DataOrigin::update`]) and says what its tiles cover ([`Cover`]). It
-//! keeps a [`TileLoad`] of each tile, and owns the tile's loading through
-//! hooks that the engine calls as the tile starts, as its
-//! [necessity](TileNecessity) changes, when it retries after a failure, when
-//! a reply to one of its loads arrives, and when what the tile took in
-//! fails to lay out or decode. Each hook gets the tile's [`LoadContext`]:
-//! through it the origin starts a load, whose [`Replier`] sends its replies
-//! from any thread, and gives the tile what the load brought as a
-//! [`TileInput`] of the tile's kind. The engine hands a reply to the origin
-//! only while its load is the tile's latest ([`LoadContext::begin_load`]).
-//! How data is cached, revalidated and kept fresh is the origin's own.
+//! [starts](DataOrigin::start) each new tile, making the
+//! [state](DataOrigin::Tile) it keeps of it, which the engine drops as the
+//! tile goes, and owns the tile's loading through hooks that the engine
+//! calls as a reply to one of its loads arrives, as its
+//! [necessity](TileNecessity) changes, when it retries after a failure, and
+//! when what the tile took in fails to lay out or decode. Each hook gets the
+//! tile's [`LoadContext`]: through it the origin starts a load, whose
+//! [`Replier`] sends its replies from any thread, and gives the tile what
+//! the load brought as a [`TileInput`] of the tile's kind. The engine hands
+//! a reply to the origin only while its load is the tile's latest
+//! ([`LoadContext::begin_load`]). How data is cached, revalidated and kept
+//! fresh is the origin's own.
+//!
+//! Necessity is a hint: an optional tile is one the view can do without, so
+//! an origin with a cheap way to get data, such as a cache, may try only
+//! that while the tile is optional. An origin without one loads every tile
+//! as it starts and ignores necessity.
 //!
 //! The engine runs [`SourceType::supply`] and the origin's hooks one at a
-//! time on the renderer's thread, so an origin and its tiles' loads needn't
-//! be `Send`. A load's work can run anywhere, as on the renderer's pool
-//! ([`LoadContext::pool`]): its [`Replier`] and its replies are `Send`. What
-//! the tiles take in lays out or decodes on the tile workers, through the
-//! worker codec where they run apart, or in the update for a
+//! time on the renderer's thread, so an origin and its tiles' states
+//! needn't be `Send`. A load's work can run anywhere, as on the renderer's
+//! pool ([`LoadContext::pool`]): its [`Replier`] and its replies are `Send`.
+//! What the tiles take in lays out or decodes on the tile workers, through
+//! the worker codec where they run apart, or in the update for a
 //! [synchronous](Cover::synchronous) cover; an origin's own types don't
 //! cross the codec.
 
-use std::any::Any;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -138,11 +144,14 @@ pub struct Cover {
 ///
 /// The tile hooks ([`start`](Self::start), [`receive`](Self::receive),
 /// [`set_necessity`](Self::set_necessity), [`retry`](Self::retry) and
-/// [`failed`](Self::failed)) get the tile's [`Load`](Self::Load) and its
-/// [`LoadContext`]. The engine calls none of the hooks from within another.
+/// [`failed`](Self::failed)) get the tile's [`LoadContext`], and all but
+/// `start` the origin's state of the tile. The engine calls none of the
+/// hooks from within another.
 pub trait DataOrigin: 'static {
-    /// What the origin keeps of each tile's loading.
-    type Load: TileLoad;
+    /// What the origin keeps of each tile. The engine drops it as the tile
+    /// goes, which lets go of what it holds, such as a request or a
+    /// subscription.
+    type Tile: 'static;
 
     /// What a tile's load gets back, which [`receive`](Self::receive)
     /// takes in.
@@ -151,91 +160,48 @@ pub trait DataOrigin: 'static {
     /// Takes in a new version of the source, or its first: clears or loads
     /// the tiles again as the source's rules say. Returns what the tiles
     /// cover, or `None` while the source has nothing to make tiles from,
-    /// in which case the engine leaves its tiles as they are.
+    /// in which case the engine leaves its tiles as they are and makes no
+    /// new ones.
     fn update(&mut self, update: &mut OriginUpdate<'_, Self>) -> Option<Cover>;
 
-    /// The load of a new tile, `tile`; `None` while the origin has nothing
-    /// to make tiles from, which leaves the tile out.
-    fn new_load(&mut self, tile: &NewTile<'_>) -> Option<Self::Load>;
-
-    /// Starts the load of a new tile, required or not.
-    fn start(&mut self, load: &mut Self::Load, cx: &mut LoadContext<'_, '_, Self::Reply>);
+    /// Starts a new tile, required or not, and returns the origin's state
+    /// of it. On a flat map, `copy` is the origin's state of the same tile
+    /// in another world copy, whose contents the new tile already shows:
+    /// [`cx.take_copy()`](LoadContext::take_copy) settles the tile on them,
+    /// as its load's answer. Otherwise the tile starts loading, or waits.
+    fn start(&mut self, cx: &mut LoadContext<'_, '_, Self::Reply>, copy: Option<&Self::Tile>) -> Self::Tile;
 
     /// Takes in `reply`, which came for the tile's latest load.
-    fn receive(&mut self, load: &mut Self::Load, reply: Self::Reply, cx: &mut LoadContext<'_, '_, Self::Reply>);
+    fn receive(&mut self, tile: &mut Self::Tile, reply: Self::Reply, cx: &mut LoadContext<'_, '_, Self::Reply>);
 
     /// The engine set how much the tile is needed, to
     /// [`cx.necessity()`](LoadContext::necessity) from `previous`, which may
     /// be the same: as each update's cover retains the tile, and as it
-    /// becomes optional. An optional tile only takes low-cost actions to
-    /// get its data, such as looking in the cache.
+    /// becomes optional.
     fn set_necessity(
         &mut self,
-        _load: &mut Self::Load,
+        _tile: &mut Self::Tile,
         _previous: TileNecessity,
         _cx: &mut LoadContext<'_, '_, Self::Reply>,
     ) {
     }
 
-    /// The engine retries the required tile's failed loads.
-    fn retry(&mut self, _load: &mut Self::Load, _cx: &mut LoadContext<'_, '_, Self::Reply>) {}
+    /// The engine retries the required tile's failed loads: in continuous
+    /// mode when the map is told to, and before each still image. A tile
+    /// that this begins a load of, or gives new data, loads anew; one that
+    /// it leaves as it was stays as it was.
+    fn retry(&mut self, _tile: &mut Self::Tile, _cx: &mut LoadContext<'_, '_, Self::Reply>) {}
 
     /// The engine couldn't lay out or decode what the tile last took in, and
     /// reported the error; the tile keeps what it shows. Not called for the
     /// origin's own [`LoadContext::fail`], nor for a layout that runs, and
     /// fails, within the hook that delivered, as a
     /// [synchronous](Cover::synchronous) cover's does.
-    fn failed(&mut self, _load: &mut Self::Load, _cx: &mut LoadContext<'_, '_, Self::Reply>) {}
-
-    /// Has `load`, of a new tile, take what `from` brought, the load of the
-    /// same tile in another world copy, whose contents the new tile starts
-    /// with: as a cache's answer, so that the tile settles without loading.
-    /// Returns false if the tile loads anew.
-    fn take_world_copy(&self, _load: &mut Self::Load, _from: &Self::Load) -> bool {
-        false
-    }
+    fn failed(&mut self, _tile: &mut Self::Tile, _cx: &mut LoadContext<'_, '_, Self::Reply>) {}
 }
 
-/// What a [`DataOrigin`] keeps of a tile's loading.
-pub trait TileLoad: Any {
-    /// The tile `tile` goes: lets go of what the load holds outside the
-    /// tile, such as its place among a provider's subscribers. The engine
-    /// drops the load after. Not called as the renderer itself drops; what
-    /// must go then goes in `Drop`.
-    fn retire(&mut self, _tile: &OverscaledTileID) {}
-}
-
-/// A new tile, whose load a [`DataOrigin`] makes.
-pub struct NewTile<'a> {
-    pub(crate) id: &'a OverscaledTileID,
-    pub(crate) pixel_ratio: f32,
-    pub(crate) order: &'a RequestOrder,
-}
-
-impl NewTile<'_> {
-    #[must_use]
-    pub fn id(&self) -> &OverscaledTileID {
-        self.id
-    }
-
-    /// The pixel ratio of the map, which a raster tile's resource asks for.
-    #[must_use]
-    pub fn pixel_ratio(&self) -> f32 {
-        self.pixel_ratio
-    }
-
-    /// When the tile's requests start among those that wait for a
-    /// connection, which the engine keeps up to date: for the tile's
-    /// resources.
-    #[must_use]
-    pub fn order(&self) -> RequestOrder {
-        self.order.clone()
-    }
-}
-
-/// A [`DataOrigin`]'s update: the source's new and previous versions, what
-/// the map says of its tiles, and the tiles, which the origin can clear or
-/// load again.
+/// A [`DataOrigin`]'s update: the source's new version, what the map says
+/// of its tiles, and the tiles, which the origin can clear or load again.
 pub struct OriginUpdate<'a, O: ?Sized> {
     pub(crate) parts: UpdateParts<'a>,
     pub(crate) origin: PhantomData<fn(&mut O)>,
@@ -250,6 +216,12 @@ impl<'a, O: DataOrigin> OriginUpdate<'a, O> {
     #[must_use]
     pub fn mode(&self) -> MapMode {
         self.parts.parameters.mode
+    }
+
+    /// The map's pixel ratio, which a raster tile's resource may ask for.
+    #[must_use]
+    pub fn pixel_ratio(&self) -> f32 {
+        self.parts.parameters.pixel_ratio
     }
 
     /// The map's highest zoom level.
@@ -294,20 +266,20 @@ impl<'a, O: DataOrigin> OriginUpdate<'a, O> {
         }
     }
 
-    /// Changes the load of each tile of the cover, not of the cache, that
-    /// `filter` picks, through `f`.
+    /// Changes each tile of the cover, not of the cache, that `filter`
+    /// picks, through `f`, which gets the origin's state of it.
     pub fn update_tiles(
         &mut self,
         filter: impl Fn(&OverscaledTileID) -> bool,
-        mut f: impl FnMut(&mut O::Load, &mut LoadContext<'_, '_, O::Reply>),
+        mut f: impl FnMut(&mut O::Tile, &mut LoadContext<'_, '_, O::Reply>),
     ) {
         self.parts.tiles.update_each(
             self.parts.ctx,
             |slot| !slot.place().is_cached() && filter(&slot.tile.id),
             |tile| {
-                tile.with_load(|load, tile| {
-                    if let Some(load) = typed::<O>(load) {
-                        f(load, &mut LoadContext::new(tile));
+                tile.with_state(|state, tile| {
+                    if let Some(state) = typed::<O>(state) {
+                        f(state, &mut LoadContext::new(tile));
                     }
                 });
             },
@@ -335,6 +307,14 @@ impl<'a, 't, R: Send + 'static> LoadContext<'a, 't, R> {
     #[must_use]
     pub fn necessity(&self) -> TileNecessity {
         self.tile.tile().load.necessity
+    }
+
+    /// When the tile's requests start among those that wait for a
+    /// connection, which the engine keeps up to date: for the tile's
+    /// resources.
+    #[must_use]
+    pub fn order(&self) -> RequestOrder {
+        self.tile.tile().load.order.clone()
     }
 
     /// Sets when the tile's data was modified and when it expires, which
@@ -385,9 +365,13 @@ impl<'a, 't, R: Send + 'static> LoadContext<'a, 't, R> {
         self.tile.keep_data();
     }
 
-    /// The tile loads again after a failure: it hasn't done what it can.
-    pub fn unsettle(&mut self) {
-        self.tile.unsettle();
+    /// In [`DataOrigin::start`], settles the new tile on the contents of
+    /// its world copy, which it shows, as its load's answer: a geometry
+    /// tile lays out the copy's data for itself. Returns false, and changes
+    /// nothing, for a tile that didn't start from a copy, or whose copy has
+    /// no data to give, as one with a decode still pending.
+    pub fn take_copy(&mut self) -> bool {
+        self.tile.take_copy()
     }
 
     /// Drops a geometry tile's data and style, so that it lays out anew once
