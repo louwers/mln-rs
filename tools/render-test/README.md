@@ -19,13 +19,13 @@ The tests render on WebGPU, or on the backend that `MLN_RENDER_BACKEND` names:
 ignores of its manifest in `manifests/`.
 
 The tests in `testdata/metrics/integration/gljs` are MapLibre GL JS's tests of
-image sources, with the images they load in `gljs/assets`: a manifest's
-`asset_path` names a directory whose files load in place of the cache's
-resources at the same `local://` paths. The tests beside that directory (in
-`gljs`) load the directories it holds (`image`) only from it, as GL JS's test
-server does, so a file missing there is not found; the other tests fall back to
-the cache. `mise run update:gljs-testdata <checkout>` copies them again, and
-`mise run update:testdata` leaves them alone.
+terrain and image sources, with the tiles and images they load in `gljs/assets`:
+a manifest's `asset_path` names a directory whose files load in place of the
+cache's resources at the same `local://` paths. The tests beside that directory
+(in `gljs`) load the directories it holds (`tiles`, `geojson`, `image`) only
+from it, as GL JS's test server does, so a file missing there is not found; the
+other tests fall back to the cache. `mise run update:gljs-testdata <checkout>`
+copies them again, and `mise run update:testdata` leaves them alone.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering

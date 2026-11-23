@@ -347,6 +347,10 @@ impl TestRunnerImpl for Impl {
         self.map.edit_style(|style| style_ops::set_light(style, json))
     }
 
+    fn set_terrain(&mut self, json: &str) -> Result<(), MapError> {
+        self.map.edit_style(|style| style_ops::set_terrain(style, json))
+    }
+
     fn add_source(&mut self, id: &str, json: &str) -> Result<(), MapError> {
         style_ops::add_source(&mut self.map, id, json)
     }

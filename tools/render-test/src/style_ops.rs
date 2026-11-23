@@ -2,6 +2,7 @@ use mln_conversion::Convertible;
 use mln_map::Map;
 use mln_map_types::CameraOptions;
 use mln_style::{Edit, Style};
+use mln_util::ErrorKind;
 
 use crate::runner::MapError;
 
@@ -115,6 +116,15 @@ pub(crate) fn set_light(style: &mut Style, json: &str) -> Result<(), MapError> {
     };
     let _ = style.apply(Edit::SetLight(light));
     Ok(())
+}
+
+/// Sets the style's root `terrain` from `json`, or removes it if `json` is
+/// `null`. A style that doesn't take terrain is [`MapError::Unsupported`].
+pub(crate) fn set_terrain(style: &mut Style, json: &str) -> Result<(), MapError> {
+    style.set_root_property_json("terrain", json).map_err(|e| match e.kind {
+        ErrorKind::Unsupported => MapError::Unsupported(e.message),
+        _ => MapError::Conversion(e.message),
+    })
 }
 
 /// Removes the source `source_name`, and returns whether there was one.
