@@ -1373,6 +1373,46 @@ fn refresh_keeps_tiles_that_only_an_earlier_style_listed() {
     assert_eq!(format!("tile {v2}").as_bytes(), current.data.expect("data").as_slice());
 }
 
+/// Each tile's request names the format that its source type gives, from
+/// the style's tileset or from the TileJSON's.
+#[test]
+fn tile_requests_name_the_format_their_source_type_gives() {
+    let test = OfflineTest::new();
+    let region = test.create_region().expect("region");
+    test.respond(Kind::Style, |_| {
+        with_data(
+            r#"{"version":8,"sources":{
+                "mvt":{"type":"vector","tiles":["http://127.0.0.1:3000/mvt/{z}-{x}-{y}"]},
+                "mlt":{"type":"vector","encoding":"mlt","tiles":["http://127.0.0.1:3000/mlt/{z}-{x}-{y}"]},
+                "remote":{"type":"vector","url":"http://127.0.0.1:3000/tiles.json"},
+                "raster":{"type":"raster","tiles":["http://127.0.0.1:3000/raster/{z}-{x}-{y}"]}},"layers":[]}"#,
+        )
+    });
+    test.respond(Kind::Source, |_| {
+        with_data(r#"{"tilejson":"2.1.0","encoding":"mlt","tiles":["http://127.0.0.1:3000/remote/{z}-{x}-{y}"]}"#)
+    });
+    let requested = Arc::new(Mutex::new(Vec::new()));
+    let requests = Arc::clone(&requested);
+    test.respond(Kind::Tile, move |resource| {
+        let tile = resource.tile_data.as_ref().expect("a tile");
+        requests.lock().push((tile.url_template.clone(), tile.format));
+        with_data("tile")
+    });
+    download_until_inactive(&test, region.id, &world_at_zoom(0.0), None);
+
+    let mut requested = requested.lock().clone();
+    requested.sort_by(|a, b| a.0.cmp(&b.0));
+    requested.dedup();
+    let template = |name: &str| format!("http://127.0.0.1:3000/{name}/{{z}}-{{x}}-{{y}}");
+    let expected = vec![
+        (template("mlt"), TileFormat::Mlt),
+        (template("mvt"), TileFormat::Mvt),
+        (template("raster"), TileFormat::Image),
+        (template("remote"), TileFormat::Mlt),
+    ];
+    assert_eq!(expected, requested);
+}
+
 // gtest: OfflineDownload.InlineSourceWithoutTileURLsHasNoTiles
 #[test]
 fn inline_source_without_tile_urls_has_no_tiles() {

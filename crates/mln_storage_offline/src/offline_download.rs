@@ -22,7 +22,6 @@ use mln_storage::resource::{Priority, TileFormat, Usage};
 use mln_storage::response::{Caching, Reason, ResourceError};
 use mln_storage::{FileSource, Kind, LoadingMethod, Request, Resource, Response};
 use mln_style::StyleRegistry;
-use mln_style::layer_type::SourceKind;
 use mln_style::parser::Parser;
 use mln_style::source_type::OfflineResources;
 use mln_text::glyph::{
@@ -35,7 +34,7 @@ use mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::i18n::glyph_range_is_entirely_locally_generated;
 use mln_util::range::Range;
-use mln_util::tileset::{Tileset, VectorEncoding};
+use mln_util::tileset::Tileset;
 use mln_vec_map::VecMap;
 
 const K_RESOURCES_BATCH_SIZE: usize = 64;
@@ -336,13 +335,14 @@ impl OfflineDownload {
                     continue;
                 }
                 // A source without tile URLs has no tiles to download.
-                OfflineResources::Tiles { tileset, tile_size, round_zoom } => (Some(tileset), tile_size, round_zoom),
+                OfflineResources::Tiles { tileset, tile_size, round_zoom, .. } => (Some(tileset), tile_size, round_zoom),
                 OfflineResources::TileJson { url, tile_size, round_zoom } => {
                     result.required_resource_count += 1;
                     let source_response = db.get(&Resource::source(&url));
                     let tileset = source_response
                         .and_then(|response| response.data)
-                        .and_then(|data| record.data().offline_tileset(&data).ok());
+                        .and_then(|data| record.data().offline_tileset(&data).ok())
+                        .map(|(tileset, _)| tileset);
                     // As a download does, count no tiles for a TileJSON that
                     // is missing, can't be read, or has no tile URLs, and
                     // leave the count imprecise.
@@ -396,11 +396,11 @@ impl OfflineDownload {
                 let Some(data) = &response.data else {
                     return Err("the TileJSON has no content".to_owned());
                 };
-                let tileset = source.data().offline_tileset(data)?;
+                let (tileset, format) = source.data().offline_tileset(data)?;
                 if tileset.tiles.is_empty() {
                     return Err("the TileJSON has no tile URLs".to_owned());
                 }
-                self.queue_tiles(source.info().layer_kind, *round_zoom, *tile_size, &tileset);
+                self.queue_tiles(format, *round_zoom, *tile_size, &tileset);
                 if self.required_source_urls.remove(url) && self.required_source_urls.is_empty() {
                     self.status.required_resource_count_is_precise = true;
                 }
@@ -422,8 +422,8 @@ impl OfflineDownload {
             let record = source.clone();
             match record.data().offline() {
                 OfflineResources::None => {}
-                OfflineResources::Tiles { tileset, tile_size, round_zoom } => {
-                    self.queue_tiles(record.info().layer_kind, round_zoom, tile_size, &tileset);
+                OfflineResources::Tiles { tileset, format, tile_size, round_zoom } => {
+                    self.queue_tiles(format, round_zoom, tile_size, &tileset);
                 }
                 OfflineResources::TileJson { url, tile_size, round_zoom } => {
                     self.status.required_resource_count_is_precise = false;
@@ -555,18 +555,13 @@ impl OfflineDownload {
         self.resources_remaining.push_front(resource);
     }
 
-    /// Queues the tiles of `tileset`, of a source whose layers are of
-    /// `kind`, that cover the region, of the zoom levels nearest the
-    /// region's if `round_zoom`.
-    fn queue_tiles(&mut self, kind: SourceKind, round_zoom: bool, tile_size: u16, tileset: &Tileset) {
+    /// Queues the tiles of `tileset` that cover the region, of the zoom
+    /// levels nearest the region's if `round_zoom`, whose requests name
+    /// `format`.
+    fn queue_tiles(&mut self, format: TileFormat, round_zoom: bool, tile_size: u16, tileset: &Tileset) {
         // A source without tile URLs has no tiles to download.
         let Some(url_template) = tileset.tiles.first() else {
             return;
-        };
-        let format = match kind {
-            SourceKind::Geometry if tileset.vector_encoding == Some(VectorEncoding::MLT) => TileFormat::Mlt,
-            SourceKind::Geometry => TileFormat::Mvt,
-            SourceKind::None | SourceKind::Raster | SourceKind::RasterDem | SourceKind::Value(_) => TileFormat::Image,
         };
         let (status, remaining) = (&mut self.status, &mut self.resources_remaining);
         let pixel_ratio = self.definition.pixel_ratio();

@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use mln_storage::{Data, Resource};
+use mln_storage::{Data, Resource, TileFormat};
 use mln_util::constants;
 use mln_util::logging::{Event, Log};
 use mln_util::pool::Respond;
@@ -50,13 +50,13 @@ pub enum OfflineResources {
     #[default]
     None,
     /// The tiles of a tileset that's known without a fetch, of tiles
-    /// `tile_size` pixels wide. With `round_zoom`, a region's tiles are of
-    /// the zoom levels nearest its own, as raster tiles are, rather than
-    /// those below.
-    Tiles { tileset: Tileset, tile_size: u16, round_zoom: bool },
+    /// `tile_size` pixels wide, whose requests name `format`. With
+    /// `round_zoom`, a region's tiles are of the zoom levels nearest its own,
+    /// as raster tiles are, rather than those below.
+    Tiles { tileset: Tileset, format: TileFormat, tile_size: u16, round_zoom: bool },
     /// The TileJSON at `url`, then the tiles, as [`Tiles`](Self::Tiles)
-    /// says, of the tileset that [`ErasedSource::offline_tileset`] makes of
-    /// it.
+    /// says, of the tileset and in the format that
+    /// [`ErasedSource::offline_tileset`] makes of it.
     TileJson { url: String, tile_size: u16, round_zoom: bool },
     /// The source's data at `url`, which is one resource.
     Source { url: String },
@@ -148,12 +148,13 @@ pub trait StyleSourceType: Sized + Send + Sync + 'static {
     }
 
     /// The tileset that an offline download takes the source's tiles from,
-    /// once the TileJSON that [`OfflineResources::TileJson`] named arrived.
+    /// once the TileJSON that [`OfflineResources::TileJson`] named arrived,
+    /// and the format that the tiles' requests name.
     ///
     /// # Errors
     ///
     /// When `tilejson` doesn't give the source a tileset.
-    fn offline_tileset(_source: &SourceData<Self>, _tilejson: &[u8]) -> Result<Tileset, String> {
+    fn offline_tileset(_source: &SourceData<Self>, _tilejson: &[u8]) -> Result<(Tileset, TileFormat), String> {
         Err(format!("a {} source has no TileJSON", Self::INFO.name))
     }
 }
@@ -260,7 +261,7 @@ pub trait ErasedSource: Any + Send + Sync {
     /// # Errors
     ///
     /// When `tilejson` doesn't give the source a tileset.
-    fn offline_tileset(&self, tilejson: &[u8]) -> Result<Tileset, String>;
+    fn offline_tileset(&self, tilejson: &[u8]) -> Result<(Tileset, TileFormat), String>;
 }
 
 /// A job that describes a source's fetched data, answering through the
@@ -325,7 +326,7 @@ impl<T: StyleSourceType> ErasedSource for SourceData<T> {
         T::offline(self)
     }
 
-    fn offline_tileset(&self, tilejson: &[u8]) -> Result<Tileset, String> {
+    fn offline_tileset(&self, tilejson: &[u8]) -> Result<(Tileset, TileFormat), String> {
         T::offline_tileset(self, tilejson)
     }
 }

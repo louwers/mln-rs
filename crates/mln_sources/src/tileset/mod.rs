@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use mln_render::source::{DemTiles, GeometryTiles, RasterTiles};
-use mln_storage::{Data, Resource};
+use mln_storage::{Data, Resource, TileFormat};
 use mln_style::conversion::{Convertible, Error};
 use mln_style::expression::Functions;
 use mln_style::layer_type::SourceKind;
@@ -55,6 +55,15 @@ impl TilesetKind for RasterDemKind {
 /// view's, as raster and raster-dem tiles are, rather than the level below.
 fn round_zoom<K: TilesetKind>() -> bool {
     K::INFO.layer_kind != SourceKind::Geometry
+}
+
+/// The format that requests of `tileset`'s tiles of the kind `K` name.
+fn tile_format<K: TilesetKind>(tileset: &Tileset) -> TileFormat {
+    match K::INFO.layer_kind {
+        SourceKind::Geometry if tileset.vector_encoding == Some(VectorEncoding::MLT) => TileFormat::Mlt,
+        SourceKind::Geometry => TileFormat::Mvt,
+        _ => TileFormat::Image,
+    }
 }
 
 /// A source type whose tiles a tileset lists.
@@ -168,18 +177,22 @@ impl<K: TilesetKind> StyleSourceType for TilesetSourceType<K> {
     }
 
     fn offline(source: &SourceData<Self>) -> OfflineResources {
-        let (options, round_zoom) = (&source.options, round_zoom::<K>());
+        let (options, tile_size, round_zoom) = (&source.options, source.options.tile_size, round_zoom::<K>());
         match &options.url {
-            Some(url) => OfflineResources::TileJson { url: url.clone(), tile_size: options.tile_size, round_zoom },
+            Some(url) => OfflineResources::TileJson { url: url.clone(), tile_size, round_zoom },
             None => match options.inline_tileset() {
-                Some(tileset) => OfflineResources::Tiles { tileset, tile_size: options.tile_size, round_zoom },
+                Some(tileset) => {
+                    OfflineResources::Tiles { format: tile_format::<K>(&tileset), tileset, tile_size, round_zoom }
+                }
                 None => OfflineResources::None,
             },
         }
     }
 
-    fn offline_tileset(source: &SourceData<Self>, tilejson: &[u8]) -> Result<Tileset, String> {
-        source.options.tileset_with_tilejson(tilejson, K::INFO.layer_kind)
+    fn offline_tileset(source: &SourceData<Self>, tilejson: &[u8]) -> Result<(Tileset, TileFormat), String> {
+        let tileset = source.options.tileset_with_tilejson(tilejson, K::INFO.layer_kind)?;
+        let format = tile_format::<K>(&tileset);
+        Ok((tileset, format))
     }
 }
 
