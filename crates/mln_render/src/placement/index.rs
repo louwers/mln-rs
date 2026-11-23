@@ -409,7 +409,9 @@ impl CollisionIndex {
                         }
                     }
                     let rank = |entry: &Entry| {
-                        ranks.binary_search_by_key(&entry.feature, |(feature, _)| *feature).map_or(order.len(), |at| ranks[at].1)
+                        ranks
+                            .binary_search_by_key(&entry.feature, |(feature, _)| *feature)
+                            .map_or(order.len(), |at| ranks[at].1)
                     };
                     hits.sort_by_key(|entry| Reverse(rank(entry)));
                 }
