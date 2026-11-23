@@ -29,7 +29,8 @@
 //!    images of its patterns ([`LayoutCx::need_patterns`]). n-gon's
 //!    `NgonLayout` builds a quad per point. A layer of a raster or image
 //!    source has the input [`RasterTiles`], each tile's image
-//!    ([`RasterTile`]), one of a raster-dem source the input [`DemTiles`],
+//!    ([`RasterTile`]) and the quad it warps onto ([`ImageQuad`]), one of a
+//!    raster-dem source the input [`DemTiles`],
 //!    each tile's elevations ([`DemTile`]), one of a source whose type
 //!    delivers a value of its own for each tile the input [`ValueTiles<V>`],
 //!    each tile's `&V`, and a layer without a source the input
@@ -173,6 +174,7 @@ pub use crate::render_light::EvaluatedLight;
 use crate::render_tile::{TileContent, ViewPlace};
 use crate::tile::contents::GeometryContents;
 use crate::tile::dem::DemContents;
+pub use crate::tile::raster::ImageQuad;
 use crate::tile::raster::RasterContents;
 pub use crate::tile_matrix::{TileProjection, TileTransform};
 use crate::tile_values::TileMap;
@@ -328,9 +330,18 @@ impl<'a> RasterTile<'a> {
         self.texture
     }
 
+    /// Where the image draws in the tile: the quad that a draw puts the
+    /// vertices of its [`surface`](Self::surface) on, the tile's own square
+    /// for a raster tile's. Every tile of a source draws on the same quad.
+    #[must_use]
+    pub fn quad(self) -> ImageQuad {
+        self.contents.quad()
+    }
+
     /// The surface that the image drapes over in `frame`: the parts of the
     /// tile that it draws, each vertex sampling the image where it is in
-    /// the tile, or an image source's image over its coordinates.
+    /// the tile, or, for an image source's image, the unit square that a
+    /// draw puts on its [`quad`](Self::quad).
     pub fn surface(self, res: &mut Resources, frame: &Frame<'_>) -> TileSurface<ImageVertex> {
         let geometry = self.contents.geometry();
         if self.source_image

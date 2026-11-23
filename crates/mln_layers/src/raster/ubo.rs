@@ -6,7 +6,8 @@ mln_gfx::uniform_block! {
 }
 
 mln_gfx::uniform_block! {
-    /// Evaluated properties that do not depend on the tile.
+    /// Evaluated properties that do not depend on the tile, and the quad
+    /// that the vertices' unit square (0 to 8192 on both axes) draws on.
     pub struct RasterEvaluatedPropsUBO {
         pub spin_weights: [f32; 4],
         pub tl_parent: [f32; 2],
@@ -22,5 +23,15 @@ mln_gfx::uniform_block! {
         pub pad1: f32,
         #[padding]
         pub pad2: f32,
+        /// The quad's top left corner (x, y) and top right corner (z, w),
+        /// in tile units.
+        pub coords_top: [f32; 4],
+        /// Its bottom left corner (x, y) and bottom right corner (z, w).
+        pub coords_bottom: [f32; 4],
+        /// The perspective terms of the projective warp from the unit
+        /// square onto the quad (x, y), and how far it is blended towards
+        /// the bilinear warp (z): 0, 0, 1 for a parallelogram such as a
+        /// tile's own square.
+        pub image_warp: [f32; 4],
     }
 }

@@ -2,8 +2,8 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::TextureFilterType;
 use mln_render::draw::{Composite, Draw, Draws, Mesh, MeshDesc, Sampler};
 use mln_render::layer::{
-    EvaluateCx, Evaluation, FrameTile, Layer, NewCx, PrepareCx, RasterTile, RasterTiles, TileCx, TileTransform,
-    UpdateCx,
+    EvaluateCx, Evaluation, FrameTile, ImageQuad, Layer, NewCx, PrepareCx, RasterTile, RasterTiles, TileCx,
+    TileTransform, UpdateCx,
 };
 use mln_style_types::RasterResamplingType;
 
@@ -57,7 +57,9 @@ impl Layer for RasterLayer {
         if let Some(composite) = Composite::of(1.0, *paint.raster_layer_blend.uniform()) {
             main.composite(composite);
         }
-        main.block(&props(paint));
+        // Every tile of a source draws on the same quad.
+        let quad = cx.tiles().next().map_or(ImageQuad::TILE, |(_, raster, _)| raster.quad());
+        main.block(&props(paint, &quad));
         // On the pixel grid while the camera stands still.
         let how = TileTransform { aligned: !cx.frame.camera_moving, ..TileTransform::default() };
         for (tile, _, mesh) in cx.tiles() {
@@ -67,8 +69,10 @@ impl Layer for RasterLayer {
     }
 }
 
-/// The block of `paint` that the layer's draws share.
-fn props(paint: &RasterPaintProperties::PossiblyEvaluated) -> RasterEvaluatedPropsUBO {
+/// The block of `paint` that the layer's draws share, which put their
+/// vertices on `quad`.
+fn props(paint: &RasterPaintProperties::PossiblyEvaluated, quad: &ImageQuad) -> RasterEvaluatedPropsUBO {
+    let [top_left, top_right, bottom_right, bottom_left] = quad.corners;
     let spin = mln_math::deg2radf(*paint.raster_hue_rotate.uniform());
     let (s, c, sqrt3) = (spin.sin(), spin.cos(), 3.0f32.sqrt());
     let saturation = *paint.raster_saturation.uniform();
@@ -84,6 +88,9 @@ fn props(paint: &RasterPaintProperties::PossiblyEvaluated) -> RasterEvaluatedPro
         brightness_high: *paint.raster_brightness_max.uniform(),
         saturation_factor: if saturation > 0.0 { 1.0 - 1.0 / (1.001 - saturation) } else { -saturation },
         contrast_factor: if contrast > 0.0 { 1.0 / (1.0 - contrast) } else { 1.0 + contrast },
+        coords_top: [top_left[0], top_left[1], top_right[0], top_right[1]],
+        coords_bottom: [bottom_left[0], bottom_left[1], bottom_right[0], bottom_right[1]],
+        image_warp: [quad.perspective[0], quad.perspective[1], quad.blend, 0.0],
         ..RasterEvaluatedPropsUBO::default()
     }
 }

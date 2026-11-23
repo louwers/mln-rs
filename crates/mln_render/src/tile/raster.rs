@@ -174,6 +174,48 @@ impl MaskedGeometry {
     }
 }
 
+/// Where a raster tile's image draws in its tile
+/// ([`RasterTile::quad`](crate::layer::RasterTile::quad)): on a quad of four
+/// corners in the tile's units, onto which a warp puts the unit square that
+/// the vertices of the image's surface span, 0 to
+/// [`EXTENT`](mln_util::constants::EXTENT) on both axes. A raster tile's
+/// image draws on the tile's own square ([`TILE`](Self::TILE)), and an
+/// image source's on the corners of its coordinates.
+///
+/// The warp puts the point `(u, v)` of the unit square, each from 0 to 1, at
+/// `mix(projective, bilinear, blend)`, where `bilinear` interpolates the
+/// corners, `projective` is `(a * u + b * v + top_left) / d` with
+/// `a = top_right - top_left + perspective[0] * top_right`,
+/// `b = bottom_left - top_left + perspective[1] * bottom_left` and
+/// `d = perspective[0] * u + perspective[1] * v + 1`, and `mix(x, y, t)` is
+/// `x * (1 - t) + y * t`. The texture coordinates follow projectively: a
+/// vertex weighs its own by `mix(1 / d, 1, blend)`, and a fragment divides
+/// what it interpolates of them by what it interpolates of the weight. So
+/// two triangles draw a projective warp exactly, and the surface of a warp
+/// blended toward the bilinear one has a grid of cells.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ImageQuad {
+    /// The corners: top left, top right, bottom right and bottom left.
+    pub corners: [[f32; 2]; 4],
+    /// The perspective terms of the projective warp, along x and y.
+    pub perspective: [f32; 2],
+    /// How far the warp is blended from the projective one toward the
+    /// bilinear one: 1 for a parallelogram, which both warp affinely.
+    pub blend: f32,
+}
+
+impl ImageQuad {
+    /// The quad of a tile itself, which leaves the vertices where they are.
+    pub const TILE: ImageQuad = {
+        let extent = constants::EXTENT as f32;
+        ImageQuad {
+            corners: [[0.0, 0.0], [extent, 0.0], [extent, extent], [0.0, extent]],
+            perspective: [0.0; 2],
+            blend: 1.0,
+        }
+    };
+}
+
 /// A raster tile's image and the geometry that draws it, which the tile
 /// masks, or an image source's image and the geometry that warps it to its
 /// coordinates.
@@ -183,6 +225,8 @@ pub(crate) struct RasterContents {
     /// The image's texture, once the contents uploaded.
     texture: Option<Texture>,
     geometry: MaskedGeometry,
+    /// The quad the geometry draws on.
+    quad: ImageQuad,
 }
 
 impl RasterContents {
@@ -193,7 +237,13 @@ impl RasterContents {
 
     #[must_use]
     pub(crate) fn with_shared_image(image: Option<Arc<PremultipliedImage>>) -> Self {
-        RasterContents { id: SimpleIdentity::new(), image, texture: None, geometry: MaskedGeometry::default() }
+        RasterContents {
+            id: SimpleIdentity::new(),
+            image,
+            texture: None,
+            geometry: MaskedGeometry::default(),
+            quad: ImageQuad::TILE,
+        }
     }
 
     /// The contents' identity, which tells what the layers make of them
@@ -222,10 +272,23 @@ impl RasterContents {
         &self.geometry
     }
 
+    /// The quad the geometry draws on.
+    #[must_use]
+    pub(crate) fn quad(&self) -> ImageQuad {
+        self.quad
+    }
+
     /// Makes the geometry `vertices` and `indices` in `segments`, which an
-    /// image source warps its image with.
-    pub(crate) fn set_geometry(&mut self, vertices: Vec<ImageVertex>, indices: Vec<u16>, segments: Vec<SegmentBase>) {
+    /// image source draws its image with, on `quad`.
+    pub(crate) fn set_geometry(
+        &mut self,
+        vertices: Vec<ImageVertex>,
+        indices: Vec<u16>,
+        segments: Vec<SegmentBase>,
+        quad: ImageQuad,
+    ) {
         self.geometry.set(vertices, indices, segments);
+        self.quad = quad;
         self.id = SimpleIdentity::new();
     }
 

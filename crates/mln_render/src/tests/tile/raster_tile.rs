@@ -190,7 +190,7 @@ fn contents_take_a_new_identity_when_their_geometry_changes_and_keep_their_textu
     contents.unmask();
     assert_ne!(masked, contents.id());
     let warped = contents.id();
-    contents.set_geometry(Vec::new(), Vec::new(), Vec::new());
+    contents.set_geometry(Vec::new(), Vec::new(), Vec::new(), crate::layer::ImageQuad::TILE);
     assert_ne!(warped, contents.id(), "an image source's image warped again");
     contents.upload(&mut context);
     assert_eq!(Some(&texture), contents.texture());
