@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.0.16](https://github.com/louwers/mln-rs/compare/v0.0.15...v0.0.16) - 2026-11-23
+
+- fix(renderer): report a frame's GPU failure, and fail its still image ([#759](https://github.com/louwers/mln-rs/pull/759))
+- fix(map): go idle only on a frame of the map's last update ([#760](https://github.com/louwers/mln-rs/pull/760))
+- fix(renderer): warp an image whose corners aren't a parallelogram ([#757](https://github.com/louwers/mln-rs/pull/757))
+- fix(map): keep what a gesture grabs under the pointer on a pitched map ([#758](https://github.com/louwers/mln-rs/pull/758))
+- perf(renderer): prepare a hillshade bucket's slopes once ([#753](https://github.com/louwers/mln-rs/pull/753))
+- fix(renderer): image sources in every world copy, and loaded when off screen ([#756](https://github.com/louwers/mln-rs/pull/756))
+- fix(renderer): clear an overflowing stencil in every world copy in view ([#754](https://github.com/louwers/mln-rs/pull/754))
+- fix(map-types): scale heights as at the center, so the center's altitude draws at the center ([#755](https://github.com/louwers/mln-rs/pull/755))
+- fix(renderer): turn a viewport-lit hillshade's lights with the map ([#752](https://github.com/louwers/mln-rs/pull/752))
+- fix(renderer): space viewport line labels at the size their glyphs draw ([#751](https://github.com/louwers/mln-rs/pull/751))
+- fix(renderer): cull a fill extrusion's back faces in a flipped viewport ([#750](https://github.com/louwers/mln-rs/pull/750))
+- fix(renderer): set an extrusion's depth pass back, so a wall that tiles share draws whole ([#749](https://github.com/louwers/mln-rs/pull/749))
+- test(map): escape the sprite path in the style loader tests' JSON ([#746](https://github.com/louwers/mln-rs/pull/746))
+- feat: make WebGPU opt-in natively, shrinking the C library by 24% ([#745](https://github.com/louwers/mln-rs/pull/745))
+- 0 chore: update Cargo.toml dependencies
+
 ## [0.0.15](https://github.com/louwers/mln-rs/compare/v0.0.14...v0.0.15) - 2026-11-22
 
 - Accept rusqlite 0.42, so apps on sqlite-compressions 0.4 can link mln-rs ([#744](https://github.com/louwers/mln-rs/pull/744))
