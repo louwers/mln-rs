@@ -6,9 +6,10 @@
 //! source, as a map's frames do. Their tiles load as a scripted origin's do:
 //! a required tile loads once, and a tile that becomes optional stops its
 //! load. A network has `SLOTS` loads in flight at once, as the online file
-//! source does, and answers each `LATENCY` frames after it got a slot. The
-//! harness counts the frames until the view the camera stops at has all its
-//! tiles, or the loads each tile began.
+//! source does, and answers each `LATENCY` frames after it got a slot, or,
+//! while it fails, with an error that leaves the load open for the file
+//! source's retry. The harness counts the frames until the view the camera
+//! stops at has all its tiles, or the loads each tile began.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
@@ -57,24 +58,32 @@ struct Pending {
 
 /// Answers every tile of the vector source with the same vector tile, and
 /// every tile of the raster source with the same image: the open loads, in
-/// the order the tiles began them, the frames ended, and how many loads
-/// each tile began.
+/// the order the tiles began them, the frames ended, how many loads each
+/// tile began, and the loads answered with an error, which wait for the file
+/// source's retry.
 struct Network {
     script: Script,
     open: VecDeque<Pending>,
     frame: usize,
     made: BTreeMap<String, usize>,
+    retrying: Vec<Pending>,
+    failed: BTreeSet<String>,
+    failing: bool,
     vector_tile: Data,
     raster_tile: Data,
 }
 
 impl Network {
     fn new(script: Script) -> Self {
+        script.keep_failed_loads_open();
         Network {
             script,
             open: VecDeque::new(),
             frame: 0,
             made: BTreeMap::new(),
+            retrying: Vec::new(),
+            failed: BTreeSet::new(),
+            failing: false,
             vector_tile: Arc::new(read_file("test/fixtures/map/issue12432/0-0-0.mvt")),
             raster_tile: Arc::new(read_file("test/fixtures/annotations/emerald.png")),
         }
@@ -101,9 +110,45 @@ impl Network {
             .partition(|pending| pending.in_flight_since.is_some_and(|since| frame + 1 - since >= LATENCY));
         self.open = open;
         for pending in answered {
-            let data = if pending.load.source == "vector" { &self.vector_tile } else { &self.raster_tile };
-            pending.load.reply(Reply::Bytes(Arc::clone(data)));
+            if self.failing {
+                pending.load.reply(Reply::Fail("NetworkError".to_owned()));
+                self.failed.insert(pending.tile.clone());
+                self.retrying.push(pending);
+            } else {
+                self.answer(&pending);
+            }
         }
+    }
+
+    /// Answers `pending` with its tile.
+    fn answer(&self, pending: &Pending) {
+        let data = if pending.load.source == "vector" { &self.vector_tile } else { &self.raster_tile };
+        pending.load.reply(Reply::Bytes(Arc::clone(data)));
+    }
+
+    /// Answers the loads in flight with an error from now on, or with their
+    /// tiles again.
+    fn set_failing(&mut self, failing: bool) {
+        self.failing = failing;
+    }
+
+    /// The file source's retry: answers each load that an error left open,
+    /// and that the tile still waits for, with its tile.
+    fn retry_failed(&mut self) {
+        for pending in std::mem::take(&mut self.retrying).iter().filter(|pending| !pending.load.is_stopped()) {
+            self.answer(pending);
+        }
+    }
+
+    /// The tiles whose loads the network answered with an error.
+    fn failed(&self) -> BTreeSet<String> {
+        self.failed.clone()
+    }
+
+    /// The tiles of the loads an error left open that their tiles still wait
+    /// for.
+    fn retrying(&self) -> BTreeSet<String> {
+        self.retrying.iter().filter(|pending| !pending.load.is_stopped()).map(|pending| pending.tile.clone()).collect()
     }
 
     /// The tiles of the open loads, oldest first.
@@ -259,6 +304,12 @@ impl Scene {
         (1 + tiles.div_ceil(SLOTS)) * LATENCY
     }
 
+    /// The vector source's tiles at zoom 14, the ideal zoom of a view at 14,
+    /// that can't draw.
+    fn z14_holes(&self) -> usize {
+        self.pyramids()[0].cover().filter(|tile| tile.id.overscaled_z == 14 && !tile.is_renderable()).count()
+    }
+
     /// The world copies that the vector source draws.
     fn vector_wraps(&self) -> BTreeSet<i16> {
         self.pyramids()[0].rendered().map(|rendered| rendered.id.wrap).collect()
@@ -395,4 +446,95 @@ fn pan_to_a_new_world_copy_draws_it_at_once() {
     assert_eq!(BTreeMap::new(), scene.network.requested_again());
     let calls = scene.network.script.take_calls();
     assert!(calls.iter().any(|call| matches!(call, Call::TookCopy(_))), "the new copies took the loaded ones'");
+}
+
+/// A fly from far away into a view at zoom 14 whose tile loads fail, as a
+/// dropped connection fails every request in flight on it.
+fn fly_into_failing_view(scene: &mut Scene, view: (f64, f64)) {
+    scene.frames_until_complete(6.0, (40.0, 60.0));
+    scene.network.set_failing(true);
+    for _ in 0..12 {
+        scene.frame(14.0, view);
+    }
+    scene.network.set_failing(false);
+    assert!(scene.z14_holes() > 0, "the failed loads left holes");
+}
+
+/// A tile whose load failed waits, in the view, for the file source to ask
+/// again, and loads from that answer: its load stays open, and the network
+/// gets no new one.
+#[test]
+fn a_failed_tile_in_view_loads_when_the_file_source_retries() {
+    let mut scene = Scene::new(Size::new(1024, 768));
+    let view = z14_point(8418.5, 5384.5);
+    fly_into_failing_view(&mut scene, view);
+    for _ in 0..30 {
+        scene.frame(14.0, view);
+    }
+    let holes = scene.z14_holes();
+    assert!(holes > 0, "nothing loads a failed tile but the file source's retry");
+    assert_eq!(scene.network.failed(), scene.network.retrying(), "every failed load stays open for the retry");
+
+    scene.network.retry_failed();
+    for _ in 0..30 {
+        scene.frame(14.0, view);
+    }
+    assert_eq!(0, scene.z14_holes(), "the retry filled the {holes} holes");
+    assert_eq!(BTreeMap::new(), scene.network.requested_again(), "the retry began no new loads");
+}
+
+/// A tile whose load failed and that left the view goes, rather than wait in
+/// the cache as if it were loading, whether or not it is next to the view:
+/// back in the view, it loads anew, without the file source's retry.
+#[test]
+fn a_failed_tile_that_leaves_the_view_is_requested_again_on_its_return() {
+    let mut scene = Scene::new(Size::new(1024, 768));
+    let view = z14_point(8418.5, 5384.5);
+    fly_into_failing_view(&mut scene, view);
+
+    // Two and a half tiles east: the column the view leaves last is next to
+    // the new view, the others further.
+    let east = z14_point(8421.0, 5384.5);
+    for _ in 0..30 {
+        scene.frame(14.0, east);
+    }
+    let left_behind: BTreeSet<String> =
+        scene.network.failed().into_iter().filter(|tile| tile.starts_with("vector/14/")).collect();
+    let retrying = scene.network.retrying();
+    assert!(left_behind.is_disjoint(&retrying), "the tiles that left the view stopped their loads: {retrying:?}");
+
+    for _ in 0..60 {
+        scene.frame(14.0, view);
+    }
+    assert_eq!(0, scene.z14_holes(), "the failed tiles loaded again");
+    let again = scene.network.requested_again();
+    assert!(
+        again.iter().all(|(tile, count)| *count == 2 && scene.network.failed().contains(tile)),
+        "only the failed tiles loaded again, once each: {again:?}"
+    );
+}
+
+/// A tile that leaves the view while it loads, and fails in the cache, loads
+/// anew when the view comes back on the next frame, rather than wait for a
+/// retry that may never come.
+#[test]
+fn a_tile_that_fails_in_the_cache_is_requested_again_on_its_return() {
+    let mut scene = Scene::new(Size::new(1024, 768));
+    let view = z14_point(8418.5, 5384.5);
+    scene.frames_until_complete(6.0, (40.0, 60.0));
+    for _ in 0..LATENCY - 1 {
+        scene.frame(14.0, view);
+    }
+    // The centre column, at x 8419 and loading first, leaves the view still
+    // loading, next to the new one, and its answers fail as the frame ends.
+    scene.network.set_failing(true);
+    scene.frame(14.0, z14_point(8417.4, 5384.5));
+    scene.network.set_failing(false);
+    let parked: BTreeSet<String> =
+        scene.network.failed().into_iter().filter(|tile| tile.starts_with("vector/14/8419/")).collect();
+    assert!(!parked.is_empty(), "the column that left failed in the cache");
+
+    scene.frame(14.0, view);
+    let again = scene.network.requested_again();
+    assert!(parked.iter().all(|tile| again.contains_key(tile)), "loaded anew: {parked:?}, {again:?}");
 }

@@ -94,17 +94,20 @@
 //! The engine owns how MapLibre loads tiles; the origin owns where their
 //! data comes from. The engine decides which tiles the view needs, in which
 //! order their requests start ([`LoadContext::order`]), and which it keeps
-//! in its cache and evicts. While a tile has nothing to show, it draws the
-//! tile's children or parent that can draw; it makes a missing parent
-//! only once the tile has loaded, or has [tried](LoadContext::tried_optional)
-//! what it can while optional, so a parent never loads for a tile that
-//! loads at once. It makes a tile in a new world copy show the same tile's
-//! contents in another, which [`WorldCopy::take`] makes the new tile's
-//! answer, and hands a reply to the origin only while its load is the
-//! tile's latest. It lays out and decodes what tiles take in, knows
-//! when a tile has done what it can, and starts a failed tile over when its
-//! retry loads anew. How data is requested, cached, revalidated, kept fresh
-//! and retried is the origin's.
+//! in its cache and evicts: a tile with nothing to show whose origin said it
+//! [failed](LoadContext::fail) isn't loading, so the cache lets go of it,
+//! and a cached tile whose data its origin said may no longer be shown
+//! ([`TileTimes::usable_until`]) goes rather than come back. While a tile
+//! has nothing to show, it draws the tile's children or parent that can
+//! draw; it makes a missing parent only once the tile has loaded, or has
+//! [tried](LoadContext::tried_optional) what it can while optional, so a
+//! parent never loads for a tile that loads at once. It makes a tile in a
+//! new world copy show the same tile's contents in another, which
+//! [`WorldCopy::take`] makes the new tile's answer, and hands a reply to the
+//! origin only while its load is the tile's latest. It lays out and decodes
+//! what tiles take in, knows when a tile has done what it can, and starts a
+//! failed tile over when its retry loads anew. How data is requested,
+//! cached, revalidated, kept fresh and retried is the origin's.
 //!
 //! # Necessity
 //!
@@ -518,8 +521,9 @@ impl<'a, 't, O: DataOrigin + ?Sized> LoadContext<'a, 't, O> {
         self.tile.tile().load.order.clone()
     }
 
-    /// Sets when the tile's data was modified and when it expires, which
-    /// the tile debug overlay shows.
+    /// Sets when the tile's data was modified, when it expires, which the
+    /// tile debug overlay shows, and until when it may be shown, which the
+    /// engine's cache keeps to.
     pub fn set_times(&mut self, times: TileTimes) {
         self.tile.tile_mut().load.times = times;
     }
@@ -542,7 +546,9 @@ impl<'a, 't, O: DataOrigin + ?Sized> LoadContext<'a, 't, O> {
     /// stops a load's work ignores the replies it sent before it stopped.
     pub fn begin_load(&mut self) -> Replier<O::Reply> {
         let load = self.tile.next();
-        self.tile.tile_mut().load.current = Some(load);
+        let tile = self.tile.tile_mut();
+        tile.load.current = Some(load);
+        tile.load.failed = false;
         let tile = self.tile.key();
         Replier { inbox: self.tile.store().inbox.clone(), tile, load, reply: PhantomData }
     }
@@ -551,18 +557,26 @@ impl<'a, 't, O: DataOrigin + ?Sized> LoadContext<'a, 't, O> {
     /// shows at once if it is a value: `None` for an empty tile, which
     /// shows nothing.
     pub fn deliver(&mut self, item: Option<<O::Data as TileKind>::Item>) {
+        self.tile.tile_mut().load.failed = false;
         <O::Data as kind::Deliver>::deliver(self.tile, item);
     }
 
     /// A load found that the source has no tile here: a tile of another
     /// zoom level draws in its place.
     pub fn missing(&mut self) {
+        self.tile.tile_mut().load.failed = false;
         self.tile.take_missing();
     }
 
     /// The tile couldn't load: it keeps what it shows, and the engine
-    /// reports `error`.
+    /// reports `error`. Until the origin begins a load or gives the tile
+    /// anything ([`begin_load`](Self::begin_load), [`deliver`](Self::deliver),
+    /// [`missing`](Self::missing), [`keep_data`](Self::keep_data) or
+    /// [`WorldCopy::take`]), the tile counts as failed rather than loading:
+    /// out of the view, one with nothing to show goes rather than wait in
+    /// the cache, and is made anew if the view comes back.
     pub fn fail(&mut self, error: Error) {
+        self.tile.tile_mut().load.failed = true;
         self.tile.fail(error);
     }
 
@@ -570,6 +584,7 @@ impl<'a, 't, O: DataOrigin + ?Sized> LoadContext<'a, 't, O> {
     /// can, unless work on its data is under way, which settles it as it
     /// ends.
     pub fn keep_data(&mut self) {
+        self.tile.tile_mut().load.failed = false;
         self.tile.keep_data();
     }
 

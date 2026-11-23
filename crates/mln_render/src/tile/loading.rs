@@ -10,12 +10,28 @@ use mln_util::chrono::Timestamp;
 
 use crate::tile::tile::{TileLoadOrder, TileNecessity};
 
-/// When a tile's data was modified and when it expires, as its origin says:
-/// what the tile debug overlay shows.
+/// What a tile's origin says of the times of its data: when it was
+/// modified and when it expires, which the tile debug overlay shows, and
+/// until when it may be shown at all, which the cache keeps to.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TileTimes {
+    /// When the data was last modified, if known.
     pub modified: Option<Timestamp>,
+    /// When the data stops being fresh; `None` if it never does, or isn't
+    /// known.
     pub expires: Option<Timestamp>,
+    /// When the data may no longer be shown until its origin loads it
+    /// again; `None` if it always may. A tile in the cache whose time has
+    /// come goes as the view needs it again, rather than show its data,
+    /// and a new tile loads in its place.
+    pub usable_until: Option<Timestamp>,
+}
+
+impl TileTimes {
+    /// Whether the data may still be shown at `now`.
+    pub(crate) fn is_usable(&self, now: Timestamp) -> bool {
+        self.usable_until.is_none_or(|until| until > now)
+    }
 }
 
 /// A tile's loading: what the cover asks of it, its latest load, and its
@@ -30,6 +46,11 @@ pub(crate) struct Load {
     pub(crate) current: Option<u64>,
     /// The tile has done what it can while optional.
     pub(crate) tried_optional: bool,
+    /// The origin's last word on the tile was that it couldn't load
+    /// ([`LoadContext::fail`](crate::source::LoadContext::fail)), and
+    /// nothing has begun or brought anything since. Such a tile isn't
+    /// loading: the cache lets go of it rather than wait for it.
+    pub(crate) failed: bool,
     pub(crate) times: TileTimes,
     /// The origin's state of the tile: `None` until the origin starts the
     /// tile, and while one of its hooks has it.
@@ -47,6 +68,7 @@ impl Load {
             order,
             current: None,
             tried_optional: false,
+            failed: false,
             times: TileTimes::default(),
             state: None,
         }

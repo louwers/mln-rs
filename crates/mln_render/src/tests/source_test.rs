@@ -563,6 +563,37 @@ fn cached_tiles_wait_behind_the_view() {
     assert_eq!(cover, hidden.cached_unwanted(), "the hidden source's tiles");
 }
 
+/// A tile that comes back from the cache shows its data while it
+/// revalidates if its origin's times allow it; a tile whose data may no
+/// longer be shown, such as stale data that must revalidate, goes, and loads
+/// anew.
+#[test]
+fn a_cached_tile_shows_its_data_only_while_caching_rules_allow() {
+    use mln_storage::response::Caching;
+    use mln_util::chrono::Timestamp;
+
+    for (expires, must_revalidate, reused) in [(i64::MAX, false, true), (0, false, true), (0, true, false)] {
+        let mut turned = TurningSource::new("mercator", Size::new(512, 512), 0);
+        let caching = Caching { expires: Some(Timestamp::from_secs(expires)), must_revalidate };
+        turned.script.set_times(crate::source::TileTimes {
+            modified: None,
+            expires: caching.expires,
+            usable_until: caching.usable_until(),
+        });
+        turned.load(0.0, 3.0);
+        let shown: Vec<_> = turned.pyramid().cover().map(|tile| tile.id).collect();
+        for _ in 0..3 {
+            turned.update(120.0, 3.0);
+            turned.placement_commits += 1;
+        }
+        assert!(turned.cached_unwanted() > 0, "the tiles the view left");
+        turned.update(0.0, 3.0);
+        let pyramid = turned.pyramid();
+        let renderable = shown.iter().all(|id| pyramid.tile(id).is_some_and(crate::tile::tile::Tile::is_renderable));
+        assert_eq!(reused, renderable, "data that expires at {expires}, must revalidate: {must_revalidate}");
+    }
+}
+
 /// A tile the view leaves is held for its symbols' fade from the update that
 /// leaves it until two placements have committed since, however many
 /// updates come in between, and the next update drops it.

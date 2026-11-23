@@ -272,7 +272,7 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
             return None;
         }
         let parameters = self.update.parameters;
-        let mut found = self.source.cache_pop(id);
+        let mut found = self.source.cache_pop(id, self.ctx);
         if !found && parameters.view.is_globe() {
             found = self.source.cache_pop_any_wrap(id, self.ctx);
         }
@@ -706,6 +706,10 @@ impl SourceTiles {
             self.ideal.extend(ideal_tiles.iter().filter(inside));
         }
 
+        // A tile that failed in the cache goes before the cover could take it
+        // back: there it would wait for a retry that may never come.
+        self.cache_release_loading(ctx, |_| true);
+
         if parameters.view.is_globe() {
             self.move_tiles_to_wanted_wraps(&ideal_tiles, &pan_tiles, ctx);
         }
@@ -777,7 +781,9 @@ impl SourceTiles {
         // and forth needs the tiles at its corners for moments too short to
         // load them each time. A tile the view has left further behind, such
         // as one of a zoom level that a fast zoom passed, stops loading, since
-        // it would hold up the requests and workers the view's tiles need.
+        // it would hold up the requests and workers the view's tiles need. A
+        // tile whose load failed isn't loading: it goes, and is requested
+        // anew if the view comes back, rather than wait out a backoff.
         let wanted = WantedTiles::new(ideal_tiles.iter().chain(&pan_tiles));
         self.cache_release_loading(ctx, |id| wanted.is_near(id));
 
@@ -788,7 +794,8 @@ impl SourceTiles {
                 continue;
             };
             let renderable = tile.is_renderable();
-            let loading_near = tile.load.necessity == TileNecessity::Required && wanted.is_near(&id);
+            let loading_near =
+                tile.load.necessity == TileNecessity::Required && !tile.load.failed && wanted.is_near(&id);
             if relayout {
                 self.release(&id, ctx);
             } else if renderable {
@@ -802,7 +809,7 @@ impl SourceTiles {
                 // A fallback that looked only in the cache, and found nothing
                 // there, loads nothing: kept, it would only push the tiles
                 // that the view needed out of the cache. A tile still loading
-                // far from the view stops loading.
+                // far from the view stops loading, and so does one that failed.
                 self.set_necessity(&id, ctx, TileNecessity::Optional);
                 self.release(&id, ctx);
             }
@@ -950,10 +957,18 @@ impl SourceTiles {
         self.cache_trim(ctx);
     }
 
-    fn cache_pop(&mut self, id: &OverscaledTileID) -> bool {
+    /// Moves cached tile `id` back into the cover, unless its origin said its
+    /// data may no longer be shown by now
+    /// ([`TileTimes::usable_until`](crate::source::TileTimes::usable_until)):
+    /// then the tile goes, and one made anew loads in its place.
+    fn cache_pop(&mut self, id: &OverscaledTileID, ctx: &mut StoreContext) -> bool {
         let Some(slot) = self.tiles.get_mut(id).filter(|slot| slot.place.is_cached()) else {
             return false;
         };
+        if !slot.tile.load.times.is_usable(mln_util::chrono::now()) {
+            self.evict(id, ctx);
+            return false;
+        }
         slot.set_place(Place::Cover { order: TileLoadOrder::UNWANTED });
         true
     }
@@ -969,7 +984,9 @@ impl SourceTiles {
         else {
             return false;
         };
-        self.cache_pop(&found);
+        if !self.cache_pop(&found, ctx) {
+            return false;
+        }
         self.rekey(&found, *id, ctx);
         true
     }
@@ -998,12 +1015,15 @@ impl SourceTiles {
         }
     }
 
-    /// Lets go of the cached tiles still loading that `keep` turns down.
+    /// Lets go of the cached tiles still loading that `keep` turns down, and
+    /// of those whose load failed.
     fn cache_release_loading(&mut self, ctx: &mut StoreContext, keep: impl Fn(&OverscaledTileID) -> bool) {
         let released: Vec<OverscaledTileID> = self
             .tiles
             .values()
-            .filter(|slot| slot.place.is_cached() && !slot.tile.is_renderable() && !keep(&slot.tile.id))
+            .filter(|slot| {
+                slot.place.is_cached() && !slot.tile.is_renderable() && (slot.tile.load.failed || !keep(&slot.tile.id))
+            })
             .map(|slot| slot.tile.id)
             .collect();
         for id in released {

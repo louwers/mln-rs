@@ -4,12 +4,13 @@
 //! begins as a [`ScriptedLoad`], which the test answers with a [`Reply`].
 //!
 //! Every tile loads the same way: a required tile without data and without a
-//! load begins one; a load stays open for further replies until a failure,
-//! a newer load, the tile becoming optional or the tile going stops it; a
-//! failed tile loads again when the engine retries it, unless the script
-//! says otherwise ([`Retry`]); and a tile that starts from another world
+//! load begins one; a load stays open for further replies until a failure
+//! (unless the script keeps failed loads open, as a file source that retries
+//! does), a newer load, the tile becoming optional or the tile going stops
+//! it; a failed tile loads again when the engine retries it, unless the
+//! script says otherwise ([`Retry`]); a tile that starts from another world
 //! copy takes that copy, which counts as data, unless the script refuses
-//! copies.
+//! copies; and each delivery comes with the times the script sets.
 
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -29,7 +30,7 @@ use parking_lot::Mutex;
 use crate::erased_source::ErasedOrigin;
 use crate::source::{
     Cover, DataOrigin, DemTiles, GeometryTiles, LoadContext, OriginUpdate, RasterTiles, Replier, SourceType, Supply,
-    TileKind, TileNecessity, TileOperation, ValueTiles, WorldCopy,
+    TileKind, TileNecessity, TileOperation, TileTimes, ValueTiles, WorldCopy,
 };
 
 /// The kind of a scripted source's tiles, whose cover picks a view's tiles
@@ -209,6 +210,8 @@ struct ScriptState {
     loads: Vec<ScriptedLoad>,
     retry: Retry,
     refuses_copies: bool,
+    failed_loads_stay_open: bool,
+    times: TileTimes,
 }
 
 impl Script {
@@ -234,6 +237,17 @@ impl Script {
     /// than take the copy.
     pub(crate) fn refuse_copies(&self) {
         self.0.lock().refuses_copies = true;
+    }
+
+    /// Has a load that fails stay open for further replies, as a network
+    /// request does that the file source retries, rather than stop.
+    pub(crate) fn keep_failed_loads_open(&self) {
+        self.0.lock().failed_loads_stay_open = true;
+    }
+
+    /// Has each delivery from now on come with `times`.
+    pub(crate) fn set_times(&self, times: TileTimes) {
+        self.0.lock().times = times;
     }
 
     /// The loads begun since the last call, oldest first.
@@ -383,9 +397,11 @@ impl<K: Kind> DataOrigin for ScriptedOrigin<K> {
         // `None` for a missing tile.
         let item = match reply {
             Reply::Fail(message) => {
-                tile.answered = false;
-                tile.stop();
-                tile.closed = true;
+                if !self.script.0.lock().failed_loads_stay_open {
+                    tile.answered = false;
+                    tile.stop();
+                    tile.closed = true;
+                }
                 cx.fail(Error::native(message));
                 return;
             }
@@ -396,6 +412,8 @@ impl<K: Kind> DataOrigin for ScriptedOrigin<K> {
         };
         tile.answered = true;
         cx.report(TileOperation::LoadFromNetwork);
+        let times = self.script.0.lock().times;
+        cx.set_times(times);
         match item {
             Some(item) => cx.deliver(item),
             None => cx.missing(),

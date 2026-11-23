@@ -133,6 +133,7 @@ impl<'a> TileMut<'a> {
     /// contents, which it shows, as `answer` says.
     pub(crate) fn take_copy(&mut self, CopyAnswer { data, times }: CopyAnswer) {
         self.tile.settled = true;
+        self.tile.load.failed = false;
         self.tile.load.times = times;
         self.tile.load.tried_optional = true;
         if let Some(data) = data {
