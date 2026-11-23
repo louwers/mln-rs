@@ -339,8 +339,14 @@ impl<L: Layer> PlacementFrame<L> {
     /// [`prepare`](Placement::prepare) and [`update`](Placement::update): its
     /// layers, its update and its tiles' buckets.
     pub fn with_context<R>(&mut self, hook: impl FnOnce(&mut PlacementCx<'_, L>) -> R) -> R {
-        let layers: Vec<PlacingLayer<'_, L>> =
-            self.layers.iter().map(|(layer, tiles, _)| PlacingLayer { layer: layer.parts().1, tiles }).collect();
+        let layers: Vec<PlacingLayer<'_, L>> = self
+            .layers
+            .iter()
+            .map(|(layer, tiles, led)| {
+                let (tiles, followers) = tiles.split_at(*led);
+                PlacingLayer { layer: layer.parts().1, tiles, followers }
+            })
+            .collect();
         let mut buckets = FrameBuckets(&mut self.tiles);
         hook(&mut PlacementCx::new(&layers, &self.update.view, PlacementBuckets::new(&mut buckets), &mut self.placed))
     }

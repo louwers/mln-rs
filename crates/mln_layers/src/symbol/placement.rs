@@ -63,9 +63,6 @@ pub(crate) struct LayerBuckets {
     pub(crate) icon_translate: SymbolTranslate,
     /// The buckets the layer leads, in the order it places them.
     pub(crate) placed: Vec<PlacedBucket>,
-    /// Where the tiles are, among the layer's, whose bucket another layer
-    /// leads, which this layer draws.
-    followers: Vec<usize>,
 }
 
 impl LayerBuckets {
@@ -78,8 +75,8 @@ impl LayerBuckets {
         }
     }
 
-    /// Makes these the buckets of `layer`'s tiles, of `buckets`: those it
-    /// leads, in order of sort key, and the others.
+    /// Makes these the buckets that `layer` leads, of `buckets`, in order
+    /// of sort key.
     fn set(&mut self, layer: &PlacingLayer<'_, SymbolLayer>, buckets: &PlacementBuckets<'_>) {
         let style = &layer.layer.style;
         let paint = &layer.layer.evaluated.paint;
@@ -89,13 +86,9 @@ impl LayerBuckets {
             SymbolTranslate { offset: *paint.icon_translate.uniform(), anchor: *paint.icon_translate_anchor.uniform() };
         self.id.clone_from(&style.id);
         self.placed.clear();
-        self.followers.clear();
         for (tile, placing) in layer.tiles.iter().enumerate() {
             let Some(bucket) = buckets.get::<SymbolBucket>(&placing.bucket) else { continue };
-            if *bucket.bucket_leader_id != *style.id {
-                self.followers.push(tile);
-                continue;
-            }
+            debug_assert_eq!(*bucket.bucket_leader_id, *style.id, "a bucket that another layer leads");
             if bucket.sort_key_ranges.is_empty() {
                 self.placed.push(PlacedBucket { tile, sort_key_range: None });
                 continue;
@@ -247,23 +240,22 @@ impl engine::Placement for SymbolPlacement {
         prepared
     }
 
-    fn begin(&mut self, cx: &mut PlaceCx<'_>) {
-        self.placement.begin(cx);
-    }
-
     fn place_crossing(&mut self, layer: &PlacingLayer<'_, SymbolLayer>, cx: &mut PlaceCx<'_>) {
         self.placing.set(layer, &cx.buckets);
+        self.placement.read(cx);
         self.placement.place_crossing(&self.placing, layer.tiles, cx);
     }
 
     fn place(&mut self, layer: &PlacingLayer<'_, SymbolLayer>, cx: &mut PlaceCx<'_>) {
         self.placing.set(layer, &cx.buckets);
+        self.placement.read(cx);
         self.placement.place_layer(&self.placing, layer.tiles, cx);
     }
 
     /// Commits the placement, and marks the buckets it placed since their
     /// tiles showed them as placed.
     fn commit(&mut self, cx: &mut PlaceCx<'_>) {
+        self.placement.read(cx);
         self.placement.commit(cx.fade, &mut cx.placed);
         for key in self.placement.reloaded.drain() {
             if let Some(bucket) = cx.buckets.get_mut::<SymbolBucket>(&key) {
@@ -303,20 +295,20 @@ impl engine::Placement for SymbolPlacement {
             self.shown.clear();
         }
         for (layer, placing) in self.layers.iter().zip(placing) {
-            for &tile in &layer.followers {
-                let tile = &placing.tiles[tile];
+            for tile in placing.followers {
                 let Some(bucket) = cx.buckets.get_mut::<SymbolBucket>(&tile.bucket) else { continue };
                 current.update_bucket_positions(bucket, view, layer, tile, true);
             }
         }
     }
 
-    fn forget(&mut self, placement: bool) {
-        if placement {
-            self.placement.current.clear();
-            self.committed = Inputs::default();
-        }
+    fn forget_buckets(&mut self) {
         self.index.reset();
+    }
+
+    fn forget_placement(&mut self) {
+        self.placement.current.clear();
+        self.committed = Inputs::default();
     }
 }
 
@@ -368,12 +360,12 @@ impl Shown {
 }
 
 /// Symbol placement: the current placement, and the next one, which it
-/// makes from begin to commit while it reads the current one.
+/// makes while it reads the current one, until it commits it.
 #[derive(Default)]
 pub(crate) struct Placement {
     pub(crate) current: Shown,
-    /// The placement being made; between placements, the one before the
-    /// current one, for its maps' memory.
+    /// The placement being made; empty between placements, keeping its
+    /// maps' memory.
     next: Shown,
     mode: MapMode,
     /// The zoom placed at.
@@ -397,15 +389,11 @@ pub(crate) struct Placement {
 }
 
 impl Placement {
-    /// Starts a placement in `cx`'s view.
-    fn begin(&mut self, cx: &PlaceCx<'_>) {
-        self.next.clear();
+    /// Reads what the placement places in from `cx`.
+    fn read(&mut self, cx: &PlaceCx<'_>) {
         self.mode = cx.mode;
         self.zoom = cx.view.zoom() as f32;
         self.debug = cx.collision_boxes;
-        self.tile = TileRounds::default();
-        self.reloaded.clear();
-        self.seen.clear();
     }
 
     /// The placement this one replaces, which a continuous map's fades
@@ -530,6 +518,10 @@ impl Placement {
             }
         }
         std::mem::swap(&mut self.current, &mut self.next);
+        // Ready for the next placement.
+        self.next.clear();
+        self.tile = TileRounds::default();
+        self.seen.clear();
     }
 }
 

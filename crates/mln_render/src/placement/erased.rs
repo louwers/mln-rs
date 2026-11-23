@@ -5,12 +5,13 @@ use std::any::Any;
 use mln_map_types::View;
 use smallvec::SmallVec;
 
+use super::run::FrameLayer;
 use super::{
     BucketKey, CollisionIndex, PlaceCx, Placement, PlacementBuckets, PlacementCx, PlacingLayer, PlacingTile, Prepared,
 };
 use crate::bucket::ErasedBucket;
 use crate::layer::{Layer, LayerValues};
-use crate::render_layer::{Hosted, RenderLayer};
+use crate::render_layer::{Hosted, RecordedLayer, RenderLayer};
 use crate::tile::contents::LayoutResult;
 
 /// The buckets of laid-out tiles, by their keys: the tile store's, or the
@@ -26,8 +27,14 @@ pub(crate) trait LaidBuckets {
 }
 
 /// What the engine hands a participant's [`prepare`](Placement::prepare)
-/// and [`update`](Placement::update) of a frame, besides its layers.
+/// and [`update`](Placement::update) of a frame.
 pub(crate) struct ErasedFrame<'a> {
+    /// The frame's placing layers of every participant, bottom to top.
+    pub(crate) layers: &'a [FrameLayer],
+    /// Their tiles, a run per layer.
+    pub(crate) tiles: &'a [PlacingTile],
+    /// The renderer's layers, which `layers` index.
+    pub(crate) recorded: &'a [RecordedLayer],
     pub(crate) view: &'a View,
     pub(crate) buckets: &'a mut dyn LaidBuckets,
     /// The current placement's index.
@@ -37,11 +44,9 @@ pub(crate) struct ErasedFrame<'a> {
 /// A [`Placement`], whichever its layer type: its hooks over layers as the
 /// engine holds them, each with its tiles.
 pub(crate) trait ErasedPlacement {
-    /// See [`Placement::prepare`].
-    fn prepare(&mut self, layers: &[(&dyn RenderLayer, &[PlacingTile])], frame: &mut ErasedFrame<'_>) -> Prepared;
-
-    /// See [`Placement::begin`].
-    fn begin(&mut self, cx: &mut PlaceCx<'_>);
+    /// See [`Placement::prepare`], for the frame's layers of the
+    /// participant `participant`.
+    fn prepare(&mut self, participant: usize, frame: &mut ErasedFrame<'_>) -> Prepared;
 
     /// [`Placement::place_crossing`] if `crossing`, else
     /// [`Placement::place`].
@@ -50,11 +55,16 @@ pub(crate) trait ErasedPlacement {
     /// See [`Placement::commit`].
     fn commit(&mut self, cx: &mut PlaceCx<'_>);
 
-    /// See [`Placement::update`].
-    fn update(&mut self, layers: &[(&dyn RenderLayer, &[PlacingTile])], frame: &mut ErasedFrame<'_>);
+    /// See [`Placement::update`], for the frame's layers of the
+    /// participant `participant`.
+    fn update(&mut self, participant: usize, frame: &mut ErasedFrame<'_>);
 
-    /// See [`Placement::forget`].
-    fn forget(&mut self, placement: bool);
+    /// See [`Placement::forget_buckets`].
+    fn forget_buckets(&mut self);
+
+    /// See [`Placement::forget_buckets`] and then
+    /// [`Placement::forget_placement`].
+    fn forget(&mut self);
 }
 
 /// A new participant `P`, as the engine holds it.
@@ -70,30 +80,34 @@ fn values<P: Placement>(layer: &dyn RenderLayer) -> Option<&LayerValues<<P::Laye
     Some(hosted?.parts().1)
 }
 
-/// Runs `hook` with the context of `frame` for `layers`, as `P` sees them.
+/// Runs `hook` with the context of `frame` for its layers of the
+/// participant `participant`, as `P` sees them.
 fn with_cx<P: Placement, R>(
-    layers: &[(&dyn RenderLayer, &[PlacingTile])],
+    participant: usize,
     frame: &mut ErasedFrame<'_>,
     hook: impl FnOnce(&mut PlacementCx<'_, P::Layer>) -> R,
 ) -> R {
-    let mut typed: SmallVec<[PlacingLayer<'_, P::Layer>; 8]> = SmallVec::with_capacity(layers.len());
-    typed.extend(layers.iter().filter_map(|&(layer, tiles)| Some(PlacingLayer { layer: values::<P>(layer)?, tiles })));
+    let (tiles, recorded) = (frame.tiles, frame.recorded);
+    let own = frame.layers.iter().filter(|layer| layer.participant == participant);
+    // Sized at once: a filter leaves the length unknown, and the vector would
+    // grow in steps.
+    let mut typed: SmallVec<[PlacingLayer<'_, P::Layer>; 8]> = SmallVec::with_capacity(own.clone().count());
+    typed.extend(own.filter_map(|layer| {
+        let (tiles, followers) = tiles[layer.tiles.clone()].split_at(layer.led);
+        Some(PlacingLayer { layer: values::<P>(&*recorded[layer.layer].layer)?, tiles, followers })
+    }));
     let buckets = PlacementBuckets::new(&mut *frame.buckets);
     hook(&mut PlacementCx::new(&typed, frame.view, buckets, &mut *frame.placed))
 }
 
 impl<P: Placement> ErasedPlacement for P {
-    fn prepare(&mut self, layers: &[(&dyn RenderLayer, &[PlacingTile])], frame: &mut ErasedFrame<'_>) -> Prepared {
-        with_cx::<P, _>(layers, frame, |cx| Placement::prepare(self, cx))
-    }
-
-    fn begin(&mut self, cx: &mut PlaceCx<'_>) {
-        Placement::begin(self, cx);
+    fn prepare(&mut self, participant: usize, frame: &mut ErasedFrame<'_>) -> Prepared {
+        with_cx::<P, _>(participant, frame, |cx| Placement::prepare(self, cx))
     }
 
     fn place(&mut self, layer: &dyn RenderLayer, tiles: &[PlacingTile], crossing: bool, cx: &mut PlaceCx<'_>) {
         let Some(layer) = values::<P>(layer) else { return };
-        let layer = PlacingLayer { layer, tiles };
+        let layer = PlacingLayer { layer, tiles, followers: &[] };
         if crossing { Placement::place_crossing(self, &layer, cx) } else { Placement::place(self, &layer, cx) }
     }
 
@@ -101,11 +115,16 @@ impl<P: Placement> ErasedPlacement for P {
         Placement::commit(self, cx);
     }
 
-    fn update(&mut self, layers: &[(&dyn RenderLayer, &[PlacingTile])], frame: &mut ErasedFrame<'_>) {
-        with_cx::<P, _>(layers, frame, |cx| Placement::update(self, cx));
+    fn update(&mut self, participant: usize, frame: &mut ErasedFrame<'_>) {
+        with_cx::<P, _>(participant, frame, |cx| Placement::update(self, cx));
     }
 
-    fn forget(&mut self, placement: bool) {
-        Placement::forget(self, placement);
+    fn forget_buckets(&mut self) {
+        Placement::forget_buckets(self);
+    }
+
+    fn forget(&mut self) {
+        Placement::forget_buckets(self);
+        Placement::forget_placement(self);
     }
 }

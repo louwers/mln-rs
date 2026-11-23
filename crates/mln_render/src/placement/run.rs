@@ -27,11 +27,11 @@ use crate::update_parameters::UpdateParameters;
 /// A placing layer of a frame, by its index among the renderer's layers,
 /// with its participant and where its tiles are among the frame's placing
 /// tiles: first the `led` ones, whose bucket it leads.
-struct FrameLayer {
-    layer: usize,
-    participant: usize,
-    tiles: Range<usize>,
-    led: usize,
+pub(crate) struct FrameLayer {
+    pub(crate) layer: usize,
+    pub(crate) participant: usize,
+    pub(crate) tiles: Range<usize>,
+    pub(crate) led: usize,
 }
 
 /// A placing layer as a placement visits it: the layer, the index of its
@@ -236,10 +236,15 @@ impl Placements {
         let mut prepared = Prepared::default();
         let mut places: SmallVec<[bool; 4]> = SmallVec::new();
         for (index, participant) in self.participants.iter_mut().enumerate() {
-            let own = layers_of(&self.layers, &self.tiles, layers, index);
-            let frame =
-                &mut ErasedFrame { view: &update_parameters.view, buckets: &mut *store, placed: &mut self.placed };
-            let own_prepared = participant.prepare(&own, frame);
+            let frame = &mut ErasedFrame {
+                layers: &self.layers,
+                tiles: &self.tiles,
+                recorded: layers,
+                view: &update_parameters.view,
+                buckets: &mut *store,
+                placed: &mut self.placed,
+            };
+            let own_prepared = participant.prepare(index, frame);
             prepared.added |= own_prepared.added;
             prepared.changed |= own_prepared.changed;
             places.push(self.layers.iter().any(|layer| layer.participant == index && layer.led > 0));
@@ -255,12 +260,12 @@ impl Placements {
                 self.committed = None;
                 self.seen.clear();
                 for participant in &mut self.participants {
-                    participant.forget(true);
+                    participant.forget();
                 }
             } else {
                 // A still image keeps nothing of the buckets between frames.
                 for participant in &mut self.participants {
-                    participant.forget(false);
+                    participant.forget_buckets();
                 }
                 frame.placement_changed = false;
             }
@@ -271,7 +276,7 @@ impl Placements {
         let zoom = update_parameters.view.zoom() as f32;
         if continuous {
             for (participant, _) in self.participants.iter_mut().zip(&places).filter(|(_, places)| !**places) {
-                participant.forget(true);
+                participant.forget();
             }
             let changed = self.changed(update_parameters) || prepared.changed;
             let added = self.added() || prepared.added;
@@ -312,7 +317,7 @@ impl Placements {
             self.schedule.commit(update_parameters.mode, transition_options, zoom, time_point, placed);
             // A still image keeps nothing of the buckets between frames.
             for participant in &mut self.participants {
-                participant.forget(false);
+                participant.forget_buckets();
             }
             frame.placement_fade = 1.0;
         }
@@ -327,10 +332,15 @@ impl Placements {
         store: &mut dyn LaidBuckets,
     ) {
         for (index, participant) in self.participants.iter_mut().enumerate() {
-            let own = layers_of(&self.layers, &self.tiles, layers, index);
-            let frame =
-                &mut ErasedFrame { view: &update_parameters.view, buckets: &mut *store, placed: &mut self.placed };
-            participant.update(&own, frame);
+            let frame = &mut ErasedFrame {
+                layers: &self.layers,
+                tiles: &self.tiles,
+                recorded: layers,
+                view: &update_parameters.view,
+                buckets: &mut *store,
+                placed: &mut self.placed,
+            };
+            participant.update(index, frame);
         }
     }
 
@@ -339,7 +349,7 @@ impl Placements {
     pub(crate) fn forget(&mut self) {
         self.seen.clear();
         for participant in &mut self.participants {
-            participant.forget(false);
+            participant.forget_buckets();
         }
     }
 
@@ -399,26 +409,9 @@ impl Placements {
     }
 }
 
-/// The layers of the participant `participant` among `frame_layers`, the
-/// frame's placing layers, bottom to top, each with all its tiles among
-/// `tiles`.
-fn layers_of<'a>(
-    frame_layers: &[FrameLayer],
-    tiles: &'a [PlacingTile],
-    layers: &'a [RecordedLayer],
-    participant: usize,
-) -> SmallVec<[(&'a dyn RenderLayer, &'a [PlacingTile]); 8]> {
-    let own = frame_layers.iter().filter(|layer| layer.participant == participant);
-    // Sized at once: a filter leaves the length unknown, and the vector would
-    // grow in steps.
-    let mut layers_of = SmallVec::with_capacity(own.clone().count());
-    layers_of.extend(own.map(|layer| (&*layers[layer.layer].layer, &tiles[layer.tiles.clone()])));
-    layers_of
-}
-
 /// Places `layers`, the frame's placing layers, bottom to top, into
-/// `index`, which it begins, with the `participants` that `places` says
-/// have something to place, for `update_parameters`' frame, whose buckets
+/// `index`, which it empties first, with the `participants` that `places`
+/// says have something to place, for `update_parameters`' frame, whose buckets
 /// are in `store`. `fade` is how far the current placement's fade had
 /// come; `records` are kept in tile mode.
 #[expect(clippy::too_many_arguments, reason = "a placement's parts, each from another part of the renderer")]
@@ -446,9 +439,6 @@ pub(crate) fn place_round<P: DerefMut<Target = dyn ErasedPlacement>>(
         placed: Placed::default(),
         records: records.filter(|_| mode == MapMode::Tile),
     };
-    for (participant, _) in participants.iter_mut().zip(places).filter(|(_, places)| **places) {
-        participant.begin(&mut cx);
-    }
     let rounds: &[bool] = if mode == MapMode::Tile { &[true, false] } else { &[false] };
     for &crossing in rounds {
         for (position, layer) in layers.iter().enumerate().rev() {

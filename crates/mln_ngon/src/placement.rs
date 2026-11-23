@@ -70,10 +70,8 @@ impl Placement for NgonPlacement {
         mem::swap(&mut self.placed, &mut self.next);
     }
 
-    fn forget(&mut self, placement: bool) {
-        if placement {
-            self.placed.clear();
-        }
+    fn forget_placement(&mut self) {
+        self.placed.clear();
     }
 }
 

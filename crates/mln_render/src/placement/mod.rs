@@ -30,16 +30,18 @@
 //! 1. [`prepare`](Placement::prepare), which brings what the participant
 //!    keeps up to date with the frame's buckets and says whether its own
 //!    inputs changed.
-//! 2. When the schedule places: [`begin`](Placement::begin), for each type
-//!    that has a layer leading a tile's bucket; for each such layer of every
-//!    type, topmost first, [`place`](Placement::place), after
+//! 2. When the schedule places: for each layer of every type that leads a
+//!    tile's bucket, topmost first, [`place`](Placement::place), after
 //!    [`place_crossing`](Placement::place_crossing) for each of them in tile
-//!    mode; and [`commit`](Placement::commit), for each type that began.
-//!    A type with nothing to place [forgets](Placement::forget) instead.
+//!    mode; and then [`commit`](Placement::commit), for each type that
+//!    placed. In a continuous map, a type with nothing to place
+//!    [forgets its buckets](Placement::forget_buckets) and
+//!    [its placement](Placement::forget_placement) instead.
 //! 3. [`update`](Placement::update), which brings its buckets to the
 //!    current placement.
 //!
-//! A still image places every frame, and every type forgets after it.
+//! A still image places every frame, and every type forgets its buckets
+//! after it.
 //!
 //! The layers place topmost first, so a layer's shapes give way to those of
 //! the layers above it, whatever their types. Without the map's
@@ -150,9 +152,6 @@ pub trait Placement: Default + 'static {
         Prepared::default()
     }
 
-    /// Starts a placement, which replaces the current one when it commits.
-    fn begin(&mut self, _cx: &mut PlaceCx<'_>) {}
-
     /// Tile mode's first round: places what of `layer`'s items crosses its
     /// tile's borders, or a neighbor's, so that the tiles on either side
     /// agree on it. [`place`](Self::place) then places the rest.
@@ -174,11 +173,13 @@ pub trait Placement: Default + 'static {
     fn update(&mut self, _cx: &mut PlacementCx<'_, Self::Layer>) {}
 
     /// Forgets what the participant keeps of its layers' buckets from frame
-    /// to frame: the renderer's tiles went, the frame is a still image's,
-    /// which keeps none, or the type has nothing to place. With `placement`,
-    /// it forgets the current placement too: a continuous map has nothing
-    /// of the type to place, so what it showed is gone.
-    fn forget(&mut self, placement: bool);
+    /// to frame: the renderer's tiles went, or the frame is a still
+    /// image's, which keeps none.
+    fn forget_buckets(&mut self) {}
+
+    /// Forgets the current placement, after the buckets: a continuous map
+    /// has nothing of the type to place, so what it showed is gone.
+    fn forget_placement(&mut self);
 }
 
 /// What a [`Placement`] reads in [`prepare`](Placement::prepare) and
@@ -249,13 +250,15 @@ pub struct PlaceCx<'a> {
 pub struct PlacingLayer<'a, L: Layer> {
     /// The layer's values.
     pub layer: &'a LayerValues<L::Style>,
-    /// The frame's tiles that hold a bucket of the layer: first those
-    /// whose bucket the layer leads, and then, in [`PlacementCx`], those
-    /// whose bucket another layer of its layout leads, which the layer
-    /// draws. Within each, the deeper zooms come first, then the tiles from
-    /// the top of the screen at the camera's bearing to its bottom, and
-    /// from its left to its right: the order the layer places them in.
+    /// The frame's tiles whose bucket of the layer it leads, which it
+    /// places and an [`Item::tile`] indexes: the deeper zooms first, then
+    /// from the top of the screen at the camera's bearing to its bottom,
+    /// and from its left to its right.
     pub tiles: &'a [PlacingTile],
+    /// The frame's tiles whose bucket another layer of the layer's layout
+    /// leads, which the layer draws as that layer placed it, in the same
+    /// order. Empty while the layer places.
+    pub followers: &'a [PlacingTile],
 }
 
 /// One of a [`PlacingLayer`]'s tiles: where its bucket of the layer is, and
