@@ -195,7 +195,7 @@ impl TestRunnerImpl for Impl {
                 bounds: [record.bounds.min.x, record.bounds.min.y, record.bounds.max.x, record.bounds.max.y],
                 placed: record.placed,
                 crosses_border: record.crosses_border,
-                padding: record.padding,
+                padding: mln_render::placement::CollisionIndex::TILE_PADDING,
                 layer: record.layer.clone(),
             })
             .collect()

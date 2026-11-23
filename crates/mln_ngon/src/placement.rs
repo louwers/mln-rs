@@ -148,13 +148,11 @@ fn place(layer: &PlacingLayer<'_, NgonLayer>, cx: &mut PlaceCx<'_>, crossing: Op
             }
             bucket.opacity[i] = next;
             if let Some(records) = &mut cx.records {
-                let (layer, padding) = (layer.layer.id().to_owned(), cx.index.padding());
                 records.push(PlacementRecord {
-                    layer,
+                    layer: layer.layer.id().to_owned(),
                     key: String::new(),
                     part: "ngon",
                     bounds,
-                    padding,
                     placed: shows,
                     crosses_border: crosses,
                 });

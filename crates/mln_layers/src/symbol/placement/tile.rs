@@ -136,14 +136,12 @@ impl Placement {
 
     /// Adds to `records` the parts of `symbol`, placed as `placement`, in
     /// tile mode: for a point symbol that won't be placed again at another
-    /// anchor, a record of its text, then one of its icon. `padding` is the
-    /// collision index's.
+    /// anchor, a record of its text, then one of its icon.
     pub(super) fn symbol_placed(
         &mut self,
         symbol: &SymbolInstance,
         ctx: &BucketContext<'_>,
         placement: JointPlacement,
-        padding: f32,
         records: Option<&mut Vec<PlacementRecord>>,
     ) {
         let Some(records) = records.filter(|_| self.mode == MapMode::Tile) else {
@@ -172,7 +170,6 @@ impl Placement {
                 key: String::from_utf8_lossy(ctx.bucket.state.symbol_instance_pools.key(symbol)).into_owned(),
                 part,
                 bounds,
-                padding,
                 placed,
                 crosses_border,
             });

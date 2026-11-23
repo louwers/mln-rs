@@ -151,7 +151,7 @@ impl Placement {
             skip_fade: offscreen || ctx.just_reloaded,
         };
         self.next.placements.insert(id, placement);
-        self.symbol_placed(symbol, ctx, placement, collisions.padding(), records);
+        self.symbol_placed(symbol, ctx, placement, records);
         placement
     }
 

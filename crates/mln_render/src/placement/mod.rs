@@ -93,10 +93,12 @@
 //! ([`Placement::place_crossing`]), and a second round visits every layer
 //! for the rest. What crosses is the participant's to say: n-gon projects
 //! its tile's corners into the grid and places first the circles whose
-//! bounds reach across the square they make. While the renderer keeps them
+//! bounds reach across the square they make.
+//!
+//! While the renderer keeps them
 //! ([`Renderer::record_placements`](crate::Renderer::record_placements)),
-//! participants record each candidate they decide
-//! ([`PlaceCx::records`]), which checks that tiles agree read.
+//! participants record each candidate they decide in [`PlaceCx::records`],
+//! which a tool reads to check that neighboring tiles agree.
 
 mod erased;
 mod grid;
@@ -392,8 +394,9 @@ impl Opacity {
     }
 }
 
-/// A candidate that a tile-mode placement decided, for checks that the
-/// tiles on either side of a border agree on what crosses it.
+/// A candidate that a tile-mode placement decided. Records exist for
+/// checks that the tiles on either side of a border agree on what crosses
+/// it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlacementRecord {
     /// The layer placed, or the layer that leads its bucket.
@@ -405,11 +408,10 @@ pub struct PlacementRecord {
     /// Which of the candidate's parts this is, such as `"text"` or
     /// `"icon"`.
     pub part: &'static str,
-    /// The part's bounds in the collision index's grid.
+    /// The part's bounds in the collision index's grid, whose
+    /// [padding](CollisionIndex::padding) is
+    /// [`CollisionIndex::TILE_PADDING`].
     pub bounds: Aabb,
-    /// The index's [padding](CollisionIndex::padding): where the viewport's
-    /// top-left corner is in the grid.
-    pub padding: f32,
     /// Whether the part shows.
     pub placed: bool,
     /// Whether the part crosses its tile's borders, or a neighbor's.

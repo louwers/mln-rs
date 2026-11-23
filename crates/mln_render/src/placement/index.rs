@@ -27,9 +27,6 @@ use crate::query::RenderedQueryOptions;
 /// so the padding moves most of those changes offscreen; more padding
 /// steadies what shows, and costs more.
 const VIEWPORT_PADDING: f32 = 100.0;
-/// A still image of a tile places as far again as a tile reaches across
-/// its borders, so the tile's neighbors agree on what crosses them.
-const VIEWPORT_PADDING_TILE: f32 = 1024.0;
 /// The width of a grid cell, in pixels.
 const CELL_SIZE: f32 = 25.0;
 
@@ -158,6 +155,11 @@ impl Default for CollisionIndex {
 }
 
 impl CollisionIndex {
+    /// The [padding](Self::padding) of a still image of a tile: as far
+    /// again as a tile reaches across its borders, so the tile's neighbors
+    /// agree on what crosses them.
+    pub const TILE_PADDING: f32 = 1024.0;
+
     /// How far the grid reaches past each edge of the viewport, in pixels:
     /// where a shape at the viewport's top-left corner is.
     #[inline]
@@ -243,7 +245,7 @@ impl CollisionIndex {
     /// grids' cells while the view keeps its size.
     pub(crate) fn begin(&mut self, view: &View, mode: MapMode) {
         let padding = match mode {
-            MapMode::Tile => VIEWPORT_PADDING_TILE,
+            MapMode::Tile => Self::TILE_PADDING,
             _ if view.pitch() == 0.0 => VIEWPORT_PADDING,
             _ => VIEWPORT_PADDING * 2.0,
         };
