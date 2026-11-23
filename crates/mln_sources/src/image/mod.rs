@@ -37,14 +37,7 @@ pub struct ImageSourceOptions {
 
 impl StyleSourceType for ImageSourceType {
     // An image source has no tiles, so the tile members say nothing.
-    const INFO: SourceTypeInfo = SourceTypeInfo {
-        name: "image",
-        layer_kind: SourceKind::Raster,
-        from_json: true,
-        round_zoom: false,
-        overscale: false,
-        prefetch: false,
-    };
+    const INFO: SourceTypeInfo = SourceTypeInfo { name: "image", layer_kind: SourceKind::Raster, from_json: true };
 
     const DESCRIBES_IN_BACKGROUND: bool = true;
 

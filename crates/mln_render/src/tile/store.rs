@@ -144,22 +144,14 @@ pub(crate) struct SourceInfo {
     pub(crate) origin: Option<Box<dyn ErasedOrigin>>,
     /// Loads and generations share it, so no two share a value.
     counter: u64,
-    /// The tiles' jobs run on the render thread as soon as they're ready.
+    /// The tiles' jobs run on the render thread as soon as they're ready,
+    /// as the last [`Cover`](crate::source::Cover) says.
     pub(crate) synchronous: bool,
-    /// The data has one layer, which a source query gets whatever source
-    /// layer it names.
-    pub(crate) single_layer: bool,
     pub(crate) feature_state: SourceFeatureState,
 }
 
 impl SourceInfo {
-    pub(crate) fn new(
-        key: SourceKey,
-        id: String,
-        kind: TileKind,
-        single_layer: bool,
-        origin: Box<dyn ErasedOrigin>,
-    ) -> Self {
+    pub(crate) fn new(key: SourceKey, id: String, kind: TileKind, origin: Box<dyn ErasedOrigin>) -> Self {
         SourceInfo {
             key,
             id,
@@ -167,7 +159,6 @@ impl SourceInfo {
             origin: Some(origin),
             counter: 0,
             synchronous: false,
-            single_layer,
             feature_state: SourceFeatureState::new(),
         }
     }
@@ -285,16 +276,10 @@ impl TileStore {
 
     /// Adds a source after the others in the style's order, whose tiles of
     /// `kind` get their data from `origin`.
-    pub(crate) fn add_source(
-        &mut self,
-        id: String,
-        kind: TileKind,
-        single_layer: bool,
-        origin: Box<dyn ErasedOrigin>,
-    ) -> SourceKey {
+    pub(crate) fn add_source(&mut self, id: String, kind: TileKind, origin: Box<dyn ErasedOrigin>) -> SourceKey {
         self.next_source += 1;
         let key = SourceKey(self.next_source);
-        let mut source = SourceTiles::new(SourceInfo::new(key, id, kind, single_layer, origin));
+        let mut source = SourceTiles::new(SourceInfo::new(key, id, kind, origin));
         source.set_cache_enabled(self.cache_enabled);
         self.sources.insert(key, source);
         self.order.push(key);
@@ -481,7 +466,7 @@ impl TileStore {
 
     pub(crate) fn reduce_memory_use(&mut self) {
         for source in self.sources.values_mut() {
-            source.reduce_memory_use(&mut self.ctx);
+            source.cache_clear(&mut self.ctx);
         }
     }
 

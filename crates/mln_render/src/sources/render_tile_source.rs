@@ -205,7 +205,6 @@ pub(crate) struct RenderTileSource {
     /// The source's id, which its debug overlays' draws carry.
     id: Rc<str>,
     key: SourceKey,
-    fast_pfor_enabled: bool,
     /// The deepest zoom of the last cover, `None` before the first.
     max_zoom: Option<u8>,
     render_tiles: Vec<RenderTile>,
@@ -216,21 +215,18 @@ pub(crate) struct RenderTileSource {
 
 impl RenderTileSource {
     /// The render source of `style_source`, whose tiles of `kind` go in `store`
-    /// and get their data through `origin`. A tile of a `single_layer`
-    /// source holds one source layer.
+    /// and get their data through `origin`.
     pub(crate) fn new(
         style_source: Source,
         kind: TileKind,
-        single_layer: bool,
         origin: Box<dyn ErasedOrigin>,
         store: &mut TileStore,
     ) -> Self {
-        let key = store.add_source(style_source.id().to_owned(), kind, single_layer, origin);
+        let key = store.add_source(style_source.id().to_owned(), kind, origin);
         RenderTileSource {
             id: Rc::from(style_source.id()),
             base: RenderSourceBase::new(style_source),
             key,
-            fast_pfor_enabled: false,
             max_zoom: None,
             render_tiles: Vec::new(),
             order_by_id: Vec::new(),
@@ -256,20 +252,12 @@ impl RenderSource for RenderTileSource {
         needs_relayout: bool,
         parameters: &TileParameters<'_>,
     ) {
-        let previous = std::mem::replace(&mut self.base.style_source, style_source);
+        self.base.style_source = style_source;
         self.base.enabled = needs_rendering;
         let Some((source, ctx)) = store.source_mut(self.key) else {
             return;
         };
-        let cover = source.update_origin(
-            &previous,
-            &self.base.style_source,
-            ctx,
-            parameters,
-            needs_relayout,
-            self.fast_pfor_enabled,
-        );
-        let Some(cover) = cover else {
+        let Some(cover) = source.update_origin(&self.base.style_source, ctx, parameters, needs_relayout) else {
             return;
         };
         self.max_zoom = Some(cover.zoom_range.max);
@@ -279,9 +267,7 @@ impl RenderSource for RenderTileSource {
             needs_relayout,
             parameters,
             style_source: &self.base.style_source,
-            tile_size: cover.tile_size,
-            zoom_range: cover.zoom_range,
-            bounds: cover.bounds,
+            cover,
         };
         source.update_cover(&update, ctx);
     }
@@ -416,10 +402,6 @@ impl RenderSource for RenderTileSource {
 
     fn tile_order(&self) -> Option<&[usize]> {
         Some(&self.order_by_id)
-    }
-
-    fn set_fast_pfor_enabled(&mut self, enable: bool) {
-        self.fast_pfor_enabled = enable;
     }
 
     fn dump_debug_logs(&self) {}

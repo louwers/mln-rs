@@ -360,14 +360,7 @@ fn build_geojson(data: &[u8], options: &GeoJsonSourceOptions) -> Option<Arc<dyn 
 }
 
 impl StyleSourceType for GeoJsonSourceType {
-    const INFO: SourceTypeInfo = SourceTypeInfo {
-        name: "geojson",
-        layer_kind: SourceKind::Geometry,
-        from_json: true,
-        round_zoom: false,
-        overscale: true,
-        prefetch: false,
-    };
+    const INFO: SourceTypeInfo = SourceTypeInfo { name: "geojson", layer_kind: SourceKind::Geometry, from_json: true };
 
     const DESCRIBES_IN_BACKGROUND: bool = true;
 

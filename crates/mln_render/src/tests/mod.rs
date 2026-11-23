@@ -80,7 +80,7 @@ impl OneTile {
         mode: mln_map_types::MapMode,
     ) -> Self {
         let script = scripted_origin::Script::default();
-        let key = store.add_source("s".to_owned(), kind, false, Box::new(script.origin()));
+        let key = store.add_source("s".to_owned(), kind, Box::new(script.origin(kind)));
         let mut tiles = OneTile { store, key, id, script, mode };
         tiles.add(id);
         tiles
@@ -98,17 +98,16 @@ impl OneTile {
     }
 
     /// Tiles `ids` of a source of `kind` whose data `script` gives, in
-    /// `store`, laid out for `mode`; `single_layer` for a source whose data
-    /// has one layer. Their loads start as a cover starts them.
+    /// `store`, laid out for `mode`. Their loads start as a cover starts
+    /// them.
     pub(crate) fn with_script(
         mut store: crate::tile::store::TileStore,
         kind: crate::tile::tile::TileKind,
-        single_layer: bool,
         script: &scripted_origin::Script,
         ids: &[mln_tile_id::OverscaledTileID],
         mode: mln_map_types::MapMode,
     ) -> Self {
-        let key = store.add_source("source".to_owned(), kind, single_layer, Box::new(script.origin()));
+        let key = store.add_source("source".to_owned(), kind, Box::new(script.origin(kind)));
         let mut tiles = OneTile { store, key, id: ids[0], script: script.clone(), mode };
         let params = tiles.params();
         crate::testing::seed(&mut tiles.store, key, ids, params);

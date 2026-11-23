@@ -189,7 +189,7 @@ enum Then {
     /// The style, which lists the sources, glyphs and sprites.
     Style,
     /// A source's TileJSON, which lists its tiles.
-    Source { url: String, source: mln_style::Source, tile_size: u16 },
+    Source { url: String, source: mln_style::Source, tile_size: u16, round_zoom: bool },
 }
 
 impl Then {
@@ -327,16 +327,15 @@ impl OfflineDownload {
 
         for source in &parser.sources {
             let record = source.clone();
-            let round_zoom = record.info().round_zoom;
-            let (tileset, tile_size) = match record.data().offline() {
+            let (tileset, tile_size, round_zoom) = match record.data().offline() {
                 OfflineResources::None => continue,
                 OfflineResources::Source { .. } | OfflineResources::Image { .. } => {
                     result.required_resource_count += 1;
                     continue;
                 }
                 // A source without tile URLs has no tiles to download.
-                OfflineResources::Tiles { tileset, tile_size } => (Some(tileset), tile_size),
-                OfflineResources::TileJson { url, tile_size } => {
+                OfflineResources::Tiles { tileset, tile_size, round_zoom } => (Some(tileset), tile_size, round_zoom),
+                OfflineResources::TileJson { url, tile_size, round_zoom } => {
                     result.required_resource_count += 1;
                     let source_response = db.get(&Resource::source(&url));
                     let tileset = source_response
@@ -348,7 +347,7 @@ impl OfflineDownload {
                     if tileset.as_ref().is_none_or(|tileset| tileset.tiles.is_empty()) {
                         result.required_resource_count_is_precise = false;
                     }
-                    (tileset, tile_size)
+                    (tileset, tile_size, round_zoom)
                 }
             };
             if let Some(tileset) = tileset.filter(|tileset| !tileset.tiles.is_empty()) {
@@ -391,7 +390,7 @@ impl OfflineDownload {
         match then {
             Then::Nothing => Ok(()),
             Then::Style => self.on_style_response(response),
-            Then::Source { url, source, tile_size } => {
+            Then::Source { url, source, tile_size, round_zoom } => {
                 let Some(data) = &response.data else {
                     return Err("the TileJSON has no content".to_owned());
                 };
@@ -399,7 +398,7 @@ impl OfflineDownload {
                 if tileset.tiles.is_empty() {
                     return Err("the TileJSON has no tile URLs".to_owned());
                 }
-                self.queue_tiles(source.info().round_zoom, *tile_size, &tileset);
+                self.queue_tiles(*round_zoom, *tile_size, &tileset);
                 if self.required_source_urls.remove(url) && self.required_source_urls.is_empty() {
                     self.status.required_resource_count_is_precise = true;
                 }
@@ -421,10 +420,10 @@ impl OfflineDownload {
             let record = source.clone();
             match record.data().offline() {
                 OfflineResources::None => {}
-                OfflineResources::Tiles { tileset, tile_size } => {
-                    self.queue_tiles(record.info().round_zoom, tile_size, &tileset);
+                OfflineResources::Tiles { tileset, tile_size, round_zoom } => {
+                    self.queue_tiles(round_zoom, tile_size, &tileset);
                 }
-                OfflineResources::TileJson { url, tile_size } => {
+                OfflineResources::TileJson { url, tile_size, round_zoom } => {
                     self.status.required_resource_count_is_precise = false;
                     self.status.required_resource_count += 1;
                     self.required_source_urls.insert(url.clone());
@@ -432,7 +431,7 @@ impl OfflineDownload {
                     let mut source_resource = Resource::source(&url);
                     source_resource.set_priority(Priority::Low);
                     source_resource.set_usage(Usage::Offline);
-                    self.ensure_resource(source_resource, Then::Source { url, source: record, tile_size });
+                    self.ensure_resource(source_resource, Then::Source { url, source: record, tile_size, round_zoom });
                 }
                 OfflineResources::Source { url } => self.queue_resource(Resource::source(&url)),
                 OfflineResources::Image { url } => {

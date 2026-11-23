@@ -81,7 +81,7 @@ fn a_cut_tile_takes_a_fresh_ancestor_from_memory() {
         let origin = TilesetOrigin::<VectorKind>::loaded(tileset, VectorTileEncoding::Mvt, Some(file_source_dyn));
         let (left, right) = (OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0));
         let mut tiles =
-            OriginTiles::new(&test.thread_pool, TileKind::Geometry, false, origin, &[left, right], MapMode::Static);
+            OriginTiles::new(&test.thread_pool, TileKind::Geometry, origin, &[left, right], MapMode::Static);
         let mut layer = Layer::new(registry.style(), "circle", "water", "source").unwrap();
         layer.set_source_layer("water");
         tiles.set_layers(&registry, &[layer]).unwrap();
@@ -108,7 +108,7 @@ fn held_tile<K: TilesetKind>(test: &TileTest, kind: TileKind, tileset: Tileset) 
     let file_source = Arc::new(Held::default());
     let file_source_dyn: Arc<dyn FileSource> = Arc::<Held>::clone(&file_source);
     let origin = TilesetOrigin::<K>::loaded(tileset, VectorTileEncoding::Mvt, Some(file_source_dyn));
-    let mut tiles = OriginTiles::new(&test.thread_pool, kind, false, origin, &[tile()], MapMode::Continuous);
+    let mut tiles = OriginTiles::new(&test.thread_pool, kind, origin, &[tile()], MapMode::Continuous);
     if kind == TileKind::Geometry {
         let registry = registry();
         let mut layer = Layer::new(registry.style(), "circle", "water", "source").unwrap();

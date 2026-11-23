@@ -50,7 +50,7 @@ fn recorder() -> (Arc<Mutex<Vec<CanonicalTileID>>>, TileFunction) {
 /// Tiles `ids` of a custom geometry source whose provider is `loader`.
 fn tiles(test: &TileTest, ids: &[OverscaledTileID], loader: Arc<CustomGeometryProvider>) -> OriginTiles {
     let origin = CustomOrigin::<CustomGeometrySourceType>::with_loader(loader);
-    OriginTiles::new(&test.thread_pool, TileKind::Geometry, true, origin, ids, MapMode::Static)
+    OriginTiles::new(&test.thread_pool, TileKind::Geometry, origin, ids, MapMode::Static)
 }
 
 /// The root tile's id.

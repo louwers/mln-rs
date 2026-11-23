@@ -41,19 +41,6 @@ pub struct SourceTypeInfo {
     pub layer_kind: SourceKind,
     /// Whether style JSON can create a source of the type.
     pub from_json: bool,
-    /// Whether the tiles that cover a view are of the zoom level nearest the
-    /// view's, as for raster tiles, rather than the level below it. A
-    /// render in tile mode then draws every tile of the cover, not only
-    /// the first.
-    pub round_zoom: bool,
-    /// Whether a view past the highest zoom level that has tiles asks for
-    /// overscaled tiles of its own zoom, rather than drawing that level's
-    /// tiles larger.
-    pub overscale: bool,
-    /// Whether, in continuous mode, the map first loads tiles a few zoom
-    /// levels below the view's, and keeps the globe's lowest level loaded,
-    /// so that something shows while the view's tiles load.
-    pub prefetch: bool,
 }
 
 /// What a source reports about itself, whichever its type. A member that
@@ -78,11 +65,14 @@ pub enum OfflineResources {
     #[default]
     None,
     /// The tiles of a tileset that's known without a fetch, of tiles
-    /// `tile_size` pixels wide.
-    Tiles { tileset: Tileset, tile_size: u16 },
-    /// The TileJSON at `url`, then the tiles, `tile_size` pixels wide, of
-    /// the tileset that [`ErasedSource::offline_tileset`] makes of it.
-    TileJson { url: String, tile_size: u16 },
+    /// `tile_size` pixels wide. With `round_zoom`, a region's tiles are of
+    /// the zoom levels nearest its own, as raster tiles are, rather than
+    /// those below.
+    Tiles { tileset: Tileset, tile_size: u16, round_zoom: bool },
+    /// The TileJSON at `url`, then the tiles, as [`Tiles`](Self::Tiles)
+    /// says, of the tileset that [`ErasedSource::offline_tileset`] makes of
+    /// it.
+    TileJson { url: String, tile_size: u16, round_zoom: bool },
     /// The source's data at `url`, which is one resource.
     Source { url: String },
     /// The source's image at `url`, which is nothing to fetch if empty.
@@ -164,7 +154,8 @@ pub trait StyleSourceType: Sized + Send + Sync + 'static {
         SourceSummary::default()
     }
 
-    /// Whether the source's tiles lay out in the call that asks for them.
+    /// Whether the map prepares data set for the source in the command that
+    /// sets it, rather than on a background thread.
     fn is_update_synchronous(_source: &SourceData<Self>) -> bool {
         false
     }

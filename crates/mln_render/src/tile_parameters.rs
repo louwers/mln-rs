@@ -27,7 +27,8 @@ pub(crate) struct TileParameters<'a> {
     /// (`Caps::cpu_rasterizer`), which the tiles' layouts read.
     pub(crate) cpu_rasterizer: bool,
     pub(crate) global_state: Option<Arc<GlobalStateMap>>,
-    pub(crate) is_update_synchronous: bool,
+    /// Whether MLT tiles decode FastPFOR-compressed streams.
+    pub(crate) fast_pfor_enabled: bool,
     /// The style's font faces, which the tiles' layouts shape text with.
     pub(crate) font_faces: Option<Arc<FontFaces>>,
     /// Whether the style has a `glyphs` URL.

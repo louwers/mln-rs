@@ -84,14 +84,8 @@ impl std::fmt::Debug for CustomGeometrySourceOptions {
 }
 
 impl StyleSourceType for CustomGeometrySourceType {
-    const INFO: SourceTypeInfo = SourceTypeInfo {
-        name: "custom-geometry",
-        layer_kind: SourceKind::Geometry,
-        from_json: false,
-        round_zoom: false,
-        overscale: true,
-        prefetch: true,
-    };
+    const INFO: SourceTypeInfo =
+        SourceTypeInfo { name: "custom-geometry", layer_kind: SourceKind::Geometry, from_json: false };
 
     type Options = CustomGeometrySourceOptions;
     /// None: the provider gives the source's data.
@@ -116,14 +110,8 @@ impl std::fmt::Debug for CustomVectorSourceOptions {
 }
 
 impl StyleSourceType for CustomVectorSourceType {
-    const INFO: SourceTypeInfo = SourceTypeInfo {
-        name: "custom-vector",
-        layer_kind: SourceKind::Geometry,
-        from_json: false,
-        round_zoom: false,
-        overscale: true,
-        prefetch: true,
-    };
+    const INFO: SourceTypeInfo =
+        SourceTypeInfo { name: "custom-vector", layer_kind: SourceKind::Geometry, from_json: false };
 
     type Options = CustomVectorSourceOptions;
     /// None: the provider gives the source's data.

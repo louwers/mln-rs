@@ -24,7 +24,7 @@ use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::tileset::{RasterEncoding, Tileset, VectorEncoding};
 
-use super::{TilesetKind, TilesetSourceType};
+use super::{TilesetKind, TilesetSourceType, round_zoom};
 
 impl<K: TilesetKind> SourceType for TilesetSourceType<K> {
     fn supply(_source: &Source) -> Supply {
@@ -169,7 +169,7 @@ impl<K: TilesetKind> TilesetOrigin<K> {
         if res.not_modified {
             cx.keep_data();
         } else if let Some(data) = &mut self.data {
-            let input = data.input(cx.kind(), cx.id(), res, from_network);
+            let input = data.input(is_vector::<K>(), cx.id(), res, from_network);
             cx.deliver(input);
         }
     }
@@ -222,7 +222,17 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
             let max_zoom = update.max_zoom().floor() as i32 - i32::from(OVERSCALED_ZOOMS);
             zoom_range.max = zoom_range.max.max(max_zoom.clamp(0, i32::from(u8::MAX)) as u8);
         }
-        Some(Cover { tile_size, zoom_range, bounds: tileset.bounds })
+        Some(Cover {
+            tile_size,
+            zoom_range,
+            bounds: tileset.bounds,
+            round_zoom: round_zoom::<K>(),
+            // Past the tileset's last zoom, raster tiles are its last zoom's
+            // drawn larger.
+            overscale: K::INFO.layer_kind != SourceKind::Raster,
+            prefetch: true,
+            synchronous: false,
+        })
     }
 
     fn new_load(&mut self, tile: &NewTile<'_>) -> Option<TilesetLoad> {
@@ -262,7 +272,7 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
             Fetch::Network { .. } => Method::Network,
             Fetch::Idle | Fetch::Failed => return,
         };
-        load.stop(cx);
+        load.stop();
         if method == Method::Network {
             self.take_response(load, method, &res, cx);
             return;
@@ -305,14 +315,14 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
             }
         } else if matches!(load.fetch, Fetch::Network { .. }) {
             // Only a network-only request is aborted.
-            load.stop(cx);
+            load.stop();
         }
     }
 
     /// A network request under way is made again with the new parameters.
     fn update_parameters_changed(&mut self, load: &mut TilesetLoad, cx: &mut LoadContext<'_, '_, Response>) {
         if matches!(load.fetch, Fetch::Network { .. }) {
-            load.stop(cx);
+            load.stop();
             self.request(load, Method::Network, cx);
         }
     }
@@ -356,18 +366,16 @@ impl TilesetData {
     /// no tile in an archive), says the tileset has no tile here: a vector
     /// tile is then empty, as in GL JS, and a raster tile missing. A sparse
     /// tileset's empty tiles are missing.
-    fn input(&mut self, kind: TileKind, id: &OverscaledTileID, res: &Response, network: bool) -> TileInput {
+    fn input(&mut self, vector: bool, id: &OverscaledTileID, res: &Response, network: bool) -> TileInput {
         let not_found = res.tile_not_found || res.error.as_ref().is_some_and(|e| e.reason == Reason::NotFound);
         let empty = res.no_content || not_found;
-        let not_found_is_empty = kind == TileKind::Geometry;
-        let missing = empty && (self.tileset.sparse || (not_found && !not_found_is_empty));
+        let missing = empty && (self.tileset.sparse || (not_found && !vector));
         let data = if empty { None } else { res.data.clone() };
-        match kind {
-            TileKind::Geometry => {
-                let fetched = network.then(|| Fetched::of(res));
-                TileInput::Geometry { data: data.map(|data| self.decode(id, data, fetched)), missing }
-            }
-            TileKind::Raster | TileKind::Dem(_) => TileInput::Image { data, missing },
+        if vector {
+            let fetched = network.then(|| Fetched::of(res));
+            TileInput::Geometry { data: data.map(|data| self.decode(id, data, fetched)), missing }
+        } else {
+            TileInput::Image { data, missing }
         }
     }
 
@@ -516,10 +524,10 @@ impl TilesetLoad {
         matches!(self.fetch, Fetch::Idle | Fetch::Failed)
     }
 
-    /// Drops the request under way, whose response no longer applies.
-    fn stop(&mut self, cx: &mut LoadContext<'_, '_, Response>) {
+    /// Drops the request under way. A response it sent before it stopped
+    /// finds the load idle, and `receive` ignores it.
+    fn stop(&mut self) {
         self.fetch = Fetch::Idle;
-        cx.end_load();
     }
 }
 

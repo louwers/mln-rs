@@ -30,35 +30,42 @@ use crate::source::{
     TileNecessity, TileOperation,
 };
 
-/// The kind of a scripted source's tiles.
+/// The kind of a scripted source's tiles, whose cover picks a view's tiles
+/// as the tileset source type of the same kind does.
 pub(crate) trait Kind: Send + Sync + 'static {
     const INFO: SourceTypeInfo;
     const TILES: TileKind;
+    const ROUND_ZOOM: bool;
+    const OVERSCALE: bool;
 }
 
 pub(crate) struct Geometry;
 pub(crate) struct Raster;
 pub(crate) struct Dem;
 
-/// The members of a scripted source type's [`SourceTypeInfo`], those of the
-/// tileset source type of the same kind of tiles.
-const fn info(name: &'static str, layer_kind: SourceKind, round_zoom: bool, overscale: bool) -> SourceTypeInfo {
-    SourceTypeInfo { name, layer_kind, from_json: false, round_zoom, overscale, prefetch: true }
+const fn info(name: &'static str, layer_kind: SourceKind) -> SourceTypeInfo {
+    SourceTypeInfo { name, layer_kind, from_json: false }
 }
 
 impl Kind for Geometry {
-    const INFO: SourceTypeInfo = info("scripted", SourceKind::Geometry, false, true);
+    const INFO: SourceTypeInfo = info("scripted", SourceKind::Geometry);
     const TILES: TileKind = TileKind::Geometry;
+    const ROUND_ZOOM: bool = false;
+    const OVERSCALE: bool = true;
 }
 
 impl Kind for Raster {
-    const INFO: SourceTypeInfo = info("scripted-raster", SourceKind::Raster, true, false);
+    const INFO: SourceTypeInfo = info("scripted-raster", SourceKind::Raster);
     const TILES: TileKind = TileKind::Raster;
+    const ROUND_ZOOM: bool = true;
+    const OVERSCALE: bool = false;
 }
 
 impl Kind for Dem {
-    const INFO: SourceTypeInfo = info("scripted-dem", SourceKind::RasterDem, true, true);
+    const INFO: SourceTypeInfo = info("scripted-dem", SourceKind::RasterDem);
     const TILES: TileKind = TileKind::Dem(RasterEncoding::Mapbox);
+    const ROUND_ZOOM: bool = true;
+    const OVERSCALE: bool = true;
 }
 
 /// A scripted source type of tiles of the kind `K`.
@@ -84,6 +91,7 @@ impl<K: Kind> SourceType for Scripted<K> {
         let options = SourceData::<Self>::recover(source).map(|data| &data.options);
         let origin = ScriptedOrigin {
             script: options.map(|options| options.script.clone()).unwrap_or_default(),
+            tiles: K::TILES,
             cover: options.map(|options| options.cover),
             source: source.id().to_owned(),
         };
@@ -94,7 +102,15 @@ impl<K: Kind> SourceType for Scripted<K> {
 /// The scripted source `id` of tiles of the kind `K`, `tile_size` pixels
 /// wide, of the zoom levels `zoom_range`, which follow `script`.
 pub(crate) fn source<K: Kind>(id: &str, script: &Script, tile_size: u16, zoom_range: Range<u8>) -> Source {
-    let cover = Cover { tile_size, zoom_range, bounds: None };
+    let cover = Cover {
+        tile_size,
+        zoom_range,
+        bounds: None,
+        round_zoom: K::ROUND_ZOOM,
+        overscale: K::OVERSCALE,
+        prefetch: true,
+        synchronous: false,
+    };
     Source::new(id, SourceData::<Scripted<K>>::new(ScriptOptions { script: script.clone(), cover }))
 }
 
@@ -139,15 +155,15 @@ struct ScriptState {
 }
 
 impl Script {
-    /// An origin of tiles that follow the script and cover nothing, for
-    /// tiles that a test makes itself.
-    pub(crate) fn origin(&self) -> ScriptedOrigin {
-        ScriptedOrigin { script: self.clone(), cover: None, source: String::new() }
+    /// An origin of tiles of `tiles` that follow the script and cover
+    /// nothing, for tiles that a test makes itself.
+    pub(crate) fn origin(&self, tiles: TileKind) -> ScriptedOrigin {
+        ScriptedOrigin { script: self.clone(), tiles, cover: None, source: String::new() }
     }
 
     /// The origin's state of a new tile `id`, which a test makes itself.
     pub(crate) fn tile(&self, id: OverscaledTileID, order: RequestOrder) -> ScriptedTile {
-        ScriptedTile { script: self.clone(), id, order, open: None, answered: false }
+        ScriptedTile { script: self.clone(), id, order, open: None, answered: false, closed: false }
     }
 
     /// The loads begun since the last call, oldest first.
@@ -205,6 +221,7 @@ impl ScriptedLoad {
 /// The origin of a scripted source's tiles.
 pub(crate) struct ScriptedOrigin {
     script: Script,
+    tiles: TileKind,
     cover: Option<Cover>,
     source: String,
 }
@@ -219,6 +236,8 @@ pub(crate) struct ScriptedTile {
     open: Option<Arc<AtomicBool>>,
     /// A load brought data, or the tile took its world copy's answer.
     answered: bool,
+    /// The tile stopped its latest load, whose replies go nowhere.
+    closed: bool,
 }
 
 impl ScriptedTile {
@@ -251,6 +270,7 @@ impl ScriptedOrigin {
     /// Begins a load of `tile`, which the test answers.
     fn begin(&self, tile: &mut ScriptedTile, cx: &mut LoadContext<'_, '_, Reply>) {
         tile.stop();
+        tile.closed = false;
         cx.report(TileOperation::RequestedFromNetwork);
         let replier = cx.begin_load();
         let stopped = Arc::new(AtomicBool::new(false));
@@ -281,14 +301,18 @@ impl DataOrigin for ScriptedOrigin {
         self.script.record(Call::Start(tile.id));
     }
 
+    /// A reply after its load stopped goes nowhere.
     fn receive(&mut self, tile: &mut ScriptedTile, reply: Reply, cx: &mut LoadContext<'_, '_, Reply>) {
+        if tile.closed {
+            return;
+        }
         self.script.record(Call::Receive(tile.id));
-        let geometry = cx.kind() == TileKind::Geometry;
+        let geometry = self.tiles == TileKind::Geometry;
         let (data, image, missing) = match reply {
             Reply::Fail(message) => {
                 tile.answered = false;
                 tile.stop();
-                cx.end_load();
+                tile.closed = true;
                 cx.fail(Error::native(message));
                 return;
             }
@@ -318,7 +342,7 @@ impl DataOrigin for ScriptedOrigin {
             TileNecessity::Optional => {
                 if tile.open.is_some() {
                     tile.stop();
-                    cx.end_load();
+                    tile.closed = true;
                 }
             }
         }

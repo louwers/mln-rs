@@ -50,7 +50,7 @@ fn recorder() -> (Arc<Mutex<Vec<CanonicalTileID>>>, TileFunction) {
 /// Tiles `ids` of a custom vector source whose provider is `loader`.
 fn tiles(test: &TileTest, ids: &[OverscaledTileID], loader: Arc<CustomVectorProvider>) -> OriginTiles {
     let origin = CustomOrigin::<CustomVectorSourceType>::with_loader(loader);
-    OriginTiles::new(&test.thread_pool, TileKind::Geometry, false, origin, ids, MapMode::Static)
+    OriginTiles::new(&test.thread_pool, TileKind::Geometry, origin, ids, MapMode::Static)
 }
 
 /// A subscriber that ignores what the loader sends it.

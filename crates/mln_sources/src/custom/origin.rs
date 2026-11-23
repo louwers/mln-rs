@@ -27,7 +27,7 @@ use crate::geojson::TileFeatures;
 
 impl SourceType for CustomGeometrySourceType {
     fn supply(_source: &Source) -> Supply {
-        Supply::single_layer_tiles(TileKind::Geometry, CustomOrigin::<Self>::new())
+        Supply::tiles(TileKind::Geometry, CustomOrigin::<Self>::new())
     }
 }
 
@@ -75,27 +75,31 @@ impl CustomSource for CustomVectorSourceType {
 
 /// A custom source's tiles, which take their data from its provider.
 pub(crate) struct CustomOrigin<T> {
+    /// The source's last version.
+    source: Option<Source>,
     loader: Option<Arc<dyn CustomLoader>>,
     fast_pfor_enabled: bool,
+    /// The key of the tiles' last subscription; no two share one.
+    last_key: SubscriberKey,
     source_type: PhantomData<fn() -> T>,
 }
 
 impl<T> CustomOrigin<T> {
     fn new() -> Self {
-        CustomOrigin { loader: None, fast_pfor_enabled: false, source_type: PhantomData }
+        CustomOrigin { source: None, loader: None, fast_pfor_enabled: false, last_key: 0, source_type: PhantomData }
     }
 
     /// An origin whose tiles take their data from `loader`, as if a source
     /// of it had updated.
     #[cfg(test)]
     pub(crate) fn with_loader(loader: Arc<dyn CustomLoader>) -> Self {
-        CustomOrigin { loader: Some(loader), fast_pfor_enabled: false, source_type: PhantomData }
+        CustomOrigin { loader: Some(loader), ..CustomOrigin::new() }
     }
 
-    /// Asks the provider for tile `id`'s data, which `replier` sends.
-    fn fetch(&self, id: OverscaledTileID, replier: Replier<CustomReply>) {
+    /// Asks the provider for tile `id`'s data, which `subscription` sends.
+    fn fetch(&self, id: OverscaledTileID, subscription: &Subscribed) {
         if let Some(loader) = &self.loader {
-            loader.fetch(id, replier, self.fast_pfor_enabled);
+            loader.fetch(id, subscription, self.fast_pfor_enabled);
         }
     }
 }
@@ -117,20 +121,27 @@ pub(crate) struct CustomLoad {
     subscription: Subscription,
 }
 
-/// A custom tile's place among its provider's subscribers, under the key of
-/// its replier's load.
+/// A custom tile's place among its provider's subscribers.
 enum Subscription {
     Unsubscribed,
-    Subscribed(Replier<CustomReply>),
+    Subscribed(Subscribed),
     /// The data went stale: the tile subscribes anew when next required.
     /// Until then this load's data still applies.
-    Stale(Replier<CustomReply>),
+    Stale(Subscribed),
+}
+
+/// A subscription's key among the provider's subscribers, and the replier
+/// of the load it answers.
+#[derive(Clone)]
+pub(crate) struct Subscribed {
+    key: SubscriberKey,
+    replier: Replier<CustomReply>,
 }
 
 impl Subscription {
     fn key(&self) -> Option<SubscriberKey> {
         match self {
-            Subscription::Subscribed(replier) | Subscription::Stale(replier) => Some(replier.load()),
+            Subscription::Subscribed(subscribed) | Subscription::Stale(subscribed) => Some(subscribed.key),
             Subscription::Unsubscribed => None,
         }
     }
@@ -153,17 +164,28 @@ impl<T: CustomSource> DataOrigin for CustomOrigin<T> {
     /// or provider clear them.
     fn update(&mut self, update: &mut OriginUpdate<'_, Self>) -> Option<Cover> {
         let data = SourceData::<T>::recover(update.source())?;
-        let same = Source::ptr_eq(update.previous(), update.source());
-        let differs = SourceData::<T>::recover(update.previous()).is_none_or(|previous| T::differs(data, previous));
-        if !same && differs {
-            update.clear_tiles();
+        let previous = self.source.as_ref();
+        let same = previous.is_some_and(|previous| Source::ptr_eq(previous, update.source()));
+        if !same {
+            if previous.and_then(SourceData::<T>::recover).is_none_or(|previous| T::differs(data, previous)) {
+                update.clear_tiles();
+            }
+            self.source = Some(update.source().clone());
         }
         let (loader, tile_size, zoom_range) = T::parts(data);
         if self.loader.is_none() || !same {
             self.loader = Some(loader);
             self.fast_pfor_enabled = update.fast_pfor_enabled();
         }
-        Some(Cover { tile_size, zoom_range, bounds: None })
+        Some(Cover {
+            tile_size,
+            zoom_range,
+            bounds: None,
+            round_zoom: false,
+            overscale: true,
+            prefetch: true,
+            synchronous: false,
+        })
     }
 
     fn new_load(&mut self, _tile: &NewTile<'_>) -> Option<CustomLoad> {
@@ -203,12 +225,13 @@ impl<T: CustomSource> DataOrigin for CustomOrigin<T> {
         let id = *cx.id();
         if cx.necessity() == TileNecessity::Required {
             match &load.subscription {
-                Subscription::Subscribed(replier) => self.fetch(id, replier.clone()),
+                Subscription::Subscribed(subscribed) => self.fetch(id, subscribed),
                 Subscription::Stale(_) | Subscription::Unsubscribed => {
                     if self.loader.is_some() {
-                        let replier = cx.begin_load();
-                        load.subscription = Subscription::Subscribed(replier.clone());
-                        self.fetch(id, replier);
+                        self.last_key += 1;
+                        let subscribed = Subscribed { key: self.last_key, replier: cx.begin_load() };
+                        self.fetch(id, &subscribed);
+                        load.subscription = Subscription::Subscribed(subscribed);
                     }
                 }
             }
@@ -223,8 +246,8 @@ impl<T: CustomSource> DataOrigin for CustomOrigin<T> {
 
 /// A custom source's provider, whatever data it hands its tiles.
 pub(crate) trait CustomLoader {
-    /// Asks for tile `id`'s data, which `replier` sends.
-    fn fetch(&self, id: OverscaledTileID, replier: Replier<CustomReply>, fast_pfor_enabled: bool);
+    /// Asks for tile `id`'s data, which `subscription` sends.
+    fn fetch(&self, id: OverscaledTileID, subscription: &Subscribed, fast_pfor_enabled: bool);
     fn cancel(&self, id: OverscaledTileID, key: SubscriberKey);
     fn remove(&self, id: OverscaledTileID, key: SubscriberKey);
 }
@@ -251,9 +274,9 @@ impl CustomTileData for CustomVectorTileData {
 }
 
 impl<D: CustomTileData> CustomLoader for CustomProvider<D> {
-    fn fetch(&self, id: OverscaledTileID, replier: Replier<CustomReply>, fast_pfor_enabled: bool) {
-        let key = replier.load();
-        self.fetch_tile(id, key, Box::new(Subscriber { replier, fast_pfor_enabled }));
+    fn fetch(&self, id: OverscaledTileID, subscription: &Subscribed, fast_pfor_enabled: bool) {
+        let replier = subscription.replier.clone();
+        self.fetch_tile(id, subscription.key, Box::new(Subscriber { replier, fast_pfor_enabled }));
     }
 
     fn cancel(&self, id: OverscaledTileID, key: SubscriberKey) {

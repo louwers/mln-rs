@@ -32,7 +32,9 @@
 //! be `Send`. A load's work can run anywhere, as on the renderer's pool
 //! ([`LoadContext::pool`]): its [`Replier`] and its replies are `Send`. What
 //! the tiles take in lays out or decodes on the tile workers, through the
-//! worker codec where they run apart; an origin's own types don't cross it.
+//! worker codec where they run apart, or in the update for a
+//! [synchronous](Cover::synchronous) cover; an origin's own types don't
+//! cross the codec.
 
 use std::any::Any;
 use std::marker::PhantomData;
@@ -74,7 +76,7 @@ pub trait SourceType: StyleSourceType {
 pub struct Supply(pub(crate) Supplied);
 
 pub(crate) enum Supplied {
-    Tiles { kind: TileKind, single_layer: bool, origin: Box<dyn ErasedOrigin> },
+    Tiles { kind: TileKind, origin: Box<dyn ErasedOrigin> },
     Image(ImageOf),
 }
 
@@ -85,15 +87,7 @@ impl Supply {
     /// Tiles of `kind`, whose data comes from `origin`.
     #[must_use]
     pub fn tiles<O: DataOrigin>(kind: TileKind, origin: O) -> Self {
-        Supply(Supplied::Tiles { kind, single_layer: false, origin: Box::new(origin) })
-    }
-
-    /// Tiles of `kind` that each hold one source layer, which a source
-    /// query gets whatever source layer it names, whose data comes from
-    /// `origin`.
-    #[must_use]
-    pub fn single_layer_tiles<O: DataOrigin>(kind: TileKind, origin: O) -> Self {
-        Supply(Supplied::Tiles { kind, single_layer: true, origin: Box::new(origin) })
+        Supply(Supplied::Tiles { kind, origin: Box::new(origin) })
     }
 
     /// One image, which `image_of` reads from each version of the source.
@@ -112,14 +106,30 @@ pub struct SourceImage<'a> {
     pub coordinates: [LatLng; 4],
 }
 
-/// What a source's tiles cover: their size in pixels, the zoom levels that
-/// have tiles of their own, beyond which they are drawn scaled up, and the
-/// bounds outside which there are none.
+/// What a source's tiles cover, and how the engine picks those of a view.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Cover {
+    /// The size of the tiles, in pixels.
     pub tile_size: u16,
+    /// The zoom levels that have tiles of their own.
     pub zoom_range: Range<u8>,
+    /// The bounds outside which there are no tiles.
     pub bounds: Option<LatLngBounds>,
+    /// Whether a view's tiles are of the zoom level nearest the view's, as
+    /// raster tiles are, rather than of the level below it. A render in tile
+    /// mode then draws every tile of the view, not only the first.
+    pub round_zoom: bool,
+    /// Whether a view past the last zoom level of `zoom_range` asks for
+    /// tiles of its own zoom, made from that level's, rather than drawing
+    /// that level's tiles larger.
+    pub overscale: bool,
+    /// Whether, in continuous mode, tiles a few zoom levels below the
+    /// view's load first, and the globe's lowest level stays loaded, so that
+    /// something shows while the view's tiles load.
+    pub prefetch: bool,
+    /// Whether the tiles lay out on the renderer's thread in the update that
+    /// gives them their data, rather than on the tile workers.
+    pub synchronous: bool,
 }
 
 /// Where a source's tiles get their data: what each tile has of the
@@ -229,13 +239,6 @@ pub struct OriginUpdate<'a, O: ?Sized> {
 }
 
 impl<'a, O: DataOrigin> OriginUpdate<'a, O> {
-    /// The source's version before this one; the same as
-    /// [`source`](Self::source) at its first update.
-    #[must_use]
-    pub fn previous(&self) -> &'a Source {
-        self.parts.previous
-    }
-
     #[must_use]
     pub fn source(&self) -> &'a Source {
         self.parts.source
@@ -258,12 +261,6 @@ impl<'a, O: DataOrigin> OriginUpdate<'a, O> {
         self.parts.parameters.file_source.as_ref()
     }
 
-    /// Whether the source's tiles lay out in the update that asks for them.
-    #[must_use]
-    pub fn is_synchronous(&self) -> bool {
-        self.parts.parameters.is_update_synchronous
-    }
-
     /// Whether the source's tiles lay out again.
     #[must_use]
     pub fn needs_relayout(&self) -> bool {
@@ -273,7 +270,7 @@ impl<'a, O: DataOrigin> OriginUpdate<'a, O> {
     /// Whether MLT tiles decode FastPFOR-compressed streams.
     #[must_use]
     pub fn fast_pfor_enabled(&self) -> bool {
-        self.parts.fast_pfor_enabled
+        self.parts.parameters.fast_pfor_enabled
     }
 
     /// Lets go of every tile.
@@ -281,10 +278,9 @@ impl<'a, O: DataOrigin> OriginUpdate<'a, O> {
         self.parts.tiles.clear_all(self.parts.ctx);
     }
 
-    /// Lets go of the cached tiles beyond what the cache keeps with less
-    /// memory.
-    pub fn reduce_memory_use(&mut self) {
-        self.parts.tiles.reduce_memory_use(self.parts.ctx);
+    /// Lets go of the cached tiles, those the view no longer needs.
+    pub fn clear_cache(&mut self) {
+        self.parts.tiles.cache_clear(self.parts.ctx);
     }
 
     /// Decodes the elevations of the tiles made from now on, of a
@@ -333,12 +329,6 @@ impl<'a, 't, R: Send + 'static> LoadContext<'a, 't, R> {
         &self.tile.tile().id
     }
 
-    /// The kind of the tile, which the input it takes is of.
-    #[must_use]
-    pub fn kind(&self) -> TileKind {
-        self.tile.source().kind
-    }
-
     #[must_use]
     pub fn necessity(&self) -> TileNecessity {
         self.tile.tile().load.necessity
@@ -367,13 +357,6 @@ impl<'a, 't, R: Send + 'static> LoadContext<'a, 't, R> {
         self.tile.tile().is_renderable()
     }
 
-    /// Whether the tile's work runs in the update that asks for it, on
-    /// this thread.
-    #[must_use]
-    pub fn is_synchronous(&self) -> bool {
-        self.tile.source().synchronous
-    }
-
     /// The renderer's thread pool.
     #[must_use]
     pub fn pool(&self) -> &Pool {
@@ -381,7 +364,9 @@ impl<'a, 't, R: Send + 'static> LoadContext<'a, 't, R> {
     }
 
     /// Starts a load, the tile's latest from now on, whose replies the
-    /// returned replier sends. Replies to the loads before go nowhere.
+    /// returned replier sends. Replies to the loads before go nowhere. A
+    /// load stays the latest until the next one begins, so an origin that
+    /// stops a load's work ignores the replies it sent before it stopped.
     pub fn begin_load(&mut self) -> Replier<R> {
         let load = self.tile.next();
         self.tile.tile_mut().load.current = Some(load);
@@ -389,14 +374,8 @@ impl<'a, 't, R: Send + 'static> LoadContext<'a, 't, R> {
         Replier { inbox: self.tile.store().inbox.clone(), tile, load, reply: PhantomData }
     }
 
-    /// Ends the tile's latest load: no replies go to the tile until it
-    /// begins another.
-    pub fn end_load(&mut self) {
-        self.tile.tile_mut().load.current = None;
-    }
-
     /// Gives the tile what a load brought, which it lays out or decodes.
-    /// `input` is of the tile's [`kind`](Self::kind).
+    /// `input` is of the kind of tiles the source supplies.
     pub fn deliver(&mut self, input: TileInput) {
         self.tile.take_input(input);
     }
@@ -459,13 +438,6 @@ impl<R> Clone for Replier<R> {
 }
 
 impl<R: Send + 'static> Replier<R> {
-    /// Which load the replier sends for. No two of a source's loads share
-    /// it.
-    #[must_use]
-    pub fn load(&self) -> u64 {
-        self.load
-    }
-
     /// Sends `reply`, which the tile takes in at the renderer's next update
     /// if the load is still its latest.
     pub fn send(&self, reply: R) {

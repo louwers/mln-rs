@@ -742,12 +742,9 @@ impl RenderOrchestrator {
             if self.render_sources.contains_key(id) {
                 continue;
             }
-            let Some(mut render_source) = render_source::create(&self.registry, style_source, &mut self.tile_store)
-            else {
-                continue;
-            };
-            render_source.set_fast_pfor_enabled(update_parameters.fast_pfor_enabled);
-            self.render_sources.insert(id.clone(), render_source);
+            if let Some(render_source) = render_source::create(&self.registry, style_source, &mut self.tile_store) {
+                self.render_sources.insert(id.clone(), render_source);
+            }
         }
 
         // The update carries the map's whole feature state, so a render
@@ -775,7 +772,7 @@ impl RenderOrchestrator {
         clock: &FrameClock,
         frame: &mut FramePlan,
     ) -> Vec<bool> {
-        let mut tile_parameters = TileParameters {
+        let tile_parameters = TileParameters {
             pixel_ratio: update_parameters.pixel_ratio,
             debug_options: update_parameters.debug_options,
             view: &update_parameters.view,
@@ -792,7 +789,7 @@ impl RenderOrchestrator {
             subdivision_granularity: update_parameters.subdivision_granularity,
             cpu_rasterizer,
             global_state: self.global_state.clone(),
-            is_update_synchronous: false,
+            fast_pfor_enabled: update_parameters.fast_pfor_enabled,
             font_faces: update_parameters.style.get_font_faces().cloned(),
             glyph_pbfs: !update_parameters.style.get_glyph_url().is_empty(),
             placement_commits: self.placement.schedule().commits(),
@@ -901,7 +898,6 @@ impl RenderOrchestrator {
                 }
             }
             if let Some(style_source) = &style_source {
-                tile_parameters.is_update_synchronous = style_source.data().is_update_synchronous();
                 let filtered_layers = std::mem::take(&mut self.filtered_layers_for_source);
                 if let Some(source) = self.render_sources.get_mut(style_source.id()) {
                     source.update(

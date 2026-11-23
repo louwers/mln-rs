@@ -35,13 +35,11 @@ pub(crate) const fn entry<T: SourceType>() -> &'static dyn ErasedSourceType {
 
 /// What an origin's update takes in, whatever its type.
 pub(crate) struct UpdateParts<'a> {
-    pub(crate) previous: &'a Source,
     pub(crate) source: &'a Source,
     pub(crate) tiles: &'a mut SourceTiles,
     pub(crate) ctx: &'a mut StoreContext,
     pub(crate) parameters: &'a TileParameters<'a>,
     pub(crate) needs_relayout: bool,
-    pub(crate) fast_pfor_enabled: bool,
 }
 
 /// A data origin, whichever its type. Each method is the [`DataOrigin`]

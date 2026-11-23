@@ -93,8 +93,6 @@ pub(crate) trait RenderSource {
         None
     }
 
-    fn set_fast_pfor_enabled(&mut self, _enable: bool) {}
-
     fn dump_debug_logs(&self);
 
     /// The deepest zoom that has tiles of its own, as the source's last
@@ -128,9 +126,7 @@ pub(crate) fn create(registry: &Registry, source: &Source, store: &mut TileStore
         "source type '{name}' supplies data of another kind than its layers draw"
     );
     Some(match supplied {
-        Supplied::Tiles { kind, single_layer, origin } => {
-            Box::new(RenderTileSource::new(source.clone(), kind, single_layer, origin, store))
-        }
+        Supplied::Tiles { kind, origin } => Box::new(RenderTileSource::new(source.clone(), kind, origin, store)),
         Supplied::Image(image_of) => Box::new(RenderImageSource::new(source.clone(), image_of)),
     })
 }

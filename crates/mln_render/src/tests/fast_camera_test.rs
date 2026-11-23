@@ -209,7 +209,7 @@ impl Scene {
             subdivision_granularity: SubdivisionGranularitySetting::none(),
             cpu_rasterizer: false,
             global_state: None,
-            is_update_synchronous: false,
+            fast_pfor_enabled: false,
             font_faces: None,
             glyph_pbfs: true,
             placement_commits: 0,

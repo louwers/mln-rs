@@ -68,7 +68,7 @@ impl Test {
     fn scripted_tile(&self, workers: Box<dyn TileWorkers>) -> OneTile {
         let store = tile_store(&self.pool, workers);
         let id = OverscaledTileID::from_zxy(0, 0, 0);
-        OneTile::with_script(store, TileKind::Geometry, false, &Script::default(), &[id], MapMode::Static)
+        OneTile::with_script(store, TileKind::Geometry, &Script::default(), &[id], MapMode::Static)
     }
 
     /// Tile 0/0/0 of a source of its own, whose jobs run on `workers`.
@@ -315,7 +315,8 @@ fn style_replaced_mid_load() {
     assert!(load.is_stopped(), "the old tile's load goes with it");
     assert!(tile.script.take_calls().contains(&Call::Retire(id)));
     let script = Script::default();
-    let new_key = tile.store.add_source("source".to_owned(), TileKind::Geometry, false, Box::new(script.origin()));
+    let new_key =
+        tile.store.add_source("source".to_owned(), TileKind::Geometry, Box::new(script.origin(TileKind::Geometry)));
     assert_ne!(new_key, old_key, "keys aren't reused");
     let (source, ctx) = tile.store.source_mut(new_key).expect("the source");
     let new_tile = source.info.new_tile(id, params).expect("a tile");

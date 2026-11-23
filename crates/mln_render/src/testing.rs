@@ -127,19 +127,18 @@ pub struct OriginTiles {
 
 impl OriginTiles {
     /// Tiles `ids` of a source of `kind` whose data comes from `origin`, in
-    /// a store that frees on `pool`, laid out for `mode`; `single_layer`
-    /// for a source whose data has one layer. Their loads start as a cover
-    /// starts them. A tile that `origin` makes no load of is left out.
+    /// a store that frees on `pool`, laid out for `mode`. Their loads start
+    /// as a cover starts them. A tile that `origin` makes no load of is left
+    /// out.
     pub fn new(
         pool: &TaskGroup,
         kind: TileKind,
-        single_layer: bool,
         origin: impl DataOrigin,
         ids: &[OverscaledTileID],
         mode: MapMode,
     ) -> Self {
         let mut store = tile_store(pool, Box::new(InlineWorkers));
-        let key = store.add_source("source".to_owned(), kind, single_layer, Box::new(origin));
+        let key = store.add_source("source".to_owned(), kind, Box::new(origin));
         let params = LayoutParams {
             mode,
             pixel_ratio: 1.0,
@@ -231,12 +230,12 @@ impl OriginTiles {
     /// When the query fails, as for data that doesn't decode.
     pub fn features(&self, id: &OverscaledTileID, source_layer: &str) -> Result<Vec<Feature>, Error> {
         let mut features = Vec::new();
-        let (Some(source), Some(tile)) = (self.store.source(self.key), self.tile(id)) else {
+        let Some(tile) = self.tile(id) else {
             return Ok(features);
         };
         if let Some(contents) = tile.contents().and_then(|contents| contents.geometry()) {
             let options = SourceQueryOptions { source_layers: Some(vec![source_layer.to_owned()]), filter: None };
-            contents.query_source_features(id, source.info.single_layer, &mut features, &options, None)?;
+            contents.query_source_features(id, &mut features, &options, None)?;
         }
         Ok(features)
     }
@@ -299,7 +298,7 @@ impl OneSource {
             subdivision_granularity: SubdivisionGranularitySetting::none(),
             cpu_rasterizer: false,
             global_state: None,
-            is_update_synchronous: source.data().is_update_synchronous(),
+            fast_pfor_enabled: false,
             font_faces: None,
             glyph_pbfs: true,
             placement_commits: 0,

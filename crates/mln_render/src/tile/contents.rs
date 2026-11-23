@@ -14,6 +14,7 @@ use mln_style::layer_type::ErasedLayerStyle;
 use mln_style_types::image::{ImagePositions, ImageType};
 use mln_text::glyph::{GlyphID, GlyphPositions};
 use mln_text::tagged_string::font_stack_hash;
+use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::feature::Feature;
@@ -491,12 +492,11 @@ impl GeometryContents {
     }
 
     /// Adds the features of tile `id` that `options` select to `result`:
-    /// those of the source layers it names, or with `single_layer`, those
-    /// of the data's one layer whatever it names.
+    /// those of the source layers it names, or those of data of one layer
+    /// whatever it names.
     pub(crate) fn query_source_features(
         &self,
         id: &OverscaledTileID,
-        single_layer: bool,
         result: &mut Vec<Feature>,
         options: &SourceQueryOptions,
         global_state: Option<&GlobalStateMap>,
@@ -504,7 +504,7 @@ impl GeometryContents {
         let Some(data) = self.result.feature_index.data() else {
             return Ok(());
         };
-        if single_layer {
+        if let TileData::Features(_) = data {
             // Ignore the source layer: there is only one.
             if let Some(layer) = data.layer("")? {
                 query_layer_source_features(&layer, result, options, global_state, id)?;

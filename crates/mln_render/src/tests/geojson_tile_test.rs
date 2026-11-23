@@ -36,8 +36,7 @@ impl GeoJSONTileTest {
     /// updates; the tiles get their features before their style.
     fn tiles(&self, ids: &[OverscaledTileID], workers: Box<dyn TileWorkers>, synchronous: bool) -> OneTile {
         let store = crate::tests::tile_store(&self.thread_pool, workers);
-        let mut tiles =
-            OneTile::with_script(store, TileKind::Geometry, true, &Script::default(), ids, MapMode::Continuous);
+        let mut tiles = OneTile::with_script(store, TileKind::Geometry, &Script::default(), ids, MapMode::Continuous);
         let key = tiles.key;
         tiles.store.source_mut(key).expect("the source").0.info.synchronous = synchronous;
         for id in ids {

@@ -31,14 +31,8 @@ fn root() -> OverscaledTileID {
 fn invoke_tile_changed() {
     let test = RasterTileTest::new();
     let store = crate::tests::tile_store(&test.thread_pool, Box::new(InlineWorkers));
-    let mut tiles = OneTile::with_script(
-        store,
-        TileKind::Geometry,
-        true,
-        &Script::default(),
-        &[root()],
-        mln_map_types::MapMode::Static,
-    );
+    let mut tiles =
+        OneTile::with_script(store, TileKind::Geometry, &Script::default(), &[root()], mln_map_types::MapMode::Static);
 
     let layer = Layer::new(Registry::with_builtins().style(), "dot", "circle", "source").unwrap();
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
@@ -63,6 +57,6 @@ fn invoke_tile_changed() {
         panic!("a layout");
     };
     let mut result = Vec::new();
-    contents.query_source_features(&root(), true, &mut result, &SourceQueryOptions::default(), None).unwrap();
+    contents.query_source_features(&root(), &mut result, &SourceQueryOptions::default(), None).unwrap();
     assert_eq!(result.len(), 1);
 }

@@ -19,7 +19,7 @@ use super::{GeoJSONData, GeoJsonSourceType, TileFeatures};
 
 impl SourceType for GeoJsonSourceType {
     fn supply(_source: &Source) -> Supply {
-        Supply::single_layer_tiles(TileKind::Geometry, GeoJsonOrigin { data: None, synchronous: false })
+        Supply::tiles(TileKind::Geometry, GeoJsonOrigin { data: None, synchronous: false })
     }
 }
 
@@ -52,8 +52,9 @@ impl DataOrigin for GeoJsonOrigin {
         let source = SourceData::<GeoJsonSourceType>::recover(update.source())?;
         // A tile lays out in the mode it was created with, so a mode change
         // recreates the tiles.
-        if update.is_synchronous() != self.synchronous {
-            self.synchronous = update.is_synchronous();
+        let synchronous = source.options.synchronous_update;
+        if synchronous != self.synchronous {
+            self.synchronous = synchronous;
             update.clear_tiles();
         }
         let data = source.description.clone();
@@ -64,14 +65,22 @@ impl DataOrigin for GeoJsonOrigin {
                 // flaky.
                 update.clear_tiles();
             } else if let Some(data) = &data {
-                update.reduce_memory_use();
+                update.clear_cache();
                 let max_z = source.options.get_zoom_range().max;
                 let relayout = update.needs_relayout();
-                update.update_tiles(|id| id.canonical.z <= max_z, |_, cx| load(data, relayout, cx));
+                update.update_tiles(|id| id.canonical.z <= max_z, |_, cx| load(data, synchronous, relayout, cx));
             }
         }
         data?;
-        Some(Cover { tile_size: constants::TILE_SIZE_I, zoom_range: source.options.get_zoom_range(), bounds: None })
+        Some(Cover {
+            tile_size: constants::TILE_SIZE_I,
+            zoom_range: source.options.get_zoom_range(),
+            bounds: None,
+            round_zoom: false,
+            overscale: true,
+            prefetch: false,
+            synchronous,
+        })
     }
 
     fn new_load(&mut self, _tile: &NewTile<'_>) -> Option<GeoJsonLoad> {
@@ -80,7 +89,7 @@ impl DataOrigin for GeoJsonOrigin {
 
     fn start(&mut self, _load: &mut GeoJsonLoad, cx: &mut LoadContext<'_, '_, TileData>) {
         if let Some(data) = &self.data {
-            load(data, false, cx);
+            load(data, self.synchronous, false, cx);
         }
     }
 
@@ -90,14 +99,13 @@ impl DataOrigin for GeoJsonOrigin {
 }
 
 /// Loads the tile's features from `data`, cut on the renderer's pool unless
-/// the source's updates are synchronous. With `relayout`, the tile first
-/// drops its data and style.
-fn load(data: &Arc<dyn GeoJSONData>, relayout: bool, cx: &mut LoadContext<'_, '_, TileData>) {
+/// `synchronous`. With `relayout`, the tile first drops its data and style.
+fn load(data: &Arc<dyn GeoJSONData>, synchronous: bool, relayout: bool, cx: &mut LoadContext<'_, '_, TileData>) {
     if relayout {
         cx.reset();
     }
     let replier = cx.begin_load();
-    let pool = (!cx.is_synchronous()).then(|| cx.pool());
+    let pool = (!synchronous).then(|| cx.pool());
     if let Some(features) = get_tile(data, cx.id().canonical, replier, pool) {
         cx.deliver(TileInput::Geometry { data: Some(features), missing: false });
     }

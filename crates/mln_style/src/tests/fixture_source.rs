@@ -17,14 +17,7 @@ pub(crate) struct Heights;
 macro_rules! fixture_source_type {
     ($type:ident, $name:literal, $kind:ident) => {
         impl StyleSourceType for $type {
-            const INFO: SourceTypeInfo = SourceTypeInfo {
-                name: $name,
-                layer_kind: SourceKind::$kind,
-                from_json: true,
-                round_zoom: false,
-                overscale: true,
-                prefetch: true,
-            };
+            const INFO: SourceTypeInfo = SourceTypeInfo { name: $name, layer_kind: SourceKind::$kind, from_json: true };
 
             type Options = ();
             type Description = ();

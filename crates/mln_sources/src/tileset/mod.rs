@@ -31,36 +31,22 @@ pub struct RasterKind;
 pub struct RasterDemKind;
 
 impl TilesetKind for VectorKind {
-    const INFO: SourceTypeInfo = SourceTypeInfo {
-        name: "vector",
-        layer_kind: SourceKind::Geometry,
-        from_json: true,
-        round_zoom: false,
-        overscale: true,
-        prefetch: true,
-    };
+    const INFO: SourceTypeInfo = SourceTypeInfo { name: "vector", layer_kind: SourceKind::Geometry, from_json: true };
 }
 
 impl TilesetKind for RasterKind {
-    const INFO: SourceTypeInfo = SourceTypeInfo {
-        name: "raster",
-        layer_kind: SourceKind::Raster,
-        from_json: true,
-        round_zoom: true,
-        overscale: false,
-        prefetch: true,
-    };
+    const INFO: SourceTypeInfo = SourceTypeInfo { name: "raster", layer_kind: SourceKind::Raster, from_json: true };
 }
 
 impl TilesetKind for RasterDemKind {
-    const INFO: SourceTypeInfo = SourceTypeInfo {
-        name: "raster-dem",
-        layer_kind: SourceKind::RasterDem,
-        from_json: true,
-        round_zoom: true,
-        overscale: true,
-        prefetch: true,
-    };
+    const INFO: SourceTypeInfo =
+        SourceTypeInfo { name: "raster-dem", layer_kind: SourceKind::RasterDem, from_json: true };
+}
+
+/// Whether a view's tiles of the kind `K` are of the zoom level nearest the
+/// view's, as raster and raster-dem tiles are, rather than the level below.
+fn round_zoom<K: TilesetKind>() -> bool {
+    K::INFO.layer_kind != SourceKind::Geometry
 }
 
 /// A source type whose tiles a tileset lists.
@@ -184,11 +170,11 @@ impl<K: TilesetKind> StyleSourceType for TilesetSourceType<K> {
     }
 
     fn offline(source: &SourceData<Self>) -> OfflineResources {
-        let options = &source.options;
+        let (options, round_zoom) = (&source.options, round_zoom::<K>());
         match &options.url {
-            Some(url) => OfflineResources::TileJson { url: url.clone(), tile_size: options.tile_size },
+            Some(url) => OfflineResources::TileJson { url: url.clone(), tile_size: options.tile_size, round_zoom },
             None => match options.inline_tileset() {
-                Some(tileset) => OfflineResources::Tiles { tileset, tile_size: options.tile_size },
+                Some(tileset) => OfflineResources::Tiles { tileset, tile_size: options.tile_size, round_zoom },
                 None => OfflineResources::None,
             },
         }

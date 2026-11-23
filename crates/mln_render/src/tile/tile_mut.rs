@@ -72,10 +72,6 @@ impl<'a> TileMut<'a> {
         self.tile
     }
 
-    pub(crate) fn source(&self) -> &SourceInfo {
-        self.source
-    }
-
     pub(crate) fn store(&self) -> &StoreContext {
         self.store
     }

@@ -14,7 +14,7 @@ use mln_tile_id::tile_range::TileRange;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
 use mln_util::error::Error;
-use mln_util::geo::{LatLngBounds, WrapMode};
+use mln_util::geo::WrapMode;
 use mln_util::hash::HashSet;
 use mln_util::logging::{Event, Log};
 use mln_util::projection::Projection;
@@ -61,9 +61,7 @@ pub(crate) struct CoverUpdate<'a, 'p> {
     pub(crate) needs_relayout: bool,
     pub(crate) parameters: &'a TileParameters<'p>,
     pub(crate) style_source: &'a Source,
-    pub(crate) tile_size: u16,
-    pub(crate) zoom_range: Range<u8>,
-    pub(crate) bounds: Option<LatLngBounds>,
+    pub(crate) cover: Cover,
 }
 
 pub(crate) struct Slot {
@@ -570,7 +568,8 @@ impl SourceTiles {
         let subdivision_granularity = parameters.subdivision_granularity;
         let relayout = update.needs_relayout || subdivision_granularity != self.last_subdivision_granularity;
         self.last_subdivision_granularity = subdivision_granularity;
-        self.info.synchronous = parameters.is_update_synchronous;
+        let cover = update.cover;
+        self.info.synchronous = cover.synchronous;
 
         if relayout {
             self.cache_clear(ctx);
@@ -614,10 +613,9 @@ impl SourceTiles {
         );
 
         let style_source = update.style_source;
-        let zoom_range = update.zoom_range;
-        let tile_size = update.tile_size;
-        let info = style_source.info();
-        let overscaled_zoom: i32 = covering_zoom_level(zoom, info.round_zoom, tile_size);
+        let zoom_range = cover.zoom_range;
+        let tile_size = cover.tile_size;
+        let overscaled_zoom: i32 = covering_zoom_level(zoom, cover.round_zoom, tile_size);
         let mut tile_zoom: i32 = overscaled_zoom;
         let mut pan_zoom: i32 = i32::from(zoom_range.max);
 
@@ -636,7 +634,7 @@ impl SourceTiles {
             tile_lod_pitch_threshold: parameters.tile_lod_pitch_threshold,
             tile_lod_mode: parameters.tile_lod_mode,
             requested_zoom: Some(zoom + (constants::TILE_SIZE_D / f64::from(tile_size)).log2()),
-            round_zoom: info.round_zoom,
+            round_zoom: cover.round_zoom,
             max_content_elevation: f64::from(self.update_max_content_elevation(update.layers)),
         };
 
@@ -644,11 +642,11 @@ impl SourceTiles {
             let ideal_zoom: i32 = std::cmp::min(i32::from(zoom_range.max), overscaled_zoom);
 
             // Past the highest zoom level, draw that level's tiles larger.
-            if !info.overscale {
+            if !cover.overscale {
                 tile_zoom = ideal_zoom;
             }
 
-            if parameters.mode == MapMode::Continuous && info.prefetch {
+            if parameters.mode == MapMode::Continuous && cover.prefetch {
                 // Lower zoom levels show something sooner, for some bandwidth.
                 let prefetch_zoom_delta: u8 = source_prefetch_zoom_delta.unwrap_or(parameters.prefetch_zoom_delta);
                 if prefetch_zoom_delta != 0 {
@@ -673,7 +671,7 @@ impl SourceTiles {
             // prefetched tiles, ahead of them, and is drawn only where the
             // search for a loaded parent reaches it.
             if parameters.mode == MapMode::Continuous
-                && info.prefetch
+                && cover.prefetch
                 && keeps_globe_base_level(parameters, zoom_range, tile_zoom, max_parent_tile_overscale_factor)
             {
                 let mut base_tiles =
@@ -682,7 +680,7 @@ impl SourceTiles {
                 base_tiles.append(&mut pan_tiles);
                 pan_tiles = base_tiles;
             }
-            if parameters.mode == MapMode::Tile && !info.round_zoom && ideal_tiles.len() > 1 {
+            if parameters.mode == MapMode::Tile && !cover.round_zoom && ideal_tiles.len() > 1 {
                 Log::warning(
                     Event::General,
                     format!(
@@ -704,7 +702,7 @@ impl SourceTiles {
         // zoom by its distance from the camera, as the globe's does, asks for
         // tiles finer than the nominal zoom, up to the source's maximum.
         let mut tile_range: Option<TileRange> = None;
-        if let Some(bounds) = &update.bounds {
+        if let Some(bounds) = &cover.bounds {
             let variable_zoom = parameters.tile_lod_mode == TileLodMode::Distance || parameters.view.is_globe();
             let max_zoom: i32 = if variable_zoom {
                 i32::from(zoom_range.max)
@@ -1015,7 +1013,7 @@ impl SourceTiles {
         self.cache_trim(ctx);
     }
 
-    fn cache_clear(&mut self, ctx: &mut StoreContext) {
+    pub(crate) fn cache_clear(&mut self, ctx: &mut StoreContext) {
         let cached: Vec<OverscaledTileID> =
             self.tiles.values().filter(|slot| slot.place.is_cached()).map(|slot| slot.tile.id).collect();
         for id in cached {
@@ -1325,7 +1323,7 @@ impl SourceTiles {
         let mut result = Vec::new();
         for tile in self.cover() {
             if let Some(contents) = tile.contents().and_then(Contents::geometry) {
-                contents.query_source_features(&tile.id, self.info.single_layer, &mut result, options, global_state)?;
+                contents.query_source_features(&tile.id, &mut result, options, global_state)?;
             }
         }
         Ok(result)
@@ -1439,10 +1437,6 @@ impl SourceTiles {
         self.cache_enabled = enable;
     }
 
-    pub(crate) fn reduce_memory_use(&mut self, ctx: &mut StoreContext) {
-        self.cache_clear(ctx);
-    }
-
     pub(crate) fn dump_debug_logs(&self) {
         for tile in self.cover() {
             tile.dump_debug_logs(self.info.kind);
@@ -1473,21 +1467,18 @@ impl SourceTiles {
         }
     }
 
-    /// Has the origin take in `source`, which replaces `previous`, for an
+    /// Has the origin take in `source`, a new version of its source, for an
     /// update of `parameters`. Returns what the tiles cover, or `None`
     /// while the source has nothing to make tiles from.
     pub(crate) fn update_origin(
         &mut self,
-        previous: &Source,
         source: &Source,
         ctx: &mut StoreContext,
         parameters: &TileParameters<'_>,
         needs_relayout: bool,
-        fast_pfor_enabled: bool,
     ) -> Option<Cover> {
-        self.info.synchronous = parameters.is_update_synchronous;
         let mut origin = self.info.origin.take()?;
-        let parts = UpdateParts { previous, source, tiles: self, ctx, parameters, needs_relayout, fast_pfor_enabled };
+        let parts = UpdateParts { source, tiles: self, ctx, parameters, needs_relayout };
         let cover = origin.update(parts);
         self.info.origin = Some(origin);
         cover
