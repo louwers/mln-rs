@@ -181,7 +181,11 @@ impl<'a> MeshDesc<'a> {
         self
     }
 
-    /// Culls as `mode` says.
+    /// Culls as `mode` says, whose winding is the faces' on a map drawn the
+    /// right way up: where the frame's viewport is flipped upside down,
+    /// which turns every triangle round on screen, the mesh culls the
+    /// faces of the other winding. The globe draws the right way up in
+    /// either viewport.
     pub fn cull(&mut self, mode: CullFaceMode) -> &mut Self {
         self.cull = mode;
         self

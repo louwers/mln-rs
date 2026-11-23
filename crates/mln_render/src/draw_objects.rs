@@ -24,6 +24,8 @@ use mln_gfx::shaders::bindings::{FIRST_VERTEX_BUFFER_ID, MAX_TEXTURES};
 use mln_gfx::shaders::block::{DrawBlocks, MemberType};
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::segment::SegmentBase;
+use mln_gfx::types::CullFaceWindingType;
+use mln_map_types::ViewportMode;
 use mln_util::logging::{Event, Log};
 use smallvec::SmallVec;
 
@@ -201,6 +203,9 @@ struct PipelineVariant {
     depth: DepthState,
     stencil: StencilState,
     targets: TargetFormats,
+    /// Whether the frame turns every triangle round on screen, which turns
+    /// the winding of the faces the draw culls.
+    turned: bool,
 }
 
 /// Geometry drawn with one program, and the GPU objects that draw it: its
@@ -425,8 +430,12 @@ impl DrawObjects {
         let Some(DrawTarget { size, targets, scissor }) = parameters.draw_target() else {
             return Ok(());
         };
-        let variant =
-            if parameters.frame.camera.is_globe() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
+        let camera = parameters.frame.camera;
+        let variant = if camera.is_globe() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
+        // A viewport flipped upside down turns every triangle round on
+        // screen; the globe's projection draws the right way up in either
+        // mode.
+        let turned = camera.viewport_mode() == ViewportMode::FlippedY && !camera.is_globe();
         let context = &mut *parameters.context;
         let shader = self.shader(context, variant).clone();
         let index_buffer = context.stored_buffer(&self.indexes).and_then(StoredBuffer::buffer);
@@ -493,7 +502,7 @@ impl DrawObjects {
             if segment.index_length == 0 {
                 continue;
             }
-            let variant = PipelineVariant { primitive: mode.primitive(), depth, stencil, targets };
+            let variant = PipelineVariant { primitive: mode.primitive(), depth, stencil, targets, turned };
             let pipeline = if let Some(&(_, id)) = self.pipelines.iter().find(|(cached, _)| *cached == variant) {
                 id
             } else {
@@ -626,9 +635,14 @@ impl DrawObjects {
 }
 
 fn fixed_state(variant: PipelineVariant, color_mode: &ColorMode, cull: CullFaceMode) -> FixedState {
+    let winding = match cull.winding {
+        CullFaceWindingType::Clockwise if variant.turned => CullFaceWindingType::CounterClockwise,
+        CullFaceWindingType::CounterClockwise if variant.turned => CullFaceWindingType::Clockwise,
+        winding => winding,
+    };
     FixedState {
         primitive: variant.primitive,
-        cull,
+        cull: CullFaceMode { winding, ..cull },
         blend: color_mode.blend_function,
         color_mask: color_mode.mask,
         depth: variant.depth,
