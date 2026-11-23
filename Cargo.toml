@@ -539,9 +539,9 @@ keywords = ["maplibre", "map", "vector-tiles", "gis", "rendering"]
 categories = ["graphics", "rendering::engine", "science::geo"]
 
 # The runtime's backends (crates/mln_runtime/Cargo.toml), each with its
-# crate re-exported and each turning on the runtime: by default the native
-# ones, with WebGPU for hosts that share a wgpu device or surface; the
-# ambient cache, offline regions and mbtiles:// sources, as in C++; and the
+# crate re-exported and each turning on the runtime: the native ones by
+# default, and WebGPU, off by default, for hosts that share a wgpu device or
+# surface; the ambient cache, offline regions and mbtiles:// sources, as in C++; and the
 # style's font faces shaped in-process (crates/mln_render/Cargo.toml). A
 # browser build turns on one backend and leaves SQLite and the shaper out; a
 # native runtime always has SQLite. Without a backend, the crate is the
