@@ -51,8 +51,11 @@ glam.workspace = true
 # tile_expiry_test's tile server.
 httpmock.workspace = true
 mln_image = { package = "mln-rs-image", path = "../mln_image" }
+# gpu_failure_test's extension layers and named target.
+mln_image_process.workspace = true
 mln_map_types = { package = "mln-rs-map-types", path = "../mln_map_types" }
 mln_math = { package = "mln-rs-math", path = "../mln_math" }
+mln_ngon.workspace = true
 # system_fonts_test shapes text with mln_text's Shaper in-process.
 mln_render = { workspace = true, features = ["font-face-shaper"] }
 mln_sources.workspace = true

@@ -5,7 +5,8 @@
 // a continuous map reports the failure once, shows what did draw, draws
 // again only now and then, goes idle once the failure lasts, and shows the
 // map once the device works. A still whose target can't make its textures
-// ends with the error too.
+// ends with the error too, and so does one whose extension layers or named
+// target fail.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -20,7 +21,7 @@ use mln_gfx::gpu::{
 use mln_gfx::offscreen_target::OffscreenTarget;
 use mln_headless::HeadlessFrontend;
 use mln_map_types::{CameraOptions, MapMode};
-use mln_render::{Renderer, RendererEvent};
+use mln_render::{Registry, RegistryBuilder, Renderer, RendererEvent};
 use mln_runtime::map::{MapCore, MapCoreOptions, MapEvent};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
@@ -111,7 +112,7 @@ fn styled(line: bool) -> String {
 enum Fail {
     /// Beginning the passes of this label: "main buffer" for the frame's,
     /// "render target" for a layer's render target's, such as a
-    /// hillshade's.
+    /// hillshade's, and "named target" for a style's named target's.
     Passes(&'static str),
     /// The draws in the passes of this label, which begin.
     DrawsIn(&'static str),
@@ -235,6 +236,11 @@ impl FailingMap {
     }
 
     fn with_style(mode: MapMode, style: &str, fail: Fail) -> Self {
+        Self::with_registry(mode, style, fail, mln_rs::builtin_registry())
+    }
+
+    /// A map of `style` whose layer types are `registry`'s.
+    fn with_registry(mode: MapMode, style: &str, fail: Fail, registry: Arc<Registry>) -> Self {
         let device = mln_webgpu::Device::new(None).expect("a device");
         let mut backend = mln_webgpu::RendererBackend::new(&device);
         let pool = Pool::new(4);
@@ -247,7 +253,7 @@ impl FailingMap {
             Some(response)
         });
         let options = MapCoreOptions { map_mode: mode, size, ..Default::default() };
-        let mut map = MapCore::new(file_source, options, crate::support::registry(), &pool).unwrap();
+        let mut map = MapCore::new(file_source, options, Arc::clone(registry.style()), &pool).unwrap();
         let events = map.renderer_events();
         let invalidate = events.clone();
         let mut renderer = Renderer::new(
@@ -256,7 +262,7 @@ impl FailingMap {
             mln_text::local_fonts::LocalGlyphs::default(),
             Arc::default(),
             mln_render::text::font_face_engine::default_engine(),
-            mln_rs::builtin_registry(),
+            registry,
             Arc::new(move || invalidate.push(RendererEvent::Invalidate)),
             &pool,
         );
@@ -411,6 +417,96 @@ fn a_still_whose_target_cant_make_its_textures_ends_with_the_error() {
     map.load_style_json(r#"{"version": 8, "sources": {}, "layers": []}"#);
     let error = frontend.render(&mut map).err().expect("a still of a target without textures");
     assert_eq!(ErrorKind::InvalidState, error.kind, "{error}");
+}
+
+/// The built-ins and the layer types of `mln_image_process` and `mln_ngon`,
+/// whose draws reach the engine through the layer contract alone.
+fn extended_registry() -> Arc<Registry> {
+    let mut builder = RegistryBuilder::new();
+    mln_rs::register_builtins(&mut builder).unwrap();
+    mln_image_process::register(&mut builder).unwrap();
+    mln_ngon::register(&mut builder).unwrap();
+    builder.build()
+}
+
+/// A white map with a red square that draws into the named target `t`,
+/// which an image-process layer draws onto the map, and a blue n-gon over
+/// it.
+const EXTENDED_STYLE: &str = r#"{
+    "version": 8,
+    "center": [0, 0],
+    "zoom": 2,
+    "org.maplibre:targets": [{"id": "t"}],
+    "sources": {
+        "shapes": {
+            "type": "geojson",
+            "data": {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "properties": {},
+                        "geometry": {"type": "Polygon", "coordinates": [[[-5, -5], [5, -5], [5, 5], [-5, 5], [-5, -5]]]}
+                    },
+                    {"type": "Feature", "properties": {}, "geometry": {"type": "Point", "coordinates": [20, 0]}}
+                ]
+            }
+        }
+    },
+    "layers": [
+        {"id": "background", "type": "background", "paint": {"background-color": "white"}},
+        {
+            "id": "fill",
+            "type": "fill",
+            "source": "shapes",
+            "org.maplibre:destination-target": "t",
+            "filter": ["==", ["geometry-type"], "Polygon"],
+            "paint": {"fill-color": "red"}
+        },
+        {
+            "id": "copy",
+            "type": "org.maplibre.image-process",
+            "org.maplibre:source-target": "t",
+            "org.maplibre:operations": []
+        },
+        {
+            "id": "ngons",
+            "type": "org.maplibre.ngon",
+            "source": "shapes",
+            "filter": ["==", ["geometry-type"], "Point"],
+            "paint": {"ngon-color": "blue", "ngon-radius": 8, "ngon-corners": 4}
+        }
+    ]
+}"#;
+
+/// A still whose one frame fails in an extension layer's draw, here
+/// through its shader, which a frame makes as it first draws with it, ends
+/// with the GPU's error, as one that fails in a built-in's does; so does a
+/// still of a loaded map whose frame fails in the pass of a named target
+/// or in its draws. A still asked for right after draws what a map that
+/// never failed draws.
+#[test]
+fn a_still_whose_extension_or_named_target_fails_ends_with_the_error() {
+    let mut new =
+        FailingMap::with_registry(MapMode::Static, EXTENDED_STYLE, Fail::DrawsIn("none"), extended_registry());
+    let new = new.still().expect("a new map's still never ended").expect("a new map's still");
+    assert!(new.iter().any(|&channel| channel != 255), "a new map's still shows the background alone");
+    for fail in [Fail::Shaders("ngon"), Fail::Shaders("image-process")] {
+        let mut map = FailingMap::with_registry(MapMode::Static, EXTENDED_STYLE, fail, extended_registry());
+        map.failing = 1;
+        assert_failed(map.still(), fail);
+        let image = map.still().expect("the next still never ended").expect("the next still");
+        assert!(new == image, "the next still after {fail:?} draws other pixels than a new map's");
+    }
+    for fail in [Fail::Passes("named target"), Fail::DrawsIn("named target")] {
+        let mut map = FailingMap::with_registry(MapMode::Static, EXTENDED_STYLE, fail, extended_registry());
+        let loaded = map.still().expect("the first still never ended").expect("the first still");
+        assert!(new == loaded, "{fail:?}: the first still draws other pixels than a new map's");
+        map.failing = 1;
+        assert_failed(map.still(), fail);
+        let image = map.still().expect("the next still never ended").expect("the next still");
+        assert!(new == image, "the next still after {fail:?} draws other pixels than a new map's");
+    }
 }
 
 fn idle(events: &[MapEvent]) -> bool {
