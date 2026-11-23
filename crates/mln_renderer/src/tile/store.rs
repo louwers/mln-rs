@@ -130,7 +130,7 @@ impl StoreContext {
             missing_images,
         };
         let answer =
-            Answer { resolved: Arc::new(resolved), atlases: Some(Rc::new(atlases)), glyphs_failed: glyphs.failed };
+            Answer { resolved: Arc::new(resolved), atlases: Some(Rc::new(atlases)), failed_glyphs: glyphs.failed };
         Some(Resume { lane: Some(*lane), known: std::mem::take(needs), answer, images: Arc::clone(seen) })
     }
 }
@@ -353,6 +353,21 @@ impl TileStore {
         self.ctx.collect_resource_events();
         while let Some(event) = self.inbox.next() {
             self.take(event);
+        }
+        self.glyphs_recovered();
+    }
+
+    /// Lays out again the tiles that lacked glyphs of a range that has
+    /// loaded since it failed.
+    fn glyphs_recovered(&mut self) {
+        let recovered = self.ctx.glyphs.take_recovered();
+        if recovered.is_empty() {
+            return;
+        }
+        for key in &self.order {
+            if let Some(source) = self.sources.get_mut(key) {
+                source.update_each(&mut self.ctx, |_| true, |tile| tile.glyphs_recovered(&recovered));
+            }
         }
     }
 

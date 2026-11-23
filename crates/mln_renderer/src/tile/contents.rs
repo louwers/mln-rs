@@ -37,7 +37,7 @@ use crate::query::{RenderedQueryOptions, SourceQueryOptions};
 use crate::render_layer::ErasedLayerBucket;
 use crate::render_orchestrator::drop_on_workers;
 use crate::source_state::SourceFeatureState;
-use crate::text::glyph_store::ShapeResults;
+use crate::text::glyph_store::{GlyphRanges, ShapeResults};
 use crate::tile_mask::TileMask;
 use crate::tile_render_data::TileAtlasTextures;
 
@@ -282,8 +282,8 @@ pub(crate) struct TileAtlases {
 pub(crate) struct Answer {
     pub(crate) resolved: Arc<Resolved>,
     pub(crate) atlases: Option<Rc<TileAtlases>>,
-    /// Whether it lacked glyphs of a range that failed to load.
-    pub(crate) glyphs_failed: bool,
+    /// The glyph ranges it lacked glyphs of because they failed to load.
+    pub(crate) failed_glyphs: GlyphRanges,
 }
 
 impl Answer {
@@ -371,7 +371,7 @@ impl Answer {
         Some(Answer {
             resolved: Arc::new(resolved),
             atlases: Some(Rc::new(atlases)),
-            glyphs_failed: self.glyphs_failed,
+            failed_glyphs: self.failed_glyphs.clone(),
         })
     }
 }

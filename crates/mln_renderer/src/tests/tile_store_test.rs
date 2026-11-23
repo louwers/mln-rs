@@ -32,7 +32,7 @@ use crate::tile::inbox::{SourceData, TileEvent};
 use crate::tile::job::{DataInput, Job, Run, TileKey};
 use crate::tile::loading::{Ancestors, DataOrigin, Fetch, Load, OriginLoad, VectorTileEncoding};
 use crate::tile::pipeline::LayoutWork;
-use crate::tile::tile::{TileKind, TileNecessity, TileOperation};
+use crate::tile::tile::{TileInput, TileKind, TileNecessity, TileOperation};
 use crate::tile::tile_workers::{InlineWorkers, TileWorkers};
 
 /// A file source whose requests wait until the test answers them.
@@ -929,6 +929,57 @@ fn a_retried_load_starts_parsing_again() {
     tile.update();
     assert_eq!(tile.actions(), [LoadFromNetwork, EndParse]);
     assert!(tile.shows_layout() && tile.tile().is_complete());
+}
+
+/// A tile laid out without the glyphs of a range that failed lays out again
+/// with them once another tile's wait loads the range, without a retry.
+#[test]
+fn a_tile_lays_out_again_once_a_failed_glyph_range_loads() {
+    let test = Test::new();
+    let file_source = Arc::new(Held::default());
+    let store = tile_store(&test.pool, Box::new(InlineWorkers));
+    let first = OverscaledTileID::from_zxy(1, 0, 0);
+    let second = OverscaledTileID::from_zxy(1, 1, 0);
+    let mut tiles = OneTile::new(store, TileKind::Geometry, first, MapMode::Continuous);
+    tiles.add(second);
+    let glyph_source: Arc<dyn FileSource> = Arc::<Held>::clone(&file_source);
+    tiles.store.set_file_source(Some(glyph_source));
+    tiles.store.glyphs().set_url("test://{fontstack}/{range}.pbf");
+    let labels = style(&[layer(json!({"id": "labels", "type": "symbol", "layout": {"text-field": "a"}}))]);
+    let has_glyph = |tiles: &OneTile, id: &OverscaledTileID| {
+        let contents = tiles.tile_at(id).contents().and_then(Contents::geometry).expect("a layout");
+        let glyphs = &contents.answer.resolved.glyphs;
+        glyphs
+            .values()
+            .flat_map(|positions| positions.iter())
+            .any(|(id, position)| id.char() == Some('a') && position.is_some())
+    };
+
+    tiles.set_style(&labels);
+    tiles.set_data(Some(points()));
+    tiles.update();
+    tiles.update();
+    assert_eq!(file_source.pending(), 1, "the glyph range's request");
+    let mut failed = Response::new();
+    failed.error = Some(Box::new(ResourceError::new(Reason::Other, "offline")));
+    let _log = crate::tests::text::SquelchLog::new();
+    file_source.respond(failed);
+    tiles.settle(&[first]);
+    assert!(!has_glyph(&tiles, &first), "laid out without the glyph");
+
+    tiles.with_at(&second, |tile| {
+        tile.set_style(&labels, 1.0, mln_util::subdivision_granularity::SubdivisionGranularitySetting::none());
+        tile.take_input(TileInput::Geometry { data: Some(points()), missing: false });
+    });
+    tiles.update();
+    tiles.update();
+    assert_eq!(file_source.pending(), 1, "the range's request again");
+    let mut glyphs = Response::new();
+    glyphs.data = Some(Arc::new(crate::tests::text::read_file("test/fixtures/resources/glyphs.pbf")));
+    file_source.respond(glyphs);
+    tiles.settle(&[first, second]);
+    assert!(has_glyph(&tiles, &second));
+    assert!(has_glyph(&tiles, &first), "laid out again with the glyph");
 }
 
 /// A required tile with `file_source`'s cache, whose cache answers with

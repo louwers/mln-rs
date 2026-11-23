@@ -3,8 +3,10 @@
 //
 // The store lives on the render thread, owned by the tile store. Tiles
 // don't register with it: a tile waiting for glyphs asks it to `resolve`
-// them again after it changes (`revision`). Responses arrive in the tile
-// store's inbox, from whatever thread answers, and the tile store hands
+// them again after it changes (`revision`). A tile laid out without a range
+// that failed lays out again once a later request loads it: the store
+// reports each such range once (`take_recovered`). Responses arrive in the
+// tile store's inbox, from whatever thread answers, and the tile store hands
 // them over (`take_response`).
 //
 // A glyph PBF is parsed on the renderer's thread pool as soon as it arrives,
@@ -86,15 +88,20 @@ pub(crate) enum GlyphData {
 /// content.
 pub(crate) type GlyphResult = Result<Option<GlyphData>, Error>;
 
+/// Glyph ranges, each with its font stack.
+pub(crate) type GlyphRanges = VecSet<(FontStack, GlyphRange)>;
+
 /// Where a glyph range is.
 enum RangeState {
     /// Requested and not answered yet, by the store's `id`th request, which
     /// `request` holds open; `None` for a font file that waits for the
-    /// engine. A response to another request is stale.
+    /// engine. A response to another request is stale. `retry` if the
+    /// range's last request failed.
     Loading {
         id: u64,
         #[expect(dead_code, reason = "dropping the request cancels it")]
         request: Option<Request>,
+        retry: bool,
     },
     /// Parsed: the glyphs of a glyph PBF, or `None` for a font file or a
     /// response without content.
@@ -167,9 +174,9 @@ pub(crate) struct ResolvedGlyphs {
     pub(crate) glyphs: GlyphMap,
     /// The shaping of the font-face text.
     pub(crate) shaping: ShapeResults,
-    /// Whether a range they needed failed, so that a retry lays the tile out
-    /// again.
-    pub(crate) failed: bool,
+    /// The ranges they lacked glyphs of because the ranges failed to load,
+    /// so that the tile lays out again once one loads.
+    pub(crate) failed: GlyphRanges,
 }
 
 pub(crate) struct GlyphStore {
@@ -200,6 +207,9 @@ pub(crate) struct GlyphStore {
     /// Changes whenever a range is answered or dropped, so waiting tiles
     /// resolve again.
     revision: u64,
+    /// The ranges that loaded after failing, since the last
+    /// `take_recovered`.
+    recovered: GlyphRanges,
 
     // Shaping objects
     font_faces: Option<Arc<FontFaces>>,
@@ -240,6 +250,7 @@ impl GlyphStore {
             failures: 0,
             requests: 0,
             revision: 0,
+            recovered: GlyphRanges::default(),
             font_faces: None,
             engine,
             engine_prepared: false,
@@ -263,6 +274,13 @@ impl GlyphStore {
     /// Changes whenever a resolve that waited could now give another answer.
     pub(crate) fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// The ranges that loaded since the last call after a request for them
+    /// failed. A resolve that lacked one of them (`ResolvedGlyphs::failed`)
+    /// would now have its glyphs.
+    pub(crate) fn take_recovered(&mut self) -> GlyphRanges {
+        std::mem::take(&mut self.recovered)
     }
 
     /// Takes in the answer to request `id`, for `font_stack`'s `range`,
@@ -341,7 +359,7 @@ impl GlyphStore {
         inbox: &InboxSender,
     ) -> Option<ResolvedGlyphs> {
         let since = *wait.since.get_or_insert(self.failures);
-        let mut failed = false;
+        let mut failed = GlyphRanges::default();
         loop {
             let mut waits = false;
             let mut needed: Vec<(&FontStack, GlyphRange)> = Vec::new();
@@ -353,8 +371,10 @@ impl GlyphStore {
                         Source::Needs(get_glyph_range(*glyph_id))
                     };
                     match source {
-                        Source::Has | Source::Lacks { failed: false } => {}
-                        Source::Lacks { failed: true } => failed = true,
+                        Source::Has => {}
+                        Source::Lacks { failed: ranges } => {
+                            failed.extend(ranges.into_iter().map(|range| (font_stack.clone(), range)));
+                        }
                         Source::Needs(range) => needed.push((font_stack, range)),
                         Source::Waits => waits = true,
                     }
@@ -381,7 +401,9 @@ impl GlyphStore {
             for (font_stack, range) in needed {
                 match self.entries.get(font_stack).and_then(|entry| entry.ranges.get(&range)) {
                     Some(RangeState::Loaded(_)) => {}
-                    Some(RangeState::Failed { at }) if *at > since => failed = true,
+                    Some(RangeState::Failed { at }) if *at > since => {
+                        failed.insert((font_stack.clone(), range));
+                    }
                     Some(RangeState::Loading { .. }) => waits = true,
                     // Never requested, or failed before this wait began.
                     _ => to_request.push((font_stack.clone(), range)),
@@ -430,11 +452,11 @@ impl GlyphStore {
 
     /// Draws the PBF glyph `glyph_id` of `font_stack` from the first source
     /// that has it, PBF or local (`pbf_first`): the first source's answer
-    /// that isn't `Lacks`, else `Lacks`, failed if either's range failed
-    /// during the wait that began at failure `since`.
+    /// that isn't `Lacks`, else `Lacks` with the ranges of either that
+    /// failed during the wait that began at failure `since`.
     fn pbf_glyph(&mut self, font_stack: &FontStack, glyph_id: GlyphID, since: u64) -> Source {
         let pbf_first = self.pbf_first(glyph_id);
-        let mut failed = false;
+        let mut failed = Vec::new();
         for pbf in [pbf_first, !pbf_first] {
             let source = if pbf {
                 self.pbf_source(font_stack, glyph_id, since)
@@ -442,7 +464,7 @@ impl GlyphStore {
                 self.local_source(font_stack, glyph_id, since)
             };
             match source {
-                Source::Lacks { failed: lacked } => failed |= lacked,
+                Source::Lacks { failed: lacked } => failed.extend(lacked),
                 source => return source,
             }
         }
@@ -458,13 +480,13 @@ impl GlyphStore {
     /// Whether `font_stack`'s glyph PBF has `glyph_id`.
     fn pbf_source(&self, font_stack: &FontStack, glyph_id: GlyphID, since: u64) -> Source {
         if self.glyph_url.is_empty() {
-            return Source::Lacks { failed: false };
+            return Source::Lacks { failed: Vec::new() };
         }
         let range = get_glyph_range(glyph_id);
         match self.entries.get(font_stack).and_then(|entry| entry.ranges.get(&range)) {
             Some(RangeState::Loaded(Some(glyphs))) if glyphs.contains_key(&glyph_id) => Source::Has,
-            Some(RangeState::Loaded(_)) => Source::Lacks { failed: false },
-            Some(RangeState::Failed { at }) if *at > since => Source::Lacks { failed: true },
+            Some(RangeState::Loaded(_)) => Source::Lacks { failed: Vec::new() },
+            Some(RangeState::Failed { at }) if *at > since => Source::Lacks { failed: vec![range] },
             _ => Source::Needs(range),
         }
     }
@@ -478,7 +500,7 @@ impl GlyphStore {
                 return Source::Has;
             }
             if entry.no_local.contains(&glyph_id) {
-                return Source::Lacks { failed: false };
+                return Source::Lacks { failed: Vec::new() };
             }
         }
         let code = u32::from(glyph_id.code);
@@ -490,7 +512,7 @@ impl GlyphStore {
             })
             .map(|face| face.type_)
             .collect();
-        let mut failed = false;
+        let mut failed = Vec::new();
         let mut glyph = None;
         for type_ in faces {
             match self.face_source(font_stack, type_, glyph_id, since, &mut failed) {
@@ -533,20 +555,21 @@ impl GlyphStore {
     /// The PBF glyph `glyph_id` from `font_stack`'s font face of `type_`:
     /// `Ok(None)` when the loaded face lacks it, or when the face's file
     /// failed to load during the wait that began at failure `since`, which
-    /// sets `failed`; `Err` with the face's range while it isn't loaded.
+    /// adds the face's range to `failed`; `Err` with the face's range while
+    /// it isn't loaded.
     fn face_source(
         &self,
         font_stack: &FontStack,
         type_: GlyphIDType,
         glyph_id: GlyphID,
         since: u64,
-        failed: &mut bool,
+        failed: &mut Vec<GlyphRange>,
     ) -> Result<Option<Glyph>, GlyphRange> {
         let range = get_glyph_range(GlyphID::with_type(0, type_));
         match self.entries.get(font_stack).and_then(|entry| entry.ranges.get(&range)) {
             Some(RangeState::Loaded(_)) => Ok(self.face_glyph(font_stack, type_, glyph_id)),
             Some(RangeState::Failed { at }) if *at > since => {
-                *failed = true;
+                failed.push(range);
                 Ok(None)
             }
             _ => Err(range),
@@ -668,7 +691,8 @@ impl GlyphStore {
     fn load_held(&mut self, font_stack: &FontStack, range: GlyphRange, data: FontData) {
         self.requests += 1;
         let id = self.requests;
-        self.set_range(font_stack, range, RangeState::Loading { id, request: None });
+        let retry = self.has_failed(font_stack, range);
+        self.set_range(font_stack, range, RangeState::Loading { id, request: None, retry });
         self.events.push(RendererEvent::GlyphsRequested { font_stack: font_stack.clone(), range });
         self.process_data(Ok(Some(GlyphData::Font(data))), font_stack, range, id);
     }
@@ -720,8 +744,16 @@ impl GlyphStore {
                 }
             }
         });
+        let retry = self.has_failed(font_stack, range);
         file_source.load(&resource, responder);
-        self.set_range(font_stack, range, RangeState::Loading { id, request: Some(req) });
+        self.set_range(font_stack, range, RangeState::Loading { id, request: Some(req), retry });
+    }
+
+    /// Whether `font_stack`'s `range` failed to load, or is loading again
+    /// after it did.
+    fn has_failed(&self, font_stack: &FontStack, range: GlyphRange) -> bool {
+        let state = self.entries.get(font_stack).and_then(|entry| entry.ranges.get(&range));
+        matches!(state, Some(RangeState::Failed { .. } | RangeState::Loading { retry: true, .. }))
     }
 
     fn set_range(&mut self, font_stack: &FontStack, range: GlyphRange, state: RangeState) {
@@ -780,6 +812,9 @@ impl GlyphStore {
             });
             self.events.push(RendererEvent::ResourceError(error));
         } else {
+            if self.has_failed(font_stack, range) {
+                self.recovered.insert((font_stack.clone(), range));
+            }
             self.set_range(font_stack, range, RangeState::Loaded(range_glyphs));
             self.events.push(RendererEvent::GlyphsLoaded { font_stack: font_stack.clone(), range });
         }
@@ -930,8 +965,9 @@ fn to_sdf(mut glyph: Glyph) -> Glyph {
 enum Source {
     /// The glyph, now in the store.
     Has,
-    /// Not the glyph: its range failed during the wait if `failed`.
-    Lacks { failed: bool },
+    /// Not the glyph: `failed` holds the ranges that would have had it
+    /// and failed during the wait.
+    Lacks { failed: Vec<GlyphRange> },
     /// The range it waits for.
     Needs(GlyphRange),
     /// Its device font is being chosen.
