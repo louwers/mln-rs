@@ -716,11 +716,35 @@ fn vertex_slots(
 
 #[cfg(test)]
 mod tests {
+    use mln_gfx::color_mode::ColorMode;
+    use mln_gfx::cull_face_mode::CullFaceMode;
+    use mln_gfx::gfx_types::DrawModeType;
+    use mln_gfx::gpu::{DepthState, StencilState, TargetFormats};
     use mln_gfx::projection_variant::ProjectionVariant;
+    use mln_gfx::types::CullFaceWindingType;
 
+    use super::{PipelineVariant, fixed_state};
     use crate::gfx::context::Resources;
     use crate::mesh_desc::MeshDesc;
     use crate::shaders::programs;
+
+    #[test]
+    fn a_turned_frame_culls_the_other_winding_and_a_disabled_cull_stays_disabled() {
+        let variant = |turned| PipelineVariant {
+            primitive: DrawModeType::Triangles,
+            depth: DepthState::DISABLED,
+            stencil: StencilState::DISABLED,
+            targets: TargetFormats { color: None, depth_stencil: None },
+            turned,
+        };
+        let cull = |turned, cull| fixed_state(variant(turned), &ColorMode::unblended(), cull).cull;
+        let ccw = CullFaceMode::back_ccw();
+        let cw = CullFaceMode { winding: CullFaceWindingType::Clockwise, ..ccw };
+        assert_eq!(ccw, cull(false, ccw));
+        assert_eq!(cw, cull(true, ccw));
+        assert_eq!(ccw, cull(true, cw));
+        assert!(!cull(true, CullFaceMode::disabled()).enabled);
+    }
 
     #[test]
     fn a_mesh_draws_in_the_projection_of_the_frame_unless_it_names_one() {
