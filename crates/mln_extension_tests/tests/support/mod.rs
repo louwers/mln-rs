@@ -6,6 +6,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use mln_rs::layer::MapMode;
 use mln_rs::mln_render::Registry;
 use mln_rs::mln_util::size::Size;
 use mln_rs::{
@@ -26,9 +27,16 @@ pub(crate) struct Fixture {
 impl Fixture {
     /// A fixture of `registry` and `style`.
     pub(crate) fn new(registry: Arc<Registry>, style: &str) -> Fixture {
+        Fixture::with_mode(registry, style, MapMode::Continuous)
+    }
+
+    /// A fixture of `registry` and `style` whose map renders in `mode`. A
+    /// map of a still mode renders nothing until the test requests a still
+    /// image.
+    pub(crate) fn with_mode(registry: Arc<Registry>, style: &str, mode: MapMode) -> Fixture {
         let runtime = Runtime::new(&RuntimeOptions::default(), registry).unwrap();
-        let options =
-            MapOptions { map: mln_rs::map::MapCoreOptions { size: SIZE, ..Default::default() }, ..Default::default() };
+        let map = mln_rs::map::MapCoreOptions { size: SIZE, map_mode: mode, ..Default::default() };
+        let options = MapOptions { map, ..Default::default() };
         let (map, created) = runtime.create_map(options).unwrap();
         created.wait().unwrap();
         wait(map.set_style_json(style));
@@ -37,7 +45,9 @@ impl Fixture {
         let (session, attached) = map.attach(target, AttachOptions::default()).unwrap();
         attached.wait().unwrap();
         let fixture = Fixture { session, map, runtime };
-        fixture.render_loaded();
+        if mode == MapMode::Continuous {
+            fixture.render_loaded();
+        }
         fixture
     }
 
