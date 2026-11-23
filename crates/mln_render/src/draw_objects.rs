@@ -85,7 +85,10 @@ impl<B> Mesh<B> {
     /// When the mesh was made among its renderer's meshes: a mesh made
     /// later has a greater one. A draw of the mesh that orders by it
     /// ([`Draw::order`](crate::draw::Draw::order)) draws over the draws of
-    /// the meshes made before it.
+    /// the meshes made before it, so draws of overlapping tiles ordered by
+    /// it stack by when each tile's mesh was made. Draws that keep order 0
+    /// and are pushed in [`PrepareCx::tiles`](crate::layer::PrepareCx::tiles)'
+    /// order stack in the frame's tile order instead.
     #[must_use]
     pub fn seq(&self) -> u64 {
         self.seq

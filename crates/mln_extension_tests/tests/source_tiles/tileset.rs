@@ -188,7 +188,11 @@ fn kind_style(kind: &str, members: &str) -> String {
     let source = format!(r#"{{"type":"{kind}","tiles":["test://tiles/{{z}}/{{x}}/{{y}}"],"maxzoom":1{members}}}"#);
     let layer = match kind {
         "raster" => r#"{"id":"red","type":"raster","source":"tiles","paint":{"raster-fade-duration":0}}"#,
-        "raster-dem" => r#"{"id":"red","type":"hillshade","source":"tiles"}"#,
+        // Every elevation past the last stop takes its color.
+        "raster-dem" => {
+            r##"{"id":"red","type":"color-relief","source":"tiles",
+               "paint":{"color-relief-color":["interpolate",["linear"],["elevation"],0,"#ff0000",1,"#ff0000"]}}"##
+        }
         _ => {
             r##"{"id":"red","type":"circle","source":"tiles","source-layer":"points",
                "paint":{"circle-color":"#ff0000","circle-radius":8}}"##
@@ -202,7 +206,7 @@ fn kind_style(kind: &str, members: &str) -> String {
 
 /// A raster-dem source seen past its maxzoom draws its deepest tiles
 /// larger, as a raster source does: zooming in keeps the maxzoom's tile,
-/// with that zoom in its id, and requests it once.
+/// loaded, drawn and with that zoom in its id, and requests it once.
 #[test]
 fn raster_dem_tiles_past_the_maxzoom_stay_at_their_zoom() {
     const DEEPEST: &str = "test://tiles/1/1/0";
@@ -216,7 +220,14 @@ fn raster_dem_tiles_past_the_maxzoom_stay_at_their_zoom() {
         host.settle();
         assert_eq!(host.network.requests(DEEPEST).len(), 1, "tile requests by zoom {zoom}");
         let overscaled = OverscaledTileID::with_zxy(zoom as u8, 0, 1, 1, 0);
-        assert!(zoom == 1.0 || host.actions(overscaled).is_empty(), "no tile {overscaled:?}");
+        let actions = host.actions(overscaled);
+        if zoom == 1.0 {
+            let loaded = actions.contains(&TileOperation::EndParse) && !actions.contains(&TileOperation::Error);
+            assert!(loaded, "tile {overscaled:?} loaded: {actions:?}");
+        } else {
+            assert!(actions.is_empty(), "no tile {overscaled:?}: {actions:?}");
+        }
+        assert_eq!(host.center_pixel(), [255, 0, 0, 255], "the maxzoom tile draws at zoom {zoom}");
     }
 }
 
