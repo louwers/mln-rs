@@ -257,3 +257,27 @@ fn cancelled_tile_drops_cached_data() {
     test.local_pool.run_all();
     assert_eq!(fetches.load(Ordering::SeqCst), 2);
 }
+
+// Port-only: a tile leaves its provider however it goes, here with the
+// store that holds it: the host stops fetching what no tile needs, and the
+// next tile to need it asks again.
+#[test]
+fn dropping_the_tiles_removes_their_subscriptions() {
+    let test = TileTest::new();
+    let (fetches, fetch) = counter();
+    let (cancels, cancel) = counter();
+    let loader = loader(&test.local_pool, Some(fetch), Some(cancel));
+    let mut first = tiles(&test, &[root()], Arc::clone(&loader));
+    first.set_necessity(&root(), TileNecessity::Required);
+    test.local_pool.run_all();
+    assert_eq!(fetches.load(Ordering::SeqCst), 1);
+
+    drop(first);
+    test.local_pool.run_all();
+    assert_eq!(cancels.load(Ordering::SeqCst), 1, "the host stops fetching for the tile that went");
+
+    let mut next = tiles(&test, &[root()], loader);
+    next.set_necessity(&root(), TileNecessity::Required);
+    test.local_pool.run_all();
+    assert_eq!(fetches.load(Ordering::SeqCst), 2);
+}

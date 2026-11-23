@@ -19,7 +19,7 @@ use serde_json::json;
 use super::tile_jobs_test::{Manual, icons, layer, points};
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::query::SourceQueryOptions;
-use crate::tests::scripted_origin::{Call, Reply, Script};
+use crate::tests::scripted_origin::{Call, Reply, Retry, Script};
 use crate::tests::tile::{dem_png, png};
 use crate::tests::{OneTile, style, tile_store};
 use crate::tile::contents::Contents;
@@ -556,4 +556,138 @@ fn a_layout_failure_reaches_the_origin() {
             "{kind:?}: the engine's failure"
         );
     }
+}
+
+/// A reply to a load that is no longer the tile's latest goes nowhere: the
+/// origin never sees it, and the tile shows only the latest load's data.
+#[test]
+fn a_reply_to_an_older_load_is_dropped() {
+    let test = Test::new();
+    let mut tile = test.scripted_tile(Box::new(InlineWorkers));
+    let id = tile.id;
+    tile.set_style(&style(&[layer(json!({"id": "dots", "type": "dot"}))]));
+    tile.set_necessity(&id, TileNecessity::Required);
+    let [older] = <[_; 1]>::try_from(tile.script.take_loads()).ok().expect("one load");
+    // Optional and required again: the origin begins a newer load.
+    tile.set_necessity(&id, TileNecessity::Optional);
+    tile.set_necessity(&id, TileNecessity::Required);
+    let [newer] = <[_; 1]>::try_from(tile.script.take_loads()).ok().expect("one load");
+    tile.script.take_calls();
+
+    older.reply(Reply::Tile(features(&[1])));
+    tile.update();
+    assert!(!tile.script.take_calls().contains(&Call::Receive(id)), "the origin never sees the older reply");
+    assert!(tile.layout().data.is_none());
+
+    newer.reply(Reply::Tile(features(&[2])));
+    tile.update();
+    tile.update();
+    let source = tile.store.source(tile.key).expect("the source");
+    let options = SourceQueryOptions { source_layers: Some(vec![String::new()]), filter: None };
+    let features = source.query_source_features(&options, None).unwrap();
+    assert_eq!(features.into_iter().map(|feature| feature.id).collect::<Vec<_>>(), [feature::Identifier::Uint(2)]);
+}
+
+/// Tile 0/0/0 of a source whose tiles load as `script` says, whose load
+/// failed.
+fn failed_tile(test: &Test, script: &Script, workers: Box<dyn TileWorkers>) -> OneTile {
+    let store = tile_store(&test.pool, workers);
+    let id = OverscaledTileID::from_zxy(0, 0, 0);
+    let mut tile = OneTile::with_script(store, TileKind::Geometry, script, &[id], MapMode::Static);
+    tile.set_style(&style(&[water_layer("water", "red")]));
+    tile.set_necessity(&id, TileNecessity::Required);
+    tile.script.answer(|_| Reply::Fail("offline".to_owned()));
+    tile.update();
+    assert!(tile.tile().is_settled(), "a failed tile has done what it can");
+    tile
+}
+
+/// A retry that begins a load starts the tile over: it hasn't done what it
+/// can until the load ends, and then shows what the load brought.
+#[test]
+fn a_failed_tile_loads_when_retried() {
+    let test = Test::new();
+    let mut tile = failed_tile(&test, &Script::default(), Box::new(InlineWorkers));
+    tile.store.retry_failed();
+    assert!(!tile.tile().is_settled(), "the tile loads anew");
+    tile.script.answer(|_| Reply::Bytes(water()));
+    tile.update();
+    tile.update();
+    assert!(tile.shows_layout() && tile.tile().is_complete());
+}
+
+/// A retry that neither loads nor delivers, as of an origin without
+/// retries, leaves a failed tile as it was: it has done what it can.
+#[test]
+fn a_failed_tile_stays_settled_for_an_origin_without_retry() {
+    let test = Test::new();
+    let script = Script::default();
+    script.set_retry(Retry::Nothing);
+    let mut tile = failed_tile(&test, &script, Box::new(InlineWorkers));
+    tile.store.retry_failed();
+    assert!(tile.script.take_calls().contains(&Call::Retry(tile.id)));
+    assert!(tile.tile().is_settled() && tile.tile().is_complete());
+    assert!(tile.script.take_loads().is_empty());
+}
+
+/// A retry that delivers data without beginning a load starts the tile
+/// over too: it hasn't done what it can until that data lays out.
+#[test]
+fn a_failed_tile_unsettles_for_a_retry_that_delivers() {
+    let test = Test::new();
+    let script = Script::default();
+    script.set_retry(Retry::Deliver);
+    let manual = Manual::default();
+    let mut tile = failed_tile(&test, &script, Box::new(manual.clone()));
+    tile.store.retry_failed();
+    assert!(tile.script.take_loads().is_empty(), "no load");
+    assert!(!tile.tile().is_settled(), "the delivered data has yet to lay out");
+    tile.update();
+    manual.run();
+    tile.update();
+    assert!(tile.shows_layout() && tile.tile().is_complete());
+}
+
+/// A tile that starts from the same tile in another world copy shows that
+/// tile's contents at once. If its origin takes the copy, it has done what
+/// it can and lays the copy's data out for itself; if not, it loads.
+#[test]
+fn a_world_copy_takes_its_copy() {
+    let test = Test::new();
+    let script = Script::default();
+    let store = tile_store(&test.pool, Box::new(InlineWorkers));
+    let loaded = OverscaledTileID::from_zxy(0, 0, 0);
+    let mut tiles = OneTile::with_script(store, TileKind::Geometry, &script, &[loaded], MapMode::Static);
+    let red = style(&[water_layer("water", "red")]);
+    tiles.set_style(&red);
+    tiles.set_necessity(&loaded, TileNecessity::Required);
+    script.answer(|_| Reply::Bytes(water()));
+    tiles.update();
+    tiles.update();
+    assert!(tiles.shows_layout());
+    script.take_calls();
+
+    let taken = OverscaledTileID::with_zxy(0, 1, 0, 0, 0);
+    tiles.add_from_copy(taken);
+    assert!(tiles.tile_at(&taken).is_renderable(), "it shows the copy's contents at once");
+    assert!(tiles.tile_at(&taken).is_settled());
+    assert!(script.take_calls().contains(&Call::TookCopy(taken)));
+    let params = tiles.tile_params();
+    tiles.with_at(&taken, |tile| tile.set_style(&red, params.pixel_ratio, params.subdivision_granularity));
+    tiles.set_necessity(&taken, TileNecessity::Required);
+    tiles.update();
+    tiles.update();
+    assert!(script.take_loads().is_empty(), "the tile that took its copy loads nothing");
+    let shown = tiles.tile_at(&taken).shown.as_ref().expect("contents");
+    assert!(!shown.world_copy, "it laid the copy's data out for itself");
+
+    script.refuse_copies();
+    let refused = OverscaledTileID::with_zxy(0, 2, 0, 0, 0);
+    tiles.add_from_copy(refused);
+    assert!(tiles.tile_at(&refused).is_renderable(), "it shows the copy's contents at once");
+    assert!(!tiles.tile_at(&refused).is_settled(), "it has yet to load");
+    assert!(!script.take_calls().contains(&Call::TookCopy(refused)));
+    tiles.set_necessity(&refused, TileNecessity::Required);
+    let loads = script.take_loads();
+    assert_eq!(loads.iter().map(|load| load.tile).collect::<Vec<_>>(), [refused]);
 }

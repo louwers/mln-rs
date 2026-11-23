@@ -541,6 +541,33 @@ fn a_tile_the_view_leaves_is_held_for_two_placements() {
     assert!(!turned.store.has_fading_tiles(), "dropped after two");
 }
 
+/// A view that zooms in draws the loaded parent in place of its children
+/// while they load, and the children once they have.
+#[test]
+fn a_parent_draws_while_its_child_loads() {
+    let mut zoomed = TurningSource::new("mercator", Size::new(512, 512), 0);
+    zoomed.load(0.0, 0.0);
+    // Not those held while what their layers placed fades out.
+    let rendered = |source: &TurningSource| -> Vec<CanonicalTileID> {
+        let rendered = source.pyramid().rendered().filter(|tile| !tile.hold_for_fade);
+        let mut ids: Vec<CanonicalTileID> = rendered.map(|tile| tile.id.canonical).collect();
+        ids.sort();
+        ids
+    };
+    assert_eq!(rendered(&zoomed), [CanonicalTileID::new(0, 0, 0)]);
+
+    zoomed.update(0.0, 1.0);
+    let children = zoomed.tiles_at(1);
+    assert_eq!(children.len(), 4, "the view's tiles at zoom 1");
+    assert!(zoomed.pyramid().cover().filter(|tile| tile.id.canonical.z == 1).all(|tile| !tile.is_renderable()));
+    assert_eq!(rendered(&zoomed), [CanonicalTileID::new(0, 0, 0)], "the parent, while its children load");
+
+    zoomed.load(0.0, 1.0);
+    let mut children = children;
+    children.sort();
+    assert_eq!(rendered(&zoomed), children, "the children, once they have loaded");
+}
+
 /// A globe turned to its far side before any tile there has loaded draws the
 /// source's first level in their place.
 fn globe_far_side_falls_back_to_the_base_level(size: Size, min_zoom: u8, zoom: f64) {

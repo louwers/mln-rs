@@ -141,6 +141,15 @@ impl OneTile {
         crate::testing::seed(&mut self.store, self.key, &[id], params);
     }
 
+    /// Adds another tile, `id`, to the source, which starts from the same
+    /// tile in another world copy if one is renderable, as a flat map's
+    /// cover starts it.
+    pub(crate) fn add_from_copy(&mut self, id: mln_tile_id::OverscaledTileID) {
+        let params = self.params();
+        let (source, ctx) = self.store.source_mut(self.key).expect("the source");
+        source.add_tile(id, params, true, ctx);
+    }
+
     pub(crate) fn tile(&self) -> &crate::tile::tile::Tile {
         self.tile_at(&self.id)
     }
