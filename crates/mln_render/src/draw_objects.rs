@@ -244,8 +244,10 @@ pub(crate) struct DrawObjects {
     attribute_bindings: AttributeBindingArray,
     instance_bindings: AttributeBindingArray,
     /// The context's [`default_vertex_generation`](Resources::default_vertex_generation)
-    /// when the bindings were made.
-    defaults: u64,
+    /// when the bindings were made. A `u32` fits in the struct's padding; a
+    /// count that wrapped round to it would only keep a replaced buffer
+    /// longer.
+    defaults: u32,
     /// The vertex buffers of the bindings, `None` until a draw after either
     /// changes computes them.
     vertex_slots: Option<Vec<VertexSlot>>,

@@ -78,7 +78,7 @@ pub struct Resources {
     /// vertex count each covers.
     default_vertex_buffers: HashMap<AttributeDataType, (usize, Rc<Buffer>)>,
     /// How many times one of `default_vertex_buffers` was replaced.
-    default_vertex_generation: u64,
+    default_vertex_generation: u32,
     /// The renderer's textures, which their owners and the draws that bind
     /// them hold as [`SharedTexture`]s.
     textures: Store<TextureKey, Texture2D>,
@@ -797,7 +797,7 @@ impl Resources {
         }
         let buffer = Rc::new(self.device.buffer(gpu, BufferUsage::Vertex, &data)?);
         if self.default_vertex_buffers.insert(format, (count, Rc::clone(&buffer))).is_some() {
-            self.default_vertex_generation += 1;
+            self.default_vertex_generation = self.default_vertex_generation.wrapping_add(1);
         }
         Ok(buffer)
     }
@@ -805,7 +805,7 @@ impl Resources {
     /// A count that changes whenever [`default_vertex_buffer`](Self::default_vertex_buffer)
     /// replaces a buffer: a draw bound at another count binds again, to let
     /// go of the replaced one.
-    pub(crate) fn default_vertex_generation(&self) -> u64 {
+    pub(crate) fn default_vertex_generation(&self) -> u32 {
         self.default_vertex_generation
     }
 }
