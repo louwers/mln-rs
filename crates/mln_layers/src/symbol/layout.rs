@@ -46,10 +46,11 @@ use mln_vec_map::VecMap;
 
 use crate::symbol::anchor::Anchor;
 use crate::symbol::bucket::{
-    Buffer, PlacedSymbol, QuadCorner, SortKeyRange, SymbolBucket, SymbolBucketState, SymbolBucketStyle,
-    SymbolIconBinders, SymbolLayoutFlags, SymbolSizeBinder, SymbolTextBinders,
+    Buffer, PlacedSymbol, QuadCorner, SortKeyRange, SymbolBucket, SymbolBucketState, SymbolIconBinders,
+    SymbolLayoutFlags, SymbolSizeBinder, SymbolTextBinders,
 };
 use crate::symbol::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature};
+use crate::symbol::format_section_override::SymbolLayerPaintPropertyOverrides;
 use crate::symbol::instance::{
     IconPart, Justification, LaidOutSymbol, ShapedTextOrientations, SymbolInstance, SymbolInstancePools, SymbolQuadSet,
     TextPart, TextRuns, WritingModes,
@@ -440,12 +441,8 @@ pub struct SymbolLayout {
     pixel_ratio: f32,
     tile_pixel_ratio: f32,
 
-    icons_need_linear: bool,
-    sort_features_by_y: bool,
+    flags: SymbolLayoutFlags,
     sort_features_by_key: bool,
-    allow_vertical_placement: bool,
-    icons_in_text: bool,
-    placement_modes: Vec<TextWritingModeType>,
 
     text_size: PropertyValue<f32>,
     icon_size: PropertyValue<f32>,
@@ -497,12 +494,15 @@ impl Layout<Symbol> for SymbolLayout {
             mode: cx.mode(),
             pixel_ratio: cx.pixel_ratio(),
             tile_pixel_ratio,
-            icons_need_linear: false,
-            sort_features_by_y: false,
+            flags: SymbolLayoutFlags {
+                icons_need_linear: leader
+                    .layout
+                    .icon_size
+                    .as_expression()
+                    .is_some_and(|e| !e.is_feature_constant() || !e.is_zoom_constant()),
+                ..SymbolLayoutFlags::default()
+            },
             sort_features_by_key: false,
-            allow_vertical_placement: false,
-            icons_in_text: false,
-            placement_modes: Vec::new(),
             text_size: leader.layout.text_size.clone(),
             icon_size: leader.layout.icon_size.clone(),
             text_radial_offset: leader.layout.text_radial_offset.clone(),
@@ -533,7 +533,7 @@ impl Layout<Symbol> for SymbolLayout {
         this.sort_features_by_key = *symbol_z_order.uniform() != SymbolZOrderType::ViewportY && has_symbol_sort_key;
         let z_order_by_viewport_y = *symbol_z_order.uniform() == SymbolZOrderType::ViewportY
             || (*symbol_z_order.uniform() == SymbolZOrderType::Auto && !this.sort_features_by_key);
-        this.sort_features_by_y = z_order_by_viewport_y
+        this.flags.sort_features_by_y = z_order_by_viewport_y
             && (text_overlap(&layout) != Overlap::Never
                 || icon_overlap(&layout) != Overlap::Never
                 || *layout.text_ignore_placement.uniform()
@@ -545,14 +545,13 @@ impl Layout<Symbol> for SymbolLayout {
             let mut seen: Vec<TextWritingModeType> = Vec::new();
             let mut placement_modes = Vec::new();
             for placement_mode in modes {
-                this.allow_vertical_placement =
-                    this.allow_vertical_placement || placement_mode == TextWritingModeType::Vertical;
+                this.flags.allow_vertical_placement |= placement_mode == TextWritingModeType::Vertical;
                 if !seen.contains(&placement_mode) {
                     seen.push(placement_mode);
                     placement_modes.push(placement_mode);
                 }
             }
-            this.placement_modes = placement_modes;
+            this.flags.placement_modes = placement_modes;
         }
 
         let canonical_id = this.canonical_id;
@@ -581,7 +580,7 @@ impl Layout<Symbol> for SymbolLayout {
                 // at a time: where the layer can lay text out vertically,
                 // the device's fonts shape only such a label's complex
                 // scripts.
-                let may_be_vertical = this.allow_vertical_placement
+                let may_be_vertical = this.flags.allow_vertical_placement
                     || (*layout.text_rotation_alignment.uniform() != TextRotationAlignmentType::Viewport
                         && *layout.symbol_placement.uniform() != SymbolPlacementType::Point);
                 let upright = may_be_vertical
@@ -685,7 +684,7 @@ impl Layout<Symbol> for SymbolLayout {
                     if section.type_ == GlyphIDType::FontPBF {
                         // Glyph PBFs have no glyphs beyond the BMP.
                         let c = formatted_text.text()[j];
-                        let vertical = can_verticalize_text || (this.allow_vertical_placement && allows_vertical);
+                        let vertical = can_verticalize_text || (this.flags.allow_vertical_placement && allows_vertical);
                         let vertical = vertical.then(|| i18n::verticalize_punctuation(c).and_then(GlyphID::from_char));
                         cx.need_glyphs(font_stack, GlyphID::from_char(c).into_iter().chain(vertical.flatten()));
                     } else {
@@ -892,7 +891,7 @@ impl SymbolLayout {
                     font_scale,
                 );
             };
-            if self.allow_vertical_placement && !shaped.text.vertical.is_empty() {
+            if self.flags.allow_vertical_placement && !shaped.text.vertical.is_empty() {
                 let mut vertical = icon.clone();
                 fit(&mut vertical, &shaped.text.vertical);
                 vertical_icon = Some(vertical);
@@ -911,7 +910,7 @@ impl SymbolLayout {
             icons,
             text_placement,
             has_icon_text_fit,
-            allow_vertical_placement: self.allow_vertical_placement,
+            allow_vertical_placement: self.flags.allow_vertical_placement,
             overscaling: self.overscaling,
             text_box_scale: self.tile_pixel_ratio * font_scale,
             text_padding: values.text_padding * self.tile_pixel_ratio,
@@ -1407,7 +1406,7 @@ impl SymbolLayout {
                     layout.text_justify.evaluate(&feature_context(zoom, feature, &canonical))
                 };
 
-                let allow_vertical_placement = self.allow_vertical_placement;
+                let allow_vertical_placement = self.flags.allow_vertical_placement;
                 let apply_shaping = |formatted_text: &TaggedString,
                                      writing_mode: TextWritingModeType,
                                      anchor: SymbolAnchorType,
@@ -1540,13 +1539,13 @@ impl SymbolLayout {
                     layout.icon_anchor.evaluate(&feature_context(zoom, feature, &canonical)),
                 ));
                 if image.pixel_ratio != self.pixel_ratio || layout.icon_rotate.constant_or(&1.0) != 0.0 {
-                    self.icons_need_linear = true;
+                    self.flags.icons_need_linear = true;
                 }
             }
 
             // Add the feature if it has either shaped text or an icon.
             let text = shaped_text_orientations.any_horizontal();
-            self.icons_in_text |= text.is_some_and(|text| text.icons_in_text);
+            self.flags.icons_in_text |= text.is_some_and(|text| text.icons_in_text);
             if text.is_some() || shaped_icon.is_some() {
                 let shaped = ShapedFeature {
                     text: shaped_text_orientations,
@@ -1565,52 +1564,54 @@ impl SymbolLayout {
         self.compare_text.clear();
     }
 
-    fn build_bucket(&mut self, cx: &BuildCx<'_, Symbol>) -> SymbolBucket {
-        let style = SymbolBucketStyle {
-            layout: Arc::clone(&self.layout),
-            icon_binders: cx.binders(),
-            text_binders: cx.binders(),
-            text_size: &self.text_size,
-            icon_size: &self.icon_size,
-            zoom: self.zoom,
-            tile_pixel_ratio: self.tile_pixel_ratio,
-            leader_id: Arc::clone(&self.bucket_leader_id),
+    fn build_bucket(self, cx: &BuildCx<'_, Symbol>) -> SymbolBucket {
+        let mut icon_binders = cx.binders();
+        let mut text_binders = cx.binders();
+        let text_size_binder =
+            SymbolSizeBinder::create(self.zoom, &self.text_size, SymbolLayoutProperties::Defaults::text_size());
+        let icon_size_binder =
+            SymbolSizeBinder::create(self.zoom, &self.icon_size, SymbolLayoutProperties::Defaults::icon_size());
+        let mut state = SymbolBucketState {
+            sorted_angle: f32::MAX,
+            symbol_instance_pools: self.symbol_instance_pools,
+            ..SymbolBucketState::default()
         };
-        let flags = SymbolLayoutFlags {
-            icons_need_linear: self.icons_need_linear,
-            sort_features_by_y: self.sort_features_by_y,
-            icons_in_text: self.icons_in_text,
-            allow_vertical_placement: self.allow_vertical_placement,
-            placement_modes: std::mem::take(&mut self.placement_modes),
-        };
-        let pools = std::mem::take(&mut self.symbol_instance_pools);
-        let mut bucket = SymbolBucket::new(style, flags, Vec::new(), pools, std::mem::take(&mut self.sort_key_ranges));
-        let mut state = std::mem::take(&mut bucket.state);
-        let section_overrides = bucket.has_format_section_overrides();
         let mut writer = BucketWriter {
             cx,
             state: &mut state,
-            icon_binders: &mut bucket.icon_binders,
-            text_binders: &mut bucket.text_binders,
-            text_size: &bucket.text_size_binder,
-            icon_size: &bucket.icon_size_binder,
-            section_overrides,
-            allow_vertical_placement: self.allow_vertical_placement,
+            icon_binders: &mut icon_binders,
+            text_binders: &mut text_binders,
+            text_size: &text_size_binder,
+            icon_size: &icon_size_binder,
+            section_overrides: SymbolLayerPaintPropertyOverrides::has_overrides(&self.layout.text_field),
+            allow_vertical_placement: self.flags.allow_vertical_placement,
         };
-        let symbols: Vec<SymbolInstance> = std::mem::take(&mut self.symbols)
-            .into_iter()
+        state.symbol_instances = (self.symbols.into_iter())
             .map(|laid_out| {
                 let feature = &self.features[laid_out.feature];
                 writer.add(laid_out, feature)
             })
             .collect();
-        state.symbol_instances = symbols;
         if cx.collision_boxes() {
             add_collision_geometry(&mut state);
         }
         state.just_reloaded = !cx.first_load();
-        bucket.state = state;
-        bucket
+        SymbolBucket {
+            layout: self.layout,
+            bucket_leader_id: self.bucket_leader_id,
+            flags: self.flags,
+            sort_key_ranges: self.sort_key_ranges,
+            icon_binders,
+            text_binders,
+            text_size_binder,
+            icon_size_binder,
+            tile_pixel_ratio: self.tile_pixel_ratio,
+            // Not taken from the symbols' `symbol-height-offset` yet, so an
+            // offset that is an expression doesn't raise the tile cover.
+            max_height_offset: 0.0,
+            bucket_instance_id: 0,
+            state,
+        }
     }
 }
 

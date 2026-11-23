@@ -97,7 +97,7 @@ fn symbol_order() {
                 bucket.state.symbol_instances.iter().map(|symbol| symbol.data_feature_index).collect();
             assert_eq!(expected_order(type_), order, "{type_:?}");
             // An explicit constant key still disables viewport-Y sorting for symbol-z-order:auto.
-            assert_eq!(type_ == SortKeyType::Undefined, bucket.sort_features_by_y, "{type_:?}");
+            assert_eq!(type_ == SortKeyType::Undefined, bucket.flags.sort_features_by_y, "{type_:?}");
             match type_ {
                 SortKeyType::Undefined => assert_eq!(bucket.sort_key_ranges, Vec::<SortKeyRange>::new()),
                 SortKeyType::Constant | SortKeyType::Camera => {
@@ -115,7 +115,7 @@ fn symbol_order() {
 fn symbol_viewport_y() {
     for type_ in SORT_KEY_TYPES {
         with_bucket(json!({"symbol-z-order": "viewport-y"}), type_, |bucket| {
-            assert!(bucket.sort_features_by_y, "{type_:?}");
+            assert!(bucket.flags.sort_features_by_y, "{type_:?}");
             assert!(bucket.sort_key_ranges.is_empty(), "{type_:?}");
             let order: Vec<usize> =
                 bucket.state.symbol_instances.iter().map(|symbol| symbol.data_feature_index).collect();

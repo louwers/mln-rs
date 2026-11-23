@@ -395,7 +395,7 @@ mod tests {
     use super::*;
     use crate::symbol::SymbolLayoutProperties;
     use crate::symbol::anchor::Anchor;
-    use crate::symbol::bucket::{SymbolBucketStyle, SymbolLayoutFlags};
+    use crate::symbol::bucket::{SymbolBucketState, SymbolLayoutFlags, SymbolSizeBinder};
     use crate::symbol::pool::PoolRange;
 
     fn make_symbol_instance(x: f32, y: f32, key: &str, pools: &mut SymbolInstancePools) -> SymbolInstance {
@@ -416,24 +416,25 @@ mod tests {
         let mut pools = SymbolInstancePools::default();
         let instances = symbols.into_iter().map(|(x, y, key)| make_symbol_instance(x, y, key, &mut pools)).collect();
         let layout = Arc::new(SymbolLayoutProperties::PossiblyEvaluated::default());
-        let mut bucket = SymbolBucket::new(
-            SymbolBucketStyle {
-                layout,
-                icon_binders: LayerBinders::default(),
-                text_binders: LayerBinders::default(),
-                text_size: &PropertyValue::Constant(16.0),
-                icon_size: &PropertyValue::Constant(1.0),
-                zoom: 0.0,
-                tile_pixel_ratio: 1.0,
-                leader_id: Arc::from("test"),
+        SymbolBucket {
+            layout,
+            bucket_leader_id: Arc::from("test"),
+            flags: SymbolLayoutFlags::default(),
+            sort_key_ranges: Vec::new(),
+            icon_binders: LayerBinders::default(),
+            text_binders: LayerBinders::default(),
+            text_size_binder: SymbolSizeBinder::create(0.0, &PropertyValue::Constant(16.0), 16.0),
+            icon_size_binder: SymbolSizeBinder::create(0.0, &PropertyValue::Constant(1.0), 1.0),
+            tile_pixel_ratio: 1.0,
+            max_height_offset: 0.0,
+            bucket_instance_id,
+            state: SymbolBucketState {
+                sorted_angle: f32::MAX,
+                symbol_instances: instances,
+                symbol_instance_pools: pools,
+                ..SymbolBucketState::default()
             },
-            SymbolLayoutFlags::default(),
-            instances,
-            pools,
-            Vec::new(),
-        );
-        bucket.bucket_instance_id = bucket_instance_id;
-        bucket
+        }
     }
 
     fn cross_tile_id(bucket: &SymbolBucket, i: usize) -> Option<u32> {

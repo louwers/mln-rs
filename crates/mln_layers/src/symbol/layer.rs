@@ -289,7 +289,7 @@ impl Layer for SymbolLayer {
                     (halo, colored(&paint.text_color), if constant { sharp } else { IconFilter::Linear })
                 }
                 kind => {
-                    let scaled = bucket.layout.icon_size.constant_or(&1.0) != 1.0 || bucket.icons_need_linear;
+                    let scaled = bucket.layout.icon_size.constant_or(&1.0) != 1.0 || bucket.flags.icons_need_linear;
                     let own = if kind == Kind::SdfIcon || scaled { IconFilter::Linear } else { sharp };
                     if kind == Kind::Icon {
                         (false, true, own)
@@ -408,7 +408,7 @@ impl<'a> MeshParts<'a> {
     ) -> Self {
         let buffer = kind.buffer(laid.bucket);
         let program = match kind {
-            Kind::Text if laid.bucket.icons_in_text => &SYMBOL_TEXT_AND_ICON,
+            Kind::Text if laid.bucket.flags.icons_in_text => &SYMBOL_TEXT_AND_ICON,
             Kind::Text | Kind::SdfIcon => &SYMBOL_SDF,
             Kind::Icon => &SYMBOL_ICON,
         };

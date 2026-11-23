@@ -20,7 +20,6 @@ use mln_util::Color;
 use mln_util::range::Range;
 use mln_util::serialization::payload::pod;
 
-use crate::symbol::format_section_override::SymbolLayerPaintPropertyOverrides;
 use crate::symbol::instance::{SymbolInstance, SymbolInstancePools, WritingModes};
 use crate::symbol::pool::PoolRange;
 use crate::symbol::quads::SymbolQuad;
@@ -498,20 +497,8 @@ impl SymbolBucketState {
     }
 }
 
-/// The style of a bucket's symbol layers at its tile's zoom.
-pub(crate) struct SymbolBucketStyle<'a> {
-    pub(crate) layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
-    pub(crate) icon_binders: LayerBinders<SymbolIconBinders>,
-    pub(crate) text_binders: LayerBinders<SymbolTextBinders>,
-    pub(crate) text_size: &'a PropertyValue<f32>,
-    pub(crate) icon_size: &'a PropertyValue<f32>,
-    pub(crate) zoom: f32,
-    pub(crate) tile_pixel_ratio: f32,
-    pub(crate) leader_id: Arc<str>,
-}
-
 /// What layout found of a bucket's symbols that drawing and placement read.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, mln_wire::Wire)]
 pub(crate) struct SymbolLayoutFlags {
     pub(crate) icons_need_linear: bool,
     pub(crate) sort_features_by_y: bool,
@@ -524,11 +511,7 @@ pub(crate) struct SymbolLayoutFlags {
 pub struct SymbolBucket {
     pub(crate) layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
     pub(crate) bucket_leader_id: Arc<str>,
-
-    // Flags
-    pub(crate) icons_need_linear: bool,
-    pub(crate) sort_features_by_y: bool,
-    pub(crate) icons_in_text: bool,
+    pub(crate) flags: SymbolLayoutFlags,
 
     pub(crate) sort_key_ranges: Vec<SortKeyRange>,
 
@@ -539,15 +522,13 @@ pub struct SymbolBucket {
     pub(crate) icon_size_binder: SymbolSizeBinder,
 
     pub(crate) tile_pixel_ratio: f32,
-    /// The highest `symbol-height-offset` of the bucket's symbols, in meters.
+    /// The bucket's [`Bucket::max_elevation`], in meters.
     pub(crate) max_height_offset: f32,
     /// The id by which the cross-tile index and placement tell symbol
     /// buckets apart, which the index gives the bucket the first time it
     /// indexes it; 0 until then.
     #[wire(skip)]
     pub(crate) bucket_instance_id: u32,
-    pub(crate) allow_vertical_placement: bool,
-    pub(crate) placement_modes: Vec<TextWritingModeType>,
 
     /// What placement, cross-tile indexing and sorting change.
     pub(crate) state: SymbolBucketState,
@@ -560,52 +541,6 @@ impl std::fmt::Debug for SymbolBucket {
 }
 
 impl SymbolBucket {
-    #[must_use]
-    pub(crate) fn new(
-        style: SymbolBucketStyle<'_>,
-        flags: SymbolLayoutFlags,
-        symbol_instances: Vec<SymbolInstance>,
-        symbol_instance_pools: SymbolInstancePools,
-        sort_key_ranges: Vec<SortKeyRange>,
-    ) -> Self {
-        let SymbolBucketStyle {
-            layout,
-            icon_binders,
-            text_binders,
-            text_size,
-            icon_size,
-            zoom,
-            tile_pixel_ratio,
-            leader_id,
-        } = style;
-        let icon_size_data_driven_or_zoom =
-            icon_size.as_expression().is_some_and(|e| !e.is_feature_constant() || !e.is_zoom_constant());
-        let max_height_offset = symbol_instances.iter().map(|symbol| symbol.height_offset).fold(0.0, f32::max);
-        SymbolBucket {
-            layout,
-            bucket_leader_id: leader_id,
-            icons_need_linear: flags.icons_need_linear || icon_size_data_driven_or_zoom,
-            sort_features_by_y: flags.sort_features_by_y,
-            icons_in_text: flags.icons_in_text,
-            sort_key_ranges,
-            icon_binders,
-            text_binders,
-            text_size_binder: SymbolSizeBinder::create(zoom, text_size, SymbolLayoutProperties::Defaults::text_size()),
-            icon_size_binder: SymbolSizeBinder::create(zoom, icon_size, SymbolLayoutProperties::Defaults::icon_size()),
-            tile_pixel_ratio,
-            max_height_offset,
-            bucket_instance_id: 0,
-            allow_vertical_placement: flags.allow_vertical_placement,
-            placement_modes: flags.placement_modes,
-            state: SymbolBucketState {
-                sorted_angle: f32::MAX,
-                symbol_instances,
-                symbol_instance_pools,
-                ..Default::default()
-            },
-        }
-    }
-
     pub(crate) fn has_text_data(&self) -> bool {
         !self.state.text.triangles.is_empty()
     }
@@ -638,10 +573,6 @@ impl SymbolBucket {
             || collision.into_iter().flatten().any(CollisionBuffer::has_data)
     }
 
-    pub(crate) fn has_format_section_overrides(&self) -> bool {
-        SymbolLayerPaintPropertyOverrides::has_overrides(&self.layout.text_field)
-    }
-
     pub(crate) fn has_variable_text_anchors(&self) -> bool {
         // A value that differs by feature may have offsets for some.
         let has_text_variable_anchor_offset =
@@ -652,7 +583,7 @@ impl SymbolBucket {
     /// Sorts the symbols by their position along the screen's y axis at
     /// the map's bearing `angle`, where the layout asks for that.
     pub(crate) fn sort_features(&mut self, angle: f32) {
-        if !self.sort_features_by_y {
+        if !self.flags.sort_features_by_y {
             return;
         }
         debug_assert!(angle != f32::MAX);

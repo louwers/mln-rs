@@ -177,7 +177,7 @@ impl Placement {
         anchors.extend(text.variable_anchors.iter().flatten().map(|pair| pair.anchor_type));
         let placed = if anchors.is_empty() {
             self.place_in_writing_modes(text, ctx, |this, vertical| {
-                if vertical && !(ctx.bucket.allow_vertical_placement && text.vertical_collision.is_some()) {
+                if vertical && !(ctx.bucket.flags.allow_vertical_placement && text.vertical_collision.is_some()) {
                     return PlacedText::default();
                 }
                 let feature = text.collision(vertical);
@@ -200,7 +200,7 @@ impl Placement {
         } else if !text.collision.along_line && !state.symbol_instance_pools.boxes(&text.collision).is_empty() {
             self.order_anchors(id, &mut anchors, ctx);
             let placed = self.place_in_writing_modes(text, ctx, |this, vertical| {
-                if vertical && !(ctx.bucket.allow_vertical_placement && text.vertical_collision.is_some()) {
+                if vertical && !(ctx.bucket.flags.allow_vertical_placement && text.vertical_collision.is_some()) {
                     return PlacedText::default();
                 }
                 // The box `place_icon` places the icon fitted to the text in.
@@ -224,7 +224,7 @@ impl Placement {
             return None;
         };
         self.anchors = anchors;
-        if ctx.bucket.allow_vertical_placement
+        if ctx.bucket.flags.allow_vertical_placement
             && !placed.result.placed
             && let Some(prev) = self.prev().and_then(|prev| prev.placed_orientations.get(&id)).copied()
         {
@@ -242,12 +242,12 @@ impl Placement {
         mut place: impl FnMut(&mut Self, bool) -> PlacedText,
     ) -> PlacedText {
         let bucket = ctx.bucket;
-        if !bucket.allow_vertical_placement || !text.runs.writing_modes().vertical {
+        if !bucket.flags.allow_vertical_placement || !text.runs.writing_modes().vertical {
             return place(self, false);
         }
-        debug_assert_ne!(bucket.placement_modes.as_slice(), []);
+        debug_assert_ne!(bucket.flags.placement_modes.as_slice(), []);
         let mut placed = PlacedText::default();
-        for &mode in &bucket.placement_modes {
+        for &mode in &bucket.flags.placement_modes {
             placed = place(self, mode == TextWritingModeType::Vertical);
             if placed.result.placed {
                 return placed;
@@ -343,7 +343,7 @@ impl Placement {
                 }
                 if result.placed {
                     self.next.variable_offsets.entry(id).or_insert(offset);
-                    if ctx.bucket.allow_vertical_placement {
+                    if ctx.bucket.flags.allow_vertical_placement {
                         self.next.placed_orientations.entry(id).or_insert(orientation(vertical));
                     }
                     return PlacedText { result, vertical, shift: Some(shift) };

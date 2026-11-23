@@ -263,7 +263,7 @@ impl Shown {
             }
         } else if has_variable_anchors {
             self.lay_out_variable_anchors(bucket, view, tile, layer_id, &tile_projector, text_translation);
-        } else if bucket.allow_vertical_placement && has_text {
+        } else if bucket.flags.allow_vertical_placement && has_text {
             self.lay_out_orientations(bucket, layer_id);
         }
     }
@@ -339,7 +339,7 @@ impl Shown {
             }
         };
 
-        let allow_vertical = bucket.allow_vertical_placement;
+        let allow_vertical = bucket.flags.allow_vertical_placement;
         let SymbolBucketState {
             symbol_instances: symbols,
             text: text_buffer,
@@ -411,7 +411,7 @@ impl Shown {
     /// fitted to it with it.
     fn lay_out_orientations(&self, bucket: &mut SymbolBucket, layer_id: Option<&str>) {
         let fit_icons = *bucket.layout.icon_text_fit.uniform() != IconTextFitType::None;
-        let allow_vertical = bucket.allow_vertical_placement;
+        let allow_vertical = bucket.flags.allow_vertical_placement;
         let SymbolBucketState { symbol_instances: symbols, text, icon, sdf_icon, .. } = &mut bucket.state;
         let shown = |symbol: &SymbolInstance| self.orientation_of(allow_vertical, symbol.cross_tile_id);
         let write = |buffer: &mut Buffer,
