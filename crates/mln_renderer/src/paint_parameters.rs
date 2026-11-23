@@ -12,6 +12,7 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::range::Range;
 use mln_util::size::Size;
 use mln_vec_map::VecMap;
+use smallvec::SmallVec;
 
 use crate::clip_masks::ClipMasks;
 use crate::frame::Frame;
@@ -19,6 +20,10 @@ use crate::gfx::context::Context;
 use crate::layer_composite::LayerComposite;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
+
+/// The tiles whose masks clear the stencil buffer: one per world copy in
+/// view, so usually one, and held inline, since every frame makes them.
+pub(crate) type StencilClear = SmallVec<[UnwrappedTileID; 2]>;
 
 /// A draw group drawing into the layer composite's texture, from
 /// [`PaintParameters::begin_composited`] to
@@ -179,7 +184,7 @@ pub(crate) struct PaintParameters<'a> {
     next_stencil_id: i32,
     /// The tiles whose masks `clear_stencil` draws zero with, from
     /// [`stencil_clear_tiles`](Self::stencil_clear_tiles).
-    pub(crate) stencil_clear: Vec<UnwrappedTileID>,
+    pub(crate) stencil_clear: StencilClear,
 
     pub(crate) current_layer: u32,
     pub(crate) depth_range_size: f32,
@@ -239,7 +244,7 @@ impl<'a> PaintParameters<'a> {
             composites_with_frame_depth,
             tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
-            stencil_clear: Vec::new(),
+            stencil_clear: StencilClear::new(),
             // The renderer sets these before use.
             current_layer: 0,
             depth_range_size: 1.0,
@@ -440,7 +445,7 @@ impl<'a> PaintParameters<'a> {
         if self.context.caps().clear_stencil_with_pass {
             self.restart_pass(gpu, LoadOp::Clear(0));
         } else {
-            let masks: Vec<_> = self.stencil_clear.iter().map(|tile| (*tile, 0)).collect();
+            let masks: SmallVec<[_; 2]> = self.stencil_clear.iter().map(|tile| (*tile, 0)).collect();
             self.draw_clip_masks(gpu, &masks);
         }
         self.context.rendering_stats().stencil_clears += 1;
@@ -451,14 +456,18 @@ impl<'a> PaintParameters<'a> {
     /// draws clip to the masks of `clip_tiles`: the world's tile in each
     /// world copy of `clip_tiles`, which covers every mask.
     #[must_use]
-    pub(crate) fn stencil_clear_tiles(&self, clip_tiles: &[UnwrappedTileID]) -> Vec<UnwrappedTileID> {
-        if self.context.caps().clear_stencil_with_pass || clip_tiles.is_empty() {
-            return Vec::new();
+    pub(crate) fn stencil_clear_tiles(&self, clip_tiles: &[UnwrappedTileID]) -> StencilClear {
+        let mut tiles = StencilClear::new();
+        if self.context.caps().clear_stencil_with_pass {
+            return tiles;
         }
-        let mut wraps: Vec<i16> = clip_tiles.iter().map(|tile| tile.wrap).collect();
-        wraps.sort_unstable();
-        wraps.dedup();
-        wraps.into_iter().map(|wrap| UnwrappedTileID::with_wrap(wrap, CanonicalTileID::new(0, 0, 0))).collect()
+        for tile in clip_tiles {
+            if !tiles.iter().any(|world| world.wrap == tile.wrap) {
+                tiles.push(UnwrappedTileID::with_wrap(tile.wrap, CanonicalTileID::new(0, 0, 0)));
+            }
+        }
+        tiles.sort_unstable();
+        tiles
     }
 
     fn draw_clip_masks(&mut self, gpu: &mut dyn Gpu, masks: &[(UnwrappedTileID, i32)]) {
