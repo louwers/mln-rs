@@ -366,35 +366,32 @@ and a metric that only one side's harness reports shows no change.
 
 ### Counts
 
-Each side runs once per scenario by default. The ref's runs are kept in
-`target/bench-compare/samples`, by commit, and the ref runs again only until it
-has three: the first comparison with a commit costs two extra runs per scenario,
-later ones none.
-
-A scenario's instructions also move with the bytes of its binary, by up to a few
+A scenario's instructions move with the bytes of its binary, by up to a few
 percent in some scenarios, while the code it runs stays the same: on macOS, a
 binary that differs only in its symbol table, signed again, gives different
-counts, each repeating exactly from run to run. Any edit moves them so, and so
-does building the same source in another directory. The ref is therefore built
-eight more times, as probes: each with the harness's `layout-probe` feature,
-which adds code that never runs and so moves the rest, and with the harness's
-symbols renamed by a `-C metadata` of its own. Each scenario runs once on each
-probe, which the comparison builds only for a ref and harness it has no probes
-of yet: the first comparison with a commit costs eight builds of the harness
-crate and eight runs per scenario.
+counts, each repeating exactly from run to run, and now and then one far from
+the rest. Any edit moves them so, and so does building the same source in
+another directory. So each side is measured as nine builds of the same code: its
+own, and eight probes, each with the harness's `layout-probe` feature, which
+adds code that never runs and so moves the rest (where the ref's harness has
+it), and with the harness's symbols renamed by a `-C metadata` of its own. Each
+scenario runs once on each build. A side's count is the median over its builds,
+each counting once, so that one build far from the rest moves it little, and a
+count's noise is the larger interquartile range of either side's builds.
 
-A count's noise is the larger range of either side's runs; for instructions,
-also the most that any probe of any ref compared so far moved them, since how
-far a build moves them differs from build to build. The report shows
-every count's change and noise, and marks a change over twice the noise, however
-small: a count that repeats exactly is marked for any change. Whether a change
-matters is the reader's call. `start_heap`, the context, shows its change and
-noise but is never marked. The heap's peak and end are marked both above
-`start_heap` and in all, since a change in what the setup leaves moves the one
-and not the other: a setup that leaves less, with work moved from it into the
-measured parts, shows as growth above a smaller start while less is live in all.
-A scenario with a marked count runs twice more on this checkout, and its counts
-come from all three runs, so that a change that doesn't repeat isn't marked.
+The ref's runs are kept in `target/bench-compare/samples`, by commit: its probes
+run only in the first comparison with a commit and harness, and later ones build
+and run only this checkout's eight probes, about 7 s to build the harness crate
+and one run per scenario each.
+
+The report shows every count's change and noise, and marks a change over twice
+the noise, however small: a count that repeats exactly is marked for any change.
+Whether a change matters is the reader's call. `start_heap`, the context, shows
+its change and noise but is never marked. The heap's peak and end are marked
+both above `start_heap` and in all, since a change in what the setup leaves
+moves the one and not the other: a setup that leaves less, with work moved from
+it into the measured parts, shows as growth above a smaller start while less is
+live in all.
 
 ### Times
 
@@ -428,7 +425,7 @@ their own.
 ## Reading a report
 
 ```text
-micro/expression/evaluate/liberty (counts: 3 base runs, 3 of this checkout)
+micro/expression/evaluate/liberty (counts: 11 base runs, 9 of this checkout)
   metric                         base     this  change  noise  moved
   instructions                 1.01 G   1.03 G   +2.2%  0.31%   more
   allocations                   687 k    699 k   +1.8%  0.00%   more
@@ -437,11 +434,12 @@ micro/expression/evaluate/liberty (counts: 3 base runs, 3 of this checkout)
   instructions_per_evaluation    1271     1299   +2.2%  0.31%   more
 ```
 
-`base` is the ref's median, `this` this checkout's, `change` the difference as a
-share of the base. `noise` is a count's noise as a share of the base, or with
-rounds the tested time's adjusted p-value. `moved` marks a change beyond the
-noise, `more` or `less` of the metric; lower is better for every metric. The
-last line counts the marked changes; comparing a commit with itself gives none.
+`base` is the ref's median over its builds, `this` this checkout's, `change` the
+difference as a share of the base. `noise` is a count's noise as a share of the
+base, or with rounds the tested time's adjusted p-value. `moved` marks a change
+beyond the noise, `more` or `less` of the metric; lower is better for every
+metric. The last line counts the marked changes; comparing a commit with itself
+gives none.
 
 ## Adding a scenario
 

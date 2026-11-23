@@ -9,11 +9,20 @@ pub(crate) fn median(values: &[f64]) -> f64 {
     if sorted.len().is_multiple_of(2) { f64::midpoint(sorted[middle - 1], sorted[middle]) } else { sorted[middle] }
 }
 
-/// The largest value of `values` less the smallest, or 0 for none.
-pub(crate) fn range(values: &[f64]) -> f64 {
-    let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    let min = values.iter().copied().fold(f64::INFINITY, f64::min);
-    if values.is_empty() { 0.0 } else { max - min }
+/// The interquartile range of `values`: the third quartile less the first,
+/// each interpolated linearly between the values around it, or 0 for none.
+pub(crate) fn interquartile_range(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let quantile = |q: f64| {
+        let position = q * (sorted.len() - 1) as f64;
+        let (low, high) = (position.floor() as usize, position.ceil() as usize);
+        sorted[low] + (sorted[high] - sorted[low]) * (position - low as f64)
+    };
+    quantile(0.75) - quantile(0.25)
 }
 
 /// The two-sided p-value of the Mann-Whitney U test that `a` and `b` come
@@ -113,11 +122,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn medians_and_ranges() {
+    fn medians_and_interquartile_ranges() {
         assert_eq!(median(&[3.0, 1.0, 2.0]), 2.0);
         assert_eq!(median(&[4.0, 1.0, 2.0, 3.0]), 2.5);
-        assert_eq!(range(&[4.0, 1.0, 2.0]), 3.0);
-        assert_eq!(range(&[]), 0.0);
+        assert_eq!(interquartile_range(&[4.0, 1.0, 2.0, 3.0, 5.0]), 2.0);
+        // The quartiles of four values fall between them.
+        assert_eq!(interquartile_range(&[1.0, 2.0, 3.0, 4.0]), 1.5);
+        // An outlier moves it no further than its neighbour.
+        assert_eq!(interquartile_range(&[1.0, 2.0, 3.0, 4.0, 100.0]), 2.0);
+        assert_eq!(interquartile_range(&[7.0]), 0.0);
+        assert_eq!(interquartile_range(&[]), 0.0);
     }
 
     #[test]

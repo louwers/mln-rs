@@ -18,23 +18,20 @@
 //! scenarios both harnesses have, by name, and the report warns that their
 //! harnesses differ, so that a change can come from either harness.
 //!
-//! Counts: each side runs once per scenario, and the ref's runs are kept
-//! under `<target>/bench-compare/samples`, by commit, to measure how much a
-//! count moves from run to run (its noise) without running the ref again
-//! next time; the ref runs again only until it has [`SPREAD_RUNS`] of them.
-//! A scenario whose counts move beyond their noise runs again on this
-//! checkout, until it has [`CONFIRM_RUNS`], and its counts come from those
-//! runs. The instructions a scenario retires also move with the bytes of
-//! its binary, by up to a few percent in some scenarios, though the code
-//! it runs is the same: any edit moves them, and so can building the same
-//! source in another directory. Each ref is therefore built again
-//! [`PROBES`] times, as probes whose bytes differ but whose scenarios run
-//! the same code ([`build`]), and the most that any stored probe has moved
-//! a scenario's instructions counts as their noise too. The report shows
-//! every metric's change and its noise,
-//! and marks a count that moved by over [`NOISE_FACTOR`] times its noise,
-//! however little: one that repeats exactly is marked for any change. The
-//! reader weighs what matters.
+//! Counts: a scenario's instructions move with the bytes of its binary,
+//! by up to a few percent in some scenarios, though the code it runs is the
+//! same: any edit moves them, and so can building the same source in
+//! another directory. So each side is measured as several builds of the
+//! same code: its own, and [`PROBES`] probes whose bytes differ
+//! ([`build`]). A side's count is the median over its builds, each build
+//! counting once, and a count's noise is the larger interquartile range of
+//! either side's builds. The ref's probe runs and its own build's runs are
+//! kept under `<target>/bench-compare/samples`, by commit, so a later
+//! comparison with the same ref builds and runs only this checkout's
+//! probes. The report shows every metric's change and its noise, and marks
+//! a count that moved by over [`NOISE_FACTOR`] times its noise, however
+//! little: one that repeats exactly is marked for any change. The reader
+//! weighs what matters.
 //! Times: one run per side has no noise to hold them against, unless
 //! `--rounds` asks for interleaved rounds, which a rank test compares: the
 //! wall-clock time, and the GPU's where the device times it. Rounds run
@@ -54,21 +51,16 @@ use crate::environment::Environment;
 use crate::report::{Run, format_value, table};
 use crate::runner::{run_in_process, warm_up};
 use crate::scenario::{MetricKind, Scenario, Unit};
-use crate::stats::{holm, mann_whitney, median, range};
+use crate::stats::{holm, interquartile_range, mann_whitney, median};
 use crate::{host, scenarios};
 
-/// The base's runs a count's noise needs at least.
-const SPREAD_RUNS: usize = 3;
-/// The base's runs kept for each scenario, the latest.
+/// The runs of the base's own build kept for each scenario, the latest.
 const KEPT_RUNS: usize = 8;
-/// This checkout's runs of a scenario whose counts moved beyond their noise
-/// in one.
-const CONFIRM_RUNS: usize = 3;
 /// How many times its noise a count must move by to be marked.
 const NOISE_FACTOR: f64 = 2.0;
-/// The builds of a ref whose runs give its instructions' noise: how far
-/// they move differs from build to build, and only the most of several
-/// builds bounds how far another build moves them.
+/// The probes of each side, besides its own build: a median over this
+/// many builds is seldom one whose bytes moved a count far, which a single
+/// build often is.
 const PROBES: usize = 8;
 /// A time is marked when its Holm-adjusted p-value is below this.
 const ALPHA: f64 = 0.05;
@@ -102,14 +94,14 @@ pub(crate) struct MetricComparison {
     pub(crate) name: String,
     pub(crate) kind: MetricKind,
     pub(crate) unit: Unit,
-    /// The median of each side's runs; none where the side lacks the metric.
+    /// Each side's median over its builds ([`draws`]); none where the side
+    /// lacks the metric.
     pub(crate) base: Option<f64>,
     pub(crate) candidate: Option<f64>,
     /// The candidate's change from the base, as a fraction of the base.
     pub(crate) change: Option<f64>,
-    /// A count's noise, as a fraction of the base: the larger range of
-    /// either side's runs, or for instructions the most a stored layout
-    /// probe moved them, if that is larger.
+    /// A count's noise, as a fraction of the base: the larger interquartile
+    /// range of either side's builds.
     pub(crate) noise: Option<f64>,
     /// A tested time's p-value with rounds, Holm-adjusted over every
     /// scenario of the comparison.
@@ -125,7 +117,8 @@ pub(crate) struct ScenarioComparison {
     /// Why the scenario's changes aren't held against their noise, if they
     /// aren't.
     pub(crate) not_comparable: Option<String>,
-    /// The base's runs its counts used, and the candidate's.
+    /// The runs the counts of the base used, and of this checkout, over
+    /// all their builds.
     pub(crate) base_runs: usize,
     pub(crate) candidate_runs: usize,
     pub(crate) metrics: Vec<MetricComparison>,
@@ -199,6 +192,8 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
     let work = target.join("bench-compare");
     std::fs::create_dir_all(&work).map_err(|error| format!("{}: {error}", work.display()))?;
     let _lock = lock(&work)?;
+    // The probes of this checkout link to the same path, so it's copied out.
+    let candidate = keep_binary(&candidate, &work.join("bin/this"))?;
 
     let whose = if own { "its own" } else { "this checkout's" };
     eprintln!("mln-bench: building {} ({}) with {whose} harness", options.base, short(&commit));
@@ -269,7 +264,9 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
     }
     let probe_key = |scenario: &Scenario| format!("{} (layout probe)", scenario.name);
     let probes_of = |samples: &Samples, scenario: &Scenario| {
-        samples.get(&probe_key(scenario)).map_or(0, |runs| runs.iter().filter(|run| run.harness == base_harness).count())
+        samples
+            .get(&probe_key(scenario))
+            .map_or(0, |runs| runs.iter().filter(|run| run.harness == base_harness).count())
     };
     let unprobed: Vec<&Scenario> =
         scenarios.iter().copied().filter(|scenario| probes_of(&samples, scenario) < PROBES).collect();
@@ -297,43 +294,50 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
     }
     let changed_while_running =
         |scenario: &Scenario| format!("{}: a side's harness changed while it ran", scenario.name);
+    // This checkout's probes, always with its harness's `layout-probe`
+    // feature, which also gives them a path of their own in the target
+    // directory, apart from the binary that runs this comparison.
+    let mut candidate_probes: BTreeMap<&str, Vec<Run>> = BTreeMap::new();
+    for index in 0..PROBES {
+        eprintln!("mln-bench: probe {} of {PROBES} of this checkout", index + 1);
+        let probe = build(&root, &root.join("Cargo.toml"), None, Some("layout-probe"), Some(index))?;
+        let probe = keep_binary(&probe, &work.join("bin/probe"))?;
+        warm_up(&probe, &scenarios)?;
+        for scenario in &scenarios {
+            let run = run_in_process(&probe, scenario.name, None)?;
+            if run.harness != harness {
+                return Err(changed_while_running(scenario));
+            }
+            candidate_probes.entry(scenario.name).or_default().push(run);
+        }
+    }
     let mut comparisons = Vec::new();
     for (index, scenario) in scenarios.iter().enumerate() {
-        let (base_runs, mut candidate_runs) = run_sides(scenario, index, &base, &candidate, options.rounds)?;
+        let (base_runs, candidate_runs) = run_sides(scenario, index, &base, &candidate, options.rounds)?;
         if base_runs.iter().any(|run| run.harness != base_harness)
             || candidate_runs.iter().any(|run| run.harness != harness)
         {
             return Err(changed_while_running(scenario));
         }
-        let kept = samples.entry(scenario.name.to_owned()).or_default();
         let environment = &base_runs[0].environment;
+        let kept = samples.entry(scenario.name.to_owned()).or_default();
         kept.retain(|run| run.harness == base_harness && &run.environment == environment);
-        let mut base_counts = kept.clone();
-        base_counts.extend(base_runs.iter().cloned());
-        while base_counts.len() < SPREAD_RUNS {
-            eprintln!("mln-bench: {}: another base run, for the noise", scenario.name);
-            base_counts.push(run_in_process(&base, scenario.name, None)?);
-        }
-        let fresh = base_counts.len() - kept.len();
-        kept.extend(base_counts[base_counts.len() - fresh..].iter().cloned());
+        kept.extend(base_runs.iter().cloned());
         let excess = kept.len().saturating_sub(KEPT_RUNS);
         kept.drain(..excess);
+        let base_own = kept.clone();
+        let base_probes: Vec<Run> = samples
+            .get(&probe_key(scenario))
+            .into_iter()
+            .flatten()
+            .filter(|run| run.harness == base_harness && &run.environment == environment)
+            .cloned()
+            .collect();
         write_samples(&samples_path, &samples)?;
-        let layout = layout_noise(&work.join("samples"), scenario.name, environment);
-        let base = Base { runs: &base_runs, counts: &base_counts, layout: &layout };
-        let mut comparison = compare_scenario(scenario, &base, &candidate_runs, options.rounds);
-        if options.rounds.is_none() && comparison.has_count_moved() {
-            while candidate_runs.len() < CONFIRM_RUNS {
-                eprintln!("mln-bench: {}: this checkout again, to confirm its changes", scenario.name);
-                let run = run_in_process(&candidate, scenario.name, None)?;
-                if run.harness != harness {
-                    return Err(changed_while_running(scenario));
-                }
-                candidate_runs.push(run);
-            }
-            comparison = compare_scenario(scenario, &base, &candidate_runs, options.rounds);
-        }
-        comparisons.push(comparison);
+        let base = Side { runs: &base_runs, own: &base_own, probes: &base_probes };
+        let probes = candidate_probes.get(scenario.name).map_or(&[][..], Vec::as_slice);
+        let candidate = Side { runs: &candidate_runs, own: &candidate_runs, probes };
+        comparisons.push(compare_scenario(scenario, &base, &candidate, options.rounds));
     }
     if options.rounds.is_some() {
         judge_times(&mut comparisons);
@@ -462,68 +466,54 @@ fn run_sides(
     Ok((base_runs, candidate_runs))
 }
 
-/// The base's runs of one scenario.
-struct Base<'a> {
-    /// This comparison's, for times.
+/// One side's runs of one scenario.
+struct Side<'a> {
+    /// This comparison's runs of the side's own build, for times.
     runs: &'a [Run],
-    /// These and kept ones, for counts.
-    counts: &'a [Run],
-    /// The most that a stored probe moved each of the scenario's
-    /// instruction counts, as a fraction of the base ([`layout_noise`]).
-    layout: &'a BTreeMap<String, f64>,
+    /// The runs of its own build that its counts use: this comparison's,
+    /// and for the base the kept ones too.
+    own: &'a [Run],
+    /// One run of each of its probes.
+    probes: &'a [Run],
 }
 
-/// How far another build of the same code moves each instruction count of
-/// `scenario` in `environment`: for each, the largest fraction of the
-/// base's median that any probe of any ref compared so far moved it by,
-/// from the kept runs in `samples`.
-fn layout_noise(samples: &Path, scenario: &str, environment: &Environment) -> BTreeMap<String, f64> {
-    let mut noise: BTreeMap<String, f64> = BTreeMap::new();
-    let Ok(entries) = std::fs::read_dir(samples) else { return noise };
-    for entry in entries.flatten() {
-        let kept = read_samples(&entry.path());
-        let of = |key: &str| -> Vec<&Run> {
-            kept.get(key).into_iter().flatten().filter(|run| &run.environment == environment).collect()
-        };
-        let base = of(scenario);
-        for probe in of(&format!("{scenario} (layout probe)")) {
-            // Only the base's runs of the probe's harness: another harness's
-            // differ by more than the build.
-            let base: Vec<&Run> = base.iter().copied().filter(|run| run.harness == probe.harness).collect();
-            for metric in probe.metrics.iter().filter(|metric| metric.name.starts_with("instructions")) {
-                let values: Vec<f64> =
-                    base.iter().filter_map(|run| run.metric(&metric.name)).map(|m| m.value).collect();
-                if values.is_empty() {
-                    continue;
-                }
-                let median = median(&values);
-                let moved = relative(metric.value - median, median).abs();
-                let largest = noise.entry(metric.name.clone()).or_default();
-                *largest = largest.max(moved);
-            }
-        }
+impl Side<'_> {
+    fn all(&self) -> impl Iterator<Item = &Run> {
+        self.own.iter().chain(self.probes)
     }
-    noise
 }
 
-/// The comparison of one scenario's runs: `base`'s and `candidate_runs`,
-/// this comparison's. With rounds, the tested time gets its p-value
-/// unadjusted, and [`judge_times`] judges it.
+/// A count of `side` as each of its builds gave it: the median of its own
+/// build's runs, then each probe's run. Each build counts once, however
+/// many runs it has.
+fn draws(side: &Side<'_>, name: &str) -> Vec<f64> {
+    let values =
+        |runs: &[Run]| -> Vec<f64> { runs.iter().filter_map(|run| run.metric(name)).map(|m| m.value).collect() };
+    let own = values(side.own);
+    let mut draws = values(side.probes);
+    if !own.is_empty() {
+        draws.insert(0, median(&own));
+    }
+    draws
+}
+
+/// The comparison of one scenario's runs on each side. With rounds, the
+/// tested time gets its p-value unadjusted, and [`judge_times`] judges it.
 fn compare_scenario(
     scenario: &Scenario,
-    base_side: &Base<'_>,
-    candidate_runs: &[Run],
+    base_side: &Side<'_>,
+    candidate_side: &Side<'_>,
     rounds: Option<usize>,
 ) -> ScenarioComparison {
-    let (base_runs, base_counts) = (base_side.runs, base_side.counts);
+    let (base_runs, candidate_runs) = (base_side.runs, candidate_side.runs);
     let environment = candidate_runs[0].environment.clone();
     let mut not_comparable = None;
-    if let Some(run) = base_runs.iter().chain(candidate_runs).find(|run| run.environment != environment) {
+    if let Some(run) = base_side.all().chain(candidate_side.all()).find(|run| run.environment != environment) {
         not_comparable = Some(format!(
             "the sides ran in different environments ({})",
             environment.differences(&run.environment).join("; ")
         ));
-    } else if timed_gpu(base_counts) != timed_gpu(candidate_runs) {
+    } else if timed_gpu(base_side.own) != timed_gpu(candidate_side.own) {
         // A commit from before the libraries timed the GPU, against one
         // that does.
         not_comparable = Some("only one side timed the GPU, whose timestamps cost work of their own".to_owned());
@@ -542,8 +532,11 @@ fn compare_scenario(
     }
     let mut metrics: Vec<MetricComparison> = Vec::new();
     for (name, kind, unit) in names {
-        let base = if kind == MetricKind::Time { values(base_runs, name) } else { values(base_counts, name) };
-        let candidate = values(candidate_runs, name);
+        let (base, candidate) = if kind == MetricKind::Time {
+            (values(base_runs, name), values(candidate_runs, name))
+        } else {
+            (draws(base_side, name), draws(candidate_side, name))
+        };
         let base_median = (!base.is_empty()).then(|| median(&base));
         let candidate_median = (!candidate.is_empty()).then(|| median(&candidate));
         let change = base_median.zip(candidate_median).map(|(b, c)| relative(c - b, b));
@@ -561,10 +554,7 @@ fn compare_scenario(
         if let (Some(b), Some(c)) = (base_median, candidate_median)
             && kind != MetricKind::Time
         {
-            let mut spread = range(&base).max(range(&candidate));
-            if let Some(moved) = base_side.layout.get(name) {
-                spread = spread.max(moved * b.abs());
-            }
+            let spread = interquartile_range(&base).max(interquartile_range(&candidate));
             comparison.noise = Some(relative(spread, b));
             if kind == MetricKind::Count && (c - b).abs() > NOISE_FACTOR * spread {
                 comparison.moved = Some(if c > b { Moved::More } else { Moved::Less });
@@ -584,8 +574,8 @@ fn compare_scenario(
         scenario: scenario.name.to_owned(),
         environment,
         not_comparable,
-        base_runs: base_counts.len(),
-        candidate_runs: candidate_runs.len(),
+        base_runs: base_side.all().count(),
+        candidate_runs: candidate_side.all().count(),
         metrics,
     }
 }
@@ -594,12 +584,6 @@ fn compare_scenario(
 /// and allocations of its own.
 fn timed_gpu(runs: &[Run]) -> bool {
     runs.iter().any(|run| run.metric("gpu").is_some())
-}
-
-impl ScenarioComparison {
-    fn has_count_moved(&self) -> bool {
-        self.metrics.iter().any(|metric| metric.kind == MetricKind::Count && metric.moved.is_some())
-    }
 }
 
 /// `delta` as a fraction of `base`: 0 for no change, infinite for a change
@@ -639,9 +623,9 @@ pub(crate) fn text(comparison: &Comparison) -> String {
     }
     let _ = writeln!(
         out,
-        "noise: a count's larger range over either side's runs, and for instructions the most a build laid out \
-         differently moved them; a change over {NOISE_FACTOR}x its noise is marked more or less, except in \
-         start_heap, which the setup left"
+        "counts: each side's median over its own build and {PROBES} probes whose bytes differ; noise: the larger \
+         interquartile range of either side's builds; a change over {NOISE_FACTOR}x its noise is marked more or \
+         less, except in start_heap, which the setup left"
     );
     match comparison.rounds {
         Some(rounds) => {
@@ -995,39 +979,62 @@ mod tests {
         comparison.metrics.iter().find(|metric| metric.name == name).unwrap().moved
     }
 
-    fn base<'a>(runs: &'a [Run], layout: &'a BTreeMap<String, f64>) -> Base<'a> {
-        Base { runs: &runs[..1], counts: runs, layout }
+    /// A side of one build, its own, with `runs`; the first is this
+    /// comparison's.
+    fn own(runs: &[Run]) -> Side<'_> {
+        Side { runs: &runs[..1], own: runs, probes: &[] }
+    }
+
+    /// A side whose own build ran `runs`, with one run of each probe.
+    fn built<'a>(runs: &'a [Run], probes: &'a [Run]) -> Side<'a> {
+        Side { runs: &runs[..1], own: runs, probes }
     }
 
     #[test]
     fn a_count_moves_beyond_twice_its_noise() {
-        let none = BTreeMap::new();
-        let runs = [run(1000.0, 1.0), run(1001.0, 1.0), run(1002.0, 1.0)];
-        // +0.5% of the median, 1001: over twice the noise of 2.
-        let comparison = compare_scenario(&SCENARIO, &base(&runs, &none), &[run(1006.0, 5.0)], None);
+        // Builds at 998, 1000, 1002, 1004 and 1006: an interquartile range,
+        // the noise, of 4 about a median of 1002.
+        let runs = [run(1002.0, 1.0)];
+        let probes = [998.0, 1000.0, 1004.0, 1006.0].map(|instructions| run(instructions, 1.0));
+        let base = built(&runs, &probes);
+        let comparison = compare_scenario(&SCENARIO, &base, &own(&[run(1011.0, 5.0)]), None);
         assert_eq!(moved(&comparison, "instructions"), Some(Moved::More));
         // Times have no noise to hold against without rounds.
         assert_eq!(moved(&comparison, "wall"), None);
-        // +0.2%: within it.
-        let comparison = compare_scenario(&SCENARIO, &base(&runs, &none), &[run(1003.0, 1.0)], None);
+        let comparison = compare_scenario(&SCENARIO, &base, &own(&[run(1009.0, 1.0)]), None);
         assert_eq!(moved(&comparison, "instructions"), None);
-        // A noise of 30 hides a change of 50.
-        let noisy = [run(1000.0, 1.0), run(1015.0, 1.0), run(1030.0, 1.0)];
-        let comparison = compare_scenario(&SCENARIO, &base(&noisy, &none), &[run(1065.0, 1.0)], None);
-        assert_eq!(moved(&comparison, "instructions"), None);
-        let comparison = compare_scenario(&SCENARIO, &base(&noisy, &none), &[run(900.0, 1.0)], None);
+        let comparison = compare_scenario(&SCENARIO, &base, &own(&[run(993.0, 1.0)]), None);
         assert_eq!(moved(&comparison, "instructions"), Some(Moved::Less));
+        // The noise is the larger of the sides': builds of this checkout at
+        // 1000 to 1040 hide a change of 20.
+        let candidate_probes = [1000.0, 1010.0, 1030.0, 1040.0].map(|instructions| run(instructions, 1.0));
+        let candidate_runs = [run(1020.0, 1.0)];
+        let candidate = built(&candidate_runs, &candidate_probes);
+        let comparison = compare_scenario(&SCENARIO, &base, &candidate, None);
+        assert_eq!(moved(&comparison, "instructions"), None);
     }
 
     #[test]
-    fn instructions_take_the_layout_noise_as_noise() {
-        let runs = [run(1000.0, 1.0), run(1000.0, 1.0), run(1000.0, 1.0)];
-        // +2%, where moving the code has moved the count by 3%.
-        let candidate = [run(1020.0, 1.0)];
-        let layout = BTreeMap::from([("instructions".to_owned(), 0.03)]);
-        let comparison = compare_scenario(&SCENARIO, &base(&runs, &layout), &candidate, None);
-        assert_eq!(moved(&comparison, "instructions"), None);
-        let comparison = compare_scenario(&SCENARIO, &base(&runs, &BTreeMap::new()), &candidate, None);
+    fn a_side_counts_each_build_once_and_takes_their_median() {
+        let probes = [run(1000.0, 1.0), run(1000.0, 1.0), run(1000.0, 1.0), run(1001.0, 1.0)];
+        // The base's own build kept four runs at 1030, which count once.
+        let kept = [run(1030.0, 1.0), run(1030.0, 1.0), run(1030.0, 1.0), run(1030.0, 1.0)];
+        let base = built(&kept, &probes);
+        // This checkout's own build moved its count by 3%, as a build's
+        // bytes can, but its probes didn't.
+        let candidate_runs = [run(1030.0, 1.0)];
+        let candidate = built(&candidate_runs, &probes);
+        let comparison = compare_scenario(&SCENARIO, &base, &candidate, None);
+        let instructions = comparison.metrics.iter().find(|metric| metric.name == "instructions").unwrap();
+        assert_eq!((instructions.base, instructions.candidate), (Some(1000.0), Some(1000.0)));
+        assert_eq!(instructions.moved, None);
+        assert_eq!(comparison.base_runs, 8);
+        // Every build of this checkout moved it.
+        let moved_probes = probes.clone().map(|mut probe| {
+            probe.metrics[0].value += 30.0;
+            probe
+        });
+        let comparison = compare_scenario(&SCENARIO, &base, &built(&candidate_runs, &moved_probes), None);
         assert_eq!(moved(&comparison, "instructions"), Some(Moved::More));
     }
 
@@ -1035,29 +1042,10 @@ mod tests {
     fn a_count_that_repeats_moves_beyond_its_noise_with_any_change() {
         let runs = [run(1000.0, 1.0), run(1000.0, 1.0), run(1000.0, 1.0)];
         // One allocation more, and its mean per tile with it.
-        let comparison =
-            compare_scenario(&SCENARIO, &base(&runs, &BTreeMap::new()), &[run_with(1000.0, 1001.0, 1.0)], None);
+        let comparison = compare_scenario(&SCENARIO, &own(&runs), &own(&[run_with(1000.0, 1001.0, 1.0)]), None);
         assert_eq!(moved(&comparison, "allocations"), Some(Moved::More));
         assert_eq!(moved(&comparison, "instructions"), None);
         assert_eq!(moved(&comparison, "allocations_per_tile"), Some(Moved::More));
-        assert!(comparison.has_count_moved());
-    }
-
-    #[test]
-    fn layout_noise_is_the_most_any_stored_probe_moved_a_count() {
-        let dir = tempfile::tempdir().unwrap();
-        let environment = Environment::machine();
-        // The ref "b" moved most in its last probe.
-        for (commit, probes) in [("a", [1010.0, 995.0, 1000.0]), ("b", [1005.0, 990.0, 1030.0])] {
-            let samples = Samples::from([
-                ("micro/test/case".to_owned(), vec![run(1000.0, 1.0), run(1000.0, 1.0)]),
-                ("micro/test/case (layout probe)".to_owned(), probes.map(|probe| run(probe, 1.0)).to_vec()),
-            ]);
-            write_samples(&dir.path().join(format!("{commit}.json")), &samples).unwrap();
-        }
-        let noise = layout_noise(dir.path(), "micro/test/case", &environment);
-        assert!((noise["instructions"] - 0.03).abs() < 1e-9);
-        assert!(!noise.contains_key("allocations"));
     }
 
     #[test]
@@ -1065,11 +1053,10 @@ mod tests {
         let base: Vec<Run> = (0..6).map(|i| run(1000.0, 10.0 + f64::from(i) * 0.01)).collect();
         let slower: Vec<Run> = (0..6).map(|i| run(1000.0, 11.0 + f64::from(i) * 0.01)).collect();
         let same: Vec<Run> = (0..6).map(|i| run(1000.0, 10.005 + f64::from(i) * 0.01)).collect();
-        let none = BTreeMap::new();
-        let all = |runs| Base { runs, counts: runs, layout: &none };
+        let all = |runs| Side { runs, own: runs, probes: &[] };
         let mut comparisons = vec![
-            compare_scenario(&SCENARIO, &all(&base), &slower, Some(6)),
-            compare_scenario(&SCENARIO, &all(&base), &same, Some(6)),
+            compare_scenario(&SCENARIO, &all(&base), &all(&slower), Some(6)),
+            compare_scenario(&SCENARIO, &all(&base), &all(&same), Some(6)),
         ];
         judge_times(&mut comparisons);
         assert_eq!(moved(&comparisons[0], "wall"), Some(Moved::More));
@@ -1089,9 +1076,8 @@ mod tests {
         let mut slower: Vec<Run> = (0..4).map(|_| run(1000.0, 10.0)).collect();
         with_gpu(&mut base, 1.0);
         with_gpu(&mut slower, 2.0);
-        let none = BTreeMap::new();
-        let mut comparisons =
-            vec![compare_scenario(&SCENARIO, &Base { runs: &base, counts: &base, layout: &none }, &slower, Some(4))];
+        let all = |runs| Side { runs, own: runs, probes: &[] };
+        let mut comparisons = vec![compare_scenario(&SCENARIO, &all(&base), &all(&slower), Some(4))];
         judge_times(&mut comparisons);
         // Four rounds suffice for one scenario: the wall time's test doesn't
         // raise the gpu time's p-value.
@@ -1109,33 +1095,29 @@ mod tests {
 
     #[test]
     fn different_environments_are_not_compared() {
-        let none = BTreeMap::new();
-        let base_of = |runs| base(runs, &none);
         let base = [run(1000.0, 1.0), run(1000.0, 1.0), run(1000.0, 1.0)];
         let mut other = run(2000.0, 1.0);
         other.environment.cpu = "another".to_owned();
-        let comparison = compare_scenario(&SCENARIO, &base_of(&base), &[other], None);
+        let comparison = compare_scenario(&SCENARIO, &own(&base), &own(&[other]), None);
         assert!(comparison.not_comparable.is_some());
         assert_eq!(moved(&comparison, "instructions"), None);
     }
 
     #[test]
     fn a_side_that_didnt_time_the_gpu_is_not_compared() {
-        let none = BTreeMap::new();
         let base_runs = [run(1000.0, 1.0), run(1000.0, 1.0), run(1000.0, 1.0)];
         let mut untimed = run(1050.0, 1.0);
         untimed.metrics.retain(|metric| metric.name != "gpu");
-        let comparison = compare_scenario(&SCENARIO, &base(&base_runs, &none), &[untimed], None);
+        let comparison = compare_scenario(&SCENARIO, &own(&base_runs), &own(&[untimed]), None);
         assert!(comparison.not_comparable.is_some());
         assert_eq!(moved(&comparison, "instructions"), None);
     }
 
     #[test]
     fn the_heap_moves_by_its_absolute_peak_and_its_growth_never_its_start() {
-        let none = BTreeMap::new();
         let runs = [heap_run(100.0, 10.0), heap_run(100.0, 10.0), heap_run(100.0, 10.0)];
         let verdict = |candidate: Run| {
-            let comparison = compare_scenario(&SCENARIO, &base(&runs, &none), &[candidate], None);
+            let comparison = compare_scenario(&SCENARIO, &own(&runs), &own(&[candidate]), None);
             let start = comparison.metrics.iter().find(|metric| metric.name == "start_heap").unwrap();
             assert!(start.noise.is_some() && start.moved.is_none());
             (moved(&comparison, "absolute_peak_heap"), moved(&comparison, "peak_heap"))
