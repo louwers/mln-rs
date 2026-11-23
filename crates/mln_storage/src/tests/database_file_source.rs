@@ -218,8 +218,9 @@ fn failed_accessed_flush_waits_for_next_read() {
     assert_eq!(response.data, cached.data);
 
     wait_until("the failed flush", || failures.load(Ordering::SeqCst) > 0);
-    std::thread::sleep(std::time::Duration::from_millis(800));
-    assert_eq!(1, failures.load(Ordering::SeqCst), "failed flush retried while idle");
+    // Once the flush's task has ended, no retry waits for its time.
+    drop(source.pause());
+    assert!(!source.has_timed_task(), "failed flush retried while idle");
 
     sql.execute_batch("DROP TRIGGER fail_accessed").unwrap();
     let cached = cached_request(&run_loop, &source, &resource);
