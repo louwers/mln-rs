@@ -85,6 +85,8 @@ fn parses_our_manifest() {
     assert!(ignores.iter().any(|(id, _)| id.starts_with("query-tests/") || id.starts_with("render-tests/")));
     // M1 tests are not ignored by the port.
     assert!(!ignores.iter().any(|(id, _)| id == "render-tests/background-color/default"));
+    // platform-all.json ignores it, and the port's unignore file runs it.
+    assert!(!ignores.iter().any(|(id, _)| id == "render-tests/projection/perspective"));
 
     let default = manifest
         .get_test_paths()

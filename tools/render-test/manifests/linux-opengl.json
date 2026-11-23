@@ -13,5 +13,6 @@
     "../testdata/metrics/ignores/platform-linux-opengl.json",
     "../ignores/rust-port.json"
   ],
+  "unignore_paths": ["../ignores/rust-port-unignores.json"],
   "metric_path": "../testdata/metrics/linux-gcc8-release"
 }

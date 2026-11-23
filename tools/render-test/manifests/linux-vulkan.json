@@ -13,5 +13,6 @@
     "../ignores/rust-port.json",
     "../ignores/rust-port-1px-outlines.json"
   ],
+  "unignore_paths": ["../ignores/rust-port-unignores.json"],
   "metric_path": "../testdata/metrics/linux-gcc8-release"
 }

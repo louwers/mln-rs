@@ -1,0 +1,12 @@
+{
+  "render-tests/fill-extrusion-base/property-function": "mln-rs scales heights on GL JS's sphere of the earth's mean radius, which this GL JS fixture's expected image needs (mapbox-gl-js#9202)",
+  "render-tests/fill-extrusion-base/zoom-and-property-function": "mln-rs scales heights on GL JS's sphere of the earth's mean radius, which this GL JS fixture's expected image needs (mapbox-gl-js#9202)",
+  "render-tests/fill-extrusion-color/function": "mln-rs scales heights on GL JS's sphere of the earth's mean radius, which this GL JS fixture's expected image needs (mapbox-gl-js#9202). It passes on Metal, Vulkan and WebGPU too, which C++'s lists ignore it on for a depth fight between the boxes' roofs",
+  "render-tests/fill-extrusion-opacity/default": "mln-rs scales heights on GL JS's sphere of the earth's mean radius, which this GL JS fixture's expected image needs (mapbox-gl-js#9202)",
+  "render-tests/fill-extrusion-opacity/function": "mln-rs scales heights on GL JS's sphere of the earth's mean radius, which this GL JS fixture's expected image needs (mapbox-gl-js#9202)",
+  "render-tests/fill-extrusion-opacity/literal": "mln-rs scales heights on GL JS's sphere of the earth's mean radius, which this GL JS fixture's expected image needs (mapbox-gl-js#9202)",
+  "render-tests/fill-extrusion-translate/default": "mln-rs scales heights on GL JS's sphere of the earth's mean radius, which this GL JS fixture's expected image needs (mapbox-gl-js#9202)",
+  "render-tests/fill-extrusion-vertical-gradient/default": "mln-rs scales heights on GL JS's sphere of the earth's mean radius, which this GL JS fixture's expected image needs (mapbox-gl-js#9202)",
+  "render-tests/fill-extrusion-vertical-gradient/false": "mln-rs scales heights on GL JS's sphere of the earth's mean radius, which this GL JS fixture's expected image needs (mapbox-gl-js#9202)",
+  "render-tests/projection/perspective": "mln-rs scales heights on GL JS's sphere of the earth's mean radius, which this GL JS fixture's expected image needs (mapbox-gl-js#9202)"
+}

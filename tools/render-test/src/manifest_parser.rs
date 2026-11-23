@@ -226,6 +226,28 @@ impl ManifestParser {
             }
             manifest.ignores = parse_ignores(&ignore_paths);
         }
+        // Port-only: files of the same form as ignore files, naming tests that
+        // run although an ignore file names them, such as tests the copied
+        // C++ lists ignore and mln-rs passes.
+        if let Some(unignore_path_value) = document.get("unignore_paths") {
+            let Some(values) = unignore_path_value.as_array() else {
+                invalid("unignore_paths");
+                return None;
+            };
+            let mut unignore_paths = Vec::new();
+            for value in values {
+                let Some(value) = value.as_str() else {
+                    invalid("unignore path item");
+                    return None;
+                };
+                unignore_paths.push(get_valid_path(&manifest.manifest_path, value));
+                if unignore_paths.last().is_some_and(String::is_empty) {
+                    return None;
+                }
+            }
+            let unignores: BTreeSet<String> = parse_ignores(&unignore_paths).into_iter().map(|(id, _)| id).collect();
+            manifest.ignores.retain(|(id, _)| !unignores.contains(id));
+        }
 
         if let Some(probes_value) = document.get("probes") {
             let Some(values) = probes_value.as_array() else {
