@@ -38,9 +38,8 @@ pub struct HillshadeLayer {
     /// The deepest zoom of the source's own tiles, which the slopes scale
     /// to.
     max_zoom: u8,
-    /// The light sources of the evaluation that the tiles last drew with:
-    /// those of a viewport anchor turn with the bearing of the first frame
-    /// that draws with it.
+    /// The light sources of the evaluation that the tiles last drew with,
+    /// before a viewport anchor turns them by the frame's bearing.
     lights: Option<(Arc<EvaluatedLayer<Hillshade>>, Lights)>,
 }
 
@@ -52,11 +51,13 @@ pub struct HillshadeTile {
     shade: Mesh<(HillshadeDrawableUBO, HillshadeTilePropsUBO)>,
 }
 
-/// The light sources, as the shader reads them, and how many it reads.
+/// The light sources, as the shader reads them, and how many it reads, and
+/// whether they turn with the map.
 #[derive(Clone, Copy)]
 struct Lights {
     props: HillshadeEvaluatedPropsUBO,
     count: i32,
+    viewport: bool,
 }
 
 /// How the slopes are prepared from the elevations: texel by texel.
@@ -100,7 +101,7 @@ impl Layer for HillshadeLayer {
         if !self.lights.as_ref().is_some_and(|(of, _)| Arc::ptr_eq(of, evaluated))
             && cx.tiles.iter().any(|(_, dem, _)| dem.is_some())
         {
-            self.lights = Some((Arc::clone(evaluated), Lights::of(&evaluated.paint, cx.frame.camera)));
+            self.lights = Some((Arc::clone(evaluated), Lights::of(&evaluated.paint)));
         }
     }
 
@@ -138,7 +139,7 @@ impl Layer for HillshadeLayer {
         }
         let paint = &cx.layer.evaluated.paint;
         let main = out.main();
-        main.block(&lights.props);
+        main.block(&lights.turned(cx.frame.camera));
         let how = TileTransform { aligned: true, ..TileTransform::default() };
         for (tile, _, value) in cx.tiles() {
             let at = tile.project(cx.frame, &how);
@@ -155,10 +156,10 @@ impl Layer for HillshadeLayer {
 }
 
 impl Lights {
-    /// The light sources of `paint` seen by `camera`, up to the most the
-    /// shader reads: each property's values, its last one repeated for the
-    /// sources that it has no value of.
-    fn of(paint: &HillshadePaintProperties::PossiblyEvaluated, camera: &View) -> Lights {
+    /// The light sources of `paint` on a map turned to the north, up to the
+    /// most the shader reads: each property's values, its last one repeated
+    /// for the sources that it has no value of.
+    fn of(paint: &HillshadePaintProperties::PossiblyEvaluated) -> Lights {
         let directions = paint.hillshade_illumination_direction.uniform();
         let altitudes = paint.hillshade_illumination_altitude.uniform();
         let highlights = paint.hillshade_highlight_color.uniform();
@@ -168,14 +169,12 @@ impl Lights {
             .max()
             .unwrap_or(0)
             .min(MAX_ILLUMINATION_SOURCES);
-        let viewport = *paint.hillshade_illumination_anchor.uniform() == HillshadeIlluminationAnchorType::Viewport;
-        let bearing = if viewport { camera.angle() as f32 } else { 0.0 };
         let mut props = HillshadeEvaluatedPropsUBO {
             accent: paint.hillshade_accent_color.uniform().to_float_array(),
             ..HillshadeEvaluatedPropsUBO::default()
         };
         for (i, direction) in padded(directions, sources).take(4).enumerate() {
-            props.azimuths[i] = deg2radf(direction) - bearing;
+            props.azimuths[i] = deg2radf(direction);
         }
         for (i, altitude) in padded(altitudes, sources).take(4).enumerate() {
             props.altitudes[i] = deg2radf(altitude);
@@ -186,7 +185,22 @@ impl Lights {
         for (i, color) in padded(highlights, sources).take(4).enumerate() {
             props.highlights[i] = color.to_float_array();
         }
-        Lights { props, count: padded(directions, sources).count() as i32 }
+        let viewport = *paint.hillshade_illumination_anchor.uniform() == HillshadeIlluminationAnchorType::Viewport;
+        Lights { props, count: padded(directions, sources).count() as i32, viewport }
+    }
+
+    /// The light sources as `camera` sees them: those anchored to the
+    /// viewport turn with the map, by its bearing.
+    fn turned(&self, camera: &View) -> HillshadeEvaluatedPropsUBO {
+        let mut props = self.props;
+        if self.viewport {
+            let bearing = camera.angle() as f32;
+            let lights = (self.count as usize).min(props.azimuths.len());
+            for azimuth in &mut props.azimuths[..lights] {
+                *azimuth -= bearing;
+            }
+        }
+        props
     }
 }
 
