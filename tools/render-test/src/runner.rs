@@ -926,6 +926,15 @@ impl TestRunner {
         // The per-test time limit, stopped when `run` returns.
         let _watchdog_guard = self.watchdog.as_ref().map(|watchdog| watchdog.arm(&self.queue));
 
+        let operations = match parse_test_operations(ctx.metadata) {
+            Ok(operations) => operations,
+            Err(message) => {
+                ctx.metadata.error_message = message;
+                ctx.metadata.render_errored += 1;
+                return;
+            }
+        };
+
         if !ctx.metadata.ignored_test {
             for operation in get_before_operations(&self.manifest) {
                 if !operation(&mut ctx) {
@@ -948,9 +957,7 @@ impl TestRunner {
         let mut duplications_report = String::new();
 
         let result_image = if self.self_check {
-            // The operations are parsed (with their parse-time effects on
-            // the metadata) but not executed: there is no map.
-            let _ = parse_test_operations(ctx.metadata);
+            // The operations parsed above don't run: there is no map.
             self_check_image(ctx.metadata)
         } else {
             if !self.maps.contains_key(&key) {
@@ -989,7 +996,7 @@ impl TestRunner {
             // panic anywhere in the map code errors this test instead of
             // ending the run, and drops the map, which may be inconsistent.
             let rendered = catch_unwind(AssertUnwindSafe(|| {
-                render_with_map(&mut ctx, &mut cut_off_labels_report, &mut duplications_report)
+                render_with_map(&mut ctx, &operations, &mut cut_off_labels_report, &mut duplications_report)
             }));
             match rendered {
                 Ok(image) => image,
@@ -1067,6 +1074,7 @@ impl TestRunner {
 /// then `runTest` (or, in tile mode, one `runTest` per covering tile).
 fn render_with_map(
     ctx: &mut TestContext<'_>,
+    operations: &[TestOperation],
     cut_off_labels_report: &mut String,
     duplications_report: &mut String,
 ) -> PremultipliedImage {
@@ -1076,13 +1084,13 @@ fn render_with_map(
     }
 
     if ctx.metadata.map_mode == MapMode::Tile {
-        return render_tiles(ctx, cut_off_labels_report, duplications_report);
+        return render_tiles(ctx, operations, cut_off_labels_report, duplications_report);
     }
 
     if let Err(error) = ctx.get_map().jump_to_default_camera() {
         return map_error_image(ctx, error);
     }
-    run_test(ctx)
+    run_test(ctx, operations)
 }
 
 fn get_tile_center_coordinates(tile_id: &TileId) -> LatLng {
@@ -1126,6 +1134,7 @@ struct SymbolLocationAndStatus {
 /// into one image, with the label cut-off and duplication reports.
 fn render_tiles(
     ctx: &mut TestContext<'_>,
+    operations: &[TestOperation],
     cut_off_labels_report: &mut String,
     duplications_report: &mut String,
 ) -> PremultipliedImage {
@@ -1171,7 +1180,7 @@ fn render_tiles(
             return map_error_image(ctx, error);
         }
 
-        let result_for_tile = run_test(ctx);
+        let result_for_tile = run_test(ctx, operations);
         if !result_for_tile.valid() {
             // C++ returns from `run` here without checking the results (the
             // test then counts as passed); the port errors it.
@@ -1280,9 +1289,9 @@ fn map_error_image(ctx: &mut TestContext<'_>, error: MapError) -> PremultipliedI
     PremultipliedImage::default()
 }
 
-fn run_test(ctx: &mut TestContext<'_>) -> PremultipliedImage {
+fn run_test(ctx: &mut TestContext<'_>, operations: &[TestOperation]) -> PremultipliedImage {
     let mut result = PremultipliedImage::default();
-    for operation in parse_test_operations(ctx.get_metadata()) {
+    for operation in operations {
         if !operation(ctx) {
             return result;
         }
@@ -1371,11 +1380,12 @@ fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
-/// An operation that sets an "Unsupported operation" message and stops the
-/// test without marking it errored, so it passes, as in C++.
+/// The operation of a manifest probe the runner doesn't know: it errors the
+/// test, which would otherwise pass without rendering.
 fn unsupported_operation(operation: String) -> TestOperation {
     Box::new(move |ctx: &mut TestContext<'_>| {
         ctx.get_metadata().error_message = format!("Unsupported operation: {operation}");
+        ctx.get_metadata().render_errored += 1;
         false
     })
 }
