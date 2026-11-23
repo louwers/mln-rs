@@ -34,9 +34,6 @@ mod gtest_tile_lod;
 // gtests-data: test/text/local_glyph_rasterizer.test.cpp (renders a map
 // through HeadlessFrontend with a StubFileSource).
 mod local_glyph_rasterizer_test;
-// The M1 background render tests through Map -> HeadlessFrontend, without the
-// render-test runner (see the file comment).
-mod m1_background_render_test;
 mod map_snapshot_test;
 // Symbol placement in a continuous map runs again when, and only when,
 // what it places from changes.
@@ -45,6 +42,8 @@ mod placement_test;
 mod pixel_ratio_test;
 // Map::set_size and HeadlessFrontend::set_size with a heatmap, which draws into a texture of its own.
 mod resize_test;
+// Frontends that share one device draw their own maps.
+mod shared_device_test;
 // A frame whose stencil values overflow, with several world copies in view.
 mod stencil_overflow_test;
 // Text that the device's fonts shape, with a font file standing in for them.
