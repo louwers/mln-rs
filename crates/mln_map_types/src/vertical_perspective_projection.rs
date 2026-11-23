@@ -178,19 +178,28 @@ impl VerticalPerspectiveProjection {
         DVec3::new(spherical_x.sin() * cos_y, sin_y, spherical_x.cos() * cos_y)
     }
 
+    /// The center's distance from the planet's center, in radii: the camera
+    /// looks at the center raised by its altitude along its vertical, as the
+    /// globe raises any height.
+    fn center_radius(view: &View) -> f64 {
+        1.0 + view.center_altitude() / Self::GLOBE_RADIUS_METERS
+    }
+
     /// The view-projection matrix that takes unit-sphere positions to clip
-    /// space.
+    /// space. It draws the center, at its altitude, at the center of the
+    /// padded view.
     #[must_use]
     pub fn globe_view_projection_matrix(view: &View, radius: f64) -> DMat4 {
         let size = view.size();
         let camera_to_center_distance = view.camera_to_center_distance();
         let center = view.center(WrapMode::Unwrapped);
+        let center_radius = Self::center_radius(view);
 
         let mut projection = perspective(
             view.perspective_fov(),
             f64::from(size.width) / f64::from(size.height),
             0.5,
-            camera_to_center_distance + radius * 2.0,
+            camera_to_center_distance + radius * (center_radius + 1.0),
         );
         // Move the vanishing point to the center of the padded view.
         let offset = view.center_offset();
@@ -206,20 +215,20 @@ impl VerticalPerspectiveProjection {
             * DMat4::from_rotation_z(view.roll())
             * DMat4::from_rotation_x(-view.pitch())
             * DMat4::from_rotation_z(-view.angle())
-            * DMat4::from_translation(DVec3::new(0.0, 0.0, -radius))
+            * DMat4::from_translation(DVec3::new(0.0, 0.0, -radius * center_radius))
             * DMat4::from_rotation_x(mln_math::deg2rad(center.latitude()))
             * DMat4::from_rotation_y(-mln_math::deg2rad(center.longitude()))
             * DMat4::from_scale(DVec3::splat(radius))
     }
 
-    /// The plane (as ax + by + cz + d) that separates the visible hemisphere
-    /// from the back of the globe.
+    /// The plane (as ax + by + cz + d) that separates the part of the
+    /// sea-level sphere the camera sees from the back of the globe.
     #[must_use]
     pub fn clipping_plane(view: &View, radius: f64) -> DVec4 {
         let pitch = view.pitch();
         let distance_camera_to_b = view.camera_to_center_distance() / radius;
         let distance_camera_to_a = pitch.sin() * distance_camera_to_b;
-        let distance_a_to_c = pitch.cos() * distance_camera_to_b + 1.0;
+        let distance_a_to_c = pitch.cos() * distance_camera_to_b + Self::center_radius(view);
         let distance_camera_to_c =
             (distance_camera_to_a * distance_camera_to_a + distance_a_to_c * distance_a_to_c).sqrt();
         let tangent_plane_distance_to_c = 1.0 / distance_camera_to_c;
@@ -235,7 +244,8 @@ impl VerticalPerspectiveProjection {
         plane.extend(-tangent_plane_distance_to_c) / plane.length()
     }
 
-    /// Camera position in unit-sphere space.
+    /// Camera position in unit-sphere space, back from the center at its
+    /// altitude.
     #[must_use]
     pub fn camera_position(view: &View, radius: f64) -> DVec3 {
         let center = view.center(WrapMode::Unwrapped);
@@ -243,7 +253,7 @@ impl VerticalPerspectiveProjection {
         position = rotate_z(position, -view.roll());
         position = rotate_x(position, view.pitch());
         position = rotate_z(position, view.angle());
-        position += DVec3::Z;
+        position += DVec3::Z * Self::center_radius(view);
         position = rotate_x(position, -mln_math::deg2rad(center.latitude()));
         rotate_y(position, mln_math::deg2rad(center.longitude()))
     }

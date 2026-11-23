@@ -1,6 +1,7 @@
-> [!NOTE]
-> See the
-> [MapLibre onboarding discussion](https://github.com/maplibre/maplibre/issues/557).
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/7ff2cda8-f564-4e70-a971-d34152f969f0#gh-light-mode-only" alt="MapLibre Logo" width="200">
+  <img src="https://github.com/user-attachments/assets/cee8376b-9812-40ff-91c6-2d53f9581b83#gh-dark-mode-only" alt="MapLibre Logo" width="200">
+</p>
 
 # mln-rs
 
@@ -8,13 +9,12 @@
 [![crates.io](https://img.shields.io/crates/v/mln-rs)](https://crates.io/crates/mln-rs)
 [![docs.rs](https://img.shields.io/docsrs/mln-rs)](https://docs.rs/mln-rs)
 [![Codecov](https://img.shields.io/codecov/c/github/louwers/mln-rs)](https://app.codecov.io/gh/louwers/mln-rs)
+[![](https://img.shields.io/badge/Slack-%23maplibre--native--rust--port-2EB67D?logo=slack)](https://slack.openstreetmap.us/)
 
-A Rust port of the
-[MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
-core.
-
-**[Browser demo](https://louwers.github.io/mln-rs/)** (uses WebGPU on supported
-browsers, otherwise WebGL2).
+An experimental Rust port of
+[MapLibre Native](https://github.com/maplibre/maplibre-native). See the
+[onboarding discussion](https://github.com/maplibre/maplibre/issues/557) for the
+motivation behind this project.
 
 ## Getting Started
 

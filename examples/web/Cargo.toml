@@ -50,6 +50,9 @@ mln_util.workspace = true
 mln_web_host.workspace = true
 mln_webgpu = { workspace = true, optional = true }
 parking_lot.workspace = true
+# The style document's own projection (WebMap::set_projection).
+serde_json.workspace = true
+serde_json_borrow.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 web-sys = { workspace = true, features = ["MessagePort"] }

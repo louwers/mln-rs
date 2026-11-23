@@ -475,6 +475,7 @@ impl FromStr for TileLodMode {
 
 pub(crate) mod test_operation_names {
     pub(crate) const WAIT_OP: &str = "wait";
+    pub(crate) const IDLE_OP: &str = "idle";
     pub(crate) const SLEEP_OP: &str = "sleep";
     pub(crate) const ADD_IMAGE_OP: &str = "addImage";
     pub(crate) const UPDATE_IMAGE_OP: &str = "updateImage";
@@ -519,7 +520,7 @@ pub(crate) mod test_operation_names {
 
 use test_operation_names::{
     ADD_IMAGE_OP, ADD_LAYER_OP, ADD_SOURCE_OP, FILE_SIZE_PROBE_OP, GET_FEATURE_STATE_OP, GFX_PROBE_END_OP,
-    GFX_PROBE_OP, GFX_PROBE_START_OP, MEMORY_PROBE_END_OP, MEMORY_PROBE_OP, MEMORY_PROBE_START_OP,
+    GFX_PROBE_OP, GFX_PROBE_START_OP, IDLE_OP, MEMORY_PROBE_END_OP, MEMORY_PROBE_OP, MEMORY_PROBE_START_OP,
     NETWORK_PROBE_END_OP, NETWORK_PROBE_OP, NETWORK_PROBE_START_OP, PAN_GESTURE_OP, REMOVE_FEATURE_STATE_OP,
     REMOVE_IMAGE_OP, REMOVE_LAYER_OP, REMOVE_SOURCE_OP, SET_BEARING_OP, SET_CENTER_ALTITUDE_OP, SET_CENTER_OP,
     SET_FEATURE_STATE_OP, SET_FILTER_OP, SET_GLOBAL_STATE_PROPERTY_OP, SET_LAYER_ZOOM_RANGE_OP, SET_LAYOUT_PROPERTY_OP,
@@ -570,14 +571,15 @@ fn json_to_value(value: &serde_json::Value) -> Option<Value> {
 /// The state conversion of the setFeatureState operation (parser.cpp
 /// `convertFn` over `eachMember(state, ...)`), with its quirks: an array
 /// value becomes `{key: [...]}` but is not stored, an object recurses and
-/// stores the last nested value under the outer key too.
-fn parse_feature_state(state: &serde_json::Value, metadata: &mut TestMetadata) -> feature::PropertyMap {
+/// stores the last nested value under the outer key too. Fails on a key
+/// that no value has been read for yet, such as one whose value is `{}`.
+fn parse_feature_state(state: &serde_json::Value) -> Result<feature::PropertyMap, String> {
     struct Parse {
         state_value: Value,
         value_parsed: bool,
         parsed_state: feature::PropertyMap,
     }
-    fn convert(p: &mut Parse, k: &str, v: &serde_json::Value, metadata: &mut TestMetadata) {
+    fn convert(p: &mut Parse, k: &str, v: &serde_json::Value) -> Result<(), String> {
         if let Some(value) = json_to_value(v) {
             p.state_value = value;
             p.value_parsed = true;
@@ -587,26 +589,26 @@ fn parse_feature_state(state: &serde_json::Value, metadata: &mut TestMetadata) -
             values.insert(k.to_string(), Value::Array(array));
             p.state_value = Value::Object(values);
             p.value_parsed = true;
-            return;
+            return Ok(());
         } else if let serde_json::Value::Object(members) = v {
             for (mk, mv) in members {
-                convert(p, mk, mv, metadata);
+                convert(p, mk, mv)?;
             }
         }
 
         if !p.value_parsed {
-            metadata.error_message = format!("Could not get feature state value, state key: {k}");
-            return;
+            return Err(format!("Could not get feature state value, state key: {k}"));
         }
         p.parsed_state.insert(k.to_string(), p.state_value.clone());
+        Ok(())
     }
     let mut p = Parse { state_value: Value::Null, value_parsed: false, parsed_state: feature::PropertyMap::new() };
     if let serde_json::Value::Object(members) = state {
         for (k, v) in members {
-            convert(&mut p, k, v, metadata);
+            convert(&mut p, k, v)?;
         }
     }
-    p.parsed_state
+    Ok(p.parsed_state)
 }
 
 /// Operations the runner recognises but cannot run, each with what it
@@ -639,23 +641,27 @@ fn infallible(ctx: &mut TestContext<'_>, result: Result<(), MapError>) -> bool {
     }
 }
 
-pub(crate) fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
+/// The operations of the test's `metadata.test.operations`, in order, or
+/// why one of them can't run: its name is unknown or its arguments are
+/// invalid. A test whose operations fail to parse must error, as rendering
+/// its starting state would test none of them.
+pub(crate) fn parse_test_operations(metadata: &TestMetadata) -> Result<TestOperations, String> {
     let mut result: TestOperations = Vec::new();
-    let Some(operations) = metadata.test_value().and_then(|t| t.get("operations")).cloned() else {
-        return result;
+    let Some(operations) = metadata.test_value().and_then(|t| t.get("operations")) else {
+        return Ok(result);
     };
-
-    let operations_array = operations.as_array().cloned().unwrap_or_default();
-    if operations_array.is_empty() {
-        return result;
-    }
-    for operation_array in &operations_array {
+    let Some(operations_array) = operations.as_array() else {
+        return Err(format!("Operations must be an array, not {operations}"));
+    };
+    for operation_array in operations_array {
         let arg = |i: usize| index(operation_array, i);
         let size = array_size(operation_array);
         let name = get_str(arg(0));
 
-        if name == WAIT_OP {
-            // wait
+        if name == WAIT_OP || name == IDLE_OP {
+            // wait; idle, GL JS's wait until the map is idle. A still image
+            // renders once everything is loaded and placed, with no
+            // transitions, so it is idle too.
             result.push(Box::new(|ctx: &mut TestContext<'_>| ctx.get_map().render().is_ok()));
         } else if name == SLEEP_OP {
             // sleep
@@ -731,10 +737,7 @@ pub(crate) fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperatio
                 Ok(center) => {
                     result.push(camera_operation(CameraOptions { center: Some(center), ..CameraOptions::default() }));
                 }
-                Err(e) => {
-                    metadata.error_message = format!("Invalid setCenter operation: {e}");
-                    return Vec::new();
-                }
+                Err(e) => return Err(format!("Invalid setCenter operation: {e}")),
             }
         } else if name == SET_ZOOM_OP {
             // setZoom
@@ -958,7 +961,7 @@ pub(crate) fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperatio
             };
             if name == SET_FEATURE_STATE_OP {
                 // setFeatureState
-                let parsed_state = parse_feature_state(arg(2), metadata);
+                let parsed_state = parse_feature_state(arg(2))?;
                 result.push(Box::new(move |ctx: &mut TestContext<'_>| {
                     let result = ctx.get_map().set_feature_state(
                         &source_id,
@@ -991,8 +994,7 @@ pub(crate) fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperatio
         } else if name == PAN_GESTURE_OP {
             // benchmarkPanGesture
             if metadata.map_mode != MapMode::Continuous {
-                metadata.error_message = format!("Map mode must be Continuous for {PAN_GESTURE_OP} operation");
-                return Vec::new();
+                return Err(format!("Map mode must be Continuous for {PAN_GESTURE_OP} operation"));
             }
             result.push(unsupported_operation_entry(name));
         } else if name == GFX_PROBE_START_OP {
@@ -1044,20 +1046,18 @@ pub(crate) fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperatio
             // C++ calls `.value()` on the optional: an unknown name throws
             // std::bad_optional_access, which the runner does not catch.
             let Ok(mode) = get_str(arg(1)).parse::<TileLodMode>() else {
-                metadata.error_message = format!("Unknown tile LOD mode: {}", get_str(arg(1)));
-                return Vec::new();
+                return Err(format!("Unknown tile LOD mode: {}", get_str(arg(1))));
             };
             result.push(Box::new(move |ctx: &mut TestContext<'_>| {
                 let result = ctx.get_map().set_tile_lod_mode(mode);
                 infallible(ctx, result)
             }));
         } else {
-            metadata.error_message = format!("Unsupported operation: {name}");
-            return Vec::new();
+            return Err(format!("Unsupported operation: {name}"));
         }
     }
 
-    result
+    Ok(result)
 }
 
 fn camera_operation(camera: CameraOptions) -> TestOperation {

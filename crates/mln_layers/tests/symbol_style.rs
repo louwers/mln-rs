@@ -4,10 +4,13 @@
 use std::path::PathBuf;
 
 use feature::Value;
-use mln_style::Style;
+use mln_layers::Symbol;
 use mln_style::conversion::{Convertible, Error, convert_layer, value_to_json};
 use mln_style::layer::{FontStack, Layer};
+use mln_style::layer_type::LayerStyle;
 use mln_style::parser::Parser;
+use mln_style::{PropertyEvaluationParameters, Style};
+use mln_style_types::SymbolHeightAnchorType;
 use mln_vec_map::VecSet;
 
 mod support;
@@ -121,6 +124,27 @@ fn viewport_glyph_only_for_text_rotation_alignment() {
         );
         assert_eq!(parse_layer(&src).is_some(), parses, "{property}");
     }
+}
+
+/// `symbol-height-anchor` parses as a constant or a zoom expression, and
+/// evaluates to `ground` where a layer leaves it out.
+#[test]
+fn symbol_height_anchor_parses_and_evaluates() {
+    let evaluate = |layout: &str, zoom: f32| {
+        let src = format!(r#"{{"id": "symbol", "type": "symbol", "source": "s", "layout": {{{layout}}}}}"#);
+        let layer = parse_layer(&src).expect("layer");
+        let style: &LayerStyle<Symbol> = LayerStyle::recover_ref(&**layer.style()).unwrap();
+        *style.layout.evaluate(&PropertyEvaluationParameters::new(zoom)).symbol_height_anchor.uniform()
+    };
+    assert_eq!(SymbolHeightAnchorType::Ground, evaluate("", 10.0));
+    assert_eq!(SymbolHeightAnchorType::Absolute, evaluate(r#""symbol-height-anchor": "absolute""#, 10.0));
+    let step = r#""symbol-height-anchor": ["step", ["zoom"], "ground", 12, "absolute"]"#;
+    assert_eq!(SymbolHeightAnchorType::Ground, evaluate(step, 10.0));
+    assert_eq!(SymbolHeightAnchorType::Absolute, evaluate(step, 13.0));
+    assert!(
+        parse_layer(r#"{"id": "s", "type": "symbol", "source": "s", "layout": {"symbol-height-anchor": "sky"}}"#)
+            .is_none()
+    );
 }
 
 // gtest: VariableAnchorOffsetCollection.Calculations (its layer)

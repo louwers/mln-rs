@@ -3,9 +3,9 @@ use std::str::FromStr;
 use mln_style_types::{
     AlignmentType, AnchorOffsetPair, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType,
     IconOverlapType, IconTextFitType, LayerBlendType, LightAnchorType, LineCapType, LineJoinType, ProjectionDefinition,
-    RasterResamplingType, ResamplingType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType, TextJustifyType,
-    TextRotationAlignmentType, TextTransformType, TextWritingModeType, TranslateAnchorType,
-    VariableAnchorOffsetCollection, VisibilityType, projection_type_from_name,
+    RasterResamplingType, ResamplingType, SymbolAnchorType, SymbolHeightAnchorType, SymbolPlacementType,
+    SymbolZOrderType, TextJustifyType, TextRotationAlignmentType, TextTransformType, TextWritingModeType,
+    TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType, projection_type_from_name,
 };
 use mln_util::{Color, Padding};
 
@@ -99,6 +99,7 @@ enum_converters!(
     RasterResamplingType,
     ResamplingType,
     SymbolAnchorType,
+    SymbolHeightAnchorType,
     SymbolPlacementType,
     SymbolZOrderType,
     TextJustifyType,

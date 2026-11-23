@@ -31,6 +31,8 @@ mod gtest_query;
 // gtests-core: test/renderer/symbol_rendering.test.cpp (maplibre-native #4628).
 mod gtest_symbol_rendering;
 mod gtest_tile_lod;
+// A hillshade's shading of a plane slope.
+mod hillshade_test;
 // gtests-data: test/text/local_glyph_rasterizer.test.cpp (renders a map
 // through HeadlessFrontend with a StubFileSource).
 mod local_glyph_rasterizer_test;
@@ -52,3 +54,5 @@ mod sync_file_source_test;
 mod system_fonts_test;
 // Tiles showing each answer to their open requests, as their data expires.
 mod tile_expiry_test;
+// Features of two tiles that overlap stack in the frame's order of its tiles.
+mod tile_order_test;

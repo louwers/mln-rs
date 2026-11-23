@@ -322,7 +322,7 @@ impl TestRunnerImpl for MockMap {
 
 fn run_operations(id: &str, map: &mut MockMap) -> (TestMetadata, bool) {
     let mut metadata = parse_test_metadata(&style_paths(id));
-    let operations = parse_test_operations(&mut metadata);
+    let operations = parse_test_operations(&metadata).unwrap();
     let mut ok = true;
     {
         let mut ctx = TestContext::with_impl(&mut metadata, map);
@@ -365,7 +365,7 @@ fn known_unsupported_operations_error_the_test() {
             document: serde_json::json!({"metadata": {"test": {"operations": [[name]]}}}),
             ..TestMetadata::default()
         };
-        let operations = parse_test_operations(&mut metadata);
+        let operations = parse_test_operations(&metadata).unwrap();
         assert_eq!(operations.len(), 1, "{name}");
         let calls = Rc::new(RefCell::new(Vec::new()));
         let mut map = MockMap::new(calls, [0, 0, 0, 255]);
@@ -381,20 +381,40 @@ fn known_unsupported_operations_error_the_test() {
 }
 
 #[test]
-fn unsupported_operation_drops_all_operations() {
-    let mut metadata = TestMetadata {
-        document: serde_json::json!({"metadata": {"test": {"operations": [["wait"], ["frobnicate"]]}}}),
-        ..TestMetadata::default()
+fn operations_that_fail_to_parse_are_an_error() {
+    let error = |operations: serde_json::Value| {
+        let metadata = TestMetadata {
+            document: serde_json::json!({"metadata": {"test": {"operations": operations}}}),
+            ..TestMetadata::default()
+        };
+        parse_test_operations(&metadata).err().unwrap_or_else(|| panic!("{operations} parsed"))
     };
-    assert!(parse_test_operations(&mut metadata).is_empty());
-    assert_eq!(metadata.error_message, "Unsupported operation: frobnicate");
+    assert_eq!(error(serde_json::json!([["wait"], ["frobnicate"]])), "Unsupported operation: frobnicate");
+    assert_eq!(
+        error(serde_json::json!([["panGesture", "x", 1, [0, 0, 1], [1, 1, 2]]])),
+        "Map mode must be Continuous for panGesture operation"
+    );
+    assert!(error(serde_json::json!([["setCenter", [0, 91]]])).starts_with("Invalid setCenter operation: "));
+    assert_eq!(error(serde_json::json!([["setTileLodMode", "nearest"]])), "Unknown tile LOD mode: nearest");
+    assert_eq!(
+        error(serde_json::json!([["setFeatureState", {"source": "s", "id": 1}, {"hover": {}}]])),
+        "Could not get feature state value, state key: hover"
+    );
+    assert_eq!(error(serde_json::json!({"wait": true})), r#"Operations must be an array, not {"wait":true}"#);
+}
 
-    let mut pan = TestMetadata {
-        document: serde_json::json!({"metadata": {"test": {"operations": [["panGesture", "x", 1, [0, 0, 1], [1, 1, 2]]]}}}),
+#[test]
+fn idle_renders_like_wait() {
+    let mut metadata = TestMetadata {
+        document: serde_json::json!({"metadata": {"test": {"operations": [["idle"]]}}}),
         ..TestMetadata::default()
     };
-    assert!(parse_test_operations(&mut pan).is_empty());
-    assert_eq!(pan.error_message, "Map mode must be Continuous for panGesture operation");
+    let operations = parse_test_operations(&metadata).unwrap();
+    let calls = Rc::new(RefCell::new(Vec::new()));
+    let mut map = MockMap::new(Rc::clone(&calls), [0, 0, 0, 255]);
+    let mut ctx = TestContext::with_impl(&mut metadata, &mut map);
+    assert!(operations[0](&mut ctx));
+    assert_eq!(*calls.borrow(), vec!["render"]);
 }
 
 // --- runner: checkRenderTestResults ---
@@ -562,6 +582,20 @@ fn status<'a>(result: &'a RunResult, id: &str) -> &'a str {
 
 const RED: [u8; 4] = [255, 0, 0, 255];
 const BLUE: [u8; 4] = [0, 0, 255, 255];
+
+#[test]
+fn a_test_whose_operations_fail_to_parse_errors() {
+    let suite = Suite::new("unparsable");
+    // Without its operations, the test would draw its expected red.
+    suite.test("unparsable", RED, r#", "operations": [["frobnicate"]]"#, &[("expected.png", RED)]);
+    suite.test("idle", RED, r#", "operations": [["idle"]]"#, &[("expected.png", RED)]);
+    let result = suite.run("{}", "");
+
+    assert_eq!(status(&result, "unparsable"), "errored");
+    let unparsable = result.metadatas.iter().find(|m| m.id == "unparsable").unwrap();
+    assert_eq!(unparsable.error_message, "Unsupported operation: frobnicate");
+    assert_eq!(status(&result, "idle"), "passed");
+}
 
 #[test]
 fn statuses_and_summary() {
@@ -785,10 +819,11 @@ fn gljs_fixtures_parse_and_no_ignore_is_stale() {
     let ignored: Vec<&str> =
         manifest.get_ignores().iter().map(|(id, _)| id.as_str()).filter(|id| id.starts_with("gljs/")).collect();
     for id in &ids {
-        let mut metadata = parse_test_metadata(&style_paths(id));
+        let metadata = parse_test_metadata(&style_paths(id));
         assert_eq!(metadata.error_message, "", "{id}");
-        parse_test_operations(&mut metadata);
-        assert_eq!(metadata.error_message, "", "{id}");
+        if let Err(error) = parse_test_operations(&metadata) {
+            panic!("{id}: {error}");
+        }
     }
     for id in ignored {
         assert!(ids.iter().any(|fixture| fixture == id), "{id} isn't a fixture");

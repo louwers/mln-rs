@@ -522,6 +522,12 @@ a {
   accent-color: var(--focus);
 }
 
+.toggle select {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+}
+
 /* Why the map can't start, or why it stopped. */
 
 .notice {

@@ -66,7 +66,7 @@ use crate::network::Network;
 use crate::overlay::Paint;
 use crate::pacing::{Pacing, Ready, Refreshes};
 use crate::settings::Settings;
-use crate::styles::{self, Style};
+use crate::styles::{self, Projection, Style};
 use crate::ui::{Action, Controls, Shown};
 
 /// What the render thread starts with.
@@ -106,8 +106,6 @@ pub(crate) struct StyleInfo {
     name: String,
     /// The sources' attributions, as HTML.
     attributions: Vec<String>,
-    /// Whether the style's projection is the globe.
-    globe: bool,
     /// How many layers the style has.
     layers: usize,
     /// How many sources the style has.
@@ -123,14 +121,9 @@ impl StyleInfo {
             .iter()
             .filter_map(|source| source.data().attribution().filter(|attribution| !attribution.is_empty()))
             .collect();
-        let projection = style.root_property_json("projection").ok().flatten();
-        let globe = projection
-            .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
-            .is_some_and(|projection| projection["type"] == "globe");
         StyleInfo {
             name: style.get_name().to_owned(),
             attributions,
-            globe,
             layers: style.get_layers().len(),
             sources: style.get_sources().len(),
         }
@@ -263,6 +256,7 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
         style_info: StyleInfo::default(),
         styles: styles::styles(),
         style: styles::style_for(&style_url),
+        projection: Projection::default(),
         next_backend: None,
         frame_report: String::new(),
         benchmark,
@@ -334,6 +328,18 @@ fn log_failure<T: Send + 'static>(sent: Result<Completion<T>, Error>) {
     match sent {
         Ok(completion) => completion.on_complete(|result| {
             if let Err(e) = result {
+                Log::warning(Event::General, e.message);
+            }
+        }),
+        Err(e) => Log::warning(Event::General, e.message),
+    }
+}
+
+/// Logs the failure of an edit of the map's style that `with_core` ran.
+fn log_edit_failure(sent: Result<Completion<Result<(), Error>>, Error>) {
+    match sent {
+        Ok(completion) => completion.on_complete(|result| {
+            if let Err(e) = result.and_then(|edited| edited) {
                 Log::warning(Event::General, e.message);
             }
         }),
@@ -416,6 +422,9 @@ struct View {
     style_info: StyleInfo,
     styles: Vec<Style>,
     style: Style,
+    /// The projection the controls picked, which each style that loads
+    /// takes.
+    projection: Projection,
     /// The backend the controls asked for, which the next frame switches to.
     next_backend: Option<Kind>,
     frame_report: String,
@@ -654,6 +663,10 @@ impl View {
             Message::Close => self.quit = true,
             Message::Map(MapEvent::StyleLoaded) => {
                 self.style_loaded = true;
+                if self.projection != Projection::Style {
+                    let projection = self.projection;
+                    log_edit_failure(self.map.with_core(move |map| projection.apply(map)));
+                }
                 self.read_style(true);
             }
             Message::Map(MapEvent::SourceChanged { .. }) => self.read_style(false),
@@ -792,7 +805,7 @@ impl View {
             pitch: camera.map_or(0.0, |camera| camera.pitch),
             attributions: &self.style_info.attributions,
             debug: snapshot.as_ref().map_or_else(MapDebugOptions::default, |snapshot| snapshot.debug),
-            globe: self.style_info.globe,
+            projection: self.projection,
             free_bearing: snapshot.as_ref().is_some_and(|snapshot| snapshot.globe_free_bearing),
             network: self.network,
             cache_disabled: self.cache_disabled,
@@ -845,10 +858,9 @@ impl View {
                 }
             }
             Action::SetDebug(debug) => log_failure(self.map.set_debug_flags(debug)),
-            Action::SetGlobe(globe) => {
-                let projection = if globe { r#"{"type":"globe"}"# } else { r#"{"type":"mercator"}"# };
-                log_failure(self.map.set_style_root_property("projection", projection));
-                self.read_style(false);
+            Action::SetProjection(projection) => {
+                self.projection = projection;
+                log_edit_failure(self.map.with_core(move |map| projection.apply(map)));
             }
             Action::SetFreeBearing(free_bearing) => log_failure(self.map.set_globe_free_bearing_enabled(free_bearing)),
             Action::SetNetwork(network) => {

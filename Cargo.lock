@@ -3377,6 +3377,8 @@ dependencies = [
  "mln-rs-web-host",
  "mln-rs-webgpu",
  "parking_lot",
+ "serde_json",
+ "serde_json_borrow",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
