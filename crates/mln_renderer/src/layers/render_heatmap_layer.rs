@@ -73,7 +73,7 @@ struct HeatmapUniforms {
 /// layer's draw of the frame, which colors the render target's heat onto it.
 #[derive(Default)]
 pub(crate) struct HeatmapDrawing {
-    tiles: TileMap<KeptDraw>,
+    tiles: TileMap<DrawObjects>,
     /// The tiles' draws into the render target.
     target: Option<LayerDraws>,
     /// The layer's draw, built on its first frame.
@@ -104,9 +104,9 @@ impl HeatmapDrawing {
 }
 
 impl LayerDrawing for HeatmapDrawing {
-    type Tile = KeptDraw;
+    type Tile = DrawObjects;
 
-    fn tiles(&mut self) -> Option<&mut TileMap<KeptDraw>> {
+    fn tiles(&mut self) -> Option<&mut TileMap<DrawObjects>> {
         Some(&mut self.tiles)
     }
 
@@ -325,6 +325,8 @@ impl RenderHeatmapLayer {
         let RenderHeatmapLayer { base, values, drawing, tile_draws, .. } = self;
 
         let evaluated = &values.evaluated.paint;
+        // The draws keep the order they're pushed in, the tiles'.
+        let order = drawing.target.get_or_insert_default().id();
         for tile in render_tiles {
             let tile_id = tile.id();
 
@@ -357,7 +359,7 @@ impl RenderHeatmapLayer {
             let changes = entry.take_changes();
             let context = &mut *paint_parameters.context;
             if let Some(cached) = entry.value.as_mut() {
-                refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
+                refresh_paint_attributes(cached, changes, |attrs| {
                     binders.bind(evaluated, paint(context).as_ref(), attrs, &mut Uniforms::default());
                 });
             } else if !bucket.vertices.is_empty()
@@ -392,13 +394,13 @@ impl RenderHeatmapLayer {
                     geometry,
                     Textures::default(),
                 );
-                *entry.value = Some(KeptDraw::new(objects));
+                *entry.value = Some(objects);
             }
 
-            let Some(cached) = entry.value.as_ref() else {
+            if entry.value.is_none() {
                 continue;
-            };
-            let draw = FrameDraw { depth: DrawDepth::Off, ..cached.frame_draw(Some(tile_id)) };
+            }
+            let draw = FrameDraw { depth: DrawDepth::Off, ..FrameDraw::new(Some(tile_id), order) };
             tile_draws.push(draw, Self::tile_uniforms(&tile_id, binders, paint_parameters));
         }
 

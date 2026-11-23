@@ -26,7 +26,7 @@ use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
-use crate::layer_drawing::{DrawList, KeptDraw, TileDraws, UniformWriter};
+use crate::layer_drawing::{DrawList, FrameDraw, TileDraws, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::circle_layout::CircleLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
@@ -88,7 +88,7 @@ impl LayerType for Circle {
 pub(crate) struct RenderCircleLayer {
     base: RenderLayerBase,
     values: LayerValues<Circle>,
-    drawing: TileDraws<KeptDraw>,
+    drawing: TileDraws<DrawObjects>,
     /// The frame's draws as the update makes them.
     draw_list: DrawList<CircleUniforms>,
 }
@@ -180,7 +180,7 @@ struct CircleUniforms {
 
 impl TypedLayer for RenderCircleLayer {
     type Type = Circle;
-    type Drawing = TileDraws<KeptDraw>;
+    type Drawing = TileDraws<DrawObjects>;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -217,6 +217,8 @@ impl TypedLayer for RenderCircleLayer {
         let layer_id = self.base.style.base().id.as_str();
         let layer = &*self.values.evaluated;
         let evaluated = &layer.paint;
+        // The draws keep the order they're pushed in, the tiles'.
+        let order = self.drawing.frame_mut().id();
         for tile in render_tiles {
             let tile_id = tile.id();
             let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
@@ -250,7 +252,7 @@ impl TypedLayer for RenderCircleLayer {
             let changes = entry.take_changes();
             let context = &mut *paint_parameters.context;
             if let Some(cached) = entry.value.as_mut() {
-                refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
+                refresh_paint_attributes(cached, changes, |attrs| {
                     binders.bind(evaluated, paint(context).as_ref(), attrs, &mut Uniforms::default());
                 });
             } else if !bucket.vertices.is_empty()
@@ -284,12 +286,13 @@ impl TypedLayer for RenderCircleLayer {
                     },
                     Textures::default(),
                 );
-                *entry.value = Some(KeptDraw::new(objects));
+                *entry.value = Some(objects);
             }
 
-            let Some(draw) = entry.value.as_ref().map(|cached| cached.frame_draw(Some(tile_id))) else {
+            if entry.value.is_none() {
                 continue;
-            };
+            }
+            let draw = FrameDraw::new(Some(tile_id), order);
             self.draw_list.push(draw, Self::uniforms(layer, &tile_id, binders, paint_parameters));
         }
 
