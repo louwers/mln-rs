@@ -572,7 +572,7 @@ fn evicted_data_needs_sending_again() {
         TileData::Mvt(tile) => tile.bytes().len(),
         _ => unreachable!(),
     };
-    codec.cache.set_budget(size * 3 / 2);
+    codec.cache = DataCache::new(size * 3 / 2);
     let style = style(&layers(&[DOTS]));
     let full_load = |load| DataInput::Full { key: key(load), data: Some(data.clone()) };
     assert!(matches!(codec.run(&job(&style, full_load(1), Resolved::default())), JobResult::Laid(_)));

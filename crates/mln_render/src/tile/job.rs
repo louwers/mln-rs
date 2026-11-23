@@ -409,13 +409,9 @@ impl DataCache {
     }
 
     /// The bytes the cache keeps, by its estimate.
+    #[cfg(test)]
     pub(crate) fn retained_bytes(&self) -> usize {
         self.retained
-    }
-
-    pub(crate) fn set_budget(&mut self, budget: usize) {
-        self.budget = budget;
-        self.evict(None);
     }
 
     fn get(&mut self, key: &DataKey) -> Option<TileData> {
@@ -435,15 +431,15 @@ impl DataCache {
             self.retained -= previous.bytes;
         }
         self.retained += bytes;
-        self.evict(Some(key));
+        self.evict(key);
     }
 
-    fn evict(&mut self, keep: Option<DataKey>) {
+    fn evict(&mut self, keep: DataKey) {
         while self.retained > self.budget {
             let oldest = self
                 .entries
                 .iter()
-                .filter(|(key, _)| Some(**key) != keep)
+                .filter(|(key, _)| **key != keep)
                 .min_by_key(|(_, entry)| entry.used)
                 .map(|(key, _)| *key);
             let Some(entry) = oldest.and_then(|key| self.entries.remove(&key)) else {
