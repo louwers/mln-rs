@@ -12,8 +12,9 @@
 //! layer types ([`mln_render::layer`], drawing with [`mln_render::draw`]
 //! and, on the globe, [`mln_render::globe`], and placing where they collide
 //! with labels with [`mln_render::placement`], whose author's names
-//! [`layer`] gathers), source types and their tiles'
-//! data origins ([`mln_render::source`]), expression functions
+//! [`layer`] gathers), source types and their tiles' data origins
+//! ([`mln_render::source`], whose author's names [`source`] gathers),
+//! expression functions
 //! ([`mln_style::expression::functions`]), the programs a layer type draws
 //! with, which carry their shader sources ([`mln_gfx::shaders::program`]),
 //! and GPU backends ([`mln_gfx::gpu`]). The built-in layer and source types, in
@@ -42,6 +43,7 @@
 
 mod builtins;
 pub mod layer;
+pub mod source;
 
 #[cfg(feature = "runtime")]
 pub use builtins::start_runtime;
