@@ -280,9 +280,10 @@ fn a_failed_load_is_requested_again_on_retry() {
 }
 
 /// A tile required again keeps network data without an expiry, as a local
-/// file's: it doesn't request it again. Data that expires is requested
-/// again, with its validators and its expiry, which the online file source
-/// holds the request until, and a "not modified" answer keeps the data.
+/// file's: it neither requests nor lays it out again. Data that expires is
+/// requested again, with its validators and its expiry, which the online
+/// file source holds the request until; a "not modified" answer keeps the
+/// data, and new data lays out once.
 #[test]
 fn a_tile_required_again_asks_again_for_data_that_expires() {
     let test = TileTest::new();
@@ -292,25 +293,51 @@ fn a_tile_required_again_asks_again_for_data_that_expires() {
     for (response, expires) in
         [(water(), None), (until_later, Some(later)), (expired(water()), Some(Timestamp::from_secs(0)))]
     {
+        let case = format!("data that expires at {expires:?}");
         let (mut tiles, file_source) = held_tile::<VectorKind>(&test, tiles_tileset());
         tiles.set_necessity(&tile(), TileNecessity::Required);
         answer(&mut tiles, &file_source, response);
         assert!(tiles.is_complete(&tile()));
+        assert_eq!(layouts(&mut tiles), 1, "{case}: one layout per response");
 
         tiles.set_necessity(&tile(), TileNecessity::Optional);
         tiles.set_necessity(&tile(), TileNecessity::Required);
-        assert_eq!(file_source.pending(), usize::from(expires.is_some()), "a request only for data that expires");
+        assert_eq!(layouts(&mut tiles), 0, "{case}: nothing to lay out again");
+        assert_eq!(
+            file_source.pending(),
+            usize::from(expires.is_some()),
+            "{case}: a request only for data that expires"
+        );
         if expires.is_some() {
             let resource = file_source.resource();
-            assert_eq!(resource.prior_caching.expires, expires, "held until the data expires");
+            assert_eq!(resource.prior_caching.expires, expires, "{case}: held until the data expires");
             assert_eq!(resource.prior_etag.as_deref(), Some("a"));
+            let responder = file_source.take();
             let mut not_modified = Response::new();
             not_modified.not_modified = true;
-            answer(&mut tiles, &file_source, not_modified);
+            responder.send(not_modified);
+            tiles.update();
+            tiles.update();
             assert!(tiles.is_complete(&tile()));
+            assert_eq!(layouts(&mut tiles), 0, "{case}: \"not modified\" keeps the data");
+            responder.send(water_changed());
+            tiles.update();
+            tiles.update();
+            assert!(tiles.is_complete(&tile()));
+            assert_eq!(layouts(&mut tiles), 1, "{case}: one layout per response");
         }
         assert_ne!(tiles.features(&tile(), "water").unwrap(), Vec::new());
     }
+}
+
+/// How many layouts of `tiles`' tiles began since the last call, each of
+/// which ended.
+fn layouts(tiles: &mut OriginTiles) -> usize {
+    let actions = actions(tiles);
+    let began = actions.iter().filter(|op| **op == TileOperation::StartParse).count();
+    let ended = actions.iter().filter(|op| **op == TileOperation::EndParse).count();
+    assert_eq!(began, ended, "every layout ends: {actions:?}");
+    began
 }
 
 /// A reload that the server answers "not modified" keeps the data the tile
@@ -502,6 +529,43 @@ fn a_network_request_restarts_when_the_update_interval_changes_while_it_loads_in
     assert_eq!(requests.len(), 2);
     assert!(requests[0].1, "the request before stops");
     assert_eq!(freshness_of(&requests[1].0), freshness_in(source.common()));
+}
+
+/// A tile that comes back from the cache shows its data while it
+/// revalidates if caching rules allow it; a tile whose stale data must
+/// revalidate goes, and loads anew, without the validators of its data.
+#[test]
+fn a_cached_tile_shows_its_data_only_while_caching_rules_allow() {
+    let (later, past) = (Timestamp::from_secs(i64::MAX), Timestamp::from_secs(0));
+    for (expires, must_revalidate, reused) in [(later, false, true), (past, false, true), (past, true, false)] {
+        let case = format!("data that expires at {expires:?}, must revalidate: {must_revalidate}");
+        let test = TileTest::new();
+        let (source, mut tiles, file_source) = held_source(&test);
+        let here = view_state(2.0);
+        // A tile to the east: tile 2/1/1 leaves the view, next to its tiles.
+        let mut east = TransformState::clone(&here);
+        east.set_lat_lng_zoom(&LatLng::new(0.0, 90.0).unwrap(), 2.0);
+        tiles.update(&source, &held_view(&here, &file_source));
+        assert_eq!(file_source.requests("2/1/1").len(), 1, "{case}");
+        while file_source.pending() > 0 {
+            let mut response = water();
+            response.caching.expires = Some(expires);
+            response.caching.must_revalidate = must_revalidate;
+            file_source.respond(response);
+        }
+        while !tiles.is_loaded() {
+            tiles.step();
+        }
+
+        tiles.update(&source, &held_view(&east, &file_source));
+        tiles.update(&source, &held_view(&here, &file_source));
+        assert_eq!(tiles.is_loaded(), reused, "{case}: the view shows its tiles at once");
+        // Data that expires is requested again as the tile is required again.
+        let requests = file_source.requests("2/1/1");
+        assert_eq!(requests.len(), 1, "{case}");
+        let validators = requests[0].0.prior_etag.as_deref();
+        assert_eq!(validators, reused.then_some("a"), "{case}: only the tile that came back revalidates its data");
+    }
 }
 
 /// A tile in a new world copy whose resource is another than its copy's,
