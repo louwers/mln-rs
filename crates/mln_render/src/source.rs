@@ -34,8 +34,9 @@
 //!
 //! A source's tiles get their data from its [`DataOrigin`]. The engine
 //! decides which tiles the view needs, keeps them, and lays out or decodes
-//! what they load. With each new version of the source, the origin updates
-//! ([`DataOrigin::update`]) and says what its tiles cover ([`Cover`]). It
+//! what they load. In each of the renderer's updates, the origin takes in
+//! the source as the style has it ([`DataOrigin::update`]), acts on a new
+//! version, and says what its tiles cover ([`Cover`]). It
 //! [starts](DataOrigin::start) each new tile, making the
 //! [state](DataOrigin::Tile) it keeps of it, which the engine drops as the
 //! tile goes, and owns the tile's loading through hooks that the engine
@@ -272,18 +273,21 @@ pub trait DataOrigin: 'static {
     /// takes in.
     type Reply: Send + 'static;
 
-    /// Takes in a new version of the source, or its first: clears or loads
-    /// the tiles again as the source's rules say. Returns what the tiles
-    /// cover, or `None` while the source has nothing to make tiles from,
-    /// in which case the engine leaves its tiles as they are and makes no
-    /// new ones.
+    /// Takes in the source as the style has it now, before each update of
+    /// the cover, which is in each of the renderer's updates: the same
+    /// version until the style changes it, so the origin tells a new
+    /// version from the last it took in, and then clears or loads the tiles
+    /// again as the source's rules say. Returns what the tiles cover, or
+    /// `None` while the source has nothing to make tiles from, in which case
+    /// the engine leaves its tiles as they are and makes no new ones.
     fn update(&mut self, update: &mut OriginUpdate<'_, Self>) -> Option<Cover>;
 
     /// Starts a new tile, required or not, and returns the origin's state
     /// of it. On a flat map, `copy` is the origin's state of the same tile
     /// in another world copy, whose contents the new tile already shows:
     /// [`cx.take_copy()`](LoadContext::take_copy) settles the tile on them,
-    /// as its load's answer. Otherwise the tile starts loading, or waits.
+    /// as its load's answer. Otherwise the origin delivers the tile's data
+    /// at once, starts a load, or waits until the tile is needed.
     fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, copy: Option<&Self::Tile>) -> Self::Tile;
 
     /// Takes in `reply`, which came for the tile's latest load.
