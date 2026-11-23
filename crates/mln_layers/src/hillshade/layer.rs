@@ -19,12 +19,13 @@ use mln_util::constants::{EXTENT, TERRAIN_RGB_MAXZOOM};
 use mln_util::geo::LatLng;
 use mln_util::size::Size;
 
+use super::Hillshade;
 use super::programs::{HILLSHADE, HILLSHADE_PREPARE};
+use super::properties::paint;
 use super::ubo::{
     HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO,
     HillshadeTilePropsUBO, MAX_ILLUMINATION_SOURCES,
 };
-use super::{Hillshade, HillshadePaintProperties};
 use crate::resampling;
 
 /// A hillshade layer: each tile's slopes, prepared once from its elevations
@@ -162,7 +163,7 @@ impl Lights {
     /// The light sources of `paint` on a map turned to the north, up to the
     /// most the shader reads: each property's values, its last one repeated
     /// for the sources that it has no value of.
-    fn of(paint: &HillshadePaintProperties::PossiblyEvaluated) -> Lights {
+    fn of(paint: &paint::PossiblyEvaluated) -> Lights {
         let directions = paint.hillshade_illumination_direction.uniform();
         let altitudes = paint.hillshade_illumination_altitude.uniform();
         let highlights = paint.hillshade_highlight_color.uniform();

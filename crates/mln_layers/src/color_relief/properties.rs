@@ -7,8 +7,7 @@ use super::ColorRelief;
 
 mln_style::properties!(
     /// The paint properties of a color-relief layer.
-    #[expect(non_snake_case, reason = "named for the C++ `ColorReliefPaintProperties` type list")]
-    pub mod ColorReliefPaintProperties: paint {
+    pub mod paint: paint {
         color_relief_color: color_ramp Color = Color::default(),
         color_relief_opacity: constant f32 = 1.0_f32,
         resampling: constant ResamplingType = ResamplingType::Linear,

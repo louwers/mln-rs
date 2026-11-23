@@ -12,10 +12,10 @@ use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::{EXTENT, TILE_SIZE_D};
 
 use super::{LayerBuckets, PlacedBucket, Placement, SymbolTranslate};
-use crate::symbol::SymbolLayoutProperties;
 use crate::symbol::bucket::{SymbolBucket, ZoomEvaluatedSize, symbols_by_viewport_y};
 use crate::symbol::placement::collision::{CollisionBoundaries, PartCollision, icon_overlap, text_overlap};
 use crate::symbol::projection::LabelPlaneProjector;
+use crate::symbol::properties::layout;
 
 /// A symbol layer's `*-translate` in the tile's units.
 pub(crate) fn translation(
@@ -155,7 +155,7 @@ impl<'a> BucketContext<'a> {
         }
     }
 
-    pub(crate) fn layout(&self) -> &'a SymbolLayoutProperties::PossiblyEvaluated {
+    pub(crate) fn layout(&self) -> &'a layout::PossiblyEvaluated {
         &self.bucket.layout
     }
 

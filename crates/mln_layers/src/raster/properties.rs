@@ -7,8 +7,7 @@ use super::Raster;
 
 mln_style::properties!(
     /// The paint properties of a raster layer.
-    #[expect(non_snake_case, reason = "named for the C++ `RasterPaintProperties` type list")]
-    pub mod RasterPaintProperties: paint {
+    pub mod paint: paint {
         raster_brightness_max: constant f32 = 1.0_f32,
         raster_brightness_min: constant f32 = 0.0_f32,
         raster_contrast: constant f32 = 0.0_f32,

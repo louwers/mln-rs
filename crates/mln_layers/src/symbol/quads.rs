@@ -6,7 +6,7 @@ use mln_text::PositionedIcon;
 use mln_text::glyph::Shaping;
 use mln_util::constants::ONE_EM;
 
-use crate::symbol::SymbolLayoutProperties;
+use crate::symbol::properties::layout;
 
 /// A glyph's or an icon's quad, relative to its symbol's anchor.
 #[derive(Clone, Debug, PartialEq)]
@@ -206,7 +206,7 @@ pub(crate) fn icon_quads(shaped_icon: &PositionedIcon, icon_rotate: f32, has_ico
 pub(crate) fn glyph_quads(
     shaped_text: &Shaping,
     text_offset: [f32; 2],
-    layout: &SymbolLayoutProperties::Values,
+    layout: &layout::Values,
     placement: SymbolPlacementType,
     icons: &ImagePositions,
     allow_vertical_placement: bool,
@@ -397,7 +397,7 @@ mod tests {
             ..Default::default()
         };
 
-        let layout = SymbolLayoutProperties::Values::default();
+        let layout = layout::Values::default();
         let image_map = ImagePositions::default();
         let quads1x = glyph_quads(&shaped_text1x, [0.0, 0.0], &layout, SymbolPlacementType::Point, &image_map, false);
         let quads2x = glyph_quads(&shaped_text2x, [0.0, 0.0], &layout, SymbolPlacementType::Point, &image_map, false);

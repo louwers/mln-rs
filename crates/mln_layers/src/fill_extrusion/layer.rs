@@ -15,14 +15,15 @@ use mln_style_types::{LayerBlendType, LightAnchorType};
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::intersection_tests::polygon_intersects_multi_polygon;
 
+use super::FillExtrusion;
 use super::bucket::{FillExtrusionBucket, WALL_CORNERS};
 use super::layout::FillExtrusionLayout;
 use super::programs::{
     FILL_EXTRUSION, FILL_EXTRUSION_INSTANCED, FILL_EXTRUSION_PATTERN, FILL_EXTRUSION_PATTERN_INSTANCED,
     FILL_EXTRUSION_PATTERN_WALL, FILL_EXTRUSION_PULLED, FILL_EXTRUSION_WALL,
 };
+use super::properties::paint;
 use super::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
-use super::{FillExtrusion, FillExtrusionPaintProperties};
 
 /// How far behind its surfaces the layer's draws into depth alone write
 /// their depth, in the clip depth that runs from 0 to 1: 16 steps of a
@@ -253,7 +254,7 @@ fn props(
     camera: &View,
     opacity: f32,
 ) -> FillExtrusionPropsUBO {
-    type Defaults = FillExtrusionPaintProperties::Defaults;
+    type Defaults = paint::Defaults;
     let paint = &layer.paint;
     let light_color = light.light_color.uniform();
     let position = glam::Vec3::from_array(light.light_position.uniform().get_cartesian());
@@ -281,7 +282,7 @@ fn props(
 
 /// How the layer's `paint` places a tile's extrusions: moved by its
 /// translate.
-fn transform(paint: &FillExtrusionPaintProperties::PossiblyEvaluated) -> TileTransform {
+fn transform(paint: &paint::PossiblyEvaluated) -> TileTransform {
     TileTransform::translated(
         *paint.fill_extrusion_translate.uniform(),
         *paint.fill_extrusion_translate_anchor.uniform(),

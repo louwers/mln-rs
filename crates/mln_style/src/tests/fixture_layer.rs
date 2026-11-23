@@ -10,9 +10,8 @@ use crate::property_table::{PropertyInfo, PropertyTable, PropertyVisitor};
 
 crate::properties!(
     /// The paint properties of a `plain` layer.
-    #[expect(non_snake_case, reason = "named as the layer types' property sets are")]
     #[expect(unreachable_pub, dead_code, reason = "a property set has the API of the layer types' sets")]
-    pub(crate) mod PlainPaintProperties: paint {
+    pub(crate) mod plain_paint: paint {
         plain_color: constant Color = Color::black(),
         plain_opacity: constant f32 = 1.0_f32,
         plain_pattern: cross_faded Image = Image::default(),
@@ -33,7 +32,7 @@ impl StyleLayerType for Plain {
     const PROPERTIES: &'static PropertyTable = &PROPERTIES;
 
     type LayoutProperties = NoProperties;
-    type PaintProperties = PlainPaintProperties::Transitionable;
+    type PaintProperties = plain_paint::Transitionable;
     /// What an app gives a `plain` layer.
     type Data = u32;
 
@@ -49,9 +48,8 @@ impl StyleLayerType for Plain {
 
 crate::properties!(
     /// The layout properties of a `dot` layer.
-    #[expect(non_snake_case, reason = "named as the layer types' property sets are")]
     #[expect(unreachable_pub, dead_code, reason = "a property set has the API of the layer types' sets")]
-    pub(crate) mod DotLayoutProperties: layout {
+    pub(crate) mod dot_layout: layout {
         dot_alignment: constant AlignmentType = AlignmentType::Auto,
         dot_justify: data_driven TextJustifyType = TextJustifyType::Center,
         dot_size: data_driven f32 = 1.0_f32,
@@ -62,9 +60,8 @@ crate::properties!(
 
 crate::properties!(
     /// The paint properties of a `dot` layer.
-    #[expect(non_snake_case, reason = "named as the layer types' property sets are")]
     #[expect(unreachable_pub, dead_code, reason = "a property set has the API of the layer types' sets")]
-    pub(crate) mod DotPaintProperties: paint {
+    pub(crate) mod dot_paint: paint {
         dot_color: data_driven Color = Color::black(),
         dot_opacity: data_driven f32 = 1.0_f32,
         dot_width: data_driven f32 = 0.0_f32,
@@ -92,8 +89,8 @@ impl StyleLayerType for Dot {
     const INFO: LayerTypeInfo = LayerTypeInfo { name: "dot", source: SourceKind::Geometry, from_json: true };
     const PROPERTIES: &'static PropertyTable = &DOT_PROPERTIES;
 
-    type LayoutProperties = DotLayoutProperties::Unevaluated;
-    type PaintProperties = DotPaintProperties::Transitionable;
+    type LayoutProperties = dot_layout::Unevaluated;
+    type PaintProperties = dot_paint::Transitionable;
     type Data = ();
 
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {

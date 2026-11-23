@@ -10,8 +10,7 @@ use super::Heatmap;
 
 mln_style::properties!(
     /// The paint properties of a heatmap layer.
-    #[expect(non_snake_case, reason = "named for the C++ `HeatmapPaintProperties` type list")]
-    pub mod HeatmapPaintProperties: paint {
+    pub mod paint: paint {
         heatmap_color: color_ramp Color = Color::default(),
         heatmap_intensity: constant f32 = 1.0_f32,
         heatmap_opacity: constant f32 = 1.0_f32,

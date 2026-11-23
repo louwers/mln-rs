@@ -33,20 +33,18 @@ mod shaders;
 pub mod symbol;
 mod tessellator;
 
-pub use background::{Background, BackgroundLayer, BackgroundPaintProperties};
-pub use circle::{Circle, CircleLayer, CircleLayoutProperties, CirclePaintProperties};
-pub use color_relief::{ColorRelief, ColorReliefLayer, ColorReliefPaintProperties};
-pub use fill::{Fill, FillLayer, FillLayoutProperties, FillPaintProperties};
-pub use fill_extrusion::{
-    FillExtrusion, FillExtrusionLayer, FillExtrusionLayoutProperties, FillExtrusionPaintProperties,
-};
-pub use heatmap::{Heatmap, HeatmapLayer, HeatmapPaintProperties};
-pub use hillshade::{Hillshade, HillshadeLayer, HillshadePaintProperties};
-pub use line::{Line, LineLayer, LineLayoutProperties, LinePaintProperties};
+pub use background::{Background, BackgroundLayer};
+pub use circle::{Circle, CircleLayer};
+pub use color_relief::{ColorRelief, ColorReliefLayer};
+pub use fill::{Fill, FillLayer};
+pub use fill_extrusion::{FillExtrusion, FillExtrusionLayer};
+pub use heatmap::{Heatmap, HeatmapLayer};
+pub use hillshade::{Hillshade, HillshadeLayer};
+pub use line::{Line, LineLayer};
 use mln_gfx::shaders::program::Program;
 use mln_render::{RegisterError, RegistryBuilder};
-pub use raster::{Raster, RasterLayer, RasterPaintProperties};
-pub use symbol::{Symbol, SymbolLayer, SymbolLayoutProperties, SymbolPaintProperties};
+pub use raster::{Raster, RasterLayer};
+pub use symbol::{Symbol, SymbolLayer};
 
 /// Adds the layer types of this crate. Fails for a name that an earlier
 /// call took.

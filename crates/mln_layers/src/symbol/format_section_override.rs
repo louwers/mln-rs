@@ -14,7 +14,7 @@ use mln_style::properties::OverridableSection as _;
 use mln_style::property_expression::PropertyExpression;
 use mln_style::property_value::{PropertyValue, StyleValue as _};
 
-use super::{SymbolLayoutProperties, SymbolPaintProperties};
+use super::properties::{layout, paint};
 
 /// The alternatives of a `PropertyValue<Formatted>` or an
 /// `Evaluated<Formatted>` that `has_override` reads.
@@ -131,10 +131,7 @@ impl SymbolLayerPaintPropertyOverrides {
     /// `evaluated` to `updated`.
     #[cfg(test)]
     // gtests-data: ported for Layer.SymbolLayerOverrides.
-    pub(crate) fn update_overrides(
-        evaluated: &SymbolPaintProperties::PossiblyEvaluated,
-        updated: &mut SymbolPaintProperties::PossiblyEvaluated,
-    ) {
+    pub(crate) fn update_overrides(evaluated: &paint::PossiblyEvaluated, updated: &mut paint::PossiblyEvaluated) {
         let property = evaluated.text_color.clone();
         if !property.is_constant() {
             let has_format_section_override =
@@ -166,9 +163,9 @@ pub(crate) fn format_section_override(default_value: Evaluated<mln_util::Color>,
 /// property's. A property folded to a constant from `unevaluated`'s
 /// expression of the style's global state keeps reading `global_state`.
 pub(crate) fn set_overrides(
-    overrides: &SymbolLayoutProperties::Unevaluated,
-    overridable: &mut SymbolPaintProperties::PossiblyEvaluated,
-    unevaluated: &SymbolPaintProperties::Unevaluated,
+    overrides: &layout::Unevaluated,
+    overridable: &mut paint::PossiblyEvaluated,
+    unevaluated: &paint::Unevaluated,
     global_state: Option<&Arc<GlobalStateMap>>,
 ) {
     if !SymbolLayerPaintPropertyOverrides::has_overrides(&overrides.text_field) {
@@ -184,13 +181,12 @@ pub(crate) fn set_overrides(
         {
             let mut retained = expression.clone();
             retained.capture_global_state(global_state.cloned());
-            *value =
-                Evaluated::PerFeature { expression: retained, default: SymbolPaintProperties::Defaults::text_color() };
+            *value = Evaluated::PerFeature { expression: retained, default: paint::Defaults::text_color() };
         }
     }
     let override_ = format_section_override(std::mem::take(value), "text-color".to_owned());
     *value = Evaluated::PerFeature {
         expression: PropertyExpression::new(Arc::new(override_)),
-        default: SymbolPaintProperties::Defaults::text_color(),
+        default: paint::Defaults::text_color(),
     };
 }

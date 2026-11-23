@@ -3,7 +3,7 @@
 
 mod layer;
 #[rustfmt::skip]
-mod properties;
+pub mod properties;
 mod glsl;
 mod glsl_es;
 mod msl;
@@ -14,7 +14,6 @@ mod wgsl;
 pub use layer::HillshadeLayer;
 use mln_style::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 use mln_style::property_table::{PropertyTable, PropertyVisitor};
-pub use properties::HillshadePaintProperties;
 
 /// The `hillshade` layer type's style half.
 pub struct Hillshade;
@@ -24,7 +23,7 @@ impl StyleLayerType for Hillshade {
     const PROPERTIES: &'static PropertyTable = &properties::PROPERTIES;
 
     type LayoutProperties = NoProperties;
-    type PaintProperties = HillshadePaintProperties::Transitionable;
+    type PaintProperties = properties::paint::Transitionable;
     type Data = ();
 
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {

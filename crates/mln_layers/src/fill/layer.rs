@@ -9,16 +9,17 @@ use mln_style::evaluated::Evaluated;
 use mln_util::Color;
 use mln_util::intersection_tests::polygon_intersects_multi_polygon;
 
+use super::Fill;
 use super::bucket::{FillBucket, LINE_WIDTH, draws_outline_quads};
 use super::layout::FillLayout;
 use super::programs::{
     FILL, FILL_OUTLINE, FILL_OUTLINE_INSTANCED, FILL_OUTLINE_PATTERN, FILL_OUTLINE_PATTERN_INSTANCED,
     FILL_OUTLINE_PULLED, FILL_PATTERN,
 };
+use super::properties::paint;
 use super::ubo::{
     FillDrawableUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO, FillPatternTilePropsUBO,
 };
-use super::{Fill, FillPaintProperties};
 use crate::features::PATTERN_SAMPLER;
 
 /// A fill layer: each tile's polygons filled with a color or a pattern, and
@@ -267,7 +268,7 @@ fn paint_layout(stride: usize, color: Option<usize>, opacity: Option<usize>) -> 
 }
 
 /// How the layer's `paint` places a tile's fills: moved by its translate.
-fn transform(paint: &FillPaintProperties::PossiblyEvaluated) -> TileTransform {
+fn transform(paint: &paint::PossiblyEvaluated) -> TileTransform {
     TileTransform::translated(*paint.fill_translate.uniform(), *paint.fill_translate_anchor.uniform())
 }
 

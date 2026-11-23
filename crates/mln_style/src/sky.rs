@@ -6,8 +6,7 @@ use crate::property_table::{self, InPlace, SetPropertyError};
 use crate::style_property::StyleProperty;
 
 crate::properties!(
-    #[expect(non_snake_case, reason = "named like the layers' property sets")]
-    pub mod SkyProperties: paint {
+    pub mod properties: paint {
         sky_atmosphere_blend: constant f32 = 0.8_f32,
         sky_fog_color: constant Color = Color::white(),
         sky_fog_ground_blend: constant f32 = 0.5_f32,
@@ -23,7 +22,7 @@ crate::properties!(
 /// The style's sky.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Sky {
-    pub properties: SkyProperties::Transitionable,
+    pub properties: properties::Transitionable,
 }
 
 impl Sky {

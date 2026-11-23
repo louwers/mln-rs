@@ -9,11 +9,12 @@ use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::Color;
 use mln_util::intersection_tests::polygon_intersects_buffered_point;
 
+use super::Circle;
 use super::bucket::CircleBucket;
 use super::layout::CircleLayout;
 use super::programs::CIRCLE;
+use super::properties::paint;
 use super::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
-use super::{Circle, CirclePaintProperties};
 
 /// A circle layer: a mesh per tile of its bucket's quads.
 pub struct CircleLayer;
@@ -82,8 +83,8 @@ impl Layer for CircleLayer {
         let binders = laid.binders(&laid.bucket.binders);
         let radius = binders.circle_radius.max_or(&paint.circle_radius);
         let stroke = binders.circle_stroke_width.max_or(&paint.circle_stroke_width);
-        radius.unwrap_or(CirclePaintProperties::Defaults::circle_radius())
-            + stroke.unwrap_or(CirclePaintProperties::Defaults::circle_stroke_width())
+        radius.unwrap_or(paint::Defaults::circle_radius())
+            + stroke.unwrap_or(paint::Defaults::circle_stroke_width())
             + transform(paint).translation_length()
     }
 
@@ -124,6 +125,6 @@ impl Layer for CircleLayer {
 }
 
 /// How the layer's `paint` places a tile's circles: moved by its translate.
-fn transform(paint: &CirclePaintProperties::PossiblyEvaluated) -> TileTransform {
+fn transform(paint: &paint::PossiblyEvaluated) -> TileTransform {
     TileTransform::translated(*paint.circle_translate.uniform(), *paint.circle_translate_anchor.uniform())
 }

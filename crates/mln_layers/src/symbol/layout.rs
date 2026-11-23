@@ -44,6 +44,7 @@ use mln_util::range::Range;
 use mln_util::{Padding, i18n};
 use mln_vec_map::VecMap;
 
+use crate::symbol::Symbol;
 use crate::symbol::anchor::Anchor;
 use crate::symbol::bucket::{
     Buffer, PlacedSymbol, QuadCorner, SortKeyRange, SymbolBucket, SymbolBucketState, SymbolIconBinders,
@@ -61,18 +62,18 @@ use crate::symbol::layout::get_anchors::{LineLabel, get_anchors, get_center_anch
 use crate::symbol::layout::merge_lines::merge_lines;
 use crate::symbol::placement::collision::{icon_overlap, text_overlap};
 use crate::symbol::pool::PoolRange;
+use crate::symbol::properties::layout;
 use crate::symbol::quads::{SymbolQuad, SymbolQuads, glyph_quads, icon_quads};
-use crate::symbol::{Symbol, SymbolLayoutProperties};
 
 /// Whether `text-field` is set: a constant that is not empty, or an
 /// expression.
-fn has_text_field(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> bool {
+fn has_text_field(layout: &layout::PossiblyEvaluated) -> bool {
     layout.text_field.constant().is_none_or(|t| !t.empty())
 }
-fn has_text_font(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> bool {
+fn has_text_font(layout: &layout::PossiblyEvaluated) -> bool {
     layout.text_font.constant().is_none_or(|t| !t.is_empty())
 }
-fn has_icon_image(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> bool {
+fn has_icon_image(layout: &layout::PossiblyEvaluated) -> bool {
     layout.icon_image.constant().is_none_or(|t| !t.empty())
 }
 
@@ -217,10 +218,10 @@ pub(crate) fn section_options_to_value(options: &SectionOptions) -> Value {
 }
 
 fn create_layout(
-    unevaluated: &SymbolLayoutProperties::Unevaluated,
+    unevaluated: &layout::Unevaluated,
     zoom: f32,
     global_state: Option<Arc<GlobalStateMap>>,
-) -> SymbolLayoutProperties::PossiblyEvaluated {
+) -> layout::PossiblyEvaluated {
     let mut evaluation_parameters = PropertyEvaluationParameters::new(zoom);
     evaluation_parameters.global_state = global_state;
     let mut layout = unevaluated.evaluate(&evaluation_parameters);
@@ -314,7 +315,7 @@ struct FeatureSymbols<'a> {
     shaped: &'a ShapedFeature,
     /// The icon fitted to the vertical text.
     vertical_icon: Option<&'a PositionedIcon>,
-    values: &'a SymbolLayoutProperties::Values,
+    values: &'a layout::Values,
     icons: &'a ImagePositions,
     text_placement: SymbolPlacementType,
     has_icon_text_fit: bool,
@@ -450,7 +451,7 @@ pub struct SymbolLayout {
     text_radial_offset: PropertyValue<f32>,
     text_variable_anchor_offset: PropertyValue<VariableAnchorOffsetCollection>,
 
-    layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
+    layout: Arc<layout::PossiblyEvaluated>,
 
     features: Vec<SymbolFeature>,
 
@@ -1569,10 +1570,8 @@ impl SymbolLayout {
     fn build_bucket(self, cx: &BuildCx<'_, Symbol>) -> SymbolBucket {
         let mut icon_binders = cx.binders();
         let mut text_binders = cx.binders();
-        let text_size_binder =
-            SymbolSizeBinder::create(self.zoom, &self.text_size, SymbolLayoutProperties::Defaults::text_size());
-        let icon_size_binder =
-            SymbolSizeBinder::create(self.zoom, &self.icon_size, SymbolLayoutProperties::Defaults::icon_size());
+        let text_size_binder = SymbolSizeBinder::create(self.zoom, &self.text_size, layout::Defaults::text_size());
+        let icon_size_binder = SymbolSizeBinder::create(self.zoom, &self.icon_size, layout::Defaults::icon_size());
         let mut state = SymbolBucketState {
             sorted_angle: f32::MAX,
             symbol_instance_pools: self.symbol_instance_pools,

@@ -7,16 +7,14 @@ use super::Fill;
 
 mln_style::properties!(
     /// The layout properties of a fill layer.
-    #[expect(non_snake_case, reason = "named for the C++ `FillLayoutProperties` type list")]
-    pub mod FillLayoutProperties: layout {
+    pub mod layout: layout {
         fill_sort_key: data_driven f32 = 0.0_f32,
     }
 );
 
 mln_style::properties!(
     /// The paint properties of a fill layer.
-    #[expect(non_snake_case, reason = "named for the C++ `FillPaintProperties` type list")]
-    pub mod FillPaintProperties: paint {
+    pub mod paint: paint {
         fill_antialias: constant bool = true,
         fill_color: data_driven Color = Color::black(),
         fill_layer_blend: constant LayerBlendType = LayerBlendType::Normal,

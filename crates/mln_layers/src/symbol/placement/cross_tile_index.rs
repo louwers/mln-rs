@@ -393,10 +393,10 @@ mod tests {
     use mln_util::size::Size;
 
     use super::*;
-    use crate::symbol::SymbolLayoutProperties;
     use crate::symbol::anchor::Anchor;
     use crate::symbol::bucket::{SymbolBucketState, SymbolLayoutFlags, SymbolSizeBinder};
     use crate::symbol::pool::PoolRange;
+    use crate::symbol::properties::layout;
 
     fn make_symbol_instance(x: f32, y: f32, key: &str, pools: &mut SymbolInstancePools) -> SymbolInstance {
         SymbolInstance {
@@ -415,7 +415,7 @@ mod tests {
     fn make_bucket(symbols: Vec<(f32, f32, &str)>, bucket_instance_id: u32) -> SymbolBucket {
         let mut pools = SymbolInstancePools::default();
         let instances = symbols.into_iter().map(|(x, y, key)| make_symbol_instance(x, y, key, &mut pools)).collect();
-        let layout = Arc::new(SymbolLayoutProperties::PossiblyEvaluated::default());
+        let layout = Arc::new(layout::PossiblyEvaluated::default());
         SymbolBucket {
             layout,
             bucket_leader_id: Arc::from("test"),

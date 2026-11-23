@@ -6,12 +6,12 @@ use mln_render::layer::{
 use mln_style::expression::Image;
 use mln_util::Color;
 
-use super::LinePaintProperties;
 use super::dashes::{DashAtlas, DashCap};
 use super::mesh::LineVertex;
+use super::properties::paint;
 
 mln_render::paint_property_binders!(
-    pub(crate) struct LineBinders for LinePaintProperties::PossiblyEvaluated {
+    pub(crate) struct LineBinders for paint::PossiblyEvaluated {
         line_blur: PaintPropertyBinder<f32> => ["blur"],
         line_color: PaintPropertyBinder<Color> => ["color"],
         line_floor_width: PaintPropertyBinder<f32> => ["floorwidth"],

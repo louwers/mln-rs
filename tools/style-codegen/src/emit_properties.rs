@@ -29,11 +29,10 @@ fn kind_and_type(property: &Property, layout: bool) -> (&'static str, String) {
     (kind, evaluated_type(property).rust())
 }
 
-fn emit_set(w: &mut Writer, layer_type: &str, class: &str, scope: &str, properties: &[Property]) {
+fn emit_set(w: &mut Writer, layer_type: &str, scope: &str, properties: &[Property]) {
     w.line(&format!("{STYLE}::properties!("));
     w.line(&format!("    /// The {scope} properties of a {layer_type} layer."));
-    w.line(&format!("    #[expect(non_snake_case, reason = \"named for the C++ `{class}` type list\")]"));
-    w.line(&format!("    pub mod {class}: {scope} {{"));
+    w.line(&format!("    pub mod {scope}: {scope} {{"));
     for p in properties {
         let (kind, t) = kind_and_type(p, scope == "layout");
         let default = if is_color_ramp(p) {
@@ -86,9 +85,9 @@ pub(crate) fn emit(layer: &LayerSpec) -> String {
     w.blank();
 
     if has_layout {
-        emit_set(&mut w, &layer.type_, &format!("{t}LayoutProperties"), "layout", &layer.layout_properties);
+        emit_set(&mut w, &layer.type_, "layout", &layer.layout_properties);
     }
-    emit_set(&mut w, &layer.type_, &format!("{t}PaintProperties"), "paint", &layer.paint_properties);
+    emit_set(&mut w, &layer.type_, "paint", &layer.paint_properties);
 
     let entries = crate::emit_table::layer_entries(&layer.paint_properties, &layer.layout_properties);
     crate::emit_table::emit(&mut w, &format!("LayerStyle<{t}>"), &entries, &Visit::Function);

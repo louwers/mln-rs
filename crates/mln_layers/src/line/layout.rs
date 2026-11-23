@@ -14,17 +14,18 @@ use mln_util::feature::numeric_value_f64;
 use mln_util::geometry::FeatureType;
 use mln_util::logging::{Event, Log};
 
+use super::Line;
 use super::bucket::{DashVertex, FeatureDashes, LineBucket};
 use super::dashes::DashCap;
 use super::mesh::{LineOptions, LineScratch, add_line};
-use super::{Line, LineLayoutProperties};
+use super::properties::layout;
 use crate::features::{uses_pattern, with_patterns};
 
 /// The features a tile's lines draw, by index, in `line-sort-key` order,
 /// each with its patterns, and the layout they draw with.
 pub struct LineLayout {
     features: Vec<(usize, FeaturePatterns)>,
-    layout: LineLayoutProperties::PossiblyEvaluated,
+    layout: layout::PossiblyEvaluated,
     /// The tile's zoom, and how many times it magnifies its data's zoom.
     zoom: f32,
     overscaling: u32,

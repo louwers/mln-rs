@@ -7,12 +7,12 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::GeometryCollection;
 use mln_util::Color;
 
-use super::FillPaintProperties;
 use super::mesh::FillBuffers;
+use super::properties::paint;
 use crate::tessellator::Tessellator;
 
 mln_render::paint_property_binders!(
-    pub(crate) struct FillBinders for FillPaintProperties::PossiblyEvaluated {
+    pub(crate) struct FillBinders for paint::PossiblyEvaluated {
         fill_color: PaintPropertyBinder<Color> => ["color"],
         fill_opacity: PaintPropertyBinder<f32> => ["opacity"],
         fill_outline_color: PaintPropertyBinder<Color> => ["outline_color"],

@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use mln_style::light::{Light, LightProperties};
+use mln_style::light::{self, Light};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 
-pub(crate) type TransitioningLight = LightProperties::Unevaluated;
+pub(crate) type TransitioningLight = light::properties::Unevaluated;
 /// The style's light, evaluated for a frame.
-pub type EvaluatedLight = LightProperties::PossiblyEvaluated;
+pub type EvaluatedLight = light::properties::PossiblyEvaluated;
 
 pub(crate) struct RenderLight {
     pub(crate) light: Arc<Light>,

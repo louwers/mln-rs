@@ -7,16 +7,14 @@ use super::Circle;
 
 mln_style::properties!(
     /// The layout properties of a circle layer.
-    #[expect(non_snake_case, reason = "named for the C++ `CircleLayoutProperties` type list")]
-    pub mod CircleLayoutProperties: layout {
+    pub mod layout: layout {
         circle_sort_key: data_driven f32 = 0.0_f32,
     }
 );
 
 mln_style::properties!(
     /// The paint properties of a circle layer.
-    #[expect(non_snake_case, reason = "named for the C++ `CirclePaintProperties` type list")]
-    pub mod CirclePaintProperties: paint {
+    pub mod paint: paint {
         circle_blur: data_driven f32 = 0.0_f32,
         circle_color: data_driven Color = Color::black(),
         circle_opacity: data_driven f32 = 1.0_f32,

@@ -1,9 +1,9 @@
 use mln_render::layer::{Bucket, GpuVec, Indexes, LayerBinders, PaintPropertyBinder, Upload};
 
-use super::HeatmapPaintProperties;
+use super::properties::paint;
 
 mln_render::paint_property_binders!(
-    pub(crate) struct HeatmapBinders for HeatmapPaintProperties::PossiblyEvaluated {
+    pub(crate) struct HeatmapBinders for paint::PossiblyEvaluated {
         heatmap_radius: PaintPropertyBinder<f32> => ["radius"],
         heatmap_weight: PaintPropertyBinder<f32> => ["weight"],
     }

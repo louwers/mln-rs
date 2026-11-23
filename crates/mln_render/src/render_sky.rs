@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use mln_style::sky::{Sky, SkyProperties};
+use mln_style::sky::{self, Sky};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 
-pub(crate) type TransitioningSky = SkyProperties::Unevaluated;
-pub(crate) type EvaluatedSky = SkyProperties::PossiblyEvaluated;
+pub(crate) type TransitioningSky = sky::properties::Unevaluated;
+pub(crate) type EvaluatedSky = sky::properties::PossiblyEvaluated;
 
 pub(crate) struct RenderSky {
     pub(crate) sky: Arc<Sky>,

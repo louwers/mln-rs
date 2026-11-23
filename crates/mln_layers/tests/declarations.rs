@@ -19,8 +19,7 @@ use mln_util::Color;
 
 mln_style::properties!(
     /// The paint properties of a `dot` layer.
-    #[expect(non_snake_case, reason = "named as the built-in layer types' property sets are")]
-    pub mod DotPaintProperties: paint {
+    pub mod paint: paint {
         dot_color: data_driven Color = Color::black(),
         dot_opacity: constant f32 = 1.0_f32,
         dot_pattern: cross_faded_data_driven Image = Image::default(),
@@ -34,8 +33,7 @@ mln_style::properties!(
 
 mln_style::properties!(
     /// The layout properties of a `dot` layer.
-    #[expect(non_snake_case, reason = "named as the built-in layer types' property sets are")]
-    pub mod DotLayoutProperties: layout {
+    pub mod layout: layout {
         dot_sort_key: data_driven f32 = 0.0_f32,
     }
 );
@@ -58,8 +56,8 @@ impl StyleLayerType for Dot {
     const INFO: LayerTypeInfo = LayerTypeInfo { name: "dot", source: SourceKind::Geometry, from_json: true };
     const PROPERTIES: &'static PropertyTable = &PROPERTIES;
 
-    type LayoutProperties = DotLayoutProperties::Unevaluated;
-    type PaintProperties = DotPaintProperties::Transitionable;
+    type LayoutProperties = layout::Unevaluated;
+    type PaintProperties = paint::Transitionable;
     type Data = ();
 
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {
@@ -76,7 +74,7 @@ impl StyleLayerType for Dot {
 
 mln_render::paint_property_binders!(
     /// The binders of a `dot` layer's data-driven paint properties.
-    struct DotBinders for DotPaintProperties::PossiblyEvaluated {
+    struct DotBinders for paint::PossiblyEvaluated {
         dot_color: PaintPropertyBinder<Color> => ["color"],
         dot_radius: PaintPropertyBinder<f32> => ["radius"],
         dot_floor_radius: PaintPropertyBinder<f32> => ["floor_radius"],
@@ -117,7 +115,7 @@ fn properties_set_and_get_by_name() {
 fn properties_evaluate_to_their_defaults_and_derived_values() {
     let layer = layer(&[("dot-radius", serde_json::json!(8))]);
     let evaluated = style(&layer).paint.untransitioned().evaluate(&PropertyEvaluationParameters::new(3.0));
-    assert_eq!(*evaluated.dot_color.uniform(), DotPaintProperties::Defaults::dot_color());
+    assert_eq!(*evaluated.dot_color.uniform(), paint::Defaults::dot_color());
     assert_eq!(*evaluated.dot_radius.uniform(), 8.0);
     assert_eq!(*evaluated.dot_floor_radius.uniform(), 8.0);
 }

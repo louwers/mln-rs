@@ -9,7 +9,7 @@ use super::util::parse_json;
 use crate::conversion::{Convertible, Error, convert_property_value};
 use crate::evaluated::Evaluated;
 use crate::expression::{EvaluationContext, Functions, GlobalStateMap, Image, dsl};
-use crate::light::LightProperties;
+use crate::light;
 use crate::map::zoom_history::ZoomHistory;
 use crate::properties::{Transitionable, Transitioning};
 use crate::property_expression::PropertyExpression;
@@ -166,15 +166,15 @@ fn possibly_evaluated_evaluate_per_feature() {
 
     use crate::expression::dsl::{get_str, number};
     use crate::property_expression::PropertyExpression;
-    use crate::tests::fixture_layer::DotLayoutProperties;
+    use crate::tests::fixture_layer::dot_layout;
     use crate::tests::util::{StubGeometryTileFeature, property_map};
 
     let feature = StubGeometryTileFeature::new(property_map(&[("r", Value::Double(7.5))]));
 
     // A constant.
-    let mut layout = DotLayoutProperties::PossiblyEvaluated {
+    let mut layout = dot_layout::PossiblyEvaluated {
         dot_size: Evaluated::Constant(3.0),
-        ..DotLayoutProperties::PossiblyEvaluated::default()
+        ..dot_layout::PossiblyEvaluated::default()
     };
     assert_eq!(3.0, layout.dot_size.evaluate(&EvaluationContext::with_zoom_feature(10.0, Some(&feature))));
     // A feature expression, with the property's default for a missing value.
@@ -340,7 +340,7 @@ fn global_state_change_of_unread_key_keeps_value() {
 // gtest: TransitioningPropertyValue.GlobalStateChangeTransitionsLightProperty
 #[test]
 fn global_state_change_transitions_light_property() {
-    let mut light = LightProperties::Transitionable::default();
+    let mut light = light::properties::Transitionable::default();
     light.light_intensity.value = global_state_value("width");
     let mut transitioning = light.transitioned(&untransitioned(), light.untransitioned());
 
@@ -359,10 +359,10 @@ fn global_state_change_transitions_light_property() {
 // A paint set cross-fades where one of its properties' kinds does.
 const _: () = {
     use crate::layer_type::{NoProperties, PaintSet};
-    use crate::tests::fixture_layer::{DotPaintProperties, PlainPaintProperties};
+    use crate::tests::fixture_layer::{dot_paint, plain_paint};
 
-    assert!(<PlainPaintProperties::Transitionable as PaintSet>::CROSSFADES);
-    assert!(!<DotPaintProperties::Transitionable as PaintSet>::CROSSFADES);
+    assert!(<plain_paint::Transitionable as PaintSet>::CROSSFADES);
+    assert!(!<dot_paint::Transitionable as PaintSet>::CROSSFADES);
     assert!(!<NoProperties as PaintSet>::CROSSFADES);
 };
 

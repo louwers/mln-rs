@@ -17,15 +17,16 @@ use mln_style_types::{AlignmentType, IconTextFitType, SymbolPlacementType, TextR
 use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
 
+use super::Symbol;
 use super::bucket::{Buffer as SymbolBuffer, CollisionBuffer, SymbolBucket, SymbolDynamicLayoutVertex};
 use super::format_section_override::{SymbolLayerPaintPropertyOverrides, set_overrides};
 use super::layout::SymbolLayout;
 use super::programs::{COLLISION_BOX, COLLISION_CIRCLE, SYMBOL_ICON, SYMBOL_SDF, SYMBOL_TEXT_AND_ICON};
 use super::projection::{gl_coord_matrix, label_plane_matrix};
+use super::properties::{layout, paint};
 use super::ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
-use super::{Symbol, SymbolLayoutProperties, SymbolPaintProperties};
 
 /// A symbol layer: the draws of its tiles' text and icons where placement
 /// shows them and, over them where the map's debug options show them, the
@@ -126,7 +127,7 @@ struct Alignment {
 }
 
 impl Alignment {
-    fn of(kind: Kind, layout: &SymbolLayoutProperties::PossiblyEvaluated) -> Alignment {
+    fn of(kind: Kind, layout: &layout::PossiblyEvaluated) -> Alignment {
         let line = *layout.symbol_placement.uniform() != SymbolPlacementType::Point;
         if kind == Kind::Text {
             let rotation = *layout.text_rotation_alignment.uniform();
@@ -193,10 +194,10 @@ impl Layer for SymbolLayer {
         }
         let paint = &cx.evaluated.paint;
         let colored = |color: &Evaluated<Color>, default: Color| color.constant_or(&default).a > 0.0;
-        let icon = colored(&paint.icon_color, SymbolPaintProperties::Defaults::icon_color())
-            || colored(&paint.icon_halo_color, SymbolPaintProperties::Defaults::icon_halo_color());
-        let text = colored(&paint.text_color, SymbolPaintProperties::Defaults::text_color())
-            || colored(&paint.text_halo_color, SymbolPaintProperties::Defaults::text_halo_color());
+        let icon = colored(&paint.icon_color, paint::Defaults::icon_color())
+            || colored(&paint.icon_halo_color, paint::Defaults::icon_halo_color());
+        let text = colored(&paint.text_color, paint::Defaults::text_color())
+            || colored(&paint.text_halo_color, paint::Defaults::text_halo_color());
         Evaluation::translucent_if(
             (paint.icon_opacity.constant_or(&1.0) > 0.0 && icon)
                 || (paint.text_opacity.constant_or(&1.0) > 0.0 && text),
@@ -368,17 +369,13 @@ impl Layer for SymbolLayer {
 
 /// Whether the layer's symbols draw over the viewport rather than on the
 /// map, by its `symbol-screen-space`.
-fn screen_space(layout: &SymbolLayoutProperties::Unevaluated) -> bool {
-    layout
-        .symbol_screen_space
-        .as_constant()
-        .copied()
-        .unwrap_or_else(SymbolLayoutProperties::Defaults::symbol_screen_space)
+fn screen_space(layout: &layout::Unevaluated) -> bool {
+    layout.symbol_screen_space.as_constant().copied().unwrap_or_else(layout::Defaults::symbol_screen_space)
 }
 
 /// How the layer's `paint` places a tile's text, or its icons: moved by
 /// their translate.
-fn transform(paint: &SymbolPaintProperties::PossiblyEvaluated, text: bool) -> TileTransform {
+fn transform(paint: &paint::PossiblyEvaluated, text: bool) -> TileTransform {
     if text {
         TileTransform::translated(*paint.text_translate.uniform(), *paint.text_translate_anchor.uniform())
     } else {

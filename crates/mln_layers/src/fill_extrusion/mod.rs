@@ -5,7 +5,7 @@ pub(crate) mod bucket;
 mod layer;
 mod layout;
 #[rustfmt::skip]
-mod properties;
+pub mod properties;
 mod glsl;
 mod glsl_es;
 mod msl;
@@ -16,7 +16,6 @@ mod wgsl;
 pub use layer::FillExtrusionLayer;
 use mln_style::layer_type::{LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType};
 use mln_style::property_table::{PropertyTable, PropertyVisitor};
-pub use properties::{FillExtrusionLayoutProperties, FillExtrusionPaintProperties};
 
 /// The `fill-extrusion` layer type's style half.
 pub struct FillExtrusion;
@@ -25,8 +24,8 @@ impl StyleLayerType for FillExtrusion {
     const INFO: LayerTypeInfo = LayerTypeInfo { name: "fill-extrusion", source: SourceKind::Geometry, from_json: true };
     const PROPERTIES: &'static PropertyTable = &properties::PROPERTIES;
 
-    type LayoutProperties = FillExtrusionLayoutProperties::Unevaluated;
-    type PaintProperties = FillExtrusionPaintProperties::Transitionable;
+    type LayoutProperties = properties::layout::Unevaluated;
+    type PaintProperties = properties::paint::Transitionable;
     type Data = ();
 
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {

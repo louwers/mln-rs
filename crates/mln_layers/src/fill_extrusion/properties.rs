@@ -7,16 +7,14 @@ use super::FillExtrusion;
 
 mln_style::properties!(
     /// The layout properties of a fill-extrusion layer.
-    #[expect(non_snake_case, reason = "named for the C++ `FillExtrusionLayoutProperties` type list")]
-    pub mod FillExtrusionLayoutProperties: layout {
+    pub mod layout: layout {
         fill_extrusion_rounded_corner_distance: constant f32 = 0.0_f32,
     }
 );
 
 mln_style::properties!(
     /// The paint properties of a fill-extrusion layer.
-    #[expect(non_snake_case, reason = "named for the C++ `FillExtrusionPaintProperties` type list")]
-    pub mod FillExtrusionPaintProperties: paint {
+    pub mod paint: paint {
         fill_extrusion_base: data_driven f32 = 0.0_f32,
         fill_extrusion_color: data_driven Color = Color::black(),
         fill_extrusion_height: data_driven f32 = 0.0_f32,

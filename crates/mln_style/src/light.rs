@@ -6,8 +6,7 @@ use crate::property_table::{self, InPlace, OwnerSlot, SetPropertyError};
 use crate::style_property::StyleProperty;
 
 crate::properties!(
-    #[expect(non_snake_case, reason = "named like the layers' property sets")]
-    pub mod LightProperties: paint {
+    pub mod properties: paint {
         light_anchor: constant LightAnchorType = LightAnchorType::Viewport,
         light_position: constant Position = Position::new([1.15_f32, 210.0_f32, 30.0_f32]),
         light_color: constant Color = Color::white(),
@@ -19,7 +18,7 @@ crate::properties!(
 /// The style's light.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Light {
-    pub properties: LightProperties::Transitionable,
+    pub properties: properties::Transitionable,
 }
 
 impl Light {

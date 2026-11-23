@@ -7,8 +7,7 @@ use super::Line;
 
 mln_style::properties!(
     /// The layout properties of a line layer.
-    #[expect(non_snake_case, reason = "named for the C++ `LineLayoutProperties` type list")]
-    pub mod LineLayoutProperties: layout {
+    pub mod layout: layout {
         line_cap: data_driven LineCapType = LineCapType::Butt,
         line_join: data_driven LineJoinType = LineJoinType::Miter,
         line_miter_limit: data_driven f32 = 2.0_f32,
@@ -20,8 +19,7 @@ mln_style::properties!(
 
 mln_style::properties!(
     /// The paint properties of a line layer.
-    #[expect(non_snake_case, reason = "named for the C++ `LinePaintProperties` type list")]
-    pub mod LinePaintProperties: paint {
+    pub mod paint: paint {
         line_blur: data_driven f32 = 0.0_f32,
         line_color: data_driven Color = Color::black(),
         line_dasharray: cross_faded_or_data_driven Vec<f32> = Vec::new(),

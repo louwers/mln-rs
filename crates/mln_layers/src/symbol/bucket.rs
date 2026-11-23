@@ -22,11 +22,11 @@ use mln_util::serialization::payload::pod;
 
 use crate::symbol::instance::{SymbolInstance, SymbolInstancePools, WritingModes};
 use crate::symbol::pool::PoolRange;
+use crate::symbol::properties::{layout, paint};
 use crate::symbol::quads::SymbolQuad;
-use crate::symbol::{SymbolLayoutProperties, SymbolPaintProperties};
 
 mln_render::paint_property_binders!(
-    pub(crate) struct SymbolIconBinders for SymbolPaintProperties::PossiblyEvaluated {
+    pub(crate) struct SymbolIconBinders for paint::PossiblyEvaluated {
         icon_opacity: PaintPropertyBinder<f32> => ["opacity"],
         icon_color: PaintPropertyBinder<Color> => ["fill_color"],
         icon_halo_color: PaintPropertyBinder<Color> => ["halo_color"],
@@ -36,7 +36,7 @@ mln_render::paint_property_binders!(
 );
 
 mln_render::paint_property_binders!(
-    pub(crate) struct SymbolTextBinders for SymbolPaintProperties::PossiblyEvaluated {
+    pub(crate) struct SymbolTextBinders for paint::PossiblyEvaluated {
         text_opacity: PaintPropertyBinder<f32> => ["opacity"],
         text_color: PaintPropertyBinder<Color> => ["fill_color"],
         text_halo_color: PaintPropertyBinder<Color> => ["halo_color"],
@@ -508,7 +508,7 @@ pub(crate) struct SymbolLayoutFlags {
 
 #[derive(Clone, mln_wire::Wire)]
 pub struct SymbolBucket {
-    pub(crate) layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
+    pub(crate) layout: Arc<layout::PossiblyEvaluated>,
     pub(crate) bucket_leader_id: Arc<str>,
     pub(crate) flags: SymbolLayoutFlags,
     /// The text's writing modes that point placement tries, in order.

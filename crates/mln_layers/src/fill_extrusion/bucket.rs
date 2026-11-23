@@ -15,11 +15,11 @@ use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates, c
 use mln_util::Color;
 use mln_util::constants::{EARTH_RADIUS_M, EXTENT, M2PI};
 
-use super::properties::FillExtrusionPaintProperties;
+use super::properties::paint;
 use crate::tessellator::Tessellator;
 
 mln_render::paint_property_binders!(
-    pub(crate) struct FillExtrusionBinders for FillExtrusionPaintProperties::PossiblyEvaluated {
+    pub(crate) struct FillExtrusionBinders for paint::PossiblyEvaluated {
         fill_extrusion_base: PaintPropertyBinder<f32> => ["base"],
         fill_extrusion_color: PaintPropertyBinder<Color> => ["color"],
         fill_extrusion_height: PaintPropertyBinder<f32> => ["height"],

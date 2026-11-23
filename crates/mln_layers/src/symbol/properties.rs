@@ -7,8 +7,7 @@ use super::Symbol;
 
 mln_style::properties!(
     /// The layout properties of a symbol layer.
-    #[expect(non_snake_case, reason = "named for the C++ `SymbolLayoutProperties` type list")]
-    pub mod SymbolLayoutProperties: layout {
+    pub mod layout: layout {
         icon_allow_overlap: constant bool = false,
         icon_anchor: data_driven SymbolAnchorType = SymbolAnchorType::Center,
         icon_ignore_placement: constant bool = false,
@@ -62,8 +61,7 @@ mln_style::properties!(
 
 mln_style::properties!(
     /// The paint properties of a symbol layer.
-    #[expect(non_snake_case, reason = "named for the C++ `SymbolPaintProperties` type list")]
-    pub mod SymbolPaintProperties: paint {
+    pub mod paint: paint {
         icon_color: data_driven Color = Color::black(),
         icon_halo_blur: data_driven f32 = 0.0_f32,
         icon_halo_color: data_driven Color = Color::default(),

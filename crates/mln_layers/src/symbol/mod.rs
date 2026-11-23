@@ -23,7 +23,7 @@ mod pool;
 pub mod programs;
 mod projection;
 #[rustfmt::skip]
-mod properties;
+pub mod properties;
 mod glsl;
 mod glsl_es;
 mod msl;
@@ -40,7 +40,6 @@ use mln_style::property_value::{PropertyValue, StyleValue as _};
 use mln_util::constants::{LAST_RESORT_ALPHABETIC_FONT, LAST_RESORT_PAN_UNICODE_FONT};
 use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
-pub use properties::{SymbolLayoutProperties, SymbolPaintProperties};
 
 use self::format_section_override::SymbolLayerPaintPropertyOverrides;
 
@@ -56,8 +55,8 @@ impl StyleLayerType for Symbol {
     const INFO: LayerTypeInfo = LayerTypeInfo { name: "symbol", source: SourceKind::Geometry, from_json: true };
     const PROPERTIES: &'static PropertyTable = &properties::PROPERTIES;
 
-    type LayoutProperties = SymbolLayoutProperties::Unevaluated;
-    type PaintProperties = SymbolPaintProperties::Transitionable;
+    type LayoutProperties = properties::layout::Unevaluated;
+    type PaintProperties = properties::paint::Transitionable;
     type Data = ();
 
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {

@@ -7,8 +7,7 @@ use super::Hillshade;
 
 mln_style::properties!(
     /// The paint properties of a hillshade layer.
-    #[expect(non_snake_case, reason = "named for the C++ `HillshadePaintProperties` type list")]
-    pub mod HillshadePaintProperties: paint {
+    pub mod paint: paint {
         hillshade_accent_color: constant Color = Color::black(),
         hillshade_exaggeration: constant f32 = 0.5_f32,
         hillshade_highlight_color: constant Vec<Color> = vec![Color::white()],

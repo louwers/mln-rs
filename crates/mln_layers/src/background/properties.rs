@@ -7,8 +7,7 @@ use super::Background;
 
 mln_style::properties!(
     /// The paint properties of a background layer.
-    #[expect(non_snake_case, reason = "named for the C++ `BackgroundPaintProperties` type list")]
-    pub mod BackgroundPaintProperties: paint {
+    pub mod paint: paint {
         background_color: constant Color = Color::black(),
         background_opacity: constant f32 = 1.0_f32,
         background_pattern: cross_faded Image = Image::default(),

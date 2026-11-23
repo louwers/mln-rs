@@ -14,15 +14,16 @@ use mln_util::Color;
 use mln_util::intersection_tests::polygon_intersects_buffered_multi_line;
 use mln_util::size::Size;
 
+use super::Line;
 use super::bucket::LineBucket;
 use super::dashes::{DASH_SAMPLER, DashTextures};
 use super::layout::LineLayout;
 use super::programs::{LINE, LINE_GRADIENT, LINE_GRADIENT_SDF, LINE_PATTERN, LINE_SDF};
+use super::properties::paint;
 use super::ubo::{
     LineDrawableUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO, LinePatternTilePropsUBO,
     LineSDFDrawableUBO, LineSDFTilePropsUBO,
 };
-use super::{Line, LinePaintProperties};
 use crate::color_ramp::ColorRamp;
 use crate::features::PATTERN_SAMPLER;
 
@@ -152,7 +153,7 @@ impl Layer for LineLayer {
         }
         // The pattern's program reads the floor width, which isn't one of
         // its properties.
-        let floorwidth = paint.line_floor_width.constant_or(&LinePaintProperties::Defaults::line_floor_width());
+        let floorwidth = paint.line_floor_width.constant_or(&paint::Defaults::line_floor_width());
         main.block(&LineEvaluatedPropsUBO { floorwidth, ..LineEvaluatedPropsUBO::default() });
         let how = transform(paint);
         let (zoom, integer_zoom) = (camera.zoom() as f32, f32::from(camera.integer_zoom()));
@@ -222,7 +223,7 @@ impl Layer for LineLayer {
     }
 
     fn query_radius(&self, layer: &LayerValues<Line>, laid: LayerBucket<'_, Line, LineBucket>, _camera: &View) -> f32 {
-        type Defaults = LinePaintProperties::Defaults;
+        type Defaults = paint::Defaults;
         let (paint, binders) = (&layer.evaluated.paint, laid.binders(&laid.bucket.binders));
         let offset = binders.line_offset.max_or(&paint.line_offset).unwrap_or(Defaults::line_offset());
         let width = binders.line_width.max_or(&paint.line_width).unwrap_or(Defaults::line_width());
@@ -279,6 +280,6 @@ fn offset_lines(lines: &GeometryCollection, offset: f64) -> Vec<GeometryCoordina
 }
 
 /// How the layer's `paint` places a tile's lines: moved by its translate.
-fn transform(paint: &LinePaintProperties::PossiblyEvaluated) -> TileTransform {
+fn transform(paint: &paint::PossiblyEvaluated) -> TileTransform {
     TileTransform::translated(*paint.line_translate.uniform(), *paint.line_translate_anchor.uniform())
 }

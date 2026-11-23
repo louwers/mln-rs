@@ -7,9 +7,10 @@ use mln_render::layer::{
 };
 use mln_style_types::RasterResamplingType;
 
+use super::Raster;
 use super::programs::RASTER;
+use super::properties::paint;
 use super::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
-use super::{Raster, RasterPaintProperties};
 use crate::resampling;
 
 /// A raster layer: each tile's image, or an image source's image in each of
@@ -72,7 +73,7 @@ impl Layer for RasterLayer {
 
 /// The block of `paint` that the layer's draws share, which put their
 /// vertices on `quad`.
-fn props(paint: &RasterPaintProperties::PossiblyEvaluated, quad: &ImageQuad) -> RasterEvaluatedPropsUBO {
+fn props(paint: &paint::PossiblyEvaluated, quad: &ImageQuad) -> RasterEvaluatedPropsUBO {
     let [top_left, top_right, bottom_right, bottom_left] = quad.corners;
     let spin = mln_math::deg2radf(*paint.raster_hue_rotate.uniform());
     let (s, c, sqrt3) = (spin.sin(), spin.cos(), 3.0f32.sqrt());

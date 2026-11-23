@@ -28,8 +28,7 @@ use crate::layer::{
 
 mln_style::properties!(
     /// The layout properties of a `dot` layer.
-    #[expect(non_snake_case, reason = "named as the layer types' property sets are")]
-    pub(crate) mod DotLayoutProperties: layout {
+    pub(crate) mod dot_layout: layout {
         dot_font: data_driven Vec<String> = Vec::new(),
         dot_icon: data_driven Image = Image::default(),
         dot_label: data_driven Formatted = Formatted::default(),
@@ -40,8 +39,7 @@ mln_style::properties!(
 
 mln_style::properties!(
     /// The paint properties of a `dot` layer.
-    #[expect(non_snake_case, reason = "named as the layer types' property sets are")]
-    pub(crate) mod DotPaintProperties: paint {
+    pub(crate) mod dot_paint: paint {
         dot_color: data_driven Color = Color::black(),
         dot_pattern: cross_faded Image = Image::default(),
     }
@@ -79,8 +77,8 @@ impl StyleLayerType for Dot {
     const INFO: LayerTypeInfo = LayerTypeInfo { name: "dot", source: SourceKind::Geometry, from_json: true };
     const PROPERTIES: &'static PropertyTable = &PROPERTIES;
 
-    type LayoutProperties = DotLayoutProperties::Unevaluated;
-    type PaintProperties = DotPaintProperties::Transitionable;
+    type LayoutProperties = dot_layout::Unevaluated;
+    type PaintProperties = dot_paint::Transitionable;
     type Data = ();
 
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {
@@ -99,11 +97,11 @@ impl StyleLayerType for Dot {
 mod binders {
     use mln_util::Color;
 
-    use super::DotPaintProperties;
+    use super::dot_paint;
     use crate::layer::PaintPropertyBinder;
 
     crate::paint_property_binders!(
-        pub(crate) struct DotBinders for DotPaintProperties::PossiblyEvaluated {
+        pub(crate) struct DotBinders for dot_paint::PossiblyEvaluated {
             dot_color: PaintPropertyBinder<Color> => ["color"],
         }
     );

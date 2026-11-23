@@ -28,10 +28,11 @@ use mln_util::Color;
 use mln_util::geometry::FeatureType;
 use mln_vec_map::{VecMap, VecSet};
 
+use crate::symbol::Symbol;
 use crate::symbol::format_section_override::{
     SymbolLayerPaintPropertyOverrides as MockOverrides, format_section_override as new_override, set_overrides,
 };
-use crate::symbol::{Symbol, SymbolLayoutProperties, SymbolPaintProperties};
+use crate::symbol::properties::{layout, paint};
 
 /// `test/include/mln/test/stub_geometry_tile_feature.hpp` (the property-map
 /// constructor).
@@ -225,11 +226,8 @@ impl FormattedCase {
 /// `layout` (a `PossiblyEvaluated` set in C++) as the `Unevaluated` layout
 /// the port's `set_overrides` takes: only its text-field is read, through
 /// `hasOverrides`, which gives the same answer for both.
-fn unevaluated_layout_with_text_field(formatted: Formatted) -> SymbolLayoutProperties::Unevaluated {
-    SymbolLayoutProperties::Unevaluated {
-        text_field: PropertyValue::Constant(formatted),
-        ..SymbolLayoutProperties::Unevaluated::default()
-    }
+fn unevaluated_layout_with_text_field(formatted: Formatted) -> layout::Unevaluated {
+    layout::Unevaluated { text_field: PropertyValue::Constant(formatted), ..layout::Unevaluated::default() }
 }
 
 // gtest: Layer.SymbolLayerOverrides
@@ -240,7 +238,7 @@ fn symbol_layer_overrides() {
 
     // Unevaluated / transitionable.
     {
-        let mut layout = SymbolLayoutProperties::Unevaluated::default();
+        let mut layout = layout::Unevaluated::default();
         // testHasOverrides<PropertyValue>(layout)
         for case in FORMATTED_CASES {
             let value = match case {
@@ -274,8 +272,8 @@ fn symbol_layer_overrides() {
 
     // Possibly evaluated.
     {
-        let mut layout = SymbolLayoutProperties::PossiblyEvaluated::default();
-        let mut paint = SymbolPaintProperties::PossiblyEvaluated::default();
+        let mut layout = layout::PossiblyEvaluated::default();
+        let mut paint = paint::PossiblyEvaluated::default();
         // testHasOverrides<Evaluated>(layout); C++'s
         // `Evaluated<Formatted>()` is a default-constructed
         // (empty) constant, so its "Undefined" step has no override.
@@ -295,14 +293,14 @@ fn symbol_layer_overrides() {
         set_overrides(
             &unevaluated_layout_with_text_field(overridden_formatted()),
             &mut paint,
-            &SymbolPaintProperties::Unevaluated::default(),
+            &paint::Unevaluated::default(),
             None,
         );
         assert!(!paint.text_color.is_constant());
 
-        let mut updated = SymbolPaintProperties::PossiblyEvaluated {
+        let mut updated = paint::PossiblyEvaluated {
             text_color: Evaluated::Constant(Color::red()),
-            ..SymbolPaintProperties::PossiblyEvaluated::default()
+            ..paint::PossiblyEvaluated::default()
         };
         MockOverrides::update_overrides(&paint, &mut updated);
         assert!(!updated.text_color.is_constant());
@@ -312,9 +310,9 @@ fn symbol_layer_overrides() {
     // keeps the dependency, its keys, and the state through the override
     // wrapper.
     {
-        let mut paint = SymbolPaintProperties::PossiblyEvaluated {
+        let mut paint = paint::PossiblyEvaluated {
             text_color: Evaluated::Constant(Color::red()),
-            ..SymbolPaintProperties::PossiblyEvaluated::default()
+            ..paint::PossiblyEvaluated::default()
         };
 
         let mut ctx = ParsingContext::new(&Functions::with_builtins());
@@ -324,11 +322,11 @@ fn symbol_layer_overrides() {
             &mut ctx,
         );
         let state_expression = state_expression.expect("global-state");
-        let unevaluated = SymbolPaintProperties::Unevaluated {
+        let unevaluated = paint::Unevaluated {
             text_color: Transitioning::new(PropertyValue::Expression(PropertyExpression::<Color>::from_expr(
                 to_color(state_expression, None),
             ))),
-            ..SymbolPaintProperties::Unevaluated::default()
+            ..paint::Unevaluated::default()
         };
 
         let state: Arc<GlobalStateMap> =

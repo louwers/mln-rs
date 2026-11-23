@@ -8,12 +8,12 @@ use mln_render::placement::{Aabb, CollisionIndex, Item, Overlap, Shape};
 use mln_style_types::IconOverlapType;
 use mln_util::constants::EXTENT;
 
-use crate::symbol::SymbolLayoutProperties;
 use crate::symbol::bucket::{PlacedSymbol, PlacedSymbolPools};
 use crate::symbol::collision_feature::{CollisionBox, CollisionFeature};
 use crate::symbol::projection::{
     LabelPlaneProjector, LineLabel, LinePlacer, PlacedGlyph, TileDistance, tile_skew_vectors,
 };
+use crate::symbol::properties::layout;
 
 /// A box's edges: [x1, y1, x2, y2].
 pub(crate) type CollisionBoundaries = [f32; 4];
@@ -34,14 +34,14 @@ impl IntersectStatus {
 /// How a symbol layer's text may overlap the symbols placed before it: its
 /// `text-overlap`, or its `text-allow-overlap` when `text-overlap` isn't
 /// set.
-pub(crate) fn text_overlap(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> Overlap {
+pub(crate) fn text_overlap(layout: &layout::PossiblyEvaluated) -> Overlap {
     overlap(*layout.text_overlap.uniform(), *layout.text_allow_overlap.uniform())
 }
 
 /// How a symbol layer's icon may overlap the symbols placed before it: its
 /// `icon-overlap`, or its `icon-allow-overlap` when `icon-overlap` isn't
 /// set.
-pub(crate) fn icon_overlap(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> Overlap {
+pub(crate) fn icon_overlap(layout: &layout::PossiblyEvaluated) -> Overlap {
     overlap(*layout.icon_overlap.uniform(), *layout.icon_allow_overlap.uniform())
 }
 

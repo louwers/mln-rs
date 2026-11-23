@@ -411,11 +411,11 @@ mod tests {
     use mln_util::Color;
 
     use super::*;
-    use crate::tests::fixture_layer::{Dot, DotPaintProperties};
+    use crate::tests::fixture_layer::{Dot, dot_paint};
 
     #[test]
     fn recover_keeps_the_allocation() {
-        let paint = DotPaintProperties::PossiblyEvaluated {
+        let paint = dot_paint::PossiblyEvaluated {
             dot_color: Evaluated::Constant(Color::white()),
             dot_pattern: Evaluated::default(),
         };

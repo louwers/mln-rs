@@ -1,10 +1,10 @@
 use mln_render::layer::{Bucket, GpuVec, Indexes, LayerBinders, PaintPropertyBinder, Upload};
 use mln_util::Color;
 
-use super::CirclePaintProperties;
+use super::properties::paint;
 
 mln_render::paint_property_binders!(
-    pub(crate) struct CircleBinders for CirclePaintProperties::PossiblyEvaluated {
+    pub(crate) struct CircleBinders for paint::PossiblyEvaluated {
         circle_blur: PaintPropertyBinder<f32> => ["blur"],
         circle_color: PaintPropertyBinder<Color> => ["color"],
         circle_opacity: PaintPropertyBinder<f32> => ["opacity"],
