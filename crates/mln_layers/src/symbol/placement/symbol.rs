@@ -245,9 +245,9 @@ impl Placement {
         if !bucket.flags.allow_vertical_placement || !text.runs.writing_modes().vertical {
             return place(self, false);
         }
-        debug_assert_ne!(bucket.flags.placement_modes.as_slice(), []);
+        debug_assert_ne!(bucket.placement_modes.as_slice(), []);
         let mut placed = PlacedText::default();
-        for &mode in &bucket.flags.placement_modes {
+        for &mode in &bucket.placement_modes {
             placed = place(self, mode == TextWritingModeType::Vertical);
             if placed.result.placed {
                 return placed;

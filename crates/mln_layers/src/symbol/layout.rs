@@ -442,6 +442,7 @@ pub struct SymbolLayout {
     tile_pixel_ratio: f32,
 
     flags: SymbolLayoutFlags,
+    placement_modes: Vec<TextWritingModeType>,
     sort_features_by_key: bool,
 
     text_size: PropertyValue<f32>,
@@ -502,6 +503,7 @@ impl Layout<Symbol> for SymbolLayout {
                     .is_some_and(|e| !e.is_feature_constant() || !e.is_zoom_constant()),
                 ..SymbolLayoutFlags::default()
             },
+            placement_modes: Vec::new(),
             sort_features_by_key: false,
             text_size: leader.layout.text_size.clone(),
             icon_size: leader.layout.icon_size.clone(),
@@ -551,7 +553,7 @@ impl Layout<Symbol> for SymbolLayout {
                     placement_modes.push(placement_mode);
                 }
             }
-            this.flags.placement_modes = placement_modes;
+            this.placement_modes = placement_modes;
         }
 
         let canonical_id = this.canonical_id;
@@ -1586,7 +1588,9 @@ impl SymbolLayout {
             section_overrides: SymbolLayerPaintPropertyOverrides::has_overrides(&self.layout.text_field),
             allow_vertical_placement: self.flags.allow_vertical_placement,
         };
-        state.symbol_instances = (self.symbols.into_iter())
+        state.symbol_instances = self
+            .symbols
+            .into_iter()
             .map(|laid_out| {
                 let feature = &self.features[laid_out.feature];
                 writer.add(laid_out, feature)
@@ -1600,6 +1604,7 @@ impl SymbolLayout {
             layout: self.layout,
             bucket_leader_id: self.bucket_leader_id,
             flags: self.flags,
+            placement_modes: self.placement_modes,
             sort_key_ranges: self.sort_key_ranges,
             icon_binders,
             text_binders,

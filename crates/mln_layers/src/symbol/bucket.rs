@@ -498,13 +498,12 @@ impl SymbolBucketState {
 }
 
 /// What layout found of a bucket's symbols that drawing and placement read.
-#[derive(Clone, Debug, Default, mln_wire::Wire)]
+#[derive(Clone, Copy, Debug, Default, mln_wire::Wire)]
 pub(crate) struct SymbolLayoutFlags {
     pub(crate) icons_need_linear: bool,
     pub(crate) sort_features_by_y: bool,
     pub(crate) icons_in_text: bool,
     pub(crate) allow_vertical_placement: bool,
-    pub(crate) placement_modes: Vec<TextWritingModeType>,
 }
 
 #[derive(Clone, mln_wire::Wire)]
@@ -512,6 +511,8 @@ pub struct SymbolBucket {
     pub(crate) layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
     pub(crate) bucket_leader_id: Arc<str>,
     pub(crate) flags: SymbolLayoutFlags,
+    /// The text's writing modes that point placement tries, in order.
+    pub(crate) placement_modes: Vec<TextWritingModeType>,
 
     pub(crate) sort_key_ranges: Vec<SortKeyRange>,
 

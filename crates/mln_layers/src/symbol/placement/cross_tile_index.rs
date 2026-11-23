@@ -420,6 +420,7 @@ mod tests {
             layout,
             bucket_leader_id: Arc::from("test"),
             flags: SymbolLayoutFlags::default(),
+            placement_modes: Vec::new(),
             sort_key_ranges: Vec::new(),
             icon_binders: LayerBinders::default(),
             text_binders: LayerBinders::default(),
