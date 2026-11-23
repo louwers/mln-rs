@@ -5,9 +5,9 @@ use mln_conversion::value_to_json;
 use mln_style_types::{
     AlignmentType, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType, IconOverlapType,
     IconTextFitType, LayerBlendType, LightAnchorType, LineCapType, LineJoinType, Position, ProjectionDefinition,
-    RasterResamplingType, ResamplingType, RotateAnchorType, Rotation, SymbolAnchorType, SymbolPlacementType,
-    SymbolZOrderType, TextJustifyType, TextRotationAlignmentType, TextTransformType, TextWritingModeType,
-    TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType,
+    RasterResamplingType, ResamplingType, RotateAnchorType, Rotation, SymbolAnchorType, SymbolHeightAnchorType,
+    SymbolPlacementType, SymbolZOrderType, TextJustifyType, TextRotationAlignmentType, TextTransformType,
+    TextWritingModeType, TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType,
 };
 use mln_util::string::to_string_double;
 use mln_util::{Color, Padding};
@@ -653,6 +653,7 @@ enum_value_converter!(
     ResamplingType,
     RotateAnchorType,
     SymbolAnchorType,
+    SymbolHeightAnchorType,
     SymbolPlacementType,
     SymbolZOrderType,
     TextJustifyType,
