@@ -61,6 +61,14 @@ impl Face {
             .collect()
     }
 
+    /// The glyph the font maps `c` to, unshaped; `undefined` unless the
+    /// face draws one.
+    #[wasm_bindgen(js_name = glyphOf)]
+    #[must_use]
+    pub fn glyph_of(&self, c: char) -> Option<u16> {
+        self.shaper.glyph_of(c).map(|glyph| glyph.code)
+    }
+
     /// Rasterizes the glyph `code` as `[metrics, bitmap]`, the metrics a
     /// `Float64Array` of width, height, left, top, advance, double resolution
     /// (0 or 1), and the bitmap's width and height, the bitmap a

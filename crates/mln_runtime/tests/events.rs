@@ -1,6 +1,6 @@
-// Events, snapshots and style loads. They follow maplibre-native-ffi's ABI
-// tests (tests/native/abi/runtime/events.c and event_generations.c at
-// eae96a42c) where those test the same rules.
+// Events, snapshots and style loads. They follow the C ABI suite
+// (tools/c-abi-test/testdata/tests/native/abi/runtime/events.c and
+// event_generations.c) where it tests the same rules.
 
 use std::sync::Arc;
 use std::time::Duration;

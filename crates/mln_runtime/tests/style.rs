@@ -1,6 +1,6 @@
-// The map handle's style commands. They follow maplibre-native-ffi's ABI
-// tests (tests/native/abi/style/{sources,custom_sources,geojson,layers}.c at
-// eae96a42c) where those test the same rules.
+// The map handle's style commands. They follow the C ABI suite
+// (tools/c-abi-test/testdata/tests/native/abi/style/{sources,custom_sources,
+// geojson,layers}.c) where it tests the same rules.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

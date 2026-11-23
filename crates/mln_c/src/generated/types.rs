@@ -166,9 +166,10 @@ pub type mln_network_status = u32;
 /** Deletes the ambient cache's resources and frees the space they used.
  Offline regions keep their resources.*/
 pub const MLN_CACHE_DATABASE_OPERATION_CLEAR: mln_cache_database_operation = 1;
-/** Keeps the ambient cache's resources, but makes maps check each one with the
- server before they use it again. Offline regions keep their resources as
- they are.*/
+/** Keeps the ambient cache's resources, but makes them stale: maps check each
+ one with the server when they next use it, and show it meanwhile unless
+ the server requires checking it first. Offline regions keep their
+ resources as they are.*/
 pub const MLN_CACHE_DATABASE_OPERATION_INVALIDATE: mln_cache_database_operation = 2;
 /** Compacts the whole database file to free the disk space that it no longer
  uses.*/
@@ -826,15 +827,20 @@ pub struct mln_resource_response {
     pub byte_count: usize,
     /// A description of the error, for MLN_RESOURCE_RESPONSE_STATUS_ERROR.
     pub error_message: mln_buffer_view,
-    /** Whether the library must request the resource again before it reuses this
- copy.*/
+    /** Whether the library must not use this copy once it expires until it
+ requests the resource again, not even while the server can't be reached,
+ as `Cache-Control: must-revalidate` or `no-cache` says.*/
     pub must_revalidate: bool,
     pub modified_unix_ms: i64,
+    /// When this copy stops being fresh. Without it, the copy never expires.
     pub expires_unix_ms: i64,
     /// Empty when the resource has no ETag.
     pub etag: mln_buffer_view,
     /// When to retry, for MLN_RESOURCE_RESPONSE_STATUS_ERROR.
     pub retry_after_unix_ms: i64,
+    /** Whether the library must not store this copy, as
+ `Cache-Control: no-store` says.*/
+    pub no_store: bool,
 }
 /** Serves a network request in place of the library.
 
@@ -1486,6 +1492,32 @@ pub struct mln_offline_region_info {
     pub definition: mln_offline_region_definition,
     pub metadata: *const u8,
     pub metadata_size: usize,
+}
+pub const MLN_OFFLINE_REGION_EXPIRY_STALE_AFTER: mln_offline_region_expiry_field = 1;
+pub const MLN_OFFLINE_REGION_EXPIRY_USABLE_OFFLINE_UNTIL: mln_offline_region_expiry_field = 2;
+/// The fields that mln_offline_region_expiry sets.
+pub type mln_offline_region_expiry_field = u32;
+/// A set of mln_offline_region_expiry_field bits.
+pub type mln_offline_region_expiry_fields = u32;
+/// How long the resources that an offline region holds stay usable.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_offline_region_expiry {
+    pub fields: mln_offline_region_expiry_fields,
+    /** When the first of the region's resources goes stale, which may have
+ passed. Maps show a stale resource while they check it with the server,
+ unless it must be checked first, and the region's download refreshes it.
+ Without it, no resource ever goes stale.*/
+    pub stale_after_unix_ms: i64,
+    /** When the first of the region's resources that the server requires
+ checking once stale stops being usable without the server, which may have
+ passed. Refresh the region before then to keep all of it usable offline.
+ Without it, every resource stays usable offline.*/
+    pub usable_offline_until_unix_ms: i64,
+    /// The resources that are stale now, tiles included.
+    pub stale_resource_count: u64,
+    /// The stale resources that maps can't use now without the server.
+    pub unusable_resource_count: u64,
 }
 /// A point in the Web Mercator projection, in meters.
 #[repr(C)]

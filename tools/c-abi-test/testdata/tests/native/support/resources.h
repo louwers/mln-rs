@@ -35,6 +35,9 @@ mln_status mln_test_clear_http_header_transform(mln_runtime runtime);
 // a cache file starts with no ambient cache, so this one gives it a budget.
 mln_runtime mln_test_create_caching_runtime(void);
 
+// The current time, in milliseconds since the Unix epoch.
+int64_t mln_test_now_unix_ms(void);
+
 bool mln_test_await_loading_failure(
   mln_runtime runtime, mln_map map, char* out_message, size_t capacity
 );

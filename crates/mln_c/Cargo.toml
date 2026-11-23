@@ -12,18 +12,18 @@ include.workspace = true
 publish = false
 
 [lib]
-# The name of maplibre-native-ffi's CMake target, so its ABI suite links this
-# library as it links that one (tools/c-abi-test).
+# The C library's name, which hosts and the ABI suite (tools/c-abi-test) link.
 name = "maplibre_native_c"
 # And an rlib for a Rust app in the browser that links the library into its
 # own wasm module.
 crate-type = ["cdylib", "staticlib", "rlib"]
 doctest = false
 
-# The runtime's backends (the facade's, in the root Cargo.toml). A browser
-# build turns on one of `webgpu` and `gl` (`mise run c-web:build`).
+# The runtime's backends (the facade's, in the root Cargo.toml), by default
+# the native ones. A browser build turns on one of `webgpu` and `gl`
+# (`mise run c-web:build`).
 [features]
-default = ["webgpu", "metal", "vulkan", "d3d12", "gl"]
+default = ["metal", "vulkan", "d3d12", "gl"]
 webgpu = ["mln_rs/webgpu"]
 metal = ["mln_rs/metal"]
 vulkan = ["mln_rs/vulkan", "dep:mln_vulkan"]

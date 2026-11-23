@@ -48,6 +48,8 @@ feature = { package = "mln-rs-feature", path = "../../vendor/feature" }
 geo-types.workspace = true
 geojson.workspace = true
 glam.workspace = true
+# tile_expiry_test's tile server.
+httpmock.workspace = true
 mln_image = { package = "mln-rs-image", path = "../mln_image" }
 mln_map_types = { package = "mln-rs-map-types", path = "../mln_map_types" }
 mln_math = { package = "mln-rs-math", path = "../mln_math" }

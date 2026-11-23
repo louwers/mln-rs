@@ -126,6 +126,47 @@ fn load_url_ignores_no_content_and_not_modified_after_a_style() {
     assert_eq!("Remote", map.style().get_name());
 }
 
+fn connection_error() -> Response {
+    let mut response = Response::new();
+    response.error = Some(Box::new(ResourceError::new(Reason::Connection, "offline")));
+    response
+}
+
+/// The file source answers the style's request again as it retries an error
+/// and revalidates: a streak of errors fails the load once.
+#[test]
+fn a_streak_of_errors_fails_the_load_once() {
+    let (mut map, run_loop) = map_with_style_response(|_| Some(connection_error()));
+    map.load_style_url("http://some-url");
+    run_loop.run_once(&mut ());
+    let mut events = map.drain_events();
+    for _ in 0..2 {
+        map.style_loader().push_style_response(connection_error());
+        events.extend(map.drain_events());
+    }
+    assert_eq!(1, load_failures(&events).len());
+    // A success ends the streak.
+    map.style_loader().push_style_response(style_response(REMOTE));
+    map.drain_events();
+    assert!(map.style_document_loaded());
+}
+
+/// Revalidations that fail keep the style, and don't fail its load.
+#[test]
+fn failed_revalidations_keep_the_style() {
+    let (mut map, run_loop) = map_with_style_response(|_| Some(style_response(REMOTE)));
+    map.load_style_url("http://some-url");
+    run_loop.run_once(&mut ());
+    map.drain_events();
+    for _ in 0..3 {
+        map.style_loader().push_style_response(connection_error());
+        let events = map.drain_events();
+        assert!(load_failures(&events).is_empty(), "{events:?}");
+    }
+    assert!(map.style_document_loaded());
+    assert_eq!("Remote", map.style().get_name());
+}
+
 #[test]
 fn load_json_parse_error() {
     let (mut map, _run_loop) = map_with_style_response(|_| None);
@@ -202,7 +243,7 @@ fn default_sprite_path() -> String {
 }
 
 fn sprite_style(sprite_path: &str) -> String {
-    format!(r#"{{"version": 8, "sprite": "{sprite_path}", "sources": {{}}, "layers": []}}"#)
+    serde_json::json!({"version": 8, "sprite": sprite_path, "sources": {}, "layers": []}).to_string()
 }
 
 fn successful_response(

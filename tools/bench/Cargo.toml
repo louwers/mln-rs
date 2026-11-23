@@ -59,8 +59,11 @@ mln_runtime = { package = "mln-rs-runtime", path = "../../crates/mln_runtime", d
 ] }
 # The GeoJSON sources whose data the GeoJSON scenarios parse and build.
 mln_sources = { package = "mln-rs-sources", path = "../../crates/mln_sources" }
-# The file source that reads the fixtures (support/fixtures.rs).
-mln_storage = { package = "mln-rs-storage", path = "../../crates/mln_storage" }
+# The file source that reads the fixtures (support/fixtures.rs), and the
+# online file source over the simulated network (support/network.rs).
+mln_storage = { package = "mln-rs-storage", path = "../../crates/mln_storage", features = [
+  "bench",
+] }
 # The style, and its edits.
 mln_style = { package = "mln-rs-style", path = "../../crates/mln_style" }
 mln_style_types = { package = "mln-rs-style-types", path = "../../crates/mln_style_types" }
@@ -76,6 +79,8 @@ mln_webgpu = { package = "mln-rs-webgpu", path = "../../crates/mln_webgpu", feat
 ] }
 # The latency file source's held answers (support/latency.rs).
 parking_lot = "0.12"
+# The paths of the simulated server's files (support/network.rs).
+percent-encoding = "2"
 # Single tiles of the fixtures' archives (support/fixtures.rs).
 pmtiles = { version = "0.28", default-features = false }
 serde = { version = "1", features = ["derive"] }

@@ -28,6 +28,7 @@ use mln_util::size::Size;
 use mln_util::time::Instant;
 use parking_lot::Mutex;
 
+mod anchor;
 mod animation;
 mod gesture;
 mod momentum;
@@ -338,7 +339,11 @@ impl Transform {
     }
 
     /// Moves the map by `offset`. A drag on the globe turns the planet so
-    /// that the location under `anchor` follows the cursor. With the bearing
+    /// that the location under `anchor` follows the cursor. On a Mercator
+    /// view the flat map's ground under the cursor before the move, at sea
+    /// level, follows it; without an anchor, or with one whose line of sight
+    /// doesn't meet the ground, the map moves on the plane at the center's
+    /// altitude. On the globe, with the bearing
     /// held, steps that follow one another, each starting at the `anchor` of
     /// the one before with the camera as it left it, hold the location the
     /// first of them grabbed, wherever
@@ -540,8 +545,15 @@ impl Transform {
         let size = self.state.view().size();
         let center = self.state.view().padding().center_in(size);
         let point_on_screen = ScreenCoordinate::new(center.x - center_offset.x, center.y - center_offset.y);
-        // Use unwrapped LatLng to carry information about moveBy direction.
-        let center = self.screen_coordinate_to_lat_lng(&point_on_screen, WrapMode::Unwrapped)?;
+        // The ground the pointer grabbed follows it, on its plane; without an
+        // anchor, the map moves on the plane at the center's altitude. Use
+        // unwrapped LatLng to carry information about moveBy direction.
+        let anchored = anchor.and_then(|anchor| {
+            let grabbed = ScreenCoordinate::new(anchor.x - offset.x, anchor.y - offset.y);
+            Some((grabbed, anchor, self.anchor_plane(&grabbed, &anchor)?))
+        });
+        let (from, to, height) = anchored.unwrap_or((point_on_screen, center, self.view().center_altitude()));
+        let center = self.center_moving_on_plane(&from, &to, height)?;
         self.ease_to(&CameraOptions { center: Some(center), ..Default::default() }, animation);
         Ok(())
     }
@@ -711,10 +723,29 @@ impl Transform {
         self.state.view().screen_coordinate_to_lat_lng(&flipped_point, wrap_mode)
     }
 
+    /// Where the line of sight through `point` (y down) meets the plane
+    /// `height` meters above sea level, on which the camera's moves solve
+    /// (see `anchor`). Fails as
+    /// [`View::screen_coordinate_to_lat_lng_at`].
+    pub(crate) fn screen_coordinate_to_lat_lng_at(
+        &self,
+        point: &ScreenCoordinate,
+        height: f64,
+        wrap_mode: WrapMode,
+    ) -> Result<LatLng, Error> {
+        self.view().screen_coordinate_to_lat_lng_at(&flip_y(self.view(), point), height, wrap_mode)
+    }
+
     pub(crate) fn set_free_camera_options(&mut self, options: &FreeCameraOptions) {
         self.cancel_transitions();
         self.state.set_free_camera_options(options);
     }
+}
+
+/// `point` measured from the other edge of `view`'s height: a screen point
+/// (y down) as a view point (y up), or back.
+fn flip_y(view: &View, point: &ScreenCoordinate) -> ScreenCoordinate {
+    ScreenCoordinate::new(point.x, f64::from(view.size().height) - point.y)
 }
 
 /// `seconds` truncated to whole nanoseconds; `None`

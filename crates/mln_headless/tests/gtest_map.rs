@@ -29,7 +29,7 @@ use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{
     Cache, DatabaseFileSource, FileSource, Kind, Loader, LoadingMethod, OnlineFileSource, Resource, ResourceOptions,
-    Response, StoragePolicy,
+    Response, StoragePolicy, TileFormat,
 };
 use mln_style::conversion::layer::convert_layer;
 use mln_style::conversion::{Convertible, Error as ConversionError};
@@ -672,7 +672,7 @@ fn offline() {
 
     let expired_item = |path: &str| {
         let mut response = file_response(&format!("test/fixtures/map/offline/{path}"));
-        response.expires = Some(Timestamp::from_secs(0));
+        response.caching.expires = Some(Timestamp::from_secs(0));
         response
     };
 
@@ -690,6 +690,7 @@ fn offline() {
             0,
             0,
             Scheme::XYZ,
+            TileFormat::Mvt,
             LoadingMethod::All,
         ),
         &expired_item("0-0-0.vector.pbf"),
@@ -878,7 +879,7 @@ fn double_style_load() {
 
 fn expired_or_fresh_response(fixture: &str, expires: Timestamp) -> Response {
     let mut response = file_response(fixture);
-    response.expires = Some(expires);
+    response.caching.expires = Some(expires);
     response
 }
 
@@ -939,7 +940,7 @@ fn style_expired() {
 
     // Send a fresh response, and confirm that we didn't overwrite the style,
     // but continue to wait for a fresh response.
-    response.expires = Some(hours_from_now(1));
+    response.caching.expires = Some(hours_from_now(1));
     test.file_source.respond(Kind::Style, &response);
     assert_eq!(1, test.file_source.requests_len());
     assert!(test.map().style().get_layer("bg").is_some());
@@ -1341,12 +1342,21 @@ fn no_content_tiles() {
     // Insert a 204 No Content response for the 0/0/0 tile
     let mut response = Response::new();
     response.no_content = true;
-    response.expires = Some(hours_from_now(1));
+    response.caching.expires = Some(hours_from_now(1));
     // C++ loads the style in the callback (inside render's run loop); see
     // Map.Offline for why the port waits for it first.
     let handle = test.run_loop.handle();
     dbfs.put(
-        &Resource::tile("http://example.com/{z}-{x}-{y}.vector.pbf", 1.0, 0, 0, 0, Scheme::XYZ, LoadingMethod::All),
+        &Resource::tile(
+            "http://example.com/{z}-{x}-{y}.vector.pbf",
+            1.0,
+            0,
+            0,
+            0,
+            Scheme::XYZ,
+            TileFormat::Mvt,
+            LoadingMethod::All,
+        ),
         &response,
     );
     dbfs.invoke(move |_| handle.stop());
@@ -1714,6 +1724,28 @@ fn image_source_beyond_mercator_latitudes() {
 
     // Passes, if rendering a frame doesn't crash.
     test.frontend().render_frame();
+}
+
+// An image source off screen draws nothing, so a still image of the map
+// doesn't wait for it.
+#[test]
+fn a_still_image_finishes_with_an_image_source_off_screen() {
+    let test = MapTest::new();
+    test.load_json(&read_file("test/fixtures/api/empty.json"));
+    let coordinates = [ll(10.0, 100.0), ll(10.0, 110.0), ll(0.0, 110.0), ll(0.0, 100.0)];
+    let source = image_source_of("image", coordinates, PremultipliedImage::new(Size::new(4, 4)));
+    test.map().add_source(source).unwrap();
+    test.map()
+        .edit_style(|style| {
+            style.apply(Edit::AddLayer {
+                layer: Layer::new(mln_rs::builtin_registry().style(), "raster", "image", "image").unwrap(),
+                before: None,
+            })
+        })
+        .unwrap();
+    test.map().jump_to(&CameraOptions { center: Some(ll(0.0, 0.0)), zoom: Some(4.0), ..Default::default() });
+    let image = test.render().image;
+    assert_eq!(test.frontend().size().width, image.size.width);
 }
 
 // An image source without a url starts empty: it requests nothing and draws
@@ -2410,7 +2442,7 @@ fn expired_sprite_sheet() {
     let make_response = |path: &str, expires: bool| {
         let mut response = Response::new();
         response.data = Some(Arc::new(server.online_fixture(path)));
-        response.expires = Some(if expires { Timestamp::from_secs(0) } else { Timestamp::from_secs(i64::MAX) });
+        response.caching.expires = Some(if expires { Timestamp::from_secs(0) } else { Timestamp::from_secs(i64::MAX) });
         response
     };
 
@@ -2451,6 +2483,7 @@ fn expired_sprite_sheet() {
             0,
             0,
             Scheme::XYZ,
+            TileFormat::Mvt,
             LoadingMethod::All,
         ),
         &make_response("0-0-0.vector.pbf", false),
@@ -2709,9 +2742,9 @@ fn resource_error() {
     }
 }
 
-/// Answers each request of `kind` once, as a file source that doesn't retry
-/// does: with an error while the returned flag is set, then with `response`.
-/// Also returns the request count.
+/// Answers the requests of `kind` with an error while the returned flag is
+/// set, then with `response`. The stub asks again a millisecond after an
+/// error, while the request stays open. Also returns the count of answers.
 fn fail_requests(test: &MapTest, kind: Kind, response: Response) -> (Arc<AtomicBool>, Arc<AtomicUsize>) {
     let failing = Arc::new(AtomicBool::new(true));
     let count = Arc::new(AtomicUsize::new(0));
@@ -2737,15 +2770,17 @@ fn assert_still_image_retries_failed_tile(source: &str, layer: &str) {
     test.load_json(&format!(r#"{{"version": 8, "sources": {{"tiles": {source}}}, "layers": [{layer}]}}"#));
 
     assert_eq!(test.try_render().err().map(|e| e.message).as_deref(), Some("failed"));
-    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    // The tile's request stays open after the error, and the stub may ask
+    // again before the renderer takes the failure in.
+    assert!(requests.load(Ordering::SeqCst) >= 1);
 
     failing.store(false, Ordering::SeqCst);
     assert!(test.try_render().is_ok());
-    assert_eq!(requests.load(Ordering::SeqCst), 2);
+    let answered = requests.load(Ordering::SeqCst);
 
     // Nothing failed, so nothing is requested again.
     assert!(test.try_render().is_ok());
-    assert_eq!(requests.load(Ordering::SeqCst), 2);
+    assert_eq!(requests.load(Ordering::SeqCst), answered);
 }
 
 // gtest: Map.StillImageRetriesFailedTile

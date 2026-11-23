@@ -11,7 +11,8 @@ use mln_render::source::{
     Cover, DataOrigin, DemTiles, GeometryTiles, LoadContext, OriginUpdate, RasterTiles, SourceType, Supply, TileKind,
     TileNecessity, TileOperation, TileTimes, WorldCopy,
 };
-use mln_storage::response::Reason;
+use mln_storage::resource::TileFormat;
+use mln_storage::response::{Caching, Reason};
 use mln_storage::{Data, FileSource, LoadingMethod, Request, Resource, Response, StoragePolicy};
 use mln_style::Source;
 use mln_style::layer_type::SourceKind;
@@ -201,10 +202,10 @@ impl<K: TilesetKind> TilesetOrigin<K> {
             return false;
         };
         let resource = &mut tile.resource;
-        (resource.prior_modified, resource.prior_expires, resource.prior_etag) =
-            (fetched.modified, fetched.expires, fetched.etag);
+        (resource.prior_modified, resource.prior_caching, resource.prior_etag) =
+            (fetched.modified, fetched.caching, fetched.etag);
         tile.from_network = true;
-        cx.set_times(TileTimes { modified: fetched.modified, expires: fetched.expires });
+        cx.set_times(TileTimes { modified: fetched.modified, expires: fetched.caching.expires });
         cx.deliver(Some(item));
         true
     }
@@ -229,10 +230,10 @@ impl<K: TilesetKind> TilesetOrigin<K> {
             resource.prior_modified = res.modified;
             resource.prior_etag = res.etag.clone();
         }
-        resource.prior_expires = res.expires;
+        resource.prior_caching = res.caching;
         let from_network = method == Method::Network;
         tile.from_network = from_network;
-        cx.set_times(TileTimes { modified: res.modified, expires: res.expires });
+        cx.set_times(TileTimes { modified: res.modified, expires: res.caching.expires });
         cx.report(match method {
             Method::Network => TileOperation::LoadFromNetwork,
             Method::Cache => TileOperation::LoadFromCache,
@@ -319,7 +320,14 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
             None => ("", cx.id().canonical, Scheme::default()),
         };
         let (x, y, z) = (canonical.x as i32, canonical.y as i32, canonical.z as i8);
-        let mut resource = Resource::tile(url, self.pixel_ratio, x, y, z, scheme, LoadingMethod::CacheOnly);
+        // What the tile's data is, which decides what an HTTP request for it
+        // accepts.
+        let format = match &self.data {
+            Some(TilesetData { encoding: VectorTileEncoding::Mlt { .. }, .. }) if is_vector::<K>() => TileFormat::Mlt,
+            _ if is_vector::<K>() => TileFormat::Mvt,
+            _ => TileFormat::Image,
+        };
+        let mut resource = Resource::tile(url, self.pixel_ratio, x, y, z, scheme, format, LoadingMethod::CacheOnly);
         resource.order = cx.order();
         let mut tile = TilesetTile { resource, fetch: Fetch::Idle, from_network: false };
         // A copy made at another pixel ratio is of another resource.
@@ -355,7 +363,7 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
         if not_found {
             let resource = &mut tile.resource;
             resource.prior_modified = res.modified;
-            resource.prior_expires = res.expires;
+            resource.prior_caching = res.caching;
             resource.prior_etag = res.etag.clone();
             resource.prior_data = res.data.clone();
         }
@@ -462,13 +470,13 @@ impl TilesetData {
 #[derive(Clone, Debug)]
 pub(crate) struct Fetched {
     modified: Option<Timestamp>,
-    expires: Option<Timestamp>,
+    caching: Caching,
     etag: Option<String>,
 }
 
 impl Fetched {
     fn of(res: &Response) -> Fetched {
-        Fetched { modified: res.modified, expires: res.expires, etag: res.etag.clone() }
+        Fetched { modified: res.modified, caching: res.caching, etag: res.etag.clone() }
     }
 }
 
@@ -515,7 +523,7 @@ impl Ancestors {
     /// expired at `now`.
     fn fresh(&self, id: CanonicalTileID, now: Timestamp) -> Option<(Arc<Ancestor>, Fetched)> {
         let held = self.0.get(&id)?;
-        let fetched = held.fetched.as_ref().filter(|fetched| fetched.expires.is_none_or(|expires| expires > now))?;
+        let fetched = held.fetched.as_ref().filter(|fetched| fetched.caching.is_fresh(now))?;
         Some((held.ancestor.upgrade()?, fetched.clone()))
     }
 }
@@ -536,7 +544,7 @@ pub(crate) struct TilesetTile {
     fetch: Fetch,
     /// The tile's data came from the network, rather than only the cache,
     /// and didn't fail to lay out or decode. It expires when the resource's
-    /// `prior_expires` says.
+    /// `prior_caching` says.
     from_network: bool,
 }
 
@@ -586,7 +594,7 @@ impl TilesetTile {
     fn take_validators(&mut self, copy: &TilesetTile) {
         let (resource, copy) = (&mut self.resource, &copy.resource);
         resource.prior_modified = copy.prior_modified;
-        resource.prior_expires = copy.prior_expires;
+        resource.prior_caching = copy.prior_caching;
         resource.prior_etag.clone_from(&copy.prior_etag);
         resource.prior_data.clone_from(&copy.prior_data);
     }
@@ -594,7 +602,7 @@ impl TilesetTile {
     /// Whether the tile's data came from the network and hasn't expired at
     /// `now`. Data without an expiry stays fresh.
     fn is_fresh(&self, now: Timestamp) -> bool {
-        self.from_network && self.resource.prior_expires.is_none_or(|expires| expires > now)
+        self.from_network && self.resource.prior_caching.is_fresh(now)
     }
 
     fn is_idle(&self) -> bool {
@@ -614,7 +622,7 @@ mod tests {
 
     fn tile(url: &str) -> TilesetTile {
         TilesetTile {
-            resource: Resource::tile(url, 1.0, 0, 0, 0, Scheme::XYZ, LoadingMethod::CacheOnly),
+            resource: Resource::tile(url, 1.0, 0, 0, 0, Scheme::XYZ, TileFormat::Mvt, LoadingMethod::CacheOnly),
             fetch: Fetch::Idle,
             from_network: false,
         }
@@ -626,14 +634,14 @@ mod tests {
     fn a_world_copy_takes_the_validators() {
         let mut copy = tile("a");
         copy.resource.prior_modified = Some(Timestamp::from_secs(1));
-        copy.resource.prior_expires = Some(Timestamp::from_secs(2));
+        copy.resource.prior_caching.expires = Some(Timestamp::from_secs(2));
         copy.resource.prior_etag = Some("etag".to_owned());
         copy.resource.prior_data = Some(Arc::new(vec![1]));
         let mut new = tile("a");
         new.take_validators(&copy);
         let (resource, copy_resource) = (&new.resource, &copy.resource);
         assert_eq!(resource.prior_modified, copy_resource.prior_modified);
-        assert_eq!(resource.prior_expires, copy_resource.prior_expires);
+        assert_eq!(resource.prior_caching, copy_resource.prior_caching);
         assert_eq!(resource.prior_etag, copy_resource.prior_etag);
         assert_eq!(resource.prior_data, copy_resource.prior_data);
     }

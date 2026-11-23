@@ -1029,6 +1029,12 @@ const _: unsafe extern "C" fn(
     mln_offline_region_id,
     *const mln_completion,
     *mut mln_diagnostic,
+) -> mln_status = crate::offline::mln_runtime_get_offline_region_expiry;
+const _: unsafe extern "C" fn(
+    mln_runtime,
+    mln_offline_region_id,
+    *const mln_completion,
+    *mut mln_diagnostic,
 ) -> mln_status = crate::offline::mln_runtime_get_offline_region_status;
 const _: unsafe extern "C" fn(
     mln_runtime,

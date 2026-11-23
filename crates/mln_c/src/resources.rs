@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use ::mln_runtime::{ResourceProvider, ResourceRequest};
 use mln_storage::resource::{Kind, Priority, Usage};
-use mln_storage::response::Reason;
+use mln_storage::response::{Caching, Reason};
 use mln_storage::{LoadingMethod, Resource, ResourceError, Response, StoragePolicy};
 use mln_util::chrono::Timestamp;
 
@@ -113,7 +113,7 @@ impl RequestInfo {
         };
         flag(resource.data_range.is_some(), MLN_RESOURCE_REQUEST_RANGE);
         flag(resource.prior_modified.is_some(), MLN_RESOURCE_REQUEST_PRIOR_MODIFIED);
-        flag(resource.prior_expires.is_some(), MLN_RESOURCE_REQUEST_PRIOR_EXPIRES);
+        flag(resource.prior_caching.expires.is_some(), MLN_RESOURCE_REQUEST_PRIOR_EXPIRES);
         let (start, end) = resource.data_range.unwrap_or_default();
         Self {
             fields,
@@ -141,7 +141,7 @@ impl RequestInfo {
             },
             range: mln_resource_range { start, end },
             prior_modified_unix_ms: resource.prior_modified.map_or(0, unix_ms),
-            prior_expires_unix_ms: resource.prior_expires.map_or(0, unix_ms),
+            prior_expires_unix_ms: resource.prior_caching.expires.map_or(0, unix_ms),
             prior_etag: LentText::new(resource.prior_etag.as_deref().unwrap_or_default()),
             prior_data: resource.prior_data.clone(),
         }
@@ -333,11 +333,12 @@ unsafe fn host_response(response: *const mln_resource_response) -> Result<Respon
         )
     };
     // SAFETY: as above.
-    let (modified, expires, retry_after) = unsafe {
+    let (modified, expires, retry_after, no_store) = unsafe {
         (
             (&raw const (*response).modified_unix_ms).read(),
             (&raw const (*response).expires_unix_ms).read(),
             (&raw const (*response).retry_after_unix_ms).read(),
+            (&raw const (*response).no_store).cast::<u8>().read() != 0,
         )
     };
     // SAFETY: the caller's contract.
@@ -359,10 +360,10 @@ unsafe fn host_response(response: *const mln_resource_response) -> Result<Respon
     let mut native = Response {
         no_content: status == MLN_RESOURCE_RESPONSE_STATUS_NO_CONTENT,
         not_modified: status == MLN_RESOURCE_RESPONSE_STATUS_NOT_MODIFIED,
-        must_revalidate,
         modified: set(MLN_RESOURCE_RESPONSE_MODIFIED, modified),
-        expires: set(MLN_RESOURCE_RESPONSE_EXPIRES, expires),
         etag: (!etag.is_empty()).then(|| etag.to_owned()),
+        caching: Caching { expires: set(MLN_RESOURCE_RESPONSE_EXPIRES, expires), must_revalidate },
+        no_store,
         ..Response::default()
     };
     if status == MLN_RESOURCE_RESPONSE_STATUS_ERROR {
@@ -566,7 +567,7 @@ mod tests {
         let native = unsafe { host_response(&raw const answer) }.unwrap();
         assert_eq!(native.data.as_deref().map(Vec::as_slice), Some(&body[..]));
         assert_eq!(native.modified, Some(Timestamp::from_secs(1_700_000_000)));
-        assert_eq!(native.expires, None);
+        assert_eq!(native.caching.expires, None);
         assert!(native.error.is_none());
 
         let error = mln_resource_response {
@@ -586,6 +587,27 @@ mod tests {
                 Some(Timestamp::from_secs(2))
             )
         );
+    }
+
+    #[test]
+    fn a_response_carries_its_caching_rules() {
+        let answer = mln_resource_response {
+            fields: MLN_RESOURCE_RESPONSE_EXPIRES,
+            expires_unix_ms: 1_000,
+            must_revalidate: true,
+            no_store: true,
+            ..response()
+        };
+        // SAFETY: a local response.
+        let native = unsafe { host_response(&raw const answer) }.unwrap();
+        assert_eq!(native.caching, Caching { expires: Some(Timestamp::from_secs(1)), must_revalidate: true });
+        assert!(native.no_store);
+
+        let unset = mln_resource_response { expires_unix_ms: 1_000, ..response() };
+        // SAFETY: a local response.
+        let native = unsafe { host_response(&raw const unset) }.unwrap();
+        assert_eq!(native.caching, Caching::default());
+        assert!(!native.no_store);
     }
 
     #[test]

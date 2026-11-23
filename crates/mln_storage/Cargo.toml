@@ -40,6 +40,10 @@ default = ["sqlite"]
 # source, so it serves no cache-only requests and no mbtiles:// URLs (as the
 # C++ MainResourceLoader without them).
 sqlite = ["dep:rusqlite"]
+# `bench`, the online file source over a simulated network: a transport and
+# a clock of the benchmarks' own (tools/bench). Not API: hidden from the
+# documentation.
+bench = ["mln_util/bench"]
 # StubFileSource, the file source that the tests of mln_storage's dependents
 # answer requests with.
 stub-file-source = []

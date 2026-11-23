@@ -76,7 +76,7 @@ fn water() -> Response {
 
 /// `response`, expired: a tile that has it requests it again when required.
 fn expired(mut response: Response) -> Response {
-    response.expires = Some(Timestamp::from_secs(0));
+    response.caching.expires = Some(Timestamp::from_secs(0));
     response
 }
 
@@ -239,7 +239,7 @@ fn a_failed_load_is_requested_again_on_retry() {
 fn a_tile_required_again_reloads_only_stale_data() {
     let test = TileTest::new();
     let mut later = water();
-    later.expires = Some(Timestamp::from_secs(i64::MAX));
+    later.caching.expires = Some(Timestamp::from_secs(i64::MAX));
     for (response, reloads) in [(water(), false), (later, false), (expired(water()), true)] {
         let (mut tiles, file_source) = held_tile::<VectorKind>(&test, tiles_tileset());
         tiles.set_necessity(&tile(), TileNecessity::Required);

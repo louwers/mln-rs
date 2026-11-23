@@ -16,7 +16,7 @@ use mln_storage::offline_database::{DatabaseError, OfflineDatabase};
 use mln_storage::resource::{Priority, Usage};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{FileSource, Kind, LoadingMethod, Resource, Responder, Response};
+use mln_storage::{FileSource, Kind, LoadingMethod, Resource, Responder, Response, TileFormat};
 use mln_text::glyph::NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK;
 use mln_util::chrono::{Timestamp, now};
 use mln_util::compression::compress;
@@ -775,7 +775,16 @@ fn request_errors_are_retried() {
 fn put_tile(test: &OfflineTest, x: i32, y: i32, z: i8) {
     let response = test.response("0-0-0.vector.pbf");
     test.db().put(
-        &Resource::tile("http://127.0.0.1:3000/{z}-{x}-{y}.vector.pbf", 1.0, x, y, z, Scheme::XYZ, LoadingMethod::All),
+        &Resource::tile(
+            "http://127.0.0.1:3000/{z}-{x}-{y}.vector.pbf",
+            1.0,
+            x,
+            y,
+            z,
+            Scheme::XYZ,
+            TileFormat::Mvt,
+            LoadingMethod::All,
+        ),
         &response,
     );
 }
@@ -1089,7 +1098,7 @@ fn hours_from_now(hours: i64) -> Timestamp {
 }
 
 fn xyz_tile(url_template: &str, x: i32, y: i32, z: i8) -> Resource {
-    Resource::tile(url_template, 1.0, x, y, z, Scheme::XYZ, LoadingMethod::All)
+    Resource::tile(url_template, 1.0, x, y, z, Scheme::XYZ, TileFormat::Mvt, LoadingMethod::All)
 }
 
 fn world_at_zoom(max_zoom: f64) -> OfflineRegionDefinition {
@@ -1146,7 +1155,7 @@ fn download_until_inactive(
 }
 
 fn invalidate_region(test: &OfflineTest, region_id: i64) {
-    assert!(test.db().invalidate_region(region_id).is_none());
+    assert!(test.db().invalidate_region(region_id).is_ok());
 }
 
 /// Downloads a region of a style and one tile, invalidates it, and downloads
@@ -1189,7 +1198,7 @@ fn test_refresh_invalidated_region(style_not_modified: bool, tile_not_modified: 
         } else {
             response(data, etag)
         };
-        result.expires = Some(expires);
+        result.caching.expires = Some(expires);
         result
     };
 
@@ -1219,9 +1228,9 @@ fn test_refresh_invalidated_region(style_not_modified: bool, tile_not_modified: 
 
     let check_stored = |resource: &Resource, data: &[u8], etag: &str| {
         let stored = test.db().get(resource).expect("stored");
-        assert!(!stored.must_revalidate);
-        assert_eq!(Some(expires), stored.expires);
-        assert!(stored.is_usable());
+        assert!(!stored.caching.must_revalidate);
+        assert_eq!(Some(expires), stored.caching.expires);
+        assert!(stored.caching.is_fresh(now()));
         assert_eq!(data, stored.data.expect("data").as_slice());
         assert_eq!(Some(etag), stored.etag.as_deref());
     };
@@ -1241,9 +1250,10 @@ fn refresh_invalidated_region_tile_not_modified() {
     test_refresh_invalidated_region(false, true);
 }
 
-// gtest: OfflineDownload.RevalidatesOnlyStoredResourcesThatMustBeRevalidated
+/// A download keeps the fresh resources that the region holds, and
+/// revalidates the stale ones.
 #[test]
-fn revalidates_only_stored_resources_that_must_be_revalidated() {
+fn revalidates_only_stale_stored_resources() {
     let test = OfflineTest::new();
     let region = test.create_region().expect("region");
     let definition = world_at_zoom(1.0);
@@ -1251,46 +1261,50 @@ fn revalidates_only_stored_resources_that_must_be_revalidated() {
     let past = hours_from_now(-1);
     let future = hours_from_now(1);
 
-    // The style was sent with Cache-Control: must-revalidate, and has
-    // expired.
+    // The style and the z0 tile have expired; the z1 tiles are fresh.
     let mut style = test.response("inline_source.style.json");
     style.etag = Some("style-1".to_owned());
-    style.must_revalidate = true;
-    style.expires = Some(past);
+    style.caching.must_revalidate = true;
+    style.caching.expires = Some(past);
     test.db().put(&Resource::style(STYLE_URL), &style);
-
-    // The z0 tile has expired, and the z1 tiles must be revalidated once they
-    // expire.
     let mut expired_tile = test.response("0-0-0.vector.pbf");
-    expired_tile.expires = Some(past);
+    expired_tile.etag = Some("tile-1".to_owned());
+    expired_tile.caching.expires = Some(past);
     test.db().put(&xyz_tile(tile_url, 0, 0, 0), &expired_tile);
     for x in 0..2 {
         for y in 0..2 {
             let mut fresh_tile = test.response("0-0-0.vector.pbf");
-            fresh_tile.must_revalidate = true;
-            fresh_tile.expires = Some(future);
+            fresh_tile.caching.must_revalidate = true;
+            fresh_tile.caching.expires = Some(future);
             test.db().put(&xyz_tile(tile_url, x, y, 1), &fresh_tile);
         }
     }
 
-    let style_requests = Arc::new(AtomicI32::new(0));
-    let requests = Arc::clone(&style_requests);
-    test.respond(Kind::Style, move |resource| {
-        requests.fetch_add(1, Ordering::SeqCst);
-        assert_eq!(Some("style-1"), resource.prior_etag.as_deref());
-        let mut response = Response::new();
-        response.not_modified = true;
-        response.expires = Some(future);
-        response
-    });
-    test.respond(Kind::Tile, |resource| panic!("requested usable tile {}", resource.url));
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    for kind in [Kind::Style, Kind::Tile] {
+        let requests = Arc::clone(&requests);
+        test.respond(kind, move |resource| {
+            requests.lock().push((resource.url.clone(), resource.prior_etag.clone()));
+            let mut response = Response::new();
+            response.not_modified = true;
+            response.caching.expires = Some(future);
+            response
+        });
+    }
 
     let status = download_until_inactive(&test, region.id, &definition, None);
 
-    assert_eq!(1, style_requests.load(Ordering::SeqCst));
+    let etag = |etag: &str| Some(etag.to_owned());
+    let expected = vec![
+        (STYLE_URL.to_owned(), etag("style-1")),
+        ("http://127.0.0.1:3000/0-0-0.vector.pbf".to_owned(), etag("tile-1")),
+    ];
+    assert_eq!(expected, *requests.lock());
     assert_eq!(6, status.completed_resource_count);
     assert_eq!(test.size.load(Ordering::SeqCst), status.completed_resource_size);
     assert_eq!(5, status.completed_tile_count);
+    let refreshed = test.db().get(&xyz_tile(tile_url, 0, 0, 0)).expect("tile");
+    assert_eq!((Some(future), Some("tile-1")), (refreshed.caching.expires, refreshed.etag.as_deref()));
 }
 
 fn inline_source_style(tile_url: &str) -> String {
@@ -1354,7 +1368,7 @@ fn refresh_keeps_tiles_that_only_an_earlier_style_listed() {
     );
 
     let earlier = test.db().get(&xyz_tile(v1, 0, 0, 0)).expect("earlier tile");
-    assert!(earlier.must_revalidate);
+    assert!(!earlier.caching.is_fresh(now()) && earlier.caching.is_usable(now()));
     let current = test.db().get(&xyz_tile(v2, 0, 0, 0)).expect("current tile");
     assert_eq!(format!("tile {v2}").as_bytes(), current.data.expect("data").as_slice());
 }
@@ -1466,7 +1480,7 @@ impl RefreshedRegion {
         assert_eq!(self.downloaded.completed_tile_count, status.completed_tile_count);
         assert_eq!(2, self.tile_requests.load(Ordering::SeqCst));
         let tile = self.test.db().get(&xyz_tile(REFRESHED_TILE_URL, 0, 0, 0)).expect("tile");
-        assert!(!tile.must_revalidate);
+        assert!(!tile.caching.must_revalidate);
     }
 }
 

@@ -865,7 +865,8 @@ impl Runtime {
     /// requests: it gets the resource's kind and the URL after any resource
     /// transform, and runs for each attempt of a request, which waits for
     /// it. Names that the library manages, such as `Range` or `User-Agent`,
-    /// are dropped, and a later value of a name replaces an earlier one. It
+    /// are dropped, and a later value of a name replaces an earlier one. An
+    /// `Accept` replaces the one the library sends for tiles and images. It
     /// replaces the transform before.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) in the

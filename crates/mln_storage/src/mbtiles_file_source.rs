@@ -134,7 +134,7 @@ impl Databases {
         // TileJSON's center zoom is an integer.
         let center = row("center").and_then(numbers::<3>);
         members.extend(center.map(|[longitude, latitude, zoom]| ("center", json!([longitude, latitude, zoom as u8]))));
-        if format == "mlt" || format == "application/vnd.maplibre-vector-tile" {
+        if matches!(format, "mlt" | "application/vnd.maplibre-tile" | "application/vnd.maplibre-vector-tile") {
             members.push(("encoding", json!("mlt")));
         }
         let tilejson = archive_tilejson(members, rows.into_iter().chain(json));
@@ -158,7 +158,7 @@ impl Databases {
         if resource.prior_etag.as_deref() == Some(resource.url.as_str()) {
             let mut response = Response::new();
             response.not_modified = true;
-            response.expires = Some(Timestamp::from_secs(i64::MAX));
+            response.caching.expires = Some(Timestamp::from_secs(i64::MAX));
             response.etag = Some(resource.url.clone());
             return Ok(response);
         }
@@ -195,7 +195,7 @@ impl Databases {
                 let mut data = data.to_vec();
                 response.no_content = false;
                 // `Timestamp::max()`.
-                response.expires = Some(Timestamp::from_secs(i64::MAX));
+                response.caching.expires = Some(Timestamp::from_secs(i64::MAX));
                 response.etag = Some(resource.url.clone());
 
                 if is_compressed(&data) {

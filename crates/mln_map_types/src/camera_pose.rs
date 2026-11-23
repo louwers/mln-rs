@@ -2,10 +2,12 @@
 //! form that free camera options set and that the projection matrix is built
 //! from.
 
+#[cfg(test)]
 use std::f64::consts::PI;
 
 use glam::{DMat4, DQuat, DVec3};
-use mln_util::constants::{EARTH_RADIUS_M, M2PI};
+#[cfg(test)]
+use mln_util::constants::M2PI;
 #[cfg(test)]
 use mln_util::geo::{LatLng, LatLngAltitude};
 use mln_util::projection::Projection;
@@ -22,6 +24,7 @@ fn mercator_y_from_lat(lat: f64) -> f64 {
     (180.0 - (180.0 / PI * ((PI / 4.0) + lat * PI / 360.0).tan().ln())) / 360.0
 }
 
+#[cfg(test)]
 fn lat_from_mercator_y(y: f64) -> f64 {
     mln_math::rad2deg(2.0 * (PI - y * M2PI).exp().atan() - (PI / 2.0))
 }
@@ -85,12 +88,11 @@ impl CameraPose {
         CameraPose { position, orientation: orientation_from_roll_pitch_bearing(roll, pitch, bearing) }
     }
 
-    /// The matrix from world space, in pixels at `scale` with z in meters, to
-    /// camera space, with y down unless `flipped_y`.
-    pub(crate) fn world_to_camera(&self, scale: f64, flipped_y: bool) -> DMat4 {
+    /// The matrix from world space, in pixels at `scale` with z in meters of
+    /// `pixels_per_meter` pixels, to camera space, with y down unless
+    /// `flipped_y`.
+    pub(crate) fn world_to_camera(&self, scale: f64, pixels_per_meter: f64, flipped_y: bool) -> DMat4 {
         let world_size = Projection::world_size(scale);
-        let latitude = lat_from_mercator_y(self.position.y);
-        let pixels_per_meter = world_size / (mln_math::deg2rad(latitude).cos() * M2PI * EARTH_RADIUS_M);
         let flip = if flipped_y { DMat4::IDENTITY } else { DMat4::from_scale(DVec3::new(1.0, -1.0, 1.0)) };
         flip * DMat4::from_quat(self.orientation.conjugate())
             * DMat4::from_translation(-self.position * world_size)

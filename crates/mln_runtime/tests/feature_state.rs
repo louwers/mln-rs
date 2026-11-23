@@ -1,7 +1,7 @@
 // The feature state that a map keeps, and its way to the frames of a render
-// session. They follow maplibre-native-ffi's ABI tests (tests/native/abi/
-// style/feature_state.c and render/invalidation.c at eae96a42c) where those
-// test the same rules.
+// session. They follow the C ABI suite (tools/c-abi-test/testdata/tests/
+// native/abi/style/feature_state.c and render/invalidation.c) where it tests
+// the same rules.
 
 use feature::{Identifier, Value};
 use mln_runtime::{

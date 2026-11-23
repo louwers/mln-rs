@@ -297,6 +297,12 @@ impl TileStore {
         }
     }
 
+    /// The sources' tiles, in the style's order.
+    #[cfg(feature = "bench")]
+    pub(crate) fn sources(&self) -> impl Iterator<Item = &SourceTiles> + '_ {
+        self.order.iter().filter_map(|key| self.sources.get(key))
+    }
+
     pub(crate) fn source(&self, key: SourceKey) -> Option<&SourceTiles> {
         self.sources.get(&key)
     }
@@ -372,6 +378,10 @@ impl TileStore {
             }
             TileEvent::Glyphs { font_stack, range, id, result } => {
                 self.ctx.glyphs.take_response(&font_stack, range, id, result);
+                self.ctx.collect_resource_events();
+            }
+            TileEvent::DeviceFonts { font_stack, faces } => {
+                self.ctx.glyphs.take_device_fonts(&font_stack, faces);
                 self.ctx.collect_resource_events();
             }
         }
@@ -473,10 +483,6 @@ impl TileStore {
             source.dump_debug_logs();
         }
         self.ctx.images.dump_debug_logs();
-        self.ctx.jobs.log_stats();
-    }
-
-    pub(crate) fn log_stats(&self) {
         self.ctx.jobs.log_stats();
     }
 

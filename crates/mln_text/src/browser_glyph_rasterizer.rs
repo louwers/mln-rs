@@ -22,7 +22,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{OffscreenCanvas, OffscreenCanvasRenderingContext2d};
 
 use crate::glyph::{Glyph, GlyphID, GlyphMetrics};
-use crate::local_glyph_rasterizer::LocalGlyphRasterizer;
+use crate::local_fonts::LocalGlyphRasterizer;
 
 // 2x bitmap with 1x logical metrics.
 const TEXTURE_SCALE: u32 = 2;

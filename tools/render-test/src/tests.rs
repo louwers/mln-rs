@@ -65,6 +65,7 @@ fn parses_our_manifest() {
     assert_eq!(manifest.get_result_path(), "manifests");
     assert_eq!(manifest.get_test_root_path(), INTEGRATION);
     assert_eq!(manifest.get_cache_path(), "manifests/../testdata/metrics/cache-style.db");
+    assert_eq!(manifest.get_asset_path(), "testdata/metrics/integration/gljs/assets");
     assert!(manifest.get_probes().is_empty());
 
     // Ignore files in manifest order, members in document order.
@@ -251,6 +252,10 @@ fn parses_test_metadata() {
     assert!(!query.render_test);
     assert_eq!(query.query_geometry_box.min.x, 1.0);
     assert_eq!(query.query_geometry_box.max.y, 120.0);
+
+    // GL JS's fixtures, as the importer copies them.
+    let imported = parse_test_metadata(&style_paths("gljs/render-tests/image/default"));
+    assert_eq!(imported.allowed, 0.00025);
 
     let missing = parse_test_metadata(&style_paths("render-tests/does-not-exist"));
     assert!(missing.document_object_empty());
@@ -728,7 +733,7 @@ fn pending_requests_leave_when_answered_or_cancelled() {
     answered(number);
     assert!(!is_pending("http://tiles/answered.mvt"));
 
-    let proxy = ProxyFileSource { default_resource_loader: std::sync::Arc::new(Unanswered) };
+    let proxy = ProxyFileSource { default_resource_loader: std::sync::Arc::new(Unanswered), assets: None };
     let request = proxy.request(&Resource::style("http://tiles/cancelled.mvt"), |_| {});
     assert!(is_pending("http://tiles/cancelled.mvt"));
     drop(request);
@@ -748,4 +753,123 @@ fn timeout_message_lists_the_pending_requests() {
     let many: Vec<_> = (0..7).map(|i| (format!("http://tiles/{i}.mvt"), Duration::from_secs(1))).collect();
     assert!(waiting_for(&many).starts_with("waiting for 7 requests: http://tiles/0.mvt (1.0 s), "));
     assert!(waiting_for(&many).ends_with("http://tiles/4.mvt (1.0 s), and 2 more"));
+}
+
+// --- GL JS's fixtures ---
+
+/// The ids, relative to the integration directory, of the tests in `dir`.
+fn fixture_ids(dir: &Path) -> Vec<String> {
+    let root = Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join(INTEGRATION);
+    let mut ids = Vec::new();
+    let mut pending = vec![root.join(dir)];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.file_name().is_some_and(|name| name == "style.json") {
+                ids.push(generic(path.parent().unwrap().strip_prefix(&root).unwrap()));
+            }
+        }
+    }
+    ids.sort();
+    ids
+}
+
+#[test]
+fn gljs_fixtures_parse_and_no_ignore_is_stale() {
+    let ids = fixture_ids(Path::new("gljs/render-tests"));
+    assert!(ids.len() >= 15, "{ids:?}");
+
+    let manifest = ManifestParser::parse_manifest(OUR_MANIFEST, String::new()).unwrap();
+    let ignored: Vec<&str> =
+        manifest.get_ignores().iter().map(|(id, _)| id.as_str()).filter(|id| id.starts_with("gljs/")).collect();
+    for id in &ids {
+        let mut metadata = parse_test_metadata(&style_paths(id));
+        assert_eq!(metadata.error_message, "", "{id}");
+        parse_test_operations(&mut metadata);
+        assert_eq!(metadata.error_message, "", "{id}");
+    }
+    for id in ignored {
+        assert!(ids.iter().any(|fixture| fixture == id), "{id} isn't a fixture");
+    }
+}
+
+/// A file source that records the URLs it is asked for.
+struct Recording(std::sync::Arc<parking_lot::Mutex<Vec<String>>>);
+
+impl mln_storage::FileSource for Recording {
+    fn load(&self, resource: &mln_storage::Resource, responder: mln_storage::Responder) {
+        self.0.lock().push(resource.url.clone());
+        std::mem::forget(responder);
+    }
+
+    fn can_request(&self, _resource: &mln_storage::Resource) -> bool {
+        true
+    }
+}
+
+#[test]
+fn asset_files_stand_in_for_the_caches_local_resources() {
+    use mln_storage::{FileSourceExt, Resource};
+
+    use crate::file_source::{AssetDir, ProxyFileSource};
+
+    let assets = tmp_dir("assets");
+    write(&assets.path().join("tiles/a.png"), b"a");
+    let load = |assets: Option<AssetDir>, url: &str| {
+        let urls = std::sync::Arc::default();
+        let loader = std::sync::Arc::new(Recording(std::sync::Arc::clone(&urls)));
+        let proxy = ProxyFileSource { default_resource_loader: loader, assets };
+        let _request = proxy.request(&Resource::style(url), |_| {});
+        let urls = urls.lock();
+        urls.clone()
+    };
+    let assets = |only| Some(AssetDir { path: assets.path().to_path_buf(), only });
+    assert_eq!(load(assets(false), "local://tiles/a.png"), ["asset://tiles/a.png"]);
+    assert_eq!(load(assets(false), "http://localhost:2900/tiles/a.png"), ["asset://tiles/a.png"]);
+    // What isn't there is the cache's.
+    assert_eq!(load(assets(false), "local://tiles/b.png"), ["http://tiles/b.png"]);
+    assert_eq!(load(assets(false), "http://example.com/tiles/a.png"), ["http://example.com/tiles/a.png"]);
+    assert_eq!(load(None, "local://tiles/a.png"), ["http://tiles/a.png"]);
+}
+
+#[test]
+fn a_suite_whose_assets_hold_a_directory_loads_it_only_from_them() {
+    use mln_storage::{FileSourceExt, Resource};
+
+    use crate::file_source::{AssetDir, ProxyFileSource};
+
+    let assets = tmp_dir("assets-only");
+    write(&assets.path().join("tiles/a.png"), b"a");
+    let load = |only: bool, url: &str| {
+        let urls = std::sync::Arc::default();
+        let loader = std::sync::Arc::new(Recording(std::sync::Arc::clone(&urls)));
+        let assets = Some(AssetDir { path: assets.path().to_path_buf(), only });
+        let proxy = ProxyFileSource { default_resource_loader: loader, assets };
+        let _request = proxy.request(&Resource::style(url), |_| {});
+        let urls = urls.lock();
+        urls.clone()
+    };
+    // A file the assets lack is not found there, not the cache's.
+    assert_eq!(load(true, "local://tiles/a.png"), ["asset://tiles/a.png"]);
+    assert_eq!(load(true, "local://tiles/b.png"), ["asset://tiles/b.png"]);
+    assert_eq!(load(true, "http://localhost:2900/tiles/b.png"), ["asset://tiles/b.png"]);
+    // A directory they lack, and other hosts, are still the cache's.
+    assert_eq!(load(true, "local://glyphs/a.pbf"), ["http://glyphs/a.pbf"]);
+    assert_eq!(load(true, "http://example.com/tiles/b.png"), ["http://example.com/tiles/b.png"]);
+    // A native suite's test falls through to the cache.
+    assert_eq!(load(false, "local://tiles/b.png"), ["http://tiles/b.png"]);
+}
+
+#[test]
+fn a_test_is_in_the_suite_of_the_assets_beside_its_directory() {
+    use crate::runner::in_assets_suite;
+
+    let assets = "../testdata/metrics/integration/gljs/assets";
+    assert!(in_assets_suite("../testdata/metrics/integration/gljs/render-tests/image/a/style.json", assets));
+    assert!(!in_assets_suite("../testdata/metrics/integration/render-tests/image/a/style.json", assets));
+    assert!(!in_assets_suite("../testdata/metrics/integration/gljs2/render-tests/a/style.json", assets));
+    // A bare directory name has no parent that would hold every style.
+    assert!(!in_assets_suite("render-tests/a/style.json", "assets"));
 }

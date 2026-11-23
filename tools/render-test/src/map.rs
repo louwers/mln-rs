@@ -12,7 +12,7 @@ use mln_util::pool::Pool;
 use mln_util::queue::Queue;
 use mln_util::time::Instant;
 
-use crate::file_source::proxy_loader;
+use crate::file_source::{Assets, proxy_loader};
 use crate::metadata::{MapMode, TestMetadata};
 use crate::runner::{
     CameraOptions, ImplFactory, ImplOptions, MapError, QueryGeometry, ResourceOptions, TestRunnerImpl,
@@ -64,6 +64,8 @@ impl Impl {
         queue: &Queue<()>,
         pool: &Pool,
     ) -> Result<Impl, String> {
+        let assets = (!resource_options.asset_path.is_empty())
+            .then_some(Assets { path: resource_options.asset_path.as_str(), only: resource_options.assets_only });
         let resource_options = mln_storage::ResourceOptions {
             cache_path: resource_options.cache_path.clone(),
             ..mln_storage::ResourceOptions::default()
@@ -80,7 +82,7 @@ impl Impl {
             });
             frontend.renderer().set_tile_workers(workers);
         }
-        let file_source = proxy_loader(&resource_options, pool);
+        let file_source = proxy_loader(&resource_options, assets, pool);
         let mut map = MapCore::new(
             Arc::clone(&file_source),
             MapCoreOptions {

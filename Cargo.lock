@@ -233,7 +233,7 @@ dependencies = [
  "regex",
  "rustc-hash 2.1.3",
  "shlex",
- "syn 3.0.9",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -2349,9 +2349,9 @@ dependencies = [
 
 [[package]]
 name = "libsqlite3-sys"
-version = "0.39.1"
+version = "0.40.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14a5f01b87b92705d07b433c06f96cbc764637d81a0bffb5734ce17cf0f9a2b3"
+checksum = "b06e69070b7e12262b0cd90832f0a7396f142a2b330181255562decf9f0c6215"
 dependencies = [
  "cc",
  "pkg-config",
@@ -2457,7 +2457,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "bytemuck",
  "geo-types",
@@ -2498,7 +2498,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-bench"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "libc",
  "mln-rs",
@@ -2524,6 +2524,7 @@ dependencies = [
  "mln-rs-vulkan",
  "mln-rs-webgpu",
  "parking_lot",
+ "percent-encoding",
  "pmtiles",
  "serde",
  "serde_json",
@@ -2535,7 +2536,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-bench-snapshot"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "mlt-core",
  "pmtiles",
@@ -2546,7 +2547,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-bench-workload"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "mln-rs-map-types",
  "mln-rs-util",
@@ -2557,7 +2558,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-c"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "geo-types",
  "geojson",
@@ -2597,7 +2598,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-c-abi-gen"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "bindgen",
  "prettyplease",
@@ -2607,8 +2608,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-c-abi-test"
+version = "0.0.15"
+dependencies = [
+ "regex",
+ "tempfile",
+ "wait-timeout",
+]
+
+[[package]]
 name = "mln-rs-d3d12"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "gpu-allocator",
  "mln-rs-gfx",
@@ -2622,7 +2632,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-desktop"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "ash",
  "egui",
@@ -2662,7 +2672,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-expression-test"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "geo-types",
  "geojson",
@@ -2676,7 +2686,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-extension-tests"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "mln-rs",
  "mln-rs-image-process",
@@ -2687,7 +2697,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-feature"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "geo-types",
  "geojson",
@@ -2698,7 +2708,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-frame-pacer"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "libc",
  "mln-rs-util",
@@ -2711,7 +2721,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-geojson"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "foldhash 0.2.0",
  "geo-index",
@@ -2726,7 +2736,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-geometry"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "geo-types",
  "mln-rs-wire",
@@ -2734,7 +2744,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-gestures"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "mln-rs-map-types",
  "mln-rs-runtime",
@@ -2746,7 +2756,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-gfx"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "bytemuck",
  "mln-rs-util",
@@ -2758,7 +2768,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-gl"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "bytemuck",
  "glow",
@@ -2779,7 +2789,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-glsl"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "mln-rs-gfx",
  "mln-rs-layers",
@@ -2788,12 +2798,13 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-headless"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "geo-types",
  "geojson",
  "glam",
  "glow",
+ "httpmock",
  "khronos-egl",
  "mln-rs",
  "mln-rs-d3d12",
@@ -2828,7 +2839,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-image"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "flate2",
  "image-webp",
@@ -2843,14 +2854,14 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-image-process"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "mln-rs",
 ]
 
 [[package]]
 name = "mln-rs-layers"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "bytemuck",
  "earcut",
@@ -2885,14 +2896,14 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-location-puck"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "mln-rs",
 ]
 
 [[package]]
 name = "mln-rs-map-types"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "geo-types",
  "glam",
@@ -2908,11 +2919,11 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-math"
-version = "0.0.13"
+version = "0.0.15"
 
 [[package]]
 name = "mln-rs-mtl"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "block2 0.6.2",
  "bytemuck",
@@ -2927,30 +2938,39 @@ dependencies = [
  "objc2-metal 0.3.2",
  "objc2-quartz-core 0.3.2",
  "parking_lot",
+ "raw-window-metal",
 ]
 
 [[package]]
 name = "mln-rs-ngon"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "mln-rs",
 ]
 
 [[package]]
 name = "mln-rs-pixelmatch"
-version = "0.0.13"
+version = "0.0.15"
 
 [[package]]
 name = "mln-rs-polylabel"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "mln-rs-geometry",
  "serde_json",
 ]
 
 [[package]]
+name = "mln-rs-ratchet"
+version = "0.0.15"
+dependencies = [
+ "regex",
+ "toml_edit",
+]
+
+[[package]]
 name = "mln-rs-render"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "bytemuck",
  "etagere",
@@ -2988,7 +3008,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-render-test"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "fastrand",
  "geojson",
@@ -3019,7 +3039,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-runtime"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "geo-types",
  "geojson",
@@ -3066,7 +3086,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-sources"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "geojson",
  "mln-rs-feature",
@@ -3090,7 +3110,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-storage"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "block2 0.6.2",
  "bytes",
@@ -3123,7 +3143,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-storage-offline"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "httpmock",
  "mln-rs",
@@ -3144,7 +3164,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-style"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "cheap-ruler",
  "fixed_decimal",
@@ -3185,7 +3205,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-style-codegen"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "mln-rs-util",
  "mln-rs-vec-map",
@@ -3194,7 +3214,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-style-types"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "mln-rs-feature",
  "mln-rs-math",
@@ -3205,7 +3225,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-system-fonts"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "jni",
  "libloading",
@@ -3224,7 +3244,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-test-server"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "httpmock",
  "mln-rs-util",
@@ -3232,7 +3252,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-text"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "ab_glyph_rasterizer",
  "buffa",
@@ -3258,7 +3278,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-tile"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "fast-mvt",
  "geo-types",
@@ -3277,7 +3297,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-tile-id"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "geo-types",
  "mln-rs-feature",
@@ -3289,8 +3309,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-unicode-tables"
+version = "0.0.15"
+dependencies = [
+ "unicode-bidi",
+]
+
+[[package]]
 name = "mln-rs-util"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "bytemuck",
  "flate2",
@@ -3315,14 +3342,14 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-vec-map"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "mln-rs-wire",
 ]
 
 [[package]]
 name = "mln-rs-vulkan"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "ash",
  "bytemuck",
@@ -3340,7 +3367,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-wasm-size"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "serde_json",
  "wasmparser",
@@ -3348,7 +3375,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-web"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "js-sys",
  "mln-rs",
@@ -3372,7 +3399,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-web-host"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "js-sys",
  "mln-rs-render",
@@ -3386,7 +3413,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-web-shaper"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "js-sys",
  "mln-rs-text",
@@ -3395,7 +3422,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-webgpu"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "mln-rs-gfx",
  "mln-rs-layers",
@@ -3408,7 +3435,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-wire"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "geo-types",
  "glam",
@@ -3418,7 +3445,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-wire-derive"
-version = "0.0.13"
+version = "0.0.15"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4668,9 +4695,9 @@ dependencies = [
 
 [[package]]
 name = "rusqlite"
-version = "0.41.1"
+version = "0.42.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da9bba6f3506135e120a6586df05be18b48d18896600646a4bec8f993d91a594"
+checksum = "a4edff0039f148731aee2fd80f76dbfeb12d204ab3d1c544838d34e02151049b"
 dependencies = [
  "bitflags 2.13.2",
  "fallible-iterator",
@@ -5163,9 +5190,9 @@ dependencies = [
 
 [[package]]
 name = "sqlite-wasm-rs"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36bd8e29bf08189a005b2df1df99823aa0861cabe9044e5f31ed54ca292ee618"
+checksum = "a6cd504cecbfe7eef649988840f9a6cb768d11085efec138f8e99f160632d867"
 dependencies = [
  "cc",
  "rsqlite-vfs",
@@ -5295,7 +5322,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.6",
  "windows-sys 0.61.2",

@@ -1,10 +1,11 @@
-// The window's render session: Metal by default on macOS, WebGPU (through
-// wgpu, the default where there is no Metal) everywhere, Vulkan elsewhere
-// than on Apple's platforms, D3D12 on Windows and OpenGL ES on Linux, picked
-// with --backend and switched in the controls. Each backend renders in a session of its own, on
-// a device of its own, which the render thread drives (`Driver::CallerThread`)
-// so that the controls' overlay (overlay.rs) draws over each frame on that
-// thread. On macOS both backends present to the window's one CAMetalLayer
+// The window's render session: Metal on macOS, Vulkan elsewhere than on
+// Apple's platforms, D3D12 on Windows, OpenGL ES on Linux, and WebGPU
+// (through wgpu) everywhere, picked with --backend and switched in the
+// controls. Without --backend, the session renders on the device that the
+// library picks (`Device::new`). Each backend renders in a session of its
+// own, on a device of its own, which the render thread drives
+// (`Driver::CallerThread`) so that the controls' overlay (overlay.rs) draws
+// over each frame on that thread. On macOS both backends present to the window's one CAMetalLayer
 // (metal_layer.rs). Elsewhere each makes its own surface of the window, which
 // takes one session's frames at a time: the session that goes gives it up
 // before the next one takes it.
@@ -64,7 +65,7 @@ impl Kind {
     #[cfg(target_os = "macos")]
     const NAMES: &str = "metal, webgpu";
     #[cfg(target_os = "linux")]
-    const NAMES: &str = "vulkan, webgpu, opengl";
+    const NAMES: &str = "vulkan, opengl, webgpu";
     #[cfg(windows)]
     const NAMES: &str = "vulkan, d3d12, webgpu";
     #[cfg(all(not(target_vendor = "apple"), not(target_os = "linux"), not(windows)))]
@@ -80,9 +81,9 @@ impl Kind {
         Kind::Vulkan,
         #[cfg(windows)]
         Kind::D3d12,
-        Kind::WebGpu,
         #[cfg(target_os = "linux")]
         Kind::OpenGl,
+        Kind::WebGpu,
     ];
 
     /// The backend after this one in `ALL`, around to the first.
@@ -104,6 +105,11 @@ impl Kind {
             #[cfg(target_os = "linux")]
             Kind::OpenGl => "OpenGL ES",
         }
+    }
+
+    /// The kind of a device of `backend`, if the app renders with it.
+    fn of(backend: BackendType) -> Option<Kind> {
+        Kind::ALL.iter().copied().find(|kind| kind.backend_type() == backend)
     }
 
     fn backend_type(self) -> BackendType {
@@ -136,13 +142,18 @@ impl Kind {
     }
 }
 
-impl Default for Kind {
-    fn default() -> Self {
-        #[cfg(target_os = "macos")]
-        return Kind::Metal;
-        #[cfg(not(target_os = "macos"))]
-        return Kind::WebGpu;
-    }
+/// The device that the library picks when the host names no backend, and
+/// its kind. Fails when the app has no overlay for its backend.
+pub(crate) fn default_device() -> Result<(Kind, Device), Error> {
+    let device = Device::new(DeviceOptions::default())?;
+    let backend = device.backend();
+    let kind = Kind::of(backend).ok_or_else(|| {
+        Error::unsupported(format!(
+            "The library picked {backend:?}, which this app doesn't render with (available: {})",
+            Kind::NAMES
+        ))
+    })?;
+    Ok((kind, device))
 }
 
 /// The window that sessions make their surfaces of, off the window's thread:

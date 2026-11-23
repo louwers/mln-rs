@@ -1,6 +1,9 @@
 //! A map shown from nothing: the map, its renderer and its workers start,
 //! the style loads, and the tiles, glyphs and sprite it needs load, until
-//! the first frame with nothing missing.
+//! the first frame with nothing missing: from the fixtures, or from a
+//! server over a simulated network (`support::network`).
+
+use std::sync::Arc;
 
 use mln_rs::mln_map_types::{CameraOptions, CameraUpdate, MapMode};
 use mln_runtime::{AttachOptions, MapOptions, RenderTarget, RuntimeOptions};
@@ -10,8 +13,11 @@ use mln_util::size::Size;
 use super::VIEW;
 use crate::meter;
 use crate::scenario::{Bench, Kind, Scenario};
+use crate::support::cache::DiskCache;
 use crate::support::fixtures::{Fixtures, Tiles};
 use crate::support::map::{Frontend, HeadlessMap, save_png};
+use crate::support::network::{Counts, LOCAL, MOBILE_4G, Network, Profile, SLOW, Serve, Server};
+use crate::support::online::OnlineMap;
 
 pub(crate) const SCENARIOS: &[Scenario] = &[
     Scenario {
@@ -31,6 +37,42 @@ pub(crate) const SCENARIOS: &[Scenario] = &[
         kind: Kind::Macro,
         question: "What does showing a city labelled in Japanese script from nothing take, until the first complete frame?",
         run: cjk,
+    },
+    Scenario {
+        name: "macro/load/street-4g",
+        kind: Kind::Macro,
+        question: "How long does a city's streets take to show complete from nothing over a mobile link, and how much of the view is blank meanwhile?",
+        run: street_4g,
+    },
+    Scenario {
+        name: "macro/load/street-z16-4g",
+        kind: Kind::Macro,
+        question: "How long does a city's streets take to show complete from nothing over a mobile link, closer in than its tileset's last zoom?",
+        run: street_z16_4g,
+    },
+    Scenario {
+        name: "macro/load/street-pmtiles-4g",
+        kind: Kind::Macro,
+        question: "How long does a city's streets take to show complete from nothing over a mobile link, read from a PMTiles archive by byte ranges?",
+        run: street_pmtiles_4g,
+    },
+    Scenario {
+        name: "macro/load/street-slow",
+        kind: Kind::Macro,
+        question: "How long does a city's streets take to show complete from nothing over a slow link, and how much of the view is blank meanwhile?",
+        run: street_slow,
+    },
+    Scenario {
+        name: "macro/load/street-warm",
+        kind: Kind::Macro,
+        question: "What does a disk cache that holds a city's streets save a map that shows them again over a mobile link?",
+        run: street_warm,
+    },
+    Scenario {
+        name: "macro/load/street-expired",
+        kind: Kind::Macro,
+        question: "What does revalidating a disk cache of a city's streets that has expired cost a map that shows them again over a mobile link?",
+        run: street_expired,
     },
     Scenario {
         name: "macro/load/runtime",
@@ -96,6 +138,107 @@ fn load(bench: &mut Bench, fixtures: &Fixtures, style: &str, camera: &CameraOpti
         let mut map = map;
         map.settle();
         map.save_image(path);
+    }
+}
+
+/// What a map's disk cache holds when it starts.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Cached {
+    /// Nothing: the map has no cache.
+    Nothing,
+    /// What an earlier visit stored, still fresh: nothing goes to the
+    /// network.
+    Fresh,
+    /// What an earlier visit stored, expired since: the map shows it at
+    /// once and revalidates it, which the server answers with 304s.
+    Expired,
+}
+
+/// The question: how long does central San Francisco at street level
+/// (zoom 14) take to show complete from nothing over a 4G link, its style,
+/// sprite, glyphs and tiles coming from a server?
+fn street_4g(bench: &mut Bench) {
+    load_online(bench, MOBILE_4G, Cached::Nothing);
+}
+
+/// The question of `macro/load/street-4g` at zoom 16, past the tileset's
+/// last zoom, 14: each tile the view shows is cut from one there, which
+/// the tiles cut from it all need at once.
+fn street_z16_4g(bench: &mut Bench) {
+    load_online_from(bench, 16.0, MOBILE_4G, Cached::Nothing, Serve::Tiles);
+}
+
+/// The question of `macro/load/street-4g`, the tiles read from a PMTiles
+/// archive on the server: the map reads its header and directories before
+/// each tile's range, through the disk cache's place in the loader.
+fn street_pmtiles_4g(bench: &mut Bench) {
+    load_online_from(bench, 14.0, MOBILE_4G, Cached::Nothing, Serve::Archive);
+}
+
+/// The question of `macro/load/street-4g` over a slow link.
+fn street_slow(bench: &mut Bench) {
+    load_online(bench, SLOW, Cached::Nothing);
+}
+
+/// The question: what does a disk cache save? `macro/load/street-4g` with
+/// a cache that an earlier visit to the view filled, still fresh.
+fn street_warm(bench: &mut Bench) {
+    load_online(bench, MOBILE_4G, Cached::Fresh);
+}
+
+/// The question: what does revalidating a cache that has expired cost?
+/// `macro/load/street-warm` with the cache's entries expired: the map
+/// shows them while it revalidates each over the 4G link.
+fn street_expired(bench: &mut Bench) {
+    load_online(bench, MOBILE_4G, Cached::Expired);
+}
+
+/// How many frames a load over the network may take: 60 seconds.
+const ONLINE_FRAME_LIMIT: u64 = 3_600;
+
+/// Measures a map's start over the simulated network on `profile`, at San
+/// Francisco's streets (zoom 14), with what `cached` says in its disk
+/// cache, each frame a part, until the first complete frame and then until
+/// no transfer is in flight, such as a revalidation of what the cache
+/// showed. The GPU device and its target, and filling the cache, are left
+/// out.
+fn load_online(bench: &mut Bench, profile: Profile, cached: Cached) {
+    load_online_from(bench, 14.0, profile, cached, Serve::Tiles);
+}
+
+/// [`load_online`] at `zoom`, the server serving the tiles as `serve` says.
+fn load_online_from(bench: &mut Bench, zoom: f64, profile: Profile, cached: Cached, serve: Serve) {
+    let fixtures = Fixtures::open(bench);
+    let camera = super::street_center(&fixtures, zoom);
+    let server = Server::new(&fixtures, Tiles::Street, serve);
+    let cache = (cached != Cached::Nothing).then(|| {
+        // An earlier visit's, over a link that takes no time, on a map of
+        // its own.
+        let cache = DiskCache::new();
+        server.set_expired(cached == Cached::Expired);
+        let network = Network::new(Arc::clone(&server), LOCAL);
+        OnlineMap::new(Frontend::new(VIEW), network, Some(Arc::clone(&cache)), &camera).settle();
+        server.set_expired(false);
+        cache
+    });
+
+    let frontend = Frontend::new(VIEW);
+    bench.gpu = Some(frontend.gpu());
+    let network = Network::new(server, profile);
+    let mut online = OnlineMap::new(frontend, network, cache, &camera);
+    loop {
+        online.frame(bench);
+        if online.sight().is_complete() && online.network().is_idle() {
+            break;
+        }
+        assert!(online.map().frames() < ONLINE_FRAME_LIMIT, "the load isn't done after {ONLINE_FRAME_LIMIT} frames");
+    }
+    bench.per_part("frame");
+    online.sight().declare(bench, true, true);
+    online.network().counts().declare(bench, Counts::default());
+    if let Some(path) = &bench.image {
+        online.settle();
+        online.map().save_image(path);
     }
 }
 

@@ -18,10 +18,11 @@ use mln_storage::offline::{
     OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionObserver, OfflineRegionStatus,
 };
 use mln_storage::offline_database::{DatabaseError, OfflineDatabase};
-use mln_storage::resource::{Priority, Usage};
-use mln_storage::response::{Reason, ResourceError};
+use mln_storage::resource::{Priority, TileFormat, Usage};
+use mln_storage::response::{Caching, Reason, ResourceError};
 use mln_storage::{FileSource, Kind, LoadingMethod, Request, Resource, Response};
 use mln_style::StyleRegistry;
+use mln_style::layer_type::SourceKind;
 use mln_style::parser::Parser;
 use mln_style::source_type::OfflineResources;
 use mln_text::glyph::{
@@ -29,11 +30,12 @@ use mln_text::glyph::{
     get_glyph_range,
 };
 use mln_tile_id::tile_id::CanonicalTileID;
+use mln_util::chrono::now;
 use mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::i18n::glyph_range_is_entirely_locally_generated;
 use mln_util::range::Range;
-use mln_util::tileset::Tileset;
+use mln_util::tileset::{Tileset, VectorEncoding};
 use mln_vec_map::VecMap;
 
 const K_RESOURCES_BATCH_SIZE: usize = 64;
@@ -398,7 +400,7 @@ impl OfflineDownload {
                 if tileset.tiles.is_empty() {
                     return Err("the TileJSON has no tile URLs".to_owned());
                 }
-                self.queue_tiles(*round_zoom, *tile_size, &tileset);
+                self.queue_tiles(source.info().layer_kind, *round_zoom, *tile_size, &tileset);
                 if self.required_source_urls.remove(url) && self.required_source_urls.is_empty() {
                     self.status.required_resource_count_is_precise = true;
                 }
@@ -421,7 +423,7 @@ impl OfflineDownload {
             match record.data().offline() {
                 OfflineResources::None => {}
                 OfflineResources::Tiles { tileset, tile_size, round_zoom } => {
-                    self.queue_tiles(round_zoom, tile_size, &tileset);
+                    self.queue_tiles(record.info().layer_kind, round_zoom, tile_size, &tileset);
                 }
                 OfflineResources::TileJson { url, tile_size, round_zoom } => {
                     self.status.required_resource_count_is_precise = false;
@@ -553,10 +555,18 @@ impl OfflineDownload {
         self.resources_remaining.push_front(resource);
     }
 
-    fn queue_tiles(&mut self, round_zoom: bool, tile_size: u16, tileset: &Tileset) {
+    /// Queues the tiles of `tileset`, of a source whose layers are of
+    /// `kind`, that cover the region, of the zoom levels nearest the
+    /// region's if `round_zoom`.
+    fn queue_tiles(&mut self, kind: SourceKind, round_zoom: bool, tile_size: u16, tileset: &Tileset) {
         // A source without tile URLs has no tiles to download.
         let Some(url_template) = tileset.tiles.first() else {
             return;
+        };
+        let format = match kind {
+            SourceKind::Geometry if tileset.vector_encoding == Some(VectorEncoding::MLT) => TileFormat::Mlt,
+            SourceKind::Geometry => TileFormat::Mvt,
+            SourceKind::None | SourceKind::Raster | SourceKind::RasterDem | SourceKind::Value(_) => TileFormat::Image,
         };
         let (status, remaining) = (&mut self.status, &mut self.resources_remaining);
         let pixel_ratio = self.definition.pixel_ratio();
@@ -571,6 +581,7 @@ impl OfflineDownload {
                 tile.y as i32,
                 tile.z as i8,
                 tileset.scheme,
+                format,
                 LoadingMethod::All,
             );
 
@@ -605,12 +616,12 @@ impl OfflineDownload {
             return;
         };
 
-        // A stored resource that can't be used without revalidating it, such
-        // as one invalidate_region marked, isn't complete. Keep it to
-        // revalidate it with the server.
+        // The region's copy is complete while it's fresh. A stale one is
+        // revalidated, and stays as it is until its refresh arrives.
+        let fresh = |caching: Caching| caching.is_fresh(now());
         let stale = if then.reads() {
             match db.get_region_resource(&resource) {
-                Some((response, size)) if response.is_usable() => {
+                Some((response, size)) if fresh(response.caching) => {
                     if let Err(error) = self.read(&then, &response) {
                         self.report_unparsable(&resource, &error);
                     }
@@ -621,11 +632,11 @@ impl OfflineDownload {
             }
         } else {
             match db.check_region_resource(&resource) {
-                Some((size, true)) => {
-                    self.complete_stored_resource(db, &resource, size as u64);
+                Some((size, caching)) if fresh(caching) => {
+                    self.complete_stored_resource(db, &resource, size);
                     return;
                 }
-                Some((_, false)) => db.get_region_resource(&resource),
+                Some(_) => db.get_region_resource(&resource),
                 None => None,
             }
         };
@@ -633,8 +644,7 @@ impl OfflineDownload {
         let mut online_resource = resource.clone();
         if let Some((stored, _)) = &stale {
             // Lets the server answer 304 Not Modified.
-            online_resource.prior_etag = stored.etag.clone();
-            online_resource.prior_modified = stored.modified;
+            online_resource.set_prior(stored);
         }
 
         let request = self.next_request();

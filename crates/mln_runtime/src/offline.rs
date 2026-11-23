@@ -4,8 +4,8 @@ use std::path::Path;
 
 use mln_storage::ResourceError;
 use mln_storage::offline::{
-    OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver,
-    OfflineRegionStatus,
+    OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionExpiry, OfflineRegionMetadata,
+    OfflineRegionObserver, OfflineRegionStatus,
 };
 use mln_storage_offline::DatabaseFileSourceExt;
 use mln_util::error::Error;
@@ -89,6 +89,15 @@ impl<'a> Offline<'a> {
         })
     }
 
+    /// How long a region's stored resources stay usable. Before
+    /// [`usable_offline_until`](OfflineRegionExpiry::usable_offline_until), a
+    /// download refreshes them.
+    pub fn region_expiry(&self, region_id: i64) -> Result<Completion<OfflineRegionExpiry>, Error> {
+        self.runtime.offline_command(move |database, core, resolver| {
+            database.get_offline_region_expiry(region_id, reply_on(core.queue.clone(), resolver));
+        })
+    }
+
     /// Selects the events that the runtime reports about a region's
     /// download, from [`EventMask::ALL_RUNTIME_EVENTS`]. It replaces the
     /// region's earlier selection, and [`EventMask::NONE`] stops them.
@@ -107,7 +116,8 @@ impl<'a> Offline<'a> {
         })
     }
 
-    /// Starts or pauses a region's download.
+    /// Starts or pauses a region's download. A download fetches the
+    /// resources the region lacks, and revalidates those that are stale.
     pub fn set_region_download_state(
         &self,
         region_id: i64,
@@ -118,8 +128,10 @@ impl<'a> Offline<'a> {
         })
     }
 
-    /// Makes maps check each resource of a region with its server before
-    /// they use it. The region keeps its resources.
+    /// Makes each resource of a region stale, so maps check it with its
+    /// server when they next use it, and the region's next download
+    /// refreshes them all. The region keeps its resources, which stay usable
+    /// unless their server requires checking them first.
     pub fn invalidate_region(&self, region_id: i64) -> Result<Completion<()>, Error> {
         self.runtime.offline_command(move |database, core, resolver| {
             database.invalidate_offline_region(region_id, reply_on(core.queue.clone(), resolver));

@@ -95,6 +95,8 @@ pub struct MapCore {
     still_image: StillImage,
     /// Counts the still image requests, so the renderer can tell a new one.
     still_image_request_id: u64,
+    /// The `update_id` of the last update the map made.
+    update_id: u64,
 
     /// Grows with each change to the map's state.
     generation: u64,
@@ -161,6 +163,7 @@ impl MapCore {
             repaint_at: None,
             still_image: StillImage::None,
             still_image_request_id: 0,
+            update_id: 0,
             generation: 1,
             renderer_events,
             events,
@@ -431,10 +434,18 @@ impl MapCore {
                 repaint_at,
                 placement_changed,
                 still_image_request_id,
+                update_id,
                 stats,
             } => {
                 self.repaint_at = repaint_at.filter(|_| continuous && !needs_repaint);
-                self.on_render_frame_finished(mode, needs_repaint, placement_changed, still_image_request_id, stats);
+                self.on_render_frame_finished(
+                    mode,
+                    needs_repaint,
+                    placement_changed,
+                    still_image_request_id,
+                    update_id,
+                    stats,
+                );
             }
             RendererEvent::RenderMapStarted => {
                 if continuous {
@@ -484,12 +495,17 @@ impl MapCore {
         }
     }
 
+    /// Handles the end of a frame. Only a `Full` frame of the map's last
+    /// update leaves a continuous map idle: the map may have made an update
+    /// since the renderer took the frame's, such as its answer to a tile that
+    /// the frame itself took in, and that update's frame is still to come.
     fn on_render_frame_finished(
         &mut self,
         mode: mln_render::RenderMode,
         needs_repaint: bool,
         placement_changed: bool,
         still_image_request_id: u64,
+        update_id: u64,
         stats: Arc<RenderingStats>,
     ) {
         let fully_loaded = mode == mln_render::RenderMode::Full;
@@ -516,7 +532,11 @@ impl MapCore {
             let animating = self.transform.in_transition();
             if needs_repaint || (animating && self.transform.frame_time().is_none()) {
                 self.on_update();
-            } else if !animating && self.renderer_fully_loaded && self.repaint_at.is_none() {
+            } else if !animating
+                && self.renderer_fully_loaded
+                && self.repaint_at.is_none()
+                && update_id == self.update_id
+            {
                 self.emit(MapEvent::Idle);
             }
         } else if self.renderer_fully_loaded
@@ -564,6 +584,7 @@ impl MapCore {
         let projection = self.projection_at(self.transform.view().zoom());
         self.transform.set_projection_definition(&projection);
 
+        self.update_id += 1;
         let params = UpdateParameters {
             style_loaded: self.style_loaded(),
             mode: self.mode,
@@ -581,6 +602,7 @@ impl MapCore {
             prefetch_zoom_delta: self.tile.prefetch_zoom_delta,
             still_image_request: self.still_image == StillImage::Pending,
             still_image_request_id: self.still_image_request_id,
+            update_id: self.update_id,
             cross_source_collisions: self.cross_source_collisions,
             fast_pfor_enabled: self.fast_pfor_enabled,
             tile_lod_min_radius: self.tile.lod_min_radius,
@@ -923,7 +945,7 @@ impl MapCore {
     /// style documents that load after this call. They shape the text that
     /// glyph PBFs can't shape, or all the text of a style without glyph
     /// PBFs, and draw the glyphs that come from local fonts (`LocalGlyphs`)
-    /// before the platform's fonts do.
+    /// before the device's fonts do.
     ///
     /// `json` is an array of font files, each an object with a `url` and an
     /// optional `unicode-range`, as in a font face of a style's `font-faces`.
@@ -939,7 +961,7 @@ impl MapCore {
     /// [`set_fallback_font_faces`](Self::set_fallback_font_faces) with faces
     /// an app has made, such as `FontFace::fallback(url, ranges).with_data(bytes)`
     /// for a font file it holds in memory, or `FontFace::system`, for the
-    /// fonts of the renderer's `LocalGlyphs`.
+    /// device's fonts that the renderer's `LocalGlyphs::chooser` chooses.
     pub fn set_fallback_font_face_list(&mut self, faces: mln_text::glyph::FontFaces) {
         self.loader.set_fallback_font_faces(Some(Arc::new(faces)));
     }

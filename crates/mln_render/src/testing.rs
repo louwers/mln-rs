@@ -47,7 +47,7 @@ pub enum Event {
 /// glyphs on `pool`, with no images and no sprite loaded.
 pub(crate) fn tile_store(pool: &TaskGroup, workers: Box<dyn TileWorkers>) -> TileStore {
     let glyphs = GlyphStore::new(
-        mln_text::local_glyph_rasterizer::LocalGlyphs::default(),
+        mln_text::local_fonts::LocalGlyphs::default(),
         Arc::default(),
         pool.clone(),
         default_engine(),

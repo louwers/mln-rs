@@ -20,10 +20,12 @@ pub enum GlyphIDType {
 }
 
 impl GlyphIDType {
-    /// Text that the device's fonts shape ([`FontFace::system`]): the glyph
-    /// store picks a font for each of its characters, and its glyphs have
-    /// those fonts' types. No glyph has this type, and no face its number.
-    /// A constant rather than a variant, so that a type stays a `u16`.
+    /// Text whose fonts the device chooses per character
+    /// ([`FontFace::system`]): the glyph store has the renderer's
+    /// [`FontChooser`](crate::local_fonts::FontChooser) choose a face for
+    /// each piece, and its glyphs take those faces' types. No glyph has this
+    /// type, and no face its number. A constant rather than a variant, so
+    /// that a type stays a `u16`.
     pub const SYSTEM: GlyphIDType = GlyphIDType::Face(NonZeroU16::MAX);
 
     /// The type of the font face numbered `id`.
@@ -339,8 +341,9 @@ impl PartialEq for FontData {
 /// A font file that draws a font's characters in `ranges`, from a style's
 /// `font-faces` or an app's fallback faces. A face without a name is a
 /// fallback, which every font stack uses after the faces that name one of
-/// its fonts: in a style with glyph PBFs, for the text they can't shape.
-#[derive(Clone, Debug, Default, PartialEq, mln_wire::Wire)]
+/// its fonts: in a style with glyph PBFs, for the text they can't shape; or
+/// one of the device's fonts ([`FontFace::device`]), which has no ranges.
+#[derive(Clone, Debug, PartialEq, mln_wire::Wire)]
 pub struct FontFace {
     /// The type of the face's glyphs.
     pub type_: GlyphIDType,
@@ -354,12 +357,28 @@ pub struct FontFace {
     /// font files.
     #[wire(skip)]
     pub data: Option<FontData>,
+    /// The OpenType weight a variable font loads at: regular (400) unless
+    /// made at another. Left out of the faces that workers get, like `data`.
+    #[wire(skip, default = "regular_weight")]
+    pub weight: u16,
+}
+
+/// [`REGULAR_WEIGHT`](crate::weight::REGULAR_WEIGHT) as an OpenType weight.
+fn regular_weight() -> u16 {
+    crate::weight::REGULAR_WEIGHT as u16
 }
 
 impl FontFace {
     #[must_use]
     pub fn new(name: &str, url: &str, ranges: Vec<FontFaceRange>) -> Self {
-        FontFace { type_: GlyphIDType::FontPBF, name: name.to_string(), url: url.to_string(), ranges, data: None }
+        FontFace {
+            type_: GlyphIDType::FontPBF,
+            name: name.to_string(),
+            url: url.to_string(),
+            ranges,
+            data: None,
+            weight: regular_weight(),
+        }
     }
 
     /// A fallback face, without a name, for the font file at `url`, which
@@ -374,12 +393,28 @@ impl FontFace {
     /// The device's fonts, as a fallback face: in a style with glyph PBFs,
     /// for the text in `ranges` (the scripts the PBFs can't shape that the
     /// device has fonts for); in a style without, for all the text the
-    /// style's own faces don't draw. For each character, the glyph store
-    /// takes the first font the label's `text-font` names that the device has
-    /// and that has it, else the font the device picks for it.
+    /// style's own faces don't draw. For each character, the glyph store has
+    /// the renderer's [`FontChooser`](crate::local_fonts::FontChooser) choose
+    /// the face that draws it.
     #[must_use]
     pub fn system(ranges: Vec<FontFaceRange>) -> Self {
         FontFace { type_: GlyphIDType::SYSTEM, ..FontFace::new("", "", ranges) }
+    }
+
+    /// One of the device's fonts, which a
+    /// [`FontChooser`](crate::local_fonts::FontChooser) chose, at the
+    /// OpenType `weight` its label's font name asks for. It has no name and
+    /// no ranges, holds its font file, and `url` only names it
+    /// (`file:///path#index`, or `font://PostScriptName` for a CoreText
+    /// font). The same url and weight get the same type for the life of the
+    /// process.
+    #[must_use]
+    pub fn device(url: &str, weight: u16, data: FontData) -> Self {
+        FontFace {
+            type_: face_type(&format!("{url}@{weight}"), "", &[]),
+            weight,
+            ..FontFace::new("", url, Vec::new()).with_data(data)
+        }
     }
 
     /// The face with its font file in memory, so that `url` only names it.

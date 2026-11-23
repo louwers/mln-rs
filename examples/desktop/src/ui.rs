@@ -23,6 +23,7 @@ use mln_rs::mln_map_types::MapDebugOptions;
 use mln_util::geo::ScreenCoordinate;
 
 use crate::backend::Kind;
+use crate::network::Network;
 use crate::styles::Style;
 
 /// What the controls ask of the map.
@@ -39,7 +40,11 @@ pub(crate) enum Action {
     SetGlobe(bool),
     /// Let drags and zooms on the globe turn the bearing with the planet.
     SetFreeBearing(bool),
-    /// Empty the cache database.
+    /// Load over this network.
+    SetNetwork(Network),
+    /// Keep nothing the map loads in the cache database, or keep it again.
+    SetCacheDisabled(bool),
+    /// Empty the cache database and what the renderer has loaded.
     ResetCache,
     /// Render with this backend from the next frame on.
     SetBackend(Kind),
@@ -61,6 +66,9 @@ pub(crate) struct Shown<'a> {
     pub globe: bool,
     /// Whether drags and zooms on the globe turn the bearing.
     pub free_bearing: bool,
+    pub network: Network,
+    /// Whether the cache database keeps nothing the map loads.
+    pub cache_disabled: bool,
     /// The backend the map renders with.
     pub backend: Kind,
     /// Lines about the renderer: its adapter, its frame time.
@@ -126,6 +134,9 @@ impl Palette {
         visuals.override_text_color = Some(self.ink);
         visuals.hyperlink_color = self.accent;
         visuals.selection.bg_fill = self.accent;
+        // The network's menu.
+        visuals.window_fill = self.surface;
+        visuals.window_stroke = Stroke::new(1.0, self.line);
         visuals.widgets.hovered.weak_bg_fill = self.hover;
         visuals.widgets.hovered.bg_fill = self.hover;
         visuals.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
@@ -361,8 +372,25 @@ fn about_panel(ctx: &egui::Context, palette: &Palette, shown: &Shown<'_>, action
             if ui.checkbox(&mut free_bearing, "Free bearing on the globe").on_hover_text(free_bearing_hint).changed() {
                 actions.push(Action::SetFreeBearing(free_bearing));
             }
+            ui.horizontal(|ui| {
+                ui.label("Network");
+                let mut network = shown.network;
+                egui::ComboBox::from_id_salt("network").selected_text(network.label()).show_ui(ui, |ui| {
+                    for option in Network::ALL {
+                        ui.selectable_value(&mut network, option, option.label());
+                    }
+                });
+                if network != shown.network {
+                    actions.push(Action::SetNetwork(network));
+                }
+            });
+            let mut cache_disabled = shown.cache_disabled;
+            let cache_hint = "Keep nothing the map loads in the cache database";
+            if ui.checkbox(&mut cache_disabled, "Disable the cache").on_hover_text(cache_hint).changed() {
+                actions.push(Action::SetCacheDisabled(cache_disabled));
+            }
             let reset = egui::Button::new("Reset the cache").stroke(Stroke::new(1.0, palette.line));
-            if ui.add(reset).on_hover_text("Empty the cache database").clicked() {
+            if ui.add(reset).on_hover_text("Empty the cache database and load the map again").clicked() {
                 actions.push(Action::ResetCache);
             }
             ui.add_space(8.0);

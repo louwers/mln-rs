@@ -34,12 +34,16 @@
 //! GeoJSON is the `geojson` crate's and feature geometry is `geo_types`'.
 //! Both crates are re-exported.
 //!
-//! Each backend is a default feature (`webgpu`, `metal`, `vulkan`, `d3d12`,
-//! `gl`) and so are SQLite (`sqlite`: the ambient cache, offline regions
-//! and `mbtiles://` sources) and the in-process font-face shaper
-//! (`font-face-shaper`). A browser build turns on one backend and leaves
-//! the others out. A native runtime always has SQLite, so there `sqlite`
-//! only re-exports `mln_storage_offline`.
+//! Each backend is a feature, which re-exports its crate: `metal`
+//! (`mln_mtl`), `vulkan` (`mln_vulkan`), `d3d12` (`mln_d3d12`), `gl`
+//! (`mln_gl`) and `webgpu` (`mln_webgpu`). All but `webgpu` are on by
+//! default; natively, wgpu renders through the same APIs as the others, so
+//! turn it on to share a wgpu device or surface with the map. SQLite
+//! (`sqlite`: the ambient cache, offline regions and `mbtiles://` sources)
+//! and the in-process font-face shaper (`font-face-shaper`) are default
+//! features too. A browser build turns on one backend and leaves the others
+//! out. A native runtime always has SQLite, so there `sqlite` only
+//! re-exports `mln_storage_offline`.
 
 mod builtins;
 pub mod layer;

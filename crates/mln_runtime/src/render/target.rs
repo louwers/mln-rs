@@ -606,6 +606,11 @@ impl Surface {
     /// [`set_surface`](crate::RenderSession::set_surface) or
     /// [`release_target`](crate::RenderSession::release_target) replaces it,
     /// or the session detaches or is abandoned.
+    ///
+    /// On Apple platforms, the session presents to a `CAMetalLayer` that it
+    /// puts in the window's view, which only the main thread may do: attach
+    /// the window with [`Driver::CallerThread`], serviced there, or make the
+    /// layer yourself and attach `Surface::metal_layer`.
     pub fn window(window: impl Window + 'static) -> Surface {
         Surface::of(SurfaceKind::Window(Arc::new(window)))
     }
@@ -1015,7 +1020,6 @@ impl SurfaceType {
     pub fn presents_without_device(self) -> bool {
         match self {
             SurfaceType::MetalLayer => self.presents_with(BackendType::Metal),
-            _ if cfg!(target_vendor = "apple") => self.presents_with(BackendType::WebGPU),
             _ => [BackendType::Vulkan, BackendType::D3D12, BackendType::OpenGL, BackendType::WebGPU]
                 .into_iter()
                 .any(|backend| self.presents_with(backend)),
@@ -1103,10 +1107,10 @@ impl Device {
 
     /// The library's device, on the platform's native backend: Metal on
     /// Apple's platforms, and Vulkan elsewhere, then D3D12 on Windows, or
-    /// OpenGL where there is neither. WebGPU (wgpu) takes the place of a
-    /// native backend that isn't there. A backend that can't name the GPU
-    /// that `options` names is skipped: only Vulkan names one by UUID, and
-    /// only Vulkan and D3D12 by LUID. OpenGL lists one GPU, the one its
+    /// OpenGL where there is neither, and last WebGPU (wgpu) in a build with
+    /// the `webgpu` feature. A backend that can't name the GPU that
+    /// `options` names is skipped: only Vulkan names one by UUID, and only
+    /// Vulkan and D3D12 by LUID. OpenGL lists one GPU, the one its
     /// display renders on, at index 0.
     /// So is OpenGL where it can't render with `options.gl_api`.
     ///

@@ -10,6 +10,12 @@ mod driver;
 mod events;
 mod exported;
 mod feature_state;
+// Rings and surfaces of the backends that report a frame's depth.
+#[cfg(any(
+    all(feature = "webgpu", not(target_family = "wasm")),
+    all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))),
+    all(feature = "gl", target_os = "linux"),
+))]
 mod frame_depth;
 mod gestures;
 mod placement;

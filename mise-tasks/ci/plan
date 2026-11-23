@@ -19,7 +19,7 @@ while IFS=$'\t' read -r status path rest; do
             *.md) ;;
             crates/mln_d3d12/*) ;;
             crates/mln_mtl/* | examples/desktop/*) macos=true ;;
-            crates/mln_vulkan/* | tools/c-abi-test/* | .github/actions/lavapipe/*) ;;
+            crates/mln_vulkan/* | tools/c-abi-test/CMakeLists.txt | tools/c-abi-test/testdata/* | .github/actions/lavapipe/*) ;;
             crates/mln_web_host/* | crates/mln_web_shaper/* | examples/web/* | crates/mln_c/web-check/* | mise-tasks/web/* | mise-tasks/c-web/*) web=true ;;
             *) macos=true web=true ;;
         esac

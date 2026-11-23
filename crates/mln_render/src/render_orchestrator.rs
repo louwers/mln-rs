@@ -16,7 +16,7 @@ use mln_style::{
 };
 use mln_style_types::image::Impl as ImageImpl;
 use mln_text::GlyphCache;
-use mln_text::local_glyph_rasterizer::LocalGlyphs;
+use mln_text::local_fonts::LocalGlyphs;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
@@ -341,6 +341,9 @@ impl RenderOrchestrator {
             &clock,
             &mut frame,
         );
+
+        #[cfg(feature = "bench")]
+        crate::bench::observe_cover(&self.view, &self.tile_store);
 
         // A synchronous source's tile laid out by its answer isn't in this
         // update's render tiles yet: the next update has it.
@@ -1514,7 +1517,6 @@ impl Drop for WaitOnDrop {
 
 impl Drop for RenderOrchestrator {
     fn drop(&mut self) {
-        self.tile_store.log_stats();
         // The render sources and their tiles go before the wait, since
         // their data drops on the thread pool.
         self.render_sources.clear();

@@ -22,8 +22,9 @@ pub(crate) type HttpHeaderCallback = Arc<dyn Fn(Kind, &str) -> HttpHeaders + Sen
 /// The names are HTTP field names that neither the file source nor a
 /// transport manages (not `Range`, `If-None-Match`, `If-Modified-Since`,
 /// `User-Agent`, `Accept-Encoding`, `Host`, `Connection`, `Content-Length`,
-/// `Transfer-Encoding`, ...), and the values are field values. A redirect to
-/// another origin drops these headers.
+/// `Transfer-Encoding`, ...), and the values are field values. An `Accept`
+/// replaces the one the file source sends for tiles and images. A redirect
+/// to another origin drops these headers.
 #[derive(Clone, Default)]
 pub struct HttpHeaderTransform {
     callback: Option<HttpHeaderCallback>,

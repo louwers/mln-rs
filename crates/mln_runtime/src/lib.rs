@@ -21,9 +21,9 @@
 //! [`Map::set_style_source_data`], and its queries of what a session drew
 //! through [`RenderSession::query_rendered_source`].
 //!
-//! Sessions render with the backends of the crate's features: `webgpu`,
-//! `metal`, `vulkan` and `gl`, each where its platform has it. A session's
-//! [`Device`] picks its backend.
+//! Sessions render with the backends of the crate's features: `metal`,
+//! `vulkan`, `d3d12` and `gl`, on by default, and `webgpu`, each where its
+//! platform has it. A session's [`Device`] picks its backend.
 //!
 //! In the browser (wasm32-unknown-unknown, without threads), a runtime's
 //! thread and its sessions' are the one that made the runtime: their work

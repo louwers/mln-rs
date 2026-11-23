@@ -4,17 +4,19 @@
 //!
 //! The session follows redirects itself and has no URL cache (the ambient
 //! cache is the file source's own). It sends the request headers the ureq
-//! transport sends (`Range`, `If-None-Match` or `If-Modified-Since`, user
-//! agent "MapLibreNative/1.0"), plus `Accept-Encoding: identity` with a
-//! `Range`, since a range of a compressed body can't be decompressed. The
-//! response headers go to the `Transfer` in a fixed order, `Cache-Control`
-//! before `Expires` as in the .mm (`NSHTTPURLResponse` doesn't keep the
-//! server's order). Errors map to `Reason`s as in the .mm, with the
-//! `NSError`'s localized description as the message.
+//! transport sends (`Range`, `If-None-Match` or `If-Modified-Since`,
+//! `Accept`, `User-Agent`), plus `Accept-Encoding:
+//! identity` with a `Range`, since a range of a compressed body can't be
+//! decompressed. The response headers the file source reads go to the
+//! `Transfer`; `NSHTTPURLResponse` joins a header's lines with commas.
+//! Errors map to `Reason`s as in the .mm, with the `NSError`'s localized
+//! description as the message.
 //!
 //! The host's headers (`TransferRequest::headers`) go with the request too.
 //! The session's delegate drops them from a redirect that leaves the origin,
-//! as maplibre-native-ffi's `http_file_source.mm` does.
+//! as maplibre-native-ffi's `http_file_source.mm` does. It keeps the
+//! request's `Accept`, which may be the host's in place of the transport's,
+//! as one of its own.
 
 #![expect(unsafe_code, reason = "Foundation through objc2 is the FFI here")]
 
@@ -35,7 +37,9 @@ use objc2_foundation::{
 };
 use parking_lot::Mutex;
 
-use crate::http_file_source::{HttpTransport, Transfer, TransferRequest, range_header, same_origin};
+use crate::http_file_source::{
+    HttpTransport, Transfer, TransferRequest, USER_AGENT, accept_header, range_header, same_origin,
+};
 use crate::response::{Reason, ResourceError};
 
 /// How long a transfer may go without receiving data before it fails with
@@ -46,14 +50,14 @@ const IDLE_TIMEOUT_SECONDS: f64 = 30.0;
 /// `MLNNetworkConfiguration`'s limit (`NSURLSession`'s default is 6).
 const MAXIMUM_CONNECTIONS_PER_HOST: NSInteger = 8;
 
-/// The response headers a `Response` reads, in the order they go to the
-/// `Transfer`.
-const RESPONSE_HEADERS: [&str; 6] =
-    ["Last-Modified", "ETag", "Cache-Control", "Expires", "Retry-After", "X-Rate-Limit-Reset"];
+/// The response headers a `Response` reads.
+const RESPONSE_HEADERS: [&str; 8] =
+    ["Last-Modified", "ETag", "Cache-Control", "Expires", "Date", "Age", "Retry-After", "X-Rate-Limit-Reset"];
 
 /// The request headers this transport sets itself. Every other header of a
 /// request is one of the host's.
-const OWN_HEADERS: [&str; 5] = ["Range", "Accept-Encoding", "If-None-Match", "If-Modified-Since", "User-Agent"];
+const OWN_HEADERS: [&str; 6] =
+    ["Range", "Accept-Encoding", "If-None-Match", "If-Modified-Since", "Accept", "User-Agent"];
 
 define_class!(
     /// The session's delegate: drops the host's headers from a redirect to
@@ -231,7 +235,10 @@ fn url_request(request: &TransferRequest) -> Option<Retained<NSMutableURLRequest
     } else if let Some(prior_modified) = resource.prior_modified {
         set_header("If-Modified-Since", &rfc1123(prior_modified));
     }
-    set_header("User-Agent", "MapLibreNative/1.0");
+    if let Some(accept) = accept_header(resource, request.headers()) {
+        set_header("Accept", accept);
+    }
+    set_header("User-Agent", USER_AGENT);
     for (name, value) in request.headers() {
         set_header(name, value);
     }
@@ -259,7 +266,7 @@ fn transfer(
         .collect();
     let status = i64::try_from(response.statusCode()).unwrap_or(0);
     let body = Ok(data.map(NSData::to_vec).unwrap_or_default());
-    Ok(Transfer { status, headers, body })
+    Ok(Transfer { status, headers, body, stale: false })
 }
 
 /// The `NSURLErrorDomain` codes the .mm maps to `Reason::Connection`.

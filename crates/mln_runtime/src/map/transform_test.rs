@@ -5312,7 +5312,8 @@ fn a_turn_around_an_anchor_keeps_the_ground_under_it() {
 // Port-only: a drag through apply_camera_delta holds the point its anchor
 // names, as move_by_with_anchor does. On the globe the planet turns to keep
 // the grabbed location under the cursor, which a drag around the view center
-// doesn't; on a flat map the anchor changes nothing.
+// doesn't; on a flat map seen from straight above at sea level every point
+// moves alike, so the anchor changes nothing.
 #[test]
 fn a_drag_delta_holds_its_anchor() {
     let offset = sc(30.0, 12.0);
@@ -5346,7 +5347,372 @@ fn a_drag_delta_holds_its_anchor() {
         transform.jump_to(&CameraOptions { center: Some(ll(30.0, 20.0)), zoom: Some(3.0), ..Default::default() });
         transform
     };
-    assert_eq!(drag(&mut flat(), Some(cursor)), drag(&mut flat(), None));
+    let (anchored, unanchored) = (drag(&mut flat(), Some(cursor)), drag(&mut flat(), None));
+    assert_near(anchored.latitude(), unanchored.latitude(), 1e-9);
+    assert_near(anchored.longitude(), unanchored.longitude(), 1e-9);
+}
+
+/// A 800 by 600 flat map at (30, 20), zoom 10, pitched 55 degrees and turned
+/// 20, with its center `altitude` meters up, its clock started.
+fn pitched_flat_map(altitude: f64) -> (Transform, Instant) {
+    let mut transform = new_transform();
+    transform.resize(Size::new(800, 600)).unwrap();
+    transform.jump_to(&CameraOptions {
+        center: Some(ll(30.0, 20.0)),
+        zoom: Some(10.0),
+        pitch: Some(55.0),
+        bearing: Some(20.0),
+        center_altitude: Some(altitude),
+        ..Default::default()
+    });
+    let start = start_clock(&mut transform);
+    (transform, start)
+}
+
+/// How far, in pixels, the flat map's ground at `location` draws from
+/// `point` (y down): the flat map's ground is the plane at sea level.
+fn off_by(transform: &Transform, location: &LatLng, point: ScreenCoordinate) -> f64 {
+    let drawn = transform.lat_lng_to_screen_coordinate(location);
+    (drawn.x - point.x).hypot(drawn.y - point.y)
+}
+
+/// The flat map's ground under `point` (y down).
+fn flat_ground_under(transform: &Transform, point: ScreenCoordinate) -> LatLng {
+    transform.screen_coordinate_to_lat_lng(&point, WrapMode::Unwrapped).unwrap()
+}
+
+/// Where the transform's projection matrix draws `lat_lng`, `height` meters
+/// above sea level (y down).
+fn drawn_at(transform: &Transform, lat_lng: &LatLng, height: f64) -> ScreenCoordinate {
+    let view = transform.view();
+    let point = Projection::project(lat_lng, view.scale());
+    let clip = view.projection_matrix() * DVec4::new(point.x, point.y, height, 1.0);
+    let size = view.size();
+    sc(
+        f64::midpoint(clip.x / clip.w, 1.0) * f64::from(size.width),
+        (1.0 - clip.y / clip.w) / 2.0 * f64::from(size.height),
+    )
+}
+
+/// Where the sky starts on the screen of a flat map that isn't rolled (y
+/// down): above it, a line of sight doesn't descend to the ground.
+fn horizon_row(transform: &Transform) -> f64 {
+    let view = transform.view();
+    view.padding().center_in(view.size()).y - view.mercator_horizon()
+}
+
+// Within about a pixel: the eye can't tell a grabbed point from the pointer
+// at that distance.
+const ABOUT_A_PIXEL: f64 = 1.0;
+
+#[test]
+fn drawn_at_sea_level_is_where_the_transform_draws_a_location() {
+    let (transform, _) = pitched_flat_map(800.0);
+    let location = flat_ground_under(&transform, sc(600.0, 520.0));
+    let (drawn, expected) = (drawn_at(&transform, &location, 0.0), transform.lat_lng_to_screen_coordinate(&location));
+    assert_near(drawn.x, expected.x, 1e-6);
+    assert_near(drawn.y, expected.y, 1e-6);
+}
+
+/// On a pitched flat map, a drag keeps the ground it grabbed under the
+/// pointer, wherever on the screen the pointer is, and its center 800 m up
+/// moves it no differently: a drag solved at the view's center slid the
+/// ground under a pointer near the bottom edge by tens of pixels a step.
+#[test]
+fn a_drag_on_a_pitched_flat_map_keeps_the_grabbed_ground_under_the_pointer() {
+    for altitude in [0.0, 800.0] {
+        let (mut transform, _) = pitched_flat_map(altitude);
+        let mut pointer = sc(600.0, 520.0);
+        let grabbed = flat_ground_under(&transform, pointer);
+        for step in 0..20 {
+            let offset = sc(-6.0, -12.0);
+            pointer = sc(pointer.x + offset.x, pointer.y + offset.y);
+            let phase = if step == 0 { GesturePhase::Begin } else { GesturePhase::Update };
+            transform
+                .apply_camera_delta(&CameraDelta {
+                    offset: Some(offset),
+                    anchor: Some(pointer),
+                    phase,
+                    ..CameraDelta::default()
+                })
+                .unwrap();
+            let off = off_by(&transform, &grabbed, pointer);
+            assert!(off < ABOUT_A_PIXEL, "{altitude} m, step {step}: the grabbed ground is {off} px off");
+        }
+        assert_eq!(altitude, transform.view().center_altitude(), "the drag keeps the altitude");
+    }
+}
+
+/// The first pan of a pitched flat map whose center stands 800 m up moves
+/// the ground at the view's center by the pan, as at sea level: a pan solved
+/// at sea level jumped by the altitude times the tangent of the pitch.
+#[test]
+fn the_first_pan_of_a_raised_flat_map_does_not_jump() {
+    let (mut transform, _) = pitched_flat_map(800.0);
+    let center = sc(400.0, 300.0);
+    let offset = sc(0.0, 2.0);
+    let moving = transform
+        .screen_coordinate_to_lat_lng_at(&sc(center.x - offset.x, center.y - offset.y), 800.0, WrapMode::Unwrapped)
+        .unwrap();
+    transform.move_by(&offset, &AnimationOptions::default()).unwrap();
+    let drawn = drawn_at(&transform, &moving, 800.0);
+    let off = (drawn.x - center.x).hypot(drawn.y - center.y);
+    assert!(off < ABOUT_A_PIXEL, "the ground at the center is {off} px off");
+}
+
+/// On a pitched flat map 800 m up, a pinch's zoom and turn, an anchored
+/// ease, and the momentum that carries a pinch on hold the ground under
+/// their anchors, at sea level, within about a pixel at each step and frame.
+#[test]
+fn anchored_moves_on_a_raised_pitched_flat_map_hold_their_ground() {
+    let anchor = sc(600.0, 450.0);
+    let (mut transform, start) = pitched_flat_map(800.0);
+    let grabbed = flat_ground_under(&transform, anchor);
+    for (step, delta) in [
+        CameraDelta { scale: Some(1.3), bearing: Some(-12.0), phase: GesturePhase::Begin, ..CameraDelta::default() },
+        CameraDelta { scale: Some(0.8), pitch: Some(5.0), phase: GesturePhase::Update, ..CameraDelta::default() },
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        transform.apply_camera_delta(&CameraDelta { anchor: Some(anchor), ..delta }).unwrap();
+        let off = off_by(&transform, &grabbed, anchor);
+        assert!(off < ABOUT_A_PIXEL, "pinch step {step}: the ground is {off} px off");
+    }
+
+    let mut momentum = CameraMomentum::default();
+    momentum.zoom.glide = Some(glide(1.5, MomentumDecay::DEFAULT));
+    momentum.zoom.anchor = Some(anchor);
+    momentum.bearing.glide = Some(glide(40.0, MomentumDecay::DEFAULT));
+    momentum.bearing.anchor = Some(anchor);
+    transform
+        .apply_camera_delta(&CameraDelta {
+            momentum: Some(momentum),
+            phase: GesturePhase::End,
+            ..CameraDelta::default()
+        })
+        .unwrap();
+    for ms in (16..2000).step_by(16) {
+        transform.update_transitions(Some(start + Duration::from_millis(ms)));
+        let off = off_by(&transform, &grabbed, anchor);
+        assert!(off < ABOUT_A_PIXEL, "{ms} ms of momentum: the ground is {off} px off");
+    }
+    assert!(!transform.in_transition());
+
+    let (mut transform, start) = pitched_flat_map(800.0);
+    let grabbed = flat_ground_under(&transform, anchor);
+    transform.ease_to(
+        &CameraOptions {
+            zoom: Some(11.5),
+            bearing: Some(-30.0),
+            pitch: Some(40.0),
+            center_altitude: Some(1000.0),
+            anchor: Some(anchor),
+            ..Default::default()
+        },
+        &AnimationOptions { duration: Some(Duration::from_millis(500)), ..Default::default() },
+    );
+    for ms in (16..=512).step_by(16) {
+        transform.update_transitions(Some(start + Duration::from_millis(ms)));
+        let off = off_by(&transform, &grabbed, anchor);
+        assert!(off < ABOUT_A_PIXEL, "{ms} ms of the ease: the ground is {off} px off");
+    }
+    let camera = transform.camera_options(None);
+    assert_eq!((Some(11.5), Some(1000.0)), (camera.zoom, camera.center_altitude), "the ease ends where it asked");
+}
+
+/// Where the flat map's old rule and its plane agree, on a map seen from
+/// straight above at sea level, a gesture moves the camera as it did: a drag
+/// pans by its offset at the view's center, and a pinch's zoom and turn hold
+/// the location under the anchor, as the state's own conversions put them.
+#[test]
+fn from_straight_above_at_sea_level_flat_gestures_move_as_before() {
+    let flipped = |point: ScreenCoordinate| sc(point.x, 600.0 - point.y);
+    let mut transform = new_transform();
+    transform.resize(Size::new(800, 600)).unwrap();
+    transform.jump_to(&CameraOptions {
+        center: Some(ll(30.0, 20.0)),
+        zoom: Some(10.0),
+        bearing: Some(20.0),
+        ..Default::default()
+    });
+    let anchor = sc(500.0, 400.0);
+
+    let mut expected = transform.state().clone();
+    let offset = sc(12.0, -30.0);
+    transform
+        .apply_camera_delta(&CameraDelta {
+            offset: Some(offset),
+            anchor: Some(anchor),
+            phase: GesturePhase::Begin,
+            ..CameraDelta::default()
+        })
+        .unwrap();
+    let center = expected
+        .view()
+        .screen_coordinate_to_lat_lng(&flipped(sc(400.0 - offset.x, 300.0 - offset.y)), WrapMode::Unwrapped)
+        .unwrap();
+    expected.set_lat_lng_zoom(&center, 10.0);
+    let (actual, expected_center) =
+        (transform.view().center(WrapMode::Unwrapped), expected.view().center(WrapMode::Unwrapped));
+    assert_near(expected_center.latitude(), actual.latitude(), 1e-9);
+    assert_near(expected_center.longitude(), actual.longitude(), 1e-9);
+
+    let mut expected = transform.state().clone();
+    let before = transform.camera_options(None);
+    let location = expected.view().screen_coordinate_to_lat_lng(&flipped(anchor), WrapMode::Unwrapped).unwrap();
+    transform
+        .apply_camera_delta(&CameraDelta {
+            scale: Some(1.3),
+            bearing: Some(-12.0),
+            anchor: Some(anchor),
+            phase: GesturePhase::Update,
+            ..CameraDelta::default()
+        })
+        .unwrap();
+    expected.set_angle(deg2rad(-(before.bearing.unwrap() - 12.0)));
+    expected.set_lat_lng_zoom(&before.center.unwrap(), before.zoom.unwrap() + 1.3f64.log2());
+    expected.move_lat_lng(&location, &flipped(anchor)).unwrap();
+    let (expected, actual) = (expected.camera_options(None), transform.camera_options(None));
+    assert_eq!((expected.zoom, expected.bearing), (actual.zoom, actual.bearing), "the pinch");
+    let (expected, actual) = (expected.center.unwrap(), actual.center.unwrap());
+    assert_near(expected.latitude(), actual.latitude(), 1e-9);
+    assert_near(expected.longitude(), actual.longitude(), 1e-9);
+}
+
+/// A tilt around a point just below the horizon of a flat map, which
+/// carries it above the horizon, turns the camera around the view's center
+/// instead, as a tilt without an anchor does: a gesture's step, and the
+/// frames of a command once they carry it there.
+#[test]
+fn a_tilt_that_carries_its_anchor_into_the_sky_turns_around_the_center() {
+    let flat_map = |pitch: f64| {
+        let mut transform = new_transform();
+        transform.set_max_pitch(85.0);
+        transform.resize(Size::new(800, 600)).unwrap();
+        transform.jump_to(&CameraOptions {
+            center: Some(ll(30.0, 20.0)),
+            zoom: Some(12.0),
+            pitch: Some(pitch),
+            ..Default::default()
+        });
+        transform
+    };
+    let tilt = |anchored: bool| {
+        let mut transform = flat_map(70.0);
+        let anchor = sc(330.0, horizon_row(&transform) + 10.0);
+        let delta = CameraDelta {
+            pitch: Some(10.0),
+            anchor: anchored.then_some(anchor),
+            phase: GesturePhase::Begin,
+            ..Default::default()
+        };
+        transform.apply_camera_delta(&delta).unwrap();
+        assert!(anchor.y < horizon_row(&transform), "the tilt carries the anchor into the sky");
+        transform.camera_options(None)
+    };
+    assert_eq!(tilt(false), tilt(true), "a gesture's tilt");
+
+    let mut transform = flat_map(60.0);
+    let start = start_clock(&mut transform);
+    let anchor = sc(330.0, horizon_row(&transform) + 150.0);
+    let grabbed = flat_ground_under(&transform, anchor);
+    transform.ease_to(
+        &CameraOptions { pitch: Some(85.0), anchor: Some(anchor), ..Default::default() },
+        &AnimationOptions { duration: Some(Duration::from_secs(1)), ..Default::default() },
+    );
+    let (mut held, mut skyward) = (0, 0);
+    let mut center = transform.view().center(WrapMode::Unwrapped);
+    for ms in (16..=1008).step_by(16) {
+        transform.update_transitions(Some(start + Duration::from_millis(ms)));
+        let now = transform.view().center(WrapMode::Unwrapped);
+        if skyward > 0 || anchor.y < horizon_row(&transform) {
+            skyward += 1;
+            assert_eq!(center, now, "{ms} ms: the anchor reached the sky, and the center moved");
+        } else {
+            held += 1;
+            let off = off_by(&transform, &grabbed, anchor);
+            assert!(off < 1e-6, "{ms} ms: the ground is {off} px off");
+        }
+        center = now;
+    }
+    assert!(held > 5 && skyward > 5, "{held} frames held the anchor, and {skyward} didn't");
+}
+
+/// Under a roll, where the horizon isn't a row of the screen, a turn around
+/// a point whose line of sight doesn't descend to the ground turns around
+/// the view's center, as a turn without an anchor does, and a turn around a
+/// point on the ground holds that ground under it.
+#[test]
+fn a_turn_under_a_roll_holds_only_a_point_on_the_ground() {
+    let rolled = || {
+        let mut transform = new_transform();
+        transform.set_max_pitch(85.0);
+        transform.resize(Size::new(512, 512)).unwrap();
+        transform.jump_to(&CameraOptions {
+            center: Some(ll(30.0, 20.0)),
+            zoom: Some(12.0),
+            pitch: Some(80.0),
+            roll: Some(90.0),
+            ..Default::default()
+        });
+        transform
+    };
+    let turn = |anchor: Option<ScreenCoordinate>| {
+        let mut transform = rolled();
+        let delta = CameraDelta { bearing: Some(15.0), anchor, phase: GesturePhase::Begin, ..Default::default() };
+        transform.apply_camera_delta(&delta).unwrap();
+        transform
+    };
+    let transform = rolled();
+    let view = transform.view();
+    let descends = |point: ScreenCoordinate| {
+        let (near, far) = view.line_of_sight(&sc(point.x, 512.0 - point.y)).unwrap();
+        far.z < near.z
+    };
+    // The roll puts the sky on one side of the screen and the ground on the
+    // other.
+    let (left, right) = (sc(20.0, 480.0), sc(492.0, 480.0));
+    let (sky, ground) = if descends(left) { (right, left) } else { (left, right) };
+    assert!(!descends(sky) && descends(ground), "the roll turns the horizon upright");
+    assert!(sky.y > horizon_row(&transform), "below the row of the unrolled horizon");
+
+    assert_eq!(turn(None).camera_options(None), turn(Some(sky)).camera_options(None), "a turn around the sky");
+
+    let grabbed = flat_ground_under(&transform, ground);
+    let off = off_by(&turn(Some(ground)), &grabbed, ground);
+    assert!(off < 0.01, "the ground moved {off} px from the anchor");
+}
+
+/// A drag whose pointer comes back below the horizon after a step above it
+/// grabs no ground on its way back: it moves the map on the plane at the
+/// center's altitude, as a drag without an anchor does, rather than solving
+/// for a point in the sky.
+#[test]
+fn a_drag_back_from_the_sky_pans_on_the_center_plane() {
+    let pan = |anchored: bool| {
+        let mut transform = new_transform();
+        transform.set_max_pitch(85.0);
+        transform.resize(Size::new(800, 600)).unwrap();
+        transform.jump_to(&CameraOptions {
+            center: Some(ll(30.0, 20.0)),
+            zoom: Some(12.0),
+            pitch: Some(75.0),
+            ..Default::default()
+        });
+        let below = sc(330.0, horizon_row(&transform) + 15.0);
+        let offset = sc(0.0, -30.0);
+        // Up across the horizon, then back.
+        let steps = [(offset, sc(below.x, below.y + offset.y)), (sc(0.0, -offset.y), below)];
+        for (step, (offset, pointer)) in steps.into_iter().enumerate() {
+            let phase = if step == 0 { GesturePhase::Begin } else { GesturePhase::Update };
+            let delta =
+                CameraDelta { offset: Some(offset), anchor: anchored.then_some(pointer), phase, ..Default::default() };
+            transform.apply_camera_delta(&delta).unwrap();
+        }
+        transform.camera_options(None)
+    };
+    assert_eq!(pan(false), pan(true));
 }
 
 #[test]

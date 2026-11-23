@@ -13,6 +13,9 @@
 pub mod android;
 mod archive_tilejson;
 mod asset_file_source;
+#[cfg(all(feature = "bench", not(target_family = "wasm")))]
+#[doc(hidden)]
+pub mod bench;
 #[cfg(feature = "sqlite")]
 pub mod database_file_source;
 #[cfg(target_family = "wasm")]
@@ -60,7 +63,7 @@ pub use loader::{Loader, LoaderBuilder};
 pub use offline_database::OfflineDatabase;
 pub use online_file_source::OnlineFileSource;
 pub use request::{Callback, Request, Responder};
-pub use resource::{Kind, LoadingMethod, RequestOrder, Resource, StoragePolicy};
+pub use resource::{Kind, LoadingMethod, RequestOrder, Resource, StoragePolicy, TileFormat};
 pub use resource_options::ResourceOptions;
 pub use response::{Data, ResourceError, Response};
 

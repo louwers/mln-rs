@@ -6,7 +6,7 @@ use mln_util::tileset::Scheme;
 use super::{LocalRequests, TestLoop, cpp_path, req, temp_path};
 use crate::file_source::FileSource;
 use crate::mbtiles_file_source::MBTilesFileSource;
-use crate::resource::{Kind, LoadingMethod, Resource};
+use crate::resource::{Kind, LoadingMethod, Resource, TileFormat};
 use crate::response::{Reason, Response};
 
 fn to_absolute_url(file_name: &str) -> String {
@@ -167,6 +167,7 @@ fn tile() {
             0,
             0,
             Scheme::XYZ,
+            TileFormat::Image,
             LoadingMethod::All,
         ),
     );
@@ -189,6 +190,7 @@ fn non_existent_tile() {
             0,
             4,
             Scheme::XYZ,
+            TileFormat::Image,
             LoadingMethod::All,
         ),
     );
@@ -211,6 +213,7 @@ fn non_existent_file_tile() {
             0,
             0,
             Scheme::XYZ,
+            TileFormat::Image,
             LoadingMethod::All,
         ),
     );
@@ -227,6 +230,7 @@ fn geography_class_tile() -> Resource {
         0,
         0,
         Scheme::XYZ,
+        TileFormat::Image,
         LoadingMethod::All,
     )
 }

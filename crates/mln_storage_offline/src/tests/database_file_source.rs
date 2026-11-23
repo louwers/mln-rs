@@ -1,6 +1,6 @@
 // The offline region API of DatabaseFileSource. C++ has no gtests for it;
-// these follow the region lifecycle that maplibre-native-ffi's ABI tests
-// drive through it (tests/native/abi/resources/offline.c).
+// these follow the region lifecycle that the C ABI suite drives through it
+// (tools/c-abi-test/testdata/tests/native/abi/resources/offline.c).
 
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -146,7 +146,7 @@ fn a_deleted_region_stops_downloading() {
     assert!(style.calls() <= 1);
 }
 
-// maplibre-native-ffi's ABI test a_download_refreshes_an_invalidated_region:
+// The C ABI suite's a_download_refreshes_an_invalidated_region:
 // a download after invalidating the region revalidates the style with the
 // server, and a 304 keeps it.
 #[test]

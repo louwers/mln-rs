@@ -29,7 +29,7 @@ fn raster_map() -> MapTest {
     test.file_source.set_response(Kind::Tile, |_: &Resource| {
         let mut response = file_response("test/fixtures/map/disabled_layers/tile.png");
         response.modified = Some(Timestamp::from_secs(784_111_777));
-        response.expires = Some(Timestamp::from_secs(784_115_377));
+        response.caching.expires = Some(Timestamp::from_secs(784_115_377));
         Some(response)
     });
     test.load_json(RASTER_STYLE);

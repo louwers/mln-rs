@@ -101,8 +101,13 @@ pub(crate) enum Message {
     /// An event of the map, from the runtime's thread.
     Map(MapEvent),
     /// What the controls show of the map's style, read on the runtime's
-    /// thread.
-    Style(view::StyleInfo),
+    /// thread. `loaded` is true when triggered by `MapEvent::StyleLoaded`.
+    Style {
+        info: view::StyleInfo,
+        loaded: bool,
+    },
+    /// The cache database finished resetting, on the runtime's thread.
+    CacheReset,
 }
 
 /// What the render thread asks of the main thread.

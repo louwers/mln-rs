@@ -43,6 +43,7 @@ objc2-io-surface.workspace = true
 objc2-metal = { workspace = true, features = ["block2", "objc2-io-surface"] }
 objc2-quartz-core.workspace = true
 parking_lot.workspace = true
+raw-window-metal.workspace = true
 
 [target.'cfg(target_vendor = "apple")'.dev-dependencies]
 # The layer types' programs and the conformance cases, which the tests compile

@@ -1,7 +1,7 @@
 // Command order, completions and the lifecycle of runtimes and maps. They
-// follow maplibre-native-ffi's ABI tests (tests/native/abi/runtime/
-// lifecycle.c, completion/completion.c and map/command_groups.c at eae96a42c)
-// where those test the same rules.
+// follow the C ABI suite (tools/c-abi-test/testdata/tests/native/abi/runtime/
+// lifecycle.c, completion/completion.c and map/command_groups.c) where it
+// tests the same rules.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

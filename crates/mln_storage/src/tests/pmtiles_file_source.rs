@@ -9,7 +9,7 @@ use super::{LocalRequests, TestLoop, cpp_path, req};
 use crate::file_source::FileSource;
 use crate::loader::Loader;
 use crate::pmtiles_file_source::PMTilesFileSource;
-use crate::resource::{Kind, LoadingMethod, Resource};
+use crate::resource::{Kind, LoadingMethod, Resource, TileFormat};
 use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, Response};
 
@@ -23,7 +23,7 @@ fn pmtiles_file_source() -> Rc<PMTilesFileSource> {
 }
 
 fn tile(url: &str, z: i8) -> Resource {
-    Resource::tile(url, 1.0, 0, 0, z, Scheme::XYZ, LoadingMethod::All)
+    Resource::tile(url, 1.0, 0, 0, z, Scheme::XYZ, TileFormat::Image, LoadingMethod::All)
 }
 
 /// Requests `resource`, runs the loop until the response and returns it.

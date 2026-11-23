@@ -14,7 +14,7 @@ use mln_runtime::{
 use mln_util::geo::{EdgeInsets, LatLng};
 use mln_util::size::Size;
 
-use crate::support::{eventually, runtime, wait};
+use crate::support::{eventually, wait};
 
 const SIZE: Size = Size { width: 64, height: 48 };
 /// The longitude of the extrusion's east wall: it covers the map west of it.
@@ -182,6 +182,7 @@ mod vulkan {
     use mln_vulkan::ash::{self, vk};
 
     use super::*;
+    use crate::support::runtime;
 
     const COLOR: vk::Format = vk::Format::R8G8B8A8_UNORM;
 
@@ -507,6 +508,8 @@ mod vulkan {
 #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
 #[test]
 fn a_webgpu_rings_depth_textures_hold_the_frames_depth() {
+    use crate::support::runtime;
+
     let Some(device) = device_of(mln_runtime::BackendType::WebGPU) else { return };
     let Device::WebGpu(webgpu) = &device else { unreachable!() };
     let (wgpu_device, queue) = (webgpu.device().clone(), webgpu.queue().clone());
@@ -585,6 +588,7 @@ mod gl {
     use khronos_egl as egl;
 
     use super::*;
+    use crate::support::runtime;
 
     type Egl = egl::DynamicInstance<egl::EGL1_4>;
 

@@ -33,6 +33,12 @@ thiserror.workspace = true
 unicode-properties.workspace = true
 web-time.workspace = true
 
+[features]
+# `Queue::run_once_at`, which runs a queue's timed tasks by a clock of the
+# caller's, for the benchmarks' simulated network (tools/bench). Not API:
+# hidden from the documentation.
+bench = []
+
 [target.'cfg(target_family = "wasm")'.dependencies]
 # host_bytes: tile workers' vertex and index arrays, kept in JS until upload.
 js-sys.workspace = true

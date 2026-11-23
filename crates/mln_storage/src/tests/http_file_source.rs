@@ -11,7 +11,7 @@ use super::{Dispatcher, LocalRequests, Req, TestLoop, req};
 use crate::file_source::FileSource;
 use crate::http_file_source::{HTTPFileSource, same_origin};
 use crate::http_header_transform::HttpHeaderTransform;
-use crate::resource::{Kind, Resource};
+use crate::resource::{Kind, LoadingMethod, Resource, TileFormat};
 use crate::response::{Reason, Response};
 
 fn http_file_source() -> HTTPFileSource {
@@ -54,8 +54,9 @@ fn http200() {
         Box::new(move |res: Response| {
             assert_eq!(None, res.error);
             assert_eq!(b"Hello World!", data(&res));
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            // Without caching headers, the response is stale at once.
+            assert!(res.caching.expires.is_some_and(|expires| expires <= now()));
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             stop.stop();
@@ -83,8 +84,9 @@ fn http206() {
         Box::new(move |res: Response| {
             assert_eq!(None, res.error);
             assert_eq!(b"lo Wor", data(&res));
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            // Without caching headers, the response is stale at once.
+            assert!(res.caching.expires.is_some_and(|expires| expires <= now()));
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             stop.stop();
@@ -111,8 +113,8 @@ fn http404() {
             assert_eq!(Reason::NotFound, error.reason);
             assert_eq!("HTTP status code 404", error.message);
             assert!(res.data.is_none());
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            assert!(res.caching.expires.is_none());
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             stop.stop();
@@ -139,8 +141,9 @@ fn http_tile404() {
             assert!(res.tile_not_found);
             assert!(res.error.is_none());
             assert!(res.data.is_none());
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            // Without caching headers, the response is stale at once.
+            assert!(res.caching.expires.is_some_and(|expires| expires <= now()));
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             stop.stop();
@@ -166,8 +169,9 @@ fn http200_empty_data() {
             assert!(!res.no_content);
             assert!(res.error.is_none());
             assert_eq!(b"", data(&res));
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            // Without caching headers, the response is stale at once.
+            assert!(res.caching.expires.is_some_and(|expires| expires <= now()));
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             stop.stop();
@@ -194,8 +198,9 @@ fn http204() {
             assert!(!res.tile_not_found);
             assert!(res.error.is_none());
             assert!(res.data.is_none());
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            // Without caching headers, the response is stale at once.
+            assert!(res.caching.expires.is_some_and(|expires| expires <= now()));
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             stop.stop();
@@ -222,8 +227,8 @@ fn http500() {
             assert_eq!(Reason::Server, error.reason);
             assert_eq!("HTTP status code 500", error.message);
             assert!(res.data.is_none());
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            assert!(res.caching.expires.is_none());
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             stop.stop();
@@ -244,12 +249,13 @@ fn expires_parsing() {
     let stop = run_loop.clone();
     let _req = fs.request_local(
         &local,
-        &Resource::new(Kind::Unknown, server.url("/test?modified=1420794326&expires=1420797926&etag=foo")),
+        &Resource::new(Kind::Unknown, server.url("/test?modified=1420794326&expires=2000000000&etag=foo")),
         Box::new(move |res: Response| {
             assert_eq!(None, res.error);
             assert_eq!(b"Hello World!", data(&res));
-            assert_eq!(Some(Timestamp::from_secs(1_420_797_926)), res.expires);
-            assert!(!res.must_revalidate);
+            let expires = res.caching.expires.expect("expires").secs_since_epoch();
+            assert!((expires - 2_000_000_000).abs() < 2, "expires at the Expires date");
+            assert!(!res.caching.must_revalidate);
             assert_eq!(Some(Timestamp::from_secs(1_420_794_326)), res.modified);
             assert_eq!(Some("foo"), res.etag.as_deref());
             stop.stop();
@@ -274,9 +280,9 @@ fn cache_control_parsing() {
         Box::new(move |res: Response| {
             assert_eq!(None, res.error);
             assert_eq!(b"Hello World!", data(&res));
-            let delta = res.expires.expect("expires").secs_since_epoch() - now().secs_since_epoch() - 120;
+            let delta = res.caching.expires.expect("expires").secs_since_epoch() - now().secs_since_epoch() - 120;
             assert!(delta.abs() < 2, "Expiration date isn't about 120 seconds in the future");
-            assert!(!res.must_revalidate);
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
             stop.stop();
@@ -314,8 +320,9 @@ pub(crate) fn load_request(
             state2.reqs[i].borrow_mut().take();
             assert_eq!(None, res.error);
             assert_eq!(format!("Request {current}").as_bytes(), data(&res));
-            assert!(res.expires.is_none());
-            assert!(!res.must_revalidate);
+            // Without caching headers, the response is stale at once.
+            assert!(res.caching.expires.is_some_and(|expires| expires <= now()));
+            assert!(!res.caching.must_revalidate);
             assert!(res.modified.is_none());
             assert!(res.etag.is_none());
 
@@ -365,13 +372,18 @@ fn token_transform(seen: Arc<Mutex<Vec<(Kind, String)>>>) -> HttpHeaderTransform
 
 /// Loads `url` with `fs`, and returns the response.
 fn load_once(fs: &HTTPFileSource, kind: Kind, url: String) -> Response {
+    load_resource(fs, &Resource::new(kind, url))
+}
+
+/// Loads `resource` with `fs`, and returns the response.
+fn load_resource(fs: &HTTPFileSource, resource: &Resource) -> Response {
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let result = Rc::new(RefCell::new(None));
     let (r, stop) = (Rc::clone(&result), run_loop.clone());
     let _req = fs.request_local(
         &local,
-        &Resource::new(kind, url),
+        resource,
         Box::new(move |res: Response| {
             *r.borrow_mut() = Some(res);
             stop.stop();
@@ -444,6 +456,51 @@ fn a_redirect_keeps_headers_only_within_the_origin() {
     elsewhere.assert_calls(1);
 }
 
+const MLT_ACCEPT: &str = "application/vnd.maplibre-tile, */*;q=0.1";
+
+fn mlt_tile(url: &str) -> Resource {
+    Resource::tile(url, 1.0, 0, 0, 0, mln_util::tileset::Scheme::XYZ, TileFormat::Mlt, LoadingMethod::All)
+}
+
+#[test]
+fn a_tile_accepts_its_format_past_a_redirect_that_drops_the_hosts_headers() {
+    let other = MockServer::start();
+    let elsewhere = other.mock(|when, then| {
+        when.method("GET").path("/elsewhere.mlt").header("Accept", MLT_ACCEPT).header_missing(TOKEN_HEADER);
+        then.status(200).body("elsewhere");
+    });
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method("GET").path("/tile.mlt").header("Accept", MLT_ACCEPT).header(TOKEN_HEADER, TOKEN_VALUE);
+        then.status(302).header("Location", other.url("/elsewhere.mlt"));
+    });
+    let mut fs = http_file_source();
+    fs.set_http_header_transform(token_transform(Arc::default()));
+
+    let res = load_resource(&fs, &mlt_tile(&server.url("/tile.mlt")));
+    assert_eq!(None, res.error);
+    assert_eq!(b"elsewhere", data(&res));
+    elsewhere.assert_calls(1);
+}
+
+#[test]
+fn a_hosts_accept_replaces_a_tiles() {
+    let server = MockServer::start();
+    let custom = server.mock(|when, then| {
+        when.method("GET").path("/tile.mlt").header("Accept", "application/x-custom");
+        then.status(200).body("custom");
+    });
+    let mut fs = http_file_source();
+    fs.set_http_header_transform(HttpHeaderTransform::new(Some(Arc::new(|_: Kind, _: &str| {
+        vec![("Accept".to_owned(), "application/x-custom".to_owned())]
+    }))));
+
+    let res = load_resource(&fs, &mlt_tile(&server.url("/tile.mlt")));
+    assert_eq!(None, res.error);
+    assert_eq!(b"custom", data(&res));
+    custom.assert_calls(1);
+}
+
 #[test]
 fn origins_compare_scheme_host_and_effective_port() {
     assert!(same_origin("https://EXAMPLE.test/a", "https://example.test:443/b"));
@@ -455,4 +512,29 @@ fn origins_compare_scheme_host_and_effective_port() {
     assert!(!same_origin("http://[::1]:8080/a", "http://[::1]:8081/b"));
     assert!(!same_origin("file:///a", "file:///a"));
     assert!(!same_origin("http:///a", "http:///a"));
+}
+
+/// A 503 is a server error that waits for its `Retry-After`, and a 408 a
+/// connection error, which the online file source retries.
+#[test]
+fn unavailable_and_request_timeout_are_retried() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method("GET").path("/unavailable");
+        then.status(503).header("Retry-After", "120");
+    });
+    server.mock(|when, then| {
+        when.method("GET").path("/timeout");
+        then.status(408);
+    });
+    let fs = http_file_source();
+
+    let res = load_once(&fs, Kind::Tile, server.url("/unavailable"));
+    let error = res.error.expect("error");
+    assert_eq!(Reason::Server, error.reason);
+    let retry_after = error.retry_after.expect("retry after").secs_since_epoch() - now().secs_since_epoch();
+    assert!((118..=120).contains(&retry_after), "{retry_after}");
+
+    let res = load_once(&fs, Kind::Tile, server.url("/timeout"));
+    assert_eq!(Reason::Connection, res.error.expect("error").reason);
 }

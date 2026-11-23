@@ -12,7 +12,7 @@ use mln_render::text::font_face_engine::FontFaceEngine;
 use mln_style::layer::Layer;
 use mln_style::{Edit, StyleLoadError};
 use mln_text::GlyphCache;
-use mln_text::local_glyph_rasterizer::{LocalGlyphRasterizer, LocalGlyphs};
+use mln_text::local_fonts::LocalGlyphs;
 use mln_util::error::{Error, ErrorKind};
 use mln_util::event_queue::Waker;
 use mln_util::geo::LatLngBounds;
@@ -56,9 +56,9 @@ pub struct MapOptions {
     /// (`mln_system_fonts::font_face`), from the fonts the labels'
     /// `text-font` names first; and draws from them the glyphs a style's
     /// PBFs lack, and with `local_ideographs`, CJK
-    /// (`mln_system_fonts::SystemGlyphRasterizer`). On by default. The first
-    /// map that uses them waits for the platform's font matcher to load. In
-    /// the browser, which has no font files to read, the browser draws each
+    /// (`mln_system_fonts::SystemFonts`). On by default. The first map that
+    /// uses them waits for the platform's font matcher to load. In the
+    /// browser, which has no font files to read, the browser draws each
     /// glyph of that text in the font stack's families, then its sans-serif
     /// font, as MapLibre GL JS does, unshaped.
     pub system_fonts: bool,
@@ -777,13 +777,26 @@ impl Map {
         self.shared.tile_cache_enabled
     }
 
-    /// How the map's renderers draw glyphs from local fonts: from the
-    /// system's with system fonts, which in the browser are the browser's,
-    /// falling back to its sans-serif font as MapLibre GL JS's
-    /// `localIdeographFontFamily` defaults to.
+    /// How the map's renderers draw glyphs from local fonts: with system
+    /// fonts, from the fonts the system chooses, or in the browser, which
+    /// has no font files, from the browser's canvas, falling back to its
+    /// sans-serif font as MapLibre GL JS's `localIdeographFontFamily`
+    /// defaults to.
     pub(crate) fn local_glyphs(&self) -> LocalGlyphs {
-        let rasterizer = self.shared.system_fonts.then(system_glyph_rasterizer);
-        LocalGlyphs { ideographs: self.shared.local_ideographs, rasterizer }
+        let mut local = LocalGlyphs { ideographs: self.shared.local_ideographs, ..LocalGlyphs::default() };
+        if self.shared.system_fonts {
+            #[cfg(not(target_family = "wasm"))]
+            {
+                local.chooser = Some(Arc::new(mln_system_fonts::SystemFonts));
+            }
+            #[cfg(target_family = "wasm")]
+            {
+                let font_family = "sans-serif".to_owned();
+                local.rasterizer =
+                    Some(Arc::new(mln_text::browser_glyph_rasterizer::BrowserGlyphRasterizer::new(font_family)));
+            }
+        }
+        local
     }
 
     pub(crate) fn glyph_cache(&self) -> Arc<GlyphCache> {
@@ -1605,18 +1618,6 @@ impl FlushFlag {
     fn clear(&self) {
         self.0.store(false, Ordering::SeqCst);
     }
-}
-
-/// The system's fonts' rasterizer.
-#[cfg(not(target_family = "wasm"))]
-fn system_glyph_rasterizer() -> Arc<dyn LocalGlyphRasterizer> {
-    Arc::new(mln_system_fonts::SystemGlyphRasterizer)
-}
-
-/// The browser's fonts' rasterizer, which falls back to its sans-serif font.
-#[cfg(target_family = "wasm")]
-fn system_glyph_rasterizer() -> Arc<dyn LocalGlyphRasterizer> {
-    Arc::new(mln_text::browser_glyph_rasterizer::BrowserGlyphRasterizer::new("sans-serif".to_owned()))
 }
 
 /// Builds the map `id` on the runtime's thread.

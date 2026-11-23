@@ -59,26 +59,35 @@ impl Face {
         )
     }
 
+    /// The index of the glyph the font maps `c` to, if the map can draw it:
+    /// a glyph other than `.notdef`, whose index fits a glyph ID and whose
+    /// outline the map reads.
+    pub(crate) fn glyph_of(&self, c: char) -> Option<u16> {
+        let glyph = self.font()?.charmap().map_unicode(c)?;
+        let index = u16::try_from(glyph.to_u32()).ok().filter(|&index| index != 0)?;
+        self.scaler()?.outline(GlyphId::new(u32::from(index)))?;
+        Some(index)
+    }
+
     #[must_use]
     pub(crate) fn rasterize_glyph(&self, glyph: GlyphID) -> Glyph {
         crate::rasterize::rasterize_glyph(self, glyph)
     }
 }
 
-/// A font file that the map draws single characters from, unshaped, as it
-/// draws the glyphs of a glyph PBF: a local font.
+/// A font file, opened to find which characters the map can draw from it.
 #[derive(Clone)]
 pub struct FontFile {
     face: Face,
 }
 
 impl FontFile {
-    /// The font in `data`, as a font face reads it, at the OpenType `weight`
-    /// within a variable font's `wght` axis (a static font draws at its own):
-    /// `None` when it isn't a font the map can draw.
+    /// The font in `data`, as a font face reads it: `None` when it isn't a
+    /// font the map can draw.
     #[must_use]
-    pub fn new(data: FontData, weight: u16) -> Option<Self> {
-        let face = Face::new(data, f32::from(weight));
+    pub fn new(data: FontData) -> Option<Self> {
+        // Which characters a font draws doesn't depend on its weight.
+        let face = Face::new(data, crate::weight::REGULAR_WEIGHT);
         face.is_valid().then_some(FontFile { face })
     }
 
@@ -87,27 +96,7 @@ impl FontFile {
     /// format the map doesn't read has none.
     #[must_use]
     pub fn has_char(&self, c: char) -> bool {
-        self.glyph_index(c).is_some()
-    }
-
-    /// The glyph of `c`, with the ID `id`: its coverage at 24 px, before the
-    /// signed distance field. `None` when the map can't draw `c` from the
-    /// font ([`has_char`](Self::has_char)).
-    #[must_use]
-    pub fn rasterize_char(&self, c: char, id: GlyphID) -> Option<Glyph> {
-        let index = self.glyph_index(c)?;
-        let mut glyph = self.face.rasterize_glyph(GlyphID::with_type(index, id.type_));
-        glyph.id = id;
-        Some(glyph)
-    }
-
-    /// The index of `c`'s glyph, if the font maps it to a glyph the map can
-    /// draw and the index fits a glyph ID.
-    fn glyph_index(&self, c: char) -> Option<u16> {
-        let glyph = self.face.font()?.charmap().map_unicode(c)?;
-        let index = u16::try_from(glyph.to_u32()).ok().filter(|&index| index != 0)?;
-        self.face.scaler()?.outline(GlyphId::new(u32::from(index)))?;
-        Some(index)
+        self.face.glyph_of(c).is_some()
     }
 }
 

@@ -6,12 +6,11 @@
 //! stay attached. Before `init`, every request fails.
 //!
 //! A request sends the headers the ureq transport sends (`Range`,
-//! `If-None-Match` or `If-Modified-Since`, user agent "MapLibreNative/1.0"),
-//! plus `Accept-Encoding: identity` with a `Range`, since a range of a
-//! compressed body isn't a range of the resource. Without one,
-//! `HttpURLConnection` asks for gzip and decodes it. The connection has no
-//! cache (the ambient cache is the file source's own), and connecting or a
-//! read that waits longer than `TIMEOUT_MILLISECONDS` fails.
+//! `If-None-Match` or `If-Modified-Since`, `Accept`, `User-Agent`), plus `Accept-Encoding: identity` with a `Range`,
+//! since a range of a compressed body isn't a range of the resource.
+//! Without one, `HttpURLConnection` asks for gzip and decodes it. The
+//! connection has no cache (the ambient cache is the file source's own), and
+//! connecting or a read that waits longer than `TIMEOUT_MILLISECONDS` fails.
 //!
 //! The transport follows redirects itself, as ureq does, also from `http` to
 //! `https`, which `HttpURLConnection` wouldn't, and drops the host's headers
@@ -35,7 +34,9 @@ use jni::{Env, JavaVM, jni_sig, jni_str};
 use mln_util::chrono::rfc1123;
 use parking_lot::Mutex;
 
-use crate::http_file_source::{HttpTransport, Transfer, TransferRequest, range_header, same_origin};
+use crate::http_file_source::{
+    HttpTransport, Transfer, TransferRequest, USER_AGENT, accept_header, range_header, same_origin,
+};
 use crate::redirect::{has_http_scheme, redirect_url};
 use crate::response::{Reason, ResourceError};
 
@@ -220,7 +221,10 @@ fn open<'local>(
     } else if let Some(prior_modified) = resource.prior_modified {
         set_header("If-Modified-Since", &rfc1123(prior_modified))?;
     }
-    set_header("User-Agent", "MapLibreNative/1.0")?;
+    if let Some(accept) = accept_header(resource, headers) {
+        set_header("Accept", accept)?;
+    }
+    set_header("User-Agent", USER_AGENT)?;
     for (name, value) in headers {
         set_header(name, value)?;
     }
@@ -246,7 +250,7 @@ fn respond(env: &mut Env<'_>, connection: &JObject<'_>, url: &str) -> Result<Exc
         discard_body(env, connection, status);
         Ok(Vec::new())
     };
-    Ok(Exchange::Done(Transfer { status: i64::from(status), headers, body }))
+    Ok(Exchange::Done(Transfer { status: i64::from(status), headers, body, stale: false }))
 }
 
 /// The response headers of `connection`, in order.

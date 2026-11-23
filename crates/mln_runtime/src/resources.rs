@@ -45,8 +45,10 @@ pub enum CacheDatabaseOperation {
     /// Deletes the ambient cache's resources and frees their space. Offline
     /// regions keep theirs.
     Clear,
-    /// Keeps the ambient cache's resources, but makes maps check each with
-    /// its server before they use it again. Offline regions are unaffected.
+    /// Keeps the ambient cache's resources, but makes them stale: maps check
+    /// each with its server when they next use it, and show it meanwhile
+    /// unless the server requires checking it first. Offline regions are
+    /// unaffected.
     Invalidate,
     /// Compacts the database file to free the space it no longer uses.
     Pack,
@@ -275,20 +277,11 @@ impl RequestShared {
         }
     }
 
-    fn respond(&self, mut response: Response) {
-        // A revalidation withholds the cached copy from the requester until
-        // the answer, so a "not modified" answer delivers that copy, as the
-        // online file source's does.
-        if response.not_modified
-            && let Some(data) = &self.resource.prior_data
-        {
-            response.data = Some(Arc::clone(data));
-            response.not_modified = false;
-            response.modified = response.modified.or(self.resource.prior_modified);
-            if response.etag.is_none() {
-                response.etag.clone_from(&self.resource.prior_etag);
-            }
-        }
+    fn respond(&self, response: Response) {
+        // A revalidation may withhold the cached copy from the requester
+        // until a "not modified" answer delivers it, as the online file
+        // source's do.
+        let response = self.resource.deliver(response);
         self.responder.send(response);
     }
 

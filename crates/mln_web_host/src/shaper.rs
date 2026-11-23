@@ -40,6 +40,9 @@ extern "C" {
     #[wasm_bindgen(method, catch)]
     fn shape(this: &Face, text: &str, rtl: bool) -> Result<Vec<f32>, JsValue>;
 
+    #[wasm_bindgen(method, catch, js_name = glyphOf)]
+    fn glyph_of(this: &Face, c: char) -> Result<Option<u16>, JsValue>;
+
     #[wasm_bindgen(method, catch)]
     fn rasterize(this: &Face, code: u16) -> Result<js_sys::Array, JsValue>;
 
@@ -198,6 +201,16 @@ impl FontFaceShaper for ShaperFace {
                 }
             }
             Err(error) => Log::error(Event::Glyph, format!("shaping with a font face failed: {}", message(&error))),
+        }
+    }
+
+    fn glyph_of(&self, c: char) -> Option<GlyphID> {
+        match self.face.glyph_of(c) {
+            Ok(code) => Some(GlyphID::with_type(code?, self.type_)),
+            Err(error) => {
+                Log::error(Event::Glyph, format!("finding a font face's glyph failed: {}", message(&error)));
+                None
+            }
         }
     }
 
