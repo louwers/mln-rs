@@ -733,7 +733,7 @@ mod tests {
         let cover = TerrainCover {
             source_id: "dem".to_owned(),
             tile_size: 512,
-            tiles: vec![TerrainTile { id, dem: None, dem_loading: false }],
+            tiles: vec![TerrainTile { id, dem: None }],
             center: None,
             dem_tiles: Vec::new(),
             ranges: ElevationRanges::default(),

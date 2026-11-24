@@ -32,9 +32,6 @@ struct DrawnDem {
 struct DrawnTile {
     id: OverscaledTileID,
     dem: Option<DrawnDem>,
-    /// Whether its own DEM tile is still loading, so that it reads an
-    /// ancestor's or none.
-    loading: bool,
     /// Whether the frame drew it: all but the tile under the center that
     /// the cover keeps undrawn ([`TerrainCover::center`]).
     drawn: bool,
@@ -94,12 +91,7 @@ impl TerrainElevation {
         let drawn = cover.tiles.iter().map(|tile| (tile, true));
         let tiles: Vec<DrawnTile> = drawn
             .chain(cover.center.iter().map(|tile| (tile, false)))
-            .map(|(tile, drawn)| DrawnTile {
-                id: tile.id,
-                dem: drawn_dem(dem, tile.dem),
-                loading: tile.dem_loading,
-                drawn,
-            })
+            .map(|(tile, drawn)| DrawnTile { id: tile.id, dem: drawn_dem(dem, tile.dem), drawn })
             .collect();
         let mut index = HashMap::default();
         let mut copies = HashMap::default();
@@ -132,7 +124,6 @@ impl TerrainElevation {
             |a: &DrawnDem, b: &DrawnDem| a.id == b.id && a.coords == b.coords && Arc::ptr_eq(&a.image, &b.image);
         let same_tile = |a: &DrawnTile, b: &DrawnTile| {
             a.id == b.id
-                && a.loading == b.loading
                 && a.drawn == b.drawn
                 && match (&a.dem, &b.dem) {
                     (None, None) => true,
@@ -193,7 +184,7 @@ impl TerrainElevation {
             let [u, v] = place_in(tile.id.canonical, [world.x, world.y])?;
             Some((tile, [u as f32, v as f32]))
         });
-        found.map_or((None, None), |(tile, uv)| (self.height_of(tile, uv), Some(self.min_of(tile))))
+        found.map_or((None, None), |(tile, uv)| (Some(self.height_of(tile, uv)), Some(self.min_of(tile))))
     }
 
     /// [`Elevation::surface_at`] as the drawn tiles of `world`'s copy,
@@ -206,18 +197,13 @@ impl TerrainElevation {
             Some((tile, [u as f32, v as f32]))
         });
         let (tile, uv) = found?;
-        Some(tile.dem.as_ref().map_or(0.0, |dem| self.height(dem, uv)))
+        Some(self.height_of(tile, uv))
     }
 
-    /// The height `tile` gives at `uv`: `None` while its own DEM tile loads
-    /// with no ancestor's in its place.
-    fn height_of(&self, tile: &DrawnTile, uv: [f32; 2]) -> Option<f64> {
-        // A tile whose own DEM tile loads draws an ancestor's in its place,
-        // which the camera stands on meanwhile, as in GL JS.
-        match &tile.dem {
-            Some(dem) => Some(self.height(dem, uv)),
-            None => (!tile.loading).then_some(0.0),
-        }
+    /// The height `tile` draws at `uv`: its DEM's, or sea level where it
+    /// draws flat.
+    fn height_of(&self, tile: &DrawnTile, uv: [f32; 2]) -> f64 {
+        tile.dem.as_ref().map_or(0.0, |dem| self.height(dem, uv))
     }
 
     /// The lowest height of the DEM `tile` reads, 0 for none.
@@ -256,7 +242,7 @@ pub(crate) fn dem_height(
 impl Elevation for TerrainElevation {
     fn at(&self, location: LatLng) -> Option<f64> {
         let (tile, uv) = self.tile_at_location(location)?;
-        self.height_of(tile, uv)
+        Some(self.height_of(tile, uv))
     }
 
     fn min_at(&self, location: LatLng) -> Option<f64> {
@@ -269,7 +255,7 @@ impl Elevation for TerrainElevation {
             return None;
         }
         let (tile, uv) = self.drawn_tile_at(world, true)?;
-        Some(tile.dem.as_ref().map_or(0.0, |dem| self.height(dem, uv)))
+        Some(self.height_of(tile, uv))
     }
 
     fn range(&self) -> Option<(f64, f64)> {
@@ -289,11 +275,8 @@ mod tests {
     /// the point's stands in for it.
     #[test]
     fn a_point_in_a_copy_past_the_wraps_has_no_surface() {
-        let tile = |wrap: i16| TerrainTile {
-            id: OverscaledTileID::new(0, wrap, CanonicalTileID::new(0, 0, 0)),
-            dem: None,
-            dem_loading: false,
-        };
+        let tile =
+            |wrap: i16| TerrainTile { id: OverscaledTileID::new(0, wrap, CanonicalTileID::new(0, 0, 0)), dem: None };
         let cover = TerrainCover {
             source_id: "dem".to_owned(),
             tile_size: 512,

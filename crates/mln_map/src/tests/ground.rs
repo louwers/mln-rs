@@ -368,14 +368,15 @@ fn an_unclamped_center_keeps_its_altitude() {
     assert_eq!((500.0, Some(300.0)), ground(&map));
 }
 
-/// Where the ground is still loading, the center keeps its altitude.
+/// Where the renderer draws the ground flat, as while its DEM loads, the
+/// center comes down to sea level: the camera stands on what is drawn.
 #[test]
-fn loading_ground_keeps_the_altitude() {
+fn ground_drawn_flat_brings_the_center_to_sea_level() {
     let run_loop = Queue::<()>::new();
     let mut map = map(MapMode::Continuous, &run_loop);
     report(&mut map, ground_event(&flat(Some(500.0), 300.0)));
-    report(&mut map, ground_event(&flat(None, 0.0)));
-    assert_eq!((500.0, Some(0.0)), ground(&map));
+    report(&mut map, ground_event(&flat(Some(0.0), 0.0)));
+    assert_eq!((0.0, Some(0.0)), ground(&map));
 }
 
 /// Once terrain stops drawing, the planes fit the flat map and a clamped

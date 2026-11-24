@@ -10,8 +10,8 @@ pub trait Elevation: fmt::Debug + Send + Sync {
     /// The height of the ground at `location`, in meters with the terrain's
     /// exaggeration, as the frame drew it: by the height rule, from the DEM
     /// that the tile drawn there read, its own or, while that loads, an
-    /// ancestor's. `Some(0.0)` where no DEM data will come; `None` where no
-    /// tile was drawn, or the tile has no DEM data yet but will.
+    /// ancestor's; 0 where the tile draws flat, as before any of them has
+    /// loaded. `None` where no tile was drawn.
     fn at(&self, location: LatLng) -> Option<f64>;
 
     /// The lowest height, in meters with the exaggeration, of the DEM that
@@ -21,9 +21,8 @@ pub trait Elevation: fmt::Debug + Send + Sync {
     /// The height of the surface the frame drew at `world`, a Web Mercator
     /// point at zoom 0 (from 0 to 1 across, y south, x in the world copy the
     /// view shows it in), in meters with the exaggeration: as
-    /// [`at`](Self::at), but `Some(0.0)` where a drawn tile has no DEM data
-    /// yet, which draws flat meanwhile, and only of the tiles drawn in
-    /// `world`'s copy. `None` where no tile was drawn there.
+    /// [`at`](Self::at), but only of the tiles drawn in `world`'s copy.
+    /// `None` where no tile was drawn there.
     fn surface_at(&self, world: DVec2) -> Option<f64>;
 
     /// The lowest and highest ground of the tiles the frame drew, in meters

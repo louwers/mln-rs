@@ -180,15 +180,15 @@ fn a_ray_that_starts_under_the_ground_finds_where_it_enters_next() {
     assert!(off < 0.01, "{off} px from the center");
 }
 
-/// A tile drawn flat while its DEM loads is met at sea level, where the
-/// flat map meets it, looking straight down too.
+/// A tile drawn flat, as while its DEM loads, is met at sea level, where
+/// the flat map meets it, looking straight down too.
 #[test]
-fn a_ray_through_a_flat_loading_tile_meets_it_at_sea_level() {
+fn a_ray_through_a_flat_tile_meets_it_at_sea_level() {
     #[derive(Debug)]
-    struct Loading;
-    impl Elevation for Loading {
+    struct Flat;
+    impl Elevation for Flat {
         fn at(&self, _: LatLng) -> Option<f64> {
-            None
+            Some(0.0)
         }
 
         fn min_at(&self, _: LatLng) -> Option<f64> {
@@ -206,7 +206,7 @@ fn a_ray_through_a_flat_loading_tile_meets_it_at_sea_level() {
     for pitch in [0.0, 45.0] {
         let view = view(pitch, 0.0, 0.0);
         for pixel in pixels().chain([ScreenCoordinate::new(256.0, 256.0)]) {
-            let hit = view.ground_under(&pixel, &Loading).unwrap_or_else(|| panic!("ground under {pixel:?}"));
+            let hit = view.ground_under(&pixel, &Flat).unwrap_or_else(|| panic!("ground under {pixel:?}"));
             assert_eq!(0.0, hit.height);
             let flat = world(&view.screen_coordinate_to_lat_lng(&pixel, WrapMode::Unwrapped).unwrap());
             let off = (hit.world - flat).length() * Projection::world_size(view.scale());

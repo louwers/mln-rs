@@ -399,15 +399,10 @@ impl TerrainLoad {
         self.render_source.is_loaded(&self.store)
     }
 
-    /// The DEM zoom and coords each terrain tile draws with, and whether
-    /// its own DEM tile loads.
-    fn bindings(&self) -> Vec<(Option<(u8, DemCoords)>, bool)> {
+    /// The DEM zoom and coords each terrain tile draws with.
+    fn bindings(&self) -> Vec<Option<(u8, DemCoords)>> {
         let cover = self.terrain.cover().expect("terrain draws");
-        cover
-            .tiles
-            .iter()
-            .map(|tile| (tile.dem.map(|(id, coords)| (id.canonical.z, coords)), tile.dem_loading))
-            .collect()
+        cover.tiles.iter().map(|tile| tile.dem.map(|(id, coords)| (id.canonical.z, coords))).collect()
     }
 }
 
@@ -434,7 +429,7 @@ fn a_terrain_only_dem_source_loads_the_dem_tiles_the_terrain_reads() {
     assert_eq!(expected, dem_tiles);
     assert_eq!(dem_tiles, load.tiles.requested());
     assert!(!load.is_loaded(), "the DEM tiles are loading");
-    assert!(load.bindings().iter().all(|&binding| binding == (None, true)));
+    assert!(load.bindings().iter().all(Option::is_none));
     assert!(load.render_source.base().enabled.not(), "nothing renders the source");
 
     load.answer(|_| Some(terrarium_png(100)));
@@ -463,7 +458,6 @@ fn a_missing_dem_tile_settles() {
     let (dem, coords) = first.dem.expect("an ancestor's DEM");
     assert!(dem.canonical.z < 9, "{dem}");
     assert_eq!(coords, sub_rect(&first.id, 10 - dem.canonical.z));
-    assert!(!first.dem_loading);
 }
 
 /// The terrain tile under the view's center, which the camera stands on.
@@ -501,9 +495,9 @@ fn a_failed_dem_tile_draws_an_ancestor_until_the_file_source_retries() {
     assert_eq!(1, load.errors);
     let binding = |load: &TerrainLoad| {
         let tile = load.terrain.cover().unwrap().tiles.iter().find(|bound| bound.id == tile).copied().unwrap();
-        (tile.dem.map(|(id, coords)| (id.canonical.z, coords)), tile.dem_loading)
+        tile.dem.map(|(id, coords)| (id.canonical.z, coords))
     };
-    let (Some((z, coords)), false) = binding(&load) else { panic!("{:?}", binding(&load)) };
+    let Some((z, coords)) = binding(&load) else { panic!("{:?}", binding(&load)) };
     assert!(z < 9, "an ancestor's DEM: {z}");
     assert_eq!(sub_rect(&tile, 10 - z), coords);
     let center = load.transform.view().center(WrapMode::Wrapped);
@@ -519,7 +513,7 @@ fn a_failed_dem_tile_draws_an_ancestor_until_the_file_source_retries() {
     }
     assert!(load.is_loaded());
     assert_eq!(1, load.errors);
-    assert_eq!((Some((9, sub_rect(&tile, 1))), false), binding(&load));
+    assert_eq!(Some((9, sub_rect(&tile, 1))), binding(&load));
     let ground = load.ground_events().pop().flatten().expect("the new ground");
     assert_eq!(Some(300.0), ground.at(center));
     assert_eq!(Some((300.0, 300.0)), load.terrain.cover().unwrap().ranges.range(tile.canonical));
@@ -546,10 +540,7 @@ fn a_dem_tile_that_reloads_draws_its_new_dem() {
         load.pool.wait();
         load.frame();
         let bound = load.terrain.cover().unwrap().tiles.iter().find(|bound| bound.id == tile).copied().unwrap();
-        assert_eq!(
-            (Some((9, sub_rect(&tile, 1))), false),
-            (bound.dem.map(|(id, coords)| (id.canonical.z, coords)), bound.dem_loading)
-        );
+        assert_eq!(Some((9, sub_rect(&tile, 1))), bound.dem.map(|(id, coords)| (id.canonical.z, coords)));
     }
     assert!(load.is_loaded());
     let ground = load.ground_events().pop().flatten().expect("the new ground");
@@ -565,18 +556,18 @@ fn a_dem_tile_that_reloads_draws_its_new_dem() {
 fn a_terrain_tile_falls_back_to_the_deepest_loaded_ancestor() {
     let mut load = TerrainLoad::new((0, 14), 1.0);
     load.frame();
-    assert!(load.bindings().iter().all(|&binding| binding == (None, true)));
+    assert!(load.bindings().iter().all(Option::is_none));
 
     load.answer(|tile| (tile.z == 5).then(|| terrarium_png(100)));
     let tiles: Vec<OverscaledTileID> = load.terrain.cover().unwrap().tiles.iter().map(|tile| tile.id).collect();
-    let ancestors: Vec<_> = tiles.iter().map(|id| (Some((5, sub_rect(id, 5))), true)).collect();
+    let ancestors: Vec<_> = tiles.iter().map(|id| Some((5, sub_rect(id, 5)))).collect();
     assert_eq!(ancestors, load.bindings());
     assert!(!load.is_loaded());
 
     load.answer(|_| Some(terrarium_png(100)));
-    let own: Vec<_> = tiles.iter().map(|id| (Some((9, sub_rect(id, 1))), false)).collect();
+    let own: Vec<_> = tiles.iter().map(|id| Some((9, sub_rect(id, 1)))).collect();
     assert_eq!(own, load.bindings());
-    assert!(own.iter().any(|(dem, _)| dem.unwrap().1.offset != [0.0, 0.0]), "quadrants other than the first");
+    assert!(own.iter().any(|dem| dem.unwrap().1.offset != [0.0, 0.0]), "quadrants other than the first");
 }
 
 /// Past the DEM's highest zoom, a terrain tile reads that zoom's tile; at
@@ -591,7 +582,7 @@ fn the_dem_zoom_stays_within_the_dem_zoom_levels() {
         load.answer(|_| Some(terrarium_png(100)));
         assert!(load.is_loaded(), "{zooms:?}");
         let tiles: Vec<OverscaledTileID> = load.terrain.cover().unwrap().tiles.iter().map(|tile| tile.id).collect();
-        let expected: Vec<_> = tiles.iter().map(|id| (dz.map(|dz| (10 - dz, sub_rect(id, dz))), false)).collect();
+        let expected: Vec<_> = tiles.iter().map(|id| dz.map(|dz| (10 - dz, sub_rect(id, dz)))).collect();
         assert_eq!(expected, load.bindings(), "{zooms:?}");
         let reads = match dz {
             Some(3) => BTreeSet::from([5, 7]),
@@ -786,11 +777,11 @@ fn an_update_is_grounded_when_it_carries_the_current_ground() {
     load.frame();
     assert!(!load.grounded, "the update carries no ground");
     let loading = load.ground_events().pop().flatten().expect("the ground while it loads");
-    // The tiles draw flat while their DEM loads, which the center doesn't
-    // stand on yet.
+    // The tiles draw flat while their DEM loads, and the center stands on
+    // what they draw.
     let center = load.transform.view().center(WrapMode::Wrapped);
     let world = mln_util::projection::Projection::project(&center, 1.0 / mln_util::constants::TILE_SIZE_D);
-    assert_eq!((None, Some(0.0)), (loading.at(center), loading.surface_at(DVec2::new(world.x, world.y))));
+    assert_eq!((Some(0.0), Some(0.0)), (loading.at(center), loading.surface_at(DVec2::new(world.x, world.y))));
     load.seen = Some(Arc::clone(&loading));
     load.frame();
     assert!(load.grounded);
@@ -1012,10 +1003,10 @@ fn the_surface_is_the_one_drawn_in_the_points_world_copy() {
 }
 
 /// Every tile drawn flat while its DEM loads draws at sea level, which the
-/// surface gives though the height under the camera waits; one drawn with
-/// an ancestor's DEM in its place draws that DEM's height.
+/// ground gives, under the camera too; one drawn with an ancestor's DEM in
+/// its place draws that DEM's height.
 #[test]
-fn surface_at_is_zero_on_loading_tiles() {
+fn the_ground_is_at_sea_level_on_loading_tiles() {
     let mut load = TerrainLoad::new((0, 14), 1.0);
     load.frame();
     let middles = |load: &TerrainLoad| -> Vec<DVec2> {
@@ -1033,7 +1024,7 @@ fn surface_at_is_zero_on_loading_tiles() {
     };
     let loading = snapshot(&load, 1.0);
     for world in middles(&load) {
-        assert_eq!((Some(0.0), None), (loading.surface_at(world), loading.at(location_of(world))), "{world}");
+        assert_eq!((Some(0.0), Some(0.0)), (loading.surface_at(world), loading.at(location_of(world))), "{world}");
     }
 
     load.answer(|tile| (tile.z == 5).then(|| terrarium_png(100)));
@@ -1089,7 +1080,7 @@ fn the_coarse_dem_tile_loads_while_the_fine_one_is_loading() {
     }
     load.answer(|tile| (tile.z == 5).then(|| terrarium_png(100)));
     let tiles: Vec<OverscaledTileID> = load.terrain.cover().unwrap().tiles.iter().map(|tile| tile.id).collect();
-    let ancestors: Vec<_> = tiles.iter().map(|id| (Some((5, sub_rect(id, 5))), true)).collect();
+    let ancestors: Vec<_> = tiles.iter().map(|id| Some((5, sub_rect(id, 5)))).collect();
     assert_eq!(ancestors, load.bindings());
 }
 
@@ -1104,7 +1095,7 @@ fn a_dem_whose_zoom_levels_are_empty_draws_flat() {
         let cover = load.frame();
         assert!(cover.tiles.iter().any(|tile| tile.id.canonical.z >= 12) == (zoom > 12.0), "{zoom}");
         load.frame();
-        assert!(load.bindings().iter().all(|&binding| binding == (None, false)), "{zoom}");
+        assert!(load.bindings().iter().all(Option::is_none), "{zoom}");
         assert_eq!(BTreeSet::new(), load.tiles.requested(), "{zoom}");
     }
 }
