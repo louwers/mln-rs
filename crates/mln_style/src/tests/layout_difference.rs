@@ -1,9 +1,8 @@
 // What changes of a layer lay its tiles out again: the rule of
 // `layer_type::layout_difference`, per layer type.
 
-use mln_conversion::Convertible;
-
 use super::util::{new_layer, parse_json};
+use crate::conversion::Convertible;
 use crate::layer::Layer;
 
 /// Whether setting each `(name, json)` of `changes` on a copy of `layer`

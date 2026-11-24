@@ -1,7 +1,5 @@
-use mln_conversion::Convertible;
-
 use super::util::parse_json;
-use crate::conversion::{Error, convert_geojson_options};
+use crate::conversion::{Convertible, Error, convert_geojson_options};
 use crate::expression::Functions;
 use crate::sources::geojson::GeoJSONOptions;
 

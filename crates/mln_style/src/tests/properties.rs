@@ -2,12 +2,11 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use feature::Value;
-use mln_conversion::{Convertible, Error};
 use mln_util::time::Instant;
 use mln_vec_map::VecSet;
 
 use super::util::parse_json;
-use crate::conversion::convert_property_value;
+use crate::conversion::{Convertible, Error, convert_property_value};
 use crate::evaluated::Evaluated;
 use crate::expression::{EvaluationContext, Functions, GlobalStateMap, Image, dsl};
 use crate::light::LightProperties;
@@ -162,10 +161,10 @@ fn transition_completes_and_drops_prior() {
 /// and the line bucket call it.
 #[test]
 fn possibly_evaluated_evaluate_per_feature() {
-    use mln_expression::dsl::{get_str, number};
     use mln_style_types::{AlignmentType, LineJoinType};
     use mln_tile_id::CanonicalTileID;
 
+    use crate::expression::dsl::{get_str, number};
     use crate::layers::{CirclePaintProperties, LineLayoutProperties};
     use crate::property_expression::PropertyExpression;
     use crate::tests::util::{StubGeometryTileFeature, property_map};

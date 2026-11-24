@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use mln_renderer::bucket::LayerFeatureStates;
 use mln_renderer::source_state::{FeatureStatesBySource, SourceFeatureStates};
-use mln_style::expression::expression::FeatureState;
+use mln_style::expression::expr::FeatureState;
 
 /// A map's feature state, by source, source layer and feature ID, where the
 /// empty source layer stands for none. It keeps no empty entry, so a removal

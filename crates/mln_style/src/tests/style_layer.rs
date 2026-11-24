@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
-use mln_conversion::{Convertible, Error};
 use mln_style_types::{LineCapType, LineJoinType, TranslateAnchorType, VisibilityType};
 use mln_util::Color;
 
 use super::util::{new_layer, parse_json, style_of};
-use crate::conversion::convert_filter;
+use crate::conversion::{Convertible, Error, convert_filter};
 use crate::edit::Edit;
 use crate::expression::{Functions, Image};
 use crate::filter::Filter;

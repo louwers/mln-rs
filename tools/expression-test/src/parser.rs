@@ -4,9 +4,9 @@
 use std::path::{Path, PathBuf};
 
 use feature::{Feature, Identifier, Value, ValueObject};
-use mln_conversion::Convertible;
-use mln_expression::type_::{self, Type};
-use mln_expression::{Dependency, Expr, Functions, ParsingContext};
+use mln_style::conversion::Convertible;
+use mln_style::expression::type_::{self, Type};
+use mln_style::expression::{Dependency, Expr, Functions, ParsingContext};
 use mln_tile_id::CanonicalTileID;
 use mln_vec_map::VecSet;
 
@@ -431,7 +431,7 @@ pub(crate) fn compiled_to_value(compiled: &Compiled) -> Value {
 
 /// A formatted value as the tests expect it: GL JS's `Formatted` object, with
 /// colors as their premultiplied channels.
-fn formatted_to_value(formatted: &mln_expression::Formatted) -> Value {
+fn formatted_to_value(formatted: &mln_style::expression::Formatted) -> Value {
     let optional = |value: Option<Value>| value.unwrap_or(Value::Null);
     let sections = formatted.sections.iter().map(|section| {
         let mut object = ValueObject::new();
@@ -444,7 +444,7 @@ fn formatted_to_value(formatted: &mln_expression::Formatted) -> Value {
             Value::Object(channels.into_iter().map(|(k, v)| (k.to_owned(), Value::Double(f64::from(v)))).collect())
         });
         object.insert("textColor".to_owned(), optional(color));
-        object.insert("image".to_owned(), optional(section.image.as_ref().map(mln_expression::Image::to_value)));
+        object.insert("image".to_owned(), optional(section.image.as_ref().map(mln_style::expression::Image::to_value)));
         if let Some(vertical_align) = section.vertical_align {
             object.insert("verticalAlign".to_owned(), Value::String(vertical_align.as_str().to_owned()));
         }
@@ -457,18 +457,18 @@ fn formatted_to_value(formatted: &mln_expression::Formatted) -> Value {
 
 /// Serializes an expression value to the JS format the tests expect; colors
 /// and formatted values have their own forms.
-pub(crate) fn expression_value_to_value(expr_value: &mln_expression::Value) -> Value {
-    use mln_expression::value::to_mbgl_value;
+pub(crate) fn expression_value_to_value(expr_value: &mln_style::expression::Value) -> Value {
+    use mln_style::expression::value::to_mbgl_value;
     match expr_value {
-        mln_expression::Value::Color(c) => Value::Array(vec![
+        mln_style::expression::Value::Color(c) => Value::Array(vec![
             Value::Double(f64::from(c.r)),
             Value::Double(f64::from(c.g)),
             Value::Double(f64::from(c.b)),
             Value::Double(f64::from(c.a)),
         ]),
-        mln_expression::Value::Formatted(formatted) => formatted_to_value(formatted),
-        mln_expression::Value::Array(values) => Value::Array(values.iter().map(to_mbgl_value).collect()),
-        mln_expression::Value::Object(value_map) => {
+        mln_style::expression::Value::Formatted(formatted) => formatted_to_value(formatted),
+        mln_style::expression::Value::Array(values) => Value::Array(values.iter().map(to_mbgl_value).collect()),
+        mln_style::expression::Value::Object(value_map) => {
             Value::Object(value_map.iter().map(|(k, v)| (k.clone(), to_mbgl_value(v))).collect())
         }
         v => to_mbgl_value(v),
@@ -491,7 +491,7 @@ pub(crate) fn parse_expression(
     if value.is_object()
         && let Some(expected) = &expected
     {
-        let mut error = mln_conversion::Error::default();
+        let mut error = mln_style::conversion::Error::default();
         parsed = mln_style::conversion::function::parse_function(&convertible, expected, false, &functions, &mut error);
         // TODO: should the error message be checked for function conversion?
     } else {

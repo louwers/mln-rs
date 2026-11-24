@@ -6,9 +6,9 @@
 
 use std::sync::Arc;
 
-use mln_expression::image_expression::UnavailableImages;
 use mln_map_types::MapMode;
 use mln_style::expression::GlobalStateMap;
+use mln_style::expression::image_expression::UnavailableImages;
 use mln_style_types::image::{ImageDependencies, ImagePositions, ImageType};
 use mln_text::glyph::{FontFaces, GlyphDependencies, GlyphPositions};
 use mln_text::tagged_string::font_stack_hash;

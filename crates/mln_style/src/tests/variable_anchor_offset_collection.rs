@@ -1,9 +1,8 @@
-use mln_conversion::Convertible;
 use mln_style_types::{AnchorOffsetPair, SymbolAnchorType, VariableAnchorOffsetCollection};
 
 use super::util::parse_json;
 use crate::StyleRegistry;
-use crate::conversion::{Converter, Error, convert_layer, convert_property_value};
+use crate::conversion::{Converter, Convertible, Error, convert_layer, convert_property_value};
 use crate::expression::{EvaluationContext, Functions};
 use crate::property_expression::PropertyExpression;
 use crate::property_value::PropertyValue;

@@ -1,18 +1,17 @@
 // The global state tests on style types (PropertyExpression, PropertyValue,
 // Filter, ColorRampPropertyValue). The expression-only ones are in
-// mln_expression's tests, the FormatSectionOverride one in
+// expression/tests, the FormatSectionOverride one in
 // tests/format_section_override_test.rs.
 
 use std::sync::Arc;
 
 use feature::Value;
-use mln_conversion::Convertible;
 use mln_util::Color;
 use mln_vec_map::VecSet;
 
 use super::util::parse_json;
 use crate::color_ramp_property_value::ColorRampPropertyValue;
-use crate::conversion::{Error, convert_filter, convert_property_value};
+use crate::conversion::{Convertible, Error, convert_filter, convert_property_value};
 use crate::expression::{Dependency, EvaluationContext, Expr, Functions, GlobalStateMap, ParsingContext, Type};
 use crate::property_expression::PropertyExpression;
 use crate::property_value::StyleValue as _;

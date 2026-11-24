@@ -7,22 +7,22 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use feature::{PropertyMap, Value as MbglValue};
-use mln_conversion::Convertible;
-use mln_expression::dsl::{format_str, get_str, literal_str, string, to_color};
-use mln_expression::expression::{Dependency, EvaluationContext, Expr, GlobalStateMap};
-use mln_expression::format_expression::{FormatExpression, FormatExpressionSection};
-use mln_expression::formatted::{Formatted, FormattedSection};
-use mln_expression::match_::Match;
-use mln_expression::parsing_context::ParsingContext;
-use mln_expression::type_::Type;
-use mln_expression::value::{ObjectType, Value};
 use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::Color;
 use mln_util::geometry::FeatureType;
 use mln_vec_map::{VecMap, VecSet};
 
+use crate::conversion::Convertible;
 use crate::evaluated::Evaluated;
 use crate::expression::Functions;
+use crate::expression::dsl::{format_str, get_str, literal_str, string, to_color};
+use crate::expression::expr::{Dependency, EvaluationContext, Expr, GlobalStateMap};
+use crate::expression::format_expression::{FormatExpression, FormatExpressionSection};
+use crate::expression::formatted::{Formatted, FormattedSection};
+use crate::expression::match_::Match;
+use crate::expression::parsing_context::ParsingContext;
+use crate::expression::type_::Type;
+use crate::expression::value::{ObjectType, Value};
 use crate::format_section_override::{format_section_override as new_override, set_overrides};
 use crate::layer_type::LayerStyle;
 use crate::layers::symbol_layer::SymbolLayerPaintPropertyOverrides as MockOverrides;
@@ -317,7 +317,7 @@ fn symbol_layer_overrides() {
         };
 
         let mut ctx = ParsingContext::new(&Functions::with_builtins());
-        let state_expression = mln_expression::compound_expression::create_compound_expression(
+        let state_expression = crate::expression::compound_expression::create_compound_expression(
             "global-state",
             vec![literal_str("labelColor")],
             &mut ctx,

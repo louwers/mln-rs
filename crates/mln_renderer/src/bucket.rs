@@ -19,7 +19,7 @@ use crate::bucket_geometry::GeometryUpload;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::util::tessellator::Tessellator;
 
-pub(crate) type FeatureStates = mln_util::hash::HashMap<String, mln_style::expression::expression::FeatureState>;
+pub(crate) type FeatureStates = mln_util::hash::HashMap<String, mln_style::expression::expr::FeatureState>;
 pub type LayerFeatureStates = mln_util::hash::HashMap<String, FeatureStates>;
 
 /// What every bucket has, whatever its type.

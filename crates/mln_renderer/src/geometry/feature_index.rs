@@ -11,7 +11,7 @@ use std::sync::{Arc, OnceLock};
 use geo_index::rtree::sort::HilbertSort;
 use geo_index::rtree::{RTree, RTreeBuilder, RTreeIndex};
 use mln_map_types::{TileProjector, VerticalPerspectiveProjection, View};
-use mln_style::expression::expression::FeatureState;
+use mln_style::expression::expr::FeatureState;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style_types::TranslateAnchorType;
 use mln_tile::TileData;

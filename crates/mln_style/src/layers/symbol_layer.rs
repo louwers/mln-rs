@@ -2,13 +2,13 @@
 // builds `FormatSectionOverride` expressions, is in
 // format_section_override.rs.
 
-use mln_expression::format_expression::FormatExpressionSection;
-use mln_expression::value::from_expression_value;
 use mln_util::constants::{LAST_RESORT_ALPHABETIC_FONT, LAST_RESORT_PAN_UNICODE_FONT};
 use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
 
 use crate::evaluated::Evaluated;
+use crate::expression::format_expression::FormatExpressionSection;
+use crate::expression::value::from_expression_value;
 use crate::expression::{Expr, Formatted, FormattedSection, Type};
 use crate::layer::FontStack;
 use crate::layer_type::{LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType};

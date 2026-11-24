@@ -7,8 +7,10 @@ use core::ffi::c_char;
 use std::sync::Arc;
 
 use feature::{Feature, Value as JsonValue, ValueObject};
-use mln_conversion::Convertible;
-use mln_expression::{Dependency, EvaluationContext, Expr, Functions, ParsingContext, Type, TypeAnnotationOption};
+use mln_style::conversion::Convertible;
+use mln_style::expression::{
+    Dependency, EvaluationContext, Expr, Functions, ParsingContext, Type, TypeAnnotationOption,
+};
 use mln_tile_id::CanonicalTileID;
 use mln_vec_map::VecSet;
 
@@ -307,12 +309,12 @@ fn evaluate(expression: &Expr, inputs: &Inputs) -> Result<String, Error> {
         ..EvaluationContext::default()
     };
     let result = match &feature {
-        Some(feature) => mln_expression::expression::evaluate_feature_with_context(expression, feature, context),
+        Some(feature) => mln_style::expression::expr::evaluate_feature_with_context(expression, feature, context),
         None => expression.evaluate(&context),
     };
     let result = result.map_err(|error| Error::invalid_argument(format!("expression: {}", error.message())))?;
     // A NaN or infinite number becomes null, as `JSON.stringify()` writes it.
-    Ok(mln_conversion::value_to_json(&mln_expression::value::to_mbgl_value(&result)).to_string())
+    Ok(mln_style::conversion::value_to_json(&mln_style::expression::value::to_mbgl_value(&result)).to_string())
 }
 
 /// `mln_style_expression_evaluate()`.

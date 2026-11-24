@@ -6,12 +6,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use feature::Value;
-use mln_conversion::borrowed_conversion::{Json, borrowed_json_to_value, member, members};
-use mln_conversion::{Convertible, value_to_json};
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::error::Error;
 
-use crate::conversion::{Converter, convert_layer, convert_light, convert_projection, convert_sky, convert_terrain};
+use crate::conversion::borrowed::{Json, borrowed_json_to_value, member, members};
+use crate::conversion::{
+    Converter, Convertible, convert_layer, convert_light, convert_projection, convert_sky, convert_terrain,
+    value_to_json,
+};
 use crate::edit::Edit;
 use crate::expression::GlobalStateMap;
 use crate::layer::Layer;
@@ -41,7 +43,7 @@ impl Style {
         }
 
         let value = parse(json, "style layer")?;
-        let mut error = mln_conversion::Error::default();
+        let mut error = crate::conversion::Error::default();
         let Some(layer) = convert_layer(self.registry(), &Convertible::from(&value), &mut error) else {
             return Err(conversion_error("style layer", &error));
         };
@@ -199,7 +201,7 @@ impl Style {
         let context = format!("style root property {}", quote(name));
         let value = parse(json, &context)?;
         let convertible = Convertible::from(&value);
-        let mut error = mln_conversion::Error::default();
+        let mut error = crate::conversion::Error::default();
         let functions = Arc::clone(self.registry().functions());
         match name {
             "light" => {
@@ -450,7 +452,7 @@ fn parse<'a>(json: &'a str, context: &str) -> Result<Json<'a>, Error> {
     serde_json::from_str(json).map_err(|error| Error::invalid_argument(format!("{context} is not valid JSON: {error}")))
 }
 
-fn conversion_error(context: &str, error: &mln_conversion::Error) -> Error {
+fn conversion_error(context: &str, error: &crate::conversion::Error) -> Error {
     Error::invalid_argument(format!("{context}: {}", error.message))
 }
 

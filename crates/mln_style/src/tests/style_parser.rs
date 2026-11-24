@@ -250,10 +250,9 @@ fn font_stacks_get_expression() {
 // gtest: StyleParser.ZoomCurve
 #[test]
 fn zoom_curve() {
-    use mln_expression::value::Value;
-
     use crate::expression::dsl::{interpolate, linear, literal, zoom};
     use crate::expression::find_zoom_curve_checked;
+    use crate::expression::value::Value;
 
     let zoom_interp = || {
         interpolate(linear(), zoom(), vec![(0.0, literal(Value::Number(0.0))), (0.0, literal(Value::Number(0.0)))])

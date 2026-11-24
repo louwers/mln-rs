@@ -1,8 +1,8 @@
-use mln_conversion::Convertible;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::tileset::{PartialTileset, Scheme};
 
 use super::util::parse_json;
+use crate::conversion::Convertible;
 use crate::conversion::tileset::convert_tileset;
 use crate::layer_type::SourceKind;
 

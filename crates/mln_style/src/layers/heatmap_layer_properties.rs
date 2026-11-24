@@ -2,12 +2,11 @@
 // (tools/style-codegen/v8.json). Do not edit.
 
 use crate::color_ramp_property_value::ColorRampPropertyValue;
-use crate::conversion::convert_color_ramp_property_value;
+use crate::conversion::{Convertible, Error, convert_color_ramp_property_value};
 use crate::expression::Functions;
 use crate::layer_type::LayerStyle;
 use crate::layers::Heatmap;
 use crate::property_table::{PropertyInfo, PropertyTable, PropertyVisitor};
-use mln_conversion::{Convertible, Error};
 
 crate::properties!(
     /// The paint properties of a heatmap layer.

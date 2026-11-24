@@ -8,9 +8,9 @@
 // passed in, in the vertices' in-memory layout (native-endian floats and
 // u16s), so the buffer is the GPU vertex data as it uploads.
 
-use mln_expression::range::Range;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_style::evaluated::{Evaluated, Faded};
+use mln_style::expression::range::Range;
 use mln_style::expression::{Dependency, EvaluationContext, Image, Value, ValueConverter};
 use mln_style::property_expression::PropertyExpression;
 use mln_style_types::LineCapType;
@@ -191,7 +191,7 @@ impl<T: BinderValue> PaintPropertyBinderKind<T> {
         vertex_offset: usize,
         range: &FeatureVertexRange,
         feature: &dyn GeometryTileFeature,
-        state: &mln_style::expression::expression::FeatureState,
+        state: &mln_style::expression::expr::FeatureState,
     ) {
         match self {
             Self::Constant { .. } => {}

@@ -75,7 +75,7 @@ pub(crate) fn emit(layer: &LayerSpec) -> String {
         imports.push("crate::color_ramp_property_value::ColorRampPropertyValue".into());
         imports.push("crate::conversion::convert_color_ramp_property_value".into());
         imports.push("crate::expression::Functions".into());
-        imports.push("mln_conversion::{Convertible, Error}".into());
+        imports.push("crate::conversion::{Convertible, Error}".into());
     }
     w.imports(imports);
     w.blank();

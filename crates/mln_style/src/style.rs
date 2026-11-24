@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use feature::Value;
-use mln_conversion::Convertible;
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 
+use crate::conversion::Convertible;
 use crate::edit::Edit;
 use crate::expression::GlobalStateMap;
 use crate::filter::Filter;

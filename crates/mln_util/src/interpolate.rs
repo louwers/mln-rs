@@ -121,7 +121,7 @@ impl Interpolate for String {
 }
 
 /// Vectors don't interpolate: the result is `self`. (Vectors of expression
-/// values interpolate in `mln_expression`.)
+/// values interpolate in `mln_style`'s expressions.)
 impl<T: Clone> Interpolate for Vec<T> {
     fn interpolate(&self, _to: &Self, _t: f64) -> Self {
         self.clone()

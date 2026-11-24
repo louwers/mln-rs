@@ -7,7 +7,9 @@
 > this crate as `mln_rs::mln_style`.
 
 Ports the style (`src/mln/style`, `include/mln/style`): `Style`, the style
-parser, layers, sources, the property system and the typed conversions.
+parser, layers, sources, the property system, the expression language
+(`src/mln/style/expression`) and the conversions (`mln::style::conversion`, on
+serde_json instead of RapidJSON).
 
 Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering

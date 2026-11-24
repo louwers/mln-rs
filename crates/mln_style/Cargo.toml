@@ -15,31 +15,71 @@ name = "mln_style"
 # The doc comments have no examples to run.
 doctest = false
 
+[features]
+# `dsl`, the functions that build expressions (`expression::dsl`) in the
+# tests of mln_style's dependents.
+dsl = []
+
 [dependencies]
+cheap-ruler.workspace = true
 feature.workspace = true
+foldhash.workspace = true
 geojson.workspace = true
 geo-types.workspace = true
-mln_conversion.workspace = true
+geometry.workspace = true
 mln_geojson.workspace = true
-mln_expression.workspace = true
 mln_image.workspace = true
 mln_map_types.workspace = true
 mln_math.workspace = true
 mln_storage.workspace = true
 mln_style_types.workspace = true
 mln_text.workspace = true
+# The tile geometry of the `within` and `distance` expressions.
+mln_tile.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true
 parking_lot.workspace = true
 mln_wire.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+serde_json_borrow.workspace = true
+smallvec.workspace = true
 thiserror.workspace = true
 
+# The locale services of the locale-sensitive expressions
+# (src/expression/locale): the platform's where it has them (Foundation and
+# the system ICU on Apple platforms, android.icu through JNI on Android, the
+# browser's Intl on wasm), else ICU4X with the CLDR data it compiles in.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = [
+  "NSArray",
+  "NSLocale",
+  "NSObjCRuntime",
+  "NSRange",
+  "NSString",
+] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+js-sys.workspace = true
+wasm-bindgen.workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", target_vendor = "apple", target_os = "android")))'.dependencies]
+fixed_decimal.workspace = true
+icu_collator.workspace = true
+icu_decimal.workspace = true
+icu_experimental.workspace = true
+icu_locale.workspace = true
+icu_plurals.workspace = true
+icu_provider.workspace = true
+writeable.workspace = true
+
 [dev-dependencies]
-mln_expression = { workspace = true, features = ["dsl"] }
 mln_storage = { workspace = true, features = ["stub-file-source"] }
-mln_tile = { package = "mln-rs-tile", path = "../mln_tile" }
 
 [lints]
 workspace = true

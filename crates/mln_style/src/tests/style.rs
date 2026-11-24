@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use feature::Value;
-use mln_conversion::Convertible;
 use mln_style_types::{ProjectionDefinition, VisibilityType};
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
@@ -10,6 +9,7 @@ use mln_util::tileset::PartialTileset;
 use mln_util::{Color, LatLng};
 
 use super::util::{FixtureLog, new_layer, parse_json};
+use crate::conversion::Convertible;
 use crate::edit::Edit;
 use crate::expression::Functions;
 use crate::layer_type::LayerStyle;
@@ -209,7 +209,7 @@ fn is_supported_script_of_a_literal_in_a_layout_property() {
     // Not a C++ test: ffi patch 0093 kept "is-supported-script" from folding,
     // so this text-field wasn't a literal and property conversion rejected it
     // (an assertion in debug builds). The port lets it fold (see
-    // REQUIRED_PROPS in mln_expression's parsing_context.rs).
+    // REQUIRED_PROPS in expression/parsing_context.rs).
     let mut style = stub_style();
     style.load_json(
         r#"{"version":8,"sources":{"s":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},

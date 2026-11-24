@@ -7,12 +7,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use feature::Value;
-use mln_conversion::{Convertible, Error};
 use mln_util::serialization::shared;
 
 use super::util::{parse_json, style_of};
 use crate::StyleRegistry;
-use crate::conversion::convert_layer;
+use crate::conversion::{Convertible, Error, convert_layer};
 use crate::expression::Functions;
 use crate::layer::Layer;
 use crate::layer_type::ErasedLayerStyle;

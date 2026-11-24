@@ -3,9 +3,8 @@
 
 use std::sync::Arc;
 
-use mln_expression::format_section_override::{FormatSectionOverride, OverrideDefault};
-
 use crate::evaluated::Evaluated;
+use crate::expression::format_section_override::{FormatSectionOverride, OverrideDefault};
 use crate::expression::{Dependency, Expr, GlobalStateMap};
 use crate::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
 use crate::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};

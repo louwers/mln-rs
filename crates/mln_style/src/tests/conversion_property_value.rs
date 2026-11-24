@@ -1,9 +1,8 @@
 use feature::Value;
-use mln_conversion::{Convertible, Error};
 use mln_style_types::{SymbolAnchorType, VariableAnchorOffsetCollection};
 
 use super::util::{StubGeometryTileFeature, parse_json, property_map};
-use crate::conversion::convert_property_value;
+use crate::conversion::{Convertible, Error, convert_property_value};
 use crate::expression::{EvaluationContext, Functions};
 
 // gtest: StyleConversion.PropertyValue

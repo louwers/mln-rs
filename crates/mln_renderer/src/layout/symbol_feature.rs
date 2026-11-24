@@ -6,7 +6,7 @@
 use std::borrow::Cow;
 
 use feature::{Identifier, PropertyMap, Value};
-use mln_expression::image::Image;
+use mln_style::expression::image::Image;
 use mln_text::TaggedString;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::geometry::FeatureType;

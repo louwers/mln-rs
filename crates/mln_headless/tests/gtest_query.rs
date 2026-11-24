@@ -2,14 +2,14 @@ use std::sync::Arc;
 
 use feature::{PropertyMap, Value};
 use geojson::{GeoJson, Geometry};
-use mln_expression::dsl::{eq, get_str, gt, id, literal, literal_str, ne, number};
 use mln_map::{CameraOptions, MapMode};
 use mln_renderer::Registry;
 use mln_renderer::query::{FeatureExtensionValue, RenderedQueryOptions, SourceQueryOptions};
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::conversion::{Convertible, Error, convert_filter};
-use mln_style::expression::expression::FeatureState;
+use mln_style::expression::dsl::{eq, get_str, gt, id, literal, literal_str, ne, number};
+use mln_style::expression::expr::FeatureState;
 use mln_style::expression::{Functions, Value as ExpressionValue};
 use mln_style::filter::Filter;
 use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType};

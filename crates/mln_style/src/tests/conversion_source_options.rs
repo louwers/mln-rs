@@ -1,10 +1,9 @@
-use mln_conversion::Convertible;
 use mln_util::tileset::{PartialTileset, RasterEncoding, VectorEncoding};
 
 use super::util::parse_json;
-use crate::conversion::Error;
 use crate::conversion::source::convert_source;
 use crate::conversion::tileset::convert_tileset;
+use crate::conversion::{Convertible, Error};
 use crate::layer_type::SourceKind;
 use crate::source_type::Source;
 

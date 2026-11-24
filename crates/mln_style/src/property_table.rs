@@ -11,9 +11,8 @@
 use std::sync::Arc;
 
 use feature::{Value, ValueObject};
-use mln_conversion::{Convertible, Error};
 
-use crate::conversion::Converter;
+use crate::conversion::{Converter, Convertible, Error};
 use crate::conversion_impl::make_transition_style_property;
 use crate::expression::Functions;
 use crate::layer::PropertyScope;

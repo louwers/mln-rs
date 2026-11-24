@@ -4,12 +4,11 @@
 
 use std::sync::Arc;
 
-use mln_conversion::Convertible;
 use mln_util::tileset::{PartialTileset, RasterEncoding, Tileset, VectorEncoding};
 
 use super::util::parse_json;
-use crate::conversion::Error;
 use crate::conversion::source::convert_source;
+use crate::conversion::{Convertible, Error};
 use crate::source_type::{Described, ErasedDescription, Load, Source, SourceData};
 use crate::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, geojson_source};
 use crate::sources::tileset::{

@@ -618,9 +618,10 @@ fn feature_state(json: &str) -> Result<FeatureState, Error> {
     }
     let json = json.to_owned();
     parse_thread::run(move || match serde_json::from_str(&json) {
-        Ok(serde_json::Value::Object(members)) => {
-            Ok(members.iter().map(|(key, member)| (key.clone(), mln_conversion::json_to_value(member))).collect())
-        }
+        Ok(serde_json::Value::Object(members)) => Ok(members
+            .iter()
+            .map(|(key, member)| (key.clone(), mln_style::conversion::json_to_value(member)))
+            .collect()),
         Ok(_) => Err(Error::invalid_argument("feature state must be a JSON object")),
         Err(error) => Err(Error::invalid_argument(format!("feature state isn't valid JSON: {error}"))),
     })?
@@ -671,7 +672,7 @@ pub(crate) unsafe extern "C" fn mln_map_get_feature_state(
                 completion,
                 |map| map.feature_state(&selector),
                 |state| {
-                    let json = mln_conversion::value_conversion::value_to_json(&Value::Object(state));
+                    let json = mln_style::conversion::value_to_json(&Value::Object(state));
                     LentText::new(&json.to_string())
                 },
             )

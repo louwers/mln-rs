@@ -42,14 +42,13 @@ feature = { package = "mln-rs-feature", path = "../../vendor/feature" }
 geo-types.workspace = true
 geojson.workspace = true
 glam.workspace = true
-mln_expression = { workspace = true, features = ["dsl"] }
 mln_image = { package = "mln-rs-image", path = "../mln_image" }
 mln_map_types = { package = "mln-rs-map-types", path = "../mln_map_types" }
 mln_math = { package = "mln-rs-math", path = "../mln_math" }
 # system_fonts_test shapes text with mln_text's Shaper in-process.
 mln_renderer = { workspace = true, features = ["font-face-shaper"] }
 mln_storage = { workspace = true, features = ["sqlite", "stub-file-source"] }
-mln_style.workspace = true
+mln_style = { workspace = true, features = ["dsl"] }
 mln_style_types.workspace = true
 mln_text = { package = "mln-rs-text", path = "../mln_text" }
 mln_tile_id.workspace = true

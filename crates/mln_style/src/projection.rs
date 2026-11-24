@@ -1,13 +1,13 @@
 #[cfg(test)]
 use std::sync::Arc;
 
-#[cfg(test)]
-use mln_conversion::{Convertible, Error};
 use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 #[cfg(test)]
 use crate::conversion::convert_property_value;
+#[cfg(test)]
+use crate::conversion::{Convertible, Error};
 use crate::conversion_impl::make_style_property;
 use crate::expression::EvaluationContext;
 #[cfg(test)]

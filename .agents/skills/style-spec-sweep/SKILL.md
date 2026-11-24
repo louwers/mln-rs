@@ -27,8 +27,8 @@ meaning can change while its name stays the same.
 - `crates/mln_style/src/layers/*_layer_properties.rs`, `light_properties.rs`,
   `sky_properties.rs`: the generated properties. `crates/mln_style/src/sources`
   holds the sources, and `style_json.rs` the root properties.
-- `crates/mln_expression`: the expressions. `parsing_context.rs` lists the ones
-  it parses.
+- `crates/mln_style/src/expression`: the expressions. `parsing_context.rs` lists
+  the ones it parses.
 - `crates/mln_renderer/src/layers/render_*_layer.rs`, `buckets/`, `layout/`,
   `text/`: where the properties are drawn.
 - `tools/render-test/testdata/metrics/integration/`: the render and query tests,

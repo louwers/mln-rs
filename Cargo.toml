@@ -49,9 +49,7 @@ categories = ["graphics", "science::geo"]
 # In-repo libraries. The exact version keeps a release's packages together.
 feature = { package = "mln-rs-feature", path = "vendor/feature", version = "=0.0.15" }
 geometry = { package = "mln-rs-geometry", path = "vendor/geometry", version = "=0.0.15" }
-mln_conversion = { package = "mln-rs-conversion", path = "crates/mln_conversion", version = "=0.0.15" }
 mln_d3d12 = { package = "mln-rs-d3d12", path = "crates/mln_d3d12", version = "=0.0.15" }
-mln_expression = { package = "mln-rs-expression", path = "crates/mln_expression", version = "=0.0.15" }
 mln_bench_workload = { package = "mln-rs-bench-workload", path = "tools/bench/workload" }
 mln_frame_pacer = { package = "mln-rs-frame-pacer", path = "crates/mln_frame_pacer", version = "=0.0.15" }
 mln_gestures = { package = "mln-rs-gestures", path = "crates/mln_gestures", version = "=0.0.15" }
@@ -168,7 +166,7 @@ fast-mvt = { version = "0.7.3", default-features = false, features = [
 # Glyph PBFs: fast-mvt's protobuf runtime, whose wire format functions read
 # them instead of a port of protozero.
 buffa = { version = "0.9.2", default-features = false }
-# The `distance` expression's distances (mln_expression), in place of a port
+# The `distance` expression's distances (mln_style), in place of a port
 # of the C++ core's vendored cheap-ruler-cpp: the same WGS84 formulas, with
 # its arithmetic in a different order, so a distance can differ from the C++
 # one in the last bits.
@@ -249,10 +247,11 @@ unicode-properties = { version = "0.1.5", default-features = false, features = [
   "general-category",
 ] }
 # The locale-sensitive expressions (collator, resolved-locale, number-format)
-# on platforms without their own locale services (mln_expression's locale):
-# ICU4X, with the CLDR data it compiles in. icu_experimental has CLDR's
-# currency, percent and unit patterns and symbols; it requires its own ICU4X
-# release (`~2.4`). icu_plurals picks a unit name's plural form.
+# on platforms without their own locale services (mln_style's
+# expression/locale): ICU4X, with the CLDR data it compiles in.
+# icu_experimental has CLDR's currency, percent and unit patterns and
+# symbols; it requires its own ICU4X release (`~2.4`). icu_plurals picks a
+# unit name's plural form.
 fixed_decimal = { version = "0.7.3", features = ["ryu"] }
 icu_collator = { version = "2.4.0" }
 icu_decimal = { version = "2.4.0" }
@@ -545,9 +544,7 @@ geo-types.workspace = true
 geojson.workspace = true
 geometry.workspace = true
 glam.workspace = true
-mln_conversion.workspace = true
 mln_d3d12 = { workspace = true, optional = true }
-mln_expression.workspace = true
 mln_frame_pacer.workspace = true
 mln_geojson.workspace = true
 mln_gestures.workspace = true

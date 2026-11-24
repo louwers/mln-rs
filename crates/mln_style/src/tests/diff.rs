@@ -3,9 +3,8 @@
 
 use std::sync::Arc;
 
-use mln_conversion::Convertible;
-
 use super::util::{new_layer, parse_json};
+use crate::conversion::Convertible;
 use crate::diff::{LayerChange, LayerChanges};
 use crate::layer::Layer;
 use crate::layer_list::LayerList;

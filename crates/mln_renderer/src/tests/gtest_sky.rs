@@ -6,8 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use feature::{Value, ValueObject};
-use mln_conversion::Convertible;
-use mln_style::conversion::{Error, convert_sky};
+use mln_style::conversion::{Convertible, Error, convert_sky};
 use mln_style::expression::Functions;
 use mln_style::property_value::PropertyValue;
 use mln_style::sky::Sky;

@@ -9,10 +9,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use mln_conversion::{Convertible, Error};
 use mln_renderer::Registry;
 use mln_style::StyleRegistry;
-use mln_style::conversion::convert_layer;
+use mln_style::conversion::{Convertible, Error, convert_layer};
 use mln_style::layer::Layer;
 use mln_style::layer_type::ErasedLayerStyle;
 use mln_style::serialization::SharedLayer;

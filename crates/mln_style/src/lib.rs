@@ -1,8 +1,9 @@
 //! The map style: [`Style`], the style JSON parser, layers and sources, the
-//! property system and the typed converters (`conversion`). It also holds
-//! the parts of the renderer and the map that the property system needs
-//! (`renderer`, `map`), so that crates don't depend on each other in a
-//! cycle.
+//! property system, the expression language (`expression`) and the
+//! conversions from JSON-like values to style types (`conversion`). It also
+//! holds the parts of the renderer and the map that the property system
+//! needs (`renderer`, `map`), so that crates don't depend on each other in
+//! a cycle.
 //!
 //! A style parses against a [`StyleRegistry`]: the expression functions and
 //! layer types its JSON, property values and filters may name.

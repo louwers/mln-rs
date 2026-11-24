@@ -822,7 +822,7 @@ impl Map {
         source_id: &str,
         source_layer_id: Option<&str>,
         feature_id: &str,
-        state: mln_style::expression::expression::FeatureState,
+        state: mln_style::expression::expr::FeatureState,
     ) -> bool {
         let changed = self.feature_state.set(source_id, source_layer_id.unwrap_or(""), feature_id, state);
         if changed {
@@ -839,7 +839,7 @@ impl Map {
         source_id: &str,
         source_layer_id: Option<&str>,
         feature_id: &str,
-    ) -> mln_style::expression::expression::FeatureState {
+    ) -> mln_style::expression::expr::FeatureState {
         self.feature_state.get(source_id, source_layer_id.unwrap_or(""), feature_id)
     }
 
