@@ -210,8 +210,8 @@ fn a_minimized_window_takes_no_session_and_no_frames_on_each_backend() {
         let target = RenderTarget::Surface { size: SIZE, surface: surface(&shown), device: Some(device) };
         let (session, attached) = map.attach(target, AttachOptions::default()).unwrap();
         if let Err(error) = attached.wait() {
-            if is_headless_session(&error) {
-                eprintln!("skipped: no interactive Windows desktop for {backend:?} HWND swap chains: {error}");
+            if error.kind == ErrorKind::Unsupported || is_headless_session(&error) {
+                eprintln!("skipped: {backend:?} cannot present to a Win32 HWND in this session: {error}");
                 continue;
             }
             panic!("{backend:?}: attach failed: {error}");
