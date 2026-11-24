@@ -30,7 +30,7 @@ use mln_util::error::Error;
 use mln_util::hash::{HashMap, hash_bytes};
 use mln_util::tileset::{RasterEncoding, Scheme, Tileset, VectorEncoding};
 
-use super::{TilesetKind, TilesetSourceType, round_zoom};
+use super::{TilesetKind, TilesetSourceType, round_zoom, tile_format};
 
 impl<K: TilesetKind> SourceType for TilesetSourceType<K> {
     type Data = K::Data;
@@ -324,20 +324,14 @@ impl<K: TilesetKind> DataOrigin for TilesetOrigin<K> {
     fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, copy: Option<WorldCopy<'_, TilesetTile>>) -> TilesetTile {
         // The source makes no tiles while it has no data, nor of a tileset
         // without tiles: such a tile can't load.
-        let (url, canonical, scheme) = match &self.data {
-            Some(TilesetData { tileset, .. }) => {
-                (tileset.tiles.first().map_or("", String::as_str), loaded_tile(tileset, cx.id()), tileset.scheme)
-            }
-            None => ("", cx.id().canonical, Scheme::default()),
+        let (url, canonical, scheme, format) = if let Some(TilesetData { tileset, .. }) = &self.data {
+            let url = tileset.tiles.first().map_or("", String::as_str);
+            (url, loaded_tile(tileset, cx.id()), tileset.scheme, tile_format::<K>(tileset))
+        } else {
+            let format = if is_vector::<K>() { TileFormat::Mvt } else { TileFormat::Image };
+            ("", cx.id().canonical, Scheme::default(), format)
         };
         let (x, y, z) = (canonical.x as i32, canonical.y as i32, canonical.z as i8);
-        // What the tile's data is, which decides what an HTTP request for it
-        // accepts.
-        let format = match &self.data {
-            Some(TilesetData { encoding: VectorTileEncoding::Mlt { .. }, .. }) if is_vector::<K>() => TileFormat::Mlt,
-            _ if is_vector::<K>() => TileFormat::Mvt,
-            _ => TileFormat::Image,
-        };
         let mut resource = Resource::tile(url, self.pixel_ratio, x, y, z, scheme, format, LoadingMethod::CacheOnly);
         resource.order = cx.order();
         let mut tile = TilesetTile::new(resource);

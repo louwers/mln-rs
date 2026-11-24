@@ -12,7 +12,9 @@
 //!
 //! A small source type, each of whose tiles holds its zoom level, which its
 //! origin gives the tile as it starts, has both halves, a registry that adds
-//! it and a style that loads a source of it:
+//! it and a style that loads a source of it. The example checks that the
+//! type registers and parses; its origin runs only on a map, as the `stamp`
+//! source type of the extension tests (`crates/mln_extension_tests`) does:
 //!
 //! ```
 //! use std::convert::Infallible;
@@ -96,7 +98,7 @@
 
 pub use mln_map_types::MapMode;
 pub use mln_render::source::*;
-pub use mln_storage::{Data, FileSource, RequestOrder, Resource};
+pub use mln_storage::{Data, FileSource, RequestOrder, Resource, TileFormat};
 pub use mln_style::Edit;
 pub use mln_style::conversion::{self, Convertible};
 pub use mln_style::expression::Functions;
