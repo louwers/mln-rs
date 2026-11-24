@@ -156,7 +156,9 @@ runs:
       shell: bash
       run: |
         sudo apt-get update
-        sudo apt-get install --no-install-recommends --yes qemu-system-x86
+        sudo apt-get install --no-install-recommends --yes \
+          qemu-system-x86 \
+          qemu-utils
 
     - name: Install the FreeBSD virtual machine host
       if: runner.os == 'Linux' && inputs.device == 'FreeBSD virtual machine'
