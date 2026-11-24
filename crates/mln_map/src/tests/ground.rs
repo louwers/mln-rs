@@ -82,9 +82,9 @@ impl Elevation for Restless {
 /// Sea level, with a plateau `height` meters high south of the world's `y`
 /// (Web Mercator at zoom 0), which only the surface shows.
 #[derive(Debug)]
-struct Plateau {
-    y: f64,
-    height: f64,
+pub(super) struct Plateau {
+    pub(super) y: f64,
+    pub(super) height: f64,
 }
 
 impl Elevation for Plateau {

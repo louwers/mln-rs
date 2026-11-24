@@ -19,8 +19,12 @@ use mln_util::time::Instant;
 
 use super::ground::{Slope, flat, ground_event, report, world};
 use super::terrain_camera::{FRAME, Hill, frames, map_over, meters, pixel, start};
+use super::terrain_gestures::decay;
 use crate::transform::{TerrainGround, Transform, TransformEvent};
-use crate::{AnimationOptions, CameraChangeSource, CameraOptions, CameraUpdate, CameraUpdateMode, Map, MapEvent};
+use crate::{
+    AnimationOptions, CameraChangeSource, CameraDelta, CameraMomentum, CameraOptions, CameraUpdate, CameraUpdateMode,
+    GesturePhase, Map, MapEvent, MomentumGlide,
+};
 
 /// An ease over a second, with an easing of its own so that it doesn't fly.
 fn eased() -> AnimationOptions {
@@ -615,6 +619,105 @@ fn a_jump_that_screen_bounds_move_ends_within_them() {
     assert_on_ground(view, &*ground, "the jump");
     assert_within_screen_bounds(&transform, "the jump");
     assert!(!transform.follow_terrain(), "at rest");
+}
+
+/// A gesture that ends over ground lower than the altitude it held, at the
+/// bounds' north edge under [`ConstrainMode::Screen`], where moving the
+/// center along the view onto the ground would take the view past the
+/// bounds, ends with its center where it was, on the ground there.
+#[test]
+fn a_gesture_end_that_screen_bounds_refuse_stands_the_center_on_the_ground() {
+    let ground = Incline::steady(0.0, 0.25);
+    let mut transform = transform_under_screen_bounds(&ground);
+    transform.jump_to(&CameraOptions { zoom: Some(12.0), ..Default::default() });
+    let center = transform.view().center(WrapMode::Unwrapped);
+    transform.apply_camera_delta(&step(GesturePhase::Begin, None, None)).unwrap();
+    let lower: Arc<dyn Elevation> = Arc::new(Incline { height: 500.0, east: 0.0, north: 0.25, rough: 0.0 });
+    transform.set_terrain(Some(TerrainGround { elevation: Some(Arc::clone(&lower)), clamped: true }));
+    transform.follow_terrain();
+    assert!(transform.view().center_altitude() > lower.at(center).unwrap() + 400.0, "the gesture holds");
+    transform.apply_camera_delta(&step(GesturePhase::End, None, None)).unwrap();
+    let view = transform.view();
+    assert_eq!(center, view.center(WrapMode::Unwrapped));
+    assert_eq!(12.0, view.zoom());
+    assert_on_ground(view, &*lower, "the gesture's end");
+    assert_within_screen_bounds(&transform, "the gesture's end");
+}
+
+/// A gesture's step: a pan by `offset`, or a turn by `bearing`.
+fn step(phase: GesturePhase, offset: Option<(f64, f64)>, bearing: Option<f64>) -> CameraDelta {
+    CameraDelta { offset: offset.map(|(x, y)| ScreenCoordinate::new(x, y)), bearing, phase, ..Default::default() }
+}
+
+/// Fingers that go down again while a command eases the center it took from
+/// a gesture's glide hold the altitude where it was while they are down.
+/// Lifted before the command ends, the command eases the altitude again and
+/// ends at its center, on the ground; lifted after, the motion ends on the
+/// ground with the eye where its last frame put it. Either way the frame
+/// that brings the camera to rest doesn't move it, and it moves no more.
+#[test]
+fn a_second_gesture_during_a_command_holds_the_altitude_while_its_fingers_are_down() {
+    let destination = LatLng::new(20.0, 10.02).unwrap();
+    // Ground at sea level under the start that rises half a meter for each
+    // meter east.
+    let ground: Arc<dyn Elevation> = Arc::new(Slope { x: world(&start()).x, height: 0.0, rise: 2e7 });
+    for lifted in [Duration::from_millis(608), Duration::from_millis(1500)] {
+        let run_loop = Queue::<()>::new();
+        let (mut map, clock) = map_over(Some(&ground), &run_loop);
+        map.apply_camera_delta(&step(GesturePhase::Begin, Some((-60.0, 40.0)), None)).unwrap();
+        let momentum = CameraMomentum {
+            pan: Some(MomentumGlide { velocity: ScreenCoordinate::new(-600.0, 800.0), decay: decay(1, 1000.0) }),
+            ..Default::default()
+        };
+        map.apply_camera_delta(&CameraDelta { momentum: Some(momentum), ..step(GesturePhase::End, None, None) })
+            .unwrap();
+        let started = clock + Duration::from_millis(96);
+        map.set_frame_time(Some(started));
+        map.update_camera(&CameraUpdate {
+            mode: CameraUpdateMode::Ease,
+            camera: CameraOptions { center: Some(destination), ..Default::default() },
+            animation: eased(),
+            ..Default::default()
+        });
+        let down = Duration::from_millis(304);
+        let mut held = None;
+        let last = Duration::from_millis(999);
+        frames(&mut map, started, last, |map, elapsed| {
+            let altitude = map.transform_state().view().center_altitude();
+            if elapsed == down {
+                map.apply_camera_delta(&step(GesturePhase::Update, None, Some(10.0))).unwrap();
+                held = Some(map.transform_state().view().center_altitude());
+            } else if let Some(held) = held.filter(|_| elapsed <= lifted) {
+                assert_eq!(held, altitude, "lifted at {lifted:?}: the altitude at {elapsed:?}");
+            }
+            if elapsed == lifted {
+                map.apply_camera_delta(&step(GesturePhase::End, None, None)).unwrap();
+            }
+        });
+        let held = held.unwrap();
+        let end = ground.at(destination).unwrap();
+        assert!(end - held > 100.0, "lifted at {lifted:?}: held {held} m, under the ground at {end} m");
+
+        // The command's last millisecond.
+        let before = Picture::of(map.transform_state().view(), &*ground);
+        map.set_frame_time(Some(started + Duration::from_secs(1)));
+        assert!(!map.snapshot().transition_in_progress);
+        if lifted < Duration::from_secs(1) {
+            before.assert_kept_by(map.transform_state().view(), &*ground, 0.05, 0.05, "the command's end");
+            let center = map.transform_state().view().center(WrapMode::Wrapped);
+            assert!((center.longitude() - destination.longitude()).abs() < 1e-9, "{center:?}");
+            assert!((center.latitude() - destination.latitude()).abs() < 1e-9, "{center:?}");
+        } else {
+            assert_eq!(held, map.transform_state().view().center_altitude(), "the fingers are down");
+            map.set_frame_time(Some(started + lifted));
+            map.apply_camera_delta(&step(GesturePhase::End, None, None)).unwrap();
+            // As for a cancel, a few centimeters of the eye are what the move
+            // along the view leaves for the altitude.
+            before.assert_kept_by(map.transform_state().view(), &*ground, 0.1, 0.05, "the gesture's end");
+        }
+        assert!(!map.snapshot().gesture_in_progress);
+        assert_at_rest(&mut map, &format!("lifted at {lifted:?}"));
+    }
 }
 
 /// Before any ground is drawn, a clamped center stays at the altitude it

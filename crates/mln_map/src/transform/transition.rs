@@ -461,7 +461,7 @@ impl Transform {
             self.stand_on_ground();
         }
         // Last, so that the eye stays clear.
-        self.keep_eye_above();
+        self.keep_clear_of_ground();
     }
 
     /// Moves the center so that `location`, `height` meters up, is at
@@ -500,15 +500,14 @@ impl Transform {
         self.moving = self.transitions.iter().fold(0, |moving, t| moving | (t.fields & t.moving_fields));
     }
 
-    /// Ends `finished`: the gestures whose momentum they are, then, if a
-    /// command is among them, the camera on the ground once nothing moves it
-    /// ([`Self::come_to_rest`]), and last their ends and changes, which
-    /// report that move too.
+    /// Ends `finished`: the gestures whose momentum they are, then the
+    /// camera on the ground once nothing moves it ([`Self::come_to_rest`]),
+    /// and last their ends and changes, which report that move too.
     pub(super) fn finish_transitions(&mut self, finished: Vec<Transition>) {
         for transition in &finished {
             self.end_gesture_momentum(transition.gesture);
         }
-        if finished.iter().any(Transition::is_command) {
+        if !finished.is_empty() {
             self.come_to_rest();
         }
         for transition in finished {
@@ -540,7 +539,7 @@ impl Transform {
             self.advance_momentum(index, now);
         }
         if self.transitions.iter().any(|t| t.momentum.is_some()) {
-            self.keep_eye_above();
+            self.keep_clear_of_ground();
         }
 
         let finished: Vec<_> = self.transitions.extract_if(.., |t| t.has_run_out(now) || t.fields == 0).collect();

@@ -349,10 +349,16 @@ impl Transform {
                     let delta = snap_delta(momentum_value(&self.state, i), &snap, i == MOMENTUM_BEARING);
                     self.step_scalar(i, delta, momentum.anchor(i));
                 }
+                self.keep_clear_of_ground();
             }
             self.end_gesture_momentum(gesture);
+            // The end of the gesture can bring the camera onto the ground.
+            let rests = self.come_to_rest();
+            if settling == 0 && rests {
+                self.emit(TransformEvent::CameraWillChange(momentum_change(CameraChangeMode::Immediate)));
+            }
             self.end_unstarted(animation, TransitionOutcome::Completed);
-            if settling != 0 {
+            if settling != 0 || rests {
                 self.emit(TransformEvent::CameraDidChange(momentum_change(CameraChangeMode::Immediate)));
             }
             return;

@@ -1,17 +1,22 @@
 //! The terrain under the camera. Every rule applies only while the map
 //! hands the transform a ground ([`TerrainGround`]):
 //!
-//! - The eye stays above the ground while a command moves the camera.
+//! - The eye stays above the ground while anything moves the camera
+//!   ([`Transform::keep_clear_of_ground`]).
+//! - A gesture holds the altitude, from its first step to the end of its
+//!   momentum, lifted by as much as keeps the eye above the ground, which
+//!   lowers again once the ground does. A command that runs while its
+//!   fingers are up takes the altitude over, and the gesture holds it from
+//!   where the command leaves it.
 //! - Under the clamp, the center stands on the ground:
 //!   - at rest, on the ground under it, where that is known;
-//!   - while commands run, the altitude eases toward the ground under where
-//!     they leave the center, and stands on it as they end
-//!     ([`Transform::ease_altitude`]);
-//!   - brought to rest off the ground, as by a cancel, the center moves
-//!     along the view onto the ground, with the eye where it is, so that
-//!     the picture stays ([`Transform::come_to_rest`]).
-//!
-//! A gesture keeps the altitude it moves with until it ends.
+//!   - while commands run and no fingers are down, the altitude eases
+//!     toward the ground under where they leave the center, and stands on
+//!     it as they end ([`Transform::ease_altitude`]);
+//!   - brought to rest off the ground, by a cancel or by the end of a
+//!     gesture or of its momentum, the center moves along the view onto the
+//!     ground, with the eye where it is, so that the picture stays
+//!     ([`Transform::come_to_rest`]).
 //!
 //! The rules are the same on the globe, where heights stand along each
 //! point's vertical above the sea-level sphere: the same heights at the
@@ -22,7 +27,7 @@
 //! The terrain moves a camera at rest, as ground loads or changes under it,
 //! the clamp turns on or the terrain goes, without camera events, as in GL
 //! JS: the map's snapshots show those moves. What the terrain does to a
-//! command's camera happens within the command, before the
+//! command's or a gesture's camera happens within it, before the
 //! `CameraDidChange` that ends it.
 
 use std::sync::Arc;
@@ -32,11 +37,12 @@ use mln_map_types::{CameraOptions, Elevation, View};
 use mln_util::geo::WrapMode;
 use mln_util::time::Instant;
 
+use super::transition::Transition;
 use super::{CENTER, Transform, flip_y};
 
-/// How many times a command's camera is raised over the ground in a frame,
-/// as in GL JS: each raise turns the near plane, which can bring another
-/// part of it under the ground.
+/// How many times a moving camera is raised over the ground in a frame, as
+/// in GL JS: each raise can turn or move the near plane, which can bring
+/// another part of it under the ground.
 const MAX_EYE_RAISES: usize = 3;
 
 /// The terrain the camera stands on, which the map hands the transform
@@ -54,13 +60,15 @@ pub struct TerrainGround {
 impl Transform {
     /// Sets the terrain the camera stands on, or `None` without terrain,
     /// which turns off every rule of the camera over terrain. Once the
-    /// terrain goes, the view fits the flat map again and a clamped center
-    /// goes to sea level, keeping its location and zoom.
+    /// terrain goes, the view fits the flat map again, a clamped center
+    /// goes to sea level, keeping its location and zoom, and a gesture
+    /// holds the altitude from where that leaves it.
     pub fn set_terrain(&mut self, terrain: Option<TerrainGround>) {
         let clamped = self.clamped();
         let goes = self.terrain.is_some() && terrain.is_none();
         self.terrain = terrain;
         if goes {
+            self.gesture.altitude = None;
             self.leave_ground();
             // Also before any ground was drawn, as the ground would have
             // overruled the altitude of a clamped center.
@@ -102,15 +110,16 @@ impl Transform {
     /// under the center, and a camera at rest whose center is clamped
     /// stands on the ground there, unless it is still loading. A camera that
     /// a command moves takes the altitude its frames give it, which ease
-    /// onto the ground, and one that a gesture moves keeps its own. Once
-    /// there is no ground, the planes fit the flat map again, and a clamped
-    /// center goes back to sea level, once.
+    /// onto the ground, and a gesture that holds the altitude lifts it just
+    /// over the ground as it is now, eye and near plane. Once there is no
+    /// ground, the planes fit the flat map again, and a clamped center goes
+    /// back to sea level, once.
     ///
-    /// It reads only the height and floor at the center ([`Elevation::at`]
-    /// and [`Elevation::min_at`]), which are what the renderer compares to
-    /// tell whether a frame's camera stood on its newest ground. The terrain
-    /// moves the camera, not a command, so this reports no camera change.
-    /// Returns whether the view changed.
+    /// At rest it reads only the height and floor at the center
+    /// ([`Elevation::at`] and [`Elevation::min_at`]), which are what the
+    /// renderer compares to tell whether a frame's camera stood on its
+    /// newest ground. The terrain moves the camera, not a command, so this
+    /// reports no camera change. Returns whether the view changed.
     pub fn follow_terrain(&mut self) -> bool {
         let Some(TerrainGround { elevation, clamped }) = &self.terrain else { return false };
         let (elevation, clamped) = (elevation.clone(), *clamped);
@@ -128,7 +137,9 @@ impl Transform {
         // A command of the pitch alone doesn't count as moving the camera,
         // but its frames set the altitude too.
         let at_rest = !self.is_camera_moving() && !self.in_transition();
-        if clamped && at_rest {
+        if self.gesture_holds_altitude() {
+            self.lift(elevation.as_deref());
+        } else if clamped && at_rest {
             self.stand_on_ground();
         }
         ground(self.view()) != before
@@ -137,6 +148,12 @@ impl Transform {
     /// Whether there is terrain and it clamps the center.
     pub(super) fn clamped(&self) -> bool {
         self.terrain.as_ref().is_some_and(|terrain| terrain.clamped)
+    }
+
+    /// Whether a gesture holds the altitude: from its first step to the end
+    /// of its momentum, except while its fingers are up and a command runs.
+    fn gesture_holds_altitude(&self) -> bool {
+        self.gesture_in_progress && (self.gesture.active || !self.transitions.iter().any(Transition::is_command))
     }
 
     /// Puts the center at the height of the ground under it, where that is
@@ -159,8 +176,8 @@ impl Transform {
     /// else where it is. Ground that lands, or a command that starts, ends
     /// or hands the center over, turns the next frame toward the new target
     /// from where the altitude is. While that ground is unknown, as at the
-    /// end of a flight past the ground the renderer drew, or a gesture is in
-    /// progress, the altitude stays where it is.
+    /// end of a flight past the ground the renderer drew, or a gesture holds
+    /// the altitude, it stays where it is.
     ///
     /// Returns whether this frame ends the commands, which then stand the
     /// center on the ground under where they put it
@@ -168,7 +185,7 @@ impl Transform {
     pub(super) fn ease_altitude(&mut self, camera: &mut CameraOptions, now: Option<Instant>) -> bool {
         let before = std::mem::replace(&mut self.last_frame, now);
         let Some(TerrainGround { elevation: Some(ground), clamped: true }) = &self.terrain else { return false };
-        if self.gesture_in_progress {
+        if self.gesture_holds_altitude() {
             return false;
         }
         let commands = || self.transitions.iter().filter(|transition| transition.is_command());
@@ -187,22 +204,24 @@ impl Transform {
         lands
     }
 
-    /// Stands a camera that commands brought to rest over terrain that
-    /// clamps the center on the ground, once no gesture or command moves it.
-    /// A center off the drawn ground under it, as a cancel leaves it, moves
-    /// along the view onto the ground its line of sight meets, with the eye
-    /// where it is ([`TransformState::recenter_on`], GL JS's
-    /// `recenterOnTerrain`); what that leaves off the ground, or all of it
-    /// where the view meets no drawn ground or the limits refuse the move,
-    /// the center takes up in altitude. The caller reports the change.
+    /// Stands a camera that a command, a gesture or a momentum brought to
+    /// rest over terrain that clamps the center on the ground, once no
+    /// gesture or command moves it. A center off the drawn ground under it,
+    /// as a cancel or a gesture leaves it, moves along the view onto the
+    /// ground its line of sight meets, with the eye where it is
+    /// ([`TransformState::recenter_on`], GL JS's `recenterOnTerrain`); what
+    /// that leaves off the ground, or all of it where the view meets no
+    /// drawn ground or the limits refuse the move, the center takes up in
+    /// altitude. The caller reports the change. Returns whether the camera
+    /// moved.
     ///
     /// [`TransformState::recenter_on`]: mln_map_types::TransformState::recenter_on
-    pub(super) fn come_to_rest(&mut self) {
-        let Some(TerrainGround { elevation: Some(ground), clamped: true }) = &self.terrain else { return };
+    pub(super) fn come_to_rest(&mut self) -> bool {
+        let Some(TerrainGround { elevation: Some(ground), clamped: true }) = &self.terrain else { return false };
         let view = self.view();
         let off = ground.at(view.center(WrapMode::Wrapped)).is_some_and(|h| h != view.center_altitude());
         if !off || self.gesture_in_progress || !self.transitions.is_empty() {
-            return;
+            return false;
         }
         let ground = Arc::clone(ground);
         let center = flip_y(view, &view.padding().center_in(view.size()));
@@ -211,27 +230,56 @@ impl Transform {
             let _ = self.state.recenter_on(&hit);
         }
         self.stand_on_ground();
+        true
     }
 
-    /// Keeps the eye of a command's camera out of the terrain: the view's
-    /// near and far planes fit the ground under the center, as at rest, and
-    /// where the eye, or the near plane over drawn ground, is below the
-    /// ground, the eye rises by pitch and zoom, keeping its place and the
-    /// center it looks at (GL JS's `_raiseCameraByPitchAndZoom`). Before the
-    /// renderer drew any ground, the eye stays above sea level. Without
-    /// terrain it does nothing.
-    pub(super) fn keep_eye_above(&mut self) {
+    /// Keeps the eye of a moving camera out of the terrain: the view's near
+    /// and far planes fit the ground under the center, as at rest, and
+    /// where the eye, or the near plane over drawn ground, would be below
+    /// the ground, a gesture that holds the altitude lifts it
+    /// ([`Self::lift`]), and anything else raises the eye by pitch and zoom,
+    /// keeping its place and the center it looks at (GL JS's
+    /// `_raiseCameraByPitchAndZoom`). Before the renderer drew any ground,
+    /// the eye stays above sea level. Without terrain it does nothing.
+    pub(super) fn keep_clear_of_ground(&mut self) {
         let Some(terrain) = &self.terrain else { return };
         let elevation = terrain.elevation.clone();
         // The frame's center may have moved since the planes last fit it.
         if let Some(elevation) = &elevation {
             self.fit_planes(&**elevation);
         }
+        if self.gesture_holds_altitude() {
+            self.lift(elevation.as_deref());
+            return;
+        }
+        // The gesture holds the altitude again from where this leaves it.
+        self.gesture.altitude = None;
         for _ in 0..MAX_EYE_RAISES {
             let shortfall = eye_shortfall(self.view(), elevation.as_deref());
             if !(shortfall > 0.0 && self.state.raise_eye(shortfall)) {
                 return;
             }
+        }
+    }
+
+    /// Puts the center at the altitude the gesture holds, raised by as far
+    /// as the ground reaches above the eye or the near plane there, so that
+    /// the lift lowers again once the ground under them does. The gesture
+    /// holds the altitude the camera has when it first lifts it. On Mercator
+    /// a raise moves the eye and the near plane straight up over the same
+    /// ground, so one clears them; on the globe it takes up to as many as a
+    /// command's.
+    fn lift(&mut self, elevation: Option<&dyn Elevation>) {
+        let mut altitude = *self.gesture.altitude.get_or_insert(self.view().center_altitude());
+        for raise in 0..=MAX_EYE_RAISES {
+            if self.view().center_altitude() != altitude {
+                self.state.set_center_altitude(altitude);
+            }
+            let shortfall = eye_shortfall(self.view(), elevation);
+            if !(shortfall > 0.0 && raise < MAX_EYE_RAISES) {
+                return;
+            }
+            altitude += shortfall;
         }
     }
 }

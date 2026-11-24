@@ -5,20 +5,23 @@ use mln_map_types::{
     GesturePhase, TransitionOutcome,
 };
 
-use super::{BEARING, CameraCommandId, PITCH, Transform, ZOOM};
-use crate::map_event::CameraChangeSource;
+use super::{BEARING, CameraCommandId, PITCH, Transform, TransformEvent, ZOOM};
+use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 
 /// The gesture that camera deltas and updates with a phase make.
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct GestureState {
     /// Between its first `Begin` or `Update` and its `End` or `Cancel`.
-    active: bool,
+    pub(super) active: bool,
     /// Counts gestures, so that an earlier gesture's momentum doesn't end a
     /// later gesture.
     serial: u64,
     /// The fields the gesture changed (`ZOOM`, `BEARING`, `PITCH`), which
     /// alone may settle.
     changed: u16,
+    /// The altitude the gesture holds over terrain, once it took it
+    /// (see `terrain`).
+    pub(super) altitude: Option<f64>,
 }
 
 impl GestureState {
@@ -155,13 +158,15 @@ impl Transform {
         }
         if matches!(phase, GesturePhase::Begin | GesturePhase::Update) {
             self.gesture.active = true;
-            self.set_gesture_in_progress(true);
+            self.gesture_in_progress = true;
         }
     }
 
     /// `Cancel` cancels the running commands after its change applies, and
     /// `End` and `Cancel` end the gesture: at once, or when its momentum
-    /// ends.
+    /// ends. A gesture that ends at once comes to rest
+    /// ([`Self::come_to_rest`]), and reports the camera's change if that
+    /// moves it, though the picture stays.
     fn gesture_phase_after(&mut self, phase: GesturePhase, momentum: bool) {
         if phase == GesturePhase::Cancel {
             self.cancel_transitions();
@@ -169,19 +174,26 @@ impl Transform {
         if matches!(phase, GesturePhase::End | GesturePhase::Cancel) {
             self.gesture.active = false;
             if !momentum {
-                self.set_gesture_in_progress(false);
+                self.gesture_in_progress = false;
+                if self.come_to_rest() {
+                    let change =
+                        CameraChange { mode: CameraChangeMode::Immediate, source: CameraChangeSource::Gesture };
+                    self.emit(TransformEvent::CameraWillChange(change));
+                    self.emit(TransformEvent::CameraDidChange(change));
+                }
             }
         }
     }
 
     /// The end of a gesture's momentum ends the gesture, unless another
-    /// gesture started since.
+    /// gesture started since. The caller brings the camera to rest.
     pub(super) fn end_gesture_momentum(&mut self, gesture: Option<u64>) {
         if gesture == Some(self.gesture.serial) && !self.gesture.active {
-            self.set_gesture_in_progress(false);
+            self.gesture_in_progress = false;
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn set_gesture_in_progress(&mut self, in_progress: bool) {
         self.gesture_in_progress = in_progress;
     }

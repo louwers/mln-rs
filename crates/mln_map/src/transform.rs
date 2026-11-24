@@ -185,6 +185,8 @@ pub struct Transform {
     source: CameraChangeSource,
     gesture: GestureState,
     /// From a gesture's first change until it ends, its momentum included.
+    /// Over terrain, a gesture holds the altitude, and comes to rest on the
+    /// ground as it ends (see `terrain`).
     gesture_in_progress: bool,
     /// The fields that the running commands move (`CENTER`, `ZOOM`,
     /// `BEARING`), as of the last frame.
@@ -354,11 +356,10 @@ impl Transform {
     /// Moves the map by `offset`. A drag on the globe turns the planet so
     /// that the location under `anchor` follows the cursor. The ground under
     /// the cursor before the move follows it, on the plane at that ground's
-    /// height, or on the globe the sphere: sea level on the flat map and for
-    /// a gesture, the drawn ground for a command over terrain
-    /// ([`Self::set_terrain`]); without an anchor, or with one that grabs no
-    /// ground, the map moves on the plane or the sphere at the center's
-    /// altitude. On the globe, with the
+    /// height, or on the globe the sphere: sea level on the flat map, the
+    /// drawn ground over terrain ([`Self::set_terrain`]); without an anchor,
+    /// or with one that grabs no ground, the map moves on the plane or the
+    /// sphere at the center's altitude. On the globe, with the
     /// bearing held, steps that follow one another, each starting at the
     /// `anchor` of the one before with the camera as it left it, hold the
     /// location the first of them grabbed, wherever
