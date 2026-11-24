@@ -78,7 +78,8 @@ fn a_fix_moves_the_puck_and_turns_its_arrow_through_north() {
 
 #[test]
 fn a_query_finds_the_puck_where_its_filter_takes_it() {
-    use mln_rs::mln_style::expression::{Expr, value::Value};
+    use mln_rs::mln_style::expression::Expr;
+    use mln_rs::mln_style::expression::value::Value;
     use mln_rs::mln_style::filter::Filter;
 
     let fixture = Fixture::new(registry(), STYLE);

@@ -336,7 +336,8 @@ impl Group {
         frame.draws.clear();
         frame.stencil_tiles.clear();
         let clips = pushes.pushed.iter().any(|pushed| pushed.draw.clip);
-        if let Some(once) = pushes.pushed.iter().find(|pushed| matches!(pushed.draw.depth, Depth::Volume { once: true, .. }))
+        if let Some(once) =
+            pushes.pushed.iter().find(|pushed| matches!(pushed.draw.depth, Depth::Volume { once: true, .. }))
             && clips
         {
             context.fail(format!("A group of draws that clip has a 3D draw of {} that draws once", once.program.name));
@@ -361,7 +362,10 @@ impl Group {
                 element,
                 opaque: pushed.draw.opaque
                     && opaque
-                    && matches!(pushed.draw.depth, Depth::Layer { write: true, .. } | Depth::Volume { write: true, .. }),
+                    && matches!(
+                        pushed.draw.depth,
+                        Depth::Layer { write: true, .. } | Depth::Volume { write: true, .. }
+                    ),
                 depth: pushed.draw.depth,
                 clip: pushed.draw.clip,
             });
@@ -1033,7 +1037,8 @@ mod tests {
             assert_eq!(opaque, [true, false, false]);
 
             group.begin(0.0, true, false);
-            assert!(group.composite(Composite::of(0.5, mln_style_types::types::LayerBlendType::Normal).expect("a composite")));
+            let half = Composite::of(0.5, mln_style_types::LayerBlendType::Normal).expect("a composite");
+            assert!(group.composite(half));
             group.push(&mesh, writes, ());
             group.finish(gpu, context, &(), []);
             assert!(!group.frame.draws[0].opaque, "an opaque draw of a composited group");

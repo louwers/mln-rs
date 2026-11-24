@@ -7,7 +7,8 @@ use std::time::Duration;
 use mln_gfx::gpu::{Gpu, TextureFormat, TextureId};
 use mln_map_types::{MapDebugOptions, MapMode, View};
 use mln_style::diff::{ItemChanges, LayerChange, LayerChanges, StyleDiff, sources_by_id};
-use mln_style::expression::{Dependency, GlobalStateMap};
+use mln_style::expression::expr::with_geojson_feature;
+use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap};
 use mln_style::layer_type::{ErasedLayerStyle, SourceKind};
 use mln_style::map::zoom_history::ZoomHistory;
 use mln_style::{
@@ -1314,11 +1315,11 @@ impl RenderOrchestrator {
             let mut hits = Vec::new();
             layer.hit_frame(&self.view, geometry, &mut hits);
             if let Some(filter) = &options.filter {
-                let context = mln_style::expression::EvaluationContext::with_zoom_feature(self.view.zoom() as f32, None)
+                let context = EvaluationContext::with_zoom_feature(self.view.zoom() as f32, None)
                     .with_global_state(self.global_state.as_deref());
                 hits.retain(|hit| {
                     let feature = hit.feature.to_geojson_feature();
-                    mln_style::expression::expr::with_geojson_feature(&feature, context.clone(), |cx| filter.evaluate(cx))
+                    with_geojson_feature(&feature, context.clone(), |cx| filter.evaluate(cx))
                 });
             }
             if !hits.is_empty() {
