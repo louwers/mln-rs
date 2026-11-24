@@ -60,6 +60,8 @@ ci:
               # The programs' Metal shaders, beside their other languages'.
               - "**/msl.rs"
               - crates/mln_extension_tests/src/stamp/**
+              # The backends' conformance cases, and their program's MSL.
+              - crates/mln_layers/src/conformance/**
           then: apply
     web:
       covers: >-
