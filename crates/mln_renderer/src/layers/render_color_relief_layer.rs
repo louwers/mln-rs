@@ -293,6 +293,7 @@ fn color_relief_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeA
 impl TypedLayer for RenderColorReliefLayer {
     type Type = ColorRelief;
     type Drawing = TileDraws<ReliefTile>;
+    const DRAPES: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -429,7 +430,7 @@ impl TypedLayer for RenderColorReliefLayer {
         };
 
         for tile in render_tiles {
-            let tile_id = tile.id();
+            let tile_id = tile.draw_id(paint_parameters);
             let Some(mut entry) = drawing.tiles_mut().entry(&tile_id) else {
                 continue;
             };

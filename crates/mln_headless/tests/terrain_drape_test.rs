@@ -208,3 +208,66 @@ fn a_circle_stands_between_two_stacks_of_draped_layers() {
     let differing = differing(&draped, &flat);
     assert!(differing <= EDGE_PIXELS, "{differing} pixels differ from the map without terrain");
 }
+
+/// A GeoJSON source `id` of a polygon for each of `boxes`, each from west
+/// to east and from south to north, in degrees.
+fn polygon_source(id: &str, boxes: &[[f64; 4]]) -> String {
+    let features: Vec<String> = boxes
+        .iter()
+        .map(|[west, south, east, north]| {
+            format!(
+                r#"{{"type": "Feature", "properties": {{}}, "geometry": {{"type": "Polygon", "coordinates": [[[{west}, {north}], [{east}, {north}], [{east}, {south}], [{west}, {south}], [{west}, {north}]]]}}}}"#
+            )
+        })
+        .collect();
+    format!(
+        r#""{id}": {{"type": "geojson", "data": {{"type": "FeatureCollection", "features": [{}]}}}}"#,
+        features.join(",")
+    )
+}
+
+/// A map without a background, of a red fill around the center, a blue
+/// line across it north of the center and two green fills that overlap,
+/// half transparent as a whole, over the red fill's east half and the line;
+/// with a terrain over flat ground if `terrain`. Its layers all drape.
+fn shapes_style(terrain: bool) -> String {
+    let sources = [
+        polygon_source("red", &[[-5.0, -5.0, 5.0, 5.0]]),
+        r#""line": {"type": "geojson", "data": {"type": "LineString", "coordinates": [[-60, 10], [60, 10]]}}"#
+            .to_owned(),
+        polygon_source("green", &[[0.0, -20.0, 20.0, 20.0], [0.0, -2.0, 30.0, 2.0]]),
+    ];
+    let layers = [
+        r#"{"id": "red", "type": "fill", "source": "red", "paint": {"fill-color": "red"}}"#,
+        r#"{"id": "line", "type": "line", "source": "line", "paint": {"line-color": "blue", "line-width": 6}}"#,
+        r#"{"id": "green", "type": "fill", "source": "green", "paint": {"fill-color": "lime", "fill-layer-opacity": 0.5}}"#,
+    ];
+    style_of(terrain, &sources.join(","), &layers.join(","))
+}
+
+/// Fills and lines drape, and a layer that is half transparent as a whole
+/// draws so inside the drapes, where its fills overlap too: over flat
+/// ground seen from above, the map looks as it does without terrain.
+#[test]
+fn fills_and_lines_drape_over_flat_terrain() {
+    let (Some((draped, draped_textures)), Some((flat, flat_textures))) =
+        (render(&shapes_style(true), ViewportMode::Default), render(&shapes_style(false), ViewportMode::Default))
+    else {
+        return;
+    };
+    // At least one drape of 1024² texels for the terrain's 512 px tiles:
+    // without a layer that drapes, there would be none.
+    assert!(draped_textures - flat_textures >= 1024 * 1024 * 4, "the drapes' textures");
+    let center = SIDE / 2;
+    assert_eq!([255, 0, 0, 255], pixel(&draped, center - 10, center), "the red fill");
+    // 10° north is 57 px north of the equator in the 2048 px of the world
+    // at zoom 2.
+    assert_eq!([0, 0, 255, 255], pixel(&draped, center - 60, center - 57), "the blue line");
+    // Half the green over the red, and half the green alone over nothing.
+    let [r, g, b, a] = pixel(&draped, center + 10, center);
+    assert!(r.abs_diff(128) <= 2 && g.abs_diff(128) <= 2 && b == 0 && a == 255, "green over red: {:?}", [r, g, b, a]);
+    let [r, g, b, a] = pixel(&draped, center + 60, center);
+    assert!(r == 0 && g.abs_diff(128) <= 2 && b == 0 && a.abs_diff(128) <= 2, "green alone: {:?}", [r, g, b, a]);
+    let differing = differing(&draped, &flat);
+    assert!(differing <= EDGE_PIXELS, "{differing} pixels differ from the map without terrain");
+}

@@ -501,7 +501,7 @@ impl RenderFillLayer {
         const NEAR_CLIPPED: bool = false;
         let evaluated = &layer.paint;
         let zoom = parameters.view.zoom() as f32;
-        let tile_id = tile.id().to_unwrapped();
+        let tile_id = tile.draw_id(parameters).to_unwrapped();
 
         let projection = projection_data(
             &tile_id,
@@ -611,6 +611,7 @@ impl RenderFillLayer {
 impl TypedLayer for RenderFillLayer {
     type Type = Fill;
     type Drawing = TileDraws<FillTile>;
+    const DRAPES: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -692,7 +693,7 @@ impl TypedLayer for RenderFillLayer {
         let layer_id = self.base.style.base().id.as_str();
         let layer = &*self.values.evaluated;
         for &tile in render_tiles {
-            let tile_id = tile.id();
+            let tile_id = tile.draw_id(paint_parameters);
             let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
                 continue;
             };
@@ -789,7 +790,7 @@ impl TypedLayer for RenderFillLayer {
             *layer.paint.fill_layer_opacity.uniform(),
             *layer.paint.fill_layer_blend.uniform(),
         ));
-        frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.tile.id));
+        frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.draw_id(paint_parameters).to_unwrapped()));
         self.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
             Self::write_uniforms(layer, writer);
         });

@@ -17,6 +17,14 @@
 //! drape again. A drape whose layers make no draw has no texture, so a stack
 //! that draws nothing in a tile holds no memory there.
 //!
+//! A draped layer with a layer opacity below 1 or a layer blend other than
+//! `normal` draws as a whole inside each drape, as in 2D
+//! ([`LayerComposite`]): into a texture of the drape's size, composited onto
+//! the drape. The drapes share one such composite, which each drape's pass
+//! uses in turn. A drape with a layer that blends in the shader draws into
+//! the composite's frame texture, which is copied into the drape before its
+//! mips, so a blend's backdrop is the drape's own texels.
+//!
 //! [`LayerParts::update_drape_draws`]: crate::render_layer::LayerParts::update_drape_draws
 
 use std::sync::Arc;
@@ -25,7 +33,7 @@ use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetF
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_map_types::View;
+use mln_map_types::{MapDebugOptions, View};
 use mln_style::layer_type::ErasedLayerStyle;
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
@@ -87,8 +95,6 @@ struct Drape {
     tile: OverscaledTileID,
     transform: TransformParameters,
     clip_masks: ClipMasks,
-    /// Composites nothing: the layers that would composite draw straight.
-    layer_composite: LayerComposite,
     stacks: Vec<StackDrape>,
 }
 
@@ -99,7 +105,6 @@ impl Drape {
             tile,
             transform: TransformParameters::for_drape(view, &tile.to_unwrapped()),
             clip_masks: ClipMasks::default(),
-            layer_composite: LayerComposite::default(),
             stacks: Vec::new(),
         }
     }
@@ -116,6 +121,9 @@ pub(crate) struct Drapes {
     globe: bool,
     /// The depth and stencil every drape draws with in turn, of `size`.
     depth_stencil: Option<GpuTexture>,
+    /// What the layers drawn as a whole draw into and composite with, of
+    /// `size`, which every drape's pass uses in turn.
+    layer_composite: LayerComposite,
 }
 
 impl Drapes {
@@ -166,8 +174,11 @@ impl Drapes {
         let (size, globe) = (Size::new(self.size, self.size), self.globe);
         let style = Arc::clone(&layer.base().style);
         let pattern_atlas_size = atlases.pattern.pixel_size();
+        // The draws' updates don't read what the layers composite with, which
+        // the upload makes.
+        let layer_composite = &mut LayerComposite::default();
         for drape in &mut self.drapes {
-            let Drape { tile, transform, clip_masks, layer_composite, stacks } = drape;
+            let Drape { tile, transform, clip_masks, stacks } = drape;
             let Some(StackDrape { layers, previous, .. }) = stacks.get_mut(stack) else {
                 continue;
             };
@@ -245,10 +256,13 @@ impl Drapes {
 
     /// Makes the drapes' textures and what they draw with, and uploads the
     /// GPU objects of their draws and the masks of the tiles they clip to,
-    /// through `gpu`, the context of `parameters`, the frame's.
+    /// through `gpu`, the context of `parameters`, the frame's. The layer
+    /// composite takes the composited draw groups of every drape, and drops
+    /// its textures where there are none.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         if self.drapes.is_empty() {
             self.depth_stencil = None;
+            self.layer_composite = LayerComposite::default();
             return;
         }
         let size = Size::new(self.size, self.size);
@@ -260,8 +274,9 @@ impl Drapes {
                 }
             }
         }
+        let layer_composite = &mut self.layer_composite;
         for drape in &mut self.drapes {
-            let Drape { tile, transform, clip_masks, layer_composite, stacks } = drape;
+            let Drape { tile, transform, clip_masks, stacks } = drape;
             let parameters = parameters.drape(transform, clip_masks, layer_composite, size, tile.to_unwrapped());
             for stack in stacks.iter_mut() {
                 let context = &mut *parameters.context;
@@ -289,19 +304,26 @@ impl Drapes {
                 to_projection_ubo(&transform.projection_data_for_tile(tile, false))
             });
         }
+        let stacks = self.drapes.iter().flat_map(|drape| &drape.stacks);
+        let composited: Vec<_> = stacks.flat_map(|stack| stack.groups.composited.iter().copied()).collect();
+        let overdraw = parameters.debug_options.contains(MapDebugOptions::OVERDRAW);
+        self.layer_composite.update(gpu, parameters.context, size, Some(COLOR), overdraw, &composited);
     }
 
     /// Draws each drape that has a texture into it, through `gpu`, the
     /// context of `parameters`, the frame's, outside any pass, and then its
     /// texture's mips: its layers' opaque draws front to back, then their
-    /// translucent ones back to front, over transparent texels.
+    /// translucent ones back to front, over transparent texels. A drape
+    /// with a layer that blends in the shader draws into the layer
+    /// composite's frame texture, which is then copied into its own.
     pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         let Some(depth_stencil) = self.depth_stencil.as_ref().map(GpuTexture::id) else {
             return;
         };
         let size = Size::new(self.size, self.size);
+        let layer_composite = &mut self.layer_composite;
         for drape in &mut self.drapes {
-            let Drape { tile, transform, clip_masks, layer_composite, stacks } = drape;
+            let Drape { tile, transform, clip_masks, stacks } = drape;
             for stack in stacks.iter_mut() {
                 let StackDrape { texture: Some(texture), layers, groups, .. } = stack else {
                     continue;
@@ -313,12 +335,11 @@ impl Drapes {
                         continue;
                     }
                 };
+                let clear = LoadOp::Clear(Color::new(0.0, 0.0, 0.0, 0.0));
+                let frame_texture = layer_composite.frame_texture_for(&groups.composited);
                 let pass = OpenPass {
                     label: "drape",
-                    color: Some(ColorAttachment {
-                        texture: color,
-                        load: LoadOp::Clear(Color::new(0.0, 0.0, 0.0, 0.0)),
-                    }),
+                    color: Some(ColorAttachment { texture: frame_texture.unwrap_or(color), load: clear }),
                     depth_stencil: Some(DepthStencilAttachment {
                         texture: depth_stencil,
                         depth: LoadOp::Clear(1.0),
@@ -342,7 +363,22 @@ impl Drapes {
                     for layer in layers.iter_mut() {
                         layer.drawing.render(gpu, &mut drape_parameters, DrawOrder::BottomUp);
                     }
-                    drape_parameters.end_pass(gpu)
+                    // A drape whose frame doesn't reach it failed, as one
+                    // whose pass did.
+                    let presented = match frame_texture {
+                        Some(_) => {
+                            let present = OpenPass {
+                                label: "drape",
+                                color: Some(ColorAttachment { texture: color, load: clear }),
+                                depth_stencil: None,
+                                size,
+                                targets: TargetFormats { color: Some(COLOR), depth_stencil: None },
+                            };
+                            drape_parameters.present_frame(gpu, present)
+                        }
+                        None => Ok(()),
+                    };
+                    drape_parameters.end_pass(gpu).and(presented)
                 });
                 if let Err(error) = drawn.and_then(|()| parameters.context.generate_mipmaps(gpu, texture)) {
                     parameters.context.fail(format!("Drawing a drape failed: {error}"));

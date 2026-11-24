@@ -297,6 +297,7 @@ fn hillshade_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArra
 impl TypedLayer for RenderHillshadeLayer {
     type Type = Hillshade;
     type Drawing = TileDraws<HillshadeTile>;
+    const DRAPES: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -355,7 +356,7 @@ impl TypedLayer for RenderHillshadeLayer {
         // The illumination, which the first draw computes.
         let mut illumination = None;
         for tile in render_tiles {
-            let tile_id = tile.id();
+            let tile_id = tile.draw_id(paint_parameters);
             let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
                 continue;
             };

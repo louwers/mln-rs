@@ -49,8 +49,7 @@ use crate::layout::pattern_layout::{LineLayoutSpec, PatternLayout, uses_pattern}
 use crate::line_atlas::{LineAtlas, LinePatternCap};
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
-    Atlases, LayerBucket, LayerParts, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer,
-    RenderLayerBase, TypedLayer,
+    Atlases, LayerBucket, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
 use crate::render_pass::RenderPass;
 use crate::render_tile::FrameTile;
@@ -216,10 +215,9 @@ pub(crate) struct RenderLineLayer {
     /// The global-state snapshot used to generate the cached color ramp and
     /// detect when it needs to be rebuilt.
     color_ramp_global_state: Option<Arc<GlobalStateMap>>,
+    /// The color ramp's texture, from the first draw that reads it until
+    /// the ramp changes. A draw that reads another is built again.
     color_ramp_texture: Option<SharedTexture>,
-    /// Whether the color ramp changed since the draws that read it were
-    /// built, which the next update drops.
-    color_ramp_changed: bool,
 }
 
 impl RenderLineLayer {
@@ -233,7 +231,6 @@ impl RenderLineLayer {
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
             color_ramp_global_state: None,
             color_ramp_texture: None,
-            color_ramp_changed: false,
         }
     }
 
@@ -246,10 +243,7 @@ impl RenderLineLayer {
         // The texture shares the ramp image, so a new one replaces it.
         self.color_ramp = Rc::new(image);
 
-        if self.color_ramp_texture.is_some() {
-            self.color_ramp_texture = None;
-            self.color_ramp_changed = true;
-        }
+        self.color_ramp_texture = None;
     }
 
     // query
@@ -318,6 +312,7 @@ fn offset_line(
 impl TypedLayer for RenderLineLayer {
     type Type = Line;
     type Drawing = TileDraws<LineTile>;
+    const DRAPES: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -377,19 +372,14 @@ impl TypedLayer for RenderLineLayer {
         atlases: &Atlases,
         render_tiles: &[FrameTile<'_, Line>],
     ) {
-        if std::mem::take(&mut self.color_ramp_changed) {
-            // The gradients' draws read the old ramp's texture.
-            self.remove_all_draws();
-        }
-
         let frame = self.drawing.frame_mut();
         let paint = &self.values.evaluated.paint;
         frame.set_composite(Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform()));
-        frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.tile.id));
+        frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.draw_id(paint_parameters).to_unwrapped()));
 
         let render_pass = RenderPass(self.values.evaluated.render_passes & !RenderPass::Opaque.underlying_type());
         for tile in render_tiles {
-            let tile_id = tile.id();
+            let tile_id = tile.draw_id(paint_parameters);
 
             let Some(render_data) = tile.bucket_for_pass(render_pass) else {
                 self.drawing.tiles_mut().drop_value(&tile_id);
@@ -408,8 +398,13 @@ impl TypedLayer for RenderLineLayer {
             let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
                 continue;
             };
-            if entry.value.as_ref().is_some_and(|cached| cached.pass != render_pass) {
-                // The tile's draw was built for other passes.
+            if entry.value.as_ref().is_some_and(|cached| {
+                cached.pass != render_pass
+                    || matches!(cached.line_type, LineType::Gradient | LineType::GradientSdf)
+                        && cached.objects.texture(ID_LINE_IMAGE_TEXTURE) != self.color_ramp_texture.as_ref()
+            }) {
+                // The tile's draw was built for other passes, or reads a color
+                // ramp the layer replaced.
                 *entry.value = None;
             }
             // A draw built from another bucket goes.

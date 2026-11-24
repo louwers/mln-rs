@@ -23,11 +23,12 @@
 //! 2. Once the sources have updated, [`RenderTerrain::bind`] binds each
 //!    terrain tile's DEM, and tells the map of the ground the tiles draw, if
 //!    it changed ([`TerrainElevation`]), which the map's camera stands on.
-//! 3. In the encode, the layers that drape (background and raster, an image
-//!    source's too) make no draws in the frame: they draw in each drape of
-//!    their stack ([`RenderTerrain::begin_drapes`]). The surface makes a draw
-//!    per tile and stack that has a drape there, which reads the textures of
-//!    the DEM tiles the tiles read ([`RenderTerrain::update_dems`],
+//! 3. In the encode, the layers that drape (background, fill, line, raster,
+//!    an image source's too, hillshade and color relief) make no draws in
+//!    the frame: they draw in each drape of their stack
+//!    ([`RenderTerrain::begin_drapes`]). The surface makes a draw per tile
+//!    and stack that has a drape there, which reads the textures of the DEM
+//!    tiles the tiles read ([`RenderTerrain::update_dems`],
 //!    [`RenderTerrain::update_draws`]).
 //! 4. The drapes draw into their textures before the frame's pass. The
 //!    frame clears to transparent, and its translucent pass draws each
@@ -92,6 +93,10 @@
 //!   drapes, so a draped line at a latitude shows as wide as the Mercator
 //!   tile under it makes it. A drape is twice as wide as its tile, or the
 //!   device's largest texture where that is smaller, and mipmapped.
+//! - **The drape composite.** A draped layer with a layer opacity below 1
+//!   or a layer blend other than `normal` draws as a whole inside each
+//!   drape, as in 2D: into a texture of the drape's size, composited onto
+//!   the drape. A blend's backdrop is the drape's own texels.
 
 #![expect(dead_code, reason = "the standing layers come with a later step of terrain")]
 
