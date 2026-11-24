@@ -14,6 +14,7 @@ use mln_gfx::gpu::{
     ResourceId, SamplerId, Scissor, ShaderId, ShaderKey, SlotMap, TextureDesc, TextureFormat, TextureId, TextureRegion,
     TextureUsage,
 };
+use mln_gfx::shaders::bindings::MAX_VERTEX_BUFFERS;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_util::Color;
@@ -36,10 +37,12 @@ const VERTEX_USAGES: wgpu::BufferUsages = wgpu::BufferUsages::VERTEX.union(wgpu:
 
 /// The most storage buffers that a program's vertex stage reads, which a
 /// device's `max_storage_buffers_per_shader_stage` has to allow for its
-/// bindings to bind vertex buffers (`Caps::binds_vertex_buffers`). A device
-/// that allows fewer, such as one made with
-/// `wgpu::Limits::downlevel_defaults()`, draws instances instead.
-pub(crate) const VERTEX_STAGE_STORAGE_BUFFERS: u32 = 5;
+/// bindings to bind vertex buffers (`Caps::binds_vertex_buffers`): the
+/// projection's, the program's two of each draw's values that the stage
+/// may read, and its vertex buffers. A device that allows fewer, such as
+/// one made with `wgpu::Limits::downlevel_defaults()`, draws instances
+/// instead.
+pub(crate) const VERTEX_STAGE_STORAGE_BUFFERS: u32 = 3 + MAX_VERTEX_BUFFERS as u32;
 
 /// The alignment of a small uniform or storage buffer in its page: WebGPU's
 /// largest allowed `minUniformBufferOffsetAlignment`, so an offset any
@@ -817,7 +820,7 @@ impl Gpu for WebGpu {
     }
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
-        key.program().check()?;
+        key.program().check_on(&self.caps)?;
         let program = shader_program::compile(self.device.device(), self.index_table.layout(), key)?;
         let reads = shader_bindings(&program)?;
         Ok(self.shaders.insert(Shader { program, reads }))

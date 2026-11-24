@@ -6,7 +6,7 @@ use std::hash::{Hash, Hasher};
 use std::{fmt, ptr};
 
 use crate::gfx_types::AttributeDataType;
-use crate::gpu::{GpuError, ShaderKey, VertexStep};
+use crate::gpu::{Caps, GpuError, ShaderKey, VertexStep};
 use crate::projection_variant::ProjectionVariant;
 use crate::shaders::bindings::{
     FIRST_UNIFORM_ID, FIRST_VERTEX_BUFFER_ID, FRAGMENT_STORAGE_ID, MAX_ATTRIBUTES, MAX_TEXTURES, MAX_VERTEX_BUFFERS,
@@ -705,6 +705,29 @@ impl Program {
         Ok(())
     }
 
+    /// [`check`](Self::check)s the program, and that a backend of `caps`
+    /// binds what it reads: no vertex buffers that its vertex stage reads
+    /// as storage buffers ([`BufferKind::Vertices`]) where
+    /// [`Caps::binds_vertex_buffers`] is false. A backend checks this before
+    /// it compiles the program.
+    ///
+    /// # Errors
+    ///
+    /// As [`check`](Self::check), and [`GpuError::Unsupported`] for a
+    /// program that reads vertex buffers on a backend that binds none.
+    pub fn check_on(&self, caps: &Caps) -> Result<(), GpuError> {
+        self.check()?;
+        if !caps.binds_vertex_buffers
+            && self.buffers.iter().any(|buffer| matches!(buffer.kind, BufferKind::Vertices { .. }))
+        {
+            return Err(GpuError::Unsupported(format!(
+                "program {}: it reads vertex buffers, which this backend's bindings don't bind",
+                self.name
+            )));
+        }
+        Ok(())
+    }
+
     /// What `stage` may read, in the order a backend declares it in for a
     /// stage that names it: the draw's index, the engine's buffers, the
     /// program's buffers that the stage may read, as [`ProgramBuffer`] says,
@@ -921,5 +944,25 @@ mod tests {
         let defines = |pixel_ratio, overdraw| ProgramParameters { pixel_ratio, overdraw }.defines().collect::<Vec<_>>();
         assert_eq!(defines(1.0, false), ["DEVICE_PIXEL_RATIO=1.0"]);
         assert_eq!(defines(1.5, true), ["DEVICE_PIXEL_RATIO=1.5", "OVERDRAW_INSPECTOR"]);
+    }
+
+    #[test]
+    fn a_program_binds_vertex_buffers_only_where_its_backend_does() {
+        let pulling = Program { buffers: const { &[ProgramBuffer::vertices("vertices", 0, Short2)] }, ..EMPTY };
+        let caps = |binds_vertex_buffers| Caps {
+            buffer_offset_alignment: 4,
+            max_texture_size: 4096,
+            half_float_render_targets: false,
+            clip_depth: crate::gpu::ClipDepthRange::ZeroToOne,
+            render_target_depth: None,
+            clear_stencil_with_pass: false,
+            cpu_rasterizer: false,
+            max_line_width: 1.0,
+            binds_vertex_buffers,
+            indexes_storage_buffers: true,
+        };
+        assert!(pulling.check_on(&caps(true)).is_ok());
+        assert!(matches!(pulling.check_on(&caps(false)), Err(GpuError::Unsupported(_))));
+        assert!(EMPTY.check_on(&caps(false)).is_ok());
     }
 }

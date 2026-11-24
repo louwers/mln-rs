@@ -2404,7 +2404,7 @@ impl Gpu for VulkanGpu {
     }
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
-        key.program().check()?;
+        key.program().check_on(&self.caps)?;
         let shader = self.compile(key)?;
         Ok(self.shaders.insert(shader))
     }

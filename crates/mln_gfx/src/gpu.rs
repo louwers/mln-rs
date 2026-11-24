@@ -666,8 +666,9 @@ pub trait Gpu {
     fn create_sampler(&mut self, state: &SamplerState) -> Result<SamplerId, GpuError>;
 
     /// Compiles the program of `key` from its source in the backend's
-    /// shading language ([`Program::sources`]). Fails with
-    /// [`GpuError::Unsupported`] for a program without one.
+    /// shading language ([`Program::sources`]). Fails as
+    /// [`Program::check_on`] does, and with [`GpuError::Unsupported`] for a
+    /// program without a source in that language.
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError>;
     /// Makes a pipeline of `desc`'s shader and state. Fails with
     /// [`GpuError::Unsupported`] for a primitive the backend doesn't draw.
