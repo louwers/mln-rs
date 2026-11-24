@@ -44,36 +44,33 @@ fn pixel(fixture: &Fixture, x: f64, y: f64) -> [u8; 4] {
     image.data[offset..offset + 4].try_into().unwrap()
 }
 
+/// The engine has no frame clock, so which frames a transition draws is
+/// the wall clock's: every frame drawn shows the puck on its way, and the
+/// last at the fix. The way a position and a bearing go, across the
+/// antimeridian and through north, is their interpolation's (mln_util's
+/// and mln_style's tests).
 #[test]
-fn a_fix_moves_the_puck_and_turns_its_arrow_through_north() {
+fn a_fix_moves_the_puck_and_turns_its_arrow_the_short_way_to_it() {
     let fixture = Fixture::new(registry(), STYLE);
     assert_eq!((-1.0, 350.0), drawn(&fixture));
 
     wait(fixture.map.set_style_layer_property("puck", "position", "[1, 0]"));
     wait(fixture.map.set_style_layer_property("puck", "bearing", "10"));
     let deadline = Instant::now() + Duration::from_secs(30);
-    let (mut midway, mut last_longitude) = (0, -1.0);
-    loop {
+    let mut last_longitude = -1.0;
+    while drawn(&fixture) != (1.0, 10.0) {
         assert!(Instant::now() < deadline, "the transition never ended");
         fixture.render();
         let (longitude, bearing) = drawn(&fixture);
         assert!((last_longitude..=1.0).contains(&longitude), "{last_longitude} then {longitude}");
         assert!(!(10.0..350.0).contains(&bearing) || bearing == 10.0, "the long way round: {bearing}");
         last_longitude = longitude;
-        if longitude == 1.0 && bearing == 10.0 {
-            break;
-        }
-        if longitude > -1.0 && bearing != 350.0 {
-            midway += 1;
-            // The arrow points about north from the puck, which zoom 3 draws
-            // 11.4 pixels a degree east of the center.
-            let x = f64::from(SIZE.width) / 2.0 + longitude * 4096.0 / 360.0;
-            let y = f64::from(SIZE.height) / 2.0;
-            assert_eq!(WHITE, pixel(&fixture, x, y - 12.0), "north of the puck, heading {bearing}");
-            assert_eq!(BLACK, pixel(&fixture, x, y + 14.0), "south of the puck, heading {bearing}");
-        }
     }
-    assert!(midway > 0, "no frame drew the transition under way");
+    // The arrow points about north from the puck, which zoom 3 draws 11.4
+    // pixels a degree east of the center.
+    let (x, y) = (f64::from(SIZE.width) / 2.0 + 4096.0 / 360.0, f64::from(SIZE.height) / 2.0);
+    assert_eq!(WHITE, pixel(&fixture, x, y - 12.0), "north of the puck");
+    assert_eq!(BLACK, pixel(&fixture, x, y + 14.0), "south of the puck");
 }
 
 #[test]
