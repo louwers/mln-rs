@@ -27,7 +27,10 @@ jobs:
   # default branch, whichever branch the workflow runs on. A scheduled run's
   # event says neither, so this asks the API.
   repository:
-    runs-on: blacksmith-2vcpu-ubuntu-2604
+    runs-on: >-
+      ${{ github.event_name == 'schedule' &&
+      'blacksmith-2vcpu-ubuntu-2604;scheduling=flex' ||
+      'blacksmith-2vcpu-ubuntu-2604' }}
     timeout-minutes: 5
     outputs:
       fork: ${{ steps.repository.outputs.fork }}
@@ -43,7 +46,10 @@ jobs:
   release-pr:
     needs: repository
     if: needs.repository.outputs.fork == 'false'
-    runs-on: blacksmith-4vcpu-ubuntu-2604
+    runs-on: >-
+      ${{ github.event_name == 'schedule' &&
+      'blacksmith-4vcpu-ubuntu-2604;scheduling=flex' ||
+      'blacksmith-4vcpu-ubuntu-2604' }}
     timeout-minutes: 90
     # Holds RELEASE_PLZ_TOKEN.
     environment: release

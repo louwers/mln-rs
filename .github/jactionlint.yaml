@@ -18,7 +18,9 @@ rules:
 self-hosted-runner:
   labels:
     - blacksmith-2vcpu-ubuntu-2604
+    - blacksmith-2vcpu-ubuntu-2604;scheduling=flex
     - blacksmith-4vcpu-ubuntu-2604
+    - blacksmith-4vcpu-ubuntu-2604;scheduling=flex
     - blacksmith-4vcpu-ubuntu-2604-arm
     - blacksmith-6vcpu-macos-26
 ignores:
@@ -28,3 +30,15 @@ ignores:
     reason:
       Trusted publishing needs each crate configured on crates.io first. Until
       then the token lives in the release environment.
+  - rule: dangerous-triggers
+    file: .github/workflows/ci-retry.yml
+    reason: >-
+      Reacts to completed `ci` runs via `workflow_run`, checks out only the
+      trusted default-branch commit (`github.sha`), and reads only GitHub API
+      job/step conclusions without touching untrusted PR code or artifacts.
+  - rule: excessive-permissions
+    file: .github/workflows/ci-retry.yml
+    job: retry
+    reason: >-
+      Needs `actions: write` to call `rerun-failed-jobs` on failed `ci` runs;
+      the job executes only trusted default-branch code (`tools/ci/retry.py`).

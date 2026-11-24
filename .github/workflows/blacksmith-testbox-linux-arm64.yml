@@ -1,0 +1,54 @@
+name: blacksmith-testbox-linux-arm64
+
+# Starts an interactive Blacksmith Testbox session on an ARM64 Linux runner with
+# the CI toolchains and Mesa software GPU stack (lavapipe, Vulkan validation
+# layer, and EGL/llvmpipe) preinstalled.
+
+on:
+  workflow_dispatch:
+    inputs:
+      testbox_id:
+        description: Blacksmith Testbox session ID
+        required: true
+        type: string
+
+# begin-testbox authenticates with the VM metadata service's sticky disk token.
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.testbox_id }}
+  cancel-in-progress: false
+
+env:
+  MISE_LOCKED: "1"
+
+# A warmup dispatch starts every job in its workflow, so each runner has a
+# workflow of its own.
+jobs:
+  linux-arm64:
+    runs-on: blacksmith-4vcpu-ubuntu-2604-arm
+    timeout-minutes: 120
+    steps:
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
+        with:
+          persist-credentials: false
+
+      - uses: useblacksmith/begin-testbox@22ff2ea5697369864347140857d218e42815b33c # v2
+        with:
+          testbox_id: ${{ inputs.testbox_id }}
+
+      - uses: ./.github/actions/setup-ci-deps
+        with:
+          lavapipe: "true"
+          lavapipe-validation-layer: "true"
+          lavapipe-egl: "true"
+
+      - name: Preserve the environment for Testbox SSH commands
+        run: tools/ci/preserve-testbox-env.sh
+
+      - uses: useblacksmith/run-testbox@9b976c32aa3bcbffb348889673585a5deee1b2f3 # v2

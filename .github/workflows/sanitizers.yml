@@ -35,7 +35,10 @@ jobs:
   # the ci workflow's vulkan leg runs them. No Rust cache: the build is a
   # nightly one with its own std, and the cache stays the ci workflow's.
   asan:
-    runs-on: blacksmith-4vcpu-ubuntu-2604
+    runs-on: >-
+      ${{ github.event_name == 'schedule' &&
+      'blacksmith-4vcpu-ubuntu-2604;scheduling=flex' ||
+      'blacksmith-4vcpu-ubuntu-2604' }}
     timeout-minutes: 60
     env:
       MLN_RENDER_BACKEND: vulkan

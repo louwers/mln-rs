@@ -1,0 +1,50 @@
+name: ci-retry
+
+# Retries a failed `ci` workflow run once when every failing primary job failed
+# only in runner setup, checkout, package installation, or device boot steps
+# (tools/ci/retry.py).
+
+on:
+  workflow_run:
+    workflows:
+      - ci
+    types:
+      - completed
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  retry:
+    runs-on: blacksmith-2vcpu-ubuntu-2604
+    timeout-minutes: 5
+    permissions:
+      contents: read # check out tools/ci/retry.py from the default branch
+      actions: write # rerun failed jobs on the completed ci workflow run
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.run_attempt == 1
+    steps:
+      # workflow_run gets a write token. Its checkout must stay on the trusted
+      # default-branch commit, never the pull request that triggered the failed
+      # run.
+      - name: Check out repository
+        uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            tools/ci
+
+      - name: Retry failed jobs and their dependents
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: python3 -m tools.ci.retry
