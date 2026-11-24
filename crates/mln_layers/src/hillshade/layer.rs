@@ -148,7 +148,9 @@ impl Layer for HillshadeLayer {
         let paint = &cx.layer.evaluated.paint;
         let main = out.main();
         main.block(&lights.turned(cx.frame.camera));
-        let how = TileTransform { aligned: true, ..TileTransform::default() };
+        // Aligned to the pixel grid at rest only: a moving camera moves the
+        // shading smoothly, as it does the layers around it.
+        let how = TileTransform { aligned: !cx.frame.camera_moving, ..TileTransform::default() };
         for (tile, _, value) in cx.tiles() {
             let at = tile.project(cx.frame, &how);
             let props = HillshadeTilePropsUBO {
