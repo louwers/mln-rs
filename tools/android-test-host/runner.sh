@@ -34,7 +34,8 @@ mkdir -p "${copy%/*}"
 if [[ ! $copy -ef $program ]]; then
     link=$(mktemp "$copy.XXXXXX")
     ln -f "$program" "$link" 2> /dev/null || cp -p "$program" "$link"
-    mv -f "$link" "$copy"
+    # mv refuses when a concurrent test has linked the same file there.
+    mv -f "$link" "$copy" 2> /dev/null || rm -f "$link"
 fi
 
 export ANDROID_TEST_HOST=$host
