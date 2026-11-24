@@ -474,3 +474,51 @@ impl std::fmt::Debug for dyn GeoJSONData {
 pub fn geojson_source(id: &str, options: Arc<GeoJSONOptions>) -> Source {
     Source::new(id, SourceData::<GeoJsonSourceType>::new(GeoJsonSourceOptions::new(options)))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use mln_tile_id::CanonicalTileID;
+    use mln_util::pool::Pool;
+    use parking_lot::Mutex;
+
+    use super::{GeoJSONOptions, TileFeatures, create_geojson_data};
+
+    type Features = Arc<TileFeatures>;
+
+    // gtest: Source.GeoJSONSourceSlicesInlineWhileABackgroundSliceRuns
+    // Data that isn't clustered cuts the tiles asked for with a pool on the
+    // pool, and those asked for without one on the calling thread, also
+    // while the pool cuts others of the same index on another thread.
+    #[test]
+    fn data_cuts_tiles_inline_while_its_pool_cuts_others() {
+        let polygon = r#"{"type":"Polygon","coordinates":[[[-10,-10],[10,-10],[10,10],[-10,10],[-10,-10]]]}"#;
+        let data = create_geojson_data(polygon.parse().unwrap(), &GeoJSONOptions::default_options()).unwrap();
+        // At zoom 3 the polygon lies in the four tiles about the origin.
+        let ids = [(3, 3), (4, 3), (3, 4), (4, 4)].map(|(x, y)| CanonicalTileID::new(3, x, y));
+        // Each tile's features, with whether it was cut inline.
+        let cut: Arc<Mutex<Vec<(bool, Features)>>> = Arc::default();
+        let pool = Pool::local();
+        for id in &ids {
+            let cut = Arc::clone(&cut);
+            data.get_tile(id, Box::new(move |features| cut.lock().push((false, features))), Some(&pool));
+        }
+        assert!(cut.lock().is_empty(), "the pool's tiles wait for the pool");
+
+        let background_pool = pool.clone();
+        let background = std::thread::spawn(move || background_pool.run_all());
+        for id in &ids {
+            let cut = Arc::clone(&cut);
+            data.get_tile(id, Box::new(move |features| cut.lock().push((true, features))), None);
+        }
+        background.join().unwrap();
+
+        let cut = cut.lock();
+        for inline in [false, true] {
+            let tiles: Vec<_> = cut.iter().filter(|(of, _)| *of == inline).map(|(_, features)| features).collect();
+            assert_eq!(tiles.len(), ids.len(), "inline: {inline}");
+            assert!(tiles.iter().all(|features| !features.is_empty()), "inline: {inline}");
+        }
+    }
+}
