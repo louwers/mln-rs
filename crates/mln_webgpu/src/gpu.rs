@@ -35,6 +35,13 @@ const PAGE: u64 = 16 << 10;
 /// (`Caps::binds_vertex_buffers`).
 const VERTEX_USAGES: wgpu::BufferUsages = wgpu::BufferUsages::VERTEX.union(wgpu::BufferUsages::STORAGE);
 
+/// The most storage buffers that a program's vertex stage reads, which a
+/// device's `max_storage_buffers_per_shader_stage` has to allow for its
+/// bindings to bind vertex buffers (`Caps::binds_vertex_buffers`). A device
+/// that allows fewer, such as one made with
+/// `wgpu::Limits::downlevel_defaults()`, draws instances instead.
+pub(crate) const VERTEX_STAGE_STORAGE_BUFFERS: u32 = 5;
+
 /// The alignment of a small uniform or storage buffer in its page: WebGPU's
 /// largest allowed `minUniformBufferOffsetAlignment`, so an offset any
 /// device binds.
@@ -218,7 +225,7 @@ impl WebGpu {
             clear_stencil_with_pass: false,
             cpu_rasterizer: device.adapter_info().device_type == wgpu::DeviceType::Cpu,
             max_line_width: 1.0,
-            binds_vertex_buffers: true,
+            binds_vertex_buffers: limits.max_storage_buffers_per_shader_stage >= VERTEX_STAGE_STORAGE_BUFFERS,
         };
         WebGpu {
             index_table: IndexTable::new(device.device()),

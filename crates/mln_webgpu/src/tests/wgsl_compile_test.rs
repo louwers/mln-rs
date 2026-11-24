@@ -9,6 +9,7 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 
 use crate::Device;
+use crate::gpu::VERTEX_STAGE_STORAGE_BUFFERS;
 use crate::index_table::IndexTable;
 use crate::shaders::shader_program::compile;
 use crate::shaders::shader_source::{BUILT_INS, ShaderSource, prelude};
@@ -78,6 +79,11 @@ fn every_program_compiles() {
                                 compiled.index_group().is_some(),
                                 text.into_iter().flatten().any(|text| text.contains("globalIndex")),
                                 "{} binds globalIndex in a group of its own",
+                                program.name
+                            );
+                            assert!(
+                                compiled.vertex_storage_buffers() <= VERTEX_STAGE_STORAGE_BUFFERS,
+                                "{}'s vertex stage reads more than VERTEX_STAGE_STORAGE_BUFFERS storage buffers",
                                 program.name
                             );
                         }
