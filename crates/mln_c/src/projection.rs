@@ -94,6 +94,7 @@ fn map_view(view: &mln_map_view) -> Result<MapView, Error> {
             constrain_mode: constrain_mode(viewport.constrain_mode)?,
             viewport_mode: viewport_mode(viewport.viewport_mode)?,
             frustum_offset: geo::edge_insets(viewport.frustum_offset, "view frustum offset")?,
+            center_clamped_to_ground: viewport.center_clamped_to_ground,
         },
         projection: projection_definition(&view.projection)?,
     })
@@ -162,6 +163,7 @@ pub(crate) fn from_map_view(view: &MapView) -> mln_map_view {
                 ViewportMode::FlippedY => MLN_VIEWPORT_MODE_FLIPPED_Y,
             },
             frustum_offset: geo::from_edge_insets(viewport.frustum_offset),
+            center_clamped_to_ground: viewport.center_clamped_to_ground,
         },
         projection: mln_projection_definition {
             from: from_projection_type(view.projection.from),
@@ -178,36 +180,21 @@ pub(crate) fn from_map_view(view: &MapView) -> mln_map_view {
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
 pub(crate) unsafe extern "C" fn mln_map_projection_create(
+    map: mln_map,
     view: *const mln_map_view,
     out_projection: *mut mln_map_projection,
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
     export!(out_diagnostic, {
-        // SAFETY: the caller's contract.
-        let view = unsafe { abi::read_sized(view) }?;
-        // SAFETY: the caller's contract.
-        let out_projection = unsafe { handles::out_handle(out_projection, "out_projection") }?;
-        let projection = MapProjection::from_view(&map_view(&view)?)?;
-        *out_projection = PROJECTIONS.insert(Arc::new(Mutex::new(projection)))?;
-        Ok(())
-    })
-}
-
-/// `mln_map_create_projection()`.
-///
-/// # Safety
-///
-/// Each pointer is null or valid for the header's use of it.
-#[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn mln_map_create_projection(
-    map: mln_map,
-    out_projection: *mut mln_map_projection,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    export!(out_diagnostic, {
+        let view = if view.is_null() {
+            None
+        } else {
+            // SAFETY: non-null, and the caller's contract.
+            Some(map_view(&unsafe { abi::read_sized(view) }?)?)
+        };
         // SAFETY: the caller's contract.
         let out_projection = unsafe { handles::out_handle(out_projection, "out_projection") }?;
-        let projection = crate::map::resolve(map)?.map.projection()?;
+        let projection = crate::map::resolve(map)?.map.projection(view.as_ref())?;
         *out_projection = PROJECTIONS.insert(Arc::new(Mutex::new(projection)))?;
         Ok(())
     })
@@ -600,15 +587,26 @@ mod tests {
                 constrain_mode: MLN_CONSTRAIN_MODE_HEIGHT_ONLY,
                 viewport_mode: MLN_VIEWPORT_MODE_DEFAULT,
                 frustum_offset: NO_INSETS,
+                center_clamped_to_ground: true,
             },
             projection: mln_projection_definition { from: 0, to: 0, transition: 0.0 },
         }
     }
 
+    /// A map for the projections of views, which lives as long as the
+    /// tests' process.
+    fn map() -> mln_map {
+        static MAP: std::sync::OnceLock<mln_map> = std::sync::OnceLock::new();
+        *MAP.get_or_init(|| {
+            crate::map::tests::create_map(crate::runtime::tests::create(), &crate::map::tests::options(1.0))
+        })
+    }
+
     fn create(view: &mln_map_view) -> mln_map_projection {
         let mut projection = handles::NULL;
         // SAFETY: locals, and a null diagnostic.
-        assert_eq!(unsafe { mln_map_projection_create(view, &raw mut projection, NULL_DIAGNOSTIC) }, MLN_STATUS_OK);
+        let status = unsafe { mln_map_projection_create(map(), view, &raw mut projection, NULL_DIAGNOSTIC) };
+        assert_eq!(status, MLN_STATUS_OK);
         projection
     }
 
@@ -761,7 +759,8 @@ mod tests {
             let mut out = diagnostic();
             let mut projection = handles::NULL;
             // SAFETY: locals.
-            let status = unsafe { mln_map_projection_create(&raw const view, &raw mut projection, &raw mut *out) };
+            let status =
+                unsafe { mln_map_projection_create(map(), &raw const view, &raw mut projection, &raw mut *out) };
             assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT, "{name}");
             assert!(message(&out).contains(expected), "{name}: {}", message(&out));
             assert_eq!(projection, handles::NULL);
@@ -770,12 +769,14 @@ mod tests {
         // SAFETY: locals, and null pointers.
         unsafe {
             assert_eq!(
-                mln_map_projection_create(&view(), &raw mut occupied, NULL_DIAGNOSTIC),
+                mln_map_projection_create(map(), &view(), &raw mut occupied, NULL_DIAGNOSTIC),
                 MLN_STATUS_INVALID_ARGUMENT
             );
             assert_eq!(occupied, 1);
-            let status = mln_map_projection_create(core::ptr::null(), &mut 0, NULL_DIAGNOSTIC);
+            let mut unmade = handles::NULL;
+            let status = mln_map_projection_create(handles::NULL, &view(), &raw mut unmade, NULL_DIAGNOSTIC);
             assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
+            assert_eq!(unmade, handles::NULL);
         }
     }
 
@@ -942,10 +943,11 @@ mod tests {
         }
     }
 
-    /// Without terrain, a map's projection converts as its snapshot's view
-    /// does and has no ground to read. It outlives the map.
+    /// A projection without a view converts for the map's current view, as
+    /// one of its snapshot's view does; without terrain it has no ground to
+    /// read. It outlives the map, which it needs to be created.
     #[test]
-    fn a_maps_projection_converts_as_its_view_without_terrain() {
+    fn a_projection_without_a_view_converts_for_the_maps_view() {
         use crate::map::tests::{create_map, options, release_map};
         use crate::runtime::tests::{create as create_runtime, release as release_runtime};
 
@@ -953,14 +955,19 @@ mod tests {
         let map = create_map(runtime, &options(1.0));
         let mut from_map = handles::NULL;
         // SAFETY: a local output and a null diagnostic.
-        assert_eq!(unsafe { mln_map_create_projection(map, &raw mut from_map, NULL_DIAGNOSTIC) }, MLN_STATUS_OK);
+        let status = unsafe { mln_map_projection_create(map, core::ptr::null(), &raw mut from_map, NULL_DIAGNOSTIC) };
+        assert_eq!(status, MLN_STATUS_OK);
         // SAFETY: zeros are a valid snapshot to overwrite.
         let mut snapshot: crate::generated::types::mln_map_snapshot = unsafe { core::mem::zeroed() };
         snapshot.size = size_of_val(&snapshot) as u32;
         // SAFETY: a local snapshot.
         let status = unsafe { crate::map::mln_map_get_snapshot(map, &raw mut snapshot, NULL_DIAGNOSTIC) };
         assert_eq!(status, MLN_STATUS_OK);
-        let from_view = create(&snapshot.view);
+        let mut from_view = handles::NULL;
+        // SAFETY: locals, and a null diagnostic.
+        let status =
+            unsafe { mln_map_projection_create(map, &raw const snapshot.view, &raw mut from_view, NULL_DIAGNOSTIC) };
+        assert_eq!(status, MLN_STATUS_OK);
         for (latitude, longitude) in [(0.0, 0.0), (10.0, 20.0), (-30.0, -100.0)] {
             let (expected, actual) = (pixel(from_view, latitude, longitude), pixel(from_map, latitude, longitude));
             assert!((expected.x - actual.x).abs() < 1e-9 && (expected.y - actual.y).abs() < 1e-9, "{actual:?}");
@@ -975,9 +982,11 @@ mod tests {
         release_runtime(runtime);
         assert_eq!(camera(from_map).map(|camera| camera.zoom), Ok(snapshot.view.camera.zoom));
         let mut after = handles::NULL;
-        // SAFETY: a local output and a null diagnostic.
-        let status = unsafe { mln_map_create_projection(map, &raw mut after, NULL_DIAGNOSTIC) };
-        assert_eq!(status, MLN_STATUS_INVALID_STATE);
+        for view in [core::ptr::null(), &raw const snapshot.view] {
+            // SAFETY: locals, and a null diagnostic.
+            let status = unsafe { mln_map_projection_create(map, view, &raw mut after, NULL_DIAGNOSTIC) };
+            assert_eq!(status, MLN_STATUS_INVALID_STATE);
+        }
         assert_eq!(after, handles::NULL);
         mln_map_projection_release(from_map);
         mln_map_projection_release(from_view);

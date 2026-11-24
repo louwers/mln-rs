@@ -75,15 +75,6 @@ static void every_option_command_round_trips_through_the_snapshot(void) {
     );
     TEST_ASSERT_EQUAL(free_bearing, snapshot.globe_free_bearing_enabled);
     TEST_ASSERT_FALSE(snapshot.globe_rendering);
-    // On by default, so the first pass turns it off.
-    const bool clamped = pass != 0;
-    COMMIT(
-      "center clamped to ground",
-      mln_map_set_center_clamped_to_ground_enabled(
-        map, clamped, &completion.descriptor, NULL
-      )
-    );
-    TEST_ASSERT_EQUAL(clamped, snapshot.center_clamped_to_ground_enabled);
   }
 
   static const struct {
@@ -150,6 +141,25 @@ static void every_option_command_round_trips_through_the_snapshot(void) {
     &viewport.frustum_offset, &snapshot.view.viewport.frustum_offset,
     sizeof(viewport.frustum_offset)
   );
+  // On by default, so the first pass turns it off. The frustum offset stays.
+  TEST_ASSERT_TRUE(snapshot.view.viewport.center_clamped_to_ground);
+  for (size_t pass = 0; pass < 2; pass += 1) {
+    const bool clamped = pass != 0;
+    mln_map_viewport_options clamp = {
+      .size = sizeof(mln_map_viewport_options),
+      .fields = MLN_MAP_VIEWPORT_OPTION_CENTER_CLAMPED_TO_GROUND,
+      .center_clamped_to_ground = clamped,
+    };
+    COMMIT(
+      "center clamped to ground",
+      mln_map_set_viewport_options(map, &clamp, &completion.descriptor, NULL)
+    );
+    TEST_ASSERT_EQUAL(clamped, snapshot.view.viewport.center_clamped_to_ground);
+    TEST_ASSERT_EQUAL_MEMORY(
+      &viewport.frustum_offset, &snapshot.view.viewport.frustum_offset,
+      sizeof(viewport.frustum_offset)
+    );
+  }
 
   // The engine's default is 60 degrees, which it keeps in radians.
   TEST_ASSERT_DOUBLE_WITHIN(1e-9, 60.0, snapshot.tile.lod_pitch_threshold);
@@ -443,9 +453,6 @@ static void option_descriptors_reject_what_they_cannot_express(void) {
     MLN_HANDLE_NULL, true, &discard, NULL
   ));
   MLN_TEST_INVALID(mln_map_set_globe_free_bearing_enabled(
-    MLN_HANDLE_NULL, true, &discard, NULL
-  ));
-  MLN_TEST_INVALID(mln_map_set_center_clamped_to_ground_enabled(
     MLN_HANDLE_NULL, true, &discard, NULL
   ));
   MLN_TEST_INVALID(mln_map_dump_debug_logs(MLN_HANDLE_NULL, &discard, NULL));

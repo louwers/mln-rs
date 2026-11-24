@@ -60,11 +60,11 @@ static mln_render_frame_result render_update(
 }
 
 static mln_screen_point pixel_for(
-  const mln_map_view* view, mln_lat_lng coordinate
+  mln_map map, const mln_map_view* view, mln_lat_lng coordinate
 ) {
   mln_map_projection projection = MLN_HANDLE_NULL;
   MLN_TEST_OK_MESSAGE(
-    mln_map_projection_create(view, &projection, MLN_TEST_DIAGNOSTIC),
+    mln_map_projection_create(map, view, &projection, MLN_TEST_DIAGNOSTIC),
     mln_test_last_error()
   );
   mln_screen_point point = {0};
@@ -188,9 +188,10 @@ static double degrees(double pixels, double zoom) {
 // Expects `view` to place the dot within a pixel of `drawn`, and inverse
 // conversion to preserve the visible world copy.
 static void expect_matches(
-  const mln_map_view* view, const view_row* row, mln_screen_point drawn
+  mln_map map, const mln_map_view* view, const view_row* row,
+  mln_screen_point drawn
 ) {
-  const mln_screen_point projected = pixel_for(view, dot);
+  const mln_screen_point projected = pixel_for(map, view, dot);
   TEST_ASSERT_DOUBLE_WITHIN_MESSAGE(1.0, drawn.x, projected.x, row->label);
   TEST_ASSERT_DOUBLE_WITHIN_MESSAGE(1.0, drawn.y, projected.y, row->label);
   if (!row->world_copy) return;
@@ -198,7 +199,7 @@ static void expect_matches(
     .latitude = dot.latitude,
     .longitude = dot.longitude + 360.0 * round(row->longitude_offset / 360.0),
   };
-  const mln_screen_point unwrapped_projected = pixel_for(view, visible_dot);
+  const mln_screen_point unwrapped_projected = pixel_for(map, view, visible_dot);
   TEST_ASSERT_DOUBLE_WITHIN_MESSAGE(
     1.0, drawn.x, unwrapped_projected.x, row->label
   );
@@ -206,7 +207,7 @@ static void expect_matches(
     1.0, drawn.y, unwrapped_projected.y, row->label
   );
   mln_map_projection projection = MLN_HANDLE_NULL;
-  MLN_TEST_OK(mln_map_projection_create(view, &projection, NULL));
+  MLN_TEST_OK(mln_map_projection_create(map, view, &projection, NULL));
   mln_lat_lng unwrapped = {0};
   MLN_TEST_OK(mln_map_projection_lat_lng_for_pixel_unwrapped(
     projection, drawn, &unwrapped, NULL
@@ -294,7 +295,7 @@ static void a_frame_view_places_coordinates_where_the_frame_drew_them(void) {
     mln_test_render_until_idle(runtime, map, &fixture);
     const mln_render_frame_result frame = render_frame(&fixture, index + 1);
     drawn[index] = drawn_dot(&fixture, row->label);
-    expect_matches(&frame.view, row, drawn[index]);
+    expect_matches(map, &frame.view, row, drawn[index]);
     views[index] = frame.view;
     TEST_ASSERT_DOUBLE_WITHIN_MESSAGE(
       1e-9, row->zoom, frame.view.camera.zoom, row->label
@@ -339,7 +340,7 @@ static void a_frame_view_places_coordinates_where_the_frame_drew_them(void) {
   TEST_ASSERT_EQUAL_UINT32(48, later.view.extent.width);
   TEST_ASSERT_EQUAL_UINT32(32, later.view.extent.height);
   for (size_t index = 0; index < row_count; index += 1) {
-    expect_matches(&views[index], &rows[index], drawn[index]);
+    expect_matches(map, &views[index], &rows[index], drawn[index]);
   }
 
   mln_test_render_fixture_destroy(&fixture);
@@ -379,7 +380,9 @@ static void each_frame_of_a_transition_reports_its_own_view(void) {
   for (uint64_t token = 1;
        distinct_views < 3 && !mln_test_deadline_passed(deadline); token += 1) {
     const mln_render_frame_result frame = render_update(&fixture, token);
-    expect_matches(&frame.view, &rows[0], drawn_dot(&fixture, rows[0].label));
+    expect_matches(
+      map, &frame.view, &rows[0], drawn_dot(&fixture, rows[0].label)
+    );
     if (
       frame.view.camera.center.latitude != previous.camera.center.latitude ||
       frame.view.camera.center.longitude != previous.camera.center.longitude

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use ::mln_map::{MapMode, MapSnapshot};
+use ::mln_map::{MapMode, MapSnapshot, TerrainOptions, TerrainSkirtLength};
 use ::mln_runtime::{Applied, EventMask, FeatureState, FeatureStateSelector, MapOptions};
 use feature::{Identifier, Value};
 use mln_util::geo::LatLngBounds;
@@ -16,10 +16,12 @@ use crate::generated::types::{
     MLN_FEATURE_ID_TYPE_DOUBLE, MLN_FEATURE_ID_TYPE_INT, MLN_FEATURE_ID_TYPE_STRING, MLN_FEATURE_ID_TYPE_UINT,
     MLN_FEATURE_STATE_SELECTOR_FEATURE_ID, MLN_MAP_MODE_CONTINUOUS, MLN_MAP_MODE_STATIC, MLN_MAP_MODE_TILE,
     MLN_MAP_OPTION_EVENT_MASK, MLN_MAP_OPTION_LOCAL_IDEOGRAPHS_ENABLED, MLN_MAP_OPTION_SYSTEM_FONTS_ENABLED,
-    MLN_MAP_OPTION_TILE_CACHE_ENABLED, MLN_TILE_LOD_MODE_DEFAULT, MLN_TILE_LOD_MODE_DISTANCE, mln_buffer_view,
-    mln_camera_bounds, mln_completion, mln_diagnostic, mln_feature_state_selector, mln_free_camera, mln_lat_lng_bounds,
-    mln_logical_extent, mln_map, mln_map_options, mln_map_snapshot, mln_map_tile_settings, mln_quaternion, mln_runtime,
-    mln_runtime_event_flags, mln_status, mln_vec3,
+    MLN_MAP_OPTION_TERRAIN_DRAPE_MEMORY_LIMIT, MLN_MAP_OPTION_TERRAIN_SKIRT_LENGTH, MLN_MAP_OPTION_TILE_CACHE_ENABLED,
+    MLN_TERRAIN_SKIRT_LENGTH_AUTO, MLN_TERRAIN_SKIRT_LENGTH_NONE, MLN_TILE_LOD_MODE_DEFAULT,
+    MLN_TILE_LOD_MODE_DISTANCE, mln_buffer_view, mln_camera_bounds, mln_completion, mln_diagnostic,
+    mln_feature_state_selector, mln_free_camera, mln_lat_lng_bounds, mln_logical_extent, mln_map, mln_map_options,
+    mln_map_snapshot, mln_map_tile_settings, mln_quaternion, mln_runtime, mln_runtime_event_flags, mln_status,
+    mln_vec3,
 };
 use crate::handles::{self, HandleKind, HandleTable};
 use crate::runtime::{self, MapHandles};
@@ -133,7 +135,9 @@ unsafe fn map_options(options: *const mln_map_options) -> Result<(MapOptions, f6
         MLN_MAP_OPTION_EVENT_MASK
             | MLN_MAP_OPTION_TILE_CACHE_ENABLED
             | MLN_MAP_OPTION_SYSTEM_FONTS_ENABLED
-            | MLN_MAP_OPTION_LOCAL_IDEOGRAPHS_ENABLED,
+            | MLN_MAP_OPTION_LOCAL_IDEOGRAPHS_ENABLED
+            | MLN_MAP_OPTION_TERRAIN_SKIRT_LENGTH
+            | MLN_MAP_OPTION_TERRAIN_DRAPE_MEMORY_LIMIT,
         "mln_map_options.fields",
     )?;
     let event_mask = match fields.get(MLN_MAP_OPTION_EVENT_MASK, options.event_mask) {
@@ -150,6 +154,16 @@ unsafe fn map_options(options: *const mln_map_options) -> Result<(MapOptions, f6
         MLN_MAP_MODE_TILE => MapMode::Tile,
         _ => MapMode::Continuous,
     };
+    let mut terrain = TerrainOptions::default();
+    if let Some(length) = fields.get(MLN_MAP_OPTION_TERRAIN_SKIRT_LENGTH, options.terrain_skirt_length) {
+        let range = MLN_TERRAIN_SKIRT_LENGTH_AUTO..=MLN_TERRAIN_SKIRT_LENGTH_NONE;
+        terrain.skirt_length = match abi::enum_value(length, range, "terrain_skirt_length")? {
+            MLN_TERRAIN_SKIRT_LENGTH_NONE => TerrainSkirtLength::None,
+            _ => TerrainSkirtLength::Auto,
+        };
+    }
+    terrain.drape_memory_limit =
+        fields.get(MLN_MAP_OPTION_TERRAIN_DRAPE_MEMORY_LIMIT, options.terrain_drape_memory_limit);
     // SAFETY: the caller's contract.
     let faces = unsafe { buffer::text(options.fallback_font_faces, "mln_map_options.fallback_font_faces") }?;
     let fallback_font_faces = if faces.is_empty() {
@@ -170,6 +184,7 @@ unsafe fn map_options(options: *const mln_map_options) -> Result<(MapOptions, f6
             size: Size::new(extent.width, extent.height),
             pixel_ratio: extent.scale_factor as f32,
             fast_pfor_enabled: options.fast_pfor_enabled,
+            terrain,
             ..Default::default()
         },
         event_mask,
@@ -338,7 +353,6 @@ fn from_snapshot(snapshot: &MapSnapshot, event_mask: mln_runtime_event_flags) ->
         view: projection::from_map_view(&snapshot.view),
         globe_rendering: snapshot.globe_rendering,
         globe_free_bearing_enabled: snapshot.globe_free_bearing,
-        center_clamped_to_ground_enabled: snapshot.center_clamped_to_ground,
     }
 }
 
@@ -810,26 +824,42 @@ pub(crate) mod tests {
         release(runtime);
     }
 
+    /// The viewport's clamp is on by default, and changes only with its bit.
     #[test]
-    fn the_center_clamp_is_on_until_its_setter_turns_it_off() {
+    fn the_center_clamp_is_on_until_the_viewport_options_turn_it_off() {
         let runtime = create();
         let map = create_map(runtime, &options(1.0));
-        assert!(snapshot(map).center_clamped_to_ground_enabled);
-        for enabled in [false, true] {
+        let before = snapshot(map).view.viewport;
+        assert!(before.center_clamped_to_ground);
+        let set = |fields, clamped| {
+            let options = crate::generated::types::mln_map_viewport_options {
+                size: size_of::<crate::generated::types::mln_map_viewport_options>() as u32,
+                fields,
+                center_clamped_to_ground: clamped,
+                // SAFETY: zeros are valid for the members without bits.
+                ..unsafe { core::mem::zeroed() }
+            };
             let waiter = Waiter::new();
-            // SAFETY: a local completion.
+            // SAFETY: local options and completion.
             let status = unsafe {
-                crate::camera::mln_map_set_center_clamped_to_ground_enabled(
+                crate::camera::mln_map_set_viewport_options(
                     map,
-                    enabled,
+                    &raw const options,
                     &raw const waiter.descriptor,
                     NO_DIAGNOSTIC,
                 )
             };
             assert_eq!(status, MLN_STATUS_OK);
             assert_eq!(waiter.status(), MLN_STATUS_OK);
-            assert_eq!(snapshot(map).center_clamped_to_ground_enabled, enabled);
-        }
+            snapshot(map).view.viewport
+        };
+        let bit = crate::generated::types::MLN_MAP_VIEWPORT_OPTION_CENTER_CLAMPED_TO_GROUND;
+        let off = set(bit, false);
+        assert!(!off.center_clamped_to_ground);
+        assert_eq!(off.constrain_mode, before.constrain_mode);
+        assert_eq!(off.north_orientation, before.north_orientation);
+        assert!(!set(0, true).center_clamped_to_ground);
+        assert!(set(bit, true).center_clamped_to_ground);
         release_map(map);
         release(runtime);
     }
@@ -846,6 +876,14 @@ pub(crate) mod tests {
             (mln_map_options { fields: 1 << 9, ..options(1.0) }, "mln_map_options.fields"),
             (mln_map_options { fields: MLN_MAP_OPTION_EVENT_MASK, event_mask: 1, ..options(1.0) }, "event_mask"),
             (mln_map_options { fallback_font_faces: view("{}"), ..options(1.0) }, "fallback_font_faces is invalid"),
+            (
+                mln_map_options {
+                    fields: MLN_MAP_OPTION_TERRAIN_SKIRT_LENGTH,
+                    terrain_skirt_length: 9,
+                    ..options(1.0)
+                },
+                "terrain_skirt_length",
+            ),
         ] {
             // SAFETY: local arguments.
             let status = unsafe {
@@ -864,6 +902,27 @@ pub(crate) mod tests {
         // SAFETY: the rejected calls left the user data with the caller.
         unsafe { (waiter.descriptor.release_user_data.unwrap())(waiter.descriptor.user_data) };
         release(runtime);
+    }
+
+    /// Each terrain option is read only with its bit, and otherwise takes
+    /// the map's default.
+    #[test]
+    fn terrain_options_take_the_defaults_without_their_bits() {
+        let read = |options: mln_map_options| {
+            // SAFETY: local options without views.
+            let (options, _) = unsafe { map_options(&raw const options) }.unwrap();
+            options.map.terrain
+        };
+        let garbage = mln_map_options { terrain_skirt_length: 9, terrain_drape_memory_limit: 1, ..options(1.0) };
+        assert_eq!(read(garbage), TerrainOptions::default());
+        let set = mln_map_options {
+            fields: MLN_MAP_OPTION_TERRAIN_SKIRT_LENGTH | MLN_MAP_OPTION_TERRAIN_DRAPE_MEMORY_LIMIT,
+            terrain_skirt_length: MLN_TERRAIN_SKIRT_LENGTH_NONE,
+            terrain_drape_memory_limit: 1 << 20,
+            ..options(1.0)
+        };
+        let expected = TerrainOptions { skirt_length: TerrainSkirtLength::None, drape_memory_limit: Some(1 << 20) };
+        assert_eq!(read(set), expected);
     }
 
     #[test]

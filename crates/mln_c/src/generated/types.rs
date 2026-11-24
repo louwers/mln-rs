@@ -995,6 +995,7 @@ pub const MLN_MAP_VIEWPORT_OPTION_NORTH_ORIENTATION: mln_map_viewport_option_fie
 pub const MLN_MAP_VIEWPORT_OPTION_CONSTRAIN_MODE: mln_map_viewport_option_field = 2;
 pub const MLN_MAP_VIEWPORT_OPTION_VIEWPORT_MODE: mln_map_viewport_option_field = 4;
 pub const MLN_MAP_VIEWPORT_OPTION_FRUSTUM_OFFSET: mln_map_viewport_option_field = 8;
+pub const MLN_MAP_VIEWPORT_OPTION_CENTER_CLAMPED_TO_GROUND: mln_map_viewport_option_field = 16;
 /// The fields that mln_map_viewport_options sets.
 pub type mln_map_viewport_option_field = u32;
 /// A set of mln_map_viewport_option_field bits.
@@ -1023,6 +1024,16 @@ pub const MLN_MAP_MODE_STATIC: mln_map_mode = 1;
 pub const MLN_MAP_MODE_TILE: mln_map_mode = 2;
 /// When a map renders.
 pub type mln_map_mode = u32;
+/// A fifth of a tile's width at the map's zoom.
+pub const MLN_TERRAIN_SKIRT_LENGTH_AUTO: mln_terrain_skirt_length = 0;
+/// No skirts.
+pub const MLN_TERRAIN_SKIRT_LENGTH_NONE: mln_terrain_skirt_length = 1;
+/** How far the skirts that hang from the edges of terrain tiles reach down.
+
+ Skirts hide the cracks where the edges of neighboring terrain tiles don't
+ meet, and show through where the layers draped over the terrain are
+ translucent.*/
+pub type mln_terrain_skirt_length = u32;
 /// A size in logical pixels, and the physical pixels in each logical pixel.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -1042,6 +1053,8 @@ pub const MLN_MAP_OPTION_EVENT_MASK: mln_map_option_field = 1;
 pub const MLN_MAP_OPTION_TILE_CACHE_ENABLED: mln_map_option_field = 2;
 pub const MLN_MAP_OPTION_SYSTEM_FONTS_ENABLED: mln_map_option_field = 4;
 pub const MLN_MAP_OPTION_LOCAL_IDEOGRAPHS_ENABLED: mln_map_option_field = 8;
+pub const MLN_MAP_OPTION_TERRAIN_SKIRT_LENGTH: mln_map_option_field = 16;
+pub const MLN_MAP_OPTION_TERRAIN_DRAPE_MEMORY_LIMIT: mln_map_option_field = 32;
 /// The fields that mln_map_options sets.
 pub type mln_map_option_field = u32;
 /// A set of mln_map_option_field bits.
@@ -1087,6 +1100,14 @@ pub struct mln_map_options {
  from a glyph PBF downloaded for every few characters. Without it, they
  do.*/
     pub local_ideographs_enabled: bool,
+    /** The skirts of the style's terrain. Without it,
+ MLN_TERRAIN_SKIRT_LENGTH_AUTO.*/
+    pub terrain_skirt_length: mln_terrain_skirt_length,
+    /** The most bytes of GPU memory that the textures the terrain drapes the
+ style's layers onto take. Past it, the drapes of the tiles farthest from
+ the center of the view take fewer texels and look blurrier; no tile loses
+ its drape. Without it, the drapes take what the view's tiles need.*/
+    pub terrain_drape_memory_limit: u64,
 }
 /// A point on the screen, in logical pixels from the map's top-left corner.
 #[repr(C)]
@@ -1567,6 +1588,13 @@ pub struct mln_map_viewport_options {
     pub constrain_mode: mln_constrain_mode,
     pub viewport_mode: mln_viewport_mode,
     pub frustum_offset: mln_edge_insets,
+    /** Whether the camera's center stands on the terrain. When it's on, the
+ default, the center stands on the ground under it once that ground has
+ loaded, and the camera ignores the center altitude it is given, including
+ the style's. When it's off, the camera keeps the center altitude it is
+ given. Either way, a camera command keeps the camera above the ground. It
+ changes nothing on a map without terrain.*/
+    pub center_clamped_to_ground: bool,
 }
 /** A map's whole viewport.
 
@@ -1578,6 +1606,7 @@ pub struct mln_map_viewport {
     pub constrain_mode: mln_constrain_mode,
     pub viewport_mode: mln_viewport_mode,
     pub frustum_offset: mln_edge_insets,
+    pub center_clamped_to_ground: bool,
 }
 pub const MLN_PROJECTION_TYPE_MERCATOR: mln_projection_type = 0;
 /// Draws the map as a globe.
@@ -1757,8 +1786,6 @@ pub struct mln_map_snapshot {
     pub globe_rendering: bool,
     /// The setting from mln_map_set_globe_free_bearing_enabled().
     pub globe_free_bearing_enabled: bool,
-    /// The setting from mln_map_set_center_clamped_to_ground_enabled().
-    pub center_clamped_to_ground_enabled: bool,
 }
 /// A map's camera, with the snapshot generation that it matches.
 #[repr(C)]
