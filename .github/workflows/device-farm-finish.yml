@@ -83,6 +83,7 @@ jobs:
         if: ${{ !cancelled() && steps.run.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
+          ARN: ${{ steps.run.outputs.arn }}
           SHA: ${{ steps.run.outputs.sha }}
           RESULT: ${{ steps.run.outputs.result }}
           RUN_URL:
@@ -96,6 +97,7 @@ jobs:
           esac
           gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state="$state" \
             -f context="$STATUS_CONTEXT" -f description="$description" -f target_url="$RUN_URL"
+          echo "[The run in the AWS console]($(tools/device-farm/console-url.sh "$ARN"))" >> "$GITHUB_STEP_SUMMARY"
 
   # Each phone's test results, from the output that the code under test wrote,
   # so without credentials.
