@@ -70,7 +70,9 @@ fn shared_instance(backends: wgpu::Backends) -> wgpu::Instance {
 /// What the library's device is made with: the WebGPU default limits,
 /// lowered to what `adapter` supports (the Metal of the iOS, tvOS and
 /// visionOS simulators allows fewer inter-stage shader variables than they
-/// ask), and 32-bit float depth with stencil where `adapter` has it. A
+/// ask), with textures as large as `adapter` takes, so that a frame is as
+/// large as on the other backends, and 32-bit float depth with stencil
+/// where `adapter` has it. A
 /// benchmark that measures the render passes also asks for pipeline
 /// statistics and timestamp queries (`bench::features`).
 fn device_descriptor(adapter: &wgpu::Adapter) -> wgpu::DeviceDescriptor<'static> {
@@ -80,10 +82,14 @@ fn device_descriptor(adapter: &wgpu::Adapter) -> wgpu::DeviceDescriptor<'static>
     {
         features |= crate::bench::features();
     }
+    let limits = adapter.limits();
     wgpu::DeviceDescriptor {
         label: Some("MapLibre WebGPU Device"),
         required_features: adapter.features() & features,
-        required_limits: wgpu::Limits::default().or_worse_values_from(&adapter.limits()),
+        required_limits: wgpu::Limits {
+            max_texture_dimension_2d: limits.max_texture_dimension_2d,
+            ..wgpu::Limits::default().or_worse_values_from(&limits)
+        },
         ..Default::default()
     }
 }
