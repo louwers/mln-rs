@@ -750,13 +750,11 @@ impl<'a> TileMut<'a> {
     /// tile itself, takes its data from that, as that load's answer, instead
     /// of loading it again.
     fn take_in_memory(&mut self) -> bool {
-        let Some(origin) = &mut self.source.origin else {
+        let (Some(origin), OriginLoad::Tileset(tileset)) = (&mut self.source.origin, &mut self.tile.load.origin) else {
             return false;
         };
-        let Some((data, fetched, held)) = origin.in_memory(&self.tile.id, mln_util::chrono::now()) else {
-            return false;
-        };
-        let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin else {
+        let now = mln_util::chrono::now();
+        let Some((data, fetched, held)) = origin.in_memory(&self.tile.id, &tileset.resource.url, now) else {
             return false;
         };
         let Fetched { modified, caching, etag } = fetched;
@@ -798,11 +796,12 @@ impl<'a> TileMut<'a> {
             if !self.tile.pipeline.is_pending(true) {
                 self.tile.settled = true;
             }
-        } else if let Some(origin) = &mut self.source.origin {
-            let (input, held) = origin.input(self.source.kind, &self.tile.id, res, method == Method::Network);
-            if let OriginLoad::Tileset(tileset) = &mut self.tile.load.origin {
-                tileset.held = held;
-            }
+        } else if let (Some(origin), OriginLoad::Tileset(tileset)) =
+            (&mut self.source.origin, &mut self.tile.load.origin)
+        {
+            let network = method == Method::Network;
+            let (input, held) = origin.input(self.source.kind, &self.tile.id, &tileset.resource.url, res, network);
+            tileset.held = held;
             self.take_input(input);
         }
     }

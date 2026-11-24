@@ -411,6 +411,42 @@ fn a_tile_at_the_last_zoom_and_its_cut_tiles_share_their_data() {
     }
 }
 
+/// A tile cut from an ancestor whose URL differs from the one another tile
+/// loaded, as after a pixel ratio change with `{ratio}` in the URL, loads
+/// its own instead of taking the other's from memory.
+#[test]
+fn a_cut_tile_takes_no_ancestor_of_another_url() {
+    let test = Test::new();
+    let file_source = Arc::new(Held::default());
+    let file_source_dyn: Arc<dyn FileSource> = Arc::<Held>::clone(&file_source);
+    let origin = DataOrigin::Tileset {
+        tileset: Tileset {
+            tiles: vec!["tiles{ratio}".to_owned()],
+            zoom_range: mln_util::range::Range::new(0, 0),
+            ..Default::default()
+        },
+        encoding: VectorTileEncoding::Mvt,
+        file_source: Some(file_source_dyn),
+        ancestors: Ancestors::default(),
+    };
+    let (left, right) = (OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0));
+    let store = tile_store(&test.pool, Box::new(InlineWorkers));
+    let mut tiles = OneTile::with_origin(store, TileKind::Geometry, false, origin, &[left], MapMode::Static);
+    tiles.set_necessity(&left, TileNecessity::Required);
+    file_source.respond(water());
+    tiles.update();
+
+    let params = crate::layout::tile_layout::LayoutParams { pixel_ratio: 2.0, ..tiles.tile_params() };
+    let (source, _) = tiles.store.source_mut(tiles.key).expect("the source");
+    let tile = source.info.new_tile(right, params).expect("a tile");
+    source.insert(tile);
+    tiles.set_necessity(&right, TileNecessity::Required);
+    assert_eq!(file_source.pending(), 1, "the @2x ancestor is requested");
+    let OriginLoad::Tileset(tileset) = &tiles.tile_at(&right).load.origin else { unreachable!() };
+    assert_eq!(tileset.resource.url, "tiles@2x");
+    assert_eq!(tileset.resource.prior_etag, None, "no validators of the 1x response");
+}
+
 /// A tile whose data failed to lay out requests it again when required
 /// again, though the data has no expiry.
 #[test]
