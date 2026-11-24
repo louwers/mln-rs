@@ -188,16 +188,15 @@ typedef enum mln_map_mode : uint32_t {
 } mln_map_mode;
 
 /**
- * How far the skirts that hang from the edges of terrain tiles reach down.
- *
- * Skirts hide the cracks where the edges of neighboring terrain tiles don't
- * meet, and show through where the layers draped over the terrain are
- * translucent.
+ * How far the skirts that hide the cracks between terrain tiles reach down.
  */
 typedef enum mln_terrain_skirt_length : uint32_t {
-  /** A fifth of a tile's width at the map's zoom. */
+  /** Far enough to hide the cracks. */
   MLN_TERRAIN_SKIRT_LENGTH_AUTO = 0,
-  /** No skirts. */
+  /**
+   * No skirts, so they don't show through translucent layers over the
+   * terrain.
+   */
   MLN_TERRAIN_SKIRT_LENGTH_NONE = 1,
 } mln_terrain_skirt_length;
 
@@ -282,15 +281,13 @@ typedef struct mln_map_options {
    */
   bool local_ideographs_enabled
     MLN_BINDING("mask=fields;bit=MLN_MAP_OPTION_LOCAL_IDEOGRAPHS_ENABLED");
-  /** The skirts of the style's terrain. Without it,
-   * MLN_TERRAIN_SKIRT_LENGTH_AUTO. */
+  /** The terrain's skirts. Without it, MLN_TERRAIN_SKIRT_LENGTH_AUTO. */
   mln_terrain_skirt_length terrain_skirt_length
     MLN_BINDING("mask=fields;bit=MLN_MAP_OPTION_TERRAIN_SKIRT_LENGTH");
   /**
-   * The most bytes of GPU memory that the textures the terrain drapes the
-   * style's layers onto take. Past it, the drapes of the tiles farthest from
-   * the center of the view take fewer texels and look blurrier; no tile loses
-   * its drape. Without it, the drapes take what the view's tiles need.
+   * The most GPU memory, in bytes, for the layers drawn over the terrain. Past
+   * it, the terrain farthest from the center of the view looks blurrier.
+   * Without it, there's no limit.
    */
   uint64_t terrain_drape_memory_limit
     MLN_BINDING("mask=fields;bit=MLN_MAP_OPTION_TERRAIN_DRAPE_MEMORY_LIMIT");
@@ -1039,12 +1036,8 @@ typedef struct mln_map_viewport_options {
   mln_edge_insets frustum_offset
     MLN_BINDING("mask=fields;bit=MLN_MAP_VIEWPORT_OPTION_FRUSTUM_OFFSET");
   /**
-   * Whether the camera's center stands on the terrain. When it's on, the
-   * default, the center stands on the ground under it once that ground has
-   * loaded, and the camera ignores the center altitude it is given, including
-   * the style's. When it's off, the camera keeps the center altitude it is
-   * given. Either way, a camera command keeps the camera above the ground. It
-   * changes nothing on a map without terrain.
+   * Whether the camera's center stands on the terrain, in place of the center
+   * altitude it's given, the style's included. On by default.
    */
   bool center_clamped_to_ground MLN_BINDING(
     "mask=fields;bit=MLN_MAP_VIEWPORT_OPTION_CENTER_CLAMPED_TO_GROUND"

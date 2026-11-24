@@ -24,14 +24,10 @@ extern "C" {
  * Creates a projection that converts coordinates as a map does, for one view
  * of it.
  *
- * `view` is the view to convert for, such as the `view` of an
- * mln_render_frame_result, or null for the map's current view, as
- * mln_map_get_snapshot() copies it. Where the map draws terrain, the
- * projection converts on the ground that the map last drew: a screen point
- * converts to the coordinate where its line of sight first meets the ground,
- * and a coordinate to the screen point where it stands on the ground. The
- * projection doesn't follow the map, so create a new one after the map's
- * camera, size, style, or terrain changes, such as after each frame.
+ * `view` is the view to convert for, such as a frame result's, or null for the
+ * map's current view. Over terrain, coordinates convert on the ground that the
+ * map drew. The projection doesn't follow the map, so create a new one after
+ * the map's view or terrain changes.
  *
  * Returns:
  * - MLN_STATUS_INVALID_STATE until mln_runtime_create_map() completes with
@@ -169,31 +165,19 @@ MLN_API mln_status mln_map_projection_lat_lngs_for_pixels_unwrapped(
   mln_diagnostic* out_diagnostic
 ) MLN_NOEXCEPT;
 
-/**
- * The height of the ground at a coordinate, as
- * mln_map_projection_get_terrain_elevation() reports it.
- */
+/** The height of the ground at a coordinate. */
 typedef struct mln_map_projection_terrain_elevation_result {
   uint32_t size;
-  /**
-   * Whether the projection has the ground's height at the coordinate. It has
-   * none on the flat map, and where the map didn't draw the ground, such as
-   * off the screen.
-   */
+  /** Whether the map drew terrain at the coordinate. */
   bool has_elevation;
   /**
-   * The ground's height in meters above sea level, multiplied by the
-   * terrain's exaggeration as the map draws it. It is 0 without
+   * Meters above sea level, with the terrain's exaggeration. 0 without
    * `has_elevation`.
    */
   double elevation_meters;
 } mln_map_projection_terrain_elevation_result;
 
-/**
- * Reads the height of the ground at a coordinate, as the map drew it.
- *
- * Only a projection of a map that draws terrain has a ground to read.
- */
+/** Reads the height of the terrain that the map drew at a coordinate. */
 MLN_API mln_status mln_map_projection_get_terrain_elevation(
   mln_map_projection projection, mln_lat_lng coordinate,
   mln_map_projection_terrain_elevation_result* out_result
