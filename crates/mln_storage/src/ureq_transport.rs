@@ -668,8 +668,10 @@ mod tests {
         let (agents, received) = mpsc::channel();
         std::thread::spawn(move || {
             for response in [
-                "HTTP/1.1 302 Found\r\nLocation: /next\r\nContent-Length: 0\r\n\r\n",
-                "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok",
+                // Each response closes its connection, as the server drops
+                // it, so the client doesn't send the next request down it.
+                "HTTP/1.1 302 Found\r\nLocation: /next\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
             ] {
                 let (mut stream, _) = listener.accept().unwrap();
                 let mut request = Vec::new();
