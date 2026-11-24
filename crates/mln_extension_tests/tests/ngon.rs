@@ -145,3 +145,41 @@ fn a_layer_that_doesnt_collide_draws_in_a_new_world_copy_at_once() {
     fixture.render();
     assert_eq!(RED, pixel(&fixture, 16));
 }
+
+/// Two n-gon layers whose filters are equal but parsed apart share a bucket,
+/// and each draws and is found with its own paint: a blue square of radius 8
+/// under a red one of radius 4.
+#[test]
+fn layers_with_equal_filters_draw_and_query_from_one_bucket() {
+    const BLUE: [u8; 4] = [0, 0, 255, 255];
+    let layer = |id: &str, color: &str, radius: u32| {
+        format!(
+            r#"{{"id":"{id}","type":"org.maplibre.ngon","source":"points",
+            "filter":["==",["get","kind"],"stop"],
+            "paint":{{"ngon-color":"{color}","ngon-radius":{radius},"ngon-corners":4,"ngon-rotate":45}}}}"#
+        )
+    };
+    let (below, above) = (layer("below", "#0000ff", 8), layer("above", "#ff0000", 4));
+    let style = format!(
+        r##"{{"version":8,"transition":{{"duration":0}},
+        "sources":{{"points":{{"type":"geojson","data":{{"type":"Feature","properties":{{"kind":"stop"}},
+            "geometry":{{"type":"Point","coordinates":[0,0]}}}}}}}},
+        "layers":[{{"id":"background","type":"background","paint":{{"background-color":"#ffffff"}}}},{below},{above}]}}"##
+    );
+    let fixture = Fixture::new(registry(), &style);
+    assert_eq!(RED, pixel(&fixture, 0), "the layer above");
+    assert_eq!(BLUE, pixel(&fixture, 4), "the layer below, past the one above");
+    assert_eq!(WHITE, pixel(&fixture, 8));
+
+    let found = |x: f64| {
+        let center = mln_rs::mln_util::geo::ScreenCoordinate::new(f64::from(SIZE.width / 2) + x, 32.0);
+        let geometry = mln_rs::RenderedQueryGeometry::Point(center);
+        let features = wait(fixture.session.query_rendered_features(geometry, mln_rs::RenderedQueryOptions::default()));
+        let mut layers: Vec<String> = features.into_iter().map(|feature| feature.layer).collect();
+        layers.sort();
+        layers
+    };
+    assert_eq!(found(0.0), ["above", "below"]);
+    assert_eq!(found(4.0), ["below"]);
+    assert_eq!(found(8.0), [] as [std::string::String; 0]);
+}
