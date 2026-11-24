@@ -54,31 +54,6 @@ impl Elevation for Flat {
     }
 }
 
-/// Ground whose height alternates between 100 m and 200 m with each read,
-/// on which a camera never settles.
-#[derive(Debug, Default)]
-struct Restless {
-    reads: AtomicU32,
-}
-
-impl Elevation for Restless {
-    fn at(&self, _: LatLng) -> Option<f64> {
-        Some(if self.reads.fetch_add(1, Ordering::SeqCst).is_multiple_of(2) { 100.0 } else { 200.0 })
-    }
-
-    fn min_at(&self, _: LatLng) -> Option<f64> {
-        Some(100.0)
-    }
-
-    fn surface_at(&self, _: DVec2) -> Option<f64> {
-        Some(100.0)
-    }
-
-    fn range(&self) -> Option<(f64, f64)> {
-        Some((100.0, 100.0))
-    }
-}
-
 /// Sea level, with a plateau `height` meters high south of the world's `y`
 /// (Web Mercator at zoom 0), which only the surface shows.
 #[derive(Debug)]
@@ -181,6 +156,12 @@ impl Elevation for Slope {
 
 pub(super) fn flat(height: Option<f64>, min: f64) -> Arc<dyn Elevation> {
     Arc::new(Flat { height, min })
+}
+
+/// The `n`th of a run of grounds that never settles: each is new, 100 m
+/// high for an even `n` and 200 m for an odd one.
+fn restless(n: usize) -> Arc<dyn Elevation> {
+    flat(Some(if n.is_multiple_of(2) { 100.0 } else { 200.0 }), 100.0)
 }
 
 pub(super) fn ground_event(elevation: &Arc<dyn Elevation>) -> RendererEvent {
@@ -336,9 +317,11 @@ fn ground_at_rest_emits_no_camera_events() {
     silent(&mut map, 0.0, "the style's terrain dropped");
 }
 
-/// The map answers each ground the renderer tells of with an update that
-/// carries it, though the camera doesn't move: the renderer completes a
-/// frame only of an update that stands the camera as it does.
+/// The map answers each new ground the renderer tells of with an update
+/// that carries it, though the camera doesn't move: the renderer completes
+/// a frame only of an update that carries its ground. Ground the map
+/// already holds, which the renderer tells of again for an update that was
+/// in flight, gets no update.
 #[test]
 fn each_ground_gets_an_update_that_carries_it() {
     let run_loop = Queue::<()>::new();
@@ -357,9 +340,13 @@ fn each_ground_gets_an_update_that_carries_it() {
         assert_eq!((500.0, Some(300.0)), ground(&map), "{mode:?}: nothing moved");
         assert_eq!(updates + 1, map.update_generation(), "{mode:?}");
         assert!(carries(&map, Some(&same)), "{mode:?}");
+        report(&mut map, ground_event(&same));
+        assert_eq!(updates + 1, map.update_generation(), "{mode:?}: the ground it holds");
 
         report(&mut map, RendererEvent::TerrainElevation(None));
         assert!(carries(&map, None), "{mode:?}");
+        report(&mut map, RendererEvent::TerrainElevation(None));
+        assert_eq!(updates + 2, map.update_generation(), "{mode:?}: no ground again");
     }
 }
 
@@ -492,13 +479,13 @@ fn a_still_image_stops_following_ground_that_never_settles() {
     let run_loop = Queue::<()>::new();
     let mut map = map(MapMode::Static, &run_loop);
     map.render_still().unwrap();
-    let restless: Arc<dyn Elevation> = Arc::new(Restless::default());
     let mut altitudes = Vec::new();
-    for _ in 0..20 {
+    for n in 0..20 {
         let updates = map.update_generation();
-        report(&mut map, ground_event(&restless));
+        let ground_ = restless(n);
+        report(&mut map, ground_event(&ground_));
         assert_eq!(updates + 1, map.update_generation(), "an answer to each");
-        assert!(carries(&map, Some(&restless)));
+        assert!(carries(&map, Some(&ground_)));
         altitudes.push(ground(&map).0);
     }
     let mut moves = [100.0, 200.0].repeat(4);
@@ -509,6 +496,7 @@ fn a_still_image_stops_following_ground_that_never_settles() {
 
     // The next still image follows the ground again.
     map.render_still().unwrap();
+    report(&mut map, ground_event(&restless(0)));
     assert_eq!(100.0, ground(&map).0);
 }
 
@@ -541,9 +529,8 @@ fn the_camera_returns_to_sea_level_after_a_still_image_used_its_moves() {
     let run_loop = Queue::<()>::new();
     let mut map = map(MapMode::Static, &run_loop);
     map.render_still().unwrap();
-    let restless: Arc<dyn Elevation> = Arc::new(Restless::default());
-    for _ in 0..10 {
-        report(&mut map, ground_event(&restless));
+    for n in 0..10 {
+        report(&mut map, ground_event(&restless(n)));
     }
     assert!(ground(&map).0 > 0.0);
     report(&mut map, RendererEvent::TerrainElevation(None));

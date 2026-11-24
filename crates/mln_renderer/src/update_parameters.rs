@@ -51,9 +51,9 @@ pub struct UpdateParameters {
     pub terrain_skirt_length: TerrainSkirtLength,
     /// The terrain's ground that `view` stands on: the snapshot of it that
     /// the renderer last reported ([`RendererEvent::TerrainElevation`]) and
-    /// the map applied, or `None`. A frame is complete only when this gives
-    /// the same height and floor at the view's center as the renderer's
-    /// current snapshot, or both are `None`. A still image draws no other.
+    /// the map applied, or `None`. A frame is complete only when this is the
+    /// renderer's current snapshot, the same `Arc`, or both are `None`. A
+    /// still image draws no other.
     ///
     /// [`RendererEvent::TerrainElevation`]: crate::RendererEvent::TerrainElevation
     pub elevation: Option<Arc<dyn Elevation>>,

@@ -287,8 +287,6 @@ struct TerrainLoad {
     /// Whether the last update's camera stood on the terrain's current
     /// ground.
     grounded: bool,
-    /// Whether a gesture or a command moves the updates' camera.
-    camera_moving: bool,
 }
 
 impl TerrainLoad {
@@ -323,7 +321,6 @@ impl TerrainLoad {
             events: Vec::new(),
             seen: None,
             grounded: false,
-            camera_moving: false,
         }
     }
 
@@ -339,7 +336,6 @@ impl TerrainLoad {
         crate::tests::update(&mut self.store);
         let parameters = UpdateParameters {
             elevation: self.seen.clone(),
-            camera_moving: self.camera_moving,
             ..update_parameters(self.style.clone(), &self.transform, MapMode::Static)
         };
         let (store, render_source) = (&self.store, &self.render_source);
@@ -778,16 +774,14 @@ fn the_ground_the_map_stands_on_is_the_height_rule_on_the_drawn_dem() {
     assert!(matches!(load.ground_events()[..], [None]));
 }
 
-/// An update's camera stands on the terrain's current ground only when the
-/// ground it carries gives the same height and floor at its center as the
-/// current one, which a still image waits for: not one that came before
-/// the DEM loaded, and not none while terrain draws. For an update that
-/// carries other ground there, the terrain tells the map of its current
-/// ground again, though it didn't change; ground that differs only
-/// elsewhere is as good as the current one. Without terrain, an update
-/// that carries none stands on it.
+/// An update is grounded only when it carries the terrain's current ground
+/// itself, which a still image waits for: not one that came before the DEM
+/// loaded, not other ground of the same height everywhere, and not none
+/// while terrain draws. For an update that carries other ground, the
+/// terrain tells the map of its current ground again, though it didn't
+/// change. Without terrain, an update that carries none is grounded.
 #[test]
-fn an_update_stands_on_the_current_ground_when_it_carries_its_height_and_floor() {
+fn an_update_is_grounded_when_it_carries_the_current_ground() {
     let mut load = TerrainLoad::new((0, 14), 1.0);
     load.frame();
     assert!(!load.grounded, "the update carries no ground");
@@ -815,15 +809,11 @@ fn an_update_stands_on_the_current_ground_when_it_carries_its_height_and_floor()
     assert!(load.grounded);
     assert!(load.ground_events().is_empty());
 
-    // Other ground of the same height and floor at the center.
     load.seen = Some(Arc::new(Uniform { at: Some(100.0), min_at: Some(100.0) }));
     load.frame();
-    assert!(load.grounded);
-    assert!(load.ground_events().is_empty());
-    load.seen = Some(Arc::new(Uniform { at: Some(100.0), min_at: Some(0.0) }));
-    load.frame();
-    assert!(!load.grounded, "another floor");
-    assert_eq!(1, load.ground_events().len());
+    assert!(!load.grounded, "other ground of the same height");
+    let again = load.ground_events();
+    assert!(matches!(&again[..], [Some(ground)] if Arc::ptr_eq(ground, &loaded)), "{again:?}");
 
     load.style.apply(Edit::SetTerrain(None)).unwrap();
     load.update();
@@ -831,32 +821,6 @@ fn an_update_stands_on_the_current_ground_when_it_carries_its_height_and_floor()
     load.seen = None;
     load.update();
     assert!(load.grounded);
-}
-
-/// The camera of a gesture or a command reads the ground away from its
-/// center too (under its eye and near plane, along rays): its update stands
-/// on the terrain's current ground only when it carries that ground itself,
-/// not other ground of the same height and floor at the center. The terrain
-/// tells the map of its current ground again only for ground that differs
-/// at the center, as for a camera at rest.
-#[test]
-fn a_moving_camera_stands_on_the_current_ground_only_when_it_carries_it() {
-    let mut load = TerrainLoad::new((0, 14), 1.0);
-    load.camera_moving = true;
-    load.frame();
-    load.answer(|_| Some(terrarium_png(100)));
-    let current = load.ground_events().pop().flatten().expect("the ground");
-    load.seen = Some(Arc::clone(&current));
-    load.frame();
-    assert!(load.grounded);
-
-    load.seen = Some(Arc::new(Uniform { at: Some(100.0), min_at: Some(100.0) }));
-    load.frame();
-    assert!(!load.grounded, "other ground of the same height and floor at the center");
-    assert!(load.ground_events().is_empty());
-    load.camera_moving = false;
-    load.frame();
-    assert!(load.grounded, "at rest");
 }
 
 /// A camera far below raised ground looks over it, which culls every tile;

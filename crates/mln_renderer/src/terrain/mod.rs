@@ -62,9 +62,8 @@
 //!   decodes it by the height rule of `mln_util::dem`, as the CPU does.
 //! - **The ground** ([`TerrainElevation`]) is the tiles as a frame drew
 //!   them, with the DEM data each read, which the map's camera reads by the
-//!   same height rule. A frame is complete only when the camera of its
-//!   update stood on the ground the frame draws, as far as that camera reads
-//!   it ([`UpdateParameters::elevation`]).
+//!   same height rule. A frame is complete only when its update carries
+//!   that ground, the same snapshot ([`UpdateParameters::elevation`]).
 //! - **The stacks** ([`DrapeStacks`]) are GL JS's: each a run of the
 //!   frame's layers that drape, ended by one of the frame's layers that
 //!   doesn't. A layer the frame doesn't draw, hidden or out of its zooms,
@@ -118,13 +117,12 @@ pub(crate) use drapes::Drapes;
 pub(crate) use elevation::TerrainElevation;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::terrain_ubo::TerrainPropsUBO;
-use mln_map_types::{Elevation, MapMode, TerrainSkirtLength};
+use mln_map_types::{MapMode, TerrainSkirtLength};
 use mln_style::source_type::SourceData;
 use mln_style::sources::RasterDemSourceType;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::constants;
 use mln_util::dem::DemUnpack;
-use mln_util::geo::{LatLng, WrapMode};
 use mln_util::hash::HashMap;
 use mln_util::tileset::RasterEncoding;
 pub(crate) use stacks::DrapeStacks;
@@ -147,21 +145,6 @@ fn skirt_length(length: TerrainSkirtLength, zoom: f64) -> Option<f64> {
     match length {
         TerrainSkirtLength::Auto => Some(constants::M2PI * constants::EARTH_RADIUS_M / zoom.max(0.0).exp2() / 5.0),
         TerrainSkirtLength::None => None,
-    }
-}
-
-/// Whether a camera at rest whose center is at `center` stands on the
-/// ground `seen` as it would on `drawn`: both give the same height and
-/// floor there, which is all such a camera takes from the ground, or
-/// neither is there. Ground that differs elsewhere doesn't move it.
-fn stands_alike(seen: Option<&dyn Elevation>, drawn: Option<&dyn Elevation>, center: LatLng) -> bool {
-    match (seen, drawn) {
-        (None, None) => true,
-        (Some(seen), Some(drawn)) => {
-            std::ptr::addr_eq(seen, drawn)
-                || (seen.at(center) == drawn.at(center) && seen.min_at(center) == drawn.min_at(center))
-        }
-        _ => false,
     }
 }
 
@@ -285,23 +268,13 @@ impl RenderTerrain {
     /// frame's bindings are of the DEM tiles it has, so that a frame that
     /// has loaded draws each tile with its own.
     ///
-    /// When the ground the tiles draw changed, it tells the map in `events`
-    /// ([`RendererEvent::TerrainElevation`]), before the frame finishes:
-    /// the tiles, the DEM data they read, or how it decodes. It tells the
-    /// map again, though the ground didn't change, when the camera of the
-    /// update ([`UpdateParameters::elevation`]) stands on a ground that
-    /// differs from it where the camera reads it, as the camera of a map
-    /// that let go of the ground when its style dropped the terrain does.
-    /// While terrain doesn't draw, it tells the map that there is no ground
-    /// once it stops, and for each update whose camera stood on a ground,
-    /// which another renderer may have drawn.
-    ///
-    /// Returns whether the update's camera stands as it would on the ground
-    /// the tiles now draw, as it does on none while terrain doesn't draw: a
-    /// camera at rest where the two agree at its center (`stands_alike`),
-    /// and one that a gesture or a command moves
-    /// ([`UpdateParameters::camera_moving`]), which reads the ground away
-    /// from its center too, only on that ground itself.
+    /// Returns whether the frame is grounded: whether the update
+    /// ([`UpdateParameters::elevation`]) carries the ground the tiles now
+    /// draw, the same `Arc`, or neither has one, as while terrain doesn't
+    /// draw. Otherwise it tells the map of its current ground in `events`
+    /// ([`RendererEvent::TerrainElevation`]), before the frame finishes.
+    /// The ground keeps its `Arc` while the tiles, the DEM data they read and
+    /// how it decodes stay the same.
     pub(crate) fn bind<'a>(
         &mut self,
         dem: impl FnOnce(&str) -> Option<&'a SourceTiles>,
@@ -318,20 +291,15 @@ impl RenderTerrain {
         let tiles = dem(&cover.source_id);
         cover.bind(tiles);
         let ground = TerrainElevation::new(cover, tiles, self.surface.unpack(), self.surface.props.exaggeration);
-        // The ground keeps its `Arc` while it doesn't change, which the map
-        // takes as the ground it already stands on.
-        let (drawn, new) = match &self.elevation {
-            Some(drawn) if drawn.draws_as(&ground) => (drawn, false),
-            _ => (&*self.elevation.insert(Arc::new(ground)), true),
+        let drawn = match &mut self.elevation {
+            Some(drawn) if drawn.draws_as(&ground) => drawn,
+            slot => slot.insert(Arc::new(ground)),
         };
-        let center = parameters.view.center(WrapMode::Wrapped);
-        let alike = stands_alike(seen, Some(&**drawn), center);
-        if new || !alike {
+        let grounded = seen.is_some_and(|seen| std::ptr::addr_eq(seen, Arc::as_ptr(drawn)));
+        if !grounded {
             events.push(RendererEvent::TerrainElevation(Some(Arc::<TerrainElevation>::clone(drawn))));
         }
-        // The map answers the ground it was told of with an update that
-        // carries it, so a moving camera comes to stand on it.
-        alike && (!parameters.camera_moving || seen.is_some_and(|seen| std::ptr::addr_eq(seen, &raw const **drawn)))
+        grounded
     }
 
     /// The drapes of the last frame.

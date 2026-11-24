@@ -90,8 +90,7 @@ pub struct Map {
     terrain_skirt_length: TerrainSkirtLength,
     /// The ground of the terrain as the renderer last drew it, while
     /// terrain draws. Each update carries it, and the renderer completes a
-    /// frame only of an update whose ground gives the height and floor at
-    /// the center that its newest gives.
+    /// frame only of an update that carries its newest ground.
     elevation: Option<Arc<dyn Elevation>>,
     /// The terrain's moves of the camera while the still image waits.
     ground_moves: u32,
@@ -499,13 +498,20 @@ impl Map {
                     stats,
                 );
             }
-            // The renderer completes a frame only of an update whose ground
-            // stands the camera as its newest does, so the map answers each
-            // with one, whether or not the camera moves onto it
-            // (`follow_terrain`).
+            // The renderer completes a frame only of an update that carries
+            // its newest ground, so the map answers new ground with one,
+            // whether or not the camera moves onto it (`follow_terrain`).
+            // The renderer tells it again of ground that an update in flight
+            // already carries.
             RendererEvent::TerrainElevation(elevation) => {
-                self.elevation = elevation;
-                self.on_update();
+                let held = match (&self.elevation, &elevation) {
+                    (Some(held), Some(told)) => Arc::ptr_eq(held, told),
+                    (held, told) => held.is_none() && told.is_none(),
+                };
+                if !held {
+                    self.elevation = elevation;
+                    self.on_update();
+                }
             }
             RendererEvent::RenderMapStarted => {
                 if continuous {
