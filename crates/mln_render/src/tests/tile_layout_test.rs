@@ -229,3 +229,23 @@ fn a_resume_builds_from_the_memo() {
     };
     assert!(!times.discover.is_zero());
 }
+
+/// A tile draws a layer whose source layer changed with the layer's new
+/// values until its relayout lands, but its layout keeps the values it laid
+/// the layer out with, whose source layer queries look its features up in.
+#[test]
+fn a_layout_keeps_the_source_layer_it_laid_a_layer_out_from() {
+    use crate::tile::contents::{Answer, Contents, GeometryContents};
+
+    let laid = layer(json!({"id": "outline", "type": "dot", "source-layer": "roads"}));
+    let JobResult::Laid(output) = run(std::slice::from_ref(&laid), &[], Resolved::default()) else {
+        panic!("expected the layout");
+    };
+    let mut contents = Contents::Geometry(GeometryContents::new(output.result, false, Answer::default(), output.deps));
+    let edited = layer(json!({"id": "outline", "type": "dot", "source-layer": "water"}));
+    assert!(contents.layer_properties_updated(&edited));
+
+    let buckets = &contents.geometry().unwrap().result.layer_render_data;
+    assert!(std::ptr::addr_eq(buckets.get("outline").unwrap().layer, &raw const *edited), "draws with the new values");
+    assert_eq!(buckets.layer("outline").unwrap().style().base().source_layer, "roads");
+}

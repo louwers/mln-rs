@@ -43,7 +43,8 @@ use crate::tile_mask::TileMask;
 use crate::tile_render_data::TileAtlasTextures;
 
 /// A layout's buckets, each once, and the bucket of each layer it laid out,
-/// with the values it laid the layer out with. The layers of a layout group
+/// with the values it laid the layer out with and those it draws with. The
+/// layers of a layout group
 /// share their bucket. A frame finds a layer by its id once
 /// ([`find`](Self::find)), and then by where it is ([`laid`](Self::laid)).
 #[derive(Default)]
@@ -62,7 +63,12 @@ struct LaidLayer {
     /// Whether the layer leads its bucket: it is the first of the layers
     /// the bucket was laid out for.
     leads: bool,
+    /// The values the layer draws with, which take the layer's new paint
+    /// values until a relayout replaces the layout.
     layer: Arc<dyn ErasedEvaluatedLayer>,
+    /// The values the layout laid the layer out with, which name the source
+    /// layer its features are of and whether it places.
+    laid: Arc<dyn ErasedEvaluatedLayer>,
 }
 
 impl LaidLayer {
@@ -89,7 +95,7 @@ impl LayoutBuckets {
         let mut used = false;
         for (id, layer) in layers {
             self.layers.entry(id).or_insert_with(|| {
-                self.laid.push(LaidLayer { bucket: index, layer, leads: !used });
+                self.laid.push(LaidLayer { bucket: index, laid: Arc::clone(&layer), layer, leads: !used });
                 used = true;
                 self.laid.len() - 1
             });
@@ -166,7 +172,7 @@ impl LayoutBuckets {
     ) -> impl Iterator<Item = (&String, usize, bool, &Arc<dyn ErasedEvaluatedLayer>)> + '_ {
         self.layers.iter().map(|(id, &index)| {
             let laid = &self.laid[index];
-            (id, laid.bucket(), laid.leads, &laid.layer)
+            (id, laid.bucket(), laid.leads, &laid.laid)
         })
     }
 
@@ -196,29 +202,30 @@ impl LayoutBuckets {
 
     /// The values the layout laid the layer `layer_id` out with.
     pub(crate) fn layer(&self, layer_id: &str) -> Option<&Arc<dyn ErasedEvaluatedLayer>> {
-        Some(&self.laid.get(self.find(layer_id)?)?.layer)
+        Some(&self.laid.get(self.find(layer_id)?)?.laid)
     }
 
-    /// [`layer`](Self::layer), to change.
+    /// The values the layer `layer_id` draws with, to change.
     pub(crate) fn layer_mut(&mut self, layer_id: &str) -> Option<&mut Arc<dyn ErasedEvaluatedLayer>> {
         let index = self.find(layer_id)?;
         Some(&mut self.laid.get_mut(index)?.layer)
     }
 
-    /// A copy of the layers that `keep` keeps, and of their buckets.
+    /// A copy of the layers that `keep` keeps, by the values they were laid
+    /// out with, and of their buckets.
     pub(crate) fn copy_where(&self, mut keep: impl FnMut(&Arc<dyn ErasedEvaluatedLayer>) -> bool) -> Self {
         let mut copy = LayoutBuckets::with_capacity(self.laid.len());
         let mut copied: Vec<Option<u32>> = vec![None; self.buckets.len()];
         for (id, &index) in &self.layers {
             let laid = &self.laid[index];
-            if !keep(&laid.layer) {
+            if !keep(&laid.laid) {
                 continue;
             }
             let bucket = *copied[laid.bucket()].get_or_insert_with(|| {
                 copy.buckets.push(self.buckets[laid.bucket()].clone_bucket());
                 copy.buckets.len() as u32 - 1
             });
-            copy.laid.push(LaidLayer { bucket, layer: Arc::clone(&laid.layer), leads: laid.leads });
+            copy.laid.push(LaidLayer { bucket, ..laid.clone() });
             copy.layers.insert(id.clone(), copy.laid.len() - 1);
         }
         copy
@@ -259,7 +266,7 @@ impl LayoutResult {
         let LayoutBuckets { buckets, laid, layers: ids } = &mut self.layer_render_data;
         for (layer_id, &index) in ids.iter() {
             let laid = &laid[index];
-            let source_layer_id = &laid.layer.style().base().source_layer;
+            let source_layer_id = &laid.laid.style().base().source_layer;
             let Some(feature_states) = states.get(source_layer_id).filter(|states| !states.is_empty()) else {
                 continue;
             };
