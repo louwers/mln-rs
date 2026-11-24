@@ -46,7 +46,9 @@ jobs:
       id-token: write # assumes the AWS role
       statuses: write # reports the run on the commit
     outputs:
-      ran: ${{ steps.package.outputs.file != '' }}
+      # Whether the tests started, as the run step does once it has credentials.
+      ran:
+        ${{ steps.run.outcome == 'success' || steps.run.outcome == 'failure' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -144,9 +146,12 @@ jobs:
           persist-credentials: false
           sparse-checkout: tools/device-farm
 
+      # By pattern, so that a run that ended before it downloaded the results
+      # downloads nothing.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: android-device-test-results
+          pattern: android-device-test-results
+          merge-multiple: true
           path: ${{ runner.temp }}/results
 
       - name: Summarize each phone's tests

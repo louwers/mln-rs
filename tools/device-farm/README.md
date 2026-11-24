@@ -46,9 +46,9 @@ or unpacks it. A newer commit of a pull request stops the run of the commit
 before it.
 
 [maplibre/infra](https://github.com/maplibre/infra)'s `opentofu/github-actions`
-stack manages the AWS side: the `mln-rs` Device Farm project, the role, the
-`workflow-run` environment and its variables. The role is shared with
-maplibre-native's `workflow_run` jobs.
+stack manages the AWS side: the `mln-rs` Device Farm project, the `workflow-run`
+environment and its variables, and the role, `GitHubActionsWorkflowRun`, which
+every maplibre repository's workflows can assume to run tests on Device Farm.
 
 ## From your machine
 
