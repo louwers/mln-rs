@@ -94,12 +94,12 @@
 //! included. In each frame that draws the layer it runs
 //! [`update`](Layer::update), then [`tile`](Layer::tile) for each frame
 //! tile with data and no value, then [`prepare`](Layer::prepare). When the
-//! frame leaves the layer out, hidden, out of its zoom range or cleared to
-//! as its color ([`Evaluation::solid`]), its tile values go; an evaluation
-//! that draws nothing ([`Evaluation::draws`]) stops its draws and keeps its
-//! tile values. What must wait for the
-//! GPU to finish the layer's work, such as freeing what it drew with
-//! outside the renderer, goes to [`AfterGpu`]. The layer, its values
+//! frame leaves the layer out, hidden, out of its zoom range or drawn as
+//! the frame's clear color ([`Evaluation::solid`]), its tile values go; an
+//! evaluation that draws nothing ([`Evaluation::draws`]) stops its draws
+//! and keeps its tile values. What must wait for the GPU to finish the
+//! layer's work, such as freeing what it drew with outside the renderer,
+//! goes to [`AfterGpu`]. The layer, its values
 //! and every hook but the layout's run on the renderer's thread; the
 //! layout and the bucket are `Send`, and a bucket implements [`Wire`]
 //! (`#[derive(Wire)]`, with `#[wire(crate = mln_rs::mln_wire)]` through
