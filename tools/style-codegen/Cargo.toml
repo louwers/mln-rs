@@ -8,8 +8,7 @@ license.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
-# Generates crates/mln_style's style code. Not released: the difftests
-# (louwers/mln-rs-difftests) take it from a git revision.
+# Generates crates/mln_style's style code. Not released.
 publish = false
 autotests = false
 

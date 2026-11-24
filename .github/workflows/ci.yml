@@ -126,8 +126,7 @@ jobs:
   # Every test (`mise run ci:test`) on WebGPU on Linux (wgpu on Vulkan, on
   # lavapipe, Mesa's software rasterizer) and on the Metal backend on macOS,
   # under Metal's API validation, with their coverage uploaded to Codecov
-  # (codecov.yml). macOS also runs clippy on the code that only it builds. The
-  # differential tests against the C++ core are in louwers/mln-rs-difftests.
+  # (codecov.yml). macOS also runs clippy on the code that only it builds.
   test:
     needs: plan
     if:

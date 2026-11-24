@@ -140,9 +140,7 @@ memmap2 = { version = "0.9.12" }
 # earcut.js, the triangulation GL JS uses.
 earcut = { version = "0.4.5" }
 # MLT decoding: the Rust implementation of the MapLibre Tile spec, instead of
-# porting the C++ decoder (vendor/maplibre-tile-spec/cpp). Assumed correct
-# (user decision, 2026-11-04); the differential test against the C++ decoder
-# (//difftest/mlt) was removed with that decision.
+# a port of the C++ decoder.
 mlt-core = { version = "0.22.1" }
 # The even-odd union that repairs the polygons of version 1 vector tiles,
 # instead of porting wagyu. mlt-core already depends on it through geo.
@@ -191,7 +189,7 @@ foldhash = { version = "0.2.0" }
 parking_lot = { version = "0.12.5" }
 png = { version = "0.18.1" }
 pollster = { version = "1.0.1" }
-# The difftests' property tests.
+# The property tests that decode malformed tiles (mln_tile, mln_renderer).
 proptest = { version = "1.12.0" }
 # The windows of window targets (mln_gfx::Window), as winit and others hand them out.
 # `alloc`: an `Arc` of a window is one too.

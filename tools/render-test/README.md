@@ -25,7 +25,7 @@ cache's resources at the same `local://` paths. The tests beside that directory
 (in `gljs`) load the directories it holds (`tiles`, `geojson`, `image`) only
 from it, as GL JS's test server does, so a file missing there is not found; the
 other tests fall back to the cache. `mise run update:gljs-testdata <checkout>`
-copies them again, and `mise run update:testdata` leaves them alone.
+copies them again.
 
 `expectations/` holds mln-rs's own expected images, at the paths of the tests
 they replace the images of. Every manifest reads it last, so that its image

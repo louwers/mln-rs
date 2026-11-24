@@ -13,9 +13,7 @@ version:
 
 The `publish = false` packages (the desktop app, the browser build in
 examples/web and crates/mln_web_shaper, the test tools and their headless
-frontend) are not released. The differential tests
-([mln-rs-difftests](https://github.com/louwers/mln-rs-difftests)) take the test
-tools from a git revision.
+frontend) are not released.
 
 ## Releasing a version
 
