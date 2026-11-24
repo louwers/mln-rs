@@ -407,6 +407,33 @@ mod tests {
         assert_eq!(*fetches.lock(), 2);
     }
 
+    // gtest: CustomGeometryTile.CancelOneCopy
+    // Tiles of one canonical tile, such as its copies in two worlds, share
+    // one fetch, which is cancelled only once none of them needs it.
+    #[test]
+    fn a_shared_fetch_is_cancelled_once_no_tile_needs_it() {
+        let pool = Pool::local();
+        let calls: Arc<Mutex<Vec<&str>>> = Arc::default();
+        let (fetches, cancels) = (Arc::clone(&calls), Arc::clone(&calls));
+        let fetch: TileFunction = Arc::new(move |_: &CanonicalTileID| fetches.lock().push("fetch"));
+        let cancel: TileFunction = Arc::new(move |_: &CanonicalTileID| cancels.lock().push("cancel"));
+        let provider = CustomProvider::<u32>::new(Some(fetch), Some(cancel), &pool);
+        let canonical = CanonicalTileID::new(0, 0, 0);
+        let copies = [OverscaledTileID::new(0, 0, canonical), OverscaledTileID::new(0, 1, canonical)];
+        for (key, id) in copies.into_iter().enumerate() {
+            provider.fetch_tile(id, key as SubscriberKey, Box::new(Ignored));
+        }
+        pool.run_all();
+        assert_eq!(*calls.lock(), ["fetch"]);
+
+        provider.cancel_tile(copies[0], 0);
+        pool.run_all();
+        assert_eq!(*calls.lock(), ["fetch"], "the other copy still needs the data");
+        provider.cancel_tile(copies[1], 1);
+        pool.run_all();
+        assert_eq!(*calls.lock(), ["fetch", "cancel"]);
+    }
+
     // The host's fetches run on a pool thread, in the order the tiles asked,
     // and a fetch that answers from inside itself doesn't deadlock.
     #[test]
