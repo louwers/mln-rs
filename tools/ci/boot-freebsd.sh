@@ -23,4 +23,56 @@ host=$(devices-cli get freebsd --release "$release")
 ssh -o BatchMode=yes "$host" \
     pkg install --yes --quiet \
     mesa-dri mesa-libs libglvnd vulkan-loader vulkan-validation-layers >&2
+# anyvm mounts the checkout over its user-space nfsd with NFSv4.0
+# (minorversion=0). Under multi-threaded I/O (such as render-test), FreeBSD's
+# NFSv4.0 client and nfsd.py desync per-owner seqids (NFS4ERR_BAD_SEQID -> EIO).
+# nfsd.py also serves NFSv4.2, which replaces open-owner seqids with session
+# slots, so upgrade the mount to minorversion=2 once per boot.
+repo_root=$(git rev-parse --show-toplevel)
+ssh -o BatchMode=yes "$host" sh -s -- "$repo_root" >&2 <<'EOF'
+set -eu
+mnt=$1
+info=$(nfsstat -m)
+opts=$(printf '%s\n' "$info" | awk -v mnt="$mnt" '
+    {
+        p = index($0, " on ")
+        if (p > 0 && substr($0, p + 4) == mnt) {
+            if (getline nextline > 0) {
+                print nextline
+            }
+            exit
+        }
+    }
+')
+case ",$opts," in
+    *,minorversion=0,*)
+        src=$(printf '%s\n' "$info" | awk -v mnt="$mnt" '
+            {
+                p = index($0, " on ")
+                if (p > 0 && substr($0, p + 4) == mnt) {
+                    print substr($0, 1, p - 1)
+                    exit
+                }
+            }
+        ')
+        port=$(printf '%s\n' "$opts" | awk '
+            match($0, /port=[0-9]+/) {
+                print substr($0, RSTART + 5, RLENGTH - 5)
+            }
+        ')
+        if [ -z "$port" ]; then
+            host_ip=${src%%:*}
+            port=$(sockstat -4 -c -P tcp | awk -v ip="$host_ip" '
+                $1 == "?" && index($7, ip ":") == 1 {
+                    sub(/^[^:]*:/, "", $7)
+                    print $7
+                    exit
+                }
+            ')
+        fi
+        umount "$mnt"
+        mount -t nfs -o "nfsv4,minorversion=2,tcp,port=${port:-2049}" "$src" "$mnt"
+        ;;
+esac
+EOF
 printf '%s\n' "$host"
