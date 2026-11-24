@@ -90,7 +90,10 @@ pub struct Draw {
     /// the tile's mask: a draw of [`Depth::Off`] or [`Depth::Layer`] pushed
     /// with the projection of one of its layer's tiles
     /// ([`FrameTile::project`](crate::layer::FrameTile::project)). The
-    /// group then draws the masks of all its layer's tiles first.
+    /// group then draws the masks of all its layer's tiles first. A group
+    /// with a draw that clips and a 3D draw that draws `once`
+    /// ([`Depth::Volume`]), which both need the stencil, fails the frame
+    /// and draws nothing.
     pub clip: bool,
 }
 
@@ -333,6 +336,13 @@ impl Group {
         frame.draws.clear();
         frame.stencil_tiles.clear();
         let clips = pushes.pushed.iter().any(|pushed| pushed.draw.clip);
+        if let Some(once) = pushes.pushed.iter().find(|pushed| matches!(pushed.draw.depth, Depth::Volume { once: true, .. }))
+            && clips
+        {
+            context.fail(format!("A group of draws that clip has a 3D draw of {} that draws once", once.program.name));
+            pushes.clear();
+            return;
+        }
         // A composited group draws into its texture in the translucent
         // pass alone, and an opaque draw that writes no depth would show
         // the lower groups that the opaque pass draws after it.
@@ -829,10 +839,10 @@ impl FrameDraws {
 
     /// Draws the pass's draws into the open pass of `gpu`, the context's:
     /// into the layer composite's texture in the translucent pass where they
-    /// composite, and onto the frame otherwise. Where none of the pass's
-    /// draws is 3D, the masks of the tiles that those that clip clip to go
-    /// into the stencil first; 3D draws that draw `once` share one stencil
-    /// value of their own.
+    /// composite, and onto the frame otherwise. The masks of the tiles that
+    /// the draws that clip clip to go into the stencil first; 3D draws that
+    /// draw `once`, which share no group with draws that clip, share one
+    /// stencil value of their own.
     pub(crate) fn render(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         if self.draws.is_empty() || parameters.pass_target().is_none() {
             return;
@@ -849,12 +859,9 @@ impl FrameDraws {
         let in_pass = |draw: &FrameDraw| pass == if draw.opaque { opaque_in } else { Pass::Translucent };
         let draws = if drawing { &self.draws[..] } else { &[] };
         let draws = || draws.iter().filter(|draw| in_pass(draw));
-        let (volume, volume_once) = draws().fold((false, false), |(volume, once), draw| match draw.depth {
-            Depth::Volume { once: draw_once, .. } => (true, once || draw_once),
-            _ => (volume, once),
-        });
-        let volume_stencil = if volume {
-            volume_once.then(|| parameters.stencil_for_3d(gpu))
+        let volume_once = draws().any(|draw| matches!(draw.depth, Depth::Volume { once: true, .. }));
+        let volume_stencil = if volume_once {
+            Some(parameters.stencil_for_3d(gpu))
         } else {
             if drawing && !self.stencil_tiles.is_empty() {
                 parameters.render_tile_clipping_masks(gpu, &self.stencil_tiles);
@@ -1030,6 +1037,21 @@ mod tests {
             group.push(&mesh, writes, ());
             group.finish(gpu, context, &(), []);
             assert!(!group.frame.draws[0].opaque, "an opaque draw of a composited group");
+        });
+    }
+
+    #[test]
+    fn a_group_of_draws_that_clip_and_draw_once_in_3d_fails_the_frame() {
+        crate::tests::with_context(|gpu, context| {
+            let mesh = mesh(context);
+            let id = OverscaledTileID::new(1, 0, CanonicalTileID::new(1, 0, 0));
+            let mut group = Group::new();
+            group.begin(0.0, false, false);
+            group.push_at(&mesh, &at(id), Draw { clip: true, ..Draw::DEFAULT }, ());
+            group.push(&mesh, Draw { depth: Depth::Volume { write: true, once: true }, ..Draw::DEFAULT }, ());
+            group.finish(gpu, context, &(), [id.to_unwrapped()]);
+            assert!(group.frame.draws.is_empty());
+            assert!(context.failed());
         });
     }
 
