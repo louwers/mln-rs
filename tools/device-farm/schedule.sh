@@ -35,6 +35,7 @@ case $platform in
         # An app test, whose app Device Farm signs and installs: the test spec
         # runs the app over devicectl.
         type=APPIUM_NODE
+        app=$package/app.ipa
         ;;
     *)
         echo "No Device Farm tests for $platform: android or ios" >&2
@@ -76,15 +77,15 @@ echo "Uploading $package" >&2
 uploads=$(mktemp -d)
 upload "$spec" "${type}_TEST_SPEC" > "$uploads/spec" &
 spec_upload=$!
-if [[ $platform == ios ]]; then
-    upload "$package/app.ipa" IOS_APP > "$uploads/app" &
+if [[ -n ${app:-} ]]; then
+    upload "$app" IOS_APP > "$uploads/app" &
     app_upload=$!
 fi
 package_arn=$(upload "$package/tests.zip" "${type}_TEST_PACKAGE")
 wait "$spec_upload"
 spec_arn=$(< "$uploads/spec")
 run=(--project-arn "$project")
-if [[ $platform == ios ]]; then
+if [[ -n ${app:-} ]]; then
     wait "$app_upload"
     run+=(--app-arn "$(< "$uploads/app")")
 fi

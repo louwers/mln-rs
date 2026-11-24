@@ -197,8 +197,8 @@ def run(app: str, binary: dict, log: pathlib.Path) -> dict[str, Result]:
     if failed:
         retry = launch(app, binary, [*HARNESS, "--exact", *failed], log)
         for name in failed:
-            second = retry.results.get(name, Result("failed", output=crash))
-            if second.event == "ok":
+            second = retry.results.get(name)
+            if second and second.event == "ok":
                 second.flaky = results[name]
                 results[name] = second
     return results

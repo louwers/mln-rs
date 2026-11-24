@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 #MISE description="Run the tests on AWS Device Farm's phones with your AWS credentials (tools/device-farm)"
-#USAGE arg "<platform>" help="The phones' platform: android or ios"
+#USAGE arg "<platform>" help="The phones' platform" {
+#USAGE   choices "android" "ios"
+#USAGE }
 #USAGE flag "--package <dir>" help="The test package that device-farm:package built (default: target/device-farm/<platform>)"
 #USAGE flag "--results <dir>" default="target/device-farm/results" help="Where to download each phone's output and artifacts"
 # Waits for the run, which an interruption stops, and exits 0 when it passed.

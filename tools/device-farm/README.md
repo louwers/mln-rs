@@ -63,9 +63,9 @@ without a result, get their one more try together, in one more launch.
 The phones run `main`'s commits. Pull requests run the tests on the Android
 emulator and the iOS simulator, in CI's `target` jobs, which `main` runs too.
 
-CI's `prepare-android-device-tests` and `prepare-ios-device-tests` jobs build
-`main`'s packages, without credentials. Three workflows run them, so that no
-GitHub runner waits for the phones while a run is queued or in progress:
+CI's `prepare-device-tests` job builds `main`'s packages, one per platform,
+without credentials. Three workflows run them, so that no GitHub runner waits
+for the phones while a run is queued or in progress:
 
 - `device-test` starts with the CI run, waits for each platform's job, and
   schedules its package once the job has built it, while the rest of CI runs. It

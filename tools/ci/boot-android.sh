@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Boots this checkout's Android emulator for CI (API 36, x86_64) via
-# devices-cli, updating the emulator first when needed, and verifies its ABI
-# and API level over adb.
+# Boots this checkout's Android emulator for CI (x86_64, at the API level that
+# tools/android-test-host/runner.sh runs the tests on) via devices-cli, in the
+# target-android environment, updating the emulator first when needed, and
+# verifies its ABI and API level over adb.
 set -euo pipefail
 
-api=36
+api=${MLN_ANDROID_DEVICE_API:-36}
 abi=x86_64
 sdk_root="${ANDROID_HOME:?ANDROID_HOME must point at an Android SDK}"
 adb="$sdk_root/platform-tools/adb"
@@ -16,31 +17,9 @@ adb="$sdk_root/platform-tools/adb"
 minimum_emulator_version=37.3.5
 emulator_revision=$(sed -n 's/^Pkg\.Revision=//p' "$sdk_root/emulator/source.properties" 2> /dev/null | tr -d '\r') || true
 if [[ "$(printf '%s\n' "$minimum_emulator_version" "$emulator_revision" | sort -V | head -n1)" != "$minimum_emulator_version" ]]; then
-    # Google's android CLI needs no JDK, and its canary packages include the
-    # dev channel. sdkmanager, which runs on a JVM, serves command-line tools
-    # that predate it.
-    install=()
-    if android_bin=$(command -v android 2> /dev/null); then
-        install=("$android_bin" --sdk="$sdk_root" sdk install --canary emulator)
-    else
-        for tool in android sdkmanager; do
-            for candidate in "$sdk_root"/cmdline-tools/latest/bin/"$tool" "$sdk_root"/cmdline-tools/*/bin/"$tool"; do
-                [[ -x "$candidate" ]] || continue
-                if [[ "$tool" == android ]]; then
-                    install=("$candidate" --sdk="$sdk_root" sdk install --canary emulator)
-                else
-                    install=("$candidate" --sdk_root="$sdk_root" --channel=2 --install emulator)
-                fi
-                break 2
-            done
-        done
-    fi
-    if ((${#install[@]} == 0)); then
-        echo "The Android emulator is at revision ${emulator_revision:-<none>}, below $minimum_emulator_version, and neither PATH nor $sdk_root has an android CLI or sdkmanager to update it." >&2
-        exit 1
-    fi
     echo "Updating the Android emulator from revision ${emulator_revision:-<none>} to $minimum_emulator_version or later." >&2
-    "${install[@]}" <<< "y" >&2
+    # The android CLI's canary packages include the dev channel.
+    android --sdk="$sdk_root" sdk install --canary emulator <<< "y" >&2
 fi
 
 # SwiftShader draws the GLES and Vulkan targets in software, which is what a

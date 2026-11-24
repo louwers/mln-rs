@@ -5,8 +5,8 @@ so that they run on a phone: iOS runs no executable but an app's, and gives the
 GPU only to an app in the foreground. AWS Device Farm's runs use it
 (`tools/device-farm`).
 
-The tests are built as dylibs, `-C link-arg=-dynamiclib`, which the app holds in
-its Frameworks with a copy of the workspace
+The tests are built as dylibs that export only their `main`, which the app holds
+in its Frameworks with a copy of the workspace
 (`mise run device-farm:package ios`). Each launch of the app runs one of them:
 `main.m` loads the dylib that its first argument names once the app is in the
 foreground, and calls its `main` with the rest of its arguments, which it makes

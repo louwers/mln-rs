@@ -127,7 +127,6 @@
     "test_target": "x86_64-linux-android",
     "backend": "vulkan"
   },
-  { "job": "prepare-android-device-tests", "unit": "android" },
   {
     "job": "target",
     "variant": "ios",
@@ -141,6 +140,5 @@
     "test_target": "aarch64-apple-ios-sim",
     "backend": "metal"
   },
-  { "job": "prepare-ios-device-tests", "unit": "ios" },
   { "job": "web", "unit": "web" }
 ]
