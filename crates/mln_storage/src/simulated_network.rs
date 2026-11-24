@@ -9,7 +9,6 @@
 
 use std::sync::Arc;
 
-use mln_util::queue::Waker;
 use mln_util::time::Instant;
 
 use crate::http_file_source::{HttpTransport, TransferRequest};
@@ -93,7 +92,8 @@ impl OnlineDriver {
     /// Calls `waker`, from the posting thread, whenever the source has a
     /// task for [`run`](Self::run): a request, a cancellation or a
     /// transfer's answer. The clock's moves don't call it.
-    pub fn set_waker(&self, waker: Option<Waker>) {
+    #[cfg(test)]
+    pub(crate) fn set_waker(&self, waker: Option<mln_util::queue::Waker>) {
         self.queue.set_waker(waker);
     }
 }
