@@ -46,11 +46,13 @@ status=0
     status=$?
 
 cp "$DEVICE_FARM_WORKSPACE/target/nextest/device-farm/junit.xml" "$artifacts/" || true
-# Without the render suite's images, which its report shows for the failed
-# tests, and as one file: adb pulls thousands of small files slowly.
+# Without the render suite's images, whose paths start with a test's ID and
+# which its reports show for the failed tests, and as one file: adb pulls
+# thousands of small files slowly.
 if adb shell "test -d $MLN_TEST_OUTPUT"; then
-    adb shell "find $MLN_TEST_OUTPUT -path '*/render_tests*' -name '*.png' -delete &&
-        tar -czf $DEVICE_FARM_ROOT/test-output.tar.gz -C $DEVICE_FARM_ROOT test-output"
-    adb pull "$DEVICE_FARM_ROOT/test-output.tar.gz" "$artifacts/" > /dev/null
+    adb shell "find $MLN_TEST_OUTPUT \\( -path '*/render-tests/*' -o -path '*/query-tests/*' -o -path '*/gljs/*' \\) \
+        -name '*.png' -delete > /dev/null; tar -czf $DEVICE_FARM_ROOT/test-output.tar.gz -C $DEVICE_FARM_ROOT test-output" &&
+        adb pull "$DEVICE_FARM_ROOT/test-output.tar.gz" "$artifacts/" > /dev/null ||
+        echo "Couldn't collect the tests' output" >&2
 fi
 exit "$status"
