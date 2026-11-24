@@ -60,9 +60,10 @@ const USAGE: &str = "  mln-desktop {OPTIONS}
       -h, --help                        Display this help menu
       -f, --fullscreen                  Toggle fullscreen
       -b, --benchmark[=path]            Draw a benchmark camera path (street, the
-                                        default, globe, antimeridian, earthquakes,
-                                        terrain or labels) as fast as the window takes
-                                        frames, print their times, quit
+                                        default, overzoom, globe, antimeridian,
+                                        earthquakes, terrain, terrain-3d or labels) as
+                                        fast as the window takes frames, print their
+                                        times, quit
       --laps=[number]                   Laps of the benchmark's path (10; 0: until
                                         the window closes)
       -o, --offline                     Toggle offline

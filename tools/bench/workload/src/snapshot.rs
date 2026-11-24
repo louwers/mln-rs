@@ -193,6 +193,16 @@ impl Snapshot {
         style.to_string()
     }
 
+    /// [`Snapshot::terrain_style`] in 3D: the terrain tiles that shade it
+    /// also raise its ground, which its fills, lines, color relief and
+    /// hillshade drape over and its labels stand on.
+    #[must_use]
+    pub fn terrain_3d_style(&self) -> String {
+        let mut style: serde_json::Value = serde_json::from_str(&self.terrain_style()).expect("the style is JSON");
+        style["terrain"] = serde_json::json!({ "source": "terrain" });
+        style.to_string()
+    }
+
     /// Liberty over the street tiles with its POI labels placed as many
     /// styles place them: each tries the anchors below, beside and above its
     /// icon (`text-variable-anchor`) instead of one.

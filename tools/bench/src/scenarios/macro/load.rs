@@ -210,7 +210,7 @@ fn load_online(bench: &mut Bench, profile: Profile, cached: Cached) {
 fn load_online_from(bench: &mut Bench, zoom: f64, profile: Profile, cached: Cached, serve: Serve) {
     let fixtures = Fixtures::open(bench);
     let camera = super::street_center(&fixtures, zoom);
-    let server = Server::new(&fixtures, Tiles::Street, serve);
+    let server = Server::new(&fixtures, &fixtures.style(Tiles::Street), serve);
     let cache = (cached != Cached::Nothing).then(|| {
         // An earlier visit's, over a link that takes no time, on a map of
         // its own.

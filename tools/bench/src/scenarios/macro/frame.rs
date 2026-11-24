@@ -7,7 +7,7 @@ use mln_map::{CameraOptions, MapMode};
 use super::VIEW;
 use crate::scenario::{Bench, Kind, Scenario};
 use crate::support::fixtures::Fixtures;
-use crate::support::map::HeadlessMap;
+use crate::support::map::{Drapes, HeadlessMap};
 
 pub(crate) const SCENARIOS: &[Scenario] = &[
     Scenario {
@@ -45,6 +45,12 @@ pub(crate) const SCENARIOS: &[Scenario] = &[
         kind: Kind::Macro,
         question: "What does a frame of a city's hills cost, tinted by elevation and hillshaded, while the camera circles, turns and tilts over loaded tiles?",
         run: terrain,
+    },
+    Scenario {
+        name: "macro/frame/terrain-3d",
+        kind: Kind::Macro,
+        question: "What does a frame of a city's hills in 3D cost, tinted by elevation and hillshaded, while the camera circles, turns and tilts over loaded tiles?",
+        run: terrain_3d,
     },
     Scenario {
         name: "macro/frame/labels",
@@ -104,6 +110,17 @@ fn terrain(bench: &mut Bench) {
     path(bench, Path::Terrain);
 }
 
+/// The question: what does the frame of `macro/frame/terrain` cost with 3D
+/// terrain on ([`Path::Terrain3d`]): the terrain tiles raise the ground,
+/// Liberty's fills and lines and the color relief and hillshade drape over
+/// it, and its labels stand on it? The two differ only in the terrain, so
+/// their difference is what it adds. One measured unit is one frame. It also
+/// reports what the frames drew of their drapes, and the most they held
+/// ([`Drapes`]).
+fn terrain_3d(bench: &mut Bench) {
+    path(bench, Path::Terrain3d);
+}
+
 /// The question: what does a frame of downtown San Francisco's labels cost,
 /// Liberty with POI labels that choose among anchors, while the camera turns
 /// a full circle tilted to 60 degrees ([`Path::Labels`])? One measured unit
@@ -124,7 +141,8 @@ fn path(bench: &mut Bench, path: Path) {
 /// frame, then measures one frame at each of its cameras: the frame, and
 /// the background work it starts, such as the layout of a tile that came
 /// back into view, which the frame doesn't wait for, but a frame soon after
-/// shows.
+/// shows. Over terrain, it also reports what the frames drew of their
+/// drapes ([`Drapes`]).
 fn frames(bench: &mut Bench, mut map: HeadlessMap, camera: impl Fn(usize) -> CameraOptions) {
     map.settle();
     for frame in 0..FRAMES {
@@ -139,13 +157,18 @@ fn frames(bench: &mut Bench, mut map: HeadlessMap, camera: impl Fn(usize) -> Cam
     let objects = map.gpu_objects_created();
     let work = map.background_work();
     let pipeline = map.pipeline_statistics();
+    let draw_calls = map.draw_calls();
+    let mut drapes = Drapes::default();
     for frame in 0..FRAMES {
         map.jump(&camera(frame));
         bench.measure(|| {
             map.draw_frame();
             map.wait_for_workers();
         });
+        drapes.frame(&map);
     }
+    bench.count("draw_calls", map.draw_calls() - draw_calls);
+    drapes.declare(bench, &map);
     bench.count("background_work", map.background_work() - work);
     map.count_pipeline(bench, pipeline);
     assert_eq!(map.frames() - drawn, FRAMES as u64, "one frame per camera");

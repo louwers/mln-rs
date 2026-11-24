@@ -17,16 +17,16 @@ inherits another's heap, threads or caches.
 
 A third kind runs outside `mln-bench`: the desktop example's **presented**
 benchmark (`mise run desktop -- --benchmark[=<path>]`, where the path is
-`street`, `overzoom`, `globe`, `antimeridian`, `earthquakes`, `terrain` or
-`labels`) draws the camera path of a `macro/frame` scenario in a window, over
-the same fixtures, and prints the times between the frames the window presents.
-It shows what a user sees of a frame, the backend's surface and the display's
-compositor included, which a headless frame leaves out. Nothing runs it but a
-person at a machine with a display: run it on both sides of a change by hand,
-and compare the summaries. Use `--profile release` when measuring shipping
-performance. `--laps <n>` sets how long it runs (10 laps of 120 frames; 0 draws
-until the window closes, for a profiler). The fixtures and the paths come from
-`workload/`, a crate both programs share.
+`street`, `overzoom`, `globe`, `antimeridian`, `earthquakes`, `terrain`,
+`terrain-3d` or `labels`) draws the camera path of a `macro/frame` scenario in a
+window, over the same fixtures, and prints the times between the frames the
+window presents. It shows what a user sees of a frame, the backend's surface and
+the display's compositor included, which a headless frame leaves out. Nothing
+runs it but a person at a machine with a display: run it on both sides of a
+change by hand, and compare the summaries. Use `--profile release` when
+measuring shipping performance. `--laps <n>` sets how long it runs (10 laps of
+120 frames; 0 draws until the window closes, for a profiler). The fixtures and
+the paths come from `workload/`, a crate both programs share.
 
 ## Running
 
@@ -134,6 +134,7 @@ its sizes are the ones it uses.
 | `macro/frame/antimeridian`              | What does a frame of the world on a flat map cost while the view crosses the antimeridian over loaded tiles?                                            |
 | `macro/frame/earthquakes`               | What does a frame of a map of earthquakes cost, a heatmap that gives way to circles, while the camera circles and zooms in and out?                     |
 | `macro/frame/terrain`                   | What does a frame of a city's hills cost, tinted by elevation and hillshaded, while the camera circles, turns and tilts over loaded tiles?              |
+| `macro/frame/terrain-3d`                | What does a frame of a city's hills in 3D cost, tinted by elevation and hillshaded, while the camera circles, turns and tilts over loaded tiles?        |
 | `macro/frame/labels`                    | What does a frame of a city's dense labels cost, POI labels choosing among anchors, while the tilted camera turns over loaded tiles?                    |
 | `macro/navigate/street`                 | What does a flight into a city's streets and back out cost, with tiles arriving while it flies?                                                         |
 | `macro/navigate/fly`                    | What does a flight from one city's streets, out over an ocean and into another city's streets, cost, with tiles arriving while it flies?                |
@@ -142,6 +143,7 @@ its sizes are the ones it uses.
 | `macro/navigate/street-flaky`           | How soon does the view of a city's streets come back complete after the network drops out during a flight?                                              |
 | `macro/navigate/street-pmtiles-flaky`   | How soon does the view of a city's streets, read from a PMTiles archive by byte ranges, come back complete after the network drops out during a flight? |
 | `macro/navigate/zoom-slow`              | Does zooming out to the world and back in over a slow link fetch again the street tiles the map just let go of?                                         |
+| `macro/navigate/terrain`                | What does a flight across a city's hills in 3D cost, low and tilted, with elevation and street tiles arriving while it flies?                           |
 | `macro/update/geojson`                  | What does replacing a GeoJSON source's data cost, until the map shows the new data?                                                                     |
 | `macro/update/layers`                   | What does adding a batch of layers to a city's map, then removing them, cost until the map shows each?                                                  |
 | `macro/update/paint`                    | What does setting a layer's paint property cost, until the map shows the new value?                                                                     |
@@ -190,8 +192,8 @@ attribution. It holds:
 - `fonts/`: Noto Sans JP, whose outlines the glyph scenarios draw, and Noto
   Sans.
 - `tiles/terrain.pmtiles`: Mapterhorn's elevation of central San Francisco,
-  zooms 0 to 12, Terrarium-encoded WebP images of 512 pixels, for hillshading
-  and color relief.
+  zooms 0 to 12, Terrarium-encoded WebP images of 512 pixels, for hillshading,
+  color relief and 3D terrain.
 - `geojson/ne_10m_admin_0_countries.geojson`: Natural Earth's countries.
 - `geojson/earthquakes-2026-10.geojson`: the USGS's 11,342 earthquakes of
   October 2026, for heatmaps and circles.
@@ -291,10 +293,12 @@ and index buffers), `gpu_objects` (the textures and buffers the renderer made),
 `gpu_vertex_shader_invocations`, `gpu_primitives` and
 `gpu_fragment_shader_invocations` (what the GPU's pipeline ran, where the device
 counts it: WebGPU on Vulkan or D3D12, a CPU rasterizer such as lavapipe
-included), or `background_work` (the times a frame started work off the frame,
-such as laying out a tile). A scenario that repeats a unit of work, such as a
-frame or a tile, also reports `instructions`, `allocations` and `allocated` per
-unit, such as `instructions_per_frame`.
+included), `draw_calls`, over 3D terrain `drapes_drawn`, `drapes` and
+`gpu_drapes` (the drapes the frames drew, the most held at once, and the most
+bytes their textures held), or `background_work` (the times a frame started work
+off the frame, such as laying out a tile). A scenario that repeats a unit of
+work, such as a frame or a tile, also reports `instructions`, `allocations` and
+`allocated` per unit, such as `instructions_per_frame`.
 
 A scenario over the simulated network also counts what a user sees, from what
 the renderer drew for each tile of the view it wanted, each weighed by its area
@@ -541,18 +545,18 @@ expired data. `mln_storage`'s `bench` module hands the source's transfers to the
 simulation, has its deadlines go by the simulation's clock, which moves one 60
 Hz frame per frame, and runs its core on the scenario's thread.
 
-A server answers from the fixtures: Liberty, its sprite and glyphs, and its tile
-set, either as a TileJSON and a URL per tile, each tile's size on the wire the
-archive's compressed bytes, or as the PMTiles archive itself, whose header,
-directories and tiles the map reads by byte ranges (the `-pmtiles` scenarios).
-Every answer carries an `ETag`, which a revalidation gets a 304 for. A
-transfer's first byte comes a round trip after it starts, and the transfers
-receiving share the link's bandwidth equally. Faults come from a seed, drawn
-from each transfer's URL, its byte range if it has one, and its attempt alone,
-so that a change in what else the map requests doesn't move them: a share of the
-transfers fails with a connection error, and an outage fails every transfer in
-flight at its start and every one whose answer would come during it. The
-profiles:
+A server answers from the fixtures: a style, such as Liberty, its sprite and
+glyphs, and the tile sets of its sources, either as a TileJSON and a URL per
+tile, each tile's size on the wire the archive's compressed bytes, or as the
+PMTiles archive itself, whose header, directories and tiles the map reads by
+byte ranges (the `-pmtiles` scenarios). Every answer carries an `ETag`, which a
+revalidation gets a 304 for. A transfer's first byte comes a round trip after it
+starts, and the transfers receiving share the link's bandwidth equally. Faults
+come from a seed, drawn from each transfer's URL, its byte range if it has one,
+and its attempt alone, so that a change in what else the map requests doesn't
+move them: a share of the transfers fails with a connection error, and an outage
+fails every transfer in flight at its start and every one whose answer would
+come during it. The profiles:
 
 | profile | round trip | bandwidth  | faults                                                        |
 | ------- | ---------- | ---------- | ------------------------------------------------------------- |

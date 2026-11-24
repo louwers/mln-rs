@@ -363,6 +363,12 @@ impl HeadlessMap {
         (i64::from(stats.mem_vertex_buffers) + i64::from(stats.mem_index_buffers)) as u64
     }
 
+    /// The draw calls the renderer has made so far, those into terrain's
+    /// drapes included.
+    pub(crate) fn draw_calls(&self) -> u64 {
+        self.frontend.frontend.rendering_stats().total_draw_calls as u64
+    }
+
     /// The textures and buffers the renderer has made on the GPU so far.
     pub(crate) fn gpu_objects_created(&self) -> u64 {
         let stats = self.frontend.frontend.rendering_stats();
@@ -394,6 +400,38 @@ impl HeadlessMap {
                 _ => {}
             }
         }
+    }
+}
+
+/// What a map's 3D terrain drew and held over the frames a scenario
+/// measured, from the rendering stats after each
+/// ([`frame`](Self::frame)).
+#[derive(Default)]
+pub(crate) struct Drapes {
+    drawn: u64,
+    most: u64,
+    most_bytes: u64,
+}
+
+impl Drapes {
+    /// Adds what `map`'s last frame drew of its drapes, and what they hold.
+    pub(crate) fn frame(&mut self, map: &HeadlessMap) {
+        let terrain = map.frontend.frontend.rendering_stats().terrain;
+        self.drawn += terrain.drapes_drawn as u64;
+        self.most = self.most.max(terrain.drapes as u64);
+        self.most_bytes = self.most_bytes.max(terrain.mem_drapes as u64);
+    }
+
+    /// Declares in `bench`, where `map`'s style has terrain, the drapes the
+    /// frames drew, `drapes_drawn`; the most drapes held after any of them,
+    /// `drapes`; and the most bytes their textures held, `gpu_drapes`.
+    pub(crate) fn declare(&self, bench: &mut Bench, map: &HeadlessMap) {
+        if map.map.style().get_terrain().is_none() {
+            return;
+        }
+        bench.count("drapes_drawn", self.drawn);
+        bench.count("drapes", self.most);
+        bench.bytes("gpu_drapes", self.most_bytes);
     }
 }
 
