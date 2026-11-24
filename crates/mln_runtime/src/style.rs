@@ -271,8 +271,9 @@ impl Map {
     ///
     /// Completes with what `make` fails with,
     /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) while the style
-    /// isn't loaded, and `AlreadyExists` when the style has a source with the
-    /// made source's ID.
+    /// isn't loaded, `AlreadyExists` when the style has a source with the
+    /// made source's ID, and `InvalidArgument` when the made source is of a
+    /// type the map's registry lacks.
     pub fn add_style_source(
         &self,
         make: impl FnOnce(&crate::map::MapCore) -> Result<Source, Error> + Send + 'static,

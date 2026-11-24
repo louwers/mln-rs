@@ -895,7 +895,8 @@ impl MapCore {
 
     /// Adds `source` to the style, last, and starts loading its description.
     /// Fails with [`ErrorKind::AlreadyExists`](mln_util::ErrorKind) if the
-    /// style has a source with its id.
+    /// style has a source with its id, and with `InvalidArgument` for a
+    /// source of a type the map's registry lacks.
     pub fn add_source(&mut self, source: Source) -> Result<(), Error> {
         self.edit_style(|style| style.apply(Edit::AddSource(source)))
     }

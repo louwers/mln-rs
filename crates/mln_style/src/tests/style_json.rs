@@ -10,6 +10,7 @@ use crate::StyleRegistry;
 use crate::edit::Edit;
 use crate::layer::Layer;
 use crate::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
+use crate::source_type::{Source, SourceData, SourceTypeInfo, StyleSourceType};
 use crate::style::Style;
 use crate::tests::fixture_layer::Plain;
 
@@ -162,6 +163,40 @@ fn a_layer_of_a_type_the_registry_lacks_is_an_invalid_argument() {
     assert_fails(style.apply(Edit::AddLayer { layer: stray, before: None }), ErrorKind::InvalidArgument, "stray");
     let impostor = layer::<Unregistered<true>>(&style, "paper");
     assert_fails(style.apply(Edit::SetLayer(impostor)), ErrorKind::InvalidArgument, "paper");
+}
+
+/// A source type outside the tests' registry, named as one that the
+/// registry has (`shapes`) if `SHAPES`, and `unregistered` otherwise.
+struct UnregisteredSource<const SHAPES: bool>;
+
+impl<const SHAPES: bool> StyleSourceType for UnregisteredSource<SHAPES> {
+    const INFO: SourceTypeInfo = SourceTypeInfo {
+        name: if SHAPES { "shapes" } else { "unregistered" },
+        layer_kind: SourceKind::Geometry,
+        from_json: false,
+    };
+
+    type Options = ();
+    type Description = ();
+}
+
+// A source made outside the style's registry is added only if its type is
+// the one the registry has by its name, as a layer is.
+#[test]
+fn a_source_of_a_type_the_registry_lacks_is_an_invalid_argument() {
+    let mut style = loaded_style();
+    let stray = Source::new("stray", SourceData::<UnregisteredSource<false>>::new(()));
+    assert_fails(
+        style.apply(Edit::AddSource(stray)),
+        ErrorKind::InvalidArgument,
+        r#"source "stray" is of a source type "unregistered" that the style's registry doesn't have"#,
+    );
+    let impostor = Source::new("impostor", SourceData::<UnregisteredSource<true>>::new(()));
+    assert_fails(style.apply(Edit::AddSource(impostor)), ErrorKind::InvalidArgument, r#"source type "shapes""#);
+    assert!(style.get_sources().is_empty());
+    let shapes = crate::tests::fixture_source::source::<crate::tests::fixture_source::Shapes>("shapes");
+    style.apply(Edit::AddSource(shapes)).unwrap();
+    assert_eq!(style.get_sources().len(), 1);
 }
 
 // A bad property name or value on a live layer is an invalid argument that

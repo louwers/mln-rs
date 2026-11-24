@@ -457,6 +457,9 @@ impl std::fmt::Debug for Source {
 pub trait ErasedStyleSourceType: Send + Sync + 'static {
     fn info(&self) -> SourceTypeInfo;
 
+    /// Whether `source` is a source of this type.
+    fn is_type_of(&self, source: &Source) -> bool;
+
     /// The source `id` of [`StyleSourceType::from_json`]'s data.
     fn create_from_json(
         &self,
@@ -478,6 +481,10 @@ impl<T: 'static> SourceTypeEntry<T> {
 impl<T: StyleSourceType> ErasedStyleSourceType for SourceTypeEntry<T> {
     fn info(&self) -> SourceTypeInfo {
         T::INFO
+    }
+
+    fn is_type_of(&self, source: &Source) -> bool {
+        SourceData::<T>::recover(source).is_some()
     }
 
     fn create_from_json(

@@ -440,6 +440,7 @@ impl Style {
             }
             Edit::AddImages(images) => self.add_images(images),
             Edit::AddSource(source) => {
+                check_source_type(&self.registry, &source)?;
                 if self.sources.get(source.id()).is_some() {
                     return Err(Error::already_exists(format!("source \"{}\" already exists", source.id())));
                 }
@@ -474,6 +475,7 @@ impl Style {
                 let instance = source.instance();
                 if let Some(source) = update(source)? {
                     debug_assert!(source.id() == id && source.instance() == instance, "an update keeps its source");
+                    check_source_type(&self.registry, &source)?;
                     Arc::make_mut(&mut self.sources).set(source);
                 }
             }
@@ -662,6 +664,18 @@ fn set_layer_property(
 
 fn layer_not_found(id: &str) -> Error {
     Error::not_found(format!("layer \"{id}\" does not exist"))
+}
+
+/// Fails when `source` is of a source type other than the one `registry`
+/// has by its name.
+fn check_source_type(registry: &StyleRegistry, source: &Source) -> Result<(), Error> {
+    let name = source.info().name;
+    if registry.source_type(name).is_some_and(|registered| registered.is_type_of(source)) {
+        return Ok(());
+    }
+    let message =
+        format!("source \"{}\" is of a source type \"{name}\" that the style's registry doesn't have", source.id());
+    Err(Error::invalid_argument(message))
 }
 
 /// Fails when `layer`'s source is in `sources` and doesn't feed layers of
