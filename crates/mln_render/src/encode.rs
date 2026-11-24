@@ -75,9 +75,11 @@ pub struct Draw {
     /// order in the order they were pushed.
     pub order: i64,
     /// Whether the draw covers what is behind it, so that it may draw in
-    /// the opaque pass: it does where its layer's evaluation says the layer
-    /// may ([`Evaluation::opaque`](crate::layer::Evaluation::opaque)) and
-    /// the layer draws there (front to back, below the lowest layer of 3D
+    /// the opaque pass: it does where it writes the depth it tests, its
+    /// group doesn't composite ([`Group::composite`]), its layer's
+    /// evaluation says the layer may
+    /// ([`Evaluation::opaque`](crate::layer::Evaluation::opaque)) and the
+    /// layer draws there (front to back, below the lowest layer of 3D
     /// geometry on a flat map), and otherwise in the translucent pass. It
     /// draws once, in one of the two. A draw that isn't opaque draws in the
     /// translucent pass.
@@ -328,8 +330,14 @@ impl Group {
         tiles: impl IntoIterator<Item = UnwrappedTileID>,
     ) {
         let Group { frame, pushes, opaque, .. } = self;
-        pushes.pushed.sort_unstable_by_key(|pushed| (pushed.draw.order, pushed.index));
         frame.draws.clear();
+        frame.stencil_tiles.clear();
+        let clips = pushes.pushed.iter().any(|pushed| pushed.draw.clip);
+        // A composited group draws into its texture in the translucent
+        // pass alone, and an opaque draw that writes no depth would show
+        // the lower groups that the opaque pass draws after it.
+        let opaque = *opaque && frame.composite.is_none();
+        pushes.pushed.sort_unstable_by_key(|pushed| (pushed.draw.order, pushed.index));
         let mut counts: SmallVec<[u32; 4]> = SmallVec::new();
         for pushed in &pushes.pushed {
             let run = frame.run(pushed.program);
@@ -341,13 +349,14 @@ impl Group {
                 mesh: pushed.mesh,
                 run: run as u16,
                 element,
-                opaque: pushed.draw.opaque && *opaque,
+                opaque: pushed.draw.opaque
+                    && opaque
+                    && matches!(pushed.draw.depth, Depth::Layer { write: true, .. } | Depth::Volume { write: true, .. }),
                 depth: pushed.draw.depth,
                 clip: pushed.draw.clip,
             });
         }
-        frame.stencil_tiles.clear();
-        if pushes.pushed.iter().any(|pushed| pushed.draw.clip) {
+        if clips {
             frame.stencil_tiles.extend(tiles);
         }
         for (run, Run { program, buffers }) in frame.runs.iter_mut().enumerate() {
@@ -991,14 +1000,36 @@ mod tests {
     fn an_opaque_draw_is_opaque_only_where_its_layer_may_draw_opaque() {
         crate::tests::with_context(|gpu, context| {
             let mesh = mesh(context);
+            let writes = Draw { opaque: true, depth: Depth::Layer { sub_layer: 0, write: true }, ..Draw::DEFAULT };
             let mut group = Group::new();
             for layer_opaque in [false, true] {
                 group.begin(0.0, layer_opaque, false);
-                group.push(&mesh, Draw { opaque: true, ..Draw::DEFAULT }, ()).push(&mesh, Draw::DEFAULT, ());
+                group.push(&mesh, writes, ()).push(&mesh, Draw::DEFAULT, ());
                 group.finish(gpu, context, &(), []);
                 let opaque: Vec<bool> = group.frame.draws.iter().map(|draw| draw.opaque).collect();
                 assert_eq!(opaque, [layer_opaque, false]);
             }
+        });
+    }
+
+    #[test]
+    fn an_opaque_draw_that_writes_no_depth_or_composites_draws_translucent() {
+        crate::tests::with_context(|gpu, context| {
+            let mesh = mesh(context);
+            let writes = Draw { opaque: true, depth: Depth::Layer { sub_layer: 0, write: true }, ..Draw::DEFAULT };
+            let mut group = Group::new();
+            group.begin(0.0, true, false);
+            group.push(&mesh, writes, ()).push(&mesh, Draw { depth: Depth::Off, ..writes }, ());
+            group.push(&mesh, Draw { opaque: true, ..Draw::DEFAULT }, ());
+            group.finish(gpu, context, &(), []);
+            let opaque: Vec<bool> = group.frame.draws.iter().map(|draw| draw.opaque).collect();
+            assert_eq!(opaque, [true, false, false]);
+
+            group.begin(0.0, true, false);
+            assert!(group.composite(Composite::of(0.5, mln_style_types::types::LayerBlendType::Normal).expect("a composite")));
+            group.push(&mesh, writes, ());
+            group.finish(gpu, context, &(), []);
+            assert!(!group.frame.draws[0].opaque, "an opaque draw of a composited group");
         });
     }
 
