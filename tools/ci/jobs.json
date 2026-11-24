@@ -77,5 +77,6 @@
     "backend": "webgpu",
     "coverage": "true"
   },
+  { "job": "device-farm", "unit": "android" },
   { "job": "web", "unit": "web" }
 ]

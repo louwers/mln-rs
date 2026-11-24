@@ -340,6 +340,40 @@ jobs:
           path: target/*/tmp/render_tests*
           if-no-files-found: ignore
 
+  # The Android tests, built for AWS Device Farm's phones (`mise run
+  # device-farm:package`, tools/device-farm/README.md). The device-farm
+  # workflow runs the package once CI completes, with credentials that this
+  # workflow doesn't get, so pull requests from forks get the run too.
+  device-farm:
+    needs: plan
+    if:
+      github.event.pull_request.state != 'closed' &&
+      contains(fromJSON(needs.plan.outputs.jobs), 'device-farm')
+    runs-on: blacksmith-4vcpu-ubuntu-2604
+    timeout-minutes: 40
+    steps:
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-ci-deps
+        with:
+          mise-env: target-android
+          save-rust-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Package
+        run: mise run device-farm:package
+
+      - name: Upload the package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-device-tests
+          path: target/device-farm/android-tests.zip
+          retention-days: 3
+          # The package's archives are compressed already.
+          compression-level: 0
+          if-no-files-found: error
+
   # The browser build in headless Chromium (`mise run web:check --profile
   # release`, examples/web/README.md): views of the render suite, served offline from
   # its cache database to the page with its tile workers in Web Workers, each
@@ -517,7 +551,18 @@ jobs:
   # be skipped.
   ci-passed:
     needs:
-      [plan, lint, package, test, backend, target, web, web-preview, commits]
+      [
+        plan,
+        lint,
+        package,
+        test,
+        backend,
+        target,
+        device-farm,
+        web,
+        web-preview,
+        commits,
+      ]
     if: always() && github.event.pull_request.state != 'closed'
     runs-on: blacksmith-2vcpu-ubuntu-2604
     timeout-minutes: 5

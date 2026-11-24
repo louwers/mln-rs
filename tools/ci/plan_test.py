@@ -82,7 +82,8 @@ class UnitConfigTest(unittest.TestCase):
         needs_match = re.search(r"^\s+needs:\s*\[([^\]]+)\]", ci_passed, re.MULTILINE)
         self.assertIsNotNone(needs_match, "ci-passed must declare needs")
         assert needs_match is not None
-        needs = {item.strip() for item in needs_match.group(1).split(",")}
+        # A list that wraps ends in a comma.
+        needs = {item.strip() for item in needs_match.group(1).split(",") if item.strip()}
         self.assertEqual(needs, defined - {"ci-passed"})
 
 
@@ -91,7 +92,13 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(names(selected(None)), names(catalog()))
 
     def test_planned_units_run_only_their_jobs_and_always_on_jobs(self) -> None:
-        for units in (["macos"], ["linux-arm64"], ["web", "package"], ["linux-x64"]):
+        for units in (
+            ["macos"],
+            ["linux-arm64"],
+            ["android"],
+            ["web", "package"],
+            ["linux-x64"],
+        ):
             with self.subTest(units=units):
                 self.assertEqual(names(selected(units)), ALWAYS | unit_names(*units))
 

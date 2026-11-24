@@ -20,3 +20,25 @@ default-filter = """
     | package(mln-rs-d3d12) | package(mln-rs-webgpu)
 ) & not test(=render_tests::render_tests_through_the_codec)
 """
+
+# The Android tests on AWS Device Farm's phones (tools/device-farm): the tests
+# that CI's target jobs run, with a JUnit report among the run's artifacts.
+# Without the tests of proc-macro crates, which are built for the host, and the
+# render runner's worker processes, which run the render-test binary that a
+# phone's copy of the package lacks. So the render suite runs in the test's
+# process there (tests/suite.rs), and takes longer than the slow timeout allows
+# elsewhere.
+[profile.device-farm]
+default-filter = """
+platform(target)
+& not test(=render_tests::render_tests_through_the_codec)
+& not (package(mln-rs-render-test) & test(/^jobs::/))
+"""
+fail-fast = false
+
+[profile.device-farm.junit]
+path = "junit.xml"
+
+[[profile.device-farm.overrides]]
+filter = "test(=render_tests::render_tests)"
+slow-timeout = { period = "60s", terminate-after = 45 }

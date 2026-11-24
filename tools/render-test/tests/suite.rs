@@ -11,7 +11,10 @@
 //
 // The tests run in worker processes of the package's render-test binary
 // (`--jobs`, src/jobs.rs): one per CPU, or $RENDER_TEST_JOBS (1: in the
-// test's process).
+// test's process). A device runs the test from a copy of its package, without
+// that binary, so there they run in the test's process, and write to the
+// directory that $MLN_RENDER_TEST_OUTPUT names, since the build's
+// CARGO_TARGET_TMPDIR is on another machine.
 
 use std::path::{Path, PathBuf};
 
@@ -31,14 +34,18 @@ pub(crate) fn run(name: &str, args: &[&str], factory: Option<ImplFactory>) -> i3
             _ => "manifests/linux-wgpu.json",
         }
     };
-    let output = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
-    let jobs = std::env::var("RENDER_TEST_JOBS").unwrap_or_else(|_| "0".to_string());
+    let output = std::env::var_os("MLN_RENDER_TEST_OUTPUT")
+        .map_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")), PathBuf::from)
+        .join(name);
+    let worker = Path::new(env!("CARGO_BIN_EXE_render-test"));
+    let jobs =
+        std::env::var("RENDER_TEST_JOBS").unwrap_or_else(|_| if worker.exists() { "0" } else { "1" }.to_string());
     let mut argv =
         vec!["render-test", "--manifestPath", manifest, "--output", output.to_str().unwrap(), "--jobs", &jobs];
     argv.extend(args);
     match parse_arguments(&argv.iter().map(ToString::to_string).collect::<Vec<_>>()) {
         Ok(mut arguments) => {
-            arguments.worker_program = Some(PathBuf::from(env!("CARGO_BIN_EXE_render-test")));
+            arguments.worker_program = Some(worker.to_path_buf());
             run_render_tests_with(&arguments, factory).return_code
         }
         Err(code) => code,
