@@ -185,6 +185,14 @@ struct Texture {
     mipmapped: bool,
 }
 
+struct Sampler {
+    object: SamplerID,
+    /// Non-mipmapped twin used when a mipmapped sampler is bound to a
+    /// single-level texture, so drivers such as older Mesa llvmpipe do not
+    /// apply anisotropic multi-tap filtering on level 0.
+    unmipmapped: Option<SamplerID>,
+}
+
 /// A uniform block of a program.
 pub(crate) struct Block {
     /// The block's binding point: its uniform or storage buffer id.
@@ -451,7 +459,7 @@ pub struct GlGpu {
     /// The storage buffers' elements.
     elements: SlotMap<ElementsId, Elements>,
     textures: SlotMap<TextureId, Texture>,
-    samplers: SlotMap<SamplerId, SamplerID>,
+    samplers: SlotMap<SamplerId, Sampler>,
     /// The source each program compiles from.
     sources: Sources<ShaderSource>,
     shaders: SlotMap<ShaderId, Program>,
@@ -1339,25 +1347,41 @@ impl Gpu for GlGpu {
         let anisotropy = f32::from(state.anisotropy()).min(self.max_anisotropy);
         let sampler = self.current(|gpu| {
             let gl = gpu.context.gl();
+            let make = |min_filter: i32, max_anisotropy: f32| {
+                // SAFETY: the sampler is new, and the parameters are GL ES 3.0's
+                // or the anisotropy extension's, which the context has.
+                unsafe {
+                    let sampler = gl.create_sampler().map_err(GpuError::Invalid)?;
+                    gl.sampler_parameter_i32(sampler, glow::TEXTURE_MIN_FILTER, min_filter);
+                    gl.sampler_parameter_i32(sampler, glow::TEXTURE_MAG_FILTER, enums::texture_filter(state.filter));
+                    gl.sampler_parameter_i32(sampler, glow::TEXTURE_WRAP_S, enums::texture_wrap(state.wrap_u));
+                    gl.sampler_parameter_i32(sampler, glow::TEXTURE_WRAP_T, enums::texture_wrap(state.wrap_v));
+                    if max_anisotropy > 1.0 {
+                        gl.sampler_parameter_f32(sampler, TEXTURE_MAX_ANISOTROPY, max_anisotropy);
+                    }
+                    Ok::<_, GpuError>(sampler)
+                }
+            };
             let min_filter = match (state.filter, state.mipmapped) {
                 (TextureFilterType::Nearest, false) => glow::NEAREST,
                 (TextureFilterType::Linear, false) => glow::LINEAR,
                 (TextureFilterType::Nearest, true) => glow::NEAREST_MIPMAP_LINEAR,
                 (TextureFilterType::Linear, true) => glow::LINEAR_MIPMAP_LINEAR,
             };
-            // SAFETY: the sampler is new, and the parameters are GL ES 3.0's
-            // or the anisotropy extension's, which the context has.
-            unsafe {
-                let sampler = gl.create_sampler().map_err(GpuError::Invalid)?;
-                gl.sampler_parameter_i32(sampler, glow::TEXTURE_MIN_FILTER, min_filter as i32);
-                gl.sampler_parameter_i32(sampler, glow::TEXTURE_MAG_FILTER, enums::texture_filter(state.filter));
-                gl.sampler_parameter_i32(sampler, glow::TEXTURE_WRAP_S, enums::texture_wrap(state.wrap_u));
-                gl.sampler_parameter_i32(sampler, glow::TEXTURE_WRAP_T, enums::texture_wrap(state.wrap_v));
-                if anisotropy > 1.0 {
-                    gl.sampler_parameter_f32(sampler, TEXTURE_MAX_ANISOTROPY, anisotropy);
+            let object = make(min_filter as i32, anisotropy)?;
+            let unmipmapped = if state.mipmapped {
+                match make(enums::texture_filter(state.filter), 1.0) {
+                    Ok(twin) => Some(twin),
+                    Err(error) => {
+                        // SAFETY: `object` was just created and is not bound.
+                        unsafe { gl.delete_sampler(object) };
+                        return Err(error);
+                    }
                 }
-                Ok::<_, GpuError>(sampler)
-            }
+            } else {
+                None
+            };
+            Ok::<_, GpuError>(Sampler { object, unmipmapped })
         })?;
         Ok(self.samplers.insert(sampler))
     }
@@ -1460,10 +1484,16 @@ impl Gpu for GlGpu {
                 .ok_or_else(|| {
                     GpuError::Invalid(format!("{} samples texture {texture_slot}, which no entry binds", program.name))
                 })?;
+            let texture_entry = self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?;
+            let sampler_entry = self.samplers.get(sampler).ok_or(GpuError::UnknownId("sampler"))?;
             textures.push(TextureBinding {
                 unit: texture_slot as u32,
-                texture: self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?.object.name(),
-                sampler: *self.samplers.get(sampler).ok_or(GpuError::UnknownId("sampler"))?,
+                texture: texture_entry.object.name(),
+                sampler: if texture_entry.mipmapped {
+                    sampler_entry.object
+                } else {
+                    sampler_entry.unmipmapped.unwrap_or(sampler_entry.object)
+                },
             });
         }
         let has_elements = blocks.iter().any(|block| matches!(block.range, BlockRange::Element { .. }));
@@ -1532,9 +1562,11 @@ impl Gpu for GlGpu {
             ResourceId::Sampler(id) => {
                 if let Some(sampler) = self.samplers.remove(id) {
                     self.delete(|gl, state| {
-                        state.forget_sampler(sampler);
-                        // SAFETY: the sampler is alive, and only this backend's.
-                        unsafe { gl.delete_sampler(sampler) };
+                        for object in [Some(sampler.object), sampler.unmipmapped].into_iter().flatten() {
+                            state.forget_sampler(object);
+                            // SAFETY: the sampler is alive, and only this backend's.
+                            unsafe { gl.delete_sampler(object) };
+                        }
                     });
                 }
             }
@@ -1799,8 +1831,10 @@ impl Drop for GlGpu {
                 gl.delete_texture(name);
             }
             for (_, sampler) in self.samplers.drain() {
-                state.forget_sampler(sampler);
-                gl.delete_sampler(sampler);
+                for object in [Some(sampler.object), sampler.unmipmapped].into_iter().flatten() {
+                    state.forget_sampler(object);
+                    gl.delete_sampler(object);
+                }
             }
             for &framebuffer in self.framebuffers.values() {
                 state.forget_framebuffer(framebuffer);
