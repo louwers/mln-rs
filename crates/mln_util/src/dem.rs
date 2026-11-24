@@ -3,7 +3,7 @@
 //! the same `f32` operations, in the same order: hillshade's and color
 //! relief's decode texels as [`DemUnpack::decode`] does, and terrain's read
 //! heights as [`sample`] does, so that what the CPU reads of the ground is
-//! what the GPU draws. `mln_gfx`'s conformance case `terrain_heights` checks
+//! what the GPU draws. `mln_layers`' conformance case `terrain_heights` checks
 //! each backend against [`sample`].
 //!
 //! A DEM tile of `dim` pixels a side is kept behind a one-texel border, so

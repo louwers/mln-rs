@@ -122,7 +122,7 @@ It fails when a frame differs too much, when the page or a worker logs an error,
 or when a view's tiles get no worker replies. Two views also drag and pinch the
 map over a slow network first, and log the URLs it fetches again
 (`crates/mln_render/src/tests/fast_camera_test.rs` tests the gestures' tile
-requests on a modeled network). It also runs mln_gfx's conformance case of
+requests on a modeled network). It also runs mln_layers' conformance case of
 writes from JS arrays on a GPU of the map's backend, and checks that a panic
 stops the page, and that the GL JS comparison lines up. The page's WebGPU frames
 come from SwiftShader, its WebGL2 ones from the first device ANGLE's Vulkan
