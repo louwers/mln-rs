@@ -1517,22 +1517,37 @@ impl RenderOrchestrator {
 
         let proj_matrix = self.view.projection_matrix_with(self.view.near_z(), false);
 
+        // Over terrain, a layer that drapes is found on the ground the frame
+        // drew, where the query's lines of sight meet it; the others draw
+        // flat, at sea level, and are found there.
+        let ground = self.terrain.ground().map(|ground| -> &dyn mln_map_types::Elevation { ground });
         // Traced once for every source. Symbols are found where they were
         // placed, on the screen, so they take the geometry as it is.
-        let traced = crate::geometry::feature_index::query_screen_geometry(&self.view, geometry);
+        let traced = crate::geometry::feature_index::query_screen_geometry(&self.view, geometry, ground.is_some());
         let mut results_by_layer = crate::geometry::feature_index::QueryResults::default();
-        for source_id in &source_ids {
-            if let Some(source) = self.source_tiles(source_id) {
-                let source_results = source.query_rendered_features(
-                    &traced,
-                    &self.view,
-                    &filtered_layers,
-                    options,
-                    self.global_state.as_deref(),
-                    &proj_matrix,
-                )?;
-                for (layer_id, features) in source_results {
-                    results_by_layer.entry(layer_id).or_insert(features);
+        for on_ground in [false, true] {
+            let layers: crate::geometry::feature_index::QueryLayers<'_> = filtered_layers
+                .iter()
+                .filter(|(_, layer)| (ground.is_some() && layer.drapes()) == on_ground)
+                .map(|(id, layer)| (id.clone(), *layer))
+                .collect();
+            if layers.is_empty() {
+                continue;
+            }
+            for source_id in &source_ids {
+                if let Some(source) = self.source_tiles(source_id) {
+                    let source_results = source.query_rendered_features(
+                        &traced,
+                        ground.filter(|_| on_ground),
+                        &self.view,
+                        &layers,
+                        options,
+                        self.global_state.as_deref(),
+                        &proj_matrix,
+                    )?;
+                    for (layer_id, features) in source_results {
+                        results_by_layer.entry(layer_id).or_insert(features);
+                    }
                 }
             }
         }

@@ -64,6 +64,13 @@ fn ridge_height(north: f64) -> f64 {
     if across.abs() >= 1.0 { 0.0 } else { 400.0 * (across * PI / 2.0).cos().powi(2) }
 }
 
+/// The location `north` and `east` meters from [`CENTER`], as longitude and
+/// latitude.
+fn offset(north: f64, east: f64) -> (f64, f64) {
+    let (lon, lat) = CENTER;
+    (lon + east / (METERS_PER_DEGREE * lat.to_radians().cos()), lat + north / METERS_PER_DEGREE)
+}
+
 /// The DEM tile `tile` of the ridge, in the Mapbox encoding.
 fn ridge_png(tile: &TileData) -> Vec<u8> {
     tile_png(tile, 256, |north, _| {
@@ -142,6 +149,15 @@ fn render_with_altitude(
     style: &str,
     tile: impl Fn(&str, &TileData) -> Vec<u8> + Send + Sync + 'static,
 ) -> Option<(PremultipliedImage, f64)> {
+    let (image, map, _) = still(style, tile)?;
+    Some((image, map.transform_state().view().center_altitude()))
+}
+
+/// [`render`]'s still image, with the map and the frontend that drew it.
+fn still(
+    style: &str,
+    tile: impl Fn(&str, &TileData) -> Vec<u8> + Send + Sync + 'static,
+) -> Option<(PremultipliedImage, Map, HeadlessFrontend)> {
     let size = Size::new(SIDE, SIDE);
     let run_loop = Queue::new();
     let pool = Pool::new(4);
@@ -169,7 +185,7 @@ fn render_with_altitude(
     let camera = map.style().get_default_camera();
     map.jump_to(&camera);
     let image = frontend.render(&mut map).expect("the still image").image;
-    Some((image, map.transform_state().view().center_altitude()))
+    Some((image, map, frontend))
 }
 
 /// The centroid of the pixels of `image` near `rgb`, and how many there are.
@@ -331,4 +347,148 @@ fn a_globe_camera_at_zoom_13_stands_on_a_plateau() {
         assert_eq!([0, 255, 0, 255], image.data[start..start + 4], "the ground at row {y}");
     }
     assert!((altitude - PLATEAU).abs() < 1.0, "the center stands {altitude} m up");
+}
+
+/// A map at zoom 14 pitched 55° over the ridge, on the globe if `globe`: a
+/// red square 80 m across on the crest, a fill, which drapes over the
+/// ground, and a blue circle south of the ridge, which draws flat, at sea
+/// level.
+fn query_style(globe: bool) -> String {
+    let projection = if globe { r#""projection": {"type": "vertical-perspective"},"# } else { "" };
+    let (lon, lat) = CENTER;
+    let ring: Vec<String> = [(140.0, -40.0), (140.0, 40.0), (220.0, 40.0), (220.0, -40.0), (140.0, -40.0)]
+        .iter()
+        .map(|&(north, east)| {
+            let (lon, lat) = offset(north, east);
+            format!("[{lon}, {lat}]")
+        })
+        .collect();
+    let (circle_lon, circle_lat) = offset(-150.0, 0.0);
+    format!(
+        r#"{{
+            "version": 8,
+            "center": [{lon}, {lat}],
+            "zoom": 14,
+            "pitch": 55,
+            {projection}
+            "terrain": {{"source": "dem"}},
+            "sources": {{
+                "dem": {{"type": "raster-dem", "tiles": ["dem/{{z}}/{{x}}/{{y}}.png"], "tileSize": 256, "maxzoom": 15}},
+                "square": {{"type": "geojson", "data": {{"type": "Polygon", "coordinates": [[{}]]}}}},
+                "circle": {{"type": "geojson", "data": {{"type": "Point", "coordinates": [{circle_lon}, {circle_lat}]}}}}
+            }},
+            "layers": [
+                {{"id": "background", "type": "background", "paint": {{"background-color": "white"}}}},
+                {{"id": "square", "type": "fill", "source": "square", "paint": {{"fill-color": "rgb(255, 0, 0)"}}}},
+                {{"id": "circle", "type": "circle", "source": "circle",
+                  "paint": {{"circle-color": "rgb(0, 0, 255)", "circle-radius": 6}}}}
+            ]
+        }}"#,
+        ring.join(", "),
+    )
+}
+
+/// Over a 400 m ridge, on the globe as on Mercator, a rendered query finds
+/// a fill draped on the crest at the pixels where it draws, and nothing a
+/// few pixels above its top edge, where the line of sight passes over it to
+/// the ground beyond; at sea level under those pixels lie the slope beyond
+/// the crest. A circle, which draws flat over the terrain, is found where it
+/// draws too.
+#[test]
+fn a_rendered_query_over_terrain_finds_a_draped_fill_where_it_draws() {
+    use mln_renderer::query::RenderedQueryOptions;
+    use mln_util::geo::ScreenCoordinate;
+
+    for globe in [true, false] {
+        let Some((image, _, mut frontend)) = still(&query_style(globe), |_, tile| ridge_png(tile)) else {
+            return;
+        };
+        let mut found = |layer: &str, x: f64, y: f64| {
+            let options = RenderedQueryOptions::new(Some(vec![layer.to_owned()]), None);
+            frontend.renderer().query_rendered_features_at_point(&ScreenCoordinate::new(x, y), &options).unwrap().len()
+        };
+        let ((x, y), count) = centroid(&image, [255, 0, 0]);
+        assert!(count > 20, "globe {globe}: the square shows: {count} px");
+        let top = (0..SIDE as usize)
+            .find(|&row| {
+                let pixel = image.data.as_chunks::<4>().0[row * SIDE as usize + x.round() as usize];
+                pixel[0] > 200 && pixel[1] < 64 && pixel[2] < 64
+            })
+            .expect("the square's top edge") as f64;
+        assert_eq!(1, found("square", x, y), "globe {globe}: the square where it draws, at {x}, {y}");
+        assert_eq!(0, found("square", x, top - 4.0), "globe {globe}: nothing above the square's top edge at {top}");
+
+        let ((x, y), count) = centroid(&image, [0, 0, 255]);
+        assert!(count > 20, "globe {globe}: the circle shows: {count} px");
+        assert_eq!(1, found("circle", x, y), "globe {globe}: the circle where it draws, at {x}, {y}");
+    }
+}
+
+/// The DEM tile `tile` of sea level with a block 1000 m high in each corner
+/// of the view, more than 300 m north or south and east or west of the
+/// center, in the Mapbox encoding.
+fn corner_blocks_png(tile: &TileData) -> Vec<u8> {
+    tile_png(tile, 256, |north, east| {
+        let height: f64 = if north.abs() > 300.0 && east.abs() > 300.0 { 1000.0 } else { 0.0 };
+        let value = ((height + 10000.0) * 10.0).round() as u32;
+        [(value >> 16) as u8, (value >> 8) as u8, value as u8, 255]
+    })
+}
+
+/// A box query over uneven terrain finds a fill drawn inside the box, on the
+/// globe as on Mercator: seen from straight above, raised blocks under the
+/// box's corners meet its corners' lines of sight nearer the center than
+/// the sea level beside them, where a small fill near the middle of the
+/// box's east edge draws.
+#[test]
+fn a_box_query_over_uneven_terrain_finds_a_fill_inside_it() {
+    use mln_renderer::query::RenderedQueryOptions;
+    use mln_util::geo::ScreenCoordinate;
+
+    for globe in [true, false] {
+        let ring: Vec<String> = [(-20.0, 480.0), (-20.0, 520.0), (20.0, 520.0), (20.0, 480.0), (-20.0, 480.0)]
+            .iter()
+            .map(|&(north, east)| {
+                let (lon, lat) = offset(north, east);
+                format!("[{lon}, {lat}]")
+            })
+            .collect();
+        let projection = if globe { r#""projection": {"type": "vertical-perspective"},"# } else { "" };
+        let (lon, lat) = CENTER;
+        let style = format!(
+            r#"{{
+                "version": 8,
+                "center": [{lon}, {lat}],
+                "zoom": 14,
+                {projection}
+                "terrain": {{"source": "dem"}},
+                "sources": {{
+                    "dem": {{"type": "raster-dem", "tiles": ["dem/{{z}}/{{x}}/{{y}}.png"], "tileSize": 256, "maxzoom": 15}},
+                    "square": {{"type": "geojson", "data": {{"type": "Polygon", "coordinates": [[{}]]}}}}
+                }},
+                "layers": [
+                    {{"id": "background", "type": "background", "paint": {{"background-color": "white"}}}},
+                    {{"id": "square", "type": "fill", "source": "square", "paint": {{"fill-color": "rgb(255, 0, 0)"}}}}
+                ]
+            }}"#,
+            ring.join(", "),
+        );
+        let Some((image, _, mut frontend)) = still(&style, |_, tile| corner_blocks_png(tile)) else {
+            return;
+        };
+        let ((x, y), count) = centroid(&image, [255, 0, 0]);
+        assert!(count > 10, "globe {globe}: the fill shows: {count} px");
+        let (min, max) = (8.0, f64::from(SIDE) - 8.0);
+        assert!(x < max && y > min && y < max, "globe {globe}: the fill draws inside the box, at {x}, {y}");
+        let options = RenderedQueryOptions::new(Some(vec!["square".to_owned()]), None);
+        let found = frontend
+            .renderer()
+            .query_rendered_features_in_box(
+                &ScreenCoordinate::new(min, min),
+                &ScreenCoordinate::new(max, max),
+                &options,
+            )
+            .unwrap();
+        assert_eq!(1, found.len(), "globe {globe}: the box finds the fill at {x}, {y}");
+    }
 }

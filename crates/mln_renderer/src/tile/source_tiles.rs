@@ -1138,9 +1138,14 @@ impl SourceTiles {
     /// The features the source's rendered tiles draw in `geometry`, screen
     /// points from the top left, traced past the globe's limb
     /// ([`query_screen_geometry`](crate::geometry::feature_index::query_screen_geometry)).
+    /// With `ground`, the ground a frame drew of the terrain, a point finds
+    /// features where its line of sight first meets the ground; else, and
+    /// where it meets none, on the flat map at sea level.
+    #[expect(clippy::too_many_arguments, reason = "the query's geometry, ground, camera, layers and options")]
     pub(crate) fn query_rendered_features(
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
+        ground: Option<&dyn mln_map_types::Elevation>,
         view: &mln_map_types::View,
         layers: &crate::geometry::feature_index::QueryLayers<'_>,
         options: &crate::query::RenderedQueryOptions,
@@ -1157,16 +1162,18 @@ impl SourceTiles {
         }
 
         let height = f64::from(view.size().height);
-        let to_world = |p: &mln_util::geo::ScreenCoordinate| {
-            TileCoordinate::from_screen_coordinate(view, 0, &mln_util::geo::ScreenCoordinate::new(p.x, height - p.y)).p
-        };
         let globe = view.is_globe();
+        let up = |p: &mln_util::geo::ScreenCoordinate| mln_util::geo::ScreenCoordinate::new(p.x, height - p.y);
+        let on_ground =
+            |p: &mln_util::geo::ScreenCoordinate| ground.and_then(|ground| view.ground_under(&up(p), ground));
+        let to_world = |p: &mln_util::geo::ScreenCoordinate| match on_ground(p) {
+            // On the main world, where the globe's sea-level points are.
+            Some(hit) if globe => geometry::Point::new(hit.world.x.rem_euclid(1.0), hit.world.y),
+            Some(hit) => geometry::Point::new(hit.world.x, hit.world.y),
+            None => TileCoordinate::from_screen_coordinate(view, 0, &up(p)).p,
+        };
         let on_planet = |p: &mln_util::geo::ScreenCoordinate| {
-            VerticalPerspectiveProjection::screen_coordinate_hits_globe(
-                view,
-                &mln_util::geo::ScreenCoordinate::new(p.x, height - p.y),
-                0.0,
-            )
+            VerticalPerspectiveProjection::screen_coordinate_hits_globe(view, &up(p), 0.0) || on_ground(p).is_some()
         };
 
         let mut query_geometry: Vec<geometry::Point<f64>> = geometry.iter().map(to_world).collect();

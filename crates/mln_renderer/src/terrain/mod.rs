@@ -247,6 +247,11 @@ impl RenderTerrain {
         grounded
     }
 
+    /// The ground the last update's cover drew, while terrain draws.
+    pub(crate) fn ground(&self) -> Option<&TerrainElevation> {
+        self.elevation.as_deref()
+    }
+
     /// The drapes of the last frame.
     #[cfg(test)]
     pub(crate) fn drapes(&self) -> &Drapes {

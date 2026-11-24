@@ -59,11 +59,16 @@ pub(crate) struct QueryRegion<'a> {
 }
 
 /// The screen points, from the top left of `view`, that a query of
-/// `geometry` tests. Past the globe's limb a query meets the planet only at
-/// the horizon, and a point there stands for the nearest horizon point, so
-/// a query's corners alone would cut the limb off: on the globe, the edges
-/// of a geometry that reaches past the planet are followed in steps.
-pub(crate) fn query_screen_geometry<'a>(view: &View, geometry: &'a [ScreenCoordinate]) -> Cow<'a, [ScreenCoordinate]> {
+/// `geometry` tests. A geometry's edges are followed in steps where its
+/// corners alone would cut off part of what it covers: past the globe's
+/// limb, where a point stands for the nearest horizon point, and over
+/// terrain (`over_terrain`), where the ground an edge passes over doesn't
+/// lie between the ground under its ends.
+pub(crate) fn query_screen_geometry<'a>(
+    view: &View,
+    geometry: &'a [ScreenCoordinate],
+    over_terrain: bool,
+) -> Cow<'a, [ScreenCoordinate]> {
     const STEPS: i32 = 32;
     let height = f64::from(view.size().height);
     let on_planet = |p: &ScreenCoordinate| {
@@ -73,7 +78,8 @@ pub(crate) fn query_screen_geometry<'a>(view: &View, geometry: &'a [ScreenCoordi
             0.0,
         )
     };
-    if !view.is_globe() || geometry.len() < 2 || geometry.iter().all(on_planet) {
+    let past_limb = || view.is_globe() && !geometry.iter().all(on_planet);
+    if geometry.len() < 2 || !(over_terrain || past_limb()) {
         return Cow::Borrowed(geometry);
     }
     let mut traced = Vec::with_capacity((geometry.len() - 1) * STEPS as usize + 1);
