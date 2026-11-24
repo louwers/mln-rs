@@ -2653,6 +2653,190 @@ highp float ground_height(highp vec2 pos, highp vec4 dem_coords, highp vec4 unpa
     };
 }
 
+/// How a hillshade shades its slopes: its tile and evaluated blocks, and
+/// `hillshade`, which writes to `fragColor` a slope shaded by the lights of
+/// `HillshadeEvaluatedPropsUBO`. A macro, so that `concat!` puts it in the
+/// fragment stages of the hillshade and of the terrain's surface, which
+/// shades a drape of a hillshade's slopes.
+macro_rules! hillshade_shading {
+    () => {
+        r#"layout(std140) uniform HillshadeTilePropsUBO {
+    highp vec2 u_latrange;
+    highp float u_exaggeration;
+    highp int u_method;           // Hillshade method (0: STANDARD, 1: COMBINED, 2: IGOR, 3: MULTIDIRECTIONAL, 4: BASIC)
+    highp int u_num_lights;       // Number of light sources (1-4)
+    highp float u_pad0;
+    highp float u_pad1;
+    highp float u_pad2;
+};
+layout(std140) uniform HillshadeEvaluatedPropsUBO {
+    highp vec4 u_accent;
+    highp vec4 u_altitudes;       // Up to 4 altitude values (in radians)
+    highp vec4 u_azimuths;        // Up to 4 azimuth values (in radians)
+    highp vec4 u_shadows[4];      // Shadow colors (up to 4 lights)
+    highp vec4 u_highlights[4];   // Highlight colors (up to 4 lights)
+};
+
+#define PI 3.141592653589793
+
+#define STANDARD 0
+#define COMBINED 1
+#define IGOR 2
+#define MULTIDIRECTIONAL 3
+#define BASIC 4
+
+float get_aspect(vec2 deriv) {
+    return deriv.x != 0.0 ?
+    atan(deriv.y, -deriv.x) : PI / 2.0 * (deriv.y > 0.0 ? 1.0 : -1.0);
+}
+
+// MapLibre's legacy hillshade algorithm (Method 0)
+void standard_hillshade(vec2 deriv) {
+    float azimuth = u_azimuths.x + PI;
+    float slope = atan(0.625 * length(deriv));
+    float aspect = get_aspect(deriv);
+
+    // Note: This implementation uses u_exaggeration as intensity, though it typically should be derived from u_altitudes.x.
+    float intensity = u_exaggeration;
+
+    // Scale the slope exponentially based on intensity
+    float base = 1.875 - intensity * 1.75;
+    float maxValue = 0.5 * PI;
+    float scaledSlope = abs(intensity - 0.5) > 1e-6 ? ((pow(base, slope) - 1.0) / (pow(base, maxValue) - 1.0)) * maxValue : slope;
+
+    float accent = cos(scaledSlope);
+    vec4 accent_color = (1.0 - accent) * u_accent * clamp(intensity * 2.0, 0.0, 1.0);
+
+    // Calculate shadow/highlight based on aspect
+    float shade = abs(mod((aspect + azimuth) / PI + 0.5, 2.0) - 1.0);
+    vec4 shade_color = mix(u_shadows[0], u_highlights[0], shade) * sin(scaledSlope) * clamp(intensity * 2.0, 0.0, 1.0);
+
+    fragColor = accent_color * (1.0 - shade_color.a) + shade_color;
+}
+
+// Basic directional hillshade (Method 4)
+void basic_hillshade(vec2 deriv) {
+    deriv = deriv * u_exaggeration * 2.0; // Exaggerate the slope derivative
+    float azimuth = u_azimuths.x + PI;
+    float cos_az = cos(azimuth);
+    float sin_az = sin(azimuth);
+    float cos_alt = cos(u_altitudes.x);
+    float sin_alt = sin(u_altitudes.x);
+
+    // Calculate the cosine of the angle between the light vector and the surface normal
+    float cang = (sin_alt - (deriv.y * cos_az * cos_alt - deriv.x * sin_az * cos_alt)) / sqrt(1.0 + dot(deriv, deriv));
+    float shade = clamp(cang, 0.0, 1.0); // cang is the hillshade intensity [0, 1]
+
+    // Blend shadow and highlight based on intensity
+    if (shade > 0.5) {
+        fragColor = u_highlights[0] * (2.0 * shade - 1.0); // Highlight strength [0, 1]
+    } else {
+        fragColor = u_shadows[0] * (1.0 - 2.0 * shade);    // Shadow strength [0, 1]
+    }
+}
+
+// Multidirectional hillshade (Method 3)
+void multidirectional_hillshade(vec2 deriv) {
+    deriv = deriv * u_exaggeration * 2.0; // Exaggerate the slope derivative
+    fragColor = vec4(0, 0, 0, 0);
+
+    // Iterate through all light sources (up to u_num_lights, max 4)
+    for (int i = 0; i < 4; i++) {
+        if (i >= u_num_lights) break;
+
+        // Access altitude and azimuth from vec4 UBOs
+        float altitude = (i == 0) ? u_altitudes.x : (i == 1) ? u_altitudes.y : (i == 2) ? u_altitudes.z : u_altitudes.w;
+        float azimuth = (i == 0) ? u_azimuths.x : (i == 1) ? u_azimuths.y : (i == 2) ? u_azimuths.z : u_azimuths.w;
+
+        float cos_alt = cos(altitude);
+        float sin_alt = sin(altitude);
+        // Negate cos/sin azimuth for correct light direction in the normal calculation
+        float cos_az = -cos(azimuth);
+        float sin_az = -sin(azimuth);
+
+        // Calculate the cosine of the angle between the light vector and the surface normal
+        float cang = (sin_alt - (deriv.y * cos_az * cos_alt - deriv.x * sin_az * cos_alt)) /
+                     sqrt(1.0 + dot(deriv, deriv));
+        float shade = clamp(cang, 0.0, 1.0); // cang is the hillshade intensity [0, 1]
+
+        // Accumulate shadow/highlight contribution from each light
+        if (shade > 0.5) {
+            fragColor += u_highlights[i] * (2.0 * shade - 1.0) / float(u_num_lights);
+        } else {
+            fragColor += u_shadows[i] * (1.0 - 2.0 * shade) / float(u_num_lights);
+        }
+    }
+}
+
+// Combined shadow and highlight method (Method 1)
+void combined_hillshade(vec2 deriv) {
+    // Only supports one light source (index 0)
+    deriv = deriv * u_exaggeration * 2.0;
+    float azimuth = u_azimuths.x + PI;
+    float cos_az = cos(azimuth);
+    float sin_az = sin(azimuth);
+    float cos_alt = cos(u_altitudes.x);
+    float sin_alt = sin(u_altitudes.x);
+
+    // Calculate the angle between the light vector and the surface normal
+    float cang = acos((sin_alt - (deriv.y * cos_az * cos_alt - deriv.x * sin_az * cos_alt)) /
+                      sqrt(1.0 + dot(deriv, deriv)));
+
+    cang = clamp(cang, 0.0, PI / 2.0); // Clamp angle to 90 degrees (half hemisphere)
+
+    // The "shade" and "highlight" components are calculated from cang (angle) and the magnitude of the slope
+    float shade = cang * atan(length(deriv)) * 4.0 / PI / PI;
+    float highlight = (PI / 2.0 - cang) * atan(length(deriv)) * 4.0 / PI / PI;
+
+    fragColor = u_shadows[0] * shade + u_highlights[0] * highlight;
+}
+
+// Igor's shadow/highlight method (Method 2)
+void igor_hillshade(vec2 deriv) {
+    // Only supports one light source (index 0)
+    deriv = deriv * u_exaggeration * 2.0;
+    float aspect = get_aspect(deriv);
+    float azimuth = u_azimuths.x + PI;
+
+    // Slope strength is magnitude of slope vector, normalized to [0, 1]
+    float slope_strength = atan(length(deriv)) * 2.0 / PI;
+
+    // Aspect strength is difference between aspect and light azimuth, normalized to [0, 1]
+    float aspect_strength = 1.0 - abs(mod((aspect + azimuth) / PI + 0.5, 2.0) - 1.0);
+
+    float shadow_strength = slope_strength * aspect_strength;
+    float highlight_strength = slope_strength * (1.0 - aspect_strength);
+
+    fragColor = u_shadows[0] * shadow_strength + u_highlights[0] * highlight_strength;
+}
+
+// Writes to `fragColor` the color of the slope `deriv`, shaded as
+// `u_method` says by the lights of `HillshadeEvaluatedPropsUBO`.
+void hillshade(vec2 deriv) {
+    switch (u_method) {
+        case BASIC:
+            basic_hillshade(deriv);
+            break;
+        case COMBINED:
+            combined_hillshade(deriv);
+            break;
+        case IGOR:
+            igor_hillshade(deriv);
+            break;
+        case MULTIDIRECTIONAL:
+            multidirectional_hillshade(deriv);
+            break;
+        case STANDARD:
+        default:
+            standard_hillshade(deriv);
+            break;
+    }
+}
+
+"#
+    };
+}
+
 /// The surface's and the probe's vertex prelude: the terrain's uniform
 /// block, the height rule, and the height of the surface's vertices.
 macro_rules! terrain_props {
@@ -2661,7 +2845,7 @@ macro_rules! terrain_props {
             r"layout (std140) uniform TerrainPropsUBO {
     highp vec4 u_unpack;
     highp float u_unpack_scale;
-    highp float u_exaggeration;
+    highp float u_terrain_exaggeration;
     highp float u_skirt_length;
     highp float props_pad0;
 };
@@ -2674,7 +2858,7 @@ highp float surface_height(highp vec2 pos, highp vec4 dem_coords) {
     if (pos.y < GLOBE_POLE_NORTH_Y || pos.y > GLOBE_POLE_SOUTH_Y) {
         return 0.0;
     }
-    return ground_height(pos, dem_coords, u_unpack, u_unpack_scale, u_exaggeration);
+    return ground_height(pos, dem_coords, u_unpack, u_unpack_scale, u_terrain_exaggeration);
 }
 
 "
@@ -2687,6 +2871,9 @@ highp float surface_height(highp vec2 pos, highp vec4 dem_coords) {
 /// block, in the colors of the tile's drape. A pole's vertices stand at sea
 /// level. GL stores the drape's rows bottom first, so the drape is sampled
 /// at `1 - v`.
+/// Where the tile's `HillshadeTilePropsUBO` has lights, the drape holds a
+/// hillshade's slopes, premultiplied by its coverage, which the surface
+/// shades with them.
 pub(crate) const TERRAIN_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
         terrain_props!(),
@@ -2707,14 +2894,27 @@ void main() {
 }
 "
     ),
-    fragment: r"in vec2 v_drape_pos;
+    fragment: concat!(
+        hillshade_shading!(),
+        r"in vec2 v_drape_pos;
 
 uniform sampler2D u_drape;
 
 void main() {
-    fragColor = texture(u_drape, v_drape_pos);
+    vec4 color = texture(u_drape, v_drape_pos);
+    if (u_num_lights == 0 || color.a == 0.0) {
+        fragColor = color;
+    } else {
+        // The tile's latitudes run from its north edge, where the drape's
+        // rows start, at a `v` of 1.
+        float latitude = mix(u_latrange[0], u_latrange[1], 1.0 - v_drape_pos.y);
+        vec2 deriv = ((color.rg / color.a) * 8.0 - 4.0) / cos(radians(latitude));
+        hillshade(deriv);
+        fragColor *= color.a;
+    }
 }
-",
+"
+    ),
 };
 
 /// Port-only, for the backend conformance cases: probes of the terrain's
@@ -2733,7 +2933,7 @@ layout (location = 1) in vec4 a_dem_coords;
 flat out highp float v_height;
 
 void main() {
-    v_height = ground_height(a_pos.zw, a_dem_coords, u_unpack, u_unpack_scale, u_exaggeration);
+    v_height = ground_height(a_pos.zw, a_dem_coords, u_unpack, u_unpack_scale, u_terrain_exaggeration);
     gl_Position = vec4(a_pos.xy, 0.0, 1.0);
 }
 "
@@ -3054,194 +3254,35 @@ void main() {
     v_pos = a_texture_pos / 8192.0;
 }
 ",
-    fragment: r#"in vec2 v_pos;
+    fragment: concat!(
+        hillshade_shading!(),
+        r#"in vec2 v_pos;
 uniform sampler2D u_image;
-
-layout(std140) uniform HillshadeTilePropsUBO {
-    highp vec2 u_latrange;
-    highp float u_exaggeration;
-    highp int u_method;           // Hillshade method (0: STANDARD, 1: COMBINED, 2: IGOR, 3: MULTIDIRECTIONAL, 4: BASIC)
-    highp int u_num_lights;       // Number of light sources (1-4)
-    highp float u_pad0;
-    highp float u_pad1;
-    highp float u_pad2;
-};
-layout(std140) uniform HillshadeEvaluatedPropsUBO {
-    highp vec4 u_accent;
-    highp vec4 u_altitudes;       // Up to 4 altitude values (in radians)
-    highp vec4 u_azimuths;        // Up to 4 azimuth values (in radians)
-    highp vec4 u_shadows[4];      // Shadow colors (up to 4 lights)
-    highp vec4 u_highlights[4];   // Highlight colors (up to 4 lights)
-};
-
-#define PI 3.141592653589793
-
-#define STANDARD 0
-#define COMBINED 1
-#define IGOR 2
-#define MULTIDIRECTIONAL 3
-#define BASIC 4
-
-float get_aspect(vec2 deriv) {
-    return deriv.x != 0.0 ?
-    atan(deriv.y, -deriv.x) : PI / 2.0 * (deriv.y > 0.0 ? 1.0 : -1.0);
-}
-
-// MapLibre's legacy hillshade algorithm (Method 0)
-void standard_hillshade(vec2 deriv) {
-    float azimuth = u_azimuths.x + PI;
-    float slope = atan(0.625 * length(deriv));
-    float aspect = get_aspect(deriv);
-
-    // Note: This implementation uses u_exaggeration as intensity, though it typically should be derived from u_altitudes.x.
-    float intensity = u_exaggeration;
-
-    // Scale the slope exponentially based on intensity
-    float base = 1.875 - intensity * 1.75;
-    float maxValue = 0.5 * PI;
-    float scaledSlope = abs(intensity - 0.5) > 1e-6 ? ((pow(base, slope) - 1.0) / (pow(base, maxValue) - 1.0)) * maxValue : slope;
-
-    float accent = cos(scaledSlope);
-    vec4 accent_color = (1.0 - accent) * u_accent * clamp(intensity * 2.0, 0.0, 1.0);
-
-    // Calculate shadow/highlight based on aspect
-    float shade = abs(mod((aspect + azimuth) / PI + 0.5, 2.0) - 1.0);
-    vec4 shade_color = mix(u_shadows[0], u_highlights[0], shade) * sin(scaledSlope) * clamp(intensity * 2.0, 0.0, 1.0);
-
-    fragColor = accent_color * (1.0 - shade_color.a) + shade_color;
-}
-
-// Basic directional hillshade (Method 4)
-void basic_hillshade(vec2 deriv) {
-    deriv = deriv * u_exaggeration * 2.0; // Exaggerate the slope derivative
-    float azimuth = u_azimuths.x + PI;
-    float cos_az = cos(azimuth);
-    float sin_az = sin(azimuth);
-    float cos_alt = cos(u_altitudes.x);
-    float sin_alt = sin(u_altitudes.x);
-
-    // Calculate the cosine of the angle between the light vector and the surface normal
-    float cang = (sin_alt - (deriv.y * cos_az * cos_alt - deriv.x * sin_az * cos_alt)) / sqrt(1.0 + dot(deriv, deriv));
-    float shade = clamp(cang, 0.0, 1.0); // cang is the hillshade intensity [0, 1]
-
-    // Blend shadow and highlight based on intensity
-    if (shade > 0.5) {
-        fragColor = u_highlights[0] * (2.0 * shade - 1.0); // Highlight strength [0, 1]
-    } else {
-        fragColor = u_shadows[0] * (1.0 - 2.0 * shade);    // Shadow strength [0, 1]
-    }
-}
-
-// Multidirectional hillshade (Method 3)
-void multidirectional_hillshade(vec2 deriv) {
-    deriv = deriv * u_exaggeration * 2.0; // Exaggerate the slope derivative
-    fragColor = vec4(0, 0, 0, 0);
-
-    // Iterate through all light sources (up to u_num_lights, max 4)
-    for (int i = 0; i < 4; i++) {
-        if (i >= u_num_lights) break;
-
-        // Access altitude and azimuth from vec4 UBOs
-        float altitude = (i == 0) ? u_altitudes.x : (i == 1) ? u_altitudes.y : (i == 2) ? u_altitudes.z : u_altitudes.w;
-        float azimuth = (i == 0) ? u_azimuths.x : (i == 1) ? u_azimuths.y : (i == 2) ? u_azimuths.z : u_azimuths.w;
-
-        float cos_alt = cos(altitude);
-        float sin_alt = sin(altitude);
-        // Negate cos/sin azimuth for correct light direction in the normal calculation
-        float cos_az = -cos(azimuth);
-        float sin_az = -sin(azimuth);
-
-        // Calculate the cosine of the angle between the light vector and the surface normal
-        float cang = (sin_alt - (deriv.y * cos_az * cos_alt - deriv.x * sin_az * cos_alt)) /
-                     sqrt(1.0 + dot(deriv, deriv));
-        float shade = clamp(cang, 0.0, 1.0); // cang is the hillshade intensity [0, 1]
-
-        // Accumulate shadow/highlight contribution from each light
-        if (shade > 0.5) {
-            fragColor += u_highlights[i] * (2.0 * shade - 1.0) / float(u_num_lights);
-        } else {
-            fragColor += u_shadows[i] * (1.0 - 2.0 * shade) / float(u_num_lights);
-        }
-    }
-}
-
-// Combined shadow and highlight method (Method 1)
-void combined_hillshade(vec2 deriv) {
-    // Only supports one light source (index 0)
-    deriv = deriv * u_exaggeration * 2.0;
-    float azimuth = u_azimuths.x + PI;
-    float cos_az = cos(azimuth);
-    float sin_az = sin(azimuth);
-    float cos_alt = cos(u_altitudes.x);
-    float sin_alt = sin(u_altitudes.x);
-
-    // Calculate the angle between the light vector and the surface normal
-    float cang = acos((sin_alt - (deriv.y * cos_az * cos_alt - deriv.x * sin_az * cos_alt)) /
-                      sqrt(1.0 + dot(deriv, deriv)));
-
-    cang = clamp(cang, 0.0, PI / 2.0); // Clamp angle to 90 degrees (half hemisphere)
-
-    // The "shade" and "highlight" components are calculated from cang (angle) and the magnitude of the slope
-    float shade = cang * atan(length(deriv)) * 4.0 / PI / PI;
-    float highlight = (PI / 2.0 - cang) * atan(length(deriv)) * 4.0 / PI / PI;
-
-    fragColor = u_shadows[0] * shade + u_highlights[0] * highlight;
-}
-
-// Igor's shadow/highlight method (Method 2)
-void igor_hillshade(vec2 deriv) {
-    // Only supports one light source (index 0)
-    deriv = deriv * u_exaggeration * 2.0;
-    float aspect = get_aspect(deriv);
-    float azimuth = u_azimuths.x + PI;
-
-    // Slope strength is magnitude of slope vector, normalized to [0, 1]
-    float slope_strength = atan(length(deriv)) * 2.0 / PI;
-
-    // Aspect strength is difference between aspect and light azimuth, normalized to [0, 1]
-    float aspect_strength = 1.0 - abs(mod((aspect + azimuth) / PI + 0.5, 2.0) - 1.0);
-
-    float shadow_strength = slope_strength * aspect_strength;
-    float highlight_strength = slope_strength * (1.0 - aspect_strength);
-
-    fragColor = u_shadows[0] * shadow_strength + u_highlights[0] * highlight_strength;
-}
 
 void main() {
     vec4 pixel = texture(u_image, v_pos);
 
-    // Scale the derivative based on the mercator distortion at this latitude (v_pos.y)
-    float scaleFactor = cos(radians((u_latrange[0] - u_latrange[1]) * (1.0 - v_pos.y) + u_latrange[1]));
+    if (u_num_lights == 0) {
+        // Without lights, the slopes as they were prepared, which the
+        // terrain's surface shades.
+        fragColor = pixel;
+    } else {
+        // Scale the derivative based on the mercator distortion at this latitude (v_pos.y)
+        float scaleFactor = cos(radians((u_latrange[0] - u_latrange[1]) * (1.0 - v_pos.y) + u_latrange[1]));
 
-    // The derivative is scaled back from [0, 1] texture range to world-space slope
-    // Texture range [0, 1] corresponds to slope range [-4, 4] (8.0 * 0.5 * deriv)
-    vec2 deriv = ((pixel.rg * 8.0) - 4.0) / scaleFactor;
+        // The derivative is scaled back from [0, 1] texture range to world-space slope
+        // Texture range [0, 1] corresponds to slope range [-4, 4] (8.0 * 0.5 * deriv)
+        vec2 deriv = ((pixel.rg * 8.0) - 4.0) / scaleFactor;
 
-    // Dispatch to the selected hillshade method
-    switch (u_method) {
-        case BASIC:
-            basic_hillshade(deriv);
-            break;
-        case COMBINED:
-            combined_hillshade(deriv);
-            break;
-        case IGOR:
-            igor_hillshade(deriv);
-            break;
-        case MULTIDIRECTIONAL:
-            multidirectional_hillshade(deriv);
-            break;
-        case STANDARD:
-        default:
-            standard_hillshade(deriv);
-            break;
+        hillshade(deriv);
     }
 
 #ifdef OVERDRAW_INSPECTOR
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+"#
+    ),
 };
 
 pub(crate) const LINE_GRADIENT_SDF_SHADER: GlslShaderSource = GlslShaderSource {

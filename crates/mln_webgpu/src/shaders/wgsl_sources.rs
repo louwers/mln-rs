@@ -2840,6 +2840,159 @@ fn ground_height(pos: vec2<f32>, dem_coords: vec4<f32>, props: TerrainPropsUBO) 
     };
 }
 
+/// How a hillshade shades its slopes: its tile and evaluated blocks, and
+/// `hillshade_color`, which shades a slope by the lights of `props`, the
+/// `HillshadeEvaluatedPropsUBO` that the program binds. A macro, so that
+/// `concat!` puts it in the fragment stages of the hillshade and of the
+/// terrain's surface, which shades a drape of a hillshade's slopes.
+macro_rules! hillshade_shading {
+    () => {
+        r"
+const STANDARD: i32 = 0;
+const COMBINED: i32 = 1;
+const IGOR: i32 = 2;
+const MULTIDIRECTIONAL: i32 = 3;
+const BASIC: i32 = 4;
+
+struct HillshadeTilePropsUBO {
+    latrange: vec2<f32>,
+    exaggeration: f32,
+    method: i32,
+    num_lights: i32,
+    pad0: f32,
+    pad1: f32,
+    pad2: f32,
+};
+
+struct HillshadeEvaluatedPropsUBO {
+    accent: vec4<f32>,
+    altitudes: vec4<f32>,
+    azimuths: vec4<f32>,
+    shadows: array<vec4<f32>, 4>,
+    highlights: array<vec4<f32>, 4>,
+};
+
+fn get_aspect(deriv: vec2<f32>) -> f32 {
+    let aspectDefault = 0.5 * PI * select(-1.0, 1.0, deriv.y > 0.0);
+    return select(aspectDefault, atan2(deriv.y, -deriv.x), deriv.x != 0.0);
+}
+
+fn standard_hillshade(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
+    let azimuth = props.azimuths.x + PI;
+    let slope = atan(0.625 * length(deriv));
+    let aspect = get_aspect(deriv);
+
+    let intensity = tileProps.exaggeration;
+
+    let base = 1.875 - intensity * 1.75;
+    let maxValue = 0.5 * PI;
+    let denom = pow(base, maxValue) - 1.0;
+    let useNonLinear = abs(intensity - 0.5) > 1e-6;
+    let scaledSlope = select(slope, ((pow(base, slope) - 1.0) / denom) * maxValue, useNonLinear);
+
+    let accent = cos(scaledSlope);
+    let accentColor = (1.0 - accent) * props.accent * clamp(intensity * 2.0, 0.0, 1.0);
+
+    let shade = abs(glMod((aspect + azimuth) / PI + 0.5, 2.0) - 1.0);
+    let shadeColor = mix(props.shadows[0], props.highlights[0], shade) * sin(scaledSlope) * clamp(intensity * 2.0, 0.0, 1.0);
+
+    return accentColor * (1.0 - shadeColor.a) + shadeColor;
+}
+
+fn basic_hillshade(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
+    let scaled_deriv = deriv * tileProps.exaggeration * 2.0;
+    let azimuth = props.azimuths.x + PI;
+    let cos_az = cos(azimuth);
+    let sin_az = sin(azimuth);
+    let cos_alt = cos(props.altitudes.x);
+    let sin_alt = sin(props.altitudes.x);
+
+    let cang = (sin_alt - (scaled_deriv.y * cos_az * cos_alt - scaled_deriv.x * sin_az * cos_alt)) / sqrt(1.0 + dot(scaled_deriv, scaled_deriv));
+    let shade = clamp(cang, 0.0, 1.0);
+
+    return select(props.shadows[0] * (1.0 - 2.0 * shade),
+                  props.highlights[0] * (2.0 * shade - 1.0),
+                  shade > 0.5);
+}
+
+fn multidirectional_hillshade(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
+    let scaled_deriv = deriv * tileProps.exaggeration * 2.0;
+    var total_color = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+
+    let num_lights = min(tileProps.num_lights, 4);
+
+    for (var i: i32 = 0; i < num_lights; i = i + 1) {
+        let altitude = select(select(select(props.altitudes.x, props.altitudes.y, i == 1), props.altitudes.z, i == 2), props.altitudes.w, i == 3);
+        let azimuth = select(select(select(props.azimuths.x, props.azimuths.y, i == 1), props.azimuths.z, i == 2), props.azimuths.w, i == 3);
+
+        let cos_alt = cos(altitude);
+        let sin_alt = sin(altitude);
+        let cos_az = -cos(azimuth);
+        let sin_az = -sin(azimuth);
+
+        let cang = (sin_alt - (scaled_deriv.y * cos_az * cos_alt - scaled_deriv.x * sin_az * cos_alt)) / sqrt(1.0 + dot(scaled_deriv, scaled_deriv));
+        let shade = clamp(cang, 0.0, 1.0);
+
+        if (shade > 0.5) {
+            total_color = total_color + props.highlights[i] * (2.0 * shade - 1.0) / f32(num_lights);
+        } else {
+            total_color = total_color + props.shadows[i] * (1.0 - 2.0 * shade) / f32(num_lights);
+        }
+    }
+
+    return total_color;
+}
+
+fn combined_hillshade(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
+    let scaled_deriv = deriv * tileProps.exaggeration * 2.0;
+    let azimuth = props.azimuths.x + PI;
+    let cos_az = cos(azimuth);
+    let sin_az = sin(azimuth);
+    let cos_alt = cos(props.altitudes.x);
+    let sin_alt = sin(props.altitudes.x);
+
+    let cang = acos((sin_alt - (scaled_deriv.y * cos_az * cos_alt - scaled_deriv.x * sin_az * cos_alt)) / sqrt(1.0 + dot(scaled_deriv, scaled_deriv)));
+    let clamped_cang = clamp(cang, 0.0, PI / 2.0);
+
+    let shade = clamped_cang * atan(length(scaled_deriv)) * 4.0 / PI / PI;
+    let highlight = (PI / 2.0 - clamped_cang) * atan(length(scaled_deriv)) * 4.0 / PI / PI;
+
+    return props.shadows[0] * shade + props.highlights[0] * highlight;
+}
+
+fn igor_hillshade(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
+    let scaled_deriv = deriv * tileProps.exaggeration * 2.0;
+    let aspect = get_aspect(scaled_deriv);
+    let azimuth = props.azimuths.x + PI;
+
+    let slope_strength = atan(length(scaled_deriv)) * 2.0 / PI;
+    let aspect_strength = 1.0 - abs(glMod((aspect + azimuth) / PI + 0.5, 2.0) - 1.0);
+
+    let shadow_strength = slope_strength * aspect_strength;
+    let highlight_strength = slope_strength * (1.0 - aspect_strength);
+
+    return props.shadows[0] * shadow_strength + props.highlights[0] * highlight_strength;
+}
+
+// The color of the slope `deriv`, shaded as `tileProps` says by the lights
+// of `props`, the program's `HillshadeEvaluatedPropsUBO`.
+fn hillshade_color(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
+    if (tileProps.method == BASIC) {
+        return basic_hillshade(deriv, tileProps);
+    } else if (tileProps.method == COMBINED) {
+        return combined_hillshade(deriv, tileProps);
+    } else if (tileProps.method == IGOR) {
+        return igor_hillshade(deriv, tileProps);
+    } else if (tileProps.method == MULTIDIRECTIONAL) {
+        return multidirectional_hillshade(deriv, tileProps);
+    } else {
+        return standard_hillshade(deriv, tileProps);
+    }
+}
+"
+    };
+}
+
 /// Port-only, for the backend conformance cases: probes of the terrain's
 /// height rule. Each probe is a quad at clip positions whose vertices read
 /// the height at a place of a tile, and whose fragments write that height's
@@ -2885,7 +3038,9 @@ fn main(@location(0) @interpolate(flat) height: f32) -> @location(0) vec4<f32> {
 /// The terrain's surface: a tile's grid, raised to the heights of the tile's
 /// DEM with its skirts lowered and projected through the tile's entry of
 /// `projectionVector`, in the colors of the tile's drape. A pole's vertices
-/// stand at sea level.
+/// stand at sea level. Where the tile's entry of `lightVector` has lights,
+/// the drape holds a hillshade's slopes, premultiplied by its coverage,
+/// which the surface shades with them.
 pub(crate) const TERRAIN_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(
         r"
@@ -2928,21 +3083,39 @@ fn main(in: VertexInput) -> VertexOutput {
 }
 ",
     ),
-    fragment: Some(
+    fragment: Some(concat!(
+        hillshade_shading!(),
         r"
 struct FragmentInput {
     @location(0) drape_pos: vec2<f32>,
 };
 
+struct GlobalIndexUBO {
+    value: u32,
+    pad0: vec3<u32>,
+};
+
+@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
+@group(0) @binding(3) var<storage, read> lightVector: array<HillshadeTilePropsUBO>;
+@group(0) @binding(6) var<uniform> props: HillshadeEvaluatedPropsUBO;
 @group(1) @binding(2) var drape_sampler: sampler;
 @group(1) @binding(3) var drape_texture: texture_2d<f32>;
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-    return textureSample(drape_texture, drape_sampler, in.drape_pos);
+    let color = textureSample(drape_texture, drape_sampler, in.drape_pos);
+    let light = lightVector[globalIndex.value];
+    if (light.num_lights == 0 || color.a == 0.0) {
+        return color;
+    }
+    // The tile's latitudes run from its north edge, where the drape's rows
+    // start.
+    let latitude = mix(light.latrange.x, light.latrange.y, in.drape_pos.y);
+    let deriv = ((color.rg / color.a) * 8.0 - vec2<f32>(4.0, 4.0)) / cos(radians(latitude));
+    return hillshade_color(deriv, light) * color.a;
 }
-",
-    ),
+"
+    )),
     prelude: Some(TERRAIN_PRELUDE),
 };
 
@@ -3125,14 +3298,9 @@ fn main(in: VertexInput) -> VertexOutput {
 }
 ",
     ),
-    fragment: Some(
+    fragment: Some(concat!(
+        hillshade_shading!(),
         r"
-const STANDARD: i32 = 0;
-const COMBINED: i32 = 1;
-const IGOR: i32 = 2;
-const MULTIDIRECTIONAL: i32 = 3;
-const BASIC: i32 = 4;
-
 struct FragmentInput {
     @location(0) tex_coord: vec2<f32>,
 };
@@ -3142,131 +3310,11 @@ struct GlobalIndexUBO {
     pad0: vec3<u32>,
 };
 
-struct HillshadeTilePropsUBO {
-    latrange: vec2<f32>,
-    exaggeration: f32,
-    method: i32,
-    num_lights: i32,
-    pad0: f32,
-    pad1: f32,
-    pad2: f32,
-};
-
-struct HillshadeEvaluatedPropsUBO {
-    accent: vec4<f32>,
-    altitudes: vec4<f32>,
-    azimuths: vec4<f32>,
-    shadows: array<vec4<f32>, 4>,
-    highlights: array<vec4<f32>, 4>,
-};
-
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<HillshadeTilePropsUBO>;
 @group(0) @binding(5) var<uniform> props: HillshadeEvaluatedPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var hillshade_texture: texture_2d<f32>;
-
-fn get_aspect(deriv: vec2<f32>) -> f32 {
-    let aspectDefault = 0.5 * PI * select(-1.0, 1.0, deriv.y > 0.0);
-    return select(aspectDefault, atan2(deriv.y, -deriv.x), deriv.x != 0.0);
-}
-
-fn standard_hillshade(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
-    let azimuth = props.azimuths.x + PI;
-    let slope = atan(0.625 * length(deriv));
-    let aspect = get_aspect(deriv);
-
-    let intensity = tileProps.exaggeration;
-
-    let base = 1.875 - intensity * 1.75;
-    let maxValue = 0.5 * PI;
-    let denom = pow(base, maxValue) - 1.0;
-    let useNonLinear = abs(intensity - 0.5) > 1e-6;
-    let scaledSlope = select(slope, ((pow(base, slope) - 1.0) / denom) * maxValue, useNonLinear);
-
-    let accent = cos(scaledSlope);
-    let accentColor = (1.0 - accent) * props.accent * clamp(intensity * 2.0, 0.0, 1.0);
-
-    let shade = abs(glMod((aspect + azimuth) / PI + 0.5, 2.0) - 1.0);
-    let shadeColor = mix(props.shadows[0], props.highlights[0], shade) * sin(scaledSlope) * clamp(intensity * 2.0, 0.0, 1.0);
-
-    return accentColor * (1.0 - shadeColor.a) + shadeColor;
-}
-
-fn basic_hillshade(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
-    let scaled_deriv = deriv * tileProps.exaggeration * 2.0;
-    let azimuth = props.azimuths.x + PI;
-    let cos_az = cos(azimuth);
-    let sin_az = sin(azimuth);
-    let cos_alt = cos(props.altitudes.x);
-    let sin_alt = sin(props.altitudes.x);
-
-    let cang = (sin_alt - (scaled_deriv.y * cos_az * cos_alt - scaled_deriv.x * sin_az * cos_alt)) / sqrt(1.0 + dot(scaled_deriv, scaled_deriv));
-    let shade = clamp(cang, 0.0, 1.0);
-
-    return select(props.shadows[0] * (1.0 - 2.0 * shade),
-                  props.highlights[0] * (2.0 * shade - 1.0),
-                  shade > 0.5);
-}
-
-fn multidirectional_hillshade(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
-    let scaled_deriv = deriv * tileProps.exaggeration * 2.0;
-    var total_color = vec4<f32>(0.0, 0.0, 0.0, 0.0);
-
-    let num_lights = min(tileProps.num_lights, 4);
-
-    for (var i: i32 = 0; i < num_lights; i = i + 1) {
-        let altitude = select(select(select(props.altitudes.x, props.altitudes.y, i == 1), props.altitudes.z, i == 2), props.altitudes.w, i == 3);
-        let azimuth = select(select(select(props.azimuths.x, props.azimuths.y, i == 1), props.azimuths.z, i == 2), props.azimuths.w, i == 3);
-
-        let cos_alt = cos(altitude);
-        let sin_alt = sin(altitude);
-        let cos_az = -cos(azimuth);
-        let sin_az = -sin(azimuth);
-
-        let cang = (sin_alt - (scaled_deriv.y * cos_az * cos_alt - scaled_deriv.x * sin_az * cos_alt)) / sqrt(1.0 + dot(scaled_deriv, scaled_deriv));
-        let shade = clamp(cang, 0.0, 1.0);
-
-        if (shade > 0.5) {
-            total_color = total_color + props.highlights[i] * (2.0 * shade - 1.0) / f32(num_lights);
-        } else {
-            total_color = total_color + props.shadows[i] * (1.0 - 2.0 * shade) / f32(num_lights);
-        }
-    }
-
-    return total_color;
-}
-
-fn combined_hillshade(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
-    let scaled_deriv = deriv * tileProps.exaggeration * 2.0;
-    let azimuth = props.azimuths.x + PI;
-    let cos_az = cos(azimuth);
-    let sin_az = sin(azimuth);
-    let cos_alt = cos(props.altitudes.x);
-    let sin_alt = sin(props.altitudes.x);
-
-    let cang = acos((sin_alt - (scaled_deriv.y * cos_az * cos_alt - scaled_deriv.x * sin_az * cos_alt)) / sqrt(1.0 + dot(scaled_deriv, scaled_deriv)));
-    let clamped_cang = clamp(cang, 0.0, PI / 2.0);
-
-    let shade = clamped_cang * atan(length(scaled_deriv)) * 4.0 / PI / PI;
-    let highlight = (PI / 2.0 - clamped_cang) * atan(length(scaled_deriv)) * 4.0 / PI / PI;
-
-    return props.shadows[0] * shade + props.highlights[0] * highlight;
-}
-
-fn igor_hillshade(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
-    let scaled_deriv = deriv * tileProps.exaggeration * 2.0;
-    let aspect = get_aspect(scaled_deriv);
-    let azimuth = props.azimuths.x + PI;
-
-    let slope_strength = atan(length(scaled_deriv)) * 2.0 / PI;
-    let aspect_strength = 1.0 - abs(glMod((aspect + azimuth) / PI + 0.5, 2.0) - 1.0);
-
-    let shadow_strength = slope_strength * aspect_strength;
-    let highlight_strength = slope_strength * (1.0 - aspect_strength);
-
-    return props.shadows[0] * shadow_strength + props.highlights[0] * highlight_strength;
-}
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
@@ -3276,27 +3324,21 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     let tileProps = tilePropsVector[globalIndex.value];
     let pixel = textureSample(hillshade_texture, texture_sampler, in.tex_coord);
+    // Without lights, the slopes as they were prepared, which the terrain's
+    // surface shades.
+    if (tileProps.num_lights == 0) {
+        return pixel;
+    }
 
     let latRange = tileProps.latrange;
     let latitude = (latRange.x - latRange.y) * in.tex_coord.y + latRange.y;
     let scaleFactor = cos(radians(latitude));
 
     let deriv = ((pixel.rg * 8.0) - vec2<f32>(4.0, 4.0)) / scaleFactor;
-
-    if (tileProps.method == BASIC) {
-        return basic_hillshade(deriv, tileProps);
-    } else if (tileProps.method == COMBINED) {
-        return combined_hillshade(deriv, tileProps);
-    } else if (tileProps.method == IGOR) {
-        return igor_hillshade(deriv, tileProps);
-    } else if (tileProps.method == MULTIDIRECTIONAL) {
-        return multidirectional_hillshade(deriv, tileProps);
-    } else {
-        return standard_hillshade(deriv, tileProps);
-    }
+    return hillshade_color(deriv, tileProps);
 }
-",
-    ),
+"
+    )),
     prelude: None,
 };
 

@@ -161,6 +161,13 @@ pub const ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_TERRAIN_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_TERRAIN_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
 pub const ID_TERRAIN_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
+/// What shades a tile's drape: a `HillshadeTilePropsUBO` of the tile's
+/// latitudes and the hillshade's values, whose lights shade a drape of a
+/// hillshade's slopes, and none for a drape of colors.
+pub const ID_TERRAIN_LIGHT_TILE_UBO: usize = ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO; // SSBO
+/// The lights of a drape of a hillshade's slopes: its
+/// `HillshadeEvaluatedPropsUBO`.
+pub const ID_TERRAIN_LIGHT_UBO: usize = ID_TERRAIN_PROPS_UBO + 1; // packed
 /// The DEM: RGBA8 texels behind a one-texel border, which the vertex stage
 /// reads texel by texel, without a sampler. It is slot 2 so that a program
 /// that reads the ground keeps slots 0 and 1 for its own textures; the shader

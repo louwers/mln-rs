@@ -43,7 +43,7 @@ use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
 use crate::render_tile::{FoundTile, RenderTile};
 use crate::renderer_event::RendererEvent;
 use crate::sources::render_tile_source::{DebugLayer, DebugLayers};
-use crate::terrain::{DrapeStacks, RenderTerrain};
+use crate::terrain::{DrapeStacks, Draped, RenderTerrain};
 use crate::text::glyph_store::GlyphStore;
 use crate::text::placement::{Placement, PlacementInputs};
 use crate::tile::contents::Contents;
@@ -1367,9 +1367,21 @@ impl RenderOrchestrator {
             render_layer.update_draws(gpu, paint_parameters, &self.atlases, layer_source);
             needs_depth = needs_depth || (render_layer.needs_globe_depth() && !surface);
         }
-        let draped = |&index: &u32| (index, self.layers[index as usize].drapes());
-        self.stacks =
-            if frame.terrain { DrapeStacks::of(frame.layers.keys().map(draped)) } else { DrapeStacks::default() };
+        self.stacks = if frame.terrain {
+            let layers = &mut self.layers;
+            let draped = |&index: &u32| {
+                let layer = &mut layers[index as usize];
+                let draped = layer.drapes().then(|| match layer.surface_light(paint_parameters) {
+                    Some(light) => Draped::Lit(light),
+                    None if layer.blends() => Draped::Blends,
+                    None => Draped::Plain,
+                });
+                (index, draped)
+            };
+            DrapeStacks::of(frame.layers.keys().map(draped))
+        } else {
+            DrapeStacks::default()
+        };
         self.terrain.update_dems(paint_parameters, |id| self.tile_store.source(self.render_sources.get(id)?.tiles()?));
         if let Some(drapes) = self.terrain.begin_drapes(paint_parameters, self.stacks.len()) {
             let mut contents = SourceContents::default();
@@ -1382,7 +1394,8 @@ impl RenderOrchestrator {
                         &self.found_tiles,
                         &mut contents,
                     );
-                    drapes.key_layer(stack, &*self.layers[*index as usize], layer_source);
+                    let lit = self.stacks.light(stack).is_some();
+                    drapes.key_layer(stack, &*self.layers[*index as usize], layer_source, lit);
                 }
             }
             drapes.choose(paint_parameters, self.atlases.pattern.pixel_size());
@@ -1396,7 +1409,8 @@ impl RenderOrchestrator {
                         &mut contents,
                     );
                     let render_layer = &mut *self.layers[*index as usize];
-                    drapes.update_layer(stack, gpu, paint_parameters, &self.atlases, render_layer, layer_source);
+                    let lit = self.stacks.light(stack).is_some();
+                    drapes.update_layer(stack, gpu, paint_parameters, &self.atlases, render_layer, layer_source, lit);
                 }
             }
             drapes.finish_update(paint_parameters.context);
@@ -1411,7 +1425,7 @@ impl RenderOrchestrator {
         // behind the surface's depth, drawn first.
         let needs_globe_depth = (needs_depth || self.sky_pass.has_atmosphere()) && !surface;
         self.globe_depth_pass.update(gpu, context, state, update_parameters, needs_globe_depth);
-        self.terrain.update_draws(gpu, paint_parameters, needs_depth && surface);
+        self.terrain.update_draws(gpu, paint_parameters, &self.stacks, needs_depth && surface);
     }
 
     /// The render layer at `index` in the drawing order.

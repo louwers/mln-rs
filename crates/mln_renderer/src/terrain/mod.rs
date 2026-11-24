@@ -25,7 +25,9 @@
 //!    ([`RenderTerrain::render_drapes`]).
 //! 5. **Surface**: the frame's pass draws each stack's surface where the
 //!    stack's first layer draws, and between the stacks the layers that
-//!    don't drape, flat ([`RenderTerrain::render`]).
+//!    don't drape, flat ([`RenderTerrain::render`]). The surface of a
+//!    hillshade's own stack shades its slopes with the frame's lights
+//!    ([`SurfaceLight`]).
 
 mod cover;
 mod dem_textures;
@@ -43,6 +45,7 @@ pub(crate) use cover::{REMEMBERED_RANGES, TerrainTile, terrain_tile_size};
 pub(crate) use drapes::Drapes;
 pub(crate) use elevation::TerrainElevation;
 use mln_gfx::gpu::Gpu;
+use mln_gfx::shaders::hillshade_layer_ubo::{HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO};
 use mln_gfx::shaders::terrain_ubo::TerrainPropsUBO;
 use mln_map_types::{MapMode, TerrainSkirtLength};
 use mln_style::source_type::SourceData;
@@ -52,7 +55,7 @@ use mln_util::constants;
 use mln_util::dem::DemUnpack;
 use mln_util::hash::HashMap;
 use mln_util::tileset::RasterEncoding;
-pub(crate) use stacks::DrapeStacks;
+pub(crate) use stacks::{DrapeStacks, Draped};
 
 use crate::gfx::context::Context;
 use crate::gfx::store::SharedTexture;
@@ -105,6 +108,19 @@ impl Surface {
         let [r, g, b, base] = self.props.unpack;
         DemUnpack { weights: [r, g, b], base, scale: self.props.unpack_scale }
     }
+}
+
+/// The shading that the surface adds to a stack's drapes, which hold a
+/// hillshade's slopes, as the hillshade's own draws would shade them: so
+/// that a hillshade lit from the viewport keeps its drapes as the map
+/// turns, while its light stays where the viewport puts it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct SurfaceLight {
+    /// The hillshade's lights, turned by the frame's bearing.
+    pub(crate) props: HillshadeEvaluatedPropsUBO,
+    /// The hillshade's values of a tile, but for its latitudes, which are
+    /// each terrain tile's.
+    pub(crate) tile: HillshadeTilePropsUBO,
 }
 
 /// The textures of the DEM tiles that the frame's terrain tiles read, which
@@ -323,17 +339,24 @@ impl RenderTerrain {
 
     /// Makes the draws of the frame of the last update, a set for each stack
     /// of the drapes the encode began ([`begin_drapes`]), which read the DEM
-    /// textures of the frame ([`update_dems`]) and sample their stack's
-    /// drapes, and, if `depth_first`, draws of the surface's depth alone
+    /// textures of the frame ([`update_dems`]), sample their stack's drapes
+    /// and shade them with the stack's light of `stacks`, if it has one,
+    /// and, if `depth_first`, draws of the surface's depth alone
     /// ([`render_depth`]). Without a stack, which a frame without terrain
     /// has too, it makes no draws, and drops what the draws hold.
     ///
     /// [`begin_drapes`]: Self::begin_drapes
     /// [`update_dems`]: Self::update_dems
     /// [`render_depth`]: Self::render_depth
-    pub(crate) fn update_draws(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, depth_first: bool) {
+    pub(crate) fn update_draws(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        stacks: &DrapeStacks,
+        depth_first: bool,
+    ) {
         let cover = self.cover.as_ref().zip(self.dems.as_ref());
-        self.draws.update(gpu, parameters, cover, self.surface, &self.drapes, depth_first);
+        self.draws.update(gpu, parameters, cover, self.surface, (&self.drapes, stacks), depth_first);
     }
 
     /// Records that the buckets in `changed` changed, for the drapes' draws

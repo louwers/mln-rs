@@ -37,6 +37,7 @@ use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, TileOrder};
 use crate::render_tile::{FoundTile, FrameTile, RenderTile, TileStamp, TileView, ViewPlace};
 use crate::sources::render_image_source::ImageSourceRenderData;
+use crate::terrain::SurfaceLight;
 use crate::tile::contents::{Contents, GeometryContents};
 use crate::tile::job::SourceKey;
 use crate::tile_render_data::TileAtlasTextures;
@@ -576,6 +577,21 @@ pub(crate) trait TypedLayer {
         false
     }
 
+    /// Whether the layer, with its values `evaluated`, blends with what is
+    /// under it otherwise than by covering it: a layer blend other than
+    /// `normal`.
+    fn blends(&self, _evaluated: &EvaluatedLayer<Self::Type>) -> bool {
+        false
+    }
+
+    /// The light that the terrain's surface can shade the layer's drapes
+    /// with in the frame of `parameters`, whose draws then put in them what
+    /// it shades ([`PaintParameters::drape_lit`]); `None` for a layer whose
+    /// drapes hold its colors.
+    fn surface_light(&mut self, _parameters: &PaintParameters<'_>) -> Option<SurfaceLight> {
+        None
+    }
+
     /// Called in the frame's update of a layer with a source with `tiles`,
     /// the frame's tiles of the source in the order the layer draws them,
     /// each with what it shows the layer: none for an image source. The
@@ -712,6 +728,14 @@ pub(crate) trait LayerParts {
     /// Whether the layer draws a drape by the map's bearing, with its values
     /// of the frame ([`TypedLayer::drapes_by_bearing`]).
     fn drapes_by_bearing(&self) -> bool;
+
+    /// Whether the layer blends with what is under it otherwise than by
+    /// covering it, with its values of the frame ([`TypedLayer::blends`]).
+    fn blends(&self) -> bool;
+
+    /// The light the terrain's surface can shade the layer's drapes with
+    /// ([`TypedLayer::surface_light`]).
+    fn surface_light(&mut self, parameters: &PaintParameters<'_>) -> Option<SurfaceLight>;
 
     /// An empty drawing of the layer's type, which a drape keeps of the
     /// layer.
@@ -923,6 +947,14 @@ impl<L: TypedLayer> LayerParts for L {
 
     fn drapes_by_bearing(&self) -> bool {
         TypedLayer::drapes_by_bearing(self, &self.parts().values.evaluated)
+    }
+
+    fn blends(&self) -> bool {
+        TypedLayer::blends(self, &self.parts().values.evaluated)
+    }
+
+    fn surface_light(&mut self, parameters: &PaintParameters<'_>) -> Option<SurfaceLight> {
+        TypedLayer::surface_light(self, parameters)
     }
 
     fn new_drape_drawing(&self) -> Option<DrapeDrawing> {

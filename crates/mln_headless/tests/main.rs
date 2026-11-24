@@ -56,6 +56,8 @@ mod sync_file_source_test;
 mod system_fonts_test;
 // The layers that drape over terrain, drawn through the terrain's drapes.
 mod terrain_drape_test;
+// A hillshade over terrain lit from the viewport, which the surface shades.
+mod terrain_hillshade_test;
 // Vertical perspective close in draws what Mercator draws.
 mod globe_precision_test;
 // Terrain on the globe, draped as on Mercator.

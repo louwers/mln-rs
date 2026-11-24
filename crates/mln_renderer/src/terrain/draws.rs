@@ -1,7 +1,8 @@
 //! The terrain's draws: one per terrain tile and stack of draped layers, of
-//! the shared grids, each with the tile's projection and where it reads its
-//! DEM in entries of its stack's storage buffers, raised by the DEM's
-//! texture and sampling the tile's drape of the stack.
+//! the shared grids, each with the tile's projection, where it reads its
+//! DEM and its drape's light in entries of its stack's storage buffers,
+//! raised by the DEM's texture and sampling the tile's drape of the stack,
+//! which they shade with the stack's light, if it has one.
 
 use std::mem::size_of;
 
@@ -9,12 +10,13 @@ use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::hillshade_layer_ubo::HillshadeTilePropsUBO;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_PROJECTION_UBO, ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_DRAWABLE_UBO,
-    ID_TERRAIN_POS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROPS_UBO,
+    ID_TERRAIN_LIGHT_TILE_UBO, ID_TERRAIN_LIGHT_UBO, ID_TERRAIN_POS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROPS_UBO,
 };
 use mln_gfx::shaders::terrain_ubo::TerrainDrawableUBO;
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
@@ -24,7 +26,7 @@ use mln_util::clip_depth::ClipDepthRange;
 use mln_util::logging::{Event, Log};
 
 use super::mesh::{TerrainMesh, TerrainVertex};
-use super::{DemBindings, Drapes, Surface, TerrainCover};
+use super::{DemBindings, DrapeStacks, Drapes, Surface, TerrainCover};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::frame_projection::zero_to_one_clip_z;
 use crate::gfx::context::Context;
@@ -33,6 +35,7 @@ use crate::gfx::store::SharedIndexes;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileMap, finish_tiles, tile_objects};
+use crate::layers::render_hillshade_layer::lat_range;
 use crate::paint_parameters::PaintParameters;
 use crate::tile_matrix::to_projection_ubo;
 
@@ -46,12 +49,13 @@ struct SharedMesh {
     index_count: usize,
 }
 
-/// What a tile's draw reads of its own: where it reads its DEM, and its
-/// projection.
+/// What a tile's draw reads of its own: where it reads its DEM, its
+/// projection, and its drape's light.
 #[derive(Clone, Copy)]
 struct TileUniforms {
     drawable: TerrainDrawableUBO,
     projection: ProjectionUBO,
+    light: HillshadeTilePropsUBO,
 }
 
 /// The draws of the terrain's tiles for one stack of draped layers.
@@ -95,7 +99,8 @@ pub(crate) struct TerrainDraws {
 impl TerrainDraws {
     /// Makes the frame's draws of the tiles of `cover`, one for each of the
     /// stacks of `drapes`, which read the DEM textures of `dems`, sample the
-    /// tile's drape of their stack and draw as `surface` says, and, if
+    /// tile's drape of their stack, shade it with the stack's light of
+    /// `stacks` if it has one, and draw as `surface` says, and, if
     /// `depth_first`, one that draws only the surface's depth; or drops the
     /// draws and what they share for `None`, a frame without terrain. Each
     /// tile projects as the frame's view does, onto the globe on a globe.
@@ -105,7 +110,7 @@ impl TerrainDraws {
         parameters: &mut PaintParameters<'_>,
         cover: Option<(&TerrainCover, &DemBindings)>,
         surface: Surface,
-        drapes: &Drapes,
+        (drapes, lights): (&Drapes, &DrapeStacks),
         depth_first: bool,
     ) {
         let stacks = drapes.stacks();
@@ -160,7 +165,9 @@ impl TerrainDraws {
             let uniforms = TileUniforms {
                 drawable: TerrainDrawableUBO { dem_coords },
                 projection: to_projection_ubo(&projection),
+                light: HillshadeTilePropsUBO::default(),
             };
+            let latrange = lat_range(&tile.id.to_unwrapped());
             let mesh = mesh(&mut self.meshes, context, surface.skirts, poles(view, tile.id.canonical));
             let sets = self.stacks.iter_mut().enumerate().map(|(stack, draws)| (Some(stack), draws));
             for (stack, draws) in sets.chain(self.depth.iter_mut().map(|draws| (None, draws))) {
@@ -189,14 +196,25 @@ impl TerrainDraws {
                     depth: DrawDepth::Volume { mask: DepthMaskType::ReadWrite },
                     ..draw.frame_draw(Some(tile.id))
                 };
-                draws.draw_list.push(frame_draw, uniforms);
+                // A stack without a light, and the depth's draws, draw their
+                // drapes' colors.
+                let light = stack
+                    .and_then(|stack| lights.light(stack))
+                    .map(|light| HillshadeTilePropsUBO { latrange, ..light.tile });
+                draws.draw_list.push(frame_draw, TileUniforms { light: light.unwrap_or_default(), ..uniforms });
             }
         }
-        for StackDraws { tiles, frame, draw_list } in self.stacks.iter_mut().chain(&mut self.depth) {
+        let sets = self.stacks.iter_mut().enumerate().map(|(stack, draws)| (Some(stack), draws));
+        for (stack, StackDraws { tiles, frame, draw_list }) in
+            sets.chain(self.depth.iter_mut().map(|draws| (None, draws)))
+        {
+            let light = stack.and_then(|stack| lights.light(stack)).map(|light| light.props).unwrap_or_default();
             finish_tiles(draw_list, frame, tiles, gpu, context, |writer| {
                 writer.storage(ID_TERRAIN_DRAWABLE_UBO, |uniforms| uniforms.drawable);
                 writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+                writer.storage(ID_TERRAIN_LIGHT_TILE_UBO, |uniforms| uniforms.light);
                 writer.uniform(ID_TERRAIN_PROPS_UBO, &surface.props);
+                writer.uniform(ID_TERRAIN_LIGHT_UBO, &light);
             });
         }
     }

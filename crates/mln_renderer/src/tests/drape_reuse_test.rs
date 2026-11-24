@@ -1,7 +1,8 @@
 // A map over terrain draws a drape again only when what it shows changed:
 // its layers or their values, the tiles or image they draw, their feature
 // state, the style's images, the zoom, or the bearing for a layer that draws
-// by it. A byte cap halves the drapes of the tiles farthest from the center
+// by it, but not for a hillshade lit from the viewport, which the surface
+// shades. A byte cap halves the drapes of the tiles farthest from the center
 // first.
 
 use std::collections::BTreeSet;
@@ -518,6 +519,62 @@ fn a_rotation_draws_again_only_a_stack_that_draws_by_the_bearing() {
         assert_eq!(shifted, drawn, "the drapes drawn at bearing {bearing}");
     }
     assert!(map.frame().1.is_empty(), "a drape drawn again at the same bearing");
+}
+
+/// A hillshade of the DEM's tiles, lit from the viewport, as hillshades are
+/// by default.
+const VIEWPORT_LIT_HILLSHADE: &str = r#"{
+    "version": 8,
+    "sources": {
+        "hills": {"type": "raster-dem", "tiles": ["dem/{z}/{x}/{y}.png"], "tileSize": 256, "maxzoom": 10}
+    },
+    "layers": [{"id": "hillshade", "type": "hillshade", "source": "hills"}]
+}"#;
+
+/// A fill that multiplies what is under it, in the north-west tile.
+const MULTIPLIED_FILL: &str = r#"{
+    "version": 8,
+    "sources": {
+        "multiplied": {
+            "type": "geojson",
+            "data": {"type": "Polygon", "coordinates": [[[-80, 50], [-70, 50], [-70, 60], [-80, 50]]]}
+        }
+    },
+    "layers": [{"id": "multiplied", "type": "fill", "source": "multiplied", "paint": {"fill-layer-blend": "multiply"}}]
+}"#;
+
+/// A hillshade lit from the viewport has a stack to itself, whose drapes
+/// hold its slopes, which the surface shades with the light of the frame's
+/// bearing: a rotation draws no drape again.
+#[test]
+fn a_rotation_keeps_the_drapes_of_a_hillshade_lit_from_the_viewport() {
+    let (mut map, drapes) = settled(Tiles::default());
+    map.add_layer(VIEWPORT_LIT_HILLSHADE, Some("fill"));
+    map.settle();
+    let stacks = |stack| drapes.iter().map(move |&(tile, _)| (tile, stack));
+    let expected: BTreeSet<_> = stacks(0).chain(stacks(1)).chain([(north_west(), 2)]).collect();
+    assert_eq!(expected, map.textured(), "the stacks under, of and over the hillshade");
+    for bearing in [1.0, 2.0] {
+        map.transform.jump_to(&CameraOptions { bearing: Some(bearing), ..Default::default() });
+        let (_, drawn) = map.frame();
+        assert!(drawn.is_empty(), "drapes drawn at bearing {bearing}: {drawn:?}");
+    }
+}
+
+/// A layer that blends over a hillshade lit from the viewport blends over
+/// its colors, in its stack: a rotation draws that stack's drapes again.
+#[test]
+fn a_blend_over_a_hillshade_lit_from_the_viewport_draws_its_stack_by_the_bearing() {
+    let (mut map, drapes) = settled(Tiles::default());
+    map.add_layer(VIEWPORT_LIT_HILLSHADE, Some("fill"));
+    map.add_layer(MULTIPLIED_FILL, None);
+    map.settle();
+    assert_eq!(drapes, map.textured(), "one stack");
+    for bearing in [1.0, 2.0] {
+        map.transform.jump_to(&CameraOptions { bearing: Some(bearing), ..Default::default() });
+        let (_, drawn) = map.frame();
+        assert_eq!(drapes, drawn, "the drapes drawn at bearing {bearing}");
+    }
 }
 
 /// The center at `longitude`, at 10° S.

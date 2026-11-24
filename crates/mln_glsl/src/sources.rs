@@ -3850,166 +3850,21 @@ float surface_height(const vec2 pos, const vec4 dem_coords, const TerrainProps p
     };
 }
 
-pub(crate) const TERRAIN_SHADER_PRELUDE: &str = r"
-
-#define idTerrainDrawableUBO    idDrawableReservedVertexOnlyUBO
-#define idTerrainPropsUBO       layerUBOStartId
-
-";
-
-/// The terrain's surface: a tile's grid, raised to the heights of the tile's
-/// DEM with its skirts lowered and projected through the tile's entry of
-/// `projectionVector`, in the colors of the tile's drape. A pole's vertices
-/// stand at sea level. The drape is sampled where the vertex is in the tile:
-/// the back end's flip of Y puts its rows north first.
-pub(crate) const TERRAIN_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: TERRAIN_SHADER_PRELUDE,
-    vertex: concat!(
-        terrain_props!(),
+/// How a hillshade shades its slopes: its tile and evaluated blocks, bound
+/// at `idHillshadeTilePropsUBO` and `idHillshadeEvaluatedPropsUBO`, and
+/// `hillshade`, which writes to `out_color` a slope shaded by the lights of
+/// `props`. A macro, so that `concat!` puts it in the fragment stages of the
+/// hillshade and of the terrain's surface, which shades a drape of a
+/// hillshade's slopes.
+macro_rules! hillshade_shading {
+    () => {
         r"
-
-// x and y in tile units, whether the vertex is a skirt's lower edge, 0.
-layout(location = 0) in ivec4 in_pos;
-
-layout(location = 0) out vec2 frag_drape_pos;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct TerrainDrawableUBO {
-    vec4 dem_coords;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idTerrainDrawableUBO) readonly buffer TerrainDrawableUBOVector {
-    TerrainDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-void main() {
-    const TerrainDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
-    const vec2 pos = vec2(in_pos.xy);
-    const float skirt = float(in_pos.z);
-    const float height = surface_height(pos, drawable.dem_coords, terrain_props.props);
-    gl_Position = projectTileFor3D(pos, height - skirt * terrain_props.props.skirt_length, projection);
-    frag_drape_pos = clamp(pos / 8192.0, vec2(0.0), vec2(1.0));
-}
-"
-    ),
-    fragment: r"
-
-layout(location = 0) in vec2 frag_drape_pos;
-
-layout(location = 0) out vec4 out_color;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 1) uniform texture2D drape_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId + 1) uniform sampler drape_sampler;
-
-void main() {
-    out_color = texture(sampler2D(drape_texture, drape_sampler), frag_drape_pos);
-}
-",
-};
-
-/// Port-only, for the backend conformance cases: probes of the terrain's
-/// height rule. Each probe is a quad at clip positions whose vertices read
-/// the height at a place of a tile, and whose fragments write that height's
-/// bits, least significant byte first, as the texel's channels.
-#[cfg(any(test, feature = "gpu-conformance"))]
-pub(crate) const TERRAIN_PROBE_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: TERRAIN_SHADER_PRELUDE,
-    vertex: concat!(
-        terrain_props!(),
-        r"
-
-// Clip x and y, then where the height is read, in tile units.
-layout(location = 0) in vec4 in_pos;
-// The DEM uv's scale and offset, then the DEM's width in pixels.
-layout(location = 1) in vec4 in_dem_coords;
-
-layout(location = 0) flat out float frag_height;
-
-void main() {
-    frag_height = ground_height(in_pos.zw, in_dem_coords, terrain_props.props);
-    gl_Position = vec4(in_pos.xy, 0.0, 1.0);
-}
-"
-    ),
-    fragment: r"
-
-layout(location = 0) flat in float frag_height;
-
-layout(location = 0) out vec4 out_color;
-
-void main() {
-    const uint bits = floatBitsToUint(frag_height);
-    const uvec4 bytes = uvec4(bits, bits >> 8u, bits >> 16u, bits >> 24u) & uvec4(255u);
-    out_color = vec4(bytes) / 255.0;
-}
-",
-};
-
-pub(crate) const HILLSHADE_SHADER_PRELUDE: &str = r"
-
-#define idHillshadeDrawableUBO          idDrawableReservedVertexOnlyUBO
-#define idHillshadeTilePropsUBO         idDrawableReservedFragmentOnlyUBO
-#define idHillshadeEvaluatedPropsUBO    layerUBOStartId
-
-";
-
-pub(crate) const HILLSHADE_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: HILLSHADE_SHADER_PRELUDE,
-    vertex: r"
-
-layout(location = 0) in ivec2 in_position;
-layout(location = 1) in ivec2 in_texture_position;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct HillshadeDrawableUBO {
-    mat4 matrix;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idHillshadeDrawableUBO) readonly buffer HillshadeDrawableUBOVector {
-    HillshadeDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-layout(location = 0) out vec2 frag_position;
-
-void main() {
-    const HillshadeDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
-
-    frag_position = vec2(in_texture_position) / 8192.0;
-    frag_position.y = 1.0 - frag_position.y;
-}
-",
-    fragment: r"
-
 #define PI 3.141592653589793
 #define STANDARD 0
 #define COMBINED 1
 #define IGOR 2
 #define MULTIDIRECTIONAL 3
 #define BASIC 4
-
-layout(location = 0) in vec2 frag_position;
-layout(location = 0) out vec4 out_color;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
 
 struct HillshadeTilePropsUBO {
     vec2 latrange;
@@ -4032,9 +3887,6 @@ layout(set = LAYER_SET_INDEX, binding = idHillshadeEvaluatedPropsUBO) uniform Hi
     vec4 shadows[4];
     vec4 highlights[4];
 } props;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;
 
 float get_aspect(vec2 deriv) {
     return deriv.x != 0.0 ? atan(deriv.y, -deriv.x) : PI / 2.0 * (deriv.y > 0.0 ? 1.0 : -1.0);
@@ -4159,6 +4011,213 @@ void igor_hillshade(vec2 deriv, const HillshadeTilePropsUBO tileProps) {
     out_color = props.shadows[0] * shadow_strength + props.highlights[0] * highlight_strength;
 }
 
+// Writes to `out_color` the color of the slope `deriv`, shaded as
+// `tileProps` says by the lights of `props`.
+void hillshade(vec2 deriv, const HillshadeTilePropsUBO tileProps) {
+    if (tileProps.method == BASIC) {
+        basic_hillshade(deriv, tileProps);
+    } else if (tileProps.method == COMBINED) {
+        combined_hillshade(deriv, tileProps);
+    } else if (tileProps.method == IGOR) {
+        igor_hillshade(deriv, tileProps);
+    } else if (tileProps.method == MULTIDIRECTIONAL) {
+        multidirectional_hillshade(deriv, tileProps);
+    } else {
+        standard_hillshade(deriv, tileProps);
+    }
+}
+
+"
+    };
+}
+
+pub(crate) const TERRAIN_SHADER_PRELUDE: &str = r"
+
+#define idTerrainDrawableUBO    idDrawableReservedVertexOnlyUBO
+#define idTerrainPropsUBO       layerUBOStartId
+// The light of the tile's drape, as a hillshade's.
+#define idHillshadeTilePropsUBO         idDrawableReservedFragmentOnlyUBO
+#define idHillshadeEvaluatedPropsUBO    layerUBOStartId + 1
+
+";
+
+/// The terrain's surface: a tile's grid, raised to the heights of the tile's
+/// DEM with its skirts lowered and projected through the tile's entry of
+/// `projectionVector`, in the colors of the tile's drape. A pole's vertices
+/// stand at sea level. The drape is sampled where the vertex is in the tile:
+/// the back end's flip of Y puts its rows north first.
+/// Where the tile's entry of `tilePropsVector` has lights, the drape holds a
+/// hillshade's slopes, premultiplied by its coverage, which the surface
+/// shades with them.
+pub(crate) const TERRAIN_SHADER: GlslShaderSource = GlslShaderSource {
+    prelude: TERRAIN_SHADER_PRELUDE,
+    vertex: concat!(
+        terrain_props!(),
+        r"
+
+// x and y in tile units, whether the vertex is a skirt's lower edge, 0.
+layout(location = 0) in ivec4 in_pos;
+
+layout(location = 0) out vec2 frag_drape_pos;
+
+layout(push_constant) uniform Constants {
+    int ubo_index;
+} constant;
+
+struct TerrainDrawableUBO {
+    vec4 dem_coords;
+};
+
+layout(std140, set = LAYER_SET_INDEX, binding = idTerrainDrawableUBO) readonly buffer TerrainDrawableUBOVector {
+    TerrainDrawableUBO drawable_ubo[];
+} drawableVector;
+
+layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
+    ProjectionUBO projection_ubo[];
+} projectionVector;
+
+void main() {
+    const TerrainDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const vec2 pos = vec2(in_pos.xy);
+    const float skirt = float(in_pos.z);
+    const float height = surface_height(pos, drawable.dem_coords, terrain_props.props);
+    gl_Position = projectTileFor3D(pos, height - skirt * terrain_props.props.skirt_length, projection);
+    frag_drape_pos = clamp(pos / 8192.0, vec2(0.0), vec2(1.0));
+}
+"
+    ),
+    fragment: concat!(
+        r"
+
+layout(location = 0) in vec2 frag_drape_pos;
+
+layout(location = 0) out vec4 out_color;
+
+layout(push_constant) uniform Constants {
+    int ubo_index;
+} constant;
+
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 1) uniform texture2D drape_texture;
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId + 1) uniform sampler drape_sampler;
+
+",
+        hillshade_shading!(),
+        r"
+void main() {
+    const vec4 color = texture(sampler2D(drape_texture, drape_sampler), frag_drape_pos);
+    const HillshadeTilePropsUBO light = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    if (light.num_lights == 0 || color.a == 0.0) {
+        out_color = color;
+        return;
+    }
+    // The tile's latitudes run from its north edge, where the drape's rows
+    // start.
+    const float latitude = mix(light.latrange.x, light.latrange.y, frag_drape_pos.y);
+    const vec2 deriv = ((color.rg / color.a) * 8.0 - 4.0) / cos(radians(latitude));
+    hillshade(deriv, light);
+    out_color *= color.a;
+}
+"
+    ),
+};
+
+/// Port-only, for the backend conformance cases: probes of the terrain's
+/// height rule. Each probe is a quad at clip positions whose vertices read
+/// the height at a place of a tile, and whose fragments write that height's
+/// bits, least significant byte first, as the texel's channels.
+#[cfg(any(test, feature = "gpu-conformance"))]
+pub(crate) const TERRAIN_PROBE_SHADER: GlslShaderSource = GlslShaderSource {
+    prelude: TERRAIN_SHADER_PRELUDE,
+    vertex: concat!(
+        terrain_props!(),
+        r"
+
+// Clip x and y, then where the height is read, in tile units.
+layout(location = 0) in vec4 in_pos;
+// The DEM uv's scale and offset, then the DEM's width in pixels.
+layout(location = 1) in vec4 in_dem_coords;
+
+layout(location = 0) flat out float frag_height;
+
+void main() {
+    frag_height = ground_height(in_pos.zw, in_dem_coords, terrain_props.props);
+    gl_Position = vec4(in_pos.xy, 0.0, 1.0);
+}
+"
+    ),
+    fragment: r"
+
+layout(location = 0) flat in float frag_height;
+
+layout(location = 0) out vec4 out_color;
+
+void main() {
+    const uint bits = floatBitsToUint(frag_height);
+    const uvec4 bytes = uvec4(bits, bits >> 8u, bits >> 16u, bits >> 24u) & uvec4(255u);
+    out_color = vec4(bytes) / 255.0;
+}
+",
+};
+
+pub(crate) const HILLSHADE_SHADER_PRELUDE: &str = r"
+
+#define idHillshadeDrawableUBO          idDrawableReservedVertexOnlyUBO
+#define idHillshadeTilePropsUBO         idDrawableReservedFragmentOnlyUBO
+#define idHillshadeEvaluatedPropsUBO    layerUBOStartId
+
+";
+
+pub(crate) const HILLSHADE_SHADER: GlslShaderSource = GlslShaderSource {
+    prelude: HILLSHADE_SHADER_PRELUDE,
+    vertex: r"
+
+layout(location = 0) in ivec2 in_position;
+layout(location = 1) in ivec2 in_texture_position;
+
+layout(push_constant) uniform Constants {
+    int ubo_index;
+} constant;
+
+struct HillshadeDrawableUBO {
+    mat4 matrix;
+};
+
+layout(std140, set = LAYER_SET_INDEX, binding = idHillshadeDrawableUBO) readonly buffer HillshadeDrawableUBOVector {
+    HillshadeDrawableUBO drawable_ubo[];
+} drawableVector;
+
+layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
+    ProjectionUBO projection_ubo[];
+} projectionVector;
+
+layout(location = 0) out vec2 frag_position;
+
+void main() {
+    const HillshadeDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+
+    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
+
+    frag_position = vec2(in_texture_position) / 8192.0;
+    frag_position.y = 1.0 - frag_position.y;
+}
+",
+    fragment: concat!(
+        r"
+
+layout(location = 0) in vec2 frag_position;
+layout(location = 0) out vec4 out_color;
+
+layout(push_constant) uniform Constants {
+    int ubo_index;
+} constant;
+
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;
+
+",
+        hillshade_shading!(),
+        r"
 void main() {
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -4169,6 +4228,12 @@ void main() {
     const HillshadeTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
 
     vec4 pixel = texture(sampler2D(image_texture, image_sampler), frag_position);
+    // Without lights, the slopes as they were prepared, which the terrain's
+    // surface shades.
+    if (tileProps.num_lights == 0) {
+        out_color = pixel;
+        return;
+    }
 
     // Scale the derivative based on the mercator distortion at this latitude
     float scaleFactor = cos(radians((tileProps.latrange[0] - tileProps.latrange[1]) * frag_position.y + tileProps.latrange[1]));
@@ -4177,21 +4242,10 @@ void main() {
     // Texture range [0, 1] corresponds to slope range [-4, 4]
     vec2 deriv = ((pixel.rg * 8.0) - 4.0) / scaleFactor;
 
-    // Dispatch to the selected hillshade method
-    if (tileProps.method == BASIC) {
-        basic_hillshade(deriv, tileProps);
-    } else if (tileProps.method == COMBINED) {
-        combined_hillshade(deriv, tileProps);
-    } else if (tileProps.method == IGOR) {
-        igor_hillshade(deriv, tileProps);
-    } else if (tileProps.method == MULTIDIRECTIONAL) {
-        multidirectional_hillshade(deriv, tileProps);
-    } else {
-        // Default to STANDARD
-        standard_hillshade(deriv, tileProps);
-    }
+    hillshade(deriv, tileProps);
 }
-",
+"
+    ),
 };
 
 pub(crate) const HILLSHADE_PREPARE_SHADER_PRELUDE: &str = r"

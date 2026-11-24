@@ -262,7 +262,12 @@ fn ubo_ids(program: &Program, source: &ShaderSource) -> Vec<(&'static str, usize
         "LayerCompositeShader" => (&[("idLayerCompositeUBO", ID_LAYER_COMPOSITE_UBO)], "layerCompositeUBOCount"),
         "VertexTexelShader" => (&[], "vertexTexelUBOCount"),
         "TerrainShader" | "TerrainProbeShader" => (
-            &[("idTerrainDrawableUBO", ID_TERRAIN_DRAWABLE_UBO), ("idTerrainPropsUBO", ID_TERRAIN_PROPS_UBO)],
+            &[
+                ("idTerrainDrawableUBO", ID_TERRAIN_DRAWABLE_UBO),
+                ("idTerrainLightTileUBO", ID_TERRAIN_LIGHT_TILE_UBO),
+                ("idTerrainPropsUBO", ID_TERRAIN_PROPS_UBO),
+                ("idTerrainLightUBO", ID_TERRAIN_LIGHT_UBO),
+            ],
             "terrainUBOCount",
         ),
         "HillshadeShader" => (

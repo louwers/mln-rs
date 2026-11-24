@@ -22,7 +22,7 @@ use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Raster;
-use mln_style_types::{RasterResamplingType, ResamplingType, TranslateAnchorType};
+use mln_style_types::{LayerBlendType, RasterResamplingType, ResamplingType, TranslateAnchorType};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
@@ -439,6 +439,10 @@ impl TypedLayer for RenderRasterLayer {
     type Type = Raster;
     type Drawing = RasterDrawing;
     const DRAPES: bool = true;
+
+    fn blends(&self, evaluated: &EvaluatedLayer<Raster>) -> bool {
+        *evaluated.paint.raster_layer_blend.uniform() != LayerBlendType::Normal
+    }
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }

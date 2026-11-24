@@ -256,7 +256,9 @@ fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
         "TerrainShader" => vec![
             (LayerStorage(ID_TERRAIN_DRAWABLE_UBO), size_of::<TerrainDrawableUBO>()),
             projection,
+            (LayerStorage(ID_TERRAIN_LIGHT_TILE_UBO), size_of::<HillshadeTilePropsUBO>()),
             (LayerUniform(ID_TERRAIN_PROPS_UBO), size_of::<TerrainPropsUBO>()),
+            (LayerUniform(ID_TERRAIN_LIGHT_UBO), size_of::<HillshadeEvaluatedPropsUBO>()),
         ],
         "TerrainProbeShader" => vec![(LayerUniform(ID_TERRAIN_PROPS_UBO), size_of::<TerrainPropsUBO>())],
         "HillshadeShader" => vec![

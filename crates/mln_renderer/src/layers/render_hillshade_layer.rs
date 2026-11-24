@@ -69,6 +69,7 @@ use crate::render_source::RenderSource;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
 use crate::render_tile::FrameTile;
+use crate::terrain::SurfaceLight;
 use crate::tile_matrix::{bind_no_projection, projection_data, to_projection_ubo};
 
 impl LayerType for Hillshade {
@@ -260,8 +261,8 @@ fn method_to_int(method: HillshadeMethodType) -> i32 {
     method as i32
 }
 
-/// Calculate latitude range for tile
-fn lat_range(id: &UnwrappedTileID) -> [f32; 2] {
+/// The latitudes of the north and the south edges of `id`, in degrees.
+pub(crate) fn lat_range(id: &UnwrappedTileID) -> [f32; 2] {
     let latlng0 = LatLng::from_unwrapped_tile(id.canonical.z, id.canonical.x, id.canonical.y, id.wrap);
     let below = UnwrappedTileID::new(id.canonical.z, i64::from(id.canonical.x), i64::from(id.canonical.y) + 1);
     let latlng1 = LatLng::from_unwrapped_tile(below.canonical.z, below.canonical.x, below.canonical.y, below.wrap);
@@ -318,6 +319,24 @@ impl TypedLayer for RenderHillshadeLayer {
         *evaluated.paint.hillshade_illumination_anchor.uniform() == HillshadeIlluminationAnchorType::Viewport
     }
 
+    /// Lit from the viewport, the surface shades its slopes with its lights
+    /// at the frame's bearing, so that its drapes don't turn with the map.
+    fn surface_light(&mut self, parameters: &PaintParameters<'_>) -> Option<SurfaceLight> {
+        let evaluated = &self.values.evaluated;
+        if !self.drapes_by_bearing(evaluated) {
+            return None;
+        }
+        let Illumination { props, num_lights } = Self::illumination(&mut self.illumination, evaluated, parameters);
+        let paint = &evaluated.paint;
+        let tile = HillshadeTilePropsUBO {
+            exaggeration: *paint.hillshade_exaggeration.uniform(),
+            method: method_to_int(*paint.hillshade_method.uniform()),
+            num_lights: num_lights as i32,
+            ..HillshadeTilePropsUBO::default()
+        };
+        Some(SurfaceLight { props, tile })
+    }
+
     fn passes(&self, evaluated: &EvaluatedLayer<Hillshade>) -> RenderPass {
         if *evaluated.paint.hillshade_exaggeration.uniform() > 0.0 {
             RenderPass::Translucent | RenderPass::Pass3D
@@ -329,7 +348,9 @@ impl TypedLayer for RenderHillshadeLayer {
     /// Makes the render target of each bucket it has none of, which prepares
     /// its slopes, and the frame's draws of the layer, those of each of its
     /// tiles, which shade the slopes and which it builds for a tile it keeps
-    /// none of, and writes the layer's buffers they read.
+    /// none of, and writes the layer's buffers they read. In a drape that
+    /// the surface shades ([`PaintParameters::drape_lit`]), they draw the
+    /// slopes as they were prepared, without lights.
     fn update_draws(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -469,6 +490,7 @@ impl TypedLayer for RenderHillshadeLayer {
             let Illumination { num_lights, .. } = *illumination.get_or_insert_with(|| {
                 Self::illumination(&mut self.illumination, &self.values.evaluated, paint_parameters)
             });
+            let num_lights = if paint_parameters.drape_lit { 0 } else { num_lights };
             let uniforms =
                 Self::uniforms(&self.values.evaluated.paint, &tile_id.to_unwrapped(), num_lights, paint_parameters);
             self.draw_list.push(draw, uniforms);

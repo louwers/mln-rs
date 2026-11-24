@@ -297,10 +297,17 @@ impl Drapes {
 
     /// Adds `layer`, a layer of `stack` that drapes, which draws from
     /// `source`, to the key of every drape of the stack. The stack's layers
-    /// come in drawing order.
-    pub(crate) fn key_layer(&mut self, stack: usize, layer: &dyn RenderLayer, source: Option<LayerSource<'_>>) {
+    /// come in drawing order. A stack that the surface `lit` holds what
+    /// doesn't turn with the map.
+    pub(crate) fn key_layer(
+        &mut self,
+        stack: usize,
+        layer: &dyn RenderLayer,
+        source: Option<LayerSource<'_>>,
+        lit: bool,
+    ) {
         let base = layer.base();
-        let by_bearing = layer.drapes_by_bearing();
+        let by_bearing = !lit && layer.drapes_by_bearing();
         for drape in &mut self.drapes {
             let Some(StackDrape { key, .. }) = drape.stacks.get_mut(stack) else {
                 continue;
@@ -357,8 +364,10 @@ impl Drapes {
 
     /// Makes the draws of `layer`, a layer of `stack` that drapes, in every
     /// drape of the stack that [`choose`](Self::choose) chose, with the
-    /// drape's `parameters`, from its `source`. The stack's layers update in
-    /// drawing order.
+    /// drape's `parameters`, from its `source`, for the surface to shade if
+    /// it `lit` the stack ([`PaintParameters::drape_lit`]). The stack's
+    /// layers update in drawing order.
+    #[expect(clippy::too_many_arguments, reason = "the frame's GPU and parameters, and the layer and its stack")]
     pub(crate) fn update_layer(
         &mut self,
         stack: usize,
@@ -367,6 +376,7 @@ impl Drapes {
         atlases: &Atlases,
         layer: &mut dyn RenderLayer,
         source: Option<LayerSource<'_>>,
+        lit: bool,
     ) {
         let globe = self.globe;
         let style = Arc::clone(&layer.base().style);
@@ -389,6 +399,7 @@ impl Drapes {
             let Some(mut kept) = kept else { continue };
             let (unwrapped, size) = (tile.to_unwrapped(), Size::new(*size, *size));
             let mut parameters = parameters.drape(transform, clip_masks, layer_composite, size, unwrapped);
+            parameters.drape_lit = lit;
             layer.update_drape_draws(gpu, &mut parameters, atlases, source, (*tile, globe), &mut kept.drawing);
             let global = parameters.global_paint_params(pattern_atlas_size);
             kept.drawing.write_uniform(gpu, ID_GLOBAL_PAINT_PARAMS_UBO, &global, parameters.context);
