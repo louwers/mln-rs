@@ -671,8 +671,7 @@ pub(crate) fn stage_sources(key: &ShaderKey) -> Result<StageSources, GpuError> {
     // its `#ifdef`s see the defines.
     let shader_prelude = source.prelude;
     let blocks = wgsl::blocks(program);
-    // WGSL reads no define's value; the pixel ratio's is an override's.
-    let defines: HashMap<String, bool> = key.define_values().map(|(name, _)| (name.to_owned(), true)).collect();
+    let defines = defines(key);
     let [vertex, fragment] = wgsl::expand(program, source)?;
     let stages = [(Stage::Vertex, vertex), (Stage::Fragment, fragment)];
     let declared =
@@ -702,6 +701,24 @@ pub(crate) fn stage_sources(key: &ShaderKey) -> Result<StageSources, GpuError> {
         preprocess_wgsl(&format!("{PRELUDE}\n{blocks}{declarations}{shader_prelude}{text}"), &defines)
     });
     Ok(StageSources { stages: [vertex, fragment], bindings, index_group })
+}
+
+/// The key's defines as the preprocessor takes them. WGSL reads no define's
+/// value; the pixel ratio's is an override's.
+fn defines(key: &ShaderKey) -> HashMap<String, bool> {
+    key.define_values().map(|(name, _)| (name.to_owned(), true)).collect()
+}
+
+/// The program's WGSL as the key's variant leaves it, for
+/// [`Program::check_on`]: a variant binds the vertex buffers it names, not
+/// those of the branches its defines leave out.
+pub(crate) fn variant_texts(key: &ShaderKey) -> Vec<String> {
+    texts_of(key.program(), &defines(key))
+}
+
+fn texts_of(program: &Program, defines: &HashMap<String, bool>) -> Vec<String> {
+    let texts = program.sources.wgsl.map(|wgsl| [wgsl.prelude, wgsl.vertex, wgsl.fragment]);
+    texts.into_iter().flatten().map(|text| preprocess_wgsl(text, defines)).collect()
 }
 
 /// What `text`, a stage and the program's prelude, names outside its
@@ -781,6 +798,41 @@ mod tests {
         assert_eq!(declared(&["PAINT"]), format!("{engine}{paint}\n"));
         // A vertex buffer is the vertex stage's alone.
         assert_eq!(declared_text(&PROGRAM, Stage::Fragment, text, &["PAINT"]), engine);
+    }
+
+    #[test]
+    fn a_variant_reads_only_the_vertex_buffers_its_defines_leave_in() {
+        static PROGRAM: Program = Program {
+            name: "pulled-or-not",
+            buffers: &[ProgramBuffer::vertices("paint", 0, Float)],
+            attributes: &[],
+            instance_attributes: &[],
+            textures: &[],
+            properties: &[],
+            projection: Projection::None,
+            sources: Sources {
+                wgsl: Some(&Wgsl { prelude: "", vertex: "#ifdef PULL\nlet x = paint[0];\n#endif\n", fragment: "" }),
+                ..Sources::NONE
+            },
+        };
+        let caps = mln_gfx::gpu::Caps {
+            buffer_offset_alignment: 4,
+            max_texture_size: 4096,
+            half_float_render_targets: false,
+            clip_depth: mln_gfx::gpu::ClipDepthRange::ZeroToOne,
+            render_target_depth: None,
+            clear_stencil_with_pass: false,
+            cpu_rasterizer: false,
+            max_line_width: 1.0,
+            binds_vertex_buffers: false,
+            indexes_storage_buffers: true,
+        };
+        let check = |defines: &[&str]| {
+            let texts = texts_of(&PROGRAM, &defines.iter().map(|&name| (name.to_owned(), true)).collect());
+            PROGRAM.check_on(&caps, &texts.iter().map(String::as_str).collect::<Vec<_>>())
+        };
+        assert!(check(&[]).is_ok(), "the variant that pulls nothing draws where no vertex buffer binds");
+        assert!(matches!(check(&["PULL"]), Err(GpuError::Unsupported(_))));
     }
 
     #[test]
