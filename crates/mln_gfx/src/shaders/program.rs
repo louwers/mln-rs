@@ -832,6 +832,22 @@ mod tests {
     #[test]
     fn a_program_breaking_a_rule_of_its_declaration_fails_its_check() {
         const POSITION: Attribute = Attribute::new("position", Short2);
+        // A block of the name of the view's, whose members GLSL ES names
+        // apart from the view's.
+        static OTHER_VIEW: Block = Block {
+            name: "ViewUBO",
+            size: 16,
+            members: &[Member {
+                name: "x",
+                ty: MemberType::Vec4,
+                offset: 0,
+                precision: Precision::High,
+                padding: false,
+            }],
+            glsl_es_prefix: "other_",
+        };
+        static OTHER: [ProgramBuffer; 1] =
+            [ProgramBuffer { id: FIRST_UNIFORM_ID, name: "props", kind: BufferKind::Uniform(&OTHER_VIEW) }];
         assert!(EMPTY.check().is_ok());
         let fails = |program: Program| assert!(program.check().is_err(), "{:?}", program.buffers);
         fails(Program { attributes: &[POSITION, POSITION], ..EMPTY });
@@ -888,22 +904,7 @@ mod tests {
             textures: const { &[ProgramTexture::new("image")] },
             ..EMPTY
         });
-        // A block of the name of the view's, whose members GLSL ES names
-        // apart from the view's.
-        static OTHER_VIEW: Block = Block {
-            name: "ViewUBO",
-            size: 16,
-            members: &[Member {
-                name: "x",
-                ty: MemberType::Vec4,
-                offset: 0,
-                precision: Precision::High,
-                padding: false,
-            }],
-            glsl_es_prefix: "other_",
-        };
-        static OTHER: [ProgramBuffer; 1] =
-            [ProgramBuffer { id: FIRST_UNIFORM_ID, name: "props", kind: BufferKind::Uniform(&OTHER_VIEW) }];
+        // A block of the name of the view's.
         fails(Program { buffers: &OTHER, ..EMPTY });
     }
 
@@ -915,13 +916,13 @@ mod tests {
             fragment: "",
             prelude: "",
         };
+        // One stage reads one projection block and the other the other.
+        static BOTH: wgsl::Wgsl = wgsl::Wgsl { fragment: "let z = drawProjection.x;", ..READS };
         let reading = Program { sources: Sources::NONE.wgsl(&READS), ..EMPTY };
         assert!(reading.check().is_err(), "a program that reads the projection and declares none");
         assert!(Program { projection: Projection::PerDraw, ..reading }.check().is_ok());
         assert!(Program { projection: Projection::Own, ..reading }.check().is_err());
         assert!(Program { projection: Projection::PerDraw, ..EMPTY }.check().is_ok(), "no source to check");
-        // One stage reads one projection block and the other the other.
-        static BOTH: wgsl::Wgsl = wgsl::Wgsl { fragment: "let z = drawProjection.x;", ..READS };
         let both = Program { projection: Projection::PerDraw, sources: Sources::NONE.wgsl(&BOTH), ..EMPTY };
         assert!(both.check().is_err(), "a fragment stage that reads the other projection");
     }
