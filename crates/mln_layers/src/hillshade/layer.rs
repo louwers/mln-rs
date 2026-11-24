@@ -76,6 +76,10 @@ impl Layer for HillshadeLayer {
     type Input = DemTiles;
     type Tile = HillshadeTile;
 
+    /// A tile's slopes and meshes are made of its DEM, which the layer's
+    /// resampling sampler samples them with.
+    const RESTYLE_KEEPS_TILES: bool = true;
+
     fn new(cx: &mut NewCx<'_, Self>) -> Self {
         let e = EXTENT as i16;
         let corners =

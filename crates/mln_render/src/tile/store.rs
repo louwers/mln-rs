@@ -321,6 +321,15 @@ impl TileStore {
         for render_tile in render_tiles {
             tiles.upload_at(render_tile.overscaled_tile_id(), render_tile.slot(), &self.ctx.atlas, context);
         }
+        tiles.release_textures(render_tiles);
+    }
+
+    /// Drops the textures of the raster and DEM tiles of the source `key`,
+    /// whose layers the frame draws none of (`SourceTiles::release_textures`).
+    pub(crate) fn release_textures(&mut self, key: SourceKey) {
+        if let Some(tiles) = self.sources.get_mut(&key) {
+            tiles.release_textures(&[]);
+        }
     }
 
     pub(crate) fn take_events(&mut self) -> Vec<StoreEvent> {

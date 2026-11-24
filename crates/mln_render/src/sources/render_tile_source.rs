@@ -279,10 +279,14 @@ impl RenderTileSource {
     }
 
     /// Readies the buckets the frame draws, uploading their indexes through
-    /// `context`, if the source is enabled.
+    /// `context`, if the source is enabled, and drops the textures of the
+    /// raster and DEM tiles that the frame doesn't render
+    /// (`SourceTiles::release_textures`).
     pub(crate) fn upload(&mut self, store: &mut TileStore, context: &mut Resources) {
         if self.enabled {
             store.upload(self.key, &self.render_tiles, context);
+        } else {
+            store.release_textures(self.key);
         }
     }
 

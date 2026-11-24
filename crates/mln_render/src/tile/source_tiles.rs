@@ -32,6 +32,7 @@ use crate::erased_source::UpdateParts;
 use crate::gfx::context::Resources;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layout::tile_layout::LayoutParams;
+use crate::render_tile::RenderTile;
 use crate::source::Cover;
 use crate::tile::contents::Contents;
 use crate::tile::dem;
@@ -459,6 +460,30 @@ impl SourceTiles {
                 let others: SmallVec<[usize; 4]> =
                     same.iter().copied().chain([index]).filter(|&other| other != copy).collect();
                 upload_sharing(slots, copy, &others, context);
+            }
+        }
+    }
+
+    /// Drops the textures of the source's raster and DEM tiles but those of
+    /// `render_tiles`, the frame's render tiles, whose buckets
+    /// [`upload_at`](Self::upload_at) readied: a tile in the cache, or one
+    /// that no layer of the frame renders, keeps no texture on the GPU, and
+    /// makes it again from its data once a frame renders it.
+    pub(crate) fn release_textures(&mut self, render_tiles: &[RenderTile]) {
+        if !matches!(self.info.kind, SourceKind::Raster | SourceKind::RasterDem) {
+            return;
+        }
+        let mut rendered = vec![false; self.tiles.len()];
+        for render_tile in render_tiles {
+            if let Some(index) = self.index_at(render_tile.overscaled_tile_id(), render_tile.slot()) {
+                rendered[index] = true;
+            }
+        }
+        for (slot, rendered) in self.tiles.values_mut().zip(rendered) {
+            match slot.tile.contents_mut() {
+                Some(Contents::Raster(raster)) if !rendered => raster.release_texture(),
+                Some(Contents::Dem(dem)) if !rendered => dem.release_texture(),
+                _ => {}
             }
         }
     }

@@ -231,8 +231,9 @@ pub(crate) trait RenderLayer: Any {
     fn placing(&self) -> Option<usize>;
 
     /// Makes `style`, the changed style of the layer (of the same id and
-    /// type), the layer's, drops its tile values and draws, which were made
-    /// for the previous style's values, and begins transitions to the new
+    /// type), the layer's, drops its draws and, unless its type keeps them
+    /// ([`Layer::RESTYLE_KEEPS_TILES`]), its tile values, which were made for
+    /// the previous style's values, and begins transitions to the new
     /// values. A style of another type leaves the layer's. The record is
     /// made again, with its evaluation and whether it draws.
     fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>);
@@ -392,7 +393,11 @@ impl<L: Layer> RenderLayer for Hosted<L> {
     }
 
     fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
-        self.remove_all_draws();
+        if L::RESTYLE_KEEPS_TILES {
+            self.frame_draws.clear();
+        } else {
+            self.remove_all_draws();
+        }
         if let Some(recovered) = LayerStyle::recover(style) {
             self.values.style = recovered;
         }

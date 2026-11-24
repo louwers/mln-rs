@@ -210,6 +210,14 @@ pub trait Layer: Sized + 'static {
     /// ([`NamedTarget`](crate::draw::NamedTarget)).
     const VOLUME: bool = false;
 
+    /// Whether the layer's tile values hold nothing made from its style's
+    /// values, only from its tiles' data and what the layer keeps for all
+    /// its tiles: a restyle of the layer then keeps them, as a hillshade
+    /// keeps its tiles' slopes while a paint property changes. By default a
+    /// restyle drops them with the draws, since they may be made from the
+    /// previous values.
+    const RESTYLE_KEEPS_TILES: bool = false;
+
     /// The layer for the values `cx.layer`, before they transition. It may
     /// make the GPU resources it keeps for every frame.
     fn new(cx: &mut NewCx<'_, Self>) -> Self;

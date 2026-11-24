@@ -83,6 +83,14 @@ impl DemContents {
         self.dem.image().valid()
     }
 
+    /// Drops the DEM's texture, which [`upload`](Self::upload) makes again.
+    /// The contents take a new identity, since what the layers made of them
+    /// samples the texture.
+    pub(crate) fn release_texture(&mut self) {
+        let released = self.texture.take().is_some();
+        self.renew_if(released);
+    }
+
     /// Readies contents with a DEM for their draws, once and again after
     /// they change: makes the DEM's texture in `context`, and moves the
     /// geometry into its stores.
