@@ -31,6 +31,18 @@ set -euo pipefail
 declare -A allowed=(
     # 27 of 65536 on RADV, 32 on lavapipe and 30 on llvmpipe.
     [terrain/default]=0.0007
+    # mln-rs draws fill outlines 2 px wide, as MapLibre Native does, where GL
+    # JS draws them 1 px wide, which spreads a translucent fill's edge about
+    # 0.2 px; the rest is the drapes' sampling. 150 of 262144 on RADV (149 on
+    # Vulkan); on Mesa 26.0.8, which CI runs, 365 (WebGPU, which draws 1 px
+    # outlines on a CPU rasterizer), 420 (Vulkan) and 389 (OpenGL); on Mesa
+    # 26.2.5, 139, 173 and 155.
+    [terrain/skirts-auto]=0.0017
+    # The fill outlines, 2 px wide in mln-rs, as in MapLibre Native, where GL
+    # JS draws them 1 px wide: 26 of 65536 on RADV and on Mesa 26.0.8 and
+    # 26.2.5; 3 with WebGPU on lavapipe, which draws 1 px outlines on a CPU
+    # rasterizer.
+    [terrain/fill-outline]=0.0005
     # The moiré's texels move: 289 of 65536 (0.44%) on RADV (291 on OpenGL),
     # 1113 (lavapipe) and 1104 (llvmpipe) (1.7%).
     [terrain/rtt-mipmap-minification/pitch-70]=0.02
@@ -49,6 +61,30 @@ declare -A allowed=(
     # Its labels don't drape and draw as without terrain: 8 of 65536 (RADV),
     # 20 on lavapipe.
     [projection/globe/terrain/collision-icon-text-translate-map]=0.0004
+    #
+    # Fills and lines drape, and their drapes' edges, sampled with mips and
+    # anisotropy where the globe turns away, differ by single pixels. "On the
+    # sphere" is the same fixture with them drawn undraped on the sea-level
+    # sphere over the surface.
+    #
+    # The lines are as wide as GL JS's, where on the sphere they were wider:
+    # 115 of 262144 (RADV), 320 (lavapipe); on the sphere, under 66 on both.
+    [projection/globe/terrain/line-spiral]=0.0013
+    # 32 (RADV), 141 (lavapipe); on the sphere, under 66 on both.
+    [projection/globe/terrain/line-translate]=0.0006
+    # 30 (RADV), 67 (lavapipe); on the sphere: 565, 535.
+    [projection/globe/terrain/fill-planet-pitched]=0.0003
+    # The drapes' edges, and the fill outlines 2 px wide, as in MapLibre
+    # Native, where GL JS draws them 1 px wide: 209 (RADV), 202 (Vulkan) and
+    # 196 (OpenGL); on Mesa 26.0.8, 259 (lavapipe), 521 (Vulkan) and 363
+    # (OpenGL); on Mesa 26.2.5, 173, 375 and 240. On the sphere: 1400, 1573.
+    [projection/globe/terrain/fill-planet-pole]=0.0021
+    # 31 (RADV), 71 (lavapipe); on the sphere: 569, 547.
+    [projection/globe/terrain/fill-planet-tiles]=0.0003
+    # 34 (RADV), 79 (lavapipe); on the sphere: 578, 561.
+    [projection/globe/terrain/fill-planet-tiles-no-background]=0.0004
+    # 56 (RADV), 97 (lavapipe); on the sphere: 191, 192.
+    [projection/globe/terrain/line-gradient]=0.0004
 )
 
 checkout="${usage_checkout:-$PWD/../maplibre-gl-js}"

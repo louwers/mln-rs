@@ -7,7 +7,7 @@
       "width": 512,
       "terrainSkirtLength": "auto",
       "threshold": 0.05,
-      "allowed": 0.00025
+      "allowed": 0.0017
     }
   },
   "center": [
