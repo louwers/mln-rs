@@ -111,7 +111,7 @@
     "unit": "windows-x64",
     "os": "windows",
     "runner": "blacksmith-4vcpu-windows-2025",
-    "backend": "gl",
+    "backend": "gl-desktop",
     "coverage": "false"
   },
   {

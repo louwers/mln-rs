@@ -18,7 +18,8 @@ runs:
 
     # A runner can have vulkan-1.dll only inside the SDK, and a cached SDK
     # skips the installer's registry entry for VK_LAYER_KHRONOS_validation.
-    # Expose both explicitly through GITHUB_PATH and VK_LAYER_PATH.
+    # Elevated Windows processes also ignore VK_LAYER_PATH, so register the
+    # explicit layer manifest in HKLM in addition to setting VK_LAYER_PATH.
     - name: Expose Vulkan loader and validation layer
       shell: pwsh
       run: |
@@ -38,11 +39,18 @@ runs:
 
         $layerDir = @("Bin", "bin") |
           ForEach-Object { Join-Path $env:VULKAN_SDK $_ } |
-          Where-Object { Test-Path (Join-Path $_ "VkLayer_khronos_validation.json") } |
+          Where-Object {
+            (Test-Path (Join-Path $_ "VkLayer_khronos_validation.json")) -and
+            (Test-Path (Join-Path $_ "VkLayer_khronos_validation.dll"))
+          } |
           Select-Object -First 1
         if (-not $layerDir) {
-          throw "Missing VkLayer_khronos_validation.json in $env:VULKAN_SDK"
+          throw "Missing VkLayer_khronos_validation.{json,dll} in $env:VULKAN_SDK"
         }
+        $layerManifest = Join-Path $layerDir "VkLayer_khronos_validation.json"
+        $layerKey = "HKLM:\SOFTWARE\Khronos\Vulkan\ExplicitLayers"
+        New-Item -Path $layerKey -Force | Out-Null
+        New-ItemProperty -Path $layerKey -Name $layerManifest -PropertyType DWord -Value 0 -Force | Out-Null
         "VK_LAYER_PATH=$layerDir" | Out-File -FilePath $env:GITHUB_ENV -Append
 
     - name: Install Lavapipe

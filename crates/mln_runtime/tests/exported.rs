@@ -705,22 +705,25 @@ mod win32 {
     fn dxgi_devices() -> Vec<(Device, [u8; 8])> {
         let mut devices = Vec::new();
         #[cfg(feature = "vulkan")]
-        if let Some(Device::Vulkan(library)) = device_of(BackendType::Vulkan) {
-            let luid = vulkan_luid(&library);
-            devices.push((Device::Vulkan(library), luid));
-        }
-        #[cfg(feature = "d3d12")]
-        if let Some(Device::D3d12(library)) = device_of(BackendType::D3D12) {
-            let luid = library.adapter_luid();
-            devices.push((Device::D3d12(library), luid));
-        }
-        devices.retain(|(device, _)| {
-            let shares = device.export_kinds().contains(ExportKind::DxgiSharedHandle);
-            if !shares {
+        if let Some(device @ Device::Vulkan(_)) = device_of(BackendType::Vulkan) {
+            if device.export_kinds().contains(ExportKind::DxgiSharedHandle) {
+                let Device::Vulkan(library) = device else { unreachable!() };
+                let luid = vulkan_luid(&library);
+                devices.push((Device::Vulkan(library), luid));
+            } else {
                 eprintln!("skipped: the {:?} device shares no DXGI textures", device.backend());
             }
-            shares
-        });
+        }
+        #[cfg(feature = "d3d12")]
+        if let Some(device @ Device::D3d12(_)) = device_of(BackendType::D3D12) {
+            if device.export_kinds().contains(ExportKind::DxgiSharedHandle) {
+                let Device::D3d12(library) = device else { unreachable!() };
+                let luid = library.adapter_luid();
+                devices.push((Device::D3d12(library), luid));
+            } else {
+                eprintln!("skipped: the {:?} device shares no DXGI textures", device.backend());
+            }
+        }
         devices
     }
 
