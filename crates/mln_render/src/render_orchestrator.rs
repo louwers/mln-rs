@@ -1307,6 +1307,7 @@ impl RenderOrchestrator {
                 &placing,
                 options,
                 self.global_state.as_deref(),
+                |source| Some(&self.tile_store.source(source)?.info.feature_state),
                 &mut results_by_layer,
             )?;
         }

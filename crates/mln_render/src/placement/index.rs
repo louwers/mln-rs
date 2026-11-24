@@ -21,6 +21,8 @@ use super::{BucketKey, PlacingTile};
 use crate::erased_layer::ErasedEvaluatedLayer;
 use crate::geometry::feature_index::{FeatureIndex, FeatureSelection, QueryLayers, QueryResults};
 use crate::query::RenderedQueryOptions;
+use crate::source_state::SourceFeatureState;
+use crate::tile::job::SourceKey;
 
 /// How far the grid reaches past each edge of the viewport, in pixels.
 /// Shapes that cross into the viewport change what shows near its edge,
@@ -84,6 +86,8 @@ struct Entry {
 /// [`Entry`]s are: what a query looks them up in.
 struct Record {
     tile: OverscaledTileID,
+    /// The tile's source, whose feature state queries return.
+    source: SourceKey,
     features: Arc<FeatureIndex>,
     /// The layer that leads the tile's bucket, as its layout laid it out,
     /// which names the features' source layer and the layers that draw
@@ -131,7 +135,7 @@ pub struct CollisionIndex {
     /// and its bucket's index, which name the bucket of one layout.
     by_bucket: HashMap<(usize, usize), u32>,
     /// The groups of the sources, in the order the layers have them.
-    groups: Vec<crate::tile::job::SourceKey>,
+    groups: Vec<SourceKey>,
 }
 
 /// An empty index, whose grids the first placement sizes to its view.
@@ -301,6 +305,7 @@ impl CollisionIndex {
         self.by_bucket.insert((Arc::as_ptr(&layout.feature_index) as usize, tile.bucket.bucket), record);
         self.records.push(Record {
             tile: tile.overscaled_id,
+            source: tile.bucket.source,
             features: Arc::clone(&layout.feature_index),
             leader: Arc::clone(leader),
             order: None,
@@ -340,13 +345,15 @@ impl CollisionIndex {
     /// `geometry`, in the view's pixels, touches: tile by tile, from the
     /// deepest zoom and from the top of the view, and within a tile in the
     /// reverse of its bucket's order, or of their [`Item::sort`]. A shape is
-    /// hit where the query touches its bounding box.
-    pub(crate) fn query_rendered_features(
+    /// hit where the query touches its bounding box. Each feature has the
+    /// state that `feature_state` gives of its source.
+    pub(crate) fn query_rendered_features<'s>(
         &self,
         geometry: &[ScreenCoordinate],
         layers: &QueryLayers<'_>,
         options: &RenderedQueryOptions,
         global_state: Option<&GlobalStateMap>,
+        feature_state: impl Fn(SourceKey) -> Option<&'s SourceFeatureState>,
         results: &mut QueryResults,
     ) -> Result<(), Error> {
         if geometry.is_empty() || (self.collision.is_empty() && self.ignored.is_empty()) {
@@ -418,8 +425,13 @@ impl CollisionIndex {
                 None => hits.sort_by_key(|entry| Reverse(entry.sort)),
             }
             let style = record.leader.style().base();
-            let selection =
-                FeatureSelection { layers, options, global_state, tile_id: &record.tile, feature_state: None };
+            let selection = FeatureSelection {
+                layers,
+                options,
+                global_state,
+                tile_id: &record.tile,
+                feature_state: feature_state(record.source),
+            };
             let features = hits.iter().map(|entry| entry.feature as usize);
             for (layer_id, features) in
                 record.features.lookup_features(features, &style.source_layer, &style.id, &selection)?

@@ -183,3 +183,23 @@ fn layers_with_equal_filters_each_draw_and_are_found() {
     assert_eq!(found(4.0), ["below"]);
     assert_eq!(found(8.0), Vec::<String>::new(), "nothing past the layer below");
 }
+
+/// A polygon that placement shows is found with its feature state, as one
+/// of a layer that doesn't collide is.
+#[test]
+fn a_placed_polygon_is_found_with_its_state() {
+    use mln_rs::feature::{Identifier, Value};
+
+    let style = points_style(0.0, 0, &[0.0], COLLIDING).replace(r#""type":"Feature","#, r#""type":"Feature","id":1,"#);
+    let fixture = Fixture::new(registry(), &style);
+    let selector = mln_rs::FeatureStateSelector::feature("points", Identifier::Uint(1));
+    let state: mln_rs::FeatureState = [("hover".to_owned(), Value::Bool(true))].into_iter().collect();
+    wait(fixture.map.set_feature_state(&selector, state.clone()));
+    fixture.render_loaded();
+
+    let center = mln_rs::mln_util::geo::ScreenCoordinate::new(f64::from(SIZE.width / 2), f64::from(SIZE.height / 2));
+    let geometry = mln_rs::RenderedQueryGeometry::Point(center);
+    let features = wait(fixture.session.query_rendered_features(geometry, mln_rs::RenderedQueryOptions::default()));
+    let states: Vec<_> = features.into_iter().map(|feature| feature.state).collect();
+    assert_eq!(states, [state]);
+}
