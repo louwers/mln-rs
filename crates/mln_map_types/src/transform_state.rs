@@ -13,6 +13,7 @@ use mln_util::size::Size;
 use crate::camera::{CameraOptions, FreeCameraOptions};
 use crate::camera_limits::CameraLimits;
 use crate::camera_pose::CameraPose;
+use crate::ground::GroundHit;
 use crate::mode::{ConstrainMode, ViewportMode};
 use crate::vertical_perspective_projection::VerticalPerspectiveProjection;
 use crate::view::{NorthOrientation, View, ViewParams, map_offset, max_mercator_horizon_angle, scale_zoom, zoom_scale};
@@ -754,6 +755,151 @@ impl TransformState {
             return;
         }
         self.update(|p| p.terrain_min_elevation = min_elevation);
+    }
+
+    /// Raises the eye by `lift` meters straight up, still looking at the
+    /// center at its altitude: keeps the center, its altitude, the bearing
+    /// and the roll, and solves the pitch and the zoom that put the eye there
+    /// (GL JS's `calculateCameraOptionsFromTo`, from the raised eye to the
+    /// center), within the limits. Heights convert to pixels at the center's
+    /// latitude. On the globe it solves in the plane of the center's
+    /// vertical, which the eye is near wherever it can come near the
+    /// ground. Returns whether the view changed; while the view shows
+    /// nothing, it doesn't.
+    pub fn raise_eye(&mut self, lift: f64) -> bool {
+        let view = &self.view;
+        if !lift.is_finite() || !view.is_valid() {
+            return false;
+        }
+        // The eye's offset from the center, in pixels at the zoom: across
+        // the ground, and up.
+        let distance = view.camera_to_center_distance();
+        let across = view.pitch().sin() * distance;
+        let up = view.pitch().cos() * distance + lift / Self::height_meters_per_pixel(view);
+        let raised = across.hypot(up);
+        if raised == 0.0 {
+            return false;
+        }
+        let pitch = mln_math::clamp_f64(across.atan2(up), self.limits.min_pitch, self.limits.max_pitch);
+        let zoom = view.zoom() + (distance / raised).log2();
+        let center = view.center(WrapMode::Unwrapped);
+        let before = *view.params();
+        self.set_pitch(pitch);
+        self.set_lat_lng_zoom(&center, zoom);
+        *self.view.params() != before
+    }
+
+    /// Moves the center along the view onto `hit`, the ground its line of
+    /// sight meets, with the eye, the pitch and the bearing kept: the center
+    /// stands as far along the view as `hit` is from the eye, at the height
+    /// the view reaches there, and the zoom follows from that distance (GL
+    /// JS's `moveCenterToElevation`, orbis's `recenter_on`). Distances across
+    /// the ground convert to meters at `hit`'s latitude, so where the
+    /// center's latitude was another, the center lands off `hit` by that
+    /// share of the distance between the latitudes' scales.
+    ///
+    /// On the globe the center moves along the line from the eye through
+    /// the center at its altitude, as far as `hit`, raised along its
+    /// vertical, is from the eye along it; it stands that far above the
+    /// sea-level sphere, and the zoom puts the eye that far from it (GL
+    /// JS's `calculateCameraOptionsFromTo`). The pitch and the bearing are
+    /// kept, which turns the eye about the new center by the angle between
+    /// the centers' verticals: under a meter where the camera is low enough
+    /// to meet terrain.
+    ///
+    /// Returns whether it moved the center there. It leaves the state as it
+    /// is while the view shows nothing, where `hit` isn't in front of the
+    /// eye, and where the limits would move the zoom or the center: the zoom
+    /// range, the bounds, and in [`ConstrainMode::Screen`] the bounds the
+    /// screen must stay within.
+    pub fn recenter_on(&mut self, hit: &GroundHit) -> bool {
+        let view = &self.view;
+        if !view.is_valid() {
+            return false;
+        }
+        let recentered =
+            if view.is_globe() { Self::recentered_on_sphere(view, hit) } else { self.recentered_on_plane(hit) };
+        let Some((center, altitude, zoom)) = recentered else { return false };
+
+        let mut moved = self.clone();
+        moved.set_center_altitude(altitude);
+        moved.set_lat_lng_zoom(&center, zoom);
+        // The limits clamp what they refuse, and the screen's bounds move it.
+        let landed = moved.view.center(WrapMode::Unwrapped);
+        let mut on_screen = CameraOptions { center: Some(landed), ..CameraOptions::default() };
+        let mut screen_zoom = moved.view.zoom();
+        moved.constrain_camera_and_zoom_to_bounds(&mut on_screen, &mut screen_zoom);
+        let refused = (moved.view.zoom() - zoom).abs() > 1e-9
+            || (landed.latitude() - center.latitude()).abs() > 1e-9
+            || (landed.longitude() - center.longitude()).abs() > 1e-9
+            || on_screen.center != Some(landed)
+            || screen_zoom != moved.view.zoom();
+        if refused {
+            return false;
+        }
+        *self = moved;
+        true
+    }
+
+    /// The center, its altitude and the zoom of [`Self::recenter_on`] on a
+    /// Mercator view, before the limits.
+    fn recentered_on_plane(&self, hit: &GroundHit) -> Option<(LatLng, f64, f64)> {
+        let view = &self.view;
+        let eye = view.eye_position();
+        let forward = view.camera_pose().forward();
+        // Meters per Web Mercator unit at zoom 0, across the ground at `hit`.
+        let latitude = hit.location(WrapMode::Unwrapped).latitude();
+        let meters = Projection::meters_per_pixel_at_latitude(latitude, 0.0) * TILE_SIZE_D;
+        let to_hit = DVec3::new((hit.world.x - eye.x) * meters, (hit.world.y - eye.y) * meters, hit.height - eye.z);
+        let distance = to_hit.dot(forward);
+        if !(distance.is_finite() && distance > 0.0) {
+            return None;
+        }
+        let world = Point::new(eye.x + forward.x * distance / meters, eye.y + forward.y * distance / meters);
+        let center = Projection::unproject(&world, 1.0 / TILE_SIZE_D, WrapMode::Unwrapped).ok()?;
+        // Wrapped, as move_lat_lng leaves it, unless bounds keep it in their
+        // range.
+        let center = if self.limits.bounds == LatLngBounds::default() { center.wrapped() } else { center };
+        let zoom = scale_zoom(view.camera_to_center_distance() * meters / distance / TILE_SIZE_D);
+        Some((center, eye.z + forward.z * distance, zoom))
+    }
+
+    /// The center, its altitude and the zoom of [`Self::recenter_on`] on the
+    /// globe, before the limits, in unit-sphere space. The center keeps the
+    /// world copy nearest the current one, as the globe's moves do.
+    fn recentered_on_sphere(view: &View, hit: &GroundHit) -> Option<(LatLng, f64, f64)> {
+        let radius = |height: f64| 1.0 + height / VerticalPerspectiveProjection::GLOBE_RADIUS_METERS;
+        let eye = view.globe_camera_position();
+        let center = VerticalPerspectiveProjection::surface_vector(&view.center(WrapMode::Unwrapped))
+            * radius(view.center_altitude());
+        let forward = (center - eye).normalize();
+        let target =
+            VerticalPerspectiveProjection::surface_vector(&hit.location(WrapMode::Unwrapped)) * radius(hit.height);
+        let distance = (target - eye).dot(forward);
+        if !(distance.is_finite() && distance > 0.0) {
+            return None;
+        }
+        let point = eye + forward * distance;
+        let length = point.length();
+        let location = VerticalPerspectiveProjection::surface_vector_to_lat_lng(point / length)?;
+        let location = view.lat_lng_near_center(&location);
+        let radius_at_zoom_0 =
+            VerticalPerspectiveProjection::globe_radius_pixels(Projection::world_size(1.0), location.latitude());
+        let zoom = scale_zoom(view.camera_to_center_distance() / distance / radius_at_zoom_0);
+        Some((location, (length - 1.0) * VerticalPerspectiveProjection::GLOBE_RADIUS_METERS, zoom))
+    }
+
+    /// Meters per pixel at the zoom of a height at the center: on Mercator
+    /// the view's, and on the globe those of its sphere, which it raises
+    /// heights on.
+    fn height_meters_per_pixel(view: &View) -> f64 {
+        if view.is_globe() {
+            let latitude = view.center(WrapMode::Unwrapped).latitude();
+            VerticalPerspectiveProjection::GLOBE_RADIUS_METERS
+                / VerticalPerspectiveProjection::globe_radius_pixels(Projection::world_size(view.scale()), latitude)
+        } else {
+            view.meters_per_pixel()
+        }
     }
 }
 
