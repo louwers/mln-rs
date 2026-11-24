@@ -365,6 +365,9 @@ impl DrawObjects {
                 self.vertex_slots = None;
                 self.geometry = None;
             }
+            if updated.is_err() {
+                self.attribute_bindings.clear();
+            }
             updated?;
         }
 
@@ -386,6 +389,9 @@ impl DrawObjects {
             if !matches!(updated, Ok(false)) {
                 self.vertex_slots = None;
                 self.geometry = None;
+            }
+            if updated.is_err() {
+                self.instance_bindings.clear();
             }
             updated?;
         }
