@@ -165,6 +165,14 @@ impl VerticalPerspectiveProjection {
     /// The unit-sphere position of a point in tile units.
     #[must_use]
     pub fn tile_coordinates_to_sphere(tile_point: &Point<f64>, tile_id: &UnwrappedTileID) -> DVec3 {
+        let [sin_x, cos_x, sin_y, cos_y] = Self::tile_coordinates_to_angles(tile_point, tile_id).to_array();
+        DVec3::new(sin_x * cos_y, sin_y, cos_x * cos_y)
+    }
+
+    /// The sine and cosine of the longitude, then of the latitude, of a point
+    /// in tile units. The longitude is 0 at the antimeridian, where Web
+    /// Mercator's X is 0, so the prime meridian is +Z.
+    fn tile_coordinates_to_angles(tile_point: &Point<f64>, tile_id: &UnwrappedTileID) -> DVec4 {
         let scale = 1.0 / (1u64 << tile_id.canonical.z) as f64;
         let mercator_x = tile_point.x / f64::from(EXTENT) * scale + f64::from(tile_id.canonical.x) * scale;
         let mercator_y = tile_point.y / f64::from(EXTENT) * scale + f64::from(tile_id.canonical.y) * scale;
@@ -173,9 +181,7 @@ impl VerticalPerspectiveProjection {
         // half-angle identities, as the shaders do.
         let t = (PI - (mercator_y * PI * 2.0)).exp();
         let t2 = t * t;
-        let sin_y = (t2 - 1.0) / (t2 + 1.0);
-        let cos_y = (2.0 * t) / (t2 + 1.0);
-        DVec3::new(spherical_x.sin() * cos_y, sin_y, spherical_x.cos() * cos_y)
+        DVec4::new(spherical_x.sin(), spherical_x.cos(), (t2 - 1.0) / (t2 + 1.0), (2.0 * t) / (t2 + 1.0))
     }
 
     /// The center's distance from the planet's center, in radii: the camera
@@ -995,7 +1001,11 @@ fn zoom_turning_the_planet(
 impl VerticalPerspectiveProjection {
     /// [`Projection::projection_data`](crate::Projection::projection_data) on the globe.
     pub(crate) fn projection_data(view: &View, tile_id: &UnwrappedTileID, mercator_matrix: &DMat4) -> ProjectionData {
+        // The middle of the tile; the shaders' `GLOBE_ANCHOR`.
+        let middle = Point::new(f64::from(EXTENT) / 2.0, f64::from(EXTENT) / 2.0);
         ProjectionData {
+            sphere_anchor: Self::tile_coordinates_to_sphere(&middle, tile_id),
+            sphere_anchor_angles: Self::tile_coordinates_to_angles(&middle, tile_id),
             main_matrix: view.globe_view_projection_matrix(),
             tile_mercator_coords: mercator_tile_coords(tile_id),
             clipping_plane: view.globe_clipping_plane(),

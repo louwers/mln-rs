@@ -55,6 +55,8 @@ mod stencil_overflow_test;
 mod system_fonts_test;
 // The layers that drape over terrain, drawn through the terrain's drapes.
 mod terrain_drape_test;
+// Vertical perspective close in draws what Mercator draws.
+mod globe_precision_test;
 // Tiles reloading as their data expires, over an online file source.
 mod tile_expiry_test;
 // Features of two tiles that overlap stack in the frame's order of its tiles.

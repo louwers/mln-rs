@@ -58,6 +58,9 @@
 //   the current zoom, so its positions stay small.
 // - ClippingMaskProgram projects through the projection block as the other
 //   shaders do, and has a globe variant.
+// - On the globe, points on the sphere are offsets from the tile's anchor,
+//   which the projection matrix carries, so float32 keeps them exact close
+//   in (`projectToSphere`).
 // - The terrain shaders have no C++ counterpart: they are the port's own, with
 //   the WGSL's height rule.
 // - Fragment shaders declare the uniform blocks they share with their vertex
@@ -4753,6 +4756,8 @@ layout (std140) uniform ProjectionUBO {
     highp float u_projection_transition;
     highp float u_projection_depth_offset;
     highp vec2 u_projection_translate;
+    highp vec4 u_projection_anchor;
+    highp vec4 u_projection_anchor_angles;
 };
 
 // Pole vertices carry these sentinel Y values in their raw position.
@@ -4763,34 +4768,76 @@ layout (std140) uniform ProjectionUBO {
 
 #define GLOBE_RADIUS 6371008.8
 #define GLOBE_PI 3.1415926535897932384626433832795
+// The tile's anchor, its middle, in tile units.
+#define GLOBE_ANCHOR 4096.0
 
-// Tile position (0..EXTENT) to a point on the unit sphere; the pole sentinels in rawPos map to the poles.
-vec3 projectToSphere(vec2 translatedPos, vec2 rawPos) {
-    vec2 mercator_pos = u_projection_tile_mercator_coords.xy + u_projection_tile_mercator_coords.zw * translatedPos;
-    float spherical_x = mercator_pos.x * GLOBE_PI * 2.0 + GLOBE_PI;
-    // sin/cos of the latitude from the Mercator Y via the tangent half-angle identities: no atan, and float32 precision survives near the equator.
-    float t = exp(GLOBE_PI - (mercator_pos.y * GLOBE_PI * 2.0));
-    float t2 = t * t;
-    float denom = t2 + 1.0;
-    float sin_sy = (t2 - 1.0) / denom;
-    float cos_sy = (2.0 * t) / denom;
-    vec3 pos = vec3(sin(spherical_x) * cos_sy, sin_sy, cos(spherical_x) * cos_sy);
-    if (rawPos.y < GLOBE_POLE_NORTH_Y) {
-        pos = vec3(0.0, 1.0, 0.0);
-    }
-    if (rawPos.y > GLOBE_POLE_SOUTH_Y) {
-        pos = vec3(0.0, -1.0, 0.0);
-    }
-    return pos;
+// The small-angle functions below are exact to float32 where the GPU's builtins may only be close in absolute terms.
+
+// e^x - 1.
+float globeExpm1(float x) {
+    return abs(x) < 0.01 ? x * (1.0 + x * (0.5 + x * (1.0 / 6.0 + x * (1.0 / 24.0)))) : exp(x) - 1.0;
 }
 
-vec3 globeRotateVector(vec3 vec, vec2 angles) {
+float globeAtan(float x) {
+    float x2 = x * x;
+    return abs(x) < 0.05 ? x * (1.0 - x2 * (1.0 / 3.0 - x2 * (0.2 - x2 / 7.0))) : atan(x);
+}
+
+float globeTan(float a) {
+    float a2 = a * a;
+    return abs(a) < 0.1 ? a * (1.0 + a2 * (1.0 / 3.0 + a2 * (2.0 / 15.0))) : tan(a);
+}
+
+// The change in the sine and cosine of an angle whose sine and cosine are `sc` when it turns by `a`.
+vec2 globeTurn(vec2 sc, float a) {
+    float a2 = a * a;
+    float sin_a = a * (1.0 - a2 / 6.0 * (1.0 - a2 / 20.0));
+    // 1 - cos(a)
+    float versin_a = a2 * 0.5 * (1.0 - a2 / 12.0 * (1.0 - a2 / 30.0));
+    if (abs(a) >= 0.1) {
+        float half_sin = sin(a * 0.5);
+        sin_a = sin(a);
+        versin_a = 2.0 * half_sin * half_sin;
+    }
+    return vec2(sc.y * sin_a - sc.x * versin_a, -sc.x * sin_a - sc.y * versin_a);
+}
+
+// Tile position (0..EXTENT) to a point on the unit sphere, as its offset from the tile's anchor. The offset is built from
+// the position's distance from the anchor alone, so float32 rounds it to its own size, a tile's, not the sphere's. The
+// pole sentinels in rawPos map to the poles.
+vec3 projectToSphere(vec2 translatedPos, vec2 rawPos) {
+    vec2 d = translatedPos - GLOBE_ANCHOR;
+    vec4 anchor = u_projection_anchor_angles;
+    float d_lng = d.x * u_projection_tile_mercator_coords.z * (2.0 * GLOBE_PI);
+    // The latitude is 2 atan(e^m) - pi/2 of the Mercator exponent m = pi - 2 pi y; its change from the anchor's, as one
+    // atan of e^(m - m_anchor) - 1.
+    float e = globeExpm1(d.y * u_projection_tile_mercator_coords.w * (-2.0 * GLOBE_PI));
+    float d_lat = 2.0 * globeAtan(anchor.w * e / (2.0 + (1.0 + anchor.z) * e));
+    vec2 lng = globeTurn(anchor.xy, d_lng);
+    vec2 lat = globeTurn(anchor.zw, d_lat);
+    float cos_lat = anchor.w + lat.y;
+    vec3 offset = vec3(lng.x * cos_lat + anchor.x * lat.y, lat.x, lng.y * cos_lat + anchor.y * lat.y);
+    if (rawPos.y < GLOBE_POLE_NORTH_Y) {
+        offset = vec3(0.0, 1.0, 0.0) - u_projection_anchor.xyz;
+    }
+    if (rawPos.y > GLOBE_POLE_SOUTH_Y) {
+        offset = vec3(0.0, -1.0, 0.0) - u_projection_anchor.xyz;
+    }
+    return offset;
+}
+
+// The point `angles` (radians right and up) from a point on the unit sphere, both as offsets from the tile's anchor.
+vec3 globeRotateVector(vec3 offset, vec2 angles) {
+    vec3 vec = u_projection_anchor.xyz + offset;
     vec3 axisRight = vec3(vec.z, 0.0, -vec.x);
     vec3 axisUp = cross(axisRight, vec);
     axisRight = normalize(axisRight);
     axisUp = normalize(axisUp);
-    vec2 t = tan(angles);
-    return normalize(vec + axisRight * t.x + axisUp * t.y);
+    vec3 v = axisRight * globeTan(angles.x) + axisUp * globeTan(angles.y);
+    // normalize(vec + v) - vec for a unit vec, without the cancellation.
+    float v2 = dot(v, v);
+    float len = sqrt(1.0 + v2);
+    return offset + (v - vec * (v2 / (len + 1.0))) / len;
 }
 
 // cos(latitude) at a tile Y, from the same exp() form as projectToSphere.
@@ -4808,15 +4855,22 @@ float projectLineThickness(float tileY) {
     return thickness;
 }
 
-float globeComputeClippingZ(vec3 spherePos) {
-    return 1.0 - (dot(spherePos, u_projection_clipping_plane.xyz) + u_projection_clipping_plane.w);
+// The clipping plane's value at a point offset from the tile's anchor, off 1.
+float globeComputeClippingZ(vec3 offset) {
+    return 1.0 - (dot(offset, u_projection_clipping_plane.xyz) + u_projection_anchor.w);
 }
 
-vec4 interpolateProjection(vec2 posInTile, vec3 spherePos, float elevation) {
-    vec3 elevatedPos = spherePos * (1.0 + elevation / GLOBE_RADIUS);
-    vec4 globePosition = u_projection_matrix * vec4(elevatedPos, 1.0);
+// A point on the unit sphere, offset from the tile's anchor, raised by `elevation` meters.
+vec3 globeElevate(vec3 offset, float elevation) {
+    return offset + (u_projection_anchor.xyz + offset) * (elevation / GLOBE_RADIUS);
+}
+
+// sphereOffset is projectToSphere's.
+vec4 interpolateProjection(vec2 posInTile, vec3 sphereOffset, float elevation) {
+    vec3 elevatedOffset = globeElevate(sphereOffset, elevation);
+    vec4 globePosition = u_projection_matrix * vec4(elevatedOffset, 1.0);
     // Clip the far side of the globe through Z; the layer's depth shift keeps layer order.
-    globePosition.z = globeComputeClippingZ(elevatedPos) * globePosition.w - u_projection_depth_offset;
+    globePosition.z = globeComputeClippingZ(elevatedOffset) * globePosition.w - u_projection_depth_offset;
 
     if (u_projection_transition > 0.999) {
         return globePosition;
@@ -4836,9 +4890,8 @@ vec4 interpolateProjection(vec2 posInTile, vec3 spherePos, float elevation) {
 }
 
 // Keeps the matrix Z, for geometry that needs the depth buffer.
-vec4 interpolateProjectionFor3D(vec2 posInTile, vec3 spherePos, float elevation) {
-    vec3 elevatedPos = spherePos * (1.0 + elevation / GLOBE_RADIUS);
-    vec4 globePosition = u_projection_matrix * vec4(elevatedPos, 1.0);
+vec4 interpolateProjectionFor3D(vec2 posInTile, vec3 sphereOffset, float elevation) {
+    vec4 globePosition = u_projection_matrix * vec4(globeElevate(sphereOffset, elevation), 1.0);
     if (u_projection_transition > 0.999) {
         return globePosition;
     }

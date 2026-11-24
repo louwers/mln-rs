@@ -37,6 +37,9 @@
 // - On the globe, a symbol vertex stage puts a screen-aligned label whose
 //   anchor is behind the horizon outside the clip volume, unless the label
 //   is raised.
+// - On the globe, points on the sphere are offsets from the tile's anchor,
+//   which the projection matrix carries, so float32 keeps them exact close
+//   in (`projectToSphere`).
 // - What naga doesn't take is written another way: no precision qualifiers,
 //   `int` for the `bool` members of buffers, no sampler parameters, `flat` on
 //   an integer output, and an `#else` after the overdraw inspector's early
@@ -171,6 +174,8 @@ struct ProjectionUBO {
     float projection_transition;
     float depth_offset;
     vec2 translate;
+    vec4 anchor;
+    vec4 anchor_angles;
 };
 
 // Pole vertices carry these sentinel Y values in their raw position.
@@ -180,34 +185,76 @@ struct ProjectionUBO {
 #ifdef PROJECTION_GLOBE
 
 #define GLOBE_RADIUS 6371008.8
+// The tile's anchor, its middle, in tile units.
+#define GLOBE_ANCHOR 4096.0
 
-// Tile position (0..EXTENT) to a point on the unit sphere; the pole sentinels in rawPos map to the poles.
-vec3 projectToSphere(vec2 translatedPos, vec2 rawPos, ProjectionUBO projection) {
-    const vec2 mercator_pos = projection.tile_mercator_coords.xy + projection.tile_mercator_coords.zw * translatedPos;
-    const float spherical_x = mercator_pos.x * M_PI * 2.0 + M_PI;
-    // sin/cos of the latitude from the Mercator Y via the tangent half-angle identities: no atan, and float32 precision survives near the equator.
-    const float t = exp(M_PI - (mercator_pos.y * M_PI * 2.0));
-    const float t2 = t * t;
-    const float denom = t2 + 1.0;
-    const float sin_sy = (t2 - 1.0) / denom;
-    const float cos_sy = (2.0 * t) / denom;
-    vec3 pos = vec3(sin(spherical_x) * cos_sy, sin_sy, cos(spherical_x) * cos_sy);
-    if (rawPos.y < GLOBE_POLE_NORTH_Y) {
-        pos = vec3(0.0, 1.0, 0.0);
-    }
-    if (rawPos.y > GLOBE_POLE_SOUTH_Y) {
-        pos = vec3(0.0, -1.0, 0.0);
-    }
-    return pos;
+// The small-angle functions below are exact to float32 where the GPU's builtins may only be close in absolute terms.
+
+// e^x - 1.
+float globeExpm1(float x) {
+    return abs(x) < 0.01 ? x * (1.0 + x * (0.5 + x * (1.0 / 6.0 + x * (1.0 / 24.0)))) : exp(x) - 1.0;
 }
 
-vec3 globeRotateVector(vec3 vec, vec2 angles) {
+float globeAtan(float x) {
+    const float x2 = x * x;
+    return abs(x) < 0.05 ? x * (1.0 - x2 * (1.0 / 3.0 - x2 * (0.2 - x2 / 7.0))) : atan(x);
+}
+
+float globeTan(float a) {
+    const float a2 = a * a;
+    return abs(a) < 0.1 ? a * (1.0 + a2 * (1.0 / 3.0 + a2 * (2.0 / 15.0))) : tan(a);
+}
+
+// The change in the sine and cosine of an angle whose sine and cosine are `sc` when it turns by `a`.
+vec2 globeTurn(vec2 sc, float a) {
+    const float a2 = a * a;
+    float sin_a = a * (1.0 - a2 / 6.0 * (1.0 - a2 / 20.0));
+    // 1 - cos(a)
+    float versin_a = a2 * 0.5 * (1.0 - a2 / 12.0 * (1.0 - a2 / 30.0));
+    if (abs(a) >= 0.1) {
+        const float half_sin = sin(a * 0.5);
+        sin_a = sin(a);
+        versin_a = 2.0 * half_sin * half_sin;
+    }
+    return vec2(sc.y * sin_a - sc.x * versin_a, -sc.x * sin_a - sc.y * versin_a);
+}
+
+// Tile position (0..EXTENT) to a point on the unit sphere, as its offset from the tile's anchor. The offset is built from
+// the position's distance from the anchor alone, so float32 rounds it to its own size, a tile's, not the sphere's. The
+// pole sentinels in rawPos map to the poles.
+vec3 projectToSphere(vec2 translatedPos, vec2 rawPos, ProjectionUBO projection) {
+    const vec2 d = translatedPos - GLOBE_ANCHOR;
+    const vec4 anchor = projection.anchor_angles;
+    const float d_lng = d.x * projection.tile_mercator_coords.z * (2.0 * M_PI);
+    // The latitude is 2 atan(e^m) - pi/2 of the Mercator exponent m = pi - 2 pi y; its change from the anchor's, as one
+    // atan of e^(m - m_anchor) - 1.
+    const float e = globeExpm1(d.y * projection.tile_mercator_coords.w * (-2.0 * M_PI));
+    const float d_lat = 2.0 * globeAtan(anchor.w * e / (2.0 + (1.0 + anchor.z) * e));
+    const vec2 lng = globeTurn(anchor.xy, d_lng);
+    const vec2 lat = globeTurn(anchor.zw, d_lat);
+    const float cos_lat = anchor.w + lat.y;
+    vec3 offset = vec3(lng.x * cos_lat + anchor.x * lat.y, lat.x, lng.y * cos_lat + anchor.y * lat.y);
+    if (rawPos.y < GLOBE_POLE_NORTH_Y) {
+        offset = vec3(0.0, 1.0, 0.0) - projection.anchor.xyz;
+    }
+    if (rawPos.y > GLOBE_POLE_SOUTH_Y) {
+        offset = vec3(0.0, -1.0, 0.0) - projection.anchor.xyz;
+    }
+    return offset;
+}
+
+// The point `angles` (radians right and up) from a point on the unit sphere, both as offsets from the tile's anchor.
+vec3 globeRotateVector(vec3 offset, vec2 angles, ProjectionUBO projection) {
+    const vec3 vec = projection.anchor.xyz + offset;
     vec3 axisRight = vec3(vec.z, 0.0, -vec.x);
     vec3 axisUp = cross(axisRight, vec);
     axisRight = normalize(axisRight);
     axisUp = normalize(axisUp);
-    const vec2 t = tan(angles);
-    return normalize(vec + axisRight * t.x + axisUp * t.y);
+    const vec3 v = axisRight * globeTan(angles.x) + axisUp * globeTan(angles.y);
+    // normalize(vec + v) - vec for a unit vec, without the cancellation.
+    const float v2 = dot(v, v);
+    const float len = sqrt(1.0 + v2);
+    return offset + (v - vec * (v2 / (len + 1.0))) / len;
 }
 
 // cos(latitude) at a tile Y, from the same exp() form as projectToSphere.
@@ -225,15 +272,22 @@ float projectLineThickness(float tileY, ProjectionUBO projection) {
     return thickness;
 }
 
-float globeComputeClippingZ(vec3 spherePos, ProjectionUBO projection) {
-    return 1.0 - (dot(spherePos, projection.clipping_plane.xyz) + projection.clipping_plane.w);
+// The clipping plane's value at a point offset from the tile's anchor, off 1.
+float globeComputeClippingZ(vec3 offset, ProjectionUBO projection) {
+    return 1.0 - (dot(offset, projection.clipping_plane.xyz) + projection.anchor.w);
 }
 
-vec4 interpolateProjection(vec2 posInTile, vec3 spherePos, float elevation, ProjectionUBO projection) {
-    const vec3 elevatedPos = spherePos * (1.0 + elevation / GLOBE_RADIUS);
-    vec4 globePosition = projection.matrix * vec4(elevatedPos, 1.0);
+// A point on the unit sphere, offset from the tile's anchor, raised by `elevation` meters.
+vec3 globeElevate(vec3 offset, float elevation, ProjectionUBO projection) {
+    return offset + (projection.anchor.xyz + offset) * (elevation / GLOBE_RADIUS);
+}
+
+// sphereOffset is projectToSphere's.
+vec4 interpolateProjection(vec2 posInTile, vec3 sphereOffset, float elevation, ProjectionUBO projection) {
+    const vec3 elevatedOffset = globeElevate(sphereOffset, elevation, projection);
+    vec4 globePosition = projection.matrix * vec4(elevatedOffset, 1.0);
     // Clip the far side of the globe through Z; the layer's depth shift keeps layer order.
-    globePosition.z = globeComputeClippingZ(elevatedPos, projection) * globePosition.w - projection.depth_offset;
+    globePosition.z = globeComputeClippingZ(elevatedOffset, projection) * globePosition.w - projection.depth_offset;
 
     if (projection.projection_transition > 0.999) {
         return globePosition;
@@ -253,9 +307,8 @@ vec4 interpolateProjection(vec2 posInTile, vec3 spherePos, float elevation, Proj
 }
 
 // Keeps the matrix Z, for geometry that needs the depth buffer.
-vec4 interpolateProjectionFor3D(vec2 posInTile, vec3 spherePos, float elevation, ProjectionUBO projection) {
-    const vec3 elevatedPos = spherePos * (1.0 + elevation / GLOBE_RADIUS);
-    const vec4 globePosition = projection.matrix * vec4(elevatedPos, 1.0);
+vec4 interpolateProjectionFor3D(vec2 posInTile, vec3 sphereOffset, float elevation, ProjectionUBO projection) {
+    const vec4 globePosition = projection.matrix * vec4(globeElevate(sphereOffset, elevation, projection), 1.0);
     if (projection.projection_transition > 0.999) {
         return globePosition;
     }
@@ -703,7 +756,7 @@ void main() {
         }
 
 #ifdef PROJECTION_GLOBE
-        const vec3 corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
+        const vec3 corner_vector = globeRotateVector(center_vector, extrude * angle_scale, projection);
         gl_Position = interpolateProjection(corner_position, corner_vector, 0.0, projection);
 #else
         gl_Position = drawable.matrix * vec4(corner_position, 0, 1);
@@ -3491,7 +3544,7 @@ void main() {
 #ifdef PROJECTION_GLOBE
     const vec2 circle_center = floor(in_position * 0.5);
     const vec3 center_vector = projectToSphere(circle_center, vec2(0.0, 0.0), projectionVector.projection_ubo[constant.ubo_index]);
-    const vec3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
+    const vec3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale, projectionVector.projection_ubo[constant.ubo_index]);
     gl_Position = interpolateProjection(circle_center + scaled_extrude, corner_vector, 0.0, projectionVector.projection_ubo[constant.ubo_index]);
 #else
     gl_Position = drawable.matrix * vec4(floor(in_position * 0.5) + scaled_extrude, 0, 1);

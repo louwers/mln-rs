@@ -95,14 +95,20 @@ pub(crate) fn projection_data(
 
 #[must_use]
 pub(crate) fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
+    // The anchor's offset goes into the matrix in f64, where the camera's
+    // large translation cancels it exactly; the anchor is zero on Mercator.
+    let anchor = data.sphere_anchor;
+    let plane = data.clipping_plane;
     ProjectionUBO {
-        matrix: cast_matrix(&data.main_matrix),
+        matrix: cast_matrix(&(data.main_matrix * DMat4::from_translation(anchor))),
         fallback_matrix: cast_matrix(&data.fallback_matrix),
         tile_mercator_coords: data.tile_mercator_coords.as_vec4().to_array(),
         clipping_plane: data.clipping_plane.as_vec4().to_array(),
         projection_transition: data.projection_transition as f32,
         depth_offset: data.depth_offset as f32,
         translate: data.translate.as_vec2().to_array(),
+        anchor: anchor.extend(anchor.dot(plane.truncate()) + plane.w).as_vec4().to_array(),
+        anchor_angles: data.sphere_anchor_angles.as_vec4().to_array(),
     }
 }
 
