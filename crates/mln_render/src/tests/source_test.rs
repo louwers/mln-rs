@@ -163,6 +163,23 @@ fn loaded_tiles(loads: &[ScriptedLoad]) -> Vec<CanonicalTileID> {
     loads.iter().map(|load| load.tile.canonical).collect()
 }
 
+/// A cover of tiles of no size, or of an empty zoom range, makes no tiles.
+#[test]
+fn a_cover_of_no_tiles_makes_none() {
+    let test = SourceTest::new();
+    let script = Script::default();
+    let layers = Tiled::Vector.layers();
+    for (tile_size, zoom_range) in [(TILE_SIZE_I, Range::new(5, 4)), (0, all_zooms())] {
+        let source = scripted_origin::source::<Geometry>("source", &script, tile_size, zoom_range);
+        let mut store = test.store();
+        let mut render_source = crate::tests::create_render_source(&source, &mut store);
+        let parameters = test.tile_parameters_with(MapMode::Continuous);
+        render_source.update(&mut store, &source, &layers, true, true, &parameters);
+        assert!(script.take_calls().iter().all(|call| *call == Call::Update), "{tile_size}, {zoom_range:?}");
+        assert!(render_source.render_tiles().is_empty());
+    }
+}
+
 /// A tile that leaves the view while it loads goes on loading, and is the
 /// one the view gets back when it turns back, as a map rotated back and
 /// forth does at its corners: its load is neither stopped nor begun again.

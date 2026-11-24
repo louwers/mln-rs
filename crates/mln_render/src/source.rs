@@ -310,6 +310,9 @@ pub struct SourceImage<'a> {
 }
 
 /// What a source's tiles cover, and how the engine picks those of a view.
+/// A cover of tiles of no size, or of an empty zoom range (`min` above
+/// `max`), has no tiles: the engine takes it as [`DataOrigin::update`]'s
+/// `None`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Cover {
     /// The size of the tiles, in pixels.

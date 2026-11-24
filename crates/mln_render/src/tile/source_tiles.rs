@@ -1477,7 +1477,8 @@ impl SourceTiles {
 
     /// Has the origin take in `source`, its source as the style has it, for
     /// an update of `parameters`. Returns what the tiles cover, or `None`
-    /// while the source has nothing to make tiles from.
+    /// while the source has nothing to make tiles from, or a cover of no
+    /// tiles (see [`Cover`]).
     pub(crate) fn update_origin(
         &mut self,
         source: &Source,
@@ -1489,7 +1490,7 @@ impl SourceTiles {
         let parts = UpdateParts { source, tiles: self, ctx, parameters, needs_relayout };
         let cover = origin.update(parts);
         self.info.origin = Some(origin);
-        cover
+        cover.filter(|cover| cover.tile_size > 0 && cover.zoom_range.min <= cover.zoom_range.max)
     }
 
     pub(crate) fn clear_all(&mut self, ctx: &mut StoreContext) {
