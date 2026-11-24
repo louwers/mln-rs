@@ -1,5 +1,6 @@
 // The styles the app offers, from the shared catalog (examples/styles.json)
-// that the web demo reads too. And the projections it draws them with.
+// that the web demo reads too, and the terrain it adds to some of them. And
+// the projections it draws them with.
 
 use mln_util::error::Error;
 
@@ -13,7 +14,7 @@ pub(crate) enum StyleSource {
 }
 
 /// A style the app can show.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Style {
     /// Names the style on the command line (`--style <key>`); `None` for a
     /// custom URL or path.
@@ -23,6 +24,54 @@ pub(crate) struct Style {
     pub source: StyleSource,
     /// Dark: the controls turn dark with it.
     pub dark: bool,
+    /// The terrain the app adds to the style once it loads.
+    pub terrain: Option<Terrain>,
+}
+
+/// 3D terrain that the app adds to a style that has none, from a catalog
+/// entry's `terrain`, as the web demo does (examples/web/web/styles.ts): a
+/// `raster-dem` source, the style's `terrain` on it, and optionally a
+/// hillshade of it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Terrain {
+    /// The `raster-dem` source's JSON.
+    pub source: String,
+    pub exaggeration: f64,
+    pub hillshade: Option<Hillshade>,
+}
+
+/// A hillshade layer of a [`Terrain`]'s source.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Hillshade {
+    /// The layer's paint, as JSON.
+    pub paint: String,
+    /// The layer that the hillshade goes under, if the style has it, such as
+    /// the first that stands on the ground; else it goes on top.
+    pub before: Option<String>,
+}
+
+impl Terrain {
+    /// A catalog entry's `terrain`, or `None` where it lacks a part.
+    fn parse(entry: &serde_json::Value) -> Option<Terrain> {
+        let object = |value: &serde_json::Value, key: &str| {
+            value.get(key).filter(|value| value.is_object()).map(ToString::to_string)
+        };
+        let hillshade = match entry.get("hillshade") {
+            Some(hillshade) => Some(Hillshade {
+                paint: object(hillshade, "paint").unwrap_or_else(|| "{}".to_owned()),
+                before: match hillshade.get("before") {
+                    Some(before) => Some(before.as_str()?.to_owned()),
+                    None => None,
+                },
+            }),
+            None => None,
+        };
+        Some(Terrain {
+            source: object(entry, "source")?,
+            exaggeration: entry.get("exaggeration")?.as_f64()?,
+            hillshade,
+        })
+    }
 }
 
 fn parse_catalog() -> (String, Vec<Style>) {
@@ -45,7 +94,11 @@ fn parse_catalog() -> (String, Vec<Style>) {
                 StyleSource::Json(entry.get("json")?.to_string())
             };
             let dark = entry.get("dark").and_then(serde_json::Value::as_bool).unwrap_or(false);
-            Some(Style { key: Some(key), name, provider, source, dark })
+            let terrain = match entry.get("terrain") {
+                Some(terrain) => Some(Terrain::parse(terrain)?),
+                None => None,
+            };
+            Some(Style { key: Some(key), name, provider, source, dark, terrain })
         })
         .collect();
     (default, styles)
@@ -69,12 +122,14 @@ pub(crate) fn default_style() -> Style {
             provider: String::new(),
             source: StyleSource::Json("{}".to_owned()),
             dark: false,
+            terrain: None,
         })
 }
 
-/// The style named by `spec`: a key or URL from `examples/styles.json`, or
-/// another URL or local file path, which the app names by the style's own name
-/// once it loads (`name` is empty until then).
+/// The style named by `spec`: a key from `examples/styles.json`, the first
+/// style there with the URL `spec`, or another URL or local file path, which
+/// the app names by the style's own name once it loads (`name` is empty until
+/// then).
 pub(crate) fn style_for(spec: &str) -> Style {
     if let Some(known) = styles().into_iter().find(|style| {
         style.key.as_deref() == Some(spec) || matches!(&style.source, StyleSource::Url(url) if url == spec)
@@ -89,7 +144,34 @@ pub(crate) fn style_for(spec: &str) -> Style {
         .filter(|host| !host.is_empty())
         .unwrap_or("local file")
         .to_owned();
-    Style { key: None, name: String::new(), provider, source: StyleSource::Url(url), dark: false }
+    Style { key: None, name: String::new(), provider, source: StyleSource::Url(url), dark: false, terrain: None }
+}
+
+/// The ID of the source that [`add_terrain`] adds.
+pub(crate) const TERRAIN_SOURCE: &str = "terrain";
+
+/// The ID of the hillshade layer that [`add_terrain`] adds.
+const TERRAIN_HILLSHADE: &str = "terrain-hillshade";
+
+/// Adds `terrain` to the style that `map` loaded, unless it has the source
+/// already. Fails while no style is loaded.
+pub(crate) fn add_terrain(map: &mut mln_map::Map, terrain: &Terrain) -> Result<(), Error> {
+    if map.source(TERRAIN_SOURCE).is_some() {
+        return Ok(());
+    }
+    map.add_source_json(TERRAIN_SOURCE, &terrain.source)?;
+    map.edit_loaded_style(|style| {
+        if let Some(hillshade) = &terrain.hillshade {
+            let layer = format!(
+                r#"{{"id":"{TERRAIN_HILLSHADE}","type":"hillshade","source":"{TERRAIN_SOURCE}","paint":{}}}"#,
+                hillshade.paint
+            );
+            let before = hillshade.before.as_deref().filter(|id| style.get_layer(id).is_some());
+            style.add_layer_json(&layer, before)?;
+        }
+        let root = format!(r#"{{"source":"{TERRAIN_SOURCE}","exaggeration":{}}}"#, terrain.exaggeration);
+        style.set_root_property_json("terrain", &root)
+    })
 }
 
 /// The projection the app draws the map with.
@@ -185,5 +267,34 @@ mod tests {
         assert!(matches!(style_for("osm-carto").source, StyleSource::Json(_)));
         assert_eq!(style_for("https://tiles.openfreemap.org/styles/liberty"), default);
         assert_eq!(style_for("/tmp/custom.json").source, StyleSource::Url("file:///tmp/custom.json".to_owned()));
+        // Satellite 3D shares Satellite's URL, which opens the plain style.
+        let satellite_3d = style_for("satellite-3d");
+        assert!(satellite_3d.terrain.is_some(), "Satellite 3D's terrain");
+        assert_eq!(satellite_3d.source, style_for("satellite").source);
+        let StyleSource::Url(url) = &satellite_3d.source else { panic!("Satellite 3D has a URL") };
+        assert_eq!(style_for(url).key.as_deref(), Some("satellite"));
+    }
+
+    #[test]
+    fn terrain_takes_an_optional_hillshade() {
+        let parse = |json: &str| Terrain::parse(&serde_json::from_str(json).unwrap());
+        let source = r#""source":{"type":"raster-dem","url":"https://example.com/dem.json"}"#;
+        let bare = parse(&format!(r#"{{{source},"exaggeration":1.5}}"#)).unwrap();
+        assert_eq!(bare.exaggeration, 1.5);
+        assert_eq!(bare.hillshade, None);
+        let shaded = parse(&format!(
+            r#"{{{source},"exaggeration":1,"hillshade":{{"paint":{{"hillshade-exaggeration":0.3}},"before":"building"}}}}"#
+        ))
+        .unwrap();
+        let hillshade = shaded.hillshade.unwrap();
+        assert_eq!(hillshade.paint, r#"{"hillshade-exaggeration":0.3}"#);
+        assert_eq!(hillshade.before.as_deref(), Some("building"));
+        assert_eq!(
+            parse(&format!(r#"{{{source},"exaggeration":1,"hillshade":{{}}}}"#)).unwrap().hillshade.unwrap().paint,
+            "{}"
+        );
+        // An entry without its source or exaggeration has no terrain.
+        assert_eq!(parse(r#"{"exaggeration":1}"#), None);
+        assert_eq!(parse(&format!("{{{source}}}")), None);
     }
 }

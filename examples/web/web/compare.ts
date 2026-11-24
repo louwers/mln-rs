@@ -1,8 +1,8 @@
 // The comparison with MapLibre GL JS: a GL JS map of the same style over the
 // page's canvas, clipped to the right of a divider, so that each side shows
-// one map and takes the input on its own side. GL JS's map draws with the
-// projection that the page's map draws with. The page imports this module
-// the first time a comparison opens, so GL JS loads only then.
+// one map and takes the input on its own side. GL JS's map has the terrain
+// and the projection that the page's map adds to the style. The page imports
+// this module the first time a comparison opens, so GL JS loads only then.
 //
 // The map that last took input leads, and the other jumps to its camera. A
 // follower's camera changes don't move the leader, so the maps don't echo
@@ -16,6 +16,8 @@
 import {
   Map as GlMap,
   getVersion,
+  type LayerSpecification,
+  type ProjectionSpecification,
   setWorkerUrl,
   type StyleSpecification,
 } from "maplibre-gl";
@@ -24,6 +26,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 
 import type { Camera, ProjectionType, StyleSource } from "./protocol.ts";
+import type { Style, Terrain } from "./styles.ts";
 
 // The bundle moves GL JS away from its worker, so the page says where it is.
 setWorkerUrl(workerUrl);
@@ -33,11 +36,44 @@ export interface Comparison {
   cameraChanged(camera: Camera): void;
   /** Makes the page's map lead without input on its canvas: its zoom buttons and compass. */
   lead(): void;
-  setStyle(style: StyleSource): void;
+  setStyle(style: Style): void;
   /** Draws with `projection`, or for null with the style's own. */
   setProjection(projection: ProjectionType | null): void;
   /** Removes GL JS's map and the divider. */
   remove(): void;
+}
+
+/**
+ * `style` with `terrain` added as the page's map adds it (styles.ts's
+ * `Terrain`, WebMap's `add_terrain`), drawn with `projection` unless that is
+ * undefined.
+ */
+function withTerrain(
+  style: StyleSpecification,
+  terrain: Terrain | undefined,
+  projection: ProjectionSpecification | undefined,
+): StyleSpecification {
+  const next = { ...style };
+  if (projection) next.projection = projection;
+  if (!terrain || "terrain" in style.sources) return next;
+  next.sources = { ...style.sources, terrain: terrain.source };
+  if (terrain.hillshade) {
+    const { paint, before } = terrain.hillshade;
+    const hillshade: LayerSpecification = {
+      id: "terrain-hillshade",
+      type: "hillshade",
+      source: "terrain",
+      paint,
+    };
+    const at = style.layers.findIndex((layer) => layer.id === before);
+    next.layers = style.layers.toSpliced(
+      at < 0 ? style.layers.length : at,
+      0,
+      hillshade,
+    );
+  }
+  next.terrain = { source: "terrain", exaggeration: terrain.exaggeration };
+  return next;
 }
 
 // Where the divider sits, as a fraction of the page's width. It stays when the
@@ -65,7 +101,7 @@ export function compare(
     follow,
     stop,
   }: {
-    style: StyleSource;
+    style: Style;
     projection: ProjectionType | null;
     camera: Camera;
     follow: (camera: Camera) => void;
@@ -103,11 +139,13 @@ export function compare(
   // The style and projection of the page's map, which a change of either
   // loads again: GL JS diffs the new style against the one it draws.
   const show = () =>
-    map.setStyle(glStyle(style), {
-      transformStyle: (_, next): StyleSpecification =>
-        projection === null
-          ? next
-          : { ...next, projection: { type: projection } },
+    map.setStyle(glStyle(style.source), {
+      transformStyle: (_, next) =>
+        withTerrain(
+          next,
+          style.terrain,
+          projection === null ? undefined : { type: projection },
+        ),
     });
   show();
   map.on("error", ({ error }) => console.warn("MapLibre GL JS:", error));

@@ -57,7 +57,7 @@ struct Reports {
     /// The map finished loading its style.
     loaded: bool,
     /// A style document loaded since the last frame, which takes the
-    /// page's projection.
+    /// page's terrain and projection.
     style_loaded: bool,
     /// The draw calls of the last frame, and the bytes of the live textures
     /// and of the live buffers after it.
@@ -129,6 +129,8 @@ pub struct WebMap {
     phases: [f64; PHASES],
     /// The check of the GPU that `start_gpu_check` started.
     gpu_check: GpuCheck,
+    /// The terrain that the page adds to the style (`set_style_url`).
+    terrain: Option<Terrain>,
     /// The projection type the page draws with, or `None` for the style's
     /// own (`set_projection`).
     projection: Option<String>,
@@ -232,18 +234,26 @@ impl WebMap {
             tasks: 0.0,
             phases: [0.0; PHASES],
             gpu_check: GpuCheck::default(),
+            terrain: None,
             projection: None,
         })
     }
 
-    /// Loads a style from a URL.
-    pub fn set_style_url(&self, url: &str) {
+    /// Loads a style from a URL, and adds `terrain` to it once it loads:
+    /// the JSON of web/styles.ts's `Terrain`, which a catalog entry of
+    /// examples/styles.json can have. Fails when `terrain` isn't one.
+    pub fn set_style_url(&mut self, url: &str, terrain: Option<String>) -> Result<(), JsValue> {
+        self.terrain = terrain.map(|json| Terrain::parse(&json)).transpose().map_err(js_error)?;
         sent(self.map.set_style_url(url));
+        Ok(())
     }
 
-    /// Loads a style from a JSON string.
-    pub fn set_style_json(&self, json: &str) {
+    /// Loads a style from a JSON string, and adds `terrain` to it once it
+    /// loads, as [`set_style_url`](Self::set_style_url) does.
+    pub fn set_style_json(&mut self, json: &str, terrain: Option<String>) -> Result<(), JsValue> {
+        self.terrain = terrain.map(|json| Terrain::parse(&json)).transpose().map_err(js_error)?;
         sent(self.map.set_style_json(json));
+        Ok(())
     }
 
     /// Draws the map with the style spec's projection type `projection`
@@ -394,16 +404,8 @@ impl WebMap {
         // on each rather than at its deadlines.
         self.gestures.tick(now);
         self.answer_events();
-        if std::mem::take(&mut self.reports.lock().style_loaded)
-            && let Some(projection) = self.projection.clone()
-        {
-            // A command that runs once another style has started loading
-            // changes nothing.
-            sent(self.map.with_core(move |map| {
-                if let Err(error) = set_projection(map, Some(&projection)) {
-                    log_refused(&error);
-                }
-            }));
+        if std::mem::take(&mut self.reports.lock().style_loaded) {
+            self.customize_style();
         }
         // A demand renders the map once the commands sent before it ran.
         let sent_sequence = self.map.sent_sequence();
@@ -647,6 +649,75 @@ fn log_refused(error: &Error) {
     Log::error(Event::General, format!("the map refused a command: {error}"));
 }
 
+/// web/styles.ts's `Terrain`.
+#[derive(Clone)]
+struct Terrain {
+    /// The `raster-dem` source's JSON.
+    source: String,
+    exaggeration: f64,
+    hillshade: Option<Hillshade>,
+}
+
+/// A hillshade layer of a [`Terrain`]'s source.
+#[derive(Clone)]
+struct Hillshade {
+    /// The layer's paint, as JSON.
+    paint: String,
+    /// The layer that the hillshade goes under, if the style has it; else it
+    /// goes on top.
+    before: Option<String>,
+}
+
+impl Terrain {
+    fn parse(json: &str) -> Result<Terrain, String> {
+        // The style parser's JSON tree, which the module has already.
+        let value: serde_json_borrow::Value<'_> = serde_json::from_str(json).map_err(|e| format!("terrain: {e}"))?;
+        let json = |value: &serde_json_borrow::Value<'_>| serde_json::to_string(value).unwrap_or_default();
+        let source = value.get("source");
+        if !source.is_object() {
+            return Err("terrain: no source".to_owned());
+        }
+        let hillshade = value.get("hillshade");
+        let hillshade = (!hillshade.is_null()).then(|| {
+            let paint = hillshade.get("paint");
+            Hillshade {
+                paint: if paint.is_object() { json(paint) } else { "{}".to_owned() },
+                before: hillshade.get("before").as_str().map(str::to_owned),
+            }
+        });
+        Ok(Terrain {
+            source: json(source),
+            exaggeration: value.get("exaggeration").as_f64().ok_or("terrain: no exaggeration")?,
+            hillshade,
+        })
+    }
+}
+
+/// The ID of the source that `add_terrain` adds.
+const TERRAIN_SOURCE: &str = "terrain";
+
+/// Adds `terrain` to the style that `map` loaded, unless it has the source
+/// already: the source, the style's `terrain` on it and the hillshade, if
+/// any. Fails while no style is loaded.
+fn add_terrain(map: &mut mln_map::Map, terrain: &Terrain) -> Result<(), Error> {
+    if map.source(TERRAIN_SOURCE).is_some() {
+        return Ok(());
+    }
+    map.add_source_json(TERRAIN_SOURCE, &terrain.source)?;
+    map.edit_loaded_style(|style| {
+        if let Some(hillshade) = &terrain.hillshade {
+            let layer = format!(
+                r#"{{"id":"terrain-hillshade","type":"hillshade","source":"{TERRAIN_SOURCE}","paint":{}}}"#,
+                hillshade.paint
+            );
+            let before = hillshade.before.as_deref().filter(|id| style.get_layer(id).is_some());
+            style.add_layer_json(&layer, before)?;
+        }
+        let root = format!(r#"{{"source":"{TERRAIN_SOURCE}","exaggeration":{}}}"#, terrain.exaggeration);
+        style.set_root_property_json("terrain", &root)
+    })
+}
+
 /// Sets the style's `projection` to the type `projection`, or for `None`
 /// back to the style document's own. Does nothing while no style is loaded:
 /// the map sets it once one loads. Fails for a type other than `mercator`,
@@ -668,6 +739,26 @@ fn set_projection(map: &mut mln_map::Map, projection: Option<&str>) -> Result<()
 }
 
 impl WebMap {
+    /// Adds the page's terrain to the style that loaded, and draws it with
+    /// the page's projection. A command that runs once another style has
+    /// started loading changes nothing.
+    fn customize_style(&self) {
+        let (terrain, projection) = (self.terrain.clone(), self.projection.clone());
+        if terrain.is_none() && projection.is_none() {
+            return;
+        }
+        sent(self.map.with_core(move |map| {
+            let edited = terrain.as_ref().map_or(Ok(()), |terrain| add_terrain(map, terrain));
+            let edited = edited.and_then(|()| match &projection {
+                Some(projection) => set_projection(map, Some(projection)),
+                None => Ok(()),
+            });
+            if let Err(error) = edited {
+                log_refused(&error);
+            }
+        }));
+    }
+
     /// Feeds one input to the gesture recognizer, and answers its events.
     /// Returns whether the map used the input.
     fn gesture(&mut self, input: Input, time: f64) -> bool {

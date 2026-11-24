@@ -6,6 +6,8 @@
 // its own (TileWorkerConnect), and the Web Worker reports there
 // (TileWorkerReport).
 
+import type { Terrain } from "./styles.ts";
+
 /** A projection type of the style spec. */
 export type ProjectionType = "mercator" | "vertical-perspective" | "globe";
 
@@ -91,6 +93,8 @@ export interface Start {
   height: number;
   ratio: number;
   style: StyleSource;
+  /** The terrain the map adds to the style (styles.ts). */
+  terrain: Terrain | undefined;
   /** JSON: font files that every font stack falls back to. */
   fallbackFontFaces: string | null;
   camera: Camera;
@@ -116,7 +120,7 @@ export type ToMap =
   | { type: "nextFrame" }
   | { type: "resize"; width: number; height: number }
   | { type: "pixelRatio"; ratio: number }
-  | { type: "style"; style: StyleSource }
+  | { type: "style"; style: StyleSource; terrain: Terrain | undefined }
   | { type: "jumpTo"; camera: Camera }
   | { type: "resetNorth" }
   // The projection the map draws with in place of the style's

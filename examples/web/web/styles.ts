@@ -1,10 +1,32 @@
 // The styles the page offers, from the shared catalog (examples/styles.json):
 // vector tiles across several schemas (OpenMapTiles, Protomaps, Shortbread,
-// and Mapeak), raster-dem hillshade, and raster tiles (satellite imagery and
-// OpenStreetMap Carto). `dark` turns the page's controls dark.
+// and Mapeak), raster-dem hillshade, raster tiles (satellite imagery and
+// OpenStreetMap Carto), and Mapterhorn's terrain under the satellite imagery.
+// `dark` turns the page's controls dark.
+
+import type {
+  HillshadeLayerSpecification,
+  RasterDEMSourceSpecification,
+} from "maplibre-gl";
 
 import catalog from "../../styles.json";
 import type { StyleSource } from "./protocol.ts";
+
+/**
+ * 3D terrain that the map adds to a style that has none once it loads
+ * (WebMap::set_style_url), as does GL JS's map in the comparison
+ * (compare.ts): the `raster-dem` source, the style's `terrain` on it at
+ * `exaggeration`, and with `hillshade`, a hillshade of it with that paint
+ * under the layer `before` if the style has it, else on top.
+ */
+export interface Terrain {
+  source: RasterDEMSourceSpecification;
+  exaggeration: number;
+  hillshade?: {
+    paint?: HillshadeLayerSpecification["paint"];
+    before?: string;
+  };
+}
 
 /** A style the page can show; `key` is null for one from a URL. */
 export interface Style {
@@ -13,6 +35,7 @@ export interface Style {
   provider: string;
   source: StyleSource;
   dark?: boolean;
+  terrain?: Terrain;
 }
 
 interface CatalogEntry {
@@ -22,6 +45,7 @@ interface CatalogEntry {
   url?: string;
   json?: object;
   dark?: boolean;
+  terrain?: Terrain;
 }
 
 export const STYLES: Style[] = (catalog.styles as CatalogEntry[]).map(
@@ -34,13 +58,18 @@ export const STYLES: Style[] = (catalog.styles as CatalogEntry[]).map(
         ? { url: entry.url }
         : { json: JSON.stringify(entry.json) },
     dark: entry.dark,
+    terrain: entry.terrain,
   }),
 );
 
 const DEFAULT_STYLE: Style =
   STYLES.find((style) => style.key === catalog.default) ?? STYLES[0]!;
 
-/** Whether two styles refer to the same style document. */
+/**
+ * Whether two styles show the same: the same style document, and the same
+ * terrain. A catalog entry can share another's URL and add terrain to it,
+ * so styles with keys compare by them.
+ */
 export function sameStyle(a: Style, b: Style): boolean {
   if (a.key !== null && b.key !== null) return a.key === b.key;
   if ("url" in a.source && "url" in b.source)
@@ -50,8 +79,8 @@ export function sameStyle(a: Style, b: Style): boolean {
   return false;
 }
 
-// The style for `?style=`: a key of STYLES, or any style's URL, which the
-// page names by the style's own name once it loads.
+// The style for `?style=`: a key of STYLES, or any style's URL (the first of
+// STYLES there), which the page names by the style's own name once it loads.
 export function styleFor(param: string | null): Style {
   if (param === null) return DEFAULT_STYLE;
   const known = STYLES.find(

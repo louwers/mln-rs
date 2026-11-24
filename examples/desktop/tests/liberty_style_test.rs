@@ -1,15 +1,17 @@
 // Loads OpenFreeMap Liberty (main.cpp's default style) over HTTPS through
 // the path mln-desktop uses: a runtime's map, whose resource loader goes
 // through the online file source to the platform's HTTP transport, and the
-// style's parser. Then the projections the controls offer. Needs network
-// access.
+// style's parser. Then the projections the controls offer, and the
+// picker's Satellite 3D, which adds Mapterhorn's terrain to VersaTiles'
+// Satellite. Needs network access.
+
+use std::time::{Duration, Instant};
 
 use mln_runtime::{Completion, MapOptions, Runtime, RuntimeOptions};
 use mln_util::size::Size;
 
-// The app's styles and projections (src/styles.rs).
+// The app's styles and the edits it makes to them (src/styles.rs).
 #[path = "../src/styles.rs"]
-#[expect(dead_code, reason = "the tests use only the projections")]
 mod styles;
 
 const LIBERTY: &str = "https://tiles.openfreemap.org/styles/liberty";
@@ -68,4 +70,49 @@ fn projections_override_the_style_and_style_restores_it() {
         assert_eq!(set["type"], kind, "{}: {}", picked.name(), picked.hint());
     }
     assert_eq!(own, projection(styles::Projection::Style));
+}
+
+/// Satellite 3D: Satellite, then a Mapterhorn DEM and the style's terrain on
+/// it, without a hillshade, and Mapterhorn's credit once its TileJSON loads.
+#[test]
+#[ignore = "needs network access"]
+fn satellite_3d_adds_mapterhorn_terrain_to_satellite() {
+    let satellite_3d = styles::style_for("satellite-3d");
+    let styles::StyleSource::Url(url) = satellite_3d.source else { panic!("Satellite 3D has no URL") };
+    // The URL opens the plain style.
+    assert_eq!(None, styles::style_for(&url).terrain);
+    let terrain = satellite_3d.terrain.unwrap();
+    assert_eq!(None, terrain.hillshade);
+
+    let (_runtime, map) = map();
+    map.set_style_url(&url).unwrap().wait().unwrap();
+    let layers = || -> Vec<String> {
+        map.style_layers().and_then(Completion::wait).unwrap().into_iter().map(|layer| layer.id).collect()
+    };
+    let before = layers();
+    for _ in 0..2 {
+        // The second time changes nothing.
+        let added = terrain.clone();
+        map.with_core(move |map| styles::add_terrain(map, &added)).unwrap().wait().unwrap().unwrap();
+    }
+
+    let json = map.style_root_property("terrain").and_then(Completion::wait).unwrap().unwrap();
+    let set: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(set["source"], styles::TERRAIN_SOURCE);
+    assert!((1.0..=2.0).contains(&set["exaggeration"].as_f64().unwrap()), "{set}");
+    assert_eq!(before, layers());
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let attribution = map
+            .with_core(|map| map.source(styles::TERRAIN_SOURCE).and_then(|source| source.data().attribution()))
+            .and_then(Completion::wait)
+            .unwrap();
+        if let Some(attribution) = attribution {
+            assert!(attribution.contains("Mapterhorn"), "{attribution}");
+            break;
+        }
+        assert!(Instant::now() < deadline, "Mapterhorn's TileJSON didn't load");
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
