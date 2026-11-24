@@ -57,7 +57,6 @@ fn snapshot_reports_every_member() {
     let snapshot = map.snapshot();
     assert_eq!(snapshot.debug, MapDebugOptions::NO_DEBUG);
     assert!(!snapshot.fully_loaded);
-    assert!(!snapshot.rendering_stats_view_enabled);
     assert!(!snapshot.gesture_in_progress);
     assert!(!snapshot.transition_in_progress);
     assert_eq!(snapshot.bounds.bounds, None);
@@ -73,7 +72,7 @@ fn snapshot_reports_every_member() {
         max_pitch: Some(50.0),
     })
     .unwrap();
-    map.set_debug(MapDebugOptions::TILE_BORDERS | MapDebugOptions::COLLISION);
+    map.set_debug(MapDebugOptions::TILE_BORDERS | MapDebugOptions::COLLISION | MapDebugOptions::RENDERING_STATS);
     map.set_tile_settings(&TileSettings {
         prefetch_zoom_delta: 2,
         lod_min_radius: 2.5,
@@ -90,7 +89,6 @@ fn snapshot_reports_every_member() {
         ..map.snapshot().view.viewport
     });
     map.set_projection_mode(&ProjectionMode::default().with_axonometric(true).with_x_skew(0.25).with_y_skew(0.5));
-    map.enable_rendering_stats_view(true);
     map.apply_camera_delta(&CameraDelta { phase: GesturePhase::Begin, ..CameraDelta::default() }).unwrap();
     let camera = CameraOptions {
         center: Some(ll(10.0, 20.0)),
@@ -116,8 +114,10 @@ fn snapshot_reports_every_member() {
     });
 
     let snapshot = map.snapshot();
-    assert_eq!(snapshot.debug, MapDebugOptions::TILE_BORDERS | MapDebugOptions::COLLISION);
-    assert!(snapshot.rendering_stats_view_enabled);
+    assert_eq!(
+        snapshot.debug,
+        MapDebugOptions::TILE_BORDERS | MapDebugOptions::COLLISION | MapDebugOptions::RENDERING_STATS
+    );
     assert!(snapshot.gesture_in_progress);
     assert!(snapshot.transition_in_progress);
     assert!(!snapshot.fully_loaded);
@@ -222,10 +222,8 @@ fn generation_grows_with_each_change() {
     assert_changed(&map, true, "set_bounds");
     map.set_bounds(&BoundOptions::default()).unwrap();
     assert_changed(&map, false, "set_bounds with no limits");
-    map.enable_rendering_stats_view(true);
-    assert_changed(&map, true, "enable_rendering_stats_view");
-    map.enable_rendering_stats_view(true);
-    assert_changed(&map, false, "enable_rendering_stats_view when enabled");
+    map.set_debug(MapDebugOptions::RENDERING_STATS);
+    assert_changed(&map, true, "set_debug with the rendering stats");
     map.load_style_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     assert_changed(&map, true, "load_json");
     map.set_free_camera_options(&FreeCameraOptions { position: Some(glam::dvec3(0.4, 0.4, 0.1)), orientation: None });
@@ -387,7 +385,7 @@ fn projection_from_a_globe_view_matches_the_map() {
 
     let snapshot = map.snapshot();
     assert!(snapshot.globe_rendering);
-    assert!(snapshot.globe_free_bearing);
+    assert!(snapshot.view.viewport.globe_free_bearing);
     let view = snapshot.view;
     assert_eq!(view.projection, ProjectionDefinition::new(ProjectionType::VerticalPerspective));
     assert!(view.camera.zoom < 0.0 && view.camera.center.latitude() > 85.0, "{:?}", view.camera);

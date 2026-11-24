@@ -19,6 +19,7 @@ use mln_map::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, G
 use mln_runtime::{
     AttachOptions, DemandMode, Error, EventMask, EventType, FrameDemand, FrameDisposition, LogicalExtent, Map,
     MapOptions, RenderSession, RenderTarget, Runtime, RuntimeEvent, RuntimeEventKind, RuntimeOptions, Surface,
+    ViewportOptions,
 };
 use mln_util::LatLng;
 use mln_util::geo::ScreenCoordinate;
@@ -309,10 +310,11 @@ impl WebMap {
 
     /// Lets drags and zooms on the globe turn the bearing with the planet,
     /// so that a drag carries on over a pole
-    /// (`Map::set_globe_free_bearing_enabled`). Off, as the map starts, they
-    /// keep north up.
+    /// (`mln_map::Viewport::globe_free_bearing`). Off, as the map starts,
+    /// they keep north up.
     pub fn set_globe_free_bearing(&self, free_bearing: bool) {
-        sent(self.map.set_globe_free_bearing_enabled(free_bearing));
+        let options = ViewportOptions { globe_free_bearing: Some(free_bearing), ..Default::default() };
+        sent(self.map.set_viewport_options(options));
     }
 
     /// Jumps to another map's camera, for a comparison that this map

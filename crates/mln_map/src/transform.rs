@@ -195,7 +195,6 @@ pub struct Transform {
     /// The host's current frame time (see [`Self::set_frame_time`]).
     frame_time: FrameClock,
     projection_for_zoom: Option<ProjectionForZoomFn>,
-    globe_free_bearing: bool,
     globe_drag_hold: Option<GlobeDragHold>,
     /// The terrain the camera stands on ([`Self::set_terrain`]).
     terrain: Option<TerrainGround>,
@@ -240,7 +239,6 @@ impl Transform {
             moving: 0,
             frame_time: FrameClock::default(),
             projection_for_zoom: None,
-            globe_free_bearing: false,
             globe_drag_hold: None,
             terrain: None,
             last_frame: None,
@@ -398,7 +396,7 @@ impl Transform {
         }
         if globe
             && let Some(duration) = fling_duration
-            && self.globe_free_bearing
+            && self.state.view().globe_free_bearing()
         {
             // A fling with the bearing free turns the planet on about the axis
             // the drag turned it about, so it carries on over a pole instead
@@ -479,7 +477,7 @@ impl Transform {
             let from = anchor.map(|anchor| ScreenCoordinate::new(anchor.x - offset.x, anchor.y - offset.y));
             let held = self.globe_drag_hold.take().filter(|held| {
                 from.is_some_and(|from| (held.cursor.x - from.x).hypot(held.cursor.y - from.y) < 1e-3)
-                    && !self.globe_free_bearing
+                    && !self.state.view().globe_free_bearing()
                     && held.size == size
                     && held.camera == self.camera_options(None)
             });
@@ -502,7 +500,7 @@ impl Transform {
             let pan_delta = ScreenCoordinate::new(offset.x, -offset.y);
             let mut camera = CameraOptions::default();
             let hold = match anchor.zip(from) {
-                Some((anchor, from)) if !self.globe_free_bearing && on_globe(&self.state, &anchor) => {
+                Some((anchor, from)) if !self.state.view().globe_free_bearing() && on_globe(&self.state, &anchor) => {
                     let location = match held {
                         Some(held) => Some(held.location),
                         None if on_globe(&self.state, &from) => self
@@ -526,7 +524,7 @@ impl Transform {
             };
             let mut center = if let Some((_, _, center)) = hold {
                 center
-            } else if self.globe_free_bearing {
+            } else if self.state.view().globe_free_bearing() {
                 let drag = VerticalPerspectiveProjection::drag_camera(
                     self.state.view(),
                     &flipped(&self.state, &grab),
@@ -620,11 +618,11 @@ impl Transform {
     }
 
     pub(crate) fn set_globe_free_bearing(&mut self, free_bearing: bool) {
-        self.globe_free_bearing = free_bearing;
+        self.state.set_globe_free_bearing(free_bearing);
     }
 
     pub(crate) fn is_globe_free_bearing(&self) -> bool {
-        self.globe_free_bearing
+        self.state.view().globe_free_bearing()
     }
 
     #[cfg(test)]

@@ -1474,23 +1474,6 @@ impl Map {
         })
     }
 
-    /// Shows or hides the rendering statistics over the map.
-    pub fn set_rendering_stats_view_enabled(&self, enabled: bool) -> Result<Completion<Applied>, Error> {
-        self.command(move |map| {
-            map.enable_rendering_stats_view(enabled);
-            Ok(())
-        })
-    }
-
-    /// Sets whether drags and zooms on a globe turn the bearing, as
-    /// `mln_map::Map::set_globe_free_bearing` describes.
-    pub fn set_globe_free_bearing_enabled(&self, enabled: bool) -> Result<Completion<Applied>, Error> {
-        self.command(move |map| {
-            map.set_globe_free_bearing(enabled);
-            Ok(())
-        })
-    }
-
     /// Logs the style's sources and their state.
     pub fn dump_debug_logs(&self) -> Result<Completion<Applied>, Error> {
         self.command(|map| {

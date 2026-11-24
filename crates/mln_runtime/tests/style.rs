@@ -5,7 +5,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use mln_runtime::{CustomSourceCallbacks, ErrorKind, GeoJsonSourceOptions, Map, ResourceRequest, SourceKind};
+use mln_runtime::{
+    CustomSourceCallbacks, ErrorKind, GeoJsonSourceOptions, Map, ResourceRequest, SourceKind, ViewportOptions,
+};
 use mln_storage::response::Reason;
 use mln_storage::{ResourceError, Response};
 use mln_style::expression::Functions;
@@ -413,7 +415,7 @@ fn a_command_inside_a_group_names_the_update_that_its_end_shows() {
 fn root_properties_change_the_live_style_and_the_view() {
     let (_runtime, map) = styled_map();
     let snapshot = map.snapshot().unwrap();
-    assert!(!snapshot.globe_rendering && !snapshot.globe_free_bearing);
+    assert!(!snapshot.globe_rendering && !snapshot.view.viewport.globe_free_bearing);
     assert_eq!(snapshot.view.projection, ProjectionDefinition::new(ProjectionType::Mercator));
 
     wait(map.set_style_root_property("projection", r#"{"type":"globe"}"#));
@@ -422,8 +424,8 @@ fn root_properties_change_the_live_style_and_the_view() {
     assert!(snapshot.globe_rendering);
     assert_eq!(snapshot.view.projection, ProjectionDefinition::new(ProjectionType::VerticalPerspective));
 
-    wait(map.set_globe_free_bearing_enabled(true));
-    assert!(map.snapshot().unwrap().globe_free_bearing);
+    wait(map.set_viewport_options(ViewportOptions { globe_free_bearing: Some(true), ..Default::default() }));
+    assert!(map.snapshot().unwrap().view.viewport.globe_free_bearing);
 
     wait(map.set_style_root_property("sky", r#"{"atmosphere-blend":0.25}"#));
     assert_eq!(wait(map.style_root_property("sky")).as_deref(), Some(r#"{"atmosphere-blend":0.25}"#));

@@ -86,6 +86,9 @@ pub(crate) struct ViewParams {
     /// Whether the center of the map the view comes from stands on its
     /// terrain, which [`View::map_view`] reports.
     pub(crate) center_clamped_to_ground: bool,
+    /// Whether drags and zooms on the globe of the map the view comes from
+    /// turn the bearing, which [`View::map_view`] reports.
+    pub(crate) globe_free_bearing: bool,
     /// The style's projection, as it was last set.
     pub(crate) projection_definition: ProjectionDefinition,
     /// 0 is Mercator, 1 is the globe, in between is the transition.
@@ -124,6 +127,7 @@ impl ViewParams {
             viewport_mode,
             constrain_mode,
             center_clamped_to_ground: true,
+            globe_free_bearing: false,
             projection_definition: ProjectionDefinition::default(),
             projection_transition: 0.0,
             padding: EdgeInsets::default(),
@@ -283,6 +287,13 @@ impl View {
     #[must_use]
     pub fn center_clamped_to_ground(&self) -> bool {
         self.params.center_clamped_to_ground
+    }
+
+    /// Whether drags and zooms on the globe turn the bearing
+    /// ([`Viewport::globe_free_bearing`]).
+    #[must_use]
+    pub fn globe_free_bearing(&self) -> bool {
+        self.params.globe_free_bearing
     }
 
     /// The center's offset from the middle of the view that the padding
@@ -467,6 +478,7 @@ impl View {
                 constrain_mode: self.params.constrain_mode,
                 viewport_mode: self.params.viewport_mode,
                 center_clamped_to_ground: self.params.center_clamped_to_ground,
+                globe_free_bearing: self.params.globe_free_bearing,
                 frustum_offset: self.params.frustum_offset,
             },
             projection: self.params.projection_definition,

@@ -1129,9 +1129,9 @@ impl Map {
         self.forward_camera_events();
     }
 
-    /// On the globe, let drags and zooms around a point turn the bearing so
-    /// the planet keeps its orientation, for maps whose rotation gestures are
-    /// enabled. Off, the default, they hold the bearing as GL JS does.
+    /// Sets whether drags and zooms on the globe turn the bearing
+    /// ([`Viewport::globe_free_bearing`]), as
+    /// [`set_viewport`](Self::set_viewport) does.
     pub fn set_globe_free_bearing(&mut self, free_bearing: bool) {
         if free_bearing != self.transform.is_globe_free_bearing() {
             self.transform.set_globe_free_bearing(free_bearing);
@@ -1398,6 +1398,9 @@ impl Map {
         if viewport.center_clamped_to_ground != self.center_clamped_to_ground() {
             self.transform.set_center_clamped_to_ground(viewport.center_clamped_to_ground);
         }
+        if viewport.globe_free_bearing != self.transform.is_globe_free_bearing() {
+            self.transform.set_globe_free_bearing(viewport.globe_free_bearing);
+        }
         self.on_update();
     }
 
@@ -1593,19 +1596,18 @@ impl Map {
 
     // MARK: - Debug
 
+    /// Sets the debug overlays. [`MapDebugOptions::RENDERING_STATS`] adds
+    /// a symbol layer (and its source) to the style, which stays there
+    /// while the flag does, even when the style is replaced; its text needs
+    /// the style's glyphs.
     pub fn set_debug(&mut self, debug_options: MapDebugOptions) {
         self.debug_options = debug_options;
+        self.show_rendering_stats(debug_options.contains(MapDebugOptions::RENDERING_STATS));
         self.on_update();
     }
 
-    /// Shows the rendering stats of the last frames in the top right corner,
-    /// with a symbol layer (and its source) that the view adds to the style
-    /// and keeps there, even when the style is replaced. The text needs the
-    /// style's glyphs. Disabling the view removes them.
-    pub fn enable_rendering_stats_view(&mut self, value: bool) {
-        if value != self.rendering_stats_view.is_some() {
-            self.changed();
-        }
+    /// Adds or removes the rendering stats view's layer and source.
+    fn show_rendering_stats(&mut self, value: bool) {
         if value {
             if self.rendering_stats_view.is_some() {
                 return;
@@ -1653,7 +1655,6 @@ impl Map {
             update_generation: self.updates.generation(),
             debug: self.debug_options,
             fully_loaded: self.is_fully_loaded(),
-            rendering_stats_view_enabled: self.rendering_stats_view.is_some(),
             gesture_in_progress: transform.is_gesture_in_progress(),
             transition_in_progress: transform.in_transition(),
             tile: self.tile,
@@ -1670,7 +1671,6 @@ impl Map {
             },
             view: state.view().map_view(f64::from(self.pixel_ratio)),
             globe_rendering: state.view().is_globe(),
-            globe_free_bearing: transform.is_globe_free_bearing(),
         }
     }
 

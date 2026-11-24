@@ -84,6 +84,11 @@ pub struct Viewport {
     /// terrain, a command's eye stays above the ground either way. Without
     /// terrain it changes nothing. On by default.
     pub center_clamped_to_ground: bool,
+    /// Whether drags and zooms around a point on the globe turn the bearing,
+    /// so the planet keeps its orientation, and a drag can carry the camera
+    /// over a pole. Off by default: they keep the bearing, as MapLibre GL JS
+    /// does. It changes nothing while the map draws Mercator.
+    pub globe_free_bearing: bool,
 }
 
 impl Default for Viewport {
@@ -94,6 +99,7 @@ impl Default for Viewport {
             viewport_mode: ViewportMode::default(),
             frustum_offset: EdgeInsets::default(),
             center_clamped_to_ground: true,
+            globe_free_bearing: false,
         }
     }
 }
@@ -140,6 +146,7 @@ impl MapView {
             viewport_mode: viewport.viewport_mode,
             constrain_mode: viewport.constrain_mode,
             center_clamped_to_ground: viewport.center_clamped_to_ground,
+            globe_free_bearing: viewport.globe_free_bearing,
             projection_definition: projection,
             projection_transition,
             padding: camera.padding,

@@ -572,7 +572,7 @@ impl Transform {
         let grab = ScreenCoordinate::new(view_center.x, f64::from(size.height) - view_center.y);
         let pan_delta = ScreenCoordinate::new(step.x, -step.y);
         let height = view.center_altitude();
-        let (center, bearing) = if self.globe_free_bearing {
+        let (center, bearing) = if self.state.view().globe_free_bearing() {
             let drag = VerticalPerspectiveProjection::drag_camera(view, &grab, &pan_delta, height);
             (drag.center, Some(drag.bearing))
         } else {
@@ -607,13 +607,14 @@ impl Transform {
             // apply_transitions.
             Some((point, lat_lng, height)) if self.globe_on_screen() && self.state.view().zoom() != before => {
                 let zoom_delta = self.state.view().zoom() - before;
+                let free_bearing = self.state.view().globe_free_bearing();
                 VerticalPerspectiveProjection::zoom_around_point(
                     &mut self.state,
                     &point,
                     &lat_lng,
                     height,
                     zoom_delta,
-                    self.globe_free_bearing,
+                    free_bearing,
                 );
             }
             _ => self.hold_momentum_anchor(anchor),

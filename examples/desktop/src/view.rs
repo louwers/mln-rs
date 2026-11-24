@@ -46,7 +46,7 @@ use mln_map::{
 };
 use mln_runtime::{
     CacheDatabaseOperation, Completion, DemandMode, Device, ErrorKind, EventMask, EventType, FrameDemand,
-    FrameDisposition, LogicalExtent, Map, MapOptions, Runtime, RuntimeEventKind, RuntimeOptions,
+    FrameDisposition, LogicalExtent, Map, MapOptions, Runtime, RuntimeEventKind, RuntimeOptions, ViewportOptions,
 };
 use mln_util::constants::DEFAULT_MAX_CACHE_SIZE;
 use mln_util::error::Error;
@@ -190,7 +190,7 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
     };
     log_failure(map.update_camera(CameraUpdate { camera, ..Default::default() }));
     log_failure(map.set_debug_flags(MapDebugOptions(settings.debug)));
-    log_failure(map.set_globe_free_bearing_enabled(settings.free_bearing));
+    log_failure(map.set_viewport_options(free_bearing_options(settings.free_bearing)));
 
     let paint = Rc::new(RefCell::new(Paint::default()));
     let (kind, device) = match args.backend {
@@ -827,7 +827,7 @@ impl View {
             attributions: &self.style_info.attributions,
             debug: snapshot.as_ref().map_or_else(MapDebugOptions::default, |snapshot| snapshot.debug),
             projection: self.projection,
-            free_bearing: snapshot.as_ref().is_some_and(|snapshot| snapshot.globe_free_bearing),
+            free_bearing: snapshot.as_ref().is_some_and(|snapshot| snapshot.view.viewport.globe_free_bearing),
             network: self.network,
             cache_disabled: self.cache_disabled,
             backend: self.kind,
@@ -883,7 +883,9 @@ impl View {
                 self.projection = projection;
                 log_edit_failure(self.map.with_core(move |map| projection.apply(map)));
             }
-            Action::SetFreeBearing(free_bearing) => log_failure(self.map.set_globe_free_bearing_enabled(free_bearing)),
+            Action::SetFreeBearing(free_bearing) => {
+                log_failure(self.map.set_viewport_options(free_bearing_options(free_bearing)));
+            }
             Action::SetNetwork(network) => {
                 self.network = network;
                 log_failure(network.apply(&self.runtime));
@@ -1219,4 +1221,10 @@ impl View {
 /// key does.
 fn zoom_step(position: ScreenCoordinate, levels: f64) -> Input {
     Input::Delta { position, discrete: true, pan: ScreenCoordinate::default(), zoom: levels, bearing: 0.0, pitch: 0.0 }
+}
+
+/// The viewport options that set whether drags and zooms on the globe turn
+/// the bearing, and nothing else.
+fn free_bearing_options(free_bearing: bool) -> ViewportOptions {
+    ViewportOptions { globe_free_bearing: Some(free_bearing), ..Default::default() }
 }

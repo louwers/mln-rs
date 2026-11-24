@@ -227,6 +227,10 @@ impl TransformState {
         self.update(|p| p.center_clamped_to_ground = clamped);
     }
 
+    pub fn set_globe_free_bearing(&mut self, free_bearing: bool) {
+        self.update(|p| p.globe_free_bearing = free_bearing);
+    }
+
     pub fn set_padding(&mut self, padding: &EdgeInsets) {
         self.update(|p| p.padding = *padding);
     }

@@ -18,7 +18,6 @@ pub struct MapSnapshot {
     /// Whether the style and every resource that the view needs have loaded,
     /// and the renderer has drawn them.
     pub fully_loaded: bool,
-    pub rendering_stats_view_enabled: bool,
     pub gesture_in_progress: bool,
     /// Whether any camera command is still animating.
     pub transition_in_progress: bool,
@@ -28,8 +27,6 @@ pub struct MapSnapshot {
     pub view: MapView,
     /// Whether the map draws as a globe, alone or blending into Mercator.
     pub globe_rendering: bool,
-    /// The setting of [`Map::set_globe_free_bearing`](crate::Map::set_globe_free_bearing).
-    pub globe_free_bearing: bool,
 }
 
 /// How a map picks the tiles to load.

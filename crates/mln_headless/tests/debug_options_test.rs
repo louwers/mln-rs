@@ -170,14 +170,14 @@ fn rendering_stats_view_shows_the_stats_in_the_top_right() {
     test.load_json(GLYPHS_STYLE);
     let plain = render(&test, MapDebugOptions::NO_DEBUG, "stats_plain");
 
-    assert!(!test.map().snapshot().rendering_stats_view_enabled);
-    test.map().enable_rendering_stats_view(true);
-    assert!(test.map().snapshot().rendering_stats_view_enabled);
+    assert_eq!(has_stats_view(&test), (false, false));
+    test.map().set_debug(MapDebugOptions::RENDERING_STATS);
+    assert_eq!(test.map().snapshot().debug, MapDebugOptions::RENDERING_STATS);
     assert_eq!(has_stats_view(&test), (true, true));
 
     // The first frame sets the text, the second shows it.
-    render(&test, MapDebugOptions::NO_DEBUG, "stats_first");
-    let stats = render(&test, MapDebugOptions::NO_DEBUG, "stats");
+    render(&test, MapDebugOptions::RENDERING_STATS, "stats_first");
+    let stats = render(&test, MapDebugOptions::RENDERING_STATS, "stats");
     let changed = changed_pixels(&plain, &stats);
     // Red text, right-aligned to the top right corner.
     assert!(changed.len() > 1000, "{} pixels changed", changed.len());
@@ -192,11 +192,10 @@ fn rendering_stats_view_shows_the_stats_in_the_top_right() {
     // A new style gets the view again.
     test.load_json(GLYPHS_STYLE);
     assert_eq!(has_stats_view(&test), (false, false));
-    render(&test, MapDebugOptions::NO_DEBUG, "stats_reloaded");
+    render(&test, MapDebugOptions::RENDERING_STATS, "stats_reloaded");
     assert_eq!(has_stats_view(&test), (true, true));
 
-    test.map().enable_rendering_stats_view(false);
-    assert!(!test.map().snapshot().rendering_stats_view_enabled);
+    test.map().set_debug(MapDebugOptions::NO_DEBUG);
     assert_eq!(has_stats_view(&test), (false, false));
     assert_eq!(
         changed_pixels(&plain, &render(&test, MapDebugOptions::NO_DEBUG, "stats_disabled")),

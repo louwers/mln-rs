@@ -88,6 +88,9 @@ impl MapDebugOptions {
     pub const TIMESTAMPS: MapDebugOptions = MapDebugOptions(1 << 3);
     pub const COLLISION: MapDebugOptions = MapDebugOptions(1 << 4);
     pub const OVERDRAW: MapDebugOptions = MapDebugOptions(1 << 5);
+    /// The rendering stats of the last frames, in the top right corner, which
+    /// the map draws with a symbol layer it adds to the style.
+    pub const RENDERING_STATS: MapDebugOptions = MapDebugOptions(1 << 8);
 
     #[must_use]
     pub const fn contains(self, rhs: MapDebugOptions) -> bool {

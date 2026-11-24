@@ -445,13 +445,14 @@ impl Transform {
             match globe_zoom_around {
                 Some((location, zoom_before)) if self.state.view().zoom() != zoom_before => {
                     let zoom_delta = self.state.view().zoom() - zoom_before;
+                    let free_bearing = self.state.view().globe_free_bearing();
                     VerticalPerspectiveProjection::zoom_around_point(
                         &mut self.state,
                         &anchor,
                         &location,
                         height,
                         zoom_delta,
-                        self.globe_free_bearing,
+                        free_bearing,
                     );
                 }
                 _ => self.hold_anchor(&anchor_lat_lng, &anchor, height, &current, index),
