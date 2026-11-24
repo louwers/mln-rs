@@ -149,22 +149,43 @@ pub fn expand(program: &Program, msl: &Msl) -> Result<String, GpuError> {
     Ok(expanded)
 }
 
-/// `text` with each character of its `//` and `/* */` comments a space, so
-/// that what is code is at the same byte as in `text`.
+/// `text` with each character of its `//` and `/* */` comments, and of its
+/// string and character literals between their quotes, a space, so that
+/// what is code is at the same byte as in `text`. A literal ends at its
+/// first quote that no `\` escapes, or else at the end of its line; a `'`
+/// after a letter or a digit, as of C++'s digit separators, opens none.
 #[must_use]
 pub fn blank_comments(text: &str) -> String {
     let mut code = String::with_capacity(text.len());
     let mut rest = text;
-    while let Some(start) = [rest.find("//"), rest.find("/*")].into_iter().flatten().min() {
+    while let Some(start) = rest.find(['/', '"', '\'']) {
+        let after_word = rest[..start].ends_with(|c: char| c.is_ascii_alphanumeric() || c == '_');
         code.push_str(&rest[..start]);
-        let comment = &rest[start..];
-        let end = if comment.starts_with("//") {
-            comment.find('\n').unwrap_or(comment.len())
+        let tail = &rest[start..];
+        // The bytes of `tail` to keep, to blank, and to keep after them.
+        let (open, blank, close) = if tail.starts_with("//") {
+            (0, tail.find('\n').unwrap_or(tail.len()), 0)
+        } else if tail.starts_with("/*") {
+            (0, tail[2..].find("*/").map_or(tail.len(), |end| end + 4), 0)
+        } else if tail.starts_with('"') || (tail.starts_with('\'') && !after_word) {
+            let quote = tail.as_bytes()[0];
+            let mut escaped = false;
+            let end = tail.bytes().skip(1).position(|byte| {
+                let end = (byte == quote && !escaped) || byte == b'\n';
+                escaped = byte == b'\\' && !escaped;
+                end
+            });
+            match end {
+                Some(at) => (1, at, usize::from(tail.as_bytes()[1 + at] == quote)),
+                None => (1, tail.len() - 1, 0),
+            }
         } else {
-            comment[2..].find("*/").map_or(comment.len(), |end| end + 4)
+            (1, 0, 0)
         };
-        code.extend(std::iter::repeat_n(' ', end));
-        rest = &comment[end..];
+        code.push_str(&tail[..open]);
+        code.extend(std::iter::repeat_n(' ', blank));
+        code.push_str(&tail[open + blank..open + blank + close]);
+        rest = &tail[open + blank + close..];
     }
     code + rest
 }

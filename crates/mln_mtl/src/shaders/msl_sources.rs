@@ -340,7 +340,7 @@ mod tests {
     }
 
     #[test]
-    fn a_main_function_is_found_past_spaces_and_comments() {
+    fn a_main_function_is_found_past_spaces_comments_and_literals() {
         static PROGRAM: Program = Program {
             name: "plain",
             buffers: &[],
@@ -351,12 +351,12 @@ mod tests {
             projection: Projection::None,
             sources: Sources::NONE,
         };
-        let functions =
-            "// fragmentMain() { }\nhalf4 fragment fragmentMain (/* ) */) {\n    // }\n    return half4(view.x);\n}";
+        let functions = "static_assert(1'0, \"/* \\\" '\");\n// fragmentMain() { }\nhalf4 fragment fragmentMain (/* ) */) \
+                         {\n    // }\n    return half4(view.x);\n}";
         assert_eq!(
             with_parameters(functions, "fragmentMain", &PROGRAM, Stage::Fragment),
-            "// fragmentMain() { }\nhalf4 fragment fragmentMain (/* ) */\n    device const ViewUBO& view [[buffer(0)]]) {\n    \
-             // }\n    return half4(view.x);\n}"
+            "static_assert(1'0, \"/* \\\" '\");\n// fragmentMain() { }\nhalf4 fragment fragmentMain (/* ) */\n    device \
+             const ViewUBO& view [[buffer(0)]]) {\n    // }\n    return half4(view.x);\n}"
         );
     }
 
