@@ -21,5 +21,6 @@ process of its own, so nextest runs them in parallel.
   the test host and the test's package to the device. It builds the test host
   into `target/android-test-host` the first time, and again when its sources
   change.
-- AWS Device Farm's runs use the same test host, built into their test package
+- AWS Device Farm's runs use the same test host and `runner.sh`, with
+  `ANDROID_TEST_HOST` set to the prebuilt test host in the test package
   (`tools/device-farm`).

@@ -11,7 +11,7 @@
 # devices-cli gives this checkout its own Wine prefix. The go backend builds it
 # with this Go.
 "core:go" = "1.27.3"
-"go:github.com/sargunv/devices-cli" = "v0.0.0-20261118051936-f04e04c68e26"
+"go:github.com/sargunv/devices-cli" = "v0.0.0-20261124175957-b99ab1cc3bc6"
 # The MinGW targets' compilers and linkers: LLVM's, for x64 and arm64.
 "github:mstorsjo/llvm-mingw" = { version = "20261104", platforms = { macos-arm64 = { asset_pattern = "llvm-mingw-*-ucrt-macos-universal.tar.xz" }, macos-x64 = { asset_pattern = "llvm-mingw-*-ucrt-macos-universal.tar.xz" }, linux-x64 = { asset_pattern = "llvm-mingw-*-ucrt-ubuntu-22.04-x86_64.tar.xz" }, linux-arm64 = { asset_pattern = "llvm-mingw-*-ucrt-ubuntu-22.04-aarch64.tar.xz" } } }
 # `cargo xwin` builds the MSVC targets with clang-cl, against Microsoft's CRT

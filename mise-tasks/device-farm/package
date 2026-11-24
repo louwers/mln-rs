@@ -29,18 +29,33 @@ tools/android-test-host/build.sh arm64-v8a "$package/host"
 
 git ls-files -z --cached --others --exclude-standard | tar --null --files-from - -czf "$package/workspace.tar.gz"
 
-# The Linux x64 cargo-nextest that mise.lock pins, for Device Farm's test host.
-read -r url checksum < <(awk '
-    /^\[/ { linux = $0 == "[tools.\"github:nextest-rs/nextest\".\"platforms.linux-x64\"]" }
-    linux && $1 == "url" { gsub(/"/, "", $3); url = $3 }
-    linux && $1 == "checksum" { gsub(/"/, "", $3); sub(/^sha256:/, "", $3); checksum = $3 }
-    END { print url, checksum }
-' mise.lock)
-curl --fail --silent --show-error --location --output "$work/nextest.tar.gz" "$url"
-echo "$checksum  $work/nextest.tar.gz" | shasum -a 256 --check --quiet
+# The Linux x64 cargo-nextest and devices-cli pinned by mise, for Device Farm's
+# Amazon Linux 2023 test host.
+read -r nextest_url nextest_checksum devices_cli_version < <(
+    python3 - << 'PYEOF'
+import tomllib
+
+with open("mise.lock", "rb") as f:
+    nextest = tomllib.load(f)["tools"]["github:nextest-rs/nextest"][0]["platforms.linux-x64"]
+with open("mise.target-android.toml", "rb") as f:
+    devices_cli = tomllib.load(f)["tools"]["go:github.com/sargunv/devices-cli"]
+print(nextest["url"], nextest["checksum"].removeprefix("sha256:"), devices_cli)
+PYEOF
+)
+curl --fail --silent --show-error --location --output "$work/nextest.tar.gz" "$nextest_url"
+echo "$nextest_checksum  $work/nextest.tar.gz" | shasum -a 256 --check --quiet
 tar -xzf "$work/nextest.tar.gz" -C "$package/bin"
 
-cp tools/device-farm/run-tests.sh tools/device-farm/runner.sh "$package/"
+# Static Linux x64 binary so it runs on Amazon Linux 2023 regardless of the
+# host OS or glibc version.
+gomodcache=$(go env GOMODCACHE)
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOPATH="$work/go" GOMODCACHE="$gomodcache" GOBIN="" \
+    go install -ldflags='-s -w' "github.com/sargunv/devices-cli@$devices_cli_version"
+devices_cli_bin=$work/go/bin/linux_amd64/devices-cli
+[[ -f $devices_cli_bin ]] || devices_cli_bin=$work/go/bin/devices-cli
+cp "$devices_cli_bin" "$package/bin/devices-cli"
+
+cp tools/device-farm/run-tests.sh "$package/"
 
 mkdir -p "$(dirname "$usage_out")"
 # Stored, since the archives are compressed already.

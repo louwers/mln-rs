@@ -10,25 +10,23 @@ Google Pixel 9 (Mali GPU) and a Samsung Galaxy S25 (Adreno GPU), both on Android
 1. `mise -E target-android run device-farm:package` builds the test package,
    `target/device-farm/android-tests.zip`. It holds the tests archived by
    cargo-nextest, the test host for the phones' ABI (`tools/android-test-host`),
-   the workspace's files, a Linux x64 cargo-nextest, and `run-tests.sh` and
-   `runner.sh`.
+   the workspace's files, Linux x64 `cargo-nextest` and `devices-cli`, and
+   `run-tests.sh`.
 2. `schedule.sh` uploads the package with the test spec, `android.yml`, and
    schedules them as a web app test, the kind of test that needs no app. Once
    the run finished, `collect.sh` downloads each phone's test spec output and
    artifacts.
-3. On each phone's test host, `run-tests.sh` copies the workspace to the phone.
-   cargo-nextest then runs the archive's tests with the `device-farm` profile
-   (`.config/nextest.toml`), each test on the phone through `runner.sh` and
-   `adb shell`, as devices-cli runs them on an emulator. The artifacts hold
-   nextest's JUnit report and the tests' output (`test-output.tar.gz`): the
-   render suite's report, which shows its failed tests' images, and the images
-   that other tests write. A test that fails gets one more try, which nextest
-   reports as flaky when it passes.
+3. On each phone's test host, `run-tests.sh` unpacks the workspace and assigns
+   the phone in `devices-cli`. cargo-nextest then runs the archive's tests with
+   the `device-farm` profile (`.config/nextest.toml`), each test on the phone
+   through `tools/android-test-host/runner.sh` and `devices-cli`, just as on an
+   emulator. The artifacts hold nextest's JUnit report and the tests' output
+   (`test-output.tar.gz`): the render suite's report, which shows its failed
+   tests' images, and the images that other tests write. A test that fails gets
+   one more try, which nextest reports as flaky when it passes.
 
-Each test runs in a Java VM's process, as an app's code does, through the test
-host that the emulator's runs use too (`tools/android-test-host`). `runner.sh`
-copies files with `adb push` rather than through devices-cli, since Device
-Farm's `adb` garbles what `adb shell` reads from stdin.
+Each test runs in a Java VM's process, as an app's code does, through the same
+test host and runner that the emulator's runs use (`tools/android-test-host`).
 
 ## In CI
 

@@ -15,7 +15,7 @@
 # runs the machine.
 "core:go" = "1.27.3"
 "core:python" = "3.15.2"
-"go:github.com/sargunv/devices-cli" = "v0.0.0-20261118051936-f04e04c68e26"
+"go:github.com/sargunv/devices-cli" = "v0.0.0-20261124175957-b99ab1cc3bc6"
 "http:anyvm" = { version = "0.7.5", url = "https://github.com/anyvm-org/anyvm/releases/download/v{{ version }}/anyvm.py", checksum = "sha256:c192b299b9bf1b9f07b1d5e5b3977b518f8f24a9af9c20da259cdca22271d9f5" }
 
 [env]

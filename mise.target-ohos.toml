@@ -17,7 +17,7 @@ ohos-sdk = "6.1"
 # DevEco Studio downloaded, and runs each test on it. The go backend builds it
 # with this Go.
 "core:go" = "1.27.3"
-"go:github.com/sargunv/devices-cli" = "v0.0.0-20261118051936-f04e04c68e26"
+"go:github.com/sargunv/devices-cli" = "v0.0.0-20261124175957-b99ab1cc3bc6"
 # The OpenHarmony emulator's image, of the SDK's release, which devices-cli
 # boots in QEMU for the x86_64 target.
 "http:oniro-emulator" = { version = "6.1", url = "https://github.com/eclipse-oniro4openharmony/device_board_oniro/releases/download/v{{ version }}/oniro_emulator.zip", checksum = "sha256:a30e01f1b161e0fdcd91263f30f29cc92bfa49c1776d5ee2c46caefef055b2da", bin_path = "." }
