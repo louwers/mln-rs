@@ -231,9 +231,11 @@ impl RenderTerrain {
     /// with its tiles and lists the DEM tiles they read. `dem` finds the
     /// tiles of a source by its id. Returns the cover while terrain draws;
     /// its tiles bind their DEM in [`bind`]. While terrain doesn't draw, it
-    /// remembers no ranges.
+    /// remembers no ranges. Terrain doesn't draw on a backend that failed to
+    /// make its shader ([`make_shader`]): the map draws flat.
     ///
     /// [`bind`]: Self::bind
+    /// [`make_shader`]: Self::make_shader
     pub(crate) fn update<'a>(
         &mut self,
         parameters: &UpdateParameters,
@@ -242,7 +244,7 @@ impl RenderTerrain {
         let mut ranges = self.cover.take().map(|cover| cover.ranges).unwrap_or_default();
         let style = &parameters.style;
         let terrain = style.get_terrain()?;
-        if parameters.mode == MapMode::Tile {
+        if parameters.mode == MapMode::Tile || self.draws.failed() {
             return None;
         }
         // Terrain draws only once its source's tileset has loaded, and not at
@@ -261,6 +263,19 @@ impl RenderTerrain {
         let view = &parameters.view;
         self.cover = Some(TerrainCover::new(view, &terrain.source, tile_size, dem_zooms, ranges));
         self.cover.as_ref()
+    }
+
+    /// Makes the surface's shader on `gpu` in `context` for the update of
+    /// `parameters`, before [`update`], if its style has terrain. A backend
+    /// that fails to make it draws no terrain until the shaders are made
+    /// again ([`release_shaders`]).
+    ///
+    /// [`update`]: Self::update
+    /// [`release_shaders`]: Self::release_shaders
+    pub(crate) fn make_shader(&mut self, gpu: &mut dyn Gpu, context: &mut Context, parameters: &UpdateParameters) {
+        if parameters.style.get_terrain().is_some() && parameters.mode != MapMode::Tile {
+            self.draws.shader(gpu, context, &parameters.view);
+        }
     }
 
     /// Binds each terrain tile's DEM, once the sources have updated, from
@@ -355,16 +370,9 @@ impl RenderTerrain {
     /// Starts the encode's update of the drapes of the frame of the last
     /// update, of `stacks` stacks of draped layers, whose layers then make
     /// their draws in them ([`Drapes::update_layer`]); `None`, dropping the
-    /// drapes, for a frame that doesn't draw terrain, a backend without the
-    /// terrain's shader, or no stack.
-    pub(crate) fn begin_drapes(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        parameters: &mut PaintParameters<'_>,
-        stacks: usize,
-    ) -> Option<&mut Drapes> {
-        let cover = self.cover.as_ref().filter(|_| stacks > 0);
-        let Some(cover) = cover.filter(|_| self.draws.supported(gpu, parameters)) else {
+    /// drapes, for a frame that doesn't draw terrain or no stack.
+    pub(crate) fn begin_drapes(&mut self, parameters: &mut PaintParameters<'_>, stacks: usize) -> Option<&mut Drapes> {
+        let Some(cover) = self.cover.as_ref().filter(|_| stacks > 0) else {
             self.drapes = Drapes::default();
             return None;
         };

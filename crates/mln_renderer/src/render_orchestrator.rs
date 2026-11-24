@@ -1350,7 +1350,7 @@ impl RenderOrchestrator {
         self.stacks =
             if frame.terrain { DrapeStacks::of(frame.layers.keys().map(draped)) } else { DrapeStacks::default() };
         self.terrain.update_dems(paint_parameters, |id| self.tile_store.source(self.render_sources.get(id)?.tiles()?));
-        if let Some(drapes) = self.terrain.begin_drapes(gpu, paint_parameters, self.stacks.len()) {
+        if let Some(drapes) = self.terrain.begin_drapes(paint_parameters, self.stacks.len()) {
             let mut contents = SourceContents::default();
             for stack in 0..self.stacks.len() {
                 for index in self.stacks.layers(stack) {
@@ -1379,9 +1379,6 @@ impl RenderOrchestrator {
                 }
             }
             drapes.finish_update(paint_parameters.context);
-        } else {
-            // A backend without the terrain's shader draws no surface.
-            self.stacks = DrapeStacks::default();
         }
         let state = paint_parameters.view;
         let (renderable_size, pixel_ratio) = (paint_parameters.renderable_size, paint_parameters.pixel_ratio);

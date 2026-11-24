@@ -300,6 +300,8 @@ impl Renderer {
             self.replace_shaders(self.encoder.pixel_ratio, overdraw);
         }
         let orchestrator = &mut self.orchestrator;
+        // Whether terrain draws depends on whether the backend has its shader.
+        orchestrator.terrain().make_shader(gpu, &mut self.encoder.context, update_parameters);
         let frame = orchestrator.update(update_parameters);
         report(orchestrator, self.events.as_ref());
         let encoder = &mut self.encoder;

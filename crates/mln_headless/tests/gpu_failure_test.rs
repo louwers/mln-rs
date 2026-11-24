@@ -280,9 +280,14 @@ impl FailingMap {
         };
         self.drawn = update.generation;
         let gpu = self.backend.gpu();
-        if let Some(frame) = self.renderer.update(gpu, &update.parameters) {
+        let failing = self.failing > 0;
+        let updated = if failing {
+            self.renderer.update(&mut Failing { gpu, fail: self.fail, failing_pass: false }, &update.parameters)
+        } else {
+            self.renderer.update(gpu, &update.parameters)
+        };
+        if let Some(frame) = updated {
             let image = self.target.begin_frame(gpu).expect("the frame's image");
-            let failing = self.failing > 0;
             let drawn = if failing {
                 self.failing -= 1;
                 self.renderer.render(&mut Failing { gpu, fail: self.fail, failing_pass: false }, &image, frame)
@@ -449,6 +454,21 @@ fn a_continuous_map_whose_draw_always_fails_shows_the_rest_and_goes_idle() {
     let (events, went_idle) = map.run(Duration::from_secs(10), idle);
     assert!(went_idle && map.frames() > frames, "{events:?}");
     assert_eq!(0, errors(&events), "the same failure reported again");
+}
+
+/// A still of a terrain on a backend that fails to make the terrain's
+/// shader draws the map flat, its draped layers too, as a map without
+/// terrain does, with the camera on no ground.
+#[test]
+fn a_still_without_the_terrains_shader_draws_flat() {
+    let flat = FailingMap::new(MapMode::Static, Fail::DrawsIn("none")).still();
+    let flat = flat.expect("a flat map's still never ended").expect("a flat map's still");
+    let style = style().replacen(r#""version": 8,"#, r#""version": 8, "terrain": {"source": "dem"},"#, 1);
+    let mut map = FailingMap::with_style(MapMode::Static, &style, Fail::Shaders("TerrainShader"));
+    map.failing = usize::MAX;
+    let image = map.still().expect("the still never ended").expect("the still");
+    assert!(flat == image, "the still draws other pixels than a flat map's");
+    assert_eq!(None, map.map.transform_state().view().terrain_min_elevation(), "the camera stands on ground");
 }
 
 /// A continuous map whose frame fails once, as for a failure that passes,

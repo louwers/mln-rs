@@ -85,9 +85,8 @@ pub(crate) struct TerrainDraws {
     meshes: Vec<SharedMesh>,
     /// How the draws and the grids were made.
     built_for: Option<BuiltFor>,
-    /// Whether the backend has no shader of the surface, which draws
-    /// nothing then.
-    unsupported: bool,
+    /// Whether the backend failed to make the surface's shader.
+    failed: bool,
 }
 
 impl TerrainDraws {
@@ -105,7 +104,7 @@ impl TerrainDraws {
         drapes: &Drapes,
     ) {
         let stacks = drapes.stacks();
-        let shader = cover.filter(|_| stacks > 0).and_then(|_| self.shader(gpu, parameters));
+        let shader = cover.filter(|_| stacks > 0).and_then(|_| self.shader(gpu, parameters.context, parameters.view));
         let (Some((cover, dems)), Some(shader)) = (cover, shader) else {
             self.stacks.clear();
             self.meshes.clear();
@@ -187,28 +186,28 @@ impl TerrainDraws {
         }
     }
 
-    /// Whether the backend has the terrain's shader, which this makes on
-    /// `gpu` the first time.
-    pub(crate) fn supported(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> bool {
-        self.shader(gpu, parameters).is_some()
+    /// Whether the backend failed to make the surface's shader, which then
+    /// draws nothing until the shaders are made again.
+    pub(crate) fn failed(&self) -> bool {
+        self.failed
     }
 
-    /// The surface's shader in the frame's projection, made on `gpu` the
-    /// first time; `None`, logged once, where the backend has none.
-    fn shader(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> Option<ShaderKey> {
-        let variant = variant(parameters.view);
+    /// The surface's shader in `view`'s projection, made on `gpu` in
+    /// `context` the first time; `None`, logged once, where the backend has
+    /// none.
+    pub(crate) fn shader(&mut self, gpu: &mut dyn Gpu, context: &mut Context, view: &View) -> Option<ShaderKey> {
+        let variant = variant(view);
         if let Some((made_for, shader)) = &self.shader
             && *made_for == variant
         {
             return Some(shader.clone());
         }
-        if self.unsupported {
+        if self.failed {
             return None;
         }
-        let context = &mut *parameters.context;
         let shader = context.shader_key(&programs::TERRAIN, Uniforms::default(), variant);
         if let Err(error) = context.shader(gpu, &shader) {
-            self.unsupported = true;
+            self.failed = true;
             Log::warning(Event::Render, format!("Terrain draws nothing on this backend: {error}"));
             return None;
         }
