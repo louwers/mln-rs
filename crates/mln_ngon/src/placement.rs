@@ -26,7 +26,7 @@ pub struct NgonPlacement {
 /// The paint values of a layer that size and move its circles.
 #[derive(Clone, Copy, PartialEq)]
 struct Circles {
-    size: Option<f32>,
+    sizes: [Option<f32>; 3],
     translate: [f32; 2],
     anchor: TranslateAnchorType,
     scale: CirclePitchScaleType,
@@ -49,7 +49,7 @@ impl Placement for NgonPlacement {
         self.next.extend(cx.layers.iter().map(|layer| {
             let paint = &layer.layer.evaluated.paint;
             Circles {
-                size: constant_size(paint),
+                sizes: constant_sizes(paint),
                 translate: *paint.ngon_translate.uniform(),
                 anchor: *paint.ngon_translate_anchor.uniform(),
                 scale: *paint.ngon_pitch_scale.uniform(),
@@ -75,14 +75,10 @@ impl Placement for NgonPlacement {
     }
 }
 
-/// The distance from the center of each of a layer's polygons to its
-/// stroke's corners, where no feature sizes them.
-pub(crate) fn constant_size(paint: &paint::PossiblyEvaluated) -> Option<f32> {
-    Some(outer_radius(
-        paint.ngon_radius.constant()?,
-        paint.ngon_stroke_width.constant()?,
-        paint.ngon_corners.constant()?,
-    ))
+/// A layer's `ngon-radius`, `ngon-stroke-width` and `ngon-corners`, each
+/// where no feature sets it.
+pub(crate) fn constant_sizes(paint: &paint::PossiblyEvaluated) -> [Option<f32>; 3] {
+    [paint.ngon_radius.constant(), paint.ngon_stroke_width.constant(), paint.ngon_corners.constant()]
 }
 
 /// Places `layer`'s points: with `crossing`, those whose circle crosses
@@ -92,7 +88,7 @@ fn place(layer: &PlacingLayer<'_, NgonLayer>, cx: &mut PlaceCx<'_>, crossing: Op
     let zoom = cx.view.zoom() as f32;
     let overlap = if layout.ngon_allow_overlap.evaluate_at(zoom, true) { Overlap::Always } else { Overlap::Never };
     let ignore_placement = layout.ngon_ignore_placement.evaluate_at(zoom, true);
-    let size = constant_size(paint);
+    let sizes = constant_sizes(paint);
     let scale_with_map = *paint.ngon_pitch_scale.uniform() == CirclePitchScaleType::Map;
     let camera = cx.view.camera_to_center_distance();
     let how = transform(paint);
@@ -120,7 +116,11 @@ fn place(layer: &PlacingLayer<'_, NgonLayer>, cx: &mut PlaceCx<'_>, crossing: Op
             let center = cx.index.to_grid(DVec2::new(at.point.x, at.point.y));
             let distance = at.signed_distance_from_camera;
             let scale = if scale_with_map { (camera / distance) as f32 } else { 1.0 };
-            let shape = Shape::Circle { center, radius: size.unwrap_or(point.size) * scale };
+            // The bucket keeps what features set; a constant can change
+            // without a new layout.
+            let [radius, stroke_width, corners] = [0, 1, 2].map(|n| sizes[n].unwrap_or(point.size[n]));
+            let size = outer_radius(radius, stroke_width, corners);
+            let shape = Shape::Circle { center, radius: size * scale };
             let bounds = shape.bounds();
             let crosses = square.is_some_and(|square| crosses(&bounds, &square));
             if crossing.is_some_and(|crossing| crossing != crosses) {

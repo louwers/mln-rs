@@ -6,8 +6,7 @@ use mln_rs::layer::{
 use mln_rs::mln_util::Color;
 use mln_rs::mln_util::constants::EXTENT;
 
-use crate::layer::outer_radius;
-use crate::placement::{NgonPlacement, constant_size};
+use crate::placement::{NgonPlacement, constant_sizes};
 use crate::{Ngon, paint};
 
 mln_rs::layer::paint_property_binders!(
@@ -52,9 +51,9 @@ pub(crate) struct NgonPoint {
     pub(crate) at: [i16; 2],
     /// Its feature's index in the tile's source layer.
     pub(crate) feature: u32,
-    /// The distance from its center to its stroke's corners at the tile's
-    /// zoom, in pixels, where a property that sizes it is data-driven.
-    pub(crate) size: f32,
+    /// Its `ngon-radius`, `ngon-stroke-width` and `ngon-corners` at the
+    /// tile's zoom, where one of them is data-driven.
+    pub(crate) size: [f32; 3],
 }
 
 impl Bucket for NgonBucket {
@@ -72,11 +71,12 @@ impl Bucket for NgonBucket {
 }
 
 /// The features the filter selects, by index, whether the layers place,
-/// and each feature's size where they do and it is data-driven.
+/// and each feature's sizing properties where they do and one is
+/// data-driven.
 pub struct NgonLayout {
     features: Vec<usize>,
     places: bool,
-    sizes: Vec<f32>,
+    sizes: Vec<[f32; 3]>,
 }
 
 impl Layout<Ngon> for NgonLayout {
@@ -88,16 +88,12 @@ impl Layout<Ngon> for NgonLayout {
         let places = NgonPlacement::places(&leader.style);
         let paint = &leader.paint;
         let mut sizes = Vec::new();
-        if places && constant_size(paint).is_none() {
+        if places && constant_sizes(paint).contains(&None) {
             for &i in &features {
                 let feature = cx.feature(i)?;
                 let at = cx.context(&feature);
                 let value = |value: &Evaluated<f32>| value.evaluate(&at);
-                sizes.push(outer_radius(
-                    value(&paint.ngon_radius),
-                    value(&paint.ngon_stroke_width),
-                    value(&paint.ngon_corners),
-                ));
+                sizes.push([value(&paint.ngon_radius), value(&paint.ngon_stroke_width), value(&paint.ngon_corners)]);
             }
         }
         Ok(NgonLayout { features, places, sizes })

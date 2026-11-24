@@ -130,6 +130,19 @@ fn placement_follows_the_zoom() {
 }
 
 #[test]
+fn a_constant_stroke_width_sizes_polygons_that_a_feature_sizes() {
+    // Squares 16 pixels apart, of radius 6, both show.
+    let fixture = Fixture::new(registry(), &points_style(0.0, 0, &[0.0, 8.0 * TWO_PIXELS], COLLIDING));
+    assert_eq!(RED, pixel(&fixture, 16));
+
+    // A stroke 4 pixels wide takes their corners 11.7 pixels from their
+    // centers, and the first hides the second.
+    wait(fixture.map.set_style_layer_property("ngons", "ngon-stroke-width", "4"));
+    fixture.render_loaded();
+    assert_eq!(WHITE, pixel(&fixture, 16));
+}
+
+#[test]
 fn a_layer_that_doesnt_collide_draws_in_a_new_world_copy_at_once() {
     // A point at 170 degrees west, which the map shows only once it looks
     // across the antimeridian.
