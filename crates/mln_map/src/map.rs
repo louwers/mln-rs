@@ -957,7 +957,8 @@ impl Map {
 
     /// Adds `source` to the style, last, and starts loading its description.
     /// Fails with [`ErrorKind::AlreadyExists`](mln_util::ErrorKind) if the
-    /// style has a source with its id.
+    /// style has a source with its id, and with `InvalidArgument` if a layer
+    /// that names its id can't draw a source of its kind.
     pub fn add_source(&mut self, source: Source) -> Result<(), Error> {
         self.edit_style(|style| style.apply(Edit::AddSource(source)))
     }
@@ -967,7 +968,8 @@ impl Map {
     ///
     /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) while the
     /// style isn't loaded, with `AlreadyExists` if the style has a source
-    /// named `id`, and with `InvalidArgument` if `json` isn't a valid source.
+    /// named `id`, and with `InvalidArgument` if `json` isn't a valid source
+    /// or a layer that names `id` can't draw it.
     pub fn add_source_json(&mut self, id: &str, json: &str) -> Result<(), Error> {
         if !self.loader.document_loaded() {
             return Err(Error::invalid_state("style is not loaded"));

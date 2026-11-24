@@ -721,6 +721,54 @@ fn sources_keep_the_order_they_were_added_in() {
     assert_eq!(mln_util::ErrorKind::NotFound, error.kind);
 }
 
+/// A style with the raster DEM source `dem`, the GeoJSON source `points`,
+/// and the circle layer `dots` on `points`.
+const DOTS_STYLE: &str = r#"{"version":8,"sources":{
+    "dem":{"type":"raster-dem","tiles":["https://example.com/{z}/{x}/{y}.png"]},
+    "points":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},
+    "layers":[{"id":"dots","type":"circle","source":"points"}]}"#;
+
+#[track_caller]
+fn assert_incompatible(style: &mut Style, edit: Edit) {
+    let before = style.clone();
+    let error = style.apply(edit).unwrap_err();
+    assert_eq!(mln_util::ErrorKind::InvalidArgument, error.kind, "{error}");
+    assert!(error.to_string().contains("not compatible"), "{error}");
+    assert!(before.is_same_version(style));
+}
+
+#[test]
+fn a_replaced_layer_needs_a_source_it_can_draw() {
+    let mut style = stub_style();
+    style.load_json(DOTS_STYLE);
+    assert_incompatible(&mut style, Edit::SetLayer(new_layer("circle", "dots", "dem")));
+    edit(&mut style, Edit::SetLayer(new_layer("hillshade", "dots", "dem")));
+}
+
+#[test]
+fn a_layers_source_property_needs_a_source_it_can_draw() {
+    let mut style = stub_style();
+    style.load_json(DOTS_STYLE);
+    let source = |id: &str| Edit::SetLayerProperty {
+        layer: "dots".to_owned(),
+        name: "source".to_owned(),
+        value: serde_json::json!(id),
+    };
+    assert_incompatible(&mut style, source("dem"));
+    edit(&mut style, source("absent"));
+}
+
+#[test]
+fn an_added_source_needs_to_feed_the_layers_that_name_it() {
+    let mut style = stub_style();
+    style.load_json(DOTS_STYLE);
+    edit(&mut style, Edit::AddLayer { layer: new_layer("fill", "waiting", "s"), before: None });
+    let raster = || crate::sources::tileset::raster_source("s", None, PartialTileset::default(), 256);
+    assert_incompatible(&mut style, Edit::AddSource(raster()));
+    edit(&mut style, Edit::RemoveLayer("waiting".to_owned()));
+    edit(&mut style, Edit::AddSource(raster()));
+}
+
 #[test]
 fn an_edit_replaces_only_the_part_it_changes() {
     let mut style = stub_style();

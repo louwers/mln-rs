@@ -360,6 +360,7 @@ impl Style {
                 Arc::make_mut(&mut self.layers).move_before(&id, before.as_deref());
             }
             Edit::SetLayer(layer) => {
+                check_layer_source(&self.sources, &layer)?;
                 let id = layer.get_id().to_owned();
                 self.update_layer(&id, |old| {
                     *old = layer;
@@ -367,7 +368,11 @@ impl Style {
                 })?;
             }
             Edit::SetLayerProperty { layer, name, value } => {
-                self.update_layer(&layer, |target| set_layer_property(target, &name, &value))?;
+                let sources = Arc::clone(&self.sources);
+                self.update_layer(&layer, |target| {
+                    set_layer_property(target, &name, &value)?;
+                    check_layer_source(&sources, target)
+                })?;
             }
             Edit::SetLayerFilter { layer, filter } => {
                 self.update_layer(&layer, |target| {
@@ -437,6 +442,9 @@ impl Style {
             Edit::AddSource(source) => {
                 if self.sources.get(source.id()).is_some() {
                     return Err(Error::already_exists(format!("source \"{}\" already exists", source.id())));
+                }
+                for layer in self.layers.iter().filter(|layer| layer.get_source_id() == source.id()) {
+                    check_source_feeds(&source, layer)?;
                 }
                 Arc::make_mut(&mut self.sources).set(source);
             }
@@ -611,11 +619,18 @@ fn layer_not_found(id: &str) -> Error {
 /// Fails when `layer`'s source is in `sources` and doesn't feed layers of
 /// the layer's type.
 fn check_layer_source(sources: &SourceList, layer: &Layer) -> Result<(), Error> {
-    let impl_ = layer.style();
-    if let Some(source) = sources.get(&impl_.base().source)
-        && source.info().layer_kind != impl_.info().source
-    {
-        let message = format!("Layer '{}' is not compatible with source '{}'", impl_.base().id, impl_.base().source);
+    match sources.get(layer.get_source_id()) {
+        Some(source) => check_source_feeds(source, layer),
+        None => Ok(()),
+    }
+}
+
+/// Fails when `layer` takes a source and `source` doesn't feed layers of its
+/// type.
+fn check_source_feeds(source: &Source, layer: &Layer) -> Result<(), Error> {
+    let kind = layer.info().source;
+    if kind != SourceKind::None && source.info().layer_kind != kind {
+        let message = format!("Layer '{}' is not compatible with source '{}'", layer.get_id(), source.id());
         return Err(Error::invalid_argument(message));
     }
     Ok(())

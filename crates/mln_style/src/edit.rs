@@ -90,7 +90,8 @@ pub enum Edit {
     RemoveImage(String),
     /// A sprite's images, each replacing the image with its id.
     AddImages(Vec<Arc<image::Impl>>),
-    /// Adds `source` last.
+    /// Adds `source` last. Fails when a layer that names its id can't draw
+    /// a source of its kind.
     AddSource(Source),
     RemoveSource(String),
     /// Gives the source `id` what a load of its description found. The load
