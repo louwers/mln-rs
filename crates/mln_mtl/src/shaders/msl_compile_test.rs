@@ -26,10 +26,11 @@ use objc2_metal::{
 use super::msl_sources::library_source;
 use crate::Id;
 
-/// Each program of the built-in layer types with MSL.
+/// Each program of the built-in layer types with MSL, and the
+/// conformance cases' program whose vertex stage reads a texture.
 fn sources() -> Vec<(&'static Program, &'static Msl)> {
-    let programs = mln_layers::PROGRAMS.iter();
-    programs.filter_map(|&program| Some((program, program.sources.msl?))).collect()
+    let programs = mln_layers::PROGRAMS.iter().copied().chain([&mln_layers::conformance::VERTEX_TEXEL]);
+    programs.filter_map(|program| Some((program, program.sources.msl?))).collect()
 }
 
 /// The projection variants of a program: its name, and whether it defines

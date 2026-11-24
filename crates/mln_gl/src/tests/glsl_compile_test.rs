@@ -41,10 +41,11 @@ fn headless_backend(api: Api) -> Option<RendererBackend> {
     }
 }
 
-/// Each program of the built-in layer types with GLSL.
+/// Each program of the built-in layer types with GLSL, and the
+/// conformance cases' program whose vertex stage reads a texture.
 fn programs() -> Vec<(&'static Program, &'static Glsl)> {
-    let programs = mln_layers::PROGRAMS.iter();
-    programs.filter_map(|&program| Some((program, program.sources.glsl_es?))).collect()
+    let programs = mln_layers::PROGRAMS.iter().copied().chain([&mln_layers::conformance::VERTEX_TEXEL]);
+    programs.filter_map(|program| Some((program, program.sources.glsl_es?))).collect()
 }
 
 /// The names after `HAS_UNIFORM_` in `program`'s GLSL, `source`, once its
@@ -219,13 +220,16 @@ fn every_program_links_and_matches_its_declaration(backend: &mut RendererBackend
 /// elevations of color relief's stops, is declared `highp`: a sampler is
 /// `lowp` by default in GLSL ES, and llvmpipe then reads a DEM's bytes too
 /// coarsely to decode, which bands a hillshade. The others keep the default.
+/// A texture is declared in the vertex stage if that reads it, and else in
+/// the fragment stage.
 #[test]
 fn precise_textures_sample_at_high_precision() {
-    for (program, [_, fragment]) in compiled_stages() {
+    for (program, [vertex, fragment]) in compiled_stages() {
         for texture in program.textures {
             let name = glsl_es::texture_name(texture);
-            let highp = fragment.contains(&format!("uniform highp sampler2D {name};"));
-            let declared = highp || fragment.contains(&format!("uniform sampler2D {name};"));
+            let stage = if texture.vertex { &vertex } else { &fragment };
+            let highp = stage.contains(&format!("uniform highp sampler2D {name};"));
+            let declared = highp || stage.contains(&format!("uniform sampler2D {name};"));
             assert!(declared, "{}: {name} isn't declared", program.name);
             assert_eq!(highp, texture.precise, "{}: {name}", program.name);
         }
@@ -236,7 +240,12 @@ fn precise_textures_sample_at_high_precision() {
             program.textures.iter().filter(|texture| texture.precise).map(|t| (program.name, t.name))
         })
         .collect();
-    let decoded = [("color-relief", "elevation_stops"), ("color-relief", "image"), ("hillshade-prepare", "image")];
+    let decoded = [
+        ("color-relief", "elevation_stops"),
+        ("color-relief", "image"),
+        ("conformance-vertex-texel", "image"),
+        ("hillshade-prepare", "image"),
+    ];
     assert_eq!(precise, BTreeSet::from(decoded));
 }
 

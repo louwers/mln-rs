@@ -4,10 +4,11 @@ use mln_glsl::variants::variants;
 
 use crate::ShaderCompiler;
 
-/// Each program of the built-in layer types with GLSL.
+/// Each program of the built-in layer types with GLSL, and the
+/// conformance cases' program whose vertex stage reads a texture.
 fn programs() -> Vec<(&'static Program, &'static Glsl)> {
-    let programs = mln_layers::PROGRAMS.iter();
-    programs.filter_map(|&program| Some((program, program.sources.glsl?))).collect()
+    let programs = mln_layers::PROGRAMS.iter().copied().chain([&mln_layers::conformance::VERTEX_TEXEL]);
+    programs.filter_map(|program| Some((program, program.sources.glsl?))).collect()
 }
 
 /// The first bytes of a DXIL container.
