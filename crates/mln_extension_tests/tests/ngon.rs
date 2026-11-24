@@ -146,11 +146,11 @@ fn a_layer_that_doesnt_collide_draws_in_a_new_world_copy_at_once() {
     assert_eq!(RED, pixel(&fixture, 16));
 }
 
-/// Two n-gon layers whose filters are equal but parsed apart share a bucket,
-/// and each draws and is found with its own paint: a blue square of radius 8
-/// under a red one of radius 4.
+/// Two n-gon layers whose filters are equal but parsed apart, which the
+/// engine lays out in one bucket, each draw and are found with their own
+/// paint: a blue square of radius 8 under a red one of radius 4.
 #[test]
-fn layers_with_equal_filters_draw_and_query_from_one_bucket() {
+fn layers_with_equal_filters_each_draw_and_are_found() {
     const BLUE: [u8; 4] = [0, 0, 255, 255];
     let layer = |id: &str, color: &str, radius: u32| {
         format!(
