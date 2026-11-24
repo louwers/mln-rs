@@ -584,23 +584,12 @@ impl View {
     /// The far plane over a flat map, with the center at its altitude.
     fn flat_far_z(&self) -> f64 {
         let camera_to_center_distance = self.camera_to_center_distance();
-        let offset = self.center_offset();
 
         let limited_pitch = mln_math::clamp_f64(self.params.pitch, 0.0, max_mercator_horizon_angle());
         let camera_to_sea_level_distance =
             camera_to_center_distance + self.center_altitude_pixels().abs() / limited_pitch.cos();
 
-        // The tangent of the angle from the center of the view, with the
-        // padding, to its top edge, in units where 1 is a pixel at the center
-        // of the map. The roll widens it by the view's other side.
-        let width = f64::from(self.params.size.width);
-        let height = f64::from(self.params.size.height);
-        let roll = self.params.roll;
-        let tan_fov_above_center = (0.5 + (offset.y - self.params.frustum_offset.top) / height)
-            * 2.0
-            * (self.params.fov / 2.0).tan()
-            * (roll.cos().abs() + roll.sin().abs() * width / height);
-        let tan_multiple = mln_math::clamp_f64(tan_fov_above_center * limited_pitch.tan(), 0.0, 0.99);
+        let tan_multiple = mln_math::clamp_f64(self.tan_fov_above_center() * limited_pitch.tan(), 0.0, 0.99);
         let horizon_multiple = mln_math::clamp_f64(self.fov_center_to_horizon().tan() * limited_pitch.tan(), 0.0, 0.99);
 
         // The distance to the farthest fragment that is drawn, and a little
@@ -630,9 +619,6 @@ impl View {
     fn terrain_far_z(&self, min_elevation: f64) -> f64 {
         let params = &self.params;
         let camera_to_center_distance = self.camera_to_center_distance();
-        let offset = self.center_offset();
-        let width = f64::from(params.size.width);
-        let height = f64::from(params.size.height);
         let pixels_per_meter = 1.0 / self.meters_per_pixel();
 
         // Heights in pixels at the zoom.
@@ -655,14 +641,24 @@ impl View {
         let distance_past_center = |angle: f64| {
             angle.sin() * lowest_plane / mln_math::clamp_f64(PI - ground_angle - angle, 0.01, PI - 0.01).sin()
         };
-        // The roll widens the angle to the top edge by the view's other side.
-        let roll = params.roll;
-        let fov = params.fov * (roll.cos().abs() * height + roll.sin().abs() * width) / height;
-        let fov_above_center = fov * (0.5 + (offset.y - params.frustum_offset.top) / height);
-        let top_half_distance =
-            distance_past_center(fov_above_center).min(distance_past_center(self.fov_center_to_horizon()));
+        let top_half_distance = distance_past_center(self.tan_fov_above_center().atan())
+            .min(distance_past_center(self.fov_center_to_horizon()));
 
         (limited_pitch.sin() * top_half_distance + lowest_plane) * 1.01
+    }
+
+    /// The tangent of the angle from the center of the view, with the
+    /// padding, to its top edge, in units where 1 is a pixel at the center of
+    /// the map. A roll widens it by the view's other side, which the corners
+    /// of the view reach in tangent space.
+    fn tan_fov_above_center(&self) -> f64 {
+        let params = &self.params;
+        let width = f64::from(params.size.width);
+        let height = f64::from(params.size.height);
+        (0.5 + (self.center_offset().y - params.frustum_offset.top) / height)
+            * 2.0
+            * (params.fov / 2.0).tan()
+            * (params.roll.cos().abs() + params.roll.sin().abs() * width / height)
     }
 
     /// The angle from the center of the view, with the padding, to the

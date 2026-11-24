@@ -644,6 +644,45 @@ fn the_far_plane_reaches_sunken_ground() {
     assert!(!terrain.is_empty() && terrain.iter().all(|depth| *depth < 1.0));
 }
 
+/// A rolled view reaches as far over terrain as its rotated corners do: in a
+/// portrait view rolled 90 degrees, the ground at the view's sides falls
+/// inside the depth range.
+#[test]
+fn the_terrain_far_plane_reaches_a_rolled_views_sides() {
+    let mut state = MapView {
+        camera: Camera {
+            center: LatLng::new(0.0, 0.0).unwrap(),
+            zoom: 12.0,
+            pitch: 60.0,
+            roll: 90.0,
+            fov: 60.0,
+            ..Camera::default()
+        },
+        extent: LogicalExtent::new(Size::new(250, 500), 1.0),
+        projection_mode: ProjectionMode::default(),
+        viewport: Viewport::default(),
+        projection: ProjectionDefinition::default(),
+    }
+    .to_state()
+    .unwrap();
+    state.set_terrain_min_elevation(Some(0.0));
+    let view = state.view();
+    let proj_matrix = view.projection_matrix();
+    let mut seen = 0;
+    for row in -150..=150 {
+        for column in -150..=150 {
+            let lat_lng = LatLng::new(f64::from(row) / 1000.0, f64::from(column) / 1000.0).unwrap();
+            let point = Projection::project(&lat_lng, view.scale());
+            let clip = proj_matrix * DVec4::new(point.x, point.y, 0.0, 1.0);
+            if clip.w > 0.0 && (clip.x / clip.w).abs() <= 1.0 && (clip.y / clip.w).abs() <= 1.0 {
+                seen += 1;
+                assert!(clip.z / clip.w < 1.0, "{lat_lng:?} is past the far plane");
+            }
+        }
+    }
+    assert!(seen > 1000, "{seen} points in view");
+}
+
 /// A 512 by 512 view of latitude 52.5, longitude 13.4 at `zoom`, pitched
 /// 60 degrees and turned 20, its center `center_altitude` meters up, under
 /// `projection`.
