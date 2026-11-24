@@ -555,6 +555,7 @@ impl Encoder {
         orchestrator.upload_draws(gpu, parameters.context);
         let draw_groups = DrawGroups::of(orchestrator, &parameters);
         parameters.stencil_clear.clone_from(&draw_groups.stencil_clear);
+        parameters.opaque_pass_cutoff = draw_groups.opaque_pass_cutoff;
         let (proj_state, transform) = (parameters.frame.camera, parameters.frame.transform);
         parameters.clip_masks.update(gpu, parameters.context, proj_state.is_globe(), &draw_groups.clip_tiles, |tile| {
             TileProjection::of(tile, proj_state, &transform.projection_data_for_tile(tile, false), None)
@@ -677,13 +678,15 @@ impl Encoder {
 }
 
 /// What the frame's draw groups need of the passes: the number of those
-/// that draw on the map, which sets the passes' depth range; the masks of
+/// that draw on the map, which sets the passes' depth range, and of those
+/// above the lowest 3D layer, which draw no opaque pass; the masks of
 /// the tiles they clip to and, when any of them uses the stencil buffer, of
 /// the tiles that clear it; and the groups drawn as a whole, each into the
 /// layer composite's texture and then onto the frame or its named target.
 #[derive(Default)]
 struct DrawGroups {
     count: usize,
+    opaque_pass_cutoff: u32,
     clip_tiles: Vec<UnwrappedTileID>,
     /// The tiles whose masks clear the stencil buffer, also in
     /// `clip_tiles` ([`PaintParameters::stencil_clear_tiles`]).
@@ -697,8 +700,12 @@ impl DrawGroups {
     fn of(orchestrator: &RenderOrchestrator, parameters: &PaintParameters<'_>) -> DrawGroups {
         let mut groups = DrawGroups::default();
         let mut last: Option<&[UnwrappedTileID]> = None;
-        orchestrator.visit_draw_groups(|group, routed| {
+        let mut lowest_volume = None;
+        orchestrator.visit_draw_groups(|group, routed, volume| {
             if !routed {
+                if volume && lowest_volume.is_none() {
+                    lowest_volume = Some(groups.count);
+                }
                 groups.count += 1;
             }
             if let Some(tiles) = group.stencil_tiles()
@@ -709,6 +716,7 @@ impl DrawGroups {
             }
             groups.composited.extend(group.composited());
         });
+        groups.opaque_pass_cutoff = lowest_volume.map_or(0, |lowest| (groups.count - 1 - lowest) as u32);
         groups.stencil_clear = parameters.stencil_clear_tiles(&groups.clip_tiles);
         groups.clip_tiles.extend_from_slice(&groups.stencil_clear);
         if !groups.clip_tiles.is_sorted() {

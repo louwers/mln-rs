@@ -227,6 +227,9 @@ pub(crate) struct PaintParameters<'a> {
 
     pub(crate) current_layer: u32,
     pub(crate) depth_range_size: f32,
+    /// The number of the frame's draw groups on the map above the first of
+    /// its lowest 3D layer, which draw without a depth test; 0 without 3D
+    /// layers.
     pub(crate) opaque_pass_cutoff: u32,
 
     /// The area of the frame's target that its draws draw in.
@@ -291,7 +294,7 @@ impl<'a> PaintParameters<'a> {
             // The renderer sets these before use.
             current_layer: 0,
             depth_range_size: 1.0,
-            opaque_pass_cutoff: frame.opaque_pass_cutoff,
+            opaque_pass_cutoff: 0,
             scissor,
             frame_projection: None,
         }

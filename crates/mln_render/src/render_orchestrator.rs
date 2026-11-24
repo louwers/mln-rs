@@ -377,7 +377,7 @@ impl RenderOrchestrator {
         }
 
         self.update_render_tiles(&frame);
-        self.update_layer_tiles(update_parameters, &mut frame);
+        self.update_layer_tiles(update_parameters, &frame);
 
         self.placement.place(&self.layers, update_parameters, &mut self.tile_store, &mut frame);
         frame.needs_repaint = clock.continuous && self.has_transitions(update_parameters.time_point);
@@ -421,10 +421,9 @@ impl RenderOrchestrator {
     }
 
     /// Gives each layer of the frame its tiles, in the order it draws them,
-    /// finds those that place, and sets the frame's opaque pass cutoff.
-    fn update_layer_tiles(&mut self, update_parameters: &UpdateParameters, frame: &mut FramePlan) {
+    /// and finds those that place.
+    fn update_layer_tiles(&mut self, update_parameters: &UpdateParameters, frame: &FramePlan) {
         self.placement.clear_layers();
-        let mut opaque_pass_cutoff_estimation = frame.layers.len();
         let mut contents = SourceContents::default();
         self.found_tiles.clear();
         for (&index, frame_layer) in &frame.layers {
@@ -446,13 +445,6 @@ impl RenderOrchestrator {
             if let Some(participant) = render_layer.placing() {
                 let found = &self.found_tiles[start..];
                 self.placement.add_layer((index, participant), source, source_contents, found);
-            }
-            let record = render_layer.record();
-            if frame.opaque_pass_cutoff == 0 {
-                opaque_pass_cutoff_estimation -= 1;
-                if record.volume {
-                    frame.opaque_pass_cutoff = opaque_pass_cutoff_estimation as u32;
-                }
             }
         }
     }
@@ -1042,10 +1034,12 @@ impl RenderOrchestrator {
     }
 
     /// Visits the layers' draw groups of the frame, in drawing order, each
-    /// with whether it draws into a named target.
-    pub(crate) fn visit_draw_groups<'a>(&'a self, mut visit: impl FnMut(&'a FrameDraws, bool)) {
+    /// with whether it draws into a named target and whether its layer
+    /// draws 3D geometry ([`Layer::VOLUME`](crate::layer::Layer::VOLUME)).
+    pub(crate) fn visit_draw_groups<'a>(&'a self, mut visit: impl FnMut(&'a FrameDraws, bool, bool)) {
         for layer in &self.layers {
-            layer.visit_draw_groups(&mut visit);
+            let volume = layer.record().volume;
+            layer.visit_draw_groups(&mut |group, routed| visit(group, routed, volume));
         }
     }
 

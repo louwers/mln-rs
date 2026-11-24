@@ -26,12 +26,6 @@ pub(crate) struct FramePlan {
     pub(crate) debug_options: MapDebugOptions,
     pub(crate) light: EvaluatedLight,
     pub(crate) sky: Option<EvaluatedSky>,
-    /// The number of the frame's layers above its lowest 3D layer, which
-    /// draw without a depth test; 0 without 3D layers. Layers drawn into
-    /// named targets count too, so as many layers just below the lowest 3D
-    /// layer draw their opaque draws in the translucent pass, bottom to top,
-    /// which shows them the same.
-    pub(crate) opaque_pass_cutoff: u32,
     /// What the frame clears to: transparent black unless the style's
     /// bottom layer is a solid background.
     pub(crate) background_color: Color,
@@ -61,7 +55,6 @@ impl FramePlan {
             debug_options,
             light: EvaluatedLight::default(),
             sky: None,
-            opaque_pass_cutoff: 0,
             background_color: Color::new_unchecked(0.0, 0.0, 0.0, 0.0),
             placement_fade: 0.0,
             needs_repaint: false,
