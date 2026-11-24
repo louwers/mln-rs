@@ -252,14 +252,17 @@ pub(crate) fn library_source(program: &Program, source: &Msl) -> Result<String, 
 /// `stage` names in its body and may read ([`Program::bindings`]) added to
 /// its parameters.
 fn with_parameters(functions: &str, main: &str, program: &Program, stage: Stage) -> String {
-    let Some(name_at) = functions.find(&format!(" {main}(")) else { return functions.to_owned() };
-    let Some(close) = matching(functions, name_at, '(', ')') else { return functions.to_owned() };
-    let Some(end) = matching(functions, close, '{', '}') else { return functions.to_owned() };
+    // Comments' parentheses and braces don't count.
+    let code = msl::blank_comments(functions);
+    let Some(name_at) = msl::main_function_at(&code, main) else { return functions.to_owned() };
+    let Some(close) = matching(&code, name_at, '(', ')') else { return functions.to_owned() };
+    let Some(end) = matching(&code, close, '{', '}') else { return functions.to_owned() };
     let (parameters, body) = (&functions[name_at..close], &functions[close..end]);
     let declared: HashSet<&str> = identifiers(parameters).collect();
     let named: HashSet<&str> = identifiers(body).filter(|name| !declared.contains(name)).collect();
-    // The function's own parameters, after ` main(`.
-    let own = &parameters[main.len() + 2..];
+    // The function's own parameters, after its `(`.
+    let own = &code[name_at..close];
+    let own = &own[own.find('(').map_or(own.len(), |open| open + 1)..];
     let mut added = String::new();
     for binding in program.bindings(stage).filter(|binding| named.contains(&*binding.name())) {
         if !added.is_empty() || !own.trim().is_empty() {
@@ -333,6 +336,27 @@ mod tests {
              device const short4* walls [[buffer(7)]]) {\n    return walls[drawIndex] + view.x;\n}\n\
              half4 fragment other(int view,\n    sampler first_sampler [[sampler(0)]],\n    \
              texture2d<float, access::sample> second [[texture(1)]]) {\n    return walls + second.sample(first_sampler, 0);\n}"
+        );
+    }
+
+    #[test]
+    fn a_main_function_is_found_past_spaces_and_comments() {
+        static PROGRAM: Program = Program {
+            name: "plain",
+            buffers: &[],
+            attributes: &[],
+            instance_attributes: &[],
+            textures: &[],
+            properties: &[],
+            projection: Projection::None,
+            sources: Sources::NONE,
+        };
+        let functions =
+            "// fragmentMain() { }\nhalf4 fragment fragmentMain (/* ) */) {\n    // }\n    return half4(view.x);\n}";
+        assert_eq!(
+            with_parameters(functions, "fragmentMain", &PROGRAM, Stage::Fragment),
+            "// fragmentMain() { }\nhalf4 fragment fragmentMain (/* ) */\n    device const ViewUBO& view [[buffer(0)]]) {\n    \
+             // }\n    return half4(view.x);\n}"
         );
     }
 

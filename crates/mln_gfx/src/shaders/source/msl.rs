@@ -82,9 +82,10 @@ fn declaration(block: &Block) -> String {
 /// names no property of the program, or that is malformed.
 pub fn expand(program: &Program, msl: &Msl) -> Result<String, GpuError> {
     let source = msl.source;
+    let code = blank_comments(source);
     // Where each main function's line starts, and its stage.
     let line_of = |name: &str| {
-        let at = source.find(&format!(" {name}("))?;
+        let at = main_function_at(&code, name)?;
         Some(source[..at].rfind('\n').map_or(0, |line| line + 1))
     };
     let mut mains: Vec<(usize, Stage)> =
@@ -146,6 +147,38 @@ pub fn expand(program: &Program, msl: &Msl) -> Result<String, GpuError> {
         expanded.push_str(&stage(&source[start..end], part)?);
     }
     Ok(expanded)
+}
+
+/// `text` with each character of its `//` and `/* */` comments a space, so
+/// that what is code is at the same byte as in `text`.
+#[must_use]
+pub fn blank_comments(text: &str) -> String {
+    let mut code = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = [rest.find("//"), rest.find("/*")].into_iter().flatten().min() {
+        code.push_str(&rest[..start]);
+        let comment = &rest[start..];
+        let end = if comment.starts_with("//") {
+            comment.find('\n').unwrap_or(comment.len())
+        } else {
+            comment[2..].find("*/").map_or(comment.len(), |end| end + 4)
+        };
+        code.extend(std::iter::repeat_n(' ', end));
+        rest = &comment[end..];
+    }
+    code + rest
+}
+
+/// Where the name of the function `name` is in `code`, MSL without
+/// comments ([`blank_comments`]): the first `name` that is a whole word and
+/// that a `(` follows, after any whitespace.
+#[must_use]
+pub fn main_function_at(code: &str, name: &str) -> Option<usize> {
+    let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    code.match_indices(name).map(|(at, _)| at).find(|&at| {
+        let after = &code[at + name.len()..];
+        !code[..at].ends_with(word) && after.trim_start().starts_with('(')
+    })
 }
 
 /// What a stage reads of `named` per vertex.
