@@ -172,12 +172,6 @@ impl ElevationRanges {
         Some((f64::from(min) * self.exaggeration, f64::from(max) * self.exaggeration))
     }
 
-    /// The bytes of its table of ranges: a slot of a key, a range and a
-    /// control byte for each range it has room for.
-    pub(crate) fn bytes(&self) -> usize {
-        self.dem_tiles.capacity() * (size_of::<(CanonicalTileID, (f32, f32))>() + 1)
-    }
-
     /// How many DEM tiles' ranges it holds.
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
@@ -274,13 +268,9 @@ pub(crate) struct TerrainCover {
     /// in GL JS, whose camera falls back to the DEM tiles at its zoom.
     pub(crate) center: Option<TerrainTile>,
     /// The DEM tiles the source keeps loaded for the tiles and the center,
-    /// whether or not a layer draws them, nearest the center first, then the
-    /// `standing_dems` that aren't among them, each once.
+    /// whether or not a layer draws them, nearest the center first, each
+    /// once.
     pub(crate) dem_tiles: Vec<OverscaledTileID>,
-    /// The DEM tiles that the standing layers' tiles that no drawn tile
-    /// holds read, each once, whether or not the tiles and the center load
-    /// them too ([`request_standing`](Self::request_standing)).
-    pub(crate) standing_dems: Vec<OverscaledTileID>,
     /// The ranges that cull the tiles, and every source's tiles; the next
     /// update's cover takes them over.
     pub(crate) ranges: ElevationRanges,
@@ -318,45 +308,7 @@ impl TerrainCover {
             .filter(|id| seen.insert(*id))
             .collect();
         let tile_size = terrain_tile_size(dem_tile_size);
-        let standing_dems = Vec::new();
-        TerrainCover { source_id: source_id.to_owned(), tile_size, tiles, center, dem_tiles, standing_dems, ranges }
-    }
-
-    /// Requests the DEM tiles that `tiles`, the ideal tiles of the source of
-    /// a standing layer the frame draws, read where no drawn tile holds them:
-    /// the DEM tile that holds each at its own zoom, or at the DEM's deepest
-    /// if that is shallower, so that the terrain's source loads it and keeps
-    /// it loaded, as it does the tiles' own. A tile above the DEM's zoom
-    /// levels reads none. A tile the source draws in place of an ideal one
-    /// while that loads requests nothing: it reads what has loaded.
-    pub(crate) fn request_standing(&mut self, tiles: impl IntoIterator<Item = OverscaledTileID>) {
-        let dem_zooms = self.ranges.dem_zooms;
-        for tile in tiles {
-            let z = tile.canonical.z;
-            let held = self.tiles.iter().any(|drawn| {
-                let (wrap, canonical) = (drawn.id.wrap, drawn.id.canonical);
-                wrap == tile.wrap && canonical.z <= z && tile.scaled_to(canonical.z).canonical == canonical
-            });
-            let id = tile.scaled_to(z.min(dem_zooms.max));
-            if held || id.canonical.z < dem_zooms.min || self.standing_dems.contains(&id) {
-                continue;
-            }
-            self.standing_dems.push(id);
-            if !self.dem_tiles.contains(&id) {
-                self.dem_tiles.push(id);
-            }
-        }
-    }
-
-    /// The DEM tiles of `dem`, the terrain's source, that the standing DEM
-    /// tiles bind: each one, or while it loads its deepest ancestor that has
-    /// data; none where none has.
-    pub(crate) fn bound_standing_dems<'a>(
-        &'a self,
-        dem: &'a SourceTiles,
-    ) -> impl Iterator<Item = OverscaledTileID> + 'a {
-        let min_zoom = self.ranges.dem_zooms.min;
-        self.standing_dems.iter().filter_map(move |&id| loaded_dem(dem, id, min_zoom))
+        TerrainCover { source_id: source_id.to_owned(), tile_size, tiles, center, dem_tiles, ranges }
     }
 
     /// Binds each tile's DEM from the tiles of `dem`, the terrain's source.

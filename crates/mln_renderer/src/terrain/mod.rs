@@ -101,8 +101,6 @@
 //!   drape, as in 2D: into a texture of the drape's size, composited onto
 //!   the drape. A blend's backdrop is the drape's own texels.
 
-#![expect(dead_code, reason = "the standing layers come with a later step of terrain")]
-
 mod cover;
 mod dem_textures;
 mod drapes;
@@ -319,10 +317,12 @@ impl RenderTerrain {
         };
         let tiles = dem(&cover.source_id);
         cover.bind(tiles);
-        let (unpack, exaggeration) = (self.surface.unpack(), self.surface.props.exaggeration);
+        let ground = TerrainElevation::new(cover, tiles, self.surface.unpack(), self.surface.props.exaggeration);
+        // The ground keeps its `Arc` while it doesn't change, which the map
+        // takes as the ground it already stands on.
         let (drawn, new) = match &self.elevation {
-            Some(drawn) if drawn.draws_as(cover, tiles, unpack, exaggeration) => (drawn, false),
-            _ => (&*self.elevation.insert(Arc::new(TerrainElevation::new(cover, tiles, unpack, exaggeration))), true),
+            Some(drawn) if drawn.draws_as(&ground) => (drawn, false),
+            _ => (&*self.elevation.insert(Arc::new(ground)), true),
         };
         let center = parameters.view.center(WrapMode::Wrapped);
         let alike = stands_alike(seen, Some(&**drawn), center);
@@ -432,12 +432,6 @@ impl RenderTerrain {
     /// their keys don't tell: the style's images, or a frame that failed.
     pub(crate) fn redraw_drapes(&mut self) {
         self.drapes.redraw();
-    }
-
-    /// The tiles of the drapes and the side their drapes take.
-    #[cfg(test)]
-    pub(crate) fn drape_sizes(&self) -> Vec<(OverscaledTileID, u32)> {
-        self.drapes.sizes()
     }
 
     /// Drops the drapes once the map's center crossed the antimeridian: the

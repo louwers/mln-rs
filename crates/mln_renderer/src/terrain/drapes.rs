@@ -736,7 +736,6 @@ mod tests {
             tiles: vec![TerrainTile { id, dem: None, dem_loading: false }],
             center: None,
             dem_tiles: Vec::new(),
-            standing_dems: Vec::new(),
             ranges: ElevationRanges::default(),
         };
         let mut drapes = Drapes::default();
