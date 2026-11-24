@@ -83,7 +83,7 @@ class UnitConfigTest(unittest.TestCase):
         self.assertIsNotNone(needs_match, "ci-passed must declare needs")
         assert needs_match is not None
         needs = {item.strip() for item in needs_match.group(1).split(",")}
-        self.assertEqual(needs, {"plan"} | catalog_jobs)
+        self.assertEqual(needs, defined - {"ci-passed"})
 
 
 class PlanTest(unittest.TestCase):
