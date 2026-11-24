@@ -314,7 +314,9 @@ impl<'a> TileMut<'a> {
         {
             layout.work = LayoutWork::Ready(resume);
         }
-        if self.source.synchronous {
+        // A synchronous cover lays out inline, but decodes on the workers:
+        // in the browser an image decodes asynchronously.
+        if self.source.synchronous && self.tile.pipeline.layout().is_some() {
             self.run_inline();
         } else if let Some((lane, run)) = self.next_job(false) {
             self.store.jobs.submit(lane, run, &self.store.inbox);
@@ -507,7 +509,7 @@ impl<'a> TileMut<'a> {
                 let DecodeWork::Queued(image) = &decode.work else {
                     return None;
                 };
-                let lane = if inline { Lane(0) } else { self.store.jobs.lane()? };
+                let lane = self.store.jobs.lane()?;
                 let image = Arc::clone(image);
                 let data = Arc::clone(&image);
                 let job = match decode.dem {

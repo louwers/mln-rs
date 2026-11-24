@@ -86,9 +86,10 @@
 //! browser, on a file source's threads, or in a host's callback. Its
 //! [`Replier`] and its replies are `Send`, and a replier sends as many
 //! replies as its load has. What the tiles take in lays out or decodes on
-//! the tile workers, through the worker codec where they run apart, or in
-//! the update that delivers it for a [synchronous](Cover::synchronous)
-//! cover; an origin's own types and values never cross the codec.
+//! the tile workers, through the worker codec where they run apart, or, for
+//! geometry of a [synchronous](Cover::synchronous) cover, lays out in the
+//! update that delivers it; an origin's own types and values never cross the
+//! codec.
 //!
 //! # What the engine owns
 //!
@@ -329,8 +330,9 @@ pub struct Cover {
     /// view's load first, and the globe's lowest level stays loaded, so that
     /// something shows while the view's tiles load.
     pub prefetch: bool,
-    /// Whether the tiles lay out on the renderer's thread in the update that
-    /// gives them their data, rather than on the tile workers. What the
+    /// Whether geometry tiles lay out on the renderer's thread in the update
+    /// that gives them their data, rather than on the tile workers; raster
+    /// and raster-dem tiles decode on the workers either way. What the
     /// origin delivers during [`DataOrigin::update`] follows the last cover's
     /// value, since the engine takes this one only as `update` returns it.
     pub synchronous: bool,
