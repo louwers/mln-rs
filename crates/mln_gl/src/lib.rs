@@ -31,6 +31,7 @@
 #[cfg(feature = "bench")]
 #[doc(hidden)]
 pub mod bench;
+mod bytes;
 mod custom_layer;
 mod enums;
 mod frame_image;

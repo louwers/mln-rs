@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use mln_gfx::renderer_backend;
 
+use crate::bytes::Bytes;
 use crate::gpu::GlGpu;
 use crate::state::State;
 use crate::types::Gl;
@@ -84,6 +85,23 @@ impl GlContext {
     /// calls through them set.
     pub(crate) fn parts(&mut self) -> (&Gl, &mut State) {
         (&self.gl, &mut self.state)
+    }
+
+    /// What hands the context bytes of memory.
+    pub(crate) fn bytes(&self) -> Bytes<'_> {
+        #[cfg(not(target_family = "wasm"))]
+        return Bytes::new(&self.gl);
+        #[cfg(target_family = "wasm")]
+        Bytes::new(&self.webgl2)
+    }
+
+    /// [`parts`](Self::parts), with [`bytes`](Self::bytes).
+    pub(crate) fn parts_with_bytes(&mut self) -> (&Gl, &mut State, Bytes<'_>) {
+        #[cfg(not(target_family = "wasm"))]
+        let bytes = Bytes::new(&self.gl);
+        #[cfg(target_family = "wasm")]
+        let bytes = Bytes::new(&self.webgl2);
+        (&self.gl, &mut self.state, bytes)
     }
 
     /// The platform's context.

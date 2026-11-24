@@ -598,16 +598,17 @@ impl WebMap {
         self.force = true;
     }
 
-    /// Starts `mln_gfx`'s conformance case of writes from JS arrays on a
-    /// `Gpu` of the map's backend made for the check, whose frame
-    /// `take_gpu_check` checks. Only check/check.mjs asks for it.
+    /// Starts `mln_gfx`'s conformance cases of writes from JS arrays, and of
+    /// writes while the instance's memory grows, on a `Gpu` of the map's
+    /// backend made for the check, whose frames `take_gpu_check` checks.
+    /// Only check/check.mjs asks for it.
     pub fn start_gpu_check(&self) {
         self.gpu_check.start();
     }
 
-    /// Whether the GPU has the frame of the check that `start_gpu_check`
-    /// started, which passed its checks. Fails when the check couldn't run,
-    /// and panics where one of the frame's checks doesn't hold.
+    /// Whether the GPU has the frames of the check that `start_gpu_check`
+    /// started, which passed their checks. Fails when the check couldn't
+    /// run, and panics where one of a frame's checks doesn't hold.
     pub fn take_gpu_check(&self) -> Result<bool, JsValue> {
         self.gpu_check.take().map_err(js_error)
     }
