@@ -84,6 +84,7 @@ ci:
             files:
               - mise.target-android.*
               - tools/ci/boot-android.sh
+              - tools/android-test-host/**
               - tools/device-farm/**
               - mise-tasks/device-farm/**
           then: apply

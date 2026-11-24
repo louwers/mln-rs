@@ -27,8 +27,9 @@ mkdir "$DEVICE_FARM_WORKSPACE" "$DEVICE_FARM_PUSHED"
 # The host's copy of the workspace, for nextest, while the phone gets its own.
 tar -xzf "$package/workspace.tar.gz" -C "$DEVICE_FARM_WORKSPACE" &
 adb shell "rm -rf $DEVICE_FARM_ROOT && mkdir -p $DEVICE_FARM_ROOT/bin $DEVICE_FARM_ROOT/workspace"
-adb push "$package/test-host.jar" "$package/libmln_test_host.so" "$package/workspace.tar.gz" "$DEVICE_FARM_ROOT/" > /dev/null
-adb shell "tar -xzf $DEVICE_FARM_ROOT/workspace.tar.gz -C $DEVICE_FARM_ROOT/workspace && rm $DEVICE_FARM_ROOT/workspace.tar.gz"
+adb push "$package/host" "$package/workspace.tar.gz" "$DEVICE_FARM_ROOT/" > /dev/null
+adb shell "chmod 755 $DEVICE_FARM_ROOT/host/launcher.sh &&
+    tar -xzf $DEVICE_FARM_ROOT/workspace.tar.gz -C $DEVICE_FARM_ROOT/workspace && rm $DEVICE_FARM_ROOT/workspace.tar.gz"
 wait
 
 export CARGO_TARGET_AARCH64_LINUX_ANDROID_RUNNER=$package/runner.sh

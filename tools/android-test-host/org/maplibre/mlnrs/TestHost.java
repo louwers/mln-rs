@@ -4,7 +4,7 @@ import java.util.Arrays;
 
 /**
  * Runs a test executable built for Android inside a Java VM's process, so
- * that its tests have the Java VM that an app's code has: runner.sh starts
+ * that its tests have the Java VM that an app's code has: launcher.sh starts
  * this class with app_process, which starts Android's runtime as it does for
  * an app, and the tests' HTTP and locale services find the VM.
  *

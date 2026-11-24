@@ -13,6 +13,8 @@
 # Google's SDK installer, which needs no JDK: setup:target-android installs the
 # NDK with it, and devices-cli the emulator and its system images.
 android-cli = "1.1.16919734"
+# The JDK that builds the test host (tools/android-test-host).
+"core:java" = "temurin-21.0.13+9.0.LTS"
 
 [env]
 # The SDK that Android Studio and devices-cli share: ANDROID_HOME, else the
@@ -20,7 +22,7 @@ android-cli = "1.1.16919734"
 # any others.
 ANDROID_HOME = "{% if get_env(name='ANDROID_HOME', default='') != '' %}{{ get_env(name='ANDROID_HOME') }}{% elif os() == 'macos' %}{{ env.HOME }}/Library/Android/sdk{% else %}{{ env.HOME }}/Android/Sdk{% endif %}"
 MLN_ANDROID_NDK = "29.0.14206865"
-# The build-tools whose d8 builds the Device Farm test host (tools/device-farm).
+# The build-tools whose d8 builds the test host (tools/android-test-host).
 MLN_ANDROID_BUILD_TOOLS = "37.0.0"
 ANDROID_NDK_HOME = "{{ env.ANDROID_HOME }}/ndk/{{ env.MLN_ANDROID_NDK }}"
 # The NDK's compilers, one per target, for API level 26 and later: the tests
@@ -41,12 +43,12 @@ CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER = "{{ env.CC_armv7_linux_androideabi
 CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER = "{{ env.CC_x86_64_linux_android }}"
 CARGO_TARGET_I686_LINUX_ANDROID_LINKER = "{{ env.CC_i686_linux_android }}"
 # Cargo's runners, for the 64-bit targets, whose emulators run on a host of the
-# same architecture: a test gets a copy of its package directory and the RUST_
-# and MLN_ variables.
-CARGO_TARGET_AARCH64_LINUX_ANDROID_RUNNER = "devices-cli exec android --api 36 --abi arm64-v8a --sync-env CARGO_MANIFEST_DIR --env RUST_* --env MLN_* --"
-CARGO_TARGET_X86_64_LINUX_ANDROID_RUNNER = "devices-cli exec android --api 36 --abi x86_64 --sync-env CARGO_MANIFEST_DIR --env RUST_* --env MLN_* --"
-# Their executables export main, which AWS Device Farm's test host calls in a
-# Java VM's process (tools/device-farm).
+# same architecture: each test runs on this checkout's emulator, or a device
+# assigned to it, in a Java VM's process (tools/android-test-host), with a copy
+# of its package directory and the RUST_ and MLN_ variables.
+CARGO_TARGET_AARCH64_LINUX_ANDROID_RUNNER = "{{ config_root }}/tools/android-test-host/runner.sh arm64-v8a"
+CARGO_TARGET_X86_64_LINUX_ANDROID_RUNNER = "{{ config_root }}/tools/android-test-host/runner.sh x86_64"
+# Their executables export main, which the test host calls.
 CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS = "-C link-arg=-Wl,--export-dynamic-symbol=main"
 CARGO_TARGET_X86_64_LINUX_ANDROID_RUSTFLAGS = "-C link-arg=-Wl,--export-dynamic-symbol=main"
 # A device runs a test from a copy of its package: nextest's target profile

@@ -1,7 +1,6 @@
 // The native half of TestHost.java: loads a test executable into the Java
-// VM's process and calls its main. The package builds the tests with main
-// exported (mise-tasks/device-farm/package), and the executable reaches the
-// VM through JNI_GetCreatedJavaVMs.
+// VM's process and calls its main, which the target-android environment
+// exports, and the executable reaches the VM through JNI_GetCreatedJavaVMs.
 
 #include <dlfcn.h>
 #include <jni.h>
