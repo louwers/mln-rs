@@ -181,5 +181,5 @@ fn layers_with_equal_filters_draw_and_query_from_one_bucket() {
     };
     assert_eq!(found(0.0), ["above", "below"]);
     assert_eq!(found(4.0), ["below"]);
-    assert_eq!(found(8.0), [] as [std::string::String; 0]);
+    assert_eq!(found(8.0), Vec::<String>::new(), "nothing past the layer below");
 }
