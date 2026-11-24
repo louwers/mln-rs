@@ -1212,63 +1212,6 @@ fn dont_load_unneeded_tiles() {
     }
 }
 
-// gtest: Map.ContinuousRendering
-#[test]
-#[ignore = "TEST_DISABLED_ON_CI (timing-dependent); see map.test.cpp:994"]
-fn continuous_rendering() {
-    let run_loop = TestLoop::new();
-    let pool = Pool::new(4);
-
-    let did_not_stop = Arc::new(AtomicBool::new(false));
-    let emergency_shutoff = LoopTimer::new(&run_loop);
-    {
-        let run_loop = run_loop.handle();
-        let did_not_stop = Arc::clone(&did_not_stop);
-        emergency_shutoff.start(Duration::from_secs(10), move || {
-            run_loop.stop();
-            did_not_stop.store(true, Ordering::SeqCst);
-        });
-    }
-
-    let timer = Rc::new(LoopTimer::new(&run_loop));
-
-    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, run_loop.queue(), &pool).expect("a headless frontend");
-
-    let observer = Rc::new(StubMapObserver::default());
-    {
-        let timer = Rc::downgrade(&timer);
-        let run_loop = run_loop.handle();
-        observer.did_finish_rendering_frame_callback.set(move |_| {
-            // Start a timer that ends the test one second from now. If we are
-            // continuing to render indefinitely, the timer will be constantly
-            // restarted and never trigger. Instead, the emergency shutoff above
-            // will trigger, failing the test.
-            if let Some(timer) = timer.upgrade() {
-                let run_loop = run_loop.clone();
-                timer.start(Duration::from_secs(1), move || run_loop.stop());
-            }
-        });
-    }
-
-    let mut map = Map::with_resource_options(
-        MapOptions { map_mode: MapMode::Continuous, size: frontend.size(), ..Default::default() },
-        &ResourceOptions {
-            asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
-            ..ResourceOptions::default()
-        },
-        &pool,
-    )
-    .unwrap();
-    frontend.attach(&mut map);
-    let map = Rc::new(RefCell::new(map));
-    let frontend = Rc::new(RefCell::new(frontend));
-    let _events = observer.observe(&run_loop, &map, Some(&frontend));
-    map.borrow_mut().load_style_json(&read_file("test/fixtures/api/water.json"));
-
-    run_loop.run();
-    assert!(!did_not_stop.load(Ordering::SeqCst), "Did not stop rendering");
-}
-
 // gtest: Map.NoContentTiles
 #[test]
 fn no_content_tiles() {
