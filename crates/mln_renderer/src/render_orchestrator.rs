@@ -635,7 +635,9 @@ impl RenderOrchestrator {
 
     /// Adding or removing an image changes the layout of the tiles whose
     /// dependencies name it, and updating one does when its size or SDF
-    /// flag changes. An update of the same size patches its atlas bins.
+    /// flag changes. An update of the same size patches its atlas bins. The
+    /// background layers' pattern atlas drops any image that changed or
+    /// went, which they pack again from the store as they need it.
     fn apply_image_diff(&mut self, image_diff: &ItemChanges<Arc<ImageImpl>>, sprite_loaded: bool) {
         let images = self.tile_store.images_mut();
         images.begin_update();
@@ -651,8 +653,8 @@ impl RenderOrchestrator {
         }
         let mut patched = Vec::new();
         for image in image_diff.changed.values() {
+            self.atlases.pattern.remove_pattern(&image.id);
             if images.update_image(Arc::clone(image)) {
-                self.atlases.pattern.remove_pattern(&image.id);
                 relayout_images.insert(image.id.clone());
             }
             patched.push(Arc::clone(image));
