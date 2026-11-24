@@ -75,3 +75,22 @@ fn a_fix_moves_the_puck_and_turns_its_arrow_through_north() {
     }
     assert!(midway > 0, "no frame drew the transition under way");
 }
+
+#[test]
+fn a_query_finds_the_puck_where_its_filter_takes_it() {
+    use mln_rs::mln_style::expression::{Expr, value::Value};
+    use mln_rs::mln_style::filter::Filter;
+
+    let fixture = Fixture::new(registry(), STYLE);
+    let found = |take: bool| {
+        // The puck, a degree west of the center at zoom 3.
+        let x = f64::from(SIZE.width) / 2.0 - 4096.0 / 360.0;
+        let at = mln_rs::mln_util::geo::ScreenCoordinate::new(x, f64::from(SIZE.height) / 2.0);
+        let filter = Filter::new(Some(Arc::new(Expr::literal(Value::Bool(take)))), None);
+        let options = mln_rs::RenderedQueryOptions::new(Some(vec!["puck".to_owned()]), Some(filter));
+        let features = wait(fixture.session.query_rendered_features(mln_rs::RenderedQueryGeometry::Point(at), options));
+        features.into_iter().map(|feature| feature.layer).collect::<Vec<_>>()
+    };
+    assert_eq!(found(true), ["puck"]);
+    assert_eq!(found(false), Vec::<String>::new());
+}

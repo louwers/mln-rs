@@ -269,7 +269,8 @@ pub trait Layer: Sized + 'static {
 
     /// Adds to `hits` what the query's geometry hits of what the layer
     /// draws without tile features, such as a mark it places itself. The
-    /// engine asks only a layer that rendered in the last frame.
+    /// engine asks only a layer that rendered in the last frame, and keeps
+    /// the hits whose features the query's filter takes.
     fn hit_frame(&self, _query: &FrameQuery<'_, Self>, _hits: &mut Vec<Hit>) {}
 }
 

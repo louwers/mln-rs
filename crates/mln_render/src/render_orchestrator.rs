@@ -1313,6 +1313,14 @@ impl RenderOrchestrator {
         for (id, layer) in &filtered_layers {
             let mut hits = Vec::new();
             layer.hit_frame(&self.view, geometry, &mut hits);
+            if let Some(filter) = &options.filter {
+                let context = mln_style::expression::EvaluationContext::with_zoom_feature(self.view.zoom() as f32, None)
+                    .with_global_state(self.global_state.as_deref());
+                hits.retain(|hit| {
+                    let feature = hit.feature.to_geojson_feature();
+                    mln_style::expression::expr::with_geojson_feature(&feature, context.clone(), |cx| filter.evaluate(cx))
+                });
+            }
             if !hits.is_empty() {
                 results_by_layer.entry(id.clone()).or_default().extend(hits);
             }
