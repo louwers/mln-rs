@@ -271,3 +271,53 @@ fn fills_and_lines_drape_over_flat_terrain() {
     let differing = differing(&draped, &flat);
     assert!(differing <= EDGE_PIXELS, "{differing} pixels differ from the map without terrain");
 }
+
+/// On the globe, a tall fill extrusion that draws before the draped layers,
+/// on the far side of the planet in a tile that reaches over the horizon,
+/// stays hidden behind the planet, which a half transparent image covers
+/// there, as without terrain. On the near side it shows.
+#[test]
+fn the_globe_hides_an_extrusion_behind_it_before_the_drapes() {
+    let style = |terrain: bool, [west, east]: [f64; 2]| {
+        let terrain = if terrain { r#""terrain": {"source": "dem"},"# } else { "" };
+        let sources = [
+            polygon_source("extrusion", &[[west, -20.0, east, 20.0]]),
+            image_source("red", [-85.0, -60.0, 85.0, 60.0]),
+        ];
+        format!(
+            r#"{{
+                "version": 8,
+                "center": [0, 0],
+                "zoom": 0.5,
+                "projection": {{"type": "vertical-perspective"}},
+                {terrain}
+                "sources": {{
+                    "dem": {{"type": "raster-dem", "tiles": ["dem/{{z}}/{{x}}/{{y}}.png"], "tileSize": 256, "maxzoom": 10}},
+                    {}
+                }},
+                "layers": [
+                    {{"id": "extrusion", "type": "fill-extrusion", "source": "extrusion",
+                      "paint": {{"fill-extrusion-color": "lime", "fill-extrusion-height": 300000}}}},
+                    {{"id": "red", "type": "raster", "source": "red",
+                      "paint": {{"raster-fade-duration": 0, "raster-opacity": 0.5}}}}
+                ]
+            }}"#,
+            sources.join(",")
+        )
+    };
+    // Lime, alone or under half the red.
+    let lime = |image: &PremultipliedImage| {
+        let pixels = image.data.as_chunks::<4>().0.iter();
+        pixels.filter(|[_, g, b, _]| *g > 64 && *b < 32).count()
+    };
+    for terrain in [false, true] {
+        let (Some((near, _)), Some((far, _))) = (
+            render(&style(terrain, [20.0, 50.0]), ViewportMode::Default),
+            render(&style(terrain, [120.0, 150.0]), ViewportMode::Default),
+        ) else {
+            return;
+        };
+        assert_ne!(0, lime(&near), "the extrusion on the near side, with terrain: {terrain}");
+        assert_eq!(0, lime(&far), "the extrusion on the far side, with terrain: {terrain}");
+    }
+}

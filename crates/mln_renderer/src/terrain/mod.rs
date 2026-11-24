@@ -324,14 +324,16 @@ impl RenderTerrain {
     /// Makes the draws of the frame of the last update, a set for each stack
     /// of the drapes the encode began ([`begin_drapes`]), which read the DEM
     /// textures of the frame ([`update_dems`]) and sample their stack's
-    /// drapes. Without a stack, which a frame without terrain has too, it
-    /// makes no draws, and drops what the draws hold.
+    /// drapes, and, if `depth_first`, draws of the surface's depth alone
+    /// ([`render_depth`]). Without a stack, which a frame without terrain
+    /// has too, it makes no draws, and drops what the draws hold.
     ///
     /// [`begin_drapes`]: Self::begin_drapes
     /// [`update_dems`]: Self::update_dems
-    pub(crate) fn update_draws(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+    /// [`render_depth`]: Self::render_depth
+    pub(crate) fn update_draws(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, depth_first: bool) {
         let cover = self.cover.as_ref().zip(self.dems.as_ref());
-        self.draws.update(gpu, parameters, cover, self.surface, &self.drapes);
+        self.draws.update(gpu, parameters, cover, self.surface, &self.drapes, depth_first);
     }
 
     /// Records that the buckets in `changed` changed, for the drapes' draws
@@ -380,6 +382,13 @@ impl RenderTerrain {
     /// the open pass of `gpu`, the context's.
     pub(crate) fn render(&mut self, stack: usize, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         self.draws.render(stack, gpu, parameters);
+    }
+
+    /// Draws the surface's depth alone into the open pass of `gpu`, the
+    /// context's, where the frame's draws have it, so that the 3D layers
+    /// that draw before the first stack's surface stand behind the ground.
+    pub(crate) fn render_depth(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        self.draws.render_depth(gpu, parameters);
     }
 
     /// Drops all it made from the map's data, for the renderer's

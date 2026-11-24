@@ -1349,7 +1349,10 @@ impl RenderOrchestrator {
         paint_parameters: &mut PaintParameters<'_>,
         frame: &Frame,
     ) {
-        let mut needs_globe_depth = false;
+        // Whether a 3D layer draws before the terrain's first surface, which
+        // writes the depth of the ground and of the planet.
+        let mut needs_depth = false;
+        let mut surface = false;
         let mut contents = SourceContents::default();
         for (&index, frame_layer) in &frame.layers {
             let render_layer = &mut self.layers[index as usize];
@@ -1358,10 +1361,11 @@ impl RenderOrchestrator {
             // Over terrain, a layer that drapes draws nothing onto the frame.
             if frame.terrain && render_layer.drapes() {
                 render_layer.remove_all_draws();
+                surface = true;
                 continue;
             }
             render_layer.update_draws(gpu, paint_parameters, &self.atlases, layer_source);
-            needs_globe_depth = needs_globe_depth || render_layer.needs_globe_depth();
+            needs_depth = needs_depth || (render_layer.needs_globe_depth() && !surface);
         }
         let draped = |&index: &u32| (index, self.layers[index as usize].drapes());
         self.stacks =
@@ -1403,11 +1407,11 @@ impl RenderOrchestrator {
         self.sky_pass.update(gpu, context, state, renderable_size, pixel_ratio, frame.sky.as_ref(), &frame.light);
         // Where the terrain's surface draws, its depth is the planet's: a
         // sea-level planet would hide the ground below sea level and the
-        // drawn ground's limb.
-        let surface = !self.stacks.is_empty();
-        let needs_globe_depth = (needs_globe_depth || self.sky_pass.has_atmosphere()) && !surface;
+        // drawn ground's limb. The 3D layers before the first surface stand
+        // behind the surface's depth, drawn first.
+        let needs_globe_depth = (needs_depth || self.sky_pass.has_atmosphere()) && !surface;
         self.globe_depth_pass.update(gpu, context, state, update_parameters, needs_globe_depth);
-        self.terrain.update_draws(gpu, paint_parameters);
+        self.terrain.update_draws(gpu, paint_parameters, needs_depth && surface);
     }
 
     /// The render layer at `index` in the drawing order.

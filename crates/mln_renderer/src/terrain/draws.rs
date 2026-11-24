@@ -78,6 +78,9 @@ type BuiltFor = (ProjectionVariant, bool, CullFaceMode);
 pub(crate) struct TerrainDraws {
     /// The draws of each of the frame's stacks.
     stacks: Vec<StackDraws>,
+    /// The draws of the surface's depth, transparent, which draw before the
+    /// frame's layers, while the frame draws them.
+    depth: Option<StackDraws>,
     /// The surface's shader, with the variant it is of.
     shader: Option<(ProjectionVariant, ShaderKey)>,
     /// The grids the draws hold: on the globe, the tiles of the first and
@@ -92,7 +95,8 @@ pub(crate) struct TerrainDraws {
 impl TerrainDraws {
     /// Makes the frame's draws of the tiles of `cover`, one for each of the
     /// stacks of `drapes`, which read the DEM textures of `dems`, sample the
-    /// tile's drape of their stack and draw as `surface` says; or drops the
+    /// tile's drape of their stack and draw as `surface` says, and, if
+    /// `depth_first`, one that draws only the surface's depth; or drops the
     /// draws and what they share for `None`, a frame without terrain. Each
     /// tile projects as the frame's view does, onto the globe on a globe.
     pub(crate) fn update(
@@ -102,11 +106,13 @@ impl TerrainDraws {
         cover: Option<(&TerrainCover, &DemBindings)>,
         surface: Surface,
         drapes: &Drapes,
+        depth_first: bool,
     ) {
         let stacks = drapes.stacks();
         let shader = cover.filter(|_| stacks > 0).and_then(|_| self.shader(gpu, parameters.context, parameters.view));
         let (Some((cover, dems)), Some(shader)) = (cover, shader) else {
             self.stacks.clear();
+            self.depth = None;
             self.meshes.clear();
             self.built_for = None;
             return;
@@ -120,6 +126,7 @@ impl TerrainDraws {
             // The draws hold the other variant's shader, the other grids, or
             // cull the other way.
             self.stacks.clear();
+            self.depth = None;
             self.meshes.clear();
             self.built_for = Some(built_for);
         }
@@ -129,7 +136,12 @@ impl TerrainDraws {
         // shaders.
         let remap_clip_z = context.caps().clip_depth == ClipDepthRange::NegativeOneToOne && !view.is_globe();
         self.stacks.resize_with(stacks, StackDraws::default);
-        for stack in &mut self.stacks {
+        if !depth_first {
+            self.depth = None;
+        } else if self.depth.is_none() {
+            self.depth = Some(StackDraws::default());
+        }
+        for stack in self.stacks.iter_mut().chain(&mut self.depth) {
             stack.tiles.set_tiles(cover.tiles.iter().map(|tile| tile.id));
         }
         for (index, tile) in cover.tiles.iter().enumerate() {
@@ -150,20 +162,23 @@ impl TerrainDraws {
                 projection: to_projection_ubo(&projection),
             };
             let mesh = mesh(&mut self.meshes, context, surface.skirts, poles(view, tile.id.canonical));
-            for (stack, draws) in self.stacks.iter_mut().enumerate() {
+            let sets = self.stacks.iter_mut().enumerate().map(|(stack, draws)| (Some(stack), draws));
+            for (stack, draws) in sets.chain(self.depth.iter_mut().map(|draws| (None, draws))) {
                 let Some(entry) = draws.tiles.entry(&tile.id) else {
                     continue;
                 };
                 // Where a stack draws nothing in the tile, it has no drape
                 // and no draw, but the first stack's draw writes the depth
-                // the stacks above test, so it draws transparent there.
-                let drape = match drapes.texture(stack, &tile.id) {
-                    Some(drape) => drape.clone(),
-                    None if stack == 0 => dems.flat().clone(),
-                    None => {
-                        *entry.value = None;
-                        continue;
-                    }
+                // the stacks above test, so it draws transparent there. The
+                // depth's draws draw so everywhere: the same draw, so the
+                // same depth.
+                let drape = match stack {
+                    Some(stack) => drapes.texture(stack, &tile.id).or_else(|| (stack == 0).then(|| dems.flat())),
+                    None => Some(dems.flat()),
+                };
+                let Some(drape) = drape.cloned() else {
+                    *entry.value = None;
+                    continue;
                 };
                 let draw =
                     entry.value.get_or_insert_with(|| KeptDraw::new(mesh_objects(&shader, mesh, cull_face_mode)));
@@ -177,7 +192,7 @@ impl TerrainDraws {
                 draws.draw_list.push(frame_draw, uniforms);
             }
         }
-        for StackDraws { tiles, frame, draw_list } in &mut self.stacks {
+        for StackDraws { tiles, frame, draw_list } in self.stacks.iter_mut().chain(&mut self.depth) {
             finish_tiles(draw_list, frame, tiles, gpu, context, |writer| {
                 writer.storage(ID_TERRAIN_DRAWABLE_UBO, |uniforms| uniforms.drawable);
                 writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
@@ -216,7 +231,7 @@ impl TerrainDraws {
 
     /// Uploads the GPU objects of the frame's draws.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
-        for StackDraws { tiles, frame, .. } in &mut self.stacks {
+        for StackDraws { tiles, frame, .. } in self.stacks.iter_mut().chain(&mut self.depth) {
             frame.upload(gpu, tiles, tile_objects, context);
         }
     }
@@ -225,6 +240,14 @@ impl TerrainDraws {
     /// context's.
     pub(crate) fn render(&mut self, stack: usize, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         if let Some(StackDraws { tiles, frame, .. }) = self.stacks.get_mut(stack) {
+            frame.render(tiles, tile_objects, gpu, parameters);
+        }
+    }
+
+    /// Draws the frame's draws of the surface's depth, if it made them, into
+    /// the open pass of `gpu`, the context's.
+    pub(crate) fn render_depth(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        if let Some(StackDraws { tiles, frame, .. }) = &mut self.depth {
             frame.render(tiles, tile_objects, gpu, parameters);
         }
     }
