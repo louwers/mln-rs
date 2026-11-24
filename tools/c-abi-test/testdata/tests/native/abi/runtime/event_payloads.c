@@ -1154,7 +1154,14 @@ static void sprites_and_glyphs_name_the_resource_they_report(void) {
     sizeof(sprite_and_glyph_resources) / sizeof(*sprite_and_glyph_resources)
   );
   mln_test_provider_install(runtime, provider);
-  mln_map map = mln_test_create_map(runtime);
+  // Neither range has "A", which the system's fonts would then draw: their
+  // glyph events would come at a time of their own, from a font face.
+  mln_map_options options = mln_test_map_options();
+  options.initial_extent.width = 64;
+  options.initial_extent.height = 64;
+  options.fields |= MLN_MAP_OPTION_SYSTEM_FONTS_ENABLED;
+  options.system_fonts_enabled = false;
+  mln_map map = mln_test_create_map_with_options(runtime, &options);
   const scenario_context context = {.runtime = runtime, .map = map};
   mln_test_render_fixture fixture = {0};
   TEST_ASSERT_TRUE(mln_test_render_fixture_create_offscreen(map, &fixture));
