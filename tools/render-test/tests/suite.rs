@@ -25,6 +25,9 @@ use render_test::runner::ImplFactory;
 /// The runner's exit code for `args` (after `--manifestPath`, `--output`
 /// and `--jobs`).
 pub(crate) fn run(name: &str, args: &[&str], factory: Option<ImplFactory>) -> i32 {
+    let package_dir =
+        std::env::var_os("CARGO_MANIFEST_DIR").map_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")), PathBuf::from);
+    std::env::set_current_dir(&package_dir).unwrap_or_else(|e| panic!("chdir {}: {e}", package_dir.display()));
     let manifest = if cfg!(target_vendor = "apple") {
         "manifests/macos-wgpu.json"
     } else {

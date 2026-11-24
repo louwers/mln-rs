@@ -12,6 +12,9 @@ const FILTER: &str = "/render-tests/(background-color|canvas|line-pattern)/";
 
 /// The run's result, its HTML report and its output directory.
 fn self_check(name: &str, jobs: usize, worker_program: &Path) -> (RunResult, String, PathBuf) {
+    let package_dir =
+        std::env::var_os("CARGO_MANIFEST_DIR").map_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")), PathBuf::from);
+    std::env::set_current_dir(&package_dir).unwrap_or_else(|e| panic!("chdir {}: {e}", package_dir.display()));
     let manifest =
         if cfg!(target_vendor = "apple") { "manifests/macos-wgpu.json" } else { "manifests/linux-wgpu.json" };
     let output = mln_headless::test_output_dir(env!("CARGO_TARGET_TMPDIR")).join(name);

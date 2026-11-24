@@ -23,7 +23,20 @@ const INTEGRATION: &str = "testdata/metrics/integration";
 
 const M1_FILTER: &str = "/render-tests/(background-color/(default|literal|function|colorSpace-hcl|colorSpace-lab|transition)|background-opacity/color|background-visibility/(none|visible))/style\\.json$";
 
+/// Sets the working directory to the `render-test` package directory once, for
+/// device runners (such as `xcrun simctl spawn`) that do not preserve Cargo's
+/// working directory.
+fn in_package_dir() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let dir = std::env::var_os("CARGO_MANIFEST_DIR")
+            .map_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")), PathBuf::from);
+        std::env::set_current_dir(&dir).unwrap_or_else(|e| panic!("chdir {}: {e}", dir.display()));
+    });
+}
+
 fn style_paths(id: &str) -> crate::metadata::TestPaths {
+    in_package_dir();
     let dir = format!("{INTEGRATION}/{id}/");
     crate::metadata::TestPaths::new(format!("{dir}style.json"), vec![dir.clone()], vec![dir])
 }
@@ -58,6 +71,7 @@ fn solid(size: Size, rgba: [u8; 4]) -> PremultipliedImage {
 
 #[test]
 fn parses_our_manifest() {
+    in_package_dir();
     let manifest = ManifestParser::parse_manifest(OUR_MANIFEST, String::new()).unwrap();
     assert_eq!(manifest.get_manifest_path(), "manifests");
     assert_eq!(manifest.get_result_path(), "manifests");
@@ -113,6 +127,7 @@ fn parses_our_manifest() {
 
 #[test]
 fn filters_tests_by_regex_search_on_the_path() {
+    in_package_dir();
     let manifest = ManifestParser::parse_manifest(OUR_MANIFEST, M1_FILTER.to_string()).unwrap();
     let mut ids: Vec<&str> =
         manifest.get_test_paths().iter().map(|t| t.style_path.strip_prefix(INTEGRATION).unwrap()).collect();
@@ -135,6 +150,7 @@ fn filters_tests_by_regex_search_on_the_path() {
 
 #[test]
 fn shuffle_order_depends_only_on_the_seed() {
+    in_package_dir();
     let manifest = ManifestParser::parse_manifest(OUR_MANIFEST, String::new()).unwrap();
     let ids = |m: &crate::manifest_parser::Manifest| -> Vec<String> {
         m.get_test_paths().iter().map(|t| t.style_path.clone()).collect()
@@ -157,6 +173,7 @@ fn shuffle_order_depends_only_on_the_seed() {
 
 #[test]
 fn parses_the_cpp_linux_manifest() {
+    in_package_dir();
     let manifest = ManifestParser::parse_manifest(CPP_MANIFEST, "background-color".to_string()).unwrap();
     assert_eq!(manifest.get_manifest_path(), "testdata/metrics");
     assert_eq!(manifest.get_test_root_path(), INTEGRATION);
@@ -167,6 +184,7 @@ fn parses_the_cpp_linux_manifest() {
 
 #[test]
 fn manifest_errors() {
+    in_package_dir();
     let tmp = tmp_dir("manifest_errors");
     let dir = tmp.path().to_owned();
     // Absolute, without the `\\?\` prefix that canonicalize gives on Windows.
@@ -459,6 +477,7 @@ fn check(dir: &Path, actual: &PremultipliedImage, expectations: Vec<String>) -> 
 
 /// As [`check`], with the test's per-pixel `threshold`.
 fn check_at(dir: &Path, actual: &PremultipliedImage, expectations: Vec<String>, threshold: f64) -> TestMetadata {
+    in_package_dir();
     let output = dir.join("out");
     let manifest = ManifestParser::parse_manifest(OUR_MANIFEST, "background-color/default/".to_string()).unwrap();
     let runner = TestRunner::new(manifest, None, false, output);
@@ -749,6 +768,7 @@ fn source_replace_reruns_with_swapped_sources() {
 
 #[test]
 fn argument_parsing() {
+    in_package_dir();
     let args = |list: &[&str]| -> Vec<String> {
         std::iter::once("render-test").chain(list.iter().copied()).map(String::from).collect()
     };
@@ -844,6 +864,7 @@ fn fixture_ids(dir: &Path) -> Vec<String> {
 
 #[test]
 fn gljs_fixtures_parse_and_no_ignore_is_stale() {
+    in_package_dir();
     let ids = fixture_ids(Path::new("gljs/render-tests"));
     assert!(ids.len() > 40, "{ids:?}");
 
