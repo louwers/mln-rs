@@ -129,8 +129,10 @@ fn blur(passes: &mut Vec<Pass>, sigma: f32, frame: Size, logical: Size) {
 /// them as the Gaussian does.
 fn taps(block: &mut Process, sigma: f32, step: [f32; 2]) {
     let reach = ((REACH * sigma).ceil() as usize).clamp(1, 2 * MAX_TAPS);
+    // The weight of a texel past the center, which weighs 1: its own
+    // formula gives 0/0 for a sigma whose square underflows.
     let weight = |texel: usize| (-((texel * texel) as f32) / (2.0 * sigma * sigma)).exp();
-    let total = weight(0) + 2.0 * (1..=reach).map(weight).sum::<f32>();
+    let total = 1.0 + 2.0 * (1..=reach).map(weight).sum::<f32>();
     let mut count = 0;
     for first in (1..=reach).step_by(2) {
         let (a, b) = (weight(first) / total, if first < reach { weight(first + 1) / total } else { 0.0 });
@@ -144,7 +146,7 @@ fn taps(block: &mut Process, sigma: f32, step: [f32; 2]) {
         tap.copy_from_slice(&[offset, a + b]);
         count += 1;
     }
-    block.blur = [step[0], step[1], count as f32, weight(0) / total];
+    block.blur = [step[0], step[1], count as f32, 1.0 / total];
 }
 
 #[cfg(test)]
@@ -199,11 +201,13 @@ mod tests {
     #[test]
     fn a_blur_too_narrow_to_reach_a_neighbor_takes_no_taps() {
         // 0.04 logical pixels are 0.04 texels along y, whose neighbors'
-        // weights underflow.
-        let passes = plan(&[Operation::Blur { size: constant(0.04) }], 0.0, FRAME, LOGICAL);
-        assert_eq!(passes[1].block.blur[2..], [0.0, 1.0], "only the center, wholly");
-        for pass in &passes {
-            assert!(pass.block.taps.as_flattened().iter().all(|value| value.is_finite()));
+        // weights underflow; at 1e-23 the square of the deviation does.
+        for size in [0.04, 1e-23] {
+            let passes = plan(&[Operation::Blur { size: constant(size) }], 0.0, FRAME, LOGICAL);
+            assert_eq!(passes[1].block.blur[2..], [0.0, 1.0], "only the center, wholly, at {size}");
+            for pass in &passes {
+                assert!(pass.block.taps.as_flattened().iter().all(|value| value.is_finite()), "at {size}");
+            }
         }
     }
 
