@@ -79,7 +79,8 @@
 //! cache. The engine runs [`retry`](DataOrigin::retry) on each required
 //! tile of the cover before each still image, and
 //! [`failed`](DataOrigin::failed) when what a tile took in fails to lay out
-//! or decode.
+//! or decode, but for a layout that fails within the hook that delivered
+//! it, as a synchronous cover's can.
 //!
 //! A load's work runs wherever the origin puts it: on the renderer's pool
 //! ([`LoadContext::pool`]), which runs on the renderer's thread in the
@@ -139,14 +140,14 @@
 //! of another kind, or of values of another type, leaves the layer out
 //! with an error. A tile shows the value of its latest delivery at once, a
 //! parent or children with a value draw for a tile without one, as above, a
-//! tile in a new world copy shares its copy's value, and the value goes
-//! with its tile. A value
-//! doesn't change once delivered: a tile that needs another gets a new one,
-//! from which the layers make their tile values again. Tiles overlap by a
-//! parent drawn under its loading children, so a layer clips its draws to
-//! its tile ([`Draw::clip`](crate::draw::Draw::clip)). stamp's `Stamp` is
-//! such a value, and its `stamp-fill` and `stamp-mark` layer types both
-//! draw from it.
+//! tile in a new world copy shows its copy's value at once and keeps it
+//! where its origin [takes](WorldCopy::take) it, and the value goes with its
+//! tile. A value doesn't change once delivered: a tile that needs another
+//! gets a new one, from which the layers make their tile values again.
+//! Tiles overlap by a parent drawn under its loading children, so a layer
+//! clips its draws to its tile ([`Draw::clip`](crate::draw::Draw::clip)).
+//! stamp's `Stamp` is such a value, and its `stamp-fill` and `stamp-mark`
+//! layer types both draw from it.
 use std::marker::PhantomData;
 use std::sync::Arc;
 

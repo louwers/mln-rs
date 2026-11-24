@@ -77,8 +77,12 @@
 //!         })
 //!     }
 //!
-//!     fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, _copy: Option<WorldCopy<'_, ()>>) {
-//!         cx.deliver(Some(Arc::new(TileZoom(cx.id().canonical.z))));
+//!     /// A tile in a new world copy keeps the same tile's value in
+//!     /// another; any other gets its own.
+//!     fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, copy: Option<WorldCopy<'_, ()>>) {
+//!         if !copy.is_some_and(|copy| copy.take(cx)) {
+//!             cx.deliver(Some(Arc::new(TileZoom(cx.id().canonical.z))));
+//!         }
 //!     }
 //!
 //!     fn receive(&mut self, _tile: &mut (), reply: Infallible, _cx: &mut LoadContext<'_, '_, Self>) {
