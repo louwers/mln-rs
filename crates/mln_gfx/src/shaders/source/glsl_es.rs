@@ -193,3 +193,59 @@ fn value(named: &Named<'_>, stage: Stage) -> Result<String, GpuError> {
         (Stage::Vertex, PropertyType::Vec4) => format!("a_{name}"),
     })
 }
+
+/// The height rule of [`mln_util::dem`] in GLSL ES, a string literal that a
+/// vertex stage's source names with `concat!`, before the code that reads the
+/// ground's height, as `concat!(ground_height!(), "...")`. It defines
+/// `ground_height(pos, dem_coords, unpack, unpack_scale, exaggeration)`, the
+/// height in meters, exaggerated, at `pos` in tile units of a tile that reads
+/// its DEM at `dem_coords`: the DEM uv's scale and offset, then the DEM's width
+/// in pixels, 0 for flat ground. The DEM's texels decode by `unpack` and
+/// `unpack_scale`, the members of a
+/// [`TerrainPropsUBO`](crate::shaders::terrain_ubo::TerrainPropsUBO), which a
+/// stage reads as `u_unpack` and `u_unpack_scale`, and `exaggeration` is its
+/// `u_exaggeration`. It interpolates between the texels of the program's
+/// texture [`GROUND_DEM`](crate::shaders::terrain_ubo::GROUND_DEM), which the
+/// vertex stage reads, in the same `f32` operations, in the same order, as
+/// [`mln_util::dem::sample`].
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ground_height_glsl_es {
+    () => {
+        r"
+// The height in meters of the DEM's bordered texel at `texel`, clamped to the
+// texture, decoded by `unpack` and `unpack_scale`.
+highp float ground_texel_height(ivec2 texel, highp vec4 unpack, highp float unpack_scale) {
+    ivec2 last = textureSize(u_ground_dem, 0) - 1;
+    highp vec3 rgb = round(texelFetch(u_ground_dem, clamp(texel, ivec2(0), last), 0).rgb * 255.0);
+    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * unpack_scale;
+}
+
+// The height in meters, exaggerated by `exaggeration`, at `pos` in tile
+// units of a tile that reads its DEM at `dem_coords`: the DEM uv's scale and
+// offset, then the DEM's width in pixels, 0 for flat ground.
+highp float ground_height(highp vec2 pos, highp vec4 dem_coords, highp vec4 unpack, highp float unpack_scale,
+                          highp float exaggeration) {
+    highp float dim = dem_coords.w;
+    if (dim == 0.0) {
+        return 0.0;
+    }
+    highp vec2 coord = (pos / 8192.0 * dem_coords.x + dem_coords.yz) * dim + 0.5;
+    highp vec2 first = floor(coord);
+    highp vec2 f = coord - first;
+    ivec2 texel = ivec2(first);
+    highp float tl = ground_texel_height(texel, unpack, unpack_scale);
+    highp float tr = ground_texel_height(texel + ivec2(1, 0), unpack, unpack_scale);
+    highp float bl = ground_texel_height(texel + ivec2(0, 1), unpack, unpack_scale);
+    highp float br = ground_texel_height(texel + ivec2(1, 1), unpack, unpack_scale);
+    highp float top = tl * (1.0 - f.x) + tr * f.x;
+    highp float bottom = bl * (1.0 - f.x) + br * f.x;
+    return (top * (1.0 - f.y) + bottom * f.y) * exaggeration;
+}
+
+"
+    };
+}
+
+#[doc(inline)]
+pub use crate::__ground_height_glsl_es as ground_height;

@@ -128,3 +128,56 @@ fn value(named: &Named<'_>, stage: Stage) -> String {
         (Stage::Fragment, _) | (Stage::Vertex, PropertyType::Vec4) => format!("in.{name}"),
     }
 }
+
+/// The height rule of [`mln_util::dem`] in WGSL, a string literal that a vertex
+/// stage's source names with `concat!`, before the code that reads the ground's
+/// height, as `concat!(ground_height!(), "...")`. It defines
+/// `ground_height(pos, dem_coords, props)`, the height in meters, exaggerated,
+/// at `pos` in tile units of a tile that reads its DEM at `dem_coords`: the DEM
+/// uv's scale and offset, then the DEM's width in pixels, 0 for flat ground.
+/// The DEM's texels decode by `props`, a
+/// [`TerrainPropsUBO`](crate::shaders::terrain_ubo::TerrainPropsUBO). It
+/// interpolates between the texels of the program's texture
+/// [`GROUND_DEM`](crate::shaders::terrain_ubo::GROUND_DEM), which the vertex
+/// stage reads, in the same `f32` operations, in the same order, as
+/// [`mln_util::dem::sample`].
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ground_height_wgsl {
+    () => {
+        r"
+// The height in meters of the DEM's bordered texel at `texel`, clamped to
+// the texture, decoded by `props`.
+fn ground_texel_height(texel: vec2<i32>, props: TerrainPropsUBO) -> f32 {
+    let last = vec2<i32>(textureDimensions(ground_dem)) - 1;
+    let rgb = round(textureLoad(ground_dem, clamp(texel, vec2<i32>(0), last), 0).rgb * 255.0);
+    let unpack = props.unpack;
+    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * props.unpack_scale;
+}
+
+// The height in meters, exaggerated, at `pos` in tile units of a tile that
+// reads its DEM at `dem_coords`: the DEM uv's scale and offset, then the
+// DEM's width in pixels, 0 for flat ground.
+fn ground_height(pos: vec2<f32>, dem_coords: vec4<f32>, props: TerrainPropsUBO) -> f32 {
+    let dim = dem_coords.w;
+    if (dim == 0.0) {
+        return 0.0;
+    }
+    let coord = (pos / 8192.0 * dem_coords.x + dem_coords.yz) * dim + 0.5;
+    let first = floor(coord);
+    let f = coord - first;
+    let texel = vec2<i32>(first);
+    let tl = ground_texel_height(texel, props);
+    let tr = ground_texel_height(texel + vec2<i32>(1, 0), props);
+    let bl = ground_texel_height(texel + vec2<i32>(0, 1), props);
+    let br = ground_texel_height(texel + vec2<i32>(1, 1), props);
+    let top = tl * (1.0 - f.x) + tr * f.x;
+    let bottom = bl * (1.0 - f.x) + br * f.x;
+    return (top * (1.0 - f.y) + bottom * f.y) * props.exaggeration;
+}
+"
+    };
+}
+
+#[doc(inline)]
+pub use crate::__ground_height_wgsl as ground_height;

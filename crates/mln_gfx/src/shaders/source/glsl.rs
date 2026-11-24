@@ -122,3 +122,56 @@ fn value(named: &Named<'_>, stage: Stage) -> String {
         (Stage::Vertex, PropertyType::Vec4) => format!("in_{name}"),
     }
 }
+
+/// The height rule of [`mln_util::dem`] in the GLSL of `mln_glsl`, a string
+/// literal that a vertex stage's source names with `concat!`, before the code
+/// that reads the ground's height, as `concat!(ground_height!(), "...")`. It
+/// defines `ground_height(pos, dem_coords, props)`, the height in meters,
+/// exaggerated, at `pos` in tile units of a tile that reads its DEM at
+/// `dem_coords`: the DEM uv's scale and offset, then the DEM's width in pixels,
+/// 0 for flat ground. The DEM's texels decode by `props`, a
+/// [`TerrainPropsUBO`](crate::shaders::terrain_ubo::TerrainPropsUBO). It
+/// interpolates between the texels of the program's texture
+/// [`GROUND_DEM`](crate::shaders::terrain_ubo::GROUND_DEM), which the vertex
+/// stage reads, in the same `f32` operations, in the same order, as
+/// [`mln_util::dem::sample`].
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ground_height_glsl {
+    () => {
+        r"
+// The height in meters of the DEM's bordered texel at `texel`, clamped to the
+// texture, decoded by `props`.
+float ground_texel_height(const ivec2 texel, const TerrainPropsUBO props) {
+    const ivec2 last = textureSize(ground_dem, 0) - 1;
+    const vec3 rgb = round(texelFetch(ground_dem, clamp(texel, ivec2(0), last), 0).rgb * 255.0);
+    const vec4 unpack = props.unpack;
+    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * props.unpack_scale;
+}
+
+// The height in meters, exaggerated, at `pos` in tile units of a tile that
+// reads its DEM at `dem_coords`: the DEM uv's scale and offset, then the
+// DEM's width in pixels, 0 for flat ground.
+float ground_height(const vec2 pos, const vec4 dem_coords, const TerrainPropsUBO props) {
+    const float dim = dem_coords.w;
+    if (dim == 0.0) {
+        return 0.0;
+    }
+    const vec2 coord = (pos / 8192.0 * dem_coords.x + dem_coords.yz) * dim + 0.5;
+    const vec2 first = floor(coord);
+    const vec2 f = coord - first;
+    const ivec2 texel = ivec2(first);
+    const float tl = ground_texel_height(texel, props);
+    const float tr = ground_texel_height(texel + ivec2(1, 0), props);
+    const float bl = ground_texel_height(texel + ivec2(0, 1), props);
+    const float br = ground_texel_height(texel + ivec2(1, 1), props);
+    const float top = tl * (1.0 - f.x) + tr * f.x;
+    const float bottom = bl * (1.0 - f.x) + br * f.x;
+    return (top * (1.0 - f.y) + bottom * f.y) * props.exaggeration;
+}
+"
+    };
+}
+
+#[doc(inline)]
+pub use crate::__ground_height_glsl as ground_height;

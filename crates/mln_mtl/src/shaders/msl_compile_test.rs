@@ -1,6 +1,6 @@
-//! Compiles every built-in program's MSL with the system's
-//! Metal compiler, the way `MetalGpu` does: its `library_source`,
-//! MSL 2.4, fast math, the `ProgramParameters` defines, a
+//! Compiles every built-in program's MSL with the system's Metal compiler,
+//! the way `MetalGpu` does: its `library_source`, MSL 2.4, fast math unless
+//! the source turns it off, the `ProgramParameters` defines, a
 //! `HAS_UNIFORM_<name>` define per property passed as a uniform, and
 //! `PROJECTION_GLOBE` for the globe variant. Also checks that the shaders'
 //! pipelines build with the vertex layouts their programs declare, in both
@@ -27,9 +27,9 @@ use super::msl_sources::library_source;
 use crate::Id;
 
 /// Each program of the built-in layer types with MSL, and the
-/// conformance cases' program whose vertex stage reads a texture.
+/// conformance cases' own programs.
 fn sources() -> Vec<(&'static Program, &'static Msl)> {
-    let programs = mln_layers::PROGRAMS.iter().copied().chain([&mln_layers::conformance::VERTEX_TEXEL]);
+    let programs = mln_layers::PROGRAMS.iter().chain(&mln_layers::conformance::PROGRAMS).copied();
     programs.filter_map(|program| Some((program, program.sources.msl?))).collect()
 }
 

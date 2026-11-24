@@ -159,3 +159,60 @@ fn value(named: &Named<'_>, stage: Stage) -> String {
         (Stage::Vertex, PropertyType::Vec4) => format!("vertex_in.{name}"),
     }
 }
+
+/// The height rule of [`mln_util::dem`] in MSL, a string literal that a vertex
+/// stage's source names with `concat!`, before the code that reads the ground's
+/// height, as `concat!(ground_height!(), "...")`. It defines
+/// `ground_height(pos, dem_coords, dem, props)`, the height in meters,
+/// exaggerated, at `pos` in tile units of a tile that reads its DEM at
+/// `dem_coords`: the DEM uv's scale and offset, then the DEM's width in pixels,
+/// 0 for flat ground. The DEM's texels are those of `dem`, the texture, and
+/// decode by `props`, a reference to a
+/// [`TerrainPropsUBO`](crate::shaders::terrain_ubo::TerrainPropsUBO). Its
+/// arithmetic must round as written, so the source turns fast math off
+/// ([`Msl::fast_math`]). It interpolates between the texels of the program's
+/// texture [`GROUND_DEM`](crate::shaders::terrain_ubo::GROUND_DEM), which the
+/// vertex stage reads, in the same `f32` operations, in the same order, as
+/// [`mln_util::dem::sample`].
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ground_height_msl {
+    () => {
+        r"
+// The height in meters of the DEM's bordered texel at `texel`, clamped to the
+// texture.
+static float ground_texel_height(texture2d<float, access::sample> dem, int2 texel,
+                                 device const TerrainPropsUBO& props) {
+    const int2 last = int2(int(dem.get_width()), int(dem.get_height())) - 1;
+    const float3 rgb = round(dem.read(uint2(clamp(texel, int2(0), last))).rgb * 255.0);
+    return (rgb.r * props.unpack.x + rgb.g * props.unpack.y + rgb.b * props.unpack.z + props.unpack.w) *
+        props.unpack_scale;
+}
+
+// The height in meters, exaggerated, at `pos` in tile units of a tile that
+// reads its DEM at `dem_coords`: the DEM uv's scale and offset, then the DEM's
+// width in pixels, 0 for flat ground.
+static float ground_height(float2 pos, float4 dem_coords, texture2d<float, access::sample> dem,
+                           device const TerrainPropsUBO& props) {
+    const float dim = dem_coords.w;
+    if (dim == 0.0) {
+        return 0.0;
+    }
+    const float2 coord = (pos / 8192.0 * dem_coords.x + dem_coords.yz) * dim + 0.5;
+    const float2 first = floor(coord);
+    const float2 f = coord - first;
+    const int2 texel = int2(first);
+    const float tl = ground_texel_height(dem, texel, props);
+    const float tr = ground_texel_height(dem, texel + int2(1, 0), props);
+    const float bl = ground_texel_height(dem, texel + int2(0, 1), props);
+    const float br = ground_texel_height(dem, texel + int2(1, 1), props);
+    const float top = tl * (1.0 - f.x) + tr * f.x;
+    const float bottom = bl * (1.0 - f.x) + br * f.x;
+    return (top * (1.0 - f.y) + bottom * f.y) * props.exaggeration;
+}
+"
+    };
+}
+
+#[doc(inline)]
+pub use crate::__ground_height_msl as ground_height;

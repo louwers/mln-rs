@@ -18,13 +18,16 @@
 //! the mips of a texture drawn into, minified. The other cases draw one color
 //! over the whole target, as [`transparent_replace`] does to check that
 //! `Replace` doesn't blend. On wasm, [`host_writes`] checks writes from JS
-//! arrays.
+//! arrays. [`terrain_heights`] reads back the heights that the terrain's
+//! height rule reads on the GPU, against the CPU's.
 //!
 //! The cases draw with this crate's programs: the mask is the background's,
 //! its color writes off. The vertex texel cases draw with
-//! [`VERTEX_TEXEL`], a program of their own that no layer draws with.
+//! [`VERTEX_TEXEL`] and the terrain's with [`TERRAIN_PROBE`], programs of
+//! their own that no layer draws with ([`PROGRAMS`]).
 
 mod cases;
+mod terrain;
 mod vertex_texels;
 
 use mln_gfx::color_mode::ColorMode;
@@ -43,9 +46,14 @@ use mln_util::Color;
 use mln_util::size::Size;
 
 pub use self::cases::*;
+pub use self::terrain::{TERRAIN_PROBE, terrain_heights};
 pub use self::vertex_texels::{VERTEX_TEXEL, drawn_vertex_texels, written_vertex_texels};
 use crate::background::programs::BACKGROUND;
 use crate::background::ubo::BackgroundPropsUBO;
+
+/// The programs of the cases' own, which no layer draws with, for each
+/// backend's tests of its shaders.
+pub static PROGRAMS: [&Program; 2] = [&VERTEX_TEXEL, &TERRAIN_PROBE];
 
 /// The size of the frame's color texture.
 pub const SIZE: Size = Size { width: 64, height: 32 };

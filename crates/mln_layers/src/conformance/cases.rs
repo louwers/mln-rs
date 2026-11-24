@@ -7,9 +7,10 @@ use mln_gfx::color_mode::{BlendFunction, ColorMode, LinearBlend};
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferId, BufferUsage, ColorAttachment, DepthState,
-    DepthStencilAttachment, Draw, DynamicState, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc, PipelineDesc, PipelineId,
-    ResourceId, Scissor, ShaderId, ShaderKey, StencilState, TargetFormats, TextureDesc, TextureFormat, TextureId,
-    TextureRegion, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep, read_texels,
+    DepthStencilAttachment, Draw, DynamicState, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc,
+    PipelineDesc, PipelineId, ResourceId, Scissor, ShaderId, ShaderKey, StencilState, TargetFormats, TextureDesc,
+    TextureFormat, TextureId, TextureRegion, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
+    read_texels,
 };
 use mln_gfx::shaders::layer_ubo::{ProjectionUBO, ViewUBO};
 use mln_gfx::shaders::program::{PROJECTION_BUFFER, Program, VIEW_BUFFER};

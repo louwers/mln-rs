@@ -22,9 +22,9 @@ use crate::shaders::shader_program::{compile, stage_sources};
 use crate::shaders::wgsl_sources::PRELUDE;
 
 /// Each program of the built-in layer types with WGSL, and the
-/// conformance cases' program whose vertex stage reads a texture.
+/// conformance cases' own programs.
 fn programs() -> Vec<(&'static Program, &'static Wgsl)> {
-    let programs = mln_layers::PROGRAMS.iter().copied().chain([&mln_layers::conformance::VERTEX_TEXEL]);
+    let programs = mln_layers::PROGRAMS.iter().chain(&mln_layers::conformance::PROGRAMS).copied();
     programs.filter_map(|program| Some((program, program.sources.wgsl?))).collect()
 }
 

@@ -11,8 +11,8 @@ use mln_gfx::shaders::program::{Program, ProgramParameters};
 use mln_gfx::shaders::source::glsl::Glsl;
 use mln_layers::conformance::{
     blend_equations, clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids,
-    imported_textures, instanced_walls, invalid_calls, mipmapped_targets, pulled_walls, readbacks, resources_in_use, topologies,
-    transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
+    imported_textures, instanced_walls, invalid_calls, mipmapped_targets, pulled_walls, readbacks, resources_in_use,
+    terrain_heights, topologies, transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
 };
 use mln_util::Color;
 use mln_util::size::Size;
@@ -118,6 +118,12 @@ fn written_vertex_texels_through_gpu() {
 fn drawn_vertex_texels_through_gpu() {
     let device = Device::new(None).expect("Vulkan device");
     drawn_vertex_texels(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frames");
+}
+
+#[test]
+fn terrain_heights_through_gpu() {
+    let device = Device::new(None).expect("Vulkan device");
+    terrain_heights(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frames");
 }
 
 #[test]

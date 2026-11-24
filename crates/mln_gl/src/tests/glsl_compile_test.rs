@@ -42,9 +42,9 @@ fn headless_backend(api: Api) -> Option<RendererBackend> {
 }
 
 /// Each program of the built-in layer types with GLSL, and the
-/// conformance cases' program whose vertex stage reads a texture.
+/// conformance cases' own programs.
 fn programs() -> Vec<(&'static Program, &'static Glsl)> {
-    let programs = mln_layers::PROGRAMS.iter().copied().chain([&mln_layers::conformance::VERTEX_TEXEL]);
+    let programs = mln_layers::PROGRAMS.iter().chain(&mln_layers::conformance::PROGRAMS).copied();
     programs.filter_map(|program| Some((program, program.sources.glsl_es?))).collect()
 }
 
@@ -243,6 +243,7 @@ fn precise_textures_sample_at_high_precision() {
     let decoded = [
         ("color-relief", "elevation_stops"),
         ("color-relief", "image"),
+        ("conformance-terrain-probe", "ground_dem"),
         ("conformance-vertex-texel", "image"),
         ("hillshade-prepare", "image"),
     ];

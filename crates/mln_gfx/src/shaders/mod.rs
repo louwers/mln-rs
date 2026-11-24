@@ -8,3 +8,4 @@ pub mod layer_ubo;
 pub mod program;
 pub mod segment;
 pub mod source;
+pub mod terrain_ubo;
