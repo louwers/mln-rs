@@ -1227,6 +1227,8 @@ typedef struct mln_map_snapshot {
   bool globe_rendering;
   /** The setting from mln_map_set_globe_free_bearing_enabled(). */
   bool globe_free_bearing_enabled;
+  /** The setting from mln_map_set_center_clamped_to_ground_enabled(). */
+  bool center_clamped_to_ground_enabled;
 } mln_map_snapshot;
 
 /** A map's camera, with the snapshot generation that it matches. */

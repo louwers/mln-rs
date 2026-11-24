@@ -1757,6 +1757,8 @@ pub struct mln_map_snapshot {
     pub globe_rendering: bool,
     /// The setting from mln_map_set_globe_free_bearing_enabled().
     pub globe_free_bearing_enabled: bool,
+    /// The setting from mln_map_set_center_clamped_to_ground_enabled().
+    pub center_clamped_to_ground_enabled: bool,
 }
 /// A map's camera, with the snapshot generation that it matches.
 #[repr(C)]
@@ -4055,6 +4057,21 @@ pub struct mln_log_handler {
 pub struct mln_map_projection_camera_result {
     pub size: u32,
     pub camera: mln_camera,
+}
+/** The height of the ground at a coordinate, as
+ mln_map_projection_get_terrain_elevation() reports it.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_map_projection_terrain_elevation_result {
+    pub size: u32,
+    /** Whether the projection has the ground's height at the coordinate. It has
+ none on the flat map, and where the map didn't draw the ground, such as
+ off the screen.*/
+    pub has_elevation: bool,
+    /** The ground's height in meters above sea level, multiplied by the
+ terrain's exaggeration as the map draws it. It is 0 without
+ `has_elevation`.*/
+    pub elevation_meters: f64,
 }
 pub const MLN_RENDER_RESULT_RENDERED: mln_render_result = 0;
 /// The map had nothing new to draw.

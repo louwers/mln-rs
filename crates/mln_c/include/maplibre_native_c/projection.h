@@ -25,7 +25,9 @@ extern "C" {
  *
  * Create it from the `view` of an mln_map_snapshot or an
  * mln_render_frame_result. The projection doesn't follow the map, so create a
- * new one after the map's camera, size, or style projection changes.
+ * new one after the map's camera, size, or style projection changes. It
+ * converts on the flat map, even where the map draws terrain;
+ * mln_map_create_projection() creates one that converts as the map does.
  *
  * Returns:
  * - MLN_STATUS_UNSUPPORTED when the view's style projection draws a globe and
@@ -34,6 +36,27 @@ extern "C" {
 MLN_API mln_status mln_map_projection_create(
   const mln_map_view* view,
   mln_map_projection* out_projection MLN_BINDING("direction=out"),
+  mln_diagnostic* out_diagnostic
+) MLN_NOEXCEPT;
+
+/**
+ * Creates a projection that converts coordinates as the map does.
+ *
+ * It converts for the map's current view, as mln_map_get_snapshot() copies
+ * it. Where the map draws terrain, it converts on the ground that the map last
+ * drew: a screen point converts to the coordinate where its line of sight
+ * first meets the ground, and a coordinate to the screen point where it stands
+ * on the ground. The projection doesn't follow the map, so create a new one
+ * after the map's camera, size, style, or terrain changes, such as after each
+ * frame.
+ *
+ * Returns:
+ * - MLN_STATUS_INVALID_STATE until mln_runtime_create_map() completes with
+ *   MLN_STATUS_OK.
+ */
+MLN_BINDING("execution=snapshot")
+MLN_API mln_status mln_map_create_projection(
+  mln_map map, mln_map_projection* out_projection MLN_BINDING("direction=out"),
   mln_diagnostic* out_diagnostic
 ) MLN_NOEXCEPT;
 
@@ -157,6 +180,39 @@ MLN_API mln_status mln_map_projection_lat_lngs_for_pixels_unwrapped(
   const mln_screen_point* points MLN_BINDING("length=point_count"),
   size_t point_count,
   mln_lat_lng* out_coordinates MLN_BINDING("direction=out;length=point_count"),
+  mln_diagnostic* out_diagnostic
+) MLN_NOEXCEPT;
+
+/**
+ * The height of the ground at a coordinate, as
+ * mln_map_projection_get_terrain_elevation() reports it.
+ */
+typedef struct mln_map_projection_terrain_elevation_result {
+  uint32_t size;
+  /**
+   * Whether the projection has the ground's height at the coordinate. It has
+   * none on the flat map, and where the map didn't draw the ground, such as
+   * off the screen.
+   */
+  bool has_elevation;
+  /**
+   * The ground's height in meters above sea level, multiplied by the
+   * terrain's exaggeration as the map draws it. It is 0 without
+   * `has_elevation`.
+   */
+  double elevation_meters;
+} mln_map_projection_terrain_elevation_result;
+
+/**
+ * Reads the height of the ground at a coordinate, as the map drew it.
+ *
+ * Only a projection from mln_map_create_projection() of a map that draws
+ * terrain has a ground to read.
+ */
+MLN_API mln_status mln_map_projection_get_terrain_elevation(
+  mln_map_projection projection, mln_lat_lng coordinate,
+  mln_map_projection_terrain_elevation_result* out_result
+    MLN_BINDING("direction=out"),
   mln_diagnostic* out_diagnostic
 ) MLN_NOEXCEPT;
 

@@ -338,6 +338,7 @@ fn from_snapshot(snapshot: &MapSnapshot, event_mask: mln_runtime_event_flags) ->
         view: projection::from_map_view(&snapshot.view),
         globe_rendering: snapshot.globe_rendering,
         globe_free_bearing_enabled: snapshot.globe_free_bearing,
+        center_clamped_to_ground_enabled: snapshot.center_clamped_to_ground,
     }
 }
 
@@ -806,6 +807,30 @@ pub(crate) mod tests {
         let mut stale = snapshot;
         // SAFETY: a local snapshot.
         assert_eq!(unsafe { mln_map_get_snapshot(map, &raw mut stale, &raw mut *out) }, MLN_STATUS_INVALID_STATE);
+        release(runtime);
+    }
+
+    #[test]
+    fn the_center_clamp_is_on_until_its_setter_turns_it_off() {
+        let runtime = create();
+        let map = create_map(runtime, &options(1.0));
+        assert!(snapshot(map).center_clamped_to_ground_enabled);
+        for enabled in [false, true] {
+            let waiter = Waiter::new();
+            // SAFETY: a local completion.
+            let status = unsafe {
+                crate::camera::mln_map_set_center_clamped_to_ground_enabled(
+                    map,
+                    enabled,
+                    &raw const waiter.descriptor,
+                    NO_DIAGNOSTIC,
+                )
+            };
+            assert_eq!(status, MLN_STATUS_OK);
+            assert_eq!(waiter.status(), MLN_STATUS_OK);
+            assert_eq!(snapshot(map).center_clamped_to_ground_enabled, enabled);
+        }
+        release_map(map);
         release(runtime);
     }
 

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use mln_map::MapProjection;
+use ::mln_map::MapProjection;
 use mln_map_types::{Camera, ConstrainMode, LogicalExtent, MapView, ProjectionMode, Viewport, ViewportMode};
 use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::geo::{NorthOrientation, WrapMode};
@@ -17,14 +17,14 @@ use crate::generated::types::{
     MLN_CONSTRAIN_MODE_WIDTH_AND_HEIGHT, MLN_NORTH_ORIENTATION_DOWN, MLN_NORTH_ORIENTATION_LEFT,
     MLN_NORTH_ORIENTATION_RIGHT, MLN_NORTH_ORIENTATION_UP, MLN_PROJECTION_TYPE_GLOBE, MLN_PROJECTION_TYPE_MERCATOR,
     MLN_PROJECTION_TYPE_VERTICAL_PERSPECTIVE, MLN_VIEWPORT_MODE_DEFAULT, MLN_VIEWPORT_MODE_FLIPPED_Y, mln_camera,
-    mln_camera_options, mln_diagnostic, mln_lat_lng, mln_logical_extent, mln_map_projection,
-    mln_map_projection_camera_result, mln_map_view, mln_map_viewport, mln_projected_meters, mln_projection_definition,
-    mln_projection_mode, mln_screen_point, mln_status,
+    mln_camera_options, mln_diagnostic, mln_lat_lng, mln_logical_extent, mln_map, mln_map_projection,
+    mln_map_projection_camera_result, mln_map_projection_terrain_elevation_result, mln_map_view, mln_map_viewport,
+    mln_projected_meters, mln_projection_definition, mln_projection_mode, mln_screen_point, mln_status,
 };
 use crate::handles::{self, HandleKind, HandleTable};
 use crate::{abi, camera, geo};
 
-abi::versioned!(mln_map_projection_camera_result, mln_map_view);
+abi::versioned!(mln_map_projection_camera_result, mln_map_projection_terrain_elevation_result, mln_map_view);
 
 /// A projection's calls run one at a time, on whichever thread makes them.
 static PROJECTIONS: HandleTable<Mutex<MapProjection>> = HandleTable::new(HandleKind::MapProjection);
@@ -193,6 +193,26 @@ pub(crate) unsafe extern "C" fn mln_map_projection_create(
     })
 }
 
+/// `mln_map_create_projection()`.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub(crate) unsafe extern "C" fn mln_map_create_projection(
+    map: mln_map,
+    out_projection: *mut mln_map_projection,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, {
+        // SAFETY: the caller's contract.
+        let out_projection = unsafe { handles::out_handle(out_projection, "out_projection") }?;
+        let projection = crate::map::resolve(map)?.map.projection()?;
+        *out_projection = PROJECTIONS.insert(Arc::new(Mutex::new(projection)))?;
+        Ok(())
+    })
+}
+
 /// `mln_map_projection_release()`.
 #[unsafe(no_mangle)]
 pub(crate) extern "C" fn mln_map_projection_release(projection: mln_map_projection) {
@@ -281,6 +301,31 @@ pub(crate) unsafe extern "C" fn mln_map_projection_is_location_occluded(
         // SAFETY: non-null, and the caller's contract.
         unsafe { out_occluded.write(occluded) };
         Ok(())
+    })
+}
+
+/// `mln_map_projection_get_terrain_elevation()`.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub(crate) unsafe extern "C" fn mln_map_projection_get_terrain_elevation(
+    projection: mln_map_projection,
+    coordinate: mln_lat_lng,
+    out_result: *mut mln_map_projection_terrain_elevation_result,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, non_null(out_result), {
+        let coordinate = geo::lat_lng(coordinate)?;
+        let elevation = with_projection(projection, |projection| projection.elevation(&coordinate))?;
+        let result = mln_map_projection_terrain_elevation_result {
+            size: 0,
+            has_elevation: elevation.is_some(),
+            elevation_meters: elevation.unwrap_or(0.0),
+        };
+        // SAFETY: the caller's contract.
+        unsafe { abi::write_sized(out_result, &result) }
     })
 }
 
@@ -878,6 +923,84 @@ mod tests {
         assert_eq!((coordinate.latitude, coordinate.longitude), (-1.0, -2.0));
         assert!(points.iter().all(|point| (point.x, point.y) == (-1.0, -2.0)));
         mln_map_projection_release(projection);
+    }
+
+    fn terrain_elevation(
+        projection: mln_map_projection,
+        coordinate: mln_lat_lng,
+        result: &mut mln_map_projection_terrain_elevation_result,
+    ) -> mln_status {
+        // SAFETY: a local output and a null diagnostic.
+        unsafe { mln_map_projection_get_terrain_elevation(projection, coordinate, result, NULL_DIAGNOSTIC) }
+    }
+
+    fn elevation_result() -> mln_map_projection_terrain_elevation_result {
+        mln_map_projection_terrain_elevation_result {
+            size: size_of::<mln_map_projection_terrain_elevation_result>() as u32,
+            has_elevation: true,
+            elevation_meters: -1.0,
+        }
+    }
+
+    /// Without terrain, a map's projection converts as its snapshot's view
+    /// does and has no ground to read. It outlives the map.
+    #[test]
+    fn a_maps_projection_converts_as_its_view_without_terrain() {
+        use crate::map::tests::{create_map, options, release_map};
+        use crate::runtime::tests::{create as create_runtime, release as release_runtime};
+
+        let runtime = create_runtime();
+        let map = create_map(runtime, &options(1.0));
+        let mut from_map = handles::NULL;
+        // SAFETY: a local output and a null diagnostic.
+        assert_eq!(unsafe { mln_map_create_projection(map, &raw mut from_map, NULL_DIAGNOSTIC) }, MLN_STATUS_OK);
+        // SAFETY: zeros are a valid snapshot to overwrite.
+        let mut snapshot: crate::generated::types::mln_map_snapshot = unsafe { core::mem::zeroed() };
+        snapshot.size = size_of_val(&snapshot) as u32;
+        // SAFETY: a local snapshot.
+        let status = unsafe { crate::map::mln_map_get_snapshot(map, &raw mut snapshot, NULL_DIAGNOSTIC) };
+        assert_eq!(status, MLN_STATUS_OK);
+        let from_view = create(&snapshot.view);
+        for (latitude, longitude) in [(0.0, 0.0), (10.0, 20.0), (-30.0, -100.0)] {
+            let (expected, actual) = (pixel(from_view, latitude, longitude), pixel(from_map, latitude, longitude));
+            assert!((expected.x - actual.x).abs() < 1e-9 && (expected.y - actual.y).abs() < 1e-9, "{actual:?}");
+        }
+        let mut result = elevation_result();
+        let origin = mln_lat_lng { latitude: 0.0, longitude: 0.0 };
+        assert_eq!(terrain_elevation(from_map, origin, &mut result), MLN_STATUS_OK);
+        assert!(!result.has_elevation);
+        assert_eq!(result.elevation_meters, 0.0);
+
+        release_map(map);
+        release_runtime(runtime);
+        assert_eq!(camera(from_map).map(|camera| camera.zoom), Ok(snapshot.view.camera.zoom));
+        let mut after = handles::NULL;
+        // SAFETY: a local output and a null diagnostic.
+        let status = unsafe { mln_map_create_projection(map, &raw mut after, NULL_DIAGNOSTIC) };
+        assert_eq!(status, MLN_STATUS_INVALID_STATE);
+        assert_eq!(after, handles::NULL);
+        mln_map_projection_release(from_map);
+        mln_map_projection_release(from_view);
+    }
+
+    #[test]
+    fn a_terrain_elevation_checks_its_inputs() {
+        let projection = create(&view());
+        let origin = mln_lat_lng { latitude: 0.0, longitude: 0.0 };
+        let mut short = elevation_result();
+        short.size -= 1;
+        assert_eq!(terrain_elevation(projection, origin, &mut short), MLN_STATUS_INVALID_ARGUMENT);
+        let past_the_pole = mln_lat_lng { latitude: 91.0, longitude: 0.0 };
+        let mut kept = elevation_result();
+        assert_eq!(terrain_elevation(projection, past_the_pole, &mut kept), MLN_STATUS_INVALID_ARGUMENT);
+        // SAFETY: a null output and a null diagnostic.
+        let status = unsafe {
+            mln_map_projection_get_terrain_elevation(projection, origin, core::ptr::null_mut(), NULL_DIAGNOSTIC)
+        };
+        assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
+        assert!(kept.has_elevation && kept.elevation_meters == -1.0);
+        mln_map_projection_release(projection);
+        assert_eq!(terrain_elevation(projection, origin, &mut kept), MLN_STATUS_INVALID_STATE);
     }
 
     #[test]
