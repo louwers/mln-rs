@@ -4183,6 +4183,26 @@ struct alignas(16) TerrainPropsUBO {
 };
 static_assert(sizeof(TerrainPropsUBO) == 2 * 16, "wrong size");
 
+// The fog over the surface.
+struct alignas(16) TerrainFogUBO {
+    // Linear and premultiplied.
+    /*  0 */ float4 fog_color;
+    /* 16 */ float4 horizon_color;
+    // The distances along the view at which the fog's depth is 0 and 1.
+    /* 32 */ float2 depth_range;
+    /* 40 */ float ground_blend;
+    /* 44 */ float horizon_blend;
+    /* 48 */
+};
+static_assert(sizeof(TerrainFogUBO) == 3 * 16, "wrong size");
+
+struct alignas(16) TerrainSurfaceUBO {
+    /*  0 */ TerrainPropsUBO props;
+    /* 32 */ TerrainFogUBO fog;
+    /* 80 */
+};
+static_assert(sizeof(TerrainSurfaceUBO) == 5 * 16, "wrong size");
+
 "#
 );
 
@@ -4193,7 +4213,7 @@ static_assert(sizeof(TerrainPropsUBO) == 2 * 16, "wrong size");
 /// the drape is read.
 /// Where the tile's entry of `lightVector` has lights, the drape holds a
 /// hillshade's slopes, premultiplied by its coverage, which the surface
-/// shades with them.
+/// shades with them. The fog of its `TerrainSurfaceUBO` covers it.
 pub(crate) const TERRAIN_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
@@ -4217,44 +4237,70 @@ struct VertexStage {
     short4 pos [[attribute(0)]];
 };
 
+// `color`, premultiplied, of the surface `view_depth` pixels along the
+// view, covered by `fog`, as GL JS's terrain is: mixed in linear components
+// toward the fog's color by the square of how far past the ground blend the
+// fog's depth is. The fog's alpha weighs its color; the coverage stays.
+static float4 fogged(float4 color, float view_depth, device const TerrainFogUBO& fog) {
+    const float near = fog.depth_range.x;
+    const float far = fog.depth_range.y;
+    const float depth = min(far / (far - near) * (1.0 - near / view_depth), 1.0);
+    if (fog.ground_blend >= 1.0 || depth <= fog.ground_blend || color.a == 0.0) {
+        return color;
+    }
+    const float horizon = smoothstep(0.0, 1.0, (depth - fog.horizon_blend) / max(1.0 - fog.horizon_blend, 1e-6));
+    const float4 tint = mix(fog.fog_color, fog.horizon_color, horizon);
+    const float along = (depth - fog.ground_blend) / (1.0 - fog.ground_blend);
+    const float strength = along * along;
+    const float3 surface = pow(color.rgb / color.a, float3(2.2));
+    const float3 mixed = surface * (1.0 - strength * tint.a) + tint.rgb * strength;
+    return float4(pow(mixed, float3(1.0 / 2.2)) * color.a, color.a);
+}
+
 struct FragmentStage {
     float4 position [[position, invariant]];
     float2 drape_pos;
+    // How far along the view, in pixels: the clip w.
+    float view_depth;
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const TerrainDrawableUBO* drawableVector [[buffer(idTerrainDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const TerrainPropsUBO& props [[buffer(idTerrainPropsUBO)]],
+                                device const TerrainSurfaceUBO& terrain [[buffer(idTerrainPropsUBO)]],
                                 texture2d<float, access::read> dem [[texture(2)]]) {
     device const TerrainDrawableUBO& drawable = drawableVector[uboIndex];
     device const ProjectionUBO& projection = projectionVector[uboIndex];
     const float2 pos = float2(vertx.pos.xy);
     const float skirt = float(vertx.pos.z);
-    const float height = surface_height(pos, drawable.dem_coords, dem, props);
+    const float height = surface_height(pos, drawable.dem_coords, dem, terrain.props);
+    const float4 position = projectTileFor3D(pos, height - skirt * terrain.props.skirt_length, projection);
     return {
-        .position = projectTileFor3D(pos, height - skirt * props.skirt_length, projection),
+        .position = position,
         .drape_pos = clamp(pos / 8192.0, float2(0.0), float2(1.0)),
+        .view_depth = position.w,
     };
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
                             device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                             device const HillshadeTilePropsUBO* lightVector [[buffer(idTerrainLightTileUBO)]],
+                            device const TerrainSurfaceUBO& terrain [[buffer(idTerrainPropsUBO)]],
                             device const HillshadeEvaluatedPropsUBO& props [[buffer(idTerrainLightUBO)]],
                             texture2d<float, access::sample> drape [[texture(1)]],
                             sampler drape_sampler [[sampler(1)]]) {
     const float4 color = drape.sample(drape_sampler, in.drape_pos);
     device const HillshadeTilePropsUBO& light = lightVector[uboIndex];
     if (light.num_lights == 0 || color.a == 0.0) {
-        return half4(color);
+        return half4(fogged(color, in.view_depth, terrain.fog));
     }
     // The tile's latitudes run from its north edge, where the drape's rows
     // start.
     const float latitude = mix(light.latrange.x, light.latrange.y, in.drape_pos.y);
     const float2 deriv = ((color.rg / color.a) * 8.0 - 4.0) / cos(radians(latitude));
-    return hillshade_color(deriv, light, props) * half(color.a);
+    const float4 shaded = float4(hillshade_color(deriv, light, props)) * color.a;
+    return half4(fogged(shaded, in.view_depth, terrain.fog));
 }
 "
     ),

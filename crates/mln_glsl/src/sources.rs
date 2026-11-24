@@ -3774,11 +3774,8 @@ void main() {
 ",
 };
 
-/// The height rule of `mln_util::dem`, over the DEM tile a draw reads: its
-/// RGBA8 texels behind a one-texel border, decoded by a `TerrainProps`. A
-/// macro, so that `concat!` puts it in the vertex stages that read the DEM:
-/// a fragment stage would need a sampler for the texture.
-macro_rules! ground_height {
+/// How the terrain's DEM decodes: a `TerrainPropsUBO`.
+macro_rules! terrain_props_struct {
     () => {
         r"
 
@@ -3790,7 +3787,19 @@ struct TerrainProps {
     float skirt_length;
     float pad0;
 };
+"
+    };
+}
 
+/// The height rule of `mln_util::dem`, over the DEM tile a draw reads: its
+/// RGBA8 texels behind a one-texel border, decoded by a `TerrainProps`. A
+/// macro, so that `concat!` puts it in the vertex stages that read the DEM:
+/// a fragment stage would need a sampler for the texture.
+macro_rules! ground_height {
+    () => {
+        concat!(
+            terrain_props_struct!(),
+            r"
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 2) uniform texture2D ground_dem_texture;
 
 // The height in meters of the DEM's bordered texel at `texel`, clamped to the
@@ -3823,19 +3832,63 @@ float ground_height(const vec2 pos, const vec4 dem_coords, const TerrainProps pr
     return (top * (1.0 - f.y) + bottom * f.y) * props.exaggeration;
 }
 "
+        )
     };
 }
 
-/// The surface's and the probe's vertex prelude: the terrain's uniform
-/// block, the height rule, and the height of the surface's vertices.
+/// The terrain's uniform block, a `TerrainSurfaceUBO`, after a
+/// `TerrainProps`, and `fogged`, which covers a color of the surface with
+/// its fog.
+macro_rules! terrain_block {
+    () => {
+        r"
+// The fog over the surface: a `TerrainFogUBO`.
+struct TerrainFog {
+    // Linear and premultiplied.
+    vec4 fog_color;
+    vec4 horizon_color;
+    // The distances along the view at which the fog's depth is 0 and 1.
+    vec2 depth_range;
+    float ground_blend;
+    float horizon_blend;
+};
+
+layout(std140, set = LAYER_SET_INDEX, binding = idTerrainPropsUBO) uniform TerrainPropsUBO {
+    TerrainProps props;
+    TerrainFog fog;
+} terrain_props;
+
+// `color`, premultiplied, of the surface `view_depth` pixels along the
+// view, covered by `fog`, as GL JS's terrain is: mixed in linear components
+// toward the fog's color by the square of how far past the ground blend the
+// fog's depth is. The fog's alpha weighs its color; the coverage stays.
+vec4 fogged(const vec4 color, const float view_depth, const TerrainFog fog) {
+    const float near = fog.depth_range.x;
+    const float far = fog.depth_range.y;
+    const float depth = min(far / (far - near) * (1.0 - near / view_depth), 1.0);
+    if (fog.ground_blend >= 1.0 || depth <= fog.ground_blend || color.a == 0.0) {
+        return color;
+    }
+    const float horizon = smoothstep(0.0, 1.0, (depth - fog.horizon_blend) / max(1.0 - fog.horizon_blend, 1e-6));
+    const vec4 tint = mix(fog.fog_color, fog.horizon_color, horizon);
+    const float along = (depth - fog.ground_blend) / (1.0 - fog.ground_blend);
+    const float strength = along * along;
+    const vec3 surface = pow(color.rgb / color.a, vec3(2.2));
+    const vec3 mixed = surface * (1.0 - strength * tint.a) + tint.rgb * strength;
+    return vec4(pow(mixed, vec3(1.0 / 2.2)) * color.a, color.a);
+}
+"
+    };
+}
+
+/// The surface's and the probe's vertex prelude: the height rule, the
+/// terrain's uniform block, and the height of the surface's vertices.
 macro_rules! terrain_props {
     () => {
         concat!(
             ground_height!(),
+            terrain_block!(),
             r"
-layout(std140, set = LAYER_SET_INDEX, binding = idTerrainPropsUBO) uniform TerrainPropsUBO {
-    TerrainProps props;
-} terrain_props;
 
 // The height of the surface's vertex at `pos`, in tile units of a tile that
 // reads its DEM at `dem_coords`: the ground's, or sea level at a pole.
@@ -4048,7 +4101,7 @@ pub(crate) const TERRAIN_SHADER_PRELUDE: &str = r"
 /// the back end's flip of Y puts its rows north first.
 /// Where the tile's entry of `tilePropsVector` has lights, the drape holds a
 /// hillshade's slopes, premultiplied by its coverage, which the surface
-/// shades with them.
+/// shades with them. The fog of `terrain_props` covers it.
 pub(crate) const TERRAIN_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: TERRAIN_SHADER_PRELUDE,
     vertex: concat!(
@@ -4059,6 +4112,8 @@ pub(crate) const TERRAIN_SHADER: GlslShaderSource = GlslShaderSource {
 layout(location = 0) in ivec4 in_pos;
 
 layout(location = 0) out vec2 frag_drape_pos;
+// How far along the view, in pixels: the clip w.
+layout(location = 1) out float frag_view_depth;
 
 layout(push_constant) uniform Constants {
     int ubo_index;
@@ -4084,13 +4139,17 @@ void main() {
     const float height = surface_height(pos, drawable.dem_coords, terrain_props.props);
     gl_Position = projectTileFor3D(pos, height - skirt * terrain_props.props.skirt_length, projection);
     frag_drape_pos = clamp(pos / 8192.0, vec2(0.0), vec2(1.0));
+    frag_view_depth = gl_Position.w;
 }
 "
     ),
     fragment: concat!(
+        terrain_props_struct!(),
+        terrain_block!(),
         r"
 
 layout(location = 0) in vec2 frag_drape_pos;
+layout(location = 1) in float frag_view_depth;
 
 layout(location = 0) out vec4 out_color;
 
@@ -4108,7 +4167,7 @@ void main() {
     const vec4 color = texture(sampler2D(drape_texture, drape_sampler), frag_drape_pos);
     const HillshadeTilePropsUBO light = tilePropsVector.tile_props_ubo[constant.ubo_index];
     if (light.num_lights == 0 || color.a == 0.0) {
-        out_color = color;
+        out_color = fogged(color, frag_view_depth, terrain_props.fog);
         return;
     }
     // The tile's latitudes run from its north edge, where the drape's rows
@@ -4116,7 +4175,7 @@ void main() {
     const float latitude = mix(light.latrange.x, light.latrange.y, frag_drape_pos.y);
     const vec2 deriv = ((color.rg / color.a) * 8.0 - 4.0) / cos(radians(latitude));
     hillshade(deriv, light);
-    out_color *= color.a;
+    out_color = fogged(out_color * color.a, frag_view_depth, terrain_props.fog);
 }
 "
     ),

@@ -38,7 +38,7 @@ use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
-use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainPropsUBO};
+use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainSurfaceUBO};
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
 
 use crate::front_end::parse;
@@ -257,10 +257,10 @@ fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
             (LayerStorage(ID_TERRAIN_DRAWABLE_UBO), size_of::<TerrainDrawableUBO>()),
             projection,
             (LayerStorage(ID_TERRAIN_LIGHT_TILE_UBO), size_of::<HillshadeTilePropsUBO>()),
-            (LayerUniform(ID_TERRAIN_PROPS_UBO), size_of::<TerrainPropsUBO>()),
+            (LayerUniform(ID_TERRAIN_PROPS_UBO), size_of::<TerrainSurfaceUBO>()),
             (LayerUniform(ID_TERRAIN_LIGHT_UBO), size_of::<HillshadeEvaluatedPropsUBO>()),
         ],
-        "TerrainProbeShader" => vec![(LayerUniform(ID_TERRAIN_PROPS_UBO), size_of::<TerrainPropsUBO>())],
+        "TerrainProbeShader" => vec![(LayerUniform(ID_TERRAIN_PROPS_UBO), size_of::<TerrainSurfaceUBO>())],
         "HillshadeShader" => vec![
             (LayerStorage(ID_HILLSHADE_DRAWABLE_UBO), size_of::<HillshadeDrawableUBO>()),
             projection,

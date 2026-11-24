@@ -21,7 +21,7 @@ use crate::shaders::shader_defines::{
     ID_PROJECTION_UBO, ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE,
     ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROPS_UBO,
 };
-use crate::shaders::terrain_ubo::TerrainPropsUBO;
+use crate::shaders::terrain_ubo::{TerrainFogUBO, TerrainPropsUBO, TerrainSurfaceUBO};
 use crate::stencil_mode::StencilMode;
 use crate::texture2d::SamplerState;
 
@@ -230,11 +230,14 @@ fn probe(
     })?;
     gpu.write_texture(texture, TextureRegion::whole(Size::new(side, side)), &dem.texels)?;
     let sampler = gpu.create_sampler(&SamplerState::default())?;
-    let props = TerrainPropsUBO {
-        unpack: dem.unpack.weights_and_base(),
-        unpack_scale: dem.unpack.scale,
-        exaggeration: dem.exaggeration,
-        ..TerrainPropsUBO::default()
+    let props = TerrainSurfaceUBO {
+        props: TerrainPropsUBO {
+            unpack: dem.unpack.weights_and_base(),
+            unpack_scale: dem.unpack.scale,
+            exaggeration: dem.exaggeration,
+            ..TerrainPropsUBO::default()
+        },
+        fog: TerrainFogUBO::NONE,
     };
     let props = bytemuck::bytes_of(&props);
     let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;

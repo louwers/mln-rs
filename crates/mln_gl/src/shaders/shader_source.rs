@@ -97,7 +97,7 @@ use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
-use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainPropsUBO};
+use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainSurfaceUBO};
 
 use super::glsl_sources;
 
@@ -341,7 +341,7 @@ shader_source!(
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         element::<TerrainDrawableUBO, TerrainDrawableUBO>("TerrainDrawableUBO", ID_TERRAIN_DRAWABLE_UBO),
-        block::<TerrainPropsUBO>("TerrainPropsUBO", ID_TERRAIN_PROPS_UBO),
+        block::<TerrainSurfaceUBO>("TerrainPropsUBO", ID_TERRAIN_PROPS_UBO),
         element::<HillshadeTilePropsUBO, HillshadeTilePropsUBO>("HillshadeTilePropsUBO", ID_TERRAIN_LIGHT_TILE_UBO),
         block::<HillshadeEvaluatedPropsUBO>("HillshadeEvaluatedPropsUBO", ID_TERRAIN_LIGHT_UBO),
     ],
@@ -355,7 +355,7 @@ shader_source!(
     TERRAIN_PROBE_SHADER,
     &[
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
-        block::<TerrainPropsUBO>("TerrainPropsUBO", ID_TERRAIN_PROPS_UBO),
+        block::<TerrainSurfaceUBO>("TerrainPropsUBO", ID_TERRAIN_PROPS_UBO),
     ],
     &[
         attr("a_pos", ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE),

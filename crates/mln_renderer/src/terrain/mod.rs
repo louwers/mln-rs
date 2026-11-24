@@ -27,13 +27,14 @@
 //!    stack's first layer draws, and between the stacks the layers that
 //!    don't drape, flat ([`RenderTerrain::render`]). The surface of a
 //!    hillshade's own stack shades its slopes with the frame's lights
-//!    ([`SurfaceLight`]).
+//!    ([`SurfaceLight`]), and the sky's fog covers it ([`terrain_fog`]).
 
 mod cover;
 mod dem_textures;
 mod drapes;
 mod draws;
 mod elevation;
+mod fog;
 mod mesh;
 mod stacks;
 
@@ -44,9 +45,10 @@ pub(crate) use cover::{ElevationRanges, TerrainCover};
 pub(crate) use cover::{REMEMBERED_RANGES, TerrainTile, terrain_tile_size};
 pub(crate) use drapes::Drapes;
 pub(crate) use elevation::TerrainElevation;
+pub(crate) use fog::terrain_fog;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::hillshade_layer_ubo::{HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO};
-use mln_gfx::shaders::terrain_ubo::TerrainPropsUBO;
+use mln_gfx::shaders::terrain_ubo::{TerrainFogUBO, TerrainPropsUBO};
 use mln_map_types::{MapMode, TerrainSkirtLength};
 use mln_style::source_type::SourceData;
 use mln_style::sources::RasterDemSourceType;
@@ -339,11 +341,12 @@ impl RenderTerrain {
 
     /// Makes the draws of the frame of the last update, a set for each stack
     /// of the drapes the encode began ([`begin_drapes`]), which read the DEM
-    /// textures of the frame ([`update_dems`]), sample their stack's drapes
-    /// and shade them with the stack's light of `stacks`, if it has one,
-    /// and, if `depth_first`, draws of the surface's depth alone
-    /// ([`render_depth`]). Without a stack, which a frame without terrain
-    /// has too, it makes no draws, and drops what the draws hold.
+    /// textures of the frame ([`update_dems`]), sample their stack's drapes,
+    /// shade them with the stack's light of `stacks`, if it has one, and
+    /// cover them with `fog`, and, if `depth_first`, draws of the surface's
+    /// depth alone ([`render_depth`]). Without a stack, which a frame
+    /// without terrain has too, it makes no draws, and drops what the draws
+    /// hold.
     ///
     /// [`begin_drapes`]: Self::begin_drapes
     /// [`update_dems`]: Self::update_dems
@@ -353,10 +356,11 @@ impl RenderTerrain {
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         stacks: &DrapeStacks,
+        fog: TerrainFogUBO,
         depth_first: bool,
     ) {
         let cover = self.cover.as_ref().zip(self.dems.as_ref());
-        self.draws.update(gpu, parameters, cover, self.surface, (&self.drapes, stacks), depth_first);
+        self.draws.update(gpu, parameters, cover, (self.surface, fog), (&self.drapes, stacks), depth_first);
     }
 
     /// Records that the buckets in `changed` changed, for the drapes' draws

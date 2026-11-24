@@ -3017,7 +3017,7 @@ struct VertexOutput {
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.position = vec4<f32>(in.pos.xy, 0.0, 1.0);
-    out.height = ground_height(in.pos.zw, in.dem_coords, terrainProps);
+    out.height = ground_height(in.pos.zw, in.dem_coords, terrain.props);
     return out;
 }
 ",
@@ -3040,7 +3040,7 @@ fn main(@location(0) @interpolate(flat) height: f32) -> @location(0) vec4<f32> {
 /// `projectionVector`, in the colors of the tile's drape. A pole's vertices
 /// stand at sea level. Where the tile's entry of `lightVector` has lights,
 /// the drape holds a hillshade's slopes, premultiplied by its coverage,
-/// which the surface shades with them.
+/// which the surface shades with them. The fog of `terrain` covers it.
 pub(crate) const TERRAIN_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(
         r"
@@ -3054,6 +3054,8 @@ struct VertexOutput {
     // Where in the drape, its north-west corner at 0 and its rows from the
     // north, as they are drawn.
     @location(0) drape_pos: vec2<f32>,
+    // How far along the view, in pixels: the clip w.
+    @location(1) view_depth: f32,
 };
 
 struct TerrainDrawableUBO {
@@ -3075,10 +3077,11 @@ fn main(in: VertexInput) -> VertexOutput {
     let projection = projectionVector[globalIndex.value];
     let pos = vec2<f32>(in.pos.xy);
     let skirt = f32(in.pos.z);
-    let height = surface_height(pos, drawable.dem_coords, terrainProps);
+    let height = surface_height(pos, drawable.dem_coords, terrain.props);
     var out: VertexOutput;
-    out.position = projectTileFor3D(pos, height - skirt * terrainProps.skirt_length, projection);
+    out.position = projectTileFor3D(pos, height - skirt * terrain.props.skirt_length, projection);
     out.drape_pos = clamp(pos / 8192.0, vec2<f32>(0.0), vec2<f32>(1.0));
+    out.view_depth = out.position.w;
     return out;
 }
 ",
@@ -3088,6 +3091,7 @@ fn main(in: VertexInput) -> VertexOutput {
         r"
 struct FragmentInput {
     @location(0) drape_pos: vec2<f32>,
+    @location(1) view_depth: f32,
 };
 
 struct GlobalIndexUBO {
@@ -3106,13 +3110,13 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let color = textureSample(drape_texture, drape_sampler, in.drape_pos);
     let light = lightVector[globalIndex.value];
     if (light.num_lights == 0 || color.a == 0.0) {
-        return color;
+        return fogged(color, in.view_depth, terrain.fog);
     }
     // The tile's latitudes run from its north edge, where the drape's rows
     // start.
     let latitude = mix(light.latrange.x, light.latrange.y, in.drape_pos.y);
     let deriv = ((color.rg / color.a) * 8.0 - vec2<f32>(4.0, 4.0)) / cos(radians(latitude));
-    return hillshade_color(deriv, light) * color.a;
+    return fogged(hillshade_color(deriv, light) * color.a, in.view_depth, terrain.fog);
 }
 "
     )),
@@ -3120,11 +3124,48 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 /// The surface's and the probe's prelude: the terrain's uniform block, the
-/// height rule, and the height of the surface's vertices.
+/// height rule, the height of the surface's vertices, and the fog.
 const TERRAIN_PRELUDE: &str = concat!(
     ground_height!(),
     r"
-@group(0) @binding(5) var<uniform> terrainProps: TerrainPropsUBO;
+// The fog over the surface: a `TerrainFogUBO`.
+struct TerrainFogUBO {
+    // Linear and premultiplied.
+    fog_color: vec4<f32>,
+    horizon_color: vec4<f32>,
+    // The distances along the view at which the fog's depth is 0 and 1.
+    depth_range: vec2<f32>,
+    ground_blend: f32,
+    horizon_blend: f32,
+};
+
+struct TerrainSurfaceUBO {
+    props: TerrainPropsUBO,
+    fog: TerrainFogUBO,
+};
+
+@group(0) @binding(5) var<uniform> terrain: TerrainSurfaceUBO;
+
+// `color`, premultiplied, of the surface `view_depth` pixels along the
+// view, covered by `fog`, as GL JS's terrain is: mixed in linear components
+// toward the fog's color by the square of how far past the ground blend the
+// fog's depth is. The fog's alpha weighs its color; the coverage stays.
+fn fogged(color: vec4<f32>, view_depth: f32, fog: TerrainFogUBO) -> vec4<f32> {
+    let near = fog.depth_range.x;
+    let far = fog.depth_range.y;
+    let depth = min(far / (far - near) * (1.0 - near / view_depth), 1.0);
+    if (fog.ground_blend >= 1.0 || depth <= fog.ground_blend || color.a == 0.0) {
+        return color;
+    }
+    let horizon = smoothstep(0.0, 1.0, (depth - fog.horizon_blend) / max(1.0 - fog.horizon_blend, 1e-6));
+    let tint = mix(fog.fog_color, fog.horizon_color, horizon);
+    let along = (depth - fog.ground_blend) / (1.0 - fog.ground_blend);
+    let strength = along * along;
+    let gamma = vec3<f32>(2.2);
+    let surface = pow(color.rgb / color.a, gamma);
+    let mixed = surface * (1.0 - strength * tint.a) + tint.rgb * strength;
+    return vec4<f32>(pow(mixed, 1.0 / gamma) * color.a, color.a);
+}
 
 // The height of the surface's vertex at `pos`, in tile units of a tile that
 // reads its DEM at `dem_coords`: the ground's, or sea level at a pole.

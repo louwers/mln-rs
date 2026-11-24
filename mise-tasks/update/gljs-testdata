@@ -90,6 +90,13 @@ declare -A allowed=(
     [projection/globe/terrain/fill-planet-tiles-no-background]=0.0004
     # 56 (RADV), 97 (lavapipe); on the sphere: 191, 192.
     [projection/globe/terrain/line-gradient]=0.0004
+    #
+    # Fog over terrain. Its ridges, raised twice their height, and the edges
+    # of its number tiles land a fraction of a pixel from GL JS's: 32 of the
+    # pixels that differ on RADV are where the fog changes nothing. 69 of
+    # 65536 on RADV (70 on OpenGL), 75 on lavapipe (WebGPU and Vulkan) and 70
+    # on llvmpipe.
+    [terrain/fog-sky-blend-globe]=0.0012
 )
 
 checkout="${usage_checkout:-$PWD/../maplibre-gl-js}"

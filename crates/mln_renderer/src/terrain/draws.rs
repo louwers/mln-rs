@@ -2,7 +2,8 @@
 //! the shared grids, each with the tile's projection, where it reads its
 //! DEM and its drape's light in entries of its stack's storage buffers,
 //! raised by the DEM's texture and sampling the tile's drape of the stack,
-//! which they shade with the stack's light, if it has one.
+//! which they shade with the stack's light, if it has one, and cover with
+//! the frame's fog.
 
 use std::mem::size_of;
 
@@ -18,7 +19,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_PROJECTION_UBO, ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_DRAWABLE_UBO,
     ID_TERRAIN_LIGHT_TILE_UBO, ID_TERRAIN_LIGHT_UBO, ID_TERRAIN_POS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROPS_UBO,
 };
-use mln_gfx::shaders::terrain_ubo::TerrainDrawableUBO;
+use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainFogUBO, TerrainSurfaceUBO};
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_map_types::View;
 use mln_tile_id::CanonicalTileID;
@@ -100,16 +101,17 @@ impl TerrainDraws {
     /// Makes the frame's draws of the tiles of `cover`, one for each of the
     /// stacks of `drapes`, which read the DEM textures of `dems`, sample the
     /// tile's drape of their stack, shade it with the stack's light of
-    /// `stacks` if it has one, and draw as `surface` says, and, if
-    /// `depth_first`, one that draws only the surface's depth; or drops the
-    /// draws and what they share for `None`, a frame without terrain. Each
-    /// tile projects as the frame's view does, onto the globe on a globe.
+    /// `stacks` if it has one, cover it with `fog`, and draw as `surface`
+    /// says, and, if `depth_first`, one that draws only the surface's depth;
+    /// or drops the draws and what they share for `None`, a frame without
+    /// terrain. Each tile projects as the frame's view does, onto the globe
+    /// on a globe.
     pub(crate) fn update(
         &mut self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         cover: Option<(&TerrainCover, &DemBindings)>,
-        surface: Surface,
+        (surface, fog): (Surface, TerrainFogUBO),
         (drapes, lights): (&Drapes, &DrapeStacks),
         depth_first: bool,
     ) {
@@ -204,6 +206,7 @@ impl TerrainDraws {
                 draws.draw_list.push(frame_draw, TileUniforms { light: light.unwrap_or_default(), ..uniforms });
             }
         }
+        let surface_ubo = TerrainSurfaceUBO { props: surface.props, fog };
         let sets = self.stacks.iter_mut().enumerate().map(|(stack, draws)| (Some(stack), draws));
         for (stack, StackDraws { tiles, frame, draw_list }) in
             sets.chain(self.depth.iter_mut().map(|draws| (None, draws)))
@@ -213,7 +216,7 @@ impl TerrainDraws {
                 writer.storage(ID_TERRAIN_DRAWABLE_UBO, |uniforms| uniforms.drawable);
                 writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
                 writer.storage(ID_TERRAIN_LIGHT_TILE_UBO, |uniforms| uniforms.light);
-                writer.uniform(ID_TERRAIN_PROPS_UBO, &surface.props);
+                writer.uniform(ID_TERRAIN_PROPS_UBO, &surface_ubo);
                 writer.uniform(ID_TERRAIN_LIGHT_UBO, &light);
             });
         }

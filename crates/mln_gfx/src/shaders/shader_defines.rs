@@ -160,6 +160,7 @@ pub const ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE: usize = 0;
 /// and 0.
 pub const ID_TERRAIN_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_TERRAIN_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
+/// How the surface stands and the fog over it: a `TerrainSurfaceUBO`.
 pub const ID_TERRAIN_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
 /// What shades a tile's drape: a `HillshadeTilePropsUBO` of the tile's
 /// latitudes and the hillshade's values, whose lights shade a drape of a

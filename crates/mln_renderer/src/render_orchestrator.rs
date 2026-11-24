@@ -1425,7 +1425,8 @@ impl RenderOrchestrator {
         // behind the surface's depth, drawn first.
         let needs_globe_depth = (needs_depth || self.sky_pass.has_atmosphere()) && !surface;
         self.globe_depth_pass.update(gpu, context, state, update_parameters, needs_globe_depth);
-        self.terrain.update_draws(gpu, paint_parameters, &self.stacks, needs_depth && surface);
+        let fog = crate::terrain::terrain_fog(frame.sky.as_ref(), paint_parameters.view);
+        self.terrain.update_draws(gpu, paint_parameters, &self.stacks, fog, needs_depth && surface);
     }
 
     /// The render layer at `index` in the drawing order.

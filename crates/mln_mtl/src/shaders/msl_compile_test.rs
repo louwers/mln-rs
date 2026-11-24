@@ -386,6 +386,8 @@ const UBO_SIZES: &[(&str, usize)] = &[
     ("SymbolEvaluatedPropsUBO", size_of::<symbol_layer_ubo::SymbolEvaluatedPropsUBO>()),
     ("TerrainDrawableUBO", size_of::<terrain_ubo::TerrainDrawableUBO>()),
     ("TerrainPropsUBO", size_of::<terrain_ubo::TerrainPropsUBO>()),
+    ("TerrainFogUBO", size_of::<terrain_ubo::TerrainFogUBO>()),
+    ("TerrainSurfaceUBO", size_of::<terrain_ubo::TerrainSurfaceUBO>()),
 ];
 
 /// True if `text` declares the struct or union `name`.

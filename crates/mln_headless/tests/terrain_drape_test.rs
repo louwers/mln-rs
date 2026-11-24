@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use mln_headless::HeadlessFrontend;
-use mln_map::{Map, MapMode, MapOptions, ViewportMode};
+use mln_map::{BoundOptions, Map, MapMode, MapOptions, ViewportMode};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
 use mln_util::error::ErrorKind;
@@ -104,10 +104,11 @@ fn stacked_style(terrain: bool) -> String {
     style_of(terrain, &sources.join(","), &layers.join(","))
 }
 
-/// The still image of `style` on the harness's device
-/// ([`mln_headless::harness_device`]), over DEM tiles at sea level, with the
-/// image `red.png` red and the image `blue.png` blue, and the bytes of the
-/// textures that drew it; `None` where the machine has no such device.
+/// The still image of `style`, pitched as it says up to 85°, on the
+/// harness's device ([`mln_headless::harness_device`]), over DEM tiles at
+/// sea level, with the image `red.png` red and the image `blue.png` blue,
+/// and the bytes of the textures that drew it; `None` where the machine has
+/// no such device.
 fn render(style: &str, viewport_mode: ViewportMode) -> Option<(PremultipliedImage, i32)> {
     let size = Size::new(SIDE, SIDE);
     let run_loop = Queue::new();
@@ -139,6 +140,7 @@ fn render(style: &str, viewport_mode: ViewportMode) -> Option<(PremultipliedImag
     let options = MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, viewport_mode, ..Default::default() };
     let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
     frontend.attach(&mut map);
+    map.set_bounds(&BoundOptions { max_pitch: Some(85.0), ..Default::default() }).unwrap();
     map.load_style_json(style);
     let camera = mln_map::style_camera(map.style());
     map.jump_to(&camera);
@@ -319,5 +321,109 @@ fn the_globe_hides_an_extrusion_behind_it_before_the_drapes() {
         };
         assert_ne!(0, lime(&near), "the extrusion on the near side, with terrain: {terrain}");
         assert_eq!(0, lime(&far), "the extrusion on the far side, with terrain: {terrain}");
+    }
+}
+
+/// Where the blue fill of [`fogged_style`] is: in the stack above the
+/// circle, in the one below it, or nowhere.
+#[derive(Clone, Copy)]
+enum Blue {
+    Above,
+    Below,
+    None,
+}
+
+/// A white map over flat terrain pitched 75° under the sky `sky`, the
+/// members of a style's sky object, with a circle near the camera, which
+/// splits the draped layers into two stacks, and an opaque blue fill over
+/// the ground west of 1° W, in the stack `blue` says.
+fn fogged_style(sky: &str, blue: Blue) -> String {
+    let fill = r#"{"id": "blue", "type": "fill", "source": "blue", "paint": {"fill-color": "blue"}}"#;
+    let circle = r#"{"id": "circle", "type": "circle", "source": "point", "paint": {"circle-color": "lime"}}"#;
+    let layers = match blue {
+        Blue::Above => format!("{BACKGROUND}, {circle}, {fill}"),
+        Blue::Below => format!("{BACKGROUND}, {fill}, {circle}"),
+        Blue::None => format!("{BACKGROUND}, {circle}"),
+    };
+    format!(
+        r#"{{
+            "version": 8,
+            "center": [0, 0],
+            "zoom": 4,
+            "pitch": 75,
+            "terrain": {{"source": "dem"}},
+            "sky": {{{sky}}},
+            "sources": {{
+                "dem": {{"type": "raster-dem", "tiles": ["dem/{{z}}/{{x}}/{{y}}.png"], "tileSize": 256, "maxzoom": 10}},
+                "point": {{"type": "geojson", "data": {{"type": "Point", "coordinates": [0, -4]}}}},
+                "blue": {{
+                    "type": "geojson",
+                    "data": {{"type": "Polygon", "coordinates": [[[-170, -80], [-1, -80], [-1, 80], [-170, 80], [-170, -80]]]}}
+                }}
+            }},
+            "layers": [{layers}]
+        }}"#
+    )
+}
+
+/// A magenta fog over the whole ground, which turns to no other color.
+const MAGENTA_FOG: &str = r#""fog-color": "magenta", "fog-ground-blend": 0, "horizon-fog-blend": 1"#;
+
+/// Far ground of [`fogged_style`] east of the fill, where the fog is strong.
+const FAR_GROUND: [(u32, u32); 2] = [(210, 70), (200, 60)];
+
+/// Far ground of [`fogged_style`] inside the fill.
+const FAR_FILL: [(u32, u32); 2] = [(40, 70), (30, 100)];
+
+/// The fog lands once on each pixel, however many stacks drape the surface:
+/// where the stack above draws nothing, the ground shows as it does without
+/// that stack, and inside its opaque fill, as it does with the fill in the
+/// stack below.
+#[test]
+fn fog_lands_once_where_stacks_overlap() {
+    let (Some((above, _)), Some((none, _)), Some((below, _)), Some((clear, _))) = (
+        render(&fogged_style(MAGENTA_FOG, Blue::Above), ViewportMode::Default),
+        render(&fogged_style(MAGENTA_FOG, Blue::None), ViewportMode::Default),
+        render(&fogged_style(MAGENTA_FOG, Blue::Below), ViewportMode::Default),
+        render(&fogged_style(r#""fog-ground-blend": 1"#, Blue::None), ViewportMode::Default),
+    ) else {
+        return;
+    };
+    for (x, y) in FAR_GROUND {
+        assert_ne!(pixel(&clear, x, y), pixel(&none, x, y), "the fog at {x}, {y}");
+        assert_eq!(pixel(&none, x, y), pixel(&above, x, y), "the ground at {x}, {y}");
+    }
+    for (x, y) in FAR_FILL {
+        assert_ne!(pixel(&none, x, y), pixel(&above, x, y), "the fill at {x}, {y}");
+        assert_eq!(pixel(&below, x, y), pixel(&above, x, y), "the fill at {x}, {y}");
+    }
+}
+
+/// The fog tints the ground and never uncovers it: a fog color's alpha is
+/// how strongly it tints, so a transparent fog leaves the ground as it is,
+/// and a translucent one tints it less than an opaque one, the ground
+/// opaque under both. Ground that the draped layers leave transparent stays
+/// transparent.
+#[test]
+fn fog_tints_the_ground_without_uncovering_it() {
+    let fog = |color: &str| format!(r#""fog-color": "{color}", "fog-ground-blend": 0, "horizon-fog-blend": 1"#);
+    let without_background = |style: String| style.replace(&format!("{BACKGROUND}, "), "");
+    let (Some((clear, _)), Some((transparent, _)), Some((translucent, _)), Some((opaque, _)), Some((undraped, _))) = (
+        render(&fogged_style(r#""fog-ground-blend": 1"#, Blue::None), ViewportMode::Default),
+        render(&fogged_style(&fog("transparent"), Blue::None), ViewportMode::Default),
+        render(&fogged_style(&fog("rgba(255, 0, 255, 0.5)"), Blue::None), ViewportMode::Default),
+        render(&fogged_style(&fog("magenta"), Blue::None), ViewportMode::Default),
+        render(&without_background(fogged_style(&fog("magenta"), Blue::None)), ViewportMode::Default),
+    ) else {
+        return;
+    };
+    for (x, y) in FAR_GROUND {
+        assert_eq!(pixel(&clear, x, y), pixel(&transparent, x, y), "a transparent fog at {x}, {y}");
+        let [_, clear_green, ..] = pixel(&clear, x, y);
+        let [_, green, _, alpha] = pixel(&translucent, x, y);
+        let [_, opaque_green, _, opaque_alpha] = pixel(&opaque, x, y);
+        assert_eq!((255, 255), (alpha, opaque_alpha), "the ground's coverage at {x}, {y}");
+        assert!(opaque_green < green && green < clear_green, "a translucent fog at {x}, {y}: {green}");
+        assert_eq!([0; 4], pixel(&undraped, x, y), "no ground at {x}, {y}");
     }
 }

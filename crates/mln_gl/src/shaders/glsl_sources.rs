@@ -2837,20 +2837,35 @@ void hillshade(vec2 deriv) {
     };
 }
 
-/// The surface's and the probe's vertex prelude: the terrain's uniform
-/// block, the height rule, and the height of the surface's vertices.
-macro_rules! terrain_props {
+/// The terrain's uniform block, a `TerrainSurfaceUBO`.
+macro_rules! terrain_block {
     () => {
-        concat!(
-            r"layout (std140) uniform TerrainPropsUBO {
+        r"layout (std140) uniform TerrainPropsUBO {
     highp vec4 u_unpack;
     highp float u_unpack_scale;
     highp float u_terrain_exaggeration;
     highp float u_skirt_length;
     highp float props_pad0;
+    // The fog over the surface: its colors, linear and premultiplied, the
+    // distances along the view at which its depth is 0 and 1, and its
+    // blends.
+    highp vec4 u_fog_color;
+    highp vec4 u_horizon_color;
+    highp vec2 u_fog_depth_range;
+    highp float u_fog_ground_blend;
+    highp float u_horizon_fog_blend;
 };
 
-",
+"
+    };
+}
+
+/// The surface's and the probe's vertex prelude: the terrain's uniform
+/// block, the height rule, and the height of the surface's vertices.
+macro_rules! terrain_props {
+    () => {
+        concat!(
+            terrain_block!(),
             ground_height!(),
             r"// The height of the surface's vertex at `pos`, in tile units of a tile
 // that reads its DEM at `dem_coords`: the ground's, or sea level at a pole.
@@ -2873,7 +2888,7 @@ highp float surface_height(highp vec2 pos, highp vec4 dem_coords) {
 /// at `1 - v`.
 /// Where the tile's `HillshadeTilePropsUBO` has lights, the drape holds a
 /// hillshade's slopes, premultiplied by its coverage, which the surface
-/// shades with them.
+/// shades with them. The fog of `TerrainPropsUBO` covers it.
 pub(crate) const TERRAIN_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
         terrain_props!(),
@@ -2885,32 +2900,58 @@ layout (std140) uniform TerrainDrawableUBO {
 };
 
 out vec2 v_drape_pos;
+// How far along the view, in pixels: the clip w.
+out highp float v_view_depth;
 
 void main() {
     float height = surface_height(a_pos.xy, u_dem_coords);
     gl_Position = projectTileFor3D(a_pos.xy, height - a_pos.z * u_skirt_length);
     vec2 drape_pos = clamp(a_pos.xy / 8192.0, 0.0, 1.0);
     v_drape_pos = vec2(drape_pos.x, 1.0 - drape_pos.y);
+    v_view_depth = gl_Position.w;
 }
 "
     ),
     fragment: concat!(
+        terrain_block!(),
         hillshade_shading!(),
         r"in vec2 v_drape_pos;
+in highp float v_view_depth;
 
 uniform sampler2D u_drape;
+
+// `color`, premultiplied, of the surface `view_depth` pixels along the
+// view, covered by the fog, as GL JS's terrain is: mixed in linear
+// components toward the fog's color by the square of how far past the
+// ground blend the fog's depth is. The fog's alpha weighs its color; the
+// coverage stays.
+highp vec4 fogged(highp vec4 color, highp float view_depth) {
+    highp float near = u_fog_depth_range.x;
+    highp float far = u_fog_depth_range.y;
+    highp float depth = min(far / (far - near) * (1.0 - near / view_depth), 1.0);
+    if (u_fog_ground_blend >= 1.0 || depth <= u_fog_ground_blend || color.a == 0.0) {
+        return color;
+    }
+    highp float horizon = smoothstep(0.0, 1.0, (depth - u_horizon_fog_blend) / max(1.0 - u_horizon_fog_blend, 1e-6));
+    highp vec4 tint = mix(u_fog_color, u_horizon_color, horizon);
+    highp float along = (depth - u_fog_ground_blend) / (1.0 - u_fog_ground_blend);
+    highp float strength = along * along;
+    highp vec3 surface = pow(color.rgb / color.a, vec3(2.2));
+    highp vec3 mixed = surface * (1.0 - strength * tint.a) + tint.rgb * strength;
+    return vec4(pow(mixed, vec3(1.0 / 2.2)) * color.a, color.a);
+}
 
 void main() {
     vec4 color = texture(u_drape, v_drape_pos);
     if (u_num_lights == 0 || color.a == 0.0) {
-        fragColor = color;
+        fragColor = fogged(color, v_view_depth);
     } else {
         // The tile's latitudes run from its north edge, where the drape's
         // rows start, at a `v` of 1.
         float latitude = mix(u_latrange[0], u_latrange[1], 1.0 - v_drape_pos.y);
         vec2 deriv = ((color.rg / color.a) * 8.0 - 4.0) / cos(radians(latitude));
         hillshade(deriv);
-        fragColor *= color.a;
+        fragColor = fogged(fragColor * color.a, v_view_depth);
     }
 }
 "

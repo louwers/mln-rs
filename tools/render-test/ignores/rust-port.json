@@ -46,15 +46,6 @@
   "render-tests/debug/padding/ease-to-right-distort": "skip - GL JS's easeTo operation and showPadding debug lines, which the runner and mln-rs don't have",
   "render-tests/debug/padding/ease-to-top-distort": "skip - GL JS's easeTo operation and showPadding debug lines, which the runner and mln-rs don't have",
   "render-tests/debug/padding/set-padding": "skip - GL JS's setPadding operation and showPadding debug lines, which the runner and mln-rs don't have",
-  "gljs/render-tests/sky/fog-color/default": "Terrain doesn't draw yet: #532 P3, fog",
-  "gljs/render-tests/sky/fog-color/function": "Terrain doesn't draw yet: #532 P3, fog",
-  "gljs/render-tests/sky/fog-color/global-state": "Terrain doesn't draw yet: #532 P3, fog",
-  "gljs/render-tests/sky/fog-ground-blend/default": "Terrain doesn't draw yet: #532 P3, fog",
-  "gljs/render-tests/sky/fog-ground-blend/function": "Terrain doesn't draw yet: #532 P3, fog",
-  "gljs/render-tests/sky/fog-ground-blend/global-state": "Terrain doesn't draw yet: #532 P3, fog",
-  "gljs/render-tests/terrain/fog": "Terrain doesn't draw yet: #532 P3, fog",
-  "gljs/render-tests/terrain/fog-sky-blend": "Terrain doesn't draw yet: #532 P3, fog",
-  "gljs/render-tests/terrain/fog-sky-blend-roll": "Terrain doesn't draw yet: #532 P3, fog",
   "gljs/render-tests/terrain/fill-extrusion": "Terrain doesn't draw yet: #532 P4, standing layers",
   "gljs/render-tests/terrain/fill-extrusion-multiple": "Terrain doesn't draw yet: #532 P4, standing layers",
   "gljs/render-tests/terrain/fill-extrusion-multipolygon": "Terrain doesn't draw yet: #532 P4, standing layers",
@@ -86,7 +77,6 @@
   "gljs/render-tests/projection/globe/terrain/fill-extrusion": "Fails as GL JS's projection/globe/fill-extrusion, the same view without terrain, does here: the extrusions' walls shade differently on the sphere. 3234 px differ there and 3233 here (1.2%)",
   "gljs/render-tests/projection/globe/terrain/fill-seams/checkerboard": "Its checkers' edges are as sharp as its drapes let them be, and land a fraction of a pixel from GL JS's. Its tiles show large enough that their drapes take the most texels a drape takes, GL JS's, twice as wide as their tiles: 3,032 of 65,536 px differ on RADV, and 1,201 with drapes four times as wide",
   "gljs/render-tests/projection/globe/terrain/heatmap": "Fails as GL JS's projection/globe/heatmap, the same view without terrain, does here: the globe's kernels spread less than GL JS's. 13993 px differ there and 14090 here (21%)",
-  "gljs/render-tests/terrain/fog-sky-blend-globe": "Terrain doesn't draw yet: #532 P3, fog",
   "render-tests/circle-sort-key/literal": "mln-rs sorts circles by circle-sort-key within each tile and draws tile by tile, where GL JS sorts them across tiles, so a circle of a higher key in one tile can draw under one of a lower key in the next. The test passed while a still image's tiles each drew their neighbours' buffered points too, which drew each circle more than once",
   "render-tests/circle-radius/antimeridian": "The view is 514 px wide at zoom 0, wider than the world, but its tile cover holds only the wrap 0 tile, so the part of a circle that reaches across the antimeridian from the next world copy isn't drawn. The test passed while a still image's tiles drew the points in their buffers too"
 }
