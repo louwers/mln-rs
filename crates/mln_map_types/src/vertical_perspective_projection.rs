@@ -4,7 +4,7 @@ use geometry::Point;
 use glam::dcamera::rh::proj::opengl::perspective;
 use glam::{DMat3, DMat4, DQuat, DVec3, DVec4, EulerRot, Vec3Swizzles, Vec4Swizzles};
 use mln_tile_id::UnwrappedTileID;
-use mln_util::constants::{EXTENT, LATITUDE_MAX};
+use mln_util::constants::{EXTENT, LATITUDE_MAX, TILE_SIZE_D};
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 use mln_util::interpolate::interpolate;
 use mln_util::projection::Projection;
@@ -279,6 +279,16 @@ impl VerticalPerspectiveProjection {
         let acos_z = (surface.z / length_xz).clamp(-1.0, 1.0).acos();
         let longitude = mln_math::rad2deg(if surface.x > 0.0 { acos_z } else { -acos_z });
         LatLng::with_mode(latitude, longitude, WrapMode::Wrapped).ok()
+    }
+
+    /// The Web Mercator point at zoom 0 under the unit-sphere point `point`,
+    /// in the world copy nearest the view's center, and its height in meters
+    /// above the sea-level sphere; `None` for a point that isn't a number.
+    pub(crate) fn sphere_point_to_world(view: &View, point: DVec3) -> Option<DVec3> {
+        let length = point.length();
+        let location = Self::surface_vector_to_lat_lng(point / length)?;
+        let world = Projection::project(&view.lat_lng_near_center(&location), 1.0 / TILE_SIZE_D);
+        Some(DVec3::new(world.x, world.y, (length - 1.0) * Self::GLOBE_RADIUS_METERS))
     }
 
     /// The direction from the planet's center, as a unit-sphere point, of

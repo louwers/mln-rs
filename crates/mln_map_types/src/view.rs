@@ -495,6 +495,22 @@ impl View {
         FreeCameraOptions { position: Some(camera.position), orientation: Some(camera.orientation) }
     }
 
+    /// Where the camera's eye is: its Web Mercator point at zoom 0 (from 0
+    /// to 1 across, y south) and its altitude in meters, of the meters the
+    /// view places heights in ([`center_altitude`](Self::center_altitude)).
+    /// On the globe it is the point under the eye, in the world copy nearest
+    /// the center, and the eye's height above the sea-level sphere.
+    #[must_use]
+    pub fn eye_position(&self) -> DVec3 {
+        if self.is_globe() && self.is_valid() {
+            let eye = self.matrices.globe_camera_position;
+            return VerticalPerspectiveProjection::sphere_point_to_world(self, eye).unwrap_or(eye);
+        }
+        let position = self.camera_pose().position;
+        let world_size = Projection::world_size(self.params.scale);
+        DVec3::new(position.x, position.y, position.z * world_size * self.meters_per_pixel())
+    }
+
     // MARK: - Projection
 
     #[must_use]
