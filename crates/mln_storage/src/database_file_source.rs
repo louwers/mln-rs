@@ -175,6 +175,13 @@ impl<E: 'static> DatabaseFileSource<E> {
         crate::tests::pause(|hold| self.invoke(move |_| hold()))
     }
 
+    /// Whether a task waits on the database thread for its time to come,
+    /// such as a write of cache hits' `accessed` timestamps.
+    #[cfg(test)]
+    pub(crate) fn has_timed_task(&self) -> bool {
+        self.queue.next_deadline().is_some()
+    }
+
     /// Switches to the database at `path`, creating it if needed. The
     /// callback runs on the database thread.
     #[cfg(test)]

@@ -1,43 +1,106 @@
-// The tests run against the test server (`mln_test_server`).
+// The loader's network is an online file source over the simulated network
+// (`super::network`), whose server answers as the C++ tests' server does
+// (`routes`), with real status codes and headers.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use mln_test_server::HttpServer;
-use mln_util::chrono::{Timestamp, now};
+use mln_util::chrono::{Timestamp, now, rfc1123};
 
+use super::network::{Network, Reply};
 use super::{LocalRequests, TestLoop, req, temp_path};
 use crate::database_file_source::{Cache, DatabaseFileSource};
+use crate::file_source::FileSource;
 use crate::loader::Loader;
-use crate::network_status::{NetworkStatus, Status};
 use crate::online_file_source::OnlineFileSource;
 use crate::resource::{Kind, LoadingMethod, Resource, StoragePolicy};
 use crate::resource_options::ResourceOptions;
 use crate::resource_transform::FinishedCallback;
 use crate::response::{Caching, Reason, Response};
 
-/// A loader over an in-memory database and an online file source, and those
+/// The URL of `path` on the simulated server.
+fn url(path: &str) -> String {
+    format!("http://example.invalid{path}")
+}
+
+/// 2015-01-01 00:00:00 UTC, when `/revalidate-modified` last changed.
+const JAN_1_2015: Timestamp = Timestamp::from_secs(1_420_070_400);
+
+/// The routes of the C++ tests' server that these tests load, by path:
+/// - `/test`: "Hello World!", without caching headers;
+/// - `/load/<n>`: "Request <n>";
+/// - `/cache`: "Response <n>" for the n-th request, fresh for 30 seconds;
+/// - `/revalidate-same`: "Response" with an `ETag` that must be revalidated,
+///   and a 304 to a revalidation of that `ETag`, fresh for a minute and
+///   then to be revalidated (C++: a second);
+/// - `/revalidate-modified`: the same with `Last-Modified`;
+/// - `/revalidate-etag`: "Response <n>" and a new `ETag` each time, which
+///   must be revalidated.
+fn routes() -> impl Fn(&Resource) -> Reply + Send + Sync + 'static {
+    let (cached, etagged) = (AtomicU32::new(0), AtomicU32::new(0));
+    move |resource| {
+        let path = resource.url.strip_prefix("http://example.invalid").unwrap_or_default();
+        let revalidated = || Reply::status(304).header("Cache-Control", "max-age=60, must-revalidate");
+        match path {
+            "/test" => Reply::ok("Hello World!"),
+            "/cache" => {
+                let n = cached.fetch_add(1, Ordering::SeqCst) + 1;
+                Reply::ok(&format!("Response {n}")).header("Cache-Control", "max-age=30")
+            }
+            "/revalidate-same" if resource.prior_etag.as_deref() == Some("snowfall") => revalidated(),
+            "/revalidate-same" => {
+                Reply::ok("Response").header("ETag", "snowfall").header("Cache-Control", "must-revalidate")
+            }
+            // A request sends `If-Modified-Since` only when it has no ETag.
+            "/revalidate-modified"
+                if resource.prior_etag.is_none() && resource.prior_modified.is_some_and(|m| m >= JAN_1_2015) =>
+            {
+                revalidated()
+            }
+            // Without `no-cache`, `Last-Modified` would give it a heuristic
+            // lifetime.
+            "/revalidate-modified" => {
+                Reply::ok("Response").header("Last-Modified", rfc1123(JAN_1_2015)).header("Cache-Control", "no-cache")
+            }
+            "/revalidate-etag" => {
+                let n = etagged.fetch_add(1, Ordering::SeqCst) + 1;
+                Reply::ok(&format!("Response {n}"))
+                    .header("ETag", format!("response-{n}"))
+                    .header("Cache-Control", "must-revalidate")
+            }
+            _ => match path.strip_prefix("/load/") {
+                Some(n) => Reply::ok(&format!("Request {n}")),
+                None => Reply::status(404),
+            },
+        }
+    }
+}
+
+/// A loader over an in-memory database and a simulated network, and those
 /// two.
 struct TestSources {
     loader: Rc<Loader>,
     database: Arc<DatabaseFileSource>,
-    online: Arc<OnlineFileSource>,
-    /// The online file source's.
-    network: Arc<NetworkStatus>,
+    network: Network,
 }
 
 impl TestSources {
+    /// Sources whose server answers by [`routes`].
     fn new() -> Self {
-        let network = Arc::new(NetworkStatus::new());
-        let online = Arc::new(OnlineFileSource::new(Arc::clone(&network)));
-        let database = Arc::new(DatabaseFileSource::new(":memory:", Some(Arc::<OnlineFileSource>::clone(&online))));
+        Self::serving(Network::serving(routes()))
+    }
+
+    fn serving(network: Network) -> Self {
+        let online: Arc<dyn FileSource> = Arc::<OnlineFileSource>::clone(&network.source);
+        let database = Arc::new(DatabaseFileSource::new(":memory:", Some(Arc::clone(&online))));
         let loader = Loader::builder(&super::pool())
-            .network(Arc::<OnlineFileSource>::clone(&online))
+            .network(online)
             .database(Arc::<DatabaseFileSource>::clone(&database))
             .build();
-        TestSources { loader: Rc::new(loader), database, online, network }
+        TestSources { loader: Rc::new(loader), database, network }
     }
 }
 
@@ -47,10 +110,6 @@ fn main_resource_loader(file_sources: &TestSources) -> Rc<Loader> {
 
 fn database_file_source(file_sources: &TestSources) -> Arc<DatabaseFileSource> {
     Arc::clone(&file_sources.database)
-}
-
-fn online_file_source(file_sources: &TestSources) -> Arc<OnlineFileSource> {
-    Arc::clone(&file_sources.online)
 }
 
 fn data(res: &Response) -> &[u8] {
@@ -76,14 +135,13 @@ fn cache_only(url: &str) -> Resource {
 // gtest: MainResourceLoader.CacheResponse
 #[test]
 fn cache_response() {
-    let file_sources = TestSources::new();
-    let server = HttpServer::new();
+    let mut file_sources = TestSources::new();
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
-    let resource = Resource::new(Kind::Unknown, server.url("/cache"));
+    let resource = Resource::new(Kind::Unknown, url("/cache"));
 
     let req1 = req();
     let req2 = req();
@@ -125,20 +183,19 @@ fn cache_response() {
         }),
     ));
 
-    run_loop.run();
+    run_loop.run_with_network(&mut file_sources.network);
 }
 
 // gtest: MainResourceLoader.VolatileStoragePolicy
 #[test]
 fn volatile_storage_policy() {
-    let file_sources = TestSources::new();
-    let server = HttpServer::new();
+    let mut file_sources = TestSources::new();
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
-    let mut resource = Resource::new(Kind::Unknown, server.url("/cache"));
+    let mut resource = Resource::new(Kind::Unknown, url("/cache"));
     resource.storage_policy = StoragePolicy::Volatile;
 
     let req = req();
@@ -166,23 +223,23 @@ fn volatile_storage_policy() {
         }),
     ));
 
-    run_loop.run();
+    run_loop.run_with_network(&mut file_sources.network);
 }
 
 /// Caches the response at `path`, then requests it again so that it is
 /// revalidated with the server; `check` inspects the second response.
 fn cache_revalidate(path: &str, check: fn(&Response)) {
-    let file_sources = TestSources::new();
-    let server = HttpServer::new();
+    let mut file_sources = TestSources::new();
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
-    let revalidate = Resource::new(Kind::Unknown, server.url(path));
+    let revalidate = Resource::new(Kind::Unknown, url(path));
     let req1 = req();
     let req2 = req();
     let got_response = Rc::new(Cell::new(false));
+    let clock = file_sources.network.clock.clone();
 
     let (r1, r2, fs2, stop, revalidate2) =
         (Rc::clone(&req1), Rc::clone(&req2), Rc::clone(&fs), run_loop.clone(), revalidate.clone());
@@ -206,16 +263,17 @@ fn cache_revalidate(path: &str, check: fn(&Response)) {
             // request to complete. We can distinguish the cached response
             // from the revalided response because the latter has an
             // expiration date, while the cached response doesn't.
-            let (r2c, stop, got_response) = (Rc::clone(&r2), stop.clone(), Rc::clone(&got_response));
+            let (r2c, stop, got_response, clock) =
+                (Rc::clone(&r2), stop.clone(), Rc::clone(&got_response), clock.clone());
             *r2.borrow_mut() = Some(fs2.request_local(
                 &queue,
                 &revalidate2,
                 Box::new(move |res2: Response| {
                     if got_response.get() {
-                        // The test server sends a Cache-Control header with
-                        // a max-age of 1 second. This means that our
+                        // The server sends a Cache-Control header with a
+                        // max-age of a minute. This means that our
                         // OnlineFileSource implementation will request the
-                        // tile again after 1 second. This time, our request
+                        // tile again after a minute. This time, our request
                         // already had a prior response, so we don't need to
                         // send the data again, and instead can actually
                         // forward the notModified flag.
@@ -241,13 +299,14 @@ fn cache_revalidate(path: &str, check: fn(&Response)) {
                         assert!(res2.caching.expires.is_some());
                         assert!(res2.caching.must_revalidate);
                         check(&res2);
+                        clock.advance(Duration::from_secs(60));
                     }
                 }),
             ));
         }),
     ));
 
-    run_loop.run();
+    run_loop.run_with_network(&mut file_sources.network);
 }
 
 // gtest: MainResourceLoader.CacheRevalidateSame
@@ -263,7 +322,7 @@ fn cache_revalidate_same() {
 #[test]
 fn cache_revalidate_modified() {
     cache_revalidate("/revalidate-modified", |res| {
-        assert_eq!(Some(Timestamp::from_secs(1_420_070_400)), res.modified);
+        assert_eq!(Some(JAN_1_2015), res.modified);
         assert!(res.etag.is_none());
     });
 }
@@ -271,14 +330,13 @@ fn cache_revalidate_modified() {
 // gtest: MainResourceLoader.CacheRevalidateEtag
 #[test]
 fn cache_revalidate_etag() {
-    let file_sources = TestSources::new();
-    let server = HttpServer::new();
+    let mut file_sources = TestSources::new();
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
-    let revalidate_etag = Resource::new(Kind::Unknown, server.url("/revalidate-etag"));
+    let revalidate_etag = Resource::new(Kind::Unknown, url("/revalidate-etag"));
     let req1 = req();
     let req2 = req();
 
@@ -322,7 +380,7 @@ fn cache_revalidate_etag() {
         }),
     ));
 
-    run_loop.run();
+    run_loop.run_with_network(&mut file_sources.network);
 }
 
 // Test for https://github.com/mapbox/mapbox-gl-native/issue/1369
@@ -340,13 +398,12 @@ fn cache_revalidate_etag() {
 // gtest: MainResourceLoader.HTTPIssue1369
 #[test]
 fn http_issue_1369() {
-    let file_sources = TestSources::new();
-    let server = HttpServer::new();
+    let mut file_sources = TestSources::new();
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let fs = main_resource_loader(&file_sources);
 
-    let resource = Resource::new(Kind::Unknown, server.url("/test"));
+    let resource = Resource::new(Kind::Unknown, url("/test"));
 
     let req = req();
     *req.borrow_mut() =
@@ -368,7 +425,7 @@ fn http_issue_1369() {
         }),
     ));
 
-    run_loop.run();
+    run_loop.run_with_network(&mut file_sources.network);
 }
 
 /// A cached value is returned for a cache-only request whether it has
@@ -380,7 +437,7 @@ fn optional_cached(expires: Timestamp) {
     let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
-    let optional_resource = cache_only("http://127.0.0.1:3000/test");
+    let optional_resource = cache_only(&url("/test"));
 
     let mut response = Response::new();
     response.data = Some(bytes("Cached value"));
@@ -436,7 +493,7 @@ fn optional_not_found() {
     let local = run_loop.dispatcher();
     let fs = main_resource_loader(&file_sources);
 
-    let optional_resource = cache_only("http://127.0.0.1:3000/test");
+    let optional_resource = cache_only(&url("/test"));
 
     let req = req();
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
@@ -463,7 +520,7 @@ fn optional_not_found() {
 /// The `NoCache`* tests: put a fake value into the cache to make sure we're
 /// not retrieving anything from the cache, then request network-only.
 fn no_cache(resource: &Resource, check: impl Fn(&Response) + 'static) {
-    let file_sources = TestSources::new();
+    let mut file_sources = TestSources::new();
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let queue = local.clone();
@@ -493,7 +550,7 @@ fn no_cache(resource: &Resource, check: impl Fn(&Response) + 'static) {
         }),
     );
 
-    run_loop.run();
+    run_loop.run_with_network(&mut file_sources.network);
 }
 
 // Test that a network only request doesn't attempt to load data from the
@@ -501,18 +558,17 @@ fn no_cache(resource: &Resource, check: impl Fn(&Response) + 'static) {
 // gtest: MainResourceLoader.NoCacheRefreshEtagNotModified
 #[test]
 fn no_cache_refresh_etag_not_modified() {
-    let server = HttpServer::new();
-    let mut resource = Resource::new(Kind::Unknown, server.url("/revalidate-same"));
+    let mut resource = Resource::new(Kind::Unknown, url("/revalidate-same"));
     resource.loading_method = LoadingMethod::NetworkOnly;
     resource.prior_etag = Some("snowfall".to_owned());
 
-    // The 304 says max-age=1, counted from no earlier than the request.
+    // The 304 says max-age=60, counted from no earlier than the request.
     let requested = now();
     no_cache(&resource, move |res| {
         assert!(res.not_modified);
         assert!(res.data.is_none());
         assert!(res.caching.expires.is_some());
-        assert!(Some(Timestamp::from_secs(requested.secs_since_epoch() + 1)) <= res.caching.expires);
+        assert!(Some(Timestamp::from_secs(requested.secs_since_epoch() + 60)) <= res.caching.expires);
         assert!(res.caching.must_revalidate);
         assert!(res.modified.is_none());
         assert_eq!(Some("snowfall"), res.etag.as_deref());
@@ -524,8 +580,7 @@ fn no_cache_refresh_etag_not_modified() {
 // gtest: MainResourceLoader.NoCacheRefreshEtagModified
 #[test]
 fn no_cache_refresh_etag_modified() {
-    let server = HttpServer::new();
-    let mut resource = Resource::new(Kind::Unknown, server.url("/revalidate-same"));
+    let mut resource = Resource::new(Kind::Unknown, url("/revalidate-same"));
     resource.loading_method = LoadingMethod::NetworkOnly;
     resource.prior_etag = Some("sunshine".to_owned());
 
@@ -544,8 +599,7 @@ fn no_cache_refresh_etag_modified() {
 // gtest: MainResourceLoader.NoCacheFull
 #[test]
 fn no_cache_full() {
-    let server = HttpServer::new();
-    let mut resource = Resource::new(Kind::Unknown, server.url("/revalidate-same"));
+    let mut resource = Resource::new(Kind::Unknown, url("/revalidate-same"));
     resource.loading_method = LoadingMethod::NetworkOnly;
 
     no_cache(&resource, |res| {
@@ -563,20 +617,19 @@ fn no_cache_full() {
 // gtest: MainResourceLoader.NoCacheRefreshModifiedNotModified
 #[test]
 fn no_cache_refresh_modified_not_modified() {
-    let server = HttpServer::new();
-    let mut resource = Resource::new(Kind::Unknown, server.url("/revalidate-modified"));
+    let mut resource = Resource::new(Kind::Unknown, url("/revalidate-modified"));
     resource.loading_method = LoadingMethod::NetworkOnly;
-    resource.prior_modified = Some(Timestamp::from_secs(1_420_070_400)); // January 1, 2015
+    resource.prior_modified = Some(JAN_1_2015);
 
-    // The 304 says max-age=1, counted from no earlier than the request.
+    // The 304 says max-age=60, counted from no earlier than the request.
     let requested = now();
     no_cache(&resource, move |res| {
         assert!(res.not_modified);
         assert!(res.data.is_none());
         assert!(res.caching.expires.is_some());
-        assert!(Some(Timestamp::from_secs(requested.secs_since_epoch() + 1)) <= res.caching.expires);
+        assert!(Some(Timestamp::from_secs(requested.secs_since_epoch() + 60)) <= res.caching.expires);
         assert!(res.caching.must_revalidate);
-        assert_eq!(Some(Timestamp::from_secs(1_420_070_400)), res.modified);
+        assert_eq!(Some(JAN_1_2015), res.modified);
         assert!(res.etag.is_none());
     });
 }
@@ -586,8 +639,7 @@ fn no_cache_refresh_modified_not_modified() {
 // gtest: MainResourceLoader.NoCacheRefreshModifiedModified
 #[test]
 fn no_cache_refresh_modified_modified() {
-    let server = HttpServer::new();
-    let mut resource = Resource::new(Kind::Unknown, server.url("/revalidate-modified"));
+    let mut resource = Resource::new(Kind::Unknown, url("/revalidate-modified"));
     resource.loading_method = LoadingMethod::NetworkOnly;
     resource.prior_modified = Some(Timestamp::from_secs(1_417_392_000)); // December 1, 2014
 
@@ -596,7 +648,7 @@ fn no_cache_refresh_modified_modified() {
         assert_eq!(b"Response", data(res));
         assert!(res.caching.expires.is_some_and(|expires| expires <= now()), "stale at once");
         assert!(res.caching.must_revalidate);
-        assert_eq!(Some(Timestamp::from_secs(1_420_070_400)), res.modified);
+        assert_eq!(Some(JAN_1_2015), res.modified);
         assert!(res.etag.is_none());
     });
 }
@@ -607,7 +659,7 @@ struct UrlTransform {
 }
 
 impl UrlTransform {
-    /// Translates "<localhost://test>" to the test server's /test.
+    /// Translates "<localhost://test>" to the server's /test.
     fn call(&self, url: &str, cb: FinishedCallback) {
         if url == "localhost://test" {
             cb(Ok(self.test_url.clone()));
@@ -620,16 +672,15 @@ impl UrlTransform {
 // gtest: MainResourceLoader.SetResourceTransform
 #[test]
 fn set_resource_transform() {
-    let file_sources = TestSources::new();
-    let server = HttpServer::new();
+    let mut file_sources = TestSources::new();
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let resource_loader = main_resource_loader(&file_sources);
-    let onlinefs = online_file_source(&file_sources);
+    let onlinefs = Arc::clone(&file_sources.network.source);
 
-    // Translates the URL "localhost://test to http://127.0.0.1:3000/test
-    // on the test's thread.
-    let transform = Arc::new(UrlTransform { test_url: server.url("/test") });
+    // Translates the URL "localhost://test" to the server's /test on the
+    // test's thread.
+    let transform = Arc::new(UrlTransform { test_url: url("/test") });
     let queue = run_loop.handle().downgrade();
     onlinefs.set_resource_transform(Some(Arc::new(move |_kind: Kind, url: &str, cb: FinishedCallback| {
         let (url, transform) = (url.to_owned(), Arc::clone(&transform));
@@ -659,10 +710,10 @@ fn set_resource_transform() {
         }),
     ));
 
-    run_loop.run();
+    run_loop.run_with_network(&mut file_sources.network);
 
     onlinefs.set_resource_transform(None);
-    let resource2 = Resource::new(Kind::Unknown, server.url("/test"));
+    let resource2 = Resource::new(Kind::Unknown, url("/test"));
 
     let (r, stop) = (Rc::clone(&req), run_loop.clone());
     *req.borrow_mut() = Some(resource_loader.request_local(
@@ -675,7 +726,7 @@ fn set_resource_transform() {
         }),
     ));
 
-    run_loop.run();
+    run_loop.run_with_network(&mut file_sources.network);
 }
 
 // gtest: MainResourceLoader.SetResourceCachePath
@@ -697,14 +748,13 @@ fn set_resource_cache_path() {
 // gtest: MainResourceLoader.RespondToStaleMustRevalidate
 #[test]
 fn respond_to_stale_must_revalidate() {
-    let file_sources = TestSources::new();
-    let server = HttpServer::new();
+    let mut file_sources = TestSources::new();
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let queue = local.clone();
     let fs = main_resource_loader(&file_sources);
 
-    let resource = Rc::new(RefCell::new(Resource::new(Kind::Unknown, server.url("/revalidate-same"))));
+    let resource = Rc::new(RefCell::new(Resource::new(Kind::Unknown, url("/revalidate-same"))));
     resource.borrow_mut().loading_method = LoadingMethod::CacheOnly;
 
     // Put an existing value in the cache that has expired, and has
@@ -752,7 +802,7 @@ fn respond_to_stale_must_revalidate() {
         }),
     );
 
-    run_loop.run();
+    run_loop.run_with_network(&mut file_sources.network);
 
     // Now run this request again, with the data we gathered from the
     // previous stale/unusable request. We're replacing the data so that we
@@ -789,219 +839,86 @@ fn respond_to_stale_must_revalidate() {
         }),
     ));
 
-    run_loop.run();
+    run_loop.run_with_network(&mut file_sources.network);
 }
 
 // Test that requests that revalidate cached copies, which the requester gets
 // while they revalidate, have lower priority than requests for new resources
-// Flaky https://github.com/maplibre/maplibre-native/issues/1071
 // gtest: MainResourceLoader.CachedResourceLowPriority
 #[test]
 fn cached_resource_low_priority() {
-    let file_sources = TestSources::new();
-    let server = HttpServer::new();
+    let mut file_sources = TestSources::new();
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let fs = main_resource_loader(&file_sources);
-
-    let mut response = Response::new();
-    let online_response_counter = Rc::new(Cell::new(0usize));
-
-    response.caching.expires = Some(one_hour_ago());
-
     let dbfs = database_file_source(&file_sources);
-    let online_fs = online_file_source(&file_sources);
 
-    // Put existing values into the cache.
-    let resource1 = Resource::with_tile_data(Kind::Unknown, server.url("/load/3"), None, LoadingMethod::All);
-    response.data = Some(bytes("Cached Request 3"));
-    dbfs.put(&resource1, &response);
+    // Expired copies of requests 3 and 4.
+    let resource =
+        |n: u32| Resource::with_tile_data(Kind::Unknown, url(&format!("/load/{n}")), None, LoadingMethod::All);
+    for n in [3, 4] {
+        let mut response = Response::new();
+        response.caching.expires = Some(one_hour_ago());
+        response.data = Some(bytes(&format!("Cached Request {n}")));
+        dbfs.put(&resource(n), &response);
+    }
+    file_sources.network.source.set_maximum_concurrent_requests(1);
 
-    let resource2 = Resource::with_tile_data(Kind::Unknown, server.url("/load/4"), None, LoadingMethod::All);
-    response.data = Some(bytes("Cached Request 4"));
-    dbfs.put(&resource2, &response);
+    // The network's answers, in the order they came, and the cached copies
+    // the requests for 3 and 4 got before theirs.
+    let answered: Rc<RefCell<Vec<String>>> = Rc::default();
+    let cached: Rc<RefCell<Vec<String>>> = Rc::default();
+    let requests: Vec<_> = [0, 1, 3, 4, 2]
+        .into_iter()
+        .map(|n| {
+            let (answered, cached, stop) = (Rc::clone(&answered), Rc::clone(&cached), run_loop.clone());
+            fs.request_local(
+                &local,
+                &resource(n),
+                Box::new(move |res: Response| {
+                    let data = String::from_utf8(data(&res).to_vec()).unwrap();
+                    if data.starts_with("Cached") {
+                        cached.borrow_mut().push(data);
+                        return;
+                    }
+                    answered.borrow_mut().push(data);
+                    if answered.borrow().len() == 5 {
+                        stop.stop();
+                    }
+                }),
+            )
+        })
+        .collect();
 
-    online_fs.set_maximum_concurrent_requests(1);
-    let paused = dbfs.pause();
-    file_sources.network.set(Status::Offline);
-
-    // Ensure that the online requests for new resources are processed first.
-    let non_cached0 = Resource::with_tile_data(Kind::Unknown, server.url("/load/0"), None, LoadingMethod::All);
-    let req0 = req();
-    let (r, counter) = (Rc::clone(&req0), Rc::clone(&online_response_counter));
-    *req0.borrow_mut() = Some(fs.request_local(
-        &local,
-        &non_cached0,
-        Box::new(move |res: Response| {
-            // Offline, each network request fails first.
-            if res.error.as_ref().is_some_and(|error| error.reason == Reason::Connection) {
-                return;
-            }
-            r.borrow_mut().take();
-            assert_eq!(counter.get(), 0); // make sure this is responded first
-            assert_eq!(b"Request 0", data(&res));
-        }),
-    ));
-
-    let non_cached1 = Resource::with_tile_data(Kind::Unknown, server.url("/load/1"), None, LoadingMethod::All);
-    let req1 = req();
-    let (r, counter) = (Rc::clone(&req1), Rc::clone(&online_response_counter));
-    *req1.borrow_mut() = Some(fs.request_local(
-        &local,
-        &non_cached1,
-        Box::new(move |res: Response| {
-            // Offline, each network request fails first.
-            if res.error.as_ref().is_some_and(|error| error.reason == Reason::Connection) {
-                return;
-            }
-            counter.set(counter.get() + 1);
-            r.borrow_mut().take();
-            assert_eq!(counter.get(), 1); // make sure this is responded second
-            assert_eq!(b"Request 1", data(&res));
-        }),
-    ));
-
-    let req3_cached_response_received = Rc::new(Cell::new(false));
-    let req3 = req();
-    let (r, counter, received) =
-        (Rc::clone(&req3), Rc::clone(&online_response_counter), Rc::clone(&req3_cached_response_received));
-    *req3.borrow_mut() = Some(fs.request_local(
-        &local,
-        &resource1,
-        Box::new(move |res: Response| {
-            // Offline, each network request fails first.
-            if res.error.as_ref().is_some_and(|error| error.reason == Reason::Connection) {
-                return;
-            }
-            // Offline callback is received first
-            if received.get() {
-                counter.set(counter.get() + 1);
-                r.borrow_mut().take();
-                assert_eq!(counter.get(), 3);
-                assert_eq!(b"Request 3", data(&res));
-            } else {
-                assert_eq!(b"Cached Request 3", data(&res));
-                received.set(true);
-            }
-        }),
-    ));
-
-    let req4_cached_response_received = Rc::new(Cell::new(false));
-    let req4 = req();
-    let (r, counter, received, stop) = (
-        Rc::clone(&req4),
-        Rc::clone(&online_response_counter),
-        Rc::clone(&req4_cached_response_received),
-        run_loop.clone(),
-    );
-    *req4.borrow_mut() = Some(fs.request_local(
-        &local,
-        &resource2,
-        Box::new(move |res: Response| {
-            // Offline, each network request fails first.
-            if res.error.as_ref().is_some_and(|error| error.reason == Reason::Connection) {
-                return;
-            }
-            // Offline callback is received first
-            if received.get() {
-                counter.set(counter.get() + 1);
-                r.borrow_mut().take();
-                assert_eq!(counter.get(), 4);
-                assert_eq!(b"Request 4", data(&res));
-                stop.stop();
-            } else {
-                assert_eq!(b"Cached Request 4", data(&res));
-                received.set(true);
-            }
-        }),
-    ));
-
-    let non_cached2 = Resource::with_tile_data(Kind::Unknown, server.url("/load/2"), None, LoadingMethod::All);
-    let req2 = req();
-    let (r, counter) = (Rc::clone(&req2), Rc::clone(&online_response_counter));
-    *req2.borrow_mut() = Some(fs.request_local(
-        &local,
-        &non_cached2,
-        Box::new(move |res: Response| {
-            // Offline, each network request fails first.
-            if res.error.as_ref().is_some_and(|error| error.reason == Reason::Connection) {
-                return;
-            }
-            counter.set(counter.get() + 1);
-            r.borrow_mut().take();
-            assert_eq!(counter.get(), 2); // make sure this is responded third
-            assert_eq!(b"Request 2", data(&res));
-        }),
-    ));
-
-    drop(paused);
-    // The online requests all reach the online file source while it is
-    // offline, so going online starts them in priority order: request 2 was
-    // sent after the expired resources' requests, but its database lookup
-    // could otherwise finish after requests 0 and 1 did, and the free slot
-    // would go to request 3. The loader sends a request to the database, and
-    // to the network once the database answers: the pauses wait for each
-    // thread in turn to finish what it was sent.
+    // Every request reaches the network before it runs: the loader sends a
+    // request to the network once the database has answered it.
     drop(dbfs.pause());
-    drop(online_fs.pause());
-    file_sources.network.set(Status::Online);
+    run_loop.run_with_network(&mut file_sources.network);
+    drop(requests);
 
-    run_loop.run();
+    assert_eq!(["Cached Request 3", "Cached Request 4"].to_vec(), *cached.borrow());
+    assert_eq!(["Request 0", "Request 1", "Request 2", "Request 3", "Request 4"].to_vec(), *answered.borrow());
 }
 
 // gtest: MainResourceLoader.NoDoubleDispatch
+// A cached copy goes to the requester once: the network's 304 that
+// revalidates it comes as not modified.
 #[test]
 fn no_double_dispatch() {
-    let file_sources = TestSources::new();
-    let server = HttpServer::new();
-    let run_loop = TestLoop::new();
-    let local = run_loop.dispatcher();
-    let queue = local.clone();
-    let fs = main_resource_loader(&file_sources);
-
-    let resource = Resource::new(Kind::Unknown, server.url("/revalidate-same"));
     let mut response = Response::new();
     response.data = Some(bytes("data"));
     response.etag = Some("snowfall".to_owned());
+    let answers = answers_with_cached(TestSources::new(), &url("/revalidate-same"), &response, 2);
 
-    let req = req();
-    let response_count = Rc::new(Cell::new(0u32));
-    // A second dispatch would answer within moments of the first, so the
-    // check waits that long after the first answer, however long it took.
-    let dbfs = database_file_source(&file_sources);
-    let (r, fs2, resource2, count) = (Rc::clone(&req), Rc::clone(&fs), resource.clone(), Rc::clone(&response_count));
-    let (stop, handle) = (run_loop.clone(), run_loop.handle());
-    dbfs.put_then(
-        &resource,
-        &response,
-        run_loop.dispatcher().callback(move || {
-            *r.borrow_mut() = Some(fs2.request_local(
-                &queue,
-                &resource2,
-                Box::new(move |res: Response| {
-                    assert_eq!(None, res.error);
-                    assert!(res.modified.is_none());
-                    assert!(res.etag.is_some());
-                    assert_eq!(Some("snowfall"), res.etag.as_deref());
-                    if !res.not_modified {
-                        assert_eq!(b"data", data(&res));
-                        count.set(count.get() + 1);
-                        if count.get() == 1 {
-                            let (stop, count) = (stop.clone(), Rc::clone(&count));
-                            let check = stop.dispatcher().callback(move || {
-                                assert_eq!(1, count.get());
-                                stop.stop();
-                            });
-                            handle.post_after(Duration::from_millis(100), move |_| check());
-                        }
-                    }
-                }),
-            ));
-        }),
-    );
-
-    run_loop.run();
-    assert_eq!(1, response_count.get());
+    for res in &answers {
+        assert_eq!(None, res.error);
+        assert!(res.modified.is_none());
+        assert_eq!(Some("snowfall"), res.etag.as_deref());
+    }
+    assert_eq!(b"data", data(&answers[0]));
+    assert!(!answers[0].not_modified);
+    assert!(answers[1].not_modified);
+    assert!(answers[1].data.is_none());
 }
 
 // Not a C++ test: the "Unsupported resource request." branch (a request
@@ -1028,10 +945,9 @@ fn unsupported_resource_request() {
     assert_eq!("Unsupported resource request.", res.error.unwrap().message);
 }
 
-/// The first `count` answers to a request of `url`, whose cache holds
-/// `cached`.
-fn answers_with_cached(url: &str, cached: &Response, count: usize) -> Vec<Response> {
-    let file_sources = TestSources::new();
+/// The first `count` answers to a request of `url` from `file_sources`,
+/// whose cache holds `cached`.
+fn answers_with_cached(mut file_sources: TestSources, url: &str, cached: &Response, count: usize) -> Vec<Response> {
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let queue = local.clone();
@@ -1058,10 +974,7 @@ fn answers_with_cached(url: &str, cached: &Response, count: usize) -> Vec<Respon
             ));
         }),
     );
-    // Only catches answers that never come: under the whole suite, a loaded
-    // machine can take several times the second this takes alone.
-    run_loop.fail_after(Duration::from_secs(60), "the answers never came");
-    run_loop.run();
+    run_loop.run_with_network(&mut file_sources.network);
     req.borrow_mut().take();
     answers.take()
 }
@@ -1083,14 +996,12 @@ fn with_caching(mut response: Response, change: impl FnOnce(&mut Caching)) -> Re
 /// follows; one that must revalidate waits for the network.
 #[test]
 fn a_stale_copy_shows_while_it_revalidates_unless_it_must_revalidate() {
-    let server = HttpServer::new();
-    let url = server.url("/test");
-    let answers = answers_with_cached(&url, &stale_copy(), 2);
+    let answers = answers_with_cached(TestSources::new(), &url("/test"), &stale_copy(), 2);
     assert_eq!(b"Cached value", data(&answers[0]));
     assert_eq!(b"Hello World!", data(&answers[1]));
 
     let cached = with_caching(stale_copy(), |caching| caching.must_revalidate = true);
-    let answers = answers_with_cached(&url, &cached, 1);
+    let answers = answers_with_cached(TestSources::new(), &url("/test"), &cached, 1);
     assert_eq!(b"Hello World!", data(&answers[0]));
 }
 
@@ -1099,13 +1010,12 @@ fn a_stale_copy_shows_while_it_revalidates_unless_it_must_revalidate() {
 /// delivered.
 #[test]
 fn a_stale_copy_shows_when_the_server_cant_be_reached() {
-    // Nothing listens on port 1.
-    let url = "http://127.0.0.1:1/test";
-    let answers = answers_with_cached(url, &stale_copy(), 2);
+    let unreachable = || TestSources::serving(Network::serving(|_| Reply::Refused));
+    let answers = answers_with_cached(unreachable(), &url("/test"), &stale_copy(), 2);
     assert_eq!(b"Cached value", data(&answers[0]));
     assert_eq!(Reason::Connection, answers[1].error.as_ref().expect("an error").reason);
 
     let cached = with_caching(stale_copy(), |caching| caching.must_revalidate = true);
-    let answers = answers_with_cached(url, &cached, 1);
+    let answers = answers_with_cached(unreachable(), &url("/test"), &cached, 1);
     assert_eq!(Reason::Connection, answers[0].error.as_ref().expect("an error").reason);
 }

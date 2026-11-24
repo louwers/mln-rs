@@ -27,7 +27,7 @@ fn volatile_resource() {
 
     let resource = Rc::new(RefCell::new(Resource::with_tile_data(
         Kind::Unknown,
-        "http://127.0.0.1:3000/test",
+        "http://example.invalid/test",
         None,
         LoadingMethod::CacheOnly,
     )));
@@ -85,7 +85,7 @@ fn volatile_resource_is_not_stored() {
 
     let mut resource = Resource::with_tile_data(
         Kind::Unknown,
-        "http://127.0.0.1:3000/volatile-not-stored",
+        "http://example.invalid/volatile-not-stored",
         None,
         LoadingMethod::CacheOnly,
     );
@@ -218,8 +218,10 @@ fn failed_accessed_flush_waits_for_next_read() {
     assert_eq!(response.data, cached.data);
 
     wait_until("the failed flush", || failures.load(Ordering::SeqCst) > 0);
-    std::thread::sleep(std::time::Duration::from_millis(800));
+    // Once the flush's task has ended, no retry waits for its time.
+    drop(source.pause());
     assert_eq!(1, failures.load(Ordering::SeqCst), "failed flush retried while idle");
+    assert!(!source.has_timed_task(), "failed flush waits to retry while idle");
 
     sql.execute_batch("DROP TRIGGER fail_accessed").unwrap();
     let cached = cached_request(&run_loop, &source, &resource);

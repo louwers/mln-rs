@@ -5,9 +5,10 @@
 //!
 //! The online file source runs as an application's does, its limit on
 //! transfers in flight, their priorities, cancellation, retries after
-//! errors and revalidations included, through `mln_storage::bench`: its
-//! transfers come to [`Simulator`], and its deadlines go by the network's
-//! clock, one 60 Hz frame per [`Network::advance`].
+//! errors and revalidations included, through
+//! `mln_storage::simulated_network`: its transfers come to [`Simulator`], and
+//! its deadlines go by the network's clock, one 60 Hz frame per
+//! [`Network::advance`].
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -15,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use mln_bench_workload::Tiles;
-use mln_storage::bench::{Clock, OnlineDriver, Transfer, Transport, online_file_source};
+use mln_storage::simulated_network::{Clock, OnlineDriver, Transfer, Transport, online_file_source};
 use mln_storage::{Cache, FileSource, Loader, Resource};
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::pool::Pool;
@@ -575,7 +576,7 @@ impl Network {
             let simulator = Arc::clone(&simulator);
             Arc::new(move || base + Duration::from_nanos(simulator.state.lock().now))
         };
-        let (source, driver) = online_file_source(Arc::<Simulator>::clone(&simulator), clock);
+        let (source, driver) = online_file_source(&Arc::default(), Arc::<Simulator>::clone(&simulator), clock);
         Network { simulator, driver, source: Arc::new(source) }
     }
 

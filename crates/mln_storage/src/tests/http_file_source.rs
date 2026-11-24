@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use httpmock::MockServer;
 use mln_test_server::HttpServer;
-use mln_util::chrono::{Timestamp, now};
+use mln_util::chrono::{Timestamp, now, rfc1123};
 use parking_lot::Mutex;
 
 use super::{Dispatcher, LocalRequests, Req, TestLoop, req};
@@ -292,15 +292,14 @@ fn cache_control_parsing() {
     run_loop.run();
 }
 
-/// The shared state of the `Load` tests: `reqs[concurrency]` and `number`.
-pub(crate) struct LoadState {
-    pub(crate) reqs: Vec<Req>,
-    pub(crate) number: Cell<i32>,
+/// The shared state of the `Load` test: `reqs[concurrency]` and `number`.
+struct LoadState {
+    reqs: Vec<Req>,
+    number: Cell<i32>,
 }
 
-/// The `req(i)` lambda of the `Load` tests (also used by
-/// OnlineFileSource.Load).
-pub(crate) fn load_request(
+/// The `req(i)` lambda of the `Load` test.
+fn load_request(
     fs: &Rc<dyn FileSource>,
     state: &Rc<LoadState>,
     url: &Rc<dyn Fn(i32) -> String>,
@@ -537,4 +536,51 @@ fn unavailable_and_request_timeout_are_retried() {
 
     let res = load_once(&fs, Kind::Tile, server.url("/timeout"));
     assert_eq!(Reason::Connection, res.error.expect("error").reason);
+}
+
+/// A request with a prior copy asks the server whether it changed: by its
+/// `ETag` if it has one, else by its modification date.
+#[test]
+fn a_request_with_a_prior_copy_is_conditional() {
+    let modified = Timestamp::from_secs(1_420_070_400);
+    let server = MockServer::start();
+    let by_etag = server.mock(|when, then| {
+        when.method("GET").path("/etag").header("If-None-Match", "\"v1\"").header_missing("If-Modified-Since");
+        then.status(304);
+    });
+    let by_date = server.mock(|when, then| {
+        when.method("GET")
+            .path("/modified")
+            .header("If-Modified-Since", rfc1123(modified))
+            .header_missing("If-None-Match");
+        then.status(304);
+    });
+    let fs = http_file_source();
+
+    let mut resource = Resource::new(Kind::Unknown, server.url("/etag"));
+    resource.prior_etag = Some("\"v1\"".to_owned());
+    resource.prior_modified = Some(modified);
+    let res = load_resource(&fs, &resource);
+    assert_eq!(None, res.error);
+    assert!(res.not_modified);
+    by_etag.assert_calls(1);
+
+    let mut resource = Resource::new(Kind::Unknown, server.url("/modified"));
+    resource.prior_modified = Some(modified);
+    let res = load_resource(&fs, &resource);
+    assert_eq!(None, res.error);
+    assert!(res.not_modified);
+    by_date.assert_calls(1);
+}
+
+/// A refused connection is a connection error, which the online file
+/// source retries with a backoff.
+#[test]
+fn a_refused_connection_is_a_connection_error() {
+    // Port 1 is reserved, and nothing listens on it: a freed ephemeral
+    // port could be taken by another test's server before the dial.
+    let res = load_once(&http_file_source(), Kind::Unknown, "http://127.0.0.1:1/test".to_owned());
+    let error = res.error.expect("error");
+    assert_eq!(Reason::Connection, error.reason);
+    assert!(res.data.is_none());
 }

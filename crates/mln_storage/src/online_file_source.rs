@@ -176,12 +176,9 @@ impl OnlineRequest {
     /// its retry's backoff; else when the data expires, if it came fresh. A
     /// response that came stale, as one without a freshness lifetime,
     /// isn't asked for again until it is requested anew.
-    fn update_interval(&self, response: &Response, connection_backoff: Option<Duration>) -> Option<Duration> {
+    fn update_interval(&self, response: &Response) -> Option<Duration> {
         if response.error.is_some() {
-            return match connection_backoff {
-                Some(backoff) if self.failed_request_reason == Reason::Connection => Some(backoff),
-                _ => error_retry_timeout(self.failed_request_reason, self.failed_requests, self.retry_after),
-            };
+            return error_retry_timeout(self.failed_request_reason, self.failed_requests, self.retry_after);
         }
         response
             .caching
@@ -221,13 +218,10 @@ pub struct OnlineCore {
     /// A task that tells the core the network is reachable again is on its
     /// way.
     reachable: Arc<AtomicBool>,
-    /// Replaces the backoff after a connection error, so that a test can
-    /// tell the retries it starts apart from the backoff's.
-    connection_backoff: Option<Duration>,
     /// The clock that the deadlines go by, in place of the system's
-    /// (`crate::bench`).
-    #[cfg(all(feature = "bench", not(target_family = "wasm")))]
-    clock: Option<crate::bench::Clock>,
+    /// (`crate::simulated_network`).
+    #[cfg(all(any(test, feature = "bench"), not(target_family = "wasm")))]
+    clock: Option<crate::simulated_network::Clock>,
 }
 
 impl OnlineCore {
@@ -476,9 +470,9 @@ impl OnlineCore {
     /// Requests the resource again after `timeout`, or never for `None`.
     fn schedule(&mut self, id: u64, timeout: Option<Duration>) {
         // The time that deadlines go by.
-        #[cfg(all(feature = "bench", not(target_family = "wasm")))]
+        #[cfg(all(any(test, feature = "bench"), not(target_family = "wasm")))]
         let now = self.clock.as_ref().map_or_else(Instant::now, |clock| clock());
-        #[cfg(not(all(feature = "bench", not(target_family = "wasm"))))]
+        #[cfg(not(all(any(test, feature = "bench"), not(target_family = "wasm"))))]
         let now = Instant::now();
         let pending = self.pending_requests.contains(id);
         let offline = self.network.get() == Status::Offline;
@@ -512,7 +506,6 @@ impl OnlineCore {
     }
 
     fn completed(&mut self, id: u64, response: Response) {
-        let connection_backoff = self.connection_backoff;
         let Some(req) = self.requests.get_mut(&id) else { return };
         if let Some(error) = &response.error {
             if error.reason == Reason::NotFound {
@@ -527,7 +520,7 @@ impl OnlineCore {
         }
         // After an error, the request retries, even while the requester
         // shows a stale copy.
-        let interval = req.update_interval(&response, connection_backoff);
+        let interval = req.update_interval(&response);
 
         let resource = &mut req.resource;
         let response = resource.deliver(response);
@@ -561,8 +554,9 @@ pub struct OnlineFileSource {
     _reachability: Subscription,
     #[cfg(not(target_family = "wasm"))]
     thread: Option<std::thread::JoinHandle<()>>,
-    /// The caller runs the core, rather than a thread (`crate::bench`).
-    #[cfg(all(feature = "bench", not(target_family = "wasm")))]
+    /// The caller runs the core, rather than a thread
+    /// (`crate::simulated_network`).
+    #[cfg(all(any(test, feature = "bench"), not(target_family = "wasm")))]
     driven: bool,
 }
 
@@ -648,8 +642,7 @@ impl OnlineFileSource {
             resource_transform: None,
             network,
             reachable,
-            connection_backoff: None,
-            #[cfg(all(feature = "bench", not(target_family = "wasm")))]
+            #[cfg(all(any(test, feature = "bench"), not(target_family = "wasm")))]
             clock: None,
         };
         let source = OnlineFileSource {
@@ -659,7 +652,7 @@ impl OnlineFileSource {
             _reachability: reachability,
             #[cfg(not(target_family = "wasm"))]
             thread: None,
-            #[cfg(all(feature = "bench", not(target_family = "wasm")))]
+            #[cfg(all(any(test, feature = "bench"), not(target_family = "wasm")))]
             driven: false,
         };
         (source, core)
@@ -667,12 +660,12 @@ impl OnlineFileSource {
 
     /// A source whose core the caller runs on its own thread, as
     /// [`local`](Self::local)'s, whose transfers go to `transport` and
-    /// whose deadlines go by `clock` (`crate::bench`).
-    #[cfg(all(feature = "bench", not(target_family = "wasm")))]
+    /// whose deadlines go by `clock` (`crate::simulated_network`).
+    #[cfg(all(any(test, feature = "bench"), not(target_family = "wasm")))]
     pub(crate) fn driven(
         network: Arc<NetworkStatus>,
         transport: Arc<dyn crate::http_file_source::HttpTransport>,
-        clock: crate::bench::Clock,
+        clock: crate::simulated_network::Clock,
     ) -> (Self, OnlineQueue, OnlineCore) {
         let (mut source, core) = Self::with_core(network);
         source.driven = true;
@@ -713,23 +706,10 @@ impl OnlineFileSource {
         self.queue.post(move |core| core.http_file_source.set_http_header_transform(transform));
     }
 
-    /// Holds the core until the guard drops (`crate::tests::pause`).
-    #[cfg(test)]
-    pub(crate) fn pause(&self) -> crate::tests::Paused {
-        crate::tests::pause(|hold| self.queue.post(move |_| hold()))
-    }
-
-    /// Waits `backoff` to retry a request that failed with a connection
-    /// error, in place of the exponential backoff.
-    #[cfg(test)]
-    pub(crate) fn set_connection_backoff(&self, backoff: Duration) {
-        self.queue.post(move |core| core.connection_backoff = Some(backoff));
-    }
-
     /// Whether a thread, or the caller, runs the source's core.
     #[cfg(not(target_family = "wasm"))]
     fn is_running(&self) -> bool {
-        #[cfg(all(feature = "bench", not(target_family = "wasm")))]
+        #[cfg(all(any(test, feature = "bench"), not(target_family = "wasm")))]
         if self.driven {
             return true;
         }
@@ -784,20 +764,37 @@ impl FileSource for OnlineFileSource {
 mod tests {
     use std::sync::mpsc;
 
-    use mln_test_server::closed_port_url;
     use parking_lot::Mutex;
 
     use super::*;
+    use crate::http_file_source::{HttpTransport, TransferRequest};
     use crate::resource::Kind;
     use crate::resource_transform::FinishedCallback;
 
+    /// Keeps each transfer in flight, unanswered.
+    #[derive(Default)]
+    struct Unanswered(Mutex<Vec<TransferRequest>>);
+
+    impl HttpTransport for Unanswered {
+        fn start(&self, request: TransferRequest) {
+            self.0.lock().push(request);
+        }
+    }
+
     /// A core that no thread runs, whose tasks the test runs or calls
-    /// itself, and the source whose drop ends it.
+    /// itself, whose transfers stay in flight, and the source whose drop
+    /// ends it.
     fn core(maximum: u32) -> (OnlineFileSource, OnlineCore) {
         let (source, core) = OnlineFileSource::with_core(Arc::new(NetworkStatus::new()));
         let mut core = core();
+        core.http_file_source = HTTPFileSource::with_transport(Arc::new(Unanswered::default()));
         core.maximum_concurrent_requests = maximum;
         (source, core)
+    }
+
+    /// The URL of `path` on a server that never answers.
+    fn url(path: &str) -> String {
+        format!("http://example.invalid{path}")
     }
 
     fn request(core: &mut OnlineCore, id: u64, url: &str) -> Request {
@@ -827,8 +824,8 @@ mod tests {
     #[test]
     fn a_stale_transfer_response_is_dropped() {
         let (_source, mut core) = core(1);
-        let _first = request(&mut core, 1, &closed_port_url("/stale-1"));
-        let _second = request(&mut core, 2, &closed_port_url("/stale-2"));
+        let _first = request(&mut core, 1, &url("/stale-1"));
+        let _second = request(&mut core, 2, &url("/stale-2"));
         pass_deadline(&mut core, 1);
         pass_deadline(&mut core, 2);
         let first = transfer(&core, 1).expect("the first request's transfer");
@@ -875,7 +872,7 @@ mod tests {
     #[test]
     fn requests_for_one_resource_share_its_transfer() {
         let (_source, mut core) = core(1);
-        let url = closed_port_url("/shared");
+        let url = url("/shared");
         let (_first, first) = counted(&mut core, 1, tile(&url));
         let (_second, second) = counted(&mut core, 2, tile(&url));
         pass_deadline(&mut core, 1);
@@ -895,7 +892,7 @@ mod tests {
     #[test]
     fn a_shared_transfer_stops_with_its_last_request() {
         let (_source, mut core) = core(2);
-        let url = closed_port_url("/shared");
+        let url = url("/shared");
         let (_first, _) = counted(&mut core, 1, tile(&url));
         let (_second, second) = counted(&mut core, 2, tile(&url));
         pass_deadline(&mut core, 1);
@@ -915,10 +912,10 @@ mod tests {
     #[test]
     fn waiting_requests_join_the_transfer_they_share_when_it_starts() {
         let (_source, mut core) = core(1);
-        let url = closed_port_url("/shared");
-        let (_other, _) = counted(&mut core, 1, tile(&closed_port_url("/other")));
-        let (_first, first) = counted(&mut core, 2, tile(&url));
-        let (_second, second) = counted(&mut core, 3, tile(&url));
+        let (_other, _) = counted(&mut core, 1, tile(&url("/other")));
+        let shared = url("/shared");
+        let (_first, first) = counted(&mut core, 2, tile(&shared));
+        let (_second, second) = counted(&mut core, 3, tile(&shared));
         for id in 1..=3 {
             pass_deadline(&mut core, id);
         }
@@ -938,7 +935,7 @@ mod tests {
     #[test]
     fn requests_of_other_validators_or_bytes_transfer_apart() {
         let (_source, mut core) = core(4);
-        let url = closed_port_url("/apart");
+        let url = url("/apart");
         let mut validated = tile(&url);
         validated.prior_etag = Some("\"v1\"".to_owned());
         let mut ranged = tile(&url);
@@ -967,7 +964,7 @@ mod tests {
         assert_eq!(Some(generation), core.requests[&1].transforming);
         assert_eq!(original, core.requests[&1].resource.url);
 
-        let url = closed_port_url("/transformed");
+        let url = url("/transformed");
         let finished = answers.lock().pop().expect("the transform's callback");
         finished(Ok(url.clone()));
         let queue = core.queue.clone();
@@ -981,7 +978,7 @@ mod tests {
     #[test]
     fn an_update_interval_past_instants_range_never_fires() {
         let (_source, mut core) = core(1);
-        let mut resource = Resource::new(Kind::Tile, closed_port_url("/forever"));
+        let mut resource = Resource::new(Kind::Tile, url("/forever"));
         resource.minimum_update_interval = Duration::MAX;
         let (_request, responder) = Request::new(|_| {});
         core.request(1, resource, responder);
@@ -1001,15 +998,13 @@ mod tests {
     #[test]
     fn a_replaced_or_cancelled_deadline_leaves_the_queue() {
         let (_source, mut core) = core(1);
-        core.connection_backoff = Some(Duration::from_secs(3600));
-        let _request = request(&mut core, 1, &closed_port_url("/retry"));
+        let _request = request(&mut core, 1, &url("/retry"));
         pass_deadline(&mut core, 1);
         let generation = transfer(&core, 1).expect("the request's transfer");
         let mut response = Response::new();
         response.error = Some(Box::new(ResourceError::new(Reason::Connection, "refused")));
         core.transferred(generation, &response);
-        let retry = core.queue.next_deadline().expect("the retry");
-        assert!(retry > Instant::now() + Duration::from_secs(60));
+        let retry = core.queue.next_deadline().expect("the retry, after its backoff");
 
         core.network_is_reachable_again();
         let again = core.queue.next_deadline().expect("the retry, at once");
