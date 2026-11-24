@@ -1,104 +1,31 @@
-//! 3D terrain: the style's `terrain` drawn as a surface whose heights come
-//! from a raster-dem source, with the layers that drape over it drawn into
+//! 3D terrain: the style's `terrain` drawn as a surface raised by a
+//! raster-dem source, with the layers that drape over it drawn into
 //! textures that the surface samples.
 //!
-//! Terrain draws when the style's terrain names a raster-dem source whose
-//! tileset has loaded, in continuous and static modes, on every projection:
-//! on Mercator, and on the globe before, through and after its handover to
-//! Mercator. In tile mode the map draws flat. A frame without terrain takes
-//! none of the paths below: its tile covers, matrices and draws are a flat
-//! map's.
+//! Terrain draws once the style's terrain names a raster-dem source whose
+//! tileset has loaded, outside tile mode, on every projection, on a backend
+//! that makes its shader ([`RenderTerrain::make_shader`]). A frame without
+//! terrain takes none of the steps below, which [`RenderTerrain`] runs for
+//! each frame:
 //!
-//! # A frame with terrain
-//!
-//! The renderer owns [`RenderTerrain`] through its orchestrator, and with it
-//! the cover, the drapes and the layers' drawings in them, the surface's
-//! draws and the DEM textures. In each update:
-//!
-//! 1. Before the sources update, [`RenderTerrain::update`] covers the view
-//!    with terrain tiles and lists the DEM tiles they read. Every source
-//!    then covers the view the same way, culled by the same elevation
-//!    ranges. The terrain's source keeps its DEM tiles loaded, whether or
-//!    not a layer draws them. They count toward the frame's being loaded.
-//! 2. Once the sources have updated, [`RenderTerrain::bind`] binds each
-//!    terrain tile's DEM, and tells the map of the ground the tiles draw, if
-//!    it changed ([`TerrainElevation`]), which the map's camera stands on.
-//! 3. In the encode, the layers that drape (background, fill, line, raster,
-//!    an image source's too, hillshade and color relief) make no draws in
-//!    the frame: they draw in each drape of their stack
-//!    ([`RenderTerrain::begin_drapes`]). The surface makes a draw per tile
-//!    and stack that has a drape there, which reads the textures of the DEM
-//!    tiles the tiles read ([`RenderTerrain::update_dems`],
-//!    [`RenderTerrain::update_draws`]).
-//! 4. The drapes whose layers draw something new draw into their textures
-//!    before the frame's pass; the others keep their texels. The frame
-//!    clears to transparent, and its translucent pass draws each
-//!    stack's surface where the stack's first layer draws, and the layers
-//!    that don't drape between the stacks, flat, with their layer depth off.
-//!
-//! # Contracts
-//!
-//! - **The cover** ([`TerrainCover`]) is GL JS's `coveringTiles` with a
-//!   zoom for each tile: terrain tiles twice the DEM's tile size, of zooms 0
-//!   to 22, nearest the center first. Each is culled by a volume over the
-//!   elevation range of the DEM under it, with the exaggeration, or by GL
-//!   JS's flat range where none has loaded: a box on Mercator, and on the
-//!   globe the globe's convex volume between the spheres of the range's
-//!   lowest and highest ground. While no tile holds the view's center, the
-//!   cover keeps the tile under it, undrawn, so that the camera has a DEM to
-//!   stand on.
-//! - **The elevation ranges** ([`ElevationRanges`]) are those of every DEM
-//!   tile of the terrain's tileset that has loaded while terrain drew,
-//!   remembered after the source lets a tile go, and forgotten when the
-//!   tileset changes or terrain stops.
-//! - **The DEM bindings.** A tile at zoom z reads the DEM tile at z − 1,
-//!   within the DEM's zoom levels; while that loads, the sub-rect of the
-//!   deepest ancestor that has loaded; else it draws flat. A frame binds the
-//!   DEM tiles it has, so a loaded frame draws each tile with its own, but
-//!   where the DEM tile is missing or its request failed: that tile isn't
-//!   loading, and draws the ancestor until the file source's retry brings
-//!   its DEM. The
-//!   surface reads each DEM's bordered RGBA8 image texel by texel and
-//!   decodes it by the height rule of `mln_util::dem`, as the CPU does.
-//! - **The ground** ([`TerrainElevation`]) is the tiles as a frame drew
-//!   them, with the DEM data each read, which the map's camera reads by the
-//!   same height rule. A frame is complete only when its update carries
-//!   that ground, the same snapshot ([`UpdateParameters::elevation`]).
-//! - **The stacks** ([`DrapeStacks`]) are GL JS's: each a run of the
-//!   frame's layers that drape, ended by one of the frame's layers that
-//!   doesn't. A layer the frame doesn't draw, hidden or out of its zooms,
-//!   splits no stack. A style whose layers don't drape has no stack, and
-//!   then no drapes and no surface.
-//! - **The surface** draws once for each stack, its tiles nearest the
-//!   center first, testing and writing the 3D depth range with less or
-//!   equal and blending its drapes over what is under it. Each tile's grid
-//!   is raised by its DEM, with the map's skirts hanging from its edges
-//!   (GL JS's by default, a fifth of a tile's width at the equator), and
-//!   projects through its projection entry as GL JS's `projectTileFor3D`
-//!   does: on Mercator through the tile's matrix, on the globe each point
-//!   raised along its vertical, blended with Mercator through a handover.
-//!   On the globe the tiles of the first and last rows close the poles at
-//!   sea level, in the colors of their drapes' edge rows; and the planet's
-//!   sea-level depth, which a flat globe draws before its 3D layers, isn't
-//!   drawn in a frame where the surface draws, whose depth is the planet's.
-//!   A stack above the first draws where the first left the nearest ground,
-//!   and only the tiles where it has a drape; the first draws every tile,
-//!   transparent where it has none, for that depth.
-//! - **The drapes** ([`Drapes`]): a texture for each drawn tile and stack
-//!   whose layers draw something in the tile, which the stack's draped
-//!   layers draw into with the map's camera, through their own draw
-//!   updates. A drape draws again only when what its layers draw it from
-//!   changed, or its side did. On the globe they draw as on Mercator, with
-//!   the camera at a projection transition of 0
-//!   ([`View::mercator`](mln_map_types::View::mercator)), as GL JS draws its
-//!   drapes, so a draped line at a latitude shows as wide as the Mercator
-//!   tile under it makes it. A drape is twice as wide as its tile, or the
-//!   device's largest texture where that is smaller, and mipmapped; a byte
-//!   cap halves the drapes of the tiles farthest from the center first.
-//! - **The drape composite.** A draped layer with a layer opacity below 1
-//!   or a layer blend other than `normal` draws as a whole inside each
-//!   drape, as in 2D: into a texture of the drape's size, composited onto
-//!   the drape. A blend's backdrop is the drape's own texels.
+//! 1. **Update**, before the sources update ([`RenderTerrain::update`]):
+//!    terrain tiles cover the view ([`TerrainCover`]), culled by the DEM's
+//!    elevation ranges ([`ElevationRanges`]), and the terrain's source keeps
+//!    the DEM tiles they read loaded. Every source covers the view the same
+//!    way.
+//! 2. **Bind**, once the sources have updated ([`RenderTerrain::bind`]):
+//!    each tile binds its DEM, and the ground the tiles draw
+//!    ([`TerrainElevation`]) goes to the map, whose camera stands on it.
+//! 3. **Encode**: the layers that drape draw nothing into the frame, but
+//!    into the drapes of their stack ([`DrapeStacks`], [`Drapes`]); the
+//!    surface makes a draw per tile and stack, which reads the DEM textures
+//!    ([`RenderTerrain::update_dems`], [`RenderTerrain::update_draws`]).
+//! 4. **Drapes**: before the frame's pass, the drapes whose layers draw
+//!    from something new draw into their textures; the others keep theirs
+//!    ([`RenderTerrain::render_drapes`]).
+//! 5. **Surface**: the frame's pass draws each stack's surface where the
+//!    stack's first layer draws, and between the stacks the layers that
+//!    don't drape, flat ([`RenderTerrain::render`]).
 
 mod cover;
 mod dem_textures;

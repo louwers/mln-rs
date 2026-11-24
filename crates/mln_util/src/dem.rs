@@ -2,9 +2,11 @@
 //! and how terrain reads a height between texels. The shaders follow it in
 //! the same `f32` operations, in the same order: hillshade's and color
 //! relief's decode texels as [`DemUnpack::decode`] does, and terrain's read
-//! heights as [`sample`] does, so that what the CPU reads of the ground is
-//! what the GPU draws. `mln_gfx`'s conformance case `terrain_heights` checks
-//! each backend against [`sample`].
+//! heights as [`sample`] does at its mesh's vertices. So the CPU reads the
+//! heights the GPU draws at the vertices, bit for bit; between them the
+//! surface is linear across each quad, which spans a DEM tile's size / 256
+//! pixels or fewer, 2 for 512 px tiles. `mln_gfx`'s conformance case
+//! `terrain_heights` checks each backend against [`sample`].
 //!
 //! A DEM tile of `dim` pixels a side is kept behind a one-texel border, so
 //! its bordered texels run from 0 to `dim + 1` and pixel `i` is texel
