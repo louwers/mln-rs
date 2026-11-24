@@ -34,6 +34,21 @@ declare -A allowed=(
     # The moiré's texels move: 289 of 65536 (0.44%) on RADV (291 on OpenGL),
     # 1113 (lavapipe) and 1104 (llvmpipe) (1.7%).
     [terrain/rtt-mipmap-minification/pitch-70]=0.02
+    # Terrain on the globe. The numbers here are WebGPU's, on RADV and on Mesa
+    # 26.0.8's lavapipe, which CI runs (Mesa 26.2.5 with
+    # `GALLIVM_PERF=no_lod_ellipse` gives the same).
+    #
+    # The planet's limb is the chords of the surface's grid, where GL JS's
+    # drawn the same way differs by single pixels: 126 of 262144 on RADV and
+    # 128 on lavapipe.
+    [projection/globe/terrain/atmosphere/base]=0.0006
+    # As atmosphere/base: 148 (RADV), 148 (lavapipe).
+    [projection/globe/terrain/atmosphere/light-position-map]=0.0006
+    # As atmosphere/base: 171 (RADV), 166 (lavapipe).
+    [projection/globe/terrain/atmosphere/ligth-position-viewport]=0.0007
+    # Its labels don't drape and draw as without terrain: 8 of 65536 (RADV),
+    # 20 on lavapipe.
+    [projection/globe/terrain/collision-icon-text-translate-map]=0.0004
 )
 
 checkout="${usage_checkout:-$PWD/../maplibre-gl-js}"

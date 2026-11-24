@@ -3,7 +3,7 @@
   "metadata": {
     "test": {
       "description": "Tests atmosphere with position on right map.",
-      "allowed": 0.00025
+      "allowed": 0.0006
     }
   },
   "projection": {

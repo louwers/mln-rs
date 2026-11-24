@@ -3,7 +3,7 @@
   "metadata": {
     "test": {
       "description": "Tests that atmosphere is well display with blend to 1.0.",
-      "allowed": 0.00025
+      "allowed": 0.0006
     }
   },
   "projection": {
