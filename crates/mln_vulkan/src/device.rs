@@ -52,6 +52,21 @@ fn load_entry() -> Result<ash::Entry, Error> {
     entry.map_err(|e| Error::unsupported(format!("No Vulkan library: {e}")))
 }
 
+/// Maps a Vulkan loader or enumeration failure to an [`Error`].
+///
+/// A loader that finds no usable driver (`VK_ERROR_INCOMPATIBLE_DRIVER` or
+/// `VK_ERROR_INITIALIZATION_FAILED`, as on stub loaders with no ICD) offers no
+/// Vulkan, just as a missing loader does, so the next backend may take its
+/// place.
+fn loader_error(context: &str, result: vk::Result) -> Error {
+    let message = format!("{context}: {result}");
+    if matches!(result, vk::Result::ERROR_INCOMPATIBLE_DRIVER | vk::Result::ERROR_INITIALIZATION_FAILED) {
+        Error::unsupported(message)
+    } else {
+        Error::native(message)
+    }
+}
+
 /// A host's lock on a queue that it submits to too. The device holds it
 /// around each submission and present to the queue, never across a wait.
 pub trait QueueLock: Send + Sync {
@@ -249,12 +264,10 @@ impl LibraryInstance {
         // SAFETY: plain queries of the loader.
         let (available_layers, available_extensions, loader_version) = unsafe {
             (
-                entry
-                    .enumerate_instance_layer_properties()
-                    .map_err(|e| Error::native(format!("Vulkan layers: {e}")))?,
+                entry.enumerate_instance_layer_properties().map_err(|e| loader_error("Vulkan layers", e))?,
                 entry
                     .enumerate_instance_extension_properties(None)
-                    .map_err(|e| Error::native(format!("Vulkan instance extensions: {e}")))?,
+                    .map_err(|e| loader_error("Vulkan instance extensions", e))?,
                 entry.try_enumerate_instance_version().ok().flatten().unwrap_or(vk::API_VERSION_1_0),
             )
         };
@@ -306,16 +319,8 @@ impl LibraryInstance {
             .enabled_extension_names(&extension_pointers);
         // SAFETY: the create info points at live names, and the layers and
         // extensions are available.
-        let instance = unsafe { entry.create_instance(&create_info, None) }.map_err(|e| {
-            let message = format!("Failed to create a Vulkan instance: {e}");
-            // A loader that finds no driver offers no Vulkan, as a missing
-            // loader doesn't, so the next backend may take its place.
-            if e == vk::Result::ERROR_INCOMPATIBLE_DRIVER {
-                Error::unsupported(message)
-            } else {
-                Error::native(message)
-            }
-        })?;
+        let instance = unsafe { entry.create_instance(&create_info, None) }
+            .map_err(|e| loader_error("Failed to create a Vulkan instance", e))?;
 
         let mut messenger = None;
         if validation != Validation::Off {
@@ -651,8 +656,8 @@ impl Device {
     ) -> Result<(vk::PhysicalDevice, u32, ash::Device, vk::PhysicalDeviceFeatures, Features, Vec<&'static CStr>), Error>
     {
         // SAFETY: plain queries of the instance and its GPUs.
-        let gpus = unsafe { instance.enumerate_physical_devices() }
-            .map_err(|e| Error::native(format!("Vulkan physical devices: {e}")))?;
+        let gpus =
+            unsafe { instance.enumerate_physical_devices() }.map_err(|e| loader_error("Vulkan physical devices", e))?;
         if gpus.is_empty() {
             return Err(Error::unsupported("No Vulkan compatible GPU found"));
         }
