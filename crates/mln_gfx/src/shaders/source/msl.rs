@@ -165,8 +165,8 @@ pub fn blank_comments(text: &str) -> String {
         // The bytes of `tail` to keep, to blank, and to keep after them.
         let (open, blank, close) = if tail.starts_with("//") {
             (0, tail.find('\n').unwrap_or(tail.len()), 0)
-        } else if tail.starts_with("/*") {
-            (0, tail[2..].find("*/").map_or(tail.len(), |end| end + 4), 0)
+        } else if let Some(after) = tail.strip_prefix("/*") {
+            (0, after.find("*/").map_or(tail.len(), |end| end + 4), 0)
         } else if tail.starts_with('"') || (tail.starts_with('\'') && !after_word) {
             let quote = tail.as_bytes()[0];
             let mut escaped = false;
