@@ -51,6 +51,8 @@ mod raster_textures_test;
 mod resize_test;
 // A frame whose stencil values overflow, with several world copies in view.
 mod stencil_overflow_test;
+// A file source that answers inside `load`.
+mod sync_file_source_test;
 // Text that the device's fonts shape, with a font file standing in for them.
 mod system_fonts_test;
 // The layers that drape over terrain, drawn through the terrain's drapes.

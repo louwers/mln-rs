@@ -1,10 +1,11 @@
+// The tests run the HTTP client against a local HTTP server (httpmock).
+
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use httpmock::MockServer;
-use mln_test_server::HttpServer;
-use mln_util::chrono::{Timestamp, now, rfc1123};
+use httpmock::{HttpMockResponse, MockServer};
+use mln_util::chrono::{Timestamp, now, parse_timestamp_i32, rfc1123};
 use parking_lot::Mutex;
 
 use super::{Dispatcher, LocalRequests, Req, TestLoop, req};
@@ -22,10 +23,26 @@ fn data(res: &Response) -> &[u8] {
     res.data.as_deref().map(Vec::as_slice).expect("data")
 }
 
+/// A server whose `path` answers with `status`, `headers` and `body`.
+fn serving(path: &str, status: u16, headers: &[(&str, String)], body: &str) -> MockServer {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method("GET").path(path);
+        let then = headers.iter().fold(then.status(status), |then, (name, value)| then.header(*name, value));
+        then.body(body);
+    });
+    server
+}
+
+/// A server whose `/test` answers "Hello World!" without caching headers.
+fn hello() -> MockServer {
+    serving("/test", 200, &[], "Hello World!")
+}
+
 // gtest: HTTPFileSource.Cancel
 #[test]
 fn cancel() {
-    let server = HttpServer::new();
+    let server = hello();
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let fs = http_file_source();
@@ -42,7 +59,7 @@ fn cancel() {
 // gtest: HTTPFileSource.HTTP200
 #[test]
 fn http200() {
-    let server = HttpServer::new();
+    let server = hello();
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let fs = http_file_source();
@@ -69,7 +86,11 @@ fn http200() {
 // gtest: HTTPFileSource.HTTP206
 #[test]
 fn http206() {
-    let server = HttpServer::new();
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method("GET").path("/test").header("Range", "bytes=3-8");
+        then.status(206).header("Content-Range", "bytes 3-8/12").body("lo Wor");
+    });
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let fs = http_file_source();
@@ -99,7 +120,7 @@ fn http206() {
 // gtest: HTTPFileSource.HTTP404
 #[test]
 fn http404() {
-    let server = HttpServer::new();
+    let server = serving("/doesnotexist", 404, &[], "");
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let fs = http_file_source();
@@ -127,7 +148,7 @@ fn http404() {
 // gtest: HTTPFileSource.HTTPTile404
 #[test]
 fn http_tile404() {
-    let server = HttpServer::new();
+    let server = serving("/doesnotexist", 404, &[], "");
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let fs = http_file_source();
@@ -156,7 +177,7 @@ fn http_tile404() {
 // gtest: HTTPFileSource.HTTP200EmptyData
 #[test]
 fn http200_empty_data() {
-    let server = HttpServer::new();
+    let server = serving("/empty-data", 200, &[], "");
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let fs = http_file_source();
@@ -184,7 +205,7 @@ fn http200_empty_data() {
 // gtest: HTTPFileSource.HTTP204
 #[test]
 fn http204() {
-    let server = HttpServer::new();
+    let server = serving("/no-content", 204, &[], "");
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let fs = http_file_source();
@@ -213,7 +234,7 @@ fn http204() {
 // gtest: HTTPFileSource.HTTP500
 #[test]
 fn http500() {
-    let server = HttpServer::new();
+    let server = serving("/permanent-error", 500, &[], "Server Error!");
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let fs = http_file_source();
@@ -241,7 +262,16 @@ fn http500() {
 // gtest: HTTPFileSource.ExpiresParsing
 #[test]
 fn expires_parsing() {
-    let server = HttpServer::new();
+    let server = serving(
+        "/test",
+        200,
+        &[
+            ("Last-Modified", rfc1123(parse_timestamp_i32(1_420_794_326))),
+            ("Expires", rfc1123(parse_timestamp_i32(2_000_000_000))),
+            ("ETag", "foo".to_owned()),
+        ],
+        "Hello World!",
+    );
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let fs = http_file_source();
@@ -249,7 +279,7 @@ fn expires_parsing() {
     let stop = run_loop.clone();
     let _req = fs.request_local(
         &local,
-        &Resource::new(Kind::Unknown, server.url("/test?modified=1420794326&expires=2000000000&etag=foo")),
+        &Resource::new(Kind::Unknown, server.url("/test")),
         Box::new(move |res: Response| {
             assert_eq!(None, res.error);
             assert_eq!(b"Hello World!", data(&res));
@@ -268,7 +298,7 @@ fn expires_parsing() {
 // gtest: HTTPFileSource.CacheControlParsing
 #[test]
 fn cache_control_parsing() {
-    let server = HttpServer::new();
+    let server = serving("/test", 200, &[("Cache-Control", "max-age=120".to_owned())], "Hello World!");
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let fs = http_file_source();
@@ -276,7 +306,7 @@ fn cache_control_parsing() {
     let stop = run_loop.clone();
     let _req = fs.request_local(
         &local,
-        &Resource::new(Kind::Unknown, server.url("/test?cachecontrol=max-age=120")),
+        &Resource::new(Kind::Unknown, server.url("/test")),
         Box::new(move |res: Response| {
             assert_eq!(None, res.error);
             assert_eq!(b"Hello World!", data(&res));
@@ -341,7 +371,14 @@ fn load() {
     const CONCURRENCY: usize = 50;
     const MAX: i32 = 10000;
 
-    let server = HttpServer::new();
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method("GET").path_matches(r"^/load/\d+$");
+        then.respond_with(|request| {
+            let number = request.uri().path()["/load/".len()..].to_owned();
+            HttpMockResponse::builder().status(200).body(format!("Request {number}")).build()
+        });
+    });
     let run_loop = TestLoop::new();
     let local = run_loop.dispatcher();
     let fs: Rc<dyn FileSource> = Rc::new(http_file_source());
