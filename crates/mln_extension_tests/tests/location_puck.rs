@@ -103,8 +103,7 @@ fn a_query_finds_the_puck_within_a_polygon_around_it() {
     let fixture = Fixture::new(registry(), STYLE);
     let found = |west: f64, east: f64| {
         let ring = format!("[[{west},-1],[{east},-1],[{east},1],[{west},1],[{west},-1]]");
-        let json: JsonValue =
-            format!(r#"["within",{{"type":"Polygon","coordinates":[{ring}]}}]"#).parse().unwrap();
+        let json: JsonValue = format!(r#"["within",{{"type":"Polygon","coordinates":[{ring}]}}]"#).parse().unwrap();
         let filter = convert_filter(&Convertible::from(&json), &Functions::with_builtins(), &mut Error::default())
             .expect("a within filter");
         let x = f64::from(SIZE.width) / 2.0 - 4096.0 / 360.0;
