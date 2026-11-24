@@ -9,12 +9,14 @@ use std::sync::Arc;
 use feature::{Feature, PropertyMap};
 use geo_types::{Geometry, Point};
 use mln_map_types::MapMode;
-use mln_storage::Data;
+use mln_storage::response::{Reason, ResourceError};
+use mln_storage::{Data, FileSource, Resource, Responder, Response};
 use mln_style::layer_type::SourceKind;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_util::identity::SimpleIdentity;
 use mln_util::pool::TaskGroup;
+use parking_lot::Mutex;
 use serde_json::json;
 
 use super::tile_jobs_test::{Manual, icons, layer, points};
@@ -779,4 +781,81 @@ fn a_value_tiles_world_copy_shares_its_value() {
     assert!(Arc::ptr_eq(&shown_value(&tiles, &copy).0, &shown_value(&tiles, &loaded).0));
     tiles.set_necessity(&copy, TileNecessity::Required);
     assert!(script.take_loads().is_empty(), "the tile that took its copy loads nothing");
+}
+
+/// A file source whose requests wait until the test answers them.
+#[derive(Default)]
+struct Held(Mutex<Vec<Responder>>);
+
+impl Held {
+    /// Answers the oldest request with `response`.
+    fn respond(&self, response: Response) {
+        let responder = self.0.lock().remove(0);
+        responder.send(response);
+    }
+
+    fn pending(&self) -> usize {
+        self.0.lock().len()
+    }
+}
+
+impl FileSource for Held {
+    fn load(&self, _resource: &Resource, responder: Responder) {
+        self.0.lock().push(responder);
+    }
+
+    fn can_request(&self, _resource: &Resource) -> bool {
+        true
+    }
+}
+
+/// A tile laid out without the glyphs of a range that failed lays out again
+/// with them once another tile's wait loads the range, without a retry.
+#[test]
+fn a_tile_lays_out_again_once_a_failed_glyph_range_loads() {
+    let test = Test::new();
+    let file_source = Arc::new(Held::default());
+    let store = tile_store(&test.pool, Box::new(InlineWorkers));
+    let first = OverscaledTileID::from_zxy(1, 0, 0);
+    let second = OverscaledTileID::from_zxy(1, 1, 0);
+    let mut tiles = OneTile::new(store, SourceKind::Geometry, first, MapMode::Continuous);
+    tiles.add(second);
+    let glyph_source: Arc<dyn FileSource> = Arc::<Held>::clone(&file_source);
+    tiles.store.set_file_source(Some(glyph_source));
+    tiles.store.glyphs().set_url("test://{fontstack}/{range}.pbf");
+    let labels = style(&[layer(json!({"id": "labels", "type": "dot", "layout": {"dot-label": "a"}}))]);
+    let has_glyph = |tiles: &OneTile, id: &OverscaledTileID| {
+        let contents = tiles.tile_at(id).contents().and_then(Contents::geometry).expect("a layout");
+        let glyphs = &contents.answer.resolved.glyphs;
+        glyphs
+            .values()
+            .flat_map(|positions| positions.iter())
+            .any(|(id, position)| id.char() == Some('a') && position.is_some())
+    };
+
+    tiles.set_style(&labels);
+    tiles.set_data(Some(points()));
+    tiles.update();
+    tiles.update();
+    assert_eq!(file_source.pending(), 1, "the glyph range's request");
+    let mut failed = Response::new();
+    failed.error = Some(Box::new(ResourceError::new(Reason::Other, "offline")));
+    let _log = crate::tests::text::SquelchLog::new();
+    file_source.respond(failed);
+    tiles.settle(&[first]);
+    assert!(!has_glyph(&tiles, &first), "laid out without the glyph");
+
+    tiles.with_at(&second, |tile| {
+        tile.set_style(&labels, 1.0, mln_util::subdivision_granularity::SubdivisionGranularitySetting::none());
+        tile.take_data(Some(points()), false);
+    });
+    tiles.update();
+    tiles.update();
+    assert_eq!(file_source.pending(), 1, "the range's request again");
+    let mut glyphs = Response::new();
+    glyphs.data = Some(Arc::new(crate::tests::text::read_file("test/fixtures/resources/glyphs.pbf")));
+    file_source.respond(glyphs);
+    tiles.settle(&[first, second]);
+    assert!(has_glyph(&tiles, &second));
+    assert!(has_glyph(&tiles, &first), "laid out again with the glyph");
 }
