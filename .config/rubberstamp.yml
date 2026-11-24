@@ -4,11 +4,15 @@ version: 1
 context: >-
   mln-rs is a Rust implementation of MapLibre Native targeting desktop, mobile,
   and the browser. `src/` is the `mln-rs` facade crate, `crates/` holds the
-  workspace libraries (core map/style/renderer crates, per-backend renderers,
-  browser crates, and `mln_c` for the C API), `vendor/` holds ported
-  dependencies, `examples/` holds the desktop and browser apps, `tools/` holds
-  developer and test tooling, and `mise.toml` / `mise-tasks/` define build and
-  test tasks.
+  workspace libraries (core map/style/renderer crates, the layer types in
+  `mln_layers`, the source types in `mln_sources`, the first-party extensions
+  `mln_ngon`, `mln_location_puck` and `mln_image_process` with their tests in
+  `mln_extension_tests`, per-backend renderers, browser crates, and `mln_c` for
+  the C API), `vendor/` holds ported dependencies, `examples/` holds the desktop
+  and browser apps, `tools/` holds developer and test tooling, and `mise.toml` /
+  `mise-tasks/` define build and test tasks. The layer types and the extensions
+  carry their programs' shaders in every shading language, in files named for
+  the language (`wgsl.rs`, `msl.rs`, `glsl.rs`, `glsl_es.rs`).
 
 # `tools/ci/jobs.json` maps each unit to the CI jobs it runs. A unit's rule
 # applies it unconditionally when a changed file matches, using GitHub Actions
@@ -53,6 +57,9 @@ ci:
         - if:
             files:
               - crates/mln_mtl/**
+              # The programs' Metal shaders, beside their other languages'.
+              - "**/msl.rs"
+              - crates/mln_extension_tests/src/stamp/**
           then: apply
     web:
       covers: >-
