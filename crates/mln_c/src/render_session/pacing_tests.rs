@@ -219,10 +219,22 @@ mod display {
             let invalid = pacing(MLN_FRAME_PACING_OPTION_MAXIMUM_FRAMES_PER_SECOND, 0, core::ptr::null_mut());
             assert_eq!(set_pacing(session, Some(&invalid)), MLN_STATUS_INVALID_ARGUMENT);
             wait_for_paced_frame(session, paint(map, "blue"));
-            // That a session without a pacer gets no frames from it is the
-            // runtime's rule, which its tests check with a display they
-            // drive.
+
+            // Null options remove the pacer: a session that keeps one on the
+            // same display shows two paced frames after the redraw that the
+            // session without one asks for, which nothing answers.
             assert_eq!(set_pacing(session, None), MLN_STATUS_OK);
+            barrier(session);
+            drain(session);
+            let (clock_runtime, clock_map, clock) = settled_session();
+            assert_eq!(set_pacing(clock, Some(&options)), MLN_STATUS_OK);
+            paint(map, "green");
+            for color in ["red", "blue"] {
+                wait_for_paced_frame(clock, paint(clock_map, color));
+            }
+            barrier(session);
+            assert_eq!(drain(session).len(), 0, "a frame of a session without a pacer");
+            end(clock_runtime, clock_map, clock);
             end(runtime, map, session);
         }
     }
