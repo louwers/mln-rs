@@ -517,8 +517,12 @@ impl TestRunner {
             metadata.actual = encode_png(actual_image);
 
             if actual_image.size.is_empty() {
-                metadata.error_message = "Invalid size for actual image".to_string();
-                metadata.render_errored += 1;
+                // A test that already errored, such as one whose render
+                // failed, keeps its own error.
+                if metadata.render_errored == 0 {
+                    metadata.error_message = "Invalid size for actual image".to_string();
+                    metadata.render_errored += 1;
+                }
                 return;
             }
 
@@ -1311,8 +1315,9 @@ fn run_test(ctx: &mut TestContext<'_>, operations: &[TestOperation]) -> Premulti
         match ctx.get_map().render() {
             Ok(image) => result = image,
             Err(e) => {
-                // (sic) "Renering", as in C++.
-                ctx.get_metadata().error_message = format!("Renering raised an exception: {e}");
+                let metadata = ctx.get_metadata();
+                metadata.error_message = format!("Rendering failed: {e}");
+                metadata.render_errored += 1;
             }
         }
     }

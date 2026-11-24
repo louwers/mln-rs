@@ -677,8 +677,7 @@ fn statuses_and_summary() {
     assert!(!result.metadatas.iter().any(|m| m.id == "skipped"));
 
     let render_error = result.metadatas.iter().find(|m| m.id == "render-error").unwrap();
-    // C++ overwrites the exception message with the empty-image error.
-    assert_eq!(render_error.error_message, "Invalid size for actual image");
+    assert_eq!(render_error.error_message, "Rendering failed: mock render failure");
 
     let stats = result.stats;
     assert_eq!(
@@ -708,7 +707,7 @@ fn statuses_and_summary() {
     }
     assert_eq!(html.matches("<div class=\"test ").count(), 7);
     assert!(html.contains(" data-alt-src=\"data:image/png;base64,"));
-    assert!(html.contains("<strong>Error:</strong> Invalid size for actual image"));
+    assert!(html.contains("<strong>Error:</strong> Rendering failed: mock render failure"));
     // A passed test's images are written to disk, though the report leaves
     // them out.
     assert!(suite.dir.join("out/pass/actual.png").exists());
