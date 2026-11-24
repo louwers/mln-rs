@@ -1,5 +1,6 @@
 // The messages between the page (main.ts), the map's Web Worker
-// (map-worker.ts) and the tile workers' Web Workers (tile-worker.ts).
+// (map-worker.ts), the style picker's previews' (preview-worker.ts) and the
+// tile workers' Web Workers (tile-worker.ts).
 //
 // Each tile workers' Web Worker has a control port to the map's: the map's
 // runtime connects each of its render sessions to it there, with a port of
@@ -213,6 +214,54 @@ export type FromMap =
   | { type: "fatal"; message: string }
   // The map didn't start: the browser's API couldn't draw it.
   | { type: "unsupported"; message: string };
+
+/** A style's preview in the style picker (picker.ts). */
+export interface Preview {
+  canvas: OffscreenCanvas;
+  style: StyleSource;
+  /** The terrain the map adds to the style (styles.ts). */
+  terrain: Terrain | undefined;
+}
+
+/**
+ * What starts the style picker's previews, a map each, in a Web Worker of
+ * their own (preview-worker.ts).
+ */
+export interface StartPreviews {
+  type: "start";
+  module: WebAssembly.Module;
+  /** One per tile workers' Web Worker of the previews: its control port. */
+  tileWorkers: MessagePort[];
+  previews: Preview[];
+  /** Every preview's size, in CSS pixels. */
+  width: number;
+  height: number;
+  ratio: number;
+  camera: Camera;
+  /** The projection in place of the styles' own, as ToMap's. */
+  projection: ProjectionType | null;
+  /** As Start's. */
+  fallbackFontFaces: string | null;
+  localIdeographs: boolean;
+}
+
+/** From the page to the previews' Web Worker. */
+export type ToPreviews =
+  | StartPreviews
+  // The camera every preview shows from its next frame on.
+  | { type: "camera"; camera: Camera }
+  | { type: "projection"; projection: ProjectionType | null }
+  | { type: "resize"; width: number; height: number }
+  | { type: "pixelRatio"; ratio: number };
+
+/**
+ * From the previews' Web Worker to the page: the previews stopped, on a
+ * panic or because the browser's API couldn't draw them.
+ */
+export interface FromPreviews {
+  type: "fatal";
+  message: string;
+}
 
 /** From the page to a tile workers' Web Worker. */
 export interface StartTileWorker {

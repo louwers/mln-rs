@@ -48,7 +48,9 @@ The page draws its own controls over the map: a style picker, a backend
 indicator that switches between WebGPU and WebGL2 where both are available, zoom
 buttons, a compass, attributions, and a panel that lists the gestures and has a
 choice of `projection` and switches for `compare`, `debug` and `freeBearing`.
-The style picker's Satellite 3D is VersaTiles' Satellite with
+The style picker is a dialog with a live preview of every style, each a map of
+the area in view that follows the map while the dialog is open (web/picker.ts).
+Its Satellite 3D is VersaTiles' Satellite with
 [Mapterhorn](https://mapterhorn.com)'s terrain added once it loads
 (web/styles.ts).
 
@@ -60,7 +62,10 @@ page (main thread, no wasm)
  │   └─ shaper module, loaded on demand
  ├─ tile worker 0: TileWorkerHost: parses, lays out and decodes tiles
  ├─ tile worker 1
- └─ ...
+ ├─ ...
+ └─ while the style picker is open:
+     ├─ preview worker: a WebMap per style, each for its preview's canvas
+     └─ tile workers of the previews' own, up to two
 ```
 
 - The page compiles the wasm module once and sends it to each worker, which
@@ -80,6 +85,13 @@ page (main thread, no wasm)
   MessageChannels, which the runtime connects through a control port that the
   page gives the map worker for each tile worker. Large arrays, such as pixels
   and vertices, are transferred rather than copied.
+- The style picker's previews are maps like the page's, one per style, in a Web
+  Worker of their own (web/preview-worker.ts). The page starts it and its tile
+  workers when the picker opens and terminates them when it closes, so the map's
+  thread does none of their work and a closed picker holds no memory. A browser
+  gives a Web Worker only a few WebGL2 contexts (Chromium four), so with WebGL2
+  the previews' maps draw with one, a whole frame at a time, and each frame goes
+  to its preview's canvas as a bitmap.
 - The module comes in two builds, and a browser downloads only one: WebGPU
   (mln_webgpu), or WebGL2 (mln_gl, the `webgl` feature without the default ones)
   for browsers without a working WebGPU.

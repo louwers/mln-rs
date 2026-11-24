@@ -2,7 +2,9 @@
 //! render session presents to the page's canvas (an `OffscreenCanvas`), with
 //! the browser's WebGPU or, in the `webgl` build of the module, its WebGL2.
 //! Its tile workers are in other Web Workers, and the page's input moves it
-//! through a gesture recognizer (`mln_gestures`).
+//! through a gesture recognizer (`mln_gestures`). A Web Worker can run
+//! several, each with a runtime of its own, as the page's style picker does
+//! for its previews (web/preview-worker.ts).
 //!
 //! The runtime and the session run on this Web Worker's one thread, in the
 //! slices of `mln_web_host`'s pump: a command or a frame demand runs in a
@@ -22,6 +24,7 @@ use mln_runtime::{
 };
 use mln_util::LatLng;
 use mln_util::geo::ScreenCoordinate;
+use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_web_host::{pump, shaper};
@@ -43,9 +46,12 @@ pub fn set_preloads(take: js_sys::Function) {
 thread_local! {
     /// What `set_preloads` set, for the runtimes made after.
     static PRELOADS: std::cell::RefCell<Option<js_sys::Function>> = const { std::cell::RefCell::new(None) };
-    /// The `on_frame` of this Web Worker's map, which its session's frame
-    /// wake calls on this thread.
-    static ON_FRAME: std::cell::RefCell<Option<js_sys::Function>> = const { std::cell::RefCell::new(None) };
+    /// The `on_frame` of each of this Web Worker's maps, by the map's
+    /// `on_frame` key, which the map's session's frame wake calls on this
+    /// thread.
+    static ON_FRAME: std::cell::RefCell<HashMap<u64, js_sys::Function>> = std::cell::RefCell::default();
+    /// The `on_frame` key of the last map made.
+    static ON_FRAME_KEYS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// How many phases `WebMap::frame_timings` reports.
@@ -104,6 +110,8 @@ pub struct WebMap {
     map: Map,
     _runtime: Runtime,
     reports: Arc<Mutex<Reports>>,
+    /// The key of the map's `on_frame` in `ON_FRAME`.
+    on_frame_key: u64,
     /// The session has something new to draw since the last demand.
     redraw: Arc<AtomicBool>,
     /// The next demand draws a frame even when nothing changed.
@@ -151,8 +159,13 @@ impl WebMap {
     /// of a style's `font-faces`. With `local_ideographs`, the map draws CJK
     /// glyphs with the browser's fonts rather than downloading them, as GL
     /// JS's `localIdeographFontFamily`. `on_frame()` runs in the task
-    /// that rendered a frame, while the canvas still has it, and must call
-    /// `drain_frames`.
+    /// that rendered a frame of this map, while the canvas still has it, and
+    /// must call `drain_frames`.
+    ///
+    /// In the `webgl` build, the maps made on one canvas draw with its one
+    /// WebGL2 context, each a whole frame at a time, which its `on_frame`
+    /// can take from the canvas. A browser gives a Web Worker only a few
+    /// WebGL2 contexts.
     ///
     /// Rejects with an error named `NotSupportedError` when the browser's
     /// API can't draw the map.
@@ -196,10 +209,14 @@ impl WebMap {
 
         let redraw = Arc::new(AtomicBool::new(true));
         let redraw_wake = Arc::clone(&redraw);
-        ON_FRAME.with(|slot| *slot.borrow_mut() = Some(on_frame));
+        let on_frame_key = ON_FRAME_KEYS.with(|keys| {
+            keys.set(keys.get() + 1);
+            keys.get()
+        });
+        ON_FRAME.with(|maps| maps.borrow_mut().insert(on_frame_key, on_frame));
         let options = AttachOptions {
-            frame_wake: Some(Arc::new(|| {
-                let on_frame = ON_FRAME.with(|slot| slot.borrow().clone());
+            frame_wake: Some(Arc::new(move || {
+                let on_frame = ON_FRAME.with(|maps| maps.borrow().get(&on_frame_key).cloned());
                 if let Some(on_frame) = on_frame {
                     let _ = on_frame.call0(&JsValue::NULL);
                 }
@@ -222,6 +239,7 @@ impl WebMap {
             map: map.clone(),
             _runtime: runtime,
             reports,
+            on_frame_key,
             redraw,
             force: false,
             demanded: 0,
@@ -611,6 +629,13 @@ impl WebMap {
     /// run, and panics where one of a frame's checks doesn't hold.
     pub fn take_gpu_check(&self) -> Result<bool, JsValue> {
         self.gpu_check.take().map_err(js_error)
+    }
+}
+
+impl Drop for WebMap {
+    fn drop(&mut self) {
+        // A thread that is ending has dropped the maps' `on_frame`s already.
+        let _ = ON_FRAME.try_with(|maps| maps.borrow_mut().remove(&self.on_frame_key));
     }
 }
 
