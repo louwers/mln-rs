@@ -67,14 +67,14 @@ pub struct Program {
     /// those whose `HAS_UNIFORM_<name>` its sources test once written
     /// out, and no others, since a variant defines only these.
     pub properties: &'static [Property],
-    /// Which of the engine's projection blocks its vertex stage reads.
+    /// Which of the engine's projection blocks its stages read.
     pub projection: Projection,
     /// Its source in each shading language it has one in.
     pub sources: Sources,
 }
 
-/// Which of the engine's projection blocks a [`Program`]'s vertex stage
-/// reads.
+/// Which of the engine's projection blocks a [`Program`]'s stages read, as
+/// its vertex stage does to project: a program's stages read one at most.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Projection {
     /// None: its geometry is in clip space or the view's, as a quad over
@@ -673,17 +673,18 @@ impl Program {
         self.check_projection()
     }
 
-    /// Checks that the projection block that the program's vertex stage
-    /// and prelude read in WGSL, MSL and GLSL is the one its
+    /// Checks that the projection block that the program's stages and
+    /// prelude read in WGSL, MSL and GLSL is the one its
     /// [`projection`](Program::projection) names: a draw of a program that
-    /// reads another gets a block of zeros. GLSL ES isn't checked: its
-    /// backend's prelude reads the projection's members itself.
+    /// reads another gets a block of zeros, and one stage can't read one
+    /// block while the other reads the other at its id. GLSL ES isn't
+    /// checked: its backend's prelude reads the projection's members itself.
     fn check_projection(&self) -> Result<(), GpuError> {
         let Sources { wgsl, msl, glsl, .. } = self.sources;
         let stages = [
-            ("WGSL", wgsl.map(|source| [source.prelude, source.vertex])),
-            ("MSL", msl.map(|source| [source.prelude, source.source])),
-            ("GLSL", glsl.map(|source| [source.prelude, source.vertex])),
+            ("WGSL", wgsl.map(|source| [source.prelude, source.vertex, source.fragment])),
+            ("MSL", msl.map(|source| [source.prelude, source.source, ""])),
+            ("GLSL", glsl.map(|source| [source.prelude, source.vertex, source.fragment])),
         ];
         for (language, texts) in stages {
             let Some(texts) = texts else { continue };
@@ -919,6 +920,10 @@ mod tests {
         assert!(Program { projection: Projection::PerDraw, ..reading }.check().is_ok());
         assert!(Program { projection: Projection::Own, ..reading }.check().is_err());
         assert!(Program { projection: Projection::PerDraw, ..EMPTY }.check().is_ok(), "no source to check");
+        // One stage reads one projection block and the other the other.
+        static BOTH: wgsl::Wgsl = wgsl::Wgsl { fragment: "let z = drawProjection.x;", ..READS };
+        let both = Program { projection: Projection::PerDraw, sources: Sources::NONE.wgsl(&BOTH), ..EMPTY };
+        assert!(both.check().is_err(), "a fragment stage that reads the other projection");
     }
 
     #[test]
