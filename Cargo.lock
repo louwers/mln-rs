@@ -3297,7 +3297,6 @@ dependencies = [
  "geo-types",
  "glam",
  "httpdate",
- "jni",
  "js-sys",
  "mln-rs-conversion",
  "mln-rs-expression",

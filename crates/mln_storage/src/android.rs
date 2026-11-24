@@ -4,13 +4,14 @@
 
 #![expect(unsafe_code, reason = "JNI and the NDK's asset manager are the FFI here")]
 
-use std::ffi::{CString, c_int, c_void};
+use std::ffi::{CString, c_char, c_int, c_void};
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::{Arc, OnceLock};
 
 use jni::errors::Error as JniError;
 use jni::objects::{Global, JObject};
-use jni::{EnvUnowned, Outcome, jni_sig, jni_str};
+use jni::sys::{JNI_OK, jint, jsize};
+use jni::{EnvUnowned, JavaVM, Outcome, jni_sig, jni_str};
 use mln_util::error::Error;
 
 use crate::local_file_request::read_range;
@@ -38,7 +39,7 @@ pub(crate) fn url_path(url: &str) -> &str {
 #[link(name = "android")]
 unsafe extern "C" {
     fn AAssetManager_fromJava(env: *mut c_void, asset_manager: *mut c_void) -> *mut c_void;
-    fn AAssetManager_open(manager: *mut c_void, name: *const std::ffi::c_char, mode: c_int) -> *mut c_void;
+    fn AAssetManager_open(manager: *mut c_void, name: *const c_char, mode: c_int) -> *mut c_void;
     fn AAsset_close(asset: *mut c_void);
     fn AAsset_read(asset: *mut c_void, buffer: *mut c_void, count: usize) -> c_int;
     fn AAsset_seek64(asset: *mut c_void, offset: i64, whence: c_int) -> i64;
@@ -56,10 +57,49 @@ struct AssetManager {
 
 static ASSETS: OnceLock<AssetManager> = OnceLock::new();
 
+/// The Java VM that HTTP goes through: the one that [`init`] gave, or else
+/// the process's own, such as an app's that didn't call [`init`], or that of a
+/// test that runs in a Java VM's process.
+pub(crate) fn java_vm() -> Option<JavaVM> {
+    JavaVM::singleton().ok().or_else(process_java_vm)
+}
+
+unsafe extern "C" {
+    fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
+    fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+}
+
+/// The process's Java VM, through `JNI_GetCreatedJavaVMs`, which
+/// libnativehelper exports to apps from API 31. A process with a Java VM has
+/// loaded libnativehelper, so this doesn't load it (`RTLD_NOLOAD`).
+fn process_java_vm() -> Option<JavaVM> {
+    type GetCreatedJavaVms = unsafe extern "system" fn(*mut *mut jni::sys::JavaVM, jsize, *mut jsize) -> jint;
+    const RTLD_NOW: c_int = 2;
+    const RTLD_NOLOAD: c_int = 4;
+    // SAFETY: a library name and flags that dlopen takes.
+    let library = unsafe { dlopen(c"libnativehelper.so".as_ptr(), RTLD_NOW | RTLD_NOLOAD) };
+    if library.is_null() {
+        return None;
+    }
+    // SAFETY: the loaded library, and a symbol name.
+    let symbol = unsafe { dlsym(library, c"JNI_GetCreatedJavaVMs".as_ptr()) };
+    if symbol.is_null() {
+        return None;
+    }
+    // SAFETY: JNI_GetCreatedJavaVMs has this signature.
+    let get_created_java_vms = unsafe { std::mem::transmute::<*mut c_void, GetCreatedJavaVms>(symbol) };
+    let mut vm = std::ptr::null_mut();
+    let mut count = 0;
+    // SAFETY: room for one VM, and the count.
+    let status = unsafe { get_created_java_vms(&raw mut vm, 1, &raw mut count) };
+    // SAFETY: the process's live VM, which it keeps until it exits.
+    (status == JNI_OK && count == 1 && !vm.is_null()).then(|| unsafe { JavaVM::from_raw(vm) })
+}
+
 /// Gives the file sources the Java VM of `jni_env` and the app's `context`.
 /// Call it before the first HTTP request or app asset; a later call changes
 /// nothing. Without it, app assets fail, and HTTP requests fail unless the
-/// process has a Java VM of its own ([`mln_util::android::java_vm`]).
+/// process has a Java VM of its own.
 ///
 /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when JNI fails,
 /// such as for a `context` that is no `Context`, and leaves no Java exception
@@ -79,7 +119,7 @@ pub unsafe fn init(jni_env: *mut c_void, context: *mut c_void) -> Result<(), Err
             let context = unsafe { JObject::from_raw(env, context.cast()) };
             let initialized = (|| {
                 retain_assets(env, &context)?;
-                // Keeps the VM for mln_util::android::java_vm.
+                // Records the VM as jni's, for java_vm.
                 env.get_java_vm()?;
                 Ok(())
             })();

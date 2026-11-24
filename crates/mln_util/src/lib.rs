@@ -2,8 +2,6 @@
 //! time, strings, URLs, logging, threading helpers and more, one module per
 //! file.
 
-#[cfg(target_os = "android")]
-pub mod android;
 mod color;
 pub mod compression;
 pub mod constants;
