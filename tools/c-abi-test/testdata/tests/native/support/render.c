@@ -254,6 +254,11 @@ static bool attach_offscreen(
   return true;
 }
 
+static bool driver_woken(void* context) {
+  mln_test_render_fixture* fixture = context;
+  return atomic_load(&fixture->driver_wakes) != 0;
+}
+
 // Attaches with `attach` on `driver`. A borrowed attach makes a ring of
 // `ring_depth` textures, where zero takes two.
 static bool create_fixture(
@@ -299,8 +304,14 @@ static bool create_fixture(
         fixture->session, &attaching, MLN_TEST_DIAGNOSTIC
       ) == MLN_STATUS_OK &&
       attaching.state == MLN_RENDER_SESSION_STATE_ATTACHING;
+    // The session's first driver work wake can come from the runtime's
+    // thread after the attach returns, so the fixture waits for it, before
+    // any service.
     if (fixture->driver == MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD) {
-      fixture->observed_driver_ready = atomic_load(&fixture->driver_wakes) != 0;
+      fixture->observed_driver_ready = mln_test_await(
+        driver_woken, fixture, mln_test_deadline_default(),
+        "a caller driver's first driver work wake"
+      );
     }
   }
   const mln_status finish_status =

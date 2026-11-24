@@ -52,7 +52,8 @@ static void an_attached_session_holds_its_map(void) {
     MLN_RENDER_SESSION_CAPABILITY_FRAME_ACQUISITION, capabilities.flags
   );
   // A caller driver attaches only when the host services it, so the session
-  // is still attaching after submission and has published driver work.
+  // is still attaching after submission, and wakes the host for its driver
+  // work before any service.
   const bool caller =
     fixture.driver == MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD;
   if (caller) {

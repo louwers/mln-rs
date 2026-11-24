@@ -23,7 +23,10 @@ typedef struct mln_test_render_fixture {
   mln_render_session session;
   void* backend_state;
   uint32_t driver;
+  // Whether the session was attaching when its attach returned.
   bool observed_attaching;
+  // Whether a caller-driven session's driver work wake ran before the
+  // fixture first serviced it.
   bool observed_driver_ready;
   // Counted by the fixture's frame and driver-work wakes, which also pulse.
   atomic_uint frame_wakes;
