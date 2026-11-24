@@ -132,9 +132,10 @@ impl DemData {
         let o = border_tile_data;
 
         // Tiles from the same source should always be of the same
-        // dimensions. Where they aren't (tiles of different sizes, or an
-        // empty one from a corrupt image), the border stays as it is.
-        if self.dim != o.dim || self.dim == 0 {
+        // dimensions and encoding. Where they aren't (tiles of different
+        // sizes or encodings, or an empty one from a corrupt image), the
+        // border stays as it is: its pixels decode by the tile's encoding.
+        if self.dim != o.dim || self.dim == 0 || self.encoding != o.encoding {
             return;
         }
 
@@ -296,6 +297,17 @@ mod tests {
         assert_eq!(dem1.get(4, 4), dem1.get(3, 3));
         assert_eq!(dem1.get(-1, -1), dem1.get(0, 0));
         assert_eq!(dem1.get(4, -1), dem1.get(3, 0));
+    }
+
+    // A neighbour of another encoding leaves the border as it is, which its
+    // pixels would decode wrongly in.
+    #[test]
+    fn a_neighbor_of_another_encoding_backfills_nothing() {
+        let mut dem = DemData::new(&fake_image(Size::new(4, 4)), RasterEncoding::Mapbox).unwrap();
+        let before = dem.image().data.clone();
+        let terrarium = DemData::new(&fake_image(Size::new(4, 4)), RasterEncoding::Terrarium).unwrap();
+        dem.backfill_border(&terrarium, -1, 0);
+        assert_eq!(dem.image().data, before);
     }
 
     // gtest: DemData.BackfillNeighbor
