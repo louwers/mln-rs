@@ -52,8 +52,9 @@ pub enum Overlap {
 #[derive(Clone, Copy, Debug)]
 pub struct Item {
     /// The index, among its layer's [`tiles`](super::PlacingLayer::tiles),
-    /// of the tile whose feature the shape is. Queries don't find the shape
-    /// of an item past them.
+    /// of the tile whose feature the shape is. The shape of an item past
+    /// them, as of every item while no layer places
+    /// ([`Placement::commit`](super::Placement::commit)), isn't inserted.
     pub tile: u32,
     /// The feature's index in its tile's source layer, which queries look
     /// up.
@@ -219,14 +220,13 @@ impl CollisionIndex {
         }
     }
 
-    /// Places `shape`, which stands for `item`.
+    /// Places `shape`, which stands for `item`, if `item` is of one of the
+    /// placing layer's tiles.
     #[inline]
     pub fn insert(&mut self, shape: Shape, item: Item) {
         let layer = &self.layer;
         let record = (item.tile < layer.tiles).then(|| self.tile_records.get(layer.first_tile + item.tile as usize));
-        let record = record.flatten().copied();
-        debug_assert!(record.is_some(), "an item of a tile whose bucket its layer doesn't lead");
-        let record = record.unwrap_or(NO_RECORD);
+        let Some(&record) = record.flatten() else { return };
         let entry = Entry {
             record,
             feature: item.feature,
@@ -484,5 +484,15 @@ mod tests {
         assert!(!index.offscreen(&bounds(0.0, 100.0)));
         assert!(index.offscreen(&bounds(612.0, 620.0)));
         assert_eq!(self::index(MapMode::Tile).padding(), 1024.0);
+    }
+
+    #[test]
+    fn a_shape_inserted_while_no_layer_places_isnt_placed() {
+        let mut index = index(MapMode::Static);
+        index.select_layer(0);
+        let shape = Shape::Box(Aabb::new(Vec2::splat(200.0), Vec2::splat(210.0)));
+        let item = Item { tile: 0, feature: 0, sort: 0, overlap: Overlap::Never, ignore_placement: false };
+        index.insert(shape, item);
+        assert!(!index.collides(&shape, Overlap::Never));
     }
 }

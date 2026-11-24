@@ -176,7 +176,8 @@ pub trait Placement: Default + 'static {
 
     /// Ends the placement: it is now the current one. Adds to
     /// [`cx.placed`](PlaceCx::placed) what the placement changed that
-    /// [`place`](Self::place) didn't add.
+    /// [`place`](Self::place) didn't add. No layer places here, so
+    /// [`cx.index`](PlaceCx::index) inserts nothing.
     fn commit(&mut self, _cx: &mut PlaceCx<'_>) {}
 
     /// Brings `cx`'s layers' buckets to the current placement, each frame
