@@ -216,16 +216,23 @@ fn draw_without_ending(target: &mut BorrowedTarget, gpu: &mut crate::VulkanGpu) 
     gpu.end_pass().unwrap();
 }
 
-/// A sync file that signals once a frame of `producer` is done.
+/// A sync file that signals once a frame of `producer` is done, or
+/// [`SyncKind::CpuComplete`] when the semaphore already signaled and exported
+/// no descriptor (`fd == -1`).
 #[cfg(unix)]
 fn sync_file(producer: &mut BorrowedTarget, gpu: &mut crate::VulkanGpu) -> mln_gfx::ConsumerSync {
     use std::os::fd::BorrowedFd;
     draw_without_ending(producer, gpu);
     let mln_gfx::frame::Handoff::GivenBack { sync, .. } = producer.end_frame(gpu) else { panic!("a handed frame") };
-    assert_eq!(SyncKind::SyncFd, sync.kind);
-    // SAFETY: the producer keeps the file open until its slot is given back.
-    let file = unsafe { BorrowedFd::borrow_raw(sync.handle as i32) }.try_clone_to_owned().unwrap();
-    mln_gfx::ConsumerSync { sync, sync_file: Some(file) }
+    match sync.kind {
+        SyncKind::SyncFd => {
+            // SAFETY: the producer keeps the file open until its slot is given back.
+            let file = unsafe { BorrowedFd::borrow_raw(sync.handle as i32) }.try_clone_to_owned().unwrap();
+            mln_gfx::ConsumerSync { sync, sync_file: Some(file) }
+        }
+        SyncKind::CpuComplete => mln_gfx::ConsumerSync::of(sync),
+        other => panic!("expected SyncFd or CpuComplete, got {other:?}"),
+    }
 }
 
 // A frame begun and drawn into, but not ended, is submitted with what its
