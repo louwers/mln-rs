@@ -9,8 +9,11 @@ The tests that CI's target jobs run, built for phones and run on real ones in
 - iOS: built for `aarch64-apple-ios`, on an Apple iPhone 17 Pro on iOS 26, with
   the render suite on Metal and its API validation.
 
-`schedule.sh` lists the phones. Each platform's directory holds the test spec,
-`test-spec.yml`, and the scripts that run the tests on the phones.
+`schedule.sh` lists the phones. The runs take the account's flat-rate devices,
+which maplibre-native's CI shares, and wait while its runs have them all: the
+account has five Android devices and one iPhone. Each platform's directory holds
+the test spec, `test-spec.yml`, and the scripts that run the tests on the
+phones.
 
 ## How a run works
 
@@ -103,5 +106,4 @@ mise run device-farm:package ios
 mise run device-farm:run ios
 ```
 
-The results land in `target/device-farm/results/<phone>/`. The phones are the
-account's flat-rate devices, which maplibre-native's CI shares.
+The results land in `target/device-farm/results/<phone>/`.

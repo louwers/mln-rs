@@ -3,9 +3,10 @@
 # Device Farm's phones (README.md): uploads it with its platform's test spec to
 # the project that $AWS_DEVICE_FARM_PROJECT_ARN names (by default the one named
 # mln-rs), schedules it on the platform's phones below, and prints the run's
-# ARN. With a key, it first stops the platform's runs that are scheduled with
-# the same key and haven't finished, such as those of a pull request's earlier
-# commit.
+# ARN. The run takes the account's flat-rate devices, and waits while
+# maplibre-native's runs have them all. With a key, it first stops the
+# platform's runs that are scheduled with the same key and haven't finished,
+# such as those of a pull request's earlier commit.
 #
 # Usage: schedule.sh <android|ios> <package directory> <run name> [key]
 #
@@ -110,4 +111,5 @@ aws devicefarm schedule-run \
     --device-selection-configuration "$selection" \
     --test "type=$type,testPackageArn=$package_arn,testSpecArn=$spec_arn" \
     --execution-configuration "jobTimeoutMinutes=$job_minutes,videoCapture=false" \
+    --configuration billingMethod=UNMETERED \
     --query run.arn --output text
