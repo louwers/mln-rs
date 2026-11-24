@@ -61,8 +61,11 @@ impl UniformBufferArray {
         self.write(gpu, id, data, true, device)
     }
 
+    /// Writes nothing to an id past the array's, which a program declares
+    /// only by mistake: the backend refuses such a program
+    /// ([`Program::check`](mln_gfx::shaders::program::Program::check)).
     fn write(&mut self, gpu: &mut dyn Gpu, id: usize, data: &[u8], storage: bool, device: &mut Device) -> bool {
-        let slot = &mut self.buffers[id];
+        let Some(slot) = self.buffers.get_mut(id) else { return false };
         let before = slot.as_ref().map(Buffer::id);
         let replaced = device.write_uniforms(gpu, slot, data, storage);
         if slot.as_ref().map(Buffer::id) != before {
@@ -80,5 +83,19 @@ impl Drop for UniformBufferArray {
         if let Some(buffer) = self.buffers.iter().flatten().next() {
             buffer.release(Release::Epoch(self.epoch));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_write_past_the_arrays_ids_writes_nothing() {
+        crate::tests::with_context(|gpu, context| {
+            let mut buffers = UniformBufferArray::new();
+            assert!(!buffers.write_uniform(gpu, FIRST_VERTEX_BUFFER_ID, &[0; 16], context.device()));
+            assert_eq!(buffers.epoch(), 0);
+        });
     }
 }
