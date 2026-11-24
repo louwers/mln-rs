@@ -346,14 +346,15 @@ impl CollisionIndex {
     /// deepest zoom and from the top of the view, and within a tile in the
     /// reverse of its bucket's order, or of their [`Item::sort`]. A shape is
     /// hit where the query touches its bounding box. Each feature has the
-    /// state that `feature_state` gives of its source.
+    /// state of its source that `source` gives, with the source's id; a
+    /// layer that left the source since the placement has no hits.
     pub(crate) fn query_rendered_features<'s>(
         &self,
         geometry: &[ScreenCoordinate],
         layers: &QueryLayers<'_>,
         options: &RenderedQueryOptions,
         global_state: Option<&GlobalStateMap>,
-        feature_state: impl Fn(SourceKey) -> Option<&'s SourceFeatureState>,
+        source: impl Fn(SourceKey) -> Option<(&'s str, &'s SourceFeatureState)>,
         results: &mut QueryResults,
     ) -> Result<(), Error> {
         if geometry.is_empty() || (self.collision.is_empty() && self.ignored.is_empty()) {
@@ -425,13 +426,11 @@ impl CollisionIndex {
                 None => hits.sort_by_key(|entry| Reverse(entry.sort)),
             }
             let style = record.leader.style().base();
-            let selection = FeatureSelection {
-                layers,
-                options,
-                global_state,
-                tile_id: &record.tile,
-                feature_state: feature_state(record.source),
-            };
+            let (source_id, feature_state) = source(record.source).unzip();
+            if layers.get(&style.id).is_some_and(|layer| Some(layer.style().base().source.as_str()) != source_id) {
+                continue;
+            }
+            let selection = FeatureSelection { layers, options, global_state, tile_id: &record.tile, feature_state };
             let features = hits.iter().map(|entry| entry.feature as usize);
             for (layer_id, features) in
                 record.features.lookup_features(features, &style.source_layer, &style.id, &selection)?
