@@ -10,9 +10,8 @@ use mln_util::{Color, LatLng};
 
 use super::util::{FixtureLog, new_layer, parse_json};
 use crate::conversion::Convertible;
-use crate::edit::Edit;
 use crate::expression::Functions;
-use crate::layer_type::LayerStyle;
+use crate::layer::LayerStyle;
 use crate::layers::Line;
 use crate::projection::Projection;
 use crate::property::transition::TransitionOptions;
@@ -20,6 +19,7 @@ use crate::property::value::{PropertyValue, StyleValue as _};
 use crate::sky::Sky;
 use crate::sources::tileset::vector_source as tileset_vector_source;
 use crate::style::Style;
+use crate::style::edit::Edit;
 use crate::terrain::Terrain;
 use crate::{StyleRegistry, image};
 

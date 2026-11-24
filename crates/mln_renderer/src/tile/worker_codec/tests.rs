@@ -4,8 +4,8 @@
 use std::sync::Arc;
 
 use mln_map_types::MapMode;
-use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
-use mln_style::layer::Layer;
+use mln_style::conversion::{Convertible, Error as ConversionError};
+use mln_style::layer::{Layer, convert_layer};
 use mln_style::layers::Fill;
 use mln_style::property::evaluation::PropertyEvaluationParameters;
 use mln_style::property::transition::{TransitionOptions, TransitionParameters};
@@ -310,7 +310,7 @@ fn every_geometry_layer_type_crosses() {
     ];
     for type_ in types {
         let layer = convert(&format!(r#"{{"id": "l", "type": "{type_}", "source": "s", "source-layer": "sl"}}"#));
-        let takes_geometry_tiles = layer.info().source == mln_style::layer_type::SourceKind::Geometry;
+        let takes_geometry_tiles = layer.info().source == mln_style::layer::SourceKind::Geometry;
         assert_eq!(
             takes_geometry_tiles,
             layers_of_type.iter().any(|(t, _)| *t == type_),
@@ -606,16 +606,16 @@ fn answers_cross_without_pixels() {
 }
 
 /// Evaluated values without a wire form.
-struct Unknown(Arc<dyn mln_style::layer_type::ErasedLayerStyle>);
+struct Unknown(Arc<dyn mln_style::layer::ErasedLayerStyle>);
 
 impl ErasedEvaluatedLayer for Unknown {
     fn entry(&self) -> &'static dyn crate::layer_type::ErasedLayerType {
         crate::layer_type::entry::<mln_style::layers::Line>()
     }
-    fn style(&self) -> &dyn mln_style::layer_type::ErasedLayerStyle {
+    fn style(&self) -> &dyn mln_style::layer::ErasedLayerStyle {
         &*self.0
     }
-    fn shared_style(&self) -> Arc<dyn mln_style::layer_type::ErasedLayerStyle> {
+    fn shared_style(&self) -> Arc<dyn mln_style::layer::ErasedLayerStyle> {
         Arc::clone(&self.0)
     }
     fn constants_mask(&self) -> u64 {

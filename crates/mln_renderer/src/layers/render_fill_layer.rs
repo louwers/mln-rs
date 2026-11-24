@@ -19,7 +19,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_style::PropertyEvaluationParameters;
-use mln_style::layer_type::LayerStyle;
+use mln_style::layer::LayerStyle;
 use mln_style::layers::Fill;
 use mln_style::layers::fill_layer_properties::FillPaintProperties;
 use mln_style_types::{AlignmentType, LayerBlendType, TranslateAnchorType};

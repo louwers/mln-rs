@@ -51,7 +51,7 @@ use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_map_types::{MapDebugOptions, View};
-use mln_style::layer_type::ErasedLayerStyle;
+use mln_style::layer::ErasedLayerStyle;
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
 use mln_util::size::Size;

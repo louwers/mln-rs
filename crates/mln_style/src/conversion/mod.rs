@@ -1,37 +1,32 @@
 //! Style conversion: `Error`, the type-erased `Convertible` view of a
 //! JSON-like value, its front ends over `serde_json` values, over
 //! `serde_json_borrow` values (the style parser's) and over
-//! `feature::Value`, `get_json_type`, and the typed converters from a
-//! `Convertible` to style types.
+//! `feature::Value`, `get_json_type`, and the converters of value types.
 //!
 //! `Converter` is a trait for the converters of constants, which take no
-//! arguments besides the value and the error. The converters of what can
-//! hold an expression are free functions that take the expression functions
-//! it parses against, such as `convert_filter(value, functions, error)` and
-//! `convert_property_value::<T>(value, error, allow_data_expressions,
-//! convert_tokens, functions)`.
+//! arguments besides the value and the error. A structure that can hold an
+//! expression has its converter next to it, a free function that takes the
+//! expression functions it parses against, such as
+//! `filter::convert_filter(value, functions, error)` and
+//! `property::convert::convert_property_value::<T>(value, error,
+//! allow_data_expressions, convert_tokens, functions)`.
 
 pub(crate) mod borrowed;
 pub(crate) mod constant;
 mod convertible;
 pub(crate) mod coordinate;
 pub(crate) mod custom_geometry_source_options;
-pub(crate) mod filter;
 pub(crate) mod geojson;
 pub(crate) mod geojson_options;
 mod get_json_type;
 pub(crate) mod image;
 mod json_conversion;
-pub mod layer;
-pub(crate) mod light;
 pub(crate) mod position;
-pub(crate) mod projection;
 pub(crate) mod rotation;
-pub(crate) mod sky;
-pub mod source;
+pub(crate) mod source;
 pub(crate) mod sprite;
-pub(crate) mod terrain;
 pub mod tileset;
+pub(crate) mod to_value;
 mod value;
 
 pub use convertible::{Convertible, Error, to_geojson};
@@ -48,11 +43,4 @@ pub fn convert<T: Converter>(value: &Convertible<'_>, error: &mut Error) -> Opti
     T::convert(value, error)
 }
 
-pub use filter::convert_filter;
 pub use geojson_options::convert_geojson_options;
-pub use layer::convert_layer;
-pub use light::convert_light;
-pub use projection::convert_projection;
-pub use sky::convert_sky;
-pub use source::convert_source;
-pub use terrain::convert_terrain;

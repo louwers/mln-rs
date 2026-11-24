@@ -339,7 +339,7 @@ macro_rules! properties {
                 }
             }
 
-            impl $crate::layer_type::PaintSet for Transitionable {
+            impl $crate::layer::PaintSet for Transitionable {
                 type Evaluated = PossiblyEvaluated;
                 type Unevaluated = Unevaluated;
 
@@ -532,7 +532,7 @@ macro_rules! properties {
                 }
             }
 
-            impl $crate::layer_type::LayoutSet for Unevaluated {
+            impl $crate::layer::LayoutSet for Unevaluated {
                 fn dependencies(&self) -> $crate::expression::Dependency {
                     self.get_dependencies()
                 }

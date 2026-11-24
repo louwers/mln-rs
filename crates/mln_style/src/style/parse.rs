@@ -12,20 +12,17 @@ use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
 
 use crate::conversion::borrowed::{Json, JsonObject, borrowed_json_to_value, member, members};
-use crate::conversion::layer::{InvalidProperty, convert_layer_with, set_paint_properties};
-use crate::conversion::{
-    Convertible, Error, convert, convert_light, convert_projection, convert_sky, convert_source, convert_terrain,
-};
+use crate::conversion::{Convertible, Error, convert};
 use crate::expression::GlobalStateMap;
-use crate::layer::{FontStack, Layer};
-use crate::light::Light;
-use crate::projection::Projection;
+use crate::layer::{FontStack, InvalidProperty, Layer, convert_layer_with, set_paint_properties};
+use crate::light::{Light, convert_light};
+use crate::projection::{Projection, convert_projection};
 use crate::property::transition::TransitionOptions;
 use crate::registry::StyleRegistry;
-use crate::sky::Sky;
-use crate::source_type::Source;
+use crate::sky::{Sky, convert_sky};
+use crate::source::{Source, convert_source};
 use crate::sprite::Sprite;
-use crate::terrain::Terrain;
+use crate::terrain::{Terrain, convert_terrain};
 
 /// What `Parser::parse` returns: a style that isn't one fails with
 /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind).

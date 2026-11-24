@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use mln_style::serialization::{SharedExpression, SharedLayer};
+use mln_style::wire::{SharedExpression, SharedLayer};
 use mln_tile::cut::SharedAncestor;
 use mln_util::serialization::shared::{self, ErasedTable, Role, Table};
 use mln_vec_map::VecSet;

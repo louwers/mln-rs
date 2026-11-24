@@ -7,9 +7,8 @@ use std::sync::Arc;
 use mln_util::tileset::{PartialTileset, RasterEncoding, Tileset, VectorEncoding};
 
 use super::util::parse_json;
-use crate::conversion::source::convert_source;
 use crate::conversion::{Convertible, Error};
-use crate::source_type::{Described, ErasedDescription, Fetch, Load, Source, SourceData};
+use crate::source::{Described, ErasedDescription, Fetch, Load, Source, SourceData, convert_source};
 use crate::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, geojson_source};
 use crate::sources::tileset::{
     RasterDemKind, RasterKind, TilesetKind, TilesetSourceType, VectorKind, raster_dem_source, raster_source,

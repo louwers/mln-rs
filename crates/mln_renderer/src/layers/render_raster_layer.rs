@@ -20,7 +20,7 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
-use mln_style::layer_type::LayerStyle;
+use mln_style::layer::LayerStyle;
 use mln_style::layers::Raster;
 use mln_style_types::{LayerBlendType, RasterResamplingType, ResamplingType, TranslateAnchorType};
 use mln_tile_id::UnwrappedTileID;

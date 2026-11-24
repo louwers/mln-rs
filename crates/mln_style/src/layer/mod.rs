@@ -1,3 +1,7 @@
+//! Layers of any type: a style's [`Layer`]s and their list ([`LayerList`]),
+//! their conversion from style JSON ([`convert_layer`]), and the contract a
+//! layer type implements ([`StyleLayerType`]).
+
 // A layer cannot point back at the style that owns it, so a style edits a
 // copy of its layer (`Style::update_layer`) and keeps the copy if the
 // layer's style data changed. A change copies the style data when it is
@@ -11,16 +15,27 @@ use mln_style_types::VisibilityType;
 use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
 
-use crate::conversion::{Converter, Convertible, Error, convert, convert_filter};
+use crate::conversion::{Converter, Convertible, Error, convert};
 use crate::expression::{
     Dependency, EvaluationContext, Expr, Functions, GlobalStateMap, ParsingContext, Type, from_expression_value,
 };
-use crate::filter::Filter;
-use crate::layer_type::{ErasedLayerStyle, LayerBase, LayerStyle, LayerTypeInfo, SourceKind};
+use crate::filter::{Filter, convert_filter};
 use crate::layers::Custom;
 use crate::layers::custom_layer::CustomLayerHost;
 use crate::property::table::{SetPropertyError, StyleProperty};
 use crate::registry::StyleRegistry;
+
+mod convert;
+mod list;
+mod type_;
+
+pub use convert::convert_layer;
+pub(crate) use convert::{InvalidProperty, convert_layer_with, set_paint_properties};
+pub use list::LayerList;
+pub use type_::{
+    ErasedLayerStyle, ErasedStyleLayerType, LayerBase, LayerStyle, LayerTypeEntry, LayerTypeInfo, LayoutSet,
+    NoProperties, PaintSet, SourceKind, StyleLayerType, style_entry,
+};
 
 pub(crate) type FontStack = Vec<String>;
 

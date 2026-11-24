@@ -16,7 +16,7 @@
 use std::sync::Arc;
 
 use mln_gfx::gpu::Gpu;
-use mln_style::layer_type::LayerStyle;
+use mln_style::layer::LayerStyle;
 use mln_style::layers::{
     Custom, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters,
 };

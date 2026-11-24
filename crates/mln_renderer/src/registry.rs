@@ -10,11 +10,11 @@ use std::sync::{Arc, LazyLock};
 use mln_style::StyleRegistry;
 use mln_style::expression::Functions;
 use mln_style::expression::functions::{RegisterError, register_builtin_functions};
-use mln_style::layer_type::ErasedStyleLayerType;
+use mln_style::layer::ErasedStyleLayerType;
 use mln_style::layers::{
     Background, Circle, ColorRelief, Custom, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster, Symbol,
 };
-use mln_style::source_type::ErasedStyleSourceType;
+use mln_style::source::ErasedStyleSourceType;
 use mln_style::sources::{
     CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType, RasterDemSourceType,
     RasterSourceType, VectorSourceType,

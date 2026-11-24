@@ -172,7 +172,7 @@ unsafe fn map_options(options: *const mln_map_options) -> Result<(MapOptions, f6
         // Checked here, so that the call fails rather than the map's
         // creation, and on the parse thread, which has the stack for it.
         let json = faces.to_owned();
-        let parsed = parse_thread::run(move || mln_style::parser::parse_fallback_font_faces(&json).map(drop))?;
+        let parsed = parse_thread::run(move || mln_style::parse_fallback_font_faces(&json).map(drop))?;
         parsed.map_err(|error| {
             Error::invalid_argument(format!("mln_map_options.fallback_font_faces is invalid: {}", error.message))
         })?;

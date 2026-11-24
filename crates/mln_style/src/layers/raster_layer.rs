@@ -1,4 +1,4 @@
-use crate::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
+use crate::layer::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 use crate::layers::raster_layer_properties::{self, RasterPaintProperties};
 use crate::property::table::{PropertyTable, PropertyVisitor};
 

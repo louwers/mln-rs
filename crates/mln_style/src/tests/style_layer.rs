@@ -4,15 +4,15 @@ use mln_style_types::{LineCapType, LineJoinType, TranslateAnchorType, Visibility
 use mln_util::Color;
 
 use super::util::{new_layer, parse_json, style_of};
-use crate::conversion::{Convertible, Error, convert_filter};
-use crate::edit::Edit;
+use crate::conversion::{Convertible, Error};
 use crate::expression::{Functions, Image};
-use crate::filter::Filter;
+use crate::filter::{Filter, convert_filter};
 use crate::layer::Layer;
 use crate::layers::{Background, Circle, Fill, Line, Raster};
 use crate::property::value::PropertyValue;
 use crate::registry::StyleRegistry;
 use crate::style::Style;
+use crate::style::edit::Edit;
 
 fn color() -> Color {
     Color::new(1.0, 0.0, 0.0, 1.0)

@@ -5,8 +5,8 @@
 //! checks them, and the formatter skips them (dprint.jsonc). The
 //! `<type>_layer.rs` files are written by hand: each declares the type's
 //! marker (such as [`Circle`]), which implements
-//! [`StyleLayerType`](crate::layer_type::StyleLayerType); a layer's style
-//! data is a [`LayerStyle`](crate::layer_type::LayerStyle) of it.
+//! [`StyleLayerType`](crate::layer::StyleLayerType); a layer's style
+//! data is a [`LayerStyle`](crate::layer::LayerStyle) of it.
 
 pub mod background_layer;
 #[rustfmt::skip]

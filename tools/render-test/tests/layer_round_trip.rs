@@ -1,6 +1,6 @@
 // Every layer in every render- and query-test style crosses (its style data,
 // as a tile worker in another wasm instance gets its layers,
-// mln_style::serialization) to one that encodes the same. A layer that doesn't
+// mln_style::wire) to one that encodes the same. A layer that doesn't
 // cross couldn't be laid out there, and one that crosses as another layer
 // would be laid out differently. Every layer also serializes to style JSON
 // that parses back to the same layer, as `Style::layer_json` promises.
@@ -11,10 +11,9 @@ use std::sync::Arc;
 
 use mln_renderer::Registry;
 use mln_style::StyleRegistry;
-use mln_style::conversion::{Convertible, Error, convert_layer};
-use mln_style::layer::Layer;
-use mln_style::layer_type::ErasedLayerStyle;
-use mln_style::serialization::SharedLayer;
+use mln_style::conversion::{Convertible, Error};
+use mln_style::layer::{ErasedLayerStyle, Layer, convert_layer};
+use mln_style::wire::SharedLayer;
 use mln_util::serialization::shared;
 
 #[derive(mln_wire::Wire)]

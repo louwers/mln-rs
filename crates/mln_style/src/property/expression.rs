@@ -9,7 +9,7 @@ use crate::expression::{
     Dependency, EvaluationContext, Expr, GlobalStateMap, Value, ValueConverter, ZoomCurvePtr,
     collect_global_state_refs, find_zoom_curve_checked,
 };
-use crate::serialization::SharedExpression;
+use crate::wire::SharedExpression;
 
 fn collect_global_state_refs_shared(expression: &Expr) -> Option<Arc<VecSet<String>>> {
     if !expression.has(Dependency::GLOBAL_STATE) {
@@ -165,7 +165,7 @@ impl PropertyExpressionBase {
     }
 }
 
-/// Port-only: crosses as the expression (shared, see serialization.rs)
+/// Port-only: crosses as the expression (shared, see wire.rs)
 /// and what was set on it; the flags are derived from the expression again.
 ///
 /// Not inlined: every `PropertyExpression<T>`, `PropertyValue<T>` and

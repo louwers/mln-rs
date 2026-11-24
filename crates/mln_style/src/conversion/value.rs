@@ -1,7 +1,7 @@
 // Port-only: a front end of Convertible over `mln::Value` itself, so that
 // what `Layer::serialize()` returns converts back without a detour through
 // JSON text. A tile worker in another wasm instance gets its layers this way
-// (mln_style's serialization.rs). It reads a value
+// (mln_style's wire.rs). It reads a value
 // as the JSON front end reads the JSON that the value stringifies to, except
 // that a non-finite number stays a number (JSON has no form for it).
 

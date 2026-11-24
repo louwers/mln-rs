@@ -18,8 +18,7 @@ use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, Tile
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::Source;
-use mln_style::layer::Layer;
-use mln_style::layer_type::LayerStyle;
+use mln_style::layer::{Layer, LayerStyle};
 use mln_style::layers::{Fill, Raster};
 use mln_style::sources::{raster_source, vector_source};
 use mln_util::chrono::{Timestamp, now};

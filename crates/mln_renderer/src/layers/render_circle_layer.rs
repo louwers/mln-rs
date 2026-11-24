@@ -13,7 +13,7 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::TileProjector;
 use mln_style::expression::EvaluationContext;
-use mln_style::layer_type::LayerStyle;
+use mln_style::layer::LayerStyle;
 use mln_style::layers::Circle;
 use mln_style_types::{AlignmentType, CirclePitchScaleType};
 use mln_tile_id::OverscaledTileID;

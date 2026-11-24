@@ -9,7 +9,7 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::TileCoordinate;
 use mln_map_types::tile_coordinate::TileCoordinatePoint;
 use mln_style::Source;
-use mln_style::source_type::SourceData;
+use mln_style::source::SourceData;
 use mln_style::sources::ImageSourceType;
 use mln_tile_id::{GeometryCoordinates, UnwrappedTileID};
 use mln_util::constants;

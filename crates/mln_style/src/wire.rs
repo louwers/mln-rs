@@ -21,7 +21,7 @@ use mln_wire::{Reader, Wire, Writer};
 
 use crate::StyleRegistry;
 use crate::expression::Expr;
-use crate::layer_type::ErasedLayerStyle;
+use crate::layer::ErasedLayerStyle;
 
 /// The `shared::Kind` of layers' style data.
 pub struct SharedLayer;

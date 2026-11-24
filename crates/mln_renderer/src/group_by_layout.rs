@@ -9,7 +9,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use mln_style::expression::Expr;
-use mln_style::layer_type::{ErasedLayerStyle, LayerTypeInfo};
+use mln_style::layer::{ErasedLayerStyle, LayerTypeInfo};
 use mln_style_types::VisibilityType;
 use mln_util::hash::{HashMap, RandomState};
 
@@ -148,11 +148,10 @@ pub(crate) fn group_layers(layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> GroupMap
 
 #[cfg(test)]
 mod tests {
-    use mln_style::conversion::{Convertible, Error, convert_filter};
+    use mln_style::conversion::{Convertible, Error};
     use mln_style::expression::Functions;
-    use mln_style::filter::Filter;
-    use mln_style::layer::Layer;
-    use mln_style::layer_type::LayerStyle;
+    use mln_style::filter::{Filter, convert_filter};
+    use mln_style::layer::{Layer, LayerStyle};
     use mln_style::layers::{Circle, Fill, Raster};
 
     use super::*;

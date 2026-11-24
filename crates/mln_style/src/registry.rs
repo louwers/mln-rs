@@ -7,9 +7,8 @@ use mln_vec_map::VecMap;
 
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
-use crate::layer::Layer;
-use crate::layer_type::{ErasedStyleLayerType, SourceKind};
-use crate::source_type::ErasedStyleSourceType;
+use crate::layer::{ErasedStyleLayerType, Layer, SourceKind};
+use crate::source::ErasedStyleSourceType;
 
 /// The expression functions, layer types and source types that a style's
 /// JSON, its layers' property values and its filters parse against.
@@ -44,11 +43,11 @@ impl StyleRegistry {
     /// `Registry::with_builtins`.
     #[cfg(test)]
     pub(crate) fn with_builtins() -> Arc<Self> {
-        use crate::layer_type::style_entry;
+        use crate::layer::style_entry;
         use crate::layers::{
             Background, Circle, ColorRelief, Custom, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster, Symbol,
         };
-        use crate::source_type::style_source_entry;
+        use crate::source::style_source_entry;
         use crate::sources::{
             CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType, RasterDemSourceType,
             RasterSourceType, VectorSourceType,

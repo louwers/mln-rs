@@ -161,10 +161,8 @@ pub(crate) fn new_layer(type_: &str, id: &str, source: &str) -> crate::layer::La
 }
 
 /// The style data of `layer`, a `T` layer.
-pub(crate) fn style_of<T: crate::layer_type::StyleLayerType>(
-    layer: &crate::layer::Layer,
-) -> &crate::layer_type::LayerStyle<T> {
-    crate::layer_type::LayerStyle::recover_ref(&**layer.style()).unwrap()
+pub(crate) fn style_of<T: crate::layer::StyleLayerType>(layer: &crate::layer::Layer) -> &crate::layer::LayerStyle<T> {
+    crate::layer::LayerStyle::recover_ref(&**layer.style()).unwrap()
 }
 
 impl crate::Style {
@@ -185,8 +183,8 @@ impl crate::Style {
         let mut error = crate::conversion::Error::default();
         let registry = Arc::clone(self.registry());
         let source =
-            crate::conversion::convert_source(&crate::conversion::Convertible::from(&value), &mut error, id, &registry)
+            crate::source::convert_source(&crate::conversion::Convertible::from(&value), &mut error, id, &registry)
                 .expect("a source");
-        let _ = self.apply(crate::edit::Edit::AddSource(source));
+        let _ = self.apply(crate::style::edit::Edit::AddSource(source));
     }
 }

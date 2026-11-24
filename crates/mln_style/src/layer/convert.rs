@@ -1,8 +1,7 @@
 use mln_util::logging::{Event, Log};
 
 use super::{Convertible, Error};
-use crate::layer::{Layer, PropertyScope};
-use crate::layer_type::SourceKind;
+use crate::layer::{Layer, PropertyScope, SourceKind};
 use crate::registry::StyleRegistry;
 
 fn set_object_member(layer: &mut Layer, value: &Convertible<'_>, member: &str, error: &mut Error) -> bool {

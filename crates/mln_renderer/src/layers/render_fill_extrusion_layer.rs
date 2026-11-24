@@ -46,7 +46,7 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::View;
-use mln_style::layer_type::LayerStyle;
+use mln_style::layer::LayerStyle;
 use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionPaintProperties;
 use mln_style_types::{AlignmentType, LayerBlendType};

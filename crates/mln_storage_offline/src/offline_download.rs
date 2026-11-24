@@ -21,10 +21,9 @@ use mln_storage::offline_database::{DatabaseError, OfflineDatabase};
 use mln_storage::resource::{Priority, TileFormat, Usage};
 use mln_storage::response::{Caching, Reason, ResourceError};
 use mln_storage::{FileSource, Kind, LoadingMethod, Request, Resource, Response};
-use mln_style::StyleRegistry;
-use mln_style::layer_type::SourceKind;
-use mln_style::parser::Parser;
-use mln_style::source_type::{OfflineResources, SourceTypeInfo};
+use mln_style::layer::SourceKind;
+use mln_style::source::{OfflineResources, SourceTypeInfo};
+use mln_style::{Parser, StyleRegistry};
 use mln_text::glyph::{
     GLYPH_RANGES_PER_FONT_STACK, GLYPHS_PER_GLYPH_RANGE, GlyphID, NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK,
     get_glyph_range,

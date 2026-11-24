@@ -16,7 +16,7 @@ use mln_gfx::{ConsumerSync, GpuSync, Handoff, SyncKind};
 use mln_map::RenderMode;
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_renderer::{Registry, Renderer, RendererEvent, RendererEvents, Update, UpdateReader};
-use mln_style::source_type::SourceData;
+use mln_style::source::SourceData;
 use mln_style::sources::{GeoJSONData, GeoJsonSourceType};
 use mln_text::GlyphCache;
 use mln_text::local_fonts::LocalGlyphs;

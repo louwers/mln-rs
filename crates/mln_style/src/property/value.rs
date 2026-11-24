@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use mln_vec_map::VecSet;
 
+use crate::conversion::to_value::{ValueFactory, make_style_property};
 use crate::conversion::{Converter, Convertible, Error};
-use crate::conversion_impl::{ValueFactory, make_style_property};
 use crate::expression::{Dependency, Functions, Type, ValueConverter, global_state_refs_intersect};
 use crate::property::convert::convert_property_value;
 use crate::property::evaluated::{Evaluated, Evaluation};

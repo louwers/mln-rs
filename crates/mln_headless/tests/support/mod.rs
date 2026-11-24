@@ -64,7 +64,7 @@ pub(crate) fn geojson_source_with_data(
     options: Arc<mln_style::sources::GeoJSONOptions>,
     geojson: geojson::GeoJson,
 ) -> mln_style::Source {
-    use mln_style::source_type::SourceData;
+    use mln_style::source::SourceData;
     use mln_style::sources::geojson::{GeoJsonSourceOptions, GeoJsonSourceType};
     let options = GeoJsonSourceOptions::new(options);
     let data = options.data_builder().build(geojson).expect("GeoJSON data");
@@ -73,7 +73,7 @@ pub(crate) fn geojson_source_with_data(
 
 /// Replaces the data of `map`'s GeoJSON source `id` with `geojson`.
 pub(crate) fn set_geojson(map: &mut Map, id: &str, geojson: geojson::GeoJson) {
-    use mln_style::source_type::SourceData;
+    use mln_style::source::SourceData;
     use mln_style::sources::geojson::GeoJsonSourceType;
     let source = map.source(id).expect("the source");
     let builder = SourceData::<GeoJsonSourceType>::recover(source).expect("a GeoJSON source").options.data_builder();

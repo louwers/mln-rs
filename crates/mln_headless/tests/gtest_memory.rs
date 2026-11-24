@@ -227,7 +227,7 @@ fn rendering_stats_count_live_resources() {
     let labels = serde_json::json!({"id": "labels", "type": "symbol", "source": "openmaptiles",
         "source-layer": "poi_label", "layout": {"text-field": "x", "text-allow-overlap": true}});
     let mut error = mln_style::conversion::Error::default();
-    let labels = mln_style::conversion::layer::convert_layer(
+    let labels = mln_style::layer::convert_layer(
         Registry::with_builtins().style(),
         &mln_style::conversion::Convertible::from(&labels),
         &mut error,

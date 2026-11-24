@@ -3,8 +3,9 @@ use mln_style_types::ProjectionDefinition;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::util::parse_json;
-use crate::conversion::{Convertible, Error, convert_projection};
+use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
+use crate::projection::convert_projection;
 use crate::property::table::Kind;
 use crate::property::value::StyleValue as _;
 
