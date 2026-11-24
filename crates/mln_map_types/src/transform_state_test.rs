@@ -1109,3 +1109,94 @@ fn recentering_on_the_globe_keeps_the_eye() {
     assert!(off < 0.01, "the center {off} m from the point");
     assert!(view.zoom() > before.zoom() + 0.1, "{}", view.zoom());
 }
+
+/// A `width` by `height` view of the equator at zoom 12, `pitch` and `roll`
+/// degrees, with a field of view of 60 degrees, `padding`, and terrain down
+/// to sea level.
+fn rolled(width: u32, height: u32, pitch: f64, roll: f64, padding: mln_util::geo::EdgeInsets) -> TransformState {
+    let mut state = MapView {
+        camera: Camera {
+            center: LatLng::new(0.0, 0.0).unwrap(),
+            padding,
+            zoom: 12.0,
+            pitch,
+            roll,
+            fov: 60.0,
+            ..Camera::default()
+        },
+        extent: LogicalExtent::new(Size::new(width, height), 1.0),
+        projection_mode: ProjectionMode::default(),
+        viewport: Viewport::default(),
+        projection: ProjectionDefinition::default(),
+    }
+    .to_state()
+    .unwrap();
+    state.set_terrain_min_elevation(Some(0.0));
+    state
+}
+
+/// The sea-level ground within a degree of the equator's center that
+/// `state` shows below GL JS's horizon: each point's depth from the camera
+/// in pixels and its clip z over w.
+fn visible_sea_level(state: &TransformState) -> Vec<(f64, f64)> {
+    let view = state.view();
+    let proj_matrix = view.projection_matrix();
+    // How far the ground at GL JS's horizon is from the camera along its
+    // line of sight: the far plane need not reach past it.
+    let pitch = view.pitch();
+    let camera_height = view.camera_to_center_distance() * pitch.cos();
+    let horizon_angle = pitch + (view.mercator_horizon() / view.camera_to_center_distance()).atan();
+    let horizon_depth = camera_height * (horizon_angle - pitch).cos() / horizon_angle.cos();
+    let mut ground = Vec::new();
+    for row in -250..=250 {
+        for column in -250..=250 {
+            let lat_lng = LatLng::new(f64::from(row) / 250.0, f64::from(column) / 250.0).unwrap();
+            let point = Projection::project(&lat_lng, view.scale());
+            let clip = proj_matrix * DVec4::new(point.x, point.y, 0.0, 1.0);
+            let in_view = clip.w > 0.0 && (clip.x / clip.w).abs() <= 1.0 && (clip.y / clip.w).abs() <= 1.0;
+            if in_view && clip.w < horizon_depth * 0.999 {
+                ground.push((clip.w, clip.z / clip.w));
+            }
+        }
+    }
+    ground
+}
+
+/// The far plane reaches the corner of a turned view that is farthest up
+/// the map, with or without terrain: a roll, the viewport's flip and the
+/// north orientation turn the view, and padding moves its center off the
+/// middle on either axis.
+#[test]
+fn the_far_plane_reaches_a_turned_views_farthest_corner() {
+    use mln_util::geo::EdgeInsets;
+
+    use crate::mode::ViewportMode;
+    use crate::view::NorthOrientation;
+
+    let bottom = EdgeInsets::new(0.0, 0.0, 50.0, 0.0);
+    let left = EdgeInsets::new(0.0, 200.0, 0.0, 0.0);
+    let right = EdgeInsets::new(0.0, 0.0, 0.0, 200.0);
+    let cases = [
+        (90.0, bottom, NorthOrientation::Upwards, ViewportMode::Default),
+        (90.0, left, NorthOrientation::Upwards, ViewportMode::Default),
+        (-90.0, right, NorthOrientation::Upwards, ViewportMode::Default),
+        (180.0, bottom, NorthOrientation::Upwards, ViewportMode::Default),
+        (0.0, bottom, NorthOrientation::Upwards, ViewportMode::FlippedY),
+        (0.0, bottom, NorthOrientation::Rightwards, ViewportMode::Default),
+        (0.0, left, NorthOrientation::Leftwards, ViewportMode::Default),
+        (30.0, right, NorthOrientation::Downwards, ViewportMode::FlippedY),
+    ];
+    for (roll, padding, orientation, viewport_mode) in cases {
+        let mut state = rolled(1000, 500, 30.0, roll, padding);
+        state.set_north_orientation(orientation);
+        state.set_viewport_mode(viewport_mode);
+        for min_elevation in [Some(0.0), None] {
+            state.set_terrain_min_elevation(min_elevation);
+            let ground = visible_sea_level(&state);
+            assert!(ground.len() > 1000, "{} points in view", ground.len());
+            let (depth, z) = ground.iter().copied().fold((0.0, 0.0), |a, b| if b.0 > a.0 { b } else { a });
+            let case = format!("roll {roll}, {padding:?}, {orientation:?}, {viewport_mode:?}, {min_elevation:?}");
+            assert!(z < 1.0, "{case}: ground {depth} px away is past the far plane at {}", state.view().far_z());
+        }
+    }
+}

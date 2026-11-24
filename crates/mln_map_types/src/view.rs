@@ -5,7 +5,7 @@ use std::f64::consts::PI;
 
 use geometry::Point;
 use glam::dcamera::rh::proj::opengl::perspective;
-use glam::{DMat4, DVec3, DVec4};
+use glam::{DMat4, DVec2, DVec3, DVec4};
 use mln_style_types::ProjectionDefinition;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::{DEFAULT_FOV, M2PI, TILE_SIZE_D};
@@ -701,31 +701,47 @@ impl View {
     }
 
     /// The tangent of the angle from the center of the view, with the
-    /// padding, to its top edge, in units where 1 is a pixel at the center of
-    /// the map. A roll widens it by the view's other side, which the corners
-    /// of the view reach in tangent space.
+    /// padding, to its edge farthest up the map, in units where 1 is a pixel
+    /// at the center of the map: to the top edge of an upright view, and to
+    /// its farthest corner as the view turns.
     fn tan_fov_above_center(&self) -> f64 {
         let params = &self.params;
-        let width = f64::from(params.size.width);
-        let height = f64::from(params.size.height);
-        (0.5 + (self.center_offset().y - params.frustum_offset.top) / height)
-            * 2.0
-            * (params.fov / 2.0).tan()
-            * (params.roll.cos().abs() + params.roll.sin().abs() * width / height)
+        let half_width = 0.5 * f64::from(params.size.width);
+        let half_height = 0.5 * f64::from(params.size.height);
+        let offset = self.center_offset();
+        // The view's reach from its padded center to each edge, in pixels.
+        let (left, right) = (half_width + offset.x, half_width - offset.x);
+        let (top, bottom) = (half_height + offset.y - params.frustum_offset.top, half_height - offset.y);
+        let up = self.up_the_map();
+        let reach = (up.x * right).max(-up.x * left) + (up.y * top).max(-up.y * bottom);
+        reach / half_height * (params.fov / 2.0).tan()
     }
 
     /// The angle from the center of the view, with the padding, to the
     /// horizon, where the map ends and the sky starts, as in GL JS's
     /// `calculateNearFarZ`: at high pitch it is below the top of the view.
+    /// The sky measures the horizon from the center of the view without the
+    /// padding, which moves it by the padding's offset up the map.
     fn fov_center_to_horizon(&self) -> f64 {
         let horizon = self.mercator_horizon();
         let horizon_angle = (horizon / self.camera_to_center_distance()).atan();
         let min_horizon_angle = PI / 2.0 - max_mercator_horizon_angle();
         if horizon_angle > min_horizon_angle {
-            2.0 * horizon_angle * (0.5 + self.center_offset().y / (horizon * 2.0))
+            let offset = self.center_offset();
+            let offset_up = DVec2::new(-offset.x, offset.y).dot(self.up_the_map());
+            2.0 * horizon_angle * (0.5 + offset_up / (horizon * 2.0))
         } else {
             min_horizon_angle
         }
+    }
+
+    /// The unit direction up the map in the view, x right and y up, which
+    /// the roll, the viewport's flip and the north orientation turn: a roll
+    /// of 90 degrees turns the left edge up.
+    fn up_the_map(&self) -> DVec2 {
+        let (sin, cos) = self.params.roll.sin_cos();
+        let flip = if self.params.viewport_mode == ViewportMode::FlippedY { -1.0 } else { 1.0 };
+        DVec2::from_angle(-self.north_orientation_angle()).rotate(DVec2::new(-sin, flip * cos))
     }
 
     /// The projection matrix with its near plane at `near_z` pixels, aligned
