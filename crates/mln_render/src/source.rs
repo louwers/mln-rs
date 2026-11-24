@@ -76,8 +76,8 @@
 //! engine works out the view's tiles: it [starts](DataOrigin::start) those
 //! it makes, and sets the [necessity](DataOrigin::set_necessity) of each it
 //! keeps, as it first keeps it in the update and as it lets it go into its
-//! cache. The engine runs [`retry`](DataOrigin::retry) on required tiles
-//! when the map retries failed loads, and before each still image, and
+//! cache. The engine runs [`retry`](DataOrigin::retry) on each required
+//! tile of the cover before each still image, and
 //! [`failed`](DataOrigin::failed) when what a tile took in fails to lay out
 //! or decode.
 //!
@@ -181,7 +181,10 @@ pub trait SourceType: StyleSourceType {
     type Data: TileKind;
 
     /// What `source`, a source of the type, supplies the renderer, which
-    /// makes it once, as the source joins the renderer's style.
+    /// makes it once, as the source joins the renderer's style. A source
+    /// that later takes its place with the same id and type, as a style
+    /// reload makes, keeps the supply: its origin takes the new source in
+    /// [`DataOrigin::update`], and an image's [`ImageOf`] reads it.
     fn supply(source: &Source) -> Supply<Self::Data>;
 }
 
@@ -391,10 +394,11 @@ pub trait DataOrigin: 'static {
     fn set_necessity(&mut self, _tile: &mut Self::Tile, _previous: TileNecessity, _cx: &mut LoadContext<'_, '_, Self>) {
     }
 
-    /// The engine retries the required tile's failed loads: in continuous
-    /// mode when the map is told to, and before each still image. A tile
-    /// that this begins a load of, or gives new data, loads anew; one that
-    /// it leaves as it was stays as it was.
+    /// The engine retries the required tile's failed loads, before each
+    /// still image: it calls this for each required tile of the cover,
+    /// failed or not, and the origin retries what of it failed. A tile that
+    /// this begins a load of, or gives new data, loads anew; one that it
+    /// leaves as it was stays as it was.
     fn retry(&mut self, _tile: &mut Self::Tile, _cx: &mut LoadContext<'_, '_, Self>) {}
 
     /// The engine couldn't lay out or decode what the tile last took in, and
