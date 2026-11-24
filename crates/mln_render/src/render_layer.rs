@@ -617,7 +617,9 @@ mod tests {
     use std::sync::Arc;
 
     use mln_style::TransitionParameters;
-    use mln_style::layer_type::{ErasedLayerStyle, LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
+    use mln_style::layer_type::{
+        ErasedLayerStyle, LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType,
+    };
     use mln_tile_id::OverscaledTileID;
 
     use super::{Hosted, RenderLayer};
