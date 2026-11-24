@@ -27,9 +27,8 @@ Each test runs in a Java VM's process, as an app's code does, so that HTTP
 (`HttpURLConnection`) and the locale-sensitive expressions (`android.icu`) work:
 `app_process` starts Android's runtime with `host/TestHost.java`, whose native
 half (`host/test-host.c`) loads the test executable into the process and calls
-its main, and the library finds the process's VM (`mln_util::android::java_vm`).
-Each test still gets a process of its own, so nextest runs them in parallel, as
-it does elsewhere.
+its main, and the library finds the process's VM. Each test still gets a process
+of its own, so nextest runs them in parallel, as it does elsewhere.
 
 ## In CI
 
