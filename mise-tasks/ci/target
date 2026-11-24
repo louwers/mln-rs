@@ -42,7 +42,8 @@ if [[ -n ${usage_test_target:-} ]]; then
     if [[ -n ${usage_backend:-} ]]; then
         export MLN_RENDER_BACKEND="$usage_backend"
         export MLN_VULKAN_VALIDATION=0 MTL_DEBUG_LAYER=0 MTL_DEBUG_LAYER_ERROR_MODE=assert
-        [[ $usage_backend == vulkan ]] && MLN_VULKAN_VALIDATION=abort
+        # Android emulators ship no system Khronos validation layer.
+        [[ $usage_backend == vulkan && $usage_test_target != *-android* ]] && MLN_VULKAN_VALIDATION=abort
         [[ $usage_backend == metal ]] && MTL_DEBUG_LAYER=1
     fi
     dev_shell cargo nextest run \
