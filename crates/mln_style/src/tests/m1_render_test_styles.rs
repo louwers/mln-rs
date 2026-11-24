@@ -20,12 +20,10 @@ use super::util::FixtureLog;
 use crate::expression::Functions;
 use crate::layer_type::LayerStyle;
 use crate::layers::{Background, BackgroundPaintProperties};
-use crate::map::zoom_history::ZoomHistory;
+use crate::property::evaluation::{PropertyEvaluationParameters, ZoomHistory};
+use crate::property::transition::{TransitionOptions, TransitionParameters};
 use crate::registry::StyleRegistry;
-use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
-use crate::renderer::transition_parameters::TransitionParameters;
 use crate::style::Style;
-use crate::transition_options::TransitionOptions;
 
 fn render_tests_dir() -> PathBuf {
     std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
@@ -125,7 +123,7 @@ fn color_space_expected(operator: &str) -> Color {
         &Functions::with_builtins(),
     )
     .unwrap();
-    crate::property_expression::PropertyExpression::<Color>::from_expr(expression)
+    crate::property::expression::PropertyExpression::<Color>::from_expr(expression)
         .evaluate(&crate::expression::EvaluationContext::new(5.0), Color::black())
 }
 

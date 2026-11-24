@@ -1,6 +1,6 @@
 use crate::layer_type::{LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType};
 use crate::layers::circle_layer_properties::{self, CircleLayoutProperties, CirclePaintProperties};
-use crate::property_table::{PropertyTable, PropertyVisitor};
+use crate::property::table::{PropertyTable, PropertyVisitor};
 
 /// The `circle` layer type.
 pub struct Circle;

@@ -241,7 +241,7 @@ fn symbol_height_anchor_parses_and_evaluates() {
     use mln_style_types::SymbolHeightAnchorType;
 
     use crate::layers::Symbol;
-    use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
+    use crate::property::evaluation::PropertyEvaluationParameters;
 
     let evaluate = |layout: &str, zoom: f32| {
         let src = format!(r#"{{"id": "symbol", "type": "symbol", "source": "s", "layout": {{{layout}}}}}"#);

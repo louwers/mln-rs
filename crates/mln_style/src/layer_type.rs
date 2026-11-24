@@ -20,12 +20,13 @@ use crate::conversion::Convertible;
 use crate::expression::{Dependency, Expr, Functions};
 use crate::filter::Filter;
 use crate::layer::FontStack;
-use crate::property_table::{self, OwnerSlot, Properties, PropertyTable, PropertyVisitor, SetPropertyError};
-use crate::property_value::PropertyValue;
-use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
-use crate::renderer::transition_parameters::TransitionParameters;
+use crate::property::evaluation::PropertyEvaluationParameters;
+use crate::property::table::{
+    self, OwnerSlot, Properties, PropertyTable, PropertyVisitor, SetPropertyError, StyleProperty,
+};
+use crate::property::transition::TransitionParameters;
+use crate::property::value::PropertyValue;
 use crate::serialization::optional_expression;
-use crate::style_property::StyleProperty;
 
 /// Where a layer type's layers get their data.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -407,11 +408,11 @@ impl<T: StyleLayerType> ErasedLayerStyle for LayerStyle<T> {
     }
 
     fn get_property(&self, name: &str) -> StyleProperty {
-        property_table::get_property(self, name)
+        table::get_property(self, name)
     }
 
     fn serialize_properties(&self, out: &mut ValueObject) {
-        property_table::serialize_properties(self, out);
+        table::serialize_properties(self, out);
     }
 
     fn copy_without_paint(&self, id: &str) -> Arc<dyn ErasedLayerStyle> {
@@ -430,7 +431,7 @@ fn layout_difference<T: StyleLayerType>(a: &LayerStyle<T>, b: &LayerStyle<T>) ->
     T::INFO.source == SourceKind::Geometry
         && (a.base.filter != b.base.filter
             || a.base.visibility != b.base.visibility
-            || property_table::layout_properties_differ(a, b, T::has_section_overrides(a)))
+            || table::layout_properties_differ(a, b, T::has_section_overrides(a)))
 }
 
 /// A layer type, whichever it is.
@@ -493,7 +494,7 @@ impl<T: StyleLayerType> ErasedStyleLayerType for LayerTypeEntry<T> {
         if slot.get().is_none() {
             return Err(SetPropertyError::Unknown);
         }
-        property_table::set_property(&mut slot, name, value, functions)
+        table::set_property(&mut slot, name, value, functions)
     }
 
     fn mutate_base(&self, style: &mut Arc<dyn ErasedLayerStyle>, f: &mut dyn FnMut(&mut LayerBase)) {

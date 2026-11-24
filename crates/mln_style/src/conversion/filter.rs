@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use feature::Value;
 
-use super::function::{conversion_errors, get, literal, matchable, number, op, owned};
 use super::{Convertible, Error};
 use crate::expression::{Functions, ParsingContext, Type};
 use crate::filter::Filter;
+use crate::property::function::{conversion_errors, get, literal, matchable, number, op, owned};
 
 /// Converts a filter: an expression, which parses against `functions`, or a
 /// legacy filter, which becomes the expression it stands for.

@@ -13,12 +13,12 @@ use crate::image;
 use crate::layer::Layer;
 use crate::light::Light;
 use crate::projection::Projection;
+use crate::property::transition::TransitionOptions;
 use crate::sky::Sky;
 use crate::source_type::{
     Described, ErasedDescription, Source, SourceCommon, SourceData, SourceInstance, StyleSourceType,
 };
 use crate::terrain::Terrain;
-use crate::transition_options::TransitionOptions;
 
 /// A change to a style, which [`Style::apply`](crate::Style::apply) makes.
 #[expect(clippy::large_enum_variant, reason = "an edit is made and applied at once, not stored")]

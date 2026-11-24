@@ -6,17 +6,17 @@ use mln_util::constants::{LAST_RESORT_ALPHABETIC_FONT, LAST_RESORT_PAN_UNICODE_F
 use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
 
-use crate::evaluated::Evaluated;
 use crate::expression::forms::format::FormatExpressionSection;
 use crate::expression::value::from_expression_value;
 use crate::expression::{Expr, Formatted, FormattedSection, Type};
 use crate::layer::FontStack;
 use crate::layer_type::{LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType};
 use crate::layers::symbol_layer_properties::{self, SymbolLayoutProperties, SymbolPaintProperties};
-use crate::properties::OverridableSection;
-use crate::property_expression::PropertyExpression;
-use crate::property_table::{PropertyTable, PropertyVisitor};
-use crate::property_value::{PropertyValue, StyleValue as _};
+use crate::property::evaluated::Evaluated;
+use crate::property::expression::PropertyExpression;
+use crate::property::set::OverridableSection;
+use crate::property::table::{PropertyTable, PropertyVisitor};
+use crate::property::value::{PropertyValue, StyleValue as _};
 
 /// The `symbol` layer type.
 pub struct Symbol;

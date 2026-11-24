@@ -16,10 +16,9 @@ use crate::conversion::{Converter, Convertible, Error};
 use crate::conversion_impl::make_transition_style_property;
 use crate::expression::Functions;
 use crate::layer::PropertyScope;
-use crate::properties::Transitionable;
-use crate::property_value::StyleValue;
-use crate::style_property::{Kind, StyleProperty};
-use crate::transition_options::TransitionOptions;
+use crate::property::set::Transitionable;
+use crate::property::transition::TransitionOptions;
+use crate::property::value::StyleValue;
 
 /// One property in a [`PropertyTable`].
 #[derive(Debug)]
@@ -488,4 +487,38 @@ pub(crate) fn names<S: Properties>() -> impl Iterator<Item = String> {
         let transition = (info.scope == PropertyScope::Paint).then(|| format!("{}-transition", info.name));
         std::iter::once(info.name.to_owned()).chain(transition)
     })
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Kind {
+    #[default]
+    Undefined,
+    Constant,
+    Expression,
+    Transition,
+}
+
+/// Generic representation of a style property.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StyleProperty {
+    value: Value,
+    kind: Kind,
+}
+
+impl StyleProperty {
+    #[must_use]
+    pub(crate) fn new(value: Value, kind: Kind) -> Self {
+        StyleProperty { value, kind }
+    }
+
+    #[must_use]
+    pub fn get_value(&self) -> &Value {
+        &self.value
+    }
+
+    #[must_use]
+    pub fn get_kind(&self) -> Kind {
+        self.kind
+    }
 }

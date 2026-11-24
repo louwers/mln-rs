@@ -130,7 +130,7 @@ fn dash_pattern_cap(bucket: &LineBucket) -> LinePatternCap {
 }
 
 pub(crate) fn apply_color_ramp(
-    color_value: &mln_style::color_ramp_property_value::ColorRampPropertyValue,
+    color_value: &mln_style::property::color_ramp::ColorRampPropertyValue,
     image: &mut PremultipliedImage,
     global_state: Option<&GlobalStateMap>,
 ) -> bool {

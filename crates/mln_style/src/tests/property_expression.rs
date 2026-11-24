@@ -6,13 +6,13 @@ use mln_util::geometry::FeatureType;
 use mln_vec_map::VecSet;
 
 use super::util::{StubGeometryTileFeature, property_map};
-use crate::evaluated::Evaluated;
 use crate::expression::dsl::{self, get, get_str, image, linear, literal, literal_str, number, step, zoom};
 use crate::expression::parse::create_expression_from_str;
 use crate::expression::{Dependency, EvaluationContext, Functions, Image, Value};
-use crate::property_expression::PropertyExpression;
-use crate::property_value::{PropertyValue, StyleValue as _};
-use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
+use crate::property::evaluated::Evaluated;
+use crate::property::evaluation::PropertyEvaluationParameters;
+use crate::property::expression::PropertyExpression;
+use crate::property::value::{PropertyValue, StyleValue as _};
 
 fn one_integer() -> StubGeometryTileFeature {
     StubGeometryTileFeature::new(property_map(&[("property", MbglValue::Uint(1))]))

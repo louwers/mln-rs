@@ -9,9 +9,9 @@
 // u16s), so the buffer is the GPU vertex data as it uploads.
 
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_style::evaluated::{Evaluated, Faded};
 use mln_style::expression::{Dependency, EvaluationContext, Image, Value, ValueConverter};
-use mln_style::property_expression::PropertyExpression;
+use mln_style::property::evaluated::{Evaluated, Faded};
+use mln_style::property::expression::PropertyExpression;
 use mln_style_types::LineCapType;
 use mln_style_types::image::ImagePositions;
 use mln_tile::TileLayer;

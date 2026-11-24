@@ -182,7 +182,7 @@ impl SkyPass {
 #[cfg(test)]
 mod tests {
     use mln_map_types::{NorthOrientation, TransformState};
-    use mln_style::evaluated::Evaluated;
+    use mln_style::property::evaluated::Evaluated;
     use mln_style_types::Position;
     use mln_util::geo::LatLng;
 

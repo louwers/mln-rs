@@ -2,9 +2,10 @@ use std::sync::Arc;
 
 use mln_style_types::ProjectionDefinition;
 
-use super::{Convertible, Error, convert_property_value};
+use super::{Convertible, Error};
 use crate::expression::Functions;
 use crate::projection::Projection;
+use crate::property::convert::convert_property_value;
 
 /// Converts the style's `projection`, whose expressions parse against
 /// `functions`.

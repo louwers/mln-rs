@@ -2,12 +2,12 @@ use feature::Value;
 use mln_style_types::{Position, ProjectionDefinition, Rotation, VariableAnchorOffsetCollection};
 use mln_util::{Color, Padding};
 
-use crate::color_ramp_property_value::ColorRampPropertyValue;
 use crate::expression::value::to_mbgl_value;
 use crate::expression::{Formatted, Image, Value as ExpressionValue};
-use crate::property_value::PropertyValue;
-use crate::style_property::{Kind, StyleProperty};
-use crate::transition_options::TransitionOptions;
+use crate::property::color_ramp::ColorRampPropertyValue;
+use crate::property::table::{Kind, StyleProperty};
+use crate::property::transition::TransitionOptions;
+use crate::property::value::PropertyValue;
 
 /// Makes a `Value` from a style value.
 pub(crate) trait ValueFactory {

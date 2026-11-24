@@ -7,7 +7,7 @@ use feature::{Feature, Identifier, PropertyMap};
 use geo_types::{Geometry, LineString, Polygon};
 use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
-use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
+use mln_style::property::evaluation::PropertyEvaluationParameters;
 use mln_style_types::image::ImageType;
 use mln_text::glyph::GlyphID;
 use mln_tile::TileData;

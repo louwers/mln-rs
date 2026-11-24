@@ -10,12 +10,12 @@ use std::sync::Arc;
 use geometry::Point;
 use glam::Vec2;
 use mln_map_types::MapMode;
-use mln_style::evaluated::Evaluated;
 use mln_style::expression::formatted::K_FORMATTED_SECTION_TEXT_COLOR;
 use mln_style::expression::{EvaluationContext, GlobalStateMap, Value};
 use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
-use mln_style::property_value::PropertyValue;
+use mln_style::property::evaluated::Evaluated;
+use mln_style::property::value::PropertyValue;
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::image::{ImagePositions, ImageType};
 use mln_style_types::{

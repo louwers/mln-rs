@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, VerticalPerspectiveProjection};
 use mln_style::Source;
-use mln_style::property_value::PropertyValue;
+use mln_style::property::value::PropertyValue;
 use mln_tile_id::tile_range::TileRange;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;

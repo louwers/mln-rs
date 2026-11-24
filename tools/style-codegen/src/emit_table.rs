@@ -58,8 +58,10 @@ pub(crate) enum Visit {
 /// The `use` paths the table needs.
 pub(crate) fn imports(visit: &Visit) -> Vec<String> {
     match visit {
-        Visit::Function => vec!["crate::property_table::{PropertyInfo, PropertyTable, PropertyVisitor}".into()],
-        Visit::Impl => vec!["crate::property_table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor}".into()],
+        Visit::Function => vec!["crate::property::table::{PropertyInfo, PropertyTable, PropertyVisitor}".into()],
+        Visit::Impl => {
+            vec!["crate::property::table::{Properties, PropertyInfo, PropertyTable, PropertyVisitor}".into()]
+        }
     }
 }
 

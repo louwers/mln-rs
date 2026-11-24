@@ -6,7 +6,7 @@ use mln_map_types::MapMode;
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Circle;
-use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
+use mln_style::property::evaluation::PropertyEvaluationParameters;
 use mln_style::sources::geojson::{Features, GeoJSONData, TileCallback, TileFeatures};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;

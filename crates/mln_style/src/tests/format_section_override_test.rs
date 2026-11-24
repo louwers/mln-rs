@@ -13,7 +13,6 @@ use mln_util::geometry::FeatureType;
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::conversion::Convertible;
-use crate::evaluated::Evaluated;
 use crate::expression::dsl::{format_str, get_str, literal_str, string, to_color};
 use crate::expression::formatted::{Formatted, FormattedSection};
 use crate::expression::forms::format::{FormatExpression, FormatExpressionSection};
@@ -26,11 +25,12 @@ use crate::format_section_override::{format_section_override as new_override, se
 use crate::layer_type::LayerStyle;
 use crate::layers::symbol_layer::SymbolLayerPaintPropertyOverrides as MockOverrides;
 use crate::layers::{Symbol, SymbolLayoutProperties, SymbolPaintProperties};
-use crate::properties::{Transitionable, Transitioning};
-use crate::property_expression::PropertyExpression;
-use crate::property_table::layout_properties_differ;
-use crate::property_value::PropertyValue;
-use crate::transition_options::TransitionOptions;
+use crate::property::evaluated::Evaluated;
+use crate::property::expression::PropertyExpression;
+use crate::property::set::{Transitionable, Transitioning};
+use crate::property::table::layout_properties_differ;
+use crate::property::transition::TransitionOptions;
+use crate::property::value::PropertyValue;
 
 /// `test/include/mln/test/stub_geometry_tile_feature.hpp` (the property-map
 /// constructor).

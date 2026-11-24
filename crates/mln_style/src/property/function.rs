@@ -6,8 +6,7 @@ use std::sync::Arc;
 
 use feature::{Value, ValueObject};
 
-use super::Error;
-use crate::conversion::Convertible;
+use crate::conversion::{Convertible, Error};
 use crate::expression::{Expr, Functions, ParsingContext, Type};
 
 /// The parser's errors for an expression a conversion wrote, without their

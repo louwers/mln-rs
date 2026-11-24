@@ -10,11 +10,12 @@ use mln_util::Color;
 use mln_vec_map::VecSet;
 
 use super::util::parse_json;
-use crate::color_ramp_property_value::ColorRampPropertyValue;
-use crate::conversion::{Convertible, Error, convert_filter, convert_property_value};
+use crate::conversion::{Convertible, Error, convert_filter};
 use crate::expression::{Dependency, EvaluationContext, Expr, Functions, GlobalStateMap, ParsingContext, Type};
-use crate::property_expression::PropertyExpression;
-use crate::property_value::StyleValue as _;
+use crate::property::color_ramp::ColorRampPropertyValue;
+use crate::property::convert::convert_property_value;
+use crate::property::expression::PropertyExpression;
+use crate::property::value::StyleValue as _;
 
 fn parse_expression(json: &str, expected: Option<Type>) -> Option<Expr> {
     let document = parse_json(json);

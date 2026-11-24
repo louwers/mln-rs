@@ -492,7 +492,7 @@ pub(crate) fn parse_expression(
         && let Some(expected) = &expected
     {
         let mut error = mln_style::conversion::Error::default();
-        parsed = mln_style::conversion::function::parse_function(&convertible, expected, false, &functions, &mut error);
+        parsed = mln_style::property::function::parse_function(&convertible, expected, false, &functions, &mut error);
         // TODO: should the error message be checked for function conversion?
     } else {
         parsed = ctx.parse_layer_property_expression(&convertible);

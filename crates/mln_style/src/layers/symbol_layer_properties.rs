@@ -3,7 +3,7 @@
 
 use crate::layer_type::LayerStyle;
 use crate::layers::Symbol;
-use crate::property_table::{PropertyInfo, PropertyTable, PropertyVisitor};
+use crate::property::table::{PropertyInfo, PropertyTable, PropertyVisitor};
 
 crate::properties!(
     /// The layout properties of a symbol layer.

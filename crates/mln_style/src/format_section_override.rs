@@ -3,13 +3,13 @@
 
 use std::sync::Arc;
 
-use crate::evaluated::Evaluated;
 use crate::expression::forms::format_section_override::{FormatSectionOverride, OverrideDefault};
 use crate::expression::{Dependency, Expr, GlobalStateMap};
 use crate::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
 use crate::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
-use crate::property_expression::PropertyExpression;
-use crate::property_value::StyleValue as _;
+use crate::property::evaluated::Evaluated;
+use crate::property::expression::PropertyExpression;
+use crate::property::value::StyleValue as _;
 
 /// A `format-section-override` of the color property `property_name`, whose
 /// value is `default_value` where no section overrides it.

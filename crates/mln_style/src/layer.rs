@@ -19,9 +19,8 @@ use crate::filter::Filter;
 use crate::layer_type::{ErasedLayerStyle, LayerBase, LayerStyle, LayerTypeInfo, SourceKind};
 use crate::layers::Custom;
 use crate::layers::custom_layer::CustomLayerHost;
-use crate::property_table::SetPropertyError;
+use crate::property::table::{SetPropertyError, StyleProperty};
 use crate::registry::StyleRegistry;
-use crate::style_property::StyleProperty;
 
 pub(crate) type FontStack = Vec<String>;
 

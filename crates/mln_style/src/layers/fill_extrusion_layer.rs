@@ -2,7 +2,7 @@ use crate::layer_type::{LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType};
 use crate::layers::fill_extrusion_layer_properties::{
     self, FillExtrusionLayoutProperties, FillExtrusionPaintProperties,
 };
-use crate::property_table::{PropertyTable, PropertyVisitor};
+use crate::property::table::{PropertyTable, PropertyVisitor};
 
 /// The `fill-extrusion` layer type.
 pub struct FillExtrusion;
