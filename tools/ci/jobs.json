@@ -33,6 +33,16 @@
     "save_toolchains": "true"
   },
   {
+    "job": "test",
+    "variant": "windows",
+    "unit": "windows-x64",
+    "os": "windows",
+    "runner": "blacksmith-4vcpu-windows-2025",
+    "backend": "d3d12",
+    "coverage": "false",
+    "save_toolchains": "true"
+  },
+  {
     "job": "backend",
     "variant": "linux-vulkan",
     "unit": "linux-x64",
@@ -76,6 +86,33 @@
     "runner": "blacksmith-6vcpu-macos-26",
     "backend": "webgpu",
     "coverage": "true"
+  },
+  {
+    "job": "backend",
+    "variant": "windows-webgpu",
+    "unit": "windows-x64",
+    "os": "windows",
+    "runner": "blacksmith-4vcpu-windows-2025",
+    "backend": "webgpu",
+    "coverage": "false"
+  },
+  {
+    "job": "backend",
+    "variant": "windows-vulkan",
+    "unit": "windows-x64",
+    "os": "windows",
+    "runner": "blacksmith-4vcpu-windows-2025",
+    "backend": "vulkan",
+    "coverage": "false"
+  },
+  {
+    "job": "backend",
+    "variant": "windows-gl",
+    "unit": "windows-x64",
+    "os": "windows",
+    "runner": "blacksmith-4vcpu-windows-2025",
+    "backend": "gl",
+    "coverage": "false"
   },
   {
     "job": "target",

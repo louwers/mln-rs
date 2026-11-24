@@ -55,6 +55,12 @@ inputs:
     description: Also install Mesa's EGL for OpenGL ES on llvmpipe.
     required: false
     default: "false"
+  software-gpu:
+    description: >-
+      Comma-separated graphics APIs (such as vulkan,wgl) whose Windows software
+      drivers stand in for hardware GPUs on headless runners.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -63,6 +69,15 @@ runs:
       if: runner.os == 'Windows'
       shell: pwsh
       run: git config --global core.longpaths true
+
+    # Git Bash maps /tmp to the checkout drive; ensure it exists before mise
+    # tasks run.
+    - name: Create Windows Git Bash temp directory
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $workspaceDrive = Split-Path -Qualifier $env:GITHUB_WORKSPACE
+        New-Item -ItemType Directory -Force -Path (Join-Path $workspaceDrive "tmp") | Out-Null
 
     # A hard error, such as a DLL the loader cannot resolve, raises a modal
     # dialog that stalls headless runners until timeout.
@@ -76,6 +91,18 @@ runs:
         $reporting = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting"
         New-Item -Path $reporting -Force | Out-Null
         Set-ItemProperty -Path $reporting -Name DontShowUI -Value 1 -Type DWord
+
+    - name: Install Windows DXC
+      if: runner.os == 'Windows'
+      uses: ./.github/actions/setup-windows-dxc
+
+    - name: Use Windows Vulkan software driver
+      if: runner.os == 'Windows' && contains(inputs.software-gpu, 'vulkan')
+      uses: ./.github/actions/setup-windows-vulkan-software
+
+    - name: Use Windows OpenGL software driver
+      if: runner.os == 'Windows' && contains(inputs.software-gpu, 'wgl')
+      uses: ./.github/actions/setup-windows-opengl-software
 
     - name: Bound apt downloads on Linux
       if: runner.os == 'Linux'

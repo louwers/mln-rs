@@ -27,8 +27,9 @@ ci:
     builds or runs: ARM64 Linux or lavapipe packaging for `linux-arm64`, Metal
     or Apple platform code for `macos`, Apple mobile/spatial targets or iOS
     simulator runs for `ios`, Android platform code or GPU behavior that differs
-    on phones for `android`, browser builds or rendered web output for `web`, or
-    Cargo manifests and file additions/deletions/renames for `package`.
+    on phones for `android`, Direct3D 12, WGL, or Windows platform code for
+    `windows-x64`, browser builds or rendered web output for `web`, or Cargo
+    manifests and file additions/deletions/renames for `package`.
 
     Changing a job's definition in `.github/workflows/ci.yml`,
     `tools/ci/jobs.json`, or `.github/actions/setup-ci-deps/` puts the units
@@ -99,6 +100,20 @@ ci:
             files:
               - crates/mln_mtl/**
               - mise.target-apple.*
+          then: apply
+    windows-x64:
+      covers: >-
+        Windows x64 clippy, workspace and render tests on Direct3D 12 (WARP with
+        DXC), and backend-only tests on WebGPU, Vulkan (Lavapipe with
+        validation), and OpenGL (WGL/llvmpipe). Catches Direct3D 12, WGL,
+        Windows platform, shared GPU/shader abstraction, and Windows CI issues.
+        Platform-independent or Linux/macOS-only changes that `linux-x64`
+        already covers do not need it.
+      rules:
+        - if:
+            files:
+              - crates/mln_d3d12/**
+              - .github/actions/setup-windows-*/**
           then: apply
     web:
       covers: >-

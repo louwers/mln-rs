@@ -1,0 +1,38 @@
+name: Setup Windows DXC
+description: >-
+  Installs Microsoft's DirectX Shader Compiler (dxcompiler.dll and dxil.dll)
+  onto PATH for Windows CI so mln_d3d12 can compile shaders.
+
+runs:
+  using: composite
+  steps:
+    - name: Install DXC
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        $ProgressPreference = "SilentlyContinue"
+
+        # Matches the DirectXShaderCompiler pin in mise.target-windows.toml.
+        $dxcVersion = "1.9.2609"
+        $archiveName = "dxc_2026_09_29.zip"
+        $dxcUrl = "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v$dxcVersion/$archiveName"
+        $expectedHash = "AD31B1FC8443175D204F77A611FDB3EF2EC42759BDC2F1167368DE24A4A7E7F1"
+
+        $dxcArchive = Join-Path $env:RUNNER_TEMP $archiveName
+        $dxcRoot = Join-Path $env:RUNNER_TEMP "dxc-$dxcVersion"
+
+        Invoke-WebRequest -Uri $dxcUrl -OutFile $dxcArchive -MaximumRetryCount 3 -RetryIntervalSec 5
+        $actualHash = (Get-FileHash $dxcArchive -Algorithm SHA256).Hash
+        if ($actualHash -ne $expectedHash) {
+          throw "DXC archive hash mismatch: expected $expectedHash, got $actualHash"
+        }
+
+        Expand-Archive -Path $dxcArchive -DestinationPath $dxcRoot -Force
+
+        $architecture = if ($env:RUNNER_ARCH -eq "ARM64") { "arm64" } else { "x64" }
+        $binDir = Join-Path $dxcRoot "bin\$architecture"
+        if (-not (Test-Path (Join-Path $binDir "dxcompiler.dll"))) {
+          throw "Missing dxcompiler.dll in $binDir"
+        }
+
+        $binDir | Out-File -FilePath $env:GITHUB_PATH -Append

@@ -22,6 +22,7 @@ self-hosted-runner:
     - blacksmith-4vcpu-ubuntu-2604
     - blacksmith-4vcpu-ubuntu-2604;scheduling=flex
     - blacksmith-4vcpu-ubuntu-2604-arm
+    - blacksmith-4vcpu-windows-2025
     - blacksmith-6vcpu-macos-26
 ignores:
   - rule: dangerous-triggers

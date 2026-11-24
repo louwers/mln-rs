@@ -1,0 +1,104 @@
+name: Setup Windows Vulkan software driver
+description: >-
+  Installs the Vulkan SDK runtime and validation layers along with Mesa's
+  Lavapipe Vulkan ICD for Windows CI.
+
+runs:
+  using: composite
+  steps:
+    - name: Install Windows Vulkan SDK
+      uses: jakoch/install-vulkan-sdk-action@7fe84289ddbf750f7eff9f8e4588e600e1dd06c8 # v1.8.1
+      with:
+        # The action caches by OS, architecture, and version, so a patch bump
+        # is what retires an entry.
+        vulkan_version: 1.4.363.0
+        cache: true
+        stripdown: true
+        install_runtime: true
+
+    # A runner can have vulkan-1.dll only inside the SDK, and a cached SDK
+    # skips the installer's registry entry for VK_LAYER_KHRONOS_validation.
+    # Expose both explicitly through GITHUB_PATH and VK_LAYER_PATH.
+    - name: Expose Vulkan loader and validation layer
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+
+        $architecture = if ($env:RUNNER_ARCH -eq "ARM64") { "arm64" } else { "x64" }
+        $candidates = @("runtime\$architecture", "Bin", "bin") |
+          ForEach-Object { Join-Path $env:VULKAN_SDK $_ }
+        $loaderDir = $candidates |
+          Where-Object { Test-Path (Join-Path $_ "vulkan-1.dll") } |
+          Select-Object -First 1
+        if ($loaderDir) {
+          $loaderDir | Out-File -FilePath $env:GITHUB_PATH -Append
+        } elseif (-not (Get-Command vulkan-1.dll -ErrorAction SilentlyContinue)) {
+          throw "Missing vulkan-1.dll in $($candidates -join ', ') or on PATH"
+        }
+
+        $layerDir = @("Bin", "bin") |
+          ForEach-Object { Join-Path $env:VULKAN_SDK $_ } |
+          Where-Object { Test-Path (Join-Path $_ "VkLayer_khronos_validation.json") } |
+          Select-Object -First 1
+        if (-not $layerDir) {
+          throw "Missing VkLayer_khronos_validation.json in $env:VULKAN_SDK"
+        }
+        "VK_LAYER_PATH=$layerDir" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+    - name: Install Lavapipe
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = "Stop"
+        $ProgressPreference = "SilentlyContinue"
+
+        function Save-CheckedArchive($Url, $Path, $ExpectedHash) {
+          Invoke-WebRequest -Uri $Url -OutFile $Path -MaximumRetryCount 3 -RetryIntervalSec 5
+          $actualHash = (Get-FileHash $Path -Algorithm SHA256).Hash
+          if ($actualHash -ne $ExpectedHash) {
+            throw "Archive hash mismatch for $Url`: expected $ExpectedHash, got $actualHash"
+          }
+        }
+
+        function Register-VulkanDriver($Manifest) {
+          $driverKey = "HKLM:\SOFTWARE\Khronos\Vulkan\Drivers"
+          New-Item -Path $driverKey -Force | Out-Null
+          New-ItemProperty -Path $driverKey -Name $Manifest -PropertyType DWord -Value 0 -Force | Out-Null
+        }
+
+        if ($env:RUNNER_ARCH -eq "ARM64") {
+          $mesaVersion = "26.2.6"
+          $archiveName = "mesa-lavapipe-arm64-$mesaVersion.7z"
+          $expectedHash = "B6FDAA1F8E96C90C5D90B07F25C93FE85D1B09AF752CC190DFF0EFFF781CE89D"
+          $mesaUrl = "https://github.com/mmozeiko/build-mesa/releases/download/$mesaVersion/$archiveName"
+          $manifestName = "lvp_icd.aarch64.json"
+        } else {
+          $mesaVersion = "26.2.6"
+          $archiveName = "mesa3d-$mesaVersion-release-msvc.7z"
+          $expectedHash = "B2E00615FEABA45942343C265CC8C5F576142CA682C1AC6661922D4B72492877"
+          $mesaUrl = "https://github.com/pal1000/mesa-dist-win/releases/download/$mesaVersion/$archiveName"
+          $manifestName = "lvp_icd.x86_64.json"
+        }
+
+        $mesaArchive = Join-Path $env:RUNNER_TEMP $archiveName
+        $mesaRoot = Join-Path $env:RUNNER_TEMP "lavapipe-$mesaVersion-$env:RUNNER_ARCH"
+        Save-CheckedArchive $mesaUrl $mesaArchive $expectedHash
+        7z x $mesaArchive "-o$mesaRoot" -y | Out-Null
+
+        $driverManifest = Get-ChildItem $mesaRoot -Recurse -Filter $manifestName |
+          Select-Object -First 1
+        if (-not $driverManifest) {
+          throw "Missing Lavapipe Vulkan ICD manifest $manifestName in $mesaArchive"
+        }
+
+        $driver = Get-ChildItem $mesaRoot -Recurse -Filter "vulkan_lvp.dll" |
+          Select-Object -First 1
+        if (-not $driver) {
+          throw "Missing Lavapipe Vulkan driver in $mesaArchive"
+        }
+
+        Register-VulkanDriver $driverManifest.FullName
+        "VK_DRIVER_FILES=$($driverManifest.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+        $driver.Directory.FullName | Out-File -FilePath $env:GITHUB_PATH -Append
+        # Software rendering is slower than hardware, so the test suites
+        # stretch their waits to match.
+        "MLN_TEST_TIMEOUT_SCALE=3" | Out-File -FilePath $env:GITHUB_ENV -Append

@@ -124,9 +124,10 @@ jobs:
         run: mise run ci:package
 
   # Every test (`mise run ci:test`) on WebGPU on Linux (wgpu on Vulkan, on
-  # lavapipe, Mesa's software rasterizer) and on the Metal backend on macOS,
-  # under Metal's API validation, with their coverage uploaded to Codecov
-  # (codecov.yml). macOS also runs clippy on the code that only it builds.
+  # lavapipe, Mesa's software rasterizer), on the Metal backend on macOS under
+  # Metal's API validation, and on Direct3D 12 on Windows (WARP with DXC), with
+  # coverage uploaded to Codecov (codecov.yml) where enabled. Non-Linux runners
+  # also run clippy on the code that only they build.
   test:
     needs: plan
     if:
@@ -155,6 +156,7 @@ jobs:
           save-rust-cache: ${{ github.ref == 'refs/heads/main' }}
           llvm-tools: ${{ matrix.coverage }}
           lavapipe: ${{ runner.os == 'Linux' }}
+          software-gpu: ${{ runner.os == 'Windows' && 'vulkan,wgl' || '' }}
 
       - name: Clippy
         if: runner.os != 'Linux'
@@ -194,11 +196,12 @@ jobs:
 
   # The tests that depend on the backend (`mise run ci:test --backend-only`,
   # .config/nextest.toml) on the backends the test jobs don't run, with their
-  # coverage: on Linux the Vulkan backend, under Vulkan's validation layer, and
-  # the OpenGL backend (OpenGL ES 3.0 through EGL, on Mesa's llvmpipe); on
-  # macOS WebGPU (wgpu on Metal). On Linux, then the C ABI suite against
-  # crates/mln_c (`mise run test:c-abi`, tools/c-abi-test) under its preset for
-  # the backend.
+  # coverage where enabled: on Linux the Vulkan backend, under Vulkan's
+  # validation layer, and the OpenGL backend (OpenGL ES 3.0 through EGL, on
+  # Mesa's llvmpipe); on macOS WebGPU (wgpu on Metal); on Windows WebGPU,
+  # Vulkan (Lavapipe with validation), and OpenGL (WGL on Mesa's llvmpipe). On
+  # Linux, then the C ABI suite against crates/mln_c (`mise run test:c-abi`,
+  # tools/c-abi-test) under its preset for the backend.
   backend:
     needs: plan
     if:
@@ -224,6 +227,9 @@ jobs:
         with:
           save-rust-cache: ${{ github.ref == 'refs/heads/main' }}
           llvm-tools: ${{ matrix.coverage }}
+          # Nextest's `backend` profile tests every backend crate (including
+          # mln_vulkan and mln_gl's WGL tests) on every Windows backend job.
+          software-gpu: ${{ runner.os == 'Windows' && 'vulkan,wgl' || '' }}
 
       # For the C ABI suite. Installed before lavapipe so apt does not
       # downgrade the pinned Vulkan loader or Mesa EGL packages.

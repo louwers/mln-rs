@@ -96,6 +96,7 @@ class PlanTest(unittest.TestCase):
             ["macos"],
             ["ios"],
             ["linux-arm64"],
+            ["windows-x64"],
             ["android"],
             ["web", "package"],
             ["linux-x64"],
@@ -111,7 +112,7 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(result["target"], {"include": []})
 
     def test_unknown_rubberstamp_units_select_nothing_extra(self) -> None:
-        self.assertEqual(names(selected(["windows-x64"])), ALWAYS)
+        self.assertEqual(names(selected(["nonexistent"])), ALWAYS)
 
     def test_outputs_name_each_job_once_and_build_matrices(self) -> None:
         result = outputs(selected(["linux-x64", "linux-arm64", "web"]), secrets=False)
