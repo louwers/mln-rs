@@ -3,6 +3,7 @@
 use geometry::Point;
 use glam::{DVec2, DVec3};
 use mln_util::constants::{LATITUDE_MAX, TILE_SIZE_D};
+use mln_util::error::Error;
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 use mln_util::projection::Projection;
 
@@ -70,6 +71,53 @@ impl View {
         }
         let (near, far) = self.line_of_sight(point)?;
         self.ground_along(near, far, ground)
+    }
+
+    /// The location that `point`, measured from the bottom edge (y up),
+    /// shows over terrain: where its line of sight first meets `ground`
+    /// ([`ground_under`](Self::ground_under)). Where it meets none, as in
+    /// the sky or past the ground drawn, the plane at the center's altitude
+    /// stands in for the ground, on the globe the sphere
+    /// ([`screen_coordinate_to_lat_lng_at`](Self::screen_coordinate_to_lat_lng_at)).
+    /// Fails as [`screen_coordinate_to_lat_lng`](Self::screen_coordinate_to_lat_lng).
+    pub fn screen_coordinate_to_lat_lng_on(
+        &self,
+        point: &ScreenCoordinate,
+        ground: &dyn Elevation,
+        wrap_mode: WrapMode,
+    ) -> Result<LatLng, Error> {
+        match self.ground_under(point, ground) {
+            // A hit's Web Mercator point stops at the edge of the globe's
+            // polar caps, whose ground is sea level: there the sea-level
+            // sphere has the location.
+            Some(hit)
+                if self.is_globe() && hit.location(WrapMode::Unwrapped).latitude().abs() >= LATITUDE_MAX - 1e-9 =>
+            {
+                self.screen_coordinate_to_lat_lng_at(point, 0.0, wrap_mode)
+            }
+            Some(hit) => Ok(hit.location(wrap_mode)),
+            None => self.screen_coordinate_to_lat_lng_at(point, self.center_altitude(), wrap_mode),
+        }
+    }
+
+    /// The screen point (y up) of `lat_lng` standing on `ground`: at the
+    /// height the ground was drawn at there, read in the world copy nearest
+    /// the center, or at the center's altitude where none was drawn, the
+    /// height [`screen_coordinate_to_lat_lng_on`] falls back to. On the
+    /// globe, past the Mercator range, the ground stands at sea level, as
+    /// [`ground_under`](Self::ground_under) meets it.
+    ///
+    /// [`screen_coordinate_to_lat_lng_on`]: Self::screen_coordinate_to_lat_lng_on
+    #[must_use]
+    pub fn lat_lng_to_screen_coordinate_on(&self, lat_lng: &LatLng, ground: &dyn Elevation) -> ScreenCoordinate {
+        let near = self.lat_lng_near_center(lat_lng);
+        let height = if self.is_globe() && near.latitude().abs() > LATITUDE_MAX {
+            Some(0.0)
+        } else {
+            let world = Projection::project(&near, 1.0 / TILE_SIZE_D);
+            ground.surface_at(DVec2::new(world.x, world.y))
+        };
+        self.lat_lng_to_screen_coordinate_at(lat_lng, height.unwrap_or_else(|| self.center_altitude()))
     }
 
     /// [`ground_under`](Self::ground_under) on the globe, in unit-sphere

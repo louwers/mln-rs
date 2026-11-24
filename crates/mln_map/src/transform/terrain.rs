@@ -99,7 +99,7 @@ impl Transform {
     /// `elevation` has in the tile under the center, or to sea level where it
     /// has none.
     fn fit_planes(&mut self, elevation: &dyn Elevation) {
-        let min_elevation = Some(elevation.min_at(self.view().center(WrapMode::Wrapped)).unwrap_or(0.0));
+        let min_elevation = Some(lowest_ground(self.view(), elevation));
         if min_elevation != self.view().terrain_min_elevation() {
             self.state.set_terrain_min_elevation(min_elevation);
         }
@@ -282,6 +282,13 @@ impl Transform {
             altitude += shortfall;
         }
     }
+}
+
+/// The lowest ground that `elevation` has in the tile under the center of
+/// `view`, or sea level where it has none, in meters: what the view's near
+/// and far planes fit while terrain draws.
+pub(crate) fn lowest_ground(view: &View, elevation: &dyn Elevation) -> f64 {
+    elevation.min_at(view.center(WrapMode::Wrapped)).unwrap_or(0.0)
 }
 
 /// How far the ground reaches above the eye of `view`, or above a point of

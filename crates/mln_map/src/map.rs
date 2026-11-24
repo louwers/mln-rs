@@ -1176,11 +1176,14 @@ impl Map {
     /// The bounds of the area the map shows from `camera`.
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a camera whose
     /// corners have no `LatLng`.
+    ///
+    /// Over terrain, the area is where the view meets the plane through the
+    /// camera's center, as [`camera_for_lat_lngs`](Self::camera_for_lat_lngs)
+    /// fits it.
     pub fn lat_lng_bounds_for_camera(&self, camera: &CameraOptions) -> Result<LatLngBounds, Error> {
-        let mut shallow = Transform::from_state(self.transform.state().clone());
+        let shallow = self.fitting_transform(camera);
         let size = shallow.state().view().size();
 
-        shallow.jump_to(camera);
         if shallow.state().view().is_globe() {
             return globe_bounds(&shallow);
         }
@@ -1227,6 +1230,13 @@ impl Map {
     /// `padding`, at `bearing` and `pitch` (the current ones for `None`).
     /// Fails as [`camera_for_lat_lng_bounds`](Self::camera_for_lat_lng_bounds)
     /// does.
+    ///
+    /// On the flat map the points stand at sea level, and the center keeps
+    /// its altitude. Over terrain, where the center will stand isn't known
+    /// until the ground there draws, so the points fit as if they stood as
+    /// high as the center: the camera shows them inside the padding at that
+    /// height, whatever altitude it comes to. Points on higher ground can
+    /// show past the padding, and those on lower ground inside it.
     pub fn camera_for_lat_lngs(
         &self,
         lat_lngs: &[LatLng],
@@ -1234,13 +1244,10 @@ impl Map {
         bearing: Option<f64>,
         pitch: Option<f64>,
     ) -> Result<CameraOptions, Error> {
+        let transform = self.fitting_transform(&CameraOptions { bearing, pitch, ..Default::default() });
         if bearing.is_none() && pitch.is_none() {
-            return camera_for_lat_lngs(lat_lngs, &self.transform, padding);
+            return camera_for_lat_lngs(lat_lngs, &transform, padding);
         }
-
-        let mut transform = Transform::from_state(self.transform.state().clone());
-
-        transform.jump_to(&CameraOptions { bearing, pitch, ..Default::default() });
 
         Ok(CameraOptions {
             bearing: Some(mln_math::rad2deg(-transform.view().angle())),
@@ -1272,10 +1279,9 @@ impl Map {
     /// antimeridian. Fails as
     /// [`lat_lng_bounds_for_camera`](Self::lat_lng_bounds_for_camera) does.
     pub fn lat_lng_bounds_for_camera_unwrapped(&self, camera: &CameraOptions) -> Result<LatLngBounds, Error> {
-        let mut shallow = Transform::from_state(self.transform.state().clone());
+        let shallow = self.fitting_transform(camera);
         let size = shallow.state().view().size();
 
-        shallow.jump_to(camera);
         if shallow.state().view().is_globe() {
             return globe_bounds(&shallow);
         }
@@ -1296,6 +1302,21 @@ impl Map {
         bounds.extend(&sw);
         bounds.extend(&center);
         Ok(bounds)
+    }
+
+    /// A copy of the map's transform moved by `camera`, without the map's
+    /// terrain, to fit cameras and find what they show. Over terrain its
+    /// center stands at sea level, whatever its altitude: a view is the same
+    /// raised by any height but for where the ground meets it, so sea-level
+    /// conversions then meet the plane through the center.
+    fn fitting_transform(&self, camera: &CameraOptions) -> Transform {
+        let mut transform = Transform::from_state(self.transform.state().clone());
+        let center_altitude = if self.terrain_applies() { Some(0.0) } else { camera.center_altitude };
+        let camera = CameraOptions { center_altitude, ..*camera };
+        if camera != CameraOptions::default() {
+            transform.jump_to(&camera);
+        }
+        transform
     }
 
     // MARK: - Bounds
@@ -1435,16 +1456,28 @@ impl Map {
     // gtests-core: projection and prefetch zoom delta (test/map, test/api).
     // MARK: - Projection
 
+    /// The screen point of `lat_lng`, in the copy of the world nearest the
+    /// camera's center, standing on the ground the map draws: over terrain,
+    /// at the height the renderer drew the ground at there ([`Self::ground`]),
+    /// or at the center's altitude where it drew none; on the flat map, at
+    /// sea level. A location that nearer ground hides still has the point
+    /// where its ground draws.
     #[must_use]
     pub fn pixel_for_lat_lng(&self, lat_lng: &LatLng) -> ScreenCoordinate {
-        let transform = &self.transform;
-        transform.lat_lng_to_screen_coordinate(&transform.state().view().lat_lng_near_center(lat_lng))
+        crate::map_projection::pixel_for_lat_lng(self.transform.view(), self.ground().as_deref(), lat_lng)
     }
 
-    /// The location under `pixel`. Fails with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN or infinite pixel.
+    /// The location that `pixel` shows on the ground the map draws: over
+    /// terrain, where its line of sight first meets the ground the renderer
+    /// drew ([`Self::ground`]), or, where it meets none, as in the sky, the
+    /// plane at the center's altitude; on the flat map, sea level.
+    /// [`pixel_for_lat_lng`](Self::pixel_for_lat_lng) takes the location
+    /// back to the pixel, but above the horizon of the plane, which the line
+    /// of sight doesn't meet. Fails with
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN or
+    /// infinite pixel.
     pub fn lat_lng_for_pixel(&self, pixel: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
-        self.transform.screen_coordinate_to_lat_lng(pixel, wrap_mode)
+        crate::map_projection::lat_lng_for_pixel(self.transform.view(), self.ground().as_deref(), pixel, wrap_mode)
     }
 
     /// Whether the globe hides a location from the camera; a Mercator map
@@ -1454,12 +1487,19 @@ impl Map {
         self.transform.is_location_occluded(lat_lng)
     }
 
+    /// [`lat_lng_for_pixel`](Self::lat_lng_for_pixel) of each pixel. Fails
+    /// as that does for any of them.
     pub fn lat_lngs_for_pixels(
         &self,
         screen_coords: &[ScreenCoordinate],
         wrap_mode: WrapMode,
     ) -> Result<Vec<LatLng>, Error> {
-        screen_coords.iter().map(|point| self.lat_lng_for_pixel(point, wrap_mode)).collect()
+        let ground = self.ground();
+        let view = self.transform.view();
+        screen_coords
+            .iter()
+            .map(|pixel| crate::map_projection::lat_lng_for_pixel(view, ground.as_deref(), pixel, wrap_mode))
+            .collect()
     }
 
     /// Places the camera by its position and orientation, and cancels the
@@ -1527,8 +1567,24 @@ impl Map {
         if self.style.get_terrain().is_none() {
             self.elevation = None;
         }
-        let applies = self.style.get_terrain().is_some() && self.mode != MapMode::Tile;
-        applies.then(|| TerrainGround { elevation: self.elevation.clone(), clamped: self.center_clamped_to_ground })
+        self.terrain_applies()
+            .then(|| TerrainGround { elevation: self.elevation.clone(), clamped: self.center_clamped_to_ground })
+    }
+
+    /// Whether the style's terrain applies: it has terrain, outside tile
+    /// mode, on every projection.
+    fn terrain_applies(&self) -> bool {
+        self.style.get_terrain().is_some() && self.mode != MapMode::Tile
+    }
+
+    /// The ground of the style's terrain as the renderer last drew it, which
+    /// the camera stands on and the map's conversions meet
+    /// ([`pixel_for_lat_lng`](Self::pixel_for_lat_lng)). `None` while the
+    /// map draws flat: without terrain, in tile mode, and until the renderer
+    /// draws the terrain.
+    #[must_use]
+    pub fn ground(&self) -> Option<Arc<dyn Elevation>> {
+        self.elevation.clone().filter(|_| self.terrain_applies())
     }
 
     // MARK: - Debug

@@ -38,6 +38,7 @@ mod transition;
 
 use gesture::GestureState;
 pub use terrain::TerrainGround;
+pub(crate) use terrain::lowest_ground;
 use transition::{FrameFn, JointEnd, Transition};
 
 use crate::map_event::{CameraChange, CameraChangeSource};
@@ -780,7 +781,7 @@ impl Transform {
 
 /// `point` measured from the other edge of `view`'s height: a screen point
 /// (y down) as a view point (y up), or back.
-fn flip_y(view: &View, point: &ScreenCoordinate) -> ScreenCoordinate {
+pub(crate) fn flip_y(view: &View, point: &ScreenCoordinate) -> ScreenCoordinate {
     ScreenCoordinate::new(point.x, f64::from(view.size().height) - point.y)
 }
 
