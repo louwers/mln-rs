@@ -4,6 +4,7 @@
 //! OpenGL ES), or WebGPU.
 
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, channel};
 use std::time::{Duration, Instant};
 
 use mln_rs::layer::MapMode;
@@ -11,7 +12,7 @@ use mln_rs::mln_render::Registry;
 use mln_rs::mln_util::size::Size;
 use mln_rs::{
     AttachOptions, BackendType, Completion, DemandMode, Device, DeviceOptions, Error, FrameDemand, FrameDisposition,
-    Map, MapOptions, RenderSession, RenderTarget, Runtime, RuntimeOptions,
+    Map, MapOptions, RenderSession, RenderTarget, Runtime, RuntimeOptions, Wake,
 };
 
 pub(crate) const SIZE: Size = Size { width: 64, height: 64 };
@@ -21,6 +22,8 @@ pub(crate) const SIZE: Size = Size { width: 64, height: 64 };
 pub(crate) struct Fixture {
     pub(crate) session: RenderSession,
     pub(crate) map: Map,
+    /// Gets a message when frame results wait for a drain.
+    frames: Receiver<()>,
     runtime: Runtime,
 }
 
@@ -42,9 +45,14 @@ impl Fixture {
         wait(map.set_style_json(style));
         let device = Device::with_backend(backend(), DeviceOptions::default()).unwrap();
         let target = RenderTarget::Offscreen { size: SIZE, device: Some(device) };
-        let (session, attached) = map.attach(target, AttachOptions::default()).unwrap();
+        let (woken, frames) = channel();
+        let frame_wake: Wake = Arc::new(move || {
+            let _ = woken.send(());
+        });
+        let options = AttachOptions { frame_wake: Some(frame_wake), ..AttachOptions::default() };
+        let (session, attached) = map.attach(target, options).unwrap();
         attached.wait().unwrap();
-        let fixture = Fixture { session, map, runtime };
+        let fixture = Fixture { session, map, frames, runtime };
         if mode == MapMode::Continuous {
             fixture.render_loaded();
         }
@@ -59,14 +67,12 @@ impl Fixture {
     /// Renders one frame on a demand of `mode`, which must draw one.
     pub(crate) fn render_on(&self, mode: DemandMode) -> mln_rs::FrameResult {
         self.session.demand_frame(FrameDemand::new(mode, 0)).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
+            self.frames.recv_timeout(Duration::from_secs(30)).expect("no frame rendered");
             if let Some(result) = self.session.drain_frame_results().unwrap().into_iter().next() {
                 assert_eq!(FrameDisposition::Rendered, result.disposition);
                 return result;
             }
-            assert!(Instant::now() < deadline, "no frame rendered");
-            std::thread::sleep(Duration::from_millis(1));
         }
     }
 

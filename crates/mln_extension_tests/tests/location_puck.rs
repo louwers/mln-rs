@@ -45,10 +45,11 @@ fn pixel(fixture: &Fixture, x: f64, y: f64) -> [u8; 4] {
 }
 
 /// The engine has no frame clock, so which frames a transition draws is
-/// the wall clock's: every frame drawn shows the puck on its way, and the
-/// last at the fix. The way a position and a bearing go, across the
-/// antimeridian and through north, is their interpolation's (`mln_util`'s
-/// and `mln_style`'s tests).
+/// the wall clock's: every frame drawn shows the puck between where it was
+/// and the fix, and the last at the fix. The way a position and a bearing
+/// go, across the antimeridian and through north, is their interpolation's
+/// (`mln_util`'s and `mln_style`'s tests), and the easing's solver keeps
+/// successive frames in order only to its tolerance.
 #[test]
 fn a_fix_moves_the_puck_and_turns_its_arrow_the_short_way_to_it() {
     let fixture = Fixture::new(registry(), STYLE);
@@ -57,14 +58,12 @@ fn a_fix_moves_the_puck_and_turns_its_arrow_the_short_way_to_it() {
     wait(fixture.map.set_style_layer_property("puck", "position", "[1, 0]"));
     wait(fixture.map.set_style_layer_property("puck", "bearing", "10"));
     let deadline = Instant::now() + Duration::from_secs(30);
-    let mut last_longitude = -1.0;
     while drawn(&fixture) != (1.0, 10.0) {
         assert!(Instant::now() < deadline, "the transition never ended");
         fixture.render();
         let (longitude, bearing) = drawn(&fixture);
-        assert!((last_longitude..=1.0).contains(&longitude), "{last_longitude} then {longitude}");
+        assert!((-1.0..=1.0).contains(&longitude), "past the fix or behind the start: {longitude}");
         assert!(!(10.0..350.0).contains(&bearing) || bearing == 10.0, "the long way round: {bearing}");
-        last_longitude = longitude;
     }
     // The arrow points about north from the puck, which zoom 3 draws 11.4
     // pixels a degree east of the center.
