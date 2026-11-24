@@ -49,6 +49,9 @@ struct MockTileData {
     /// Whether the tile can draw once it is retained as required, as one
     /// whose origin delivers as it learns that, for this crate's own case.
     renders_when_required: bool,
+    /// Whether the tile settles without data once it is retained as
+    /// required, as one whose origin finds it missing as it learns that.
+    missing_when_required: bool,
     tried_optional: bool,
     loaded: bool,
     tile_id: OverscaledTileID,
@@ -61,6 +64,7 @@ impl MockTileData {
         MockTileData {
             renderable: false,
             renders_when_required: false,
+            missing_when_required: false,
             tried_optional: false,
             loaded: false,
             tile_id,
@@ -147,7 +151,9 @@ impl RenderablesContext for Callbacks<'_> {
 
     fn retain_tile(&mut self, tile: &OverscaledTileID, necessity: TileNecessity) {
         let tile_data = self.data_tiles.get_mut(tile).expect("null tile");
-        tile_data.renderable |= tile_data.renders_when_required && necessity == TileNecessity::Required;
+        let required = necessity == TileNecessity::Required;
+        tile_data.renderable |= tile_data.renders_when_required && required;
+        tile_data.loaded |= tile_data.missing_when_required && required;
         self.log.push(RetainTileDataAction(tile_data.tile_id, necessity));
     }
 
@@ -188,6 +194,33 @@ fn an_ideal_tile_that_loads_as_it_is_retained_renders() {
             GetTileDataAction(oid(1, 0, (1, 1, 1)), Found),
             RetainTileDataAction(oid(1, 0, (1, 1, 1)), TileNecessity::Required),
             RenderTileAction(uid(1, 1, 1), tile),
+        ],
+        source.log
+    );
+}
+
+// Port-only: an ideal tile that its origin finds missing as it is retained
+// counts as loaded in the same pass, so the cover loads its parent from the
+// network.
+#[test]
+fn an_ideal_tile_missing_as_it_is_retained_loads_its_parent() {
+    let mut source = MockSource::new();
+    source.ideal_tiles.insert(OverscaledTileID::from_zxy(1, 1, 1));
+    let tile = source.create_tile_data(OverscaledTileID::from_zxy(1, 1, 1));
+    source.tile_mut(tile).missing_when_required = true;
+
+    source.update_renderables(None);
+    assert_eq!(
+        vec![
+            GetTileDataAction(oid(1, 0, (1, 1, 1)), Found),
+            RetainTileDataAction(oid(1, 0, (1, 1, 1)), TileNecessity::Required),
+            GetTileDataAction(oid(2, 0, (2, 2, 2)), NotFound),
+            GetTileDataAction(oid(2, 0, (2, 2, 3)), NotFound),
+            GetTileDataAction(oid(2, 0, (2, 3, 2)), NotFound),
+            GetTileDataAction(oid(2, 0, (2, 3, 3)), NotFound),
+            GetTileDataAction(oid(0, 0, (0, 0, 0)), NotFound),
+            CreateTileDataAction(oid(0, 0, (0, 0, 0))),
+            RetainTileDataAction(oid(0, 0, (0, 0, 0)), TileNecessity::Required),
         ],
         source.log
     );

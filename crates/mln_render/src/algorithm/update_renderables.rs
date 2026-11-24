@@ -57,11 +57,11 @@ pub(crate) fn update_renderables<C: RenderablesContext>(
             },
         };
 
+        // Retained before its state counts: an origin can deliver, or find
+        // the tile missing, as it learns that the tile is required.
+        ctx.retain_tile(&ideal_tile, TileNecessity::Required);
         let mut parent_has_tried_optional = ctx.has_tried_optional(&ideal_tile);
         let mut parent_is_loaded = ctx.is_loaded(&ideal_tile);
-        // Retained before its renderability counts: an origin can deliver,
-        // or find the tile missing, as it learns that the tile is required.
-        ctx.retain_tile(&ideal_tile, TileNecessity::Required);
 
         // if (source has the tile and bucket is loaded) {
         if ctx.is_renderable(&ideal_tile) {
