@@ -590,7 +590,7 @@ fn a_memory_limit_halves_the_drapes_of_the_farthest_tiles_first() {
     let whole: Vec<_> = map.sides().into_iter().map(|(tile, _)| (tile, 1024)).collect();
     assert_eq!(whole, map.sides());
 
-    map.terrain.drape_memory_limit = 4 * DRAPE_BYTES + DEPTH_STENCIL_BYTES - 1;
+    map.terrain.drape_memory_limit = Some(4 * DRAPE_BYTES + DEPTH_STENCIL_BYTES - 1);
     let (_, drawn) = map.frame();
     let sides = map.sides();
     let (last, _) = *sides.last().unwrap();
@@ -601,7 +601,7 @@ fn a_memory_limit_halves_the_drapes_of_the_farthest_tiles_first() {
     assert!((terrain.mem_drapes as u64) < 4 * DRAPE_BYTES + DEPTH_STENCIL_BYTES, "{terrain:?}");
     assert!(map.frame().1.is_empty(), "the drapes are drawn again once only");
 
-    map.terrain.drape_memory_limit = u64::MAX;
+    map.terrain.drape_memory_limit = None;
     assert_eq!(BTreeSet::from([(last, 0)]), map.frame().1);
     assert_eq!(whole, map.sides());
 }

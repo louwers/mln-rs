@@ -65,13 +65,14 @@ pub struct TerrainOptions {
     /// its layers onto hold, with their mips and the depth and stencil they
     /// draw with. Past it, the drapes of the tiles farthest from the view's
     /// center take fewer texels, and look blurrier; no tile loses its
-    /// drape. 256 MiB by default.
-    pub drape_memory_limit: u64,
+    /// drape. `None`, the default, sets no limit: the drapes hold what the
+    /// view's tiles need.
+    pub drape_memory_limit: Option<u64>,
 }
 
 impl Default for TerrainOptions {
     fn default() -> Self {
-        TerrainOptions { skirt_length: TerrainSkirtLength::Auto, drape_memory_limit: 256 << 20 }
+        TerrainOptions { skirt_length: TerrainSkirtLength::Auto, drape_memory_limit: None }
     }
 }
 

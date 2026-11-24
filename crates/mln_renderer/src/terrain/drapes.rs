@@ -21,14 +21,15 @@
 //! texture, so a stack that draws nothing in a tile holds no memory there.
 //!
 //! A drape takes GL JS's side, twice its tile's, or the device's largest
-//! texture where that is smaller ([`drape_size`]). A byte cap, the map's
-//! [`TerrainOptions::drape_memory_limit`], lowers the sides of the tiles
-//! farthest from the view's center, last in the cover, where the drapes'
-//! textures and the depth and stencil they draw with would hold more; it
-//! never drops a tile. The sides are settled before the layers update
-//! their drawings, so a drape that changes takes its tile's side at once.
-//! The cap counts as holding a texture every drape that does, and every
-//! drape whose layers draw from something new, which may draw something.
+//! texture where that is smaller ([`drape_size`]). Where the map sets a
+//! byte cap ([`TerrainOptions::drape_memory_limit`]), it lowers the sides
+//! of the tiles farthest from the view's center, last in the cover, where
+//! the drapes' textures and the depth and stencil they draw with would
+//! hold more; it never drops a tile. The sides are settled before the
+//! layers update their drawings, so a drape that changes takes its tile's
+//! side at once. The cap counts as holding a texture every drape that
+//! does, and every drape whose layers draw from something new, which may
+//! draw something.
 //!
 //! A draped layer with a layer opacity below 1 or a layer blend other than
 //! `normal` draws as a whole inside each drape, as in 2D

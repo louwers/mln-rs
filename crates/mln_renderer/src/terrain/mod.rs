@@ -147,10 +147,10 @@ pub(crate) struct RenderTerrain {
     /// What the frame's draws bind of them; `None` without terrain.
     dems: Option<DemBindings>,
     /// The most bytes the drapes hold, the map's
-    /// [`TerrainOptions::drape_memory_limit`].
+    /// [`TerrainOptions::drape_memory_limit`], or `None` for no limit.
     ///
     /// [`TerrainOptions::drape_memory_limit`]: mln_map_types::TerrainOptions::drape_memory_limit
-    drape_memory_limit: u64,
+    drape_memory_limit: Option<u64>,
 }
 
 impl RenderTerrain {
@@ -307,7 +307,12 @@ impl RenderTerrain {
             return None;
         };
         let max_texture_size = parameters.context.caps().max_texture_size;
-        self.drapes.begin(parameters.view, cover, stacks, (self.drape_memory_limit, max_texture_size));
+        self.drapes.begin(
+            parameters.view,
+            cover,
+            stacks,
+            (self.drape_memory_limit.unwrap_or(u64::MAX), max_texture_size),
+        );
         Some(&mut self.drapes)
     }
 

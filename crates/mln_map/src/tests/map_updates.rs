@@ -122,7 +122,7 @@ fn a_group_without_changes_publishes_nothing() {
 #[test]
 fn updates_carry_the_terrain_options_of_the_map_options() {
     let run_loop = Queue::<()>::new();
-    let terrain = TerrainOptions { skirt_length: TerrainSkirtLength::None, drape_memory_limit: 1 << 20 };
+    let terrain = TerrainOptions { skirt_length: TerrainSkirtLength::None, drape_memory_limit: Some(1 << 20) };
     let options = MapOptions { size: Size::new(256, 256), terrain, ..Default::default() };
     let file_source = StubFileSource::on_queue(&run_loop, ResponseType::Asynchronous);
     let mut map = Map::with_file_source(file_source, options, &crate::tests::pool()).expect("map");
