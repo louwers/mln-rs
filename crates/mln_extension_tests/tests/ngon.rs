@@ -99,11 +99,12 @@ const COLLIDING: &str = r##"{"id":"ngons","type":"org.maplibre.ngon","source":"p
 /// Zoom 0 draws 1.40625 degrees of longitude in 2 pixels.
 const TWO_PIXELS: f64 = 1.406_25;
 
-/// A bucket's first placement shows and hides its polygons at once, though
-/// the style fades: what a fade draws midway is the wall clock's, which the
-/// engine has no frame clock to fix.
+/// Two colliding polygons in a style that fades settle with the first
+/// shown and the second hidden, and the settled map draws no more frames.
+/// The test reads only the settled frame: what a fade draws midway is the
+/// wall clock's, which the engine has no frame clock to fix.
 #[test]
-fn colliding_ngons_first_place_at_once_and_the_map_goes_idle() {
+fn colliding_ngons_settle_with_one_shown_and_the_map_goes_idle() {
     // Squares 4 pixels apart: the first shows, and the second, which it
     // hides, would reach 8 pixels right of the center.
     let fixture = Fixture::new(registry(), &points_style(0.0, 300, &[0.0, 2.0 * TWO_PIXELS], COLLIDING));
