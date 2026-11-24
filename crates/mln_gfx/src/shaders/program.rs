@@ -581,8 +581,9 @@ impl Program {
     /// [`BufferKind::Vertices`] names, no more attributes and textures than
     /// a program can have, and distinct names of the buffers, the textures
     /// and their samplers, none of them a name of the engine's buffers or
-    /// [`DRAW_INDEX`]. Also that the GLSL ES names of the members of the
-    /// engine's blocks and the program's, and of the textures, are distinct,
+    /// [`DRAW_INDEX`]. Also that the names of the engine's blocks and the
+    /// program's are distinct, since a backend declares a block of a name
+    /// once, and the GLSL ES names of their members and of the textures,
     /// since GLSL ES has them in one scope.
     ///
     /// # Errors
@@ -658,6 +659,9 @@ impl Program {
             }
         }
         blocks.extend(self.buffers.iter().filter_map(ProgramBuffer::block));
+        if let Some(name) = repeated(blocks.iter().map(|block| block.name).collect()) {
+            return invalid(format!("two blocks are named {name}"));
+        }
         let mut names: Vec<String> = blocks
             .iter()
             .flat_map(|block| block.members.iter().map(|member| glsl_es::member_name(block, member)))
@@ -811,6 +815,7 @@ impl fmt::Debug for Program {
 mod tests {
     use super::*;
     use crate::gfx_types::AttributeDataType::{Float3, Short2};
+    use crate::shaders::block::{Member, MemberType, Precision};
 
     static EMPTY: Program = Program {
         name: "empty",
@@ -882,6 +887,23 @@ mod tests {
             textures: const { &[ProgramTexture::new("image")] },
             ..EMPTY
         });
+        // A block of the name of the view's, whose members GLSL ES names
+        // apart from the view's.
+        static OTHER_VIEW: Block = Block {
+            name: "ViewUBO",
+            size: 16,
+            members: &[Member {
+                name: "x",
+                ty: MemberType::Vec4,
+                offset: 0,
+                precision: Precision::High,
+                padding: false,
+            }],
+            glsl_es_prefix: "other_",
+        };
+        static OTHER: [ProgramBuffer; 1] =
+            [ProgramBuffer { id: FIRST_UNIFORM_ID, name: "props", kind: BufferKind::Uniform(&OTHER_VIEW) }];
+        fails(Program { buffers: &OTHER, ..EMPTY });
     }
 
     #[test]
