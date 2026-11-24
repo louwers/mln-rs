@@ -3212,14 +3212,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mln-rs-test-server"
-version = "0.0.15"
-dependencies = [
- "httpmock",
- "mln-rs-util",
-]
-
-[[package]]
 name = "mln-rs-text"
 version = "0.0.15"
 dependencies = [
