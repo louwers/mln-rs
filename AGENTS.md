@@ -76,8 +76,8 @@ FreeBSD's in a virtual machine, with KVM, and Windows' x64 targets under Wine.
 
 Android's tests run in a Java VM's process, as an app's code does
 (tools/android-test-host/README.md). They also run on real phones in AWS Device
-Farm: CI runs them after it completes, and `mise run device-farm:run` from your
-machine (tools/device-farm/README.md).
+Farm: CI runs them once it has built them, and `mise run device-farm:run` from
+your machine (tools/device-farm/README.md).
 
 A test that reads files of its package finds them through the
 `CARGO_MANIFEST_DIR` that Cargo sets when it runs the test, not

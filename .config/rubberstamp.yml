@@ -25,10 +25,10 @@ ci:
     `linux-x64` is the general check for shared Rust code, rendering, and the C
     library. Another unit matters only when a change reaches what it alone
     builds or runs: ARM64 Linux or lavapipe packaging for `linux-arm64`, Metal
-    or Apple platform code for `macos`, Android platform code, emulator setup or
-    GPU behavior that differs on phones for `android`, browser builds or
-    rendered web output for `web`, or Cargo manifests and file
-    additions/deletions/renames for `package`.
+    or Apple platform code for `macos`, Android platform code or GPU behavior
+    that differs on phones for `android`, browser builds or rendered web output
+    for `web`, or Cargo manifests and file additions/deletions/renames for
+    `package`.
 
     Changing a job's definition in `.github/workflows/ci.yml`,
     `tools/ci/jobs.json`, or `.github/actions/setup-ci-deps/` puts the units
@@ -72,18 +72,16 @@ ci:
     android:
       covers: >-
         Android cross-target clippy for all four Android ABIs, and the workspace
-        and render tests on Vulkan: on the x86_64 API 36 emulator (SwiftShader),
-        and after CI on AWS Device Farm's phones (a Pixel 9 with a Mali GPU and
-        a Galaxy S25 with an Adreno one). Catches Android platform code,
-        NDK/JNI/AHardwareBuffer integration, Vulkan backend portability,
-        rendering that differs on phones' GPU drivers, and Android CI or
-        emulator setup issues. Platform-independent changes that `linux-x64`
-        already covers do not need it.
+        and render tests on Vulkan on AWS Device Farm's phones (a Pixel 9 with a
+        Mali GPU and a Galaxy S25 with an Adreno one), whose package CI builds.
+        Catches Android platform code, NDK/JNI/AHardwareBuffer integration,
+        Vulkan backend portability, rendering that differs on phones' GPU
+        drivers, and Android CI setup issues. Platform-independent changes that
+        `linux-x64` already covers do not need it.
       rules:
         - if:
             files:
               - mise.target-android.*
-              - tools/ci/boot-android.sh
               - tools/android-test-host/**
               - tools/device-farm/**
               - mise-tasks/device-farm/**
