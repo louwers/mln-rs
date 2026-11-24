@@ -626,6 +626,7 @@ impl Encoder {
             |tiles| parameters.stencil_clear_tiles(tiles),
         );
         parameters.stencil_clear.clone_from(&draw_groups.stencil_clear);
+        parameters.opaque_pass_cutoff = orchestrator.opaque_pass_cutoff();
         let (proj_state, transform) = (parameters.view, parameters.transform_params);
         parameters.clip_masks.update(gpu, parameters.context, proj_state.is_globe(), &draw_groups.clip_tiles, |tile| {
             to_projection_ubo(&transform.projection_data_for_tile(tile, false))

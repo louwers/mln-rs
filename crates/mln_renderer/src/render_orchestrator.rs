@@ -404,7 +404,7 @@ impl RenderOrchestrator {
         // placement change, which the draws that copied it copy again.
         let mut changed_buckets = ChangedBuckets::default();
         self.update_render_tiles(&frame, &mut changed_buckets);
-        let placed = self.update_layer_tiles(update_parameters, &mut frame);
+        let placed = self.update_layer_tiles(update_parameters, &frame);
 
         frame.symbols_started = Instant::now();
         let update_symbol_opacities = self.place_symbols(update_parameters, &placed.leaders, &mut frame);
@@ -484,12 +484,11 @@ impl RenderOrchestrator {
         }
     }
 
-    /// Gives each layer of the frame its tiles, in the order it draws them,
-    /// and sets the frame's opaque pass cutoff. Returns the layers that
-    /// place symbols and those that draw symbols another layer places.
-    fn update_layer_tiles(&mut self, update_parameters: &UpdateParameters, frame: &mut Frame) -> PlacementLayers {
+    /// Gives each layer of the frame its tiles, in the order it draws them.
+    /// Returns the layers that place symbols and those that draw symbols
+    /// another layer places.
+    fn update_layer_tiles(&mut self, update_parameters: &UpdateParameters, frame: &Frame) -> PlacementLayers {
         let mut placed = PlacementLayers::default();
-        let mut opaque_pass_cutoff_estimation = frame.layers.len();
         let mut contents = SourceContents::default();
         self.found_tiles.clear();
         for (&index, frame_layer) in &frame.layers {
@@ -513,12 +512,6 @@ impl RenderOrchestrator {
             }
             if !render_layer.follower_data().is_empty() {
                 placed.followers.push(index);
-            }
-            if frame.opaque_pass_cutoff == 0 {
-                opaque_pass_cutoff_estimation -= 1;
-                if render_layer.is_3d() {
-                    frame.opaque_pass_cutoff = opaque_pass_cutoff_estimation as u32;
-                }
             }
         }
         placed
@@ -1210,6 +1203,24 @@ impl RenderOrchestrator {
         for layer in &self.layers {
             layer.visit_draw_groups(&mut visit);
         }
+    }
+
+    /// The number of the frame's draw groups above those of its lowest 3D
+    /// layer that draws, which draw without a depth test; 0 without one. A
+    /// layer may have no draw group or several, such as a symbol layer's
+    /// collision boxes.
+    pub(crate) fn opaque_pass_cutoff(&self) -> u32 {
+        let mut above: Option<u32> = None;
+        for layer in &self.layers {
+            let mut groups = 0;
+            layer.visit_draw_groups(&mut |_| groups += 1);
+            match &mut above {
+                Some(above) => *above += groups,
+                None if groups > 0 && layer.is_3d() => above = Some(0),
+                None => {}
+            }
+        }
+        above.unwrap_or(0)
     }
 
     /// Uploads the GPU objects of the frame's draws: the layers' draw

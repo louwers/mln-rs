@@ -223,6 +223,9 @@ pub(crate) struct PaintParameters<'a> {
     /// Whether the frame draws terrain, under which 2D layers draw without
     /// depth.
     pub(crate) terrain: bool,
+    /// The number of the frame's draw groups above its lowest 3D layer's,
+    /// which draw without a depth test
+    /// ([`RenderOrchestrator::opaque_pass_cutoff`](crate::render_orchestrator::RenderOrchestrator::opaque_pass_cutoff)).
     pub(crate) opaque_pass_cutoff: u32,
     pub(crate) symbol_fade_change: f32,
 
@@ -285,7 +288,7 @@ impl<'a> PaintParameters<'a> {
             current_layer: 0,
             depth_range_size: 1.0,
             terrain: frame.terrain,
-            opaque_pass_cutoff: frame.opaque_pass_cutoff,
+            opaque_pass_cutoff: 0,
             symbol_fade_change: frame.symbol_fade_change,
             scissor_rect,
             custom_layer_frame: None,

@@ -1,13 +1,17 @@
 // The tile debug overlays of `Map::set_debug` (tile borders, parse status,
-// timestamps) and the rendering stats view, on the headless frontend.
+// timestamps), its collision boxes, and the rendering stats view, on the
+// headless frontend.
 
 use mln_map::{CameraOptions, MapDebugOptions};
 use mln_storage::{Kind, Resource};
+use mln_style::Edit;
 use mln_util::chrono::Timestamp;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
+use mln_util::size::Size;
 
-use crate::support::{MapTest, file_response};
+use crate::gtest_map::style_image;
+use crate::support::{MapTest, center_pixel, file_response};
 
 /// A raster source of one solid tile, whose responses carry `modified` and
 /// `expires` times.
@@ -198,4 +202,54 @@ fn rendering_stats_view_shows_the_stats_in_the_top_right() {
         changed_pixels(&plain, &render(&test, MapDebugOptions::NO_DEBUG, "stats_disabled")),
         Vec::<(u32, u32)>::new()
     );
+}
+
+/// From the bottom: a box extruded over the map's center, an opaque blue
+/// background, and an icon away from the center.
+const COVERED_EXTRUSION_STYLE: &str = r#"{
+  "version": 8,
+  "center": [0, 0],
+  "zoom": 15,
+  "sources": {
+    "box": {
+      "type": "geojson",
+      "data": {
+        "type": "Polygon",
+        "coordinates": [[[-0.001, -0.001], [0.001, -0.001], [0.001, 0.001], [-0.001, 0.001], [-0.001, -0.001]]]
+      }
+    },
+    "point": {
+      "type": "geojson",
+      "data": { "type": "Point", "coordinates": [0.002, 0.002] }
+    }
+  },
+  "layers": [
+    {
+      "id": "box",
+      "type": "fill-extrusion",
+      "source": "box",
+      "paint": { "fill-extrusion-color": "red", "fill-extrusion-height": 50 }
+    },
+    { "id": "cover", "type": "background", "paint": { "background-color": "blue" } },
+    { "id": "icon", "type": "symbol", "source": "point", "layout": { "icon-image": "icon" } }
+  ]
+}"#;
+
+#[test]
+fn collision_boxes_leave_a_layer_above_an_extrusion_on_top() {
+    let test = MapTest::new();
+    test.load_json(COVERED_EXTRUSION_STYLE);
+    let icon = PremultipliedImage::from_vec(Size::new(16, 16), [0, 255, 0, 255].repeat(16 * 16));
+    test.map().edit_style(|style| style.apply(Edit::AddImage(style_image("icon", icon, 1.0)))).unwrap();
+    let camera = test.map().style().get_default_camera();
+    test.map().jump_to(&camera);
+
+    let blue = [0, 0, 255, 255];
+    let plain = render(&test, MapDebugOptions::NO_DEBUG, "covered_extrusion_plain");
+    assert_eq!(center_pixel(&plain), blue, "the extrusion shows through the background above it");
+    let collision = render(&test, MapDebugOptions::COLLISION, "covered_extrusion_collision");
+    assert_eq!(center_pixel(&collision), blue, "the extrusion shows through with collision boxes");
+    // The layer's collision boxes are gone, but not what made them.
+    let after = render(&test, MapDebugOptions::NO_DEBUG, "covered_extrusion_after_collision");
+    assert_eq!(center_pixel(&after), blue, "the extrusion shows through after collision boxes");
 }

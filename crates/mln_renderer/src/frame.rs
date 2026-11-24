@@ -31,9 +31,6 @@ pub(crate) struct Frame {
     /// don't draw onto, and under which the other 2D layers draw without
     /// depth.
     pub(crate) terrain: bool,
-    /// The number of the frame's layers above its lowest 3D layer, which
-    /// draw without a depth test; 0 without 3D layers.
-    pub(crate) opaque_pass_cutoff: u32,
     /// What the frame clears to: transparent black unless the style's
     /// bottom layer is a solid background.
     pub(crate) background_color: Color,
@@ -67,7 +64,6 @@ impl Frame {
             sky: None,
             has_3d: false,
             terrain: false,
-            opaque_pass_cutoff: 0,
             background_color: Color::new_unchecked(0.0, 0.0, 0.0, 0.0),
             symbol_fade_change: 0.0,
             needs_repaint: false,
