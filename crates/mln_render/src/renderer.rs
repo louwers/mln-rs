@@ -555,7 +555,6 @@ impl Encoder {
         orchestrator.upload_draws(gpu, parameters.context);
         let draw_groups = DrawGroups::of(orchestrator, &parameters);
         parameters.stencil_clear.clone_from(&draw_groups.stencil_clear);
-        parameters.opaque_pass_cutoff = draw_groups.opaque_pass_cutoff;
         let (proj_state, transform) = (parameters.frame.camera, parameters.frame.transform);
         parameters.clip_masks.update(gpu, parameters.context, proj_state.is_globe(), &draw_groups.clip_tiles, |tile| {
             TileProjection::of(tile, proj_state, &transform.projection_data_for_tile(tile, false), None)
@@ -592,7 +591,7 @@ impl Encoder {
         let frame_projection =
             frame_projection::compute(&frame.transform, depth_range_size, parameters.context.caps().clip_depth);
         parameters.frame_projection = Some(frame_projection);
-        draw(orchestrator, gpu, &mut parameters, &frame, image, draw_groups.count, depth_range_size);
+        draw(orchestrator, gpu, &mut parameters, &frame, image, &draw_groups, depth_range_size);
         let start_rendering = Instant::now();
         let submitted = parameters.end_pass(gpu).and_then(|()| gpu.flush(false));
         if let Err(error) = &submitted {
@@ -729,22 +728,25 @@ impl DrawGroups {
 
 /// The draw section of a frame's encode: encodes the passes of `frame` into
 /// `image` through `gpu`, which holds the frame's work until it is
-/// submitted, each pass drawing the `num_draw_groups` draw groups at depths
-/// below `depth_range_size`.
+/// submitted, each pass drawing the map's `draw_groups` at depths below
+/// `depth_range_size`.
 fn draw(
     orchestrator: &mut RenderOrchestrator,
     gpu: &mut dyn Gpu,
     parameters: &mut PaintParameters<'_>,
     frame: &FramePlan,
     image: &FrameImage,
-    num_draw_groups: usize,
+    draw_groups: &DrawGroups,
     depth_range_size: f32,
 ) {
+    let num_draw_groups = draw_groups.count;
     // What the layers draw into their targets and the named targets, which
-    // the passes sample.
+    // the passes sample. Their passes aren't the map's, so the map's
+    // opaque pass cutoff comes after them.
     let frame_depth =
         image.depth_stencil.filter(|_| parameters.frame.composites_with_frame_depth).zip(image.targets.depth_stencil);
     orchestrator.render_targets(gpu, parameters, frame_depth);
+    parameters.opaque_pass_cutoff = draw_groups.opaque_pass_cutoff;
 
     // The frame's pass, cleared to the backdrop, which shows where there are
     // no tiles.
