@@ -2,6 +2,11 @@
 //! while the view needs them; what each kind of response leaves them with;
 //! and when they load again. Time passes only in the responses' headers:
 //! data that expired long ago, or expires far ahead.
+//!
+//! A check that a tile made no request, or no layout, reads what the map
+//! did by a frame's end. A request still on its way through the cache's
+//! thread, or a layout still on a worker, would come after it, so such a
+//! check catches what the frames did and can miss what they set off.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

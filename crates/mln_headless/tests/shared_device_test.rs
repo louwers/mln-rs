@@ -1,5 +1,6 @@
-// Frontends on one device, as maplibre-native-ffi's offscreen device shares
-// it: each draws its own map, in turn.
+// Frontends made with one device, as maplibre-native-ffi's offscreen device
+// shares it: each draws its own map, in turn. That they draw on the device
+// they were given isn't observable here.
 
 use std::sync::Arc;
 
@@ -33,7 +34,7 @@ fn render_on(device: &mln_runtime::Device, color: &str) -> Vec<u8> {
 }
 
 #[test]
-fn frontends_on_one_device_render_in_turn() {
+fn frontends_made_with_one_device_each_draw_their_own_map() {
     let device = mln_headless::harness_device().expect("device");
     for (color, pixel) in [("red", [255, 0, 0, 255]), ("blue", [0, 0, 255, 255]), ("red", [255, 0, 0, 255])] {
         let image = render_on(&device, color);
