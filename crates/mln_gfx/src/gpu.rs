@@ -186,6 +186,16 @@ impl TextureFormat {
     pub fn has_stencil(self) -> bool {
         matches!(self, TextureFormat::Depth24PlusStencil8 | TextureFormat::Depth32FloatStencil8)
     }
+
+    /// Whether a texture of the format can be
+    /// [`mipmapped`](TextureDesc::mipmapped): a color format that every
+    /// backend filters and draws into, as making its mips takes. (A backend
+    /// may still lack a format, as GL lacks the BGRA ones.)
+    #[must_use]
+    pub fn mipmappable(self) -> bool {
+        self.bytes_per_texel().is_some()
+            && !matches!(self, TextureFormat::A8Unorm | TextureFormat::R32Float | TextureFormat::Rgba32Float)
+    }
 }
 
 /// What a texture is used for.
@@ -206,6 +216,20 @@ pub struct TextureDesc<'a> {
     pub size: Size,
     pub format: TextureFormat,
     pub usage: TextureUsage,
+    /// Whether the texture has a full chain of mip levels, each half the
+    /// size of the one before, rounded down, to 1×1, which
+    /// [`generate_mipmaps`](Gpu::generate_mipmaps) fills from level 0.
+    /// Passes, writes and readbacks reach level 0 only.
+    /// [`validation::check_mips`] says what such a texture is.
+    pub mipmapped: bool,
+}
+
+impl TextureDesc<'_> {
+    /// The number of mip levels of the texture: 1 without mips.
+    #[must_use]
+    pub fn mip_level_count(&self) -> u32 {
+        if self.mipmapped { self.size.width.max(self.size.height).max(1).bit_width() } else { 1 }
+    }
 }
 
 /// The texels at `x`, `y` of `size` that a write replaces.
@@ -624,11 +648,20 @@ pub trait Gpu {
         self.write_buffer(buffer, offset, &bytes)
     }
 
+    /// Makes a texture of `desc`. Fails as [`validation::check_mips`] does,
+    /// and for a size or format the backend doesn't make.
     fn create_texture(&mut self, desc: &TextureDesc<'_>) -> Result<TextureId, GpuError>;
     /// Writes `data`, the region's texels in rows from the top with no
     /// padding, to `region` of `texture`, which is
     /// [`sampled`](TextureUsage::sampled).
     fn write_texture(&mut self, texture: TextureId, region: TextureRegion, data: &[u8]) -> Result<(), GpuError>;
+
+    /// Fills mip levels 1 and on of `texture`, which is
+    /// [`mipmapped`](TextureDesc::mipmapped), each with the average of the
+    /// texels of the level before, from what level 0 holds once the work
+    /// recorded so far is done. Fails while a pass is open, and for a
+    /// texture without mips.
+    fn generate_mipmaps(&mut self, texture: TextureId) -> Result<(), GpuError>;
 
     fn create_sampler(&mut self, state: &SamplerState) -> Result<SamplerId, GpuError>;
 

@@ -68,6 +68,7 @@ OutlineCorner outline_corner(float4 start, float4 end, short2 corner, float2 wor
 pub(super) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: concat!(
         pattern_pos!(msl),
         atlas_pos!(msl),
@@ -270,6 +271,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(super) const FILL_OUTLINE_INSTANCED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: r"
 
 //
@@ -326,6 +328,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
 pub(super) const FILL_OUTLINE_PULLED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: FILL_OUTLINE_INSTANCED_SHADER.prelude,
     source: concat!(
         r"
@@ -371,6 +374,7 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]]) {
 pub(super) const FILL_PATTERN_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: concat!(
         pattern_pos!(msl),
         atlas_pos!(msl),
@@ -512,6 +516,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(super) const FILL_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: r"
 
 //

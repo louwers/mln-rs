@@ -113,12 +113,14 @@ impl BufferAllocation {
     }
 }
 
-/// An image, its memory and its view, which [`destroy`](Self::destroy)
+/// An image, its memory and its views, which [`destroy`](Self::destroy)
 /// frees: in debug builds, dropping one that isn't destroyed panics.
 pub(crate) struct ImageAllocation {
     image: vk::Image,
     allocation: Allocation,
     image_view: vk::ImageView,
+    /// Of an image with mips, a view of level 0, which framebuffers take.
+    level_view: vk::ImageView,
 }
 
 impl ImageAllocation {
@@ -159,10 +161,17 @@ impl ImageAllocation {
                 return None;
             }
         };
-        Some(ImageAllocation { image, allocation, image_view: vk::ImageView::null() })
+        Some(ImageAllocation {
+            image,
+            allocation,
+            image_view: vk::ImageView::null(),
+            level_view: vk::ImageView::null(),
+        })
     }
 
-    /// Creates the image's view, of every mip level of `aspect`.
+    /// Creates the image's view, of its `mip_levels` mip levels of
+    /// `aspect`, and with more than one level, the view of level 0 that
+    /// framebuffers take.
     pub(crate) fn create_view(
         &mut self,
         device: &ash::Device,
@@ -171,26 +180,30 @@ impl ImageAllocation {
         aspect: vk::ImageAspectFlags,
         mip_levels: u32,
     ) -> bool {
-        let create_info = vk::ImageViewCreateInfo::default()
-            .image(self.image)
-            .view_type(vk::ImageViewType::TYPE_2D)
-            .format(format)
-            .components(components)
-            .subresource_range(vk::ImageSubresourceRange {
-                aspect_mask: aspect,
-                base_mip_level: 0,
-                level_count: mip_levels,
-                base_array_layer: 0,
-                layer_count: 1,
-            });
-        // SAFETY: the image is live and of `format`.
-        match unsafe { device.create_image_view(&create_info, None) } {
-            Ok(view) => {
-                self.image_view = view;
-                true
-            }
-            Err(_) => false,
+        let view = |components, level_count| {
+            let create_info = vk::ImageViewCreateInfo::default()
+                .image(self.image)
+                .view_type(vk::ImageViewType::TYPE_2D)
+                .format(format)
+                .components(components)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: aspect,
+                    base_mip_level: 0,
+                    level_count,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                });
+            // SAFETY: the image is live and of `format`, with `level_count`
+            // levels or more.
+            unsafe { device.create_image_view(&create_info, None) }.ok()
+        };
+        let Some(image_view) = view(components, mip_levels) else { return false };
+        self.image_view = image_view;
+        if mip_levels > 1 {
+            let Some(level_view) = view(vk::ComponentMapping::default(), 1) else { return false };
+            self.level_view = level_view;
         }
+        true
     }
 
     #[must_use]
@@ -203,13 +216,21 @@ impl ImageAllocation {
         self.image_view
     }
 
+    /// The view of level 0, which framebuffers take.
+    #[must_use]
+    pub(crate) fn level_view(&self) -> vk::ImageView {
+        if self.level_view == vk::ImageView::null() { self.image_view } else { self.level_view }
+    }
+
     /// Destroys the view and the image and frees its memory, which no
     /// command that hasn't finished uses.
     pub(crate) fn destroy(mut self, device: &ash::Device, allocator: &mut Allocator) {
         // SAFETY: the commands that use the image have finished.
         unsafe {
-            if self.image_view != vk::ImageView::null() {
-                device.destroy_image_view(self.image_view, None);
+            for view in [self.image_view, self.level_view] {
+                if view != vk::ImageView::null() {
+                    device.destroy_image_view(view, None);
+                }
             }
             device.destroy_image(self.image, None);
         }

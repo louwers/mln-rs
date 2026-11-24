@@ -410,7 +410,7 @@ fn a_reloaded_dem_refills_both_borders() {
         tiles.update();
     }
     assert_borders_match(&tiles, &left, &right);
-    let edge = |tiles: &OneTile| -> Vec<i32> {
+    let edge = |tiles: &OneTile| -> Vec<f32> {
         let [_, right_dem] = dems(tiles, &left, &right);
         (0..16).map(|y| right_dem.dem().get(0, y)).collect()
     };

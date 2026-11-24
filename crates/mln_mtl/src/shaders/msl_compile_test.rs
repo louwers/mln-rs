@@ -41,11 +41,13 @@ fn device() -> Id<dyn MTLDevice> {
     MTLCreateSystemDefaultDevice().expect("no Metal device")
 }
 
-/// The library of `source` with `defines`, or the compiler's error.
+/// The library of `source` with `defines`, and with fast math if
+/// `fast_math`, or the compiler's error.
 fn compile(
     device: &ProtocolObject<dyn MTLDevice>,
     source: &str,
     defines: &[(String, String)],
+    fast_math: bool,
 ) -> Result<Id<dyn MTLLibrary>, String> {
     let keys: Vec<Retained<NSString>> = defines.iter().map(|(key, _)| NSString::from_str(key)).collect();
     let values: Vec<Retained<NSString>> = defines.iter().map(|(_, value)| NSString::from_str(value)).collect();
@@ -57,6 +59,10 @@ fn compile(
     // SAFETY: the macros map NSString names to NSString values.
     unsafe { options.setPreprocessorMacros(Some(&macros)) };
     // Fast math is Metal's default.
+    if !fast_math {
+        #[expect(deprecated, reason = "its replacement, mathMode, needs macOS 15 and iOS 18")]
+        options.setFastMathEnabled(false);
+    }
     options.setLanguageVersion(MTLLanguageVersion::Version2_4);
     options.setPreserveInvariance(true);
     device
@@ -121,7 +127,7 @@ fn every_shader_source_compiles() {
             ];
             variants.extend(properties.iter().map(|name| (format!("uniform {name}"), defines(false, globe, [name]))));
             for (variant, defines) in variants {
-                match compile(&device, &text, &defines) {
+                match compile(&device, &text, &defines, source.fast_math) {
                     Ok(library) => {
                         compiled += 1;
                         for function in [source.vertex_main_function, source.fragment_main_function] {
@@ -265,7 +271,7 @@ fn pipelines_build_with_the_programs_vertex_layout() {
         });
         let locations = program.attributes.len() + program.instance_attributes.len();
         for (variant, defines) in variants {
-            let library = compile(&device, &text, &defines)
+            let library = compile(&device, &text, &defines, source.fast_math)
                 .unwrap_or_else(|error| panic!("{} ({variant}): {error}", program.name));
             let function = |name: &str| library.newFunctionWithName(&NSString::from_str(name)).unwrap();
             let vertex = function(source.vertex_main_function);
@@ -369,7 +375,7 @@ fn every_block_has_its_layout() {
             library += "}\n";
         }
     }
-    if let Err(error) = compile(&device, &library, &[]) {
+    if let Err(error) = compile(&device, &library, &[], true) {
         panic!("{error}");
     }
 }

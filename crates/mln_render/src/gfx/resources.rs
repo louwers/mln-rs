@@ -201,7 +201,7 @@ impl Device {
         format: TextureFormat,
     ) -> Result<GpuTexture, GpuError> {
         let usage = TextureUsage { render_target: true, ..TextureUsage::default() };
-        self.texture(gpu, &TextureDesc { label, size, format, usage }, None)
+        self.texture(gpu, &TextureDesc { label, size, format, usage, mipmapped: false }, None)
     }
 }
 

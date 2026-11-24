@@ -158,6 +158,9 @@ impl Gpu for Failing<'_> {
     fn write_texture(&mut self, texture: TextureId, region: TextureRegion, data: &[u8]) -> Result<(), GpuError> {
         self.gpu.write_texture(texture, region, data)
     }
+    fn generate_mipmaps(&mut self, texture: TextureId) -> Result<(), GpuError> {
+        self.gpu.generate_mipmaps(texture)
+    }
     fn create_sampler(&mut self, state: &mln_gfx::texture2d::SamplerState) -> Result<SamplerId, GpuError> {
         self.gpu.create_sampler(state)
     }

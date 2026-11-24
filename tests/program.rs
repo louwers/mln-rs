@@ -70,6 +70,7 @@ fn quads(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         size: SIZE,
         format: TextureFormat::Rgba8Unorm,
         usage: TextureUsage { render_target: true, copy_src: true, ..TextureUsage::default() },
+        mipmapped: false,
     })?;
     let image_size = Size { width: 2, height: 1 };
     let image = gpu.create_texture(&TextureDesc {
@@ -77,6 +78,7 @@ fn quads(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         size: image_size,
         format: TextureFormat::Rgba8Unorm,
         usage: TextureUsage { sampled: true, ..TextureUsage::default() },
+        mipmapped: false,
     })?;
     gpu.write_texture(image, TextureRegion::whole(image_size), &[255, 0, 0, 255, 0, 0, 255, 255])?;
     let sampler = gpu.create_sampler(&SamplerState::default())?;

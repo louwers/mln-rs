@@ -164,17 +164,23 @@ pub(crate) fn create(device: &ID3D12Device) -> Result<ID3D12RootSignature, GpuEr
         pStaticSamplers: std::ptr::null(),
         Flags: D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT,
     };
+    serialize(device, &desc)
+}
+
+/// Serializes and makes the root signature of `desc`, whose parameters and
+/// samplers it points at.
+pub(crate) fn serialize(
+    device: &ID3D12Device,
+    desc: &D3D12_ROOT_SIGNATURE_DESC,
+) -> Result<ID3D12RootSignature, GpuError> {
     let mut blob: Option<ID3DBlob> = None;
     let mut errors: Option<ID3DBlob> = None;
-    // SAFETY: the description and its ranges outlive the call, and the
-    // blob holds what it serialized.
+    // SAFETY: the description and what it points at outlive the call, and
+    // the blob holds what it serialized.
     unsafe {
-        if let Err(error) = D3D12SerializeRootSignature(
-            &raw const desc,
-            D3D_ROOT_SIGNATURE_VERSION_1,
-            &raw mut blob,
-            Some(&raw mut errors),
-        ) {
+        if let Err(error) =
+            D3D12SerializeRootSignature(desc, D3D_ROOT_SIGNATURE_VERSION_1, &raw mut blob, Some(&raw mut errors))
+        {
             let message = errors.map_or_else(String::new, |errors| {
                 let bytes = std::slice::from_raw_parts(errors.GetBufferPointer().cast::<u8>(), errors.GetBufferSize());
                 String::from_utf8_lossy(bytes).into_owned()

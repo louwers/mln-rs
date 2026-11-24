@@ -12,9 +12,10 @@ use windows::Win32::Graphics::Direct3D12::{
     D3D12_DESCRIPTOR_HEAP_DESC, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
     D3D12_DESCRIPTOR_HEAP_TYPE, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,
     D3D12_FILTER_ANISOTROPIC, D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT, D3D12_FILTER_MIN_MAG_MIP_LINEAR,
-    D3D12_FILTER_MIN_MAG_MIP_POINT, D3D12_GPU_DESCRIPTOR_HANDLE, D3D12_SAMPLER_DESC, D3D12_SHADER_RESOURCE_VIEW_DESC,
-    D3D12_SHADER_RESOURCE_VIEW_DESC_0, D3D12_SRV_DIMENSION_TEXTURE2D, D3D12_TEX2D_SRV,
-    D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_WRAP, ID3D12DescriptorHeap, ID3D12Device,
+    D3D12_FILTER_MIN_MAG_MIP_POINT, D3D12_FILTER_MIN_MAG_POINT_MIP_LINEAR, D3D12_GPU_DESCRIPTOR_HANDLE,
+    D3D12_SAMPLER_DESC, D3D12_SHADER_RESOURCE_VIEW_DESC, D3D12_SHADER_RESOURCE_VIEW_DESC_0,
+    D3D12_SRV_DIMENSION_TEXTURE2D, D3D12_TEX2D_SRV, D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+    ID3D12DescriptorHeap, ID3D12Device,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R8G8B8A8_UNORM;
 
@@ -205,11 +206,13 @@ impl SamplerHeap {
             return Err(GpuError::Unsupported(format!("more than {SAMPLER_HEAP_SIZE} sampler states")));
         }
         let linear = state.filter == TextureFilterType::Linear;
-        let filter = match (linear, state.mipmapped, state.max_anisotropy > 1) {
-            (_, _, true) => D3D12_FILTER_ANISOTROPIC,
-            (true, true, false) => D3D12_FILTER_MIN_MAG_MIP_LINEAR,
-            (true, false, false) => D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT,
-            (false, _, false) => D3D12_FILTER_MIN_MAG_MIP_POINT,
+        let anisotropy = state.anisotropy();
+        let filter = match (linear, state.mipmapped) {
+            _ if anisotropy > 1 => D3D12_FILTER_ANISOTROPIC,
+            (true, true) => D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+            (true, false) => D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT,
+            (false, true) => D3D12_FILTER_MIN_MAG_POINT_MIP_LINEAR,
+            (false, false) => D3D12_FILTER_MIN_MAG_MIP_POINT,
         };
         let address = |wrap| match wrap {
             TextureWrapType::Repeat => D3D12_TEXTURE_ADDRESS_MODE_WRAP,
@@ -221,11 +224,13 @@ impl SamplerHeap {
             AddressV: address(state.wrap_v),
             AddressW: D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
             MipLODBias: 0.0,
-            MaxAnisotropy: u32::from(state.max_anisotropy.clamp(1, 16)),
+            // D3D12's most.
+            MaxAnisotropy: u32::from(anisotropy.min(16)),
             ComparisonFunc: D3D12_COMPARISON_FUNC_NEVER,
             BorderColor: [0.0; 4],
             MinLOD: 0.0,
-            MaxLOD: f32::MAX,
+            // Without mips, level 0 only.
+            MaxLOD: if state.mipmapped { f32::MAX } else { 0.0 },
         };
         // SAFETY: the slot is past every sampler handed out, so no work
         // reads it.

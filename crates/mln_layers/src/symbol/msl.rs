@@ -34,6 +34,7 @@ macro_rules! sdf_px {
 pub(super) const COLLISION_BOX_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: "",
     source: r"
 
@@ -111,6 +112,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(super) const COLLISION_CIRCLE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: "",
     source: r"
 
@@ -206,6 +208,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(super) const SYMBOL_ICON_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: concat!(
         atlas_pos!(msl),
         unpack_opacity!(),
@@ -394,6 +397,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(super) const SYMBOL_SDF_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: concat!(
         atlas_pos!(msl),
         sdf_px!(),
@@ -644,6 +648,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(super) const SYMBOL_TEXT_AND_ICON_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: concat!(
         atlas_pos!(msl),
         sdf_px!(),

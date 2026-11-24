@@ -191,14 +191,12 @@ impl DemData {
         }
     }
 
-    /// `get(x, y)`.
+    /// The height in meters of the pixel at `x`, `y`, each from -1 to
+    /// `dim`, the border's included.
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn get(&self, x: i32, y: i32) -> i32 {
-        let unpack = self.unpack_vector();
-        let value = pixel(&self.image.data, self.idx(x, y));
-        (f32::from(value[0]) * unpack[0] + f32::from(value[1]) * unpack[1] + f32::from(value[2]) * unpack[2]
-            - unpack[3]) as i32
+    pub(crate) fn get(&self, x: i32, y: i32) -> f32 {
+        mln_util::dem::DemUnpack::of(self.encoding).decode(pixel(&self.image.data, self.idx(x, y)))
     }
 
     /// The number of elevations along each side, without the border.
@@ -268,8 +266,7 @@ mod tests {
         let demdata = DemData::new(&image, encoding).unwrap();
 
         // 10 * 100 + 20 * 10 + 30 * 0.5 - 1000
-        assert_eq!(demdata.get(0, 0), 215);
-        assert_eq!(demdata.unpack_vector(), [100.0, 10.0, 0.5, 1000.0]);
+        assert_eq!(demdata.get(0, 0), 215.0);
     }
 
     #[test]
@@ -289,7 +286,7 @@ mod tests {
         let mut nonempty = true;
         for x in -1..5 {
             for y in -1..5 {
-                if dem1.get(x, y) == -65536 {
+                if dem1.get(x, y) == -65536.0 {
                     nonempty = false;
                 }
             }

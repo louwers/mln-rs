@@ -1,7 +1,7 @@
 use mln_gfx::gpu::{Gpu, TextureDesc, TextureFormat, TextureRegion, TextureUsage};
 use mln_layers::conformance::{
     blend_equations, clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids,
-    imported_textures, instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, topologies,
+    imported_textures, instanced_walls, invalid_calls, mipmapped_targets, mipmapped_targets_of, pulled_walls, readbacks, resources_in_use, topologies,
     transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
 };
 use mln_util::size::Size;
@@ -63,6 +63,38 @@ fn drawn_vertex_texels_through_gpu() {
 }
 
 #[test]
+fn mipmapped_targets_through_gpu() {
+    let device = Device::new(None).expect("WebGPU device");
+    mipmapped_targets(&mut WebGpu::new(&device)).expect("the frames");
+}
+
+/// The mips of a format that shaders can't write, which a compute pass
+/// can't make: a pass draws each level.
+#[test]
+fn mipmapped_targets_of_a_format_shaders_cannot_write_through_gpu() {
+    let device = Device::new(None).expect("WebGPU device");
+    mipmapped_targets_of(&mut WebGpu::new(&device), TextureFormat::Bgra8Unorm).expect("the frames");
+}
+
+/// The mips of a device without storage textures, where a compute pass
+/// can't write them: a pass draws each level. The host's device keeps
+/// wgpu's handler, which panics on a validation error.
+#[test]
+fn mipmapped_targets_without_storage_textures_through_gpu() {
+    let host = Device::new(None).expect("WebGPU device");
+    let adapter = host.adapter().expect("the library's adapter");
+    let limits = wgpu::Limits { max_storage_textures_per_shader_stage: 0, ..host.device().limits() };
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some("host device"),
+        required_limits: limits,
+        ..Default::default()
+    }))
+    .expect("device");
+    let device = Device::from_wgpu(host.instance().cloned(), device, queue, None);
+    mipmapped_targets(&mut WebGpu::new(&device)).expect("the frames");
+}
+
+#[test]
 fn vertex_layouts_through_gpu() {
     let device = Device::new(None).expect("WebGPU device");
     vertex_layouts(&mut WebGpu::new(&device)).expect("the frames");
@@ -93,6 +125,7 @@ fn a_readback_copies_into_the_last_ones_buffer() {
             size,
             format: TextureFormat::Rgba8Unorm,
             usage: TextureUsage { sampled: true, copy_src: true, ..TextureUsage::default() },
+            mipmapped: false,
         })
         .expect("a texture");
     let whole = TextureRegion::whole(size);

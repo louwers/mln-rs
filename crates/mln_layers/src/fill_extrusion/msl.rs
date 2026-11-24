@@ -124,6 +124,7 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
 pub(super) const FILL_EXTRUSION_INSTANCED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: concat!(
         wall_normal!(),
         r"
@@ -159,6 +160,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
 pub(super) const FILL_EXTRUSION_PULLED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: FILL_EXTRUSION_INSTANCED_SHADER.prelude,
     source: concat!(
         r"
@@ -218,6 +220,7 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]]) {
 pub(super) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: concat!(
         pattern_pos!(msl),
         atlas_pos!(msl),
@@ -396,6 +399,7 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
 pub(super) const FILL_EXTRUSION_PATTERN_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: concat!(
         pattern_pos!(msl),
         atlas_pos!(msl),
@@ -544,6 +548,7 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
 pub(super) const FILL_EXTRUSION_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: "",
     source: r"
 

@@ -40,6 +40,11 @@ pub struct Msl {
     pub vertex_main_function: &'static str,
     /// The name of the fragment function.
     pub fragment_main_function: &'static str,
+    /// Whether the library compiles with fast math, Metal's default, which
+    /// lets the compiler fuse and reorder floating-point operations: off
+    /// for a source whose arithmetic must round as written, as the CPU's
+    /// does.
+    pub fast_math: bool,
     /// The shader's own constants and structs, "" if none.
     pub prelude: &'static str,
     /// The functions.

@@ -3,6 +3,7 @@ use mln_rs::layer::source::msl::Msl;
 pub(crate) const PROCESS: Msl = Msl {
     vertex_main_function: "vertexMain",
     fragment_main_function: "fragmentMain",
+    fast_math: true,
     prelude: r"
 // The least half width of a threshold's antialiased edge, in coverage.
 constant float PROCESS_THRESHOLD_EDGE = 0.001;

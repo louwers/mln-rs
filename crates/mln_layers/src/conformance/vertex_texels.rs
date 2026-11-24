@@ -67,6 +67,7 @@ fn main(@location(0) color: vec4<f32>) -> @location(0) vec4<f32> {
 const MSL: Msl = Msl {
     vertex_main_function: "vertexMain",
     fragment_main_function: "fragmentMain",
+    fast_math: true,
     prelude: "",
     source: r"
 struct VertexStage {
@@ -150,6 +151,7 @@ pub fn written_vertex_texels(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         size,
         format: TextureFormat::Rgba8Unorm,
         usage: TextureUsage { sampled: true, ..TextureUsage::default() },
+        mipmapped: false,
     })?;
     gpu.write_texture(texture, TextureRegion::whole(size), QUADRANTS.as_flattened())?;
     check_vertex_texels(&vertex_texels(gpu, texture)?, QUADRANTS);
@@ -172,6 +174,7 @@ pub fn drawn_vertex_texels(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         size,
         format: TextureFormat::Rgba8Unorm,
         usage: TextureUsage { sampled: true, render_target: true, ..TextureUsage::default() },
+        mipmapped: false,
     })?;
     let red = solid_at(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 1.0], tile_matrix(0.0))?;
     gpu.begin_pass(&PassDesc {

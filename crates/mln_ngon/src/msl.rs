@@ -3,6 +3,7 @@ use mln_rs::layer::source::msl::Msl;
 pub(crate) const NGON: Msl = Msl {
     vertex_main_function: "vertexMain",
     fragment_main_function: "fragmentMain",
+    fast_math: true,
     prelude: r"
 constant float NGON_PI = 3.141592653589793;
 

@@ -49,6 +49,7 @@ inline float projectLineThickness(float, device const ProjectionUBO&) {
 pub(super) const LINE_GRADIENT_SDF_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: concat!(
         line_prelude!(),
         r"
@@ -248,6 +249,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(super) const LINE_GRADIENT_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: concat!(
         line_prelude!(),
         r"
@@ -416,6 +418,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(super) const LINE_PATTERN_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: concat!(
         atlas_pos!(msl),
         line_prelude!(),
@@ -634,6 +637,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(super) const LINE_SDF_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: concat!(
         line_prelude!(),
         r"
@@ -834,6 +838,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(super) const LINE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: concat!(
         line_prelude!(),
         r"

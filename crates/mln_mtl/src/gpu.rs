@@ -88,6 +88,7 @@ struct Buffer {
 struct Texture {
     texture: Id<dyn MTLTexture>,
     format: TextureFormat,
+    mipmapped: bool,
     /// The events that the next flush whose passes draw into it, or that
     /// reads it back, waits for: of
     /// [`wait_before_using`](MetalGpu::wait_before_using).
@@ -400,7 +401,7 @@ impl MetalGpu {
         if texture.pixelFormat() != pixel_format(format) {
             return Err(GpuError::Invalid(format!("a texture of {:?} imported as {format:?}", texture.pixelFormat())));
         }
-        Ok(self.textures.insert(Texture { texture: texture.retain(), format, waits: Vec::new() }))
+        Ok(self.textures.insert(Texture { texture: texture.retain(), format, mipmapped: false, waits: Vec::new() }))
     }
 
     /// Has the next pass that draws into `texture`, or the next readback of
@@ -982,8 +983,9 @@ fn merge_read(reads: &mut Vec<ShaderBinding>, read: ShaderBinding) {
 /// A shader's vertex function, and its fragment function, if it has one.
 type Functions = (Id<dyn MTLFunction>, Option<Id<dyn MTLFunction>>);
 
-/// Compiles `source`, with `defines` as preprocessor macros, and finds its
-/// `vertex` function and its `fragment` one, if named.
+/// Compiles `source`, with `defines` as preprocessor macros and with fast
+/// math if `fast_math`, and finds its `vertex` function and its `fragment`
+/// one, if named.
 pub(crate) fn compile<'a>(
     device: &ProtocolObject<dyn MTLDevice>,
     name: &str,
@@ -991,6 +993,7 @@ pub(crate) fn compile<'a>(
     vertex: &str,
     fragment: &str,
     defines: impl IntoIterator<Item = (&'a str, &'a str)>,
+    fast_math: bool,
 ) -> Result<Functions, GpuError> {
     let (keys, values): (Vec<_>, Vec<_>) = defines
         .into_iter()
@@ -1002,6 +1005,10 @@ pub(crate) fn compile<'a>(
     // SAFETY: the dictionary maps strings to strings, as Metal expects.
     unsafe { options.setPreprocessorMacros(Some(&defines)) };
     // Fast math is Metal's default.
+    if !fast_math {
+        #[expect(deprecated, reason = "its replacement, mathMode, needs macOS 15 and iOS 18")]
+        options.setFastMathEnabled(false);
+    }
     options.setLanguageVersion(MTLLanguageVersion::Version2_4);
     // Lets the position outputs marked [[invariant]] be computed the same
     // way in every shader.
@@ -1278,7 +1285,10 @@ impl Gpu for MetalGpu {
         if !(1..=max).contains(&width) || !(1..=max).contains(&height) {
             return Err(GpuError::Unsupported(format!("{}: a {width}x{height} texture", desc.label)));
         }
+        let mip_levels = validation::check_mips(desc)?;
         let descriptor = texture_descriptor(pixel_format(desc.format), desc.size);
+        // SAFETY: the count is the full chain's for the size, or 1.
+        unsafe { descriptor.setMipmapLevelCount(mip_levels as usize) };
         let mut usage = MTLTextureUsage::empty();
         if desc.usage.sampled {
             usage |= MTLTextureUsage::ShaderRead;
@@ -1294,7 +1304,7 @@ impl Gpu for MetalGpu {
             .newTextureWithDescriptor(&descriptor)
             .ok_or_else(|| GpuError::Invalid(format!("{}: Metal made no texture", desc.label)))?;
         texture.setLabel(Some(&NSString::from_str(desc.label)));
-        Ok(self.textures.insert(Texture { texture, format: desc.format, waits: Vec::new() }))
+        Ok(self.textures.insert(Texture { texture, format: desc.format, mipmapped: desc.mipmapped, waits: Vec::new() }))
     }
 
     fn write_texture(&mut self, texture: TextureId, region: TextureRegion, data: &[u8]) -> Result<(), GpuError> {
@@ -1311,6 +1321,32 @@ impl Gpu for MetalGpu {
             self.uploads.copies.push(Upload::Texture { from, to, region, bytes_per_row });
         }
         Ok(())
+    }
+
+    /// Encodes Metal's blit that makes the mips, in the frame's command
+    /// buffer.
+    fn generate_mipmaps(&mut self, texture: TextureId) -> Result<(), GpuError> {
+        if self.pass.is_some() {
+            return Err(open_pass("generating mips"));
+        }
+        let entry = self.texture(texture)?;
+        if !entry.mipmapped {
+            return Err(GpuError::Invalid("generating the mips of a texture without them".to_owned()));
+        }
+        let texture = entry.texture.clone();
+        // Metal rejects a texture of one level, which a 1x1 texture's chain is.
+        if texture.mipmapLevelCount() == 1 {
+            return Ok(());
+        }
+        autoreleasepool(|_| {
+            let blit = self
+                .frame()?
+                .blitCommandEncoder()
+                .ok_or_else(|| GpuError::Invalid("the command buffer gave no blit encoder".to_owned()))?;
+            blit.generateMipmapsForTexture(&texture);
+            blit.endEncoding();
+            Ok(())
+        })
     }
 
     fn create_sampler(&mut self, state: &SamplerState) -> Result<SamplerId, GpuError> {
@@ -1332,7 +1368,8 @@ impl Gpu for MetalGpu {
         });
         descriptor.setSAddressMode(address_mode(state.wrap_u));
         descriptor.setTAddressMode(address_mode(state.wrap_v));
-        descriptor.setMaxAnisotropy(usize::from(state.max_anisotropy.max(1)));
+        // Metal takes 1 to 16.
+        descriptor.setMaxAnisotropy(usize::from(state.anisotropy().min(16)));
         let sampler = self
             .device
             .device()
@@ -1354,6 +1391,7 @@ impl Gpu for MetalGpu {
                 source.vertex_main_function,
                 source.fragment_main_function,
                 key.define_values(),
+                source.fast_math,
             )
         })?;
         let active_attributes = active_attributes(&vertex);

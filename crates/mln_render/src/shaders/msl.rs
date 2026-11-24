@@ -5,6 +5,7 @@ use mln_gfx::shaders::source::msl::Msl;
 pub(crate) const ATMOSPHERE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: "",
     source: r"
 
@@ -129,6 +130,7 @@ half4 fragment fragmentMain(AtmosphereFragmentStage in [[stage_in]]) {
 pub(crate) const CLIPPING_MASK_PROGRAM: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: "",
     source: r"
 
@@ -158,6 +160,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(crate) const GLOBE_DEPTH_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: "",
     source: r"
 
@@ -187,6 +190,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(crate) const LAYER_COMPOSITE_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: "",
     source: r"
 
@@ -265,6 +269,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(crate) const TILE_DEBUG_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: "",
     source: r"
 
@@ -356,6 +361,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(crate) const SKY_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: "",
     source: r"
 

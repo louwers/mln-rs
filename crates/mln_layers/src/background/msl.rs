@@ -7,6 +7,7 @@ use crate::shaders::{atlas_pos, pattern_pos};
 pub(super) const BACKGROUND_PATTERN_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: concat!(
         pattern_pos!(msl),
         atlas_pos!(msl),
@@ -82,6 +83,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(super) const BACKGROUND_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: r"
 
 //

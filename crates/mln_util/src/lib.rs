@@ -5,6 +5,7 @@
 mod color;
 pub mod compression;
 pub mod constants;
+pub mod dem;
 pub mod geo;
 pub mod interpolate;
 mod padding;

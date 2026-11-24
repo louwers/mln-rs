@@ -256,6 +256,7 @@ impl SurfaceTarget {
                     size,
                     format: DEPTH_STENCIL,
                     usage: TextureUsage { sampled: false, render_target: true, copy_src: false },
+                    mipmapped: false,
                 };
                 match gpu.create_texture(&desc) {
                     Ok(depth_stencil) => self.depth_stencil.insert((size, depth_stencil)).1,

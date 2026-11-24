@@ -3,6 +3,7 @@ use mln_rs::layer::source::msl::Msl;
 pub(crate) const PUCK: Msl = Msl {
     vertex_main_function: "vertexMain",
     fragment_main_function: "fragmentMain",
+    fast_math: true,
     prelude: r"
 // How much of a shape's quad lies past its unit square, where its edge
 // fades out.

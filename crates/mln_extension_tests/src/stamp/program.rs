@@ -72,6 +72,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 const MSL: Msl = Msl {
     vertex_main_function: "vertexMain",
     fragment_main_function: "fragmentMain",
+    fast_math: true,
     prelude: "",
     source: r"
 struct VertexStage {

@@ -5,6 +5,7 @@ use mln_gfx::shaders::source::msl::Msl;
 pub(super) const COLOR_RELIEF_SHADER: Msl = Msl {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
+    fast_math: true,
     prelude: "",
     source: r"
 
