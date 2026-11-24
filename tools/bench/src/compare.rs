@@ -249,7 +249,8 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
     let samples_path = work.join("samples").join(samples_name(&commit, &profile));
     let mut samples = read_samples(&samples_path);
     eprintln!("mln-bench: a first run of each scenario on each side, not counted");
-    let base_harness = harness_of(&warm_up(&base, &scenarios)?)?;
+    let base_warm_up = warm_up(&base, &scenarios)?;
+    let base_harness = harness_of(&base_warm_up)?;
     let harness = harness_of(&warm_up(&candidate, &scenarios)?)?;
     if base_harness != harness {
         if !own {
@@ -264,13 +265,19 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
         );
     }
     let probe_key = |scenario: &Scenario| format!("{} (layout probe)", scenario.name);
-    let probes_of = |samples: &Samples, scenario: &Scenario| {
-        samples
-            .get(&probe_key(scenario))
-            .map_or(0, |runs| runs.iter().filter(|run| run.harness == base_harness).count())
+    // The probes a scenario has of the base's harness, in the environment
+    // that its comparison keeps.
+    let probes_of = |samples: &Samples, scenario: &Scenario, warm_up: &Run| {
+        samples.get(&probe_key(scenario)).map_or(0, |runs| {
+            runs.iter().filter(|run| run.harness == base_harness && run.environment == warm_up.environment).count()
+        })
     };
-    let unprobed: Vec<&Scenario> =
-        scenarios.iter().copied().filter(|scenario| probes_of(&samples, scenario) < PROBES).collect();
+    let unprobed: Vec<&Scenario> = scenarios
+        .iter()
+        .zip(&base_warm_up)
+        .filter(|(scenario, warm_up)| probes_of(&samples, scenario, warm_up) < PROBES)
+        .map(|(scenario, _)| *scenario)
+        .collect();
     if !unprobed.is_empty() {
         for scenario in &unprobed {
             if let Some(runs) = samples.get_mut(&probe_key(scenario)) {
