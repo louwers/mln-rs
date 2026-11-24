@@ -92,3 +92,27 @@ fn a_query_finds_the_puck_where_its_filter_takes_it() {
     assert_eq!(found(true), ["puck"]);
     assert_eq!(found(false), Vec::<String>::new());
 }
+
+/// A spatial filter places the puck, which has no tile, where it is.
+#[test]
+fn a_query_finds_the_puck_within_a_polygon_around_it() {
+    use mln_rs::geojson::JsonValue;
+    use mln_rs::mln_style::conversion::{Convertible, Error, convert_filter};
+    use mln_rs::mln_style::expression::Functions;
+
+    let fixture = Fixture::new(registry(), STYLE);
+    let found = |west: f64, east: f64| {
+        let ring = format!("[[{west},-1],[{east},-1],[{east},1],[{west},1],[{west},-1]]");
+        let json: JsonValue =
+            format!(r#"["within",{{"type":"Polygon","coordinates":[{ring}]}}]"#).parse().unwrap();
+        let filter = convert_filter(&Convertible::from(&json), &Functions::with_builtins(), &mut Error::default())
+            .expect("a within filter");
+        let x = f64::from(SIZE.width) / 2.0 - 4096.0 / 360.0;
+        let at = mln_rs::mln_util::geo::ScreenCoordinate::new(x, f64::from(SIZE.height) / 2.0);
+        let options = mln_rs::RenderedQueryOptions::new(Some(vec!["puck".to_owned()]), Some(filter));
+        let features = wait(fixture.session.query_rendered_features(mln_rs::RenderedQueryGeometry::Point(at), options));
+        features.into_iter().map(|feature| feature.layer).collect::<Vec<_>>()
+    };
+    assert_eq!(found(-1.5, -0.5), ["puck"]);
+    assert_eq!(found(0.5, 1.5), Vec::<String>::new());
+}

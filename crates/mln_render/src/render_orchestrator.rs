@@ -18,7 +18,9 @@ use mln_style::{
 use mln_style_types::image::Impl as ImageImpl;
 use mln_text::GlyphCache;
 use mln_text::local_fonts::LocalGlyphs;
-use mln_util::constants::DEFAULT_TRANSITION_DURATION;
+use mln_tile_id::CanonicalTileID;
+use mln_tile_id::geometry_tile_data::convert_geometry_to_tile;
+use mln_util::constants::{DEFAULT_TRANSITION_DURATION, EXTENT};
 use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::logging::{Event, Log};
@@ -1320,6 +1322,8 @@ impl RenderOrchestrator {
                     .with_global_state(self.global_state.as_deref());
                 hits.retain(|hit| {
                     let feature = hit.feature.to_geojson_feature();
+                    let tile = feature.geometry.as_ref().map(tile_holding);
+                    let context = context.with_canonical_tile_id(tile.as_ref());
                     with_geojson_feature(&feature, context, |cx| filter.evaluate(cx))
                 });
             }
@@ -1481,6 +1485,26 @@ impl<'a> SourceContents<'a> {
         }
         &self.contents
     }
+}
+
+/// The deepest tile, down to zoom 13, that holds all of `geometry`, in
+/// which `within` and `distance` place a feature without a tile. The
+/// geometry's coordinates in the zoom-0 tile, 2^13 units wide, choose the
+/// tile exactly down to there, where a unit of the tile is under a metre.
+fn tile_holding(geometry: &geo_types::Geometry<f64>) -> CanonicalTileID {
+    const DEEPEST: u8 = 13;
+    let points = convert_geometry_to_tile(geometry, &CanonicalTileID::new(0, 0, 0));
+    let unit = |v: i16| u32::from(v.clamp(0, (EXTENT - 1) as i16).unsigned_abs());
+    let (mut min, mut max) = ((u32::MAX, u32::MAX), (0, 0));
+    for point in points.iter().flatten() {
+        let (x, y) = (unit(point.x), unit(point.y));
+        (min, max) = ((min.0.min(x), min.1.min(y)), (max.0.max(x), max.1.max(y)));
+    }
+    let tile = |z: u8| (min.0 >> (DEEPEST - z), min.1 >> (DEEPEST - z));
+    let holds = |z: u8| tile(z) == (max.0 >> (DEEPEST - z), max.1 >> (DEEPEST - z));
+    let z = (0..=DEEPEST).rev().find(|&z| holds(z)).unwrap_or(0);
+    let (x, y) = if min.0 > max.0 { (0, 0) } else { tile(z) };
+    CanonicalTileID::new(z, x, y)
 }
 
 /// Drops `value` on `thread_pool`, the orchestrator's workers, instead of
