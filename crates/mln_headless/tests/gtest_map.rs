@@ -17,12 +17,11 @@ use mln_map::{
     NorthOrientation, ProjectionMode, RenderFrameStatus, RenderMode, TileLodMode, TileSettings, Viewport, ViewportMode,
 };
 use mln_renderer::{OverscaledTileID, Registry, TileOperation, UpdateParameters, UpdateReader};
-use mln_storage::network_status::{NetworkStatus, Status as NetworkStatusType};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{
-    Cache, DatabaseFileSource, FileSource, Kind, Loader, LoadingMethod, OnlineFileSource, Resource, ResourceOptions,
-    Response, StoragePolicy, TileFormat,
+    Cache, DatabaseFileSource, FileSource, Kind, Loader, LoadingMethod, Resource, ResourceOptions, Response,
+    StoragePolicy, TileFormat,
 };
 use mln_style::conversion::layer::convert_layer;
 use mln_style::conversion::{Convertible, Error as ConversionError};
@@ -43,7 +42,6 @@ use mln_style::sprite::Sprite;
 use mln_style::style_property::Kind as StylePropertyKind;
 use mln_style::{Edit, PropertyValue, Source, TransitionOptions};
 use mln_style_types::{ProjectionDefinition, ProjectionType, VisibilityType};
-use mln_test_server::HttpServer;
 use mln_text::glyph::{GlyphIDType, GlyphRange};
 use mln_tile_id::CanonicalTileID;
 use mln_util::Color;
@@ -618,40 +616,36 @@ fn pixel_for_lat_lng_during_a_fling_across_the_antimeridian() {
     }
 }
 
-/// A loader over an online file source and a cache database at
-/// `cache_path`, with assets at `asset_path`, the database, and the network
-/// status the online file source follows.
+/// A loader over a cache database at `cache_path` and `network`, with assets
+/// at `asset_path`, and the database.
 fn loader_with_database(
     cache_path: &str,
     asset_path: &str,
-) -> (Arc<Loader>, Arc<DatabaseFileSource>, Arc<NetworkStatus>) {
+    network: Arc<StubFileSource>,
+) -> (Arc<Loader>, Arc<DatabaseFileSource>) {
     let pool = Pool::new(4);
-    let status = Arc::new(NetworkStatus::new());
-    let network: Arc<dyn FileSource> = Arc::new(OnlineFileSource::new(Arc::clone(&status)));
-    let database = Arc::new(DatabaseFileSource::new(cache_path, Some(Arc::clone(&network))));
+    let database = Arc::new(DatabaseFileSource::new(cache_path, Some(Arc::<StubFileSource>::clone(&network))));
     let loader = Loader::builder(&pool)
         .asset_path(asset_path)
         .network(network)
         .database(Arc::<DatabaseFileSource>::clone(&database))
         .build();
-    (Arc::new(loader), database, status)
+    (Arc::new(loader), database)
 }
 
 /// A map test that loads through a `Loader` with these cache and asset
-/// paths, the loader's database, and its network status.
-fn main_resource_loader_test(
-    cache_path: &str,
-    asset_path: &str,
-) -> (MapTest<Loader>, Arc<DatabaseFileSource>, Arc<NetworkStatus>) {
+/// paths and a network that never answers, and the loader's database.
+fn main_resource_loader_test(cache_path: &str, asset_path: &str) -> (MapTest<Loader>, Arc<DatabaseFileSource>) {
     let run_loop = TestLoop::new();
-    let (file_source, database, status) = loader_with_database(cache_path, asset_path);
-    (MapTest::create(run_loop, file_source, 1.0, MapMode::Static), database, status)
+    let network = Arc::new(StubFileSource::new(ResponseType::Manual));
+    let (file_source, database) = loader_with_database(cache_path, asset_path, network);
+    (MapTest::create(run_loop, file_source, 1.0, MapMode::Static), database)
 }
 
 // gtest: Map.Offline
 #[test]
 fn offline() {
-    let (test, dbfs, network) = main_resource_loader_test(":memory:", ".");
+    let (test, dbfs) = main_resource_loader_test(":memory:", ".");
 
     // C++ CI leaves this test out on the macOS runners
     // (.github/workflows/macos-ci.yml, --gtest_filter=-...:Map.Offline, for
@@ -676,7 +670,7 @@ fn offline() {
         response
     };
 
-    network.set(NetworkStatusType::Offline);
+    // The network never answers, so the map shows what the cache has.
     let prefix = "http://127.0.0.1:3000/";
     dbfs.put(&Resource::style(&format!("{prefix}style.json")), &expired_item("style.json"));
     dbfs.put(&Resource::source(&format!("{prefix}streets.json")), &expired_item("streets.json"));
@@ -709,7 +703,6 @@ fn offline() {
     test.map().load_style_url(&format!("{prefix}style.json"));
 
     check_image("test/fixtures/map/offline", &test.render().image, 0.0015, 0.1);
-    network.set(NetworkStatusType::Online);
 }
 
 // gtest: Map.SetStyleDefaultCamera
@@ -1068,55 +1061,6 @@ fn style_loaded_signal() {
     assert!(!emitted.get());
 }
 
-fn online_file_source_test() -> MapTest<OnlineFileSource> {
-    let run_loop = TestLoop::new();
-    let file_source = Arc::new(OnlineFileSource::new(Arc::new(NetworkStatus::new())));
-    MapTest::create(run_loop, file_source, 1.0, MapMode::Static)
-}
-
-// Test for https://github.com/mapbox/mapbox-gl-native/issues/7902
-// gtest: Map.StyleNetworkErrorRetry
-#[test]
-fn style_network_error_retry() {
-    let server = HttpServer::new();
-    let test = online_file_source_test();
-
-    test.map().load_style_url(&server.url("/style-fail-once-500"));
-
-    let run_loop = test.run_loop.clone();
-    test.observer.did_finish_loading_style_callback.set(move |()| run_loop.stop());
-
-    run_with_timeout(&test.run_loop, 10);
-}
-
-// gtest: Map.StyleNotFound
-#[test]
-fn style_not_found() {
-    let server = HttpServer::new();
-    let test = online_file_source_test();
-
-    test.map().load_style_url(&server.url("/style-fail-once-404"));
-
-    let timer = Rc::new(LoopTimer::new(&test.run_loop));
-
-    // Not found errors should not trigger a retry like other errors.
-    test.observer.did_finish_loading_style_callback.set(|()| panic!("Should not retry on not found!"));
-
-    {
-        let (timer, run_loop) = (Rc::clone(&timer), test.run_loop.handle());
-        test.observer.did_fail_loading_map_callback.set(move |()| {
-            let run_loop = run_loop.clone();
-            timer.start(Duration::from_millis(1100), move || run_loop.stop());
-        });
-    }
-
-    run_with_timeout(&test.run_loop, 10);
-
-    // Should also not retry if the response has cache headers.
-    test.map().load_style_url(&server.url("/style-fail-once-404-cache"));
-    run_with_timeout(&test.run_loop, 10);
-}
-
 // gtest: Map.AddLayer
 #[test]
 fn add_layer() {
@@ -1328,7 +1272,7 @@ fn continuous_rendering() {
 // gtest: Map.NoContentTiles
 #[test]
 fn no_content_tiles() {
-    let (test, dbfs, _) = main_resource_loader_test(":memory:", ".");
+    let (test, dbfs) = main_resource_loader_test(":memory:", ".");
 
     // Insert a 204 No Content response for the 0/0/0 tile
     let mut response = Response::new();
@@ -2403,20 +2347,51 @@ fn prefetch_delta_override_custom_source() {
     assert_eq!(requested_tiles.load(Ordering::SeqCst), 8);
 }
 
+/// A response of the fixture `file` of the expired sprite test: its style,
+/// source and sprite sheet's JSON, or the offline test's tile and sprite
+/// image.
+fn online_fixture(file: &str) -> Response {
+    match file {
+        "sprite.png" | "0-0-0.vector.pbf" => file_response(&format!("test/fixtures/map/offline/{file}")),
+        _ => file_response(&format!("test/fixtures/map/online/{file}")),
+    }
+}
+
 // Test verifies that Style::Impl::onSpriteLoaded does not create duplicate
 // images when we get new spritesheet from the server and we merge it with
 // currently used spritesheet.
 // gtest: Map.ExpiredSpriteSheet
 #[test]
 fn expired_sprite_sheet() {
-    let server = HttpServer::new();
-
     // `MapTest<MainResourceLoader, ForwardingHeadlessFrontend>
     // test{":memory:", ".", 1, MapMode::Continuous}`: the frontend's
     // check runs on the update each frame draws.
     let run_loop = TestLoop::new();
     let pool = Pool::new(4);
-    let (file_source, dbfs, network) = loader_with_database(":memory:", ".");
+    // The network answers once the map has loaded from the cache, as it
+    // would coming online then.
+    let network = StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous);
+    let online = Arc::new(AtomicBool::new(false));
+    let sprites_served = Arc::new(Mutex::new(BTreeSet::new()));
+    for (kind, file) in [
+        (Kind::Style, "style.json"),
+        (Kind::Source, "streets.json"),
+        (Kind::SpriteJSON, "sprite.json"),
+        (Kind::SpriteImage, "sprite.png"),
+        (Kind::Tile, "0-0-0.vector.pbf"),
+    ] {
+        let (online, sprites_served) = (Arc::clone(&online), Arc::clone(&sprites_served));
+        network.set_response(kind, move |_| {
+            if !online.load(Ordering::SeqCst) {
+                return None;
+            }
+            if matches!(kind, Kind::SpriteJSON | Kind::SpriteImage) {
+                sprites_served.lock().insert(file);
+            }
+            Some(online_fixture(file))
+        });
+    }
+    let (file_source, dbfs) = loader_with_database(":memory:", ".", network);
     let observer = Rc::new(StubMapObserver::default());
     let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, run_loop.queue(), &pool).expect("a headless frontend");
     let options =
@@ -2428,11 +2403,8 @@ fn expired_sprite_sheet() {
     let frontend = Rc::new(RefCell::new(frontend));
     let _events = observer.observe(&run_loop, &map, Some(&frontend));
 
-    // The server's own address replaces 127.0.0.1:3000 in the fixtures, as in
-    // what it serves.
     let make_response = |path: &str, expires: bool| {
-        let mut response = Response::new();
-        response.data = Some(Arc::new(server.online_fixture(path)));
+        let mut response = online_fixture(path);
         response.caching.expires = Some(if expires { Timestamp::from_secs(0) } else { Timestamp::from_secs(i64::MAX) });
         response
     };
@@ -2440,9 +2412,9 @@ fn expired_sprite_sheet() {
     {
         let weak_observer = Rc::downgrade(&observer);
         let run_loop = run_loop.clone();
-        let network = Arc::clone(&network);
+        let online = Arc::clone(&online);
         observer.did_finish_loading_map_callback.set(move |()| {
-            network.set(NetworkStatusType::Online);
+            online.store(true, Ordering::SeqCst);
 
             if let Some(observer) = weak_observer.upgrade() {
                 let updates = updates.clone();
@@ -2457,8 +2429,7 @@ fn expired_sprite_sheet() {
         });
     }
 
-    network.set(NetworkStatusType::Offline);
-    let prefix = server.url("/online/");
+    let prefix = "http://127.0.0.1:3000/online/";
     dbfs.put(&Resource::style(&format!("{prefix}style.json")), &make_response("style.json", false));
     dbfs.put(&Resource::source(&format!("{prefix}streets.json")), &make_response("streets.json", false));
     dbfs.put(&Resource::sprite_json(&format!("{prefix}sprite"), 1.0), &make_response("sprite.json", true));
@@ -2484,6 +2455,8 @@ fn expired_sprite_sheet() {
     map.borrow_mut().load_style_url(&format!("{prefix}style.json"));
 
     run_with_timeout(&run_loop, 60);
+    // The expired sprite sheet's JSON and image came again.
+    assert_eq!(BTreeSet::from(["sprite.json", "sprite.png"]), *sprites_served.lock());
 }
 
 // gtest: Map.SourceMinimumUpdateIntervalOverride
@@ -4564,8 +4537,14 @@ fn global_state_change_transitions_paint_property() {
     assert!(changed[0] > 200, "{changed:?}");
     assert!(changed[2] < 55, "{changed:?}");
 
-    // Once the transition has run its course, the new state shows.
-    std::thread::sleep(Duration::from_millis(200));
+    // Once the transition has run its course and the map is idle, the new
+    // state shows.
+    {
+        let run_loop = test.run_loop.clone();
+        test.observer.did_become_idle_callback.set(move |()| run_loop.stop());
+    }
+    run_with_timeout(&test.run_loop, 60);
+    test.observer.did_become_idle_callback.clear();
     let finished = render_center_pixel(&test);
     assert!(finished[0] < 10, "{finished:?}");
     assert!(finished[2] > 240, "{finished:?}");

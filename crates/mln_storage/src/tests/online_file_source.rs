@@ -184,6 +184,47 @@ fn timeout() {
     }
 }
 
+/// A response that is fresh isn't asked for again while it is, whatever the
+/// order of its caching headers: here tile.openstreetmap.org's, whose
+/// `Expires`, after `max-age`, is in the past.
+#[test]
+fn a_fresh_response_is_not_requested_again() {
+    let mut network = Network::serving(|_| {
+        Reply::ok("tile")
+            .header("ETag", "\"a\"")
+            .header("Cache-Control", "max-age=88823, stale-while-revalidate=604800, stale-if-error=604800")
+            .header("Expires", "Wed, 18 Nov 2026 02:37:39 GMT")
+            .header("Age", "67981")
+    });
+    let (_request, answers) = network.request(&resource("/0/0/0.png"));
+    network.run();
+    // Less than the 88823 - 67981 seconds it stays fresh.
+    network.advance(Duration::from_secs(3600));
+
+    let answers = answers.lock();
+    assert_eq!(1, answers.len());
+    assert_eq!(None, answers[0].error);
+    assert!(answers[0].caching.expires.is_some_and(|expires| expires > now()), "fresh");
+    assert_eq!(1, network.server.requested().len());
+}
+
+/// A 404 isn't requested again, even with caching headers: the file source
+/// of the C++ Map.StyleNotFound.
+#[test]
+fn a_not_found_is_not_requested_again() {
+    for reply in [|| Reply::status(404), || Reply::status(404).header("Cache-Control", "max-age=30")] {
+        let mut network = Network::serving(move |_| reply());
+        let (_request, answers) = network.request(&resource("/style.json"));
+        network.run();
+        network.advance(Duration::from_secs(3600));
+
+        let answers = answers.lock();
+        assert_eq!(1, answers.len());
+        assert_error(&answers[0], Reason::NotFound);
+        assert_eq!(1, network.server.requested().len());
+    }
+}
+
 /// A response that came expired has no freshness lifetime to revalidate it
 /// at: the source doesn't ask for it again until it is requested anew.
 #[test]

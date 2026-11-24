@@ -61,7 +61,7 @@ mod terrain_drape_test;
 mod globe_precision_test;
 // Terrain on the globe, draped as on Mercator.
 mod terrain_globe_test;
-// Tiles reloading as their data expires, over an online file source.
+// Tiles showing each answer to their open requests, as their data expires.
 mod tile_expiry_test;
 // Features of two tiles that overlap stack in the frame's order of its tiles.
 mod tile_order_test;
