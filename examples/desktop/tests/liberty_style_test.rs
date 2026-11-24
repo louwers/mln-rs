@@ -2,8 +2,8 @@
 // the path mln-desktop uses: a runtime's map, whose resource loader goes
 // through the online file source to the platform's HTTP transport, and the
 // style's parser. Then the projections the controls offer, and the
-// picker's Satellite 3D, which adds Mapterhorn's terrain to VersaTiles'
-// Satellite. Needs network access.
+// picker's Satellite 3D and Liberty 3D, which add Mapterhorn's terrain to
+// VersaTiles' Satellite and to Liberty. Needs network access.
 
 use std::time::{Duration, Instant};
 
@@ -115,4 +115,24 @@ fn satellite_3d_adds_mapterhorn_terrain_to_satellite() {
         assert!(Instant::now() < deadline, "Mapterhorn's TileJSON didn't load");
         std::thread::sleep(Duration::from_millis(100));
     }
+}
+
+/// Liberty 3D: Liberty, then a Mapterhorn DEM, the style's terrain on it, and
+/// a hillshade of it right under Liberty's buildings.
+#[test]
+#[ignore = "needs network access"]
+fn liberty_3d_shades_the_ground_under_libertys_buildings() {
+    let terrain = styles::style_for("liberty-3d").terrain.unwrap();
+    let (_runtime, map) = map();
+    map.set_style_url(LIBERTY).unwrap().wait().unwrap();
+    let added = terrain.clone();
+    map.with_core(move |map| styles::add_terrain(map, &added)).unwrap().wait().unwrap().unwrap();
+
+    let layers: Vec<String> =
+        map.style_layers().and_then(Completion::wait).unwrap().into_iter().map(|layer| layer.id).collect();
+    let building = layers.iter().position(|id| id == "building").expect("Liberty's buildings");
+    assert_eq!(layers[building - 1], "terrain-hillshade", "{layers:?}");
+    let json = map.style_root_property("terrain").and_then(Completion::wait).unwrap().unwrap();
+    let set: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(set["source"], styles::TERRAIN_SOURCE);
 }

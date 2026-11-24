@@ -9,6 +9,27 @@
       "dark": false
     },
     {
+      "key": "liberty-3d",
+      "name": "Liberty 3D",
+      "provider": "OpenFreeMap",
+      "url": "https://tiles.openfreemap.org/styles/liberty",
+      "dark": false,
+      "terrain": {
+        "source": {
+          "type": "raster-dem",
+          "url": "https://tiles.mapterhorn.com/tilejson.json"
+        },
+        "exaggeration": 1.3,
+        "hillshade": {
+          "paint": {
+            "hillshade-exaggeration": 0.3,
+            "hillshade-shadow-color": "#473b24"
+          },
+          "before": "building"
+        }
+      }
+    },
+    {
       "key": "bright",
       "name": "Bright",
       "provider": "OpenFreeMap",

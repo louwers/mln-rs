@@ -273,6 +273,9 @@ mod tests {
         assert_eq!(satellite_3d.source, style_for("satellite").source);
         let StyleSource::Url(url) = &satellite_3d.source else { panic!("Satellite 3D has a URL") };
         assert_eq!(style_for(url).key.as_deref(), Some("satellite"));
+        // Liberty 3D shades the ground under Liberty's buildings.
+        let liberty_3d = style_for("liberty-3d").terrain.expect("Liberty 3D's terrain");
+        assert_eq!(liberty_3d.hillshade.expect("Liberty 3D's hillshade").before.as_deref(), Some("building"));
     }
 
     #[test]

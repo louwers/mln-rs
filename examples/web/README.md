@@ -48,9 +48,9 @@ The page draws its own controls over the map: a style picker, a backend
 indicator that switches between WebGPU and WebGL2 where both are available, zoom
 buttons, a compass, attributions, and a panel that lists the gestures and has a
 choice of `projection` and switches for `compare`, `debug` and `freeBearing`.
-The style picker's Satellite 3D is VersaTiles' Satellite with
-[Mapterhorn](https://mapterhorn.com)'s terrain added once it loads
-(web/styles.ts).
+The style picker's Satellite 3D and Liberty 3D are VersaTiles' Satellite and
+OpenFreeMap's Liberty with [Mapterhorn](https://mapterhorn.com)'s terrain added
+once they load, and Liberty 3D with a hillshade of it (web/styles.ts).
 
 ## How it runs
 
