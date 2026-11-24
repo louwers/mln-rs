@@ -434,6 +434,10 @@ impl DrawObjects {
         let Some(DrawTarget { size, targets, scissor }) = parameters.draw_target() else {
             return Ok(());
         };
+        // A mesh of no indexes has no index buffer.
+        if self.segments.iter().all(|segment| segment.index_length == 0) {
+            return Ok(());
+        }
         let camera = parameters.frame.camera;
         let variant = if camera.is_globe() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
         // A viewport flipped upside down turns every triangle round on

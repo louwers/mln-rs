@@ -19,7 +19,7 @@ mln_rs::layer::uniform_block! {
 
 /// Draws a draw's rectangle over a quad whose corners are its unit
 /// square's.
-pub(crate) static RECT: Program = Program {
+pub static RECT: Program = Program {
     name: "stamp-rect",
     buffers: &[ProgramBuffer::storage::<RectDraw>("draws", Stages::Vertex)],
     attributes: &[Attribute::new("pos", Short2)],

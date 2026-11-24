@@ -9,7 +9,7 @@
 //! stamp, and `hold`, which, while true, leaves new tiles without a stamp,
 //! as tiles whose values take long to make are.
 
-mod program;
+pub mod program;
 
 use std::convert::Infallible;
 use std::sync::Arc;
