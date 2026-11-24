@@ -56,6 +56,25 @@ pub enum TerrainSkirtLength {
     None,
 }
 
+/// How a map draws its terrain, for the map's lifetime.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TerrainOptions {
+    /// How far the skirts of terrain tiles reach down. `Auto` by default.
+    pub skirt_length: TerrainSkirtLength,
+    /// The most bytes of GPU memory the textures that the terrain drapes
+    /// its layers onto hold, with their mips and the depth and stencil they
+    /// draw with. Past it, the drapes of the tiles farthest from the view's
+    /// center take fewer texels, and look blurrier; no tile loses its
+    /// drape. 256 MiB by default.
+    pub drape_memory_limit: u64,
+}
+
+impl Default for TerrainOptions {
+    fn default() -> Self {
+        TerrainOptions { skirt_length: TerrainSkirtLength::Auto, drape_memory_limit: 256 << 20 }
+    }
+}
+
 /// The map's debug overlays, a bit set. Where C++ tests a flag with
 /// `lhs & rhs`, which returns a bool there, use `contains`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]

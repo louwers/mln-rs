@@ -166,6 +166,8 @@ fn update(style: &Style, state: &TransformState) -> UpdateParameters {
         fast_pfor_enabled: false,
         #[cfg(mln_bench_terrain_skirts)]
         terrain_skirt_length: mln_map::TerrainSkirtLength::Auto,
+        #[cfg(mln_bench_terrain_options)]
+        terrain: mln_map::TerrainOptions::default(),
         #[cfg(mln_bench_terrain)]
         elevation: None,
         tile_lod_min_radius: 3.0,

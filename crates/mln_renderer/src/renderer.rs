@@ -334,12 +334,6 @@ impl Renderer {
         self.orchestrator.terrain()
     }
 
-    /// Caps the bytes of the terrain's drapes at `bytes`.
-    #[cfg(test)]
-    pub(crate) fn set_drape_byte_cap(&mut self, bytes: u64) {
-        self.orchestrator.terrain().drape_byte_cap = Some(bytes);
-    }
-
     /// Drops `value` on the renderer's workers instead of this
     /// thread, for data that would take a frame long to free, such as the
     /// sources of an earlier update. The renderer's drop waits for it.

@@ -78,7 +78,10 @@ impl Impl {
                 size: metadata.size,
                 pixel_ratio: metadata.pixel_ratio,
                 cross_source_collisions: metadata.cross_source_collisions,
-                terrain_skirt_length: terrain_skirt_length(metadata.terrain_skirt_length),
+                terrain: mln_map::TerrainOptions {
+                    skirt_length: terrain_skirt_length(metadata.terrain_skirt_length),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             Arc::clone(registry.style()),

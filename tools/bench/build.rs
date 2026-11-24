@@ -64,22 +64,28 @@ fn backend_timers(workspace: &Path) {
     }
 }
 
-/// Sets `mln_bench_terrain` where the renderer's `UpdateParameters` has the
-/// terrain's fields, which the symbol scenarios' update must name, and
-/// `mln_bench_terrain_skirts` where it has the skirts' length. A base of
-/// `mln-bench compare` from before the libraries drew terrain, or before
-/// they took the skirts' length, builds the update without them.
+/// Sets a cfg for each terrain field of the renderer's `UpdateParameters`
+/// that the symbol scenarios' update names, so that `mln-bench compare`
+/// builds against a base whose update has only some of them:
+/// `mln_bench_terrain` for the ground the view stands on,
+/// `mln_bench_terrain_skirts` for the skirts' length on its own, and
+/// `mln_bench_terrain_options` for the terrain's options, which take their
+/// defaults.
 fn terrain_update(workspace: &Path) {
     let source = workspace.join("crates/mln_renderer/src/update_parameters.rs");
     println!("cargo::rerun-if-changed={}", source.display());
     println!("cargo::rustc-check-cfg=cfg(mln_bench_terrain)");
     println!("cargo::rustc-check-cfg=cfg(mln_bench_terrain_skirts)");
+    println!("cargo::rustc-check-cfg=cfg(mln_bench_terrain_options)");
     let source = std::fs::read_to_string(&source).expect("the renderer's update parameters");
     if source.contains("pub elevation:") {
         println!("cargo::rustc-cfg=mln_bench_terrain");
     }
     if source.contains("pub terrain_skirt_length:") {
         println!("cargo::rustc-cfg=mln_bench_terrain_skirts");
+    }
+    if source.contains("pub terrain: TerrainOptions") {
+        println!("cargo::rustc-cfg=mln_bench_terrain_options");
     }
 }
 

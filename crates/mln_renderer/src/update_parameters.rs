@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use mln_map_types::{Elevation, MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode, View};
+use mln_map_types::{Elevation, MapDebugOptions, MapMode, TerrainOptions, TileLodMode, View};
 use mln_style::Style;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::time::Instant;
@@ -47,8 +47,8 @@ pub struct UpdateParameters {
     pub update_id: u64,
     pub cross_source_collisions: bool,
     pub fast_pfor_enabled: bool,
-    /// How far the skirts of terrain tiles reach down.
-    pub terrain_skirt_length: TerrainSkirtLength,
+    /// How the map draws its terrain.
+    pub terrain: TerrainOptions,
     /// The terrain's ground that `view` stands on: the snapshot of it that
     /// the renderer last reported ([`RendererEvent::TerrainElevation`]) and
     /// the map applied, or `None`. A frame is complete only when this gives

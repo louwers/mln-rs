@@ -29,7 +29,9 @@ pub use elevation::Elevation;
 pub use frame_projection::{ClipDepthRange, FrameProjection};
 pub use ground::GroundHit;
 pub use map_view::{Camera, LogicalExtent, MapView, Viewport};
-pub use mode::{ConstrainMode, MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode, ViewportMode};
+pub use mode::{
+    ConstrainMode, MapDebugOptions, MapMode, TerrainOptions, TerrainSkirtLength, TileLodMode, ViewportMode,
+};
 pub use projection_mode::ProjectionMode;
 mod camera_pose;
 pub mod tile_coordinate;

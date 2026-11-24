@@ -238,9 +238,11 @@ pub(crate) struct RenderTerrain {
     dem_textures: DemTextures,
     /// What the frame's draws bind of them; `None` without terrain.
     dems: Option<DemBindings>,
-    /// The drapes' byte cap in place of [`drapes::BYTE_CAP`].
-    #[cfg(test)]
-    pub(crate) drape_byte_cap: Option<u64>,
+    /// The most bytes the drapes hold, the map's
+    /// [`TerrainOptions::drape_memory_limit`].
+    ///
+    /// [`TerrainOptions::drape_memory_limit`]: mln_map_types::TerrainOptions::drape_memory_limit
+    drape_memory_limit: u64,
 }
 
 impl RenderTerrain {
@@ -271,8 +273,9 @@ impl RenderTerrain {
         let tileset = data.description.as_ref().filter(|tileset| !tileset.tiles.is_empty())?;
 
         let encoding = tileset.raster_encoding.unwrap_or(RasterEncoding::Mapbox);
-        let skirt_length = skirt_length(parameters.terrain_skirt_length, parameters.view.zoom());
+        let skirt_length = skirt_length(parameters.terrain.skirt_length, parameters.view.zoom());
         self.surface = Surface::new(encoding, terrain.exaggeration, skirt_length);
+        self.drape_memory_limit = parameters.terrain.drape_memory_limit;
 
         let dem_zooms = tileset.zoom_range;
         ranges.update(tileset, dem(&terrain.source), f64::from(terrain.exaggeration));
@@ -400,12 +403,8 @@ impl RenderTerrain {
             self.drapes = Drapes::default();
             return None;
         };
-        #[cfg(not(test))]
-        let byte_cap = drapes::BYTE_CAP;
-        #[cfg(test)]
-        let byte_cap = self.drape_byte_cap.unwrap_or(drapes::BYTE_CAP);
         let max_texture_size = parameters.context.caps().max_texture_size;
-        self.drapes.begin(parameters.view, cover, stacks, (byte_cap, max_texture_size));
+        self.drapes.begin(parameters.view, cover, stacks, (self.drape_memory_limit, max_texture_size));
         Some(&mut self.drapes)
     }
 
@@ -485,11 +484,7 @@ impl RenderTerrain {
         if self.elevation.is_some() {
             events.push(RendererEvent::TerrainElevation(None));
         }
-        *self = RenderTerrain {
-            #[cfg(test)]
-            drape_byte_cap: self.drape_byte_cap,
-            ..RenderTerrain::default()
-        };
+        *self = RenderTerrain::default();
     }
 
     /// Drops the draws and the drapes, which hold the renderer's shaders,

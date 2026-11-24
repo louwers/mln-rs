@@ -13,7 +13,7 @@ use mln_gfx::frame::FrameTarget;
 use mln_gfx::offscreen_target::OffscreenTarget;
 use mln_map::transform::Transform;
 use mln_map_types::{
-    CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode, ViewportMode,
+    CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TerrainOptions, TileLodMode, ViewportMode,
 };
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::expression::expression::FeatureState;
@@ -180,6 +180,8 @@ struct DrapedMap {
     /// The ground the renderer last told of, which the updates carry, as a
     /// map's do.
     elevation: Option<Arc<dyn Elevation>>,
+    /// The terrain options the updates carry.
+    terrain: TerrainOptions,
     work: TileWork,
     _pool: mln_util::pool::Pool,
 }
@@ -209,6 +211,7 @@ impl DrapedMap {
             style: Arc::new(style_of(STYLE)),
             transform,
             elevation: None,
+            terrain: TerrainOptions::default(),
             work: TileWork::default(),
             _pool: pool,
         }
@@ -236,7 +239,7 @@ impl DrapedMap {
             update_id: 0,
             cross_source_collisions: true,
             fast_pfor_enabled: false,
-            terrain_skirt_length: TerrainSkirtLength::Auto,
+            terrain: self.terrain,
             elevation: self.elevation.clone(),
             tile_lod_min_radius: 3.0,
             tile_lod_scale: 1.0,
@@ -577,17 +580,17 @@ fn the_rendering_stats_count_the_drapes() {
 const DRAPE_BYTES: u64 = 4 * 1024 * 1024 * 4 / 3;
 const DEPTH_STENCIL_BYTES: u64 = 4 * 1024 * 1024;
 
-/// A byte cap under what the drapes would hold halves the drapes of the
+/// A memory limit under what the drapes would hold halves the drapes of the
 /// tiles farthest from the view's center, last in the cover, which draw
 /// again once, smaller; every tile keeps its drape. Raised again, it lets
 /// them draw again at their whole side.
 #[test]
-fn a_byte_cap_halves_the_drapes_of_the_farthest_tiles_first() {
+fn a_memory_limit_halves_the_drapes_of_the_farthest_tiles_first() {
     let (mut map, drapes) = settled(Tiles::default());
     let whole: Vec<_> = map.sides().into_iter().map(|(tile, _)| (tile, 1024)).collect();
     assert_eq!(whole, map.sides());
 
-    map.renderer.set_drape_byte_cap(4 * DRAPE_BYTES + DEPTH_STENCIL_BYTES - 1);
+    map.terrain.drape_memory_limit = 4 * DRAPE_BYTES + DEPTH_STENCIL_BYTES - 1;
     let (_, drawn) = map.frame();
     let sides = map.sides();
     let (last, _) = *sides.last().unwrap();
@@ -598,7 +601,7 @@ fn a_byte_cap_halves_the_drapes_of_the_farthest_tiles_first() {
     assert!((terrain.mem_drapes as u64) < 4 * DRAPE_BYTES + DEPTH_STENCIL_BYTES, "{terrain:?}");
     assert!(map.frame().1.is_empty(), "the drapes are drawn again once only");
 
-    map.renderer.set_drape_byte_cap(u64::MAX);
+    map.terrain.drape_memory_limit = u64::MAX;
     assert_eq!(BTreeSet::from([(last, 0)]), map.frame().1);
     assert_eq!(whole, map.sides());
 }

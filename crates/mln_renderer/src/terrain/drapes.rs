@@ -21,14 +21,14 @@
 //! texture, so a stack that draws nothing in a tile holds no memory there.
 //!
 //! A drape takes GL JS's side, twice its tile's, or the device's largest
-//! texture where that is smaller ([`drape_size`]). A byte cap
-//! ([`BYTE_CAP`]) lowers the sides of the tiles farthest from the view's
-//! center, last in the cover, where the drapes' textures and the depth and
-//! stencil they draw with would hold more; it never drops a tile. The
-//! sides are settled before the layers update their drawings, so a drape
-//! that changes takes its tile's side at once. The cap counts as holding a
-//! texture every drape that does, and every drape whose layers draw from
-//! something new, which may draw something.
+//! texture where that is smaller ([`drape_size`]). A byte cap, the map's
+//! [`TerrainOptions::drape_memory_limit`], lowers the sides of the tiles
+//! farthest from the view's center, last in the cover, where the drapes'
+//! textures and the depth and stencil they draw with would hold more; it
+//! never drops a tile. The sides are settled before the layers update
+//! their drawings, so a drape that changes takes its tile's side at once.
+//! The cap counts as holding a texture every drape that does, and every
+//! drape whose layers draw from something new, which may draw something.
 //!
 //! A draped layer with a layer opacity below 1 or a layer blend other than
 //! `normal` draws as a whole inside each drape, as in 2D
@@ -40,6 +40,7 @@
 //! its mips, so a blend's backdrop is the drape's own texels.
 //!
 //! [`LayerParts::update_drape_draws`]: crate::render_layer::LayerParts::update_drape_draws
+//! [`TerrainOptions::drape_memory_limit`]: mln_map_types::TerrainOptions::drape_memory_limit
 
 use std::sync::Arc;
 
@@ -84,23 +85,6 @@ const MAX_ANISOTROPY: u8 = 16;
 pub(crate) fn drape_size(tile_size: u16, max_texture_size: u32) -> u32 {
     (u32::from(tile_size) * 2).min(max_texture_size).max(1)
 }
-
-/// The most bytes the drapes' textures hold, with their mips and the depth
-/// and stencil they draw with, before the tiles farthest from the view's
-/// center take fewer texels: less on phones and in the browser, whose GPU shares a
-/// smaller memory with the system.
-pub(crate) const BYTE_CAP: u64 = if cfg!(any(
-    target_os = "android",
-    target_os = "ios",
-    target_os = "tvos",
-    target_os = "visionos",
-    target_env = "ohos",
-    target_family = "wasm"
-)) {
-    256 << 20
-} else {
-    384 << 20
-};
 
 /// The bytes of a drape's texture of `side` texels a side, with its mips,
 /// as [`Texture2D::bytes`](crate::gfx::texture2d::Texture2D::bytes)
@@ -740,7 +724,7 @@ mod tests {
             ranges: ElevationRanges::default(),
         };
         let mut drapes = Drapes::default();
-        drapes.begin(&view, &cover, 1, (BYTE_CAP, 4096));
+        drapes.begin(&view, &cover, 1, (u64::MAX, 4096));
         let transform = &drapes.drapes[0].transform;
         assert!(!transform.view.is_globe());
         let tile = id.to_unwrapped();

@@ -7,7 +7,8 @@ use std::sync::Arc;
 use glam::DVec2;
 use mln_map::transform::Transform;
 use mln_map_types::{
-    CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode, ViewportMode,
+    CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TerrainOptions, TerrainSkirtLength, TileLodMode,
+    ViewportMode,
 };
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Resource, Responder, Response};
@@ -81,7 +82,7 @@ fn update_parameters(style: Style, transform: &Transform, mode: MapMode) -> Upda
         update_id: 0,
         cross_source_collisions: true,
         fast_pfor_enabled: false,
-        terrain_skirt_length: TerrainSkirtLength::Auto,
+        terrain: TerrainOptions::default(),
         elevation: None,
         tile_lod_min_radius: 3.0,
         tile_lod_scale: 1.0,
@@ -141,7 +142,7 @@ fn the_surface_decodes_the_dem_as_its_tileset_says_and_hangs_the_skirts_the_map_
     style.apply(Edit::SetTerrain(Some(Terrain { source: "dem".to_owned(), exaggeration: 1.5 }))).unwrap();
     let surface = |skirts| {
         let parameters = UpdateParameters {
-            terrain_skirt_length: skirts,
+            terrain: TerrainOptions { skirt_length: skirts, ..TerrainOptions::default() },
             ..update_parameters(style.clone(), &transform, MapMode::Static)
         };
         let mut terrain = RenderTerrain::default();
