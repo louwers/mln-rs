@@ -1066,15 +1066,19 @@ impl RenderOrchestrator {
                 self.placement_controller.placement().symbol_fade_change(update_parameters.time_point);
             frame.needs_repaint = self.has_transitions(update_parameters.time_point);
         } else {
-            frame.placement_changed = !layers_need_placement.is_empty();
-            symbol_buckets_changed = frame.placement_changed;
-            if frame.placement_changed {
+            if layers_need_placement.is_empty() {
+                // Nothing to place: drop the earlier image's placement, so
+                // queries don't find its symbols.
+                frame.placement_changed = self.placement_controller.reset();
+            } else {
                 let inputs = PlacementInputs::new(update_parameters, &layers_need_placement, &self.tile_store);
                 let mut placement = Placement::create(Arc::new(inputs), update_parameters.time_point, None);
                 placement.collect_placed_symbol_data(self.placed_symbol_data_collected);
                 placement.place(&mut self.tile_store);
                 self.placement_controller.set_placement(placement);
+                frame.placement_changed = true;
             }
+            symbol_buckets_changed = frame.placement_changed;
             self.cross_tile_symbol_index.reset();
             frame.symbol_fade_change = 1.0;
             frame.needs_repaint = false;

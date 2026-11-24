@@ -111,6 +111,20 @@ fn query_rendered_features() {
     assert_eq!(features2.len(), 0);
 }
 
+// A still image with nothing to place finds no symbols: the icons of the
+// image before it are gone from its queries.
+#[test]
+fn a_still_image_with_nothing_to_place_finds_nothing_placed() {
+    let test = QueryTest::new();
+    let center = test.map().pixel_for_lat_lng(&ll(0.0, 0.0));
+    assert_eq!(test.query_rendered_features(&center, &RenderedQueryOptions::default()).len(), 4);
+
+    // Far from the sources' one point, so no tile in view has a symbol.
+    test.map().jump_to(&CameraOptions { center: Some(ll(40.0, 90.0)), zoom: Some(6.0), ..Default::default() });
+    test.render();
+    assert_eq!(test.query_rendered_features(&center, &RenderedQueryOptions::default()).len(), 0);
+}
+
 // gtest: Query.QueryRenderedFeaturesFilterLayer
 #[test]
 fn query_rendered_features_filter_layer() {
