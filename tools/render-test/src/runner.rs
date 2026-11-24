@@ -352,25 +352,14 @@ impl<'a> TestContext<'a> {
 pub(crate) type TestOperation = Box<dyn Fn(&mut TestContext<'_>) -> bool>;
 pub(crate) type TestOperations = Vec<TestOperation>;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) enum UpdateResults {
-    No,
-    Default,
-    Platform,
-    Metrics,
-    Rebaseline,
-}
-
 pub(crate) struct TestRunner {
     maps: HashMap<String, Box<dyn TestRunnerImpl>>,
     manifest: Manifest,
-    update_results: UpdateResults,
     /// Creates the map for a test; `None` without a map implementation.
     factory: Option<ImplFactory>,
     /// `--self-check`: the "rendered" image is the test's expected image.
     self_check: bool,
-    /// Where actual.png and diff.png go. C++ writes them next to the test's
-    /// style.json; the port never writes into the C++ tree.
+    /// Where actual.png and diff.png go.
     output_path: PathBuf,
     /// The per-test wall-clock limit (watchdog.rs).
     watchdog: Option<crate::watchdog::Watchdog>,
@@ -387,7 +376,6 @@ impl TestRunner {
     #[must_use]
     pub(crate) fn new(
         manifest: Manifest,
-        update_results: UpdateResults,
         factory: Option<ImplFactory>,
         self_check: bool,
         output_path: PathBuf,
@@ -397,7 +385,6 @@ impl TestRunner {
         TestRunner {
             maps: HashMap::default(),
             manifest,
-            update_results,
             factory,
             self_check,
             output_path,
@@ -460,10 +447,6 @@ impl TestRunner {
             return;
         }
 
-        // The update modes are rejected when parsing arguments (the port
-        // does not write baselines).
-        debug_assert!(!matches!(self.update_results, UpdateResults::Platform | UpdateResults::Default));
-
         let actual_json = metadata.actual_json.clone();
         self.write_output(metadata, "actual.json", actual_json.as_bytes());
 
@@ -525,10 +508,6 @@ impl TestRunner {
                 }
                 return;
             }
-
-            // The update modes are rejected when parsing arguments (the port
-            // does not write baselines).
-            debug_assert!(!matches!(self.update_results, UpdateResults::Platform | UpdateResults::Default));
 
             self.write_output(metadata, "actual.png", &metadata.actual);
 
@@ -617,7 +596,7 @@ impl TestRunner {
         }
     }
 
-    pub(crate) fn check_probing_results(&self, result_metadata: &mut TestMetadata) {
+    pub(crate) fn check_probing_results(result_metadata: &mut TestMetadata) {
         fn append(metadata: &mut TestMetadata, s: &str) {
             if metadata.error_message.is_empty() {
                 metadata.error_message += s;
@@ -629,21 +608,7 @@ impl TestRunner {
         if result_metadata.metrics.is_empty() {
             return;
         }
-        // The runner doesn't write metrics: the metrics and rebaseline update
-        // modes error the test.
-        let write_metrics = |metadata: &mut TestMetadata, message: &str| {
-            let _ = message;
-            let msg = "Unsupported: writing metrics.json";
-            metadata.error_message += msg;
-            log::warning(Event::General, msg);
-        };
-
         let expected_metrics = result_metadata.paths.expected_metrics.clone();
-        if self.update_results == UpdateResults::Metrics {
-            write_metrics(result_metadata, " Updated expected metrics.");
-            result_metadata.metrics_errored += 1;
-            return;
-        }
 
         // Check the possible paths in reverse order, so that the default path with
         // the test style will only be checked in the very end.
@@ -672,9 +637,6 @@ impl TestRunner {
         if result_metadata.expected_metrics.is_empty() {
             result_metadata.error_message =
                 format!("Failed to find metric expectations for: {}", result_metadata.paths.style_path);
-            if self.update_results == UpdateResults::Rebaseline && !result_metadata.ignored_test {
-                write_metrics(result_metadata, ". Created baseline for missing metrics.");
-            }
             result_metadata.metrics_errored += 1;
             return;
         }
@@ -904,16 +866,6 @@ impl TestRunner {
         check_network(result_metadata);
         check_fps(result_metadata);
         check_gfx(result_metadata);
-
-        if result_metadata.ignored_test {
-            return;
-        }
-
-        if (result_metadata.metrics_errored != 0 || result_metadata.metrics_failed != 0)
-            && self.update_results == UpdateResults::Rebaseline
-        {
-            write_metrics(result_metadata, " Rebaselined expected metric for failed test.");
-        }
     }
 
     pub(crate) fn append_label_cut_off_results(
@@ -1074,7 +1026,7 @@ impl TestRunner {
 
         if metadata.render_test {
             if !metadata.ignore_probing {
-                self.check_probing_results(metadata);
+                Self::check_probing_results(metadata);
             }
             Self::append_label_cut_off_results(metadata, &cut_off_labels_report, &duplications_report);
             self.check_render_test_results(&result_image, metadata);

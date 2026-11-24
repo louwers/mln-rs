@@ -88,7 +88,7 @@ hand. In a fork, it does nothing.
    nothing.
 2. If it doesn't, or the workflow was run by hand, `release`:
    1. Checks out the commit that set the version: the latest on the branch whose
-      change to `Cargo.toml` adds the version's line. It needs no C++ checkout.
+      change to `Cargo.toml` adds the version's line.
    2. Installs stable Rust and runs `cargo package --workspace --locked`
       (without the desktop app). It packages every crate and builds each one
       from its packaged sources. The packages resolve each other locally, so
