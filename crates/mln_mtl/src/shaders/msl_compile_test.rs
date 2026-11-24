@@ -379,3 +379,13 @@ fn every_block_has_its_layout() {
         panic!("{error}");
     }
 }
+
+/// The terrain probe reads heights that must round as `mln_util::dem` does,
+/// so its MSL compiles without fast math, which may fuse the height rule's
+/// multiplies and adds; every other program keeps Metal's default.
+#[test]
+fn only_the_terrain_probe_compiles_without_fast_math() {
+    let exact: Vec<&str> =
+        sources().into_iter().filter(|(_, msl)| !msl.fast_math).map(|(program, _)| program.name).collect();
+    assert_eq!(exact, [mln_layers::conformance::TERRAIN_PROBE.name]);
+}
