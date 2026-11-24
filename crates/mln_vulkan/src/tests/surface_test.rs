@@ -146,10 +146,15 @@ impl Drop for Window {
 }
 
 /// A backend and a target on a headless surface that `provider` makes, or
-/// `None` where there can't be one, which fails the test on CI.
+/// `None` where there can't be one, which fails the test on Linux CI (where
+/// Mesa's Lavapipe exposes `VK_EXT_headless_surface`; Windows Lavapipe does
+/// not, and Win32 swapchains are covered by `surfaces_win32`).
 fn surface_backend_on(provider: HeadlessSurface, size: Size, cap_frame_rate: bool) -> Option<Window> {
     if let Some(reason) = unavailable() {
-        assert!(std::env::var_os("CI").is_none(), "the swapchain tests can't run on CI: {reason}");
+        assert!(
+            !(cfg!(all(target_os = "linux", not(target_env = "ohos"))) && std::env::var_os("CI").is_some()),
+            "the swapchain tests can't run on CI: {reason}"
+        );
         eprintln!("skipping the swapchain test: {reason}");
         return None;
     }
