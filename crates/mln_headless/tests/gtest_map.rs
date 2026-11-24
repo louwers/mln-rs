@@ -2356,6 +2356,7 @@ fn expired_sprite_sheet() {
         let weak_observer = Rc::downgrade(&observer);
         let run_loop = run_loop.clone();
         let online = Arc::clone(&online);
+        let sprites_served = Arc::clone(&sprites_served);
         observer.did_finish_loading_map_callback.set(move |()| {
             online.store(true, Ordering::SeqCst);
 
@@ -2366,8 +2367,16 @@ fn expired_sprite_sheet() {
                     assert!(params.style.get_images().windows(2).all(|pair| pair[0].id <= pair[1].id));
                     assert!(params.style.get_images().len() < 4);
                 });
+                // The map can go idle before the network has answered for
+                // the expired sprite sheet; it goes idle again once its
+                // images have changed.
                 let run_loop = run_loop.clone();
-                observer.did_become_idle_callback.set(move |()| run_loop.stop());
+                let sprites_served = Arc::clone(&sprites_served);
+                observer.did_become_idle_callback.set(move |()| {
+                    if sprites_served.lock().len() == 2 {
+                        run_loop.stop();
+                    }
+                });
             }
         });
     }

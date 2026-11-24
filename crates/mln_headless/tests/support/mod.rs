@@ -22,6 +22,7 @@ use std::cell::{Cell, RefCell, RefMut};
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use mln_headless::{HeadlessFrontend, RenderResult};
@@ -375,11 +376,18 @@ struct FakeRequestEntry {
 /// Records the requests made; the test responds to them.
 pub(crate) struct FakeFileSource {
     requests: Mutex<Vec<FakeRequestEntry>>,
+    /// Every request made, open or cancelled since.
+    loads: AtomicUsize,
 }
 
 impl FakeFileSource {
     pub(crate) fn new() -> Self {
-        FakeFileSource { requests: Mutex::new(Vec::new()) }
+        FakeFileSource { requests: Mutex::new(Vec::new()), loads: AtomicUsize::new(0) }
+    }
+
+    /// The number of requests made, including those cancelled since.
+    pub(crate) fn loads(&self) -> usize {
+        self.loads.load(Ordering::SeqCst)
     }
 
     /// The requests that weren't cancelled.
@@ -430,6 +438,7 @@ impl Default for FakeFileSource {
 
 impl FileSource for FakeFileSource {
     fn load(&self, resource: &Resource, responder: Responder) {
+        self.loads.fetch_add(1, Ordering::SeqCst);
         self.list().push(FakeRequestEntry { resource: resource.clone(), responder });
     }
 
@@ -585,12 +594,12 @@ pub(crate) fn run_within(run_loop: &TestLoop, limit: std::time::Duration) -> boo
     {
         let (timed_out, stop) = (Arc::clone(&timed_out), run_loop.handle());
         timeout.start(limit, move || {
-            timed_out.store(true, std::sync::atomic::Ordering::SeqCst);
+            timed_out.store(true, Ordering::SeqCst);
             stop.stop();
         });
     }
     run_loop.run();
-    !timed_out.load(std::sync::atomic::Ordering::SeqCst)
+    !timed_out.load(Ordering::SeqCst)
 }
 
 /// Runs `run_loop`, stopping it and failing after `seconds` if nothing
@@ -618,17 +627,17 @@ impl LoopTimer {
     }
 
     pub(crate) fn start(&self, delay: std::time::Duration, callback: impl FnOnce() + Send + 'static) {
-        let generation = self.generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let current = Arc::clone(&self.generation);
         self.queue.post_after(delay, move |()| {
-            if current.load(std::sync::atomic::Ordering::SeqCst) == generation {
+            if current.load(Ordering::SeqCst) == generation {
                 callback();
             }
         });
     }
 
     pub(crate) fn stop(&self) {
-        self.generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.generation.fetch_add(1, Ordering::SeqCst);
     }
 }
 

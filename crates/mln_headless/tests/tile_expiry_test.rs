@@ -57,10 +57,10 @@ fn a_tile_shows_each_answer_to_its_open_request() {
 }"#,
     );
     assert_eq!(GREEN, answer_tiles(&test, &png(GREEN)));
-    let requests = test.file_source.requests_len();
+    let requests = test.file_source.loads();
 
     // The file source answers the same requests again, as it does when it
     // revalidates data that expired and the server has new data.
     assert_eq!(BLUE, answer_tiles(&test, &png(BLUE)));
-    assert_eq!(requests, test.file_source.requests_len(), "no new request");
+    assert_eq!(requests, test.file_source.loads(), "no new request");
 }
