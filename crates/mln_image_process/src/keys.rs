@@ -36,8 +36,9 @@ pub enum Operation {
     /// A Gaussian blur whose standard deviation is `size` logical pixels,
     /// from 0 to 64.
     Blur { size: PropertyValue<f32> },
-    /// Coverage at or above `cutoff`, from 0 to 255, made whole and the
-    /// rest none, with an antialiased edge.
+    /// Coverage above `cutoff`, from 0 to 255, made whole and below it
+    /// none, antialiased over an edge centered on the cutoff, where coverage
+    /// turns half.
     Threshold { cutoff: PropertyValue<f32> },
     /// Every pixel painted `value`, its coverage kept.
     Color { value: PropertyValue<Color> },
@@ -56,9 +57,9 @@ pub enum Combine {
     Multiply,
     /// Only where the other doesn't: a cut-out.
     Subtract,
-    /// The more covered of the two: a union.
+    /// Each channel's more of the two: a union of their coverage.
     Max,
-    /// The less covered of the two: an intersection.
+    /// Each channel's less of the two: an intersection of their coverage.
     Min,
     /// The other drawn over it.
     Over,
