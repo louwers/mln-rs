@@ -89,6 +89,10 @@ fn place(layer: &PlacingLayer<'_, NgonLayer>, cx: &mut PlaceCx<'_>, crossing: Op
     let overlap = if layout.ngon_allow_overlap.evaluate_at(zoom, true) { Overlap::Always } else { Overlap::Never };
     let ignore_placement = layout.ngon_ignore_placement.evaluate_at(zoom, true);
     let sizes = constant_sizes(paint);
+    let constant_size = match sizes {
+        [Some(radius), Some(stroke_width), Some(corners)] => Some(outer_radius(radius, stroke_width, corners)),
+        _ => None,
+    };
     let scale_with_map = *paint.ngon_pitch_scale.uniform() == CirclePitchScaleType::Map;
     let camera = cx.view.camera_to_center_distance();
     let how = transform(paint);
@@ -118,8 +122,10 @@ fn place(layer: &PlacingLayer<'_, NgonLayer>, cx: &mut PlaceCx<'_>, crossing: Op
             let scale = if scale_with_map { (camera / distance) as f32 } else { 1.0 };
             // The bucket keeps what features set; a constant can change
             // without a new layout.
-            let [radius, stroke_width, corners] = [0, 1, 2].map(|n| sizes[n].unwrap_or(point.size[n]));
-            let size = outer_radius(radius, stroke_width, corners);
+            let size = constant_size.unwrap_or_else(|| {
+                let [radius, stroke_width, corners] = [0, 1, 2].map(|n| sizes[n].unwrap_or(point.size[n]));
+                outer_radius(radius, stroke_width, corners)
+            });
             let shape = Shape::Circle { center, radius: size * scale };
             let bounds = shape.bounds();
             let crosses = square.is_some_and(|square| crosses(&bounds, &square));
