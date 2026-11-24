@@ -331,6 +331,14 @@ impl Context {
         texture.upload_sub_region(gpu, device, data, size, x, y)
     }
 
+    /// Fills the mip levels below the first of the texture of `handle`,
+    /// which is made mipmapped, from what the work recorded so far leaves in
+    /// the first. Fails while a pass is open and for a texture not made.
+    pub(crate) fn generate_mipmaps(&mut self, gpu: &mut dyn Gpu, handle: &SharedTexture) -> Result<(), GpuError> {
+        let texture = self.gpu_texture(handle).ok_or(GpuError::UnknownId("texture"))?;
+        gpu.generate_mipmaps(texture.id())
+    }
+
     /// Writes the image the texture of `handle` was given, if any.
     pub(crate) fn upload_texture(&mut self, gpu: &mut dyn Gpu, handle: &SharedTexture) -> Result<(), GpuError> {
         let (texture, device) = self.texture_entry(handle)?;

@@ -201,9 +201,35 @@ pub(crate) struct ImageSourceRenderData<'a> {
     /// The tile the image draws in, in each world copy it draws in: one
     /// canonical tile under different wraps.
     pub(crate) tile_ids: &'a [UnwrappedTileID],
-    /// Where the bucket's vertices draw, in the tile units of `tile_ids`'
-    /// canonical tile.
+    /// The box of the quad's corners, in the tile units of `tile_ids`'
+    /// canonical tile: min x, min y, max x, max y.
+    pub(crate) bounds: [i32; 4],
+    /// Where the bucket's vertices draw, in the same units.
     pub(crate) quad: ImageQuad,
+}
+
+impl ImageSourceRenderData<'_> {
+    /// Whether the image drawn in `tile_id`, one of `tile_ids`, covers part
+    /// of the tile `drape`. An image that only touches its edge doesn't.
+    pub(crate) fn overlaps(&self, tile_id: &UnwrappedTileID, drape: &UnwrappedTileID) -> bool {
+        // Both boxes in the tile units of the finer of the two zooms, from
+        // the west edge of world copy 0.
+        let zoom = tile_id.canonical.z.max(drape.canonical.z);
+        let place = |id: &UnwrappedTileID| {
+            let scale = 1i64 << (zoom - id.canonical.z);
+            let extent = i64::from(constants::EXTENT) * scale;
+            let x = ((i64::from(id.wrap) << id.canonical.z) + i64::from(id.canonical.x)) * extent;
+            (x, i64::from(id.canonical.y) * extent, scale)
+        };
+        let (left, top, scale) = place(tile_id);
+        let [min_x, min_y, max_x, max_y] = self.bounds.map(|bound| i64::from(bound) * scale);
+        let (drape_left, drape_top, drape_scale) = place(drape);
+        let drape_extent = i64::from(constants::EXTENT) * drape_scale;
+        left + min_x < drape_left + drape_extent
+            && drape_left < left + max_x
+            && top + min_y < drape_top + drape_extent
+            && drape_top < top + max_y
+    }
 }
 
 pub(crate) struct RenderImageSource {
@@ -211,6 +237,8 @@ pub(crate) struct RenderImageSource {
     bucket: Option<RasterBucket>,
     tile_ids: Vec<UnwrappedTileID>,
     mesh_corners: GeometryCoordinates,
+    /// The box of `mesh_corners`, as [`ImageSourceRenderData::bounds`].
+    bounds: [i32; 4],
     quad: ImageQuad,
     mesh_cells: u32,
 }
@@ -223,6 +251,7 @@ impl RenderImageSource {
             bucket: None,
             tile_ids: Vec::new(),
             mesh_corners: GeometryCoordinates::new(),
+            bounds: [0; 4],
             quad: ImageQuad::TILE,
             mesh_cells: 0,
         }
@@ -326,23 +355,26 @@ impl RenderSource for RenderImageSource {
         // there, in the world copy the cover chose.
         let globe = view.is_globe();
         // The image draws in each world copy whose quad overlaps the view's
-        // tiles.
-        let zoom_range = Range::new(0u8, zoom);
-        let ideal_tiles = tile_cover(
-            &TileCoverParameters {
-                view: view.clone(),
-                tile_lod_min_radius: parameters.tile_lod_min_radius,
-                tile_lod_scale: parameters.tile_lod_scale,
-                tile_lod_pitch_threshold: parameters.tile_lod_pitch_threshold,
-                tile_lod_mode: parameters.tile_lod_mode,
-                requested_zoom: None,
-                round_zoom: false,
-                max_content_elevation: 0.0,
-            },
-            view.integer_zoom(),
-            zoom_range,
-            None,
-        );
+        // tiles: while terrain draws, the terrain's, raised ground's too, as
+        // every source covers the view then.
+        let ideal_tiles = match parameters.terrain {
+            Some(terrain) => terrain.tiles.iter().map(|tile| tile.id).collect(),
+            None => tile_cover(
+                &TileCoverParameters {
+                    view: view.clone(),
+                    tile_lod_min_radius: parameters.tile_lod_min_radius,
+                    tile_lod_scale: parameters.tile_lod_scale,
+                    tile_lod_pitch_threshold: parameters.tile_lod_pitch_threshold,
+                    tile_lod_mode: parameters.tile_lod_mode,
+                    requested_zoom: None,
+                    round_zoom: false,
+                    max_content_elevation: 0.0,
+                },
+                view.integer_zoom(),
+                Range::new(0u8, zoom),
+                None,
+            ),
+        };
         for tile in &ideal_tiles {
             for covering_tile in &tile_cover_ids {
                 if covering_tile.canonical == tile.canonical
@@ -420,6 +452,12 @@ impl RenderSource for RenderImageSource {
         if !bucket.geometry().has_quads() || geom_coords != self.mesh_corners || cells != self.mesh_cells {
             build_image_mesh(bucket, cells, matches!(concave, Some(0 | 2)));
             self.quad = ImageQuad::new(&geom_coords, &warp);
+            let mut bounds = [i32::MAX, i32::MAX, i32::MIN, i32::MIN];
+            for corner in &geom_coords {
+                let (x, y) = (i32::from(corner.x), i32::from(corner.y));
+                bounds = [bounds[0].min(x), bounds[1].min(y), bounds[2].max(x), bounds[3].max(y)];
+            }
+            self.bounds = bounds;
             self.mesh_corners = geom_coords;
             self.mesh_cells = cells;
         }
@@ -438,7 +476,7 @@ impl RenderSource for RenderImageSource {
         // coordinates, and an image shrunk out of sight or out of view draws
         // nowhere.
         let tile_ids: &[UnwrappedTileID] = if self.base.enabled && self.loaded() { &self.tile_ids } else { &[] };
-        Some(ImageSourceRenderData { bucket: self.bucket.as_ref(), tile_ids, quad: self.quad })
+        Some(ImageSourceRenderData { bucket: self.bucket.as_ref(), tile_ids, bounds: self.bounds, quad: self.quad })
     }
 
     fn dump_debug_logs(&self) {

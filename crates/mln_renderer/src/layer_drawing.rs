@@ -12,8 +12,10 @@
 //! [`DrawPass::draw`] draws one draw's objects. A layer type that draws one
 //! group of its tiles' draws keeps them in a [`TileDraws`], whose tiles name
 //! the objects of their draws by a part of their own type
-//! ([`TileObjects`]).
+//! ([`TileObjects`]). A layer that drapes over terrain keeps a drawing of
+//! its type in each drape too ([`DrapeDrawing`]).
 
+use std::any::Any;
 use std::ops::BitOrAssign;
 
 use mln_gfx::depth_mode::DepthMode;
@@ -29,7 +31,7 @@ use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::layer_composite::Composite;
-use crate::paint_parameters::{Composited, PaintParameters};
+use crate::paint_parameters::{Composited, PaintParameters, StencilClear};
 use crate::render_pass::RenderPass;
 
 /// The order of a layer's draws that its draws' ids don't give: lower
@@ -350,6 +352,12 @@ impl<T> TileMap<T> {
         if let Some(value) = self.set.index_of(tile_id).and_then(|index| self.values.get_mut(index)) {
             *value = None;
         }
+    }
+
+    /// The tiles, in order, each with its entry.
+    pub(crate) fn entries(&mut self) -> impl Iterator<Item = (OverscaledTileID, TileEntry<'_, T>)> {
+        let TileSet { ids, states, .. } = &mut self.set;
+        ids.iter().zip(states).zip(&mut self.values).map(|((&id, state), value)| (id, TileEntry { state, value }))
     }
 
     /// The entry of `tile_id`, if the tile is one of the frame's.
@@ -935,6 +943,11 @@ impl<P: Copy> LayerDraws<P> {
         self.frame.set_stencil_tiles(tiles);
     }
 
+    /// The buffers the draws bind.
+    pub(crate) fn uniform_buffers_mut(&mut self) -> &mut UniformBufferArray {
+        &mut self.frame.uniform_buffers
+    }
+
     /// Drops the draws.
     pub(crate) fn clear(&mut self) {
         self.frame.draws.clear();
@@ -1043,6 +1056,15 @@ impl<'a> DrawGroup<'a> {
         }
     }
 
+    /// Whether the group draws anything: a custom layer's host may.
+    #[must_use]
+    pub(crate) fn draws(self) -> bool {
+        match self {
+            DrawGroup::Draws(frame) => !frame.draws.is_empty(),
+            DrawGroup::Custom => true,
+        }
+    }
+
     /// How the group composites onto the frame, with the id that tells it
     /// apart in the layer composite, if it draws anything and composites.
     #[must_use]
@@ -1051,6 +1073,60 @@ impl<'a> DrawGroup<'a> {
             DrawGroup::Draws(frame) => frame.composited(),
             DrawGroup::Custom => None,
         }
+    }
+}
+
+/// What a frame's draw groups, or a drape's, need of the passes: their
+/// number, which sets the passes' depth range; the masks of the tiles they
+/// clip to and of the tiles that clear the stencil buffer; and the groups
+/// drawn as a whole, each into the layer composite's texture and then onto
+/// the frame.
+#[derive(Default)]
+pub(crate) struct DrawGroups {
+    pub(crate) count: usize,
+    pub(crate) clip_tiles: Vec<UnwrappedTileID>,
+    /// The tiles whose masks clear the stencil buffer, also in
+    /// `clip_tiles` ([`PaintParameters::stencil_clear_tiles`]).
+    pub(crate) stencil_clear: StencilClear,
+    pub(crate) composited: Vec<(SimpleIdentity, Composite)>,
+}
+
+impl DrawGroups {
+    /// The draw groups that `visit_groups` visits, in drawing order, of
+    /// passes whose stencil the tiles that `stencil_clear_tiles` gives for
+    /// the tiles they clip to clear
+    /// ([`PaintParameters::stencil_clear_tiles`]). Draw groups of one source
+    /// clip to the same tiles, which are added once.
+    pub(crate) fn of<'a>(
+        visit_groups: impl FnOnce(&mut dyn FnMut(DrawGroup<'a>)),
+        stencil_clear_tiles: impl FnOnce(&[UnwrappedTileID]) -> StencilClear,
+    ) -> DrawGroups {
+        let mut groups = DrawGroups::default();
+        let mut last: Option<&[UnwrappedTileID]> = None;
+        visit_groups(&mut |group| {
+            groups.count += 1;
+            if let Some(tiles) = group.stencil_tiles()
+                && last.is_none_or(|last| last != tiles)
+            {
+                groups.clip_tiles.extend(tiles.iter().copied());
+                last = Some(tiles);
+            }
+            groups.composited.extend(group.composite());
+        });
+        groups.stencil_clear = stencil_clear_tiles(&groups.clip_tiles);
+        groups.clip_tiles.extend_from_slice(&groups.stencil_clear);
+        if !groups.clip_tiles.is_sorted() {
+            groups.clip_tiles.sort_unstable();
+        }
+        groups.clip_tiles.dedup();
+        groups
+    }
+
+    /// The depth range of the passes' 3D draws, from 0, below the depths of
+    /// the groups' 2D draws.
+    #[must_use]
+    pub(crate) fn depth_range_size(&self) -> f32 {
+        1.0 - ((self.count + 2) * PaintParameters::NUM_SUBLAYERS as usize) as f32 * PaintParameters::DEPTH_EPSILON
     }
 }
 
@@ -1160,6 +1236,10 @@ impl<T: TileObjects> LayerDrawing for TileDraws<T> {
             order.step(parameters);
         }
     }
+
+    fn frame_buffers(&mut self) -> Option<&mut UniformBufferArray> {
+        Some(self.frame.as_mut()?.uniform_buffers_mut())
+    }
 }
 
 /// What a layer type keeps of its drawing: the GPU objects of its draws, in
@@ -1200,6 +1280,105 @@ pub(crate) trait LayerDrawing {
     /// Draws the draw groups' draws of the pass into the open pass of `gpu`,
     /// the context's, in `order`, each at its depth.
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder);
+
+    /// The buffers that the draws of the drawing's one draw group share,
+    /// once it has the group; `None` for a drawing of other groups.
+    fn frame_buffers(&mut self) -> Option<&mut UniformBufferArray> {
+        None
+    }
+}
+
+/// What a drawing does, whatever the layer type's, for a [`DrapeDrawing`].
+trait AnyDrawing {
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+    fn mark_changed(&mut self, changed: &ChangedBuckets);
+    fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>));
+    fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context);
+    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder);
+    fn frame_buffers(&mut self) -> Option<&mut UniformBufferArray>;
+}
+
+impl<D: LayerDrawing + 'static> AnyDrawing for D {
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn mark_changed(&mut self, changed: &ChangedBuckets) {
+        if let Some(tiles) = self.tiles() {
+            tiles.mark_changed(changed);
+        }
+    }
+
+    fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
+        LayerDrawing::visit_groups(self, visit);
+    }
+
+    fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+        LayerDrawing::upload(self, gpu, context);
+    }
+
+    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
+        LayerDrawing::render(self, gpu, parameters, order);
+    }
+
+    fn frame_buffers(&mut self) -> Option<&mut UniformBufferArray> {
+        LayerDrawing::frame_buffers(self)
+    }
+}
+
+/// A layer's drawing of its type that a drape keeps, which only the layer
+/// updates ([`LayerParts::update_drape_draws`]) and the drape uploads and
+/// draws.
+///
+/// [`LayerParts::update_drape_draws`]: crate::render_layer::LayerParts::update_drape_draws
+pub(crate) struct DrapeDrawing(Box<dyn AnyDrawing>);
+
+impl DrapeDrawing {
+    pub(crate) fn new<D: LayerDrawing + 'static>(drawing: D) -> DrapeDrawing {
+        DrapeDrawing(Box::new(drawing))
+    }
+
+    /// The drawing, if it is a `D`.
+    pub(crate) fn downcast_mut<D: 'static>(&mut self) -> Option<&mut D> {
+        self.0.as_any_mut().downcast_mut()
+    }
+
+    /// See [`LayerParts::mark_changed`](crate::render_layer::LayerParts::mark_changed).
+    pub(crate) fn mark_changed(&mut self, changed: &ChangedBuckets) {
+        self.0.mark_changed(changed);
+    }
+
+    /// See [`LayerDrawing::visit_groups`].
+    pub(crate) fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
+        self.0.visit_groups(visit);
+    }
+
+    /// See [`LayerDrawing::upload`].
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+        self.0.upload(gpu, context);
+    }
+
+    /// See [`LayerDrawing::render`].
+    pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
+        self.0.render(gpu, parameters, order);
+    }
+
+    /// Writes `value` to the uniform buffer `id` that the draws of the
+    /// drawing's draw group share, which they bind rather than the
+    /// context's global one, if it has the group.
+    pub(crate) fn write_uniform<T: bytemuck::Pod>(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        id: usize,
+        value: &T,
+        context: &mut Context,
+    ) {
+        if let Some(buffers) = self.0.frame_buffers() {
+            // A replaced buffer has a new epoch, which remakes the bindings
+            // of the draws.
+            let _replaced = buffers.write_pod(gpu, id, value, context.device());
+        }
+    }
 }
 
 #[cfg(test)]

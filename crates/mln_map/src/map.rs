@@ -9,7 +9,7 @@ use std::time::Duration;
 use geo_types::Geometry;
 use glam::{DMat4, DVec3};
 use mln_map_types::{
-    AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraLimits, CameraOptions, CameraUpdate,
+    AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraLimits, CameraOptions, CameraUpdate, Elevation,
     MapDebugOptions, MapMode, ProjectionMode, TileLodMode, TransformState, VerticalPerspectiveProjection, Viewport,
 };
 use mln_renderer::{
@@ -37,7 +37,12 @@ use crate::map_options::{MapOptions, UnusedStyleImagePolicy};
 use crate::map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
 use crate::rendering_stats_view::{RenderingStatsView, RenderingStatsViewOptions};
 use crate::style_loader::{LoadEvent, StyleLoader};
-use crate::transform::{CameraCommandId, CommandEnd, FrameClock, Transform, TransformEvent};
+use crate::transform::{CameraCommandId, CommandEnd, FrameClock, TerrainGround, Transform, TransformEvent};
+
+/// How many times the terrain may move the camera while a still image
+/// waits, before the map stops following it for that image: a camera whose
+/// ground changes with each move would otherwise never settle.
+const MAX_GROUND_MOVES_PER_STILL: u32 = 8;
 
 /// How long a continuous map waits to draw again after the first of a run
 /// of frames that failed on the GPU, in case the failure passes.
@@ -78,6 +83,15 @@ pub struct Map {
     cross_source_collisions: bool,
     fast_pfor_enabled: bool,
     unused_style_image_policy: UnusedStyleImagePolicy,
+    /// Whether the center stands on the terrain.
+    center_clamped_to_ground: bool,
+    /// The ground of the terrain as the renderer last drew it, while
+    /// terrain draws. Each update carries it, and the renderer completes a
+    /// frame only of an update whose ground gives the height and floor at
+    /// the center that its newest gives.
+    elevation: Option<Arc<dyn Elevation>>,
+    /// The terrain's moves of the camera while the still image waits.
+    ground_moves: u32,
 
     debug_options: MapDebugOptions,
     rendering_stats_view: Option<RenderingStatsView>,
@@ -182,6 +196,9 @@ impl Map {
             cross_source_collisions: map_options.cross_source_collisions,
             fast_pfor_enabled: map_options.fast_pfor_enabled,
             unused_style_image_policy: map_options.unused_style_image_policy,
+            center_clamped_to_ground: map_options.center_clamped_to_ground,
+            elevation: None,
+            ground_moves: 0,
             debug_options: MapDebugOptions::NO_DEBUG,
             rendering_stats_view: None,
             style,
@@ -478,6 +495,14 @@ impl Map {
                     stats,
                 );
             }
+            // The renderer completes a frame only of an update whose ground
+            // stands the camera as its newest does, so the map answers each
+            // with one, whether or not the camera moves onto it
+            // (`follow_terrain`).
+            RendererEvent::TerrainElevation(elevation) => {
+                self.elevation = elevation;
+                self.on_update();
+            }
             RendererEvent::RenderMapStarted => {
                 if continuous {
                     self.emit(MapEvent::RenderMapStarted);
@@ -540,10 +565,13 @@ impl Map {
         }
     }
 
-    /// Handles the end of a frame. Only a `Full` frame of the map's last
-    /// update leaves a continuous map idle: the map may have made an update
-    /// since the renderer took the frame's, such as its answer to a tile that
-    /// the frame itself took in, and that update's frame is still to come.
+    /// Handles the end of a frame. Only a `Full` frame completes a still
+    /// image; one whose camera hadn't stood on the terrain's newest ground
+    /// isn't `Full`. Only a `Full` frame of the map's last update leaves a
+    /// continuous map idle: the map may have made an update since the
+    /// renderer took the frame's, such as its answer to the new ground or to
+    /// a tile that the frame itself took in, and that update's frame is still
+    /// to come.
     fn on_render_frame_finished(
         &mut self,
         mode: mln_renderer::RenderMode,
@@ -612,6 +640,8 @@ impl Map {
 
         // Don't load/render anything in still mode until explicitly requested.
         if self.mode != MapMode::Continuous && self.still_image != StillImage::Pending {
+            // The camera stands on the ground all the same.
+            self.follow_terrain();
             return;
         }
 
@@ -625,9 +655,13 @@ impl Map {
             (time_point, _) => time_point,
         };
 
+        // The frame's commands keep their eye above the newest ground.
+        let ground = self.terrain_ground();
+        self.transform.set_terrain(ground);
         self.transform.update_transitions(time_point);
         let projection = self.projection_at(self.transform.view().zoom());
         self.transform.set_projection_definition(&projection);
+        self.follow_terrain();
 
         self.update_id += 1;
         let params = UpdateParameters {
@@ -650,6 +684,7 @@ impl Map {
             update_id: self.update_id,
             cross_source_collisions: self.cross_source_collisions,
             fast_pfor_enabled: self.fast_pfor_enabled,
+            elevation: self.elevation.clone(),
             tile_lod_min_radius: self.tile.lod_min_radius,
             tile_lod_scale: self.tile.lod_scale,
             tile_lod_pitch_threshold: mln_math::deg2rad(self.tile.lod_pitch_threshold),
@@ -673,6 +708,9 @@ impl Map {
         let zoom = camera.zoom.unwrap_or_else(|| self.transform.view().zoom());
         let projection = self.projection_at(zoom);
         self.transform.set_projection_definition(&projection);
+        // So does the terrain, which applies only on Mercator.
+        let ground = self.terrain_ground();
+        self.transform.set_terrain(ground);
         self.transform.jump_to(camera);
         self.on_update();
     }
@@ -717,6 +755,7 @@ impl Map {
         }
         self.still_image = StillImage::Pending;
         self.still_image_request_id += 1;
+        self.ground_moves = 0;
         self.on_update();
         Ok(())
     }
@@ -1420,6 +1459,67 @@ impl Map {
         self.transform.set_free_camera_options(camera);
         self.camera_mutated = true;
         self.on_update();
+    }
+
+    // MARK: - Terrain
+
+    /// Sets whether the center stands on the terrain, at its height under
+    /// the center ([`MapOptions::center_clamped_to_ground`]). Turning it on
+    /// stands a camera at rest on the ground at once, without camera
+    /// events; turning it off leaves the altitude where it is.
+    pub fn set_center_clamped_to_ground(&mut self, clamped: bool) {
+        if self.center_clamped_to_ground != clamped {
+            self.center_clamped_to_ground = clamped;
+            self.on_update();
+        }
+    }
+
+    /// Whether the center stands on the terrain.
+    #[must_use]
+    pub fn center_clamped_to_ground(&self) -> bool {
+        self.center_clamped_to_ground
+    }
+
+    /// Hands the transform the terrain the camera stands on
+    /// ([`Self::terrain_ground`]), and moves the camera onto it
+    /// ([`Transform::follow_terrain`]).
+    ///
+    /// The moves report no camera change. A still image stops following the
+    /// terrain after [`MAX_GROUND_MOVES_PER_STILL`] of them, though it still
+    /// goes back to the flat map, and its updates still carry the newest
+    /// ground, so its frame draws.
+    fn follow_terrain(&mut self) {
+        let ground = self.terrain_ground();
+        let grounded = ground.as_ref().is_some_and(|ground| ground.elevation.is_some());
+        self.transform.set_terrain(ground);
+        let still = self.mode != MapMode::Continuous && self.still_image == StillImage::Pending;
+        if still && grounded && self.ground_moves >= MAX_GROUND_MOVES_PER_STILL {
+            return;
+        }
+        if self.transform.follow_terrain() && still && grounded {
+            self.ground_moves += 1;
+            if self.ground_moves == MAX_GROUND_MOVES_PER_STILL {
+                Log::warning(
+                    Event::Render,
+                    "The camera didn't settle on the terrain: the still image shows it where it last moved",
+                );
+            }
+        }
+    }
+
+    /// The terrain the camera stands on: the ground the renderer last drew,
+    /// while the style has terrain outside tile mode on a Mercator view,
+    /// where terrain draws; else none, which turns the camera's rules over
+    /// terrain off.
+    fn terrain_ground(&mut self) -> Option<TerrainGround> {
+        // The renderer tells of the ground only after it draws an update
+        // without it, so the map, which owns the style, lets go first.
+        if self.style.get_terrain().is_none() {
+            self.elevation = None;
+        }
+        let applies =
+            self.style.get_terrain().is_some() && self.mode != MapMode::Tile && !self.transform.view().is_globe();
+        applies.then(|| TerrainGround { elevation: self.elevation.clone(), clamped: self.center_clamped_to_ground })
     }
 
     // MARK: - Debug

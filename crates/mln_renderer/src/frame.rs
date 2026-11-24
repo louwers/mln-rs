@@ -27,6 +27,10 @@ pub(crate) struct Frame {
     pub(crate) sky: Option<EvaluatedSky>,
     /// Whether a layer draws in the 3D pass.
     pub(crate) has_3d: bool,
+    /// Whether the frame draws terrain, which the layers that drape over it
+    /// don't draw onto, and under which the other 2D layers draw without
+    /// depth.
+    pub(crate) terrain: bool,
     /// The number of the frame's layers above its lowest 3D layer, which
     /// draw without a depth test; 0 without 3D layers.
     pub(crate) opaque_pass_cutoff: u32,
@@ -62,6 +66,7 @@ impl Frame {
             light: EvaluatedLight::default(),
             sky: None,
             has_3d: false,
+            terrain: false,
             opaque_pass_cutoff: 0,
             background_color: Color::new_unchecked(0.0, 0.0, 0.0, 0.0),
             symbol_fade_change: 0.0,

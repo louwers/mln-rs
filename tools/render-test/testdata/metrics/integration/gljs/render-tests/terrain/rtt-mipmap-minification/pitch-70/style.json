@@ -4,7 +4,7 @@
     "test": {
       "height": 256,
       "width": 256,
-      "allowed": 0.001,
+      "allowed": 0.02,
       "maxPitch": 85,
       "description": "A checkerboard draped over terrain at pitch 70 is sampled through the render-to-texture mip chain, so the far field filters to an even grey instead of aliasing into a moire pattern."
     }

@@ -199,12 +199,15 @@ pub(crate) struct TerrainTile {
     /// The DEM tile it reads, and where in it; `None` draws it flat. While
     /// its own DEM tile loads, it reads the deepest ancestor that has.
     pub(crate) dem: Option<(OverscaledTileID, DemCoords)>,
+    /// Whether its own DEM tile is still loading, so that it has none or
+    /// an ancestor's in its place.
+    pub(crate) dem_loading: bool,
 }
 
 impl TerrainTile {
     /// The tile `id`, which has no DEM yet.
     fn new(id: OverscaledTileID) -> Self {
-        TerrainTile { id, dem: None }
+        TerrainTile { id, dem: None, dem_loading: false }
     }
 
     /// The DEM tiles the tile loads, in `dem_zooms`: the one it reads, and
@@ -226,10 +229,13 @@ impl TerrainTile {
     /// that has data, else none.
     fn bind(&mut self, dem: Option<&SourceTiles>, dem_zooms: Range<u8>) {
         self.dem = None;
+        self.dem_loading = false;
         let (Some(dem), Some(own)) = (dem, dem_zoom(self.id.canonical.z, dem_zooms)) else {
             return;
         };
-        let bound = loaded_dem(dem, self.id.scaled_to(own), dem_zooms.min);
+        let own = self.id.scaled_to(own);
+        self.dem_loading = dem.tile(&own).is_some_and(|tile| dem_data(tile).is_none() && !tile.is_complete());
+        let bound = loaded_dem(dem, own, dem_zooms.min);
         self.dem = bound.map(|id| (id, self.dem_coords(id.canonical.z)));
     }
 

@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 pub use mln_gfx::rendering_stats::RenderingStats;
+use mln_map_types::Elevation;
 pub use mln_text::glyph::GlyphRange;
 pub use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
@@ -35,8 +36,12 @@ pub enum RendererEvent {
     RenderFrameStarted,
     /// The renderer drew a frame.
     RenderFrameFinished {
-        /// `Full` when everything the frame shows has loaded, though some of
-        /// it may have failed to draw (`error`).
+        /// `Full` when everything the frame shows has loaded and its camera
+        /// stood as it would on the terrain's current ground
+        /// ([`UpdateParameters::elevation`]), though some of it may have
+        /// failed to draw (`error`).
+        ///
+        /// [`UpdateParameters::elevation`]: crate::UpdateParameters::elevation
         mode: RenderMode,
         /// The frame has transitions still running.
         needs_repaint: bool,
@@ -61,6 +66,17 @@ pub enum RendererEvent {
         /// lacks what failed. Boxed, so that the events don't grow for it.
         error: Option<Box<Error>>,
     },
+    /// The ground of the terrain changed: the tiles that draw it, or the DEM
+    /// data they read; or it comes again for an update that carried a
+    /// ground that differs from it at the view's center. `None` once terrain
+    /// stops drawing, and for an update that carries a ground while terrain
+    /// doesn't draw. It comes before the frame of its update finishes. The
+    /// map's camera stands on it, and the map answers it with an update that
+    /// carries it ([`UpdateParameters::elevation`]), which a still image
+    /// waits for.
+    ///
+    /// [`UpdateParameters::elevation`]: crate::UpdateParameters::elevation
+    TerrainElevation(Option<Arc<dyn Elevation>>),
     /// The renderer drew its first frame with everything loaded.
     RenderMapFinished,
     /// A layer uses an image that the style lacks. The renderer lays out

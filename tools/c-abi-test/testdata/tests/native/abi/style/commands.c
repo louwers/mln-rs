@@ -554,7 +554,7 @@ static void root_properties_change_the_light_and_the_transition(void) {
 }
 
 // The library reads the other root properties from the style as it loaded,
-// and can't change the terrain, the sprite, or the font faces after.
+// and can't change the sprite or the font faces after.
 static void other_root_properties_read_back_as_loaded_and_reject_changes(void) {
   mln_runtime runtime = mln_test_create_runtime();
   mln_map map = mln_test_create_map(runtime);
@@ -573,7 +573,6 @@ static void other_root_properties_read_back_as_loaded_and_reject_changes(void) {
     const char* name;
     const char* value;
   } unsupported[] = {
-    {"terrain", "{\"source\":\"dem\"}"},
     {"sprite", "\"sprite\""},
     {"font-faces", "{}"},
   };
@@ -649,6 +648,63 @@ static mln_status set_root_property(
   return status;
 }
 
+// The terrain changes while the style is loaded, and reads back as set. A
+// source that the style has must be a raster-dem source; one it lacks is fine.
+static void the_terrain_changes_and_reads_back(void) {
+  mln_runtime runtime = mln_test_create_runtime();
+  mln_map map = mln_test_create_map(runtime);
+  mln_test_load_style_and_wait(map, mln_test_empty_style_json);
+  MLN_TEST_AWAIT_OK(mln_map_add_style_source_json(
+    map, MLN_BUFFER_LITERAL("dem"),
+    MLN_BUFFER_LITERAL("{\"type\":\"raster-dem\",\"tiles\":[\"fixture://"
+                       "dem/{z}/{x}/{y}.png\"]}"),
+    &completion.descriptor, NULL
+  ));
+  MLN_TEST_AWAIT_OK(mln_map_add_style_source_json(
+    map, MLN_BUFFER_LITERAL("points"),
+    MLN_BUFFER_LITERAL(MLN_TEST_EMPTY_GEOJSON_SOURCE), &completion.descriptor,
+    NULL
+  ));
+  EXPECT_ROOT_PROPERTY("", map, "terrain");
+
+  TEST_ASSERT_EQUAL_INT(
+    MLN_STATUS_OK, set_root_property(map, "terrain", "{\"source\":\"dem\"}")
+  );
+  EXPECT_ROOT_PROPERTY("{\"source\":\"dem\",\"exaggeration\":1.0}", map, "terrain");
+  TEST_ASSERT_EQUAL_INT(
+    MLN_STATUS_OK,
+    set_root_property(map, "terrain", "{\"source\":\"dem\",\"exaggeration\":2.5}")
+  );
+  EXPECT_ROOT_PROPERTY("{\"source\":\"dem\",\"exaggeration\":2.5}", map, "terrain");
+
+  MLN_TEST_EXPECT_COMMAND_FAILED(
+    MLN_STATUS_INVALID_ARGUMENT, "not a raster-dem source",
+    mln_map_set_style_root_property(
+      map, MLN_BUFFER_LITERAL("terrain"),
+      MLN_BUFFER_LITERAL("{\"source\":\"points\"}"), &completion.descriptor,
+      NULL
+    )
+  );
+  MLN_TEST_EXPECT_COMMAND_FAILED(
+    MLN_STATUS_INVALID_ARGUMENT, "style root property \"terrain\"",
+    mln_map_set_style_root_property(
+      map, MLN_BUFFER_LITERAL("terrain"),
+      MLN_BUFFER_LITERAL("{\"source\":\"dem\",\"exaggeration\":-1}"),
+      &completion.descriptor, NULL
+    )
+  );
+  EXPECT_ROOT_PROPERTY("{\"source\":\"dem\",\"exaggeration\":2.5}", map, "terrain");
+
+  TEST_ASSERT_EQUAL_INT(
+    MLN_STATUS_OK, set_root_property(map, "terrain", "{\"source\":\"later\"}")
+  );
+  TEST_ASSERT_EQUAL_INT(MLN_STATUS_OK, set_root_property(map, "terrain", "null"));
+  EXPECT_ROOT_PROPERTY("", map, "terrain");
+
+  mln_test_destroy_map(map);
+  mln_test_destroy_runtime(runtime);
+}
+
 // The projection and the sky change while the style is loaded, and read back
 // as set, where the library can change them. Where it can't, they read back as
 // the style loaded them.
@@ -694,37 +750,6 @@ static void the_projection_and_the_sky_change_where_the_library_can(void) {
   mln_test_destroy_runtime(runtime);
 }
 
-// A terrain that the style loaded with reads back, but the library refuses to
-// change it, as it doesn't draw terrain.
-static void a_loaded_terrain_reads_back_and_refuses_changes(void) {
-  mln_runtime runtime = mln_test_create_runtime();
-  mln_map map = mln_test_create_map(runtime);
-  mln_test_load_style_and_wait(
-    map, MLN_BUFFER_LITERAL(
-           "{\"version\":8,\"sources\":{\"dem\":{\"type\":\"raster-dem\","
-           "\"tiles\":[\"fixture://dem/{z}/{x}/{y}.png\"]}},\"layers\":[],"
-           "\"terrain\":{\"source\":\"dem\",\"exaggeration\":2}}"
-         )
-  );
-  EXPECT_ROOT_PROPERTY(
-    "{\"source\":\"dem\",\"exaggeration\":2.0}", map, "terrain"
-  );
-
-  MLN_TEST_EXPECT_COMMAND_FAILED(
-    MLN_STATUS_UNSUPPORTED, "terrain",
-    mln_map_set_style_root_property(
-      map, MLN_BUFFER_LITERAL("terrain"), MLN_BUFFER_LITERAL("null"),
-      &completion.descriptor, NULL
-    )
-  );
-  EXPECT_ROOT_PROPERTY(
-    "{\"source\":\"dem\",\"exaggeration\":2.0}", map, "terrain"
-  );
-
-  mln_test_destroy_map(map);
-  mln_test_destroy_runtime(runtime);
-}
-
 MLN_TEST_GROUP {
   RUN_TEST(style_commands_copy_inputs_and_fail_on_duplicate_or_missing_ids);
   RUN_TEST(missing_style_ids_report_not_found);
@@ -736,5 +761,5 @@ MLN_TEST_GROUP {
   RUN_TEST(root_properties_change_the_light_and_the_transition);
   RUN_TEST(other_root_properties_read_back_as_loaded_and_reject_changes);
   RUN_TEST(the_projection_and_the_sky_change_where_the_library_can);
-  RUN_TEST(a_loaded_terrain_reads_back_and_refuses_changes);
+  RUN_TEST(the_terrain_changes_and_reads_back);
 }

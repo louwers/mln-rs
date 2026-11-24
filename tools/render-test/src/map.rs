@@ -105,6 +105,8 @@ impl TestRunnerImpl for Impl {
                 .with_y_skew(metadata.y_skew),
         );
         self.map.set_debug(mln_map::MapDebugOptions(metadata.debug.0));
+        // A test that unclamps the center leaves the map to the next one.
+        self.map.set_center_clamped_to_ground(true);
         self.map.load_style_json(&metadata.document_json);
         // C++ parses a style as it loads: the operations after it see it.
         self.map.process_events();
@@ -349,6 +351,11 @@ impl TestRunnerImpl for Impl {
 
     fn set_terrain(&mut self, json: &str) -> Result<(), MapError> {
         self.map.edit_style(|style| style_ops::set_terrain(style, json))
+    }
+
+    fn set_center_clamped_to_ground(&mut self, clamped: bool) -> Result<(), MapError> {
+        self.map.set_center_clamped_to_ground(clamped);
+        Ok(())
     }
 
     fn add_source(&mut self, id: &str, json: &str) -> Result<(), MapError> {

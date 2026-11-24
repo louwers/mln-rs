@@ -6,6 +6,8 @@ use mln_style::expression::GlobalStateMap;
 use mln_text::glyph::FontFaces;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
+use crate::terrain::TerrainCover;
+
 /// What a source's update gives its tiles.
 pub(crate) struct TileParameters<'a> {
     pub(crate) pixel_ratio: f32,
@@ -33,4 +35,7 @@ pub(crate) struct TileParameters<'a> {
     /// (`PlacementController::commits`), which the tiles the view leaves
     /// stay rendered for while their symbols fade out.
     pub(crate) placement_commits: u64,
+    /// The terrain's cover while terrain draws, whose elevation ranges cull
+    /// the sources' covers.
+    pub(crate) terrain: Option<&'a TerrainCover>,
 }

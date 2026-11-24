@@ -34,6 +34,9 @@ mod tile_cover_test;
 // test/style/source.test.cpp: need mln_map's Transform (above this crate).
 mod geojson_tile_test;
 mod source_test;
+// The terrain's drapes: their projection, their stencil, and the tiles a
+// drape draws.
+mod drape_test;
 // Port-only: the renderer frees what it lets go of on its workers.
 mod drop_on_workers_test;
 // Port-only: malformed vector tiles become tile errors, not panics.
@@ -46,6 +49,8 @@ mod tile_jobs_test;
 mod tile_layout_test;
 // Port-only: the tile store keeps a tile's data, work and contents apart.
 mod tile_store_test;
+// Port-only: whether terrain draws, and its cover.
+mod terrain_test;
 // The VectorTile tests of test/tile/vector_tile.test.cpp.
 mod vector_tile_test;
 

@@ -2,7 +2,10 @@
   "base_test_path": "../testdata/metrics/integration",
   "cache_path": "../testdata/metrics/cache-style.db",
   "asset_path": "../testdata/metrics/integration/gljs/assets",
-  "expectation_paths": ["../testdata/metrics/expectations/platform-linux"],
+  "expectation_paths": [
+    "../testdata/metrics/expectations/platform-linux",
+    "../expectations"
+  ],
   "ignore_paths": [
     "../testdata/metrics/ignores/platform-all.json",
     "../testdata/metrics/ignores/platform-linux.json",

@@ -164,6 +164,8 @@ fn update(style: &Style, state: &TransformState) -> UpdateParameters {
         update_id: 0,
         cross_source_collisions: true,
         fast_pfor_enabled: false,
+        #[cfg(mln_bench_terrain)]
+        elevation: None,
         tile_lod_min_radius: 3.0,
         tile_lod_scale: 1.0,
         tile_lod_pitch_threshold: 60.0 * std::f64::consts::PI / 180.0,

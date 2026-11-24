@@ -6,7 +6,8 @@
 //! composes with the other commands' cameras. The transform calls no
 //! observer: it queues what happens as `TransformEvent`s, which its owner
 //! drains once the call returns, so no callback runs while the transform
-//! changes.
+//! changes. Over terrain, the rules of `terrain` stand the camera on the
+//! ground and keep its eye above it.
 
 use std::f64::consts::PI;
 use std::rc::Rc;
@@ -32,9 +33,11 @@ mod anchor;
 mod animation;
 mod gesture;
 mod momentum;
+mod terrain;
 mod transition;
 
 use gesture::GestureState;
+pub use terrain::TerrainGround;
 use transition::{FrameFn, JointEnd, Transition};
 
 use crate::map_event::{CameraChange, CameraChangeSource};
@@ -191,6 +194,8 @@ pub struct Transform {
     projection_for_zoom: Option<ProjectionForZoomFn>,
     globe_free_bearing: bool,
     globe_drag_hold: Option<GlobeDragHold>,
+    /// The terrain the camera stands on ([`Self::set_terrain`]).
+    terrain: Option<TerrainGround>,
 }
 
 /// The location a drag on the globe holds under the cursor, from the step
@@ -230,6 +235,7 @@ impl Transform {
             projection_for_zoom: None,
             globe_free_bearing: false,
             globe_drag_hold: None,
+            terrain: None,
         }
     }
 

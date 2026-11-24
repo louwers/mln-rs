@@ -39,6 +39,16 @@ pub struct MapOptions {
     /// What the map does with a style image once no layer uses it. By
     /// default, it removes the image.
     pub unused_style_image_policy: UnusedStyleImagePolicy,
+    /// Whether the center stands on the terrain, at its height under the
+    /// center, once that has loaded. A camera at rest stands there, and the
+    /// ground decides its altitude: it ignores the altitude it is given, such
+    /// as the style's `centerAltitude`. When this is off, every camera keeps
+    /// the altitude it is given. Over terrain, a command's eye stays above
+    /// the ground either way. Without terrain it changes nothing. On by
+    /// default. [`Map::set_center_clamped_to_ground`] changes it.
+    ///
+    /// [`Map::set_center_clamped_to_ground`]: crate::Map::set_center_clamped_to_ground
+    pub center_clamped_to_ground: bool,
 }
 
 impl Default for MapOptions {
@@ -53,6 +63,7 @@ impl Default for MapOptions {
             pixel_ratio: 1.0,
             fast_pfor_enabled: false,
             unused_style_image_policy: UnusedStyleImagePolicy::Remove,
+            center_clamped_to_ground: true,
         }
     }
 }

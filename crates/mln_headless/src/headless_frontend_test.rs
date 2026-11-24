@@ -253,3 +253,355 @@ fn a_hillshade_prepares_its_slopes_once() {
     );
     assert_eq!(second.stats.num_draw_calls, third.stats.num_draw_calls);
 }
+
+/// One DEM tile of 1000 m everywhere, in the Mapbox encoding:
+/// (1 · 65536 + 173 · 256 + 176) · 0.1 − 10000. With `found` false, the
+/// source has no tile.
+fn dem_source(found: bool) -> Arc<mln_storage::stub_file_source::StubFileSource> {
+    use mln_storage::response::{Reason, ResourceError};
+    use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+    use mln_storage::{Kind, Resource, Response};
+
+    let mut dem = PremultipliedImage::new(Size::new(4, 4));
+    for pixel in dem.data.as_chunks_mut::<4>().0 {
+        pixel.copy_from_slice(&[1, 173, 176, 255]);
+    }
+    let dem = Arc::new(mln_image::encode_png(&dem));
+    let file_source = Arc::new(StubFileSource::new(ResponseType::Synchronous));
+    file_source.set_response(Kind::Tile, move |_: &Resource| {
+        let mut response = Response::new();
+        if found {
+            response.data = Some(Arc::clone(&dem));
+        } else {
+            response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "no such tile")));
+        }
+        Some(response)
+    });
+    file_source
+}
+
+/// Seen from zoom 1, one terrain tile covers the world, and reads the one
+/// DEM tile, at zoom 0.
+const TERRAIN_STYLE: &str = r#"{
+    "version": 8,
+    "zoom": 1,
+    "terrain": {"source": "dem"},
+    "sources": {"dem": {"type": "raster-dem", "tiles": ["dem/{z}/{x}/{y}.png"], "maxzoom": 0}},
+    "layers": [{"id": "background", "type": "background", "paint": {"background-color": "red"}}]
+}"#;
+
+/// The center's altitude and the floor of the view's planes.
+fn ground(map: &Map) -> (f64, Option<f64>) {
+    let view = map.transform_state().view();
+    (view.center_altitude(), view.terrain_min_elevation())
+}
+
+/// A still image of a terrain draws one frame, which shows the camera
+/// standing on the ground: the renderer draws no frame of an update whose
+/// camera hasn't stood on the ground it draws.
+#[test]
+fn a_still_image_over_terrain_draws_one_frame_of_the_camera_on_the_ground() {
+    let size = Size::new(64, 64);
+    let run_loop = Queue::new();
+    let pool = Pool::new(4);
+    let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
+    let options = MapOptions { map_mode: MapMode::Static, size, ..Default::default() };
+    let mut map = Map::with_file_source(dem_source(true), options, &pool).unwrap();
+    frontend.attach(&mut map);
+    map.load_style_json(TERRAIN_STYLE);
+    let result = frontend.render(&mut map).expect("the still image");
+    assert_eq!(1, result.stats.num_frames);
+    // The frame is of the map's last update, whose camera stands on the
+    // ground.
+    let latest = map.update_reader().latest().expect("an update");
+    assert_eq!(latest.generation, frontend.drawn);
+    let altitude = latest.parameters.view.center_altitude();
+    assert!((altitude - 1000.0).abs() < 1e-6, "{altitude}");
+    assert_eq!(pixel(&result.image, 32, 32), [255, 0, 0, 255]);
+
+    // A renderer that lets go of its data tells the map at once that the
+    // ground it drew is gone.
+    frontend.clear_data();
+    map.process_events();
+    assert_eq!((0.0, None), ground(&map));
+}
+
+/// A still image over a terrain whose source has no DEM tile ends, with the
+/// camera on flat ground.
+#[test]
+fn a_still_image_over_terrain_without_its_dem_tile_ends() {
+    let size = Size::new(64, 64);
+    let run_loop = Queue::new();
+    let pool = Pool::new(4);
+    let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
+    let options = MapOptions { map_mode: MapMode::Static, size, ..Default::default() };
+    let mut map = Map::with_file_source(dem_source(false), options, &pool).unwrap();
+    frontend.attach(&mut map);
+    map.load_style_json(TERRAIN_STYLE);
+    let result = frontend.render(&mut map).expect("the still image");
+    assert_eq!(1, result.stats.num_frames);
+    assert_eq!((0.0, Some(0.0)), ground(&map));
+    assert_eq!(pixel(&result.image, 32, 32), [255, 0, 0, 255]);
+}
+
+/// A still image whose style loses its terrain before the image completes
+/// ends on the flat map.
+#[test]
+fn a_still_image_whose_terrain_goes_away_ends_flat() {
+    let size = Size::new(64, 64);
+    let run_loop = Queue::new();
+    let pool = Pool::new(4);
+    let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
+    let options = MapOptions { map_mode: MapMode::Static, size, ..Default::default() };
+    let mut map = Map::with_file_source(dem_source(true), options, &pool).unwrap();
+    frontend.attach(&mut map);
+    map.load_style_json(TERRAIN_STYLE);
+    map.process_events();
+    map.render_still().unwrap();
+    // The first update finds the terrain, whose ground its camera hasn't
+    // stood on: it draws no frame.
+    assert!(frontend.render_update());
+    assert_eq!(0, frontend.rendering_stats().num_frames);
+    map.edit_style(|style| style.apply(mln_style::Edit::SetTerrain(None))).unwrap();
+    let ended = (0..10_000).find_map(|_| {
+        map.process_events();
+        let ended = map.take_still_image();
+        if ended.is_none() && !frontend.render_update() && !run_loop.run_once(&mut ()) {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        ended
+    });
+    assert_eq!(Some(Ok(())), ended);
+    assert_eq!(1, frontend.rendering_stats().num_frames);
+    assert_eq!((0.0, None), ground(&map));
+}
+
+/// Asks for a still image and draws the map's updates until it ends, or
+/// gives up after a while: `None` for a still that never ends.
+fn try_still(map: &mut Map, frontend: &mut HeadlessFrontend, run_loop: &Queue<()>) -> Option<Result<(), Error>> {
+    map.process_events();
+    map.render_still().unwrap();
+    (0..2_000).find_map(|_| {
+        map.process_events();
+        let ended = map.take_still_image();
+        if ended.is_none() && !frontend.render_update() && !run_loop.run_once(&mut ()) {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        ended
+    })
+}
+
+/// A still image over terrain that the style dropped and then set again
+/// as it was, between two images, draws: the map let go of the ground with
+/// the terrain, and the renderer, whose ground is the same as before, tells
+/// it of that ground again.
+#[test]
+fn a_still_image_over_terrain_removed_and_restored_draws() {
+    let size = Size::new(64, 64);
+    let run_loop = Queue::new();
+    let pool = Pool::new(4);
+    let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
+    let options = MapOptions { map_mode: MapMode::Static, size, ..Default::default() };
+    let mut map = Map::with_file_source(dem_source(true), options, &pool).unwrap();
+    frontend.attach(&mut map);
+    map.load_style_json(TERRAIN_STYLE);
+    assert_eq!(Some(Ok(())), try_still(&mut map, &mut frontend, &run_loop));
+    assert_eq!(1, frontend.rendering_stats().num_frames);
+
+    let terrain = map.style().get_terrain().map(|terrain| (**terrain).clone());
+    map.edit_style(|style| style.apply(mln_style::Edit::SetTerrain(None))).unwrap();
+    map.edit_style(|style| style.apply(mln_style::Edit::SetTerrain(terrain))).unwrap();
+    assert_eq!(Some(Ok(())), try_still(&mut map, &mut frontend, &run_loop), "the second still never ended");
+    assert_eq!(2, frontend.rendering_stats().num_frames);
+    let altitude = map.update_reader().latest().expect("an update").parameters.view.center_altitude();
+    assert!((altitude - 1000.0).abs() < 1e-6, "{altitude}");
+}
+
+/// The requests for tiles a file source answered: for all of them, and for
+/// the far ones of [`far_dem`].
+#[derive(Clone, Default)]
+struct Requests {
+    all: Arc<std::sync::atomic::AtomicUsize>,
+    far: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl Requests {
+    fn all(&self) -> usize {
+        self.all.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn far(&self) -> usize {
+        self.far.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// Seen from zoom 10.5 at a pitch of 60°, ground that is flat but for the
+/// DEM tiles far from the camera, which stand high ([`far_dem`]).
+const FAR_DEM_STYLE: &str = r#"{
+    "version": 8,
+    "center": [10, 45],
+    "zoom": 10.5,
+    "pitch": 60,
+    "terrain": {"source": "dem", "exaggeration": 10},
+    "sources": {"dem": {"type": "raster-dem", "tiles": ["dem/{z}/{x}/{y}.png"], "encoding": "terrarium", "maxzoom": 14}},
+    "layers": [{"id": "background", "type": "background", "paint": {"background-color": "red"}}]
+}"#;
+
+/// The DEM of [`FAR_DEM_STYLE`], and the requests for its tiles. Its tiles
+/// of zoom 6 or more whose south edge lies north of the center's row of
+/// terrain tiles stand high; terrain tiles read only them there. Once one
+/// loads, its height range culls the terrain tiles that read it, so that
+/// the terrain no longer reads it.
+fn far_dem() -> (Arc<mln_storage::stub_file_source::StubFileSource>, Requests) {
+    use std::sync::atomic::Ordering;
+
+    use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+    use mln_storage::{Kind, Resource, Response};
+
+    // DEM tiles of 16 pixels a side, each `height` m in Terrarium.
+    let terrarium = |height: u16| {
+        let mut dem = PremultipliedImage::new(Size::new(16, 16));
+        let [hi, lo] = (height + 32768).to_be_bytes();
+        for pixel in dem.data.as_chunks_mut::<4>().0 {
+            pixel.copy_from_slice(&[hi, lo, 0, 255]);
+        }
+        Arc::new(mln_image::encode_png(&dem))
+    };
+    let (low, high) = (terrarium(0), terrarium(20_000));
+    let center_y = mln_util::projection::Projection::project(
+        &mln_util::geo::LatLng::new(45.0, 10.0).unwrap(),
+        1.0 / mln_util::constants::TILE_SIZE_D,
+    )
+    .y;
+    let requests = Requests::default();
+    let file_source = Arc::new(StubFileSource::new(ResponseType::Synchronous));
+    let counts = requests.clone();
+    file_source.set_response(Kind::Tile, move |resource: &Resource| {
+        let tile = resource.tile_data.as_ref().expect("a tile");
+        let south = f64::from(tile.y + 1) / f64::from(1u32 << tile.z);
+        let far = tile.z > 5 && south < center_y - 0.0003;
+        counts.all.fetch_add(1, Ordering::Relaxed);
+        if far {
+            counts.far.fetch_add(1, Ordering::Relaxed);
+        }
+        let mut response = Response::new();
+        response.data = Some(Arc::clone(if far { &high } else { &low }));
+        Some(response)
+    });
+    (file_source, requests)
+}
+
+/// A still image draws, in one frame, over far DEM tiles that the terrain
+/// lets go of once they load ([`far_dem`]), under a camera that stays put,
+/// without the tile cache to keep them. The terrain remembers their height
+/// ranges, so the next image of the same camera doesn't load them again.
+#[test]
+fn a_still_image_over_far_dem_tiles_that_flip_draws_in_one_frame() {
+    let (file_source, requests) = far_dem();
+    let size = Size::new(1024, 1024);
+    let run_loop = Queue::new();
+    let pool = Pool::new(4);
+    let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
+    frontend.renderer().set_tile_cache_enabled(false);
+    let options = MapOptions { map_mode: MapMode::Static, size, ..Default::default() };
+    let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
+    frontend.attach(&mut map);
+    map.load_style_json(FAR_DEM_STYLE);
+    assert_eq!(Some(Ok(())), try_still(&mut map, &mut frontend, &run_loop), "the still never ended");
+    assert_eq!(1, frontend.rendering_stats().num_frames);
+    assert_eq!((0.0, Some(0.0)), ground(&map));
+    let far = requests.far();
+    assert!(far > 0, "the far DEM tiles load");
+
+    assert_eq!(Some(Ok(())), try_still(&mut map, &mut frontend, &run_loop), "the second still never ended");
+    assert_eq!(2, frontend.rendering_stats().num_frames);
+    assert_eq!(far, requests.far(), "the far DEM tiles load again");
+}
+
+/// A continuous map over far DEM tiles that the terrain lets go of once
+/// they load ([`far_dem`]), without the tile cache to keep them, goes idle
+/// and stays so: the terrain remembers their height ranges, so the cover
+/// doesn't read them again, and no frame follows.
+#[test]
+fn a_continuous_map_over_far_dem_tiles_that_flip_settles() {
+    let (file_source, requests) = far_dem();
+    let size = Size::new(1024, 1024);
+    let run_loop = Queue::new();
+    let pool = Pool::new(4);
+    let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
+    frontend.renderer().set_tile_cache_enabled(false);
+    let options = MapOptions { size, ..Default::default() };
+    let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
+    frontend.attach(&mut map);
+    map.load_style_json(FAR_DEM_STYLE);
+    // Draws the map's updates for at most `iterations` turns, and returns
+    // whether the map went idle.
+    let run = |map: &mut Map, frontend: &mut HeadlessFrontend, iterations: usize| {
+        (0..iterations).any(|_| {
+            map.process_events();
+            if map.drain_events().iter().any(|event| matches!(event, mln_map::MapEvent::Idle)) {
+                return true;
+            }
+            if !frontend.render_update() && !run_loop.run_once(&mut ()) {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            false
+        })
+    };
+    assert!(run(&mut map, &mut frontend, 2_000), "the map never went idle");
+    assert!(requests.far() > 0, "the far DEM tiles load");
+
+    let (frames, all) = (frontend.rendering_stats().num_frames, requests.all());
+    assert!(!run(&mut map, &mut frontend, 200), "the map went idle again");
+    assert_eq!(frames, frontend.rendering_stats().num_frames, "frames follow the idle map's");
+    assert_eq!(all, requests.all(), "DEM tiles load after the map went idle");
+}
+
+/// A continuous map over terrain goes idle only once a complete frame
+/// showed the camera standing on the newest ground: the frame of an update
+/// from before the camera stood on it isn't complete.
+#[test]
+fn a_continuous_map_over_terrain_goes_idle_on_the_ground() {
+    let size = Size::new(64, 64);
+    let run_loop = Queue::new();
+    let pool = Pool::new(4);
+    let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
+    let options = MapOptions { size, ..Default::default() };
+    let mut map = Map::with_file_source(dem_source(true), options, &pool).unwrap();
+    frontend.attach(&mut map);
+    map.load_style_json(TERRAIN_STYLE);
+    let idle = (0..10_000).any(|_| {
+        map.process_events();
+        if map.drain_events().iter().any(|event| matches!(event, mln_map::MapEvent::Idle)) {
+            // The last frame drew the map's last update, whose camera stands
+            // on the ground.
+            let latest = map.update_reader().latest().expect("an update");
+            assert_eq!(latest.generation, frontend.drawn);
+            let altitude = latest.parameters.view.center_altitude();
+            assert!((altitude - 1000.0).abs() < 1e-6, "idle at {altitude} m");
+            return true;
+        }
+        if !frontend.render_update() && !run_loop.run_once(&mut ()) {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        false
+    });
+    assert!(idle, "the map never went idle");
+
+    // A frame of an update that carries no ground, as one from before the
+    // terrain drew would, draws everything that it shows but isn't
+    // complete, and leaves the map as it is.
+    let latest = map.update_reader().latest().expect("an update");
+    frontend.draw(&Arc::new(UpdateParameters { elevation: None, ..(*latest.parameters).clone() }));
+    map.process_events();
+    let events = map.drain_events();
+    let modes: Vec<mln_renderer::RenderMode> = events
+        .iter()
+        .filter_map(|event| match event {
+            mln_map::MapEvent::RenderFrameFinished(status) => Some(status.mode),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(vec![mln_renderer::RenderMode::Partial], modes);
+    assert!(!events.iter().any(|event| matches!(event, mln_map::MapEvent::Idle)));
+}

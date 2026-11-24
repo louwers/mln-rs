@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, View};
+use mln_map_types::{Elevation, MapDebugOptions, MapMode, TileLodMode, View};
 use mln_style::Style;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::time::Instant;
@@ -47,6 +47,14 @@ pub struct UpdateParameters {
     pub update_id: u64,
     pub cross_source_collisions: bool,
     pub fast_pfor_enabled: bool,
+    /// The terrain's ground that `view` stands on: the snapshot of it that
+    /// the renderer last reported ([`RendererEvent::TerrainElevation`]) and
+    /// the map applied, or `None`. A frame is complete only when this gives
+    /// the same height and floor at the view's center as the renderer's
+    /// current snapshot, or both are `None`. A still image draws no other.
+    ///
+    /// [`RendererEvent::TerrainElevation`]: crate::RendererEvent::TerrainElevation
+    pub elevation: Option<Arc<dyn Elevation>>,
 
     pub tile_lod_min_radius: f64,
     pub tile_lod_scale: f64,

@@ -15,7 +15,7 @@ use crate::buckets::debug_bucket::DebugBucket;
 use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::buckets::raster_bucket::RasterBucket;
 use crate::layer_type::LayerType;
-use crate::paint_parameters::TransformParameters;
+use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render_pass::RenderPass;
 use crate::render_source::RenderTileParameters;
 use crate::tile::contents::Contents;
@@ -286,5 +286,16 @@ impl<'a, T: LayerType> FrameTile<'a, T> {
     #[must_use]
     pub(crate) fn id(self) -> OverscaledTileID {
         *self.tile.overscaled_tile_id()
+    }
+
+    /// The id that a layer that drapes draws the tile under with
+    /// `parameters`: its own, but in a drape in the drape's world copy.
+    #[must_use]
+    pub(crate) fn draw_id(self, parameters: &PaintParameters<'_>) -> OverscaledTileID {
+        let id = self.id();
+        match parameters.drape_wrap() {
+            Some(wrap) => OverscaledTileID { wrap, ..id },
+            None => id,
+        }
     }
 }

@@ -1,13 +1,15 @@
 use std::any::Any;
 
-use glam::DMat4;
+use glam::{DMat4, DVec4};
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadOp, PassDesc, Scissor, TargetFormats};
+use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::{CullFaceWindingType, DepthFunctionType, StencilOpType};
 use mln_gfx::{DepthMaskType, DepthMode, ScissorRect, StencilMode};
 use mln_map_types::{MapDebugOptions, ProjectionData, View, ViewportMode};
 use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
+use mln_util::constants::EXTENT;
 use mln_util::identity::SimpleIdentity;
 use mln_util::range::Range;
 use mln_util::size::Size;
@@ -98,6 +100,32 @@ impl TransformParameters {
         }
     }
 
+    /// The transform of a drape of the tile `tile` in `view`'s map, which
+    /// draws the map's layers into the tile's texture: an orthographic
+    /// projection of the tile's square of the world, in pixels at the
+    /// view's scale, onto the whole target, the tile's north edge at clip
+    /// y = 1, every depth at clip z = 0. The view stays `view`, so zoom and
+    /// bearing are its own.
+    pub(crate) fn for_drape(view: &View, tile: &UnwrappedTileID) -> Self {
+        // The tile's square of the world: its corner, and its side.
+        let tile_matrix = view.tile_matrix(tile);
+        let (x, y) = (tile_matrix.w_axis.x, tile_matrix.w_axis.y);
+        let side = tile_matrix.x_axis.x * f64::from(EXTENT);
+        let proj_matrix = DMat4::from_cols(
+            DVec4::new(2.0 / side, 0.0, 0.0, 0.0),
+            DVec4::new(0.0, -2.0 / side, 0.0, 0.0),
+            DVec4::ZERO,
+            DVec4::new(-1.0 - 2.0 * x / side, 1.0 + 2.0 * y / side, 0.0, 1.0),
+        );
+        TransformParameters {
+            proj_matrix,
+            aligned_proj_matrix: proj_matrix,
+            near_clipped_proj_matrix: proj_matrix,
+            near_clipped_near_z: 0.0,
+            view: view.clone(),
+        }
+    }
+
     /// The projection of the tile `tile_id`, with the projection matrix
     /// aligned to the pixel grid or not.
     #[must_use]
@@ -182,12 +210,19 @@ pub(crate) struct PaintParameters<'a> {
     /// The stencil value of each tile whose mask the stencil buffer holds.
     tile_clipping_mask_ids: VecMap<UnwrappedTileID, i32>,
     next_stencil_id: i32,
-    /// The tiles whose masks `clear_stencil` draws zero with, from
-    /// [`stencil_clear_tiles`](Self::stencil_clear_tiles).
+    /// The tile of the drape that the draws go into, whose mask covers the
+    /// whole target; `None` for the frame.
+    drape_tile: Option<UnwrappedTileID>,
+    /// The tiles whose masks `clear_stencil` draws zero with in the frame,
+    /// from [`stencil_clear_tiles`](Self::stencil_clear_tiles); a drape
+    /// draws its own tile's.
     pub(crate) stencil_clear: StencilClear,
 
     pub(crate) current_layer: u32,
     pub(crate) depth_range_size: f32,
+    /// Whether the frame draws terrain, under which 2D layers draw without
+    /// depth.
+    pub(crate) terrain: bool,
     pub(crate) opaque_pass_cutoff: u32,
     pub(crate) symbol_fade_change: f32,
 
@@ -244,10 +279,12 @@ impl<'a> PaintParameters<'a> {
             composites_with_frame_depth,
             tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
+            drape_tile: None,
             stencil_clear: StencilClear::new(),
             // The renderer sets these before use.
             current_layer: 0,
             depth_range_size: 1.0,
+            terrain: frame.terrain,
             opaque_pass_cutoff: frame.opaque_pass_cutoff,
             symbol_fade_change: frame.symbol_fade_change,
             scissor_rect,
@@ -263,6 +300,72 @@ impl<'a> PaintParameters<'a> {
         let turned = self.view.viewport_mode() == ViewportMode::FlippedY && !self.view.is_globe();
         let winding = if turned { CullFaceWindingType::Clockwise } else { CullFaceWindingType::CounterClockwise };
         CullFaceMode { winding, ..CullFaceMode::back_ccw() }
+    }
+
+    /// The parameters of the encode of a drape, which draws the frame's
+    /// layers into a texture of `size` over its tile `tile` with `transform`
+    /// ([`TransformParameters::for_drape`]): with the transform's view, the
+    /// frame's GPU state and values, but its own clip masks and stencil
+    /// values, its layers drawn as a whole into and composited by
+    /// `layer_composite`, of `size`, with their own depth, and the whole
+    /// target as the scissor. The layers draw with depth, front to back in
+    /// the opaque pass. A map pixel is a pixel of the projection, so
+    /// [`pixels_to_gl_units`](Self::pixels_to_gl_units) are its scale.
+    pub(crate) fn drape<'b>(
+        &'b mut self,
+        transform: &'b TransformParameters,
+        clip_masks: &'b mut ClipMasks,
+        layer_composite: &'b mut LayerComposite,
+        size: Size,
+        tile: UnwrappedTileID,
+    ) -> PaintParameters<'b> {
+        let proj_matrix = &transform.proj_matrix;
+        PaintParameters {
+            context: &mut *self.context,
+            open_pass: None,
+            transform_params: transform,
+            view: &transform.view,
+            camera_moving: self.camera_moving,
+            light: self.light,
+            static_data: self.static_data,
+            pass: RenderPass::Opaque,
+            debug_options: self.debug_options,
+            pixel_ratio: self.pixel_ratio,
+            renderable_size: size,
+            pixels_to_gl_units: [proj_matrix.x_axis.x as f32, proj_matrix.y_axis.y as f32],
+            clip_masks,
+            layer_composite,
+            composites_with_frame_depth: false,
+            tile_clipping_mask_ids: VecMap::new(),
+            next_stencil_id: 1,
+            drape_tile: Some(tile),
+            stencil_clear: StencilClear::new(),
+            current_layer: 0,
+            depth_range_size: 1.0,
+            terrain: false,
+            opaque_pass_cutoff: 0,
+            symbol_fade_change: self.symbol_fade_change,
+            scissor_rect: ScissorRect { x: 0, y: 0, width: size.width, height: size.height },
+            custom_layer_frame: None,
+        }
+    }
+
+    /// What every draw of the encode reads of its frame, with the pattern
+    /// atlas of `pattern_atlas_size`: the target's size and the pixels'
+    /// scale, the camera and the frame's values.
+    #[must_use]
+    pub(crate) fn global_paint_params(&self, pattern_atlas_size: Size) -> GlobalPaintParamsUBO {
+        GlobalPaintParamsUBO {
+            pattern_atlas_texsize: [pattern_atlas_size.width as f32, pattern_atlas_size.height as f32],
+            units_to_pixels: [1.0 / self.pixels_to_gl_units[0], 1.0 / self.pixels_to_gl_units[1]],
+            world_size: [self.renderable_size.width as f32, self.renderable_size.height as f32],
+            camera_to_center_distance: self.view.camera_to_center_distance() as f32,
+            symbol_fade_change: self.symbol_fade_change,
+            aspect_ratio: self.view.size().aspect_ratio(),
+            pixel_ratio: self.pixel_ratio,
+            map_zoom: self.view.zoom() as f32,
+            pad1: 0.0,
+        }
     }
 
     /// The size and formats of the attachments that draws draw into
@@ -406,10 +509,11 @@ impl<'a> PaintParameters<'a> {
 
     /// Whether the current layer draws in the opaque pass: front to back,
     /// with depth. On the globe, 2D layers are ordered by draw order alone;
-    /// their Z is the back-hemisphere clip.
+    /// their Z is the back-hemisphere clip. Over terrain they draw flat, on
+    /// top of it.
     #[must_use]
     pub(crate) fn opaque_pass_enabled_for_layer(&self) -> bool {
-        self.current_layer >= self.opaque_pass_cutoff && !self.view.is_globe()
+        self.current_layer >= self.opaque_pass_cutoff && !self.view.is_globe() && !self.terrain
     }
 
     #[must_use]
@@ -445,7 +549,10 @@ impl<'a> PaintParameters<'a> {
         if self.context.caps().clear_stencil_with_pass {
             self.restart_pass(gpu, LoadOp::Clear(0));
         } else {
-            let masks: SmallVec<[_; 2]> = self.stencil_clear.iter().map(|tile| (*tile, 0)).collect();
+            let masks: SmallVec<[_; 2]> = match self.drape_tile {
+                Some(tile) => SmallVec::from_elem((tile, 0), 1),
+                None => self.stencil_clear.iter().map(|tile| (*tile, 0)).collect(),
+            };
             self.draw_clip_masks(gpu, &masks);
         }
         self.context.rendering_stats().stencil_clears += 1;
@@ -453,12 +560,17 @@ impl<'a> PaintParameters<'a> {
 
     /// The tiles whose masks `clear_stencil` draws zero with, where the
     /// render pass clears the stencil buffer only where it begins, when the
-    /// draws clip to the masks of `clip_tiles`: the world's tile in each
-    /// world copy of `clip_tiles`, which covers every mask.
+    /// draws clip to the masks of `clip_tiles`: those that cover every mask,
+    /// the drape's own tile in a drape and the world in each world copy of
+    /// `clip_tiles` in the frame.
     #[must_use]
     pub(crate) fn stencil_clear_tiles(&self, clip_tiles: &[UnwrappedTileID]) -> StencilClear {
         let mut tiles = StencilClear::new();
-        if self.context.caps().clear_stencil_with_pass {
+        if self.context.caps().clear_stencil_with_pass || clip_tiles.is_empty() {
+            return tiles;
+        }
+        if let Some(tile) = self.drape_tile {
+            tiles.push(tile);
             return tiles;
         }
         for tile in clip_tiles {
@@ -468,6 +580,13 @@ impl<'a> PaintParameters<'a> {
         }
         tiles.sort_unstable();
         tiles
+    }
+
+    /// The world copy of the drape that the draws go into; `None` for the
+    /// frame, where each tile draws in its own.
+    #[must_use]
+    pub(crate) fn drape_wrap(&self) -> Option<i16> {
+        self.drape_tile.map(|tile| tile.wrap)
     }
 
     fn draw_clip_masks(&mut self, gpu: &mut dyn Gpu, masks: &[(UnwrappedTileID, i32)]) {

@@ -50,6 +50,7 @@ pub(crate) struct RenderCustomLayer {
 
 /// The layer's drawing, which keeps no tiles and no draws of its own: its
 /// one draw group is what the host draws.
+#[derive(Default)]
 pub(crate) struct CustomDrawing {
     /// The host, while the renderer draws through it.
     host: Option<Arc<dyn CustomLayerHost>>,

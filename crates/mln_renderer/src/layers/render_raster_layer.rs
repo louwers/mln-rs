@@ -35,6 +35,7 @@ use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::gfx::store::SharedTexture;
+use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
@@ -140,6 +141,10 @@ impl LayerDrawing for RasterDrawing {
             frame.render(&mut self.objects, Self::objects, gpu, parameters);
             order.step(parameters);
         }
+    }
+
+    fn frame_buffers(&mut self) -> Option<&mut UniformBufferArray> {
+        Some(self.frame.as_mut()?.uniform_buffers_mut())
     }
 }
 
@@ -433,6 +438,7 @@ fn raster_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
 impl TypedLayer for RenderRasterLayer {
     type Type = Raster;
     type Drawing = RasterDrawing;
+    const DRAPES: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -478,7 +484,7 @@ impl TypedLayer for RenderRasterLayer {
         }
 
         for tile in render_tiles {
-            let tile_id = tile.id();
+            let tile_id = tile.draw_id(paint_parameters);
             let Some(mut entry) = drawing.objects.tiles.entry(&tile_id) else {
                 continue;
             };
@@ -556,8 +562,9 @@ impl TypedLayer for RenderRasterLayer {
     }
 
     /// Drops the textures of the buckets of tiles the frame doesn't draw,
-    /// in every frame, including one the layer draws nothing in. An image
-    /// source's draws keep their image's texture themselves.
+    /// in every frame, including one the layer draws nothing in. The frame's
+    /// draws and its drapes' share the others. An image source's draws keep
+    /// their image's texture themselves.
     fn update(&mut self, params: &mut LayerUpdateParameters<'_>, tiles: &[FrameTile<'_, Raster>]) {
         if params.source.is_some_and(|source| source.image_render_data().is_some()) {
             return;

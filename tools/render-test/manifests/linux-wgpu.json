@@ -4,7 +4,8 @@
   "asset_path": "../testdata/metrics/integration/gljs/assets",
   "expectation_paths": [
     "../testdata/metrics/expectations/platform-linux",
-    "../testdata/metrics/expectations/platform-linux-opengl"
+    "../testdata/metrics/expectations/platform-linux-opengl",
+    "../expectations"
   ],
   "ignore_paths": [
     "../testdata/metrics/ignores/platform-all.json",

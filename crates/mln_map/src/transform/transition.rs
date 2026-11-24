@@ -350,6 +350,8 @@ impl Transform {
                 _ => self.hold_anchor(&anchor_lat_lng, &anchor, height, &current, index),
             }
         }
+        // Last, so that the eye stays clear.
+        self.keep_eye_above();
     }
 
     /// Moves the center so that `location`, `height` meters up, is at
@@ -417,6 +419,9 @@ impl Transform {
         }
         for index in 0..self.transitions.len() {
             self.advance_momentum(index, now);
+        }
+        if self.transitions.iter().any(|t| t.momentum.is_some()) {
+            self.keep_eye_above();
         }
 
         let finished: Vec<_> = self.transitions.extract_if(.., |t| t.has_run_out(now) || t.fields == 0).collect();

@@ -353,10 +353,13 @@ impl RenderSource for RenderTileSource {
         let Some(cover) = self.origin.update(&previous, &self.base.style_source, source, ctx, &origin_update) else {
             return;
         };
+        let source_id = self.base.style_source.id();
+        let terrain_reads = parameters.terrain.filter(|terrain| terrain.source_id == source_id);
         let update = CoverUpdate {
             layers,
             needs_rendering,
             needs_relayout,
+            terrain_reads: terrain_reads.map_or(&[], |terrain| &terrain.dem_tiles),
             parameters,
             style_source: &self.base.style_source,
             tile_size: cover.tile_size,

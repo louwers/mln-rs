@@ -27,6 +27,12 @@ from it, as GL JS's test server does, so a file missing there is not found; the
 other tests fall back to the cache. `mise run update:gljs-testdata <checkout>`
 copies them again, and `mise run update:testdata` leaves them alone.
 
+`expectations/` holds mln-rs's own expected images, at the paths of the tests
+they replace the images of. Every manifest reads it last, so that its image
+wins. It is for tests that mln-rs draws as it means to but that the upstream
+image draws otherwise, such as GL JS's terrain tests, whose heights GL JS scales
+on a sphere of the earth's mean radius and mln-rs on the WGS84 radius.
+
 Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
 core.

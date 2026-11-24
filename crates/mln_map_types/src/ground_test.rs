@@ -31,6 +31,14 @@ struct Ground {
 }
 
 impl Elevation for Ground {
+    fn at(&self, location: LatLng) -> Option<f64> {
+        (self.surface)(world(&location))
+    }
+
+    fn min_at(&self, _: LatLng) -> Option<f64> {
+        Some(self.range.0)
+    }
+
     fn surface_at(&self, world: DVec2) -> Option<f64> {
         (self.surface)(world)
     }
@@ -179,6 +187,14 @@ fn a_ray_through_a_flat_loading_tile_meets_it_at_sea_level() {
     #[derive(Debug)]
     struct Loading;
     impl Elevation for Loading {
+        fn at(&self, _: LatLng) -> Option<f64> {
+            None
+        }
+
+        fn min_at(&self, _: LatLng) -> Option<f64> {
+            Some(0.0)
+        }
+
         fn surface_at(&self, _: DVec2) -> Option<f64> {
             Some(0.0)
         }

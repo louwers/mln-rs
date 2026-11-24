@@ -647,6 +647,7 @@ mod tests {
             update_id: 0,
             cross_source_collisions: true,
             fast_pfor_enabled: false,
+            elevation: None,
             tile_lod_min_radius: 3.0,
             tile_lod_scale: 1.0,
             tile_lod_pitch_threshold: mln_math::deg2rad(60.0),

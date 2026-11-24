@@ -98,9 +98,10 @@ fn parses_our_manifest() {
             format!("{INTEGRATION}/render-tests/background-color/default/"),
             // platform-linux first, as in C++'s OpenGL manifest: the runner
             // checks the paths from the last one, so a platform-linux-opengl
-            // baseline wins where both exist.
+            // baseline wins where both exist, and the port's own over both.
             "testdata/metrics/expectations/platform-linux/render-tests/background-color/default/".to_string(),
             "testdata/metrics/expectations/platform-linux-opengl/render-tests/background-color/default/".to_string(),
+            "expectations/render-tests/background-color/default/".to_string(),
         ]
     );
     assert_eq!(
@@ -862,6 +863,27 @@ fn gljs_fixtures_parse_and_no_ignore_is_stale() {
     }
     for id in ignored {
         assert!(ids.iter().any(|fixture| fixture == id), "{id} isn't a fixture");
+    }
+}
+
+/// Every image in the port's `expectations/` stands for a test's, at the
+/// test's path.
+#[test]
+fn the_ports_expectations_are_of_tests() {
+    let package = Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).to_path_buf();
+    let root = package.join("expectations");
+    let mut pending = vec![root.clone()];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                let test = path.parent().unwrap().strip_prefix(&root).unwrap();
+                let style = package.join(INTEGRATION).join(test).join("style.json");
+                assert!(style.exists(), "{} isn't of a test", path.display());
+            }
+        }
     }
 }
 

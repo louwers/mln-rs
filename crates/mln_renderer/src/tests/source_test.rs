@@ -78,6 +78,7 @@ fn tile_parameters(
         font_faces: None,
         glyph_pbfs: true,
         placement_commits: 0,
+        terrain: None,
     }
 }
 

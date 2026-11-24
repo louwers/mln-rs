@@ -21,10 +21,21 @@
 # the ones these tests use (tools/render-test/testdata/metrics/cache-style.db).
 set -euo pipefail
 
-# Tests that draw as GL JS's but differ by more than they allow, by id, each
-# with its own allowance and a comment on the pixels that differ and why.
-# None do.
-declare -A allowed=()
+# Tests that draw as GL JS's but differ by more than they allow, and why. The
+# numbers are the pixels that differ, measured with WebGPU, Vulkan and OpenGL
+# alike unless they say which: on RADV, and on Mesa 26.2.5's lavapipe and
+# llvmpipe.
+#
+# The terrain samples its drapes with mips and anisotropy, and how a device
+# picks the level of detail of an anisotropic sample isn't specified, so the
+# drape's edges look softer or sharper than GL JS's, and its far texels move.
+declare -A allowed=(
+    # 27 of 65536 on RADV, 32 on lavapipe and 30 on llvmpipe.
+    [terrain/default]=0.0007
+    # The moiré's texels move: 289 of 65536 (0.44%) on RADV (291 on OpenGL),
+    # 1113 (lavapipe) and 1104 (llvmpipe) (1.7%).
+    [terrain/rtt-mipmap-minification/pitch-70]=0.02
+)
 
 checkout="${usage_checkout:-$PWD/../maplibre-gl-js}"
 integration="$checkout/test/integration"

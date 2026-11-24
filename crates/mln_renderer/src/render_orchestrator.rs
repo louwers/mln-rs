@@ -38,10 +38,12 @@ use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_layer::{Atlases, FrameSourceTiles, LayerSource, LayerUpdateParameters, RenderLayer};
+use crate::render_pass::RenderPass;
 use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
 use crate::render_tile::{FoundTile, RenderTile};
 use crate::renderer_event::RendererEvent;
 use crate::sources::render_tile_source::{DebugLayer, DebugLayers};
+use crate::terrain::{DrapeStacks, Draped, Draping, RenderTerrain};
 use crate::text::glyph_store::GlyphStore;
 use crate::text::placement::{Placement, PlacementInputs};
 use crate::tile::contents::Contents;
@@ -191,6 +193,10 @@ pub(crate) struct RenderOrchestrator {
 
     globe_depth_pass: GlobeDepthPass,
     sky_pass: crate::sky_pass::SkyPass,
+    terrain: RenderTerrain,
+    /// The frame's stacks of draped layers, whose surfaces the translucent
+    /// pass draws among the layers; none without terrain.
+    stacks: DrapeStacks,
 
     /// Last, so that it drops after the fields above: the render sources'
     /// tiles free their data on the thread pool (`drop_on_workers`).
@@ -250,6 +256,8 @@ impl RenderOrchestrator {
             global_state: None,
             globe_depth_pass: GlobeDepthPass::default(),
             sky_pass: crate::sky_pass::SkyPass::default(),
+            terrain: RenderTerrain::default(),
+            stacks: DrapeStacks::default(),
             debug_layers: VecMap::new(),
         }
     }
@@ -340,6 +348,9 @@ impl RenderOrchestrator {
         }
         self.view = update_parameters.view.clone();
 
+        let (store, render_sources) = (&self.tile_store, &self.render_sources);
+        let dem = |id: &str| store.source(render_sources.get(id)?.tiles()?);
+        frame.terrain = self.terrain.update(update_parameters, dem).is_some();
         let will_render = self.update_sources(
             update_parameters,
             &layers,
@@ -348,6 +359,9 @@ impl RenderOrchestrator {
             &clock,
             &mut frame,
         );
+        let (store, render_sources) = (&self.tile_store, &self.render_sources);
+        let dem = |id: &str| store.source(render_sources.get(id)?.tiles()?);
+        let grounded = self.terrain.bind(dem, update_parameters, &mut self.events);
 
         #[cfg(feature = "bench")]
         crate::bench::observe_cover(&self.view, &self.tile_store);
@@ -366,6 +380,9 @@ impl RenderOrchestrator {
         let longitude = update_parameters.view.center(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
         let wrap_delta = ((longitude - self.longitude) / 360.0).round() as i16;
         self.longitude = longitude;
+        if wrap_delta != 0 {
+            self.terrain.handle_wrap_jump();
+        }
         for (layer, will_render) in self.layers.iter_mut().zip(will_render) {
             if wrap_delta != 0 {
                 layer.handle_wrap_jump(wrap_delta);
@@ -375,7 +392,10 @@ impl RenderOrchestrator {
             }
         }
 
-        frame.loaded = update_parameters.style_loaded && !answered && self.is_loaded();
+        // A frame whose camera would move on the terrain's current ground
+        // isn't complete: the map answers the new ground with an update, and
+        // a still image draws only the frame of an update that stands on it.
+        frame.loaded = update_parameters.style_loaded && !answered && grounded && self.is_loaded();
         if !clock.continuous && !frame.loaded {
             return None;
         }
@@ -423,6 +443,7 @@ impl RenderOrchestrator {
             for layer in &mut self.layers {
                 layer.mark_changed(&changed_buckets);
             }
+            self.terrain.mark_changed(&changed_buckets);
         }
 
         Some(frame)
@@ -832,6 +853,7 @@ impl RenderOrchestrator {
             font_faces: update_parameters.style.get_font_faces().cloned(),
             glyph_pbfs: !update_parameters.style.get_glyph_url().is_empty(),
             placement_commits: self.placement_controller.commits(),
+            terrain: self.terrain.cover(),
         };
 
         if !self.sources_by_id.is_empty() {
@@ -920,11 +942,13 @@ impl RenderOrchestrator {
                     && layer.supports_zoom(self.zoom_history.last_zoom)
                 {
                     // On the globe the background is a sphere mesh, not the
-                    // backdrop, so it stays a layer, as it does for the
-                    // overdraw inspector, which counts its draw.
+                    // backdrop, and over terrain it drapes, so it stays a
+                    // layer, as it does for the overdraw inspector, which
+                    // counts its draw.
                     if self.background_layer_as_color
                         && frame.sky.is_none()
                         && !update_parameters.view.is_globe()
+                        && !frame.terrain
                         && !update_parameters.debug_options.contains(MapDebugOptions::OVERDRAW)
                         && layers.first().is_some_and(|first| Arc::ptr_eq(style, first.style()))
                     {
@@ -1113,10 +1137,12 @@ impl RenderOrchestrator {
 
         self.tile_store.images_mut().clear();
         self.tile_store.glyphs().evict(&VecSet::new());
+        self.terrain.clear_data(&mut self.events);
     }
 
     /// Drops what holds the renderer's shaders: the sky and globe depth
-    /// passes and the debug overlays now, and the render layers in the next
+    /// passes, the terrain's draws and the debug overlays now, and the render
+    /// layers in the next
     /// update, which makes them again. The draws made after that use the
     /// shaders the renderer has then. The sources keep their tiles, and the
     /// tiles their layout.
@@ -1125,6 +1151,7 @@ impl RenderOrchestrator {
         self.debug_layers.clear();
         self.sky_pass = crate::sky_pass::SkyPass::default();
         self.globe_depth_pass = GlobeDepthPass::default();
+        self.terrain.release_shaders();
     }
 
     /// Makes the GPU textures of the tiles' atlas and of the layers'
@@ -1186,14 +1213,15 @@ impl RenderOrchestrator {
     }
 
     /// Uploads the GPU objects of the frame's draws: the layers' draw
-    /// groups in drawing order, the globe's depth, the sky and the
-    /// atmosphere, what draws into the layers' render targets, and the debug
-    /// overlays.
+    /// groups in drawing order, the globe's depth, the terrain, the sky and
+    /// the atmosphere, what draws into the layers' render targets, and the
+    /// debug overlays.
     pub(crate) fn upload_draws(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         for layer in &mut self.layers {
             layer.upload(gpu, context);
         }
         self.globe_depth_pass.upload(gpu, context);
+        self.terrain.upload(gpu, context);
         if let Some(sky) = self.sky_pass.sky() {
             sky.upload(gpu, context);
         }
@@ -1211,6 +1239,8 @@ impl RenderOrchestrator {
     /// Draws the pass's draws of the layers' draw groups into the open pass
     /// of `gpu`, the context's, in `order`, each at the depth of
     /// `parameters.current_layer`, which `order` steps after each group.
+    /// The translucent pass draws each stack's surface under the stack's
+    /// first layer, where it draws in the frame.
     pub(crate) fn render_draw_groups(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -1218,6 +1248,15 @@ impl RenderOrchestrator {
         order: DrawOrder,
     ) {
         match order {
+            DrawOrder::BottomUp if parameters.pass == RenderPass::Translucent && !self.stacks.is_empty() => {
+                let mut starts = self.stacks.starts().enumerate().peekable();
+                for (index, layer) in self.layers.iter_mut().enumerate() {
+                    if let Some((stack, _)) = starts.next_if(|&(_, start)| start as usize == index) {
+                        self.terrain.render(stack, gpu, parameters);
+                    }
+                    layer.render(gpu, parameters, order);
+                }
+            }
             DrawOrder::BottomUp => {
                 for layer in &mut self.layers {
                     layer.render(gpu, parameters, order);
@@ -1279,8 +1318,9 @@ impl RenderOrchestrator {
         }
     }
 
-    /// Makes the draws of the layers the frame draws, and of the sky and
-    /// globe depth passes.
+    /// Makes the draws of the layers the frame draws, of the terrain, and of
+    /// the sky and globe depth passes. Over terrain, the layers that drape
+    /// over it make theirs in the terrain's drapes rather than in the frame.
     pub(crate) fn update_layer_draws(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -1292,17 +1332,42 @@ impl RenderOrchestrator {
         let mut contents = SourceContents::default();
         for (&index, frame_layer) in &frame.layers {
             let render_layer = &mut self.layers[index as usize];
-            let source = frame_layer.source.as_ref().and_then(|id| self.render_sources.get_key_value(id));
-            let source = source.map(|(id, source)| (id.as_str(), &**source));
-            let source_contents = contents.of(source, &self.tile_store);
-            let layer_source = source.map(|(_, source)| match source.image_render_data() {
-                Some(image) => LayerSource::Image(image),
-                None => {
-                    LayerSource::Tiles(FrameSourceTiles::new(source.render_tiles(), source_contents), &self.found_tiles)
-                }
-            });
+            let layer_source =
+                layer_source(frame_layer, &self.render_sources, &self.tile_store, &self.found_tiles, &mut contents);
+            // Over terrain, a layer that drapes draws nothing onto the frame.
+            if frame.terrain && render_layer.drapes() {
+                render_layer.remove_all_draws();
+                continue;
+            }
             render_layer.update_draws(gpu, paint_parameters, &self.atlases, layer_source);
             needs_globe_depth = needs_globe_depth || render_layer.needs_globe_depth();
+        }
+        let draped = |&index: &u32| {
+            let drapes = self.layers[index as usize].drapes();
+            (index, drapes.then_some(Draped { draping: Draping::Fixed, blends: false }))
+        };
+        self.stacks =
+            if frame.terrain { DrapeStacks::of(frame.layers.keys().map(draped)) } else { DrapeStacks::default() };
+        self.terrain.update_dems(paint_parameters, |id| self.tile_store.source(self.render_sources.get(id)?.tiles()?));
+        if let Some(drapes) = self.terrain.begin_drapes(gpu, paint_parameters, self.stacks.len()) {
+            let mut contents = SourceContents::default();
+            for stack in 0..self.stacks.len() {
+                for index in self.stacks.layers(stack) {
+                    let layer_source = layer_source(
+                        &frame.layers[index],
+                        &self.render_sources,
+                        &self.tile_store,
+                        &self.found_tiles,
+                        &mut contents,
+                    );
+                    let render_layer = &mut *self.layers[*index as usize];
+                    drapes.update_layer(stack, gpu, paint_parameters, &self.atlases, render_layer, layer_source);
+                }
+            }
+            drapes.finish_update(paint_parameters.context);
+        } else {
+            // A backend without the terrain's shader draws no surface.
+            self.stacks = DrapeStacks::default();
         }
         let state = paint_parameters.view;
         let (renderable_size, pixel_ratio) = (paint_parameters.renderable_size, paint_parameters.pixel_ratio);
@@ -1315,6 +1380,7 @@ impl RenderOrchestrator {
             update_parameters,
             needs_globe_depth || self.sky_pass.has_atmosphere(),
         );
+        self.terrain.update_draws(gpu, paint_parameters);
     }
 
     /// The render layer at `index` in the drawing order.
@@ -1336,6 +1402,11 @@ impl RenderOrchestrator {
     /// The pass that draws the planet's depth.
     pub(crate) fn globe_depth(&mut self) -> &mut GlobeDepthPass {
         &mut self.globe_depth_pass
+    }
+
+    /// The terrain, whose drapes draw before the frame's pass.
+    pub(crate) fn terrain(&mut self) -> &mut RenderTerrain {
+        &mut self.terrain
     }
 
     /// Queries the rendered features in `geometry`. `Err` if the query fails
@@ -1616,6 +1687,28 @@ impl<'a> SourceContents<'a> {
         }
         &self.contents
     }
+}
+
+/// What `frame_layer`, a layer of the frame, draws from its source among
+/// `render_sources`: an image source's image, or the source's render tiles
+/// with what `contents` finds they show in `tile_store`, among which it draws
+/// those of `found` its update found.
+fn layer_source<'a, 'c>(
+    frame_layer: &'a FrameLayer,
+    render_sources: &'a HashMap<String, Box<dyn RenderSource>>,
+    tile_store: &'a TileStore,
+    found: &'a [FoundTile],
+    contents: &'c mut SourceContents<'a>,
+) -> Option<LayerSource<'c>> {
+    let source = frame_layer.source.as_ref().and_then(|id| render_sources.get_key_value(id));
+    let (id, source) = source.map(|(id, source)| (id.as_str(), &**source))?;
+    Some(match source.image_render_data() {
+        Some(image) => LayerSource::Image(image),
+        None => LayerSource::Tiles(
+            FrameSourceTiles::new(source.render_tiles(), contents.of(Some((id, source)), tile_store)),
+            found,
+        ),
+    })
 }
 
 /// Drops `value` on `thread_pool`, the orchestrator's workers, instead of

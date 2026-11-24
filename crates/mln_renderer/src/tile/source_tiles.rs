@@ -37,7 +37,9 @@ use crate::tile::store::{SourceInfo, StoreContext};
 use crate::tile::tile::{Tile, TileKind, TileLoadOrder, TileNecessity, TileUpdateParameters};
 use crate::tile::tile_mut::{TileMut, WorldCopy, retire};
 use crate::tile_parameters::TileParameters;
-use crate::util::tile_cover::{TileCoverParameters, covering_zoom_level, globe_level_cover, tile_cover};
+use crate::util::tile_cover::{
+    TileCoverParameters, covering_zoom_level, globe_level_cover, terrain_tile_cover, tile_cover,
+};
 
 /// How many times the tiles in view the cache keeps, at least.
 const VIEWS_CACHED: usize = 3;
@@ -58,6 +60,9 @@ pub(crate) struct CoverUpdate<'a, 'p> {
     pub(crate) layers: &'a [Arc<dyn ErasedEvaluatedLayer>],
     pub(crate) needs_rendering: bool,
     pub(crate) needs_relayout: bool,
+    /// The DEM tiles that the terrain reads, of the terrain's source: they
+    /// are kept loaded, with or without a layer, and render nothing.
+    pub(crate) terrain_reads: &'a [OverscaledTileID],
     pub(crate) parameters: &'a TileParameters<'p>,
     pub(crate) style_source: &'a Source,
     pub(crate) tile_size: u16,
@@ -311,6 +316,10 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
             return;
         }
         let first = self.retain.insert(*key);
+        // A tile the terrain reads is required, also where another read
+        // reaches it first as a fallback: its necessity is set only once a
+        // pass, and an optional one would stop it loading.
+        let necessity = if self.update.terrain_reads.contains(key) { TileNecessity::Required } else { necessity };
         if first {
             // The pan pass comes first, so a tile of both covers loads with
             // the coarse ones.
@@ -581,8 +590,9 @@ impl SourceTiles {
             self.max_content_elevation = 0.0;
         }
 
-        // Nothing renders: the cover's tiles go to the cache, or go.
-        if !update.needs_rendering {
+        // Nothing renders or reads them: the cover's tiles go to the cache,
+        // or go.
+        if !update.needs_rendering && update.terrain_reads.is_empty() {
             let cover: Vec<OverscaledTileID> = self.cover().map(|tile| tile.id).collect();
             for id in cover {
                 if relayout {
@@ -624,7 +634,7 @@ impl SourceTiles {
         let tile_size = update.tile_size;
         let info = style_source.info();
         let overscaled_zoom: i32 = covering_zoom_level(zoom, info.round_zoom, tile_size);
-        let mut tile_zoom: i32 = overscaled_zoom;
+        let mut tile_zoom: i32 = overscaled_zoom.max(0);
         let mut pan_zoom: i32 = i32::from(zoom_range.max);
 
         let source_prefetch_zoom_delta = style_source.common().prefetch_zoom_delta;
@@ -646,8 +656,24 @@ impl SourceTiles {
             max_content_elevation: f64::from(self.update_max_content_elevation(update.layers)),
         };
 
-        if overscaled_zoom >= i32::from(zoom_range.min) {
-            let ideal_zoom: i32 = std::cmp::min(i32::from(zoom_range.max), overscaled_zoom);
+        // While terrain draws, every source covers the view as the terrain
+        // does, with the tiles under raised ground, and only a source that
+        // cuts overscaled tiles loads them at a deeper zoom.
+        let cover = |parameters: &TileCoverParameters, z: u8, overscaled_z: Option<u8>| match update.parameters.terrain
+        {
+            Some(terrain) => {
+                terrain_tile_cover(parameters, z, zoom_range, overscaled_z.filter(|_| info.overscale), &terrain.ranges)
+            }
+            None => tile_cover(parameters, z, zoom_range, overscaled_z),
+        };
+
+        // A source that only the terrain reads covers nothing of the view.
+        // Under terrain, tiles near the camera can be finer than the nominal
+        // zoom, and the cover skips those below the source's lowest zoom one
+        // by one.
+        let covers_zoom = overscaled_zoom >= i32::from(zoom_range.min) || parameters.terrain.is_some();
+        if update.needs_rendering && covers_zoom {
+            let ideal_zoom: i32 = std::cmp::min(i32::from(zoom_range.max), tile_zoom);
 
             // Past the highest zoom level, draw that level's tiles larger.
             if !info.overscale {
@@ -667,11 +693,11 @@ impl SourceTiles {
                     let mut pan_parameters = tile_cover_parameters.clone();
                     pan_parameters.requested_zoom = None;
                     pan_parameters.round_zoom = false;
-                    pan_tiles = tile_cover(&pan_parameters, pan_zoom as u8, zoom_range, None);
+                    pan_tiles = cover(&pan_parameters, pan_zoom as u8, None);
                 }
             }
 
-            ideal_tiles = tile_cover(&tile_cover_parameters, ideal_zoom as u8, zoom_range, Some(tile_zoom as u8));
+            ideal_tiles = cover(&tile_cover_parameters, ideal_zoom as u8, Some(tile_zoom as u8));
 
             // The globe cover leaves out the far side of the planet, so a
             // view turned there would find no parent to draw until its tiles
@@ -711,7 +737,9 @@ impl SourceTiles {
         // tiles finer than the nominal zoom, up to the source's maximum.
         let mut tile_range: Option<TileRange> = None;
         if let Some(bounds) = &update.bounds {
-            let variable_zoom = parameters.tile_lod_mode == TileLodMode::Distance || parameters.view.is_globe();
+            let variable_zoom = parameters.tile_lod_mode == TileLodMode::Distance
+                || parameters.view.is_globe()
+                || parameters.terrain.is_some();
             let max_zoom: i32 = if variable_zoom {
                 i32::from(zoom_range.max)
             } else {
@@ -760,6 +788,13 @@ impl SourceTiles {
                 update_renderables(&mut cover, &pan_tiles, zoom_range, max_parent_tile_overscale_factor);
             }
 
+            // The terrain's DEM tiles load with the coarse ones, and stand in
+            // for each other as the view's do, but render nothing.
+            if !update.terrain_reads.is_empty() {
+                cover.render = false;
+                update_renderables(&mut cover, update.terrain_reads, zoom_range, max_parent_tile_overscale_factor);
+            }
+
             cover.render = true;
             cover.pass_rank = 0;
             update_renderables(&mut cover, &ideal_tiles, zoom_range, max_parent_tile_overscale_factor);
@@ -793,7 +828,7 @@ impl SourceTiles {
                 * 0.5) as usize;
             // A tilted view holds more tiles than its size suggests, and as it
             // turns it passes over more again.
-            let view_cache_size = ideal_tiles.len() * VIEWS_CACHED;
+            let view_cache_size = (ideal_tiles.len() + update.terrain_reads.len()) * VIEWS_CACHED;
             self.cache_set_size(conservative_cache_size.max(view_cache_size), ctx);
         } else {
             self.cache_set_size(0, ctx);
@@ -807,7 +842,7 @@ impl SourceTiles {
         // it would hold up the requests and workers the view's tiles need. A
         // tile whose load failed isn't loading: it goes, and is requested
         // anew if the view comes back, rather than wait out a backoff.
-        let wanted = WantedTiles::new(ideal_tiles.iter().chain(&pan_tiles));
+        let wanted = WantedTiles::new(ideal_tiles.iter().chain(&pan_tiles).chain(update.terrain_reads));
         self.cache_release_loading(ctx, |id| wanted.is_near(id));
 
         // The cover's tiles that weren't retained go to the cache, or go.

@@ -355,7 +355,7 @@ fn the_sky_and_the_projection_change_and_reset() {
 }
 
 #[test]
-fn the_terrain_reads_back_as_the_style_holds_it_and_refuses_changes() {
+fn the_terrain_changes_resets_and_reads_back() {
     let dem_style = |terrain: &str| {
         format!(
             r#"{{"version":8,"sources":{{"dem":{DEM_SOURCE},"points":{EMPTY_GEOJSON_SOURCE}}},"layers":[],"terrain":{terrain}}}"#
@@ -367,13 +367,21 @@ fn the_terrain_reads_back_as_the_style_holds_it_and_refuses_changes() {
     style.load_json(&dem_style(r#"{"source":"dem","exaggeration":0.3}"#));
     assert_eq!(root_property(&style, "terrain").as_deref(), Some(r#"{"source":"dem","exaggeration":0.3}"#));
 
-    // The map doesn't draw terrain, so the root property doesn't change.
-    for json in [r#"{"source":"dem"}"#, "null"] {
-        assert_fails(style.set_root_property_json("terrain", json), ErrorKind::Unsupported, "doesn't draw terrain");
+    style.set_root_property_json("terrain", r#"{"source":"dem","exaggeration":2.5}"#).unwrap();
+    assert_eq!(root_property(&style, "terrain").as_deref(), Some(r#"{"source":"dem","exaggeration":2.5}"#));
+    for (json, message) in [
+        (r#"{"source":"points"}"#, "not a raster-dem source"),
+        (r#"{"exaggeration":2}"#, "must have a source"),
+        (r#"{"source":3}"#, "source must be a string"),
+        (r#"{"source":"dem","exaggeration":"high"}"#, "exaggeration must be a number"),
+        (r#"{"source":"dem","exaggeration":-1}"#, "exaggeration must be at least 0"),
+        ("[]", "terrain must be an object"),
+    ] {
+        assert_fails(style.set_root_property_json("terrain", json), ErrorKind::InvalidArgument, message);
     }
-    assert_eq!(root_property(&style, "terrain").as_deref(), Some(r#"{"source":"dem","exaggeration":0.3}"#));
+    assert_eq!(root_property(&style, "terrain").as_deref(), Some(r#"{"source":"dem","exaggeration":2.5}"#));
 
-    style.apply(crate::Edit::SetTerrain(None)).unwrap();
+    style.set_root_property_json("terrain", "null").unwrap();
     assert_eq!(root_property(&style, "terrain"), None);
 
     // A terrain that the style dropped as it loaded doesn't read back.
@@ -414,7 +422,7 @@ fn other_root_properties_read_as_loaded_and_reject_changes() {
     assert_eq!(root_property(&style, "zoom").as_deref(), Some("3"));
     assert_eq!(root_property(&style, "sprite"), None);
 
-    for (name, value) in [("zoom", "4"), ("sprite", r#""sprite""#), ("glyphs", r#""{fontstack}""#), ("terrain", "{}")] {
+    for (name, value) in [("zoom", "4"), ("sprite", r#""sprite""#), ("glyphs", r#""{fontstack}""#)] {
         assert_fails(style.set_root_property_json(name, value), ErrorKind::Unsupported, &format!("\"{name}\""));
     }
     assert_eq!(root_property(&style, "zoom").as_deref(), Some("3"));
