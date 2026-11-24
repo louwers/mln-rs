@@ -112,7 +112,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #endif
 
     let t = textureSample(image, image_sampler, in.tex_coord).r;
-    let color = textureSample(color_ramp, image_sampler, vec2<f32>(t, 0.5));
+    let color = textureSample(color_ramp, color_ramp_sampler, vec2<f32>(t, 0.5));
     return color * props.opacity;
 }
 ",
