@@ -37,20 +37,21 @@ use crate::generated::types::{
     MLN_CAMERA_UPDATE_MODE_JUMP, MLN_CONSTRAIN_MODE_HEIGHT_ONLY, MLN_CONSTRAIN_MODE_NONE, MLN_CONSTRAIN_MODE_SCREEN,
     MLN_CONSTRAIN_MODE_WIDTH_AND_HEIGHT, MLN_FREE_CAMERA_OPTION_ORIENTATION, MLN_FREE_CAMERA_OPTION_POSITION,
     MLN_MAP_DEBUG_COLLISION, MLN_MAP_DEBUG_DEPTH_BUFFER, MLN_MAP_DEBUG_OVERDRAW, MLN_MAP_DEBUG_PARSE_STATUS,
-    MLN_MAP_DEBUG_STENCIL_CLIP, MLN_MAP_DEBUG_TILE_BORDERS, MLN_MAP_DEBUG_TIMESTAMPS,
+    MLN_MAP_DEBUG_RENDERING_STATS, MLN_MAP_DEBUG_STENCIL_CLIP, MLN_MAP_DEBUG_TILE_BORDERS, MLN_MAP_DEBUG_TIMESTAMPS,
     MLN_MAP_TILE_OPTION_LOD_MIN_RADIUS, MLN_MAP_TILE_OPTION_LOD_MODE, MLN_MAP_TILE_OPTION_LOD_PITCH_THRESHOLD,
     MLN_MAP_TILE_OPTION_LOD_SCALE, MLN_MAP_TILE_OPTION_LOD_ZOOM_SHIFT, MLN_MAP_TILE_OPTION_PREFETCH_ZOOM_DELTA,
     MLN_MAP_VIEWPORT_OPTION_CENTER_CLAMPED_TO_GROUND, MLN_MAP_VIEWPORT_OPTION_CONSTRAIN_MODE,
-    MLN_MAP_VIEWPORT_OPTION_FRUSTUM_OFFSET, MLN_MAP_VIEWPORT_OPTION_NORTH_ORIENTATION,
-    MLN_MAP_VIEWPORT_OPTION_VIEWPORT_MODE, MLN_NORTH_ORIENTATION_DOWN, MLN_NORTH_ORIENTATION_LEFT,
-    MLN_NORTH_ORIENTATION_RIGHT, MLN_NORTH_ORIENTATION_UP, MLN_PROJECTION_MODE_OPTION_AXONOMETRIC,
-    MLN_PROJECTION_MODE_OPTION_X_SKEW, MLN_PROJECTION_MODE_OPTION_Y_SKEW, MLN_TILE_LOD_MODE_DEFAULT,
-    MLN_TILE_LOD_MODE_DISTANCE, MLN_VIEWPORT_MODE_DEFAULT, MLN_VIEWPORT_MODE_FLIPPED_Y, mln_animation_options,
-    mln_bound_options, mln_buffer_view, mln_camera, mln_camera_delta, mln_camera_fit_options, mln_camera_fit_update,
-    mln_camera_options, mln_camera_query_result, mln_camera_transition_end, mln_camera_transition_handler,
-    mln_camera_update, mln_canonical_tile_id, mln_completion, mln_diagnostic, mln_edge_insets, mln_free_camera_options,
-    mln_lat_lng, mln_lat_lng_bounds, mln_logical_size, mln_map, mln_map_debug_flags, mln_map_tile_options,
-    mln_map_viewport_options, mln_projection_mode_options, mln_screen_point, mln_status,
+    MLN_MAP_VIEWPORT_OPTION_FRUSTUM_OFFSET, MLN_MAP_VIEWPORT_OPTION_GLOBE_FREE_BEARING,
+    MLN_MAP_VIEWPORT_OPTION_NORTH_ORIENTATION, MLN_MAP_VIEWPORT_OPTION_VIEWPORT_MODE, MLN_NORTH_ORIENTATION_DOWN,
+    MLN_NORTH_ORIENTATION_LEFT, MLN_NORTH_ORIENTATION_RIGHT, MLN_NORTH_ORIENTATION_UP,
+    MLN_PROJECTION_MODE_OPTION_AXONOMETRIC, MLN_PROJECTION_MODE_OPTION_X_SKEW, MLN_PROJECTION_MODE_OPTION_Y_SKEW,
+    MLN_TILE_LOD_MODE_DEFAULT, MLN_TILE_LOD_MODE_DISTANCE, MLN_VIEWPORT_MODE_DEFAULT, MLN_VIEWPORT_MODE_FLIPPED_Y,
+    mln_animation_options, mln_bound_options, mln_buffer_view, mln_camera, mln_camera_delta, mln_camera_fit_options,
+    mln_camera_fit_update, mln_camera_options, mln_camera_query_result, mln_camera_transition_end,
+    mln_camera_transition_handler, mln_camera_update, mln_canonical_tile_id, mln_completion, mln_diagnostic,
+    mln_edge_insets, mln_free_camera_options, mln_lat_lng, mln_lat_lng_bounds, mln_logical_size, mln_map,
+    mln_map_debug_flags, mln_map_tile_options, mln_map_viewport_options, mln_projection_mode_options, mln_screen_point,
+    mln_status,
 };
 use crate::map::{command, query};
 use crate::{buffer, geo, handles};
@@ -368,7 +369,8 @@ const KNOWN_DEBUG_FLAGS: u32 = MLN_MAP_DEBUG_TILE_BORDERS
     | MLN_MAP_DEBUG_COLLISION
     | MLN_MAP_DEBUG_OVERDRAW
     | MLN_MAP_DEBUG_STENCIL_CLIP
-    | MLN_MAP_DEBUG_DEPTH_BUFFER;
+    | MLN_MAP_DEBUG_DEPTH_BUFFER
+    | MLN_MAP_DEBUG_RENDERING_STATS;
 
 /// `mln_map_set_debug_flags()`.
 ///
@@ -388,42 +390,6 @@ pub(crate) unsafe extern "C" fn mln_map_set_debug_flags(
         }
         // SAFETY: the caller's contract.
         unsafe { command(map, completion, |map| map.set_debug_flags(MapDebugOptions(flags))) }
-    })
-}
-
-/// `mln_map_set_rendering_stats_view_enabled()`.
-///
-/// # Safety
-///
-/// Each pointer is null or valid for the header's use of it.
-#[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn mln_map_set_rendering_stats_view_enabled(
-    map: mln_map,
-    enabled: bool,
-    completion: *const mln_completion,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    export!(out_diagnostic, {
-        // SAFETY: the caller's contract.
-        unsafe { command(map, completion, |map| map.set_rendering_stats_view_enabled(enabled)) }
-    })
-}
-
-/// `mln_map_set_globe_free_bearing_enabled()`.
-///
-/// # Safety
-///
-/// Each pointer is null or valid for the header's use of it.
-#[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn mln_map_set_globe_free_bearing_enabled(
-    map: mln_map,
-    enabled: bool,
-    completion: *const mln_completion,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    export!(out_diagnostic, {
-        // SAFETY: the caller's contract.
-        unsafe { command(map, completion, |map| map.set_globe_free_bearing_enabled(enabled)) }
     })
 }
 
@@ -464,7 +430,8 @@ fn viewport_options(options: &mln_map_viewport_options) -> Result<ViewportOption
             | MLN_MAP_VIEWPORT_OPTION_CONSTRAIN_MODE
             | MLN_MAP_VIEWPORT_OPTION_VIEWPORT_MODE
             | MLN_MAP_VIEWPORT_OPTION_FRUSTUM_OFFSET
-            | MLN_MAP_VIEWPORT_OPTION_CENTER_CLAMPED_TO_GROUND,
+            | MLN_MAP_VIEWPORT_OPTION_CENTER_CLAMPED_TO_GROUND
+            | MLN_MAP_VIEWPORT_OPTION_GLOBE_FREE_BEARING,
         "mln_map_viewport_options.fields",
     )?;
     let invalid = |name: &str| Error::invalid_argument(format!("{name} is invalid"));
@@ -494,7 +461,15 @@ fn viewport_options(options: &mln_map_viewport_options) -> Result<ViewportOption
         fields.get(MLN_MAP_VIEWPORT_OPTION_FRUSTUM_OFFSET, options.frustum_offset).map(frustum_offset).transpose()?;
     let center_clamped_to_ground =
         fields.get(MLN_MAP_VIEWPORT_OPTION_CENTER_CLAMPED_TO_GROUND, options.center_clamped_to_ground);
-    Ok(ViewportOptions { north_orientation, constrain_mode, viewport_mode, frustum_offset, center_clamped_to_ground })
+    let globe_free_bearing = fields.get(MLN_MAP_VIEWPORT_OPTION_GLOBE_FREE_BEARING, options.globe_free_bearing);
+    Ok(ViewportOptions {
+        north_orientation,
+        constrain_mode,
+        viewport_mode,
+        frustum_offset,
+        center_clamped_to_ground,
+        globe_free_bearing,
+    })
 }
 
 /// `mln_map_set_viewport_options()`.

@@ -319,7 +319,6 @@ fn from_snapshot(snapshot: &MapSnapshot, event_mask: mln_runtime_event_flags) ->
         debug_flags: snapshot.debug.0,
         generation: snapshot.generation,
         fully_loaded: snapshot.fully_loaded,
-        rendering_stats_view_enabled: snapshot.rendering_stats_view_enabled,
         gesture_in_progress: snapshot.gesture_in_progress,
         transition_in_progress: snapshot.transition_in_progress,
         event_mask,
@@ -352,7 +351,6 @@ fn from_snapshot(snapshot: &MapSnapshot, event_mask: mln_runtime_event_flags) ->
         },
         view: projection::from_map_view(&snapshot.view),
         globe_rendering: snapshot.globe_rendering,
-        globe_free_bearing_enabled: snapshot.globe_free_bearing,
     }
 }
 
@@ -824,18 +822,21 @@ pub(crate) mod tests {
         release(runtime);
     }
 
-    /// The viewport's clamp is on by default, and changes only with its bit.
+    /// The viewport's clamp is on and its free bearing off by default, and
+    /// each changes only with its bit.
     #[test]
-    fn the_center_clamp_is_on_until_the_viewport_options_turn_it_off() {
+    fn the_viewports_flags_change_only_with_their_bits() {
         let runtime = create();
         let map = create_map(runtime, &options(1.0));
         let before = snapshot(map).view.viewport;
         assert!(before.center_clamped_to_ground);
-        let set = |fields, clamped| {
+        assert!(!before.globe_free_bearing);
+        let set = |fields, value| {
             let options = crate::generated::types::mln_map_viewport_options {
                 size: size_of::<crate::generated::types::mln_map_viewport_options>() as u32,
                 fields,
-                center_clamped_to_ground: clamped,
+                center_clamped_to_ground: value,
+                globe_free_bearing: value,
                 // SAFETY: zeros are valid for the members without bits.
                 ..unsafe { core::mem::zeroed() }
             };
@@ -858,8 +859,12 @@ pub(crate) mod tests {
         assert!(!off.center_clamped_to_ground);
         assert_eq!(off.constrain_mode, before.constrain_mode);
         assert_eq!(off.north_orientation, before.north_orientation);
+        assert!(!off.globe_free_bearing);
         assert!(!set(0, true).center_clamped_to_ground);
-        assert!(set(bit, true).center_clamped_to_ground);
+        let on = set(bit, true);
+        assert!(on.center_clamped_to_ground && !on.globe_free_bearing);
+        let free = set(crate::generated::types::MLN_MAP_VIEWPORT_OPTION_GLOBE_FREE_BEARING, true);
+        assert!(free.globe_free_bearing && free.center_clamped_to_ground);
         release_map(map);
         release(runtime);
     }

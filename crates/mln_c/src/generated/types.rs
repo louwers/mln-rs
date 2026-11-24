@@ -967,6 +967,10 @@ pub const MLN_MAP_DEBUG_COLLISION: mln_map_debug_flag = 16;
 pub const MLN_MAP_DEBUG_OVERDRAW: mln_map_debug_flag = 32;
 pub const MLN_MAP_DEBUG_STENCIL_CLIP: mln_map_debug_flag = 64;
 pub const MLN_MAP_DEBUG_DEPTH_BUFFER: mln_map_debug_flag = 128;
+/** Statistics about the last frames, in the top right corner. The map draws
+ them with a layer that it adds to the style, whose text needs the style's
+ glyphs.*/
+pub const MLN_MAP_DEBUG_RENDERING_STATS: mln_map_debug_flag = 256;
 /// A debug overlay that the map draws.
 pub type mln_map_debug_flag = u32;
 /// A set of mln_map_debug_flag bits.
@@ -996,6 +1000,7 @@ pub const MLN_MAP_VIEWPORT_OPTION_CONSTRAIN_MODE: mln_map_viewport_option_field 
 pub const MLN_MAP_VIEWPORT_OPTION_VIEWPORT_MODE: mln_map_viewport_option_field = 4;
 pub const MLN_MAP_VIEWPORT_OPTION_FRUSTUM_OFFSET: mln_map_viewport_option_field = 8;
 pub const MLN_MAP_VIEWPORT_OPTION_CENTER_CLAMPED_TO_GROUND: mln_map_viewport_option_field = 16;
+pub const MLN_MAP_VIEWPORT_OPTION_GLOBE_FREE_BEARING: mln_map_viewport_option_field = 32;
 /// The fields that mln_map_viewport_options sets.
 pub type mln_map_viewport_option_field = u32;
 /// A set of mln_map_viewport_option_field bits.
@@ -1586,6 +1591,13 @@ pub struct mln_map_viewport_options {
     /** Whether the camera's center stands on the terrain, in place of the center
  altitude it's given, the style's included. On by default.*/
     pub center_clamped_to_ground: bool,
+    /** Whether drags and zooms on a globe turn the bearing. When it's on, a drag
+ or a zoom around a point on the globe turns the bearing so the planet
+ keeps its orientation, and a drag can carry the camera over a pole. When
+ it's off, the default, they keep the bearing, as MapLibre GL JS does. Turn
+ it on for a map whose users can rotate it. It changes nothing while the
+ map draws Mercator.*/
+    pub globe_free_bearing: bool,
 }
 /** A map's whole viewport.
 
@@ -1598,6 +1610,7 @@ pub struct mln_map_viewport {
     pub viewport_mode: mln_viewport_mode,
     pub frustum_offset: mln_edge_insets,
     pub center_clamped_to_ground: bool,
+    pub globe_free_bearing: bool,
 }
 pub const MLN_PROJECTION_TYPE_MERCATOR: mln_projection_type = 0;
 /// Draws the map as a globe.
@@ -1761,7 +1774,6 @@ pub struct mln_map_snapshot {
     pub generation: u64,
     /// Whether the style and every resource that the view needs have loaded.
     pub fully_loaded: bool,
-    pub rendering_stats_view_enabled: bool,
     /** Whether a gesture recognizer's gesture, or the glide and snap after it,
  moves the camera.*/
     pub gesture_in_progress: bool,
@@ -1775,8 +1787,6 @@ pub struct mln_map_snapshot {
     pub view: mln_map_view,
     /// Whether the map draws as a globe, alone or blending into Mercator.
     pub globe_rendering: bool,
-    /// The setting from mln_map_set_globe_free_bearing_enabled().
-    pub globe_free_bearing_enabled: bool,
 }
 /// A map's camera, with the snapshot generation that it matches.
 #[repr(C)]

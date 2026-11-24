@@ -51,7 +51,7 @@ static void every_option_command_round_trips_through_the_snapshot(void) {
     MLN_MAP_DEBUG_TILE_BORDERS | MLN_MAP_DEBUG_PARSE_STATUS |
     MLN_MAP_DEBUG_TIMESTAMPS | MLN_MAP_DEBUG_COLLISION |
     MLN_MAP_DEBUG_OVERDRAW | MLN_MAP_DEBUG_STENCIL_CLIP |
-    MLN_MAP_DEBUG_DEPTH_BUFFER;
+    MLN_MAP_DEBUG_DEPTH_BUFFER | MLN_MAP_DEBUG_RENDERING_STATS;
   for (size_t pass = 0; pass < 2; pass += 1) {
     const uint32_t debug = pass == 0 ? every_debug_flag : 0;
     COMMIT(
@@ -59,22 +59,6 @@ static void every_option_command_round_trips_through_the_snapshot(void) {
       mln_map_set_debug_flags(map, debug, &completion.descriptor, NULL)
     );
     TEST_ASSERT_EQUAL_UINT32(debug, snapshot.debug_flags);
-    const bool stats = pass == 0;
-    COMMIT(
-      "rendering stats view", mln_map_set_rendering_stats_view_enabled(
-                                map, stats, &completion.descriptor, NULL
-                              )
-    );
-    TEST_ASSERT_EQUAL(stats, snapshot.rendering_stats_view_enabled);
-    // MapLibre Native has no globe, so the setting changes only the snapshot.
-    const bool free_bearing = pass == 0;
-    COMMIT(
-      "globe free bearing", mln_map_set_globe_free_bearing_enabled(
-                              map, free_bearing, &completion.descriptor, NULL
-                            )
-    );
-    TEST_ASSERT_EQUAL(free_bearing, snapshot.globe_free_bearing_enabled);
-    TEST_ASSERT_FALSE(snapshot.globe_rendering);
   }
 
   static const struct {
@@ -141,20 +125,35 @@ static void every_option_command_round_trips_through_the_snapshot(void) {
     &viewport.frustum_offset, &snapshot.view.viewport.frustum_offset,
     sizeof(viewport.frustum_offset)
   );
-  // On by default, so the first pass turns it off. The frustum offset stays.
+  // The clamp is on and the free bearing off by default, so the first pass
+  // flips each. Each changes only with its bit, and the frustum offset stays.
   TEST_ASSERT_TRUE(snapshot.view.viewport.center_clamped_to_ground);
+  TEST_ASSERT_FALSE(snapshot.view.viewport.globe_free_bearing);
   for (size_t pass = 0; pass < 2; pass += 1) {
     const bool clamped = pass != 0;
-    mln_map_viewport_options clamp = {
+    mln_map_viewport_options flags = {
       .size = sizeof(mln_map_viewport_options),
       .fields = MLN_MAP_VIEWPORT_OPTION_CENTER_CLAMPED_TO_GROUND,
       .center_clamped_to_ground = clamped,
+      .globe_free_bearing = true,
     };
     COMMIT(
       "center clamped to ground",
-      mln_map_set_viewport_options(map, &clamp, &completion.descriptor, NULL)
+      mln_map_set_viewport_options(map, &flags, &completion.descriptor, NULL)
     );
     TEST_ASSERT_EQUAL(clamped, snapshot.view.viewport.center_clamped_to_ground);
+    TEST_ASSERT_EQUAL(pass != 0, snapshot.view.viewport.globe_free_bearing);
+    // MapLibre Native has no globe, so the setting changes only the snapshot.
+    flags.fields = MLN_MAP_VIEWPORT_OPTION_GLOBE_FREE_BEARING;
+    flags.center_clamped_to_ground = !clamped;
+    flags.globe_free_bearing = pass == 0;
+    COMMIT(
+      "globe free bearing",
+      mln_map_set_viewport_options(map, &flags, &completion.descriptor, NULL)
+    );
+    TEST_ASSERT_EQUAL(pass == 0, snapshot.view.viewport.globe_free_bearing);
+    TEST_ASSERT_EQUAL(clamped, snapshot.view.viewport.center_clamped_to_ground);
+    TEST_ASSERT_FALSE(snapshot.globe_rendering);
     TEST_ASSERT_EQUAL_MEMORY(
       &viewport.frustum_offset, &snapshot.view.viewport.frustum_offset,
       sizeof(viewport.frustum_offset)
@@ -449,12 +448,6 @@ static void option_descriptors_reject_what_they_cannot_express(void) {
   MLN_TEST_INVALID(mln_map_set_tile_options(map, NULL, &discard, NULL));
   MLN_TEST_INVALID(mln_map_set_projection_mode(map, NULL, &discard, NULL));
   MLN_TEST_INVALID(mln_map_set_debug_flags(MLN_HANDLE_NULL, 0, &discard, NULL));
-  MLN_TEST_INVALID(mln_map_set_rendering_stats_view_enabled(
-    MLN_HANDLE_NULL, true, &discard, NULL
-  ));
-  MLN_TEST_INVALID(mln_map_set_globe_free_bearing_enabled(
-    MLN_HANDLE_NULL, true, &discard, NULL
-  ));
   MLN_TEST_INVALID(mln_map_dump_debug_logs(MLN_HANDLE_NULL, &discard, NULL));
   MLN_TEST_INVALID(mln_map_set_debug_flags(
     map, UINT32_C(1) << 31, &discard, MLN_TEST_DIAGNOSTIC

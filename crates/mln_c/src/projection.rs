@@ -95,6 +95,7 @@ fn map_view(view: &mln_map_view) -> Result<MapView, Error> {
             viewport_mode: viewport_mode(viewport.viewport_mode)?,
             frustum_offset: geo::edge_insets(viewport.frustum_offset, "view frustum offset")?,
             center_clamped_to_ground: viewport.center_clamped_to_ground,
+            globe_free_bearing: viewport.globe_free_bearing,
         },
         projection: projection_definition(&view.projection)?,
     })
@@ -164,6 +165,7 @@ pub(crate) fn from_map_view(view: &MapView) -> mln_map_view {
             },
             frustum_offset: geo::from_edge_insets(viewport.frustum_offset),
             center_clamped_to_ground: viewport.center_clamped_to_ground,
+            globe_free_bearing: viewport.globe_free_bearing,
         },
         projection: mln_projection_definition {
             from: from_projection_type(view.projection.from),
@@ -588,6 +590,7 @@ mod tests {
                 viewport_mode: MLN_VIEWPORT_MODE_DEFAULT,
                 frustum_offset: NO_INSETS,
                 center_clamped_to_ground: true,
+                globe_free_bearing: false,
             },
             projection: mln_projection_definition { from: 0, to: 0, transition: 0.0 },
         }

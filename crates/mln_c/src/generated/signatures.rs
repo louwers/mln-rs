@@ -692,12 +692,6 @@ const _: unsafe extern "C" fn(
 ) -> mln_status = crate::style::mln_map_set_global_state_property;
 const _: unsafe extern "C" fn(
     mln_map,
-    bool,
-    *const mln_completion,
-    *mut mln_diagnostic,
-) -> mln_status = crate::camera::mln_map_set_globe_free_bearing_enabled;
-const _: unsafe extern "C" fn(
-    mln_map,
     mln_buffer_view,
     *const mln_lat_lng,
     usize,
@@ -724,12 +718,6 @@ const _: unsafe extern "C" fn(
     *const mln_completion,
     *mut mln_diagnostic,
 ) -> mln_status = crate::camera::mln_map_set_projection_mode;
-const _: unsafe extern "C" fn(
-    mln_map,
-    bool,
-    *const mln_completion,
-    *mut mln_diagnostic,
-) -> mln_status = crate::camera::mln_map_set_rendering_stats_view_enabled;
 const _: unsafe extern "C" fn(
     mln_map,
     mln_buffer_view,

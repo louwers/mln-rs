@@ -111,6 +111,12 @@ typedef enum MLN_BINDING("kind=bitmask") mln_map_debug_flag : uint32_t {
   MLN_MAP_DEBUG_OVERDRAW = 1U << 5U,
   MLN_MAP_DEBUG_STENCIL_CLIP = 1U << 6U,
   MLN_MAP_DEBUG_DEPTH_BUFFER = 1U << 7U,
+  /**
+   * Statistics about the last frames, in the top right corner. The map draws
+   * them with a layer that it adds to the style, whose text needs the style's
+   * glyphs.
+   */
+  MLN_MAP_DEBUG_RENDERING_STATS = 1U << 8U,
 } mln_map_debug_flag;
 
 /** A set of mln_map_debug_flag bits. */
@@ -151,6 +157,7 @@ typedef enum MLN_BINDING(
   MLN_MAP_VIEWPORT_OPTION_VIEWPORT_MODE = 1U << 2U,
   MLN_MAP_VIEWPORT_OPTION_FRUSTUM_OFFSET = 1U << 3U,
   MLN_MAP_VIEWPORT_OPTION_CENTER_CLAMPED_TO_GROUND = 1U << 4U,
+  MLN_MAP_VIEWPORT_OPTION_GLOBE_FREE_BEARING = 1U << 5U,
 } mln_map_viewport_option_field;
 
 /** A set of mln_map_viewport_option_field bits. */
@@ -1042,6 +1049,16 @@ typedef struct mln_map_viewport_options {
   bool center_clamped_to_ground MLN_BINDING(
     "mask=fields;bit=MLN_MAP_VIEWPORT_OPTION_CENTER_CLAMPED_TO_GROUND"
   );
+  /**
+   * Whether drags and zooms on a globe turn the bearing. When it's on, a drag
+   * or a zoom around a point on the globe turns the bearing so the planet
+   * keeps its orientation, and a drag can carry the camera over a pole. When
+   * it's off, the default, they keep the bearing, as MapLibre GL JS does. Turn
+   * it on for a map whose users can rotate it. It changes nothing while the
+   * map draws Mercator.
+   */
+  bool globe_free_bearing
+    MLN_BINDING("mask=fields;bit=MLN_MAP_VIEWPORT_OPTION_GLOBE_FREE_BEARING");
 } mln_map_viewport_options;
 
 /**
@@ -1055,6 +1072,7 @@ typedef struct mln_map_viewport {
   mln_viewport_mode viewport_mode;
   mln_edge_insets frustum_offset;
   bool center_clamped_to_ground;
+  bool globe_free_bearing;
 } mln_map_viewport;
 
 /**
@@ -1243,7 +1261,6 @@ typedef struct mln_map_snapshot {
   uint64_t generation;
   /** Whether the style and every resource that the view needs have loaded. */
   bool fully_loaded;
-  bool rendering_stats_view_enabled;
   /**
    * Whether a gesture recognizer's gesture, or the glide and snap after it,
    * moves the camera.
@@ -1259,8 +1276,6 @@ typedef struct mln_map_snapshot {
   mln_map_view view;
   /** Whether the map draws as a globe, alone or blending into Mercator. */
   bool globe_rendering;
-  /** The setting from mln_map_set_globe_free_bearing_enabled(). */
-  bool globe_free_bearing_enabled;
 } mln_map_snapshot;
 
 /** A map's camera, with the snapshot generation that it matches. */
