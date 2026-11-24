@@ -62,7 +62,11 @@ pub(crate) enum SpritePart {
 }
 
 /// What the map does about a load, in the order the loader returns them.
-#[expect(clippy::large_enum_variant, reason = "the events are handled as they are returned, not stored")]
+// A style is past the lint's threshold only where pointers are 64 bits.
+#[cfg_attr(
+    target_pointer_width = "64",
+    expect(clippy::large_enum_variant, reason = "the events are handled as they are returned, not stored")
+)]
 pub(crate) enum LoadEvent {
     /// A load began.
     Loading,

@@ -8,7 +8,7 @@ use crate::runner::MapError;
 
 #[must_use]
 pub(crate) fn default_camera(style: &Style) -> CameraOptions {
-    style.get_default_camera()
+    mln_map::style_camera(style)
 }
 
 /// Sets the paint or layout property `property_name` of the layer

@@ -29,6 +29,7 @@ geo-types.workspace = true
 geometry.workspace = true
 mln_geojson.workspace = true
 mln_image.workspace = true
+# The view and projection of the frame that a custom layer draws into.
 mln_map_types.workspace = true
 mln_math.workspace = true
 mln_style_types.workspace = true

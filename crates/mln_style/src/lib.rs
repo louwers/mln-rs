@@ -95,7 +95,7 @@ pub use renderer::property_evaluation_parameters::{CrossfadeParameters, Property
 pub use renderer::transition_parameters::{GlobalStateChange, TransitionParameters};
 pub use source_list::SourceList;
 pub use source_type::{Source, SourceInstance, SourceTypeInfo};
-pub use style::{Style, StyleLoadError};
+pub use style::{Style, StyleCamera, StyleLoadError};
 pub use transition_options::TransitionOptions;
 
 #[cfg(test)]

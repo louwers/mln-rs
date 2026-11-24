@@ -36,7 +36,7 @@ fn render(style: &str, viewport_mode: ViewportMode) -> Option<PremultipliedImage
     frontend.attach(&mut map);
     map.set_bounds(&BoundOptions { max_pitch: Some(85.0), ..Default::default() }).unwrap();
     map.load_style_json(style);
-    let camera = map.style().get_default_camera();
+    let camera = mln_map::style_camera(map.style());
     map.jump_to(&camera);
     Some(frontend.render(&mut map).expect("the still image").image)
 }

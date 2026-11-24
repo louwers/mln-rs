@@ -45,6 +45,22 @@ use crate::transform::{CameraCommandId, CommandEnd, FrameClock, TerrainGround, T
 /// ground changes with each move would otherwise never settle.
 const MAX_GROUND_MOVES_PER_STILL: u32 = 8;
 
+/// The camera options of `style`'s default camera, which the map jumps to
+/// once the style loads, unless a camera command came first.
+#[must_use]
+pub fn style_camera(style: &Style) -> CameraOptions {
+    let camera = style.get_default_camera();
+    CameraOptions {
+        center: camera.center,
+        center_altitude: camera.center_altitude,
+        zoom: camera.zoom,
+        bearing: camera.bearing,
+        pitch: camera.pitch,
+        roll: camera.roll,
+        ..CameraOptions::default()
+    }
+}
+
 /// How long a continuous map waits to draw again after the first of a run
 /// of frames that failed on the GPU, in case the failure passes.
 const RETRY_DELAY: Duration = Duration::from_millis(200);
@@ -404,7 +420,7 @@ impl Map {
                 LoadEvent::Loaded => {
                     self.changed();
                     if !self.camera_mutated {
-                        let camera = self.style.get_default_camera();
+                        let camera = style_camera(&self.style);
                         self.jump_to(&camera);
                     }
                     self.emit(MapEvent::StyleLoaded);

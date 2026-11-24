@@ -14,7 +14,7 @@ mod rendering_stats_view;
 mod style_loader;
 pub mod transform;
 
-pub use map::Map;
+pub use map::{Map, style_camera};
 pub use map_event::{CameraChange, CameraChangeMode, CameraChangeSource, MapEvent, RenderFrameStatus};
 pub use map_options::MapOptions;
 pub use map_projection::MapProjection;

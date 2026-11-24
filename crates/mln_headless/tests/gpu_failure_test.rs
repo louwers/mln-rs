@@ -261,7 +261,7 @@ impl FailingMap {
         );
         renderer.set_event_queue(Some(events));
         map.load_style_json(style);
-        let camera = map.style().get_default_camera();
+        let camera = mln_map::style_camera(map.style());
         map.jump_to(&camera);
         let target = OffscreenTarget::new(size);
         FailingMap { map, backend, target, renderer, drawn: 0, fail, failing: 0, shown: None, _pool: pool }

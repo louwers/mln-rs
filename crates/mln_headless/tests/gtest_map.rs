@@ -720,7 +720,7 @@ fn set_style_default_camera() {
     camera = CameraOptions::from(test.map().snapshot().view.camera);
     assert_double_eq(camera.zoom.unwrap(), 0.0);
 
-    let default_camera = test.map().style().get_default_camera();
+    let default_camera = mln_map::style_camera(test.map().style());
     test.map().jump_to(&default_camera);
     camera = CameraOptions::from(test.map().snapshot().view.camera);
     assert_double_eq(camera.zoom.unwrap(), 0.5);
@@ -1835,7 +1835,7 @@ fn no_hang_on_missing_image() {
     test.render();
 
     test.load_json(style);
-    let default_camera = test.map().style().get_default_camera();
+    let default_camera = mln_map::style_camera(test.map().style());
     test.map().jump_to(&default_camera);
     // The test passes if the following call does not hang.
     test.render();

@@ -71,7 +71,7 @@ fn a_hillshade_shades_a_plane_slope_evenly() {
     let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
     frontend.attach(&mut map);
     map.load_style_json(style);
-    let camera = map.style().get_default_camera();
+    let camera = mln_map::style_camera(map.style());
     map.jump_to(&camera);
     let image = frontend.render(&mut map).expect("the still image").image;
 

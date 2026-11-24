@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use feature::Value;
 use mln_util::error::Error;
+use mln_util::geo::LatLng;
 use mln_util::logging::{Event, Log};
 
 use crate::conversion::Convertible;
@@ -13,7 +14,6 @@ use crate::layer::Layer;
 use crate::layer_list::LayerList;
 use crate::layer_type::SourceKind;
 use crate::light::Light;
-use crate::map::camera::CameraOptions;
 use crate::parser::Parser;
 use crate::projection::Projection;
 use crate::registry::StyleRegistry;
@@ -23,6 +23,24 @@ use crate::source_type::Source;
 use crate::sprite::Sprite;
 use crate::terrain::Terrain;
 use crate::transition_options::TransitionOptions;
+
+/// The camera that a style's root properties set: `center`, `centerAltitude`,
+/// `zoom`, `bearing`, `pitch` and `roll`. A parsed style sets every member,
+/// to the style spec's default where the document leaves it out; an empty
+/// style sets none.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct StyleCamera {
+    pub center: Option<LatLng>,
+    /// In meters above sea level.
+    pub center_altitude: Option<f64>,
+    pub zoom: Option<f64>,
+    /// In degrees.
+    pub bearing: Option<f64>,
+    /// In degrees.
+    pub pitch: Option<f64>,
+    /// In degrees.
+    pub roll: Option<f64>,
+}
 
 /// Why a style failed to load.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -63,7 +81,7 @@ pub struct Style {
     /// The document, for the root properties that edits don't change.
     json: Arc<str>,
     name: Arc<str>,
-    default_camera: CameraOptions,
+    default_camera: StyleCamera,
     layers: Arc<LayerList>,
     /// The sources, in the order they were added.
     sources: Arc<SourceList>,
@@ -109,7 +127,7 @@ impl Style {
             registry,
             json: Arc::from(""),
             name: Arc::from(""),
-            default_camera: CameraOptions::default(),
+            default_camera: StyleCamera::default(),
             layers: Arc::default(),
             sources: Arc::default(),
             images: Arc::default(),
@@ -171,14 +189,13 @@ impl Style {
         style.layers = Arc::new(layers);
 
         style.name = Arc::from(parser.name.as_str());
-        style.default_camera = CameraOptions {
+        style.default_camera = StyleCamera {
             center: Some(parser.lat_lng),
             center_altitude: Some(parser.center_altitude),
             zoom: Some(parser.zoom),
             bearing: Some(parser.bearing),
             pitch: Some(parser.pitch),
             roll: Some(parser.roll),
-            ..CameraOptions::default()
         };
 
         style.light = Arc::new(std::mem::take(&mut parser.light));
@@ -231,7 +248,7 @@ impl Style {
     }
 
     #[must_use]
-    pub fn get_default_camera(&self) -> CameraOptions {
+    pub fn get_default_camera(&self) -> StyleCamera {
         self.default_camera
     }
 

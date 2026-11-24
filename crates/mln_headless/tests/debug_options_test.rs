@@ -241,7 +241,7 @@ fn collision_boxes_leave_a_layer_above_an_extrusion_on_top() {
     test.load_json(COVERED_EXTRUSION_STYLE);
     let icon = PremultipliedImage::from_vec(Size::new(16, 16), [0, 255, 0, 255].repeat(16 * 16));
     test.map().edit_style(|style| style.apply(Edit::AddImage(style_image("icon", icon, 1.0)))).unwrap();
-    let camera = test.map().style().get_default_camera();
+    let camera = mln_map::style_camera(test.map().style());
     test.map().jump_to(&camera);
 
     let blue = [0, 0, 255, 255];
