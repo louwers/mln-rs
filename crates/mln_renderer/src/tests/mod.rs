@@ -371,12 +371,29 @@ pub(crate) fn ready(source: mln_style::Source) -> mln_style::Source {
     }
 }
 
+/// A WebGPU device, or `None` where no adapter is available: the test is
+/// skipped there, unless `MLN_RENDER_BACKEND` asks for `webgpu`.
+pub(super) fn webgpu_device() -> Option<mln_webgpu::Device> {
+    let requested = std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case("webgpu"));
+    match mln_webgpu::Device::new(None) {
+        Ok(device) => Some(device),
+        Err(error) if error.kind == mln_util::error::ErrorKind::Unsupported && !requested => {
+            eprintln!("skipped: {error}");
+            None
+        }
+        Err(error) => panic!("WebGPU device: {error}"),
+    }
+}
+
 /// Runs `f` with the `Gpu` of a headless WebGPU backend and a context over
-/// it, which it then tears down.
+/// it, which it then tears down. Skipped where no WebGPU adapter is
+/// available unless `MLN_RENDER_BACKEND` asks for `webgpu`.
 fn with_context(f: impl FnOnce(&mut dyn mln_gfx::gpu::Gpu, &mut crate::gfx::context::Context)) {
     use mln_gfx::RendererBackend as _;
     use mln_gfx::gpu::Gpu as _;
-    let device = mln_webgpu::Device::new(None).expect("device");
+    let Some(device) = webgpu_device() else {
+        return;
+    };
     let mut backend = mln_webgpu::RendererBackend::new(&device);
     let gpu = backend.gpu();
     let mut context = crate::gfx::context::Context::new(*gpu.caps(), 1.0);

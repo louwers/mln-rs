@@ -17,29 +17,37 @@ use mln_glsl::BUILT_INS;
 use mln_util::Color;
 use mln_util::size::Size;
 
-use crate::{Device, ImportedImage, VulkanGpu};
+use crate::{ImportedImage, VulkanGpu};
 
 #[test]
 fn clip_mask_and_background_through_gpu() {
-    let device = Device::new(None).expect("Vulkan device");
+    let Some(device) = super::device() else {
+        return;
+    };
     clip_mask_and_background(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frame");
 }
 
 #[test]
 fn resources_in_use_through_gpu() {
-    let device = Device::new(None).expect("Vulkan device");
+    let Some(device) = super::device() else {
+        return;
+    };
     resources_in_use(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frames");
 }
 
 #[test]
 fn invalid_calls_through_gpu() {
-    let device = Device::new(None).expect("Vulkan device");
+    let Some(device) = super::device() else {
+        return;
+    };
     invalid_calls(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the valid calls");
 }
 
 #[test]
 fn foreign_ids_through_gpu() {
-    let device = Device::new(None).expect("Vulkan device");
+    let Some(device) = super::device() else {
+        return;
+    };
     let mut first = VulkanGpu::new(&device).expect("VulkanGpu");
     let mut second = VulkanGpu::new(&device).expect("VulkanGpu");
     foreign_ids(&mut first, &mut second).expect("the valid calls");
@@ -47,76 +55,100 @@ fn foreign_ids_through_gpu() {
 
 #[test]
 fn transparent_replace_through_gpu() {
-    let device = Device::new(None).expect("Vulkan device");
+    let Some(device) = super::device() else {
+        return;
+    };
     transparent_replace(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frame");
 }
 
 #[test]
 fn topologies_through_gpu() {
-    let device = Device::new(None).expect("Vulkan device");
+    let Some(device) = super::device() else {
+        return;
+    };
     topologies(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frames");
 }
 
 #[test]
 fn vertex_layouts_through_gpu() {
-    let device = Device::new(None).expect("Vulkan device");
+    let Some(device) = super::device() else {
+        return;
+    };
     vertex_layouts(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frames");
 }
 
 #[test]
 fn readbacks_through_gpu() {
-    let device = Device::new(None).expect("Vulkan device");
+    let Some(device) = super::device() else {
+        return;
+    };
     readbacks(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the readbacks");
 }
 
 #[test]
 fn instanced_walls_through_gpu() {
-    let device = Device::new(None).expect("Vulkan device");
+    let Some(device) = super::device() else {
+        return;
+    };
     let mut gpu = VulkanGpu::new(&device).expect("VulkanGpu");
     instanced_walls(&mut gpu).expect("the frame");
 }
 
 #[test]
 fn wall_quads_through_gpu() {
-    let device = Device::new(None).expect("Vulkan device");
+    let Some(device) = super::device() else {
+        return;
+    };
     let mut gpu = VulkanGpu::new(&device).expect("VulkanGpu");
     wall_quads(&mut gpu).expect("the frame");
 }
 
 #[test]
 fn pulled_walls_through_gpu() {
-    let device = Device::new(None).expect("Vulkan device");
+    let Some(device) = super::device() else {
+        return;
+    };
     let mut gpu = VulkanGpu::new(&device).expect("VulkanGpu");
     pulled_walls(&mut gpu).expect("the bindings");
 }
 
 #[test]
 fn depth_only_through_gpu() {
-    let device = Device::new(None).expect("Vulkan device");
+    let Some(device) = super::device() else {
+        return;
+    };
     depth_only(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frame");
 }
 
 #[test]
 fn written_vertex_texels_through_gpu() {
-    let device = Device::new(None).expect("Vulkan device");
+    let Some(device) = super::device() else {
+        return;
+    };
     written_vertex_texels(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frame");
 }
 
 #[test]
 fn drawn_vertex_texels_through_gpu() {
-    let device = Device::new(None).expect("Vulkan device");
+    let Some(device) = super::device() else {
+        return;
+    };
     drawn_vertex_texels(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frames");
 }
 
 #[test]
 fn terrain_heights_through_gpu() {
-    let device = Device::new(None).expect("Vulkan device");
+    let Some(device) = super::device() else {
+        return;
+    };
     terrain_heights(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frames");
 }
 
 #[test]
 fn mipmapped_targets_through_gpu() {
-    let device = Device::new(None).expect("Vulkan device");
+    let Some(device) = super::device() else {
+        return;
+    };
     mipmapped_targets(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frames");
 }
 
@@ -124,7 +156,9 @@ fn mipmapped_targets_through_gpu() {
 // `Gpu`.
 #[test]
 fn destroy_later_waits_for_the_next_submit() {
-    let device = Device::new(None).expect("Vulkan device");
+    let Some(device) = super::device() else {
+        return;
+    };
     let mut gpu = VulkanGpu::new(&device).expect("VulkanGpu");
     let destroyed = Rc::new(Cell::new(0));
     let count = |destroyed: &Rc<Cell<u32>>| {
@@ -145,7 +179,9 @@ fn destroy_later_waits_for_the_next_submit() {
 // projections.
 #[test]
 fn every_program_compiles_for_gpu() {
-    let device = Device::new(None).expect("Vulkan device");
+    let Some(device) = super::device() else {
+        return;
+    };
     let mut gpu = VulkanGpu::new(&device).expect("VulkanGpu");
     let parameters = ProgramParameters::new(1.0, false);
     for &(program, _) in BUILT_INS {
@@ -162,7 +198,9 @@ fn every_program_compiles_for_gpu() {
 
 #[test]
 fn custom_layers_through_gpu() {
-    let device = Device::new(None).expect("Vulkan device");
+    let Some(device) = super::device() else {
+        return;
+    };
     custom_layers(
         &mut VulkanGpu::new(&device).expect("VulkanGpu"),
         |lent| assert!(lent.is::<crate::CustomLayerEncoder>()),
@@ -177,7 +215,9 @@ fn custom_layers_through_gpu() {
 
 #[test]
 fn imported_textures_through_gpu() {
-    let device = Device::new(None).expect("Vulkan device");
+    let Some(device) = super::device() else {
+        return;
+    };
     imported_textures(&mut VulkanGpu::new(&device).expect("VulkanGpu"), |gpu, texture| {
         let imported = gpu.as_imported(texture).expect("a texture of the backend's");
         gpu.import_image(&imported)
@@ -190,7 +230,9 @@ fn imported_textures_through_gpu() {
 // semaphore that a flush signals reaches its value once the flush is done.
 #[test]
 fn imported_images_go_to_their_queue_family_and_signal() {
-    let device = Device::new(None).expect("Vulkan device");
+    let Some(device) = super::device() else {
+        return;
+    };
     let mut gpu = VulkanGpu::new(&device).expect("VulkanGpu");
     let size = Size { width: 4, height: 4 };
     let owned = gpu

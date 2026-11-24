@@ -48,7 +48,9 @@ const BLUE: Color = Color::blue();
 
 #[test]
 fn backends_on_one_device_render_in_turn() {
-    let device = Device::new(None).expect("device");
+    let Some(device) = super::device() else {
+        return;
+    };
     let mut first = headless(&device);
     let mut second = headless(&device);
     assert_eq!(first.0.device().device(), device.device());
@@ -62,7 +64,9 @@ fn backends_on_one_device_render_in_turn() {
 
 #[test]
 fn a_backend_renders_after_the_host_drops_its_device() {
-    let device = Device::new(None).expect("device");
+    let Some(device) = super::device() else {
+        return;
+    };
     let mut target = headless(&device);
     drop(device);
     assert_all(&clear_and_read(&mut target, RED), [255, 0, 0, 255]);
@@ -79,8 +83,14 @@ fn a_backend_renders_on_a_device_the_host_made() {
         backends,
         ..wgpu::InstanceDescriptor::new_without_display_handle()
     });
-    let adapter =
-        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).expect("adapter");
+    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) {
+        Ok(adapter) => adapter,
+        Err(error) if !super::webgpu_requested() => {
+            eprintln!("skipped: {error}");
+            return;
+        }
+        Err(error) => panic!("adapter: {error}"),
+    };
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("host device"),
         required_limits: wgpu::Limits::default().or_worse_values_from(&adapter.limits()),
@@ -106,7 +116,18 @@ fn a_backend_renders_on_a_device_the_host_made() {
 
 #[test]
 fn the_first_named_adapter_renders() {
-    let mut target = headless(&Device::new(Some(0)).expect("adapter 0"));
+    let device = match Device::new(Some(0)) {
+        Ok(device) => device,
+        Err(error)
+            if matches!(error.kind, mln_util::ErrorKind::Unsupported | mln_util::ErrorKind::NotFound)
+                && !super::webgpu_requested() =>
+        {
+            eprintln!("skipped: {error}");
+            return;
+        }
+        Err(error) => panic!("adapter 0: {error}"),
+    };
+    let mut target = headless(&device);
     assert_all(&clear_and_read(&mut target, RED), [255, 0, 0, 255]);
 }
 

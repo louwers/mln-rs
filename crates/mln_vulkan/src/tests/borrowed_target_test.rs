@@ -21,10 +21,10 @@ fn images(size: Size) -> BorrowedImages {
     }
 }
 
-fn backend() -> (Device, RendererBackend) {
-    let device = Device::new(None).expect("Vulkan device");
+fn backend() -> Option<(Device, RendererBackend)> {
+    let device = super::device()?;
     let backend = RendererBackend::new(&device).expect("a backend");
-    (device, backend)
+    Some((device, backend))
 }
 
 /// Sizes that no image of the device has.
@@ -36,7 +36,9 @@ fn bad_sizes(device: &Device) -> [Size; 3] {
 // An error past the first import returns, with what was imported destroyed.
 #[test]
 fn imports_that_fail_are_destroyed() {
-    let (device, mut backend) = backend();
+    let Some((device, mut backend)) = backend() else {
+        return;
+    };
     for size in bad_sizes(&device) {
         let error =
             Imports::new::<VulkanRing>(backend.gpu(), &images(size)).err().expect("no depth texture of that size");
@@ -46,7 +48,9 @@ fn imports_that_fail_are_destroyed() {
 
 #[test]
 fn a_ring_of_images_of_no_size_or_too_large_is_rejected() {
-    let (device, mut backend) = backend();
+    let Some((device, mut backend)) = backend() else {
+        return;
+    };
     for size in bad_sizes(&device) {
         let error =
             BorrowedTarget::new(&mut backend, images(size), SyncKind::CpuComplete).err().expect("no ring of that size");
@@ -244,7 +248,9 @@ fn sync_file(producer: &mut BorrowedTarget, gpu: &mut crate::VulkanGpu) -> mln_g
 // host's reads of a slot that no frame drew into hold nothing up.
 #[test]
 fn a_frame_drawn_and_not_ended_is_submitted_with_its_waits() {
-    let (device, mut backend) = backend();
+    let Some((device, mut backend)) = backend() else {
+        return;
+    };
     let mut owned = Owned::new(&device);
     let size = Size::new(8, 8);
     let (producers, consumers) = device.sync_kinds();

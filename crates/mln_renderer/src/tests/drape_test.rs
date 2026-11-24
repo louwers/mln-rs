@@ -292,7 +292,7 @@ const TWO_STACKS: &str = r#"{
 /// over a 256 px WebGPU target, drawn until a frame of the camera on the
 /// terrain's ground is complete. Returns the tile and stack of each drape
 /// that has a texture then.
-fn textured_drapes(style: &str) -> BTreeSet<(OverscaledTileID, usize)> {
+fn textured_drapes(style: &str) -> Option<BTreeSet<(OverscaledTileID, usize)>> {
     let registry = Registry::with_builtins();
     let parsed = Style::from_json(registry.style(), style).expect("the style");
     let mut style = Style::new(Arc::clone(registry.style()));
@@ -306,7 +306,7 @@ fn textured_drapes(style: &str) -> BTreeSet<(OverscaledTileID, usize)> {
     let style = Arc::new(style);
 
     let size = Size::new(256, 256);
-    let device = mln_webgpu::Device::new(None).expect("device");
+    let device = super::webgpu_device()?;
     let mut backend = mln_webgpu::RendererBackend::new(&device);
     let mut target = OffscreenTarget::<mln_webgpu::WebGpu>::new(size);
     let pool = crate::tests::pool();
@@ -376,7 +376,7 @@ fn textured_drapes(style: &str) -> BTreeSet<(OverscaledTileID, usize)> {
     assert!(complete, "no frame was complete");
     let textured = renderer.terrain().drapes().textured().into_iter().collect();
     target.tear_down(backend.gpu());
-    textured
+    Some(textured)
 }
 
 /// A stack has a drape with a texture only in the terrain tiles where its
@@ -386,5 +386,8 @@ fn textured_drapes(style: &str) -> BTreeSet<(OverscaledTileID, usize)> {
 fn a_stack_has_a_drape_texture_only_where_its_layers_draw() {
     let tile = |x, y| OverscaledTileID::new(2, 0, CanonicalTileID::new(2, x, y));
     let expected = BTreeSet::from([(tile(1, 1), 0), (tile(2, 2), 1)]);
-    assert_eq!(expected, textured_drapes(TWO_STACKS));
+    let Some(actual) = textured_drapes(TWO_STACKS) else {
+        return;
+    };
+    assert_eq!(expected, actual);
 }

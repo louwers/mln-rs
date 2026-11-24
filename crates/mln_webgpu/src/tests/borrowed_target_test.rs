@@ -24,7 +24,9 @@ fn textures(device: &Device, size: Size) -> BorrowedTextures {
 // A target torn down with a frame begun forgets the frame's imports.
 #[test]
 fn a_target_torn_down_in_a_frame_forgets_its_imports() {
-    let device = Device::new(None).expect("device");
+    let Some(device) = super::device() else {
+        return;
+    };
     let mut backend = RendererBackend::new(&device);
     let size = Size::new(4, 4);
     let before = backend.gpu().texture_count();

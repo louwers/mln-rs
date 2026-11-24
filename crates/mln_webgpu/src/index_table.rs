@@ -101,14 +101,16 @@ impl IndexTable {
 mod tests {
     use super::*;
 
-    fn device() -> (wgpu::Device, wgpu::Queue) {
-        let device = crate::Device::new(None).expect("a WebGPU device");
-        (device.device().clone(), device.queue().clone())
+    fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
+        let device = crate::tests::device()?;
+        Some((device.device().clone(), device.queue().clone()))
     }
 
     #[test]
     fn index_table_grows_to_hold_an_index() {
-        let (device, queue) = device();
+        let Some((device, queue)) = device() else {
+            return;
+        };
         let mut table = IndexTable::new(&device);
         assert!(table.get(0).is_none());
 

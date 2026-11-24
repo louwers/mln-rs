@@ -2,7 +2,6 @@ use std::sync::mpsc::{Sender, channel};
 
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 
-use crate::Device;
 use crate::device::backend_type_to_string;
 
 struct Recorder(Sender<(EventSeverity, Event, i64, String)>);
@@ -18,8 +17,11 @@ impl Observer for Recorder {
 fn a_device_logs_its_adapter() {
     let (sender, records) = channel();
     let previous = Log::set_thread_observer(Some(Box::new(Recorder(sender))));
-    let device = Device::new(None).expect("device");
+    let device = super::device();
     drop(Log::set_thread_observer(previous));
+    let Some(device) = device else {
+        return;
+    };
 
     let info = device.adapter_info();
     let message =

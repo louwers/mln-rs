@@ -49,7 +49,7 @@ use mln_util::size::Size;
 
 use crate::renderer_backend::SurfaceProvider;
 use crate::surface_target::{FrameRateMode, Overlay, OverlayTarget, present_mode};
-use crate::{Device, RendererBackend, SurfaceTarget, VulkanGpu};
+use crate::{RendererBackend, SurfaceTarget, VulkanGpu};
 
 const EXTENT: i16 = 8192;
 
@@ -151,14 +151,14 @@ impl Drop for Window {
 /// not, and Win32 swapchains are covered by `surfaces_win32`).
 fn surface_backend_on(provider: HeadlessSurface, size: Size, cap_frame_rate: bool) -> Option<Window> {
     if let Some(reason) = unavailable() {
-        assert!(
-            !(cfg!(all(target_os = "linux", not(target_env = "ohos"))) && std::env::var_os("CI").is_some()),
-            "the swapchain tests can't run on CI: {reason}"
-        );
+        let ci_expects_vulkan = std::env::var_os("CI").is_some()
+            && cfg!(target_os = "linux")
+            && (super::vulkan_requested() || !cfg!(target_env = "ohos"));
+        assert!(!ci_expects_vulkan, "the swapchain tests can't run on CI: {reason}");
         eprintln!("skipping the swapchain test: {reason}");
         return None;
     }
-    let device = Device::new(None).expect("Vulkan device");
+    let device = super::device()?;
     let frame_rate_mode = if cap_frame_rate { FrameRateMode::Capped } else { FrameRateMode::Uncapped };
     let (backend, target) =
         SurfaceTarget::with_backend_from_provider(&device, Box::new(provider), size, frame_rate_mode)

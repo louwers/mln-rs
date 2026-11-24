@@ -2,8 +2,6 @@ use std::sync::mpsc::{Sender, channel};
 
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 
-use crate::Device;
-
 struct Recorder(Sender<(EventSeverity, Event, i64, String)>);
 
 impl Observer for Recorder {
@@ -17,8 +15,11 @@ impl Observer for Recorder {
 fn a_device_logs_its_gpu() {
     let (sender, records) = channel();
     let previous = Log::set_thread_observer(Some(Box::new(Recorder(sender))));
-    let device = Device::new(None).expect("Vulkan device");
+    let device = super::device();
     drop(Log::set_thread_observer(previous));
+    let Some(device) = device else {
+        return;
+    };
 
     let name = device.shared.properties().device_name_as_c_str().unwrap().to_string_lossy().into_owned();
     // The validation layer's warnings aside.

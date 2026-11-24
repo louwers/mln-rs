@@ -8,7 +8,6 @@ use std::collections::BTreeSet;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 
-use crate::Device;
 use crate::gpu::VERTEX_STAGE_STORAGE_BUFFERS;
 use crate::index_table::IndexTable;
 use crate::shaders::shader_program::compile;
@@ -87,7 +86,9 @@ fn every_layer_program_shows_the_overdraw_inspector() {
 
 #[test]
 fn every_program_compiles() {
-    let device = Device::new(None).expect("device");
+    let Some(device) = super::device() else {
+        return;
+    };
     let device = device.device();
     let index_table = IndexTable::new(device);
     let mut failed = Vec::new();

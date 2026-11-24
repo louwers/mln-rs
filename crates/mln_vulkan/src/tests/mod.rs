@@ -13,3 +13,21 @@ mod log_test;
 // A borrowed ring's checks of its images, and what its construction leaves
 // behind when it fails.
 mod borrowed_target_test;
+
+/// Whether `MLN_RENDER_BACKEND` asks for Vulkan.
+fn vulkan_requested() -> bool {
+    std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case("vulkan"))
+}
+
+/// A Vulkan device, or `None` where no Vulkan ICD is available: the test is
+/// skipped there, unless `MLN_RENDER_BACKEND` asks for `vulkan`.
+fn device() -> Option<crate::Device> {
+    match crate::Device::new(None) {
+        Ok(device) => Some(device),
+        Err(error) if error.kind == mln_util::error::ErrorKind::Unsupported && !vulkan_requested() => {
+            eprintln!("skipped: {error}");
+            None
+        }
+        Err(error) => panic!("Vulkan device: {error}"),
+    }
+}

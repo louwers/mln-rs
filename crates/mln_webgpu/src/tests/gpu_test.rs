@@ -10,61 +10,81 @@ use crate::{CustomLayerEncoder, CustomLayerPass, Device, WebGpu};
 
 #[test]
 fn clip_mask_and_background_through_gpu() {
-    let device = Device::new(None).expect("WebGPU device");
+    let Some(device) = super::device() else {
+        return;
+    };
     clip_mask_and_background(&mut WebGpu::new(&device)).expect("the frame");
 }
 
 #[test]
 fn invalid_calls_through_gpu() {
-    let device = Device::new(None).expect("WebGPU device");
+    let Some(device) = super::device() else {
+        return;
+    };
     invalid_calls(&mut WebGpu::new(&device)).expect("the valid calls");
 }
 
 #[test]
 fn foreign_ids_through_gpu() {
-    let device = Device::new(None).expect("WebGPU device");
+    let Some(device) = super::device() else {
+        return;
+    };
     foreign_ids(&mut WebGpu::new(&device), &mut WebGpu::new(&device)).expect("the valid calls");
 }
 
 #[test]
 fn transparent_replace_through_gpu() {
-    let device = Device::new(None).expect("WebGPU device");
+    let Some(device) = super::device() else {
+        return;
+    };
     transparent_replace(&mut WebGpu::new(&device)).expect("the frame");
 }
 
 #[test]
 fn topologies_through_gpu() {
-    let device = Device::new(None).expect("WebGPU device");
+    let Some(device) = super::device() else {
+        return;
+    };
     topologies(&mut WebGpu::new(&device)).expect("the frames");
 }
 
 #[test]
 fn depth_only_through_gpu() {
-    let device = Device::new(None).expect("WebGPU device");
+    let Some(device) = super::device() else {
+        return;
+    };
     depth_only(&mut WebGpu::new(&device)).expect("the frame");
 }
 
 #[test]
 fn written_vertex_texels_through_gpu() {
-    let device = Device::new(None).expect("WebGPU device");
+    let Some(device) = super::device() else {
+        return;
+    };
     written_vertex_texels(&mut WebGpu::new(&device)).expect("the frame");
 }
 
 #[test]
 fn drawn_vertex_texels_through_gpu() {
-    let device = Device::new(None).expect("WebGPU device");
+    let Some(device) = super::device() else {
+        return;
+    };
     drawn_vertex_texels(&mut WebGpu::new(&device)).expect("the frames");
 }
 
 #[test]
 fn terrain_heights_through_gpu() {
-    let device = Device::new(None).expect("WebGPU device");
+    let Some(device) = super::device() else {
+        return;
+    };
     terrain_heights(&mut WebGpu::new(&device)).expect("the frames");
 }
 
 #[test]
 fn mipmapped_targets_through_gpu() {
-    let device = Device::new(None).expect("WebGPU device");
+    let Some(device) = super::device() else {
+        return;
+    };
     mipmapped_targets(&mut WebGpu::new(&device)).expect("the frames");
 }
 
@@ -72,7 +92,9 @@ fn mipmapped_targets_through_gpu() {
 /// can't make: a pass draws each level.
 #[test]
 fn mipmapped_targets_of_a_format_shaders_cannot_write_through_gpu() {
-    let device = Device::new(None).expect("WebGPU device");
+    let Some(device) = super::device() else {
+        return;
+    };
     mipmapped_targets_of(&mut WebGpu::new(&device), TextureFormat::Bgra8Unorm).expect("the frames");
 }
 
@@ -81,7 +103,9 @@ fn mipmapped_targets_of_a_format_shaders_cannot_write_through_gpu() {
 /// wgpu's handler, which panics on a validation error.
 #[test]
 fn mipmapped_targets_without_storage_textures_through_gpu() {
-    let host = Device::new(None).expect("WebGPU device");
+    let Some(host) = super::device() else {
+        return;
+    };
     let adapter = host.adapter().expect("the library's adapter");
     let limits = wgpu::Limits { max_storage_textures_per_shader_stage: 0, ..host.device().limits() };
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
@@ -96,19 +120,25 @@ fn mipmapped_targets_without_storage_textures_through_gpu() {
 
 #[test]
 fn vertex_layouts_through_gpu() {
-    let device = Device::new(None).expect("WebGPU device");
+    let Some(device) = super::device() else {
+        return;
+    };
     vertex_layouts(&mut WebGpu::new(&device)).expect("the frames");
 }
 
 #[test]
 fn readbacks_through_gpu() {
-    let device = Device::new(None).expect("WebGPU device");
+    let Some(device) = super::device() else {
+        return;
+    };
     readbacks(&mut WebGpu::new(&device)).expect("the readbacks");
 }
 
 #[test]
 fn resources_in_use_through_gpu() {
-    let device = Device::new(None).expect("WebGPU device");
+    let Some(device) = super::device() else {
+        return;
+    };
     resources_in_use(&mut WebGpu::new(&device)).expect("the frames");
 }
 
@@ -116,7 +146,9 @@ fn resources_in_use_through_gpu() {
 // before, which holds what the last copy wrote.
 #[test]
 fn a_readback_copies_into_the_last_ones_buffer() {
-    let device = Device::new(None).expect("WebGPU device");
+    let Some(device) = super::device() else {
+        return;
+    };
     let mut gpu = WebGpu::new(&device);
     let size = Size { width: 4, height: 2 };
     let texture = gpu
@@ -141,28 +173,36 @@ fn a_readback_copies_into_the_last_ones_buffer() {
 
 #[test]
 fn instanced_walls_through_gpu() {
-    let device = Device::new(None).expect("WebGPU device");
+    let Some(device) = super::device() else {
+        return;
+    };
     let mut gpu = WebGpu::new(&device);
     instanced_walls(&mut gpu).expect("the frame");
 }
 
 #[test]
 fn wall_quads_through_gpu() {
-    let device = Device::new(None).expect("WebGPU device");
+    let Some(device) = super::device() else {
+        return;
+    };
     let mut gpu = WebGpu::new(&device);
     wall_quads(&mut gpu).expect("the frame");
 }
 
 #[test]
 fn pulled_walls_through_gpu() {
-    let device = Device::new(None).expect("WebGPU device");
+    let Some(device) = super::device() else {
+        return;
+    };
     let mut gpu = WebGpu::new(&device);
     pulled_walls(&mut gpu).expect("the frame");
 }
 
 #[test]
 fn custom_layers_through_gpu() {
-    let device = Device::new(None).expect("WebGPU device");
+    let Some(device) = super::device() else {
+        return;
+    };
     custom_layers(
         &mut WebGpu::new(&device),
         |lent| assert!(lent.is::<CustomLayerEncoder>()),
@@ -176,7 +216,9 @@ fn custom_layers_through_gpu() {
 
 #[test]
 fn imported_textures_through_gpu() {
-    let device = Device::new(None).expect("WebGPU device");
+    let Some(device) = super::device() else {
+        return;
+    };
     imported_textures(&mut WebGpu::new(&device), |gpu, texture| {
         let native = gpu.native_texture(texture).expect("a texture of the backend's").clone();
         Ok(gpu.import_texture(&native))

@@ -188,8 +188,8 @@ struct DrapedMap {
 }
 
 impl DrapedMap {
-    fn new(tiles: Tiles) -> Self {
-        let device = mln_webgpu::Device::new(None).expect("device");
+    fn new(tiles: Tiles) -> Option<Self> {
+        let device = super::webgpu_device()?;
         let mut backend = mln_webgpu::RendererBackend::new(&device);
         let pool = crate::tests::pool();
         let mut renderer =
@@ -203,7 +203,7 @@ impl DrapedMap {
             zoom: Some(2.0),
             ..Default::default()
         });
-        DrapedMap {
+        Some(DrapedMap {
             backend,
             target: OffscreenTarget::new(Size::new(SIDE, SIDE)),
             renderer,
@@ -215,7 +215,7 @@ impl DrapedMap {
             terrain: TerrainOptions::default(),
             work: TileWork::default(),
             _pool: pool,
-        }
+        })
     }
 
     fn update_parameters(&self) -> UpdateParameters {
@@ -337,12 +337,12 @@ impl Drop for DrapedMap {
 
 /// The map, settled, and the tiles and stacks of its drapes, one stack over
 /// four tiles.
-fn settled(tiles: Tiles) -> (DrapedMap, BTreeSet<(OverscaledTileID, usize)>) {
-    let mut map = DrapedMap::new(tiles);
+fn settled(tiles: Tiles) -> Option<(DrapedMap, BTreeSet<(OverscaledTileID, usize)>)> {
+    let mut map = DrapedMap::new(tiles)?;
     map.settle();
     let drapes = map.textured();
     assert_eq!(4, drapes.len(), "drapes: {drapes:?}");
-    (map, drapes)
+    Some((map, drapes))
 }
 
 /// The terrain tile at zoom 2 north-west of the view's center, which holds
@@ -353,7 +353,9 @@ fn north_west() -> OverscaledTileID {
 
 #[test]
 fn a_map_at_rest_draws_no_drape_again() {
-    let (mut map, drapes) = settled(Tiles::default());
+    let Some((mut map, drapes)) = settled(Tiles::default()) else {
+        return;
+    };
     let (full, drawn) = map.frame();
     assert!(full);
     assert!(drawn.is_empty(), "drapes drawn again: {drawn:?}");
@@ -364,7 +366,9 @@ fn a_map_at_rest_draws_no_drape_again() {
 /// layers' values, so every drape draws again, once.
 #[test]
 fn a_zoom_change_draws_every_drape_again() {
-    let (mut map, drapes) = settled(Tiles::default());
+    let Some((mut map, drapes)) = settled(Tiles::default()) else {
+        return;
+    };
     map.transform.jump_to(&CameraOptions { zoom: Some(2.1), ..Default::default() });
     let (_, drawn) = map.frame();
     assert_eq!(drapes, map.textured(), "the same drapes cover the view");
@@ -376,7 +380,9 @@ fn a_zoom_change_draws_every_drape_again() {
 /// drapes.
 #[test]
 fn a_pan_keeps_the_drapes() {
-    let (mut map, drapes) = settled(Tiles::default());
+    let Some((mut map, drapes)) = settled(Tiles::default()) else {
+        return;
+    };
     map.transform.jump_to(&CameraOptions { center: Some(LatLng::new(-9.0, 11.0).unwrap()), ..Default::default() });
     let drawn = map.settle();
     assert_eq!(drapes, map.textured(), "the same drapes cover the view");
@@ -396,7 +402,9 @@ const CIRCLE: &str = r#"{
 /// drapes again.
 #[test]
 fn a_paint_change_in_a_stack_draws_only_its_drapes_again() {
-    let (mut map, drapes) = settled(Tiles::default());
+    let Some((mut map, drapes)) = settled(Tiles::default()) else {
+        return;
+    };
     map.add_layer(CIRCLE, Some("raster"));
     map.settle();
     let both: BTreeSet<_> = drapes.iter().flat_map(|&(tile, _)| [(tile, 0), (tile, 1)]).collect();
@@ -416,7 +424,9 @@ fn a_paint_change_in_a_stack_draws_only_its_drapes_again() {
 /// else.
 #[test]
 fn new_data_draws_the_drapes_whose_tiles_changed_again() {
-    let (mut map, _) = settled(Tiles::default());
+    let Some((mut map, _)) = settled(Tiles::default()) else {
+        return;
+    };
     let geojson: geojson::GeoJson = r#"{
         "type": "Feature",
         "id": 1,
@@ -443,7 +453,9 @@ fn new_data_draws_the_drapes_whose_tiles_changed_again() {
 /// The drapes' keys don't tell what the style's images draw.
 #[test]
 fn a_new_image_draws_every_drape_again() {
-    let (mut map, drapes) = settled(Tiles::default());
+    let Some((mut map, drapes)) = settled(Tiles::default()) else {
+        return;
+    };
     let image = PremultipliedImage::from_vec(Size::new(2, 2), [255, 0, 0, 255].repeat(4));
     let image =
         mln_style::image::Impl::new("red".to_owned(), image, 1.0, false, Vec::new(), Vec::new(), None, None, None)
@@ -456,7 +468,9 @@ fn a_new_image_draws_every_drape_again() {
 #[test]
 fn a_new_source_tile_draws_the_drapes_it_overlaps_again() {
     let held = CanonicalTileID::new(3, 3, 3);
-    let (mut map, drapes) = settled(Tiles { held: Mutex::new(Some(held)), ..Tiles::default() });
+    let Some((mut map, drapes)) = settled(Tiles { held: Mutex::new(Some(held)), ..Tiles::default() }) else {
+        return;
+    };
     assert!(!map.tiles.waiting.lock().is_empty(), "the held tile was requested");
     map.tiles.release();
     let drawn = map.settle();
@@ -467,7 +481,9 @@ fn a_new_source_tile_draws_the_drapes_it_overlaps_again() {
 
 #[test]
 fn a_feature_state_change_draws_its_drapes_again() {
-    let (mut map, _) = settled(Tiles::default());
+    let Some((mut map, _)) = settled(Tiles::default()) else {
+        return;
+    };
     let mut hover = FeatureState::new();
     hover.insert("hover".into(), feature::Value::Bool(true));
     map.renderer.set_feature_state("shapes", None, "1", &hover);
@@ -494,7 +510,9 @@ const VIEWPORT_SHIFTED_LINE: &str = r#"{
 /// bearing.
 #[test]
 fn a_rotation_keeps_drapes_that_draw_nothing_by_the_bearing() {
-    let (mut map, drapes) = settled(Tiles::default());
+    let Some((mut map, drapes)) = settled(Tiles::default()) else {
+        return;
+    };
     for bearing in [1.0, 2.0] {
         map.transform.jump_to(&CameraOptions { bearing: Some(bearing), ..Default::default() });
         let (_, drawn) = map.frame();
@@ -508,7 +526,9 @@ fn a_rotation_keeps_drapes_that_draw_nothing_by_the_bearing() {
 /// while the stack under it keeps its drapes.
 #[test]
 fn a_rotation_draws_again_only_a_stack_that_draws_by_the_bearing() {
-    let (mut map, drapes) = settled(Tiles::default());
+    let Some((mut map, drapes)) = settled(Tiles::default()) else {
+        return;
+    };
     map.add_layer(CIRCLE, None);
     map.add_layer(VIEWPORT_SHIFTED_LINE, None);
     map.settle();
@@ -549,7 +569,9 @@ const MULTIPLIED_FILL: &str = r#"{
 /// bearing: a rotation draws no drape again.
 #[test]
 fn a_rotation_keeps_the_drapes_of_a_hillshade_lit_from_the_viewport() {
-    let (mut map, drapes) = settled(Tiles::default());
+    let Some((mut map, drapes)) = settled(Tiles::default()) else {
+        return;
+    };
     map.add_layer(VIEWPORT_LIT_HILLSHADE, Some("fill"));
     map.settle();
     let stacks = |stack| drapes.iter().map(move |&(tile, _)| (tile, stack));
@@ -566,7 +588,9 @@ fn a_rotation_keeps_the_drapes_of_a_hillshade_lit_from_the_viewport() {
 /// its colors, in its stack: a rotation draws that stack's drapes again.
 #[test]
 fn a_blend_over_a_hillshade_lit_from_the_viewport_draws_its_stack_by_the_bearing() {
-    let (mut map, drapes) = settled(Tiles::default());
+    let Some((mut map, drapes)) = settled(Tiles::default()) else {
+        return;
+    };
     map.add_layer(VIEWPORT_LIT_HILLSHADE, Some("fill"));
     map.add_layer(MULTIPLIED_FILL, None);
     map.settle();
@@ -588,7 +612,9 @@ fn center(longitude: f64) -> CameraOptions {
 /// that started there draws.
 #[test]
 fn a_pan_across_the_antimeridian_draws_what_a_new_map_draws() {
-    let mut map = DrapedMap::new(Tiles::default());
+    let Some(mut map) = DrapedMap::new(Tiles::default()) else {
+        return;
+    };
     map.transform.jump_to(&center(179.0));
     map.settle();
     let before = map.textured();
@@ -602,7 +628,9 @@ fn a_pan_across_the_antimeridian_draws_what_a_new_map_draws() {
         map.textured()
     );
 
-    let mut fresh = DrapedMap::new(Tiles::default());
+    let Some(mut fresh) = DrapedMap::new(Tiles::default()) else {
+        return;
+    };
     fresh.transform.jump_to(&center(-179.0));
     fresh.settle();
     assert!(map.image() == fresh.image(), "the map draws otherwise than a map that started there");
@@ -612,7 +640,9 @@ fn a_pan_across_the_antimeridian_draws_what_a_new_map_draws() {
 /// drew of them.
 #[test]
 fn the_rendering_stats_count_the_drapes() {
-    let (mut map, drapes) = settled(Tiles::default());
+    let Some((mut map, drapes)) = settled(Tiles::default()) else {
+        return;
+    };
     map.edit(Edit::SetLayerProperty {
         layer: "line".to_owned(),
         name: "line-color".to_owned(),
@@ -644,7 +674,9 @@ const DEPTH_STENCIL_BYTES: u64 = 4 * 1024 * 1024;
 /// them draw again at their whole side.
 #[test]
 fn a_memory_limit_halves_the_drapes_of_the_farthest_tiles_first() {
-    let (mut map, drapes) = settled(Tiles::default());
+    let Some((mut map, drapes)) = settled(Tiles::default()) else {
+        return;
+    };
     let whole: Vec<_> = map.sides().into_iter().map(|(tile, _)| (tile, 1024)).collect();
     assert_eq!(whole, map.sides());
 

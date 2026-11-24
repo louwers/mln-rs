@@ -107,9 +107,11 @@ fn circle_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|_, context| upload(&mut bucket, &mut BucketGeometry::default(), context));
-    assert!(bucket.has_data());
-    assert!(!bucket.needs_upload());
+    with_context(|_, context| {
+        upload(&mut bucket, &mut BucketGeometry::default(), context);
+        assert!(bucket.has_data());
+        assert!(!bucket.needs_upload());
+    });
 }
 
 // gtest: Buckets.FillBucket
@@ -133,8 +135,10 @@ fn fill_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|_, context| upload(&mut bucket, &mut BucketGeometry::default(), context));
-    assert!(!bucket.needs_upload());
+    with_context(|_, context| {
+        upload(&mut bucket, &mut BucketGeometry::default(), context);
+        assert!(!bucket.needs_upload());
+    });
 }
 
 /// The vertices of a fill-extrusion bucket of `tile` holding `polygon`
@@ -407,8 +411,10 @@ fn line_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|_, context| upload(&mut bucket, &mut BucketGeometry::default(), context));
-    assert!(!bucket.needs_upload());
+    with_context(|_, context| {
+        upload(&mut bucket, &mut BucketGeometry::default(), context);
+        assert!(!bucket.needs_upload());
+    });
 }
 
 // gtest: Buckets.LineBucketDrawablesBuildFromFreedIndexes
@@ -495,8 +501,10 @@ fn symbol_bucket() {
     assert!(bucket.has_data());
     assert!(bucket.needs_upload());
 
-    with_context(|_, context| upload(&mut bucket, &mut BucketGeometry::default(), context));
-    assert!(!bucket.needs_upload());
+    with_context(|_, context| {
+        upload(&mut bucket, &mut BucketGeometry::default(), context);
+        assert!(!bucket.needs_upload());
+    });
 }
 
 // gtest: Buckets.RasterBucket

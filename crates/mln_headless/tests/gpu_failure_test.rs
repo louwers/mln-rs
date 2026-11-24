@@ -231,13 +231,27 @@ struct FailingMap {
     _pool: Pool,
 }
 
+/// A WebGPU device, or `None` where no adapter is available: the test is
+/// skipped there, unless `MLN_RENDER_BACKEND` asks for `webgpu`.
+fn webgpu_device() -> Option<mln_webgpu::Device> {
+    let requested = std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case("webgpu"));
+    match mln_webgpu::Device::new(None) {
+        Ok(device) => Some(device),
+        Err(error) if error.kind == ErrorKind::Unsupported && !requested => {
+            eprintln!("skipped: {error}");
+            None
+        }
+        Err(error) => panic!("WebGPU device: {error}"),
+    }
+}
+
 impl FailingMap {
-    fn new(mode: MapMode, fail: Fail) -> Self {
+    fn new(mode: MapMode, fail: Fail) -> Option<Self> {
         Self::with_style(mode, &style(), fail)
     }
 
-    fn with_style(mode: MapMode, style: &str, fail: Fail) -> Self {
-        let device = mln_webgpu::Device::new(None).expect("a device");
+    fn with_style(mode: MapMode, style: &str, fail: Fail) -> Option<Self> {
+        let device = webgpu_device()?;
         let mut backend = mln_webgpu::RendererBackend::new(&device);
         let pool = Pool::new(4);
         let size = Size::new(SIDE, SIDE);
@@ -264,7 +278,7 @@ impl FailingMap {
         let camera = mln_map::style_camera(map.style());
         map.jump_to(&camera);
         let target = OffscreenTarget::new(size);
-        FailingMap { map, backend, target, renderer, drawn: 0, fail, failing: 0, shown: None, _pool: pool }
+        Some(FailingMap { map, backend, target, renderer, drawn: 0, fail, failing: 0, shown: None, _pool: pool })
     }
 
     /// Takes in the renderer's reports, repaints the map if its time came,
@@ -376,10 +390,14 @@ const FAILURES: [Fail; 6] = [
 /// draws what a new map's does.
 #[test]
 fn a_still_whose_frame_fails_ends_with_the_error() {
-    let new = FailingMap::new(MapMode::Static, Fail::DrawsIn("none")).still();
-    let new = new.expect("a new map's still never ended").expect("a new map's still");
+    let Some(mut new) = FailingMap::new(MapMode::Static, Fail::DrawsIn("none")) else {
+        return;
+    };
+    let new = new.still().expect("a new map's still never ended").expect("a new map's still");
     for fail in FAILURES {
-        let mut map = FailingMap::new(MapMode::Static, fail);
+        let Some(mut map) = FailingMap::new(MapMode::Static, fail) else {
+            return;
+        };
         map.failing = 1;
         assert_failed(map.still(), fail);
         assert_eq!((0, 1), (map.failing, map.frames()), "{fail:?}");
@@ -393,7 +411,9 @@ fn a_still_whose_frame_fails_ends_with_the_error() {
 /// one frame, each time it is asked for.
 #[test]
 fn a_still_whose_frames_always_fail_ends_with_the_error_each_time() {
-    let mut map = FailingMap::new(MapMode::Static, Fail::Passes("render target"));
+    let Some(mut map) = FailingMap::new(MapMode::Static, Fail::Passes("render target")) else {
+        return;
+    };
     map.failing = usize::MAX;
     assert_failed(map.still(), map.fail);
     assert_eq!(1, map.frames());
@@ -425,10 +445,10 @@ fn errors(events: &[MapEvent]) -> usize {
 
 /// What a continuous map of `style` shows once it goes idle, on a GPU that
 /// works.
-fn idle_image(style: &str) -> Vec<u8> {
-    let mut map = FailingMap::with_style(MapMode::Continuous, style, Fail::DrawsIn("none"));
+fn idle_image(style: &str) -> Option<Vec<u8>> {
+    let mut map = FailingMap::with_style(MapMode::Continuous, style, Fail::DrawsIn("none"))?;
     assert!(map.run(Duration::from_secs(10), idle).1, "a new map never went idle");
-    map.shown.take().expect("a new map showed nothing")
+    Some(map.shown.take().expect("a new map showed nothing"))
 }
 
 /// A continuous map whose line's shader always fails, as on a backend that
@@ -438,9 +458,16 @@ fn idle_image(style: &str) -> Vec<u8> {
 /// change, still draws.
 #[test]
 fn a_continuous_map_whose_draw_always_fails_shows_the_rest_and_goes_idle() {
-    let expected = idle_image(&styled(false));
-    assert!(expected != idle_image(&style()), "the line draws nothing");
-    let mut map = FailingMap::new(MapMode::Continuous, Fail::Shaders("Line"));
+    let Some(expected) = idle_image(&styled(false)) else {
+        return;
+    };
+    let Some(with_line) = idle_image(&style()) else {
+        return;
+    };
+    assert!(expected != with_line, "the line draws nothing");
+    let Some(mut map) = FailingMap::new(MapMode::Continuous, Fail::Shaders("Line")) else {
+        return;
+    };
     map.failing = usize::MAX;
     let (events, went_idle) = map.run(Duration::from_secs(10), idle);
     assert!(went_idle, "the map never went idle: {events:?}");
@@ -461,10 +488,14 @@ fn a_continuous_map_whose_draw_always_fails_shows_the_rest_and_goes_idle() {
 /// terrain does, with the camera on no ground.
 #[test]
 fn a_still_without_the_terrains_shader_draws_flat() {
-    let flat = FailingMap::new(MapMode::Static, Fail::DrawsIn("none")).still();
-    let flat = flat.expect("a flat map's still never ended").expect("a flat map's still");
+    let Some(mut flat) = FailingMap::new(MapMode::Static, Fail::DrawsIn("none")) else {
+        return;
+    };
+    let flat = flat.still().expect("a flat map's still never ended").expect("a flat map's still");
     let style = style().replacen(r#""version": 8,"#, r#""version": 8, "terrain": {"source": "dem"},"#, 1);
-    let mut map = FailingMap::with_style(MapMode::Static, &style, Fail::Shaders("TerrainShader"));
+    let Some(mut map) = FailingMap::with_style(MapMode::Static, &style, Fail::Shaders("TerrainShader")) else {
+        return;
+    };
     map.failing = usize::MAX;
     let image = map.still().expect("the still never ended").expect("the still");
     assert!(flat == image, "the still draws other pixels than a flat map's");
@@ -476,10 +507,14 @@ fn a_still_without_the_terrains_shader_draws_flat() {
 /// map that never failed shows, and goes idle.
 #[test]
 fn a_continuous_map_whose_frame_fails_once_reports_it_and_draws_again() {
-    let expected = idle_image(&style());
+    let Some(expected) = idle_image(&style()) else {
+        return;
+    };
     // A shader that failed would fail every frame: only a pass can fail once.
     for fail in [Fail::Passes("main buffer"), Fail::DrawsIn("main buffer")] {
-        let mut map = FailingMap::new(MapMode::Continuous, fail);
+        let Some(mut map) = FailingMap::new(MapMode::Continuous, fail) else {
+            return;
+        };
         assert!(map.run(Duration::from_secs(10), idle).1, "{fail:?}: a new map never went idle");
         let frames = map.frames();
         map.failing = 1;
