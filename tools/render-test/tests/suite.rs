@@ -25,7 +25,7 @@ use render_test::runner::ImplFactory;
 /// The runner's exit code for `args` (after `--manifestPath`, `--output`
 /// and `--jobs`).
 pub(crate) fn run(name: &str, args: &[&str], factory: Option<ImplFactory>) -> i32 {
-    let manifest = if cfg!(target_os = "macos") {
+    let manifest = if cfg!(target_vendor = "apple") {
         "manifests/macos-wgpu.json"
     } else {
         match std::env::var("MLN_RENDER_BACKEND").map(|backend| backend.to_ascii_lowercase()).as_deref() {

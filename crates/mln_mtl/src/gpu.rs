@@ -165,10 +165,36 @@ struct Bindings {
     tags: BindingsTags,
 }
 
+/// One vertex or instance buffer bound by a [`Geometry`].
+struct VertexBuffer {
+    index: usize,
+    buffer: Id<dyn MTLBuffer>,
+    offset: usize,
+    stride: usize,
+    step: VertexStep,
+}
+
+/// The byte offset at which a vertex or instance buffer starts when emulating
+/// `base_vertex` / `first_instance` on devices without hardware support.
+fn shifted_offset(vb: &VertexBuffer, base_vertex: i32, first_instance: u32) -> Result<usize, GpuError> {
+    let first = match vb.step {
+        VertexStep::Vertex => i64::from(base_vertex),
+        VertexStep::Instance => i64::from(first_instance),
+    };
+    if first == 0 {
+        return Ok(vb.offset);
+    }
+    i64::try_from(vb.offset)
+        .ok()
+        .and_then(|base| i64::try_from(vb.stride).ok()?.checked_mul(first)?.checked_add(base))
+        .and_then(|start| usize::try_from(start).ok())
+        .ok_or_else(|| GpuError::Unsupported("a draw from a base vertex or instance".to_owned()))
+}
+
 /// The vertex buffers, at their buffer indexes and from their offsets, and
 /// the index buffer, of draws.
 struct Geometry {
-    vertex_buffers: Vec<(usize, Id<dyn MTLBuffer>, usize)>,
+    vertex_buffers: Vec<VertexBuffer>,
     index_buffer: Id<dyn MTLBuffer>,
     tags: GeometryTags,
 }
@@ -191,7 +217,10 @@ struct OpenPass {
     pipeline: Option<PipelineId>,
     bindings: Option<BindingsId>,
     global_index: Option<u32>,
-    geometry: Option<GeometryId>,
+    /// The bound geometry and, when emulating base vertex/instance offsets on
+    /// devices without `base_vertex_instance`, the `(base_vertex, first_instance)`
+    /// whose offsets are currently bound.
+    geometry: Option<(GeometryId, i32, u32)>,
     dynamic: Option<DynamicState>,
 }
 
@@ -1496,9 +1525,15 @@ impl Gpu for MetalGpu {
         let (_, indices) = vertex_descriptor(name, source, active_attributes, desc.layouts)?;
         let native = |id| self.buffers.get(id).map(|buffer| buffer.buffer.clone()).ok_or(GpuError::UnknownId("buffer"));
         let mut vertex_buffers = Vec::with_capacity(desc.vertex_buffers.len());
-        for (&(buffer, offset), index) in desc.vertex_buffers.iter().zip(indices) {
+        for ((&(buffer, offset), layout), index) in desc.vertex_buffers.iter().zip(desc.layouts).zip(indices) {
             if let Some(index) = index {
-                vertex_buffers.push((index, native(buffer)?, offset as usize));
+                vertex_buffers.push(VertexBuffer {
+                    index,
+                    buffer: native(buffer)?,
+                    offset: offset as usize,
+                    stride: layout.stride as usize,
+                    step: layout.step,
+                });
             }
         }
         let index_buffer = native(desc.index_buffer)?;
@@ -1567,8 +1602,18 @@ impl Gpu for MetalGpu {
         let bindings = self.bindings.get(draw.bindings).ok_or(GpuError::UnknownId("bindings"))?;
         let geometry = self.geometries.get(draw.geometry).ok_or(GpuError::UnknownId("geometry"))?;
         validation::check_draw(draw, open.target.targets, &pipeline.tags, &bindings.tags, &geometry.tags)?;
-        if (draw.base_vertex != 0 || draw.first_instance != 0) && !self.base_vertex_instance {
-            return Err(GpuError::Unsupported("a draw from a base vertex or instance".to_owned()));
+        let (bind_base_vertex, bind_first_instance) =
+            if self.base_vertex_instance { (0, 0) } else { (draw.base_vertex, draw.first_instance) };
+        if !self.base_vertex_instance {
+            if (draw.base_vertex != 0 && !geometry.vertex_buffers.iter().any(|vb| vb.step == VertexStep::Vertex))
+                || (draw.first_instance != 0
+                    && !geometry.vertex_buffers.iter().any(|vb| vb.step == VertexStep::Instance))
+            {
+                return Err(GpuError::Unsupported("a draw from a base vertex or instance".to_owned()));
+            }
+            for vb in &geometry.vertex_buffers {
+                shifted_offset(vb, bind_base_vertex, bind_first_instance)?;
+            }
         }
         if draw.index_count == 0 || draw.instance_count == 0 {
             return Ok(());
@@ -1634,11 +1679,13 @@ impl Gpu for MetalGpu {
             }
             open.global_index = Some(draw.global_index);
         }
-        if open.geometry != Some(draw.geometry) {
-            for (index, buffer, offset) in &geometry.vertex_buffers {
-                unsafe { encoder.setVertexBuffer_offset_atIndex(Some(buffer), *offset, *index) };
+        let geometry_key = (draw.geometry, bind_base_vertex, bind_first_instance);
+        if open.geometry != Some(geometry_key) {
+            for vb in &geometry.vertex_buffers {
+                let offset = shifted_offset(vb, bind_base_vertex, bind_first_instance)?;
+                unsafe { encoder.setVertexBuffer_offset_atIndex(Some(&vb.buffer), offset, vb.index) };
             }
-            open.geometry = Some(draw.geometry);
+            open.geometry = Some(geometry_key);
         }
         let dynamic = draw.dynamic;
         let last = open.dynamic.replace(dynamic);
@@ -1677,16 +1724,27 @@ impl Gpu for MetalGpu {
         // Metal draws no wide lines.
         // SAFETY: the draw's checks passed.
         unsafe {
-            encoder.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset_instanceCount_baseVertex_baseInstance(
-                pipeline.primitive,
-                draw.index_count as usize,
-                MTLIndexType::UInt16,
-                &geometry.index_buffer,
-                draw.first_index as usize * size_of::<u16>(),
-                draw.instance_count as usize,
-                draw.base_vertex as isize,
-                draw.first_instance as usize,
-            );
+            if self.base_vertex_instance {
+                encoder.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset_instanceCount_baseVertex_baseInstance(
+                    pipeline.primitive,
+                    draw.index_count as usize,
+                    MTLIndexType::UInt16,
+                    &geometry.index_buffer,
+                    draw.first_index as usize * size_of::<u16>(),
+                    draw.instance_count as usize,
+                    draw.base_vertex as isize,
+                    draw.first_instance as usize,
+                );
+            } else {
+                encoder.drawIndexedPrimitives_indexCount_indexType_indexBuffer_indexBufferOffset_instanceCount(
+                    pipeline.primitive,
+                    draw.index_count as usize,
+                    MTLIndexType::UInt16,
+                    &geometry.index_buffer,
+                    draw.first_index as usize * size_of::<u16>(),
+                    draw.instance_count as usize,
+                );
+            }
         }
         Ok(())
     }
