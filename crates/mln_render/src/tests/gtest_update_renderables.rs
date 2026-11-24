@@ -46,6 +46,9 @@ fn uid(z: u8, x: i64, y: i64) -> UnwrappedTileID {
 /// mock.hpp `MockTileData`.
 struct MockTileData {
     renderable: bool,
+    /// Whether the tile can draw once it is retained as required, as one
+    /// whose origin delivers as it learns that, for this crate's own case.
+    renders_when_required: bool,
     tried_optional: bool,
     loaded: bool,
     tile_id: OverscaledTileID,
@@ -55,7 +58,14 @@ struct MockTileData {
 impl MockTileData {
     fn new(tile_id: OverscaledTileID, next_serial: &mut u64) -> Self {
         *next_serial += 1;
-        MockTileData { renderable: false, tried_optional: false, loaded: false, tile_id, serial: *next_serial }
+        MockTileData {
+            renderable: false,
+            renders_when_required: false,
+            tried_optional: false,
+            loaded: false,
+            tile_id,
+            serial: *next_serial,
+        }
     }
 }
 
@@ -136,7 +146,8 @@ impl RenderablesContext for Callbacks<'_> {
     }
 
     fn retain_tile(&mut self, tile: &OverscaledTileID, necessity: TileNecessity) {
-        let tile_data = &self.data_tiles[tile];
+        let tile_data = self.data_tiles.get_mut(tile).expect("null tile");
+        tile_data.renderable |= tile_data.renders_when_required && necessity == TileNecessity::Required;
         self.log.push(RetainTileDataAction(tile_data.tile_id, necessity));
     }
 
@@ -160,6 +171,26 @@ impl RenderablesContext for Callbacks<'_> {
     fn is_loaded(&self, tile: &OverscaledTileID) -> bool {
         self.data_tiles[tile].loaded
     }
+}
+
+// Port-only: an ideal tile that can draw once it is retained draws in the
+// same pass, without a look for its children or parent.
+#[test]
+fn an_ideal_tile_that_loads_as_it_is_retained_renders() {
+    let mut source = MockSource::new();
+    source.ideal_tiles.insert(OverscaledTileID::from_zxy(1, 1, 1));
+    let tile = source.create_tile_data(OverscaledTileID::from_zxy(1, 1, 1));
+    source.tile_mut(tile).renders_when_required = true;
+
+    source.update_renderables(None);
+    assert_eq!(
+        vec![
+            GetTileDataAction(oid(1, 0, (1, 1, 1)), Found),
+            RetainTileDataAction(oid(1, 0, (1, 1, 1)), TileNecessity::Required),
+            RenderTileAction(uid(1, 1, 1), tile),
+        ],
+        source.log
+    );
 }
 
 // gtest: UpdateRenderables.SingleTile
