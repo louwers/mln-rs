@@ -8,7 +8,9 @@ use std::ffi::{CStr, c_char, c_void};
 use std::os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd};
 
 use khronos_egl as egl;
-use mln_gfx::export::{DMA_BUF_MAX_PLANES, DRM_FORMAT_ABGR8888, DRM_FORMAT_MOD_LINEAR, DmaBufChoice};
+#[cfg(target_os = "linux")]
+use mln_gfx::export::DRM_FORMAT_MOD_LINEAR;
+use mln_gfx::export::{DMA_BUF_MAX_PLANES, DRM_FORMAT_ABGR8888, DmaBufChoice};
 use mln_gfx::{DmaBufFormat, DmaBufPlane, ExportKind, ExportedImage, ExportedRing};
 use mln_util::error::Error;
 use mln_util::size::Size;
@@ -224,9 +226,13 @@ impl Allocator {
 
 impl Drop for Allocator {
     fn drop(&mut self) {
-        if let Allocator::Gbm { gbm, device, .. } = self {
-            // SAFETY: the device is the allocator's, and its buffers are gone.
-            unsafe { (gbm.device_destroy)(*device) };
+        match self {
+            Allocator::Gbm { gbm, device, .. } => {
+                // SAFETY: the device is the allocator's, and its buffers are gone.
+                unsafe { (gbm.device_destroy)(*device) };
+            }
+            #[cfg(target_os = "linux")]
+            Allocator::Udmabuf { .. } => {}
         }
     }
 }

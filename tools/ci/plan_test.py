@@ -98,6 +98,7 @@ class PlanTest(unittest.TestCase):
             ["linux-arm64"],
             ["windows-x64"],
             ["android"],
+            ["freebsd"],
             ["web", "package"],
             ["linux-x64"],
         ):
@@ -203,6 +204,29 @@ class PlanTest(unittest.TestCase):
                 }
             ],
         )
+
+    def test_outputs_build_target_matrix_for_freebsd(self) -> None:
+        result = outputs(selected(["freebsd"]), secrets=False)
+        self.assertEqual(result["jobs"], ["commits", "lint", "target"])
+        self.assertFalse(result["secrets"])
+        self.assertEqual(result["test"], {"include": []})
+        self.assertEqual(result["backend"], {"include": []})
+        self.assertEqual(
+            result["target"]["include"],
+            [
+                {
+                    "target": "freebsd",
+                    "runner": "blacksmith-4vcpu-ubuntu-2604",
+                    "mise_env": "target-freebsd",
+                    "device": "FreeBSD virtual machine",
+                    "device_command": "bash tools/ci/boot-freebsd.sh",
+                    "clippy_targets": "x86_64-unknown-freebsd",
+                    "test_target": "x86_64-unknown-freebsd",
+                    "backend": "vulkan",
+                }
+            ],
+        )
+
     def test_dispatch_units_override_and_validation(self) -> None:
         self.assertIsNone(parse_dispatch_units(""))
         self.assertIsNone(parse_dispatch_units("   "))

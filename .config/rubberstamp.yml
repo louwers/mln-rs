@@ -28,8 +28,9 @@ ci:
     or Apple platform code for `macos`, Apple mobile/spatial targets or iOS
     simulator runs for `ios`, Android platform code or GPU behavior that differs
     on phones for `android`, Direct3D 12, WGL, or Windows platform code for
-    `windows-x64`, browser builds or rendered web output for `web`, or Cargo
-    manifests and file additions/deletions/renames for `package`.
+    `windows-x64`, FreeBSD cross-compilation or platform code for `freebsd`,
+    browser builds or rendered web output for `web`, or Cargo manifests and file
+    additions/deletions/renames for `package`.
 
     Changing a job's definition in `.github/workflows/ci.yml`,
     `tools/ci/jobs.json`, or `.github/actions/setup-ci-deps/` puts the units
@@ -114,6 +115,20 @@ ci:
             files:
               - crates/mln_d3d12/**
               - .github/actions/setup-windows-*/**
+          then: apply
+    freebsd:
+      covers: >-
+        FreeBSD x64 cross-target clippy and workspace and render tests on Vulkan
+        (with validation) in a FreeBSD virtual machine. Catches FreeBSD
+        platform, Unix/BSD portability, Zig cross-linking, and FreeBSD CI
+        issues. Routine platform-independent changes that `linux-x64` already
+        covers do not need it.
+      rules:
+        - if:
+            files:
+              - mise.target-freebsd.*
+              - tools/ci/boot-freebsd.sh
+              - tools/zig-cc-freebsd.sh
           then: apply
     web:
       covers: >-

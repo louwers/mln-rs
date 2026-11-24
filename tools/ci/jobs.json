@@ -137,5 +137,18 @@
     "test_target": "aarch64-apple-ios-sim",
     "backend": "metal"
   },
+  {
+    "job": "target",
+    "variant": "freebsd",
+    "unit": "freebsd",
+    "target": "freebsd",
+    "runner": "blacksmith-4vcpu-ubuntu-2604",
+    "mise_env": "target-freebsd",
+    "device": "FreeBSD virtual machine",
+    "device_command": "bash tools/ci/boot-freebsd.sh",
+    "clippy_targets": "x86_64-unknown-freebsd",
+    "test_target": "x86_64-unknown-freebsd",
+    "backend": "vulkan"
+  },
   { "job": "web", "unit": "web" }
 ]
