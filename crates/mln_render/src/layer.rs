@@ -1637,7 +1637,8 @@ impl<S: StyleLayerType> BuildCx<'_, S> {
     /// formatted text that the vertices draw, which a property's
     /// `["get", ..]` of the section reads; `patterns` the feature's patterns
     /// ([`LayoutCx::need_patterns`]), which the values take where the
-    /// layout's resolved patterns put them.
+    /// layout's resolved patterns put them. A layer whose vertices draw
+    /// neither a text section nor patterns passes `None` for both.
     pub fn populate<P: PaintBinders>(
         &self,
         binders: &mut LayerBinders<P>,

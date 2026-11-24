@@ -7,8 +7,10 @@
 //! with its shaders' [`source`]s).
 //!
 //! The smallest layer type, whose layers draw nothing, has both halves, a
-//! registry that adds them and a style that loads a layer of it; the
-//! `mln_ngon` crate's `org.maplibre.ngon` is a whole one that draws:
+//! registry that adds them and a style that loads a layer of it. The
+//! example checks that the type registers and parses; its hooks run only on
+//! a map, as those of the `mln_ngon` crate's `org.maplibre.ngon`, a whole
+//! type that draws, do in its render tests:
 //!
 //! ```
 //! use mln_rs::layer::{
