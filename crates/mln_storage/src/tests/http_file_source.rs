@@ -1,7 +1,6 @@
 // The tests run the HTTP client against a local HTTP server (httpmock).
 
 use std::cell::{Cell, RefCell};
-use std::net::TcpListener;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -580,9 +579,9 @@ fn unavailable_and_request_timeout_are_retried() {
 /// source retries with a backoff.
 #[test]
 fn a_refused_connection_is_a_connection_error() {
-    // Nothing listens on the port once the listener drops.
-    let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-    let res = load_once(&http_file_source(), Kind::Unknown, format!("http://127.0.0.1:{port}/test"));
+    // Port 1 is reserved, and nothing listens on it: a freed ephemeral
+    // port could be taken by another test's server before the dial.
+    let res = load_once(&http_file_source(), Kind::Unknown, "http://127.0.0.1:1/test".to_owned());
     let error = res.error.expect("error");
     assert_eq!(Reason::Connection, error.reason);
     assert!(res.data.is_none());
