@@ -47,12 +47,16 @@ runs:
       run: |
         dir="$RUNNER_TEMP/lavapipe"
         mkdir -p "$dir"
-        lists=("$GITHUB_ACTION_PATH/packages.sha256")
+        suffix=""
+        if [ "$RUNNER_ARCH" = ARM64 ]; then
+          suffix="-arm64"
+        fi
+        lists=("$GITHUB_ACTION_PATH/packages${suffix}.sha256")
         if [ "$VALIDATION_LAYER" = true ]; then
-          lists+=("$GITHUB_ACTION_PATH/validation-layer.sha256")
+          lists+=("$GITHUB_ACTION_PATH/validation-layer${suffix}.sha256")
         fi
         if [ "$EGL" = true ]; then
-          lists+=("$GITHUB_ACTION_PATH/packages-egl.sha256")
+          lists+=("$GITHUB_ACTION_PATH/packages-egl${suffix}.sha256")
         fi
         debs=()
         while read -r sha256 path; do

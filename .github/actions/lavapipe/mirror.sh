@@ -16,10 +16,21 @@ trap 'rm -rf "$dir"' EXIT
 debs=()
 while read -r sha256 path; do
   deb="$dir/${path##*/}"
-  curl -fsSL --retry 5 -o "$deb" "https://archive.ubuntu.com/ubuntu/$path"
+  if [[ "$path" == *_arm64.deb ]]; then
+    archive="https://ports.ubuntu.com/ubuntu-ports"
+  else
+    archive="https://archive.ubuntu.com/ubuntu"
+  fi
+  curl -fsSL --retry 5 -o "$deb" "$archive/$path"
   echo "$sha256  $deb" | sha256sum --check --quiet
   debs+=("$deb")
-done < <(cat "$here/packages.sha256" "$here/validation-layer.sha256" "$here/packages-egl.sha256")
+done < <(cat \
+  "$here/packages.sha256" \
+  "$here/validation-layer.sha256" \
+  "$here/packages-egl.sha256" \
+  "$here/packages-arm64.sha256" \
+  "$here/validation-layer-arm64.sha256" \
+  "$here/packages-egl-arm64.sha256")
 
 if ! gh release view "$tag" --repo "$repo" > /dev/null 2>&1; then
   gh release create "$tag" --repo "$repo" --prerelease \

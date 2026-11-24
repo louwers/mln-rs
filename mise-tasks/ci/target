@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+#MISE description="Run what CI's target job runs: cross-target clippy and nextest on the target device"
+#USAGE flag "--clippy-targets <targets>" default="" help="Comma-separated Rust target triples to lint with clippy"
+#USAGE flag "--test-target <target>" default="" help="Rust target triple to test with cargo nextest"
+#USAGE flag "--backend <backend>" default="" help="The backend, as MLN_RENDER_BACKEND names it, if any"
+# Lints and tests every library crate (root, crates/*, vendor/*) plus the
+# expression and render test suites, omitting desktop apps and host-only CLI
+# tools. The render suite through the worker codec runs on Linux x64 only.
+set -euo pipefail
+source tools/dev-shell.sh
+
+packages=()
+while IFS= read -r pkg; do
+    packages+=(-p "$pkg")
+done < <(
+    cargo metadata --no-deps --format-version 1 --locked | jq -r '
+        .workspace_root as $root |
+        .packages[] |
+        (.manifest_path | ltrimstr($root + "/")) as $rel |
+        select(
+            $rel == "Cargo.toml"
+            or ($rel | startswith("crates/"))
+            or ($rel | startswith("vendor/"))
+            or $rel == "tools/expression-test/Cargo.toml"
+            or $rel == "tools/render-test/Cargo.toml"
+        ) |
+        .name
+    '
+)
+
+if [[ -n ${usage_clippy_targets:-} ]]; then
+    IFS=',' read -r -a clippy_targets <<< "$usage_clippy_targets"
+    for target in "${clippy_targets[@]}"; do
+        [[ -n $target ]] || continue
+        rustup target add "$target"
+        dev_shell cargo clippy --target "$target" "${packages[@]}" --all-targets
+    done
+fi
+
+if [[ -n ${usage_test_target:-} ]]; then
+    rustup target add "$usage_test_target"
+    if [[ -n ${usage_backend:-} ]]; then
+        export MLN_RENDER_BACKEND="$usage_backend"
+        export MLN_VULKAN_VALIDATION=0 MTL_DEBUG_LAYER=0 MTL_DEBUG_LAYER_ERROR_MODE=assert
+        [[ $usage_backend == vulkan ]] && MLN_VULKAN_VALIDATION=abort
+        [[ $usage_backend == metal ]] && MTL_DEBUG_LAYER=1
+    fi
+    dev_shell cargo nextest run \
+        --target "$usage_test_target" \
+        "${packages[@]}" \
+        -E 'not test(=render_tests::render_tests_through_the_codec)'
+fi

@@ -9,6 +9,7 @@
     "os": "linux",
     "runner": "blacksmith-4vcpu-ubuntu-2604",
     "backend": "webgpu",
+    "coverage": "true",
     "save_toolchains": "false"
   },
   {
@@ -18,6 +19,17 @@
     "os": "macos",
     "runner": "blacksmith-6vcpu-macos-26",
     "backend": "metal",
+    "coverage": "true",
+    "save_toolchains": "true"
+  },
+  {
+    "job": "test",
+    "variant": "linux-arm64",
+    "unit": "linux-arm64",
+    "os": "linux-arm64",
+    "runner": "blacksmith-4vcpu-ubuntu-2604-arm",
+    "backend": "webgpu",
+    "coverage": "false",
     "save_toolchains": "true"
   },
   {
@@ -26,7 +38,8 @@
     "unit": "linux-x64",
     "os": "linux",
     "runner": "blacksmith-4vcpu-ubuntu-2604",
-    "backend": "vulkan"
+    "backend": "vulkan",
+    "coverage": "true"
   },
   {
     "job": "backend",
@@ -34,7 +47,26 @@
     "unit": "linux-x64",
     "os": "linux",
     "runner": "blacksmith-4vcpu-ubuntu-2604",
-    "backend": "gl"
+    "backend": "gl",
+    "coverage": "true"
+  },
+  {
+    "job": "backend",
+    "variant": "linux-arm64-vulkan",
+    "unit": "linux-arm64",
+    "os": "linux-arm64",
+    "runner": "blacksmith-4vcpu-ubuntu-2604-arm",
+    "backend": "vulkan",
+    "coverage": "false"
+  },
+  {
+    "job": "backend",
+    "variant": "linux-arm64-gl",
+    "unit": "linux-arm64",
+    "os": "linux-arm64",
+    "runner": "blacksmith-4vcpu-ubuntu-2604-arm",
+    "backend": "gl",
+    "coverage": "false"
   },
   {
     "job": "backend",
@@ -42,7 +74,8 @@
     "unit": "macos",
     "os": "macos",
     "runner": "blacksmith-6vcpu-macos-26",
-    "backend": "webgpu"
+    "backend": "webgpu",
+    "coverage": "true"
   },
   { "job": "web", "unit": "web" }
 ]

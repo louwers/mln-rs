@@ -19,6 +19,7 @@ self-hosted-runner:
   labels:
     - blacksmith-2vcpu-ubuntu-2604
     - blacksmith-4vcpu-ubuntu-2604
+    - blacksmith-4vcpu-ubuntu-2604-arm
     - blacksmith-6vcpu-macos-26
 ignores:
   - rule: use-trusted-publishing

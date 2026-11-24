@@ -24,9 +24,10 @@ ci:
 
     `linux-x64` is the general check for shared Rust code, rendering, and the C
     library. Another unit matters only when a change reaches what it alone
-    builds or runs: Metal or Apple platform code for `macos`, browser builds or
-    rendered web output for `web`, or Cargo manifests and file
-    additions/deletions/renames for `package`.
+    builds or runs: ARM64 Linux or lavapipe packaging for `linux-arm64`, Metal
+    or Apple platform code for `macos`, browser builds or rendered web output
+    for `web`, or Cargo manifests and file additions/deletions/renames for
+    `package`.
 
     Changing a job's definition in `.github/workflows/ci.yml`,
     `tools/ci/jobs.json`, or `.github/actions/setup-ci-deps/` puts the units
@@ -42,6 +43,19 @@ ci:
         native C ABI suite. This is the general correctness check for shared
         Rust crates, rendering, and the C library. Docs-only, browser-only, or
         macOS/Windows-only changes do not need it.
+    linux-arm64:
+      covers: >-
+        Linux ARM64 workspace and render tests on WebGPU (lavapipe),
+        backend-only tests on Vulkan (with validation) and OpenGL ES
+        (EGL/llvmpipe), and the native C ABI suite. Catches ARM64 architecture,
+        alignment/SIMD/char-signedness, and ARM64 Linux packaging or CI issues.
+        Routine architecture-independent changes that `linux-x64` already covers
+        do not need it.
+      rules:
+        - if:
+            files:
+              - .github/actions/lavapipe/**
+          then: apply
     macos:
       covers: >-
         macOS ARM64 clippy, workspace and render tests on Metal (with API

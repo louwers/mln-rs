@@ -1,9 +1,22 @@
 name: Setup CI dependencies
 description: >-
-  Bounds Linux apt mirrors, optionally installs lavapipe, restores and installs
-  the mise-pinned toolchains, and optionally configures Rust build caching.
+  Configures runner prerequisites, optionally installs lavapipe or device host
+  tools, restores and installs the mise-pinned toolchains, and optionally
+  configures Rust build caching.
 
 inputs:
+  mise-env:
+    description: >-
+      Optional mise configuration environment to activate (such as target-apple,
+      target-android, target-ohos, or target-freebsd).
+    required: false
+    default: ""
+  device:
+    description: >-
+      Target device booted by the job (such as iOS simulator, Android emulator,
+      OpenHarmony emulator, or FreeBSD virtual machine).
+    required: false
+    default: ""
   save-toolchains:
     description: >-
       Save the mise/rustup toolchain cache on a miss. Claimed by one job per
@@ -15,6 +28,12 @@ inputs:
       Restore (and optionally save) Cargo build caches with rust-cache.
     required: false
     default: "true"
+  rust-cache-key:
+    description: >-
+      Extra cache key suffix for rust-cache; defaults to mise-env so cross
+      targets do not share build artifacts with host jobs.
+    required: false
+    default: ""
   save-rust-cache:
     description: Whether rust-cache should save updates at the end of the job.
     required: false
@@ -40,10 +59,54 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Enable Git long paths
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: git config --global core.longpaths true
+
+    # A hard error, such as a DLL the loader cannot resolve, raises a modal
+    # dialog that stalls headless runners until timeout.
+    - name: Fail Windows hard errors instead of waiting on a dialog
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        Set-ItemProperty `
+          -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Windows" `
+          -Name ErrorMode -Value 2 -Type DWord
+        $reporting = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting"
+        New-Item -Path $reporting -Force | Out-Null
+        Set-ItemProperty -Path $reporting -Name DontShowUI -Value 1 -Type DWord
+
     - name: Bound apt downloads on Linux
       if: runner.os == 'Linux'
       shell: bash
       run: bash "${GITHUB_ACTION_PATH}/bound-apt.sh"
+
+    # aqua's WebAssembly/binaryen registry entry has no linux-arm64 target, so
+    # MISE_LOCKED=1 rejects it on ARM64 Linux; only the Linux x64 web job runs
+    # wasm-opt.
+    - name: Skip binaryen on Linux ARM64
+      if: runner.os == 'Linux' && runner.arch == 'ARM64'
+      shell: bash
+      run: echo "MISE_DISABLE_TOOLS=aqua:WebAssembly/binaryen" >> "$GITHUB_ENV"
+
+    - name: Select mise environment
+      if: inputs.mise-env != ''
+      shell: bash
+      env:
+        TARGET_MISE_ENV: ${{ inputs.mise-env }}
+      run: |
+        case "$TARGET_MISE_ENV" in
+          target-apple) echo "MISE_ENV=target-apple" >> "$GITHUB_ENV" ;;
+          target-android) echo "MISE_ENV=target-android" >> "$GITHUB_ENV" ;;
+          target-ohos) echo "MISE_ENV=target-ohos" >> "$GITHUB_ENV" ;;
+          target-freebsd) echo "MISE_ENV=target-freebsd" >> "$GITHUB_ENV" ;;
+          target-windows) echo "MISE_ENV=target-windows" >> "$GITHUB_ENV" ;;
+          *)
+            echo "error: unsupported mise-env: $TARGET_MISE_ENV" >&2
+            exit 1
+            ;;
+        esac
 
     - name: Install lavapipe
       if: runner.os == 'Linux' && inputs.lavapipe == 'true'
@@ -51,6 +114,46 @@ runs:
       with:
         validation-layer: ${{ inputs.lavapipe-validation-layer }}
         egl: ${{ inputs.lavapipe-egl }}
+
+    # devices-cli runs one emulator per 8 GiB of RAM by default; allow two on
+    # 16 GiB Linux runners when needed.
+    - name: Configure devices-cli for Android emulators
+      if: runner.os == 'Linux' && inputs.device == 'Android emulator'
+      shell: bash
+      run: |
+        mkdir -p ~/.config/devices-cli
+        echo 'max_instances = 2' > ~/.config/devices-cli/config.toml
+
+    - name: Install the OpenHarmony emulator host
+      if: runner.os == 'Linux' && inputs.device == 'OpenHarmony emulator'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install --no-install-recommends --yes qemu-system-x86
+
+    - name: Install the FreeBSD virtual machine host
+      if: runner.os == 'Linux' && inputs.device == 'FreeBSD virtual machine'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install --no-install-recommends --yes \
+          ovmf \
+          qemu-system-x86 \
+          qemu-utils
+
+    # Grant the runner process access to /dev/kvm so emulators and VMs use
+    # hardware acceleration instead of falling back to software emulation.
+    - name: Enable KVM for the device
+      if: runner.os == 'Linux' && inputs.device != ''
+      shell: bash
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+        sudo udevadm settle --timeout=10
+        ls -l /dev/kvm
+        test -r /dev/kvm
+        test -w /dev/kvm
 
     # `mise-action` writes its cache inside its own step and doesn't cover
     # ~/.rustup or ~/.cargo/bin. Restore before it runs and save once per
@@ -70,8 +173,14 @@ runs:
       id: toolchains
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
+        # Exclude single-job cross SDKs (OpenHarmony SDK and Oniro emulator
+        # image) so they do not bloat or evict the shared toolchain cache.
         path: |
           ~/.local/share/mise
+          !~/.local/share/mise/installs/http-oniro-emulator
+          !~/.local/share/mise/installs/ohos-sdk*
+          !~/.local/share/mise/plugins/ohos-sdk
+          ~/AppData/Local/mise
           ~/.rustup
           ~/.cargo/bin
         key: ${{ steps.toolchain-key.outputs.key }}
@@ -79,7 +188,7 @@ runs:
           ${{ steps.toolchain-key.outputs.prefix }}-
 
     # The tools that mise.toml pins, Rust from rust-toolchain.toml among
-    # them, at the versions mise.lock records.
+    # them, at the versions mise.lock records (plus any MISE_ENV overlay).
     - name: Install mise toolchains
       uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
       env:
@@ -95,6 +204,10 @@ runs:
       with:
         path: |
           ~/.local/share/mise
+          !~/.local/share/mise/installs/http-oniro-emulator
+          !~/.local/share/mise/installs/ohos-sdk*
+          !~/.local/share/mise/plugins/ohos-sdk
+          ~/AppData/Local/mise
           ~/.rustup
           ~/.cargo/bin
         key: ${{ steps.toolchain-key.outputs.key }}
@@ -111,4 +224,5 @@ runs:
       if: inputs.rust-cache == 'true'
       uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       with:
+        key: ${{ inputs.rust-cache-key || inputs.mise-env }}
         save-if: ${{ inputs.save-rust-cache }}

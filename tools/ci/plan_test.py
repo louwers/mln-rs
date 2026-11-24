@@ -91,7 +91,7 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(names(selected(None)), names(catalog()))
 
     def test_planned_units_run_only_their_jobs_and_always_on_jobs(self) -> None:
-        for units in (["macos"], ["web", "package"], ["linux-x64"]):
+        for units in (["macos"], ["linux-arm64"], ["web", "package"], ["linux-x64"]):
             with self.subTest(units=units):
                 self.assertEqual(names(selected(units)), ALWAYS | unit_names(*units))
 
@@ -100,13 +100,16 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(result["jobs"], ["commits", "lint"])
         self.assertEqual(result["test"], {"include": []})
         self.assertEqual(result["backend"], {"include": []})
+        self.assertEqual(result["target"], {"include": []})
 
     def test_unknown_rubberstamp_units_select_nothing_extra(self) -> None:
         self.assertEqual(names(selected(["windows-x64"])), ALWAYS)
 
     def test_outputs_name_each_job_once_and_build_matrices(self) -> None:
-        result = outputs(selected(["linux-x64", "web"]), secrets=False)
-        self.assertEqual(result["jobs"], ["commits", "lint", "test", "backend", "web"])
+        result = outputs(selected(["linux-x64", "linux-arm64", "web"]), secrets=False)
+        self.assertEqual(
+            result["jobs"], ["commits", "lint", "test", "backend", "web"]
+        )
         self.assertFalse(result["secrets"])
         self.assertEqual(
             result["test"]["include"],
@@ -115,14 +118,31 @@ class PlanTest(unittest.TestCase):
                     "os": "linux",
                     "runner": "blacksmith-4vcpu-ubuntu-2604",
                     "backend": "webgpu",
+                    "coverage": "true",
                     "save_toolchains": "false",
-                }
+                },
+                {
+                    "os": "linux-arm64",
+                    "runner": "blacksmith-4vcpu-ubuntu-2604-arm",
+                    "backend": "webgpu",
+                    "coverage": "false",
+                    "save_toolchains": "true",
+                },
             ],
         )
         self.assertEqual(
-            [entry["backend"] for entry in result["backend"]["include"]],
-            ["vulkan", "gl"],
+            [
+                (entry["os"], entry["backend"])
+                for entry in result["backend"]["include"]
+            ],
+            [
+                ("linux", "vulkan"),
+                ("linux", "gl"),
+                ("linux-arm64", "vulkan"),
+                ("linux-arm64", "gl"),
+            ],
         )
+        self.assertEqual(result["target"], {"include": []})
 
     def test_dispatch_units_override_and_validation(self) -> None:
         self.assertIsNone(parse_dispatch_units(""))
@@ -217,6 +237,7 @@ class PlanCommandTest(unittest.TestCase):
         self.assertEqual(parsed["secrets"], "true")
         self.assertEqual(json.loads(parsed["test"]), {"include": []})
         self.assertEqual(json.loads(parsed["backend"]), {"include": []})
+        self.assertEqual(json.loads(parsed["target"]), {"include": []})
         self.assertIn("Jobs: commits, lint, web", summary)
 
     def test_workflow_dispatch_units_override(self) -> None:

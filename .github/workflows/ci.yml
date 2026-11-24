@@ -52,6 +52,7 @@ jobs:
       secrets: ${{ steps.plan.outputs.secrets }}
       test: ${{ steps.plan.outputs.test }}
       backend: ${{ steps.plan.outputs.backend }}
+      target: ${{ steps.plan.outputs.target }}
     steps:
       - name: Plan coverage
         id: rubberstamp
@@ -153,18 +154,24 @@ jobs:
         with:
           save-toolchains: ${{ matrix.save_toolchains }}
           save-rust-cache: ${{ github.ref == 'refs/heads/main' }}
-          llvm-tools: "true"
+          llvm-tools: ${{ matrix.coverage }}
           lavapipe: ${{ runner.os == 'Linux' }}
 
       - name: Clippy
-        if: runner.os == 'macOS'
+        if: runner.os != 'Linux'
         run: mise run clippy
 
       - name: Test
         if: ${{ !cancelled() }}
         env:
           BACKEND: ${{ matrix.backend }}
-        run: mise run ci:test "$BACKEND"
+          COVERAGE: ${{ matrix.coverage }}
+        run: |
+          if [[ "$COVERAGE" == true ]]; then
+            mise run ci:test "$BACKEND"
+          else
+            mise run ci:test --no-coverage "$BACKEND"
+          fi
 
       # The render suites' reports and actual/diff images.
       - name: Upload the render test results
@@ -172,11 +179,15 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: render-tests-${{ matrix.os }}-${{ matrix.backend }}
-          path: target/llvm-cov-target/tmp/render_tests*
+          path: |
+            target/llvm-cov-target/tmp/render_tests*
+            target/tmp/render_tests*
           if-no-files-found: ignore
 
       - name: Upload the coverage to Codecov
-        if: ${{ !cancelled() && fromJSON(needs.plan.outputs.secrets) }}
+        if: >-
+          ${{ !cancelled() && matrix.coverage == 'true' &&
+          fromJSON(needs.plan.outputs.secrets) }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -213,7 +224,7 @@ jobs:
       - uses: ./.github/actions/setup-ci-deps
         with:
           save-rust-cache: ${{ github.ref == 'refs/heads/main' }}
-          llvm-tools: "true"
+          llvm-tools: ${{ matrix.coverage }}
 
       # For the C ABI suite. Installed before lavapipe so apt does not
       # downgrade the pinned Vulkan loader or Mesa EGL packages.
@@ -233,7 +244,13 @@ jobs:
       - name: Test
         env:
           BACKEND: ${{ matrix.backend }}
-        run: mise run ci:test --backend-only "$BACKEND"
+          COVERAGE: ${{ matrix.coverage }}
+        run: |
+          if [[ "$COVERAGE" == true ]]; then
+            mise run ci:test --backend-only "$BACKEND"
+          else
+            mise run ci:test --backend-only --no-coverage "$BACKEND"
+          fi
 
       - name: Test the C ABI
         if: ${{ !cancelled() && runner.os == 'Linux' }}
@@ -247,15 +264,81 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: render-tests-${{ matrix.os }}-${{ matrix.backend }}
-          path: target/llvm-cov-target/tmp/render_tests*
+          path: |
+            target/llvm-cov-target/tmp/render_tests*
+            target/tmp/render_tests*
           if-no-files-found: ignore
 
       - name: Upload the coverage to Codecov
-        if: ${{ !cancelled() && fromJSON(needs.plan.outputs.secrets) }}
+        if: >-
+          ${{ !cancelled() && matrix.coverage == 'true' &&
+          fromJSON(needs.plan.outputs.secrets) }}
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: target/llvm-cov/lcov.info
+
+  # Cross-compiled targets linted with clippy and tested on their simulator,
+  # emulator, or virtual machine through devices-cli (`mise run ci:target`).
+  target:
+    needs: plan
+    if:
+      github.event.pull_request.state != 'closed' &&
+      contains(fromJSON(needs.plan.outputs.jobs), 'target')
+    name: target (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.target) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - if: runner.os == 'Linux'
+        uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
+        with:
+          persist-credentials: false
+      - if: runner.os != 'Linux'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-ci-deps
+        with:
+          mise-env: ${{ matrix.mise_env }}
+          device: ${{ matrix.device }}
+          save-rust-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      # Named so an infra retry workflow can tell a device boot failure apart
+      # from a build or test failure.
+      - name: Boot ${{ matrix.device }}
+        if: matrix.device_command != ''
+        env:
+          DEVICE_COMMAND: ${{ matrix.device_command }}
+        run: mise exec -- bash -euo pipefail -c "$DEVICE_COMMAND"
+
+      - name: Clippy and test
+        env:
+          CLIPPY_TARGETS: ${{ matrix.clippy_targets }}
+          TEST_TARGET: ${{ matrix.test_target }}
+          BACKEND: ${{ matrix.backend }}
+        run: >-
+          mise run ci:target --clippy-targets "$CLIPPY_TARGETS" --test-target
+          "$TEST_TARGET" --backend "$BACKEND"
+
+      - name: Upload device logs
+        if: failure() && matrix.device != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: device-logs-${{ matrix.target }}-${{ github.run_attempt }}
+          path: ~/.local/state/devices-cli/logs
+          if-no-files-found: ignore
+
+      - name: Upload the render test results
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: render-tests-${{ matrix.target }}
+          path: target/*/tmp/render_tests*
+          if-no-files-found: ignore
 
   # The browser build in headless Chromium (`mise run web:check --profile
   # release`, examples/web/README.md): views of the render suite, served offline from
@@ -433,7 +516,8 @@ jobs:
   # required check, so `plan` must succeed and every other job must succeed or
   # be skipped.
   ci-passed:
-    needs: [plan, lint, package, test, backend, web, web-preview, commits]
+    needs:
+      [plan, lint, package, test, backend, target, web, web-preview, commits]
     if: always() && github.event.pull_request.state != 'closed'
     runs-on: blacksmith-2vcpu-ubuntu-2604
     timeout-minutes: 5

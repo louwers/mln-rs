@@ -88,9 +88,15 @@ def selected(units: list[str] | None) -> list[dict]:
     ]
 
 
+MATRIX_JOBS = ("test", "backend", "target")
+
+
 def outputs(rows: list[dict], secrets: bool) -> dict:
     """The plan job's outputs: the jobs that run and each matrix job's matrix."""
-    matrices = {row["job"]: {"include": []} for row in catalog() if "variant" in row}
+    matrices = {job: {"include": []} for job in MATRIX_JOBS}
+    for row in catalog():
+        if "variant" in row:
+            matrices.setdefault(row["job"], {"include": []})
     for row in rows:
         if "variant" in row:
             matrices[row["job"]]["include"].append(

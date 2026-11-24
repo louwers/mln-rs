@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-#MISE description="Run what CI's test and backend jobs run: the tests on one backend, with the coverage in target/llvm-cov/lcov.info"
+#MISE description="Run what CI's test and backend jobs run: the tests on one backend, with optional coverage in target/llvm-cov/lcov.info"
 #USAGE flag "--backend-only" help="Only the tests that depend on the backend (nextest's `backend` profile, .config/nextest.toml)"
+#USAGE flag "--no-coverage" help="Run cargo nextest directly without cargo-llvm-cov instrumentation"
 #USAGE arg "<backend>" help="The backend, as MLN_RENDER_BACKEND names it, such as webgpu, metal, vulkan or gl"
 # vulkan runs under Vulkan's validation layer and metal under Metal's API
 # validation, and either aborts on an error. The render suite through the
@@ -11,17 +12,21 @@ source tools/dev-shell.sh
 filter=()
 if [[ ${usage_backend_only:-false} == true ]]; then
     export NEXTEST_PROFILE=backend
-elif [[ "$(uname -s)" != Linux ]]; then
+elif [[ "$(uname -s)" != Linux || "$(uname -m)" != x86_64 ]]; then
     filter=(-E 'not test(=render_tests::render_tests_through_the_codec)')
 fi
 export MLN_RENDER_BACKEND="$usage_backend"
 export MLN_VULKAN_VALIDATION=0 MTL_DEBUG_LAYER=0 MTL_DEBUG_LAYER_ERROR_MODE=assert
 [[ $usage_backend == vulkan ]] && MLN_VULKAN_VALIDATION=abort
 [[ $usage_backend == metal ]] && MTL_DEBUG_LAYER=1
-# As `mise run coverage` does: a pool of profiles per test binary.
-export LLVM_PROFILE_FILE_NAME="${LLVM_PROFILE_FILE_NAME:-mln-rs-%8m.profraw}"
-rm -rf target/llvm-cov
-mkdir -p target/llvm-cov
-cargo llvm-cov clean --workspace
-dev_shell cargo llvm-cov nextest --no-report --workspace ${filter[@]+"${filter[@]}"}
-cargo llvm-cov report --workspace --lcov --output-path target/llvm-cov/lcov.info
+if [[ ${usage_no_coverage:-false} == true ]]; then
+    dev_shell cargo nextest run --workspace ${filter[@]+"${filter[@]}"}
+else
+    # As `mise run coverage` does: a pool of profiles per test binary.
+    export LLVM_PROFILE_FILE_NAME="${LLVM_PROFILE_FILE_NAME:-mln-rs-%8m.profraw}"
+    rm -rf target/llvm-cov
+    mkdir -p target/llvm-cov
+    cargo llvm-cov clean --workspace
+    dev_shell cargo llvm-cov nextest --no-report --workspace ${filter[@]+"${filter[@]}"}
+    cargo llvm-cov report --workspace --lcov --output-path target/llvm-cov/lcov.info
+fi
