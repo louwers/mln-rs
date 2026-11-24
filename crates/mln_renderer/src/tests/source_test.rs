@@ -1306,6 +1306,42 @@ fn a_cached_tile_shows_its_data_only_while_caching_rules_allow() {
     }
 }
 
+/// A tile that enters the view in another world copy starts from the cached
+/// tile of the same place only if caching rules would let that tile come
+/// back from the cache itself.
+#[test]
+fn a_world_copy_of_a_cached_tile_follows_its_caching_rules() {
+    for (expires, must_revalidate, reused) in [(i64::MAX, false, true), (0, false, true), (0, true, false)] {
+        let mut turned = TurningSource::new("mercator", Size::new(512, 512), 0);
+        turned.file_source.set_response(Kind::Tile, move |_| {
+            let mut response = Response::new();
+            response.no_content = true;
+            response.caching.expires = Some(mln_util::chrono::Timestamp::from_secs(expires));
+            response.caching.must_revalidate = must_revalidate;
+            Some(response)
+        });
+        // At zoom 2 the view is a quarter of the world wide: the west
+        // quarter's tiles go to the cache when the view moves east.
+        turned.load(-120.0, 2.0);
+        for _ in 0..3 {
+            turned.update(50.0, 2.0);
+            turned.placement_commits += 1;
+        }
+        let west_cached = turned.pyramid().slots().any(|slot| {
+            let id = slot.tile.id;
+            slot.place().is_cached() && id.canonical.x == 0 && id.wrap == 0
+        });
+        assert!(west_cached, "the west tiles");
+        // Across the antimeridian, the west quarter of the next world copy.
+        turned.update(170.0, 2.0);
+        let pyramid = turned.pyramid();
+        let copies: Vec<_> = pyramid.cover().filter(|tile| tile.id.wrap == 1 && tile.id.canonical.z == 2).collect();
+        assert!(!copies.is_empty(), "the view's tiles in the next world copy");
+        let renderable = copies.iter().all(|tile| tile.is_renderable());
+        assert_eq!(reused, renderable, "data that expires at {expires}, must revalidate: {must_revalidate}");
+    }
+}
+
 /// A tile the view leaves is held for its symbols' fade from the update that
 /// leaves it until two placements have committed since, however many
 /// updates come in between, and the next update drops it.

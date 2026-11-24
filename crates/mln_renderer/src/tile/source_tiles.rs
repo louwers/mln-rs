@@ -1030,15 +1030,19 @@ impl SourceTiles {
         true
     }
 
-    /// A copy of a renderable tile that is `id` in another world copy. The
-    /// copy's buckets, copies of the tile's, draw the geometry that the
-    /// first of either to upload moves into the context's stores
-    /// (`upload_at`).
+    /// A copy of a renderable tile that is `id` in another world copy: of a
+    /// cached tile only if caching rules let it come back from the cache
+    /// (`cache_pop`). The copy's buckets, copies of the tile's, draw the
+    /// geometry that the first of either to upload moves into the context's
+    /// stores (`upload_at`).
     pub(crate) fn world_copy(&self, id: &OverscaledTileID) -> Option<WorldCopy> {
+        let now = mln_util::chrono::now();
         let tile = self
             .same_place(id)
             .into_iter()
-            .filter_map(|at| Some(&self.tiles.get_index(at)?.1.tile))
+            .filter_map(|at| Some(self.tiles.get_index(at)?.1))
+            .filter(|slot| !slot.place.is_cached() || slot.tile.load.is_usable(now))
+            .map(|slot| &slot.tile)
             .find(|tile| tile.id.wrap != id.wrap && tile.is_renderable())?;
         WorldCopy::of(tile)
     }
