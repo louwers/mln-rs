@@ -41,7 +41,9 @@
 //! with no commands lent in the pass.
 //!
 //! The resources and their handles belong to the renderer's thread: they
-//! are neither `Send` nor `Sync`.
+//! are neither `Send` nor `Sync`. A handle names an entry only of the
+//! resources that made it: those of another renderer find nothing by it,
+//! which a debug build asserts.
 
 pub use mln_gfx::shaders::block::DrawBlocks;
 

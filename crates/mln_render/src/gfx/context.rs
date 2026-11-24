@@ -199,7 +199,7 @@ impl Resources {
     }
 
     /// `texture`, to change: the meshes that sample it see the change.
-    /// `None` for a texture that other resources made, and for a target's
+    /// `None` for a target's texture
     /// ([`Target::texture`](crate::draw::Target::texture)), which only its
     /// draws change.
     pub fn texture_mut(&mut self, texture: &crate::draw::Texture) -> Option<TextureMut<'_>> {

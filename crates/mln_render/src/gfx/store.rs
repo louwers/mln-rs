@@ -8,6 +8,7 @@
 
 use std::marker::PhantomData;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::gfx::release::{Release, ReleaseQueue};
 
@@ -132,11 +133,13 @@ pub(crate) struct Store<K, V> {
     chunks: Vec<Box<Chunk<V>>>,
     /// The lowest chunk with a vacant slot, or past the last chunk.
     first_vacant: usize,
-    /// The version of the next entry. Each entry has its own, so a key of an
-    /// entry the store removed names none of those it adds after.
-    next_version: u32,
     key: PhantomData<fn() -> K>,
 }
+
+/// The version of the next entry of any store. Each entry has its own, so
+/// a key of an entry a store removed names none of those it adds after,
+/// and a key of another renderer's store names none of a store's.
+static NEXT_VERSION: AtomicU32 = AtomicU32::new(0);
 
 /// Slots of a store, with which of them are vacant.
 struct Chunk<V> {
@@ -159,7 +162,7 @@ impl<V> Chunk<V> {
 
 impl<K, V> Default for Store<K, V> {
     fn default() -> Self {
-        Store { chunks: Vec::new(), first_vacant: 0, next_version: 0, key: PhantomData }
+        Store { chunks: Vec::new(), first_vacant: 0, key: PhantomData }
     }
 }
 
@@ -167,8 +170,7 @@ impl<K: Key, V> Store<K, V> {
     /// Keeps `value`, while a clone of the returned handle lasts, whose key
     /// goes to `queue` once the last clone drops.
     pub(crate) fn add(&mut self, value: V, queue: &Rc<ReleaseQueue>) -> Shared<K> {
-        let version = self.next_version;
-        self.next_version = version.wrapping_add(1);
+        let version = NEXT_VERSION.fetch_add(1, Ordering::Relaxed);
         if let Some(offset) = self.chunks.iter().skip(self.first_vacant).position(|chunk| chunk.vacant != 0) {
             self.first_vacant += offset;
         } else {
@@ -287,6 +289,17 @@ mod tests {
         assert_eq!(store.get(&second), Some(&2));
         assert_eq!(store.get(&kept), Some(&0));
         assert_eq!(store.remove(key), None);
+    }
+
+    // Each renderer has its own stores, whose keys name none of another's
+    // entries.
+    #[test]
+    fn a_key_names_no_entry_of_another_store() {
+        let (mut own, released) = store();
+        let (mut other, _) = store();
+        let entry = own.add(0, &released);
+        let _other_entry = other.add(1, &released);
+        assert!(!other.contains(entry.key()));
     }
 
     // Entries take the lowest vacant slots, and a store frees its chunks
