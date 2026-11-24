@@ -31,5 +31,8 @@ if [[ -n ${usage_test_target:-} ]]; then
         [[ $usage_backend == vulkan && $usage_test_target != *-android* ]] && MLN_VULKAN_VALIDATION=abort
         [[ $usage_backend == metal ]] && MTL_DEBUG_LAYER=1
     fi
+    # wgpu's Vulkan crashes on the x86_64 Android emulator's software Vulkan:
+    # the library's WebGPU draws through wgpu's OpenGL ES there.
+    [[ $usage_test_target == x86_64-linux-android ]] && export WGPU_BACKEND=gl
     dev_shell cargo nextest run --profile target --target "$usage_test_target" "${packages[@]}"
 fi

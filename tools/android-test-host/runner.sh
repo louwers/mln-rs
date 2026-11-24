@@ -42,7 +42,7 @@ if [[ -n ${DEVICES_CLI_OWNER:-} ]]; then
 fi
 args+=(
     --sync-env CARGO_MANIFEST_DIR --sync-env ANDROID_TEST_HOST --sync "$program"
-    --env 'RUST_*' --env 'MLN_*'
+    --env 'RUST_*' --env 'MLN_*' --env 'WGPU_*'
     -- "$host/launcher.sh" "$program" "$@"
 )
 exec devices-cli "${args[@]}" < /dev/null
