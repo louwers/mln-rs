@@ -68,13 +68,34 @@ impl LogicalExtent {
 }
 
 /// How a map orients and constrains its view.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Viewport {
     pub north_orientation: NorthOrientation,
     pub constrain_mode: ConstrainMode,
     pub viewport_mode: ViewportMode,
     /// Insets that move the vanishing point off the center of the map.
     pub frustum_offset: EdgeInsets,
+    /// Whether the center stands on the terrain, at its height under the
+    /// center, once that has loaded. The ground decides the altitude, so the
+    /// camera ignores the altitude it is given, such as the style's
+    /// `centerAltitude`: at rest the center stands on the ground, and a
+    /// command eases the altitude onto the ground where it leaves the center.
+    /// When this is off, every camera keeps the altitude it is given. Over
+    /// terrain, a command's eye stays above the ground either way. Without
+    /// terrain it changes nothing. On by default.
+    pub center_clamped_to_ground: bool,
+}
+
+impl Default for Viewport {
+    fn default() -> Self {
+        Viewport {
+            north_orientation: NorthOrientation::default(),
+            constrain_mode: ConstrainMode::default(),
+            viewport_mode: ViewportMode::default(),
+            frustum_offset: EdgeInsets::default(),
+            center_clamped_to_ground: true,
+        }
+    }
 }
 
 /// One view of a map: its camera, size, and projection.
@@ -118,6 +139,7 @@ impl MapView {
             north_orientation: viewport.north_orientation,
             viewport_mode: viewport.viewport_mode,
             constrain_mode: viewport.constrain_mode,
+            center_clamped_to_ground: viewport.center_clamped_to_ground,
             projection_definition: projection,
             projection_transition,
             padding: camera.padding,

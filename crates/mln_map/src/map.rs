@@ -84,8 +84,6 @@ pub struct Map {
     cross_source_collisions: bool,
     fast_pfor_enabled: bool,
     unused_style_image_policy: UnusedStyleImagePolicy,
-    /// Whether the center stands on the terrain.
-    center_clamped_to_ground: bool,
     /// How the map draws its terrain.
     terrain: TerrainOptions,
     /// The ground of the terrain as the renderer last drew it, while
@@ -190,6 +188,7 @@ impl Map {
         let loader = StyleLoader::new(Some(Arc::clone(&file_source)), pool, pixel_ratio);
         let mut transform = Transform::new(map_options.constrain_mode, map_options.viewport_mode);
         transform.set_north_orientation(map_options.north_orientation);
+        transform.set_center_clamped_to_ground(map_options.center_clamped_to_ground);
         let mut map = Map {
             updates: UpdateSlot::new(),
             transform,
@@ -198,7 +197,6 @@ impl Map {
             cross_source_collisions: map_options.cross_source_collisions,
             fast_pfor_enabled: map_options.fast_pfor_enabled,
             unused_style_image_policy: map_options.unused_style_image_policy,
-            center_clamped_to_ground: map_options.center_clamped_to_ground,
             terrain: map_options.terrain,
             elevation: None,
             ground_moves: 0,
@@ -1397,6 +1395,9 @@ impl Map {
         if viewport.frustum_offset != frustum_offset {
             self.transform.set_frustum_offset(&viewport.frustum_offset);
         }
+        if viewport.center_clamped_to_ground != self.center_clamped_to_ground() {
+            self.transform.set_center_clamped_to_ground(viewport.center_clamped_to_ground);
+        }
         self.on_update();
     }
 
@@ -1517,12 +1518,13 @@ impl Map {
     // MARK: - Terrain
 
     /// Sets whether the center stands on the terrain, at its height under
-    /// the center ([`MapOptions::center_clamped_to_ground`]). Turning it on
-    /// stands a camera at rest on the ground at once, without camera
-    /// events; turning it off leaves the altitude where it is.
+    /// the center ([`Viewport::center_clamped_to_ground`]), as
+    /// [`set_viewport`](Self::set_viewport) does. Turning it on stands a
+    /// camera at rest on the ground at once, without camera events; turning
+    /// it off leaves the altitude where it is.
     pub fn set_center_clamped_to_ground(&mut self, clamped: bool) {
-        if self.center_clamped_to_ground != clamped {
-            self.center_clamped_to_ground = clamped;
+        if self.center_clamped_to_ground() != clamped {
+            self.transform.set_center_clamped_to_ground(clamped);
             self.on_update();
         }
     }
@@ -1530,7 +1532,7 @@ impl Map {
     /// Whether the center stands on the terrain.
     #[must_use]
     pub fn center_clamped_to_ground(&self) -> bool {
-        self.center_clamped_to_ground
+        self.transform.view().center_clamped_to_ground()
     }
 
     /// Hands the transform the terrain the camera stands on
@@ -1570,7 +1572,7 @@ impl Map {
             self.elevation = None;
         }
         self.terrain_applies()
-            .then(|| TerrainGround { elevation: self.elevation.clone(), clamped: self.center_clamped_to_ground })
+            .then(|| TerrainGround { elevation: self.elevation.clone(), clamped: self.center_clamped_to_ground() })
     }
 
     /// Whether the style's terrain applies: it has terrain, outside tile
@@ -1669,7 +1671,6 @@ impl Map {
             view: state.view().map_view(f64::from(self.pixel_ratio)),
             globe_rendering: state.view().is_globe(),
             globe_free_bearing: transform.is_globe_free_bearing(),
-            center_clamped_to_ground: self.center_clamped_to_ground,
         }
     }
 

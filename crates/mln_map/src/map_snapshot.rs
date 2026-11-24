@@ -30,8 +30,6 @@ pub struct MapSnapshot {
     pub globe_rendering: bool,
     /// The setting of [`Map::set_globe_free_bearing`](crate::Map::set_globe_free_bearing).
     pub globe_free_bearing: bool,
-    /// The setting of [`Map::set_center_clamped_to_ground`](crate::Map::set_center_clamped_to_ground).
-    pub center_clamped_to_ground: bool,
 }
 
 /// How a map picks the tiles to load.

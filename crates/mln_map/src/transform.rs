@@ -652,6 +652,12 @@ impl Transform {
         self.state.set_viewport_mode(mode);
     }
 
+    /// Sets whether the center stands on the terrain. The map hands the
+    /// setting to [`set_terrain`](Self::set_terrain) on its next update.
+    pub fn set_center_clamped_to_ground(&mut self, clamped: bool) {
+        self.state.set_center_clamped_to_ground(clamped);
+    }
+
     // MARK: - Projection mode
 
     pub(crate) fn set_projection_mode(&mut self, options: &ProjectionMode) {

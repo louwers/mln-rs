@@ -86,6 +86,7 @@ fn snapshot_reports_every_member() {
         north_orientation: NorthOrientation::Rightwards,
         viewport_mode: ViewportMode::FlippedY,
         frustum_offset: insets(1.0, 2.0, 3.0, 4.0),
+        center_clamped_to_ground: false,
         ..map.snapshot().view.viewport
     });
     map.set_projection_mode(&ProjectionMode::default().with_axonometric(true).with_x_skew(0.25).with_y_skew(0.5));
@@ -159,6 +160,8 @@ fn snapshot_reports_every_member() {
     assert_eq!(view.viewport.constrain_mode, ConstrainMode::WidthAndHeight);
     assert_eq!(view.viewport.viewport_mode, ViewportMode::FlippedY);
     assert_eq!(view.viewport.frustum_offset, insets(1.0, 2.0, 3.0, 4.0));
+    assert!(!view.viewport.center_clamped_to_ground);
+    assert!(!map.center_clamped_to_ground());
 
     map.cancel_transitions();
     map.apply_camera_delta(&CameraDelta { phase: GesturePhase::End, ..CameraDelta::default() }).unwrap();

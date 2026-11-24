@@ -83,6 +83,9 @@ pub(crate) struct ViewParams {
     /// The constrain mode of the map the view comes from, which
     /// [`View::map_view`] reports.
     pub(crate) constrain_mode: ConstrainMode,
+    /// Whether the center of the map the view comes from stands on its
+    /// terrain, which [`View::map_view`] reports.
+    pub(crate) center_clamped_to_ground: bool,
     /// The style's projection, as it was last set.
     pub(crate) projection_definition: ProjectionDefinition,
     /// 0 is Mercator, 1 is the globe, in between is the transition.
@@ -120,6 +123,7 @@ impl ViewParams {
             north_orientation: NorthOrientation::Upwards,
             viewport_mode,
             constrain_mode,
+            center_clamped_to_ground: true,
             projection_definition: ProjectionDefinition::default(),
             projection_transition: 0.0,
             padding: EdgeInsets::default(),
@@ -272,6 +276,13 @@ impl View {
     #[must_use]
     pub fn viewport_mode(&self) -> ViewportMode {
         self.params.viewport_mode
+    }
+
+    /// Whether the map's center stands on its terrain
+    /// ([`Viewport::center_clamped_to_ground`]).
+    #[must_use]
+    pub fn center_clamped_to_ground(&self) -> bool {
+        self.params.center_clamped_to_ground
     }
 
     /// The center's offset from the middle of the view that the padding
@@ -455,6 +466,7 @@ impl View {
                 north_orientation: self.params.north_orientation,
                 constrain_mode: self.params.constrain_mode,
                 viewport_mode: self.params.viewport_mode,
+                center_clamped_to_ground: self.params.center_clamped_to_ground,
                 frustum_offset: self.params.frustum_offset,
             },
             projection: self.params.projection_definition,

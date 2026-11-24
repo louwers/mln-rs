@@ -50,6 +50,8 @@ pub struct ViewportOptions {
     pub constrain_mode: Option<ConstrainMode>,
     pub viewport_mode: Option<ViewportMode>,
     pub frustum_offset: Option<EdgeInsets>,
+    /// As `mln_map::Viewport::center_clamped_to_ground`.
+    pub center_clamped_to_ground: Option<bool>,
 }
 
 /// How the map picks the tiles to load, as its snapshot's
@@ -104,6 +106,7 @@ pub(crate) fn set_viewport(map: &mut mln_map::Map, options: &ViewportOptions) {
     viewport.constrain_mode = options.constrain_mode.unwrap_or(viewport.constrain_mode);
     viewport.viewport_mode = options.viewport_mode.unwrap_or(viewport.viewport_mode);
     viewport.frustum_offset = options.frustum_offset.unwrap_or(viewport.frustum_offset);
+    viewport.center_clamped_to_ground = options.center_clamped_to_ground.unwrap_or(viewport.center_clamped_to_ground);
     map.set_viewport(&viewport);
 }
 

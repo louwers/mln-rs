@@ -5,8 +5,8 @@ use std::sync::{Arc, OnceLock, Weak};
 
 use mln_map::{
     BoundOptions, Camera, CameraCommandId, CameraDelta, CameraOptions, CameraUpdate, Elevation, FrameClock,
-    FreeCameraOptions, LogicalExtent, MapDebugOptions, MapEvent, MapMode, MapProjection, MapSnapshot, ProjectionMode,
-    StyleLoadError, TransitionEnd, TransitionOutcome,
+    FreeCameraOptions, LogicalExtent, MapDebugOptions, MapEvent, MapMode, MapProjection, MapSnapshot, MapView,
+    ProjectionMode, StyleLoadError, TransitionEnd, TransitionOutcome,
 };
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_renderer::{Registry, UpdateReader};
@@ -463,16 +463,17 @@ impl Map {
         Ok(snapshot)
     }
 
-    /// A projection of the map's view as of [`snapshot`](Self::snapshot),
-    /// on the ground the map drew then (`mln_map::Map::ground`): it
-    /// converts as the map does, over terrain on the ground the renderer
-    /// drew, else on the flat map. It is the caller's, and doesn't follow
-    /// the map.
+    /// A projection of `view`, or of the map's view as of
+    /// [`snapshot`](Self::snapshot) for `None`, on the ground the map drew
+    /// then (`mln_map::Map::ground`): it converts as the map does, over
+    /// terrain on the ground the renderer drew, else on the flat map. It is
+    /// the caller's, and doesn't follow the map.
     ///
-    /// Fails as [`snapshot`](Self::snapshot) does.
-    pub fn projection(&self) -> Result<MapProjection, Error> {
-        let (view, ground) = self.published(|state| (state.snapshot.view, state.ground.clone()))?;
-        Ok(MapProjection::from_view(&view)?.with_ground(ground))
+    /// Fails as [`snapshot`](Self::snapshot) does, and for `view` as
+    /// [`MapView::to_state`](mln_map::MapView::to_state).
+    pub fn projection(&self, view: Option<&MapView>) -> Result<MapProjection, Error> {
+        let (snapshot_view, ground) = self.published(|state| (state.snapshot.view, state.ground.clone()))?;
+        Ok(MapProjection::from_view(view.unwrap_or(&snapshot_view))?.with_ground(ground))
     }
 
     /// What `read` takes from the map's last flush. Fails with
@@ -1486,15 +1487,6 @@ impl Map {
     pub fn set_globe_free_bearing_enabled(&self, enabled: bool) -> Result<Completion<Applied>, Error> {
         self.command(move |map| {
             map.set_globe_free_bearing(enabled);
-            Ok(())
-        })
-    }
-
-    /// Sets whether the center stands on the terrain, as
-    /// `mln_map::Map::set_center_clamped_to_ground` describes.
-    pub fn set_center_clamped_to_ground_enabled(&self, enabled: bool) -> Result<Completion<Applied>, Error> {
-        self.command(move |map| {
-            map.set_center_clamped_to_ground(enabled);
             Ok(())
         })
     }

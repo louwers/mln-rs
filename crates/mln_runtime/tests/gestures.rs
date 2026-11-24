@@ -76,7 +76,7 @@ fn a_box_zoom_over_terrain_centers_on_the_boxed_ground() {
     assert!(!near(ground, sea_level, 1e-3), "{ground:?} {sea_level:?}");
     let under = GestureCamera::lat_lng_for_pixel(&map, middle).unwrap();
     assert!(near(under, ground, 1e-6), "{under:?}, not {ground:?}");
-    let projected = map.projection().unwrap().lat_lng_for_pixel(&middle, WrapMode::Unwrapped).unwrap();
+    let projected = map.projection(None).unwrap().lat_lng_for_pixel(&middle, WrapMode::Unwrapped).unwrap();
     assert_eq!(under, projected);
 
     let mut gestures = GestureRecognizer::new(map.clone());

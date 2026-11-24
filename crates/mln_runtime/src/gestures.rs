@@ -55,7 +55,7 @@ impl GestureCamera for Map {
     /// On the ground the map draws, so that a box zoom over terrain centers
     /// on the ground it boxed.
     fn lat_lng_for_pixel(&self, pixel: ScreenCoordinate) -> Option<LatLng> {
-        self.projection().ok()?.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).ok()
+        self.projection(None).ok()?.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).ok()
     }
 
     fn apply_camera_delta(&mut self, delta: &CameraDelta) {

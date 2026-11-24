@@ -223,6 +223,10 @@ impl TransformState {
         self.update(|p| p.viewport_mode = mode);
     }
 
+    pub fn set_center_clamped_to_ground(&mut self, clamped: bool) {
+        self.update(|p| p.center_clamped_to_ground = clamped);
+    }
+
     pub fn set_padding(&mut self, padding: &EdgeInsets) {
         self.update(|p| p.padding = *padding);
     }
