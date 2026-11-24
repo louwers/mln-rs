@@ -253,9 +253,11 @@ impl<E: 'static> DatabaseFileSource<E> {
     }
 
     /// Stops the database, as its drop does, for an owner that must know
-    /// its worker has ended although the database may be held elsewhere:
-    /// waits for the worker unless it runs on the worker's thread. The work
-    /// sent after drops, and requests fail as when the thread didn't start.
+    /// its worker has ended although the database may be held elsewhere.
+    /// The first call waits for the worker, unless it runs on the worker's
+    /// thread; a later call returns at once, so one owner shuts it down.
+    /// The work sent after drops, and requests fail as when the thread
+    /// didn't start.
     pub fn shut_down(&self) {
         self.queue.stop();
         // Released before the join, as the thread may load from this source

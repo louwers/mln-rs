@@ -729,9 +729,11 @@ impl OnlineFileSource {
     }
 
     /// Stops the source, as its drop does, for an owner that must know its
-    /// thread has ended although the source may be held elsewhere: waits
-    /// for that thread unless it runs on it. Requests in flight end without
-    /// a response, and later ones fail as when the thread didn't start.
+    /// thread has ended although the source may be held elsewhere. The first
+    /// call waits for that thread, unless it runs on it; a later call
+    /// returns at once, so one owner shuts it down. Requests in flight end
+    /// without a response, and later ones fail as when the thread didn't
+    /// start.
     pub fn shut_down(&self) {
         self.queue.stop();
         #[cfg(not(target_family = "wasm"))]
