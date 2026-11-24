@@ -94,6 +94,7 @@ class PlanTest(unittest.TestCase):
     def test_planned_units_run_only_their_jobs_and_always_on_jobs(self) -> None:
         for units in (
             ["macos"],
+            ["ios"],
             ["linux-arm64"],
             ["android"],
             ["web", "package"],
@@ -153,7 +154,9 @@ class PlanTest(unittest.TestCase):
 
     def test_android_unit_populates_target_matrix(self) -> None:
         result = outputs(selected(["android"]), secrets=False)
-        self.assertEqual(result["jobs"], ["commits", "lint", "target", "prepare-device-tests"])
+        self.assertEqual(
+            result["jobs"], ["commits", "lint", "target", "prepare-device-tests"]
+        )
         self.assertFalse(result["secrets"])
         self.assertEqual(result["test"], {"include": []})
         self.assertEqual(result["backend"], {"include": []})
@@ -172,6 +175,33 @@ class PlanTest(unittest.TestCase):
             ],
         )
 
+    def test_outputs_include_target_matrix_for_ios(self) -> None:
+        result = outputs(selected(["ios"]), secrets=False)
+        self.assertEqual(result["jobs"], ["commits", "lint", "target"])
+        self.assertFalse(result["secrets"])
+        self.assertEqual(result["test"], {"include": []})
+        self.assertEqual(result["backend"], {"include": []})
+        self.assertEqual(
+            result["target"]["include"],
+            [
+                {
+                    "target": "ios",
+                    "runner": "blacksmith-6vcpu-macos-26",
+                    "mise_env": "target-apple",
+                    "device": "iOS simulator",
+                    "device_command": "devices-cli get ios",
+                    "clippy_targets": (
+                        "aarch64-apple-ios,"
+                        "aarch64-apple-ios-sim,"
+                        "aarch64-apple-ios-macabi,"
+                        "aarch64-apple-visionos,"
+                        "aarch64-apple-visionos-sim"
+                    ),
+                    "test_target": "aarch64-apple-ios-sim",
+                    "backend": "metal",
+                }
+            ],
+        )
     def test_dispatch_units_override_and_validation(self) -> None:
         self.assertIsNone(parse_dispatch_units(""))
         self.assertIsNone(parse_dispatch_units("   "))

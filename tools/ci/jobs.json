@@ -87,5 +87,18 @@
     "clippy_targets": "aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android"
   },
   { "job": "prepare-device-tests", "unit": "android" },
+  {
+    "job": "target",
+    "variant": "ios",
+    "unit": "ios",
+    "target": "ios",
+    "runner": "blacksmith-6vcpu-macos-26",
+    "mise_env": "target-apple",
+    "device": "iOS simulator",
+    "device_command": "devices-cli get ios",
+    "clippy_targets": "aarch64-apple-ios,aarch64-apple-ios-sim,aarch64-apple-ios-macabi,aarch64-apple-visionos,aarch64-apple-visionos-sim",
+    "test_target": "aarch64-apple-ios-sim",
+    "backend": "metal"
+  },
   { "job": "web", "unit": "web" }
 ]
