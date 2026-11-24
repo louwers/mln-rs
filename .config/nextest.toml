@@ -26,7 +26,6 @@ default-filter = """
 # x64 only.
 [profile.target]
 default-filter = "not test(=render_tests::render_tests_through_the_codec)"
-fail-fast = false
 
 # Android's and OpenHarmony's devices run each test from a copy of its package,
 # without the host's binaries: not the tests of proc-macro crates, which are

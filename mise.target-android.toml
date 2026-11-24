@@ -45,12 +45,16 @@ CARGO_TARGET_I686_LINUX_ANDROID_LINKER = "{{ env.CC_i686_linux_android }}"
 # Cargo's runners, for the 64-bit targets, whose emulators run on a host of the
 # same architecture: each test runs on this checkout's emulator, or a device
 # assigned to it, in a Java VM's process (tools/android-test-host), with a copy
-# of its package directory and the RUST_ and MLN_ variables.
+# of its package directory and the RUST_, MLN_ and WGPU_ variables.
 CARGO_TARGET_AARCH64_LINUX_ANDROID_RUNNER = "{{ config_root }}/tools/android-test-host/runner.sh arm64-v8a"
 CARGO_TARGET_X86_64_LINUX_ANDROID_RUNNER = "{{ config_root }}/tools/android-test-host/runner.sh x86_64"
 # Their executables export main, which the test host calls.
 CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS = "-C link-arg=-Wl,--export-dynamic-symbol=main"
 CARGO_TARGET_X86_64_LINUX_ANDROID_RUSTFLAGS = "-C link-arg=-Wl,--export-dynamic-symbol=main"
+# The emulator's Vulkan driver (vulkan.ranchu) dereferences a null pointer when
+# wgpu names a descriptor set layout, as it does for each labeled object in a
+# debug build: wgpu leaves them unnamed.
+WGPU_DISCARD_HAL_LABELS = "1"
 # A device runs a test from a copy of its package: nextest's target profile
 # (.config/nextest.toml) and the render suite in the test's process.
 NEXTEST_PROFILE = "target"

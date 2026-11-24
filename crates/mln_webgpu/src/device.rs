@@ -7,6 +7,8 @@
 //! backends, kept for the life of the process: the Vulkan loader crashes when
 //! one thread names an object (`vkSetDebugUtilsObjectNameEXT`, which wgpu
 //! calls for each labeled object) while another thread destroys an instance.
+//! The instance takes wgpu's other variables too, such as
+//! `WGPU_DISCARD_HAL_LABELS`, which leaves the objects unnamed.
 
 use std::sync::{Arc, OnceLock};
 
@@ -61,7 +63,7 @@ fn shared_instance(backends: wgpu::Backends) -> wgpu::Instance {
     }
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends,
-        ..wgpu::InstanceDescriptor::new_without_display_handle()
+        ..wgpu::InstanceDescriptor::new_without_display_handle_from_env()
     });
     instances.push((backends, instance.clone()));
     instance

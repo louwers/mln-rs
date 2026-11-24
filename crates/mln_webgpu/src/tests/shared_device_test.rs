@@ -81,7 +81,7 @@ fn a_backend_renders_on_a_device_the_host_made() {
     });
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends,
-        ..wgpu::InstanceDescriptor::new_without_display_handle()
+        ..wgpu::InstanceDescriptor::new_without_display_handle_from_env()
     });
     let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) {
         Ok(adapter) => adapter,
