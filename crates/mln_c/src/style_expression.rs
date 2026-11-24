@@ -399,7 +399,7 @@ mod tests {
         if status != MLN_STATUS_OK {
             return Err((status, message(&out).to_owned()));
         }
-        let bytes: Vec<u8> = json[..length].iter().map(|byte| *byte as u8).collect();
+        let bytes: Vec<u8> = json[..length].iter().map(|byte| byte.to_ne_bytes()[0]).collect();
         Ok(String::from_utf8(bytes).unwrap())
     }
 
@@ -642,7 +642,7 @@ mod tests {
             assert_eq!(evaluate(exact.as_mut_ptr(), exact.len(), &raw mut length), MLN_STATUS_OK);
             assert!(exact.iter().all(|byte| *byte == b'x' as c_char));
             assert_eq!(evaluate(fits.as_mut_ptr(), fits.len(), &raw mut length), MLN_STATUS_OK);
-            assert_eq!(fits.map(|byte| byte as u8), *b"\"abcdef\"\0");
+            assert_eq!(fits.map(|byte| byte.to_ne_bytes()[0]), *b"\"abcdef\"\0");
             assert_eq!(evaluate(core::ptr::null_mut(), 1, &raw mut length), MLN_STATUS_INVALID_ARGUMENT);
             assert_eq!(evaluate(fits.as_mut_ptr(), fits.len(), core::ptr::null_mut()), MLN_STATUS_INVALID_ARGUMENT);
         }
