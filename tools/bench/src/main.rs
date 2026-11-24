@@ -29,7 +29,7 @@ static ALLOCATOR: CountingAllocator = CountingAllocator;
 const USAGE: &str = "usage:
   mln-bench list [--filter <s>]... [--json]
   mln-bench run [--filter <s>]... [--images <dir>] [--json]
-  mln-bench compare <ref> [--filter <s>]... [--rounds <n>] [--max-load <n>] [--json]
+  mln-bench compare <ref> [--filter <s>]... [--rounds <n>] [--max-load <n>] [--own-harness] [--json]
   mln-bench fixtures [--from <dir>]
 
 --filter keeps the scenarios whose names contain one of the strings.
@@ -41,7 +41,8 @@ compare builds this checkout's harness against <ref> and compares the two
 moves between runs, and for instructions between builds of the same code
 laid out differently; a change over twice its noise is marked. --rounds
 runs each side n times, and marks the wall time when a rank test finds it
-changed.
+changed. --own-harness builds the ref with its own harness instead, and
+compares the scenarios both harnesses have.
 Rounds run alone among the machine's benchmark runs,
 and not at all while its load average is over --max-load (a quarter of its
 cores by default).
@@ -74,6 +75,7 @@ struct Options {
     json: bool,
     rounds: Option<usize>,
     max_load: Option<f64>,
+    own_harness: bool,
     from: Option<PathBuf>,
     images: Option<PathBuf>,
     /// exec's: the file the scenario writes its last image to.
@@ -87,6 +89,7 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
         json: false,
         rounds: None,
         max_load: None,
+        own_harness: false,
         from: None,
         images: None,
         image: None,
@@ -101,6 +104,7 @@ fn parse(args: Vec<String>) -> Result<Options, String> {
             "--json" => options.json = true,
             "--rounds" => options.rounds = Some(value()?.parse().map_err(|_| "--rounds needs a number")?),
             "--max-load" => options.max_load = Some(number(value()?)?),
+            "--own-harness" => options.own_harness = true,
             "--from" => options.from = Some(PathBuf::from(value()?)),
             "--images" => options.images = Some(PathBuf::from(value()?)),
             "--image" => options.image = Some(PathBuf::from(value()?)),
@@ -172,6 +176,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 filters: options.filters,
                 rounds: options.rounds,
                 max_load: options.max_load.unwrap_or_else(host::default_max_load),
+                own_harness: options.own_harness,
             })?;
             if options.json {
                 println!("{}", serde_json::to_string_pretty(&comparison).map_err(|error| error.to_string())?);
