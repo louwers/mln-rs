@@ -279,9 +279,13 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
         .map(|(scenario, _)| *scenario)
         .collect();
     if !unprobed.is_empty() {
-        for scenario in &unprobed {
-            if let Some(runs) = samples.get_mut(&probe_key(scenario)) {
-                runs.retain(|run| run.harness != base_harness);
+        // A scenario's probes of the base's harness in its other
+        // environments stay for a comparison in those.
+        for (scenario, warm_up) in scenarios.iter().zip(&base_warm_up) {
+            if unprobed.iter().any(|unprobed| unprobed.name == scenario.name)
+                && let Some(runs) = samples.get_mut(&probe_key(scenario))
+            {
+                runs.retain(|run| run.harness != base_harness || run.environment != warm_up.environment);
             }
         }
         // With the harness's `layout-probe` feature, where it has one, the
