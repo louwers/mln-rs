@@ -418,3 +418,38 @@ fn a_flight_on_the_globe_eases_onto_the_ground() {
     assert_eq!(Some(13.0), camera.zoom);
     assert_eq!(ground.at(center.wrapped()).unwrap(), camera.center_altitude.unwrap());
 }
+
+/// An easing that overshoots its end and comes back takes the altitude onto
+/// the ground it heads for without passing it or jumping: from ground
+/// 1000 m high to ground 2000 m high, the altitude only climbs, never past
+/// 2000 m, and no frame climbs more than the easing's steepest stretch.
+#[test]
+fn an_overshooting_ease_climbs_onto_the_ground_without_a_jump() {
+    let run_loop = Queue::<()>::new();
+    let rise = 1000.0 / (world(&destination()).x - world(&start()).x);
+    let ground: Arc<dyn Elevation> = Arc::new(Slope { x: world(&start()).x, height: 1000.0, rise });
+    let (mut map, clock) = map_over(Some(&ground), &run_loop);
+    let target = ground.at(destination()).unwrap();
+    assert_near(2000.0, target, 1e-6, "the ground at the destination");
+    assert_near(1000.0, self::ground(&map).0, 1e-6, "the ground at the start");
+    map.update_camera(&CameraUpdate {
+        mode: CameraUpdateMode::Ease,
+        camera: CameraOptions { center: Some(destination()), ..Default::default() },
+        animation: AnimationOptions {
+            duration: Some(DURATION),
+            easing: Some(mln_util::UnitBezier::new(1.0 / 3.0, 0.0, 2.0 / 3.0, 2.0)),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    let (mut last, mut largest) = (self::ground(&map).0, 0.0f64);
+    frames(&mut map, clock, DURATION, |map, elapsed| {
+        let altitude = self::ground(map).0;
+        assert!(altitude >= last - 1e-9, "{elapsed:?}: the altitude falls from {last} to {altitude} m");
+        assert!(altitude <= target + 1e-9, "{elapsed:?}: the altitude passes the ground, at {altitude} m");
+        largest = largest.max(altitude - last);
+        last = altitude;
+    });
+    assert_near(target, self::ground(&map).0, 1e-6, "after the ease");
+    assert!(largest < 60.0, "{largest} m in one frame");
+}

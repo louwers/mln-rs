@@ -196,11 +196,17 @@ impl Transform {
         };
         let Some(target) = ground.at(end) else { return false };
         let altitude = self.view().center_altitude();
-        let share = pacing.share(now);
-        let reached = before.map_or(0.0, |before| pacing.share(Some(before))).min(share);
-        let lands = share == 1.0;
-        camera.center_altitude =
-            Some(if lands { target } else { altitude + (target - altitude) * (share - reached) / (1.0 - reached) });
+        // An easing that overshoots its end, or backs up past its start,
+        // takes the altitude no farther than the target: it arrives where
+        // the share first reaches 1, and holds while the share falls back.
+        let share = pacing.share(now).clamp(0.0, 1.0);
+        let reached = before.map_or(0.0, |before| pacing.share(Some(before)).clamp(0.0, 1.0)).min(share);
+        let lands = pacing.remaining(now).is_zero();
+        camera.center_altitude = Some(if lands || reached == 1.0 {
+            target
+        } else {
+            altitude + (target - altitude) * (share - reached) / (1.0 - reached)
+        });
         lands
     }
 
