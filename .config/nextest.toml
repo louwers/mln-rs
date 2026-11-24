@@ -26,6 +26,20 @@ default-filter = """
 # x64 only.
 [profile.target]
 default-filter = "not test(=render_tests::render_tests_through_the_codec)"
+fail-fast = false
+
+# The x86_64 Android emulator, which CI's pull requests test on
+# (tools/ci/boot-android.sh), as Android's devices below, without the tests
+# that crash there: WebGPU's teardown on the emulator's software Vulkan. The
+# phones run them for main's commits (tools/device-farm).
+[[profile.target.overrides]]
+platform = 'cfg(all(target_os = "android", target_arch = "x86_64"))'
+default-filter = """
+platform(target)
+& not test(=render_tests::render_tests_through_the_codec)
+& not (package(mln-rs-render-test) & test(/^jobs::/))
+& not (package(mln-rs-headless) & test(/^custom_layer_test::ending::/))
+"""
 
 # Android's and OpenHarmony's devices run each test from a copy of its package,
 # without the host's binaries: not the tests of proc-macro crates, which are
