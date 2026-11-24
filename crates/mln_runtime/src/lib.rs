@@ -25,8 +25,17 @@
 //! to a canvas (`Surface::web_canvas`) with the browser's WebGPU or WebGL2,
 //! and put their tiles' workers in Web Workers.
 
-#[cfg(not(any(feature = "webgpu", feature = "metal", feature = "vulkan", feature = "gl")))]
-compile_error!("mln_runtime renders with at least one backend: enable `webgpu`, `metal`, `vulkan` or `gl`");
+#[cfg(not(any(
+    feature = "webgpu",
+    feature = "metal",
+    feature = "vulkan",
+    // Outside Windows, `d3d12` builds no backend.
+    all(feature = "d3d12", windows),
+    feature = "gl"
+)))]
+compile_error!(
+    "mln_runtime renders with at least one backend: enable `webgpu`, `metal`, `vulkan`, `gl` or, on Windows, `d3d12`"
+);
 
 #[cfg(all(feature = "bench", not(target_family = "wasm")))]
 #[doc(hidden)]

@@ -109,7 +109,7 @@ impl CustomLayerHost for Host {
 /// The header's variants of the backends' commands. A backend without one,
 /// such as WebGPU outside a browser, gives the host nothing to draw with.
 mod native {
-    #[cfg(any(backend_vulkan, backend_d3d12))]
+    #[cfg(backend_vulkan)]
     use core::ffi::c_void;
 
     use super::{Any, mln_custom_layer_encoder_data, mln_custom_layer_pass_data, mln_render_backend};

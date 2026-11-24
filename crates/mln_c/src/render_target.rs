@@ -158,10 +158,11 @@ enum PendingRing {
     /// A ring of Vulkan images or OpenGL textures, which are handles rather
     /// than objects.
     #[cfg_attr(
-        target_vendor = "apple",
+        all(not(target_family = "wasm"), not(any(backend_vulkan, backend_gl))),
         expect(
             dead_code,
-            reason = "Apple builds take only Metal textures, which the ring retains once the call's handles check out"
+            reason = "builds without Vulkan or OpenGL take only Metal textures or D3D12 resources, which the ring \
+                      retains once the call's handles check out"
         )
     )]
     Ready(BorrowedRing),
