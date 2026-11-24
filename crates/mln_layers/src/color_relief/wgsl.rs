@@ -40,10 +40,13 @@ struct FragmentInput {
     @location(0) frag_position: vec2<f32>,
 };
 
-fn getElevation(coord: vec2<f32>, unpack: vec4<f32>) -> f32 {
-    var data = textureSample(image, image_sampler, coord) * 255.0;
-    data.a = -1.0;
-    return dot(data, unpack);
+// The height in meters of the DEM at `coord`, by the rule of
+// `mln_util::dem`. The channels aren't rounded: the decode is linear in
+// them, so where a linear sampler interpolates them, it interpolates the
+// heights.
+fn getElevation(coord: vec2<f32>, unpack: vec4<f32>, unpack_scale: f32) -> f32 {
+    let rgb = textureSample(image, image_sampler, coord).rgb * 255.0;
+    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * unpack_scale;
 }
 
 // The stops are read at texel centres, from textures without mipmaps, so
@@ -66,7 +69,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #endif
 
     let tileProps = tilePropsVector[drawIndex];
-    let el = getElevation(in.frag_position, tileProps.unpack);
+    let el = getElevation(in.frag_position, tileProps.unpack, tileProps.unpack_scale);
 
     // Binary search to find surrounding elevation stops
     var r: i32 = tileProps.color_ramp_size - 1;

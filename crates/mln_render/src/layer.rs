@@ -410,11 +410,13 @@ impl<'a> DemTile<'a> {
         self.contents.dem().dim() as u32
     }
 
-    /// The factors that make a texel's red, green and blue, each from 0 to
-    /// 255, its elevation in meters: `r * f[0] + g * f[1] + b * f[2] - f[3]`.
+    /// How a texel's red, green and blue, each from 0 to 255, decode to its
+    /// elevation in meters, by the height rule of [`mln_util::dem`], which
+    /// a shader follows in the same operations
+    /// ([`DemUnpack::decode`](mln_util::dem::DemUnpack::decode)).
     #[must_use]
-    pub fn unpack(self) -> [f32; 4] {
-        self.contents.dem().unpack_vector()
+    pub fn unpack(self) -> mln_util::dem::DemUnpack {
+        self.contents.dem().unpack()
     }
 
     /// The surface that the elevations drape over in `frame`: the parts of

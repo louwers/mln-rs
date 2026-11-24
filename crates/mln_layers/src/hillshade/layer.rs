@@ -137,11 +137,14 @@ impl Layer for HillshadeLayer {
         // a target that holds them keeps them.
         for (tile, dem, value) in cx.tiles().filter(|(_, _, value)| !cx.res.is_drawn(&value.slopes)) {
             let stride = dem.image().size.width as f32;
+            let unpack = dem.unpack();
             let props = HillshadePrepareTilePropsUBO {
-                unpack: dem.unpack(),
+                unpack: unpack.weights_and_base(),
                 dimension: [stride, stride],
                 zoom: f32::from(tile.id().canonical.z),
                 maxzoom: f32::from(self.max_zoom),
+                unpack_scale: unpack.scale,
+                ..HillshadePrepareTilePropsUBO::default()
             };
             out.target(&value.slopes).push(&value.prepare, Draw::DEFAULT, (to_texture, props));
         }

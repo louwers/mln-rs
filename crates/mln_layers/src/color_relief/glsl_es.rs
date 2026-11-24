@@ -25,11 +25,13 @@ precision highp float;
 
 in vec2 v_pos;
 
+// The height in meters of the DEM at `coord`, by the rule of
+// `mln_util::dem`. The channels aren't rounded: the decode is linear in
+// them, so where a linear sampler interpolates them, it interpolates the
+// heights.
 float getElevation(vec2 coord) {
-    // Convert encoded elevation value to meters
-    vec4 data = texture(u_image, coord) * 255.0;
-    data.a = -1.0;
-    return dot(data, u_unpack);
+    vec3 rgb = texture(u_image, coord).rgb * 255.0;
+    return (rgb.r * u_unpack.x + rgb.g * u_unpack.y + rgb.b * u_unpack.z + u_unpack.w) * u_unpack_scale;
 }
 
 float getElevationStop(int stop) {

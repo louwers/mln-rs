@@ -30,10 +30,14 @@ struct FragmentInput {
     @location(0) tex_coord: vec2<f32>,
 };
 
+// The height in meters of the DEM at `coord`, by the rule of
+// `mln_util::dem`. The channels aren't rounded: the decode is linear in
+// them, so where a linear sampler interpolates them, it interpolates the
+// heights.
 fn getElevation(coord: vec2<f32>) -> f32 {
-    var data = textureSample(image, image_sampler, coord) * 255.0;
-    data.a = -1.0;
-    return dot(data, tileProps.unpack);
+    let rgb = textureSample(image, image_sampler, coord).rgb * 255.0;
+    let unpack = tileProps.unpack;
+    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * tileProps.unpack_scale;
 }
 
 @fragment

@@ -100,11 +100,12 @@ impl Layer for ColorReliefLayer {
             let at = tile.project(cx.frame, &TileTransform::default());
             // The elevations' image has a border of a texel.
             let stride = dem.image().size.width as f32;
+            let unpack = dem.unpack();
             let props = ColorReliefTilePropsUBO {
-                unpack: dem.unpack(),
+                unpack: unpack.weights_and_base(),
                 dimension: [stride, stride],
                 color_ramp_size: self.stops.elevations.len() as i32,
-                ..ColorReliefTilePropsUBO::default()
+                unpack_scale: unpack.scale,
             };
             main.push_at(mesh, &at, Draw::DEFAULT, (ColorReliefDrawableUBO::default(), props));
         }

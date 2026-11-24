@@ -33,11 +33,14 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     };
 }
 
-float getElevation(float2 coord, float bias, texture2d<float, access::sample> image, sampler image_sampler, float4 unpack) {
-    // Convert encoded elevation value to meters
-    float4 data = image.sample(image_sampler, coord) * 255.0;
-    data.a = -1.0;
-    return dot(data, unpack);
+// The height in meters of the DEM at `coord`, by the rule of
+// `mln_util::dem`. The channels aren't rounded: the decode is linear in
+// them, so where a linear sampler interpolates them, it interpolates the
+// heights.
+float getElevation(float2 coord, texture2d<float, access::sample> image, sampler image_sampler, float4 unpack,
+                   float unpack_scale) {
+    const float3 rgb = image.sample(image_sampler, coord).rgb * 255.0;
+    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * unpack_scale;
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
@@ -62,15 +65,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     // | g | h | i |
     // |   |   |   |
     // +-----------+
-    float a = getElevation(in.pos + float2(-epsilon.x, -epsilon.y), 0.0, image, image_sampler, tileProps.unpack);
-    float b = getElevation(in.pos + float2(0, -epsilon.y), 0.0, image, image_sampler, tileProps.unpack);
-    float c = getElevation(in.pos + float2(epsilon.x, -epsilon.y), 0.0, image, image_sampler, tileProps.unpack);
-    float d = getElevation(in.pos + float2(-epsilon.x, 0), 0.0, image, image_sampler, tileProps.unpack);
-  //float e = getElevation(in.pos, 0.0, image, image_sampler, tileProps.unpack);
-    float f = getElevation(in.pos + float2(epsilon.x, 0), 0.0, image, image_sampler, tileProps.unpack);
-    float g = getElevation(in.pos + float2(-epsilon.x, epsilon.y), 0.0, image, image_sampler, tileProps.unpack);
-    float h = getElevation(in.pos + float2(0, epsilon.y), 0.0, image, image_sampler, tileProps.unpack);
-    float i = getElevation(in.pos + float2(epsilon.x, epsilon.y), 0.0, image, image_sampler, tileProps.unpack);
+    float a = getElevation(in.pos + float2(-epsilon.x, -epsilon.y), image, image_sampler, tileProps.unpack, tileProps.unpack_scale);
+    float b = getElevation(in.pos + float2(0, -epsilon.y), image, image_sampler, tileProps.unpack, tileProps.unpack_scale);
+    float c = getElevation(in.pos + float2(epsilon.x, -epsilon.y), image, image_sampler, tileProps.unpack, tileProps.unpack_scale);
+    float d = getElevation(in.pos + float2(-epsilon.x, 0), image, image_sampler, tileProps.unpack, tileProps.unpack_scale);
+  //float e = getElevation(in.pos, image, image_sampler, tileProps.unpack, tileProps.unpack_scale);
+    float f = getElevation(in.pos + float2(epsilon.x, 0), image, image_sampler, tileProps.unpack, tileProps.unpack_scale);
+    float g = getElevation(in.pos + float2(-epsilon.x, epsilon.y), image, image_sampler, tileProps.unpack, tileProps.unpack_scale);
+    float h = getElevation(in.pos + float2(0, epsilon.y), image, image_sampler, tileProps.unpack, tileProps.unpack_scale);
+    float i = getElevation(in.pos + float2(epsilon.x, epsilon.y), image, image_sampler, tileProps.unpack, tileProps.unpack_scale);
 
     // Convert the raw pixel-space derivative (slope) into world-space slope.
     // The conversion factor is: tileSize / (8 * meters_per_pixel).

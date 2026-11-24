@@ -213,11 +213,14 @@ void main() {
 layout(location = 0) in vec2 frag_position;
 layout(location = 0) out vec4 out_color;
 
-float getElevation(vec2 coord, float bias, vec4 unpack) {
-    // Convert encoded elevation value to meters
-    vec4 data = texture(sampler2D(image, image_sampler), coord) * 255.0;
-    data.a = -1.0;
-    return dot(data, unpack);
+// The height in meters of the DEM at `coord`, by the rule of
+// `mln_util::dem`. The channels aren't rounded: the decode is linear in
+// them, so where a linear sampler interpolates them, it interpolates the
+// heights.
+float getElevation(vec2 coord) {
+    const vec3 rgb = texture(sampler2D(image, image_sampler), coord).rgb * 255.0;
+    const vec4 unpack = tileProps.unpack;
+    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * tileProps.unpack_scale;
 }
 
 void main() {
@@ -245,15 +248,15 @@ void main() {
     // |   |   |   |
     // +-----------+
 
-    float a = getElevation(frag_position + vec2(-epsilon.x, -epsilon.y), 0.0, tileProps.unpack);
-    float b = getElevation(frag_position + vec2(0, -epsilon.y), 0.0, tileProps.unpack);
-    float c = getElevation(frag_position + vec2(epsilon.x, -epsilon.y), 0.0, tileProps.unpack);
-    float d = getElevation(frag_position + vec2(-epsilon.x, 0), 0.0, tileProps.unpack);
-  //float e = getElevation(frag_position, 0.0, tileProps.unpack);
-    float f = getElevation(frag_position + vec2(epsilon.x, 0), 0.0, tileProps.unpack);
-    float g = getElevation(frag_position + vec2(-epsilon.x, epsilon.y), 0.0, tileProps.unpack);
-    float h = getElevation(frag_position + vec2(0, epsilon.y), 0.0, tileProps.unpack);
-    float i = getElevation(frag_position + vec2(epsilon.x, epsilon.y), 0.0, tileProps.unpack);
+    float a = getElevation(frag_position + vec2(-epsilon.x, -epsilon.y));
+    float b = getElevation(frag_position + vec2(0, -epsilon.y));
+    float c = getElevation(frag_position + vec2(epsilon.x, -epsilon.y));
+    float d = getElevation(frag_position + vec2(-epsilon.x, 0));
+  //float e = getElevation(frag_position);
+    float f = getElevation(frag_position + vec2(epsilon.x, 0));
+    float g = getElevation(frag_position + vec2(-epsilon.x, epsilon.y));
+    float h = getElevation(frag_position + vec2(0, epsilon.y));
+    float i = getElevation(frag_position + vec2(epsilon.x, epsilon.y));
 
     // Convert the raw pixel-space derivative (slope) into world-space slope.
     // The conversion factor is: tileSize / (8 * meters_per_pixel).

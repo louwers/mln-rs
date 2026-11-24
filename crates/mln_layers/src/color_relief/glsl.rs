@@ -30,11 +30,13 @@ void main() {
 layout(location = 0) in vec2 frag_position;
 layout(location = 0) out vec4 out_color;
 
-float getElevation(vec2 coord, vec4 unpack) {
-    // Convert encoded elevation value to meters
-    vec4 data = texture(sampler2D(image, image_sampler), coord) * 255.0;
-    data.a = -1.0;
-    return dot(data, unpack);
+// The height in meters of the DEM at `coord`, by the rule of
+// `mln_util::dem`. The channels aren't rounded: the decode is linear in
+// them, so where a linear sampler interpolates them, it interpolates the
+// heights.
+float getElevation(vec2 coord, vec4 unpack, float unpack_scale) {
+    const vec3 rgb = texture(sampler2D(image, image_sampler), coord).rgb * 255.0;
+    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * unpack_scale;
 }
 
 float getElevationStop(int stop, int color_ramp_size) {
@@ -57,7 +59,7 @@ void main() {
 
     const ColorReliefTilePropsUBO tileProps = tilePropsVector[drawIndex];
 
-    float el = getElevation(frag_position, tileProps.unpack);
+    float el = getElevation(frag_position, tileProps.unpack, tileProps.unpack_scale);
 
     // Binary search to find surrounding elevation stops (l and r indices)
     int r = tileProps.color_ramp_size - 1;

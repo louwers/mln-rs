@@ -2,27 +2,10 @@
 // crosses from the workers, so it is Send, and textures live on the render
 // thread.
 
+use mln_util::dem::DemUnpack;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::tileset::RasterEncoding;
-
-/// <https://www.mapbox.com/help/access-elevation-data/#mapbox-terrain-rgb>
-const UNPACK_MAPBOX: [f32; 4] = [6553.6, 25.6, 0.1, 10000.0];
-/// <https://aws.amazon.com/public-datasets/terrain>/
-const UNPACK_TERRARIUM: [f32; 4] = [256.0, 1.0, 1.0 / 256.0, 32768.0];
-
-/// The DEM unpack vector for an encoding: the red, green and blue factors
-/// and the base shift.
-#[must_use]
-fn unpack_vector(encoding: RasterEncoding) -> [f32; 4] {
-    match encoding {
-        RasterEncoding::Mapbox => UNPACK_MAPBOX,
-        RasterEncoding::Terrarium => UNPACK_TERRARIUM,
-        RasterEncoding::Custom { red_factor, green_factor, blue_factor, base_shift } => {
-            [red_factor, green_factor, blue_factor, base_shift]
-        }
-    }
-}
 
 /// A raster-dem tile's elevations, a pixel of border on each side, encoded
 /// in an image's pixels. It reads back only as `new` can make it
@@ -196,7 +179,7 @@ impl DemData {
     #[cfg(test)]
     #[must_use]
     pub(crate) fn get(&self, x: i32, y: i32) -> f32 {
-        mln_util::dem::DemUnpack::of(self.encoding).decode(pixel(&self.image.data, self.idx(x, y)))
+        self.unpack().decode(pixel(&self.image.data, self.idx(x, y)))
     }
 
     /// The number of elevations along each side, without the border.
@@ -205,11 +188,10 @@ impl DemData {
         self.dim
     }
 
-    /// The factors that turn a pixel's red, green and blue into an
-    /// elevation, and the base shift subtracted from their sum.
+    /// How a pixel's red, green and blue decode to its elevation.
     #[must_use]
-    pub(crate) fn unpack_vector(&self) -> [f32; 4] {
-        unpack_vector(self.encoding)
+    pub(crate) fn unpack(&self) -> DemUnpack {
+        DemUnpack::of(self.encoding)
     }
 
     /// The image whose pixels encode the elevations, with the border.

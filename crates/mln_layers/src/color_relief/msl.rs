@@ -41,11 +41,14 @@ FragmentStage vertex vertexMain(thread const VertexStage vertex_in [[stage_in]])
     };
 }
 
-// Function to convert terrain-RGB encoded elevation value to meters
-float getElevation(float2 coord, texture2d<float, access::sample> image, sampler image_sampler, float4 unpack) {
-    float4 data = image.sample(image_sampler, coord) * 255.0;
-    data.a = -1.0;
-    return dot(data, unpack);
+// The height in meters of the DEM at `coord`, by the rule of
+// `mln_util::dem`. The channels aren't rounded: the decode is linear in
+// them, so where a linear sampler interpolates them, it interpolates the
+// heights.
+float getElevation(float2 coord, texture2d<float, access::sample> image, sampler image_sampler, float4 unpack,
+                   float unpack_scale) {
+    const float3 rgb = image.sample(image_sampler, coord).rgb * 255.0;
+    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * unpack_scale;
 }
 
 // Function to get the elevation value at a specific color ramp stop
@@ -69,7 +72,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     device const ColorReliefTilePropsUBO& tileProps = tilePropsVector[drawIndex];
 
     // 1. Get elevation at this pixel from DEM
-    float el = getElevation(in.pos, image, image_sampler, tileProps.unpack);
+    float el = getElevation(in.pos, image, image_sampler, tileProps.unpack, tileProps.unpack_scale);
 
     // 2. Binary search to find surrounding elevation stops (l and r indices)
     int r = tileProps.color_ramp_size - 1;

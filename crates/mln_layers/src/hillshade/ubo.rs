@@ -46,9 +46,20 @@ mln_gfx::uniform_block! {
 mln_gfx::uniform_block! {
     /// The hillshade prepare shader's per-tile uniform block.
     pub struct HillshadePrepareTilePropsUBO {
+        /// How the DEM's texels decode, as [`mln_util::dem::DemUnpack`]
+        /// does: the weights of a texel's red, green and blue channels,
+        /// from 0 to 255, then the base added to their sum.
         pub unpack: [f32; 4],
         pub dimension: [f32; 2],
         pub zoom: f32,
         pub maxzoom: f32,
+        /// What the sum is multiplied by, to meters.
+        pub unpack_scale: f32,
+        #[padding]
+        pub pad0: f32,
+        #[padding]
+        pub pad1: f32,
+        #[padding]
+        pub pad2: f32,
     }
 }

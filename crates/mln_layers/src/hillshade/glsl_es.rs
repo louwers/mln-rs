@@ -21,11 +21,13 @@ precision highp float;
 #endif
 
 in vec2 v_pos;
-float getElevation(vec2 coord, float bias) {
-    // Convert encoded elevation value to meters
-    vec4 data = texture(u_image, coord) * 255.0;
-    data.a = -1.0;
-    return dot(data, u_unpack);
+// The height in meters of the DEM at `coord`, by the rule of
+// `mln_util::dem`. The channels aren't rounded: the decode is linear in
+// them, so where a linear sampler interpolates them, it interpolates the
+// heights.
+float getElevation(vec2 coord) {
+    vec3 rgb = texture(u_image, coord).rgb * 255.0;
+    return (rgb.r * u_unpack.x + rgb.g * u_unpack.y + rgb.b * u_unpack.z + u_unpack.w) * u_unpack_scale;
 }
 
 void main() {
@@ -47,15 +49,15 @@ void main() {
     // |   |   |   |
     // +-----------+
 
-    float a = getElevation(v_pos + vec2(-epsilon.x, -epsilon.y), 0.0);
-    float b = getElevation(v_pos + vec2(0, -epsilon.y), 0.0);
-    float c = getElevation(v_pos + vec2(epsilon.x, -epsilon.y), 0.0);
-    float d = getElevation(v_pos + vec2(-epsilon.x, 0), 0.0);
-  //float e = getElevation(v_pos, 0.0);
-    float f = getElevation(v_pos + vec2(epsilon.x, 0), 0.0);
-    float g = getElevation(v_pos + vec2(-epsilon.x, epsilon.y), 0.0);
-    float h = getElevation(v_pos + vec2(0, epsilon.y), 0.0);
-    float i = getElevation(v_pos + vec2(epsilon.x, epsilon.y), 0.0);
+    float a = getElevation(v_pos + vec2(-epsilon.x, -epsilon.y));
+    float b = getElevation(v_pos + vec2(0, -epsilon.y));
+    float c = getElevation(v_pos + vec2(epsilon.x, -epsilon.y));
+    float d = getElevation(v_pos + vec2(-epsilon.x, 0));
+  //float e = getElevation(v_pos);
+    float f = getElevation(v_pos + vec2(epsilon.x, 0));
+    float g = getElevation(v_pos + vec2(-epsilon.x, epsilon.y));
+    float h = getElevation(v_pos + vec2(0, epsilon.y));
+    float i = getElevation(v_pos + vec2(epsilon.x, epsilon.y));
 
     // Convert the raw pixel-space derivative (slope) into world-space slope.
     // The conversion factor is: tileSize / (8 * meters_per_pixel).
