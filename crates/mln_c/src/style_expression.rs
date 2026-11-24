@@ -309,7 +309,7 @@ fn evaluate(expression: &Expr, inputs: &Inputs) -> Result<String, Error> {
         ..EvaluationContext::default()
     };
     let result = match &feature {
-        Some(feature) => mln_style::expression::expr::evaluate_feature_with_context(expression, feature, context),
+        Some(feature) => mln_style::expression::evaluate_feature_with_context(expression, feature, context),
         None => expression.evaluate(&context),
     };
     let result = result.map_err(|error| Error::invalid_argument(format!("expression: {}", error.message())))?;

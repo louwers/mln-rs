@@ -1198,7 +1198,7 @@ pub(crate) trait RenderLayer: LayerParts {
         _region: &QueryRegion<'_>,
         _feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
         _geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
-        _feature_state: &mln_style::expression::expr::FeatureState,
+        _feature_state: &mln_style::expression::FeatureState,
     ) -> bool {
         false
     }

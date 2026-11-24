@@ -1,9 +1,8 @@
-use crate::expression::Functions;
-use crate::expression::collator_expression::CollatorExpression;
 use crate::expression::dsl::*;
-use crate::expression::expr::Dependency;
-use crate::expression::parsing_context::create_expression_from_str;
-use crate::expression::semiliteral::Semiliteral;
+use crate::expression::forms::collator::CollatorExpression;
+use crate::expression::forms::semiliteral::Semiliteral;
+use crate::expression::parse::create_expression_from_str;
+use crate::expression::{Dependency, Functions};
 
 // gtest: ExpressionDependencies.Get
 #[test]

@@ -3,8 +3,8 @@ use std::sync::mpsc::{Sender, channel};
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 
 use crate::expression::dsl::*;
-use crate::expression::find_zoom_curve::find_zoom_curve_checked;
 use crate::expression::value::Value;
+use crate::expression::zoom_curve::find_zoom_curve_checked;
 
 struct Recorder(Sender<(EventSeverity, Event, String)>);
 

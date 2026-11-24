@@ -8,7 +8,7 @@ use mln_vec_map::VecSet;
 use super::util::{StubGeometryTileFeature, property_map};
 use crate::evaluated::Evaluated;
 use crate::expression::dsl::{self, get, get_str, image, linear, literal, literal_str, number, step, zoom};
-use crate::expression::parsing_context::create_expression_from_str;
+use crate::expression::parse::create_expression_from_str;
 use crate::expression::{Dependency, EvaluationContext, Functions, Image, Value};
 use crate::property_expression::PropertyExpression;
 use crate::property_value::{PropertyValue, StyleValue as _};

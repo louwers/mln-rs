@@ -120,7 +120,7 @@ fn background_color_function() {
 
 /// The colorSpace tests' stops, interpolated by `operator` at their zoom, 5.
 fn color_space_expected(operator: &str) -> Color {
-    let expression = crate::expression::parsing_context::create_expression_from_str(
+    let expression = crate::expression::parse::create_expression_from_str(
         &format!(r#"["{operator}", ["linear"], ["zoom"], 0, "rgb(118,0,118)", 10, "rgb(255,155,0)"]"#),
         &Functions::with_builtins(),
     )

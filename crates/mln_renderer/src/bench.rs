@@ -728,7 +728,7 @@ mod tests {
 
         let mut states = LayerFeatureStates::default();
         assert!(laid_out.result.set_feature_state(&states, patterns).is_empty(), "no state, no change");
-        let mut on = mln_style::expression::expr::FeatureState::new();
+        let mut on = mln_style::expression::FeatureState::new();
         on.insert("on".to_owned(), Value::Bool(true));
         states.entry("l".to_owned()).or_default().insert("1".to_owned(), on);
         let roads = laid_out.result.layer_render_data.get("roads").unwrap().bucket.base().bucket_id;

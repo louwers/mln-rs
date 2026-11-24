@@ -13,11 +13,11 @@ use mln_util::{Color, Padding};
 use serde::Serialize;
 
 use crate::conversion::value_to_json;
-use crate::expression::collator::Collator;
-use crate::expression::expr::{EvaluationContext, Expr};
 use crate::expression::formatted::Formatted;
 use crate::expression::image::Image;
+use crate::expression::locale::collator::Collator;
 use crate::expression::type_::Type;
+use crate::expression::{EvaluationContext, Expr};
 
 /// The object alternative of `expression::Value`.
 // C++ uses std::unordered_map, whose iteration order is libstdc++-hash
@@ -48,7 +48,7 @@ pub enum Value {
 /// expression evaluates.
 mod no_collator {
 
-    use crate::expression::collator::Collator;
+    use crate::expression::locale::collator::Collator;
 
     pub(super) fn write(_: &Collator, w: &mut mln_wire::Writer) {
         w.fail("a collator value doesn't cross".to_owned());

@@ -605,7 +605,7 @@ impl OverridableSection for crate::expression::formatted::FormattedSection {
     }
 }
 
-impl OverridableSection for crate::expression::format_expression::FormatExpressionSection {
+impl OverridableSection for crate::expression::forms::format::FormatExpressionSection {
     fn has_text_color(&self) -> bool {
         self.text_color.is_some()
     }

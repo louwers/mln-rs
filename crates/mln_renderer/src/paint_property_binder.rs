@@ -10,7 +10,6 @@
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_style::evaluated::{Evaluated, Faded};
-use mln_style::expression::range::Range;
 use mln_style::expression::{Dependency, EvaluationContext, Image, Value, ValueConverter};
 use mln_style::property_expression::PropertyExpression;
 use mln_style_types::LineCapType;
@@ -20,6 +19,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::Color;
 use mln_util::feature::feature_id_to_string;
+use mln_util::range::Range;
 use mln_vec_map::VecMap;
 
 use crate::bucket_geometry::GeometryVec;
@@ -191,7 +191,7 @@ impl<T: BinderValue> PaintPropertyBinderKind<T> {
         vertex_offset: usize,
         range: &FeatureVertexRange,
         feature: &dyn GeometryTileFeature,
-        state: &mln_style::expression::expr::FeatureState,
+        state: &mln_style::expression::FeatureState,
     ) {
         match self {
             Self::Constant { .. } => {}

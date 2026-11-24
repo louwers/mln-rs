@@ -3,19 +3,19 @@
 
 use mln_util::ColorSpace;
 
-use crate::expression::assertion::Assertion;
-use crate::expression::coercion::Coercion;
-use crate::expression::comparison::Comparison;
-use crate::expression::compound_expression::create_compound_expression;
-use crate::expression::expr::Expr;
-use crate::expression::format_expression::{FormatExpression, FormatExpressionSection};
+use crate::expression::Expr;
 use crate::expression::formatted::Formatted;
+use crate::expression::forms::assertion::Assertion;
+use crate::expression::forms::coercion::Coercion;
+use crate::expression::forms::comparison::Comparison;
+use crate::expression::forms::compound::create_compound_expression;
+use crate::expression::forms::format::{FormatExpression, FormatExpressionSection};
+use crate::expression::forms::image::ImageExpression;
+use crate::expression::forms::interpolate::create_interpolate;
+use crate::expression::forms::step::Step;
 use crate::expression::functions::Functions;
-use crate::expression::image_expression::ImageExpression;
-use crate::expression::interpolate::create_interpolate;
 use crate::expression::interpolator::{ExponentialInterpolator, Interpolator};
-use crate::expression::parsing_context::ParsingContext;
-use crate::expression::step::Step;
+use crate::expression::parse::ParsingContext;
 use crate::expression::stops::Stops;
 use crate::expression::type_::Type;
 use crate::expression::value::Value;

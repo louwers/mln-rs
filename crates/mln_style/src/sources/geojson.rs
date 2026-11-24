@@ -17,8 +17,7 @@ use mln_vec_map::VecMap;
 use crate::Edit;
 use crate::conversion::geojson::convert_json_geojson;
 use crate::conversion::{Convertible, Error as ConversionError};
-use crate::expression::expr::evaluate_accumulated;
-use crate::expression::{Expr, Functions, from_expression_value};
+use crate::expression::{Expr, Functions, evaluate_accumulated, from_expression_value};
 use crate::layer_type::SourceKind;
 use crate::source_type::{
     Data, Described, Fetch, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,

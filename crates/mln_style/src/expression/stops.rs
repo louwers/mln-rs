@@ -5,8 +5,9 @@
 
 use std::cmp::Ordering;
 
-use crate::expression::expr::Expr;
-use crate::expression::range::Range;
+use mln_util::range::Range;
+
+use crate::expression::Expr;
 
 /// The stops of a curve: outputs by input key, in key order. The keys are
 /// kept apart from the outputs, so that finding a stop reads only keys.

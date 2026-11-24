@@ -32,6 +32,7 @@ use std::sync::OnceLock;
 mod android;
 #[cfg(target_vendor = "apple")]
 mod apple;
+pub(crate) mod collator;
 #[cfg(not(any(target_family = "wasm", target_vendor = "apple", target_os = "android")))]
 mod icu4x;
 #[cfg(any(target_family = "wasm", target_vendor = "apple", target_os = "android", test))]

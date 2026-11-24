@@ -9,13 +9,13 @@ use mln_util::geometry::FeatureType;
 use mln_util::{Color, i18n};
 
 use super::{Eval, Functions, OverloadSpec, Params, RegisterError, Role};
-use crate::expression::expr::{
+use crate::expression::forms::coercion::rgba;
+use crate::expression::forms::length::get_unicode_character_offset_on_validated_utf8;
+use crate::expression::type_::{self, Type};
+use crate::expression::value::{ObjectType, Value, from_mbgl_value_owned, to_string, type_of};
+use crate::expression::{
     Dependency, EvalResult, EvaluationContext, EvaluationError, EvaluationResult, Expr, mbgl_to_expression_value,
 };
-use crate::expression::type_::{self, Type};
-use crate::expression::utf8_op_helpers::get_unicode_character_offset_on_validated_utf8;
-use crate::expression::util::rgba;
-use crate::expression::value::{ObjectType, Value, from_mbgl_value_owned, to_string, type_of};
 
 /// Adds the style specification's functions to `functions`, each name's
 /// overloads in the order parsing tries them. Fails if `functions` already

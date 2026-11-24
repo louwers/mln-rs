@@ -1,4 +1,4 @@
-use crate::expression::util::rgba;
+use crate::expression::forms::coercion::rgba;
 
 // gtest: Expression.Util_rgba
 #[test]

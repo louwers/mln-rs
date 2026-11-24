@@ -2,13 +2,13 @@ use feature::Value as MbglValue;
 use mln_vec_map::VecSet;
 
 use crate::conversion::Convertible;
-use crate::expression::Functions;
-use crate::expression::expr::{
-    Dependency, EvaluationContext, Expr, GlobalStateMap, collect_global_state_refs, global_state_refs_intersect,
-};
-use crate::expression::parsing_context::ParsingContext;
+use crate::expression::parse::ParsingContext;
 use crate::expression::type_::Type;
 use crate::expression::value::Value;
+use crate::expression::{
+    Dependency, EvaluationContext, Expr, Functions, GlobalStateMap, collect_global_state_refs,
+    global_state_refs_intersect,
+};
 
 fn parse_expression(json: &str, expected: Option<Type>) -> Option<Expr> {
     let document: serde_json::Value = serde_json::from_str(json).unwrap();

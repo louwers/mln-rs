@@ -7,7 +7,7 @@ use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
 
 use crate::evaluated::Evaluated;
-use crate::expression::format_expression::FormatExpressionSection;
+use crate::expression::forms::format::FormatExpressionSection;
 use crate::expression::value::from_expression_value;
 use crate::expression::{Expr, Formatted, FormattedSection, Type};
 use crate::layer::FontStack;

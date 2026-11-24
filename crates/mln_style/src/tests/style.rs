@@ -209,7 +209,7 @@ fn is_supported_script_of_a_literal_in_a_layout_property() {
     // Not a C++ test: ffi patch 0093 kept "is-supported-script" from folding,
     // so this text-field wasn't a literal and property conversion rejected it
     // (an assertion in debug builds). The port lets it fold (see
-    // REQUIRED_PROPS in expression/parsing_context.rs).
+    // REQUIRED_PROPS in expression/parse.rs).
     let mut style = stub_style();
     style.load_json(
         r#"{"version":8,"sources":{"s":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},
