@@ -95,7 +95,7 @@ pub(crate) fn file_response(path: &str) -> Response {
 // MARK: - checkImage (test/src/mln/test/util.cpp)
 
 fn write_output(base: &str, name: &str, image: &PremultipliedImage) {
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(base);
+    let dir = mln_headless::test_output_dir(env!("CARGO_TARGET_TMPDIR")).join(base);
     if std::fs::create_dir_all(&dir).is_ok() {
         let _ = std::fs::write(dir.join(name), mln_image::encode_png(image));
     }

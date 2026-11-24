@@ -3,8 +3,8 @@
 #USAGE flag "--clippy-targets <targets>" default="" help="Comma-separated Rust target triples to lint with clippy"
 #USAGE flag "--test-target <target>" default="" help="Rust target triple to test with cargo nextest"
 #USAGE flag "--backend <backend>" default="" help="The backend, as MLN_RENDER_BACKEND names it, if any"
-# Lints and tests the packages that tools/ci/target-packages.sh lists. The
-# render suite through the worker codec runs on Linux x64 only.
+# Lints and tests the packages that tools/ci/target-packages.sh lists, with
+# nextest's target profile (.config/nextest.toml).
 set -euo pipefail
 source tools/dev-shell.sh
 
@@ -30,8 +30,5 @@ if [[ -n ${usage_test_target:-} ]]; then
         [[ $usage_backend == vulkan ]] && MLN_VULKAN_VALIDATION=abort
         [[ $usage_backend == metal ]] && MTL_DEBUG_LAYER=1
     fi
-    dev_shell cargo nextest run \
-        --target "$usage_test_target" \
-        "${packages[@]}" \
-        -E 'not test(=render_tests::render_tests_through_the_codec)'
+    dev_shell cargo nextest run --profile target --target "$usage_test_target" "${packages[@]}"
 fi

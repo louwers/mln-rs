@@ -1,6 +1,7 @@
 // Runs the runner as src/main.rs would: from the package directory (where
 // `cargo test` runs the tests), with the manifest for the OS and backend, and
-// the HTML report and the actual/diff images in target/tmp/<name>. Fill
+// the HTML report and the actual/diff images in <name> in the test output
+// directory (mln_headless::test_output_dir). Fill
 // outlines are 2 px wide, as C++ draws them on OpenGL, so OpenGL, Vulkan and
 // WebGPU take C++'s OpenGL or Vulkan expectations; WebGPU on a CPU
 // rasterizer and D3D12 draw them 1 px wide (ignores/rust-port-1px-outlines.json):
@@ -12,13 +13,11 @@
 // (ignores/rust-port-mali.json), as the Pixel 9 that CI tests on has.
 //
 // The tests run in worker processes of the package's render-test binary
-// (`--jobs`, src/jobs.rs): one per CPU, or $RENDER_TEST_JOBS (1: in the
-// test's process). A device runs the test from a copy of its package, without
-// that binary, so there they run in the test's process, and write to the
-// directory that $MLN_RENDER_TEST_OUTPUT names, since the build's
-// CARGO_TARGET_TMPDIR is on another machine.
+// (`--jobs`, src/jobs.rs): one per CPU, or $MLN_RENDER_TEST_JOBS (1: in the
+// test's process), which the target environments whose devices run a test
+// from a copy of its package set to 1, since the copy lacks that binary.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use render_test::render_test::{parse_arguments, run_render_tests_with};
 use render_test::runner::ImplFactory;
@@ -37,18 +36,14 @@ pub(crate) fn run(name: &str, args: &[&str], factory: Option<ImplFactory>) -> i3
             _ => "manifests/linux-wgpu.json",
         }
     };
-    let output = std::env::var_os("MLN_RENDER_TEST_OUTPUT")
-        .map_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")), PathBuf::from)
-        .join(name);
-    let worker = Path::new(env!("CARGO_BIN_EXE_render-test"));
-    let jobs =
-        std::env::var("RENDER_TEST_JOBS").unwrap_or_else(|_| if worker.exists() { "0" } else { "1" }.to_string());
+    let output = mln_headless::test_output_dir(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let jobs = std::env::var("MLN_RENDER_TEST_JOBS").unwrap_or_else(|_| "0".to_string());
     let mut argv =
         vec!["render-test", "--manifestPath", manifest, "--output", output.to_str().unwrap(), "--jobs", &jobs];
     argv.extend(args);
     match parse_arguments(&argv.iter().map(ToString::to_string).collect::<Vec<_>>()) {
         Ok(mut arguments) => {
-            arguments.worker_program = Some(worker.to_path_buf());
+            arguments.worker_program = Some(PathBuf::from(env!("CARGO_BIN_EXE_render-test")));
             run_render_tests_with(&arguments, factory).return_code
         }
         Err(code) => code,

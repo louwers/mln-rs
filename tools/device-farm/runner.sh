@@ -20,16 +20,14 @@ pushed=${DEVICE_FARM_PUSHED:?}
 
 name=${program##*/}
 device_program=$root/bin/$name
+# nextest lists and runs a binary's tests in parallel: one pushes it.
+exec 9> "$pushed/$name.lock"
+flock 9
 if [[ ! -e $pushed/$name ]]; then
-    # nextest lists and runs a binary's tests in parallel: one pushes it.
-    exec 9> "$pushed/$name.lock"
-    flock 9
-    if [[ ! -e $pushed/$name ]]; then
-        adb push "$program" "$device_program" > /dev/null
-        touch "$pushed/$name"
-    fi
-    exec 9>&-
+    adb push "$program" "$device_program" > /dev/null
+    touch "$pushed/$name"
 fi
+exec 9>&-
 
 on_device() {
     case $1 in

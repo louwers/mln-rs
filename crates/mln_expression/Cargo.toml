@@ -56,7 +56,6 @@ objc2-foundation = { workspace = true, features = [
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni.workspace = true
-mln_android.workspace = true
 parking_lot.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]

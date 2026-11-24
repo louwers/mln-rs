@@ -1,6 +1,10 @@
+//! The Java VM that the crates' Android services call: HTTP through
+//! `HttpURLConnection`, and `android.icu` for the locale-sensitive
+//! expressions.
+
 #![expect(unsafe_code, reason = "dlsym and the JNI invocation API are the FFI here")]
 
-use std::ffi::{c_char, c_int, c_void};
+use std::ffi::c_void;
 
 use jni::JavaVM;
 use jni::sys::{JNI_OK, jint, jsize};
@@ -15,25 +19,18 @@ pub fn java_vm() -> Option<JavaVM> {
     JavaVM::singleton().ok().or_else(process_java_vm)
 }
 
-unsafe extern "C" {
-    fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
-    fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
-}
-
 /// The process's Java VM, through `JNI_GetCreatedJavaVMs`, which
 /// libnativehelper exports to apps from API 31. A process with a Java VM has
 /// loaded libnativehelper, so this doesn't load it (`RTLD_NOLOAD`).
 fn process_java_vm() -> Option<JavaVM> {
     type GetCreatedJavaVms = unsafe extern "system" fn(*mut *mut jni::sys::JavaVM, jsize, *mut jsize) -> jint;
-    const RTLD_NOW: c_int = 2;
-    const RTLD_NOLOAD: c_int = 4;
     // SAFETY: a library name and flags that dlopen takes.
-    let library = unsafe { dlopen(c"libnativehelper.so".as_ptr(), RTLD_NOW | RTLD_NOLOAD) };
+    let library = unsafe { libc::dlopen(c"libnativehelper.so".as_ptr(), libc::RTLD_NOW | libc::RTLD_NOLOAD) };
     if library.is_null() {
         return None;
     }
     // SAFETY: the loaded library, and a symbol name.
-    let symbol = unsafe { dlsym(library, c"JNI_GetCreatedJavaVMs".as_ptr()) };
+    let symbol = unsafe { libc::dlsym(library, c"JNI_GetCreatedJavaVMs".as_ptr()) };
     if symbol.is_null() {
         return None;
     }

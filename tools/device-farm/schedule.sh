@@ -8,8 +8,8 @@
 #
 # Usage: schedule.sh <package.zip> <results directory> [run name]
 #
-# It only uploads the package, which CI's device-farm workflow takes from a
-# pull request that may come from a fork: nothing here runs or unpacks it.
+# Nothing here runs or unpacks the package, which may come from a fork
+# (README.md).
 set -euo pipefail
 
 package=$1
@@ -24,9 +24,10 @@ devices=(
     arn:aws:devicefarm:us-west-2::device:092D78E7B4694568812D5FF0711CD346 # Samsung Galaxy S25
 )
 # Each phone's run of the tests, and the wait for the whole run, including
-# the queue for the account's phones.
-job_minutes=${DEVICE_FARM_JOB_MINUTES:-60}
-wait_minutes=${DEVICE_FARM_WAIT_MINUTES:-210}
+# the queue for the account's phones: within the device-farm workflow's job
+# timeout, and the AWS role's four-hour sessions.
+job_minutes=60
+wait_minutes=210
 
 project=${AWS_DEVICE_FARM_PROJECT_ARN:-$(aws devicefarm list-projects --query "projects[?name=='mln-rs'].arn | [0]" --output text)}
 
@@ -57,8 +58,12 @@ upload() {
 }
 
 echo "Uploading $package"
+spec_arn_file=$(mktemp)
+upload "$spec" APPIUM_WEB_NODE_TEST_SPEC > "$spec_arn_file" &
+spec_upload=$!
 package_arn=$(upload "$package" APPIUM_WEB_NODE_TEST_PACKAGE)
-spec_arn=$(upload "$spec" APPIUM_WEB_NODE_TEST_SPEC)
+wait "$spec_upload"
+spec_arn=$(< "$spec_arn_file")
 
 # A web app test, the type of test that needs no app: android.yml drives the
 # phone over adb.
@@ -115,4 +120,4 @@ echo "$summary"
 if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
     echo "$summary" >> "$GITHUB_STEP_SUMMARY"
 fi
-[[ $(aws devicefarm get-run --arn "$run" --query run.result --output text) == PASSED ]]
+[[ $state == $'COMPLETED\tPASSED' ]]

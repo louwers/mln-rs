@@ -37,12 +37,12 @@ fn raster_map() -> MapTest {
     test
 }
 
-/// Renders a still image with `debug`, and writes it to
-/// `target/tmp/debug_options`/<name>.png.
+/// Renders a still image with `debug`, and writes it to `debug_options/<name>.png`
+/// in the test output directory.
 fn render(test: &MapTest, debug: MapDebugOptions, name: &str) -> PremultipliedImage {
     test.map().set_debug(debug);
     let image = test.render().image;
-    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("debug_options");
+    let dir = mln_headless::test_output_dir(env!("CARGO_TARGET_TMPDIR")).join("debug_options");
     if std::fs::create_dir_all(&dir).is_ok() {
         let _ = std::fs::write(dir.join(format!("{name}.png")), mln_image::encode_png(&image));
     }

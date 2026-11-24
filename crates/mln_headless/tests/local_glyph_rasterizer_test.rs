@@ -30,12 +30,12 @@ fn read_file(relative: &str) -> Vec<u8> {
 }
 
 /// The share of pixels of `actual` that differ from `<base>/expected.png`
-/// (1 for a different size). Writes `actual` to
-/// `target/tmp/local_glyph_rasterizer_test` rather than next to the fixture.
+/// (1 for a different size). Writes `actual` to `local_glyph_rasterizer_test`
+/// in the test output directory rather than next to the fixture.
 fn get_image_diff(base: &str, actual: &PremultipliedImage, pixel_threshold: f64) -> f64 {
     let expected = decode_image(&read_file(&format!("{base}/expected.png"))).expect("decode expected.png");
 
-    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("local_glyph_rasterizer_test");
+    let dir = mln_headless::test_output_dir(env!("CARGO_TARGET_TMPDIR")).join("local_glyph_rasterizer_test");
     if std::fs::create_dir_all(&dir).is_ok() {
         let name = base.replace('/', "_");
         let _ = std::fs::write(dir.join(format!("{name}-actual.png")), encode_png(actual));

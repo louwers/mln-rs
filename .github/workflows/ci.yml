@@ -341,9 +341,8 @@ jobs:
           if-no-files-found: ignore
 
   # The Android tests, built for AWS Device Farm's phones (`mise run
-  # device-farm:package`, tools/device-farm/README.md). The device-farm
-  # workflow runs the package once CI completes, with credentials that this
-  # workflow doesn't get, so pull requests from forks get the run too.
+  # device-farm:package`), which the device-farm workflow runs once CI
+  # completes (tools/device-farm/README.md).
   device-farm:
     needs: plan
     if:
