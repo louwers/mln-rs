@@ -76,7 +76,7 @@ fn render(bearing: f64, paint: &str) -> Option<PremultipliedImage> {
     let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
     frontend.attach(&mut map);
     map.load_style_json(&style);
-    let camera = map.style().get_default_camera();
+    let camera = mln_map::style_camera(map.style());
     map.jump_to(&camera);
     Some(frontend.render(&mut map).expect("the still image").image)
 }
