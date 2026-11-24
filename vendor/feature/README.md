@@ -12,6 +12,6 @@ features (`mln::Feature` in the C++ core), whose geometry is
 
 Licensed under the ISC License, as geometry.hpp is ([LICENSE](LICENSE)).
 
-Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
+Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
 core. All its crates are released together, at the same version.

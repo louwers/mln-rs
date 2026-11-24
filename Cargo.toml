@@ -36,7 +36,7 @@ edition = "2024"
 rust-version = "1.98"
 description = "Part of mln-rs, a Rust port of the MapLibre Native map rendering core. Depend on mln-rs instead."
 license = "BSD-2-Clause"
-repository = "https://github.com/louwers/mln-rs"
+repository = "https://github.com/maplibre/mln-rs"
 # `/LICENSE*` ships each package's license files. A published package whose
 # code is, all or in part, under the root license has a LICENSE.md symlink to
 # it, which `cargo package` archives as a file. The ports of other projects

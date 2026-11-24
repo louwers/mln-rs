@@ -24,6 +24,6 @@ feedback. The recognizer owns no clock or thread.
 snapping and haptic notches, and the zoom amounts for double and two-finger
 taps. See the Rust API docs for the input units and scheduling contracts.
 
-Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
+Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
 core. All its crates are released together, at the same version.

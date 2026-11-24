@@ -4,7 +4,7 @@
 //! and its [`Map`]s, whose commands run on the runtime's thread and report
 //! through a [`Completion`], and the [`RenderSession`]s that draw them.
 //!
-//! The library crates of <https://github.com/louwers/mln-rs> are re-exported
+//! The library crates of <https://github.com/maplibre/mln-rs> are re-exported
 //! here under their crate names: `mln_rs::mln_map`, `mln_rs::mln_util`,
 //! `mln_rs::mln_geojson`, and so on. They are published as the `mln-rs-*`
 //! packages, which only exist for this crate. The tile worker codec's

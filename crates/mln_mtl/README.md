@@ -10,6 +10,6 @@ The Metal backend, through `objc2-metal`: its `Gpu`, its MSL shaders, and the
 targets that frames draw into. It renders on Apple platforms only, and is empty
 elsewhere.
 
-Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
+Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
 core. All its crates are released together, at the same version.

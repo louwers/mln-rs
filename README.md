@@ -5,10 +5,10 @@
 
 # mln-rs
 
-[![CI](https://github.com/louwers/mln-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/louwers/mln-rs/actions/workflows/ci.yml)
+[![CI](https://github.com/maplibre/mln-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/maplibre/mln-rs/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/mln-rs)](https://crates.io/crates/mln-rs)
 [![docs.rs](https://img.shields.io/docsrs/mln-rs)](https://docs.rs/mln-rs)
-[![Codecov](https://img.shields.io/codecov/c/github/louwers/mln-rs)](https://app.codecov.io/gh/louwers/mln-rs)
+[![Codecov](https://img.shields.io/codecov/c/github/maplibre/mln-rs)](https://app.codecov.io/gh/maplibre/mln-rs)
 [![](https://img.shields.io/badge/Slack-%23maplibre--native--rust--port-2EB67D?logo=slack)](https://slack.openstreetmap.us/)
 
 An experimental Rust port of

@@ -33,6 +33,6 @@ wins. It is for tests that mln-rs draws as it means to but that the upstream
 image draws otherwise, such as GL JS's terrain tests, whose heights GL JS scales
 on a sphere of the earth's mean radius and mln-rs on the WGS84 radius.
 
-Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
+Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
 core.

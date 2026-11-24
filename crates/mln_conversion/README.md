@@ -10,6 +10,6 @@ Ports the core of the style conversions (`mln::style::conversion`):
 `Convertible`, `Error` and the JSON front end, on serde_json instead of
 RapidJSON.
 
-Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
+Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
 core. All its crates are released together, at the same version.

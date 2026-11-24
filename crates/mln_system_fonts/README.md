@@ -16,6 +16,6 @@ the platform's font matcher where it has one.
 Licensed under the BSD 2-Clause License, as the rest of mln-rs is
 ([LICENSE.md](../../LICENSE.md)).
 
-Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
+Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
 core. All its crates are released together, at the same version.

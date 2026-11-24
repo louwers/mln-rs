@@ -808,7 +808,7 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                 }
                 Target::Unsupported(
                     "WebGPU rings render on a wrapped GPUDevice, which this library's WebGPU can't wrap yet \
-                     (https://github.com/louwers/mln-rs/issues/263)",
+                     (https://github.com/maplibre/mln-rs/issues/263)",
                 )
             }
             MLN_RENDER_TARGET_KIND_EXPORTED_RING => exported_ring(size, &target.data.exported_ring, name)?,

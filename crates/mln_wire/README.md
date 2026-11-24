@@ -10,6 +10,6 @@ of the browser build: a `Wire` trait over a byte writer and a slice reader, the
 `Context` that values get registries and side tables from, and
 `#[derive(Wire)]`.
 
-Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
+Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
 core. All its crates are released together, at the same version.

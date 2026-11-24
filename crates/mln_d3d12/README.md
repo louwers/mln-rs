@@ -13,6 +13,6 @@ apps that use it ship DXC's `dxcompiler.dll`, 1.8.2502 or later, which signs
 what it compiles; an older one needs `dxil.dll` beside it. It is empty except on
 Windows.
 
-Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
+Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
 core. All its crates are released together, at the same version.

@@ -14,6 +14,6 @@ Licensed under the BSD 2-Clause License, as the rest of mln-rs is
 and BiDi mirroring tables (`arabic_tables.rs`, `bidi_mirroring.rs`), under the
 [Unicode License V3](https://www.unicode.org/license.txt).
 
-Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
+Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
 core. All its crates are released together, at the same version.

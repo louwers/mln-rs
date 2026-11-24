@@ -12,6 +12,6 @@ as geojson-vt does, or clusters its points, as supercluster does.
 Its code is under the root license ([LICENSE.md](LICENSE.md)); the algorithms it
 follows are Mapbox's, under the ISC License ([LICENSE-ISC](LICENSE-ISC)).
 
-Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
+Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
 core. All its crates are released together, at the same version.

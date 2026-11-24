@@ -9,6 +9,6 @@ The GLSL that the Vulkan and D3D12 backends draw with, the tables of its vertex
 inputs and textures, its binding layout, and naga's front end for it. It is
 empty on Apple platforms and in the browser build.
 
-Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
+Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
 core. All its crates are released together, at the same version.

@@ -13,6 +13,6 @@ Licensed under the BSD 2-Clause License, as the rest of mln-rs is
 `mat2.rs`, `mat3.rs` and `mat4.rs` from gl-matrix (zlib License) and
 `unitbezier.rs` from WebKit (BSD 2-Clause License, Apple), each in its header.
 
-Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
+Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
 core. All its crates are released together, at the same version.
