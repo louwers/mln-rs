@@ -43,6 +43,10 @@
 //! A still image places every frame, and every type forgets its buckets
 //! after it.
 //!
+//! Each step ends before the next begins. `prepare`, `commit`, the
+//! forgetting and `update` call the participants in the order their types
+//! were registered.
+//!
 //! The layers place topmost first, so a layer's shapes give way to those of
 //! the layers above it, whatever their types. Without the map's
 //! cross-source collisions, they give way only to those of layers on their
