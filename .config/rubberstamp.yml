@@ -29,7 +29,8 @@ ci:
     simulator runs for `ios`, Android platform code or GPU behavior that differs
     on phones for `android`, Direct3D 12, WGL, or Windows platform code for
     `windows-x64`, FreeBSD cross-compilation or platform code for `freebsd`,
-    browser builds or rendered web output for `web`, or Cargo manifests and file
+    OpenHarmony or HarmonyOS platform code for `ohos`, browser builds or
+    rendered web output for `web`, or Cargo manifests and file
     additions/deletions/renames for `package`.
 
     Changing a job's definition in `.github/workflows/ci.yml`,
@@ -130,6 +131,18 @@ ci:
               - mise.target-freebsd.*
               - tools/ci/boot-freebsd.sh
               - tools/zig-cc-freebsd.sh
+          then: apply
+    ohos:
+      covers: >-
+        OpenHarmony cross-target clippy (aarch64, armv7, x86_64) and workspace
+        and render tests on the x86_64 OpenHarmony emulator with the OpenGL ES
+        backend. Catches OpenHarmony/HarmonyOS platform, native window/VSync,
+        OpenGL ES/EGL, and `target-ohos` CI issues. Platform-independent changes
+        that `linux-x64` already covers do not need it.
+      rules:
+        - if:
+            files:
+              - mise.target-ohos.*
           then: apply
     web:
       covers: >-

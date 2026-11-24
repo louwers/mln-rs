@@ -99,6 +99,7 @@ class PlanTest(unittest.TestCase):
             ["windows-x64"],
             ["android"],
             ["freebsd"],
+            ["ohos"],
             ["web", "package"],
             ["linux-x64"],
         ):
@@ -204,7 +205,6 @@ class PlanTest(unittest.TestCase):
                 }
             ],
         )
-
     def test_outputs_build_target_matrix_for_freebsd(self) -> None:
         result = outputs(selected(["freebsd"]), secrets=False)
         self.assertEqual(result["jobs"], ["commits", "lint", "target"])
@@ -227,6 +227,31 @@ class PlanTest(unittest.TestCase):
             ],
         )
 
+    def test_ohos_unit_populates_target_matrix(self) -> None:
+        result = outputs(selected(["ohos"]), secrets=False)
+        self.assertEqual(result["jobs"], ["commits", "lint", "target"])
+        self.assertFalse(result["secrets"])
+        self.assertEqual(result["test"], {"include": []})
+        self.assertEqual(result["backend"], {"include": []})
+        self.assertEqual(
+            result["target"]["include"],
+            [
+                {
+                    "target": "ohos",
+                    "runner": "blacksmith-4vcpu-ubuntu-2604",
+                    "mise_env": "target-ohos",
+                    "device": "OpenHarmony emulator",
+                    "device_command": "devices-cli get ohos",
+                    "clippy_targets": (
+                        "aarch64-unknown-linux-ohos,"
+                        "armv7-unknown-linux-ohos,"
+                        "x86_64-unknown-linux-ohos"
+                    ),
+                    "test_target": "x86_64-unknown-linux-ohos",
+                    "backend": "gl",
+                }
+            ],
+        )
     def test_dispatch_units_override_and_validation(self) -> None:
         self.assertIsNone(parse_dispatch_units(""))
         self.assertIsNone(parse_dispatch_units("   "))

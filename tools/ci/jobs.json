@@ -150,5 +150,18 @@
     "test_target": "x86_64-unknown-freebsd",
     "backend": "vulkan"
   },
+  {
+    "job": "target",
+    "variant": "ohos",
+    "unit": "ohos",
+    "target": "ohos",
+    "runner": "blacksmith-4vcpu-ubuntu-2604",
+    "mise_env": "target-ohos",
+    "device": "OpenHarmony emulator",
+    "device_command": "devices-cli get ohos",
+    "clippy_targets": "aarch64-unknown-linux-ohos,armv7-unknown-linux-ohos,x86_64-unknown-linux-ohos",
+    "test_target": "x86_64-unknown-linux-ohos",
+    "backend": "gl"
+  },
   { "job": "web", "unit": "web" }
 ]
