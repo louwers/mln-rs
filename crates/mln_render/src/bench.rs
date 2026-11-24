@@ -301,8 +301,8 @@ impl<L: Layer> PlacementFrame<L> {
             update,
             tiles,
             layers,
-            placed: CollisionIndex::default(),
-            index: CollisionIndex::default(),
+            placed: CollisionIndex::new(),
+            index: CollisionIndex::new(),
             spare: Vec::new(),
         })
     }

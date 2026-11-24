@@ -131,8 +131,8 @@ impl Placements {
         Placements {
             participants: registry.new_placements(),
             schedule: Schedule::default(),
-            placed: CollisionIndex::default(),
-            spare: CollisionIndex::default(),
+            placed: CollisionIndex::new(),
+            spare: CollisionIndex::new(),
             layers: Vec::new(),
             tiles: Vec::new(),
             followers: Vec::new(),
@@ -449,6 +449,9 @@ pub(crate) fn place_round<P: DerefMut<Target = dyn ErasedPlacement>>(
             participants[layer.participant].place(layer.layer, layer.tiles, crossing, &mut cx);
         }
     }
+    // No layer places during the commits: a shape inserted now would
+    // stand for an item of no layer's tiles.
+    cx.index.select_layer(layers.len());
     for (participant, _) in participants.iter_mut().zip(places).filter(|(_, places)| **places) {
         participant.commit(&mut cx);
     }

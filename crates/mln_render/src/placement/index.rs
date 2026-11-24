@@ -138,9 +138,11 @@ pub struct CollisionIndex {
     groups: Vec<SourceKey>,
 }
 
-/// An empty index, whose grids the first placement sizes to its view.
-impl Default for CollisionIndex {
-    fn default() -> Self {
+impl CollisionIndex {
+    /// An empty index, whose grids the first placement sizes to its view.
+    /// Only the engine makes one, so a participant can't replace the index
+    /// it places into.
+    pub(crate) fn new() -> Self {
         CollisionIndex {
             size: DVec2::ZERO,
             padding: 0.0,
@@ -156,9 +158,7 @@ impl Default for CollisionIndex {
             groups: Vec::new(),
         }
     }
-}
 
-impl CollisionIndex {
     /// The [padding](Self::padding) of a still image of a tile: as far
     /// again as a tile reaches across its borders, so the tile's neighbors
     /// agree on what crosses them.
@@ -467,7 +467,7 @@ mod tests {
     fn index(mode: MapMode) -> CollisionIndex {
         let mut state = TransformState::default();
         state.set_size(Size::new(512, 512));
-        let mut index = CollisionIndex::default();
+        let mut index = CollisionIndex::new();
         index.begin(state.view(), mode);
         index
     }
