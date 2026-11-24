@@ -1476,7 +1476,7 @@ impl RenderOrchestrator {
                 options,
                 global_state: self.global_state.as_deref(),
                 tile_id: &query_data.tile_id,
-                feature_state: None,
+                feature_state: self.tile_store.source(query_data.source).map(|source| &source.info.feature_state),
             };
             let bucket_symbols =
                 feature_index.lookup_symbol_features(&symbol_features, &selection, &query_data.feature_sort_order)?;

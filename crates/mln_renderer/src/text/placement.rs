@@ -33,6 +33,7 @@ use crate::layout::symbol_instance::SymbolInstance;
 use crate::render_layer::{BucketKey, BucketPlacementData, RenderLayer, SymbolBuckets};
 use crate::text::collision_grid::{Aabb, Shape};
 use crate::text::collision_index::CollisionIndex;
+use crate::tile::job::SourceKey;
 use crate::update_parameters::UpdateParameters;
 
 /// The opacity of a symbol's text or icon, and whether it fades in or out.
@@ -137,6 +138,8 @@ pub(crate) struct RetainedQueryData {
     pub(crate) bucket_instance_id: u32,
     pub(crate) feature_index: Option<Arc<FeatureIndex>>,
     pub(crate) tile_id: OverscaledTileID,
+    /// The tile's source, whose feature state queries return.
+    pub(crate) source: SourceKey,
     /// The order of the bucket's features as the last opacity update
     /// sorted them, for a bucket whose symbols sort by their position.
     pub(crate) feature_sort_order: Option<Arc<Vec<usize>>>,
@@ -545,6 +548,7 @@ impl Placement {
             bucket_instance_id,
             feature_index: ctx.data.feature_index.clone(),
             tile_id: ctx.tile().overscaled_id,
+            source: ctx.data.bucket.source,
             feature_sort_order: None,
         });
     }
