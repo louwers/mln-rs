@@ -1412,7 +1412,7 @@ mod tests {
             while newest.is_none() || Instant::now() < deadline {
                 let (mut buffer, mut fence) = (core::ptr::null_mut(), -1);
                 // SAFETY: the live image, and local outputs.
-                if unsafe { OH_NativeImage_AcquireNativeWindowBuffer(image, &mut buffer, &mut fence) } != 0 {
+                if unsafe { OH_NativeImage_AcquireNativeWindowBuffer(image, &raw mut buffer, &raw mut fence) } != 0 {
                     if newest.is_some() {
                         break;
                     }
@@ -1425,7 +1425,7 @@ mod tests {
                     // SAFETY: one local pollfd, then the fence that is the
                     // test's to close.
                     unsafe {
-                        poll(&mut wait, 1, -1);
+                        poll(&raw mut wait, 1, -1);
                         drop(std::os::fd::OwnedFd::from_raw_fd(fence));
                     }
                 }
@@ -1433,9 +1433,9 @@ mod tests {
                     (core::ptr::null_mut(), core::ptr::null_mut(), BufferConfig::default());
                 // SAFETY: the acquired buffer, until its release.
                 unsafe {
-                    assert_eq!(OH_NativeBuffer_FromNativeWindowBuffer(buffer, &mut native), 0);
-                    OH_NativeBuffer_GetConfig(native, &mut config);
-                    assert_eq!(OH_NativeBuffer_Map(native, &mut data), 0, "the frame maps for the CPU");
+                    assert_eq!(OH_NativeBuffer_FromNativeWindowBuffer(buffer, &raw mut native), 0);
+                    OH_NativeBuffer_GetConfig(native, &raw mut config);
+                    assert_eq!(OH_NativeBuffer_Map(native, &raw mut data), 0, "the frame maps for the CPU");
                 }
                 let center = (config.height / 2) as usize * config.stride as usize + (config.width / 2) as usize * 4;
                 // SAFETY: the mapped buffer holds `height` rows of `stride`
@@ -1462,7 +1462,7 @@ mod tests {
         let styled = Waiter::new();
         let style = r#"{"version":8,"sources":{},"layers":[{"id":"bg","type":"background","paint":{"background-color":"red"}}]}"#;
         // SAFETY: local arguments.
-        unsafe { mln_map_set_style_json(map, view(style), &styled.descriptor, core::ptr::null_mut()) };
+        unsafe { mln_map_set_style_json(map, view(style), &raw const styled.descriptor, core::ptr::null_mut()) };
         assert_eq!(styled.status(), MLN_STATUS_OK);
 
         // Memory that is no native object, which an attach turns down.
@@ -1476,8 +1476,8 @@ mod tests {
                 &ohos(8, 8, not_a_window),
                 0,
                 &attach_options(),
-                &mut session,
-                &attached.descriptor,
+                &raw mut session,
+                &raw const attached.descriptor,
                 core::ptr::null_mut(),
             )
         };
@@ -1490,12 +1490,14 @@ mod tests {
             device_options.backend = *value;
             let mut device = 0;
             // SAFETY: local arguments.
-            if unsafe { mln_gpu_device_create(&device_options, &mut device, core::ptr::null_mut()) } != MLN_STATUS_OK {
+            if unsafe { mln_gpu_device_create(&raw const device_options, &raw mut device, core::ptr::null_mut()) }
+                != MLN_STATUS_OK
+            {
                 continue;
             }
             let mut capabilities = sized::<mln_gpu_device_capabilities>();
             // SAFETY: local arguments.
-            unsafe { mln_gpu_device_get_capabilities(device, &mut capabilities, core::ptr::null_mut()) };
+            unsafe { mln_gpu_device_get_capabilities(device, &raw mut capabilities, core::ptr::null_mut()) };
             if capabilities.target_kinds & MLN_RENDER_TARGET_KIND_FLAG_OHOS_WINDOW == 0 {
                 gpu_device::mln_gpu_device_release(device);
                 continue;
@@ -1514,13 +1516,23 @@ mod tests {
             let (mut session, attached) = (0, Waiter::new());
             // SAFETY: local arguments.
             let status = unsafe {
-                mln_map_attach(map, &target, device, &attach, &mut session, &attached.descriptor, core::ptr::null_mut())
+                mln_map_attach(
+                    map,
+                    &raw const target,
+                    device,
+                    &raw const attach,
+                    &raw mut session,
+                    &raw const attached.descriptor,
+                    core::ptr::null_mut(),
+                )
             };
             gpu_device::mln_gpu_device_release(device);
             assert_eq!((status, attached.status()), (MLN_STATUS_OK, MLN_STATUS_OK), "{backend:?}");
             let mut session_capabilities = sized::<mln_render_session_capabilities>();
             // SAFETY: local capabilities.
-            unsafe { mln_render_session_get_capabilities(session, &mut session_capabilities, core::ptr::null_mut()) };
+            unsafe {
+                mln_render_session_get_capabilities(session, &raw mut session_capabilities, core::ptr::null_mut())
+            };
             assert_eq!(session_capabilities.flags, MLN_RENDER_SESSION_CAPABILITY_PRESENTATION);
             let token = 10 * index as u64;
             assert_eq!(demand(session, MLN_FRAME_DEMAND_FORCE, token + 1), MLN_STATUS_OK);
@@ -1531,7 +1543,7 @@ mod tests {
             // A frame may still present to the window as its consumer goes,
             // and the next finds no window.
             // SAFETY: the image is the test's. The session holds the window.
-            unsafe { OH_NativeImage_Destroy(&mut image) };
+            unsafe { OH_NativeImage_Destroy(&raw mut image) };
             assert_eq!(demand(session, MLN_FRAME_DEMAND_FORCE, token + 2), MLN_STATUS_OK);
             let first = wait_for_result(session).disposition;
             assert!([MLN_RENDER_RESULT_RENDERED, MLN_RENDER_RESULT_TARGET_NOT_READY].contains(&first), "{backend:?}");
