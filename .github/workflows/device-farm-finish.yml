@@ -3,7 +3,7 @@ name: device-farm-finish
 run-name: ${{ inputs.run }}
 
 # Reports a finished AWS Device Farm run of the Android tests on its commit as
-# the `device-farm / android` status, with each phone's output and artifacts
+# the `device-test / android` status, with each phone's output and artifacts
 # (tools/device-farm/README.md).
 
 on:
@@ -20,7 +20,7 @@ defaults:
     shell: bash
 
 env:
-  STATUS_CONTEXT: device-farm / android
+  STATUS_CONTEXT: device-test / android
 
 jobs:
   finish:
@@ -50,7 +50,7 @@ jobs:
           role-to-assume: ${{ vars.OIDC_AWS_ROLE_TO_ASSUME }}
           role-session-name: mln-rs-device-farm-finish-${{ github.run_id }}
 
-      # The commit is the one that the device-farm workflow named the run for.
+      # The commit is the one that the device-test workflow named the run for.
       - name: Read the run
         id: run
         env:

@@ -36,11 +36,12 @@ CI's `prepare-device-tests` job builds the package when the `android` unit runs,
 without credentials. Three workflows run it, so that no GitHub runner waits for
 the phones while a run is queued or in progress:
 
-- `device-farm` starts with the CI run, waits for `prepare-device-tests`, and
+- `device-test` starts with the CI run, waits for `prepare-device-tests`, and
   schedules the package once the job has built it, while the rest of CI runs. It
-  reports the run on the commit as pending, as the `device-farm / android`
-  status. It names the run for the commit. A newer commit of a pull request
-  stops the run of the commit before it.
+  reports the run on the commit as pending, as the `device-test / android`
+  status, and names the run for the commit. A newer commit of a pull request
+  stops the run of the commit before it. When the plan leaves the Android tests
+  out, it reports the status as passed, since merging into `main` requires it.
 - `device-farm-watch`, one at a time for every run, waits for the runs, and
   starts `device-farm-finish` for each that finished (`watch.sh`). An hourly
   schedule starts it too, in case one failed.
@@ -48,7 +49,7 @@ the phones while a run is queued or in progress:
   output and artifacts (`collect.sh`), and a job without credentials summarizes
   each phone's JUnit report (`summary.py`).
 
-`device-farm` runs on `workflow_run`, from the default branch, so pull requests
+`device-test` runs on `workflow_run`, from the default branch, so pull requests
 from forks get a run too: the package may come from a fork, so the workflows,
 which assume their AWS role through the `workflow-run` environment that only
 `main` can use, never run or unpack it.

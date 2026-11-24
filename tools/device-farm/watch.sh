@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Watches the AWS Device Farm runs that the device-farm workflow scheduled
+# Watches the AWS Device Farm runs that the device-test workflow scheduled
 # (README.md): starts the device-farm-finish workflow for each run that
 # finished, until none is in progress. A run's name starts with "mln-rs" and
 # its commit. The AWS credentials last four hours, so after three it starts

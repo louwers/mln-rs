@@ -340,7 +340,7 @@ jobs:
           if-no-files-found: ignore
 
   # The Android tests, built for AWS Device Farm's phones (`mise run
-  # device-farm:package`), which the device-farm workflow runs once this job
+  # device-farm:package`), which the device-test workflow runs once this job
   # has built it (tools/device-farm/README.md).
   prepare-device-tests:
     needs: plan

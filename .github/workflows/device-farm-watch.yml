@@ -1,12 +1,12 @@
 name: device-farm-watch
 
-# Waits for the AWS Device Farm runs that the device-farm workflow scheduled,
+# Waits for the AWS Device Farm runs that the device-test workflow scheduled,
 # and starts device-farm-finish for each that finished, so that a run holds no
 # GitHub runner while it waits for the phones (tools/device-farm/README.md).
 # One watcher waits for every run.
 
 on:
-  workflow_dispatch: # started by the device-farm workflow, and by itself
+  workflow_dispatch: # started by the device-test workflow, and by itself
   schedule:
     - cron: "23 * * * *" # in case a watcher failed
 
