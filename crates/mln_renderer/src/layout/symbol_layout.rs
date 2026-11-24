@@ -40,7 +40,7 @@ use mln_vec_map::VecMap;
 use crate::bucket_parameters::BucketParameters;
 use crate::buckets::symbol_bucket::{
     Buffer, PaintProperties, PlacedSymbol, QuadCorner, SortKeyRange, SymbolBucket, SymbolBucketState,
-    SymbolBucketStyle, SymbolLayoutFlags, SymbolSizeBinder,
+    SymbolBucketStyle, SymbolLayoutFlags, SymbolSizeBinder, max_height_offset,
 };
 use crate::geometry::anchor::Anchor;
 use crate::geometry::feature_index::{FeatureIndexBuilder, IndexedSubfeature};
@@ -1696,6 +1696,7 @@ impl SymbolLayout {
                 writer.add(laid_out, feature)
             })
             .collect();
+        bucket.max_height_offset = max_height_offset(&symbols);
         state.symbol_instances = symbols;
         if show_collision_boxes {
             add_collision_geometry(&mut state);

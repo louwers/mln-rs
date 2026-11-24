@@ -267,3 +267,13 @@ fn symbol_viewport_y() {
         assert_eq!(vec![0, 1, 2], order, "{type_:?}");
     }
 }
+
+#[test]
+fn symbol_height_offset_expression_raises_content_elevation() {
+    let json = json!({
+        "id": "symbol", "type": "symbol", "source": "source",
+        "layout": { "icon-image": "marker", "icon-allow-overlap": true, "symbol-height-offset": ["get", "rank"] }
+    });
+    let bucket = create_bucket(&layer(json, "symbol-sort-key", SortKeyType::Undefined), Shape::Point);
+    assert_eq!(bucket.max_content_elevation(), 2.0);
+}

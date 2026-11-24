@@ -531,7 +531,7 @@ impl SymbolBucket {
                 text_binders: SymbolTextBinders::new(evaluated, zoom),
             });
         }
-        let max_height_offset = symbol_instances.iter().map(|symbol| symbol.height_offset).fold(0.0, f32::max);
+        let max_height_offset = max_height_offset(&symbol_instances);
         SymbolBucket {
             base: BucketBase::default(),
             layout,
@@ -717,6 +717,12 @@ impl SymbolBucket {
     pub(crate) fn collision_dynamic_vertex(placed: bool, not_used: bool, shift: Vec2) -> CollisionBoxDynamicVertex {
         CollisionBoxDynamicVertex { a1: [u16::from(placed), u16::from(not_used)], a2: [shift.x, shift.y] }
     }
+}
+
+/// The highest `symbol-height-offset` of `symbol_instances`, and 0 for none.
+#[must_use]
+pub(crate) fn max_height_offset(symbol_instances: &[SymbolInstance]) -> f32 {
+    symbol_instances.iter().map(|symbol| symbol.height_offset).fold(0.0, f32::max)
 }
 
 /// Adds the two triangles of each quad of `placed_symbol`.
