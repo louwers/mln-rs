@@ -39,6 +39,10 @@ web-time.workspace = true
 # hidden from the documentation.
 bench = []
 
+# android: the Java VM of the library's Android services.
+[target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true
+
 [target.'cfg(target_family = "wasm")'.dependencies]
 # host_bytes: tile workers' vertex and index arrays, kept in JS until upload.
 js-sys.workspace = true
