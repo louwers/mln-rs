@@ -421,6 +421,18 @@ pub struct MapSettings {
     pub fast_pfor_enabled: bool,
 }
 
+impl std::fmt::Debug for MapSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MapSettings")
+            .field("mode", &self.mode)
+            .field("pixel_ratio", &self.pixel_ratio)
+            .field("max_zoom", &self.max_zoom)
+            .field("file_source", &self.file_source.as_ref().map(|_| format_args!("..")))
+            .field("fast_pfor_enabled", &self.fast_pfor_enabled)
+            .finish()
+    }
+}
+
 /// A [`DataOrigin`]'s update: the source as the style has it, what the map
 /// says of its tiles, and the tiles, which the origin can clear or load
 /// again.
