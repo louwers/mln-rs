@@ -82,7 +82,8 @@ pub struct Draw {
     /// layer draws there (front to back, below the lowest layer of 3D
     /// geometry on a flat map), and otherwise in the translucent pass. It
     /// draws once, in one of the two. A draw that isn't opaque draws in the
-    /// translucent pass.
+    /// translucent pass, and so does every draw after it in its group's
+    /// order, which the opaque pass would otherwise reverse.
     pub opaque: bool,
     /// How the draw tests and writes depth.
     pub depth: Depth,
@@ -346,8 +347,10 @@ impl Group {
         }
         // A composited group draws into its texture in the translucent
         // pass alone, and an opaque draw that writes no depth would show
-        // the lower groups that the opaque pass draws after it.
-        let opaque = *opaque && frame.composite.is_none();
+        // the lower groups that the opaque pass draws after it. The opaque
+        // pass draws before the translucent one, so the group's opaque
+        // draws end at its first draw that isn't, which keeps their order.
+        let mut opaque = *opaque && frame.composite.is_none();
         pushes.pushed.sort_unstable_by_key(|pushed| (pushed.draw.order, pushed.index));
         let mut counts: SmallVec<[u32; 4]> = SmallVec::new();
         for pushed in &pushes.pushed {
@@ -355,17 +358,14 @@ impl Group {
             counts.resize(counts.len().max(run + 1), 0);
             let element = counts[run];
             counts[run] += 1;
+            opaque &= pushed.draw.opaque
+                && matches!(pushed.draw.depth, Depth::Layer { write: true, .. } | Depth::Volume { write: true, .. });
             frame.draws.push(FrameDraw {
                 tile: pushed.tile,
                 mesh: pushed.mesh,
                 run: run as u16,
                 element,
-                opaque: pushed.draw.opaque
-                    && opaque
-                    && matches!(
-                        pushed.draw.depth,
-                        Depth::Layer { write: true, .. } | Depth::Volume { write: true, .. }
-                    ),
+                opaque,
                 depth: pushed.draw.depth,
                 clip: pushed.draw.clip,
             });
@@ -1035,6 +1035,15 @@ mod tests {
             group.finish(gpu, context, &(), []);
             let opaque: Vec<bool> = group.frame.draws.iter().map(|draw| draw.opaque).collect();
             assert_eq!(opaque, [true, false, false]);
+
+            // An opaque draw after one that draws translucent draws
+            // translucent too, after it, as its group orders them.
+            group.begin(0.0, true, false);
+            group.push(&mesh, Draw { depth: Depth::Layer { sub_layer: 0, write: false }, ..writes }, ());
+            group.push(&mesh, writes, ());
+            group.finish(gpu, context, &(), []);
+            let opaque: Vec<bool> = group.frame.draws.iter().map(|draw| draw.opaque).collect();
+            assert_eq!(opaque, [false, false]);
 
             group.begin(0.0, true, false);
             let half = Composite::of(0.5, mln_style_types::LayerBlendType::Normal).expect("a composite");
