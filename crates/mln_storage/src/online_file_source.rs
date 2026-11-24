@@ -36,6 +36,8 @@ use mln_util::logging::{Event, Log};
 use mln_util::queue::{Queue, TimedTask};
 use mln_util::time::Instant;
 use mln_vec_map::VecMap;
+#[cfg(not(target_family = "wasm"))]
+use parking_lot::Mutex;
 
 use crate::file_source::FileSource;
 use crate::http_file_source::HTTPFileSource;
@@ -544,16 +546,18 @@ impl OnlineCore {
 /// share it. Its requests follow the [`NetworkStatus`] it was made with.
 ///
 /// Outside the browser its requests run on a thread of its own, which its
-/// drop waits for, unless it drops on that thread. When that thread can't
-/// start, the source logs why and fails each request.
+/// drop or [`shut_down`](Self::shut_down) waits for, unless it runs on that
+/// thread. When that thread can't start, the source logs why and fails each
+/// request.
 pub struct OnlineFileSource {
     maximum_concurrent_requests: AtomicU32,
     /// The id of the next request.
     next_request_id: AtomicU64,
     queue: OnlineQueue,
     _reachability: Subscription,
+    /// The thread that runs the core, until the source shuts down.
     #[cfg(not(target_family = "wasm"))]
-    thread: Option<std::thread::JoinHandle<()>>,
+    thread: Mutex<Option<std::thread::JoinHandle<()>>>,
     /// The caller runs the core, rather than a thread
     /// (`crate::simulated_network`).
     #[cfg(all(any(test, feature = "bench"), not(target_family = "wasm")))]
@@ -590,7 +594,7 @@ impl OnlineFileSource {
             drop(core);
         });
         match thread {
-            Ok(thread) => source.thread = Some(thread),
+            Ok(thread) => *source.thread.get_mut() = Some(thread),
             Err(error) => {
                 source.queue.close();
                 Log::error(Event::General, format!("The online file source's thread didn't start: {error}"));
@@ -651,7 +655,7 @@ impl OnlineFileSource {
             queue,
             _reachability: reachability,
             #[cfg(not(target_family = "wasm"))]
-            thread: None,
+            thread: Mutex::new(None),
             #[cfg(all(any(test, feature = "bench"), not(target_family = "wasm")))]
             driven: false,
         };
@@ -713,7 +717,7 @@ impl OnlineFileSource {
         if self.driven {
             return true;
         }
-        self.thread.is_some()
+        self.thread.lock().is_some()
     }
 
     /// Whether a thread runs the source's core: in the browser the host's
@@ -723,17 +727,30 @@ impl OnlineFileSource {
     fn is_running(&self) -> bool {
         true
     }
+
+    /// Stops the source, as its drop does, for an owner that must know its
+    /// thread has ended although the source may be held elsewhere: waits
+    /// for that thread unless it runs on it. Requests in flight end without
+    /// a response, and later ones fail as when the thread didn't start.
+    pub fn shut_down(&self) {
+        self.queue.stop();
+        #[cfg(not(target_family = "wasm"))]
+        {
+            // Released before the join, as the thread may load from this
+            // source meanwhile.
+            let thread = self.thread.lock().take();
+            if let Some(thread) = thread
+                && thread.thread().id() != std::thread::current().id()
+            {
+                let _ = thread.join();
+            }
+        }
+    }
 }
 
 impl Drop for OnlineFileSource {
     fn drop(&mut self) {
-        self.queue.stop();
-        #[cfg(not(target_family = "wasm"))]
-        if let Some(thread) = self.thread.take()
-            && thread.thread().id() != std::thread::current().id()
-        {
-            let _ = thread.join();
-        }
+        self.shut_down();
     }
 }
 

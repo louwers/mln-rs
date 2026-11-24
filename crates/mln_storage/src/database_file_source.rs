@@ -15,6 +15,7 @@ use std::time::Duration;
 use mln_util::constants::{ASSET_PROTOCOL, FILE_PROTOCOL};
 use mln_util::logging::{Event, Log};
 use mln_util::queue::Queue;
+use parking_lot::Mutex;
 
 use crate::file_source::FileSource;
 use crate::offline_database::{DatabaseError, OfflineDatabase};
@@ -112,12 +113,14 @@ pub trait Cache: FileSource {
 
 /// The `Database` file source: the ambient cache and the offline regions,
 /// in an SQLite database that a worker thread owns, with the worker's
-/// extension `E` beside it. Its drop waits for the worker to end, unless it
-/// drops on the worker's thread. When the worker's thread can't start, the
-/// source logs why, fails each request, and drops the work sent to it.
+/// extension `E` beside it. Its drop or [`shut_down`](Self::shut_down) waits
+/// for the worker to end, unless it runs on the worker's thread. When the
+/// worker's thread can't start, the source logs why, fails each request, and
+/// drops the work sent to it.
 pub struct DatabaseFileSource<E: 'static = ()> {
     queue: DatabaseQueue<E>,
-    thread: Option<std::thread::JoinHandle<()>>,
+    /// The worker's thread, until the database shuts down.
+    thread: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 impl DatabaseFileSource {
@@ -166,7 +169,7 @@ impl<E: 'static> DatabaseFileSource<E> {
         if thread.is_none() {
             queue.close();
         }
-        DatabaseFileSource { queue, thread }
+        DatabaseFileSource { queue, thread: Mutex::new(thread) }
     }
 
     /// Holds the database thread until the guard drops (`crate::tests::pause`).
@@ -248,16 +251,27 @@ impl<E: 'static> DatabaseFileSource<E> {
     pub fn invoke(&self, f: impl FnOnce(&mut DatabaseWorker<E>) + Send + 'static) {
         self.queue.post(f);
     }
-}
 
-impl<E: 'static> Drop for DatabaseFileSource<E> {
-    fn drop(&mut self) {
+    /// Stops the database, as its drop does, for an owner that must know
+    /// its worker has ended although the database may be held elsewhere:
+    /// waits for the worker unless it runs on the worker's thread. The work
+    /// sent after drops, and requests fail as when the thread didn't start.
+    pub fn shut_down(&self) {
         self.queue.stop();
-        if let Some(thread) = self.thread.take()
+        // Released before the join, as the thread may load from this source
+        // meanwhile.
+        let thread = self.thread.lock().take();
+        if let Some(thread) = thread
             && thread.thread().id() != std::thread::current().id()
         {
             let _ = thread.join();
         }
+    }
+}
+
+impl<E: 'static> Drop for DatabaseFileSource<E> {
+    fn drop(&mut self) {
+        self.shut_down();
     }
 }
 
@@ -276,7 +290,7 @@ impl<E: 'static> Cache for DatabaseFileSource<E> {
 
 impl<E: 'static> FileSource for DatabaseFileSource<E> {
     fn load(&self, resource: &Resource, responder: Responder) {
-        if self.thread.is_none() {
+        if self.thread.lock().is_none() {
             let mut response = Response::new();
             response.error = Some(Box::new(ResourceError::new(Reason::Other, "The database's thread isn't running.")));
             responder.send(response);

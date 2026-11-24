@@ -420,6 +420,25 @@ pub(crate) struct RuntimeCore {
     spare_deliveries: Vec<Box<dyn FnOnce()>>,
 }
 
+impl Drop for RuntimeCore {
+    /// Stops the file sources' threads, and waits for them, after the maps
+    /// have gone. The sources can outlive the runtime's handles of them: a
+    /// response's callback holds the loader while it runs on a source's
+    /// thread, and a provider's request holds the online source, so their
+    /// last handles can drop where a drop doesn't wait, such as on the
+    /// source's own thread.
+    fn drop(&mut self) {
+        self.maps.clear();
+        #[cfg(not(target_family = "wasm"))]
+        if let Some(database) = self.database.get() {
+            database.shut_down();
+        }
+        if let Some(online) = self.online.get() {
+            online.shut_down();
+        }
+    }
+}
+
 /// What the library's own network loading of a runtime follows.
 struct NetworkOptions {
     status: Arc<NetworkStatus>,

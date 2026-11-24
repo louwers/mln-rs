@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Sender, channel};
 
 use httpmock::MockServer;
-use mln_runtime::{AttachOptions, Map, RenderSession, RenderTarget, Runtime, RuntimeOptions};
+use mln_runtime::{AttachOptions, Map, RenderSession, RenderTarget, ResourceRequest, Runtime, RuntimeOptions};
 use mln_util::size::Size;
 use parking_lot::Mutex;
 
@@ -88,6 +88,41 @@ fn dropping_a_runtime_waits_for_its_threads() {
     for ended in threads {
         assert!(ended.has(), "the runtime's {} thread runs", ended.thread);
     }
+}
+
+#[test]
+fn dropping_a_runtime_waits_for_its_network_thread_that_a_request_holds() {
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method("GET").path("/style.json");
+        then.status(200).body(EMPTY_STYLE);
+    });
+    let runtime = Runtime::new(&RuntimeOptions::default()).unwrap();
+    let (network, network_thread) = channel();
+    wait(runtime.set_http_header_transform(move |_, _| {
+        let _ = network.send(Ended::here());
+        Vec::new()
+    }));
+    // The provider passes the first style through, to the network, and
+    // hands the request for the second to this thread, which holds it, and
+    // the network file source with it, past the runtime's drop.
+    let (held, requests) = channel();
+    wait(runtime.set_resource_provider(move |request: ResourceRequest| {
+        if request.resource().url.starts_with("custom://") {
+            held.send(request).unwrap();
+        } else {
+            request.pass_through().unwrap();
+        }
+    }));
+    let map = map(&runtime);
+    wait(map.set_style_url(format!("{}/style.json", server.base_url())));
+    let network = network_thread.recv_timeout(TIMEOUT).unwrap();
+    let _load = map.set_style_url("custom://held").unwrap();
+    let request = requests.recv_timeout(TIMEOUT).unwrap();
+    drop(map);
+    drop(runtime);
+    assert!(network.has(), "the runtime's {} thread runs", network.thread);
+    drop(request);
 }
 
 #[test]
