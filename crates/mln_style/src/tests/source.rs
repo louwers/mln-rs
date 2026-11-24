@@ -9,7 +9,7 @@ use mln_util::tileset::{PartialTileset, RasterEncoding, Tileset, VectorEncoding}
 use super::util::parse_json;
 use crate::conversion::source::convert_source;
 use crate::conversion::{Convertible, Error};
-use crate::source_type::{Described, ErasedDescription, Load, Source, SourceData};
+use crate::source_type::{Described, ErasedDescription, Fetch, Load, Source, SourceData};
 use crate::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, geojson_source};
 use crate::sources::tileset::{
     RasterDemKind, RasterKind, TilesetKind, TilesetSourceType, VectorKind, raster_dem_source, raster_source,
@@ -60,8 +60,8 @@ fn style_with(source: Source) -> Style {
 #[test]
 fn loading_corrupt() {
     let source = vector_source("source", Some("url".to_owned()), PartialTileset::default());
-    let Load::Fetch(resource) = source.data().plan_load() else { panic!("a TileJSON to fetch") };
-    assert_eq!("url", resource.url);
+    let Load::Fetch(fetch) = source.data().plan_load() else { panic!("a TileJSON to fetch") };
+    assert_eq!(Fetch::Source("url".to_owned()), fetch);
     // C++ expects rapidjson's "Invalid value. at offset 0"; JSON syntax
     // errors carry serde_json's message in the port.
     let error = describe(&source, b"CORRUPTED").expect_err("an error");

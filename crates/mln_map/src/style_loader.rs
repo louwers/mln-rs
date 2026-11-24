@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use mln_sprite::load_sprite;
 use mln_storage::{Data, FileSource, FileSourceExt, Request, Resource, ResourceError, Response};
-use mln_style::source_type::{Described, ErasedDescription, Load};
+use mln_style::source_type::{Described, ErasedDescription, Fetch, Load};
 use mln_style::sprite::Sprite;
 use mln_style::{Edit, SourceInstance, Style, StyleLoadError, StyleRegistry, image};
 use mln_text::glyph::FontFaces;
@@ -313,8 +313,12 @@ impl StyleLoader {
                     load: load.load,
                     result: Ok(Some(description)),
                 }),
-                Load::Fetch(resource) => {
+                Load::Fetch(target) => {
                     entry.loaded = false;
+                    let resource = match &target {
+                        Fetch::Source(url) => Resource::source(url),
+                        Fetch::Image(url) => Resource::image(url),
+                    };
                     if let Some(file_source) = self.file_source.clone() {
                         let replies = self.replies.clone();
                         let reply_load = load.clone();

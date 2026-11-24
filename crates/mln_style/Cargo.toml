@@ -31,7 +31,6 @@ mln_geojson.workspace = true
 mln_image.workspace = true
 mln_map_types.workspace = true
 mln_math.workspace = true
-mln_storage.workspace = true
 mln_style_types.workspace = true
 mln_text.workspace = true
 # The tile geometry of the `within` and `distance` expressions.
@@ -77,9 +76,6 @@ icu_locale.workspace = true
 icu_plurals.workspace = true
 icu_provider.workspace = true
 writeable.workspace = true
-
-[dev-dependencies]
-mln_storage = { workspace = true, features = ["stub-file-source"] }
 
 [lints]
 workspace = true

@@ -5,7 +5,6 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use mln_storage::{Data, Resource};
 use mln_util::constants;
 use mln_util::pool::Respond;
 use mln_util::tileset::{PartialTileset, Tileset, VectorEncoding};
@@ -15,7 +14,7 @@ use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
 use crate::layer_type::SourceKind;
 use crate::source_type::{
-    Described, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,
+    Data, Described, Fetch, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,
 };
 
 /// Which of the tileset source types a [`TilesetSourceType`] is.
@@ -147,7 +146,7 @@ impl<K: TilesetKind> StyleSourceType for TilesetSourceType<K> {
     /// The TileJSON at the source's URL, or else the tileset the style lists.
     fn load(source: &SourceData<Self>) -> Load<Tileset> {
         match &source.options.url {
-            Some(url) => Load::Fetch(Resource::source(url)),
+            Some(url) => Load::Fetch(Fetch::Source(url.clone())),
             None => Load::Ready(source.options.tileset.clone().into()),
         }
     }

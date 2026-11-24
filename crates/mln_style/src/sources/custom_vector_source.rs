@@ -4,7 +4,6 @@
 
 use std::sync::{Arc, Weak};
 
-use mln_storage::Data;
 use mln_tile_id::CanonicalTileID;
 use mln_util::error::Error;
 use mln_util::geo::LatLngBounds;
@@ -14,7 +13,7 @@ use mln_util::range::Range;
 pub use super::custom::{CustomVectorProvider, CustomVectorTileData, TileDataFormat};
 use super::custom::{CustomVectorSourceOptions, CustomVectorSourceType};
 use crate::custom_tile_loader::{CustomProvider, TileFunction};
-use crate::source_type::{Source, SourceData};
+use crate::source_type::{Data, Source, SourceData};
 
 #[derive(Clone)]
 pub struct Options {

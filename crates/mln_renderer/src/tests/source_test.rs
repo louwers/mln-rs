@@ -15,7 +15,7 @@ use mln_storage::{FileSource, FileSourceExt, Kind, RequestOrder, Resource, Respo
 use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::{Circle, Hillshade, Line, Raster};
-use mln_style::source_type::SourceData;
+use mln_style::source_type::{Fetch, Load, SourceData};
 use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
 use mln_style::sources::custom_vector_source::{self, Options as CustomVectorSourceOptions, TileDataFormat};
 use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, create_geojson_data, geojson_source};
@@ -607,7 +607,8 @@ fn tile_attribution(kind: Tiled, attribution: &'static str) {
     );
 
     // The map's loader fetches the TileJSON and describes it.
-    let mln_style::source_type::Load::Fetch(resource) = source.data().plan_load() else { panic!("a TileJSON") };
+    let Load::Fetch(Fetch::Source(url)) = source.data().plan_load() else { panic!("a TileJSON") };
+    let resource = Resource::source(&url);
     let (sender, responses) = std::sync::mpsc::channel();
     let _request = file_source.request(&resource, move |response: Response| {
         let _ = sender.send(response);

@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use mln_image::decoder;
-use mln_storage::{Data, Resource};
 use mln_util::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::Respond;
@@ -14,7 +13,7 @@ use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
 use crate::layer_type::SourceKind;
 use crate::source_type::{
-    Described, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,
+    Data, Described, Fetch, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,
 };
 
 /// The image source type.
@@ -52,7 +51,7 @@ impl StyleSourceType for ImageSourceType {
     /// The image at the source's URL, if it has one.
     fn load(source: &SourceData<Self>) -> Load<Arc<PremultipliedImage>> {
         match &source.options.url {
-            Some(url) => Load::Fetch(Resource::image(url)),
+            Some(url) => Load::Fetch(Fetch::Image(url.clone())),
             None => Load::Done,
         }
     }

@@ -6,7 +6,6 @@ use std::sync::{Arc, OnceLock};
 use feature::{Feature, PropertyMap, Value};
 use geojson::GeoJson;
 use mln_geojson::{cluster, tile};
-use mln_storage::{Data, Resource};
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::error::Error;
@@ -22,7 +21,7 @@ use crate::expression::expr::evaluate_accumulated;
 use crate::expression::{Expr, Functions, from_expression_value};
 use crate::layer_type::SourceKind;
 use crate::source_type::{
-    Described, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,
+    Data, Described, Fetch, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,
 };
 
 /// The features of tile `id`. A tile past the maximum zoom or the last row
@@ -377,7 +376,7 @@ impl StyleSourceType for GeoJsonSourceType {
     /// The GeoJSON at the source's URL, if it has one.
     fn load(source: &SourceData<Self>) -> Load<Arc<dyn GeoJSONData>> {
         match &source.options.url {
-            Some(url) => Load::Fetch(Resource::source(url)),
+            Some(url) => Load::Fetch(Fetch::Source(url.clone())),
             None => Load::Done,
         }
     }

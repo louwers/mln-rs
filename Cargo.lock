@@ -3105,7 +3105,6 @@ dependencies = [
  "mln-rs-image",
  "mln-rs-map-types",
  "mln-rs-math",
- "mln-rs-storage",
  "mln-rs-style-types",
  "mln-rs-text",
  "mln-rs-tile",

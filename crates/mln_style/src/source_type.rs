@@ -19,7 +19,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use mln_storage::{Data, Resource};
 use mln_util::constants;
 use mln_util::logging::{Event, Log};
 use mln_util::pool::Respond;
@@ -101,8 +100,21 @@ pub enum Load<D> {
     Ready(D),
     /// The resource whose data [`StyleSourceType::describe`] turns into the
     /// description.
-    Fetch(Resource),
+    Fetch(Fetch),
 }
+
+/// A resource that a source loads its description from, by its URL.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Fetch {
+    /// A document that describes the source, such as TileJSON or GeoJSON.
+    Source(String),
+    /// An image.
+    Image(String),
+}
+
+/// The bytes that a source loads from: a fetched resource's, or those of
+/// a tile that the host gives.
+pub type Data = Arc<Vec<u8>>;
 
 /// What describing a source's fetched data found: its description, `None`
 /// for data that describes nothing, or why the source failed to load.
@@ -315,7 +327,7 @@ impl<T: StyleSourceType> ErasedSource for SourceData<T> {
         match T::load(self) {
             Load::Done => Load::Done,
             Load::Ready(description) => Load::Ready(erase(description)),
-            Load::Fetch(resource) => Load::Fetch(resource),
+            Load::Fetch(fetch) => Load::Fetch(fetch),
         }
     }
 
