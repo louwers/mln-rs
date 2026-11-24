@@ -1,0 +1,17 @@
+# The test spec of the iOS tests' runs on AWS Device Farm (../README.md): each
+# job runs the test package's run-tests.py on a macOS test host, with the
+# iPhone attached and the package's app installed on it, and keeps
+# $DEVICEFARM_LOG_DIR as the job's customer artifacts. A command in the test
+# phase that fails fails the job.
+# https://docs.aws.amazon.com/devicefarm/latest/developerguide/custom-test-environment-test-spec.html
+version: 0.1
+
+ios_test_host: macos_tahoe
+
+phases:
+  test:
+    commands:
+      - python3 -I "$DEVICEFARM_TEST_PACKAGE_PATH/run-tests.py"
+
+artifacts:
+  - $DEVICEFARM_LOG_DIR

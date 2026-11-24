@@ -158,7 +158,7 @@ class PlanTest(unittest.TestCase):
     def test_android_unit_populates_target_matrix(self) -> None:
         result = outputs(selected(["android"]), secrets=False)
         self.assertEqual(
-            result["jobs"], ["commits", "lint", "target", "prepare-device-tests"]
+            result["jobs"], ["commits", "lint", "target", "prepare-android-device-tests"]
         )
         self.assertFalse(result["secrets"])
         self.assertEqual(result["test"], {"include": []})
@@ -180,7 +180,9 @@ class PlanTest(unittest.TestCase):
 
     def test_outputs_include_target_matrix_for_ios(self) -> None:
         result = outputs(selected(["ios"]), secrets=False)
-        self.assertEqual(result["jobs"], ["commits", "lint", "target"])
+        self.assertEqual(
+            result["jobs"], ["commits", "lint", "target", "prepare-ios-device-tests"]
+        )
         self.assertFalse(result["secrets"])
         self.assertEqual(result["test"], {"include": []})
         self.assertEqual(result["backend"], {"include": []})

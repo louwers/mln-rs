@@ -1,38 +1,60 @@
 #!/usr/bin/env bash
-#MISE description="Build the Android tests into a test package for AWS Device Farm's phones (tools/device-farm)"
-#USAGE flag "--out <file>" default="target/device-farm/android-tests.zip" help="Where to write the package"
-# In the target-android environment: `mise -E target-android run
-# device-farm:package`. tools/device-farm/README.md lists what the package
-# holds.
+#MISE description="Build the tests into a test package for AWS Device Farm's phones (tools/device-farm)"
+#USAGE arg "<platform>" help="The phones' platform: android or ios"
+#USAGE flag "--out <dir>" help="Where to write the package (default: target/device-farm/<platform>)"
+# Android's in the target-android environment, `mise -E target-android run
+# device-farm:package android`, and iOS's on a Mac with Xcode.
+# tools/device-farm/README.md lists what the package holds: tests.zip, and
+# for iOS the app, app.ipa.
 set -euo pipefail
 source tools/dev-shell.sh
 
-if [[ -z ${CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER:-} ]]; then
-    echo "Select the target-android environment: mise -E target-android run device-farm:package" >&2
-    exit 1
-fi
+platform=$usage_platform
+out=${usage_out:-target/device-farm/$platform}
+case $platform in
+    android)
+        if [[ -z ${CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER:-} ]]; then
+            echo "Select the target-android environment: mise -E target-android run device-farm:package android" >&2
+            exit 1
+        fi
+        ;;
+    ios)
+        if ! xcrun --sdk iphoneos --show-sdk-path > /dev/null; then
+            echo "Building for iOS needs Xcode" >&2
+            exit 1
+        fi
+        ;;
+    *)
+        echo "No Device Farm tests for $platform: android or ios" >&2
+        exit 1
+        ;;
+esac
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 package=$work/package
-mkdir -p "$package/bin"
+mkdir -p "$package" "$out"
+rm -f "$out/tests.zip" "$out/app.ipa"
 
 packages=()
 while IFS= read -r name; do
     packages+=(-p "$name")
 done < <(tools/ci/target-packages.sh)
-rustup target add aarch64-linux-android
-dev_shell cargo nextest archive --target aarch64-linux-android "${packages[@]}" --archive-file "$package/tests.tar.zst"
 
-# The test host, for the phones' ABI.
-tools/android-test-host/build.sh arm64-v8a "$package/host"
+if [[ $platform == android ]]; then
+    mkdir "$package/bin"
+    rustup target add aarch64-linux-android
+    dev_shell cargo nextest archive --target aarch64-linux-android "${packages[@]}" --archive-file "$package/tests.tar.zst"
 
-git ls-files -z --cached --others --exclude-standard | tar --null --files-from - -czf "$package/workspace.tar.gz"
+    # The test host, for the phones' ABI.
+    tools/android-test-host/build.sh arm64-v8a "$package/host"
 
-# The Linux x64 cargo-nextest and devices-cli pinned by mise, for Device Farm's
-# Amazon Linux 2023 test host.
-read -r nextest_url nextest_checksum devices_cli_version < <(
-    python3 - << 'PYEOF'
+    git ls-files -z --cached --others --exclude-standard | tar --null --files-from - -czf "$package/workspace.tar.gz"
+
+    # The Linux x64 cargo-nextest and devices-cli pinned by mise, for Device
+    # Farm's Amazon Linux 2023 test host.
+    read -r nextest_url nextest_checksum devices_cli_version < <(
+        python3 - << 'PYEOF'
 import tomllib
 
 with open("mise.lock", "rb") as f:
@@ -41,25 +63,94 @@ with open("mise.target-android.toml", "rb") as f:
     devices_cli = tomllib.load(f)["tools"]["go:github.com/sargunv/devices-cli"]
 print(nextest["url"], nextest["checksum"].removeprefix("sha256:"), devices_cli)
 PYEOF
-)
-curl --fail --silent --show-error --location --output "$work/nextest.tar.gz" "$nextest_url"
-echo "$nextest_checksum  $work/nextest.tar.gz" | shasum -a 256 --check --quiet
-tar -xzf "$work/nextest.tar.gz" -C "$package/bin"
+    )
+    curl --fail --silent --show-error --location --output "$work/nextest.tar.gz" "$nextest_url"
+    echo "$nextest_checksum  $work/nextest.tar.gz" | shasum -a 256 --check --quiet
+    tar -xzf "$work/nextest.tar.gz" -C "$package/bin"
 
-# Static Linux x64 binary so it runs on Amazon Linux 2023 regardless of the
-# host OS or glibc version.
-gomodcache=$(go env GOMODCACHE)
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOPATH="$work/go" GOMODCACHE="$gomodcache" GOBIN="" \
-    go install -ldflags='-s -w' "github.com/sargunv/devices-cli@$devices_cli_version"
-devices_cli_bin=$work/go/bin/linux_amd64/devices-cli
-[[ -f $devices_cli_bin ]] || devices_cli_bin=$work/go/bin/devices-cli
-cp "$devices_cli_bin" "$package/bin/devices-cli"
+    # Static Linux x64 binary so it runs on Amazon Linux 2023 regardless of the
+    # host OS or glibc version.
+    gomodcache=$(go env GOMODCACHE)
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOPATH="$work/go" GOMODCACHE="$gomodcache" GOBIN="" \
+        go install -ldflags='-s -w' "github.com/sargunv/devices-cli@$devices_cli_version"
+    devices_cli_bin=$work/go/bin/linux_amd64/devices-cli
+    [[ -f $devices_cli_bin ]] || devices_cli_bin=$work/go/bin/devices-cli
+    cp "$devices_cli_bin" "$package/bin/devices-cli"
 
-cp tools/device-farm/run-tests.sh "$package/"
+    cp tools/device-farm/android/run-tests.sh "$package/"
+else
+    rustup target add aarch64-apple-ios
+    # The tests as dylibs, which the test host loads into the app's process
+    # (tools/ios-test-host).
+    CARGO_TARGET_AARCH64_APPLE_IOS_RUSTFLAGS="-C link-arg=-dynamiclib" \
+        cargo test --no-run --target aarch64-apple-ios "${packages[@]}" \
+        --message-format json-render-diagnostics > "$work/build.json"
+    cargo metadata --no-deps --format-version 1 --locked > "$work/metadata.json"
 
-mkdir -p "$(dirname "$usage_out")"
+    app=$work/Payload/MlnRsTestHost.app
+    tools/ios-test-host/build.sh "$app"
+    mkdir "$app/Frameworks" "$app/workspace"
+    git ls-files -z --cached --others --exclude-standard | tar --null --files-from - -cf - | tar -xf - -C "$app/workspace"
+
+    # The binaries go to the app's Frameworks, and tests.json lists them for
+    # run-tests.py: the IDs that nextest gives them, and their packages and
+    # the packages' directories in the workspace.
+    python3 - "$work" "$app" "$package/tests.json" << 'PYEOF'
+import json
+import pathlib
+import plistlib
+import shutil
+import sys
+
+work, app, listing = map(pathlib.Path, sys.argv[1:])
+metadata = json.loads((work / "metadata.json").read_text())
+root = pathlib.Path(metadata["workspace_root"])
+packages = {package["id"]: package for package in metadata["packages"]}
+binaries = []
+for line in (work / "build.json").read_text().splitlines():
+    message = json.loads(line)
+    executable = message.get("executable")
+    if message.get("reason") != "compiler-artifact" or not message["profile"]["test"] or not executable:
+        continue
+    # Not proc-macros' tests, which are built for the host.
+    if "/aarch64-apple-ios/" not in executable:
+        continue
+    package = packages[message["package_id"]]
+    target = message["target"]
+    kind = target["kind"][0]
+    if kind in ("lib", "rlib", "cdylib", "staticlib", "proc-macro"):
+        binary_id = package["name"]
+    elif kind == "test":
+        binary_id = f"{package['name']}::{target['name']}"
+    else:
+        binary_id = f"{package['name']}::{kind}/{target['name']}"
+    # MH_DYLIB, unless RUSTFLAGS overrode the target's rustflags.
+    with open(executable, "rb") as binary:
+        if binary.read(16)[12:] != (6).to_bytes(4, "little"):
+            sys.exit(f"{executable} isn't a dylib: is RUSTFLAGS set?")
+    name = pathlib.Path(executable).name + ".dylib"
+    shutil.copy(executable, app / "Frameworks" / name)
+    binaries.append({
+        "id": binary_id,
+        "file": name,
+        "package": package["name"],
+        "dir": str(pathlib.Path(package["manifest_path"]).parent.relative_to(root)),
+    })
+bundle = plistlib.loads((app / "Info.plist").read_bytes())["CFBundleIdentifier"]
+listing.write_text(json.dumps({"app": bundle, "binaries": sorted(binaries, key=lambda b: b["id"])}, indent=2))
+PYEOF
+
+    # Ad hoc: Device Farm signs the app again for its phones.
+    codesign --force --sign - "$app"/Frameworks/*.dylib
+    codesign --force --sign - "$app"
+    (cd "$work" && zip -qry app.ipa Payload)
+    mv "$work/app.ipa" "$out/"
+
+    cp tools/device-farm/ios/run-tests.py "$package/"
+fi
+
 # Stored, since the archives are compressed already.
-python3 - "$package" "$usage_out" << 'PYEOF'
+python3 - "$package" "$out/tests.zip" << 'PYEOF'
 import pathlib
 import sys
 import zipfile
@@ -70,4 +161,4 @@ with zipfile.ZipFile(sys.argv[2], "w") as package:
         if path.is_file():
             package.write(path, path.relative_to(root))
 PYEOF
-ls -l "$usage_out"
+ls -l "$out"

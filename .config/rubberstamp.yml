@@ -93,16 +93,20 @@ ci:
     ios:
       covers: >-
         Apple mobile/spatial clippy across iOS, iOS Simulator, Mac Catalyst,
-        visionOS, and visionOS Simulator, and workspace and render tests on the
-        iOS simulator with Metal API validation. Catches Apple mobile/spatial
-        compilation, Metal backend, and `target-apple` CI issues.
-        Platform-independent or Linux-only changes that `linux-x64` already
-        covers do not need it.
+        visionOS, and visionOS Simulator, workspace and render tests on the iOS
+        simulator with Metal API validation, and the workspace and render tests
+        on Metal on AWS Device Farm's iPhone, whose package CI builds. Catches
+        Apple mobile/spatial compilation, Metal backend, rendering that differs
+        on an iPhone's GPU, and `target-apple` CI issues. Platform-independent
+        or Linux-only changes that `linux-x64` already covers do not need it.
       rules:
         - if:
             files:
               - crates/mln_mtl/**
               - mise.target-apple.*
+              - tools/ios-test-host/**
+              - tools/device-farm/**
+              - mise-tasks/device-farm/**
           then: apply
     windows-x64:
       covers: >-

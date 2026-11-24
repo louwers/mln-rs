@@ -1,4 +1,4 @@
-# The test spec of the Android tests' runs on AWS Device Farm (README.md):
+# The test spec of the Android tests' runs on AWS Device Farm (../README.md):
 # each job runs the test package's run-tests.sh on an Amazon Linux 2023 test
 # host, with the phone attached over adb, and keeps $DEVICEFARM_LOG_DIR as the
 # job's customer artifacts. A command in the test phase that fails fails the

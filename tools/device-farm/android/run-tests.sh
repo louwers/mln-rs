@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Runs the Android tests on the phone of an AWS Device Farm job: android.yml
+# Runs the Android tests on the phone of an AWS Device Farm job: test-spec.yml
 # runs it on the job's test host, from the test package that
-# `mise run device-farm:package` builds (README.md). cargo-nextest runs the
-# package's archive of the tests with its device-farm profile, each test on the
-# phone in a Java VM's process through tools/android-test-host/runner.sh and
-# devices-cli, on Vulkan. The job's artifacts get nextest's JUnit report and the
-# tests' output (test-output.tar.gz): the render suite's report, which shows its
-# failed tests' images, and the images that other tests write. Exits as nextest
-# does.
+# `mise run device-farm:package android` builds (../README.md). cargo-nextest
+# runs the package's archive of the tests with its device-farm profile, each
+# test on the phone in a Java VM's process through
+# tools/android-test-host/runner.sh and devices-cli, on Vulkan. The job's
+# artifacts get nextest's JUnit report and the tests' output
+# (test-output.tar.gz): the render suite's report, which shows its failed
+# tests' images, and the images that other tests write. Exits as nextest does.
 set -euo pipefail
 
 package=${DEVICEFARM_TEST_PACKAGE_PATH:?}

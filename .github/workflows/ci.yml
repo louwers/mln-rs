@@ -346,14 +346,14 @@ jobs:
           if-no-files-found: ignore
 
   # The Android tests, built for AWS Device Farm's phones (`mise run
-  # device-farm:package`). The maplibre-device-farm GitHub App picks up the
-  # uploaded artifact once this job finishes (.config/device-farm.toml,
-  # tools/device-farm/README.md).
-  prepare-device-tests:
+  # device-farm:package android`), which the device-test workflow runs once
+  # this job has built them (tools/device-farm/README.md).
+  prepare-android-device-tests:
     needs: plan
     if:
       github.event.pull_request.state != 'closed' &&
-      contains(fromJSON(needs.plan.outputs.jobs), 'prepare-device-tests')
+      contains(fromJSON(needs.plan.outputs.jobs),
+      'prepare-android-device-tests')
     runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 40
     steps:
@@ -367,15 +367,48 @@ jobs:
           save-rust-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Package
-        run: mise run device-farm:package
+        run: mise run device-farm:package android
 
       - name: Upload the package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: android-device-tests
-          path: target/device-farm/android-tests.zip
+          path: target/device-farm/android
           retention-days: 3
           # The package's archives are compressed already.
+          compression-level: 0
+          if-no-files-found: error
+
+  # The iOS tests, built for AWS Device Farm's iPhone (`mise run
+  # device-farm:package ios`), which the device-test workflow runs once this
+  # job has built them (tools/device-farm/README.md).
+  prepare-ios-device-tests:
+    needs: plan
+    if:
+      github.event.pull_request.state != 'closed' &&
+      contains(fromJSON(needs.plan.outputs.jobs), 'prepare-ios-device-tests')
+    runs-on: blacksmith-6vcpu-macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-ci-deps
+        with:
+          mise-env: target-apple
+          save-rust-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Package
+        run: mise run device-farm:package ios
+
+      - name: Upload the package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-device-tests
+          path: target/device-farm/ios
+          retention-days: 3
+          # The app and the package are compressed already.
           compression-level: 0
           if-no-files-found: error
 
@@ -577,7 +610,8 @@ jobs:
         test,
         backend,
         target,
-        prepare-device-tests,
+        prepare-android-device-tests,
+        prepare-ios-device-tests,
         web,
         web-preview,
         commits,
