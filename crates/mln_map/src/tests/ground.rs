@@ -556,7 +556,7 @@ fn the_camera_returns_to_sea_level_after_a_still_image_used_its_moves() {
 /// the altitude alone, which the clamp decides, has nothing to animate: it
 /// ends at once, with the center on the ground.
 #[test]
-fn a_pitch_animation_holds_the_altitude() {
+fn a_pitch_animation_eases_onto_ground_that_lands() {
     let animate = |map: &mut Map, camera| {
         map.update_camera(&CameraUpdate {
             mode: CameraUpdateMode::Ease,

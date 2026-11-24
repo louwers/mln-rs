@@ -3,7 +3,7 @@
 //!
 //! - The eye stays above the ground while a command moves the camera.
 //! - Under the clamp, the center stands on the ground:
-//!   - at rest, on the ground under it, once that has loaded;
+//!   - at rest, on the ground under it, where that is known;
 //!   - while commands run, the altitude eases toward the ground under where
 //!     they leave the center, and stands on it as they end
 //!     ([`Transform::ease_altitude`]);
@@ -61,24 +61,39 @@ impl Transform {
         let goes = self.terrain.is_some() && terrain.is_none();
         self.terrain = terrain;
         if goes {
+            self.leave_ground();
             // Also before any ground was drawn, as the ground would have
             // overruled the altitude of a clamped center.
-            if clamped && self.view().center_altitude() != 0.0 {
-                self.state.set_center_altitude(0.0);
+            if clamped {
+                self.go_to_sea_level();
             }
-            self.leave_ground(clamped);
         }
     }
 
-    /// Fits the view's near and far planes to the flat map again, once there
-    /// is no ground, and puts a `clamped` center at sea level, keeping its
-    /// location and zoom.
-    fn leave_ground(&mut self, clamped: bool) {
-        if self.view().terrain_min_elevation().is_some() {
+    /// Fits the view's near and far planes to the flat map again, and
+    /// returns whether they fit the ground before.
+    fn leave_ground(&mut self) -> bool {
+        let fit = self.view().terrain_min_elevation().is_some();
+        if fit {
             self.state.set_terrain_min_elevation(None);
-            if clamped && self.view().center_altitude() != 0.0 {
-                self.state.set_center_altitude(0.0);
-            }
+        }
+        fit
+    }
+
+    /// Puts the center at sea level, keeping its location and zoom.
+    fn go_to_sea_level(&mut self) {
+        if self.view().center_altitude() != 0.0 {
+            self.state.set_center_altitude(0.0);
+        }
+    }
+
+    /// Fits the view's near and far planes to the lowest ground that
+    /// `elevation` has in the tile under the center, or to sea level where it
+    /// has none.
+    fn fit_planes(&mut self, elevation: &dyn Elevation) {
+        let min_elevation = Some(elevation.min_at(self.view().center(WrapMode::Wrapped)).unwrap_or(0.0));
+        if min_elevation != self.view().terrain_min_elevation() {
+            self.state.set_terrain_min_elevation(min_elevation);
         }
     }
 
@@ -101,14 +116,14 @@ impl Transform {
         let (elevation, clamped) = (elevation.clone(), *clamped);
         let ground = |view: &View| (view.terrain_min_elevation(), view.center_altitude());
         let before = ground(self.view());
-        let center = self.view().center(WrapMode::Wrapped);
-        if let Some(elevation) = &elevation {
-            let min_elevation = Some(elevation.min_at(center).unwrap_or(0.0));
-            if min_elevation != before.0 {
-                self.state.set_terrain_min_elevation(min_elevation);
+        match &elevation {
+            Some(elevation) => self.fit_planes(&**elevation),
+            // Once, as the planes fit the flat map from then on.
+            None => {
+                if self.leave_ground() && clamped {
+                    self.go_to_sea_level();
+                }
             }
-        } else {
-            self.leave_ground(clamped);
         }
         // A command of the pitch alone doesn't count as moving the camera,
         // but its frames set the altitude too.
@@ -124,8 +139,8 @@ impl Transform {
         self.terrain.as_ref().is_some_and(|terrain| terrain.clamped)
     }
 
-    /// Puts the center at the height of the ground under it, unless that
-    /// is still loading.
+    /// Puts the center at the height of the ground under it, where that is
+    /// known.
     pub(super) fn stand_on_ground(&mut self) {
         let Some(TerrainGround { elevation: Some(ground), .. }) = &self.terrain else { return };
         let view = self.view();
@@ -143,8 +158,9 @@ impl Transform {
     /// they leave the center is where the command that owns it ends it, or
     /// else where it is. Ground that lands, or a command that starts, ends
     /// or hands the center over, turns the next frame toward the new target
-    /// from where the altitude is. While that ground is unknown, or a
-    /// gesture is in progress, the altitude stays where it is.
+    /// from where the altitude is. While that ground is unknown, as at the
+    /// end of a flight past the ground the renderer drew, or a gesture is in
+    /// progress, the altitude stays where it is.
     ///
     /// Returns whether this frame ends the commands, which then stand the
     /// center on the ground under where they put it
@@ -173,7 +189,7 @@ impl Transform {
 
     /// Stands a camera that commands brought to rest over terrain that
     /// clamps the center on the ground, once no gesture or command moves it.
-    /// A center off the loaded ground under it, as a cancel leaves it, moves
+    /// A center off the drawn ground under it, as a cancel leaves it, moves
     /// along the view onto the ground its line of sight meets, with the eye
     /// where it is ([`TransformState::recenter_on`], GL JS's
     /// `recenterOnTerrain`); what that leaves off the ground, or all of it
@@ -207,11 +223,9 @@ impl Transform {
     pub(super) fn keep_eye_above(&mut self) {
         let Some(terrain) = &self.terrain else { return };
         let elevation = terrain.elevation.clone();
+        // The frame's center may have moved since the planes last fit it.
         if let Some(elevation) = &elevation {
-            let min_elevation = Some(elevation.min_at(self.view().center(WrapMode::Wrapped)).unwrap_or(0.0));
-            if min_elevation != self.view().terrain_min_elevation() {
-                self.state.set_terrain_min_elevation(min_elevation);
-            }
+            self.fit_planes(&**elevation);
         }
         for _ in 0..MAX_EYE_RAISES {
             let shortfall = eye_shortfall(self.view(), elevation.as_deref());
