@@ -2,5 +2,24 @@
 #MISE description="Run the Android tests on AWS Device Farm's phones with your AWS credentials (tools/device-farm)"
 #USAGE flag "--package <file>" default="target/device-farm/android-tests.zip" help="The test package that device-farm:package built"
 #USAGE flag "--results <dir>" default="target/device-farm/results" help="Where to download each phone's output and artifacts"
+# Waits for the run, which an interruption stops, and exits 0 when it passed.
 set -euo pipefail
-exec tools/device-farm/schedule.sh "$usage_package" "$usage_results"
+export AWS_REGION=us-west-2 AWS_PAGER=
+
+run=$(tools/device-farm/schedule.sh "$usage_package" "mln-rs local $(git rev-parse --short HEAD)")
+echo "Scheduled $run"
+trap 'aws devicefarm stop-run --arn "$run" > /dev/null; exit 1' INT TERM
+shown=
+while true; do
+    state=$(aws devicefarm get-run --arn "$run" --query '[run.status, run.result]' --output text) || state=$shown
+    if [[ $state != "$shown" ]]; then
+        echo "$(date -u +%H:%M:%S) ${state//$'\t'/ }"
+        shown=$state
+    fi
+    [[ $state == COMPLETED* ]] && break
+    # In the background, so that an interruption stops the run at once.
+    sleep 30 &
+    wait $!
+done
+trap - INT TERM
+exec tools/device-farm/collect.sh "$run" "$usage_results"

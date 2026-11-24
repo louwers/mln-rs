@@ -49,7 +49,8 @@ def section(phone: pathlib.Path) -> str:
 
 def main() -> None:
     results = pathlib.Path(sys.argv[1])
-    print("\n".join(section(phone) for phone in sorted(results.iterdir()) if phone.is_dir()))
+    phones = sorted(phone for phone in results.iterdir() if phone.is_dir()) if results.is_dir() else []
+    print("\n".join(section(phone) for phone in phones) if phones else "The run has no phone's results.")
 
 
 if __name__ == "__main__":
