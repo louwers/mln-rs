@@ -35,7 +35,7 @@ use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, TileOrder};
-use crate::render_tile::{FoundTile, FrameTile, RenderTile, TileView, ViewPlace};
+use crate::render_tile::{FoundTile, FrameTile, RenderTile, TileStamp, TileView, ViewPlace};
 use crate::sources::render_image_source::ImageSourceRenderData;
 use crate::tile::contents::{Contents, GeometryContents};
 use crate::tile::job::SourceKey;
@@ -369,14 +369,43 @@ impl<'a> FrameSourceTiles<'a> {
         tile: UnwrappedTileID,
         globe: bool,
     ) -> FrameTiles<'a, T> {
-        let overlaps = found.iter().filter(|found| {
-            self.tiles.get(found.tile).is_some_and(|render_tile| {
-                let id = render_tile.id;
-                let tile = if globe { UnwrappedTileID { wrap: id.wrap, ..tile } } else { tile };
-                id == tile || id.is_child_of(&tile) || tile.is_child_of(&id)
-            })
-        });
-        self.at(overlaps, layer_id)
+        self.at(self.overlaps(found, tile, globe).map(|(found, _)| found), layer_id)
+    }
+
+    /// What a layer draws of the tiles of `found` that
+    /// [`overlapping`](Self::overlapping) gives, in its order, under the ids
+    /// it draws them in.
+    pub(crate) fn stamps(
+        self,
+        found: &[FoundTile],
+        tile: UnwrappedTileID,
+        globe: bool,
+    ) -> impl Iterator<Item = TileStamp> {
+        self.overlaps(found, tile, globe).map(move |(&FoundTile { tile: index, view }, render_tile)| {
+            let contents = self.contents.get(index).copied().flatten();
+            let stamp = contents.zip(view).and_then(|(contents, place)| contents.stamp(place));
+            TileStamp {
+                tile: OverscaledTileID { wrap: tile.wrap, ..*render_tile.overscaled_tile_id() },
+                bucket: stamp.map(|(bucket, _)| bucket),
+                generations: stamp.map_or([0, 0], |(_, generations)| generations),
+            }
+        })
+    }
+
+    /// The tiles of `found` that overlap `tile`, with their render tiles:
+    /// in its world copy, or, on the `globe`, in any.
+    fn overlaps<'f>(
+        self,
+        found: &'f [FoundTile],
+        tile: UnwrappedTileID,
+        globe: bool,
+    ) -> impl Iterator<Item = (&'f FoundTile, &'a RenderTile)> {
+        found.iter().filter_map(move |found| {
+            let render_tile = self.tiles.get(found.tile)?;
+            let id = render_tile.id;
+            let tile = if globe { UnwrappedTileID { wrap: id.wrap, ..tile } } else { tile };
+            (id == tile || id.is_child_of(&tile) || tile.is_child_of(&id)).then_some((found, render_tile))
+        })
     }
 }
 
@@ -541,6 +570,12 @@ pub(crate) trait TypedLayer {
     /// a frame.
     fn passes(&self, evaluated: &EvaluatedLayer<Self::Type>) -> RenderPass;
 
+    /// Whether the layer draws a drape with its values `evaluated` by the
+    /// map's bearing: something of it is anchored to the viewport.
+    fn drapes_by_bearing(&self, _evaluated: &EvaluatedLayer<Self::Type>) -> bool {
+        false
+    }
+
     /// Called in the frame's update of a layer with a source with `tiles`,
     /// the frame's tiles of the source in the order the layer draws them,
     /// each with what it shows the layer: none for an image source. The
@@ -674,6 +709,10 @@ pub(crate) trait LayerParts {
     /// Whether the layer drapes over terrain ([`TypedLayer::DRAPES`]).
     fn drapes(&self) -> bool;
 
+    /// Whether the layer draws a drape by the map's bearing, with its values
+    /// of the frame ([`TypedLayer::drapes_by_bearing`]).
+    fn drapes_by_bearing(&self) -> bool;
+
     /// An empty drawing of the layer's type, which a drape keeps of the
     /// layer.
     fn new_drape_drawing(&self) -> Option<DrapeDrawing>;
@@ -697,6 +736,18 @@ pub(crate) trait LayerParts {
         source: Option<LayerSource<'_>>,
         drape: (OverscaledTileID, bool),
         drawing: &mut DrapeDrawing,
+    );
+
+    /// Adds to `stamps` what the layer draws of each tile that
+    /// [`update_drape_draws`](Self::update_drape_draws) makes its draws in
+    /// `drape` from: for an image source, its bucket and geometry in each
+    /// copy of the image that overlaps the drape; none for a layer without
+    /// a source.
+    fn drape_stamps(
+        &self,
+        source: Option<LayerSource<'_>>,
+        drape: (OverscaledTileID, bool),
+        stamps: &mut Vec<TileStamp>,
     );
 
     /// Records that the buckets in `changed` changed, for the tiles whose
@@ -870,6 +921,10 @@ impl<L: TypedLayer> LayerParts for L {
         L::DRAPES
     }
 
+    fn drapes_by_bearing(&self) -> bool {
+        TypedLayer::drapes_by_bearing(self, &self.parts().values.evaluated)
+    }
+
     fn new_drape_drawing(&self) -> Option<DrapeDrawing> {
         // Only a layer that drapes builds the code of a drawing in a drape.
         L::DRAPES.then(|| DrapeDrawing::new(L::Drawing::default()))
@@ -893,6 +948,32 @@ impl<L: TypedLayer> LayerParts for L {
         std::mem::swap(self.parts_mut().drawing, drawing);
         update_drape(self, gpu, parameters, atlases, source, drape);
         std::mem::swap(self.parts_mut().drawing, drawing);
+    }
+
+    fn drape_stamps(
+        &self,
+        source: Option<LayerSource<'_>>,
+        (drape_tile, globe): (OverscaledTileID, bool),
+        stamps: &mut Vec<TileStamp>,
+    ) {
+        let drape = drape_tile.to_unwrapped();
+        match source {
+            Some(LayerSource::Tiles(source, found)) => {
+                let found = found.get(self.base().found.clone()).unwrap_or_default();
+                stamps.extend(source.stamps(found, drape, globe));
+            }
+            Some(LayerSource::Image(image)) => {
+                let bucket = image.bucket.map(|bucket| (bucket.base.bucket_id, bucket.geometry().generation()));
+                stamps.extend(image.tile_ids.iter().filter(|copy| image.overlaps(copy, &drape)).map(|copy| {
+                    TileStamp {
+                        tile: copy.overscale_to(copy.canonical.z),
+                        bucket: bucket.map(|(id, _)| id),
+                        generations: [bucket.map_or(0, |(_, generation)| generation), 0],
+                    }
+                }));
+            }
+            None => {}
+        }
     }
 
     fn mark_changed(&mut self, changed: &ChangedBuckets) {

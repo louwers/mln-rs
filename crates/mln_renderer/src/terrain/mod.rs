@@ -30,8 +30,9 @@
 //!    and stack that has a drape there, which reads the textures of the DEM
 //!    tiles the tiles read ([`RenderTerrain::update_dems`],
 //!    [`RenderTerrain::update_draws`]).
-//! 4. The drapes draw into their textures before the frame's pass. The
-//!    frame clears to transparent, and its translucent pass draws each
+//! 4. The drapes whose layers draw something new draw into their textures
+//!    before the frame's pass; the others keep their texels. The frame
+//!    clears to transparent, and its translucent pass draws each
 //!    stack's surface where the stack's first layer draws, and the layers
 //!    that don't drape between the stacks, flat, with their layer depth off.
 //!
@@ -87,12 +88,14 @@
 //! - **The drapes** ([`Drapes`]): a texture for each drawn tile and stack
 //!   whose layers draw something in the tile, which the stack's draped
 //!   layers draw into with the map's camera, through their own draw
-//!   updates, every frame. On the globe they draw as on Mercator, with the
-//!   camera at a projection transition of 0
+//!   updates. A drape draws again only when what its layers draw it from
+//!   changed, or its side did. On the globe they draw as on Mercator, with
+//!   the camera at a projection transition of 0
 //!   ([`View::mercator`](mln_map_types::View::mercator)), as GL JS draws its
 //!   drapes, so a draped line at a latitude shows as wide as the Mercator
 //!   tile under it makes it. A drape is twice as wide as its tile, or the
-//!   device's largest texture where that is smaller, and mipmapped.
+//!   device's largest texture where that is smaller, and mipmapped; a byte
+//!   cap halves the drapes of the tiles farthest from the center first.
 //! - **The drape composite.** A draped layer with a layer opacity below 1
 //!   or a layer blend other than `normal` draws as a whole inside each
 //!   drape, as in 2D: into a texture of the drape's size, composited onto
@@ -126,7 +129,7 @@ use mln_util::dem::DemUnpack;
 use mln_util::geo::{LatLng, WrapMode};
 use mln_util::hash::HashMap;
 use mln_util::tileset::RasterEncoding;
-pub(crate) use stacks::{DrapeStacks, Draped, Draping};
+pub(crate) use stacks::DrapeStacks;
 
 use crate::gfx::context::Context;
 use crate::gfx::store::SharedTexture;
@@ -235,6 +238,9 @@ pub(crate) struct RenderTerrain {
     dem_textures: DemTextures,
     /// What the frame's draws bind of them; `None` without terrain.
     dems: Option<DemBindings>,
+    /// The drapes' byte cap in place of [`drapes::BYTE_CAP`].
+    #[cfg(test)]
+    pub(crate) drape_byte_cap: Option<u64>,
 }
 
 impl RenderTerrain {
@@ -394,8 +400,12 @@ impl RenderTerrain {
             self.drapes = Drapes::default();
             return None;
         };
+        #[cfg(not(test))]
+        let byte_cap = drapes::BYTE_CAP;
+        #[cfg(test)]
+        let byte_cap = self.drape_byte_cap.unwrap_or(drapes::BYTE_CAP);
         let max_texture_size = parameters.context.caps().max_texture_size;
-        self.drapes.begin(parameters.view, cover, stacks, max_texture_size);
+        self.drapes.begin(parameters.view, cover, stacks, (byte_cap, max_texture_size));
         Some(&mut self.drapes)
     }
 
@@ -413,13 +423,26 @@ impl RenderTerrain {
     }
 
     /// Records that the buckets in `changed` changed, for the drapes' draws
-    /// built from them.
+    /// built from them, and makes the drapes that show them draw again.
     pub(crate) fn mark_changed(&mut self, changed: &ChangedBuckets) {
         self.drapes.mark_changed(changed);
     }
 
+    /// Makes every drape draw again in the next frame, for a change that
+    /// their keys don't tell: the style's images, or a frame that failed.
+    pub(crate) fn redraw_drapes(&mut self) {
+        self.drapes.redraw();
+    }
+
+    /// The tiles of the drapes and the side their drapes take.
+    #[cfg(test)]
+    pub(crate) fn drape_sizes(&self) -> Vec<(OverscaledTileID, u32)> {
+        self.drapes.sizes()
+    }
+
     /// Drops the drapes once the map's center crossed the antimeridian: the
-    /// tiles are the same ones under new ids.
+    /// tiles are the same ones under new ids, and the next frame draws their
+    /// drapes again.
     pub(crate) fn handle_wrap_jump(&mut self) {
         self.drapes = Drapes::default();
     }
@@ -441,6 +464,12 @@ impl RenderTerrain {
         self.drapes.render(gpu, parameters);
     }
 
+    /// Counts in the rendering stats of `context` what the drapes hold once
+    /// a frame has drawn ([`Drapes::count`]).
+    pub(crate) fn count(&self, context: &mut Context) {
+        self.drapes.count(context);
+    }
+
     /// Draws the surface of `stack`, which samples the stack's drapes, into
     /// the open pass of `gpu`, the context's.
     pub(crate) fn render(&mut self, stack: usize, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
@@ -456,7 +485,11 @@ impl RenderTerrain {
         if self.elevation.is_some() {
             events.push(RendererEvent::TerrainElevation(None));
         }
-        *self = RenderTerrain::default();
+        *self = RenderTerrain {
+            #[cfg(test)]
+            drape_byte_cap: self.drape_byte_cap,
+            ..RenderTerrain::default()
+        };
     }
 
     /// Drops the draws and the drapes, which hold the renderer's shaders,

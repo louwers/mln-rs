@@ -34,8 +34,9 @@ mod tile_cover_test;
 // test/style/source.test.cpp: need mln_map's Transform (above this crate).
 mod geojson_tile_test;
 mod source_test;
-// The terrain's drapes: their projection, their stencil, and the tiles a
-// drape draws.
+// The terrain's drapes: their projection, their stencil, the tiles a drape
+// draws, what draws one again, and their byte cap.
+mod drape_reuse_test;
 mod drape_test;
 // Port-only: the renderer frees what it lets go of on its workers.
 mod drop_on_workers_test;

@@ -344,7 +344,8 @@ impl<'a> PaintParameters<'a> {
             depth_range_size: 1.0,
             terrain: false,
             opaque_pass_cutoff: 0,
-            symbol_fade_change: self.symbol_fade_change,
+            // A drape draws no symbols, and keeps no fade of theirs.
+            symbol_fade_change: 1.0,
             scissor_rect: ScissorRect { x: 0, y: 0, width: size.width, height: size.height },
             custom_layer_frame: None,
         }

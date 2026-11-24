@@ -314,6 +314,10 @@ impl TypedLayer for RenderHillshadeLayer {
         }
     }
 
+    fn drapes_by_bearing(&self, evaluated: &EvaluatedLayer<Hillshade>) -> bool {
+        *evaluated.paint.hillshade_illumination_anchor.uniform() == HillshadeIlluminationAnchorType::Viewport
+    }
+
     fn passes(&self, evaluated: &EvaluatedLayer<Hillshade>) -> RenderPass {
         if *evaluated.paint.hillshade_exaggeration.uniform() > 0.0 {
             RenderPass::Translucent | RenderPass::Pass3D

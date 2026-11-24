@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetFormats};
-use mln_gfx::rendering_stats::RenderingStats;
+use mln_gfx::rendering_stats::{RenderingStats, TerrainStats};
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
 use mln_gfx::{FrameImage, Handoff, ScissorRect};
 use mln_map_types::MapDebugOptions;
@@ -334,6 +334,12 @@ impl Renderer {
         self.orchestrator.terrain()
     }
 
+    /// Caps the bytes of the terrain's drapes at `bytes`.
+    #[cfg(test)]
+    pub(crate) fn set_drape_byte_cap(&mut self, bytes: u64) {
+        self.orchestrator.terrain().drape_byte_cap = Some(bytes);
+    }
+
     /// Drops `value` on the renderer's workers instead of this
     /// thread, for data that would take a frame long to free, such as the
     /// sources of an earlier update. The renderer's drop waits for it.
@@ -564,6 +570,7 @@ impl Encoder {
         {
             let stats = self.context.rendering_stats();
             stats.num_draw_calls = 0;
+            stats.terrain = TerrainStats::default();
             stats.num_frames += 1;
         }
         let static_data = &self.static_data;
@@ -660,6 +667,7 @@ impl Encoder {
             height: renderable_size.height,
         });
         draw(orchestrator, gpu, &mut parameters, &frame, image, draw_groups.count, depth_range_size);
+        orchestrator.terrain().count(parameters.context);
         let start_rendering = Instant::now();
         let submitted = parameters.end_pass(gpu).and_then(|()| gpu.flush(false));
         if let Err(error) = &submitted {
@@ -667,6 +675,11 @@ impl Encoder {
         }
         let error = parameters.context.device().take_failure().map(Error::native);
         drop(parameters);
+        // A drape of a frame that failed may lack what failed: every drape
+        // draws again in the next frame.
+        if error.is_some() {
+            orchestrator.terrain().redraw_drapes();
+        }
         if submitted.is_err() {
             orchestrator.visit_render_layers(|layer| layer.prepare_again());
         }

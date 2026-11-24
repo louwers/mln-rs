@@ -43,7 +43,7 @@ use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
 use crate::render_tile::{FoundTile, RenderTile};
 use crate::renderer_event::RendererEvent;
 use crate::sources::render_tile_source::{DebugLayer, DebugLayers};
-use crate::terrain::{DrapeStacks, Draped, Draping, RenderTerrain};
+use crate::terrain::{DrapeStacks, RenderTerrain};
 use crate::text::glyph_store::GlyphStore;
 use crate::text::placement::{Placement, PlacementInputs};
 use crate::tile::contents::Contents;
@@ -329,6 +329,10 @@ impl RenderOrchestrator {
         let layers = Arc::clone(style.get_layer_list());
 
         self.apply_image_diff(&image_diff, update_parameters.sprite_loaded);
+        // The drapes' keys don't tell what the style's images draw.
+        if !(image_diff.added.is_empty() && image_diff.removed.is_empty() && image_diff.changed.is_empty()) {
+            self.terrain.redraw_drapes();
+        }
 
         let render_layers_remade = self.apply_layer_changes(&layer_changes, &layers, &clock);
         let constants_mask_changed = self.evaluate_layers(&layer_changes, render_layers_remade, &mut clock);
@@ -1342,15 +1346,25 @@ impl RenderOrchestrator {
             render_layer.update_draws(gpu, paint_parameters, &self.atlases, layer_source);
             needs_globe_depth = needs_globe_depth || render_layer.needs_globe_depth();
         }
-        let draped = |&index: &u32| {
-            let drapes = self.layers[index as usize].drapes();
-            (index, drapes.then_some(Draped { draping: Draping::Fixed, blends: false }))
-        };
+        let draped = |&index: &u32| (index, self.layers[index as usize].drapes());
         self.stacks =
             if frame.terrain { DrapeStacks::of(frame.layers.keys().map(draped)) } else { DrapeStacks::default() };
         self.terrain.update_dems(paint_parameters, |id| self.tile_store.source(self.render_sources.get(id)?.tiles()?));
         if let Some(drapes) = self.terrain.begin_drapes(gpu, paint_parameters, self.stacks.len()) {
             let mut contents = SourceContents::default();
+            for stack in 0..self.stacks.len() {
+                for index in self.stacks.layers(stack) {
+                    let layer_source = layer_source(
+                        &frame.layers[index],
+                        &self.render_sources,
+                        &self.tile_store,
+                        &self.found_tiles,
+                        &mut contents,
+                    );
+                    drapes.key_layer(stack, &*self.layers[*index as usize], layer_source);
+                }
+            }
+            drapes.choose(paint_parameters, self.atlases.pattern.pixel_size());
             for stack in 0..self.stacks.len() {
                 for index in self.stacks.layers(stack) {
                     let layer_source = layer_source(

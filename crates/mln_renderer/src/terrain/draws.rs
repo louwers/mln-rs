@@ -158,7 +158,7 @@ impl TerrainDraws {
                 // Where a stack draws nothing in the tile, it has no drape
                 // and no draw, but the first stack's draw writes the depth
                 // the stacks above test, so it draws transparent there.
-                let drape = match drapes.texture(stack, index, &tile.id) {
+                let drape = match drapes.texture(stack, &tile.id) {
                     Some(drape) => drape.clone(),
                     None if stack == 0 => dems.flat().clone(),
                     None => {

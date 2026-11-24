@@ -10,6 +10,7 @@ use glam::{DMat4, Vec2};
 use mln_map_types::{MapDebugOptions, ProjectionData, View};
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
+use mln_util::identity::SimpleIdentity;
 
 use crate::buckets::debug_bucket::DebugBucket;
 use crate::buckets::hillshade_bucket::HillshadeBucket;
@@ -218,6 +219,17 @@ impl TileView<'_> for NoTileBucket {
     fn at(_contents: &Contents, _place: ViewPlace) -> Option<Self> {
         None
     }
+}
+
+/// What a layer draws of a frame's tile: the tile, the bucket it shows the
+/// layer, and the generations of the bucket's geometry and of what is
+/// prepared from it. It changes whenever the layer's draws of the tile
+/// would.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TileStamp {
+    pub(crate) tile: OverscaledTileID,
+    pub(crate) bucket: Option<SimpleIdentity>,
+    pub(crate) generations: [u64; 2],
 }
 
 /// A layer's tile of a frame, as the frame's update found it: its index

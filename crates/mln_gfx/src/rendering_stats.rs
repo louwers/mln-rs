@@ -65,4 +65,25 @@ pub struct RenderingStats {
     pub stencil_clears: i32,
     /// Stencil buffer updates.
     pub stencil_updates: i32,
+    /// What the drapes of 3D terrain hold, and what the most recent frame
+    /// drew of them.
+    pub terrain: TerrainStats,
+}
+
+/// What the drapes of 3D terrain hold after the most recent frame, and what
+/// that frame drew of them: all zero for a frame without terrain. Its byte
+/// counts are of what the drapes hold now, as the `mem_*` counters of
+/// [`RenderingStats`] are; a depth and stencil texture counts 4 bytes a
+/// texel, though a backend may store it in more.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TerrainStats {
+    /// Drapes whose textures are made: one for each terrain tile and stack
+    /// whose layers draw something there.
+    pub drapes: usize,
+    /// Drapes drawn during the most recent frame, each followed by the
+    /// generation of its mips. The others kept what they last drew.
+    pub drapes_drawn: usize,
+    /// Bytes of the drapes' textures, their mips included, and of the depth
+    /// and stencil and composite textures they draw with.
+    pub mem_drapes: usize,
 }

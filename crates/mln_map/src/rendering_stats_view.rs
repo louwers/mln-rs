@@ -195,6 +195,13 @@ impl RenderingStatsView {
 
         number(t, "Stencil buffer clears", f64::from(stats.stencil_clears), true);
         number(t, "Stencil buffer updates", f64::from(stats.stencil_updates), verbose);
+
+        // Only a map whose terrain has drapes has these.
+        let terrain = &stats.terrain;
+        let shown = terrain.drapes > 0;
+        number(t, "Terrain drapes", terrain.drapes as f64, shown);
+        number(t, "Terrain drapes drawn", terrain.drapes_drawn as f64, shown);
+        memory(t, "Terrain drape memory", terrain.mem_drapes as u64, shown);
         text
     }
 }
@@ -271,5 +278,20 @@ mod tests {
         assert!(lines.contains(&"Texture memory: 2KB"));
         assert!(!text.contains("Total draw calls"));
         assert_eq!(lines.len(), 15);
+    }
+
+    #[test]
+    fn text_shows_the_terrain_where_it_drapes() {
+        let view = RenderingStatsView::new(RenderingStatsViewOptions::default());
+        let mut stats = RenderingStats::default();
+        stats.terrain.drapes = 2;
+        stats.terrain.drapes_drawn = 1;
+        stats.terrain.mem_drapes = 4 * 1024 * 1024;
+        let text = view.text(&stats);
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(lines.contains(&"Terrain drapes: 2"));
+        assert!(lines.contains(&"Terrain drapes drawn: 1"));
+        assert!(lines.contains(&"Terrain drape memory: 4MB"));
+        assert_eq!(lines.len(), 18);
     }
 }

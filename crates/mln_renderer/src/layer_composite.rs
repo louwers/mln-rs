@@ -46,7 +46,7 @@ use crate::draw::Entries;
 use crate::gfx::buffer::Buffer;
 use crate::gfx::context::Context;
 use crate::gfx::owned::Owned;
-use crate::gfx::resources::GpuTexture;
+use crate::gfx::resources::{GpuTexture, attachment_bytes};
 use crate::gfx::vertex_attribute::Uniforms;
 use crate::paint_parameters::{DrawTarget, OpenPass};
 use crate::render_static_data::RenderStaticData;
@@ -319,6 +319,16 @@ impl LayerComposite {
             });
         }
         Ok(())
+    }
+
+    /// The bytes of its textures: its target's color, depth and stencil,
+    /// and the frame and backdrop of a frame with a layer that blends in
+    /// the shader.
+    pub(crate) fn bytes(&self) -> u64 {
+        let Some(target) = &self.target else { return 0 };
+        let depth_stencil = target.depth_stencil.as_ref().map_or(0, |_| attachment_bytes(target.size, DEPTH_STENCIL));
+        let frame = self.frame.as_ref().map_or(0, |frame| 2 * attachment_bytes(target.size, frame.format));
+        attachment_bytes(target.size, COLOR) + depth_stencil + frame
     }
 
     /// The texture the frame draws into rather than its target's, where a
