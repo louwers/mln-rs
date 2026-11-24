@@ -134,6 +134,11 @@ fn taps(block: &mut Process, sigma: f32, step: [f32; 2]) {
     let mut count = 0;
     for first in (1..=reach).step_by(2) {
         let (a, b) = (weight(first) / total, if first < reach { weight(first + 1) / total } else { 0.0 });
+        // A narrow Gaussian's weights past the center can underflow to 0,
+        // and those further out too.
+        if a + b == 0.0 {
+            break;
+        }
         let offset = (first as f32 * a + (first + 1) as f32 * b) / (a + b);
         let tap = &mut block.taps[count / 2][2 * (count % 2)..][..2];
         tap.copy_from_slice(&[offset, a + b]);
@@ -189,6 +194,17 @@ mod tests {
         let block = &passes[1].block;
         let taps: f32 = (0..3).map(|tap| block.taps[tap / 2][2 * (tap % 2) + 1]).sum();
         assert!((block.blur[3] + 2.0 * taps - 1.0).abs() < 1e-5, "a blur's weights add up to 1");
+    }
+
+    #[test]
+    fn a_blur_too_narrow_to_reach_a_neighbor_takes_no_taps() {
+        // 0.04 logical pixels are 0.04 texels along y, whose neighbors'
+        // weights underflow.
+        let passes = plan(&[Operation::Blur { size: constant(0.04) }], 0.0, FRAME, LOGICAL);
+        assert_eq!(passes[1].block.blur[2..], [0.0, 1.0], "only the center, wholly");
+        for pass in &passes {
+            assert!(pass.block.taps.as_flattened().iter().all(|value| value.is_finite()));
+        }
     }
 
     #[test]
