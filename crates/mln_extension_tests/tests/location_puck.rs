@@ -47,8 +47,8 @@ fn pixel(fixture: &Fixture, x: f64, y: f64) -> [u8; 4] {
 /// The engine has no frame clock, so which frames a transition draws is
 /// the wall clock's: every frame drawn shows the puck on its way, and the
 /// last at the fix. The way a position and a bearing go, across the
-/// antimeridian and through north, is their interpolation's (mln_util's
-/// and mln_style's tests).
+/// antimeridian and through north, is their interpolation's (`mln_util`'s
+/// and `mln_style`'s tests).
 #[test]
 fn a_fix_moves_the_puck_and_turns_its_arrow_the_short_way_to_it() {
     let fixture = Fixture::new(registry(), STYLE);
