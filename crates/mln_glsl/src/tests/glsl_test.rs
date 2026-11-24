@@ -30,10 +30,11 @@ use crate::program::declaration;
 use crate::variants::variants;
 use crate::{Stage, compose, sources};
 
-/// Each program of the built-in layer types with GLSL.
+/// Each program of the built-in layer types with GLSL, and the
+/// conformance cases' program whose vertex stage reads a texture.
 fn programs() -> Vec<(&'static Program, &'static Glsl)> {
-    let programs = mln_layers::PROGRAMS.iter();
-    programs.filter_map(|&program| Some((program, program.sources.glsl?))).collect()
+    let programs = mln_layers::PROGRAMS.iter().copied().chain([&mln_layers::conformance::VERTEX_TEXEL]);
+    programs.filter_map(|program| Some((program, program.sources.glsl?))).collect()
 }
 
 const STAGES: [Stage; 2] = [Stage::Vertex, Stage::Fragment];
@@ -181,9 +182,11 @@ fn check_layout(set: u32, binding: u32, resource: Resource) -> Result<(), String
 
 // Every resource a stage declares has a binding of its kind in the
 // descriptor set layouts, the global set holds the paint parameters alone,
-// the textures of a fragment stage are the ones of the texture table, each
-// with its sampler, and the push constants are the general pipeline layout's
-// index or, for the clipping mask, its matrices.
+// the stages declare the program's textures between them, a fragment stage
+// each of its own with its sampler and a vertex stage only those it reads
+// (`ProgramTexture::vertex`) and no sampler, since it fetches texels, and the
+// push constants are the general pipeline layout's index or, for the
+// clipping mask, its matrices.
 #[test]
 fn resources_are_in_the_descriptor_set_layouts() {
     assert_eq!(DescriptorSetType::Global.set_index(), 0);
@@ -193,7 +196,13 @@ fn resources_are_in_the_descriptor_set_layouts() {
 
     let mut failures = Vec::new();
     for (program, source) in programs() {
+        let table: BTreeSet<u32> = (0..program.textures.len()).map(image_texture_binding).collect();
+        let read_by_vertex: BTreeSet<u32> = (program.textures.iter().enumerate())
+            .filter(|(_, texture)| texture.vertex)
+            .map(|(slot, _)| image_texture_binding(slot))
+            .collect();
         for variant in variants(program, false) {
+            let mut declared = BTreeSet::new();
             for stage in STAGES {
                 let mut fail = |message: String| {
                     failures.push(format!("{} ({}, {stage:?}): {message}", program.name, variant.name));
@@ -224,23 +233,35 @@ fn resources_are_in_the_descriptor_set_layouts() {
                         .collect()
                 };
                 let (textures, samplers) = (bindings_of(Resource::Texture), bindings_of(Resource::Sampler));
-                let declared = |binding: fn(usize) -> u32| -> BTreeSet<u32> {
-                    match stage {
-                        Stage::Vertex => BTreeSet::new(),
-                        Stage::Fragment => (0..program.textures.len()).map(binding).collect(),
-                    }
+                let allowed = match stage {
+                    Stage::Vertex => &read_by_vertex,
+                    Stage::Fragment => &table,
                 };
-                if textures != declared(image_texture_binding) {
-                    fail(format!("textures at {textures:?}, the program has {:?}", declared(image_texture_binding)));
+                if !textures.is_subset(allowed) {
+                    fail(format!("textures at {textures:?}, the stage may read {allowed:?}"));
                 }
-                if samplers != declared(image_sampler_binding) {
-                    fail(format!("samplers at {samplers:?}, the program has {:?}", declared(image_sampler_binding)));
+                let sampled: BTreeSet<u32> = match stage {
+                    Stage::Vertex => BTreeSet::new(),
+                    Stage::Fragment => textures
+                        .iter()
+                        .map(|&binding| image_sampler_binding((binding - image_texture_binding(0)) as usize))
+                        .collect(),
+                };
+                if samplers != sampled {
+                    fail(format!("samplers at {samplers:?}, not {sampled:?}"));
                 }
+                declared.extend(textures);
 
                 let expected_push_constants = push_constants.map(|_| DRAW_INDEX_PUSH_CONSTANT_SIZE);
                 if push_constants != expected_push_constants {
                     fail(format!("push constants of {push_constants:?} bytes, not {expected_push_constants:?}"));
                 }
+            }
+            if declared != table {
+                failures.push(format!(
+                    "{} ({}): textures at {declared:?}, the program has {table:?}",
+                    program.name, variant.name
+                ));
             }
         }
     }

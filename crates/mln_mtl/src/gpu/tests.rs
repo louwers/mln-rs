@@ -3,9 +3,9 @@ use std::time::Duration;
 
 use mln_gfx::gpu::{BufferUsage, ColorAttachment};
 use mln_layers::conformance::{
-    blend_equations, clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures,
-    instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace,
-    vertex_layouts,
+    blend_equations, clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids,
+    imported_textures, instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, topologies,
+    transparent_replace, vertex_layouts, written_vertex_texels,
 };
 use mln_util::Color;
 use objc2::runtime::NSObjectProtocol as _;
@@ -66,6 +66,18 @@ fn resources_in_use_through_gpu() {
 fn depth_only_through_gpu() {
     let device = Device::new(None).expect("Metal device");
     depth_only(&mut MetalGpu::new(&device)).expect("the frame");
+}
+
+#[test]
+fn written_vertex_texels_through_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    written_vertex_texels(&mut MetalGpu::new(&device)).expect("the frame");
+}
+
+#[test]
+fn drawn_vertex_texels_through_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    drawn_vertex_texels(&mut MetalGpu::new(&device)).expect("the frames");
 }
 
 #[test]

@@ -41,8 +41,10 @@ use crate::shaders::source::{self, Stage, glsl, glsl_es, msl, wgsl};
 /// - A texture and its sampler at the slot of its index in
 ///   [`textures`](Program::textures), which a draw names it by, and which
 ///   a fragment stage that names them declares, as the backend writes them
-///   from the [`ProgramTexture`]: a source declares no texture itself, and a
-///   vertex stage samples none.
+///   from the [`ProgramTexture`]: a source declares no texture itself. A
+///   vertex stage that names a texture declares it, without its sampler,
+///   only where the texture says that the vertex stage reads it
+///   ([`ProgramTexture::vertex`]).
 ///
 /// A program has at most [`MAX_ATTRIBUTES`] attributes and [`MAX_TEXTURES`]
 /// textures.
@@ -332,8 +334,9 @@ impl Attribute {
 /// A fragment stage reads the texture as `<name>` and the sampler that a
 /// draw binds with it as `<name>_sampler`, in WGSL, MSL and GLSL; it may
 /// sample a texture with another texture's sampler. GLSL ES reads both as
-/// the combined sampler `u_<name>`. A vertex stage samples no texture: the Vulkan and D3D12
-/// backends' layout has textures for the fragment stage only.
+/// the combined sampler `u_<name>`. A vertex stage samples no texture: it
+/// reads the texels of one whose [`vertex`](Self::vertex) says so, by their
+/// coordinates, without a sampler.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProgramTexture {
     /// The name its shaders read it by.
@@ -348,25 +351,36 @@ pub struct ProgramTexture {
     /// its bytes too coarsely. The other languages sample every texture at
     /// full precision.
     pub precise: bool,
+    /// Whether the vertex stage reads it too, texel by texel and without a
+    /// sampler: by `texelFetch` in GLSL and GLSL ES, `textureLoad` in WGSL
+    /// and `read` in MSL. The backends then declare it for the vertex stage
+    /// as well, and its sampler for the fragment stage alone.
+    pub vertex: bool,
 }
 
 impl ProgramTexture {
     /// The filterable texture `name`.
     #[must_use]
     pub const fn new(name: &'static str) -> ProgramTexture {
-        ProgramTexture { name, filterable: true, precise: false }
+        ProgramTexture { name, filterable: true, precise: false, vertex: false }
     }
 
     /// The unfilterable texture `name`.
     #[must_use]
     pub const fn unfilterable(name: &'static str) -> ProgramTexture {
-        ProgramTexture { name, filterable: false, precise: false }
+        ProgramTexture { name, filterable: false, precise: false, vertex: false }
     }
 
     /// The texture, sampled at full precision ([`precise`](Self::precise)).
     #[must_use]
     pub const fn precise(self) -> ProgramTexture {
         ProgramTexture { precise: true, ..self }
+    }
+
+    /// The texture, read by the vertex stage too ([`vertex`](Self::vertex)).
+    #[must_use]
+    pub const fn vertex(self) -> ProgramTexture {
+        ProgramTexture { vertex: true, ..self }
     }
 
     /// The name its shaders read its sampler by, `<name>_sampler`.
@@ -686,15 +700,20 @@ impl Program {
 
     /// What `stage` may read, in the order a backend declares it in for a
     /// stage that names it: the draw's index, the engine's buffers, the
-    /// program's buffers that the stage may read, as [`ProgramBuffer`] says, and in
-    /// a fragment stage the program's textures, each followed by its
-    /// sampler.
+    /// program's buffers that the stage may read, as [`ProgramBuffer`] says,
+    /// and the program's textures, in a fragment stage each followed by its
+    /// sampler, and in a vertex stage only those it reads
+    /// ([`ProgramTexture::vertex`]), without their samplers.
     pub fn bindings(&self, stage: Stage) -> impl Iterator<Item = Binding<'_>> {
         let buffers = ENGINE_BUFFERS.iter().chain(self.buffers).filter(move |buffer| buffer.stages().include(stage));
-        let textures = self.textures.iter().enumerate().filter(move |_| stage == Stage::Fragment);
-        std::iter::once(Binding::DrawIndex).chain(buffers.map(Binding::Buffer)).chain(
-            textures.flat_map(|(slot, texture)| [Binding::Texture(slot, texture), Binding::Sampler(slot, texture)]),
-        )
+        let textures = self.textures.iter().enumerate().filter(move |(_, texture)| match stage {
+            Stage::Vertex => texture.vertex,
+            Stage::Fragment => true,
+        });
+        let samplers = move |slot, texture| (stage == Stage::Fragment).then_some(Binding::Sampler(slot, texture));
+        std::iter::once(Binding::DrawIndex).chain(buffers.map(Binding::Buffer)).chain(textures.flat_map(
+            move |(slot, texture)| std::iter::once(Binding::Texture(slot, texture)).chain(samplers(slot, texture)),
+        ))
     }
 
     /// The buffer whose block is `name`: one of the program's, or the
@@ -862,15 +881,20 @@ mod tests {
                     ProgramBuffer::vertices("vertices", 0, Short2),
                 ]
             },
-            textures: const { &[ProgramTexture::new("image")] },
+            textures: const { &[ProgramTexture::new("image"), ProgramTexture::new("heights").vertex()] },
             ..EMPTY
         };
         let names = |stage| PROGRAM.bindings(stage).map(|binding| binding.name().into_owned()).collect::<Vec<_>>();
         let engine = ["drawIndex", "view", "projectionVector", "drawProjection"];
-        assert_eq!(names(Stage::Vertex), [&engine[..], &["vertexOnly", "both", "props", "vertices"]].concat());
+        assert_eq!(
+            names(Stage::Vertex),
+            [&engine[..], &["vertexOnly", "both", "props", "vertices", "heights"]].concat(),
+            "a vertex stage reads only the textures that say so, without samplers"
+        );
         assert_eq!(
             names(Stage::Fragment),
-            [&engine[..], &["fragmentOnly", "both", "props", "image", "image_sampler"]].concat()
+            [&engine[..], &["fragmentOnly", "both", "props", "image", "image_sampler", "heights", "heights_sampler"]]
+                .concat()
         );
     }
 

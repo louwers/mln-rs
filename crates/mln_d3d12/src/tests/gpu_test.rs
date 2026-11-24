@@ -3,9 +3,9 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program::{Program, ProgramParameters};
 use mln_gfx::shaders::source::glsl::Glsl;
 use mln_layers::conformance::{
-    blend_equations, clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures,
-    instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace,
-    vertex_layouts, wall_quads,
+    blend_equations, clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids,
+    imported_textures, instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, topologies,
+    transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN};
 
@@ -88,6 +88,16 @@ fn pulled_walls_through_gpu() {
 #[test]
 fn depth_only_through_gpu() {
     depth_only(&mut gpu()).expect("the frame");
+}
+
+#[test]
+fn written_vertex_texels_through_gpu() {
+    written_vertex_texels(&mut gpu()).expect("the frame");
+}
+
+#[test]
+fn drawn_vertex_texels_through_gpu() {
+    drawn_vertex_texels(&mut gpu()).expect("the frames");
 }
 
 #[test]

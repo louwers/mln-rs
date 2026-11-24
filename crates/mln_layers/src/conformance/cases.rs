@@ -31,12 +31,12 @@ use crate::fill_extrusion::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO
 use crate::heatmap::programs::HEATMAP_TEXTURE;
 use crate::heatmap::ubo::HeatmapTexturePropsUBO;
 
-const BLACK: Color = Color::black();
-const RGBA8: TargetFormats = TargetFormats { color: Some(TextureFormat::Rgba8Unorm), depth_stencil: None };
+pub(super) const BLACK: Color = Color::black();
+pub(super) const RGBA8: TargetFormats = TargetFormats { color: Some(TextureFormat::Rgba8Unorm), depth_stencil: None };
 
 /// A color target of [`SIZE`], and what the background shader reads to
 /// cover it with one color.
-struct Solid {
+pub(super) struct Solid {
     target: TextureId,
     quad: BufferId,
     indices: BufferId,
@@ -47,7 +47,7 @@ struct Solid {
     geometry: GeometryId,
     /// The background shader, unblended, drawing triangles into an
     /// [`Rgba8Unorm`](TextureFormat::Rgba8Unorm) target.
-    pipeline: PipelineId,
+    pub(super) pipeline: PipelineId,
 }
 
 /// A target of `format`, which the background shader covers with `color`,
@@ -57,7 +57,12 @@ fn solid(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4]) -> Result<S
 }
 
 /// [`solid`], drawn through `matrix` instead of over the whole target.
-fn solid_at(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4], matrix: [f32; 16]) -> Result<Solid, GpuError> {
+pub(super) fn solid_at(
+    gpu: &mut impl Gpu,
+    format: TextureFormat,
+    color: [f32; 4],
+    matrix: [f32; 16],
+) -> Result<Solid, GpuError> {
     let target = target(gpu, format)?;
     let (quad, indices) = quad(gpu)?;
     let shader = gpu.create_shader(&ShaderKey::new(&BACKGROUND, []))?;
@@ -98,7 +103,7 @@ fn at_depth(mut matrix: [f32; 16], z: f32) -> [f32; 16] {
 }
 
 /// A render target of [`SIZE`] and `format`, which can be read back.
-fn target(gpu: &mut (impl Gpu + ?Sized), format: TextureFormat) -> Result<TextureId, GpuError> {
+pub(super) fn target(gpu: &mut (impl Gpu + ?Sized), format: TextureFormat) -> Result<TextureId, GpuError> {
     gpu.create_texture(&TextureDesc {
         label: "target",
         size: SIZE,
@@ -136,7 +141,7 @@ impl Solid {
     }
 
     /// The draw of the quad with `pipeline`.
-    fn draw(&self, pipeline: PipelineId) -> Draw {
+    pub(super) fn draw(&self, pipeline: PipelineId) -> Draw {
         draw(pipeline, self.bindings, self.geometry, 6)
     }
 

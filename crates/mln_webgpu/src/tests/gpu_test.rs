@@ -1,8 +1,8 @@
 use mln_gfx::gpu::{Gpu, TextureDesc, TextureFormat, TextureRegion, TextureUsage};
 use mln_layers::conformance::{
-    blend_equations, clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures,
-    instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace,
-    vertex_layouts, wall_quads,
+    blend_equations, clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids,
+    imported_textures, instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, topologies,
+    transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
 };
 use mln_util::size::Size;
 
@@ -48,6 +48,18 @@ fn topologies_through_gpu() {
 fn depth_only_through_gpu() {
     let device = Device::new(None).expect("WebGPU device");
     depth_only(&mut WebGpu::new(&device)).expect("the frame");
+}
+
+#[test]
+fn written_vertex_texels_through_gpu() {
+    let device = Device::new(None).expect("WebGPU device");
+    written_vertex_texels(&mut WebGpu::new(&device)).expect("the frame");
+}
+
+#[test]
+fn drawn_vertex_texels_through_gpu() {
+    let device = Device::new(None).expect("WebGPU device");
+    drawn_vertex_texels(&mut WebGpu::new(&device)).expect("the frames");
 }
 
 #[test]

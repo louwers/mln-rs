@@ -20,9 +20,12 @@ doctest = false
 mln_gfx = { workspace = true, features = ["glsl"] }
 naga.workspace = true
 
-# The layer types' programs, which the tests parse.
+# The layer types' programs and the conformance cases' own, which the tests
+# parse.
 [target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dev-dependencies]
-mln_layers = { package = "mln-rs-layers", path = "../mln_layers" }
+mln_layers = { package = "mln-rs-layers", path = "../mln_layers", features = [
+  "gpu-conformance",
+] }
 
 [features]
 # `variants`, the sets of defines that the backends' tests compile each

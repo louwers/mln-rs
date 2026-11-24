@@ -10,9 +10,9 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program::{Program, ProgramParameters};
 use mln_gfx::shaders::source::glsl::Glsl;
 use mln_layers::conformance::{
-    blend_equations, clip_mask_and_background, custom_layers, depth_only, foreign_ids, imported_textures,
-    instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace,
-    vertex_layouts, wall_quads,
+    blend_equations, clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids,
+    imported_textures, instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, topologies,
+    transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
 };
 use mln_util::Color;
 use mln_util::size::Size;
@@ -106,6 +106,18 @@ fn pulled_walls_through_gpu() {
 fn depth_only_through_gpu() {
     let device = Device::new(None).expect("Vulkan device");
     depth_only(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frame");
+}
+
+#[test]
+fn written_vertex_texels_through_gpu() {
+    let device = Device::new(None).expect("Vulkan device");
+    written_vertex_texels(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frame");
+}
+
+#[test]
+fn drawn_vertex_texels_through_gpu() {
+    let device = Device::new(None).expect("Vulkan device");
+    drawn_vertex_texels(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frames");
 }
 
 // What `destroy_later` destroys waits for the next flush, or goes with the
