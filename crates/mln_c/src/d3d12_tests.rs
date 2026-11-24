@@ -5,7 +5,7 @@
 
 use core::ffi::c_void;
 
-use mln_d3d12::windows::Win32::Foundation::HANDLE;
+use mln_d3d12::windows::Win32::Foundation::{E_ACCESSDENIED, HANDLE};
 use mln_d3d12::windows::Win32::Graphics::Direct3D12::{
     D3D12_COMMAND_LIST_TYPE_COMPUTE, D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_QUEUE_DESC, D3D12_FENCE_FLAG_NONE,
     D3D12_HEAP_FLAG_NONE, D3D12_HEAP_PROPERTIES, D3D12_HEAP_TYPE_DEFAULT, D3D12_HEAP_TYPE_READBACK,
@@ -550,9 +550,14 @@ fn a_composition_target_presents_to_a_direct_composition_visual() {
     let Some(device) = d3d12_device() else { return };
     let window = HostWindow::new();
     // SAFETY: plain calls, of a device without a rendering device, on the
-    // live window.
+    // live window. A non-interactive Windows session has no desktop
+    // compositor and denies DirectComposition device creation.
     let (composition, _target, visual) = unsafe {
-        let composition: IDCompositionDesktopDevice = DCompositionCreateDevice2(None::<&IUnknown>).unwrap();
+        let composition: IDCompositionDesktopDevice = match DCompositionCreateDevice2(None::<&IUnknown>) {
+            Ok(composition) => composition,
+            Err(error) if error.code() == E_ACCESSDENIED => return,
+            Err(error) => panic!("DCompositionCreateDevice2 failed: {error}"),
+        };
         let target =
             composition.CreateTargetForHwnd(mln_d3d12::windows::Win32::Foundation::HWND(window.0), true).unwrap();
         let visual: IDCompositionVisual = composition.CreateVisual().unwrap().cast().unwrap();

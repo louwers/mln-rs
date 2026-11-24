@@ -313,6 +313,7 @@ fn a_d3d12_target_takes_no_frame_while_its_window_is_minimized() {
 #[cfg(feature = "d3d12")]
 #[test]
 fn a_d3d12_session_presents_to_a_direct_composition_visual() {
+    use windows::Win32::Foundation::E_ACCESSDENIED;
     use windows::Win32::Graphics::DirectComposition::{
         DCompositionCreateDevice2, IDCompositionDesktopDevice, IDCompositionVisual,
     };
@@ -323,9 +324,14 @@ fn a_d3d12_session_presents_to_a_direct_composition_visual() {
     let map = map(&runtime);
     let window = TestWindow::new();
     // SAFETY: plain calls, of a device without a rendering device, on the
-    // live window.
+    // live window. A non-interactive Windows session has no desktop
+    // compositor and denies DirectComposition device creation.
     let (composition, _target, visual) = unsafe {
-        let composition: IDCompositionDesktopDevice = DCompositionCreateDevice2(None::<&IUnknown>).unwrap();
+        let composition: IDCompositionDesktopDevice = match DCompositionCreateDevice2(None::<&IUnknown>) {
+            Ok(composition) => composition,
+            Err(error) if error.code() == E_ACCESSDENIED => return,
+            Err(error) => panic!("DCompositionCreateDevice2 failed: {error}"),
+        };
         let target = composition.CreateTargetForHwnd(window.handle(), true).unwrap();
         let visual: IDCompositionVisual = composition.CreateVisual().unwrap().cast().unwrap();
         target.SetRoot(&visual).unwrap();
