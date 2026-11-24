@@ -258,6 +258,39 @@ fn a_projection_reads_the_height_of_its_ground() {
     assert_eq!(flat.elevation(&at(100.0)), None, "the flat map");
 }
 
+/// Ground the camera stands on under its center, at 500 m, that the
+/// renderer didn't draw, as when the camera is below every tile's range.
+#[derive(Debug)]
+struct UndrawnUnderCenter;
+
+impl Elevation for UndrawnUnderCenter {
+    fn at(&self, _: LatLng) -> Option<f64> {
+        Some(500.0)
+    }
+
+    fn min_at(&self, _: LatLng) -> Option<f64> {
+        Some(500.0)
+    }
+
+    fn surface_at(&self, _: DVec2) -> Option<f64> {
+        None
+    }
+
+    fn range(&self) -> Option<(f64, f64)> {
+        Some((500.0, 500.0))
+    }
+}
+
+/// A projection reads no height from ground the camera stands on but the
+/// renderer didn't draw.
+#[test]
+fn a_projection_reads_no_height_of_ground_not_drawn() {
+    let run_loop = Queue::<()>::new();
+    let ground: Arc<dyn Elevation> = Arc::new(UndrawnUnderCenter);
+    let map = map_over(STYLE, Some(&ground), true, pitched(60.0), &run_loop);
+    assert_eq!(MapProjection::new(&map).elevation(&center()), None);
+}
+
 /// A projection given the map's ground fits its view's planes to it as the
 /// map does, so the far rows of a camera at sea level over ground 1000 m
 /// below it meet that ground, past the flat map's far plane; and a camera

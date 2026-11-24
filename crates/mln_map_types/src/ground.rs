@@ -110,14 +110,23 @@ impl View {
     /// [`screen_coordinate_to_lat_lng_on`]: Self::screen_coordinate_to_lat_lng_on
     #[must_use]
     pub fn lat_lng_to_screen_coordinate_on(&self, lat_lng: &LatLng, ground: &dyn Elevation) -> ScreenCoordinate {
-        let near = self.lat_lng_near_center(lat_lng);
-        let height = if self.is_globe() && near.latitude().abs() > LATITUDE_MAX {
-            Some(0.0)
-        } else {
-            let world = Projection::project(&near, 1.0 / TILE_SIZE_D);
-            ground.surface_at(DVec2::new(world.x, world.y))
-        };
+        let height = self.drawn_height_at(lat_lng, ground);
         self.lat_lng_to_screen_coordinate_at(lat_lng, height.unwrap_or_else(|| self.center_altitude()))
+    }
+
+    /// The height `ground` was drawn at, at `lat_lng`, read in the world
+    /// copy nearest the center: on the globe, past the Mercator range, the
+    /// sea-level polar caps. `None` where no ground was drawn there, though
+    /// the camera may stand on ground under its center that wasn't drawn
+    /// ([`Elevation::at`]).
+    #[must_use]
+    pub fn drawn_height_at(&self, lat_lng: &LatLng, ground: &dyn Elevation) -> Option<f64> {
+        let near = self.lat_lng_near_center(lat_lng);
+        if self.is_globe() && near.latitude().abs() > LATITUDE_MAX {
+            return Some(0.0);
+        }
+        let world = Projection::project(&near, 1.0 / TILE_SIZE_D);
+        ground.surface_at(DVec2::new(world.x, world.y))
     }
 
     /// [`ground_under`](Self::ground_under) on the globe, in unit-sphere
