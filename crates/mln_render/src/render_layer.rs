@@ -611,3 +611,63 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use mln_style::TransitionParameters;
+    use mln_style::layer_type::{ErasedLayerStyle, LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
+    use mln_tile_id::OverscaledTileID;
+
+    use super::{Hosted, RenderLayer};
+    use crate::draw::Draws;
+    use crate::gfx::context::Resources;
+    use crate::layer::{DemTiles, Layer, NewCx, PrepareCx};
+    use crate::tests::fixture_layer::Shade;
+
+    /// A layer type of a raster-dem source whose tile values a restyle
+    /// keeps, drawing nothing.
+    struct Kept;
+
+    impl StyleLayerType for Kept {
+        const INFO: LayerTypeInfo = LayerTypeInfo { name: "kept", source: SourceKind::RasterDem, from_json: true };
+
+        type LayoutProperties = NoProperties;
+        type PaintProperties = NoProperties;
+        type Data = ();
+    }
+
+    impl Layer for Kept {
+        type Style = Kept;
+        type Input = DemTiles;
+        type Tile = ();
+
+        const RESTYLE_KEEPS_TILES: bool = true;
+
+        fn new(_cx: &mut NewCx<'_, Self>) -> Self {
+            Kept
+        }
+
+        fn prepare(&self, _cx: &PrepareCx<'_, Self>, _out: &mut Draws) {}
+    }
+
+    /// Whether a layer of the type `L` still has the value it made of a
+    /// tile after a restyle.
+    fn keeps_its_tile_after_a_restyle<L: Layer<Style = L, Tile = ()> + StyleLayerType>() -> bool {
+        let style = |source: &str| Arc::new(LayerStyle::<L>::new("layer".to_owned(), source.to_owned()));
+        let entry = crate::erased_layer::entry::<L, ()>();
+        let mut layer = Hosted::<L>::new(entry, style("dem"), &mut Resources::detached(), None);
+        layer.tile_values.set_tiles(&[OverscaledTileID::with_zxy(1, 0, 1, 0, 0)]);
+        *layer.tile_values.get_mut(0) = Some(());
+        let restyled: Arc<dyn ErasedLayerStyle> = style("other");
+        layer.restyle(&TransitionParameters::default(), &restyled);
+        layer.tile_values.get(0).is_some()
+    }
+
+    #[test]
+    fn a_restyle_drops_the_tile_values_unless_the_type_keeps_them() {
+        assert!(!keeps_its_tile_after_a_restyle::<Shade>(), "made from the previous style's values");
+        assert!(keeps_its_tile_after_a_restyle::<Kept>());
+    }
+}
