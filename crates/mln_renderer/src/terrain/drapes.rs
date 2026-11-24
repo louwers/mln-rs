@@ -4,7 +4,13 @@
 //!
 //! A drape draws the frame's layers with the map's camera, so zoom, bearing
 //! and line widths are the map's, through a projection of the tile's square
-//! of the world onto its texture ([`TransformParameters::for_drape`]). Each
+//! of the world onto its texture ([`TransformParameters::for_drape`]). On the
+//! globe the camera is the map's on Mercator ([`View::mercator`]), as GL JS
+//! draws its drapes, so the layers draw as flat as on a Mercator map. A
+//! drape draws the tiles over its own tile: on Mercator those of its world
+//! copy; on the globe, which has no copies, those of any, in its own, so
+//! that near the antimeridian it holds the tiles that the cover puts in the
+//! next copy. Each
 //! draped layer keeps a drawing of its own in each drape of its stack, made
 //! by the layer's own draw update ([`LayerParts::update_drape_draws`]), with
 //! the drape's uniforms, clip masks and stencil. Every frame draws every
@@ -105,6 +111,9 @@ pub(crate) struct Drapes {
     drapes: Vec<Drape>,
     /// The side of the drapes' textures, in texels.
     size: u32,
+    /// Whether the frame's view is on the globe, where a drape draws the
+    /// tiles over its own whatever their world copy.
+    globe: bool,
     /// The depth and stencil every drape draws with in turn, of `size`.
     depth_stencil: Option<GpuTexture>,
 }
@@ -114,22 +123,25 @@ impl Drapes {
     /// `view`, each with `stacks` stacks, on a device whose textures have at
     /// most `max_texture_size` texels a side: keeps the drapes of the tiles
     /// it had, with their drawings for the layers to take, and drops the
-    /// others.
+    /// others. The layers draw into the drapes as on Mercator, on the globe
+    /// too ([`View::mercator`]).
     pub(crate) fn begin(&mut self, view: &View, cover: &TerrainCover, stacks: usize, max_texture_size: u32) {
         let size = drape_size(cover.tile_size, max_texture_size);
         if size != self.size {
             *self = Drapes { size, ..Drapes::default() };
         }
+        self.globe = view.is_globe();
+        let flat = view.mercator();
         let mut kept = std::mem::take(&mut self.drapes);
         self.drapes.reserve(cover.tiles.len());
         for tile in &cover.tiles {
             let mut drape = match kept.iter().position(|drape| drape.tile == tile.id) {
                 Some(index) => {
                     let mut drape = kept.swap_remove(index);
-                    drape.transform = TransformParameters::for_drape(view, &tile.id.to_unwrapped());
+                    drape.transform = TransformParameters::for_drape(&flat, &tile.id.to_unwrapped());
                     drape
                 }
-                None => Drape::new(view, tile.id),
+                None => Drape::new(&flat, tile.id),
             };
             drape.stacks.resize_with(stacks, StackDrape::default);
             for stack in &mut drape.stacks {
@@ -151,7 +163,7 @@ impl Drapes {
         layer: &mut dyn RenderLayer,
         source: Option<LayerSource<'_>>,
     ) {
-        let size = Size::new(self.size, self.size);
+        let (size, globe) = (Size::new(self.size, self.size), self.globe);
         let style = Arc::clone(&layer.base().style);
         let pattern_atlas_size = atlases.pattern.pixel_size();
         for drape in &mut self.drapes {
@@ -170,7 +182,7 @@ impl Drapes {
             let Some(mut kept) = kept else { continue };
             let unwrapped = tile.to_unwrapped();
             let mut parameters = parameters.drape(transform, clip_masks, layer_composite, size, unwrapped);
-            layer.update_drape_draws(gpu, &mut parameters, atlases, source, *tile, &mut kept.drawing);
+            layer.update_drape_draws(gpu, &mut parameters, atlases, source, (*tile, globe), &mut kept.drawing);
             let global = parameters.global_paint_params(pattern_atlas_size);
             kept.drawing.write_uniform(gpu, ID_GLOBAL_PAINT_PARAMS_UBO, &global, parameters.context);
             layers.push(kept);
@@ -356,4 +368,49 @@ fn drape_texture(context: &mut Context, size: Size) -> SharedTexture {
             mipmapped: true,
         });
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use mln_map::transform::Transform;
+    use mln_map_types::{CameraOptions, ConstrainMode, ViewportMode};
+    use mln_style_types::ProjectionDefinition;
+    use mln_tile_id::CanonicalTileID;
+    use mln_util::geo::LatLng;
+
+    use super::*;
+    use crate::terrain::{ElevationRanges, TerrainTile};
+
+    /// On the globe, a drape draws its layers as on Mercator: its view isn't
+    /// the globe's, and its tile projects through the Mercator matrix onto
+    /// its texture, as GL JS draws its drapes.
+    #[test]
+    fn a_globe_drape_draws_on_mercator() {
+        let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
+        transform.resize(Size::new(512, 512)).unwrap();
+        transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+        let center = LatLng::new(30.0, 20.0).unwrap();
+        transform.jump_to(&CameraOptions { center: Some(center), zoom: Some(3.0), ..Default::default() });
+        let view = transform.view().clone();
+        assert!(view.is_globe());
+        let id = OverscaledTileID::new(3, 0, CanonicalTileID::new(3, 4, 3));
+        let cover = TerrainCover {
+            source_id: "dem".to_owned(),
+            tile_size: 512,
+            tiles: vec![TerrainTile { id, dem: None, dem_loading: false }],
+            center: None,
+            dem_tiles: Vec::new(),
+            standing_dems: Vec::new(),
+            ranges: ElevationRanges::default(),
+        };
+        let mut drapes = Drapes::default();
+        drapes.begin(&view, &cover, 1, 4096);
+        let transform = &drapes.drapes[0].transform;
+        assert!(!transform.view.is_globe());
+        let tile = id.to_unwrapped();
+        let projection = transform.projection_data_for_tile(&tile, false);
+        let mercator = TransformParameters::for_drape(&view.mercator(), &tile);
+        assert_eq!(mercator.proj_matrix * view.mercator().tile_matrix(&tile), projection.main_matrix);
+        assert_eq!(0.0, projection.projection_transition);
+    }
 }

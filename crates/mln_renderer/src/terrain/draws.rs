@@ -1,5 +1,5 @@
 //! The terrain's draws: one per terrain tile and stack of draped layers, of
-//! the shared grid, each with the tile's projection and where it reads its
+//! the shared grids, each with the tile's projection and where it reads its
 //! DEM in entries of its stack's storage buffers, raised by the DEM's
 //! texture and sampling the tile's drape of the stack.
 
@@ -18,6 +18,8 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_gfx::shaders::terrain_ubo::TerrainDrawableUBO;
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
+use mln_map_types::View;
+use mln_tile_id::CanonicalTileID;
 use mln_util::clip_depth::ClipDepthRange;
 use mln_util::logging::{Event, Log};
 
@@ -34,8 +36,10 @@ use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws,
 use crate::paint_parameters::PaintParameters;
 use crate::tile_matrix::to_projection_ubo;
 
-/// The grid, in the context's stores.
+/// A grid, in the context's stores.
 struct SharedMesh {
+    /// Whether it has a cap to the north and to the south pole.
+    poles: [bool; 2],
     vertices: SharedVertices,
     vertex_count: usize,
     indexes: SharedIndexes,
@@ -61,24 +65,25 @@ struct StackDraws {
     draw_list: DrawList<TileUniforms>,
 }
 
-/// How the draws were made: whether their grid has skirts, and the
-/// triangles they cull, those facing away, whose winding a flipped viewport
-/// turns round.
-type BuiltFor = (bool, CullFaceMode);
+/// How the draws were made: the projection variant of their shader,
+/// whether their grids have skirts, and the triangles they cull, those
+/// facing away, whose winding a flipped viewport turns round.
+type BuiltFor = (ProjectionVariant, bool, CullFaceMode);
 
 /// The draws of the terrain's tiles, a set for each stack, which draw in the
 /// translucent pass, nearest the center first, testing and writing the 3D
-/// depth range. The sets share the grid, the DEM textures and each tile's
+/// depth range. The sets share the grids, the DEM textures and each tile's
 /// projection and DEM coordinates.
 #[derive(Default)]
 pub(crate) struct TerrainDraws {
     /// The draws of each of the frame's stacks.
     stacks: Vec<StackDraws>,
-    /// The surface's shader.
-    shader: Option<ShaderKey>,
-    /// The grid the draws hold.
-    mesh: Option<SharedMesh>,
-    /// How the draws and the grid were made.
+    /// The surface's shader, with the variant it is of.
+    shader: Option<(ProjectionVariant, ShaderKey)>,
+    /// The grids the draws hold: on the globe, the tiles of the first and
+    /// last rows draw grids with caps to the poles.
+    meshes: Vec<SharedMesh>,
+    /// How the draws and the grids were made.
     built_for: Option<BuiltFor>,
     /// Whether the backend has no shader of the surface, which draws
     /// nothing then.
@@ -89,7 +94,8 @@ impl TerrainDraws {
     /// Makes the frame's draws of the tiles of `cover`, one for each of the
     /// stacks of `drapes`, which read the DEM textures of `dems`, sample the
     /// tile's drape of their stack and draw as `surface` says; or drops the
-    /// draws and what they share for `None`, a frame without terrain.
+    /// draws and what they share for `None`, a frame without terrain. Each
+    /// tile projects as the frame's view does, onto the globe on a globe.
     pub(crate) fn update(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -102,7 +108,7 @@ impl TerrainDraws {
         let shader = cover.filter(|_| stacks > 0).and_then(|_| self.shader(gpu, parameters));
         let (Some((cover, dems)), Some(shader)) = (cover, shader) else {
             self.stacks.clear();
-            self.mesh = None;
+            self.meshes.clear();
             self.built_for = None;
             return;
         };
@@ -110,22 +116,23 @@ impl TerrainDraws {
         let cull_face_mode = parameters.cull_back_faces();
         let (view, proj_matrix) = (parameters.view, &parameters.transform_params.proj_matrix);
         let context = &mut *parameters.context;
-        let built_for = (surface.skirts, cull_face_mode);
+        let built_for = (variant(view), surface.skirts, cull_face_mode);
         if self.built_for != Some(built_for) {
-            // The draws hold the other grid, or cull the other way.
+            // The draws hold the other variant's shader, the other grids, or
+            // cull the other way.
             self.stacks.clear();
-            self.mesh = None;
+            self.meshes.clear();
             self.built_for = Some(built_for);
         }
 
         // A backend whose clip depth runs from -1 writes the depth of one
-        // whose runs from 0, as fill extrusions do.
-        let remap_clip_z = context.caps().clip_depth == ClipDepthRange::NegativeOneToOne;
+        // whose runs from 0, as fill extrusions do. The globe projects in its
+        // shaders.
+        let remap_clip_z = context.caps().clip_depth == ClipDepthRange::NegativeOneToOne && !view.is_globe();
         self.stacks.resize_with(stacks, StackDraws::default);
         for stack in &mut self.stacks {
             stack.tiles.set_tiles(cover.tiles.iter().map(|tile| tile.id));
         }
-        let mesh = self.mesh.get_or_insert_with(|| shared_mesh(context, surface.skirts));
         for (index, tile) in cover.tiles.iter().enumerate() {
             let bound = tile.dem.and_then(|(id, coords)| Some((dems.dem(&id)?, coords)));
             let (dem_texture, dem_coords) = match bound {
@@ -143,6 +150,7 @@ impl TerrainDraws {
                 drawable: TerrainDrawableUBO { dem_coords },
                 projection: to_projection_ubo(&projection),
             };
+            let mesh = mesh(&mut self.meshes, context, surface.skirts, poles(view, tile.id.canonical));
             for (stack, draws) in self.stacks.iter_mut().enumerate() {
                 let Some(entry) = draws.tiles.entry(&tile.id) else {
                     continue;
@@ -185,23 +193,26 @@ impl TerrainDraws {
         self.shader(gpu, parameters).is_some()
     }
 
-    /// The surface's shader, made on `gpu` the first time; `None`, logged
-    /// once, where the backend has none.
+    /// The surface's shader in the frame's projection, made on `gpu` the
+    /// first time; `None`, logged once, where the backend has none.
     fn shader(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> Option<ShaderKey> {
-        if let Some(shader) = &self.shader {
+        let variant = variant(parameters.view);
+        if let Some((made_for, shader)) = &self.shader
+            && *made_for == variant
+        {
             return Some(shader.clone());
         }
         if self.unsupported {
             return None;
         }
         let context = &mut *parameters.context;
-        let shader = context.shader_key(&programs::TERRAIN, Uniforms::default(), ProjectionVariant::Mercator);
+        let shader = context.shader_key(&programs::TERRAIN, Uniforms::default(), variant);
         if let Err(error) = context.shader(gpu, &shader) {
             self.unsupported = true;
             Log::warning(Event::Render, format!("Terrain draws nothing on this backend: {error}"));
             return None;
         }
-        Some(self.shader.insert(shader).clone())
+        Some(self.shader.insert((variant, shader)).1.clone())
     }
 
     /// Uploads the GPU objects of the frame's draws.
@@ -220,15 +231,34 @@ impl TerrainDraws {
     }
 }
 
-/// The grid, with `skirts` or without, made in the stores of `context`.
-fn shared_mesh(context: &mut Context, skirts: bool) -> SharedMesh {
-    let TerrainMesh { vertices, indices } = TerrainMesh::new(skirts, [false, false]);
-    SharedMesh {
+/// The variant of the surface's shader in `view`: the globe's while it
+/// draws the globe, through its handover to Mercator too.
+fn variant(view: &View) -> ProjectionVariant {
+    if view.is_globe() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator }
+}
+
+/// Whether the grid of `tile` in `view` closes the north and the south
+/// pole: on the globe, for a tile of the first or the last row.
+fn poles(view: &View, tile: CanonicalTileID) -> [bool; 2] {
+    let last = (1u32 << tile.z) - 1;
+    [view.is_globe() && tile.y == 0, view.is_globe() && tile.y == last]
+}
+
+/// The grid of `meshes` with `skirts` and the caps of `poles`, made in the
+/// stores of `context` the first time.
+fn mesh<'a>(meshes: &'a mut Vec<SharedMesh>, context: &mut Context, skirts: bool, poles: [bool; 2]) -> &'a SharedMesh {
+    if let Some(index) = meshes.iter().position(|mesh| mesh.poles == poles) {
+        return &meshes[index];
+    }
+    let TerrainMesh { vertices, indices } = TerrainMesh::new(skirts, poles);
+    meshes.push(SharedMesh {
+        poles,
         vertex_count: vertices.len(),
         vertices: context.add_vertices(vertices),
         index_count: indices.len(),
         indexes: context.add_indexes(Indexes::new(indices)),
-    }
+    });
+    &meshes[meshes.len() - 1]
 }
 
 /// The GPU objects of a tile's draw of `mesh` with `shader`: alpha-blended,

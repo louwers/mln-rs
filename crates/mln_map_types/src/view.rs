@@ -564,6 +564,16 @@ impl View {
         if self.is_globe() { crate::Projection::VerticalPerspective } else { crate::Projection::Mercator }
     }
 
+    /// The same camera, size and center altitude on Mercator: the view at a
+    /// projection transition of 0. A view on Mercator is its own.
+    #[must_use]
+    pub fn mercator(&self) -> View {
+        if !self.is_globe() {
+            return self.clone();
+        }
+        View::new(ViewParams { projection_transition: 0.0, ..self.params })
+    }
+
     /// The tile-to-world matrix of a tile at the view's scale.
     #[must_use]
     pub fn tile_matrix(&self, tile_id: &UnwrappedTileID) -> DMat4 {

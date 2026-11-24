@@ -1508,17 +1508,15 @@ impl Map {
     }
 
     /// The terrain the camera stands on: the ground the renderer last drew,
-    /// while the style has terrain outside tile mode on a Mercator view,
-    /// where terrain draws; else none, which turns the camera's rules over
-    /// terrain off.
+    /// while the style has terrain outside tile mode, on every projection;
+    /// else none, which turns the camera's rules over terrain off.
     fn terrain_ground(&mut self) -> Option<TerrainGround> {
         // The renderer tells of the ground only after it draws an update
         // without it, so the map, which owns the style, lets go first.
         if self.style.get_terrain().is_none() {
             self.elevation = None;
         }
-        let applies =
-            self.style.get_terrain().is_some() && self.mode != MapMode::Tile && !self.transform.view().is_globe();
+        let applies = self.style.get_terrain().is_some() && self.mode != MapMode::Tile;
         applies.then(|| TerrainGround { elevation: self.elevation.clone(), clamped: self.center_clamped_to_ground })
     }
 

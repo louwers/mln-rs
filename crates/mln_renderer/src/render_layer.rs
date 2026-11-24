@@ -359,16 +359,21 @@ impl<'a> FrameSourceTiles<'a> {
     }
 
     /// The tiles of `found`, as [`at`](Self::at) gives them, that overlap
-    /// `tile`: it, its ancestors and its descendants, in its world copy.
+    /// `tile`: it, its ancestors and its descendants, in its world copy, or
+    /// on the `globe`, which has no copies, whatever their copy. A drape of
+    /// `tile` draws each in `tile`'s copy ([`FrameTile::draw_id`]).
     pub(crate) fn overlapping<T: LayerType>(
         self,
         found: &[FoundTile],
         layer_id: &str,
         tile: UnwrappedTileID,
+        globe: bool,
     ) -> FrameTiles<'a, T> {
         let overlaps = found.iter().filter(|found| {
             self.tiles.get(found.tile).is_some_and(|render_tile| {
-                render_tile.id == tile || render_tile.id.is_child_of(&tile) || tile.is_child_of(&render_tile.id)
+                let id = render_tile.id;
+                let tile = if globe { UnwrappedTileID { wrap: id.wrap, ..tile } } else { tile };
+                id == tile || id.is_child_of(&tile) || tile.is_child_of(&id)
             })
         });
         self.at(overlaps, layer_id)
@@ -674,8 +679,9 @@ pub(crate) trait LayerParts {
     fn new_drape_drawing(&self) -> Option<DrapeDrawing>;
 
     /// The encode's update of the layer's draws into the drape of the
-    /// terrain tile `drape`, which keeps them in `drawing`, one of the
-    /// layer's ([`new_drape_drawing`](Self::new_drape_drawing)): as
+    /// terrain tile `drape`, with whether the frame is on the globe, which
+    /// keeps them in `drawing`, one of the layer's
+    /// ([`new_drape_drawing`](Self::new_drape_drawing)): as
     /// [`update_draws`](Self::update_draws) makes the frame's, with the
     /// drape's `parameters`, from the tiles of `source` the layer's update
     /// found that overlap the drape's tile
@@ -689,7 +695,7 @@ pub(crate) trait LayerParts {
         parameters: &mut PaintParameters<'_>,
         atlases: &Atlases,
         source: Option<LayerSource<'_>>,
-        drape: OverscaledTileID,
+        drape: (OverscaledTileID, bool),
         drawing: &mut DrapeDrawing,
     );
 
@@ -875,7 +881,7 @@ impl<L: TypedLayer> LayerParts for L {
         parameters: &mut PaintParameters<'_>,
         atlases: &Atlases,
         source: Option<LayerSource<'_>>,
-        drape: OverscaledTileID,
+        drape: (OverscaledTileID, bool),
         drawing: &mut DrapeDrawing,
     ) {
         let Some(drawing) = drawing.downcast_mut::<L::Drawing>().filter(|_| L::DRAPES) else {
@@ -946,7 +952,7 @@ fn update_drape<L: TypedLayer>(
     parameters: &mut PaintParameters<'_>,
     atlases: &Atlases,
     source: Option<LayerSource<'_>>,
-    drape_tile: OverscaledTileID,
+    (drape_tile, globe): (OverscaledTileID, bool),
 ) {
     // A drape is flat: the layer's draws are Mercator's.
     use_projection_variant(layer, ProjectionVariant::Mercator);
@@ -963,7 +969,7 @@ fn update_drape<L: TypedLayer>(
     let tiles = match source {
         Some(LayerSource::Tiles(source, found)) => {
             let found = found.get(layer.base().found.clone()).unwrap_or_default();
-            source.overlapping::<L::Type>(found, layer.id(), drape)
+            source.overlapping::<L::Type>(found, layer.id(), drape, globe)
         }
         Some(LayerSource::Image(image)) => {
             let copies: SmallVec<[UnwrappedTileID; 4]> =

@@ -1373,13 +1373,12 @@ impl RenderOrchestrator {
         let (renderable_size, pixel_ratio) = (paint_parameters.renderable_size, paint_parameters.pixel_ratio);
         let context = &mut *paint_parameters.context;
         self.sky_pass.update(gpu, context, state, renderable_size, pixel_ratio, frame.sky.as_ref(), &frame.light);
-        self.globe_depth_pass.update(
-            gpu,
-            context,
-            state,
-            update_parameters,
-            needs_globe_depth || self.sky_pass.has_atmosphere(),
-        );
+        // Where the terrain's surface draws, its depth is the planet's: a
+        // sea-level planet would hide the ground below sea level and the
+        // drawn ground's limb.
+        let surface = !self.stacks.is_empty();
+        let needs_globe_depth = (needs_globe_depth || self.sky_pass.has_atmosphere()) && !surface;
+        self.globe_depth_pass.update(gpu, context, state, update_parameters, needs_globe_depth);
         self.terrain.update_draws(gpu, paint_parameters);
     }
 

@@ -5,6 +5,12 @@
 //! ([`TerrainGround`]). The terrain moves a camera at rest, as ground loads
 //! or changes under it, the clamp turns on or the terrain goes, without
 //! camera events, as in GL JS: the map's snapshots show those moves.
+//!
+//! The rules are the same on the globe, where heights stand along each
+//! point's vertical above the sea-level sphere: the same heights at the
+//! center decide the altitude, and the eye, its near plane and the ground
+//! under the line of sight are the globe camera's
+//! ([`View::ground_under`]).
 
 use std::sync::Arc;
 
@@ -20,7 +26,7 @@ use super::Transform;
 const MAX_EYE_RAISES: usize = 3;
 
 /// The terrain the camera stands on, which the map hands the transform
-/// while its style's terrain draws, on a Mercator view outside tile mode.
+/// while its style's terrain draws outside tile mode, on every projection.
 #[derive(Clone, Debug)]
 pub struct TerrainGround {
     /// The ground the renderer last drew, or `None` before it drew any:

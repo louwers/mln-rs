@@ -157,8 +157,28 @@ fn a_drape_draws_the_tiles_that_overlap_its_tile() {
     let found: Vec<FoundTile> = (0..render_tiles.len()).map(|tile| FoundTile { tile, view: None }).collect();
     let source = FrameSourceTiles::new(&render_tiles, &contents);
     let drawn: Vec<UnwrappedTileID> =
-        source.overlapping::<Raster>(&found, "raster", ids[0]).iter().map(|tile| tile.tile.id).collect();
+        source.overlapping::<Raster>(&found, "raster", ids[0], false).iter().map(|tile| tile.tile.id).collect();
     assert_eq!(&ids[..4], &drawn[..]);
+}
+
+/// On the globe, which has no world copies, a drape draws the tiles over
+/// its tile whatever their copy: near the antimeridian, a zoom 0 drape in
+/// copy 0 draws the western zoom 1 tile that the globe's cover puts in
+/// copy 1, as its west half. A Mercator drape doesn't.
+#[test]
+fn a_globe_drape_draws_the_tiles_over_it_of_every_world_copy() {
+    let ids = [tile(1, 1, 0, 0), tile(0, 1, 1, 0), tile(1, 2, 0, 1)];
+    let render_tiles: Vec<RenderTile> =
+        ids.iter().map(|id| RenderTile::of_tile_id(*id, id.overscale_to(id.canonical.z), false)).collect();
+    let contents = vec![None; render_tiles.len()];
+    let found: Vec<FoundTile> = (0..render_tiles.len()).map(|tile| FoundTile { tile, view: None }).collect();
+    let source = FrameSourceTiles::new(&render_tiles, &contents);
+    let drape = tile(0, 0, 0, 0);
+    let drawn = |globe: bool| -> Vec<UnwrappedTileID> {
+        source.overlapping::<Raster>(&found, "raster", drape, globe).iter().map(|tile| tile.tile.id).collect()
+    };
+    assert_eq!(ids.to_vec(), drawn(true));
+    assert_eq!(ids[1..2].to_vec(), drawn(false));
 }
 
 /// An image drawn in the tiles `tile_ids` over the box `bounds` of their

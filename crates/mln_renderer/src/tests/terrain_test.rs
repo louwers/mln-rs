@@ -122,12 +122,12 @@ fn terrain_draws_from_a_raster_dem_source_whose_tileset_has_loaded() {
     missing.apply(Edit::SetTerrain(Some(Terrain::new("elsewhere")))).unwrap();
     assert_eq!(None, terrain_zooms(missing, &transform, MapMode::Static));
 
-    // Tile mode and the globe draw it flat.
+    // Tile mode draws it flat; the globe draws it.
     assert_eq!(None, terrain_zooms(style_with(ready.clone()), &transform, MapMode::Tile));
     let mut globe = self::transform();
     globe.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
     assert!(globe.view().is_globe());
-    assert_eq!(None, terrain_zooms(style_with(ready), &globe, MapMode::Static));
+    assert!(terrain_zooms(style_with(ready), &globe, MapMode::Static).is_some());
 }
 
 #[test]
