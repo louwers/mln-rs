@@ -134,6 +134,13 @@ pub enum BufferKind {
     /// a uniform block, so a shader reads only that one where
     /// [`Caps::indexes_storage_buffers`](crate::gpu::Caps::indexes_storage_buffers)
     /// is false.
+    ///
+    /// A shader indexes inside the buffer the draw binds, here and in
+    /// [`Vertices`](BufferKind::Vertices). A read past it reads zero or a
+    /// value of the buffer on WebGPU, and on Vulkan where the device has
+    /// `robustBufferAccess` on, as `mln_vulkan`'s own device does where the
+    /// GPU offers it; on Metal, D3D12 and a Vulkan device without it, what
+    /// it reads is undefined, as the GPU's own rules say.
     Storage { block: &'static Block },
     /// A vertex buffer of vertices of `format` that the vertex stage reads
     /// as a storage buffer, where the backend binds them

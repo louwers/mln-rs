@@ -772,6 +772,9 @@ impl Device {
         } else {
             Log::error(Event::Render, "Feature not available: samplerAnisotropy");
         }
+        // A shader's read past a storage buffer's bound range then reads
+        // inside the buffer or zero, rather than undefined memory.
+        enabled.robust_buffer_access = supported.robust_buffer_access;
 
         let queue_priority = [1.0f32];
         let queue_create_infos = [vk::DeviceQueueCreateInfo::default()
