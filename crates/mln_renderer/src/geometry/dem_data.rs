@@ -213,6 +213,12 @@ impl DEMData {
     pub(crate) fn image(&self) -> &PremultipliedImage {
         &self.image
     }
+
+    /// The bordered image, to share: a backfill after copies it first.
+    #[must_use]
+    pub(crate) fn shared_image(&self) -> &Arc<PremultipliedImage> {
+        &self.image
+    }
 }
 
 #[cfg(test)]
