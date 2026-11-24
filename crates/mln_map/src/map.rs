@@ -10,7 +10,8 @@ use geo_types::Geometry;
 use glam::{DMat4, DVec3};
 use mln_map_types::{
     AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraLimits, CameraOptions, CameraUpdate, Elevation,
-    MapDebugOptions, MapMode, ProjectionMode, TileLodMode, TransformState, VerticalPerspectiveProjection, Viewport,
+    MapDebugOptions, MapMode, ProjectionMode, TerrainSkirtLength, TileLodMode, TransformState,
+    VerticalPerspectiveProjection, Viewport,
 };
 use mln_renderer::{
     Registry, RendererEvent, RendererEvents, RenderingStats, UpdateParameters, UpdateReader, UpdateSlot,
@@ -85,6 +86,8 @@ pub struct Map {
     unused_style_image_policy: UnusedStyleImagePolicy,
     /// Whether the center stands on the terrain.
     center_clamped_to_ground: bool,
+    /// How far the skirts of terrain tiles reach down.
+    terrain_skirt_length: TerrainSkirtLength,
     /// The ground of the terrain as the renderer last drew it, while
     /// terrain draws. Each update carries it, and the renderer completes a
     /// frame only of an update whose ground gives the height and floor at
@@ -197,6 +200,7 @@ impl Map {
             fast_pfor_enabled: map_options.fast_pfor_enabled,
             unused_style_image_policy: map_options.unused_style_image_policy,
             center_clamped_to_ground: map_options.center_clamped_to_ground,
+            terrain_skirt_length: map_options.terrain_skirt_length,
             elevation: None,
             ground_moves: 0,
             debug_options: MapDebugOptions::NO_DEBUG,
@@ -684,6 +688,7 @@ impl Map {
             update_id: self.update_id,
             cross_source_collisions: self.cross_source_collisions,
             fast_pfor_enabled: self.fast_pfor_enabled,
+            terrain_skirt_length: self.terrain_skirt_length,
             elevation: self.elevation.clone(),
             tile_lod_min_radius: self.tile.lod_min_radius,
             tile_lod_scale: self.tile.lod_scale,

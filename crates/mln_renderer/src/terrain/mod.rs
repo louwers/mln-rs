@@ -72,18 +72,18 @@
 //! - **The surface** draws once for each stack, its tiles nearest the
 //!   center first, testing and writing the 3D depth range with less or
 //!   equal and blending its drapes over what is under it. Each tile's grid
-//!   is raised by its DEM, with GL JS's skirts, a fifth of a tile's width at
-//!   the equator, hanging from its edges, and projects through its
-//!   projection entry as GL JS's `projectTileFor3D` does: on Mercator
-//!   through the tile's matrix, on the globe each point raised along its
-//!   vertical, blended with Mercator through a handover. On the globe the
-//!   tiles of the first and last rows close the poles at sea level, in the
-//!   colors of their drapes' edge rows; and the planet's sea-level depth,
-//!   which a flat globe draws before its 3D layers, isn't drawn in a frame
-//!   where the surface draws, whose depth is the planet's. A stack above
-//!   the first draws where the first left the nearest ground, and only the
-//!   tiles where it has a drape; the first draws every tile, transparent
-//!   where it has none, for that depth.
+//!   is raised by its DEM, with the map's skirts hanging from its edges
+//!   (GL JS's by default, a fifth of a tile's width at the equator), and
+//!   projects through its projection entry as GL JS's `projectTileFor3D`
+//!   does: on Mercator through the tile's matrix, on the globe each point
+//!   raised along its vertical, blended with Mercator through a handover.
+//!   On the globe the tiles of the first and last rows close the poles at
+//!   sea level, in the colors of their drapes' edge rows; and the planet's
+//!   sea-level depth, which a flat globe draws before its 3D layers, isn't
+//!   drawn in a frame where the surface draws, whose depth is the planet's.
+//!   A stack above the first draws where the first left the nearest ground,
+//!   and only the tiles where it has a drape; the first draws every tile,
+//!   transparent where it has none, for that depth.
 //! - **The drapes** ([`Drapes`]): a texture for each drawn tile and stack
 //!   whose layers draw something in the tile, which the stack's draped
 //!   layers draw into with the map's camera, through their own draw
@@ -117,7 +117,7 @@ pub(crate) use drapes::Drapes;
 pub(crate) use elevation::TerrainElevation;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::terrain_ubo::TerrainPropsUBO;
-use mln_map_types::{Elevation, MapMode};
+use mln_map_types::{Elevation, MapMode, TerrainSkirtLength};
 use mln_style::source_type::SourceData;
 use mln_style::sources::RasterDemSourceType;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
@@ -139,10 +139,14 @@ use crate::terrain::draws::TerrainDraws;
 use crate::tile::source_tiles::SourceTiles;
 use crate::update_parameters::UpdateParameters;
 
-/// How far the skirts of terrain tiles reach down at `zoom`, in meters: a
-/// fifth of a tile's width at the equator, as GL JS's `getSkirtLength`.
-fn skirt_length(zoom: f64) -> f64 {
-    constants::M2PI * constants::EARTH_RADIUS_M / zoom.max(0.0).exp2() / 5.0
+/// How far the skirts of terrain tiles reach down at `zoom`, in meters, or
+/// `None` for no skirts. `Auto` is a fifth of a tile's width at the
+/// equator, as GL JS's `getSkirtLength`.
+fn skirt_length(length: TerrainSkirtLength, zoom: f64) -> Option<f64> {
+    match length {
+        TerrainSkirtLength::Auto => Some(constants::M2PI * constants::EARTH_RADIUS_M / zoom.max(0.0).exp2() / 5.0),
+        TerrainSkirtLength::None => None,
+    }
 }
 
 /// Whether a camera at rest whose center is at `center` stands on the
@@ -172,17 +176,17 @@ pub(crate) struct Surface {
 
 impl Surface {
     /// The surface of a DEM of `encoding`, raised by `exaggeration`, with
-    /// skirts of `skirt_length` meters.
-    fn new(encoding: RasterEncoding, exaggeration: f32, skirt_length: f64) -> Surface {
+    /// skirts of `skirt_length` meters, or none.
+    fn new(encoding: RasterEncoding, exaggeration: f32, skirt_length: Option<f64>) -> Surface {
         let unpack = DemUnpack::of(encoding);
         let props = TerrainPropsUBO {
             unpack: unpack.weights_and_base(),
             unpack_scale: unpack.scale,
             exaggeration,
-            skirt_length: skirt_length as f32,
+            skirt_length: skirt_length.unwrap_or(0.0) as f32,
             pad0: 0.0,
         };
-        Surface { props, skirts: true }
+        Surface { props, skirts: skirt_length.is_some() }
     }
 
     /// How the DEM decodes.
@@ -261,7 +265,8 @@ impl RenderTerrain {
         let tileset = data.description.as_ref().filter(|tileset| !tileset.tiles.is_empty())?;
 
         let encoding = tileset.raster_encoding.unwrap_or(RasterEncoding::Mapbox);
-        self.surface = Surface::new(encoding, terrain.exaggeration, skirt_length(parameters.view.zoom()));
+        let skirt_length = skirt_length(parameters.terrain_skirt_length, parameters.view.zoom());
+        self.surface = Surface::new(encoding, terrain.exaggeration, skirt_length);
 
         let dem_zooms = tileset.zoom_range;
         ranges.update(tileset, dem(&terrain.source), f64::from(terrain.exaggeration));

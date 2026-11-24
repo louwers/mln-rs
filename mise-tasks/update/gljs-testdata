@@ -38,6 +38,11 @@ declare -A allowed=(
     # outlines on a CPU rasterizer), 420 (Vulkan) and 389 (OpenGL); on Mesa
     # 26.2.5, 139, 173 and 155.
     [terrain/skirts-auto]=0.0017
+    # As skirts-auto, where the same fills' edges differ: 143 of 262144 on
+    # RADV (142 on Vulkan); on lavapipe as CI runs it (Mesa 26.2.5 with
+    # `GALLIVM_PERF=no_lod_ellipse`), 355 (WebGPU), 418 (Vulkan) and 386
+    # (OpenGL, llvmpipe). With the skirts: 14581 (RADV), 14674 (lavapipe).
+    [terrain/skirts-none]=0.0017
     # The fill outlines, 2 px wide in mln-rs, as in MapLibre Native, where GL
     # JS draws them 1 px wide: 26 of 65536 on RADV and on Mesa 26.0.8 and
     # 26.2.5; 3 with WebGPU on lavapipe, which draws 1 px outlines on a CPU

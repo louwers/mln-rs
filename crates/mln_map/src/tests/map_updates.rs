@@ -15,7 +15,7 @@ use mln_util::queue::Queue;
 use mln_util::size::Size;
 use parking_lot::Mutex;
 
-use crate::{CameraOptions, ErrorKind, Map, MapOptions, TileSettings, UpdateReader};
+use crate::{CameraOptions, ErrorKind, Map, MapOptions, TerrainSkirtLength, TileSettings, UpdateReader};
 
 fn map(run_loop: &Queue<()>) -> Map {
     let options = MapOptions { size: Size::new(256, 256), ..Default::default() };
@@ -115,6 +115,19 @@ fn a_group_without_changes_publishes_nothing() {
     map.begin_command_group();
     map.end_command_group().expect("the group ends");
     assert_eq!(map.update_generation(), before);
+}
+
+#[test]
+fn updates_carry_the_terrain_skirt_length_of_the_map_options() {
+    let run_loop = Queue::<()>::new();
+    let options =
+        MapOptions { size: Size::new(256, 256), terrain_skirt_length: TerrainSkirtLength::None, ..Default::default() };
+    let file_source = StubFileSource::on_queue(&run_loop, ResponseType::Asynchronous);
+    let mut map = Map::with_file_source(file_source, options, &crate::tests::pool()).expect("map");
+    let reader = map.update_reader();
+    map.jump_to(&CameraOptions { zoom: Some(2.0), ..Default::default() });
+    let update = reader.latest().expect("an update");
+    assert_eq!(update.parameters.terrain_skirt_length, TerrainSkirtLength::None);
 }
 
 fn hover(value: bool) -> FeatureState {

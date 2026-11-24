@@ -46,7 +46,6 @@
   "render-tests/debug/padding/ease-to-right-distort": "skip - GL JS's easeTo operation and showPadding debug lines, which the runner and mln-rs don't have",
   "render-tests/debug/padding/ease-to-top-distort": "skip - GL JS's easeTo operation and showPadding debug lines, which the runner and mln-rs don't have",
   "render-tests/debug/padding/set-padding": "skip - GL JS's setPadding operation and showPadding debug lines, which the runner and mln-rs don't have",
-  "gljs/render-tests/terrain/skirts-none": "The map has no terrain skirt length option yet, so the runner can't take the skirts off: with them, 14,581 of 262,144 px differ on RADV",
   "gljs/render-tests/sky/fog-color/default": "Terrain doesn't draw yet: #532 P3, fog",
   "gljs/render-tests/sky/fog-color/function": "Terrain doesn't draw yet: #532 P3, fog",
   "gljs/render-tests/sky/fog-color/global-state": "Terrain doesn't draw yet: #532 P3, fog",

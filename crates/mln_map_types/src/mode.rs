@@ -42,6 +42,20 @@ pub enum TileLodMode {
     Distance,
 }
 
+/// How far the skirts that hang from the edges of terrain tiles reach down.
+/// Skirts hide the cracks where the edges of neighboring tiles don't meet,
+/// and show through where the layers draped over the terrain are
+/// translucent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum TerrainSkirtLength {
+    /// A fifth of a tile's width at the map's zoom, in meters at the
+    /// equator.
+    #[default]
+    Auto,
+    /// No skirts.
+    None,
+}
+
 /// The map's debug overlays, a bit set. Where C++ tests a flag with
 /// `lhs & rhs`, which returns a bool there, use `contains`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]

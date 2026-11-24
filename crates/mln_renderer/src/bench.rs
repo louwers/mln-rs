@@ -587,7 +587,7 @@ mod tests {
 
     use feature::{Feature, Identifier, PropertyMap, Value};
     use geo_types::{Geometry, LineString, Point};
-    use mln_map_types::{MapDebugOptions, TileLodMode, TransformState};
+    use mln_map_types::{MapDebugOptions, TerrainSkirtLength, TileLodMode, TransformState};
     use mln_util::geo::LatLng;
     use mln_util::size::Size;
     use mln_util::time::Instant;
@@ -647,6 +647,7 @@ mod tests {
             update_id: 0,
             cross_source_collisions: true,
             fast_pfor_enabled: false,
+            terrain_skirt_length: TerrainSkirtLength::Auto,
             elevation: None,
             tile_lod_min_radius: 3.0,
             tile_lod_scale: 1.0,

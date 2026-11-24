@@ -12,7 +12,8 @@ use mln_gfx::offscreen_target::OffscreenTarget;
 use mln_gfx::{RendererBackend as _, ScissorRect};
 use mln_map::transform::Transform;
 use mln_map_types::{
-    CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TileLodMode, View, ViewportMode,
+    CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode, View,
+    ViewportMode,
 };
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::layers::Raster;
@@ -345,6 +346,7 @@ fn textured_drapes(style: &str) -> BTreeSet<(OverscaledTileID, usize)> {
             update_id: 0,
             cross_source_collisions: true,
             fast_pfor_enabled: false,
+            terrain_skirt_length: TerrainSkirtLength::Auto,
             elevation: elevation.clone(),
             tile_lod_min_radius: 3.0,
             tile_lod_scale: 1.0,

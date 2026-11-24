@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use glam::DVec2;
 use mln_map::transform::Transform;
-use mln_map_types::{CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
+use mln_map_types::{
+    CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode, ViewportMode,
+};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::sources::raster_dem_source;
@@ -79,6 +81,7 @@ fn update_parameters(style: Style, transform: &Transform, mode: MapMode) -> Upda
         update_id: 0,
         cross_source_collisions: true,
         fast_pfor_enabled: false,
+        terrain_skirt_length: TerrainSkirtLength::Auto,
         elevation: None,
         tile_lod_min_radius: 3.0,
         tile_lod_scale: 1.0,
@@ -131,23 +134,36 @@ fn terrain_draws_from_a_raster_dem_source_whose_tileset_has_loaded() {
 }
 
 #[test]
-fn the_surface_decodes_the_dem_as_its_tileset_says_and_hangs_skirts() {
+fn the_surface_decodes_the_dem_as_its_tileset_says_and_hangs_the_skirts_the_map_asks_for() {
     let transform = transform();
     let tileset = PartialTileset { raster_encoding: Some(RasterEncoding::Terrarium), ..tiles() };
     let mut style = style_with(crate::tests::ready(raster_dem_source("dem", None, tileset, 256)));
     style.apply(Edit::SetTerrain(Some(Terrain { source: "dem".to_owned(), exaggeration: 1.5 }))).unwrap();
-    let mut terrain = RenderTerrain::default();
-    terrain.update(&update_parameters(style, &transform, MapMode::Static), |_| None).expect("terrain draws");
-    let surface = terrain.surface();
+    let surface = |skirts| {
+        let parameters = UpdateParameters {
+            terrain_skirt_length: skirts,
+            ..update_parameters(style.clone(), &transform, MapMode::Static)
+        };
+        let mut terrain = RenderTerrain::default();
+        terrain.update(&parameters, |_| None).expect("terrain draws");
+        terrain.surface()
+    };
 
-    assert!(surface.skirts);
-    assert_eq!([65536.0, 256.0, 1.0, -8_388_608.0], surface.props.unpack);
-    assert_eq!(1.0 / 256.0, surface.props.unpack_scale);
-    assert_eq!(1.5, surface.props.exaggeration);
+    let auto = surface(TerrainSkirtLength::Auto);
+    assert!(auto.skirts);
+    assert_eq!([65536.0, 256.0, 1.0, -8_388_608.0], auto.props.unpack);
+    assert_eq!(1.0 / 256.0, auto.props.unpack_scale);
+    assert_eq!(1.5, auto.props.exaggeration);
     // A fifth of a tile's width at the map's zoom, 10.5, in meters at the
     // equator.
     let tile_width = 2.0 * std::f64::consts::PI * 6_378_137.0 / 2f64.powf(10.5);
-    assert_eq!((tile_width / 5.0) as f32, surface.props.skirt_length);
+    assert_eq!((tile_width / 5.0) as f32, auto.props.skirt_length);
+
+    // Without skirts, the tiles' grids have none to lower.
+    let none = surface(TerrainSkirtLength::None);
+    assert!(!none.skirts);
+    assert_eq!(0.0, none.props.skirt_length);
+    assert_eq!(auto.props.unpack, none.props.unpack);
 }
 
 /// A file source whose DEM tile requests wait until the test answers them,
