@@ -1,0 +1,5 @@
+{
+  "gljs/render-tests/image/pitched": "On a Mali GPU (Pixel 9), Vulkan draws nothing of the pitched image, through mln-rs's backend and wgpu alike; OpenGL ES draws it",
+  "render-tests/sky/basic": "On a Mali GPU (Pixel 9), the map's ground near the horizon ends a row or two higher, on every backend: where the far plane cuts the map there, depth barely changes from row to row",
+  "render-tests/sky/zoom-expression": "On a Mali GPU (Pixel 9), the map's ground near the horizon ends a row or two higher, on every backend: where the far plane cuts the map there, depth barely changes from row to row"
+}

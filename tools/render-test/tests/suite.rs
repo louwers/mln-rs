@@ -8,6 +8,8 @@
 // macOS adds the C++ WebGPU ignore list, since wgpu renders through Metal
 // there, and ignores the tests whose only expected image is C++ Metal's, which
 // triangulates them 1 px wide (ignores/rust-port-metal-outlines.json).
+// Android's Vulkan manifest adds what Mali GPUs draw differently
+// (ignores/rust-port-mali.json), as the Pixel 9 that CI tests on has.
 //
 // The tests run in worker processes of the package's render-test binary
 // (`--jobs`, src/jobs.rs): one per CPU, or $RENDER_TEST_JOBS (1: in the
@@ -29,6 +31,7 @@ pub(crate) fn run(name: &str, args: &[&str], factory: Option<ImplFactory>) -> i3
     } else {
         match std::env::var("MLN_RENDER_BACKEND").map(|backend| backend.to_ascii_lowercase()).as_deref() {
             Ok("gl" | "gl-desktop") => "manifests/linux-opengl.json",
+            Ok("vulkan") if cfg!(target_os = "android") => "manifests/android-vulkan.json",
             Ok("vulkan") => "manifests/linux-vulkan.json",
             Ok("d3d12") => "manifests/windows-d3d12.json",
             _ => "manifests/linux-wgpu.json",
