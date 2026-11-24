@@ -1,0 +1,114 @@
+name: Setup CI dependencies
+description: >-
+  Bounds Linux apt mirrors, optionally installs lavapipe, restores and installs
+  the mise-pinned toolchains, and optionally configures Rust build caching.
+
+inputs:
+  save-toolchains:
+    description: >-
+      Save the mise/rustup toolchain cache on a miss. Claimed by one job per
+      runner label so matrix jobs do not race to upload the same key.
+    required: false
+    default: "false"
+  rust-cache:
+    description:
+      Restore (and optionally save) Cargo build caches with rust-cache.
+    required: false
+    default: "true"
+  save-rust-cache:
+    description: Whether rust-cache should save updates at the end of the job.
+    required: false
+    default: "false"
+  llvm-tools:
+    description:
+      Install the llvm-tools-preview rustup component for cargo-llvm-cov.
+    required: false
+    default: "false"
+  lavapipe:
+    description: Install Mesa's software rasterizers on Linux.
+    required: false
+    default: "false"
+  lavapipe-validation-layer:
+    description: Also install the Khronos Vulkan validation layer with lavapipe.
+    required: false
+    default: "false"
+  lavapipe-egl:
+    description: Also install Mesa's EGL for OpenGL ES on llvmpipe.
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Bound apt downloads on Linux
+      if: runner.os == 'Linux'
+      shell: bash
+      run: bash "${GITHUB_ACTION_PATH}/bound-apt.sh"
+
+    - name: Install lavapipe
+      if: runner.os == 'Linux' && inputs.lavapipe == 'true'
+      uses: ./.github/actions/lavapipe
+      with:
+        validation-layer: ${{ inputs.lavapipe-validation-layer }}
+        egl: ${{ inputs.lavapipe-egl }}
+
+    # `mise-action` writes its cache inside its own step and doesn't cover
+    # ~/.rustup or ~/.cargo/bin. Restore before it runs and save once per
+    # runner label after every install succeeds.
+    - name: Compute toolchain cache key
+      id: toolchain-key
+      shell: bash
+      env:
+        FILES_HASH:
+          ${{ hashFiles('mise.toml', 'mise.lock', 'rust-toolchain.toml') }}
+      run: |
+        prefix="toolchains-v1-${RUNNER_OS}-${RUNNER_ARCH}-${ImageOS:-unknown}"
+        echo "prefix=${prefix}" >> "$GITHUB_OUTPUT"
+        echo "key=${prefix}-${FILES_HASH}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore toolchains
+      id: toolchains
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.local/share/mise
+          ~/.rustup
+          ~/.cargo/bin
+        key: ${{ steps.toolchain-key.outputs.key }}
+        restore-keys: |
+          ${{ steps.toolchain-key.outputs.prefix }}-
+
+    # The tools that mise.toml pins, Rust from rust-toolchain.toml among
+    # them, at the versions mise.lock records.
+    - name: Install mise toolchains
+      uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      with:
+        cache: false
+
+    - name: Save toolchains
+      if:
+        inputs.save-toolchains == 'true' && steps.toolchains.outputs.cache-hit
+        != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.local/share/mise
+          ~/.rustup
+          ~/.cargo/bin
+        key: ${{ steps.toolchain-key.outputs.key }}
+
+    # For cargo-llvm-cov.
+    - name: Install llvm-tools
+      if: inputs.llvm-tools == 'true'
+      shell: bash
+      run: rustup component add llvm-tools-preview
+
+    # Saves from main only in CI, so pull requests restore main's dependencies
+    # rather than each filling the cache with its own.
+    - name: Cache Rust artifacts
+      if: inputs.rust-cache == 'true'
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        save-if: ${{ inputs.save-rust-cache }}

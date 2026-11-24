@@ -70,7 +70,10 @@ impl WebCanvas {
 /// Frames drawn into a canvas, which the browser presents.
 pub struct CanvasTarget {
     canvas: WebCanvas,
+    /// The size of the next frame.
     size: Size,
+    /// The size of the canvas's drawing buffer.
+    canvas_size: Size,
     /// The frame's default framebuffer, imported into the backend's `GlGpu`.
     image: FrameImports,
 }
@@ -103,23 +106,26 @@ impl CanvasTarget {
         // heatmap's half-float one).
         let _ = webgl2.get_extension("EXT_color_buffer_float");
         let backend = RendererBackend::from_parts(webgl2, Box::new(CanvasContext));
-        Ok((backend, CanvasTarget { canvas, size, image: FrameImports::default() }))
+        Ok((backend, CanvasTarget { canvas, size, canvas_size: size, image: FrameImports::default() }))
     }
 }
 
 impl FrameTarget for CanvasTarget {
     type Gpu = GlGpu;
 
-    /// Resizes the canvas's drawing buffer.
+    /// Draws the next frame at `size` pixels. The canvas's drawing buffer
+    /// takes the size when that frame begins: resizing it clears it, and the
+    /// browser would show it cleared after any task that resized it without
+    /// drawing.
     fn resize(&mut self, _gpu: &mut GlGpu, size: Size) {
-        if size == std::mem::replace(&mut self.size, size) {
-            return;
-        }
-        self.canvas.set_size(size);
+        self.size = size;
     }
 
     fn begin_frame(&mut self, gpu: &mut GlGpu) -> Option<FrameImage> {
         let size = self.size;
+        if size != std::mem::replace(&mut self.canvas_size, size) {
+            self.canvas.set_size(size);
+        }
         self.image.get_or_import(|| default_framebuffer(gpu, size))
     }
 

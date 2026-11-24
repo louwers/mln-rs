@@ -571,7 +571,7 @@ pub(crate) fn observe_cover(view: &View, store: &TileStore) {
     let coverage = if view.is_globe() {
         None
     } else {
-        let projection = view.projection_matrix_with(1, false);
+        let projection = view.projection_matrix();
         let area = |id: &UnwrappedTileID| screen_share(&(projection * view.tile_matrix(id)));
         let mut sum = Coverage::default();
         let mut sources = 0u32;

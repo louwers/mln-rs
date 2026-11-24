@@ -235,8 +235,16 @@ impl Controls {
                             ui.spacing_mut().item_spacing.y = 0.0;
                             let name = style_name(shown.style, shown.style_name);
                             ui.label(RichText::new(name).size(14.0).strong());
-                            let detail = if shown.loading { "Loading…" } else { shown.style.provider.as_str() };
-                            ui.label(RichText::new(detail).size(12.0).color(palette.muted));
+                            let detail = if shown.loading {
+                                "Loading…"
+                            } else if shown.style.provider == name {
+                                ""
+                            } else {
+                                shown.style.provider.as_str()
+                            };
+                            if !detail.is_empty() {
+                                ui.label(RichText::new(detail).size(12.0).color(palette.muted));
+                            }
                         });
                         let (chevron, _) = ui.allocate_exact_size(vec2(16.0, 30.0), Sense::hover());
                         let c = chevron.right_center() - vec2(6.0, 0.0);
@@ -256,21 +264,46 @@ impl Controls {
     }
 
     fn style_list(&mut self, ctx: &egui::Context, palette: &Palette, shown: &Shown<'_>, actions: &mut Vec<Action>) {
+        let max_height = (ctx.content_rect().height() - 120.0).max(160.0);
         layer("styles", Align2::LEFT_TOP, vec2(GAP, GAP + 52.0)).show(ctx, |ui| {
             palette.panel().show(ui, |ui| {
                 ui.set_width(PANEL_WIDTH - 40.0);
-                ui.spacing_mut().item_spacing.y = 2.0;
+                // Group styles by provider, collecting single-style providers under "Other".
+                let mut groups: Vec<(&str, Vec<(usize, &Style)>)> = Vec::new();
                 for (index, style) in shown.styles.iter().enumerate() {
-                    if style_row(ui, palette, style, style == shown.style).clicked() {
-                        self.styles_open = false;
-                        if style != shown.style {
-                            actions.push(Action::PickStyle(index));
-                        }
+                    let count = shown.styles.iter().filter(|other| other.provider == style.provider).count();
+                    let heading = if count > 1 { style.provider.as_str() } else { "Other" };
+                    if let Some((_, items)) = groups.iter_mut().find(|(name, _)| *name == heading) {
+                        items.push((index, style));
+                    } else {
+                        groups.push((heading, vec![(index, style)]));
                     }
                 }
+                egui::ScrollArea::vertical().max_height(max_height).show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    for (group_index, (heading, items)) in groups.iter().enumerate() {
+                        if group_index > 0 {
+                            ui.add_space(6.0);
+                        }
+                        Frame::new().inner_margin(Margin::symmetric(10, 2)).show(ui, |ui| {
+                            ui.label(RichText::new(heading.to_uppercase()).size(11.0).strong().color(palette.muted));
+                        });
+                        for &(index, style) in items {
+                            let show_provider = *heading == "Other" && style.provider != style.name;
+                            if style_row(ui, palette, style, show_provider, style == shown.style).clicked() {
+                                self.styles_open = false;
+                                if style != shown.style {
+                                    actions.push(Action::PickStyle(index));
+                                }
+                            }
+                        }
+                    }
+                });
                 ui.add_space(4.0);
                 ui.separator();
-                ui.label(RichText::new("Or open any style with --style and its URL.").size(12.0).color(palette.muted));
+                ui.label(
+                    RichText::new("Or open any style with --style and its key or URL.").size(12.0).color(palette.muted),
+                );
             });
         });
     }
@@ -298,13 +331,15 @@ fn style_name<'a>(style: &'a Style, loaded_name: &'a str) -> &'a str {
     }
 }
 
-fn style_row(ui: &mut Ui, palette: &Palette, style: &Style, current: bool) -> Response {
+fn style_row(ui: &mut Ui, palette: &Palette, style: &Style, show_provider: bool, current: bool) -> Response {
     let inner =
-        Frame::new().inner_margin(Margin::symmetric(10, 5)).corner_radius(CornerRadius::same(6)).show(ui, |ui| {
+        Frame::new().inner_margin(Margin::symmetric(10, 4)).corner_radius(CornerRadius::same(6)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.spacing_mut().item_spacing.y = 0.0;
             ui.label(RichText::new(&style.name).size(14.0).strong());
-            ui.label(RichText::new(&style.provider).size(12.0).color(palette.muted));
+            if show_provider {
+                ui.label(RichText::new(&style.provider).size(12.0).color(palette.muted));
+            }
         });
     let rect = inner.response.rect;
     let response = inner.response.interact(Sense::click()).on_hover_cursor(CursorIcon::PointingHand);

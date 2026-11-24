@@ -22,7 +22,7 @@ use crate::encode::DrawOrder;
 use crate::frame::FramePlan;
 use crate::gfx::context::Resources;
 use crate::layer_composite::{Composite, LayerComposite};
-use crate::paint_parameters::{OpenPass, PaintParameters};
+use crate::paint_parameters::{OpenPass, PaintParameters, StencilClear};
 use crate::render_orchestrator::RenderOrchestrator;
 use crate::render_pass::Pass;
 use crate::renderer_event::{RenderMode, RendererEvent, RendererEvents};
@@ -687,7 +687,7 @@ struct DrawGroups {
     clip_tiles: Vec<UnwrappedTileID>,
     /// The tiles whose masks clear the stencil buffer, also in
     /// `clip_tiles` ([`PaintParameters::stencil_clear_tiles`]).
-    stencil_clear: Vec<UnwrappedTileID>,
+    stencil_clear: StencilClear,
     composited: Vec<(SimpleIdentity, Composite)>,
 }
 

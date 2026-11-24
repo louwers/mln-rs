@@ -23,7 +23,7 @@ import {
 import "maplibre-gl/dist/maplibre-gl.css";
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 
-import type { Camera, ProjectionType } from "./protocol.ts";
+import type { Camera, ProjectionType, StyleSource } from "./protocol.ts";
 
 // The bundle moves GL JS away from its worker, so the page says where it is.
 setWorkerUrl(workerUrl);
@@ -33,7 +33,7 @@ export interface Comparison {
   cameraChanged(camera: Camera): void;
   /** Makes the page's map lead without input on its canvas: its zoom buttons and compass. */
   lead(): void;
-  setStyle(url: string): void;
+  setStyle(style: StyleSource): void;
   /** Draws with `projection`, or for null with the style's own. */
   setProjection(projection: ProjectionType | null): void;
   /** Removes GL JS's map and the divider. */
@@ -43,6 +43,12 @@ export interface Comparison {
 // Where the divider sits, as a fraction of the page's width. It stays when the
 // comparison closes, for the next time it opens.
 let split = 0.5;
+
+function glStyle(source: StyleSource): string | StyleSpecification {
+  return "url" in source
+    ? source.url
+    : (JSON.parse(source.json) as StyleSpecification);
+}
 
 /**
  * Opens a comparison over `canvas` (the page's map) with `style` drawn with
@@ -59,7 +65,7 @@ export function compare(
     follow,
     stop,
   }: {
-    style: string;
+    style: StyleSource;
     projection: ProjectionType | null;
     camera: Camera;
     follow: (camera: Camera) => void;
@@ -97,7 +103,7 @@ export function compare(
   // The style and projection of the page's map, which a change of either
   // loads again: GL JS diffs the new style against the one it draws.
   const show = () =>
-    map.setStyle(style, {
+    map.setStyle(glStyle(style), {
       transformStyle: (_, next): StyleSpecification =>
         projection === null
           ? next
@@ -168,8 +174,8 @@ export function compare(
     lead() {
       lead("mln");
     },
-    setStyle(url) {
-      style = url;
+    setStyle(next) {
+      style = next;
       show();
     },
     setProjection(next) {

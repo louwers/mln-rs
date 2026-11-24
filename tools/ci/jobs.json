@@ -1,0 +1,48 @@
+[
+  { "job": "commits" },
+  { "job": "lint" },
+  { "job": "package", "unit": "package" },
+  {
+    "job": "test",
+    "variant": "linux",
+    "unit": "linux-x64",
+    "os": "linux",
+    "runner": "blacksmith-4vcpu-ubuntu-2604",
+    "backend": "webgpu",
+    "save_toolchains": "false"
+  },
+  {
+    "job": "test",
+    "variant": "macos",
+    "unit": "macos",
+    "os": "macos",
+    "runner": "blacksmith-6vcpu-macos-26",
+    "backend": "metal",
+    "save_toolchains": "true"
+  },
+  {
+    "job": "backend",
+    "variant": "linux-vulkan",
+    "unit": "linux-x64",
+    "os": "linux",
+    "runner": "blacksmith-4vcpu-ubuntu-2604",
+    "backend": "vulkan"
+  },
+  {
+    "job": "backend",
+    "variant": "linux-gl",
+    "unit": "linux-x64",
+    "os": "linux",
+    "runner": "blacksmith-4vcpu-ubuntu-2604",
+    "backend": "gl"
+  },
+  {
+    "job": "backend",
+    "variant": "macos-webgpu",
+    "unit": "macos",
+    "os": "macos",
+    "runner": "blacksmith-6vcpu-macos-26",
+    "backend": "webgpu"
+  },
+  { "job": "web", "unit": "web" }
+]

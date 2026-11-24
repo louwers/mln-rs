@@ -242,6 +242,11 @@ impl WebMap {
         sent(self.map.set_style_url(url));
     }
 
+    /// Loads a style from a JSON string.
+    pub fn set_style_json(&self, json: &str) {
+        sent(self.map.set_style_json(json));
+    }
+
     /// Draws the map with the style spec's projection type `projection`
     /// (`mercator`, `vertical-perspective` or `globe`) in place of the
     /// style's, now and in each style that loads after; `None` goes back to

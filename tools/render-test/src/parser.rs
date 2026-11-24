@@ -21,8 +21,8 @@ use crate::file_source::ProxyFileSource;
 use crate::filesystem;
 use crate::log::{self, Event};
 use crate::metadata::{
-    FileSizeProbe, GfxProbe, GfxProbeMemory, MapDebugOptions, MapMode, MemoryProbe, NetworkProbe, TestMetadata,
-    TestMetrics, TestPaths, TestStatistics,
+    FileSizeProbe, GfxProbe, GfxProbeMemory, MapDebugOptions, MapMode, MemoryProbe, NetworkProbe, TerrainSkirtLength,
+    TestMetadata, TestMetrics, TestPaths, TestStatistics,
 };
 use crate::runner::{CameraOptions, MapError, TestContext, TestOperation, TestOperations};
 
@@ -403,6 +403,21 @@ pub(crate) fn parse_test_metadata(paths: &TestPaths) -> TestMetadata {
         metadata.cross_source_collisions = get_bool(member(test_value, "crossSourceCollisions"));
     }
 
+    if has("terrainSkirtLength") {
+        let length = get_str(member(test_value, "terrainSkirtLength"));
+        metadata.terrain_skirt_length = match length {
+            "auto" => TerrainSkirtLength::Auto,
+            "none" => TerrainSkirtLength::None,
+            _ => {
+                log::warning(
+                    Event::ParseStyle,
+                    &format!("Unknown terrain skirt length: {length}. Falling back to auto"),
+                );
+                TerrainSkirtLength::Auto
+            }
+        };
+    }
+
     if has("axonometric") {
         metadata.axonometric = get_bool(member(test_value, "axonometric"));
     }
@@ -490,6 +505,8 @@ pub(crate) mod test_operation_names {
     pub(crate) const SET_FILTER_OP: &str = "setFilter";
     pub(crate) const SET_LAYER_ZOOM_RANGE_OP: &str = "setLayerZoomRange";
     pub(crate) const SET_LIGHT_OP: &str = "setLight";
+    pub(crate) const SET_TERRAIN_OP: &str = "setTerrain";
+    pub(crate) const SET_CENTER_CLAMPED_TO_GROUND_OP: &str = "setCenterClampedToGround";
     pub(crate) const ADD_LAYER_OP: &str = "addLayer";
     pub(crate) const REMOVE_LAYER_OP: &str = "removeLayer";
     pub(crate) const ADD_SOURCE_OP: &str = "addSource";
@@ -522,11 +539,11 @@ use test_operation_names::{
     ADD_IMAGE_OP, ADD_LAYER_OP, ADD_SOURCE_OP, FILE_SIZE_PROBE_OP, GET_FEATURE_STATE_OP, GFX_PROBE_END_OP,
     GFX_PROBE_OP, GFX_PROBE_START_OP, IDLE_OP, MEMORY_PROBE_END_OP, MEMORY_PROBE_OP, MEMORY_PROBE_START_OP,
     NETWORK_PROBE_END_OP, NETWORK_PROBE_OP, NETWORK_PROBE_START_OP, PAN_GESTURE_OP, REMOVE_FEATURE_STATE_OP,
-    REMOVE_IMAGE_OP, REMOVE_LAYER_OP, REMOVE_SOURCE_OP, SET_BEARING_OP, SET_CENTER_ALTITUDE_OP, SET_CENTER_OP,
-    SET_FEATURE_STATE_OP, SET_FILTER_OP, SET_GLOBAL_STATE_PROPERTY_OP, SET_LAYER_ZOOM_RANGE_OP, SET_LAYOUT_PROPERTY_OP,
-    SET_LIGHT_OP, SET_PAINT_PROPERTY_OP, SET_PITCH_OP, SET_ROLL_OP, SET_STYLE_OP, SET_TILE_LOD_MIN_RADIUS_OP,
-    SET_TILE_LOD_MODE_OP, SET_TILE_LOD_PITCH_THRESHOLD_OP, SET_TILE_LOD_SCALE_OP, SET_TILE_LOD_ZOOM_SHIFT_OP,
-    SET_ZOOM_OP, SLEEP_OP, UPDATE_IMAGE_OP, WAIT_OP,
+    REMOVE_IMAGE_OP, REMOVE_LAYER_OP, REMOVE_SOURCE_OP, SET_BEARING_OP, SET_CENTER_ALTITUDE_OP,
+    SET_CENTER_CLAMPED_TO_GROUND_OP, SET_CENTER_OP, SET_FEATURE_STATE_OP, SET_FILTER_OP, SET_GLOBAL_STATE_PROPERTY_OP,
+    SET_LAYER_ZOOM_RANGE_OP, SET_LAYOUT_PROPERTY_OP, SET_LIGHT_OP, SET_PAINT_PROPERTY_OP, SET_PITCH_OP, SET_ROLL_OP,
+    SET_STYLE_OP, SET_TERRAIN_OP, SET_TILE_LOD_MIN_RADIUS_OP, SET_TILE_LOD_MODE_OP, SET_TILE_LOD_PITCH_THRESHOLD_OP,
+    SET_TILE_LOD_SCALE_OP, SET_TILE_LOD_ZOOM_SHIFT_OP, SET_ZOOM_OP, SLEEP_OP, UPDATE_IMAGE_OP, WAIT_OP,
 };
 
 fn parse_global_state_value(value: &serde_json::Value) -> Value {
@@ -760,6 +777,13 @@ pub(crate) fn parse_test_operations(metadata: &TestMetadata) -> Result<TestOpera
             let center_altitude = get_f64(arg(1));
             result
                 .push(camera_operation(CameraOptions { center_altitude: Some(center_altitude), ..Default::default() }));
+        } else if name == SET_CENTER_CLAMPED_TO_GROUND_OP {
+            // setCenterClampedToGround
+            let clamped = get_bool(arg(1));
+            result.push(Box::new(move |ctx: &mut TestContext<'_>| {
+                let result = ctx.get_map().set_center_clamped_to_ground(clamped);
+                infallible(ctx, result)
+            }));
         } else if name == SET_FILTER_OP {
             // setFilter
             let layer_name = get_str(arg(1)).to_string();
@@ -809,6 +833,18 @@ pub(crate) fn parse_test_operations(metadata: &TestMetadata) -> Result<TestOpera
             result.push(Box::new(move |ctx: &mut TestContext<'_>| match ctx.get_map().set_light(&json) {
                 Err(MapError::Conversion(message)) => {
                     ctx.get_metadata().error_message = format!("Unable to convert light: {message}");
+                    false
+                }
+                Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),
+                Err(MapError::Exception(what)) => ctx.fail_exception(&what),
+                Ok(()) | Err(_) => true,
+            }));
+        } else if name == SET_TERRAIN_OP {
+            // setTerrain: no argument removes the terrain, as in GL JS.
+            let json = if size >= 2 { serialize_json_value(arg(1)) } else { "null".to_string() };
+            result.push(Box::new(move |ctx: &mut TestContext<'_>| match ctx.get_map().set_terrain(&json) {
+                Err(MapError::Conversion(message)) => {
+                    ctx.get_metadata().error_message = format!("Unable to convert terrain: {message}");
                     false
                 }
                 Err(MapError::Unsupported(what)) => ctx.fail_unsupported(&what),

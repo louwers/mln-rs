@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-#MISE description="Refresh the image render tests copied from MapLibre GL JS"
+#MISE description="Refresh the terrain and image render tests copied from MapLibre GL JS"
 #USAGE arg "[checkout]" help="A maplibre-gl-js checkout (default ../maplibre-gl-js)"
 #USAGE flag "--commit <sha>" help="The checkout's commit, if it isn't a git checkout"
-# Copies the render tests of image sources, which GL JS warps as mln-rs does
-# where MapLibre Native's own tests expect two affine triangles, with their
-# expected images, from test/integration/render/tests, and the images they
+# Copies the render tests that exercise terrain and the fog that sits on it,
+# and image sources, which GL JS warps as mln-rs does where MapLibre Native's
+# own tests expect two affine triangles, with their expected images, from
+# test/integration/render/tests, and the tiles, images and GeoJSON files they
 # load from test/integration/assets, to
 # tools/render-test/testdata/metrics/integration/gljs. That directory is
 # mln-rs's own: `mise run update:testdata` leaves it alone, and this task
@@ -37,7 +38,10 @@ if [[ -z $commit ]]; then
     }
 fi
 
-selected='^(image/.*|regressions/mapbox-gl-js#3010)$'
+# The selection leaves out GL JS's custom layers, which are JavaScript of its
+# own harness that the runner doesn't have: custom-layer-js, and the globe's
+# projection/globe/terrain/custom, the one subdirectory there to start "cu".
+selected='^(terrain/.*|projection/globe/terrain/([^c]|c[^u]).*|image/.*|regressions/mapbox-gl-js#3010|sky/fog-.*|terrain-shading/default|high-pitch/terrain-pitch95|(fill-layer-blend|fill-layer-opacity|line-layer-blend|line-layer-opacity|line-opacity|raster-layer-blend)/terrain)$'
 
 rm -rf "$dest"
 mkdir -p "$dest/render-tests" "$dest/assets"

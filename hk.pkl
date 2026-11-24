@@ -2,9 +2,10 @@ amends "package://github.com/jdx/hk/releases/download/v2.12.0/hk@2.12.0#/Config.
 import "package://github.com/jdx/hk/releases/download/v2.12.0/hk@2.12.0#/Builtins.pkl"
 
 // hk (https://hk.jdx.dev) runs the formatters and linters: `mise run check`
-// checks every file and `mise run fix` fixes what they can. The pre-commit
-// hook, which `hk install --mise` installs if you want it, fixes the staged
-// files.
+// checks every file and `mise run fix` fixes what they can. The git hooks,
+// which `hk install --mise` installs if you want them, fix the staged files
+// and reject a commit that credits an AI tool as an author
+// (tools/check-commit-authors.sh).
 
 // Quick, and only on the files they're given: every hook.
 local fileSteps = new Mapping<String, Step> {
@@ -38,6 +39,13 @@ hooks {
     fix = true
     stash = "git"
     steps = fileSteps
+  }
+  ["commit-msg"] {
+    steps {
+      ["commit-authors"] {
+        check = "tools/check-commit-authors.sh --message {{commit_msg_file}}"
+      }
+    }
   }
   ["check"] {
     steps {

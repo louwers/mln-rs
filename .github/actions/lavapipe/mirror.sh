@@ -6,7 +6,7 @@
 # already has stay, for the branches that still pin them.
 set -euo pipefail
 
-repo=louwers/mln-rs
+repo=maplibre/mln-rs
 tag=ci-lavapipe
 
 here=$(dirname "${BASH_SOURCE[0]}")

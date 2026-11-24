@@ -347,6 +347,15 @@ impl ShaderProgram {
         })
     }
 
+    /// How many storage buffers the vertex stage reads.
+    #[cfg(test)]
+    pub(crate) fn vertex_storage_buffers(&self) -> u32 {
+        let storage = |info: &&BindingInfo| {
+            info.type_ == BindingType::ReadOnlyStorageBuffer && info.visibility.contains(wgpu::ShaderStages::VERTEX)
+        };
+        self.bindings_per_group.iter().flatten().filter(storage).count() as u32
+    }
+
     /// The bindings of `group`, by binding.
     pub(crate) fn binding_infos(&self, group: u32) -> &[BindingInfo] {
         self.bind_group_order.iter().position(|&g| g == group).map_or(&[], |i| &self.bindings_per_group[i])

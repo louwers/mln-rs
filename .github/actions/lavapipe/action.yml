@@ -41,7 +41,7 @@ runs:
   steps:
     - shell: bash
       env:
-        RELEASE: https://github.com/louwers/mln-rs/releases/download/ci-lavapipe
+        RELEASE: https://github.com/maplibre/mln-rs/releases/download/ci-lavapipe
         VALIDATION_LAYER: ${{ inputs.validation-layer }}
         EGL: ${{ inputs.egl }}
       run: |

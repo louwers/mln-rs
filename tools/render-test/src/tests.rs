@@ -12,7 +12,7 @@ use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
 use crate::manifest_parser::ManifestParser;
-use crate::metadata::{MapDebugOptions, MapMode, TestMetadata};
+use crate::metadata::{MapDebugOptions, MapMode, TerrainSkirtLength, TestMetadata};
 use crate::parser::{parse_test_metadata, parse_test_operations};
 use crate::render_test::{Arguments, RunResult, parse_arguments, run_render_tests_with};
 use crate::runner::{
@@ -256,6 +256,10 @@ fn parses_test_metadata() {
     // GL JS's fixtures, as the importer copies them.
     let imported = parse_test_metadata(&style_paths("gljs/render-tests/image/default"));
     assert_eq!(imported.allowed, 0.00025);
+    assert_eq!(imported.terrain_skirt_length, TerrainSkirtLength::Auto);
+    let skirts = |id| parse_test_metadata(&style_paths(id)).terrain_skirt_length;
+    assert_eq!(skirts("gljs/render-tests/terrain/skirts-auto"), TerrainSkirtLength::Auto);
+    assert_eq!(skirts("gljs/render-tests/terrain/skirts-none"), TerrainSkirtLength::None);
 
     let missing = parse_test_metadata(&style_paths("render-tests/does-not-exist"));
     assert!(missing.document_object_empty());
@@ -308,6 +312,14 @@ impl TestRunnerImpl for MockMap {
         }
         Ok(solid(self.size, self.color))
     }
+    fn set_terrain(&mut self, json: &str) -> Result<(), MapError> {
+        self.log(format!("terrain {json}"));
+        Ok(())
+    }
+    fn set_center_clamped_to_ground(&mut self, clamped: bool) -> Result<(), MapError> {
+        self.log(format!("clamped {clamped}"));
+        Ok(())
+    }
     fn set_layer_property(&mut self, layer: &str, name: &str, value: &serde_json::Value) -> Result<(), MapError> {
         self.log(format!("set {layer} {name} {value}"));
         if layer != "background" {
@@ -345,6 +357,29 @@ fn transition_operations_drive_the_map() {
     assert_eq!(metadata.error_message, "");
     assert_eq!(*calls.borrow(), vec!["set background background-color \"white\"", "render", "render"]);
     assert_eq!(map.color, [255, 255, 255, 255]);
+}
+
+#[test]
+fn terrain_operations_drive_the_map() {
+    let mut metadata = TestMetadata {
+        document: serde_json::json!({"metadata": {"test": {"operations": [
+            ["wait"],
+            ["setTerrain"],
+            ["idle"],
+            ["setTerrain", {"source": "dem", "exaggeration": 1}],
+            ["setCenterClampedToGround", false],
+        ]}}}),
+        ..TestMetadata::default()
+    };
+    let operations = parse_test_operations(&metadata).unwrap();
+    let calls = Rc::new(RefCell::new(Vec::new()));
+    let mut map = MockMap::new(Rc::clone(&calls), [0, 0, 0, 255]);
+    let mut ctx = TestContext::with_impl(&mut metadata, &mut map);
+    assert!(operations.iter().all(|operation| operation(&mut ctx)));
+    assert_eq!(
+        *calls.borrow(),
+        vec!["render", "terrain null", "render", r#"terrain {"source":"dem","exaggeration":1}"#, "clamped false"]
+    );
 }
 
 #[test]
@@ -813,7 +848,7 @@ fn fixture_ids(dir: &Path) -> Vec<String> {
 #[test]
 fn gljs_fixtures_parse_and_no_ignore_is_stale() {
     let ids = fixture_ids(Path::new("gljs/render-tests"));
-    assert!(ids.len() >= 15, "{ids:?}");
+    assert!(ids.len() > 40, "{ids:?}");
 
     let manifest = ManifestParser::parse_manifest(OUR_MANIFEST, String::new()).unwrap();
     let ignored: Vec<&str> =

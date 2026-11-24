@@ -4,14 +4,32 @@ on:
   push:
     branches: [main]
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
   workflow_dispatch:
+    inputs:
+      units:
+        description: JSON array of coverage units to run (empty runs all)
+        type: string
+        default: ""
+      secrets:
+        description: Allow repository secrets (e.g. preview deployments)
+        type: boolean
+        default: true
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group:
+    ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
+
+defaults:
+  run:
+    shell: bash
 
 env:
   # Keep every mise command (including task-scoped tool auto-installs such as
@@ -20,57 +38,59 @@ env:
   MISE_LOCKED: "1"
 
 jobs:
-  # Which jobs and steps a pull request needs, from what it changes (`mise run
-  # ci:plan`): the macOS test and backend jobs, web, and the packaging. Pushes
-  # to main and manual runs run everything.
+  # Rubberstamp plans which coverage units a pull request needs, per
+  # .config/rubberstamp.yml, and tools/ci/plan.py selects their jobs from
+  # tools/ci/jobs.json. Pushes to main and manual runs without `inputs.units`
+  # run every unit.
   plan:
-    runs-on: ubuntu-26.04
-    timeout-minutes: 5
+    runs-on: blacksmith-2vcpu-ubuntu-2604
+    # The Rubberstamp action waits up to ten minutes before running every unit.
+    timeout-minutes: 15
+    if: github.event.pull_request.state != 'closed'
     outputs:
+      jobs: ${{ steps.plan.outputs.jobs }}
+      secrets: ${{ steps.plan.outputs.secrets }}
       test: ${{ steps.plan.outputs.test }}
       backend: ${{ steps.plan.outputs.backend }}
-      web: ${{ steps.plan.outputs.web }}
-      package: ${{ steps.plan.outputs.package }}
     steps:
-      # The pull request's merge commit and its first parent, the base.
-      - uses: actions/checkout@v7
+      - name: Plan coverage
+        id: rubberstamp
+        if: github.event_name == 'pull_request'
+        uses: sargunv/rubberstamp/actions/plan@c8f1458d614fde78815ef07288cd7c12149da954 # main
+
+      - name: Check out planner
+        uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
         with:
-          fetch-depth: 2
           persist-credentials: false
+          sparse-checkout: |
+            mise-tasks/ci
+            tools/ci
 
-      - id: plan
-        run: |
-          plan="$RUNNER_TEMP/plan"
-          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            git diff --name-status HEAD^1 HEAD | bash mise-tasks/ci/plan > "$plan"
-          else
-            printf 'macos=true\nweb=true\npackage=true\n' > "$plan"
-          fi
-          cat "$plan"
-          grep -E '^(web|package)=' "$plan" >> "$GITHUB_OUTPUT"
-          linux='"os":"linux","runner":"ubuntu-26.04"'
-          macos='"os":"macos","runner":"macos-26"'
-          test="{$linux,\"backend\":\"webgpu\"}"
-          backend="{$linux,\"backend\":\"vulkan\"},{$linux,\"backend\":\"gl\"}"
-          if grep -qx macos=true "$plan"; then
-            test+=",{$macos,\"backend\":\"metal\"}"
-            backend+=",{$macos,\"backend\":\"webgpu\"}"
-          fi
-          echo "test={\"include\":[$test]}" >> "$GITHUB_OUTPUT"
-          echo "backend={\"include\":[$backend]}" >> "$GITHUB_OUTPUT"
+      - name: Select jobs
+        id: plan
+        env:
+          RUBBERSTAMP_ALL: ${{ steps.rubberstamp.outputs.all }}
+          RUBBERSTAMP_UNITS: ${{ steps.rubberstamp.outputs.units }}
+        run: bash mise-tasks/ci/plan
 
-  # The formatters and linters (`mise run check`, hk.pkl), the API docs as
-  # docs.rs builds them, clippy for wasm32 and 32-bit x86 Linux, the minimum
-  # Rust that Cargo.toml declares and the C library's generated declarations
-  # against its headers. When the plan asks, each crates.io package built from
-  # its packaged sources with every test target (RELEASING.md). Warnings are
-  # errors (mise.toml denies them in CI).
+  # The formatters and linters (`mise run check`, hk.pkl), CI planner tests,
+  # the API docs as docs.rs builds them, clippy for wasm32 and 32-bit x86
+  # Linux, the minimum Rust that Cargo.toml declares and the C library's
+  # generated declarations against its headers. Runs on every event without
+  # waiting for the plan. Warnings are errors (mise.toml denies them in CI).
   lint:
-    needs: plan
-    runs-on: ubuntu-26.04
+    if: github.event.pull_request.state != 'closed'
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-ci-deps
+        with:
+          save-toolchains: "true"
+          save-rust-cache: ${{ github.ref == 'refs/heads/main' }}
 
       # libclang for `mise run generate:c-abi`.
       - name: Install system packages
@@ -78,21 +98,28 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libclang-dev
 
-      # The tools that mise.toml pins, Rust from rust-toolchain.toml among
-      # them, at the versions mise.lock records.
-      - uses: jdx/mise-action@v5
-
-      # Saves from main only, so pull requests restore main's dependencies
-      # rather than each filling the cache with its own.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
       - name: Lint
         run: mise run ci:lint
 
+  # Each crates.io package built from its packaged sources with every test
+  # target (RELEASING.md).
+  package:
+    needs: plan
+    if:
+      github.event.pull_request.state != 'closed' &&
+      contains(fromJSON(needs.plan.outputs.jobs), 'package')
+    runs-on: blacksmith-4vcpu-ubuntu-2604
+    timeout-minutes: 30
+    steps:
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-ci-deps
+        with:
+          save-rust-cache: ${{ github.ref == 'refs/heads/main' }}
+
       - name: Package
-        if: needs.plan.outputs.package == 'true'
         run: mise run ci:package
 
   # Every test (`mise run ci:test`) on WebGPU on Linux (wgpu on Vulkan, on
@@ -102,6 +129,9 @@ jobs:
   # differential tests against the C++ core are in louwers/mln-rs-difftests.
   test:
     needs: plan
+    if:
+      github.event.pull_request.state != 'closed' &&
+      contains(fromJSON(needs.plan.outputs.jobs), 'test')
     name: test (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -109,21 +139,22 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
-
-      - name: Install lavapipe
-        if: runner.os == 'Linux'
-        uses: ./.github/actions/lavapipe
-
-      - uses: jdx/mise-action@v5
-
-      # For cargo-llvm-cov.
-      - name: Install llvm-tools
-        run: rustup component add llvm-tools-preview
-
-      - uses: Swatinem/rust-cache@v2
+      # Blacksmith's checkout mirrors only on its Linux runners.
+      - if: runner.os == 'Linux'
+        uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          persist-credentials: false
+      - if: runner.os != 'Linux'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-ci-deps
+        with:
+          save-toolchains: ${{ matrix.save_toolchains }}
+          save-rust-cache: ${{ github.ref == 'refs/heads/main' }}
+          llvm-tools: "true"
+          lavapipe: ${{ runner.os == 'Linux' }}
 
       - name: Clippy
         if: runner.os == 'macOS'
@@ -131,20 +162,22 @@ jobs:
 
       - name: Test
         if: ${{ !cancelled() }}
-        run: mise run ci:test ${{ matrix.backend }}
+        env:
+          BACKEND: ${{ matrix.backend }}
+        run: mise run ci:test "$BACKEND"
 
       # The render suites' reports and actual/diff images.
       - name: Upload the render test results
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: render-tests-${{ matrix.os }}-${{ matrix.backend }}
           path: target/llvm-cov-target/tmp/render_tests*
           if-no-files-found: ignore
 
       - name: Upload the coverage to Codecov
-        if: ${{ !cancelled() }}
-        uses: codecov/codecov-action@v7
+        if: ${{ !cancelled() && fromJSON(needs.plan.outputs.secrets) }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: target/llvm-cov/lcov.info
@@ -158,6 +191,9 @@ jobs:
   # the backend.
   backend:
     needs: plan
+    if:
+      github.event.pull_request.state != 'closed' &&
+      contains(fromJSON(needs.plan.outputs.jobs), 'backend')
     name: backend (${{ matrix.os }}, ${{ matrix.backend }})
     strategy:
       fail-fast: false
@@ -165,9 +201,22 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
+      - if: runner.os == 'Linux'
+        uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
+        with:
+          persist-credentials: false
+      - if: runner.os != 'Linux'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      # For the C ABI suite.
+      - uses: ./.github/actions/setup-ci-deps
+        with:
+          save-rust-cache: ${{ github.ref == 'refs/heads/main' }}
+          llvm-tools: "true"
+
+      # For the C ABI suite. Installed before lavapipe so apt does not
+      # downgrade the pinned Vulkan loader or Mesa EGL packages.
       - name: Install system packages
         if: runner.os == 'Linux'
         run: |
@@ -181,17 +230,10 @@ jobs:
           validation-layer: ${{ matrix.backend == 'vulkan' }}
           egl: ${{ matrix.backend == 'gl' }}
 
-      - uses: jdx/mise-action@v5
-
-      - name: Install llvm-tools
-        run: rustup component add llvm-tools-preview
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
       - name: Test
-        run: mise run ci:test --backend-only ${{ matrix.backend }}
+        env:
+          BACKEND: ${{ matrix.backend }}
+        run: mise run ci:test --backend-only "$BACKEND"
 
       - name: Test the C ABI
         if: ${{ !cancelled() && runner.os == 'Linux' }}
@@ -202,15 +244,15 @@ jobs:
 
       - name: Upload the render test results
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: render-tests-${{ matrix.os }}-${{ matrix.backend }}
           path: target/llvm-cov-target/tmp/render_tests*
           if-no-files-found: ignore
 
       - name: Upload the coverage to Codecov
-        if: ${{ !cancelled() }}
-        uses: codecov/codecov-action@v7
+        if: ${{ !cancelled() && fromJSON(needs.plan.outputs.secrets) }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: target/llvm-cov/lcov.info
@@ -225,26 +267,25 @@ jobs:
   # the SwiftShader it bundles.
   web:
     needs: plan
-    if: needs.plan.outputs.web == 'true'
-    runs-on: ubuntu-26.04
+    if:
+      github.event.pull_request.state != 'closed' &&
+      contains(fromJSON(needs.plan.outputs.jobs), 'web')
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
+        with:
+          persist-credentials: false
 
-      # Lavapipe for the native runner's renders.
-      - name: Install lavapipe
-        uses: ./.github/actions/lavapipe
-
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ hashFiles('examples/web/pnpm-lock.yaml') }}
 
-      - uses: jdx/mise-action@v5
-
-      - uses: Swatinem/rust-cache@v2
+      - uses: ./.github/actions/setup-ci-deps
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          lavapipe: "true"
+          save-rust-cache: ${{ github.ref == 'refs/heads/main' }}
 
       # The Chromium that examples/web's playwright-core pins, which both
       # checks use. The runner's own Chrome brings the system libraries it
@@ -290,7 +331,7 @@ jobs:
       # render and diff (results/).
       - name: Upload the frames and diffs
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: web-check
           path: |
@@ -298,21 +339,51 @@ jobs:
             ${{ runner.temp }}/web-check-webgl2
           if-no-files-found: ignore
 
-  # The one check for branch protection to require: it fails when a job above
-  # failed or was cancelled. A job that the plan skips passes.
+  # That no commit credits an AI tool as its author, committer or co-author
+  # (tools/check-commit-authors.sh): a pull request's own commits,
+  # whose authors a squash merge makes co-authors, and on main the pushed
+  # commits, whose messages the merge dialog may have changed.
+  commits:
+    if: github.event.pull_request.state != 'closed'
+    runs-on: blacksmith-2vcpu-ubuntu-2604
+    timeout-minutes: 5
+    steps:
+      # Every commit, without their files' contents.
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+
+      - env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            # The merge commit's parents: the base and the pull request.
+            range=HEAD^1..HEAD^2
+          elif [ "$GITHUB_EVENT_NAME" = push ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            range=$BEFORE..HEAD
+          else
+            range=HEAD^!
+          fi
+          tools/check-commit-authors.sh "$range"
+
+  # The one check for branch protection to require: a skipped job passes a
+  # required check, so `plan` must succeed and every other job must succeed or
+  # be skipped.
   ci-passed:
-    needs: [plan, lint, test, backend, web]
-    if: always()
-    runs-on: ubuntu-26.04
+    needs: [plan, lint, package, test, backend, web, commits]
+    if: always() && github.event.pull_request.state != 'closed'
+    runs-on: blacksmith-2vcpu-ubuntu-2604
+    timeout-minutes: 5
     permissions: {}
     steps:
-      - name: The jobs' results
+      - name: Require plan and every planned job
         env:
+          PLAN: ${{ needs.plan.result }}
           NEEDS: ${{ toJSON(needs) }}
-        run: echo "$NEEDS"
-
-      - name: Fail if a job failed or was cancelled
-        if:
-          contains(needs.*.result, 'failure') || contains(needs.*.result,
-          'cancelled')
-        run: exit 1
+        run: |
+          echo "$NEEDS"
+          test "$PLAN" = success &&
+            jq -e -n --argjson results "$NEEDS" \
+              'all($results[]; .result == "success" or .result == "skipped")'

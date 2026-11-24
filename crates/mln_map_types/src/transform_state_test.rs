@@ -31,7 +31,7 @@ fn pitched(pitch: f64) -> TransformState {
 /// every hundredth of a degree up to 85 degrees north: each point's row
 /// from the top of the view, and its clip z over w.
 fn meridian(state: &TransformState) -> Vec<(f64, f64)> {
-    let proj_matrix = state.view().projection_matrix_with(1, false);
+    let proj_matrix = state.view().projection_matrix_with(1.0, false);
     let height = f64::from(state.view().size().height);
     (0..8500)
         .map(|step| {
@@ -237,6 +237,115 @@ fn equal_zoom_limits_just_below_the_least_zoom_the_view_allows_apply() {
     state.set_limits(CameraLimits { min_zoom: zoom, max_zoom: zoom, ..*state.limits() }).unwrap();
 }
 
+/// A 301 by 200 view of the Alps, level or with pitch, roll, padding and a
+/// center below sea level.
+fn alpine(pitched: bool) -> TransformState {
+    use mln_util::geo::EdgeInsets;
+
+    let (center_altitude, pitch, roll, top) = if pitched { (-800.0, 72.5, 9.0, 60.0) } else { (0.0, 0.0, 0.0, 0.0) };
+    MapView {
+        camera: Camera {
+            center: LatLng::new(46.5, 7.9).unwrap(),
+            center_altitude,
+            padding: EdgeInsets::new(top, 0.0, 10.0, 25.0),
+            zoom: 12.25,
+            bearing: 20.0,
+            pitch,
+            roll,
+            fov: 37.0,
+        },
+        extent: LogicalExtent::new(Size::new(301, 200), 1.0),
+        projection_mode: ProjectionMode::default(),
+        viewport: Viewport::default(),
+        projection: ProjectionDefinition::default(),
+    }
+    .to_state()
+    .unwrap()
+}
+
+/// Fails unless the numbers are the same but for the last bits, which differ
+/// by the target's math library.
+fn assert_same(expected: &[f64], actual: &[f64]) {
+    for (expected, actual) in expected.iter().zip(actual) {
+        let tolerance = 1e-12 * expected.abs().max(1.0);
+        assert!((expected - actual).abs() <= tolerance, "{actual} isn't {expected}");
+    }
+}
+
+/// Without terrain the planes and matrices are those of the flat map, and a
+/// terrain that goes away restores them.
+#[test]
+fn matrices_without_terrain_are_unchanged() {
+    // Each view's far plane, projection matrix, and the z row of its matrix
+    // with the near plane at a tenth of the distance to the center.
+    let expected = [
+        (
+            alpine(false),
+            301.857_181_237_032_25,
+            [
+                1.866_076_615_892_337_9,
+                1.022_190_496_282_749_3,
+                0.0,
+                0.0,
+                0.679_196_343_045_016_2,
+                -2.808_445_306_917_968_7,
+                0.0,
+                0.0,
+                0.007_508_877_260_565_23,
+                -0.004_520_344_110_860_268,
+                -0.091_007_877_558_885_29,
+                -0.090_406_882_217_205_36,
+                -3_028_316.878_903_641,
+                1_147_156.446_909_028_3,
+                298.848_628_475_551_95,
+                298.868_496_274_289_27,
+            ],
+            [0.0, 0.0, -0.109_624_258_666_032_52, 298.233_205_214_500_34],
+        ),
+        (
+            alpine(true),
+            54_478.153_105_644_335,
+            [
+                1.784_059_983_608_735_4,
+                0.661_384_306_806_117_8,
+                0.326_202_383_497_395_66,
+                0.326_190_408_187_028_27,
+                0.833_051_235_020_185_3,
+                -0.450_162_381_905_947_7,
+                -0.896_233_682_831_371_7,
+                -0.896_200_780_936_546_3,
+                -0.024_527_372_501_201_117,
+                0.261_315_976_530_130_6,
+                -0.027_186_871_862_956_253,
+                -0.027_185_873_797_813_42,
+                -3_057_312.553_228_450_5,
+                -463_638.868_611_956_83,
+                366_351.995_260_439_06,
+                366_340.545_969_311_15,
+            ],
+            [0.326_537_870_775_438_83, -0.897_155_426_552_309_5, -0.027_214_832_571_097_07, 366_672.746_155_253_44],
+        ),
+    ];
+    for (mut state, far_z, projection, clipped_z) in expected {
+        let far_z: f64 = far_z;
+        for _ in 0..2 {
+            let view = state.view();
+            assert_eq!(1.0, view.near_z());
+            assert_same(&[far_z], &[view.far_z()]);
+            assert_same(&projection, &view.projection_matrix().to_cols_array());
+            let near_clipped = f64::from((0.1 * view.camera_to_center_distance()) as u16);
+            let clipped = view.projection_matrix_with(near_clipped, false).row(2).to_array();
+            assert_same(&clipped_z, &clipped);
+
+            let before = view.clone();
+            state.set_terrain_min_elevation(Some(-120.0));
+            assert_ne!(before.far_z(), state.view().far_z());
+            state.set_terrain_min_elevation(None);
+            assert_eq!(before, *state.view());
+        }
+    }
+}
+
 /// Meters scale as at the center, as the center's altitude does, so a point
 /// at the center's altitude draws at the center of the view, even where the
 /// camera is far from the center, over another latitude (GL JS's
@@ -394,28 +503,184 @@ fn the_line_of_sight_runs_from_the_near_plane_to_the_far_plane() {
     assert!(far.z >= near.z, "{near} {far}");
 }
 
-/// The globe reads and holds locations on the sea-level sphere only: a plane
-/// at another height fails, and sea level is the globe's own solve.
+/// With terrain, the near and far planes are GL JS's (`calculateNearFarZ`
+/// in `mercator_camera_math.ts`): the numbers come from that function run on
+/// the same cameras, with the WGS84 radius for the pixels per meter. With
+/// GL JS's radius, the camera below sea level gives GL JS's own test's far
+/// plane.
 #[test]
-fn the_globe_refuses_a_plane_above_sea_level() {
-    use mln_style_types::ProjectionType;
-    use mln_util::geo::{ScreenCoordinate, WrapMode};
+fn terrain_planes_are_gl_js_planes() {
+    use mln_util::geo::EdgeInsets;
 
-    let mut state = pitched(30.0);
-    state.set_projection_definition(&ProjectionDefinition::new(ProjectionType::Globe));
-    let point = ScreenCoordinate::new(200.0, 220.0);
+    struct Case {
+        size: Size,
+        center: (f64, f64),
+        center_altitude: f64,
+        zoom: f64,
+        pitch: f64,
+        top_padding: f64,
+        min_elevation: f64,
+        near_z: f64,
+        far_z: f64,
+    }
+    let cases = [
+        // Ground above sea level, the center on it.
+        Case {
+            size: Size::new(500, 400),
+            center: (46.5, 7.9),
+            center_altitude: 1200.0,
+            zoom: 12.25,
+            pitch: 60.0,
+            top_padding: 0.0,
+            min_elevation: 900.0,
+            near_z: 8.0,
+            far_z: 1_952.317_066_220_289_5,
+        },
+        // Ground below sea level: GL JS's own test of a negative floor.
+        Case {
+            size: Size::new(500, 500),
+            center: (0.0, 0.0),
+            center_altitude: 0.0,
+            zoom: 11.46,
+            pitch: 60.0,
+            top_padding: 0.0,
+            min_elevation: -455.5,
+            near_z: 10.0,
+            far_z: 1_870.617_879_146_915_8,
+        },
+        // Past the horizon pitch, with the center moved down the view.
+        Case {
+            size: Size::new(512, 384),
+            center: (27.9, 86.9),
+            center_altitude: 300.0,
+            zoom: 13.0,
+            pitch: 85.0,
+            top_padding: 120.0,
+            min_elevation: 250.0,
+            near_z: 7.68,
+            far_z: 18_532.242_194_604_092,
+        },
+    ];
+    for case in cases {
+        let mut state = MapView {
+            camera: Camera {
+                center: LatLng::new(case.center.0, case.center.1).unwrap(),
+                center_altitude: case.center_altitude,
+                padding: EdgeInsets::new(case.top_padding, 0.0, 0.0, 0.0),
+                zoom: case.zoom,
+                bearing: 20.0,
+                pitch: case.pitch,
+                fov: mln_math::rad2deg(DEFAULT_FOV),
+                ..Camera::default()
+            },
+            extent: LogicalExtent::new(case.size, 1.0),
+            projection_mode: ProjectionMode::default(),
+            viewport: Viewport::default(),
+            projection: ProjectionDefinition::default(),
+        }
+        .to_state()
+        .unwrap();
+        state.set_terrain_min_elevation(Some(case.min_elevation));
+        let view = state.view();
+        assert_eq!(case.near_z, view.near_z());
+        let far_z = view.far_z();
+        assert!((far_z - case.far_z).abs() <= case.far_z * 1e-12, "{far_z} vs {}", case.far_z);
+        assert_eq!(view.projection_matrix_with(view.near_z(), false), view.projection_matrix());
+    }
+}
+
+/// The camera's distance to sea level is GL JS's (`cameraToSeaLevelDistance`
+/// in `mercator_camera_math.ts`), at least half the distance to the center:
+/// for a center above, at and below sea level, and past the horizon's pitch.
+#[test]
+fn the_camera_to_sea_level_distance_is_gl_js_s() {
+    let (latitude, zoom) = (46.5, 12.0);
+    // GL JS's `pixelsPerMeter`: the world's pixels over the circumference at
+    // the latitude, on the WGS84 radius that heights scale on.
+    let pixels_per_meter =
+        512.0 * 2f64.powf(zoom) / (2.0 * std::f64::consts::PI * 6_378_137.0 * mln_math::deg2rad(latitude).cos());
+    for (pitch, altitude) in [(60.0, 1200.0), (60.0, 0.0), (60.0, -400.0), (60.0, -30_000.0), (89.9, 1200.0)] {
+        let mut state = pitched(pitch);
+        state.set_lat_lng_zoom(&LatLng::new(latitude, 7.9).unwrap(), zoom);
+        state.set_center_altitude(altitude);
+        let view = state.view();
+        let camera_to_center = view.camera_to_center_distance();
+        let limited_pitch = mln_math::deg2rad(f64::min(pitch, 89.25));
+        let expected =
+            f64::max(camera_to_center / 2.0, camera_to_center + altitude * pixels_per_meter / limited_pitch.cos());
+        let distance = view.camera_to_sea_level_distance();
+        assert!((distance - expected).abs() <= expected * 1e-12, "{distance} vs {expected} at {pitch}°, {altitude} m");
+        if altitude == 0.0 {
+            assert_eq!(camera_to_center, distance);
+        }
+        if altitude == -30_000.0 {
+            assert_eq!(camera_to_center / 2.0, distance, "at least half the distance to the center");
+        }
+    }
+}
+
+/// With terrain, the far plane reaches ground 2 km below sea level up to
+/// the top of the view, where the flat map's plane cuts it off.
+#[test]
+fn the_far_plane_reaches_sunken_ground() {
+    let mut state = pitched(60.0);
+    state.set_lat_lng_zoom(&LatLng::new(0.0, -60.0).unwrap(), 13.0);
+    // The depths of the sunken ground north of the center that shows.
+    let depths = |state: &TransformState| -> Vec<f64> {
+        let proj_matrix = state.view().projection_matrix();
+        (0..8500)
+            .filter_map(|step| {
+                let lat_lng = LatLng::new(f64::from(step) / 10_000.0, -60.0).unwrap();
+                let point = Projection::project(&lat_lng, state.view().scale());
+                let clip = proj_matrix * DVec4::new(point.x, point.y, -2000.0, 1.0);
+                (clip.w > 0.0 && clip.y / clip.w <= 1.0).then_some(clip.z / clip.w)
+            })
+            .collect()
+    };
+    let flat = depths(&state);
+    assert!(flat.iter().any(|depth| *depth > 1.0));
+    state.set_terrain_min_elevation(Some(-2000.0));
+    let terrain = depths(&state);
+    assert!(!terrain.is_empty() && terrain.iter().all(|depth| *depth < 1.0));
+}
+
+/// A rolled view reaches as far over terrain as its rotated corners do: in a
+/// portrait view rolled 90 degrees, the ground at the view's sides falls
+/// inside the depth range.
+#[test]
+fn the_terrain_far_plane_reaches_a_rolled_views_sides() {
+    let mut state = MapView {
+        camera: Camera {
+            center: LatLng::new(0.0, 0.0).unwrap(),
+            zoom: 12.0,
+            pitch: 60.0,
+            roll: 90.0,
+            fov: 60.0,
+            ..Camera::default()
+        },
+        extent: LogicalExtent::new(Size::new(250, 500), 1.0),
+        projection_mode: ProjectionMode::default(),
+        viewport: Viewport::default(),
+        projection: ProjectionDefinition::default(),
+    }
+    .to_state()
+    .unwrap();
+    state.set_terrain_min_elevation(Some(0.0));
     let view = state.view();
-    assert!(view.screen_coordinate_to_lat_lng_at(&point, 100.0, WrapMode::Unwrapped).is_err());
-    let location = view.screen_coordinate_to_lat_lng_at(&point, 0.0, WrapMode::Unwrapped).unwrap();
-    assert!(state.center_for_lat_lng_at(&location, &point, 100.0).is_err());
-    assert!(view.line_of_sight(&point).is_none());
-    let mut moved = state.clone();
-    assert!(moved.move_lat_lng_at(&location, &point, 100.0).is_err());
-    assert_eq!(state, moved);
-    moved.move_lat_lng_at(&location, &point, 0.0).unwrap();
-    let mut held = state.clone();
-    held.move_lat_lng(&location, &point).unwrap();
-    assert_eq!(held, moved);
+    let proj_matrix = view.projection_matrix();
+    let mut seen = 0;
+    for row in -150..=150 {
+        for column in -150..=150 {
+            let lat_lng = LatLng::new(f64::from(row) / 1000.0, f64::from(column) / 1000.0).unwrap();
+            let point = Projection::project(&lat_lng, view.scale());
+            let clip = proj_matrix * DVec4::new(point.x, point.y, 0.0, 1.0);
+            if clip.w > 0.0 && (clip.x / clip.w).abs() <= 1.0 && (clip.y / clip.w).abs() <= 1.0 {
+                seen += 1;
+                assert!(clip.z / clip.w < 1.0, "{lat_lng:?} is past the far plane");
+            }
+        }
+    }
+    assert!(seen > 1000, "{seen} points in view");
 }
 
 /// A 512 by 512 view of latitude 52.5, longitude 13.4 at `zoom`, pitched
@@ -466,6 +731,68 @@ fn the_globe_draws_the_center_at_its_altitude_at_the_center() {
         );
         let distance = (view.globe_camera_position() - center).length() * radius;
         assert!((distance - view.camera_to_center_distance()).abs() < 1e-6, "zoom {zoom}: {distance}");
+    }
+}
+
+/// On the globe, a location at a height converts to the screen and back,
+/// raised along its vertical, away from where it draws at sea level: within
+/// a hundredth of a pixel wherever the line of sight meets the sphere at
+/// that height, and at height 0 as the sea-level conversions, to the bit.
+#[test]
+fn globe_conversions_at_a_height_undo_each_other() {
+    use mln_style_types::ProjectionType;
+    use mln_util::geo::{ScreenCoordinate, WrapMode};
+
+    let state = raised(ProjectionDefinition::new(ProjectionType::VerticalPerspective), 14.0, 1000.0);
+    let view = state.view();
+    for row in 0..=8 {
+        for column in 0..=8 {
+            let pixel = ScreenCoordinate::new(64.0 * f64::from(column), 30.0 * f64::from(row));
+            let flat = view.screen_coordinate_to_lat_lng(&pixel, WrapMode::Unwrapped).unwrap();
+            let at = view.screen_coordinate_to_lat_lng_at(&pixel, 0.0, WrapMode::Unwrapped).unwrap();
+            assert_eq!(flat, at);
+            assert_eq!(view.lat_lng_to_screen_coordinate(&flat), view.lat_lng_to_screen_coordinate_at(&at, 0.0));
+            for height in [-300.0, 1000.0, 2500.0] {
+                let location = view.screen_coordinate_to_lat_lng_at(&pixel, height, WrapMode::Unwrapped).unwrap();
+                let back = view.lat_lng_to_screen_coordinate_at(&location, height);
+                let off = (back.x - pixel.x).hypot(back.y - pixel.y);
+                assert!(off < 0.01, "{height} m: {pixel:?} comes back {off} px off");
+                // At sea level the location draws elsewhere, by its height.
+                let sea = view.lat_lng_to_screen_coordinate(&location);
+                let parallax = (sea.x - pixel.x).hypot(sea.y - pixel.y);
+                assert!(parallax > 10.0, "{height} m: {pixel:?} is {parallax} px from where it draws at sea level");
+            }
+        }
+    }
+}
+
+/// On the globe, moving a location on the sphere at a height to a point
+/// puts it there at that height, with the zoom, the angles and the center's
+/// altitude kept.
+#[test]
+fn moving_a_location_on_a_sphere_puts_it_at_the_point() {
+    use mln_style_types::ProjectionType;
+    use mln_util::geo::{ScreenCoordinate, WrapMode};
+
+    use crate::VerticalPerspectiveProjection;
+
+    let state = raised(ProjectionDefinition::new(ProjectionType::VerticalPerspective), 14.0, 400.0);
+    let (from, to) = (ScreenCoordinate::new(140.0, 120.0), ScreenCoordinate::new(380.0, 200.0));
+    for height in [0.0, 400.0, 1500.0] {
+        let mut moved = state.clone();
+        let location = moved.view().screen_coordinate_to_lat_lng_at(&from, height, WrapMode::Unwrapped).unwrap();
+        moved.move_lat_lng_at(&location, &to, height).unwrap();
+        // Where the location, raised along its vertical, draws.
+        let raised = VerticalPerspectiveProjection::surface_vector(&location)
+            * (1.0 + height / VerticalPerspectiveProjection::GLOBE_RADIUS_METERS);
+        let clip = moved.view().globe_view_projection_matrix() * raised.extend(1.0);
+        let landed = ((clip.x / clip.w + 1.0) * 256.0, (clip.y / clip.w + 1.0) * 256.0);
+        assert!((landed.0 - to.x).hypot(landed.1 - to.y) < 1e-2, "{height} m: {landed:?}");
+        let (before, after) = (state.view(), moved.view());
+        assert_eq!(
+            (before.angle(), before.pitch(), before.center_altitude()),
+            (after.angle(), after.pitch(), after.center_altitude())
+        );
     }
 }
 

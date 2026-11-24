@@ -90,7 +90,9 @@ not the code.
 
 ## Pull requests
 
-Use Conventional Commits for commit titles and pull request titles.
+Use Conventional Commits for commit and PR titles, and credit AI tools with
+`Assisted-by:`, never as author, committer or `Co-authored-by:`. CI checks
+commit titles and authorship; don't flag them in code review.
 
 Open a PR as a draft until it's ready to merge.
 

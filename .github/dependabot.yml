@@ -1,11 +1,12 @@
-# Keeps the actions in .github/workflows up to date: at most one grouped pull
-# request a week, for releases at least a week old. The Rust crates are
-# updated by hand (`cargo update`): Cargo.lock also sets Bazel's crates
-# (MODULE.bazel), so an update needs MODULE.bazel.lock refreshed with it.
+# Keeps the actions in .github/workflows and .github/actions up to date: at
+# most one grouped pull request a week, for releases at least a week old. The
+# Rust crates are updated by hand (`cargo update`): Cargo.lock also sets
+# Bazel's crates (MODULE.bazel), so an update needs MODULE.bazel.lock
+# refreshed with it.
 version: 2
 updates:
   - package-ecosystem: github-actions
-    directory: /
+    directories: ["/", "/.github/actions/*"]
     schedule:
       interval: weekly
     cooldown:

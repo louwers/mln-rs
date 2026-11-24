@@ -21,6 +21,7 @@ use mln_vec_map::VecSet;
 use crate::erased_source::ErasedOrigin;
 use crate::layout::tile_layout::{Dependencies, LayoutParams};
 use crate::render_orchestrator::drop_on_workers;
+use crate::text::glyph_store::GlyphRanges;
 use crate::tile::contents::{Contents, GeometryContents, LayoutResult, ValueContents, release};
 use crate::tile::dem::DemContents;
 use crate::tile::job::{DataInput, DataKey, Job, JobId, JobResult, LayoutJob, LayoutOutput, Run, SourceStyle, TileKey};
@@ -280,14 +281,26 @@ impl<'a> TileMut<'a> {
 
     /// Lays the tile out again if it lacked glyphs of a range that failed.
     pub(crate) fn retry_failed_glyphs(&mut self) {
+        self.relayout_if_lacked(|failed| !failed.is_empty());
+    }
+
+    /// Lays the tile out again if it lacked glyphs of a range in
+    /// `recovered`, ranges that loaded after failing.
+    pub(crate) fn glyphs_recovered(&mut self, recovered: &GlyphRanges) {
+        self.relayout_if_lacked(|failed| failed.iter().any(|range| recovered.contains(range)));
+    }
+
+    /// Lays the tile out again if `lacked` holds for the failed glyph
+    /// ranges of the answer it shows or its work has.
+    fn relayout_if_lacked(&mut self, lacked: impl Fn(&GlyphRanges) -> bool) {
         let running = self.tile.pipeline.layout().is_some_and(|layout| match &layout.work {
             LayoutWork::Running(Running { answer, .. }) | LayoutWork::Ready(Resume { answer, .. }) => {
-                answer.glyphs_failed
+                lacked(&answer.failed_glyphs)
             }
             LayoutWork::Current | LayoutWork::Outdated | LayoutWork::Waiting(_) => false,
         });
-        let shown =
-            self.tile.contents().and_then(Contents::geometry).is_some_and(|contents| contents.answer.glyphs_failed);
+        let shown = (self.tile.contents().and_then(Contents::geometry))
+            .is_some_and(|contents| lacked(&contents.answer.failed_glyphs));
         if running || shown {
             self.relayout();
         }

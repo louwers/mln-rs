@@ -9,6 +9,7 @@ use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
 use mln_util::identity::SimpleIdentity;
 use mln_util::size::Size;
 use mln_vec_map::VecMap;
+use smallvec::SmallVec;
 
 use crate::clip_masks::ClipMasks;
 use crate::frame::FramePlan;
@@ -16,6 +17,10 @@ use crate::gfx::context::Resources;
 use crate::layer_composite::LayerComposite;
 use crate::render_light::EvaluatedLight;
 use crate::render_pass::Pass;
+
+/// The tiles whose masks clear the stencil buffer: one per world copy in
+/// view, so usually one, and held inline, since every frame makes them.
+pub(crate) type StencilClear = SmallVec<[UnwrappedTileID; 2]>;
 
 /// A draw group drawing into the layer composite's texture, from
 /// [`PaintParameters::begin_composited`] to
@@ -67,24 +72,24 @@ impl TransformParameters {
     pub(crate) fn new(view: &View) -> Self {
         let state = view.clone();
         // Update the default matrices to the current viewport dimensions.
-        let proj_matrix = state.projection_matrix_with(1, false);
+        let proj_matrix = state.projection_matrix_with(state.near_z(), false);
 
         // Also compute a projection matrix that aligns with the current pixel
         // grid, taking into account odd viewport sizes.
-        let aligned_proj_matrix = state.projection_matrix_with(1, true);
+        let aligned_proj_matrix = state.projection_matrix_with(state.near_z(), true);
 
         // Calculate a second projection matrix with the near plane moved
         // further, to a tenth of the far value, so as not to waste depth
         // buffer precision on very close empty space, for layer types that
         // use the depth buffer to emulate real-world space.
-        let near_z = (0.1 * state.camera_to_center_distance()) as u16;
-        let near_clipped_proj_matrix = state.projection_matrix_with(near_z, false);
+        let near_clipped_near_z = f64::from((0.1 * state.camera_to_center_distance()) as u16);
+        let near_clipped_proj_matrix = state.projection_matrix_with(near_clipped_near_z, false);
 
         TransformParameters {
             proj_matrix,
             aligned_proj_matrix,
             near_clipped_proj_matrix,
-            near_clipped_near_z: f64::from(near_z),
+            near_clipped_near_z,
             view: state,
         }
     }
@@ -218,7 +223,7 @@ pub(crate) struct PaintParameters<'a> {
     next_stencil_id: i32,
     /// The tiles whose masks `clear_stencil` draws zero with, from
     /// [`stencil_clear_tiles`](Self::stencil_clear_tiles).
-    pub(crate) stencil_clear: Vec<UnwrappedTileID>,
+    pub(crate) stencil_clear: StencilClear,
 
     pub(crate) current_layer: u32,
     pub(crate) depth_range_size: f32,
@@ -282,7 +287,7 @@ impl<'a> PaintParameters<'a> {
             layer_composite,
             tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
-            stencil_clear: Vec::new(),
+            stencil_clear: StencilClear::new(),
             // The renderer sets these before use.
             current_layer: 0,
             depth_range_size: 1.0,
@@ -463,7 +468,7 @@ impl<'a> PaintParameters<'a> {
         if self.context.caps().clear_stencil_with_pass {
             self.restart_pass(gpu, LoadOp::Clear(0));
         } else {
-            let masks: Vec<_> = self.stencil_clear.iter().map(|tile| (*tile, 0)).collect();
+            let masks: SmallVec<[_; 2]> = self.stencil_clear.iter().map(|tile| (*tile, 0)).collect();
             self.draw_clip_masks(gpu, &masks);
         }
         self.context.rendering_stats().stencil_clears += 1;
@@ -474,14 +479,18 @@ impl<'a> PaintParameters<'a> {
     /// draws clip to the masks of `clip_tiles`: the world's tile in each
     /// world copy of `clip_tiles`, which covers every mask.
     #[must_use]
-    pub(crate) fn stencil_clear_tiles(&self, clip_tiles: &[UnwrappedTileID]) -> Vec<UnwrappedTileID> {
-        if self.context.caps().clear_stencil_with_pass || clip_tiles.is_empty() {
-            return Vec::new();
+    pub(crate) fn stencil_clear_tiles(&self, clip_tiles: &[UnwrappedTileID]) -> StencilClear {
+        let mut tiles = StencilClear::new();
+        if self.context.caps().clear_stencil_with_pass {
+            return tiles;
         }
-        let mut wraps: Vec<i16> = clip_tiles.iter().map(|tile| tile.wrap).collect();
-        wraps.sort_unstable();
-        wraps.dedup();
-        wraps.into_iter().map(|wrap| UnwrappedTileID::with_wrap(wrap, CanonicalTileID::new(0, 0, 0))).collect()
+        for tile in clip_tiles {
+            if !tiles.iter().any(|world| world.wrap == tile.wrap) {
+                tiles.push(UnwrappedTileID::with_wrap(tile.wrap, CanonicalTileID::new(0, 0, 0)));
+            }
+        }
+        tiles.sort_unstable();
+        tiles
     }
 
     fn draw_clip_masks(&mut self, gpu: &mut dyn Gpu, masks: &[(UnwrappedTileID, i32)]) {

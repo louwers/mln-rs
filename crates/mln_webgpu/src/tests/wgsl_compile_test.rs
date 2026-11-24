@@ -16,6 +16,7 @@ use mln_gfx::shaders::source::wgsl::{self, Wgsl};
 use mln_gfx::types::DepthFunctionType;
 
 use crate::Device;
+use crate::gpu::VERTEX_STAGE_STORAGE_BUFFERS;
 use crate::index_table::IndexTable;
 use crate::shaders::shader_program::{compile, stage_sources};
 use crate::shaders::wgsl_sources::PRELUDE;
@@ -79,6 +80,11 @@ fn every_program_compiles() {
                                 compiled.index_group().is_some(),
                                 text.into_iter().any(|text| text.contains("drawIndex")),
                                 "{} binds drawIndex in a group of its own",
+                                program.name
+                            );
+                            assert!(
+                                compiled.vertex_storage_buffers() <= VERTEX_STAGE_STORAGE_BUFFERS,
+                                "{}'s vertex stage reads more than VERTEX_STAGE_STORAGE_BUFFERS storage buffers",
                                 program.name
                             );
                         }

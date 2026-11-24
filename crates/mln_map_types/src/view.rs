@@ -107,6 +107,9 @@ pub(crate) struct ViewParams {
     pub(crate) axonometric: bool,
     /// How [`View::camera`] reports the center.
     pub(crate) center_wrap: WrapMode,
+    /// While terrain draws, the lowest ground near the center, in meters,
+    /// exaggerated; the near and far planes then fit raised ground.
+    pub(crate) terrain_min_elevation: Option<f64>,
 }
 
 impl ViewParams {
@@ -132,6 +135,7 @@ impl ViewParams {
             y_skew: 1.0,
             axonometric: false,
             center_wrap: WrapMode::Unwrapped,
+            terrain_min_elevation: None,
         }
     }
 }
@@ -207,7 +211,7 @@ impl View {
         if self.params.size.is_empty() {
             return Matrices::ZERO;
         }
-        let projection = self.projection_matrix_with(1, false);
+        let projection = self.projection_matrix_with(self.near_z(), false);
         let coord = self.coordinate_point_matrix(&projection);
         let from_center = coord * DMat4::from_translation(self.center_coordinate());
         let (Some(inv_projection), Some(inverted_from_center)) = (projection.try_inverse(), from_center.try_inverse())
@@ -543,41 +547,50 @@ impl View {
         self.projection().projection_data(self, tile_id, mercator_matrix)
     }
 
+    /// The lowest ground near the center while terrain draws, in meters,
+    /// exaggerated; `None` without terrain
+    /// ([`TransformState::set_terrain_min_elevation`]).
+    ///
+    /// [`TransformState::set_terrain_min_elevation`]: crate::TransformState::set_terrain_min_elevation
+    #[must_use]
+    pub fn terrain_min_elevation(&self) -> Option<f64> {
+        self.params.terrain_min_elevation
+    }
+
+    /// The distance from the camera to the near plane of the projection
+    /// matrix, in pixels: 1, or a fiftieth of the view's height while
+    /// terrain draws, as in GL JS, for the depth precision raised ground
+    /// needs. The globe's matrix takes it while terrain draws too.
+    #[must_use]
+    pub fn near_z(&self) -> f64 {
+        match self.params.terrain_min_elevation {
+            Some(_) => f64::from(self.params.size.height) / 50.0,
+            None => 1.0,
+        }
+    }
+
     /// The distance from the camera to the far plane of the projection
     /// matrix, in pixels at the zoom: past the farthest point of the ground
-    /// that the view shows.
+    /// that the view shows, down to the terrain's lowest ground while it
+    /// draws.
     #[must_use]
     pub fn far_z(&self) -> f64 {
+        match self.params.terrain_min_elevation {
+            Some(min_elevation) => self.terrain_far_z(min_elevation),
+            None => self.flat_far_z(),
+        }
+    }
+
+    /// The far plane over a flat map, with the center at its altitude.
+    fn flat_far_z(&self) -> f64 {
         let camera_to_center_distance = self.camera_to_center_distance();
-        let offset = self.center_offset();
 
         let limited_pitch = mln_math::clamp_f64(self.params.pitch, 0.0, max_mercator_horizon_angle());
         let camera_to_sea_level_distance =
             camera_to_center_distance + self.center_altitude_pixels().abs() / limited_pitch.cos();
 
-        // The tangent of the angle from the center of the view, with the
-        // padding, to its top edge, in units where 1 is a pixel at the center
-        // of the map. The roll widens it by the view's other side.
-        let width = f64::from(self.params.size.width);
-        let height = f64::from(self.params.size.height);
-        let roll = self.params.roll;
-        let tan_fov_above_center = (0.5 + (offset.y - self.params.frustum_offset.top) / height)
-            * 2.0
-            * (self.params.fov / 2.0).tan()
-            * (roll.cos().abs() + roll.sin().abs() * width / height);
-        let tan_multiple = mln_math::clamp_f64(tan_fov_above_center * limited_pitch.tan(), 0.0, 0.99);
-
-        // The map ends at the horizon, where the sky starts, as in GL JS's
-        // `_calculateNearFarZ`: at high pitch it is below the top of the view.
-        let horizon = self.mercator_horizon();
-        let horizon_angle = (horizon / camera_to_center_distance).atan();
-        let min_horizon_angle = PI / 2.0 - max_mercator_horizon_angle();
-        let fov_center_to_horizon = if horizon_angle > min_horizon_angle {
-            2.0 * horizon_angle * (0.5 + offset.y / (horizon * 2.0))
-        } else {
-            min_horizon_angle
-        };
-        let horizon_multiple = mln_math::clamp_f64(fov_center_to_horizon.tan() * limited_pitch.tan(), 0.0, 0.99);
+        let tan_multiple = mln_math::clamp_f64(self.tan_fov_above_center() * limited_pitch.tan(), 0.0, 0.99);
+        let horizon_multiple = mln_math::clamp_f64(self.fov_center_to_horizon().tan() * limited_pitch.tan(), 0.0, 0.99);
 
         // The distance to the farthest fragment that is drawn, and a little
         // more, for the precision of a fragment exactly there.
@@ -585,10 +598,87 @@ impl View {
         furthest_distance * 1.01
     }
 
-    /// The projection matrix with its near plane at `near_z`, aligned to the
-    /// pixel grid if `aligned`; zero while the size is empty.
+    /// GL JS's `cameraToSeaLevelDistance`, in pixels at the zoom: how far
+    /// the camera is from sea level along the view, past the center by its
+    /// altitude, at the pitch up to the horizon's limit, and at least half
+    /// the distance to the center.
     #[must_use]
-    pub fn projection_matrix_with(&self, near_z: u16, aligned: bool) -> DMat4 {
+    pub fn camera_to_sea_level_distance(&self) -> f64 {
+        let camera_to_center_distance = self.camera_to_center_distance();
+        let limited_pitch = self.params.pitch.min(max_mercator_horizon_angle());
+        f64::max(
+            camera_to_center_distance / 2.0,
+            camera_to_center_distance + self.center_altitude_pixels() / limited_pitch.cos(),
+        )
+    }
+
+    /// GL JS's far plane (`calculateNearFarZ`) over ground that reaches down
+    /// to `min_elevation` meters: it fits the lowest of that, the center and
+    /// 100 meters below the camera. The frustum offset shortens it as it
+    /// does the flat map's.
+    fn terrain_far_z(&self, min_elevation: f64) -> f64 {
+        let params = &self.params;
+        let camera_to_center_distance = self.camera_to_center_distance();
+        let pixels_per_meter = 1.0 / self.meters_per_pixel();
+
+        // Heights in pixels at the zoom.
+        let center_altitude = self.center_altitude_pixels();
+        let limited_pitch = params.pitch.min(max_mercator_horizon_angle());
+        let camera_to_sea_level_distance = self.camera_to_sea_level_distance();
+        let camera_altitude = params.pitch.cos() * camera_to_center_distance + center_altitude;
+        let lowest =
+            center_altitude.min(min_elevation * pixels_per_meter).min(camera_altitude - 100.0 * pixels_per_meter);
+        let lowest_plane = if lowest < 0.0 {
+            camera_to_sea_level_distance - lowest / limited_pitch.cos()
+        } else {
+            camera_to_sea_level_distance
+        };
+
+        // How far past the center, along the lowest plane, the ray at `angle`
+        // above the center of the view meets it: the law of sines in the
+        // triangle of the camera, the center and that point.
+        let ground_angle = PI / 2.0 + params.pitch;
+        let distance_past_center = |angle: f64| {
+            angle.sin() * lowest_plane / mln_math::clamp_f64(PI - ground_angle - angle, 0.01, PI - 0.01).sin()
+        };
+        let top_half_distance = distance_past_center(self.tan_fov_above_center().atan())
+            .min(distance_past_center(self.fov_center_to_horizon()));
+
+        (limited_pitch.sin() * top_half_distance + lowest_plane) * 1.01
+    }
+
+    /// The tangent of the angle from the center of the view, with the
+    /// padding, to its top edge, in units where 1 is a pixel at the center of
+    /// the map. A roll widens it by the view's other side, which the corners
+    /// of the view reach in tangent space.
+    fn tan_fov_above_center(&self) -> f64 {
+        let params = &self.params;
+        let width = f64::from(params.size.width);
+        let height = f64::from(params.size.height);
+        (0.5 + (self.center_offset().y - params.frustum_offset.top) / height)
+            * 2.0
+            * (params.fov / 2.0).tan()
+            * (params.roll.cos().abs() + params.roll.sin().abs() * width / height)
+    }
+
+    /// The angle from the center of the view, with the padding, to the
+    /// horizon, where the map ends and the sky starts, as in GL JS's
+    /// `calculateNearFarZ`: at high pitch it is below the top of the view.
+    fn fov_center_to_horizon(&self) -> f64 {
+        let horizon = self.mercator_horizon();
+        let horizon_angle = (horizon / self.camera_to_center_distance()).atan();
+        let min_horizon_angle = PI / 2.0 - max_mercator_horizon_angle();
+        if horizon_angle > min_horizon_angle {
+            2.0 * horizon_angle * (0.5 + self.center_offset().y / (horizon * 2.0))
+        } else {
+            min_horizon_angle
+        }
+    }
+
+    /// The projection matrix with its near plane at `near_z` pixels, aligned
+    /// to the pixel grid if `aligned`; zero while the size is empty.
+    #[must_use]
+    pub fn projection_matrix_with(&self, near_z: f64, aligned: bool) -> DMat4 {
         let params = &self.params;
         if params.size.is_empty() {
             return DMat4::ZERO;
@@ -602,7 +692,7 @@ impl View {
         let pixels_per_meter = 1.0 / self.meters_per_pixel();
         let world_to_camera =
             camera.world_to_camera(params.scale, pixels_per_meter, params.viewport_mode == ViewportMode::FlippedY);
-        let mut camera_to_clip = perspective(self.perspective_fov(), width / height, f64::from(near_z), self.far_z());
+        let mut camera_to_clip = perspective(self.perspective_fov(), width / height, near_z, self.far_z());
 
         // The vanishing point moves to the center of the padded view, from -1
         // to 1 across it. An axonometric view has none.
@@ -710,23 +800,39 @@ impl View {
     /// The screen point of a location, measured from the bottom edge (y up).
     #[must_use]
     pub fn lat_lng_to_screen_coordinate(&self, lat_lng: &LatLng) -> ScreenCoordinate {
-        self.lat_lng_to_screen_coordinate_with_clip(lat_lng).0
+        self.lat_lng_to_screen_coordinate_at(lat_lng, 0.0)
+    }
+
+    /// The screen point of a location `height` meters above sea level,
+    /// measured from the bottom edge (y up). The globe raises it along its
+    /// vertical.
+    #[must_use]
+    pub fn lat_lng_to_screen_coordinate_at(&self, lat_lng: &LatLng, height: f64) -> ScreenCoordinate {
+        self.clip_point_at(lat_lng, height).0
     }
 
     /// The screen point of a location and its clip-space position, whose w
     /// is negative behind the camera. Both are zero while the size is empty.
     #[must_use]
     pub fn lat_lng_to_screen_coordinate_with_clip(&self, lat_lng: &LatLng) -> (ScreenCoordinate, DVec4) {
+        self.clip_point_at(lat_lng, 0.0)
+    }
+
+    /// [`lat_lng_to_screen_coordinate_with_clip`] of a location `height`
+    /// meters above sea level.
+    ///
+    /// [`lat_lng_to_screen_coordinate_with_clip`]: Self::lat_lng_to_screen_coordinate_with_clip
+    fn clip_point_at(&self, lat_lng: &LatLng, height: f64) -> (ScreenCoordinate, DVec4) {
         if self.params.size.is_empty() {
             return (ScreenCoordinate::new(0.0, 0.0), DVec4::ZERO);
         }
 
         if self.is_globe() {
-            return VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(self, lat_lng);
+            return VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(self, lat_lng, height);
         }
 
         let pt = Projection::project(lat_lng, self.params.scale);
-        let p = self.matrices.coord * DVec4::new(pt.x / TILE_SIZE_D, pt.y / TILE_SIZE_D, 0.0, 1.0);
+        let p = self.matrices.coord * DVec4::new(pt.x / TILE_SIZE_D, pt.y / TILE_SIZE_D, height, 1.0);
         (ScreenCoordinate::new(p.x / p.w, f64::from(self.params.size.height) - p.y / p.w), p)
     }
 
@@ -750,7 +856,12 @@ impl View {
         }
 
         if self.is_globe() {
-            return match VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(self, point, WrapMode::Unwrapped) {
+            return match VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(
+                self,
+                point,
+                0.0,
+                WrapMode::Unwrapped,
+            ) {
                 Some(lat_lng) => TileCoordinate::from_lat_lng(f64::from(at_zoom), &lat_lng),
                 None => TileCoordinate { p: Point::new(0.0, 0.0), z: 0.0 },
             };
@@ -800,11 +911,11 @@ impl View {
 
     /// The location where the line of sight through `point`, measured from
     /// the bottom edge (y up), meets the plane `height` meters above sea
-    /// level on a Mercator view; where the line doesn't descend, as at sea
-    /// level, the point it passes a little way from the camera. The globe
-    /// reads its points on the sea-level sphere only. Fails as
-    /// [`screen_coordinate_to_lat_lng`], and on the globe for a `height`
-    /// other than 0.
+    /// level; where the line doesn't descend, as at sea level, the point it
+    /// passes a little way from the camera. The globe meets the sphere
+    /// `height` meters above sea level, and a line that misses it the
+    /// nearest point of that sphere's horizon. Fails as
+    /// [`screen_coordinate_to_lat_lng`].
     ///
     /// [`screen_coordinate_to_lat_lng`]: Self::screen_coordinate_to_lat_lng
     pub fn screen_coordinate_to_lat_lng_at(
@@ -815,16 +926,13 @@ impl View {
     ) -> Result<LatLng, Error> {
         // Without a size the point is Mercator's, as the tile coordinate is.
         if self.is_globe() && !self.params.size.is_empty() {
-            if height != 0.0 {
-                return Err(Error::invalid_argument("the globe reads points at sea level only"));
-            }
             if point.x.is_nan() || point.y.is_nan() {
                 return Err(Error::invalid_argument("screen coordinate must not be NaN"));
             }
             if !point.x.is_finite() || !point.y.is_finite() {
                 return Err(Error::invalid_argument("screen coordinate must not be infinite"));
             }
-            return VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(self, point, wrap_mode)
+            return VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(self, point, height, wrap_mode)
                 .ok_or_else(|| Error::invalid_argument("the camera shows no location"));
         }
         let coord = if self.params.size.is_empty() {

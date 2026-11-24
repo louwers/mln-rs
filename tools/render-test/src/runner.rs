@@ -154,6 +154,15 @@ pub trait TestRunnerImpl {
     fn set_light(&mut self, _json: &str) -> Result<(), MapError> {
         unsupported("Style::setLight")
     }
+    /// Port-only: sets the root `terrain` from `json`, which is `null` to
+    /// remove it (a conversion error is `MapError::Conversion`).
+    fn set_terrain(&mut self, _json: &str) -> Result<(), MapError> {
+        unsupported("Style::setTerrain")
+    }
+    /// Sets whether the center of a camera at rest stands on the terrain.
+    fn set_center_clamped_to_ground(&mut self, _clamped: bool) -> Result<(), MapError> {
+        unsupported("Map::setCenterClampedToGround")
+    }
     fn remove_source(&mut self, _id: &str) -> Result<bool, MapError> {
         unsupported("Style::removeSource")
     }
@@ -948,10 +957,11 @@ impl TestRunner {
         let asset_path = self.manifest.get_asset_path();
         let assets_only = !asset_path.is_empty() && in_assets_suite(&ctx.metadata.paths.style_path, asset_path);
         let key = format!(
-            "{}/{}/{}/{}",
+            "{}/{}/{}/{}/{}",
             ctx.metadata.map_mode as u32,
             ctx.metadata.pixel_ratio,
             u32::from(ctx.metadata.cross_source_collisions),
+            ctx.metadata.terrain_skirt_length as u32,
             u32::from(assets_only)
         );
 

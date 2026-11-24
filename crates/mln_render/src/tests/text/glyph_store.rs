@@ -38,7 +38,7 @@ use super::glyph_store_bitmaps::{SDF_BITMAP, STUB_BITMAP};
 use super::{SquelchLog, read_file};
 use crate::renderer_event::RendererEvent;
 use crate::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
-use crate::text::glyph_store::{GlyphStore, GlyphWait, ShapeResults};
+use crate::text::glyph_store::{GlyphRanges, GlyphStore, GlyphWait, ShapeResults};
 use crate::tile::inbox::{Inbox, TileEvent};
 
 fn stub_glyph(glyph_id: GlyphID) -> Glyph {
@@ -164,8 +164,8 @@ struct StubGlyphRequestor {
     glyphs_available: RefCell<Option<OnGlyphsAvailable>>,
     /// The shaping of the last answer.
     shaping: RefCell<Option<ShapeResults>>,
-    /// Whether the last answer lacked glyphs of a failed range.
-    failed: Cell<bool>,
+    /// The failed ranges the last answer lacked glyphs of.
+    failed: RefCell<GlyphRanges>,
 }
 
 /// A request's wait for its answer.
@@ -287,7 +287,7 @@ impl Store {
         self.report();
         for (requestor, resolved) in answered {
             *requestor.shaping.borrow_mut() = Some(resolved.shaping);
-            requestor.failed.set(resolved.failed);
+            *requestor.failed.borrow_mut() = resolved.failed;
             let f = requestor.glyphs_available.borrow().clone();
             if let Some(f) = f {
                 f(resolved.glyphs);
@@ -522,6 +522,21 @@ fn fails_first_then_glyphs() -> impl Fn(&Resource) -> Option<Response> + Send + 
     }
 }
 
+/// A file source response that fails on the first request and serves
+/// `data` after that.
+fn fails_first_then(data: &'static [u8]) -> impl Fn(&Resource) -> Option<Response> + Send + Sync {
+    let loads = AtomicU32::new(0);
+    move |_: &Resource| {
+        let mut response = Response::new();
+        if loads.fetch_add(1, Ordering::SeqCst) == 0 {
+            response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "Failed by the test case")));
+        } else {
+            response.data = Some(Arc::new(data.to_vec()));
+        }
+        Some(response)
+    }
+}
+
 fn count_requests(test: &GlyphStoreTest) -> Arc<AtomicU32> {
     let requests = Arc::new(AtomicU32::new(0));
     let r = Arc::clone(&requests);
@@ -581,14 +596,33 @@ fn an_answer_says_a_range_it_needed_failed() {
     *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |_: GlyphMap| run_loop.stop()));
 
     test.run("test/fixtures/resources/glyphs.pbf", dependencies(&['a']));
-    assert!(test.requestor.failed.get());
+    assert!(!test.requestor.failed.borrow().is_empty());
     assert_eq!(requests.load(Ordering::SeqCst), 1);
 
     // A wait that began after the failure requests the range again, which
     // loads.
     test.run("test/fixtures/resources/glyphs.pbf", dependencies(&['a']));
     assert_eq!(requests.load(Ordering::SeqCst), 2);
-    assert!(!test.requestor.failed.get());
+    assert!(test.requestor.failed.borrow().is_empty());
+}
+
+/// A range that a later wait loads after it failed is reported once, so that
+/// the tiles laid out without it lay out again.
+#[test]
+fn a_range_that_loads_after_failing_is_reported_once() {
+    let mut test = GlyphStoreTest::new();
+    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs());
+    let run_loop = test.run_loop.clone();
+    *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |_: GlyphMap| run_loop.stop()));
+    let range = (test_stack(), GlyphRange::new(0, 255, GlyphIDType::FontPBF));
+
+    test.run("test/fixtures/resources/glyphs.pbf", dependencies(&['a']));
+    assert_eq!(*test.requestor.failed.borrow(), VecSet::from([range.clone()]), "the answer names the range");
+    assert!(test.glyph_store().take_recovered().is_empty(), "nothing loaded yet");
+
+    test.run("test/fixtures/resources/glyphs.pbf", dependencies(&['a']));
+    assert_eq!(test.glyph_store().take_recovered(), VecSet::from([range]));
+    assert!(test.glyph_store().take_recovered().is_empty(), "reported once");
 }
 
 /// A wait for a range that fails while it waits gets the range's glyphs as
@@ -615,7 +649,7 @@ fn a_wait_resolves_a_range_that_failed_during_it_as_missing() {
     for _ in 0..2 {
         let resolved =
             test.glyph_store().resolve(&dependencies(&['a']), &mut wait, Some(&file_source), &inbox).expect("answered");
-        assert!(resolved.failed);
+        assert!(!resolved.failed.is_empty());
         assert!(resolved.glyphs[&font_stack_hash(&test_stack())][&gid('a')].is_none());
     }
     assert_eq!(requests.load(Ordering::SeqCst), 1);
@@ -1573,6 +1607,97 @@ fn a_device_face_loads_without_a_file_source() {
     assert!(glyphs[&gid('中')].is_some(), "the fallback face's glyph");
     assert!(glyphs[&gid('テ')].is_some(), "the device's glyph");
     assert_eq!(engine.loads.lock().len(), 2);
+}
+
+/// A later wait requests a fallback face's file that failed to load again
+/// and draws the face's glyphs once it loads.
+#[test]
+fn a_fallback_face_that_failed_to_load_is_requested_again() {
+    let (test, _) = letter_test(&StubChooser::new(|_| None));
+    let _log = SquelchLog::new();
+    let requests = Arc::new(AtomicU32::new(0));
+    let r = Arc::clone(&requests);
+    test.file_source.set_response(Kind::Glyphs, move |resource: &Resource| {
+        assert_eq!(resource.url, "app://face.ttf");
+        let mut response = Response::new();
+        if r.fetch_add(1, Ordering::SeqCst) == 0 {
+            response.error = Some(Box::new(ResourceError::new(Reason::Other, "Failed by the test case")));
+        } else {
+            response.data = Some(Arc::new(b"font".to_vec()));
+        }
+        Some(response)
+    });
+    let face = FontFace { type_: FONT_FACE, ..FontFace::new("", "app://face.ttf", vec![(0x4E2D, 0x4E2D)]) };
+    test.glyph_store().set_font_faces(Some(Arc::new(vec![face])));
+    test.glyph_store().set_url("");
+    let range = (test_stack(), get_glyph_range(GlyphID::with_type(0, FONT_FACE)));
+
+    let glyphs = test.run_until_answered(dependencies(&['中']));
+    assert!(glyphs[&font_stack_hash(&test_stack())][&gid('中')].is_none());
+    assert_eq!(*test.requestor.failed.borrow(), VecSet::from([range.clone()]), "the answer names the face");
+
+    let glyphs = test.run_until_answered(dependencies(&['中']));
+    assert!(glyphs[&font_stack_hash(&test_stack())][&gid('中')].is_some(), "the face's glyph");
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
+    assert_eq!(test.glyph_store().take_recovered(), VecSet::from([range]));
+}
+
+/// Local fonts with every glyph, drawn wider than any other source's, so
+/// that a test tells them apart.
+struct WideLocalGlyphRasterizer;
+
+impl LocalGlyphRasterizer for WideLocalGlyphRasterizer {
+    fn rasterize_glyph(&self, _font_stack: &FontStack, glyph_id: GlyphID) -> Option<Glyph> {
+        let glyph = stub_glyph(glyph_id);
+        Some(Glyph { metrics: GlyphMetrics { advance: 99, ..glyph.metrics }, ..glyph })
+    }
+}
+
+/// The advance of `c`'s glyph in `glyphs`, which has it.
+fn advance(glyphs: &GlyphMap, c: char) -> u32 {
+    glyphs[&font_stack_hash(&test_stack())][&gid(c)].as_ref().expect("the glyph").metrics.advance
+}
+
+/// The rasterizer stands in for a fallback face whose file failed to load,
+/// until a later wait loads the file and draws the face's glyph.
+#[test]
+fn a_rasterized_glyph_stands_in_for_a_face_that_failed_to_load() {
+    let local = LocalGlyphs { ideographs: true, chooser: None, rasterizer: Some(Arc::new(WideLocalGlyphRasterizer)) };
+    let test =
+        GlyphStoreTest::with_all(local, ResponseType::Synchronous, Arc::default(), Arc::new(LetterEngine::default()));
+    let _log = SquelchLog::new();
+    test.file_source.set_response(Kind::Glyphs, fails_first_then(b"font"));
+    let face = FontFace { type_: FONT_FACE, ..FontFace::new("", "app://face.ttf", vec![(0x4E2D, 0x4E2D)]) };
+    test.glyph_store().set_font_faces(Some(Arc::new(vec![face])));
+    test.glyph_store().set_url("");
+    let range = (test_stack(), get_glyph_range(GlyphID::with_type(0, FONT_FACE)));
+
+    let glyphs = test.run_until_answered(dependencies(&['中']));
+    assert_eq!(advance(&glyphs, '中'), 99, "the rasterizer's glyph");
+    assert_eq!(*test.requestor.failed.borrow(), VecSet::from([range.clone()]), "the answer names the face");
+
+    let glyphs = test.run_until_answered(dependencies(&['中']));
+    assert_ne!(advance(&glyphs, '中'), 99, "the face's glyph");
+    assert_eq!(test.glyph_store().take_recovered(), VecSet::from([range]));
+}
+
+/// A local glyph stands in for a glyph PBF that failed to load, until a
+/// later wait loads the PBF and draws its glyph.
+#[test]
+fn a_local_glyph_stands_in_for_a_range_that_failed_to_load() {
+    let test = GlyphStoreTest::with(local(WideLocalGlyphRasterizer), ResponseType::Synchronous);
+    let _log = SquelchLog::new();
+    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs());
+    test.glyph_store().set_url("test/fixtures/resources/glyphs.pbf");
+    let range = (test_stack(), GlyphRange::new(0, 255, GlyphIDType::FontPBF));
+
+    let glyphs = test.run_until_answered(dependencies(&['a']));
+    assert_eq!(advance(&glyphs, 'a'), 99, "the rasterizer's glyph");
+    assert_eq!(*test.requestor.failed.borrow(), VecSet::from([range.clone()]), "the answer names the range");
+
+    let glyphs = test.run_until_answered(dependencies(&['a']));
+    assert_ne!(advance(&glyphs, 'a'), 99, "the PBF's glyph");
+    assert_eq!(test.glyph_store().take_recovered(), VecSet::from([range]));
 }
 
 // A device glyph is the glyph its font maps the character to, as a PBF's

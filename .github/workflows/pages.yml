@@ -2,7 +2,7 @@ name: pages
 
 # Builds the browser build and its page (`mise run web:build --profile release`,
 # examples/web/README.md) and deploys the page, examples/web/dist, to GitHub
-# Pages (https://louwers.github.io/mln-rs/). It needs no COOP/COEP headers,
+# Pages (https://maplibre.org/mln-rs/). It needs no COOP/COEP headers,
 # so Pages serves it as is. Publishing only: CI's web job checks the build.
 
 on:
@@ -10,10 +10,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
 
 # One run at a time; a newer push replaces the one waiting, so the latest
 # commit deploys next. In-flight runs finish, so that pushes coming faster
@@ -26,29 +27,39 @@ env:
   MISE_LOCKED: "1"
 
 jobs:
-  deploy:
-    runs-on: ubuntu-26.04
+  build:
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 30
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
         with:
           persist-credentials: false
 
-      # The tools that mise.toml pins, Rust from rust-toolchain.toml among
-      # them, at the versions mise.lock records.
-      - uses: jdx/mise-action@v5
-
-      - uses: Swatinem/rust-cache@v2
+      # No Rust cache: a cache entry that another job saved could end up in
+      # the published page.
+      - uses: ./.github/actions/setup-ci-deps
+        with:
+          rust-cache: "false"
 
       - name: Build
         run: mise run web:build --profile release
 
-      - uses: actions/configure-pages@v6
-      - uses: actions/upload-pages-artifact@v5
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: examples/web/dist
+
+  deploy:
+    needs: build
+    runs-on: blacksmith-2vcpu-ubuntu-2604
+    timeout-minutes: 15
+    permissions:
+      pages: write # deploy-pages publishes the page
+      id-token: write # deploy-pages authenticates to Pages with OIDC
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
       - id: deploy
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

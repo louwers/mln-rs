@@ -66,7 +66,7 @@ use crate::network::Network;
 use crate::overlay::Paint;
 use crate::pacing::{Pacing, Ready, Refreshes};
 use crate::settings::Settings;
-use crate::styles::{self, Projection, Style};
+use crate::styles::{self, Projection, Style, StyleSource};
 use crate::ui::{Action, Controls, Shown};
 
 /// What the render thread starts with.
@@ -92,9 +92,6 @@ pub(crate) struct Launch {
     pub inbox: Arc<Inbox>,
     pub proxy: EventLoopProxy<UserEvent>,
 }
-
-/// Where the app opens without `--style` or `MLN_STYLE_URL`.
-const DEFAULT_STYLE: &str = "https://tiles.openfreemap.org/styles/liberty";
 
 /// How long a readback waits for its offscreen session to load the map.
 const READBACK_TIMEOUT: Duration = Duration::from_secs(30);
@@ -204,10 +201,9 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
     let window = WindowSession::attach(kind, device, &map, &surfaces, map_size, Rc::clone(&paint), &inbox)
         .map_err(|e| e.message)?;
 
-    let style_url = match &args.style {
-        Some(style) if !style.contains("://") => format!("file://{style}"),
-        Some(style) => style.clone(),
-        None => std::env::var("MLN_STYLE_URL").unwrap_or_else(|_| DEFAULT_STYLE.to_owned()),
+    let style = match args.style.clone().or_else(|| std::env::var("MLN_STYLE_URL").ok()) {
+        Some(spec) => styles::style_for(&spec),
+        None => styles::default_style(),
     };
 
     let refreshes = match frame_pacer {
@@ -255,7 +251,7 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
         paint,
         style_info: StyleInfo::default(),
         styles: styles::styles(),
-        style: styles::style_for(&style_url),
+        style,
         projection: Projection::default(),
         next_backend: None,
         frame_report: String::new(),
@@ -456,7 +452,11 @@ impl View {
 
     /// Loads `style` and names the window after it.
     fn load_style(&mut self, style: Style) {
-        match self.map.set_style_url(&style.url) {
+        let loaded = match &style.source {
+            StyleSource::Url(url) => self.map.set_style_url(url),
+            StyleSource::Json(json) => self.map.set_style_json(json),
+        };
+        match loaded {
             Ok(loaded) => loaded.on_complete(|result| match result {
                 // Another style's load replaced it.
                 Err(e) if e.kind == ErrorKind::Cancelled => {}
@@ -465,7 +465,13 @@ impl View {
             }),
             Err(e) => Log::error(Event::General, e.message),
         }
-        let name = if style.name.is_empty() { style.url.clone() } else { style.name.clone() };
+        let name = if !style.name.is_empty() {
+            style.name.clone()
+        } else if let StyleSource::Url(url) = &style.source {
+            url.clone()
+        } else {
+            "custom style".to_owned()
+        };
         let _ = self.proxy.send_event(UserEvent::SetTitle(format!("mln-rs: {name}")));
         self.style = style;
         self.style_loaded = false;
@@ -983,8 +989,10 @@ impl View {
             format!("\"{}\"", self.style.name)
         } else if !info.name.is_empty() {
             format!("\"{}\"", info.name)
-        } else if !self.style.url.is_empty() {
-            self.style.url.clone()
+        } else if let StyleSource::Url(url) = &self.style.source
+            && !url.is_empty()
+        {
+            url.clone()
         } else {
             "(unnamed)".to_owned()
         };

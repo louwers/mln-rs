@@ -76,6 +76,9 @@ export const WHEEL_PIXELS = 0;
 /** WebMap::wheel's `kind`: a mouse wheel's detents, which the map eases. */
 export const WHEEL_NOTCHES = 1;
 
+/** Where a style loads from: a URL, or a style document's JSON text. */
+export type StyleSource = { url: string } | { json: string };
+
 /** What starts the map, once the module compiled. */
 export interface Start {
   type: "start";
@@ -87,7 +90,7 @@ export interface Start {
   width: number;
   height: number;
   ratio: number;
-  style: string;
+  style: StyleSource;
   /** JSON: font files that every font stack falls back to. */
   fallbackFontFaces: string | null;
   camera: Camera;
@@ -102,7 +105,7 @@ export interface Start {
 
 /** From the page to the map's Web Worker. */
 export type ToMap =
-  | { type: "preload"; style: string; ratio: number; zoom: number }
+  | { type: "preload"; style: StyleSource; ratio: number; zoom: number }
   | Start
   | { type: "readPixels" }
   // Run mln_gfx's conformance case of writes from JS arrays on a GPU of the
@@ -113,7 +116,7 @@ export type ToMap =
   | { type: "nextFrame" }
   | { type: "resize"; width: number; height: number }
   | { type: "pixelRatio"; ratio: number }
-  | { type: "style"; url: string }
+  | { type: "style"; style: StyleSource }
   | { type: "jumpTo"; camera: Camera }
   | { type: "resetNorth" }
   // The projection the map draws with in place of the style's

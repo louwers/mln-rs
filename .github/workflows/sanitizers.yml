@@ -17,6 +17,16 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
+# One run at a time; a scheduled run waits for a manual one that is still
+# running.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 env:
   MISE_LOCKED: "1"
 
@@ -25,23 +35,22 @@ jobs:
   # the ci workflow's vulkan leg runs them. No Rust cache: the build is a
   # nightly one with its own std, and the cache stays the ci workflow's.
   asan:
-    runs-on: ubuntu-26.04
+    runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 60
     env:
       MLN_RENDER_BACKEND: vulkan
       MLN_VULKAN_VALIDATION: abort
       MINUTES: ${{ inputs.minutes || '20' }}
     steps:
-      - uses: actions/checkout@v7
-
-      - name: Install lavapipe
-        uses: ./.github/actions/lavapipe
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
         with:
-          validation-layer: true
+          persist-credentials: false
 
-      # The tools that mise.toml pins, Rust from rust-toolchain.toml among
-      # them, at the versions mise.lock records.
-      - uses: jdx/mise-action@v5
+      - uses: ./.github/actions/setup-ci-deps
+        with:
+          lavapipe: "true"
+          lavapipe-validation-layer: "true"
+          rust-cache: "false"
 
       - name: Test
         run: mise run test:asan "$MINUTES"
