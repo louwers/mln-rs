@@ -74,10 +74,10 @@ fn fixture(layers: &str) -> Fixture {
     builder.add_layer_type::<Overlaid>().unwrap();
     builder.add_layer_type::<UnindexedLayer>().unwrap();
     let style = format!(
-        r##"{{"version":8,"transition":{{"duration":0}},
+        r#"{{"version":8,"transition":{{"duration":0}},
         "sources":{{"square":{{"type":"geojson","data":{{"type":"Polygon",
             "coordinates":[[[-20,-20],[20,-20],[20,20],[-20,20],[-20,-20]]]}}}}}},
-        "layers":[{layers}]}}"##
+        "layers":[{layers}]}}"#
     );
     Fixture::new(builder.build(), &style)
 }

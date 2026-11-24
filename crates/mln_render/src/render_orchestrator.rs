@@ -1319,7 +1319,7 @@ impl RenderOrchestrator {
                     .with_global_state(self.global_state.as_deref());
                 hits.retain(|hit| {
                     let feature = hit.feature.to_geojson_feature();
-                    with_geojson_feature(&feature, context.clone(), |cx| filter.evaluate(cx))
+                    with_geojson_feature(&feature, context, |cx| filter.evaluate(cx))
                 });
             }
             if !hits.is_empty() {
