@@ -1577,6 +1577,61 @@ mod terrain_cover {
         );
     }
 
+    /// On the globe, mountains past the sea-level horizon rise into a view
+    /// low over the ground, and the terrain draws them: the cover keeps the
+    /// tiles under them.
+    #[test]
+    fn the_globe_cover_keeps_mountains_past_the_horizon() {
+        use mln_map_types::VerticalPerspectiveProjection;
+        use mln_util::projection::Projection;
+
+        let options = Options { min_zoom: 0, max_zoom: 22, tile_size: 512, reparse_overscaled: false };
+        let mut transform = Camera { pitch: 80.0, ..Camera::new((512, 512), (10.0, 45.0), 10.0) }.transform();
+        transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+        let view = transform.view();
+        let height = 3000.0;
+        let mut mountains = ElevationRanges::default();
+        mountains.insert(cn(0, 0, 0), 0.0, height as f32);
+        let (z, overscaled_z, parameters) = source_cover_inputs(&transform, options);
+        let cover = terrain_tile_cover(
+            &parameters,
+            z,
+            Range::new(options.min_zoom, options.max_zoom),
+            overscaled_z,
+            &mountains,
+        );
+
+        // Peaks north of the center, behind the sea-level horizon, whose
+        // line of sight from the camera clears the sea-level sphere and that
+        // the view frames.
+        let camera = view.globe_camera_position();
+        let peaks: Vec<_> = (1..2000)
+            .map(|step| ll(45.0 + f64::from(step) / 200.0, 10.0))
+            .filter(|peak| {
+                let top = VerticalPerspectiveProjection::surface_vector(peak)
+                    * (1.0 + height / VerticalPerspectiveProjection::GLOBE_RADIUS_METERS);
+                // The point of the line of sight nearest the planet's center
+                // is above sea level, or past the peak.
+                let ray = top - camera;
+                let t = (-camera.dot(ray) / ray.length_squared()).clamp(0.0, 1.0);
+                let clear = (camera + ray * t).length() > 1.0;
+                let (pixel, clip) = VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(view, peak, height);
+                let framed = clip.w > 0.0 && (0.0..512.0).contains(&pixel.x) && (0.0..512.0).contains(&pixel.y);
+                view.is_location_occluded(peak) && clear && framed
+            })
+            .collect();
+        assert_ne!(Vec::<LatLng>::new(), peaks);
+        for peak in peaks {
+            let point = Projection::project(&peak, 1.0 / constants::TILE_SIZE_D);
+            let covered = cover.iter().any(|tile| {
+                let tiles = f64::from(1u32 << tile.canonical.z);
+                (point.x * tiles).floor() == f64::from(tile.canonical.x)
+                    && (point.y * tiles).floor() == f64::from(tile.canonical.y)
+            });
+            assert!(covered, "no tile covers {peak:?}");
+        }
+    }
+
     /// Without terrain, the globe's cover measures from sea level, where the
     /// ground is, as Mercator's does: a center raised 3,000 m covers the
     /// tiles it did before terrain's cover, none finer than the view shows.

@@ -617,22 +617,26 @@ mod globe {
         // the frustum's corners bound the visible cap and not the space behind
         // the planet.
         let horizon = projection.clipping_plane;
-        let mut frustum = Frustum::from_inv_proj_matrix(&inverse, 1.0, 0.0, /*flipped_y*/ true, Some(horizon));
-        // Both the horizon plane and the far plane assume content on the
-        // surface. A point raised to radius r, in planet radii, stays in view
-        // up to acos(1/r) past the surface's horizon and sqrt(r^2 - 1)
-        // farther away, so both move back by as much (GL JS
+        let frustum = Frustum::from_inv_proj_matrix(&inverse, 1.0, 0.0, /*flipped_y*/ true, Some(horizon));
+        // Both the horizon plane and the far plane assume ground at sea
+        // level. A point raised to radius r, in planet radii, stays in view
+        // up to acos(1/r) past the sea-level horizon and sqrt(r^2 - 1)
+        // farther away, so for a tile whose ground and content reach
+        // `elevation` meters both move back by as much (GL JS
         // `coveringTiles`).
-        let mut culling_horizon = horizon;
         let normal_length = horizon.xyz().length();
-        if state.max_content_elevation > 0.0 && normal_length > 0.0 {
-            let shell_radius = 1.0 + state.max_content_elevation / constants::EARTH_RADIUS_M;
+        let camera = transform.globe_camera_position();
+        let culling_limits = |elevation: f64| {
+            if elevation <= 0.0 || normal_length <= 0.0 {
+                return (frustum.clone(), horizon);
+            }
+            let shell_radius = 1.0 + elevation / constants::EARTH_RADIUS_M;
             let horizon_cos = (-horizon.w / normal_length).clamp(-1.0, 1.0);
             let shell_cos = (horizon_cos.acos() + (1.0 / shell_radius).acos()).cos();
-            culling_horizon.w = -shell_cos * normal_length;
-            frustum = frustum
-                .with_far_plane_pushed((shell_radius * shell_radius - 1.0).sqrt(), transform.globe_camera_position());
-        }
+            let culling_horizon = DVec4::from((horizon.xyz(), -shell_cos * normal_length));
+            (frustum.with_far_plane_pushed((shell_radius * shell_radius - 1.0).sqrt(), camera), culling_horizon)
+        };
+        let flat_limits = culling_limits(state.max_content_elevation);
 
         // Tiles nearer the camera than the center may load finer than the
         // nominal zoom, up to the source's maximum.
@@ -703,12 +707,15 @@ mod globe {
             // least, as GL JS's does: the horizon plane is the sea-level
             // sphere's, which ground wholly below sea level under a camera
             // near the surface can lie behind.
-            let elevations = (ranges.and_then(|ranges| ranges.range(tile)))
-                .map_or(allowance, |(lowest, highest)| (lowest, highest.max(allowance.1)));
+            let range = ranges.and_then(|ranges| ranges.range(tile));
+            let elevations = range.map_or(allowance, |(lowest, highest)| (lowest, highest.max(allowance.1)));
             let volume = tile_bounding_volume(&tile, elevations);
 
             if !node.fully_visible {
-                let intersection = is_tile_visible(&frustum, &volume, &culling_horizon);
+                // The content stands on the ground, as high as that reaches.
+                let raised_limits = range.map(|(_, highest)| culling_limits(highest + state.max_content_elevation));
+                let (frustum, culling_horizon) = raised_limits.as_ref().unwrap_or(&flat_limits);
+                let intersection = is_tile_visible(frustum, &volume, culling_horizon);
                 if intersection == IntersectionResult::Separate {
                     continue;
                 }
