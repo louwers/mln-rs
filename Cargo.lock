@@ -2497,6 +2497,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-android"
+version = "0.0.15"
+dependencies = [
+ "jni",
+]
+
+[[package]]
 name = "mln-rs-bench"
 version = "0.0.15"
 dependencies = [
@@ -2699,6 +2706,7 @@ dependencies = [
  "icu_provider",
  "jni",
  "js-sys",
+ "mln-rs-android",
  "mln-rs-conversion",
  "mln-rs-feature",
  "mln-rs-geometry",
@@ -3110,6 +3118,7 @@ dependencies = [
  "httpmock",
  "jni",
  "js-sys",
+ "mln-rs-android",
  "mln-rs-feature",
  "mln-rs-headless",
  "mln-rs-map",

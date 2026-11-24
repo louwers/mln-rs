@@ -20,18 +20,14 @@
 //! `NumberFormatter` and `petabyte` need 30. A unit the system's ICU lacks
 //! fails to format.
 
-#![expect(unsafe_code, reason = "dlsym and the JNI invocation API find the process's Java VM")]
-
 use std::cmp::Ordering;
 use std::collections::VecDeque;
-use std::ffi::{c_char, c_int, c_void};
 use std::sync::{Arc, OnceLock};
 
 use jni::errors::Error as JniError;
 use jni::objects::{Global, JObject, JObjectArray, JString, JValue};
 use jni::strings::{JNIStr, JNIString};
-use jni::sys::{JNI_OK, jint, jsize};
-use jni::{Env, JavaVM, jni_sig, jni_str};
+use jni::{Env, jni_sig, jni_str};
 use mln_util::hash::HashSet;
 use parking_lot::Mutex;
 
@@ -69,43 +65,8 @@ impl Failure {
 /// Runs `f` on this thread attached to the app's Java VM, in a frame of local
 /// references of its own. A Java exception that `f` leaves fails it.
 fn with_java<T>(f: impl FnOnce(&mut Env<'_>) -> Result<T, Failure>) -> Result<T, String> {
-    let vm = JavaVM::singleton()
-        .ok()
-        .or_else(process_java_vm)
-        .ok_or_else(|| "Locale services need Android initialization".to_owned())?;
+    let vm = mln_android::java_vm().ok_or_else(|| "Locale services need Android initialization".to_owned())?;
     vm.attach_current_thread(f).map_err(Failure::into_message)
-}
-
-unsafe extern "C" {
-    fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
-    fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
-}
-
-/// The process's Java VM, through `JNI_GetCreatedJavaVMs`, which
-/// libnativehelper exports to apps from API 31. A process with a Java VM has
-/// loaded libnativehelper, so this doesn't load it (`RTLD_NOLOAD`).
-fn process_java_vm() -> Option<JavaVM> {
-    type GetCreatedJavaVms = unsafe extern "system" fn(*mut *mut jni::sys::JavaVM, jsize, *mut jsize) -> jint;
-    const RTLD_NOW: c_int = 2;
-    const RTLD_NOLOAD: c_int = 4;
-    // SAFETY: a library name and flags that dlopen takes.
-    let library = unsafe { dlopen(c"libnativehelper.so".as_ptr(), RTLD_NOW | RTLD_NOLOAD) };
-    if library.is_null() {
-        return None;
-    }
-    // SAFETY: the loaded library, and a symbol name.
-    let symbol = unsafe { dlsym(library, c"JNI_GetCreatedJavaVMs".as_ptr()) };
-    if symbol.is_null() {
-        return None;
-    }
-    // SAFETY: JNI_GetCreatedJavaVMs has this signature.
-    let get_created_java_vms = unsafe { std::mem::transmute::<*mut c_void, GetCreatedJavaVms>(symbol) };
-    let mut vm = std::ptr::null_mut();
-    let mut count = 0;
-    // SAFETY: room for one VM, and the count.
-    let status = unsafe { get_created_java_vms(&raw mut vm, 1, &raw mut count) };
-    // SAFETY: the process's live VM, which it keeps until it exits.
-    (status == JNI_OK && count == 1 && !vm.is_null()).then(|| unsafe { JavaVM::from_raw(vm) })
 }
 
 /// The text of a Java string.

@@ -50,6 +50,7 @@ categories = ["graphics", "science::geo"]
 # In-repo libraries. The exact version keeps a release's packages together.
 feature = { package = "mln-rs-feature", path = "vendor/feature", version = "=0.0.15" }
 geometry = { package = "mln-rs-geometry", path = "vendor/geometry", version = "=0.0.15" }
+mln_android = { package = "mln-rs-android", path = "crates/mln_android", version = "=0.0.15" }
 mln_conversion = { package = "mln-rs-conversion", path = "crates/mln_conversion", version = "=0.0.15" }
 mln_d3d12 = { package = "mln-rs-d3d12", path = "crates/mln_d3d12", version = "=0.0.15" }
 mln_expression = { package = "mln-rs-expression", path = "crates/mln_expression", version = "=0.0.15" }

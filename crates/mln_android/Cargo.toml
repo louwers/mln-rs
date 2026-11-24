@@ -1,0 +1,22 @@
+[package]
+name = "mln-rs-android"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+include.workspace = true
+
+[lib]
+name = "mln_android"
+# The doc comments have no examples to run.
+doctest = false
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true
+
+[lints]
+workspace = true
