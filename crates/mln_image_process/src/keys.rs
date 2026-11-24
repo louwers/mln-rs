@@ -120,13 +120,15 @@ fn param<T: Converter + ValueConverter + Clone>(
     PropertyValue::parse(&member, functions).map(Some).map_err(|e| error(format!("{name}: {}", e.message)))
 }
 
-/// The value of `object`'s member `name`, which it must have.
+/// The value of `object`'s member `name`, which it must have, not `null`.
 fn required<T: Converter + ValueConverter + Clone>(
     object: &Convertible<'_>,
     name: &str,
     functions: &Arc<Functions>,
 ) -> Result<PropertyValue<T>, conversion::Error> {
-    param(object, name, functions)?.ok_or_else(|| error(format!("expected a {name}")))
+    param(object, name, functions)?
+        .filter(|value| !matches!(value, PropertyValue::Undefined))
+        .ok_or_else(|| error(format!("expected a {name}")))
 }
 
 fn parse_operation(value: &Convertible<'_>, functions: &Arc<Functions>) -> Result<Operation, conversion::Error> {

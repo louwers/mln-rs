@@ -94,6 +94,8 @@ fn a_map_reads_writes_and_refuses_the_keys_json() {
     for operations in [
         r#"[{"type":"invert"}]"#,
         r#"[{"type":"blur"}]"#,
+        r#"[{"type":"blur","size":null}]"#,
+        r#"[{"type":"color","value":null}]"#,
         r#"[{"type":"blur","size":2,"sigma":2}]"#,
         r#"[{"type":"combine","target":"t","mode":"screen"}]"#,
         r#"[{"type":"opacity","value":["get","opacity"]}]"#,
