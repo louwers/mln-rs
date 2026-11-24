@@ -177,6 +177,15 @@ fn still(
         response.data = Some(Arc::new(tile(&resource.url, resource.tile_data.as_ref().expect("a tile"))));
         Some(response)
     });
+    file_source.set_response(Kind::Image, |_: &Resource| {
+        let mut image = PremultipliedImage::new(Size::new(8, 8));
+        for pixel in image.data.as_chunks_mut::<4>().0 {
+            *pixel = [0, 0, 255, 255];
+        }
+        let mut response = Response::new();
+        response.data = Some(Arc::new(mln_image::encode_png(&image)));
+        Some(response)
+    });
     let options = MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() };
     let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
     frontend.attach(&mut map);
@@ -490,5 +499,52 @@ fn a_box_query_over_uneven_terrain_finds_a_fill_inside_it() {
             )
             .unwrap();
         assert_eq!(1, found.len(), "globe {globe}: the box finds the fill at {x}, {y}");
+    }
+}
+
+/// On the globe, an image whose quad crosses the antimeridian drapes over
+/// the terrain on both sides of it, as it draws without terrain.
+#[test]
+fn an_image_drapes_on_both_sides_of_the_antimeridian() {
+    let style = |terrain: bool, center: f64| {
+        let terrain = if terrain { r#""terrain": {"source": "dem"},"# } else { "" };
+        format!(
+            r#"{{
+                "version": 8,
+                "center": [{center}, 0],
+                "zoom": 1,
+                "projection": {{"type": "vertical-perspective"}},
+                {terrain}
+                "sources": {{
+                    "dem": {{"type": "raster-dem", "tiles": ["dem/{{z}}/{{x}}/{{y}}.png"], "tileSize": 512, "maxzoom": 15}},
+                    "image": {{"type": "image", "url": "image.png",
+                        "coordinates": [[-210, 40], [-100, 40], [-100, -40], [-210, -40]]}}
+                }},
+                "layers": [
+                    {{"id": "background", "type": "background", "paint": {{"background-color": "white"}}}},
+                    {{"id": "image", "type": "raster", "source": "image", "paint": {{"raster-fade-duration": 0}}}}
+                ]
+            }}"#
+        )
+    };
+    let tiles = |_: &str, tile: &TileData| sea_level_png(tile);
+    let blue = |image: &PremultipliedImage| {
+        image.data.as_chunks::<4>().0.iter().filter(|[r, _, b, _]| *b > 200 && *r < 64).count()
+    };
+    // Centers on either side of the antimeridian, where the drapes of the
+    // tiles west of it are in another world copy than those east of it.
+    for center in [180.0, 155.0, -155.0, 120.0] {
+        let (Some(draped), Some(flat)) = (render(&style(true, center), tiles), render(&style(false, center), tiles))
+        else {
+            return;
+        };
+        // The surface filters its drapes, so the image's edges differ, by
+        // about 1% on a software rasterizer. Without its copy in the next
+        // world, the image loses about 40%.
+        let (draped, flat) = (blue(&draped), blue(&flat));
+        assert!(
+            flat > 0 && draped.abs_diff(flat) * 20 <= flat,
+            "{draped} blue pixels draped, {flat} without terrain, at {center}"
+        );
     }
 }

@@ -964,12 +964,10 @@ impl<L: TypedLayer> LayerParts for L {
             }
             Some(LayerSource::Image(image)) => {
                 let bucket = image.bucket.map(|bucket| (bucket.base.bucket_id, bucket.geometry().generation()));
-                stamps.extend(image.tile_ids.iter().filter(|copy| image.overlaps(copy, &drape)).map(|copy| {
-                    TileStamp {
-                        tile: copy.overscale_to(copy.canonical.z),
-                        bucket: bucket.map(|(id, _)| id),
-                        generations: [bucket.map_or(0, |(_, generation)| generation), 0],
-                    }
+                stamps.extend(image.copies_over(&drape, globe).map(|copy| TileStamp {
+                    tile: copy.overscale_to(copy.canonical.z),
+                    bucket: bucket.map(|(id, _)| id),
+                    generations: [bucket.map_or(0, |(_, generation)| generation), 0],
                 }));
             }
             None => {}
@@ -1053,8 +1051,7 @@ fn update_drape<L: TypedLayer>(
             source.overlapping::<L::Type>(found, layer.id(), drape, globe)
         }
         Some(LayerSource::Image(image)) => {
-            let copies: SmallVec<[UnwrappedTileID; 4]> =
-                image.tile_ids.iter().filter(|copy| image.overlaps(copy, &drape)).copied().collect();
+            let copies: SmallVec<[UnwrappedTileID; 4]> = image.copies_over(&drape, globe).collect();
             if copies.is_empty() {
                 layer.remove_all_draws();
             } else if begin_frame(layer) {

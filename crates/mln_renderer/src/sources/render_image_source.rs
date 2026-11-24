@@ -230,6 +230,24 @@ impl ImageSourceRenderData<'_> {
             && top + min_y < drape_top + drape_extent
             && drape_top < top + max_y
     }
+
+    /// The copies of the image that cover part of the tile `drape`
+    /// ([`overlaps`](Self::overlaps)): of `tile_ids`, or on the `globe`,
+    /// whose one copy stands for every world copy, of that copy in the
+    /// drape's world and the worlds either side, which a quad that crosses
+    /// the antimeridian reaches into.
+    pub(crate) fn copies_over(
+        &self,
+        drape: &UnwrappedTileID,
+        globe: bool,
+    ) -> impl Iterator<Item = UnwrappedTileID> + use<'_> {
+        let drape = *drape;
+        let copies = self.tile_ids.iter().flat_map(move |copy| {
+            let wraps = if globe { drape.wrap - 1..=drape.wrap + 1 } else { copy.wrap..=copy.wrap };
+            wraps.map(|wrap| UnwrappedTileID::with_wrap(wrap, copy.canonical))
+        });
+        copies.filter(move |copy| self.overlaps(copy, &drape))
+    }
 }
 
 pub(crate) struct RenderImageSource {
