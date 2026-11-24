@@ -1,0 +1,125 @@
+name: device-farm-finish
+# The run's ID, by which device-farm-watch finds the runs it finished.
+run-name: ${{ inputs.run }}
+
+# Reports a finished AWS Device Farm run of the Android tests on its commit as
+# the `device-farm / android` status, with each phone's output and artifacts
+# (tools/device-farm/README.md).
+
+on:
+  workflow_dispatch: # started by device-farm-watch
+    inputs:
+      run:
+        description: ID of the finished AWS Device Farm run
+        required: true
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  STATUS_CONTEXT: device-farm / android
+
+jobs:
+  finish:
+    if: github.repository == 'maplibre/mln-rs'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    environment:
+      name: workflow-run
+      deployment: false
+    permissions:
+      id-token: write # assumes the AWS role
+      statuses: write # reports the run on the commit
+    outputs:
+      collected:
+        ${{ steps.collect.outcome == 'success' || steps.collect.outcome ==
+        'failure' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: tools/device-farm
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-region: us-west-2
+          role-to-assume: ${{ vars.OIDC_AWS_ROLE_TO_ASSUME }}
+          role-session-name: mln-rs-device-farm-finish-${{ github.run_id }}
+
+      # The commit is the one that the device-farm workflow named the run for.
+      - name: Read the run
+        id: run
+        env:
+          AWS_DEVICE_FARM_PROJECT_ARN: ${{ vars.AWS_DEVICE_FARM_PROJECT_ARN }}
+          RUN: ${{ inputs.run }}
+        run: |
+          [[ $RUN =~ ^[0-9a-f-]{36}$ ]] || { echo "Not a run ID: $RUN" >&2; exit 1; }
+          arn=${AWS_DEVICE_FARM_PROJECT_ARN/:project:/:run:}/$RUN
+          aws devicefarm get-run --arn "$arn" --output json | jq -er --arg arn "$arn" '.run |
+            select(.status == "COMPLETED") | (.name | capture("^mln-rs (?<sha>[0-9a-f]{40}) ")) as $name |
+            "arn=\($arn)", "sha=\($name.sha)", "result=\(.result)"' >> "$GITHUB_OUTPUT"
+
+      - name: Download the phones' output and artifacts
+        id: collect
+        env:
+          ARN: ${{ steps.run.outputs.arn }}
+        run: tools/device-farm/collect.sh "$ARN" "$RUNNER_TEMP/results"
+
+      - name: Upload the phones' output and artifacts
+        if: ${{ !cancelled() && steps.run.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-device-test-results
+          path: ${{ runner.temp }}/results
+          # The artifacts are compressed already.
+          compression-level: 0
+          if-no-files-found: ignore
+
+      - name: Report the run on the commit
+        if: ${{ !cancelled() && steps.run.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.run.outputs.sha }}
+          RESULT: ${{ steps.run.outputs.result }}
+          RUN_URL:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
+            github.run_id }}
+        run: |
+          case $RESULT in
+            PASSED) state=success description="The tests passed on every phone" ;;
+            STOPPED) state=error description="The run was stopped, as for a newer commit" ;;
+            *) state=failure description="Tests failed on a phone, or the run failed" ;;
+          esac
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state="$state" \
+            -f context="$STATUS_CONTEXT" -f description="$description" -f target_url="$RUN_URL"
+
+  # Each phone's test results, from the output that the code under test wrote,
+  # so without credentials.
+  report:
+    needs: finish
+    if: ${{ !cancelled() && needs.finish.outputs.collected == 'true' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      actions: read # downloads the finish job's results
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: tools/device-farm
+
+      # By pattern, so that a run without results downloads nothing.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: android-device-test-results
+          merge-multiple: true
+          path: ${{ runner.temp }}/results
+
+      - name: Summarize each phone's tests
+        run: >-
+          python3 -I tools/device-farm/summary.py "$RUNNER_TEMP/results" | tee
+          -a "$GITHUB_STEP_SUMMARY"

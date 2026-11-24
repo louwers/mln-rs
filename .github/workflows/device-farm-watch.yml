@@ -1,0 +1,53 @@
+name: device-farm-watch
+
+# Waits for the AWS Device Farm runs that the device-farm workflow scheduled,
+# and starts device-farm-finish for each that finished, so that a run holds no
+# GitHub runner while it waits for the phones (tools/device-farm/README.md).
+# One watcher waits for every run.
+
+on:
+  workflow_dispatch: # started by the device-farm workflow, and by itself
+  schedule:
+    - cron: "23 * * * *" # in case a watcher failed
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: device-farm-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    if: github.repository == 'maplibre/mln-rs'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 200
+    environment:
+      name: workflow-run
+      deployment: false
+    permissions:
+      actions: write # starts device-farm-finish, and the next watcher
+      id-token: write # assumes the AWS role
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: tools/device-farm
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-region: us-west-2
+          role-to-assume: ${{ vars.OIDC_AWS_ROLE_TO_ASSUME }}
+          role-session-name: mln-rs-device-farm-watch-${{ github.run_id }}
+          # The role's maximum; watch.sh starts the next watcher before then.
+          role-duration-seconds: 14400
+
+      - name: Watch the runs
+        env:
+          AWS_DEVICE_FARM_PROJECT_ARN: ${{ vars.AWS_DEVICE_FARM_PROJECT_ARN }}
+          GH_TOKEN: ${{ github.token }}
+        run: tools/device-farm/watch.sh

@@ -13,9 +13,10 @@ Google Pixel 9 (Mali GPU) and a Samsung Galaxy S25 (Adreno GPU), both on Android
    cargo-nextest, and `run-tests.sh` and `runner.sh`. It builds the test host
    with a JDK, which the task installs, and the SDK's build-tools, which the
    target-android environment installs.
-2. `schedule.sh` uploads the package with the test spec, `android.yml`. It
-   schedules them as a web app test, the kind of test that needs no app, waits
-   for the run, and downloads each phone's test spec output and artifacts.
+2. `schedule.sh` uploads the package with the test spec, `android.yml`, and
+   schedules them as a web app test, the kind of test that needs no app. Once
+   the run finished, `collect.sh` downloads each phone's test spec output and
+   artifacts.
 3. On each phone's test host, `run-tests.sh` copies the workspace to the phone.
    cargo-nextest then runs the archive's tests with the `device-farm` profile
    (`.config/nextest.toml`), each test on the phone through `runner.sh` and
@@ -35,15 +36,24 @@ of its own, so nextest runs them in parallel, as it does elsewhere.
 ## In CI
 
 CI's `device-farm` job builds the package when the `android` unit runs, without
-credentials. Once the CI run completes, the `device-farm` workflow
-(`.github/workflows/device-farm.yml`) runs it and reports the result on the
-commit as the `device-farm / android` status, and a job without credentials
-summarizes each phone's JUnit report (`summary.py`). That workflow runs on
-`workflow_run`, from the default branch, so pull requests from forks get a run
-too: the package may come from a fork, so the workflow, which assumes its AWS
-role through the `workflow-run` environment that only `main` can use, never runs
-or unpacks it. A newer commit of a pull request stops the run of the commit
-before it.
+credentials. Three workflows run it, so that no GitHub runner waits for the
+phones while a run is queued or in progress:
+
+- `device-farm` schedules the package once the CI run completes, and reports it
+  on the commit as pending, as the `device-farm / android` status. It names the
+  run for the commit. A newer commit of a pull request stops the run of the
+  commit before it.
+- `device-farm-watch`, one at a time for every run, waits for the runs, and
+  starts `device-farm-finish` for each that finished (`watch.sh`). An hourly
+  schedule starts it too, in case one failed.
+- `device-farm-finish` reports the run's result on its commit, with each phone's
+  output and artifacts (`collect.sh`), and a job without credentials summarizes
+  each phone's JUnit report (`summary.py`).
+
+`device-farm` runs on `workflow_run`, from the default branch, so pull requests
+from forks get a run too: the package may come from a fork, so the workflows,
+which assume their AWS role through the `workflow-run` environment that only
+`main` can use, never run or unpack it.
 
 [maplibre/infra](https://github.com/maplibre/infra)'s `opentofu/github-actions`
 stack manages the AWS side: the `mln-rs` Device Farm project, the `workflow-run`
