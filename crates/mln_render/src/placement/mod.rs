@@ -146,8 +146,10 @@ pub trait Placement: Default + 'static {
     /// copied to world copies and queried as a layer of a type without
     /// placement. It may read only the layer's filter, visibility and
     /// layout properties, since only a change to those lays the layer out
-    /// again: until it is, a tile laid out the other way keeps what its
-    /// layout made of it.
+    /// again. Until it is, a tile laid out the other way keeps what its
+    /// layout made of it, and its world copies follow its layout, but the
+    /// layer places and is queried as it is now: a layer that stopped
+    /// placing finds no features of a tile laid out while it placed.
     #[must_use]
     fn places(_style: &LayerStyle<<Self::Layer as Layer>::Style>) -> bool {
         true
