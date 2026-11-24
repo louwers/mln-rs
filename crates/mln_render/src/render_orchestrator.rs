@@ -172,9 +172,6 @@ pub(crate) struct RenderOrchestrator {
     /// Whether the next update makes the render layers again, for new
     /// shaders.
     remake_render_layers: bool,
-    /// Whether the render layers left with the renderer's GPU context, so
-    /// that the next update makes every layer of the style again.
-    layers_left: bool,
     filtered_layers_for_source: Vec<Arc<dyn ErasedEvaluatedLayer>>,
 
     thread_pool: TaskGroup,
@@ -237,7 +234,6 @@ impl RenderOrchestrator {
             longitude: 0.0,
             tile_cache_enabled: true,
             remake_render_layers: false,
-            layers_left: false,
             filtered_layers_for_source: Vec::new(),
             _wait_for_thread_pool: WaitOnDrop(thread_pool.clone()),
             thread_pool,
@@ -616,8 +612,7 @@ impl RenderOrchestrator {
             }
         }
 
-        let rejoin = std::mem::take(&mut self.layers_left);
-        if layer_changes.order_changed || rejoin {
+        if layer_changes.order_changed {
             let mut by_id: HashMap<String, Box<dyn RenderLayer>> =
                 self.layers.drain(..).map(|layer| (layer.id().to_owned(), layer)).collect();
 
@@ -633,16 +628,6 @@ impl RenderOrchestrator {
                     render_layer.transition(&clock.added_layer_transition);
                     // A layer added twice keeps its first render layer.
                     by_id.entry(id.to_string()).or_insert(render_layer);
-                }
-            }
-
-            // After the GPU context went, every layer joins again.
-            if rejoin {
-                for layer in layers.iter() {
-                    if let Some(mut render_layer) = create_render_layer(&self.registry, layer.style(), res) {
-                        render_layer.transition(&clock.added_layer_transition);
-                        by_id.entry(layer.get_id().to_owned()).or_insert(render_layer);
-                    }
                 }
             }
 
@@ -664,7 +649,6 @@ impl RenderOrchestrator {
             }
         }
 
-        let render_layers_remade = render_layers_remade || rejoin;
         if render_layers_remade || layer_changes.order_changed || !layer_changes.is_empty() {
             self.tile_store.glyphs().evict(&layer::font_stacks(layers.iter().map(Layer::style)));
         }
@@ -1178,12 +1162,10 @@ impl RenderOrchestrator {
         Some(hosted.parts())
     }
 
-    /// Drops every render layer, with the GPU context they were made in:
-    /// the next update makes every layer of the style again.
+    /// Drops every render layer, with the GPU context they were made in.
     pub(crate) fn leave_layers(&mut self) {
         self.layers.clear();
         self.layer_indexes.clear();
-        self.layers_left = true;
         self.routes.lose();
     }
 

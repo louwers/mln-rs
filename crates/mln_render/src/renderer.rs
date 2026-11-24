@@ -421,11 +421,11 @@ impl Renderer {
         self.orchestrator.layer::<L>(id)
     }
 
-    /// Drops every layer: the renderer's device or target went first, and
-    /// the layers' GPU resources with it. The work after the GPU runs as
-    /// lost ([`GpuEnd::Lost`](crate::layer::GpuEnd::Lost)). The next update
-    /// makes every layer of the style again
-    /// ([`Layer::new`](crate::layer::Layer::new)).
+    /// Drops every layer, and runs the work after the GPU as lost
+    /// ([`GpuEnd::Lost`](crate::layer::GpuEnd::Lost)). Call it only before
+    /// the renderer goes, when its device or target went first and the
+    /// layers' GPU resources with it: the renderer's other GPU objects stay
+    /// those of the lost device.
     pub fn lose_context(&mut self) {
         self.orchestrator.leave_layers();
         self.encoder.context.after_gpu.run(crate::layer::GpuEnd::Lost);
