@@ -121,8 +121,9 @@ pub enum Edit {
 }
 
 /// What [`Edit::UpdateSource`] does to a source: it returns the source with
-/// new data, made by [`Source::with_data`], or `None` if it changes nothing,
-/// or fails, as for a source of a type it doesn't update.
+/// new data of its type, made by [`Source::with_data`], or `None` if it
+/// changes nothing, or fails, as for a source of a type it doesn't update.
+/// The edit fails with `InvalidArgument` for data of another type.
 pub type SourceUpdate = Box<dyn FnOnce(&Source) -> Result<Option<Source>, Error> + Send>;
 
 impl Edit {

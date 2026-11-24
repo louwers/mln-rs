@@ -440,10 +440,10 @@ impl Style {
             }
             Edit::AddImages(images) => self.add_images(images),
             Edit::AddSource(source) => {
-                check_source_type(&self.registry, &source)?;
                 if self.sources.get(source.id()).is_some() {
                     return Err(Error::already_exists(format!("source \"{}\" already exists", source.id())));
                 }
+                check_source_type(&self.registry, &source)?;
                 Arc::make_mut(&mut self.sources).set(source);
             }
             Edit::RemoveSource(id) => {
@@ -472,10 +472,14 @@ impl Style {
             }
             Edit::UpdateSource { id, update } => {
                 let source = self.sources.get(&id).ok_or_else(|| source_not_found(&id))?;
-                let instance = source.instance();
+                let (instance, name) = (source.instance(), source.info().name);
                 if let Some(source) = update(source)? {
                     debug_assert!(source.id() == id && source.instance() == instance, "an update keeps its source");
-                    check_source_type(&self.registry, &source)?;
+                    // The source's type was the registry's when it was
+                    // added; its description and tiles are that type's.
+                    if !self.registry.source_type(name).is_some_and(|registered| registered.is_type_of(&source)) {
+                        return Err(Error::invalid_argument(format!("an update changes the type of source \"{id}\"")));
+                    }
                     Arc::make_mut(&mut self.sources).set(source);
                 }
             }

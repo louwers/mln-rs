@@ -181,7 +181,8 @@ impl<const SHAPES: bool> StyleSourceType for UnregisteredSource<SHAPES> {
 }
 
 // A source made outside the style's registry is added only if its type is
-// the one the registry has by its name, as a layer is.
+// the one the registry has by its name, as a layer is, and an update keeps
+// a source's type.
 #[test]
 fn a_source_of_a_type_the_registry_lacks_is_an_invalid_argument() {
     let mut style = loaded_style();
@@ -197,6 +198,18 @@ fn a_source_of_a_type_the_registry_lacks_is_an_invalid_argument() {
     let shapes = crate::tests::fixture_source::source::<crate::tests::fixture_source::Shapes>("shapes");
     style.apply(Edit::AddSource(shapes)).unwrap();
     assert_eq!(style.get_sources().len(), 1);
+
+    // A duplicate id fails first, and an update keeps the source's type.
+    let stray = Source::new("shapes", SourceData::<UnregisteredSource<false>>::new(()));
+    assert_fails(style.apply(Edit::AddSource(stray)), ErrorKind::AlreadyExists, r#"source "shapes" already exists"#);
+    let points =
+        |source: &Source| Ok(Some(source.with_data(SourceData::<crate::tests::fixture_source::Points>::new(()))));
+    assert_fails(
+        style.apply(Edit::UpdateSource { id: "shapes".to_owned(), update: Box::new(points) }),
+        ErrorKind::InvalidArgument,
+        r#"an update changes the type of source "shapes""#,
+    );
+    assert_eq!(style.get_sources().get("shapes").map(|source| source.info().name), Some("shapes"));
 }
 
 // A bad property name or value on a live layer is an invalid argument that
