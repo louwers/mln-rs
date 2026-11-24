@@ -312,8 +312,10 @@ pub(crate) fn tile_order(tiles: &[RenderTile], bearing: f32) -> Vec<usize> {
 /// [module docs](self) list it).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Prepared {
-    /// Whether the participant can place items it couldn't before, which a
-    /// continuous map with a flat view places soon. The engine knows when a
+    /// Whether the participant can place items it couldn't before, which
+    /// shortens the wait of a continuous map with a flat view for its next
+    /// placement. It asks for none: a participant whose new items would
+    /// show says [`changed`](Self::changed) too. The engine knows when a
     /// layer leads a bucket that no layer led the frame before; a
     /// participant says so for reasons of its own, such as symbols of an
     /// overscaled tile that came into view.
