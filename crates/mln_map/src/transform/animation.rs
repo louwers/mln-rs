@@ -122,8 +122,9 @@ impl Transform {
         }
         let start_center_alt = self.state.view().center_altitude();
 
-        let start_point = Projection::project(&start_lat_lng, self.state.view().scale());
-        let end_point = Projection::project(&lat_lng_end, self.state.view().scale());
+        let start_scale = self.state.view().scale();
+        let start_point = Projection::project(&start_lat_lng, start_scale);
+        let end_point = Projection::project(&lat_lng_end, start_scale);
 
         // Constrain camera options.
         // The target is drawn in the projection the style gives at its zoom,
@@ -216,12 +217,11 @@ impl Transform {
                     };
                 }
                 (Some(frame_lat_lng), frame_zoom)
-            } else {
+            } else if t < 1.0 {
                 let frame_point = interpolate(&start_point, &end_point, t);
-                (
-                    frame_unproject(&frame_point, mln_map_types::zoom_scale(start_zoom), WrapMode::Unwrapped),
-                    interpolate(&start_zoom, &zoom, t),
-                )
+                (frame_unproject(&frame_point, start_scale, WrapMode::Unwrapped), interpolate(&start_zoom, &zoom, t))
+            } else {
+                (Some(lat_lng_end), zoom)
             };
             CameraOptions {
                 center: frame_lat_lng,
