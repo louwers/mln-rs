@@ -6,7 +6,6 @@ use mln_render::bench::{PlacementFrame, TileLayout};
 use mln_style::{Edit, Style};
 use mln_style_types::image::Impl as ImageImpl;
 use mln_tile::TileData;
-use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use serde_json::json;
@@ -84,8 +83,8 @@ fn with_bucket(mut layout: serde_json::Value, type_: SortKeyType, check: impl Fn
     let data = TileData::Features(Arc::new(features));
     let layout = TileLayout::new(super::registry(), &style, "s", |_| true, (0, 0, 0), &data, |_| None).unwrap();
     let laid_out = layout.run(data).unwrap();
-    let center = LatLng::new(0.0, 0.0).unwrap();
-    let mut frame = PlacementFrame::<SymbolLayer>::new(&style, "s", &[&laid_out], center, 0.0, (512, 512)).unwrap();
+    let mut frame =
+        PlacementFrame::<SymbolLayer>::new("s", &[&laid_out], super::update(&style, 0.0, (512, 512))).unwrap();
     frame.with_context(|cx| check(cx.buckets.get::<SymbolBucket>(&cx.layers[0].tiles[0].bucket).unwrap()));
 }
 

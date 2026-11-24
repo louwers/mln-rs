@@ -7,10 +7,10 @@
 //! The engine's entry points, which lay tiles out and show them to a frame's
 //! layers, are `mln_render::bench`'s.
 
+use mln_render::UpdateParameters;
 use mln_render::bench::{LaidOut, PlacementFrame};
-use mln_style::Style;
 use mln_util::error::Error;
-use mln_util::geo::{LatLng, WrapMode};
+use mln_util::geo::WrapMode;
 
 use crate::symbol::SymbolLayer;
 use crate::symbol::placement::cross_tile_index::CrossTileSymbolIndex;
@@ -27,18 +27,11 @@ pub struct SymbolView {
 }
 
 impl SymbolView {
-    /// A view of `size` pixels centered on `center` at `zoom`, of `tiles`
-    /// laid out by the visible symbol layers on `source` in `style`, for a
-    /// continuous map at pixel ratio 1.
-    pub fn new(
-        style: &Style,
-        source: &str,
-        tiles: &[&LaidOut],
-        center: LatLng,
-        zoom: f64,
-        size: (u32, u32),
-    ) -> Result<SymbolView, Error> {
-        let mut frame = PlacementFrame::new(style, source, tiles, center, zoom, size)?;
+    /// The view that `update` shows of `tiles`, laid out by the visible
+    /// symbol layers on `source` in `update`'s style. The harness makes the
+    /// update ([`PlacementFrame::new`]).
+    pub fn new(source: &str, tiles: &[&LaidOut], update: UpdateParameters) -> Result<SymbolView, Error> {
+        let mut frame = PlacementFrame::new(source, tiles, update)?;
         let mut layers = Vec::new();
         frame.with_context(|cx| LayerBuckets::fill(&mut layers, cx));
         Ok(SymbolView { frame, layers })

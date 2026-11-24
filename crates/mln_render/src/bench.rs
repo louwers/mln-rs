@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use glam::{DMat4, DVec4};
-use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState, View};
+use mln_map_types::{MapMode, View};
 use mln_storage::Resource;
 use mln_style::Style;
 use mln_style::layer_type::{LayerStyle, StyleLayerType};
@@ -24,9 +24,6 @@ use mln_tile::TileData;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
 use mln_util::constants::EXTENT;
 use mln_util::error::Error;
-use mln_util::geo::LatLng;
-use mln_util::size::Size;
-use mln_util::time::Instant;
 use mln_vec_map::VecSet;
 use parking_lot::Mutex;
 
@@ -242,22 +239,15 @@ pub struct PlacementFrame<L: Layer> {
 }
 
 impl<L: Layer> PlacementFrame<L> {
-    /// A view of `size` pixels centered on `center` at `zoom`, of copies of
-    /// `tiles` laid out by the visible layers of `L`'s type on `source` in
-    /// `style`, for a continuous map at pixel ratio 1. Fails for a layer of
-    /// the type's name that isn't of the type.
-    pub fn new(
-        style: &Style,
-        source: &str,
-        tiles: &[&LaidOut],
-        center: LatLng,
-        zoom: f64,
-        (width, height): (u32, u32),
-    ) -> Result<PlacementFrame<L>, Error> {
-        let mut state = TransformState::default();
-        state.set_size(Size::new(width, height));
-        state.set_lat_lng_zoom(&center, zoom);
-        let transform = TransformParameters::new(state.view());
+    /// The view that `update` shows of copies of `tiles`, laid out by the
+    /// visible layers of `L`'s type on `source` in `update`'s style. Fails
+    /// for a layer of the type's name that isn't of the type.
+    ///
+    /// The harness makes the update, since its fields are what a renderer
+    /// takes from a map: a comparison builds this module against libraries
+    /// whose updates have other fields.
+    pub fn new(source: &str, tiles: &[&LaidOut], update: UpdateParameters) -> Result<PlacementFrame<L>, Error> {
+        let transform = TransformParameters::new(&update.view);
         let render_tiles: Vec<RenderTile> = tiles
             .iter()
             .map(|laid_out| {
@@ -273,39 +263,11 @@ impl<L: Layer> PlacementFrame<L> {
                 (laid_out.id, LayoutResult::new(buckets, Arc::clone(&laid_out.result.feature_index)))
             })
             .collect();
-        let order = crate::placement::tile_order(&render_tiles, state.view().angle() as f32);
+        let order = crate::placement::tile_order(&render_tiles, update.view.angle() as f32);
 
-        let update = UpdateParameters {
-            style_loaded: true,
-            mode: MapMode::Continuous,
-            pixel_ratio: 1.0,
-            debug_options: MapDebugOptions::NO_DEBUG,
-            time_point: Some(Instant::now()),
-            view: state.view().clone(),
-            min_zoom: state.min_zoom(),
-            max_zoom: state.limits().max_zoom,
-            camera_moving: false,
-            style: Arc::new(style.clone()),
-            sprite_loaded: true,
-            feature_states: Arc::default(),
-            file_source: None,
-            prefetch_zoom_delta: 0,
-            still_image_request: false,
-            still_image_request_id: 0,
-            update_id: 0,
-            cross_source_collisions: true,
-            fast_pfor_enabled: false,
-            tile_lod_min_radius: 3.0,
-            tile_lod_scale: 1.0,
-            tile_lod_pitch_threshold: mln_math::deg2rad(60.0),
-            tile_lod_zoom_shift: 0.0,
-            tile_lod_mode: TileLodMode::Default,
-            subdivision_granularity: style.get_projection().get_subdivision_granularity(),
-        };
-
-        let parameters = PropertyEvaluationParameters::new(zoom as f32);
+        let parameters = PropertyEvaluationParameters::new(update.view.zoom() as f32);
         let mut layers = Vec::new();
-        for layer in style.get_layers() {
+        for layer in update.style.get_layers() {
             let base = layer.style().base();
             let name = <L::Style as StyleLayerType>::INFO.name;
             if base.source != source || base.visibility == VisibilityType::None || layer.info().name != name {

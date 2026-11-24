@@ -8,6 +8,8 @@ use std::sync::Arc;
 use feature::{Feature, Identifier, PropertyMap, Value};
 use geo_types::{Geometry, LineString, Point};
 use mln_layers::bench::{SymbolIndex, SymbolView};
+use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState};
+use mln_render::UpdateParameters;
 use mln_render::bench::{Codec, TileLayout};
 use mln_style::{Edit, Style};
 use mln_style_types::image::Impl as ImageImpl;
@@ -15,9 +17,45 @@ use mln_tile::TileData;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
+use mln_util::time::Instant;
 
 mod support;
 use support::builtin_registry;
+
+/// The update of a continuous map of `style` at pixel ratio 1, of
+/// `width` × `height` pixels centered on 0, 0 at `zoom`.
+fn update(style: &Style, zoom: f64, (width, height): (u32, u32)) -> UpdateParameters {
+    let mut state = TransformState::default();
+    state.set_size(Size::new(width, height));
+    state.set_lat_lng_zoom(&LatLng::new(0.0, 0.0).unwrap(), zoom);
+    UpdateParameters {
+        style_loaded: true,
+        mode: MapMode::Continuous,
+        pixel_ratio: 1.0,
+        debug_options: MapDebugOptions::NO_DEBUG,
+        time_point: Some(Instant::now()),
+        view: state.view().clone(),
+        min_zoom: state.min_zoom(),
+        max_zoom: state.limits().max_zoom,
+        camera_moving: false,
+        style: Arc::new(style.clone()),
+        sprite_loaded: true,
+        feature_states: Arc::default(),
+        file_source: None,
+        prefetch_zoom_delta: 0,
+        still_image_request: false,
+        still_image_request_id: 0,
+        update_id: 0,
+        cross_source_collisions: true,
+        fast_pfor_enabled: false,
+        tile_lod_min_radius: 3.0,
+        tile_lod_scale: 1.0,
+        tile_lod_pitch_threshold: mln_math::deg2rad(60.0),
+        tile_lod_zoom_shift: 0.0,
+        tile_lod_mode: TileLodMode::Default,
+        subdivision_granularity: style.get_projection().get_subdivision_granularity(),
+    }
+}
 
 /// A style of a layer of labels, one of labels and icons whose text color
 /// a format section overrides, and the icon `marker`, over source `s`.
@@ -139,9 +177,8 @@ fn places_the_symbols_it_indexes() {
         layout.run(data.clone()).unwrap()
     };
     let (before, after) = (names(0), names(1));
-    let center = LatLng::new(0.0, 0.0).unwrap();
-    let mut zoomed_out = SymbolView::new(&style, "s", &[&before], center, 0.0, (512, 512)).unwrap();
-    let mut zoomed_in = SymbolView::new(&style, "s", &[&after], center, 1.0, (1024, 1024)).unwrap();
+    let mut zoomed_out = SymbolView::new("s", &[&before], update(&style, 0.0, (512, 512))).unwrap();
+    let mut zoomed_in = SymbolView::new("s", &[&after], update(&style, 1.0, (1024, 1024))).unwrap();
 
     // Unindexed symbols show nowhere.
     assert_eq!(zoomed_in.place(), 0);
