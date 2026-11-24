@@ -3725,18 +3725,17 @@ void main() {
 /// RGBA8 texels behind a one-texel border, decoded by a `TerrainProps`. A
 /// macro, so that `concat!` puts it in the vertex stages that read the DEM:
 /// a fragment stage would need a sampler for the texture.
-#[cfg(any(test, feature = "gpu-conformance"))]
 macro_rules! ground_height {
     () => {
         r"
 
-// How the terrain's DEM decodes, and its exaggeration.
+// How the terrain's DEM decodes, its exaggeration and its skirts' length.
 struct TerrainProps {
     vec4 unpack;
     float unpack_scale;
     float exaggeration;
+    float skirt_length;
     float pad0;
-    float pad1;
 };
 
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 2) uniform texture2D ground_dem_texture;
@@ -3774,23 +3773,105 @@ float ground_height(const vec2 pos, const vec4 dem_coords, const TerrainProps pr
     };
 }
 
+/// The surface's and the probe's vertex prelude: the terrain's uniform
+/// block, the height rule, and the height of the surface's vertices.
+macro_rules! terrain_props {
+    () => {
+        concat!(
+            ground_height!(),
+            r"
+layout(std140, set = LAYER_SET_INDEX, binding = idTerrainPropsUBO) uniform TerrainPropsUBO {
+    TerrainProps props;
+} terrain_props;
+
+// The height of the surface's vertex at `pos`, in tile units of a tile that
+// reads its DEM at `dem_coords`: the ground's, or sea level at a pole.
+float surface_height(const vec2 pos, const vec4 dem_coords, const TerrainProps props) {
+    if (pos.y < GLOBE_POLE_NORTH_Y || pos.y > GLOBE_POLE_SOUTH_Y) {
+        return 0.0;
+    }
+    return ground_height(pos, dem_coords, props);
+}
+"
+        )
+    };
+}
+
+pub(crate) const TERRAIN_SHADER_PRELUDE: &str = r"
+
+#define idTerrainDrawableUBO    idDrawableReservedVertexOnlyUBO
+#define idTerrainPropsUBO       layerUBOStartId
+
+";
+
+/// The terrain's surface: a tile's grid, raised to the heights of the tile's
+/// DEM with its skirts lowered and projected through the tile's entry of
+/// `projectionVector`, in the colors of the tile's drape. A pole's vertices
+/// stand at sea level. The drape is sampled where the vertex is in the tile:
+/// the back end's flip of Y puts its rows north first.
+pub(crate) const TERRAIN_SHADER: GlslShaderSource = GlslShaderSource {
+    prelude: TERRAIN_SHADER_PRELUDE,
+    vertex: concat!(
+        terrain_props!(),
+        r"
+
+// x and y in tile units, whether the vertex is a skirt's lower edge, 0.
+layout(location = 0) in ivec4 in_pos;
+
+layout(location = 0) out vec2 frag_drape_pos;
+
+layout(push_constant) uniform Constants {
+    int ubo_index;
+} constant;
+
+struct TerrainDrawableUBO {
+    vec4 dem_coords;
+};
+
+layout(std140, set = LAYER_SET_INDEX, binding = idTerrainDrawableUBO) readonly buffer TerrainDrawableUBOVector {
+    TerrainDrawableUBO drawable_ubo[];
+} drawableVector;
+
+layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
+    ProjectionUBO projection_ubo[];
+} projectionVector;
+
+void main() {
+    const TerrainDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const vec2 pos = vec2(in_pos.xy);
+    const float skirt = float(in_pos.z);
+    const float height = surface_height(pos, drawable.dem_coords, terrain_props.props);
+    gl_Position = projectTileFor3D(pos, height - skirt * terrain_props.props.skirt_length, projection);
+    frag_drape_pos = clamp(pos / 8192.0, vec2(0.0), vec2(1.0));
+}
+"
+    ),
+    fragment: r"
+
+layout(location = 0) in vec2 frag_drape_pos;
+
+layout(location = 0) out vec4 out_color;
+
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 1) uniform texture2D drape_texture;
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId + 1) uniform sampler drape_sampler;
+
+void main() {
+    out_color = texture(sampler2D(drape_texture, drape_sampler), frag_drape_pos);
+}
+",
+};
+
 /// Port-only, for the backend conformance cases: probes of the terrain's
 /// height rule. Each probe is a quad at clip positions whose vertices read
 /// the height at a place of a tile, and whose fragments write that height's
 /// bits, least significant byte first, as the texel's channels.
 #[cfg(any(test, feature = "gpu-conformance"))]
 pub(crate) const TERRAIN_PROBE_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: r"
-
-#define idTerrainPropsUBO       layerUBOStartId
-
-",
+    prelude: TERRAIN_SHADER_PRELUDE,
     vertex: concat!(
-        ground_height!(),
+        terrain_props!(),
         r"
-layout(std140, set = LAYER_SET_INDEX, binding = idTerrainPropsUBO) uniform TerrainPropsUBO {
-    TerrainProps props;
-} terrain_props;
 
 // Clip x and y, then where the height is read, in tile units.
 layout(location = 0) in vec4 in_pos;

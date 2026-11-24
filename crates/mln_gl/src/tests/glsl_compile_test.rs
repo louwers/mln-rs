@@ -69,8 +69,11 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
     use mln_gfx::shaders::programs::{
-        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN_PROBE, VERTEX_TEXEL,
+        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_PROBE,
+        VERTEX_TEXEL,
     };
+    // The terrain shows its drapes, where the draped layers count their
+    // draws.
     let not_layers = [
         &CLIPPING_MASK,
         &COLLISION_BOX,
@@ -78,6 +81,7 @@ fn every_layer_program_shows_the_overdraw_inspector() {
         &GLOBE_DEPTH,
         &SKY,
         &ATMOSPHERE,
+        &TERRAIN,
         &VERTEX_TEXEL,
         &TERRAIN_PROBE,
     ];

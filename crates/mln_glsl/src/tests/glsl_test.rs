@@ -38,7 +38,7 @@ use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
-use mln_gfx::shaders::terrain_ubo::TerrainPropsUBO;
+use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainPropsUBO};
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
 
 use crate::front_end::parse;
@@ -81,8 +81,11 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
     use mln_gfx::shaders::programs::{
-        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN_PROBE, VERTEX_TEXEL,
+        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_PROBE,
+        VERTEX_TEXEL,
     };
+    // The terrain shows its drapes, where the draped layers count their
+    // draws.
     let not_layers = [
         &CLIPPING_MASK,
         &COLLISION_BOX,
@@ -90,6 +93,7 @@ fn every_layer_program_shows_the_overdraw_inspector() {
         &GLOBE_DEPTH,
         &SKY,
         &ATMOSPHERE,
+        &TERRAIN,
         &VERTEX_TEXEL,
         &TERRAIN_PROBE,
     ];
@@ -249,6 +253,11 @@ fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
         }
         "LayerCompositeShader" => vec![(LayerUniform(ID_LAYER_COMPOSITE_UBO), size_of::<LayerCompositeUBO>())],
         "VertexTexelShader" => vec![],
+        "TerrainShader" => vec![
+            (LayerStorage(ID_TERRAIN_DRAWABLE_UBO), size_of::<TerrainDrawableUBO>()),
+            projection,
+            (LayerUniform(ID_TERRAIN_PROPS_UBO), size_of::<TerrainPropsUBO>()),
+        ],
         "TerrainProbeShader" => vec![(LayerUniform(ID_TERRAIN_PROPS_UBO), size_of::<TerrainPropsUBO>())],
         "HillshadeShader" => vec![
             (LayerStorage(ID_HILLSHADE_DRAWABLE_UBO), size_of::<HillshadeDrawableUBO>()),

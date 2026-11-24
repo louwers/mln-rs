@@ -58,6 +58,8 @@
 //   the current zoom, so its positions stay small.
 // - ClippingMaskProgram projects through the projection block as the other
 //   shaders do, and has a globe variant.
+// - The terrain shaders have no C++ counterpart: they are the port's own, with
+//   the WGSL's height rule.
 // - Fragment shaders declare the uniform blocks they share with their vertex
 //   shader first, in the vertex shader's order, which SwiftShader needs
 //   (maplibre/maplibre-native#4625, ffi patch 0011, and `line_gradient_sdf`).
@@ -2610,7 +2612,6 @@ void main() {
 /// RGBA8 texels behind a one-texel border, decoded as the unpack weights
 /// and scale say. A macro, so that `concat!` puts it in the vertex stages,
 /// which read the DEM with `texelFetch`.
-#[cfg(test)]
 macro_rules! ground_height {
     () => {
         r"uniform highp sampler2D u_ground_dem;
@@ -2649,6 +2650,70 @@ highp float ground_height(highp vec2 pos, highp vec4 dem_coords, highp vec4 unpa
     };
 }
 
+/// The surface's and the probe's vertex prelude: the terrain's uniform
+/// block, the height rule, and the height of the surface's vertices.
+macro_rules! terrain_props {
+    () => {
+        concat!(
+            r"layout (std140) uniform TerrainPropsUBO {
+    highp vec4 u_unpack;
+    highp float u_unpack_scale;
+    highp float u_exaggeration;
+    highp float u_skirt_length;
+    highp float props_pad0;
+};
+
+",
+            ground_height!(),
+            r"// The height of the surface's vertex at `pos`, in tile units of a tile
+// that reads its DEM at `dem_coords`: the ground's, or sea level at a pole.
+highp float surface_height(highp vec2 pos, highp vec4 dem_coords) {
+    if (pos.y < GLOBE_POLE_NORTH_Y || pos.y > GLOBE_POLE_SOUTH_Y) {
+        return 0.0;
+    }
+    return ground_height(pos, dem_coords, u_unpack, u_unpack_scale, u_exaggeration);
+}
+
+"
+        )
+    };
+}
+
+/// The terrain's surface: a tile's grid, raised to the heights of the tile's
+/// DEM with its skirts lowered and projected through the tile's projection
+/// block, in the colors of the tile's drape. A pole's vertices stand at sea
+/// level. GL stores the drape's rows bottom first, so the drape is sampled
+/// at `1 - v`.
+pub(crate) const TERRAIN_SHADER: GlslShaderSource = GlslShaderSource {
+    vertex: concat!(
+        terrain_props!(),
+        r"// x and y in tile units, whether the vertex is a skirt's lower edge, 0.
+layout (location = 0) in vec4 a_pos;
+
+layout (std140) uniform TerrainDrawableUBO {
+    highp vec4 u_dem_coords;
+};
+
+out vec2 v_drape_pos;
+
+void main() {
+    float height = surface_height(a_pos.xy, u_dem_coords);
+    gl_Position = projectTileFor3D(a_pos.xy, height - a_pos.z * u_skirt_length);
+    vec2 drape_pos = clamp(a_pos.xy / 8192.0, 0.0, 1.0);
+    v_drape_pos = vec2(drape_pos.x, 1.0 - drape_pos.y);
+}
+"
+    ),
+    fragment: r"in vec2 v_drape_pos;
+
+uniform sampler2D u_drape;
+
+void main() {
+    fragColor = texture(u_drape, v_drape_pos);
+}
+",
+};
+
 /// Port-only, for the backend conformance cases: probes of the terrain's
 /// height rule. Each probe is a quad at clip positions whose vertices read
 /// the height at a place of a tile, and whose fragments write that height's
@@ -2656,16 +2721,7 @@ highp float ground_height(highp vec2 pos, highp vec4 dem_coords, highp vec4 unpa
 #[cfg(test)]
 pub(crate) const TERRAIN_PROBE_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
-        r"layout (std140) uniform TerrainPropsUBO {
-    highp vec4 u_unpack;
-    highp float u_unpack_scale;
-    highp float u_exaggeration;
-    highp float props_pad0;
-    highp float props_pad1;
-};
-
-",
-        ground_height!(),
+        terrain_props!(),
         r"// Clip x and y, then where the height is read, in tile units.
 layout (location = 0) in vec4 a_pos;
 // The DEM uv's scale and offset, then the DEM's width in pixels.

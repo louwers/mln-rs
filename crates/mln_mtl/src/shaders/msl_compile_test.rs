@@ -106,8 +106,11 @@ fn defines<'a>(overdraw: bool, globe: bool, uniforms: impl IntoIterator<Item = &
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
     use mln_gfx::shaders::programs::{
-        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN_PROBE, VERTEX_TEXEL,
+        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_PROBE,
+        VERTEX_TEXEL,
     };
+    // The terrain shows its drapes, where the draped layers count their
+    // draws.
     let not_layers = [
         &CLIPPING_MASK,
         &COLLISION_BOX,
@@ -115,6 +118,7 @@ fn every_layer_program_shows_the_overdraw_inspector() {
         &GLOBE_DEPTH,
         &SKY,
         &ATMOSPHERE,
+        &TERRAIN,
         &VERTEX_TEXEL,
         &TERRAIN_PROBE,
     ];
@@ -257,7 +261,10 @@ fn ubo_ids(program: &Program, source: &ShaderSource) -> Vec<(&'static str, usize
         }
         "LayerCompositeShader" => (&[("idLayerCompositeUBO", ID_LAYER_COMPOSITE_UBO)], "layerCompositeUBOCount"),
         "VertexTexelShader" => (&[], "vertexTexelUBOCount"),
-        "TerrainProbeShader" => (&[("idTerrainPropsUBO", ID_TERRAIN_PROPS_UBO)], "terrainProbeUBOCount"),
+        "TerrainShader" | "TerrainProbeShader" => (
+            &[("idTerrainDrawableUBO", ID_TERRAIN_DRAWABLE_UBO), ("idTerrainPropsUBO", ID_TERRAIN_PROPS_UBO)],
+            "terrainUBOCount",
+        ),
         "HillshadeShader" => (
             &[
                 ("idHillshadeDrawableUBO", ID_HILLSHADE_DRAWABLE_UBO),
@@ -372,6 +379,7 @@ const UBO_SIZES: &[(&str, usize)] = &[
     ("SymbolDrawableUBO", size_of::<symbol_layer_ubo::SymbolDrawableUBO>()),
     ("SymbolTilePropsUBO", size_of::<symbol_layer_ubo::SymbolTilePropsUBO>()),
     ("SymbolEvaluatedPropsUBO", size_of::<symbol_layer_ubo::SymbolEvaluatedPropsUBO>()),
+    ("TerrainDrawableUBO", size_of::<terrain_ubo::TerrainDrawableUBO>()),
     ("TerrainPropsUBO", size_of::<terrain_ubo::TerrainPropsUBO>()),
 ];
 

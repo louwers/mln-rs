@@ -3869,7 +3869,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 /// RGBA8 texels behind a one-texel border, decoded by a `TerrainPropsUBO`.
 /// A macro, so that `concat!` puts it in the sources of the programs that
 /// read the DEM.
-#[cfg(test)]
 macro_rules! ground_height {
     () => {
         r#"
@@ -3910,6 +3909,92 @@ static float ground_height(float2 pos, float4 dem_coords, texture2d<float, acces
     };
 }
 
+/// The UBO ids and structs of the terrain's shaders.
+const TERRAIN_PRELUDE: &str = r#"
+
+enum {
+    idTerrainDrawableUBO = idDrawableReservedVertexOnlyUBO,
+    idTerrainPropsUBO = drawableReservedUBOCount,
+    terrainUBOCount
+};
+
+struct alignas(16) TerrainDrawableUBO {
+    /*  0 */ float4 dem_coords;
+    /* 16 */
+};
+static_assert(sizeof(TerrainDrawableUBO) == 16, "wrong size");
+
+// How the terrain's DEM decodes, its exaggeration and its skirts' length.
+struct alignas(16) TerrainPropsUBO {
+    /*  0 */ float4 unpack;
+    /* 16 */ float unpack_scale;
+    /* 20 */ float exaggeration;
+    /* 24 */ float skirt_length;
+    /* 28 */ float pad0;
+    /* 32 */
+};
+static_assert(sizeof(TerrainPropsUBO) == 2 * 16, "wrong size");
+
+"#;
+
+/// The terrain's surface: a tile's grid, raised to the heights of the tile's
+/// DEM with its skirts lowered and projected through the tile's entry of
+/// `projectionVector`, in the colors of the tile's drape. A pole's vertices
+/// stand at sea level. Rows of a pass's texture are stored north first, as
+/// the drape is read.
+pub(crate) const TERRAIN_SHADER: MslShaderSource = MslShaderSource {
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
+    prelude: TERRAIN_PRELUDE,
+    source: concat!(
+        ground_height!(),
+        r"
+// The height of the surface's vertex at `pos`, in tile units of a tile that
+// reads its DEM at `dem_coords`: the ground's, or sea level at a pole.
+static float surface_height(float2 pos, float4 dem_coords, texture2d<float, access::read> dem,
+                            device const TerrainPropsUBO& props) {
+    if (pos.y < GLOBE_POLE_NORTH_Y || pos.y > GLOBE_POLE_SOUTH_Y) {
+        return 0.0;
+    }
+    return ground_height(pos, dem_coords, dem, props);
+}
+
+struct VertexStage {
+    // x and y in tile units, whether the vertex is a skirt's lower edge, 0.
+    short4 pos [[attribute(0)]];
+};
+
+struct FragmentStage {
+    float4 position [[position, invariant]];
+    float2 drape_pos;
+};
+
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
+                                device const TerrainDrawableUBO* drawableVector [[buffer(idTerrainDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
+                                device const TerrainPropsUBO& props [[buffer(idTerrainPropsUBO)]],
+                                texture2d<float, access::read> dem [[texture(2)]]) {
+    device const TerrainDrawableUBO& drawable = drawableVector[uboIndex];
+    device const ProjectionUBO& projection = projectionVector[uboIndex];
+    const float2 pos = float2(vertx.pos.xy);
+    const float skirt = float(vertx.pos.z);
+    const float height = surface_height(pos, drawable.dem_coords, dem, props);
+    return {
+        .position = projectTileFor3D(pos, height - skirt * props.skirt_length, projection),
+        .drape_pos = clamp(pos / 8192.0, float2(0.0), float2(1.0)),
+    };
+}
+
+half4 fragment fragmentMain(FragmentStage in [[stage_in]],
+                            texture2d<float, access::sample> drape [[texture(1)]],
+                            sampler drape_sampler [[sampler(1)]]) {
+    return half4(drape.sample(drape_sampler, in.drape_pos));
+}
+"
+    ),
+};
+
 /// Port-only, for the backend conformance cases: probes of the terrain's
 /// height rule. Each probe is a quad at clip positions whose vertices read the
 /// height at a place of a tile, and whose fragments write that height's bits,
@@ -3918,25 +4003,7 @@ static float ground_height(float2 pos, float4 dem_coords, texture2d<float, acces
 pub(crate) const TERRAIN_PROBE_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idTerrainPropsUBO = drawableReservedUBOCount,
-    terrainProbeUBOCount
-};
-
-// How the terrain's DEM decodes, and its exaggeration.
-struct alignas(16) TerrainPropsUBO {
-    /*  0 */ float4 unpack;
-    /* 16 */ float unpack_scale;
-    /* 20 */ float exaggeration;
-    /* 24 */ float pad0;
-    /* 28 */ float pad1;
-    /* 32 */
-};
-static_assert(sizeof(TerrainPropsUBO) == 2 * 16, "wrong size");
-
-"#,
+    prelude: TERRAIN_PRELUDE,
     source: concat!(
         ground_height!(),
         r"

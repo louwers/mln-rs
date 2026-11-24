@@ -154,13 +154,20 @@ pub const ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_VERTEX_TEXEL_TEXTURE: usize = 0;
 pub const ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE: usize = 0;
 
-// --- terrain: the ground's heights, by the height rule of `mln_util::dem`.
+// --- terrain: a tile's grid, raised by the ground's heights by the height
+// rule of `mln_util::dem`, and the texture draped over it.
+/// A grid vertex: x and y in tile units, whether it is a skirt's lower edge,
+/// and 0.
+pub const ID_TERRAIN_POS_VERTEX_ATTRIBUTE: usize = 0;
+pub const ID_TERRAIN_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
 pub const ID_TERRAIN_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
 /// The DEM: RGBA8 texels behind a one-texel border, which the vertex stage
 /// reads texel by texel, without a sampler. It is slot 2 so that a program
 /// that reads the ground keeps slots 0 and 1 for its own textures; the shader
 /// sources write it as a literal.
 pub const ID_TERRAIN_DEM_TEXTURE: usize = 2;
+/// The tile's drape, which the fragment stage samples.
+pub const ID_TERRAIN_DRAPE_TEXTURE: usize = 1;
 
 // --- terrain probe (port-only): the conformance case's probes of the height
 // rule, which read the terrain's props and DEM texture.
