@@ -26,6 +26,6 @@ sent it returns. Sessions present to a canvas with the browser's WebGPU or
 WebGL2, one backend per build, and put their tiles' workers in Web Workers, as
 examples/web does.
 
-Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
+Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
 core. All its crates are released together, at the same version.

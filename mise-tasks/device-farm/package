@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+#MISE description="Build the Android tests into a test package for AWS Device Farm's phones (tools/device-farm)"
+#USAGE flag "--out <file>" default="target/device-farm/android-tests.zip" help="Where to write the package"
+#MISE tools={"core:java"="temurin-21.0.13+9.0.LTS"}
+# In the target-android environment: `mise -E target-android run
+# device-farm:package`. tools/device-farm/README.md lists what the package
+# holds.
+set -euo pipefail
+source tools/dev-shell.sh
+
+if [[ -z ${CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER:-} ]]; then
+    echo "Select the target-android environment: mise -E target-android run device-farm:package" >&2
+    exit 1
+fi
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+package=$work/package
+mkdir -p "$package/bin"
+
+packages=()
+while IFS= read -r name; do
+    packages+=(-p "$name")
+done < <(tools/ci/target-packages.sh)
+rustup target add aarch64-linux-android
+dev_shell cargo nextest archive --target aarch64-linux-android "${packages[@]}" --archive-file "$package/tests.tar.zst"
+
+# The test host: TestHost.java as dex for app_process, and its native half.
+javac --release 17 -d "$work/classes" tools/device-farm/host/org/maplibre/mlnrs/TestHost.java
+java -cp "$ANDROID_HOME/build-tools/$MLN_ANDROID_BUILD_TOOLS/lib/d8.jar" com.android.tools.r8.D8 \
+    --min-api "$MLN_ANDROID_API" --output "$package/test-host.jar" "$work/classes/org/maplibre/mlnrs/TestHost.class"
+"$CC_aarch64_linux_android" -shared -fPIC -O2 -Wall -Wextra -Werror \
+    tools/device-farm/host/test-host.c -o "$package/libmln_test_host.so"
+
+git ls-files -z --cached --others --exclude-standard | tar --null --files-from - -czf "$package/workspace.tar.gz"
+
+# The Linux x64 cargo-nextest that mise.lock pins, for Device Farm's test host.
+read -r url checksum < <(awk '
+    /^\[/ { linux = $0 == "[tools.\"github:nextest-rs/nextest\".\"platforms.linux-x64\"]" }
+    linux && $1 == "url" { gsub(/"/, "", $3); url = $3 }
+    linux && $1 == "checksum" { gsub(/"/, "", $3); sub(/^sha256:/, "", $3); checksum = $3 }
+    END { print url, checksum }
+' mise.lock)
+curl --fail --silent --show-error --location --output "$work/nextest.tar.gz" "$url"
+echo "$checksum  $work/nextest.tar.gz" | shasum -a 256 --check --quiet
+tar -xzf "$work/nextest.tar.gz" -C "$package/bin"
+
+cp tools/device-farm/run-tests.sh tools/device-farm/runner.sh "$package/"
+
+mkdir -p "$(dirname "$usage_out")"
+# Stored, since the archives are compressed already.
+python3 - "$package" "$usage_out" << 'PYEOF'
+import pathlib
+import sys
+import zipfile
+
+root = pathlib.Path(sys.argv[1])
+with zipfile.ZipFile(sys.argv[2], "w") as package:
+    for path in sorted(root.rglob("*")):
+        if path.is_file():
+            package.write(path, path.relative_to(root))
+PYEOF
+ls -l "$usage_out"

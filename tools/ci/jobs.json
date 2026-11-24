@@ -90,5 +90,6 @@
     "test_target": "x86_64-linux-android",
     "backend": "vulkan"
   },
+  { "job": "device-farm", "unit": "android" },
   { "job": "web", "unit": "web" }
 ]

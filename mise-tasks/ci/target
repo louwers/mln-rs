@@ -3,30 +3,15 @@
 #USAGE flag "--clippy-targets <targets>" default="" help="Comma-separated Rust target triples to lint with clippy"
 #USAGE flag "--test-target <target>" default="" help="Rust target triple to test with cargo nextest"
 #USAGE flag "--backend <backend>" default="" help="The backend, as MLN_RENDER_BACKEND names it, if any"
-# Lints and tests every library crate (root, crates/*, vendor/*) plus the
-# expression and render test suites, omitting desktop apps and host-only CLI
-# tools. The render suite through the worker codec runs on Linux x64 only.
+# Lints and tests the packages that tools/ci/target-packages.sh lists, with
+# nextest's target profile (.config/nextest.toml).
 set -euo pipefail
 source tools/dev-shell.sh
 
 packages=()
 while IFS= read -r pkg; do
     packages+=(-p "$pkg")
-done < <(
-    cargo metadata --no-deps --format-version 1 --locked | jq -r '
-        .workspace_root as $root |
-        .packages[] |
-        (.manifest_path | ltrimstr($root + "/")) as $rel |
-        select(
-            $rel == "Cargo.toml"
-            or ($rel | startswith("crates/"))
-            or ($rel | startswith("vendor/"))
-            or $rel == "tools/expression-test/Cargo.toml"
-            or $rel == "tools/render-test/Cargo.toml"
-        ) |
-        .name
-    '
-)
+done < <(tools/ci/target-packages.sh)
 
 if [[ -n ${usage_clippy_targets:-} ]]; then
     IFS=',' read -r -a clippy_targets <<< "$usage_clippy_targets"
@@ -46,8 +31,5 @@ if [[ -n ${usage_test_target:-} ]]; then
         [[ $usage_backend == vulkan && $usage_test_target != *-android* ]] && MLN_VULKAN_VALIDATION=abort
         [[ $usage_backend == metal ]] && MTL_DEBUG_LAYER=1
     fi
-    dev_shell cargo nextest run \
-        --target "$usage_test_target" \
-        "${packages[@]}" \
-        -E 'not test(=render_tests::render_tests_through_the_codec)'
+    dev_shell cargo nextest run --profile target --target "$usage_test_target" "${packages[@]}"
 fi

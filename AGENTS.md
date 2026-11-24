@@ -74,6 +74,10 @@ virtual machine or Wine prefix through
 Linux host, the x86_64 targets of Android and OpenHarmony run on emulators and
 FreeBSD's in a virtual machine, with KVM, and Windows' x64 targets under Wine.
 
+The Android tests also run on real phones in AWS Device Farm: CI runs them after
+it completes, and `mise run device-farm:run` from your machine
+(tools/device-farm/README.md).
+
 A test that reads files of its package finds them through the
 `CARGO_MANIFEST_DIR` that Cargo sets when it runs the test, not
 `env!("CARGO_MANIFEST_DIR")`: on Android and OpenHarmony the package is a copy

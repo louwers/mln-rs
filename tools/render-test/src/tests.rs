@@ -15,9 +15,7 @@ use crate::manifest_parser::ManifestParser;
 use crate::metadata::{MapDebugOptions, MapMode, TerrainSkirtLength, TestMetadata};
 use crate::parser::{parse_test_metadata, parse_test_operations};
 use crate::render_test::{Arguments, RunResult, parse_arguments, run_render_tests_with};
-use crate::runner::{
-    ImplFactory, ImplOptions, MapError, ResourceOptions, TestContext, TestRunner, TestRunnerImpl, UpdateResults,
-};
+use crate::runner::{ImplFactory, ImplOptions, MapError, ResourceOptions, TestContext, TestRunner, TestRunnerImpl};
 
 const OUR_MANIFEST: &str = "manifests/linux-wgpu.json";
 const CPP_MANIFEST: &str = "testdata/metrics/linux-opengl.json";
@@ -463,7 +461,7 @@ fn check(dir: &Path, actual: &PremultipliedImage, expectations: Vec<String>) -> 
 fn check_at(dir: &Path, actual: &PremultipliedImage, expectations: Vec<String>, threshold: f64) -> TestMetadata {
     let output = dir.join("out");
     let manifest = ManifestParser::parse_manifest(OUR_MANIFEST, "background-color/default/".to_string()).unwrap();
-    let runner = TestRunner::new(manifest, UpdateResults::No, None, false, output);
+    let runner = TestRunner::new(manifest, None, false, output);
     let mut metadata = TestMetadata {
         id: "check".to_string(),
         paths: crate::metadata::TestPaths::new("style.json".to_string(), expectations, vec![]),
@@ -677,8 +675,7 @@ fn statuses_and_summary() {
     assert!(!result.metadatas.iter().any(|m| m.id == "skipped"));
 
     let render_error = result.metadatas.iter().find(|m| m.id == "render-error").unwrap();
-    // C++ overwrites the exception message with the empty-image error.
-    assert_eq!(render_error.error_message, "Invalid size for actual image");
+    assert_eq!(render_error.error_message, "Rendering failed: mock render failure");
 
     let stats = result.stats;
     assert_eq!(
@@ -708,7 +705,7 @@ fn statuses_and_summary() {
     }
     assert_eq!(html.matches("<div class=\"test ").count(), 7);
     assert!(html.contains(" data-alt-src=\"data:image/png;base64,"));
-    assert!(html.contains("<strong>Error:</strong> Invalid size for actual image"));
+    assert!(html.contains("<strong>Error:</strong> Rendering failed: mock render failure"));
     // A passed test's images are written to disk, though the report leaves
     // them out.
     assert!(suite.dir.join("out/pass/actual.png").exists());
@@ -766,9 +763,8 @@ fn argument_parsing() {
     assert_eq!(parse_arguments(&args(&["--bogus"])), Err(1));
     assert_eq!(parse_arguments(&args(&[])), Err(2));
     assert_eq!(parse_arguments(&args(&["-p", "nope.json"])), Err(3));
-    assert_eq!(parse_arguments(&args(&["-p", OUR_MANIFEST, "-u", "nonsense"])), Err(1));
-    // Not ported: baselines are never written.
     assert_eq!(parse_arguments(&args(&["-p", OUR_MANIFEST, "-u", "platform"])), Err(1));
+    assert_eq!(parse_arguments(&args(&["-p", OUR_MANIFEST, "--update=platform"])), Err(1));
     assert!(parse_arguments(&args(&["-p", OUR_MANIFEST, "-s"])).unwrap().shuffle);
     // --jobs (jobs.rs).
     assert_eq!(parse_arguments(&args(&["-p", OUR_MANIFEST])).unwrap().jobs, 1);

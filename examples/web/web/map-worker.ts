@@ -37,6 +37,7 @@ import type {
   TileWorkerReport,
   ToMap,
 } from "./protocol.ts";
+import type { Terrain } from "./styles.ts";
 
 // Every URL this worker fetched, and how many times, and how many fetches
 // are still transferring: the map's fetches look the global `fetch` up at
@@ -325,6 +326,7 @@ async function run({
   height,
   ratio,
   style,
+  terrain,
   fallbackFontFaces,
   camera,
   localIdeographs,
@@ -400,7 +402,7 @@ async function run({
 
   if (panic) panic_for_check(panic);
 
-  applyStyle(map, style);
+  applyStyle(map, style, terrain);
   map.jump_to(...camera);
 
   let started = performance.now();
@@ -549,7 +551,7 @@ async function run({
           map.set_pixel_ratio(data.ratio);
           break;
         case "style":
-          applyStyle(map, data.style);
+          applyStyle(map, data.style, data.terrain);
           started = performance.now();
           loaded = null;
           // The page clears both for the new style, so they go again even
@@ -610,9 +612,16 @@ async function run({
   return handle;
 }
 
-function applyStyle(map: WebMap, style: StyleSource) {
-  if ("url" in style) map.set_style_url(style.url);
-  else map.set_style_json(style.json);
+// Loads `style`, to which the map adds `terrain` once it loads.
+function applyStyle(
+  map: WebMap,
+  style: StyleSource,
+  terrain: Terrain | undefined,
+) {
+  const terrainJson =
+    terrain === undefined ? undefined : JSON.stringify(terrain);
+  if ("url" in style) map.set_style_url(style.url, terrainJson);
+  else map.set_style_json(style.json, terrainJson);
 }
 
 // The frame just drawn, in the task that drew it: the canvas keeps its frame

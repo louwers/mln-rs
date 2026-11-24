@@ -26,6 +26,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 use mln_util::size::Size;
 
+use crate::bytes::Bytes;
 use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass, lend_context};
 use crate::enums::{self, AttributeFormat};
 use crate::renderer_backend::GlContext;
@@ -63,11 +64,11 @@ struct Elements {
 impl Elements {
     /// The GL buffer that holds the elements `element_size` bytes apart, a
     /// multiple of `alignment`, and that distance, uploaded if they
-    /// changed. `gl`'s context is current, and `state` is its state.
+    /// changed. `gl`'s context is current, `state` is its state, and
+    /// `uploads` hands it the bytes.
     fn upload(
         &mut self,
-        gl: &Gl,
-        state: &mut State,
+        (gl, state, uploads): (&Gl, &mut State, Bytes<'_>),
         alignment: u32,
         element_size: usize,
     ) -> Result<(BufferID, u64), GpuError> {
@@ -102,11 +103,11 @@ impl Elements {
         unsafe {
             if self.object.is_some() && self.uploaded == bytes.len() {
                 gl.bind_buffer(glow::UNIFORM_BUFFER, Some(object));
-                gl.buffer_sub_data_u8_slice(glow::UNIFORM_BUFFER, 0, bytes);
+                uploads.buffer_sub_data(glow::UNIFORM_BUFFER, 0, bytes);
             } else {
                 state.forget_uniform_buffer(object);
                 gl.bind_buffer(glow::UNIFORM_BUFFER, Some(object));
-                gl.buffer_data_u8_slice(glow::UNIFORM_BUFFER, bytes, glow::DYNAMIC_DRAW);
+                uploads.buffer_data(glow::UNIFORM_BUFFER, bytes, glow::DYNAMIC_DRAW);
             }
         }
         self.uploaded = bytes.len();
@@ -272,11 +273,12 @@ struct Bindings {
 impl Bindings {
     /// Binds the uniform blocks for a draw at `global_index`, uploading the
     /// storage buffers' `elements` they read, and with `textures`, the
-    /// textures. `gl`'s context is current, with the state `state`, and GL
-    /// binds blocks at multiples of `alignment`.
+    /// textures. `gl`'s context is current, with the state `state`,
+    /// `uploads` hands it the elements' bytes, and GL binds blocks at
+    /// multiples of `alignment`.
     fn bind(
         &self,
-        (gl, state): (&Gl, &mut State),
+        (gl, state, uploads): (&Gl, &mut State, Bytes<'_>),
         elements: &mut SlotMap<ElementsId, Elements>,
         alignment: u32,
         global_index: u32,
@@ -287,7 +289,7 @@ impl Bindings {
                 BlockRange::Uniform { buffer, offset, size } => (buffer, offset, size),
                 BlockRange::Element { elements: key, first, element_size } => {
                     let elements = elements.get_mut(key).ok_or(GpuError::UnknownId("buffer"))?;
-                    let (object, stride) = elements.upload(gl, state, alignment, element_size)?;
+                    let (object, stride) = elements.upload((gl, state, uploads), alignment, element_size)?;
                     (object, (first + u64::from(global_index)) * stride, block.size as u64)
                 }
             };
@@ -1124,7 +1126,11 @@ fn delete_vertex_arrays(gl: &Gl, state: &mut State, geometry: &Geometry) {
 
 /// Reads `region` of the bound framebuffer, `height` pixels tall, as RGBA
 /// texels in rows from the top: GL's rows start at the bottom.
-pub(crate) fn read_pixels(gl: &Gl, state: &mut State, height: u32, region: TextureRegion) -> Vec<u8> {
+pub(crate) fn read_pixels(
+    (gl, state, bytes): (&Gl, &mut State, Bytes<'_>),
+    height: u32,
+    region: TextureRegion,
+) -> Vec<u8> {
     let row = region.size.width as usize * 4;
     let mut pixels = vec![0u8; row * region.size.height as usize];
     if pixels.is_empty() {
@@ -1133,18 +1139,9 @@ pub(crate) fn read_pixels(gl: &Gl, state: &mut State, height: u32, region: Textu
     // Packed tightly into `pixels`.
     state.set_pixel_store_pack_alignment(gl, 1);
     let bottom = height - region.y - region.size.height;
+    let rect = [region.x as i32, bottom as i32, region.size.width as i32, region.size.height as i32];
     // SAFETY: `pixels` holds the region's RGBA texels.
-    unsafe {
-        gl.read_pixels(
-            region.x as i32,
-            bottom as i32,
-            region.size.width as i32,
-            region.size.height as i32,
-            glow::RGBA,
-            glow::UNSIGNED_BYTE,
-            glow::PixelPackData::Slice(Some(&mut pixels)),
-        );
-    }
+    unsafe { bytes.read_pixels(rect, &mut pixels) };
     // GL's rows start at the bottom: copied out from the last, whole rows
     // at a time.
     let mut flipped = Vec::with_capacity(pixels.len());
@@ -1207,7 +1204,7 @@ impl Gpu for GlGpu {
             // vertex array of calls outside draws takes an index buffer.
             unsafe {
                 gpu.context.gl().bind_buffer(target, Some(object));
-                gpu.context.gl().buffer_sub_data_u8_slice(target, offset as i32, data);
+                gpu.context.bytes().buffer_sub_data(target, offset as i32, data);
             }
         });
         Ok(())
@@ -1247,7 +1244,7 @@ impl Gpu for GlGpu {
             let tail = &zeros[..(end - offset - len) as usize];
             if !tail.is_empty() {
                 // SAFETY: as above, and the word is inside the buffer.
-                unsafe { gl.buffer_sub_data_u8_slice(target, (offset + len) as i32, tail) };
+                unsafe { gpu.context.bytes().buffer_sub_data(target, (offset + len) as i32, tail) };
             }
         });
         Ok(())
@@ -1306,24 +1303,13 @@ impl Gpu for GlGpu {
         let format = entry.format;
         let (_, gl_format, type_) = texture_format(format, self.desktop).ok_or(GpuError::UnknownId("texture"))?;
         self.current(|gpu| {
-            let (gl, state) = gpu.context.parts();
+            let (gl, state, uploads) = gpu.context.parts_with_bytes();
             state.set_pixel_store_unpack_alignment(gl, 1);
             state.activate_texture(gl, 0, Some(object));
+            let rect = [region.x as i32, region.y as i32, region.size.width as i32, region.size.height as i32];
             // SAFETY: the texture is alive, and `data` holds the region's
             // texels, which are inside it.
-            unsafe {
-                gl.tex_sub_image_2d(
-                    glow::TEXTURE_2D,
-                    0,
-                    region.x as i32,
-                    region.y as i32,
-                    region.size.width as i32,
-                    region.size.height as i32,
-                    gl_format,
-                    type_,
-                    glow::PixelUnpackData::Slice(Some(data)),
-                );
-            }
+            unsafe { uploads.tex_sub_image_2d(rect, gl_format, type_, data) };
         });
         Ok(())
     }
@@ -1639,9 +1625,9 @@ impl Gpu for GlGpu {
         set_state(self.context.parts(), open, pipeline, changed, &draw.dynamic, &self.line_widths);
         let alignment = self.caps.buffer_offset_alignment;
         if open.bindings != Some(draw.bindings) {
-            bindings.bind(self.context.parts(), &mut self.elements, alignment, draw.global_index, true)?;
+            bindings.bind(self.context.parts_with_bytes(), &mut self.elements, alignment, draw.global_index, true)?;
         } else if bindings.elements && open.global_index != Some(draw.global_index) {
-            bindings.bind(self.context.parts(), &mut self.elements, alignment, draw.global_index, false)?;
+            bindings.bind(self.context.parts_with_bytes(), &mut self.elements, alignment, draw.global_index, false)?;
         }
         let bases = (draw.base_vertex, draw.first_instance);
         let mode = enums::draw_mode(pipeline.state.primitive);
@@ -1748,9 +1734,9 @@ impl Gpu for GlGpu {
         };
         let rgba = self.current(|gpu| {
             let framebuffer = gpu.framebuffer_of(Some(texture), None, "readback")?;
-            let (gl, state) = gpu.context.parts();
+            let (gl, state, bytes) = gpu.context.parts_with_bytes();
             state.bind_framebuffer(gl, framebuffer);
-            let rgba = read_pixels(gl, state, height, region);
+            let rgba = read_pixels((gl, state, bytes), height, region);
             // Reading the pixels waited for the passes before it.
             #[cfg(feature = "bench")]
             if let Some(timer) = &mut gpu.timer {

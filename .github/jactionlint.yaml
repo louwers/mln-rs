@@ -22,6 +22,13 @@ self-hosted-runner:
     - blacksmith-4vcpu-ubuntu-2604-arm
     - blacksmith-6vcpu-macos-26
 ignores:
+  - rule: dangerous-triggers
+    file: .github/workflows/device-farm.yml
+    reason:
+      The Android tests of pull requests from forks run on AWS Device Farm only
+      from workflow_run, which gets the AWS role. The workflow runs the default
+      branch's code and only uploads the package that CI built, without running
+      or unpacking it.
   - rule: use-trusted-publishing
     file: .github/workflows/release.yml
     job: release

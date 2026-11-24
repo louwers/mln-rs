@@ -467,7 +467,7 @@ fn resources_are_in_the_descriptor_set_layouts() {
 // binds is declared by a stage.
 #[test]
 fn buffers_are_the_renderers() {
-    assert_eq!(size_of::<ProjectionUBO>(), 176);
+    assert_eq!(size_of::<ProjectionUBO>(), 208);
     assert_eq!(size_of::<GlobalPaintParamsUBO>(), 48);
 
     let mut failures = Vec::new();

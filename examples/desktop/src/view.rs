@@ -476,6 +476,25 @@ impl View {
         self.style_loaded = false;
     }
 
+    /// Adds the style's terrain to the style that loaded, and draws it with
+    /// the projection the controls picked. A command that runs once another
+    /// style has started loading changes nothing.
+    fn customize_style(&self) {
+        let (terrain, projection) = (self.style.terrain.clone(), self.projection);
+        if terrain.is_none() && projection == Projection::Style {
+            return;
+        }
+        log_edit_failure(self.map.with_core(move |map| {
+            if let Some(terrain) = &terrain {
+                styles::add_terrain(map, terrain)?;
+            }
+            if projection != Projection::Style {
+                projection.apply(map)?;
+            }
+            Ok(())
+        }));
+    }
+
     /// Reads what the controls show of the map's style, once the commands
     /// sent before have run.
     fn read_style(&self, loaded: bool) {
@@ -668,10 +687,7 @@ impl View {
             Message::Close => self.quit = true,
             Message::Map(MapEvent::StyleLoaded) => {
                 self.style_loaded = true;
-                if self.projection != Projection::Style {
-                    let projection = self.projection;
-                    log_edit_failure(self.map.with_core(move |map| projection.apply(map)));
-                }
+                self.customize_style();
                 self.read_style(true);
             }
             Message::Map(MapEvent::SourceChanged { .. }) => self.read_style(false),

@@ -40,6 +40,10 @@ CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_RUNNER = "devices-cli exec harmonyos --s
 # And for the x86_64 target, on the OpenHarmony emulator.
 OHOS_EMULATOR_IMAGES = { value = "{{ tools['http:oniro-emulator'].path }}/images", tools = true }
 CARGO_TARGET_X86_64_UNKNOWN_LINUX_OHOS_RUNNER = "devices-cli exec ohos --sync-env CARGO_MANIFEST_DIR --env RUST_* --env MLN_* --"
+# A device runs a test from a copy of its package: nextest's target profile
+# (.config/nextest.toml) and the render suite in the test's process.
+NEXTEST_PROFILE = "target"
+MLN_RENDER_TEST_JOBS = "1"
 
 [hooks]
 # The Rust targets. An inline script, since a hook's `mise run` would not see

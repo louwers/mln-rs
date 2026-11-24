@@ -466,7 +466,7 @@ pub(crate) unsafe extern "C" fn mln_gpu_device_get_capabilities(
 }
 
 /// `mln_gpu_device_wrap_web_gpu()`: this library's WebGPU is wgpu's, which
-/// can't wrap a `GPUDevice` yet (louwers/mln-rs#263).
+/// can't wrap a `GPUDevice` yet (maplibre/mln-rs#263).
 ///
 /// # Safety
 ///
@@ -488,7 +488,7 @@ pub(crate) unsafe extern "C" fn mln_gpu_device_wrap_web_gpu(
         unsafe { handles::out_handle(out_device, "out_device") }?;
         Err(Error::new(
             ErrorKind::Unsupported,
-            "this library's WebGPU can't wrap a GPUDevice yet (https://github.com/louwers/mln-rs/issues/263)",
+            "this library's WebGPU can't wrap a GPUDevice yet (https://github.com/maplibre/mln-rs/issues/263)",
         ))
     })
 }

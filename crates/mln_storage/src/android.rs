@@ -4,13 +4,13 @@
 
 #![expect(unsafe_code, reason = "JNI and the NDK's asset manager are the FFI here")]
 
-use std::ffi::{CString, c_int, c_void};
+use std::ffi::{CString, c_char, c_int, c_void};
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::{Arc, OnceLock};
 
 use jni::errors::Error as JniError;
 use jni::objects::{Global, JObject};
-use jni::{EnvUnowned, JavaVM, Outcome, jni_sig, jni_str};
+use jni::{EnvUnowned, Outcome, jni_sig, jni_str};
 use mln_util::error::Error;
 
 use crate::local_file_request::read_range;
@@ -38,7 +38,7 @@ pub(crate) fn url_path(url: &str) -> &str {
 #[link(name = "android")]
 unsafe extern "C" {
     fn AAssetManager_fromJava(env: *mut c_void, asset_manager: *mut c_void) -> *mut c_void;
-    fn AAssetManager_open(manager: *mut c_void, name: *const std::ffi::c_char, mode: c_int) -> *mut c_void;
+    fn AAssetManager_open(manager: *mut c_void, name: *const c_char, mode: c_int) -> *mut c_void;
     fn AAsset_close(asset: *mut c_void);
     fn AAsset_read(asset: *mut c_void, buffer: *mut c_void, count: usize) -> c_int;
     fn AAsset_seek64(asset: *mut c_void, offset: i64, whence: c_int) -> i64;
@@ -56,17 +56,10 @@ struct AssetManager {
 
 static ASSETS: OnceLock<AssetManager> = OnceLock::new();
 
-/// The app's Java VM, which [`init`] keeps.
-static VM: OnceLock<JavaVM> = OnceLock::new();
-
-/// The app's Java VM, once [`init`] gave it.
-pub(crate) fn java_vm() -> Option<&'static JavaVM> {
-    VM.get()
-}
-
 /// Gives the file sources the Java VM of `jni_env` and the app's `context`.
 /// Call it before the first HTTP request or app asset; a later call changes
-/// nothing. Without it, HTTP requests and app assets fail.
+/// nothing. Without it, app assets fail, and HTTP requests fail unless the
+/// process has a Java VM of its own.
 ///
 /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when JNI fails,
 /// such as for a `context` that is no `Context`, and leaves no Java exception
@@ -86,7 +79,8 @@ pub unsafe fn init(jni_env: *mut c_void, context: *mut c_void) -> Result<(), Err
             let context = unsafe { JObject::from_raw(env, context.cast()) };
             let initialized = (|| {
                 retain_assets(env, &context)?;
-                let _ = VM.set(env.get_java_vm()?);
+                // Records the VM as jni's, for mln_util::android::java_vm.
+                env.get_java_vm()?;
                 Ok(())
             })();
             if env.exception_check() {

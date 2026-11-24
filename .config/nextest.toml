@@ -20,3 +20,40 @@ default-filter = """
     | package(mln-rs-d3d12) | package(mln-rs-webgpu)
 ) & not test(=render_tests::render_tests_through_the_codec)
 """
+
+# The tests that a target's device runs (`mise run ci:target`, tools/device-farm):
+# every test but the render suite through the worker codec, which runs on Linux
+# x64 only.
+[profile.target]
+default-filter = "not test(=render_tests::render_tests_through_the_codec)"
+
+# Android's and OpenHarmony's devices run each test from a copy of its package,
+# without the host's binaries: not the tests of proc-macro crates, which are
+# built for the host, nor those of the render runner's worker processes, which
+# run the render-test binary. The render suite runs in the test's process there
+# (MLN_RENDER_TEST_JOBS), so it takes longer than the slow timeout allows
+# elsewhere, and starts first, since it's the slowest.
+[[profile.target.overrides]]
+platform = 'cfg(any(target_os = "android", target_env = "ohos"))'
+default-filter = """
+platform(target)
+& not test(=render_tests::render_tests_through_the_codec)
+& not (package(mln-rs-render-test) & test(/^jobs::/))
+"""
+
+[[profile.target.overrides]]
+platform = 'cfg(any(target_os = "android", target_env = "ohos"))'
+filter = "test(=render_tests::render_tests)"
+slow-timeout = { period = "60s", terminate-after = 45 }
+priority = 100
+
+# AWS Device Farm's phones (tools/device-farm), with a JUnit report among the
+# run's artifacts. A phone's run is noisier than a runner's: a test that fails
+# gets one more try, and passes as flaky.
+[profile.device-farm]
+inherits = "target"
+fail-fast = false
+retries = 1
+
+[profile.device-farm.junit]
+path = "junit.xml"

@@ -9,6 +9,6 @@
 Ports the style (`src/mln/style`, `include/mln/style`): `Style`, the style
 parser, layers, sources, the property system and the typed conversions.
 
-Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
+Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
 core. All its crates are released together, at the same version.

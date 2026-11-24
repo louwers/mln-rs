@@ -10,7 +10,7 @@ use super::{EXTENT, SIZE, buffer, draw, dynamic, fixed, position_layout, quad, t
 use crate::color_mode::ColorMode;
 use crate::gfx_types::{AttributeDataType, DrawModeType};
 use crate::gpu::{
-    BindGroupEntry, BindingsDesc, BindingsId, BufferId, BufferUsage, ColorAttachment, DepthState,
+    BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState,
     DepthStencilAttachment, Draw, DynamicState, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc,
     PipelineDesc, PipelineId, ResourceId, Scissor, ShaderId, ShaderKey, StencilState, TargetFormats, TextureDesc,
     TextureFormat, TextureId, TextureRegion, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
@@ -187,8 +187,7 @@ pub fn invalid_calls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     // once.
     let alignment = u64::from(gpu.caps().buffer_offset_alignment.max(4));
     let unit = (size_of::<BackgroundPropsUBO>() as u64).next_multiple_of(alignment);
-    let uniform =
-        gpu.create_buffer(&crate::gpu::BufferDesc { label: "uniform", usage: BufferUsage::Uniform, size: 2 * unit })?;
+    let uniform = gpu.create_buffer(&BufferDesc { label: "uniform", usage: BufferUsage::Uniform, size: 2 * unit })?;
     let props =
         |buffer, offset, size| BindGroupEntry::Buffer { id: ID_BACKGROUND_PROPS_UBO as u32, buffer, offset, size };
     let with = |entry: Option<BindGroupEntry>| -> Vec<BindGroupEntry> {
@@ -719,6 +718,28 @@ fn minified(gpu: &mut impl Gpu, texture: TextureId, state: SamplerState) -> Resu
         usage: TextureUsage { render_target: true, copy_src: true, ..TextureUsage::default() },
         mipmapped: false,
     })?;
+    let raster = raster_draw(gpu, texture, state, &mut || {})?;
+    gpu.begin_pass(&PassDesc {
+        label: "minified",
+        color: Some(ColorAttachment { texture: target, load: LoadOp::Clear(BLACK) }),
+        depth_stencil: None,
+    })?;
+    let scissor = Scissor { x: 0, y: 0, width: size.width, height: size.height };
+    gpu.draw(&Draw { dynamic: DynamicState { scissor, ..dynamic() }, ..raster })?;
+    gpu.end_pass()?;
+    let pixel = read_texels(gpu, target, TextureRegion::whole(size))?;
+    Ok([pixel[0], pixel[1], pixel[2], pixel[3]])
+}
+
+/// The draw of the raster shader that covers a target of [`SIZE`] with all
+/// of `texture`, through a sampler of `state`. `before_vertices` runs
+/// before the write of the quad's vertices.
+fn raster_draw(
+    gpu: &mut impl Gpu,
+    texture: TextureId,
+    state: SamplerState,
+    before_vertices: &mut dyn FnMut(),
+) -> Result<Draw, GpuError> {
     let shader = gpu.create_shader(&ShaderKey::new(&programs::RASTER, []))?;
     let sampler = gpu.create_sampler(&state)?;
     let projection = [ProjectionUBO { matrix: tile_matrix(1.0), ..ProjectionUBO::default() }];
@@ -756,7 +777,11 @@ fn minified(gpu: &mut impl Gpu, texture: TextureId, state: SamplerState) -> Resu
     // texture position.
     let e = EXTENT as i16;
     let quad: [[i16; 4]; 4] = [[0, 0, 0, 0], [e, 0, e, 0], [0, e, 0, e], [e, e, e, e]];
-    let vertices = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&quad))?;
+    let quad: &[u8] = bytemuck::cast_slice(&quad);
+    let vertices =
+        gpu.create_buffer(&BufferDesc { label: "quad", usage: BufferUsage::Vertex, size: quad.len() as u64 })?;
+    before_vertices();
+    gpu.write_buffer(vertices, 0, quad)?;
     let indices = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&[0u16, 1, 2, 1, 2, 3]))?;
     let attribute = |id: usize, offset| VertexAttribute { id: id as u32, format: AttributeDataType::Short2, offset };
     let layouts = [VertexBufferLayout {
@@ -775,16 +800,7 @@ fn minified(gpu: &mut impl Gpu, texture: TextureId, state: SamplerState) -> Resu
     })?;
     let pipeline =
         gpu.create_pipeline(&PipelineDesc { shader, vertex_buffers: &layouts, ..background(shader, RGBA8) })?;
-    gpu.begin_pass(&PassDesc {
-        label: "minified",
-        color: Some(ColorAttachment { texture: target, load: LoadOp::Clear(BLACK) }),
-        depth_stencil: None,
-    })?;
-    let scissor = Scissor { x: 0, y: 0, width: size.width, height: size.height };
-    gpu.draw(&Draw { dynamic: DynamicState { scissor, ..dynamic() }, ..draw(pipeline, bindings, geometry, 6) })?;
-    gpu.end_pass()?;
-    let pixel = read_texels(gpu, target, TextureRegion::whole(size))?;
-    Ok([pixel[0], pixel[1], pixel[2], pixel[3]])
+    Ok(draw(pipeline, bindings, geometry, 6))
 }
 
 /// Checks that a pipeline reads its attributes from whichever vertex
@@ -1388,9 +1404,8 @@ pub fn host_writes<G: Gpu + ?Sized>(
     let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;
     let props = |color| BackgroundPropsUBO { color, opacity: 1.0, ..BackgroundPropsUBO::default() };
     let props_size = size_of::<BackgroundPropsUBO>() as u64;
-    let props_buffer = |gpu: &mut G| {
-        gpu.create_buffer(&crate::gpu::BufferDesc { label: "props", usage: BufferUsage::Uniform, size: props_size })
-    };
+    let props_buffer =
+        |gpu: &mut G| gpu.create_buffer(&BufferDesc { label: "props", usage: BufferUsage::Uniform, size: props_size });
 
     // Opaque green, then red from the host up to the middle of the alpha:
     // its low bytes, which are 0.0's. The zeros after them make the alpha
@@ -1452,4 +1467,134 @@ pub fn check_host_writes(pixels: &[u8]) {
     let y = SIZE.height / 2;
     assert_eq!(texel(pixels, left, y), [255, 0, 255, 255], "a write before the host's bytes left them");
     assert_eq!(texel(pixels, right, y), [255, 0, 0, 0], "the host's write zeroed the rest of its last word");
+}
+
+/// The texels [`memory_growth`] writes to its texture, a red column and a
+/// green one, the color its background draws have, and the boxes they draw
+/// it into, as their left edges: each [`GROWTH_BOX`] wide and tall, in the
+/// middle rows.
+#[cfg(target_family = "wasm")]
+const GROWTH_TEXELS: [[u8; 4]; 4] = [[255, 0, 0, 255], [0, 255, 0, 255], [255, 0, 0, 255], [0, 255, 0, 255]];
+#[cfg(target_family = "wasm")]
+const GROWTH_COLOR: [f32; 4] = [0.0, 1.0, 1.0, 1.0];
+#[cfg(target_family = "wasm")]
+const GROWTH_BOXES: [u32; 3] = [8, 40, 52];
+#[cfg(target_family = "wasm")]
+const GROWTH_BOX: u32 = 8;
+
+/// Checks that the backend takes bytes of the instance's memory, and fills
+/// them, while the memory grows. In the browser a backend hands WebGL and
+/// WebGPU the bytes as a typed array, a view of the memory, which the
+/// memory's growth detaches: a view made before the growth holds no bytes.
+/// Taking a JS value can grow the memory, so a view taken as one before the
+/// call that reads it may be detached by then.
+///
+/// `arm(spare)` runs before each call that hands bytes over: the host makes
+/// the memory grow as the instance takes its next JS value after `spare`
+/// more. The calls are a texture's write, a vertex buffer's, a draw that
+/// uploads a storage buffer's elements for the first time (into a buffer a
+/// backend may make then, the spare JS value) and one that uploads them
+/// again, and the frame's read.
+///
+/// The raster shader covers the target with the texture, whose left column
+/// is red and right one green, and the background shader draws
+/// [`GROWTH_COLOR`] into three boxes: the first through a storage buffer
+/// that covers the left half, the second through one that covers the
+/// target, and the third through the first buffer again, written to cover
+/// the target. Returns the readback of the frame, whose texels
+/// [`check_memory_growth`] checks once the backend has them, or the error
+/// of a call that should succeed.
+#[cfg(target_family = "wasm")]
+pub fn memory_growth(gpu: &mut impl Gpu, mut arm: impl FnMut(usize)) -> Result<crate::gpu::ReadbackId, GpuError> {
+    let target = target(gpu, TextureFormat::Rgba8Unorm)?;
+    let size = Size::new(2, 2);
+    let texture = gpu.create_texture(&TextureDesc {
+        label: "written",
+        size,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsage { sampled: true, ..TextureUsage::default() },
+        mipmapped: false,
+    })?;
+    arm(0);
+    gpu.write_texture(texture, TextureRegion::whole(size), GROWTH_TEXELS.as_flattened())?;
+    let raster = raster_draw(gpu, texture, SamplerState::default(), &mut || arm(0))?;
+
+    let (quad, indices) = quad(gpu)?;
+    let shader = gpu.create_shader(&ShaderKey::new(&programs::BACKGROUND, []))?;
+    let props = BackgroundPropsUBO { color: GROWTH_COLOR, opacity: 1.0, ..BackgroundPropsUBO::default() };
+    let props = bytemuck::bytes_of(&props);
+    let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
+    let drawable = [BackgroundDrawableUnionUBO::default()];
+    let drawable = bytemuck::cast_slice(&drawable);
+    let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;
+    let projection = |x_max| [ProjectionUBO { matrix: tile_matrix(x_max), ..ProjectionUBO::default() }];
+    let (left, whole_target) = (projection(0.0), projection(1.0));
+    let (left, whole_target): (&[u8], &[u8]) = (bytemuck::cast_slice(&left), bytemuck::cast_slice(&whole_target));
+    let bindings = |gpu: &mut _, projection| {
+        let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
+        let bindings = Gpu::create_bindings(
+            gpu,
+            &BindingsDesc {
+                label: "memory growth",
+                shader,
+                entries: &[
+                    whole(ID_PROJECTION_UBO, projection_buffer, projection),
+                    whole(ID_BACKGROUND_DRAWABLE_UBO, drawable_buffer, drawable),
+                    whole(ID_BACKGROUND_PROPS_UBO, props_buffer, props),
+                ],
+            },
+        )?;
+        Ok::<_, GpuError>((projection_buffer, bindings))
+    };
+    let (rewritten_buffer, rewritten) = bindings(gpu, left)?;
+    let (_, first_upload) = bindings(gpu, whole_target)?;
+    let pipeline = gpu.create_pipeline(&background(shader, RGBA8))?;
+    let geometry = background_geometry(gpu, shader, quad, indices)?;
+    let boxed = |bindings, x| {
+        let scissor = Scissor { x, y: (SIZE.height - GROWTH_BOX) / 2, width: GROWTH_BOX, height: GROWTH_BOX };
+        Draw { dynamic: DynamicState { scissor, ..dynamic() }, ..draw(pipeline, bindings, geometry, 6) }
+    };
+    let pass = |load| PassDesc {
+        label: "memory growth",
+        color: Some(ColorAttachment { texture: target, load }),
+        depth_stencil: None,
+    };
+
+    gpu.begin_pass(&pass(LoadOp::Clear(BLACK)))?;
+    gpu.draw(&raster)?;
+    // The drawable's elements and the first projection's, uploaded here.
+    gpu.draw(&boxed(rewritten, GROWTH_BOXES[0]))?;
+    // The second projection's alone, for the first time.
+    arm(1);
+    gpu.draw(&boxed(first_upload, GROWTH_BOXES[1]))?;
+    gpu.end_pass()?;
+    // The first projection's again.
+    gpu.write_buffer(rewritten_buffer, 0, whole_target)?;
+    gpu.begin_pass(&pass(LoadOp::Load))?;
+    arm(0);
+    gpu.draw(&boxed(rewritten, GROWTH_BOXES[2]))?;
+    gpu.end_pass()?;
+    arm(0);
+    gpu.read_texture(target, TextureRegion::whole(SIZE))
+}
+
+/// Checks the texels of [`memory_growth`]'s frame.
+///
+/// # Panics
+///
+/// Where a check doesn't hold.
+#[cfg(target_family = "wasm")]
+pub fn check_memory_growth(pixels: &[u8]) {
+    assert_eq!(pixels.len(), (SIZE.width * SIZE.height * 4) as usize, "a texel for each pixel");
+    assert!(pixels.iter().any(|&byte| byte != 0), "the frame's read");
+    for y in [SIZE.height / 4, SIZE.height * 3 / 4] {
+        let what = "the texture's and the vertices' writes";
+        assert_eq!(texel(pixels, SIZE.width / 4, y), GROWTH_TEXELS[0], "{what}, for the left column in row {y}");
+        assert_eq!(texel(pixels, SIZE.width * 3 / 4, y), GROWTH_TEXELS[1], "{what}, for the right column in row {y}");
+    }
+    let what = ["the draw before the others", "a storage buffer's first upload", "a storage buffer's second upload"];
+    for (x, what) in GROWTH_BOXES.into_iter().zip(what) {
+        let center = texel(pixels, x + GROWTH_BOX / 2, SIZE.height / 2);
+        assert_eq!(center, [0, 255, 255, 255], "{what}, for the box at {x}");
+    }
 }

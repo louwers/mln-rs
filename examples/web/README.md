@@ -48,6 +48,9 @@ The page draws its own controls over the map: a style picker, a backend
 indicator that switches between WebGPU and WebGL2 where both are available, zoom
 buttons, a compass, attributions, and a panel that lists the gestures and has a
 choice of `projection` and switches for `compare`, `debug` and `freeBearing`.
+The style picker's Satellite 3D is VersaTiles' Satellite with
+[Mapterhorn](https://mapterhorn.com)'s terrain added once it loads
+(web/styles.ts).
 
 ## How it runs
 
@@ -122,15 +125,15 @@ It fails when a frame differs too much, when the page or a worker logs an error,
 or when a view's tiles get no worker replies. Two views also drag and pinch the
 map over a slow network first, and log the URLs it fetches again
 (`crates/mln_renderer/src/tests/fast_camera_test.rs` tests the gestures' tile
-requests on a modeled network). It also runs mln_gfx's conformance case of
-writes from JS arrays on a GPU of the map's backend, and checks that a panic
-stops the page, and that the GL JS comparison lines up. The page's WebGPU frames
-come from SwiftShader, its WebGL2 ones from the first device ANGLE's Vulkan
-finds, and the native ones from lavapipe, which match in most views. Where
-lavapipe isn't installed (`/usr/share/vulkan/icd.d/lvp_icd.x86_64.json`) and
-`VK_DRIVER_FILES` isn't set, the native runner draws on the machine's default
-device, and the check says so. check/check.mjs documents the options, and
-check/views.mjs lists the views.
+requests on a modeled network). It also runs mln_gfx's conformance cases of
+writes from JS arrays, and of writes while the instance's memory grows, on a GPU
+of the map's backend, and checks that a panic stops the page, and that the GL JS
+comparison lines up. The page's WebGPU frames come from SwiftShader, its WebGL2
+ones from the first device ANGLE's Vulkan finds, and the native ones from
+lavapipe, which match in most views. Where lavapipe isn't installed
+(`/usr/share/vulkan/icd.d/lvp_icd.x86_64.json`) and `VK_DRIVER_FILES` isn't set,
+the native runner draws on the machine's default device, and the check says so.
+check/check.mjs documents the options, and check/views.mjs lists the views.
 
 `--browser firefox` or `webkit` runs the check in Playwright's Firefox or WebKit
 (`playwright-core install firefox webkit`), and `--channel chrome`, `msedge` or

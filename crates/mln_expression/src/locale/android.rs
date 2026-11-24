@@ -2,10 +2,9 @@
 //! level 24), with the system's locale data, through JNI in the app's Java VM.
 //! The default locale is the app's (`ULocale.getDefault()`).
 //!
-//! The Java VM is `jni`'s process-wide one, which `mln_android_init()` (or
-//! `mln_storage`'s and `mln_system_fonts`' `init`) records. Before then, a
-//! collator or number format fails. Each thread that evaluates an expression
-//! attaches to the VM and stays attached.
+//! The Java VM is [`mln_util::android::java_vm`]'s. Without one, a collator
+//! or number format fails. Each thread that evaluates an expression attaches
+//! to the VM and stays attached.
 //!
 //! A collator honors `co`, `kf` and `kn`, though `co` only when ICU has that
 //! collation type for the language. Its resolved locale is the language tag
@@ -25,7 +24,7 @@ use std::sync::{Arc, OnceLock};
 use jni::errors::Error as JniError;
 use jni::objects::{Global, JObject, JObjectArray, JString, JValue};
 use jni::strings::{JNIStr, JNIString};
-use jni::{Env, JavaVM, jni_sig, jni_str};
+use jni::{Env, jni_sig, jni_str};
 use mln_util::hash::HashSet;
 use parking_lot::Mutex;
 
@@ -63,7 +62,7 @@ impl Failure {
 /// Runs `f` on this thread attached to the app's Java VM, in a frame of local
 /// references of its own. A Java exception that `f` leaves fails it.
 fn with_java<T>(f: impl FnOnce(&mut Env<'_>) -> Result<T, Failure>) -> Result<T, String> {
-    let vm = JavaVM::singleton().map_err(|_| "Locale services need Android initialization".to_owned())?;
+    let vm = mln_util::android::java_vm().ok_or_else(|| "Locale services need Android initialization".to_owned())?;
     vm.attach_current_thread(f).map_err(Failure::into_message)
 }
 

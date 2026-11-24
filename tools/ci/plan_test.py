@@ -82,7 +82,8 @@ class UnitConfigTest(unittest.TestCase):
         needs_match = re.search(r"^\s+needs:\s*\[([^\]]+)\]", ci_passed, re.MULTILINE)
         self.assertIsNotNone(needs_match, "ci-passed must declare needs")
         assert needs_match is not None
-        needs = {item.strip() for item in needs_match.group(1).split(",")}
+        # A list that wraps ends in a comma.
+        needs = {item.strip() for item in needs_match.group(1).split(",") if item.strip()}
         self.assertEqual(needs, defined - {"ci-passed"})
 
 
@@ -152,7 +153,7 @@ class PlanTest(unittest.TestCase):
 
     def test_android_unit_populates_target_matrix(self) -> None:
         result = outputs(selected(["android"]), secrets=False)
-        self.assertEqual(result["jobs"], ["commits", "lint", "target"])
+        self.assertEqual(result["jobs"], ["commits", "lint", "target", "device-farm"])
         self.assertFalse(result["secrets"])
         self.assertEqual(result["test"], {"include": []})
         self.assertEqual(result["backend"], {"include": []})

@@ -243,7 +243,7 @@ const camera: Camera = cameraFromHash(location.hash) ?? [
   number("pitch", 0),
 ];
 let current = styleFor(params.get("style"));
-const style = current.source;
+const { source: style, terrain } = current;
 // The map's Web Worker fetches the style and what it needs first meanwhile.
 toMap({ type: "preload", style, ratio, zoom: camera[2] });
 
@@ -276,6 +276,7 @@ compiling.then(
         height: size[1],
         ratio,
         style,
+        terrain,
         fallbackFontFaces: params.get("fallbackFontFaces"),
         camera,
         localIdeographs: localFamily !== "" && localFamily !== "false",
@@ -698,8 +699,8 @@ function pickStyle(next: Style) {
   styleName = "";
   showStyle();
   showAttribution([]);
-  toMap({ type: "style", style: next.source });
-  comparison?.setStyle(next.source);
+  toMap({ type: "style", style: next.source, terrain: next.terrain });
+  comparison?.setStyle(next);
   setParam("style", next.key);
 }
 // Sets (or, for null, removes) a URL parameter, keeping the camera's hash.
@@ -838,7 +839,7 @@ async function setComparing(on: boolean) {
     const style = current;
     const projection = currentProjection;
     const opened = compare(canvas, {
-      style: style.source,
+      style,
       projection,
       camera: latestCamera,
       follow: (next) => toMap({ type: "follow", camera: next }),
@@ -850,7 +851,7 @@ async function setComparing(on: boolean) {
       return;
     }
     comparison = opened;
-    if (!sameStyle(current, style)) comparison.setStyle(current.source);
+    if (!sameStyle(current, style)) comparison.setStyle(current);
     if (currentProjection !== projection)
       comparison.setProjection(currentProjection);
   } catch (error) {

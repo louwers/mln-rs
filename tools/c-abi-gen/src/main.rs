@@ -1,7 +1,9 @@
 //! Generates `crates/mln_c/src/generated` from the C headers in
 //! `crates/mln_c/include` (`mise run generate:c-abi`):
 //!
-//! - `types.rs`: the headers' types and constants, from bindgen.
+//! - `types.rs`: the headers' types and constants, from bindgen. A `#define`
+//!   constant is left out when its value uses a macro from outside the headers,
+//!   such as `UINT64_MAX`, whose definition depends on the system's C library.
 //! - `stubs.rs`: for each header function that `crates/mln_c` doesn't define
 //!   itself, an exported function with the header's signature that does
 //!   nothing and fails: it returns `MLN_STATUS_UNSUPPORTED` and writes a
@@ -139,6 +141,7 @@ fn bind(include_dir: &Path, headers: &[String]) -> Result<(Vec<Item>, Vec<Signat
         .rust_target(bindgen::RustTarget::stable(85, 0).map_err(|error| error.to_string())?)
         .rust_edition(bindgen::RustEdition::Edition2024)
         .formatter(bindgen::Formatter::None)
+        .parse_callbacks(Box::new(OwnMacrosOnly))
         .generate()?;
     let file = syn::parse_file(&bindings.to_string())?;
 
@@ -161,6 +164,24 @@ fn bind(include_dir: &Path, headers: &[String]) -> Result<(Vec<Item>, Vec<Signat
     }
     functions.sort_by_key(|function| function.ident.to_string());
     Ok((types, functions))
+}
+
+/// Has bindgen parse only the headers' own macros, which are all named `MLN_`.
+/// A constant that uses another header's macro then fails to parse, so it's
+/// left out on every system alike: bindgen can evaluate some C libraries'
+/// definitions of such a macro and not others', and loses an unsigned 64-bit
+/// value's type when it can.
+#[derive(Debug)]
+struct OwnMacrosOnly;
+
+impl bindgen::callbacks::ParseCallbacks for OwnMacrosOnly {
+    fn will_parse_macro(&self, name: &str) -> bindgen::callbacks::MacroParsingBehavior {
+        if name.starts_with("MLN_") {
+            bindgen::callbacks::MacroParsingBehavior::Default
+        } else {
+            bindgen::callbacks::MacroParsingBehavior::Ignore
+        }
+    }
 }
 
 fn regex_escape(text: &str) -> String {

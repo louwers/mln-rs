@@ -8,8 +8,7 @@ license = "ISC"
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
-# Only the tests use it (and tools/render-test). Not released: the
-# difftests (louwers/mln-rs-difftests) take it from a git revision.
+# Only the tests use it (and tools/render-test). Not released.
 publish = false
 # The [[test]]s below; tests/ also holds their modules.
 autotests = false

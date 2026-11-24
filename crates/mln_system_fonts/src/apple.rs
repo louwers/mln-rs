@@ -238,7 +238,7 @@ mod tests {
     /// Each language's first font draws the ideograph. Chinese and Japanese
     /// can get the same font: the Chinese font of CoreText's cascade list
     /// may have only Apple's `hvgl` outlines, which the map can't read
-    /// (<https://github.com/louwers/mln-rs/issues/737>).
+    /// (<https://github.com/maplibre/mln-rs/issues/737>).
     #[test]
     fn ideographs_take_a_font_that_draws_them() {
         for language in ["ja-JP", "zh-Hans"] {

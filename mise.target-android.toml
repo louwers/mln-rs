@@ -20,6 +20,8 @@ android-cli = "1.1.16919734"
 # any others.
 ANDROID_HOME = "{% if get_env(name='ANDROID_HOME', default='') != '' %}{{ get_env(name='ANDROID_HOME') }}{% elif os() == 'macos' %}{{ env.HOME }}/Library/Android/sdk{% else %}{{ env.HOME }}/Android/Sdk{% endif %}"
 MLN_ANDROID_NDK = "29.0.14206865"
+# The build-tools whose d8 builds the Device Farm test host (tools/device-farm).
+MLN_ANDROID_BUILD_TOOLS = "37.0.0"
 ANDROID_NDK_HOME = "{{ env.ANDROID_HOME }}/ndk/{{ env.MLN_ANDROID_NDK }}"
 # The NDK's compilers, one per target, for API level 26 and later: the tests
 # link AHardwareBuffer, which arrived in 26. The libraries load it when they
@@ -43,11 +45,21 @@ CARGO_TARGET_I686_LINUX_ANDROID_LINKER = "{{ env.CC_i686_linux_android }}"
 # and MLN_ variables.
 CARGO_TARGET_AARCH64_LINUX_ANDROID_RUNNER = "devices-cli exec android --api 36 --abi arm64-v8a --sync-env CARGO_MANIFEST_DIR --env RUST_* --env MLN_* --"
 CARGO_TARGET_X86_64_LINUX_ANDROID_RUNNER = "devices-cli exec android --api 36 --abi x86_64 --sync-env CARGO_MANIFEST_DIR --env RUST_* --env MLN_* --"
+# Their executables export main, which AWS Device Farm's test host calls in a
+# Java VM's process (tools/device-farm).
+CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS = "-C link-arg=-Wl,--export-dynamic-symbol=main"
+CARGO_TARGET_X86_64_LINUX_ANDROID_RUSTFLAGS = "-C link-arg=-Wl,--export-dynamic-symbol=main"
+# A device runs a test from a copy of its package: nextest's target profile
+# (.config/nextest.toml) and the render suite in the test's process.
+NEXTEST_PROFILE = "target"
+MLN_RENDER_TEST_JOBS = "1"
 
 [hooks]
-# The Rust targets, and the NDK into the SDK when it lacks it. Inline scripts,
-# since a hook's `mise run` would not see an environment selected with -E.
+# The Rust targets, and the NDK and build-tools into the SDK when it lacks
+# them. Inline scripts, since a hook's `mise run` would not see an environment
+# selected with -E.
 postinstall = [
   "rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android",
   '[ -d "$ANDROID_NDK_HOME" ] || android --sdk="$ANDROID_HOME" sdk install "ndk/$MLN_ANDROID_NDK"',
+  '[ -d "$ANDROID_HOME/build-tools/$MLN_ANDROID_BUILD_TOOLS" ] || android --sdk="$ANDROID_HOME" sdk install "build-tools/$MLN_ANDROID_BUILD_TOOLS"',
 ]

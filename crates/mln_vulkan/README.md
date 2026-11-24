@@ -10,6 +10,6 @@ The Vulkan backend: mln-rs's GPU interface on Vulkan through `ash`, its shaders,
 and the targets that frames are drawn into. It is empty on Apple platforms and
 in the browser build.
 
-Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
+Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
 core. All its crates are released together, at the same version.

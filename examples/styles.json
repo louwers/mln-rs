@@ -100,6 +100,20 @@
       "dark": true
     },
     {
+      "key": "satellite-3d",
+      "name": "Satellite 3D",
+      "provider": "VersaTiles",
+      "url": "https://tiles.versatiles.org/assets/styles/satellite/style.json",
+      "dark": true,
+      "terrain": {
+        "source": {
+          "type": "raster-dem",
+          "url": "https://tiles.mapterhorn.com/tilejson.json"
+        },
+        "exaggeration": 1.5
+      }
+    },
+    {
       "key": "americana",
       "name": "Americana",
       "provider": "OpenStreetMap Americana",

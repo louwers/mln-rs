@@ -11,6 +11,6 @@ backend) onto OpenGL ES 3.0 and desktop OpenGL 3.3 through `glow`: natively in
 an EGL context or, on Windows, a WGL one, and in a browser as WebGL2 on a
 canvas.
 
-Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
+Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
 core. All its crates are released together, at the same version.

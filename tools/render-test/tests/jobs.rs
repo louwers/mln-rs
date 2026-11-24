@@ -13,7 +13,7 @@ const FILTER: &str = "/render-tests/(background-color|canvas|line-pattern)/";
 /// The run's result, its HTML report and its output directory.
 fn self_check(name: &str, jobs: usize, worker_program: &Path) -> (RunResult, String, PathBuf) {
     let manifest = if cfg!(target_os = "macos") { "manifests/macos-wgpu.json" } else { "manifests/linux-wgpu.json" };
-    let output = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let output = mln_headless::test_output_dir(env!("CARGO_TARGET_TMPDIR")).join(name);
     let args = [
         "render-test",
         "--manifestPath",

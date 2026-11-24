@@ -2,10 +2,10 @@
   "version": 8,
   "metadata": {
     "test": {
-      "description": "The globe preset half way to Mercator: zoom 11.5 blends the two projections. 0.0005 covers the 32 cell-corner pixels Vulkan and WebGPU rasterize differently from the Metal expectation.",
+      "description": "The globe preset half way to Mercator: zoom 11.5 blends the two projections. 0.00075 covers the 44 cell-corner pixels Vulkan, WebGPU and OpenGL rasterize differently from the Metal expectation.",
       "width": 256,
       "height": 256,
-      "allowed": 0.0005
+      "allowed": 0.00075
     }
   },
   "center": [

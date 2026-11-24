@@ -23,6 +23,13 @@ pub struct ProjectionData {
     /// The camera on the unit sphere's scale, for the line of sight to points
     /// above the surface.
     pub(crate) camera_position: DVec3,
+    /// On the globe, the point on the unit sphere under the middle of the
+    /// tile, which the shaders place the tile's geometry relative to; zero on
+    /// Mercator.
+    pub sphere_anchor: DVec3,
+    /// The sine and cosine of the anchor's longitude, then of its latitude,
+    /// in the angles of [`VerticalPerspectiveProjection::tile_coordinates_to_sphere`].
+    pub sphere_anchor_angles: DVec4,
 }
 
 /// A tile point in clip space, as the vertex shaders would place it.

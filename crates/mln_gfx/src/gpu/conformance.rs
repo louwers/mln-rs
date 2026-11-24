@@ -18,7 +18,8 @@
 //! the mips of a texture drawn into, minified. The other cases draw one color
 //! over the whole target, as [`transparent_replace`] does to check that
 //! `Replace` doesn't blend. On wasm, [`host_writes`] checks writes from JS
-//! arrays. [`terrain_heights`] reads back the heights that the terrain's
+//! arrays, and [`memory_growth`] writes and a read while the instance's
+//! memory grows. [`terrain_heights`] reads back the heights that the terrain's
 //! height rule reads on the GPU, against the CPU's.
 
 mod cases;

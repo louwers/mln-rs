@@ -7,9 +7,8 @@
 # own tests expect two affine triangles, with their expected images, from
 # test/integration/render/tests, and the tiles, images and GeoJSON files they
 # load from test/integration/assets, to
-# tools/render-test/testdata/metrics/integration/gljs. That directory is
-# mln-rs's own: `mise run update:testdata` leaves it alone, and this task
-# rewrites it whole. Fixtures that GL JS adds to the selection come along; add
+# tools/render-test/testdata/metrics/integration/gljs, which this task
+# rewrites whole. Fixtures that GL JS adds to the selection come along; add
 # those that don't pass to an ignore file in tools/render-test/ignores.
 #
 # GL JS's tests allow a difference of 0.00025 unless they say otherwise,

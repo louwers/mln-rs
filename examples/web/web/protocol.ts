@@ -6,6 +6,8 @@
 // its own (TileWorkerConnect), and the Web Worker reports there
 // (TileWorkerReport).
 
+import type { Terrain } from "./styles.ts";
+
 /** A projection type of the style spec. */
 export type ProjectionType = "mercator" | "vertical-perspective" | "globe";
 
@@ -91,6 +93,8 @@ export interface Start {
   height: number;
   ratio: number;
   style: StyleSource;
+  /** The terrain the map adds to the style (styles.ts). */
+  terrain: Terrain | undefined;
   /** JSON: font files that every font stack falls back to. */
   fallbackFontFaces: string | null;
   camera: Camera;
@@ -108,15 +112,16 @@ export type ToMap =
   | { type: "preload"; style: StyleSource; ratio: number; zoom: number }
   | Start
   | { type: "readPixels" }
-  // Run mln_gfx's conformance case of writes from JS arrays on a GPU of the
-  // map's backend (WebMap::start_gpu_check), for check/check.mjs.
+  // Run mln_gfx's conformance cases of writes from JS arrays, and of writes
+  // while the instance's memory grows, on a GPU of the map's backend
+  // (WebMap::start_gpu_check), for check/check.mjs.
   | { type: "checkGpu" }
   | { type: "fetches" }
   | { type: "idle" }
   | { type: "nextFrame" }
   | { type: "resize"; width: number; height: number }
   | { type: "pixelRatio"; ratio: number }
-  | { type: "style"; style: StyleSource }
+  | { type: "style"; style: StyleSource; terrain: Terrain | undefined }
   | { type: "jumpTo"; camera: Camera }
   | { type: "resetNorth" }
   // The projection the map draws with in place of the style's

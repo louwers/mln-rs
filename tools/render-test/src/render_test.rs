@@ -1,7 +1,6 @@
 // Options that C++ does not have:
 // - `--output <dir>` (required): where actual.png, diff.png and the HTML
-//   report go. C++ writes them next to the tests and the manifest; this
-//   runner never writes into the C++ tree.
+//   report go. C++ writes them next to the tests and the manifest.
 // - `--self-check`: renders nothing; every test's "actual" image is its
 //   expected image, so the run exercises manifest parsing, metadata and
 //   operation parsing, comparison and reporting. Exits non-zero unless
@@ -22,7 +21,7 @@ use crate::log::{self, Event};
 use crate::manifest_parser::{Manifest, ManifestParser};
 use crate::metadata::{TestMetadata, TestPaths, TestStatistics};
 use crate::parser::{create_result_page, parse_test_metadata, serialize_json_value};
-use crate::runner::{ImplFactory, ImplOptions, TestRunner, UpdateResults};
+use crate::runner::{ImplFactory, ImplOptions, TestRunner};
 use crate::{filesystem, jobs};
 
 // SHOW_ANSI_COLORS is not defined in the C++ build either.
@@ -48,15 +47,6 @@ const HELP: &str = "  render-test {OPTIONS}
       -p[manifestPath],
       --manifestPath=[manifestPath]     Test manifest file path
       -f[filter], --filter=[filter]     Test filter regex
-      -u[update], --update=[update]     Test results update mode. Supported
-                                        values are: \"default\" Updates generic
-                                        render test expectations. \"platform\"
-                                        Updates platform specific render test
-                                        expectations. \"metrics\" Updates
-                                        expected metrics for configuration
-                                        defined by a manifest. \"rebaseline\"
-                                        Updates or creates expected metrics for
-                                        configuration defined by a manifest.
       --output=[dir]                    Directory for actual.png, diff.png
                                         and the HTML report
       --self-check                      Compare each test's expected image
@@ -80,7 +70,6 @@ pub struct Arguments {
     pub(crate) online: bool,
     pub(crate) seed: u32,
     pub(crate) manifest_path: String,
-    pub(crate) update_results: UpdateResults,
     pub(crate) test_filter: String,
     pub(crate) self_check: bool,
     pub(crate) output: Option<String>,
@@ -107,7 +96,6 @@ pub fn parse_arguments(args: &[String]) -> Result<Arguments, i32> {
     let mut seed: Option<u32> = None;
     let mut manifest_path: Option<String> = None;
     let mut test_filter: Option<String> = None;
-    let mut update: Option<String> = None;
     let mut self_check = false;
     let mut output: Option<String> = None;
     let mut timeout_millis: u64 = 60_000;
@@ -158,7 +146,6 @@ pub fn parse_arguments(args: &[String]) -> Result<Arguments, i32> {
                 }
                 "manifestPath" => manifest_path = Some(take_value("--manifestPath")?),
                 "filter" => test_filter = Some(take_value("--filter")?),
-                "update" => update = Some(take_value("--update")?),
                 "output" => output = Some(take_value("--output")?),
                 "timeout" => {
                     let value = take_value("--timeout")?;
@@ -202,7 +189,7 @@ pub fn parse_arguments(args: &[String]) -> Result<Arguments, i32> {
                     'r' => recycle_map = true,
                     's' => shuffle = true,
                     'o' => online = true,
-                    'p' | 'f' | 'u' => {
+                    'p' | 'f' => {
                         let value = if j < chars.len() {
                             let rest: String = chars[j..].iter().collect();
                             j = chars.len();
@@ -213,10 +200,10 @@ pub fn parse_arguments(args: &[String]) -> Result<Arguments, i32> {
                         } else {
                             return Err(parse_error(format!("Flag '{c}' requires an argument but received none")));
                         };
-                        match c {
-                            'p' => manifest_path = Some(value),
-                            'f' => test_filter = Some(value),
-                            _ => update = Some(value),
+                        if c == 'p' {
+                            manifest_path = Some(value);
+                        } else {
+                            test_filter = Some(value);
                         }
                     }
                     _ => return Err(parse_error(format!("Flag could not be matched: {c}"))),
@@ -229,15 +216,6 @@ pub fn parse_arguments(args: &[String]) -> Result<Arguments, i32> {
         )));
     }
 
-    let update_results = match update.as_deref() {
-        None => UpdateResults::No,
-        Some("default") => UpdateResults::Default,
-        Some("platform") => UpdateResults::Platform,
-        Some("metrics") => UpdateResults::Metrics,
-        Some("rebaseline") => UpdateResults::Rebaseline,
-        Some(other) => return Err(parse_error(format!("Could not find key '{other}' in map for arg 'update'"))),
-    };
-
     let Some(manifest_path) = manifest_path else {
         log::info(Event::General, HELP);
         log::error(Event::General, "Option 'manifestPath' is required");
@@ -249,23 +227,12 @@ pub fn parse_arguments(args: &[String]) -> Result<Arguments, i32> {
         return Err(3);
     }
 
-    // The port's restrictions.
-    if update_results != UpdateResults::No {
-        log::error(
-            Event::General,
-            "--update is not supported: the runner never writes baselines into \
-             ../maplibre-native (add an alternate expectation by hand for a justified difference)",
-        );
-        return Err(1);
-    }
-
     Ok(Arguments {
         recycle_map,
         shuffle,
         online,
         seed: seed.unwrap_or(1),
         manifest_path,
-        update_results,
         test_filter: test_filter.unwrap_or_default(),
         self_check,
         output,
@@ -350,7 +317,7 @@ pub(crate) fn create_runner(
     factory: Option<ImplFactory>,
     output_path: PathBuf,
 ) -> TestRunner {
-    let mut runner = TestRunner::new(manifest, arguments.update_results, factory, arguments.self_check, output_path);
+    let mut runner = TestRunner::new(manifest, factory, arguments.self_check, output_path);
     runner.set_impl_options(ImplOptions { tile_worker_codec: arguments.tile_worker_codec });
     if !arguments.self_check && arguments.timeout_millis > 0 {
         runner.set_test_timeout(Some(std::time::Duration::from_millis(arguments.timeout_millis)));

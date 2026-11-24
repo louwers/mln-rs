@@ -13,6 +13,6 @@ is ready for it. It follows a `CADisplayLink` on Apple platforms,
 host's own. A render session of `mln-rs-runtime` can take one to demand its
 frames.
 
-Part of [mln-rs](https://github.com/louwers/mln-rs), a Rust port of the
+Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
 core. All its crates are released together, at the same version.

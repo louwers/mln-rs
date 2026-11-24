@@ -13,9 +13,7 @@ version:
 
 The `publish = false` packages (the desktop app, the browser build in
 examples/web and crates/mln_web_shaper, the test tools and their headless
-frontend) are not released. The differential tests
-([mln-rs-difftests](https://github.com/louwers/mln-rs-difftests)) take the test
-tools from a git revision.
+frontend) are not released.
 
 ## Releasing a version
 
@@ -90,7 +88,7 @@ hand. In a fork, it does nothing.
    nothing.
 2. If it doesn't, or the workflow was run by hand, `release`:
    1. Checks out the commit that set the version: the latest on the branch whose
-      change to `Cargo.toml` adds the version's line. It needs no C++ checkout.
+      change to `Cargo.toml` adds the version's line.
    2. Installs stable Rust and runs `cargo package --workspace --locked`
       (without the desktop app). It packages every crate and builds each one
       from its packaged sources. The packages resolve each other locally, so

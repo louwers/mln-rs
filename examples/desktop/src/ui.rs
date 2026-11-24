@@ -438,7 +438,7 @@ fn about_panel(ctx: &egui::Context, palette: &Palette, shown: &Shown<'_>, action
                 ui.label(RichText::new(line).size(12.0).color(palette.muted));
             }
             ui.add_space(4.0);
-            ui.hyperlink_to("Source on GitHub", "https://github.com/louwers/mln-rs");
+            ui.hyperlink_to("Source on GitHub", "https://github.com/maplibre/mln-rs");
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 ui.label(RichText::new("WebGPU logo by ").size(11.0).color(palette.muted));
