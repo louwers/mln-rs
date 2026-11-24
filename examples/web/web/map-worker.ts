@@ -331,6 +331,7 @@ async function run({
   camera,
   localIdeographs,
   panic,
+  terrain,
 }: Start): Promise<Handle> {
   const {
     default: init,

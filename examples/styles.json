@@ -26,6 +26,23 @@
             "hillshade-shadow-color": "#473b24"
           },
           "before": "building"
+        },
+        "sky": {
+          "sky-color": "#88c6fc",
+          "horizon-color": "#ffffff",
+          "fog-color": "#ffffff",
+          "fog-ground-blend": 0.5,
+          "atmosphere-blend": [
+            "interpolate",
+            ["linear"],
+            ["zoom"],
+            0,
+            1,
+            5,
+            1,
+            7,
+            0
+          ]
         }
       }
     },

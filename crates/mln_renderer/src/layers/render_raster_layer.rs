@@ -22,7 +22,7 @@ use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Raster;
-use mln_style_types::{RasterResamplingType, ResamplingType, TranslateAnchorType};
+use mln_style_types::{LayerBlendType, RasterResamplingType, ResamplingType, TranslateAnchorType};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
@@ -457,6 +457,10 @@ impl TypedLayer for RenderRasterLayer {
 
     fn passes(&self, evaluated: &EvaluatedLayer<Raster>) -> RenderPass {
         if *evaluated.paint.raster_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None }
+    }
+
+    fn blends_with_backdrop(&self, evaluated: &EvaluatedLayer<Raster>) -> bool {
+        *evaluated.paint.raster_layer_blend.uniform() != LayerBlendType::Normal
     }
 
     /// Makes the frame's draws of the layer, one of each of its tiles, which

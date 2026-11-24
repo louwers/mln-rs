@@ -5383,38 +5383,9 @@ fn flat_ground_under(transform: &Transform, point: ScreenCoordinate) -> LatLng {
     transform.screen_coordinate_to_lat_lng(&point, WrapMode::Unwrapped).unwrap()
 }
 
-/// Where the transform's projection matrix draws `lat_lng`, `height` meters
-/// above sea level (y down).
-fn drawn_at(transform: &Transform, lat_lng: &LatLng, height: f64) -> ScreenCoordinate {
-    let view = transform.view();
-    let point = Projection::project(lat_lng, view.scale());
-    let clip = view.projection_matrix() * DVec4::new(point.x, point.y, height, 1.0);
-    let size = view.size();
-    sc(
-        f64::midpoint(clip.x / clip.w, 1.0) * f64::from(size.width),
-        (1.0 - clip.y / clip.w) / 2.0 * f64::from(size.height),
-    )
-}
-
-/// Where the sky starts on the screen of a flat map that isn't rolled (y
-/// down): above it, a line of sight doesn't descend to the ground.
-fn horizon_row(transform: &Transform) -> f64 {
-    let view = transform.view();
-    view.padding().center_in(view.size()).y - view.mercator_horizon()
-}
-
 // Within about a pixel: the eye can't tell a grabbed point from the pointer
 // at that distance.
 const ABOUT_A_PIXEL: f64 = 1.0;
-
-#[test]
-fn drawn_at_sea_level_is_where_the_transform_draws_a_location() {
-    let (transform, _) = pitched_flat_map(800.0);
-    let location = flat_ground_under(&transform, sc(600.0, 520.0));
-    let (drawn, expected) = (drawn_at(&transform, &location, 0.0), transform.lat_lng_to_screen_coordinate(&location));
-    assert_near(drawn.x, expected.x, 1e-6);
-    assert_near(drawn.y, expected.y, 1e-6);
-}
 
 /// On a pitched flat map, a drag keeps the ground it grabbed under the
 /// pointer, wherever on the screen the pointer is, and its center 800 m up
@@ -5453,11 +5424,12 @@ fn the_first_pan_of_a_raised_flat_map_does_not_jump() {
     let (mut transform, _) = pitched_flat_map(800.0);
     let center = sc(400.0, 300.0);
     let offset = sc(0.0, 2.0);
-    let moving = transform
-        .screen_coordinate_to_lat_lng_at(&sc(center.x - offset.x, center.y - offset.y), 800.0, WrapMode::Unwrapped)
-        .unwrap();
+    let at_center = |transform: &Transform, point: ScreenCoordinate| {
+        transform.screen_coordinate_to_lat_lng_at(&point, 800.0, WrapMode::Unwrapped).unwrap()
+    };
+    let moving = at_center(&transform, sc(center.x - offset.x, center.y - offset.y));
     transform.move_by(&offset, &AnimationOptions::default()).unwrap();
-    let drawn = drawn_at(&transform, &moving, 800.0);
+    let drawn = transform.lat_lng_to_screen_coordinate_at(&moving, 800.0);
     let off = (drawn.x - center.x).hypot(drawn.y - center.y);
     assert!(off < ABOUT_A_PIXEL, "the ground at the center is {off} px off");
 }
@@ -5640,6 +5612,13 @@ fn from_straight_above_at_sea_level_flat_gestures_move_as_before() {
     let (expected, actual) = (expected.center.unwrap(), actual.center.unwrap());
     assert_near(expected.latitude(), actual.latitude(), 1e-9);
     assert_near(expected.longitude(), actual.longitude(), 1e-9);
+}
+
+/// Where the sky starts on the screen of a flat map that isn't rolled (y
+/// down): above it, a line of sight doesn't descend to the ground.
+fn horizon_row(transform: &Transform) -> f64 {
+    let view = transform.view();
+    view.padding().center_in(view.size()).y - view.mercator_horizon()
 }
 
 /// A tilt around a point just below the horizon of a flat map, which

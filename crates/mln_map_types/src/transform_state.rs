@@ -775,7 +775,7 @@ impl TransformState {
         // the ground, and up.
         let distance = view.camera_to_center_distance();
         let across = view.pitch().sin() * distance;
-        let up = view.pitch().cos() * distance + lift / Self::height_meters_per_pixel(view);
+        let up = view.pitch().cos() * distance + lift / view.meters_per_pixel();
         let raised = across.hypot(up);
         if raised == 0.0 {
             return false;
@@ -887,19 +887,6 @@ impl TransformState {
             VerticalPerspectiveProjection::globe_radius_pixels(Projection::world_size(1.0), location.latitude());
         let zoom = scale_zoom(view.camera_to_center_distance() / distance / radius_at_zoom_0);
         Some((location, (length - 1.0) * VerticalPerspectiveProjection::GLOBE_RADIUS_METERS, zoom))
-    }
-
-    /// Meters per pixel at the zoom of a height at the center: on Mercator
-    /// the view's, and on the globe those of its sphere, which it raises
-    /// heights on.
-    fn height_meters_per_pixel(view: &View) -> f64 {
-        if view.is_globe() {
-            let latitude = view.center(WrapMode::Unwrapped).latitude();
-            VerticalPerspectiveProjection::GLOBE_RADIUS_METERS
-                / VerticalPerspectiveProjection::globe_radius_pixels(Projection::world_size(view.scale()), latitude)
-        } else {
-            view.meters_per_pixel()
-        }
     }
 }
 

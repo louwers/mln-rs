@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use mln_map_types::{Elevation, MapDebugOptions, MapMode, TileLodMode, View};
+use mln_map_types::{Elevation, MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode, View};
 use mln_style::Style;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::time::Instant;
@@ -20,7 +20,13 @@ pub struct UpdateParameters {
     pub min_zoom: f64,
     pub max_zoom: f64,
     /// Whether a gesture or an animation moves the camera, which the frame
-    /// draws for speed rather than crispness.
+    /// draws for speed rather than crispness: from a gesture's start, held
+    /// still or not, to its momentum's end, and while a command moves the
+    /// center, zoom or bearing. Such a camera reads the terrain away from
+    /// its center, which [`elevation`](Self::elevation) says how a frame
+    /// waits on. A command of the pitch or the altitude alone, which
+    /// doesn't count, runs as an animation, which keeps a continuous map
+    /// from going idle, and a still image shows it ended.
     pub camera_moving: bool,
 
     /// The version of the style to draw. A renderer compares it with the
@@ -47,11 +53,15 @@ pub struct UpdateParameters {
     pub update_id: u64,
     pub cross_source_collisions: bool,
     pub fast_pfor_enabled: bool,
+    /// How far the skirts of terrain tiles reach down.
+    pub terrain_skirt_length: TerrainSkirtLength,
     /// The terrain's ground that `view` stands on: the snapshot of it that
     /// the renderer last reported ([`RendererEvent::TerrainElevation`]) and
     /// the map applied, or `None`. A frame is complete only when this gives
     /// the same height and floor at the view's center as the renderer's
-    /// current snapshot, or both are `None`. A still image draws no other.
+    /// current snapshot, or both are `None`, and, while the camera moves
+    /// ([`camera_moving`](Self::camera_moving)), only when this is that
+    /// snapshot. A still image draws no other.
     ///
     /// [`RendererEvent::TerrainElevation`]: crate::RendererEvent::TerrainElevation
     pub elevation: Option<Arc<dyn Elevation>>,

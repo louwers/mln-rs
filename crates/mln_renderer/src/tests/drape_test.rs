@@ -1,40 +1,27 @@
 // The terrain's drapes: the projection that draws a tile's square of the map
-// into its drape, its stencil, the frame's tiles and image copies a drape
-// draws, and the drapes that hold a texture.
+// into its drape, the scale of the drape's pixels, and the frame's tiles and
+// image copies a drape draws.
 
-use std::collections::BTreeSet;
-use std::sync::Arc;
-use std::time::Duration;
-
-use glam::DVec4;
-use mln_gfx::frame::FrameTarget;
-use mln_gfx::offscreen_target::OffscreenTarget;
-use mln_gfx::{RendererBackend as _, ScissorRect};
+use glam::{DVec4, Vec2, Vec4};
+use mln_gfx::ScissorRect;
 use mln_map::transform::Transform;
-use mln_map_types::{
-    CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TileLodMode, View, ViewportMode,
-};
-use mln_storage::{FileSource, Resource, Responder, Response};
-use mln_style::layers::Raster;
-use mln_style::{Edit, Style};
+use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, View, ViewportMode};
+use mln_style::layers::Fill;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
 use mln_util::constants::EXTENT;
 use mln_util::geo::LatLng;
-use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::with_context;
 use crate::clip_masks::ClipMasks;
 use crate::frame::Frame;
 use crate::layer_composite::LayerComposite;
+use crate::layers::cast_matrix;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render_layer::FrameSourceTiles;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::{FoundTile, RenderTile};
 use crate::sources::render_image_source::{ImageQuad, ImageSourceRenderData};
-use crate::update_parameters::UpdateParameters;
-use crate::{Registry, RenderMode, Renderer, RendererEvent, RendererEvents};
 
 /// A camera pitched by `pitch` and turned to `bearing`, in degrees, over a
 /// 512 px view at a fractional zoom.
@@ -93,6 +80,58 @@ fn a_drape_projects_its_tile_onto_the_whole_target() {
 
     // The world copy to the west is eight tiles to the west.
     assert_clip(clip(&transform, tile(0, 3, 5, 2), 0.0, 0.0), -17.0, 1.0);
+}
+
+/// A drape's pixels are the map's at its zoom, so a line's extrusion in a
+/// drape is as long in pixels as the line shader asks: its antialiasing's
+/// gamma scale is 1, as GL JS's is in a drape, for the drape's tile and the
+/// tiles of other zooms in it. The fill outlines' world is the drape's
+/// texture.
+#[test]
+fn lines_in_a_drape_antialias_at_a_gamma_scale_of_1() {
+    with_context(|_, context| {
+        let view = view(60.0, 30.0);
+        let frame = Frame::new(&view, false, MapDebugOptions::NO_DEBUG);
+        let static_data = RenderStaticData::default();
+        let (mut clip_masks, mut layer_composite) = (ClipMasks::default(), LayerComposite::default());
+        let size = Size::new(512, 512);
+        let scissor = ScissorRect { x: 0, y: 0, width: size.width, height: size.height };
+        let mut parameters = PaintParameters::new(
+            context,
+            &mut clip_masks,
+            &mut layer_composite,
+            false,
+            &frame,
+            &static_data,
+            1.0,
+            size,
+            scissor,
+        );
+        let drape = tile(0, 3, 5, 2);
+        let transform = TransformParameters::for_drape(&view, &drape);
+        let (mut drape_masks, mut drape_composite) = (ClipMasks::default(), LayerComposite::default());
+        let drape_size = Size::new(1024, 1024);
+        let drape_parameters = parameters.drape(&transform, &mut drape_masks, &mut drape_composite, drape_size, drape);
+        let global = drape_parameters.global_paint_params(Size::new(1, 1));
+        assert_eq!([1024.0, 1024.0], global.world_size);
+        let units_to_pixels = Vec2::from(global.units_to_pixels);
+
+        let zoom = view.zoom() as f32;
+        let pixel_scale = view.projection().pixel_scale(&view) as f32;
+        for tile in [drape, tile(0, 2, 2, 1), tile(0, 5, 21, 9)] {
+            // The line shader's extrusion of `dist` pixels, at the middle of
+            // the tile (`linesofar` and offsets aside).
+            let matrix = glam::Mat4::from_cols_array(&cast_matrix(&(transform.proj_matrix * view.tile_matrix(&tile))));
+            let ratio = pixel_scale / tile.pixels_to_tile_units(1.0, zoom);
+            let dist = Vec2::new(3.0, -4.0);
+            let projected_extrude = matrix * Vec4::new(dist.x / ratio, dist.y / ratio, 0.0, 0.0);
+            let half = EXTENT as f32 / 2.0;
+            let position = matrix * Vec4::new(half, half, 0.0, 1.0) + projected_extrude;
+            let with_perspective = (projected_extrude.truncate().truncate() / position.w * units_to_pixels).length();
+            let gamma_scale = dist.length() / with_perspective;
+            assert!((gamma_scale - 1.0).abs() < 1e-4, "{tile:?}: gamma scale {gamma_scale}");
+        }
+    });
 }
 
 /// Where a pass clears the stencil only as it begins, a drape clears it by
@@ -157,14 +196,15 @@ fn a_drape_draws_the_tiles_that_overlap_its_tile() {
     let found: Vec<FoundTile> = (0..render_tiles.len()).map(|tile| FoundTile { tile, view: None }).collect();
     let source = FrameSourceTiles::new(&render_tiles, &contents);
     let drawn: Vec<UnwrappedTileID> =
-        source.overlapping::<Raster>(&found, "raster", ids[0], false).iter().map(|tile| tile.tile.id).collect();
+        source.overlapping::<Fill>(&found, "fill", ids[0], false).iter().map(|tile| tile.tile.id).collect();
     assert_eq!(&ids[..4], &drawn[..]);
 }
 
 /// On the globe, which has no world copies, a drape draws the tiles over
-/// its tile whatever their copy: near the antimeridian, a zoom 0 drape in
-/// copy 0 draws the western zoom 1 tile that the globe's cover puts in
-/// copy 1, as its west half. A Mercator drape doesn't.
+/// its tile whatever their copy, in its own: near the antimeridian, a
+/// zoom 0 drape in copy 0 draws the western zoom 1 tile that the globe's
+/// cover puts in copy 1, as its west half, which its key names in the
+/// drape's copy. A Mercator drape doesn't.
 #[test]
 fn a_globe_drape_draws_the_tiles_over_it_of_every_world_copy() {
     let ids = [tile(1, 1, 0, 0), tile(0, 1, 1, 0), tile(1, 2, 0, 1)];
@@ -174,11 +214,17 @@ fn a_globe_drape_draws_the_tiles_over_it_of_every_world_copy() {
     let found: Vec<FoundTile> = (0..render_tiles.len()).map(|tile| FoundTile { tile, view: None }).collect();
     let source = FrameSourceTiles::new(&render_tiles, &contents);
     let drape = tile(0, 0, 0, 0);
-    let drawn = |globe: bool| -> Vec<UnwrappedTileID> {
-        source.overlapping::<Raster>(&found, "raster", drape, globe).iter().map(|tile| tile.tile.id).collect()
+    let drawn = |globe: bool| -> Vec<OverscaledTileID> {
+        source.overlapping::<Fill>(&found, "fill", drape, globe).iter().map(|tile| tile.id()).collect()
     };
-    assert_eq!(ids.to_vec(), drawn(true));
-    assert_eq!(ids[1..2].to_vec(), drawn(false));
+    let overscaled = |ids: &[UnwrappedTileID]| -> Vec<OverscaledTileID> {
+        ids.iter().map(|id| id.overscale_to(id.canonical.z)).collect()
+    };
+    assert_eq!(overscaled(&ids), drawn(true));
+    assert_eq!(overscaled(&ids[1..2]), drawn(false));
+    let in_drape = ids.map(|id| tile(0, id.canonical.z, id.canonical.x, id.canonical.y));
+    let stamped: Vec<OverscaledTileID> = source.stamps(&found, drape, true).map(|stamp| stamp.tile).collect();
+    assert_eq!(overscaled(&in_drape), stamped);
 }
 
 /// An image drawn in the tiles `tile_ids` over the box `bounds` of their
@@ -245,144 +291,4 @@ fn an_image_overlaps_the_drapes_at_coarser_and_finer_zooms() {
     // neighbor's tiles.
     assert!(image.overlaps(&copies[0], &tile(0, 10, 6 * 128, 2 * 128)));
     assert!(!image.overlaps(&copies[0], &tile(0, 10, 6 * 128 + 1, 2 * 128)));
-}
-
-/// Answers every request at once with a PNG of sea level in the Mapbox
-/// encoding, (1 · 65536 + 134 · 256 + 160) · 0.1 − 10000 = 0 m, which a
-/// raster source draws as an opaque color.
-struct SeaLevel;
-
-impl FileSource for SeaLevel {
-    fn load(&self, _resource: &Resource, responder: Responder) {
-        let mut image = PremultipliedImage::new(Size::new(256, 256));
-        for texel in image.data.as_chunks_mut::<4>().0 {
-            *texel = [1, 134, 160, 255];
-        }
-        let mut response = Response::new();
-        response.data = Some(Arc::new(mln_image::encode_png(&image)));
-        responder.send(response);
-    }
-
-    fn can_request(&self, _resource: &Resource) -> bool {
-        true
-    }
-}
-
-/// A style over a terrain of flat ground with two raster layers that a
-/// circle splits into two stacks: the first of a source whose bounds are in
-/// the north-west terrain tile of a view of zoom 2 over 10° E, 10° S, the
-/// second in the south-east one.
-const TWO_STACKS: &str = r#"{
-    "version": 8,
-    "terrain": {"source": "dem"},
-    "sources": {
-        "dem": {"type": "raster-dem", "tiles": ["dem/{z}/{x}/{y}.png"], "tileSize": 256, "maxzoom": 10},
-        "north-west": {"type": "raster", "tiles": ["a/{z}/{x}/{y}.png"], "bounds": [-20, 10, -10, 20]},
-        "south-east": {"type": "raster", "tiles": ["b/{z}/{x}/{y}.png"], "bounds": [20, -30, 30, -20]},
-        "point": {"type": "geojson", "data": {"type": "Point", "coordinates": [10, -10]}}
-    },
-    "layers": [
-        {"id": "north-west", "type": "raster", "source": "north-west", "paint": {"raster-fade-duration": 0}},
-        {"id": "circle", "type": "circle", "source": "point"},
-        {"id": "south-east", "type": "raster", "source": "south-east", "paint": {"raster-fade-duration": 0}}
-    ]
-}"#;
-
-/// A continuous map of `style` at zoom 2 over 10° E, 10° S, seen from above
-/// over a 256 px WebGPU target, drawn until a frame of the camera on the
-/// terrain's ground is complete. Returns the tile and stack of each drape
-/// that has a texture then.
-fn textured_drapes(style: &str) -> BTreeSet<(OverscaledTileID, usize)> {
-    let registry = Registry::with_builtins();
-    let parsed = Style::from_json(registry.style(), style, None).expect("the style");
-    let mut style = Style::new(Arc::clone(registry.style()));
-    for source in parsed.get_sources().iter() {
-        style.apply(Edit::AddSource(crate::tests::ready(source.clone()))).unwrap();
-    }
-    for layer in parsed.get_layer_list().iter() {
-        style.apply(Edit::AddLayer { layer: layer.clone(), before: None }).unwrap();
-    }
-    style.apply(Edit::SetTerrain(parsed.get_terrain().map(|terrain| (**terrain).clone()))).unwrap();
-    let style = Arc::new(style);
-
-    let size = Size::new(256, 256);
-    let device = mln_webgpu::Device::new(None).expect("device");
-    let mut backend = mln_webgpu::RendererBackend::new(&device);
-    let mut target = OffscreenTarget::<mln_webgpu::WebGpu>::new(size);
-    let pool = crate::tests::pool();
-    let mut renderer =
-        Renderer::new(backend.gpu(), 1.0, mln_text::local_fonts::LocalGlyphs::default(), Arc::new(|| {}), &pool);
-    let events = RendererEvents::new();
-    renderer.set_event_queue(Some(events.clone()));
-    let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
-    transform.resize(size).unwrap();
-    transform.jump_to(&CameraOptions {
-        center: Some(LatLng::new(-10.0, 10.0).unwrap()),
-        zoom: Some(2.0),
-        ..Default::default()
-    });
-    let file_source: Arc<dyn FileSource> = Arc::new(SeaLevel);
-    let mut elevation: Option<Arc<dyn Elevation>> = None;
-    let mut complete = false;
-    for _ in 0..1000 {
-        let parameters = Arc::new(UpdateParameters {
-            style_loaded: true,
-            mode: MapMode::Continuous,
-            pixel_ratio: 1.0,
-            debug_options: MapDebugOptions::NO_DEBUG,
-            time_point: None,
-            view: transform.view().clone(),
-            min_zoom: 0.0,
-            max_zoom: 22.0,
-            camera_moving: false,
-            style: Arc::clone(&style),
-            sprite_loaded: true,
-            feature_states: Arc::default(),
-            file_source: Some(Arc::clone(&file_source)),
-            prefetch_zoom_delta: 0,
-            still_image_request: false,
-            still_image_request_id: 0,
-            update_id: 0,
-            cross_source_collisions: true,
-            fast_pfor_enabled: false,
-            elevation: elevation.clone(),
-            tile_lod_min_radius: 3.0,
-            tile_lod_scale: 1.0,
-            tile_lod_pitch_threshold: mln_math::deg2rad(60.0),
-            tile_lod_zoom_shift: 0.0,
-            tile_lod_mode: TileLodMode::Default,
-            subdivision_granularity: SubdivisionGranularitySetting::none(),
-        });
-        let gpu = backend.gpu();
-        let frame = renderer.update(gpu, &parameters).expect("a continuous map's frame");
-        let image = target.begin_frame(gpu).expect("the frame's image");
-        let drawn = renderer.render(gpu, &image, frame);
-        let handoff = target.end_frame(gpu);
-        renderer.finish_frame(gpu, drawn, handoff);
-        for event in events.take() {
-            match event {
-                RendererEvent::RenderFrameFinished { mode, .. } => complete = mode == RenderMode::Full,
-                RendererEvent::TerrainElevation(ground) => elevation = ground,
-                _ => {}
-            }
-        }
-        if complete {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(1));
-    }
-    assert!(complete, "no frame was complete");
-    let textured = renderer.terrain().drapes().textured().into_iter().collect();
-    target.tear_down(backend.gpu());
-    textured
-}
-
-/// A stack has a drape with a texture only in the terrain tiles where its
-/// layers draw something: each raster's stack, only in the tile of its
-/// source's bounds.
-#[test]
-fn a_stack_has_a_drape_texture_only_where_its_layers_draw() {
-    let tile = |x, y| OverscaledTileID::new(2, 0, CanonicalTileID::new(2, x, y));
-    let expected = BTreeSet::from([(tile(1, 1), 0), (tile(2, 2), 1)]);
-    assert_eq!(expected, textured_drapes(TWO_STACKS));
 }

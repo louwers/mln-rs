@@ -391,11 +391,72 @@ impl Elevation for TerrainElevation {
 }
 
 #[cfg(test)]
+impl TerrainElevation {
+    /// Ground `meters` high everywhere on `tile`, a drawn terrain tile that
+    /// reads its own DEM tile, Terrarium encoded, and flat off it.
+    pub(crate) fn level(tile: OverscaledTileID, meters: f64) -> TerrainElevation {
+        TerrainElevation::shaped(tile, |_| meters)
+    }
+
+    /// Ground on `tile`, a drawn terrain tile that reads its own DEM tile,
+    /// Terrarium encoded, and flat off it, as high in meters as `meters`
+    /// gives at the centers of its DEM pixels, from the tile's uv: linear in
+    /// uv everywhere on the tile where `meters` is.
+    pub(crate) fn shaped(tile: OverscaledTileID, meters: impl Fn(DVec2) -> f64) -> TerrainElevation {
+        use mln_util::size::Size;
+        use mln_util::tileset::RasterEncoding;
+
+        let dim = 64;
+        let mut image = PremultipliedImage::new(Size::new(dim + 2, dim + 2));
+        let (mut min, mut max) = (f64::INFINITY, f64::NEG_INFINITY);
+        let width = dim as usize + 2;
+        for (index, texel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            // The border pixels, outside the tile, at -1 and dim.
+            let pixel = DVec2::new((index % width) as f64, (index / width) as f64);
+            let meters = meters((pixel - 0.5) / f64::from(dim));
+            (min, max) = (min.min(meters), max.max(meters));
+            // Terrarium: r · 256 + g + b / 256 − 32768 meters.
+            let encoded = meters + 32768.0;
+            let (r, g) = ((encoded / 256.0).floor(), encoded.rem_euclid(256.0).floor());
+            let b = ((encoded - r * 256.0 - g) * 256.0).round();
+            *texel = [r as u8, g as u8, b as u8, 255];
+        }
+        let dem = DrawnDem { id: tile, image: Arc::new(image), dim, coords: DemCoords::OWN, min: 0.0, max: 0.0 };
+        let drawn = DrawnTile { id: tile, dem: Some(dem), loading: false, drawn: true };
+        TerrainElevation {
+            tiles: vec![drawn],
+            zooms: vec![tile.canonical.z],
+            index: [(tile.canonical, 0)].into_iter().collect(),
+            copies: [(tile.to_unwrapped(), 0)].into_iter().collect(),
+            standing: Vec::new(),
+            dems: [(tile.canonical, 0)].into_iter().collect(),
+            range: Some((min, max)),
+            unpack: DemUnpack::of(RasterEncoding::Terrarium),
+            exaggeration: 1.0,
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use mln_util::tileset::RasterEncoding;
 
     use super::*;
     use crate::terrain::cover::{ElevationRanges, TerrainTile};
+
+    /// Level ground stands as high as it was made, on its tile and on a
+    /// tile inside it.
+    #[test]
+    fn level_ground_is_as_high_as_it_was_made() {
+        use glam::Vec2;
+
+        let tile = OverscaledTileID::new(12, 0, CanonicalTileID::new(12, 2000, 1500));
+        let ground = TerrainElevation::level(tile, 812.25);
+        let point = Vec2::new(1000.0, 7000.0);
+        assert_eq!(812.25, ground.ground(&tile).height(point));
+        let inside = OverscaledTileID::new(14, 0, CanonicalTileID::new(14, 8001, 6002));
+        assert_eq!(812.25, ground.ground(&inside).height(point));
+    }
 
     /// A point in a world copy past the range of the tiles' wraps has no
     /// surface, though a tile of the last copy in range drew: no copy of

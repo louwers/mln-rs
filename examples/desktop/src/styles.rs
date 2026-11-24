@@ -31,13 +31,16 @@ pub(crate) struct Style {
 /// 3D terrain that the app adds to a style that has none, from a catalog
 /// entry's `terrain`, as the web demo does (examples/web/web/styles.ts): a
 /// `raster-dem` source, the style's `terrain` on it, and optionally a
-/// hillshade of it.
+/// hillshade of it and a `sky` where the style has none, so that fog shows
+/// at a high pitch.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Terrain {
     /// The `raster-dem` source's JSON.
     pub source: String,
     pub exaggeration: f64,
     pub hillshade: Option<Hillshade>,
+    /// The sky for a style without one, as JSON.
+    pub sky: Option<String>,
 }
 
 /// A hillshade layer of a [`Terrain`]'s source.
@@ -70,6 +73,7 @@ impl Terrain {
             source: object(entry, "source")?,
             exaggeration: entry.get("exaggeration")?.as_f64()?,
             hillshade,
+            sky: object(entry, "sky"),
         })
     }
 }
@@ -170,7 +174,13 @@ pub(crate) fn add_terrain(map: &mut mln_map::Map, terrain: &Terrain) -> Result<(
             style.add_layer_json(&layer, before)?;
         }
         let root = format!(r#"{{"source":"{TERRAIN_SOURCE}","exaggeration":{}}}"#, terrain.exaggeration);
-        style.set_root_property_json("terrain", &root)
+        style.set_root_property_json("terrain", &root)?;
+        if let Some(sky) = &terrain.sky
+            && style.get_sky().is_none()
+        {
+            style.set_root_property_json("sky", sky)?;
+        }
+        Ok(())
     })
 }
 
@@ -275,16 +285,18 @@ mod tests {
         assert_eq!(style_for(url).key.as_deref(), Some("satellite"));
         // Liberty 3D shades the ground under Liberty's buildings.
         let liberty_3d = style_for("liberty-3d").terrain.expect("Liberty 3D's terrain");
+        assert!(liberty_3d.sky.is_some(), "Liberty 3D's sky");
         assert_eq!(liberty_3d.hillshade.expect("Liberty 3D's hillshade").before.as_deref(), Some("building"));
     }
 
     #[test]
-    fn terrain_takes_an_optional_hillshade() {
+    fn terrain_takes_an_optional_hillshade_and_sky() {
         let parse = |json: &str| Terrain::parse(&serde_json::from_str(json).unwrap());
         let source = r#""source":{"type":"raster-dem","url":"https://example.com/dem.json"}"#;
         let bare = parse(&format!(r#"{{{source},"exaggeration":1.5}}"#)).unwrap();
         assert_eq!(bare.exaggeration, 1.5);
         assert_eq!(bare.hillshade, None);
+        assert_eq!(bare.sky, None);
         let shaded = parse(&format!(
             r#"{{{source},"exaggeration":1,"hillshade":{{"paint":{{"hillshade-exaggeration":0.3}},"before":"building"}}}}"#
         ))

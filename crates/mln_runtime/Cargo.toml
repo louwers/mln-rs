@@ -109,6 +109,8 @@ mln_d3d12 = { workspace = true, optional = true }
 
 [dev-dependencies]
 glam.workspace = true
+# The DEM tiles of the still image tests over terrain.
+mln_image = { package = "mln-rs-image", path = "../mln_image" }
 # Serves the styles of the resource tests.
 httpmock.workspace = true
 pollster.workspace = true

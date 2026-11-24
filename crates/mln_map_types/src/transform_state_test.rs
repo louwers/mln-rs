@@ -138,6 +138,7 @@ fn numbers_out_of_range_do_not_panic() {
             let _ = s.set_limits(CameraLimits { max_pitch: v, ..*s.limits() });
         }),
         ("center altitude", |s, v| s.set_center_altitude(v)),
+        ("terrain min elevation", |s, v| s.set_terrain_min_elevation(Some(v))),
         ("zoom", |s, v| s.set_lat_lng_zoom(&LatLng::new(10.0, 10.0).unwrap(), v)),
         ("longitude", |s, v| {
             if let Ok(lat_lng) = LatLng::with_mode(0.0, v, WrapMode::Unwrapped) {
@@ -414,18 +415,6 @@ fn the_center_altitude_holds_in_meters_through_zoom_and_center_changes() {
     draws_at_center(&state);
 }
 
-/// Where `view`'s projection matrix draws `lat_lng`, `height` meters above
-/// sea level, measured from the bottom edge (y up).
-fn drawn_at(view: &crate::View, lat_lng: &LatLng, height: f64) -> mln_util::geo::ScreenCoordinate {
-    let point = Projection::project(lat_lng, view.scale());
-    let clip = view.projection_matrix() * DVec4::new(point.x, point.y, height, 1.0);
-    let size = view.size();
-    mln_util::geo::ScreenCoordinate::new(
-        f64::midpoint(clip.x / clip.w, 1.0) * f64::from(size.width),
-        f64::midpoint(clip.y / clip.w, 1.0) * f64::from(size.height),
-    )
-}
-
 /// The line of sight through a point meets the plane at a height where the
 /// projection matrix draws the location it reads there, at that height; at
 /// sea level the location is `screen_coordinate_to_lat_lng`'s, to the bit.
@@ -440,7 +429,7 @@ fn a_point_reads_the_location_its_line_of_sight_meets_on_a_plane() {
     let point = ScreenCoordinate::new(140.0, 120.0);
     for height in [-300.0, 0.0, 400.0, 1500.0] {
         let location = view.screen_coordinate_to_lat_lng_at(&point, height, WrapMode::Unwrapped).unwrap();
-        let drawn = drawn_at(view, &location, height);
+        let drawn = view.lat_lng_to_screen_coordinate_at(&location, height);
         assert!((drawn.x - point.x).hypot(drawn.y - point.y) < 1e-6, "{height} m: {drawn:?}");
     }
     assert_eq!(
@@ -466,7 +455,7 @@ fn moving_a_location_on_a_plane_puts_it_at_the_point() {
         moved.move_lat_lng_at(&location, &to, height).unwrap();
         // The center's altitude in meters draws a little higher or lower at
         // the center's new latitude.
-        let landed = drawn_at(moved.view(), &location, height);
+        let landed = moved.view().lat_lng_to_screen_coordinate_at(&location, height);
         assert!((landed.x - to.x).hypot(landed.y - to.y) < 1e-2, "{height} m: {landed:?}");
         let (before, after) = (state.view(), moved.view());
         assert_eq!(
@@ -481,26 +470,140 @@ fn moving_a_location_on_a_plane_puts_it_at_the_point() {
     }
 }
 
-/// The line of sight through the view's center descends through the center
-/// at its altitude, from the near plane to the far plane; through a point
-/// above the horizon of a steep view it rises.
+/// The eye stands back from the center along the line of sight, and the
+/// near plane's middle point is on that line, the near plane's distance
+/// further. Raising the eye keeps the ground under it and the center it
+/// looks at, with its altitude, the bearing and the roll.
 #[test]
-fn the_line_of_sight_runs_from_the_near_plane_to_the_far_plane() {
-    use mln_util::geo::{ScreenCoordinate, WrapMode};
+fn raising_the_eye_keeps_its_place_and_the_center() {
+    use mln_util::geo::WrapMode;
+
+    let mut state = pitched(70.0);
+    state.set_limits(CameraLimits { max_pitch: mln_util::constants::PITCH_MAX, ..*state.limits() }).unwrap();
+    state.set_angle(0.5);
+    state.set_roll(0.1);
+    state.set_center_altitude(1000.0);
+    state.set_terrain_min_elevation(Some(800.0));
+    let view = state.view().clone();
+    let meters_per_pixel = view.meters_per_pixel();
+    let world_size = Projection::world_size(view.scale());
+    let eye = view.eye_position();
+    let rise = mln_math::deg2rad(70.0).cos() * view.camera_to_center_distance() * meters_per_pixel;
+    assert!((eye.z - (1000.0 + rise)).abs() < 1e-6, "{eye}");
+    let middle = view.near_plane_points()[4];
+    let to_middle = DVec3::new(
+        (middle.x - eye.x) * world_size,
+        (middle.y - eye.y) * world_size,
+        (middle.z - eye.z) / meters_per_pixel,
+    );
+    assert!((to_middle.length() - view.near_z()).abs() < 1e-6, "{to_middle}");
+    assert!((to_middle.z / to_middle.length() + mln_math::deg2rad(70.0).cos()).abs() < 1e-9, "{to_middle}");
+
+    assert!(state.raise_eye(500.0));
+    let raised = state.view();
+    let center = |view: &crate::View| view.center(WrapMode::Unwrapped);
+    assert!((center(raised).latitude() - center(&view).latitude()).abs() < 1e-9);
+    assert!((center(raised).longitude() - center(&view).longitude()).abs() < 1e-9);
+    assert_eq!((1000.0, 0.5, 0.1), (raised.center_altitude(), raised.angle(), raised.roll()));
+    assert!(raised.pitch() < view.pitch() && raised.zoom() < view.zoom());
+    let raised_eye = raised.eye_position();
+    assert!((raised_eye.truncate() - eye.truncate()).length() * world_size < 1e-6, "{raised_eye} {eye}");
+    assert!((raised_eye.z - (eye.z + 500.0)).abs() < 1e-6, "{raised_eye} {eye}");
+}
+
+/// An eye below sea level raised to it looks level at a center at sea
+/// level, from as far as it stood across the ground: GL JS's pitch 90 and
+/// zoom for the camera of `high-pitch/terrain-pitch95`.
+#[test]
+fn an_eye_raised_level_with_the_center_looks_level() {
+    let mut state = pitched(95.0);
+    state.set_limits(CameraLimits { max_pitch: mln_util::constants::PITCH_MAX, ..*state.limits() }).unwrap();
+    state.set_pitch(mln_math::deg2rad(95.0));
+    let eye = state.view().eye_position();
+    assert!(eye.z < 0.0, "{eye}");
+    assert!(state.raise_eye(-eye.z));
+    assert!((state.view().pitch() - mln_math::deg2rad(90.0)).abs() < 1e-12);
+    let zoom = 5.0 + (1.0 / mln_math::deg2rad(95.0).sin()).log2();
+    assert!((state.view().zoom() - zoom).abs() < 1e-12, "{}", state.view().zoom());
+}
+
+/// A view at latitude 45, zoom 14 and pitch 60, turned, with the center at
+/// sea level, and the point 1000 m up on its center's line of sight, where
+/// ground that rises in front of the center would meet it.
+fn looking_at_a_rise() -> (TransformState, crate::GroundHit) {
+    use mln_util::geo::WrapMode;
 
     let mut state = pitched(60.0);
-    state.set_center_altitude(700.0);
+    state.set_angle(0.5);
+    state.set_lat_lng_zoom(&LatLng::new(45.0, 10.0).unwrap(), 14.0);
     let view = state.view();
-    let (near, far) = view.line_of_sight(&ScreenCoordinate::new(256.0, 256.0)).unwrap();
-    assert!(far.z < near.z && far.z < 700.0 && 700.0 < near.z, "{near} {far}");
-    let center = Projection::project(&view.center(WrapMode::Unwrapped), 1.0 / mln_util::constants::TILE_SIZE_D);
-    let along = (700.0 - near.z) / (far.z - near.z);
-    let at = near + (far - near) * along;
-    assert!((at.x - center.x).abs() < 1e-12 && (at.y - center.y).abs() < 1e-12, "{at} against {center:?}");
+    let center = view.lat_lng_to_screen_coordinate(&view.center(WrapMode::Unwrapped));
+    let (near, far) = view.line_of_sight(&center).unwrap();
+    let point = near + (far - near) * ((1000.0 - near.z) / (far.z - near.z));
+    (state, crate::GroundHit { world: point.truncate(), height: 1000.0 })
+}
 
-    let steep = pitched(85.0);
-    let (near, far) = steep.view().line_of_sight(&ScreenCoordinate::new(256.0, 500.0)).unwrap();
-    assert!(far.z >= near.z, "{near} {far}");
+/// Meters along the ground at latitude 45 in a unit of Web Mercator at zoom 0.
+fn meters_at_45() -> f64 {
+    Projection::meters_per_pixel_at_latitude(45.0, 0.0) * mln_util::constants::TILE_SIZE_D
+}
+
+/// Moving the center along the view onto a point of its line of sight keeps
+/// the eye, the pitch and the bearing, and zooms in to the nearer center,
+/// which stands where the view at the new latitude reaches the point's
+/// height, off it by far less than a meter.
+#[test]
+fn recentering_keeps_the_eye_and_moves_the_center_along_the_view() {
+    use mln_util::geo::WrapMode;
+
+    let (mut state, hit) = looking_at_a_rise();
+    let before = state.view().clone();
+    assert!(state.recenter_on(&hit));
+    let view = state.view();
+    assert_eq!((before.pitch(), before.angle()), (view.pitch(), view.angle()));
+    let moved = view.eye_position() - before.eye_position();
+    let moved = DVec3::new(moved.x * meters_at_45(), moved.y * meters_at_45(), moved.z);
+    assert!(moved.length() < 1e-5, "the eye moved {moved} m");
+    assert!(view.zoom() > before.zoom() + 0.1, "{}", view.zoom());
+    let center = Projection::project(&view.center(WrapMode::Unwrapped), 1.0 / mln_util::constants::TILE_SIZE_D);
+    let off = DVec3::new(
+        (center.x - hit.world.x) * meters_at_45(),
+        (center.y - hit.world.y) * meters_at_45(),
+        view.center_altitude() - hit.height,
+    );
+    assert!(off.length() > 1e-3 && off.length() < 1.0, "the center stands {off} m off the point");
+}
+
+/// A point behind the eye, or a zoom past the limit, leaves the state as it
+/// is.
+#[test]
+fn recentering_refuses_a_point_behind_the_eye_or_past_the_zoom_limit() {
+    let (mut state, hit) = looking_at_a_rise();
+    let before = state.clone();
+    let eye = state.view().eye_position();
+    let behind = crate::GroundHit { world: hit.world + (eye.truncate() - hit.world) * 2.0, height: hit.height };
+    assert!(!state.recenter_on(&behind));
+    assert_eq!(before, state);
+    state.set_limits(CameraLimits { max_zoom: 14.0, ..*state.limits() }).unwrap();
+    let before = state.clone();
+    assert!(!state.recenter_on(&hit));
+    assert_eq!(before, state);
+}
+
+/// A center the bounds would move leaves the state as it is: bounds that
+/// hold the center but not the point.
+#[test]
+fn recentering_refuses_a_center_out_of_bounds() {
+    use mln_util::geo::{LatLngBounds, WrapMode};
+
+    let (mut state, hit) = looking_at_a_rise();
+    let center = state.view().center(WrapMode::Unwrapped);
+    let corner = |offset: f64| LatLng::new(center.latitude() + offset, center.longitude() + offset).unwrap();
+    let bounds = LatLngBounds::hull(corner(-1e-3), corner(1e-3));
+    state.set_limits(CameraLimits { bounds, ..*state.limits() }).unwrap();
+    let before = state.clone();
+    assert!(!state.recenter_on(&hit));
+    assert_eq!(before, state);
 }
 
 /// With terrain, the near and far planes are GL JS's (`calculateNearFarZ`
@@ -683,6 +786,251 @@ fn the_terrain_far_plane_reaches_a_rolled_views_sides() {
     assert!(seen > 1000, "{seen} points in view");
 }
 
+// MARK: - The camera on the globe
+
+/// The globe's radius in meters, which heights on it are measured against.
+const GLOBE_RADIUS: f64 = crate::VerticalPerspectiveProjection::GLOBE_RADIUS_METERS;
+
+/// A 512 by 512 view under `vertical-perspective` of latitude 46.5,
+/// longitude 7.9 at zoom 14, at `pitch` degrees and `bearing`, the center
+/// `center_altitude` meters up.
+fn on_globe(pitch: f64, bearing: f64, center_altitude: f64) -> TransformState {
+    let mut state = MapView {
+        camera: Camera {
+            center: LatLng::new(46.5, 7.9).unwrap(),
+            center_altitude,
+            zoom: 14.0,
+            pitch,
+            bearing,
+            fov: mln_math::rad2deg(DEFAULT_FOV),
+            ..Camera::default()
+        },
+        extent: LogicalExtent::new(Size::new(512, 512), 1.0),
+        projection_mode: ProjectionMode::default(),
+        viewport: Viewport::default(),
+        projection: ProjectionDefinition::new(mln_style_types::ProjectionType::VerticalPerspective),
+    }
+    .to_state()
+    .unwrap();
+    state.set_limits(CameraLimits { max_pitch: mln_util::constants::PITCH_MAX, ..*state.limits() }).unwrap();
+    assert!(state.view().is_globe());
+    state
+}
+
+/// The globe's radius in pixels at the view's zoom and center.
+fn globe_radius_px(view: &crate::View) -> f64 {
+    crate::VerticalPerspectiveProjection::globe_radius_pixels(
+        Projection::world_size(view.scale()),
+        view.center(mln_util::geo::WrapMode::Unwrapped).latitude(),
+    )
+}
+
+/// The unit-sphere point of a point of [`crate::View::eye_position`]'s
+/// units: a Web Mercator point at zoom 0 and a height.
+fn on_sphere(point: DVec3) -> DVec3 {
+    let world = mln_util::geometry::Point::new(point.x, point.y);
+    let location =
+        Projection::unproject(&world, 1.0 / mln_util::constants::TILE_SIZE_D, mln_util::geo::WrapMode::Unwrapped)
+            .unwrap();
+    crate::VerticalPerspectiveProjection::surface_vector(&location) * (1.0 + point.z / GLOBE_RADIUS)
+}
+
+/// GL JS's globe camera, with the center at sea level and the near plane
+/// half a pixel from the eye: the matrix, the clipping plane and the
+/// camera's position.
+fn sea_level_globe(view: &crate::View) -> (glam::DMat4, DVec4, DVec3) {
+    use glam::DMat4;
+    let radius = globe_radius_px(view);
+    let center = view.center(mln_util::geo::WrapMode::Unwrapped);
+    let (lat, lng) = (mln_math::deg2rad(center.latitude()), mln_math::deg2rad(center.longitude()));
+    let distance = view.camera_to_center_distance();
+    let size = view.size();
+    let projection = glam::dcamera::rh::proj::opengl::perspective(
+        f64::from(view.fov() as f32),
+        f64::from(size.width) / f64::from(size.height),
+        0.5,
+        distance + radius * 2.0,
+    );
+    let matrix = projection
+        * DMat4::from_translation(DVec3::new(0.0, 0.0, -distance))
+        * DMat4::from_rotation_z(view.roll())
+        * DMat4::from_rotation_x(-view.pitch())
+        * DMat4::from_rotation_z(-view.angle())
+        * DMat4::from_translation(DVec3::new(0.0, 0.0, -radius))
+        * DMat4::from_rotation_x(lat)
+        * DMat4::from_rotation_y(-lng)
+        * DMat4::from_scale(DVec3::splat(radius));
+
+    let pitch = view.pitch();
+    let to_b = distance / radius;
+    let (to_a, a_to_c) = (pitch.sin() * to_b, pitch.cos() * to_b + 1.0);
+    let to_c = (to_a * to_a + a_to_c * a_to_c).sqrt();
+    let mut plane = DVec3::new(0.0, -to_a / to_c, a_to_c / to_c);
+    plane = glam::DMat3::from_rotation_z(view.angle()) * plane;
+    plane = glam::DMat3::from_rotation_x(-lat) * plane;
+    plane = glam::DMat3::from_rotation_y(lng) * plane;
+    let plane = plane.extend(-1.0 / to_c) / plane.length();
+
+    let mut position = DVec3::new(0.0, 0.0, to_b);
+    position = glam::DMat3::from_rotation_z(-view.roll()) * position;
+    position = glam::DMat3::from_rotation_x(pitch) * position;
+    position = glam::DMat3::from_rotation_z(view.angle()) * position;
+    position += DVec3::Z;
+    position = glam::DMat3::from_rotation_x(-lat) * position;
+    position = glam::DMat3::from_rotation_y(lng) * position;
+    (matrix, plane, position)
+}
+
+/// With the center at sea level and no terrain, the globe's matrices are
+/// GL JS's sea-level camera's, to the bit; a center raised by its altitude
+/// draws at the center of the view, and terrain moves the near plane out.
+#[test]
+fn the_globe_camera_looks_at_the_center_at_its_altitude() {
+    let state = on_globe(60.0, 30.0, 0.0);
+    let view = state.view();
+    let (matrix, plane, position) = sea_level_globe(view);
+    assert_eq!(matrix.to_cols_array(), view.globe_view_projection_matrix().to_cols_array());
+    assert_eq!(plane.to_array(), view.globe_clipping_plane().to_array());
+    assert_eq!(position.to_array(), view.globe_camera_position().to_array());
+
+    for altitude in [-400.0, 1200.0, 4000.0] {
+        let mut state = state.clone();
+        state.set_center_altitude(altitude);
+        let view = state.view();
+        let center =
+            crate::VerticalPerspectiveProjection::surface_vector(&view.center(mln_util::geo::WrapMode::Unwrapped))
+                * (1.0 + altitude / GLOBE_RADIUS);
+        let clip = view.globe_view_projection_matrix() * center.extend(1.0);
+        assert!((clip.x / clip.w).abs() < 1e-9 && (clip.y / clip.w).abs() < 1e-9, "{altitude} m: {clip}");
+        // The eye is the camera's distance from that center.
+        let distance = (view.globe_camera_position() - center).length() * globe_radius_px(view);
+        assert!((distance - view.camera_to_center_distance()).abs() < 1e-6, "{altitude} m: {distance}");
+    }
+
+    let mut terrain = state.clone();
+    terrain.set_terrain_min_elevation(Some(0.0));
+    let near = terrain.view().near_plane_points()[4];
+    let eye = terrain.view().eye_position();
+    let to_near = (on_sphere(near) - on_sphere(eye)).length() * globe_radius_px(terrain.view());
+    assert!((to_near - terrain.view().near_z()).abs() < 1e-3, "the near plane {to_near} px from the eye");
+}
+
+/// On the globe the eye stands where the camera is, back from the center
+/// at its altitude along the view, and its height is measured from the
+/// sea-level sphere; the near plane's points are the near plane's distance
+/// from the eye along the view.
+#[test]
+fn the_globe_eye_and_near_plane_are_the_cameras() {
+    let mut state = on_globe(70.0, 0.0, 1500.0);
+    state.set_terrain_min_elevation(Some(1000.0));
+    let view = state.view();
+    let radius = globe_radius_px(view);
+    let distance = view.camera_to_center_distance() / radius;
+    let pitch = mln_math::deg2rad(70.0);
+    // Looking north, the eye is south of the center, on its meridian.
+    let (south, up) = (pitch.sin() * distance, 1.0 + 1500.0 / GLOBE_RADIUS + pitch.cos() * distance);
+    let center = view.center(mln_util::geo::WrapMode::Unwrapped);
+    let under = LatLng::new(center.latitude() - mln_math::rad2deg(south.atan2(up)), center.longitude()).unwrap();
+    let expected = Projection::project(&under, 1.0 / mln_util::constants::TILE_SIZE_D);
+    let eye = view.eye_position();
+    assert!((eye.x - expected.x).abs() < 1e-12 && (eye.y - expected.y).abs() < 1e-12, "{eye}");
+    let height = (south.hypot(up) - 1.0) * GLOBE_RADIUS;
+    assert!((eye.z - height).abs() < 1e-6, "the eye {} m up, not {height}", eye.z);
+
+    let eye = on_sphere(eye);
+    let raised_center = crate::VerticalPerspectiveProjection::surface_vector(&center) * (1.0 + 1500.0 / GLOBE_RADIUS);
+    let forward = (raised_center - eye).normalize();
+    let points = view.near_plane_points();
+    let middle = on_sphere(points[4]) - eye;
+    assert!((middle - forward * view.near_z() / radius).length() * radius < 1e-3, "{middle}");
+    for point in points {
+        let along = (on_sphere(point) - eye).dot(forward) * radius;
+        assert!((along - view.near_z()).abs() < 1e-3, "{point} is {along} px along the view");
+    }
+}
+
+/// On the globe at zoom 14, raising the eye over a ridge 300 m above it
+/// clears the ridge, keeping the center, its altitude and the bearing, and
+/// the ground under the eye.
+#[test]
+fn raising_the_eye_on_the_globe_clears_a_ridge() {
+    use mln_util::geo::WrapMode;
+
+    let mut state = on_globe(70.0, 40.0, 1000.0);
+    state.set_terrain_min_elevation(Some(800.0));
+    let before = state.view().clone();
+    let eye = before.eye_position();
+    let ridge = eye.z + 300.0;
+    assert!(state.raise_eye(ridge - eye.z));
+    let raised = state.view();
+    let raised_eye = raised.eye_position();
+    assert!((raised_eye.z - ridge).abs() < 0.01, "the eye {} m up, the ridge {ridge} m", raised_eye.z);
+    let center = |view: &crate::View| view.center(WrapMode::Unwrapped);
+    assert!((center(raised).latitude() - center(&before).latitude()).abs() < 1e-9);
+    assert!((center(raised).longitude() - center(&before).longitude()).abs() < 1e-9);
+    assert_eq!((1000.0, before.angle()), (raised.center_altitude(), raised.angle()));
+    let under = |eye: DVec3| on_sphere(DVec3::new(eye.x, eye.y, 0.0));
+    let moved = (under(raised_eye) - under(eye)).length() * GLOBE_RADIUS;
+    assert!(moved < 0.5, "the ground under the eye moved {moved} m");
+}
+
+/// On the globe at zoom 14, moving the center along the view onto a point
+/// 1000 m up on its line of sight puts the center there, keeps the pitch
+/// and the bearing, and moves the eye less than a meter.
+#[test]
+fn recentering_on_the_globe_keeps_the_eye() {
+    use mln_util::geo::WrapMode;
+
+    let mut state = on_globe(60.0, 30.0, 0.0);
+    let before = state.view().clone();
+    let eye = before.globe_camera_position();
+    let center = crate::VerticalPerspectiveProjection::surface_vector(&before.center(WrapMode::Unwrapped));
+    let forward = (center - eye).normalize();
+    // Where the center's line of sight comes down to 1000 m.
+    let radius = 1.0 + 1000.0 / GLOBE_RADIUS;
+    let b = eye.dot(forward);
+    let t = -b - (b * b - eye.length_squared() + radius * radius).sqrt();
+    let point = eye + forward * t;
+    let location = crate::VerticalPerspectiveProjection::surface_vector_to_lat_lng(point.normalize()).unwrap();
+    let world = Projection::project(&location, 1.0 / mln_util::constants::TILE_SIZE_D);
+    let hit = crate::GroundHit { world: glam::DVec2::new(world.x, world.y), height: 1000.0 };
+
+    assert!(state.recenter_on(&hit));
+    let view = state.view();
+    assert_eq!((before.pitch(), before.angle()), (view.pitch(), view.angle()));
+    let moved = (view.globe_camera_position() - eye).length() * GLOBE_RADIUS;
+    assert!(moved < 1.0, "the eye moved {moved} m");
+    assert!((view.center_altitude() - 1000.0).abs() < 0.01, "the center {} m up", view.center_altitude());
+    let off = (crate::VerticalPerspectiveProjection::surface_vector(&view.center(WrapMode::Unwrapped))
+        - point.normalize())
+    .length()
+        * GLOBE_RADIUS;
+    assert!(off < 0.01, "the center {off} m from the point");
+    assert!(view.zoom() > before.zoom() + 0.1, "{}", view.zoom());
+}
+
+/// The line of sight through the view's center descends through the center
+/// at its altitude, from the near plane to the far plane; through a point
+/// above the horizon of a steep view it rises.
+#[test]
+fn the_line_of_sight_runs_from_the_near_plane_to_the_far_plane() {
+    use mln_util::geo::{ScreenCoordinate, WrapMode};
+
+    let mut state = pitched(60.0);
+    state.set_center_altitude(700.0);
+    let view = state.view();
+    let (near, far) = view.line_of_sight(&ScreenCoordinate::new(256.0, 256.0)).unwrap();
+    assert!(far.z < near.z && far.z < 700.0 && 700.0 < near.z, "{near} {far}");
+    let center = Projection::project(&view.center(WrapMode::Unwrapped), 1.0 / mln_util::constants::TILE_SIZE_D);
+    let along = (700.0 - near.z) / (far.z - near.z);
+    let at = near + (far - near) * along;
+    assert!((at.x - center.x).abs() < 1e-12 && (at.y - center.y).abs() < 1e-12, "{at} against {center:?}");
+
+    let steep = pitched(85.0);
+    let (near, far) = steep.view().line_of_sight(&ScreenCoordinate::new(256.0, 500.0)).unwrap();
+    assert!(far.z >= near.z, "{near} {far}");
+}
+
 /// A 512 by 512 view of latitude 52.5, longitude 13.4 at `zoom`, pitched
 /// 60 degrees and turned 20, its center `center_altitude` meters up, under
 /// `projection`.
@@ -827,285 +1175,4 @@ fn the_globe_hands_over_to_mercator_with_the_center_raised() {
     let raised = farthest_apart(3000.0);
     assert!(at_sea_level < 2.0, "{at_sea_level} px apart at sea level");
     assert!(raised < at_sea_level + 1.0, "{raised} px apart with the center 3000 m up");
-}
-
-// MARK: - Raising the eye and recentering
-
-/// The eye stands back from the center along the line of sight, and the
-/// near plane's middle point is on that line, the near plane's distance
-/// further. Raising the eye keeps the ground under it and the center it
-/// looks at, with its altitude, the bearing and the roll.
-#[test]
-fn raising_the_eye_keeps_its_place_and_the_center() {
-    use mln_util::geo::WrapMode;
-
-    let mut state = pitched(70.0);
-    state.set_limits(CameraLimits { max_pitch: mln_util::constants::PITCH_MAX, ..*state.limits() }).unwrap();
-    state.set_angle(0.5);
-    state.set_roll(0.1);
-    state.set_center_altitude(1000.0);
-    state.set_terrain_min_elevation(Some(800.0));
-    let view = state.view().clone();
-    let meters_per_pixel = view.meters_per_pixel();
-    let world_size = Projection::world_size(view.scale());
-    let eye = view.eye_position();
-    let rise = mln_math::deg2rad(70.0).cos() * view.camera_to_center_distance() * meters_per_pixel;
-    assert!((eye.z - (1000.0 + rise)).abs() < 1e-6, "{eye}");
-    let middle = view.near_plane_points()[4];
-    let to_middle = DVec3::new(
-        (middle.x - eye.x) * world_size,
-        (middle.y - eye.y) * world_size,
-        (middle.z - eye.z) / meters_per_pixel,
-    );
-    assert!((to_middle.length() - view.near_z()).abs() < 1e-6, "{to_middle}");
-    assert!((to_middle.z / to_middle.length() + mln_math::deg2rad(70.0).cos()).abs() < 1e-9, "{to_middle}");
-
-    assert!(state.raise_eye(500.0));
-    let raised = state.view();
-    let center = |view: &crate::View| view.center(WrapMode::Unwrapped);
-    assert!((center(raised).latitude() - center(&view).latitude()).abs() < 1e-9);
-    assert!((center(raised).longitude() - center(&view).longitude()).abs() < 1e-9);
-    assert_eq!((1000.0, 0.5, 0.1), (raised.center_altitude(), raised.angle(), raised.roll()));
-    assert!(raised.pitch() < view.pitch() && raised.zoom() < view.zoom());
-    let raised_eye = raised.eye_position();
-    assert!((raised_eye.truncate() - eye.truncate()).length() * world_size < 1e-6, "{raised_eye} {eye}");
-    assert!((raised_eye.z - (eye.z + 500.0)).abs() < 1e-6, "{raised_eye} {eye}");
-}
-
-/// An eye below sea level raised to it looks level at a center at sea
-/// level, from as far as it stood across the ground: GL JS's pitch 90 and
-/// zoom for the camera of `high-pitch/terrain-pitch95`.
-#[test]
-fn an_eye_raised_level_with_the_center_looks_level() {
-    let mut state = pitched(95.0);
-    state.set_limits(CameraLimits { max_pitch: mln_util::constants::PITCH_MAX, ..*state.limits() }).unwrap();
-    state.set_pitch(mln_math::deg2rad(95.0));
-    let eye = state.view().eye_position();
-    assert!(eye.z < 0.0, "{eye}");
-    assert!(state.raise_eye(-eye.z));
-    assert!((state.view().pitch() - mln_math::deg2rad(90.0)).abs() < 1e-12);
-    let zoom = 5.0 + (1.0 / mln_math::deg2rad(95.0).sin()).log2();
-    assert!((state.view().zoom() - zoom).abs() < 1e-12, "{}", state.view().zoom());
-}
-
-/// A view at latitude 45, zoom 14 and pitch 60, turned, with the center at
-/// sea level, and the point 1000 m up on its center's line of sight, where
-/// ground that rises in front of the center would meet it.
-fn looking_at_a_rise() -> (TransformState, crate::GroundHit) {
-    use mln_util::geo::WrapMode;
-
-    let mut state = pitched(60.0);
-    state.set_angle(0.5);
-    state.set_lat_lng_zoom(&LatLng::new(45.0, 10.0).unwrap(), 14.0);
-    let view = state.view();
-    let center = view.lat_lng_to_screen_coordinate(&view.center(WrapMode::Unwrapped));
-    let (near, far) = view.line_of_sight(&center).unwrap();
-    let point = near + (far - near) * ((1000.0 - near.z) / (far.z - near.z));
-    (state, crate::GroundHit { world: point.truncate(), height: 1000.0 })
-}
-
-/// Meters along the ground at latitude 45 in a unit of Web Mercator at zoom 0.
-fn meters_at_45() -> f64 {
-    Projection::meters_per_pixel_at_latitude(45.0, 0.0) * mln_util::constants::TILE_SIZE_D
-}
-
-/// Moving the center along the view onto a point of its line of sight keeps
-/// the eye, the pitch and the bearing, and zooms in to the nearer center,
-/// which stands where the view at the new latitude reaches the point's
-/// height, off it by far less than a meter.
-#[test]
-fn recentering_keeps_the_eye_and_moves_the_center_along_the_view() {
-    use mln_util::geo::WrapMode;
-
-    let (mut state, hit) = looking_at_a_rise();
-    let before = state.view().clone();
-    assert!(state.recenter_on(&hit));
-    let view = state.view();
-    assert_eq!((before.pitch(), before.angle()), (view.pitch(), view.angle()));
-    let moved = view.eye_position() - before.eye_position();
-    let moved = DVec3::new(moved.x * meters_at_45(), moved.y * meters_at_45(), moved.z);
-    assert!(moved.length() < 1e-5, "the eye moved {moved} m");
-    assert!(view.zoom() > before.zoom() + 0.1, "{}", view.zoom());
-    let center = Projection::project(&view.center(WrapMode::Unwrapped), 1.0 / mln_util::constants::TILE_SIZE_D);
-    let off = DVec3::new(
-        (center.x - hit.world.x) * meters_at_45(),
-        (center.y - hit.world.y) * meters_at_45(),
-        view.center_altitude() - hit.height,
-    );
-    assert!(off.length() > 1e-3 && off.length() < 1.0, "the center stands {off} m off the point");
-}
-
-/// A point behind the eye, or a zoom past the limit, leaves the state as it
-/// is.
-#[test]
-fn recentering_refuses_a_point_behind_the_eye_or_past_the_zoom_limit() {
-    let (mut state, hit) = looking_at_a_rise();
-    let before = state.clone();
-    let eye = state.view().eye_position();
-    let behind = crate::GroundHit { world: hit.world + (eye.truncate() - hit.world) * 2.0, height: hit.height };
-    assert!(!state.recenter_on(&behind));
-    assert_eq!(before, state);
-    state.set_limits(CameraLimits { max_zoom: 14.0, ..*state.limits() }).unwrap();
-    let before = state.clone();
-    assert!(!state.recenter_on(&hit));
-    assert_eq!(before, state);
-}
-
-/// A center the bounds would move leaves the state as it is: bounds that
-/// hold the center but not the point.
-#[test]
-fn recentering_refuses_a_center_out_of_bounds() {
-    use mln_util::geo::{LatLngBounds, WrapMode};
-
-    let (mut state, hit) = looking_at_a_rise();
-    let center = state.view().center(WrapMode::Unwrapped);
-    let corner = |offset: f64| LatLng::new(center.latitude() + offset, center.longitude() + offset).unwrap();
-    let bounds = LatLngBounds::hull(corner(-1e-3), corner(1e-3));
-    state.set_limits(CameraLimits { bounds, ..*state.limits() }).unwrap();
-    let before = state.clone();
-    assert!(!state.recenter_on(&hit));
-    assert_eq!(before, state);
-}
-
-// MARK: - Raising the eye and recentering on the globe
-
-/// The globe's radius in meters, which heights on it are measured against.
-const GLOBE_RADIUS: f64 = crate::VerticalPerspectiveProjection::GLOBE_RADIUS_METERS;
-
-/// A 512 by 512 view under `vertical-perspective` of latitude 46.5,
-/// longitude 7.9 at zoom 14, at `pitch` degrees and `bearing`, the center
-/// `center_altitude` meters up.
-fn on_globe(pitch: f64, bearing: f64, center_altitude: f64) -> TransformState {
-    let mut state = MapView {
-        camera: Camera {
-            center: LatLng::new(46.5, 7.9).unwrap(),
-            center_altitude,
-            zoom: 14.0,
-            pitch,
-            bearing,
-            fov: mln_math::rad2deg(DEFAULT_FOV),
-            ..Camera::default()
-        },
-        extent: LogicalExtent::new(Size::new(512, 512), 1.0),
-        projection_mode: ProjectionMode::default(),
-        viewport: Viewport::default(),
-        projection: ProjectionDefinition::new(mln_style_types::ProjectionType::VerticalPerspective),
-    }
-    .to_state()
-    .unwrap();
-    state.set_limits(CameraLimits { max_pitch: mln_util::constants::PITCH_MAX, ..*state.limits() }).unwrap();
-    assert!(state.view().is_globe());
-    state
-}
-
-/// The globe's radius in pixels at the view's zoom and center.
-fn globe_radius_px(view: &crate::View) -> f64 {
-    crate::VerticalPerspectiveProjection::globe_radius_pixels(
-        Projection::world_size(view.scale()),
-        view.center(mln_util::geo::WrapMode::Unwrapped).latitude(),
-    )
-}
-
-/// The unit-sphere point of a point of [`crate::View::eye_position`]'s
-/// units: a Web Mercator point at zoom 0 and a height.
-fn on_sphere(point: DVec3) -> DVec3 {
-    let world = mln_util::geometry::Point::new(point.x, point.y);
-    let location =
-        Projection::unproject(&world, 1.0 / mln_util::constants::TILE_SIZE_D, mln_util::geo::WrapMode::Unwrapped)
-            .unwrap();
-    crate::VerticalPerspectiveProjection::surface_vector(&location) * (1.0 + point.z / GLOBE_RADIUS)
-}
-
-/// On the globe the eye stands where the camera is, back from the center
-/// at its altitude along the view, and its height is measured from the
-/// sea-level sphere; the near plane's points are the near plane's distance
-/// from the eye along the view.
-#[test]
-fn the_globe_eye_and_near_plane_are_the_cameras() {
-    let mut state = on_globe(70.0, 0.0, 1500.0);
-    state.set_terrain_min_elevation(Some(1000.0));
-    let view = state.view();
-    let radius = globe_radius_px(view);
-    let distance = view.camera_to_center_distance() / radius;
-    let pitch = mln_math::deg2rad(70.0);
-    // Looking north, the eye is south of the center, on its meridian.
-    let (south, up) = (pitch.sin() * distance, 1.0 + 1500.0 / GLOBE_RADIUS + pitch.cos() * distance);
-    let center = view.center(mln_util::geo::WrapMode::Unwrapped);
-    let under = LatLng::new(center.latitude() - mln_math::rad2deg(south.atan2(up)), center.longitude()).unwrap();
-    let expected = Projection::project(&under, 1.0 / mln_util::constants::TILE_SIZE_D);
-    let eye = view.eye_position();
-    assert!((eye.x - expected.x).abs() < 1e-12 && (eye.y - expected.y).abs() < 1e-12, "{eye}");
-    let height = (south.hypot(up) - 1.0) * GLOBE_RADIUS;
-    assert!((eye.z - height).abs() < 1e-6, "the eye {} m up, not {height}", eye.z);
-
-    let eye = on_sphere(eye);
-    let raised_center = crate::VerticalPerspectiveProjection::surface_vector(&center) * (1.0 + 1500.0 / GLOBE_RADIUS);
-    let forward = (raised_center - eye).normalize();
-    let points = view.near_plane_points();
-    let middle = on_sphere(points[4]) - eye;
-    assert!((middle - forward * view.near_z() / radius).length() * radius < 1e-3, "{middle}");
-    for point in points {
-        let along = (on_sphere(point) - eye).dot(forward) * radius;
-        assert!((along - view.near_z()).abs() < 1e-3, "{point} is {along} px along the view");
-    }
-}
-
-/// On the globe at zoom 14, raising the eye over a ridge 300 m above it
-/// clears the ridge, keeping the center, its altitude and the bearing, and
-/// the ground under the eye.
-#[test]
-fn raising_the_eye_on_the_globe_clears_a_ridge() {
-    use mln_util::geo::WrapMode;
-
-    let mut state = on_globe(70.0, 40.0, 1000.0);
-    state.set_terrain_min_elevation(Some(800.0));
-    let before = state.view().clone();
-    let eye = before.eye_position();
-    let ridge = eye.z + 300.0;
-    assert!(state.raise_eye(ridge - eye.z));
-    let raised = state.view();
-    let raised_eye = raised.eye_position();
-    assert!((raised_eye.z - ridge).abs() < 0.01, "the eye {} m up, the ridge {ridge} m", raised_eye.z);
-    let center = |view: &crate::View| view.center(WrapMode::Unwrapped);
-    assert!((center(raised).latitude() - center(&before).latitude()).abs() < 1e-9);
-    assert!((center(raised).longitude() - center(&before).longitude()).abs() < 1e-9);
-    assert_eq!((1000.0, before.angle()), (raised.center_altitude(), raised.angle()));
-    let under = |eye: DVec3| on_sphere(DVec3::new(eye.x, eye.y, 0.0));
-    let moved = (under(raised_eye) - under(eye)).length() * GLOBE_RADIUS;
-    assert!(moved < 0.5, "the ground under the eye moved {moved} m");
-}
-
-/// On the globe at zoom 14, moving the center along the view onto a point
-/// 1000 m up on its line of sight puts the center there, keeps the pitch
-/// and the bearing, and moves the eye less than a meter.
-#[test]
-fn recentering_on_the_globe_keeps_the_eye() {
-    use mln_util::geo::WrapMode;
-
-    let mut state = on_globe(60.0, 30.0, 0.0);
-    let before = state.view().clone();
-    let eye = before.globe_camera_position();
-    let center = crate::VerticalPerspectiveProjection::surface_vector(&before.center(WrapMode::Unwrapped));
-    let forward = (center - eye).normalize();
-    // Where the center's line of sight comes down to 1000 m.
-    let radius = 1.0 + 1000.0 / GLOBE_RADIUS;
-    let b = eye.dot(forward);
-    let t = -b - (b * b - eye.length_squared() + radius * radius).sqrt();
-    let point = eye + forward * t;
-    let location = crate::VerticalPerspectiveProjection::surface_vector_to_lat_lng(point.normalize()).unwrap();
-    let world = Projection::project(&location, 1.0 / mln_util::constants::TILE_SIZE_D);
-    let hit = crate::GroundHit { world: glam::DVec2::new(world.x, world.y), height: 1000.0 };
-
-    assert!(state.recenter_on(&hit));
-    let view = state.view();
-    assert_eq!((before.pitch(), before.angle()), (view.pitch(), view.angle()));
-    let moved = (view.globe_camera_position() - eye).length() * GLOBE_RADIUS;
-    assert!(moved < 1.0, "the eye moved {moved} m");
-    assert!((view.center_altitude() - 1000.0).abs() < 0.01, "the center {} m up", view.center_altitude());
-    let off = (crate::VerticalPerspectiveProjection::surface_vector(&view.center(WrapMode::Unwrapped))
-        - point.normalize())
-    .length()
-        * GLOBE_RADIUS;
-    assert!(off < 0.01, "the center {off} m from the point");
-    assert!(view.zoom() > before.zoom() + 0.1, "{}", view.zoom());
 }

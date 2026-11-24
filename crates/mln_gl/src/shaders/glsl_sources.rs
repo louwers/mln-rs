@@ -69,6 +69,203 @@
 
 use super::shader_source::GlslShaderSource;
 
+/// The height rule of `mln_util::dem`, over the DEM tile a draw reads: its
+/// RGBA8 texels behind a one-texel border, decoded as the unpack weights
+/// and scale say. A macro, so that `concat!` puts it in the vertex stages,
+/// which read the DEM with `texelFetch`: the surface's, and each standing
+/// layer's terrain variant's (`standing_ground`), which read the same
+/// sampler.
+macro_rules! ground_height {
+    () => {
+        r"uniform highp sampler2D u_ground_dem;
+
+// The height in meters of the DEM's bordered texel at `texel`, clamped to the
+// texture, decoded by `unpack` and `unpack_scale`.
+highp float ground_texel_height(ivec2 texel, highp vec4 unpack, highp float unpack_scale) {
+    ivec2 last = textureSize(u_ground_dem, 0) - 1;
+    highp vec3 rgb = round(texelFetch(u_ground_dem, clamp(texel, ivec2(0), last), 0).rgb * 255.0);
+    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * unpack_scale;
+}
+
+// The height in meters, exaggerated by `exaggeration`, at `pos` in tile
+// units of a tile that reads its DEM at `dem_coords`: the DEM uv's scale and
+// offset, then the DEM's width in pixels, 0 for flat ground.
+highp float ground_height(highp vec2 pos, highp vec4 dem_coords, highp vec4 unpack, highp float unpack_scale,
+                          highp float exaggeration) {
+    highp float dim = dem_coords.w;
+    if (dim == 0.0) {
+        return 0.0;
+    }
+    highp vec2 coord = (pos / 8192.0 * dem_coords.x + dem_coords.yz) * dim + 0.5;
+    highp vec2 first = floor(coord);
+    highp vec2 f = coord - first;
+    ivec2 texel = ivec2(first);
+    highp float tl = ground_texel_height(texel, unpack, unpack_scale);
+    highp float tr = ground_texel_height(texel + ivec2(1, 0), unpack, unpack_scale);
+    highp float bl = ground_texel_height(texel + ivec2(0, 1), unpack, unpack_scale);
+    highp float br = ground_texel_height(texel + ivec2(1, 1), unpack, unpack_scale);
+    highp float top = tl * (1.0 - f.x) + tr * f.x;
+    highp float bottom = bl * (1.0 - f.x) + br * f.x;
+    return (top * (1.0 - f.y) + bottom * f.y) * exaggeration;
+}
+
+"
+    };
+}
+
+/// The surface's and the probe's uniform block and height rule, and the
+/// height of the surface's vertices.
+macro_rules! terrain_props {
+    () => {
+        concat!(
+            r"layout (std140) uniform TerrainPropsUBO {
+    highp vec4 u_unpack;
+    highp float u_unpack_scale;
+    highp float u_exaggeration;
+    highp float u_skirt_length;
+    highp float u_depth_factor;
+};
+
+",
+            ground_height!(),
+            r"// The height of the surface's vertex at `pos`, in tile units of a tile
+// that reads its DEM at `dem_coords`: the ground's, or sea level at a pole.
+highp float surface_height(highp vec2 pos, highp vec4 dem_coords) {
+    if (pos.y < GLOBE_POLE_NORTH_Y || pos.y > GLOBE_POLE_SOUTH_Y) {
+        return 0.0;
+    }
+    return ground_height(pos, dem_coords, u_unpack, u_unpack_scale, u_exaggeration);
+}
+
+"
+        )
+    };
+}
+
+/// What a standing layer's terrain variant's vertex stage reads of the
+/// ground, within `#ifdef TERRAIN`: `ground_height`, and what reads the
+/// ground of its draw in its projection block (`u_ground_*`).
+macro_rules! standing_ground {
+    () => {
+        concat!(
+            "#ifdef TERRAIN\n",
+            ground_height!(),
+            r"// The height of the ground in meters at `pos`, in tile units of the draw's
+// tile.
+highp float standing_height(highp vec2 pos) {
+    return ground_height(pos, u_ground_dem_coords, u_ground_unpack, u_ground_unpack_scale, u_ground_exaggeration);
+}
+
+// Whether a point feature whose untranslated anchor is at `pos`, in tile
+// units, is in the draw's tile, from 0 to under the extent on both axes:
+// only the tile that holds it draws it, not a neighbour whose buffer holds a
+// copy.
+bool tile_holds(highp vec2 pos) {
+    return all(greaterThanEqual(pos, vec2(0.0))) && all(lessThan(pos, vec2(8192.0)));
+}
+
+// A position outside the clip volume, of a vertex the draw drops.
+vec4 ground_dropped() {
+    return vec4(-2.0, -2.0, -2.0, 1.0);
+}
+#endif
+"
+        )
+    };
+}
+
+/// What a terrain variant of a program that terrain hides reads of the
+/// ground's depth, within `#ifdef TERRAIN`, after `standing_ground`:
+/// `ground_visibility`. The depth binds on its own texture unit, which no
+/// flat program declares.
+macro_rules! ground_visibility {
+    () => {
+        r"#ifdef TERRAIN
+uniform highp sampler2D u_ground_depth;
+
+// The eye distance of the ground drawn at `texel`, which holds its float's
+// bits, least significant byte first; 0 where no ground is drawn.
+highp float ground_depth_at(ivec2 texel) {
+    highp uvec4 bytes = uvec4(round(texelFetch(u_ground_depth, texel, 0) * 255.0));
+    return uintBitsToFloat(bytes.x | (bytes.y << 8u) | (bytes.z << 16u) | (bytes.w << 24u));
+}
+
+// GL JS's `depthOpacity`: 1 where a point `w` from the eye, at `ndc`, is in
+// front of the ground drawn there, fading to 0 over its depth ramp behind
+// it, in GL's NDC depth, which `u_ground_depth_factor` scales; 1 where no
+// ground is drawn. The ground's depth there is the texel nearest it, as GL
+// JS reads it. The texels' rows run from the bottom, as GL stores what a pass
+// draws.
+highp float ground_depth_opacity(highp vec2 ndc, highp float w) {
+    ivec2 size = textureSize(u_ground_depth, 0);
+    highp vec2 pos = (ndc * 0.5 + 0.5) * vec2(size);
+    highp float ground = ground_depth_at(clamp(ivec2(floor(pos)), ivec2(0), size - 1));
+    if (!(ground > 0.0)) {
+        return 1.0;
+    }
+    highp float d = u_ground_depth_factor * (1.0 / w - 1.0 / ground) + 0.0001;
+    return 1.0 - clamp(-500.0 * d, 0.0, 1.0);
+}
+
+// GL JS's `calculate_visibility` of the point at `clip`, whole: 1 where the
+// drawn ground doesn't hide it, 0 where it does, between them on its depth
+// ramp, averaged with the point 0.01 NDC above where that is 0.95 or less.
+highp float ground_visibility(highp vec4 clip) {
+    if (clip.w <= 0.0) {
+        return 1.0;
+    }
+    highp vec2 ndc = clip.xy / clip.w;
+    highp float visibility = ground_depth_opacity(ndc, clip.w);
+    if (visibility > 0.95) {
+        return 1.0;
+    }
+    return (visibility + ground_depth_opacity(ndc + vec2(0.0, 0.01), clip.w)) / 2.0;
+}
+#endif
+"
+    };
+}
+
+/// `groundHeight` and `baseGround`, what a fill extrusion's top and base
+/// rise by: over terrain, the ground under its polygon's centroid,
+/// `a_centroid`, as it draws, translated, and a base at or below 0 sinks
+/// 10 m more, so that no gap shows under a wall downhill.
+macro_rules! fill_extrusion_ground {
+    () => {
+        r"
+#ifdef TERRAIN
+    highp vec2 centroid_pos = a_centroid;
+    highp float groundHeight = standing_height(centroid_pos + u_projection_translate);
+    highp float baseGround = groundHeight - (base > 0.0 ? 0.0 : 10.0);
+#else
+    highp float groundHeight = 0.0;
+    highp float baseGround = 0.0;
+#endif
+"
+    };
+}
+
+/// `z`, the height of a fill extrusion wall's corner at `t` (0 at the base,
+/// 1 at the top) of its `end`. Over terrain, the foot of a wall of a polygon
+/// whose base is at or below 0 reaches down to the ground under its own end
+/// where that is lower than under the centroid, so that no gap shows under a
+/// wall on a steep slope: `sink` is how much lower, 0 elsewhere.
+macro_rules! fill_extrusion_wall_foot {
+    () => {
+        r"
+#ifdef TERRAIN
+    highp float sink = 0.0;
+    if (t == 0.0 && base <= 0.0) {
+        sink = max(groundHeight - standing_height(end + u_projection_translate), 0.0);
+    }
+    float z = t > 0.0 ? height + groundHeight : base + baseGround - sink;
+#else
+    float z = t > 0.0 ? height + groundHeight : base + baseGround;
+#endif
+"
+    };
+}
+
 pub(crate) const ATMOSPHERE_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: r"layout(location = 0) in vec2 a_pos;
 
@@ -316,8 +513,15 @@ void main() {
 };
 
 pub(crate) const CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (location = 0) in vec2 a_pos;
+    vertex: concat!(
+        standing_ground!(),
+        ground_visibility!(),
+        r"layout (location = 0) in vec2 a_pos;
 out vec3 v_data;
+#ifdef TERRAIN
+// How much of the circle the ground in front of its center leaves.
+out lowp float v_visibility;
+#endif
 
 layout (std140) uniform GlobalPaintParamsUBO {
     highp vec2 u_pattern_atlas_texsize;
@@ -432,6 +636,18 @@ lowp float stroke_opacity = u_stroke_opacity;
     // multiply a_pos by 0.5, since we had it * 2 in order to sneak
     // in extrusion data
     vec2 circle_center = floor(a_pos * 0.5);
+    // The circle stands on the ground under its center, as it draws,
+    // translated, if its tile holds its center.
+#ifdef TERRAIN
+    highp float ele = standing_height(circle_center + u_projection_translate);
+#ifdef PROJECTION_GLOBE
+    v_visibility = ground_visibility(projectTileWithElevation(circle_center, ele));
+#else
+    v_visibility = ground_visibility(u_matrix * vec4(circle_center, ele, 1));
+#endif
+#else
+    highp float ele = 0.0;
+#endif
     if (u_pitch_with_map) {
 #ifdef PROJECTION_GLOBE
         vec3 center_vector = projectToSphere(circle_center + u_projection_translate, vec2(0.0, 0.0));
@@ -448,28 +664,28 @@ lowp float stroke_opacity = u_stroke_opacity;
             // To counteract the effect for pitch-scale: viewport, we rescale the
             // whole circle based on the pitch scaling effect at its central point
 #ifdef PROJECTION_GLOBE
-            vec4 projected_center = interpolateProjection(circle_center, center_vector, 0.0);
+            vec4 projected_center = interpolateProjection(circle_center, center_vector, ele);
             angle_scale *= (radius + stroke_width) * (projected_center.w / u_camera_to_center_distance);
 #else
-            vec4 projected_center = u_matrix * vec4(circle_center, 0, 1);
+            vec4 projected_center = u_matrix * vec4(circle_center, ele, 1);
 #endif
             corner_position += extrude * (radius + stroke_width) * u_extrude_scale * (projected_center.w / u_camera_to_center_distance);
         }
 
 #ifdef PROJECTION_GLOBE
         vec3 corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
-        gl_Position = interpolateProjection(corner_position, corner_vector, 0.0);
+        gl_Position = interpolateProjection(corner_position, corner_vector, ele);
 #else
-        gl_Position = u_matrix * vec4(corner_position, 0, 1);
+        gl_Position = u_matrix * vec4(corner_position, ele, 1);
 #endif
     } else {
 #ifdef PROJECTION_GLOBE
-        gl_Position = projectTile(circle_center);
+        gl_Position = projectTileWithElevation(circle_center, ele);
         if (gl_Position.z / gl_Position.w > 1.0) {
             gl_Position.xy = vec2(10000.0);
         }
 #else
-        gl_Position = u_matrix * vec4(circle_center, 0, 1);
+        gl_Position = u_matrix * vec4(circle_center, ele, 1);
 #endif
 
         if (u_scale_with_map) {
@@ -478,6 +694,11 @@ lowp float stroke_opacity = u_stroke_opacity;
             gl_Position.xy += extrude * (radius + stroke_width) * u_extrude_scale * gl_Position.w;
         }
     }
+#ifdef TERRAIN
+    if (!tile_holds(circle_center)) {
+        gl_Position = ground_dropped();
+    }
+#endif
 
     // This is a minimum blur distance that serves as a faux-antialiasing for
     // the circle. since blur is a ratio of the circle's size and the intent is
@@ -486,8 +707,12 @@ lowp float stroke_opacity = u_stroke_opacity;
 
     v_data = vec3(extrude.x, extrude.y, antialiasblur);
 }
-",
+"
+    ),
     fragment: r"in vec3 v_data;
+#ifdef TERRAIN
+in lowp float v_visibility;
+#endif
 
 layout (std140) uniform CircleEvaluatedPropsUBO {
     highp vec4 u_color;
@@ -562,6 +787,9 @@ lowp float stroke_opacity = u_stroke_opacity;
     );
 
     fragColor = opacity_t * mix(color * opacity, stroke_color * stroke_opacity, color_t);
+#ifdef TERRAIN
+    fragColor *= v_visibility;
+#endif
 
 #ifdef OVERDRAW_INSPECTOR
     fragColor = vec4(1.0);
@@ -913,7 +1141,9 @@ void main() {
 };
 
 pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"invariant gl_Position;
+    vertex: concat!(
+        standing_ground!(),
+        r"invariant gl_Position;
 
 // The corner of the wall quad: x picks the instance's outline vertex (0) or
 // the next one (1), y the base (0) or the top (1).
@@ -973,6 +1203,47 @@ layout (location = 4) in highp vec2 a_height;
 #ifndef HAS_UNIFORM_u_color
 layout (location = 5) in highp vec4 a_color;
 #endif
+#ifdef TERRAIN
+layout (location = 10) in vec2 a_centroid;
+#endif
+
+// The color of a wall facing `normal` at `t`, 0 at its base and 1 at its top.
+highp vec4 wall_color(highp vec4 color, vec3 normal, float t, highp float wall_base, highp float wall_height) {
+    // Relative luminance (how dark/bright is the surface color?)
+    float colorvalue = color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722;
+
+    highp vec4 lit = vec4(0.0, 0.0, 0.0, 1.0);
+
+    // Add slight ambient lighting so no extrusions are totally black
+    vec4 ambientlight = vec4(0.03, 0.03, 0.03, 1.0);
+    color += ambientlight;
+
+    // Calculate cos(theta), where theta is the angle between surface normal and diffuse light ray
+    float directional = clamp(dot(normal, u_lightpos), 0.0, 1.0);
+
+    // Adjust directional so that
+    // the range of values for highlight/shading is narrower
+    // with lower light intensity
+    // and with lighter/brighter surface colors
+    directional = mix((1.0 - u_lightintensity), max((1.0 - colorvalue + u_lightintensity), 1.0), directional);
+
+    // Add gradient along z axis of side surfaces
+    if (normal.z == 0.0) {
+        // This avoids another branching statement, but multiplies by a constant of 0.84 if no vertical gradient,
+        // and otherwise calculates the gradient based on base + height
+        float fMin = mix(0.7, 0.98, 1.0 - u_lightintensity);
+        float factor = clamp((t + wall_base) * pow(wall_height / 150.0, 0.5), fMin, 1.0);
+        directional *= (1.0 - u_vertical_gradient) + (u_vertical_gradient * factor);
+    }
+
+    // Assign final color based on surface + ambient light color, diffuse light directional, and light color
+    // with lower bounds adjusted to hue of light
+    // so that shading is tinted with the complementary (opposite) color to the light color
+    lit.r += clamp(color.r * directional * u_lightcolor.r, mix(0.0, 0.3, 1.0 - u_lightcolor.r), 1.0);
+    lit.g += clamp(color.g * directional * u_lightcolor.g, mix(0.0, 0.3, 1.0 - u_lightcolor.g), 1.0);
+    lit.b += clamp(color.b * directional * u_lightcolor.b, mix(0.0, 0.3, 1.0 - u_lightcolor.b), 1.0);
+    return lit * u_opacity;
+}
 
 void main() {
     // The vertex that ends a ring has no wall.
@@ -1005,48 +1276,29 @@ highp vec4 color = u_color;
 
     base = max(0.0, base);
     height = max(0.0, height);
-
-    float t = a_pos.y;
-    float z = t > 0.0 ? height : base;
-
-    gl_Position = projectTileFor3D(a_pos.x == 0.0 ? p1 : p2, z);
-
-    // Relative luminance (how dark/bright is the surface color?)
-    float colorvalue = color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722;
-
-    v_color = vec4(0.0, 0.0, 0.0, 1.0);
-
-    // Add slight ambient lighting so no extrusions are totally black
-    vec4 ambientlight = vec4(0.03, 0.03, 0.03, 1.0);
-    color += ambientlight;
-
-    // Calculate cos(theta), where theta is the angle between surface normal and diffuse light ray
-    float directional = clamp(dot(normal, u_lightpos), 0.0, 1.0);
-
-    // Adjust directional so that
-    // the range of values for highlight/shading is narrower
-    // with lower light intensity
-    // and with lighter/brighter surface colors
-    directional = mix((1.0 - u_lightintensity), max((1.0 - colorvalue + u_lightintensity), 1.0), directional);
-
-    // Add gradient along z axis of side surfaces
-    if (normal.z == 0.0) {
-        // This avoids another branching statement, but multiplies by a constant of 0.84 if no vertical gradient,
-        // and otherwise calculates the gradient based on base + height
-        float fMin = mix(0.7, 0.98, 1.0 - u_lightintensity);
-        float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
-        directional *= (1.0 - u_vertical_gradient) + (u_vertical_gradient * factor);
-    }
-
-    // Assign final color based on surface + ambient light color, diffuse light directional, and light color
-    // with lower bounds adjusted to hue of light
-    // so that shading is tinted with the complementary (opposite) color to the light color
-    v_color.r += clamp(color.r * directional * u_lightcolor.r, mix(0.0, 0.3, 1.0 - u_lightcolor.r), 1.0);
-    v_color.g += clamp(color.g * directional * u_lightcolor.g, mix(0.0, 0.3, 1.0 - u_lightcolor.g), 1.0);
-    v_color.b += clamp(color.b * directional * u_lightcolor.b, mix(0.0, 0.3, 1.0 - u_lightcolor.b), 1.0);
-    v_color *= u_opacity;
-}
 ",
+        fill_extrusion_ground!(),
+        r"
+    vec2 end = a_pos.x == 0.0 ? p1 : p2;
+    float t = a_pos.y;
+",
+        fill_extrusion_wall_foot!(),
+        r"
+    gl_Position = projectTileFor3D(end, z);
+
+    v_color = wall_color(color, normal, t, base, height);
+#ifdef TERRAIN
+    // The gradient carries on below the base to a foot that sinks, so that
+    // the wall shades where it showed as it did. Written out, not with
+    // mix(), which Metal leaves undefined outside [0, 1].
+    if (sink > 0.0) {
+        vec4 top = wall_color(color, normal, 1.0, base, height);
+        v_color += (top - v_color) * (-sink / (height + groundHeight - base - baseGround));
+    }
+#endif
+}
+"
+    ),
     fragment: r"in vec4 v_color;
 
 void main() {
@@ -1060,7 +1312,9 @@ void main() {
 };
 
 pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"invariant gl_Position;
+    vertex: concat!(
+        standing_ground!(),
+        r"invariant gl_Position;
 
 // The corner of the wall quad: x picks the instance's outline vertex (0) or
 // the next one (1), y the base (0) or the top (1).
@@ -1142,6 +1396,28 @@ flat out highp vec4 pattern_from;
 layout (location = 6) in highp vec4 a_pattern_to;
 flat out highp vec4 pattern_to;
 #endif
+#ifdef TERRAIN
+layout (location = 10) in vec2 a_centroid;
+#endif
+
+// The lighting of a wall facing `normal` at `t`, 0 at its base and 1 at its
+// top.
+vec4 wall_lighting(vec3 normal, float t, highp float wall_base, highp float wall_height) {
+    vec4 lighting = vec4(0.0, 0.0, 0.0, 1.0);
+    float directional = clamp(dot(normal, u_lightpos), 0.0, 1.0);
+    directional = mix((1.0 - u_lightintensity), max((0.5 + u_lightintensity), 1.0), directional);
+
+    if (normal.z == 0.0) {
+        // This avoids another branching statement, but multiplies by a constant of 0.84 if no vertical gradient,
+        // and otherwise calculates the gradient based on base + height
+        float fMin = mix(0.7, 0.98, 1.0 - u_lightintensity);
+        float factor = clamp((t + wall_base) * pow(wall_height / 150.0, 0.5), fMin, 1.0);
+        directional *= (1.0 - u_vertical_gradient) + (u_vertical_gradient * factor);
+    }
+
+    lighting.rgb += clamp(directional * u_lightcolor, mix(vec3(0.0), vec3(0.3), 1.0 - u_lightcolor), vec3(1.0));
+    return lighting * u_opacity;
+}
 
 void main() {
     // The vertex that ends a ring has no wall.
@@ -1193,11 +1469,15 @@ highp vec4 pattern_to = u_pattern_to;
 
     base = max(0.0, base);
     height = max(0.0, height);
-
+",
+        fill_extrusion_ground!(),
+        r"
+    vec2 end = a_pos.x == 0.0 ? p1 : p2;
     float t = a_pos.y;
-    float z = t > 0.0 ? height : base;
-
-    gl_Position = projectTileFor3D(a_pos.x == 0.0 ? p1 : p2, z);
+",
+        fill_extrusion_wall_foot!(),
+        r"
+    gl_Position = projectTileFor3D(end, z);
 
     // extrusion top or side
     vec2 pos = normal.z == 1.0 ? a_pos : vec2(edgedistance, z * u_height_factor);
@@ -1205,22 +1485,20 @@ highp vec4 pattern_to = u_pattern_to;
     v_pos_a = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, fromScale * display_size_a, tileRatio, pos);
     v_pos_b = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, toScale * display_size_b, tileRatio, pos);
 
-    v_lighting = vec4(0.0, 0.0, 0.0, 1.0);
-    float directional = clamp(dot(normal, u_lightpos), 0.0, 1.0);
-    directional = mix((1.0 - u_lightintensity), max((0.5 + u_lightintensity), 1.0), directional);
-
-    if (normal.z == 0.0) {
-        // This avoids another branching statement, but multiplies by a constant of 0.84 if no vertical gradient,
-        // and otherwise calculates the gradient based on base + height
-        float fMin = mix(0.7, 0.98, 1.0 - u_lightintensity);
-        float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
-        directional *= (1.0 - u_vertical_gradient) + (u_vertical_gradient * factor);
+    v_lighting = wall_lighting(normal, t, base, height);
+#ifdef TERRAIN
+    // The gradient carries on below the base to a foot that sinks, so that
+    // the wall shades where it showed as it did. The pattern, placed by `z`,
+    // stays where it was. Written out, not with mix(), which Metal leaves
+    // undefined outside [0, 1].
+    if (sink > 0.0) {
+        vec4 top = wall_lighting(normal, 1.0, base, height);
+        v_lighting += (top - v_lighting) * (-sink / (height + groundHeight - base - baseGround));
     }
-
-    v_lighting.rgb += clamp(directional * u_lightcolor, mix(vec3(0.0), vec3(0.3), 1.0 - u_lightcolor), vec3(1.0));
-    v_lighting *= u_opacity;
+#endif
 }
-",
+"
+    ),
     fragment: r"#ifdef GL_ES
 precision highp float;
 #endif
@@ -1313,7 +1591,9 @@ highp vec4 pattern_to = u_pattern_to;
 };
 
 pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"invariant gl_Position;
+    vertex: concat!(
+        standing_ground!(),
+        r"invariant gl_Position;
 
 layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_decimals_ed;
@@ -1389,6 +1669,9 @@ flat out highp vec4 pattern_from;
 layout (location = 6) in highp vec4 a_pattern_to;
 flat out highp vec4 pattern_to;
 #endif
+#ifdef TERRAIN
+layout (location = 10) in vec2 a_centroid;
+#endif
 
 void main() {
     #ifndef HAS_UNIFORM_u_base
@@ -1431,9 +1714,11 @@ highp vec4 pattern_to = u_pattern_to;
 
     base = max(0.0, base);
     height = max(0.0, height);
-
+",
+        fill_extrusion_ground!(),
+        r"
     float t = 1.0;
-    float z = height;
+    float z = height + groundHeight;
     gl_Position = projectTileFor3D(a_pos, z);
 
     // extrusion top or side
@@ -1457,7 +1742,8 @@ highp vec4 pattern_to = u_pattern_to;
     v_lighting.rgb += clamp(directional * u_lightcolor, mix(vec3(0.0), vec3(0.3), 1.0 - u_lightcolor), vec3(1.0));
     v_lighting *= u_opacity;
 }
-",
+"
+    ),
     fragment: r"#ifdef GL_ES
 precision highp float;
 #endif
@@ -1550,7 +1836,9 @@ highp vec4 pattern_to = u_pattern_to;
 };
 
 pub(crate) const FILL_EXTRUSION_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"invariant gl_Position;
+    vertex: concat!(
+        standing_ground!(),
+        r"invariant gl_Position;
 
 layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_decimals_ed;
@@ -1604,6 +1892,9 @@ layout (location = 4) in highp vec2 a_height;
 #ifndef HAS_UNIFORM_u_color
 layout (location = 5) in highp vec4 a_color;
 #endif
+#ifdef TERRAIN
+layout (location = 10) in vec2 a_centroid;
+#endif
 
 void main() {
     #ifndef HAS_UNIFORM_u_base
@@ -1627,9 +1918,11 @@ highp vec4 color = u_color;
 
     base = max(0.0, base);
     height = max(0.0, height);
-
+",
+        fill_extrusion_ground!(),
+        r"
     float t = 1.0;
-    float z = height;
+    float z = height + groundHeight;
     gl_Position = projectTileFor3D(a_pos, z);
 
     // Relative luminance (how dark/bright is the surface color?)
@@ -1667,7 +1960,8 @@ highp vec4 color = u_color;
     v_color.b += clamp(color.b * directional * u_lightcolor.b, mix(0.0, 0.3, 1.0 - u_lightcolor.b), 1.0);
     v_color *= u_opacity;
 }
-",
+"
+    ),
     fragment: r"in vec4 v_color;
 
 void main() {
@@ -2611,82 +2905,227 @@ void main() {
 ",
 };
 
-/// The height rule of `mln_util::dem`, over the DEM tile a draw reads: its
-/// RGBA8 texels behind a one-texel border, decoded as the unpack weights
-/// and scale say. A macro, so that `concat!` puts it in the vertex stages,
-/// which read the DEM with `texelFetch`.
-macro_rules! ground_height {
+/// A hillshade's lighting, in the fragment stage of a program that lights
+/// its slopes, after the hillshade's blocks: `hillshade`, which writes the
+/// color the blocks' lights give a slope, by their method.
+macro_rules! hillshade_lighting {
     () => {
-        r"uniform highp sampler2D u_ground_dem;
+        r#"
+#define PI 3.141592653589793
 
-// The height in meters of the DEM's bordered texel at `texel`, clamped to the
-// texture, decoded by `unpack` and `unpack_scale`.
-highp float ground_texel_height(ivec2 texel, highp vec4 unpack, highp float unpack_scale) {
-    ivec2 last = textureSize(u_ground_dem, 0) - 1;
-    highp vec3 rgb = round(texelFetch(u_ground_dem, clamp(texel, ivec2(0), last), 0).rgb * 255.0);
-    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * unpack_scale;
+#define STANDARD 0
+#define COMBINED 1
+#define IGOR 2
+#define MULTIDIRECTIONAL 3
+#define BASIC 4
+
+float get_aspect(vec2 deriv) {
+    return deriv.x != 0.0 ?
+    atan(deriv.y, -deriv.x) : PI / 2.0 * (deriv.y > 0.0 ? 1.0 : -1.0);
 }
 
-// The height in meters, exaggerated by `exaggeration`, at `pos` in tile
-// units of a tile that reads its DEM at `dem_coords`: the DEM uv's scale and
-// offset, then the DEM's width in pixels, 0 for flat ground.
-highp float ground_height(highp vec2 pos, highp vec4 dem_coords, highp vec4 unpack, highp float unpack_scale,
-                          highp float exaggeration) {
-    highp float dim = dem_coords.w;
-    if (dim == 0.0) {
-        return 0.0;
+// MapLibre's legacy hillshade algorithm (Method 0)
+void standard_hillshade(vec2 deriv) {
+    float azimuth = u_azimuths.x + PI;
+    float slope = atan(0.625 * length(deriv));
+    float aspect = get_aspect(deriv);
+
+    // Note: This implementation uses u_exaggeration as intensity, though it typically should be derived from u_altitudes.x.
+    float intensity = u_exaggeration;
+
+    // Scale the slope exponentially based on intensity
+    float base = 1.875 - intensity * 1.75;
+    float maxValue = 0.5 * PI;
+    float scaledSlope = abs(intensity - 0.5) > 1e-6 ? ((pow(base, slope) - 1.0) / (pow(base, maxValue) - 1.0)) * maxValue : slope;
+
+    float accent = cos(scaledSlope);
+    vec4 accent_color = (1.0 - accent) * u_accent * clamp(intensity * 2.0, 0.0, 1.0);
+
+    // Calculate shadow/highlight based on aspect
+    float shade = abs(mod((aspect + azimuth) / PI + 0.5, 2.0) - 1.0);
+    vec4 shade_color = mix(u_shadows[0], u_highlights[0], shade) * sin(scaledSlope) * clamp(intensity * 2.0, 0.0, 1.0);
+
+    fragColor = accent_color * (1.0 - shade_color.a) + shade_color;
+}
+
+// Basic directional hillshade (Method 4)
+void basic_hillshade(vec2 deriv) {
+    deriv = deriv * u_exaggeration * 2.0; // Exaggerate the slope derivative
+    float azimuth = u_azimuths.x + PI;
+    float cos_az = cos(azimuth);
+    float sin_az = sin(azimuth);
+    float cos_alt = cos(u_altitudes.x);
+    float sin_alt = sin(u_altitudes.x);
+
+    // Calculate the cosine of the angle between the light vector and the surface normal
+    float cang = (sin_alt - (deriv.y * cos_az * cos_alt - deriv.x * sin_az * cos_alt)) / sqrt(1.0 + dot(deriv, deriv));
+    float shade = clamp(cang, 0.0, 1.0); // cang is the hillshade intensity [0, 1]
+
+    // Blend shadow and highlight based on intensity
+    if (shade > 0.5) {
+        fragColor = u_highlights[0] * (2.0 * shade - 1.0); // Highlight strength [0, 1]
+    } else {
+        fragColor = u_shadows[0] * (1.0 - 2.0 * shade);    // Shadow strength [0, 1]
     }
-    highp vec2 coord = (pos / 8192.0 * dem_coords.x + dem_coords.yz) * dim + 0.5;
-    highp vec2 first = floor(coord);
-    highp vec2 f = coord - first;
-    ivec2 texel = ivec2(first);
-    highp float tl = ground_texel_height(texel, unpack, unpack_scale);
-    highp float tr = ground_texel_height(texel + ivec2(1, 0), unpack, unpack_scale);
-    highp float bl = ground_texel_height(texel + ivec2(0, 1), unpack, unpack_scale);
-    highp float br = ground_texel_height(texel + ivec2(1, 1), unpack, unpack_scale);
-    highp float top = tl * (1.0 - f.x) + tr * f.x;
-    highp float bottom = bl * (1.0 - f.x) + br * f.x;
-    return (top * (1.0 - f.y) + bottom * f.y) * exaggeration;
 }
 
-"
+// Multidirectional hillshade (Method 3)
+void multidirectional_hillshade(vec2 deriv) {
+    deriv = deriv * u_exaggeration * 2.0; // Exaggerate the slope derivative
+    fragColor = vec4(0, 0, 0, 0);
+
+    // Iterate through all light sources (up to u_num_lights, max 4)
+    for (int i = 0; i < 4; i++) {
+        if (i >= u_num_lights) break;
+
+        // Access altitude and azimuth from vec4 UBOs
+        float altitude = (i == 0) ? u_altitudes.x : (i == 1) ? u_altitudes.y : (i == 2) ? u_altitudes.z : u_altitudes.w;
+        float azimuth = (i == 0) ? u_azimuths.x : (i == 1) ? u_azimuths.y : (i == 2) ? u_azimuths.z : u_azimuths.w;
+
+        float cos_alt = cos(altitude);
+        float sin_alt = sin(altitude);
+        // Negate cos/sin azimuth for correct light direction in the normal calculation
+        float cos_az = -cos(azimuth);
+        float sin_az = -sin(azimuth);
+
+        // Calculate the cosine of the angle between the light vector and the surface normal
+        float cang = (sin_alt - (deriv.y * cos_az * cos_alt - deriv.x * sin_az * cos_alt)) /
+                     sqrt(1.0 + dot(deriv, deriv));
+        float shade = clamp(cang, 0.0, 1.0); // cang is the hillshade intensity [0, 1]
+
+        // Accumulate shadow/highlight contribution from each light
+        if (shade > 0.5) {
+            fragColor += u_highlights[i] * (2.0 * shade - 1.0) / float(u_num_lights);
+        } else {
+            fragColor += u_shadows[i] * (1.0 - 2.0 * shade) / float(u_num_lights);
+        }
+    }
+}
+
+// Combined shadow and highlight method (Method 1)
+void combined_hillshade(vec2 deriv) {
+    // Only supports one light source (index 0)
+    deriv = deriv * u_exaggeration * 2.0;
+    float azimuth = u_azimuths.x + PI;
+    float cos_az = cos(azimuth);
+    float sin_az = sin(azimuth);
+    float cos_alt = cos(u_altitudes.x);
+    float sin_alt = sin(u_altitudes.x);
+
+    // Calculate the angle between the light vector and the surface normal
+    float cang = acos((sin_alt - (deriv.y * cos_az * cos_alt - deriv.x * sin_az * cos_alt)) /
+                      sqrt(1.0 + dot(deriv, deriv)));
+
+    cang = clamp(cang, 0.0, PI / 2.0); // Clamp angle to 90 degrees (half hemisphere)
+
+    // The "shade" and "highlight" components are calculated from cang (angle) and the magnitude of the slope
+    float shade = cang * atan(length(deriv)) * 4.0 / PI / PI;
+    float highlight = (PI / 2.0 - cang) * atan(length(deriv)) * 4.0 / PI / PI;
+
+    fragColor = u_shadows[0] * shade + u_highlights[0] * highlight;
+}
+
+// Igor's shadow/highlight method (Method 2)
+void igor_hillshade(vec2 deriv) {
+    // Only supports one light source (index 0)
+    deriv = deriv * u_exaggeration * 2.0;
+    float aspect = get_aspect(deriv);
+    float azimuth = u_azimuths.x + PI;
+
+    // Slope strength is magnitude of slope vector, normalized to [0, 1]
+    float slope_strength = atan(length(deriv)) * 2.0 / PI;
+
+    // Aspect strength is difference between aspect and light azimuth, normalized to [0, 1]
+    float aspect_strength = 1.0 - abs(mod((aspect + azimuth) / PI + 0.5, 2.0) - 1.0);
+
+    float shadow_strength = slope_strength * aspect_strength;
+    float highlight_strength = slope_strength * (1.0 - aspect_strength);
+
+    fragColor = u_shadows[0] * shadow_strength + u_highlights[0] * highlight_strength;
+}
+
+void hillshade(vec2 deriv) {
+    switch (u_method) {
+        case BASIC:
+            basic_hillshade(deriv);
+            break;
+        case COMBINED:
+            combined_hillshade(deriv);
+            break;
+        case IGOR:
+            igor_hillshade(deriv);
+            break;
+        case MULTIDIRECTIONAL:
+            multidirectional_hillshade(deriv);
+            break;
+        case STANDARD:
+        default:
+            standard_hillshade(deriv);
+            break;
+    }
+}
+"#
     };
 }
 
-/// The surface's and the probe's vertex prelude: the terrain's uniform
-/// block, the height rule, and the height of the surface's vertices.
-macro_rules! terrain_props {
+/// The terrain's fog, at the start of the fragment stage of a program that
+/// draws the surface: its block, and `fogged`, what it makes of a color the
+/// surface shows at a distance along the view.
+macro_rules! terrain_fog {
     () => {
-        concat!(
-            r"layout (std140) uniform TerrainPropsUBO {
-    highp vec4 u_unpack;
-    highp float u_unpack_scale;
-    highp float u_exaggeration;
-    highp float u_skirt_length;
-    highp float props_pad0;
+        r"#ifdef GL_ES
+precision highp float;
+#endif
+
+layout (std140) uniform TerrainFogUBO {
+    // Linear and premultiplied.
+    highp vec4 u_fog_color;
+    highp vec4 u_horizon_color;
+    // The near and far distances along the view, in pixels, between which the
+    // fog's depth runs from 0 to 1.
+    highp vec2 u_fog_depth_range;
+    highp float u_fog_ground_blend;
+    highp float u_fog_horizon_blend;
+    highp float u_fog_opacity;
+    highp float u_fog_pad0;
+    highp float u_fog_pad1;
+    highp float u_fog_pad2;
 };
 
-",
-            ground_height!(),
-            r"// The height of the surface's vertex at `pos`, in tile units of a tile
-// that reads its DEM at `dem_coords`: the ground's, or sea level at a pole.
-highp float surface_height(highp vec2 pos, highp vec4 dem_coords) {
-    if (pos.y < GLOBE_POLE_NORTH_Y || pos.y > GLOBE_POLE_SOUTH_Y) {
-        return 0.0;
+vec4 fogged(vec4 color, float view_depth) {
+    float fog_near = u_fog_depth_range.x;
+    float fog_far = u_fog_depth_range.y;
+    if (u_fog_opacity <= 0.0 || color.a <= 0.0 || view_depth <= fog_near) {
+        return color;
     }
-    return ground_height(pos, dem_coords, u_unpack, u_unpack_scale, u_exaggeration);
+    // GL JS's fog depth, a perspective depth from 0 at the near end of the
+    // range to 1 at its far end.
+    float fog_depth = min(fog_far / (fog_far - fog_near) * (1.0 - fog_near / view_depth), 1.0);
+    if (fog_depth <= u_fog_ground_blend) {
+        return color;
+    }
+    // GL JS's fog, mixed in linear space through a gamma of 2.2: toward the
+    // fog's color, and past the horizon blend toward the horizon's. It tints
+    // the drape's color by the fog's alpha and keeps the drape's coverage.
+    float horizon = smoothstep(0.0, 1.0, (fog_depth - u_fog_horizon_blend) / max(1.0 - u_fog_horizon_blend, 1e-6));
+    vec4 tint = mix(u_fog_color, u_horizon_color, horizon);
+    float along = (fog_depth - u_fog_ground_blend) / (1.0 - u_fog_ground_blend);
+    float strength = along * along * u_fog_opacity;
+    vec3 gamma = vec3(2.2);
+    vec3 surface = pow(color.rgb / color.a, gamma);
+    vec3 mixed = surface * (1.0 - strength * tint.a) + tint.rgb * strength;
+    return vec4(pow(mixed, 1.0 / gamma) * color.a, color.a);
 }
-
 "
-        )
     };
 }
 
 /// The terrain's surface: a tile's grid, raised to the heights of the tile's
 /// DEM with its skirts lowered and projected through the tile's projection
-/// block, in the colors of the tile's drape. A pole's vertices stand at sea
-/// level. GL stores the drape's rows bottom first, so the drape is sampled
-/// at `1 - v`.
+/// block, in the colors of the tile's drape, fogged as GL JS's terrain is. A
+/// pole's vertices stand at sea level in the color of the drape's edge row.
+/// GL stores the drape's rows bottom first, so the drape is sampled at
+/// `1 - v`.
 pub(crate) const TERRAIN_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
         terrain_props!(),
@@ -2698,21 +3137,119 @@ layout (std140) uniform TerrainDrawableUBO {
 };
 
 out vec2 v_drape_pos;
+// The distance along the view of the ground before the skirt lowers it, which
+// the fog reads, as in GL JS: the clip w.
+out highp float v_view_depth;
 
 void main() {
     float height = surface_height(a_pos.xy, u_dem_coords);
     gl_Position = projectTileFor3D(a_pos.xy, height - a_pos.z * u_skirt_length);
     vec2 drape_pos = clamp(a_pos.xy / 8192.0, 0.0, 1.0);
     v_drape_pos = vec2(drape_pos.x, 1.0 - drape_pos.y);
+    v_view_depth = gl_Position.w;
+    if (a_pos.z != 0.0) {
+        v_view_depth = projectTileFor3D(a_pos.xy, height).w;
+    }
 }
 "
     ),
-    fragment: r"in vec2 v_drape_pos;
+    fragment: concat!(
+        terrain_fog!(),
+        r"
+in vec2 v_drape_pos;
+in highp float v_view_depth;
 
 uniform sampler2D u_drape;
 
 void main() {
-    fragColor = texture(u_drape, v_drape_pos);
+    fragColor = fogged(texture(u_drape, v_drape_pos), v_view_depth);
+}
+"
+    ),
+};
+
+/// The terrain's surface with a drape of a hillshade's slopes over it,
+/// which the fragment stage lights as the hillshade's does, with the lights
+/// and the latitudes of the tile's block, and fogs.
+pub(crate) const TERRAIN_HILLSHADE_SHADER: GlslShaderSource = GlslShaderSource {
+    vertex: TERRAIN_SHADER.vertex,
+    fragment: concat!(
+        terrain_fog!(),
+        r"
+in vec2 v_drape_pos;
+in highp float v_view_depth;
+
+uniform sampler2D u_drape;
+
+// The hillshade's blocks, with the terrain tile's latitudes. The program's
+// uniforms share their names, and the terrain's block has an exaggeration
+// of its own.
+#define u_exaggeration u_hillshade_exaggeration
+layout(std140) uniform TerrainLightUBO {
+    highp vec2 u_latrange;
+    highp float u_exaggeration;
+    highp int u_method;
+    highp int u_num_lights;
+    highp float u_pad0;
+    highp float u_pad1;
+    highp float u_pad2;
+    highp vec4 u_accent;
+    highp vec4 u_altitudes;
+    highp vec4 u_azimuths;
+    highp vec4 u_shadows[4];
+    highp vec4 u_highlights[4];
+};
+",
+        hillshade_lighting!(),
+        r"
+void main() {
+    // The slopes as the hillshade prepared them, by how much of the texel its
+    // tiles cover.
+    vec4 slopes = texture(u_drape, v_drape_pos);
+    fragColor = vec4(0.0);
+    if (slopes.a <= 0.0) {
+        return;
+    }
+    // The drape's rows run to the tile's north.
+    float latitude = mix(u_latrange.y, u_latrange.x, v_drape_pos.y);
+    vec2 deriv = ((slopes.rg / slopes.a * 8.0) - 4.0) / cos(radians(latitude));
+    hillshade(deriv);
+    fragColor = fogged(fragColor * slopes.a, v_view_depth);
+}
+"
+    ),
+};
+
+/// The depth of the terrain's surface: a tile's grid, raised and projected
+/// as the surface's, whose fragments write the eye distance (the clip w) as
+/// its float's bits, least significant byte first.
+pub(crate) const TERRAIN_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
+    vertex: concat!(
+        terrain_props!(),
+        r"// x and y in tile units, whether the vertex is a skirt's lower edge, 0.
+layout (location = 0) in vec4 a_pos;
+
+layout (std140) uniform TerrainDrawableUBO {
+    highp vec4 u_dem_coords;
+};
+
+out highp float v_eye_distance;
+
+void main() {
+    float height = surface_height(a_pos.xy, u_dem_coords);
+    gl_Position = projectTileFor3D(a_pos.xy, height - a_pos.z * u_skirt_length);
+    v_eye_distance = gl_Position.w;
+}
+"
+    ),
+    fragment: r"in highp float v_eye_distance;
+
+void main() {
+    // A fragment shader's integers are mediump unless said otherwise, which
+    // Mesa lowers to 16 bits.
+    highp uint bits = floatBitsToUint(v_eye_distance);
+    highp uvec4 bytes = uvec4(bits, bits >> 8u, bits >> 16u, bits >> 24u) & uvec4(255u);
+    fragColor = vec4(bytes) / 255.0;
 }
 ",
 };
@@ -2751,7 +3288,9 @@ void main() {
 };
 
 pub(crate) const HEATMAP_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r#"layout (location = 0) in vec2 a_pos;
+    vertex: concat!(
+        standing_ground!(),
+        r#"layout (location = 0) in vec2 a_pos;
 out vec2 v_extrude;
 
 layout (std140) uniform HeatmapDrawableUBO {
@@ -2823,18 +3362,29 @@ mediump float radius = u_radius;
 
     // multiply a_pos by 0.5, since we had it * 2 in order to sneak
     // in extrusion data
-#ifdef PROJECTION_GLOBE
-    vec2 circle_center = floor(a_pos * 0.5);
-    vec3 center_vector = projectToSphere(circle_center, vec2(0.0, 0.0));
-    vec3 corner_vector = globeRotateVector(center_vector, v_extrude * radius * u_globe_extrude_scale);
-    gl_Position = interpolateProjection(circle_center + extrude, corner_vector, 0.0);
+    // The kernel lies flat on the ground under its center, if its tile
+    // holds its center.
+    vec2 center = floor(a_pos * 0.5);
+#ifdef TERRAIN
+    highp float ele = standing_height(center);
 #else
-    vec4 pos = vec4(floor(a_pos * 0.5) + extrude, 0, 1);
-
-    gl_Position = u_matrix * pos;
+    highp float ele = 0.0;
+#endif
+#ifdef PROJECTION_GLOBE
+    vec3 center_vector = projectToSphere(center, vec2(0.0, 0.0));
+    vec3 corner_vector = globeRotateVector(center_vector, v_extrude * radius * u_globe_extrude_scale);
+    gl_Position = interpolateProjection(center + extrude, corner_vector, ele);
+#else
+    gl_Position = u_matrix * vec4(center + extrude, ele, 1);
+#endif
+#ifdef TERRAIN
+    if (!tile_holds(center)) {
+        gl_Position = ground_dropped();
+    }
 #endif
 }
-"#,
+"#
+    ),
     fragment: r"in vec2 v_extrude;
 
 layout (std140) uniform HeatmapEvaluatedPropsUBO {
@@ -3054,7 +3604,8 @@ void main() {
     v_pos = a_texture_pos / 8192.0;
 }
 ",
-    fragment: r#"in vec2 v_pos;
+    fragment: concat!(
+        r"in vec2 v_pos;
 uniform sampler2D u_image;
 
 layout(std140) uniform HillshadeTilePropsUBO {
@@ -3073,140 +3624,9 @@ layout(std140) uniform HillshadeEvaluatedPropsUBO {
     highp vec4 u_shadows[4];      // Shadow colors (up to 4 lights)
     highp vec4 u_highlights[4];   // Highlight colors (up to 4 lights)
 };
-
-#define PI 3.141592653589793
-
-#define STANDARD 0
-#define COMBINED 1
-#define IGOR 2
-#define MULTIDIRECTIONAL 3
-#define BASIC 4
-
-float get_aspect(vec2 deriv) {
-    return deriv.x != 0.0 ?
-    atan(deriv.y, -deriv.x) : PI / 2.0 * (deriv.y > 0.0 ? 1.0 : -1.0);
-}
-
-// MapLibre's legacy hillshade algorithm (Method 0)
-void standard_hillshade(vec2 deriv) {
-    float azimuth = u_azimuths.x + PI;
-    float slope = atan(0.625 * length(deriv));
-    float aspect = get_aspect(deriv);
-
-    // Note: This implementation uses u_exaggeration as intensity, though it typically should be derived from u_altitudes.x.
-    float intensity = u_exaggeration;
-
-    // Scale the slope exponentially based on intensity
-    float base = 1.875 - intensity * 1.75;
-    float maxValue = 0.5 * PI;
-    float scaledSlope = abs(intensity - 0.5) > 1e-6 ? ((pow(base, slope) - 1.0) / (pow(base, maxValue) - 1.0)) * maxValue : slope;
-
-    float accent = cos(scaledSlope);
-    vec4 accent_color = (1.0 - accent) * u_accent * clamp(intensity * 2.0, 0.0, 1.0);
-
-    // Calculate shadow/highlight based on aspect
-    float shade = abs(mod((aspect + azimuth) / PI + 0.5, 2.0) - 1.0);
-    vec4 shade_color = mix(u_shadows[0], u_highlights[0], shade) * sin(scaledSlope) * clamp(intensity * 2.0, 0.0, 1.0);
-
-    fragColor = accent_color * (1.0 - shade_color.a) + shade_color;
-}
-
-// Basic directional hillshade (Method 4)
-void basic_hillshade(vec2 deriv) {
-    deriv = deriv * u_exaggeration * 2.0; // Exaggerate the slope derivative
-    float azimuth = u_azimuths.x + PI;
-    float cos_az = cos(azimuth);
-    float sin_az = sin(azimuth);
-    float cos_alt = cos(u_altitudes.x);
-    float sin_alt = sin(u_altitudes.x);
-
-    // Calculate the cosine of the angle between the light vector and the surface normal
-    float cang = (sin_alt - (deriv.y * cos_az * cos_alt - deriv.x * sin_az * cos_alt)) / sqrt(1.0 + dot(deriv, deriv));
-    float shade = clamp(cang, 0.0, 1.0); // cang is the hillshade intensity [0, 1]
-
-    // Blend shadow and highlight based on intensity
-    if (shade > 0.5) {
-        fragColor = u_highlights[0] * (2.0 * shade - 1.0); // Highlight strength [0, 1]
-    } else {
-        fragColor = u_shadows[0] * (1.0 - 2.0 * shade);    // Shadow strength [0, 1]
-    }
-}
-
-// Multidirectional hillshade (Method 3)
-void multidirectional_hillshade(vec2 deriv) {
-    deriv = deriv * u_exaggeration * 2.0; // Exaggerate the slope derivative
-    fragColor = vec4(0, 0, 0, 0);
-
-    // Iterate through all light sources (up to u_num_lights, max 4)
-    for (int i = 0; i < 4; i++) {
-        if (i >= u_num_lights) break;
-
-        // Access altitude and azimuth from vec4 UBOs
-        float altitude = (i == 0) ? u_altitudes.x : (i == 1) ? u_altitudes.y : (i == 2) ? u_altitudes.z : u_altitudes.w;
-        float azimuth = (i == 0) ? u_azimuths.x : (i == 1) ? u_azimuths.y : (i == 2) ? u_azimuths.z : u_azimuths.w;
-
-        float cos_alt = cos(altitude);
-        float sin_alt = sin(altitude);
-        // Negate cos/sin azimuth for correct light direction in the normal calculation
-        float cos_az = -cos(azimuth);
-        float sin_az = -sin(azimuth);
-
-        // Calculate the cosine of the angle between the light vector and the surface normal
-        float cang = (sin_alt - (deriv.y * cos_az * cos_alt - deriv.x * sin_az * cos_alt)) /
-                     sqrt(1.0 + dot(deriv, deriv));
-        float shade = clamp(cang, 0.0, 1.0); // cang is the hillshade intensity [0, 1]
-
-        // Accumulate shadow/highlight contribution from each light
-        if (shade > 0.5) {
-            fragColor += u_highlights[i] * (2.0 * shade - 1.0) / float(u_num_lights);
-        } else {
-            fragColor += u_shadows[i] * (1.0 - 2.0 * shade) / float(u_num_lights);
-        }
-    }
-}
-
-// Combined shadow and highlight method (Method 1)
-void combined_hillshade(vec2 deriv) {
-    // Only supports one light source (index 0)
-    deriv = deriv * u_exaggeration * 2.0;
-    float azimuth = u_azimuths.x + PI;
-    float cos_az = cos(azimuth);
-    float sin_az = sin(azimuth);
-    float cos_alt = cos(u_altitudes.x);
-    float sin_alt = sin(u_altitudes.x);
-
-    // Calculate the angle between the light vector and the surface normal
-    float cang = acos((sin_alt - (deriv.y * cos_az * cos_alt - deriv.x * sin_az * cos_alt)) /
-                      sqrt(1.0 + dot(deriv, deriv)));
-
-    cang = clamp(cang, 0.0, PI / 2.0); // Clamp angle to 90 degrees (half hemisphere)
-
-    // The "shade" and "highlight" components are calculated from cang (angle) and the magnitude of the slope
-    float shade = cang * atan(length(deriv)) * 4.0 / PI / PI;
-    float highlight = (PI / 2.0 - cang) * atan(length(deriv)) * 4.0 / PI / PI;
-
-    fragColor = u_shadows[0] * shade + u_highlights[0] * highlight;
-}
-
-// Igor's shadow/highlight method (Method 2)
-void igor_hillshade(vec2 deriv) {
-    // Only supports one light source (index 0)
-    deriv = deriv * u_exaggeration * 2.0;
-    float aspect = get_aspect(deriv);
-    float azimuth = u_azimuths.x + PI;
-
-    // Slope strength is magnitude of slope vector, normalized to [0, 1]
-    float slope_strength = atan(length(deriv)) * 2.0 / PI;
-
-    // Aspect strength is difference between aspect and light azimuth, normalized to [0, 1]
-    float aspect_strength = 1.0 - abs(mod((aspect + azimuth) / PI + 0.5, 2.0) - 1.0);
-
-    float shadow_strength = slope_strength * aspect_strength;
-    float highlight_strength = slope_strength * (1.0 - aspect_strength);
-
-    fragColor = u_shadows[0] * shadow_strength + u_highlights[0] * highlight_strength;
-}
-
+",
+        hillshade_lighting!(),
+        r"
 void main() {
     vec4 pixel = texture(u_image, v_pos);
 
@@ -3218,30 +3638,27 @@ void main() {
     vec2 deriv = ((pixel.rg * 8.0) - 4.0) / scaleFactor;
 
     // Dispatch to the selected hillshade method
-    switch (u_method) {
-        case BASIC:
-            basic_hillshade(deriv);
-            break;
-        case COMBINED:
-            combined_hillshade(deriv);
-            break;
-        case IGOR:
-            igor_hillshade(deriv);
-            break;
-        case MULTIDIRECTIONAL:
-            multidirectional_hillshade(deriv);
-            break;
-        case STANDARD:
-        default:
-            standard_hillshade(deriv);
-            break;
-    }
+    hillshade(deriv);
 
 #ifdef OVERDRAW_INSPECTOR
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+"
+    ),
+};
+
+/// A hillshade's tiles as the slopes prepared for them, unlit and opaque:
+/// what the hillshade drapes where the terrain's surface lights it.
+pub(crate) const HILLSHADE_SLOPES_SHADER: GlslShaderSource = GlslShaderSource {
+    vertex: HILLSHADE_SHADER.vertex,
+    fragment: r"in vec2 v_pos;
+uniform sampler2D u_image;
+
+void main() {
+    fragColor = vec4(texture(u_image, v_pos).rg, 0.0, 1.0);
+}
+",
 };
 
 pub(crate) const LINE_GRADIENT_SDF_SHADER: GlslShaderSource = GlslShaderSource {
@@ -4758,6 +5175,16 @@ layout (std140) uniform ProjectionUBO {
     highp vec2 u_projection_translate;
     highp vec4 u_projection_anchor;
     highp vec4 u_projection_anchor_angles;
+#ifdef TERRAIN
+    // Where a terrain variant's draw reads the ground it stands on: where its
+    // tile is in the DEM tile it binds, and how the DEM decodes.
+    highp vec4 u_ground_dem_coords;
+    highp vec4 u_ground_unpack;
+    highp float u_ground_unpack_scale;
+    highp float u_ground_exaggeration;
+    highp float u_ground_skirt_length;
+    highp float u_ground_depth_factor;
+#endif
 };
 
 // Pole vertices carry these sentinel Y values in their raw position.
@@ -5161,7 +5588,10 @@ void main() {
 };
 
 pub(crate) const SYMBOL_ICON_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (location = 0) in vec4 a_pos_offset;
+    vertex: concat!(
+        standing_ground!(),
+        ground_visibility!(),
+        r"layout (location = 0) in vec4 a_pos_offset;
 layout (location = 1) in vec4 a_data;
 layout (location = 2) in vec4 a_pixeloffset;
 layout (location = 3) in vec3 a_projected_pos;
@@ -5280,7 +5710,27 @@ void main() {
     }
 
     vec2 translated_a_pos = a_pos + u_translation;
-    vec4 projectedPoint = projectTileWithElevation(translated_a_pos, a_height_offset);
+    // The symbol stands where its draw's ground says, under its anchor as it
+    // draws, translated, if its tile holds its anchor.
+#ifdef TERRAIN
+    if (!tile_holds(a_pos)) {
+        gl_Position = ground_dropped();
+        return;
+    }
+    highp float ele = a_height_offset + standing_height(translated_a_pos);
+#else
+    highp float ele = a_height_offset;
+#endif
+    vec4 projectedPoint = projectTileWithElevation(translated_a_pos, ele);
+    // The ground in front of the anchor hides the whole symbol.
+#ifdef TERRAIN
+    highp float ground_seen = ground_visibility(projectedPoint);
+    if (ground_seen == 0.0) {
+        gl_Position = ground_dropped();
+        return;
+    }
+    v_fade_opacity *= ground_seen;
+#endif
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
@@ -5288,7 +5738,7 @@ void main() {
     // vertices go through the globe projection, which clips them.
     // A raised label is left to placement, which hides it once the planet
     // blocks the line of sight to it.
-    if (!u_pitch_with_map && a_height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (!u_pitch_with_map && ele <= 0.0 && projectedPoint.z > projectedPoint.w) {
         gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
         return;
     }
@@ -5312,7 +5762,7 @@ void main() {
     highp float symbol_rotation = 0.0;
     if (u_rotate_symbol) {
         // See comments in symbol_sdf.vertex
-        vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), a_height_offset);
+        vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), ele);
 
         vec2 a = projectedPoint.xy / projectedPoint.w;
         vec2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -5326,11 +5776,11 @@ void main() {
 
     vec4 projected_pos;
     if (u_is_along_line || u_is_variable_anchor) {
-        projected_pos = vec4(a_projected_pos.xy, a_height_offset, 1.0);
+        projected_pos = vec4(a_projected_pos.xy, ele, 1.0);
     } else if (u_pitch_with_map) {
-        projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, a_height_offset, 1.0);
+        projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, ele, 1.0);
     } else {
-        projected_pos = u_label_plane_matrix * projectTileWithElevation(a_projected_pos.xy + u_translation, a_height_offset);
+        projected_pos = u_label_plane_matrix * projectTileWithElevation(a_projected_pos.xy + u_translation, ele);
     }
     float z = float(u_pitch_with_map) * projected_pos.z / projected_pos.w;
 
@@ -5344,13 +5794,21 @@ void main() {
 
     gl_Position = u_coord_matrix * vec4(projected_pos.xy / projected_pos.w + rotation_matrix * (a_offset / 32.0 * max(a_minFontScale, fontScale) + a_pxoffset / 16.0) * projectionScaling, z, 1.0);
     if (u_pitch_with_map) {
+#ifdef TERRAIN
+        // A label along a line stands on the ground under each of its
+        // glyphs' vertices.
+        if (u_is_along_line) {
+            gl_Position.z = a_height_offset + standing_height(gl_Position.xy);
+        }
+#endif
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z);
     }
 
     v_tex = (a_tex - a_tex_origin) / u_texsize;
     v_tex_origin = a_tex_origin / u_texsize;
 }
-",
+"
+    ),
     fragment: r"uniform sampler2D u_texture;
 
 layout (std140) uniform SymbolEvaluatedPropsUBO {
@@ -5395,7 +5853,10 @@ void main() {
 };
 
 pub(crate) const SYMBOL_SDF_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"#define SDF_PX 8.0
+    vertex: concat!(
+        standing_ground!(),
+        ground_visibility!(),
+        r"#define SDF_PX 8.0
 
 layout (location = 0) in vec4 a_pos_offset;
 layout (location = 1) in vec4 a_data;
@@ -5560,7 +6021,27 @@ lowp float halo_blur = u_halo_blur;
     }
 
     vec2 translated_a_pos = a_pos + u_translation;
-    vec4 projectedPoint = projectTileWithElevation(translated_a_pos, a_height_offset);
+    // The symbol stands where its draw's ground says, under its anchor as it
+    // draws, translated, if its tile holds its anchor.
+#ifdef TERRAIN
+    if (!tile_holds(a_pos)) {
+        gl_Position = ground_dropped();
+        return;
+    }
+    highp float ele = a_height_offset + standing_height(translated_a_pos);
+#else
+    highp float ele = a_height_offset;
+#endif
+    vec4 projectedPoint = projectTileWithElevation(translated_a_pos, ele);
+    // The ground in front of the anchor hides the whole symbol.
+#ifdef TERRAIN
+    highp float ground_seen = ground_visibility(projectedPoint);
+    if (ground_seen == 0.0) {
+        gl_Position = ground_dropped();
+        return;
+    }
+    interpolated_fade_opacity *= ground_seen;
+#endif
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
@@ -5568,7 +6049,7 @@ lowp float halo_blur = u_halo_blur;
     // vertices go through the globe projection, which clips them.
     // A raised label is left to placement, which hides it once the planet
     // blocks the line of sight to it.
-    if (!u_pitch_with_map && a_height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (!u_pitch_with_map && ele <= 0.0 && projectedPoint.z > projectedPoint.w) {
         gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
         return;
     }
@@ -5599,7 +6080,7 @@ lowp float halo_blur = u_halo_blur;
         // Point labels with 'rotation-alignment: map' are horizontal with respect to tile units
         // To figure out that angle in projected space, we draw a short horizontal line in tile
         // space, project it, and measure its angle in projected space.
-        vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), a_height_offset);
+        vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), ele);
 
         vec2 a = projectedPoint.xy / projectedPoint.w;
         vec2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -5613,11 +6094,11 @@ lowp float halo_blur = u_halo_blur;
 
     vec4 projected_pos;
     if (u_is_along_line || u_is_variable_anchor) {
-        projected_pos = vec4(a_projected_pos.xy, a_height_offset, 1.0);
+        projected_pos = vec4(a_projected_pos.xy, ele, 1.0);
     } else if (u_pitch_with_map) {
-        projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, a_height_offset, 1.0);
+        projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, ele, 1.0);
     } else {
-        projected_pos = u_label_plane_matrix * projectTileWithElevation(a_projected_pos.xy + u_translation, a_height_offset);
+        projected_pos = u_label_plane_matrix * projectTileWithElevation(a_projected_pos.xy + u_translation, ele);
     }
     float z = float(u_pitch_with_map) * projected_pos.z / projected_pos.w;
 
@@ -5631,6 +6112,13 @@ lowp float halo_blur = u_halo_blur;
 
     gl_Position = u_coord_matrix * vec4(projected_pos.xy / projected_pos.w + rotation_matrix * (a_offset / 32.0 * fontScale + a_pxoffset) * projectionScaling, z, 1.0);
     if (u_pitch_with_map) {
+#ifdef TERRAIN
+        // A label along a line stands on the ground under each of its
+        // glyphs' vertices.
+        if (u_is_along_line) {
+            gl_Position.z = a_height_offset + standing_height(gl_Position.xy);
+        }
+#endif
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z);
     }
     // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
@@ -5648,7 +6136,8 @@ lowp float halo_blur = u_halo_blur;
     v_tex_origin = a_tex_origin / u_texsize;
     v_data1 = vec3(gamma_scaled, halo_edge, interpolated_fade_opacity);
 }
-",
+"
+    ),
     fragment: r"#define SDF_PX 8.0
 
 layout (std140) uniform SymbolEvaluatedPropsUBO {
@@ -5733,7 +6222,10 @@ highp vec4 halo_color = u_halo_color;
 };
 
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"#define SDF_PX 8.0
+    vertex: concat!(
+        standing_ground!(),
+        ground_visibility!(),
+        r"#define SDF_PX 8.0
 #define ICON 0.0
 
 layout (location = 0) in vec4 a_pos_offset;
@@ -5899,7 +6391,27 @@ lowp float halo_blur = u_halo_blur;
     }
 
     vec2 translated_a_pos = a_pos + u_translation;
-    vec4 projectedPoint = projectTileWithElevation(translated_a_pos, a_height_offset);
+    // The symbol stands where its draw's ground says, under its anchor as it
+    // draws, translated, if its tile holds its anchor.
+#ifdef TERRAIN
+    if (!tile_holds(a_pos)) {
+        gl_Position = ground_dropped();
+        return;
+    }
+    highp float ele = a_height_offset + standing_height(translated_a_pos);
+#else
+    highp float ele = a_height_offset;
+#endif
+    vec4 projectedPoint = projectTileWithElevation(translated_a_pos, ele);
+    // The ground in front of the anchor hides the whole symbol.
+#ifdef TERRAIN
+    highp float ground_seen = ground_visibility(projectedPoint);
+    if (ground_seen == 0.0) {
+        gl_Position = ground_dropped();
+        return;
+    }
+    interpolated_fade_opacity *= ground_seen;
+#endif
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
@@ -5907,7 +6419,7 @@ lowp float halo_blur = u_halo_blur;
     // vertices go through the globe projection, which clips them.
     // A raised label is left to placement, which hides it once the planet
     // blocks the line of sight to it.
-    if (!u_pitch_with_map && a_height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (!u_pitch_with_map && ele <= 0.0 && projectedPoint.z > projectedPoint.w) {
         gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
         return;
     }
@@ -5938,7 +6450,7 @@ lowp float halo_blur = u_halo_blur;
         // Point labels with 'rotation-alignment: map' are horizontal with respect to tile units
         // To figure out that angle in projected space, we draw a short horizontal line in tile
         // space, project it, and measure its angle in projected space.
-        vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), a_height_offset);
+        vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), ele);
 
         vec2 a = projectedPoint.xy / projectedPoint.w;
         vec2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -5952,11 +6464,11 @@ lowp float halo_blur = u_halo_blur;
 
     vec4 projected_pos;
     if (u_is_along_line || u_is_variable_anchor) {
-        projected_pos = vec4(a_projected_pos.xy, a_height_offset, 1.0);
+        projected_pos = vec4(a_projected_pos.xy, ele, 1.0);
     } else if (u_pitch_with_map) {
-        projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, a_height_offset, 1.0);
+        projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, ele, 1.0);
     } else {
-        projected_pos = u_label_plane_matrix * projectTileWithElevation(a_projected_pos.xy + u_translation, a_height_offset);
+        projected_pos = u_label_plane_matrix * projectTileWithElevation(a_projected_pos.xy + u_translation, ele);
     }
     float z = float(u_pitch_with_map) * projected_pos.z / projected_pos.w;
 
@@ -5970,6 +6482,13 @@ lowp float halo_blur = u_halo_blur;
 
     gl_Position = u_coord_matrix * vec4(projected_pos.xy / projected_pos.w + rotation_matrix * (a_offset / 32.0 * fontScale) * projectionScaling, z, 1.0);
     if (u_pitch_with_map) {
+#ifdef TERRAIN
+        // A label along a line stands on the ground under each of its
+        // glyphs' vertices.
+        if (u_is_along_line) {
+            gl_Position.z = a_height_offset + standing_height(gl_Position.xy);
+        }
+#endif
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z);
     }
     // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
@@ -5990,7 +6509,8 @@ lowp float halo_blur = u_halo_blur;
     v_data1 = vec3(gamma_scaled, halo_edge, interpolated_fade_opacity);
     v_is_icon = int(is_icon);
 }
-",
+"
+    ),
     fragment: r"#define SDF_PX 8.0
 
 layout (std140) uniform SymbolEvaluatedPropsUBO {

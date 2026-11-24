@@ -353,7 +353,7 @@ pub type mln_map_load_error = u32;
 pub const MLN_RENDER_MODE_PARTIAL: mln_render_mode = 0;
 pub const MLN_RENDER_MODE_FULL: mln_render_mode = 1;
 /** Whether a frame drew the map complete, or lacked resources that are still
- loading.*/
+ loading or showed the camera before it settled on the terrain.*/
 pub type mln_render_mode = u32;
 pub const MLN_TILE_OPERATION_REQUESTED_FROM_CACHE: mln_tile_operation = 0;
 pub const MLN_TILE_OPERATION_REQUESTED_FROM_NETWORK: mln_tile_operation = 1;
@@ -1023,6 +1023,14 @@ pub const MLN_MAP_MODE_STATIC: mln_map_mode = 1;
 pub const MLN_MAP_MODE_TILE: mln_map_mode = 2;
 /// When a map renders.
 pub type mln_map_mode = u32;
+/// Skirts as long as a fifth of a tile's width at the map's zoom.
+pub const MLN_TERRAIN_SKIRT_LENGTH_AUTO: mln_terrain_skirt_length = 0;
+/// No skirts.
+pub const MLN_TERRAIN_SKIRT_LENGTH_NONE: mln_terrain_skirt_length = 1;
+/** How far the skirts that hang from the edges of terrain tiles reach down.
+
+ Skirts hide the cracks between neighboring terrain tiles of different zooms.*/
+pub type mln_terrain_skirt_length = u32;
 /// A size in logical pixels, and the physical pixels in each logical pixel.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -1042,6 +1050,7 @@ pub const MLN_MAP_OPTION_EVENT_MASK: mln_map_option_field = 1;
 pub const MLN_MAP_OPTION_TILE_CACHE_ENABLED: mln_map_option_field = 2;
 pub const MLN_MAP_OPTION_SYSTEM_FONTS_ENABLED: mln_map_option_field = 4;
 pub const MLN_MAP_OPTION_LOCAL_IDEOGRAPHS_ENABLED: mln_map_option_field = 8;
+pub const MLN_MAP_OPTION_TERRAIN_SKIRT_LENGTH: mln_map_option_field = 16;
 /// The fields that mln_map_options sets.
 pub type mln_map_option_field = u32;
 /// A set of mln_map_option_field bits.
@@ -1087,6 +1096,9 @@ pub struct mln_map_options {
  from a glyph PBF downloaded for every few characters. Without it, they
  do.*/
     pub local_ideographs_enabled: bool,
+    /** The skirts of the style's terrain, for the map's lifetime. Without it,
+ MLN_TERRAIN_SKIRT_LENGTH_AUTO.*/
+    pub terrain_skirt_length: mln_terrain_skirt_length,
 }
 /// A point on the screen, in logical pixels from the map's top-left corner.
 #[repr(C)]
@@ -1757,6 +1769,8 @@ pub struct mln_map_snapshot {
     pub globe_rendering: bool,
     /// The setting from mln_map_set_globe_free_bearing_enabled().
     pub globe_free_bearing_enabled: bool,
+    /// The setting from mln_map_set_center_clamped_to_ground_enabled().
+    pub center_clamped_to_ground_enabled: bool,
 }
 /// A map's camera, with the snapshot generation that it matches.
 #[repr(C)]
@@ -4055,6 +4069,21 @@ pub struct mln_log_handler {
 pub struct mln_map_projection_camera_result {
     pub size: u32,
     pub camera: mln_camera,
+}
+/** The height of the ground at a coordinate, as
+ mln_map_projection_get_terrain_elevation() reports it.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_map_projection_terrain_elevation_result {
+    pub size: u32,
+    /** Whether the projection has the ground's height at the coordinate. It has
+ none without terrain, where the map hasn't drawn the ground, such as off
+ the screen, and while the ground's data there loads.*/
+    pub has_elevation: bool,
+    /** The ground's height, in meters above sea level with the terrain's
+ exaggeration; 0 where the terrain's source has no data. Read it only
+ with `has_elevation`.*/
+    pub elevation_meters: f64,
 }
 pub const MLN_RENDER_RESULT_RENDERED: mln_render_result = 0;
 /// The map had nothing new to draw.

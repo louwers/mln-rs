@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use mln_gestures::{GestureEvent, GestureRecognizer, Input, Modes, PointerKind};
-use mln_map::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, MapEvent};
+use mln_map::{AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, MapEvent};
 use mln_runtime::{
     AttachOptions, DemandMode, Error, EventMask, EventType, FrameDemand, FrameDisposition, LogicalExtent, Map,
     MapOptions, RenderSession, RenderTarget, Runtime, RuntimeEvent, RuntimeEventKind, RuntimeOptions, Surface,
@@ -193,6 +193,8 @@ impl WebMap {
             ..Default::default()
         };
         let (map, created) = runtime.create_map(options).map_err(js_error)?;
+        // Past the map's default of 60°, where fog shows over terrain.
+        sent(map.set_bounds(BoundOptions { max_pitch: Some(MAX_PITCH), ..Default::default() }));
 
         let redraw = Arc::new(AtomicBool::new(true));
         let redraw_wake = Arc::clone(&redraw);
@@ -650,6 +652,9 @@ fn log_refused(error: &Error) {
     Log::error(Event::General, format!("the map refused a command: {error}"));
 }
 
+/// How far the page lets the camera tilt, in degrees.
+const MAX_PITCH: f64 = 85.0;
+
 /// web/styles.ts's `Terrain`.
 #[derive(Clone)]
 struct Terrain {
@@ -657,6 +662,8 @@ struct Terrain {
     source: String,
     exaggeration: f64,
     hillshade: Option<Hillshade>,
+    /// The sky for a style without one, as JSON.
+    sky: Option<String>,
 }
 
 /// A hillshade layer of a [`Terrain`]'s source.
@@ -686,10 +693,12 @@ impl Terrain {
                 before: hillshade.get("before").as_str().map(str::to_owned),
             }
         });
+        let sky = value.get("sky");
         Ok(Terrain {
             source: json(source),
             exaggeration: value.get("exaggeration").as_f64().ok_or("terrain: no exaggeration")?,
             hillshade,
+            sky: sky.is_object().then(|| json(sky)),
         })
     }
 }
@@ -698,8 +707,9 @@ impl Terrain {
 const TERRAIN_SOURCE: &str = "terrain";
 
 /// Adds `terrain` to the style that `map` loaded, unless it has the source
-/// already: the source, the style's `terrain` on it and the hillshade, if
-/// any. Fails while no style is loaded.
+/// already: the source, the style's `terrain` on it, and the hillshade and
+/// the sky, if any, the sky only where the style has none. Fails while no
+/// style is loaded.
 fn add_terrain(map: &mut mln_map::Map, terrain: &Terrain) -> Result<(), Error> {
     if map.source(TERRAIN_SOURCE).is_some() {
         return Ok(());
@@ -715,7 +725,13 @@ fn add_terrain(map: &mut mln_map::Map, terrain: &Terrain) -> Result<(), Error> {
             style.add_layer_json(&layer, before)?;
         }
         let root = format!(r#"{{"source":"{TERRAIN_SOURCE}","exaggeration":{}}}"#, terrain.exaggeration);
-        style.set_root_property_json("terrain", &root)
+        style.set_root_property_json("terrain", &root)?;
+        if let Some(sky) = &terrain.sky
+            && style.get_sky().is_none()
+        {
+            style.set_root_property_json("sky", sky)?;
+        }
+        Ok(())
     })
 }
 

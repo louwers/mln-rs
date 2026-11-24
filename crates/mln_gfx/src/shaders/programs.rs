@@ -1,6 +1,8 @@
 //! The built-in programs.
 
+use crate::gfx_types::AttributeDataType;
 use crate::gfx_types::AttributeDataType::{Float, Float2, Float3, Float4, Short2, Short4, UByte4, UShort2, UShort4};
+use crate::projection_variant::ProjectionVariant;
 use crate::shaders::program::{Program, Property};
 use crate::shaders::shader_defines::{
     ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE,
@@ -12,36 +14,111 @@ use crate::shaders::shader_defines::{
     ID_COLLISION_PLACED_VERTEX_ATTRIBUTE, ID_COLLISION_POS_VERTEX_ATTRIBUTE, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE,
     ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE, ID_COLOR_RELIEF_IMAGE_TEXTURE,
     ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_FILL_COLOR_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_IMAGE_TEXTURE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE,
-    ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE,
-    ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_IMAGE_TEXTURE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE,
-    ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_END_ATTRIBUTE, ID_FILL_OUTLINE_POS_ATTRIBUTE,
-    ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE,
-    ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE,
-    ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE,
-    ID_HILLSHADE_IMAGE_TEXTURE, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE,
-    ID_LAYER_COMPOSITE_BACKDROP_TEXTURE, ID_LAYER_COMPOSITE_IMAGE_TEXTURE, ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE,
-    ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASH_TEXTURE,
-    ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE,
-    ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_IMAGE_TEXTURE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
-    ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE,
-    ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE, ID_RASTER_IMAGE0_TEXTURE,
-    ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
-    ID_SKY_POS_VERTEX_ATTRIBUTE, ID_SYMBOL_COLOR_ATTRIBUTE, ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE,
-    ID_SYMBOL_HALO_BLUR_ATTRIBUTE, ID_SYMBOL_HALO_COLOR_ATTRIBUTE, ID_SYMBOL_HALO_WIDTH_ATTRIBUTE,
-    ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE,
-    ID_SYMBOL_OPACITY_ATTRIBUTE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE,
-    ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_TERRAIN_DEM_TEXTURE,
-    ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_POS_VERTEX_ATTRIBUTE,
+    ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE,
+    ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE,
+    ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_IMAGE_TEXTURE,
+    ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE,
+    ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE,
+    ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_IMAGE_TEXTURE,
+    ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_END_ATTRIBUTE,
+    ID_FILL_OUTLINE_POS_ATTRIBUTE, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE,
+    ID_FILL_POS_VERTEX_ATTRIBUTE, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_GROUND_DEM_TEXTURE, ID_GROUND_DEPTH_TEXTURE,
+    ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
+    ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE, ID_HILLSHADE_IMAGE_TEXTURE,
+    ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_LAYER_COMPOSITE_BACKDROP_TEXTURE,
+    ID_LAYER_COMPOSITE_IMAGE_TEXTURE, ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE, ID_LINE_BLUR_VERTEX_ATTRIBUTE,
+    ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASH_TEXTURE, ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE,
+    ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE,
+    ID_LINE_IMAGE_TEXTURE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE, ID_LINE_OPACITY_VERTEX_ATTRIBUTE,
+    ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE,
+    ID_LINE_WIDTH_VERTEX_ATTRIBUTE, ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE,
+    ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_SKY_POS_VERTEX_ATTRIBUTE, ID_SYMBOL_COLOR_ATTRIBUTE,
+    ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, ID_SYMBOL_HALO_BLUR_ATTRIBUTE,
+    ID_SYMBOL_HALO_COLOR_ATTRIBUTE, ID_SYMBOL_HALO_WIDTH_ATTRIBUTE, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE,
+    ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_OPACITY_ATTRIBUTE,
+    ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE,
+    ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_POS_VERTEX_ATTRIBUTE,
 };
 #[cfg(feature = "gpu-conformance")]
 use crate::shaders::shader_defines::{
     ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE,
     ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE,
 };
+
+/// The projection variants of `program`: every program's Mercator and globe
+/// variants, and the terrain variants of a standing layer's program, on
+/// Mercator and on the globe, which read the ground
+/// ([`ID_GROUND_DEM_TEXTURE`]).
+#[must_use]
+pub fn projection_variants(program: &Program) -> &'static [ProjectionVariant] {
+    const FLAT: &[ProjectionVariant] = &[ProjectionVariant::Mercator, ProjectionVariant::Globe];
+    const STANDING: &[ProjectionVariant] = &[
+        ProjectionVariant::Mercator,
+        ProjectionVariant::Globe,
+        ProjectionVariant::Terrain,
+        ProjectionVariant::GlobeTerrain,
+    ];
+    const STANDING_PROGRAMS: [&Program; 12] = [
+        &CIRCLE,
+        &HEATMAP,
+        &FILL_EXTRUSION,
+        &FILL_EXTRUSION_INSTANCED,
+        &FILL_EXTRUSION_WALL,
+        &FILL_EXTRUSION_PULLED,
+        &FILL_EXTRUSION_PATTERN,
+        &FILL_EXTRUSION_PATTERN_INSTANCED,
+        &FILL_EXTRUSION_PATTERN_WALL,
+        &SYMBOL_ICON,
+        &SYMBOL_SDF,
+        &SYMBOL_TEXT_AND_ICON,
+    ];
+    if STANDING_PROGRAMS.contains(&program) { STANDING } else { FLAT }
+}
+
+/// Attributes, each id with the format a draw without data for it binds.
+type Attributes<const N: usize> = [(usize, AttributeDataType); N];
+
+/// A program variant's attributes, as [`Program::attributes`] gives them:
+/// those it reads per vertex, then those it reads per instance.
+pub type VariantAttributes = (&'static [(usize, AttributeDataType)], &'static [(usize, AttributeDataType)]);
+
+/// `attributes` and then the centroid of the polygon that each vertex or
+/// wall instance stands on over terrain, which the terrain variants of the
+/// fill extrusion programs read. Takes `M`, the count, as one more than `N`.
+const fn with_centroid<const N: usize, const M: usize>(attributes: Attributes<N>) -> Attributes<M> {
+    assert!(M == N + 1);
+    let mut all = [(ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE, Short2); M];
+    let mut i = 0;
+    while i < N {
+        all[i] = attributes[i];
+        i += 1;
+    }
+    all
+}
+
+/// The attributes of `program`'s terrain variant, by vertex and by
+/// instance, where they aren't the program's: the fill extrusion programs'
+/// read the centroid that a roof vertex or a wall stands on
+/// ([`ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE`]), where they read attributes.
+/// Only a terrain variant's draws bind it.
+#[must_use]
+pub fn terrain_attributes(program: &Program) -> Option<VariantAttributes> {
+    static TERRAIN: [(&Program, VariantAttributes); 6] = [
+        (&FILL_EXTRUSION, (&with_centroid::<5, 6>(FILL_EXTRUSION_ATTRIBUTES), &[])),
+        (
+            &FILL_EXTRUSION_INSTANCED,
+            (&FILL_EXTRUSION_INSTANCED_ATTRIBUTES, &with_centroid::<7, 8>(FILL_EXTRUSION_INSTANCE_ATTRIBUTES)),
+        ),
+        (&FILL_EXTRUSION_WALL, (&with_centroid::<8, 9>(FILL_EXTRUSION_WALL_ATTRIBUTES), &[])),
+        (&FILL_EXTRUSION_PATTERN, (&with_centroid::<6, 7>(FILL_EXTRUSION_PATTERN_ATTRIBUTES), &[])),
+        (
+            &FILL_EXTRUSION_PATTERN_INSTANCED,
+            (&FILL_EXTRUSION_INSTANCED_ATTRIBUTES, &with_centroid::<8, 9>(FILL_EXTRUSION_PATTERN_INSTANCE_ATTRIBUTES)),
+        ),
+        (&FILL_EXTRUSION_PATTERN_WALL, (&with_centroid::<9, 10>(FILL_EXTRUSION_PATTERN_WALL_ATTRIBUTES), &[])),
+    ];
+    TERRAIN.iter().find(|(terrain, _)| *terrain == program).map(|&(_, attributes)| attributes)
+}
 
 const fn property(name: &'static str, attribute: usize) -> Property {
     Property { name, attribute }
@@ -76,7 +153,9 @@ pub static CIRCLE: Program = Program {
         (ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE, Float2),
     ],
     instance_attributes: &[],
-    textures: &[],
+    // The terrain variant's ground, and the depth of the ground that hides
+    // circles behind it.
+    textures: &[ID_GROUND_DEM_TEXTURE, ID_GROUND_DEPTH_TEXTURE],
     properties: &[
         property("color", ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE),
         property("radius", ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE),
@@ -348,17 +427,69 @@ pub static RASTER: Program = Program {
     properties: &[],
 };
 
+const FILL_EXTRUSION_ATTRIBUTES: Attributes<5> = [
+    (ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, Short2),
+    (ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, UShort2),
+    (ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE, Float4),
+    (ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, Float2),
+    (ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, Float2),
+];
+const FILL_EXTRUSION_INSTANCED_ATTRIBUTES: Attributes<1> = [(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, Short2)];
+const FILL_EXTRUSION_INSTANCE_ATTRIBUTES: Attributes<7> = [
+    (ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, Short2),
+    (ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, UShort2),
+    (ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, Short2),
+    (ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, UShort2),
+    (ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE, Float4),
+    (ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, Float2),
+    (ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, Float2),
+];
+const FILL_EXTRUSION_WALL_ATTRIBUTES: Attributes<8> = [
+    (ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, Short2),
+    (ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, Short2),
+    (ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, UShort2),
+    (ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, Short2),
+    (ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, UShort2),
+    (ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE, Float4),
+    (ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, Float2),
+    (ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, Float2),
+];
+const FILL_EXTRUSION_PATTERN_ATTRIBUTES: Attributes<6> = [
+    (ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, Short2),
+    (ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, UShort2),
+    (ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, Float2),
+    (ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, Float2),
+    (ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE, UShort4),
+    (ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE, UShort4),
+];
+const FILL_EXTRUSION_PATTERN_INSTANCE_ATTRIBUTES: Attributes<8> = [
+    (ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, Short2),
+    (ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, UShort2),
+    (ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, Short2),
+    (ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, UShort2),
+    (ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, Float2),
+    (ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, Float2),
+    (ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE, UShort4),
+    (ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE, UShort4),
+];
+const FILL_EXTRUSION_PATTERN_WALL_ATTRIBUTES: Attributes<9> = [
+    (ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, Short2),
+    (ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, Short2),
+    (ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, UShort2),
+    (ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, Short2),
+    (ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, UShort2),
+    (ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, Float2),
+    (ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, Float2),
+    (ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE, UShort4),
+    (ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE, UShort4),
+];
+
 pub static FILL_EXTRUSION: Program = Program {
     name: "FillExtrusionShader",
-    attributes: &[
-        (ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, Short2),
-        (ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, UShort2),
-        (ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE, Float4),
-        (ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, Float2),
-        (ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, Float2),
-    ],
+    attributes: &FILL_EXTRUSION_ATTRIBUTES,
     instance_attributes: &[],
-    textures: &[],
+    // The terrain variant's ground.
+    textures: &[ID_GROUND_DEM_TEXTURE],
     properties: &[
         property("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
         property("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
@@ -368,17 +499,9 @@ pub static FILL_EXTRUSION: Program = Program {
 
 pub static FILL_EXTRUSION_INSTANCED: Program = Program {
     name: "FillExtrusionInstancedShader",
-    attributes: &[(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, Short2)],
-    instance_attributes: &[
-        (ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, Short2),
-        (ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, UShort2),
-        (ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, Short2),
-        (ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, UShort2),
-        (ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE, Float4),
-        (ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, Float2),
-        (ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, Float2),
-    ],
-    textures: &[],
+    attributes: &FILL_EXTRUSION_INSTANCED_ATTRIBUTES,
+    instance_attributes: &FILL_EXTRUSION_INSTANCE_ATTRIBUTES,
+    textures: &[ID_GROUND_DEM_TEXTURE],
     properties: &[
         property("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
         property("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
@@ -390,18 +513,9 @@ pub static FILL_EXTRUSION_INSTANCED: Program = Program {
 /// vertex, for walls whose quads are in the vertex buffer.
 pub static FILL_EXTRUSION_WALL: Program = Program {
     name: "FillExtrusionWallShader",
-    attributes: &[
-        (ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, Short2),
-        (ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, Short2),
-        (ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, UShort2),
-        (ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, Short2),
-        (ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, UShort2),
-        (ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE, Float4),
-        (ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, Float2),
-        (ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, Float2),
-    ],
+    attributes: &FILL_EXTRUSION_WALL_ATTRIBUTES,
     instance_attributes: &[],
-    textures: &[],
+    textures: &[ID_GROUND_DEM_TEXTURE],
     properties: &[
         property("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
         property("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
@@ -416,7 +530,7 @@ pub static FILL_EXTRUSION_PULLED: Program = Program {
     name: "FillExtrusionPulledShader",
     attributes: &[],
     instance_attributes: &[],
-    textures: &[],
+    textures: &[ID_GROUND_DEM_TEXTURE],
     properties: &[
         property("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
         property("color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
@@ -426,16 +540,9 @@ pub static FILL_EXTRUSION_PULLED: Program = Program {
 
 pub static FILL_EXTRUSION_PATTERN: Program = Program {
     name: "FillExtrusionPatternShader",
-    attributes: &[
-        (ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, Short2),
-        (ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, UShort2),
-        (ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, Float2),
-        (ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, Float2),
-        (ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE, UShort4),
-        (ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE, UShort4),
-    ],
+    attributes: &FILL_EXTRUSION_PATTERN_ATTRIBUTES,
     instance_attributes: &[],
-    textures: &[ID_FILL_EXTRUSION_IMAGE_TEXTURE],
+    textures: &[ID_FILL_EXTRUSION_IMAGE_TEXTURE, ID_GROUND_DEM_TEXTURE],
     properties: &[
         property("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
         property("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
@@ -446,18 +553,9 @@ pub static FILL_EXTRUSION_PATTERN: Program = Program {
 
 pub static FILL_EXTRUSION_PATTERN_INSTANCED: Program = Program {
     name: "FillExtrusionPatternInstancedShader",
-    attributes: &[(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, Short2)],
-    instance_attributes: &[
-        (ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, Short2),
-        (ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, UShort2),
-        (ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, Short2),
-        (ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, UShort2),
-        (ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, Float2),
-        (ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, Float2),
-        (ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE, UShort4),
-        (ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE, UShort4),
-    ],
-    textures: &[ID_FILL_EXTRUSION_IMAGE_TEXTURE],
+    attributes: &FILL_EXTRUSION_INSTANCED_ATTRIBUTES,
+    instance_attributes: &FILL_EXTRUSION_PATTERN_INSTANCE_ATTRIBUTES,
+    textures: &[ID_FILL_EXTRUSION_IMAGE_TEXTURE, ID_GROUND_DEM_TEXTURE],
     properties: &[
         property("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
         property("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
@@ -469,19 +567,9 @@ pub static FILL_EXTRUSION_PATTERN_INSTANCED: Program = Program {
 /// [`FILL_EXTRUSION_WALL`] of the pattern walls.
 pub static FILL_EXTRUSION_PATTERN_WALL: Program = Program {
     name: "FillExtrusionPatternWallShader",
-    attributes: &[
-        (ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, Short2),
-        (ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, Short2),
-        (ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, UShort2),
-        (ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, Short2),
-        (ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, UShort2),
-        (ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, Float2),
-        (ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, Float2),
-        (ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE, UShort4),
-        (ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE, UShort4),
-    ],
+    attributes: &FILL_EXTRUSION_PATTERN_WALL_ATTRIBUTES,
     instance_attributes: &[],
-    textures: &[ID_FILL_EXTRUSION_IMAGE_TEXTURE],
+    textures: &[ID_FILL_EXTRUSION_IMAGE_TEXTURE, ID_GROUND_DEM_TEXTURE],
     properties: &[
         property("base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
         property("height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
@@ -498,7 +586,8 @@ pub static HEATMAP: Program = Program {
         (ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, Float2),
     ],
     instance_attributes: &[],
-    textures: &[],
+    // The terrain variant's ground.
+    textures: &[ID_GROUND_DEM_TEXTURE],
     properties: &[
         property("weight", ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE),
         property("radius", ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE),
@@ -515,6 +604,17 @@ pub static HEATMAP_TEXTURE: Program = Program {
 
 pub static HILLSHADE: Program = Program {
     name: "HillshadeShader",
+    attributes: &[(ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, Short2), (ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, Short2)],
+    instance_attributes: &[],
+    textures: &[ID_HILLSHADE_IMAGE_TEXTURE],
+    properties: &[],
+};
+
+/// A hillshade's tiles as their slopes, as [`HILLSHADE_PREPARE`] prepared
+/// them, unlit: what a hillshade drapes over terrain where the surface
+/// lights it ([`TERRAIN_HILLSHADE`]).
+pub static HILLSHADE_SLOPES: Program = Program {
+    name: "HillshadeSlopesShader",
     attributes: &[(ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, Short2), (ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, Short2)],
     instance_attributes: &[],
     textures: &[ID_HILLSHADE_IMAGE_TEXTURE],
@@ -557,7 +657,7 @@ pub static SYMBOL_ICON: Program = Program {
         (ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, Float),
     ],
     instance_attributes: &[],
-    textures: &[ID_SYMBOL_IMAGE_TEXTURE],
+    textures: &[ID_SYMBOL_IMAGE_TEXTURE, ID_GROUND_DEM_TEXTURE, ID_GROUND_DEPTH_TEXTURE],
     properties: &[property("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE)],
 };
 
@@ -578,7 +678,7 @@ pub static SYMBOL_SDF: Program = Program {
         (ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, Float),
     ],
     instance_attributes: &[],
-    textures: &[ID_SYMBOL_IMAGE_TEXTURE],
+    textures: &[ID_SYMBOL_IMAGE_TEXTURE, ID_GROUND_DEM_TEXTURE, ID_GROUND_DEPTH_TEXTURE],
     properties: &[
         property("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE),
         property("fill_color", ID_SYMBOL_COLOR_ATTRIBUTE),
@@ -604,7 +704,7 @@ pub static SYMBOL_TEXT_AND_ICON: Program = Program {
         (ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, Float),
     ],
     instance_attributes: &[],
-    textures: &[ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_IMAGE_ICON_TEXTURE],
+    textures: &[ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_GROUND_DEM_TEXTURE, ID_GROUND_DEPTH_TEXTURE],
     properties: &[
         property("opacity", ID_SYMBOL_OPACITY_ATTRIBUTE),
         property("fill_color", ID_SYMBOL_COLOR_ATTRIBUTE),
@@ -682,6 +782,29 @@ pub static TERRAIN: Program = Program {
     attributes: &[(ID_TERRAIN_POS_VERTEX_ATTRIBUTE, Short4)],
     instance_attributes: &[],
     textures: &[ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE],
+    properties: &[],
+};
+
+/// The terrain's surface with a drape of a hillshade's slopes over it
+/// ([`HILLSHADE_SLOPES`]), which it lights as [`HILLSHADE`] does, with the
+/// lights of the frame.
+pub static TERRAIN_HILLSHADE: Program = Program {
+    name: "TerrainHillshadeShader",
+    attributes: &[(ID_TERRAIN_POS_VERTEX_ATTRIBUTE, Short4)],
+    instance_attributes: &[],
+    textures: &[ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE],
+    properties: &[],
+};
+
+/// The depth of the terrain's surface, which the standing layers that it
+/// hides read: a tile's grid with its skirts, raised by its DEM as the
+/// surface's, whose fragments write the eye distance's (the clip w's) bits,
+/// least significant byte first, as a texel's channels.
+pub static TERRAIN_DEPTH: Program = Program {
+    name: "TerrainDepthShader",
+    attributes: &[(ID_TERRAIN_POS_VERTEX_ATTRIBUTE, Short4)],
+    instance_attributes: &[],
+    textures: &[ID_TERRAIN_DEM_TEXTURE],
     properties: &[],
 };
 

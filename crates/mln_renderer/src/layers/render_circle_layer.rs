@@ -2,14 +2,16 @@ use std::mem::offset_of;
 use std::sync::Arc;
 
 use geometry::Point;
+use glam::Vec2;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::circle_layer_ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
-    ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO, ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
+    ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO, ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_GROUND_DEM_TEXTURE,
 };
+use mln_gfx::shaders::terrain_ubo::GroundDrawableUBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::TileProjector;
 use mln_style::expression::EvaluationContext;
@@ -37,18 +39,22 @@ use crate::render_layer::{
 };
 use crate::render_pass::RenderPass;
 use crate::render_tile::{FrameTile, RenderTile};
+use crate::terrain::write_projection;
 use crate::tile_matrix::{globe_extrude_scale, projection_data, to_projection_ubo};
 
 /// The pass the layer's draws draw in.
 const RENDER_PASS: RenderPass = RenderPass::Translucent;
 
 // query
+/// Where on the screen the tile point `p`, `height` meters up, shows, in
+/// pixels.
 fn project_point(
     p: mln_tile_id::geometry_tile_data::GeometryCoordinate,
+    height: f64,
     projector: &TileProjector<'_>,
     size: mln_util::size::Size,
 ) -> mln_tile_id::geometry_tile_data::GeometryCoordinate {
-    let pos = projector.project(&Point::new(f64::from(p.x), f64::from(p.y)), 0.0).point;
+    let pos = projector.project(&Point::new(f64::from(p.x), f64::from(p.y)), height).point;
     // `(float(pos.x) + 1) * size.width * 0.5`: float, then double.
     mln_tile_id::geometry_tile_data::GeometryCoordinate::new(
         (f64::from((pos.x as f32 + 1.0) * size.width as f32) * 0.5) as i16,
@@ -56,12 +62,16 @@ fn project_point(
     )
 }
 
+/// Where on the screen the points of `query_geometry` show, each at its
+/// height of `heights`, or at sea level without them.
 fn project_query_geometry(
     query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
+    heights: Option<&[f64]>,
     projector: &TileProjector<'_>,
     size: mln_util::size::Size,
 ) -> mln_tile_id::geometry_tile_data::GeometryCoordinates {
-    query_geometry.iter().map(|p| project_point(*p, projector, size)).collect()
+    let height = |i: usize| heights.map_or(0.0, |heights| heights[i]);
+    query_geometry.iter().enumerate().map(|(i, p)| project_point(*p, height(i), projector, size)).collect()
 }
 
 impl LayerType for Circle {
@@ -92,12 +102,21 @@ pub(crate) struct RenderCircleLayer {
     drawing: TileDraws<DrawObjects>,
     /// The frame's draws as the update makes them.
     draw_list: DrawList<CircleUniforms>,
+    /// Over terrain, the ground under each of the frame's draws, in the
+    /// order the update makes them.
+    grounds: Vec<GroundDrawableUBO>,
 }
 
 impl RenderCircleLayer {
     pub(crate) fn new(impl_: Arc<LayerStyle<Circle>>) -> Self {
         let (base, values) = LayerValues::new(impl_);
-        RenderCircleLayer { base, values, drawing: TileDraws::default(), draw_list: DrawList::default() }
+        RenderCircleLayer {
+            base,
+            values,
+            drawing: TileDraws::default(),
+            draw_list: DrawList::default(),
+            grounds: Vec::new(),
+        }
     }
 
     /// The entries in the layer's storage buffers of the draw of `tile_id`,
@@ -152,8 +171,13 @@ impl RenderCircleLayer {
         }
     }
 
-    /// Writes the layer's buffers of the frame's draws.
-    fn write_uniforms(layer: &EvaluatedLayer<Circle>, writer: &mut UniformWriter<'_, CircleUniforms>) {
+    /// Writes the layer's buffers of the frame's draws, with the ground
+    /// under each of them, `grounds`, where they stand on terrain.
+    fn write_uniforms(
+        layer: &EvaluatedLayer<Circle>,
+        grounds: Option<&[GroundDrawableUBO]>,
+        writer: &mut UniformWriter<'_, CircleUniforms>,
+    ) {
         let evaluated = &layer.paint;
         let props = CircleEvaluatedPropsUBO {
             color: evaluated.circle_color.uniform().to_float_array(),
@@ -169,11 +193,12 @@ impl RenderCircleLayer {
         };
         writer.uniform(ID_CIRCLE_EVALUATED_PROPS_UBO, &props);
         writer.storage(ID_CIRCLE_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-        writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+        write_projection(writer, grounds, |uniforms| uniforms.projection);
     }
 }
 
 /// A draw's entries in the layer's storage buffers.
+#[derive(Clone, Copy)]
 struct CircleUniforms {
     draw_ubo: CircleDrawableUBO,
     projection: ProjectionUBO,
@@ -182,6 +207,9 @@ struct CircleUniforms {
 impl TypedLayer for RenderCircleLayer {
     type Type = Circle;
     type Drawing = TileDraws<DrawObjects>;
+
+    const STANDS: bool = true;
+    const HIDES_BEHIND_GROUND: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -218,6 +246,11 @@ impl TypedLayer for RenderCircleLayer {
         let layer_id = self.base.style.base().id.as_str();
         let layer = &*self.values.evaluated;
         let evaluated = &layer.paint;
+        // Over terrain, the draws are of the terrain variant, which stands
+        // on the ground.
+        let ground = paint_parameters.ground.clone();
+        let ground = ground.as_deref();
+        self.grounds.clear();
         // The draws keep the order they're pushed in, the tiles'.
         let order = self.drawing.frame_mut().id();
         for tile in render_tiles {
@@ -248,18 +281,24 @@ impl TypedLayer for RenderCircleLayer {
             // A draw built from another bucket goes.
             entry.set_bucket(bucket.base.bucket_id);
 
-            // The draw's attributes read the bucket's vertices in the
+            // The draws' attributes read the bucket's vertices in the
             // context's store, which upload again when they change.
             let changes = entry.take_changes();
             let context = &mut *paint_parameters.context;
-            if let Some(cached) = entry.value.as_mut() {
-                refresh_paint_attributes(cached, changes, |attrs| {
+            let objects = if let Some(objects) = entry.value {
+                refresh_paint_attributes(objects, changes, |attrs| {
                     binders.bind(evaluated, paint(context).as_ref(), attrs, &mut Uniforms::default());
                 });
-            } else if !bucket.vertices.is_empty()
-                && let (Some(vertices), Some(indexes)) =
+                objects
+            } else {
+                if bucket.vertices.is_empty() {
+                    continue;
+                }
+                let (Some(vertices), Some(indexes)) =
                     (bucket_vertices(geometry, &bucket.vertices), bucket_indexes(geometry, &bucket.triangles))
-            {
+                else {
+                    continue;
+                };
                 let mut uniforms = Uniforms::default();
                 let mut attrs = VertexAttributeArray::new();
                 binders.bind(evaluated, paint(context).as_ref(), &mut attrs, &mut uniforms);
@@ -273,7 +312,7 @@ impl TypedLayer for RenderCircleLayer {
                     ),
                 );
                 let vertex_count = if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() };
-                let objects = DrawObjects::new(
+                entry.value.insert(DrawObjects::new(
                     context.shader_key(&programs::CIRCLE, uniforms, self.base.projection_variant),
                     context.color_mode(ColorMode::alpha_blended()),
                     CullFaceMode::disabled(),
@@ -286,19 +325,21 @@ impl TypedLayer for RenderCircleLayer {
                         instances: None,
                     },
                     Textures::default(),
-                );
-                *entry.value = Some(objects);
-            }
+                ))
+            };
 
-            if entry.value.is_none() {
-                continue;
+            let uniforms = Self::uniforms(layer, &tile_id, binders, paint_parameters);
+            if let Some(ground) = ground {
+                let read = ground.read(&tile_id);
+                objects.set_texture(ID_GROUND_DEM_TEXTURE, Some(&read.texture));
+                self.grounds.push(read.ubo);
             }
-            let draw = FrameDraw::new(Some(tile_id), order);
-            self.draw_list.push(draw, Self::uniforms(layer, &tile_id, binders, paint_parameters));
+            self.draw_list.push_part(FrameDraw::new(Some(tile_id), order), (), uniforms);
         }
 
+        let grounds = ground.map(|_| self.grounds.as_slice());
         self.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
-            Self::write_uniforms(layer, writer);
+            Self::write_uniforms(layer, grounds, writer);
         });
     }
 }
@@ -314,7 +355,8 @@ impl RenderLayer for RenderCircleLayer {
     ) -> bool {
         use crate::geometry::feature_index::FeatureIndex;
 
-        let QueryRegion { geometry: query_geometry, view, projector, pixels_to_tile_units, .. } = *region;
+        let QueryRegion { geometry: query_geometry, view, projector, pixels_to_tile_units, ground, heights, .. } =
+            *region;
         let zoom = view.zoom() as f32;
         let evaluated = &self.values.evaluated.paint;
         // Translate query geometry
@@ -351,7 +393,9 @@ impl RenderLayer for RenderCircleLayer {
         let transformed_query_geometry = if align_with_map {
             translated_query_geometry
         } else {
-            projected = project_query_geometry(translated_query_geometry, projector, view.size());
+            // Over terrain, each point at the height its line of sight met
+            // the ground at.
+            projected = project_query_geometry(translated_query_geometry, heights, projector, view.size());
             &projected
         };
         let transformed_size = if align_with_map { size * pixels_to_tile_units } else { size };
@@ -380,10 +424,18 @@ impl RenderLayer for RenderCircleLayer {
                 {
                     continue;
                 }
+                // Over terrain, the center stands where its draw does: on the
+                // ground under it as translated.
+                let height = ground.map_or(0.0, |ground| {
+                    ground.height(Vec2::new(
+                        f32::from(point.x) + drawn_translation[0],
+                        f32::from(point.y) + drawn_translation[1],
+                    ))
+                });
                 let transformed_point =
-                    if align_with_map { *point } else { project_point(*point, projector, view.size()) };
+                    if align_with_map { *point } else { project_point(*point, height, projector, view.size()) };
 
-                let projected = projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), 0.0);
+                let projected = projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), height);
                 let mut adjusted_size = transformed_size;
                 let w = projected.signed_distance_from_camera;
                 let pitch_scale = &evaluated.circle_pitch_scale;

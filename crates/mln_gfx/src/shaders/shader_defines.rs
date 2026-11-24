@@ -123,6 +123,9 @@ pub const FILL_EXTRUSION_LAYER_UBO_COUNT: usize = ID_FILL_EXTRUSION_PROPS_UBO + 
 // buffers, whose ids follow the uniform buffers'.
 pub const ID_FILL_EXTRUSION_WALL_VERTICES: usize = MAX_UBO_COUNT_PER_SHADER;
 pub const ID_FILL_EXTRUSION_WALL_PAINT: usize = MAX_UBO_COUNT_PER_SHADER + 1;
+/// Port-only: in the terrain variant of `FillExtrusionPulledShader`, the
+/// centroid each bucket vertex's polygon stands on.
+pub const ID_FILL_EXTRUSION_WALL_CENTROIDS: usize = MAX_UBO_COUNT_PER_SHADER + 2;
 pub const ID_FILL_EXTRUSION_IMAGE_TEXTURE: usize = 0;
 pub const ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE: usize = 1;
@@ -138,6 +141,10 @@ pub const ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE: usize = 6;
 pub const ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE: usize = 7;
 pub const ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE: usize = 8;
 pub const ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE: usize = 9;
+/// Port-only: the centroid of a vertex's polygon, which the terrain variants
+/// of the fill extrusion programs read, per vertex or per wall instance, to
+/// stand the polygon on the ground there.
+pub const ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE: usize = 10;
 
 pub const ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE: usize = 0;
 
@@ -154,6 +161,24 @@ pub const ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_VERTEX_TEXEL_TEXTURE: usize = 0;
 pub const ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE: usize = 0;
 
+// --- the ground (port-only): what the terrain variants of the standing
+// layers' programs read of the ground under them. Each draw's ground rides in
+// its projection entry (`TerrainProjectionUBO`), which every standing
+// program's vertex stage reads.
+/// The DEM texture of a draw's ground, and the surface's, so that one
+/// prelude declares it: RGBA8 texels behind a one-texel border, which the
+/// vertex stage reads texel by texel, without a sampler. It is slot 2 so
+/// that a program that reads the ground keeps slots 0 and 1 for its own
+/// textures; the shader sources write it as a literal.
+pub const ID_GROUND_DEM_TEXTURE: usize = 2;
+/// The depth of the frame's drawn ground (the eye distance of each logical
+/// pixel's nearest ground, as its f32's bits), which the terrain variants of
+/// the programs that terrain hides (symbols and circles) read at their
+/// anchor. It is one texture for the whole frame, past the
+/// draw's own textures: a draw binds it from the context's frame, not from
+/// its `Textures`, so no flat program's layout or draw changes for it.
+pub const ID_GROUND_DEPTH_TEXTURE: usize = MAX_TEXTURE_COUNT_PER_SHADER;
+
 // --- terrain: a tile's grid, raised by the ground's heights by the height
 // rule of `mln_util::dem`, and the texture draped over it.
 /// A grid vertex: x and y in tile units, whether it is a skirt's lower edge,
@@ -161,11 +186,12 @@ pub const ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_TERRAIN_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_TERRAIN_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
 pub const ID_TERRAIN_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
-/// The DEM: RGBA8 texels behind a one-texel border, which the vertex stage
-/// reads texel by texel, without a sampler. It is slot 2 so that a program
-/// that reads the ground keeps slots 0 and 1 for its own textures; the shader
-/// sources write it as a literal.
-pub const ID_TERRAIN_DEM_TEXTURE: usize = 2;
+/// The terrain's fog, which only the surface's program reads.
+pub const ID_TERRAIN_FOG_UBO: usize = ID_TERRAIN_PROPS_UBO + 1; // packed
+/// The lights of a hillshade and the tile's latitudes, which only the
+/// program of a surface that lights a drape of slopes reads.
+pub const ID_TERRAIN_LIGHT_UBO: usize = ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO; // SSBO
+pub const ID_TERRAIN_DEM_TEXTURE: usize = ID_GROUND_DEM_TEXTURE;
 /// The tile's drape, which the fragment stage samples.
 pub const ID_TERRAIN_DRAPE_TEXTURE: usize = 1;
 
@@ -174,9 +200,9 @@ pub const ID_TERRAIN_DRAPE_TEXTURE: usize = 1;
 /// Where a probe draws, in clip x and y, then where it reads the height, in
 /// tile units.
 pub const ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE: usize = 0;
-/// Where the probe reads its DEM: the scale and offset that map the tile's
-/// uv to the DEM's (`uv * scale + offset`), then the DEM's width in pixels,
-/// 0 for flat ground.
+/// Where the probe reads its DEM, as the terrain's `dem_coords`: the scale
+/// and offset that map the tile's uv to the DEM's (`uv * scale + offset`),
+/// then the DEM's width in pixels, 0 for flat ground.
 pub const ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE: usize = 1;
 
 // --- sky (`idSkyPropsUBO` / `idAtmospherePropsUBO = getEnumValue(drawableReservedUBOCount, layerUBOStartId)`)

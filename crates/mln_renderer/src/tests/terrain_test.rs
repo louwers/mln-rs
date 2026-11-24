@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use glam::DVec2;
 use mln_map::transform::Transform;
-use mln_map_types::{CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
+use mln_map_types::{
+    CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TerrainSkirtLength, TileLodMode, ViewportMode,
+};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::sources::raster_dem_source;
@@ -26,7 +28,7 @@ use parking_lot::Mutex;
 use crate::Registry;
 use crate::render_source::RenderSource;
 use crate::renderer_event::RendererEvent;
-use crate::terrain::{RenderTerrain, TerrainCover, TerrainElevation};
+use crate::terrain::{RenderTerrain, TerrainCover, TerrainElevation, TileGround};
 use crate::tile::contents::Contents;
 use crate::tile::store::{StoreEvent, TileStore};
 use crate::tile::tile::Tile;
@@ -79,6 +81,7 @@ fn update_parameters(style: Style, transform: &Transform, mode: MapMode) -> Upda
         update_id: 0,
         cross_source_collisions: true,
         fast_pfor_enabled: false,
+        terrain_skirt_length: TerrainSkirtLength::Auto,
         elevation: None,
         tile_lod_min_radius: 3.0,
         tile_lod_scale: 1.0,
@@ -131,23 +134,33 @@ fn terrain_draws_from_a_raster_dem_source_whose_tileset_has_loaded() {
 }
 
 #[test]
-fn the_surface_decodes_the_dem_as_its_tileset_says_and_hangs_skirts() {
+fn the_surface_decodes_the_dem_as_its_tileset_says_and_hangs_skirts_as_the_map_says() {
     let transform = transform();
     let tileset = PartialTileset { raster_encoding: Some(RasterEncoding::Terrarium), ..tiles() };
     let mut style = style_with(crate::tests::ready(raster_dem_source("dem", None, tileset, 256)));
     style.apply(Edit::SetTerrain(Some(Terrain { source: "dem".to_owned(), exaggeration: 1.5 }))).unwrap();
-    let mut terrain = RenderTerrain::default();
-    terrain.update(&update_parameters(style, &transform, MapMode::Static), |_| None).expect("terrain draws");
-    let surface = terrain.surface();
+    let surface = |skirts| {
+        let mut parameters = update_parameters(style.clone(), &transform, MapMode::Static);
+        parameters.terrain_skirt_length = skirts;
+        let mut terrain = RenderTerrain::default();
+        terrain.update(&parameters, |_| None).expect("terrain draws");
+        terrain.surface()
+    };
 
-    assert!(surface.skirts);
-    assert_eq!([65536.0, 256.0, 1.0, -8_388_608.0], surface.props.unpack);
-    assert_eq!(1.0 / 256.0, surface.props.unpack_scale);
-    assert_eq!(1.5, surface.props.exaggeration);
+    let auto = surface(TerrainSkirtLength::Auto);
+    assert!(auto.skirts);
+    assert_eq!([65536.0, 256.0, 1.0, -8_388_608.0], auto.props.unpack);
+    assert_eq!(1.0 / 256.0, auto.props.unpack_scale);
+    assert_eq!(1.5, auto.props.exaggeration);
     // A fifth of a tile's width at the map's zoom, 10.5, in meters at the
     // equator.
     let tile_width = 2.0 * std::f64::consts::PI * 6_378_137.0 / 2f64.powf(10.5);
-    assert_eq!((tile_width / 5.0) as f32, surface.props.skirt_length);
+    assert_eq!((tile_width / 5.0) as f32, auto.props.skirt_length);
+
+    let none = surface(TerrainSkirtLength::None);
+    assert!(!none.skirts, "no skirts on the mesh");
+    assert_eq!(0.0, none.props.skirt_length);
+    assert_eq!(auto.props.unpack, none.props.unpack);
 }
 
 /// A file source whose DEM tile requests wait until the test answers them,
@@ -273,19 +286,26 @@ struct TerrainLoad {
     grounded: bool,
     /// Whether a gesture or a command moves the updates' camera.
     camera_moving: bool,
+    /// The ideal tiles of a standing layer's source in each update.
+    standing: Vec<OverscaledTileID>,
 }
 
 impl TerrainLoad {
     /// A terrain exaggerated by `exaggeration`, over a Terrarium DEM of 256
     /// px tiles of the zoom levels `zooms`.
     fn new(zooms: (u8, u8), exaggeration: f32) -> Self {
+        Self::with_tile_size(zooms, exaggeration, 256)
+    }
+
+    /// [`new`](Self::new), over DEM tiles declared `tile_size` px.
+    fn with_tile_size(zooms: (u8, u8), exaggeration: f32, tile_size: u16) -> Self {
         let tileset = PartialTileset {
             min_zoom: Some(zooms.0),
             max_zoom: Some(zooms.1),
             raster_encoding: Some(RasterEncoding::Terrarium),
             ..tiles()
         };
-        let source = crate::tests::ready(raster_dem_source("dem", None, tileset, 256));
+        let source = crate::tests::ready(raster_dem_source("dem", None, tileset, tile_size));
         let mut style = style_with(source.clone());
         style.apply(Edit::SetTerrain(Some(Terrain { exaggeration, ..Terrain::new("dem") }))).unwrap();
         let pool = TaskGroup::new(&crate::tests::pool());
@@ -308,6 +328,7 @@ impl TerrainLoad {
             seen: None,
             grounded: false,
             camera_moving: false,
+            standing: Vec::new(),
         }
     }
 
@@ -328,6 +349,7 @@ impl TerrainLoad {
         };
         let (store, render_source) = (&self.store, &self.render_source);
         self.terrain.update(&parameters, |_| store.source(render_source.tiles()?));
+        self.terrain.request_standing(self.standing.iter().copied());
         let file_source: Arc<dyn FileSource> = Arc::<DemTiles>::clone(&self.tiles);
         let tile_parameters = TileParameters {
             pixel_ratio: 1.0,
@@ -344,6 +366,7 @@ impl TerrainLoad {
             tile_lod_zoom_shift: 0.0,
             tile_lod_mode: TileLodMode::Default,
             subdivision_granularity: SubdivisionGranularitySetting::none(),
+            layout_terrain: false,
             global_state: None,
             is_update_synchronous: false,
             font_faces: None,
@@ -1242,4 +1265,209 @@ fn the_surface_a_hair_west_of_a_copy_is_its_neighbors() {
     assert!(edge.is_some(), "the first column drew");
     assert_eq!(edge, ground.surface_at(DVec2::new(-1e-17, y)));
     assert_eq!(ground.surface_at(DVec2::new(-1.0, y)), ground.surface_at(DVec2::new(-1.0 - 1e-17, y)));
+}
+
+/// The points of an `n` by `n` grid over a tile, off its pixels' centers, as
+/// fractions of the tile.
+fn grid(n: u32) -> impl Iterator<Item = DVec2> {
+    let n = f64::from(n);
+    (0..n as u32)
+        .flat_map(move |i| (0..n as u32).map(move |j| DVec2::new((f64::from(i) + 0.37) / n, (f64::from(j) + 0.61) / n)))
+}
+
+/// The Web Mercator point at zoom 0 at `uv` across `tile`, in its world
+/// copy.
+fn world_at(tile: &OverscaledTileID, uv: DVec2) -> DVec2 {
+    let tiles = f64::from(1u32 << tile.canonical.z);
+    let corner = DVec2::new(f64::from(tile.canonical.x), f64::from(tile.canonical.y));
+    (corner + uv) / tiles + DVec2::new(f64::from(tile.wrap), 0.0)
+}
+
+/// That the ground under `tile` is the drawn `surface` at the points of an
+/// `n` by `n` grid where it drew, within a millimeter; returns at how many
+/// it drew.
+fn assert_stands_on(ground: &TerrainElevation, tile: &OverscaledTileID, surface: &TerrainElevation, n: u32) -> usize {
+    let under = ground.ground(tile);
+    let mut drawn_at = 0;
+    for uv in grid(n) {
+        let point = (uv * f64::from(mln_util::constants::EXTENT)).as_vec2();
+        let height = under.height(point);
+        let Some(drawn) = surface.surface_at(world_at(tile, uv)) else {
+            continue;
+        };
+        drawn_at += 1;
+        assert!((height - drawn).abs() < 1e-3, "{tile} at {uv}: {height} on a surface at {drawn}");
+    }
+    drawn_at
+}
+
+/// The DEM tile `ground` reads, and where its tile is in it.
+fn read_of(ground: &TileGround<'_>) -> (Option<OverscaledTileID>, [f32; 4]) {
+    (ground.dem(), ground.coords())
+}
+
+/// Over each terrain tile, the ground the standing layers read is the drawn
+/// surface: the tile's own DEM tile, at the tile's place in it, and the
+/// height of the surface there.
+#[test]
+fn the_ground_of_a_terrain_tile_is_the_surface_it_draws() {
+    let mut load = TerrainLoad::new((0, 14), 1.5);
+    load.frame();
+    load.answer(|_| Some(terrarium_slope()));
+    assert!(load.is_loaded());
+    let surface = snapshot(&load, 1.5);
+    let ground = Arc::clone(load.terrain.ground().expect("the ground"));
+    let cover = load.terrain.cover().unwrap();
+    for tile in &cover.tiles {
+        let (dem, coords) = tile.dem.expect("its DEM");
+        let under = ground.ground(&tile.id);
+        assert_eq!((Some(dem), [coords.scale, coords.offset[0], coords.offset[1], 16.0]), read_of(&under));
+        assert_eq!(64, assert_stands_on(&ground, &tile.id, &surface, 8));
+    }
+}
+
+/// Over a DEM of 512 px tiles, which terrain tiles of 1024 px read, a source
+/// tile of 512 px, a quarter of a terrain tile, reads the DEM tile of the
+/// terrain tile it is in, at its place in it, and stands on its surface. It
+/// requests no DEM tile of its own.
+#[test]
+fn a_source_tile_inside_a_terrain_tile_reads_its_dem() {
+    let mut load = TerrainLoad::with_tile_size((0, 14), 1.0, 512);
+    let cover = load.frame();
+    load.standing = cover
+        .tiles
+        .iter()
+        .flat_map(|tile| tile.id.to_unwrapped().children())
+        .map(|child| OverscaledTileID::new(child.canonical.z, child.wrap, child.canonical))
+        .collect();
+    load.frame();
+    load.answer(|_| Some(terrarium_slope()));
+    assert!(load.is_loaded());
+    let surface = snapshot(&load, 1.0);
+    let ground = Arc::clone(load.terrain.ground().expect("the ground"));
+    let cover = load.terrain.cover().unwrap();
+    for tile in &cover.tiles {
+        let (dem, _) = tile.dem.expect("its DEM");
+        let CanonicalTileID { z, x, y } = tile.id.canonical;
+        for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+            let source =
+                OverscaledTileID::new(z + 1, tile.id.wrap, CanonicalTileID::new(z + 1, 2 * x + dx, 2 * y + dy));
+            let coords = sub_rect(&source, source.canonical.z - dem.canonical.z);
+            let expected = (Some(dem), [coords.scale, coords.offset[0], coords.offset[1], 16.0]);
+            assert_eq!(expected, read_of(&ground.ground(&source)), "{source}");
+            assert_eq!(64, assert_stands_on(&ground, &source, &surface, 8));
+        }
+    }
+    assert_eq!(Vec::<OverscaledTileID>::new(), cover.standing_dems);
+}
+
+/// A DEM tile of 16 px, each `tile` at its own height, under the camera of
+/// a view at zoom 17.
+fn terrarium_of(tile: CanonicalTileID) -> Response {
+    terrarium_png(50 + 5 * (tile.x % 8) as u16 + 13 * (tile.y % 8) as u16 + 20 * u16::from(tile.z % 4))
+}
+
+/// A source tile of zoom 14, coarser than the terrain tiles over it at zoom
+/// 17, which read the DEM tiles of zoom 15 inside it, reads the DEM tile of
+/// its own zoom, which the cover requests and a still waits for. While that
+/// loads, it reads the deepest ancestor of it that has loaded, the coarse
+/// one the terrain loads to cull its tiles. It stands on its DEM tile, not on
+/// the finer ones under the surface: the known limit.
+#[test]
+fn a_source_tile_coarser_than_the_terrain_tiles_reads_its_own_dem_tile() {
+    let mut load = TerrainLoad::new((0, 15), 1.0);
+    // At the corner of four DEM tiles of zoom 15, the center of one of
+    // zoom 14.
+    let center = location_of(DVec2::new(8646.5, 5893.5) / f64::from(1u32 << 14));
+    load.transform.jump_to(&CameraOptions { center: Some(center), zoom: Some(17.0), ..Default::default() });
+    let cover = load.frame();
+    let zooms: BTreeSet<u8> = cover.tiles.iter().map(|tile| tile.id.canonical.z).collect();
+    assert!(zooms.iter().all(|&z| z >= 16), "terrain tiles that read the DEM at 15: {zooms:?}");
+    let sources: BTreeSet<OverscaledTileID> = cover.tiles.iter().map(|tile| tile.id.scaled_to(14)).collect();
+    load.standing = sources.iter().copied().collect();
+    let cover = load.frame();
+    let requested: BTreeSet<OverscaledTileID> = cover.standing_dems.iter().copied().collect();
+    assert_eq!(sources, requested);
+    assert!(sources.iter().all(|source| cover.dem_tiles.contains(source)), "the source keeps them loaded");
+
+    // The DEM tiles of zoom 14 wait.
+    load.answer(|tile| (tile.z != 14).then(|| terrarium_of(tile)));
+    assert!(!load.is_loaded(), "a still waits for the DEM tiles of zoom 14");
+    let ground = Arc::clone(load.terrain.ground().expect("the ground"));
+    for source in &sources {
+        let coords = sub_rect(source, 9);
+        let expected = (Some(source.scaled_to(5)), [coords.scale, coords.offset[0], coords.offset[1], 16.0]);
+        assert_eq!(expected, read_of(&ground.ground(source)), "{source}");
+    }
+
+    load.answer(|tile| Some(terrarium_of(tile)));
+    assert!(load.is_loaded());
+    let ground = Arc::clone(load.terrain.ground().expect("the ground"));
+    let middle = glam::Vec2::splat(4096.0);
+    for source in &sources {
+        let under = ground.ground(source);
+        assert_eq!((Some(*source), [1.0, 0.0, 0.0, 16.0]), read_of(&under), "{source}");
+        let expected = f64::from(50 + 5 * (source.canonical.x % 8) + 13 * (source.canonical.y % 8) + 20 * 2);
+        assert!((under.height(middle) - expected).abs() < 1e-3, "{source}: {}", under.height(middle));
+    }
+}
+
+/// A source tile that no terrain tile is over, off the cover, reads the DEM
+/// tile of its own zoom, which the cover requests for it, once it loads.
+#[test]
+fn a_source_tile_off_the_cover_reads_the_dem_tile_requested_for_it() {
+    let mut load = TerrainLoad::new((0, 14), 1.0);
+    let cover = load.frame();
+    // Far east of the view, at the zoom of the terrain's tiles.
+    let z = cover.tiles[0].id.canonical.z;
+    let off = OverscaledTileID::new(z, 0, CanonicalTileID::new(z, (1 << z) - 1, 0));
+    assert!(cover.tiles.iter().all(|tile| !tile.id.is_child_of(&off) && tile.id != off));
+    load.standing = vec![off];
+    let cover = load.frame();
+    let dem = off;
+    assert_eq!(vec![dem], cover.standing_dems);
+    load.answer(|_| Some(terrarium_png(321)));
+    assert!(load.is_loaded());
+    let ground = Arc::clone(load.terrain.ground().expect("the ground"));
+    let under = ground.ground(&dem);
+    assert_eq!(Some(dem), under.dem());
+    assert_eq!(321.0, under.height(glam::Vec2::splat(4096.0)));
+}
+
+/// A source tile of zoom 5 under terrain tiles of zoom 10 reads the DEM
+/// tile of zoom 5 that also culls them, once the finer DEM tiles the terrain
+/// tiles read have loaded too: which DEM tile a standing tile reads doesn't
+/// depend on whether the cover loads it for something else.
+#[test]
+fn a_source_tile_whose_dem_tile_culls_the_cover_keeps_reading_it() {
+    let mut load = TerrainLoad::new((0, 14), 1.0);
+    let cover = load.frame();
+    assert!(cover.tiles.iter().all(|tile| tile.id.canonical.z == 10));
+    let sources: BTreeSet<OverscaledTileID> = cover.tiles.iter().map(|tile| tile.id.scaled_to(5)).collect();
+    assert!(sources.iter().all(|source| cover.dem_tiles.contains(source)), "the cover culls with them");
+    load.standing = sources.iter().copied().collect();
+    load.answer(|tile| Some(terrarium_of(tile)));
+    assert!(load.is_loaded());
+    let cover = load.terrain.cover().unwrap();
+    assert!(cover.tiles.iter().all(|tile| tile.dem.is_some_and(|(dem, _)| dem.canonical.z == 9)));
+    let ground = Arc::clone(load.terrain.ground().expect("the ground"));
+    for source in &sources {
+        let under = ground.ground(source);
+        assert_eq!(Some(*source), under.dem(), "{source}");
+        let expected = f64::from(50 + 5 * (source.canonical.x % 8) + 13 * (source.canonical.y % 8) + 20);
+        assert_eq!(expected, under.height(glam::Vec2::splat(4096.0)), "{source}");
+    }
+}
+
+/// Before any DEM tile loads, the ground is flat at sea level.
+#[test]
+fn the_ground_without_a_dem_is_sea_level() {
+    let mut load = TerrainLoad::new((0, 14), 1.0);
+    load.frame();
+    let ground = Arc::clone(load.terrain.ground().expect("the ground"));
+    for tile in &load.terrain.cover().unwrap().tiles {
+        let under = ground.ground(&tile.id);
+        assert_eq!((None, [0.0; 4]), read_of(&under));
+        assert_eq!(0.0, under.height(glam::Vec2::new(4096.0, 4096.0)));
+    }
 }

@@ -13,4 +13,8 @@ pub(crate) struct BucketParameters {
     /// The style's global state, used by "global-state" expressions.
     pub(crate) global_state: Option<Arc<GlobalStateMap>>,
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
+    /// Whether the tile lays out for terrain ([`LayoutParams::terrain`]).
+    ///
+    /// [`LayoutParams::terrain`]: crate::layout::tile_layout::LayoutParams::terrain
+    pub(crate) terrain: bool,
 }

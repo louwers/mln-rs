@@ -10,6 +10,7 @@ use crate::gfx_types::AttributeDataType;
 use crate::gpu::{GpuError, ShaderKey};
 use crate::projection_variant::ProjectionVariant;
 use crate::shaders::program_parameters::ProgramParameters;
+use crate::shaders::programs::projection_variants;
 
 /// A program: the attributes, textures and paint properties its shader
 /// reads.
@@ -46,12 +47,21 @@ pub struct Property {
 /// The define that compiles a program's globe variant.
 pub const GLOBE_DEFINE: &str = "PROJECTION_GLOBE";
 
+/// The define that compiles a program's terrain variants
+/// ([`ProjectionVariant::stands`]), which read the ground's DEM.
+pub const TERRAIN_DEFINE: &str = "TERRAIN";
+
 impl Program {
     /// The key of the variant compiled with `parameters` that reads
     /// `uniforms`, properties of the program, from their uniforms, for
     /// `variant`'s projection. It has the parameters' defines
     /// (`DEVICE_PIXEL_RATIO=<ratio>`), a `HAS_UNIFORM_u_<name>` define for
-    /// each of `uniforms`, and the globe's define for its variant.
+    /// each of `uniforms`, the globe's define for a variant on the globe, and
+    /// the terrain's for one that stands on the ground. A program without a
+    /// terrain variant ([`projection_variants`]), such as a standing layer's
+    /// collision boxes or composite, gets the key of its projection's flat
+    /// variant for a standing one: it draws flat whatever its layer stands
+    /// on.
     #[must_use]
     pub fn variant_key<'a>(
         &'static self,
@@ -64,8 +74,9 @@ impl Program {
             .iter()
             .map(|(name, value)| if value.is_empty() { name.clone() } else { format!("{name}={value}") });
         let uniforms = uniforms.into_iter().map(|property| format!("HAS_UNIFORM_u_{}", property.name));
-        let globe = (variant == ProjectionVariant::Globe).then(|| GLOBE_DEFINE.to_owned());
-        ShaderKey::new(self, parameters.chain(uniforms).chain(globe))
+        let stands = variant.stands() && projection_variants(self).contains(&variant);
+        let projection = [variant.is_globe().then_some(GLOBE_DEFINE), stands.then_some(TERRAIN_DEFINE)];
+        ShaderKey::new(self, parameters.chain(uniforms).chain(projection.into_iter().flatten().map(str::to_owned)))
     }
 }
 

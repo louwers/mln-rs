@@ -35,8 +35,9 @@ use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, TileOrder};
-use crate::render_tile::{FoundTile, FrameTile, RenderTile, TileView, ViewPlace};
+use crate::render_tile::{FoundTile, FrameTile, RenderTile, TileStamp, TileView, ViewPlace};
 use crate::sources::render_image_source::ImageSourceRenderData;
+use crate::terrain::SurfaceLight;
 use crate::tile::contents::{Contents, GeometryContents};
 use crate::tile::job::SourceKey;
 use crate::tile_render_data::TileAtlasTextures;
@@ -369,14 +370,43 @@ impl<'a> FrameSourceTiles<'a> {
         tile: UnwrappedTileID,
         globe: bool,
     ) -> FrameTiles<'a, T> {
-        let overlaps = found.iter().filter(|found| {
-            self.tiles.get(found.tile).is_some_and(|render_tile| {
-                let id = render_tile.id;
-                let tile = if globe { UnwrappedTileID { wrap: id.wrap, ..tile } } else { tile };
-                id == tile || id.is_child_of(&tile) || tile.is_child_of(&id)
-            })
-        });
-        self.at(overlaps, layer_id)
+        self.at(self.overlaps(found, tile, globe).map(|(found, _)| found), layer_id)
+    }
+
+    /// What a layer draws of the tiles of `found` that
+    /// [`overlapping`](Self::overlapping) gives, in its order, under the ids
+    /// it draws them in.
+    pub(crate) fn stamps(
+        self,
+        found: &[FoundTile],
+        tile: UnwrappedTileID,
+        globe: bool,
+    ) -> impl Iterator<Item = TileStamp> {
+        self.overlaps(found, tile, globe).map(move |(&FoundTile { tile: index, view }, render_tile)| {
+            let contents = self.contents.get(index).copied().flatten();
+            let stamp = contents.zip(view).and_then(|(contents, place)| contents.stamp(place));
+            TileStamp {
+                tile: OverscaledTileID { wrap: tile.wrap, ..*render_tile.overscaled_tile_id() },
+                bucket: stamp.map(|(bucket, _)| bucket),
+                generations: stamp.map_or([0, 0], |(_, generations)| generations),
+            }
+        })
+    }
+
+    /// The tiles of `found` that overlap `tile`, with their render tiles:
+    /// in its world copy, or, on the `globe`, in any.
+    fn overlaps<'f>(
+        self,
+        found: &'f [FoundTile],
+        tile: UnwrappedTileID,
+        globe: bool,
+    ) -> impl Iterator<Item = (&'f FoundTile, &'a RenderTile)> {
+        found.iter().filter_map(move |found| {
+            let render_tile = self.tiles.get(found.tile)?;
+            let id = render_tile.id;
+            let tile = if globe { UnwrappedTileID { wrap: id.wrap, ..tile } } else { tile };
+            (id == tile || id.is_child_of(&tile) || tile.is_child_of(&id)).then_some((found, render_tile))
+        })
     }
 }
 
@@ -433,6 +463,11 @@ pub(crate) struct RenderLayerBase {
     /// The projection variant this layer's draws are built with.
     pub(crate) projection_variant: ProjectionVariant,
 
+    /// Counts the evaluations of the layer's values for a reason other than
+    /// the map's zoom, a new style, a transition or a global state, while
+    /// the style has terrain, whose drapes compare it.
+    pub(crate) paint_revision: u64,
+
     /// Where the tiles the layer's update found are among the frame's
     /// ([`LayerUpdateParameters::found`]).
     found: Range<usize>,
@@ -448,6 +483,7 @@ impl RenderLayerBase {
             style_dependencies: Dependency::NONE,
             is_renderable: false,
             projection_variant: ProjectionVariant::Mercator,
+            paint_revision: 0,
             found: 0..0,
         }
     }
@@ -523,8 +559,27 @@ pub(crate) trait TypedLayer {
     /// than onto the frame.
     const DRAPES: bool = false;
 
+    /// Whether the layer stands on terrain: over terrain, its draws are of
+    /// a terrain variant ([`ProjectionVariant::stands`]), which reads the
+    /// ground under them ([`PaintParameters::ground`]).
+    const STANDS: bool = false;
+
+    /// Whether the ground hides the layer's features behind it, each whole
+    /// by its anchor or center, through the depth of the drawn ground that
+    /// its terrain variant reads. A standing layer that the depth test hides
+    /// pixel by pixel, as fill extrusions are, needs no such depth.
+    const HIDES_BEHIND_GROUND: bool = false;
+
     fn parts(&self) -> Parts<'_, Self>;
     fn parts_mut(&mut self) -> PartsMut<'_, Self>;
+
+    /// Whether the layer's draws read the DEM under its tiles over terrain,
+    /// so that the terrain loads the DEM tiles its source's tiles read: a
+    /// standing layer's, but for one whose draws are given flat ground or
+    /// don't stand on the map.
+    fn reads_ground(&self) -> bool {
+        Self::STANDS
+    }
 
     /// Called once the layer's paint values are evaluated for a frame of
     /// `parameters`, before they become the layer's: the layer derives the
@@ -540,6 +595,44 @@ pub(crate) trait TypedLayer {
     /// The passes the layer draws in with `evaluated`, its paint values of
     /// a frame.
     fn passes(&self, evaluated: &EvaluatedLayer<Self::Type>) -> RenderPass;
+
+    /// Whether the layer draws a drape with its values `evaluated` by the
+    /// map's bearing: something of it is anchored to the viewport.
+    fn drapes_by_bearing(&self, _evaluated: &EvaluatedLayer<Self::Type>) -> bool {
+        false
+    }
+
+    /// What the terrain's surface lights the layer's drapes with in the
+    /// frame of `parameters`, for a layer that, with its values of the
+    /// frame, can drape what the surface lights instead of its colors
+    /// ([`Draping::Lit`](crate::terrain::Draping::Lit)): a hillshade lit
+    /// from the viewport, whose lights turn with the map. `None` for a
+    /// layer that drapes its colors.
+    fn surface_light(&mut self, _parameters: &PaintParameters<'_>) -> Option<SurfaceLight> {
+        None
+    }
+
+    /// Whether the layer has a [`surface_light`](Self::surface_light) with
+    /// its values `evaluated`.
+    fn lights_surface(&self, _evaluated: &EvaluatedLayer<Self::Type>) -> bool {
+        false
+    }
+
+    /// The texels a side of each of the layer's tiles that hold all it
+    /// shows of the tile, where it shows no more however large it draws: a
+    /// drape then takes no more texels than its tiles have across it. `None`
+    /// for a layer that draws shapes, which show sharper the more texels
+    /// they take.
+    fn drape_texels(&self) -> Option<u32> {
+        None
+    }
+
+    /// Whether the layer, with its values `evaluated`, blends with what is
+    /// under it otherwise than by covering it: a layer blend other than
+    /// `normal`, whose backdrop over terrain is its drape's own texels.
+    fn blends_with_backdrop(&self, _evaluated: &EvaluatedLayer<Self::Type>) -> bool {
+        false
+    }
 
     /// Called in the frame's update of a layer with a source with `tiles`,
     /// the frame's tiles of the source in the order the layer draws them,
@@ -655,7 +748,8 @@ pub(crate) trait LayerParts {
     fn update(&mut self, parameters: &mut LayerUpdateParameters<'_>);
 
     /// The encode's update of the layer's draws: picks the shader variant
-    /// for the frame's projection, dropping the draws when it changed; drops
+    /// for the frame's projection, and over terrain the terrain variant for
+    /// a layer that stands on it, dropping the draws when it changed; drops
     /// the draws of a layer that has nothing to draw, and otherwise starts
     /// its draws of the frame ([`LayerDrawing::begin_frame`]); drops them
     /// again for a layer that draws in no pass, and otherwise runs the
@@ -673,6 +767,38 @@ pub(crate) trait LayerParts {
 
     /// Whether the layer drapes over terrain ([`TypedLayer::DRAPES`]).
     fn drapes(&self) -> bool;
+
+    /// Whether the layer stands on terrain ([`TypedLayer::STANDS`]).
+    fn stands(&self) -> bool;
+
+    /// Whether the layer's draws read the DEM under its tiles over terrain
+    /// ([`TypedLayer::reads_ground`]).
+    fn reads_ground(&self) -> bool;
+
+    /// Whether the ground hides the layer's features behind it
+    /// ([`TypedLayer::HIDES_BEHIND_GROUND`]).
+    fn hides_behind_ground(&self) -> bool;
+
+    /// Whether the layer draws a drape by the map's bearing, with its values
+    /// of the frame ([`TypedLayer::drapes_by_bearing`]).
+    fn drapes_by_bearing(&self) -> bool;
+
+    /// Whether the layer blends with what is under it otherwise than by
+    /// covering it, with its values of the frame
+    /// ([`TypedLayer::blends_with_backdrop`]).
+    fn blends_with_backdrop(&self) -> bool;
+
+    /// The texels a side of each of the layer's tiles that hold all it
+    /// shows of the tile ([`TypedLayer::drape_texels`]).
+    fn drape_texels(&self) -> Option<u32>;
+
+    /// Whether the terrain's surface can light the layer's drapes, with its
+    /// values of the frame ([`TypedLayer::lights_surface`]).
+    fn lights_surface(&self) -> bool;
+
+    /// What the terrain's surface lights the layer's drapes with in the
+    /// frame of `parameters` ([`TypedLayer::surface_light`]).
+    fn surface_light(&mut self, parameters: &PaintParameters<'_>) -> Option<SurfaceLight>;
 
     /// An empty drawing of the layer's type, which a drape keeps of the
     /// layer.
@@ -697,6 +823,18 @@ pub(crate) trait LayerParts {
         source: Option<LayerSource<'_>>,
         drape: (OverscaledTileID, bool),
         drawing: &mut DrapeDrawing,
+    );
+
+    /// Adds to `stamps` what the layer draws of each tile that
+    /// [`update_drape_draws`](Self::update_drape_draws) makes its draws in
+    /// `drape` from: for an image source, its bucket and geometry in each
+    /// copy of the image that overlaps the drape; none for a layer without
+    /// a source.
+    fn drape_stamps(
+        &self,
+        source: Option<LayerSource<'_>>,
+        drape: (OverscaledTileID, bool),
+        stamps: &mut Vec<TileStamp>,
     );
 
     /// Records that the buckets in `changed` changed, for the tiles whose
@@ -837,7 +975,7 @@ impl<L: TypedLayer> LayerParts for L {
         atlases: &Atlases,
         source: Option<LayerSource<'_>>,
     ) {
-        let variant = if parameters.view.is_globe() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
+        let variant = ProjectionVariant::new(parameters.view.is_globe(), L::STANDS && parameters.ground.is_some());
         use_projection_variant(self, variant);
         if <L::Type as StyleLayerType>::INFO.source == SourceKind::None {
             // A layer that keeps tiles draws those its update picked.
@@ -870,6 +1008,38 @@ impl<L: TypedLayer> LayerParts for L {
         L::DRAPES
     }
 
+    fn stands(&self) -> bool {
+        L::STANDS
+    }
+
+    fn reads_ground(&self) -> bool {
+        TypedLayer::reads_ground(self)
+    }
+
+    fn hides_behind_ground(&self) -> bool {
+        L::HIDES_BEHIND_GROUND
+    }
+
+    fn drapes_by_bearing(&self) -> bool {
+        TypedLayer::drapes_by_bearing(self, &self.parts().values.evaluated)
+    }
+
+    fn blends_with_backdrop(&self) -> bool {
+        TypedLayer::blends_with_backdrop(self, &self.parts().values.evaluated)
+    }
+
+    fn drape_texels(&self) -> Option<u32> {
+        TypedLayer::drape_texels(self)
+    }
+
+    fn lights_surface(&self) -> bool {
+        TypedLayer::lights_surface(self, &self.parts().values.evaluated)
+    }
+
+    fn surface_light(&mut self, parameters: &PaintParameters<'_>) -> Option<SurfaceLight> {
+        TypedLayer::surface_light(self, parameters)
+    }
+
     fn new_drape_drawing(&self) -> Option<DrapeDrawing> {
         // Only a layer that drapes builds the code of a drawing in a drape.
         L::DRAPES.then(|| DrapeDrawing::new(L::Drawing::default()))
@@ -893,6 +1063,32 @@ impl<L: TypedLayer> LayerParts for L {
         std::mem::swap(self.parts_mut().drawing, drawing);
         update_drape(self, gpu, parameters, atlases, source, drape);
         std::mem::swap(self.parts_mut().drawing, drawing);
+    }
+
+    fn drape_stamps(
+        &self,
+        source: Option<LayerSource<'_>>,
+        (drape_tile, globe): (OverscaledTileID, bool),
+        stamps: &mut Vec<TileStamp>,
+    ) {
+        match source {
+            Some(LayerSource::Tiles(source, found)) => {
+                let found = found.get(self.base().found.clone()).unwrap_or_default();
+                stamps.extend(source.stamps(found, drape_tile.to_unwrapped(), globe));
+            }
+            Some(LayerSource::Image(image)) => {
+                let drape = drape_tile.to_unwrapped();
+                let bucket = image.bucket.map(|bucket| (bucket.base.bucket_id, bucket.geometry().generation()));
+                stamps.extend(image.tile_ids.iter().filter(|copy| image.overlaps(copy, &drape)).map(|copy| {
+                    TileStamp {
+                        tile: copy.overscale_to(copy.canonical.z),
+                        bucket: bucket.map(|(id, _)| id),
+                        generations: [bucket.map_or(0, |(_, generation)| generation), 0],
+                    }
+                }));
+            }
+            None => {}
+        }
     }
 
     fn mark_changed(&mut self, changed: &ChangedBuckets) {
@@ -1020,6 +1216,13 @@ fn begin_frame<L: TypedLayer + ?Sized>(layer: &mut L) -> bool {
 /// What a layer type does that the engine can't do for it, whatever the
 /// type: the hooks the engine calls on the layers it holds.
 pub(crate) trait RenderLayer: LayerParts {
+    /// Whether a draw the layer keeps reads vertices as the attribute,
+    /// instance attribute or storage buffer `id`.
+    #[cfg(test)]
+    fn keeps_vertices_of(&mut self, _id: usize) -> bool {
+        false
+    }
+
     /// Whether the layer draws 3D geometry, whose depth it writes in the
     /// range of [`PaintParameters::depth_mode_for_3d`].
     fn is_3d(&self) -> bool {

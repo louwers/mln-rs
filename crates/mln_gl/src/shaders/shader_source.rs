@@ -56,37 +56,38 @@ use mln_gfx::shaders::shader_defines::{
     ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE, ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, ID_COLOR_RELIEF_IMAGE_TEXTURE,
     ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_TILE_PROPS_UBO,
     ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_DRAWABLE_UBO, ID_FILL_EVALUATED_PROPS_UBO,
-    ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_DRAWABLE_UBO, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_IMAGE_TEXTURE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE,
-    ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE,
-    ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO, ID_FILL_EXTRUSION_TILE_PROPS_UBO,
-    ID_FILL_IMAGE_TEXTURE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE,
-    ID_FILL_OUTLINE_END_ATTRIBUTE, ID_FILL_OUTLINE_POS_ATTRIBUTE, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE,
-    ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE, ID_FILL_TILE_PROPS_UBO,
-    ID_GLOBAL_PAINT_PARAMS_UBO, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_COLOR_RAMP_TEXTURE,
-    ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO, ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
-    ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, ID_HEATMAP_TEXTURE_PROPS_UBO, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE,
-    ID_HILLSHADE_DRAWABLE_UBO, ID_HILLSHADE_EVALUATED_PROPS_UBO, ID_HILLSHADE_IMAGE_TEXTURE,
-    ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_PREPARE_DRAWABLE_UBO, ID_HILLSHADE_PREPARE_TILE_PROPS_UBO,
-    ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_TILE_PROPS_UBO, ID_LAYER_COMPOSITE_BACKDROP_TEXTURE,
-    ID_LAYER_COMPOSITE_IMAGE_TEXTURE, ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE, ID_LAYER_COMPOSITE_UBO,
-    ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASH_TEXTURE,
-    ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO,
-    ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE,
-    ID_LINE_IMAGE_TEXTURE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE, ID_LINE_OPACITY_VERTEX_ATTRIBUTE,
-    ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE,
-    ID_LINE_TILE_PROPS_UBO, ID_LINE_WIDTH_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO, ID_RASTER_DRAWABLE_UBO,
-    ID_RASTER_EVALUATED_PROPS_UBO, ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE,
+    ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE,
+    ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_DRAWABLE_UBO,
+    ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_IMAGE_TEXTURE,
+    ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE,
+    ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE,
+    ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO,
+    ID_FILL_EXTRUSION_TILE_PROPS_UBO, ID_FILL_IMAGE_TEXTURE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE,
+    ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_END_ATTRIBUTE, ID_FILL_OUTLINE_POS_ATTRIBUTE,
+    ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE, ID_FILL_POS_VERTEX_ATTRIBUTE,
+    ID_FILL_TILE_PROPS_UBO, ID_GLOBAL_PAINT_PARAMS_UBO, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_GROUND_DEM_TEXTURE,
+    ID_GROUND_DEPTH_TEXTURE, ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO,
+    ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE,
+    ID_HEATMAP_TEXTURE_PROPS_UBO, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE, ID_HILLSHADE_DRAWABLE_UBO,
+    ID_HILLSHADE_EVALUATED_PROPS_UBO, ID_HILLSHADE_IMAGE_TEXTURE, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE,
+    ID_HILLSHADE_PREPARE_DRAWABLE_UBO, ID_HILLSHADE_PREPARE_TILE_PROPS_UBO, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE,
+    ID_HILLSHADE_TILE_PROPS_UBO, ID_LAYER_COMPOSITE_BACKDROP_TEXTURE, ID_LAYER_COMPOSITE_IMAGE_TEXTURE,
+    ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE, ID_LAYER_COMPOSITE_UBO, ID_LINE_BLUR_VERTEX_ATTRIBUTE,
+    ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASH_TEXTURE, ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE,
+    ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO,
+    ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_IMAGE_TEXTURE,
+    ID_LINE_OFFSET_VERTEX_ATTRIBUTE, ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE,
+    ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_TILE_PROPS_UBO,
+    ID_LINE_WIDTH_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO, ID_RASTER_DRAWABLE_UBO, ID_RASTER_EVALUATED_PROPS_UBO,
+    ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE,
     ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_SKY_POS_VERTEX_ATTRIBUTE, ID_SKY_PROPS_UBO, ID_SYMBOL_COLOR_ATTRIBUTE,
     ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_DRAWABLE_UBO, ID_SYMBOL_EVALUATED_PROPS_UBO, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE,
     ID_SYMBOL_HALO_BLUR_ATTRIBUTE, ID_SYMBOL_HALO_COLOR_ATTRIBUTE, ID_SYMBOL_HALO_WIDTH_ATTRIBUTE,
     ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE,
     ID_SYMBOL_OPACITY_ATTRIBUTE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE,
     ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_SYMBOL_TILE_PROPS_UBO,
-    ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_DRAWABLE_UBO, ID_TERRAIN_POS_VERTEX_ATTRIBUTE,
-    ID_TERRAIN_PROPS_UBO,
+    ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_DRAWABLE_UBO, ID_TERRAIN_FOG_UBO,
+    ID_TERRAIN_LIGHT_UBO, ID_TERRAIN_POS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROPS_UBO,
 };
 #[cfg(test)]
 use mln_gfx::shaders::shader_defines::{
@@ -97,7 +98,9 @@ use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
-use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainPropsUBO};
+use mln_gfx::shaders::terrain_ubo::{
+    TerrainDrawableUBO, TerrainFogUBO, TerrainLightUBO, TerrainProjectionUBO, TerrainPropsUBO,
+};
 
 use super::glsl_sources;
 
@@ -124,6 +127,20 @@ pub(crate) struct UniformBlockInfo {
     /// The size of an element of the layer's buffer that holds this block for
     /// each of its drawables, or 0 if the renderer writes no such buffer.
     pub(crate) element_size: usize,
+}
+
+impl UniformBlockInfo {
+    /// The block as a program declares it, with the terrain's define if
+    /// `terrain`: a terrain variant's projection block holds the ground of
+    /// its draw too ([`TerrainProjectionUBO`]).
+    pub(crate) fn in_variant(self, terrain: bool) -> UniformBlockInfo {
+        if terrain && self.id == ID_PROJECTION_UBO {
+            let size = size_of::<TerrainProjectionUBO>();
+            UniformBlockInfo { size, element_size: size, ..self }
+        } else {
+            self
+        }
+    }
 }
 
 /// The vertex attribute `name` reads attribute `id`.
@@ -247,6 +264,14 @@ shader_source!(
     &[]
 );
 
+// A standing layer's terrain variant's ground: the DEM. The rest of the
+// ground is in its projection block (`UniformBlockInfo::in_variant`).
+const GROUND_TEXTURES: &[TextureInfo] = &[tex("u_ground_dem", ID_GROUND_DEM_TEXTURE)];
+// The ground, and the depth of the frame's drawn ground, which the terrain
+// variant of a program that terrain hides reads.
+const HIDDEN_GROUND_TEXTURES: &[TextureInfo] =
+    &[tex("u_ground_dem", ID_GROUND_DEM_TEXTURE), tex("u_ground_depth", ID_GROUND_DEPTH_TEXTURE)];
+
 // Circle
 shader_source!(
     CIRCLE_SHADER,
@@ -266,7 +291,7 @@ shader_source!(
         attr("a_stroke_width", ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE),
         attr("a_stroke_opacity", ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE),
     ],
-    &[]
+    HIDDEN_GROUND_TEXTURES
 );
 
 // Collision Box
@@ -342,9 +367,36 @@ shader_source!(
         element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
         element::<TerrainDrawableUBO, TerrainDrawableUBO>("TerrainDrawableUBO", ID_TERRAIN_DRAWABLE_UBO),
         block::<TerrainPropsUBO>("TerrainPropsUBO", ID_TERRAIN_PROPS_UBO),
+        block::<TerrainFogUBO>("TerrainFogUBO", ID_TERRAIN_FOG_UBO),
     ],
     &[attr("a_pos", ID_TERRAIN_POS_VERTEX_ATTRIBUTE)],
     &[tex("u_ground_dem", ID_TERRAIN_DEM_TEXTURE), tex("u_drape", ID_TERRAIN_DRAPE_TEXTURE)]
+);
+
+// Terrain that lights a drape of a hillshade's slopes
+shader_source!(
+    TERRAIN_HILLSHADE_SHADER,
+    &[
+        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        element::<TerrainDrawableUBO, TerrainDrawableUBO>("TerrainDrawableUBO", ID_TERRAIN_DRAWABLE_UBO),
+        element::<TerrainLightUBO, TerrainLightUBO>("TerrainLightUBO", ID_TERRAIN_LIGHT_UBO),
+        block::<TerrainPropsUBO>("TerrainPropsUBO", ID_TERRAIN_PROPS_UBO),
+        block::<TerrainFogUBO>("TerrainFogUBO", ID_TERRAIN_FOG_UBO),
+    ],
+    &[attr("a_pos", ID_TERRAIN_POS_VERTEX_ATTRIBUTE)],
+    &[tex("u_ground_dem", ID_TERRAIN_DEM_TEXTURE), tex("u_drape", ID_TERRAIN_DRAPE_TEXTURE)]
+);
+
+// Terrain depth
+shader_source!(
+    TERRAIN_DEPTH_SHADER,
+    &[
+        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        element::<TerrainDrawableUBO, TerrainDrawableUBO>("TerrainDrawableUBO", ID_TERRAIN_DRAWABLE_UBO),
+        block::<TerrainPropsUBO>("TerrainPropsUBO", ID_TERRAIN_PROPS_UBO),
+    ],
+    &[attr("a_pos", ID_TERRAIN_POS_VERTEX_ATTRIBUTE)],
+    &[tex("u_ground_dem", ID_TERRAIN_DEM_TEXTURE)]
 );
 
 // Terrain probe
@@ -505,8 +557,9 @@ shader_source!(
         attr("a_base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
         attr("a_height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
         attr("a_color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
+        attr("a_centroid", ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE),
     ],
-    &[]
+    GROUND_TEXTURES
 );
 
 // Fill Extrusion Instanced: the walls, an instance per outline vertex
@@ -523,8 +576,9 @@ shader_source!(
         attr("a_base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
         attr("a_height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
         attr("a_color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
+        attr("a_centroid", ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE),
     ],
-    &[]
+    GROUND_TEXTURES
 );
 
 // Fill Extrusion Wall: the instanced walls' GLSL with every attribute per
@@ -541,9 +595,10 @@ static FILL_EXTRUSION_WALL_SHADER: ShaderSource = ShaderSource {
         attr("a_base", ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
         attr("a_height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
         attr("a_color", ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
+        attr("a_centroid", ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE),
     ],
     instance_attributes: &[],
-    textures: &[],
+    textures: GROUND_TEXTURES,
 };
 
 // Fill Extrusion Pattern: the roofs
@@ -560,7 +615,8 @@ const FILL_EXTRUSION_PATTERN_BLOCKS: &[UniformBlockInfo] = &[
     ),
     block::<FillExtrusionPropsUBO>("FillExtrusionPropsUBO", ID_FILL_EXTRUSION_PROPS_UBO),
 ];
-const FILL_EXTRUSION_PATTERN_TEXTURES: &[TextureInfo] = &[tex("u_image", ID_FILL_EXTRUSION_IMAGE_TEXTURE)];
+const FILL_EXTRUSION_PATTERN_TEXTURES: &[TextureInfo] =
+    &[tex("u_image", ID_FILL_EXTRUSION_IMAGE_TEXTURE), tex("u_ground_dem", ID_GROUND_DEM_TEXTURE)];
 shader_source!(
     FILL_EXTRUSION_PATTERN_SHADER,
     FILL_EXTRUSION_PATTERN_BLOCKS,
@@ -571,6 +627,7 @@ shader_source!(
         attr("a_height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
         attr("a_pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
         attr("a_pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
+        attr("a_centroid", ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE),
     ],
     FILL_EXTRUSION_PATTERN_TEXTURES
 );
@@ -589,6 +646,7 @@ shader_source!(
         attr("a_height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
         attr("a_pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
         attr("a_pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
+        attr("a_centroid", ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE),
     ],
     FILL_EXTRUSION_PATTERN_TEXTURES
 );
@@ -607,6 +665,7 @@ static FILL_EXTRUSION_PATTERN_WALL_SHADER: ShaderSource = ShaderSource {
         attr("a_height", ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
         attr("a_pattern_from", ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
         attr("a_pattern_to", ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
+        attr("a_centroid", ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE),
     ],
     instance_attributes: &[],
     textures: FILL_EXTRUSION_PATTERN_TEXTURES,
@@ -625,7 +684,7 @@ shader_source!(
         attr("a_weight", ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE),
         attr("a_radius", ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE),
     ],
-    &[]
+    GROUND_TEXTURES
 );
 
 // Heatmap Texture
@@ -663,6 +722,20 @@ shader_source!(
         element::<HillshadeDrawableUBO, HillshadeDrawableUBO>("HillshadeDrawableUBO", ID_HILLSHADE_DRAWABLE_UBO),
         element::<HillshadeTilePropsUBO, HillshadeTilePropsUBO>("HillshadeTilePropsUBO", ID_HILLSHADE_TILE_PROPS_UBO),
         block::<HillshadeEvaluatedPropsUBO>("HillshadeEvaluatedPropsUBO", ID_HILLSHADE_EVALUATED_PROPS_UBO),
+    ],
+    &[
+        attr("a_pos", ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),
+        attr("a_texture_pos", ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE),
+    ],
+    &[tex("u_image", ID_HILLSHADE_IMAGE_TEXTURE)]
+);
+
+// Hillshade slopes
+shader_source!(
+    HILLSHADE_SLOPES_SHADER,
+    &[
+        element::<ProjectionUBO, ProjectionUBO>("ProjectionUBO", ID_PROJECTION_UBO),
+        element::<HillshadeDrawableUBO, HillshadeDrawableUBO>("HillshadeDrawableUBO", ID_HILLSHADE_DRAWABLE_UBO),
     ],
     &[
         attr("a_pos", ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),
@@ -845,7 +918,11 @@ shader_source!(
         attr("a_tex_origin", ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
         attr("a_height_offset", ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
     ],
-    &[tex("u_texture", ID_SYMBOL_IMAGE_TEXTURE)]
+    &[
+        tex("u_texture", ID_SYMBOL_IMAGE_TEXTURE),
+        tex("u_ground_dem", ID_GROUND_DEM_TEXTURE),
+        tex("u_ground_depth", ID_GROUND_DEPTH_TEXTURE)
+    ]
 );
 
 // Symbol SDF
@@ -872,7 +949,11 @@ shader_source!(
         attr("a_tex_origin", ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
         attr("a_height_offset", ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
     ],
-    &[tex("u_texture", ID_SYMBOL_IMAGE_TEXTURE)]
+    &[
+        tex("u_texture", ID_SYMBOL_IMAGE_TEXTURE),
+        tex("u_ground_dem", ID_GROUND_DEM_TEXTURE),
+        tex("u_ground_depth", ID_GROUND_DEPTH_TEXTURE)
+    ]
 );
 
 // Symbol Text & Icon
@@ -898,7 +979,12 @@ shader_source!(
         attr("a_tex_origin", ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
         attr("a_height_offset", ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
     ],
-    &[tex("u_texture", ID_SYMBOL_IMAGE_TEXTURE), tex("u_texture_icon", ID_SYMBOL_IMAGE_ICON_TEXTURE)]
+    &[
+        tex("u_texture", ID_SYMBOL_IMAGE_TEXTURE),
+        tex("u_texture_icon", ID_SYMBOL_IMAGE_ICON_TEXTURE),
+        tex("u_ground_dem", ID_GROUND_DEM_TEXTURE),
+        tex("u_ground_depth", ID_GROUND_DEPTH_TEXTURE),
+    ]
 );
 
 /// The source of each built-in program that has GLSL.
@@ -928,6 +1014,7 @@ pub(crate) static BUILT_INS: &[(&Program, &ShaderSource)] = &[
     (&programs::HEATMAP_TEXTURE, &HEATMAP_TEXTURE_SHADER),
     (&programs::HILLSHADE_PREPARE, &HILLSHADE_PREPARE_SHADER),
     (&programs::HILLSHADE, &HILLSHADE_SHADER),
+    (&programs::HILLSHADE_SLOPES, &HILLSHADE_SLOPES_SHADER),
     (&programs::COLOR_RELIEF, &COLOR_RELIEF_SHADER),
     (&programs::LINE, &LINE_SHADER),
     (&programs::LINE_GRADIENT, &LINE_GRADIENT_SHADER),
@@ -939,9 +1026,11 @@ pub(crate) static BUILT_INS: &[(&Program, &ShaderSource)] = &[
     (&programs::SYMBOL_SDF, &SYMBOL_SDF_SHADER),
     (&programs::SYMBOL_TEXT_AND_ICON, &SYMBOL_TEXT_AND_ICON_SHADER),
     (&programs::LAYER_COMPOSITE, &LAYER_COMPOSITE_SHADER),
-    (&programs::TERRAIN, &TERRAIN_SHADER),
     #[cfg(test)]
     (&programs::VERTEX_TEXEL, &VERTEX_TEXEL_SHADER),
+    (&programs::TERRAIN, &TERRAIN_SHADER),
+    (&programs::TERRAIN_HILLSHADE, &TERRAIN_HILLSHADE_SHADER),
+    (&programs::TERRAIN_DEPTH, &TERRAIN_DEPTH_SHADER),
     #[cfg(test)]
     (&programs::TERRAIN_PROBE, &TERRAIN_PROBE_SHADER),
 ];

@@ -26,19 +26,21 @@ export async function writeTest(out, name, style, { width, height, base64 }) {
 
 /**
  * Runs `runner` on the tests in `out` with the fixtures of the cache
- * database at `cache`, through the Vulkan driver file `icd`, if any (else
- * the runner's environment, and its default device, apply); its results go to
+ * database at `cache` and the files in `assets` that load in place of
+ * them, through the Vulkan driver file `icd`, if any (else the runner's
+ * environment, and its default device, apply); its results go to
  * `out`/results. Returns the runner's exit status and output, and
  * `results`, each test's `{ status, diff, error }` by name, unless the
  * runner wrote no report.
  */
-export async function renderNative({ out, runner, cache, codec, icd }) {
+export async function renderNative({ out, runner, cache, assets, codec, icd }) {
   const manifest = path.join(out, "manifest.json");
   await writeFile(
     manifest,
     JSON.stringify({
       base_test_path: path.join(out, "tests"),
       cache_path: cache,
+      asset_path: assets,
       expectation_paths: [],
       ignore_paths: [],
     }),

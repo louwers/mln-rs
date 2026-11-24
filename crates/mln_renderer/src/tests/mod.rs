@@ -34,9 +34,11 @@ mod tile_cover_test;
 // test/style/source.test.cpp: need mln_map's Transform (above this crate).
 mod geojson_tile_test;
 mod source_test;
-// The terrain's drapes: their projection, their stencil, and the tiles a
-// drape draws.
+// The terrain's drapes: their projection, their pixels' scale, and the
+// tiles a drape draws.
 mod drape_test;
+// The drapes draw again only when what they show changed.
+mod drape_reuse_test;
 // Port-only: the renderer frees what it lets go of on its workers.
 mod drop_on_workers_test;
 // Port-only: malformed vector tiles become tile errors, not panics.
@@ -125,6 +127,7 @@ impl OneTile {
             pixel_ratio: 1.0,
             show_collision_boxes: false,
             subdivision_granularity: mln_util::subdivision_granularity::SubdivisionGranularitySetting::none(),
+            terrain: false,
             first_load: true,
         }
     }
@@ -235,7 +238,7 @@ impl OneTile {
 
     pub(crate) fn set_style(&mut self, style: &std::sync::Arc<crate::tile::job::SourceStyle>) {
         let params = self.params();
-        self.with(|tile| tile.set_style(style, params.pixel_ratio, params.subdivision_granularity));
+        self.with(|tile| tile.set_style(style, params.pixel_ratio, params.subdivision_granularity, params.terrain));
     }
 
     /// Gives a geometry tile `data`, as a load of its own.

@@ -10,6 +10,8 @@ use std::sync::{Arc, OnceLock};
 
 use geo_index::rtree::sort::HilbertSort;
 use geo_index::rtree::{RTree, RTreeBuilder, RTreeIndex};
+use geometry::Point;
+use mln_map_types::tile_coordinate::TileCoordinate;
 use mln_map_types::{TileProjector, VerticalPerspectiveProjection, View};
 use mln_style::expression::expression::FeatureState;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
@@ -22,13 +24,14 @@ use mln_tile_id::geometry_tile_data::{
 use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::feature::{Feature, feature_id_to_string};
-use mln_util::geo::ScreenCoordinate;
+use mln_util::geo::{ScreenCoordinate, WrapMode};
 use mln_util::hash::{HashMap, HashSet};
 use mln_vec_map::VecMap;
 
 use crate::query::RenderedQueryOptions;
 use crate::render_layer::RenderLayer;
 use crate::source_state::SourceFeatureState;
+use crate::terrain::{TerrainElevation, TileGround};
 use crate::text::collision_index::OverlapMode;
 
 /// The render layers a query looks at, by id.
@@ -56,6 +59,13 @@ pub(crate) struct QueryRegion<'a> {
     /// How far around the geometry the layers' features may reach, in
     /// pixels.
     pub(crate) padding: f32,
+    /// Over terrain, the ground under the tile, which its standing layers'
+    /// draws read ([`TerrainElevation::ground`]).
+    pub(crate) ground: Option<TileGround<'a>>,
+    /// Over terrain, the height in meters of the ground each point of
+    /// `geometry` was met at, in order ([`QueryGround::heights`]), which a
+    /// translation of the geometry keeps.
+    pub(crate) heights: Option<&'a [f64]>,
 }
 
 /// The screen points, from the top left of `view`, that a query of
@@ -86,6 +96,53 @@ pub(crate) fn query_screen_geometry<'a>(view: &View, geometry: &'a [ScreenCoordi
     }
     traced.extend(geometry.last().copied());
     Cow::Owned(traced)
+}
+
+/// Where the points of a query over terrain meet the ground the frame drew.
+pub(crate) struct QueryGround<'a> {
+    /// The ground the frame drew, of which [`TerrainElevation::ground`] gives
+    /// the ground under a tile.
+    pub(crate) elevation: &'a TerrainElevation,
+    /// For each point of the query's screen geometry, in order, the Web
+    /// Mercator point at zoom 0 (x in the world copy the view shows it in,
+    /// on the globe the copy nearest the view's center on the main world)
+    /// where its line of sight first meets the drawn ground; where it meets
+    /// none, the flat map's point at sea level.
+    pub(crate) world: Vec<Point<f64>>,
+    /// The height of the ground at each of `world`, in meters with the
+    /// terrain's exaggeration; 0 at sea level.
+    pub(crate) heights: Vec<f64>,
+}
+
+impl QueryGround<'_> {
+    /// Where each of `geometry`, screen points from the top left of `view`,
+    /// meets `elevation`, the ground the frame of `view` drew.
+    pub(crate) fn new<'a>(
+        view: &View,
+        elevation: &'a TerrainElevation,
+        geometry: &[ScreenCoordinate],
+    ) -> QueryGround<'a> {
+        let height = f64::from(view.size().height);
+        // The globe, which has no world copies, tests its tiles about the
+        // main world, so a query's points go to the copy nearest the center
+        // there, side by side across the antimeridian.
+        let center = view.is_globe().then(|| TileCoordinate::from_lat_lng(0.0, &view.center(WrapMode::Wrapped)).p.x);
+        let (world, heights) = geometry
+            .iter()
+            .map(|point| {
+                let y_up = ScreenCoordinate::new(point.x, height - point.y);
+                let (mut world, height) = match view.ground_under(&y_up, elevation) {
+                    Some(hit) => (Point::new(hit.world.x, hit.world.y), hit.height),
+                    None => (TileCoordinate::from_screen_coordinate(view, 0, &y_up).p, 0.0),
+                };
+                if let Some(center) = center {
+                    world.x += (center - world.x).round();
+                }
+                (world, height)
+            })
+            .unzip();
+        QueryGround { elevation, world, heights }
+    }
 }
 
 /// The features a query found, by layer id.

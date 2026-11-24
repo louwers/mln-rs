@@ -12,11 +12,18 @@ use mln_util::queue::Queue;
 use mln_util::time::Instant;
 
 use crate::file_source::{Assets, proxy_loader};
-use crate::metadata::{MapMode, TestMetadata};
+use crate::metadata::{MapMode, TerrainSkirtLength, TestMetadata};
 use crate::runner::{
     CameraOptions, ImplFactory, ImplOptions, MapError, QueryGeometry, ResourceOptions, TestRunnerImpl,
 };
 use crate::style_ops;
+
+fn terrain_skirt_length(length: TerrainSkirtLength) -> mln_map::TerrainSkirtLength {
+    match length {
+        TerrainSkirtLength::Auto => mln_map::TerrainSkirtLength::Auto,
+        TerrainSkirtLength::None => mln_map::TerrainSkirtLength::None,
+    }
+}
 
 fn map_mode(mode: MapMode) -> mln_map::MapMode {
     match mode {
@@ -71,6 +78,7 @@ impl Impl {
                 size: metadata.size,
                 pixel_ratio: metadata.pixel_ratio,
                 cross_source_collisions: metadata.cross_source_collisions,
+                terrain_skirt_length: terrain_skirt_length(metadata.terrain_skirt_length),
                 ..Default::default()
             },
             Arc::clone(registry.style()),

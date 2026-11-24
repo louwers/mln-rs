@@ -22,7 +22,7 @@ use mln_style::PropertyEvaluationParameters;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Fill;
 use mln_style::layers::fill_layer_properties::FillPaintProperties;
-use mln_style_types::AlignmentType;
+use mln_style_types::{AlignmentType, LayerBlendType, TranslateAnchorType};
 use mln_util::Color;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::error::Error;
@@ -631,6 +631,16 @@ impl TypedLayer for RenderFillLayer {
         if self.values.unevaluated.fill_outline_color.is_undefined() {
             evaluated.fill_outline_color = evaluated.fill_color.clone();
         }
+    }
+
+    fn drapes_by_bearing(&self, evaluated: &EvaluatedLayer<Fill>) -> bool {
+        let paint = &evaluated.paint;
+        *paint.fill_translate_anchor.uniform() == TranslateAnchorType::Viewport
+            && *paint.fill_translate.uniform() != [0.0, 0.0]
+    }
+
+    fn blends_with_backdrop(&self, evaluated: &EvaluatedLayer<Fill>) -> bool {
+        *evaluated.paint.fill_layer_blend.uniform() != LayerBlendType::Normal
     }
 
     fn passes(&self, evaluated: &EvaluatedLayer<Fill>) -> RenderPass {

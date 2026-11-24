@@ -2,12 +2,12 @@
 //! gesture or an animation over tiles already there.
 
 use mln_bench_workload::paths::{FRAMES, Path};
-use mln_map::{CameraOptions, MapMode};
+use mln_map::{BoundOptions, CameraOptions, MapMode};
 
 use super::VIEW;
 use crate::scenario::{Bench, Kind, Scenario};
 use crate::support::fixtures::Fixtures;
-use crate::support::map::HeadlessMap;
+use crate::support::map::{DrawMeter, HeadlessMap, gesture_phase};
 
 pub(crate) const SCENARIOS: &[Scenario] = &[
     Scenario {
@@ -45,6 +45,12 @@ pub(crate) const SCENARIOS: &[Scenario] = &[
         kind: Kind::Macro,
         question: "What does a frame of a city's hills cost, tinted by elevation and hillshaded, while the camera circles, turns and tilts over loaded tiles?",
         run: terrain,
+    },
+    Scenario {
+        name: "macro/frame/terrain-3d",
+        kind: Kind::Macro,
+        question: "What does a frame over 3D terrain cost, with draped layers and layers that stand on it, while the camera circles, turns and tilts over loaded tiles?",
+        run: terrain_3d,
     },
     Scenario {
         name: "macro/frame/labels",
@@ -104,6 +110,31 @@ fn terrain(bench: &mut Bench) {
     path(bench, Path::Terrain);
 }
 
+/// The question: what does a frame over San Francisco's hills in 3D cost,
+/// Liberty draped over the terrain tiles' ground in four stacks with its
+/// extruded buildings and labels standing between and above them, while the
+/// camera circles Twin Peaks tilted to 65 degrees ([`Path::Terrain3d`])? One
+/// measured unit is one frame: its update, the drapes it draws again, the
+/// surface and the layers that stand on it. The camera moves as a gesture
+/// moves it, which keeps the drapes it drew at another zoom, and the last
+/// frame ends the gesture, which draws them again where they differ from
+/// what the map at rest shows. The surface lights the hillshade, lit from
+/// the viewport, in every frame, from drapes of its slopes that a turn of
+/// the map keeps. It also reports the frames' render passes and draw calls,
+/// the drapes they drew, and the most the terrain held ([`DrawMeter`]).
+fn terrain_3d(bench: &mut Bench) {
+    let fixtures = Fixtures::open(bench);
+    let path = Path::Terrain3d;
+    let camera = path.camera(&fixtures);
+    let style = path.style(&fixtures);
+    let mut map = HeadlessMap::open(bench, &fixtures, VIEW, MapMode::Continuous, &style, &camera(0));
+    // The path tilts past the map's default bound.
+    let max_pitch = (0..FRAMES).filter_map(|frame| camera(frame).pitch).fold(0.0, f64::max);
+    let bounds = BoundOptions { max_pitch: Some(max_pitch), ..Default::default() };
+    map.map().set_bounds(&bounds).expect("a pitch the map can take");
+    frames(bench, map, camera, Some(DrawMeter::default()));
+}
+
 /// The question: what does a frame of downtown San Francisco's labels cost,
 /// Liberty with POI labels that choose among anchors, while the camera turns
 /// a full circle tilted to 60 degrees ([`Path::Labels`])? One measured unit
@@ -117,15 +148,21 @@ fn path(bench: &mut Bench, path: Path) {
     let camera = path.camera(&fixtures);
     let style = path.style(&fixtures);
     let map = HeadlessMap::open(bench, &fixtures, VIEW, MapMode::Continuous, &style, &camera(0));
-    frames(bench, map, camera);
+    frames(bench, map, camera, None);
 }
 
 /// Loads the path, drawing it once with its tiles loaded before each
 /// frame, then measures one frame at each of its cameras: the frame, and
 /// the background work it starts, such as the layout of a tile that came
 /// back into view, which the frame doesn't wait for, but a frame soon after
-/// shows.
-fn frames(bench: &mut Bench, mut map: HeadlessMap, camera: impl Fn(usize) -> CameraOptions) {
+/// shows. With a `meter`, the camera moves as one gesture's, and it also
+/// reports what the measured frames drew.
+fn frames(
+    bench: &mut Bench,
+    mut map: HeadlessMap,
+    camera: impl Fn(usize) -> CameraOptions,
+    mut meter: Option<DrawMeter>,
+) {
     map.settle();
     for frame in 0..FRAMES {
         map.jump(&camera(frame));
@@ -140,11 +177,20 @@ fn frames(bench: &mut Bench, mut map: HeadlessMap, camera: impl Fn(usize) -> Cam
     let work = map.background_work();
     let pipeline = map.pipeline_statistics();
     for frame in 0..FRAMES {
-        map.jump(&camera(frame));
+        match meter {
+            Some(_) => map.gesture(&camera(frame), gesture_phase(frame, FRAMES)),
+            None => map.jump(&camera(frame)),
+        }
         bench.measure(|| {
             map.draw_frame();
             map.wait_for_workers();
         });
+        if let Some(meter) = &mut meter {
+            meter.frame(&map);
+        }
+    }
+    if let Some(meter) = &meter {
+        meter.report(bench);
     }
     bench.count("background_work", map.background_work() - work);
     map.count_pipeline(bench, pipeline);

@@ -17,16 +17,16 @@ inherits another's heap, threads or caches.
 
 A third kind runs outside `mln-bench`: the desktop example's **presented**
 benchmark (`mise run desktop -- --benchmark[=<path>]`, where the path is
-`street`, `overzoom`, `globe`, `antimeridian`, `earthquakes`, `terrain` or
-`labels`) draws the camera path of a `macro/frame` scenario in a window, over
-the same fixtures, and prints the times between the frames the window presents.
-It shows what a user sees of a frame, the backend's surface and the display's
-compositor included, which a headless frame leaves out. Nothing runs it but a
-person at a machine with a display: run it on both sides of a change by hand,
-and compare the summaries. Use `--profile release` when measuring shipping
-performance. `--laps <n>` sets how long it runs (10 laps of 120 frames; 0 draws
-until the window closes, for a profiler). The fixtures and the paths come from
-`workload/`, a crate both programs share.
+`street`, `overzoom`, `globe`, `antimeridian`, `earthquakes`, `terrain`,
+`terrain-3d` or `labels`) draws the camera path of a `macro/frame` scenario in a
+window, over the same fixtures, and prints the times between the frames the
+window presents. It shows what a user sees of a frame, the backend's surface and
+the display's compositor included, which a headless frame leaves out. Nothing
+runs it but a person at a machine with a display: run it on both sides of a
+change by hand, and compare the summaries. Use `--profile release` when
+measuring shipping performance. `--laps <n>` sets how long it runs (10 laps of
+120 frames; 0 draws until the window closes, for a profiler). The fixtures and
+the paths come from `workload/`, a crate both programs share.
 
 ## Running
 
@@ -133,6 +133,7 @@ its sizes are the ones it uses.
 | `macro/frame/antimeridian`              | What does a frame of the world on a flat map cost while the view crosses the antimeridian over loaded tiles?                                            |
 | `macro/frame/earthquakes`               | What does a frame of a map of earthquakes cost, a heatmap that gives way to circles, while the camera circles and zooms in and out?                     |
 | `macro/frame/terrain`                   | What does a frame of a city's hills cost, tinted by elevation and hillshaded, while the camera circles, turns and tilts over loaded tiles?              |
+| `macro/frame/terrain-3d`                | What does a frame over 3D terrain cost, with draped layers and layers that stand on it, while the camera circles, turns and tilts over loaded tiles?    |
 | `macro/frame/labels`                    | What does a frame of a city's dense labels cost, POI labels choosing among anchors, while the tilted camera turns over loaded tiles?                    |
 | `macro/navigate/street`                 | What does a flight into a city's streets and back out cost, with tiles arriving while it flies?                                                         |
 | `macro/navigate/fly`                    | What does a flight from one city's streets, out over an ocean and into another city's streets, cost, with tiles arriving while it flies?                |
@@ -140,6 +141,7 @@ its sizes are the ones it uses.
 | `macro/navigate/fly-4g`                 | How much of the view does a flight from one city to another leave blank over a mobile link, and how many bytes go to tiles it passes over?              |
 | `macro/navigate/street-flaky`           | How soon does the view of a city's streets come back complete after the network drops out during a flight?                                              |
 | `macro/navigate/street-pmtiles-flaky`   | How soon does the view of a city's streets, read from a PMTiles archive by byte ranges, come back complete after the network drops out during a flight? |
+| `macro/navigate/terrain-3d`             | What does a flight over 3D terrain into ground it hasn't loaded cost: pan, zoom and rotate at pitch 60 to 75?                                           |
 | `macro/navigate/zoom-slow`              | Does zooming out to the world and back in over a slow link fetch again the street tiles the map just let go of?                                         |
 | `macro/update/geojson`                  | What does replacing a GeoJSON source's data cost, until the map shows the new data?                                                                     |
 | `macro/update/layers`                   | What does adding a batch of layers to a city's map, then removing them, cost until the map shows each?                                                  |
@@ -189,8 +191,8 @@ attribution. It holds:
 - `fonts/`: Noto Sans JP, whose outlines the glyph scenarios draw, and Noto
   Sans.
 - `tiles/terrain.pmtiles`: Mapterhorn's elevation of central San Francisco,
-  zooms 0 to 12, Terrarium-encoded WebP images of 512 pixels, for hillshading
-  and color relief.
+  zooms 0 to 12, Terrarium-encoded WebP images of 512 pixels, for hillshading,
+  color relief and 3D terrain.
 - `geojson/ne_10m_admin_0_countries.geojson`: Natural Earth's countries.
 - `geojson/earthquakes-2026-10.geojson`: the USGS's 11,342 earthquakes of
   October 2026, for heatmaps and circles.
@@ -287,10 +289,19 @@ and index buffers), `gpu_objects` (the textures and buffers the renderer made),
 `gpu_vertex_shader_invocations`, `gpu_primitives` and
 `gpu_fragment_shader_invocations` (what the GPU's pipeline ran, where the device
 counts it: WebGPU on Vulkan or D3D12, a CPU rasterizer such as lavapipe
-included), or `background_work` (the times a frame started work off the frame,
-such as laying out a tile). A scenario that repeats a unit of work, such as a
-frame or a tile, also reports `instructions`, `allocations` and `allocated` per
-unit, such as `instructions_per_frame`.
+included), `background_work` (the times a frame started work off the frame, such
+as laying out a tile), or, over 3D terrain, what the frames drew (`draw_calls`,
+`render_passes`, `mipmap_generations`, `drapes_drawn` and the most in a frame,
+`drape_passes`, `drape_draw_calls`, `surface_draw_calls`,
+`ground_depth_draw_calls`) and the most bytes the terrain held
+(`terrain_drapes`, the drapes' textures with their mips;
+`terrain_drape_depth_stencil` and `terrain_drape_composite`, what they draw
+with; `terrain_dem_textures`; `terrain_dem_data`, the DEM images the camera's
+ground holds; `terrain_height_ranges`; `terrain_memory`, all of them at once;
+and `terrain_ground_depth`, the depth of the ground that hides what stands
+behind it). A scenario that repeats a unit of work, such as a frame or a tile,
+also reports `instructions`, `allocations` and `allocated` per unit, such as
+`instructions_per_frame`.
 
 A scenario over the simulated network also counts what a user sees, from what
 the renderer drew for each tile of the view it wanted, each weighed by its area
@@ -557,8 +568,8 @@ dates go by the system's clock: the server's are a week ahead or long past, so
 that whether one has passed never depends on when a run started.
 
 The navigate scenarios start settled at their first view over `local`, then fly
-over their profile: `macro/navigate/street`, `fly` and `zoom` over `cdn`, the
-others over the link their question names.
+over their profile: `macro/navigate/street`, `fly`, `zoom` and `terrain-3d` over
+`cdn`, the others over the link their question names.
 
 ### Repeating counts
 

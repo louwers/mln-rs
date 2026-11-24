@@ -171,7 +171,7 @@ impl Texture2D {
     }
 
     /// The bytes the texture takes, its mip levels' included.
-    fn bytes(&self) -> usize {
+    pub(crate) fn bytes(&self) -> usize {
         let texel = self.format.bytes_per_texel().unwrap_or(4) as usize;
         let bytes = self.size.width as usize * self.size.height as usize * texel;
         // The levels below the first add up to a third of it.

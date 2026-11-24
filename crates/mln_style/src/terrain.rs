@@ -3,9 +3,7 @@
 ///
 /// A style takes a terrain whose source it doesn't have, which waits for a
 /// source with that id, but not one whose source isn't a `raster-dem` source
-/// or whose exaggeration is below 0 or not finite. The map doesn't draw
-/// terrain, so [`Style::set_root_property_json`](crate::Style::set_root_property_json)
-/// refuses one.
+/// or whose exaggeration is below 0 or not finite.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Terrain {
     /// The id of the terrain's source.

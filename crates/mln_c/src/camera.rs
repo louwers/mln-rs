@@ -427,6 +427,24 @@ pub(crate) unsafe extern "C" fn mln_map_set_globe_free_bearing_enabled(
     })
 }
 
+/// `mln_map_set_center_clamped_to_ground_enabled()`.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub(crate) unsafe extern "C" fn mln_map_set_center_clamped_to_ground_enabled(
+    map: mln_map,
+    enabled: bool,
+    completion: *const mln_completion,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, {
+        // SAFETY: the caller's contract.
+        unsafe { command(map, completion, |map| map.set_center_clamped_to_ground(enabled)) }
+    })
+}
+
 /// `mln_map_dump_debug_logs()`.
 ///
 /// # Safety

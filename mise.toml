@@ -40,7 +40,8 @@ all_compile = false
 # The browser build's page (examples/web) and its check.
 "core:node" = "24.22.2"
 "aqua:pnpm/pnpm" = "12.18.0"
-# The jq that reads Cargo's JSON output.
+# The jq that reads Cargo's JSON output and rewrites the styles that
+# update:gljs-testdata copies.
 "aqua:jqlang/jq" = "1.8.2"
 # The formatters and linters (hk.pkl): hk runs them, dprint formats
 # (dprint.jsonc), jactionlint lints the workflows and shellcheck the tasks.

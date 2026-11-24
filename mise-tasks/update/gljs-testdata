@@ -22,30 +22,84 @@ set -euo pipefail
 
 # Tests that draw as GL JS's but differ by more than they allow, and why. The
 # numbers are the pixels that differ, measured with WebGPU, Vulkan and OpenGL
-# alike unless they say which: on RADV, and on Mesa 26.2.5's lavapipe and
-# llvmpipe.
+# alike unless they say which: on RADV, on CI's Mesa 26.0.8 (lavapipe, and
+# llvmpipe for OpenGL), and on Mesa 26.2.5's llvmpipe.
 #
 # The terrain samples its drapes with mips and anisotropy, and how a device
-# picks the level of detail of an anisotropic sample isn't specified, so the
-# drape's edges look softer or sharper than GL JS's, and its far texels move.
+# picks the level of detail of an anisotropic sample isn't specified. Mesa
+# 26.0.8's llvmpipe takes the lengths of the texture coordinates' screen
+# derivatives as the footprint's axes; Mesa 26.2.5's first finds the
+# footprint's ellipse (`GALLIVM_PERF=no_lod_ellipse` brings back 26.0.8's
+# numbers), which picks sharper levels. The drape's edges then look softer or
+# sharper than GL JS's, and its far texels move. No anisotropy changes that:
+# 26.0.8 gives the same numbers from 2 to 16.
 declare -A allowed=(
-    # 27 of 65536 on RADV, 32 on lavapipe and 30 on llvmpipe.
+    # 27 of 65536 on RADV, 44 on Mesa 26.0.8 (43 on llvmpipe), 30 to 32 on
+    # Mesa 26.2.5. Heights read a texel off: 1785 (RADV), 1881 (lavapipe).
+    # Anisotropy 1: 247 (RADV), 141 (lavapipe).
     [terrain/default]=0.0007
     # mln-rs draws fill outlines 2 px wide, as MapLibre Native does, where GL
     # JS draws them 1 px wide, which spreads a translucent fill's edge about
-    # 0.2 px; the rest is the drapes' sampling. 150 of 262144 on RADV (149 on
-    # Vulkan); on Mesa 26.0.8, which CI runs, 365 (WebGPU, which draws 1 px
-    # outlines on a CPU rasterizer), 420 (Vulkan) and 389 (OpenGL); on Mesa
-    # 26.2.5, 139, 173 and 155.
+    # 0.2 px; the rest is the drapes' sampling. 143 of 262144 on RADV (142 on
+    # Vulkan); on Mesa 26.0.8, 355 (WebGPU, which draws 1 px outlines on a CPU
+    # rasterizer), 418 (Vulkan) and 386 (OpenGL); on Mesa 26.2.5, 126, 168 and
+    # 150. With 1 px outlines: 113 (RADV), 355 (Vulkan) and 334 (OpenGL) on
+    # Mesa 26.0.8. With skirts: 14467 (RADV), 14506 (lavapipe), 14479
+    # (llvmpipe).
+    [terrain/skirts-none]=0.0017
+    # As skirts-none: 150 of 262144 on RADV (149 on Vulkan); on Mesa 26.0.8,
+    # 365 (WebGPU), 420 (Vulkan) and 389 (OpenGL); on Mesa 26.2.5, 139, 173
+    # and 155. With 1 px outlines: 124 (RADV), 365 (Vulkan) and 346 (OpenGL)
+    # on Mesa 26.0.8. Without skirts: 14551 (RADV), 14546 (lavapipe), 14524
+    # (llvmpipe).
     [terrain/skirts-auto]=0.0017
     # The fill outlines, 2 px wide in mln-rs, as in MapLibre Native, where GL
-    # JS draws them 1 px wide: 26 of 65536 on RADV and on Mesa 26.0.8 and
-    # 26.2.5; 3 with WebGPU on lavapipe, which draws 1 px outlines on a CPU
-    # rasterizer.
+    # JS draws them 1 px wide: 26 of 65536 on RADV and on Mesa 26.0.8, 27 on
+    # Mesa 26.2.5; 3 with WebGPU on lavapipe, which draws 1 px outlines on a
+    # CPU rasterizer, and 3 everywhere with 1 px outlines.
     [terrain/fill-outline]=0.0005
-    # The moiré's texels move: 289 of 65536 (0.44%) on RADV (291 on OpenGL),
-    # 1113 (lavapipe) and 1104 (llvmpipe) (1.7%).
+    # The moiré's texels move: 279 of 65536 (0.43%) on RADV, 170 (0.26%) on
+    # Mesa 26.0.8, 1051 (lavapipe) and 1046 (llvmpipe) (1.6%) on Mesa 26.2.5.
+    # Without the drape's mips: 6451 (RADV), 6408 (lavapipe 26.0.8) and 6409
+    # (Mesa 26.0.8's llvmpipe, Mesa 26.2.5's lavapipe and llvmpipe), 9.8%.
     [terrain/rtt-mipmap-minification/pitch-70]=0.02
+    # Drawn better than GL JS's image, which shows a gap under the downhill
+    # walls: their feet stop 10 m below the ground at the polygon's centroid.
+    # Here a ground-level wall's foot reaches the ground under its own end,
+    # so 165 of 262144 px differ on RADV, all along the feet of two
+    # buildings' south walls on the slope; 174 (lavapipe) and 172 (llvmpipe)
+    # on Mesa 26.0.8, 164 on Mesa 26.2.5. Walls not depth-tested against the
+    # ground: 590 (RADV). Buildings at sea level: 3590 (RADV), and 6875 drawn
+    # flat, as before they stood on the ground.
+    [terrain/fill-extrusion]=0.0008
+    # The labels hide behind the ridges as GL JS's do; 51 of 262144 px differ
+    # on RADV (WebGPU and Vulkan), 50 (OpenGL), 83 on Mesa 26.0.8's lavapipe
+    # and 59 on Mesa 26.2.5's llvmpipe, single pixels along the drapes'
+    # silhouettes. With nothing hidden: 2446 (RADV).
+    [terrain/occlusion-debug]=0.0004
+    # GL JS colors each tile's kernel density on its own over terrain and
+    # blends the tiles, where mln-rs sums density across tiles, as both do
+    # without terrain: 1552 of 262144 px differ on RADV (WebGPU and Vulkan),
+    # 1568 (OpenGL), 1587 on Mesa 26.0.8's lavapipe and 1593 on Mesa 26.2.5's
+    # llvmpipe, all in the two patches where kernels of the fixture's two
+    # GeoJSON tiles overlap. Kernels hidden behind the ground: 29095 (RADV).
+    # Kernels at sea level: 62776 (RADV).
+    [terrain/heatmap]=0.007
+    # GL JS draws a terrain's DEM source at twice its declared tile size,
+    # which this fixture's hillshade shares, so its far hills shade from DEM
+    # tiles a zoom coarser; mln-rs keeps the declared size. 210 of 262144 px
+    # differ on RADV (WebGPU), single pixels and short runs on the far hills;
+    # 58, which pass, with the hillshade on a copy of the source declared
+    # 512 px. The label hidden or missing: 1160 (RADV). Seams where DEM tiles
+    # of two overscaled zooms meet: 481 (RADV).
+    #
+    # The fixture's hillshade is lit from the viewport, so the surface lights
+    # its slopes a screen pixel at a time, where GL JS shades each texel of
+    # the drape and filters the colors: along the far ridges, where a pixel
+    # takes many texels, 60 to 70 more single pixels differ. 271 px on RADV
+    # (WebGPU, Vulkan and OpenGL), 318 on Mesa 26.0.8's lavapipe, 314 on Mesa
+    # 26.1.8's and 310 on its llvmpipe.
+    [terrain/symbol-height-offset-occluded-ground]=0.0015
     # Terrain on the globe. The numbers here are WebGPU's, on RADV and on Mesa
     # 26.0.8's lavapipe, which CI runs (Mesa 26.2.5 with
     # `GALLIVM_PERF=no_lod_ellipse` gives the same).
@@ -85,6 +139,27 @@ declare -A allowed=(
     [projection/globe/terrain/fill-planet-tiles-no-background]=0.0004
     # 56 (RADV), 97 (lavapipe); on the sphere: 191, 192.
     [projection/globe/terrain/line-gradient]=0.0004
+    #
+    # The standing layers and the fog on the globe.
+    #
+    # Past the handover, on Mercator: the far ridges at pitch 80. 44 of 65536
+    # (RADV), 48 (lavapipe), as on Mercator with no projection set.
+    [terrain/fog-sky-blend-globe]=0.0008
+    # Each circle draws once, from the tile that holds it, as in GL JS. The
+    # circles near the limb sit up to a pixel from GL JS's, as they do in GL
+    # JS's projection/globe twin without terrain drawn here with each circle
+    # once (911 px; the image is the same to 3 px): 914 of 65536 (RADV), 923
+    # (lavapipe), 912 (Apple M6), 927 (Adreno X1-85 on D3D12). On the
+    # sea-level sphere, each drawn once for every tile buffer that holds it:
+    # 9550.
+    [projection/globe/terrain/circle-planet]=0.0143
+    # As circle-planet: the far circles a pixel from GL JS's, 134 (RADV), 149
+    # (lavapipe); the twin drawn once each, 134. On the sea-level sphere:
+    # 9731.
+    [projection/globe/terrain/circle-pitch-alignment/map-scale-map]=0.0023
+    # As circle-planet: 236 (RADV), 235 (lavapipe); the twin drawn once
+    # each, 236. On the sea-level sphere: 7477.
+    [projection/globe/terrain/circle-pitch-alignment/map-scale-viewport]=0.0037
 )
 
 checkout="${usage_checkout:-$PWD/../maplibre-gl-js}"

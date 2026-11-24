@@ -22,12 +22,12 @@ use mln_gfx::gpu::{
     TextureRegion, TextureUsage, VertexStep,
 };
 use mln_gfx::shaders::program::Sources;
-use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
+use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, ID_GROUND_DEPTH_TEXTURE, LAYER_SSBO_START_ID};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{DepthFunctionType, TextureFilterType, TextureWrapType};
 use mln_glsl::layout::{
-    DescriptorSetType, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE,
-    image_sampler_binding, image_texture_binding,
+    DescriptorSetType, GLOBAL_GROUND_DEPTH_BINDING, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT,
+    UBO_INDEX_PUSH_CONSTANT_SIZE, image_sampler_binding, image_texture_binding,
 };
 use mln_glsl::{AttributeInfo, BUILT_INS, ResourceUse, ShaderSource, Stage, TextureInfo};
 use mln_util::hash::HashMap;
@@ -491,6 +491,9 @@ fn binding_of(
     let start = LAYER_SSBO_START_ID as u32;
     let storage = LAYER_STORAGE_COUNT as u32;
     let resource = match DescriptorSetType::ALL.get(set as usize) {
+        Some(DescriptorSetType::Global) if binding == GLOBAL_GROUND_DEPTH_BINDING => {
+            (DescriptorSetType::Global, Binding::Texture(ID_GROUND_DEPTH_TEXTURE as u32))
+        }
         Some(DescriptorSetType::Global) => (DescriptorSetType::Global, Binding::Buffer(binding)),
         Some(DescriptorSetType::Layer) if binding < storage => {
             (DescriptorSetType::Layer, Binding::Buffer(binding + start))
@@ -618,13 +621,14 @@ impl VulkanGpu {
             binds_vertex_buffers: limits.max_per_stage_descriptor_storage_buffers as usize
                 >= VERTEX_STAGE_STORAGE_BUFFERS,
         };
-        let pool = |type_: DescriptorSetType, textures: usize| {
+        let pool = |type_: DescriptorSetType, textures: usize, samplers: usize| {
             let shape = buffer_shape(type_, caps.binds_vertex_buffers);
             DescriptorPoolGrowable::new(
                 DESCRIPTOR_POOL_SIZE,
                 (shape.storage + shape.vertex) as u32,
                 shape.uniform as u32,
                 textures as u32,
+                samplers as u32,
             )
         };
         // At least two, so that the CPU writes the next batch's while the
@@ -643,10 +647,11 @@ impl VulkanGpu {
             pipeline_layout: vk::PipelineLayout::null(),
             pipeline_cache: vk::PipelineCache::null(),
             descriptor_pools: [
-                pool(DescriptorSetType::Global, 0),
-                pool(DescriptorSetType::Layer, 0),
-                pool(DescriptorSetType::DrawableUniform, 0),
-                pool(DescriptorSetType::DrawableImage, IMAGE_TEXTURE_COUNT),
+                // The global set's texture is the frame's ground depth.
+                pool(DescriptorSetType::Global, 1, 0),
+                pool(DescriptorSetType::Layer, 0, 0),
+                pool(DescriptorSetType::DrawableUniform, 0, 0),
+                pool(DescriptorSetType::DrawableImage, IMAGE_TEXTURE_COUNT, IMAGE_TEXTURE_COUNT),
             ],
             depth24_stencil8,
             line_widths,
@@ -1473,6 +1478,20 @@ impl VulkanGpu {
             }
         }
 
+        // The global set's frame ground depth, or the placeholder image for a
+        // shader that doesn't read it.
+        let ground_depth = (type_ == DescriptorSetType::Global).then(|| {
+            let view = match resource(GLOBAL_GROUND_DEPTH_BINDING) {
+                Some(Resource::Texture(id)) => {
+                    self.textures.get(id).map(|texture| (texture.image.image_view(), texture.layout))
+                }
+                _ => None,
+            };
+            let (view, layout) =
+                view.unwrap_or((self.placeholder_image.image_view(), vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL));
+            vk::DescriptorImageInfo::default().image_view(view).image_layout(layout)
+        });
+
         let device = self.device.shared.device();
         let windows = if strides.iter().any(|&stride| stride > 0) { self.window_count } else { 1 };
         let mut sets = Vec::with_capacity(windows);
@@ -1490,20 +1509,28 @@ impl VulkanGpu {
                 .zip(&strides)
                 .map(|(&info, &stride)| info.offset(info.offset + window as u64 * stride))
                 .collect();
-            let writes: Vec<vk::WriteDescriptorSet<'_>> = descriptors
-                .iter()
-                .map(|&(binding, descriptor_type, index)| {
-                    let write = vk::WriteDescriptorSet::default()
+            let mut writes: Vec<vk::WriteDescriptorSet<'_>> =
+                Vec::with_capacity(descriptors.len() + usize::from(ground_depth.is_some()));
+            writes.extend(descriptors.iter().map(|&(binding, descriptor_type, index)| {
+                let write = vk::WriteDescriptorSet::default()
+                    .dst_set(set)
+                    .dst_binding(binding)
+                    .descriptor_type(descriptor_type);
+                if type_ == DescriptorSetType::DrawableImage {
+                    write.image_info(std::slice::from_ref(&image_infos[index]))
+                } else {
+                    write.buffer_info(std::slice::from_ref(&window_infos[index]))
+                }
+            }));
+            if let Some(ground_depth) = &ground_depth {
+                writes.push(
+                    vk::WriteDescriptorSet::default()
                         .dst_set(set)
-                        .dst_binding(binding)
-                        .descriptor_type(descriptor_type);
-                    if type_ == DescriptorSetType::DrawableImage {
-                        write.image_info(std::slice::from_ref(&image_infos[index]))
-                    } else {
-                        write.buffer_info(std::slice::from_ref(&window_infos[index]))
-                    }
-                })
-                .collect();
+                        .dst_binding(GLOBAL_GROUND_DEPTH_BINDING)
+                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                        .image_info(std::slice::from_ref(ground_depth)),
+                );
+            }
             // SAFETY: the set is new, and the writes name live resources of
             // the descriptor types of its layout.
             unsafe { device.update_descriptor_sets(&writes, &[]) };

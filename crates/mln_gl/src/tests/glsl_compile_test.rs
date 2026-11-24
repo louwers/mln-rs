@@ -1,7 +1,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 //! Compiles and links every built-in program's GLSL on an OpenGL ES 3.0
 //! context and on a desktop OpenGL one, through `GlGpu`, with the keys of
-//! the renderer's variants: in both projection variants, with every property
+//! the renderer's variants: in each projection variant, with every property
 //! the program declares read per vertex and with every one read from its
 //! uniform. Also checks each program against its tables:
 //! every uniform block is as large as the UBO the renderer writes for it,
@@ -12,6 +12,8 @@ use std::collections::BTreeSet;
 use mln_gfx::RendererBackend as _;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_gfx::shaders::programs::projection_variants;
+use mln_gfx::shaders::shader_defines::{ID_GROUND_DEM_TEXTURE, ID_GROUND_DEPTH_TEXTURE};
 use mln_util::hash::HashSet;
 
 use crate::shaders::glsl_sources::PRELUDE;
@@ -69,12 +71,14 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
     use mln_gfx::shaders::programs::{
-        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_PROBE,
-        VERTEX_TEXEL,
+        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, HILLSHADE_SLOPES, SKY, TERRAIN,
+        TERRAIN_DEPTH, TERRAIN_HILLSHADE, TERRAIN_PROBE, VERTEX_TEXEL,
     };
     // The terrain shows its drapes, where the draped layers count their
-    // draws.
+    // draws: a hillshade's too, which drapes no slopes for the inspector.
     let not_layers = [
+        &HILLSHADE_SLOPES,
+        &TERRAIN_HILLSHADE,
         &CLIPPING_MASK,
         &COLLISION_BOX,
         &COLLISION_CIRCLE,
@@ -82,8 +86,9 @@ fn every_layer_program_shows_the_overdraw_inspector() {
         &SKY,
         &ATMOSPHERE,
         &TERRAIN,
-        &VERTEX_TEXEL,
+        &TERRAIN_DEPTH,
         &TERRAIN_PROBE,
+        &VERTEX_TEXEL,
     ];
     for &(program, source) in BUILT_INS {
         if !not_layers.contains(&program) {
@@ -174,7 +179,8 @@ fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
         if !program.properties.is_empty() {
             property_sets.push(program.properties);
         }
-        for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
+        let stands = projection_variants(program).contains(&ProjectionVariant::Terrain);
+        for &variant in projection_variants(program) {
             for (i, &property_set) in property_sets.iter().enumerate() {
                 let what = format!("{} ({variant:?}, {})", program.name, ["attributes", "uniforms"][i]);
                 let key = program.variant_key(&parameters, property_set, variant);
@@ -194,7 +200,8 @@ fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
                         .uniform_blocks
                         .iter()
                         .find(|info| info.id == block.id)
-                        .unwrap_or_else(|| panic!("{what}: block at {} without a table entry", block.id));
+                        .unwrap_or_else(|| panic!("{what}: block at {} without a table entry", block.id))
+                        .in_variant(variant.stands());
                     assert_eq!(
                         block.size.next_multiple_of(16),
                         info.size,
@@ -212,7 +219,12 @@ fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
                 if i == 0 {
                     assert!(!locations.is_empty(), "{what}: no vertex attributes");
                 }
-                for info in source.textures {
+                // Only the terrain variants of a standing layer's program read
+                // the ground's DEM and depth.
+                let reads = |id: usize| {
+                    variant.stands() || !stands || (id != ID_GROUND_DEM_TEXTURE && id != ID_GROUND_DEPTH_TEXTURE)
+                };
+                for info in source.textures.iter().filter(|info| reads(info.id)) {
                     assert!(program.textures.contains(&info.id), "{what}: no sampler {}", info.name);
                 }
             }

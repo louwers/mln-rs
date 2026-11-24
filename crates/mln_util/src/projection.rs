@@ -55,6 +55,9 @@ impl Projection {
         scale * TILE_SIZE_D
     }
 
+    /// The meters along the ground that a pixel spans at `lat` and `zoom`,
+    /// on the sphere of [`EARTH_RADIUS_M`]. Heights scale on it too: a meter
+    /// of altitude spans as many pixels as a meter along the ground.
     #[must_use]
     pub fn meters_per_pixel_at_latitude(lat: f64, zoom: f64) -> f64 {
         let constrained_zoom = clamp_f64(zoom, MIN_ZOOM, MAX_ZOOM);

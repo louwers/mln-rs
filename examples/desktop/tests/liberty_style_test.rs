@@ -117,8 +117,8 @@ fn satellite_3d_adds_mapterhorn_terrain_to_satellite() {
     }
 }
 
-/// Liberty 3D: Liberty, then a Mapterhorn DEM, the style's terrain on it, and
-/// a hillshade of it right under Liberty's buildings.
+/// Liberty 3D: Liberty, then a Mapterhorn DEM, the style's terrain on it, a
+/// hillshade of it right under Liberty's buildings, and a sky.
 #[test]
 #[ignore = "needs network access"]
 fn liberty_3d_shades_the_ground_under_libertys_buildings() {
@@ -135,4 +135,5 @@ fn liberty_3d_shades_the_ground_under_libertys_buildings() {
     let json = map.style_root_property("terrain").and_then(Completion::wait).unwrap().unwrap();
     let set: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!(set["source"], styles::TERRAIN_SOURCE);
+    assert!(map.style_root_property("sky").and_then(Completion::wait).unwrap().is_some(), "Liberty 3D's sky");
 }

@@ -27,6 +27,13 @@ impl UniformBufferArray {
         self.epoch
     }
 
+    /// Gives the array a new epoch, for bindings of its buffers to make
+    /// again, though they are the same: for what bindings take from where
+    /// they take the array's buffers, such as the frame's ground depth.
+    pub(crate) fn renew_epoch(&mut self, device: &mut Device) {
+        self.epoch = device.next_uniform_epoch();
+    }
+
     /// The buffer `id`, if the array has one.
     pub(crate) fn get(&self, id: usize) -> Option<&Buffer> {
         self.buffers.get(id).and_then(Option::as_ref)

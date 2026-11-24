@@ -36,14 +36,15 @@ pub enum RendererEvent {
     RenderFrameStarted,
     /// The renderer drew a frame.
     RenderFrameFinished {
-        /// `Full` when everything the frame shows has loaded and its camera
+        /// `Full` when everything the frame shows has loaded, its camera
         /// stood as it would on the terrain's current ground
-        /// ([`UpdateParameters::elevation`]), though some of it may have
-        /// failed to draw (`error`).
+        /// ([`UpdateParameters::elevation`]), and no drape waits for a later
+        /// frame, though some of it may have failed to draw (`error`).
         ///
         /// [`UpdateParameters::elevation`]: crate::UpdateParameters::elevation
         mode: RenderMode,
-        /// The frame has transitions still running.
+        /// The frame has transitions still running, or drapes to draw again
+        /// at rest.
         needs_repaint: bool,
         /// When, without `needs_repaint`, the map changes next though
         /// nothing asks for a frame before: a frame then places the symbols

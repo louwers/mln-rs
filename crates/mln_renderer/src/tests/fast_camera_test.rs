@@ -295,6 +295,7 @@ impl Scene {
             tile_lod_zoom_shift: 0.0,
             tile_lod_mode: TileLodMode::Default,
             subdivision_granularity: SubdivisionGranularitySetting::none(),
+            layout_terrain: false,
             global_state: None,
             is_update_synchronous: false,
             font_faces: None,

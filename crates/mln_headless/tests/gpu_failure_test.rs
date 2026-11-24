@@ -1,7 +1,7 @@
 // Frames that fail on the GPU, through a GPU that fails a kind of pass, the
 // draws in one, or a shader, as a device out of memory or a backend that
-// rejects a shader would: a still image ends with the error, and the next
-// one draws once the device works;
+// rejects a shader would: a still image ends with the error, on a map with
+// terrain and on one without, and the next one draws once the device works;
 // a continuous map reports the failure once, shows what did draw, draws
 // again only now and then, goes idle once the failure lasts, and shows the
 // map once the device works. A still whose target can't make its textures
@@ -42,13 +42,15 @@ fn sea_level_png() -> Vec<u8> {
 }
 
 /// A white map with a red square around the center, a blue line across it
-/// and the hillshade of flat ground, which prepares in a render target.
-fn style() -> String {
-    styled(true)
+/// and the hillshade of flat ground, which prepares in a render target; with
+/// a terrain over that ground if `terrain`.
+fn style(terrain: bool) -> String {
+    styled(terrain, true)
 }
 
 /// [`style`], with its line if `line`.
-fn styled(line: bool) -> String {
+fn styled(terrain: bool, line: bool) -> String {
+    let terrain = if terrain { r#""terrain": {"source": "dem"},"# } else { "" };
     let line = if line {
         r#",{
             "id": "line",
@@ -65,6 +67,7 @@ fn styled(line: bool) -> String {
             "version": 8,
             "center": [0, 0],
             "zoom": 2,
+            {terrain}
             "sources": {{
                 "dem": {{"type": "raster-dem", "tiles": ["dem/{{z}}/{{x}}/{{y}}.png"], "tileSize": 256, "maxzoom": 10}},
                 "shapes": {{
@@ -108,9 +111,9 @@ fn styled(line: bool) -> String {
 /// What a [`Failing`] GPU fails.
 #[derive(Clone, Copy, Debug)]
 enum Fail {
-    /// Beginning the passes of this label: "main buffer" for the frame's,
-    /// "render target" for a layer's render target's, such as a
-    /// hillshade's.
+    /// Beginning the passes of this label: "drape" for the drapes', "main
+    /// buffer" for the frame's, "render target" for a layer's render
+    /// target's, such as a hillshade's.
     Passes(&'static str),
     /// The draws in the passes of this label, which begin.
     DrawsIn(&'static str),
@@ -232,8 +235,8 @@ struct FailingMap {
 }
 
 impl FailingMap {
-    fn new(mode: MapMode, fail: Fail) -> Self {
-        Self::with_style(mode, &style(), fail)
+    fn new(mode: MapMode, terrain: bool, fail: Fail) -> Self {
+        Self::with_style(mode, &style(terrain), fail)
     }
 
     fn with_style(mode: MapMode, style: &str, fail: Fail) -> Self {
@@ -248,6 +251,8 @@ impl FailingMap {
             response.data = Some(Arc::clone(&dem));
             Some(response)
         });
+        file_source
+            .set_response(Kind::Glyphs, |_| Some(crate::support::file_response("test/fixtures/resources/glyphs.pbf")));
         let options = MapOptions { map_mode: mode, size, ..Default::default() };
         let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
         let events = map.renderer_events();
@@ -356,44 +361,40 @@ fn assert_failed(ended: Option<Result<Vec<u8>, Error>>, fail: Fail) {
     assert!(error.message.contains("failed on purpose"), "{fail:?}: {error}");
 }
 
-/// The kinds of failures of a map.
-const FAILURES: [Fail; 6] = [
-    Fail::Passes("main buffer"),
-    Fail::Passes("render target"),
-    Fail::DrawsIn("main buffer"),
-    Fail::DrawsIn("render target"),
-    Fail::Shaders("Line"),
-    Fail::Submits,
-];
-
-/// A still whose one frame fails, in any of its passes or draws, ends with
-/// the GPU's error rather than a wrong image. A still asked for right after
-/// draws what a new map's does.
-#[test]
-fn a_still_whose_frame_fails_ends_with_the_error() {
-    let new = FailingMap::new(MapMode::Static, Fail::DrawsIn("none")).still();
-    let new = new.expect("a new map's still never ended").expect("a new map's still");
-    for fail in FAILURES {
-        let mut map = FailingMap::new(MapMode::Static, fail);
-        map.failing = 1;
-        assert_failed(map.still(), fail);
-        assert_eq!((0, 1), (map.failing, map.frames()), "{fail:?}");
-        let image = map.still().expect("the next still never ended").expect("the next still");
-        assert_eq!(2, map.frames(), "{fail:?}");
-        assert!(new == image, "the next still after {fail:?} draws other pixels than a new map's");
+/// The kinds of failures of a map with or without `terrain`.
+fn failures(terrain: bool) -> Vec<Fail> {
+    let mut failures = vec![
+        Fail::Passes("main buffer"),
+        Fail::Passes("render target"),
+        Fail::DrawsIn("main buffer"),
+        Fail::DrawsIn("render target"),
+        Fail::Shaders("Line"),
+        Fail::Submits,
+    ];
+    if terrain {
+        failures.extend([Fail::Passes("drape"), Fail::DrawsIn("drape")]);
     }
+    failures
 }
 
-/// A still whose frames fail in every frame ends with the GPU's error, in
-/// one frame, each time it is asked for.
+/// A still whose one frame fails, in any of its passes or draws, on a map
+/// with terrain and on one without, ends with the GPU's error rather than a
+/// wrong image. A still asked for right after draws what a new map's does.
 #[test]
-fn a_still_whose_frames_always_fail_ends_with_the_error_each_time() {
-    let mut map = FailingMap::new(MapMode::Static, Fail::Passes("render target"));
-    map.failing = usize::MAX;
-    assert_failed(map.still(), map.fail);
-    assert_eq!(1, map.frames());
-    assert_failed(map.still(), map.fail);
-    assert_eq!(2, map.frames());
+fn a_still_whose_frame_fails_ends_with_the_error() {
+    for terrain in [false, true] {
+        let new = FailingMap::new(MapMode::Static, terrain, Fail::DrawsIn("none")).still();
+        let new = new.expect("a new map's still never ended").expect("a new map's still");
+        for fail in failures(terrain) {
+            let mut map = FailingMap::new(MapMode::Static, terrain, fail);
+            map.failing = 1;
+            assert_failed(map.still(), fail);
+            assert_eq!((0, 1), (map.failing, map.frames()), "{fail:?}");
+            let image = map.still().expect("the next still never ended").expect("the next still");
+            assert_eq!(2, map.frames(), "{fail:?}");
+            assert!(new == image, "the next still after {fail:?} draws other pixels than a new map's");
+        }
+    }
 }
 
 /// A still whose target can't make the textures to draw it into, here for
@@ -408,6 +409,33 @@ fn a_still_whose_target_cant_make_its_textures_ends_with_the_error() {
     map.load_style_json(r#"{"version": 8, "sources": {}, "layers": []}"#);
     let error = frontend.render(&mut map).err().expect("a still of a target without textures");
     assert_eq!(ErrorKind::InvalidState, error.kind, "{error}");
+}
+
+/// A still whose drapes fail to draw once, in its one frame, ends with the
+/// GPU's error rather than an image without them, and the next still draws
+/// them, as a new map's does.
+#[test]
+fn a_still_whose_drapes_fail_to_draw_once_ends_with_the_error() {
+    let mut map = FailingMap::new(MapMode::Static, true, Fail::Passes("drape"));
+    map.failing = 1;
+    assert_failed(map.still(), map.fail);
+    assert_eq!((0, 1), (map.failing, map.frames()));
+    let image = map.still().expect("the next still never ended").expect("the next still");
+    assert_eq!(2, map.frames());
+    let new = FailingMap::new(MapMode::Static, true, map.fail).still().expect("a new map's still never ended").unwrap();
+    assert!(new == image, "a new map's still draws other pixels");
+}
+
+/// A still whose drapes fail to draw in every frame ends with the GPU's
+/// error, in one frame, each time it is asked for.
+#[test]
+fn a_still_whose_drapes_fail_to_draw_in_every_frame_ends_with_the_error() {
+    let mut map = FailingMap::new(MapMode::Static, true, Fail::Passes("drape"));
+    map.failing = usize::MAX;
+    assert_failed(map.still(), map.fail);
+    assert_eq!(1, map.frames());
+    assert_failed(map.still(), map.fail);
+    assert_eq!(2, map.frames());
 }
 
 fn idle(events: &[MapEvent]) -> bool {
@@ -427,28 +455,30 @@ fn idle_image(style: &str) -> Vec<u8> {
 }
 
 /// A continuous map whose line's shader always fails, as on a backend that
-/// rejects it, shows the rest of the map, as a map without the line does,
-/// and reports the failure once. It goes idle, after drawing again once, and
-/// draws no more on its own; whatever else draws a frame, such as a camera
-/// change, still draws.
+/// rejects it, with terrain and without, shows the rest of the map, as a
+/// map without the line does, and reports the failure once. It goes idle,
+/// after drawing again once, and draws no more on its own; whatever else
+/// draws a frame, such as a camera change, still draws.
 #[test]
 fn a_continuous_map_whose_draw_always_fails_shows_the_rest_and_goes_idle() {
-    let expected = idle_image(&styled(false));
-    assert!(expected != idle_image(&style()), "the line draws nothing");
-    let mut map = FailingMap::new(MapMode::Continuous, Fail::Shaders("Line"));
-    map.failing = usize::MAX;
-    let (events, went_idle) = map.run(Duration::from_secs(10), idle);
-    assert!(went_idle, "the map never went idle: {events:?}");
-    assert_eq!(1, errors(&events), "{events:?}");
-    assert!(map.shown.as_ref() == Some(&expected), "the map shows other pixels");
+    for terrain in [false, true] {
+        let expected = idle_image(&styled(terrain, false));
+        assert!(expected != idle_image(&style(terrain)), "terrain {terrain}: the line draws nothing");
+        let mut map = FailingMap::new(MapMode::Continuous, terrain, Fail::Shaders("Line"));
+        map.failing = usize::MAX;
+        let (events, went_idle) = map.run(Duration::from_secs(10), idle);
+        assert!(went_idle, "terrain {terrain}: the map never went idle: {events:?}");
+        assert_eq!(1, errors(&events), "terrain {terrain}: {events:?}");
+        assert!(map.shown.as_ref() == Some(&expected), "terrain {terrain}: the map shows other pixels");
 
-    let frames = map.frames();
-    let (events, _) = map.run(Duration::from_millis(1500), |_| false);
-    assert!(frames == map.frames() && events.is_empty(), "the idle map drew: {events:?}");
-    map.map.jump_to(&mln_map::CameraOptions { zoom: Some(2.5), ..Default::default() });
-    let (events, went_idle) = map.run(Duration::from_secs(10), idle);
-    assert!(went_idle && map.frames() > frames, "{events:?}");
-    assert_eq!(0, errors(&events), "the same failure reported again");
+        let frames = map.frames();
+        let (events, _) = map.run(Duration::from_millis(1500), |_| false);
+        assert!(frames == map.frames() && events.is_empty(), "terrain {terrain}: the idle map drew: {events:?}");
+        map.map.jump_to(&mln_map::CameraOptions { zoom: Some(2.5), ..Default::default() });
+        let (events, went_idle) = map.run(Duration::from_secs(10), idle);
+        assert!(went_idle && map.frames() > frames, "terrain {terrain}: {events:?}");
+        assert_eq!(0, errors(&events), "terrain {terrain}: the same failure reported again");
+    }
 }
 
 /// A continuous map whose frame fails once, as for a failure that passes,
@@ -456,18 +486,76 @@ fn a_continuous_map_whose_draw_always_fails_shows_the_rest_and_goes_idle() {
 /// map that never failed shows, and goes idle.
 #[test]
 fn a_continuous_map_whose_frame_fails_once_reports_it_and_draws_again() {
-    let expected = idle_image(&style());
     // A shader that failed would fail every frame: only a pass can fail once.
-    for fail in [Fail::Passes("main buffer"), Fail::DrawsIn("main buffer")] {
-        let mut map = FailingMap::new(MapMode::Continuous, fail);
-        assert!(map.run(Duration::from_secs(10), idle).1, "{fail:?}: a new map never went idle");
-        let frames = map.frames();
-        map.failing = 1;
-        map.map.trigger_repaint();
-        let (events, went_idle) = map.run(Duration::from_secs(10), idle);
-        assert!(went_idle, "{fail:?}: the map never went idle: {events:?}");
-        assert_eq!(1, errors(&events), "{fail:?}: {events:?}");
-        assert_eq!(frames + 2, map.frames(), "{fail:?}: the failed frame and the one that drew it again");
-        assert!(map.shown.as_ref() == Some(&expected), "{fail:?}: the map shows other pixels");
+    for terrain in [false, true] {
+        let expected = idle_image(&style(terrain));
+        for fail in [Fail::Passes("main buffer"), Fail::DrawsIn("main buffer")] {
+            let mut map = FailingMap::new(MapMode::Continuous, terrain, fail);
+            assert!(map.run(Duration::from_secs(10), idle).1, "{fail:?}: a new map never went idle");
+            let frames = map.frames();
+            map.failing = 1;
+            map.map.trigger_repaint();
+            let (events, went_idle) = map.run(Duration::from_secs(10), idle);
+            assert!(went_idle, "terrain {terrain}, {fail:?}: the map never went idle: {events:?}");
+            assert_eq!(1, errors(&events), "terrain {terrain}, {fail:?}: {events:?}");
+            let drawn = map.frames() - frames;
+            assert_eq!(2, drawn, "terrain {terrain}, {fail:?}: the failed frame and the one that drew it again");
+            assert!(map.shown.as_ref() == Some(&expected), "terrain {terrain}, {fail:?}: the map shows other pixels");
+        }
     }
+}
+
+/// A map over flat terrain, seen pitched, of a red label at the center, the
+/// only layer, with a square around the center, which drapes, for a layer
+/// added later.
+const LABEL_STYLE: &str = r#"{
+    "version": 8,
+    "center": [0, 0],
+    "zoom": 4,
+    "pitch": 40,
+    "glyphs": "glyphs/{fontstack}/{range}.pbf",
+    "terrain": {"source": "dem"},
+    "sources": {
+        "dem": {"type": "raster-dem", "tiles": ["dem/{z}/{x}/{y}.png"], "tileSize": 256, "maxzoom": 10},
+        "square": {"type": "geojson", "data": {"type": "Polygon", "coordinates": [[[-5, -5], [5, -5], [5, 5], [-5, 5], [-5, -5]]]}},
+        "label": {"type": "geojson", "data": {"type": "Point", "coordinates": [0, 0]}}
+    },
+    "layers": [
+        {"id": "label", "type": "symbol", "source": "label",
+         "layout": {"text-field": "HH", "text-font": ["Open Sans Regular"], "text-size": 24},
+         "paint": {"text-color": "red"}}
+    ]
+}"#;
+
+/// How many of the RGBA `pixels` are `kind`.
+fn count(pixels: &[u8], kind: fn([u8; 4]) -> bool) -> usize {
+    pixels.as_chunks::<4>().0.iter().filter(|&&pixel| kind(pixel)).count()
+}
+
+/// A continuous map over terrain whose shader of the ground's depth always
+/// fails, as on a backend that rejects it, reports the failure once, and
+/// shows its label, in front of the ground, which then hides nothing. A
+/// layer that drapes, added once its frames have failed without one, draws
+/// on the surface.
+#[test]
+fn a_continuous_map_whose_ground_depth_shader_fails_hides_nothing_and_draws_the_surface() {
+    let mut map = FailingMap::with_style(MapMode::Continuous, LABEL_STYLE, Fail::Shaders("TerrainDepth"));
+    map.failing = usize::MAX;
+    let (mut events, went_idle) = map.run(Duration::from_secs(10), idle);
+    assert!(went_idle, "the map never went idle");
+    let red = |[r, g, b, _]: [u8; 4]| r > 200 && g < 60 && b < 60;
+    let shown = map.shown.take().expect("the map showed nothing");
+    assert!(count(&shown, red) >= 40, "{} opaque red pixels of the label", count(&shown, red));
+
+    let square = r#"{"id": "square", "type": "fill", "source": "square", "paint": {"fill-color": "lime"}}"#;
+    map.map.edit_style(|style| style.add_layer_json(square, Some("label"))).unwrap();
+    let (later, went_idle) = map.run(Duration::from_secs(10), idle);
+    events.extend(later);
+    assert!(went_idle, "the map never went idle with the square");
+    let shown = map.shown.take().expect("the map showed nothing");
+    let lime = |[r, g, b, _]: [u8; 4]| r < 60 && g > 200 && b < 60;
+    assert!(count(&shown, lime) >= 1000, "{} lime pixels of the square", count(&shown, lime));
+    assert!(count(&shown, red) >= 40, "{} opaque red pixels of the label over the square", count(&shown, red));
+    let reported: Vec<_> = events.iter().filter(|event| matches!(event, MapEvent::RenderError(_))).collect();
+    assert_eq!(1, reported.len(), "{reported:?}");
 }

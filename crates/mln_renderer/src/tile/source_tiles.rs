@@ -164,9 +164,12 @@ pub(crate) struct SourceTiles {
     /// unloads, or the tile could not come back while its symbols show.
     max_content_elevation: f32,
     style: Option<Arc<SourceStyle>>,
-    /// The last update's ideal cover, inside the source's bounds, for the
-    /// benchmarks' measure of what a frame shows (`crate::bench`).
-    #[cfg(feature = "bench")]
+    /// The last update's ideal cover, inside the source's bounds, while
+    /// terrain draws: the tiles whose DEM tiles off the surface's the terrain
+    /// requests for a standing layer
+    /// ([`TerrainCover::request_standing`](crate::terrain::TerrainCover::request_standing)).
+    /// The benchmarks keep it always, for their measure of what a frame
+    /// shows (`crate::bench`). Empty after an update that made no cover.
     pub(crate) ideal: Vec<OverscaledTileID>,
 }
 
@@ -282,8 +285,8 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
         if !found && parameters.view.is_globe() {
             found = self.source.cache_pop_any_wrap(id, self.ctx);
         }
-        // A tile cached before the pixel ratio changed lays out again as
-        // it is retained.
+        // A tile cached before the pixel ratio changed, or laid out without
+        // the terrain it needs, lays out again as it is retained.
         if found {
             return Some(*id);
         }
@@ -292,6 +295,7 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
             pixel_ratio: parameters.pixel_ratio,
             show_collision_boxes: parameters.debug_options.contains(MapDebugOptions::COLLISION),
             subdivision_granularity: parameters.subdivision_granularity,
+            terrain: parameters.layout_terrain,
             first_load: true,
         };
         let tile = self.source.info.new_tile(*id, params)?;
@@ -306,7 +310,7 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
                 Some(copy) => tile.start_as_copy(copy),
                 None => tile.start_load(),
             }
-            tile.set_style(style, params.pixel_ratio, params.subdivision_granularity);
+            tile.set_style(style, params.pixel_ratio, params.subdivision_granularity, params.terrain);
         });
         Some(*id)
     }
@@ -341,12 +345,20 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
                 tile.set_update_parameters(update_parameters);
                 tile.set_necessity(necessity);
             }
-            // A new pixel ratio lays the tile out again, without the
-            // relayout that drops the cached tiles.
-            let pixel_ratio_changed =
-                tile.tile().pipeline.layout().is_some_and(|layout| layout.params.pixel_ratio != parameters.pixel_ratio);
-            if needs_relayout || pixel_ratio_changed {
-                tile.set_style(style, parameters.pixel_ratio, parameters.subdivision_granularity);
+            // A new pixel ratio lays the tile out again, as does terrain
+            // that a tile laid out without needs, without the relayout that
+            // drops the cached tiles.
+            let outdated = tile.tile().pipeline.layout().is_some_and(|layout| {
+                layout.params.pixel_ratio != parameters.pixel_ratio
+                    || (parameters.layout_terrain && !layout.params.terrain)
+            });
+            if needs_relayout || outdated {
+                tile.set_style(
+                    style,
+                    parameters.pixel_ratio,
+                    parameters.subdivision_granularity,
+                    parameters.layout_terrain,
+                );
             }
         });
     }
@@ -400,7 +412,6 @@ impl SourceTiles {
             last_subdivision_granularity: SubdivisionGranularitySetting::none(),
             max_content_elevation: 0.0,
             style: None,
-            #[cfg(feature = "bench")]
             ideal: Vec::new(),
         }
     }
@@ -611,7 +622,6 @@ impl SourceTiles {
             // So are the tiles that went on loading in the cache.
             self.cache_release_loading(ctx, |_| false);
             self.rendered.clear();
-            #[cfg(feature = "bench")]
             self.ideal.clear();
             if self.info.kind != TileKind::Geometry {
                 std::mem::swap(&mut self.masked, &mut self.masked_before);
@@ -748,9 +758,8 @@ impl SourceTiles {
             tile_range = Some(TileRange::from_lat_lng_bounds_range(bounds, zoom_range.min, max_zoom as u8));
         }
 
-        #[cfg(feature = "bench")]
-        {
-            self.ideal.clear();
+        self.ideal.clear();
+        if cfg!(feature = "bench") || parameters.terrain.is_some() {
             let inside = |id: &&OverscaledTileID| tile_range.as_ref().is_none_or(|range| range.contains(&id.canonical));
             self.ideal.extend(ideal_tiles.iter().filter(inside));
         }
@@ -1138,9 +1147,16 @@ impl SourceTiles {
     /// The features the source's rendered tiles draw in `geometry`, screen
     /// points from the top left, traced past the globe's limb
     /// ([`query_screen_geometry`](crate::geometry::feature_index::query_screen_geometry)).
+    /// Over terrain, `ground` gives where each point meets the ground, which
+    /// the tiles are queried at in place of sea level.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the query geometry and its ground, camera, layers, options, global state and projection of a feature query"
+    )]
     pub(crate) fn query_rendered_features(
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
+        ground: Option<&crate::geometry::feature_index::QueryGround<'_>>,
         view: &mln_map_types::View,
         layers: &crate::geometry::feature_index::QueryLayers<'_>,
         options: &crate::query::RenderedQueryOptions,
@@ -1169,7 +1185,10 @@ impl SourceTiles {
             )
         };
 
-        let mut query_geometry: Vec<geometry::Point<f64>> = geometry.iter().map(to_world).collect();
+        let mut query_geometry: Vec<geometry::Point<f64>> = match ground {
+            Some(ground) => ground.world.clone(),
+            None => geometry.iter().map(to_world).collect(),
+        };
 
         // The bounding box of points, of which the geometry has at least one.
         let envelope = |points: &mut dyn Iterator<Item = (f64, f64)>| {
@@ -1181,7 +1200,9 @@ impl SourceTiles {
             (min, max)
         };
 
-        if globe {
+        // Over terrain the ground's points lie side by side already
+        // ([`QueryGround::world`](crate::geometry::feature_index::QueryGround)).
+        if globe && ground.is_none() {
             // The globe has no world copies, so a box across the
             // antimeridian lands on the rest of the world, which shows when
             // its slightly shrunken corners fall outside it. It moves to the
@@ -1327,6 +1348,7 @@ impl SourceTiles {
                         &tile.id,
                         &mut result,
                         &tile_space_query_geometry,
+                        ground,
                         view,
                         layers,
                         options,
@@ -1342,6 +1364,7 @@ impl SourceTiles {
                     &tile.id,
                     &mut found,
                     &tile_space_query_geometry,
+                    ground,
                     view,
                     layers,
                     options,

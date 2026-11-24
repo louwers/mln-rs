@@ -569,7 +569,8 @@ impl TypedLayer for RenderColorReliefLayer {
     }
 
     /// Drops the DEM textures of the buckets of tiles the frame doesn't
-    /// draw, in every frame, including one the layer draws nothing in.
+    /// draw, in every frame, including one the layer draws nothing in. The
+    /// frame's draws and its drapes' share the others.
     fn update(&mut self, _params: &mut LayerUpdateParameters<'_>, tiles: &[FrameTile<'_, ColorRelief>]) {
         let live_buckets = &mut self.live_buckets;
         live_buckets.clear();

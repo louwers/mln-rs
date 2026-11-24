@@ -50,7 +50,9 @@ buttons, a compass, attributions, and a panel that lists the gestures and has a
 choice of `projection` and switches for `compare`, `debug` and `freeBearing`.
 The style picker's Satellite 3D and Liberty 3D are VersaTiles' Satellite and
 OpenFreeMap's Liberty with [Mapterhorn](https://mapterhorn.com)'s terrain added
-once they load, and Liberty 3D with a hillshade of it (web/styles.ts).
+once they load, and Liberty 3D with a hillshade of it and a sky (web/styles.ts).
+The camera tilts up to 85°, past the map's default of 60°, where fog shows over
+terrain.
 
 ## How it runs
 
@@ -112,9 +114,9 @@ doesn't have. `--module` picks mln_web_webgl or mln_web_shaper instead.
 
 `mise run web:check` tests the browser build against the native renderer:
 
-1. It loads views of the render test suite in headless Chromium, through
+1. It loads views of the render test suites in headless Chromium, through
    Playwright, offline, with every fixture served from the suite's cache
-   database.
+   database or GL JS's suite's assets.
 2. The page reads each frame back from the canvas, in the task that drew it. A
    screenshot won't do, because headless Chromium composites WebGPU canvases as
    white.

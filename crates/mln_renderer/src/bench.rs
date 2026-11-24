@@ -131,6 +131,7 @@ impl TileLayout {
                 pixel_ratio: 1.0,
                 show_collision_boxes: false,
                 subdivision_granularity: style.get_projection().get_subdivision_granularity(),
+                terrain: style.get_terrain().is_some(),
                 first_load: true,
             },
             resolved: Arc::default(),
@@ -284,7 +285,7 @@ impl SymbolView {
         let previous = Placement::new_default();
         let layers: Vec<&dyn RenderLayer> = self.layers.iter().map(|layer| -> &dyn RenderLayer { layer }).collect();
         let mut buckets = crate::render_layer::HeldBuckets::take();
-        let inputs = PlacementInputs::new(&self.update, &layers, &buckets);
+        let inputs = PlacementInputs::new(&self.update, None, &layers, &buckets);
         let mut placement = Placement::create(Arc::new(inputs), self.update.time_point, Some(previous));
         placement.place(&mut buckets);
         buckets.restore();
@@ -647,6 +648,7 @@ mod tests {
             update_id: 0,
             cross_source_collisions: true,
             fast_pfor_enabled: false,
+            terrain_skirt_length: mln_map_types::TerrainSkirtLength::Auto,
             elevation: None,
             tile_lod_min_radius: 3.0,
             tile_lod_scale: 1.0,

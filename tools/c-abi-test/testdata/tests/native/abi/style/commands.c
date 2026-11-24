@@ -750,6 +750,26 @@ static void the_projection_and_the_sky_change_where_the_library_can(void) {
   mln_test_destroy_runtime(runtime);
 }
 
+// A terrain that the style loaded with reads back as the style holds it, with
+// the exaggeration as a number.
+static void a_loaded_terrain_reads_back(void) {
+  mln_runtime runtime = mln_test_create_runtime();
+  mln_map map = mln_test_create_map(runtime);
+  mln_test_load_style_and_wait(
+    map, MLN_BUFFER_LITERAL(
+           "{\"version\":8,\"sources\":{\"dem\":{\"type\":\"raster-dem\","
+           "\"tiles\":[\"fixture://dem/{z}/{x}/{y}.png\"]}},\"layers\":[],"
+           "\"terrain\":{\"source\":\"dem\",\"exaggeration\":2}}"
+         )
+  );
+  EXPECT_ROOT_PROPERTY(
+    "{\"source\":\"dem\",\"exaggeration\":2.0}", map, "terrain"
+  );
+
+  mln_test_destroy_map(map);
+  mln_test_destroy_runtime(runtime);
+}
+
 MLN_TEST_GROUP {
   RUN_TEST(style_commands_copy_inputs_and_fail_on_duplicate_or_missing_ids);
   RUN_TEST(missing_style_ids_report_not_found);
@@ -762,4 +782,5 @@ MLN_TEST_GROUP {
   RUN_TEST(other_root_properties_read_back_as_loaded_and_reject_changes);
   RUN_TEST(the_projection_and_the_sky_change_where_the_library_can);
   RUN_TEST(the_terrain_changes_and_reads_back);
+  RUN_TEST(a_loaded_terrain_reads_back);
 }

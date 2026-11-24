@@ -19,6 +19,12 @@
 // roofs read, by the vertex's index. A layer with a pattern draws instances
 // there too.
 //
+// Over terrain, the layer's draws are of its programs' terrain variant, which
+// raise each polygon by the ground at its centroid. A draw expands the
+// bucket's centroids, one a polygon, into one a vertex, which the roofs and
+// the instanced walls read as attributes, the walls that are quads of their
+// own as four a wall, and the pulled walls from a storage buffer.
+//
 // A translucent layer blends only its nearest surface over each pixel. Where
 // the layer composite's texture can draw with the frame's depth, the layer
 // draws into it once, opaque, and composites at its opacity. Elsewhere, and
@@ -29,6 +35,7 @@ use std::mem::offset_of;
 use std::sync::Arc;
 
 use mln_gfx::gpu::{Gpu, ShaderKey};
+use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::fill_extrusion_layer_ubo::{
     FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO,
 };
@@ -37,13 +44,15 @@ use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
-    ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_DRAWABLE_UBO, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_IMAGE_TEXTURE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE,
-    ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE,
-    ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO, ID_FILL_EXTRUSION_TILE_PROPS_UBO,
-    ID_FILL_EXTRUSION_WALL_PAINT, ID_FILL_EXTRUSION_WALL_VERTICES, ID_PROJECTION_UBO,
+    ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE,
+    ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_DRAWABLE_UBO,
+    ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_IMAGE_TEXTURE,
+    ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE,
+    ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO,
+    ID_FILL_EXTRUSION_TILE_PROPS_UBO, ID_FILL_EXTRUSION_WALL_CENTROIDS, ID_FILL_EXTRUSION_WALL_PAINT,
+    ID_FILL_EXTRUSION_WALL_VERTICES, ID_GROUND_DEM_TEXTURE,
 };
+use mln_gfx::shaders::terrain_ubo::GroundDrawableUBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::View;
 use mln_style::layer_type::LayerStyle;
@@ -64,7 +73,7 @@ use crate::bucket_geometry::{
 };
 use crate::buckets::fill_extrusion_bucket::{
     FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutSpec, FillExtrusionLayoutVertex,
-    FillExtrusionStaticVertex, FillExtrusionWallVertex, wall_quad_paint,
+    FillExtrusionStaticVertex, FillExtrusionWallVertex, vertex_centroids, wall_quad_centroids, wall_quad_paint,
 };
 use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::frame_projection::zero_to_one_clip_z;
@@ -90,6 +99,7 @@ use crate::render_light::EvaluatedLight;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
+use crate::terrain::write_projection;
 use crate::tile_matrix::{projection_data, to_projection_ubo};
 
 /// The pass the layer's draws draw in.
@@ -333,6 +343,9 @@ pub(crate) struct RenderFillExtrusionLayer {
     drawing: TileDraws<ExtrusionTile>,
     /// The frame's draws as the update makes them.
     draw_list: DrawList<ExtrusionUniforms, usize>,
+    /// Over terrain, the ground under each of the frame's draws, in the
+    /// order the update makes them.
+    grounds: Vec<GroundDrawableUBO>,
 
     /// The wall quad (`RenderStaticData::fill_extrusion_vertices`) of the
     /// instanced walls.
@@ -352,6 +365,7 @@ impl RenderFillExtrusionLayer {
             values,
             drawing: TileDraws::default(),
             draw_list: DrawList::default(),
+            grounds: Vec::new(),
             static_data_vertices: None,
             strip_indices: None,
             wall_indices: None,
@@ -368,6 +382,8 @@ fn opacity(evaluated: &EvaluatedLayer<FillExtrusion>) -> f32 {
 impl TypedLayer for RenderFillExtrusionLayer {
     type Type = FillExtrusion;
     type Drawing = TileDraws<ExtrusionTile>;
+
+    const STANDS: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -434,6 +450,11 @@ impl TypedLayer for RenderFillExtrusionLayer {
 
         let layer = &*self.values.evaluated;
         let cull_face_mode = paint_parameters.cull_back_faces();
+        // Over terrain, the draws are of the terrain variant, which stands
+        // on the ground.
+        let ground = paint_parameters.ground.clone();
+        let ground = ground.as_deref();
+        self.grounds.clear();
         for tile in render_tiles {
             let tile_id = tile.id();
             let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
@@ -455,6 +476,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
 
             let changes = entry.take_changes();
             let context = &mut *paint_parameters.context;
+            let read = ground.map(|ground| ground.read(&tile_id));
             let cached = match entry.value {
                 Some(cached) => {
                     if changes.paint {
@@ -464,7 +486,12 @@ impl TypedLayer for RenderFillExtrusionLayer {
                 }
                 None => entry.value.insert(builder.build(context, render_data, binders, &layer.paint)),
             };
-            for (index, draw) in cached.draws.iter_mut().enumerate() {
+            for index in 0..cached.draws.len() {
+                let draw = &mut cached.draws[index];
+                if let Some(read) = &read {
+                    draw.objects.set_texture(ID_GROUND_DEM_TEXTURE, Some(&read.texture));
+                    self.grounds.push(read.ubo);
+                }
                 draw.objects.set_cull_face_mode(cull_face_mode);
                 let frame_draw = FrameDraw {
                     priority: draw.priority,
@@ -486,8 +513,9 @@ impl TypedLayer for RenderFillExtrusionLayer {
         // The draws that composite draw opaque: the composite has the
         // layer's opacity.
         let opacity = if composite.is_some() { 1.0 } else { opacity };
+        let grounds = ground.map(|_| self.grounds.as_slice());
         self.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
-            Self::write_uniforms(layer, writer, light, state, opacity);
+            Self::write_uniforms(layer, grounds, writer, light, state, opacity);
         });
     }
 }
@@ -495,6 +523,11 @@ impl TypedLayer for RenderFillExtrusionLayer {
 impl RenderLayer for RenderFillExtrusionLayer {
     fn is_3d(&self) -> bool {
         true
+    }
+
+    #[cfg(test)]
+    fn keeps_vertices_of(&mut self, id: usize) -> bool {
+        self.drawing.tiles_mut().values_mut().any(|tile| tile.draws.iter().any(|draw| draw.objects.reads_vertices(id)))
     }
 
     // query
@@ -526,7 +559,7 @@ struct TileBuilder<'a> {
     /// The programs of the roofs and of the walls.
     program: &'static Program,
     wall_program: &'static Program,
-    projection_variant: mln_gfx::projection_variant::ProjectionVariant,
+    projection_variant: ProjectionVariant,
     /// How the walls draw.
     walls: Walls,
     /// The static quad, and the indexes the walls draw.
@@ -555,6 +588,11 @@ impl TileBuilder<'_> {
             return ExtrusionTile { draws: Vec::new(), paint_layout: 0, atlases: None };
         };
         let vertex_count = bucket.vertices.len();
+        // A bucket laid out before the style had terrain has no centroids to
+        // stand on: the tile draws once the one laid out for terrain comes.
+        if self.projection_variant.stands() && bucket.centroids.is_empty() {
+            return ExtrusionTile { draws: Vec::new(), paint_layout: 0, atlases: None };
+        }
         // A wall from each vertex to the next, but from the last, which
         // ends a ring.
         let walls = vertex_count.saturating_sub(1);
@@ -567,6 +605,11 @@ impl TileBuilder<'_> {
             let vertices = derived_vertices(geometry, &bucket.vertices);
             (vertices, wall_paint(context, geometry, binders, walls))
         });
+        // Over terrain, the centroid each vertex's polygon stands on.
+        let centroids = (self.projection_variant.stands()).then(|| vertex_centroids(&bucket.centroids, vertex_count));
+        let centroid_attribute = |vertices: SharedVertices| {
+            SharedAttribute::new(vertices, AttributeDataType::Short2, 0, size_of::<[i16; 2]>() as u32)
+        };
 
         // The roofs read the paint values per vertex, the instanced walls per
         // instance and the pulled walls by vertex index, from the same
@@ -579,6 +622,12 @@ impl TileBuilder<'_> {
         binders.bind(evaluated, paint, &mut vertex_attrs, &mut uniforms);
         let mut wall_attrs = VertexAttributeArray::new();
         let mut paint_layout = 0;
+        // The walls drawn as their own quads read four centroids a wall.
+        let quad_centroids =
+            centroids.as_ref().filter(|_| quads.is_some()).map(|centroids| wall_quad_centroids(centroids, walls));
+        // The centroids of the bucket's vertices, which the roofs read, and
+        // the instanced and pulled walls.
+        let vertex_centroids = centroids.map(|centroids| context.add_vertices(centroids));
         let (wall_instance_attrs, wall_vertex_count, wall_segments) = if let Some((quad_vertices, quad_paint)) = &quads
         {
             binders.bind(evaluated, paint, &mut wall_attrs, &mut wall_uniforms);
@@ -587,6 +636,10 @@ impl TileBuilder<'_> {
             }
             if let Some(quad_vertices) = quad_vertices {
                 read_wall_quads(&mut wall_attrs, quad_vertices);
+            }
+            if let Some(quad_centroids) = quad_centroids {
+                let quad_centroids = context.add_vertices(quad_centroids);
+                wall_attrs.set_shared(ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE, centroid_attribute(quad_centroids));
             }
             (None, 4 * walls, RenderStaticData::fill_extrusion_wall_segments(walls))
         } else if self.walls == Walls::Pulled {
@@ -600,6 +653,9 @@ impl TileBuilder<'_> {
             let mut instance_attrs = VertexAttributeArray::new();
             binders.bind(evaluated, paint, &mut instance_attrs, &mut wall_uniforms);
             read_wall_instances(&mut wall_attrs, &mut instance_attrs, self.static_vertices, &vertices);
+            if let Some(centroids) = &vertex_centroids {
+                instance_attrs.set_shared(ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE, centroid_attribute(centroids.clone()));
+            }
             let segments = vec![RenderStaticData::fill_extrusion_segment(walls)];
             (Some(instance_attrs), self.static_vertices.count(), segments)
         };
@@ -627,6 +683,9 @@ impl TileBuilder<'_> {
                 stride,
             ),
         );
+        if let Some(centroids) = &vertex_centroids {
+            vertex_attrs.set_shared(ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE, centroid_attribute(centroids.clone()));
+        }
 
         let atlases = self.has_pattern.then(|| tile_bucket.atlas_textures()).map(|atlases| {
             AtlasBinding::new(
@@ -640,7 +699,6 @@ impl TileBuilder<'_> {
                 false,
             )
         });
-        let mut draws = Vec::new();
         // The draws in color clip where the layer draws into depth first.
         let clip = self.depth_pass;
         let roofs = SharedGeometry {
@@ -651,13 +709,6 @@ impl TileBuilder<'_> {
             indexes: &triangles,
             segments: &bucket.triangle_segments,
         };
-        if !bucket.triangles.is_empty() && vertex_count > 0 {
-            if self.depth_pass {
-                draws.push(extrusion_draw(&shader, false, None, false, &roofs, atlases.as_ref()));
-            }
-            draws.push(extrusion_draw(&shader, false, color, clip, &roofs, atlases.as_ref()));
-        }
-        // A tile with one vertex has no wall.
         let walls_geometry = SharedGeometry {
             vertices: &wall_attrs,
             instances: wall_instance_attrs.as_ref(),
@@ -666,6 +717,14 @@ impl TileBuilder<'_> {
             indexes: self.static_indices,
             segments: &wall_segments,
         };
+        let mut draws = Vec::new();
+        if !bucket.triangles.is_empty() && vertex_count > 0 {
+            if self.depth_pass {
+                draws.push(extrusion_draw(&shader, false, None, false, &roofs, atlases.as_ref()));
+            }
+            draws.push(extrusion_draw(&shader, false, color, clip, &roofs, atlases.as_ref()));
+        }
+        // A tile with one vertex has no wall.
         if walls > 0 && wall_vertex_count > 0 {
             if self.depth_pass {
                 draws.push(extrusion_draw(&wall_shader, true, None, false, &walls_geometry, atlases.as_ref()));
@@ -676,6 +735,7 @@ impl TileBuilder<'_> {
             for draw in draws.iter_mut().filter(|draw| draw.walls) {
                 draw.objects.read_as_storage(ID_FILL_EXTRUSION_WALL_VERTICES, Some(vertices.clone()));
                 draw.objects.read_as_storage(ID_FILL_EXTRUSION_WALL_PAINT, paint.cloned());
+                draw.objects.read_as_storage(ID_FILL_EXTRUSION_WALL_CENTROIDS, vertex_centroids.clone());
             }
         }
 
@@ -746,18 +806,21 @@ impl RenderFillExtrusionLayer {
         parameters: &PaintParameters<'_>,
     ) -> ExtrusionUniforms {
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
-        const NEAR_CLIPPED: bool = true;
         let evaluated = &layer.paint;
         let state = parameters.view;
         let zoom = state.zoom() as f32;
         let tile_id = tile_id.to_unwrapped();
 
+        // Over terrain, the buildings share the surface's projection, whose
+        // depth theirs is tested against. A flat map draws them with the
+        // near plane further out, for the depth buffer's precision.
+        let near_clipped = parameters.ground.is_none();
         let mut projection = projection_data(
             &tile_id,
             parameters,
             *evaluated.fill_extrusion_translate.uniform(),
             *evaluated.fill_extrusion_translate_anchor.uniform(),
-            NEAR_CLIPPED,
+            near_clipped,
             IN_VIEWPORT_PIXEL_UNITS,
             None,
             false,
@@ -823,9 +886,11 @@ impl RenderFillExtrusionLayer {
     }
 
     /// Writes the layer's buffers of the frame's draws, which draw at
-    /// `opacity`.
+    /// `opacity`, with the ground under each of them, `grounds`, where they
+    /// stand on terrain.
     fn write_uniforms(
         layer: &EvaluatedLayer<FillExtrusion>,
+        grounds: Option<&[GroundDrawableUBO]>,
         writer: &mut UniformWriter<'_, ExtrusionUniforms>,
         light: &EvaluatedLight,
         state: &View,
@@ -858,7 +923,7 @@ impl RenderFillExtrusionLayer {
         writer.uniform(ID_FILL_EXTRUSION_PROPS_UBO, &props);
         writer.storage(ID_FILL_EXTRUSION_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
         writer.storage(ID_FILL_EXTRUSION_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
-        writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+        write_projection(writer, grounds, |uniforms| uniforms.projection);
     }
 }
 

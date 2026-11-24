@@ -20,9 +20,10 @@ use mln_gfx::gpu::{
     GeometryId, Gpu, GpuError, PipelineId, PipelineKey, SamplerId, Scissor, ShaderId, ShaderKey, StencilState,
     TargetFormats, TextureId, VertexAttribute as GpuVertexAttribute, VertexBufferLayout, VertexStep,
 };
-use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER};
+use mln_gfx::shaders::shader_defines::{
+    ID_GROUND_DEPTH_TEXTURE, MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER,
+};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_util::logging::{Event, Log};
 
@@ -80,11 +81,11 @@ pub(crate) fn raw_vertices(
 const MAX_STORAGE_VERTICES: usize = 3;
 
 /// The most entries bindings have.
-const MAX_ENTRIES: usize = MAX_UBO_COUNT_PER_SHADER + MAX_STORAGE_VERTICES + MAX_TEXTURE_COUNT_PER_SHADER;
+const MAX_ENTRIES: usize = MAX_UBO_COUNT_PER_SHADER + MAX_STORAGE_VERTICES + MAX_TEXTURE_COUNT_PER_SHADER + 1;
 
 /// The entries of bindings, on the stack: at most a buffer at each uniform
-/// buffer id, one of each of the vertices read as storage buffers, and a
-/// texture at each texture id.
+/// buffer id, one of each of the vertices read as storage buffers, a texture
+/// at each texture id, and the frame's ground depth.
 pub(crate) struct Entries {
     entries: [BindGroupEntry; MAX_ENTRIES],
     len: usize,
@@ -239,9 +240,9 @@ impl DrawObjects {
     }
 
     fn upload_in(&mut self, gpu: &mut dyn Gpu, context: &mut Context) -> Result<(), GpuError> {
-        let program = self.shader.program();
+        let shader = &self.shader;
         if self.indexes.buffer(context).is_none() && self.indexes.len(context) == 0 {
-            debug_assert!(false, "a draw of {} has no index data", program.name);
+            debug_assert!(false, "a draw of {} has no index data", shader.program().name);
             return Ok(());
         }
         self.indexes.upload(gpu, context)?;
@@ -249,12 +250,12 @@ impl DrawObjects {
         // An attribute binds again where its array changed, or where the
         // upload writes what it reads, which may be new. A failed upload
         // leaves the attributes changed, so the next binds them again.
-        if self.vertex_attributes_changed || upload::needs_upload(context, program.attributes, &self.vertex_attributes)
+        if self.vertex_attributes_changed || upload::needs_upload(context, shader.attributes(), &self.vertex_attributes)
         {
             let updated = upload::update_attribute_bindings(
                 gpu,
                 context,
-                program.attributes,
+                shader.attributes(),
                 &mut self.vertex_attributes,
                 self.vertex_count,
                 &mut self.attribute_bindings,
@@ -270,13 +271,13 @@ impl DrawObjects {
         if let Some(attrs) = self
             .instance_attributes
             .as_mut()
-            .filter(|attrs| changed || upload::needs_upload(context, program.instance_attributes, attrs))
+            .filter(|attrs| changed || upload::needs_upload(context, shader.instance_attributes(), attrs))
         {
             let instance_count = attrs.min_count();
             let updated = upload::update_attribute_bindings(
                 gpu,
                 context,
-                program.instance_attributes,
+                shader.instance_attributes(),
                 attrs,
                 instance_count,
                 &mut self.instance_bindings,
@@ -362,7 +363,7 @@ impl DrawObjects {
         let slots = if let Some(slots) = &self.vertex_slots {
             slots
         } else {
-            let slots = vertex_slots(self.shader.program(), &self.attribute_bindings, &self.instance_bindings);
+            let slots = vertex_slots(&self.shader, &self.attribute_bindings, &self.instance_bindings);
             // New buffers in the layouts of the old ones keep the
             // pipelines.
             let layouts = slots.iter().map(|slot| &slot.layout);
@@ -511,6 +512,16 @@ impl DrawObjects {
             textures
                 .filter_map(|&id| context.gpu_texture(self.textures.get(id)?.as_ref()?).cloned().map(Held::Texture)),
         );
+        // The frame's ground depth binds with the global buffers, whose epoch
+        // renews when it changes.
+        if let Some(depth) =
+            context.ground_depth().filter(|_| self.shader.program().textures.contains(&ID_GROUND_DEPTH_TEXTURE))
+        {
+            let depth = depth.clone();
+            let (texture, sampler) = context.texture_binding(gpu, &depth)?;
+            entries.push(BindGroupEntry::Texture { id: ID_GROUND_DEPTH_TEXTURE as u32, texture, sampler });
+            held.extend(context.gpu_texture(&depth).cloned().map(Held::Texture));
+        }
         let bindings = gpu.create_bindings(&BindingsDesc {
             label: self.shader.program().name,
             shader: shader_id,
@@ -580,6 +591,15 @@ impl DrawObjects {
     #[cfg(test)]
     pub(crate) fn storage_buffer(&self, id: usize) -> Option<BufferId> {
         self.storage_vertices.iter().find(|(at, ..)| *at == id).and_then(|&(_, _, buffer)| buffer)
+    }
+
+    /// Whether the draw reads vertices as the attribute or the instance
+    /// attribute `id`, or as the storage buffer `id`.
+    #[cfg(test)]
+    pub(crate) fn reads_vertices(&self, id: usize) -> bool {
+        self.vertex_attributes.get(id).is_some()
+            || self.instance_attributes.as_ref().is_some_and(|attrs| attrs.get(id).is_some())
+            || self.storage_vertices.iter().any(|(at, ..)| *at == id)
     }
 
     /// Whether the draw draws instances.
@@ -700,7 +720,7 @@ fn fixed_state(variant: PipelineVariant, color_mode: &ColorMode, cull: CullFaceM
 /// extrusion wall's outline vertex and the next one) read it through slots
 /// of their own, since an attribute's offset must stay within the stride.
 fn vertex_slots(
-    program: &Program,
+    shader: &ShaderKey,
     attributes: &AttributeBindingArray,
     instances: &AttributeBindingArray,
 ) -> Vec<VertexSlot> {
@@ -709,8 +729,8 @@ fn vertex_slots(
         for (index, binding) in bindings.iter().enumerate() {
             let buffer = &binding.buffer;
             let attributes = match step {
-                VertexStep::Vertex => program.attributes,
-                VertexStep::Instance => program.instance_attributes,
+                VertexStep::Vertex => shader.attributes(),
+                VertexStep::Instance => shader.instance_attributes(),
             };
             let Some(&(id, _)) = attributes.get(index) else { continue };
             let offset = u64::from(binding.vertex_offset) * u64::from(binding.vertex_stride);
@@ -741,7 +761,7 @@ fn vertex_slots(
             Event::Render,
             format!(
                 "{} uses {} vertex buffers, exceeding the limit of {MAX_VERTEX_BUFFERS}",
-                program.name,
+                shader.program().name,
                 slots.len()
             ),
         );

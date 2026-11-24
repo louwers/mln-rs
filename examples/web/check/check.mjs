@@ -74,6 +74,9 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, "../../..");
 const metrics = path.join(repo, "tools/render-test/testdata/metrics");
 const cache = path.join(metrics, "cache-style.db");
+// The files that load in place of the cache's, as the manifests'
+// asset_path: GL JS's suite's tiles, which the terrain views load.
+const assets = path.join(metrics, "integration/gljs/assets");
 // The page as Vite builds it, as it deploys.
 const root = path.join(here, "../dist");
 
@@ -102,7 +105,7 @@ if (!existsSync(path.join(root, "index.html")))
 
 const fixtures = openFixtures(cache);
 const views = selectViews(options.filter, {
-  tests: path.join(metrics, "integration/render-tests"),
+  integration: path.join(metrics, "integration"),
   fixtures,
 }).filter((view) => {
   // The pinch is the DevTools protocol's (interactions.mjs), which only
@@ -112,7 +115,7 @@ const views = selectViews(options.filter, {
   if (!runs) console.log(`${view.name}: skipped, its pinch needs Chromium`);
   return runs;
 });
-const server = await startServer({ root, views, fixtures });
+const server = await startServer({ root, views, fixtures, assets });
 const browser = await launch({
   browser: options.browser,
   channel: options.channel,
@@ -231,6 +234,7 @@ async function compare() {
     out,
     runner,
     cache,
+    assets,
     codec: options.codec,
     icd,
   });

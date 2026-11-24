@@ -22,7 +22,7 @@ use mln_style::layer_type::LayerStyle;
 use mln_style::layers::Line;
 use mln_style::layers::line_layer_properties::LinePaintProperties;
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
-use mln_style_types::{AlignmentType, LineCapType};
+use mln_style_types::{AlignmentType, LayerBlendType, LineCapType, TranslateAnchorType};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
 use mln_util::error::Error;
@@ -347,6 +347,16 @@ impl TypedLayer for RenderLineLayer {
         if ramp_affected {
             self.update_color_ramp();
         }
+    }
+
+    fn drapes_by_bearing(&self, evaluated: &EvaluatedLayer<Line>) -> bool {
+        let paint = &evaluated.paint;
+        *paint.line_translate_anchor.uniform() == TranslateAnchorType::Viewport
+            && *paint.line_translate.uniform() != [0.0, 0.0]
+    }
+
+    fn blends_with_backdrop(&self, evaluated: &EvaluatedLayer<Line>) -> bool {
+        *evaluated.paint.line_layer_blend.uniform() != LayerBlendType::Normal
     }
 
     fn passes(&self, evaluated: &EvaluatedLayer<Line>) -> RenderPass {

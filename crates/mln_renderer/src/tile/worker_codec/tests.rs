@@ -94,6 +94,7 @@ fn job(style: &Arc<SourceStyle>, data: DataInput, resolved: Resolved) -> Run {
             pixel_ratio: 1.0,
             show_collision_boxes: false,
             subdivision_granularity: SubdivisionGranularitySetting::none(),
+            terrain: false,
             first_load: true,
         },
         resolved: Arc::new(resolved),

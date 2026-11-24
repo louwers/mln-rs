@@ -8,7 +8,7 @@ use glam::dcamera::rh::proj::opengl::perspective;
 use glam::{DMat4, DVec3, DVec4};
 use mln_style_types::ProjectionDefinition;
 use mln_tile_id::UnwrappedTileID;
-use mln_util::constants::{DEFAULT_FOV, M2PI, TILE_SIZE_D};
+use mln_util::constants::{DEFAULT_FOV, EARTH_RADIUS_M, M2PI, TILE_SIZE_D};
 use mln_util::error::Error;
 pub use mln_util::geo::NorthOrientation;
 use mln_util::geo::{EdgeInsets, LatLng, ScreenCoordinate, WrapMode};
@@ -319,12 +319,21 @@ impl View {
     /// Meters per pixel at the zoom, as at the center (GL JS's
     /// `pixelsPerMeter`, inverted): the scale of every height the matrices
     /// place, so that a point at the center's altitude draws at the center.
+    /// On Mercator they are the meters along the ground of
+    /// [`Projection::meters_per_pixel_at_latitude`]; on the globe, those along
+    /// its sphere, of [`VerticalPerspectiveProjection::GLOBE_RADIUS_METERS`],
+    /// on which its ground's heights scale.
     pub(crate) fn meters_per_pixel(&self) -> f64 {
-        Projection::meters_per_pixel_at_latitude(self.center(WrapMode::Unwrapped).latitude(), self.zoom())
+        let meters = Projection::meters_per_pixel_at_latitude(self.center(WrapMode::Unwrapped).latitude(), self.zoom());
+        if self.is_globe() {
+            meters * VerticalPerspectiveProjection::GLOBE_RADIUS_METERS / EARTH_RADIUS_M
+        } else {
+            meters
+        }
     }
 
     /// The center's altitude in pixels at the zoom.
-    fn center_altitude_pixels(&self) -> f64 {
+    pub(crate) fn center_altitude_pixels(&self) -> f64 {
         // A center at sea level, as on most maps, spares the conversion's
         // transcendental functions on every new view.
         if self.params.center_altitude == 0.0 {
@@ -488,13 +497,6 @@ impl View {
         camera
     }
 
-    /// The camera's position and orientation.
-    #[must_use]
-    pub fn free_camera_options(&self) -> FreeCameraOptions {
-        let camera = self.camera_pose();
-        FreeCameraOptions { position: Some(camera.position), orientation: Some(camera.orientation) }
-    }
-
     /// Where the camera's eye is: its Web Mercator point at zoom 0 (from 0
     /// to 1 across, y south) and its altitude in meters, of the meters the
     /// view places heights in ([`center_altitude`](Self::center_altitude)).
@@ -536,6 +538,13 @@ impl View {
             let point = self.matrices.inv_projection.project_point3(clip(index));
             DVec3::new(point.x / world_size, point.y / world_size, point.z)
         })
+    }
+
+    /// The camera's position and orientation.
+    #[must_use]
+    pub fn free_camera_options(&self) -> FreeCameraOptions {
+        let camera = self.camera_pose();
+        FreeCameraOptions { position: Some(camera.position), orientation: Some(camera.orientation) }
     }
 
     // MARK: - Projection

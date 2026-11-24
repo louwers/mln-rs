@@ -5,20 +5,35 @@ use mln_map_types::{
     GesturePhase, TransitionOutcome,
 };
 
-use super::{BEARING, CameraCommandId, PITCH, Transform, ZOOM};
-use crate::map_event::CameraChangeSource;
+use super::{BEARING, CameraCommandId, PITCH, Transform, TransformEvent, ZOOM};
+use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 
 /// The gesture that camera deltas and updates with a phase make.
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct GestureState {
     /// Between its first `Begin` or `Update` and its `End` or `Cancel`.
-    active: bool,
+    pub(super) active: bool,
     /// Counts gestures, so that an earlier gesture's momentum doesn't end a
     /// later gesture.
     serial: u64,
     /// The fields the gesture changed (`ZOOM`, `BEARING`, `PITCH`), which
     /// alone may settle.
     changed: u16,
+    /// The altitude that a gesture in progress over a center the terrain
+    /// clamps holds, under its lift ([`Transform::follow_terrain`]).
+    pub(super) hold: Option<f64>,
+    /// The plane over terrain that the gesture's anchored steps solve on
+    /// ([`Transform::anchor_plane`]).
+    pub(super) anchor_plane: Option<AnchorPlane>,
+}
+
+/// The height of the ground a gesture grabbed, at its first anchored step,
+/// and the altitude it held then, at which the plane holds.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct AnchorPlane {
+    /// `None` where the pointer grabbed no drawn ground.
+    pub(super) height: Option<f64>,
+    pub(super) at_altitude: f64,
 }
 
 impl GestureState {
@@ -141,49 +156,80 @@ impl Transform {
         self.gesture_phase_after(update.phase, false);
     }
 
-    /// `Begin` cancels the running commands, and `Begin` and `Update` mark
-    /// the gesture, before its change applies, so that the change follows
-    /// the gesture rules (an ease doesn't fly, and wraps the longitude as a
-    /// drag). The first phase after a gesture ended starts a new one, which
-    /// an earlier gesture's momentum no longer ends.
+    /// `Begin` and `Update` mark the gesture, before its change applies, so
+    /// that the change follows the gesture rules (an ease doesn't fly, and
+    /// wraps the longitude as a drag), and `Begin` then cancels the running
+    /// commands, which end within the gesture. The first phase after a
+    /// gesture ended starts a new one, which an earlier gesture's momentum
+    /// no longer ends.
+    ///
+    /// When the fingers go down over a center the terrain clamps, the
+    /// gesture holds the altitude the camera has: commands no longer ease
+    /// it while the fingers are down.
     fn gesture_phase_before(&mut self, phase: GesturePhase) {
         if phase != GesturePhase::None && (phase == GesturePhase::Begin || !self.gesture.active) {
-            self.gesture = GestureState { serial: self.gesture.serial.wrapping_add(1), ..GestureState::default() };
-        }
-        if phase == GesturePhase::Begin {
-            self.cancel_transitions();
+            // A gesture that begins during the last one's momentum keeps its
+            // hold, as the gesture stays in progress.
+            self.gesture = GestureState {
+                serial: self.gesture.serial.wrapping_add(1),
+                hold: self.gesture.hold,
+                ..GestureState::default()
+            };
         }
         if matches!(phase, GesturePhase::Begin | GesturePhase::Update) {
             self.gesture.active = true;
             self.set_gesture_in_progress(true);
         }
+        if phase == GesturePhase::Begin {
+            self.cancel_transitions();
+        }
     }
 
     /// `Cancel` cancels the running commands after its change applies, and
     /// `End` and `Cancel` end the gesture: at once, or when its momentum
-    /// ends.
+    /// ends. An end that moves the center onto the terrain reports the
+    /// change, though the picture stays.
     fn gesture_phase_after(&mut self, phase: GesturePhase, momentum: bool) {
         if phase == GesturePhase::Cancel {
             self.cancel_transitions();
         }
         if matches!(phase, GesturePhase::End | GesturePhase::Cancel) {
             self.gesture.active = false;
-            if !momentum {
-                self.set_gesture_in_progress(false);
+            if !momentum && self.set_gesture_in_progress(false) {
+                let change = CameraChange { mode: CameraChangeMode::Immediate, source: CameraChangeSource::Gesture };
+                self.emit(TransformEvent::CameraWillChange(change));
+                self.emit(TransformEvent::CameraDidChange(change));
             }
         }
     }
 
     /// The end of a gesture's momentum ends the gesture, unless another
-    /// gesture started since.
-    pub(super) fn end_gesture_momentum(&mut self, gesture: Option<u64>) {
-        if gesture == Some(self.gesture.serial) && !self.gesture.active {
-            self.set_gesture_in_progress(false);
-        }
+    /// gesture started since, without coming to rest: the caller does that
+    /// once it ends all it ends. Returns whether it ended the gesture.
+    pub(super) fn end_momentum_gesture(&mut self, gesture: Option<u64>) -> bool {
+        gesture == Some(self.gesture.serial) && !self.gesture.active && self.end_gesture()
     }
 
-    pub(crate) fn set_gesture_in_progress(&mut self, in_progress: bool) {
-        self.gesture_in_progress = in_progress;
+    /// Marks whether a gesture is in progress. The end of one over a clamped
+    /// center ends on the ground, unless a command still moves the camera
+    /// ([`Self::come_to_rest`]). Returns whether that end moved the camera.
+    pub(crate) fn set_gesture_in_progress(&mut self, in_progress: bool) -> bool {
+        if in_progress {
+            self.gesture_in_progress = true;
+            return false;
+        }
+        self.end_gesture() && self.come_to_rest(false)
+    }
+
+    /// Ends the gesture in progress, if any, and returns whether there was
+    /// one.
+    fn end_gesture(&mut self) -> bool {
+        let ends = self.gesture_in_progress;
+        self.gesture_in_progress = false;
+        if ends {
+            self.gesture.hold = None;
+        }
+        ends
     }
 
     #[must_use]

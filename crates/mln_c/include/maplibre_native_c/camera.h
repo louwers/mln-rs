@@ -48,6 +48,24 @@ MLN_API mln_status mln_map_set_globe_free_bearing_enabled(
   mln_map map, bool enabled, const mln_completion* completion,
   mln_diagnostic* out_diagnostic
 ) MLN_NOEXCEPT;
+/**
+ * Sets whether the camera's center stands on the terrain.
+ *
+ * When it's on, the default, the center stands on the ground under it once
+ * that ground has loaded, and the camera ignores the center altitude it is
+ * given, and the style's. A camera command eases the altitude toward the
+ * ground where it ends; a gesture holds the altitude it starts with, lifted
+ * over ground that reaches above the camera. Turning it on stands a camera at
+ * rest on the ground at once. When it's off, the camera keeps the center
+ * altitude it is given, and a camera command or gesture whose eye the ground
+ * would reach lowers the pitch and zoom instead. It changes nothing on a map
+ * without terrain.
+ */
+MLN_BINDING("execution=command")
+MLN_API mln_status mln_map_set_center_clamped_to_ground_enabled(
+  mln_map map, bool enabled, const mln_completion* completion,
+  mln_diagnostic* out_diagnostic
+) MLN_NOEXCEPT;
 /** Logs debugging information about the map's style and sources. */
 MLN_BINDING("execution=command")
 MLN_API mln_status mln_map_dump_debug_logs(

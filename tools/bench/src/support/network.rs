@@ -140,32 +140,20 @@ pub(crate) enum Serve {
     Archive,
 }
 
-/// A server of a style over the fixtures, at [`ORIGIN`]: the style, a tile
-/// set as [`Serve`] says, and the snapshot's sprite and glyphs.
-/// Every answer carries an `ETag`, which a revalidation that sends it back
-/// gets a 304 for, and a `Cache-Control: max-age` of [`Server::MAX_AGE`],
-/// or an `Expires` long past after [`set_expired`](Self::set_expired).
-/// Either is a day or more from the system's clock, which times the
-/// expiries, so that whether one has passed never depends on when a run
-/// started.
-pub(crate) struct Server {
-    dir: PathBuf,
-    style: String,
+/// A tile set the server serves: an archive of the snapshot.
+struct TileSet {
     name: &'static str,
     archive_path: PathBuf,
     archive: pmtiles::PmTilesReader<std::fs::File, pmtiles::NoCache>,
     tilejson: String,
-    expired: AtomicBool,
 }
 
-impl Server {
-    /// Liberty over `tiles`, served as `serve` says, with every URL the
-    /// server's.
-    pub(crate) fn new(fixtures: &Fixtures, tiles: Tiles, serve: Serve) -> Arc<Server> {
+impl TileSet {
+    fn new(fixtures: &Fixtures, tiles: Tiles) -> TileSet {
         let name = tiles.name();
-        let path = fixtures.path(&fixtures.tile_set(tiles).archive);
-        let archive =
-            pmtiles::PmTilesReader::new_with_path(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        let archive_path = fixtures.path(&fixtures.tile_set(tiles).archive);
+        let archive = pmtiles::PmTilesReader::new_with_path(&archive_path)
+            .unwrap_or_else(|error| panic!("{}: {error}", archive_path.display()));
         let header = archive.get_header();
         let tilejson = serde_json::json!({
             "tilejson": "3.0.0",
@@ -176,25 +164,84 @@ impl Server {
             "bounds": [header.min_longitude, header.min_latitude, header.max_longitude, header.max_latitude],
         })
         .to_string();
-        let mut style = fixtures.style_value(tiles);
-        style["sources"]["openmaptiles"]["url"] = match serve {
-            Serve::Tiles => format!("{ORIGIN}tiles/{name}.json"),
-            Serve::Archive => format!("pmtiles://{ORIGIN}tiles/{name}.pmtiles"),
+        TileSet { name, archive_path, archive, tilejson }
+    }
+
+    /// The bytes `first` to `last` of the archive, as many as it has.
+    fn read_range(&self, (first, last): (u64, u64)) -> Vec<u8> {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut file = std::fs::File::open(&self.archive_path).expect("the archive opens");
+        file.seek(SeekFrom::Start(first)).expect("the archive seeks");
+        let mut bytes = Vec::new();
+        file.take(last + 1 - first).read_to_end(&mut bytes).expect("the archive reads");
+        bytes
+    }
+
+    /// The body at `path`, and its size on the wire, if it is the set's
+    /// TileJSON or a tile.
+    fn read(&self, path: &str) -> Option<(Vec<u8>, u64)> {
+        if path == format!("tiles/{}.json", self.name) {
+            return Some((self.tilejson.clone().into_bytes(), self.tilejson.len() as u64));
         }
-        .into();
+        let zxy = path.strip_prefix(&format!("tiles/{}/", self.name))?;
+        let mut parts = zxy.split('/').map(|part| part.parse::<u32>().expect("a tile's z/x/y"));
+        let (z, x, y) = (parts.next()?, parts.next()?, parts.next()?);
+        let coord = pmtiles::TileCoord::new(u8::try_from(z).ok()?, x, y).expect("a tile in the world");
+        let raw = self.archive.get_tile(coord).expect("the archive reads")?;
+        let body = self.archive.get_tile_decompressed(coord).expect("the archive reads")?;
+        Some((body.to_vec(), raw.len() as u64))
+    }
+}
+
+/// A server of a style over the fixtures, at [`ORIGIN`]: the style, its tile
+/// sets as [`Serve`] says, and the snapshot's sprite and glyphs.
+/// Every answer carries an `ETag`, which a revalidation that sends it back
+/// gets a 304 for, and a `Cache-Control: max-age` of [`Server::MAX_AGE`],
+/// or an `Expires` long past after [`set_expired`](Self::set_expired).
+/// Either is a day or more from the system's clock, which times the
+/// expiries, so that whether one has passed never depends on when a run
+/// started.
+pub(crate) struct Server {
+    dir: PathBuf,
+    style: String,
+    sets: Vec<TileSet>,
+    expired: AtomicBool,
+}
+
+impl Server {
+    /// Liberty over `tiles`, served as `serve` says, with every URL the
+    /// server's.
+    pub(crate) fn new(fixtures: &Fixtures, tiles: Tiles, serve: Serve) -> Arc<Server> {
+        Server::for_style(fixtures, fixtures.style_value(tiles), &[("openmaptiles", tiles)], serve)
+    }
+
+    /// `style`, whose sources `sets` name by id and tile set, served as
+    /// `serve` says, with every URL the server's.
+    pub(crate) fn for_style(
+        fixtures: &Fixtures,
+        mut style: serde_json::Value,
+        sets: &[(&str, Tiles)],
+        serve: Serve,
+    ) -> Arc<Server> {
+        let sets = sets
+            .iter()
+            .map(|&(source, tiles)| {
+                let set = TileSet::new(fixtures, tiles);
+                let name = set.name;
+                style["sources"][source]["url"] = match serve {
+                    Serve::Tiles => format!("{ORIGIN}tiles/{name}.json"),
+                    Serve::Archive => format!("pmtiles://{ORIGIN}tiles/{name}.pmtiles"),
+                }
+                .into();
+                set
+            })
+            .collect();
         for url in ["sprite", "glyphs"] {
             let local = style[url].as_str().expect("the style's sprite and glyphs");
             style[url] = local.replacen("asset://", ORIGIN, 1).into();
         }
-        Arc::new(Server {
-            dir: fixtures.dir().to_owned(),
-            style: style.to_string(),
-            name,
-            archive_path: path,
-            archive,
-            tilejson,
-            expired: AtomicBool::new(false),
-        })
+        let dir = fixtures.dir().to_owned();
+        Arc::new(Server { dir, style: style.to_string(), sets, expired: AtomicBool::new(false) })
     }
 
     /// How long a client may use what the server answers, in seconds: a
@@ -211,31 +258,13 @@ impl Server {
         self.expired.store(expired, Ordering::Relaxed);
     }
 
-    /// The bytes `first` to `last` of the archive, as many as it has.
-    fn read_range(&self, (first, last): (u64, u64)) -> Vec<u8> {
-        use std::io::{Read, Seek, SeekFrom};
-        let mut file = std::fs::File::open(&self.archive_path).expect("the archive opens");
-        file.seek(SeekFrom::Start(first)).expect("the archive seeks");
-        let mut bytes = Vec::new();
-        file.take(last + 1 - first).read_to_end(&mut bytes).expect("the archive reads");
-        bytes
-    }
-
     /// The body at `path`, and its size on the wire.
     fn read(&self, path: &str) -> Option<(Vec<u8>, u64)> {
         if path == "style.json" {
             return Some((self.style.clone().into_bytes(), self.style.len() as u64));
         }
-        if path == format!("tiles/{}.json", self.name) {
-            return Some((self.tilejson.clone().into_bytes(), self.tilejson.len() as u64));
-        }
-        if let Some(zxy) = path.strip_prefix(&format!("tiles/{}/", self.name)) {
-            let mut parts = zxy.split('/').map(|part| part.parse::<u32>().expect("a tile's z/x/y"));
-            let (z, x, y) = (parts.next()?, parts.next()?, parts.next()?);
-            let coord = pmtiles::TileCoord::new(u8::try_from(z).ok()?, x, y).expect("a tile in the world");
-            let raw = self.archive.get_tile(coord).expect("the archive reads")?;
-            let body = self.archive.get_tile_decompressed(coord).expect("the archive reads")?;
-            return Some((body.to_vec(), raw.len() as u64));
+        if let Some(found) = self.sets.iter().find_map(|set| set.read(path)) {
+            return Some(found);
         }
         let decoded = percent_encoding::percent_decode_str(path).decode_utf8().expect("a UTF-8 path");
         let body = std::fs::read(self.dir.join(decoded.as_ref())).ok()?;
@@ -263,9 +292,9 @@ impl Origin for Server {
             return Answer { status: 304, headers, body: Vec::new(), wire: HEADER_BYTES };
         }
         let path = url.strip_prefix(ORIGIN).unwrap_or_else(|| panic!("a request off the server: {url}"));
-        if path == format!("tiles/{}.pmtiles", self.name) {
+        if let Some(set) = self.sets.iter().find(|set| path == format!("tiles/{}.pmtiles", set.name)) {
             let range = resource.data_range.expect("a range of the archive");
-            let body = self.read_range(range);
+            let body = set.read_range(range);
             let wire = HEADER_BYTES + body.len() as u64;
             return Answer { status: 206, headers, body, wire };
         }

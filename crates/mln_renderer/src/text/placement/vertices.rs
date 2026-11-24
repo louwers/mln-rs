@@ -16,10 +16,11 @@ use super::{JointOpacityState, Placement, VariableOffset};
 use crate::buckets::symbol_bucket::{Buffer, CollisionBuffer, SymbolBucket, SymbolBucketState};
 use crate::layout::symbol_instance::{Justification, SymbolInstance, TextPart};
 use crate::layout::symbol_projection::{
-    LabelPlaneProjector, LineLabelAlignment, add_dynamic_attributes, evaluate_size_for_feature, hide_glyphs,
-    reproject_line_labels, tile_skew_vectors,
+    LabelHeight, LabelPlaneProjector, LineLabelAlignment, SymbolElevation, add_dynamic_attributes,
+    evaluate_size_for_feature, hide_glyphs, reproject_line_labels, symbol_ground, tile_skew_vectors,
 };
 use crate::render_layer::BucketPlacementData;
+use crate::terrain::TerrainElevation;
 use crate::text::collision_index::OverlapMode;
 use crate::text::placement::CircleKey;
 
@@ -185,13 +186,15 @@ impl Placement {
     }
 
     /// Lays out where the bucket's labels draw, for those that follow their
-    /// lines, take variable anchors or turn upright, and returns whether it
-    /// did. With a layer ID, lays out that layer's own positions, which it
-    /// needs only at another translation than the leader's.
+    /// lines, take variable anchors or turn upright, standing on `ground`
+    /// where terrain draws, and returns whether it did. With a layer ID, lays
+    /// out that layer's own positions, which it needs only at another
+    /// translation than the leader's.
     pub(crate) fn update_bucket_positions(
         &self,
         bucket: &mut SymbolBucket,
         view: &View,
+        ground: Option<&TerrainElevation>,
         data: &BucketPlacementData,
         layer_id: Option<&str>,
     ) -> bool {
@@ -221,6 +224,10 @@ impl Placement {
         }
 
         let tile_projector = TileProjector::with_data(view, &tile.id, tile.projection);
+        // Labels along lines and at variable anchors stand on the ground.
+        let ground = ground.filter(|_| along_line || has_variable_anchors);
+        let ground = symbol_ground(ground, &tile.overscaled_id, &bucket.layout);
+        let elevation = SymbolElevation::of(ground.as_ref(), &bucket.layout);
         if along_line {
             let mut laid_out = false;
             if *layout.icon_rotation_alignment.uniform() == AlignmentType::Map {
@@ -238,9 +245,8 @@ impl Placement {
                         positions,
                         runs,
                         pools,
-                        &tile_projector,
+                        (&tile_projector, icon_translation, elevation),
                         &bucket.icon_size_binder,
-                        icon_translation,
                         alignment,
                     );
                     laid_out = true;
@@ -253,9 +259,8 @@ impl Placement {
                     positions,
                     runs,
                     pools,
-                    &tile_projector,
+                    (&tile_projector, text_translation, elevation),
                     &bucket.text_size_binder,
-                    text_translation,
                     LineLabelAlignment {
                         pitch_with_map: *layout.text_pitch_alignment.uniform() == AlignmentType::Map,
                         rotate_with_map: rotation_alignment == TextRotationAlignmentType::Map,
@@ -266,7 +271,8 @@ impl Placement {
             }
             laid_out
         } else if has_variable_anchors {
-            self.lay_out_variable_anchors(bucket, view, data, layer_id, &tile_projector, text_translation);
+            let placed = (&tile_projector, text_translation, elevation);
+            self.lay_out_variable_anchors(bucket, view, data, layer_id, placed);
             true
         } else if bucket.allow_vertical_placement && has_text {
             self.lay_out_orientations(bucket, layer_id);
@@ -277,16 +283,17 @@ impl Placement {
     }
 
     /// Moves each label to the variable anchor it took, and an icon fitted
-    /// to it with it.
+    /// to it with it, projected by the tile's projector, moved by the
+    /// translation and standing on the elevation of `placed`.
     fn lay_out_variable_anchors(
         &self,
         bucket: &mut SymbolBucket,
         view: &View,
         data: &BucketPlacementData,
         layer_id: Option<&str>,
-        tile_projector: &TileProjector<'_>,
-        translation: Vec2,
+        placed: (&TileProjector<'_>, Vec2, SymbolElevation<'_>),
     ) {
+        let (tile_projector, translation, elevation) = placed;
         let layout = &*bucket.layout;
         let tile = &data.tile;
         let zoom = view.zoom() as f32;
@@ -314,12 +321,12 @@ impl Placement {
             (Vec2::X, Vec2::Y)
         };
         let shifted_anchor = |offset: &VariableOffset, run: &crate::buckets::symbol_bucket::PlacedSymbol| {
-            let label_plane = label_plane.raised(run.height_offset);
             let tile_anchor = run.anchor_point;
+            let height = LabelHeight::Fixed(f64::from(elevation.at(tile_anchor + translation, run.height_offset)));
             let projected = if pitch_with_map {
-                label_plane.to_clip_space_from_tile(tile_anchor)
+                label_plane.to_clip_space_from_tile(tile_anchor, height)
             } else {
-                label_plane.project(tile_anchor)
+                label_plane.project(tile_anchor, height)
             };
             let projected_anchor = projected.point;
             let perspective_ratio = 0.5 + 0.5 * (view.camera_to_center_distance() as f32 / projected.camera_distance);
@@ -335,11 +342,11 @@ impl Placement {
                     f64::from(tile_anchor.x + translation.x),
                     f64::from(tile_anchor.y + translation.y),
                 )) as f32;
-                label_plane.project(tile_anchor + (east * shift.x + south * shift.y) * correction).point
+                label_plane.project(tile_anchor + (east * shift.x + south * shift.y) * correction, height).point
             } else if rotate_with_map {
                 // Viewport labels stay east-west aligned, so the shift
                 // follows the projected east.
-                let east = label_plane.project(tile_anchor + Vec2::X).point;
+                let east = label_plane.project(tile_anchor + Vec2::X, height).point;
                 let to_east = east - projected_anchor;
                 let angle = (to_east.y / to_east.x).atan() + if to_east.x < 0.0 { std::f32::consts::PI } else { 0.0 };
                 projected_anchor + Vec2::from_angle(angle).rotate(shift)

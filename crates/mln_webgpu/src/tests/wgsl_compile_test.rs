@@ -1,12 +1,12 @@
 // Compiles every built-in program's WGSL as `WebGpu::create_shader` does, in
-// both projection variants, with and without the overdraw inspector, with
-// every property it declares read per vertex and with every one read from
-// its uniform.
+// each of its projection variants, with and without the overdraw inspector,
+// with every property it declares read per vertex and with every one read
+// from its uniform.
 
 use std::collections::BTreeSet;
 
-use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_gfx::shaders::programs::projection_variants;
 
 use crate::Device;
 use crate::gpu::VERTEX_STAGE_STORAGE_BUFFERS;
@@ -44,12 +44,14 @@ fn every_program_declares_the_properties_its_wgsl_reads_from_uniforms() {
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
     use mln_gfx::shaders::programs::{
-        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_PROBE,
-        VERTEX_TEXEL,
+        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, HILLSHADE_SLOPES, SKY, TERRAIN,
+        TERRAIN_DEPTH, TERRAIN_HILLSHADE, TERRAIN_PROBE, VERTEX_TEXEL,
     };
     // The terrain shows its drapes, where the draped layers count their
-    // draws.
+    // draws: a hillshade's too, which drapes no slopes for the inspector.
     let not_layers = [
+        &HILLSHADE_SLOPES,
+        &TERRAIN_HILLSHADE,
         &CLIPPING_MASK,
         &COLLISION_BOX,
         &COLLISION_CIRCLE,
@@ -57,8 +59,9 @@ fn every_layer_program_shows_the_overdraw_inspector() {
         &SKY,
         &ATMOSPHERE,
         &TERRAIN,
-        &VERTEX_TEXEL,
+        &TERRAIN_DEPTH,
         &TERRAIN_PROBE,
+        &VERTEX_TEXEL,
     ];
     for &(program, source) in BUILT_INS {
         if !not_layers.contains(&program) {
@@ -83,7 +86,7 @@ fn every_program_compiles() {
     let parameters = [false, true].map(|overdraw| ProgramParameters::new(1.0, overdraw));
     for &(program, source) in BUILT_INS {
         for parameters in &parameters {
-            for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
+            for &variant in projection_variants(program) {
                 for uniforms in [&[][..], program.properties] {
                     let key = program.variant_key(parameters, uniforms, variant);
                     match compile(device, index_table.layout(), &key, source) {

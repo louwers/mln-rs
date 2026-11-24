@@ -193,6 +193,20 @@ impl Snapshot {
         style.to_string()
     }
 
+    /// [`Snapshot::terrain_style`] in 3D: the terrain tiles raise the
+    /// ground, 1.5 times its height, as an outdoors map in 3D does, and the
+    /// hillshading and color relief read the same tiles. Its layers that
+    /// drape over the ground fall into stacks between those that stand on
+    /// it, from zoom 14 its extruded buildings, and around its hillshade,
+    /// which is lit from the viewport and so has a stack to itself, which
+    /// the surface lights: four in all.
+    #[must_use]
+    pub fn terrain_3d_style(&self) -> String {
+        let mut style: serde_json::Value = serde_json::from_str(&self.terrain_style()).expect("the style is JSON");
+        style["terrain"] = serde_json::json!({ "source": "terrain", "exaggeration": 1.5 });
+        style.to_string()
+    }
+
     /// Liberty over the street tiles with its POI labels placed as many
     /// styles place them: each tries the anchors below, beside and above its
     /// icon (`text-variable-anchor`) instead of one.

@@ -353,7 +353,9 @@ fn a_cut_tile_takes_a_fresh_ancestor_from_memory() {
         let mut tiles = OneTile::with_origin(store, TileKind::Geometry, false, origin, &[left, right], MapMode::Static);
         let (styled, params) = (style(&[water_layer("water", "red")]), tiles.tile_params());
         for id in [left, right] {
-            tiles.with_at(&id, |tile| tile.set_style(&styled, params.pixel_ratio, params.subdivision_granularity));
+            tiles.with_at(&id, |tile| {
+                tile.set_style(&styled, params.pixel_ratio, params.subdivision_granularity, params.terrain);
+            });
         }
         tiles.set_necessity(&left, TileNecessity::Required);
         file_source.respond(response);
@@ -395,7 +397,9 @@ fn a_tile_at_the_last_zoom_and_its_cut_tiles_share_their_data() {
         let mut tiles = OneTile::with_origin(store, TileKind::Geometry, false, origin, &[whole, cut], MapMode::Static);
         let (styled, params) = (style(&[water_layer("water", "red")]), tiles.tile_params());
         for id in [whole, cut] {
-            tiles.with_at(&id, |tile| tile.set_style(&styled, params.pixel_ratio, params.subdivision_granularity));
+            tiles.with_at(&id, |tile| {
+                tile.set_style(&styled, params.pixel_ratio, params.subdivision_granularity, params.terrain);
+            });
         }
         tiles.set_necessity(&first, TileNecessity::Required);
         file_source.respond(water());
@@ -968,7 +972,7 @@ fn a_tile_lays_out_again_once_a_failed_glyph_range_loads() {
     assert!(!has_glyph(&tiles, &first), "laid out without the glyph");
 
     tiles.with_at(&second, |tile| {
-        tile.set_style(&labels, 1.0, mln_util::subdivision_granularity::SubdivisionGranularitySetting::none());
+        tile.set_style(&labels, 1.0, mln_util::subdivision_granularity::SubdivisionGranularitySetting::none(), false);
         tile.take_input(TileInput::Geometry { data: Some(points()), missing: false });
     });
     tiles.update();

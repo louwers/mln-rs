@@ -1,18 +1,19 @@
 //! Parses and validates every program's GLSL with naga, as the backends
 //! compose it: `#version 450`, the `ProgramParameters` defines, a
 //! `HAS_UNIFORM_u_<name>` define per property passed as a uniform,
-//! `PROJECTION_GLOBE` for the globe variant, then the stage's prelude, the
-//! shader's prelude and the stage's source. Also checks that the buffers,
-//! textures, samplers and vertex inputs the GLSL declares are the ones the
-//! descriptor set layouts and the attribute and texture tables describe, that
-//! the buffers have the sizes of what the renderer binds there, and that the
-//! stages of a shader agree on what passes between them, in both projection
-//! variants.
+//! `PROJECTION_GLOBE` for the globe variant and `TERRAIN` for the terrain
+//! one, then the stage's prelude, the shader's prelude and the stage's
+//! source. Also checks that the buffers, textures, samplers and vertex inputs
+//! the GLSL declares are the ones the descriptor set layouts and the attribute
+//! and texture tables describe, that the buffers have the sizes of what the
+//! renderer binds there, and that the stages of a shader agree on what passes
+//! between them, in each projection variant.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::mem::size_of;
 
 use mln_gfx::gfx_types::AttributeDataType;
+use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::background_layer_ubo::{
     BackgroundDrawableUnionUBO, BackgroundPatternPropsUBO, BackgroundPropsUBO,
 };
@@ -32,21 +33,24 @@ use mln_gfx::shaders::layer_composite_ubo::LayerCompositeUBO;
 use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
 use mln_gfx::shaders::line_layer_ubo::{LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineTilePropsUnionUBO};
 use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::programs::projection_variants;
 use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
-use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainPropsUBO};
+use mln_gfx::shaders::terrain_ubo::{
+    TerrainDrawableUBO, TerrainFogUBO, TerrainLightUBO, TerrainProjectionUBO, TerrainPropsUBO,
+};
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
 
 use crate::front_end::parse;
 use crate::layout::{
-    DRAWABLE_UNIFORM_COUNT, DRAWABLE_VERTEX_COUNT, DescriptorSetType, GLOBAL_UNIFORM_COUNT, IMAGE_SAMPLER_START,
-    IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, LAYER_UNIFORM_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE,
-    drawable_uniform_binding, drawable_vertex_binding, global_uniform_binding, image_sampler_binding,
-    image_texture_binding, layer_storage_binding, layer_uniform_binding,
+    DRAWABLE_UNIFORM_COUNT, DRAWABLE_VERTEX_COUNT, DescriptorSetType, GLOBAL_GROUND_DEPTH_BINDING,
+    GLOBAL_UNIFORM_COUNT, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, LAYER_UNIFORM_COUNT,
+    UBO_INDEX_PUSH_CONSTANT_SIZE, drawable_uniform_binding, drawable_vertex_binding, global_uniform_binding,
+    image_sampler_binding, image_texture_binding, layer_storage_binding, layer_uniform_binding,
 };
 use crate::variants::variants;
 use crate::{AttributeInfo, BUILT_INS, ShaderSource, Stage, sources};
@@ -81,12 +85,14 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
     use mln_gfx::shaders::programs::{
-        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_PROBE,
-        VERTEX_TEXEL,
+        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, HILLSHADE_SLOPES, SKY, TERRAIN,
+        TERRAIN_DEPTH, TERRAIN_HILLSHADE, TERRAIN_PROBE, VERTEX_TEXEL,
     };
     // The terrain shows its drapes, where the draped layers count their
-    // draws.
+    // draws: a hillshade's too, which drapes no slopes for the inspector.
     let not_layers = [
+        &HILLSHADE_SLOPES,
+        &TERRAIN_HILLSHADE,
         &CLIPPING_MASK,
         &COLLISION_BOX,
         &COLLISION_CIRCLE,
@@ -94,8 +100,9 @@ fn every_layer_program_shows_the_overdraw_inspector() {
         &SKY,
         &ATMOSPHERE,
         &TERRAIN,
-        &VERTEX_TEXEL,
+        &TERRAIN_DEPTH,
         &TERRAIN_PROBE,
+        &VERTEX_TEXEL,
     ];
     for &(program, source) in BUILT_INS {
         if !not_layers.contains(&program) {
@@ -118,7 +125,7 @@ fn module(program: &Program, source: &ShaderSource, stage: Stage, defines: &str)
 
 // Every stage parses and validates, with every property per vertex, every
 // property as a uniform, each property alone as a uniform, and with the
-// overdraw inspector, in both projections.
+// overdraw inspector, in each projection.
 #[test]
 fn every_stage_validates() {
     let mut failures = Vec::new();
@@ -169,10 +176,12 @@ impl Buffer {
 /// The buffers of each shader, with the size of what the renderer binds: a
 /// uniform buffer's struct, or an element of a storage buffer's vector (the
 /// union of the layer's drawable structs where it has several, a word of a
-/// vertex buffer).
-fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
+/// vertex buffer), in a variant of `variant`'s projection: a terrain
+/// variant's projection entries carry the ground under its draws.
+fn buffers(program: &Program, variant: ProjectionVariant) -> Vec<(Buffer, usize)> {
     use Buffer::{DrawableUniform, DrawableVertex, Global, LayerStorage, LayerUniform};
-    let projection = (LayerStorage(ID_PROJECTION_UBO), size_of::<ProjectionUBO>());
+    let projection_size = if variant.stands() { size_of::<TerrainProjectionUBO>() } else { size_of::<ProjectionUBO>() };
+    let projection = (LayerStorage(ID_PROJECTION_UBO), projection_size);
     let mut buffers = vec![(Global(ID_GLOBAL_PAINT_PARAMS_UBO), size_of::<GlobalPaintParamsUBO>())];
     let own: Vec<(Buffer, usize)> = match program.name {
         "AtmosphereShader" => vec![(LayerUniform(ID_ATMOSPHERE_PROPS_UBO), size_of::<AtmospherePropsUBO>())],
@@ -233,7 +242,11 @@ fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
             (LayerUniform(ID_FILL_EXTRUSION_PROPS_UBO), size_of::<FillExtrusionPropsUBO>()),
             (DrawableVertex(ID_FILL_EXTRUSION_WALL_VERTICES), size_of::<u32>()),
             (DrawableVertex(ID_FILL_EXTRUSION_WALL_PAINT), size_of::<f32>()),
-        ],
+        ]
+        .into_iter()
+        // The terrain variant reads the centroids, a word each.
+        .chain(variant.stands().then_some((DrawableVertex(ID_FILL_EXTRUSION_WALL_CENTROIDS), size_of::<u32>())))
+        .collect(),
         "FillExtrusionPatternShader" | "FillExtrusionPatternInstancedShader" | "FillExtrusionPatternWallShader" => {
             vec![
                 (LayerStorage(ID_FILL_EXTRUSION_DRAWABLE_UBO), size_of::<FillExtrusionDrawableUBO>()),
@@ -257,14 +270,30 @@ fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
             (LayerStorage(ID_TERRAIN_DRAWABLE_UBO), size_of::<TerrainDrawableUBO>()),
             projection,
             (LayerUniform(ID_TERRAIN_PROPS_UBO), size_of::<TerrainPropsUBO>()),
+            (LayerUniform(ID_TERRAIN_FOG_UBO), size_of::<TerrainFogUBO>()),
         ],
         "TerrainProbeShader" => vec![(LayerUniform(ID_TERRAIN_PROPS_UBO), size_of::<TerrainPropsUBO>())],
+        "TerrainDepthShader" => vec![
+            (LayerStorage(ID_TERRAIN_DRAWABLE_UBO), size_of::<TerrainDrawableUBO>()),
+            projection,
+            (LayerUniform(ID_TERRAIN_PROPS_UBO), size_of::<TerrainPropsUBO>()),
+        ],
         "HillshadeShader" => vec![
             (LayerStorage(ID_HILLSHADE_DRAWABLE_UBO), size_of::<HillshadeDrawableUBO>()),
             projection,
             (LayerStorage(ID_HILLSHADE_TILE_PROPS_UBO), size_of::<HillshadeTilePropsUBO>()),
             (LayerUniform(ID_HILLSHADE_EVALUATED_PROPS_UBO), size_of::<HillshadeEvaluatedPropsUBO>()),
         ],
+        "TerrainHillshadeShader" => vec![
+            (LayerStorage(ID_TERRAIN_DRAWABLE_UBO), size_of::<TerrainDrawableUBO>()),
+            projection,
+            (LayerStorage(ID_TERRAIN_LIGHT_UBO), size_of::<TerrainLightUBO>()),
+            (LayerUniform(ID_TERRAIN_PROPS_UBO), size_of::<TerrainPropsUBO>()),
+            (LayerUniform(ID_TERRAIN_FOG_UBO), size_of::<TerrainFogUBO>()),
+        ],
+        "HillshadeSlopesShader" => {
+            vec![(LayerStorage(ID_HILLSHADE_DRAWABLE_UBO), size_of::<HillshadeDrawableUBO>()), projection]
+        }
         "HillshadePrepareShader" => vec![
             (DrawableUniform(ID_HILLSHADE_PREPARE_DRAWABLE_UBO), size_of::<HillshadePrepareDrawableUBO>()),
             (DrawableUniform(ID_HILLSHADE_PREPARE_TILE_PROPS_UBO), size_of::<HillshadePrepareTilePropsUBO>()),
@@ -367,6 +396,7 @@ fn check_layout(set: u32, binding: u32, resource: Resource) -> Result<(), String
     let binding = binding as usize;
     let in_layout = match (set, resource) {
         (0, Resource::Uniform(_)) => binding < GLOBAL_UNIFORM_COUNT,
+        (0, Resource::Texture) => binding == GLOBAL_GROUND_DEPTH_BINDING as usize,
         (1, Resource::Storage(_)) => binding < LAYER_STORAGE_COUNT,
         (1, Resource::Uniform(_)) => {
             (LAYER_STORAGE_COUNT..LAYER_STORAGE_COUNT + LAYER_UNIFORM_COUNT).contains(&binding)
@@ -383,7 +413,9 @@ fn check_layout(set: u32, binding: u32, resource: Resource) -> Result<(), String
 }
 
 // Every resource a stage declares has a binding of its kind in the
-// descriptor set layouts, the global set holds the paint parameters alone,
+// descriptor set layouts, the global set holds the paint parameters and, in
+// the vertex stage of the terrain variant of a program that terrain hides,
+// the ground's depth,
 // the stages declare the textures of the texture table between them, a
 // fragment stage each of its own with its sampler and a vertex stage none,
 // since it fetches texels, and the push constants are the general pipeline
@@ -397,8 +429,17 @@ fn resources_are_in_the_descriptor_set_layouts() {
 
     let mut failures = Vec::new();
     for (program, source) in programs() {
-        let table: BTreeSet<u32> = source.textures.iter().map(|texture| image_texture_binding(texture.index)).collect();
+        let stands = projection_variants(program).contains(&ProjectionVariant::Terrain);
         for variant in variants(program, false) {
+            // Of a standing layer's program, only the terrain variants read
+            // the ground's DEM.
+            let reads = |id: usize| !stands || variant.projection.stands() || id != ID_GROUND_DEM_TEXTURE;
+            let table: BTreeSet<u32> = source
+                .textures
+                .iter()
+                .filter(|texture| reads(texture.id))
+                .map(|texture| image_texture_binding(texture.index))
+                .collect();
             let mut declared = BTreeSet::new();
             for stage in STAGES {
                 let mut fail = |message: String| {
@@ -412,13 +453,22 @@ fn resources_are_in_the_descriptor_set_layouts() {
                             continue;
                         }
                     };
+                // Of the programs that list the ground's depth, only the
+                // terrain variants' vertex stage reads it.
+                let reads_depth = program.textures.contains(&ID_GROUND_DEPTH_TEXTURE)
+                    && variant.projection.stands()
+                    && stage == Stage::Vertex;
                 for (&(set, binding), &resource) in &bindings {
                     if let Err(message) = check_layout(set, binding, resource) {
                         fail(message);
                     }
-                    if set == 0 && global_uniform_binding(ID_GLOBAL_PAINT_PARAMS_UBO) != Some(binding) {
+                    let depth = resource == Resource::Texture && binding == GLOBAL_GROUND_DEPTH_BINDING;
+                    if set == 0 && !depth && global_uniform_binding(ID_GLOBAL_PAINT_PARAMS_UBO) != Some(binding) {
                         fail(format!("set 0 binding {binding}: not the paint parameters"));
                     }
+                }
+                if bindings.contains_key(&(0, GLOBAL_GROUND_DEPTH_BINDING)) != reads_depth {
+                    fail(format!("the ground's depth declared: {}, not {reads_depth}", !reads_depth));
                 }
 
                 let image_set = DescriptorSetType::DrawableImage.set_index();
@@ -472,19 +522,24 @@ fn buffers_are_the_renderers() {
 
     let mut failures = Vec::new();
     for (program, source) in programs() {
-        let expected: BTreeMap<(u32, u32), (Buffer, Resource)> = buffers(program)
-            .into_iter()
-            .map(|(buffer, size)| {
-                let (set, binding, storage) = buffer.slot();
-                let size = size as u32;
-                let resource = if storage { Resource::Storage(size) } else { Resource::Uniform(size) };
-                ((set.set_index(), binding), (buffer, resource))
-            })
-            .collect();
-        assert_eq!(expected.len(), buffers(program).len(), "{}: two buffers at a binding", program.name);
+        let expected = |projection: ProjectionVariant| -> BTreeMap<(u32, u32), (Buffer, Resource)> {
+            let buffers = buffers(program, projection);
+            let expected: BTreeMap<_, _> = buffers
+                .iter()
+                .map(|&(buffer, size)| {
+                    let (set, binding, storage) = buffer.slot();
+                    let size = size as u32;
+                    let resource = if storage { Resource::Storage(size) } else { Resource::Uniform(size) };
+                    ((set.set_index(), binding), (buffer, resource))
+                })
+                .collect();
+            assert_eq!(expected.len(), buffers.len(), "{}: two buffers at a binding", program.name);
+            expected
+        };
 
         let mut declared = BTreeSet::new();
         for variant in variants(program, false) {
+            let expected = expected(variant.projection);
             for stage in STAGES {
                 let at = format!("{} ({}, {stage:?})", program.name, variant.name);
                 let resources = resources(&module(program, source, stage, &variant.defines))
@@ -504,7 +559,7 @@ fn buffers_are_the_renderers() {
                 }
             }
         }
-        for (slot, (buffer, _)) in &expected {
+        for (slot, (buffer, _)) in &expected(ProjectionVariant::Mercator) {
             if !declared.contains(slot) {
                 failures.push(format!("{}: no stage declares {buffer:?}", program.name));
             }
@@ -597,8 +652,13 @@ fn vertex_inputs_are_the_attribute_tables() {
         let indices: BTreeSet<usize> = all_attributes(source).map(|attr| attr.index).collect();
         assert_eq!(indices.len(), all_attributes(source).count(), "{}: attribute indices repeat", program.name);
         for variant in variants(program, true) {
+            // A terrain variant may read more than the program's own
+            // attributes (`terrain_attributes`).
+            let terrain = variant.projection.stands();
+            let own = |id: usize| program.attributes.iter().chain(program.instance_attributes).any(|&(at, _)| at == id);
             let table: BTreeMap<u32, (ScalarKind, u32)> = all_attributes(source)
                 .filter(|attr| !UNREAD_ATTRIBUTES.contains(&(program.name, attr.index)))
+                .filter(|attr| terrain || own(attr.id))
                 .map(|attr| (attr.index as u32, input_type(attr.data_type)))
                 .collect();
             let inputs: BTreeMap<u32, (ScalarKind, u32)> =
@@ -717,6 +777,7 @@ fn bindings_follow_from_the_packed_ids() {
     assert_eq!(DRAWABLE_UNIFORM_COUNT, 5);
     assert_eq!(drawable_vertex_binding(ID_FILL_EXTRUSION_WALL_VERTICES), Some(5));
     assert_eq!(drawable_vertex_binding(ID_FILL_EXTRUSION_WALL_PAINT), Some(6));
+    assert_eq!(drawable_vertex_binding(ID_FILL_EXTRUSION_WALL_CENTROIDS), Some(7));
     assert_eq!(drawable_vertex_binding(ID_FILL_OUTLINE_VERTICES), Some(5));
     assert_eq!(drawable_vertex_binding(ID_FILL_OUTLINE_ENDS), Some(6));
     assert_eq!(drawable_vertex_binding(ID_FILL_OUTLINE_PAINT), Some(7));

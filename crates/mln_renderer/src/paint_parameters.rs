@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::rc::Rc;
 
 use glam::{DMat4, DVec4};
 use mln_gfx::cull_face_mode::CullFaceMode;
@@ -22,6 +23,7 @@ use crate::gfx::context::Context;
 use crate::layer_composite::LayerComposite;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
+use crate::terrain::GroundBindings;
 
 /// The tiles whose masks clear the stencil buffer: one per world copy in
 /// view, so usually one, and held inline, since every frame makes them.
@@ -105,7 +107,8 @@ impl TransformParameters {
     /// projection of the tile's square of the world, in pixels at the
     /// view's scale, onto the whole target, the tile's north edge at clip
     /// y = 1, every depth at clip z = 0. The view stays `view`, so zoom and
-    /// bearing are its own.
+    /// bearing are its own; the drapes give it the map's on Mercator
+    /// ([`View::mercator`]).
     pub(crate) fn for_drape(view: &View, tile: &UnwrappedTileID) -> Self {
         // The tile's square of the world: its corner, and its side.
         let tile_matrix = view.tile_matrix(tile);
@@ -213,6 +216,10 @@ pub(crate) struct PaintParameters<'a> {
     /// The tile of the drape that the draws go into, whose mask covers the
     /// whole target; `None` for the frame.
     drape_tile: Option<UnwrappedTileID>,
+    /// Whether the drape the draws go into is of a stack that the terrain's
+    /// surface lights ([`Draping::Lit`](crate::terrain::Draping::Lit)): its
+    /// layer then drapes what the surface lights, not its colors.
+    pub(crate) drape_lit: bool,
     /// The tiles whose masks `clear_stencil` draws zero with in the frame,
     /// from [`stencil_clear_tiles`](Self::stencil_clear_tiles); a drape
     /// draws its own tile's.
@@ -223,6 +230,9 @@ pub(crate) struct PaintParameters<'a> {
     /// Whether the frame draws terrain, under which 2D layers draw without
     /// depth.
     pub(crate) terrain: bool,
+    /// What the standing layers' draws bind of the ground they stand on,
+    /// while the frame draws terrain; `None` in a drape.
+    pub(crate) ground: Option<Rc<GroundBindings>>,
     pub(crate) opaque_pass_cutoff: u32,
     pub(crate) symbol_fade_change: f32,
 
@@ -280,11 +290,13 @@ impl<'a> PaintParameters<'a> {
             tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
             drape_tile: None,
+            drape_lit: false,
             stencil_clear: StencilClear::new(),
             // The renderer sets these before use.
             current_layer: 0,
             depth_range_size: 1.0,
             terrain: frame.terrain,
+            ground: None,
             opaque_pass_cutoff: frame.opaque_pass_cutoff,
             symbol_fade_change: frame.symbol_fade_change,
             scissor_rect,
@@ -339,10 +351,12 @@ impl<'a> PaintParameters<'a> {
             tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
             drape_tile: Some(tile),
+            drape_lit: false,
             stencil_clear: StencilClear::new(),
             current_layer: 0,
             depth_range_size: 1.0,
             terrain: false,
+            ground: None,
             opaque_pass_cutoff: 0,
             symbol_fade_change: self.symbol_fade_change,
             scissor_rect: ScissorRect { x: 0, y: 0, width: size.width, height: size.height },
@@ -384,6 +398,7 @@ impl<'a> PaintParameters<'a> {
     /// into.
     pub(crate) fn begin_pass(&mut self, gpu: &mut dyn Gpu, pass: OpenPass) -> Result<(), GpuError> {
         gpu.begin_pass(&pass.desc())?;
+        self.context.rendering_stats().num_render_passes += 1;
         self.open_pass = Some(pass);
         Ok(())
     }
@@ -582,8 +597,8 @@ impl<'a> PaintParameters<'a> {
         tiles
     }
 
-    /// The world copy of the drape that the draws go into; `None` for the
-    /// frame, where each tile draws in its own.
+    /// The world copy of the drape that the draws go into, which they draw
+    /// every tile in; `None` for the frame, where each tile draws in its own.
     #[must_use]
     pub(crate) fn drape_wrap(&self) -> Option<i16> {
         self.drape_tile.map(|tile| tile.wrap)

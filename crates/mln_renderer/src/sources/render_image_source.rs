@@ -449,6 +449,8 @@ impl RenderSource for RenderImageSource {
         } else {
             1
         };
+        // New corners build the mesh again too, so that the drapes that
+        // showed the image draw again.
         if !bucket.geometry().has_quads() || geom_coords != self.mesh_corners || cells != self.mesh_cells {
             build_image_mesh(bucket, cells, matches!(concave, Some(0 | 2)));
             self.quad = ImageQuad::new(&geom_coords, &warp);
@@ -474,7 +476,7 @@ impl RenderSource for RenderImageSource {
     fn image_render_data(&self) -> Option<ImageSourceRenderData<'_>> {
         // A disabled source's tile ids and corners may be of other
         // coordinates, and an image shrunk out of sight or out of view draws
-        // nowhere.
+        // nowhere: the drapes that showed it draw again.
         let tile_ids: &[UnwrappedTileID] = if self.base.enabled && self.loaded() { &self.tile_ids } else { &[] };
         Some(ImageSourceRenderData { bucket: self.bucket.as_ref(), tile_ids, bounds: self.bounds, quad: self.quad })
     }

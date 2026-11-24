@@ -2,6 +2,137 @@
 
 use super::shader_source::WgslShaderSource;
 
+/// The height rule of `mln_util::dem`, over the DEM tile a draw reads: its
+/// RGBA8 texels behind a one-texel border, decoded by a `TerrainPropsUBO`
+/// (the prelude's). The surface's prelude has it, and so does each standing
+/// layer's terrain variant (`standing_ground`), which reads the same texture
+/// binding.
+macro_rules! ground_height {
+    () => {
+        r"
+@group(1) @binding(5) var ground_dem_texture: texture_2d<f32>;
+
+// The height in meters of the DEM's bordered texel at `texel`, clamped to
+// the texture, decoded by `props`.
+fn ground_texel_height(texel: vec2<i32>, props: TerrainPropsUBO) -> f32 {
+    let last = vec2<i32>(textureDimensions(ground_dem_texture)) - 1;
+    let rgb = round(textureLoad(ground_dem_texture, clamp(texel, vec2<i32>(0), last), 0).rgb * 255.0);
+    let unpack = props.unpack;
+    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * props.unpack_scale;
+}
+
+// The height in meters, exaggerated, at `pos` in tile units of a tile that
+// reads its DEM at `dem_coords`: the DEM uv's scale and offset, then the
+// DEM's width in pixels, 0 for flat ground.
+fn ground_height(pos: vec2<f32>, dem_coords: vec4<f32>, props: TerrainPropsUBO) -> f32 {
+    let dim = dem_coords.w;
+    if (dim == 0.0) {
+        return 0.0;
+    }
+    let coord = (pos / 8192.0 * dem_coords.x + dem_coords.yz) * dim + 0.5;
+    let first = floor(coord);
+    let f = coord - first;
+    let texel = vec2<i32>(first);
+    let tl = ground_texel_height(texel, props);
+    let tr = ground_texel_height(texel + vec2<i32>(1, 0), props);
+    let bl = ground_texel_height(texel + vec2<i32>(0, 1), props);
+    let br = ground_texel_height(texel + vec2<i32>(1, 1), props);
+    let top = tl * (1.0 - f.x) + tr * f.x;
+    let bottom = bl * (1.0 - f.x) + br * f.x;
+    return (top * (1.0 - f.y) + bottom * f.y) * props.exaggeration;
+}
+"
+    };
+}
+
+pub(crate) use ground_height;
+
+/// What a standing layer's terrain variant reads of the ground, within
+/// `#ifdef TERRAIN`: `ground_height`, and what reads the ground of its draw
+/// in its projection entry (`ProjectionUBO::ground`).
+macro_rules! standing_ground {
+    () => {
+        concat!(
+            "\n#ifdef TERRAIN\n",
+            $crate::shaders::wgsl_sources::ground_height!(),
+            r"
+// The height of the ground in meters at `pos`, in tile units of the draw's
+// tile, which reads `ground`.
+fn standing_height(pos: vec2<f32>, ground: GroundDrawableUBO) -> f32 {
+    return ground_height(pos, ground.dem_coords, ground.props);
+}
+
+// Whether a point feature whose untranslated anchor is at `pos`, in tile
+// units, is in the draw's tile, from 0 to under the extent on both axes:
+// only the tile that holds it draws it, not a neighbour whose buffer holds a
+// copy.
+fn tile_holds(pos: vec2<f32>) -> bool {
+    return all(pos >= vec2<f32>(0.0)) && all(pos < vec2<f32>(8192.0));
+}
+
+// A position outside the clip volume, of a vertex the draw drops.
+fn ground_dropped() -> vec4<f32> {
+    return vec4<f32>(-2.0, -2.0, -2.0, 1.0);
+}
+#endif
+"
+        )
+    };
+}
+pub(crate) use standing_ground;
+
+/// What a terrain variant of a program that terrain hides reads of the
+/// ground's depth, within `#ifdef TERRAIN`, after `standing_ground`:
+/// `ground_visibility`.
+macro_rules! ground_visibility {
+    () => {
+        r"
+#ifdef TERRAIN
+@group(1) @binding(7) var ground_depth_texture: texture_2d<f32>;
+
+// The eye distance of the ground drawn at `texel`, which holds its f32's
+// bits, least significant byte first; 0 where no ground is drawn.
+fn ground_depth_at(texel: vec2<i32>) -> f32 {
+    let bytes = vec4<u32>(round(textureLoad(ground_depth_texture, texel, 0) * 255.0));
+    return bitcast<f32>(bytes.x | (bytes.y << 8u) | (bytes.z << 16u) | (bytes.w << 24u));
+}
+
+// GL JS's `depthOpacity`: 1 where a point `w` from the eye, at `ndc`, is in
+// front of the ground drawn there, fading to 0 over its depth ramp behind
+// it, in GL's NDC depth, which `depth_factor` scales; 1 where no ground is
+// drawn. The ground's depth there is the texel nearest it, as GL JS reads it.
+// The texels' rows run from the top.
+fn ground_depth_opacity(ndc: vec2<f32>, w: f32, depth_factor: f32) -> f32 {
+    let size = vec2<i32>(textureDimensions(ground_depth_texture));
+    let pos = (vec2<f32>(ndc.x, -ndc.y) * 0.5 + 0.5) * vec2<f32>(size);
+    let ground = ground_depth_at(clamp(vec2<i32>(floor(pos)), vec2<i32>(0), size - 1));
+    if (!(ground > 0.0)) {
+        return 1.0;
+    }
+    let d = depth_factor * (1.0 / w - 1.0 / ground) + 0.0001;
+    return 1.0 - clamp(-500.0 * d, 0.0, 1.0);
+}
+
+// GL JS's `calculate_visibility` of the point at `clip`, whole: 1 where the
+// drawn ground doesn't hide it, 0 where it does, between them on its depth
+// ramp, averaged with the point 0.01 NDC above where that is 0.95 or less.
+fn ground_visibility(clip: vec4<f32>, ground: GroundDrawableUBO) -> f32 {
+    if (clip.w <= 0.0) {
+        return 1.0;
+    }
+    let ndc = clip.xy / clip.w;
+    let depth_factor = ground.props.depth_factor;
+    let visibility = ground_depth_opacity(ndc, clip.w, depth_factor);
+    if (visibility > 0.95) {
+        return 1.0;
+    }
+    return (visibility + ground_depth_opacity(ndc + vec2<f32>(0.0, 0.01), clip.w, depth_factor)) / 2.0;
+}
+#endif
+"
+    };
+}
+
 pub(crate) const ATMOSPHERE_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(
         r"
@@ -364,7 +495,9 @@ fn main() -> @location(0) vec4<f32> {
 };
 
 pub(crate) const CIRCLE_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        standing_ground!(),
+        ground_visibility!(),
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
@@ -419,6 +552,10 @@ struct VertexOutput {
 #ifndef HAS_UNIFORM_u_stroke_opacity
     @location(8) stroke_opacity: f32,
 #endif
+#ifdef TERRAIN
+    // How much of the circle the ground in front of its center leaves.
+    @location(9) visibility: f32,
+#endif
 };
 
 @vertex
@@ -467,6 +604,23 @@ fn main(in: VertexInput) -> VertexOutput {
     let radius_with_stroke = radius + stroke_width;
 
     let projection = projectionVector[globalIndex.value];
+    // The circle stands on the ground under its center, as it draws,
+    // translated, if its tile holds its center.
+#ifdef TERRAIN
+    if (!tile_holds(circle_center)) {
+        out.position = ground_dropped();
+        return out;
+    }
+    let ele = standing_height(circle_center + projection.translate, projection.ground);
+#ifdef PROJECTION_GLOBE
+    let standing_center = projectTileWithElevation(circle_center, ele, projection);
+#else
+    let standing_center = drawable.matrix * vec4<f32>(circle_center, ele, 1.0);
+#endif
+    out.visibility = ground_visibility(standing_center, projection.ground);
+#else
+    let ele = 0.0;
+#endif
     var position: vec4<f32>;
     if (pitch_with_map) {
 #ifdef PROJECTION_GLOBE
@@ -481,29 +635,29 @@ fn main(in: VertexInput) -> VertexOutput {
 #endif
         } else {
 #ifdef PROJECTION_GLOBE
-            let projected_center = interpolateProjection(circle_center, center_vector, 0.0, projection);
+            let projected_center = interpolateProjection(circle_center, center_vector, ele, projection);
             angle_scale *= radius_with_stroke * (projected_center.w / paintParams.camera_to_center_distance);
 #else
-            let projected_center = drawable.matrix * vec4<f32>(circle_center, 0.0, 1.0);
+            let projected_center = drawable.matrix * vec4<f32>(circle_center, ele, 1.0);
 #endif
             corner_position += scaled_extrude * radius_with_stroke *
                                (projected_center.w / paintParams.camera_to_center_distance);
         }
 #ifdef PROJECTION_GLOBE
         let corner_vector = globeRotateVector(center_vector, extrude * angle_scale, projection);
-        position = interpolateProjection(corner_position, corner_vector, 0.0, projection);
+        position = interpolateProjection(corner_position, corner_vector, ele, projection);
 #else
-        position = drawable.matrix * vec4<f32>(corner_position, 0.0, 1.0);
+        position = drawable.matrix * vec4<f32>(corner_position, ele, 1.0);
 #endif
     } else {
 #ifdef PROJECTION_GLOBE
-        position = projectTile(circle_center, projection);
+        position = projectTileWithElevation(circle_center, ele, projection);
         if (position.z / position.w > 1.0) {
             position.x = 10000.0;
             position.y = 10000.0;
         }
 #else
-        position = drawable.matrix * vec4<f32>(circle_center, 0.0, 1.0);
+        position = drawable.matrix * vec4<f32>(circle_center, ele, 1.0);
 #endif
         var factor = position.w;
         if (scale_with_map) {
@@ -521,8 +675,8 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-",
-    ),
+"
+    )),
     fragment: Some(
         r"
 struct FragmentInput {
@@ -548,6 +702,10 @@ struct FragmentInput {
 #endif
 #ifndef HAS_UNIFORM_u_stroke_opacity
     @location(8) stroke_opacity: f32,
+#endif
+#ifdef TERRAIN
+    // How much of the circle the ground in front of its center leaves.
+    @location(9) visibility: f32,
 #endif
 };
 
@@ -606,7 +764,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     }
 
     let final_color = mix(color * opacity, stroke_color * stroke_opacity, color_t);
+#ifdef TERRAIN
+    return opacity_t * final_color * in.visibility;
+#else
     return opacity_t * final_color;
+#endif
 }
 ",
     ),
@@ -2438,7 +2600,8 @@ fn main() -> @location(0) vec4<f32> {
 };
 
 pub(crate) const HEATMAP_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        standing_ground!(),
         r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
@@ -2513,12 +2676,24 @@ fn main(in: VertexInput) -> VertexOutput {
     let scaled_extrude = extrude * radius * drawable.extrude_scale;
 
     let base = floor(pos * 0.5);
+    // The kernel lies flat on the ground under its center, if its tile
+    // holds its center.
+#ifdef TERRAIN
+    let ground = projectionVector[globalIndex.value].ground;
+    if (!tile_holds(base)) {
+        out.position = ground_dropped();
+        return out;
+    }
+    let ele = standing_height(base, ground);
+#else
+    let ele = 0.0;
+#endif
 #ifdef PROJECTION_GLOBE
     let center_vector = projectToSphere(base, vec2<f32>(0.0, 0.0), projectionVector[globalIndex.value]);
     let corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale, projectionVector[globalIndex.value]);
-    out.position = interpolateProjection(base + scaled_extrude, corner_vector, 0.0, projectionVector[globalIndex.value]);
+    out.position = interpolateProjection(base + scaled_extrude, corner_vector, ele, projectionVector[globalIndex.value]);
 #else
-    out.position = drawable.matrix * vec4<f32>(base + scaled_extrude, 0.0, 1.0);
+    out.position = drawable.matrix * vec4<f32>(base + scaled_extrude, ele, 1.0);
 #endif
 #ifndef HAS_UNIFORM_u_weight
     out.weight = weight;
@@ -2527,8 +2702,8 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-",
-    ),
+"
+    )),
     fragment: Some(
         r"
 struct FragmentInput {
@@ -2647,6 +2822,489 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
+/// A hillshade's lighting, in the fragment stage of a program that lights
+/// its slopes: its blocks, and `hillshade`, the color its lights give a
+/// slope by its method. The lights are the stage's `props`.
+macro_rules! hillshade_lighting {
+    () => {
+        r"
+const STANDARD: i32 = 0;
+const COMBINED: i32 = 1;
+const IGOR: i32 = 2;
+const MULTIDIRECTIONAL: i32 = 3;
+const BASIC: i32 = 4;
+
+struct HillshadeTilePropsUBO {
+    latrange: vec2<f32>,
+    exaggeration: f32,
+    method: i32,
+    num_lights: i32,
+    pad0: f32,
+    pad1: f32,
+    pad2: f32,
+};
+
+struct HillshadeEvaluatedPropsUBO {
+    accent: vec4<f32>,
+    altitudes: vec4<f32>,
+    azimuths: vec4<f32>,
+    shadows: array<vec4<f32>, 4>,
+    highlights: array<vec4<f32>, 4>,
+};
+
+fn get_aspect(deriv: vec2<f32>) -> f32 {
+    let aspectDefault = 0.5 * PI * select(-1.0, 1.0, deriv.y > 0.0);
+    return select(aspectDefault, atan2(deriv.y, -deriv.x), deriv.x != 0.0);
+}
+
+fn standard_hillshade(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
+    let azimuth = props.azimuths.x + PI;
+    let slope = atan(0.625 * length(deriv));
+    let aspect = get_aspect(deriv);
+
+    let intensity = tileProps.exaggeration;
+
+    let base = 1.875 - intensity * 1.75;
+    let maxValue = 0.5 * PI;
+    let denom = pow(base, maxValue) - 1.0;
+    let useNonLinear = abs(intensity - 0.5) > 1e-6;
+    let scaledSlope = select(slope, ((pow(base, slope) - 1.0) / denom) * maxValue, useNonLinear);
+
+    let accent = cos(scaledSlope);
+    let accentColor = (1.0 - accent) * props.accent * clamp(intensity * 2.0, 0.0, 1.0);
+
+    let shade = abs(glMod((aspect + azimuth) / PI + 0.5, 2.0) - 1.0);
+    let shadeColor = mix(props.shadows[0], props.highlights[0], shade) * sin(scaledSlope) * clamp(intensity * 2.0, 0.0, 1.0);
+
+    return accentColor * (1.0 - shadeColor.a) + shadeColor;
+}
+
+fn basic_hillshade(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
+    let scaled_deriv = deriv * tileProps.exaggeration * 2.0;
+    let azimuth = props.azimuths.x + PI;
+    let cos_az = cos(azimuth);
+    let sin_az = sin(azimuth);
+    let cos_alt = cos(props.altitudes.x);
+    let sin_alt = sin(props.altitudes.x);
+
+    let cang = (sin_alt - (scaled_deriv.y * cos_az * cos_alt - scaled_deriv.x * sin_az * cos_alt)) / sqrt(1.0 + dot(scaled_deriv, scaled_deriv));
+    let shade = clamp(cang, 0.0, 1.0);
+
+    return select(props.shadows[0] * (1.0 - 2.0 * shade),
+                  props.highlights[0] * (2.0 * shade - 1.0),
+                  shade > 0.5);
+}
+
+fn multidirectional_hillshade(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
+    let scaled_deriv = deriv * tileProps.exaggeration * 2.0;
+    var total_color = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+
+    let num_lights = min(tileProps.num_lights, 4);
+
+    for (var i: i32 = 0; i < num_lights; i = i + 1) {
+        let altitude = select(select(select(props.altitudes.x, props.altitudes.y, i == 1), props.altitudes.z, i == 2), props.altitudes.w, i == 3);
+        let azimuth = select(select(select(props.azimuths.x, props.azimuths.y, i == 1), props.azimuths.z, i == 2), props.azimuths.w, i == 3);
+
+        let cos_alt = cos(altitude);
+        let sin_alt = sin(altitude);
+        let cos_az = -cos(azimuth);
+        let sin_az = -sin(azimuth);
+
+        let cang = (sin_alt - (scaled_deriv.y * cos_az * cos_alt - scaled_deriv.x * sin_az * cos_alt)) / sqrt(1.0 + dot(scaled_deriv, scaled_deriv));
+        let shade = clamp(cang, 0.0, 1.0);
+
+        if (shade > 0.5) {
+            total_color = total_color + props.highlights[i] * (2.0 * shade - 1.0) / f32(num_lights);
+        } else {
+            total_color = total_color + props.shadows[i] * (1.0 - 2.0 * shade) / f32(num_lights);
+        }
+    }
+
+    return total_color;
+}
+
+fn combined_hillshade(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
+    let scaled_deriv = deriv * tileProps.exaggeration * 2.0;
+    let azimuth = props.azimuths.x + PI;
+    let cos_az = cos(azimuth);
+    let sin_az = sin(azimuth);
+    let cos_alt = cos(props.altitudes.x);
+    let sin_alt = sin(props.altitudes.x);
+
+    let cang = acos((sin_alt - (scaled_deriv.y * cos_az * cos_alt - scaled_deriv.x * sin_az * cos_alt)) / sqrt(1.0 + dot(scaled_deriv, scaled_deriv)));
+    let clamped_cang = clamp(cang, 0.0, PI / 2.0);
+
+    let shade = clamped_cang * atan(length(scaled_deriv)) * 4.0 / PI / PI;
+    let highlight = (PI / 2.0 - clamped_cang) * atan(length(scaled_deriv)) * 4.0 / PI / PI;
+
+    return props.shadows[0] * shade + props.highlights[0] * highlight;
+}
+
+fn igor_hillshade(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
+    let scaled_deriv = deriv * tileProps.exaggeration * 2.0;
+    let aspect = get_aspect(scaled_deriv);
+    let azimuth = props.azimuths.x + PI;
+
+    let slope_strength = atan(length(scaled_deriv)) * 2.0 / PI;
+    let aspect_strength = 1.0 - abs(glMod((aspect + azimuth) / PI + 0.5, 2.0) - 1.0);
+
+    let shadow_strength = slope_strength * aspect_strength;
+    let highlight_strength = slope_strength * (1.0 - aspect_strength);
+
+    return props.shadows[0] * shadow_strength + props.highlights[0] * highlight_strength;
+}
+
+fn hillshade(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
+    if (tileProps.method == BASIC) {
+        return basic_hillshade(deriv, tileProps);
+    } else if (tileProps.method == COMBINED) {
+        return combined_hillshade(deriv, tileProps);
+    } else if (tileProps.method == IGOR) {
+        return igor_hillshade(deriv, tileProps);
+    } else if (tileProps.method == MULTIDIRECTIONAL) {
+        return multidirectional_hillshade(deriv, tileProps);
+    } else {
+        return standard_hillshade(deriv, tileProps);
+    }
+}
+"
+    };
+}
+
+/// The terrain's fog, in the fragment stage of a program that draws the
+/// surface: its block, and `fogged`, what it makes of a color the surface
+/// shows at a distance along the view.
+macro_rules! terrain_fog {
+    () => {
+        r"
+struct TerrainFogUBO {
+    // Linear and premultiplied.
+    fog_color: vec4<f32>,
+    horizon_color: vec4<f32>,
+    // The near and far distances along the view, in pixels, between which
+    // the fog's depth runs from 0 to 1.
+    depth_range: vec2<f32>,
+    ground_blend: f32,
+    horizon_blend: f32,
+    opacity: f32,
+    pad0: f32,
+    pad1: f32,
+    pad2: f32,
+};
+
+@group(0) @binding(6) var<uniform> terrainFog: TerrainFogUBO;
+
+fn fogged(color: vec4<f32>, view_depth: f32) -> vec4<f32> {
+    let fog = terrainFog;
+    let fog_near = fog.depth_range.x;
+    let fog_far = fog.depth_range.y;
+    if (fog.opacity <= 0.0 || color.a <= 0.0 || view_depth <= fog_near) {
+        return color;
+    }
+    // GL JS's fog depth, a perspective depth from 0 at the near end of the
+    // range to 1 at its far end.
+    let fog_depth = min(fog_far / (fog_far - fog_near) * (1.0 - fog_near / view_depth), 1.0);
+    if (fog_depth <= fog.ground_blend) {
+        return color;
+    }
+    // GL JS's fog, mixed in linear space through a gamma of 2.2: toward the
+    // fog's color, and past the horizon blend toward the horizon's. It tints
+    // the drape's color by the fog's alpha and keeps the drape's coverage.
+    let horizon = smoothstep(0.0, 1.0, (fog_depth - fog.horizon_blend) / max(1.0 - fog.horizon_blend, 1e-6));
+    let tint = mix(fog.fog_color, fog.horizon_color, horizon);
+    let along = (fog_depth - fog.ground_blend) / (1.0 - fog.ground_blend);
+    let strength = along * along * fog.opacity;
+    let gamma = vec3<f32>(2.2);
+    let surface = pow(color.rgb / color.a, gamma);
+    let mixed = surface * (1.0 - strength * tint.a) + tint.rgb * strength;
+    return vec4<f32>(pow(mixed, 1.0 / gamma) * color.a, color.a);
+}
+"
+    };
+}
+
+/// The terrain's surface: a tile's grid, raised to the heights of the tile's
+/// DEM with its skirts lowered and projected through the tile's entry of
+/// `projectionVector`, in the colors of the tile's drape, fogged as GL JS's
+/// terrain is. A pole's vertices stand at sea level in the color of the
+/// drape's edge row.
+pub(crate) const TERRAIN_SHADER: WgslShaderSource = WgslShaderSource {
+    vertex: Some(
+        r"
+struct VertexInput {
+    // x and y in tile units, whether the vertex is a skirt's lower edge, 0.
+    @location(0) pos: vec4<i32>,
+};
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    // Where in the drape, its north-west corner at 0 and its rows from the
+    // north, as they are drawn.
+    @location(0) drape_pos: vec2<f32>,
+    // The distance along the view of the ground before the skirt lowers it,
+    // which the fog reads, as in GL JS: the clip w.
+    @location(1) view_depth: f32,
+};
+
+struct TerrainDrawableUBO {
+    dem_coords: vec4<f32>,
+};
+
+struct GlobalIndexUBO {
+    value: u32,
+    pad0: vec3<u32>,
+};
+
+@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
+@group(0) @binding(2) var<storage, read> drawableVector: array<TerrainDrawableUBO>;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+
+@vertex
+fn main(in: VertexInput) -> VertexOutput {
+    let drawable = drawableVector[globalIndex.value];
+    let projection = projectionVector[globalIndex.value];
+    let pos = vec2<f32>(in.pos.xy);
+    let skirt = f32(in.pos.z);
+    let height = surface_height(pos, drawable.dem_coords, terrainProps);
+    var out: VertexOutput;
+    out.position = projectTileFor3D(pos, height - skirt * terrainProps.skirt_length, projection);
+    out.drape_pos = clamp(pos / 8192.0, vec2<f32>(0.0), vec2<f32>(1.0));
+    out.view_depth = out.position.w;
+    if (skirt != 0.0) {
+        out.view_depth = projectTileFor3D(pos, height, projection).w;
+    }
+    return out;
+}
+",
+    ),
+    fragment: Some(concat!(
+        r"
+struct FragmentInput {
+    @location(0) drape_pos: vec2<f32>,
+    @location(1) view_depth: f32,
+};
+",
+        terrain_fog!(),
+        r"
+@group(1) @binding(2) var drape_sampler: sampler;
+@group(1) @binding(3) var drape_texture: texture_2d<f32>;
+
+@fragment
+fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+    return fogged(textureSample(drape_texture, drape_sampler, in.drape_pos), in.view_depth);
+}
+"
+    )),
+    prelude: Some(TERRAIN_PRELUDE),
+};
+
+/// The terrain's surface with a drape of a hillshade's slopes over it,
+/// which the fragment stage lights as the hillshade's does, with the lights
+/// and the latitudes of the tile's entry, and fogs.
+pub(crate) const TERRAIN_HILLSHADE_SHADER: WgslShaderSource = WgslShaderSource {
+    vertex: TERRAIN_SHADER.vertex,
+    fragment: Some(concat!(
+        r"
+struct FragmentInput {
+    @location(0) drape_pos: vec2<f32>,
+    @location(1) view_depth: f32,
+};
+
+struct GlobalIndexUBO {
+    value: u32,
+    pad0: vec3<u32>,
+};
+",
+        terrain_fog!(),
+        hillshade_lighting!(),
+        r"
+struct TerrainLightUBO {
+    tile: HillshadeTilePropsUBO,
+    props: HillshadeEvaluatedPropsUBO,
+};
+
+@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
+@group(0) @binding(3) var<storage, read> lightVector: array<TerrainLightUBO>;
+@group(1) @binding(2) var drape_sampler: sampler;
+@group(1) @binding(3) var drape_texture: texture_2d<f32>;
+
+// The lights, which the hillshade's functions read.
+var<private> props: HillshadeEvaluatedPropsUBO;
+
+@fragment
+fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+    // The slopes as the hillshade prepared them, by how much of the texel
+    // its tiles cover.
+    let slopes = textureSample(drape_texture, drape_sampler, in.drape_pos);
+    if (slopes.a <= 0.0) {
+        return vec4<f32>(0.0);
+    }
+    let light = lightVector[globalIndex.value];
+    props = light.props;
+    // The drape's rows run from the tile's north.
+    let latitude = mix(light.tile.latrange.x, light.tile.latrange.y, in.drape_pos.y);
+    let deriv = ((slopes.rg / slopes.a * 8.0) - vec2<f32>(4.0, 4.0)) / cos(radians(latitude));
+    return fogged(hillshade(deriv, light.tile) * slopes.a, in.view_depth);
+}
+"
+    )),
+    prelude: Some(TERRAIN_PRELUDE),
+};
+
+/// The depth of the terrain's surface: a tile's grid, raised and projected
+/// as the surface's, whose fragments write the eye distance (the clip w) as
+/// its f32's bits, least significant byte first.
+pub(crate) const TERRAIN_DEPTH_SHADER: WgslShaderSource = WgslShaderSource {
+    vertex: Some(
+        r"
+struct VertexInput {
+    // x and y in tile units, whether the vertex is a skirt's lower edge, 0.
+    @location(0) pos: vec4<i32>,
+};
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) eye_distance: f32,
+};
+
+struct TerrainDrawableUBO {
+    dem_coords: vec4<f32>,
+};
+
+struct GlobalIndexUBO {
+    value: u32,
+    pad0: vec3<u32>,
+};
+
+@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
+@group(0) @binding(2) var<storage, read> drawableVector: array<TerrainDrawableUBO>;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+
+@vertex
+fn main(in: VertexInput) -> VertexOutput {
+    let drawable = drawableVector[globalIndex.value];
+    let projection = projectionVector[globalIndex.value];
+    let pos = vec2<f32>(in.pos.xy);
+    let skirt = f32(in.pos.z);
+    let height = surface_height(pos, drawable.dem_coords, terrainProps);
+    var out: VertexOutput;
+    out.position = projectTileFor3D(pos, height - skirt * terrainProps.skirt_length, projection);
+    out.eye_distance = out.position.w;
+    return out;
+}
+",
+    ),
+    fragment: Some(
+        r"
+@fragment
+fn main(@location(0) eye_distance: f32) -> @location(0) vec4<f32> {
+    let bits = bitcast<u32>(eye_distance);
+    let bytes = vec4<u32>(bits, bits >> 8u, bits >> 16u, bits >> 24u) & vec4<u32>(255u);
+    return vec4<f32>(bytes) / 255.0;
+}
+",
+    ),
+    prelude: Some(TERRAIN_PRELUDE),
+};
+
+/// Port-only, for the backend conformance cases: probes of the terrain's
+/// height rule. Each probe is a quad at clip positions whose vertices read
+/// the height at a place of a tile, and whose fragments write that height's
+/// bits, least significant byte first, as the texel's channels.
+#[cfg(test)]
+pub(crate) const TERRAIN_PROBE_SHADER: WgslShaderSource = WgslShaderSource {
+    vertex: Some(
+        r"
+struct VertexInput {
+    // Clip x and y, then where the height is read, in tile units.
+    @location(0) pos: vec4<f32>,
+    // The DEM uv's scale and offset, then the DEM's width in pixels.
+    @location(1) dem_coords: vec4<f32>,
+};
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) @interpolate(flat) height: f32,
+};
+
+@vertex
+fn main(in: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+    out.position = vec4<f32>(in.pos.xy, 0.0, 1.0);
+    out.height = ground_height(in.pos.zw, in.dem_coords, terrainProps);
+    return out;
+}
+",
+    ),
+    fragment: Some(
+        r"
+@fragment
+fn main(@location(0) @interpolate(flat) height: f32) -> @location(0) vec4<f32> {
+    let bits = bitcast<u32>(height);
+    let bytes = vec4<u32>(bits, bits >> 8u, bits >> 16u, bits >> 24u) & vec4<u32>(255u);
+    return vec4<f32>(bytes) / 255.0;
+}
+",
+    ),
+    prelude: Some(TERRAIN_PRELUDE),
+};
+
+/// The surface's and the probe's prelude: the terrain's uniform block, the
+/// height rule, and the height of the surface's vertices.
+const TERRAIN_PRELUDE: &str = concat!(
+    ground_height!(),
+    r"
+@group(0) @binding(5) var<uniform> terrainProps: TerrainPropsUBO;
+
+// The height of the surface's vertex at `pos`, in tile units of a tile that
+// reads its DEM at `dem_coords`: the ground's, or sea level at a pole.
+fn surface_height(pos: vec2<f32>, dem_coords: vec4<f32>, props: TerrainPropsUBO) -> f32 {
+    if (pos.y < GLOBE_POLE_NORTH_Y || pos.y > GLOBE_POLE_SOUTH_Y) {
+        return 0.0;
+    }
+    return ground_height(pos, dem_coords, props);
+}
+"
+);
+
+/// Port-only, for the backend conformance cases: quads at clip positions,
+/// each vertex colored by the texel of `image_texture` it names, which the
+/// vertex stage loads.
+#[cfg(test)]
+pub(crate) const VERTEX_TEXEL_SHADER: WgslShaderSource = WgslShaderSource {
+    vertex: Some(
+        r"
+struct VertexInput {
+    @location(0) pos_texel: vec4<i32>,
+};
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) color: vec4<f32>,
+};
+
+@group(0) @binding(1) var image_texture: texture_2d<f32>;
+
+@vertex
+fn main(in: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+    out.position = vec4<f32>(vec2<f32>(in.pos_texel.xy), 0.0, 1.0);
+    out.color = textureLoad(image_texture, in.pos_texel.zw, 0);
+    return out;
+}
+",
+    ),
+    fragment: Some(
+        r"
+@fragment
+fn main(@location(0) color: vec4<f32>) -> @location(0) vec4<f32> {
+    return color;
+}
+",
+    ),
+    prelude: None,
+};
+
 /// Port-only: a layer's texture, the size of the frame, composited onto it
 /// texel for texel, with its opacity and, for the blend modes that no blend
 /// function expresses, against a copy of the frame (`backdrop_texture`).
@@ -2752,217 +3410,6 @@ fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     ),
     prelude: None,
 };
-
-/// Port-only, for the backend conformance cases: quads at clip positions,
-/// each vertex colored by the texel of `image_texture` it names, which the
-/// vertex stage loads.
-#[cfg(test)]
-pub(crate) const VERTEX_TEXEL_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
-        r"
-struct VertexInput {
-    @location(0) pos_texel: vec4<i32>,
-};
-
-struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) color: vec4<f32>,
-};
-
-@group(0) @binding(1) var image_texture: texture_2d<f32>;
-
-@vertex
-fn main(in: VertexInput) -> VertexOutput {
-    var out: VertexOutput;
-    out.position = vec4<f32>(vec2<f32>(in.pos_texel.xy), 0.0, 1.0);
-    out.color = textureLoad(image_texture, in.pos_texel.zw, 0);
-    return out;
-}
-",
-    ),
-    fragment: Some(
-        r"
-@fragment
-fn main(@location(0) color: vec4<f32>) -> @location(0) vec4<f32> {
-    return color;
-}
-",
-    ),
-    prelude: None,
-};
-
-/// The height rule of `mln_util::dem`, over the DEM tile a draw reads: its
-/// RGBA8 texels behind a one-texel border, decoded by a `TerrainPropsUBO`.
-macro_rules! ground_height {
-    () => {
-        r"
-// How the terrain's DEM decodes, its exaggeration and its skirts' length.
-struct TerrainPropsUBO {
-    unpack: vec4<f32>,
-    unpack_scale: f32,
-    exaggeration: f32,
-    skirt_length: f32,
-    pad0: f32,
-};
-
-@group(1) @binding(5) var ground_dem_texture: texture_2d<f32>;
-
-// The height in meters of the DEM's bordered texel at `texel`, clamped to
-// the texture, decoded by `props`.
-fn ground_texel_height(texel: vec2<i32>, props: TerrainPropsUBO) -> f32 {
-    let last = vec2<i32>(textureDimensions(ground_dem_texture)) - 1;
-    let rgb = round(textureLoad(ground_dem_texture, clamp(texel, vec2<i32>(0), last), 0).rgb * 255.0);
-    let unpack = props.unpack;
-    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * props.unpack_scale;
-}
-
-// The height in meters, exaggerated, at `pos` in tile units of a tile that
-// reads its DEM at `dem_coords`: the DEM uv's scale and offset, then the
-// DEM's width in pixels, 0 for flat ground.
-fn ground_height(pos: vec2<f32>, dem_coords: vec4<f32>, props: TerrainPropsUBO) -> f32 {
-    let dim = dem_coords.w;
-    if (dim == 0.0) {
-        return 0.0;
-    }
-    let coord = (pos / 8192.0 * dem_coords.x + dem_coords.yz) * dim + 0.5;
-    let first = floor(coord);
-    let f = coord - first;
-    let texel = vec2<i32>(first);
-    let tl = ground_texel_height(texel, props);
-    let tr = ground_texel_height(texel + vec2<i32>(1, 0), props);
-    let bl = ground_texel_height(texel + vec2<i32>(0, 1), props);
-    let br = ground_texel_height(texel + vec2<i32>(1, 1), props);
-    let top = tl * (1.0 - f.x) + tr * f.x;
-    let bottom = bl * (1.0 - f.x) + br * f.x;
-    return (top * (1.0 - f.y) + bottom * f.y) * props.exaggeration;
-}
-"
-    };
-}
-
-/// Port-only, for the backend conformance cases: probes of the terrain's
-/// height rule. Each probe is a quad at clip positions whose vertices read
-/// the height at a place of a tile, and whose fragments write that height's
-/// bits, least significant byte first, as the texel's channels.
-#[cfg(test)]
-pub(crate) const TERRAIN_PROBE_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
-        r"
-struct VertexInput {
-    // Clip x and y, then where the height is read, in tile units.
-    @location(0) pos: vec4<f32>,
-    // The DEM uv's scale and offset, then the DEM's width in pixels.
-    @location(1) dem_coords: vec4<f32>,
-};
-
-struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) @interpolate(flat) height: f32,
-};
-
-@vertex
-fn main(in: VertexInput) -> VertexOutput {
-    var out: VertexOutput;
-    out.position = vec4<f32>(in.pos.xy, 0.0, 1.0);
-    out.height = ground_height(in.pos.zw, in.dem_coords, terrainProps);
-    return out;
-}
-",
-    ),
-    fragment: Some(
-        r"
-@fragment
-fn main(@location(0) @interpolate(flat) height: f32) -> @location(0) vec4<f32> {
-    let bits = bitcast<u32>(height);
-    let bytes = vec4<u32>(bits, bits >> 8u, bits >> 16u, bits >> 24u) & vec4<u32>(255u);
-    return vec4<f32>(bytes) / 255.0;
-}
-",
-    ),
-    prelude: Some(TERRAIN_PRELUDE),
-};
-
-/// The terrain's surface: a tile's grid, raised to the heights of the tile's
-/// DEM with its skirts lowered and projected through the tile's entry of
-/// `projectionVector`, in the colors of the tile's drape. A pole's vertices
-/// stand at sea level.
-pub(crate) const TERRAIN_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
-        r"
-struct VertexInput {
-    // x and y in tile units, whether the vertex is a skirt's lower edge, 0.
-    @location(0) pos: vec4<i32>,
-};
-
-struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-    // Where in the drape, its north-west corner at 0 and its rows from the
-    // north, as they are drawn.
-    @location(0) drape_pos: vec2<f32>,
-};
-
-struct TerrainDrawableUBO {
-    dem_coords: vec4<f32>,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
-@group(0) @binding(2) var<storage, read> drawableVector: array<TerrainDrawableUBO>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
-
-@vertex
-fn main(in: VertexInput) -> VertexOutput {
-    let drawable = drawableVector[globalIndex.value];
-    let projection = projectionVector[globalIndex.value];
-    let pos = vec2<f32>(in.pos.xy);
-    let skirt = f32(in.pos.z);
-    let height = surface_height(pos, drawable.dem_coords, terrainProps);
-    var out: VertexOutput;
-    out.position = projectTileFor3D(pos, height - skirt * terrainProps.skirt_length, projection);
-    out.drape_pos = clamp(pos / 8192.0, vec2<f32>(0.0), vec2<f32>(1.0));
-    return out;
-}
-",
-    ),
-    fragment: Some(
-        r"
-struct FragmentInput {
-    @location(0) drape_pos: vec2<f32>,
-};
-
-@group(1) @binding(2) var drape_sampler: sampler;
-@group(1) @binding(3) var drape_texture: texture_2d<f32>;
-
-@fragment
-fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-    return textureSample(drape_texture, drape_sampler, in.drape_pos);
-}
-",
-    ),
-    prelude: Some(TERRAIN_PRELUDE),
-};
-
-/// The surface's and the probe's prelude: the terrain's uniform block, the
-/// height rule, and the height of the surface's vertices.
-const TERRAIN_PRELUDE: &str = concat!(
-    ground_height!(),
-    r"
-@group(0) @binding(5) var<uniform> terrainProps: TerrainPropsUBO;
-
-// The height of the surface's vertex at `pos`, in tile units of a tile that
-// reads its DEM at `dem_coords`: the ground's, or sea level at a pole.
-fn surface_height(pos: vec2<f32>, dem_coords: vec4<f32>, props: TerrainPropsUBO) -> f32 {
-    if (pos.y < GLOBE_POLE_NORTH_Y || pos.y > GLOBE_POLE_SOUTH_Y) {
-        return 0.0;
-    }
-    return ground_height(pos, dem_coords, props);
-}
-"
-);
 
 pub(crate) const HILLSHADE_PREPARE_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(
@@ -3125,14 +3572,8 @@ fn main(in: VertexInput) -> VertexOutput {
 }
 ",
     ),
-    fragment: Some(
+    fragment: Some(concat!(
         r"
-const STANDARD: i32 = 0;
-const COMBINED: i32 = 1;
-const IGOR: i32 = 2;
-const MULTIDIRECTIONAL: i32 = 3;
-const BASIC: i32 = 4;
-
 struct FragmentInput {
     @location(0) tex_coord: vec2<f32>,
 };
@@ -3141,132 +3582,14 @@ struct GlobalIndexUBO {
     value: u32,
     pad0: vec3<u32>,
 };
-
-struct HillshadeTilePropsUBO {
-    latrange: vec2<f32>,
-    exaggeration: f32,
-    method: i32,
-    num_lights: i32,
-    pad0: f32,
-    pad1: f32,
-    pad2: f32,
-};
-
-struct HillshadeEvaluatedPropsUBO {
-    accent: vec4<f32>,
-    altitudes: vec4<f32>,
-    azimuths: vec4<f32>,
-    shadows: array<vec4<f32>, 4>,
-    highlights: array<vec4<f32>, 4>,
-};
-
+",
+        hillshade_lighting!(),
+        r"
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<HillshadeTilePropsUBO>;
 @group(0) @binding(5) var<uniform> props: HillshadeEvaluatedPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var hillshade_texture: texture_2d<f32>;
-
-fn get_aspect(deriv: vec2<f32>) -> f32 {
-    let aspectDefault = 0.5 * PI * select(-1.0, 1.0, deriv.y > 0.0);
-    return select(aspectDefault, atan2(deriv.y, -deriv.x), deriv.x != 0.0);
-}
-
-fn standard_hillshade(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
-    let azimuth = props.azimuths.x + PI;
-    let slope = atan(0.625 * length(deriv));
-    let aspect = get_aspect(deriv);
-
-    let intensity = tileProps.exaggeration;
-
-    let base = 1.875 - intensity * 1.75;
-    let maxValue = 0.5 * PI;
-    let denom = pow(base, maxValue) - 1.0;
-    let useNonLinear = abs(intensity - 0.5) > 1e-6;
-    let scaledSlope = select(slope, ((pow(base, slope) - 1.0) / denom) * maxValue, useNonLinear);
-
-    let accent = cos(scaledSlope);
-    let accentColor = (1.0 - accent) * props.accent * clamp(intensity * 2.0, 0.0, 1.0);
-
-    let shade = abs(glMod((aspect + azimuth) / PI + 0.5, 2.0) - 1.0);
-    let shadeColor = mix(props.shadows[0], props.highlights[0], shade) * sin(scaledSlope) * clamp(intensity * 2.0, 0.0, 1.0);
-
-    return accentColor * (1.0 - shadeColor.a) + shadeColor;
-}
-
-fn basic_hillshade(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
-    let scaled_deriv = deriv * tileProps.exaggeration * 2.0;
-    let azimuth = props.azimuths.x + PI;
-    let cos_az = cos(azimuth);
-    let sin_az = sin(azimuth);
-    let cos_alt = cos(props.altitudes.x);
-    let sin_alt = sin(props.altitudes.x);
-
-    let cang = (sin_alt - (scaled_deriv.y * cos_az * cos_alt - scaled_deriv.x * sin_az * cos_alt)) / sqrt(1.0 + dot(scaled_deriv, scaled_deriv));
-    let shade = clamp(cang, 0.0, 1.0);
-
-    return select(props.shadows[0] * (1.0 - 2.0 * shade),
-                  props.highlights[0] * (2.0 * shade - 1.0),
-                  shade > 0.5);
-}
-
-fn multidirectional_hillshade(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
-    let scaled_deriv = deriv * tileProps.exaggeration * 2.0;
-    var total_color = vec4<f32>(0.0, 0.0, 0.0, 0.0);
-
-    let num_lights = min(tileProps.num_lights, 4);
-
-    for (var i: i32 = 0; i < num_lights; i = i + 1) {
-        let altitude = select(select(select(props.altitudes.x, props.altitudes.y, i == 1), props.altitudes.z, i == 2), props.altitudes.w, i == 3);
-        let azimuth = select(select(select(props.azimuths.x, props.azimuths.y, i == 1), props.azimuths.z, i == 2), props.azimuths.w, i == 3);
-
-        let cos_alt = cos(altitude);
-        let sin_alt = sin(altitude);
-        let cos_az = -cos(azimuth);
-        let sin_az = -sin(azimuth);
-
-        let cang = (sin_alt - (scaled_deriv.y * cos_az * cos_alt - scaled_deriv.x * sin_az * cos_alt)) / sqrt(1.0 + dot(scaled_deriv, scaled_deriv));
-        let shade = clamp(cang, 0.0, 1.0);
-
-        if (shade > 0.5) {
-            total_color = total_color + props.highlights[i] * (2.0 * shade - 1.0) / f32(num_lights);
-        } else {
-            total_color = total_color + props.shadows[i] * (1.0 - 2.0 * shade) / f32(num_lights);
-        }
-    }
-
-    return total_color;
-}
-
-fn combined_hillshade(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
-    let scaled_deriv = deriv * tileProps.exaggeration * 2.0;
-    let azimuth = props.azimuths.x + PI;
-    let cos_az = cos(azimuth);
-    let sin_az = sin(azimuth);
-    let cos_alt = cos(props.altitudes.x);
-    let sin_alt = sin(props.altitudes.x);
-
-    let cang = acos((sin_alt - (scaled_deriv.y * cos_az * cos_alt - scaled_deriv.x * sin_az * cos_alt)) / sqrt(1.0 + dot(scaled_deriv, scaled_deriv)));
-    let clamped_cang = clamp(cang, 0.0, PI / 2.0);
-
-    let shade = clamped_cang * atan(length(scaled_deriv)) * 4.0 / PI / PI;
-    let highlight = (PI / 2.0 - clamped_cang) * atan(length(scaled_deriv)) * 4.0 / PI / PI;
-
-    return props.shadows[0] * shade + props.highlights[0] * highlight;
-}
-
-fn igor_hillshade(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f32> {
-    let scaled_deriv = deriv * tileProps.exaggeration * 2.0;
-    let aspect = get_aspect(scaled_deriv);
-    let azimuth = props.azimuths.x + PI;
-
-    let slope_strength = atan(length(scaled_deriv)) * 2.0 / PI;
-    let aspect_strength = 1.0 - abs(glMod((aspect + azimuth) / PI + 0.5, 2.0) - 1.0);
-
-    let shadow_strength = slope_strength * aspect_strength;
-    let highlight_strength = slope_strength * (1.0 - aspect_strength);
-
-    return props.shadows[0] * shadow_strength + props.highlights[0] * highlight_strength;
-}
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
@@ -3282,18 +3605,30 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let scaleFactor = cos(radians(latitude));
 
     let deriv = ((pixel.rg * 8.0) - vec2<f32>(4.0, 4.0)) / scaleFactor;
+    return hillshade(deriv, tileProps);
+}
+"
+    )),
+    prelude: None,
+};
 
-    if (tileProps.method == BASIC) {
-        return basic_hillshade(deriv, tileProps);
-    } else if (tileProps.method == COMBINED) {
-        return combined_hillshade(deriv, tileProps);
-    } else if (tileProps.method == IGOR) {
-        return igor_hillshade(deriv, tileProps);
-    } else if (tileProps.method == MULTIDIRECTIONAL) {
-        return multidirectional_hillshade(deriv, tileProps);
-    } else {
-        return standard_hillshade(deriv, tileProps);
-    }
+/// A hillshade's tiles as the slopes prepared for them, unlit and opaque:
+/// what the hillshade drapes where the terrain's surface lights it.
+pub(crate) const HILLSHADE_SLOPES_SHADER: WgslShaderSource = WgslShaderSource {
+    vertex: HILLSHADE_SHADER.vertex,
+    fragment: Some(
+        r"
+struct FragmentInput {
+    @location(0) tex_coord: vec2<f32>,
+};
+
+@group(1) @binding(0) var texture_sampler: sampler;
+@group(1) @binding(1) var hillshade_texture: texture_2d<f32>;
+
+@fragment
+fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+    let pixel = textureSample(hillshade_texture, texture_sampler, in.tex_coord);
+    return vec4<f32>(pixel.rg, 0.0, 1.0);
 }
 ",
     ),
@@ -5069,6 +5404,24 @@ fn get_pattern_pos(pixel_coord_upper: vec2<f32>, pixel_coord_lower: vec2<f32>,
     return (tile_units_to_pixels * pos + offset) / pattern_size;
 }
 
+// How the terrain's DEM decodes, its exaggeration and its skirts' length.
+struct TerrainPropsUBO {
+    unpack: vec4<f32>,
+    unpack_scale: f32,
+    exaggeration: f32,
+    skirt_length: f32,
+    // 2fn / (f - n) of the frame's main projection, 0 without the ground's
+    // depth.
+    depth_factor: f32,
+};
+
+// Where a terrain variant's draw reads the ground it stands on: where its
+// tile is in the DEM tile it binds, and how the DEM decodes.
+struct GroundDrawableUBO {
+    dem_coords: vec4<f32>,
+    props: TerrainPropsUBO,
+};
+
 struct ProjectionUBO {
     matrix: mat4x4<f32>,
     fallback_matrix: mat4x4<f32>,
@@ -5079,6 +5432,9 @@ struct ProjectionUBO {
     translate: vec2<f32>,
     anchor: vec4<f32>,
     anchor_angles: vec4<f32>,
+#ifdef TERRAIN
+    ground: GroundDrawableUBO,
+#endif
 };
 
 // Pole vertices carry these sentinel Y values in their raw position.
@@ -5511,7 +5867,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const SYMBOL_ICON_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        standing_ground!(),
+        ground_visibility!(),
         r"
 struct VertexInput {
     @location(3) pos_offset: vec4<i32>,
@@ -5591,7 +5949,28 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let projection = projectionVector[globalIndex.value];
     let translated_a_pos = a_pos + drawable.translation;
-    let projectedPoint = projectTileWithElevation(translated_a_pos, in.height_offset, projection);
+    // The symbol stands where its draw's ground says, under its anchor as it
+    // draws, translated, if its tile holds its anchor.
+#ifdef TERRAIN
+    if (!tile_holds(a_pos)) {
+        out.position = ground_dropped();
+        return out;
+    }
+    let ele = in.height_offset + standing_height(translated_a_pos, projection.ground);
+#else
+    let ele = in.height_offset;
+#endif
+    let projectedPoint = projectTileWithElevation(translated_a_pos, ele, projection);
+    // The ground in front of the anchor hides the whole symbol.
+#ifdef TERRAIN
+    let ground_seen = ground_visibility(projectedPoint, projection.ground);
+    if (ground_seen == 0.0) {
+        out.position = ground_dropped();
+        return out;
+    }
+#else
+    let ground_seen = 1.0;
+#endif
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
@@ -5599,7 +5978,7 @@ fn main(in: VertexInput) -> VertexOutput {
     // vertices go through the globe projection, which clips them.
     // A raised label is left to placement, which hides it once the planet
     // blocks the line of sight to it.
-    if (drawable.pitch_with_map == 0u && in.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (drawable.pitch_with_map == 0u && ele <= 0.0 && projectedPoint.z > projectedPoint.w) {
         out.position = vec4<f32>(c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location, 1.0);
@@ -5624,7 +6003,7 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var symbol_rotation = 0.0;
     if (drawable.rotate_symbol != 0u) {
-        let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), in.height_offset, projection);
+        let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), ele, projection);
         let a = projectedPoint.xy / projectedPoint.w;
         let b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
         symbol_rotation = atan2((b.y - a.y) / paintParams.aspect_ratio, b.x - a.x);
@@ -5636,11 +6015,11 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var projected_pos: vec4<f32>;
     if (drawable.is_along_line != 0u || drawable.is_variable_anchor != 0u) {
-        projected_pos = vec4<f32>(in.projected_pos.xy, in.height_offset, 1.0);
+        projected_pos = vec4<f32>(in.projected_pos.xy, ele, 1.0);
     } else if (drawable.pitch_with_map != 0u) {
-        projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, in.height_offset, 1.0);
+        projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, ele, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(in.projected_pos.xy + drawable.translation, in.height_offset, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(in.projected_pos.xy + drawable.translation, ele, projection);
     }
     let z = select(0.0, projected_pos.z / projected_pos.w, drawable.pitch_with_map != 0u);
 
@@ -5654,6 +6033,13 @@ fn main(in: VertexInput) -> VertexOutput {
     let posOffset = a_offset * max(a_minFontScale, vec2<f32>(fontScale)) / 32.0 + a_pxoffset / 16.0;
     var position = drawable.coord_matrix * vec4<f32>(projected_pos.xy / projected_pos.w + rotation_matrix * posOffset * projectionScaling, z, 1.0);
     if (drawable.pitch_with_map != 0u) {
+#ifdef TERRAIN
+        // A label along a line stands on the ground under each of its
+        // glyphs' vertices.
+        if (drawable.is_along_line != 0u) {
+            position.z = in.height_offset + standing_height(position.xy, projection.ground);
+        }
+#endif
         position = projectTileWithElevation(position.xy, position.z, projection);
     }
 
@@ -5661,15 +6047,15 @@ fn main(in: VertexInput) -> VertexOutput {
     let tex_origin = vec2<f32>(f32(in.tex_origin.x), f32(in.tex_origin.y));
     out.tex = (a_tex - tex_origin) / drawable.texsize;
     out.tex_origin = tex_origin / drawable.texsize;
-    out.fade_opacity = fade_opacity;
+    out.fade_opacity = fade_opacity * ground_seen;
 #ifndef HAS_UNIFORM_u_opacity
-    out.opacity = final_opacity;
+    out.opacity = final_opacity * ground_seen;
 #endif
 
     return out;
 }
-",
-    ),
+"
+    )),
     fragment: Some(
         r"
 struct FragmentInput {
@@ -5793,7 +6179,9 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 };
 
 pub(crate) const SYMBOL_SDF_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        standing_ground!(),
+        ground_visibility!(),
         r"
 struct VertexInput {
     @location(3) pos_offset: vec4<i32>,
@@ -5890,7 +6278,28 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let projection = projectionVector[globalIndex.value];
     let translated_a_pos = a_pos + drawable.translation;
-    let projectedPoint = projectTileWithElevation(translated_a_pos, in.height_offset, projection);
+    // The symbol stands where its draw's ground says, under its anchor as it
+    // draws, translated, if its tile holds its anchor.
+#ifdef TERRAIN
+    if (!tile_holds(a_pos)) {
+        out.position = ground_dropped();
+        return out;
+    }
+    let ele = in.height_offset + standing_height(translated_a_pos, projection.ground);
+#else
+    let ele = in.height_offset;
+#endif
+    let projectedPoint = projectTileWithElevation(translated_a_pos, ele, projection);
+    // The ground in front of the anchor hides the whole symbol.
+#ifdef TERRAIN
+    let ground_seen = ground_visibility(projectedPoint, projection.ground);
+    if (ground_seen == 0.0) {
+        out.position = ground_dropped();
+        return out;
+    }
+#else
+    let ground_seen = 1.0;
+#endif
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
@@ -5898,7 +6307,7 @@ fn main(in: VertexInput) -> VertexOutput {
     // vertices go through the globe projection, which clips them.
     // A raised label is left to placement, which hides it once the planet
     // blocks the line of sight to it.
-    if (drawable.pitch_with_map == 0u && in.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (drawable.pitch_with_map == 0u && ele <= 0.0 && projectedPoint.z > projectedPoint.w) {
         out.position = vec4<f32>(c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location, 1.0);
@@ -5923,7 +6332,7 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var symbol_rotation = 0.0;
     if (drawable.rotate_symbol != 0u) {
-        let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), in.height_offset, projection);
+        let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), ele, projection);
         let a = projectedPoint.xy / projectedPoint.w;
         let b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
         symbol_rotation = atan2((b.y - a.y) / paintParams.aspect_ratio, b.x - a.x);
@@ -5935,11 +6344,11 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var projected_pos: vec4<f32>;
     if (drawable.is_along_line != 0u || drawable.is_variable_anchor != 0u) {
-        projected_pos = vec4<f32>(in.projected_pos.xy, in.height_offset, 1.0);
+        projected_pos = vec4<f32>(in.projected_pos.xy, ele, 1.0);
     } else if (drawable.pitch_with_map != 0u) {
-        projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, in.height_offset, 1.0);
+        projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, ele, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(in.projected_pos.xy + drawable.translation, in.height_offset, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(in.projected_pos.xy + drawable.translation, ele, projection);
     }
     let z = select(0.0, projected_pos.z / projected_pos.w, drawable.pitch_with_map != 0u);
 
@@ -5953,6 +6362,13 @@ fn main(in: VertexInput) -> VertexOutput {
     let pos_rot = a_offset / 32.0 * fontScale + a_pxoffset;
     var position = drawable.coord_matrix * vec4<f32>(projected_pos.xy / projected_pos.w + rotation_matrix * pos_rot * projectionScaling, z, 1.0);
     if (drawable.pitch_with_map != 0u) {
+#ifdef TERRAIN
+        // A label along a line stands on the ground under each of its
+        // glyphs' vertices.
+        if (drawable.is_along_line != 0u) {
+            position.z = in.height_offset + standing_height(position.xy, projection.ground);
+        }
+#endif
         position = projectTileWithElevation(position.xy, position.z, projection);
     }
 
@@ -5962,9 +6378,9 @@ fn main(in: VertexInput) -> VertexOutput {
     out.tex_origin = tex_origin / drawable.texsize;
     let gamma_scale = position.w;
 #ifdef HAS_UNIFORM_u_opacity
-    out.fade_opacity = fo;
+    out.fade_opacity = fo * ground_seen;
 #else
-    out.fade_opacity = fo * opacity;
+    out.fade_opacity = fo * opacity * ground_seen;
 #endif
 
     // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
@@ -5993,8 +6409,8 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-",
-    ),
+"
+    )),
     fragment: Some(
         r"
 struct FragmentInput {
@@ -6154,7 +6570,9 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 };
 
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        standing_ground!(),
+        ground_visibility!(),
         r"
 struct VertexInput {
     @location(3) pos_offset: vec4<i32>,
@@ -6254,7 +6672,28 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let projection = projectionVector[globalIndex.value];
     let translated_a_pos = a_pos + drawable.translation;
-    let projectedPoint = projectTileWithElevation(translated_a_pos, in.height_offset, projection);
+    // The symbol stands where its draw's ground says, under its anchor as it
+    // draws, translated, if its tile holds its anchor.
+#ifdef TERRAIN
+    if (!tile_holds(a_pos)) {
+        out.position = ground_dropped();
+        return out;
+    }
+    let ele = in.height_offset + standing_height(translated_a_pos, projection.ground);
+#else
+    let ele = in.height_offset;
+#endif
+    let projectedPoint = projectTileWithElevation(translated_a_pos, ele, projection);
+    // The ground in front of the anchor hides the whole symbol.
+#ifdef TERRAIN
+    let ground_seen = ground_visibility(projectedPoint, projection.ground);
+    if (ground_seen == 0.0) {
+        out.position = ground_dropped();
+        return out;
+    }
+#else
+    let ground_seen = 1.0;
+#endif
 #ifdef PROJECTION_GLOBE
     // A screen-aligned label whose anchor is behind the horizon goes at
     // once, rather than fading out once placement next finds it occluded:
@@ -6262,7 +6701,7 @@ fn main(in: VertexInput) -> VertexOutput {
     // vertices go through the globe projection, which clips them.
     // A raised label is left to placement, which hides it once the planet
     // blocks the line of sight to it.
-    if (drawable.pitch_with_map == 0u && in.height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (drawable.pitch_with_map == 0u && ele <= 0.0 && projectedPoint.z > projectedPoint.w) {
         out.position = vec4<f32>(c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location,
                                  c_offscreen_degenerate_triangle_location, 1.0);
@@ -6286,7 +6725,7 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var symbol_rotation = 0.0;
     if (drawable.rotate_symbol != 0u) {
-        let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), in.height_offset, projection);
+        let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), ele, projection);
         let a = projectedPoint.xy / projectedPoint.w;
         let b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
         symbol_rotation = atan2((b.y - a.y) / paintParams.aspect_ratio, b.x - a.x);
@@ -6298,11 +6737,11 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var projected_pos: vec4<f32>;
     if (drawable.is_along_line != 0u || drawable.is_variable_anchor != 0u) {
-        projected_pos = vec4<f32>(in.projected_pos.xy, in.height_offset, 1.0);
+        projected_pos = vec4<f32>(in.projected_pos.xy, ele, 1.0);
     } else if (drawable.pitch_with_map != 0u) {
-        projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, in.height_offset, 1.0);
+        projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, ele, 1.0);
     } else {
-        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(in.projected_pos.xy + drawable.translation, in.height_offset, projection);
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(in.projected_pos.xy + drawable.translation, ele, projection);
     }
     let z = select(0.0, projected_pos.z / projected_pos.w, drawable.pitch_with_map != 0u);
 
@@ -6316,6 +6755,13 @@ fn main(in: VertexInput) -> VertexOutput {
     let pos_rot = a_offset / 32.0 * fontScale;
     var position = drawable.coord_matrix * vec4<f32>(projected_pos.xy / projected_pos.w + rotation_matrix * pos_rot * projectionScaling, z, 1.0);
     if (drawable.pitch_with_map != 0u) {
+#ifdef TERRAIN
+        // A label along a line stands on the ground under each of its
+        // glyphs' vertices.
+        if (drawable.is_along_line != 0u) {
+            position.z = in.height_offset + standing_height(position.xy, projection.ground);
+        }
+#endif
         position = projectTileWithElevation(position.xy, position.z, projection);
     }
     let gamma_scale = position.w;
@@ -6328,9 +6774,9 @@ fn main(in: VertexInput) -> VertexOutput {
     out.tex = (a_tex - tex_origin) * inv_tex;
     out.tex_origin = tex_origin * inv_tex;
 #ifdef HAS_UNIFORM_u_opacity
-    out.fade_opacity = fo;
+    out.fade_opacity = fo * ground_seen;
 #else
-    out.fade_opacity = fo * opacity;
+    out.fade_opacity = fo * opacity * ground_seen;
 #endif
 
     // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
@@ -6361,8 +6807,8 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-",
-    ),
+"
+    )),
     fragment: Some(
         r"
 struct FragmentInput {

@@ -5,7 +5,9 @@
 //   register: `b` for a uniform buffer, a root CBV, and `t` for a storage
 //   buffer or a vertex buffer read as one, a root SRV.
 // - The image set's textures are `t0` to `t2` of its space, one descriptor
-//   table.
+//   table. The global set's ground depth is `t2` of space 0, a table of its
+//   own, which only the terrain variants of the programs that terrain hides
+//   read.
 // - naga reads samplers out of a heap of them (`nagaSamplerHeap`, a table
 //   from `s0` of `SAMPLER_HEAP_SPACE`) at the indices of a buffer of `uint`s
 //   (`nagaGroup3SamplerIndexArray`, at `SAMPLER_INDEX_REGISTER` of the image
@@ -20,7 +22,7 @@
 
 use std::sync::LazyLock;
 
-use mln_glsl::layout::{DescriptorSetType, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT};
+use mln_glsl::layout::{DescriptorSetType, GLOBAL_GROUND_DEPTH_BINDING, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT};
 use mln_glsl::{Module, Stage};
 use naga::ResourceBinding;
 use naga::back::hlsl;
@@ -55,6 +57,10 @@ fn options() -> hlsl::Options {
             binding_map.insert(ResourceBinding { group: set, binding }, target(set as u8, binding));
         }
     }
+    // The frame's ground depth, after the global set's buffers.
+    let global = DescriptorSetType::Global.set_index();
+    let ground_depth = ResourceBinding { group: global, binding: GLOBAL_GROUND_DEPTH_BINDING };
+    binding_map.insert(ground_depth, target(global as u8, GLOBAL_GROUND_DEPTH_BINDING));
     let image_set = DescriptorSetType::DrawableImage.set_index();
     for index in 0..IMAGE_TEXTURE_COUNT as u32 {
         binding_map.insert(ResourceBinding { group: image_set, binding: index }, target(image_set as u8, index));

@@ -17,9 +17,9 @@ use mln_gfx::gpu::{
     TextureUsage, VertexStep, destroy_unused,
 };
 use mln_gfx::shaders::program::Sources;
-use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
+use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, ID_GROUND_DEPTH_TEXTURE, LAYER_SSBO_START_ID};
 use mln_gfx::texture2d::SamplerState;
-use mln_glsl::layout::{DescriptorSetType, IMAGE_SAMPLER_START, LAYER_STORAGE_COUNT};
+use mln_glsl::layout::{DescriptorSetType, GLOBAL_GROUND_DEPTH_BINDING, IMAGE_SAMPLER_START, LAYER_STORAGE_COUNT};
 use mln_glsl::{BUILT_INS, ShaderSource, TextureInfo as ShaderTexture};
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::size::Size;
@@ -63,7 +63,7 @@ use crate::heaps::{CpuDescriptors, CpuSlot, SamplerHeap, TABLE_SIZE, TableHeap};
 use crate::memory::{BufferMemory, Memory, NO_RANGE, TextureMemory};
 use crate::mipmaps::Mipmapper;
 use crate::root_signature::{
-    self, ROOT_CONSTANTS, SAMPLER_INDICES, SAMPLER_TABLE, SPECIAL_CONSTANTS, TEXTURE_TABLE, View,
+    self, GROUND_DEPTH_TABLE, ROOT_CONSTANTS, SAMPLER_INDICES, SAMPLER_TABLE, SPECIAL_CONSTANTS, TEXTURE_TABLE, View,
 };
 use crate::shaders::{CompiledProgram, ShaderCompiler};
 use crate::upload::UploadRing;
@@ -123,6 +123,10 @@ struct Texture {
     /// resource view of the level before and the render target view of the
     /// level, which draw it.
     mips: Vec<(CpuSlot, CpuSlot)>,
+    /// The table of its shader resource view alone, made when bindings
+    /// first read it as the frame's ground depth, which every bindings that
+    /// read it so share, and which goes with it.
+    table: Option<u32>,
 }
 
 /// A compiled program, what it reads from its bindings, and where.
@@ -134,6 +138,8 @@ struct Shader {
     buffers: Vec<(u32, u32, View)>,
     /// The textures it reads, by id, with their index in the table.
     textures: Vec<(u32, u32)>,
+    /// Whether it reads the frame's ground depth.
+    ground_depth: bool,
 }
 
 struct Pipeline {
@@ -160,6 +166,9 @@ struct BoundBuffer {
 struct Bindings {
     buffers: Vec<BoundBuffer>,
     textures: Option<(u32, u64)>,
+    /// The table of the frame's ground depth, for a shader that reads it,
+    /// which the texture owns ([`Texture::table`]).
+    ground_depth: Option<u32>,
     tags: BindingsTags,
 }
 
@@ -413,6 +422,8 @@ enum Resource {
         id: u32,
         index: u32,
     },
+    /// The frame's ground depth, in a table of its own.
+    GroundDepth,
 }
 
 fn resource_of(name: &str, textures: &[ShaderTexture], set: u32, binding: u32) -> Result<Resource, GpuError> {
@@ -426,6 +437,7 @@ fn resource_of(name: &str, textures: &[ShaderTexture], set: u32, binding: u32) -
     let start = LAYER_SSBO_START_ID as u32;
     let storage = LAYER_STORAGE_COUNT as u32;
     match DescriptorSetType::ALL.get(set as usize) {
+        Some(DescriptorSetType::Global) if binding == GLOBAL_GROUND_DEPTH_BINDING => Ok(Resource::GroundDepth),
         Some(DescriptorSetType::Global) => Ok(Resource::Buffer(binding)),
         Some(DescriptorSetType::Layer) if binding < storage => Ok(Resource::Buffer(binding + start)),
         Some(DescriptorSetType::Layer) => Ok(Resource::Buffer(binding - storage + DRAWABLE_RESERVED_UBO_COUNT as u32)),
@@ -635,13 +647,38 @@ impl D3d12Gpu {
         rest: D3D12_RESOURCE_STATES,
         mipmapped: bool,
     ) -> Result<TextureId, GpuError> {
-        let mut texture =
-            Texture { memory, info, format, rest, srv: None, rtv: None, dsv: None, mipmapped, mips: Vec::new() };
+        let mut texture = Texture {
+            memory,
+            info,
+            format,
+            rest,
+            srv: None,
+            rtv: None,
+            dsv: None,
+            mipmapped,
+            mips: Vec::new(),
+            table: None,
+        };
         if let Err(error) = self.make_views(&mut texture) {
             self.free(Garbage::Texture(texture));
             return Err(error);
         }
         Ok(self.textures.insert(texture))
+    }
+
+    /// The table of the shader resource view of `texture` alone, made the
+    /// first time ([`Texture::table`]).
+    fn texture_table(&mut self, texture: TextureId) -> Result<u32, GpuError> {
+        let entry = self.textures.get_mut(texture).ok_or(GpuError::UnknownId("texture"))?;
+        if let Some(table) = entry.table {
+            return Ok(table);
+        }
+        let srv = entry.srv.ok_or_else(|| GpuError::Invalid("a texture that shaders can't sample".to_owned()))?;
+        let mut views = [None; TABLE_SIZE as usize];
+        views[0] = Some(srv.handle);
+        let table = self.tables.allocate(self.device.device(), &views)?;
+        entry.table = Some(table);
+        Ok(table)
     }
 
     /// Makes the views of `texture` that its usage needs.
@@ -941,6 +978,9 @@ impl D3d12Gpu {
                 for (srv, rtv) in texture.mips {
                     self.srv_heap.free(srv);
                     self.rtv_heap.free(rtv);
+                }
+                if let Some(table) = texture.table {
+                    self.tables.free(table);
                 }
                 self.memory.free_texture(texture.memory);
             }
@@ -1243,6 +1283,7 @@ impl Gpu for D3d12Gpu {
         let mut reads: Vec<ShaderBinding> = Vec::new();
         let mut buffers = Vec::new();
         let mut textures = Vec::new();
+        let mut ground_depth = false;
         for resource in &program.resources {
             match resource_of(program.name, source_textures, resource.set, resource.binding)? {
                 Resource::Buffer(id) => {
@@ -1269,9 +1310,15 @@ impl Gpu for D3d12Gpu {
                         reads.push(ShaderBinding::Texture { id });
                     }
                 }
+                Resource::GroundDepth => {
+                    if !ground_depth {
+                        ground_depth = true;
+                        reads.push(ShaderBinding::Texture { id: ID_GROUND_DEPTH_TEXTURE as u32 });
+                    }
+                }
             }
         }
-        Ok(self.shaders.insert(Shader { key: key.clone(), program, reads, buffers, textures }))
+        Ok(self.shaders.insert(Shader { key: key.clone(), program, reads, buffers, textures, ground_depth }))
     }
 
     fn create_pipeline(&mut self, desc: &PipelineDesc<'_>) -> Result<PipelineId, GpuError> {
@@ -1322,6 +1369,7 @@ impl Gpu for D3d12Gpu {
             let stride = buffer.windows.as_ref().map_or(0, |windows| windows.stride);
             buffers.push(BoundBuffer { parameter, view, address: buffer.memory.address() + offset, stride });
         }
+        let (reads_ground_depth, name) = (shader.ground_depth, shader.program.name);
         let textures = if shader.textures.is_empty() {
             None
         } else {
@@ -1353,8 +1401,31 @@ impl Gpu for D3d12Gpu {
                 }
             }
         };
+        let ground_depth = if reads_ground_depth {
+            let id = ID_GROUND_DEPTH_TEXTURE as u32;
+            let table = desc
+                .entries
+                .iter()
+                .find_map(|entry| match *entry {
+                    BindGroupEntry::Texture { id: entry_id, texture, .. } if entry_id == id => Some(texture),
+                    _ => None,
+                })
+                .ok_or_else(|| GpuError::Invalid(format!("{name} reads texture {id}, which no entry binds")))
+                .and_then(|texture| self.texture_table(texture));
+            match table {
+                Ok(table) => Some(table),
+                Err(error) => {
+                    if let Some((table, _)) = textures {
+                        self.tables.free(table);
+                    }
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
         let tags = BindingsTags { shader: desc.shader, elements };
-        let id = self.bindings.insert(Bindings { buffers, textures, tags });
+        let id = self.bindings.insert(Bindings { buffers, textures, ground_depth, tags });
         self.dependents.bindings(id, desc);
         Ok(id)
     }
@@ -1589,6 +1660,9 @@ impl Gpu for D3d12Gpu {
                 if let Some((table, indices)) = bindings.textures {
                     list.SetGraphicsRootDescriptorTable(TEXTURE_TABLE, self.tables.gpu(table));
                     list.SetGraphicsRootShaderResourceView(SAMPLER_INDICES, indices);
+                }
+                if let Some(table) = bindings.ground_depth {
+                    list.SetGraphicsRootDescriptorTable(GROUND_DEPTH_TABLE, self.tables.gpu(table));
                 }
                 open.bindings = Some(draw.bindings);
             }

@@ -29,7 +29,6 @@ use mln_util::size::Size;
 use mln_util::time::Instant;
 use parking_lot::Mutex;
 
-mod anchor;
 mod animation;
 mod gesture;
 mod momentum;
@@ -38,7 +37,8 @@ mod transition;
 
 use gesture::GestureState;
 pub use terrain::TerrainGround;
-use transition::{FrameFn, JointEnd, Transition};
+pub(crate) use terrain::{project_on_ground, unproject_on_ground};
+use transition::{Along, FrameFn, JointEnd, Transition};
 
 use crate::map_event::{CameraChange, CameraChangeSource};
 
@@ -196,6 +196,10 @@ pub struct Transform {
     globe_drag_hold: Option<GlobeDragHold>,
     /// The terrain the camera stands on ([`Self::set_terrain`]).
     terrain: Option<TerrainGround>,
+    /// The time of the last frame that composed the commands' cameras,
+    /// from which the altitude over terrain heads on
+    /// ([`Self::ease_altitude`]).
+    last_frame: Option<Instant>,
 }
 
 /// The location a drag on the globe holds under the cursor, from the step
@@ -236,6 +240,7 @@ impl Transform {
             globe_free_bearing: false,
             globe_drag_hold: None,
             terrain: None,
+            last_frame: None,
         }
     }
 
@@ -347,14 +352,15 @@ impl Transform {
     }
 
     /// Moves the map by `offset`. A drag on the globe turns the planet so
-    /// that the location under `anchor` follows the cursor. The flat map's
-    /// ground under the cursor before the move follows it, on the plane at
-    /// sea level, or on the globe the sphere; without an anchor, or with one
-    /// whose line of sight doesn't meet the ground, the map moves on the
-    /// plane or the sphere at the center's altitude. On the globe, with the
-    /// bearing held, steps that follow one another, each starting at the
-    /// `anchor` of the one before with the camera as it left it, hold the
-    /// location the first of them grabbed, wherever
+    /// that the location under `anchor` follows the cursor. The ground under
+    /// the cursor before the move follows it, on the plane at that ground's
+    /// height, or on the globe the sphere: sea level on the flat map, the
+    /// drawn ground over terrain ([`Self::set_terrain`]); without an anchor,
+    /// or with one that grabs no ground, the map moves on the plane or the
+    /// sphere at the center's altitude. With the bearing
+    /// held, steps that follow one another, each starting at the `anchor` of
+    /// the one before with the camera as it left it, hold the location the
+    /// first of them grabbed, wherever
     /// [`VerticalPerspectiveProjection::drag_center_holding`] has a center
     /// that does. Fails as [`move_by`](Self::move_by) does.
     pub fn move_by_with_anchor(
@@ -428,7 +434,7 @@ impl Transform {
                 bearing: Some(end.bearing),
                 ..Default::default()
             };
-            self.start_transition(&fields, animation, frame, duration, false);
+            self.start_transition(&fields, animation, frame, Along::Linear, duration, false);
             return Ok(());
         }
 
@@ -474,9 +480,10 @@ impl Transform {
                     && held.size == size
                     && held.camera == self.camera_options(None)
             });
+            let gesture = self.source != CameraChangeSource::Command;
             let height = match (held, anchor.zip(from)) {
                 (Some(held), _) => held.height,
-                (None, Some((anchor, from))) => self.anchor_height(&from, &anchor),
+                (None, Some((anchor, from))) => self.anchor_height(&from, &anchor, gesture),
                 (None, None) => self.view().center_altitude(),
             };
             let on_globe = |state: &TransformState, point: &ScreenCoordinate| {
@@ -576,9 +583,10 @@ impl Transform {
         // The ground the pointer grabbed follows it, on its plane; without an
         // anchor, the map moves on the plane at the center's altitude. Use
         // unwrapped LatLng to carry information about moveBy direction.
+        let gesture = self.source != CameraChangeSource::Command;
         let anchored = anchor.and_then(|anchor| {
             let grabbed = ScreenCoordinate::new(anchor.x - offset.x, anchor.y - offset.y);
-            Some((grabbed, anchor, self.anchor_plane(&grabbed, &anchor)?))
+            Some((grabbed, anchor, self.anchor_plane(&grabbed, &anchor, gesture)?))
         });
         let (from, to, height) = anchored.unwrap_or((point_on_screen, center, self.view().center_altitude()));
         let center = self.center_moving_on_plane(&from, &to, height)?;
@@ -735,26 +743,43 @@ impl Transform {
 
     // MARK: Conversion and projection
 
+    /// The screen point (y down) of `lat_lng`: standing on the terrain's
+    /// ground while there is terrain ([`Self::set_terrain`]), at sea level
+    /// where none was drawn, and on the flat map without terrain.
     #[must_use]
     pub fn lat_lng_to_screen_coordinate(&self, lat_lng: &LatLng) -> ScreenCoordinate {
-        let mut point = self.state.view().lat_lng_to_screen_coordinate(lat_lng);
-        point.y = f64::from(self.state.view().size().height) - point.y;
-        point
+        let point = match &self.terrain {
+            Some(terrain) => project_on_ground(self.view(), terrain.elevation.as_deref(), lat_lng),
+            None => self.view().lat_lng_to_screen_coordinate(lat_lng),
+        };
+        flip_y(self.view(), &point)
     }
 
-    /// The location under `point`, in screen coordinates (y down).
+    /// The location under `point`, in screen coordinates (y down): while
+    /// there is terrain ([`Self::set_terrain`]), where the line of sight
+    /// first meets the ground the renderer drew, or the plane at the center's
+    /// altitude where it meets none; without terrain, on the flat map.
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN
     /// or infinite point.
     pub fn screen_coordinate_to_lat_lng(&self, point: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
-        let mut flipped_point = *point;
-        flipped_point.y = f64::from(self.state.view().size().height) - flipped_point.y;
-        self.state.view().screen_coordinate_to_lat_lng(&flipped_point, wrap_mode)
+        let point = flip_y(self.view(), point);
+        match &self.terrain {
+            Some(terrain) => unproject_on_ground(self.view(), terrain.elevation.as_deref(), &point, wrap_mode),
+            None => self.view().screen_coordinate_to_lat_lng(&point, wrap_mode),
+        }
+    }
+
+    /// The screen point (y down) of `lat_lng` `height` meters above sea
+    /// level, whatever the terrain.
+    pub(crate) fn lat_lng_to_screen_coordinate_at(&self, lat_lng: &LatLng, height: f64) -> ScreenCoordinate {
+        flip_y(self.view(), &self.view().lat_lng_to_screen_coordinate_at(lat_lng, height))
     }
 
     /// Where the line of sight through `point` (y down) meets the plane
-    /// `height` meters above sea level, on which the camera's moves solve
-    /// (see `anchor`). Fails as
-    /// [`View::screen_coordinate_to_lat_lng_at`].
+    /// `height` meters above sea level, whatever the terrain: the camera's
+    /// own moves solve on planes, as the terrain under a point would move the
+    /// center by its parallax. Fails as
+    /// [`screen_coordinate_to_lat_lng`](Self::screen_coordinate_to_lat_lng).
     pub(crate) fn screen_coordinate_to_lat_lng_at(
         &self,
         point: &ScreenCoordinate,
@@ -772,7 +797,7 @@ impl Transform {
 
 /// `point` measured from the other edge of `view`'s height: a screen point
 /// (y down) as a view point (y up), or back.
-fn flip_y(view: &View, point: &ScreenCoordinate) -> ScreenCoordinate {
+pub(crate) fn flip_y(view: &View, point: &ScreenCoordinate) -> ScreenCoordinate {
     ScreenCoordinate::new(point.x, f64::from(view.size().height) - point.y)
 }
 

@@ -1,8 +1,9 @@
 // The local server: the page as Vite builds it, each view's style, and the
 // fixtures. Every URL the page loads is on this server, at
-// `/fixtures/<scheme>/<rest>` for the cache's `<scheme>://<rest>`.
+// `/fixtures/<scheme>/<rest>` for the cache's `<scheme>://<rest>`, or for
+// the file in the assets that loads in its place.
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
 
@@ -25,8 +26,23 @@ const types = {
 };
 
 /**
+ * The file in `assets` that a test URL names, if there is one, as the
+ * runner's file source finds it (tools/render-test/src/file_source.rs).
+ */
+function assetFile(assets, url) {
+  const match = /^(?:local:\/\/|http:\/\/localhost:2900\/)(.*)$/.exec(url);
+  if (!match) return undefined;
+  const file = path.join(assets, path.normalize(match[1]));
+  return file.startsWith(assets + path.sep) &&
+    statSync(file, { throwIfNoEntry: false })?.isFile()
+    ? file
+    : undefined;
+}
+
+/**
  * Serves `root` (the built page), the styles of `views` and `fixtures` on a
- * free port of 127.0.0.1, and `/blank`, an empty page.
+ * free port of 127.0.0.1, and `/blank`, an empty page. A fixture whose test
+ * URL names a file in `assets` is that file, as the runner loads it.
  *
  * `beginView({ slow })` starts a view: it returns the list that the server
  * fills with the fixtures the view asks for that the cache doesn't have,
@@ -35,7 +51,7 @@ const types = {
  * this server (404, which HTTPFileSource reads as a tile the tileset
  * doesn't have, or as a Not Found error for other resources).
  */
-export async function startServer({ root, views, fixtures }) {
+export async function startServer({ root, views, fixtures, assets }) {
   let origin;
   let missing = [];
   let slow = false;
@@ -74,6 +90,13 @@ export async function startServer({ root, views, fixtures }) {
   }
 
   function serveFixture(url, response) {
+    const asset = assetFile(assets, url);
+    if (asset) {
+      response
+        .writeHead(200, { "content-type": "application/octet-stream" })
+        .end(readFileSync(asset));
+      return;
+    }
     const entry = fixtures.cached(url);
     if (!entry) {
       missing.push(url);

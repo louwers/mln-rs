@@ -335,11 +335,13 @@ impl<'a> TileMut<'a> {
         style: &Arc<SourceStyle>,
         pixel_ratio: f32,
         granularity: SubdivisionGranularitySetting,
+        terrain: bool,
     ) {
         self.change_layout(|layout| {
             layout.style = Some(Arc::clone(style));
             layout.params.pixel_ratio = pixel_ratio;
             layout.params.subdivision_granularity = granularity;
+            layout.params.terrain = terrain;
         });
     }
 
@@ -571,6 +573,9 @@ impl<'a> TileMut<'a> {
                         (None, answer, Arc::clone(self.store.images.available_images()))
                     }
                 };
+                // For the frame's terrain, not that of the last layout: new
+                // data after terrain went lays out flat.
+                layout.params.terrain = self.source.layout_terrain;
                 let input = if cached {
                     DataInput::Cached(data.key)
                 } else {

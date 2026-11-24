@@ -1,9 +1,17 @@
+mod center_altitude;
 mod ground;
 mod map_events;
 mod map_snapshot;
 mod map_updates;
 mod style_loader;
 mod style_sources;
+mod terrain_anchors;
+mod terrain_camera;
+mod terrain_conversions;
+mod terrain_gestures;
+mod terrain_globe;
+mod terrain_overlap;
+mod terrain_rest;
 
 /// A pool for a test's map.
 fn pool() -> mln_util::pool::Pool {

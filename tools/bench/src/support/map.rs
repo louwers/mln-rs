@@ -12,7 +12,10 @@ use std::time::{Duration, Instant};
 
 pub(crate) use mln_bench_workload::paths::{tile_at, tile_center};
 use mln_headless::HeadlessFrontend;
-use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
+use mln_map::{
+    CameraOptions, CameraUpdate, GesturePhase, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode,
+    RenderingStats,
+};
 use mln_runtime::{BackendRef, Device};
 use mln_storage::FileSource;
 use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, create_geojson_data, geojson_source};
@@ -204,6 +207,14 @@ impl HeadlessMap {
         self.map.jump_to(camera);
     }
 
+    /// Moves the camera to `camera` at once as a step of a gesture in
+    /// `phase`, as a user's drag or pinch does: from its `Begin` to its
+    /// `End`, the map draws its frames as a moving camera's, for speed
+    /// rather than crispness.
+    pub(crate) fn gesture(&mut self, camera: &CameraOptions, phase: GesturePhase) {
+        self.map.update_camera(&CameraUpdate { camera: *camera, phase, ..Default::default() });
+    }
+
     /// What the GPU's pipeline has run for the map's frames so far, where
     /// the device counts it: on WebGPU on Vulkan or D3D12.
     pub(crate) fn pipeline_statistics(&self) -> Option<PipelineStatistics> {
@@ -363,6 +374,11 @@ impl HeadlessMap {
         (i64::from(stats.mem_vertex_buffers) + i64::from(stats.mem_index_buffers)) as u64
     }
 
+    /// The rendering stats after the last frame.
+    pub(crate) fn rendering_stats(&self) -> RenderingStats {
+        self.frontend.frontend.rendering_stats()
+    }
+
     /// The textures and buffers the renderer has made on the GPU so far.
     pub(crate) fn gpu_objects_created(&self) -> u64 {
         let stats = self.frontend.frontend.rendering_stats();
@@ -394,6 +410,125 @@ impl HeadlessMap {
                 _ => {}
             }
         }
+    }
+}
+
+/// What a map drew in the frames a scenario measured, and the most its
+/// terrain held after any of them, from the rendering stats after each:
+/// draw calls on every commit, and the rest where the stats count it
+/// (`mln_bench_terrain_stats`).
+#[derive(Default)]
+pub(crate) struct DrawMeter {
+    draw_calls: u64,
+    /// The frames' render passes, mip generations, drapes drawn, drape
+    /// passes, draws into drapes and draws of the surface.
+    #[cfg(mln_bench_terrain_stats)]
+    drawn: [u64; 6],
+    /// The most drapes a frame drew.
+    #[cfg(mln_bench_terrain_stats)]
+    drapes_drawn_max: u64,
+    /// The most bytes of each kind the terrain held, and of all of them at
+    /// once.
+    #[cfg(mln_bench_terrain_stats)]
+    held: [u64; 7],
+    /// The frames' draws of the ground's depth, and the most bytes it held.
+    #[cfg(mln_bench_ground_depth)]
+    ground_depth: (u64, u64),
+}
+
+impl DrawMeter {
+    /// Adds what `map`'s last frame drew, and what its terrain holds.
+    pub(crate) fn frame(&mut self, map: &HeadlessMap) {
+        let stats = map.rendering_stats();
+        self.draw_calls += u64::try_from(stats.num_draw_calls).unwrap_or(0);
+        #[cfg(mln_bench_terrain_stats)]
+        {
+            let terrain = stats.terrain;
+            let count = |value: i32| u64::try_from(value).unwrap_or(0);
+            let drawn = [
+                count(stats.num_render_passes),
+                count(stats.num_mipmap_generations),
+                terrain.drapes_drawn as u64,
+                terrain.drape_passes as u64,
+                terrain.drape_draw_calls as u64,
+                terrain.surface_draw_calls as u64,
+            ];
+            for (sum, value) in self.drawn.iter_mut().zip(drawn) {
+                *sum += value;
+            }
+            self.drapes_drawn_max = self.drapes_drawn_max.max(terrain.drapes_drawn as u64);
+            let held = [
+                terrain.mem_drapes,
+                terrain.mem_drape_depth_stencil,
+                terrain.mem_drape_composite,
+                terrain.mem_dem_textures,
+                terrain.mem_dem_data,
+                terrain.mem_height_ranges,
+            ]
+            .map(|bytes| bytes as u64);
+            for (peak, value) in self.held.iter_mut().zip(held.iter().copied().chain([held.iter().sum()])) {
+                *peak = (*peak).max(value);
+            }
+        }
+        #[cfg(mln_bench_ground_depth)]
+        {
+            let terrain = stats.terrain;
+            self.ground_depth.0 += terrain.ground_depth_draw_calls as u64;
+            self.ground_depth.1 = self.ground_depth.1.max(terrain.mem_ground_depth as u64);
+        }
+    }
+
+    /// Declares in `bench` what the frames drew: `draw_calls`,
+    /// `render_passes`, `mipmap_generations`, `drapes_drawn` (and the most
+    /// in a frame, `drapes_drawn_max`), `drape_passes`, `drape_draw_calls`,
+    /// `surface_draw_calls` and `ground_depth_draw_calls`; and the most bytes
+    /// the terrain held: `terrain_drapes`, `terrain_drape_depth_stencil`,
+    /// `terrain_drape_composite`, `terrain_dem_textures`, `terrain_dem_data`,
+    /// `terrain_height_ranges`, and `terrain_memory`, all of them at once,
+    /// and `terrain_ground_depth`, the ground's depth and its depth test.
+    pub(crate) fn report(&self, bench: &mut Bench) {
+        bench.count("draw_calls", self.draw_calls);
+        #[cfg(mln_bench_terrain_stats)]
+        {
+            let drawn = [
+                "render_passes",
+                "mipmap_generations",
+                "drapes_drawn",
+                "drape_passes",
+                "drape_draw_calls",
+                "surface_draw_calls",
+            ];
+            for (name, value) in drawn.into_iter().zip(self.drawn) {
+                bench.count(name, value);
+            }
+            bench.count("drapes_drawn_max", self.drapes_drawn_max);
+            let held = [
+                "terrain_drapes",
+                "terrain_drape_depth_stencil",
+                "terrain_drape_composite",
+                "terrain_dem_textures",
+                "terrain_dem_data",
+                "terrain_height_ranges",
+                "terrain_memory",
+            ];
+            for (name, value) in held.into_iter().zip(self.held) {
+                bench.bytes(name, value);
+            }
+        }
+        #[cfg(mln_bench_ground_depth)]
+        {
+            bench.count("ground_depth_draw_calls", self.ground_depth.0);
+            bench.bytes("terrain_ground_depth", self.ground_depth.1);
+        }
+    }
+}
+
+/// The phase of the step at `index` of a gesture of `steps` steps.
+pub(crate) fn gesture_phase(index: usize, steps: usize) -> GesturePhase {
+    match index {
+        0 => GesturePhase::Begin,
+        index if index + 1 == steps => GesturePhase::End,
+        _ => GesturePhase::Update,
     }
 }
 

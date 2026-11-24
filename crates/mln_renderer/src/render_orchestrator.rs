@@ -8,7 +8,8 @@ use mln_gfx::gpu::Gpu;
 use mln_map_types::{MapDebugOptions, MapMode, View};
 use mln_style::diff::{ItemChanges, LayerChange, LayerChanges, StyleDiff, sources_by_id};
 use mln_style::expression::{Dependency, GlobalStateMap};
-use mln_style::layer_type::{ErasedLayerStyle, SourceKind};
+use mln_style::layer_type::{ErasedLayerStyle, SourceKind, StyleLayerType};
+use mln_style::layers::FillExtrusion;
 use mln_style::map::zoom_history::ZoomHistory;
 use mln_style::{
     GlobalStateChange, Layer, LayerList, PropertyEvaluationParameters, Source, Style, TransitionOptions,
@@ -43,7 +44,7 @@ use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
 use crate::render_tile::{FoundTile, RenderTile};
 use crate::renderer_event::RendererEvent;
 use crate::sources::render_tile_source::{DebugLayer, DebugLayers};
-use crate::terrain::{DrapeStacks, Draped, Draping, RenderTerrain};
+use crate::terrain::{DrapeStacks, Draped, Draping, RenderTerrain, SurfaceLight};
 use crate::text::glyph_store::GlyphStore;
 use crate::text::placement::{Placement, PlacementInputs};
 use crate::tile::contents::Contents;
@@ -329,9 +330,13 @@ impl RenderOrchestrator {
         let layers = Arc::clone(style.get_layer_list());
 
         self.apply_image_diff(&image_diff, update_parameters.sprite_loaded);
+        if !(image_diff.added.is_empty() && image_diff.removed.is_empty() && image_diff.changed.is_empty()) {
+            self.terrain.redraw_drapes();
+        }
 
         let render_layers_remade = self.apply_layer_changes(&layer_changes, &layers, &clock);
-        let constants_mask_changed = self.evaluate_layers(&layer_changes, render_layers_remade, &mut clock);
+        let drapes = style.get_terrain().is_some();
+        let constants_mask_changed = self.evaluate_layers(&layer_changes, render_layers_remade, drapes, &mut clock);
         self.apply_source_diff(&source_diff, update_parameters);
 
         // A still image fails at the first resource error, and nothing
@@ -420,12 +425,15 @@ impl RenderOrchestrator {
         }
 
         // The symbol buckets of the layers that need placement, then the
-        // positions of the layers that draw buckets other layers place.
+        // positions of the layers that draw buckets other layers place, on
+        // the ground the frame draws.
         let placement = self.placement_controller.placement_mut();
+        let ground = self.terrain.ground().map(|ground| &**ground);
         for &index in placed.leaders.iter().rev() {
             placement.update_layer_buckets(
                 &*self.layers[index],
                 &frame.transform.view,
+                ground,
                 update_symbol_opacities,
                 &mut changed_buckets,
                 &mut self.tile_store,
@@ -435,6 +443,7 @@ impl RenderOrchestrator {
             placement.update_follower_buckets(
                 &*self.layers[index],
                 &frame.transform.view,
+                ground,
                 &mut changed_buckets,
                 &mut self.tile_store,
             );
@@ -738,10 +747,16 @@ impl RenderOrchestrator {
     /// global state that changed, and the ones still transitioning or
     /// crossfading. Returns the ids of the layers whose evaluated constants
     /// changed, which lays their sources out again.
+    ///
+    /// With `drapes`, for a style with terrain, it also counts each layer's
+    /// [`paint_revision`](crate::render_layer::RenderLayerBase::paint_revision),
+    /// which only the terrain's drapes read: they exist only while terrain
+    /// draws, and draw anew when it starts.
     fn evaluate_layers(
         &mut self,
         layer_changes: &LayerChanges,
         render_layers_remade: bool,
+        drapes: bool,
         clock: &mut FrameClock,
     ) -> VecSet<String> {
         let mut constants_mask_changed: VecSet<String> = VecSet::new();
@@ -779,6 +794,11 @@ impl RenderOrchestrator {
                 || clock.evaluation.has_crossfade
                 || layer.has_transition()
             {
+                // A drape drawn while the camera moves keeps values evaluated
+                // at another zoom, but not values of another revision.
+                if drapes && (layer_added_or_changed || global_state_changed_and_matters || layer.has_transition()) {
+                    layer.base_mut().paint_revision += 1;
+                }
                 let previous_mask = layer.base().evaluated_properties.constants_mask();
                 layer.evaluate(&clock.evaluation);
                 if previous_mask != layer.base().evaluated_properties.constants_mask() {
@@ -833,43 +853,32 @@ impl RenderOrchestrator {
         clock: &FrameClock,
         frame: &mut Frame,
     ) -> Vec<bool> {
-        let mut tile_parameters = TileParameters {
-            pixel_ratio: update_parameters.pixel_ratio,
-            debug_options: update_parameters.debug_options,
-            view: &update_parameters.view,
-            min_zoom: update_parameters.min_zoom,
-            max_zoom: update_parameters.max_zoom,
-            file_source: update_parameters.file_source.clone(),
-            mode: update_parameters.mode,
-            prefetch_zoom_delta: update_parameters.prefetch_zoom_delta,
-            tile_lod_min_radius: update_parameters.tile_lod_min_radius,
-            tile_lod_scale: update_parameters.tile_lod_scale,
-            tile_lod_pitch_threshold: update_parameters.tile_lod_pitch_threshold,
-            tile_lod_zoom_shift: update_parameters.tile_lod_zoom_shift,
-            tile_lod_mode: update_parameters.tile_lod_mode,
-            subdivision_granularity: update_parameters.subdivision_granularity,
-            global_state: self.global_state.clone(),
-            is_update_synchronous: false,
-            font_faces: update_parameters.style.get_font_faces().cloned(),
-            glyph_pbfs: !update_parameters.style.get_glyph_url().is_empty(),
-            placement_commits: self.placement_controller.commits(),
-            terrain: self.terrain.cover(),
-        };
-
         if !self.sources_by_id.is_empty() {
             self.filtered_layers_for_source.reserve(layers.len());
         }
 
         let mut will_render: Vec<bool> = vec![false; self.layers.len()];
+        let has_terrain = update_parameters.style.get_terrain().is_some();
 
         // Each source in turn takes its layers. The layers without a source
         // go with the first, and with no sources the loop runs once for
-        // them.
+        // them. Over terrain, the terrain's source goes last, so that it
+        // loads the DEM tiles that the tiles of the standing layers' sources
+        // read off the surface's.
         let source_count = std::cmp::max(self.sources_by_id.len(), 1);
-        for source_index in 0..source_count {
+        let dem_source = self
+            .terrain
+            .cover()
+            .and_then(|cover| self.sources_by_id.iter().position(|source| source.id() == cover.source_id));
+        let order = (0..source_count).filter(|&index| Some(index) != dem_source).chain(dem_source);
+        // The sources with a layer that the frame draws that reads the DEM
+        // under their tiles.
+        let mut standing_sources: SmallVec<[usize; 2]> = SmallVec::new();
+        for (position, source_index) in order.enumerate() {
             let style_source = self.sources_by_id.get(source_index).cloned();
             let mut source_needs_rendering = false;
             let mut source_needs_relayout = false;
+            let mut source_reads_ground = false;
             // The layers of a source type without a render source are
             // skipped.
             let has_render_source =
@@ -923,6 +932,7 @@ impl RenderOrchestrator {
                             self.filtered_layers_for_source.push(Arc::clone(&layer.base().evaluated_properties));
                             if zoom_fits_layer {
                                 source_needs_rendering = true;
+                                source_reads_ground |= frame.terrain && layer.reads_ground();
                                 let source_id = style_source.id().to_owned();
                                 frame
                                     .layers
@@ -936,7 +946,7 @@ impl RenderOrchestrator {
                 }
 
                 // Handle layers without source.
-                let is_first_source = source_index == 0;
+                let is_first_source = position == 0;
                 if is_first_source
                     && style.base().visibility != mln_style_types::VisibilityType::None
                     && layer.supports_zoom(self.zoom_history.last_zoom)
@@ -964,8 +974,44 @@ impl RenderOrchestrator {
                 }
             }
             if let Some(style_source) = &style_source {
-                tile_parameters.is_update_synchronous = style_source.data().is_update_synchronous();
+                if Some(source_index) == dem_source {
+                    let (store, render_sources) = (&self.tile_store, &self.render_sources);
+                    let standing = standing_sources.iter().filter_map(|&index| {
+                        let tiles = render_sources.get(self.sources_by_id[index].id())?.tiles()?;
+                        Some(store.source(tiles)?.ideal.iter().copied())
+                    });
+                    self.terrain.request_standing(standing.flatten());
+                }
+                if source_reads_ground {
+                    standing_sources.push(source_index);
+                }
                 let filtered_layers = std::mem::take(&mut self.filtered_layers_for_source);
+                let tile_parameters = TileParameters {
+                    pixel_ratio: update_parameters.pixel_ratio,
+                    debug_options: update_parameters.debug_options,
+                    view: &update_parameters.view,
+                    min_zoom: update_parameters.min_zoom,
+                    max_zoom: update_parameters.max_zoom,
+                    file_source: update_parameters.file_source.clone(),
+                    mode: update_parameters.mode,
+                    prefetch_zoom_delta: update_parameters.prefetch_zoom_delta,
+                    tile_lod_min_radius: update_parameters.tile_lod_min_radius,
+                    tile_lod_scale: update_parameters.tile_lod_scale,
+                    tile_lod_pitch_threshold: update_parameters.tile_lod_pitch_threshold,
+                    tile_lod_zoom_shift: update_parameters.tile_lod_zoom_shift,
+                    tile_lod_mode: update_parameters.tile_lod_mode,
+                    subdivision_granularity: update_parameters.subdivision_granularity,
+                    // Fill extrusions lay out their polygons' centroids,
+                    // which they stand on, only for a style with terrain.
+                    layout_terrain: has_terrain
+                        && filtered_layers.iter().any(|layer| layer.style().info() == FillExtrusion::INFO),
+                    global_state: self.global_state.clone(),
+                    is_update_synchronous: style_source.data().is_update_synchronous(),
+                    font_faces: update_parameters.style.get_font_faces().cloned(),
+                    glyph_pbfs: !update_parameters.style.get_glyph_url().is_empty(),
+                    placement_commits: self.placement_controller.commits(),
+                    terrain: self.terrain.cover(),
+                };
                 if let Some(source) = self.render_sources.get_mut(style_source.id()) {
                     source.update(
                         &mut self.tile_store,
@@ -1000,11 +1046,15 @@ impl RenderOrchestrator {
         let mut symbol_buckets_added = false;
         let mut used_symbol_layers: VecSet<String> = VecSet::new();
         let longitude = update_parameters.view.center(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
+        // The symbols stand on the ground the frame draws, which a new
+        // snapshot of makes placement stale.
+        let ground = self.terrain.ground();
         for layer in layers_need_placement.iter().rev() {
             let result = self.cross_tile_symbol_index.index_layer(
                 *layer,
                 longitude,
                 &update_parameters.view,
+                ground.map(|ground| &**ground),
                 &mut self.tile_store,
             );
             if continuous {
@@ -1038,7 +1088,7 @@ impl RenderOrchestrator {
             // that wait for placements to fade their symbols out. Until it
             // may, the frame says when, rather than asking for frames that
             // would show the same.
-            let inputs = PlacementInputs::new(update_parameters, &layers_need_placement, &self.tile_store);
+            let inputs = PlacementInputs::new(update_parameters, ground, &layers_need_placement, &self.tile_store);
             let stale = self.placement_controller.is_stale(&inputs) || self.tile_store.has_fading_tiles();
             let next_placement_at = self
                 .placement_controller
@@ -1065,7 +1115,7 @@ impl RenderOrchestrator {
             frame.placement_changed = !layers_need_placement.is_empty();
             symbol_buckets_changed = frame.placement_changed;
             if frame.placement_changed {
-                let inputs = PlacementInputs::new(update_parameters, &layers_need_placement, &self.tile_store);
+                let inputs = PlacementInputs::new(update_parameters, ground, &layers_need_placement, &self.tile_store);
                 let mut placement = Placement::create(Arc::new(inputs), update_parameters.time_point, None);
                 placement.collect_placed_symbol_data(self.placed_symbol_data_collected);
                 placement.place(&mut self.tile_store);
@@ -1141,8 +1191,7 @@ impl RenderOrchestrator {
     }
 
     /// Drops what holds the renderer's shaders: the sky and globe depth
-    /// passes, the terrain's draws and the debug overlays now, and the render
-    /// layers in the next
+    /// passes, the terrain's draws and the debug overlays now, and the render layers in the next
     /// update, which makes them again. The draws made after that use the
     /// shaders the renderer has then. The sources keep their tiles, and the
     /// tiles their layout.
@@ -1320,7 +1369,9 @@ impl RenderOrchestrator {
 
     /// Makes the draws of the layers the frame draws, of the terrain, and of
     /// the sky and globe depth passes. Over terrain, the layers that drape
-    /// over it make theirs in the terrain's drapes rather than in the frame.
+    /// over it make theirs in the terrain's drapes rather than in the frame,
+    /// and those that stand on it read the ground the terrain prepares
+    /// first ([`PaintParameters::ground`]).
     pub(crate) fn update_layer_draws(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -1328,6 +1379,12 @@ impl RenderOrchestrator {
         paint_parameters: &mut PaintParameters<'_>,
         frame: &Frame,
     ) {
+        let (store, render_sources) = (&self.tile_store, &self.render_sources);
+        let dem = |id: &str| store.source(render_sources.get(id)?.tiles()?);
+        let layers = || frame.layers.keys().map(|&index| &self.layers[index as usize]).filter(|_| frame.terrain);
+        let stands = layers().any(|layer| layer.stands());
+        let hides = layers().any(|layer| layer.hides_behind_ground());
+        paint_parameters.ground = self.terrain.prepare_ground(paint_parameters, dem, stands);
         let mut needs_globe_depth = false;
         let mut contents = SourceContents::default();
         for (&index, frame_layer) in &frame.layers {
@@ -1342,13 +1399,24 @@ impl RenderOrchestrator {
             render_layer.update_draws(gpu, paint_parameters, &self.atlases, layer_source);
             needs_globe_depth = needs_globe_depth || render_layer.needs_globe_depth();
         }
+        // The overdraw inspector counts the draws of a hillshade's colors.
+        let lights = frame.terrain
+            && !paint_parameters.context.overdraw()
+            && frame.layers.keys().any(|&index| self.layers[index as usize].lights_surface())
+            && self.terrain.lights(gpu, paint_parameters);
         let draped = |&index: &u32| {
-            let drapes = self.layers[index as usize].drapes();
-            (index, drapes.then_some(Draped { draping: Draping::Fixed, blends: false }))
+            let layer = &self.layers[index as usize];
+            let draping = if lights && layer.lights_surface() {
+                Draping::Lit
+            } else if layer.drapes_by_bearing() {
+                Draping::ByBearing
+            } else {
+                Draping::Fixed
+            };
+            (index, layer.drapes().then(|| Draped { draping, blends: layer.blends_with_backdrop() }))
         };
         self.stacks =
             if frame.terrain { DrapeStacks::of(frame.layers.keys().map(draped)) } else { DrapeStacks::default() };
-        self.terrain.update_dems(paint_parameters, |id| self.tile_store.source(self.render_sources.get(id)?.tiles()?));
         if let Some(drapes) = self.terrain.begin_drapes(gpu, paint_parameters, self.stacks.len()) {
             let mut contents = SourceContents::default();
             for stack in 0..self.stacks.len() {
@@ -1360,8 +1428,22 @@ impl RenderOrchestrator {
                         &self.found_tiles,
                         &mut contents,
                     );
+                    drapes.key_layer(stack, &*self.layers[*index as usize], layer_source, self.stacks.lit(stack));
+                }
+            }
+            drapes.choose(!paint_parameters.camera_moving, update_parameters.mode == MapMode::Continuous);
+            for stack in 0..self.stacks.len() {
+                for index in self.stacks.layers(stack) {
+                    let layer_source = layer_source(
+                        &frame.layers[index],
+                        &self.render_sources,
+                        &self.tile_store,
+                        &self.found_tiles,
+                        &mut contents,
+                    );
                     let render_layer = &mut *self.layers[*index as usize];
-                    drapes.update_layer(stack, gpu, paint_parameters, &self.atlases, render_layer, layer_source);
+                    let lit = self.stacks.lit(stack);
+                    drapes.update_layer(stack, gpu, paint_parameters, &self.atlases, render_layer, layer_source, lit);
                 }
             }
             drapes.finish_update(paint_parameters.context);
@@ -1379,7 +1461,15 @@ impl RenderOrchestrator {
         let surface = !self.stacks.is_empty();
         let needs_globe_depth = (needs_globe_depth || self.sky_pass.has_atmosphere()) && !surface;
         self.globe_depth_pass.update(gpu, context, state, update_parameters, needs_globe_depth);
-        self.terrain.update_draws(gpu, paint_parameters);
+        // What the surface lights each stack's drapes with: its layer's
+        // lights of the frame, for a stack it lights.
+        let lights: SmallVec<[Option<SurfaceLight>; 4]> = (0..self.stacks.len())
+            .map(|stack| {
+                let layer = self.stacks.layers(stack)[0] as usize;
+                self.stacks.lit(stack).then(|| self.layers[layer].surface_light(paint_parameters)).flatten()
+            })
+            .collect();
+        self.terrain.update_draws(gpu, paint_parameters, frame.sky.as_ref(), &lights, hides);
     }
 
     /// The render layer at `index` in the drawing order.
@@ -1406,6 +1496,42 @@ impl RenderOrchestrator {
     /// The terrain, whose drapes draw before the frame's pass.
     pub(crate) fn terrain(&mut self) -> &mut RenderTerrain {
         &mut self.terrain
+    }
+
+    /// The projection variant each layer draws with, by its id.
+    /// Whether a draw that the layer `id` keeps reads vertices as the
+    /// attribute, instance attribute or storage buffer `vertices`.
+    #[cfg(test)]
+    pub(crate) fn keeps_vertices_of(&mut self, id: &str, vertices: usize) -> bool {
+        self.layers.iter_mut().any(|layer| layer.base().style.base().id == id && layer.keeps_vertices_of(vertices))
+    }
+
+    /// How many polygon centroids the fill-extrusion buckets of the cover
+    /// tiles of source `id` hold.
+    #[cfg(test)]
+    pub(crate) fn extrusion_centroids(&self, id: &str) -> usize {
+        use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
+        let Some(source) = self.source_tiles(id) else {
+            return 0;
+        };
+        let geometry = source.cover().filter_map(|tile| tile.contents()?.geometry());
+        let buckets = geometry.flat_map(|contents| contents.result.layer_render_data.buckets());
+        buckets
+            .filter_map(|bucket| bucket.downcast_ref::<FillExtrusionBucket>())
+            .map(|bucket| bucket.centroids.len())
+            .sum()
+    }
+
+    /// How many placements the controller has committed.
+    #[cfg(test)]
+    pub(crate) fn placement_commits(&self) -> u64 {
+        self.placement_controller.commits()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn projection_variants(&self) -> Vec<(String, mln_gfx::projection_variant::ProjectionVariant)> {
+        let variant = |layer: &dyn RenderLayer| (layer.base().style.base().id.clone(), layer.base().projection_variant);
+        self.layers.iter().map(|layer| variant(&**layer)).collect()
     }
 
     /// Queries the rendered features in `geometry`. `Err` if the query fails
@@ -1506,14 +1632,24 @@ impl RenderOrchestrator {
 
         let proj_matrix = self.view.projection_matrix_with(self.view.near_z(), false);
 
-        // Traced once for every source. Symbols are found where they were
-        // placed, on the screen, so they take the geometry as it is.
+        // Over terrain, each point, traced past the globe's limb as without
+        // terrain, is queried where its line of sight meets the ground the
+        // frame drew, once for every source. Symbols are found where they
+        // were placed, on the screen, so they take the geometry as it is,
+        // and a query of symbols alone needs no ground.
         let traced = crate::geometry::feature_index::query_screen_geometry(&self.view, geometry);
+        let ground = self
+            .terrain
+            .ground()
+            .filter(|_| !filtered_layers.values().all(|layer| layer.base().style.info().cross_tile_index))
+            .map(|elevation| crate::geometry::feature_index::QueryGround::new(&self.view, elevation, &traced));
+
         let mut results_by_layer = crate::geometry::feature_index::QueryResults::default();
         for source_id in &source_ids {
             if let Some(source) = self.source_tiles(source_id) {
                 let source_results = source.query_rendered_features(
                     &traced,
+                    ground.as_ref(),
                     &self.view,
                     &filtered_layers,
                     options,

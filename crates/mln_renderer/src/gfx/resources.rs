@@ -186,6 +186,19 @@ impl Device {
     }
 }
 
+/// The bytes a texture of `size` and `format` that passes draw into takes,
+/// as [`RenderingStats`] counts it: a depth and stencil format at 4 bytes a
+/// texel, or 8 with a 32-bit depth and a stencil, though a backend may
+/// store it in more.
+pub(crate) fn attachment_bytes(size: Size, format: TextureFormat) -> u64 {
+    let texel = match format {
+        TextureFormat::Depth32Float | TextureFormat::Depth24PlusStencil8 => 4,
+        TextureFormat::Depth32FloatStencil8 => 8,
+        format => u64::from(format.bytes_per_texel().unwrap_or(4)),
+    };
+    u64::from(size.width) * u64::from(size.height) * texel
+}
+
 /// Writes `data` at the start of `buffer` through `gpu`. Fails if `data` is
 /// longer than the buffer.
 fn write_bytes(gpu: &mut dyn Gpu, buffer: &Buffer, data: &[u8]) -> Result<(), GpuError> {

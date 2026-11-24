@@ -18,7 +18,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, ID_COLLISION_DRAWABLE_UBO, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE,
     ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE, ID_COLLISION_PLACED_VERTEX_ATTRIBUTE,
     ID_COLLISION_POS_VERTEX_ATTRIBUTE, ID_COLLISION_PROJECTION_UBO, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE,
-    ID_COLLISION_TILE_PROPS_UBO, ID_PROJECTION_UBO, ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_DRAWABLE_UBO,
+    ID_COLLISION_TILE_PROPS_UBO, ID_GROUND_DEM_TEXTURE, ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_DRAWABLE_UBO,
     ID_SYMBOL_EVALUATED_PROPS_UBO, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE,
     ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE,
     ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
@@ -27,6 +27,7 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
+use mln_gfx::shaders::terrain_ubo::GroundDrawableUBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{Projection, ProjectionData};
 use mln_style::layer_type::{ErasedLayerStyle as _, LayerStyle};
@@ -35,7 +36,8 @@ use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
 use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::{
-    AlignmentType, IconTextFitType, SymbolPlacementType, TextRotationAlignmentType, TranslateAnchorType,
+    AlignmentType, IconTextFitType, SymbolHeightAnchorType, SymbolPlacementType, TextRotationAlignmentType,
+    TranslateAnchorType,
 };
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
@@ -64,7 +66,7 @@ use crate::layer_drawing::{
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::symbol_layout::SymbolLayout;
-use crate::layout::symbol_projection::{gl_coord_matrix, label_plane_matrix};
+use crate::layout::symbol_projection::{gl_coord_matrix, label_plane_matrix, measured_from_ground};
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
     Atlases, BucketKey, BucketPlacementData, LayerBucket, LayerUpdateParameters, LayerValues, Parts, PartsMut,
@@ -73,6 +75,7 @@ use crate::render_layer::{
 use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, TileOrder};
 use crate::render_tile::{FrameTile, RenderTile};
+use crate::terrain::{GroundBinding, write_projection};
 use crate::tile_matrix::{projection_data, to_projection_ubo};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -143,6 +146,14 @@ pub(crate) fn text_property_values(
         translate: *evaluated.text_translate.uniform(),
         translate_anchor: *evaluated.text_translate_anchor.uniform(),
     }
+}
+
+/// Whether the symbols of `style` draw over the view
+/// (`symbol-screen-space`), with the flat projection, rather than on the
+/// map.
+fn draws_over_view(style: &LayerStyle<Symbol>) -> bool {
+    let screen_space = &style.layout.symbol_screen_space;
+    screen_space.as_constant().copied().unwrap_or_else(SymbolLayoutProperties::Defaults::symbol_screen_space)
 }
 
 /// The tile matrix of screen-space symbols.
@@ -618,6 +629,12 @@ pub(crate) struct RenderSymbolLayer {
     /// The segments of the tiles the update builds draws of, as it sorts
     /// them, kept from frame to frame for their memory.
     renderable_segments: Vec<SegmentGroup>,
+    /// Over terrain, what the draws of each of the frame's tiles, by its
+    /// index, bind of their ground.
+    ground_reads: Vec<GroundBinding>,
+    /// Over terrain, the ground under each of the frame's draws, in the
+    /// order they're pushed.
+    grounds: Vec<GroundDrawableUBO>,
     /// The buckets the layer places, in placement order.
     placement_data: Vec<BucketPlacementData>,
     /// The buckets another layer places and this layer draws.
@@ -765,6 +782,8 @@ impl RenderSymbolLayer {
             draw_list: DrawList::default(),
             collision_list: DrawList::default(),
             renderable_segments: Vec::new(),
+            ground_reads: Vec::new(),
+            grounds: Vec::new(),
             placement_data: Vec::new(),
             follower_data: Vec::new(),
             source_id: Arc::from(""),
@@ -885,11 +904,7 @@ impl RenderSymbolLayer {
         let data = &draw.data;
         let tile_id = tile_id.to_unwrapped();
         let is_text = data.symbol_type == SymbolType::Text;
-        let screen_space_prop = &layer.style.layout.symbol_screen_space;
-        let is_screen_space = screen_space_prop
-            .as_constant()
-            .copied()
-            .unwrap_or_else(SymbolLayoutProperties::Defaults::symbol_screen_space);
+        let is_screen_space = draws_over_view(&layer.style);
 
         let translate = if is_text { &evaluated.text_translate } else { &evaluated.icon_translate };
         let anchor = if is_text { &evaluated.text_translate_anchor } else { &evaluated.icon_translate_anchor };
@@ -1002,30 +1017,44 @@ impl RenderSymbolLayer {
     }
 
     /// Makes the frame's draws of the layer's draws of `tiles` that show any
-    /// symbols, in `passes`, and of their collision boxes and circles, and
-    /// writes the buffers they read.
+    /// symbols, in `passes`, which over terrain (`stands`) stand on the
+    /// ground of the update's reads, and of their collision boxes and
+    /// circles, and writes the buffers they read.
     fn make_frame_draws(
         &mut self,
         gpu: &mut dyn Gpu,
         tiles: &[FrameTile<'_, Symbol>],
         passes: RenderPass,
+        stands: bool,
         paint_parameters: &mut PaintParameters<'_>,
     ) {
         let layer_id = self.base.style.base().id.as_str();
         let layer = &*self.values.evaluated;
-        for tile in tiles {
+        self.grounds.clear();
+        for (tile_index, tile) in tiles.iter().enumerate() {
             let tile_id = tile.id();
             let Some(cached) = self.drawing.tiles.get_mut(&tile_id) else {
                 continue;
             };
             let bucket = tile.bucket().map(|bucket| bucket.bucket);
             debug_assert!(bucket.is_some() || cached.draws.is_empty());
-            for (index, draw) in cached.draws.iter().enumerate().filter(|(_, draw)| draw.visible) {
+            // Over terrain, what the tile's draws read of the ground, which
+            // is flat for symbols measured from sea level.
+            let ground = stands.then(|| self.ground_reads.get(tile_index)).flatten().map(|read| {
+                let flat = bucket.is_some_and(|bucket| !measured_from_ground(&bucket.layout));
+                (read, flat)
+            });
+            for (index, draw) in cached.draws.iter_mut().enumerate().filter(|(_, draw)| draw.visible) {
                 let Some(uniforms) =
                     bucket.and_then(|bucket| Self::uniforms(layer_id, layer, &tile_id, bucket, draw, paint_parameters))
                 else {
                     continue;
                 };
+                if let Some((read, flat)) = ground {
+                    draw.objects.set_texture(ID_GROUND_DEM_TEXTURE, Some(&read.texture));
+                    let dem_coords = if flat { [0.0; 4] } else { read.ubo.dem_coords };
+                    self.grounds.push(GroundDrawableUBO { dem_coords, ..read.ubo });
+                }
                 let frame_draw = FrameDraw { pass: passes, ..FrameDraw::new(Some(tile_id), draw.id) };
                 self.draw_list.push_part(frame_draw, index, uniforms);
             }
@@ -1038,9 +1067,10 @@ impl RenderSymbolLayer {
         }
 
         if let Some(frame) = &mut self.drawing.frame {
+            let grounds = stands.then_some(self.grounds.as_slice());
             if self
                 .draw_list
-                .finish(frame, gpu, paint_parameters.context, |writer| write_uniforms(&layer.paint, writer))
+                .finish(frame, gpu, paint_parameters.context, |writer| write_uniforms(&layer.paint, grounds, writer))
             {
                 for draw in self.drawing.tiles.values_mut().flat_map(|tile| &mut tile.draws) {
                     draw.objects.drop_bindings();
@@ -1060,9 +1090,11 @@ impl RenderSymbolLayer {
 }
 
 /// Writes the buffers of the frame's draws of a layer of the paint values
-/// `evaluated`.
+/// `evaluated`, with the ground under each of them, `grounds`, where they
+/// stand on terrain.
 fn write_uniforms(
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
+    grounds: Option<&[GroundDrawableUBO]>,
     writer: &mut UniformWriter<'_, SymbolUniforms>,
 ) {
     let props = SymbolEvaluatedPropsUBO {
@@ -1082,7 +1114,7 @@ fn write_uniforms(
     writer.uniform(ID_SYMBOL_EVALUATED_PROPS_UBO, &props);
     writer.storage(ID_SYMBOL_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
     writer.storage(ID_SYMBOL_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
-    writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+    write_projection(writer, grounds, |uniforms| uniforms.projection);
 }
 
 /// Writes the buffers of a collision draw of the tile `tile_id`: its matrix,
@@ -1165,12 +1197,29 @@ impl TypedLayer for RenderSymbolLayer {
     /// higher's.
     const TILE_ORDER: TileOrder = TileOrder::ByY;
 
+    const STANDS: bool = true;
+    const HIDES_BEHIND_GROUND: bool = true;
+
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
     }
 
     fn parts_mut(&mut self) -> PartsMut<'_, Self> {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
+    }
+
+    /// Symbols drawn over the view read no ground, nor do point symbols
+    /// whose height is measured from sea level (`symbol-height-anchor:
+    /// absolute`), whose draws are given flat ground. A value that an
+    /// expression gives may read it.
+    fn reads_ground(&self) -> bool {
+        let style = &self.values.style;
+        let layout = &style.layout;
+        let absolute = layout.symbol_height_anchor.as_constant() == Some(&SymbolHeightAnchorType::Absolute);
+        let point = !layout.symbol_placement.is_expression()
+            && layout.symbol_placement.as_constant().is_none_or(|&placement| placement == SymbolPlacementType::Point);
+        let from_sea_level = absolute && point;
+        !(draws_over_view(style) || from_sea_level)
     }
 
     /// The text of a `text-field` with format sections takes the values
@@ -1236,13 +1285,13 @@ impl TypedLayer for RenderSymbolLayer {
         let constant_sort_key = layout.symbol_sort_key.is_constant();
         // Screen-space symbols are drawn over the view, not projected onto
         // the map.
-        let screen_space_prop = &layout.symbol_screen_space;
-        let is_screen_space = screen_space_prop
-            .as_constant()
-            .copied()
-            .unwrap_or_else(SymbolLayoutProperties::Defaults::symbol_screen_space);
+        let is_screen_space = draws_over_view(&self.values.style);
         let symbol_projection_variant =
             if is_screen_space { ProjectionVariant::Mercator } else { self.base.projection_variant };
+        // Over terrain, the symbols stand on the ground, but for those drawn
+        // over the view.
+        let ground = paint_parameters.ground.clone().filter(|_| !is_screen_space);
+        self.ground_reads.clear();
         let is_offset = !layout.icon_offset.is_undefined();
 
         let current_zoom = transform.zoom() as f32;
@@ -1252,6 +1301,9 @@ impl TypedLayer for RenderSymbolLayer {
 
         for (tile_index, tile) in render_tiles.iter().enumerate() {
             let tile_id = tile.id();
+            if let Some(ground) = &ground {
+                self.ground_reads.push(ground.read(&tile_id));
+            }
 
             let Some(mut entry) = self.drawing.tiles.entry(&tile_id) else {
                 continue;
@@ -1516,7 +1568,7 @@ impl TypedLayer for RenderSymbolLayer {
         }
 
         self.renderable_segments = renderable_segments;
-        self.make_frame_draws(gpu, render_tiles, passes, paint_parameters);
+        self.make_frame_draws(gpu, render_tiles, passes, ground.is_some(), paint_parameters);
     }
 
     /// Collects the symbol buckets of the tiles the layer places, and of

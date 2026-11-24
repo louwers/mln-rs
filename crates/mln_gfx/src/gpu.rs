@@ -38,7 +38,8 @@ use crate::color_mode::{BlendFunction, Mask};
 use crate::cull_face_mode::CullFaceMode;
 use crate::depth_mode::DepthMode;
 use crate::gfx_types::{AttributeDataType, DrawModeType};
-use crate::shaders::program::Program;
+use crate::shaders::program::{Program, TERRAIN_DEFINE};
+use crate::shaders::programs::{VariantAttributes, terrain_attributes};
 use crate::stencil_mode::{StencilMode, Test};
 use crate::texture2d::SamplerState;
 use crate::types::{DepthFunctionType, DepthMaskType, StencilOpType};
@@ -303,6 +304,8 @@ pub struct VertexBufferLayout {
 pub struct ShaderKey {
     program: &'static Program,
     defines: Arc<[String]>,
+    /// Whether it is the program's terrain variant ([`TERRAIN_DEFINE`]).
+    terrain: bool,
 }
 
 impl ShaderKey {
@@ -314,12 +317,33 @@ impl ShaderKey {
         let mut defines: Vec<String> = defines.into_iter().collect();
         defines.sort_unstable();
         defines.dedup();
-        ShaderKey { program, defines: defines.into() }
+        let terrain = defines.iter().any(|define| define == TERRAIN_DEFINE);
+        ShaderKey { program, defines: defines.into(), terrain }
     }
 
     #[must_use]
     pub fn program(&self) -> &'static Program {
         self.program
+    }
+
+    /// The per-vertex attributes the variant reads, each with the format a
+    /// draw without data for it binds, in the variant's order: the
+    /// program's ([`Program::attributes`]), or more for a terrain variant
+    /// ([`terrain_attributes`]).
+    #[must_use]
+    pub fn attributes(&self) -> &'static [(usize, AttributeDataType)] {
+        self.terrain_attributes().map_or(self.program.attributes, |(attributes, _)| attributes)
+    }
+
+    /// The per-instance attributes the variant reads, as
+    /// [`attributes`](Self::attributes) gives them.
+    #[must_use]
+    pub fn instance_attributes(&self) -> &'static [(usize, AttributeDataType)] {
+        self.terrain_attributes().map_or(self.program.instance_attributes, |(_, instances)| instances)
+    }
+
+    fn terrain_attributes(&self) -> Option<VariantAttributes> {
+        if self.terrain { terrain_attributes(self.program) } else { None }
     }
 
     /// The defines, sorted.
@@ -737,6 +761,76 @@ mod tests {
         assert_eq!(key(&["B", "A"]).defines(), ["A", "B"]);
         assert_ne!(key(&["A"]), ShaderKey::new(&programs::LINE, ["A".to_owned()]));
         assert_eq!(key(&["B=2.0", "A"]).define_values().collect::<Vec<_>>(), [("A", ""), ("B", "2.0")]);
+    }
+
+    // A fill extrusion program's terrain variant reads its own attributes,
+    // in their order, and then the centroid, per vertex or per instance as
+    // its walls step, but the pulled walls, which read it from a storage
+    // buffer; its other variants, and every other program's, read the
+    // program's.
+    #[test]
+    fn only_a_fill_extrusions_terrain_variant_reads_the_centroid() {
+        use crate::shaders::program_parameters::ProgramParameters;
+        use crate::shaders::shader_defines::ID_FILL_EXTRUSION_CENTROID_ATTRIBUTE as CENTROID;
+
+        let parameters = ProgramParameters::new(1.0, false);
+        let extrusions = [
+            &programs::FILL_EXTRUSION,
+            &programs::FILL_EXTRUSION_INSTANCED,
+            &programs::FILL_EXTRUSION_WALL,
+            &programs::FILL_EXTRUSION_PULLED,
+            &programs::FILL_EXTRUSION_PATTERN,
+            &programs::FILL_EXTRUSION_PATTERN_INSTANCED,
+            &programs::FILL_EXTRUSION_PATTERN_WALL,
+        ];
+        for program in extrusions.into_iter().chain([&programs::FILL, &programs::CIRCLE]) {
+            for &variant in programs::projection_variants(program) {
+                let key = program.variant_key(&parameters, program.properties, variant);
+                let (attributes, instances) = (key.attributes(), key.instance_attributes());
+                let reads =
+                    variant.stands() && extrusions.contains(&program) && program != &programs::FILL_EXTRUSION_PULLED;
+                let ids = |attributes: &[(usize, AttributeDataType)]| -> Vec<usize> {
+                    attributes.iter().map(|&(id, _)| id).collect()
+                };
+                let (own, own_instances) = (ids(program.attributes), ids(program.instance_attributes));
+                let (attributes, instances) = (ids(attributes), ids(instances));
+                let added: Vec<usize> = if instances.len() > own_instances.len() {
+                    assert_eq!(attributes, own, "{program:?} {variant:?}");
+                    assert_eq!(instances[..own_instances.len()], own_instances, "{program:?} {variant:?}");
+                    instances[own_instances.len()..].to_vec()
+                } else {
+                    assert_eq!(instances, own_instances, "{program:?} {variant:?}");
+                    assert_eq!(attributes[..own.len()], own, "{program:?} {variant:?}");
+                    attributes[own.len()..].to_vec()
+                };
+                assert_eq!(added, if reads { vec![CENTROID] } else { vec![] }, "{program:?} {variant:?}");
+            }
+        }
+    }
+
+    // A program without a terrain variant, such as the collision boxes a
+    // standing symbol layer draws, keys its projection's flat variant over
+    // terrain.
+    #[test]
+    fn only_a_standing_program_keys_a_terrain_variant() {
+        use crate::projection_variant::ProjectionVariant::{Globe, GlobeTerrain, Mercator, Terrain};
+        use crate::shaders::program::GLOBE_DEFINE;
+        use crate::shaders::program_parameters::ProgramParameters;
+
+        let parameters = ProgramParameters::new(1.0, false);
+        let key = |program: &'static Program, variant| program.variant_key(&parameters, [], variant);
+        for program in [&programs::COLLISION_BOX, &programs::COLLISION_CIRCLE, &programs::HEATMAP_TEXTURE] {
+            assert_eq!(key(program, Terrain), key(program, Mercator), "{program:?}");
+            assert_eq!(key(program, GlobeTerrain), key(program, Globe), "{program:?}");
+        }
+        for program in [&programs::SYMBOL_SDF, &programs::CIRCLE] {
+            let keys = [Mercator, Globe, Terrain, GlobeTerrain].map(|variant| key(program, variant));
+            for (i, a) in keys.iter().enumerate() {
+                assert!(keys[i + 1..].iter().all(|b| a != b), "{program:?}");
+            }
+            let names: Vec<&str> = keys[3].define_values().map(|(name, _)| name).collect();
+            assert!(names.contains(&GLOBE_DEFINE) && names.contains(&TERRAIN_DEFINE), "{program:?}");
+        }
     }
 
     #[test]

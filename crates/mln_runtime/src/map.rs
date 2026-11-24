@@ -3,10 +3,11 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 
+use mln_map::transform::TerrainGround;
 use mln_map::{
     BoundOptions, Camera, CameraCommandId, CameraDelta, CameraOptions, CameraUpdate, FrameClock, FreeCameraOptions,
-    LogicalExtent, MapDebugOptions, MapEvent, MapMode, MapSnapshot, ProjectionMode, StyleLoadError, TransitionEnd,
-    TransitionOutcome,
+    LogicalExtent, MapDebugOptions, MapEvent, MapMode, MapProjection, MapSnapshot, ProjectionMode, StyleLoadError,
+    TransitionEnd, TransitionOutcome,
 };
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_renderer::{Registry, UpdateReader};
@@ -115,7 +116,9 @@ pub struct CameraQuery {
 
 /// What the runtime's thread publishes for a map's handles.
 pub(crate) struct Published {
-    snapshot: Mutex<Option<MapSnapshot>>,
+    /// The map's state as of its last flush, under one lock, so a
+    /// projection's view and terrain come from the same flush.
+    state: Mutex<PublishedState>,
     /// The map's updates for its renderer, once the map is built.
     updates: OnceLock<UpdateReader>,
     /// The sequence number of the last command that ran and whose changes a
@@ -137,6 +140,15 @@ pub(crate) struct Published {
     still_image: AtomicU64,
 }
 
+/// The map's state as of its last flush.
+#[derive(Default)]
+struct PublishedState {
+    /// `None` until the map is built.
+    snapshot: Option<MapSnapshot>,
+    /// The terrain the map's camera stands on (`mln_map::Map::terrain`).
+    terrain: Option<TerrainGround>,
+}
+
 impl Published {
     /// The sequence number of the last command that ran and whose changes a
     /// frame can show.
@@ -152,7 +164,7 @@ impl Published {
     /// Whether a camera command was still animating as of the map's last
     /// published state.
     pub(crate) fn animating(&self) -> bool {
-        self.snapshot.lock().as_ref().is_some_and(|snapshot| snapshot.transition_in_progress)
+        self.state.lock().snapshot.as_ref().is_some_and(|snapshot| snapshot.transition_in_progress)
     }
 
     /// The still image that waits for a frame, as the
@@ -164,7 +176,7 @@ impl Published {
 
     pub(crate) fn new(event_mask: EventMask) -> Self {
         Published {
-            snapshot: Mutex::new(None),
+            state: Mutex::new(PublishedState::default()),
             updates: OnceLock::new(),
             applied: AtomicU64::new(0),
             frame_clock: OnceLock::new(),
@@ -443,11 +455,7 @@ impl Map {
     /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) until the
     /// map is built, and after it is released.
     pub fn snapshot(&self) -> Result<MapSnapshot, Error> {
-        if self.shared.released.load(Ordering::SeqCst) {
-            return Err(released());
-        }
-        let mut snapshot =
-            self.shared.published.snapshot.lock().ok_or_else(|| Error::invalid_state("the map isn't built"))?;
+        let mut snapshot = self.published_state(|state| state.snapshot)?;
         // The map publishes an update, which the renderer may draw at once,
         // before it copies the snapshot: count the updates as they are now, so
         // a frame never shows a later update than the snapshot.
@@ -455,6 +463,28 @@ impl Map {
             snapshot.update_generation = updates.generation();
         }
         Ok(snapshot)
+    }
+
+    /// A projection of the map's view as of [`snapshot`](Self::snapshot),
+    /// on the terrain its camera stands on in that state, so its conversions
+    /// and its [`terrain_elevation`](MapProjection::terrain_elevation) meet
+    /// the ground that the renderer last drew, as the map's own conversions
+    /// do, on the globe as on Mercator. Without terrain it converts on the
+    /// flat map. The projection is the caller's and doesn't follow the map.
+    ///
+    /// Fails as [`snapshot`](Self::snapshot) does.
+    pub fn projection(&self) -> Result<MapProjection, Error> {
+        let (view, terrain) = self.published_state(|state| Some((state.snapshot?.view, state.terrain.clone())))?;
+        Ok(MapProjection::from_view(&view)?.with_terrain(terrain))
+    }
+
+    /// What `read` takes from the map's published state, which fails until
+    /// the map is built (when `read` gives `None`) and after it is released.
+    fn published_state<T>(&self, read: impl FnOnce(&PublishedState) -> Option<T>) -> Result<T, Error> {
+        if self.shared.released.load(Ordering::SeqCst) {
+            return Err(released());
+        }
+        read(&self.shared.published.state.lock()).ok_or_else(|| Error::invalid_state("the map isn't built"))
     }
 
     /// The events that the map reports, as of the last command that ran.
@@ -1462,6 +1492,15 @@ impl Map {
         })
     }
 
+    /// Sets whether the center stands on the terrain, as
+    /// `mln_map::Map::set_center_clamped_to_ground` describes.
+    pub fn set_center_clamped_to_ground(&self, clamped: bool) -> Result<Completion<Applied>, Error> {
+        self.command(move |map| {
+            map.set_center_clamped_to_ground(clamped);
+            Ok(())
+        })
+    }
+
     /// Logs the style's sources and their state.
     pub fn dump_debug_logs(&self) -> Result<Completion<Applied>, Error> {
         self.command(|map| {
@@ -1848,10 +1887,11 @@ pub(crate) fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
         .collect();
     // Each change to the state grows the generation, so a snapshot of the
     // same generation shows the state as it is.
-    let mut published = entry.published.snapshot.lock();
-    if published.is_none_or(|snapshot| snapshot.generation != generation) {
-        *published = Some(entry.core.snapshot());
+    let mut published = entry.published.state.lock();
+    if published.snapshot.is_none_or(|snapshot| snapshot.generation != generation) {
+        published.snapshot = Some(entry.core.snapshot());
     }
+    published.terrain = entry.core.terrain();
     drop(published);
 
     let mut style_outcome = None;
@@ -1922,6 +1962,8 @@ fn remove(core: &mut RuntimeCore, id: MapId, done: Option<Resolver<()>>, outbox:
             core.queue.cancel(task);
         }
         entry.core.set_waker(None);
+        // Handles may outlive the map: they keep no terrain alive.
+        entry.published.state.lock().terrain.take();
         if let Some(pending) = entry.pending_style.take() {
             outbox.resolve(pending.resolver, Err(Error::cancelled("the map was released")));
         }

@@ -88,6 +88,12 @@ impl ChangedBuckets {
         self.0.is_empty()
     }
 
+    /// Whether the bucket `bucket` changed.
+    #[must_use]
+    pub(crate) fn contains(&self, bucket: SimpleIdentity) -> bool {
+        self.0.contains_key(&bucket)
+    }
+
     fn get(&self, bucket: SimpleIdentity) -> Option<BucketChanges> {
         self.0.get(&bucket).copied()
     }
@@ -683,6 +689,18 @@ impl<U> UniformWriter<'_, U> {
         self.replaced |= self.buffers.write_storage(self.gpu, id, self.bytes, self.context.device());
     }
 
+    /// Writes each draw's `entry` of its uniform values and its element of
+    /// `extra`, which holds one for each draw in the order they were pushed,
+    /// to the storage buffer `id`.
+    pub(crate) fn storage_with<X, P: bytemuck::Pod>(&mut self, id: usize, extra: &[X], entry: impl Fn(&U, &X) -> P) {
+        debug_assert_eq!(extra.len(), self.uniforms.len(), "an element of `extra` for each draw");
+        self.bytes.clear();
+        for &(_, index) in self.draws {
+            self.bytes.extend_from_slice(bytemuck::bytes_of(&entry(&self.uniforms[index], &extra[index])));
+        }
+        self.replaced |= self.buffers.write_storage(self.gpu, id, self.bytes, self.context.device());
+    }
+
     /// Writes `value`, which all the draws read, to the uniform buffer `id`.
     pub(crate) fn uniform<P: bytemuck::Pod>(&mut self, id: usize, value: &P) {
         self.replaced |= self.buffers.write_pod(self.gpu, id, value, self.context.device());
@@ -938,14 +956,14 @@ impl<P: Copy> LayerDraws<P> {
         self.frame.set_composite(composite);
     }
 
-    /// See [`FrameDraws::set_stencil_tiles`].
-    pub(crate) fn set_stencil_tiles(&mut self, tiles: impl IntoIterator<Item = UnwrappedTileID>) {
-        self.frame.set_stencil_tiles(tiles);
-    }
-
     /// The buffers the draws bind.
     pub(crate) fn uniform_buffers_mut(&mut self) -> &mut UniformBufferArray {
         &mut self.frame.uniform_buffers
+    }
+
+    /// See [`FrameDraws::set_stencil_tiles`].
+    pub(crate) fn set_stencil_tiles(&mut self, tiles: impl IntoIterator<Item = UnwrappedTileID>) {
+        self.frame.set_stencil_tiles(tiles);
     }
 
     /// Drops the draws.
@@ -1086,7 +1104,7 @@ pub(crate) struct DrawGroups {
     pub(crate) count: usize,
     pub(crate) clip_tiles: Vec<UnwrappedTileID>,
     /// The tiles whose masks clear the stencil buffer, also in
-    /// `clip_tiles` ([`PaintParameters::stencil_clear_tiles`]).
+    /// `clip_tiles` ([`PaintParameters::stencil_clear`]).
     pub(crate) stencil_clear: StencilClear,
     pub(crate) composited: Vec<(SimpleIdentity, Composite)>,
 }

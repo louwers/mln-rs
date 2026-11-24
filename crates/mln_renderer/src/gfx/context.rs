@@ -41,6 +41,9 @@ pub(crate) struct Context {
     device: Device,
     caps: Caps,
     global_uniform_buffers: UniformBufferArray,
+    /// The depth of the frame's drawn ground, which the draws of the terrain
+    /// variants that terrain hides bind with the global buffers.
+    ground_depth: Option<SharedTexture>,
     /// The sampler of each state a texture is sampled with.
     samplers: HashMap<SamplerState, SamplerId>,
     /// What the programs are compiled with: the pixel ratio's defines, and
@@ -81,6 +84,7 @@ impl Context {
             device: Device::default(),
             caps,
             global_uniform_buffers: UniformBufferArray::default(),
+            ground_depth: None,
             samplers: HashMap::default(),
             program_parameters: ProgramParameters::new(pixel_ratio, false),
             overdraw: false,
@@ -244,6 +248,12 @@ impl Context {
         self.vertices.contains(key)
     }
 
+    /// Whether the store has the texture `key`.
+    #[cfg(test)]
+    pub(crate) fn has_texture(&self, key: TextureKey) -> bool {
+        self.textures.contains(key)
+    }
+
     /// Replaces the vertices of `typed` with a copy of `data`, as many, which
     /// the next upload writes over their buffer's. Returns false, leaving
     /// them be, for another number of vertices.
@@ -336,7 +346,9 @@ impl Context {
     /// the first. Fails while a pass is open and for a texture not made.
     pub(crate) fn generate_mipmaps(&mut self, gpu: &mut dyn Gpu, handle: &SharedTexture) -> Result<(), GpuError> {
         let texture = self.gpu_texture(handle).ok_or(GpuError::UnknownId("texture"))?;
-        gpu.generate_mipmaps(texture.id())
+        gpu.generate_mipmaps(texture.id())?;
+        self.device.stats.num_mipmap_generations += 1;
+        Ok(())
     }
 
     /// Writes the image the texture of `handle` was given, if any.
@@ -384,6 +396,13 @@ impl Context {
             .clone()
     }
 
+    /// Whether it made the key of a variant for a projection that `of`
+    /// holds for since the keys were last cleared.
+    #[cfg(test)]
+    pub(crate) fn made_key_for(&self, of: impl Fn(ProjectionVariant) -> bool) -> bool {
+        self.shader_keys.keys().any(|&(_, _, made)| of(made))
+    }
+
     /// Makes the keys of later variants at `pixel_ratio`, and with the
     /// overdraw inspector's define if `overdraw`. The shaders of the earlier
     /// keys stay until [`release_shaders`](Self::release_shaders).
@@ -419,6 +438,25 @@ impl Context {
     /// them.
     pub(crate) fn global_uniform_buffers(&self) -> &UniformBufferArray {
         &self.global_uniform_buffers
+    }
+
+    /// The depth of the frame's drawn ground, or a texture of no ground in a
+    /// frame that drew none, which the draws of programs that read
+    /// [`ID_GROUND_DEPTH_TEXTURE`] bind, as they bind the global buffers;
+    /// `None` in a frame without terrain.
+    ///
+    /// [`ID_GROUND_DEPTH_TEXTURE`]: mln_gfx::shaders::shader_defines::ID_GROUND_DEPTH_TEXTURE
+    pub(crate) fn ground_depth(&self) -> Option<&SharedTexture> {
+        self.ground_depth.as_ref()
+    }
+
+    /// Makes `texture` the frame's ground depth. Where it changes, the
+    /// bindings made of the global buffers make again.
+    pub(crate) fn set_ground_depth(&mut self, texture: Option<&SharedTexture>) {
+        if self.ground_depth.as_ref() != texture {
+            self.ground_depth = texture.cloned();
+            self.global_uniform_buffers.renew_epoch(&mut self.device);
+        }
     }
 
     /// Writes `value` to the global uniform buffer `id`.
@@ -526,6 +564,7 @@ impl Context {
     /// still goes to the queue, and goes with the `Gpu`.
     pub(crate) fn tear_down(&mut self, gpu: &mut dyn Gpu) {
         self.global_uniform_buffers = UniformBufferArray::new();
+        self.ground_depth = None;
         self.default_vertex_buffers.clear();
         self.textures.clear();
         self.indexes.clear();

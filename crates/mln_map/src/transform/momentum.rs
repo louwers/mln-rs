@@ -14,7 +14,7 @@ use mln_util::geo::{LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
-use super::anchor::sees_plane;
+use super::terrain::sees_plane;
 use super::transition::Transition;
 use super::{BEARING, CENTER, PITCH, Transform, TransformEvent, ZOOM, max_pitch_for_padding, nanos_from_secs};
 use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
@@ -349,10 +349,15 @@ impl Transform {
                     let delta = snap_delta(momentum_value(&self.state, i), &snap, i == MOMENTUM_BEARING);
                     self.step_scalar(i, delta, momentum.anchor(i));
                 }
+                self.keep_clear_of_ground();
             }
-            self.end_gesture_momentum(gesture);
+            // The gesture's end can move the center onto the terrain.
+            let recentered = self.end_momentum_gesture(gesture) && self.come_to_rest(false);
+            if settling == 0 && recentered {
+                self.emit(TransformEvent::CameraWillChange(momentum_change(CameraChangeMode::Immediate)));
+            }
             self.end_unstarted(animation, TransitionOutcome::Completed);
-            if settling != 0 {
+            if settling != 0 || recentered {
                 self.emit(TransformEvent::CameraDidChange(momentum_change(CameraChangeMode::Immediate)));
             }
             return;
@@ -479,11 +484,12 @@ impl Transform {
 
     /// The anchor `anchor` (from the top left) as a state point, from the
     /// bottom left, with the `LatLng` under it on the plane it holds it on
-    /// and that plane's height ([`Self::anchor_height`]); `None` without
-    /// one, or for an anchor that has no `LatLng`, which is logged.
-    fn momentum_anchor(&self, anchor: Option<ScreenCoordinate>) -> Option<(ScreenCoordinate, LatLng, f64)> {
+    /// and that plane's height ([`Self::anchor_height`]: a gesture's momentum
+    /// holds it on the gesture's); `None` without one, or for an anchor that
+    /// has no `LatLng`, which is logged.
+    fn momentum_anchor(&mut self, anchor: Option<ScreenCoordinate>) -> Option<(ScreenCoordinate, LatLng, f64)> {
         let anchor = anchor?;
-        let height = self.anchor_height(&anchor, &anchor);
+        let height = self.anchor_height(&anchor, &anchor, self.gesture_in_progress);
         let point = ScreenCoordinate::new(anchor.x, f64::from(self.state.view().size().height) - anchor.y);
         match self.state.view().screen_coordinate_to_lat_lng_at(&point, height, WrapMode::Unwrapped) {
             Ok(lat_lng) => Some((point, lat_lng, height)),
@@ -494,10 +500,8 @@ impl Transform {
         }
     }
 
-    /// Moves the center so that `lat_lng`, on the plane at the height the
-    /// anchor holds it on, is at `point` again; on a Mercator view, where the
-    /// camera can hold it there (see `Transform::hold_anchor`), and the step
-    /// moves around the view's center elsewhere.
+    /// Moves the center so that `lat_lng` is at `point` again; on a Mercator
+    /// view, where the camera can hold it there (see `Transform::hold_anchor`).
     fn hold_momentum_anchor(&mut self, anchor: Option<(ScreenCoordinate, LatLng, f64)>) {
         let Some((point, lat_lng, height)) = anchor else { return };
         if !self.view().is_globe() && !sees_plane(self.view(), &point, height) {

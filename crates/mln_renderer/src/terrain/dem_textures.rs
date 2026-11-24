@@ -12,6 +12,7 @@ use mln_util::size::Size;
 use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::gfx::context::Context;
 use crate::gfx::store::SharedTexture;
+use crate::gfx::texture2d::Texture2D;
 
 /// The DEM textures of a frame's terrain tiles, kept while a tile reads
 /// them.
@@ -55,6 +56,20 @@ impl DemTextures {
             context.add_texture_with(|texture| texture.set_image(Some(Rc::new(image))))
         });
         flat.clone()
+    }
+
+    /// How many textures it holds, made or not, but the flat one.
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.textures.len()
+    }
+
+    /// The bytes of the textures it holds that are made, in `context`.
+    pub(crate) fn bytes(&self, context: &Context) -> usize {
+        let made = |texture: &SharedTexture| {
+            context.texture(texture).filter(|texture| texture.gpu_texture().is_some()).map_or(0, Texture2D::bytes)
+        };
+        self.textures.values().map(|(texture, _)| made(texture)).sum::<usize>() + self.flat.as_ref().map_or(0, made)
     }
 
     /// Drops the textures of the buckets no tile of the frame read, once

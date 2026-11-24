@@ -7,6 +7,7 @@
 import type {
   HillshadeLayerSpecification,
   RasterDEMSourceSpecification,
+  SkySpecification,
 } from "maplibre-gl";
 
 import catalog from "../../styles.json";
@@ -16,8 +17,14 @@ import type { StyleSource } from "./protocol.ts";
  * 3D terrain that the map adds to a style that has none once it loads
  * (WebMap::set_style_url), as does GL JS's map in the comparison
  * (compare.ts): the `raster-dem` source, the style's `terrain` on it at
- * `exaggeration`, and with `hillshade`, a hillshade of it with that paint
- * under the layer `before` if the style has it, else on top.
+ * `exaggeration`, with `hillshade`, a hillshade of it with that paint
+ * under the layer `before` if the style has it, else on top, and with `sky`,
+ * that sky where the style has none, so that fog shows at a high pitch.
+ *
+ * The catalog's Liberty 3D takes the style spec's default sky colors, whose
+ * white fog greys the far ground. Its globe's atmosphere fades out by zoom
+ * 7: it scatters along each line of sight to the sea-level sphere, so up
+ * close it would whiten the mountains.
  */
 export interface Terrain {
   source: RasterDEMSourceSpecification;
@@ -26,6 +33,7 @@ export interface Terrain {
     paint?: HillshadeLayerSpecification["paint"];
     before?: string;
   };
+  sky?: SkySpecification;
 }
 
 /** A style the page can show; `key` is null for one from a URL. */

@@ -10,7 +10,8 @@ use geo_types::Geometry;
 use glam::{DMat4, DVec3};
 use mln_map_types::{
     AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraLimits, CameraOptions, CameraUpdate, Elevation,
-    MapDebugOptions, MapMode, ProjectionMode, TileLodMode, TransformState, VerticalPerspectiveProjection, Viewport,
+    MapDebugOptions, MapMode, ProjectionMode, TerrainSkirtLength, TileLodMode, TransformState,
+    VerticalPerspectiveProjection, Viewport,
 };
 use mln_renderer::{
     Registry, RendererEvent, RendererEvents, RenderingStats, UpdateParameters, UpdateReader, UpdateSlot,
@@ -85,6 +86,7 @@ pub struct Map {
     unused_style_image_policy: UnusedStyleImagePolicy,
     /// Whether the center stands on the terrain.
     center_clamped_to_ground: bool,
+    terrain_skirt_length: TerrainSkirtLength,
     /// The ground of the terrain as the renderer last drew it, while
     /// terrain draws. Each update carries it, and the renderer completes a
     /// frame only of an update whose ground gives the height and floor at
@@ -197,6 +199,7 @@ impl Map {
             fast_pfor_enabled: map_options.fast_pfor_enabled,
             unused_style_image_policy: map_options.unused_style_image_policy,
             center_clamped_to_ground: map_options.center_clamped_to_ground,
+            terrain_skirt_length: map_options.terrain_skirt_length,
             elevation: None,
             ground_moves: 0,
             debug_options: MapDebugOptions::NO_DEBUG,
@@ -655,7 +658,7 @@ impl Map {
             (time_point, _) => time_point,
         };
 
-        // The frame's commands keep their eye above the newest ground.
+        // The frame's commands ease onto the newest ground.
         let ground = self.terrain_ground();
         self.transform.set_terrain(ground);
         self.transform.update_transitions(time_point);
@@ -684,6 +687,7 @@ impl Map {
             update_id: self.update_id,
             cross_source_collisions: self.cross_source_collisions,
             fast_pfor_enabled: self.fast_pfor_enabled,
+            terrain_skirt_length: self.terrain_skirt_length,
             elevation: self.elevation.clone(),
             tile_lod_min_radius: self.tile.lod_min_radius,
             tile_lod_scale: self.tile.lod_scale,
@@ -1424,14 +1428,21 @@ impl Map {
     // gtests-core: projection and prefetch zoom delta (test/map, test/api).
     // MARK: - Projection
 
+    /// The screen point of `lat_lng`, in the copy of the world nearest the
+    /// camera's center: while the style's terrain applies, standing on the
+    /// ground the renderer drew there ([`Self::ground`]), or at sea level
+    /// where it drew none.
     #[must_use]
     pub fn pixel_for_lat_lng(&self, lat_lng: &LatLng) -> ScreenCoordinate {
         let transform = &self.transform;
         transform.lat_lng_to_screen_coordinate(&transform.state().view().lat_lng_near_center(lat_lng))
     }
 
-    /// The location under `pixel`. Fails with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN or infinite pixel.
+    /// The location under `pixel`: while the style's terrain applies, where
+    /// the line of sight first meets the ground the renderer drew
+    /// ([`Self::ground`]), or the plane at the center's altitude where it
+    /// meets none. Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind)
+    /// for a NaN or infinite pixel.
     pub fn lat_lng_for_pixel(&self, pixel: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
         self.transform.screen_coordinate_to_lat_lng(pixel, wrap_mode)
     }
@@ -1443,6 +1454,8 @@ impl Map {
         self.transform.is_location_occluded(lat_lng)
     }
 
+    /// [`lat_lng_for_pixel`](Self::lat_lng_for_pixel) of each pixel. Fails
+    /// as that does for any of them.
     pub fn lat_lngs_for_pixels(
         &self,
         screen_coords: &[ScreenCoordinate],
@@ -1478,6 +1491,24 @@ impl Map {
     #[must_use]
     pub fn center_clamped_to_ground(&self) -> bool {
         self.center_clamped_to_ground
+    }
+
+    /// The ground the camera stands on: the terrain the renderer last drew,
+    /// while the style's terrain applies on a Mercator view outside tile
+    /// mode. `None` without terrain, and before the renderer drew any.
+    #[must_use]
+    pub fn ground(&self) -> Option<Arc<dyn Elevation>> {
+        self.transform.ground().cloned()
+    }
+
+    /// The terrain the camera stands on while the style's terrain applies
+    /// on a Mercator view outside tile mode, with its [`ground`] or none
+    /// before the renderer drew any; `None` without terrain.
+    ///
+    /// [`ground`]: Self::ground
+    #[must_use]
+    pub fn terrain(&self) -> Option<TerrainGround> {
+        self.transform.terrain().cloned()
     }
 
     /// Hands the transform the terrain the camera stands on
@@ -1600,6 +1631,7 @@ impl Map {
             view: state.view().map_view(f64::from(self.pixel_ratio)),
             globe_rendering: state.view().is_globe(),
             globe_free_bearing: transform.is_globe_free_bearing(),
+            center_clamped_to_ground: self.center_clamped_to_ground,
         }
     }
 
@@ -1663,7 +1695,9 @@ fn camera_for_lat_lngs_on_screen(
     let mut ne_pixel = ScreenCoordinate::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
     let mut sw_pixel = ScreenCoordinate::new(f64::INFINITY, f64::INFINITY);
     for lat_lng in lat_lngs {
-        let pixel = transform.lat_lng_to_screen_coordinate(lat_lng);
+        // The camera fits the locations on the flat map, as GL JS's does,
+        // whatever the terrain.
+        let pixel = transform.lat_lng_to_screen_coordinate_at(lat_lng, 0.0);
         // std::min / std::max
         sw_pixel.x = if pixel.x < sw_pixel.x { pixel.x } else { sw_pixel.x };
         ne_pixel.x = if ne_pixel.x < pixel.x { pixel.x } else { ne_pixel.x };
@@ -1703,7 +1737,7 @@ fn camera_for_lat_lngs_on_screen(
         ScreenCoordinate::new(f64::midpoint(ne_pixel.x, sw_pixel.x), f64::midpoint(ne_pixel.y, sw_pixel.y));
 
     Ok(CameraOptions {
-        center: Some(transform.screen_coordinate_to_lat_lng(&center_pixel, WrapMode::Wrapped)?),
+        center: Some(transform.screen_coordinate_to_lat_lng_at(&center_pixel, 0.0, WrapMode::Wrapped)?),
         padding: Some(*padding),
         zoom: Some(zoom),
         ..Default::default()

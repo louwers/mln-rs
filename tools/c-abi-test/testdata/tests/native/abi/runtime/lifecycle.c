@@ -131,6 +131,12 @@ static void map_options_with_unknown_mode(void* descriptor) {
   ((mln_map_options*)descriptor)->map_mode = 999;
 }
 
+static void map_options_with_unknown_skirt_length(void* descriptor) {
+  mln_map_options* options = descriptor;
+  options->fields |= MLN_MAP_OPTION_TERRAIN_SKIRT_LENGTH;
+  options->terrain_skirt_length = 9;
+}
+
 static void map_options_with_unknown_field(void* descriptor) {
   ((mln_map_options*)descriptor)->fields = 1U << 31U;
 }
@@ -154,6 +160,8 @@ static const mln_test_validation_case map_creation_cases[] = {
    "mln_map_options.size"},
   {"unknown map mode", map_options_with_unknown_mode,
    MLN_STATUS_INVALID_ARGUMENT, "map_mode"},
+  {"unknown terrain skirt length", map_options_with_unknown_skirt_length,
+   MLN_STATUS_INVALID_ARGUMENT, "terrain_skirt_length"},
   {"unknown field", map_options_with_unknown_field, MLN_STATUS_INVALID_ARGUMENT,
    "mln_map_options.fields"},
   {"zero initial extent", map_options_without_extent,
@@ -189,6 +197,15 @@ static void map_creation_validates_its_options(void) {
     sizeof(map_creation_cases) / sizeof(*map_creation_cases), &defaults,
     sizeof(defaults), create_map_from, &runtime
   );
+  mln_test_destroy_runtime(runtime);
+}
+
+// The library reads the skirt length only with its bit.
+static void map_creation_ignores_the_skirt_length_without_its_bit(void) {
+  mln_runtime runtime = mln_test_create_runtime();
+  mln_map_options unset = mln_test_map_options();
+  unset.terrain_skirt_length = 9;
+  mln_test_destroy_map(mln_test_create_map_with_options(runtime, &unset));
   mln_test_destroy_runtime(runtime);
 }
 
@@ -511,6 +528,7 @@ MLN_TEST_GROUP {
   RUN_TEST(null_options_create_a_runtime_with_the_defaults);
   RUN_TEST(runtime_calls_reject_a_value_that_names_no_runtime);
   RUN_TEST(map_creation_validates_its_options);
+  RUN_TEST(map_creation_ignores_the_skirt_length_without_its_bit);
   RUN_TEST(map_creation_checks_its_output);
   RUN_TEST(style_functions_reject_null_inputs);
   RUN_TEST(disposal_waits_for_children_and_retires_callback_state);
