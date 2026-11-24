@@ -1669,6 +1669,7 @@ impl Map {
             view: state.view().map_view(f64::from(self.pixel_ratio)),
             globe_rendering: state.view().is_globe(),
             globe_free_bearing: transform.is_globe_free_bearing(),
+            center_clamped_to_ground: self.center_clamped_to_ground,
         }
     }
 

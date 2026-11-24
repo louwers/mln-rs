@@ -1490,6 +1490,15 @@ impl Map {
         })
     }
 
+    /// Sets whether the center stands on the terrain, as
+    /// `mln_map::Map::set_center_clamped_to_ground` describes.
+    pub fn set_center_clamped_to_ground_enabled(&self, enabled: bool) -> Result<Completion<Applied>, Error> {
+        self.command(move |map| {
+            map.set_center_clamped_to_ground(enabled);
+            Ok(())
+        })
+    }
+
     /// Logs the style's sources and their state.
     pub fn dump_debug_logs(&self) -> Result<Completion<Applied>, Error> {
         self.command(|map| {

@@ -72,6 +72,14 @@ impl MapProjection {
         pixel_for_lat_lng(self.state.view(), self.ground.as_deref(), lat_lng)
     }
 
+    /// The height of the projection's ground at `lat_lng`, in meters with
+    /// the terrain's exaggeration ([`Elevation::at`]). `None` on the flat
+    /// map, and where no ground was drawn.
+    #[must_use]
+    pub fn elevation(&self, lat_lng: &LatLng) -> Option<f64> {
+        self.ground.as_ref()?.at(*lat_lng)
+    }
+
     /// Whether the globe hides `lat_lng` from the camera; a Mercator view
     /// hides nothing.
     #[must_use]
