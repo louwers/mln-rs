@@ -123,7 +123,8 @@ jobs:
           if [[ $EVENT == pull_request ]]; then
             key=$(printf '%s' "$HEAD" | sha256sum | cut -c 1-12)
           fi
-          tools/device-farm/schedule.sh "$PACKAGE" "mln-rs $HEAD_SHA $EVENT" "$key"
+          arn=$(tools/device-farm/schedule.sh "$PACKAGE" "mln-rs $HEAD_SHA $EVENT" "$key")
+          echo "arn=$arn" >> "$GITHUB_OUTPUT"
 
       # Unless one is waiting to start: a running watcher may be about to exit
       # without seeing the new run.
@@ -136,22 +137,27 @@ jobs:
             gh workflow run device-farm-watch.yml
           fi
 
+      # While the phones run, the status links to the run in the AWS console.
       - name: Report the tests on the commit
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           PREPARED: ${{ steps.prepared.outputs.result }}
           OUTCOME: ${{ steps.schedule.outcome }}
+          RUN_ARN: ${{ steps.schedule.outputs.arn }}
           RUN_URL:
             ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
             github.run_id }}
         run: |
+          url=$RUN_URL
           case $PREPARED:$OUTCOME in
-            success:success) state=pending description="Running on AWS Device Farm's phones" ;;
+            success:success)
+              state=pending description="Running on AWS Device Farm's phones"
+              url=$(tools/device-farm/console-url.sh "$RUN_ARN") ;;
             skipped:*) state=success description="Not needed: the plan left the Android tests out" ;;
             failure:*) state=failure description="CI couldn't build the tests" ;;
             missing:*) state=error description="This branch's CI builds no tests for the phones: merge main" ;;
             *) state=error description="The tests weren't scheduled" ;;
           esac
           gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" -f state="$state" \
-            -f context="$STATUS_CONTEXT" -f description="$description" -f target_url="$RUN_URL"
+            -f context="$STATUS_CONTEXT" -f description="$description" -f target_url="$url"

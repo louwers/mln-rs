@@ -39,15 +39,17 @@ the phones while a run is queued or in progress:
 - `device-test` starts with the CI run, waits for `prepare-device-tests`, and
   schedules the package once the job has built it, while the rest of CI runs. It
   reports the run on the commit as pending, as the `device-test / android`
-  status, and names the run for the commit. A newer commit of a pull request
-  stops the run of the commit before it. When the plan leaves the Android tests
-  out, it reports the status as passed, since merging into `main` requires it.
+  status, which links to the run in the AWS console (`console-url.sh`), and
+  names the run for the commit. A newer commit of a pull request stops the run
+  of the commit before it. When the plan leaves the Android tests out, it
+  reports the status as passed, since merging into `main` requires it.
 - `device-farm-watch`, one at a time for every run, waits for the runs, and
   starts `device-farm-finish` for each that finished (`watch.sh`). An hourly
   schedule starts it too, in case one failed.
-- `device-farm-finish` reports the run's result on its commit, with each phone's
-  output and artifacts (`collect.sh`), and a job without credentials summarizes
-  each phone's JUnit report (`summary.py`).
+- `device-farm-finish` reports the run's result on its commit, linking to itself
+  rather than to the AWS console, which needs a login to the account. It has
+  each phone's output and artifacts (`collect.sh`), and a job without
+  credentials summarizes each phone's JUnit report (`summary.py`).
 
 `device-test` runs on `workflow_run`, from the default branch, so pull requests
 from forks get a run too: the package may come from a fork, so the workflows,
