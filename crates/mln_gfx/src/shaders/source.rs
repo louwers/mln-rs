@@ -138,13 +138,13 @@ pub(crate) fn blocks<'a>(
 /// `text` between `#ifndef HAS_UNIFORM_<name>` and `#endif`, for the
 /// variants that read `named` per vertex.
 pub(crate) fn per_vertex(named: &Named<'_>, text: &str) -> String {
-    format!("#ifndef HAS_UNIFORM_{}\n{text}\n#endif", named.name())
+    ["#ifndef HAS_UNIFORM_", named.name(), "\n", text, "\n#endif"].concat()
 }
 
 /// `text` between `#ifdef HAS_UNIFORM_<name>` and `#endif`, for the
 /// variants that read `named` from its uniform.
 pub(crate) fn from_uniform(named: &Named<'_>, text: &str) -> String {
-    format!("#ifdef HAS_UNIFORM_{}\n{text}\n#endif", named.name())
+    ["#ifdef HAS_UNIFORM_", named.name(), "\n", text, "\n#endif"].concat()
 }
 
 /// `text` with the property directives and `$`s of `program`'s

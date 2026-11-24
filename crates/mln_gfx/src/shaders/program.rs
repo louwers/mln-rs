@@ -525,7 +525,7 @@ impl Program {
         variant: ProjectionVariant,
     ) -> ShaderKey {
         let parameters = parameters.defines();
-        let uniforms = uniforms.into_iter().map(|property| format!("HAS_UNIFORM_{}", property.name));
+        let uniforms = uniforms.into_iter().map(|property| ["HAS_UNIFORM_", property.name].concat());
         let globe = (variant == ProjectionVariant::Globe).then(|| GLOBE_DEFINE.to_owned());
         ShaderKey::new(self, parameters.chain(uniforms).chain(globe))
     }
