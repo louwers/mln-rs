@@ -194,7 +194,7 @@ impl Style {
     /// `json` isn't a valid value for it; and with `Unsupported` for the root properties that only
     /// take effect as a style loads (the default camera, the sprite, the
     /// glyphs and font faces, and the metadata) and for `terrain`, which the
-    /// map doesn't draw.
+    /// map doesn't draw. [`Edit::SetTerrain`] still sets the style's terrain.
     pub fn set_root_property_json(&mut self, name: &str, json: &str) -> Result<(), Error> {
         require_root_property(name)?;
         let context = format!("style root property {}", quote(name));
@@ -259,7 +259,9 @@ impl Style {
     /// differ in form from the value that was set, as with
     /// [`layer_property_json`](Self::layer_property_json). The root
     /// properties that [`set_root_property_json`](Self::set_root_property_json)
-    /// can't change read as the style loaded them.
+    /// can't change read as the style loaded them, except `terrain`, which
+    /// reads as the style holds it: with its default exaggeration filled in,
+    /// and absent if the style dropped it as it loaded.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if
     /// `name` isn't a root property, or is `sources` or `layers`.
@@ -268,6 +270,9 @@ impl Style {
         let value = match name {
             "light" => defined_properties_json(&**self.get_light()),
             "sky" => self.get_sky().and_then(|sky| defined_properties_json(&**sky)),
+            "terrain" => self.get_terrain().map(|terrain| {
+                serde_json::json!({ "source": terrain.source, "exaggeration": shortest_f64(terrain.exaggeration) })
+            }),
             "projection" => {
                 let projection = self.get_projection();
                 properties_json(&["type"], |name| projection.get_property(name))
@@ -397,6 +402,12 @@ fn milliseconds_json(duration: Duration) -> serde_json::Value {
     } else {
         serde_json::Value::from(duration.as_nanos() as f64 / 1e6)
     }
+}
+
+/// `value` as the `f64` with the same shortest decimal digits, so that an
+/// `f32` of 0.3 reads back as 0.3.
+fn shortest_f64(value: f32) -> f64 {
+    value.to_string().parse().unwrap_or_else(|_| f64::from(value))
 }
 
 /// The defaults of a root `state` object: each member is an object, whose

@@ -355,6 +355,33 @@ fn the_sky_and_the_projection_change_and_reset() {
 }
 
 #[test]
+fn the_terrain_reads_back_as_the_style_holds_it_and_refuses_changes() {
+    let dem_style = |terrain: &str| {
+        format!(
+            r#"{{"version":8,"sources":{{"dem":{DEM_SOURCE},"points":{EMPTY_GEOJSON_SOURCE}}},"layers":[],"terrain":{terrain}}}"#
+        )
+    };
+    let mut style = Style::new(StyleRegistry::with_builtins());
+    style.load_json(&dem_style(r#"{"source":"dem"}"#));
+    assert_eq!(root_property(&style, "terrain").as_deref(), Some(r#"{"source":"dem","exaggeration":1.0}"#));
+    style.load_json(&dem_style(r#"{"source":"dem","exaggeration":0.3}"#));
+    assert_eq!(root_property(&style, "terrain").as_deref(), Some(r#"{"source":"dem","exaggeration":0.3}"#));
+
+    // The map doesn't draw terrain, so the root property doesn't change.
+    for json in [r#"{"source":"dem"}"#, "null"] {
+        assert_fails(style.set_root_property_json("terrain", json), ErrorKind::Unsupported, "doesn't draw terrain");
+    }
+    assert_eq!(root_property(&style, "terrain").as_deref(), Some(r#"{"source":"dem","exaggeration":0.3}"#));
+
+    style.apply(crate::Edit::SetTerrain(None)).unwrap();
+    assert_eq!(root_property(&style, "terrain"), None);
+
+    // A terrain that the style dropped as it loaded doesn't read back.
+    style.load_json(&dem_style(r#"{"source":"points"}"#));
+    assert_eq!(root_property(&style, "terrain"), None);
+}
+
+#[test]
 fn a_new_state_resets_every_global_state_property() {
     let mut style = Style::new(StyleRegistry::with_builtins());
     style.load_json(r#"{"version":8,"sources":{},"layers":[],"state":{"theme":{"default":"light"}}}"#);
