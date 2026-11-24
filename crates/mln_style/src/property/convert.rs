@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use mln_util::Color;
 
-use super::function::{has_tokens, parse_converted, parse_function, token_string_expression};
-use super::{Converter, Convertible, Error, convert};
+use crate::conversion::{Converter, Convertible, Error, convert};
 use crate::expression::{Functions, ParsingContext, Type, ValueConverter, is_expression};
-use crate::property_expression::PropertyExpression;
-use crate::property_value::PropertyValue;
+use crate::property::expression::PropertyExpression;
+use crate::property::function::{has_tokens, parse_converted, parse_function, token_string_expression};
+use crate::property::value::PropertyValue;
 
 /// Converts a property's value: a constant, an expression, or a legacy
 /// function or (with `convert_tokens`) `{token}` string, which become the

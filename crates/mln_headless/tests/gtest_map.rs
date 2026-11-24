@@ -31,6 +31,7 @@ use mln_style::layer::Layer;
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::symbol_layer::Symbol;
 use mln_style::projection::Projection;
+use mln_style::property::table::Kind as StylePropertyKind;
 use mln_style::source_type::SourceData;
 use mln_style::sources::custom_geometry_source::{
     self, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions,
@@ -39,7 +40,6 @@ use mln_style::sources::geojson::GeoJSONOptions;
 use mln_style::sources::image::ImageSourceOptions;
 use mln_style::sources::{ImageSourceType, image_source};
 use mln_style::sprite::Sprite;
-use mln_style::style_property::Kind as StylePropertyKind;
 use mln_style::{Edit, PropertyValue, Source, TransitionOptions};
 use mln_style_types::{ProjectionDefinition, ProjectionType, VisibilityType};
 use mln_text::glyph::{GlyphIDType, GlyphRange};

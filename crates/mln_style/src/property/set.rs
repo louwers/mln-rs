@@ -13,12 +13,11 @@ use mln_util::constants::DEFAULT_TRANSITION_EASE;
 use mln_util::interpolate::Interpolate;
 use mln_util::time::Instant;
 
-use crate::evaluated::{Evaluated, Evaluation};
 use crate::expression::{Dependency, global_state_refs_intersect};
-use crate::property_value::StyleValue;
-use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
-use crate::renderer::transition_parameters::{GlobalStateChange, TransitionParameters};
-use crate::transition_options::TransitionOptions;
+use crate::property::evaluated::{Evaluated, Evaluation};
+use crate::property::evaluation::PropertyEvaluationParameters;
+use crate::property::transition::{GlobalStateChange, TransitionOptions, TransitionParameters};
+use crate::property::value::StyleValue;
 
 /// A value, and the values it transitions from.
 #[derive(Clone, Debug, Default)]
@@ -191,10 +190,10 @@ impl<V: StyleValue> Transitionable<V> {
 /// The style value type of a property kind.
 macro_rules! __property_value {
     (color_ramp, $t:ty) => {
-        $crate::color_ramp_property_value::ColorRampPropertyValue
+        $crate::property::color_ramp::ColorRampPropertyValue
     };
     ($kind:ident, $t:ty) => {
-        $crate::property_value::PropertyValue<$t>
+        $crate::property::value::PropertyValue<$t>
     };
 }
 pub(crate) use __property_value;
@@ -202,19 +201,19 @@ pub(crate) use __property_value;
 /// How a property kind evaluates.
 macro_rules! __property_evaluation {
     (integer_zoom) => {
-        $crate::evaluated::Evaluated::integer_zoom
+        $crate::property::evaluated::Evaluated::integer_zoom
     };
     (cross_faded) => {
-        $crate::evaluated::Evaluated::cross_faded
+        $crate::property::evaluated::Evaluated::cross_faded
     };
     (cross_faded_data_driven) => {
-        $crate::evaluated::Evaluated::cross_faded_per_feature
+        $crate::property::evaluated::Evaluated::cross_faded_per_feature
     };
     (cross_faded_or_data_driven) => {
-        $crate::evaluated::Evaluated::cross_faded_or_per_feature
+        $crate::property::evaluated::Evaluated::cross_faded_or_per_feature
     };
     ($kind:ident) => {
-        $crate::evaluated::Evaluated::plain
+        $crate::property::evaluated::Evaluated::plain
     };
 }
 pub(crate) use __property_evaluation;
@@ -271,7 +270,7 @@ macro_rules! properties {
         $(#[$meta])*
         $vis mod $module {
             $($(use $import;)+)?
-            use $crate::property_value::StyleValue as _;
+            use $crate::property::value::StyleValue as _;
 
             /// The spec's default of each property.
             pub struct Defaults;
@@ -290,31 +289,31 @@ macro_rules! properties {
             #[derive(Clone, Debug, Default, PartialEq, ::mln_wire::Wire)]
             #[wire(default)]
             pub struct Transitionable {
-                $(pub $field: $crate::properties::Transitionable<$crate::__property_value!($kind, $t)>,)+
+                $(pub $field: $crate::property::set::Transitionable<$crate::__property_value!($kind, $t)>,)+
             }
 
             #[derive(Clone, Debug, Default)]
             pub struct Unevaluated {
-                $(pub $field: $crate::properties::Transitioning<$crate::__property_value!($kind, $t)>,)+
-                $($(pub $dfield: $crate::properties::Transitioning<$crate::__property_value!($dkind, $dt)>,)+)?
+                $(pub $field: $crate::property::set::Transitioning<$crate::__property_value!($kind, $t)>,)+
+                $($(pub $dfield: $crate::property::set::Transitioning<$crate::__property_value!($dkind, $dt)>,)+)?
             }
 
             #[derive(Clone, Debug, Default, ::mln_wire::Wire)]
             #[wire(default)]
             pub struct PossiblyEvaluated {
-                $(pub $field: $crate::evaluated::Evaluated<$t>,)+
-                $($(pub $dfield: $crate::evaluated::Evaluated<$dt>,)+)?
+                $(pub $field: $crate::property::evaluated::Evaluated<$t>,)+
+                $($(pub $dfield: $crate::property::evaluated::Evaluated<$dt>,)+)?
             }
 
             impl Transitionable {
                 pub fn transitioned(
                     &self,
-                    parameters: &$crate::renderer::transition_parameters::TransitionParameters,
+                    parameters: &$crate::property::transition::TransitionParameters,
                     prior: Unevaluated,
                 ) -> Unevaluated {
                     Unevaluated {
                         $($field: self.$field.transition(parameters, prior.$field),)+
-                        $($($dfield: $crate::properties::Transitionable {
+                        $($($dfield: $crate::property::set::Transitionable {
                             value: self.$source.value.clone(),
                             options: ::core::default::Default::default(),
                         }
@@ -324,8 +323,8 @@ macro_rules! properties {
 
                 pub fn untransitioned(&self) -> Unevaluated {
                     Unevaluated {
-                        $($field: $crate::properties::Transitioning::new(self.$field.value.clone()),)+
-                        $($($dfield: $crate::properties::Transitioning::new(self.$source.value.clone()),)+)?
+                        $($field: $crate::property::set::Transitioning::new(self.$field.value.clone()),)+
+                        $($($dfield: $crate::property::set::Transitioning::new(self.$source.value.clone()),)+)?
                     }
                 }
 
@@ -350,7 +349,7 @@ macro_rules! properties {
 
                 fn transitioned(
                     &self,
-                    parameters: &$crate::renderer::transition_parameters::TransitionParameters,
+                    parameters: &$crate::property::transition::TransitionParameters,
                     prior: Unevaluated,
                 ) -> Unevaluated {
                     Transitionable::transitioned(self, parameters, prior)
@@ -358,7 +357,7 @@ macro_rules! properties {
 
                 fn evaluate_with_previous(
                     unevaluated: &mut Unevaluated,
-                    parameters: &$crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters,
+                    parameters: &$crate::property::evaluation::PropertyEvaluationParameters,
                     previous: &PossiblyEvaluated,
                 ) -> PossiblyEvaluated {
                     unevaluated.evaluate_with_previous(parameters, previous)
@@ -395,7 +394,7 @@ macro_rules! properties {
 
                 pub fn evaluate(
                     &mut self,
-                    parameters: &$crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters,
+                    parameters: &$crate::property::evaluation::PropertyEvaluationParameters,
                 ) -> PossiblyEvaluated {
                     PossiblyEvaluated {
                         $($field: self.$field.evaluate(
@@ -415,7 +414,7 @@ macro_rules! properties {
                 /// `previous` where it can't have changed.
                 pub fn evaluate_with_previous(
                     &mut self,
-                    parameters: &$crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters,
+                    parameters: &$crate::property::evaluation::PropertyEvaluationParameters,
                     previous: &PossiblyEvaluated,
                 ) -> PossiblyEvaluated {
                     PossiblyEvaluated {
@@ -461,7 +460,7 @@ macro_rules! properties {
         $(#[$meta])*
         $vis mod $module {
             $($(use $import;)+)?
-            use $crate::property_value::StyleValue as _;
+            use $crate::property::value::StyleValue as _;
 
             /// The spec's default of each property.
             pub struct Defaults;
@@ -482,7 +481,7 @@ macro_rules! properties {
             #[derive(Clone, Debug, Default, ::mln_wire::Wire)]
             #[wire(default)]
             pub struct PossiblyEvaluated {
-                $(pub $field: $crate::evaluated::Evaluated<$t>,)+
+                $(pub $field: $crate::property::evaluated::Evaluated<$t>,)+
             }
 
             /// The value of each property for one feature.
@@ -494,7 +493,7 @@ macro_rules! properties {
             impl Unevaluated {
                 pub fn evaluate(
                     &self,
-                    parameters: &$crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters,
+                    parameters: &$crate::property::evaluation::PropertyEvaluationParameters,
                 ) -> PossiblyEvaluated {
                     PossiblyEvaluated {
                         $($field: self.$field.evaluate(

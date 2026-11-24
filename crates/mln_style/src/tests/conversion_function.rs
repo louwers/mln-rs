@@ -1,10 +1,11 @@
-// The TokenStrings test is in conversion/function.rs.
+// The TokenStrings test is in property/function.rs.
 
 use super::util::parse_json;
-use crate::conversion::{Convertible, Error, convert_property_value};
+use crate::conversion::{Convertible, Error};
 use crate::expression::dsl::{format, get, literal_str};
 use crate::expression::{Formatted, Functions};
-use crate::property_value::PropertyValue;
+use crate::property::convert::convert_property_value;
+use crate::property::value::PropertyValue;
 
 fn convert_json<T>(json: &str, error: &mut Error, allow_data_expressions: bool) -> Option<PropertyValue<T>>
 where

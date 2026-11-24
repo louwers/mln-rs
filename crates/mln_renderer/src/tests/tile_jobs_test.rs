@@ -15,7 +15,7 @@ use mln_map_types::MapMode;
 use mln_storage::FileSource;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
-use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
+use mln_style::property::evaluation::PropertyEvaluationParameters;
 use mln_style_types::image::Impl as ImageImpl;
 use mln_tile::TileData;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};

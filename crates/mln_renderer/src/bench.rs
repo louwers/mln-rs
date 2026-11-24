@@ -14,7 +14,7 @@ use glam::{DMat4, DVec4};
 use mln_map_types::{MapMode, View};
 use mln_storage::Resource;
 use mln_style::Style;
-use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
+use mln_style::property::evaluation::PropertyEvaluationParameters;
 use mln_style_types::VisibilityType;
 use mln_style_types::image::{ImageMap, ImageType};
 use mln_text::glyph::{GlyphMap, get_glyph_range};

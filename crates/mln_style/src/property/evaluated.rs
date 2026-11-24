@@ -5,9 +5,9 @@ use mln_util::interpolate::Interpolate;
 use mln_vec_map::VecSet;
 
 use crate::expression::{Dependency, EvaluationContext, ValueConverter};
-use crate::property_expression::PropertyExpression;
-use crate::property_value::PropertyValue;
-use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
+use crate::property::evaluation::PropertyEvaluationParameters;
+use crate::property::expression::PropertyExpression;
+use crate::property::value::PropertyValue;
 
 /// A value that fades from one image or dash array to the next while the
 /// zoom crosses an integer.

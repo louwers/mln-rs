@@ -5,15 +5,15 @@ use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 #[cfg(test)]
-use crate::conversion::convert_property_value;
-#[cfg(test)]
 use crate::conversion::{Convertible, Error};
 use crate::conversion_impl::make_style_property;
 use crate::expression::EvaluationContext;
 #[cfg(test)]
 use crate::expression::Functions;
-use crate::property_value::{PropertyValue, StyleValue as _};
-use crate::style_property::StyleProperty;
+#[cfg(test)]
+use crate::property::convert::convert_property_value;
+use crate::property::table::StyleProperty;
+use crate::property::value::{PropertyValue, StyleValue as _};
 
 /// The style's root `projection` object.
 #[derive(Clone, Debug, Default, PartialEq)]

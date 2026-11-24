@@ -20,12 +20,12 @@ use crate::expression::GlobalStateMap;
 use crate::layer::{FontStack, Layer};
 use crate::light::Light;
 use crate::projection::Projection;
+use crate::property::transition::TransitionOptions;
 use crate::registry::StyleRegistry;
 use crate::sky::Sky;
 use crate::source_type::Source;
 use crate::sprite::Sprite;
 use crate::terrain::Terrain;
-use crate::transition_options::TransitionOptions;
 
 /// What `Parser::parse` returns: a style that isn't one fails with
 /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind).

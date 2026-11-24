@@ -20,10 +20,9 @@ use crate::layer::Layer;
 use crate::layer_type::SourceKind;
 use crate::light::Light;
 use crate::projection::Projection;
-use crate::property_table::{Properties, defined_properties};
+use crate::property::table::{Kind, Properties, StyleProperty, defined_properties};
+use crate::property::transition::TransitionOptions;
 use crate::style::Style;
-use crate::style_property::{Kind, StyleProperty};
-use crate::transition_options::TransitionOptions;
 
 impl Style {
     /// Adds the [layer](https://maplibre.org/maplibre-style-spec/layers/)

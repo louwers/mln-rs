@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
-use crate::property_table::{self, InPlace, OwnerSlot, SetPropertyError};
-use crate::style_property::StyleProperty;
+use crate::property::table::{self, InPlace, OwnerSlot, SetPropertyError, StyleProperty};
 
 crate::properties!(
     #[expect(non_snake_case, reason = "named like the layers' property sets")]
@@ -47,7 +46,7 @@ impl Light {
 
     #[must_use]
     pub fn get_property(&self, name: &str) -> StyleProperty {
-        property_table::get_property(self, name)
+        table::get_property(self, name)
     }
 }
 
@@ -57,7 +56,7 @@ fn set_property<O: OwnerSlot<Light>>(
     value: &Convertible<'_>,
     functions: &Arc<Functions>,
 ) -> Option<Error> {
-    match property_table::set_property(owner, name, value, functions) {
+    match table::set_property(owner, name, value, functions) {
         Ok(()) => None,
         Err(SetPropertyError::Invalid(error)) => Some(error),
         Err(SetPropertyError::Unknown) => Some(Error::new("light doesn't support this property")),

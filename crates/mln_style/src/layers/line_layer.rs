@@ -1,6 +1,6 @@
 use crate::layer_type::{LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType};
 use crate::layers::line_layer_properties::{self, LineLayoutProperties, LinePaintProperties};
-use crate::property_table::{PropertyTable, PropertyVisitor};
+use crate::property::table::{PropertyTable, PropertyVisitor};
 
 /// The `line` layer type.
 pub struct Line;

@@ -119,7 +119,7 @@ pub(crate) fn imports_for<'a>(properties: impl Iterator<Item = &'a Property>, wi
         paths.push(type_path(&name));
     }
     if color_ramp && with_color_ramp {
-        paths.push("crate::color_ramp_property_value::ColorRampPropertyValue".into());
+        paths.push("crate::property::color_ramp::ColorRampPropertyValue".into());
     }
     paths
 }

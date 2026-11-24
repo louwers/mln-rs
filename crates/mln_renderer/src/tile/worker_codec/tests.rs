@@ -7,9 +7,8 @@ use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer::Layer;
 use mln_style::layers::Fill;
-use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
-use mln_style::renderer::transition_parameters::TransitionParameters;
-use mln_style::transition_options::TransitionOptions;
+use mln_style::property::evaluation::PropertyEvaluationParameters;
+use mln_style::property::transition::{TransitionOptions, TransitionParameters};
 use mln_style_types::image::{ImageMap, ImageType};
 use mln_text::glyph::{GlyphIDType, GlyphMap, GlyphRange};
 use mln_text::glyph_pbf::parse_glyph_pbf;
@@ -487,7 +486,7 @@ fn geojson_tiles_cross() {
 fn properties_cross_while_a_paint_property_transitions() {
     use std::time::Duration;
 
-    use mln_style::map::zoom_history::ZoomHistory;
+    use mln_style::property::evaluation::ZoomHistory;
     use mln_util::time::Instant;
 
     let constant = FILL.replace(r#"["case", ["has", "class"], "red", "rgba(0, 0, 255, 0.678)"]"#, r#""red""#);

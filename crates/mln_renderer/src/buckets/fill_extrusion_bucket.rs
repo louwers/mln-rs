@@ -13,10 +13,10 @@ use mln_gfx::shaders::shader_defines::{
 };
 use mln_map_types::View;
 use mln_style::PropertyEvaluationParameters;
-use mln_style::evaluated::Evaluated;
 use mln_style::expression::{Image, Value};
 use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::{FillExtrusionLayoutProperties, FillExtrusionPaintProperties};
+use mln_style::property::evaluated::Evaluated;
 use mln_style_types::LightAnchorType;
 use mln_style_types::image::ImagePositions;
 use mln_tile::geometry_tile_data::{

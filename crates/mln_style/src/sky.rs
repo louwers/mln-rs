@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
-use crate::property_table::{self, InPlace, SetPropertyError};
-use crate::style_property::StyleProperty;
+use crate::property::table::{self, InPlace, SetPropertyError, StyleProperty};
 
 crate::properties!(
     #[expect(non_snake_case, reason = "named like the layers' property sets")]
@@ -35,7 +34,7 @@ impl Sky {
     /// Sets a property (or `<name>-transition`) from a style JSON value,
     /// whose expressions parse against `functions`.
     pub fn set_property(&mut self, name: &str, value: &Convertible<'_>, functions: &Arc<Functions>) -> Option<Error> {
-        match property_table::set_property(&mut InPlace(self), name, value, functions) {
+        match table::set_property(&mut InPlace(self), name, value, functions) {
             Ok(()) => None,
             Err(SetPropertyError::Invalid(error)) => Some(error),
             Err(SetPropertyError::Unknown) => Some(Error::new("sky doesn't support this property")),
@@ -44,6 +43,6 @@ impl Sky {
 
     #[must_use]
     pub fn get_property(&self, name: &str) -> StyleProperty {
-        property_table::get_property(self, name)
+        table::get_property(self, name)
     }
 }

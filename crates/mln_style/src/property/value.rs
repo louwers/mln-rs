@@ -3,15 +3,15 @@ use std::sync::Arc;
 
 use mln_vec_map::VecSet;
 
-use crate::conversion::{Converter, Convertible, Error, convert_property_value};
+use crate::conversion::{Converter, Convertible, Error};
 use crate::conversion_impl::{ValueFactory, make_style_property};
-use crate::evaluated::{Evaluated, Evaluation};
 use crate::expression::{Dependency, Functions, Type, ValueConverter, global_state_refs_intersect};
-use crate::property_expression::PropertyExpression;
-use crate::property_table::PropertyInfo;
-use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
-use crate::renderer::transition_parameters::GlobalStateChange;
-use crate::style_property::StyleProperty;
+use crate::property::convert::convert_property_value;
+use crate::property::evaluated::{Evaluated, Evaluation};
+use crate::property::evaluation::PropertyEvaluationParameters;
+use crate::property::expression::PropertyExpression;
+use crate::property::table::{PropertyInfo, StyleProperty};
+use crate::property::transition::GlobalStateChange;
 
 /// A style property's value: undefined (the default), a constant or an
 /// expression.
@@ -92,7 +92,7 @@ impl<T> PropertyValue<T> {
 }
 
 /// A style value a property holds: a [`PropertyValue`], or a
-/// [`ColorRampPropertyValue`](crate::color_ramp_property_value::ColorRampPropertyValue).
+/// [`ColorRampPropertyValue`](crate::property::color_ramp::ColorRampPropertyValue).
 pub trait StyleValue: Clone + Default + Debug + PartialEq + 'static {
     /// What the value evaluates to.
     type Type: Clone + Debug + Default + ValueConverter;

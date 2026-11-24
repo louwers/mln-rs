@@ -12,13 +12,11 @@
 //! convert_tokens, functions)`.
 
 pub(crate) mod borrowed;
-pub(crate) mod color_ramp_property_value;
 pub(crate) mod constant;
 mod convertible;
 pub(crate) mod coordinate;
 pub(crate) mod custom_geometry_source_options;
 pub(crate) mod filter;
-pub mod function;
 pub(crate) mod geojson;
 pub(crate) mod geojson_options;
 mod get_json_type;
@@ -28,14 +26,12 @@ pub mod layer;
 pub(crate) mod light;
 pub(crate) mod position;
 pub(crate) mod projection;
-pub(crate) mod property_value;
 pub(crate) mod rotation;
 pub(crate) mod sky;
 pub mod source;
 pub(crate) mod sprite;
 pub(crate) mod terrain;
 pub mod tileset;
-pub(crate) mod transition_options;
 mod value;
 
 pub use convertible::{Convertible, Error, to_geojson};
@@ -52,13 +48,11 @@ pub fn convert<T: Converter>(value: &Convertible<'_>, error: &mut Error) -> Opti
     T::convert(value, error)
 }
 
-pub(crate) use color_ramp_property_value::convert_color_ramp_property_value;
 pub use filter::convert_filter;
 pub use geojson_options::convert_geojson_options;
 pub use layer::convert_layer;
 pub use light::convert_light;
 pub use projection::convert_projection;
-pub use property_value::convert_property_value;
 pub use sky::convert_sky;
 pub use source::convert_source;
 pub use terrain::convert_terrain;

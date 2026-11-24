@@ -24,12 +24,12 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
-use mln_style::color_ramp_property_value::ColorRampPropertyValue;
 use mln_style::expression::{
     Dependency, EvaluationContext, GlobalStateMap, from_expression_value, global_state_refs_intersect,
 };
 use mln_style::layer_type::LayerStyle;
 use mln_style::layers::ColorRelief;
+use mln_style::property::color_ramp::ColorRampPropertyValue;
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::ResamplingType;
 use mln_util::Color;

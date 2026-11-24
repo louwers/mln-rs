@@ -6,17 +6,16 @@ use mln_util::time::Instant;
 use mln_vec_map::VecSet;
 
 use super::util::parse_json;
-use crate::conversion::{Convertible, Error, convert_property_value};
-use crate::evaluated::Evaluated;
+use crate::conversion::{Convertible, Error};
 use crate::expression::{EvaluationContext, Functions, GlobalStateMap, Image, dsl};
 use crate::light::LightProperties;
-use crate::map::zoom_history::ZoomHistory;
-use crate::properties::{Transitionable, Transitioning};
-use crate::property_expression::PropertyExpression;
-use crate::property_value::PropertyValue;
-use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
-use crate::renderer::transition_parameters::{GlobalStateChange, TransitionParameters};
-use crate::transition_options::TransitionOptions;
+use crate::property::convert::convert_property_value;
+use crate::property::evaluated::Evaluated;
+use crate::property::evaluation::{PropertyEvaluationParameters, ZoomHistory};
+use crate::property::expression::PropertyExpression;
+use crate::property::set::{Transitionable, Transitioning};
+use crate::property::transition::{GlobalStateChange, TransitionOptions, TransitionParameters};
+use crate::property::value::PropertyValue;
 
 /// The time the tests' transitions start at.
 fn start() -> Instant {
@@ -166,7 +165,7 @@ fn possibly_evaluated_evaluate_per_feature() {
 
     use crate::expression::dsl::{get_str, number};
     use crate::layers::{CirclePaintProperties, LineLayoutProperties};
-    use crate::property_expression::PropertyExpression;
+    use crate::property::expression::PropertyExpression;
     use crate::tests::util::{StubGeometryTileFeature, property_map};
 
     let feature = StubGeometryTileFeature::new(property_map(&[("r", Value::Double(7.5))]));

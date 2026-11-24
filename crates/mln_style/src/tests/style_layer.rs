@@ -10,7 +10,7 @@ use crate::expression::{Functions, Image};
 use crate::filter::Filter;
 use crate::layer::Layer;
 use crate::layers::{Background, Circle, Fill, Line, Raster};
-use crate::property_value::PropertyValue;
+use crate::property::value::PropertyValue;
 use crate::registry::StyleRegistry;
 use crate::style::Style;
 

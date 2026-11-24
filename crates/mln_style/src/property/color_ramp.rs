@@ -3,16 +3,18 @@ use std::sync::Arc;
 use mln_util::Color;
 use mln_vec_map::VecSet;
 
-use crate::conversion::{Convertible, Error, convert_color_ramp_property_value};
+use crate::conversion::{Convertible, Error};
 use crate::conversion_impl::make_color_ramp_style_property;
-use crate::evaluated::{Evaluated, Evaluation};
 use crate::expression::value::from_expression_value;
-use crate::expression::{Dependency, EvaluationContext, Expr, Functions, GlobalStateMap, collect_global_state_refs};
-use crate::property_table::PropertyInfo;
-use crate::property_value::StyleValue;
-use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
+use crate::expression::{
+    Dependency, EvaluationContext, Expr, Functions, GlobalStateMap, ParsingContext, Type, collect_global_state_refs,
+    is_expression,
+};
+use crate::property::evaluated::{Evaluated, Evaluation};
+use crate::property::evaluation::PropertyEvaluationParameters;
+use crate::property::table::{PropertyInfo, StyleProperty};
+use crate::property::value::StyleValue;
 use crate::serialization::optional_expression;
-use crate::style_property::StyleProperty;
 
 /// Special-case implementation of (a subset of) the `PropertyValue<T>`
 /// interface used for building the paint property traits classes for
@@ -124,5 +126,38 @@ impl StyleValue for ColorRampPropertyValue {
 
     fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
         self.global_state_refs.as_deref()
+    }
+}
+
+/// Converts a color ramp property value, an expression that parses against
+/// `functions`.
+pub(crate) fn convert_color_ramp_property_value(
+    value: &Convertible<'_>,
+    error: &mut Error,
+    functions: &Arc<Functions>,
+) -> Option<ColorRampPropertyValue> {
+    if value.is_undefined() {
+        Some(ColorRampPropertyValue::default())
+    } else if is_expression(value, functions) {
+        let mut ctx = ParsingContext::with_expected(functions, Type::Color);
+        let Some(expression) = ctx.parse_layer_property_expression(value) else {
+            error.message = ctx.get_combined_errors();
+            return None;
+        };
+
+        let deps = expression.dependencies();
+        if deps.intersects(Dependency::FEATURE) && !deps.intersects(Dependency::ELEVATION) {
+            error.message = "data expressions not supported".to_owned();
+            return None;
+        }
+        if deps.intersects(Dependency::ZOOM) {
+            error.message = "zoom expressions not supported".to_owned();
+            return None;
+        }
+
+        Some(ColorRampPropertyValue::new(Some(Arc::from(expression))))
+    } else {
+        error.message = "color ramp must be an expression".to_owned();
+        None
     }
 }

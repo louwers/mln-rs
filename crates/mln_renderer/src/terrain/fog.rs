@@ -46,7 +46,7 @@ fn linear(color: &Color, opacity: f32) -> [f32; 4] {
 #[cfg(test)]
 mod tests {
     use mln_map_types::TransformState;
-    use mln_style::evaluated::Evaluated;
+    use mln_style::property::evaluated::Evaluated;
     use mln_style_types::ProjectionDefinition;
     use mln_util::geo::LatLng;
     use mln_util::size::Size;

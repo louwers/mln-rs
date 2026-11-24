@@ -8,7 +8,7 @@ use super::util::FixtureLog;
 use crate::StyleRegistry;
 use crate::layer::FontStack;
 use crate::parser::Parser;
-use crate::style_property::Kind;
+use crate::property::table::Kind;
 
 fn fixtures_dir() -> PathBuf {
     std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata/test/fixtures/style_parser")

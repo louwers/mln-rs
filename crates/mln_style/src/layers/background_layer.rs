@@ -1,6 +1,6 @@
 use crate::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 use crate::layers::background_layer_properties::{self, BackgroundPaintProperties};
-use crate::property_table::{PropertyTable, PropertyVisitor};
+use crate::property::table::{PropertyTable, PropertyVisitor};
 
 /// The `background` layer type.
 pub struct Background;

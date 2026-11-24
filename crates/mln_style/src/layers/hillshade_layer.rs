@@ -1,6 +1,6 @@
 use crate::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 use crate::layers::hillshade_layer_properties::{self, HillshadePaintProperties};
-use crate::property_table::{PropertyTable, PropertyVisitor};
+use crate::property::table::{PropertyTable, PropertyVisitor};
 
 /// The `hillshade` layer type.
 pub struct Hillshade;

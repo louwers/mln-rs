@@ -9,7 +9,7 @@ use mln_map_types::{MapDebugOptions, MapMode, View};
 use mln_style::diff::{ItemChanges, LayerChange, LayerChanges, StyleDiff, sources_by_id};
 use mln_style::expression::{Dependency, GlobalStateMap};
 use mln_style::layer_type::{ErasedLayerStyle, SourceKind};
-use mln_style::map::zoom_history::ZoomHistory;
+use mln_style::property::evaluation::ZoomHistory;
 use mln_style::{
     GlobalStateChange, Layer, LayerList, PropertyEvaluationParameters, Source, Style, TransitionOptions,
     TransitionParameters, layer,

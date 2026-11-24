@@ -1,6 +1,6 @@
 use crate::layer_type::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 use crate::layers::color_relief_layer_properties::{self, ColorReliefPaintProperties};
-use crate::property_table::{PropertyTable, PropertyVisitor};
+use crate::property::table::{PropertyTable, PropertyVisitor};
 
 /// The `color-relief` layer type.
 pub struct ColorRelief;

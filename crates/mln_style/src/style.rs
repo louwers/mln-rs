@@ -16,13 +16,13 @@ use crate::layer_type::SourceKind;
 use crate::light::Light;
 use crate::parser::Parser;
 use crate::projection::Projection;
+use crate::property::transition::TransitionOptions;
 use crate::registry::StyleRegistry;
 use crate::sky::Sky;
 use crate::source_list::SourceList;
 use crate::source_type::Source;
 use crate::sprite::Sprite;
 use crate::terrain::Terrain;
-use crate::transition_options::TransitionOptions;
 
 /// The camera that a style's root properties set: `center`, `centerAltitude`,
 /// `zoom`, `bearing`, `pitch` and `roll`. A parsed style sets every member,
