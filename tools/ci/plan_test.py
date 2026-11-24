@@ -170,10 +170,14 @@ class PlanTest(unittest.TestCase):
                     "target": "android",
                     "runner": "blacksmith-4vcpu-ubuntu-2604",
                     "mise_env": "target-android",
+                    "device": "Android emulator",
+                    "device_command": "bash tools/ci/boot-android.sh",
                     "clippy_targets": (
                         "aarch64-linux-android,armv7-linux-androideabi,"
                         "x86_64-linux-android,i686-linux-android"
                     ),
+                    "test_target": "x86_64-linux-android",
+                    "backend": "vulkan",
                 }
             ],
         )

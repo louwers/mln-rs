@@ -4,20 +4,16 @@
 # the project that $AWS_DEVICE_FARM_PROJECT_ARN names (by default the one named
 # mln-rs), schedules it on the platform's phones below, and prints the run's
 # ARN. The run takes the account's flat-rate devices, and waits while
-# maplibre-native's runs have them all. With a key, it first stops the
-# platform's runs that are scheduled with the same key and haven't finished,
-# such as those of a pull request's earlier commit.
+# maplibre-native's runs have them all.
 #
-# Usage: schedule.sh <android|ios> <package directory> <run name> [key]
+# Usage: schedule.sh <android|ios> <package directory> <run name>
 #
-# Nothing here runs or unpacks the package, which may come from a fork
-# (README.md).
+# Nothing here runs or unpacks the package (README.md).
 set -euo pipefail
 
 platform=$1
 package=$2
 name=$3
-key=${4:-}
 spec=$(dirname "$0")/$platform/test-spec.yml
 export AWS_REGION=us-west-2 AWS_PAGER=
 
@@ -93,21 +89,10 @@ if [[ $platform == ios ]]; then
     run+=(--app-arn "$(< "$uploads/app")")
 fi
 
-name+=" $platform"
-if [[ -n $key ]]; then
-    name+=" key=$key"
-    aws devicefarm list-runs --arn "$project" --output json |
-        jq -r --arg suffix " $platform key=$key" '.runs[] | select(.status != "COMPLETED" and .status != "STOPPING" and (.name | endswith($suffix))) | .arn' |
-        while read -r earlier; do
-            echo "Stopping $earlier" >&2
-            aws devicefarm stop-run --arn "$earlier" > /dev/null
-        done
-fi
-
 selection=$(jq -cn '{filters: [{attribute: "ARN", operator: "IN", values: $ARGS.positional}], maxDevices: ($ARGS.positional | length)}' --args "${devices[@]}")
 aws devicefarm schedule-run \
     "${run[@]}" \
-    --name "$name" \
+    --name "$name $platform" \
     --device-selection-configuration "$selection" \
     --test "type=$type,testPackageArn=$package_arn,testSpecArn=$spec_arn" \
     --execution-configuration "jobTimeoutMinutes=$job_minutes,videoCapture=false" \

@@ -347,12 +347,12 @@ jobs:
 
   # The Android tests, built for AWS Device Farm's phones (`mise run
   # device-farm:package android`), which the device-test workflow runs once
-  # this job has built them (tools/device-farm/README.md).
+  # this job has built them: main's commits only, while pull requests test on
+  # the emulator (tools/device-farm/README.md).
   prepare-android-device-tests:
     needs: plan
     if:
-      github.event.pull_request.state != 'closed' &&
-      contains(fromJSON(needs.plan.outputs.jobs),
+      github.event_name == 'push' && contains(fromJSON(needs.plan.outputs.jobs),
       'prepare-android-device-tests')
     runs-on: blacksmith-4vcpu-ubuntu-2604
     timeout-minutes: 40
@@ -381,12 +381,13 @@ jobs:
 
   # The iOS tests, built for AWS Device Farm's iPhone (`mise run
   # device-farm:package ios`), which the device-test workflow runs once this
-  # job has built them (tools/device-farm/README.md).
+  # job has built them: main's commits only, while pull requests test on the
+  # simulator (tools/device-farm/README.md).
   prepare-ios-device-tests:
     needs: plan
     if:
-      github.event.pull_request.state != 'closed' &&
-      contains(fromJSON(needs.plan.outputs.jobs), 'prepare-ios-device-tests')
+      github.event_name == 'push' && contains(fromJSON(needs.plan.outputs.jobs),
+      'prepare-ios-device-tests')
     runs-on: blacksmith-6vcpu-macos-26
     timeout-minutes: 40
     steps:

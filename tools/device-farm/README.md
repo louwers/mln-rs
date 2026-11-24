@@ -60,19 +60,20 @@ without a result, get their one more try together, in one more launch.
 
 ## In CI
 
+The phones run `main`'s commits. Pull requests run the tests on the Android
+emulator and the iOS simulator, in CI's `target` jobs, which `main` runs too.
+
 CI's `prepare-android-device-tests` and `prepare-ios-device-tests` jobs build
-the packages when the `android` and `ios` units run, without credentials. Three
-workflows run them, so that no GitHub runner waits for the phones while a run is
-queued or in progress:
+`main`'s packages, without credentials. Three workflows run them, so that no
+GitHub runner waits for the phones while a run is queued or in progress:
 
 - `device-test` starts with the CI run, waits for each platform's job, and
   schedules its package once the job has built it, while the rest of CI runs. It
   reports each run on the commit as pending, as the `device-test / android` and
   `device-test / ios` statuses, which link to the run in the AWS console
-  (`console-url.sh`), and names the run for the commit and the platform. A newer
-  commit of a pull request stops the runs of the commit before it. When the plan
-  leaves a platform's tests out, it reports its status as passed, since merging
-  into `main` requires it.
+  (`console-url.sh`), and names the run for the commit and the platform. Since
+  merging into `main` requires the statuses, it reports them as passed for a
+  pull request's commits.
 - `device-farm-watch`, one at a time for every run, waits for the runs, and
   starts `device-farm-finish` for each that finished (`watch.sh`). An hourly
   schedule starts it too, in case one failed.
@@ -81,9 +82,9 @@ queued or in progress:
   each phone's output and artifacts (`collect.sh`), and a job without
   credentials summarizes each phone's JUnit report (`summary.py`).
 
-Pull requests from forks get a run safely because the orchestrator always reads
-`.config/device-farm.toml` and `android.yml` from `main` and never unpacks or
-executes the package outside AWS Device Farm.
+`device-test` runs on `workflow_run`, from the default branch. The workflows
+assume their AWS role through the `workflow-run` environment, which only `main`
+can use, and never run or unpack a package.
 
 [maplibre/infra](https://github.com/maplibre/infra) manages the AWS side: the
 `device-farm/` Lambda orchestrator and the `opentofu/device-farm` stack (the

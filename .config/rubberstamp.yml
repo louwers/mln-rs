@@ -75,38 +75,34 @@ ci:
     android:
       covers: >-
         Android cross-target clippy for all four Android ABIs, and the workspace
-        and render tests on Vulkan on AWS Device Farm's phones (a Pixel 9 with a
-        Mali GPU and a Galaxy S25 with an Adreno one), whose package CI builds.
+        and render tests on Vulkan (SwiftShader) on an x86_64 Android emulator.
         Catches Android platform code, NDK/JNI/AHardwareBuffer integration,
-        Vulkan backend portability, rendering that differs on phones' GPU
-        drivers, and Android CI setup issues. Platform-independent changes that
-        `linux-x64` already covers do not need it.
+        Vulkan backend portability, and Android CI setup issues. `main` also
+        runs the tests on AWS Device Farm's phones, which pull requests don't.
+        Platform-independent changes that `linux-x64` already covers do not need
+        it.
       rules:
         - if:
             files:
               - .config/device-farm.toml
               - mise.target-android.*
               - tools/android-test-host/**
-              - tools/device-farm/**
-              - mise-tasks/device-farm/**
+              - tools/ci/boot-android.sh
           then: apply
     ios:
       covers: >-
         Apple mobile/spatial clippy across iOS, iOS Simulator, Mac Catalyst,
-        visionOS, and visionOS Simulator, workspace and render tests on the iOS
-        simulator with Metal API validation, and the workspace and render tests
-        on Metal on AWS Device Farm's iPhone, whose package CI builds. Catches
-        Apple mobile/spatial compilation, Metal backend, rendering that differs
-        on an iPhone's GPU, and `target-apple` CI issues. Platform-independent
-        or Linux-only changes that `linux-x64` already covers do not need it.
+        visionOS, and visionOS Simulator, and workspace and render tests on the
+        iOS simulator with Metal API validation. Catches Apple mobile/spatial
+        compilation, Metal backend, and `target-apple` CI issues. `main` also
+        runs the tests on AWS Device Farm's iPhone, which pull requests don't.
+        Platform-independent or Linux-only changes that `linux-x64` already
+        covers do not need it.
       rules:
         - if:
             files:
               - crates/mln_mtl/**
               - mise.target-apple.*
-              - tools/ios-test-host/**
-              - tools/device-farm/**
-              - mise-tasks/device-farm/**
           then: apply
     windows-x64:
       covers: >-
