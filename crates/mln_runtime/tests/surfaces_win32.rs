@@ -184,6 +184,14 @@ fn surface(window: &Arc<TestWindow>) -> Surface {
     Surface::window(Arc::clone(window))
 }
 
+/// Non-interactive Windows sessions (such as CI runners in Session 0) have no
+/// desktop compositor, so DXGI refuses flip-model HWND swap chains with
+/// `DXGI_ERROR_NOT_CURRENTLY_AVAILABLE` (`0x887A0022`).
+fn is_headless_session(error: &mln_runtime::Error) -> bool {
+    let message = error.message.to_ascii_lowercase();
+    message.contains("0x887a0022") || message.contains("dxgi_error_not_currently_available")
+}
+
 // A minimized window takes no session and no replacement, and a session's
 // window takes no frame while it is minimized, and the next one once it is
 // restored.
@@ -201,7 +209,13 @@ fn a_minimized_window_takes_no_session_and_no_frames_on_each_backend() {
 
         let target = RenderTarget::Surface { size: SIZE, surface: surface(&shown), device: Some(device) };
         let (session, attached) = map.attach(target, AttachOptions::default()).unwrap();
-        attached.wait().unwrap();
+        if let Err(error) = attached.wait() {
+            if is_headless_session(&error) {
+                eprintln!("skipped: no interactive Windows desktop for {backend:?} HWND swap chains: {error}");
+                continue;
+            }
+            panic!("{backend:?}: attach failed: {error}");
+        }
         assert_eq!(FrameDisposition::Rendered, frame(&session, 1).disposition, "{backend:?}");
         let refused = session.set_surface(SIZE, surface(&minimized)).unwrap_err();
         assert_eq!(ErrorKind::InvalidState, refused.kind, "{backend:?}: {refused:?}");
@@ -291,7 +305,14 @@ fn a_d3d12_target_takes_no_frame_while_its_window_is_minimized() {
     let Some(Device::D3d12(device)) = device_of(BackendType::D3D12) else { return };
     let mut backend = mln_d3d12::RendererBackend::new(&device).unwrap();
     let window = TestWindow::new();
-    let mut target = mln_d3d12::SurfaceTarget::new(&backend, Arc::<TestWindow>::clone(&window), SIZE).unwrap();
+    let mut target = match mln_d3d12::SurfaceTarget::new(&backend, Arc::<TestWindow>::clone(&window), SIZE) {
+        Ok(target) => target,
+        Err(error) if is_headless_session(&error) => {
+            eprintln!("skipped: no interactive Windows desktop for D3D12 HWND swap chains: {error}");
+            return;
+        }
+        Err(error) => panic!("D3D12 SurfaceTarget::new failed: {error}"),
+    };
     assert_eq!(Some(Handoff::Presented), clear_frame(&mut backend, &mut target));
     // A resize takes buffers of the new size before the next frame.
     target.resize(backend.gpu(), Size::new(32, 48));

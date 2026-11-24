@@ -83,7 +83,7 @@ impl TileZoomFunction {
         );
         let lowest_pitch = f64::min(highest_pitch, center_pitch - deg2rad(self.camera_vertical_fov / 2.0));
         let tile_count = integral_of_cos_x_by_p(self.pitch_tile_loading_behavior - 1.0, lowest_pitch, highest_pitch);
-        let this_tile_pitch = (distance_to_tile_2d / distance_to_tile_z).atan();
+        let this_tile_pitch = distance_to_tile_2d.atan2(distance_to_tile_z);
         let distance_to_tile_3d = distance_to_tile_2d.hypot(distance_to_tile_z);
         let mut desired = requested_center_zoom;
         desired += (distance_to_center_3d
@@ -114,4 +114,23 @@ pub(crate) fn elevation_for_tile_culling(
         / TILE_CULLING_HORIZON_ONSET_DEGREES;
     let proximity_to_horizon = proximity.clamp(0.0, 1.0);
     center_elevation + proximity_to_horizon * f64::max(ASSUMED_MAX_FEATURE_HEIGHT_METERS, max_content_elevation)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TileZoomFunction;
+
+    #[test]
+    fn level_camera_over_containing_tile_does_not_return_nan() {
+        let zoom = TileZoomFunction::new(
+            36.87,
+            TileZoomFunction::DEFAULT_MAX_ZOOM_LEVELS_ON_SCREEN,
+            TileZoomFunction::DEFAULT_TILE_COUNT_MAX_MIN_RATIO,
+        );
+        // At pitch = 90°, camera_coord.z == center_coord.z (distance_z == 0.0)
+        // on platforms whose trig leaves no residual, and the root tile contains
+        // the camera (distance_to_tile_2d == 0.0).
+        let desired = zoom.call(13.0, 0.0, 0.0, 1e-4);
+        assert!(!desired.is_nan() && desired >= 13.0, "desired zoom: {desired}");
+    }
 }

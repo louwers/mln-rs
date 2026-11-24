@@ -585,7 +585,10 @@ impl SurfaceResource {
                     }
                     return Ok(Acquired { image, slot });
                 }
-                Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::ERROR_MEMORY_MAP_FAILED) => {
+                    // Mesa's Win32 WSI (llvmpipe) marks a swapchain with
+                    // VK_ERROR_MEMORY_MAP_FAILED while its window is minimized
+                    // and keeps returning it until the swapchain is rebuilt.
                     self.request_surface_update(false);
                     self.update_surface(gpu);
                 }
@@ -696,7 +699,9 @@ impl SurfaceResource {
         match self.device.present(&present_info) {
             Ok(true) => self.request_surface_update(true),
             Ok(false) => {}
-            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => self.request_surface_update(false),
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::ERROR_MEMORY_MAP_FAILED) => {
+                self.request_surface_update(false);
+            }
             Err(vk::Result::ERROR_SURFACE_LOST_KHR) => {
                 // The frame was submitted, recreate the surface before the
                 // next one.
