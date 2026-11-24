@@ -5,10 +5,8 @@ use std::collections::hash_map::Entry;
 
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
-use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gfx_types::DrawModeType;
 use mln_gfx::gpu::{DepthState, FixedState, GpuError, StencilState};
-use mln_gfx::stencil_mode::StencilMode;
 use mln_glsl::Stage;
 use mln_util::hash::HashMap;
 use windows::Win32::Graphics::Direct3D12::{
@@ -121,8 +119,8 @@ impl Mipmapper {
                     cull: CullFaceMode::disabled(),
                     blend: unblended.blend_function,
                     color_mask: unblended.mask,
-                    depth: DepthState::from(&DepthMode::disabled()),
-                    stencil: StencilState::from(&StencilMode::disabled()),
+                    depth: DepthState::DISABLED,
+                    stencil: StencilState::DISABLED,
                 };
                 let bytecode = |code: &[u8]| D3D12_SHADER_BYTECODE {
                     pShaderBytecode: code.as_ptr().cast(),
