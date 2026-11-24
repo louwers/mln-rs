@@ -26,9 +26,9 @@
 //! ([`build`]). A side's count is the median over its builds, each build
 //! counting once, and a count's noise is the larger interquartile range of
 //! either side's builds. The ref's probe runs and its own build's runs are
-//! kept under `<target>/bench-compare/samples`, by commit, so a later
-//! comparison with the same ref builds and runs only this checkout's
-//! probes. The report shows every metric's change and its noise, and marks
+//! kept under `<target>/bench-compare/samples`, by commit and by this
+//! checkout's `profile.toml`, so a later comparison with the same ref and
+//! profile builds and runs only this checkout's probes. The report shows every metric's change and its noise, and marks
 //! a count that moved by over [`NOISE_FACTOR`] times its noise, however
 //! little: one that repeats exactly is marked for any change. The reader
 //! weighs what matters.
@@ -245,7 +245,8 @@ pub(crate) fn compare(options: &Options) -> Result<Comparison, String> {
         ));
     }
 
-    let samples_path = work.join("samples").join(format!("{commit}.json"));
+    let profile = read(&root.join("tools/bench/profile.toml"))?;
+    let samples_path = work.join("samples").join(samples_name(&commit, &profile));
     let mut samples = read_samples(&samples_path);
     eprintln!("mln-bench: a first run of each scenario on each side, not counted");
     let base_harness = harness_of(&warm_up(&base, &scenarios)?)?;
@@ -919,6 +920,17 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
 
 type Samples = BTreeMap<String, Vec<Run>>;
 
+/// The file of the base's kept runs: by commit, and by `profile`, the
+/// `profile.toml` that both sides build with, which the base's harness id
+/// covers only when the harness is this checkout's.
+fn samples_name(commit: &str, profile: &[u8]) -> String {
+    // FNV-1a, which every build of the tool computes the same way.
+    let hash = profile
+        .iter()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3));
+    format!("{commit}-{hash:016x}.json")
+}
+
 /// The base's kept runs, or none when there are none or they don't read.
 fn read_samples(path: &Path) -> Samples {
     std::fs::read_to_string(path).ok().and_then(|json| serde_json::from_str(&json).ok()).unwrap_or_default()
@@ -1216,6 +1228,14 @@ mod tests {
         let error = prepare_tree(root, &tree, &commit, true).unwrap_err();
         assert!(error.contains("--own-harness"), "{error}");
         prepare_tree(root, &tree, &commit, false).unwrap();
+    }
+
+    #[test]
+    fn keeps_the_bases_runs_by_commit_and_profile() {
+        let name = samples_name("abc", b"codegen-units = 1");
+        assert_eq!(name, samples_name("abc", b"codegen-units = 1"));
+        assert_ne!(name, samples_name("abc", b"codegen-units = 16"));
+        assert_ne!(name, samples_name("abd", b"codegen-units = 1"));
     }
 
     #[test]

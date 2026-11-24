@@ -379,10 +379,11 @@ scenario runs once on each build. A side's count is the median over its builds,
 each counting once, so that one build far from the rest moves it little, and a
 count's noise is the larger interquartile range of either side's builds.
 
-The ref's runs are kept in `target/bench-compare/samples`, by commit: its probes
-run only in the first comparison with a commit and harness, and later ones build
-and run only this checkout's eight probes, about 7 s to build the harness crate
-and one run per scenario each.
+The ref's runs are kept in `target/bench-compare/samples`, by commit and by this
+checkout's `profile.toml`: its probes run only in the first comparison with a
+commit, profile and harness, and later ones build and run only this checkout's
+eight probes, about 7 s to build the harness crate and one run per scenario
+each.
 
 The report shows every count's change and noise, and marks a change over twice
 the noise, however small: a count that repeats exactly is marked for any change.
