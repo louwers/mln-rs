@@ -8,6 +8,9 @@
 //!   `OffscreenCanvas`, with the browser's WebGPU, or its WebGL2 in the
 //!   `webgl` build. The runtime's and the session's work runs in the slices
 //!   of `mln_web_host::pump`, and the page's animation frames demand frames.
+//! - In the Web Worker of the page's style picker, while it is open: a
+//!   `WebMap` for each style's preview, with tile workers' Web Workers of
+//!   their own.
 //! - In each tile worker's Web Worker, `mln_web_host`'s tile worker side
 //!   (`serve_tile_worker`): a `TileWorkerHost`, which runs the tiles' jobs:
 //!   layouts, and raster and raster-dem tiles' image decodes. The session's
@@ -25,7 +28,8 @@
 //! its pump (`mln_web_host::pump`) when its Web Worker's event loop runs
 //! them.
 //!
-//! web/main.ts, web/map-worker.ts and web/tile-worker.ts are the page's side.
+//! web/main.ts, web/map-worker.ts, web/preview-worker.ts and
+//! web/tile-worker.ts are the page's side.
 
 #![cfg(target_arch = "wasm32")]
 

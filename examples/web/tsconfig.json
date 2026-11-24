@@ -20,6 +20,8 @@
     "web/main.ts",
     "web/compare.ts",
     "web/debug.ts",
+    "web/picker.ts",
+    "web/workers.ts",
     "web/styles.ts",
     "web/protocol.ts",
     "web/wheel.ts",

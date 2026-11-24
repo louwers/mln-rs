@@ -50,8 +50,9 @@
 //                          the browser has it)
 //
 // The hash holds the camera as GL JS's does, #zoom/lat/lon[/bearing/pitch],
-// and follows it, so that a link opens the same view. Picking a style keeps
-// the camera and puts the style's key in `?style=`.
+// and follows it, so that a link opens the same view. The style button opens
+// the style picker (picker.ts), a dialog with a live preview of each style.
+// Picking a style keeps the camera and puts the style's key in `?style=`.
 //
 // Input: the canvas's pointer, wheel, key and focus events go to the map's
 // Web Worker, whose gesture recognizer (mln_gestures) moves the camera: drag
@@ -77,6 +78,7 @@
 
 import type { Comparison } from "./compare.ts";
 import { createDebugOverlay } from "./debug.ts";
+import { createStylePicker } from "./picker.ts";
 import wasmUrl from "./pkg/mln_web_bg.wasm?url";
 import webglWasmUrl from "./pkg/webgl/mln_web_bg.wasm?url";
 import {
@@ -88,11 +90,11 @@ import {
   type Loaded,
   type Pixels,
   type ProjectionType,
-  type StartTileWorker,
   type ToMap,
 } from "./protocol.ts";
-import { STYLES, type Style, sameStyle, styleFor } from "./styles.ts";
+import { type Style, sameStyle, styleFor } from "./styles.ts";
 import { wheelDelta } from "./wheel.ts";
+import { startTileWorker, tileWorker } from "./workers.ts";
 
 declare global {
   interface Window {
@@ -152,6 +154,8 @@ canvas.height = devicePixels(size[1]);
 fitCanvas();
 
 const localFamily = params.get("localIdeographFontFamily");
+const localIdeographs = localFamily !== "" && localFamily !== "false";
+const fallbackFontFaces = params.get("fallbackFontFaces");
 
 const BACKEND_NAME: Record<Backend, string> = {
   webgpu: "WebGPU",
@@ -201,13 +205,7 @@ const count = number(
   "workers",
   Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1)),
 );
-const tileWorkers = Array.from({ length: count }, () =>
-  backend === "webgl2"
-    ? new Worker(new URL("./worker-webgl.ts", import.meta.url), {
-        type: "module",
-      })
-    : new Worker(new URL("./worker.ts", import.meta.url), { type: "module" }),
-);
+const tileWorkers = Array.from({ length: count }, () => tileWorker(backend));
 const map =
   backend === "webgl2"
     ? new Worker(new URL("./map-worker.ts", import.meta.url), {
@@ -254,16 +252,13 @@ const panicMessage = "panic=<map|tile> asked for this panic";
 // what they ask of the map waits in the map's Web Worker until it starts.
 compiling.then(
   (module) => {
-    const controls = tileWorkers.map((worker, i) => {
-      const channel = new MessageChannel();
-      const start: StartTileWorker = {
+    const controls = tileWorkers.map((worker, i) =>
+      startTileWorker(
+        worker,
         module,
-        control: channel.port2,
-        panic: panic === "tile" && i === 0 ? panicMessage : undefined,
-      };
-      worker.postMessage(start, [channel.port2]);
-      return channel.port1;
-    });
+        panic === "tile" && i === 0 ? panicMessage : undefined,
+      ),
+    );
 
     const offscreen = canvas.transferControlToOffscreen();
     toMap(
@@ -277,9 +272,9 @@ compiling.then(
         ratio,
         style,
         terrain,
-        fallbackFontFaces: params.get("fallbackFontFaces"),
+        fallbackFontFaces,
         camera,
-        localIdeographs: localFamily !== "" && localFamily !== "false",
+        localIdeographs,
         panic: panic === "map" ? panicMessage : undefined,
       },
       [offscreen, ...controls],
@@ -576,6 +571,7 @@ new ResizeObserver(() => {
   size = next;
   fitCanvas();
   toMap({ type: "resize", width: size[0], height: size[1] });
+  picker.setMapSize(size);
   showDebugPage();
 }).observe(mapBox);
 
@@ -589,6 +585,7 @@ if (!params.has("ratio")) {
         ratio = window.devicePixelRatio || 1;
         fitCanvas();
         toMap({ type: "pixelRatio", ratio });
+        picker.setRatio(ratio);
         showDebugPage();
         watchRatio(ratio);
       },
@@ -639,6 +636,7 @@ function showCamera(next: Camera) {
   needle.style.transform = `rotateX(${pitch}deg) rotateZ(${-bearing}deg)`;
   debug.camera(next);
   comparison?.cameraChanged(next);
+  picker.setCamera(next);
   hashTimer ??= setTimeout(() => {
     hashTimer = null;
     writtenHash = hashFromCamera(latestCamera);
@@ -665,8 +663,31 @@ element("compass", HTMLButtonElement).addEventListener("click", () => {
   toMap({ type: "resetNorth" });
 });
 
-// The style button and its list.
-const styleList = element("style-list", HTMLElement);
+// The style button, and the picker it opens (picker.ts).
+const styleButton = element("style-button", HTMLButtonElement);
+const picker = createStylePicker({
+  dialog: element("styles", HTMLElement),
+  list: element("style-list", HTMLElement),
+  button: styleButton,
+  backend,
+  module: compiling,
+  // The previews are small, a few tiles each: more Web Workers than two
+  // load them no sooner, and each takes memory.
+  tileWorkers: Math.min(count, 2),
+  camera,
+  mapSize: size,
+  ratio,
+  fallbackFontFaces,
+  localIdeographs,
+  pick: pickStyle,
+});
+styleButton.addEventListener("click", () => {
+  if (picker.open) picker.hide();
+  else picker.show();
+});
+element("styles-close", HTMLButtonElement).addEventListener("click", () =>
+  picker.hide(),
+);
 let loading = true;
 let styleName = "";
 function showStyle() {
@@ -682,17 +703,10 @@ function showStyle() {
         : current.provider;
   detail.hidden = detail.textContent === "";
   document.documentElement.dataset.theme = current.dark ? "dark" : "light";
-  for (const option of styleList.querySelectorAll<HTMLElement>(
-    ".style-option",
-  )) {
-    option.setAttribute(
-      "aria-current",
-      String(option.dataset.key === current.key),
-    );
-  }
+  picker.setCurrent(current);
 }
 function pickStyle(next: Style) {
-  element("styles", HTMLElement).hidePopover();
+  picker.hide();
   if (sameStyle(next, current)) return;
   current = next;
   loading = true;
@@ -711,60 +725,6 @@ function setParam(name: string, value: string | null) {
   url.hash = writtenHash;
   history.replaceState(history.state, "", url);
 }
-// Group styles by provider, collecting single-style providers under "Other".
-const providerCounts = new Map<string, number>();
-for (const option of STYLES) {
-  providerCounts.set(
-    option.provider,
-    (providerCounts.get(option.provider) ?? 0) + 1,
-  );
-}
-const styleGroups = new Map<string, Style[]>();
-for (const option of STYLES) {
-  const heading =
-    (providerCounts.get(option.provider) ?? 0) > 1 ? option.provider : "Other";
-  const group = styleGroups.get(heading);
-  if (group) group.push(option);
-  else styleGroups.set(heading, [option]);
-}
-styleList.replaceChildren(
-  ...[...styleGroups].map(([heading, options]) => {
-    const title = document.createElement("div");
-    title.className = "style-group-title";
-    title.textContent = heading;
-    const list = document.createElement("ul");
-    list.className = "style-group-list";
-    list.append(
-      ...options.map((option) => {
-        const name = document.createElement("span");
-        name.className = "style-name";
-        name.textContent = option.name;
-        const text = document.createElement("span");
-        text.className = "style-text";
-        text.append(name);
-        if (heading === "Other" && option.provider !== option.name) {
-          const provider = document.createElement("span");
-          provider.className = "style-detail";
-          provider.textContent = option.provider;
-          text.append(provider);
-        }
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "style-option";
-        button.dataset.key = option.key ?? "";
-        button.append(text);
-        button.addEventListener("click", () => pickStyle(option));
-        const item = document.createElement("li");
-        item.append(button);
-        return item;
-      }),
-    );
-    const section = document.createElement("section");
-    section.className = "style-group";
-    section.append(title, list);
-    return section;
-  }),
-);
 showStyle();
 
 // Attribution: the sources' HTML, kept to its text and its http(s) links.
@@ -892,6 +852,7 @@ function setProjection(key: string) {
   currentProjection = projection;
   toMap({ type: "projection", projection });
   comparison?.setProjection(projection);
+  picker.setProjection(projection);
 }
 projectionSelect.addEventListener("change", () =>
   setProjection(projectionSelect.value),

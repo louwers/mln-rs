@@ -6,6 +6,7 @@
   },
   "include": [
     "web/map-worker.ts",
+    "web/preview-worker.ts",
     "web/tile-worker.ts",
     "web/worker.ts",
     "web/worker-webgl.ts",
