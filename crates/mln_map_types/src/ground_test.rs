@@ -367,3 +367,93 @@ fn a_globe_ray_over_the_ground_meets_none() {
     assert_eq!(None, view.ground_under(&ScreenCoordinate::new(256.0, 400.0), &south));
     assert!(view.ground_under(&ScreenCoordinate::new(256.0, 100.0), &south).is_some());
 }
+
+/// A 512 px square globe view of latitude 84 at zoom 4, `pitch` degrees
+/// toward `bearing`, its center `center_altitude` meters up, that shows
+/// the north polar cap.
+fn polar_view(pitch: f64, bearing: f64, center_altitude: f64) -> View {
+    let mut state = MapView {
+        camera: Camera {
+            center: LatLng::new(84.0, 20.0).unwrap(),
+            center_altitude,
+            zoom: 4.0,
+            pitch,
+            bearing,
+            fov: 36.87,
+            ..Camera::default()
+        },
+        extent: LogicalExtent::new(Size::new(512, 512), 1.0),
+        projection_mode: ProjectionMode::default(),
+        viewport: crate::Viewport::default(),
+        projection: ProjectionDefinition::new(mln_style_types::ProjectionType::VerticalPerspective),
+    }
+    .to_state()
+    .unwrap();
+    state.set_terrain_min_elevation(Some(0.0));
+    assert!(state.view().is_globe());
+    state.view().clone()
+}
+
+/// A plateau 1000 m high over all of Web Mercator's square, and nothing
+/// past it.
+fn high_plateau() -> Ground {
+    Ground { surface: |world| (0.0..=1.0).contains(&world.y).then_some(1000.0), range: (1000.0, 1000.0) }
+}
+
+/// On the globe, a ray through a polar cap meets it at sea level, where the
+/// globe draws it, though all the drawn ground stands higher and the center
+/// stands higher too: within a centimeter of where the line of sight meets
+/// the sea-level sphere, at the cap's own latitude, and the hit draws back
+/// at its pixel, as the location on the terrain does.
+#[test]
+fn a_globe_ray_meets_a_polar_cap_at_sea_level() {
+    let ground = high_plateau();
+    let view = polar_view(30.0, 0.0, 1000.0);
+    let (mut on_cap, mut on_plateau) = (0, 0);
+    for pixel in pixels() {
+        let Some(hit) = view.ground_under(&pixel, &ground) else { continue };
+        let sea = view.screen_coordinate_to_lat_lng_at(&pixel, 0.0, WrapMode::Unwrapped).unwrap();
+        if sea.latitude() > mln_util::constants::LATITUDE_MAX + 0.01 {
+            assert_eq!(0.0, hit.height, "{pixel:?}");
+            let location = hit.location(WrapMode::Unwrapped);
+            let off = meters_apart(&location, &sea, 0.0);
+            assert!(off < 0.01, "{pixel:?} meets the cap at {location:?}, {off} m from the sphere's point {sea:?}");
+            assert_draws_at(&view, &hit, &pixel);
+            let on = view.screen_coordinate_to_lat_lng_on(&pixel, &ground, WrapMode::Unwrapped).unwrap();
+            let back = view.lat_lng_to_screen_coordinate_on(&on, &ground);
+            let off = DVec2::new(back.x - pixel.x, back.y - pixel.y).length();
+            assert!(off < 0.01, "{pixel:?} shows {on:?}, which comes back {off} px off");
+            on_cap += 1;
+        } else if hit.height == 1000.0 {
+            on_plateau += 1;
+        }
+    }
+    assert!(on_cap > 16 && on_plateau > 16, "{on_cap} on the cap, {on_plateau} on the plateau");
+}
+
+/// On the globe, the eye and the near plane over a polar cap keep their
+/// latitudes, past those Web Mercator's square holds: each converts back
+/// to the location of its point on the sphere.
+#[test]
+fn the_globe_s_eye_and_near_plane_over_a_polar_cap_keep_their_latitudes() {
+    use crate::VerticalPerspectiveProjection;
+
+    let view = polar_view(60.0, 180.0, 0.0);
+    let location = |world: glam::DVec3| {
+        crate::GroundHit { world: world.truncate(), height: world.z }.location(WrapMode::Unwrapped)
+    };
+    let on_sphere =
+        |point: glam::DVec3| VerticalPerspectiveProjection::surface_vector_to_lat_lng(point.normalize()).unwrap();
+    let expected = on_sphere(view.globe_camera_position());
+    assert!(expected.latitude() > mln_util::constants::LATITUDE_MAX + 1.0, "the eye is over {expected:?}");
+    let eye = location(view.eye_position());
+    assert!(meters_apart(&eye, &expected, 0.0) < 0.01, "the eye is over {eye:?}, not {expected:?}");
+
+    let inverse = view.inverse_globe_view_projection_matrix();
+    for (index, point) in view.near_plane_points().into_iter().enumerate() {
+        let clip = glam::DVec3::new((index % 3) as f64 - 1.0, (index / 3) as f64 - 1.0, -1.0);
+        let expected = on_sphere(inverse.project_point3(clip));
+        let at = location(point);
+        assert!(meters_apart(&at, &expected, 0.0) < 0.01, "near plane point {index} is over {at:?}, not {expected:?}");
+    }
+}

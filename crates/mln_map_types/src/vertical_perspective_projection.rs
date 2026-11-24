@@ -290,11 +290,20 @@ impl VerticalPerspectiveProjection {
     /// The Web Mercator point at zoom 0 under the unit-sphere point `point`,
     /// in the world copy nearest the view's center, and its height in meters
     /// above the sea-level sphere; `None` for a point that isn't a number.
+    /// Over the polar caps, past the latitudes that Web Mercator's square
+    /// holds, y is past 0 or 1, and at the poles infinite or far past.
     pub(crate) fn sphere_point_to_world(view: &View, point: DVec3) -> Option<DVec3> {
         let length = point.length();
-        let location = Self::surface_vector_to_lat_lng(point / length)?;
-        let world = Projection::project(&view.lat_lng_near_center(&location), 1.0 / TILE_SIZE_D);
-        Some(DVec3::new(world.x, world.y, (length - 1.0) * Self::GLOBE_RADIUS_METERS))
+        let location = view.lat_lng_near_center(&Self::surface_vector_to_lat_lng(point / length)?);
+        let world = Projection::project(&location, 1.0 / TILE_SIZE_D);
+        let latitude = location.latitude();
+        // `Projection::project`'s formula, without its clamp.
+        let y = if latitude.abs() > LATITUDE_MAX {
+            (180.0 - mln_math::rad2deg((PI / 4.0 + mln_math::deg2rad(latitude) / 2.0).tan().ln())) / 360.0
+        } else {
+            world.y
+        };
+        Some(DVec3::new(world.x, y, (length - 1.0) * Self::GLOBE_RADIUS_METERS))
     }
 
     /// The direction from the planet's center, as a unit-sphere point, of

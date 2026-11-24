@@ -31,7 +31,8 @@ const BAND_PADDING: f64 = 10.0;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GroundHit {
     /// Its Web Mercator point at zoom 0 (from 0 to 1 across, y south), with
-    /// x in the world copy the view shows it in.
+    /// x in the world copy the view shows it in. On a globe's polar cap y is
+    /// past 0 or 1.
     pub world: DVec2,
     /// The height of the surface there, in meters with the terrain's
     /// exaggeration ([`Elevation::surface_at`]).
@@ -58,12 +59,13 @@ impl View {
     /// ground within the band of its heights, at most 512 times, which a
     /// long line spaces closer near the eye, and bisects the first step
     /// that ends under the ground. On the globe the band lies between the
-    /// spheres of the lowest and highest heights, a point's height is
-    /// measured up its vertical from the sea-level sphere, and the hit's
-    /// [`world`](GroundHit::world) is in the world copy nearest the view's
-    /// center; past the Mercator range, where the globe closes its poles at
-    /// sea level, drawn ground is at sea level. `None` where the line meets
-    /// no drawn ground, and while the view shows nothing.
+    /// spheres of the lowest and highest heights and sea level, a point's
+    /// height is measured up its vertical from the sea-level sphere, and the
+    /// hit's [`world`](GroundHit::world) is in the world copy nearest the
+    /// view's center; past the Mercator range, where the globe closes its
+    /// poles at sea level, the ground is at sea level wherever the tile at
+    /// the range's edge below it drew. `None` where the line meets no drawn
+    /// ground, and while the view shows nothing.
     #[must_use]
     pub fn ground_under(&self, point: &ScreenCoordinate, ground: &dyn Elevation) -> Option<GroundHit> {
         if self.is_globe() {
@@ -87,14 +89,6 @@ impl View {
         wrap_mode: WrapMode,
     ) -> Result<LatLng, Error> {
         match self.ground_under(point, ground) {
-            // A hit's Web Mercator point stops at the edge of the globe's
-            // polar caps, whose ground is sea level: there the sea-level
-            // sphere has the location.
-            Some(hit)
-                if self.is_globe() && hit.location(WrapMode::Unwrapped).latitude().abs() >= LATITUDE_MAX - 1e-9 =>
-            {
-                self.screen_coordinate_to_lat_lng_at(point, 0.0, wrap_mode)
-            }
             Some(hit) => Ok(hit.location(wrap_mode)),
             None => self.screen_coordinate_to_lat_lng_at(point, self.center_altitude(), wrap_mode),
         }
@@ -127,9 +121,10 @@ impl View {
         if size.is_empty() {
             return None;
         }
+        // The band holds sea level, where the globe closes its poles.
         let (low, high) = ground.range()?;
         let radius = |height: f64| 1.0 + height / VerticalPerspectiveProjection::GLOBE_RADIUS_METERS;
-        let (low, high) = (radius(low - BAND_PADDING), radius(high + BAND_PADDING));
+        let (low, high) = (radius(low.min(0.0) - BAND_PADDING), radius(high.max(0.0) + BAND_PADDING));
 
         // The line of sight from the near plane to the far plane.
         let inverse = self.inverse_globe_view_projection_matrix();
@@ -151,12 +146,13 @@ impl View {
         }
 
         let point_at = |t: f64| near + along * t;
-        let max_y = mln_math::deg2rad(LATITUDE_MAX).sin();
         let sample = |t: f64| {
-            let point = point_at(t);
-            let world = VerticalPerspectiveProjection::sphere_point_to_world(self, point)?;
-            let surface = ground.surface_at(world.truncate())?;
-            Some((world, if point.y.abs() > max_y * point.length() { 0.0 } else { surface }))
+            let world = VerticalPerspectiveProjection::sphere_point_to_world(self, point_at(t))?;
+            // A polar cap draws at sea level where the tile at the edge of
+            // Web Mercator's square below it drew.
+            let edge = DVec2::new(world.x, world.y.clamp(0.0, 1.0));
+            let surface = ground.surface_at(edge)?;
+            Some((world, if edge.y == world.y { surface } else { 0.0 }))
         };
         // The ground the band spans, from the directions of its ends.
         let globe_radius = VerticalPerspectiveProjection::globe_radius_pixels(

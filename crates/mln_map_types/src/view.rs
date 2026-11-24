@@ -499,7 +499,8 @@ impl View {
     /// to 1 across, y south) and its altitude in meters, of the meters the
     /// view places heights in ([`center_altitude`](Self::center_altitude)).
     /// On the globe it is the point under the eye, in the world copy nearest
-    /// the center, and the eye's height above the sea-level sphere.
+    /// the center, with y past 0 or 1 over a polar cap, and the eye's height
+    /// above the sea-level sphere.
     #[must_use]
     pub fn eye_position(&self) -> DVec3 {
         if self.is_globe() && self.is_valid() {
