@@ -110,7 +110,7 @@ enum WindowSurface {
     /// An Android window, which the surface takes its own reference to.
     #[cfg(target_os = "android")]
     Android(NonNull<c_void>),
-    /// An OpenHarmony window, which the surface takes its own reference to.
+    /// An `OpenHarmony` window, which the surface takes its own reference to.
     #[cfg(target_env = "ohos")]
     Ohos(NonNull<c_void>),
     /// A `CAMetalLayer`, which the surface retains.
@@ -479,7 +479,7 @@ fn win32_window(size: Size, window: NonNull<c_void>) -> Target {
     Target::Surface { size, kind: SurfaceType::Win32, surface: WindowSurface::Ready(Surface::window(window)) }
 }
 
-/// An OpenHarmony window that the session holds a reference to, which it
+/// An `OpenHarmony` window that the session holds a reference to, which it
 /// drops once it lets go of the window.
 #[cfg(target_env = "ohos")]
 struct OhosWindow(NonNull<c_void>);
@@ -520,7 +520,7 @@ impl HasDisplayHandle for OhosWindow {
 impl OhosWindow {
     /// Takes a reference to the host's window.
     ///
-    /// Fails with an invalid argument for a pointer that OpenHarmony finds
+    /// Fails with an invalid argument for a pointer that `OpenHarmony` finds
     /// is no `OHNativeWindow`.
     ///
     /// # Safety
@@ -544,7 +544,7 @@ impl Drop for OhosWindow {
     }
 }
 
-/// An OpenHarmony window's target. The surface takes its own reference to
+/// An `OpenHarmony` window's target. The surface takes its own reference to
 /// the window, as the header says, once the call's handles check out.
 #[cfg(target_env = "ohos")]
 fn ohos_window(size: Size, window: NonNull<c_void>) -> Target {

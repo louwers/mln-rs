@@ -90,7 +90,7 @@ unsafe extern "C" {
     fn OH_NativeWindow_NativeWindowHandleOpt(window: *mut c_void, code: c_int, ...) -> i32;
 }
 
-/// Gives an OpenHarmony window's buffers `size`, which EGL draws the window's
+/// Gives an `OpenHarmony` window's buffers `size`, which EGL draws the window's
 /// surface at. A window's own geometry is its consumer's default size, which
 /// may differ from the frames' or be none, and EGL makes no surface of a
 /// window without one.
