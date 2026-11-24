@@ -46,6 +46,7 @@ mod sky_pass;
 pub mod source_state;
 mod source_type;
 mod sources;
+mod terrain;
 pub mod text;
 pub mod tile;
 mod tile_mask;
