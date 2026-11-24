@@ -111,6 +111,14 @@ impl Image {
             Image::Imported { view, .. } => *view,
         }
     }
+
+    /// The view of level 0, which framebuffers take.
+    fn level_view(&self) -> vk::ImageView {
+        match self {
+            Image::Owned(allocation) => allocation.level_view(),
+            Image::Imported { view, .. } => *view,
+        }
+    }
 }
 
 struct Texture {
@@ -120,7 +128,9 @@ struct Texture {
     size: Size,
     usage: TextureUsage,
     aspect: vk::ImageAspectFlags,
-    /// The layout the image is in between commands.
+    mipmapped: bool,
+    mip_levels: u32,
+    /// The layout the image is in between commands, at every level.
     layout: vk::ImageLayout,
     /// The queue family that each flush whose passes draw into the image
     /// releases it to.
@@ -454,14 +464,9 @@ fn resting_layout(format: TextureFormat, usage: TextureUsage) -> vk::ImageLayout
     }
 }
 
-fn whole_range(aspect: vk::ImageAspectFlags) -> vk::ImageSubresourceRange {
-    vk::ImageSubresourceRange {
-        aspect_mask: aspect,
-        base_mip_level: 0,
-        level_count: 1,
-        base_array_layer: 0,
-        layer_count: 1,
-    }
+/// Of `aspect`, `level_count` mip levels from `base_mip_level`.
+fn levels(aspect: vk::ImageAspectFlags, base_mip_level: u32, level_count: u32) -> vk::ImageSubresourceRange {
+    vk::ImageSubresourceRange { aspect_mask: aspect, base_mip_level, level_count, base_array_layer: 0, layer_count: 1 }
 }
 
 fn clear_color(color: mln_util::Color) -> vk::ClearValue {
@@ -719,7 +724,7 @@ impl VulkanGpu {
             gpu.vk(),
             uploads,
             gpu.placeholder_image.image(),
-            whole_range(vk::ImageAspectFlags::COLOR),
+            levels(vk::ImageAspectFlags::COLOR, 0, 1),
             (vk::ImageLayout::UNDEFINED, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
             (vk::AccessFlags::empty(), vk::AccessFlags::SHADER_READ),
             (vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::ALL_COMMANDS),
@@ -767,6 +772,8 @@ impl VulkanGpu {
             size: imported.size,
             usage: imported.usage,
             aspect: aspect(format),
+            mipmapped: false,
+            mip_levels: 1,
             layout: imported.layout,
             release_to: imported.release_to,
             released: imported.release_to.is_some(),
@@ -1539,7 +1546,7 @@ impl VulkanGpu {
         let views: Vec<vk::ImageView> = [color, depth_stencil]
             .into_iter()
             .flatten()
-            .map(|id| self.textures.get(id).map(|texture| texture.image.image_view()))
+            .map(|id| self.textures.get(id).map(|texture| texture.image.level_view()))
             .collect::<Option<_>>()
             .ok_or(GpuError::UnknownId("texture"))?;
         let create_info = vk::FramebufferCreateInfo::default()
@@ -1935,7 +1942,7 @@ fn ownership_barrier(
         .src_queue_family_index(from)
         .dst_queue_family_index(to)
         .image(texture.image.image())
-        .subresource_range(whole_range(texture.aspect))
+        .subresource_range(levels(texture.aspect, 0, texture.mip_levels))
 }
 
 /// Records a barrier between all memory accesses of `stages`.
@@ -2082,6 +2089,7 @@ impl Gpu for VulkanGpu {
     }
 
     fn create_texture(&mut self, desc: &TextureDesc<'_>) -> Result<TextureId, GpuError> {
+        let mip_levels = validation::check_mips(desc)?;
         let format = desc.format;
         let vk_format = self.vk_format(format);
         let aspect = aspect(format);
@@ -2107,6 +2115,13 @@ impl Gpu for VulkanGpu {
         if usage.copy_src {
             vk_usage |= vk::ImageUsageFlags::TRANSFER_SRC;
         }
+        if desc.mipmapped {
+            // Each level is blitted from the one before.
+            vk_usage |= vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST;
+            features |= vk::FormatFeatureFlags::BLIT_SRC
+                | vk::FormatFeatureFlags::BLIT_DST
+                | vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_LINEAR;
+        }
         if vk_usage.is_empty() {
             return Err(GpuError::Invalid(format!("{}: a texture without a usage", desc.label)));
         }
@@ -2116,7 +2131,7 @@ impl Gpu for VulkanGpu {
             shared.instance().get_physical_device_format_properties(shared.physical_device(), vk_format)
         };
         if !properties.optimal_tiling_features.contains(features) {
-            return Err(GpuError::Unsupported(format!("{format:?} textures for {usage:?}")));
+            return Err(GpuError::Unsupported(format!("{format:?} textures for {usage:?}, {mip_levels} levels")));
         }
         let max = self.caps.max_texture_size;
         let size = desc.size;
@@ -2128,7 +2143,7 @@ impl Gpu for VulkanGpu {
             .image_type(vk::ImageType::TYPE_2D)
             .format(vk_format)
             .extent(vk::Extent3D { width: size.width, height: size.height, depth: 1 })
-            .mip_levels(1)
+            .mip_levels(mip_levels)
             .array_layers(1)
             .samples(vk::SampleCountFlags::TYPE_1)
             .tiling(vk::ImageTiling::OPTIMAL)
@@ -2155,7 +2170,7 @@ impl Gpu for VulkanGpu {
         } else {
             vk::ComponentMapping::default()
         };
-        if !image.create_view(self.vk(), vk_format, components, aspect, 1) {
+        if !image.create_view(self.vk(), vk_format, components, aspect, mip_levels) {
             image.destroy(self.device.shared.device(), &mut self.allocator);
             return Err(GpuError::Invalid(format!("{}: Vulkan couldn't make the texture's view", desc.label)));
         }
@@ -2173,7 +2188,7 @@ impl Gpu for VulkanGpu {
             self.device.shared.device(),
             uploads,
             image.image(),
-            whole_range(aspect),
+            levels(aspect, 0, mip_levels),
             (vk::ImageLayout::UNDEFINED, layout),
             (vk::AccessFlags::empty(), vk::AccessFlags::MEMORY_READ | vk::AccessFlags::MEMORY_WRITE),
             (vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::ALL_COMMANDS),
@@ -2185,6 +2200,8 @@ impl Gpu for VulkanGpu {
             size,
             usage,
             aspect,
+            mipmapped: desc.mipmapped,
+            mip_levels,
             layout,
             release_to: None,
             released: false,
@@ -2218,7 +2235,7 @@ impl Gpu for VulkanGpu {
         unsafe { std::ptr::copy_nonoverlapping(data.as_ptr(), staging.mapped_buffer(), data.len()) };
 
         let device = self.device.shared.device();
-        let range = whole_range(aspect);
+        let range = levels(aspect, 0, 1);
         transition_image(
             device,
             uploads,
@@ -2261,6 +2278,122 @@ impl Gpu for VulkanGpu {
         Ok(())
     }
 
+    /// Blits each level from the one before, in the frame's commands.
+    fn generate_mipmaps(&mut self, texture: TextureId) -> Result<(), GpuError> {
+        if self.pass.is_some() {
+            return Err(open_pass("generating mips"));
+        }
+        let entry = self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?;
+        if !entry.mipmapped {
+            return Err(GpuError::Invalid("generating the mips of a texture without them".to_owned()));
+        }
+        let (image, layout, size, count) = (entry.image.image(), entry.layout, entry.size, entry.mip_levels);
+        if count == 1 {
+            return Ok(());
+        }
+        let frame = self.frame()?;
+        let device = self.device.shared.device();
+        let color = vk::ImageAspectFlags::COLOR;
+        let barrier = |range, (old, new), (src, dst)| {
+            vk::ImageMemoryBarrier::default()
+                .image(image)
+                .old_layout(old)
+                .new_layout(new)
+                .src_access_mask(src)
+                .dst_access_mask(dst)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .subresource_range(range)
+        };
+        let shader_stages = vk::PipelineStageFlags::VERTEX_SHADER | vk::PipelineStageFlags::FRAGMENT_SHADER;
+        let transfer = vk::PipelineStageFlags::TRANSFER;
+        let extent = |level: u32| {
+            let offset = |length: u32| (length >> level).max(1) as i32;
+            [vk::Offset3D::default(), vk::Offset3D { x: offset(size.width), y: offset(size.height), z: 1 }]
+        };
+        let layers = |mip_level| vk::ImageSubresourceLayers {
+            aspect_mask: color,
+            mip_level,
+            base_array_layer: 0,
+            layer_count: 1,
+        };
+        // SAFETY: the command buffer is recording outside a render pass,
+        // the image is in `layout` at every level until the first barrier,
+        // and each blit reads a level in the source layout that the blit
+        // before wrote.
+        unsafe {
+            // After the passes that drew level 0 and the shaders that read
+            // any level, level 0 is the first blit's source and the others
+            // its destinations.
+            device.cmd_pipeline_barrier(
+                frame,
+                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT | shader_stages | transfer,
+                transfer,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[
+                    barrier(
+                        levels(color, 0, 1),
+                        (layout, vk::ImageLayout::TRANSFER_SRC_OPTIMAL),
+                        (
+                            vk::AccessFlags::COLOR_ATTACHMENT_WRITE | vk::AccessFlags::TRANSFER_WRITE,
+                            vk::AccessFlags::TRANSFER_READ,
+                        ),
+                    ),
+                    barrier(
+                        levels(color, 1, count - 1),
+                        (layout, vk::ImageLayout::TRANSFER_DST_OPTIMAL),
+                        (vk::AccessFlags::empty(), vk::AccessFlags::TRANSFER_WRITE),
+                    ),
+                ],
+            );
+            for level in 1..count {
+                let blit = vk::ImageBlit::default()
+                    .src_subresource(layers(level - 1))
+                    .src_offsets(extent(level - 1))
+                    .dst_subresource(layers(level))
+                    .dst_offsets(extent(level));
+                device.cmd_blit_image(
+                    frame,
+                    image,
+                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                    image,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    &[blit],
+                    vk::Filter::LINEAR,
+                );
+                device.cmd_pipeline_barrier(
+                    frame,
+                    transfer,
+                    transfer,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &[barrier(
+                        levels(color, level, 1),
+                        (vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::TRANSFER_SRC_OPTIMAL),
+                        (vk::AccessFlags::TRANSFER_WRITE, vk::AccessFlags::TRANSFER_READ),
+                    )],
+                );
+            }
+            device.cmd_pipeline_barrier(
+                frame,
+                transfer,
+                shader_stages,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[barrier(
+                    levels(color, 0, count),
+                    (vk::ImageLayout::TRANSFER_SRC_OPTIMAL, layout),
+                    (vk::AccessFlags::TRANSFER_WRITE, vk::AccessFlags::SHADER_READ),
+                )],
+            );
+        }
+        Ok(())
+    }
+
     fn create_sampler(&mut self, state: &SamplerState) -> Result<SamplerId, GpuError> {
         let filter = match state.filter {
             TextureFilterType::Linear => vk::Filter::LINEAR,
@@ -2278,10 +2411,12 @@ impl Gpu for VulkanGpu {
             .address_mode_v(address_mode(state.wrap_v))
             .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
             .min_lod(0.0)
-            .max_lod(0.0);
-        if state.max_anisotropy > 1 && self.device.shared.enabled_features().sampler_anisotropy == vk::TRUE {
+            // Without mips, level 0 only.
+            .max_lod(if state.mipmapped { vk::LOD_CLAMP_NONE } else { 0.0 });
+        let anisotropy = state.anisotropy();
+        if anisotropy > 1 && self.device.shared.enabled_features().sampler_anisotropy == vk::TRUE {
             let max = self.device.shared.properties().limits.max_sampler_anisotropy;
-            create_info = create_info.anisotropy_enable(true).max_anisotropy(max.min(f32::from(state.max_anisotropy)));
+            create_info = create_info.anisotropy_enable(true).max_anisotropy(max.min(f32::from(anisotropy)));
         }
         // SAFETY: the create info is valid for the device.
         let sampler = unsafe { self.vk().create_sampler(&create_info, None) }.map_err(vk_error("sampler"))?;
@@ -2635,7 +2770,7 @@ impl Gpu for VulkanGpu {
         )
         .ok_or_else(|| GpuError::Invalid("Vulkan couldn't make a readback buffer".to_owned()))?;
         let device = self.device.shared.device();
-        let range = whole_range(vk::ImageAspectFlags::COLOR);
+        let range = levels(vk::ImageAspectFlags::COLOR, 0, 1);
         transition_image(
             device,
             frame,

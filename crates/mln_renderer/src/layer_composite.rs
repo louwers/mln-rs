@@ -137,7 +137,7 @@ struct Texture {
 impl Texture {
     fn new(gpu: &mut dyn Gpu, context: &mut Context, size: Size, format: TextureFormat) -> Result<Texture, GpuError> {
         let usage = TextureUsage { sampled: true, render_target: true, copy_src: true };
-        let desc = TextureDesc { label: "render target", size, format, usage };
+        let desc = TextureDesc { label: "render target", size, format, usage, mipmapped: false };
         let bytes = size.width as usize * size.height as usize * format.bytes_per_texel().unwrap_or(4) as usize;
         let texture = context.device().texture(gpu, &desc, Some(bytes))?;
         Ok(Texture { texture, sampler: context.sampler(gpu, SamplerState::default())? })

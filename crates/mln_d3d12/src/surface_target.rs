@@ -364,6 +364,7 @@ impl SurfaceTarget {
             size,
             format: DEPTH_STENCIL,
             usage: TextureUsage { render_target: true, ..TextureUsage::default() },
+            mipmapped: false,
         };
         let depth_stencil = match gpu.create_texture(&desc) {
             Ok(texture) => texture,

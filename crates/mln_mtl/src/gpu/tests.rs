@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use mln_gfx::gpu::conformance::{
     clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, imported_textures,
-    instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, terrain_heights, topologies,
-    transparent_replace, vertex_layouts, written_vertex_texels,
+    instanced_walls, invalid_calls, mipmapped_targets, pulled_walls, readbacks, resources_in_use, terrain_heights,
+    topologies, transparent_replace, vertex_layouts, written_vertex_texels,
 };
 use mln_gfx::gpu::{BufferUsage, ColorAttachment};
 use mln_gfx::shaders::programs;
@@ -79,6 +79,12 @@ fn drawn_vertex_texels_through_gpu() {
 fn terrain_heights_through_gpu() {
     let device = Device::new(None).expect("Metal device");
     terrain_heights(&mut MetalGpu::new(&device)).expect("the frames");
+}
+
+#[test]
+fn mipmapped_targets_through_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    mipmapped_targets(&mut MetalGpu::new(&device)).expect("the frames");
 }
 
 #[test]
@@ -161,6 +167,7 @@ fn a_destroyed_buffer_stays_for_the_flushes_before() {
             size: Size { width: 4, height: 4 },
             format: TextureFormat::Rgba8Unorm,
             usage: TextureUsage { render_target: true, ..Default::default() },
+            mipmapped: false,
         })
         .unwrap();
     let pass = PassDesc {
@@ -263,6 +270,7 @@ fn flushes_wait_for_and_signal_events() {
             size: Size { width: 4, height: 4 },
             format: TextureFormat::Rgba8Unorm,
             usage: TextureUsage { render_target: true, ..Default::default() },
+            mipmapped: false,
         })
         .unwrap();
     let pass = PassDesc {

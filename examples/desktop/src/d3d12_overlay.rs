@@ -462,6 +462,7 @@ impl Painter {
             size,
             format: TextureFormat::Rgba8Unorm,
             usage: TextureUsage { sampled: true, ..TextureUsage::default() },
+            mipmapped: false,
         });
         let texture = match texture.and_then(|texture| {
             gpu.write_texture(texture, TextureRegion::whole(size), &pixels).map(|()| texture).inspect_err(|_| {

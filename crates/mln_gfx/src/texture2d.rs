@@ -5,12 +5,19 @@ use crate::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, 
 
 pub const MAX_ACTIVE_TEXTURE_UNITS: i32 = 8;
 
+/// How a sampler reads a texture.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SamplerState {
+    /// How it filters within a mip level.
     pub filter: TextureFilterType,
     pub wrap_u: TextureWrapType,
     pub wrap_v: TextureWrapType,
+    /// The most samples that a `Linear`, `mipmapped` sampler takes along
+    /// the longer axis of a pixel's footprint, up to what the device
+    /// allows: 1 filters isotropically. Other samplers ignore it.
     pub max_anisotropy: u8,
+    /// Whether it blends the two mip levels nearest a pixel's footprint, of
+    /// a texture with mips. Without, it reads level 0 only.
     pub mipmapped: bool,
 }
 
@@ -23,6 +30,16 @@ impl Default for SamplerState {
             max_anisotropy: 1,
             mipmapped: false,
         }
+    }
+}
+
+impl SamplerState {
+    /// The anisotropy it filters with, as
+    /// [`max_anisotropy`](Self::max_anisotropy) says: at least 1, and 1
+    /// unless the sampler is `Linear` and `mipmapped`.
+    #[must_use]
+    pub fn anisotropy(&self) -> u8 {
+        if self.filter == TextureFilterType::Linear && self.mipmapped { self.max_anisotropy.max(1) } else { 1 }
     }
 }
 

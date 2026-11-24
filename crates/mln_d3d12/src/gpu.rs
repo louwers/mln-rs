@@ -24,32 +24,35 @@ use mln_glsl::{BUILT_INS, ShaderSource, TextureInfo as ShaderTexture};
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::size::Size;
 use windows::Win32::Foundation::{HANDLE, RECT};
-use windows::Win32::Graphics::Direct3D::D3D_PRIMITIVE_TOPOLOGY;
+use windows::Win32::Graphics::Direct3D::{D3D_PRIMITIVE_TOPOLOGY, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST};
 use windows::Win32::Graphics::Direct3D12::{
     D3D12_BOX, D3D12_CLEAR_FLAG_DEPTH, D3D12_CLEAR_FLAG_STENCIL, D3D12_CLEAR_VALUE, D3D12_CLEAR_VALUE_0,
     D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT, D3D12_CPU_DESCRIPTOR_HANDLE,
-    D3D12_DEPTH_STENCIL_VALUE, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_DESCRIPTOR_HEAP_TYPE_DSV,
-    D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_FENCE_FLAG_NONE, D3D12_GRAPHICS_PIPELINE_STATE_DESC,
-    D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED, D3D12_INDEX_BUFFER_VIEW, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA,
-    D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, D3D12_INPUT_ELEMENT_DESC, D3D12_INPUT_LAYOUT_DESC,
-    D3D12_PLACED_SUBRESOURCE_FOOTPRINT, D3D12_PRIMITIVE_TOPOLOGY_TYPE, D3D12_RANGE, D3D12_RENDER_PASS_BEGINNING_ACCESS,
-    D3D12_RENDER_PASS_BEGINNING_ACCESS_0, D3D12_RENDER_PASS_BEGINNING_ACCESS_CLEAR_PARAMETERS,
-    D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_CLEAR, D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS,
-    D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_PRESERVE, D3D12_RENDER_PASS_DEPTH_STENCIL_DESC,
-    D3D12_RENDER_PASS_ENDING_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS,
-    D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE, D3D12_RENDER_PASS_FLAG_NONE, D3D12_RENDER_PASS_RENDER_TARGET_DESC,
-    D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION, D3D12_RESOURCE_BARRIER, D3D12_RESOURCE_BARRIER_0,
-    D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_BARRIER_FLAG_NONE, D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-    D3D12_RESOURCE_DESC, D3D12_RESOURCE_DIMENSION_TEXTURE2D, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,
-    D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET, D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE, D3D12_RESOURCE_FLAG_NONE,
-    D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST,
-    D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_RENDER_TARGET,
-    D3D12_RESOURCE_STATES, D3D12_RESOURCE_TRANSITION_BARRIER, D3D12_SHADER_BYTECODE, D3D12_SUBRESOURCE_FOOTPRINT,
-    D3D12_TEXTURE_COPY_LOCATION, D3D12_TEXTURE_COPY_LOCATION_0, D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT,
-    D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT,
-    D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT, D3D12_TEXTURE_LAYOUT_UNKNOWN, D3D12_VERTEX_BUFFER_VIEW, D3D12_VIEWPORT,
-    ID3D12CommandAllocator, ID3D12Fence, ID3D12GraphicsCommandList, ID3D12GraphicsCommandList4, ID3D12PipelineState,
-    ID3D12Resource,
+    D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING, D3D12_DEPTH_STENCIL_VALUE, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+    D3D12_DESCRIPTOR_HEAP_TYPE_DSV, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_FENCE_FLAG_NONE,
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC, D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED, D3D12_INDEX_BUFFER_VIEW,
+    D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, D3D12_INPUT_ELEMENT_DESC,
+    D3D12_INPUT_LAYOUT_DESC, D3D12_PLACED_SUBRESOURCE_FOOTPRINT, D3D12_PRIMITIVE_TOPOLOGY_TYPE, D3D12_RANGE,
+    D3D12_RENDER_PASS_BEGINNING_ACCESS, D3D12_RENDER_PASS_BEGINNING_ACCESS_0,
+    D3D12_RENDER_PASS_BEGINNING_ACCESS_CLEAR_PARAMETERS, D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_CLEAR,
+    D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_BEGINNING_ACCESS_TYPE_PRESERVE,
+    D3D12_RENDER_PASS_DEPTH_STENCIL_DESC, D3D12_RENDER_PASS_ENDING_ACCESS,
+    D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_NO_ACCESS, D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE,
+    D3D12_RENDER_PASS_FLAG_NONE, D3D12_RENDER_PASS_RENDER_TARGET_DESC, D3D12_RENDER_TARGET_VIEW_DESC,
+    D3D12_RENDER_TARGET_VIEW_DESC_0, D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION, D3D12_RESOURCE_BARRIER,
+    D3D12_RESOURCE_BARRIER_0, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_BARRIER_FLAG_NONE,
+    D3D12_RESOURCE_BARRIER_TYPE_TRANSITION, D3D12_RESOURCE_DESC, D3D12_RESOURCE_DIMENSION_TEXTURE2D,
+    D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET,
+    D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE,
+    D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_SOURCE,
+    D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATES,
+    D3D12_RESOURCE_TRANSITION_BARRIER, D3D12_RTV_DIMENSION_TEXTURE2D, D3D12_SHADER_BYTECODE,
+    D3D12_SHADER_RESOURCE_VIEW_DESC, D3D12_SHADER_RESOURCE_VIEW_DESC_0, D3D12_SRV_DIMENSION_TEXTURE2D,
+    D3D12_SUBRESOURCE_FOOTPRINT, D3D12_TEX2D_RTV, D3D12_TEX2D_SRV, D3D12_TEXTURE_COPY_LOCATION,
+    D3D12_TEXTURE_COPY_LOCATION_0, D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT, D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+    D3D12_TEXTURE_DATA_PITCH_ALIGNMENT, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT, D3D12_TEXTURE_LAYOUT_UNKNOWN,
+    D3D12_VERTEX_BUFFER_VIEW, D3D12_VIEWPORT, ID3D12CommandAllocator, ID3D12Fence, ID3D12GraphicsCommandList,
+    ID3D12GraphicsCommandList4, ID3D12PipelineState, ID3D12Resource,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT, DXGI_FORMAT_R16_UINT, DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC,
@@ -58,6 +61,7 @@ use windows::core::{Interface, s};
 
 use crate::heaps::{CpuDescriptors, CpuSlot, SamplerHeap, TABLE_SIZE, TableHeap};
 use crate::memory::{BufferMemory, Memory, NO_RANGE, TextureMemory};
+use crate::mipmaps::Mipmapper;
 use crate::root_signature::{
     self, ROOT_CONSTANTS, SAMPLER_INDICES, SAMPLER_TABLE, SPECIAL_CONSTANTS, TEXTURE_TABLE, View,
 };
@@ -114,6 +118,11 @@ struct Texture {
     srv: Option<CpuSlot>,
     rtv: Option<CpuSlot>,
     dsv: Option<CpuSlot>,
+    mipmapped: bool,
+    /// Of a texture with mips, for each level after the first, the shader
+    /// resource view of the level before and the render target view of the
+    /// level, which draw it.
+    mips: Vec<(CpuSlot, CpuSlot)>,
 }
 
 /// A compiled program, what it reads from its bindings, and where.
@@ -291,6 +300,8 @@ pub struct D3d12Gpu {
     /// What the live pipelines, bindings and geometry were made of.
     dependents: validation::Dependents,
     readbacks: SlotMap<ReadbackId, Readback>,
+    /// What draws mips, made for the first texture whose mips are made.
+    mipmapper: Option<Mipmapper>,
     /// The memory of the last readback taken, which the next readback of
     /// its size copies into, as a frame read back each time is.
     spare_readback: Option<BufferMemory>,
@@ -327,6 +338,16 @@ fn transition(
     before: D3D12_RESOURCE_STATES,
     after: D3D12_RESOURCE_STATES,
 ) -> D3D12_RESOURCE_BARRIER {
+    transition_subresource(resource, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, before, after)
+}
+
+/// A transition of `subresource` of `resource` from `before` to `after`.
+fn transition_subresource(
+    resource: &ID3D12Resource,
+    subresource: u32,
+    before: D3D12_RESOURCE_STATES,
+    after: D3D12_RESOURCE_STATES,
+) -> D3D12_RESOURCE_BARRIER {
     D3D12_RESOURCE_BARRIER {
         Type: D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
         Flags: D3D12_RESOURCE_BARRIER_FLAG_NONE,
@@ -335,7 +356,7 @@ fn transition(
                 // SAFETY: a copy of the pointer without a reference, which
                 // the barrier's ManuallyDrop never releases.
                 pResource: unsafe { std::mem::transmute_copy(resource) },
-                Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                Subresource: subresource,
                 StateBefore: before,
                 StateAfter: after,
             }),
@@ -471,6 +492,7 @@ impl D3d12Gpu {
             geometries: SlotMap::with_key(),
             dependents: validation::Dependents::default(),
             readbacks: SlotMap::with_key(),
+            mipmapper: None,
             spare_readback: None,
             copies: None,
             frame: None,
@@ -518,7 +540,7 @@ impl D3d12Gpu {
         };
         let size = Size::new(desc.Width as u32, desc.Height);
         let memory = TextureMemory::imported(resource.clone());
-        self.insert_texture(memory, desc.Format, TextureInfo { format, size, usage }, state)
+        self.insert_texture(memory, desc.Format, TextureInfo { format, size, usage }, state, false)
     }
 
     /// Each window of the uniform or storage buffer `buffer`.
@@ -611,8 +633,10 @@ impl D3d12Gpu {
         format: DXGI_FORMAT,
         info: TextureInfo,
         rest: D3D12_RESOURCE_STATES,
+        mipmapped: bool,
     ) -> Result<TextureId, GpuError> {
-        let mut texture = Texture { memory, info, format, rest, srv: None, rtv: None, dsv: None };
+        let mut texture =
+            Texture { memory, info, format, rest, srv: None, rtv: None, dsv: None, mipmapped, mips: Vec::new() };
         if let Err(error) = self.make_views(&mut texture) {
             self.free(Garbage::Texture(texture));
             return Err(error);
@@ -642,6 +666,40 @@ impl D3d12Gpu {
                 device.CreateRenderTargetView(resource, None, slot.handle);
                 texture.rtv = Some(slot);
             }
+            if texture.mipmapped {
+                for level in 1..u32::from(resource.GetDesc().MipLevels) {
+                    let srv_desc = D3D12_SHADER_RESOURCE_VIEW_DESC {
+                        Format: texture.format,
+                        ViewDimension: D3D12_SRV_DIMENSION_TEXTURE2D,
+                        Shader4ComponentMapping: D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                        Anonymous: D3D12_SHADER_RESOURCE_VIEW_DESC_0 {
+                            Texture2D: D3D12_TEX2D_SRV {
+                                MostDetailedMip: level - 1,
+                                MipLevels: 1,
+                                ..Default::default()
+                            },
+                        },
+                    };
+                    let rtv_desc = D3D12_RENDER_TARGET_VIEW_DESC {
+                        Format: texture.format,
+                        ViewDimension: D3D12_RTV_DIMENSION_TEXTURE2D,
+                        Anonymous: D3D12_RENDER_TARGET_VIEW_DESC_0 {
+                            Texture2D: D3D12_TEX2D_RTV { MipSlice: level, PlaneSlice: 0 },
+                        },
+                    };
+                    let srv = self.srv_heap.allocate(device)?;
+                    let rtv = match self.rtv_heap.allocate(device) {
+                        Ok(rtv) => rtv,
+                        Err(error) => {
+                            self.srv_heap.free(srv);
+                            return Err(error);
+                        }
+                    };
+                    device.CreateShaderResourceView(resource, Some(&raw const srv_desc), srv.handle);
+                    device.CreateRenderTargetView(resource, Some(&raw const rtv_desc), rtv.handle);
+                    texture.mips.push((srv, rtv));
+                }
+            }
         }
         Ok(())
     }
@@ -660,6 +718,9 @@ impl D3d12Gpu {
         unsafe {
             if rest != target {
                 list.ResourceBarrier(&[transition(resource, rest, target)]);
+            }
+            for &(_, rtv) in &entry.mips {
+                list.ClearRenderTargetView(rtv.handle, &[0.0; 4], None);
             }
             match (entry.rtv, entry.dsv) {
                 (Some(rtv), _) => list.ClearRenderTargetView(rtv.handle, &[0.0; 4], None),
@@ -877,6 +938,10 @@ impl D3d12Gpu {
                         heap.free(slot);
                     }
                 }
+                for (srv, rtv) in texture.mips {
+                    self.srv_heap.free(srv);
+                    self.rtv_heap.free(rtv);
+                }
                 self.memory.free_texture(texture.memory);
             }
             Garbage::Table(table) => self.tables.free(table),
@@ -1000,6 +1065,7 @@ impl Gpu for D3d12Gpu {
         if width == 0 || height == 0 || width > MAX_TEXTURE_SIZE || height > MAX_TEXTURE_SIZE {
             return Err(GpuError::Invalid(format!("a texture of {width}x{height}")));
         }
+        let mip_levels = validation::check_mips(desc)?;
         let format = conv::texture_format(desc.format);
         let depth = conv::is_depth(desc.format);
         let mut flags = D3D12_RESOURCE_FLAG_NONE;
@@ -1016,7 +1082,7 @@ impl Gpu for D3d12Gpu {
             Width: u64::from(width),
             Height: height,
             DepthOrArraySize: 1,
-            MipLevels: 1,
+            MipLevels: mip_levels as u16,
             Format: format,
             SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
             Layout: D3D12_TEXTURE_LAYOUT_UNKNOWN,
@@ -1026,7 +1092,7 @@ impl Gpu for D3d12Gpu {
         let rest = rest_state(info.format, desc.usage);
         let bytes = u64::from(width) * u64::from(height) * u64::from(desc.format.bytes_per_texel().unwrap_or(8));
         let memory = self.memory.texture(self.device.device(), &resource_desc, bytes, rest)?;
-        let id = self.insert_texture(memory, format, info, rest)?;
+        let id = self.insert_texture(memory, format, info, rest, desc.mipmapped)?;
         if desc.usage.render_target
             && let Err(error) = self.clear_new_target(id, depth)
         {
@@ -1095,6 +1161,73 @@ impl Gpu for D3d12Gpu {
             list.CopyTextureRegion(&raw const dst, region.x, region.y, 0, &raw const src, None);
             list.ResourceBarrier(&[transition(resource, D3D12_RESOURCE_STATE_COPY_DEST, rest)]);
         }
+        Ok(())
+    }
+
+    /// Draws each level from the one before, in the frame's commands.
+    fn generate_mipmaps(&mut self, texture: TextureId) -> Result<(), GpuError> {
+        if self.pass.is_some() {
+            return Err(Self::open_pass("generating mips"));
+        }
+        let entry = self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?;
+        if !entry.mipmapped {
+            return Err(GpuError::Invalid("generating the mips of a texture without them".to_owned()));
+        }
+        if entry.mips.is_empty() {
+            return Ok(());
+        }
+        if self.mipmapper.is_none() {
+            self.mipmapper = Some(Mipmapper::new(self.device.device(), &self.compiler)?);
+        }
+        let list = self.frame_list()?;
+        let entry = self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?;
+        let (resource, rest, size) = (&entry.memory.resource, entry.rest, entry.info.size);
+        let device = self.device.device();
+        let mipmapper = self.mipmapper.as_mut().ok_or(GpuError::UnknownId("mipmapper"))?;
+        let pipeline = mipmapper.pipeline(device, entry.format)?.clone();
+        let mut tables = Vec::with_capacity(entry.mips.len());
+        for &(srv, _) in &entry.mips {
+            let mut views = [None; TABLE_SIZE as usize];
+            views[0] = Some(srv.handle);
+            match self.tables.allocate(device, &views) {
+                Ok(table) => tables.push(table),
+                Err(error) => {
+                    for table in tables {
+                        self.tables.free(table);
+                    }
+                    return Err(error);
+                }
+            }
+        }
+        // SAFETY: the texture and the tables live until the work finishes,
+        // as destroying them waits for it, and the barriers return each
+        // level that a draw draws into to the texture's rest.
+        unsafe {
+            list.SetGraphicsRootSignature(&mipmapper.root_signature);
+            list.SetPipelineState(&pipeline);
+            list.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            for ((level, &(_, rtv)), &table) in (1u32..).zip(&entry.mips).zip(&tables) {
+                let (width, height) = ((size.width >> level).max(1), (size.height >> level).max(1));
+                let target = D3D12_RESOURCE_STATE_RENDER_TARGET;
+                list.ResourceBarrier(&[transition_subresource(resource, level, rest, target)]);
+                list.SetGraphicsRootDescriptorTable(0, self.tables.gpu(table));
+                list.OMSetRenderTargets(1, Some(&raw const rtv.handle), false, None);
+                list.RSSetViewports(&[D3D12_VIEWPORT {
+                    TopLeftX: 0.0,
+                    TopLeftY: 0.0,
+                    Width: width as f32,
+                    Height: height as f32,
+                    MinDepth: 0.0,
+                    MaxDepth: 1.0,
+                }]);
+                list.RSSetScissorRects(&[RECT { left: 0, top: 0, right: width as i32, bottom: height as i32 }]);
+                list.DrawInstanced(3, 1, 0, 0);
+                list.ResourceBarrier(&[transition_subresource(resource, level, target, rest)]);
+            }
+        }
+        self.bind_root(&list);
+        let serial = self.serial;
+        self.garbage.extend(tables.into_iter().map(|table| (serial, Garbage::Table(table))));
         Ok(())
     }
 

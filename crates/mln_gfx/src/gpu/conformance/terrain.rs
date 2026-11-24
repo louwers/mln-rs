@@ -218,6 +218,7 @@ fn probe(
         size,
         format: TextureFormat::Rgba8Unorm,
         usage: TextureUsage { render_target: true, copy_src: true, ..TextureUsage::default() },
+        mipmapped: false,
     })?;
     let side = dem.side();
     let texture = gpu.create_texture(&TextureDesc {
@@ -225,6 +226,7 @@ fn probe(
         size: Size::new(side, side),
         format: TextureFormat::Rgba8Unorm,
         usage: TextureUsage { sampled: true, ..TextureUsage::default() },
+        mipmapped: false,
     })?;
     gpu.write_texture(texture, TextureRegion::whole(Size::new(side, side)), &dem.texels)?;
     let sampler = gpu.create_sampler(&SamplerState::default())?;

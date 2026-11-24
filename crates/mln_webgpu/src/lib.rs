@@ -14,6 +14,7 @@ mod custom_layer;
 mod device;
 mod gpu;
 mod index_table;
+mod mipmaps;
 mod renderer_backend;
 mod shaders;
 mod surface_target;

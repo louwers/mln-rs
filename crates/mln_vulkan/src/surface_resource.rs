@@ -362,6 +362,7 @@ impl SurfaceResource {
                 size,
                 format: DEPTH_STENCIL,
                 usage: TextureUsage { sampled: false, render_target: true, copy_src: false },
+                mipmapped: false,
             })
             .map_err(|error| format!("Vulkan depth texture allocation failed: {error}"))?;
         state.depth_stencil = Some(depth_stencil);

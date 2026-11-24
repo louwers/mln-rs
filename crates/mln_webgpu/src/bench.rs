@@ -374,6 +374,34 @@ impl Queries {
         })
     }
 
+    /// [`timestamp_writes`](Self::timestamp_writes) for a compute pass,
+    /// which [`begin_compute`](Self::begin_compute) counts.
+    pub(crate) fn compute_timestamp_writes(&self) -> Option<wgpu::ComputePassTimestampWrites<'_>> {
+        self.timestamp_writes().map(|writes| wgpu::ComputePassTimestampWrites {
+            query_set: writes.query_set,
+            beginning_of_pass_write_index: writes.beginning_of_pass_write_index,
+            end_of_pass_write_index: writes.end_of_pass_write_index,
+        })
+    }
+
+    /// [`begin`](Self::begin) for a compute pass, whose statistics count no
+    /// vertex, primitive or fragment; [`end_compute`](Self::end_compute)
+    /// stops them.
+    pub(crate) fn begin_compute(&mut self, pass: &mut wgpu::ComputePass<'_>) -> bool {
+        if self.used == QUERIES {
+            return false;
+        }
+        if let Some(set) = &self.statistics {
+            pass.begin_pipeline_statistics_query(set, self.used);
+        }
+        self.used += 1;
+        self.statistics.is_some()
+    }
+
+    pub(crate) fn end_compute(pass: &mut wgpu::ComputePass<'_>) {
+        pass.end_pipeline_statistics_query();
+    }
+
     /// Counts `pass`, begun with [`timestamp_writes`](Self::timestamp_writes),
     /// and starts counting its pipeline statistics, which
     /// [`end`](Self::end) stops. Returns whether it does: where the device

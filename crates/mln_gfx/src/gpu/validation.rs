@@ -5,9 +5,10 @@
 //! `create_geometry`, with what it knows of the resources they name, and
 //! keeps what they return. A draw then needs only [`check_draw`]'s
 //! comparisons of what the pipeline, bindings and geometry it names were
-//! made for. [`check_pass`] checks a pass's attachments in `begin_pass`,
-//! [`check_readback`] a readback in `read_texture`, and [`check_write`] a
-//! write in `write_buffer`. [`Dependents`] keeps what pipelines, bindings
+//! made for. [`check_mips`] checks a texture's mips in `create_texture`,
+//! [`check_pass`] a pass's attachments in `begin_pass`, [`check_readback`]
+//! a readback in `read_texture`, and [`check_write`] a write in
+//! `write_buffer`. [`Dependents`] keeps what pipelines, bindings
 //! and geometry are made of, which `destroy` checks.
 
 use mln_util::hash::HashMap;
@@ -15,8 +16,8 @@ use mln_util::size::Size;
 
 use super::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferId, BufferUsage, Draw, GeometryDesc, GeometryId, GpuError,
-    PassDesc, PipelineId, ResourceId, SamplerId, ShaderId, TargetFormats, TextureFormat, TextureId, TextureRegion,
-    TextureUsage, VertexBufferLayout, VertexStep,
+    PassDesc, PipelineId, ResourceId, SamplerId, ShaderId, TargetFormats, TextureDesc, TextureFormat, TextureId,
+    TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
 };
 
 /// What the checks read of a buffer.
@@ -467,6 +468,25 @@ pub fn check_pass(
     }
     let size = size.ok_or_else(|| GpuError::Invalid(format!("{label}: a pass without attachments")))?;
     Ok(PassTarget { size, targets: known.then_some(targets) })
+}
+
+/// Checks that `desc`, if [`mipmapped`](TextureDesc::mipmapped), is of a
+/// [`sampled`](TextureUsage::sampled) render target of a
+/// [`mipmappable`](TextureFormat::mipmappable) format, as making its mips
+/// takes; fails with [`GpuError::Unsupported`] for another format. Returns
+/// its number of mip levels.
+pub fn check_mips(desc: &TextureDesc<'_>) -> Result<u32, GpuError> {
+    if !desc.mipmapped {
+        return Ok(1);
+    }
+    let label = desc.label;
+    if !desc.usage.sampled || !desc.usage.render_target {
+        return Err(GpuError::Invalid(format!("{label}: mips of a texture that isn't a sampled render target")));
+    }
+    if !desc.format.mipmappable() {
+        return Err(GpuError::Unsupported(format!("{label}: mips of a {:?} texture", desc.format)));
+    }
+    Ok(desc.mip_level_count())
 }
 
 /// A texture that a readback copies out of, and the region it copies.

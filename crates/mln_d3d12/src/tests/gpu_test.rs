@@ -1,7 +1,7 @@
 use mln_gfx::gpu::conformance::{
     clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, imported_textures,
-    instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, terrain_heights, topologies,
-    transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
+    instanced_walls, invalid_calls, mipmapped_targets, pulled_walls, readbacks, resources_in_use, terrain_heights,
+    topologies, transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
 };
 use mln_gfx::gpu::{Gpu as _, GpuError};
 use mln_gfx::projection_variant::ProjectionVariant;
@@ -95,6 +95,11 @@ fn terrain_heights_through_gpu() {
 }
 
 #[test]
+fn mipmapped_targets_through_gpu() {
+    mipmapped_targets(&mut gpu()).expect("the frames");
+}
+
+#[test]
 fn custom_layers_through_gpu() {
     custom_layers(
         &mut gpu(),
@@ -179,7 +184,13 @@ fn a_uniform_buffer_in_reused_memory_starts_zeroed() {
     let size = mln_util::size::Size::new(4, 4);
     let usage = TextureUsage { render_target: true, ..TextureUsage::default() };
     let target = gpu
-        .create_texture(&TextureDesc { label: "target", size, format: TextureFormat::Rgba8Unorm, usage })
+        .create_texture(&TextureDesc {
+            label: "target",
+            size,
+            format: TextureFormat::Rgba8Unorm,
+            usage,
+            mipmapped: false,
+        })
         .expect("a texture");
     let color = Some(ColorAttachment { texture: target, load: LoadOp::Load });
     gpu.begin_pass(&PassDesc { label: "pass", color, depth_stencil: None }).expect("the pass");
@@ -208,7 +219,13 @@ fn small_readbacks_waiting_at_once_read_their_rows() {
     let size = Size::new(4, 4);
     let usage = TextureUsage { sampled: true, copy_src: true, ..TextureUsage::default() };
     let texture = gpu
-        .create_texture(&TextureDesc { label: "rows", size, format: TextureFormat::Rgba8Unorm, usage })
+        .create_texture(&TextureDesc {
+            label: "rows",
+            size,
+            format: TextureFormat::Rgba8Unorm,
+            usage,
+            mipmapped: false,
+        })
         .expect("a texture");
     let texels: Vec<u8> = (0..64).collect();
     gpu.write_texture(texture, TextureRegion::whole(size), &texels).expect("the write");
@@ -232,7 +249,13 @@ fn a_textures_wait_holds_back_only_its_passes() {
     let mut gpu = gpu();
     let texture = |gpu: &mut D3d12Gpu| {
         let usage = TextureUsage { render_target: true, ..TextureUsage::default() };
-        let desc = TextureDesc { label: "target", size: Size::new(4, 4), format: TextureFormat::Rgba8Unorm, usage };
+        let desc = TextureDesc {
+            label: "target",
+            size: Size::new(4, 4),
+            format: TextureFormat::Rgba8Unorm,
+            usage,
+            mipmapped: false,
+        };
         gpu.create_texture(&desc).expect("a texture")
     };
     let (held, free) = (texture(&mut gpu), texture(&mut gpu));

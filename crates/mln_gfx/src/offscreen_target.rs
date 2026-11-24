@@ -61,7 +61,7 @@ impl<G: Gpu + ?Sized> OffscreenTarget<G> {
     fn make_image(gpu: &mut G, size: Size) -> Result<Image, GpuError> {
         let mut texture = |label, format, copy_src| {
             let usage = TextureUsage { render_target: true, copy_src, ..TextureUsage::default() };
-            gpu.create_texture(&TextureDesc { label, size, format, usage })
+            gpu.create_texture(&TextureDesc { label, size, format, usage, mipmapped: false })
         };
         let color = texture("offscreen color", COLOR, true)?;
         match texture("offscreen depth and stencil", DEPTH_STENCIL, false) {
