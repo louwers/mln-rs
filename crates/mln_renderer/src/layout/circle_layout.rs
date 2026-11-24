@@ -131,11 +131,12 @@ impl CircleLayout {
         feature_index: usize,
         canonical: &CanonicalTileID,
     ) {
-        // A continuous map leaves the points outside the tile to the tiles
-        // they're in. The others draw them all, so that circles from a
-        // neighbouring tile aren't clipped at the tile's edge.
+        // A map of many tiles leaves the points outside the tile to the
+        // tiles they're in, so that a circle that several tiles hold in
+        // their buffers draws once. A tile image draws them all, so that
+        // circles from a neighbouring tile aren't cut off at its edge.
         let in_tile = |p: &&Point<i16>| (0..EXTENT).contains(&i32::from(p.x)) && (0..EXTENT).contains(&i32::from(p.y));
-        let points = geometry.iter().flatten().filter(|p| mode != MapMode::Continuous || in_tile(p)).copied();
+        let points = geometry.iter().flatten().filter(|p| mode == MapMode::Tile || in_tile(p)).copied();
         let mut triangles = Indexed { indexes: bucket.triangles.get_mut(), segments: &mut bucket.segments };
         add_point_quads(bucket.vertices.get_mut(), &mut triangles, points, |a1| CircleLayoutVertex { a1 });
 
