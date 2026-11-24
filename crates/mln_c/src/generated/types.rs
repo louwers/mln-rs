@@ -967,9 +967,6 @@ pub const MLN_MAP_DEBUG_COLLISION: mln_map_debug_flag = 16;
 pub const MLN_MAP_DEBUG_OVERDRAW: mln_map_debug_flag = 32;
 pub const MLN_MAP_DEBUG_STENCIL_CLIP: mln_map_debug_flag = 64;
 pub const MLN_MAP_DEBUG_DEPTH_BUFFER: mln_map_debug_flag = 128;
-/** Statistics about the last frames, in the top right corner. The map draws
- them with a layer that it adds to the style, whose text needs the style's
- glyphs.*/
 pub const MLN_MAP_DEBUG_RENDERING_STATS: mln_map_debug_flag = 256;
 /// A debug overlay that the map draws.
 pub type mln_map_debug_flag = u32;
@@ -1591,12 +1588,9 @@ pub struct mln_map_viewport_options {
     /** Whether the camera's center stands on the terrain, in place of the center
  altitude it's given, the style's included. On by default.*/
     pub center_clamped_to_ground: bool,
-    /** Whether drags and zooms on a globe turn the bearing. When it's on, a drag
- or a zoom around a point on the globe turns the bearing so the planet
- keeps its orientation, and a drag can carry the camera over a pole. When
- it's off, the default, they keep the bearing, as MapLibre GL JS does. Turn
- it on for a map whose users can rotate it. It changes nothing while the
- map draws Mercator.*/
+    /** Whether drags and zooms on a globe turn the bearing to keep the planet's
+ orientation, which lets a drag carry the camera over a pole. Off by
+ default.*/
     pub globe_free_bearing: bool,
 }
 /** A map's whole viewport.

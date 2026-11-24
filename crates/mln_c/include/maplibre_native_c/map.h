@@ -111,11 +111,6 @@ typedef enum MLN_BINDING("kind=bitmask") mln_map_debug_flag : uint32_t {
   MLN_MAP_DEBUG_OVERDRAW = 1U << 5U,
   MLN_MAP_DEBUG_STENCIL_CLIP = 1U << 6U,
   MLN_MAP_DEBUG_DEPTH_BUFFER = 1U << 7U,
-  /**
-   * Statistics about the last frames, in the top right corner. The map draws
-   * them with a layer that it adds to the style, whose text needs the style's
-   * glyphs.
-   */
   MLN_MAP_DEBUG_RENDERING_STATS = 1U << 8U,
 } mln_map_debug_flag;
 
@@ -1050,12 +1045,9 @@ typedef struct mln_map_viewport_options {
     "mask=fields;bit=MLN_MAP_VIEWPORT_OPTION_CENTER_CLAMPED_TO_GROUND"
   );
   /**
-   * Whether drags and zooms on a globe turn the bearing. When it's on, a drag
-   * or a zoom around a point on the globe turns the bearing so the planet
-   * keeps its orientation, and a drag can carry the camera over a pole. When
-   * it's off, the default, they keep the bearing, as MapLibre GL JS does. Turn
-   * it on for a map whose users can rotate it. It changes nothing while the
-   * map draws Mercator.
+   * Whether drags and zooms on a globe turn the bearing to keep the planet's
+   * orientation, which lets a drag carry the camera over a pole. Off by
+   * default.
    */
   bool globe_free_bearing
     MLN_BINDING("mask=fields;bit=MLN_MAP_VIEWPORT_OPTION_GLOBE_FREE_BEARING");
