@@ -718,22 +718,24 @@ impl View {
         reach / half_height * (params.fov / 2.0).tan()
     }
 
-    /// The angle from the center of the view, with the padding, to the
-    /// horizon, where the map ends and the sky starts, as in GL JS's
-    /// `calculateNearFarZ`: at high pitch it is below the top of the view.
-    /// The sky measures the horizon from the center of the view without the
-    /// padding, which moves it by the padding's offset up the map.
+    /// The angle from the center of the view, with the padding, up the map
+    /// to the horizon, where the map ends and the sky starts (GL JS's
+    /// `calculateNearFarZ`): at high pitch it is below the top of the view.
+    /// The sky draws the horizon [`mercator_horizon`](Self::mercator_horizon)
+    /// pixels up the map from the center of the view without the padding,
+    /// so the padding's offset up the map moves it, but never past 89.25
+    /// degrees from straight down, nor below the center.
     fn fov_center_to_horizon(&self) -> f64 {
+        let camera_to_center = self.camera_to_center_distance();
         let horizon = self.mercator_horizon();
-        let horizon_angle = (horizon / self.camera_to_center_distance()).atan();
         let min_horizon_angle = PI / 2.0 - max_mercator_horizon_angle();
-        if horizon_angle > min_horizon_angle {
-            let offset = self.center_offset();
-            let offset_up = DVec2::new(-offset.x, offset.y).dot(self.up_the_map());
-            2.0 * horizon_angle * (0.5 + offset_up / (horizon * 2.0))
-        } else {
-            min_horizon_angle
+        if (horizon / camera_to_center).atan() <= min_horizon_angle {
+            return min_horizon_angle;
         }
+        let offset = self.center_offset();
+        let offset_up = DVec2::new(-offset.x, offset.y).dot(self.up_the_map());
+        let farthest = camera_to_center * (max_mercator_horizon_angle() - self.params.pitch).tan();
+        (mln_math::clamp_f64(horizon + offset_up, 0.0, farthest) / camera_to_center).atan()
     }
 
     /// The unit direction up the map in the view, x right and y up, which

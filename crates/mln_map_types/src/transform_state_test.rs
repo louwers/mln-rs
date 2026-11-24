@@ -58,6 +58,38 @@ fn the_map_ends_at_the_horizon() {
     assert!(past.iter().all(|(row, depth)| *row > 0.0 && *depth > 1.0));
 }
 
+/// At high pitch the far plane ends the map at the sky's horizon, which the
+/// sky draws from the middle of the view, so the padding moves it up the
+/// view from the padded center or down: the ground drawn below that row is
+/// nearer than the far plane, and the ground above it is past it. The map
+/// never reaches past 89.25 degrees from straight down, which here stops
+/// top padding short of the sky's horizon, and always reaches its center,
+/// though bottom padding moves the sky's horizon below it. With terrain,
+/// the far plane ends sea-level ground there too.
+#[test]
+fn padding_moves_the_map_s_end_with_the_sky_s_horizon() {
+    use mln_util::geo::EdgeInsets;
+
+    for (top, bottom) in [(0.0, 40.0), (0.0, 80.0), (0.0, 160.0), (40.0, 0.0)] {
+        let mut state = pitched(85.0);
+        state.set_padding(&EdgeInsets::new(top, 0.0, bottom, 0.0));
+        let view = state.view();
+        let center_row = 256.0 + (top - bottom) / 2.0;
+        let farthest = view.camera_to_center_distance() * mln_math::deg2rad(89.25 - 85.0).tan();
+        let up = center_row - (256.0 - view.mercator_horizon());
+        let end_row = center_row - mln_math::clamp_f64(up, 0.0, farthest);
+        for min_elevation in [None, Some(0.0)] {
+            state.set_terrain_min_elevation(min_elevation);
+            let ground = meridian(&state);
+            let case = format!("padding {top} top, {bottom} bottom, {min_elevation:?}");
+            assert!(ground.iter().filter(|(row, _)| *row > end_row + 1.0).all(|(_, depth)| *depth < 1.0), "{case}");
+            let past: Vec<_> = ground.iter().filter(|(row, _)| *row < end_row - 1.0).collect();
+            assert_ne!(past.len(), 0, "{case}");
+            assert!(past.iter().all(|(row, depth)| *row > 0.0 && *depth > 1.0), "{case}: ground past row {end_row}");
+        }
+    }
+}
+
 /// Below about 68 degrees of pitch the horizon is above the top of the
 /// view, and the far plane reaches the ground at the top.
 #[test]
@@ -304,26 +336,26 @@ fn matrices_without_terrain_are_unchanged() {
         ),
         (
             alpine(true),
-            54_478.153_105_644_335,
+            11_984.201_437_014_68,
             [
                 1.784_059_983_608_735_4,
                 0.661_384_306_806_117_8,
-                0.326_202_383_497_395_66,
+                0.326_244_849_466_331_03,
                 0.326_190_408_187_028_27,
                 0.833_051_235_020_185_3,
                 -0.450_162_381_905_947_7,
-                -0.896_233_682_831_371_7,
+                -0.896_350_357_122_117,
                 -0.896_200_780_936_546_3,
                 -0.024_527_372_501_201_117,
                 0.261_315_976_530_130_6,
-                -0.027_186_871_862_956_253,
+                -0.027_190_411_128_499_33,
                 -0.027_185_873_797_813_42,
                 -3_057_312.553_228_450_5,
                 -463_638.868_611_956_83,
-                366_351.995_260_439_06,
+                366_399.688_152_04,
                 366_340.545_969_311_15,
             ],
-            [0.326_537_870_775_438_83, -0.897_155_426_552_309_5, -0.027_214_832_571_097_07, 366_672.746_155_253_44],
+            [0.327_772_902_950_878_3, -0.900_548_649_566_629_4, -0.027_317_764_564_236_752, 368_059.686_218_946_76],
         ),
     ];
     for (mut state, far_z, projection, clipped_z) in expected {
@@ -510,15 +542,12 @@ fn the_line_of_sight_runs_from_the_near_plane_to_the_far_plane() {
 /// plane.
 #[test]
 fn terrain_planes_are_gl_js_planes() {
-    use mln_util::geo::EdgeInsets;
-
     struct Case {
         size: Size,
         center: (f64, f64),
         center_altitude: f64,
         zoom: f64,
         pitch: f64,
-        top_padding: f64,
         min_elevation: f64,
         near_z: f64,
         far_z: f64,
@@ -531,7 +560,6 @@ fn terrain_planes_are_gl_js_planes() {
             center_altitude: 1200.0,
             zoom: 12.25,
             pitch: 60.0,
-            top_padding: 0.0,
             min_elevation: 900.0,
             near_z: 8.0,
             far_z: 1_952.317_066_220_289_5,
@@ -543,22 +571,9 @@ fn terrain_planes_are_gl_js_planes() {
             center_altitude: 0.0,
             zoom: 11.46,
             pitch: 60.0,
-            top_padding: 0.0,
             min_elevation: -455.5,
             near_z: 10.0,
             far_z: 1_870.617_879_146_915_8,
-        },
-        // Past the horizon pitch, with the center moved down the view.
-        Case {
-            size: Size::new(512, 384),
-            center: (27.9, 86.9),
-            center_altitude: 300.0,
-            zoom: 13.0,
-            pitch: 85.0,
-            top_padding: 120.0,
-            min_elevation: 250.0,
-            near_z: 7.68,
-            far_z: 18_532.242_194_604_092,
         },
     ];
     for case in cases {
@@ -566,7 +581,6 @@ fn terrain_planes_are_gl_js_planes() {
             camera: Camera {
                 center: LatLng::new(case.center.0, case.center.1).unwrap(),
                 center_altitude: case.center_altitude,
-                padding: EdgeInsets::new(case.top_padding, 0.0, 0.0, 0.0),
                 zoom: case.zoom,
                 bearing: 20.0,
                 pitch: case.pitch,
@@ -1198,5 +1212,21 @@ fn the_far_plane_reaches_a_turned_views_farthest_corner() {
             let case = format!("roll {roll}, {padding:?}, {orientation:?}, {viewport_mode:?}, {min_elevation:?}");
             assert!(z < 1.0, "{case}: ground {depth} px away is past the far plane at {}", state.view().far_z());
         }
+    }
+}
+
+/// Padding that moves the sky's horizon far up the map keeps the far plane
+/// past the ground the view shows: a 2000 by 500 view rolled 90 degrees
+/// with 1000 px of left padding, with or without terrain.
+#[test]
+fn padding_far_up_the_map_keeps_the_far_plane() {
+    let mut state = rolled(2000, 500, 30.0, 90.0, mln_util::geo::EdgeInsets::new(0.0, 1000.0, 0.0, 0.0));
+    for min_elevation in [None, Some(0.0)] {
+        state.set_terrain_min_elevation(min_elevation);
+        let ground = visible_sea_level(&state);
+        assert!(ground.len() > 1000, "{} points in view", ground.len());
+        let (depth, z) = ground.iter().copied().fold((0.0, 0.0), |a, b| if b.0 > a.0 { b } else { a });
+        let far = state.view().far_z();
+        assert!(z < 1.0, "{min_elevation:?}: ground {depth} px away is past the far plane at {far}");
     }
 }
