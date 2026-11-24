@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 #MISE description="Build the Android tests into a test package for AWS Device Farm's phones (tools/device-farm)"
 #USAGE flag "--out <file>" default="target/device-farm/android-tests.zip" help="Where to write the package"
+#MISE tools={"core:java"="temurin-21.0.13+9.0.LTS"}
 # In the target-android environment: `mise -E target-android run
 # device-farm:package`. The package holds the tests of the packages that
-# tools/ci/target-packages.sh lists, built for aarch64-linux-android and
-# archived by cargo-nextest, the workspace's files, which the tests read, the
-# Linux x64 cargo-nextest that mise.lock pins, for Device Farm's test host,
-# and tools/device-farm's scripts that run them there.
+# tools/ci/target-packages.sh lists, built for aarch64-linux-android with main
+# exported and archived by cargo-nextest, the test host that runs them in a
+# Java VM's process (tools/device-farm/host), the workspace's files, which the
+# tests read, the Linux x64 cargo-nextest that mise.lock pins, for Device
+# Farm's test host, and tools/device-farm's scripts that run them there.
 set -euo pipefail
 source tools/dev-shell.sh
 
@@ -24,7 +26,19 @@ while IFS= read -r name; do
     packages+=(-p "$name")
 done < <(tools/ci/target-packages.sh)
 rustup target add aarch64-linux-android
-dev_shell cargo nextest archive --target aarch64-linux-android "${packages[@]}" --archive-file "$package/tests.tar.zst"
+# The test host calls each test executable's main.
+CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS="-C link-arg=-Wl,--export-dynamic-symbol=main" \
+    dev_shell cargo nextest archive --target aarch64-linux-android "${packages[@]}" --archive-file "$package/tests.tar.zst"
+
+# The test host: TestHost.java as dex for app_process, and its native half.
+build_tools=$ANDROID_HOME/build-tools/37.0.0
+[[ -d $build_tools ]] || android --sdk="$ANDROID_HOME" sdk install build-tools/37.0.0
+javac --release 17 -d "$package/classes" tools/device-farm/host/org/maplibre/mlnrs/TestHost.java
+java -cp "$build_tools/lib/d8.jar" com.android.tools.r8.D8 --min-api "$MLN_ANDROID_API" \
+    --output "$package/test-host.jar" "$package/classes/org/maplibre/mlnrs/TestHost.class"
+rm -r "$package/classes"
+"$CC_aarch64_linux_android" -shared -fPIC -O2 -Wall -Wextra -Werror \
+    tools/device-farm/host/test-host.c -o "$package/libmln_test_host.so"
 
 git ls-files -z --cached --others --exclude-standard | tar --null --files-from - -czf "$package/workspace.tar.gz"
 

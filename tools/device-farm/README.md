@@ -9,8 +9,10 @@ Google Pixel 9 (Mali GPU) and a Samsung Galaxy S25 (Adreno GPU), both on Android
 
 1. `mise -E target-android run device-farm:package` builds the test package,
    `target/device-farm/android-tests.zip`. It holds the tests archived by
-   cargo-nextest, the workspace's files, a Linux x64 cargo-nextest, and
-   `run-tests.sh` and `runner.sh`.
+   cargo-nextest, the test host (`host/`), the workspace's files, a Linux x64
+   cargo-nextest, and `run-tests.sh` and `runner.sh`. It needs a JDK, which the
+   task installs, and the SDK's build-tools, which it installs into
+   `$ANDROID_HOME` when they're missing.
 2. `schedule.sh` uploads the package with the test spec, `android.yml`. It
    schedules them as a web app test, the kind of test that needs no app, waits
    for the run, and downloads each phone's test spec output and artifacts.
@@ -20,6 +22,14 @@ Google Pixel 9 (Mali GPU) and a Samsung Galaxy S25 (Adreno GPU), both on Android
    `adb shell`, as devices-cli runs them on an emulator. The artifacts hold
    nextest's JUnit report and the render suite's report and images
    (`render-tests.tar.gz`).
+
+Each test runs in a Java VM's process, as an app's code does, so that HTTP
+(`HttpURLConnection`) and the locale-sensitive expressions (`android.icu`) work:
+`app_process` starts Android's runtime with `host/TestHost.java`, whose native
+half (`host/test-host.c`) loads the test executable into the process and calls
+its main, and the library finds the process's VM (`mln_util::android::java_vm`).
+Each test still gets a process of its own, so nextest runs them in parallel, as
+it does elsewhere.
 
 ## In CI
 

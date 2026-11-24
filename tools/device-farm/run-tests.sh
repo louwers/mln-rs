@@ -3,8 +3,9 @@
 # runs it on the job's test host, from the test package that
 # `mise run device-farm:package` builds (README.md). cargo-nextest runs the
 # package's archive of the tests with its device-farm profile, each test on the
-# phone through runner.sh, on Vulkan. The job's artifacts get nextest's JUnit
-# report and the render suite's report and images. Exits as nextest does.
+# phone in a Java VM's process through runner.sh, on Vulkan. The job's
+# artifacts get nextest's JUnit report and the render suite's report and
+# images. Exits as nextest does.
 set -euo pipefail
 
 package=${DEVICEFARM_TEST_PACKAGE_PATH:?}
@@ -24,6 +25,7 @@ export DEVICE_FARM_PUSHED=$work/pushed
 mkdir "$DEVICE_FARM_WORKSPACE" "$DEVICE_FARM_PUSHED" "$work/archive"
 tar -xzf "$package/workspace.tar.gz" -C "$DEVICE_FARM_WORKSPACE"
 adb shell "rm -rf $DEVICE_FARM_ROOT && mkdir -p $DEVICE_FARM_ROOT/bin $DEVICE_FARM_ROOT/workspace"
+adb push "$package/test-host.jar" "$package/libmln_test_host.so" "$DEVICE_FARM_ROOT/" > /dev/null
 adb push "$package/workspace.tar.gz" "$DEVICE_FARM_ROOT/workspace.tar.gz" > /dev/null
 adb shell "tar -xzf $DEVICE_FARM_ROOT/workspace.tar.gz -C $DEVICE_FARM_ROOT/workspace && rm $DEVICE_FARM_ROOT/workspace.tar.gz"
 
@@ -42,8 +44,9 @@ status=0
     status=$?
 
 cp "$DEVICE_FARM_WORKSPACE/target/nextest/device-farm/junit.xml" "$artifacts/" || true
+# As one file: adb pulls thousands of small files slowly.
 if adb shell "test -d $MLN_RENDER_TEST_OUTPUT"; then
-    adb pull "$MLN_RENDER_TEST_OUTPUT" "$work/render-tests" > /dev/null
-    tar -czf "$artifacts/render-tests.tar.gz" -C "$work" render-tests
+    adb shell "tar -czf $DEVICE_FARM_ROOT/render-tests.tar.gz -C $DEVICE_FARM_ROOT render-tests"
+    adb pull "$DEVICE_FARM_ROOT/render-tests.tar.gz" "$artifacts/" > /dev/null
 fi
 exit "$status"

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # cargo-nextest's target runner on an AWS Device Farm test host
 # (run-tests.sh): runs a test binary on the job's phone, as devices-cli does on
-# an emulator. The binary goes to bin/ under $DEVICE_FARM_ROOT once, and runs
-# in its package's copy of the workspace, which run-tests.sh made there, with
-# the RUST_* and MLN_* variables and CARGO_MANIFEST_DIR, and with host
+# an emulator, but inside a Java VM's process, as an app's code runs: the test
+# host (host/) loads the binary into a process that app_process started, and
+# calls its main. The binary goes to bin/ under $DEVICE_FARM_ROOT once, and
+# runs in its package's copy of the workspace, which run-tests.sh made there,
+# with the RUST_* and MLN_* variables and CARGO_MANIFEST_DIR, and with host
 # workspace paths in them and in the arguments made the copy's.
 #
 # Files go over adb's sync protocol (adb push): Device Farm's adb garbles what
@@ -45,7 +47,8 @@ while IFS= read -r variable; do
         RUST_* | MLN_* | CARGO_MANIFEST_DIR) script+=" $(quote "$variable=$(on_device "${!variable}")")" ;;
     esac
 done < <(compgen -e)
-script+=" $(quote "$device_program")"
+script+=" CLASSPATH=$root/test-host.jar app_process /system/bin org.maplibre.mlnrs.TestHost"
+script+=" $root/libmln_test_host.so $(quote "$device_program")"
 for argument; do
     script+=" $(quote "$(on_device "$argument")")"
 done
