@@ -1379,10 +1379,10 @@ impl Gpu for MetalGpu {
     }
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
-        key.program().check_on(&self.caps)?;
         let program = key.program();
         let source =
             program.sources.msl.ok_or_else(|| GpuError::Unsupported(format!("no MSL for {}", program.name)))?;
+        program.check_on(&self.caps, &[source.prelude, source.source])?;
         let (vertex, fragment) = autoreleasepool(|_| {
             compile(
                 self.device.device(),

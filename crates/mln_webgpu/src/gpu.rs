@@ -820,7 +820,8 @@ impl Gpu for WebGpu {
     }
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
-        key.program().check_on(&self.caps)?;
+        let wgsl = key.program().sources.wgsl.map_or([""; 3], |wgsl| [wgsl.prelude, wgsl.vertex, wgsl.fragment]);
+        key.program().check_on(&self.caps, &wgsl)?;
         let program = shader_program::compile(self.device.device(), self.index_table.layout(), key)?;
         let reads = shader_bindings(&program)?;
         Ok(self.shaders.insert(Shader { program, reads }))

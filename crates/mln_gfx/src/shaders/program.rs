@@ -711,23 +711,29 @@ impl Program {
     }
 
     /// [`check`](Self::check)s the program, and that a backend of `caps`
-    /// binds what it reads: no vertex buffers that its vertex stage reads
-    /// as storage buffers ([`BufferKind::Vertices`]) where
-    /// [`Caps::binds_vertex_buffers`] is false. A backend checks this before
-    /// it compiles the program.
+    /// binds what `texts`, its source in the backend's language, reads: no
+    /// vertex buffer that its vertex stage reads as a storage buffer
+    /// ([`BufferKind::Vertices`]) and that `texts` name outside their
+    /// comments, where [`Caps::binds_vertex_buffers`] is false. So one
+    /// program can pull vertices in one language and read attributes in
+    /// another. A backend checks this before it compiles the program.
     ///
     /// # Errors
     ///
     /// As [`check`](Self::check), and [`GpuError::Unsupported`] for a
     /// program that reads vertex buffers on a backend that binds none.
-    pub fn check_on(&self, caps: &Caps) -> Result<(), GpuError> {
+    pub fn check_on(&self, caps: &Caps, texts: &[&str]) -> Result<(), GpuError> {
         self.check()?;
+        let named = |name: &str| texts.iter().any(|text| source::identifiers(text).any(|word| word == name));
         if !caps.binds_vertex_buffers
-            && self.buffers.iter().any(|buffer| matches!(buffer.kind, BufferKind::Vertices { .. }))
+            && let Some(buffer) = self
+                .buffers
+                .iter()
+                .find(|buffer| matches!(buffer.kind, BufferKind::Vertices { .. }) && named(buffer.name))
         {
             return Err(GpuError::Unsupported(format!(
-                "program {}: it reads vertex buffers, which this backend's bindings don't bind",
-                self.name
+                "program {}: it reads vertex buffer {}, which this backend's bindings don't bind",
+                self.name, buffer.name
             )));
         }
         Ok(())
@@ -989,8 +995,11 @@ mod tests {
             binds_vertex_buffers,
             indexes_storage_buffers: true,
         };
-        assert!(pulling.check_on(&caps(true)).is_ok());
-        assert!(matches!(pulling.check_on(&caps(false)), Err(GpuError::Unsupported(_))));
-        assert!(EMPTY.check_on(&caps(false)).is_ok());
+        let reads = ["vec2 at = vertices[gl_VertexIndex];"];
+        assert!(pulling.check_on(&caps(true), &reads).is_ok());
+        assert!(matches!(pulling.check_on(&caps(false), &reads), Err(GpuError::Unsupported(_))));
+        // A source that reads attributes instead, as GLSL ES does.
+        assert!(pulling.check_on(&caps(false), &["// vertices\nin vec2 a_pos;"]).is_ok());
+        assert!(EMPTY.check_on(&caps(false), &reads).is_ok());
     }
 }

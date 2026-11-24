@@ -2404,7 +2404,8 @@ impl Gpu for VulkanGpu {
     }
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
-        key.program().check_on(&self.caps)?;
+        let glsl = key.program().sources.glsl.map_or([""; 3], |glsl| [glsl.prelude, glsl.vertex, glsl.fragment]);
+        key.program().check_on(&self.caps, &glsl)?;
         let shader = self.compile(key)?;
         Ok(self.shaders.insert(shader))
     }

@@ -1233,7 +1233,8 @@ impl Gpu for D3d12Gpu {
     }
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
-        key.program().check_on(&self.caps)?;
+        let glsl = key.program().sources.glsl.map_or([""; 3], |glsl| [glsl.prelude, glsl.vertex, glsl.fragment]);
+        key.program().check_on(&self.caps, &glsl)?;
         let program = self.compiler.compile(key)?;
         let mut reads: Vec<ShaderBinding> = Vec::new();
         let mut buffers = Vec::new();
