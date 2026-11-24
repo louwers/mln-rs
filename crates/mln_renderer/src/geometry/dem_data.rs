@@ -5,24 +5,6 @@ use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::tileset::RasterEncoding;
 
-/// <https://www.mapbox.com/help/access-elevation-data/#mapbox-terrain-rgb>
-const UNPACK_MAPBOX: [f32; 4] = [6553.6, 25.6, 0.1, 10000.0];
-/// <https://aws.amazon.com/public-datasets/terrain>/
-const UNPACK_TERRARIUM: [f32; 4] = [256.0, 1.0, 1.0 / 256.0, 32768.0];
-
-/// The DEM unpack vector for an encoding: the red, green and blue factors
-/// and the base shift.
-#[must_use]
-pub(crate) fn unpack_vector(encoding: RasterEncoding) -> [f32; 4] {
-    match encoding {
-        RasterEncoding::Mapbox => UNPACK_MAPBOX,
-        RasterEncoding::Terrarium => UNPACK_TERRARIUM,
-        RasterEncoding::Custom { red_factor, green_factor, blue_factor, base_shift } => {
-            [red_factor, green_factor, blue_factor, base_shift]
-        }
-    }
-}
-
 /// A raster-dem tile's elevations, a pixel of border on each side. It reads
 /// back only as `new` can make it (`from_parts`).
 #[derive(Clone, Debug)]
@@ -190,19 +172,12 @@ impl DEMData {
         }
     }
 
-    /// `get(x, y)`.
+    /// The height in meters of the pixel at `x`, `y`, each from -1 to
+    /// `dim`, the border's included.
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn get(&self, x: i32, y: i32) -> i32 {
-        let unpack = self.unpack_vector();
-        let value = pixel(&self.image.data, self.idx(x, y));
-        (f32::from(value[0]) * unpack[0] + f32::from(value[1]) * unpack[1] + f32::from(value[2]) * unpack[2]
-            - unpack[3]) as i32
-    }
-
-    #[must_use]
-    pub(crate) fn unpack_vector(&self) -> [f32; 4] {
-        unpack_vector(self.encoding)
+    pub(crate) fn get(&self, x: i32, y: i32) -> f32 {
+        mln_util::dem::DemUnpack::of(self.encoding).decode(pixel(&self.image.data, self.idx(x, y)))
     }
 
     #[must_use]
@@ -258,8 +233,7 @@ mod tests {
         let demdata = DEMData::new(&image, encoding).unwrap();
 
         // 10 * 100 + 20 * 10 + 30 * 0.5 - 1000
-        assert_eq!(demdata.get(0, 0), 215);
-        assert_eq!(demdata.unpack_vector(), [100.0, 10.0, 0.5, 1000.0]);
+        assert_eq!(demdata.get(0, 0), 215.0);
     }
 
     #[test]
@@ -279,7 +253,7 @@ mod tests {
         let mut nonempty = true;
         for x in -1..5 {
             for y in -1..5 {
-                if dem1.get(x, y) == -65536 {
+                if dem1.get(x, y) == -65536.0 {
                     nonempty = false;
                 }
             }

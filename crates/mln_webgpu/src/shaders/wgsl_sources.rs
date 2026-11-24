@@ -977,7 +977,7 @@ struct ColorReliefTilePropsUBO {
     unpack: vec4<f32>,
     dimension: vec2<f32>,
     color_ramp_size: i32,
-    pad_tile0: f32,
+    unpack_scale: f32,
 };
 
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
@@ -1022,7 +1022,7 @@ struct ColorReliefTilePropsUBO {
     unpack: vec4<f32>,
     dimension: vec2<f32>,
     color_ramp_size: i32,
-    pad_tile0: f32,
+    unpack_scale: f32,
 };
 
 struct ColorReliefEvaluatedPropsUBO {
@@ -1042,10 +1042,13 @@ struct ColorReliefEvaluatedPropsUBO {
 @group(1) @binding(4) var color_stops_sampler: sampler;
 @group(1) @binding(5) var color_stops_texture: texture_2d<f32>;
 
-fn getElevation(coord: vec2<f32>, unpack: vec4<f32>) -> f32 {
-    var data = textureSample(dem_texture, dem_sampler, coord) * 255.0;
-    data.a = -1.0;
-    return dot(data, unpack);
+// The height in meters of the DEM at `coord`, by the rule of
+// `mln_util::dem`. The channels aren't rounded: the decode is linear in
+// them, so where a linear sampler interpolates them, it interpolates the
+// heights.
+fn getElevation(coord: vec2<f32>, unpack: vec4<f32>, unpack_scale: f32) -> f32 {
+    let rgb = textureSample(dem_texture, dem_sampler, coord).rgb * 255.0;
+    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * unpack_scale;
 }
 
 // The stops are read at texel centres, from textures without mipmaps, so
@@ -1068,7 +1071,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #endif
 
     let tileProps = tilePropsVector[globalIndex.value];
-    let el = getElevation(in.frag_position, tileProps.unpack);
+    let el = getElevation(in.frag_position, tileProps.unpack, tileProps.unpack_scale);
 
     // Binary search to find surrounding elevation stops
     var r: i32 = tileProps.color_ramp_size - 1;
@@ -2788,6 +2791,103 @@ fn main(@location(0) color: vec4<f32>) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
+/// The height rule of `mln_util::dem`, over the DEM tile a draw reads: its
+/// RGBA8 texels behind a one-texel border, decoded by a `TerrainPropsUBO`.
+#[cfg(test)]
+macro_rules! ground_height {
+    () => {
+        r"
+// How the terrain's DEM decodes, and its exaggeration.
+struct TerrainPropsUBO {
+    unpack: vec4<f32>,
+    unpack_scale: f32,
+    exaggeration: f32,
+    pad0: f32,
+    pad1: f32,
+};
+
+@group(1) @binding(5) var ground_dem_texture: texture_2d<f32>;
+
+// The height in meters of the DEM's bordered texel at `texel`, clamped to
+// the texture, decoded by `props`.
+fn ground_texel_height(texel: vec2<i32>, props: TerrainPropsUBO) -> f32 {
+    let last = vec2<i32>(textureDimensions(ground_dem_texture)) - 1;
+    let rgb = round(textureLoad(ground_dem_texture, clamp(texel, vec2<i32>(0), last), 0).rgb * 255.0);
+    let unpack = props.unpack;
+    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * props.unpack_scale;
+}
+
+// The height in meters, exaggerated, at `pos` in tile units of a tile that
+// reads its DEM at `dem_coords`: the DEM uv's scale and offset, then the
+// DEM's width in pixels, 0 for flat ground.
+fn ground_height(pos: vec2<f32>, dem_coords: vec4<f32>, props: TerrainPropsUBO) -> f32 {
+    let dim = dem_coords.w;
+    if (dim == 0.0) {
+        return 0.0;
+    }
+    let coord = (pos / 8192.0 * dem_coords.x + dem_coords.yz) * dim + 0.5;
+    let first = floor(coord);
+    let f = coord - first;
+    let texel = vec2<i32>(first);
+    let tl = ground_texel_height(texel, props);
+    let tr = ground_texel_height(texel + vec2<i32>(1, 0), props);
+    let bl = ground_texel_height(texel + vec2<i32>(0, 1), props);
+    let br = ground_texel_height(texel + vec2<i32>(1, 1), props);
+    let top = tl * (1.0 - f.x) + tr * f.x;
+    let bottom = bl * (1.0 - f.x) + br * f.x;
+    return (top * (1.0 - f.y) + bottom * f.y) * props.exaggeration;
+}
+"
+    };
+}
+
+/// Port-only, for the backend conformance cases: probes of the terrain's
+/// height rule. Each probe is a quad at clip positions whose vertices read
+/// the height at a place of a tile, and whose fragments write that height's
+/// bits, least significant byte first, as the texel's channels.
+#[cfg(test)]
+pub(crate) const TERRAIN_PROBE_SHADER: WgslShaderSource = WgslShaderSource {
+    vertex: Some(
+        r"
+struct VertexInput {
+    // Clip x and y, then where the height is read, in tile units.
+    @location(0) pos: vec4<f32>,
+    // The DEM uv's scale and offset, then the DEM's width in pixels.
+    @location(1) dem_coords: vec4<f32>,
+};
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) @interpolate(flat) height: f32,
+};
+
+@vertex
+fn main(in: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+    out.position = vec4<f32>(in.pos.xy, 0.0, 1.0);
+    out.height = ground_height(in.pos.zw, in.dem_coords, terrainProps);
+    return out;
+}
+",
+    ),
+    fragment: Some(
+        r"
+@fragment
+fn main(@location(0) @interpolate(flat) height: f32) -> @location(0) vec4<f32> {
+    let bits = bitcast<u32>(height);
+    let bytes = vec4<u32>(bits, bits >> 8u, bits >> 16u, bits >> 24u) & vec4<u32>(255u);
+    return vec4<f32>(bytes) / 255.0;
+}
+",
+    ),
+    prelude: Some(concat!(
+        ground_height!(),
+        r"
+@group(0) @binding(5) var<uniform> terrainProps: TerrainPropsUBO;
+"
+    )),
+};
+
 pub(crate) const HILLSHADE_PREPARE_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(
         r"
@@ -2810,6 +2910,10 @@ struct HillshadePrepareTilePropsUBO {
     dimension: vec2<f32>,
     zoom: f32,
     maxzoom: f32,
+    unpack_scale: f32,
+    pad0: f32,
+    pad1: f32,
+    pad2: f32,
 };
 
 @group(0) @binding(2) var<uniform> drawable: HillshadePrepareDrawableUBO;
@@ -2838,16 +2942,24 @@ struct HillshadePrepareTilePropsUBO {
     dimension: vec2<f32>,
     zoom: f32,
     maxzoom: f32,
+    unpack_scale: f32,
+    pad0: f32,
+    pad1: f32,
+    pad2: f32,
 };
 
 @group(0) @binding(5) var<uniform> tileProps: HillshadePrepareTilePropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var dem_texture: texture_2d<f32>;
 
+// The height in meters of the DEM at `coord`, by the rule of
+// `mln_util::dem`. The channels aren't rounded: the decode is linear in
+// them, so where a linear sampler interpolates them, it interpolates the
+// heights.
 fn getElevation(coord: vec2<f32>) -> f32 {
-    var data = textureSample(dem_texture, texture_sampler, coord) * 255.0;
-    data.a = -1.0;
-    return dot(data, tileProps.unpack);
+    let rgb = textureSample(dem_texture, texture_sampler, coord).rgb * 255.0;
+    let unpack = tileProps.unpack;
+    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * tileProps.unpack_scale;
 }
 
 @fragment

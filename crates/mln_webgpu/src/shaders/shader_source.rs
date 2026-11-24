@@ -35,7 +35,10 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
 };
 #[cfg(test)]
-use mln_gfx::shaders::shader_defines::{ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE};
+use mln_gfx::shaders::shader_defines::{
+    ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE,
+    ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE,
+};
 
 use super::{fill_extrusion_wgsl, fill_outline_wgsl, wgsl_sources};
 
@@ -487,6 +490,17 @@ const VERTEX_TEXEL_ATTRIBUTES: &[AttributeInfo] = &[attr(0, ID_VERTEX_TEXEL_POS_
 #[cfg(test)]
 shader_source!(VERTEX_TEXEL_SHADER, VERTEX_TEXEL_SHADER, VERTEX_TEXEL_ATTRIBUTES, &[tex(0, ID_VERTEX_TEXEL_TEXTURE)]);
 
+#[cfg(test)]
+const TERRAIN_PROBE_ATTRIBUTES: &[AttributeInfo] =
+    &[attr(0, ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE), attr(1, ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE)];
+#[cfg(test)]
+shader_source!(
+    TERRAIN_PROBE_SHADER,
+    TERRAIN_PROBE_SHADER,
+    TERRAIN_PROBE_ATTRIBUTES,
+    &[unfilterable_tex(4, ID_TERRAIN_DEM_TEXTURE)]
+);
+
 /// The source of each built-in program that has WGSL.
 pub(crate) static BUILT_INS: &[(&Program, &ShaderSource)] = &[
     (&programs::BACKGROUND, &BACKGROUND_SHADER),
@@ -529,6 +543,8 @@ pub(crate) static BUILT_INS: &[(&Program, &ShaderSource)] = &[
     (&programs::LAYER_COMPOSITE, &LAYER_COMPOSITE_SHADER),
     #[cfg(test)]
     (&programs::VERTEX_TEXEL, &VERTEX_TEXEL_SHADER),
+    #[cfg(test)]
+    (&programs::TERRAIN_PROBE, &TERRAIN_PROBE_SHADER),
 ];
 
 #[must_use]

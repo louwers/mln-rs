@@ -48,7 +48,10 @@ use mln_gfx::shaders::shader_defines::{
     RASTER_LAYER_UBO_COUNT, SKY_LAYER_UBO_COUNT, SYMBOL_LAYER_UBO_COUNT,
 };
 #[cfg(test)]
-use mln_gfx::shaders::shader_defines::{ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE};
+use mln_gfx::shaders::shader_defines::{
+    ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE,
+    ID_TERRAIN_PROPS_UBO, ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE,
+};
 
 use super::msl_sources;
 
@@ -91,6 +94,9 @@ pub(crate) struct ShaderSource {
     pub(crate) attributes: &'static [AttributeInfo],
     pub(crate) instance_attributes: &'static [AttributeInfo],
     pub(crate) textures: &'static [TextureInfo],
+    /// Whether its library compiles with fast math, Metal's default, which
+    /// lets the compiler fuse and reorder floating-point operations.
+    pub(crate) fast_math: bool,
 }
 
 // The number of UBOs each shader binds before its vertex buffers, for the
@@ -112,6 +118,8 @@ const SKY_UBO_COUNT: usize = SKY_LAYER_UBO_COUNT;
 const SYMBOL_UBO_COUNT: usize = SYMBOL_LAYER_UBO_COUNT;
 #[cfg(test)]
 const VERTEX_TEXEL_UBO_COUNT: usize = DRAWABLE_RESERVED_UBO_COUNT;
+#[cfg(test)]
+const TERRAIN_PROBE_UBO_COUNT: usize = ID_TERRAIN_PROPS_UBO + 1;
 
 const fn attr(index: usize, data_type: AttributeDataType, buffer_index: usize, id: usize) -> AttributeInfo {
     AttributeInfo { index, data_type, buffer_index, id }
@@ -124,6 +132,16 @@ const fn tex(index: usize, id: usize) -> TextureInfo {
 use AttributeDataType::{Float, Float2, Float3, Float4, Short2, Short4, UByte4, UShort2, UShort4};
 
 macro_rules! shader_source {
+    // A shader that compiles without fast math.
+    (precise $name:ident, $attrs:expr, $textures:expr) => {
+        static $name: ShaderSource = ShaderSource {
+            msl: &msl_sources::$name,
+            attributes: $attrs,
+            instance_attributes: &[],
+            textures: $textures,
+            fast_math: false,
+        };
+    };
     ($name:ident, $attrs:expr, $textures:expr) => {
         shader_source!($name, $attrs, &[], $textures);
     };
@@ -133,6 +151,7 @@ macro_rules! shader_source {
             attributes: $attrs,
             instance_attributes: $instance_attrs,
             textures: $textures,
+            fast_math: true,
         };
     };
 }
@@ -347,6 +366,17 @@ const VERTEX_TEXEL_ATTRIBUTES: &[AttributeInfo] =
 #[cfg(test)]
 shader_source!(VERTEX_TEXEL_SHADER, VERTEX_TEXEL_ATTRIBUTES, &[tex(0, ID_VERTEX_TEXEL_TEXTURE)]);
 
+#[cfg(test)]
+const TERRAIN_PROBE_ATTRIBUTES: &[AttributeInfo] = &[
+    attr(0, Float4, TERRAIN_PROBE_UBO_COUNT, ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE),
+    attr(1, Float4, TERRAIN_PROBE_UBO_COUNT, ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE),
+];
+// Fast math would let the compiler fuse or reorder the f32 operations of the
+// terrain's height rule, which the CPU does one at a time, in order
+// (`mln_util::dem`).
+#[cfg(test)]
+shader_source!(precise TERRAIN_PROBE_SHADER, TERRAIN_PROBE_ATTRIBUTES, &[tex(2, ID_TERRAIN_DEM_TEXTURE)]);
+
 const HILLSHADE_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, HILLSHADE_UBO_COUNT, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE),
     attr(1, Short2, HILLSHADE_UBO_COUNT, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE),
@@ -542,4 +572,6 @@ pub(crate) static BUILT_INS: &[(&Program, &ShaderSource)] = &[
     (&programs::LAYER_COMPOSITE, &LAYER_COMPOSITE_SHADER),
     #[cfg(test)]
     (&programs::VERTEX_TEXEL, &VERTEX_TEXEL_SHADER),
+    #[cfg(test)]
+    (&programs::TERRAIN_PROBE, &TERRAIN_PROBE_SHADER),
 ];

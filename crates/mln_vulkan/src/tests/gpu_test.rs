@@ -4,8 +4,8 @@ use std::rc::Rc;
 use ash::vk;
 use mln_gfx::gpu::conformance::{
     clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, imported_textures,
-    instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace,
-    vertex_layouts, wall_quads, written_vertex_texels,
+    instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, terrain_heights, topologies,
+    transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
 };
 use mln_gfx::gpu::{
     ColorAttachment, Gpu as _, GpuError, LoadOp, PassDesc, TextureDesc, TextureFormat, TextureRegion, TextureUsage,
@@ -106,6 +106,12 @@ fn written_vertex_texels_through_gpu() {
 fn drawn_vertex_texels_through_gpu() {
     let device = Device::new(None).expect("Vulkan device");
     drawn_vertex_texels(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frames");
+}
+
+#[test]
+fn terrain_heights_through_gpu() {
+    let device = Device::new(None).expect("Vulkan device");
+    terrain_heights(&mut VulkanGpu::new(&device).expect("VulkanGpu")).expect("the frames");
 }
 
 // What `destroy_later` destroys waits for the next flush, or goes with the

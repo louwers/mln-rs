@@ -40,7 +40,10 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
 };
 #[cfg(any(test, feature = "gpu-conformance"))]
-use mln_gfx::shaders::shader_defines::{ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE};
+use mln_gfx::shaders::shader_defines::{
+    ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE,
+    ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE,
+};
 
 use crate::front_end::Stage;
 use crate::sources;
@@ -373,6 +376,14 @@ const VERTEX_TEXEL_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short4, ID_VERTEX_TE
 #[cfg(any(test, feature = "gpu-conformance"))]
 shader_source!(VERTEX_TEXEL_SHADER, VERTEX_TEXEL_ATTRIBUTES, &[tex(0, ID_VERTEX_TEXEL_TEXTURE)]);
 
+#[cfg(any(test, feature = "gpu-conformance"))]
+const TERRAIN_PROBE_ATTRIBUTES: &[AttributeInfo] = &[
+    attr(0, Float4, ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE),
+    attr(1, Float4, ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE),
+];
+#[cfg(any(test, feature = "gpu-conformance"))]
+shader_source!(TERRAIN_PROBE_SHADER, TERRAIN_PROBE_ATTRIBUTES, &[tex(2, ID_TERRAIN_DEM_TEXTURE)]);
+
 const HILLSHADE_ATTRIBUTES: &[AttributeInfo] =
     &[attr(0, Short2, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE), attr(1, Short2, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE)];
 const HILLSHADE_PREPARE_ATTRIBUTES: &[AttributeInfo] =
@@ -562,4 +573,6 @@ pub static BUILT_INS: &[(&Program, &ShaderSource)] = &[
     (&programs::LAYER_COMPOSITE, &LAYER_COMPOSITE_SHADER),
     #[cfg(any(test, feature = "gpu-conformance"))]
     (&programs::VERTEX_TEXEL, &VERTEX_TEXEL_SHADER),
+    #[cfg(any(test, feature = "gpu-conformance"))]
+    (&programs::TERRAIN_PROBE, &TERRAIN_PROBE_SHADER),
 ];

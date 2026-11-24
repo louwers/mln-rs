@@ -13,11 +13,17 @@ const _: () = assert!(size_of::<ColorReliefDrawableUBO>() == 64);
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct ColorReliefTilePropsUBO {
-    /*  0 */ pub unpack: [f32; 4], // DEM unpack vector
+    /// How the DEM's texels decode, as [`mln_util::dem::DemUnpack`] does:
+    /// the weights of a texel's red, green and blue channels, from 0 to 255,
+    /// then the base added to their sum.
+    /*  0 */
+    pub unpack: [f32; 4],
     /* 16 */ pub dimension: [f32; 2], // Texture dimensions
     /* 24 */ pub color_ramp_size: i32, // Number of color stops
-    /* 28 */ pub pad_tile0: f32, // Padding for alignment
-                        /* 32 */
+    /// What the sum is multiplied by, to meters.
+    /* 28 */
+    pub unpack_scale: f32,
+    /* 32 */
 }
 const _: () = assert!(size_of::<ColorReliefTilePropsUBO>() == 32);
 

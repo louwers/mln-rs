@@ -33,6 +33,7 @@ use mln_style::layers::ColorRelief;
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_style_types::ResamplingType;
 use mln_util::Color;
+use mln_util::dem::DemUnpack;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
@@ -445,13 +446,14 @@ impl TypedLayer for RenderColorReliefLayer {
             let geometry_generation = geometry.generation();
             let dem_data = bucket.dem_data();
             if dem_data.image().valid() {
+                let unpack = DemUnpack::of(dem_data.encoding);
                 let tile_props = ColorReliefTilePropsUBO {
-                    unpack: dem_data.unpack_vector(),
+                    unpack: unpack.weights_and_base(),
                     // Use stride (dim + 2) for dimension, as the texture
                     // includes a 1-pixel border
                     dimension: [dem_data.stride as f32, dem_data.stride as f32],
                     color_ramp_size: *color_ramp_size as i32,
-                    pad_tile0: 0.0,
+                    unpack_scale: unpack.scale,
                 };
                 let generation = bucket.render_target_generation();
                 let context = &mut *paint_parameters.context;

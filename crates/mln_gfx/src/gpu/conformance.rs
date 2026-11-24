@@ -17,14 +17,17 @@
 //! texture written or drawn into just before. The other cases draw one color
 //! over the whole target, as [`transparent_replace`] does to check that
 //! `Replace` doesn't blend. On wasm, [`host_writes`] checks writes from JS
-//! arrays.
+//! arrays. [`terrain_heights`] reads back the heights that the terrain's
+//! height rule reads on the GPU, against the CPU's.
 
 mod cases;
+mod terrain;
 
 use mln_util::Color;
 use mln_util::size::Size;
 
 pub use self::cases::*;
+pub use self::terrain::terrain_heights;
 use super::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState,
     DepthStencilAttachment, Draw, DynamicState, FixedState, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc,

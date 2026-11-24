@@ -154,6 +154,24 @@ pub const ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_VERTEX_TEXEL_TEXTURE: usize = 0;
 pub const ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE: usize = 0;
 
+// --- terrain: the ground's heights, by the height rule of `mln_util::dem`.
+pub const ID_TERRAIN_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
+/// The DEM: RGBA8 texels behind a one-texel border, which the vertex stage
+/// reads texel by texel, without a sampler. It is slot 2 so that a program
+/// that reads the ground keeps slots 0 and 1 for its own textures; the shader
+/// sources write it as a literal.
+pub const ID_TERRAIN_DEM_TEXTURE: usize = 2;
+
+// --- terrain probe (port-only): the conformance case's probes of the height
+// rule, which read the terrain's props and DEM texture.
+/// Where a probe draws, in clip x and y, then where it reads the height, in
+/// tile units.
+pub const ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE: usize = 0;
+/// Where the probe reads its DEM: the scale and offset that map the tile's
+/// uv to the DEM's (`uv * scale + offset`), then the DEM's width in pixels,
+/// 0 for flat ground.
+pub const ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE: usize = 1;
+
 // --- sky (`idSkyPropsUBO` / `idAtmospherePropsUBO = getEnumValue(drawableReservedUBOCount, layerUBOStartId)`)
 pub const ID_SKY_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
 pub const SKY_LAYER_UBO_COUNT: usize = ID_SKY_PROPS_UBO + 1;

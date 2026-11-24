@@ -790,7 +790,7 @@ layout(std140) uniform ColorReliefTilePropsUBO {
     highp vec4 u_unpack;
     highp vec2 u_dimension;
     highp int u_color_ramp_size;
-    highp float pad_tile0;
+    highp float u_unpack_scale;
 };
 
 layout (location = 0) in vec2 a_pos;
@@ -821,7 +821,7 @@ layout(std140) uniform ColorReliefTilePropsUBO {
     highp vec4 u_unpack;
     highp vec2 u_dimension;
     highp int u_color_ramp_size;
-    highp float pad_tile0;
+    highp float u_unpack_scale;
 };
 
 layout(std140) uniform ColorReliefEvaluatedPropsUBO {
@@ -839,11 +839,13 @@ uniform sampler2D u_color_stops;
 
 in vec2 v_pos;
 
+// The height in meters of the DEM at `coord`, by the rule of
+// `mln_util::dem`. The channels aren't rounded: the decode is linear in
+// them, so where a linear sampler interpolates them, it interpolates the
+// heights.
 float getElevation(vec2 coord) {
-    // Convert encoded elevation value to meters
-    vec4 data = texture(u_image, coord) * 255.0;
-    data.a = -1.0;
-    return dot(data, u_unpack);
+    vec3 rgb = texture(u_image, coord).rgb * 255.0;
+    return (rgb.r * u_unpack.x + rgb.g * u_unpack.y + rgb.b * u_unpack.z + u_unpack.w) * u_unpack_scale;
 }
 
 float getElevationStop(int stop) {
@@ -2604,6 +2606,91 @@ void main() {
 ",
 };
 
+/// The height rule of `mln_util::dem`, over the DEM tile a draw reads: its
+/// RGBA8 texels behind a one-texel border, decoded as the unpack weights
+/// and scale say. A macro, so that `concat!` puts it in the vertex stages,
+/// which read the DEM with `texelFetch`.
+#[cfg(test)]
+macro_rules! ground_height {
+    () => {
+        r"uniform highp sampler2D u_ground_dem;
+
+// The height in meters of the DEM's bordered texel at `texel`, clamped to the
+// texture, decoded by `unpack` and `unpack_scale`.
+highp float ground_texel_height(ivec2 texel, highp vec4 unpack, highp float unpack_scale) {
+    ivec2 last = textureSize(u_ground_dem, 0) - 1;
+    highp vec3 rgb = round(texelFetch(u_ground_dem, clamp(texel, ivec2(0), last), 0).rgb * 255.0);
+    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * unpack_scale;
+}
+
+// The height in meters, exaggerated by `exaggeration`, at `pos` in tile
+// units of a tile that reads its DEM at `dem_coords`: the DEM uv's scale and
+// offset, then the DEM's width in pixels, 0 for flat ground.
+highp float ground_height(highp vec2 pos, highp vec4 dem_coords, highp vec4 unpack, highp float unpack_scale,
+                          highp float exaggeration) {
+    highp float dim = dem_coords.w;
+    if (dim == 0.0) {
+        return 0.0;
+    }
+    highp vec2 coord = (pos / 8192.0 * dem_coords.x + dem_coords.yz) * dim + 0.5;
+    highp vec2 first = floor(coord);
+    highp vec2 f = coord - first;
+    ivec2 texel = ivec2(first);
+    highp float tl = ground_texel_height(texel, unpack, unpack_scale);
+    highp float tr = ground_texel_height(texel + ivec2(1, 0), unpack, unpack_scale);
+    highp float bl = ground_texel_height(texel + ivec2(0, 1), unpack, unpack_scale);
+    highp float br = ground_texel_height(texel + ivec2(1, 1), unpack, unpack_scale);
+    highp float top = tl * (1.0 - f.x) + tr * f.x;
+    highp float bottom = bl * (1.0 - f.x) + br * f.x;
+    return (top * (1.0 - f.y) + bottom * f.y) * exaggeration;
+}
+
+"
+    };
+}
+
+/// Port-only, for the backend conformance cases: probes of the terrain's
+/// height rule. Each probe is a quad at clip positions whose vertices read
+/// the height at a place of a tile, and whose fragments write that height's
+/// bits, least significant byte first, as the texel's channels.
+#[cfg(test)]
+pub(crate) const TERRAIN_PROBE_SHADER: GlslShaderSource = GlslShaderSource {
+    vertex: concat!(
+        r"layout (std140) uniform TerrainPropsUBO {
+    highp vec4 u_unpack;
+    highp float u_unpack_scale;
+    highp float u_exaggeration;
+    highp float props_pad0;
+    highp float props_pad1;
+};
+
+",
+        ground_height!(),
+        r"// Clip x and y, then where the height is read, in tile units.
+layout (location = 0) in vec4 a_pos;
+// The DEM uv's scale and offset, then the DEM's width in pixels.
+layout (location = 1) in vec4 a_dem_coords;
+
+flat out highp float v_height;
+
+void main() {
+    v_height = ground_height(a_pos.zw, a_dem_coords, u_unpack, u_unpack_scale, u_exaggeration);
+    gl_Position = vec4(a_pos.xy, 0.0, 1.0);
+}
+"
+    ),
+    fragment: r"flat in highp float v_height;
+
+void main() {
+    // A fragment shader's integers are mediump unless said otherwise, which
+    // Mesa lowers to 16 bits.
+    highp uint bits = floatBitsToUint(v_height);
+    highp uvec4 bytes = uvec4(bits, bits >> 8u, bits >> 16u, bits >> 24u) & uvec4(255u);
+    fragColor = vec4(bytes) / 255.0;
+}
+",
+};
+
 pub(crate) const HEATMAP_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: r#"layout (location = 0) in vec2 a_pos;
 out vec2 v_extrude;
@@ -2791,6 +2878,10 @@ layout (std140) uniform HillshadePrepareTilePropsUBO {
     highp vec2 u_dimension;
     highp float u_zoom;
     highp float u_maxzoom;
+    highp float u_unpack_scale;
+    highp float pad_tile0;
+    highp float pad_tile1;
+    highp float pad_tile2;
 };
 
 out vec2 v_pos;
@@ -2816,13 +2907,19 @@ layout (std140) uniform HillshadePrepareTilePropsUBO {
     highp vec2 u_dimension;
     highp float u_zoom;
     highp float u_maxzoom;
+    highp float u_unpack_scale;
+    highp float pad_tile0;
+    highp float pad_tile1;
+    highp float pad_tile2;
 };
 
-float getElevation(vec2 coord, float bias) {
-    // Convert encoded elevation value to meters
-    vec4 data = texture(u_image, coord) * 255.0;
-    data.a = -1.0;
-    return dot(data, u_unpack);
+// The height in meters of the DEM at `coord`, by the rule of
+// `mln_util::dem`. The channels aren't rounded: the decode is linear in
+// them, so where a linear sampler interpolates them, it interpolates the
+// heights.
+float getElevation(vec2 coord) {
+    vec3 rgb = texture(u_image, coord).rgb * 255.0;
+    return (rgb.r * u_unpack.x + rgb.g * u_unpack.y + rgb.b * u_unpack.z + u_unpack.w) * u_unpack_scale;
 }
 
 void main() {
@@ -2844,15 +2941,15 @@ void main() {
     // |   |   |   |
     // +-----------+
 
-    float a = getElevation(v_pos + vec2(-epsilon.x, -epsilon.y), 0.0);
-    float b = getElevation(v_pos + vec2(0, -epsilon.y), 0.0);
-    float c = getElevation(v_pos + vec2(epsilon.x, -epsilon.y), 0.0);
-    float d = getElevation(v_pos + vec2(-epsilon.x, 0), 0.0);
-  //float e = getElevation(v_pos, 0.0);
-    float f = getElevation(v_pos + vec2(epsilon.x, 0), 0.0);
-    float g = getElevation(v_pos + vec2(-epsilon.x, epsilon.y), 0.0);
-    float h = getElevation(v_pos + vec2(0, epsilon.y), 0.0);
-    float i = getElevation(v_pos + vec2(epsilon.x, epsilon.y), 0.0);
+    float a = getElevation(v_pos + vec2(-epsilon.x, -epsilon.y));
+    float b = getElevation(v_pos + vec2(0, -epsilon.y));
+    float c = getElevation(v_pos + vec2(epsilon.x, -epsilon.y));
+    float d = getElevation(v_pos + vec2(-epsilon.x, 0));
+  //float e = getElevation(v_pos);
+    float f = getElevation(v_pos + vec2(epsilon.x, 0));
+    float g = getElevation(v_pos + vec2(-epsilon.x, epsilon.y));
+    float h = getElevation(v_pos + vec2(0, epsilon.y));
+    float i = getElevation(v_pos + vec2(epsilon.x, epsilon.y));
 
     // Convert the raw pixel-space derivative (slope) into world-space slope.
     // The conversion factor is: tileSize / (8 * meters_per_pixel).

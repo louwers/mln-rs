@@ -37,7 +37,10 @@ use crate::shaders::shader_defines::{
     ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
 };
 #[cfg(feature = "gpu-conformance")]
-use crate::shaders::shader_defines::{ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE};
+use crate::shaders::shader_defines::{
+    ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE,
+    ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE,
+};
 
 const fn property(name: &'static str, attribute: usize) -> Property {
     Property { name, attribute }
@@ -679,5 +682,20 @@ pub static VERTEX_TEXEL: Program = Program {
     attributes: &[(ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, Short4)],
     instance_attributes: &[],
     textures: &[ID_VERTEX_TEXEL_TEXTURE],
+    properties: &[],
+};
+
+/// For the backend conformance cases: probes whose vertex stage reads a
+/// height by the terrain's height rule, and whose fragment stage writes its
+/// bits. The renderer doesn't draw with it.
+#[cfg(feature = "gpu-conformance")]
+pub static TERRAIN_PROBE: Program = Program {
+    name: "TerrainProbeShader",
+    attributes: &[
+        (ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE, Float4),
+        (ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE, Float4),
+    ],
+    instance_attributes: &[],
+    textures: &[ID_TERRAIN_DEM_TEXTURE],
     properties: &[],
 };

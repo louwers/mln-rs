@@ -39,6 +39,7 @@ use mln_style_types::{HillshadeIlluminationAnchorType, HillshadeMethodType, Resa
 use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
 use mln_util::constants::{self, EXTENT};
+use mln_util::dem::DemUnpack;
 use mln_util::geo::LatLng;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
@@ -50,7 +51,6 @@ use crate::bucket_geometry::copied_vertices;
 use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::buckets::raster_bucket::RasterLayoutVertex;
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
-use crate::geometry::dem_data::unpack_vector;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::gfx::store::SharedTexture;
@@ -598,11 +598,14 @@ impl BucketTarget {
         bind_no_projection(gpu, &mut prepare.frame.uniform_buffers, context);
         let draw_ubo = HillshadePrepareDrawableUBO { matrix: cast_matrix(&m) };
         prepare.write_pod(gpu, ID_HILLSHADE_PREPARE_DRAWABLE_UBO, &draw_ubo, context);
+        let unpack = DemUnpack::of(encoding);
         let tile_props = HillshadePrepareTilePropsUBO {
-            unpack: unpack_vector(encoding),
+            unpack: unpack.weights_and_base(),
             dimension: [stride as f32, stride as f32],
             zoom: f32::from(tile_id.canonical.z),
             maxzoom: f32::from(maxzoom),
+            unpack_scale: unpack.scale,
+            ..HillshadePrepareTilePropsUBO::default()
         };
         prepare.write_pod(gpu, ID_HILLSHADE_PREPARE_TILE_PROPS_UBO, &tile_props, context);
 

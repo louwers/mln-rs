@@ -21,3 +21,4 @@ pub mod segment;
 pub mod shader_defines;
 pub mod sky_ubo;
 pub mod symbol_layer_ubo;
+pub mod terrain_ubo;

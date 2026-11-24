@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use mln_gfx::gpu::conformance::{
     clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, imported_textures,
-    instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, topologies, transparent_replace,
-    vertex_layouts, written_vertex_texels,
+    instanced_walls, invalid_calls, pulled_walls, readbacks, resources_in_use, terrain_heights, topologies,
+    transparent_replace, vertex_layouts, written_vertex_texels,
 };
 use mln_gfx::gpu::{BufferUsage, ColorAttachment};
 use mln_gfx::shaders::programs;
@@ -76,6 +76,12 @@ fn drawn_vertex_texels_through_gpu() {
 }
 
 #[test]
+fn terrain_heights_through_gpu() {
+    let device = Device::new(None).expect("Metal device");
+    terrain_heights(&mut MetalGpu::new(&device)).expect("the frames");
+}
+
+#[test]
 fn vertex_layouts_through_gpu() {
     let device = Device::new(None).expect("Metal device");
     vertex_layouts(&mut MetalGpu::new(&device)).expect("the frames");
@@ -111,7 +117,7 @@ fragment half4 fragmentMain() { return half4(1.0); }
     let mut gpu = MetalGpu::new(&device);
     let program = &programs::FILL_EXTRUSION_INSTANCED;
     let (vertex, fragment) =
-        compile(device.device(), "direct read", MSL, "vertexMain", "fragmentMain", []).expect("the MSL compiles");
+        compile(device.device(), "direct read", MSL, "vertexMain", "fragmentMain", [], true).expect("the MSL compiles");
     let source = gpu.sources.get(program).expect("the table");
     let active_attributes = active_attributes(&vertex);
     let shader = gpu.shaders.insert(Shader { program, source, vertex, active_attributes, fragment, table: None });
