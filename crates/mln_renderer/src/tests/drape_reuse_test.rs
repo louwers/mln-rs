@@ -17,7 +17,7 @@ use mln_map_types::{
     CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TerrainOptions, TileLodMode, ViewportMode,
 };
 use mln_storage::{FileSource, Resource, Responder, Response};
-use mln_style::expression::expr::FeatureState;
+use mln_style::expression::FeatureState;
 use mln_style::sources::{GeoJSONOptions, GeoJsonSourceType};
 use mln_style::{Edit, Style};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};

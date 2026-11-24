@@ -251,7 +251,7 @@ impl RenderLineLayer {
         &self,
         feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
         zoom: f32,
-        feature_state: &mln_style::expression::expr::FeatureState,
+        feature_state: &mln_style::expression::FeatureState,
     ) -> f32 {
         let evaluated = &self.values.evaluated.paint;
         let line_width = evaluated.line_width.evaluate(&EvaluationContext::with_zoom_feature_state(
@@ -502,7 +502,7 @@ impl RenderLayer for RenderLineLayer {
         region: &QueryRegion<'_>,
         feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
         geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
-        feature_state: &mln_style::expression::expr::FeatureState,
+        feature_state: &mln_style::expression::FeatureState,
     ) -> bool {
         let QueryRegion { geometry: query_geometry, view, pixels_to_tile_units, .. } = *region;
         let zoom = view.zoom() as f32;

@@ -13,7 +13,7 @@ use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapDebugOptions, MapMode, MapOptions, RenderFrameStatus, RenderMode};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::Edit;
-use mln_style::expression::expr::FeatureState;
+use mln_style::expression::FeatureState;
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::Pool;
 use mln_util::size::Size;

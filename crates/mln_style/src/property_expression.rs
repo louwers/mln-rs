@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
+use mln_util::range::Range;
 use mln_util::serialization::shared;
 use mln_vec_map::VecSet;
 
-use crate::expression::range::Range;
 use crate::expression::value::from_expression_values;
 use crate::expression::{
     Dependency, EvaluationContext, Expr, GlobalStateMap, Value, ValueConverter, ZoomCurvePtr,

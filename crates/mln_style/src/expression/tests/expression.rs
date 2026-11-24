@@ -4,11 +4,11 @@ use mln_text::glyph::{FontFace, FontFaces};
 use mln_tile_id::CanonicalTileID;
 
 use crate::conversion::Convertible;
-use crate::expression::expr::{EvaluationContext, Expr, FeatureState, GlobalStateMap, evaluate_feature_with_context};
-use crate::expression::is_expression::is_expression;
-use crate::expression::parsing_context::ParsingContext;
+use crate::expression::parse::ParsingContext;
 use crate::expression::value::Value;
-use crate::expression::{Functions, dsl};
+use crate::expression::{
+    EvaluationContext, Expr, FeatureState, Functions, GlobalStateMap, dsl, evaluate_feature_with_context, is_expression,
+};
 
 /// A path relative to the C++ repository, in the copy of the files these
 /// tests read (testdata/).

@@ -14,15 +14,14 @@ use mln_vec_map::{VecMap, VecSet};
 
 use crate::conversion::Convertible;
 use crate::evaluated::Evaluated;
-use crate::expression::Functions;
 use crate::expression::dsl::{format_str, get_str, literal_str, string, to_color};
-use crate::expression::expr::{Dependency, EvaluationContext, Expr, GlobalStateMap};
-use crate::expression::format_expression::{FormatExpression, FormatExpressionSection};
 use crate::expression::formatted::{Formatted, FormattedSection};
-use crate::expression::match_::Match;
-use crate::expression::parsing_context::ParsingContext;
+use crate::expression::forms::format::{FormatExpression, FormatExpressionSection};
+use crate::expression::forms::match_::Match;
+use crate::expression::parse::ParsingContext;
 use crate::expression::type_::Type;
 use crate::expression::value::{ObjectType, Value};
+use crate::expression::{Dependency, EvaluationContext, Expr, Functions, GlobalStateMap};
 use crate::format_section_override::{format_section_override as new_override, set_overrides};
 use crate::layer_type::LayerStyle;
 use crate::layers::symbol_layer::SymbolLayerPaintPropertyOverrides as MockOverrides;
@@ -317,7 +316,7 @@ fn symbol_layer_overrides() {
         };
 
         let mut ctx = ParsingContext::new(&Functions::with_builtins());
-        let state_expression = crate::expression::compound_expression::create_compound_expression(
+        let state_expression = crate::expression::forms::compound::create_compound_expression(
             "global-state",
             vec![literal_str("labelColor")],
             &mut ctx,

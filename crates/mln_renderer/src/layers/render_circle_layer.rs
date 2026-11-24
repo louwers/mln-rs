@@ -310,7 +310,7 @@ impl RenderLayer for RenderCircleLayer {
         region: &QueryRegion<'_>,
         feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
         geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
-        feature_state: &mln_style::expression::expr::FeatureState,
+        feature_state: &mln_style::expression::FeatureState,
     ) -> bool {
         use crate::geometry::feature_index::FeatureIndex;
 

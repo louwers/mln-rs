@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, LazyLock};
 
-use mln_style::expression::expr::FeatureState;
+use mln_style::expression::FeatureState;
 use mln_util::hash::HashMap;
 use mln_vec_map::VecMap;
 

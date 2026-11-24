@@ -1,14 +1,13 @@
 // Port-only: the images `image` expressions record as unavailable
-// (image_expression.rs).
+// (expression/forms/image.rs).
 
 use mln_vec_map::VecSet;
 
 use crate::conversion::Convertible;
-use crate::expression::Functions;
-use crate::expression::expr::{EvaluationContext, Expr};
-use crate::expression::image_expression::UnavailableImages;
-use crate::expression::parsing_context::ParsingContext;
+use crate::expression::forms::image::UnavailableImages;
+use crate::expression::parse::ParsingContext;
 use crate::expression::type_::Type;
+use crate::expression::{EvaluationContext, Expr, Functions};
 
 fn coalesce() -> Expr {
     let document: serde_json::Value =

@@ -1,4 +1,4 @@
-use crate::expression::utf8_op_helpers::{
+use crate::expression::forms::length::{
     get_unicode_character_offset_on_validated_utf8, unicode_length_on_validated_utf8,
 };
 

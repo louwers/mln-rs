@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use crate::conversion::Convertible;
-use crate::expression::expr::{Dependency, EvalResult, EvaluationContext, Expr};
 use crate::expression::functions::{Eval, Functions, OverloadSpec, Params, RegisterError, Role};
-use crate::expression::parsing_context::ParsingContext;
+use crate::expression::parse::ParsingContext;
 use crate::expression::type_::Type;
 use crate::expression::value::Value;
+use crate::expression::{Dependency, EvalResult, EvaluationContext, Expr};
 
 fn twice(args: &[Expr], cx: &EvaluationContext<'_>) -> EvalResult<f64> {
     Ok(2.0 * args[0].eval_num(cx)?)
