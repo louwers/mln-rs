@@ -608,20 +608,6 @@ impl DrawObjects {
         }
     }
 
-    /// The texture it binds as `id`, which `make` makes where it has none;
-    /// `None` where it has none and `make` returns `None`.
-    pub(crate) fn texture_or_insert_with(
-        &mut self,
-        id: usize,
-        make: impl FnOnce() -> Option<SharedTexture>,
-    ) -> Option<&SharedTexture> {
-        let texture = &mut self.textures[id];
-        if texture.is_none() {
-            *texture = make();
-        }
-        texture.as_ref()
-    }
-
     /// Replaces the indexes and the segments drawn from them.
     pub(crate) fn replace_indexes(&mut self, indexes: DrawIndexes, segments: Vec<SegmentBase>) {
         if let DrawIndexes::Own(_) = self.indexes {

@@ -4759,6 +4759,39 @@ fn image_readded_before_relayout() {
     assert!(same_color(pixel, BLUE), "{pixel:?}");
 }
 
+/// A dashed line whose dash array steps at a zoom between two of the same
+/// tile's draws shows the dashes of the zoom it draws at, as a map that
+/// starts at that zoom does.
+#[test]
+fn a_line_shows_the_dashes_of_its_zoom_on_a_kept_tile() {
+    let style = r#"{
+      "version": 8,
+      "sources": {"line": {"type": "geojson", "data": {"type": "LineString", "coordinates": [[-40, 0], [40, 0]]}}},
+      "layers": [
+        {"id": "background", "type": "background", "paint": {"background-color": "white"}},
+        {"id": "line", "type": "line", "source": "line", "paint": {
+          "line-width": 8,
+          "line-dasharray": ["step", ["zoom"], ["literal", [1, 1]], 2.5, ["literal", [4, 1]]]
+        }}
+      ]
+    }"#;
+    let render_at = |test: &MapTest, zoom: f64| {
+        test.map().jump_to(&CameraOptions { center: Some(ll(0.0, 0.0)), zoom: Some(zoom), ..Default::default() });
+        test.render().image
+    };
+
+    let zoomed = MapTest::new();
+    zoomed.load_json(style);
+    render_at(&zoomed, 2.2);
+    let zoomed = render_at(&zoomed, 2.8);
+
+    let fresh = MapTest::new();
+    fresh.load_json(style);
+    let fresh = render_at(&fresh, 2.8);
+
+    assert!(zoomed.data == fresh.data, "the zoomed map draws other dashes than a map that starts at its zoom");
+}
+
 // gtest: Map.FallbackFontFacesCoverEveryFontStack
 #[test]
 fn fallback_font_faces_cover_every_font_stack() {

@@ -786,7 +786,7 @@ impl RenderLineLayer {
                 } else {
                     let dasharray = evaluated.line_dasharray.faded();
                     let dash_pattern = line_atlas.get(dasharray.from, dasharray.to, cached.dash_cap)?;
-                    cached.objects.texture_or_insert_with(dash_texture_id, || dash_pattern.texture().cloned())?;
+                    cached.objects.set_texture(dash_texture_id, Some(dash_pattern.texture()?));
 
                     let pos_a = dash_pattern.from();
                     let pos_b = dash_pattern.to();
