@@ -1,16 +1,18 @@
 //! The planes that the camera's moves solve on, or on the globe the
-//! spheres. The flat map's ground is the plane, or the sphere, at sea level:
-//! a move around an anchor, a drag, a pinch, a turn or a tilt, holds the
-//! location its pointer grabbed on it under the pointer. A move without an
-//! anchor, or around one whose line of sight doesn't meet the ground, moves
-//! the map on the plane or the sphere at the center's altitude, which keeps
-//! the center where it draws.
+//! spheres. A move around an anchor, a drag, a pinch, a turn or a tilt,
+//! holds the location its pointer grabbed under the pointer, on the plane at
+//! the height of the ground it grabbed: a command's over terrain grabs the
+//! drawn ground, and anything else the flat map's, at sea level. A move
+//! without an anchor, or around one whose line of sight doesn't meet the
+//! ground, moves the map on the plane or the sphere at the center's
+//! altitude, which keeps the center where it draws.
 
 use mln_map_types::{VerticalPerspectiveProjection, View};
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 
 use super::{Transform, flip_y};
+use crate::map_event::CameraChangeSource;
 
 /// How near the view's center, in squared pixels, an anchor stands at it:
 /// a move around it leaves the center where it is (GL JS's).
@@ -19,21 +21,35 @@ const NEAR_CENTER: f64 = 1e-2;
 impl Transform {
     /// The height of the plane on which a move around `anchor` (y down)
     /// holds the ground the pointer grabbed under `grabbed`, the pointer
-    /// before the move: the flat map's ground, sea level. On the globe the
-    /// plane is the sphere at that height.
+    /// before the move. On the globe the plane is the sphere at that height.
     ///
-    /// `None`, for the plane at the center's altitude, for a pivot
-    /// (`grabbed` is `anchor`) at the view's center, and where the plane
-    /// can't hold the anchor or the grabbed point ([`sees_plane`]), such as
-    /// one above the horizon.
+    /// `None`, for the plane at the center's altitude, where the pointer
+    /// grabbed no ground ([`Self::grabbed_height`]), for a pivot (`grabbed`
+    /// is `anchor`) at the view's center, and where the plane can't hold the
+    /// anchor or the grabbed point ([`sees_plane`]), such as one above the
+    /// horizon.
     pub(super) fn anchor_plane(&self, grabbed: &ScreenCoordinate, anchor: &ScreenCoordinate) -> Option<f64> {
+        let height = self.grabbed_height(grabbed)?;
         let view = self.view();
-        let height = 0.0;
         let center = view.padding().center_in(view.size());
         // A pivot at the center leaves the center where it is.
         let pivot = grabbed == anchor && (anchor.x - center.x).powi(2) + (anchor.y - center.y).powi(2) < NEAR_CENTER;
         let sees = |point: &ScreenCoordinate| sees_plane(view, &flip_y(view, point), height);
         (!pivot && sees(anchor) && sees(grabbed)).then_some(height)
+    }
+
+    /// The height of the ground a move grabs under `grabbed` (y down): for a
+    /// command over terrain, the drawn ground that the point's line of sight
+    /// meets, or `None` where it meets none or before any was drawn; for
+    /// anything else, sea level.
+    fn grabbed_height(&self, grabbed: &ScreenCoordinate) -> Option<f64> {
+        match &self.terrain {
+            Some(terrain) if self.source == CameraChangeSource::Command => {
+                let view = self.view();
+                Some(view.ground_under(&flip_y(view, grabbed), terrain.elevation.as_deref()?)?.height)
+            }
+            _ => Some(0.0),
+        }
     }
 
     /// The height of the plane, or on the globe the sphere, on which a move

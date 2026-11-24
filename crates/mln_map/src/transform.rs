@@ -196,6 +196,10 @@ pub struct Transform {
     globe_drag_hold: Option<GlobeDragHold>,
     /// The terrain the camera stands on ([`Self::set_terrain`]).
     terrain: Option<TerrainGround>,
+    /// The time of the last frame that composed the commands' cameras,
+    /// from which the altitude over terrain heads on
+    /// ([`Self::ease_altitude`]).
+    last_frame: Option<Instant>,
 }
 
 /// The location a drag on the globe holds under the cursor, from the step
@@ -236,6 +240,7 @@ impl Transform {
             globe_free_bearing: false,
             globe_drag_hold: None,
             terrain: None,
+            last_frame: None,
         }
     }
 
@@ -347,11 +352,13 @@ impl Transform {
     }
 
     /// Moves the map by `offset`. A drag on the globe turns the planet so
-    /// that the location under `anchor` follows the cursor. The flat map's
-    /// ground under the cursor before the move follows it, on the plane at
-    /// sea level, or on the globe the sphere; without an anchor, or with one
-    /// whose line of sight doesn't meet the ground, the map moves on the
-    /// plane or the sphere at the center's altitude. On the globe, with the
+    /// that the location under `anchor` follows the cursor. The ground under
+    /// the cursor before the move follows it, on the plane at that ground's
+    /// height, or on the globe the sphere: sea level on the flat map and for
+    /// a gesture, the drawn ground for a command over terrain
+    /// ([`Self::set_terrain`]); without an anchor, or with one that grabs no
+    /// ground, the map moves on the plane or the sphere at the center's
+    /// altitude. On the globe, with the
     /// bearing held, steps that follow one another, each starting at the
     /// `anchor` of the one before with the camera as it left it, hold the
     /// location the first of them grabbed, wherever
@@ -428,7 +435,7 @@ impl Transform {
                 bearing: Some(end.bearing),
                 ..Default::default()
             };
-            self.start_transition(&fields, animation, frame, duration, false);
+            self.start_transition(&fields, animation, frame, None, duration, false);
             return Ok(());
         }
 

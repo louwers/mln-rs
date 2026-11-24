@@ -3,13 +3,15 @@
 
 use std::time::Duration;
 
+use glam::DVec3;
 use mln_map_types::{
-    AnimationOptions, CameraOptions, CameraVelocity, TransformState, TransitionEnd, TransitionOutcome,
+    AnimationOptions, CameraOptions, CameraVelocity, Elevation, TransformState, TransitionEnd, TransitionOutcome,
     VerticalPerspectiveProjection,
 };
-use mln_util::constants::DEFAULT_TRANSITION_EASE;
+use mln_util::constants::{DEFAULT_TRANSITION_EASE, TILE_SIZE_D};
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
 use mln_util::logging::{Event, Log};
+use mln_util::projection::Projection;
 use mln_util::time::Instant;
 
 use super::anchor::sees_plane;
@@ -24,6 +26,10 @@ use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 /// center or padding the frame could not compute (logged), which keeps the
 /// current one.
 pub(super) type FrameFn = Box<dyn Fn(&TransformState, f64) -> CameraOptions>;
+
+/// How far along its path a command's center is at an eased progress below
+/// 1, as a share of the path, where that isn't the eased progress itself.
+pub(super) type AlongFn = Box<dyn Fn(f64) -> f64>;
 
 /// One camera command.
 pub(super) struct Transition {
@@ -41,6 +47,9 @@ pub(super) struct Transition {
     pub(super) duration: Duration,
     animation: AnimationOptions,
     frame: FrameFn,
+    /// How far along its path the center is ([`Transition::share`]), or
+    /// `None` for the eased progress.
+    along: Option<AlongFn>,
     anchor: Option<ScreenCoordinate>,
     anchor_lat_lng: LatLng,
     /// The height in meters of the plane, or on the globe the sphere, the
@@ -82,6 +91,7 @@ impl Transition {
             duration,
             animation: *animation,
             frame,
+            along: None,
             anchor: None,
             anchor_lat_lng: LatLng::default(),
             anchor_height: 0.0,
@@ -90,6 +100,28 @@ impl Transition {
             source,
             command: None,
             gesture: None,
+        }
+    }
+
+    /// Whether a camera command started the transition, not a gesture's
+    /// own move or its momentum.
+    pub(super) fn is_command(&self) -> bool {
+        self.source == CameraChangeSource::Command && self.momentum.is_none()
+    }
+
+    /// Where the command leaves the center, as the frame whose camera is
+    /// `frame` sees it: the center it heads for, or for an anchored command,
+    /// the center that stands on `ground` in its camera at the end with the
+    /// anchor's location under the anchor ([`anchored_end`]).
+    pub(super) fn end_center(&self, state: &TransformState, frame: &CameraOptions, ground: &dyn Elevation) -> LatLng {
+        let end = (self.frame)(state, 1.0);
+        match self.anchor {
+            Some(anchor) => {
+                let mut camera = *frame;
+                compose(&mut camera, &end, self.fields);
+                anchored_end(state, &camera, &anchor, &self.anchor_lat_lng, self.anchor_height, ground)
+            }
+            None => end.center.or(frame.center).unwrap_or_else(|| state.view().center(WrapMode::Unwrapped)).wrapped(),
         }
     }
 
@@ -132,6 +164,29 @@ impl Transition {
         }
     }
 
+    /// The progress at `now` through the command's easing, which its camera
+    /// is at: 1 at its end.
+    fn eased_progress(&self, now: Option<Instant>) -> f64 {
+        let t = self.progress(now);
+        let ease = self.animation.easing.unwrap_or(DEFAULT_TRANSITION_EASE);
+        if t == 1.0 { 1.0 } else { ease.solve(t, 0.001) }
+    }
+
+    /// How far along its path the command's center is at `now`, as a share
+    /// of the path: 0 before it starts, 1 from its end on.
+    pub(super) fn share(&self, now: Option<Instant>) -> f64 {
+        let k = self.eased_progress(now);
+        match &self.along {
+            Some(along) if k < 1.0 => along(k),
+            _ => k,
+        }
+    }
+
+    /// The time left of the command at `now`: none without a clock.
+    pub(super) fn remaining(&self, now: Option<Instant>) -> Duration {
+        self.duration.saturating_sub(self.elapsed(now))
+    }
+
     /// The time since the command started, at `now`; zero before it, and
     /// `Duration::MAX` without a clock, which ends every command.
     pub(super) fn elapsed(&self, now: Option<Instant>) -> Duration {
@@ -142,6 +197,104 @@ impl Transition {
     fn has_run_out(&self, now: Option<Instant>) -> bool {
         now.is_none_or(|now| now >= self.start && self.elapsed(Some(now)) >= self.duration)
     }
+}
+
+/// Takes onto `camera` the fields of a command's camera `value` that
+/// `fields` names, but a center or padding it lacks (see [`FrameFn`]).
+fn compose(camera: &mut CameraOptions, value: &CameraOptions, fields: u16) {
+    if fields & CENTER != 0 && value.center.is_some() {
+        camera.center = value.center;
+    }
+    if fields & ZOOM != 0 {
+        camera.zoom = value.zoom;
+    }
+    if fields & BEARING != 0 {
+        camera.bearing = value.bearing;
+    }
+    if fields & PITCH != 0 {
+        camera.pitch = value.pitch;
+    }
+    if fields & PADDING != 0 && value.padding.is_some() {
+        camera.padding = value.padding;
+    }
+    if fields & ALTITUDE != 0 {
+        camera.center_altitude = value.center_altitude;
+    }
+    if fields & ROLL != 0 {
+        camera.roll = value.roll;
+    }
+    if fields & FOV != 0 {
+        camera.fov = value.fov;
+    }
+}
+
+/// Puts `camera`, composed over `current`, the camera of `state`, on
+/// `state` within its limits. In particular, padding and field of view
+/// determine the pitch limit, and center and zoom jointly determine the
+/// geographic bounds, which constrain `camera`.
+///
+/// The angles no command changed stay as they are, so that converting
+/// them to degrees and back doesn't move them.
+fn place(state: &mut TransformState, current: &CameraOptions, camera: &mut CameraOptions) {
+    let padding = camera.padding.unwrap_or_default();
+    state.set_padding(&padding);
+    if let Some(fov) = camera.fov.filter(|_| camera.fov != current.fov) {
+        state.set_fov(mln_math::deg2rad(fov));
+    }
+    if let Some(bearing) = camera.bearing.filter(|_| camera.bearing != current.bearing) {
+        state.set_angle(mln_math::deg2rad(-bearing));
+    }
+    if let Some(roll) = camera.roll.filter(|_| camera.roll != current.roll) {
+        state.set_roll(mln_math::deg2rad(roll));
+    }
+    let pitch = match camera.pitch.filter(|_| camera.pitch != current.pitch) {
+        Some(pitch) => mln_math::deg2rad(pitch),
+        None => state.view().pitch(),
+    };
+    state.set_pitch(f64::min(max_pitch_for_padding(state, &padding), pitch));
+    // Before the center, so that an anchor holds at the new altitude.
+    state.set_center_altitude(camera.center_altitude.unwrap_or_default());
+    let mut zoom = camera.zoom.unwrap_or_default();
+    state.constrain_camera_and_zoom_to_bounds(camera, &mut zoom);
+    state.set_lat_lng_zoom(&camera.center.unwrap_or_default(), zoom);
+}
+
+/// Where an anchored command leaves the center over `ground`, in `camera`,
+/// its camera at the end, with `location`, `height` meters up, under
+/// `anchor` (y up).
+///
+/// Moving that camera along the anchor's line of sight keeps `location`
+/// under the anchor, so its center stands on a line along that line of
+/// sight at whatever altitude it has: the end is where that line meets the
+/// ground, or where it meets none, the center at the altitude it has now. A
+/// camera that can't hold the anchor turns around its center, as the frames
+/// do (see `Transform::hold_anchor`); so does the globe, which has no
+/// straight line of sight to slide along.
+fn anchored_end(
+    state: &TransformState,
+    camera: &CameraOptions,
+    anchor: &ScreenCoordinate,
+    location: &LatLng,
+    height: f64,
+    ground: &dyn Elevation,
+) -> LatLng {
+    let mut state = state.clone();
+    let current = state.camera_options(None);
+    let altitude = current.center_altitude;
+    place(&mut state, &current, &mut CameraOptions { center_altitude: altitude, ..*camera });
+    if state.view().is_globe() || !sees_plane(state.view(), anchor, height) {
+        return state.view().center(WrapMode::Wrapped);
+    }
+    // The anchor had a location at the start, so it has one here.
+    let _ = state.move_lat_lng_at(location, anchor, height);
+    let view = state.view();
+    let center = view.center(WrapMode::Unwrapped);
+    let on_ground = view.line_of_sight(anchor).and_then(|(near, far)| {
+        let world = Projection::project(&center, 1.0 / TILE_SIZE_D);
+        let at = DVec3::new(world.x, world.y, view.center_altitude());
+        view.ground_along(at - (far - near), at + (far - near), ground)
+    });
+    on_ground.map_or(center, |hit| hit.location(WrapMode::Unwrapped)).wrapped()
 }
 
 /// A command made of several transitions, which ends once with the
@@ -159,16 +312,23 @@ impl Transform {
     /// commands. A flight couples center and zoom; an anchored command
     /// couples center with its fields. Replacing any field of a coupled
     /// group stops the whole group, and a command left with no fields
-    /// finishes.
+    /// finishes. Over terrain that clamps the center, the ground decides the
+    /// altitude, and a command given one starts as it would without it.
+    /// `along` tells how far along its path the command's center is, if
+    /// that isn't its eased progress.
     pub(super) fn start_transition(
         &mut self,
         camera: &CameraOptions,
         animation: &AnimationOptions,
         frame: FrameFn,
+        along: Option<AlongFn>,
         duration: Duration,
         flight: bool,
     ) {
         let mut fields = camera_fields(camera);
+        if self.clamped() {
+            fields &= !ALTITUDE;
+        }
         let mut coupled_fields = if flight { CENTER | ZOOM } else { 0 };
         fields |= coupled_fields;
 
@@ -207,6 +367,7 @@ impl Transform {
         let duration = if fields != 0 { duration } else { Duration::ZERO };
         let transition = Transition {
             coupled_fields,
+            along,
             anchor,
             anchor_lat_lng,
             anchor_height,
@@ -244,41 +405,11 @@ impl Transform {
             Some(index) => &self.transitions[index..=index],
             None => &self.transitions[..],
         };
-        for transition in active {
-            if transition.momentum.is_some() {
-                continue;
-            }
-            let t = transition.progress(now);
-            let ease = transition.animation.easing.unwrap_or(DEFAULT_TRANSITION_EASE);
-            let value = (transition.frame)(&self.state, if t == 1.0 { 1.0 } else { ease.solve(t, 0.001) });
-            let fields = transition.fields;
-            // A frame without a center or padding (see FrameFn) keeps the
-            // current one.
-            if fields & CENTER != 0 && value.center.is_some() {
-                camera.center = value.center;
-            }
-            if fields & ZOOM != 0 {
-                camera.zoom = value.zoom;
-            }
-            if fields & BEARING != 0 {
-                camera.bearing = value.bearing;
-            }
-            if fields & PITCH != 0 {
-                camera.pitch = value.pitch;
-            }
-            if fields & PADDING != 0 && value.padding.is_some() {
-                camera.padding = value.padding;
-            }
-            if fields & ALTITUDE != 0 {
-                camera.center_altitude = value.center_altitude;
-            }
-            if fields & ROLL != 0 {
-                camera.roll = value.roll;
-            }
-            if fields & FOV != 0 {
-                camera.fov = value.fov;
-            }
+        for transition in active.iter().filter(|transition| transition.momentum.is_none()) {
+            let k = transition.eased_progress(now);
+            compose(&mut camera, &(transition.frame)(&self.state, k), transition.fields);
         }
+        let lands = self.ease_altitude(&mut camera, now);
 
         // An active anchor also applies to immediate changes of other
         // properties.
@@ -307,33 +438,9 @@ impl Transform {
             _ => None,
         };
 
-        // Compose the camera before applying constraints. In particular,
-        // padding and field of view determine the pitch limit, and center
-        // and zoom jointly determine the geographic bounds.
-        //
-        // The angles no command changed stay as they are, so that converting
-        // them to degrees and back doesn't move them.
-        let padding = camera.padding.unwrap_or_default();
-        self.state.set_padding(&padding);
-        if let Some(fov) = camera.fov.filter(|_| camera.fov != current.fov) {
-            self.state.set_fov(mln_math::deg2rad(fov));
-        }
-        if let Some(bearing) = camera.bearing.filter(|_| camera.bearing != current.bearing) {
-            self.state.set_angle(mln_math::deg2rad(-bearing));
-        }
-        if let Some(roll) = camera.roll.filter(|_| camera.roll != current.roll) {
-            self.state.set_roll(mln_math::deg2rad(roll));
-        }
-        let pitch = match camera.pitch.filter(|_| camera.pitch != current.pitch) {
-            Some(pitch) => mln_math::deg2rad(pitch),
-            None => self.state.view().pitch(),
-        };
-        self.state.set_pitch(f64::min(max_pitch_for_padding(&self.state, &padding), pitch));
-        // Before the center, so that the anchor holds at the frame's altitude.
-        self.state.set_center_altitude(camera.center_altitude.unwrap_or_default());
-        let mut zoom = camera.zoom.unwrap_or_default();
-        self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut zoom);
-        self.state.set_lat_lng_zoom(&camera.center.unwrap_or_default(), zoom);
+        // The altitude is set before the anchor holds its location, so that it
+        // holds at the frame's altitude (see `place`).
+        place(&mut self.state, &current, &mut camera);
         if let Some((anchor, anchor_lat_lng, height, index)) = anchored {
             match globe_zoom_around {
                 Some((location, zoom_before)) if self.state.view().zoom() != zoom_before => {
@@ -349,6 +456,9 @@ impl Transform {
                 }
                 _ => self.hold_anchor(&anchor_lat_lng, &anchor, height, &current, index),
             }
+        }
+        if lands {
+            self.stand_on_ground();
         }
         // Last, so that the eye stays clear.
         self.keep_eye_above();
@@ -390,9 +500,18 @@ impl Transform {
         self.moving = self.transitions.iter().fold(0, |moving, t| moving | (t.fields & t.moving_fields));
     }
 
+    /// Ends `finished`: the gestures whose momentum they are, then, if a
+    /// command is among them, the camera on the ground once nothing moves it
+    /// ([`Self::come_to_rest`]), and last their ends and changes, which
+    /// report that move too.
     pub(super) fn finish_transitions(&mut self, finished: Vec<Transition>) {
-        for transition in finished {
+        for transition in &finished {
             self.end_gesture_momentum(transition.gesture);
+        }
+        if finished.iter().any(Transition::is_command) {
+            self.come_to_rest();
+        }
+        for transition in finished {
             self.report_end(transition.command, transition.animation.transition_id, transition.end());
             // This notification ends a command, not necessarily all camera
             // motion.

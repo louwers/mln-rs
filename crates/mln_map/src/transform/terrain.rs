@@ -1,24 +1,38 @@
-//! The terrain under the camera: the ground a camera at rest stands on, and
-//! the eye kept above the ground while a command moves the camera.
+//! The terrain under the camera. Every rule applies only while the map
+//! hands the transform a ground ([`TerrainGround`]):
 //!
-//! Every rule applies only while the map hands the transform a ground
-//! ([`TerrainGround`]). The terrain moves a camera at rest, as ground loads
-//! or changes under it, the clamp turns on or the terrain goes, without
-//! camera events, as in GL JS: the map's snapshots show those moves.
+//! - The eye stays above the ground while a command moves the camera.
+//! - Under the clamp, the center stands on the ground:
+//!   - at rest, on the ground under it, once that has loaded;
+//!   - while commands run, the altitude eases toward the ground under where
+//!     they leave the center, and stands on it as they end
+//!     ([`Transform::ease_altitude`]);
+//!   - brought to rest off the ground, as by a cancel, the center moves
+//!     along the view onto the ground, with the eye where it is, so that
+//!     the picture stays ([`Transform::come_to_rest`]).
+//!
+//! A gesture keeps the altitude it moves with until it ends.
 //!
 //! The rules are the same on the globe, where heights stand along each
 //! point's vertical above the sea-level sphere: the same heights at the
 //! center decide the altitude, and the eye, its near plane and the ground
 //! under the line of sight are the globe camera's
 //! ([`View::ground_under`]).
+//!
+//! The terrain moves a camera at rest, as ground loads or changes under it,
+//! the clamp turns on or the terrain goes, without camera events, as in GL
+//! JS: the map's snapshots show those moves. What the terrain does to a
+//! command's camera happens within the command, before the
+//! `CameraDidChange` that ends it.
 
 use std::sync::Arc;
 
 use glam::DVec3;
-use mln_map_types::{Elevation, View};
+use mln_map_types::{CameraOptions, Elevation, View};
 use mln_util::geo::WrapMode;
+use mln_util::time::Instant;
 
-use super::Transform;
+use super::{CENTER, Transform, flip_y};
 
 /// How many times a command's camera is raised over the ground in a frame,
 /// as in GL JS: each raise turns the near plane, which can bring another
@@ -72,7 +86,8 @@ impl Transform {
     /// the view's near and far planes fit the lowest ground of the tile
     /// under the center, and a camera at rest whose center is clamped
     /// stands on the ground there, unless it is still loading. A camera that
-    /// a gesture or a command moves keeps the altitude they give it. Once
+    /// a command moves takes the altitude its frames give it, which ease
+    /// onto the ground, and one that a gesture moves keeps its own. Once
     /// there is no ground, the planes fit the flat map again, and a clamped
     /// center goes back to sea level, once.
     ///
@@ -96,19 +111,90 @@ impl Transform {
             self.leave_ground(clamped);
         }
         // A command of the pitch alone doesn't count as moving the camera,
-        // but it holds the altitude too.
+        // but its frames set the altitude too.
         let at_rest = !self.is_camera_moving() && !self.in_transition();
-        if let Some(elevation) = elevation.filter(|_| clamped && at_rest)
-            && let Some(altitude) = elevation.at(center).filter(|&altitude| altitude != before.1)
-        {
-            self.state.set_center_altitude(altitude);
+        if clamped && at_rest {
+            self.stand_on_ground();
         }
         ground(self.view()) != before
     }
 
     /// Whether there is terrain and it clamps the center.
-    fn clamped(&self) -> bool {
+    pub(super) fn clamped(&self) -> bool {
         self.terrain.as_ref().is_some_and(|terrain| terrain.clamped)
+    }
+
+    /// Puts the center at the height of the ground under it, unless that
+    /// is still loading.
+    pub(super) fn stand_on_ground(&mut self) {
+        let Some(TerrainGround { elevation: Some(ground), .. }) = &self.terrain else { return };
+        let view = self.view();
+        if let Some(altitude) = ground.at(view.center(WrapMode::Wrapped)).filter(|&h| h != view.center_altitude()) {
+            self.state.set_center_altitude(altitude);
+        }
+    }
+
+    /// Sets the altitude of `camera`, a frame's camera at `now` composed of
+    /// the running commands, over terrain that clamps the center: from the
+    /// altitude the camera has, toward the ground under where the commands
+    /// leave the center, by this frame's share of what is left of the way of
+    /// the command that ends last, so that it arrives as they end (GL JS's
+    /// `_startElevationEasing`, turned toward its target each frame). Where
+    /// they leave the center is where the command that owns it ends it, or
+    /// else where it is. Ground that lands, or a command that starts, ends
+    /// or hands the center over, turns the next frame toward the new target
+    /// from where the altitude is. While that ground is unknown, or a
+    /// gesture is in progress, the altitude stays where it is.
+    ///
+    /// Returns whether this frame ends the commands, which then stand the
+    /// center on the ground under where they put it
+    /// ([`Self::stand_on_ground`]).
+    pub(super) fn ease_altitude(&mut self, camera: &mut CameraOptions, now: Option<Instant>) -> bool {
+        let before = std::mem::replace(&mut self.last_frame, now);
+        let Some(TerrainGround { elevation: Some(ground), clamped: true }) = &self.terrain else { return false };
+        if self.gesture_in_progress {
+            return false;
+        }
+        let commands = || self.transitions.iter().filter(|transition| transition.is_command());
+        let Some(pacing) = commands().max_by_key(|transition| transition.remaining(now)) else { return false };
+        let end = match commands().find(|transition| transition.fields & CENTER != 0) {
+            Some(owner) => owner.end_center(&self.state, camera, &**ground),
+            None => self.view().center(WrapMode::Wrapped),
+        };
+        let Some(target) = ground.at(end) else { return false };
+        let altitude = self.view().center_altitude();
+        let share = pacing.share(now);
+        let reached = before.map_or(0.0, |before| pacing.share(Some(before))).min(share);
+        let lands = share == 1.0;
+        camera.center_altitude =
+            Some(if lands { target } else { altitude + (target - altitude) * (share - reached) / (1.0 - reached) });
+        lands
+    }
+
+    /// Stands a camera that commands brought to rest over terrain that
+    /// clamps the center on the ground, once no gesture or command moves it.
+    /// A center off the loaded ground under it, as a cancel leaves it, moves
+    /// along the view onto the ground its line of sight meets, with the eye
+    /// where it is ([`TransformState::recenter_on`], GL JS's
+    /// `recenterOnTerrain`); what that leaves off the ground, or all of it
+    /// where the view meets no drawn ground or the limits refuse the move,
+    /// the center takes up in altitude. The caller reports the change.
+    ///
+    /// [`TransformState::recenter_on`]: mln_map_types::TransformState::recenter_on
+    pub(super) fn come_to_rest(&mut self) {
+        let Some(TerrainGround { elevation: Some(ground), clamped: true }) = &self.terrain else { return };
+        let view = self.view();
+        let off = ground.at(view.center(WrapMode::Wrapped)).is_some_and(|h| h != view.center_altitude());
+        if !off || self.gesture_in_progress || !self.transitions.is_empty() {
+            return;
+        }
+        let ground = Arc::clone(ground);
+        let center = flip_y(view, &view.padding().center_in(view.size()));
+        if let Some(hit) = view.ground_under(&center, &*ground) {
+            // A refused move leaves the state as it is.
+            let _ = self.state.recenter_on(&hit);
+        }
+        self.stand_on_ground();
     }
 
     /// Keeps the eye of a command's camera out of the terrain: the view's

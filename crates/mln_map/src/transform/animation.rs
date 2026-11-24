@@ -10,7 +10,7 @@ use mln_util::geo::{EdgeInsets, LatLngBounds, WrapMode};
 use mln_util::interpolate::interpolate;
 use mln_util::projection::Projection;
 
-use super::transition::FrameFn;
+use super::transition::{AlongFn, FrameFn};
 use super::{
     CameraCommandId, Transform, frame_edge_insets, frame_unproject, lat_lng, nanos_from_secs, normalize_angle,
 };
@@ -248,7 +248,7 @@ impl Transform {
         } else {
             *input_camera
         };
-        self.start_transition(&fields, animation, frame, duration, false);
+        self.start_transition(&fields, animation, frame, None, duration, false);
     }
 
     /// This method implements an “optimal path” animation, as detailed in:
@@ -479,6 +479,8 @@ impl Transform {
         };
         // S: Total length of the flight path, measured in ρ-screenfuls.
         let total_s = if is_close { (w1 / w0).ln().abs() / rho } else { (r1 - r0) / rho };
+        // Where the center stays, the share of the time stands in.
+        let along: Option<AlongFn> = if is_close { None } else { Some(Box::new(move |k| u(k * total_s))) };
 
         let duration = if let Some(duration) = animation.duration {
             duration
@@ -576,6 +578,6 @@ impl Transform {
             }
         });
 
-        self.start_transition(input_camera, animation, frame, duration, !linear_zoom_interpolation);
+        self.start_transition(input_camera, animation, frame, along, duration, !linear_zoom_interpolation);
     }
 }
