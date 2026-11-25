@@ -2510,6 +2510,7 @@ pub(crate) const FILL_EXTRUSION_SHADER_PRELUDE: &str = r"
 #define idFillExtrusionPropsUBO                 layerUBOStartId + 1
 #define idFillExtrusionWallVertices             drawableUBOStartId + 5
 #define idFillExtrusionWallPaint                drawableUBOStartId + 6
+#define idFillExtrusionWallHeights              drawableUBOStartId + 7
 
 ";
 
@@ -2531,6 +2532,11 @@ layout(location = 3) in vec2 in_base;
 
 #if !defined(HAS_UNIFORM_u_height)
 layout(location = 4) in vec2 in_height;
+#endif
+
+#ifdef TERRAIN
+// The height of the ground under its polygon's centroid.
+layout(location = 10) in float in_ground_height;
 #endif
 
 layout(push_constant) uniform Constants {
@@ -2599,7 +2605,15 @@ void main() {
 
     const vec3 normal = vec3(0.0, 0.0, 1.0);
     const float t = 1.0;
+    // Over terrain, the extrusion stands on the ground under its polygon's
+    // centroid, as GL JS raises it, its base 10 m lower where it is at the
+    // ground, so that it meets a slope.
+#ifdef TERRAIN
+    const float ele = in_ground_height;
+    const float z = t > 0.0 ? height + ele : base + ele - (base > 0.0 ? 0.0 : 10.0);
+#else
     const float z = t > 0.0 ? height : base;
+#endif
     gl_Position = projectTileFor3D(vec2(in_position), z, projectionVector.projection_ubo[constant.ubo_index]);
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -2755,7 +2769,15 @@ macro_rules! fill_extrusion_wall_main {
 
     const vec3 normal = vec3(in_position.x == 0.0 ? wall_normal(in_decimals_ed.x, own) : wall_normal(in_next_decimals_ed.x, own), 0.0);
     const float t = float(in_position.y);
+    // Over terrain, the extrusion stands on the ground under its polygon's
+    // centroid, as GL JS raises it, its base 10 m lower where it is at the
+    // ground, so that it meets a slope.
+#ifdef TERRAIN
+    const float ele = in_ground_height;
+    const float z = t > 0.0 ? height + ele : base + ele - (base > 0.0 ? 0.0 : 10.0);
+#else
     const float z = t > 0.0 ? height : base;
+#endif
 
     gl_Position = projectTileFor3D(in_position.x == 0.0 ? p1 : p2, z, projectionVector.projection_ubo[constant.ubo_index]);
 
@@ -2831,6 +2853,11 @@ layout(location = 4) in vec2 in_base;
 layout(location = 5) in vec2 in_height;
 #endif
 
+#ifdef TERRAIN
+// The height of the ground under its polygon's centroid.
+layout(location = 10) in float in_ground_height;
+#endif
+
 ",
         fill_extrusion_wall_declarations!(),
         r"
@@ -2876,6 +2903,14 @@ layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillExtrusionWallPaint)
 } wallPaint;
 #endif
 
+#ifdef TERRAIN
+// The heights of the ground under the bucket's vertices' polygons'
+// centroids.
+layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillExtrusionWallHeights) readonly buffer FillExtrusionWallHeights {
+    float heights[];
+} wallHeights;
+#endif
+
 void main() {
     // Four vertices a wall, in the order of the static quad's corners.
     const uint wall = uint(gl_VertexIndex) / 4u;
@@ -2891,6 +2926,9 @@ void main() {
     const uvec2 in_decimals_ed = uvec2(decimals_ed & 0xffffu, decimals_ed >> 16u);
     const ivec2 in_next_outline_pos = ivec2(int(next_pos << 16u) >> 16, int(next_pos) >> 16);
     const uvec2 in_next_decimals_ed = uvec2(next_decimals_ed & 0xffffu, next_decimals_ed >> 16u);
+#ifdef TERRAIN
+    const float in_ground_height = wallHeights.heights[wall];
+#endif
 
     // The wall's paint values are its outline vertex's.
     const uint paint_layout = drawableVector.drawable_ubo[constant.ubo_index].paint_layout;
@@ -2938,6 +2976,11 @@ layout(location = 4) in uvec4 in_pattern_from;
 
 #if !defined(HAS_UNIFORM_u_pattern_to)
 layout(location = 5) in uvec4 in_pattern_to;
+#endif
+
+#ifdef TERRAIN
+// The height of the ground under its polygon's centroid.
+layout(location = 10) in float in_ground_height;
 #endif
 
 layout(push_constant) uniform Constants {
@@ -3023,7 +3066,15 @@ void main() {
 
     const vec3 normal = vec3(0.0, 0.0, 1.0);
     const float t = 1.0;
+    // Over terrain, the extrusion stands on the ground under its polygon's
+    // centroid, as GL JS raises it, its base 10 m lower where it is at the
+    // ground, so that it meets a slope.
+#ifdef TERRAIN
+    const float ele = in_ground_height;
+    const float z = t > 0.0 ? height + ele : base + ele - (base > 0.0 ? 0.0 : 10.0);
+#else
     const float z = t > 0.0 ? height : base;
+#endif
     gl_Position = projectTileFor3D(vec2(in_position), z, projectionVector.projection_ubo[constant.ubo_index]);
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -3222,6 +3273,11 @@ layout(location = 5) in uvec4 in_pattern_from;
 layout(location = 6) in uvec4 in_pattern_to;
 #endif
 
+#ifdef TERRAIN
+// The height of the ground under its polygon's centroid.
+layout(location = 10) in float in_ground_height;
+#endif
+
 layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
@@ -3322,7 +3378,15 @@ void main() {
     const vec3 normal = vec3(in_position.x == 0.0 ? wall_normal(in_decimals_ed.x, own) : wall_normal(in_next_decimals_ed.x, own), 0.0);
     const float edgedistance = in_position.x == 0.0 ? nextInstanceDecimalsEd.y : instanceDecimalsEd.y;
     const float t = float(in_position.y);
+    // Over terrain, the extrusion stands on the ground under its polygon's
+    // centroid, as GL JS raises it, its base 10 m lower where it is at the
+    // ground, so that it meets a slope.
+#ifdef TERRAIN
+    const float ele = in_ground_height;
+    const float z = t > 0.0 ? height + ele : base + ele - (base > 0.0 ? 0.0 : 10.0);
+#else
     const float z = t > 0.0 ? height : base;
+#endif
 
     gl_Position = projectTileFor3D(in_position.x == 0.0 ? p1 : p2, z, projectionVector.projection_ubo[constant.ubo_index]);
 

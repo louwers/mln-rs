@@ -51,6 +51,10 @@ declare -A allowed=(
     # The moiré's texels move: 289 of 65536 (0.44%) on RADV (291 on OpenGL),
     # 1113 (lavapipe) and 1104 (llvmpipe) (1.7%).
     [terrain/rtt-mipmap-minification/pitch-70]=0.02
+    # The extrusions' edges, single pixels, and the hillshade's ridges in the
+    # drapes, sampled with mips and anisotropy as in terrain/default, half
+    # each: 78 of 250000 on RADV and 81 on lavapipe and llvmpipe.
+    [terrain/fill-extrusion-multipolygon]=0.00035
     # Terrain on the globe. The numbers here are WebGPU's, on RADV and on Mesa
     # 26.0.8's lavapipe, which CI runs (Mesa 26.2.5 with
     # `GALLIVM_PERF=no_lod_ellipse` gives the same).

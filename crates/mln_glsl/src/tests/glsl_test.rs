@@ -235,6 +235,7 @@ fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
             (LayerUniform(ID_FILL_EXTRUSION_PROPS_UBO), size_of::<FillExtrusionPropsUBO>()),
             (DrawableVertex(ID_FILL_EXTRUSION_WALL_VERTICES), size_of::<u32>()),
             (DrawableVertex(ID_FILL_EXTRUSION_WALL_PAINT), size_of::<f32>()),
+            (DrawableVertex(ID_FILL_EXTRUSION_WALL_HEIGHTS), size_of::<f32>()),
         ],
         "FillExtrusionPatternShader" | "FillExtrusionPatternInstancedShader" | "FillExtrusionPatternWallShader" => {
             vec![
@@ -608,6 +609,12 @@ const UNREAD_ATTRIBUTES: &[(&str, usize)] = &[("ColorReliefShader", 1)];
 const STANDING_ATTRIBUTES: &[(&str, usize)] = &[
     ("CircleShader", ID_CIRCLE_GROUND_HEIGHT_VERTEX_ATTRIBUTE),
     ("HeatmapShader", ID_HEATMAP_GROUND_HEIGHT_VERTEX_ATTRIBUTE),
+    ("FillExtrusionShader", ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
+    ("FillExtrusionInstancedShader", ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
+    ("FillExtrusionWallShader", ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
+    ("FillExtrusionPatternShader", ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
+    ("FillExtrusionPatternInstancedShader", ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
+    ("FillExtrusionPatternWallShader", ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
 ];
 
 // The inputs of a vertex stage are the vertex and instance attributes of the

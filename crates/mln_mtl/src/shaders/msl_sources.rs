@@ -1549,7 +1549,15 @@ FragmentStage wall(thread const Vertex& vertx,
 
     const float3 normal = float3(vertx.pos.x == 0 ? wall_normal(vertx.decimals_ed.x, own) : wall_normal(vertx.next_decimals_ed.x, own), 0.0);
     const float t = float(vertx.pos.y);
-    const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
+    // Over terrain, the extrusion stands on the ground under its polygon's
+    // centroid, its base 10 m lower where it is at the ground, so that it
+    // meets a slope.
+#if defined(TERRAIN)
+    const float ele = vertx.ground_height;
+    const float z = (t != 0.0) ? height + ele : base + ele - (base > 0.0 ? 0.0 : 10.0);
+#else
+    const float z = (t != 0.0) ? height : base;
+#endif
 
     const float4 position = projectTileFor3D(vertx.pos.x == 0.0 ? p1 : p2, z, projection);
 
@@ -1691,6 +1699,10 @@ struct VertexStage {
 #if !defined(HAS_UNIFORM_u_height)
     float2 height [[attribute(5)]];
 #endif
+#if defined(TERRAIN)
+    // The height of the ground under its polygon's centroid.
+    float ground_height [[attribute(8)]];
+#endif
 };
 
 ",
@@ -1717,7 +1729,8 @@ pub(crate) const FILL_EXTRUSION_PULLED_SHADER: MslShaderSource = MslShaderSource
 
 enum {
     idFillExtrusionWallVertices = 7,
-    idFillExtrusionWallPaint
+    idFillExtrusionWallPaint,
+    idFillExtrusionWallHeights
 };
 
 // A vertex of the bucket, which the walls read by index.
@@ -1742,6 +1755,9 @@ struct WallVertex {
 #if !defined(HAS_UNIFORM_u_height)
     float2 height;
 #endif
+#if defined(TERRAIN)
+    float ground_height;
+#endif
 };
 ",
         extrusion_wall!(),
@@ -1752,7 +1768,11 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]],
                                 device const BucketVertex* wallVertices [[buffer(idFillExtrusionWallVertices)]],
-                                device const float* wallPaint [[buffer(idFillExtrusionWallPaint)]]) {
+                                device const float* wallPaint [[buffer(idFillExtrusionWallPaint)]]
+#if defined(TERRAIN)
+                                , device const float* wallHeights [[buffer(idFillExtrusionWallHeights)]]
+#endif
+                                ) {
     device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
 
     // Four vertices a wall, in the order of the static quad's corners.
@@ -1781,6 +1801,9 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
 #endif
 #if !defined(HAS_UNIFORM_u_color)
     vertx.color = float4(*(device const packed_float4*)(paint + (paint_layout >> 24)));
+#endif
+#if defined(TERRAIN)
+    vertx.ground_height = wallHeights[wall_index];
 #endif
 
     return wall(vertx, drawable, projectionVector[uboIndex], props);
@@ -1868,6 +1891,10 @@ struct VertexStage {
 #if !defined(HAS_UNIFORM_u_pattern_to)
     ushort4 pattern_to [[attribute(6)]];
 #endif
+#if defined(TERRAIN)
+    // The height of the ground under its polygon's centroid.
+    float ground_height [[attribute(9)]];
+#endif
 };
 
 struct FragmentStage {
@@ -1936,7 +1963,15 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float3 normal = float3(vertx.pos.x == 0 ? wall_normal(vertx.decimals_ed.x, own) : wall_normal(vertx.next_decimals_ed.x, own), 0.0);
     const float edgedistance = vertx.pos.x == 0 ? vertx.next_decimals_ed.y : vertx.decimals_ed.y;
     const float t = float(vertx.pos.y);
-    const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
+    // Over terrain, the extrusion stands on the ground under its polygon's
+    // centroid, its base 10 m lower where it is at the ground, so that it
+    // meets a slope.
+#if defined(TERRAIN)
+    const float ele = vertx.ground_height;
+    const float z = (t != 0.0) ? height + ele : base + ele - (base > 0.0 ? 0.0 : 10.0);
+#else
+    const float z = (t != 0.0) ? height : base;
+#endif
 
     const float4 position = projectTileFor3D(vertx.pos.x == 0.0 ? p1 : p2, z, projectionVector[uboIndex]);
 
@@ -2137,6 +2172,10 @@ struct VertexStage {
 #if !defined(HAS_UNIFORM_u_pattern_to)
     ushort4 pattern_to [[attribute(5)]];
 #endif
+#if defined(TERRAIN)
+    // The height of the ground under its polygon's centroid.
+    float ground_height [[attribute(6)]];
+#endif
 };
 
 struct FragmentStage {
@@ -2182,7 +2221,15 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     const float3 normal = float3(0.0, 0.0, 1.0);
     const float t = 1.0;
-    const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
+    // Over terrain, the extrusion stands on the ground under its polygon's
+    // centroid, its base 10 m lower where it is at the ground, so that it
+    // meets a slope.
+#if defined(TERRAIN)
+    const float ele = vertx.ground_height;
+    const float z = (t != 0.0) ? height + ele : base + ele - (base > 0.0 ? 0.0 : 10.0);
+#else
+    const float z = (t != 0.0) ? height : base;
+#endif
     const float4 position = projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -2377,6 +2424,10 @@ struct VertexStage {
 #if !defined(HAS_UNIFORM_u_height)
     float2 height [[attribute(4)]];
 #endif
+#if defined(TERRAIN)
+    // The height of the ground under its polygon's centroid.
+    float ground_height [[attribute(5)]];
+#endif
 };
 
 struct FragmentStage {
@@ -2410,7 +2461,15 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     const float3 normal = float3(0.0, 0.0, 1.0);
     const float t = 1.0;
-    const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
+    // Over terrain, the extrusion stands on the ground under its polygon's
+    // centroid, its base 10 m lower where it is at the ground, so that it
+    // meets a slope.
+#if defined(TERRAIN)
+    const float ele = vertx.ground_height;
+    const float z = (t != 0.0) ? height + ele : base + ele - (base > 0.0 ? 0.0 : 10.0);
+#else
+    const float z = (t != 0.0) ? height : base;
+#endif
     const float4 position = projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)

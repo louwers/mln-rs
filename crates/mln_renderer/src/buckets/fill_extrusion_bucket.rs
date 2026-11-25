@@ -55,6 +55,24 @@ pub(crate) struct FillExtrusionLayoutVertex {
     pub(crate) a2: [u16; 2],
 }
 
+/// The point an extrusion of `polygon` stands on over terrain, as GL JS
+/// takes it: the floored mean of the vertices of its rings, holes too, each
+/// ring's closing vertex left out.
+pub(crate) fn polygon_centroid<R: AsRef<[Point<i16>]>>(polygon: &[R]) -> [i16; 2] {
+    let (mut x, mut y, mut count) = (0i64, 0i64, 0i64);
+    for ring in polygon {
+        let ring = ring.as_ref();
+        let closed = ring.len() > 1 && ring.first() == ring.last();
+        for p in &ring[..ring.len() - usize::from(closed)] {
+            x += i64::from(p.x);
+            y += i64::from(p.y);
+            count += 1;
+        }
+    }
+    let count = count.max(1);
+    [x.div_euclid(count) as i16, y.div_euclid(count) as i16]
+}
+
 /// A corner of the wall quad every instance draws: x picks the instance's
 /// vertex (0) or the next one (1), y the base (0) or the top (1).
 pub(crate) type FillExtrusionStaticVertex = [i16; 2];
@@ -104,6 +122,10 @@ pub(crate) struct FillExtrusionBucket {
     pub(crate) layout: FillExtrusionLayoutProperties::PossiblyEvaluated,
 
     pub(crate) vertices: GeometryVec<FillExtrusionLayoutVertex>,
+    /// Each polygon's centroid ([`polygon_centroid`]), which its extrusion
+    /// stands on over terrain, with the number of `vertices` it laid out,
+    /// in their order.
+    pub(crate) centroids: Vec<([i16; 2], u32)>,
     pub(crate) triangles: GeometryVec<u16>,
     pub(crate) triangle_segments: Vec<SegmentBase>,
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
@@ -201,6 +223,7 @@ impl FillExtrusionBucket {
             base: BucketBase::default(),
             layout,
             vertices: GeometryVec::default(),
+            centroids: Vec::new(),
             triangles: GeometryVec::default(),
             triangle_segments: Vec::new(),
             subdivision_granularity: SubdivisionGranularitySetting::none(),
@@ -347,6 +370,7 @@ impl Bucket for FillExtrusionBucket {
             // Optimize polygons with many interior rings for earcut
             // tessellation.
             limit_holes(&mut polygon, 500);
+            let centroid = polygon_centroid(&polygon);
 
             let rounded_corner_distance = f64::from(*self.layout.fill_extrusion_rounded_corner_distance.uniform());
             if rounded_corner_distance > 0.0 {
@@ -362,6 +386,7 @@ impl Bucket for FillExtrusionBucket {
             // On the globe the walls follow subdivided rings and the roof is a
             // subdivided mesh of its own.
             let granularity = self.subdivision_granularity.fill.granularity_for_zoom_level(canonical.z);
+            let first = self.vertices.len();
             if granularity >= 2 {
                 let subdivided_rings: Vec<GeometryCoordinates> =
                     polygon.iter().map(|ring| subdivide_vertex_line(ring, granularity, true)).collect();
@@ -370,6 +395,7 @@ impl Bucket for FillExtrusionBucket {
             } else {
                 self.add_polygon(&polygon[..], None, tessellator);
             }
+            self.centroids.push((centroid, (self.vertices.len() - first) as u32));
         }
 
         let length = self.vertices.len();
@@ -499,6 +525,19 @@ mod tests {
         // -π and π are one direction.
         let v = FillExtrusionBucket::layout_vertex(Point::new(0, 0), 0, false, Some(Point::new(-1.0, 0.0)));
         assert_eq!(v.a2[0], 2);
+    }
+
+    /// A polygon stands on the floored mean of its rings' vertices, holes
+    /// too, without each ring's closing vertex.
+    #[test]
+    fn a_polygon_stands_on_the_mean_of_its_vertices() {
+        let ring = |points: &[(i16, i16)]| points.iter().map(|&(x, y)| Point::new(x, y)).collect::<Vec<_>>();
+        let square = ring(&[(0, 0), (10, 0), (10, 10), (0, 10), (0, 0)]);
+        assert_eq!([5, 5], polygon_centroid(std::slice::from_ref(&square)));
+        let hole = ring(&[(1, 1), (2, 1), (2, 2), (1, 1)]);
+        // (20 + 5) / 7 and (20 + 4) / 7, floored.
+        assert_eq!([3, 3], polygon_centroid(&[square, hole]));
+        assert_eq!([-2, -1], polygon_centroid(&[ring(&[(-3, -1), (0, 0)])]));
     }
 
     fn normals(ring: &[(i16, i16)]) -> Vec<Option<(f64, f64)>> {

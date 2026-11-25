@@ -395,3 +395,74 @@ fn a_rendered_query_finds_a_circle_on_a_slope_within_its_edges() {
     assert_eq!(0, found(top - 3), "past the circle's top edge, at row {top}");
     assert_eq!(0, found(bottom + 3), "past the circle's bottom edge, at row {bottom}");
 }
+
+/// A style of `style`'s members with a lime extrusion `height` m tall of the
+/// square of `side` degrees a side around `center`, the longitude and
+/// latitude, over terrain if `terrain`.
+fn extrusion_style(
+    terrain: bool,
+    projection: &str,
+    camera: [f64; 4],
+    center: [f64; 2],
+    side: f64,
+    height: f64,
+) -> String {
+    let [lng, lat] = center;
+    let (w, e, s, n) = (lng - side / 2.0, lng + side / 2.0, lat - side / 2.0, lat + side / 2.0);
+    let layer = format!(
+        r#"{{"id": "box", "type": "fill-extrusion", "source": "box",
+            "paint": {{"fill-extrusion-color": "lime", "fill-extrusion-height": {height}}}}}"#
+    );
+    let source = format!(
+        r#""sources": {{
+            "box": {{"type": "geojson", "data": {{"type": "Polygon",
+                "coordinates": [[[{w}, {s}], [{e}, {s}], [{e}, {n}], [{w}, {n}], [{w}, {s}]]]}}}},"#
+    );
+    style(terrain, projection, camera, &[], &layer).replacen(r#""sources": {"#, &source, 1)
+}
+
+/// An extrusion on a plateau stands on it, its base and roof raised by it:
+/// the camera stands on the plateau too, so the map looks as it does without
+/// terrain, on Mercator and on the globe. At sea level, the plateau would
+/// hide it.
+#[test]
+fn an_extrusion_stands_on_a_plateau() {
+    let cases = [
+        ("mercator", [0.0, 0.0, 15.0, 60.0], 0.0005, 30.0, 2000.0),
+        ("globe", [0.0, 0.0, 6.0, 50.0], 0.5, 20000.0, 40000.0),
+    ];
+    for (projection, camera, side, height, plateau) in cases {
+        let (Some(standing), Some(flat)) = (
+            render(&extrusion_style(true, projection, camera, [0.0, 0.0], side, height), move |_, _| plateau),
+            render(&extrusion_style(false, projection, camera, [0.0, 0.0], side, height), |_, _| 0.0),
+        ) else {
+            return;
+        };
+        assert!(lime_ish(&flat) > 64, "{projection}: the extrusion without terrain");
+        let differing = differing(&standing, &flat);
+        assert!(differing <= 64, "{projection}: {differing} pixels differ from the map without terrain");
+    }
+}
+
+/// An extrusion north of a ridge hides behind it, where without the ridge it
+/// shows.
+#[test]
+fn an_extrusion_hides_behind_a_ridge() {
+    let style = extrusion_style(true, "mercator", RIDGE_CAMERA, [0.0, 0.016], 0.002, 50.0);
+    let (Some(hidden), Some(shown)) = (render(&style, ridge), render(&style, |_, _| 0.0)) else {
+        return;
+    };
+    assert!(lime_ish(&shown) > 16, "the extrusion north of flat ground: {} px", lime_ish(&shown));
+    assert_eq!(0, lime_ish(&hidden), "the extrusion behind the ridge");
+}
+
+/// How many pixels of `image` are green, as a lit lime extrusion is.
+fn lime_ish(image: &PremultipliedImage) -> usize {
+    image
+        .data
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|[r, g, b, _]| *g > 96 && *g > r.saturating_add(48) && *g > b.saturating_add(48))
+        .count()
+}

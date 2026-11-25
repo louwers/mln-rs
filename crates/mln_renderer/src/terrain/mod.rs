@@ -54,7 +54,7 @@ pub(crate) use cover::{REMEMBERED_RANGES, TerrainTile, terrain_tile_size};
 pub(crate) use drapes::Drapes;
 pub(crate) use elevation::{TerrainElevation, TileGround};
 pub(crate) use fog::terrain_fog;
-pub(crate) use ground::{FrameGround, StandingDraw, point_center};
+pub(crate) use ground::{FrameGround, GroundHeights, StandingDraw, height_attribute, point_center};
 use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::hillshade_layer_ubo::{HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO};
 use mln_gfx::shaders::terrain_ubo::{TerrainFogUBO, TerrainPropsUBO};

@@ -126,7 +126,14 @@ pub const FILL_EXTRUSION_LAYER_UBO_COUNT: usize = ID_FILL_EXTRUSION_PROPS_UBO + 
 // buffers, whose ids follow the uniform buffers'.
 pub const ID_FILL_EXTRUSION_WALL_VERTICES: usize = MAX_UBO_COUNT_PER_SHADER;
 pub const ID_FILL_EXTRUSION_WALL_PAINT: usize = MAX_UBO_COUNT_PER_SHADER + 1;
+/// Over terrain, the height of the ground under each of the bucket's
+/// vertices' polygon's centroid, which the pulled walls read by vertex.
+pub const ID_FILL_EXTRUSION_WALL_HEIGHTS: usize = MAX_UBO_COUNT_PER_SHADER + 2;
 pub const ID_FILL_EXTRUSION_IMAGE_TEXTURE: usize = 0;
+/// Over terrain, the height of the ground under the centroid of a vertex's
+/// polygon, in meters with the exaggeration, which the extrusion stands on:
+/// the terrain variants'.
+pub const ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE: usize = 10;
 pub const ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE: usize = 1;
 /// `MLN_USE_FILL_EXTRUSION_INSTANCING`

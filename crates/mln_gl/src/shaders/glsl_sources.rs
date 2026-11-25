@@ -1048,6 +1048,10 @@ layout (location = 3) in highp vec2 a_base;
 #ifndef HAS_UNIFORM_u_height
 layout (location = 4) in highp vec2 a_height;
 #endif
+#ifdef TERRAIN
+// The height of the ground under its polygon\'s centroid.
+in highp float a_ground_height;
+#endif
 #ifndef HAS_UNIFORM_u_color
 layout (location = 5) in highp vec4 a_color;
 #endif
@@ -1085,7 +1089,14 @@ highp vec4 color = u_color;
     height = max(0.0, height);
 
     float t = a_pos.y;
+    // Over terrain, the extrusion stands on the ground under its polygon's
+    // centroid, its base 10 m lower where it is at the ground, so that it
+    // meets a slope.
+#ifdef TERRAIN
+    float z = t > 0.0 ? height + a_ground_height : base + a_ground_height - (base > 0.0 ? 0.0 : 10.0);
+#else
     float z = t > 0.0 ? height : base;
+#endif
 
     gl_Position = projectTileFor3D(a_pos.x == 0.0 ? p1 : p2, z);
 
@@ -1212,6 +1223,10 @@ out highp float base;
 layout (location = 4) in highp vec2 a_height;
 out highp float height;
 #endif
+#ifdef TERRAIN
+// The height of the ground under its polygon\'s centroid.
+in highp float a_ground_height;
+#endif
 #ifndef HAS_UNIFORM_u_pattern_from
 layout (location = 5) in highp vec4 a_pattern_from;
 flat out highp vec4 pattern_from;
@@ -1273,7 +1288,14 @@ highp vec4 pattern_to = u_pattern_to;
     height = max(0.0, height);
 
     float t = a_pos.y;
+    // Over terrain, the extrusion stands on the ground under its polygon's
+    // centroid, its base 10 m lower where it is at the ground, so that it
+    // meets a slope.
+#ifdef TERRAIN
+    float z = t > 0.0 ? height + a_ground_height : base + a_ground_height - (base > 0.0 ? 0.0 : 10.0);
+#else
     float z = t > 0.0 ? height : base;
+#endif
 
     gl_Position = projectTileFor3D(a_pos.x == 0.0 ? p1 : p2, z);
 
@@ -1459,6 +1481,10 @@ out highp float base;
 layout (location = 4) in highp vec2 a_height;
 out highp float height;
 #endif
+#ifdef TERRAIN
+// The height of the ground under its polygon\'s centroid.
+in highp float a_ground_height;
+#endif
 #ifndef HAS_UNIFORM_u_pattern_from
 layout (location = 5) in highp vec4 a_pattern_from;
 flat out highp vec4 pattern_from;
@@ -1511,7 +1537,11 @@ highp vec4 pattern_to = u_pattern_to;
     height = max(0.0, height);
 
     float t = 1.0;
+#ifdef TERRAIN
+    float z = height + a_ground_height;
+#else
     float z = height;
+#endif
     gl_Position = projectTileFor3D(a_pos, z);
 
     // extrusion top or side
@@ -1679,6 +1709,10 @@ layout (location = 3) in highp vec2 a_base;
 #ifndef HAS_UNIFORM_u_height
 layout (location = 4) in highp vec2 a_height;
 #endif
+#ifdef TERRAIN
+// The height of the ground under its polygon\'s centroid.
+in highp float a_ground_height;
+#endif
 #ifndef HAS_UNIFORM_u_color
 layout (location = 5) in highp vec4 a_color;
 #endif
@@ -1707,7 +1741,11 @@ highp vec4 color = u_color;
     height = max(0.0, height);
 
     float t = 1.0;
+#ifdef TERRAIN
+    float z = height + a_ground_height;
+#else
     float z = height;
+#endif
     gl_Position = projectTileFor3D(a_pos, z);
 
     // Relative luminance (how dark/bright is the surface color?)
