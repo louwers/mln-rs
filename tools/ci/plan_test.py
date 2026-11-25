@@ -100,6 +100,7 @@ class PlanTest(unittest.TestCase):
             ["android"],
             ["freebsd"],
             ["ohos"],
+            ["android-device-farm", "ios-device-farm"],
             ["web", "package"],
             ["linux-x64"],
         ):
@@ -112,6 +113,24 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(result["test"], {"include": []})
         self.assertEqual(result["backend"], {"include": []})
         self.assertEqual(result["target"], {"include": []})
+
+    def test_device_farm_units_build_each_platforms_package(self) -> None:
+        result = outputs(selected(["ios-device-farm"]), secrets=False)
+        self.assertEqual(result["jobs"], ["commits", "lint", "prepare-device-tests"])
+        self.assertEqual(
+            result["prepare-device-tests"]["include"],
+            [
+                {
+                    "platform": "ios",
+                    "runner": "blacksmith-6vcpu-macos-26",
+                    "mise_env": "target-apple",
+                }
+            ],
+        )
+        self.assertEqual(
+            outputs(selected([]), secrets=False)["prepare-device-tests"],
+            {"include": []},
+        )
 
     def test_unknown_rubberstamp_units_select_nothing_extra(self) -> None:
         self.assertEqual(names(selected(["nonexistent"])), ALWAYS)

@@ -26,10 +26,11 @@ ci:
     library. Another unit matters only when a change reaches what it alone
     builds or runs: ARM64 Linux or lavapipe packaging for `linux-arm64`, Metal
     or Apple platform code for `macos`, Apple mobile/spatial targets or iOS
-    simulator runs for `ios`, Android platform code or GPU behavior that differs
-    on phones for `android`, Direct3D 12, WGL, or Windows platform code for
-    `windows-x64`, FreeBSD cross-compilation or platform code for `freebsd`,
-    OpenHarmony or HarmonyOS platform code for `ohos`, browser builds or
+    simulator runs for `ios`, Android platform code or emulator runs for
+    `android`, Direct3D 12, WGL, or Windows platform code for `windows-x64`,
+    FreeBSD cross-compilation or platform code for `freebsd`, OpenHarmony or
+    HarmonyOS platform code for `ohos`, the test packages for AWS Device Farm's
+    phones for `android-device-farm` and `ios-device-farm`, browser builds or
     rendered web output for `web`, or Cargo manifests and file
     additions/deletions/renames for `package`.
 
@@ -84,10 +85,25 @@ ci:
       rules:
         - if:
             files:
-              - .config/device-farm.toml
               - mise.target-android.*
               - tools/android-test-host/**
               - tools/ci/boot-android.sh
+          then: apply
+    android-device-farm:
+      covers: >-
+        Builds the Android tests into the test package for AWS Device Farm's
+        phones (`mise run device-farm:package android`), as `main` does before
+        the phones run them; pull requests don't run the phones. Catches
+        breakage in the package's build and contents. Only changes to the
+        packaging, the Android test host, or the phones' configuration need it.
+      rules:
+        - if:
+            files:
+              - .config/device-farm.toml
+              - mise-tasks/device-farm/**
+              - tools/device-farm/*
+              - tools/device-farm/android/**
+              - tools/android-test-host/**
           then: apply
     ios:
       covers: >-
@@ -103,6 +119,22 @@ ci:
             files:
               - crates/mln_mtl/**
               - mise.target-apple.*
+          then: apply
+    ios-device-farm:
+      covers: >-
+        Builds the iOS tests into the test package and app for AWS Device Farm's
+        iPhone (`mise run device-farm:package ios`), as `main` does before the
+        iPhone runs them; pull requests don't run the iPhone. Catches breakage
+        in the package's build and contents. Only changes to the packaging, the
+        iOS test host, or the phones' configuration need it.
+      rules:
+        - if:
+            files:
+              - .config/device-farm.toml
+              - mise-tasks/device-farm/**
+              - tools/device-farm/*
+              - tools/device-farm/ios/**
+              - tools/ios-test-host/**
           then: apply
     windows-x64:
       covers: >-

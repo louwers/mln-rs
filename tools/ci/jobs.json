@@ -140,5 +140,47 @@
     "test_target": "aarch64-apple-ios-sim",
     "backend": "metal"
   },
+  {
+    "job": "target",
+    "variant": "freebsd",
+    "unit": "freebsd",
+    "target": "freebsd",
+    "runner": "blacksmith-4vcpu-ubuntu-2604",
+    "mise_env": "target-freebsd",
+    "device": "FreeBSD virtual machine",
+    "device_command": "bash tools/ci/boot-freebsd.sh",
+    "clippy_targets": "x86_64-unknown-freebsd",
+    "test_target": "x86_64-unknown-freebsd",
+    "backend": "vulkan"
+  },
+  {
+    "job": "target",
+    "variant": "ohos",
+    "unit": "ohos",
+    "target": "ohos",
+    "runner": "blacksmith-4vcpu-ubuntu-2604",
+    "mise_env": "target-ohos",
+    "device": "OpenHarmony emulator",
+    "device_command": "devices-cli get ohos",
+    "clippy_targets": "aarch64-unknown-linux-ohos,armv7-unknown-linux-ohos,x86_64-unknown-linux-ohos",
+    "test_target": "x86_64-unknown-linux-ohos",
+    "backend": "gl"
+  },
+  {
+    "job": "prepare-device-tests",
+    "variant": "android",
+    "unit": "android-device-farm",
+    "platform": "android",
+    "runner": "blacksmith-4vcpu-ubuntu-2604",
+    "mise_env": "target-android"
+  },
+  {
+    "job": "prepare-device-tests",
+    "variant": "ios",
+    "unit": "ios-device-farm",
+    "platform": "ios",
+    "runner": "blacksmith-6vcpu-macos-26",
+    "mise_env": "target-apple"
+  },
   { "job": "web", "unit": "web" }
 ]

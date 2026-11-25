@@ -1,16 +1,40 @@
-# Configuration for the maplibre-device-farm GitHub App / AWS Lambda
-# orchestrator (maplibre/infra: device-farm/) and local `mise run
-# device-farm:run` runs (tools/device-farm/README.md).
+# The tests on AWS Device Farm's phones (tools/device-farm/README.md), for the
+# maplibre-device-farm GitHub App's orchestrator (maplibre/infra: device-farm/),
+# which reads this file from main, and for `mise run device-farm:run`.
 workflow_name = "ci"
-trigger_job = "prepare-device-tests"
-artifact_name = "android-device-tests"
-package_filename = "android-tests.zip"
-test_spec_path = "tools/device-farm/android.yml"
-check_name = "device-test / android"
-job_timeout_minutes = 60
+# Only main's commits run on the phones. Pull requests' checks pass as not
+# needed: CI's target jobs test them on the emulator and the simulator.
+pull_requests = false
+# The account's flat-rate devices, which maplibre-native's CI shares.
+billing_method = "UNMETERED"
 
+# A web app test, the kind of test that needs no app: the test spec drives the
+# phones over adb.
+[targets.android]
+trigger_job = "prepare-android-device-tests"
+artifact_name = "android-device-tests"
+check_name = "device-test / android"
+test_type = "APPIUM_WEB_NODE"
+package_filename = "tests.zip"
+test_spec_path = "tools/device-farm/android/test-spec.yml"
+job_timeout_minutes = 60
 # A Mali GPU and an Adreno one, on Android 16.
 devices = [
   "arn:aws:devicefarm:us-west-2::device:6D89F408709B4D3BBBBB17696A24B141", # Google Pixel 9
   "arn:aws:devicefarm:us-west-2::device:092D78E7B4694568812D5FF0711CD346", # Samsung Galaxy S25
+]
+
+# An app test: Device Farm signs the app and installs it, and the test spec
+# launches it over devicectl.
+[targets.ios]
+trigger_job = "prepare-ios-device-tests"
+artifact_name = "ios-device-tests"
+check_name = "device-test / ios"
+test_type = "APPIUM_NODE"
+package_filename = "tests.zip"
+app_filename = "app.ipa"
+test_spec_path = "tools/device-farm/ios/test-spec.yml"
+job_timeout_minutes = 60
+devices = [
+  "arn:aws:devicefarm:us-west-2::device:6200F380A4874FEB9C72EED72B863B67", # Apple iPhone 17 Pro, iOS 26
 ]

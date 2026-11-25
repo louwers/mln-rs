@@ -9,19 +9,20 @@ The tests that CI's target jobs run, built for phones and run on real ones in
 - iOS: built for `aarch64-apple-ios`, on an Apple iPhone 17 Pro on iOS 26, with
   the render suite on Metal and its API validation.
 
-`schedule.sh` lists the phones. The runs take the account's flat-rate devices,
+`.config/device-farm.toml` configures each platform's run: its phones, test
+type, test spec and timeout. The runs take the account's flat-rate devices,
 which maplibre-native's CI shares, and wait while its runs have them all: the
 account has five Android devices and one iPhone. Each platform's directory holds
-the test spec, `test-spec.yml`, and the scripts that run the tests on the
+its test spec, `test-spec.yml`, and the scripts that run the tests on the
 phones.
 
 ## How a run works
 
 1. `mise run device-farm:package <platform>` builds the test package into
    `target/device-farm/<platform>/`.
-2. `schedule.sh` uploads the package with the platform's test spec, and
-   schedules them. Once the run finished, `collect.sh` downloads each phone's
-   test spec output and artifacts.
+2. The package is uploaded with the platform's test spec and scheduled, by the
+   orchestrator in CI, or by `schedule.sh` from your machine, where `collect.sh`
+   downloads each phone's test spec output and artifacts once the run finished.
 3. On each phone's test host, the platform's `run-tests` runs the tests on the
    phone. The artifacts hold a JUnit report and the tests' output
    (`test-output.tar.gz`): the render suite's report, which shows its failed
@@ -32,8 +33,8 @@ phones.
 
 The package, `tests.zip`, holds the tests archived by cargo-nextest, the test
 host for the phones' ABI (`tools/android-test-host`), the workspace's files,
-Linux x64 `cargo-nextest` and `devices-cli`, and `run-tests.sh`. `schedule.sh`
-schedules it as a web app test, the kind of test that needs no app.
+Linux x64 `cargo-nextest` and `devices-cli`, and `run-tests.sh`. It runs as a
+web app test, the kind of test that needs no app.
 
 On a Linux test host, `run-tests.sh` unpacks the workspace and assigns the phone
 in `devices-cli`. cargo-nextest then runs the archive's tests with the
@@ -46,9 +47,9 @@ test host and runner that the emulator's runs use.
 
 The package is an app, `app.ipa`: the test host (`tools/ios-test-host`) with the
 tests built as dylibs and the workspace's files. `tests.zip` holds
-`run-tests.py` and `tests.json`, which lists the tests. `schedule.sh` schedules
-them as an app test, for which Device Farm signs the app, which is signed ad
-hoc, and installs it on the phone.
+`run-tests.py` and `tests.json`, which lists the tests. They run as an app test,
+for which Device Farm signs the app, which is signed ad hoc, and installs it on
+the phone.
 
 On a macOS test host, `run-tests.py` launches the app with `devicectl` once for
 each test binary, whose harness runs all of the binary's tests in the app's
@@ -63,32 +64,26 @@ without a result, get their one more try together, in one more launch.
 The phones run `main`'s commits. Pull requests run the tests on the Android
 emulator and the iOS simulator, in CI's `target` jobs, which `main` runs too.
 
-CI's `prepare-device-tests` job builds `main`'s packages, one per platform,
-without credentials. Three workflows run them, so that no GitHub runner waits
-for the phones while a run is queued or in progress:
+CI's `prepare-<platform>-device-tests` jobs build the packages, without AWS
+credentials, and upload them as the `<platform>-device-tests` artifacts. A pull
+request builds a platform's package only when it changes the packaging, to check
+that it still builds.
 
-- `device-test` starts with the CI run, waits for each platform's job, and
-  schedules its package once the job has built it, while the rest of CI runs. It
-  reports each run on the commit as pending, as the `device-test / android` and
-  `device-test / ios` statuses, which link to the run in the AWS console
-  (`console-url.sh`), and names the run for the commit and the platform. Since
-  merging into `main` requires the statuses, it reports them as passed for a
-  pull request's commits.
-- `device-farm-watch`, one at a time for every run, waits for the runs, and
-  starts `device-farm-finish` for each that finished (`watch.sh`). An hourly
-  schedule starts it too, in case one failed.
-- `device-farm-finish` reports the run's result on its commit, linking to itself
-  rather than to the AWS console, which needs a login to the account. It has
-  each phone's output and artifacts (`collect.sh`), and a job without
-  credentials summarizes each phone's JUnit report (`summary.py`).
+The `maplibre-device-farm` GitHub App runs the packages, without holding a
+GitHub runner while the phones run. Its orchestrator, which
+[maplibre/infra](https://github.com/maplibre/infra) deploys with the `mln-rs`
+Device Farm project, reads `.config/device-farm.toml` and the test specs from
+`main`, and never unpacks or runs a package:
 
-`device-test` runs on `workflow_run`, from the default branch. The workflows
-assume their AWS role through the `workflow-run` environment, which only `main`
-can use, and never run or unpack a package.
-
-[maplibre/infra](https://github.com/maplibre/infra) manages the AWS side: the
-`device-farm/` Lambda orchestrator and the `opentofu/device-farm` stack (the
-`mln-rs` Device Farm project, Lambdas, queue, table, and results distribution).
+- Once a prepare job has built `main`'s package, it schedules the package on the
+  platform's phones and reports the run on the commit as the
+  `device-test / <platform>` check run, which links to the run in the AWS
+  console.
+- When the run finishes, it publishes each phone's output and artifacts and
+  completes the check run with a summary of each phone's JUnit report. GitHub's
+  Re-run button on the check run runs the package again.
+- It passes a pull request's check runs as not needed, since merging requires
+  `device-test / android`.
 
 ## From your machine
 

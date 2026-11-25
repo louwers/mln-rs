@@ -53,6 +53,7 @@ jobs:
       test: ${{ steps.plan.outputs.test }}
       backend: ${{ steps.plan.outputs.backend }}
       target: ${{ steps.plan.outputs.target }}
+      prepare-device-tests: ${{ steps.plan.outputs.prepare-device-tests }}
     steps:
       - name: Plan coverage
         id: rubberstamp
@@ -345,23 +346,21 @@ jobs:
           path: target/*/tmp/render_tests*
           if-no-files-found: ignore
 
-  # main's tests, built for AWS Device Farm's phones (`mise run
-  # device-farm:package <platform>`), which the device-test workflow runs once
-  # this job has built them, while pull requests test on the emulator and the
-  # simulator (tools/device-farm/README.md). A push runs every unit.
+  # The tests built for AWS Device Farm's phones, one package per platform
+  # (`mise run device-farm:package <platform>`). The maplibre-device-farm GitHub
+  # App runs main's packages on the phones once this job has built them
+  # (.config/device-farm.toml, tools/device-farm/README.md). A pull request
+  # builds a platform's package only when it changes its packaging, and tests
+  # on the emulator and the simulator in the target jobs.
   prepare-device-tests:
-    if: github.event_name == 'push'
+    needs: plan
+    if:
+      github.event.pull_request.state != 'closed' &&
+      contains(fromJSON(needs.plan.outputs.jobs), 'prepare-device-tests')
     name: prepare-${{ matrix.platform }}-device-tests
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - platform: android
-            runner: blacksmith-4vcpu-ubuntu-2604
-            mise_env: target-android
-          - platform: ios
-            runner: blacksmith-6vcpu-macos-26
-            mise_env: target-apple
+      matrix: ${{ fromJSON(needs.plan.outputs.prepare-device-tests) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     steps:

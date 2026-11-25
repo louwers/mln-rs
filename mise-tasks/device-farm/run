@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #MISE description="Run the tests on AWS Device Farm's phones with your AWS credentials (tools/device-farm)"
-#USAGE arg "<platform>" help="The phones' platform" {
+#USAGE arg "<platform>" help="The phones' platform, a target of .config/device-farm.toml" {
 #USAGE   choices "android" "ios"
 #USAGE }
 #USAGE flag "--package <dir>" help="The test package that device-farm:package built (default: target/device-farm/<platform>)"
