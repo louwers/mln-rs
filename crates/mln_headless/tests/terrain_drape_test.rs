@@ -18,8 +18,9 @@ const SIDE: u32 = 256;
 
 /// How many pixels a draped map may differ by from the same map drawn flat:
 /// the surface filters its drapes, so pixels on the images' edges differ, and
-/// how many depends on the GPU.
-const EDGE_PIXELS: u64 = 64;
+/// how many depends on the GPU. `OpenHarmony`'s emulator, with Mesa 22.2.5's
+/// llvmpipe, filters them more softly than newer drivers do.
+const EDGE_PIXELS: u64 = if cfg!(target_env = "ohos") { 256 } else { 64 };
 
 /// A DEM tile of sea level everywhere, in the Mapbox encoding: (1 · 65536 +
 /// 134 · 256 + 160) · 0.1 − 10000 = 0 m.

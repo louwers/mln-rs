@@ -1,0 +1,19 @@
+{
+  "gljs/render-tests/projection/globe/terrain/fill-planet-pitched": "On OpenHarmony's emulator (Mesa 22.2.5 llvmpipe), terrain drapes' edges filter differently, just past the test's allowance; Mesa 26's llvmpipe matches",
+  "gljs/render-tests/projection/globe/terrain/fill-planet-pole": "On OpenHarmony's emulator (Mesa 22.2.5 llvmpipe), terrain drapes' edges filter differently, just past the test's allowance; Mesa 26's llvmpipe matches",
+  "gljs/render-tests/projection/globe/terrain/fill-planet-tiles": "On OpenHarmony's emulator (Mesa 22.2.5 llvmpipe), terrain drapes' edges filter differently, just past the test's allowance; Mesa 26's llvmpipe matches",
+  "gljs/render-tests/projection/globe/terrain/fill-planet-tiles-no-background": "On OpenHarmony's emulator (Mesa 22.2.5 llvmpipe), terrain drapes' edges filter differently, just past the test's allowance; Mesa 26's llvmpipe matches",
+  "gljs/render-tests/projection/globe/terrain/line-translate": "On OpenHarmony's emulator (Mesa 22.2.5 llvmpipe), terrain drapes' edges filter differently, just past the test's allowance; Mesa 26's llvmpipe matches",
+  "gljs/render-tests/terrain/default": "On OpenHarmony's emulator (Mesa 22.2.5 llvmpipe), terrain drapes' edges filter differently, just past the test's allowance; Mesa 26's llvmpipe matches",
+  "gljs/render-tests/terrain/field-of-view-number": "On OpenHarmony's emulator (Mesa 22.2.5 llvmpipe), terrain drapes' edges filter differently, just past the test's allowance; Mesa 26's llvmpipe matches",
+  "gljs/render-tests/terrain/fog-sky-blend-globe": "On OpenHarmony's emulator (Mesa 22.2.5 llvmpipe), terrain drapes' edges filter differently, just past the test's allowance; Mesa 26's llvmpipe matches",
+  "gljs/render-tests/terrain/image-projective": "On OpenHarmony's emulator (Mesa 22.2.5 llvmpipe), terrain drapes' edges filter differently, just past the test's allowance; Mesa 26's llvmpipe matches",
+  "gljs/render-tests/terrain/image-wrap-lower-zl": "On OpenHarmony's emulator (Mesa 22.2.5 llvmpipe), terrain drapes' edges filter differently, just past the test's allowance; Mesa 26's llvmpipe matches",
+  "gljs/render-tests/terrain/occlusion-debug": "On OpenHarmony's emulator (Mesa 22.2.5 llvmpipe), terrain drapes' edges filter differently, just past the test's allowance; Mesa 26's llvmpipe matches",
+  "gljs/render-tests/terrain/pitched-world": "On OpenHarmony's emulator (Mesa 22.2.5 llvmpipe), terrain drapes' edges filter differently, just past the test's allowance; Mesa 26's llvmpipe matches",
+  "render-tests/fill-visibility/visible": "On OpenHarmony's emulator (Mesa 22.2.5 llvmpipe), the zoom-0 water tile's fill outline misses one pixel, past the test's allowance; Mesa 26's llvmpipe matches",
+  "render-tests/runtime-styling/set-style-source-add-vector-inline": "On OpenHarmony's emulator (Mesa 22.2.5 llvmpipe), the zoom-0 water tile's fill outline misses one pixel, past the test's allowance; Mesa 26's llvmpipe matches",
+  "render-tests/runtime-styling/set-style-source-add-vector-url": "On OpenHarmony's emulator (Mesa 22.2.5 llvmpipe), the zoom-0 water tile's fill outline misses one pixel, past the test's allowance; Mesa 26's llvmpipe matches",
+  "render-tests/runtime-styling/source-add-vector-inline": "On OpenHarmony's emulator (Mesa 22.2.5 llvmpipe), the zoom-0 water tile's fill outline misses one pixel, past the test's allowance; Mesa 26's llvmpipe matches",
+  "render-tests/runtime-styling/source-add-vector-url": "On OpenHarmony's emulator (Mesa 22.2.5 llvmpipe), the zoom-0 water tile's fill outline misses one pixel, past the test's allowance; Mesa 26's llvmpipe matches"
+}

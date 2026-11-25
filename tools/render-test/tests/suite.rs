@@ -11,6 +11,8 @@
 // triangulates them 1 px wide (ignores/rust-port-metal-outlines.json).
 // Android's Vulkan manifest adds what Mali GPUs draw differently
 // (ignores/rust-port-mali.json), as the Pixel 9 that CI tests on has.
+// OpenHarmony's OpenGL ES manifest adds what the emulator's Mesa 22.2.5
+// llvmpipe draws differently (ignores/rust-port-ohos-llvmpipe.json).
 //
 // The tests run in worker processes of the package's render-test binary
 // (`--jobs`, src/jobs.rs): one per CPU, or $MLN_RENDER_TEST_JOBS (1: in the
@@ -32,6 +34,7 @@ pub(crate) fn run(name: &str, args: &[&str], factory: Option<ImplFactory>) -> i3
         "manifests/macos-wgpu.json"
     } else {
         match std::env::var("MLN_RENDER_BACKEND").map(|backend| backend.to_ascii_lowercase()).as_deref() {
+            Ok("gl" | "gl-desktop") if cfg!(target_env = "ohos") => "manifests/ohos-opengl.json",
             Ok("gl" | "gl-desktop") => "manifests/linux-opengl.json",
             Ok("vulkan") if cfg!(target_os = "android") => "manifests/android-vulkan.json",
             Ok("vulkan") => "manifests/linux-vulkan.json",
