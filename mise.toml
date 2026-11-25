@@ -11,6 +11,15 @@ pin = true
 lockfile = true
 # Default from mise 2026.10.19 (merge mode is removed in 2027.10.0).
 lockfile_mode = "generate"
+# Keep every supported host platform in mise.lock regardless of a contributor's
+# global ~/.config/mise/config.toml lockfile_platforms setting.
+lockfile_platforms = [
+  "linux-arm64",
+  "linux-x64",
+  "macos-arm64",
+  "windows-arm64",
+  "windows-x64",
+]
 # Rust comes from rust-toolchain.toml, which rustup and CI also read; mise
 # installs that toolchain through rustup.
 idiomatic_version_file_enable_tools = ["rust"]
