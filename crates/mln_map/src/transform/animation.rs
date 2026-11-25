@@ -217,11 +217,11 @@ impl Transform {
                     };
                 }
                 (Some(frame_lat_lng), frame_zoom)
-            } else if t < 1.0 {
+            } else if t == 1.0 {
+                (Some(lat_lng_end), zoom)
+            } else {
                 let frame_point = interpolate(&start_point, &end_point, t);
                 (frame_unproject(&frame_point, start_scale, WrapMode::Unwrapped), interpolate(&start_zoom, &zoom, t))
-            } else {
-                (Some(lat_lng_end), zoom)
             };
             CameraOptions {
                 center: frame_lat_lng,

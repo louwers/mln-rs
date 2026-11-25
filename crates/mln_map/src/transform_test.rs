@@ -5921,3 +5921,37 @@ fn a_stale_frame_time_doesnt_start_commands_in_the_past() {
     transform.set_frame_time(Some(fresh));
     assert_eq!(transform.frame_time(), Some(fresh));
 }
+
+#[test]
+fn overshooting_mercator_ease_interpolates_center_and_zoom_past_target() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(1000, 1000)).unwrap();
+    transform.jump_to(&CameraOptions { center: Some(ll(0.0, 0.0)), zoom: Some(4.0), ..Default::default() });
+
+    let start = start_clock(&mut transform);
+    let destination = ll(0.0, 10.0);
+    let target_zoom = 6.0;
+    let duration = Duration::from_secs(1);
+    transform.ease_to(
+        &CameraOptions { center: Some(destination), zoom: Some(target_zoom), ..Default::default() },
+        &AnimationOptions {
+            duration: Some(duration),
+            easing: Some(UnitBezier::new(1.0 / 3.0, 0.0, 2.0 / 3.0, 2.0)),
+            ..AnimationOptions::default()
+        },
+    );
+
+    // At 75% elapsed time this curve evaluates above 1.0 (~1.266), so both
+    // center and zoom must overshoot past their destinations.
+    transform.update_transitions(Some(start + Duration::from_millis(750)));
+    assert!(transform.in_transition());
+    assert!(transform.view().center(WrapMode::Unwrapped).longitude() > destination.longitude() + 1.0);
+    assert!(transform.view().zoom() > target_zoom + 0.2);
+
+    // At completion (t == 1.0) the animation lands on the exact destination.
+    transform.update_transitions(Some(start + duration));
+    assert!(!transform.in_transition());
+    assert_double_eq(destination.latitude(), transform.view().center(WrapMode::Wrapped).latitude());
+    assert_double_eq(destination.longitude(), transform.view().center(WrapMode::Wrapped).longitude());
+    assert_double_eq(target_zoom, transform.view().zoom());
+}
