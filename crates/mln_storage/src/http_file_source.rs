@@ -29,6 +29,7 @@
 // ureq sends `Accept-Encoding: gzip` and decodes gzip. Dates are read in the
 // three formats of RFC 9110 only.
 
+#[cfg(not(target_family = "wasm"))]
 use std::str::FromStr;
 use std::sync::Arc;
 
