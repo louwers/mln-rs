@@ -3,6 +3,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::gpu::{Gpu, TextureFormat};
+use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::line_layer_ubo::{
     LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
@@ -10,9 +11,6 @@ use mln_gfx::shaders::line_layer_ubo::{
 };
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_TILE_PROPS_UBO, ID_PROJECTION_UBO,
-};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -53,6 +51,11 @@ use crate::render_layer::{
 use crate::render_pass::RenderPass;
 use crate::render_tile::FrameTile;
 use crate::tile_matrix::{projection_data, to_projection_ubo};
+
+/// The ids of the buffers that the draws bind.
+const DRAWABLE_ID: usize = programs::LINE.buffer_id("drawableVector");
+const TILE_PROPS_ID: usize = programs::LINE_PATTERN.buffer_id("tilePropsVector");
+const PROPS_ID: usize = programs::LINE.buffer_id("props");
 
 /// The slots of the programs' textures that the draws bind.
 const DASH_SLOT: usize = programs::LINE_GRADIENT_SDF.texture_slot("image_dash");
@@ -846,9 +849,9 @@ impl RenderLineLayer {
             pad0: 0.0,
             pad1: 0.0,
         };
-        writer.uniform(ID_LINE_EVALUATED_PROPS_UBO, &props);
-        writer.storage(ID_LINE_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-        writer.storage(ID_LINE_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
-        writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+        writer.uniform(PROPS_ID, &props);
+        writer.storage(DRAWABLE_ID, |uniforms| uniforms.draw_ubo);
+        writer.storage(TILE_PROPS_ID, |uniforms| uniforms.tile_props);
+        writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
     }
 }

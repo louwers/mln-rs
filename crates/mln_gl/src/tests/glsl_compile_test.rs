@@ -11,12 +11,13 @@ use std::collections::BTreeSet;
 
 use mln_gfx::RendererBackend as _;
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::programs::STANDING;
 use mln_util::hash::HashSet;
 
 use crate::shaders::glsl_sources::PRELUDE;
-use crate::shaders::shader_source::{BUILT_INS, ShaderSource};
+use crate::shaders::shader_source::{BUILT_INS, ShaderSource, UniformBlockInfo, uniform_block};
 use crate::{Api, Device, DeviceOptions, RendererBackend};
 
 /// A backend on a device of `api`, or none where there is no EGL to make a
@@ -116,20 +117,22 @@ fn declared_blocks(glsl: &str) -> BTreeSet<String> {
     declared_blocks_in_order(glsl).into_iter().collect()
 }
 
+/// The uniform blocks of `source` and the prelude, by their names, with
+/// where each binds.
+fn uniform_blocks(program: &Program, source: &ShaderSource) -> Vec<(String, Option<UniformBlockInfo>)> {
+    let texts = [PRELUDE.vertex, PRELUDE.fragment, source.glsl.vertex, source.glsl.fragment];
+    let names: BTreeSet<String> = texts.iter().flat_map(|glsl| declared_blocks(glsl)).collect();
+    names.into_iter().map(|name| (name.clone(), uniform_block(program, &name))).collect()
+}
+
 /// WebGL2 rejects a draw whose program has a uniform block without a buffer,
 /// and whether a block the shader doesn't read counts differs between
 /// compilers. So every block a shader declares needs an id to bind at.
 #[test]
-fn every_declared_uniform_block_has_a_table_entry() {
+fn every_declared_uniform_block_has_a_buffer() {
     for &(program, source) in BUILT_INS {
-        for glsl in [PRELUDE.vertex, PRELUDE.fragment, source.glsl.vertex, source.glsl.fragment] {
-            for block in declared_blocks(glsl) {
-                assert!(
-                    source.uniform_blocks.iter().any(|info| info.name == block),
-                    "{}: uniform block {block} has no table entry",
-                    program.name
-                );
-            }
+        for (block, info) in uniform_blocks(program, source) {
+            assert!(info.is_some(), "{}: uniform block {block} has no buffer", program.name);
         }
     }
 }
@@ -192,17 +195,16 @@ fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
                 let program = compile(false);
                 programs += 1;
 
+                let blocks = uniform_blocks(key.program(), source);
                 for block in &program.blocks {
-                    let info = source
-                        .uniform_blocks
+                    let (name, info) = blocks
                         .iter()
-                        .find(|info| info.id == block.id)
-                        .unwrap_or_else(|| panic!("{what}: block at {} without a table entry", block.id));
+                        .find_map(|(name, info)| info.filter(|info| info.id == block.id).map(|info| (name, info)))
+                        .unwrap_or_else(|| panic!("{what}: block at {} without a buffer", block.id));
                     assert_eq!(
                         block.size.next_multiple_of(16),
                         info.size,
-                        "{what}: the size of {} differs from its UBO's",
-                        info.name
+                        "{what}: the size of {name} differs from its UBO's",
                     );
                 }
 

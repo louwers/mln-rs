@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::{BufferUsage, Gpu, GpuError};
-use mln_gfx::shaders::shader_defines::MAX_ATTRIBUTE_COUNT_PER_SHADER;
+use mln_gfx::shaders::bindings::MAX_ATTRIBUTES;
 
 use crate::gfx::buffer::Buffer;
 use crate::gfx::context::Context;
@@ -134,7 +134,7 @@ impl VertexAttribute {
 /// The paint properties a draw reads from their uniforms instead, by name.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Uniforms {
-    names: [&'static str; MAX_ATTRIBUTE_COUNT_PER_SHADER],
+    names: [&'static str; MAX_ATTRIBUTES],
     len: usize,
 }
 
@@ -170,7 +170,7 @@ impl FromIterator<&'static str> for Uniforms {
 /// each in a slot of the array, which [`slot_of`](Self::slot_of) finds.
 #[derive(Default)]
 pub(crate) struct VertexAttributeArray {
-    attrs: [Option<Box<(&'static str, VertexAttribute)>>; MAX_ATTRIBUTE_COUNT_PER_SHADER],
+    attrs: [Option<Box<(&'static str, VertexAttribute)>>; MAX_ATTRIBUTES],
     /// Which names its slots hold ([`layout`](Self::layout)).
     layout: u64,
 }

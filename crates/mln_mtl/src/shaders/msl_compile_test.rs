@@ -15,8 +15,10 @@ use std::mem::size_of;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::VertexStep;
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::{
+    FIRST_UNIFORM_ID, FRAGMENT_DRAW_ID, GLOBAL_INDEX_ID, PAINT_PARAMS_ID, PROJECTION_ID, VERTEX_DRAW_ID,
+};
 use mln_gfx::shaders::program::{GLOBE_DEFINE, Program, TERRAIN_DEFINE};
-use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::shaders::*;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -27,7 +29,7 @@ use objc2_metal::{
 };
 
 use super::msl_sources::PRELUDE;
-use super::shader_source::{BUILT_INS, ShaderSource};
+use super::shader_source::{BUILT_INS, ShaderSource, first_vertex_buffer};
 use crate::Id;
 
 fn sources() -> impl Iterator<Item = (&'static Program, &'static ShaderSource)> {
@@ -183,158 +185,110 @@ fn every_shader_source_compiles() {
     });
 }
 
-/// The UBO id enumerators of each shader's prelude, with the renderer's
-/// values; the `<layer>UBOCount` enumerator is also where its vertex buffers
-/// start.
-fn ubo_ids(program: &Program, source: &ShaderSource) -> Vec<(&'static str, usize)> {
-    let first_vertex_buffer = source.first_vertex_buffer.filter(|_| !program.attributes.is_empty());
+/// The UBO id enumerators of each shader's prelude, with the ids of the
+/// buffers the programs declare.
+fn ubo_ids(program: &Program) -> Vec<(&'static str, usize)> {
     let mut ids = vec![
-        ("idGlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
-        ("idGlobalUBOIndex", ID_GLOBAL_UBO_INDEX),
-        ("idDrawableReservedVertexOnlyUBO", ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO),
-        ("idDrawableReservedFragmentOnlyUBO", ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO),
-        ("idProjectionUBO", ID_PROJECTION_UBO),
-        ("drawableReservedUBOCount", DRAWABLE_RESERVED_UBO_COUNT),
+        ("idGlobalPaintParamsUBO", PAINT_PARAMS_ID),
+        ("idGlobalUBOIndex", GLOBAL_INDEX_ID),
+        ("idDrawableReservedVertexOnlyUBO", VERTEX_DRAW_ID),
+        ("idDrawableReservedFragmentOnlyUBO", FRAGMENT_DRAW_ID),
+        ("idProjectionUBO", PROJECTION_ID),
+        ("drawableReservedUBOCount", FIRST_UNIFORM_ID),
     ];
-    let (layer, count): (&[(&str, usize)], &str) = match program.name {
-        "AtmosphereShader" => (&[("idAtmospherePropsUBO", ID_ATMOSPHERE_PROPS_UBO)], "atmosphereUBOCount"),
-        "BackgroundShader" | "BackgroundPatternShader" => (
-            &[
-                ("idBackgroundDrawableUBO", ID_BACKGROUND_DRAWABLE_UBO),
-                ("idBackgroundPropsUBO", ID_BACKGROUND_PROPS_UBO),
-            ],
-            "backgroundUBOCount",
-        ),
-        "CircleShader" => (
-            &[
-                ("idCircleDrawableUBO", ID_CIRCLE_DRAWABLE_UBO),
-                ("idCircleEvaluatedPropsUBO", ID_CIRCLE_EVALUATED_PROPS_UBO),
-            ],
-            "circleUBOCount",
-        ),
-        "ClippingMaskProgram" => (&[], "clippingMaskUBOCount"),
-        "CollisionBoxShader" | "CollisionCircleShader" => (
-            &[
-                ("idCollisionDrawableUBO", ID_COLLISION_DRAWABLE_UBO),
-                ("idCollisionTilePropsUBO", ID_COLLISION_TILE_PROPS_UBO),
-                ("idCollisionProjectionUBO", ID_COLLISION_PROJECTION_UBO),
-            ],
-            "collisionUBOCount",
-        ),
-        "ColorReliefShader" => (
-            &[
-                ("idColorReliefDrawableUBO", ID_COLOR_RELIEF_DRAWABLE_UBO),
-                ("idColorReliefTilePropsUBO", ID_COLOR_RELIEF_TILE_PROPS_UBO),
-                ("idColorReliefEvaluatedPropsUBO", ID_COLOR_RELIEF_EVALUATED_PROPS_UBO),
-            ],
-            "colorReliefUBOCount",
-        ),
+    let layer: Vec<(&str, usize)> = match program.name {
+        "AtmosphereShader" => vec![("idAtmospherePropsUBO", programs::ATMOSPHERE.buffer_id("atmosphere"))],
+        "BackgroundShader" | "BackgroundPatternShader" => vec![
+            ("idBackgroundDrawableUBO", programs::BACKGROUND.buffer_id("drawableVector")),
+            ("idBackgroundPropsUBO", programs::BACKGROUND.buffer_id("props")),
+        ],
+        "CircleShader" => vec![
+            ("idCircleDrawableUBO", programs::CIRCLE.buffer_id("drawableVector")),
+            ("idCircleEvaluatedPropsUBO", programs::CIRCLE.buffer_id("props")),
+        ],
+        "ClippingMaskProgram" | "GlobeDepthShader" | "VertexTexelShader" => vec![],
+        "CollisionBoxShader" | "CollisionCircleShader" => vec![
+            ("idCollisionDrawableUBO", programs::COLLISION_BOX.buffer_id("drawable")),
+            ("idCollisionTilePropsUBO", programs::COLLISION_BOX.buffer_id("tile_props")),
+            ("idCollisionProjectionUBO", PROJECTION_ID),
+        ],
+        "ColorReliefShader" => vec![
+            ("idColorReliefDrawableUBO", programs::COLOR_RELIEF.buffer_id("drawableVector")),
+            ("idColorReliefTilePropsUBO", programs::COLOR_RELIEF.buffer_id("tilePropsVector")),
+            ("idColorReliefEvaluatedPropsUBO", programs::COLOR_RELIEF.buffer_id("props")),
+        ],
         "FillShader"
         | "FillOutlineShader"
         | "FillPatternShader"
         | "FillOutlinePatternShader"
         | "FillOutlineInstancedShader"
         | "FillOutlinePulledShader"
-        | "FillOutlinePatternInstancedShader" => (
-            &[
-                ("idFillDrawableUBO", ID_FILL_DRAWABLE_UBO),
-                ("idFillTilePropsUBO", ID_FILL_TILE_PROPS_UBO),
-                ("idFillEvaluatedPropsUBO", ID_FILL_EVALUATED_PROPS_UBO),
-            ],
-            "fillUBOCount",
-        ),
+        | "FillOutlinePatternInstancedShader" => vec![
+            ("idFillDrawableUBO", programs::FILL.buffer_id("drawableVector")),
+            ("idFillTilePropsUBO", programs::FILL_PATTERN.buffer_id("tilePropsVector")),
+            ("idFillEvaluatedPropsUBO", programs::FILL.buffer_id("props")),
+        ],
         "FillExtrusionShader"
         | "FillExtrusionInstancedShader"
         | "FillExtrusionPulledShader"
         | "FillExtrusionPatternShader"
-        | "FillExtrusionPatternInstancedShader" => (
-            &[
-                ("idFillExtrusionDrawableUBO", ID_FILL_EXTRUSION_DRAWABLE_UBO),
-                ("idFillExtrusionTilePropsUBO", ID_FILL_EXTRUSION_TILE_PROPS_UBO),
-                ("idFillExtrusionPropsUBO", ID_FILL_EXTRUSION_PROPS_UBO),
-            ],
-            "fillExtrusionUBOCount",
-        ),
-        "GlobeDepthShader" => (&[], "globeDepthUBOCount"),
-        "HeatmapShader" => (
-            &[
-                ("idHeatmapDrawableUBO", ID_HEATMAP_DRAWABLE_UBO),
-                ("idHeatmapEvaluatedPropsUBO", ID_HEATMAP_EVALUATED_PROPS_UBO),
-            ],
-            "heatmapUBOCount",
-        ),
-        "HeatmapTextureShader" => {
-            (&[("idHeatmapTexturePropsUBO", ID_HEATMAP_TEXTURE_PROPS_UBO)], "heatmapTextureUBOCount")
-        }
-        "LayerCompositeShader" => (&[("idLayerCompositeUBO", ID_LAYER_COMPOSITE_UBO)], "layerCompositeUBOCount"),
-        "VertexTexelShader" => (&[], "vertexTexelUBOCount"),
-        "TerrainShader" | "TerrainProbeShader" | "TerrainDepthShader" => (
-            &[
-                ("idTerrainDrawableUBO", ID_TERRAIN_DRAWABLE_UBO),
-                ("idTerrainLightTileUBO", ID_TERRAIN_LIGHT_TILE_UBO),
-                ("idTerrainPropsUBO", ID_TERRAIN_PROPS_UBO),
-                ("idTerrainLightUBO", ID_TERRAIN_LIGHT_UBO),
-            ],
-            "terrainUBOCount",
-        ),
-        "HillshadeShader" => (
-            &[
-                ("idHillshadeDrawableUBO", ID_HILLSHADE_DRAWABLE_UBO),
-                ("idHillshadeTilePropsUBO", ID_HILLSHADE_TILE_PROPS_UBO),
-                ("idHillshadeEvaluatedPropsUBO", ID_HILLSHADE_EVALUATED_PROPS_UBO),
-            ],
-            "hillshadeUBOCount",
-        ),
-        "HillshadePrepareShader" => (
-            &[
-                ("idHillshadePrepareDrawableUBO", ID_HILLSHADE_PREPARE_DRAWABLE_UBO),
-                ("idHillshadePrepareTilePropsUBO", ID_HILLSHADE_PREPARE_TILE_PROPS_UBO),
-            ],
-            "hillshadePrepareUBOCount",
-        ),
-        "LineShader" | "LineGradientShader" | "LinePatternShader" | "LineSDFShader" | "LineGradientSDFShader" => (
-            &[
-                ("idLineDrawableUBO", ID_LINE_DRAWABLE_UBO),
-                ("idLineTilePropsUBO", ID_LINE_TILE_PROPS_UBO),
-                ("idLineEvaluatedPropsUBO", ID_LINE_EVALUATED_PROPS_UBO),
-            ],
-            "lineUBOCount",
-        ),
-        "RasterShader" => (
-            &[
-                ("idRasterDrawableUBO", ID_RASTER_DRAWABLE_UBO),
-                ("idRasterEvaluatedPropsUBO", ID_RASTER_EVALUATED_PROPS_UBO),
-            ],
-            "rasterUBOCount",
-        ),
-        "SkyShader" => (&[("idSkyPropsUBO", ID_SKY_PROPS_UBO)], "skyUBOCount"),
-        "SymbolIconShader" | "SymbolSDFShader" | "SymbolTextAndIconShader" => (
-            &[
-                ("idSymbolDrawableUBO", ID_SYMBOL_DRAWABLE_UBO),
-                ("idSymbolTilePropsUBO", ID_SYMBOL_TILE_PROPS_UBO),
-                ("idSymbolEvaluatedPropsUBO", ID_SYMBOL_EVALUATED_PROPS_UBO),
-            ],
-            "symbolUBOCount",
-        ),
+        | "FillExtrusionPatternInstancedShader" => vec![
+            ("idFillExtrusionDrawableUBO", programs::FILL_EXTRUSION.buffer_id("drawableVector")),
+            ("idFillExtrusionTilePropsUBO", programs::FILL_EXTRUSION_PATTERN.buffer_id("tilePropsVector")),
+            ("idFillExtrusionPropsUBO", programs::FILL_EXTRUSION.buffer_id("props")),
+        ],
+        "HeatmapShader" => vec![
+            ("idHeatmapDrawableUBO", programs::HEATMAP.buffer_id("drawableVector")),
+            ("idHeatmapEvaluatedPropsUBO", programs::HEATMAP.buffer_id("props")),
+        ],
+        "HeatmapTextureShader" => vec![("idHeatmapTexturePropsUBO", programs::HEATMAP_TEXTURE.buffer_id("ubo"))],
+        "LayerCompositeShader" => vec![("idLayerCompositeUBO", programs::LAYER_COMPOSITE.buffer_id("props"))],
+        "TerrainShader" | "TerrainProbeShader" | "TerrainDepthShader" => vec![
+            ("idTerrainDrawableUBO", programs::TERRAIN.buffer_id("drawableVector")),
+            ("idTerrainLightTileUBO", programs::TERRAIN.buffer_id("lightVector")),
+            ("idTerrainPropsUBO", programs::TERRAIN.buffer_id("terrain")),
+            ("idTerrainLightUBO", programs::TERRAIN.buffer_id("props")),
+        ],
+        "HillshadeShader" => vec![
+            ("idHillshadeDrawableUBO", programs::HILLSHADE.buffer_id("drawableVector")),
+            ("idHillshadeTilePropsUBO", programs::HILLSHADE.buffer_id("tilePropsVector")),
+            ("idHillshadeEvaluatedPropsUBO", programs::HILLSHADE.buffer_id("props")),
+        ],
+        "HillshadePrepareShader" => vec![
+            ("idHillshadePrepareDrawableUBO", programs::HILLSHADE_PREPARE.buffer_id("drawable")),
+            ("idHillshadePrepareTilePropsUBO", programs::HILLSHADE_PREPARE.buffer_id("tileProps")),
+        ],
+        "LineShader" | "LineGradientShader" | "LinePatternShader" | "LineSDFShader" | "LineGradientSDFShader" => vec![
+            ("idLineDrawableUBO", programs::LINE.buffer_id("drawableVector")),
+            ("idLineTilePropsUBO", programs::LINE_PATTERN.buffer_id("tilePropsVector")),
+            ("idLineEvaluatedPropsUBO", programs::LINE.buffer_id("props")),
+        ],
+        "RasterShader" => vec![
+            ("idRasterDrawableUBO", programs::RASTER.buffer_id("drawableVector")),
+            ("idRasterEvaluatedPropsUBO", programs::RASTER.buffer_id("props")),
+        ],
+        "SkyShader" => vec![("idSkyPropsUBO", programs::SKY.buffer_id("sky"))],
+        "SymbolIconShader" | "SymbolSDFShader" | "SymbolTextAndIconShader" => vec![
+            ("idSymbolDrawableUBO", programs::SYMBOL_SDF.buffer_id("drawableVector")),
+            ("idSymbolTilePropsUBO", programs::SYMBOL_SDF.buffer_id("tilePropsVector")),
+            ("idSymbolEvaluatedPropsUBO", programs::SYMBOL_SDF.buffer_id("props")),
+        ],
         name => panic!("no UBO ids for {name}"),
     };
-    ids.extend_from_slice(layer);
-    if let Some(first_vertex_buffer) = first_vertex_buffer {
-        ids.push((count, first_vertex_buffer));
-    }
+    ids.extend(layer);
     // The vertex buffers that the pulled shaders read as storage buffers.
-    ids.extend_from_slice(match program.name {
-        "FillExtrusionPulledShader" => &[
-            ("idFillExtrusionWallVertices", ID_FILL_EXTRUSION_WALL_VERTICES),
-            ("idFillExtrusionWallPaint", ID_FILL_EXTRUSION_WALL_PAINT),
-            ("idFillExtrusionWallHeights", ID_FILL_EXTRUSION_WALL_HEIGHTS),
+    ids.extend(match program.name {
+        "FillExtrusionPulledShader" => vec![
+            ("idFillExtrusionWallVertices", programs::FILL_EXTRUSION_PULLED.buffer_id("wallVertices")),
+            ("idFillExtrusionWallPaint", programs::FILL_EXTRUSION_PULLED.buffer_id("wallPaint")),
+            ("idFillExtrusionWallHeights", programs::FILL_EXTRUSION_PULLED.buffer_id("wallHeights")),
         ],
-        "FillOutlinePulledShader" => &[
-            ("idFillOutlineVertices", ID_FILL_OUTLINE_VERTICES),
-            ("idFillOutlineEnds", ID_FILL_OUTLINE_ENDS),
-            ("idFillOutlinePaint", ID_FILL_OUTLINE_PAINT),
+        "FillOutlinePulledShader" => vec![
+            ("idFillOutlineVertices", programs::FILL_OUTLINE_PULLED.buffer_id("outlineVertices")),
+            ("idFillOutlineEnds", programs::FILL_OUTLINE_PULLED.buffer_id("outlineEnds")),
+            ("idFillOutlinePaint", programs::FILL_OUTLINE_PULLED.buffer_id("outlinePaint")),
         ],
-        _ => &[],
+        _ => vec![],
     });
     ids
 }
@@ -393,8 +347,6 @@ const UBO_SIZES: &[(&str, usize)] = &[
     ("SymbolTilePropsUBO", size_of::<symbol_layer_ubo::SymbolTilePropsUBO>()),
     ("SymbolEvaluatedPropsUBO", size_of::<symbol_layer_ubo::SymbolEvaluatedPropsUBO>()),
     ("TerrainDrawableUBO", size_of::<terrain_ubo::TerrainDrawableUBO>()),
-    ("TerrainPropsUBO", size_of::<terrain_ubo::TerrainPropsUBO>()),
-    ("TerrainFogUBO", size_of::<terrain_ubo::TerrainFogUBO>()),
     ("TerrainSurfaceUBO", size_of::<terrain_ubo::TerrainSurfaceUBO>()),
 ];
 
@@ -412,7 +364,7 @@ fn ubo_ids_and_sizes_are_the_renderers() {
     for (program, source) in sources() {
         let mut text = full_source(source);
         let mut asserts = String::new();
-        for (id, value) in ubo_ids(program, source) {
+        for (id, value) in ubo_ids(program) {
             let _ = writeln!(asserts, "static_assert({id} == {value}, \"{id} != {value}\");");
         }
         for &(name, size) in UBO_SIZES {
@@ -451,11 +403,10 @@ fn vertex_format(data_type: AttributeDataType) -> (MTLVertexFormat, usize) {
 /// instance attributes' buffers stepping per instance.
 fn vertex_descriptor(
     program: &Program,
-    source: &ShaderSource,
     data_type: impl Fn(AttributeDataType) -> AttributeDataType,
 ) -> Retained<MTLVertexDescriptor> {
     let descriptor = MTLVertexDescriptor::new();
-    let first = source.first_vertex_buffer.unwrap_or(0);
+    let first = first_vertex_buffer(program).unwrap_or(0);
     for (location, step, attribute) in program.locations() {
         let (format, size) = vertex_format(data_type(attribute.format));
         let buffer_index = first + location;
@@ -500,8 +451,8 @@ fn pipelines_build_with_the_programs_attributes() {
             other => other,
         };
         let layouts: [(&str, Retained<MTLVertexDescriptor>); 2] = [
-            ("declared formats", vertex_descriptor(program, source, |data_type| data_type)),
-            ("single-value formats", vertex_descriptor(program, source, narrow)),
+            ("declared formats", vertex_descriptor(program, |data_type| data_type)),
+            ("single-value formats", vertex_descriptor(program, narrow)),
         ];
         let variants = ProjectionVariant::of(program).iter().flat_map(|&projection| {
             [
@@ -550,11 +501,11 @@ fn pipelines_build_with_the_programs_attributes() {
 fn the_programs_fit_the_argument_tables() {
     // Metal's argument tables have 31 buffers, 31 vertex attributes and 16
     // samplers.
-    for (program, source) in sources() {
+    for (program, _) in sources() {
         let attributes = program.locations().count();
         assert!(attributes < 31, "{}", program.name);
-        assert_eq!(source.first_vertex_buffer.is_some(), attributes > 0, "{}", program.name);
-        assert!(source.first_vertex_buffer.is_none_or(|first| first + attributes <= 31), "{}", program.name);
+        assert_eq!(first_vertex_buffer(program).is_some(), attributes > 0, "{}", program.name);
+        assert!(first_vertex_buffer(program).is_none_or(|first| first + attributes <= 31), "{}", program.name);
         assert!(program.textures.len() <= 16, "{}", program.name);
     }
 }

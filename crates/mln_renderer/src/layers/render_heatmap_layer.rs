@@ -9,14 +9,12 @@ use std::sync::Arc;
 use glam::dcamera::rh::proj::opengl::orthographic;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::heatmap_layer_ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO};
 use mln_gfx::shaders::heatmap_texture_layer_ubo::HeatmapTexturePropsUBO;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO, ID_HEATMAP_TEXTURE_PROPS_UBO, ID_PROJECTION_UBO,
-};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -58,6 +56,11 @@ use crate::render_target::RenderTarget;
 use crate::render_tile::FrameTile;
 use crate::terrain::StandingDraw;
 use crate::tile_matrix::{bind_no_projection, globe_extrude_scale, projection_data, to_projection_ubo};
+
+/// The ids of the buffers that the draws bind.
+const DRAWABLE_ID: usize = programs::HEATMAP.buffer_id("drawableVector");
+const PROPS_ID: usize = programs::HEATMAP.buffer_id("props");
+const TEXTURE_PROPS_ID: usize = programs::HEATMAP_TEXTURE.buffer_id("ubo");
 
 /// The slots of the programs' textures that the draws bind.
 const COLOR_RAMP_SLOT: usize = programs::HEATMAP_TEXTURE.texture_slot("color_ramp");
@@ -469,9 +472,9 @@ impl RenderHeatmapLayer {
             intensity: *evaluated.heatmap_intensity.uniform(),
             padding: 0.0,
         };
-        writer.uniform(ID_HEATMAP_EVALUATED_PROPS_UBO, &props);
-        writer.storage(ID_HEATMAP_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-        writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+        writer.uniform(PROPS_ID, &props);
+        writer.storage(DRAWABLE_ID, |uniforms| uniforms.draw_ubo);
+        writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
     }
 
     /// Makes the layer's draw of the frame, which colors the heat of the
@@ -555,7 +558,7 @@ impl RenderHeatmapLayer {
             pad3: 0.0,
         };
         let context = &mut *paint_parameters.context;
-        if frame.uniform_buffers.write_pod(gpu, ID_HEATMAP_TEXTURE_PROPS_UBO, &props, context.device())
+        if frame.uniform_buffers.write_pod(gpu, TEXTURE_PROPS_ID, &props, context.device())
             && let Some(texture) = &mut drawing.texture
         {
             texture.objects.drop_bindings();

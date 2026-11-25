@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetFormats};
 use mln_gfx::rendering_stats::{RenderingStats, TerrainStats};
-use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
+use mln_gfx::shaders::bindings::PAINT_PARAMS_ID;
 use mln_gfx::{FrameImage, Handoff, ScissorRect};
 use mln_map_types::MapDebugOptions;
 use mln_style::layers::CustomLayerFrame;
@@ -644,7 +644,7 @@ impl Encoder {
             &draw_groups.composited,
         );
         let global_paint_params_ubo = parameters.global_paint_params(orchestrator.atlases().pattern.pixel_size());
-        parameters.context.write_global_uniform_buffer(gpu, ID_GLOBAL_PAINT_PARAMS_UBO, &global_paint_params_ubo);
+        parameters.context.write_global_uniform_buffer(gpu, PAINT_PARAMS_ID, &global_paint_params_ubo);
         // What the uploads replaced goes before the passes make what
         // replaces it, such as a draw's geometry.
         parameters.context.destroy_released(gpu);

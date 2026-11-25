@@ -403,7 +403,7 @@ impl ShaderProgram {
     }
 
     /// The group that holds only `globalIndex`, the index of the draw's
-    /// entries in the layer's UBO vectors, at binding `ID_GLOBAL_UBO_INDEX`.
+    /// entries in the layer's UBO vectors, at binding [`GLOBAL_INDEX_ID`](mln_gfx::shaders::bindings::GLOBAL_INDEX_ID).
     /// Its layout is the index table's, and a draw binds it with the dynamic
     /// offset of its index, so its other groups bind only what it shares
     /// with the layer's other draws.

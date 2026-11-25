@@ -24,13 +24,13 @@ use mln_gfx::gpu::{
     VertexAttribute, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::{BUFFER_IDS, PROJECTION_ID};
 use mln_gfx::shaders::layer_composite_ubo::{
     LAYER_COMPOSITE_BLEND_COLOR, LAYER_COMPOSITE_BLEND_LUMINOSITY, LAYER_COMPOSITE_BLEND_MULTIPLY,
     LAYER_COMPOSITE_BLEND_NONE, LAYER_COMPOSITE_BLEND_OVERLAY, LayerCompositeUBO,
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
-use mln_gfx::shaders::shader_defines::{ID_LAYER_COMPOSITE_UBO, ID_PROJECTION_UBO, MAX_UBO_COUNT_PER_SHADER};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::ColorBlendFactorType;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMode, DrawModeType, StencilMode};
@@ -47,6 +47,9 @@ use crate::gfx::resources::{GpuTexture, attachment_bytes};
 use crate::gfx::vertex_attribute::Uniforms;
 use crate::paint_parameters::{DrawTarget, OpenPass};
 use crate::render_static_data::RenderStaticData;
+
+/// The ids of the buffers that the draws bind.
+const PROPS_ID: usize = programs::LAYER_COMPOSITE.buffer_id("props");
 
 /// The format of the texture a composited layer draws into: its colors are
 /// premultiplied, as the frame's are.
@@ -487,10 +490,10 @@ impl LayerComposite {
                     None => (layer, layer),
                 };
                 let mut entries = Entries::new();
-                for id in 0..MAX_UBO_COUNT_PER_SHADER {
+                for id in 0..BUFFER_IDS {
                     let (buffer, offset, size) = match id {
-                        ID_LAYER_COMPOSITE_UBO => (uniforms, (slot * stride) as u64, size as u64),
-                        ID_PROJECTION_UBO => (projection, 0, projection.size() as u64),
+                        PROPS_ID => (uniforms, (slot * stride) as u64, size as u64),
+                        PROJECTION_ID => (projection, 0, projection.size() as u64),
                         _ => match global.get(id) {
                             Some(buffer) => (buffer, 0, buffer.size() as u64),
                             None => continue,

@@ -1,5 +1,5 @@
 use mln_gfx::gpu::Gpu;
-use mln_gfx::shaders::shader_defines::MAX_UBO_COUNT_PER_SHADER;
+use mln_gfx::shaders::bindings::BUFFER_IDS;
 
 use crate::gfx::buffer::Buffer;
 use crate::gfx::resources::Device;
@@ -8,7 +8,7 @@ use crate::gfx::resources::Device;
 /// the array drops the bindings made of a buffer that it replaces.
 #[derive(Default)]
 pub(crate) struct UniformBufferArray {
-    buffers: [Option<Buffer>; MAX_UBO_COUNT_PER_SHADER],
+    buffers: [Option<Buffer>; BUFFER_IDS],
     epoch: u64,
 }
 

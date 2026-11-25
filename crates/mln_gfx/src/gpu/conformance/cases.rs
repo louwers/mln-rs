@@ -17,6 +17,7 @@ use crate::gpu::{
     read_texels,
 };
 use crate::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
+use crate::shaders::bindings::{PAINT_PARAMS_ID, PROJECTION_ID};
 use crate::shaders::fill_extrusion_layer_ubo::{
     FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO,
 };
@@ -26,12 +27,6 @@ use crate::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
 use crate::shaders::program::Program;
 use crate::shaders::programs;
 use crate::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
-use crate::shaders::shader_defines::{
-    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO, ID_FILL_DRAWABLE_UBO, ID_FILL_EVALUATED_PROPS_UBO,
-    ID_FILL_EXTRUSION_DRAWABLE_UBO, ID_FILL_EXTRUSION_PROPS_UBO, ID_FILL_EXTRUSION_TILE_PROPS_UBO,
-    ID_FILL_EXTRUSION_WALL_VERTICES, ID_GLOBAL_PAINT_PARAMS_UBO, ID_HEATMAP_TEXTURE_PROPS_UBO, ID_PROJECTION_UBO,
-    ID_RASTER_DRAWABLE_UBO, ID_RASTER_EVALUATED_PROPS_UBO,
-};
 use crate::stencil_mode::StencilMode;
 use crate::texture2d::SamplerState;
 use crate::types::{DepthFunctionType, TextureFilterType};
@@ -75,9 +70,9 @@ fn solid_at(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4], matrix: 
     let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;
     let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
     let entries = vec![
-        whole(ID_PROJECTION_UBO, projection_buffer, projection),
-        whole(ID_BACKGROUND_DRAWABLE_UBO, drawable_buffer, drawable),
-        whole(ID_BACKGROUND_PROPS_UBO, props_buffer, props),
+        whole(PROJECTION_ID, projection_buffer, projection),
+        whole(const { programs::BACKGROUND.buffer_id("drawableVector") }, drawable_buffer, drawable),
+        whole(const { programs::BACKGROUND.buffer_id("props") }, props_buffer, props),
     ];
     let bindings = gpu.create_bindings(&BindingsDesc { label: "background layer", shader, entries: &entries })?;
     let geometry = background_geometry(gpu, shader, quad, indices)?;
@@ -182,8 +177,12 @@ pub fn invalid_calls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let alignment = u64::from(gpu.caps().buffer_offset_alignment.max(4));
     let unit = (size_of::<BackgroundPropsUBO>() as u64).next_multiple_of(alignment);
     let uniform = gpu.create_buffer(&BufferDesc { label: "uniform", usage: BufferUsage::Uniform, size: 2 * unit })?;
-    let props =
-        |buffer, offset, size| BindGroupEntry::Buffer { id: ID_BACKGROUND_PROPS_UBO as u32, buffer, offset, size };
+    let props = |buffer, offset, size| BindGroupEntry::Buffer {
+        id: const { programs::BACKGROUND.buffer_id("props") } as u32,
+        buffer,
+        offset,
+        size,
+    };
     let with = |entry: Option<BindGroupEntry>| -> Vec<BindGroupEntry> {
         frame.entries[..2].iter().copied().chain(entry).collect()
     };
@@ -301,8 +300,12 @@ pub fn foreign_ids<G: Gpu>(first: &mut G, second: &mut G) -> Result<(), GpuError
 
     let unknown = |result: Result<(), GpuError>, what| matches!(result, Err(GpuError::UnknownId(kind)) if kind == what);
     assert!(unknown(second.write_buffer(theirs.quad, 0, &[0; 4]), "buffer"), "a write to their buffer");
-    let entries =
-        [BindGroupEntry::Buffer { id: ID_BACKGROUND_PROPS_UBO as u32, buffer: theirs.quad, offset: 0, size: 4 }];
+    let entries = [BindGroupEntry::Buffer {
+        id: const { programs::BACKGROUND.buffer_id("props") } as u32,
+        buffer: theirs.quad,
+        offset: 0,
+        size: 4,
+    }];
     let bindings = second.create_bindings(&BindingsDesc { label: "theirs", shader: ours.shader, entries: &entries });
     assert!(unknown(bindings.map(drop), "buffer"), "bindings of their buffer");
     let bindings =
@@ -556,7 +559,7 @@ fn vertex_texels(gpu: &mut impl Gpu, texture: TextureId) -> Result<Vec<u8>, GpuE
         shader,
         entries: &[
             BindGroupEntry::Texture { slot: slot(&programs::VERTEX_TEXEL, "image"), texture, sampler },
-            whole(ID_PROJECTION_UBO, projection_buffer, projection),
+            whole(PROJECTION_ID, projection_buffer, projection),
         ],
     })?;
 
@@ -760,9 +763,9 @@ fn raster_draw(
         label: "minified",
         shader,
         entries: &[
-            whole(ID_PROJECTION_UBO, projection_buffer, projection),
-            whole(ID_RASTER_DRAWABLE_UBO, drawable_buffer, drawable),
-            whole(ID_RASTER_EVALUATED_PROPS_UBO, props_buffer, props),
+            whole(PROJECTION_ID, projection_buffer, projection),
+            whole(const { programs::RASTER.buffer_id("drawableVector") }, drawable_buffer, drawable),
+            whole(const { programs::RASTER.buffer_id("props") }, props_buffer, props),
             BindGroupEntry::Texture { slot: slot(&programs::RASTER, "image0"), texture, sampler },
             BindGroupEntry::Texture { slot: slot(&programs::RASTER, "image1"), texture, sampler },
         ],
@@ -824,9 +827,9 @@ pub fn vertex_layouts(gpu: &mut impl Gpu) -> Result<(), GpuError> {
         label: "fill layer",
         shader,
         entries: &[
-            whole(ID_PROJECTION_UBO, projection_buffer, projection),
-            whole(ID_FILL_DRAWABLE_UBO, drawable_buffer, drawable),
-            whole(ID_FILL_EVALUATED_PROPS_UBO, props_buffer, props),
+            whole(PROJECTION_ID, projection_buffer, projection),
+            whole(const { programs::FILL.buffer_id("drawableVector") }, drawable_buffer, drawable),
+            whole(const { programs::FILL.buffer_id("props") }, props_buffer, props),
         ],
     })?;
 
@@ -928,10 +931,10 @@ fn wall_frame(
     let tile_props_buffer = buffer(gpu, BufferUsage::Storage, tile_props)?;
     let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
     let mut entries = vec![
-        whole(ID_PROJECTION_UBO, projection_buffer, projection),
-        whole(ID_FILL_EXTRUSION_DRAWABLE_UBO, drawable_buffer, drawable),
-        whole(ID_FILL_EXTRUSION_TILE_PROPS_UBO, tile_props_buffer, tile_props),
-        whole(ID_FILL_EXTRUSION_PROPS_UBO, props_buffer, props),
+        whole(PROJECTION_ID, projection_buffer, projection),
+        whole(const { programs::FILL_EXTRUSION_PATTERN.buffer_id("drawableVector") }, drawable_buffer, drawable),
+        whole(const { programs::FILL_EXTRUSION_PATTERN.buffer_id("tilePropsVector") }, tile_props_buffer, tile_props),
+        whole(const { programs::FILL_EXTRUSION_PATTERN.buffer_id("props") }, props_buffer, props),
     ];
     entries.extend_from_slice(more);
     let bindings = gpu.create_bindings(&BindingsDesc { label: "fill extrusion layer", shader, entries: &entries })?;
@@ -1075,7 +1078,7 @@ pub fn pulled_walls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let outline = wall_outline();
     let outline: &[u8] = bytemuck::cast_slice(&outline);
     let outline_buffer = buffer(gpu, BufferUsage::Vertex, outline)?;
-    let outline = whole(ID_FILL_EXTRUSION_WALL_VERTICES, outline_buffer, outline);
+    let outline = whole(const { programs::FILL_EXTRUSION_PULLED.buffer_id("wallVertices") }, outline_buffer, outline);
     if !gpu.caps().binds_vertex_buffers {
         let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0; 4])?;
         let entries = [frame.entries.as_slice(), &[outline]].concat();
@@ -1240,9 +1243,9 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
         targets: RGBA8,
     })?;
     let entries = [
-        whole(ID_GLOBAL_PAINT_PARAMS_UBO, paint_buffer, paint),
-        whole(ID_HEATMAP_TEXTURE_PROPS_UBO, props_buffer, props),
-        whole(ID_PROJECTION_UBO, projection_buffer, projection),
+        whole(PAINT_PARAMS_ID, paint_buffer, paint),
+        whole(const { programs::HEATMAP_TEXTURE.buffer_id("ubo") }, props_buffer, props),
+        whole(PROJECTION_ID, projection_buffer, projection),
         BindGroupEntry::Texture { slot: slot(&programs::HEATMAP_TEXTURE, "image"), texture: image, sampler },
         BindGroupEntry::Texture { slot: slot(&programs::HEATMAP_TEXTURE, "color_ramp"), texture: image, sampler },
     ];
@@ -1417,10 +1420,10 @@ pub fn host_writes<G: Gpu + ?Sized>(
             label: "host writes",
             shader,
             entries: &[
-                whole(ID_PROJECTION_UBO, projection_buffer, projection),
-                whole(ID_BACKGROUND_DRAWABLE_UBO, drawable_buffer, drawable),
+                whole(PROJECTION_ID, projection_buffer, projection),
+                whole(const { programs::BACKGROUND.buffer_id("drawableVector") }, drawable_buffer, drawable),
                 BindGroupEntry::Buffer {
-                    id: ID_BACKGROUND_PROPS_UBO as u32,
+                    id: const { programs::BACKGROUND.buffer_id("props") } as u32,
                     buffer: props,
                     offset: 0,
                     size: props_size,
@@ -1529,9 +1532,9 @@ pub fn memory_growth(gpu: &mut impl Gpu, mut arm: impl FnMut(usize)) -> Result<c
                 label: "memory growth",
                 shader,
                 entries: &[
-                    whole(ID_PROJECTION_UBO, projection_buffer, projection),
-                    whole(ID_BACKGROUND_DRAWABLE_UBO, drawable_buffer, drawable),
-                    whole(ID_BACKGROUND_PROPS_UBO, props_buffer, props),
+                    whole(PROJECTION_ID, projection_buffer, projection),
+                    whole(const { programs::BACKGROUND.buffer_id("drawableVector") }, drawable_buffer, drawable),
+                    whole(const { programs::BACKGROUND.buffer_id("props") }, props_buffer, props),
                 ],
             },
         )?;

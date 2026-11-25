@@ -15,10 +15,10 @@ use crate::gpu::{
     LoadOp, PassDesc, PipelineDesc, Scissor, ShaderId, ShaderKey, StencilState, TargetFormats, TextureDesc,
     TextureFormat, TextureRegion, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep, read_texels,
 };
+use crate::shaders::bindings::PROJECTION_ID;
 use crate::shaders::layer_ubo::ProjectionUBO;
 use crate::shaders::programs;
-use crate::shaders::shader_defines::{ID_PROJECTION_UBO, ID_TERRAIN_PROPS_UBO};
-use crate::shaders::terrain_ubo::{TerrainFogUBO, TerrainPropsUBO, TerrainSurfaceUBO};
+use crate::shaders::terrain_ubo::TerrainSurfaceUBO;
 use crate::stencil_mode::StencilMode;
 use crate::texture2d::SamplerState;
 
@@ -228,13 +228,10 @@ fn probe(
     gpu.write_texture(texture, TextureRegion::whole(Size::new(side, side)), &dem.texels)?;
     let sampler = gpu.create_sampler(&SamplerState::default())?;
     let props = TerrainSurfaceUBO {
-        props: TerrainPropsUBO {
-            unpack: dem.unpack.weights_and_base(),
-            unpack_scale: dem.unpack.scale,
-            exaggeration: dem.exaggeration,
-            ..TerrainPropsUBO::default()
-        },
-        fog: TerrainFogUBO::NONE,
+        unpack: dem.unpack.weights_and_base(),
+        unpack_scale: dem.unpack.scale,
+        exaggeration: dem.exaggeration,
+        ..TerrainSurfaceUBO::default()
     };
     let props = bytemuck::bytes_of(&props);
     let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
@@ -248,8 +245,8 @@ fn probe(
         shader,
         entries: &[
             BindGroupEntry::Texture { slot: slot(&programs::TERRAIN_PROBE, "ground_dem"), texture, sampler },
-            whole(ID_TERRAIN_PROPS_UBO, props_buffer, props),
-            whole(ID_PROJECTION_UBO, projection_buffer, projection),
+            whole(const { programs::TERRAIN_PROBE.buffer_id("terrain") }, props_buffer, props),
+            whole(PROJECTION_ID, projection_buffer, projection),
         ],
     })?;
 

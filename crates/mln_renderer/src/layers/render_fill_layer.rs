@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::fill_layer_ubo::{
     FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO,
     FillPatternTilePropsUBO, FillTilePropsUnionUBO,
@@ -11,10 +12,6 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_FILL_DRAWABLE_UBO, ID_FILL_EVALUATED_PROPS_UBO, ID_FILL_OUTLINE_ENDS, ID_FILL_OUTLINE_PAINT,
-    ID_FILL_OUTLINE_VERTICES, ID_FILL_TILE_PROPS_UBO, ID_PROJECTION_UBO,
-};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_style::PropertyEvaluationParameters;
 use mln_style::layer::LayerStyle;
@@ -51,6 +48,14 @@ use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
 use crate::tile_matrix::{projection_data, to_projection_ubo};
+
+/// The ids of the buffers that the draws bind.
+const DRAWABLE_ID: usize = programs::FILL.buffer_id("drawableVector");
+const TILE_PROPS_ID: usize = programs::FILL_PATTERN.buffer_id("tilePropsVector");
+const PROPS_ID: usize = programs::FILL.buffer_id("props");
+const OUTLINE_VERTICES_ID: usize = programs::FILL_OUTLINE_PULLED.buffer_id("outlineVertices");
+const OUTLINE_ENDS_ID: usize = programs::FILL_OUTLINE_PULLED.buffer_id("outlineEnds");
+const OUTLINE_PAINT_ID: usize = programs::FILL_OUTLINE_PULLED.buffer_id("outlinePaint");
 
 /// The slots of the programs' textures that the draws bind.
 const IMAGE_SLOT: usize = programs::FILL_PATTERN.texture_slot("image");
@@ -356,12 +361,11 @@ impl TileBuilder<'_> {
                     quad_geometry,
                     atlases.as_ref(),
                 );
-                for (id, vertices) in
-                    [(ID_FILL_OUTLINE_VERTICES, &bucket.vertices), (ID_FILL_OUTLINE_ENDS, &bucket.outline_ends)]
+                for (id, vertices) in [(OUTLINE_VERTICES_ID, &bucket.vertices), (OUTLINE_ENDS_ID, &bucket.outline_ends)]
                 {
                     draw.objects.read_as_storage(id, Some(bucket_vertices(geometry, vertices)?));
                 }
-                draw.objects.read_as_storage(ID_FILL_OUTLINE_PAINT, paint.clone());
+                draw.objects.read_as_storage(OUTLINE_PAINT_ID, paint.clone());
                 draw.paint_layout = Some(outline_paint_layout(&vertex_attrs));
                 Some(draw)
             } else if let Some(quad) = self.outline_quad {
@@ -596,10 +600,10 @@ impl RenderFillLayer {
             from_scale: layer.crossfade.from_scale,
             to_scale: layer.crossfade.to_scale,
         };
-        writer.uniform(ID_FILL_EVALUATED_PROPS_UBO, &props);
-        writer.storage(ID_FILL_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-        writer.storage(ID_FILL_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
-        writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+        writer.uniform(PROPS_ID, &props);
+        writer.storage(DRAWABLE_ID, |uniforms| uniforms.draw_ubo);
+        writer.storage(TILE_PROPS_ID, |uniforms| uniforms.tile_props);
+        writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
     }
 }
 
@@ -743,7 +747,7 @@ impl TypedLayer for RenderFillLayer {
                             if changes.paint {
                                 let mut attrs = VertexAttributeArray::new();
                                 let paint = refresh(&mut attrs);
-                                outline.objects.read_as_storage(ID_FILL_OUTLINE_PAINT, paint);
+                                outline.objects.read_as_storage(OUTLINE_PAINT_ID, paint);
                                 outline.paint_layout = Some(outline_paint_layout(&attrs));
                             }
                         }

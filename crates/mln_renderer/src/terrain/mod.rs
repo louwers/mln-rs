@@ -57,7 +57,7 @@ pub(crate) use fog::terrain_fog;
 pub(crate) use ground::{FrameGround, GroundHeights, StandingDraw, height_attribute, point_center};
 use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::hillshade_layer_ubo::{HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO};
-use mln_gfx::shaders::terrain_ubo::{TerrainFogUBO, TerrainPropsUBO};
+use mln_gfx::shaders::terrain_ubo::{TerrainFog, TerrainProps};
 use mln_map_types::{MapMode, TerrainSkirtLength};
 use mln_style::source::SourceData;
 use mln_style::sources::RasterDemSourceType;
@@ -94,8 +94,8 @@ fn skirt_length(length: TerrainSkirtLength, zoom: f64) -> Option<f64> {
 /// exaggeration and its skirts.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct Surface {
-    /// The terrain's uniform block.
-    pub(crate) props: TerrainPropsUBO,
+    /// How the surface stands, the first members of its uniform block.
+    pub(crate) props: TerrainProps,
     /// Whether the tiles have skirts.
     pub(crate) skirts: bool,
 }
@@ -105,12 +105,11 @@ impl Surface {
     /// skirts of `skirt_length` meters, or none.
     fn new(encoding: RasterEncoding, exaggeration: f32, skirt_length: Option<f64>) -> Surface {
         let unpack = DemUnpack::of(encoding);
-        let props = TerrainPropsUBO {
+        let props = TerrainProps {
             unpack: unpack.weights_and_base(),
             unpack_scale: unpack.scale,
             exaggeration,
             skirt_length: skirt_length.unwrap_or(0.0) as f32,
-            pad0: 0.0,
         };
         Surface { props, skirts: skirt_length.is_some() }
     }
@@ -395,7 +394,7 @@ impl RenderTerrain {
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         stacks: &DrapeStacks,
-        fog: TerrainFogUBO,
+        fog: TerrainFog,
         (depth_first, ground): (bool, bool),
     ) {
         let cover = self.cover.as_ref().zip(self.dems.as_ref());

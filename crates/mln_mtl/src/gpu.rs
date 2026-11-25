@@ -20,8 +20,8 @@ use mln_gfx::gpu::{
     TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexAttribute as GpuVertexAttribute,
     VertexBufferLayout, VertexStep,
 };
+use mln_gfx::shaders::bindings::GLOBAL_INDEX_ID;
 use mln_gfx::shaders::program::{Program, Sources};
-use mln_gfx::shaders::shader_defines::ID_GLOBAL_UBO_INDEX;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{
@@ -51,7 +51,7 @@ use parking_lot::{Condvar, Mutex};
 use crate::custom_layer::{AttachmentFormats, CustomLayerEncoder, CustomLayerPass};
 use crate::readback::{buffer_bytes, encode_region_copy};
 use crate::shaders::msl_sources::PRELUDE;
-use crate::shaders::shader_source::{BUILT_INS, ShaderSource};
+use crate::shaders::shader_source::{BUILT_INS, ShaderSource, first_vertex_buffer};
 use crate::{Device, Id};
 
 /// The entries of a stage's buffer argument table.
@@ -101,7 +101,6 @@ struct Texture {
 /// them or its bindings reflected it.
 struct Shader {
     program: &'static Program,
-    source: &'static ShaderSource,
     vertex: Id<dyn MTLFunction>,
     /// The attribute indexes that `vertex` reads, by bit.
     active_attributes: u32,
@@ -704,7 +703,7 @@ impl MetalGpu {
         let shader = self.shaders.get(desc.shader).ok_or(GpuError::UnknownId("shader"))?;
         let name = shader.program.name;
         let (vertex_descriptor, vertex_buffer_indices) =
-            vertex_descriptor(shader.program, shader.source, shader.active_attributes, desc.vertex_buffers)?;
+            vertex_descriptor(shader.program, shader.active_attributes, desc.vertex_buffers)?;
 
         let descriptor = MTLRenderPipelineDescriptor::new();
         descriptor.setLabel(Some(&NSString::from_str(name)));
@@ -733,8 +732,7 @@ impl MetalGpu {
         let reflection =
             reflection.ok_or_else(|| GpuError::Invalid(format!("{name}: Metal gave no pipeline reflection")))?;
         if shader.table.is_none() {
-            let (bindings, reads) =
-                shader_bindings(&reflection, shader.program, shader.source, &vertex_buffer_indices)?;
+            let (bindings, reads) = shader_bindings(&reflection, shader.program, &vertex_buffer_indices)?;
             if let Some(shader) = self.shaders.get_mut(desc.shader) {
                 shader.table = Some(ShaderTable { bindings, reads });
             }
@@ -843,7 +841,7 @@ fn new_metal_buffer(
     }
 }
 
-/// The vertex descriptor of `layouts` for the attributes of `source` that
+/// The vertex descriptor of `layouts` for the attributes of `program` that
 /// `active` marks by index, and the buffer index each layout's slot binds
 /// at, `None` for a slot without such attributes.
 ///
@@ -851,19 +849,18 @@ fn new_metal_buffer(
 /// attribute, which the layouts still hold. Metal rejects a layout that no
 /// attribute reads, so such a slot gets no layout and binds no buffer.
 ///
-/// The slots bind in order from the lowest buffer index of `source`'s
-/// attribute tables, which is past the indexes of the shader's own
+/// The slots bind in order from the program's first vertex buffer index
+/// ([`first_vertex_buffer`]), which is past the indexes of the shader's own
 /// buffers. Which attributes a slot holds is the layouts' choice, not the
 /// tables' grouping of them.
 fn vertex_descriptor(
     program: &Program,
-    source: &ShaderSource,
     active: u32,
     layouts: &[VertexBufferLayout],
 ) -> Result<(Retained<MTLVertexDescriptor>, Vec<Option<usize>>), GpuError> {
     let descriptor = MTLVertexDescriptor::vertexDescriptor();
     let name = program.name;
-    let first = source.first_vertex_buffer;
+    let first = first_vertex_buffer(program);
     let mut buffer_indices: Vec<Option<usize>> = Vec::with_capacity(layouts.len());
     for (slot, layout) in layouts.iter().enumerate() {
         let mut attributes = Vec::with_capacity(layout.attributes.len());
@@ -930,11 +927,10 @@ fn active_attributes(function: &ProtocolObject<dyn MTLFunction>) -> u32 {
 fn shader_bindings(
     reflection: &MTLRenderPipelineReflection,
     program: &Program,
-    source: &ShaderSource,
     vertex_buffer_indices: &[Option<usize>],
 ) -> Result<(Vec<Binding>, Vec<ShaderBinding>), GpuError> {
     let name = program.name;
-    let first_vertex_buffer = source.first_vertex_buffer;
+    let first_vertex_buffer = first_vertex_buffer(program);
     let mut bindings: Vec<Binding> = Vec::new();
     let mut reads: Vec<ShaderBinding> = Vec::new();
     for (vertex, stage) in [(true, reflection.vertexBindings()), (false, reflection.fragmentBindings())] {
@@ -957,7 +953,7 @@ fn shader_bindings(
                     )));
                 }
                 MTLBindingType::Buffer if vertex && vertex_buffer_indices.contains(&Some(index)) => continue,
-                MTLBindingType::Buffer if index == ID_GLOBAL_UBO_INDEX => Resource::GlobalIndex,
+                MTLBindingType::Buffer if index == GLOBAL_INDEX_ID => Resource::GlobalIndex,
                 MTLBindingType::Buffer => Resource::Buffer(index as u32),
                 MTLBindingType::Texture => Resource::Texture(texture_id()?),
                 MTLBindingType::Sampler => Resource::Sampler(texture_id()?),
@@ -1417,7 +1413,7 @@ impl Gpu for MetalGpu {
             )
         })?;
         let active_attributes = active_attributes(&vertex);
-        Ok(self.shaders.insert(Shader { program, source, vertex, active_attributes, fragment, table: None }))
+        Ok(self.shaders.insert(Shader { program, vertex, active_attributes, fragment, table: None }))
     }
 
     fn create_pipeline(&mut self, desc: &PipelineDesc<'_>) -> Result<PipelineId, GpuError> {
@@ -1500,14 +1496,14 @@ impl Gpu for MetalGpu {
 
     fn create_geometry(&mut self, desc: &GeometryDesc<'_>) -> Result<GeometryId, GpuError> {
         let shader = self.shaders.get(desc.shader).ok_or(GpuError::UnknownId("shader"))?;
-        let (program, source, active_attributes) = (shader.program, shader.source, shader.active_attributes);
+        let (program, active_attributes) = (shader.program, shader.active_attributes);
         let ranges = {
             let buffer =
                 |id| self.buffers.get(id).map(|buffer: &Buffer| BufferInfo { usage: buffer.usage, size: buffer.size });
             let lookup = Lookup { buffer: &buffer, texture: &|_| None, sampler: &|_| false };
             validation::check_geometry(desc, &lookup)?
         };
-        let (_, indices) = vertex_descriptor(program, source, active_attributes, desc.layouts)?;
+        let (_, indices) = vertex_descriptor(program, active_attributes, desc.layouts)?;
         let native = |id| self.buffers.get(id).map(|buffer| buffer.buffer.clone()).ok_or(GpuError::UnknownId("buffer"));
         let mut vertex_buffers = Vec::with_capacity(desc.vertex_buffers.len());
         for ((&(buffer, offset), layout), index) in desc.vertex_buffers.iter().zip(desc.layouts).zip(indices) {

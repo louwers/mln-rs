@@ -10,10 +10,11 @@
 //! between [`Gpu::begin_pass`] and [`Gpu::end_pass`], and the backend
 //! records it at once.
 //!
-//! Bindings use the shaders' own numbering: a buffer binds at its uniform
-//! or storage buffer id (`shaders::shader_defines`, e.g.
-//! `ID_GLOBAL_PAINT_PARAMS_UBO`), and a texture and a vertex attribute at
-//! the slot and location the program declares them at ([`Program`]). Each
+//! Bindings use the shaders' own numbering: a buffer binds at the id the
+//! program declares it at, or the engine's
+//! ([`shaders::bindings`](crate::shaders::bindings)), and a texture and a
+//! vertex attribute at the slot and location the program declares them at
+//! ([`Program`]). Each
 //! backend maps them to its own slots, groups, descriptor sets or shader
 //! locations.
 

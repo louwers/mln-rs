@@ -36,10 +36,10 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPropsUBO};
+use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::programs;
-use mln_gfx::shaders::shader_defines::{ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
 use mln_util::Color;
@@ -224,9 +224,13 @@ impl Scene {
             size: size as u64,
         };
         let entries = [
-            entry(ID_BACKGROUND_PROPS_UBO, props, size_of::<BackgroundPropsUBO>()),
-            entry(ID_BACKGROUND_DRAWABLE_UBO, drawable, size_of::<BackgroundDrawableUnionUBO>()),
-            entry(ID_PROJECTION_UBO, projection, size_of::<ProjectionUBO>()),
+            entry(const { programs::BACKGROUND.buffer_id("props") }, props, size_of::<BackgroundPropsUBO>()),
+            entry(
+                const { programs::BACKGROUND.buffer_id("drawableVector") },
+                drawable,
+                size_of::<BackgroundDrawableUnionUBO>(),
+            ),
+            entry(PROJECTION_ID, projection, size_of::<ProjectionUBO>()),
         ];
         let vertices = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&tile_vertices));
         let indexes = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&tile_indexes));

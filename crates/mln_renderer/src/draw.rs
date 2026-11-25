@@ -20,9 +20,9 @@ use mln_gfx::gpu::{
     GeometryId, Gpu, GpuError, PipelineId, PipelineKey, SamplerId, Scissor, ShaderId, ShaderKey, StencilState,
     TargetFormats, TextureId, VertexAttribute as GpuVertexAttribute, VertexBufferLayout, VertexStep,
 };
+use mln_gfx::shaders::bindings::{BUFFER_IDS, MAX_TEXTURES};
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_util::logging::{Event, Log};
 
@@ -37,7 +37,7 @@ use crate::gfx::vertices::SharedVertices;
 use crate::paint_parameters::{DrawTarget, PaintParameters};
 
 /// The textures a draw binds, by the slots of its program's textures.
-pub(crate) type Textures = [Option<SharedTexture>; MAX_TEXTURE_COUNT_PER_SHADER];
+pub(crate) type Textures = [Option<SharedTexture>; MAX_TEXTURES];
 
 /// The most vertex buffers a draw binds, WebGPU's default limit.
 const MAX_VERTEX_BUFFERS: usize = 8;
@@ -80,7 +80,7 @@ pub(crate) fn raw_vertices(
 const MAX_STORAGE_VERTICES: usize = 3;
 
 /// The most entries bindings have.
-const MAX_ENTRIES: usize = MAX_UBO_COUNT_PER_SHADER + MAX_STORAGE_VERTICES + MAX_TEXTURE_COUNT_PER_SHADER;
+const MAX_ENTRIES: usize = BUFFER_IDS + MAX_STORAGE_VERTICES + MAX_TEXTURES;
 
 /// The entries of bindings, on the stack: at most a buffer at each uniform
 /// buffer id, one of each of the vertices read as storage buffers, and a
@@ -125,7 +125,7 @@ struct BindingsStamp {
     frame: u64,
     own: u64,
     storage: u64,
-    textures: [Option<(TextureId, SamplerId)>; MAX_TEXTURE_COUNT_PER_SHADER],
+    textures: [Option<(TextureId, SamplerId)>; MAX_TEXTURES],
 }
 
 /// What, besides the draw's own state, a draw's pipeline depends on.
@@ -468,7 +468,7 @@ impl DrawObjects {
         shader_id: ShaderId,
         frame: &UniformBufferArray,
     ) -> Result<BindingsId, GpuError> {
-        let mut textures = [None; MAX_TEXTURE_COUNT_PER_SHADER];
+        let mut textures = [None; MAX_TEXTURES];
         for slot in sampled_slots(self.shader.program()) {
             if let Some(texture) = self.textures.get(slot).and_then(Option::as_ref) {
                 textures[slot] = Some(context.texture_binding(gpu, texture)?);
@@ -489,7 +489,7 @@ impl DrawObjects {
         }
         self.bindings = None;
         let mut entries = Entries::new();
-        for id in 0..MAX_UBO_COUNT_PER_SHADER {
+        for id in 0..BUFFER_IDS {
             // The draw's buffer wins over its frame's, and that over the
             // global one.
             let buffer = self.uniform_buffers.get(id).or_else(|| frame.get(id)).or_else(|| global.get(id));
@@ -574,7 +574,7 @@ impl DrawObjects {
     /// buffers; nothing with `None`. The next upload writes them, and the
     /// draws after it bind their buffer.
     pub(crate) fn read_as_storage(&mut self, id: usize, vertices: Option<SharedVertices>) {
-        debug_assert!(id >= MAX_UBO_COUNT_PER_SHADER, "a uniform buffer's id");
+        debug_assert!(id >= BUFFER_IDS, "a uniform buffer's id");
         self.storage_vertices.retain(|(at, ..)| *at != id);
         debug_assert!(vertices.is_none() || self.storage_vertices.len() < MAX_STORAGE_VERTICES);
         if let Some(vertices) = vertices {

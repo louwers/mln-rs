@@ -16,9 +16,9 @@ use mln_gfx::gpu::{
     read_texels,
 };
 use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
+use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
-use mln_gfx::shaders::shader_defines::{ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
 use mln_util::Color;
@@ -280,9 +280,9 @@ fn background(gpu: &mut GlGpu, props: &BackgroundPropsUBO) -> Background {
             label: "background layer",
             shader,
             entries: &[
-                whole(ID_PROJECTION_UBO, projection_buffer, projection),
-                whole(ID_BACKGROUND_DRAWABLE_UBO, drawable_buffer, drawable),
-                whole(ID_BACKGROUND_PROPS_UBO, props_buffer, bytemuck::bytes_of(props)),
+                whole(PROJECTION_ID, projection_buffer, projection),
+                whole(const { programs::BACKGROUND.buffer_id("drawableVector") }, drawable_buffer, drawable),
+                whole(const { programs::BACKGROUND.buffer_id("props") }, props_buffer, bytemuck::bytes_of(props)),
             ],
         })
         .unwrap();

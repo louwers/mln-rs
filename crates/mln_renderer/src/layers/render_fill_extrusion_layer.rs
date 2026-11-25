@@ -34,6 +34,7 @@ use std::mem::offset_of;
 use std::sync::Arc;
 
 use mln_gfx::gpu::{Gpu, ShaderKey};
+use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::fill_extrusion_layer_ubo::{
     FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO,
 };
@@ -41,10 +42,6 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_FILL_EXTRUSION_DRAWABLE_UBO, ID_FILL_EXTRUSION_PROPS_UBO, ID_FILL_EXTRUSION_TILE_PROPS_UBO,
-    ID_FILL_EXTRUSION_WALL_HEIGHTS, ID_FILL_EXTRUSION_WALL_PAINT, ID_FILL_EXTRUSION_WALL_VERTICES, ID_PROJECTION_UBO,
-};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::View;
 use mln_style::layer::LayerStyle;
@@ -93,6 +90,14 @@ use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
 use crate::terrain::{FrameGround, GroundHeights, height_attribute};
 use crate::tile_matrix::{projection_data, to_projection_ubo};
+
+/// The ids of the buffers that the draws bind.
+const DRAWABLE_ID: usize = programs::FILL_EXTRUSION.buffer_id("drawableVector");
+const TILE_PROPS_ID: usize = programs::FILL_EXTRUSION_PATTERN.buffer_id("tilePropsVector");
+const PROPS_ID: usize = programs::FILL_EXTRUSION.buffer_id("props");
+const WALL_VERTICES_ID: usize = programs::FILL_EXTRUSION_PULLED.buffer_id("wallVertices");
+const WALL_PAINT_ID: usize = programs::FILL_EXTRUSION_PULLED.buffer_id("wallPaint");
+const WALL_HEIGHTS_ID: usize = programs::FILL_EXTRUSION_PULLED.buffer_id("wallHeights");
 
 /// The slots of the programs' textures that the draws bind.
 const IMAGE_SLOT: usize = programs::FILL_EXTRUSION_PATTERN.texture_slot("image");
@@ -179,7 +184,7 @@ impl ExtrusionTile {
             match (draw.walls, walls) {
                 (true, Walls::Pulled) => {
                     if let Some(heights) = &heights {
-                        draw.objects.read_as_storage(ID_FILL_EXTRUSION_WALL_HEIGHTS, Some(heights.clone()));
+                        draw.objects.read_as_storage(WALL_HEIGHTS_ID, Some(heights.clone()));
                     }
                 }
                 (true, Walls::Quads) => {
@@ -745,8 +750,8 @@ impl TileBuilder<'_> {
         }
         if self.walls == Walls::Pulled {
             for draw in draws.iter_mut().filter(|draw| draw.walls) {
-                draw.objects.read_as_storage(ID_FILL_EXTRUSION_WALL_VERTICES, Some(vertices.clone()));
-                draw.objects.read_as_storage(ID_FILL_EXTRUSION_WALL_PAINT, paint.cloned());
+                draw.objects.read_as_storage(WALL_VERTICES_ID, Some(vertices.clone()));
+                draw.objects.read_as_storage(WALL_PAINT_ID, paint.cloned());
             }
         }
 
@@ -802,7 +807,7 @@ impl TileBuilder<'_> {
             }
             if self.walls == Walls::Pulled && draw.walls {
                 cached.paint_layout = paint_layout(attrs);
-                draw.objects.read_as_storage(ID_FILL_EXTRUSION_WALL_PAINT, paint.clone());
+                draw.objects.read_as_storage(WALL_PAINT_ID, paint.clone());
             }
         }
     }
@@ -933,10 +938,10 @@ impl RenderFillExtrusionLayer {
             to_scale: crossfade.to_scale,
             pad2: 0.0,
         };
-        writer.uniform(ID_FILL_EXTRUSION_PROPS_UBO, &props);
-        writer.storage(ID_FILL_EXTRUSION_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-        writer.storage(ID_FILL_EXTRUSION_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
-        writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+        writer.uniform(PROPS_ID, &props);
+        writer.storage(DRAWABLE_ID, |uniforms| uniforms.draw_ubo);
+        writer.storage(TILE_PROPS_ID, |uniforms| uniforms.tile_props);
+        writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
     }
 }
 

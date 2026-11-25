@@ -41,10 +41,10 @@ use crate::cull_face_mode::CullFaceMode;
 use crate::depth_mode::DepthMode;
 use crate::gfx_types::{AttributeDataType, DrawModeType};
 use crate::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
+use crate::shaders::bindings::PROJECTION_ID;
 use crate::shaders::layer_ubo::ProjectionUBO;
 use crate::shaders::program::Program;
 use crate::shaders::programs;
-use crate::shaders::shader_defines::{ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO};
 use crate::stencil_mode::{StencilMode, Test};
 use crate::types::StencilOpType;
 
@@ -247,7 +247,7 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
     })?;
     let clip = ProjectionUBO { matrix: tile_matrix(0.0), ..ProjectionUBO::default() };
     let clip_buffer = buffer(gpu, BufferUsage::Uniform, bytemuck::bytes_of(&clip))?;
-    let mask_entries = vec![whole(ID_PROJECTION_UBO, clip_buffer, bytemuck::bytes_of(&clip))];
+    let mask_entries = vec![whole(PROJECTION_ID, clip_buffer, bytemuck::bytes_of(&clip))];
     let mask_bindings =
         gpu.create_bindings(&BindingsDesc { label: "clip", shader: mask_shader, entries: &mask_entries })?;
     let mask_geometry = gpu.create_geometry(&GeometryDesc {
@@ -289,9 +289,9 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
         label: "background layer",
         shader: background_shader,
         entries: &[
-            whole(ID_PROJECTION_UBO, projection_buffer, projections),
-            whole(ID_BACKGROUND_DRAWABLE_UBO, drawable_buffer, drawables),
-            whole(ID_BACKGROUND_PROPS_UBO, props_buffer, props),
+            whole(PROJECTION_ID, projection_buffer, projections),
+            whole(const { programs::BACKGROUND.buffer_id("drawableVector") }, drawable_buffer, drawables),
+            whole(const { programs::BACKGROUND.buffer_id("props") }, props_buffer, props),
         ],
     })?;
     let background_geometry = gpu.create_geometry(&GeometryDesc {

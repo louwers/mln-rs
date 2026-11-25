@@ -8,10 +8,10 @@ use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_map_types::View;
 use mln_util::range::Range;
@@ -125,7 +125,7 @@ impl GlobeDepthPass {
         }
         // The draws draw in the order their GPU objects were made.
         finish_tiles(&mut self.draw_list, &mut self.frame, &mut self.tiles, gpu, context, |writer| {
-            writer.storage(ID_PROJECTION_UBO, |projection| *projection);
+            writer.storage(PROJECTION_ID, |projection| *projection);
         });
     }
 

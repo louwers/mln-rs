@@ -13,14 +13,12 @@ use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::hillshade_layer_ubo::HillshadeTilePropsUBO;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_PROJECTION_UBO, ID_TERRAIN_DRAWABLE_UBO, ID_TERRAIN_LIGHT_TILE_UBO, ID_TERRAIN_LIGHT_UBO, ID_TERRAIN_PROPS_UBO,
-};
-use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainFogUBO, TerrainSurfaceUBO};
+use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainFog, TerrainSurfaceUBO};
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_map_types::View;
 use mln_tile_id::CanonicalTileID;
@@ -40,6 +38,12 @@ use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws,
 use crate::layers::render_hillshade_layer::lat_range;
 use crate::paint_parameters::PaintParameters;
 use crate::tile_matrix::to_projection_ubo;
+
+/// The ids of the buffers that the draws bind.
+const DRAWABLE_ID: usize = programs::TERRAIN.buffer_id("drawableVector");
+const LIGHT_TILE_ID: usize = programs::TERRAIN.buffer_id("lightVector");
+const SURFACE_ID: usize = programs::TERRAIN.buffer_id("terrain");
+const LIGHT_ID: usize = programs::TERRAIN.buffer_id("props");
 
 /// The slots of the programs' textures that the draws bind.
 const GROUND_DEM_SLOT: usize = programs::TERRAIN.texture_slot("ground_dem");
@@ -125,7 +129,7 @@ impl TerrainDraws {
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         cover: Option<(&TerrainCover, &DemBindings)>,
-        (surface, fog): (Surface, TerrainFogUBO),
+        (surface, fog): (Surface, TerrainFog),
         (drapes, lights): (&Drapes, &DrapeStacks),
         (depth_first, ground): (bool, bool),
     ) {
@@ -242,15 +246,15 @@ impl TerrainDraws {
                 draws.draw_list.push(frame_draw, TileUniforms { light: light.unwrap_or_default(), ..uniforms });
             }
         }
-        let surface_ubo = TerrainSurfaceUBO { props: surface.props, fog };
+        let surface_ubo = TerrainSurfaceUBO::new(&surface.props, &fog);
         for (set, StackDraws { tiles, frame, draw_list }) in sets(&mut self.stacks, &mut self.depth, &mut self.ground) {
             let light = set.stack().and_then(|stack| lights.light(stack)).map(|light| light.props).unwrap_or_default();
             finish_tiles(draw_list, frame, tiles, gpu, context, |writer| {
-                writer.storage(ID_TERRAIN_DRAWABLE_UBO, |uniforms| uniforms.drawable);
-                writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
-                writer.storage(ID_TERRAIN_LIGHT_TILE_UBO, |uniforms| uniforms.light);
-                writer.uniform(ID_TERRAIN_PROPS_UBO, &surface_ubo);
-                writer.uniform(ID_TERRAIN_LIGHT_UBO, &light);
+                writer.storage(DRAWABLE_ID, |uniforms| uniforms.drawable);
+                writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
+                writer.storage(LIGHT_TILE_ID, |uniforms| uniforms.light);
+                writer.uniform(SURFACE_ID, &surface_ubo);
+                writer.uniform(LIGHT_ID, &light);
             });
         }
     }

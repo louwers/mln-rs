@@ -1,20 +1,17 @@
-use bytemuck::{Pod, Zeroable};
+use crate::shaders::block::uniform_block;
 
-/// The layer composite shader's uniform block (16 bytes): the opacity the
-/// layer's texture is composited with, and the blend the shader computes
-/// against the backdrop texture.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-#[repr(C, align(16))]
-pub struct LayerCompositeUBO {
-    /*  0 */ pub opacity: f32,
-    /// One of the `LAYER_COMPOSITE_BLEND_*` constants.
-    /*  4 */
-    pub blend: i32,
-    /*  8 */ pub pad2: f32,
-    /* 12 */ pub pad3: f32,
-    /* 16 */
+uniform_block! {
+    /// The layer composite shader's uniform block: the opacity the
+    /// layer's texture is composited with, and the blend the shader computes
+    /// against the backdrop texture.
+    pub struct LayerCompositeUBO {
+        pub opacity: f32,
+        /// One of the `LAYER_COMPOSITE_BLEND_*` constants.
+        pub blend: i32,
+        pub pad2: f32,
+        pub pad3: f32,
+    }
 }
-const _: () = assert!(size_of::<LayerCompositeUBO>() == 16);
 
 /// The texture is drawn as it is, for the pipeline's blend to composite.
 pub const LAYER_COMPOSITE_BLEND_NONE: i32 = 0;

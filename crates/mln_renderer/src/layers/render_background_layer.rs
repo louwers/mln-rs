@@ -6,10 +6,10 @@ use mln_gfx::shaders::background_layer_ubo::{
     BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO,
     BackgroundPropsUBO,
 };
+use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
@@ -40,6 +40,10 @@ use crate::render_static_data::RenderStaticData;
 use crate::render_tile::NoTileBucket;
 use crate::tile_matrix::{projection_data, to_projection_ubo};
 use crate::util::tile_cover::{TileCoverParameters, tile_cover};
+
+/// The ids of the buffers that the draws bind.
+const DRAWABLE_ID: usize = programs::BACKGROUND.buffer_id("drawableVector");
+const PROPS_ID: usize = programs::BACKGROUND.buffer_id("props");
 
 /// Adds the image `id` to the pattern atlas if it isn't there yet.
 fn add_pattern_if_needed(id: &str, params: &mut LayerUpdateParameters<'_>) {
@@ -260,7 +264,7 @@ impl TypedLayer for RenderBackgroundLayer {
                     mix: crossfade.t,
                     opacity,
                 };
-                writer.uniform(ID_BACKGROUND_PROPS_UBO, &props);
+                writer.uniform(PROPS_ID, &props);
             } else {
                 let props = BackgroundPropsUBO {
                     color: evaluated.background_color.uniform().to_float_array(),
@@ -269,10 +273,10 @@ impl TypedLayer for RenderBackgroundLayer {
                     pad2: 0.0,
                     pad3: 0.0,
                 };
-                writer.uniform(ID_BACKGROUND_PROPS_UBO, &props);
+                writer.uniform(PROPS_ID, &props);
             }
-            writer.storage(ID_BACKGROUND_DRAWABLE_UBO, |(draw_ubo, _)| *draw_ubo);
-            writer.storage(ID_PROJECTION_UBO, |(_, projection)| *projection);
+            writer.storage(DRAWABLE_ID, |(draw_ubo, _)| *draw_ubo);
+            writer.storage(PROJECTION_ID, |(_, projection)| *projection);
         });
     }
 

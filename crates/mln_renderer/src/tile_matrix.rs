@@ -4,8 +4,8 @@
 use geometry::Point;
 use glam::{DMat4, DVec2, DVec3, Vec2};
 use mln_gfx::gpu::Gpu;
+use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_map_types::{ProjectionData, View};
 use mln_style::types::TranslateAnchorType;
 use mln_tile_id::UnwrappedTileID;
@@ -22,10 +22,10 @@ use crate::render_tile::RenderTile;
 /// declare the block whether they read it or not, so a draw binds it all the
 /// same.
 pub(crate) fn bind_no_projection(gpu: &mut dyn Gpu, layer_uniforms: &mut UniformBufferArray, context: &mut Context) {
-    if layer_uniforms.get(ID_PROJECTION_UBO).is_none() {
+    if layer_uniforms.get(PROJECTION_ID).is_none() {
         layer_uniforms.write_storage(
             gpu,
-            ID_PROJECTION_UBO,
+            PROJECTION_ID,
             bytemuck::bytes_of(&ProjectionUBO::default()),
             context.device(),
         );

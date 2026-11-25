@@ -10,16 +10,13 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::color_relief_layer_ubo::{
     ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO,
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_COLOR_RELIEF_DRAWABLE_UBO, ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, ID_COLOR_RELIEF_TILE_PROPS_UBO,
-    ID_PROJECTION_UBO,
-};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -61,6 +58,11 @@ use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
 use crate::tile_matrix::to_projection_ubo;
+
+/// The ids of the buffers that the draws bind.
+const DRAWABLE_ID: usize = programs::COLOR_RELIEF.buffer_id("drawableVector");
+const TILE_PROPS_ID: usize = programs::COLOR_RELIEF.buffer_id("tilePropsVector");
+const PROPS_ID: usize = programs::COLOR_RELIEF.buffer_id("props");
 
 /// The slots of the programs' textures that the draws bind.
 const COLOR_STOPS_SLOT: usize = programs::COLOR_RELIEF.texture_slot("color_stops");
@@ -565,10 +567,10 @@ impl TypedLayer for RenderColorReliefLayer {
         let opacity = *values.evaluated.paint.color_relief_opacity.uniform();
         drawing.finish(draw_list, gpu, paint_parameters.context, |writer| {
             let props = ColorReliefEvaluatedPropsUBO { opacity, pad_eval0: 0.0, pad_eval1: 0.0, pad_eval2: 0.0 };
-            writer.uniform(ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, &props);
-            writer.storage(ID_COLOR_RELIEF_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-            writer.storage(ID_COLOR_RELIEF_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
-            writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+            writer.uniform(PROPS_ID, &props);
+            writer.storage(DRAWABLE_ID, |uniforms| uniforms.draw_ubo);
+            writer.storage(TILE_PROPS_ID, |uniforms| uniforms.tile_props);
+            writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
         });
     }
 

@@ -21,8 +21,8 @@ use mln_gfx::gpu::{
     ResourceId, SamplerId, ShaderId, ShaderKey, SlotMap, TargetFormats, TextureDesc, TextureFormat, TextureId,
     TextureRegion, TextureUsage, VertexStep,
 };
+use mln_gfx::shaders::bindings::{FIRST_UNIFORM_ID, VERTEX_DRAW_ID};
 use mln_gfx::shaders::program::{Program, Sources};
-use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{DepthFunctionType, TextureFilterType, TextureWrapType};
 use mln_glsl::layout::{
@@ -474,7 +474,7 @@ fn binding_of(program: &Program, set: u32, binding: u32) -> Result<(DescriptorSe
         Some(texture) if !texture.is_unused() => Ok(slot),
         _ => Err(GpuError::Invalid(format!("{}: no texture at slot {slot} of set {set}", program.name))),
     };
-    let start = LAYER_SSBO_START_ID as u32;
+    let start = VERTEX_DRAW_ID as u32;
     let storage = LAYER_STORAGE_COUNT as u32;
     let resource = match DescriptorSetType::ALL.get(set as usize) {
         Some(DescriptorSetType::Global) => (DescriptorSetType::Global, Binding::Buffer(binding)),
@@ -482,7 +482,7 @@ fn binding_of(program: &Program, set: u32, binding: u32) -> Result<(DescriptorSe
             (DescriptorSetType::Layer, Binding::Buffer(binding + start))
         }
         Some(DescriptorSetType::Layer) => {
-            (DescriptorSetType::Layer, Binding::Buffer(binding - storage + DRAWABLE_RESERVED_UBO_COUNT as u32))
+            (DescriptorSetType::Layer, Binding::Buffer(binding - storage + FIRST_UNIFORM_ID as u32))
         }
         Some(DescriptorSetType::DrawableUniform) => {
             (DescriptorSetType::DrawableUniform, Binding::Buffer(binding + start))

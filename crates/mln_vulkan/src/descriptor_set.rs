@@ -2,7 +2,7 @@
 //! made of them, and the pools the sets are allocated from.
 
 use ash::vk;
-use mln_gfx::shaders::shader_defines::{ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO, ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO};
+use mln_gfx::shaders::bindings::{FRAGMENT_DRAW_ID, VERTEX_DRAW_ID};
 use mln_glsl::layout::{
     BufferSetShape, DRAWABLE_UNIFORM_COUNT, DRAWABLE_VERTEX_COUNT, DescriptorSetType, GLOBAL_UNIFORM_COUNT,
     IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, LAYER_UNIFORM_COUNT, image_sampler_binding, image_texture_binding,
@@ -42,9 +42,9 @@ fn buffer_stages(type_: DescriptorSetType, binding: u32) -> vk::ShaderStageFlags
     if binding as usize >= shape.storage + shape.uniform {
         stages = vk::ShaderStageFlags::VERTEX;
     } else if type_ == DescriptorSetType::Layer {
-        if layer_storage_binding(ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO) == Some(binding) {
+        if layer_storage_binding(VERTEX_DRAW_ID) == Some(binding) {
             stages = vk::ShaderStageFlags::VERTEX;
-        } else if layer_storage_binding(ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO) == Some(binding) {
+        } else if layer_storage_binding(FRAGMENT_DRAW_ID) == Some(binding) {
             stages = vk::ShaderStageFlags::FRAGMENT;
         }
     }

@@ -31,7 +31,7 @@ use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass, lend_context};
 use crate::enums::{self, AttributeFormat};
 use crate::renderer_backend::GlContext;
 use crate::shaders::glsl_sources::PRELUDE;
-use crate::shaders::shader_source::{BUILT_INS, ShaderSource};
+use crate::shaders::shader_source::{BUILT_INS, ShaderSource, uniform_block};
 use crate::state::State;
 #[cfg(not(target_family = "wasm"))]
 use crate::types::FenceID;
@@ -801,7 +801,7 @@ impl GlGpu {
         let mut program = Program {
             name,
             object,
-            blocks: Vec::with_capacity(source.uniform_blocks.len()),
+            blocks: Vec::new(),
             textures: Vec::with_capacity(declared.textures.len()),
             vertex_locations: Vec::with_capacity(declared.attributes.len()),
             instance_locations: Vec::with_capacity(declared.instance_attributes.len()),
@@ -815,10 +815,9 @@ impl GlGpu {
                 let block_count = gl.get_program_parameter_i32(object, glow::ACTIVE_UNIFORM_BLOCKS).max(0) as u32;
                 (0..block_count).try_for_each(|index| {
                     let block_name = gl.get_active_uniform_block_name(object, index);
-                    let info =
-                        source.uniform_blocks.iter().find(|info| info.name == block_name).ok_or_else(|| {
-                            GpuError::Invalid(format!("{name}'s uniform block {block_name} has no id"))
-                        })?;
+                    let info = uniform_block(declared, &block_name).ok_or_else(|| {
+                        GpuError::Invalid(format!("{name}'s uniform block {block_name} has no buffer"))
+                    })?;
                     let size = gl.get_active_uniform_block_parameter_i32(object, index, glow::UNIFORM_BLOCK_DATA_SIZE);
                     gl.uniform_block_binding(object, index, info.id as u32);
                     program.blocks.push(Block {

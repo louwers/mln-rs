@@ -928,7 +928,7 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
 // buffer of its own, which its uploads write the vertices' updates to.
 #[test]
 fn a_draw_binds_the_vertices_it_reads_as_a_storage_buffer() {
-    use mln_gfx::shaders::shader_defines::ID_FILL_EXTRUSION_WALL_VERTICES as ID;
+    const ID: usize = mln_gfx::shaders::programs::FILL_EXTRUSION_PULLED.buffer_id("wallVertices");
     use mln_gfx::{ColorMode, CullFaceMode, DrawMode};
 
     use crate::draw::{DrawGeometry, DrawObjects};

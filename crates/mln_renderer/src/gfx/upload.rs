@@ -3,8 +3,8 @@
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::{BufferId, Gpu, GpuError};
+use mln_gfx::shaders::bindings::MAX_ATTRIBUTES;
 use mln_gfx::shaders::program::Attribute;
-use mln_gfx::shaders::shader_defines::MAX_ATTRIBUTE_COUNT_PER_SHADER;
 
 use crate::gfx::context::Context;
 use crate::gfx::owned::Held;
@@ -51,7 +51,7 @@ pub(crate) struct AttributeSlots {
     /// were found.
     layout: Option<u64>,
     /// The slot of each of the shader's attributes that the array has.
-    slots: [Option<u8>; MAX_ATTRIBUTE_COUNT_PER_SHADER],
+    slots: [Option<u8>; MAX_ATTRIBUTES],
 }
 
 impl AttributeSlots {
@@ -61,7 +61,7 @@ impl AttributeSlots {
         if self.layout == Some(array.layout()) {
             return;
         }
-        self.slots = [None; MAX_ATTRIBUTE_COUNT_PER_SHADER];
+        self.slots = [None; MAX_ATTRIBUTES];
         for (slot, attribute) in self.slots.iter_mut().zip(attributes) {
             *slot = array.slot_of(attribute.name).and_then(|slot| u8::try_from(slot).ok());
         }

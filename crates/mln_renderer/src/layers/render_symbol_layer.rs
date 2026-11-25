@@ -10,14 +10,11 @@ use glam::dcamera::rh::proj::opengl::orthographic;
 use glam::{DMat4, DVec3};
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_COLLISION_DRAWABLE_UBO, ID_COLLISION_PROJECTION_UBO, ID_COLLISION_TILE_PROPS_UBO, ID_PROJECTION_UBO,
-    ID_SYMBOL_DRAWABLE_UBO, ID_SYMBOL_EVALUATED_PROPS_UBO, ID_SYMBOL_TILE_PROPS_UBO,
-};
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
 };
@@ -69,6 +66,13 @@ use crate::render_source::{RenderSource, TileOrder};
 use crate::render_tile::{FrameTile, RenderTile};
 use crate::terrain::FrameGround;
 use crate::tile_matrix::{projection_data, to_projection_ubo};
+
+/// The ids of the buffers that the draws bind.
+const DRAWABLE_ID: usize = programs::SYMBOL_SDF.buffer_id("drawableVector");
+const TILE_PROPS_ID: usize = programs::SYMBOL_SDF.buffer_id("tilePropsVector");
+const PROPS_ID: usize = programs::SYMBOL_SDF.buffer_id("props");
+const COLLISION_DRAWABLE_ID: usize = programs::COLLISION_BOX.buffer_id("drawable");
+const COLLISION_TILE_PROPS_ID: usize = programs::COLLISION_BOX.buffer_id("tile_props");
 
 /// The slots of the programs' textures that the draws bind.
 const GROUND_DEPTH_SLOT: usize = programs::SYMBOL_SDF.texture_slot("ground_depth");
@@ -1096,10 +1100,10 @@ fn write_uniforms(
         icon_halo_blur: *evaluated.icon_halo_blur.uniform(),
         pad2: 0.0,
     };
-    writer.uniform(ID_SYMBOL_EVALUATED_PROPS_UBO, &props);
-    writer.storage(ID_SYMBOL_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-    writer.storage(ID_SYMBOL_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
-    writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+    writer.uniform(PROPS_ID, &props);
+    writer.storage(DRAWABLE_ID, |uniforms| uniforms.draw_ubo);
+    writer.storage(TILE_PROPS_ID, |uniforms| uniforms.tile_props);
+    writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
 }
 
 /// Writes the buffers of a collision draw of the tile `tile_id`: its matrix,
@@ -1136,9 +1140,9 @@ fn write_collision_uniforms(
         CollisionTilePropsUBO { extrude_scale, overscale_factor: tile_id.overscale_factor() as f32, pad1: 0.0 };
     let objects = &mut draw.draw.objects;
     let context = &mut *parameters.context;
-    objects.write_pod(gpu, ID_COLLISION_DRAWABLE_UBO, &draw_ubo, context);
-    objects.write_pod(gpu, ID_COLLISION_TILE_PROPS_UBO, &tile_props_ubo, context);
-    objects.write_pod(gpu, ID_COLLISION_PROJECTION_UBO, &to_projection_ubo(&projection), context);
+    objects.write_pod(gpu, COLLISION_DRAWABLE_ID, &draw_ubo, context);
+    objects.write_pod(gpu, COLLISION_TILE_PROPS_ID, &tile_props_ubo, context);
+    objects.write_pod(gpu, PROJECTION_ID, &to_projection_ubo(&projection), context);
 }
 
 fn collision_vertex_attributes(context: &mut Context, buffer: &CollisionBuffer) -> VertexAttributeArray {

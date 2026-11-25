@@ -2894,24 +2894,15 @@ fn main(@location(0) color: vec4<f32>) -> @location(0) vec4<f32> {
 };
 
 /// The height rule of `mln_util::dem`, over the DEM tile a draw reads: its
-/// RGBA8 texels behind a one-texel border, decoded by a `TerrainPropsUBO`.
+/// RGBA8 texels behind a one-texel border, decoded by a `TerrainSurfaceUBO`.
 macro_rules! ground_height {
     () => {
         r"
-// How the terrain's DEM decodes, its exaggeration and its skirts' length.
-struct TerrainPropsUBO {
-    unpack: vec4<f32>,
-    unpack_scale: f32,
-    exaggeration: f32,
-    skirt_length: f32,
-    pad0: f32,
-};
-
 @group(1) @binding(5) var ground_dem_texture: texture_2d<f32>;
 
 // The height in meters of the DEM's bordered texel at `texel`, clamped to
 // the texture, decoded by `props`.
-fn ground_texel_height(texel: vec2<i32>, props: TerrainPropsUBO) -> f32 {
+fn ground_texel_height(texel: vec2<i32>, props: TerrainSurfaceUBO) -> f32 {
     let last = vec2<i32>(textureDimensions(ground_dem_texture)) - 1;
     let rgb = round(textureLoad(ground_dem_texture, clamp(texel, vec2<i32>(0), last), 0).rgb * 255.0);
     let unpack = props.unpack;
@@ -2921,7 +2912,7 @@ fn ground_texel_height(texel: vec2<i32>, props: TerrainPropsUBO) -> f32 {
 // The height in meters, exaggerated, at `pos` in tile units of a tile that
 // reads its DEM at `dem_coords`: the DEM uv's scale and offset, then the
 // DEM's width in pixels, 0 for flat ground.
-fn ground_height(pos: vec2<f32>, dem_coords: vec4<f32>, props: TerrainPropsUBO) -> f32 {
+fn ground_height(pos: vec2<f32>, dem_coords: vec4<f32>, props: TerrainSurfaceUBO) -> f32 {
     let dim = dem_coords.w;
     if (dim == 0.0) {
         return 0.0;
@@ -3119,7 +3110,7 @@ struct VertexOutput {
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     out.position = vec4<f32>(in.pos.xy, 0.0, 1.0);
-    out.height = ground_height(in.pos.zw, in.dem_coords, terrain.props);
+    out.height = ground_height(in.pos.zw, in.dem_coords, terrain);
     return out;
 }
 ",
@@ -3179,9 +3170,9 @@ fn main(in: VertexInput) -> VertexOutput {
     let projection = projectionVector[globalIndex.value];
     let pos = vec2<f32>(in.pos.xy);
     let skirt = f32(in.pos.z);
-    let height = surface_height(pos, drawable.dem_coords, terrain.props);
+    let height = surface_height(pos, drawable.dem_coords, terrain);
     var out: VertexOutput;
-    out.position = projectTileFor3D(pos, height - skirt * terrain.props.skirt_length, projection);
+    out.position = projectTileFor3D(pos, height - skirt * terrain.skirt_length, projection);
     out.drape_pos = clamp(pos / 8192.0, vec2<f32>(0.0), vec2<f32>(1.0));
     out.view_depth = out.position.w;
     return out;
@@ -3212,13 +3203,13 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let color = textureSample(drape_texture, drape_sampler, in.drape_pos);
     let light = lightVector[globalIndex.value];
     if (light.num_lights == 0 || color.a == 0.0) {
-        return fogged(color, in.view_depth, terrain.fog);
+        return fogged(color, in.view_depth, terrain);
     }
     // The tile's latitudes run from its north edge, where the drape's rows
     // start.
     let latitude = mix(light.latrange.x, light.latrange.y, in.drape_pos.y);
     let deriv = ((color.rg / color.a) * 8.0 - vec2<f32>(4.0, 4.0)) / cos(radians(latitude));
-    return fogged(hillshade_color(deriv, light) * color.a, in.view_depth, terrain.fog);
+    return fogged(hillshade_color(deriv, light) * color.a, in.view_depth, terrain);
 }
 "
     )),
@@ -3261,9 +3252,9 @@ fn main(in: VertexInput) -> VertexOutput {
     let projection = projectionVector[globalIndex.value];
     let pos = vec2<f32>(in.pos.xy);
     let skirt = f32(in.pos.z);
-    let height = surface_height(pos, drawable.dem_coords, terrain.props);
+    let height = surface_height(pos, drawable.dem_coords, terrain);
     var out: VertexOutput;
-    out.position = projectTileFor3D(pos, height - skirt * terrain.props.skirt_length, projection);
+    out.position = projectTileFor3D(pos, height - skirt * terrain.skirt_length, projection);
     out.distance = out.position.w;
     return out;
 }
@@ -3287,8 +3278,14 @@ fn main(@location(0) distance: f32) -> @location(0) vec4<f32> {
 const TERRAIN_PRELUDE: &str = concat!(
     ground_height!(),
     r"
-// The fog over the surface: a `TerrainFogUBO`.
-struct TerrainFogUBO {
+// How the terrain's DEM decodes, its exaggeration and its skirts' length,
+// then the fog over the surface.
+struct TerrainSurfaceUBO {
+    unpack: vec4<f32>,
+    unpack_scale: f32,
+    exaggeration: f32,
+    skirt_length: f32,
+    pad0: f32,
     // Linear and premultiplied.
     fog_color: vec4<f32>,
     horizon_color: vec4<f32>,
@@ -3298,18 +3295,13 @@ struct TerrainFogUBO {
     horizon_blend: f32,
 };
 
-struct TerrainSurfaceUBO {
-    props: TerrainPropsUBO,
-    fog: TerrainFogUBO,
-};
-
 @group(0) @binding(5) var<uniform> terrain: TerrainSurfaceUBO;
 
 // `color`, premultiplied, of the surface `view_depth` pixels along the
 // view, covered by `fog`, as GL JS's terrain is: mixed in linear components
 // toward the fog's color by the square of how far past the ground blend the
 // fog's depth is. The fog's alpha weighs its color; the coverage stays.
-fn fogged(color: vec4<f32>, view_depth: f32, fog: TerrainFogUBO) -> vec4<f32> {
+fn fogged(color: vec4<f32>, view_depth: f32, fog: TerrainSurfaceUBO) -> vec4<f32> {
     let near = fog.depth_range.x;
     let far = fog.depth_range.y;
     let depth = min(far / (far - near) * (1.0 - near / view_depth), 1.0);
@@ -3328,7 +3320,7 @@ fn fogged(color: vec4<f32>, view_depth: f32, fog: TerrainFogUBO) -> vec4<f32> {
 
 // The height of the surface's vertex at `pos`, in tile units of a tile that
 // reads its DEM at `dem_coords`: the ground's, or sea level at a pole.
-fn surface_height(pos: vec2<f32>, dem_coords: vec4<f32>, props: TerrainPropsUBO) -> f32 {
+fn surface_height(pos: vec2<f32>, dem_coords: vec4<f32>, props: TerrainSurfaceUBO) -> f32 {
     if (pos.y < GLOBE_POLE_NORTH_Y || pos.y > GLOBE_POLE_SOUTH_Y) {
         return 0.0;
     }

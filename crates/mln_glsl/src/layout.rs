@@ -1,6 +1,6 @@
 // The descriptor sets of every pipeline, and the binding of each buffer and
-// texture in them, for the packed ids of mln_gfx::shaders::shader_defines
-// (see the crate's doc comment).
+// texture in them, for the ids of mln_gfx::shaders::bindings (see the crate's
+// doc comment).
 //
 // - A layer's uniform buffer binds at its id less one: the first one of a
 //   layer has the id 5, or 6 for the layers with a tile properties storage
@@ -14,9 +14,8 @@
 // - The global set has no platform parameters: swapchains have the identity
 //   transform.
 
-use mln_gfx::shaders::shader_defines::{
-    DRAWABLE_RESERVED_UBO_COUNT, GLOBAL_UBO_COUNT, LAYER_SSBO_START_ID, LAYER_UBO_START_ID,
-    MAX_TEXTURE_COUNT_PER_SHADER, MAX_UBO_COUNT_PER_SHADER,
+use mln_gfx::shaders::bindings::{
+    BUFFER_IDS, FIRST_UNIFORM_ID, FIRST_VERTICES_ID, GLOBAL_INDEX_ID, MAX_TEXTURES, VERTEX_DRAW_ID, VERTICES_SLOTS,
 };
 
 /// The descriptor sets of a pipeline layout, by set index.
@@ -92,30 +91,32 @@ impl BufferSetShape {
     }
 }
 
-/// The uniform buffers of the global set, bound at their ids.
-pub const GLOBAL_UNIFORM_COUNT: usize = GLOBAL_UBO_COUNT;
+/// The uniform buffers of the global set, bound at their ids: the paint
+/// parameters and the global index.
+pub const GLOBAL_UNIFORM_COUNT: usize = GLOBAL_INDEX_ID + 1;
 
 /// The storage buffers of the layer set: the bindings from 0
-/// (`layerSSBOStartId` in the GLSL).
-pub const LAYER_STORAGE_COUNT: usize = LAYER_UBO_START_ID - LAYER_SSBO_START_ID;
+/// (`layerSSBOStartId` in the GLSL), for the ids from [`VERTEX_DRAW_ID`] up
+/// to that of the storage buffer that both stages read.
+pub const LAYER_STORAGE_COUNT: usize = FIRST_UNIFORM_ID + 1 - VERTEX_DRAW_ID;
 /// The uniform buffers of the layer set: the bindings from
 /// `LAYER_STORAGE_COUNT` (`layerUBOStartId` in the GLSL).
-pub const LAYER_UNIFORM_COUNT: usize = MAX_UBO_COUNT_PER_SHADER - DRAWABLE_RESERVED_UBO_COUNT;
+pub const LAYER_UNIFORM_COUNT: usize = BUFFER_IDS - FIRST_UNIFORM_ID;
 
 /// The uniform buffers of the drawable set: the bindings from 0
 /// (`drawableUBOStartId` in the GLSL).
-pub const DRAWABLE_UNIFORM_COUNT: usize = MAX_UBO_COUNT_PER_SHADER - LAYER_SSBO_START_ID;
+pub const DRAWABLE_UNIFORM_COUNT: usize = BUFFER_IDS - VERTEX_DRAW_ID;
 
 /// The vertex buffers of the drawable set, which the pulled shaders read as
 /// storage buffers: the bindings after its uniform buffers, for the ids
-/// after `MAX_UBO_COUNT_PER_SHADER`.
-pub const DRAWABLE_VERTEX_COUNT: usize = 3;
+/// from [`FIRST_VERTICES_ID`].
+pub const DRAWABLE_VERTEX_COUNT: usize = VERTICES_SLOTS;
 
 /// The textures of the image set: the bindings from 0.
-pub const IMAGE_TEXTURE_COUNT: usize = MAX_TEXTURE_COUNT_PER_SHADER;
+pub const IMAGE_TEXTURE_COUNT: usize = MAX_TEXTURES;
 /// The binding of the first sampler of the image set
 /// (`samplerBindingStartId` in the GLSL).
-pub const IMAGE_SAMPLER_START: usize = MAX_TEXTURE_COUNT_PER_SHADER;
+pub const IMAGE_SAMPLER_START: usize = MAX_TEXTURES;
 
 /// The binding in the global set of the uniform buffer `id`.
 #[must_use]
@@ -126,14 +127,18 @@ pub const fn global_uniform_binding(id: usize) -> Option<u32> {
 /// The binding in the layer set of the storage buffer `id`.
 #[must_use]
 pub const fn layer_storage_binding(id: usize) -> Option<u32> {
-    if id >= LAYER_SSBO_START_ID && id < LAYER_UBO_START_ID { Some((id - LAYER_SSBO_START_ID) as u32) } else { None }
+    if id >= VERTEX_DRAW_ID && id < VERTEX_DRAW_ID + LAYER_STORAGE_COUNT {
+        Some((id - VERTEX_DRAW_ID) as u32)
+    } else {
+        None
+    }
 }
 
 /// The binding in the layer set of the uniform buffer `id`.
 #[must_use]
 pub const fn layer_uniform_binding(id: usize) -> Option<u32> {
-    if id >= DRAWABLE_RESERVED_UBO_COUNT && id < MAX_UBO_COUNT_PER_SHADER {
-        Some((LAYER_STORAGE_COUNT + id - DRAWABLE_RESERVED_UBO_COUNT) as u32)
+    if id >= FIRST_UNIFORM_ID && id < BUFFER_IDS {
+        Some((LAYER_STORAGE_COUNT + id - FIRST_UNIFORM_ID) as u32)
     } else {
         None
     }
@@ -142,19 +147,15 @@ pub const fn layer_uniform_binding(id: usize) -> Option<u32> {
 /// The binding in the drawable set of the uniform buffer `id`.
 #[must_use]
 pub const fn drawable_uniform_binding(id: usize) -> Option<u32> {
-    if id >= LAYER_SSBO_START_ID && id < MAX_UBO_COUNT_PER_SHADER {
-        Some((id - LAYER_SSBO_START_ID) as u32)
-    } else {
-        None
-    }
+    if id >= VERTEX_DRAW_ID && id < BUFFER_IDS { Some((id - VERTEX_DRAW_ID) as u32) } else { None }
 }
 
 /// The binding in the drawable set of the vertex buffer `id`, which a shader
 /// reads as a storage buffer.
 #[must_use]
 pub const fn drawable_vertex_binding(id: usize) -> Option<u32> {
-    if id >= MAX_UBO_COUNT_PER_SHADER && id < MAX_UBO_COUNT_PER_SHADER + DRAWABLE_VERTEX_COUNT {
-        Some((id - LAYER_SSBO_START_ID) as u32)
+    if id >= FIRST_VERTICES_ID && id < FIRST_VERTICES_ID + DRAWABLE_VERTEX_COUNT {
+        Some((id - VERTEX_DRAW_ID) as u32)
     } else {
         None
     }

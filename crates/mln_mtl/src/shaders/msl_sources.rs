@@ -4075,7 +4075,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 };
 
 /// The height rule of `mln_util::dem`, over the DEM tile a draw reads: its
-/// RGBA8 texels behind a one-texel border, decoded by a `TerrainPropsUBO`.
+/// RGBA8 texels behind a one-texel border, decoded by a `TerrainSurfaceUBO`.
 /// A macro, so that `concat!` puts it in the sources of the programs that
 /// read the DEM.
 macro_rules! ground_height {
@@ -4085,7 +4085,7 @@ macro_rules! ground_height {
 // The height in meters of the DEM's bordered texel at `texel`, clamped to the
 // texture.
 static float ground_texel_height(texture2d<float, access::read> dem, int2 texel,
-                                 device const TerrainPropsUBO& props) {
+                                 device const TerrainSurfaceUBO& props) {
     const int2 last = int2(int(dem.get_width()), int(dem.get_height())) - 1;
     const float3 rgb = round(dem.read(uint2(clamp(texel, int2(0), last))).rgb * 255.0);
     return (rgb.r * props.unpack.x + rgb.g * props.unpack.y + rgb.b * props.unpack.z + props.unpack.w) *
@@ -4096,7 +4096,7 @@ static float ground_texel_height(texture2d<float, access::read> dem, int2 texel,
 // reads its DEM at `dem_coords`: the DEM uv's scale and offset, then the DEM's
 // width in pixels, 0 for flat ground.
 static float ground_height(float2 pos, float4 dem_coords, texture2d<float, access::read> dem,
-                           device const TerrainPropsUBO& props) {
+                           device const TerrainSurfaceUBO& props) {
     const float dim = dem_coords.w;
     if (dim == 0.0) {
         return 0.0;
@@ -4329,33 +4329,21 @@ struct alignas(16) TerrainDrawableUBO {
 };
 static_assert(sizeof(TerrainDrawableUBO) == 16, "wrong size");
 
-// How the terrain's DEM decodes, its exaggeration and its skirts' length.
-struct alignas(16) TerrainPropsUBO {
+// How the terrain's DEM decodes, its exaggeration and its skirts' length,
+// then the fog over the surface.
+struct alignas(16) TerrainSurfaceUBO {
     /*  0 */ float4 unpack;
     /* 16 */ float unpack_scale;
     /* 20 */ float exaggeration;
     /* 24 */ float skirt_length;
     /* 28 */ float pad0;
-    /* 32 */
-};
-static_assert(sizeof(TerrainPropsUBO) == 2 * 16, "wrong size");
-
-// The fog over the surface.
-struct alignas(16) TerrainFogUBO {
     // Linear and premultiplied.
-    /*  0 */ float4 fog_color;
-    /* 16 */ float4 horizon_color;
+    /* 32 */ float4 fog_color;
+    /* 48 */ float4 horizon_color;
     // The distances along the view at which the fog's depth is 0 and 1.
-    /* 32 */ float2 depth_range;
-    /* 40 */ float ground_blend;
-    /* 44 */ float horizon_blend;
-    /* 48 */
-};
-static_assert(sizeof(TerrainFogUBO) == 3 * 16, "wrong size");
-
-struct alignas(16) TerrainSurfaceUBO {
-    /*  0 */ TerrainPropsUBO props;
-    /* 32 */ TerrainFogUBO fog;
+    /* 64 */ float2 depth_range;
+    /* 72 */ float ground_blend;
+    /* 76 */ float horizon_blend;
     /* 80 */
 };
 static_assert(sizeof(TerrainSurfaceUBO) == 5 * 16, "wrong size");
@@ -4382,7 +4370,7 @@ pub(crate) const TERRAIN_SHADER: MslShaderSource = MslShaderSource {
 // The height of the surface's vertex at `pos`, in tile units of a tile that
 // reads its DEM at `dem_coords`: the ground's, or sea level at a pole.
 static float surface_height(float2 pos, float4 dem_coords, texture2d<float, access::read> dem,
-                            device const TerrainPropsUBO& props) {
+                            device const TerrainSurfaceUBO& props) {
     if (pos.y < GLOBE_POLE_NORTH_Y || pos.y > GLOBE_POLE_SOUTH_Y) {
         return 0.0;
     }
@@ -4398,7 +4386,7 @@ struct VertexStage {
 // view, covered by `fog`, as GL JS's terrain is: mixed in linear components
 // toward the fog's color by the square of how far past the ground blend the
 // fog's depth is. The fog's alpha weighs its color; the coverage stays.
-static float4 fogged(float4 color, float view_depth, device const TerrainFogUBO& fog) {
+static float4 fogged(float4 color, float view_depth, device const TerrainSurfaceUBO& fog) {
     const float near = fog.depth_range.x;
     const float far = fog.depth_range.y;
     const float depth = min(far / (far - near) * (1.0 - near / view_depth), 1.0);
@@ -4431,8 +4419,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     device const ProjectionUBO& projection = projectionVector[uboIndex];
     const float2 pos = float2(vertx.pos.xy);
     const float skirt = float(vertx.pos.z);
-    const float height = surface_height(pos, drawable.dem_coords, dem, terrain.props);
-    const float4 position = projectTileFor3D(pos, height - skirt * terrain.props.skirt_length, projection);
+    const float height = surface_height(pos, drawable.dem_coords, dem, terrain);
+    const float4 position = projectTileFor3D(pos, height - skirt * terrain.skirt_length, projection);
     return {
         .position = position,
         .drape_pos = clamp(pos / 8192.0, float2(0.0), float2(1.0)),
@@ -4450,14 +4438,14 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const float4 color = drape.sample(drape_sampler, in.drape_pos);
     device const HillshadeTilePropsUBO& light = lightVector[uboIndex];
     if (light.num_lights == 0 || color.a == 0.0) {
-        return half4(fogged(color, in.view_depth, terrain.fog));
+        return half4(fogged(color, in.view_depth, terrain));
     }
     // The tile's latitudes run from its north edge, where the drape's rows
     // start.
     const float latitude = mix(light.latrange.x, light.latrange.y, in.drape_pos.y);
     const float2 deriv = ((color.rg / color.a) * 8.0 - 4.0) / cos(radians(latitude));
     const float4 shaded = float4(hillshade_color(deriv, light, props)) * color.a;
-    return half4(fogged(shaded, in.view_depth, terrain.fog));
+    return half4(fogged(shaded, in.view_depth, terrain));
 }
 "
     ),
@@ -4476,7 +4464,7 @@ pub(crate) const TERRAIN_DEPTH_SHADER: MslShaderSource = MslShaderSource {
 // The height of the surface's vertex at `pos`, in tile units of a tile that
 // reads its DEM at `dem_coords`: the ground's, or sea level at a pole.
 static float surface_height(float2 pos, float4 dem_coords, texture2d<float, access::read> dem,
-                            device const TerrainPropsUBO& props) {
+                            device const TerrainSurfaceUBO& props) {
     if (pos.y < GLOBE_POLE_NORTH_Y || pos.y > GLOBE_POLE_SOUTH_Y) {
         return 0.0;
     }
@@ -4498,7 +4486,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const TerrainDrawableUBO* drawableVector [[buffer(idTerrainDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const TerrainPropsUBO& props [[buffer(idTerrainPropsUBO)]],
+                                device const TerrainSurfaceUBO& props [[buffer(idTerrainPropsUBO)]],
                                 texture2d<float, access::read> dem [[texture(2)]]) {
     device const TerrainDrawableUBO& drawable = drawableVector[uboIndex];
     device const ProjectionUBO& projection = projectionVector[uboIndex];
@@ -4547,7 +4535,7 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const TerrainPropsUBO& props [[buffer(idTerrainPropsUBO)]],
+                                device const TerrainSurfaceUBO& props [[buffer(idTerrainPropsUBO)]],
                                 texture2d<float, access::read> dem [[texture(2)]]) {
     return {
         .position = float4(vertx.pos.xy, 0.0, 1.0),

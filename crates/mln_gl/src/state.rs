@@ -5,7 +5,7 @@ use glow::HasContext;
 use mln_gfx::color_mode::{ColorMode, Mask};
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
-use mln_gfx::shaders::shader_defines::MAX_UBO_COUNT_PER_SHADER;
+use mln_gfx::shaders::bindings::BUFFER_IDS;
 use mln_gfx::stencil_mode::{StencilMode, Test};
 use mln_gfx::texture2d::MAX_ACTIVE_TEXTURE_UNITS;
 use mln_gfx::types::{
@@ -48,7 +48,7 @@ pub(crate) struct State {
     textures: [Cached<Option<TextureID>>; MAX_ACTIVE_TEXTURE_UNITS as usize],
     samplers: [Cached<Option<SamplerID>>; MAX_ACTIVE_TEXTURE_UNITS as usize],
     /// The buffer range bound to each uniform buffer binding point.
-    uniform_buffers: [Cached<(BufferID, i32, i32)>; MAX_UBO_COUNT_PER_SHADER],
+    uniform_buffers: [Cached<(BufferID, i32, i32)>; BUFFER_IDS],
 
     depth_test: Cached<bool>,
     depth_func: Cached<DepthFunctionType>,
