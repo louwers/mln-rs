@@ -228,6 +228,8 @@ impl EglDisplay {
         }
         .ok_or("Failed to obtain a valid EGL display.")?;
         egl.initialize(display).map_err(|e| format!("eglInitialize() failed: {e}"))?;
+        #[cfg(target_os = "freebsd")]
+        pin_mesa_egl();
         Ok(EglDisplay { egl, display, platform, configs: [OnceLock::new(), OnceLock::new()] })
     }
 
@@ -273,6 +275,29 @@ impl EglDisplay {
         egl.choose_first_config(display, &attributes)
             .map_err(|e| format!("Failed to choose an EGL config: {e}"))?
             .ok_or_else(|| format!("Failed to choose an EGL config of {}.", api.name()))
+    }
+}
+
+/// Pins Mesa's EGL vendor library in memory on FreeBSD so `libglvnd`'s
+/// exit-time destructor does not `dlclose` and `munmap` `libgallium` out from
+/// under live `llvmpipe` worker threads.
+///
+/// `EglDisplay` stays initialized for the life of the process. On Linux,
+/// `libEGL_mesa.so.0` and `libgallium` carry `DF_STATIC_TLS`, so glibc treats
+/// `dlclose` as a no-op; on FreeBSD they do not, so `libglvnd` unloading the
+/// ICD during `rtld_exit` unmaps `libgallium` while `llvmpipe` threads are
+/// still running in it.
+#[cfg(target_os = "freebsd")]
+fn pin_mesa_egl() {
+    // SAFETY: `RTLD_NOLOAD` only queries an already-loaded DSO without loading
+    // anything new, and `RTLD_NODELETE` marks it non-unloadable for the rest
+    // of the process lifetime.
+    unsafe {
+        if libc::dlopen(c"libEGL_mesa.so.0".as_ptr(), libc::RTLD_LAZY | libc::RTLD_NOLOAD | libc::RTLD_NODELETE)
+            .is_null()
+        {
+            let _ = libc::dlerror();
+        }
     }
 }
 
