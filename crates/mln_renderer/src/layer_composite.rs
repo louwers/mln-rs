@@ -30,10 +30,7 @@ use mln_gfx::shaders::layer_composite_ubo::{
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
-use mln_gfx::shaders::shader_defines::{
-    ID_LAYER_COMPOSITE_BACKDROP_TEXTURE, ID_LAYER_COMPOSITE_IMAGE_TEXTURE, ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE,
-    ID_LAYER_COMPOSITE_UBO, ID_PROJECTION_UBO, MAX_UBO_COUNT_PER_SHADER,
-};
+use mln_gfx::shaders::shader_defines::{ID_LAYER_COMPOSITE_UBO, ID_PROJECTION_UBO, MAX_UBO_COUNT_PER_SHADER};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::ColorBlendFactorType;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMode, DrawModeType, StencilMode};
@@ -58,6 +55,10 @@ const COLOR: TextureFormat = TextureFormat::Rgba8Unorm;
 /// depth tests read as they would the frame's.
 const DEPTH_STENCIL: TextureFormat = TextureFormat::Depth24PlusStencil8;
 
+/// The slots of the layer's texture and of the frame's behind it.
+const IMAGE_SLOT: usize = programs::LAYER_COMPOSITE.texture_slot("image");
+const BACKDROP_SLOT: usize = programs::LAYER_COMPOSITE.texture_slot("backdrop");
+
 /// The vertex layout of the quad that covers the frame: a corner of the unit
 /// square in two shorts.
 fn layout() -> VertexBufferLayout {
@@ -65,7 +66,7 @@ fn layout() -> VertexBufferLayout {
         stride: 4,
         step: VertexStep::Vertex,
         attributes: vec![VertexAttribute {
-            id: ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE as u32,
+            location: const { programs::LAYER_COMPOSITE.location("pos") as u32 },
             format: AttributeDataType::Short2,
             offset: 0,
         }],
@@ -497,11 +498,9 @@ impl LayerComposite {
                     };
                     entries.push(BindGroupEntry::Buffer { id: id as u32, buffer: buffer.id(), offset, size });
                 }
-                for (id, texture) in
-                    [(ID_LAYER_COMPOSITE_IMAGE_TEXTURE, image), (ID_LAYER_COMPOSITE_BACKDROP_TEXTURE, backdrop)]
-                {
+                for (slot, texture) in [(IMAGE_SLOT, image), (BACKDROP_SLOT, backdrop)] {
                     entries.push(BindGroupEntry::Texture {
-                        id: id as u32,
+                        slot: slot as u32,
                         texture: texture.id(),
                         sampler: texture.sampler,
                     });

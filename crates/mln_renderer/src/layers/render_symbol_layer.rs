@@ -15,14 +15,8 @@ use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
-    ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, ID_COLLISION_DRAWABLE_UBO, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE,
-    ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE, ID_COLLISION_PLACED_VERTEX_ATTRIBUTE,
-    ID_COLLISION_POS_VERTEX_ATTRIBUTE, ID_COLLISION_PROJECTION_UBO, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE,
-    ID_COLLISION_TILE_PROPS_UBO, ID_PROJECTION_UBO, ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_DRAWABLE_UBO,
-    ID_SYMBOL_EVALUATED_PROPS_UBO, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, ID_SYMBOL_GROUND_DEPTH_TEXTURE,
-    ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE,
-    ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE,
-    ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_SYMBOL_TILE_PROPS_UBO,
+    ID_COLLISION_DRAWABLE_UBO, ID_COLLISION_PROJECTION_UBO, ID_COLLISION_TILE_PROPS_UBO, ID_PROJECTION_UBO,
+    ID_SYMBOL_DRAWABLE_UBO, ID_SYMBOL_EVALUATED_PROPS_UBO, ID_SYMBOL_TILE_PROPS_UBO,
 };
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
@@ -75,6 +69,11 @@ use crate::render_source::{RenderSource, TileOrder};
 use crate::render_tile::{FrameTile, RenderTile};
 use crate::terrain::FrameGround;
 use crate::tile_matrix::{projection_data, to_projection_ubo};
+
+/// The slots of the programs' textures that the draws bind.
+const GROUND_DEPTH_SLOT: usize = programs::SYMBOL_SDF.texture_slot("ground_depth");
+const TEXTURE_SLOT: usize = programs::SYMBOL_SDF.texture_slot("texture");
+const TEXTURE_ICON_SLOT: usize = programs::SYMBOL_TEXT_AND_ICON.texture_slot("texture_icon");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SymbolType {
@@ -206,20 +205,15 @@ fn set_layout_attributes(geometry: &BucketGeometry, buffer: &Buffer, attribs: &m
     let Some(layout_data) = bucket_vertices(geometry, &buffer.attribute_data) else {
         return;
     };
+    attribs
+        .set_shared("pos_offset", SharedAttribute::new(layout_data.clone(), AttributeDataType::Short4, 0, layout_size));
+    attribs.set_shared("data", SharedAttribute::new(layout_data.clone(), AttributeDataType::UShort4, 8, layout_size));
     attribs.set_shared(
-        ID_SYMBOL_POS_OFFSET_ATTRIBUTE,
-        SharedAttribute::new(layout_data.clone(), AttributeDataType::Short4, 0, layout_size),
-    );
-    attribs.set_shared(
-        ID_SYMBOL_DATA_ATTRIBUTE,
-        SharedAttribute::new(layout_data.clone(), AttributeDataType::UShort4, 8, layout_size),
-    );
-    attribs.set_shared(
-        ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE,
+        "pixeloffset",
         SharedAttribute::new(layout_data.clone(), AttributeDataType::Short4, 16, layout_size),
     );
     attribs.set_shared(
-        ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
+        "tex_origin",
         SharedAttribute::new(layout_data.clone(), AttributeDataType::UShort2, 24, layout_size),
     );
     set_height_offset_attribute(layout_data, attribs);
@@ -229,10 +223,7 @@ fn set_layout_attributes(geometry: &BucketGeometry, buffer: &Buffer, attribs: &m
 /// of `layout_data`.
 fn set_height_offset_attribute(layout_data: SharedVertices, attribs: &mut VertexAttributeArray) {
     let layout_size = size_of::<crate::buckets::symbol_bucket::SymbolLayoutVertex>() as u32;
-    attribs.set_shared(
-        ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE,
-        SharedAttribute::new(layout_data, AttributeDataType::Float, 28, layout_size),
-    );
+    attribs.set_shared("height_offset", SharedAttribute::new(layout_data, AttributeDataType::Float, 28, layout_size));
 }
 
 /// Sets the symbols' heights to the heights placement gave them over the
@@ -247,14 +238,7 @@ fn set_elevation_attribute(
 ) {
     let elevations = &buffer.elevation_attribute_data;
     if !elevations.is_empty() {
-        set_placed_attribute(
-            context,
-            attribs,
-            ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE,
-            elevations,
-            AttributeDataType::Float,
-            placed,
-        );
+        set_placed_attribute(context, attribs, "height_offset", elevations, AttributeDataType::Float, placed);
     } else if placed.take().is_some()
         && let Some(layout_data) = bucket_vertices(geometry, &buffer.attribute_data)
     {
@@ -272,14 +256,7 @@ fn set_projected_pos_attribute(
     placed: &mut Option<TypedVertices<SymbolDynamicLayoutVertex>>,
 ) {
     let vertices = buffer.dynamic_attribute_data_for(layer_id);
-    set_placed_attribute(
-        context,
-        attribs,
-        ID_SYMBOL_PROJECTED_POS_ATTRIBUTE,
-        vertices,
-        AttributeDataType::Float4,
-        placed,
-    );
+    set_placed_attribute(context, attribs, "projected_pos", vertices, AttributeDataType::Float4, placed);
 }
 
 /// Sets the opacity vertices, which placement updates.
@@ -290,24 +267,17 @@ fn set_fade_opacity_attribute(
     placed: &mut Option<TypedVertices<SymbolOpacityVertex>>,
 ) {
     let vertices = &buffer.opacity_attribute_data;
-    set_placed_attribute(
-        context,
-        attribs,
-        ID_SYMBOL_FADE_OPACITY_ATTRIBUTE,
-        vertices,
-        AttributeDataType::Float,
-        placed,
-    );
+    set_placed_attribute(context, attribs, "fade_opacity", vertices, AttributeDataType::Float, placed);
 }
 
-/// Sets attribute `id` of `attribs` to read a copy of `vertices`, which
+/// Sets attribute `name` of `attribs` to read a copy of `vertices`, which
 /// placement updates, as `type_`: into `placed`, the vertices the attribute
 /// reads, where they are as many, so that the upload writes them over their
 /// buffer, or else into vertices of their own, which `placed` then holds.
 fn set_placed_attribute<V: bytemuck::Pod>(
     context: &mut Context,
     attribs: &mut VertexAttributeArray,
-    id: usize,
+    name: &'static str,
     vertices: &[V],
     type_: AttributeDataType,
     placed: &mut Option<TypedVertices<V>>,
@@ -316,7 +286,7 @@ fn set_placed_attribute<V: bytemuck::Pod>(
         return;
     }
     let typed = context.add_dynamic_vertices(vertices);
-    attribs.set_shared(id, SharedAttribute::new(typed.shared().clone(), type_, 0, size_of::<V>() as u32));
+    attribs.set_shared(name, SharedAttribute::new(typed.shared().clone(), type_, 0, size_of::<V>() as u32));
     *placed = Some(typed);
 }
 
@@ -477,10 +447,10 @@ struct SymbolUniforms {
     projection: ProjectionUBO,
 }
 
-/// The size of the texture `objects` binds at `texture_id` in `context`,
+/// The size of the texture `objects` binds at `slot` in `context`,
 /// zero for none.
-fn texture_size(context: &Context, objects: &DrawObjects, texture_id: usize) -> [f32; 2] {
-    objects.texture(texture_id).and_then(|texture| context.texture(texture)).map_or([0.0, 0.0], |texture| {
+fn texture_size(context: &Context, objects: &DrawObjects, slot: usize) -> [f32; 2] {
+    objects.texture(slot).and_then(|texture| context.texture(texture)).map_or([0.0, 0.0], |texture| {
         let size = texture.size();
         [size.width as f32, size.height as f32]
     })
@@ -1008,8 +978,8 @@ impl RenderSymbolLayer {
                 matrix: cast_matrix(&matrix),
                 label_plane_matrix: cast_matrix(&label_plane_matrix),
                 coord_matrix: cast_matrix(&gl_coord_matrix),
-                texsize: texture_size(parameters.context, &draw.objects, ID_SYMBOL_IMAGE_TEXTURE),
-                texsize_icon: texture_size(parameters.context, &draw.objects, ID_SYMBOL_IMAGE_ICON_TEXTURE),
+                texsize: texture_size(parameters.context, &draw.objects, TEXTURE_SLOT),
+                texsize_icon: texture_size(parameters.context, &draw.objects, TEXTURE_ICON_SLOT),
                 is_text_prop: i32::from(is_text),
                 rotate_symbol: i32::from(rotate_in_shader),
                 pitch_with_map: i32::from(pitch_with_map),
@@ -1071,7 +1041,7 @@ impl RenderSymbolLayer {
                     continue;
                 };
                 if let Some(depth) = depth {
-                    draw.objects.set_texture(ID_SYMBOL_GROUND_DEPTH_TEXTURE, Some(depth));
+                    draw.objects.set_texture(GROUND_DEPTH_SLOT, Some(depth));
                 }
                 let frame_draw = FrameDraw { pass: passes, ..FrameDraw::new(Some(tile_id), draw.id) };
                 self.draw_list.push_part(frame_draw, index, uniforms);
@@ -1177,18 +1147,9 @@ fn collision_vertex_attributes(context: &mut Context, buffer: &CollisionBuffer) 
     let layout = copied_vertices(context, &buffer.vertices);
     let dynamic_stride = size_of::<CollisionBoxDynamicVertex>() as u32;
     let dynamic = copied_vertices(context, &buffer.dynamic_vertices);
-    attrs.set_shared(
-        ID_COLLISION_POS_VERTEX_ATTRIBUTE,
-        SharedAttribute::new(layout.clone(), AttributeDataType::Short2, 0, layout_stride),
-    );
-    attrs.set_shared(
-        ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE,
-        SharedAttribute::new(layout.clone(), AttributeDataType::Short2, 4, layout_stride),
-    );
-    attrs.set_shared(
-        ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE,
-        SharedAttribute::new(layout.clone(), AttributeDataType::Short2, 8, layout_stride),
-    );
+    attrs.set_shared("pos", SharedAttribute::new(layout.clone(), AttributeDataType::Short2, 0, layout_stride));
+    attrs.set_shared("anchor_pos", SharedAttribute::new(layout.clone(), AttributeDataType::Short2, 4, layout_stride));
+    attrs.set_shared("extrude", SharedAttribute::new(layout.clone(), AttributeDataType::Short2, 8, layout_stride));
     // Over the ground, the heights placement gave the boxes.
     let height = if buffer.elevations.is_empty() {
         SharedAttribute::new(layout, AttributeDataType::Float, 12, layout_stride)
@@ -1196,15 +1157,9 @@ fn collision_vertex_attributes(context: &mut Context, buffer: &CollisionBuffer) 
         let elevations = copied_vertices(context, &buffer.elevations);
         SharedAttribute::new(elevations, AttributeDataType::Float, 0, size_of::<f32>() as u32)
     };
-    attrs.set_shared(ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE, height);
-    attrs.set_shared(
-        ID_COLLISION_PLACED_VERTEX_ATTRIBUTE,
-        SharedAttribute::new(dynamic.clone(), AttributeDataType::UShort2, 0, dynamic_stride),
-    );
-    attrs.set_shared(
-        ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE,
-        SharedAttribute::new(dynamic, AttributeDataType::Float2, 4, dynamic_stride),
-    );
+    attrs.set_shared("height_offset", height);
+    attrs.set_shared("placed", SharedAttribute::new(dynamic.clone(), AttributeDataType::UShort2, 0, dynamic_stride));
+    attrs.set_shared("shift", SharedAttribute::new(dynamic, AttributeDataType::Float2, 4, dynamic_stride));
     attrs
 }
 
@@ -1510,8 +1465,8 @@ impl TypedLayer for RenderSymbolLayer {
                             bucket.text_size_binder.evaluate_for_zoom(current_zoom).is_zoom_constant;
                         AtlasBinding::new(
                             Some(atlases.clone()),
-                            Some(ID_SYMBOL_IMAGE_ICON_TEXTURE),
-                            Some(ID_SYMBOL_IMAGE_TEXTURE),
+                            Some(TEXTURE_ICON_SLOT),
+                            Some(TEXTURE_SLOT),
                             is_text,
                             false,
                             values.rotation_alignment,
@@ -1524,8 +1479,8 @@ impl TypedLayer for RenderSymbolLayer {
                         let icon_scaled = bucket_layout.icon_size.constant_or(&1.0) != 1.0 || bucket.icons_need_linear;
                         AtlasBinding::new(
                             Some(atlases.clone()),
-                            Some(ID_SYMBOL_IMAGE_ICON_TEXTURE),
-                            Some(ID_SYMBOL_IMAGE_TEXTURE),
+                            Some(TEXTURE_ICON_SLOT),
+                            Some(TEXTURE_SLOT),
                             is_text,
                             sdf_icons,
                             values.rotation_alignment,

@@ -29,6 +29,16 @@ fn uniforms(source: &ShaderSource) -> BTreeSet<String> {
     names
 }
 
+/// The WGSL has a location for each of the program's attributes and a
+/// binding for each of its texture slots.
+#[test]
+fn every_program_has_wgsl_locations_of_its_attributes_and_textures() {
+    for &(program, source) in BUILT_INS {
+        assert_eq!(source.locations.len(), program.locations().count(), "{}", program.name);
+        assert_eq!(source.texture_bindings.len(), program.textures.len(), "{}", program.name);
+    }
+}
+
 /// A variant's defines read a property from its uniform only where the
 /// program declares it.
 #[test]

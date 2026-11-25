@@ -876,7 +876,6 @@ fn typed_vertices_take_updates_of_as_many_vertices() {
 // soon after its last upload the update comes.
 #[test]
 fn a_draw_writes_an_update_of_the_vertices_it_binds() {
-    use mln_gfx::shaders::shader_defines::{ID_RASTER_POS_VERTEX_ATTRIBUTE, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE};
     use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 
     use crate::draw::{DrawGeometry, DrawObjects};
@@ -889,9 +888,9 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
         let typed = context.add_dynamic_vertices(&[vertex(0), vertex(1), vertex(2)]);
         let stride = size_of::<RasterLayoutVertex>() as u32;
         let mut attrs = VertexAttributeArray::new();
-        for (id, offset) in [(ID_RASTER_POS_VERTEX_ATTRIBUTE, 0), (ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, 4)] {
+        for (name, offset) in [("pos", 0), ("texture_pos", 4)] {
             attrs.set_shared(
-                id,
+                name,
                 SharedAttribute::new(typed.shared().clone(), AttributeDataType::Short2, offset, stride),
             );
         }
@@ -980,10 +979,6 @@ fn a_draw_binds_the_vertices_it_reads_as_a_storage_buffer() {
 #[test]
 fn the_paint_layout_of_pulled_walls_is_the_paint_attributes() {
     use mln_gfx::AttributeDataType::{Float, Float4};
-    use mln_gfx::shaders::shader_defines::{
-        ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
-        ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
-    };
 
     use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
     use crate::layers::render_fill_extrusion_layer::paint_layout;
@@ -994,12 +989,8 @@ fn the_paint_layout_of_pulled_walls_is_the_paint_attributes() {
 
         // A vertex's base, its color's four floats, then its height.
         let paint = context.add_vertices(vec![[0f32; 6]]);
-        for (id, data_type, offset) in [
-            (ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, Float, 0),
-            (ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE, Float4, 4),
-            (ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, Float, 20),
-        ] {
-            attrs.set_shared(id, SharedAttribute::new(paint.clone(), data_type, offset, 24));
+        for (name, data_type, offset) in [("base", Float, 0), ("color", Float4, 4), ("height", Float, 20)] {
+            attrs.set_shared(name, SharedAttribute::new(paint.clone(), data_type, offset, 24));
         }
         // Six words a vertex: the base at 0, the height at 5, the color at 1.
         assert_eq!(paint_layout(&attrs), 0x0105_0006);
@@ -1011,9 +1002,6 @@ fn the_paint_layout_of_pulled_walls_is_the_paint_attributes() {
 #[test]
 fn the_paint_layout_of_pulled_outlines_is_the_paint_attributes() {
     use mln_gfx::AttributeDataType::{Float, Float2, Float4};
-    use mln_gfx::shaders::shader_defines::{
-        ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE,
-    };
 
     use crate::gfx::vertex_attribute::{SharedAttribute, VertexAttributeArray};
     use crate::layers::render_fill_layer::outline_paint_layout;
@@ -1024,12 +1012,8 @@ fn the_paint_layout_of_pulled_outlines_is_the_paint_attributes() {
 
         // A vertex's fill color, its opacity, then its outline color.
         let paint = context.add_vertices(vec![[0f32; 5]]);
-        for (id, data_type, offset) in [
-            (ID_FILL_COLOR_VERTEX_ATTRIBUTE, Float2, 0),
-            (ID_FILL_OPACITY_VERTEX_ATTRIBUTE, Float, 8),
-            (ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, Float2, 12),
-        ] {
-            attrs.set_shared(id, SharedAttribute::new(paint.clone(), data_type, offset, 20));
+        for (name, data_type, offset) in [("color", Float2, 0), ("opacity", Float, 8), ("outline_color", Float2, 12)] {
+            attrs.set_shared(name, SharedAttribute::new(paint.clone(), data_type, offset, 20));
         }
         // Five words a vertex: the outline color at 3, the opacity at 2.
         assert_eq!(outline_paint_layout(&attrs), 0x0002_0305);
@@ -1037,7 +1021,7 @@ fn the_paint_layout_of_pulled_outlines_is_the_paint_attributes() {
         // An interpolated outline color alone.
         let mut attrs = VertexAttributeArray::new();
         let paint = context.add_vertices(vec![[0f32; 4]]);
-        attrs.set_shared(ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, SharedAttribute::new(paint, Float4, 0, 16));
+        attrs.set_shared("outline_color", SharedAttribute::new(paint, Float4, 0, 16));
         assert_eq!(outline_paint_layout(&attrs), 4);
     });
 }

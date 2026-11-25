@@ -24,9 +24,8 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
-    ID_HILLSHADE_DRAWABLE_UBO, ID_HILLSHADE_EVALUATED_PROPS_UBO, ID_HILLSHADE_IMAGE_TEXTURE,
-    ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_PREPARE_DRAWABLE_UBO, ID_HILLSHADE_PREPARE_TILE_PROPS_UBO,
-    ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_TILE_PROPS_UBO, ID_PROJECTION_UBO,
+    ID_HILLSHADE_DRAWABLE_UBO, ID_HILLSHADE_EVALUATED_PROPS_UBO, ID_HILLSHADE_PREPARE_DRAWABLE_UBO,
+    ID_HILLSHADE_PREPARE_TILE_PROPS_UBO, ID_HILLSHADE_TILE_PROPS_UBO, ID_PROJECTION_UBO,
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
@@ -71,6 +70,9 @@ use crate::render_target::RenderTarget;
 use crate::render_tile::FrameTile;
 use crate::terrain::SurfaceLight;
 use crate::tile_matrix::{bind_no_projection, projection_data, to_projection_ubo};
+
+/// The slots of the programs' textures that the draws bind.
+const IMAGE_SLOT: usize = programs::HILLSHADE.texture_slot("image");
 
 impl LayerType for Hillshade {
     type Layout = NoLayout;
@@ -275,7 +277,7 @@ fn hillshade_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArra
     let mut attrs = VertexAttributeArray::new();
     let stride = size_of::<RasterLayoutVertex>() as u32;
     attrs.set_shared(
-        ID_HILLSHADE_POS_VERTEX_ATTRIBUTE,
+        "pos",
         SharedAttribute::new(
             vertices.clone(),
             AttributeDataType::Short2,
@@ -284,7 +286,7 @@ fn hillshade_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArra
         ),
     );
     attrs.set_shared(
-        ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE,
+        "texture_pos",
         SharedAttribute::new(
             vertices.clone(),
             AttributeDataType::Short2,
@@ -472,11 +474,11 @@ impl TypedLayer for RenderHillshadeLayer {
                 }
                 // The bucket's render target is made again with its
                 // generation.
-                cached.draw.objects.set_texture(ID_HILLSHADE_IMAGE_TEXTURE, Some(render_target_texture));
+                cached.draw.objects.set_texture(IMAGE_SLOT, Some(render_target_texture));
                 cached
             } else {
                 let mut textures = Textures::default();
-                textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(render_target_texture.clone());
+                textures[IMAGE_SLOT] = Some(render_target_texture.clone());
                 let objects = DrawObjects::new(
                     hillshade_shader.clone(),
                     color_mode,
@@ -615,7 +617,7 @@ impl BucketTarget {
             instances: None,
         };
         let mut textures = Textures::default();
-        textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(dem.clone());
+        textures[IMAGE_SLOT] = Some(dem.clone());
         let objects =
             DrawObjects::new(shader.clone(), ColorMode::unblended(), CullFaceMode::disabled(), geometry, textures);
         let mut prepare = SingleDraw::new(objects, FrameDraw::new(None, SimpleIdentity::new()));

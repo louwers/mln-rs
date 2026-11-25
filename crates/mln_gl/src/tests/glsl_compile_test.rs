@@ -207,7 +207,7 @@ fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
                 }
 
                 // With every property an attribute, the program has every
-                // attribute of its table but the ones its GLSL leaves unused.
+                // attribute it declares but the ones its GLSL leaves unused.
                 let mut locations = HashSet::default();
                 for &(_, location) in &program.vertex_locations {
                     assert!(locations.insert(location), "{what}: two attributes at location {location}");
@@ -217,8 +217,11 @@ fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
                 }
                 // A variant that doesn't stand on terrain doesn't read the
                 // ground's depth, whatever slot its program keeps for it.
-                for info in source.textures.iter().filter(|info| !(flat && info.name == "u_ground_depth")) {
-                    assert!(program.textures.contains(&info.id), "{what}: no sampler {}", info.name);
+                let textures = key.program().textures.iter().enumerate();
+                for (slot, texture) in textures.filter(|(_, texture)| !(flat && texture.name == "ground_depth")) {
+                    if !texture.is_unused() {
+                        assert!(program.textures.contains(&slot), "{what}: no sampler u_{}", texture.name);
+                    }
                 }
             }
         }

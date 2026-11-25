@@ -6,7 +6,7 @@ use std::any::Any;
 use mln_util::Color;
 use mln_util::size::Size;
 
-use super::{EXTENT, SIZE, buffer, draw, dynamic, fixed, position_layout, quad, tile_matrix, whole};
+use super::{EXTENT, SIZE, buffer, draw, dynamic, fixed, location, position_layout, quad, slot, tile_matrix, whole};
 use crate::color_mode::ColorMode;
 use crate::gfx_types::{AttributeDataType, DrawModeType};
 use crate::gpu::{
@@ -27,16 +27,10 @@ use crate::shaders::program::Program;
 use crate::shaders::programs;
 use crate::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use crate::shaders::shader_defines::{
-    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
-    ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_DRAWABLE_UBO,
-    ID_FILL_EVALUATED_PROPS_UBO, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_DRAWABLE_UBO,
-    ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE,
-    ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO,
-    ID_FILL_EXTRUSION_TILE_PROPS_UBO, ID_FILL_EXTRUSION_WALL_VERTICES, ID_FILL_OPACITY_VERTEX_ATTRIBUTE,
-    ID_FILL_POS_VERTEX_ATTRIBUTE, ID_GLOBAL_PAINT_PARAMS_UBO, ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE,
-    ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_TEXTURE_PROPS_UBO, ID_PROJECTION_UBO, ID_RASTER_DRAWABLE_UBO,
-    ID_RASTER_EVALUATED_PROPS_UBO, ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE,
-    ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE,
+    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO, ID_FILL_DRAWABLE_UBO, ID_FILL_EVALUATED_PROPS_UBO,
+    ID_FILL_EXTRUSION_DRAWABLE_UBO, ID_FILL_EXTRUSION_PROPS_UBO, ID_FILL_EXTRUSION_TILE_PROPS_UBO,
+    ID_FILL_EXTRUSION_WALL_VERTICES, ID_GLOBAL_PAINT_PARAMS_UBO, ID_HEATMAP_TEXTURE_PROPS_UBO, ID_PROJECTION_UBO,
+    ID_RASTER_DRAWABLE_UBO, ID_RASTER_EVALUATED_PROPS_UBO,
 };
 use crate::stencil_mode::StencilMode;
 use crate::texture2d::SamplerState;
@@ -100,7 +94,7 @@ fn background_geometry(
 ) -> Result<GeometryId, GpuError> {
     gpu.create_geometry(&GeometryDesc {
         shader,
-        layouts: &[position_layout(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)],
+        layouts: &[position_layout(&programs::BACKGROUND)],
         vertex_buffers: &[(vertices, 0)],
         index_buffer: indices,
     })
@@ -138,7 +132,7 @@ fn background(shader: ShaderId, targets: TargetFormats) -> PipelineDesc<'static>
 /// pipeline of it here reads.
 fn background_layouts() -> &'static [VertexBufferLayout] {
     static LAYOUTS: std::sync::OnceLock<[VertexBufferLayout; 1]> = std::sync::OnceLock::new();
-    LAYOUTS.get_or_init(|| [position_layout(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)])
+    LAYOUTS.get_or_init(|| [position_layout(&programs::BACKGROUND)])
 }
 
 impl Solid {
@@ -232,7 +226,7 @@ pub fn invalid_calls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     ))?;
     assert!(invalid(&with_draw(gpu, frame.draw(depth_pipeline))), "a pipeline for a depth attachment");
     let mask = gpu.create_shader(&ShaderKey::new(&programs::CLIPPING_MASK, []))?;
-    let mask_layouts = [position_layout(ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE)];
+    let mask_layouts = [position_layout(&programs::CLIPPING_MASK)];
     let mask_geometry = gpu.create_geometry(&GeometryDesc {
         shader: mask,
         layouts: &mask_layouts,
@@ -561,7 +555,7 @@ fn vertex_texels(gpu: &mut impl Gpu, texture: TextureId) -> Result<Vec<u8>, GpuE
         label: "vertex texels",
         shader,
         entries: &[
-            BindGroupEntry::Texture { id: ID_VERTEX_TEXEL_TEXTURE as u32, texture, sampler },
+            BindGroupEntry::Texture { slot: slot(&programs::VERTEX_TEXEL, "image"), texture, sampler },
             whole(ID_PROJECTION_UBO, projection_buffer, projection),
         ],
     })?;
@@ -585,7 +579,7 @@ fn vertex_texels(gpu: &mut impl Gpu, texture: TextureId) -> Result<Vec<u8>, GpuE
         stride: 8,
         step: VertexStep::Vertex,
         attributes: vec![VertexAttribute {
-            id: ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE as u32,
+            location: location(&programs::VERTEX_TEXEL, "pos_texel"),
             format: AttributeDataType::Short4,
             offset: 0,
         }],
@@ -769,8 +763,8 @@ fn raster_draw(
             whole(ID_PROJECTION_UBO, projection_buffer, projection),
             whole(ID_RASTER_DRAWABLE_UBO, drawable_buffer, drawable),
             whole(ID_RASTER_EVALUATED_PROPS_UBO, props_buffer, props),
-            BindGroupEntry::Texture { id: ID_RASTER_IMAGE0_TEXTURE as u32, texture, sampler },
-            BindGroupEntry::Texture { id: ID_RASTER_IMAGE1_TEXTURE as u32, texture, sampler },
+            BindGroupEntry::Texture { slot: slot(&programs::RASTER, "image0"), texture, sampler },
+            BindGroupEntry::Texture { slot: slot(&programs::RASTER, "image1"), texture, sampler },
         ],
     })?;
     // The tile's quad, each vertex its position, then the same as its
@@ -783,14 +777,15 @@ fn raster_draw(
     before_vertices();
     gpu.write_buffer(vertices, 0, quad)?;
     let indices = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&[0u16, 1, 2, 1, 2, 3]))?;
-    let attribute = |id: usize, offset| VertexAttribute { id: id as u32, format: AttributeDataType::Short2, offset };
+    let attribute = |name, offset| VertexAttribute {
+        location: location(&programs::RASTER, name),
+        format: AttributeDataType::Short2,
+        offset,
+    };
     let layouts = [VertexBufferLayout {
         stride: 8,
         step: VertexStep::Vertex,
-        attributes: vec![
-            attribute(ID_RASTER_POS_VERTEX_ATTRIBUTE, 0),
-            attribute(ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE, 4),
-        ],
+        attributes: vec![attribute("pos", 0), attribute("texture_pos", 4)],
     }];
     let geometry = gpu.create_geometry(&GeometryDesc {
         shader,
@@ -850,19 +845,20 @@ pub fn vertex_layouts(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     }
     let interleaved = buffer(gpu, BufferUsage::Vertex, &interleaved)?;
 
-    let attribute = |id: usize, format, offset| VertexAttribute { id: id as u32, format, offset };
+    let attribute =
+        |name, format, offset| VertexAttribute { location: location(&programs::FILL, name), format, offset };
     let layout = |stride, attributes| VertexBufferLayout { stride, step: VertexStep::Vertex, attributes };
-    let pos = attribute(ID_FILL_POS_VERTEX_ATTRIBUTE, AttributeDataType::Short2, 0);
-    let color_layout = layout(16, vec![attribute(ID_FILL_COLOR_VERTEX_ATTRIBUTE, AttributeDataType::Float4, 0)]);
+    let pos = attribute("pos", AttributeDataType::Short2, 0);
+    let color_layout = layout(16, vec![attribute("color", AttributeDataType::Float4, 0)]);
     let separate = (
         vec![
             layout(4, vec![pos]),
-            layout(8, vec![attribute(ID_FILL_OPACITY_VERTEX_ATTRIBUTE, AttributeDataType::Float2, 0)]),
+            layout(8, vec![attribute("opacity", AttributeDataType::Float2, 0)]),
             color_layout.clone(),
         ],
         vec![(frame.quad, 0), (opacities, 0), (colors, 0)],
     );
-    let opacity_at_4 = attribute(ID_FILL_OPACITY_VERTEX_ATTRIBUTE, AttributeDataType::Float2, 4);
+    let opacity_at_4 = attribute("opacity", AttributeDataType::Float2, 4);
     let interleaved = (vec![layout(12, vec![pos, opacity_at_4]), color_layout], vec![(interleaved, 0), (colors, 0)]);
     for (layouts, buffers) in [separate, interleaved] {
         let pipeline =
@@ -981,24 +977,18 @@ fn instanced_wall_texels(gpu: &mut impl Gpu) -> Result<Vec<u8>, GpuError> {
     let corners = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&WALL_CORNERS))?;
     let outline = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&wall_outline()))?;
 
-    let attribute = |id: usize, format, offset| VertexAttribute { id: id as u32, format, offset };
+    let attribute = |name, format, offset| VertexAttribute {
+        location: location(&programs::FILL_EXTRUSION_INSTANCED, name),
+        format,
+        offset,
+    };
     let instances = |stride, attributes| VertexBufferLayout { stride, step: VertexStep::Instance, attributes };
     let (short2, ushort2) = (AttributeDataType::Short2, AttributeDataType::UShort2);
     let layouts = [
-        VertexBufferLayout {
-            stride: 4,
-            step: VertexStep::Vertex,
-            attributes: vec![attribute(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, short2, 0)],
-        },
-        instances(
-            8,
-            vec![
-                attribute(ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ushort2, 4),
-                attribute(ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, short2, 0),
-            ],
-        ),
-        instances(8, vec![attribute(ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, short2, 0)]),
-        instances(8, vec![attribute(ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ushort2, 4)]),
+        VertexBufferLayout { stride: 4, step: VertexStep::Vertex, attributes: vec![attribute("pos", short2, 0)] },
+        instances(8, vec![attribute("next_decimals_ed", ushort2, 4), attribute("next_outline_pos", short2, 0)]),
+        instances(8, vec![attribute("outline_pos", short2, 0)]),
+        instances(8, vec![attribute("decimals_ed", ushort2, 4)]),
     ];
     let pipeline =
         gpu.create_pipeline(&PipelineDesc { shader, vertex_buffers: &layouts, ..background(shader, RGBA8) })?;
@@ -1037,19 +1027,20 @@ pub fn wall_quads(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let indices: [u16; 12] = [0, 1, 2, 1, 2, 3, 4, 5, 6, 5, 6, 7];
     let indices = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&indices))?;
 
-    let attribute = |id: usize, format, offset| VertexAttribute { id: id as u32, format, offset };
+    let attribute = |name, format, offset| VertexAttribute {
+        location: location(&programs::FILL_EXTRUSION_WALL, name),
+        format,
+        offset,
+    };
     let vertices = |attributes| VertexBufferLayout { stride: 12, step: VertexStep::Vertex, attributes };
     let (short2, ushort2) = (AttributeDataType::Short2, AttributeDataType::UShort2);
     let layouts = [
         vertices(vec![
-            attribute(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, short2, 0),
-            attribute(ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, short2, 4),
-            attribute(ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ushort2, 8),
+            attribute("pos", short2, 0),
+            attribute("outline_pos", short2, 4),
+            attribute("decimals_ed", ushort2, 8),
         ]),
-        vertices(vec![
-            attribute(ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, short2, 4),
-            attribute(ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ushort2, 8),
-        ]),
+        vertices(vec![attribute("next_outline_pos", short2, 4), attribute("next_decimals_ed", ushort2, 8)]),
     ];
     let pipeline =
         gpu.create_pipeline(&PipelineDesc { shader, vertex_buffers: &layouts, ..background(shader, RGBA8) })?;
@@ -1241,7 +1232,7 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
     let projection_buffer = buffer(gpu, BufferUsage::Storage, projection)?;
     let (vertices, indices) = quad(gpu)?;
     let shader = gpu.create_shader(&ShaderKey::new(&programs::HEATMAP_TEXTURE, []))?;
-    let layouts = [position_layout(ID_HEATMAP_POS_VERTEX_ATTRIBUTE)];
+    let layouts = [position_layout(&programs::HEATMAP_TEXTURE)];
     let pipeline = gpu.create_pipeline(&PipelineDesc {
         shader,
         vertex_buffers: &layouts,
@@ -1252,8 +1243,8 @@ pub fn resources_in_use<G: Gpu>(gpu: &mut G) -> Result<(), GpuError> {
         whole(ID_GLOBAL_PAINT_PARAMS_UBO, paint_buffer, paint),
         whole(ID_HEATMAP_TEXTURE_PROPS_UBO, props_buffer, props),
         whole(ID_PROJECTION_UBO, projection_buffer, projection),
-        BindGroupEntry::Texture { id: ID_HEATMAP_IMAGE_TEXTURE as u32, texture: image, sampler },
-        BindGroupEntry::Texture { id: ID_HEATMAP_COLOR_RAMP_TEXTURE as u32, texture: image, sampler },
+        BindGroupEntry::Texture { slot: slot(&programs::HEATMAP_TEXTURE, "image"), texture: image, sampler },
+        BindGroupEntry::Texture { slot: slot(&programs::HEATMAP_TEXTURE, "color_ramp"), texture: image, sampler },
     ];
     let first = gpu.create_bindings(&BindingsDesc { label: "heatmap", shader, entries: &entries })?;
     let second = gpu.create_bindings(&BindingsDesc { label: "heatmap again", shader, entries: &entries })?;

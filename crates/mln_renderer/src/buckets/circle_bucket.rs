@@ -4,11 +4,6 @@
 use std::sync::Arc;
 
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE, ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE, ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE,
-    ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE,
-    ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE,
-};
 use mln_map_types::MapMode;
 use mln_style::layers::Circle;
 use mln_style::layers::circle_layer_properties::CirclePaintProperties;
@@ -24,13 +19,13 @@ use crate::terrain::point_center;
 
 crate::paint_property_binders!(
     pub struct CircleBinders for CirclePaintProperties::PossiblyEvaluated {
-        circle_blur: PaintPropertyBinder<f32> => [ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE],
-        circle_color: PaintPropertyBinder<Color> => [ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE],
-        circle_opacity: PaintPropertyBinder<f32> => [ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE],
-        circle_radius: PaintPropertyBinder<f32> => [ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE],
-        circle_stroke_color: PaintPropertyBinder<Color> => [ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE],
-        circle_stroke_opacity: PaintPropertyBinder<f32> => [ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE],
-        circle_stroke_width: PaintPropertyBinder<f32> => [ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE],
+        circle_blur: PaintPropertyBinder<f32> => ["blur"],
+        circle_color: PaintPropertyBinder<Color> => ["color"],
+        circle_opacity: PaintPropertyBinder<f32> => ["opacity"],
+        circle_radius: PaintPropertyBinder<f32> => ["radius"],
+        circle_stroke_color: PaintPropertyBinder<Color> => ["stroke_color"],
+        circle_stroke_opacity: PaintPropertyBinder<f32> => ["stroke_opacity"],
+        circle_stroke_width: PaintPropertyBinder<f32> => ["stroke_width"],
     }
 );
 

@@ -8,10 +8,7 @@ use mln_gfx::shaders::circle_layer_ubo::{CircleDrawableUBO, CircleEvaluatedProps
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO, ID_CIRCLE_GROUND_HEIGHT_VERTEX_ATTRIBUTE,
-    ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_GROUND_DEPTH_TEXTURE, ID_PROJECTION_UBO,
-};
+use mln_gfx::shaders::shader_defines::{ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO, ID_PROJECTION_UBO};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{TileCoordinate, TileProjector};
 use mln_style::expression::EvaluationContext;
@@ -42,6 +39,9 @@ use crate::render_pass::RenderPass;
 use crate::render_tile::{FrameTile, RenderTile};
 use crate::terrain::{FrameGround, StandingDraw, TileGround};
 use crate::tile_matrix::{globe_extrude_scale, projection_data, to_projection_ubo};
+
+/// The slots of the programs' textures that the draws bind.
+const GROUND_DEPTH_SLOT: usize = programs::CIRCLE.texture_slot("ground_depth");
 
 /// The pass the layer's draws draw in.
 const RENDER_PASS: RenderPass = RenderPass::Translucent;
@@ -317,7 +317,7 @@ impl TypedLayer for RenderCircleLayer {
                 let mut attrs = VertexAttributeArray::new();
                 binders.bind(evaluated, paint(context).as_ref(), &mut attrs, &mut uniforms);
                 attrs.set_shared(
-                    ID_CIRCLE_POS_VERTEX_ATTRIBUTE,
+                    "pos",
                     SharedAttribute::new(
                         vertices,
                         AttributeDataType::Short2,
@@ -347,14 +347,8 @@ impl TypedLayer for RenderCircleLayer {
                 continue;
             };
             let ground = ground.as_deref();
-            draw.stand(
-                context,
-                ground,
-                tile_id.to_unwrapped(),
-                ID_CIRCLE_GROUND_HEIGHT_VERTEX_ATTRIBUTE,
-                &bucket.centers,
-            );
-            draw.objects.set_texture(ID_GROUND_DEPTH_TEXTURE, ground.and_then(FrameGround::depth));
+            draw.stand(context, ground, tile_id.to_unwrapped(), "ground_height", &bucket.centers);
+            draw.objects.set_texture(GROUND_DEPTH_SLOT, ground.and_then(FrameGround::depth));
             let draw = FrameDraw::new(Some(tile_id), order);
             self.draw_list.push(draw, Self::uniforms(layer, &tile_id, binders, paint_parameters));
         }

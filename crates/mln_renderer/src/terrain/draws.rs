@@ -18,8 +18,7 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
-    ID_PROJECTION_UBO, ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_DRAWABLE_UBO,
-    ID_TERRAIN_LIGHT_TILE_UBO, ID_TERRAIN_LIGHT_UBO, ID_TERRAIN_POS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROPS_UBO,
+    ID_PROJECTION_UBO, ID_TERRAIN_DRAWABLE_UBO, ID_TERRAIN_LIGHT_TILE_UBO, ID_TERRAIN_LIGHT_UBO, ID_TERRAIN_PROPS_UBO,
 };
 use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainFogUBO, TerrainSurfaceUBO};
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
@@ -41,6 +40,10 @@ use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws,
 use crate::layers::render_hillshade_layer::lat_range;
 use crate::paint_parameters::PaintParameters;
 use crate::tile_matrix::to_projection_ubo;
+
+/// The slots of the programs' textures that the draws bind.
+const GROUND_DEM_SLOT: usize = programs::TERRAIN.texture_slot("ground_dem");
+const DRAPE_SLOT: usize = programs::TERRAIN.texture_slot("drape");
 
 /// A grid, in the context's stores.
 struct SharedMesh {
@@ -221,10 +224,10 @@ impl TerrainDraws {
                     let mesh = &meshes[surface_mesh];
                     let objects = || mesh_objects(&shader, ColorMode::alpha_blended(), mesh, cull_face_mode);
                     let draw = entry.value.get_or_insert_with(|| KeptDraw::new(objects()));
-                    draw.objects.set_texture(ID_TERRAIN_DRAPE_TEXTURE, Some(&drape));
+                    draw.objects.set_texture(DRAPE_SLOT, Some(&drape));
                     draw
                 };
-                draw.objects.set_texture(ID_TERRAIN_DEM_TEXTURE, Some(dem_texture));
+                draw.objects.set_texture(GROUND_DEM_SLOT, Some(dem_texture));
                 let frame_draw = FrameDraw {
                     priority: index as i64,
                     depth: DrawDepth::Volume { mask: DepthMaskType::ReadWrite },
@@ -394,7 +397,7 @@ fn mesh_objects(
 ) -> DrawObjects {
     let mut vertices = VertexAttributeArray::new();
     vertices.set_shared(
-        ID_TERRAIN_POS_VERTEX_ATTRIBUTE,
+        "pos",
         SharedAttribute::new(mesh.vertices.clone(), AttributeDataType::Short4, 0, size_of::<TerrainVertex>() as u32),
     );
     let geometry = DrawGeometry {

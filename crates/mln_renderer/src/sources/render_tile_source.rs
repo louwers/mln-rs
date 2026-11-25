@@ -15,12 +15,7 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::line_layer_ubo::{LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO};
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO,
-    ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
-    ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
-    ID_PROJECTION_UBO,
-};
+use mln_gfx::shaders::shader_defines::{ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO, ID_PROJECTION_UBO};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::MapDebugOptions;
 use mln_style::Source;
@@ -105,8 +100,8 @@ fn polyline_objects(
     let mut attrs = VertexAttributeArray::new();
     // The position and normal, then the extrusion data.
     for (id, offset, data_type) in [
-        (ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, offset_of!(LineLayoutVertex, a1) as u32, AttributeDataType::Short2),
-        (ID_LINE_DATA_VERTEX_ATTRIBUTE, offset_of!(LineLayoutVertex, a2) as u32, AttributeDataType::UByte4),
+        ("pos_normal", offset_of!(LineLayoutVertex, a1) as u32, AttributeDataType::Short2),
+        ("data", offset_of!(LineLayoutVertex, a2) as u32, AttributeDataType::UByte4),
     ] {
         attrs.set_shared(id, SharedAttribute::new(shared.clone(), data_type, offset, stride));
     }
@@ -416,14 +411,7 @@ impl RenderSource for RenderTileSource {
         let globe = parameters.view.is_globe();
         let projection_variant = if globe { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
 
-        let uniforms = [
-            ID_LINE_COLOR_VERTEX_ATTRIBUTE,
-            ID_LINE_BLUR_VERTEX_ATTRIBUTE,
-            ID_LINE_OPACITY_VERTEX_ATTRIBUTE,
-            ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE,
-            ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
-            ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
-        ];
+        let uniforms = ["color", "blur", "opacity", "gapwidth", "offset", "width"];
         let polyline_shader =
             parameters.context.shader_key(&programs::LINE, uniforms.into_iter().collect(), projection_variant);
 

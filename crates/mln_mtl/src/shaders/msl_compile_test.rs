@@ -5,14 +5,15 @@
 //! `HAS_UNIFORM_u_<name>` define per property passed as a uniform, and
 //! `PROJECTION_GLOBE` for the globe variant. Also checks that the UBO ids and
 //! sizes the MSL declares are the renderer's, and that the shaders' pipelines
-//! build with the vertex layouts their tables describe, in both projection
-//! variants.
+//! build with vertex buffers of the attributes their programs declare, in
+//! both projection variants.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::mem::size_of;
 
 use mln_gfx::gfx_types::AttributeDataType;
+use mln_gfx::gpu::VertexStep;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program::{GLOBE_DEFINE, Program, TERRAIN_DEFINE};
 use mln_gfx::shaders::shader_defines::*;
@@ -26,7 +27,7 @@ use objc2_metal::{
 };
 
 use super::msl_sources::PRELUDE;
-use super::shader_source::{AttributeInfo, BUILT_INS, ShaderSource};
+use super::shader_source::{BUILT_INS, ShaderSource};
 use crate::Id;
 
 fn sources() -> impl Iterator<Item = (&'static Program, &'static ShaderSource)> {
@@ -186,7 +187,7 @@ fn every_shader_source_compiles() {
 /// values; the `<layer>UBOCount` enumerator is also where its vertex buffers
 /// start.
 fn ubo_ids(program: &Program, source: &ShaderSource) -> Vec<(&'static str, usize)> {
-    let first_vertex_buffer = source.attributes.iter().map(|attr| attr.buffer_index).min();
+    let first_vertex_buffer = source.first_vertex_buffer.filter(|_| !program.attributes.is_empty());
     let mut ids = vec![
         ("idGlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
         ("idGlobalUBOIndex", ID_GLOBAL_UBO_INDEX),
@@ -445,38 +446,28 @@ fn vertex_format(data_type: AttributeDataType) -> (MTLVertexFormat, usize) {
     }
 }
 
-/// The vertex and instance attributes of a table.
-fn all_attributes(source: &ShaderSource) -> impl Iterator<Item = &AttributeInfo> {
-    source.attributes.iter().chain(source.instance_attributes)
-}
-
-/// A vertex descriptor with every attribute of the table, the attributes of
-/// a buffer one after the other in its vertices, the instance attributes'
-/// buffers stepping per instance.
+/// A vertex descriptor with every attribute of `program` at its location,
+/// each in a buffer of its own, from the shader's first vertex buffer on, the
+/// instance attributes' buffers stepping per instance.
 fn vertex_descriptor(
+    program: &Program,
     source: &ShaderSource,
     data_type: impl Fn(AttributeDataType) -> AttributeDataType,
 ) -> Retained<MTLVertexDescriptor> {
     let descriptor = MTLVertexDescriptor::new();
-    let mut strides = [0usize; 31];
-    for attr in all_attributes(source) {
-        let (format, size) = vertex_format(data_type(attr.data_type));
+    let first = source.first_vertex_buffer.unwrap_or(0);
+    for (location, step, attribute) in program.locations() {
+        let (format, size) = vertex_format(data_type(attribute.format));
+        let buffer_index = first + location;
         // SAFETY: the attribute and buffer indices are below 31.
         unsafe {
-            let attribute = descriptor.attributes().objectAtIndexedSubscript(attr.index);
-            attribute.setFormat(format);
-            attribute.setOffset(strides[attr.buffer_index]);
-            attribute.setBufferIndex(attr.buffer_index);
-        }
-        strides[attr.buffer_index] += size;
-    }
-    for (buffer_index, &stride) in strides.iter().enumerate().filter(|(_, stride)| **stride > 0) {
-        let per_instance = source.instance_attributes.iter().any(|attr| attr.buffer_index == buffer_index);
-        // SAFETY: the buffer index is below 31.
-        unsafe {
+            let descriptor_attribute = descriptor.attributes().objectAtIndexedSubscript(location);
+            descriptor_attribute.setFormat(format);
+            descriptor_attribute.setOffset(0);
+            descriptor_attribute.setBufferIndex(buffer_index);
             let layout = descriptor.layouts().objectAtIndexedSubscript(buffer_index);
-            layout.setStride(stride);
-            if per_instance {
+            layout.setStride(size);
+            if step == VertexStep::Instance {
                 layout.setStepFunction(MTLVertexStepFunction::PerInstance);
             }
         }
@@ -484,13 +475,14 @@ fn vertex_descriptor(
     descriptor
 }
 
-/// Builds each shader's render pipeline with the vertex layout its table
-/// describes: the vertex attributes the MSL reads are all in the table, in
-/// formats Metal can convert to the MSL's types. The data-driven attributes
-/// also come as one value instead of two (source functions instead of
-/// composite functions), which leaves the MSL's second component 0.
+/// Builds each shader's render pipeline with a buffer of each attribute its
+/// program declares: the vertex attributes the MSL reads are all the
+/// program's, at their locations, in formats Metal can convert to the MSL's
+/// types. The data-driven attributes also come as one value instead of two
+/// (source functions instead of composite functions), which leaves the MSL's
+/// second component 0.
 #[test]
-fn pipelines_build_with_the_tables_vertex_layout() {
+fn pipelines_build_with_the_programs_attributes() {
     let device = device();
     let mut failures = Vec::new();
     for (program, source) in sources() {
@@ -508,8 +500,8 @@ fn pipelines_build_with_the_tables_vertex_layout() {
             other => other,
         };
         let layouts: [(&str, Retained<MTLVertexDescriptor>); 2] = [
-            ("table formats", vertex_descriptor(source, |data_type| data_type)),
-            ("single-value formats", vertex_descriptor(source, narrow)),
+            ("declared formats", vertex_descriptor(program, source, |data_type| data_type)),
+            ("single-value formats", vertex_descriptor(program, source, narrow)),
         ];
         let variants = ProjectionVariant::of(program).iter().flat_map(|&projection| {
             [
@@ -526,9 +518,9 @@ fn pipelines_build_with_the_tables_vertex_layout() {
             // A vertex function without `[[stage_in]]` has no attributes.
             let attributes = vertex.vertexAttributes().map(|attributes| attributes.to_vec()).unwrap_or_default();
             for attribute in attributes.iter().filter(|attribute| attribute.isActive()) {
-                if !all_attributes(source).any(|attr| attr.index == attribute.attributeIndex()) {
+                if program.attribute_at(attribute.attributeIndex()).is_none() {
                     failures.push(format!(
-                        "{} ({variant}): [[attribute({})]] {} has no table entry",
+                        "{} ({variant}): [[attribute({})]] {} isn't the program's",
                         program.name,
                         attribute.attributeIndex(),
                         attribute.name()
@@ -555,29 +547,14 @@ fn pipelines_build_with_the_tables_vertex_layout() {
 }
 
 #[test]
-fn attribute_and_texture_slots_are_distinct() {
+fn the_programs_fit_the_argument_tables() {
     // Metal's argument tables have 31 buffers, 31 vertex attributes and 16
     // samplers.
     for (program, source) in sources() {
-        let count = all_attributes(source).count();
-        let indices: BTreeSet<usize> = all_attributes(source).map(|attr| attr.index).collect();
-        assert_eq!(indices.len(), count, "{}: attribute indices repeat", program.name);
-        let ids: BTreeSet<usize> = source.attributes.iter().map(|attr| attr.id).collect();
-        assert_eq!(ids.len(), source.attributes.len(), "{}: attribute ids repeat", program.name);
-        let ids: BTreeSet<usize> = source.instance_attributes.iter().map(|attr| attr.id).collect();
-        assert_eq!(ids.len(), source.instance_attributes.len(), "{}: instance attribute ids repeat", program.name);
-        assert!(all_attributes(source).all(|attr| attr.index < 31 && attr.buffer_index < 31), "{}", program.name);
-        // A buffer steps per vertex or per instance.
-        assert!(
-            source
-                .attributes
-                .iter()
-                .all(|attr| source.instance_attributes.iter().all(|i| i.buffer_index != attr.buffer_index)),
-            "{}: a buffer has vertex and instance attributes",
-            program.name
-        );
-        let textures: BTreeSet<usize> = source.textures.iter().map(|texture| texture.index).collect();
-        assert_eq!(textures.len(), source.textures.len(), "{}: texture indices repeat", program.name);
-        assert!(source.textures.iter().all(|texture| texture.index < 16), "{}", program.name);
+        let attributes = program.locations().count();
+        assert!(attributes < 31, "{}", program.name);
+        assert_eq!(source.first_vertex_buffer.is_some(), attributes > 0, "{}", program.name);
+        assert!(source.first_vertex_buffer.is_none_or(|first| first + attributes <= 31), "{}", program.name);
+        assert!(program.textures.len() <= 16, "{}", program.name);
     }
 }

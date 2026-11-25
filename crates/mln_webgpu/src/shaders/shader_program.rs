@@ -8,6 +8,7 @@ use std::borrow::Cow;
 use mln_gfx::color_mode::BlendFunction;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::{FixedState, GpuError, ShaderKey, VertexBufferLayout, VertexStep};
+use mln_gfx::shaders::program::{Program, ProgramTexture};
 use mln_gfx::types::{
     ColorBlendEquationType, ColorBlendFactorType, CullFaceSideType, CullFaceWindingType, DepthFunctionType,
     StencilFunctionType, StencilOpType,
@@ -15,7 +16,7 @@ use mln_gfx::types::{
 use mln_util::hash::HashMap;
 use mln_vec_map::VecMap;
 
-use crate::shaders::shader_source::{AttributeInfo, ShaderSource, TextureInfo, prelude};
+use crate::shaders::shader_source::{ShaderSource, prelude};
 use crate::shaders::wgsl_preprocessor::{is_space, preprocess_wgsl};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -258,10 +259,9 @@ pub(crate) struct ShaderProgram {
     /// [`index_group`](Self::index_group)).
     index_group: Option<u32>,
     pipeline_layout: wgpu::PipelineLayout,
-    /// The shader locations of the per-vertex and per-instance inputs.
-    attributes: &'static [AttributeInfo],
-    instance_attributes: &'static [AttributeInfo],
-    textures: &'static [TextureInfo],
+    program: &'static Program,
+    /// Where the WGSL reads the program's attributes and textures.
+    source: &'static ShaderSource,
     bindings_per_group: Vec<Vec<BindingInfo>>,
     /// The bytes of each buffer the sources read (`buffer_sizes`).
     buffer_sizes: Vec<((u32, u32), u64)>,
@@ -287,7 +287,7 @@ fn constants(source: &str, pixel_ratio: f32) -> Vec<(&'static str, f64)> {
 }
 
 impl ShaderProgram {
-    /// The program `name` of `source`, from `vertex_source` and
+    /// The program `program` of `source`, from `vertex_source` and
     /// `fragment_source`, its WGSL preprocessed already.
     ///
     /// A `globalIndex` the sources declare in group 0 moves to a group of its
@@ -303,10 +303,11 @@ impl ShaderProgram {
         index_layout: &wgpu::BindGroupLayout,
         vertex_source: &str,
         fragment_source: &str,
-        name: &str,
-        source: &ShaderSource,
+        program: &'static Program,
+        source: &'static ShaderSource,
         pixel_ratio: f32,
     ) -> Result<Self, GpuError> {
+        let name = program.name;
         let index_group = index_group_of(&[vertex_source, fragment_source]);
         let (vertex_source, fragment_source) = match index_group {
             Some(group) => (move_global_index(vertex_source, group), move_global_index(fragment_source, group)),
@@ -339,7 +340,7 @@ impl ShaderProgram {
                 BindingType::Texture => false,
                 _ => continue,
             };
-            if texture_info_at(source.textures, info.binding, sampler).is_some_and(|texture| !texture.filterable) {
+            if texture_at(program, source, info.binding, sampler).is_some_and(|(_, texture)| !texture.filterable) {
                 info.type_ = if sampler { BindingType::NonFilteringSampler } else { BindingType::UnfilterableTexture };
             }
         }
@@ -360,9 +361,8 @@ impl ShaderProgram {
             bind_group_order: groups.order,
             index_group,
             pipeline_layout,
-            attributes: source.attributes,
-            instance_attributes: source.instance_attributes,
-            textures: source.textures,
+            program,
+            source,
             bindings_per_group: groups.bindings,
             buffer_sizes: buffer_sizes(&[vertex_source, fragment_source]),
             vertex_constants: constants(vertex_source, pixel_ratio),
@@ -415,21 +415,21 @@ impl ShaderProgram {
         &self.shader_name
     }
 
-    /// The lowest texture id whose sampler the shader declares at `binding`
-    /// if `sampler`, else whose texture it declares there: a texture's
-    /// sampler is at its location, and the texture there or at the next
-    /// binding.
+    /// The lowest slot of the program's textures whose sampler the shader
+    /// declares at `binding` if `sampler`, else whose texture it declares
+    /// there: a texture's sampler is at its binding, and the texture there
+    /// or at the next binding.
     pub(crate) fn texture_at(&self, binding: u32, sampler: bool) -> Option<usize> {
-        texture_info_at(self.textures, binding, sampler).map(|texture| texture.id)
+        texture_at(self.program, self.source, binding, sampler).map(|(slot, _)| slot)
     }
 
-    /// The shader location of the input `id` that steps by `step`.
-    fn location(&self, step: VertexStep, id: u32) -> Option<u32> {
-        let attributes = match step {
-            VertexStep::Vertex => self.attributes,
-            VertexStep::Instance => self.instance_attributes,
-        };
-        attributes.iter().find(|attribute| attribute.id == id as usize).map(|attribute| attribute.index as u32)
+    /// The shader location of the program's attribute at `location`, if it
+    /// steps by `step`.
+    fn location(&self, step: VertexStep, location: u32) -> Option<u32> {
+        match self.program.attribute_at(location as usize) {
+            Some((at, _)) if at == step => self.source.locations.get(location as usize).copied(),
+            _ => None,
+        }
     }
 
     /// The pipeline of this program with `state`, reading vertex buffers of
@@ -454,8 +454,8 @@ impl ShaderProgram {
                         let format = vertex_format(attribute.format).ok_or_else(|| {
                             GpuError::Unsupported(format!("vertex attribute format {:?}", attribute.format))
                         })?;
-                        let shader_location = self.location(layout.step, attribute.id).ok_or_else(|| {
-                            GpuError::Invalid(format!("{} has no attribute {}", self.name(), attribute.id))
+                        let shader_location = self.location(layout.step, attribute.location).ok_or_else(|| {
+                            GpuError::Invalid(format!("{} has no attribute at {}", self.name(), attribute.location))
                         })?;
                         Ok(wgpu::VertexAttribute { format, offset: u64::from(attribute.offset), shader_location })
                     })
@@ -655,17 +655,19 @@ impl BindingType {
     }
 }
 
-/// The texture of `textures` with the lowest id whose sampler is at
-/// `binding` if `sampler`, else whose texture is (see
-/// [`ShaderProgram::texture_at`]).
-fn texture_info_at(textures: &[TextureInfo], binding: u32, sampler: bool) -> Option<&TextureInfo> {
-    textures
-        .iter()
-        .filter(|texture| {
-            let location = texture.index as u32;
-            location == binding || (!sampler && location + 1 == binding)
-        })
-        .min_by_key(|texture| texture.id)
+/// The texture of `program`, and its slot, with the lowest slot whose
+/// sampler `source`'s WGSL declares at `binding` if `sampler`, else whose
+/// texture it declares there (see [`ShaderProgram::texture_at`]).
+fn texture_at(
+    program: &'static Program,
+    source: &ShaderSource,
+    binding: u32,
+    sampler: bool,
+) -> Option<(usize, &'static ProgramTexture)> {
+    program.textures.iter().zip(source.texture_bindings).enumerate().find_map(|(slot, (texture, &at))| {
+        let declared = at == binding || (!sampler && at.checked_add(1) == Some(binding));
+        (declared && !texture.is_unused()).then_some((slot, texture))
+    })
 }
 
 /// Adds the bindings of the `@group(N) @binding(M) var<...> name: type`
@@ -782,7 +784,7 @@ pub(crate) fn compile(
     device: &wgpu::Device,
     index_layout: &wgpu::BindGroupLayout,
     key: &ShaderKey,
-    source: &ShaderSource,
+    source: &'static ShaderSource,
 ) -> Result<ShaderProgram, GpuError> {
     // The common prelude goes through the preprocessor with the program, so
     // its `#ifdef`s see the defines.
@@ -798,7 +800,7 @@ pub(crate) fn compile(
         .and_then(|(_, value)| value.parse().ok())
         .unwrap_or(1.0);
 
-    ShaderProgram::new(device, index_layout, &vertex_source, &fragment_source, key.program().name, source, pixel_ratio)
+    ShaderProgram::new(device, index_layout, &vertex_source, &fragment_source, key.program(), source, pixel_ratio)
 }
 
 /// How the vendored sources declare `globalIndex`.

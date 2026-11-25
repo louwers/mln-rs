@@ -16,8 +16,8 @@ pub(crate) struct AtlasBinding {
     /// The textures of the tile's glyph and icon atlases, if it has
     /// atlases.
     atlases: Option<(Option<SharedTexture>, Option<SharedTexture>)>,
-    icon_texture_id: Option<u8>,
-    glyph_texture_id: Option<u8>,
+    icon_slot: Option<u8>,
+    glyph_slot: Option<u8>,
     is_text: bool,
     sdf_icons: bool,
     rotation_alignment: AlignmentType,
@@ -30,20 +30,20 @@ impl AtlasBinding {
     #[must_use]
     pub(crate) fn new(
         atlases: Option<TileAtlasTextures>,
-        icon_texture_id: Option<usize>,
-        glyph_texture_id: Option<usize>,
+        icon_slot: Option<usize>,
+        glyph_slot: Option<usize>,
         is_text: bool,
         sdf_icons: bool,
         rotation_alignment: AlignmentType,
         icon_scaled: bool,
         text_size_is_zoom_constant: bool,
     ) -> Self {
-        debug_assert_ne!(icon_texture_id, glyph_texture_id);
-        let texture_id = |id: Option<usize>| id.and_then(|id| u8::try_from(id).ok());
+        debug_assert_ne!(icon_slot, glyph_slot);
+        let slot = |slot: Option<usize>| slot.and_then(|slot| u8::try_from(slot).ok());
         AtlasBinding {
             atlases: atlases.map(|atlases| (atlases.glyph().cloned(), atlases.icon().cloned())),
-            icon_texture_id: texture_id(icon_texture_id),
-            glyph_texture_id: texture_id(glyph_texture_id),
+            icon_slot: slot(icon_slot),
+            glyph_slot: slot(glyph_slot),
             is_text,
             sdf_icons,
             rotation_alignment,
@@ -57,7 +57,7 @@ impl AtlasBinding {
     #[must_use]
     pub(crate) fn textures(&self, shader: &ShaderKey) -> Textures {
         let mut textures = Textures::default();
-        self.set_textures(self.samples_icon(shader), |id, texture| textures[id] = texture.cloned());
+        self.set_textures(self.samples_icon(shader), |slot, texture| textures[slot] = texture.cloned());
         textures
     }
 
@@ -72,35 +72,36 @@ impl AtlasBinding {
         } else {
             self.sdf_icons || parameters.camera_moving || self.icon_scaled || transformed
         };
-        if self.glyph_texture_id.is_some()
+        if self.glyph_slot.is_some()
             && let Some((glyph, icon)) = &self.atlases
         {
             set_samplers(parameters.context, glyph.as_ref(), icon.as_ref(), linear_filter_for_icons);
         }
         let samples_icon = self.samples_icon(objects.shader());
-        self.set_textures(samples_icon, |id, texture| objects.set_texture(id, texture));
+        self.set_textures(samples_icon, |slot, texture| objects.set_texture(slot, texture));
     }
 
     /// Sets the atlases' textures, those of a shader that samples the icon
-    /// texture or not, with `set(id, texture)`.
+    /// texture or not, with `set(slot, texture)`.
     fn set_textures(&self, samples_icon: bool, mut set: impl FnMut(usize, Option<&SharedTexture>)) {
-        let (Some(glyph_texture_id), Some((glyph, icon))) = (self.glyph_texture_id, &self.atlases) else {
+        let (Some(glyph_slot), Some((glyph, icon))) = (self.glyph_slot, &self.atlases) else {
             return;
         };
         let (glyph, icon) = (glyph.as_ref(), icon.as_ref());
-        let glyph_texture_id = usize::from(glyph_texture_id);
-        if let Some(icon_texture_id) = self.icon_texture_id.map(usize::from).filter(|_| samples_icon) {
-            debug_assert_ne!(glyph_texture_id, icon_texture_id);
-            set(glyph_texture_id, glyph);
-            set(icon_texture_id, icon);
+        let glyph_slot = usize::from(glyph_slot);
+        if let Some(icon_slot) = self.icon_slot.map(usize::from).filter(|_| samples_icon) {
+            debug_assert_ne!(glyph_slot, icon_slot);
+            set(glyph_slot, glyph);
+            set(icon_slot, icon);
         } else {
-            set(glyph_texture_id, if self.is_text { glyph } else { icon });
+            set(glyph_slot, if self.is_text { glyph } else { icon });
         }
     }
 
     /// Whether `shader` samples the icon texture.
     fn samples_icon(&self, shader: &ShaderKey) -> bool {
-        self.icon_texture_id.is_some_and(|id| shader.program().textures.contains(&usize::from(id)))
+        let textures = shader.program().textures;
+        self.icon_slot.is_some_and(|slot| textures.get(usize::from(slot)).is_some_and(|texture| !texture.is_unused()))
     }
 }
 

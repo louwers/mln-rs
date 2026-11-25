@@ -17,9 +17,8 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
-    ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE, ID_COLOR_RELIEF_DRAWABLE_UBO, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE,
-    ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, ID_COLOR_RELIEF_IMAGE_TEXTURE, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE,
-    ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_TILE_PROPS_UBO, ID_PROJECTION_UBO,
+    ID_COLOR_RELIEF_DRAWABLE_UBO, ID_COLOR_RELIEF_EVALUATED_PROPS_UBO, ID_COLOR_RELIEF_TILE_PROPS_UBO,
+    ID_PROJECTION_UBO,
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
@@ -62,6 +61,11 @@ use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
 use crate::tile_matrix::to_projection_ubo;
+
+/// The slots of the programs' textures that the draws bind.
+const COLOR_STOPS_SLOT: usize = programs::COLOR_RELIEF.texture_slot("color_stops");
+const ELEVATION_STOPS_SLOT: usize = programs::COLOR_RELIEF.texture_slot("elevation_stops");
+const IMAGE_SLOT: usize = programs::COLOR_RELIEF.texture_slot("image");
 
 /// What the layer keeps of a tile: the draw that colors its bucket's DEM,
 /// with the generation of the bucket's geometry and the DEM's properties it
@@ -270,7 +274,7 @@ fn color_relief_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeA
     let mut attrs = VertexAttributeArray::new();
     let stride = size_of::<RasterLayoutVertex>() as u32;
     attrs.set_shared(
-        ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE,
+        "pos",
         SharedAttribute::new(
             vertices.clone(),
             AttributeDataType::Short2,
@@ -279,7 +283,7 @@ fn color_relief_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeA
         ),
     );
     attrs.set_shared(
-        ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE,
+        "texture_pos",
         SharedAttribute::new(
             vertices.clone(),
             AttributeDataType::Short2,
@@ -471,9 +475,9 @@ impl TypedLayer for RenderColorReliefLayer {
                     texture.set_sampler(dem_sampler);
                 }
                 let textures = [
-                    (ID_COLOR_RELIEF_IMAGE_TEXTURE, &*dem_texture),
-                    (ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE, elevation_stops_texture),
-                    (ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE, color_stops_texture),
+                    (IMAGE_SLOT, &*dem_texture),
+                    (ELEVATION_STOPS_SLOT, elevation_stops_texture),
+                    (COLOR_STOPS_SLOT, color_stops_texture),
                 ];
 
                 if entry.value.as_ref().is_some_and(|cached| cached.geometry_generation != geometry_generation) {
@@ -483,8 +487,8 @@ impl TypedLayer for RenderColorReliefLayer {
                 if let Some(cached) = entry.value.as_mut() {
                     // The DEM and the ramps' textures change with the
                     // bucket's generation and the ramps.
-                    for (id, texture) in textures {
-                        cached.draw.objects.set_texture(id, Some(texture));
+                    for (slot, texture) in textures {
+                        cached.draw.objects.set_texture(slot, Some(texture));
                     }
                 } else {
                     // The tile's geometry: the globe's mesh of its mask, the
@@ -527,8 +531,8 @@ impl TypedLayer for RenderColorReliefLayer {
                         instances: None,
                     };
                     let mut draw_textures = Textures::default();
-                    for (id, texture) in textures {
-                        draw_textures[id] = Some(texture.clone());
+                    for (slot, texture) in textures {
+                        draw_textures[slot] = Some(texture.clone());
                     }
                     let objects = DrawObjects::new(
                         color_relief_shader.clone(),

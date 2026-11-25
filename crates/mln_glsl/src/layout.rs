@@ -160,17 +160,17 @@ pub const fn drawable_vertex_binding(id: usize) -> Option<u32> {
     }
 }
 
-/// The binding in the image set of the texture at `index`
-/// (`TextureInfo::index`).
+/// The binding in the image set of the program's texture at `slot`.
 #[must_use]
-pub const fn image_texture_binding(index: usize) -> u32 {
-    index as u32
+pub const fn image_texture_binding(slot: usize) -> u32 {
+    slot as u32
 }
 
-/// The binding in the image set of the sampler of the texture at `index`.
+/// The binding in the image set of the sampler of the program's texture at
+/// `slot`.
 #[must_use]
-pub const fn image_sampler_binding(index: usize) -> u32 {
-    (IMAGE_SAMPLER_START + index) as u32
+pub const fn image_sampler_binding(slot: usize) -> u32 {
+    (IMAGE_SAMPLER_START + slot) as u32
 }
 
 /// The size of the push constants of the general pipeline layout: the

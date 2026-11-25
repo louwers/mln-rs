@@ -31,12 +31,12 @@ use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::owned::{Held, Owned};
 use crate::gfx::store::SharedTexture;
 use crate::gfx::uniform_buffer::UniformBufferArray;
-use crate::gfx::upload::{self, AttributeBindingArray};
+use crate::gfx::upload::{self, AttributeBindingArray, AttributeSlots};
 use crate::gfx::vertex_attribute::VertexAttributeArray;
 use crate::gfx::vertices::SharedVertices;
 use crate::paint_parameters::{DrawTarget, PaintParameters};
 
-/// The textures a draw binds, by texture id.
+/// The textures a draw binds, by the slots of its program's textures.
 pub(crate) type Textures = [Option<SharedTexture>; MAX_TEXTURE_COUNT_PER_SHADER];
 
 /// The most vertex buffers a draw binds, WebGPU's default limit.
@@ -45,7 +45,7 @@ const MAX_VERTEX_BUFFERS: usize = 8;
 /// What a draw draws: its vertices, and the primitives its segments draw of
 /// them.
 pub(crate) struct DrawGeometry {
-    /// The vertex attributes, by attribute id.
+    /// The vertex attributes, by the names of the program's attributes.
     pub(crate) vertices: VertexAttributeArray,
     /// How many vertices the attributes hold, which an attribute the
     /// shader reads and the draw lacks gets default values for.
@@ -59,11 +59,11 @@ pub(crate) struct DrawGeometry {
     pub(crate) instances: Option<VertexAttributeArray>,
 }
 
-/// `count` vertices of `data_type` in `data` as the vertex attribute `id`,
+/// `count` vertices of `data_type` in `data` as the vertex attribute `name`,
 /// none where there are no vertices.
 #[must_use]
 pub(crate) fn raw_vertices(
-    id: usize,
+    name: &'static str,
     data: Vec<u8>,
     count: usize,
     data_type: AttributeDataType,
@@ -72,7 +72,7 @@ pub(crate) fn raw_vertices(
     if count == 0 || data_type == AttributeDataType::Invalid || data.is_empty() {
         return attributes;
     }
-    attributes.set_own(id, data_type, data);
+    attributes.set_own(name, data_type, data);
     attributes
 }
 
@@ -84,7 +84,7 @@ const MAX_ENTRIES: usize = MAX_UBO_COUNT_PER_SHADER + MAX_STORAGE_VERTICES + MAX
 
 /// The entries of bindings, on the stack: at most a buffer at each uniform
 /// buffer id, one of each of the vertices read as storage buffers, and a
-/// texture at each texture id.
+/// texture at each texture slot.
 pub(crate) struct Entries {
     entries: [BindGroupEntry; MAX_ENTRIES],
     len: usize,
@@ -92,7 +92,7 @@ pub(crate) struct Entries {
 
 impl Entries {
     pub(crate) fn new() -> Entries {
-        let none = BindGroupEntry::Texture { id: 0, texture: TextureId::default(), sampler: SamplerId::default() };
+        let none = BindGroupEntry::Texture { slot: 0, texture: TextureId::default(), sampler: SamplerId::default() };
         Entries { entries: [none; MAX_ENTRIES], len: 0 }
     }
 
@@ -118,7 +118,7 @@ struct VertexSlot {
 /// What a draw's bindings were made of: the epochs of the global uniform
 /// buffers, those of its frame's draws and its own, how often the buffers
 /// of the vertices it reads as storage buffers changed, and the texture and
-/// sampler it bound at each texture id.
+/// sampler it bound at each texture slot.
 #[derive(Clone, Copy, PartialEq)]
 struct BindingsStamp {
     global: u64,
@@ -153,7 +153,11 @@ pub(crate) struct DrawObjects {
     /// Whether the instance attributes changed since the last upload, as
     /// `vertex_attributes_changed` says of the vertex attributes.
     instance_attributes_changed: bool,
-    /// The textures it binds, by texture id.
+    /// Where the program's vertex and instance attributes are in the
+    /// attribute arrays.
+    vertex_slots_of: AttributeSlots,
+    instance_slots_of: AttributeSlots,
+    /// The textures it binds, by slot.
     textures: Textures,
     /// The draw's own uniform and storage buffers, by id, which win over
     /// its layer's and the frame's.
@@ -209,6 +213,8 @@ impl DrawObjects {
             instance_attributes: instances,
             vertex_attributes_changed: true,
             instance_attributes_changed: true,
+            vertex_slots_of: AttributeSlots::default(),
+            instance_slots_of: AttributeSlots::default(),
             textures,
             uniform_buffers: UniformBufferArray::new(),
             storage_vertices: Vec::new(),
@@ -249,13 +255,15 @@ impl DrawObjects {
         // An attribute binds again where its array changed, or where the
         // upload writes what it reads, which may be new. A failed upload
         // leaves the attributes changed, so the next binds them again.
-        if self.vertex_attributes_changed || upload::needs_upload(context, program.attributes, &self.vertex_attributes)
+        if self.vertex_attributes_changed
+            || upload::needs_upload(context, &self.vertex_attributes, &self.vertex_slots_of)
         {
             let updated = upload::update_attribute_bindings(
                 gpu,
                 context,
                 program.attributes,
                 &mut self.vertex_attributes,
+                &mut self.vertex_slots_of,
                 self.vertex_count,
                 &mut self.attribute_bindings,
             );
@@ -270,7 +278,7 @@ impl DrawObjects {
         if let Some(attrs) = self
             .instance_attributes
             .as_mut()
-            .filter(|attrs| changed || upload::needs_upload(context, program.instance_attributes, attrs))
+            .filter(|attrs| changed || upload::needs_upload(context, attrs, &self.instance_slots_of))
         {
             let instance_count = attrs.min_count();
             let updated = upload::update_attribute_bindings(
@@ -278,6 +286,7 @@ impl DrawObjects {
                 context,
                 program.instance_attributes,
                 attrs,
+                &mut self.instance_slots_of,
                 instance_count,
                 &mut self.instance_bindings,
             );
@@ -460,9 +469,9 @@ impl DrawObjects {
         frame: &UniformBufferArray,
     ) -> Result<BindingsId, GpuError> {
         let mut textures = [None; MAX_TEXTURE_COUNT_PER_SHADER];
-        for &id in self.shader.program().textures {
-            if let Some(texture) = self.textures.get(id).and_then(Option::as_ref) {
-                textures[id] = Some(context.texture_binding(gpu, texture)?);
+        for slot in sampled_slots(self.shader.program()) {
+            if let Some(texture) = self.textures.get(slot).and_then(Option::as_ref) {
+                textures[slot] = Some(context.texture_binding(gpu, texture)?);
             }
         }
         let global = context.global_uniform_buffers();
@@ -501,15 +510,14 @@ impl DrawObjects {
                 held.push(vertices.held());
             }
         }
-        for (id, binding) in textures.iter().enumerate() {
+        for (slot, binding) in textures.iter().enumerate() {
             if let Some((texture, sampler)) = *binding {
-                entries.push(BindGroupEntry::Texture { id: id as u32, texture, sampler });
+                entries.push(BindGroupEntry::Texture { slot: slot as u32, texture, sampler });
             }
         }
-        let textures = self.shader.program().textures.iter();
         held.extend(
-            textures
-                .filter_map(|&id| context.gpu_texture(self.textures.get(id)?.as_ref()?).cloned().map(Held::Texture)),
+            sampled_slots(self.shader.program())
+                .filter_map(|slot| context.gpu_texture(self.textures.get(slot)?.as_ref()?).cloned().map(Held::Texture)),
         );
         let bindings = gpu.create_bindings(&BindingsDesc {
             label: self.shader.program().name,
@@ -594,17 +602,18 @@ impl DrawObjects {
         *self.vertex_attributes_mut() = copy_shared_attributes(&other.vertex_attributes);
     }
 
-    /// The texture it binds as `id`.
+    /// The texture it binds at its program's texture slot `slot`.
     #[must_use]
-    pub(crate) fn texture(&self, id: usize) -> Option<&SharedTexture> {
-        self.textures[id].as_ref()
+    pub(crate) fn texture(&self, slot: usize) -> Option<&SharedTexture> {
+        self.textures[slot].as_ref()
     }
 
-    /// Makes `texture` the one it binds as `id`.
-    pub(crate) fn set_texture(&mut self, id: usize, texture: Option<&SharedTexture>) {
-        let slot = &mut self.textures[id];
-        if slot.as_ref() != texture {
-            *slot = texture.cloned();
+    /// Makes `texture` the one it binds at its program's texture slot
+    /// `slot`.
+    pub(crate) fn set_texture(&mut self, slot: usize, texture: Option<&SharedTexture>) {
+        let bound = &mut self.textures[slot];
+        if bound.as_ref() != texture {
+            *bound = texture.cloned();
         }
     }
 
@@ -653,16 +662,22 @@ impl DrawObjects {
     }
 }
 
+/// The slots of the textures `program` samples.
+fn sampled_slots(program: &Program) -> impl Iterator<Item = usize> + use<> {
+    let textures = program.textures;
+    (0..textures.len()).filter(move |&slot| !textures[slot].is_unused())
+}
+
 /// A copy of `attrs`, all of whose attributes read vertices of the
 /// context's store: the copy reads the same vertices, so draws of either
 /// bind the same buffers.
 #[must_use]
 pub(crate) fn copy_shared_attributes(attrs: &VertexAttributeArray) -> VertexAttributeArray {
     let mut copy = VertexAttributeArray::new();
-    for (id, attr) in attrs.iter() {
+    for (name, attr) in attrs.iter() {
         debug_assert!(attr.shared().is_some(), "a copied attribute has values of its own");
         if let Some(shared) = attr.shared() {
-            copy.set_shared(id, shared.clone());
+            copy.set_shared(name, shared.clone());
         }
     }
     copy
@@ -692,16 +707,15 @@ fn vertex_slots(
 ) -> Vec<VertexSlot> {
     let mut slots: Vec<VertexSlot> = Vec::new();
     for (bindings, step) in [(attributes, VertexStep::Vertex), (instances, VertexStep::Instance)] {
-        for (index, binding) in bindings.iter().enumerate() {
+        let (count, first) = match step {
+            VertexStep::Vertex => (program.attributes.len(), 0),
+            VertexStep::Instance => (program.instance_attributes.len(), program.attributes.len()),
+        };
+        for (index, binding) in bindings.iter().enumerate().take(count) {
             let buffer = &binding.buffer;
-            let attributes = match step {
-                VertexStep::Vertex => program.attributes,
-                VertexStep::Instance => program.instance_attributes,
-            };
-            let Some(&(id, _)) = attributes.get(index) else { continue };
             let offset = u64::from(binding.vertex_offset) * u64::from(binding.vertex_stride);
             let attribute = GpuVertexAttribute {
-                id: id as u32,
+                location: (first + index) as u32,
                 format: binding.attribute.data_type,
                 offset: binding.attribute.offset,
             };

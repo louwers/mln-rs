@@ -13,10 +13,7 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_PROJECTION_UBO, ID_RASTER_DRAWABLE_UBO, ID_RASTER_EVALUATED_PROPS_UBO, ID_RASTER_IMAGE0_TEXTURE,
-    ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
-};
+use mln_gfx::shaders::shader_defines::{ID_PROJECTION_UBO, ID_RASTER_DRAWABLE_UBO, ID_RASTER_EVALUATED_PROPS_UBO};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -54,6 +51,10 @@ use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
 use crate::sources::render_image_source::{ImageQuad, ImageSourceRenderData};
 use crate::tile_matrix::{projection_data, to_projection_ubo};
+
+/// The slots of the programs' textures that the draws bind.
+const IMAGE0_SLOT: usize = programs::RASTER.texture_slot("image0");
+const IMAGE1_SLOT: usize = programs::RASTER.texture_slot("image1");
 
 /// What the layer keeps of a tile: its draw, and the generation of the
 /// bucket's geometry it was built of.
@@ -387,8 +388,8 @@ fn new_objects(
     texture: Option<&SharedTexture>,
 ) -> DrawObjects {
     let mut textures = Textures::default();
-    textures[ID_RASTER_IMAGE0_TEXTURE] = texture.cloned();
-    textures[ID_RASTER_IMAGE1_TEXTURE] = texture.cloned();
+    textures[IMAGE0_SLOT] = texture.cloned();
+    textures[IMAGE1_SLOT] = texture.cloned();
     DrawObjects::new(shader.clone(), color_mode, CullFaceMode::disabled(), geometry, textures)
 }
 
@@ -415,7 +416,7 @@ fn raster_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
     let mut attrs = VertexAttributeArray::new();
     let stride = size_of::<RasterLayoutVertex>() as u32;
     attrs.set_shared(
-        ID_RASTER_POS_VERTEX_ATTRIBUTE,
+        "pos",
         SharedAttribute::new(
             vertices.clone(),
             AttributeDataType::Short2,
@@ -424,7 +425,7 @@ fn raster_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
         ),
     );
     attrs.set_shared(
-        ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
+        "texture_pos",
         SharedAttribute::new(
             vertices.clone(),
             AttributeDataType::Short2,

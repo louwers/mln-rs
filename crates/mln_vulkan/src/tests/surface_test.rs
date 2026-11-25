@@ -206,11 +206,11 @@ impl Scene {
         let parameters = ProgramParameters::new(1.0, false);
         let key = program.variant_key(&parameters, [], ProjectionVariant::Mercator);
         let shader = gpu.create_shader(&key).expect("the shader");
-        let (attribute, _) = program.attributes[0];
+        let location = program.location("pos") as u32;
         let layouts = [VertexBufferLayout {
             stride: 4,
             step: VertexStep::Vertex,
-            attributes: vec![VertexAttribute { id: attribute as u32, format: AttributeDataType::Short2, offset: 0 }],
+            attributes: vec![VertexAttribute { location, format: AttributeDataType::Short2, offset: 0 }],
         }];
         let tile_vertices: [[i16; 2]; 4] = [[0, 0], [EXTENT, 0], [0, EXTENT], [EXTENT, EXTENT]];
         let tile_indexes: [u16; 6] = [0, 1, 2, 1, 2, 3];

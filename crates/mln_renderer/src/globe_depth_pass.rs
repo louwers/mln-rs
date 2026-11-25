@@ -11,7 +11,7 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO};
+use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_map_types::View;
 use mln_util::range::Range;
@@ -96,12 +96,7 @@ impl GlobeDepthPass {
                 let mesh = self.meshes.entry(key).or_insert_with(|| {
                     raw_globe_tile_mesh(canonical, true, SubdivisionGranularitySetting::globe().tile)
                 });
-                let vertices = raw_vertices(
-                    ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE,
-                    mesh.vertices.clone(),
-                    mesh.vertex_count,
-                    AttributeDataType::Short2,
-                );
+                let vertices = raw_vertices("pos", mesh.vertices.clone(), mesh.vertex_count, AttributeDataType::Short2);
                 let geometry = DrawGeometry {
                     vertices,
                     vertex_count: mesh.vertex_count,

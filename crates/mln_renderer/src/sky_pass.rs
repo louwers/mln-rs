@@ -7,9 +7,7 @@ use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, ID_ATMOSPHERE_PROPS_UBO, ID_SKY_POS_VERTEX_ATTRIBUTE, ID_SKY_PROPS_UBO,
-};
+use mln_gfx::shaders::shader_defines::{ID_ATMOSPHERE_PROPS_UBO, ID_SKY_PROPS_UBO};
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_map_types::View;
@@ -31,7 +29,7 @@ use crate::tile_matrix::bind_no_projection;
 
 /// A draw of `shader`, which reads the view's corners as the vertex attribute
 /// `vertex_attribute`, in the translucent pass at `depth`.
-fn fullscreen_draw(shader: ShaderKey, vertex_attribute: usize, depth: DrawDepth) -> SingleDraw {
+fn fullscreen_draw(shader: ShaderKey, vertex_attribute: &'static str, depth: DrawDepth) -> SingleDraw {
     let corners: [[i16; 2]; 4] = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
     let vertices = bytemuck::cast_slice(&corners).to_vec();
     let geometry = DrawGeometry {
@@ -110,7 +108,7 @@ impl SkyPass {
             let sky = self.sky.get_or_insert_with(|| {
                 let shader = context.shader_key(&programs::SKY, Uniforms::default(), ProjectionVariant::Mercator);
                 let depth = DrawDepth::Layer { sub_layer: 0, mask: DepthMaskType::ReadWrite };
-                fullscreen_draw(shader, ID_SKY_POS_VERTEX_ATTRIBUTE, depth)
+                fullscreen_draw(shader, "pos", depth)
             });
             let horizon_distance = state.mercator_horizon() * f64::from(pixel_ratio);
             let roll = state.roll();
@@ -143,11 +141,7 @@ impl SkyPass {
 
         let atmosphere = self.atmosphere.get_or_insert_with(|| {
             let shader = context.shader_key(&programs::ATMOSPHERE, Uniforms::default(), ProjectionVariant::Globe);
-            fullscreen_draw(
-                shader,
-                ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE,
-                DrawDepth::Volume { mask: DepthMaskType::ReadOnly },
-            )
+            fullscreen_draw(shader, "pos", DrawDepth::Volume { mask: DepthMaskType::ReadOnly })
         });
 
         let camera = state.globe_camera_position();

@@ -544,14 +544,14 @@ fn shader_bindings(shader: &ShaderProgram) -> Result<Vec<ShaderBinding>, GpuErro
                 | BindingType::Texture
                 | BindingType::UnfilterableTexture => {
                     let sampler = matches!(info.type_, BindingType::Sampler | BindingType::NonFilteringSampler);
-                    let id = shader.texture_at(info.binding, sampler).ok_or_else(|| {
+                    let slot = shader.texture_at(info.binding, sampler).ok_or_else(|| {
                         GpuError::Invalid(format!(
-                            "{} reads binding {} with no texture id",
+                            "{} reads binding {}, which is no texture of its program",
                             shader.name(),
                             info.binding
                         ))
                     })?;
-                    ShaderBinding::Texture { id: id as u32 }
+                    ShaderBinding::Texture { slot: slot as u32 }
                 }
             };
             if !bindings.contains(&binding) {
@@ -900,12 +900,12 @@ impl Gpu for WebGpu {
                     | BindingType::Texture
                     | BindingType::UnfilterableTexture => {
                         let sampler = matches!(info.type_, BindingType::Sampler | BindingType::NonFilteringSampler);
-                        let texture_id = program.texture_at(info.binding, sampler).ok_or_else(missing)? as u32;
+                        let texture_slot = program.texture_at(info.binding, sampler).ok_or_else(missing)? as u32;
                         let (texture, texture_sampler) = desc
                             .entries
                             .iter()
                             .find_map(|entry| match *entry {
-                                BindGroupEntry::Texture { id, texture, sampler } if id == texture_id => {
+                                BindGroupEntry::Texture { slot, texture, sampler } if slot == texture_slot => {
                                     Some((texture, sampler))
                                 }
                                 _ => None,

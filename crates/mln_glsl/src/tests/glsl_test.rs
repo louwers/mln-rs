@@ -4,7 +4,7 @@
 //! `PROJECTION_GLOBE` for the globe variant, then the stage's prelude, the
 //! shader's prelude and the stage's source. Also checks that the buffers,
 //! textures, samplers and vertex inputs the GLSL declares are the ones the
-//! descriptor set layouts and the attribute and texture tables describe, that
+//! descriptor set layouts and the program's declaration describe, that
 //! the buffers have the sizes of what the renderer binds there, and that the
 //! stages of a shader agree on what passes between them, in both projection
 //! variants.
@@ -31,8 +31,8 @@ use mln_gfx::shaders::hillshade_prepare_layer_ubo::{HillshadePrepareDrawableUBO,
 use mln_gfx::shaders::layer_composite_ubo::LayerCompositeUBO;
 use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
 use mln_gfx::shaders::line_layer_ubo::{LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineTilePropsUnionUBO};
-use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::programs::{self, STANDING};
+use mln_gfx::shaders::program::{Attribute, Program};
+use mln_gfx::shaders::programs::STANDING;
 use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
@@ -50,7 +50,7 @@ use crate::layout::{
     image_texture_binding, layer_storage_binding, layer_uniform_binding,
 };
 use crate::variants::variants;
-use crate::{AttributeInfo, BUILT_INS, ShaderSource, Stage, sources};
+use crate::{BUILT_INS, ShaderSource, Stage, sources};
 
 fn programs() -> impl Iterator<Item = (&'static Program, &'static ShaderSource)> {
     BUILT_INS.iter().copied()
@@ -394,7 +394,7 @@ fn check_layout(set: u32, binding: u32, resource: Resource) -> Result<(), String
 
 // Every resource a stage declares has a binding of its kind in the
 // descriptor set layouts, the global set holds the paint parameters alone,
-// the stages declare the textures of the texture table between them, a
+// the stages declare the program's textures between them, a
 // fragment stage each of its own with its sampler and a vertex stage none,
 // since it fetches texels, and the push constants are the general pipeline
 // layout's index or, for the clipping mask, its matrices.
@@ -407,7 +407,13 @@ fn resources_are_in_the_descriptor_set_layouts() {
 
     let mut failures = Vec::new();
     for (program, source) in programs() {
-        let table: BTreeSet<u32> = source.textures.iter().map(|texture| image_texture_binding(texture.index)).collect();
+        let table: BTreeSet<u32> = program
+            .textures
+            .iter()
+            .enumerate()
+            .filter(|(_, texture)| !texture.is_unused())
+            .map(|(slot, _)| image_texture_binding(slot))
+            .collect();
         for variant in variants(program, false) {
             let mut declared = BTreeSet::new();
             for stage in STAGES {
@@ -460,11 +466,9 @@ fn resources_are_in_the_descriptor_set_layouts() {
                 }
             }
             // A variant that doesn't stand on terrain reads none of the
-            // ground's depth, which the symbols read in a slot of their own.
-            let symbols = [&programs::SYMBOL_ICON, &programs::SYMBOL_SDF, &programs::SYMBOL_TEXT_AND_ICON];
-            let depth =
-                if symbols.contains(&program) { ID_SYMBOL_GROUND_DEPTH_TEXTURE } else { ID_GROUND_DEPTH_TEXTURE };
-            let ground = [depth].map(image_texture_binding);
+            // ground's depth.
+            let depth = program.textures.iter().position(|texture| texture.name == "ground_depth");
+            let ground: Vec<u32> = depth.into_iter().map(image_texture_binding).collect();
             let expected: BTreeSet<u32> = if variant.projection.stands() || !STANDING.contains(&program) {
                 table.clone()
             } else {
@@ -597,61 +601,52 @@ fn stage_outputs(module: &Module) -> BTreeMap<u32, Varying> {
     outputs
 }
 
-/// The vertex and instance attributes of a table.
-fn all_attributes(source: &ShaderSource) -> impl Iterator<Item = &AttributeInfo> {
-    source.attributes.iter().chain(source.instance_attributes)
-}
-
-/// The attributes a table has that the GLSL doesn't read, by shader and
-/// index: the color relief's texture position, which its vertex stage works
-/// out from the position.
+/// The attributes a program has that its GLSL doesn't read, by program and
+/// location: the color relief's texture position, which its vertex stage
+/// works out from the position.
 const UNREAD_ATTRIBUTES: &[(&str, usize)] = &[("ColorReliefShader", 1)];
 
-/// The attributes only the variants that stand on terrain read, by shader
-/// and attribute id: the heights of the ground under their points.
-const STANDING_ATTRIBUTES: &[(&str, usize)] = &[
-    ("CircleShader", ID_CIRCLE_GROUND_HEIGHT_VERTEX_ATTRIBUTE),
-    ("HeatmapShader", ID_HEATMAP_GROUND_HEIGHT_VERTEX_ATTRIBUTE),
-    ("FillExtrusionShader", ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
-    ("FillExtrusionInstancedShader", ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
-    ("FillExtrusionWallShader", ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
-    ("FillExtrusionPatternShader", ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
-    ("FillExtrusionPatternInstancedShader", ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
-    ("FillExtrusionPatternWallShader", ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
-];
+/// The attribute only the variants that stand on terrain read: the height of
+/// the ground under their points.
+const STANDING_ATTRIBUTE: &str = "ground_height";
 
-// The inputs of a vertex stage are the vertex and instance attributes of the
-// shader's tables, at the locations of their indices and in the types that
-// read their formats. With a property as a uniform, the stage reads a subset
-// of them.
+// The inputs of a vertex stage are the program's vertex and instance
+// attributes, at their locations (`ShaderSource::location`) and in the types
+// that read their formats, or, for a property's attribute, which may come as
+// one value instead of two, in types of as many components or more. With a
+// property as a uniform, the stage reads a subset of them.
 #[test]
-fn vertex_inputs_are_the_attribute_tables() {
+fn vertex_inputs_are_the_programs_attributes() {
     let mut failures = Vec::new();
     for (program, source) in programs() {
-        let indices: BTreeSet<usize> = all_attributes(source).map(|attr| attr.index).collect();
-        assert_eq!(indices.len(), all_attributes(source).count(), "{}: attribute indices repeat", program.name);
+        let reads = |attribute: &Attribute, (kind, components): (ScalarKind, u32)| {
+            let (declared_kind, declared) = input_type(attribute.format);
+            let property = program.properties.iter().any(|property| property.name == attribute.name);
+            declared_kind == kind && (declared == components || property && declared < components)
+        };
+        let locations: BTreeSet<u32> = program.locations().map(|(location, ..)| source.location(location)).collect();
+        assert_eq!(locations.len(), program.locations().count(), "{}: attribute locations repeat", program.name);
         for variant in variants(program, true) {
-            let unread = |attr: &&AttributeInfo| {
-                UNREAD_ATTRIBUTES.contains(&(program.name, attr.index))
-                    || (!variant.projection.stands() && STANDING_ATTRIBUTES.contains(&(program.name, attr.id)))
+            let unread = |location: usize, attribute: &Attribute| {
+                UNREAD_ATTRIBUTES.contains(&(program.name, location))
+                    || (!variant.projection.stands() && attribute.name == STANDING_ATTRIBUTE)
             };
-            let table: BTreeMap<u32, (ScalarKind, u32)> = all_attributes(source)
-                .filter(|attr| !unread(attr))
-                .map(|attr| (attr.index as u32, input_type(attr.data_type)))
+            let table: BTreeMap<u32, &Attribute> = program
+                .locations()
+                .filter(|&(location, _, attribute)| !unread(location, attribute))
+                .map(|(location, _, attribute)| (source.location(location), attribute))
                 .collect();
             let inputs: BTreeMap<u32, (ScalarKind, u32)> =
                 stage_inputs(&module(program, source, Stage::Vertex, &variant.defines))
                     .into_iter()
                     .map(|(location, (kind, components, _))| (location, (kind, components)))
                     .collect();
-            let matches = if variant.per_vertex {
-                inputs == table
-            } else {
-                inputs.iter().all(|(location, input)| table.get(location) == Some(input))
-            };
+            let all = !variant.per_vertex || inputs.keys().eq(table.keys());
+            let matches = all
+                && inputs.iter().all(|(location, &input)| table.get(location).is_some_and(|attr| reads(attr, input)));
             if !matches {
                 failures
-                    .push(format!("{} ({}): inputs {inputs:?}, the table has {table:?}", program.name, variant.name));
+                    .push(format!("{} ({}): inputs {inputs:?}, the program has {table:?}", program.name, variant.name));
             }
         }
     }
@@ -663,21 +658,18 @@ fn vertex_inputs_are_the_attribute_tables() {
 #[test]
 fn a_walls_next_outline_vertex_has_the_formats_of_its_outline_vertex() {
     let instanced: Vec<_> = programs()
-        .filter(|(program, source)| program.name.starts_with("FillExtrusion") && !source.instance_attributes.is_empty())
+        .filter(|(program, _)| program.name.starts_with("FillExtrusion") && !program.instance_attributes.is_empty())
         .collect();
     assert_eq!(instanced.len(), 2);
-    for (program, source) in instanced {
-        let format = |id: usize| {
-            let mut found = source.instance_attributes.iter().filter(|attr| attr.id == id);
-            let attr = found.next().unwrap_or_else(|| panic!("{}: no instance attribute {id}", program.name));
+    for (program, _) in instanced {
+        let format = |name: &str| {
+            let mut found = program.instance_attributes.iter().filter(|attr| attr.name == name);
+            let attr = found.next().unwrap_or_else(|| panic!("{}: no instance attribute {name}", program.name));
             assert!(found.next().is_none());
-            attr.data_type
+            attr.format
         };
-        for (id, next_id) in [
-            (ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
-            (ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
-        ] {
-            assert_eq!(format(id), format(next_id), "{}", program.name);
+        for (name, next) in [("outline_pos", "next_outline_pos"), ("decimals_ed", "next_decimals_ed")] {
+            assert_eq!(format(name), format(next), "{}", program.name);
         }
     }
 }
@@ -765,14 +757,18 @@ fn bindings_follow_from_the_packed_ids() {
     assert_eq!(image_sampler_binding(0), 3);
 }
 
-// No table has more attributes and textures than a shader can have. Only
-// the fill extrusion walls and the instanced fill outlines have instance
+// No program has more attributes and textures than a shader can have, and a
+// GLSL that reads its attributes at locations of its own has one for each.
+// Only the fill extrusion walls and the instanced fill outlines have instance
 // attributes.
 #[test]
-fn the_tables_fit_a_shader() {
+fn the_programs_fit_a_shader() {
     for (program, source) in programs() {
-        assert!(all_attributes(source).count() <= MAX_ATTRIBUTE_COUNT_PER_SHADER, "{}", program.name);
-        assert!(source.textures.len() <= MAX_TEXTURE_COUNT_PER_SHADER, "{}", program.name);
+        assert!(program.locations().count() <= MAX_ATTRIBUTE_COUNT_PER_SHADER, "{}", program.name);
+        if let Some(locations) = source.locations {
+            assert_eq!(locations.len(), program.locations().count(), "{}", program.name);
+        }
+        assert!(program.textures.len() <= IMAGE_TEXTURE_COUNT, "{}", program.name);
         let instanced = matches!(
             program.name,
             "FillExtrusionInstancedShader"
@@ -780,14 +776,28 @@ fn the_tables_fit_a_shader() {
                 | "FillOutlineInstancedShader"
                 | "FillOutlinePatternInstancedShader"
         );
-        assert_eq!(!source.instance_attributes.is_empty(), instanced, "{}", program.name);
-        let ids: BTreeSet<usize> = source.attributes.iter().map(|attr| attr.id).collect();
-        assert_eq!(ids.len(), source.attributes.len(), "{}: attribute ids repeat", program.name);
-        let ids: BTreeSet<usize> = source.instance_attributes.iter().map(|attr| attr.id).collect();
-        assert_eq!(ids.len(), source.instance_attributes.len(), "{}: instance attribute ids repeat", program.name);
-        let textures: BTreeSet<usize> = source.textures.iter().map(|texture| texture.index).collect();
-        assert_eq!(textures.len(), source.textures.len(), "{}: texture indices repeat", program.name);
-        assert!(textures.iter().all(|&index| index < IMAGE_TEXTURE_COUNT), "{}", program.name);
+        assert_eq!(!program.instance_attributes.is_empty(), instanced, "{}", program.name);
+    }
+}
+
+// A program's attributes and textures have names of their own, and each of
+// its properties has an attribute of its name, which a layer binds its values
+// to, unless the program has no attributes and reads the values itself.
+#[test]
+fn every_property_binds_an_attribute_of_its_name() {
+    for (program, _) in programs() {
+        let attributes: Vec<&str> = program.locations().map(|(_, _, attribute)| attribute.name).collect();
+        let distinct: BTreeSet<&str> = attributes.iter().copied().collect();
+        assert_eq!(distinct.len(), attributes.len(), "{}: two attributes have a name", program.name);
+        let textures: Vec<&str> =
+            program.textures.iter().filter(|texture| !texture.is_unused()).map(|texture| texture.name).collect();
+        let distinct: BTreeSet<&str> = textures.iter().copied().collect();
+        assert_eq!(distinct.len(), textures.len(), "{}: two textures have a name", program.name);
+        if !attributes.is_empty() {
+            for property in program.properties {
+                assert!(attributes.contains(&property.name), "{}: no attribute {}", program.name, property.name);
+            }
+        }
     }
 }
 

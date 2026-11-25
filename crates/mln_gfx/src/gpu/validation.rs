@@ -48,8 +48,8 @@ pub enum ShaderBinding {
     /// size of each of its elements, of which a draw reads the one at
     /// `globalIndex`. 0 where the backend can't tell.
     Buffer { id: u32, min_size: u64 },
-    /// The texture at texture id `id`, and its sampler.
-    Texture { id: u32 },
+    /// The texture at texture slot `slot`, and its sampler.
+    Texture { slot: u32 },
 }
 
 /// A backend's resources, as the checks of bindings and geometry see them:
@@ -106,10 +106,12 @@ pub fn check_bindings(
                     return Err(invalid(format!("{size} bytes at {offset} of a buffer of {}", info.size)));
                 }
             }
-            BindGroupEntry::Texture { id, texture, sampler } => {
+            BindGroupEntry::Texture { slot, texture, sampler } => {
                 let info = (lookup.texture)(texture).ok_or(GpuError::UnknownId("texture"))?;
                 if !info.usage.sampled {
-                    return Err(GpuError::Invalid(format!("{label}: texture id {id}: a texture that isn't sampled")));
+                    return Err(GpuError::Invalid(format!(
+                        "{label}: texture slot {slot}: a texture that isn't sampled"
+                    )));
                 }
                 if !(lookup.sampler)(sampler) {
                     return Err(GpuError::UnknownId("sampler"));
@@ -122,7 +124,7 @@ pub fn check_bindings(
     for &binding in reads {
         let entry = desc.entries.iter().find(|entry| match (binding, entry) {
             (ShaderBinding::Buffer { id, .. }, BindGroupEntry::Buffer { id: entry, .. })
-            | (ShaderBinding::Texture { id }, BindGroupEntry::Texture { id: entry, .. }) => id == *entry,
+            | (ShaderBinding::Texture { slot: id }, BindGroupEntry::Texture { slot: entry, .. }) => id == *entry,
             _ => false,
         });
         let Some(&BindGroupEntry::Buffer { buffer, size, .. }) = entry else {
@@ -149,7 +151,7 @@ pub fn check_bindings(
 fn same_id(a: &BindGroupEntry, b: &BindGroupEntry) -> bool {
     match (a, b) {
         (BindGroupEntry::Buffer { id: a, .. }, BindGroupEntry::Buffer { id: b, .. })
-        | (BindGroupEntry::Texture { id: a, .. }, BindGroupEntry::Texture { id: b, .. }) => a == b,
+        | (BindGroupEntry::Texture { slot: a, .. }, BindGroupEntry::Texture { slot: b, .. }) => a == b,
         _ => false,
     }
 }
@@ -587,7 +589,7 @@ mod tests {
         let layout = |step| VertexBufferLayout {
             stride: 8,
             step,
-            attributes: vec![Attribute { id: 0, format: AttributeDataType::Short2, offset: 4 }],
+            attributes: vec![Attribute { location: 0, format: AttributeDataType::Short2, offset: 4 }],
         };
         let check = |layouts: &[VertexBufferLayout], vertex_buffers: &[(BufferId, u64)], index_buffer| {
             let buffer = lookup(&buffers);

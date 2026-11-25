@@ -42,11 +42,9 @@ use crate::depth_mode::DepthMode;
 use crate::gfx_types::{AttributeDataType, DrawModeType};
 use crate::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use crate::shaders::layer_ubo::ProjectionUBO;
+use crate::shaders::program::Program;
 use crate::shaders::programs;
-use crate::shaders::shader_defines::{
-    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
-    ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
-};
+use crate::shaders::shader_defines::{ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO};
 use crate::stencil_mode::{StencilMode, Test};
 use crate::types::StencilOpType;
 
@@ -72,11 +70,23 @@ fn whole(id: usize, buffer: BufferId, data: &[u8]) -> BindGroupEntry {
     BindGroupEntry::Buffer { id: id as u32, buffer, offset: 0, size: data.len() as u64 }
 }
 
-fn position_layout(id: usize) -> VertexBufferLayout {
+/// The location of `program`'s attribute `name`.
+fn location(program: &Program, name: &str) -> u32 {
+    program.location(name) as u32
+}
+
+/// The slot of `program`'s texture `name`.
+fn slot(program: &Program, name: &str) -> u32 {
+    program.texture_slot(name) as u32
+}
+
+/// The layout of a buffer of `program`'s attribute `pos`, alone.
+fn position_layout(program: &Program) -> VertexBufferLayout {
+    let location = location(program, "pos");
     VertexBufferLayout {
         stride: 4,
         step: VertexStep::Vertex,
-        attributes: vec![VertexAttribute { id: id as u32, format: AttributeDataType::Short2, offset: 0 }],
+        attributes: vec![VertexAttribute { location, format: AttributeDataType::Short2, offset: 0 }],
     }
 }
 
@@ -219,7 +229,7 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
     let (quad, indices) = quad(gpu)?;
 
     let mask_shader = gpu.create_shader(&ShaderKey::new(&programs::CLIPPING_MASK, []))?;
-    let mask_layouts = [position_layout(ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE)];
+    let mask_layouts = [position_layout(&programs::CLIPPING_MASK)];
     let mask_pipeline = gpu.create_pipeline(&PipelineDesc {
         shader: mask_shader,
         vertex_buffers: &mask_layouts,
@@ -248,7 +258,7 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
     })?;
 
     let background_shader = gpu.create_shader(&ShaderKey::new(&programs::BACKGROUND, []))?;
-    let background_layouts = [position_layout(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE)];
+    let background_layouts = [position_layout(&programs::BACKGROUND)];
     let background_pipeline = gpu.create_pipeline(&PipelineDesc {
         shader: background_shader,
         vertex_buffers: &background_layouts,

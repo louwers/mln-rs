@@ -6,7 +6,7 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
-use mln_gfx::shaders::shader_defines::{ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO};
+use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_util::Color;
 use mln_util::size::Size;
 
@@ -38,7 +38,7 @@ fn bindings_and_geometry_go_before_what_they_were_made_of() {
         let shader = context.shader(gpu, &ShaderKey::new(&programs::CLIPPING_MASK, [])).expect("the shader");
         let entries = [
             BindGroupEntry::Buffer { id: ID_PROJECTION_UBO as u32, buffer: ubo_id, offset: 0, size: projection as u64 },
-            BindGroupEntry::Texture { id: 0, texture: texture_id, sampler },
+            BindGroupEntry::Texture { slot: 0, texture: texture_id, sampler },
         ];
         let bindings =
             gpu.create_bindings(&BindingsDesc { label: "test", shader, entries: &entries }).expect("the bindings");
@@ -168,7 +168,7 @@ fn position_layout() -> VertexBufferLayout {
         stride: 4,
         step: VertexStep::Vertex,
         attributes: vec![VertexAttribute {
-            id: ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE as u32,
+            location: const { programs::CLIPPING_MASK.location("pos") as u32 },
             format: AttributeDataType::Short2,
             offset: 0,
         }],

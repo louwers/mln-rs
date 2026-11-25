@@ -783,13 +783,13 @@ fn shared_paint(shared: &SharedVertices, offset: usize, stride: u32, data_type: 
 }
 
 /// Binds `binder`'s values, `shared`, the vertices of `buffer`, to the
-/// attributes `attributes` in `attrs`, or records the attributes in
-/// `uniforms` if the property is constant or has no values.
+/// attributes `attributes` in `attrs`, or records the properties of those
+/// names in `uniforms` if the property is constant or has no values.
 pub(crate) fn bind_paint_property(
     binder: &dyn PaintPropertyBinderBase,
     buffer: &InterleavedVertexBuffer,
     shared: Option<&SharedVertices>,
-    attributes: &[usize],
+    attributes: &[&'static str],
     is_constant: bool,
     attrs: &mut VertexAttributeArray,
     uniforms: &mut Uniforms,
@@ -806,8 +806,8 @@ pub(crate) fn bind_paint_property(
 }
 
 /// Declares the binders of one layer type's data-driven paint properties: a
-/// struct with one binder per property, each with the ids of the attributes a
-/// program reads its values from (fields in the interleaved vertex order),
+/// struct with one binder per property, each with the names of the attributes
+/// a program reads its values from (fields in the interleaved vertex order),
 /// and the shared `InterleavedVertexBuffer`.
 macro_rules! paint_property_binders {
     (
@@ -889,8 +889,9 @@ macro_rules! paint_property_binders {
             }
 
             /// Binds each property's values, `shared`, the vertices of the
-            /// paint values, to its attributes in `attrs`, or records its
-            /// attributes in `uniforms` where `evaluated` is constant.
+            /// paint values, to its attributes in `attrs`, or records the
+            /// properties of its attributes' names in `uniforms` where
+            /// `evaluated` is constant.
             pub(crate) fn bind(
                 &self,
                 evaluated: &$props,

@@ -12,10 +12,10 @@
 //!
 //! Bindings use the shaders' own numbering: a buffer binds at its uniform
 //! or storage buffer id (`shaders::shader_defines`, e.g.
-//! `ID_GLOBAL_PAINT_PARAMS_UBO`), a texture at its texture id (e.g.
-//! `ID_LINE_DASH_TEXTURE`) and a vertex attribute at its attribute id (e.g.
-//! `ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE`). Each backend maps them to its own
-//! slots, groups, descriptor sets or shader locations.
+//! `ID_GLOBAL_PAINT_PARAMS_UBO`), and a texture and a vertex attribute at
+//! the slot and location the program declares them at ([`Program`]). Each
+//! backend maps them to its own slots, groups, descriptor sets or shader
+//! locations.
 
 #[cfg(feature = "gpu-conformance")]
 pub mod conformance;
@@ -277,13 +277,14 @@ pub enum VertexStep {
     Instance,
 }
 
-/// An attribute of a vertex buffer: the shader input with attribute id
-/// `id` reads `format` from `offset` bytes into each element. The id is of
-/// the shader's per-vertex attributes in a [`VertexStep::Vertex`] buffer,
-/// and of its per-instance ones in a [`VertexStep::Instance`] buffer.
+/// An attribute of a vertex buffer: the program's attribute at `location`
+/// ([`Program::location`]) reads `format` from `offset` bytes into each
+/// element. It is one of the program's per-vertex attributes in a
+/// [`VertexStep::Vertex`] buffer, and of its per-instance ones in a
+/// [`VertexStep::Instance`] buffer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct VertexAttribute {
-    pub id: u32,
+    pub location: u32,
     pub format: AttributeDataType,
     pub offset: u32,
 }
@@ -446,8 +447,9 @@ pub enum BindGroupEntry {
     /// id `id`. A shader reads a [`Vertex`](BufferUsage::Vertex) buffer as
     /// a storage buffer ([`Caps::binds_vertex_buffers`]).
     Buffer { id: u32, buffer: BufferId, offset: u64, size: u64 },
-    /// `texture`, sampled with `sampler`, at texture id `id`.
-    Texture { id: u32, texture: TextureId, sampler: SamplerId },
+    /// `texture`, sampled with `sampler`, at the program's texture slot
+    /// `slot` ([`Program::texture_slot`]).
+    Texture { slot: u32, texture: TextureId, sampler: SamplerId },
 }
 
 /// What [`Gpu::create_bindings`] makes bindings of.

@@ -48,8 +48,9 @@ pub(crate) struct Context {
     program_parameters: ProgramParameters,
     /// Whether the draws show the overdraw inspector.
     overdraw: bool,
-    /// The key of each variant a draw used.
-    shader_keys: HashMap<(&'static Program, Uniforms, ProjectionVariant), ShaderKey>,
+    /// The key of each variant a draw used, by program, the properties of
+    /// the program it reads from uniforms, a bit by index, and projection.
+    shader_keys: HashMap<(&'static Program, u16, ProjectionVariant), ShaderKey>,
     /// The shader of each key a draw used.
     shaders: HashMap<ShaderKey, ShaderId>,
     /// The pipeline of each key a draw used.
@@ -375,12 +376,20 @@ impl Context {
         projection: ProjectionVariant,
     ) -> ShaderKey {
         // Only the program's own properties tell its variants apart.
-        let read = program.properties.iter().filter(move |property| uniforms.contains(property.attribute));
-        let uniforms = read.clone().map(|property| property.attribute).collect();
+        let mut read = 0u16;
+        for (index, property) in program.properties.iter().enumerate() {
+            if uniforms.contains(property.name) {
+                read |= 1 << index;
+            }
+        }
         let parameters = &self.program_parameters;
         self.shader_keys
-            .entry((program, uniforms, projection))
-            .or_insert_with(|| program.variant_key(parameters, read, projection))
+            .entry((program, read, projection))
+            .or_insert_with(|| {
+                let properties = program.properties.iter().enumerate();
+                let uniforms = properties.filter(|&(index, _)| read & (1 << index) != 0).map(|(_, property)| property);
+                program.variant_key(parameters, uniforms, projection)
+            })
             .clone()
     }
 

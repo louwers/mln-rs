@@ -21,7 +21,7 @@ use mln_gfx::gpu::{
     ResourceId, SamplerId, ShaderId, ShaderKey, SlotMap, TargetFormats, TextureDesc, TextureFormat, TextureId,
     TextureRegion, TextureUsage, VertexStep,
 };
-use mln_gfx::shaders::program::Sources;
+use mln_gfx::shaders::program::{Program, Sources};
 use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{DepthFunctionType, TextureFilterType, TextureWrapType};
@@ -29,7 +29,7 @@ use mln_glsl::layout::{
     DescriptorSetType, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE,
     image_sampler_binding, image_texture_binding,
 };
-use mln_glsl::{AttributeInfo, BUILT_INS, ResourceUse, ShaderSource, Stage, TextureInfo};
+use mln_glsl::{BUILT_INS, ResourceUse, ShaderSource, Stage};
 use mln_util::hash::HashMap;
 use mln_util::size::Size;
 
@@ -168,7 +168,8 @@ pub struct ImportedImage {
     pub release_to: Option<u32>,
 }
 
-/// What a shader binding reads, by the shaders' ids.
+/// What a shader binding reads: a buffer by its id, a texture or its
+/// sampler by the texture's slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Binding {
     Buffer(u32),
@@ -178,31 +179,24 @@ enum Binding {
 
 /// A compiled program.
 pub(crate) struct Shader {
-    name: &'static str,
+    program: &'static Program,
+    source: &'static ShaderSource,
     vertex: vk::ShaderModule,
     fragment: vk::ShaderModule,
     /// The bindings its stages use, by descriptor set.
     bindings: [Vec<(u32, Binding)>; DescriptorSetType::COUNT],
-    /// What its stages read from its bindings, by the shaders' ids.
+    /// What its stages read from its bindings.
     reads: Vec<ShaderBinding>,
-    /// The location of each per-vertex attribute, by id.
-    attributes: &'static [AttributeInfo],
-    /// The location of each per-instance attribute, by id.
-    instance_attributes: &'static [AttributeInfo],
 }
 
 impl Shader {
-    /// The location of the per-vertex or per-instance attribute `id`.
-    fn location(&self, step: VertexStep, id: u32) -> Result<u32, GpuError> {
-        let attributes = match step {
-            VertexStep::Vertex => self.attributes,
-            VertexStep::Instance => self.instance_attributes,
-        };
-        attributes
-            .iter()
-            .find(|attribute| attribute.id == id as usize)
-            .map(|attribute| attribute.index as u32)
-            .ok_or_else(|| GpuError::Invalid(format!("{} has no {step:?} attribute {id}", self.name)))
+    /// The location the GLSL reads the program's attribute at `location` at,
+    /// if it steps by `step`.
+    fn location(&self, step: VertexStep, location: u32) -> Result<u32, GpuError> {
+        match self.program.attribute_at(location as usize) {
+            Some((at, _)) if at == step => Ok(self.source.location(location as usize)),
+            _ => Err(GpuError::Invalid(format!("{} has no {step:?} attribute at {location}", self.program.name))),
+        }
     }
 }
 
@@ -473,20 +467,12 @@ fn clear_color(color: mln_util::Color) -> vk::ClearValue {
     vk::ClearValue { color: vk::ClearColorValue { float32: [color.r, color.g, color.b, color.a] } }
 }
 
-/// The resource of `binding` in `set` of the shared layout, by the shaders'
-/// ids: the inverse of `mln_glsl::layout`'s `*_binding` functions.
-fn binding_of(
-    name: &str,
-    textures: &[TextureInfo],
-    set: u32,
-    binding: u32,
-) -> Result<(DescriptorSetType, Binding), GpuError> {
-    let texture_id = |index: u32| {
-        textures
-            .iter()
-            .find(|texture| texture.index == index as usize)
-            .map(|texture| texture.id as u32)
-            .ok_or_else(|| GpuError::Invalid(format!("{name}: no texture at index {index} of set {set}")))
+/// The resource of `binding` in `set` of the shared layout, for `program`:
+/// the inverse of `mln_glsl::layout`'s `*_binding` functions.
+fn binding_of(program: &Program, set: u32, binding: u32) -> Result<(DescriptorSetType, Binding), GpuError> {
+    let texture_id = |slot: u32| match program.textures.get(slot as usize) {
+        Some(texture) if !texture.is_unused() => Ok(slot),
+        _ => Err(GpuError::Invalid(format!("{}: no texture at slot {slot} of set {set}", program.name))),
     };
     let start = LAYER_SSBO_START_ID as u32;
     let storage = LAYER_STORAGE_COUNT as u32;
@@ -507,7 +493,7 @@ fn binding_of(
         Some(DescriptorSetType::DrawableImage) => {
             (DescriptorSetType::DrawableImage, Binding::Sampler(texture_id(binding - IMAGE_SAMPLER_START as u32)?))
         }
-        None => return Err(GpuError::Invalid(format!("{name}: no descriptor set {set}"))),
+        None => return Err(GpuError::Invalid(format!("{}: no descriptor set {set}", program.name))),
     };
     Ok(resource)
 }
@@ -517,7 +503,7 @@ fn binding_of(
 fn read(reads: &mut Vec<ShaderBinding>, resource: Binding, size: u64) {
     let read = match resource {
         Binding::Buffer(id) => ShaderBinding::Buffer { id, min_size: size },
-        Binding::Texture(id) | Binding::Sampler(id) => ShaderBinding::Texture { id },
+        Binding::Texture(slot) | Binding::Sampler(slot) => ShaderBinding::Texture { slot },
     };
     for earlier in reads.iter_mut() {
         match (earlier, read) {
@@ -1105,7 +1091,7 @@ impl VulkanGpu {
                 .map_err(|error| GpuError::Invalid(format!("{name}: {error}")))
                 .and_then(|compiled| {
                     for &ResourceUse { set, binding, size } in &compiled.resources {
-                        let (type_, resource) = binding_of(name, source.textures, set, binding)?;
+                        let (type_, resource) = binding_of(key.program(), set, binding)?;
                         let set_bindings = &mut bindings[type_ as usize];
                         if !set_bindings.contains(&(binding, resource)) {
                             set_bindings.push((binding, resource));
@@ -1129,15 +1115,7 @@ impl VulkanGpu {
         }
         self.device.set_debug_name(modules[0], &format!("{name}.vert"));
         self.device.set_debug_name(modules[1], &format!("{name}.frag"));
-        Ok(Shader {
-            name,
-            vertex: modules[0],
-            fragment: modules[1],
-            bindings,
-            reads,
-            attributes: source.attributes,
-            instance_attributes: source.instance_attributes,
-        })
+        Ok(Shader { program: key.program(), source, vertex: modules[0], fragment: modules[1], bindings, reads })
     }
 
     /// The render pass of `key`, made on first use.
@@ -1272,7 +1250,7 @@ impl VulkanGpu {
                 }
                 input_attributes.push(
                     vk::VertexInputAttributeDescription::default()
-                        .location(shader.location(layout.step, attribute.id)?)
+                        .location(shader.location(layout.step, attribute.location)?)
                         .binding(slot as u32)
                         .format(format)
                         .offset(attribute.offset),
@@ -1362,7 +1340,7 @@ impl VulkanGpu {
         }
         let dynamic_state = vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
 
-        let (name, vertex, fragment) = (shader.name, shader.vertex, shader.fragment);
+        let (name, vertex, fragment) = (shader.program.name, shader.vertex, shader.fragment);
         let shader_stages = [
             vk::PipelineShaderStageCreateInfo::default()
                 .stage(vk::ShaderStageFlags::VERTEX)
@@ -1885,16 +1863,16 @@ impl VulkanGpu {
                     (BindGroupEntry::Buffer { id, buffer, offset, size }, Binding::Buffer(wanted)) if id == wanted => {
                         Some(Resource::Buffer(buffer, offset, size))
                     }
-                    (BindGroupEntry::Texture { id, texture, .. }, Binding::Texture(wanted)) if id == wanted => {
+                    (BindGroupEntry::Texture { slot, texture, .. }, Binding::Texture(wanted)) if slot == wanted => {
                         Some(Resource::Texture(texture))
                     }
-                    (BindGroupEntry::Texture { id, sampler, .. }, Binding::Sampler(wanted)) if id == wanted => {
+                    (BindGroupEntry::Texture { slot, sampler, .. }, Binding::Sampler(wanted)) if slot == wanted => {
                         Some(Resource::Sampler(sampler))
                     }
                     _ => None,
                 });
                 let resource = resource.ok_or_else(|| {
-                    GpuError::Invalid(format!("{} reads {read:?}, which no entry binds", shader.name))
+                    GpuError::Invalid(format!("{} reads {read:?}, which no entry binds", shader.program.name))
                 })?;
                 resources.push((binding, resource));
             }

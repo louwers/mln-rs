@@ -16,11 +16,11 @@ use mln_gfx::gpu::{
     ResourceId, SamplerId, Scissor, ShaderId, ShaderKey, SlotMap, TextureDesc, TextureFormat, TextureId, TextureRegion,
     TextureUsage, VertexStep, destroy_unused,
 };
-use mln_gfx::shaders::program::Sources;
+use mln_gfx::shaders::program::{Program, Sources};
 use mln_gfx::shaders::shader_defines::{DRAWABLE_RESERVED_UBO_COUNT, LAYER_SSBO_START_ID};
 use mln_gfx::texture2d::SamplerState;
 use mln_glsl::layout::{DescriptorSetType, IMAGE_SAMPLER_START, LAYER_STORAGE_COUNT};
-use mln_glsl::{BUILT_INS, ShaderSource, TextureInfo as ShaderTexture};
+use mln_glsl::{BUILT_INS, ShaderSource};
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::size::Size;
 use windows::Win32::Foundation::{HANDLE, RECT};
@@ -132,8 +132,9 @@ struct Shader {
     reads: Vec<ShaderBinding>,
     /// The buffers it reads, by id, with their root parameter and view.
     buffers: Vec<(u32, u32, View)>,
-    /// The textures it reads, by id, with their index in the table.
-    textures: Vec<(u32, u32)>,
+    /// The slots of the textures it reads, which are their indices in the
+    /// table.
+    textures: Vec<u32>,
 }
 
 struct Pipeline {
@@ -404,24 +405,20 @@ fn preserve() -> D3D12_RENDER_PASS_ENDING_ACCESS {
     D3D12_RENDER_PASS_ENDING_ACCESS { Type: D3D12_RENDER_PASS_ENDING_ACCESS_TYPE_PRESERVE, ..Default::default() }
 }
 
-/// A resource of a shader's set and binding, by the shaders' ids: the
-/// inverse of `mln_glsl::layout`'s `*_binding` functions.
+/// A resource of a shader's set and binding: the inverse of
+/// `mln_glsl::layout`'s `*_binding` functions.
 enum Resource {
+    /// A buffer, by its id.
     Buffer(u32),
-    /// A texture or its sampler, at its index in the table.
-    Texture {
-        id: u32,
-        index: u32,
-    },
+    /// A texture or its sampler, by the texture's slot.
+    Texture(u32),
 }
 
-fn resource_of(name: &str, textures: &[ShaderTexture], set: u32, binding: u32) -> Result<Resource, GpuError> {
-    let texture = |index: u32| {
-        textures
-            .iter()
-            .find(|texture| texture.index == index as usize)
-            .map(|texture| Resource::Texture { id: texture.id as u32, index })
-            .ok_or_else(|| GpuError::Invalid(format!("{name}: no texture at index {index} of set {set}")))
+fn resource_of(program: &Program, set: u32, binding: u32) -> Result<Resource, GpuError> {
+    let name = program.name;
+    let texture = |slot: u32| match program.textures.get(slot as usize) {
+        Some(texture) if !texture.is_unused() => Ok(Resource::Texture(slot)),
+        _ => Err(GpuError::Invalid(format!("{name}: no texture at slot {slot} of set {set}"))),
     };
     let start = LAYER_SSBO_START_ID as u32;
     let storage = LAYER_STORAGE_COUNT as u32;
@@ -1239,12 +1236,11 @@ impl Gpu for D3d12Gpu {
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
         let source = self.sources.get(key.program())?;
         let program = self.compiler.compile(key, source)?;
-        let source_textures = source.textures;
         let mut reads: Vec<ShaderBinding> = Vec::new();
         let mut buffers = Vec::new();
         let mut textures = Vec::new();
         for resource in &program.resources {
-            match resource_of(program.name, source_textures, resource.set, resource.binding)? {
+            match resource_of(key.program(), resource.set, resource.binding)? {
                 Resource::Buffer(id) => {
                     let (parameter, view) = root_signature::buffer_parameter(resource.set, resource.binding)
                         .ok_or_else(|| {
@@ -1263,10 +1259,10 @@ impl Gpu for D3d12Gpu {
                         buffers.push((id, parameter, view));
                     }
                 }
-                Resource::Texture { id, index } => {
-                    if !textures.contains(&(id, index)) {
-                        textures.push((id, index));
-                        reads.push(ShaderBinding::Texture { id });
+                Resource::Texture(slot) => {
+                    if !textures.contains(&slot) {
+                        textures.push(slot);
+                        reads.push(ShaderBinding::Texture { slot });
                     }
                 }
             }
@@ -1327,22 +1323,22 @@ impl Gpu for D3d12Gpu {
         } else {
             let mut views = [None; TABLE_SIZE as usize];
             let mut indices = [0; TABLE_SIZE as usize];
-            for &(id, index) in &shader.textures {
+            for &slot in &shader.textures {
                 let (texture, sampler) = desc
                     .entries
                     .iter()
                     .find_map(|entry| match *entry {
-                        BindGroupEntry::Texture { id: entry_id, texture, sampler } if entry_id == id => {
+                        BindGroupEntry::Texture { slot: entry_slot, texture, sampler } if entry_slot == slot => {
                             Some((texture, sampler))
                         }
                         _ => None,
                     })
-                    .ok_or_else(|| missing("texture", id))?;
+                    .ok_or_else(|| missing("texture", slot))?;
                 let texture = self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?;
                 let srv =
                     texture.srv.ok_or_else(|| GpuError::Invalid("a texture that shaders can't sample".to_owned()))?;
-                views[index as usize] = Some(srv.handle);
-                indices[index as usize] = *self.samplers.get(sampler).ok_or(GpuError::UnknownId("sampler"))?;
+                views[slot as usize] = Some(srv.handle);
+                indices[slot as usize] = *self.samplers.get(sampler).ok_or(GpuError::UnknownId("sampler"))?;
             }
             let table = self.tables.allocate(self.device.device(), &views)?;
             match self.sampler_index_address(indices) {
@@ -1897,22 +1893,24 @@ fn create_pipeline_state(
 ) -> Result<ID3D12PipelineState, GpuError> {
     let mut elements = Vec::new();
     for (slot, layout) in desc.vertex_buffers.iter().enumerate() {
-        let (table, class, rate) = match layout.step {
-            VertexStep::Vertex => (program.attributes, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0),
-            VertexStep::Instance => (program.instance_attributes, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1),
+        let (class, rate) = match layout.step {
+            VertexStep::Vertex => (D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0),
+            VertexStep::Instance => (D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1),
         };
         for attribute in &layout.attributes {
             let format = conv::vertex_format(attribute.format)
                 .ok_or_else(|| GpuError::Unsupported(format!("vertex attribute format {:?}", attribute.format)))?;
-            let location = table
-                .iter()
-                .find(|info| info.id == attribute.id as usize)
-                .ok_or_else(|| GpuError::Invalid(format!("{} has no attribute {}", program.name, attribute.id)))?
-                .index;
+            let location = attribute.location;
+            if program.program.attribute_at(location as usize).is_none_or(|(step, _)| step != layout.step) {
+                return Err(GpuError::Invalid(format!(
+                    "{} has no {:?} attribute at {location}",
+                    program.name, layout.step
+                )));
+            }
             elements.push(D3D12_INPUT_ELEMENT_DESC {
                 // naga's HLSL names a vertex input of location N `LOC`N.
                 SemanticName: s!("LOC"),
-                SemanticIndex: location as u32,
+                SemanticIndex: program.source.location(location as usize),
                 Format: format,
                 InputSlot: slot as u32,
                 AlignedByteOffset: attribute.offset,

@@ -11,8 +11,7 @@ use mln_gfx::shaders::line_layer_ubo::{
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
-    ID_LINE_DASH_TEXTURE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO,
-    ID_LINE_IMAGE_TEXTURE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_TILE_PROPS_UBO, ID_PROJECTION_UBO,
+    ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_TILE_PROPS_UBO, ID_PROJECTION_UBO,
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
@@ -54,6 +53,10 @@ use crate::render_layer::{
 use crate::render_pass::RenderPass;
 use crate::render_tile::FrameTile;
 use crate::tile_matrix::{projection_data, to_projection_ubo};
+
+/// The slots of the programs' textures that the draws bind.
+const DASH_SLOT: usize = programs::LINE_GRADIENT_SDF.texture_slot("image_dash");
+const IMAGE_SLOT: usize = programs::LINE_PATTERN.texture_slot("image");
 
 /// What a line draws: its shader and the uniforms it reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -411,7 +414,7 @@ impl TypedLayer for RenderLineLayer {
             if entry.value.as_ref().is_some_and(|cached| {
                 cached.pass != render_pass
                     || matches!(cached.line_type, LineType::Gradient | LineType::GradientSdf)
-                        && cached.objects.texture(ID_LINE_IMAGE_TEXTURE) != self.color_ramp_texture.as_ref()
+                        && cached.objects.texture(IMAGE_SLOT) != self.color_ramp_texture.as_ref()
             }) {
                 // The tile's draw was built for other passes, or reads a color
                 // ramp the layer replaced.
@@ -573,18 +576,18 @@ impl RenderLineLayer {
         let mut textures = Textures::default();
         let mut atlases = None;
         let (line_type, program) = if has_dasharray && has_gradient {
-            textures[ID_LINE_IMAGE_TEXTURE] = Some(self.color_ramp_texture(context)?);
-            textures[ID_LINE_DASH_TEXTURE] = dash_texture;
+            textures[IMAGE_SLOT] = Some(self.color_ramp_texture(context)?);
+            textures[DASH_SLOT] = dash_texture;
             (LineType::GradientSdf, &programs::LINE_GRADIENT_SDF)
         } else if has_dasharray {
-            textures[ID_LINE_IMAGE_TEXTURE] = dash_texture;
+            textures[IMAGE_SLOT] = dash_texture;
             (LineType::Sdf, &programs::LINE_SDF)
         } else if !self.values.unevaluated.line_pattern.is_undefined() {
             let icons = Some(tile_bucket.atlas_textures()).filter(|atlases| atlases.icon().is_some())?;
             atlases = Some(AtlasBinding::new(
                 Some(icons.clone()),
                 None,
-                Some(ID_LINE_IMAGE_TEXTURE),
+                Some(IMAGE_SLOT),
                 /*is_text*/ false,
                 /*sdf_icons*/ true, // to force linear filter
                 AlignmentType::Auto,
@@ -593,7 +596,7 @@ impl RenderLineLayer {
             ));
             (LineType::Pattern, &programs::LINE_PATTERN)
         } else if has_gradient {
-            textures[ID_LINE_IMAGE_TEXTURE] = Some(self.color_ramp_texture(context)?);
+            textures[IMAGE_SLOT] = Some(self.color_ramp_texture(context)?);
             (LineType::Gradient, &programs::LINE_GRADIENT)
         } else {
             (LineType::Simple, &programs::LINE)
@@ -607,7 +610,7 @@ impl RenderLineLayer {
         let shared = bucket_vertices(geometry, &bucket.vertices)?;
         let stride = size_of::<LineLayoutVertex>() as u32;
         attrs.set_shared(
-            ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE,
+            "pos_normal",
             SharedAttribute::new(
                 shared.clone(),
                 AttributeDataType::Short2,
@@ -616,7 +619,7 @@ impl RenderLineLayer {
             ),
         );
         attrs.set_shared(
-            ID_LINE_DATA_VERTEX_ATTRIBUTE,
+            "data",
             SharedAttribute::new(shared, AttributeDataType::UByte4, offset_of!(LineLayoutVertex, a2) as u32, stride),
         );
 
@@ -728,10 +731,8 @@ impl RenderLineLayer {
                 pad2: 0.0,
             }),
             LineType::Pattern => {
-                let texture = cached
-                    .objects
-                    .texture(ID_LINE_IMAGE_TEXTURE)
-                    .and_then(|texture| parameters.context.texture(texture));
+                let texture =
+                    cached.objects.texture(IMAGE_SLOT).and_then(|texture| parameters.context.texture(texture));
                 let texture_size = texture.map_or(Size::new(0, 0), Texture2D::size);
                 uniforms.draw_ubo.set(&LinePatternDrawableUBO {
                     matrix,
@@ -767,11 +768,7 @@ impl RenderLineLayer {
             LineType::Sdf | LineType::GradientSdf => {
                 // The gradient keeps its ramp in the image slot, so the dash
                 // pattern takes the second.
-                let dash_texture_id = if cached.line_type == LineType::GradientSdf {
-                    ID_LINE_DASH_TEXTURE
-                } else {
-                    ID_LINE_IMAGE_TEXTURE
-                };
+                let dash_slot = if cached.line_type == LineType::GradientSdf { DASH_SLOT } else { IMAGE_SLOT };
                 let tile_ratio = |scale: f32| 1.0 / tile_id.pixels_to_tile_units(scale, f32::from(int_zoom));
                 let sdf = if let Some(atlas) = binders.line_dasharray.atlas() {
                     // Per-feature patterns don't fade from the zoom before:
@@ -790,7 +787,7 @@ impl RenderLineLayer {
                 } else {
                     let dasharray = evaluated.line_dasharray.faded();
                     let dash_pattern = line_atlas.get(dasharray.from, dasharray.to, cached.dash_cap)?;
-                    cached.objects.set_texture(dash_texture_id, Some(dash_pattern.texture()?));
+                    cached.objects.set_texture(dash_slot, Some(dash_pattern.texture()?));
 
                     let pos_a = dash_pattern.from();
                     let pos_b = dash_pattern.to();
