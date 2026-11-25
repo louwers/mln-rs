@@ -5690,7 +5690,9 @@ fn a_tilt_that_carries_its_anchor_into_the_sky_turns_around_the_center() {
         let now = transform.view().center(WrapMode::Unwrapped);
         if skyward > 0 || anchor.y < horizon_row(&transform) {
             skyward += 1;
-            assert_eq!(center, now, "{ms} ms: the anchor reached the sky, and the center moved");
+            // Recomputed each frame, so equal only to rounding.
+            let moved = (now.latitude() - center.latitude()).abs().max((now.longitude() - center.longitude()).abs());
+            assert!(moved < 1e-9, "{ms} ms: the anchor reached the sky, and the center moved {moved}°");
         } else {
             held += 1;
             let off = off_by(&transform, &grabbed, anchor);
