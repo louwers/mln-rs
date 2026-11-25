@@ -410,9 +410,9 @@ impl CollisionIndex {
         } else {
             run.font_size
         };
-        let first_and_last_glyph = LinePlacer::new(part.label_plane)
-            .begin(LineLabel::new(symbol, run.pools), font_size)
-            .first_and_last_glyph(false);
+        let mut placer = LinePlacer::new(part.label_plane);
+        let mut label = placer.begin(LineLabel::new(symbol, run.pools), font_size);
+        let first_and_last_glyph = label.first_and_last_glyph(false);
 
         let tile_to_viewport = anchor.perspective_ratio * part.pixel_ratio;
         // Translates line geometry to tile units, so it takes the scale but
@@ -451,9 +451,11 @@ impl CollisionIndex {
                 previous_center = None;
                 continue;
             }
-            let elevation = part.heights.at(circle.anchor, 0.0);
+            // The circle stands on the label's path, at its height there,
+            // as its glyphs are laid out.
+            let height = label.line_height(circle.signed_distance_from_anchor);
             let center =
-                self.project_point_with_projector(part.tile_projector, circle.anchor + part.translation, elevation);
+                self.project_point_with_projector(part.tile_projector, circle.anchor + part.translation, height);
             let radius = (circle.x2 - circle.x1) / 2.0 * tile_to_viewport;
             // Circles closer than √2 radii to the last one placed are skipped,
             // which thins them as much as can be with small gaps, unless it is

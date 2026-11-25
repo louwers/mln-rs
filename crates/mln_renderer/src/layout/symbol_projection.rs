@@ -272,28 +272,16 @@ impl<'a> LabelPlaneProjector<'a> {
         }
     }
 
-    /// The height above sea level, in meters, that a glyph at
-    /// `label_plane_point` stands at where the label plane is pitched with
-    /// the map, where the shaders raise it: that of the ground under it,
-    /// before the translation. 0 in the viewport's plane, whose points
-    /// project at the heights under them already.
+    /// Label plane to clip space, for a point of a label's path
+    /// `elevation` meters above sea level, which a point in the plane
+    /// pitched with the map needs and one in the viewport's has already.
     #[must_use]
-    pub(crate) fn glyph_height(&self, label_plane_point: Vec2) -> f32 {
-        if !self.pitch_with_map || !label_plane_point.is_finite() {
-            return 0.0;
-        }
-        let pos = self.pitched_inverse * label_plane_point.as_dvec2().extend(0.0).extend(1.0);
-        let tile_point = (pos.truncate().truncate() / pos.w).as_vec2() - self.translation;
-        self.heights.at(tile_point, self.height_offset)
-    }
-
-    /// Label plane to clip space, for orientation checks.
-    #[must_use]
-    pub(crate) fn to_clip_space(&self, label_plane_point: Vec2) -> Vec2 {
+    pub(crate) fn to_clip_space(&self, label_plane_point: Vec2, elevation: f32) -> Vec2 {
         if self.pitch_with_map {
             let pos = self.pitched_inverse * label_plane_point.as_dvec2().extend(0.0).extend(1.0);
             let tile_point = (pos.truncate().truncate() / pos.w).as_vec2();
-            return self.to_clip_space_from_tile(tile_point).point;
+            let projected: ProjectedPoint = self.tile.project(&tile_point_f64(tile_point), f64::from(elevation)).into();
+            return projected.point;
         }
         Vec2::new(1.0, -1.0) * (label_plane_point / self.viewport * 2.0 - 1.0)
     }
@@ -319,6 +307,10 @@ pub(crate) struct TileDistance {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct PlacedGlyph {
     pub(crate) point: Vec2,
+    /// The height above sea level, in meters, of the label's path at the
+    /// glyph ([`LabelPlacer::line_height`]), which the shaders raise a glyph
+    /// pitched with the map to.
+    pub(crate) height: f32,
     /// The angle of the segment the glyph is on, turned half around for a
     /// glyph read against the line's direction.
     pub(crate) angle: f32,
@@ -376,12 +368,15 @@ enum Unplaced {
 pub(crate) struct LinePlacer<'a> {
     label_plane: &'a LabelPlaneProjector<'a>,
     projections: Vec<Option<ProjectedPoint>>,
+    /// The heights of the ground under each vertex of the line, as the walk
+    /// reaches them; none where the labels don't stand on the ground.
+    heights: Vec<Option<f32>>,
 }
 
 impl<'a> LinePlacer<'a> {
     #[must_use]
     pub(crate) fn new(label_plane: &'a LabelPlaneProjector<'a>) -> Self {
-        LinePlacer { label_plane, projections: Vec::new() }
+        LinePlacer { label_plane, projections: Vec::new(), heights: Vec::new() }
     }
 
     /// Starts placing `label`, its glyphs `font_size` pixels in the label
@@ -389,10 +384,16 @@ impl<'a> LinePlacer<'a> {
     pub(crate) fn begin(&mut self, label: LineLabel<'a>, font_size: f32) -> LabelPlacer<'_, 'a> {
         self.projections.clear();
         self.projections.resize(label.line.len(), None);
+        self.heights.clear();
+        if self.label_plane.heights.on_ground() {
+            self.heights.resize(label.line.len(), None);
+        }
         let font_scale = font_size / ONE_EM;
         LabelPlacer {
             label_plane: self.label_plane,
             projections: &mut self.projections,
+            heights: &mut self.heights,
+            anchor_height: self.label_plane.elevation(label.anchor),
             occluded: false,
             anchor: self.label_plane.project(label.anchor).point,
             font_scale,
@@ -407,6 +408,9 @@ impl<'a> LinePlacer<'a> {
 pub(crate) struct LabelPlacer<'s, 'a> {
     label_plane: &'a LabelPlaneProjector<'a>,
     projections: &'s mut [Option<ProjectedPoint>],
+    /// The heights of the ground under the line's vertices, and its anchor.
+    heights: &'s mut [Option<f32>],
+    anchor_height: f32,
     /// Whether any vertex projected so far is behind the globe's horizon.
     occluded: bool,
     label: LineLabel<'a>,
@@ -418,6 +422,40 @@ pub(crate) struct LabelPlacer<'s, 'a> {
 }
 
 impl LabelPlacer<'_, '_> {
+    /// The height above sea level of the label's path `tile_distance` tile
+    /// units along its line from its anchor, back along the line where
+    /// negative. The path runs through the anchor and the line's vertices,
+    /// each at the height of the ground under it, straight between them,
+    /// and keeps its last height past the line's ends. The glyphs are laid
+    /// out along it ([`glyph_at`](Self::glyph_at)), and what follows it, as
+    /// collision circles, follows the glyphs.
+    pub(crate) fn line_height(&mut self, tile_distance: f32) -> f32 {
+        if self.heights.is_empty() {
+            // Off the ground, the path is level.
+            return self.anchor_height;
+        }
+        let forward = tile_distance > 0.0;
+        let distance = tile_distance.abs();
+        let segment = self.label.segment;
+        let line_len = self.label.line.len();
+        let first = if forward { segment + 1 } else { segment };
+        let vertices = iter::successors(Some(first), |&i| if forward { Some(i + 1) } else { i.checked_sub(1) })
+            .take_while(|&i| i < line_len);
+        let (mut prev_distance, mut prev_height) = (0.0, self.anchor_height);
+        for index in vertices {
+            let (label_plane, line) = (self.label_plane, self.label.line);
+            let height = *self.heights[index].get_or_insert_with(|| label_plane.elevation(tile_point(line[index])));
+            let vertex_distance = self.label.tile_distances.get(index).copied().unwrap_or_default();
+            if vertex_distance >= distance {
+                let span = vertex_distance - prev_distance;
+                let t = if span > 0.0 { (distance - prev_distance) / span } else { 0.0 };
+                return prev_height + (height - prev_height) * t;
+            }
+            (prev_distance, prev_height) = (vertex_distance, height);
+        }
+        prev_height
+    }
+
     fn project_vertex(&mut self, index: usize) -> ProjectedPoint {
         let (label_plane, line, occluded) = (self.label_plane, self.label.line, &mut self.occluded);
         *self.projections[index].get_or_insert_with(|| {
@@ -474,11 +512,18 @@ impl LabelPlacer<'_, '_> {
         let along_segment = distance - distance_to_prev;
         let direction = current - prev;
         let side = if forward { self.line_offset.y } else { -self.line_offset.y };
-        let point = prev + direction * (along_segment / segment_length) + direction.perp() * (side / segment_length);
-        let prev_tile_distance =
-            prev_vertex.map_or(0.0, |i| self.label.tile_distances.get(i).copied().unwrap_or_default());
+        let t = along_segment / segment_length;
+        let point = prev + direction * t + direction.perp() * (side / segment_length);
+        let tile_distance = |vertex: Option<usize>| {
+            vertex.map_or(0.0, |i| self.label.tile_distances.get(i).copied().unwrap_or_default())
+        };
+        let prev_tile_distance = tile_distance(prev_vertex);
+        // Where the glyph is along the line, at the fraction of its segment
+        // it is in the label plane, which the path's height follows.
+        let along_line = prev_tile_distance + (tile_distance(current_vertex) - prev_tile_distance) * t;
         Some(PlacedGlyph {
             point,
+            height: self.line_height(if forward { along_line } else { -along_line }),
             angle: angle_offset + direction.y.atan2(direction.x),
             tile_distance: TileDistance { prev_tile_distance, last_segment_viewport_distance: along_segment },
         })
@@ -505,10 +550,9 @@ impl LabelPlacer<'_, '_> {
         vertices: &mut Vec<SymbolDynamicLayoutVertex>,
     ) -> Result<(), Unplaced> {
         let check_upright = keep_upright && !flip;
-        let label_plane = self.label_plane;
         let mut push = |glyph: PlacedGlyph| {
             let angle = if rotate_to_line { glyph.angle } else { 0.0 };
-            add_dynamic_attributes(glyph.point, angle, label_plane.glyph_height(glyph.point), vertices);
+            add_dynamic_attributes(glyph.point, angle, glyph.height, vertices);
         };
         match self.label.glyph_offsets {
             // A label of glyphs that are all 0x0 has no vertices.
@@ -524,8 +568,10 @@ impl LabelPlacer<'_, '_> {
                 let (first, last) = self.first_and_last_glyph(flip).ok_or(Unplaced::NotEnoughRoom)?;
                 if check_upright {
                     let label_plane = self.label_plane;
-                    let (first_clip, last_clip) =
-                        (label_plane.to_clip_space(first.point), label_plane.to_clip_space(last.point));
+                    let (first_clip, last_clip) = (
+                        label_plane.to_clip_space(first.point, first.height),
+                        label_plane.to_clip_space(last.point, last.height),
+                    );
                     self.check_upright(first_clip, last_clip)?;
                 }
                 push(first);
@@ -534,6 +580,7 @@ impl LabelPlacer<'_, '_> {
                     // rounding puts off the line is hidden.
                     let glyph = self.glyph_at(offset, flip).unwrap_or(PlacedGlyph {
                         point: Vec2::NEG_INFINITY,
+                        height: 0.0,
                         angle: 0.0,
                         tile_distance: TileDistance::default(),
                     });

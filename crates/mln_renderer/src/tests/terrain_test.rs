@@ -1217,13 +1217,45 @@ fn the_surface_a_hair_west_of_a_copy_is_its_neighbors() {
     assert_eq!(ground.surface_at(DVec2::new(-1.0, y)), ground.surface_at(DVec2::new(-1.0 - 1e-17, y)));
 }
 
+/// Ridges across a DEM tile: 16 px a side, at 100 m but for three columns
+/// of every eight, 60 m higher.
+fn terrarium_ridges() -> Response {
+    let mut image = PremultipliedImage::new(Size::new(16, 16));
+    for (i, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        let ridge = if (3..6).contains(&(i % 16 % 8)) { 60 } else { 0 };
+        let [hi, lo] = (100 + ridge + 32768u16).to_be_bytes();
+        *pixel = [hi, lo, 0, 255];
+    }
+    let mut response = Response::new();
+    response.data = Some(Arc::new(mln_image::encode_png(&image)));
+    response
+}
+
 /// A label along a line pitched with the map, over steep ground, draws each
-/// glyph at the height of the ground under it, and placement stands each of
-/// its collision circles on the ground under it too: every glyph draws
-/// inside a circle, where the label collides and a query finds it.
+/// glyph on its path, and placement stands each of its collision circles on
+/// the same path: every glyph draws inside a circle, where the label
+/// collides and a query finds it.
 #[test]
 fn a_pitched_line_label_draws_its_glyphs_where_its_circles_collide() {
-    use glam::{DMat4, Vec2};
+    assert_glyphs_draw_in_circles(terrarium_slope, true);
+}
+
+/// A label along a line, aligned with the viewport or pitched with the map,
+/// over ridges between its line's vertices, lays its glyphs out on its path,
+/// straight from vertex to vertex, and its collision circles stand on the
+/// same path rather than on the ridges: every glyph draws inside a circle.
+#[test]
+fn a_line_label_over_ridges_draws_its_glyphs_where_its_circles_collide() {
+    assert_glyphs_draw_in_circles(terrarium_ridges, false);
+    assert_glyphs_draw_in_circles(terrarium_ridges, true);
+}
+
+/// Places a 480 px label along a line across a tile, over the ground of
+/// `dem` raised 100 times, aligned with the viewport or pitched with the map
+/// (`pitch_with_map`), and checks that each glyph draws inside one of its
+/// placed collision circles.
+fn assert_glyphs_draw_in_circles(dem: fn() -> Response, pitch_with_map: bool) {
+    use glam::Vec2;
     use mln_map_types::TileProjector;
     use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
     use mln_util::constants::{EXTENT, TILE_SIZE_D};
@@ -1232,7 +1264,7 @@ fn a_pitched_line_label_draws_its_glyphs_where_its_circles_collide() {
     use crate::geometry::feature_index::IndexedSubfeature;
     use crate::layout::symbol_instance::WritingModes;
     use crate::layout::symbol_projection::{
-        LabelPlaneProjector, LineLabelAlignment, SymbolHeights, label_plane_matrix, reproject_line_labels,
+        LabelPlaneProjector, LineLabelAlignment, SymbolHeights, reproject_line_labels,
     };
     use crate::text::collision_feature::{CollisionBox, CollisionFeature};
     use crate::text::collision_grid::Shape;
@@ -1242,7 +1274,7 @@ fn a_pitched_line_label_draws_its_glyphs_where_its_circles_collide() {
     let mut load = TerrainLoad::new((0, 14), 100.0);
     load.transform.jump_to(&CameraOptions { pitch: Some(60.0), ..Default::default() });
     load.frame();
-    load.answer(|_| Some(terrarium_slope()));
+    load.answer(|_| Some(dem()));
     let ground = snapshot(&load, 100.0);
     let view = load.transform.view().clone();
     let tile = load.terrain.cover().unwrap().tiles[0].id;
@@ -1278,7 +1310,7 @@ fn a_pitched_line_label_draws_its_glyphs_where_its_circles_collide() {
     };
 
     // The glyphs as they draw, in the viewport.
-    let alignment = LineLabelAlignment { pitch_with_map: true, rotate_with_map: true, keep_upright: false };
+    let alignment = LineLabelAlignment { pitch_with_map, rotate_with_map: true, keep_upright: false };
     let size = SymbolSizeBinder::Constant { layout_size: 24.0, covering_ranges: None, expression: None };
     let mut vertices = Vec::new();
     reproject_line_labels(
@@ -1292,29 +1324,23 @@ fn a_pitched_line_label_draws_its_glyphs_where_its_circles_collide() {
         alignment,
     );
     let pixels_to_tile_units = unwrapped.pixels_to_tile_units(1.0, zoom);
-    let to_tile = label_plane_matrix(true, true, &view, pixels_to_tile_units).inverse();
+    let label_plane =
+        LabelPlaneProjector::new(&projector, heights, pitch_with_map, true, pixels_to_tile_units, Vec2::ZERO);
     let index = CollisionIndex::new(&view, MapMode::Static);
     let padding = index.viewport_padding();
-    let viewport = view.size();
-    let to_viewport = |clip: geometry::Point<f64>| {
-        Vec2::new(
-            (f64::midpoint(clip.x, 1.0) * f64::from(viewport.width)) as f32 + padding,
-            (f64::midpoint(-clip.y, 1.0) * f64::from(viewport.height)) as f32 + padding,
-        )
-    };
+    let viewport = Vec2::new(view.size().width as f32, view.size().height as f32);
     let glyphs: Vec<Vec2> = vertices
         .iter()
         .step_by(4)
         .map(|vertex| {
             let [x, y, _, height] = vertex.a1;
-            let tile_point = DMat4::mul_vec4(&to_tile, glam::DVec4::new(f64::from(x), f64::from(y), 0.0, 1.0));
-            let point = geometry::Point::new(tile_point.x / tile_point.w, tile_point.y / tile_point.w);
-            to_viewport(projector.project(&point, f64::from(height)).point)
+            let clip = label_plane.to_clip_space(Vec2::new(x, y), height);
+            (clip * Vec2::new(0.5, -0.5) + 0.5) * viewport + padding
         })
         .collect();
     assert_eq!(glyph_offsets.len(), glyphs.len(), "every glyph draws");
-    let rise = glyphs.first().unwrap().distance(*glyphs.last().unwrap());
-    assert!(rise > 300.0, "the label spans {rise} px");
+    let span = glyphs.first().unwrap().distance(*glyphs.last().unwrap());
+    assert!(span > 300.0, "the label spans {span} px");
 
     // Its collision circles, a radius apart along the line, as placement
     // places them.
@@ -1331,7 +1357,6 @@ fn a_pitched_line_label_draws_its_glyphs_where_its_circles_collide() {
             signed_distance_from_anchor: x - anchor.x,
         })
         .collect();
-    let label_plane = LabelPlaneProjector::new(&projector, heights, true, true, pixels_to_tile_units, Vec2::ZERO);
     let pixel_ratio = (TILE_SIZE_D * f64::from(tile.overscale_factor()) / f64::from(EXTENT)) as f32;
     let part = PartCollision {
         tile_projector: &projector,
@@ -1341,7 +1366,7 @@ fn a_pitched_line_label_draws_its_glyphs_where_its_circles_collide() {
         pixel_ratio,
         scale: (f64::from(zoom) - f64::from(tile.overscaled_z)).exp2() as f32,
         overlap_mode: OverlapMode::Always,
-        pitch_with_map: true,
+        pitch_with_map,
         rotate_with_map: true,
         avoid_edges: None,
         collision_group: None,
@@ -1371,9 +1396,10 @@ fn a_pitched_line_label_draws_its_glyphs_where_its_circles_collide() {
         })
         .collect();
     assert!(placed.len() > 4, "the label's circles: {placed:?}");
+    let pitch = if pitch_with_map { "pitched with the map" } else { "aligned with the viewport" };
     for (i, glyph) in glyphs.iter().enumerate() {
         let nearest =
             placed.iter().map(|(center, radius)| center.distance(*glyph) - radius).fold(f32::INFINITY, f32::min);
-        assert!(nearest <= 0.0, "glyph {i} at {glyph} is {nearest} px outside every circle: {placed:?}");
+        assert!(nearest <= 0.0, "{pitch}: glyph {i} at {glyph} is {nearest} px outside every circle: {placed:?}");
     }
 }
