@@ -99,7 +99,11 @@ fn uniform_properties(text: &str) -> BTreeSet<String> {
 
 /// ProgramParameters(1.0, overdraw), the globe define if `Projection::Globe`, and a
 /// uniform define per name.
-fn defines<'a>(overdraw: Overdraw, projection: Projection, uniforms: impl IntoIterator<Item = &'a String>) -> Vec<(String, String)> {
+fn defines<'a>(
+    overdraw: Overdraw,
+    projection: Projection,
+    uniforms: impl IntoIterator<Item = &'a String>,
+) -> Vec<(String, String)> {
     let mut defines = vec![("DEVICE_PIXEL_RATIO".to_owned(), "1.0".to_owned())];
     if matches!(overdraw, Overdraw::On) {
         defines.push(("OVERDRAW_INSPECTOR".to_owned(), String::new()));
@@ -162,7 +166,9 @@ fn every_shader_source_compiles() {
                 ("overdraw inspector".to_owned(), defines(Overdraw::On, proj, [])),
                 ("overdraw inspector, all uniforms".to_owned(), defines(Overdraw::On, proj, &properties)),
             ];
-            variants.extend(properties.iter().map(|name| (format!("uniform {name}"), defines(Overdraw::Off, proj, [name]))));
+            variants.extend(
+                properties.iter().map(|name| (format!("uniform {name}"), defines(Overdraw::Off, proj, [name]))),
+            );
             for (variant, defines) in variants {
                 match compile(&device, &text, &defines, source.fast_math) {
                     Ok(library) => {

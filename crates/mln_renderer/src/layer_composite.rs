@@ -96,7 +96,9 @@ impl Composite {
     /// expresses.
     fn shader_blend(self) -> LayerCompositeBlendMode {
         match self.blend {
-            LayerBlendType::Normal | LayerBlendType::Screen | LayerBlendType::PlusLighter => LayerCompositeBlendMode::None,
+            LayerBlendType::Normal | LayerBlendType::Screen | LayerBlendType::PlusLighter => {
+                LayerCompositeBlendMode::None
+            }
             LayerBlendType::Multiply => LayerCompositeBlendMode::Multiply,
             LayerBlendType::Overlay => LayerCompositeBlendMode::Overlay,
             LayerBlendType::Color => LayerCompositeBlendMode::Color,

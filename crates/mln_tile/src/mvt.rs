@@ -256,11 +256,15 @@ impl MvtFeature<'_> {
         let lines = GeometryCollection::from(
             decode_geometry(self.feature.geometry_commands(), scale).map_err(TileError::Geometry)?,
         );
-        Ok(if self.layer.version() < 2 && self.feature.geom_type_value().and_then(MvtGeometryType::from_i32) == Some(MvtGeometryType::Polygon) {
-            fixup_polygons(&lines)
-        } else {
-            lines
-        })
+        Ok(
+            if self.layer.version() < 2
+                && self.feature.geom_type_value().and_then(MvtGeometryType::from_i32) == Some(MvtGeometryType::Polygon)
+            {
+                fixup_polygons(&lines)
+            } else {
+                lines
+            },
+        )
     }
 }
 

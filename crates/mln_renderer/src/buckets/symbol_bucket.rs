@@ -122,17 +122,33 @@ pub(crate) struct SortKeyRange {
     pub(crate) end: usize,
 }
 
+/// What a symbol's size depends on.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
-pub(crate) enum SizeConstancy {
+pub(crate) enum SizeKind {
+    /// Neither the zoom nor the feature.
     #[default]
-    Both,
-    Zoom,
-    Neither,
+    Constant,
+    /// The zoom: a camera expression.
+    Camera,
+    /// The feature: a source function.
+    Source,
+    /// Both: a composite function.
+    Composite,
+}
+
+impl SizeKind {
+    pub(crate) fn is_zoom_constant(self) -> bool {
+        matches!(self, SizeKind::Constant | SizeKind::Source)
+    }
+
+    pub(crate) fn is_feature_constant(self) -> bool {
+        matches!(self, SizeKind::Constant | SizeKind::Camera)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct ZoomEvaluatedSize {
-    pub(crate) constancy: SizeConstancy,
+    pub(crate) kind: SizeKind,
     pub(crate) size_t: f32,
     pub(crate) size: f32,
     pub(crate) layout_size: f32,
@@ -235,35 +251,33 @@ impl SymbolSizeBinder {
         match self {
             SymbolSizeBinder::Constant { layout_size, covering_ranges, expression } => {
                 let mut size = *layout_size;
-                let constancy = if covering_ranges.is_some() || expression.is_some() {
-                    SizeConstancy::Zoom
+                let kind = if covering_ranges.is_some() || expression.is_some() {
+                    SizeKind::Camera
                 } else {
-                    SizeConstancy::Both
+                    SizeKind::Constant
                 };
                 if let (Some((zoom_levels, size_levels)), Some(expression)) = (covering_ranges, expression) {
+                    // Even though we could get the exact value of the camera
+                    // function at the current zoom, we intentionally do not:
+                    // instead, we interpolate between the camera function
+                    // values at a pair of zoom stops covering [tile zoom,
+                    // tile zoom + 1] in order to be consistent with this
+                    // restriction on composite functions.
                     let t = mln_math::clamp_f32(expression.interpolation_factor(*zoom_levels, current_zoom), 0.0, 1.0);
                     size = size_levels.min + t * (size_levels.max - size_levels.min);
                 } else if let Some(expression) = expression {
                     size = expression.evaluate(&EvaluationContext::new(current_zoom), 0.0);
                 }
-                ZoomEvaluatedSize {
-                    constancy,
-                    size_t: unused,
-                    size,
-                    layout_size: *layout_size,
-                }
+                ZoomEvaluatedSize { kind, size_t: unused, size, layout_size: *layout_size }
             }
-            SymbolSizeBinder::SourceFunction { .. } => ZoomEvaluatedSize {
-                constancy: SizeConstancy::Zoom,
-                size_t: unused,
-                size: unused,
-                layout_size: unused,
-            },
+            SymbolSizeBinder::SourceFunction { .. } => {
+                ZoomEvaluatedSize { kind: SizeKind::Source, size_t: unused, size: unused, layout_size: unused }
+            }
             SymbolSizeBinder::CompositeFunction { expression, covering_zoom_stops, .. } => {
                 let size_interpolation_t =
                     mln_math::clamp_f32(expression.interpolation_factor(*covering_zoom_stops, current_zoom), 0.0, 1.0);
                 ZoomEvaluatedSize {
-                    constancy: SizeConstancy::Neither,
+                    kind: SizeKind::Composite,
                     size_t: size_interpolation_t,
                     size: unused,
                     layout_size: unused,

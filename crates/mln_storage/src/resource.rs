@@ -368,8 +368,18 @@ impl Resource {
                     // The spec defines `{bbox}` as `{bbox-epsg-3857}` under every
                     // projection mln-rs has: mercator, globe and vertical-perspective.
                     TileTemplateToken::Bbox | TileTemplateToken::BboxEpsg3857 => get_tile_bbox(x, y, z),
-                    TileTemplateToken::Prefix => [hex[x.rem_euclid(16) as usize] as char, hex[y.rem_euclid(16) as usize] as char].iter().collect(),
-                    TileTemplateToken::Ratio => if pixel_ratio > 1.0 { "@2x".to_owned() } else { String::new() },
+                    TileTemplateToken::Prefix => {
+                        [hex[x.rem_euclid(16) as usize] as char, hex[y.rem_euclid(16) as usize] as char]
+                            .iter()
+                            .collect()
+                    }
+                    TileTemplateToken::Ratio => {
+                        if pixel_ratio > 1.0 {
+                            "@2x".to_owned()
+                        } else {
+                            String::new()
+                        }
+                    }
                 }
             })
         });

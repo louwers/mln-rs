@@ -4,7 +4,9 @@
 use std::sync::Arc;
 
 use ::mln_map::MapProjection;
-use mln_map_types::{Camera, ConstrainMode, LogicalExtent, MapView, ProjectionMode, Viewport, ViewportMode, AxonometricMode};
+use mln_map_types::{
+    AxonometricMode, Camera, ConstrainMode, LogicalExtent, MapView, ProjectionMode, Viewport, ViewportMode,
+};
 use mln_style::types::{ProjectionDefinition, ProjectionType};
 use mln_util::geo::{NorthOrientation, WrapMode};
 use mln_util::projection::{ProjectedMeters, Projection};

@@ -20,7 +20,7 @@ use crate::camera_pose::CameraPose;
 use crate::map_view::{Camera, LogicalExtent, MapView, Viewport};
 use crate::mode::{ConstrainMode, ViewportMode};
 use crate::projection::{ProjectionData, mercator_tile_matrix};
-use crate::projection_mode::{ProjectionMode, AxonometricMode};
+use crate::projection_mode::{AxonometricMode, ProjectionMode};
 use crate::tile_coordinate::TileCoordinate;
 use crate::vertical_perspective_projection::VerticalPerspectiveProjection;
 

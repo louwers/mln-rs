@@ -1132,7 +1132,7 @@ impl BucketWriter<'_> {
             size,
             offset,
             writing_modes,
-            angle: if allow_vertical_placement && writing_modes == WritingMode::VERTICAL {
+            angle: if allow_vertical_placement && writing_modes == WritingMode::Vertical {
                 std::f32::consts::FRAC_PI_2
             } else {
                 0.0
@@ -1151,8 +1151,8 @@ impl BucketWriter<'_> {
                 let info = run(size, icon_offset, writing_modes, line, PoolRange::default());
                 add_run(buffer, &info, run_quads, |_, _| {})
             };
-            icon.run = add(quads.icon.as_deref().unwrap_or_default(), WritingMode::NONE);
-            icon.vertical_run = quads.vertical_icon.as_deref().map(|run_quads| add(run_quads, WritingMode::VERTICAL));
+            icon.run = add(quads.icon.as_deref().unwrap_or_default(), WritingMode::None);
+            icon.vertical_run = quads.vertical_icon.as_deref().map(|run_quads| add(run_quads, WritingMode::Vertical));
             let length = buffer.attribute_data.len();
             for binders in self.paint_properties.values_mut() {
                 binders.icon_binders.populate_vertex_vectors(
@@ -1218,7 +1218,7 @@ impl BucketWriter<'_> {
                 }
             }
             if !quads.vertical.is_empty() {
-                text.runs.vertical = Some(add(&quads.vertical, WritingMode::VERTICAL));
+                text.runs.vertical = Some(add(&quads.vertical, WritingMode::Vertical));
             }
             let length = buffer.attribute_data.len();
             populate_section(section.unwrap_or(0), length);

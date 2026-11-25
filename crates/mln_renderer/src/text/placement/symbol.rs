@@ -9,7 +9,7 @@ use mln_text::anchor_alignment;
 
 use super::context::PlacementContext;
 use super::{CircleKey, JointPlacement, Placement, VariableOffset};
-use crate::layout::symbol_instance::{IconPart, SymbolInstance, TextPart, WritingMode};
+use crate::layout::symbol_instance::{IconPart, SymbolInstance, TextPart};
 use crate::layout::symbol_projection::evaluate_size_for_feature;
 use crate::text::collision_feature::CollisionFeature;
 use crate::text::collision_index::{LabelRun, OverlapMode, PlacedFeatureResult};
@@ -241,9 +241,7 @@ impl Placement {
         mut place: impl FnMut(&mut Self, bool) -> PlacedText,
     ) -> PlacedText {
         let bucket = ctx.bucket;
-        let writing_modes = text.runs.writing_modes();
-        let has_vertical = writing_modes == WritingMode::Vertical || writing_modes == WritingMode::Both;
-        if !bucket.allow_vertical_placement || !has_vertical {
+        if !bucket.allow_vertical_placement || !text.runs.writing_modes().has_vertical() {
             return place(self, false);
         }
         debug_assert_ne!(bucket.placement_modes.as_slice(), []);

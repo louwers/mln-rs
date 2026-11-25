@@ -34,6 +34,15 @@ pub(crate) enum RangeContent {
 }
 
 impl RangeContent {
+    fn new(is_dash: bool, is_zero_length: bool) -> Self {
+        match (is_dash, is_zero_length) {
+            (true, false) => RangeContent::Dash,
+            (false, false) => RangeContent::Gap,
+            (true, true) => RangeContent::ZeroLengthDash,
+            (false, true) => RangeContent::ZeroLengthGap,
+        }
+    }
+
     /// Whether this range represents a dash (as opposed to a gap).
     fn is_dash(self) -> bool {
         matches!(self, RangeContent::Dash | RangeContent::ZeroLengthDash)
@@ -62,12 +71,7 @@ fn dash_ranges(dasharray: &[f32], stretch: f32) -> Vec<DashRange> {
     let mut is_dash = true;
 
     let mut ranges = Vec::with_capacity(dasharray.len());
-    let content = if dasharray[0] == 0.0 {
-        if is_dash { RangeContent::ZeroLengthDash } else { RangeContent::ZeroLengthGap }
-    } else {
-        if is_dash { RangeContent::Dash } else { RangeContent::Gap }
-    };
-    ranges.push(DashRange { left, right, content });
+    ranges.push(DashRange { left, right, content: RangeContent::new(is_dash, dasharray[0] == 0.0) });
 
     let mut current_dash_length = dasharray[0];
     for &dash_length in &dasharray[1..] {
@@ -77,12 +81,7 @@ fn dash_ranges(dasharray: &[f32], stretch: f32) -> Vec<DashRange> {
         current_dash_length += dash_length;
         right = current_dash_length * stretch;
 
-        let content = if dash_length == 0.0 {
-            if is_dash { RangeContent::ZeroLengthDash } else { RangeContent::ZeroLengthGap }
-        } else {
-            if is_dash { RangeContent::Dash } else { RangeContent::Gap }
-        };
-        ranges.push(DashRange { left, right, content });
+        ranges.push(DashRange { left, right, content: RangeContent::new(is_dash, dash_length == 0.0) });
     }
 
     ranges

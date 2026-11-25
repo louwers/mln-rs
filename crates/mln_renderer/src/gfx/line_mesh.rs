@@ -372,7 +372,7 @@ impl Strip<'_> {
         let slices = (approx_angle.to_degrees() / DEGREES_PER_SLICE).round() as u32;
         let cos_angle = turn.prev_normal.dot(turn.next_normal);
         let turns_left = turn.turns_left();
-        let side = if turns_left { VertexSide::Right } else { VertexSide::Left };
+        let (side, sign) = if turns_left { (VertexSide::Right, -1.0) } else { (VertexSide::Left, 1.0) };
         for m in 1..slices {
             let mut t = f64::from(m) / f64::from(slices);
             if t != 0.5 {
@@ -384,7 +384,7 @@ impl Strip<'_> {
                 t += t * t2 * (t - 1.0) * (a * t2 * t2 + b);
             }
             let normal = turn.prev_normal.lerp(turn.next_normal, t).normalize();
-            let slice = self.push(at, normal, VertexRound::Sharp, side, 0.0);
+            let slice = self.push(at, normal * sign, VertexRound::Sharp, side, 0.0);
             // Each slice fans out from the vertex on the inside of the turn.
             self.last[usize::from(turns_left)] = Some(slice);
         }

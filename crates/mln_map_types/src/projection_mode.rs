@@ -18,11 +18,7 @@ impl AxonometricMode {
 
 impl From<bool> for AxonometricMode {
     fn from(value: bool) -> Self {
-        if value {
-            AxonometricMode::Enabled
-        } else {
-            AxonometricMode::Disabled
-        }
+        if value { AxonometricMode::Enabled } else { AxonometricMode::Disabled }
     }
 }
 

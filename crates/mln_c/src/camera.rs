@@ -7,9 +7,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use ::mln_map::{
-    AnimationOptions, BoundOptions, Camera, CameraDelta, CameraOptions, CameraUpdate, CameraUpdateMode, ConstrainMode,
-    FreeCameraOptions, GesturePhase, MapDebugOptions, NorthOrientation, ProjectionMode, TileLodMode, TransitionEnd,
-    TransitionOutcome, ViewportMode, AxonometricMode,
+    AnimationOptions, AxonometricMode, BoundOptions, Camera, CameraDelta, CameraOptions, CameraUpdate,
+    CameraUpdateMode, ConstrainMode, FreeCameraOptions, GesturePhase, MapDebugOptions, NorthOrientation,
+    ProjectionMode, TileLodMode, TransitionEnd, TransitionOutcome, ViewportMode,
 };
 use mln_runtime::{Applied, CameraFitArea, CameraFitOptions, CameraFitUpdate, TileOptions, ViewportOptions};
 use mln_util::UnitBezier;

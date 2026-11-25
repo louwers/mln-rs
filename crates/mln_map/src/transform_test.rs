@@ -13,8 +13,9 @@ use std::time::Duration;
 
 use glam::{DMat4, DQuat, DVec3, DVec4, EulerRot, dvec3};
 use mln_map_types::{
-    CameraDelta, CameraError, CameraMomentum, CameraUpdate, CameraUpdateMode, CameraVelocity, GesturePhase,
-    MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumGlide, MomentumSnap, TileProjector, TransitionOutcome, AxonometricMode,
+    AxonometricMode, CameraDelta, CameraError, CameraMomentum, CameraUpdate, CameraUpdateMode, CameraVelocity,
+    GesturePhase, MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumGlide, MomentumSnap, TileProjector,
+    TransitionOutcome,
 };
 use mln_math::deg2rad;
 use mln_style::types::ProjectionType;

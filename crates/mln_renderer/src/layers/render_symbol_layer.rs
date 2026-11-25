@@ -48,8 +48,8 @@ use super::cast_matrix;
 use crate::bucket::Bucket;
 use crate::bucket_geometry::{BucketGeometry, bucket_vertices, copied_indexes, copied_vertices, paint_vertices};
 use crate::buckets::symbol_bucket::{
-    Buffer, CollisionBoxDynamicVertex, CollisionBoxLayoutVertex, CollisionBuffer, PaintProperties, SizeConstancy,
-    SymbolBucket, SymbolDynamicLayoutVertex, SymbolOpacityVertex,
+    Buffer, CollisionBoxDynamicVertex, CollisionBoxLayoutVertex, CollisionBuffer, PaintProperties, SymbolBucket,
+    SymbolDynamicLayoutVertex, SymbolOpacityVertex,
 };
 use crate::draw::{DrawGeometry, DrawObjects, Textures, copy_shared_attributes};
 use crate::geometry::feature_index::FeatureIndex;
@@ -974,8 +974,8 @@ impl RenderSymbolLayer {
                 is_text_prop: i32::from(is_text),
                 rotate_symbol: i32::from(rotate_in_shader),
                 pitch_with_map: i32::from(pitch_with_map),
-                is_size_zoom_constant: i32::from(size.constancy != SizeConstancy::Neither),
-                is_size_feature_constant: i32::from(size.constancy == SizeConstancy::Both),
+                is_size_zoom_constant: i32::from(size.kind.is_zoom_constant()),
+                is_size_feature_constant: i32::from(size.kind.is_feature_constant()),
                 is_offset: i32::from(data.is_offset),
                 size_t: size.size_t,
                 size: size.size,
@@ -1450,7 +1450,7 @@ impl TypedLayer for RenderSymbolLayer {
                 let draw_atlases = if is_text {
                     tile_atlases.text.get_or_insert_with(|| {
                         let text_size_is_zoom_constant =
-                            bucket.text_size_binder.evaluate_for_zoom(current_zoom).constancy != SizeConstancy::Neither;
+                            bucket.text_size_binder.evaluate_for_zoom(current_zoom).kind.is_zoom_constant();
                         AtlasBinding::new(
                             Some(atlases.clone()),
                             Some(ID_SYMBOL_IMAGE_ICON_TEXTURE),

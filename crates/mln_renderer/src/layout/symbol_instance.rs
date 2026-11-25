@@ -5,7 +5,7 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use mln_style::feature::GeometryCoordinates;
-use mln_style::types::{SymbolAnchorType, TextJustifyType, VariableAnchorOffsetCollection};
+use mln_style::types::{SymbolAnchorType, TextJustifyType, TextWritingModeType, VariableAnchorOffsetCollection};
 use mln_text::anchor_justification;
 use mln_text::glyph::Shaping;
 use mln_util::serialization::payload::pod;
@@ -26,9 +26,18 @@ pub(crate) enum WritingMode {
 }
 
 impl WritingMode {
-    pub(crate) const NONE: WritingMode = WritingMode::None;
-    pub(crate) const VERTICAL: WritingMode = WritingMode::Vertical;
-    pub(crate) const BOTH: WritingMode = WritingMode::Both;
+    pub(crate) fn new(horizontal: bool, vertical: bool) -> Self {
+        match (horizontal, vertical) {
+            (false, false) => WritingMode::None,
+            (true, false) => WritingMode::Horizontal,
+            (false, true) => WritingMode::Vertical,
+            (true, true) => WritingMode::Both,
+        }
+    }
+
+    pub(crate) fn has_vertical(self) -> bool {
+        matches!(self, WritingMode::Vertical | WritingMode::Both)
+    }
 }
 
 /// The collision boxes and keys of a bucket's symbol instances, which they
@@ -137,19 +146,14 @@ pub(crate) struct SymbolQuadSet {
 
 impl SymbolQuadSet {
     pub(crate) fn has_text(&self) -> bool {
-        self.text_writing_modes() != WritingMode::NONE
+        self.text_writing_modes() != WritingMode::None
     }
 
     /// The writing modes the text has quads in.
     pub(crate) fn text_writing_modes(&self) -> WritingMode {
         let horizontal = self.horizontal.iter().any(|quads| !quads.is_empty());
         let vertical = !self.vertical.is_empty();
-        match (horizontal, vertical) {
-            (false, false) => WritingMode::None,
-            (true, false) => WritingMode::Horizontal,
-            (false, true) => WritingMode::Vertical,
-            (true, true) => WritingMode::Both,
-        }
+        WritingMode::new(horizontal, vertical)
     }
 }
 
@@ -193,21 +197,17 @@ impl TextRuns {
             .map(|run| run as usize)
     }
 
-    /// Each distinct run, in buffer order, with whether it is the vertical
-    /// one.
-    pub(crate) fn all(&self) -> impl Iterator<Item = (usize, bool)> + '_ {
-        self.horizontal().map(|run| (run, false)).chain(self.vertical.map(|run| (run as usize, true)))
+    /// Each distinct run, in buffer order, with its orientation.
+    pub(crate) fn all(&self) -> impl Iterator<Item = (usize, TextWritingModeType)> + '_ {
+        self.horizontal()
+            .map(|run| (run, TextWritingModeType::Horizontal))
+            .chain(self.vertical.map(|run| (run as usize, TextWritingModeType::Vertical)))
     }
 
     pub(crate) fn writing_modes(&self) -> WritingMode {
         let horizontal = self.horizontal.iter().any(Option::is_some);
         let vertical = self.vertical.is_some();
-        match (horizontal, vertical) {
-            (false, false) => WritingMode::None,
-            (true, false) => WritingMode::Horizontal,
-            (false, true) => WritingMode::Vertical,
-            (true, true) => WritingMode::Both,
-        }
+        WritingMode::new(horizontal, vertical)
     }
 }
 
@@ -248,9 +248,10 @@ pub(crate) struct IconPart {
 }
 
 impl IconPart {
-    /// Each run, with whether it is the vertical one.
-    pub(crate) fn runs(&self) -> impl Iterator<Item = (usize, bool)> {
-        std::iter::once((self.run as usize, false)).chain(self.vertical_run.map(|run| (run as usize, true)))
+    /// Each run, with its orientation.
+    pub(crate) fn runs(&self) -> impl Iterator<Item = (usize, TextWritingModeType)> {
+        std::iter::once((self.run as usize, TextWritingModeType::Horizontal))
+            .chain(self.vertical_run.map(|run| (run as usize, TextWritingModeType::Vertical)))
     }
 
     /// The collision feature of the icon beside `vertical` text.

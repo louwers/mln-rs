@@ -90,11 +90,12 @@ pub(crate) fn gl_coord_matrix(
 /// for.
 #[must_use]
 pub(crate) fn evaluate_size_for_feature(size: &ZoomEvaluatedSize, symbol: &PlacedSymbol) -> f32 {
-    use crate::buckets::symbol_bucket::SizeConstancy;
-    match size.constancy {
-        SizeConstancy::Both => size.size,
-        SizeConstancy::Zoom => symbol.lower_size,
-        SizeConstancy::Neither => symbol.lower_size + size.size_t * (symbol.upper_size - symbol.lower_size),
+    if size.kind.is_feature_constant() {
+        size.size
+    } else if size.kind.is_zoom_constant() {
+        symbol.lower_size
+    } else {
+        symbol.lower_size + size.size_t * (symbol.upper_size - symbol.lower_size)
     }
 }
 
@@ -487,7 +488,7 @@ impl LabelPlacer<'_, '_> {
     /// itself could show both or neither.
     fn check_upright(&self, first: Vec2, last: Vec2) -> Result<(), Unplaced> {
         let writing_modes = self.label.writing_modes;
-        if writing_modes == WritingMode::BOTH {
+        if writing_modes == WritingMode::Both {
             let aspect_ratio = self.label_plane.viewport.x / self.label_plane.viewport.y;
             let rise = (last.y - first.y).abs();
             let run = (last.x - first.x).abs() * aspect_ratio;
@@ -495,7 +496,7 @@ impl LabelPlacer<'_, '_> {
                 return Err(Unplaced::UseVertical);
             }
         }
-        let upside_down = if writing_modes == WritingMode::VERTICAL { first.y < last.y } else { first.x > last.x };
+        let upside_down = if writing_modes == WritingMode::Vertical { first.y < last.y } else { first.x > last.x };
         if upside_down { Err(Unplaced::NeedsFlipping) } else { Ok(()) }
     }
 }
@@ -571,7 +572,7 @@ pub(crate) fn reproject_line_labels(
     for symbol in symbols {
         let glyph_count = symbol.glyph_offsets.len();
         let vertical_shows = std::mem::take(&mut show_vertical);
-        if symbol.hidden || (symbol.writing_modes == WritingMode::VERTICAL && !vertical_shows) {
+        if symbol.hidden || (symbol.writing_modes == WritingMode::Vertical && !vertical_shows) {
             hide_glyphs(glyph_count, vertices);
             continue;
         }
