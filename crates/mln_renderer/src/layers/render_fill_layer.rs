@@ -812,9 +812,9 @@ impl RenderLayer for RenderFillLayer {
     fn query_intersects_feature(
         &self,
         region: &QueryRegion<'_>,
-        _feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
-        geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
-        _feature_state: &mln_style::expression::FeatureState,
+        _feature: &dyn mln_style::feature::GeometryTileFeature,
+        geometry: &mln_style::feature::GeometryCollection,
+        _feature_state: &mln_style::feature::FeatureState,
     ) -> bool {
         let evaluated = &self.values.evaluated.paint;
         let translated_query_geometry = crate::geometry::feature_index::FeatureIndex::translate_query_geometry(

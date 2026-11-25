@@ -1,8 +1,8 @@
 use glam::Vec2;
 use mln_math::deg2radf;
+use mln_style::feature::GeometryCoordinate;
 use mln_text::PositionedIcon;
 use mln_text::glyph::Shaping;
-use mln_tile_id::geometry_tile_data::GeometryCoordinate;
 use mln_util::Padding;
 
 use crate::geometry::anchor::{Anchor, segments, vertex_behind};

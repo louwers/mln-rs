@@ -1,4 +1,4 @@
-use mln_tile_id::geometry_tile_data::GeometryCoordinate;
+use mln_style::feature::GeometryCoordinate;
 use mln_util::hash::HashMap;
 
 use crate::layout::symbol_feature::SymbolFeature;
@@ -98,9 +98,9 @@ pub(crate) fn merge_lines(features: &mut [SymbolFeature]) {
 mod tests {
     use feature::Value;
     use geometry::Point;
+    use mln_style::feature::{GeometryCollection, GeometryCoordinates, GeometryTileFeature};
     use mln_text::glyph::GlyphIDType;
     use mln_text::{SectionOptions, TaggedString};
-    use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates, GeometryTileFeature};
     use mln_util::geometry::FeatureType;
 
     use super::*;

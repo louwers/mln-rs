@@ -3,9 +3,9 @@
 //! value, rather than once per feature for each layer.
 
 use mln_style::expression::{EvaluationContext, Expr, Value};
+use mln_style::feature::GeometryTileFeature;
 use mln_style::filter::Filter;
 use mln_tile::{FeatureGroups, TileLayer};
-use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::hash::HashMap;
 
 /// A scalar value that an equality filter compares, as a key that equal

@@ -9,10 +9,10 @@ use feature::{PropertyMap, Value as MbglValue};
 use mln_style::conversion::{Convertible, Error};
 use mln_style::expression::dsl::{interpolate, linear, literal, zoom};
 use mln_style::expression::{EvaluationContext, Functions, create_expression_from_str};
+use mln_style::feature::GeometryTileFeature;
 use mln_style::property::convert::convert_property_value;
 use mln_style::property::expression::PropertyExpression;
 use mln_style::property::value::PropertyValue;
-use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::Padding;
 use mln_util::geometry::FeatureType;
 

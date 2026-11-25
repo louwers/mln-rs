@@ -1,10 +1,6 @@
-//! Tile ids (canonical, unwrapped and overscaled), tile ranges, feature
-//! geometry, and the interface through which expressions and buckets read a
-//! feature.
+//! Tile ids (canonical, unwrapped and overscaled) and tile ranges.
 
-pub mod geometry_tile_data;
 pub mod tile_id;
 pub mod tile_range;
 
-pub use geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
 pub use tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};

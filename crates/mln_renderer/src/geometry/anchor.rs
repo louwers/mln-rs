@@ -1,5 +1,5 @@
 use glam::Vec2;
-use mln_tile_id::geometry_tile_data::GeometryCoordinate;
+use mln_style::feature::GeometryCoordinate;
 
 /// Where a symbol is placed: a point, and for a label along a line, the
 /// line's angle there and the index of the segment the point is on.

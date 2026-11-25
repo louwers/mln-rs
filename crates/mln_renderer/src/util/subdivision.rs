@@ -4,8 +4,8 @@
 
 use geometry::Point;
 use glam::DVec2;
+use mln_style::feature::{GeometryCollection, GeometryCoordinates};
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates};
 use mln_util::constants::EXTENT;
 use mln_util::hash::HashMap;
 

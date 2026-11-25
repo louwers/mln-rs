@@ -12,7 +12,7 @@ use std::ops::Range;
 use std::sync::{Arc, OnceLock};
 
 use feature::{Identifier, PropertyMap, Value};
-use mln_tile_id::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
+use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
 use mln_util::constants::EXTENT;
 use mln_util::geometry::FeatureType;
 use mln_util::hash::HashMap;

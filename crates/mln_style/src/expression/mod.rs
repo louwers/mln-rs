@@ -30,8 +30,8 @@ pub use dependency::{Dependency, collect_global_state_refs, feature_property_key
 pub(crate) use evaluate::evaluate_feature;
 pub(crate) use evaluate::mbgl_to_expression_value;
 pub use evaluate::{
-    EvalResult, EvaluationContext, EvaluationError, EvaluationResult, FeatureState, GlobalStateMap,
-    evaluate_accumulated, evaluate_feature_with_context, with_geojson_feature,
+    EvalResult, EvaluationContext, EvaluationError, EvaluationResult, GlobalStateMap, evaluate_accumulated,
+    evaluate_feature_with_context, with_geojson_feature,
 };
 pub use formatted::{Formatted, FormattedSection};
 pub use forms::case::Case;

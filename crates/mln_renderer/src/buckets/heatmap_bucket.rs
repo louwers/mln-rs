@@ -9,11 +9,11 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE};
 use mln_map_types::MapMode;
 use mln_style::expression::Value;
+use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
 use mln_style::layers::Heatmap;
 use mln_style::layers::heatmap_layer_properties::HeatmapPaintProperties;
 use mln_text::atlas::ImagePositions;
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
 use mln_util::constants::EXTENT;
 use mln_vec_map::VecMap;
 

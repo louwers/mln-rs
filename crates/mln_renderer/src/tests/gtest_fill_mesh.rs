@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use geometry::Point;
 use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
+use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
 use mln_util::constants::EXTENT;
 
 use crate::buckets::fill_bucket::FillLayoutVertex;

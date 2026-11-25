@@ -1662,7 +1662,7 @@ impl RenderOrchestrator {
         source_id: &str,
         source_layer_id: Option<&str>,
         feature_id: &str,
-        state: &mln_style::expression::FeatureState,
+        state: &mln_style::feature::FeatureState,
     ) {
         if let Some(source) = self.source_tiles_mut(source_id) {
             source.info.feature_state.update_state(source_layer_id, feature_id, state);
@@ -1674,10 +1674,10 @@ impl RenderOrchestrator {
         source_id: &str,
         source_layer_id: Option<&str>,
         feature_id: &str,
-    ) -> mln_style::expression::FeatureState {
+    ) -> mln_style::feature::FeatureState {
         match self.source_tiles(source_id) {
             Some(source) => source.info.feature_state.state(source_layer_id, feature_id),
-            None => mln_style::expression::FeatureState::default(),
+            None => mln_style::feature::FeatureState::default(),
         }
     }
 

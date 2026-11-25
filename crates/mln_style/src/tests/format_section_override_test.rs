@@ -7,7 +7,6 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use feature::{PropertyMap, Value as MbglValue};
-use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::Color;
 use mln_util::geometry::FeatureType;
 use mln_vec_map::{VecMap, VecSet};
@@ -21,6 +20,7 @@ use crate::expression::parse::ParsingContext;
 use crate::expression::type_::Type;
 use crate::expression::value::{ObjectType, Value};
 use crate::expression::{Dependency, EvaluationContext, Expr, Functions, GlobalStateMap};
+use crate::feature::GeometryTileFeature;
 use crate::layer::LayerStyle;
 use crate::layers::symbol_layer::{
     SymbolLayerPaintPropertyOverrides as MockOverrides, format_section_override as new_override, set_overrides,

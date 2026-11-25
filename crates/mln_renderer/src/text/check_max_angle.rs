@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use glam::Vec2;
-use mln_tile_id::geometry_tile_data::GeometryCoordinate;
+use mln_style::feature::GeometryCoordinate;
 
 use crate::geometry::anchor::{Anchor, segments, vertex_behind};
 

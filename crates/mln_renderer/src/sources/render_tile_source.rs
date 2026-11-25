@@ -24,9 +24,9 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::MapDebugOptions;
 use mln_style::Source;
+use mln_style::feature::GeometryCoordinates;
 use mln_style::types::{LineCapType, LineJoinType, TranslateAnchorType};
 use mln_tile_id::OverscaledTileID;
-use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::Color;
 use mln_util::constants::EXTENT;
 use mln_util::error::Error;

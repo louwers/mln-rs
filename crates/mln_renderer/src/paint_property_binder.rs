@@ -10,13 +10,13 @@
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_style::expression::{Dependency, EvaluationContext, Image, Value, ValueConverter};
+use mln_style::feature::GeometryTileFeature;
 use mln_style::property::evaluated::{Evaluated, Faded};
 use mln_style::property::expression::PropertyExpression;
 use mln_style::types::LineCapType;
 use mln_text::atlas::ImagePositions;
 use mln_tile::TileLayer;
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::Color;
 use mln_util::feature::feature_id_to_string;
 use mln_util::range::Range;
@@ -191,7 +191,7 @@ impl<T: BinderValue> PaintPropertyBinderKind<T> {
         vertex_offset: usize,
         range: &FeatureVertexRange,
         feature: &dyn GeometryTileFeature,
-        state: &mln_style::expression::FeatureState,
+        state: &mln_style::feature::FeatureState,
     ) {
         match self {
             Self::Constant { .. } => {}
@@ -837,7 +837,7 @@ macro_rules! paint_property_binders {
             #[expect(clippy::too_many_arguments, reason = "the feature and its index range, its patterns, the tile and the formatted section that evaluate every property")]
             pub(crate) fn populate_vertex_vectors(
                 &mut self,
-                feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
+                feature: &dyn mln_style::feature::GeometryTileFeature,
                 length: usize,
                 index: usize,
                 pattern_positions: &mln_text::atlas::ImagePositions,

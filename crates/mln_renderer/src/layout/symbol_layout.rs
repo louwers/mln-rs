@@ -12,6 +12,7 @@ use glam::Vec2;
 use mln_map_types::MapMode;
 use mln_style::expression::formatted::K_FORMATTED_SECTION_TEXT_COLOR;
 use mln_style::expression::{EvaluationContext, GlobalStateMap, Value};
+use mln_style::feature::{GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
 use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::property::evaluated::Evaluated;
@@ -28,7 +29,6 @@ use mln_text::shaping::{PositionedIcon, ShapingOptions, anchor_justification, sh
 use mln_text::tagged_string::{SectionIndex, SectionOptions};
 use mln_text::{ShapedText, TaggedString, shape_arabic, starts_right_to_left};
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
 use mln_util::constants::{EXTENT, ONE_EM, TILE_SIZE_D};
 use mln_util::error::Error;
 use mln_util::geometry::FeatureType;
@@ -1004,7 +1004,7 @@ impl SymbolLayout {
             }
             SymbolPlacementType::Point => match feature.get_type() {
                 FeatureType::Polygon => {
-                    for polygon in mln_tile::geometry_tile_data::classify_rings(&feature.geometry) {
+                    for polygon in mln_style::feature::classify_rings(&feature.geometry) {
                         let rings: polylabel::Polygon<f64> = polygon
                             .iter()
                             .map(|ring| ring.iter().map(|p| Point::new(f64::from(p.x), f64::from(p.y))).collect())

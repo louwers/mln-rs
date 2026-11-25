@@ -5,7 +5,6 @@
 use std::sync::{Arc, Weak};
 
 use geojson::GeoJson;
-use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::geo::LatLngBounds;
@@ -17,6 +16,7 @@ pub use super::custom::{CustomGeometryProvider, TileOptions};
 use super::custom::{CustomGeometrySourceOptions, CustomGeometrySourceType};
 use super::geojson::TileFeatures;
 use crate::custom_tile_loader::{CustomProvider, TileFunction};
+use crate::feature::CanonicalTileID;
 use crate::source::{Source, SourceData};
 
 #[derive(Clone)]

@@ -1338,7 +1338,7 @@ impl SourceTiles {
                     continue;
                 }
 
-                let tile_space_query_geometry: mln_tile_id::geometry_tile_data::GeometryCoordinates =
+                let tile_space_query_geometry: mln_style::feature::GeometryCoordinates =
                     query_geometry.iter().map(|c| TileCoordinate::to_geometry_coordinate(copy, c)).collect();
 
                 if !globe {

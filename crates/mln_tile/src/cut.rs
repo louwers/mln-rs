@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
-use mln_tile_id::{CanonicalTileID, GeometryCollection, GeometryCoordinates, GeometryTileFeature};
+use mln_style::feature::{GeometryCollection, GeometryCoordinates, GeometryTileFeature};
+use mln_tile_id::CanonicalTileID;
 use mln_util::constants::EXTENT;
 use mln_util::geometry::FeatureType;
 use mln_util::hash::HashMap;

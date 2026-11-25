@@ -44,23 +44,23 @@ const RENDER_PASS: RenderPass = RenderPass::Translucent;
 
 // query
 fn project_point(
-    p: mln_tile_id::geometry_tile_data::GeometryCoordinate,
+    p: mln_style::feature::GeometryCoordinate,
     projector: &TileProjector<'_>,
     size: mln_util::size::Size,
-) -> mln_tile_id::geometry_tile_data::GeometryCoordinate {
+) -> mln_style::feature::GeometryCoordinate {
     let pos = projector.project(&Point::new(f64::from(p.x), f64::from(p.y)), 0.0).point;
     // `(float(pos.x) + 1) * size.width * 0.5`: float, then double.
-    mln_tile_id::geometry_tile_data::GeometryCoordinate::new(
+    mln_style::feature::GeometryCoordinate::new(
         (f64::from((pos.x as f32 + 1.0) * size.width as f32) * 0.5) as i16,
         (f64::from((pos.y as f32 + 1.0) * size.height as f32) * 0.5) as i16,
     )
 }
 
 fn project_query_geometry(
-    query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
+    query_geometry: &mln_style::feature::GeometryCoordinates,
     projector: &TileProjector<'_>,
     size: mln_util::size::Size,
-) -> mln_tile_id::geometry_tile_data::GeometryCoordinates {
+) -> mln_style::feature::GeometryCoordinates {
     query_geometry.iter().map(|p| project_point(*p, projector, size)).collect()
 }
 
@@ -308,9 +308,9 @@ impl RenderLayer for RenderCircleLayer {
     fn query_intersects_feature(
         &self,
         region: &QueryRegion<'_>,
-        feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
-        geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
-        feature_state: &mln_style::expression::FeatureState,
+        feature: &dyn mln_style::feature::GeometryTileFeature,
+        geometry: &mln_style::feature::GeometryCollection,
+        feature_state: &mln_style::feature::FeatureState,
     ) -> bool {
         use crate::geometry::feature_index::FeatureIndex;
 

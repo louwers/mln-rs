@@ -6,7 +6,6 @@ use std::sync::{Arc, OnceLock};
 use feature::{Feature, PropertyMap, Value};
 use geojson::GeoJson;
 use mln_geojson::{cluster, tile};
-use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
@@ -18,6 +17,7 @@ use crate::Edit;
 use crate::conversion::geojson::convert_json_geojson;
 use crate::conversion::{Convertible, Error as ConversionError};
 use crate::expression::{Expr, Functions, evaluate_accumulated, from_expression_value};
+use crate::feature::CanonicalTileID;
 use crate::layer::SourceKind;
 use crate::source::{
     Data, Described, Fetch, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,

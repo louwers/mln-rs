@@ -572,7 +572,7 @@ fn queries_and_feature_state_read_the_shown_contents() {
     assert_eq!(query(&tile), [feature::Identifier::Uint(1)], "the shown contents' data");
 
     // A feature state edit reaches the shown contents, over their data.
-    let mut state = mln_style::expression::FeatureState::new();
+    let mut state = mln_style::feature::FeatureState::new();
     state.insert("hover".to_owned(), feature::Value::Bool(true));
     let (source, _) = tile.store.source_mut(key).expect("the source");
     source.info.feature_state.update_state(None, "1", &state);

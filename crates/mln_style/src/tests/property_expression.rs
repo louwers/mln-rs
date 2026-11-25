@@ -1,7 +1,5 @@
 use feature::{Value as MbglValue, geojson};
 use geo_types::{Geometry, LineString, MultiLineString, MultiPoint, Point, Polygon};
-use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::GeometryCollection;
 use mln_util::geometry::FeatureType;
 use mln_vec_map::VecSet;
 
@@ -9,6 +7,7 @@ use super::util::{StubGeometryTileFeature, property_map};
 use crate::expression::dsl::{self, get, get_str, image, linear, literal, literal_str, number, step, zoom};
 use crate::expression::parse::create_expression_from_str;
 use crate::expression::{Dependency, EvaluationContext, Functions, Image, Value};
+use crate::feature::{CanonicalTileID, GeometryCollection};
 use crate::property::evaluated::Evaluated;
 use crate::property::evaluation::PropertyEvaluationParameters;
 use crate::property::expression::PropertyExpression;
@@ -271,7 +270,7 @@ fn image_expression() {
 
 /// Converts `geometry` from lon/lat to tile coordinates.
 fn convert_geometry(geometry: &Geometry<f64>, canonical: &CanonicalTileID) -> GeometryCollection {
-    mln_tile::geometry_tile_data::convert_geometry_to_tile(geometry, canonical)
+    crate::feature::convert_geometry_to_tile(geometry, canonical)
 }
 
 fn pt(x: f64, y: f64) -> Point<f64> {

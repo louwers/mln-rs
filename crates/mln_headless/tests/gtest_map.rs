@@ -4096,7 +4096,7 @@ fn feature_state_changes_rendered_style() {
 
     // Setting feature-state "active" flips the rendered fill to red on the next
     // frame, with no style edit
-    let mut active = mln_style::expression::FeatureState::new();
+    let mut active = mln_style::feature::FeatureState::new();
     active.insert("active".into(), Value::Bool(true));
     test.frontend().renderer().set_feature_state("fs", None, "1", &active);
     {
@@ -4160,7 +4160,7 @@ fn feature_state_changes_rendered_extrusion() {
 
     assert!(red_over_blue(&test.render().image) < -40, "blue before the state is set");
 
-    let mut active = mln_style::expression::FeatureState::new();
+    let mut active = mln_style::feature::FeatureState::new();
     active.insert("active".into(), Value::Bool(true));
     test.frontend().renderer().set_feature_state("fs", None, "1", &active);
     assert!(red_over_blue(&test.render().image) > 40, "red once the state is set");
@@ -4223,13 +4223,13 @@ fn render_selected_halves(test: &MapTest) -> (bool, bool) {
     (is_selected(width / 4), is_selected(width * 3 / 4))
 }
 
-fn feature_state(key: &str) -> mln_style::expression::FeatureState {
-    let mut state = mln_style::expression::FeatureState::new();
+fn feature_state(key: &str) -> mln_style::feature::FeatureState {
+    let mut state = mln_style::feature::FeatureState::new();
     state.insert(key.into(), Value::Bool(true));
     state
 }
 
-fn set_state(test: &MapTest, feature_id: &str, state: &mln_style::expression::FeatureState) {
+fn set_state(test: &MapTest, feature_id: &str, state: &mln_style::feature::FeatureState) {
     test.frontend().renderer().set_feature_state("fs", None, feature_id, state);
 }
 

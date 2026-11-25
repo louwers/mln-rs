@@ -2,9 +2,9 @@
 //! outline them, over the same vertices.
 
 use geometry::Point;
-use mln_tile::geometry_tile_data::{classify_rings, limit_holes, signed_area};
+use mln_style::feature::{GeometryCollection, classify_rings, signed_area};
+use mln_tile::geometry_tile_data::limit_holes;
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::GeometryCollection;
 
 use crate::buckets::fill_bucket::FillLayoutVertex;
 use crate::gfx::mesh::Indexed;

@@ -6,11 +6,11 @@ use mln_gfx::shaders::shader_defines::{
     ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE,
 };
 use mln_style::expression::{Image, Value};
+use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
 use mln_style::layers::Fill;
 use mln_style::layers::fill_layer_properties::{FillLayoutProperties, FillPaintProperties};
 use mln_text::atlas::ImagePositions;
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
 use mln_util::Color;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::logging::{Event, Log};

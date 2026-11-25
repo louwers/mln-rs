@@ -469,7 +469,7 @@ impl GeometryContents {
         &self,
         id: &OverscaledTileID,
         result: &mut QueryResults,
-        query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
+        query_geometry: &mln_style::feature::GeometryCoordinates,
         view: &mln_map_types::View,
         layers: &QueryLayers<'_>,
         options: &RenderedQueryOptions,

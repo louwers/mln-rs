@@ -1,22 +1,19 @@
 //! Evaluating an expression: its inputs ([`EvaluationContext`]), why it
 //! fails ([`EvaluationError`]), and evaluation against a GeoJSON feature.
 
-use std::borrow::Cow;
 use std::fmt;
 
-use feature::{Feature, Identifier as FeatureIdentifier, Value as MbglValue, ValueObject};
-use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
-use mln_util::geometry::{FeatureType, to_feature_type};
+use feature::{Feature, Value as MbglValue, ValueObject};
 use mln_vec_map::VecSet;
 
 use crate::expression::Expr;
 use crate::expression::forms::image::UnavailableImages;
 use crate::expression::type_::Type;
 use crate::expression::value::{Value, from_mbgl_value, type_of};
+use crate::feature::geojson_feature::GeoJSONFeature;
+use crate::feature::{CanonicalTileID, FeatureState, GeometryTileFeature};
 use crate::font_face::FontCoverage;
 
-pub type FeatureState = ValueObject;
 pub type GlobalStateMap = ValueObject;
 
 /// Why an expression failed to evaluate. One pointer wide, so that a typed
@@ -174,47 +171,6 @@ impl<'a> EvaluationContext<'a> {
     pub fn with_font_faces(mut self, font_faces: Option<&'a impl FontCoverage>) -> Self {
         self.font_faces = font_faces.map(|faces| -> &dyn FontCoverage { faces });
         self
-    }
-}
-
-/// A `GeometryTileFeature` view of a GeoJSON feature.
-struct GeoJSONFeature<'a> {
-    feature: &'a Feature<f64>,
-    geometry: GeometryCollection,
-}
-
-impl<'a> GeoJSONFeature<'a> {
-    fn new(feature: &'a Feature<f64>) -> Self {
-        GeoJSONFeature { feature, geometry: GeometryCollection::default() }
-    }
-
-    fn with_canonical(feature: &'a Feature<f64>, canonical: &CanonicalTileID) -> Self {
-        let geometry = feature.geometry.as_ref().map_or_else(GeometryCollection::default, |g| {
-            mln_tile::geometry_tile_data::convert_geometry_to_tile(g, canonical)
-        });
-        GeoJSONFeature { feature, geometry }
-    }
-}
-
-impl GeometryTileFeature for GeoJSONFeature<'_> {
-    fn get_type(&self) -> FeatureType {
-        to_feature_type(self.feature.geometry.as_ref())
-    }
-
-    fn get_properties(&self) -> Cow<'_, ValueObject> {
-        Cow::Borrowed(&self.feature.properties)
-    }
-
-    fn get_id(&self) -> FeatureIdentifier {
-        self.feature.id.clone()
-    }
-
-    fn get_value(&self, key: &str) -> Option<MbglValue> {
-        self.feature.properties.get(key).cloned()
-    }
-
-    fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_util::error::Error> {
-        Ok(Cow::Borrowed(&self.geometry))
     }
 }
 

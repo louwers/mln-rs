@@ -2,14 +2,13 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
-use mln_tile_id::{GeometryCollection, GeometryTileFeature};
+use mln_style::feature::{GeometryCollection, GeometryTileFeature, to_geometry_collection};
 use mln_util::geometry::{FeatureType, to_feature_type};
 use mln_util::serialization::payload;
 use mln_wire::{Reader, Wire, Writer};
 
 use crate::TileError;
 use crate::cut::{CutData, CutFeature, CutLayer};
-use crate::geometry_tile_data::to_geometry_collection;
 use crate::mlt::{MltFeature, MltLayer, MltTile};
 use crate::mvt::{MvtFeature, MvtLayer, MvtTile};
 

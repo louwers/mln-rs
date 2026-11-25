@@ -4,8 +4,8 @@
 
 use geometry::Point;
 use mln_map_types::MapDebugOptions;
+use mln_style::feature::GeometryCoordinates;
 use mln_tile_id::OverscaledTileID;
-use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::chrono::{Timestamp, iso8601};
 
 use crate::geometry::debug_font_data::SIMPLEX;

@@ -1,5 +1,5 @@
 use geometry::Point;
-use mln_tile_id::{GeometryCoordinate, UnwrappedTileID};
+use mln_tile_id::UnwrappedTileID;
 use mln_util::constants;
 use mln_util::geo::{LatLng, ScreenCoordinate};
 use mln_util::projection::Projection;
@@ -37,7 +37,7 @@ impl TileCoordinate {
     }
 
     #[must_use]
-    pub fn to_geometry_coordinate(tile_id: &UnwrappedTileID, point: &TileCoordinatePoint) -> GeometryCoordinate {
+    pub fn to_geometry_coordinate(tile_id: &UnwrappedTileID, point: &TileCoordinatePoint) -> Point<i16> {
         let scale = 2.0f64.powf(f64::from(tile_id.canonical.z));
         let zoomed = TileCoordinate { p: *point, z: 0.0 }.zoom_to(f64::from(tile_id.canonical.z));
         let clamp = |v: f64| -> i16 {

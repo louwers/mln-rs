@@ -4,7 +4,6 @@ use std::borrow::Cow;
 
 use feature::{Identifier as FeatureIdentifier, Value as MbglValue};
 use mln_math::{fmax, fmin};
-use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::geometry::FeatureType;
 use mln_util::{Color, i18n};
 
@@ -16,6 +15,7 @@ use crate::expression::value::{ObjectType, Value, from_mbgl_value_owned, to_stri
 use crate::expression::{
     Dependency, EvalResult, EvaluationContext, EvaluationError, EvaluationResult, Expr, mbgl_to_expression_value,
 };
+use crate::feature::GeometryTileFeature;
 
 /// Adds the style specification's functions to `functions`, each name's
 /// overloads in the order parsing tries them. Fails if `functions` already

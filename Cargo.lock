@@ -3098,7 +3098,6 @@ dependencies = [
  "mln-rs-map-types",
  "mln-rs-math",
  "mln-rs-style-types",
- "mln-rs-tile",
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
@@ -3188,6 +3187,7 @@ dependencies = [
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-math",
+ "mln-rs-style",
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-wire",
@@ -3201,7 +3201,6 @@ dependencies = [
 name = "mln-rs-tile-id"
 version = "0.0.15"
 dependencies = [
- "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-math",
  "mln-rs-util",

@@ -87,7 +87,7 @@ pub(crate) struct StubGeometryTileFeature {
     pub(crate) properties: feature::PropertyMap,
     pub(crate) id: feature::Identifier,
     pub(crate) type_: mln_util::geometry::FeatureType,
-    pub(crate) geometry: mln_tile_id::geometry_tile_data::GeometryCollection,
+    pub(crate) geometry: crate::feature::GeometryCollection,
 }
 
 impl StubGeometryTileFeature {
@@ -96,13 +96,13 @@ impl StubGeometryTileFeature {
             properties,
             id: feature::Identifier::Null,
             type_: mln_util::geometry::FeatureType::Point,
-            geometry: mln_tile_id::geometry_tile_data::GeometryCollection::default(),
+            geometry: crate::feature::GeometryCollection::default(),
         }
     }
 
     pub(crate) fn with_geometry(
         type_: mln_util::geometry::FeatureType,
-        geometry: mln_tile_id::geometry_tile_data::GeometryCollection,
+        geometry: crate::feature::GeometryCollection,
     ) -> Self {
         StubGeometryTileFeature {
             properties: feature::PropertyMap::default(),
@@ -118,16 +118,11 @@ impl StubGeometryTileFeature {
         type_: mln_util::geometry::FeatureType,
         properties: feature::PropertyMap,
     ) -> Self {
-        StubGeometryTileFeature {
-            properties,
-            id,
-            type_,
-            geometry: mln_tile_id::geometry_tile_data::GeometryCollection::default(),
-        }
+        StubGeometryTileFeature { properties, id, type_, geometry: crate::feature::GeometryCollection::default() }
     }
 }
 
-impl mln_tile_id::geometry_tile_data::GeometryTileFeature for StubGeometryTileFeature {
+impl crate::feature::GeometryTileFeature for StubGeometryTileFeature {
     fn get_type(&self) -> mln_util::geometry::FeatureType {
         self.type_
     }
@@ -144,9 +139,7 @@ impl mln_tile_id::geometry_tile_data::GeometryTileFeature for StubGeometryTileFe
         self.id.clone()
     }
 
-    fn get_geometries(
-        &self,
-    ) -> Result<Cow<'_, mln_tile_id::geometry_tile_data::GeometryCollection>, mln_util::error::Error> {
+    fn get_geometries(&self) -> Result<Cow<'_, crate::feature::GeometryCollection>, mln_util::error::Error> {
         Ok(Cow::Borrowed(&self.geometry))
     }
 }

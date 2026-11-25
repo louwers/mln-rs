@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 
-use mln_tile_id::GeometryTileFeature;
+use mln_style::feature::GeometryTileFeature;
 use proptest::prelude::*;
 
 use crate::{MltTile, MvtTile, TileData};

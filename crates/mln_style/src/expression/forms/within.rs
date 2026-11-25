@@ -9,8 +9,6 @@ use feature::Value as MbglValue;
 use geo_types::{Coord, Geometry, Polygon};
 use geojson::GeoJson;
 use geometry::Point;
-use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{GeometryCoordinates, GeometryTileFeature};
 use mln_util::constants::{DEGREES_MAX, EXTENT, LONGITUDE_MAX};
 use mln_util::geometry::{FeatureType, to_feature_type};
 use mln_util::logging::{Event, Log};
@@ -18,6 +16,7 @@ use mln_util::logging::{Event, Log};
 use crate::conversion::{Convertible, Error};
 use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::{EvaluationContext, Expr, Node};
+use crate::feature::{CanonicalTileID, GeometryCoordinates, GeometryTileFeature};
 
 // --- util/geometry_util ---
 
@@ -458,7 +457,7 @@ mod tests {
         assert_eq!(ctx.get_errors()[0].message, POLYGON_REQUIRED);
     }
 
-    struct PointFeature(mln_tile_id::geometry_tile_data::GeometryCollection);
+    struct PointFeature(crate::feature::GeometryCollection);
 
     impl GeometryTileFeature for PointFeature {
         fn get_type(&self) -> FeatureType {
@@ -469,9 +468,7 @@ mod tests {
             None
         }
 
-        fn get_geometries(
-            &self,
-        ) -> Result<Cow<'_, mln_tile_id::geometry_tile_data::GeometryCollection>, mln_util::error::Error> {
+        fn get_geometries(&self) -> Result<Cow<'_, crate::feature::GeometryCollection>, mln_util::error::Error> {
             Ok(Cow::Borrowed(&self.0))
         }
     }

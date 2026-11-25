@@ -13,6 +13,7 @@ use mln_gfx::shaders::shader_defines::{
     ID_SYMBOL_HALO_WIDTH_ATTRIBUTE, ID_SYMBOL_OPACITY_ATTRIBUTE,
 };
 use mln_style::expression::EvaluationContext;
+use mln_style::feature::{GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
 use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
 use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
@@ -21,7 +22,6 @@ use mln_style::property::value::PropertyValue;
 use mln_style::types::TextWritingModeType;
 use mln_text::atlas::ImagePositions;
 use mln_tile::TileLayer;
-use mln_tile_id::geometry_tile_data::{GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
 use mln_util::Color;
 use mln_util::range::Range;
 use mln_util::serialization::payload::pod;

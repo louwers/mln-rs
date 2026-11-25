@@ -10,6 +10,7 @@
 use std::sync::Arc;
 
 use mln_style::expression::{EvaluationContext, Image};
+use mln_style::feature::GeometryTileFeature;
 use mln_style::layers::fill_layer_properties::FillLayoutProperties;
 use mln_style::layers::line_layer_properties::LineLayoutProperties;
 use mln_style::layers::{Fill, Line};
@@ -17,7 +18,6 @@ use mln_style::property::evaluated::Evaluated;
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_text::atlas::ImagePositions;
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;

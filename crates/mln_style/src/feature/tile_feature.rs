@@ -1,6 +1,3 @@
-// The geometry algorithms on these types (ring classification, coordinate
-// conversion, polygon fixup, ...) are in `mln_tile`.
-
 use std::borrow::Cow;
 use std::ops::{Deref, DerefMut, Range};
 use std::sync::Arc;

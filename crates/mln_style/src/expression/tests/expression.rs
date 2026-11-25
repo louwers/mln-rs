@@ -1,13 +1,12 @@
 use std::path::PathBuf;
 
-use mln_tile_id::CanonicalTileID;
-
 use crate::conversion::Convertible;
 use crate::expression::parse::ParsingContext;
 use crate::expression::value::Value;
 use crate::expression::{
-    EvaluationContext, Expr, FeatureState, Functions, GlobalStateMap, dsl, evaluate_feature_with_context, is_expression,
+    EvaluationContext, Expr, Functions, GlobalStateMap, dsl, evaluate_feature_with_context, is_expression,
 };
+use crate::feature::{CanonicalTileID, FeatureState};
 use crate::font_face::{FontFace, FontFaces};
 
 /// A path relative to the C++ repository, in the copy of the files these

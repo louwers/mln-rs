@@ -1,6 +1,7 @@
 //! The map style: [`Style`], the style JSON parser, layers and sources, the
-//! property system (`property`), the expression language (`expression`) and
-//! the conversions from JSON-like values to style types (`conversion`).
+//! property system (`property`), the expression language (`expression`), what
+//! expressions read of a feature (`feature`), the spec's value types (`types`)
+//! and the conversions from JSON-like values to style types (`conversion`).
 //!
 //! A style parses against a [`StyleRegistry`]: the expression functions and
 //! layer types its JSON, property values and filters may name.
@@ -38,6 +39,7 @@
 pub mod conversion;
 pub mod custom_tile_loader;
 pub mod expression;
+pub mod feature;
 pub mod filter;
 pub mod font_face;
 pub mod image;

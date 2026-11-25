@@ -15,7 +15,7 @@ use std::sync::{Arc, OnceLock};
 use fast_mvt::{MvtLazyFeature, MvtLazyLayer, MvtLazyReader, MvtResult, MvtValueRef};
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
-use mln_tile_id::GeometryCollection;
+use mln_style::feature::GeometryCollection;
 use mln_util::constants::EXTENT;
 use mln_util::geometry::FeatureType;
 use mln_util::hash::HashMap;

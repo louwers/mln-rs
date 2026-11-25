@@ -8,7 +8,7 @@ use std::iter;
 use geometry::Point;
 use glam::{DMat4, DVec2, DVec3, DVec4, Vec2};
 use mln_map_types::{ProjectedTilePoint, TileProjector, View};
-use mln_tile_id::geometry_tile_data::GeometryCoordinate;
+use mln_style::feature::GeometryCoordinate;
 use mln_util::constants::ONE_EM;
 
 use crate::buckets::symbol_bucket::{

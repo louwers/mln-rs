@@ -1,4 +1,4 @@
-use mln_tile_id::geometry_tile_data::GeometryCoordinate;
+use mln_style::feature::GeometryCoordinate;
 use mln_util::constants::EXTENT;
 
 use crate::geometry::anchor::{Anchor, line_length, segments};

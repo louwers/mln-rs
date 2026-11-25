@@ -1196,9 +1196,9 @@ pub(crate) trait RenderLayer: LayerParts {
     fn query_intersects_feature(
         &self,
         _region: &QueryRegion<'_>,
-        _feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
-        _geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
-        _feature_state: &mln_style::expression::FeatureState,
+        _feature: &dyn mln_style::feature::GeometryTileFeature,
+        _geometry: &mln_style::feature::GeometryCollection,
+        _feature_state: &mln_style::feature::FeatureState,
     ) -> bool {
         false
     }

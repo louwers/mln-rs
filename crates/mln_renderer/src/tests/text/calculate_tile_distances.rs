@@ -1,5 +1,5 @@
 use geometry::Point;
-use mln_tile_id::GeometryCoordinates;
+use mln_style::feature::GeometryCoordinates;
 
 use crate::geometry::anchor::Anchor;
 use crate::layout::symbol_layout::SymbolLayout;

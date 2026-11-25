@@ -1,35 +1,21 @@
-// Polygon fixup runs on i_overlay, where C++ uses wagyu.
+// Polygon fixup runs on i_overlay, where C++ uses wagyu. Ring classification
+// and the conversions to and from longitude/latitude are in
+// `mln_style::feature`, where expressions reach them.
 
 use std::f64::consts::PI;
 
 use feature::Feature;
-use geo_types::{Coord, CoordNum, Geometry, LineString, MultiLineString, MultiPolygon, Polygon};
 use geometry::Point;
 use i_overlay::core::fill_rule::FillRule;
 use i_overlay::core::overlay::{Overlay, ShapeType};
 use i_overlay::core::overlay_rule::OverlayRule;
 use i_overlay::i_float::int::point::IntPoint;
-use mln_tile_id::{CanonicalTileID, GeometryCollection, GeometryCoordinates, GeometryTileFeature};
+use mln_style::feature::{
+    CanonicalTileID, GeometryCollection, GeometryCoordinates, GeometryTileFeature, convert_geometry, signed_area,
+};
 use mln_util::constants::EXTENT;
-use mln_util::geometry::FeatureType;
 
 use crate::TileError;
-
-/// Twice the signed area of `ring`, positive for a ring that is clockwise
-/// with y down.
-#[must_use]
-pub fn signed_area(ring: &[Point<i16>]) -> f64 {
-    let Some(&last) = ring.last() else {
-        return 0.0;
-    };
-    let mut prev = last;
-    let mut sum = 0i64;
-    for &p in ring {
-        sum += (i64::from(prev.x) - i64::from(p.x)) * (i64::from(p.y) + i64::from(prev.y));
-        prev = p;
-    }
-    sum as f64
-}
 
 /// Repairs the rings of a polygon from a version 1 vector tile, whose spec
 /// doesn't require them to be wound or simple: unions them with an even-odd
@@ -58,45 +44,6 @@ pub(crate) fn fixup_polygons(rings: &GeometryCollection) -> GeometryCollection {
     result
 }
 
-/// Classifies an array of rings into polygons with outer rings and holes.
-#[must_use]
-pub fn classify_rings(rings: &GeometryCollection) -> Vec<GeometryCollection> {
-    let mut polygons: Vec<GeometryCollection> = Vec::new();
-
-    let len = rings.len();
-
-    if len <= 1 {
-        polygons.push(rings.clone());
-        return polygons;
-    }
-
-    let mut polygon = GeometryCollection::new();
-    let mut ccw: i8 = 0;
-
-    for ring in rings.iter() {
-        let area = signed_area(ring);
-        if area == 0.0 {
-            continue;
-        }
-
-        if ccw == 0 {
-            ccw = if area < 0.0 { -1 } else { 1 };
-        }
-
-        if ccw == (if area < 0.0 { -1 } else { 1 }) && !polygon.is_empty() {
-            polygons.push(std::mem::take(&mut polygon));
-        }
-
-        polygon.push(ring.clone());
-    }
-
-    if !polygon.is_empty() {
-        polygons.push(polygon);
-    }
-
-    polygons
-}
-
 /// Truncates `polygon` to its `max_holes` largest inner rings by absolute
 /// area. The order of the kept rings is unspecified, and so is which of
 /// several rings tied at the cut is kept.
@@ -105,125 +52,6 @@ pub fn limit_holes(polygon: &mut GeometryCollection, max_holes: u32) {
     if polygon.len() > 1 + max_holes {
         polygon[1..].select_nth_unstable_by(max_holes, |a, b| signed_area(b).abs().total_cmp(&signed_area(a).abs()));
         polygon.truncate(1 + max_holes);
-    }
-}
-
-/// Converts `geometries`, the geometry of a feature of type `feature_type`
-/// in `tile_id`, from tile coordinates to longitude/latitude. Fails with
-/// [`TileError::OutOfRange`] for a point feature without rings. A feature of
-/// `FeatureType::Unknown` fails a debug assertion and otherwise converts to
-/// `Point(NaN, NaN)`.
-pub fn convert_geometry(
-    feature_type: FeatureType,
-    geometries: &GeometryCollection,
-    tile_id: &CanonicalTileID,
-) -> Result<Geometry<f64>, TileError> {
-    let size = f64::from(EXTENT) * 2f64.powi(i32::from(tile_id.z));
-    let x0 = f64::from(EXTENT) * f64::from(tile_id.x);
-    let y0 = f64::from(EXTENT) * f64::from(tile_id.y);
-
-    let tile_coordinates_to_lat_lng = |p: &Point<i16>| {
-        let y2 = 180.0 - (f64::from(p.y) + y0) * 360.0 / size;
-        Coord { x: (f64::from(p.x) + x0) * 360.0 / size - 180.0, y: (y2 * PI / 180.0).exp().atan() * 360.0 / PI - 90.0 }
-    };
-    let line_string = |points: &[Point<i16>]| LineString(points.iter().map(tile_coordinates_to_lat_lng).collect());
-
-    match feature_type {
-        FeatureType::Unknown => {
-            debug_assert!(false, "convertGeometry of a feature of unknown type");
-            Ok(Geometry::Point(geo_types::Point::new(f64::NAN, f64::NAN)))
-        }
-
-        FeatureType::Point => {
-            let first = geometries.first().ok_or_else(|| TileError::vector_range_check(0, geometries.len()))?;
-            if let [p] = first.as_slice() {
-                Ok(Geometry::Point(tile_coordinates_to_lat_lng(p).into()))
-            } else {
-                Ok(Geometry::MultiPoint(
-                    first.iter().map(|p| geo_types::Point(tile_coordinates_to_lat_lng(p))).collect(),
-                ))
-            }
-        }
-
-        FeatureType::LineString => {
-            if let [g] = geometries.as_slice() {
-                Ok(Geometry::LineString(line_string(g)))
-            } else {
-                Ok(Geometry::MultiLineString(MultiLineString(geometries.iter().map(|g| line_string(g)).collect())))
-            }
-        }
-
-        FeatureType::Polygon => {
-            let mut multi_polygon: Vec<Polygon<f64>> = classify_rings(geometries)
-                .iter()
-                .map(|pg| {
-                    let mut rings = pg.iter().map(|r| line_string(r));
-                    let exterior = rings.next().unwrap_or_else(|| LineString(Vec::new()));
-                    Polygon::new(exterior, rings.collect())
-                })
-                .collect();
-            if multi_polygon.len() == 1 {
-                Ok(Geometry::Polygon(multi_polygon.swap_remove(0)))
-            } else {
-                Ok(Geometry::MultiPolygon(MultiPolygon(multi_polygon)))
-            }
-        }
-    }
-}
-
-/// Narrows `v` as clang emits `static_cast<int16_t>(double)` on x86-64:
-/// cvttsd2si to int32 (0x80000000 for NaN and out-of-range values;
-/// undefined behaviour in C++), then the low 16 bits.
-fn int16_cast_x86_64(v: f64) -> i16 {
-    let i = if v.is_nan() || v >= 2_147_483_648.0 || v <= -2_147_483_649.0 { i32::MIN } else { v as i32 };
-    i as i16
-}
-
-/// Converts `geometry` from longitude/latitude to the coordinates of
-/// `tile_id`. The C++ clamps *after* the narrowing cast, so the clamp has no
-/// effect; the cast is reproduced as x86-64 executes it (see
-/// `int16_cast_x86_64`).
-#[must_use]
-pub fn convert_geometry_to_tile(geometry: &Geometry<f64>, tile_id: &CanonicalTileID) -> GeometryCollection {
-    let size = f64::from(EXTENT) * 2f64.powi(i32::from(tile_id.z));
-    let x0 = f64::from(EXTENT) * f64::from(tile_id.x);
-    let y0 = f64::from(EXTENT) * f64::from(tile_id.y);
-
-    let lat_lon_to_tile_coodinates = |c: Coord<f64>| {
-        let x = (c.x + 180.0) * size / 360.0 - x0;
-        let px = int16_cast_x86_64(x);
-
-        let y = (180.0 - (((c.y + 90.0) * PI / 360.0).tan().ln() * 180.0 / PI)) * size / 360.0 - y0;
-        let py = int16_cast_x86_64(y);
-
-        Point::new(px, py)
-    };
-
-    GeometryCollection::from(geometry_rings(geometry, lat_lon_to_tile_coodinates))
-}
-
-/// The points of `geometry` as lines or rings: one for a point, its line
-/// for a line string, one per line, and a polygon's exterior then its
-/// interiors. A geometry collection has none.
-fn geometry_rings<T: CoordNum, U>(geometry: &Geometry<T>, point: impl Fn(Coord<T>) -> U) -> Vec<Vec<U>> {
-    let line = |coords: &[Coord<T>]| coords.iter().map(|&c| point(c)).collect::<Vec<_>>();
-    let polygon_rings = |polygon: &Polygon<T>| {
-        // A polygon of no rings has an empty exterior.
-        let exterior =
-            (!polygon.exterior().0.is_empty() || !polygon.interiors().is_empty()).then(|| polygon.exterior());
-        exterior.into_iter().chain(polygon.interiors()).map(|ring| line(&ring.0)).collect::<Vec<_>>()
-    };
-    match geometry {
-        Geometry::Point(p) => vec![vec![point(p.0)]],
-        Geometry::MultiPoint(points) => vec![points.iter().map(|p| point(p.0)).collect()],
-        Geometry::Line(l) => vec![vec![point(l.start), point(l.end)]],
-        Geometry::LineString(l) => vec![line(&l.0)],
-        Geometry::MultiLineString(lines) => lines.iter().map(|l| line(&l.0)).collect(),
-        Geometry::Polygon(p) => polygon_rings(p),
-        Geometry::MultiPolygon(polygons) => polygons.iter().flat_map(polygon_rings).collect(),
-        Geometry::Rect(r) => polygon_rings(&r.to_polygon()),
-        Geometry::Triangle(t) => polygon_rings(&t.to_polygon()),
-        Geometry::GeometryCollection(_) => Vec::new(),
     }
 }
 
@@ -239,13 +67,6 @@ pub fn convert_feature(
     converted.properties = feature.get_properties().into_owned();
     converted.id = feature.get_id();
     Ok(converted)
-}
-
-/// The lines or rings of a tile feature's geometry; a null geometry has
-/// none.
-#[must_use]
-pub fn to_geometry_collection(geom: Option<&Geometry<i16>>) -> GeometryCollection {
-    geom.map_or_else(GeometryCollection::new, |geom| GeometryCollection::from(geometry_rings(geom, Point::from)))
 }
 
 /// Whether the edge from `a` to `b` runs along a line the tile was clipped
@@ -379,6 +200,8 @@ fn append_round_corner(
 
 #[cfg(test)]
 mod tests {
+    use mln_style::feature::classify_rings;
+
     use super::*;
 
     fn ring(points: &[(i16, i16)]) -> GeometryCoordinates {
@@ -391,31 +214,6 @@ mod tests {
 
     fn test_signed_area(ring: &GeometryCoordinates) -> f64 {
         signed_area(ring)
-    }
-
-    // gtest: GeometryTileData.classifyRings1
-    #[test]
-    fn classify_rings1() {
-        let polygons = classify_rings(&collection(&[&[(0, 0), (0, 40), (40, 40), (40, 0), (0, 0)]]));
-
-        // output: 1 polygon
-        assert_eq!(polygons.len(), 1);
-        // output: polygon 1 has 1 exterior
-        assert_eq!(polygons[0].len(), 1);
-    }
-
-    // gtest: GeometryTileData.classifyRings2
-    #[test]
-    fn classify_rings2() {
-        let polygons = classify_rings(&collection(&[
-            &[(0, 0), (0, 40), (40, 40), (40, 0), (0, 0)],
-            &[(10, 10), (20, 10), (20, 20), (10, 10)],
-        ]));
-
-        // output: 1 polygon
-        assert_eq!(polygons.len(), 1);
-        // output: polygon 1 has 1 exterior, 1 interior
-        assert_eq!(polygons[0].len(), 2);
     }
 
     /// The (outer ring, hole count) of each polygon, with every ring

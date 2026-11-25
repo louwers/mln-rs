@@ -1,4 +1,4 @@
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate};
+use mln_style::feature::{GeometryCollection, GeometryCoordinate};
 
 /// The coordinate, rounded, at which the line from `a0` to `a1` on one axis
 /// meets `edge` on the other, along which it goes from `b0` to `b1`.
@@ -67,7 +67,7 @@ pub(crate) fn clip_lines(lines: &GeometryCollection, x1: i16, y1: i16, x2: i16, 
 #[cfg(test)]
 mod tests {
     use geometry::Point;
-    use mln_tile_id::geometry_tile_data::GeometryCoordinates;
+    use mln_style::feature::GeometryCoordinates;
 
     use super::*;
 

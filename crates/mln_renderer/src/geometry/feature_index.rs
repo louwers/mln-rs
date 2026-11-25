@@ -11,13 +11,13 @@ use std::sync::{Arc, OnceLock};
 use geo_index::rtree::sort::HilbertSort;
 use geo_index::rtree::{RTree, RTreeBuilder, RTreeIndex};
 use mln_map_types::{TileProjector, VerticalPerspectiveProjection, View};
-use mln_style::expression::{EvaluationContext, FeatureState, GlobalStateMap};
+use mln_style::expression::{EvaluationContext, GlobalStateMap};
+use mln_style::feature::{
+    FeatureState, GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileFeature,
+};
 use mln_style::types::TranslateAnchorType;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
-use mln_tile_id::geometry_tile_data::{
-    GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileFeature,
-};
 use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::feature::{Feature, feature_id_to_string};

@@ -249,9 +249,9 @@ impl RenderLineLayer {
     // query
     fn line_width(
         &self,
-        feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
+        feature: &dyn mln_style::feature::GeometryTileFeature,
         zoom: f32,
-        feature_state: &mln_style::expression::FeatureState,
+        feature_state: &mln_style::feature::FeatureState,
     ) -> f32 {
         let evaluated = &self.values.evaluated.paint;
         let line_width = evaluated.line_width.evaluate(&EvaluationContext::with_zoom_feature_state(
@@ -270,9 +270,9 @@ impl RenderLineLayer {
 
 // query
 fn offset_line(
-    rings: &mln_tile_id::geometry_tile_data::GeometryCollection,
+    rings: &mln_style::feature::GeometryCollection,
     offset: f64,
-) -> Vec<mln_tile_id::geometry_tile_data::GeometryCoordinates> {
+) -> Vec<mln_style::feature::GeometryCoordinates> {
     use geometry::Point;
     use mln_util::math::{perp, unit};
 
@@ -500,9 +500,9 @@ impl RenderLayer for RenderLineLayer {
     fn query_intersects_feature(
         &self,
         region: &QueryRegion<'_>,
-        feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
-        geometry: &mln_tile_id::geometry_tile_data::GeometryCollection,
-        feature_state: &mln_style::expression::FeatureState,
+        feature: &dyn mln_style::feature::GeometryTileFeature,
+        geometry: &mln_style::feature::GeometryCollection,
+        feature_state: &mln_style::feature::FeatureState,
     ) -> bool {
         let QueryRegion { geometry: query_geometry, view, pixels_to_tile_units, .. } = *region;
         let zoom = view.zoom() as f32;

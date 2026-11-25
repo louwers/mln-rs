@@ -8,10 +8,10 @@
 
 use std::any::Any;
 
+use mln_style::feature::{GeometryCollection, GeometryTileFeature};
 use mln_text::atlas::ImagePositions;
 use mln_tile::TileLayer;
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::identity::SimpleIdentity;
 use mln_wire::{Reader, Wire, Writer};
 
@@ -19,7 +19,7 @@ use crate::bucket_geometry::GeometryUpload;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::util::tessellator::Tessellator;
 
-pub(crate) type FeatureStates = mln_util::hash::HashMap<String, mln_style::expression::FeatureState>;
+pub(crate) type FeatureStates = mln_util::hash::HashMap<String, mln_style::feature::FeatureState>;
 pub type LayerFeatureStates = mln_util::hash::HashMap<String, FeatureStates>;
 
 /// What every bucket has, whatever its type.

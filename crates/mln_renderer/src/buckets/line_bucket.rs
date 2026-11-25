@@ -9,11 +9,11 @@ use mln_gfx::shaders::shader_defines::{
     ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
 };
 use mln_style::expression::{EvaluationContext, Image, Value};
+use mln_style::feature::{GeometryCollection, GeometryTileFeature};
 use mln_style::layers::Line;
 use mln_style::layers::line_layer_properties::{LineLayoutProperties, LinePaintProperties};
 use mln_text::atlas::ImagePositions;
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::Color;
 use mln_util::feature::numeric_value_f64;
 use mln_util::geometry::FeatureType;

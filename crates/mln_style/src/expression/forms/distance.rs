@@ -8,15 +8,13 @@ use cheap_ruler::{CheapRuler, DistanceUnit};
 use feature::Value as MbglValue;
 use geojson::GeoJson;
 use geometry::Point;
-use mln_tile::geometry_tile_data::convert_geometry;
-use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::geometry::{FeatureType, to_feature_type};
 use mln_util::logging::{Event, Log};
 
 use crate::conversion::{Convertible, Error};
 use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::{EvalResult, EvaluationContext, EvaluationError, Expr, Node};
+use crate::feature::{CanonicalTileID, GeometryTileFeature, convert_geometry};
 
 // The algorithms work on `mapbox::geometry`'s shapes, as in C++: a polygon
 // is its rings, the exterior first. `Geometry::from_geo` converts to them.
@@ -1095,13 +1093,12 @@ mod tests {
     use std::borrow::Cow;
 
     use feature::{Identifier, Value as MbglValue};
-    use mln_tile::geometry_tile_data::convert_geometry_to_tile;
-    use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate};
 
     use super::*;
     use crate::expression::parse::create_expression_from_str;
     use crate::expression::value::Value;
     use crate::expression::{EvaluationResult, Functions};
+    use crate::feature::{GeometryCollection, GeometryCoordinate, convert_geometry_to_tile};
 
     struct Feature {
         type_: FeatureType,
