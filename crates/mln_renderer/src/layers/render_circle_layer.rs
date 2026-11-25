@@ -50,12 +50,12 @@ const RENDER_PASS: RenderPass = RenderPass::Translucent;
 /// Where `p`, in tile units of the tile `projector` projects, `elevation`
 /// meters up, shows in a view of `size`, in pixels from its bottom left.
 fn project_point(
-    p: mln_style::feature::GeometryCoordinate,
+    p: Point<f64>,
     elevation: f64,
     projector: &TileProjector<'_>,
     size: mln_util::size::Size,
 ) -> mln_style::feature::GeometryCoordinate {
-    let pos = projector.project(&Point::new(f64::from(p.x), f64::from(p.y)), elevation).point;
+    let pos = projector.project(&p, elevation).point;
     // `(float(pos.x) + 1) * size.width * 0.5`: float, then double.
     mln_style::feature::GeometryCoordinate::new(
         (f64::from((pos.x as f32 + 1.0) * size.width as f32) * 0.5) as i16,
@@ -63,19 +63,25 @@ fn project_point(
     )
 }
 
-/// `translated`, `query_geometry` moved by a circle's translation, in tile
-/// units of the tile `projector` projects, where it shows in a view of
-/// `size`: over `ground`, at the height of the ground under
-/// `query_geometry`, which lies on it.
 fn project_query_geometry(
     query_geometry: &mln_style::feature::GeometryCoordinates,
-    translated: &mln_style::feature::GeometryCoordinates,
-    ground: Option<TileGround<'_>>,
     projector: &TileProjector<'_>,
     size: mln_util::size::Size,
 ) -> mln_style::feature::GeometryCoordinates {
-    let height = |p: &mln_style::feature::GeometryCoordinate| ground_height(ground, *p);
-    query_geometry.iter().zip(translated).map(|(p, t)| project_point(*t, height(p), projector, size)).collect()
+    query_geometry
+        .iter()
+        .map(|p| project_point(Point::new(f64::from(p.x), f64::from(p.y)), 0.0, projector, size))
+        .collect()
+}
+
+/// `screen`, points from the top left of a view of `size`, in pixels from
+/// its bottom left.
+fn viewport_geometry(
+    screen: &[mln_util::geo::ScreenCoordinate],
+    size: mln_util::size::Size,
+) -> mln_style::feature::GeometryCoordinates {
+    let height = f64::from(size.height);
+    screen.iter().map(|p| mln_style::feature::GeometryCoordinate::new(p.x as i16, (height - p.y) as i16)).collect()
 }
 
 /// The height of `ground` under `p`, in tile units of its tile, in meters;
@@ -407,14 +413,18 @@ impl RenderLayer for RenderCircleLayer {
         // Over terrain, a circle stands at the height of the ground under its
         // center: aligned with the map, it lies in the plane at that height,
         // where the query's lines of sight meet it; aligned with the
-        // viewport, the query's points show where they lie on the ground.
+        // viewport, it shows where it draws, which the query's screen points
+        // test, wherever their lines of sight meet the ground.
         let align_with_map = *evaluated.circle_pitch_alignment.uniform() == AlignmentType::Map;
         let projected;
         let viewport_query_geometry = if align_with_map {
             translated_query_geometry
         } else {
-            projected =
-                project_query_geometry(query_geometry, translated_query_geometry, ground, projector, view.size());
+            projected = if ground.is_some() {
+                viewport_geometry(screen, view.size())
+            } else {
+                project_query_geometry(translated_query_geometry, projector, view.size())
+            };
             &projected
         };
         let transformed_size = if align_with_map { size * pixels_to_tile_units } else { size };
@@ -453,8 +463,13 @@ impl RenderLayer for RenderCircleLayer {
                 } else {
                     viewport_query_geometry
                 };
-                let transformed_point =
-                    if align_with_map { *point } else { project_point(*point, elevation, projector, view.size()) };
+                let transformed_point = if align_with_map {
+                    *point
+                } else if ground.is_some() {
+                    project_point(drawn, elevation, projector, view.size())
+                } else {
+                    project_point(Point::new(f64::from(point.x), f64::from(point.y)), 0.0, projector, view.size())
+                };
 
                 let projected = projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), elevation);
                 let mut adjusted_size = transformed_size;

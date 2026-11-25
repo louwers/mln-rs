@@ -1571,28 +1571,40 @@ impl RenderOrchestrator {
 
         let proj_matrix = self.view.projection_matrix_with(self.view.near_z(), false);
 
-        // Over terrain, a layer that drapes or stands on the ground is found
-        // on the ground the frame drew, where the query's lines of sight
-        // meet it; the others draw flat, at sea level, and are found there.
-        let ground = self.terrain.ground().map(|ground| &**ground);
+        // Over terrain, a layer that drapes is found on the ground the frame
+        // drew, where the query's lines of sight meet it, and so is a 3D
+        // layer that stands on it, by its footprint there. One whose points
+        // stand on the ground is found wherever they show, raised, as its
+        // hit test decides. The others draw flat, at sea level, and are
+        // found there.
+        let elevation = self.terrain.ground().map(|ground| &**ground);
+        let ground_of = |layer: &dyn RenderLayer| {
+            let elevation = elevation.filter(|_| layer.drapes() || layer.stands())?;
+            let standing = layer.stands() && !layer.is_3d();
+            Some(crate::geometry::feature_index::QueryGround { elevation, standing })
+        };
         // Traced once for every source. Symbols are found where they were
         // placed, on the screen, so they take the geometry as it is.
-        let traced = crate::geometry::feature_index::query_screen_geometry(&self.view, geometry, ground.is_some());
+        let traced = crate::geometry::feature_index::query_screen_geometry(&self.view, geometry, elevation.is_some());
         let mut results_by_layer = crate::geometry::feature_index::QueryResults::default();
-        for on_ground in [false, true] {
+        // Flat, draped, then standing.
+        for pass in [None, Some(false), Some(true)] {
             let layers: crate::geometry::feature_index::QueryLayers<'_> = filtered_layers
                 .iter()
-                .filter(|(_, layer)| (ground.is_some() && (layer.drapes() || layer.stands())) == on_ground)
+                .filter(|(_, layer)| ground_of(**layer).map(|ground| ground.standing) == pass)
                 .map(|(id, layer)| (id.clone(), *layer))
                 .collect();
             if layers.is_empty() {
                 continue;
             }
+            let ground = pass.and_then(|standing| {
+                elevation.map(|elevation| crate::geometry::feature_index::QueryGround { elevation, standing })
+            });
             for source_id in &source_ids {
                 if let Some(source) = self.source_tiles(source_id) {
                     let source_results = source.query_rendered_features(
                         &traced,
-                        ground.filter(|_| on_ground),
+                        ground,
                         &self.view,
                         &layers,
                         options,

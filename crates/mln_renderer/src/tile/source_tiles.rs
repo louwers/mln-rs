@@ -1152,12 +1152,14 @@ impl SourceTiles {
     /// ([`query_screen_geometry`](crate::geometry::feature_index::query_screen_geometry)).
     /// With `ground`, the ground a frame drew of the terrain, a point finds
     /// features where its line of sight first meets the ground; else, and
-    /// where it meets none, on the flat map at sea level.
+    /// where it meets none, on the flat map at sea level. Every rendered
+    /// tile is a candidate for layers that stand on the ground
+    /// ([`QueryGround::standing`](crate::geometry::feature_index::QueryGround::standing)).
     #[expect(clippy::too_many_arguments, reason = "the query's geometry, ground, camera, layers and options")]
     pub(crate) fn query_rendered_features(
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
-        ground: Option<&crate::terrain::TerrainElevation>,
+        ground: Option<crate::geometry::feature_index::QueryGround<'_>>,
         view: &mln_map_types::View,
         layers: &crate::geometry::feature_index::QueryLayers<'_>,
         options: &crate::query::RenderedQueryOptions,
@@ -1177,7 +1179,8 @@ impl SourceTiles {
         let globe = view.is_globe();
         let up = |p: &mln_util::geo::ScreenCoordinate| mln_util::geo::ScreenCoordinate::new(p.x, height - p.y);
         let on_ground =
-            |p: &mln_util::geo::ScreenCoordinate| ground.and_then(|ground| view.ground_under(&up(p), ground));
+            |p: &mln_util::geo::ScreenCoordinate| ground.and_then(|ground| view.ground_under(&up(p), ground.elevation));
+        let standing = ground.is_some_and(|ground| ground.standing);
         let to_world = |p: &mln_util::geo::ScreenCoordinate| match on_ground(p) {
             // On the main world, where the globe's sea-level points are.
             Some(hit) if globe => geometry::Point::new(hit.world.x.rem_euclid(1.0), hit.world.y),
@@ -1325,15 +1328,17 @@ impl SourceTiles {
             let copies: &[UnwrappedTileID] = if globe { &globe_copies } else { std::slice::from_ref(id) };
             for copy in copies {
                 let tile_space_bounds_min = TileCoordinate::to_geometry_coordinate(copy, &box_min);
-                if f64::from(tile_space_bounds_min.x) - query_padding >= f64::from(constants::EXTENT)
-                    || f64::from(tile_space_bounds_min.y) - query_padding >= f64::from(constants::EXTENT)
+                if !standing
+                    && (f64::from(tile_space_bounds_min.x) - query_padding >= f64::from(constants::EXTENT)
+                        || f64::from(tile_space_bounds_min.y) - query_padding >= f64::from(constants::EXTENT))
                 {
                     continue;
                 }
 
                 let tile_space_bounds_max = TileCoordinate::to_geometry_coordinate(copy, &box_max);
-                if f64::from(tile_space_bounds_max.x) + query_padding < 0.0
-                    || f64::from(tile_space_bounds_max.y) + query_padding < 0.0
+                if !standing
+                    && (f64::from(tile_space_bounds_max.x) + query_padding < 0.0
+                        || f64::from(tile_space_bounds_max.y) + query_padding < 0.0)
                 {
                     continue;
                 }

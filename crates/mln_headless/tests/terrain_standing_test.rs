@@ -698,3 +698,45 @@ fn lime_ish(image: &PremultipliedImage) -> usize {
         .filter(|[r, g, b, _]| *g > 96 && *g > r.saturating_add(48) && *g > b.saturating_add(48))
         .count()
 }
+
+/// A rendered query finds a circle on a ridge where it shows past the
+/// ridge's silhouette, though the query's line of sight there meets the
+/// lower ground beyond the ridge, far from the circle: a circle stands
+/// raised, so where the query meets the ground doesn't bound where it finds
+/// one.
+#[test]
+fn a_rendered_query_finds_a_circle_where_it_shows_past_a_ridge() {
+    use mln_renderer::query::RenderedQueryOptions;
+    use mln_util::geo::ScreenCoordinate;
+
+    let layer = r#"{"id": "circles", "type": "circle", "source": "points",
+        "paint": {"circle-color": "lime", "circle-radius": 20}}"#;
+    // On the ridge, near its far edge, so that the circle's upper half shows
+    // above the ridge's silhouette.
+    let style = style(true, "mercator", [0.0, 0.0, 13.0, 70.0], &[[0.0, 0.0075]], layer);
+    let low_ridge = |_: f64, lat: f64| if (0.004..0.008).contains(&lat) { 300.0 } else { 0.0 };
+    let Some((image, mut frontend)) = still(&style, low_ridge) else {
+        return;
+    };
+    let side = SIDE as usize;
+    let column = side / 2;
+    let rows: Vec<usize> = (0..side)
+        .filter(|&y| {
+            let [r, g, b, _] = image.data.as_chunks::<4>().0[y * side + column];
+            g > 192 && r < 96 && b < 96
+        })
+        .collect();
+    let (Some(&top), Some(&bottom)) = (rows.first(), rows.last()) else {
+        panic!("the circle shows at the view's center column");
+    };
+    assert!(top > 3, "the circle's top edge, at row {top}, is in view");
+    let options = RenderedQueryOptions::new(Some(vec!["circles".to_owned()]), None);
+    let mut found = |y: usize| {
+        let point = ScreenCoordinate::new(column as f64, y as f64);
+        frontend.renderer().query_rendered_features_at_point(&point, &options).unwrap().len()
+    };
+    for y in (top + 3)..=(bottom - 3) {
+        assert_eq!(1, found(y), "the circle at row {y}, between rows {top} and {bottom}");
+    }
+    assert_eq!(0, found(top - 3), "past the circle's top edge, at row {top}");
+}
