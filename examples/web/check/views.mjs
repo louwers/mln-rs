@@ -2,9 +2,9 @@
 // page can follow. The real-world styles (vector tiles with fills, lines,
 // icons and labels), raster tiles, raster-dem tiles (hillshade and color
 // relief, whose borders the map side backfills from the neighbouring tiles),
-// raster with GeoJSON, and labels in font faces (complex scripts and
+// raster with GeoJSON, labels in font faces (complex scripts and
 // right-to-left text, which the map shapes with the shaper module it loads
-// for them).
+// for them), and 3D terrain.
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -34,6 +34,23 @@ const VIEWS = [
   { id: "text-font/khmer" },
   { id: "text-font/font-faces-bidi" },
   { id: "is-supported-script/font-faces-layout" },
+  // 3D terrain: the test's hillshade draped over its DEM, which the cache
+  // has only four z12 tiles of, looking up a slope to the sky, with fog over
+  // the far ground. It tilts past the map's default limit of 60°, as far as
+  // the demo's.
+  {
+    id: "fill-layer-blend/overlap",
+    name: "terrain/draped",
+    width: 512,
+    height: 512,
+    edit: (style) => ({
+      ...style,
+      pitch: 75,
+      bearing: 30,
+      terrain: { source: "terrain", exaggeration: 3 },
+      sky: { "fog-ground-blend": 0.2 },
+    }),
+  },
   // Interactions (interact()): a right-drag that turns the map back and
   // forth, and a pinch that pans and zooms it back and forth. Each starts
   // where some tiles come into view only for moments of each swing, shorter
@@ -60,9 +77,10 @@ const VIEWS = [
 /**
  * The views whose names match `filter`, each with its render test's style
  * from `tests` (the suite's render-tests directory), with the test's
- * operations followed so that the camera is in the style. The page can't
- * follow other operations or test options, so a view must not have them.
- * `fixtures` gives the styles that a `setStyle` operation names.
+ * operations followed so that the camera is in the style, then the view's
+ * `edit`, if any. The page can't follow other operations or test options,
+ * so a view must not have them. `fixtures` gives the styles that a
+ * `setStyle` operation names.
  */
 export function selectViews(filter, { tests, fixtures }) {
   const pattern = new RegExp(filter);
@@ -74,7 +92,14 @@ export function selectViews(filter, { tests, fixtures }) {
 }
 
 function view(
-  { id, name = id, interaction, allowed = THRESHOLD, ...camera },
+  {
+    id,
+    name = id,
+    interaction,
+    edit = (style) => style,
+    allowed = THRESHOLD,
+    ...camera
+  },
   { tests, fixtures },
 ) {
   const test = JSON.parse(
@@ -105,7 +130,7 @@ function view(
         `${id}: the page can't follow the operation ${operation}`,
       );
   }
-  style = structuredClone(style);
+  style = edit(structuredClone(style));
   if (camera.center) style.center = camera.center;
   if (camera.zoom !== undefined) style.zoom = camera.zoom;
   style.center ??= [0, 0];
@@ -115,6 +140,9 @@ function view(
   const width = camera.width ?? metadata.width ?? 512;
   const height = camera.height ?? metadata.height ?? 512;
   const ratio = metadata.pixelRatio ?? 1;
-  style.metadata = { test: { width, height, pixelRatio: ratio, allowed } };
+  // The native map tilts as far as the page's (map.rs's MAX_PITCH).
+  style.metadata = {
+    test: { width, height, pixelRatio: ratio, allowed, maxPitch: 85 },
+  };
   return { id, name, interaction, style, width, height, ratio, allowed };
 }
