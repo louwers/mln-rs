@@ -20,10 +20,16 @@
 //!    into the drapes of their stack ([`DrapeStacks`], [`Drapes`]); the
 //!    surface makes a draw per tile and stack, which reads the DEM textures
 //!    ([`RenderTerrain::update_dems`], [`RenderTerrain::update_draws`]).
-//! 4. **Drapes**: before the frame's pass, the drapes whose layers draw
+//!    The layers that stand on terrain stand on the frame's ground
+//!    ([`FrameGround`], [`RenderTerrain::update_ground`]): their points'
+//!    heights are the ground's under them ([`TileGround`]).
+//! 4. **Ground**: before the frame's passes, where layers hide behind the
+//!    ground, the surface draws its depth into the ground's depth texture
+//!    ([`RenderTerrain::render_ground`]), which they read.
+//! 5. **Drapes**: before the frame's pass, the drapes whose layers draw
 //!    from something new draw into their textures; the others keep theirs
 //!    ([`RenderTerrain::render_drapes`]).
-//! 5. **Surface**: the frame's pass draws each stack's surface where the
+//! 6. **Surface**: the frame's pass draws each stack's surface where the
 //!    stack's first layer draws, and between the stacks the layers that
 //!    don't drape, flat ([`RenderTerrain::render`]). The surface of a
 //!    hillshade's own stack shades its slopes with the frame's lights
@@ -35,17 +41,20 @@ mod drapes;
 mod draws;
 mod elevation;
 mod fog;
+mod ground;
 mod mesh;
 mod stacks;
 
+use std::rc::Rc;
 use std::sync::Arc;
 
 pub(crate) use cover::{ElevationRanges, TerrainCover};
 #[cfg(test)]
 pub(crate) use cover::{REMEMBERED_RANGES, TerrainTile, terrain_tile_size};
 pub(crate) use drapes::Drapes;
-pub(crate) use elevation::TerrainElevation;
+pub(crate) use elevation::{TerrainElevation, TileGround};
 pub(crate) use fog::terrain_fog;
+pub(crate) use ground::{FrameGround, StandingDraw, point_center};
 use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::hillshade_layer_ubo::{HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO};
 use mln_gfx::shaders::terrain_ubo::{TerrainFogUBO, TerrainPropsUBO};
@@ -67,6 +76,7 @@ use crate::renderer_event::RendererEvent;
 use crate::terrain::cover::dem_bucket;
 use crate::terrain::dem_textures::DemTextures;
 use crate::terrain::draws::TerrainDraws;
+use crate::terrain::ground::GroundDepth;
 use crate::tile::source_tiles::SourceTiles;
 use crate::update_parameters::UpdateParameters;
 
@@ -164,6 +174,8 @@ pub(crate) struct RenderTerrain {
     dem_textures: DemTextures,
     /// What the frame's draws bind of them; `None` without terrain.
     dems: Option<DemBindings>,
+    /// The texture of the ground's depth, while the frame draws it.
+    ground_depth: GroundDepth,
     /// The most bytes the drapes hold, the map's
     /// [`TerrainOptions::drape_memory_limit`], or `None` for no limit.
     ///
@@ -222,7 +234,7 @@ impl RenderTerrain {
     /// [`release_shaders`]: Self::release_shaders
     pub(crate) fn make_shader(&mut self, gpu: &mut dyn Gpu, context: &mut Context, parameters: &UpdateParameters) {
         if parameters.style.get_terrain().is_some() && parameters.mode != MapMode::Tile {
-            self.draws.shader(gpu, context, &parameters.view);
+            self.draws.shaders(gpu, context, &parameters.view);
         }
     }
 
@@ -266,8 +278,33 @@ impl RenderTerrain {
     }
 
     /// The ground the last update's cover drew, while terrain draws.
-    pub(crate) fn ground(&self) -> Option<&TerrainElevation> {
-        self.elevation.as_deref()
+    pub(crate) fn ground(&self) -> Option<&Arc<TerrainElevation>> {
+        self.elevation.as_ref()
+    }
+
+    /// The ground of the frame of the last update, where it has terrain and
+    /// a layer `stands` on it: the ground its cover drew ([`ground`]), and,
+    /// where a layer `hides` behind it, the texture of its depth, which the
+    /// frame draws first ([`render_ground`]). Drops the ground's depth
+    /// otherwise.
+    ///
+    /// [`ground`]: Self::ground
+    /// [`render_ground`]: Self::render_ground
+    pub(crate) fn update_ground(
+        &mut self,
+        parameters: &mut PaintParameters<'_>,
+        stands: bool,
+        hides: bool,
+    ) -> Option<Rc<FrameGround>> {
+        let elevation = self.elevation.clone().filter(|_| stands && self.cover.is_some());
+        let depth = elevation
+            .as_ref()
+            .filter(|_| hides)
+            .map(|_| self.ground_depth.texture(parameters.context, parameters.renderable_size));
+        if depth.is_none() {
+            self.ground_depth.clear();
+        }
+        Some(Rc::new(FrameGround::new(elevation?, depth)))
     }
 
     /// The drapes of the last frame.
@@ -344,23 +381,25 @@ impl RenderTerrain {
     /// textures of the frame ([`update_dems`]), sample their stack's drapes,
     /// shade them with the stack's light of `stacks`, if it has one, and
     /// cover them with `fog`, and, if `depth_first`, draws of the surface's
-    /// depth alone ([`render_depth`]). Without a stack, which a frame
-    /// without terrain has too, it makes no draws, and drops what the draws
-    /// hold.
+    /// depth alone ([`render_depth`]), and, if `ground`, draws of the
+    /// ground's depth into its texture ([`render_ground`]). Without either,
+    /// which a frame without terrain has neither of, it makes no draws, and
+    /// drops what the draws hold.
     ///
     /// [`begin_drapes`]: Self::begin_drapes
     /// [`update_dems`]: Self::update_dems
     /// [`render_depth`]: Self::render_depth
+    /// [`render_ground`]: Self::render_ground
     pub(crate) fn update_draws(
         &mut self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         stacks: &DrapeStacks,
         fog: TerrainFogUBO,
-        depth_first: bool,
+        (depth_first, ground): (bool, bool),
     ) {
         let cover = self.cover.as_ref().zip(self.dems.as_ref());
-        self.draws.update(gpu, parameters, cover, (self.surface, fog), (&self.drapes, stacks), depth_first);
+        self.draws.update(gpu, parameters, cover, (self.surface, fog), (&self.drapes, stacks), (depth_first, ground));
     }
 
     /// Records that the buckets in `changed` changed, for the drapes' draws
@@ -411,6 +450,28 @@ impl RenderTerrain {
         self.draws.render(stack, gpu, parameters);
     }
 
+    /// Draws the ground's depth, where the frame has a ground that a layer
+    /// hides behind ([`update_ground`]), in a pass of its own before the
+    /// frame's passes, into its texture.
+    ///
+    /// [`update_ground`]: Self::update_ground
+    pub(crate) fn render_ground(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        if !self.draws.draws_ground() {
+            return;
+        }
+        let Some(pass) = self.ground_depth.pass(gpu, parameters.context) else {
+            return;
+        };
+        if let Err(error) = parameters.begin_pass(gpu, pass) {
+            parameters.context.fail(format!("Beginning the ground's pass failed: {error}"));
+            return;
+        }
+        self.draws.render_ground(gpu, parameters);
+        if let Err(error) = parameters.end_pass(gpu) {
+            parameters.context.fail(format!("Ending the ground's pass failed: {error}"));
+        }
+    }
+
     /// Draws the surface's depth alone into the open pass of `gpu`, the
     /// context's, where the frame's draws have it, so that the 3D layers
     /// that draw before the first stack's surface stand behind the ground.
@@ -437,5 +498,6 @@ impl RenderTerrain {
         self.draws = TerrainDraws::default();
         self.dem_textures = DemTextures::default();
         self.dems = None;
+        self.ground_depth.clear();
     }
 }

@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::rc::Rc;
 
 use glam::{DMat4, DVec4};
 use mln_gfx::cull_face_mode::CullFaceMode;
@@ -22,6 +23,7 @@ use crate::gfx::context::Context;
 use crate::layer_composite::LayerComposite;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
+use crate::terrain::FrameGround;
 
 /// The tiles whose masks clear the stencil buffer: one per world copy in
 /// view, so usually one, and held inline, since every frame makes them.
@@ -227,6 +229,9 @@ pub(crate) struct PaintParameters<'a> {
     /// Whether the frame draws terrain, under which 2D layers draw without
     /// depth.
     pub(crate) terrain: bool,
+    /// The ground that the layers that stand on terrain stand on, where the
+    /// frame has terrain and such layers.
+    pub(crate) ground: Option<Rc<FrameGround>>,
     /// The number of the frame's draw groups above its lowest 3D layer's,
     /// which draw without a depth test
     /// ([`RenderOrchestrator::opaque_pass_cutoff`](crate::render_orchestrator::RenderOrchestrator::opaque_pass_cutoff)).
@@ -293,6 +298,7 @@ impl<'a> PaintParameters<'a> {
             current_layer: 0,
             depth_range_size: 1.0,
             terrain: frame.terrain,
+            ground: None,
             opaque_pass_cutoff: 0,
             symbol_fade_change: frame.symbol_fade_change,
             scissor_rect,
@@ -352,6 +358,7 @@ impl<'a> PaintParameters<'a> {
             current_layer: 0,
             depth_range_size: 1.0,
             terrain: false,
+            ground: None,
             opaque_pass_cutoff: 0,
             // A drape draws no symbols, and keeps no fade of theirs.
             symbol_fade_change: 1.0,

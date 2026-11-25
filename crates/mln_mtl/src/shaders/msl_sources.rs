@@ -3,6 +3,56 @@
 
 use super::shader_source::MslShaderSource;
 
+/// What the terrain variant of a program that hides behind the ground in
+/// front of it reads of the ground's depth, within `#if defined(TERRAIN)`:
+/// whether that ground hides a point (`ground_visibility`). Its vertex
+/// function takes the ground's depth at `[[texture(1)]]`.
+macro_rules! ground_visibility {
+    () => {
+        r#"
+#if defined(TERRAIN)
+// GL JS's `depthOpacity`: 1 where a point `w` from the eye, at `ndc`, is in
+// front of the ground drawn there, fading to 0 behind it over GL JS's ramp
+// of its NDC depth, which `depth_factor` scales; 1 where no ground is drawn
+// there or `ndc` is outside the view. The texels' rows run from the top.
+static float ground_depth_opacity(float2 ndc, float w, float depth_factor, texture2d<float, access::read> depth) {
+    if (any(abs(ndc) > float2(1.0))) {
+        return 1.0;
+    }
+    const int2 size = int2(int(depth.get_width()), int(depth.get_height()));
+    const float2 pos = (float2(ndc.x, -ndc.y) * 0.5 + 0.5) * float2(size);
+    const int2 texel = clamp(int2(floor(pos)), int2(0), size - 1);
+    const uint4 bytes = uint4(round(depth.read(uint2(texel)) * 255.0));
+    const float ground = as_type<float>(bytes.x | (bytes.y << 8) | (bytes.z << 16) | (bytes.w << 24));
+    if (!(ground > 0.0)) {
+        return 1.0;
+    }
+    const float d = depth_factor * (1.0 / w - 1.0 / ground) + 0.0001;
+    return 1.0 - clamp(-500.0 * d, 0.0, 1.0);
+}
+
+// GL JS's `calculate_visibility` of the point at `clip`: 1 where the ground
+// drawn in front doesn't hide it, 0 where it does, averaged with the point
+// 0.01 NDC above it where it is partly hidden. The ramp's scale is GL JS's:
+// `2n` of a near plane `n` a fiftieth of the view's height, in pixels, a
+// `GlobalPaintParamsUBO`'s `world_size.y / pixel_ratio`.
+static float ground_visibility(float4 clip, float view_height, texture2d<float, access::read> depth) {
+    if (clip.w <= 0.0) {
+        return 1.0;
+    }
+    const float2 ndc = clip.xy / clip.w;
+    const float depth_factor = view_height / 25.0;
+    const float visibility = ground_depth_opacity(ndc, clip.w, depth_factor, depth);
+    if (visibility > 0.95) {
+        return 1.0;
+    }
+    return (visibility + ground_depth_opacity(ndc + float2(0.0, 0.01), clip.w, depth_factor, depth)) / 2.0;
+}
+#endif
+"#
+    };
+}
+
 /// The start of every shader's source.
 pub(crate) const PRELUDE: &str = r#"
 #include <metal_stdlib>
@@ -770,7 +820,9 @@ struct alignas(16) CircleEvaluatedPropsUBO {
 static_assert(sizeof(CircleEvaluatedPropsUBO) == 4 * 16, "wrong size");
 
 "#,
-    source: r"
+    source: concat!(
+        ground_visibility!(),
+        r"
 
 struct VertexStage {
     short2 position [[attribute(0)]];
@@ -795,6 +847,10 @@ struct VertexStage {
 #endif
 #if !defined(HAS_UNIFORM_u_stroke_opacity)
     float2 stroke_opacity [[attribute(7)]];
+#endif
+#if defined(TERRAIN)
+    // The height of the ground under the circle's center.
+    float ground_height [[attribute(8)]];
 #endif
 };
 
@@ -824,6 +880,10 @@ struct FragmentStage {
 #if !defined(HAS_UNIFORM_u_stroke_opacity)
     half stroke_opacity;
 #endif
+#if defined(TERRAIN)
+    // How much of the circle the ground in front of its center leaves.
+    float visibility;
+#endif
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
@@ -831,7 +891,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const CircleDrawableUBO* drawableVector [[buffer(idCircleDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const CircleEvaluatedPropsUBO& props [[buffer(idCircleEvaluatedPropsUBO)]]) {
+                                device const CircleEvaluatedPropsUBO& props [[buffer(idCircleEvaluatedPropsUBO)]]
+#if defined(TERRAIN)
+                                , texture2d<float, access::read> ground_depth [[texture(1)]]
+#endif
+                                ) {
 
     device const CircleDrawableUBO& drawable = drawableVector[uboIndex];
 
@@ -854,6 +918,20 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     // multiply a_pos by 0.5, since we had it * 2 in order to sneak in extrusion data
     const float2 circle_center = floor(float2(vertx.position) * 0.5);
 
+    // Over terrain, the circle stands on the ground under its center.
+    device const ProjectionUBO& projection = projectionVector[uboIndex];
+#if defined(TERRAIN)
+    const float ele = vertx.ground_height;
+    const float view_height = paintParams.world_size.y / paintParams.pixel_ratio;
+#if defined(PROJECTION_GLOBE)
+    const float visibility = ground_visibility(projectTileWithElevation(circle_center, ele, projection), view_height, ground_depth);
+#else
+    const float visibility = ground_visibility(drawable.matrix * float4(circle_center, ele, 1), view_height, ground_depth);
+#endif
+#else
+    const float ele = 0.0;
+#endif
+
     float4 position;
     if (props.pitch_with_map) {
 #if defined(PROJECTION_GLOBE)
@@ -871,10 +949,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
             // To counteract the effect for pitch-scale: viewport, we rescale the
             // whole circle based on the pitch scaling effect at its central point
 #if defined(PROJECTION_GLOBE)
-            const float4 projected_center = interpolateProjection(circle_center, center_vector, 0.0, projectionVector[uboIndex]);
+            const float4 projected_center = interpolateProjection(circle_center, center_vector, ele, projectionVector[uboIndex]);
             angle_scale *= (radius + stroke_width) * (projected_center.w / paintParams.camera_to_center_distance);
 #else
-            const float4 projected_center = drawable.matrix * float4(circle_center, 0, 1);
+            const float4 projected_center = drawable.matrix * float4(circle_center, ele, 1);
 #endif
             corner_position += scaled_extrude * (radius + stroke_width) *
                                (projected_center.w / paintParams.camera_to_center_distance);
@@ -882,18 +960,18 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
 #if defined(PROJECTION_GLOBE)
         const float3 corner_vector = globeRotateVector(center_vector, extrude * angle_scale, projectionVector[uboIndex]);
-        position = interpolateProjection(corner_position, corner_vector, 0.0, projectionVector[uboIndex]);
+        position = interpolateProjection(corner_position, corner_vector, ele, projectionVector[uboIndex]);
 #else
-        position = drawable.matrix * float4(corner_position, 0, 1);
+        position = drawable.matrix * float4(corner_position, ele, 1);
 #endif
     } else {
 #if defined(PROJECTION_GLOBE)
-        position = projectTile(circle_center, projectionVector[uboIndex]);
+        position = projectTileWithElevation(circle_center, ele, projectionVector[uboIndex]);
         if (position.z / position.w > 1.0) {
             position.xy = float2(10000.0);
         }
 #else
-        position = drawable.matrix * float4(circle_center, 0, 1);
+        position = drawable.matrix * float4(circle_center, ele, 1);
 #endif
 
         const float factor = props.scale_with_map ? paintParams.camera_to_center_distance : position.w;
@@ -930,6 +1008,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #endif
 #if !defined(HAS_UNIFORM_u_stroke_opacity)
         .stroke_opacity = half(unpack_mix_float(vertx.stroke_opacity, drawable.stroke_opacity_t)),
+#endif
+#if defined(TERRAIN)
+        .visibility     = visibility,
 #endif
     };
 }
@@ -982,9 +1063,14 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const float color_t = (stroke_width < 0.01) ? 0.0 :
         smoothstep(antialiased_blur, 0.0, extrude_length - radius / (radius + stroke_width));
 
+#if defined(TERRAIN)
+    return half4(opacity_t * mix(color * opacity, stroke_color * stroke_opacity, color_t) * in.visibility);
+#else
     return half4(opacity_t * mix(color * opacity, stroke_color * stroke_opacity, color_t));
+#endif
 }
-",
+"
+    ),
 };
 
 pub(crate) const CLIPPING_MASK_PROGRAM: MslShaderSource = MslShaderSource {
@@ -3614,6 +3700,10 @@ struct VertexStage {
 #if !defined(HAS_UNIFORM_u_radius)
     float2 radius [[attribute(2)]];
 #endif
+#if defined(TERRAIN)
+    // The height of the ground under the kernel's center.
+    float ground_height [[attribute(3)]];
+#endif
 };
 
 struct FragmentStage {
@@ -3676,14 +3766,22 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     // multiply a_pos by 0.5, since we had it * 2 in order to sneak
     // in extrusion data
-#if defined(PROJECTION_GLOBE)
     const float2 circle_center = floor(float2(vertx.pos) * 0.5);
-    const float3 center_vector = projectToSphere(circle_center, float2(0.0, 0.0), projectionVector[uboIndex]);
-    const float3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale, projectionVector[uboIndex]);
-    const float4 position = interpolateProjection(circle_center + scaled_extrude, corner_vector, 0.0, projectionVector[uboIndex]);
+    device const ProjectionUBO& projection = projectionVector[uboIndex];
+    // Over terrain, the kernel lies flat at the height of the ground under
+    // its center. The ground in front of it doesn't hide it: its density
+    // adds up in screen space, as GL JS's does.
+#if defined(TERRAIN)
+    const float ele = vertx.ground_height;
 #else
-    const float4 pos = float4(floor(float2(vertx.pos) * 0.5) + scaled_extrude, 0, 1);
-    const float4 position = drawable.matrix * pos;
+    const float ele = 0.0;
+#endif
+#if defined(PROJECTION_GLOBE)
+    const float3 center_vector = projectToSphere(circle_center, float2(0.0, 0.0), projection);
+    const float3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale, projection);
+    const float4 position = interpolateProjection(circle_center + scaled_extrude, corner_vector, ele, projection);
+#else
+    const float4 position = drawable.matrix * float4(circle_center + scaled_extrude, ele, 1);
 #endif
 
     return {
@@ -4301,6 +4399,64 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const float2 deriv = ((color.rg / color.a) * 8.0 - 4.0) / cos(radians(latitude));
     const float4 shaded = float4(hillshade_color(deriv, light, props)) * color.a;
     return half4(fogged(shaded, in.view_depth, terrain.fog));
+}
+"
+    ),
+};
+
+/// The ground's depth: the surface's grid, raised and projected as
+/// `TERRAIN_SHADER` does, writing each pixel's eye distance, an `f32`'s bits,
+/// least significant byte first, as the texel's channels.
+pub(crate) const TERRAIN_DEPTH_SHADER: MslShaderSource = MslShaderSource {
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
+    prelude: TERRAIN_PRELUDE,
+    source: concat!(
+        ground_height!(),
+        r"
+// The height of the surface's vertex at `pos`, in tile units of a tile that
+// reads its DEM at `dem_coords`: the ground's, or sea level at a pole.
+static float surface_height(float2 pos, float4 dem_coords, texture2d<float, access::read> dem,
+                            device const TerrainPropsUBO& props) {
+    if (pos.y < GLOBE_POLE_NORTH_Y || pos.y > GLOBE_POLE_SOUTH_Y) {
+        return 0.0;
+    }
+    return ground_height(pos, dem_coords, dem, props);
+}
+
+struct VertexStage {
+    // x and y in tile units, whether the vertex is a skirt's lower edge, 0.
+    short4 pos [[attribute(0)]];
+};
+
+struct FragmentStage {
+    float4 position [[position, invariant]];
+    // The eye distance, which interpolates exactly across a triangle.
+    float distance;
+};
+
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
+                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
+                                device const TerrainDrawableUBO* drawableVector [[buffer(idTerrainDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
+                                device const TerrainPropsUBO& props [[buffer(idTerrainPropsUBO)]],
+                                texture2d<float, access::read> dem [[texture(2)]]) {
+    device const TerrainDrawableUBO& drawable = drawableVector[uboIndex];
+    device const ProjectionUBO& projection = projectionVector[uboIndex];
+    const float2 pos = float2(vertx.pos.xy);
+    const float skirt = float(vertx.pos.z);
+    const float height = surface_height(pos, drawable.dem_coords, dem, props);
+    const float4 position = projectTileFor3D(pos, height - skirt * props.skirt_length, projection);
+    return {
+        .position = position,
+        .distance = position.w,
+    };
+}
+
+float4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
+    const uint bits = as_type<uint>(in.distance);
+    const uint4 bytes = uint4(bits, bits >> 8, bits >> 16, bits >> 24) & uint4(255);
+    return float4(bytes) / 255.0;
 }
 "
     ),

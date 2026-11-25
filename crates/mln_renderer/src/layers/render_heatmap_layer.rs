@@ -15,8 +15,9 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
-    ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO, ID_HEATMAP_IMAGE_TEXTURE,
-    ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_TEXTURE_PROPS_UBO, ID_PROJECTION_UBO,
+    ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO,
+    ID_HEATMAP_GROUND_HEIGHT_VERTEX_ATTRIBUTE, ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
+    ID_HEATMAP_TEXTURE_PROPS_UBO, ID_PROJECTION_UBO,
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
@@ -57,6 +58,7 @@ use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
 use crate::render_tile::FrameTile;
+use crate::terrain::StandingDraw;
 use crate::tile_matrix::{bind_no_projection, globe_extrude_scale, projection_data, to_projection_ubo};
 
 /// The pass the layer's draws draw in, onto the frame and into its render
@@ -73,7 +75,7 @@ struct HeatmapUniforms {
 /// layer's draw of the frame, which colors the render target's heat onto it.
 #[derive(Default)]
 pub(crate) struct HeatmapDrawing {
-    tiles: TileMap<DrawObjects>,
+    tiles: TileMap<StandingDraw>,
     /// The tiles' draws into the render target.
     target: Option<LayerDraws>,
     /// The layer's draw, built on its first frame.
@@ -104,9 +106,9 @@ impl HeatmapDrawing {
 }
 
 impl LayerDrawing for HeatmapDrawing {
-    type Tile = DrawObjects;
+    type Tile = StandingDraw;
 
-    fn tiles(&mut self) -> Option<&mut TileMap<DrawObjects>> {
+    fn tiles(&mut self) -> Option<&mut TileMap<StandingDraw>> {
         Some(&mut self.tiles)
     }
 
@@ -224,6 +226,8 @@ impl RenderHeatmapLayer {
 impl TypedLayer for RenderHeatmapLayer {
     type Type = Heatmap;
     type Drawing = HeatmapDrawing;
+
+    const STANDS: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -359,7 +363,7 @@ impl RenderHeatmapLayer {
             let changes = entry.take_changes();
             let context = &mut *paint_parameters.context;
             if let Some(cached) = entry.value.as_mut() {
-                refresh_paint_attributes(cached, changes, |attrs| {
+                refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
                     binders.bind(evaluated, paint(context).as_ref(), attrs, &mut Uniforms::default());
                 });
             } else if !bucket.vertices.is_empty()
@@ -394,12 +398,18 @@ impl RenderHeatmapLayer {
                     geometry,
                     Textures::default(),
                 );
-                *entry.value = Some(objects);
+                *entry.value = Some(StandingDraw::new(objects));
             }
 
-            if entry.value.is_none() {
+            let Some(draw) = entry.value.as_mut() else {
                 continue;
-            }
+            };
+            // Over terrain, the kernels stand on the frame's ground. They
+            // don't hide behind it: their density adds up on the screen, as
+            // GL JS's does.
+            let ground = paint_parameters.ground.as_deref();
+            let centers = &bucket.centers;
+            draw.stand(context, ground, tile_id.to_unwrapped(), ID_HEATMAP_GROUND_HEIGHT_VERTEX_ATTRIBUTE, centers);
             let draw = FrameDraw { depth: DrawDepth::Off, ..FrameDraw::new(Some(tile_id), order) };
             tile_draws.push(draw, Self::tile_uniforms(&tile_id, binders, paint_parameters));
         }

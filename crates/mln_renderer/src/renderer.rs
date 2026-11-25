@@ -784,6 +784,12 @@ fn draw(
         orchestrator.layer_mut(index as usize).prerender(gpu, parameters);
     }
 
+    // The ground's depth, which the layers that stand on terrain hide
+    // behind, in a pass of its own.
+    parameters.pass = RenderPass::Translucent;
+    parameters.depth_range_size = depth_range_size;
+    orchestrator.terrain().render_ground(gpu, parameters);
+
     // The 3D pass: the 3D layers draw bottom to top. No pass is open, so
     // the draw groups draw nothing but into their own targets.
     if frame.has_3d {

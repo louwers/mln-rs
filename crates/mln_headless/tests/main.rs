@@ -62,6 +62,8 @@ mod terrain_hillshade_test;
 mod globe_precision_test;
 // Terrain on the globe, draped as on Mercator.
 mod terrain_globe_test;
+// The layers that stand on terrain, and hide behind it.
+mod terrain_standing_test;
 // Tiles showing each answer to their open requests, as their data expires.
 mod tile_expiry_test;
 // Features of two tiles that overlap stack in the frame's order of its tiles.

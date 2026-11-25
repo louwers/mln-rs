@@ -23,6 +23,7 @@ use crate::gfx::mesh::{Indexed, add_point_quads};
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::PaintPropertyBinder;
+use crate::terrain::point_center;
 use crate::util::tessellator::Tessellator;
 
 crate::paint_property_binders!(
@@ -45,6 +46,10 @@ pub(crate) type HeatmapTextureLayoutVertex = HeatmapLayoutVertex;
 pub(crate) struct HeatmapBucket {
     pub(crate) base: BucketBase,
     pub(crate) vertices: GeometryVec<HeatmapLayoutVertex>,
+    /// The center of each vertex's point, which the upload keeps before the
+    /// vertices move: where the heights of the ground under them are.
+    #[wire(skip)]
+    pub(crate) centers: Vec<[i16; 2]>,
     pub(crate) triangles: GeometryVec<u16>,
     pub(crate) segments: Vec<SegmentBase>,
     pub(crate) paint_property_binders: VecMap<String, HeatmapBinders>,
@@ -63,6 +68,7 @@ impl HeatmapBucket {
         HeatmapBucket {
             base: BucketBase::default(),
             vertices: GeometryVec::default(),
+            centers: Vec::new(),
             triangles: GeometryVec::default(),
             segments: Vec::new(),
             paint_property_binders,
@@ -127,6 +133,9 @@ impl Bucket for HeatmapBucket {
     }
 
     fn upload(&mut self, geometry: &mut GeometryUpload<'_>, _needs: UploadNeeds) {
+        if !self.vertices.is_moved() {
+            self.centers = self.vertices.data().iter().map(|vertex| point_center(vertex.a1)).collect();
+        }
         geometry.move_vertices(&mut self.vertices);
         geometry.move_indexes(&mut self.triangles);
         for binders in self.paint_property_binders.values_mut() {

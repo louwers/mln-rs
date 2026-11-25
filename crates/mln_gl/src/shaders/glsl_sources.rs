@@ -69,6 +69,57 @@
 
 use super::shader_source::GlslShaderSource;
 
+/// What the terrain variant of a program that hides behind the ground in
+/// front of it reads of the ground's depth, within `#ifdef TERRAIN` of its
+/// vertex shader: whether that ground hides a point (`ground_visibility`).
+macro_rules! ground_visibility {
+    () => {
+        r"#ifdef TERRAIN
+uniform highp sampler2D u_ground_depth;
+
+// GL JS's `depthOpacity`: 1 where a point `w` from the eye, at `ndc`, is in
+// front of the ground drawn there, fading to 0 behind it over GL JS's ramp
+// of its NDC depth, which `depth_factor` scales; 1 where no ground is drawn
+// there or `ndc` is outside the view. GL stores the rows from the bottom.
+highp float ground_depth_opacity(highp vec2 ndc, highp float w, highp float depth_factor) {
+    if (any(greaterThan(abs(ndc), vec2(1.0)))) {
+        return 1.0;
+    }
+    ivec2 size = textureSize(u_ground_depth, 0);
+    highp vec2 pos = (ndc * 0.5 + 0.5) * vec2(size);
+    ivec2 texel = clamp(ivec2(floor(pos)), ivec2(0), size - 1);
+    highp uvec4 bytes = uvec4(round(texelFetch(u_ground_depth, texel, 0) * 255.0));
+    highp float ground = uintBitsToFloat(bytes.x | (bytes.y << 8u) | (bytes.z << 16u) | (bytes.w << 24u));
+    if (!(ground > 0.0)) {
+        return 1.0;
+    }
+    highp float d = depth_factor * (1.0 / w - 1.0 / ground) + 0.0001;
+    return 1.0 - clamp(-500.0 * d, 0.0, 1.0);
+}
+
+// GL JS's `calculate_visibility` of the point at `clip`: 1 where the ground
+// drawn in front doesn't hide it, 0 where it does, averaged with the point
+// 0.01 NDC above it where it is partly hidden. The ramp's scale is GL JS's:
+// `2n` of a near plane `n` a fiftieth of the view's height, in pixels,
+// `u_world_size.y / u_pixel_ratio`.
+highp float ground_visibility(highp vec4 clip, highp float view_height) {
+    if (clip.w <= 0.0) {
+        return 1.0;
+    }
+    highp vec2 ndc = clip.xy / clip.w;
+    highp float depth_factor = view_height / 25.0;
+    highp float visibility = ground_depth_opacity(ndc, clip.w, depth_factor);
+    if (visibility > 0.95) {
+        return 1.0;
+    }
+    return (visibility + ground_depth_opacity(ndc + vec2(0.0, 0.01), clip.w, depth_factor)) / 2.0;
+}
+#endif
+
+"
+    };
+}
+
 pub(crate) const ATMOSPHERE_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: r"layout(location = 0) in vec2 a_pos;
 
@@ -316,8 +367,16 @@ void main() {
 };
 
 pub(crate) const CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (location = 0) in vec2 a_pos;
+    vertex: concat!(
+        ground_visibility!(),
+        r"layout (location = 0) in vec2 a_pos;
 out vec3 v_data;
+#ifdef TERRAIN
+// The height of the ground under the circle's center.
+in highp float a_ground_height;
+// How much of the circle the ground in front of its center leaves.
+out highp float v_visibility;
+#endif
 
 layout (std140) uniform GlobalPaintParamsUBO {
     highp vec2 u_pattern_atlas_texsize;
@@ -432,6 +491,18 @@ lowp float stroke_opacity = u_stroke_opacity;
     // multiply a_pos by 0.5, since we had it * 2 in order to sneak
     // in extrusion data
     vec2 circle_center = floor(a_pos * 0.5);
+    // Over terrain, the circle stands on the ground under its center.
+#ifdef TERRAIN
+    highp float ele = a_ground_height;
+    highp float view_height = u_world_size.y / u_pixel_ratio;
+#ifdef PROJECTION_GLOBE
+    v_visibility = ground_visibility(projectTileWithElevation(circle_center, ele), view_height);
+#else
+    v_visibility = ground_visibility(u_matrix * vec4(circle_center, ele, 1), view_height);
+#endif
+#else
+    highp float ele = 0.0;
+#endif
     if (u_pitch_with_map) {
 #ifdef PROJECTION_GLOBE
         vec3 center_vector = projectToSphere(circle_center + u_projection_translate, vec2(0.0, 0.0));
@@ -448,28 +519,28 @@ lowp float stroke_opacity = u_stroke_opacity;
             // To counteract the effect for pitch-scale: viewport, we rescale the
             // whole circle based on the pitch scaling effect at its central point
 #ifdef PROJECTION_GLOBE
-            vec4 projected_center = interpolateProjection(circle_center, center_vector, 0.0);
+            vec4 projected_center = interpolateProjection(circle_center, center_vector, ele);
             angle_scale *= (radius + stroke_width) * (projected_center.w / u_camera_to_center_distance);
 #else
-            vec4 projected_center = u_matrix * vec4(circle_center, 0, 1);
+            vec4 projected_center = u_matrix * vec4(circle_center, ele, 1);
 #endif
             corner_position += extrude * (radius + stroke_width) * u_extrude_scale * (projected_center.w / u_camera_to_center_distance);
         }
 
 #ifdef PROJECTION_GLOBE
         vec3 corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
-        gl_Position = interpolateProjection(corner_position, corner_vector, 0.0);
+        gl_Position = interpolateProjection(corner_position, corner_vector, ele);
 #else
-        gl_Position = u_matrix * vec4(corner_position, 0, 1);
+        gl_Position = u_matrix * vec4(corner_position, ele, 1);
 #endif
     } else {
 #ifdef PROJECTION_GLOBE
-        gl_Position = projectTile(circle_center);
+        gl_Position = projectTileWithElevation(circle_center, ele);
         if (gl_Position.z / gl_Position.w > 1.0) {
             gl_Position.xy = vec2(10000.0);
         }
 #else
-        gl_Position = u_matrix * vec4(circle_center, 0, 1);
+        gl_Position = u_matrix * vec4(circle_center, ele, 1);
 #endif
 
         if (u_scale_with_map) {
@@ -486,8 +557,12 @@ lowp float stroke_opacity = u_stroke_opacity;
 
     v_data = vec3(extrude.x, extrude.y, antialiasblur);
 }
-",
+"
+    ),
     fragment: r"in vec3 v_data;
+#ifdef TERRAIN
+in highp float v_visibility;
+#endif
 
 layout (std140) uniform CircleEvaluatedPropsUBO {
     highp vec4 u_color;
@@ -562,6 +637,9 @@ lowp float stroke_opacity = u_stroke_opacity;
     );
 
     fragColor = opacity_t * mix(color * opacity, stroke_color * stroke_opacity, color_t);
+#ifdef TERRAIN
+    fragColor *= v_visibility;
+#endif
 
 #ifdef OVERDRAW_INSPECTOR
     fragColor = vec4(1.0);
@@ -2958,6 +3036,39 @@ void main() {
     ),
 };
 
+/// The ground's depth: the surface's grid, raised and projected as
+/// `TERRAIN_SHADER` does, writing each pixel's eye distance, an `f32`'s bits,
+/// least significant byte first, as the texel's channels.
+pub(crate) const TERRAIN_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
+    vertex: concat!(
+        terrain_props!(),
+        r"// x and y in tile units, whether the vertex is a skirt's lower edge, 0.
+layout (location = 0) in vec4 a_pos;
+
+layout (std140) uniform TerrainDrawableUBO {
+    highp vec4 u_dem_coords;
+};
+
+// The eye distance, which interpolates exactly across a triangle.
+out highp float v_distance;
+
+void main() {
+    float height = surface_height(a_pos.xy, u_dem_coords);
+    gl_Position = projectTileFor3D(a_pos.xy, height - a_pos.z * u_skirt_length);
+    v_distance = gl_Position.w;
+}
+"
+    ),
+    fragment: r"in highp float v_distance;
+
+void main() {
+    highp uint bits = floatBitsToUint(v_distance);
+    highp uvec4 bytes = uvec4(bits, bits >> 8u, bits >> 16u, bits >> 24u) & uvec4(255u);
+    fragColor = vec4(bytes) / 255.0;
+}
+",
+};
+
 /// Port-only, for the backend conformance cases: probes of the terrain's
 /// height rule. Each probe is a quad at clip positions whose vertices read
 /// the height at a place of a tile, and whose fragments write that height's
@@ -2993,6 +3104,10 @@ void main() {
 
 pub(crate) const HEATMAP_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: r#"layout (location = 0) in vec2 a_pos;
+#ifdef TERRAIN
+// The height of the ground under the kernel's center.
+in highp float a_ground_height;
+#endif
 out vec2 v_extrude;
 
 layout (std140) uniform HeatmapDrawableUBO {
@@ -3064,13 +3179,21 @@ mediump float radius = u_radius;
 
     // multiply a_pos by 0.5, since we had it * 2 in order to sneak
     // in extrusion data
-#ifdef PROJECTION_GLOBE
     vec2 circle_center = floor(a_pos * 0.5);
+    // Over terrain, the kernel lies flat at the height of the ground under
+    // its center. The ground in front of it doesn't hide it: its density
+    // adds up in screen space, as GL JS's does.
+#ifdef TERRAIN
+    highp float ele = a_ground_height;
+#else
+    highp float ele = 0.0;
+#endif
+#ifdef PROJECTION_GLOBE
     vec3 center_vector = projectToSphere(circle_center, vec2(0.0, 0.0));
     vec3 corner_vector = globeRotateVector(center_vector, v_extrude * radius * u_globe_extrude_scale);
-    gl_Position = interpolateProjection(circle_center + extrude, corner_vector, 0.0);
+    gl_Position = interpolateProjection(circle_center + extrude, corner_vector, ele);
 #else
-    vec4 pos = vec4(floor(a_pos * 0.5) + extrude, 0, 1);
+    vec4 pos = vec4(circle_center + extrude, ele, 1);
 
     gl_Position = u_matrix * pos;
 #endif

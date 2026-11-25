@@ -49,6 +49,12 @@ pub(crate) struct FeatureSelection<'a> {
 #[derive(Clone, Copy)]
 pub(crate) struct QueryRegion<'a> {
     pub(crate) geometry: &'a GeometryCoordinates,
+    /// The screen points of `geometry`, from the view's top left: where the
+    /// query's lines of sight start.
+    pub(crate) screen: &'a [ScreenCoordinate],
+    /// Over terrain, the ground the frame drew under the tile, where the
+    /// lines of sight meet it at `geometry`, for the layers that stand on it.
+    pub(crate) ground: Option<crate::terrain::TileGround<'a>>,
     pub(crate) view: &'a View,
     pub(crate) projector: &'a TileProjector<'a>,
     pub(crate) pixels_to_tile_units: f32,

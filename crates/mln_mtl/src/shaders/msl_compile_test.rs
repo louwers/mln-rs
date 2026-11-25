@@ -13,7 +13,8 @@ use std::fmt::Write as _;
 use std::mem::size_of;
 
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::shaders::program::{GLOBE_DEFINE, Program};
+use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::program::{GLOBE_DEFINE, Program, TERRAIN_DEFINE};
 use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::shaders::*;
 use objc2::rc::Retained;
@@ -31,10 +32,6 @@ use crate::Id;
 fn sources() -> impl Iterator<Item = (&'static Program, &'static ShaderSource)> {
     BUILT_INS.iter().copied()
 }
-
-/// The projection variants of a program: its name, and whether it defines
-/// `PROJECTION_GLOBE`.
-const PROJECTIONS: [(&str, bool); 2] = [("Mercator", false), ("globe", true)];
 
 fn device() -> Id<dyn MTLDevice> {
     MTLCreateSystemDefaultDevice().expect("no Metal device")
@@ -89,13 +86,20 @@ fn uniform_properties(text: &str) -> BTreeSet<String> {
 
 /// ProgramParameters(1.0, overdraw), the globe define if `globe`, and a
 /// uniform define per name.
-fn defines<'a>(overdraw: bool, globe: bool, uniforms: impl IntoIterator<Item = &'a String>) -> Vec<(String, String)> {
+fn defines<'a>(
+    overdraw: bool,
+    projection: ProjectionVariant,
+    uniforms: impl IntoIterator<Item = &'a String>,
+) -> Vec<(String, String)> {
     let mut defines = vec![("DEVICE_PIXEL_RATIO".to_owned(), "1.0".to_owned())];
     if overdraw {
         defines.push(("OVERDRAW_INSPECTOR".to_owned(), String::new()));
     }
-    if globe {
+    if projection.is_globe() {
         defines.push((GLOBE_DEFINE.to_owned(), String::new()));
+    }
+    if projection.stands() {
+        defines.push((TERRAIN_DEFINE.to_owned(), String::new()));
     }
     defines.extend(uniforms.into_iter().map(|name| (format!("HAS_UNIFORM_u_{name}"), String::new())));
     defines
@@ -106,8 +110,8 @@ fn defines<'a>(overdraw: bool, globe: bool, uniforms: impl IntoIterator<Item = &
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
     use mln_gfx::shaders::programs::{
-        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_PROBE,
-        VERTEX_TEXEL,
+        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_DEPTH,
+        TERRAIN_PROBE, VERTEX_TEXEL,
     };
     // The terrain shows its drapes, where the draped layers count their
     // draws.
@@ -119,6 +123,7 @@ fn every_layer_program_shows_the_overdraw_inspector() {
         &SKY,
         &ATMOSPHERE,
         &TERRAIN,
+        &TERRAIN_DEPTH,
         &VERTEX_TEXEL,
         &TERRAIN_PROBE,
     ];
@@ -143,16 +148,17 @@ fn every_shader_source_compiles() {
             "{}: the properties its MSL reads from uniforms",
             program.name
         );
-        for (projection, globe) in PROJECTIONS {
+        for &projection in ProjectionVariant::of(program) {
             // Every property per vertex, every property as a uniform, each one
             // alone as a uniform, and the overdraw inspector.
             let mut variants = vec![
-                ("no uniforms".to_owned(), defines(false, globe, [])),
-                ("all uniforms".to_owned(), defines(false, globe, &properties)),
-                ("overdraw inspector".to_owned(), defines(true, globe, [])),
-                ("overdraw inspector, all uniforms".to_owned(), defines(true, globe, &properties)),
+                ("no uniforms".to_owned(), defines(false, projection, [])),
+                ("all uniforms".to_owned(), defines(false, projection, &properties)),
+                ("overdraw inspector".to_owned(), defines(true, projection, [])),
+                ("overdraw inspector, all uniforms".to_owned(), defines(true, projection, &properties)),
             ];
-            variants.extend(properties.iter().map(|name| (format!("uniform {name}"), defines(false, globe, [name]))));
+            variants
+                .extend(properties.iter().map(|name| (format!("uniform {name}"), defines(false, projection, [name]))));
             for (variant, defines) in variants {
                 match compile(&device, &text, &defines, source.fast_math) {
                     Ok(library) => {
@@ -160,13 +166,13 @@ fn every_shader_source_compiles() {
                         for function in [source.msl.vertex_main_function, source.msl.fragment_main_function] {
                             if library.newFunctionWithName(&NSString::from_str(function)).is_none() {
                                 failures.push(format!(
-                                    "{} ({projection}, {variant}): no function {function}",
+                                    "{} ({projection:?}, {variant}): no function {function}",
                                     program.name
                                 ));
                             }
                         }
                     }
-                    Err(error) => failures.push(format!("{} ({projection}, {variant}):\n{error}", program.name)),
+                    Err(error) => failures.push(format!("{} ({projection:?}, {variant}):\n{error}", program.name)),
                 }
             }
         }
@@ -261,7 +267,7 @@ fn ubo_ids(program: &Program, source: &ShaderSource) -> Vec<(&'static str, usize
         }
         "LayerCompositeShader" => (&[("idLayerCompositeUBO", ID_LAYER_COMPOSITE_UBO)], "layerCompositeUBOCount"),
         "VertexTexelShader" => (&[], "vertexTexelUBOCount"),
-        "TerrainShader" | "TerrainProbeShader" => (
+        "TerrainShader" | "TerrainProbeShader" | "TerrainDepthShader" => (
             &[
                 ("idTerrainDrawableUBO", ID_TERRAIN_DRAWABLE_UBO),
                 ("idTerrainLightTileUBO", ID_TERRAIN_LIGHT_TILE_UBO),
@@ -413,9 +419,9 @@ fn ubo_ids_and_sizes_are_the_renderers() {
             }
         }
         text.push_str(&asserts);
-        for (projection, globe) in PROJECTIONS {
-            if let Err(error) = compile(&device, &text, &defines(false, globe, []), source.fast_math) {
-                failures.push(format!("{} ({projection}):\n{error}", program.name));
+        for &projection in ProjectionVariant::of(program) {
+            if let Err(error) = compile(&device, &text, &defines(false, projection, []), source.fast_math) {
+                failures.push(format!("{} ({projection:?}):\n{error}", program.name));
             }
         }
     }
@@ -504,10 +510,10 @@ fn pipelines_build_with_the_tables_vertex_layout() {
             ("table formats", vertex_descriptor(source, |data_type| data_type)),
             ("single-value formats", vertex_descriptor(source, narrow)),
         ];
-        let variants = PROJECTIONS.iter().flat_map(|&(projection, globe)| {
+        let variants = ProjectionVariant::of(program).iter().flat_map(|&projection| {
             [
-                (format!("{projection}, no uniforms"), defines(false, globe, [])),
-                (format!("{projection}, all uniforms"), defines(false, globe, &properties)),
+                (format!("{projection:?}, no uniforms"), defines(false, projection, [])),
+                (format!("{projection:?}, all uniforms"), defines(false, projection, &properties)),
             ]
         });
         for (variant, defines) in variants {

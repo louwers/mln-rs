@@ -20,6 +20,7 @@ use crate::bucket::{Bucket, BucketBase, UploadNeeds};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::layer_type::EvaluatedLayer;
 use crate::paint_property_binder::PaintPropertyBinder;
+use crate::terrain::point_center;
 
 crate::paint_property_binders!(
     pub struct CircleBinders for CirclePaintProperties::PossiblyEvaluated {
@@ -43,6 +44,10 @@ pub(crate) struct CircleLayoutVertex {
 pub(crate) struct CircleBucket {
     pub(crate) base: BucketBase,
     pub(crate) vertices: GeometryVec<CircleLayoutVertex>,
+    /// The center of each vertex's point, which the upload keeps before the
+    /// vertices move: where the heights of the ground under them are.
+    #[wire(skip)]
+    pub(crate) centers: Vec<[i16; 2]>,
     pub(crate) triangles: GeometryVec<u16>,
     pub(crate) segments: Vec<SegmentBase>,
     pub(crate) paint_property_binders: VecMap<String, CircleBinders>,
@@ -63,6 +68,7 @@ impl CircleBucket {
         CircleBucket {
             base: BucketBase::default(),
             vertices: GeometryVec::default(),
+            centers: Vec::new(),
             triangles: GeometryVec::default(),
             segments: Vec::new(),
             paint_property_binders,
@@ -106,6 +112,9 @@ impl Bucket for CircleBucket {
     }
 
     fn upload(&mut self, geometry: &mut GeometryUpload<'_>, _needs: UploadNeeds) {
+        if !self.vertices.is_moved() {
+            self.centers = self.vertices.data().iter().map(|vertex| point_center(vertex.a1)).collect();
+        }
         geometry.move_vertices(&mut self.vertices);
         geometry.move_indexes(&mut self.triangles);
         for binders in self.paint_property_binders.values_mut() {

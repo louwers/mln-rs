@@ -70,6 +70,9 @@ pub const ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE: usize = 4;
 pub const ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE: usize = 5;
 pub const ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE: usize = 6;
 pub const ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE: usize = 7;
+/// Over terrain, the height of the ground under the circle's center, in
+/// meters with the exaggeration: the terrain variant's.
+pub const ID_CIRCLE_GROUND_HEIGHT_VERTEX_ATTRIBUTE: usize = 8;
 
 pub const ID_FILL_POS_VERTEX_ATTRIBUTE: usize = 0;
 // Data driven
@@ -177,6 +180,14 @@ pub const ID_TERRAIN_DEM_TEXTURE: usize = 2;
 /// The tile's drape, which the fragment stage samples.
 pub const ID_TERRAIN_DRAPE_TEXTURE: usize = 1;
 
+// --- the ground that the terrain variants of the programs that hide behind
+// it read (`ProjectionVariant::stands`), in the texture slot the programs
+// keep free for it.
+/// The ground's depth: each pixel's eye distance to the nearest ground drawn
+/// there, the bits of an `f32`, least significant byte first, in an RGBA8
+/// texel; 0 where none is.
+pub const ID_GROUND_DEPTH_TEXTURE: usize = 1;
+
 // --- terrain probe (port-only): the conformance case's probes of the height
 // rule, which read the terrain's props and DEM texture.
 /// Where a probe draws, in clip x and y, then where it reads the height, in
@@ -206,6 +217,9 @@ pub const ID_HEATMAP_POS_VERTEX_ATTRIBUTE: usize = 0;
 // Data driven
 pub const ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE: usize = 1;
 pub const ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE: usize = 2;
+/// Over terrain, the height of the ground under the kernel's center, in
+/// meters with the exaggeration: the terrain variant's.
+pub const ID_HEATMAP_GROUND_HEIGHT_VERTEX_ATTRIBUTE: usize = 3;
 
 pub const ID_HILLSHADE_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
 pub const ID_HILLSHADE_TILE_PROPS_UBO: usize = ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO; // SSBO
