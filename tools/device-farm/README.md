@@ -3,7 +3,8 @@
 The tests that CI's target jobs run, built for `aarch64-linux-android` and run
 on real phones in [AWS Device Farm](https://aws.amazon.com/device-farm/): a
 Google Pixel 9 (Mali GPU) and a Samsung Galaxy S25 (Adreno GPU), both on Android
-16, with the render suite on Vulkan. The phones are listed in `schedule.sh`.
+16, with the render suite on Vulkan. The phones and run settings are configured
+in `.config/device-farm.toml`.
 
 ## How a run works
 
@@ -12,10 +13,9 @@ Google Pixel 9 (Mali GPU) and a Samsung Galaxy S25 (Adreno GPU), both on Android
    cargo-nextest, the test host for the phones' ABI (`tools/android-test-host`),
    the workspace's files, Linux x64 `cargo-nextest` and `devices-cli`, and
    `run-tests.sh`.
-2. `schedule.sh` uploads the package with the test spec, `android.yml`, and
-   schedules them as a web app test, the kind of test that needs no app. Once
-   the run finished, `collect.sh` downloads each phone's test spec output and
-   artifacts.
+2. The package is uploaded with the test spec, `android.yml`, and scheduled as a
+   web app test, the kind of test that needs no app (by the Lambda orchestrator
+   in CI, or by `schedule.sh` and `collect.sh` locally).
 3. On each phone's test host, `run-tests.sh` unpacks the workspace and assigns
    the phone in `devices-cli`. cargo-nextest then runs the archive's tests with
    the `device-farm` profile (`.config/nextest.toml`), each test on the phone
@@ -30,34 +30,32 @@ test host and runner that the emulator's runs use (`tools/android-test-host`).
 
 ## In CI
 
-CI's `prepare-device-tests` job builds the package when the `android` unit runs,
-without credentials. Three workflows run it, so that no GitHub runner waits for
-the phones while a run is queued or in progress:
+CI's `prepare-device-tests` job builds and uploads the `android-device-tests`
+artifact when the `android` unit runs, without AWS credentials. The
+`maplibre-device-farm` GitHub App runs the tests on AWS Device Farm without
+holding a GitHub runner:
 
-- `device-test` starts with the CI run, waits for `prepare-device-tests`, and
-  schedules the package once the job has built it, while the rest of CI runs. It
-  reports the run on the commit as pending, as the `device-test / android`
-  status, which links to the run in the AWS console (`console-url.sh`), and
-  names the run for the commit. A newer commit of a pull request stops the run
-  of the commit before it. When the plan leaves the Android tests out, it
-  reports the status as passed, since merging into `main` requires it.
-- `device-farm-watch`, one at a time for every run, waits for the runs, and
-  starts `device-farm-finish` for each that finished (`watch.sh`). An hourly
-  schedule starts it too, in case one failed.
-- `device-farm-finish` reports the run's result on its commit, linking to itself
-  rather than to the AWS console, which needs a login to the account. It has
-  each phone's output and artifacts (`collect.sh`), and a job without
-  credentials summarizes each phone's JUnit report (`summary.py`).
+- When `prepare-device-tests` finishes (or when the `ci` workflow finishes, as a
+  reconciliation fallback), the orchestrator reads `.config/device-farm.toml`
+  and `tools/device-farm/android.yml` from `main`, downloads the artifact, stops
+  any earlier in-flight run for the same branch, and schedules the run on the
+  configured phones.
+- While the phones run, it creates a `device-test / android` check run on the
+  commit linking to the AWS console. When the plan skips `prepare-device-tests`,
+  it reports the check run as passed.
+- A poller checks active runs every minute, uploads each phone's logs and
+  artifacts to the public results bucket, and settles the
+  `device-test / android` check run with a per-phone JUnit summary and links to
+  the published results. GitHub's Re-run button on the check run reschedules the
+  run from the uploaded artifact.
 
-`device-test` runs on `workflow_run`, from the default branch, so pull requests
-from forks get a run too: the package may come from a fork, so the workflows,
-which assume their AWS role through the `workflow-run` environment that only
-`main` can use, never run or unpack it.
+Pull requests from forks get a run safely because the orchestrator always reads
+`.config/device-farm.toml` and `android.yml` from `main` and never unpacks or
+executes the package outside AWS Device Farm.
 
-[maplibre/infra](https://github.com/maplibre/infra)'s `opentofu/github-actions`
-stack manages the AWS side: the `mln-rs` Device Farm project, the `workflow-run`
-environment and its variables, and the role, `GitHubActionsWorkflowRun`, which
-every maplibre repository's workflows can assume to run tests on Device Farm.
+[maplibre/infra](https://github.com/maplibre/infra) manages the AWS side: the
+`device-farm/` Lambda orchestrator and the `opentofu/device-farm` stack (the
+`mln-rs` Device Farm project, Lambdas, queue, table, and results distribution).
 
 ## From your machine
 

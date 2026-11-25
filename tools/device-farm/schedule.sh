@@ -1,30 +1,38 @@
 #!/usr/bin/env bash
 # Schedules a test package that `mise run device-farm:package` built on AWS
-# Device Farm's phones (README.md): uploads it with android.yml to the project
-# that $AWS_DEVICE_FARM_PROJECT_ARN names (by default the one named mln-rs),
-# schedules it on the phones below, and prints the run's ARN. With a key, it
-# first stops the runs that are scheduled with the same key and haven't
-# finished, such as those of a pull request's earlier commit.
+# Device Farm's phones (README.md): reads the test spec, timeout, and phones
+# from .config/device-farm.toml, uploads the package and test spec to the
+# project that $AWS_DEVICE_FARM_PROJECT_ARN names (by default the one named
+# mln-rs), schedules the run, and prints the run's ARN.
 #
-# Usage: schedule.sh <package.zip> <run name> [key]
-#
-# Nothing here runs or unpacks the package, which may come from a fork
-# (README.md).
+# Usage: schedule.sh <package.zip> <run name>
 set -euo pipefail
 
 package=$1
 name=$2
-key=${3:-}
-spec=$(dirname "$0")/android.yml
+repo_root=$(cd "$(dirname "$0")/../.." && pwd)
+config=$repo_root/.config/device-farm.toml
 export AWS_REGION=us-west-2 AWS_PAGER=
 
-# A Mali GPU and an Adreno one, on Android 16.
-devices=(
-    arn:aws:devicefarm:us-west-2::device:6D89F408709B4D3BBBBB17696A24B141 # Google Pixel 9
-    arn:aws:devicefarm:us-west-2::device:092D78E7B4694568812D5FF0711CD346 # Samsung Galaxy S25
+config_values=()
+while IFS= read -r line; do
+    config_values+=("$line")
+done < <(
+    python3 - "$config" << 'PYEOF'
+import sys
+import tomllib
+
+with open(sys.argv[1], "rb") as f:
+    cfg = tomllib.load(f)
+print(cfg["test_spec_path"])
+print(cfg.get("job_timeout_minutes", 60))
+for arn in cfg["devices"]:
+    print(arn)
+PYEOF
 )
-# Each phone's run of the tests.
-job_minutes=60
+spec=$repo_root/${config_values[0]}
+job_minutes=${config_values[1]}
+devices=("${config_values[@]:2}")
 
 project=${AWS_DEVICE_FARM_PROJECT_ARN:-$(aws devicefarm list-projects --query "projects[?name=='mln-rs'].arn | [0]" --output text)}
 
@@ -56,21 +64,12 @@ upload() {
 
 echo "Uploading $package" >&2
 spec_arn_file=$(mktemp)
+trap 'rm -f "$spec_arn_file"' EXIT
 upload "$spec" APPIUM_WEB_NODE_TEST_SPEC > "$spec_arn_file" &
 spec_upload=$!
 package_arn=$(upload "$package" APPIUM_WEB_NODE_TEST_PACKAGE)
 wait "$spec_upload"
 spec_arn=$(< "$spec_arn_file")
-
-if [[ -n $key ]]; then
-    name+=" key=$key"
-    aws devicefarm list-runs --arn "$project" --output json |
-        jq -r --arg key " key=$key" '.runs[] | select(.status != "COMPLETED" and .status != "STOPPING" and (.name | endswith($key))) | .arn' |
-        while read -r earlier; do
-            echo "Stopping $earlier" >&2
-            aws devicefarm stop-run --arn "$earlier" > /dev/null
-        done
-fi
 
 # A web app test, the type of test that needs no app: android.yml drives the
 # phone over adb.

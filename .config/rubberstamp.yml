@@ -82,6 +82,7 @@ ci:
       rules:
         - if:
             files:
+              - .config/device-farm.toml
               - mise.target-android.*
               - tools/android-test-host/**
               - tools/device-farm/**

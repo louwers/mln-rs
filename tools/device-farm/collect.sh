@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Downloads a finished AWS Device Farm run's results (README.md): each phone's
 # test spec output and artifacts into a directory of its own in the results
-# directory, and prints a table of the phones' results, which it also adds to
-# a GitHub Actions job's summary. Exits 0 when the run passed.
+# directory, and prints a table of the phones' results. Exits 0 when the run
+# passed.
 #
 # Usage: collect.sh <run ARN> <results directory>
 set -euo pipefail
@@ -25,7 +25,4 @@ done < <(aws devicefarm list-jobs --arn "$run" --output json |
     jq -r '.jobs[] | [.arn, .device.name, .result, .deviceMinutes.total] | @tsv')
 
 echo "$summary"
-if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
-    echo "$summary" >> "$GITHUB_STEP_SUMMARY"
-fi
 [[ $(aws devicefarm get-run --arn "$run" --query run.result --output text) == PASSED ]]

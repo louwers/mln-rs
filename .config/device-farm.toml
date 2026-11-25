@@ -1,0 +1,16 @@
+# Configuration for the maplibre-device-farm GitHub App / AWS Lambda
+# orchestrator (maplibre/infra: device-farm/) and local `mise run
+# device-farm:run` runs (tools/device-farm/README.md).
+workflow_name = "ci"
+trigger_job = "prepare-device-tests"
+artifact_name = "android-device-tests"
+package_filename = "android-tests.zip"
+test_spec_path = "tools/device-farm/android.yml"
+check_name = "device-test / android"
+job_timeout_minutes = 60
+
+# A Mali GPU and an Adreno one, on Android 16.
+devices = [
+  "arn:aws:devicefarm:us-west-2::device:6D89F408709B4D3BBBBB17696A24B141", # Google Pixel 9
+  "arn:aws:devicefarm:us-west-2::device:092D78E7B4694568812D5FF0711CD346", # Samsung Galaxy S25
+]
