@@ -655,8 +655,8 @@ impl Encoder {
         // size, which the draw groups' count sets, and custom layers record
         // their work with the projection that the frame's result reports.
         let depth_range_size = draw_groups.depth_range_size();
-        let frame_projection =
-            frame_projection::compute(&frame.transform, depth_range_size, parameters.context.caps().clip_depth);
+        let clip_depth = parameters.context.caps().clip_depth;
+        let frame_projection = frame_projection::compute(&frame.transform, depth_range_size, clip_depth, frame.terrain);
         parameters.custom_layer_frame = Some(CustomLayerFrame {
             view: state.map_view(pixel_ratio),
             projection: frame_projection,

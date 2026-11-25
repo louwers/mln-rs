@@ -839,8 +839,9 @@ impl RenderFillExtrusionLayer {
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
         // The near-clipped projection keeps the depth buffer's precision for
         // the extrusions, but over terrain they test the frame's depth of the
-        // ground, which the surface's projection draws.
-        let near_clipped = parameters.ground.is_none();
+        // ground, which the surface's projection draws, and the frame reports
+        // that projection (`frame_projection::compute`).
+        let near_clipped = !parameters.terrain;
         let evaluated = &layer.paint;
         let state = parameters.view;
         let zoom = state.zoom() as f32;

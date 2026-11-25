@@ -16,17 +16,24 @@ use crate::paint_parameters::TransformParameters;
 
 /// The projection of a frame that drew with `transform`, its 3D layers into
 /// the depth range from 0 to `depth_range_size`, on a backend whose API's
-/// clip depth is `clip_depth_range`.
+/// clip depth is `clip_depth_range`: the projection that writes the frame's
+/// depth. Over `terrain`, that's the 3D projection, which the surface and
+/// the layers standing on it draw with, and the near-clipped one elsewhere.
 #[must_use]
 pub(crate) fn compute(
     transform: &TransformParameters,
     depth_range_size: f32,
     clip_depth_range: ClipDepthRange,
+    terrain: bool,
 ) -> FrameProjection {
     let state = &transform.view;
     let world_size = Projection::world_size(state.scale());
-    let mut world_to_clip =
-        transform.near_clipped_proj_matrix * DMat4::from_scale(DVec3::new(world_size, world_size, 1.0));
+    let (proj_matrix, near) = if terrain {
+        (transform.proj_matrix, state.near_z())
+    } else {
+        (transform.near_clipped_proj_matrix, transform.near_clipped_near_z)
+    };
+    let mut world_to_clip = proj_matrix * DMat4::from_scale(DVec3::new(world_size, world_size, 1.0));
     let far_depth = f64::from(depth_range_size);
     // Clip z over w from 0 to 1 is the 3D layers' depth over `far_depth`:
     // scale it to the depth, and on OpenGL map it to -1 to 1 again.
@@ -38,7 +45,6 @@ pub(crate) fn compute(
             ClipDepthRange::NegativeOneToOne => 2.0 * far_depth * z - w,
         },
     );
-    let near = transform.near_clipped_near_z;
     let far = state.far_z();
     FrameProjection {
         matrix: world_to_clip,
@@ -107,7 +113,7 @@ mod tests {
     #[test]
     fn the_matrix_puts_points_where_the_map_draws_them() {
         let transform = transform();
-        let projection = compute(&transform, 0.9, ClipDepthRange::ZeroToOne);
+        let projection = compute(&transform, 0.9, ClipDepthRange::ZeroToOne, false);
         for (lat, lng) in [(40.7, -74.0), (40.703, -73.996), (40.698, -74.004), (40.705, -74.001)] {
             let lat_lng = LatLng::new(lat, lng).unwrap();
             // The state counts its screen points from the bottom.
@@ -131,8 +137,8 @@ mod tests {
     fn both_conventions_give_the_depth_of_the_3d_layers() {
         let transform = transform();
         let far_depth = 0.99;
-        let zero_to_one = compute(&transform, far_depth as f32, ClipDepthRange::ZeroToOne);
-        let negative_one_to_one = compute(&transform, far_depth as f32, ClipDepthRange::NegativeOneToOne);
+        let zero_to_one = compute(&transform, far_depth as f32, ClipDepthRange::ZeroToOne, false);
+        let negative_one_to_one = compute(&transform, far_depth as f32, ClipDepthRange::NegativeOneToOne, false);
         assert_eq!(ClipDepthRange::ZeroToOne, zero_to_one.clip_depth_range);
         assert_eq!(ClipDepthRange::NegativeOneToOne, negative_one_to_one.clip_depth_range);
         let far_depth = zero_to_one.far_depth;
@@ -180,7 +186,7 @@ mod tests {
             projection: ProjectionDefinition::default(),
         };
         let transform = TransformParameters::new(&view.to_view().unwrap());
-        let projection = compute(&transform, 1.0, ClipDepthRange::ZeroToOne);
+        let projection = compute(&transform, 1.0, ClipDepthRange::ZeroToOne, false);
         assert_eq!(transform.view.far_z(), projection.far_distance);
         // The ground north of the center: what is drawn below the horizon
         // is nearer than the far depth, and what is drawn above it is past.
