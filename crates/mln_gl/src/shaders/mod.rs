@@ -3,4 +3,6 @@
 /// The GLSL of every shader.
 #[rustfmt::skip]
 pub(crate) mod glsl_sources;
+pub(crate) mod declarations;
+pub(crate) mod precision;
 pub(crate) mod shader_source;

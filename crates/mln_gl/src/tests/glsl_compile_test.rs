@@ -10,13 +10,14 @@
 use std::collections::BTreeSet;
 
 use mln_gfx::RendererBackend as _;
+use mln_gfx::gpu::ShaderKey;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::programs::STANDING;
 use mln_util::hash::HashSet;
 
-use crate::shaders::glsl_sources::PRELUDE;
+use crate::shaders::declarations::Stage;
 use crate::shaders::shader_source::{BUILT_INS, ShaderSource, UniformBlockInfo, uniform_block};
 use crate::{Api, Device, DeviceOptions, RendererBackend};
 
@@ -99,8 +100,53 @@ fn every_layer_program_shows_the_overdraw_inspector() {
     }
 }
 
+/// A variant of a program that the tests compile.
+struct Variant {
+    /// The program and variant, for messages.
+    what: String,
+    key: ShaderKey,
+    /// Whether it reads every property from its uniform, rather than every
+    /// one per vertex.
+    uniforms: bool,
+    /// Whether it is a variant of a program that stands on terrain that
+    /// doesn't.
+    flat: bool,
+}
+
+/// The variants of `program` that the tests compile: in each projection
+/// variant, with every property read per vertex and with every one read
+/// from its uniform.
+fn variants(program: &'static Program) -> Vec<Variant> {
+    let parameters = ProgramParameters::new(1.0, false);
+    let mut property_sets = vec![&[][..]];
+    if !program.properties.is_empty() {
+        property_sets.push(program.properties);
+    }
+    let mut variants = Vec::new();
+    for &variant in ProjectionVariant::of(program) {
+        for (i, &property_set) in property_sets.iter().enumerate() {
+            variants.push(Variant {
+                what: format!("{} ({variant:?}, {})", program.name, ["attributes", "uniforms"][i]),
+                key: program.variant_key(&parameters, property_set, variant),
+                uniforms: i == 1,
+                flat: !variant.stands() && STANDING.contains(&program),
+            });
+        }
+    }
+    variants
+}
+
+/// The vertex and fragment stages of `source` for `key`'s program, as GL ES.
+fn stages(source: &ShaderSource, key: &ShaderKey) -> [String; 2] {
+    let defines: String = key.define_values().flat_map(|(name, value)| ["#define ", name, " ", value, "\n"]).collect();
+    let header = ["#version 300 es\n", &defines].concat();
+    [Stage::Vertex, Stage::Fragment].map(|stage| {
+        source.compose(key.program(), stage, &header).unwrap_or_else(|error| panic!("{}: {error}", key.program().name))
+    })
+}
+
 /// The names of the uniform blocks `glsl` declares, in declaration order.
-fn declared_blocks_in_order(glsl: &str) -> Vec<String> {
+fn declared_blocks(glsl: &str) -> Vec<String> {
     let mut names = Vec::new();
     for (start, _) in glsl.match_indices("uniform ") {
         let rest = &glsl[start + "uniform ".len()..];
@@ -112,17 +158,11 @@ fn declared_blocks_in_order(glsl: &str) -> Vec<String> {
     names
 }
 
-/// The names of the uniform blocks `glsl` declares.
-fn declared_blocks(glsl: &str) -> BTreeSet<String> {
-    declared_blocks_in_order(glsl).into_iter().collect()
-}
-
-/// The uniform blocks of `source` and the prelude, by their names, with
-/// where each binds.
-fn uniform_blocks(program: &Program, source: &ShaderSource) -> Vec<(String, Option<UniformBlockInfo>)> {
-    let texts = [PRELUDE.vertex, PRELUDE.fragment, source.glsl.vertex, source.glsl.fragment];
-    let names: BTreeSet<String> = texts.iter().flat_map(|glsl| declared_blocks(glsl)).collect();
-    names.into_iter().map(|name| (name.clone(), uniform_block(program, &name))).collect()
+/// The uniform blocks that the stages of `source` for `key` declare, by
+/// their names, with where each binds.
+fn uniform_blocks(source: &ShaderSource, key: &ShaderKey) -> Vec<(String, Option<UniformBlockInfo>)> {
+    let names: BTreeSet<String> = stages(source, key).iter().flat_map(|glsl| declared_blocks(glsl)).collect();
+    names.into_iter().map(|name| (name.clone(), uniform_block(key.program(), &name))).collect()
 }
 
 /// WebGL2 rejects a draw whose program has a uniform block without a buffer,
@@ -131,8 +171,10 @@ fn uniform_blocks(program: &Program, source: &ShaderSource) -> Vec<(String, Opti
 #[test]
 fn every_declared_uniform_block_has_a_buffer() {
     for &(program, source) in BUILT_INS {
-        for (block, info) in uniform_blocks(program, source) {
-            assert!(info.is_some(), "{}: uniform block {block} has no buffer", program.name);
+        for variant in variants(program) {
+            for (block, info) in uniform_blocks(source, &variant.key) {
+                assert!(info.is_some(), "{}: uniform block {block} has no buffer", variant.what);
+            }
         }
     }
 }
@@ -143,11 +185,12 @@ fn every_declared_uniform_block_has_a_buffer() {
 #[test]
 fn fragment_shaders_declare_shared_uniform_blocks_first() {
     for &(program, source) in BUILT_INS {
-        let vertex = declared_blocks_in_order(source.glsl.vertex);
-        let fragment = declared_blocks_in_order(source.glsl.fragment);
-        let shared: Vec<&String> = vertex.iter().filter(|block| fragment.contains(block)).collect();
-        let leading: Vec<&String> = fragment.iter().take(shared.len()).collect();
-        assert_eq!(leading, shared, "{}: fragment shader's leading uniform blocks", program.name);
+        for variant in variants(program) {
+            let [vertex, fragment] = stages(source, &variant.key).map(|glsl| declared_blocks(&glsl));
+            let shared: Vec<&String> = vertex.iter().filter(|block| fragment.contains(block)).collect();
+            let leading: Vec<&String> = fragment.iter().take(shared.len()).collect();
+            assert_eq!(leading, shared, "{}: fragment shader's leading uniform blocks", variant.what);
+        }
     }
 }
 
@@ -171,59 +214,49 @@ fn every_program_links_and_matches_its_tables_on_desktop_open_gl() {
 fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
     let version = glow::HasContext::version(backend.context().gl());
     println!("GL_RENDERER: {}, GL_VERSION: {}", backend.get_renderer_name(), version.vendor_info);
-    let parameters = ProgramParameters::new(1.0, false);
 
     let mut programs = 0;
     for &(program, source) in BUILT_INS {
-        let mut property_sets = vec![&[][..]];
-        if !program.properties.is_empty() {
-            property_sets.push(program.properties);
-        }
-        for &variant in ProjectionVariant::of(program) {
-            let flat = !variant.stands() && STANDING.contains(&program);
-            for (i, &property_set) in property_sets.iter().enumerate() {
-                let what = format!("{} ({variant:?}, {})", program.name, ["attributes", "uniforms"][i]);
-                let key = program.variant_key(&parameters, property_set, variant);
-                // Fragment shaders default to mediump on a GPU and to highp
-                // on a CPU rasterizer, so both must link wherever this runs.
-                let mut compile = |highp_fragment| {
-                    backend.gpu().program(&key, highp_fragment).unwrap_or_else(|error| {
-                        panic!("{what} failed to compile or link with highp_fragment {highp_fragment}: {error}")
-                    })
-                };
-                compile(true);
-                let program = compile(false);
-                programs += 1;
+        for Variant { what, key, uniforms, flat } in variants(program) {
+            // Fragment shaders default to mediump on a GPU and to highp on a
+            // CPU rasterizer, so both must link wherever this runs.
+            let mut compile = |highp_fragment| {
+                backend.gpu().program(&key, highp_fragment).unwrap_or_else(|error| {
+                    panic!("{what} failed to compile or link with highp_fragment {highp_fragment}: {error}")
+                })
+            };
+            compile(true);
+            let compiled = compile(false);
+            programs += 1;
 
-                let blocks = uniform_blocks(key.program(), source);
-                for block in &program.blocks {
-                    let (name, info) = blocks
-                        .iter()
-                        .find_map(|(name, info)| info.filter(|info| info.id == block.id).map(|info| (name, info)))
-                        .unwrap_or_else(|| panic!("{what}: block at {} without a buffer", block.id));
-                    assert_eq!(
-                        block.size.next_multiple_of(16),
-                        info.size,
-                        "{what}: the size of {name} differs from its UBO's",
-                    );
-                }
+            let blocks = uniform_blocks(source, &key);
+            for block in &compiled.blocks {
+                let (name, info) = blocks
+                    .iter()
+                    .find_map(|(name, info)| info.filter(|info| info.id == block.id).map(|info| (name, info)))
+                    .unwrap_or_else(|| panic!("{what}: block at {} without a buffer", block.id));
+                assert_eq!(
+                    block.size.next_multiple_of(16),
+                    info.size,
+                    "{what}: the size of {name} differs from its UBO's"
+                );
+            }
 
-                // With every property an attribute, the program has every
-                // attribute it declares but the ones its GLSL leaves unused.
-                let mut locations = HashSet::default();
-                for &(_, location) in &program.vertex_locations {
-                    assert!(locations.insert(location), "{what}: two attributes at location {location}");
-                }
-                if i == 0 {
-                    assert!(!locations.is_empty(), "{what}: no vertex attributes");
-                }
-                // A variant that doesn't stand on terrain doesn't read the
-                // ground's depth, whatever slot its program keeps for it.
-                let textures = key.program().textures.iter().enumerate();
-                for (slot, texture) in textures.filter(|(_, texture)| !(flat && texture.name == "ground_depth")) {
-                    if !texture.is_unused() {
-                        assert!(program.textures.contains(&slot), "{what}: no sampler u_{}", texture.name);
-                    }
+            // With every property an attribute, the program has every
+            // attribute it declares but the ones its GLSL leaves unused.
+            let mut locations = HashSet::default();
+            for &(_, location) in &compiled.vertex_locations {
+                assert!(locations.insert(location), "{what}: two attributes at location {location}");
+            }
+            if !uniforms {
+                assert!(!locations.is_empty(), "{what}: no vertex attributes");
+            }
+            // A variant that doesn't stand on terrain doesn't read the
+            // ground's depth, whatever slot its program keeps for it.
+            let textures = program.textures.iter().enumerate();
+            for (slot, texture) in textures.filter(|(_, texture)| !(flat && texture.name == "ground_depth")) {
+                if !texture.is_unused() {
+                    assert!(compiled.textures.contains(&slot), "{what}: no sampler u_{}", texture.name);
                 }
             }
         }

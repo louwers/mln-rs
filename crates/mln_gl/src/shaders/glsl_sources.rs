@@ -63,9 +63,6 @@
 //   in (`projectToSphere`).
 // - The terrain shaders have no C++ counterpart: they are the port's own, with
 //   the WGSL's height rule.
-// - Fragment shaders declare the uniform blocks they share with their vertex
-//   shader first, in the vertex shader's order, which SwiftShader needs
-//   (maplibre/maplibre-native#4625, ffi patch 0011, and `line_gradient_sdf`).
 
 use super::shader_source::GlslShaderSource;
 
@@ -75,7 +72,6 @@ use super::shader_source::GlslShaderSource;
 macro_rules! ground_visibility {
     () => {
         r"#ifdef TERRAIN
-uniform highp sampler2D u_ground_depth;
 
 // GL JS's `depthOpacity`: 1 where a point `w` from the eye, at `ndc`, is in
 // front of the ground drawn there, fading to 0 behind it over GL JS's ramp
@@ -121,19 +117,11 @@ highp float ground_visibility(highp vec4 clip, highp float view_height) {
 }
 
 pub(crate) const ATMOSPHERE_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout(location = 0) in vec2 a_pos;
-
-layout(std140) uniform AtmospherePropsUBO {
-    mat4 inv_view_projection;
-    vec4 camera_position;
-    vec4 sun_position;
-} atmosphere;
-
-out vec3 v_view_direction;
+    vertex: r"out vec3 v_view_direction;
 
 void main() {
-    vec4 view_position = atmosphere.inv_view_projection * vec4(a_pos, 0.0, 1.0);
-    v_view_direction = view_position.xyz / view_position.w - atmosphere.camera_position.xyz;
+    vec4 view_position = u_inv_view_projection * vec4(a_pos, 0.0, 1.0);
+    v_view_direction = view_position.xyz / view_position.w - u_camera_position.xyz;
     // WebGL maps NDC z=0 to depth 0.5. This keeps atmospheric scattering in
     // front of the planet while still participating in the read-only depth test.
     gl_Position = vec4(a_pos, 0.0, 1.0);
@@ -144,12 +132,6 @@ precision highp float;
 #endif
 
 in vec3 v_view_direction;
-
-layout(std140) uniform AtmospherePropsUBO {
-    mat4 inv_view_projection;
-    vec4 camera_position;
-    vec4 sun_position;
-} atmosphere;
 
 const float PI = 3.141592653589793;
 const int PRIMARY_STEPS = 5;
@@ -241,41 +223,17 @@ vec4 scatter(vec3 direction, vec3 origin, vec3 sun) {
 }
 
 void main() {
-    vec3 camera = atmosphere.camera_position.xyz * EARTH_RADIUS;
-    vec4 color = scatter(v_view_direction, camera, atmosphere.sun_position.xyz);
+    vec3 camera = u_camera_position.xyz * EARTH_RADIUS;
+    vec4 color = scatter(v_view_direction, camera, u_sun_position.xyz);
     color.rgb = 1.0 - exp(-color.rgb);
     color = pow(color, vec4(1.0 / 2.2));
-    fragColor = vec4(color.rgb, 1.0 - color.a) * atmosphere.sun_position.w;
+    fragColor = vec4(color.rgb, 1.0 - color.a) * u_sun_position.w;
 }
 ",
 };
 
 pub(crate) const BACKGROUND_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (std140) uniform BackgroundPatternDrawableUBO {
-    highp mat4 u_matrix;
-    highp vec2 u_pixel_coord_upper;
-    highp vec2 u_pixel_coord_lower;
-    highp float u_tile_units_to_pixels;
-    lowp float drawable_pad1;
-    lowp float drawable_pad2;
-    lowp float drawable_pad3;
-};
-
-layout (std140) uniform BackgroundPatternPropsUBO {
-    highp vec2 u_pattern_tl_a;
-    highp vec2 u_pattern_br_a;
-    highp vec2 u_pattern_tl_b;
-    highp vec2 u_pattern_br_b;
-    highp vec2 u_pattern_size_a;
-    highp vec2 u_pattern_size_b;
-    highp float u_scale_a;
-    highp float u_scale_b;
-    highp float u_mix;
-    highp float u_opacity;
-};
-
-layout (location = 0) in vec2 a_pos;
-out mediump vec2 v_pos_a;
+    vertex: r"out mediump vec2 v_pos_a;
 out mediump vec2 v_pos_b;
 
 void main() {
@@ -285,34 +243,7 @@ void main() {
     v_pos_b = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, u_scale_b * u_pattern_size_b, u_tile_units_to_pixels, a_pos);
 }
 ",
-    fragment: r"layout (std140) uniform BackgroundPatternPropsUBO {
-    highp vec2 u_pattern_tl_a;
-    highp vec2 u_pattern_br_a;
-    highp vec2 u_pattern_tl_b;
-    highp vec2 u_pattern_br_b;
-    highp vec2 u_pattern_size_a;
-    highp vec2 u_pattern_size_b;
-    highp float u_scale_a;
-    highp float u_scale_b;
-    highp float u_mix;
-    highp float u_opacity;
-};
-
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-
-uniform sampler2D u_image;
-
-in mediump vec2 v_pos_a;
+    fragment: r"in mediump vec2 v_pos_a;
 in mediump vec2 v_pos_b;
 
 void main() {
@@ -340,24 +271,11 @@ void main() {
 };
 
 pub(crate) const BACKGROUND_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (location = 0) in vec2 a_pos;
-layout (std140) uniform BackgroundDrawableUBO {
-    highp mat4 u_matrix;
-};
-
-void main() {
+    vertex: r"void main() {
     gl_Position = projectTile(a_pos, a_pos);
 }
 ",
-    fragment: r"layout (std140) uniform BackgroundPropsUBO {
-    highp vec4 u_color;
-    highp float u_opacity;
-    lowp float props_pad1;
-    lowp float props_pad2;
-    lowp float props_pad3;
-};
-
-void main() {
+    fragment: r"void main() {
     fragColor = u_color * u_opacity;
 #ifdef OVERDRAW_INSPECTOR
     fragColor = vec4(1.0);
@@ -369,82 +287,31 @@ void main() {
 pub(crate) const CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
         ground_visibility!(),
-        r"layout (location = 0) in vec2 a_pos;
-out vec3 v_data;
+        r"out vec3 v_data;
 #ifdef TERRAIN
-// The height of the ground under the circle's center.
-in highp float a_ground_height;
 // How much of the circle the ground in front of its center leaves.
 out highp float v_visibility;
 #endif
 
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform CircleDrawableUBO {
-    highp mat4 u_matrix;
-    highp vec2 u_extrude_scale;
-    // Interpolations
-    lowp float u_color_t;
-    lowp float u_radius_t;
-    lowp float u_blur_t;
-    lowp float u_opacity_t;
-    lowp float u_stroke_color_t;
-    lowp float u_stroke_width_t;
-    lowp float u_stroke_opacity_t;
-    highp float u_globe_extrude_scale;
-    lowp float drawable_pad2;
-    lowp float drawable_pad3;
-};
-
-layout (std140) uniform CircleEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_stroke_color;
-    mediump float u_radius;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_stroke_width;
-    lowp float u_stroke_opacity;
-    bool u_scale_with_map;
-    bool u_pitch_with_map;
-    lowp float props_pad1;
-};
-
 #ifndef HAS_UNIFORM_u_color
-layout (location = 1) in highp vec4 a_color;
 out highp vec4 color;
 #endif
 #ifndef HAS_UNIFORM_u_radius
-layout (location = 2) in mediump vec2 a_radius;
 out mediump float radius;
 #endif
 #ifndef HAS_UNIFORM_u_blur
-layout (location = 3) in lowp vec2 a_blur;
 out lowp float blur;
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-layout (location = 4) in lowp vec2 a_opacity;
 out lowp float opacity;
 #endif
 #ifndef HAS_UNIFORM_u_stroke_color
-layout (location = 5) in highp vec4 a_stroke_color;
 out highp vec4 stroke_color;
 #endif
 #ifndef HAS_UNIFORM_u_stroke_width
-layout (location = 6) in mediump vec2 a_stroke_width;
 out mediump float stroke_width;
 #endif
 #ifndef HAS_UNIFORM_u_stroke_opacity
-layout (location = 7) in lowp vec2 a_stroke_opacity;
 out lowp float stroke_opacity;
 #endif
 
@@ -503,13 +370,13 @@ lowp float stroke_opacity = u_stroke_opacity;
 #else
     highp float ele = 0.0;
 #endif
-    if (u_pitch_with_map) {
+    if (u_pitch_with_map != 0) {
 #ifdef PROJECTION_GLOBE
-        vec3 center_vector = projectToSphere(circle_center + u_projection_translate, vec2(0.0, 0.0));
+        vec3 center_vector = projectToSphere(circle_center + projection.translate, vec2(0.0, 0.0));
         float angle_scale = u_globe_extrude_scale;
 #endif
         vec2 corner_position = circle_center;
-        if (u_scale_with_map) {
+        if (u_scale_with_map != 0) {
             corner_position += extrude * (radius + stroke_width) * u_extrude_scale;
 #ifdef PROJECTION_GLOBE
             angle_scale *= (radius + stroke_width);
@@ -543,7 +410,7 @@ lowp float stroke_opacity = u_stroke_opacity;
         gl_Position = u_matrix * vec4(circle_center, ele, 1);
 #endif
 
-        if (u_scale_with_map) {
+        if (u_scale_with_map != 0) {
             gl_Position.xy += extrude * (radius + stroke_width) * u_extrude_scale * u_camera_to_center_distance;
         } else {
             gl_Position.xy += extrude * (radius + stroke_width) * u_extrude_scale * gl_Position.w;
@@ -563,19 +430,6 @@ lowp float stroke_opacity = u_stroke_opacity;
 #ifdef TERRAIN
 in highp float v_visibility;
 #endif
-
-layout (std140) uniform CircleEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_stroke_color;
-    mediump float u_radius;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_stroke_width;
-    lowp float u_stroke_opacity;
-    bool u_scale_with_map;
-    bool u_pitch_with_map;
-    lowp float props_pad1;
-};
 
 #ifndef HAS_UNIFORM_u_color
 in highp vec4 color;
@@ -649,9 +503,7 @@ lowp float stroke_opacity = u_stroke_opacity;
 };
 
 pub(crate) const CLIPPING_MASK_PROGRAM: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (location = 0) in vec2 a_pos;
-
-void main() {
+    vertex: r"void main() {
     gl_Position = projectTile(a_pos, a_pos);
 }
 ",
@@ -662,36 +514,7 @@ void main() {
 };
 
 pub(crate) const COLLISION_BOX_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (location = 0) in vec2 a_pos;
-layout (location = 1) in vec2 a_anchor_pos;
-layout (location = 2) in vec2 a_extrude;
-layout (location = 3) in vec2 a_placed;
-layout (location = 4) in vec2 a_shift;
-layout (location = 5) in float a_height_offset;
-
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform CollisionDrawableUBO {
-    highp mat4 u_matrix;
-};
-
-layout (std140) uniform CollisionTilePropsUBO {
-    highp vec2 u_extrude_scale;
-    highp float u_overscale_factor;
-    lowp float drawable_pad1;
-};
-
-out float v_placed;
+    vertex: r"out float v_placed;
 out float v_notUsed;
 
 void main() {
@@ -745,34 +568,7 @@ void main() {
 };
 
 pub(crate) const COLLISION_CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (location = 0) in vec2 a_pos;
-layout (location = 1) in vec2 a_anchor_pos;
-layout (location = 2) in vec2 a_extrude;
-layout (location = 3) in vec2 a_placed;
-
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform CollisionDrawableUBO {
-    highp mat4 u_matrix;
-};
-
-layout (std140) uniform CollisionTilePropsUBO {
-    highp vec2 u_extrude_scale;
-    highp float u_overscale_factor;
-    lowp float drawable_pad1;
-};
-
-out float v_placed;
+    vertex: r"out float v_placed;
 out float v_notUsed;
 out float v_radius;
 out highp vec2 v_extrude;
@@ -811,25 +607,7 @@ void main() {
     v_extrude_scale = u_extrude_scale * u_camera_to_center_distance * collision_perspective_ratio;
 }
 ",
-    fragment: r"layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform CollisionTilePropsUBO {
-    highp vec2 u_extrude_scale;
-    highp float u_overscale_factor;
-    lowp float drawable_pad1;
-};
-
-in float v_placed;
+    fragment: r"in float v_placed;
 in float v_notUsed;
 in float v_radius;
 in highp vec2 v_extrude;
@@ -865,20 +643,7 @@ void main() {
 };
 
 pub(crate) const COLOR_RELIEF_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout(std140) uniform ColorReliefDrawableUBO {
-    highp mat4 u_matrix;
-};
-
-layout(std140) uniform ColorReliefTilePropsUBO {
-    highp vec4 u_unpack;
-    highp vec2 u_dimension;
-    highp int u_color_ramp_size;
-    highp float u_unpack_scale;
-};
-
-layout (location = 0) in vec2 a_pos;
-layout (location = 1) in vec2 a_texture_pos;
-out vec2 v_pos;
+    vertex: r"out vec2 v_pos;
 
 void main() {
     gl_Position = projectTile(a_pos, a_pos);
@@ -895,30 +660,6 @@ void main() {
     fragment: r"#ifdef GL_ES
 precision highp float;
 #endif
-
-layout(std140) uniform ColorReliefDrawableUBO {
-    highp mat4 u_matrix;
-};
-
-layout(std140) uniform ColorReliefTilePropsUBO {
-    highp vec4 u_unpack;
-    highp vec2 u_dimension;
-    highp int u_color_ramp_size;
-    highp float u_unpack_scale;
-};
-
-layout(std140) uniform ColorReliefEvaluatedPropsUBO {
-    highp float u_opacity;
-    highp float pad_eval0;
-    highp float pad_eval1;
-    highp float pad_eval2;
-};
-
-// highp: a sampler is lowp by default in GLSL ES, and a driver may then
-// read the DEM's bytes and the stops' elevations too coarsely to decode.
-uniform highp sampler2D u_image;
-uniform highp sampler2D u_elevation_stops;
-uniform sampler2D u_color_stops;
 
 in vec2 v_pos;
 
@@ -993,68 +734,7 @@ void main() {
 pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: r"invariant gl_Position;
 
-// The corner of the wall quad: x picks the instance's outline vertex (0) or
-// the next one (1), y the base (0) or the top (1).
-layout (location = 0) in vec2 a_pos;
-// Per instance: an outline vertex and the one after it.
-layout (location = 1) in vec2 a_outline_pos;
-layout (location = 2) in vec2 a_decimals_ed;
-layout (location = 8) in vec2 a_next_outline_pos;
-layout (location = 9) in vec2 a_next_decimals_ed;
 out vec4 v_color;
-
-layout (std140) uniform FillExtrusionDrawableUBO {
-    highp mat4 u_matrix;
-    highp vec2 u_pixel_coord_upper;
-    highp vec2 u_pixel_coord_lower;
-    highp float u_height_factor;
-    highp float u_tile_ratio;
-    // Interpolations
-    highp float u_base_t;
-    highp float u_height_t;
-    highp float u_color_t;
-    highp float u_pattern_from_t;
-    highp float u_pattern_to_t;
-    lowp float drawable_pad1;
-};
-
-layout (std140) uniform FillExtrusionTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
-};
-
-layout (std140) uniform FillExtrusionPropsUBO {
-    highp vec4 u_color;
-    highp vec3 u_lightcolor;
-    lowp float props_pad1;
-    highp vec3 u_lightpos;
-    highp float u_base;
-    highp float u_height;
-    highp float u_lightintensity;
-    highp float u_vertical_gradient;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-    lowp float props_pad2;
-};
-
-#ifndef HAS_UNIFORM_u_base
-layout (location = 3) in highp vec2 a_base;
-#endif
-#ifndef HAS_UNIFORM_u_height
-layout (location = 4) in highp vec2 a_height;
-#endif
-#ifdef TERRAIN
-// The height of the ground under its polygon\'s centroid.
-in highp float a_ground_height;
-#endif
-#ifndef HAS_UNIFORM_u_color
-layout (location = 5) in highp vec4 a_color;
-#endif
 
 void main() {
     // The vertex that ends a ring has no wall.
@@ -1110,19 +790,19 @@ highp vec4 color = u_color;
     color += ambientlight;
 
     // Calculate cos(theta), where theta is the angle between surface normal and diffuse light ray
-    float directional = clamp(dot(normal, u_lightpos), 0.0, 1.0);
+    float directional = clamp(dot(normal, u_light_position), 0.0, 1.0);
 
     // Adjust directional so that
     // the range of values for highlight/shading is narrower
     // with lower light intensity
     // and with lighter/brighter surface colors
-    directional = mix((1.0 - u_lightintensity), max((1.0 - colorvalue + u_lightintensity), 1.0), directional);
+    directional = mix((1.0 - u_light_intensity), max((1.0 - colorvalue + u_light_intensity), 1.0), directional);
 
     // Add gradient along z axis of side surfaces
     if (normal.z == 0.0) {
         // This avoids another branching statement, but multiplies by a constant of 0.84 if no vertical gradient,
         // and otherwise calculates the gradient based on base + height
-        float fMin = mix(0.7, 0.98, 1.0 - u_lightintensity);
+        float fMin = mix(0.7, 0.98, 1.0 - u_light_intensity);
         float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
         directional *= (1.0 - u_vertical_gradient) + (u_vertical_gradient * factor);
     }
@@ -1130,9 +810,9 @@ highp vec4 color = u_color;
     // Assign final color based on surface + ambient light color, diffuse light directional, and light color
     // with lower bounds adjusted to hue of light
     // so that shading is tinted with the complementary (opposite) color to the light color
-    v_color.r += clamp(color.r * directional * u_lightcolor.r, mix(0.0, 0.3, 1.0 - u_lightcolor.r), 1.0);
-    v_color.g += clamp(color.g * directional * u_lightcolor.g, mix(0.0, 0.3, 1.0 - u_lightcolor.g), 1.0);
-    v_color.b += clamp(color.b * directional * u_lightcolor.b, mix(0.0, 0.3, 1.0 - u_lightcolor.b), 1.0);
+    v_color.r += clamp(color.r * directional * u_light_color.r, mix(0.0, 0.3, 1.0 - u_light_color.r), 1.0);
+    v_color.g += clamp(color.g * directional * u_light_color.g, mix(0.0, 0.3, 1.0 - u_light_color.g), 1.0);
+    v_color.b += clamp(color.b * directional * u_light_color.b, mix(0.0, 0.3, 1.0 - u_light_color.b), 1.0);
     v_color *= u_opacity;
 }
 ",
@@ -1151,88 +831,20 @@ void main() {
 pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: r"invariant gl_Position;
 
-// The corner of the wall quad: x picks the instance's outline vertex (0) or
-// the next one (1), y the base (0) or the top (1).
-layout (location = 0) in vec2 a_pos;
-// Per instance: an outline vertex and the one after it.
-layout (location = 1) in vec2 a_outline_pos;
-layout (location = 2) in vec2 a_decimals_ed;
-layout (location = 8) in vec2 a_next_outline_pos;
-layout (location = 9) in vec2 a_next_decimals_ed;
-
 out vec2 v_pos_a;
 out vec2 v_pos_b;
 out vec4 v_lighting;
 
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform FillExtrusionDrawableUBO {
-    highp mat4 u_matrix;
-    highp vec2 u_pixel_coord_upper;
-    highp vec2 u_pixel_coord_lower;
-    highp float u_height_factor;
-    highp float u_tile_ratio;
-    // Interpolations
-    highp float u_base_t;
-    highp float u_height_t;
-    highp float u_color_t;
-    highp float u_pattern_from_t;
-    highp float u_pattern_to_t;
-    lowp float drawable_pad1;
-};
-
-layout (std140) uniform FillExtrusionTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
-};
-
-layout (std140) uniform FillExtrusionPropsUBO {
-    highp vec4 u_color;
-    highp vec3 u_lightcolor;
-    lowp float props_pad1;
-    highp vec3 u_lightpos;
-    highp float u_base;
-    highp float u_height;
-    highp float u_lightintensity;
-    highp float u_vertical_gradient;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-    lowp float props_pad2;
-};
-
 #ifndef HAS_UNIFORM_u_base
-layout (location = 3) in highp vec2 a_base;
 out highp float base;
 #endif
 #ifndef HAS_UNIFORM_u_height
-layout (location = 4) in highp vec2 a_height;
 out highp float height;
 #endif
-#ifdef TERRAIN
-// The height of the ground under its polygon\'s centroid.
-in highp float a_ground_height;
-#endif
 #ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 5) in highp vec4 a_pattern_from;
 flat out highp vec4 pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 6) in highp vec4 a_pattern_to;
 flat out highp vec4 pattern_to;
 #endif
 
@@ -1306,18 +918,18 @@ highp vec4 pattern_to = u_pattern_to;
     v_pos_b = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, toScale * display_size_b, tileRatio, pos);
 
     v_lighting = vec4(0.0, 0.0, 0.0, 1.0);
-    float directional = clamp(dot(normal, u_lightpos), 0.0, 1.0);
-    directional = mix((1.0 - u_lightintensity), max((0.5 + u_lightintensity), 1.0), directional);
+    float directional = clamp(dot(normal, u_light_position), 0.0, 1.0);
+    directional = mix((1.0 - u_light_intensity), max((0.5 + u_light_intensity), 1.0), directional);
 
     if (normal.z == 0.0) {
         // This avoids another branching statement, but multiplies by a constant of 0.84 if no vertical gradient,
         // and otherwise calculates the gradient based on base + height
-        float fMin = mix(0.7, 0.98, 1.0 - u_lightintensity);
+        float fMin = mix(0.7, 0.98, 1.0 - u_light_intensity);
         float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
         directional *= (1.0 - u_vertical_gradient) + (u_vertical_gradient * factor);
     }
 
-    v_lighting.rgb += clamp(directional * u_lightcolor, mix(vec3(0.0), vec3(0.3), 1.0 - u_lightcolor), vec3(1.0));
+    v_lighting.rgb += clamp(directional * u_light_color, mix(vec3(0.0), vec3(0.3), 1.0 - u_light_color), vec3(1.0));
     v_lighting *= u_opacity;
 }
 ",
@@ -1328,32 +940,6 @@ precision highp float;
 in vec2 v_pos_a;
 in vec2 v_pos_b;
 in vec4 v_lighting;
-
-layout (std140) uniform FillExtrusionTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
-};
-
-layout (std140) uniform FillExtrusionPropsUBO {
-    highp vec4 u_color;
-    highp vec3 u_lightcolor;
-    lowp float props_pad1;
-    highp vec3 u_lightpos;
-    highp float u_base;
-    highp float u_height;
-    highp float u_lightintensity;
-    highp float u_vertical_gradient;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-    lowp float props_pad2;
-};
-
-uniform sampler2D u_image;
 
 #ifndef HAS_UNIFORM_u_base
 in highp float base;
@@ -1415,82 +1001,20 @@ highp vec4 pattern_to = u_pattern_to;
 pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: r"invariant gl_Position;
 
-layout (location = 0) in vec2 a_pos;
-layout (location = 1) in vec2 a_decimals_ed;
-
 out vec2 v_pos_a;
 out vec2 v_pos_b;
 out vec4 v_lighting;
 
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform FillExtrusionDrawableUBO {
-    highp mat4 u_matrix;
-    highp vec2 u_pixel_coord_upper;
-    highp vec2 u_pixel_coord_lower;
-    highp float u_height_factor;
-    highp float u_tile_ratio;
-    // Interpolations
-    highp float u_base_t;
-    highp float u_height_t;
-    highp float u_color_t;
-    highp float u_pattern_from_t;
-    highp float u_pattern_to_t;
-    lowp float drawable_pad1;
-};
-
-layout (std140) uniform FillExtrusionTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
-};
-
-layout (std140) uniform FillExtrusionPropsUBO {
-    highp vec4 u_color;
-    highp vec3 u_lightcolor;
-    lowp float props_pad1;
-    highp vec3 u_lightpos;
-    highp float u_base;
-    highp float u_height;
-    highp float u_lightintensity;
-    highp float u_vertical_gradient;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-    lowp float props_pad2;
-};
-
 #ifndef HAS_UNIFORM_u_base
-layout (location = 3) in highp vec2 a_base;
 out highp float base;
 #endif
 #ifndef HAS_UNIFORM_u_height
-layout (location = 4) in highp vec2 a_height;
 out highp float height;
 #endif
-#ifdef TERRAIN
-// The height of the ground under its polygon\'s centroid.
-in highp float a_ground_height;
-#endif
 #ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 5) in highp vec4 a_pattern_from;
 flat out highp vec4 pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 6) in highp vec4 a_pattern_to;
 flat out highp vec4 pattern_to;
 #endif
 
@@ -1551,18 +1075,18 @@ highp vec4 pattern_to = u_pattern_to;
     v_pos_b = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, toScale * display_size_b, tileRatio, pos);
 
     v_lighting = vec4(0.0, 0.0, 0.0, 1.0);
-    float directional = clamp(dot(normal, u_lightpos), 0.0, 1.0);
-    directional = mix((1.0 - u_lightintensity), max((0.5 + u_lightintensity), 1.0), directional);
+    float directional = clamp(dot(normal, u_light_position), 0.0, 1.0);
+    directional = mix((1.0 - u_light_intensity), max((0.5 + u_light_intensity), 1.0), directional);
 
     if (normal.z == 0.0) {
         // This avoids another branching statement, but multiplies by a constant of 0.84 if no vertical gradient,
         // and otherwise calculates the gradient based on base + height
-        float fMin = mix(0.7, 0.98, 1.0 - u_lightintensity);
+        float fMin = mix(0.7, 0.98, 1.0 - u_light_intensity);
         float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
         directional *= (1.0 - u_vertical_gradient) + (u_vertical_gradient * factor);
     }
 
-    v_lighting.rgb += clamp(directional * u_lightcolor, mix(vec3(0.0), vec3(0.3), 1.0 - u_lightcolor), vec3(1.0));
+    v_lighting.rgb += clamp(directional * u_light_color, mix(vec3(0.0), vec3(0.3), 1.0 - u_light_color), vec3(1.0));
     v_lighting *= u_opacity;
 }
 ",
@@ -1573,32 +1097,6 @@ precision highp float;
 in vec2 v_pos_a;
 in vec2 v_pos_b;
 in vec4 v_lighting;
-
-layout (std140) uniform FillExtrusionTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
-};
-
-layout (std140) uniform FillExtrusionPropsUBO {
-    highp vec4 u_color;
-    highp vec3 u_lightcolor;
-    lowp float props_pad1;
-    highp vec3 u_lightpos;
-    highp float u_base;
-    highp float u_height;
-    highp float u_lightintensity;
-    highp float u_vertical_gradient;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-    lowp float props_pad2;
-};
-
-uniform sampler2D u_image;
 
 #ifndef HAS_UNIFORM_u_base
 in highp float base;
@@ -1660,62 +1158,7 @@ highp vec4 pattern_to = u_pattern_to;
 pub(crate) const FILL_EXTRUSION_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: r"invariant gl_Position;
 
-layout (location = 0) in vec2 a_pos;
-layout (location = 1) in vec2 a_decimals_ed;
 out vec4 v_color;
-
-layout (std140) uniform FillExtrusionDrawableUBO {
-    highp mat4 u_matrix;
-    highp vec2 u_pixel_coord_upper;
-    highp vec2 u_pixel_coord_lower;
-    highp float u_height_factor;
-    highp float u_tile_ratio;
-    // Interpolations
-    highp float u_base_t;
-    highp float u_height_t;
-    highp float u_color_t;
-    highp float u_pattern_from_t;
-    highp float u_pattern_to_t;
-    lowp float drawable_pad1;
-};
-
-layout (std140) uniform FillExtrusionTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
-};
-
-layout (std140) uniform FillExtrusionPropsUBO {
-    highp vec4 u_color;
-    highp vec3 u_lightcolor;
-    lowp float props_pad1;
-    highp vec3 u_lightpos;
-    highp float u_base;
-    highp float u_height;
-    highp float u_lightintensity;
-    highp float u_vertical_gradient;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-    lowp float props_pad2;
-};
-
-#ifndef HAS_UNIFORM_u_base
-layout (location = 3) in highp vec2 a_base;
-#endif
-#ifndef HAS_UNIFORM_u_height
-layout (location = 4) in highp vec2 a_height;
-#endif
-#ifdef TERRAIN
-// The height of the ground under its polygon\'s centroid.
-in highp float a_ground_height;
-#endif
-#ifndef HAS_UNIFORM_u_color
-layout (location = 5) in highp vec4 a_color;
-#endif
 
 void main() {
     #ifndef HAS_UNIFORM_u_base
@@ -1758,19 +1201,19 @@ highp vec4 color = u_color;
     color += ambientlight;
 
     // Calculate cos(theta), where theta is the angle between surface normal and diffuse light ray
-    float directional = clamp(dot(normal, u_lightpos), 0.0, 1.0);
+    float directional = clamp(dot(normal, u_light_position), 0.0, 1.0);
 
     // Adjust directional so that
     // the range of values for highlight/shading is narrower
     // with lower light intensity
     // and with lighter/brighter surface colors
-    directional = mix((1.0 - u_lightintensity), max((1.0 - colorvalue + u_lightintensity), 1.0), directional);
+    directional = mix((1.0 - u_light_intensity), max((1.0 - colorvalue + u_light_intensity), 1.0), directional);
 
     // Add gradient along z axis of side surfaces
     if (normal.z == 0.0) {
         // This avoids another branching statement, but multiplies by a constant of 0.84 if no vertical gradient,
         // and otherwise calculates the gradient based on base + height
-        float fMin = mix(0.7, 0.98, 1.0 - u_lightintensity);
+        float fMin = mix(0.7, 0.98, 1.0 - u_light_intensity);
         float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
         directional *= (1.0 - u_vertical_gradient) + (u_vertical_gradient * factor);
     }
@@ -1778,9 +1221,9 @@ highp vec4 color = u_color;
     // Assign final color based on surface + ambient light color, diffuse light directional, and light color
     // with lower bounds adjusted to hue of light
     // so that shading is tinted with the complementary (opposite) color to the light color
-    v_color.r += clamp(color.r * directional * u_lightcolor.r, mix(0.0, 0.3, 1.0 - u_lightcolor.r), 1.0);
-    v_color.g += clamp(color.g * directional * u_lightcolor.g, mix(0.0, 0.3, 1.0 - u_lightcolor.g), 1.0);
-    v_color.b += clamp(color.b * directional * u_lightcolor.b, mix(0.0, 0.3, 1.0 - u_lightcolor.b), 1.0);
+    v_color.r += clamp(color.r * directional * u_light_color.r, mix(0.0, 0.3, 1.0 - u_light_color.r), 1.0);
+    v_color.g += clamp(color.g * directional * u_light_color.g, mix(0.0, 0.3, 1.0 - u_light_color.g), 1.0);
+    v_color.b += clamp(color.b * directional * u_light_color.b, mix(0.0, 0.3, 1.0 - u_light_color.b), 1.0);
     v_color *= u_opacity;
 }
 ",
@@ -1797,70 +1240,20 @@ void main() {
 };
 
 pub(crate) const FILL_OUTLINE_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform FillOutlinePatternDrawableUBO {
-    highp mat4 u_matrix;
-    highp vec2 u_pixel_coord_upper;
-    highp vec2 u_pixel_coord_lower;
-    highp float u_tile_ratio;
-    // Interpolations
-    highp float u_pattern_from_t;
-    highp float u_pattern_to_t;
-    highp float u_opacity_t;
-    highp float u_color_t;
-    lowp float drawable_pad1;
-    lowp float drawable_pad2;
-    lowp float drawable_pad3;
-};
-
-layout (std140) uniform FillOutlinePatternTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    lowp float u_sdf;
-    lowp float tileprops_pad2;
-};
-
-layout (std140) uniform FillEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_outline_color;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-};
-
-layout (location = 0) in vec2 a_pos;
-
-out vec2 v_pos_a;
+    vertex: r"out vec2 v_pos_a;
 out vec2 v_pos_b;
 out vec2 v_pos;
 
 #ifndef HAS_UNIFORM_u_color
-layout (location = 1) in highp vec4 a_color;
 out highp vec4 color;
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-layout (location = 2) in lowp vec2 a_opacity;
 out lowp float opacity;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 3) in highp vec4 a_pattern_from;
 flat out highp vec4 pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 4) in highp vec4 a_pattern_to;
 flat out highp vec4 pattern_to;
 #endif
 
@@ -1910,25 +1303,6 @@ highp vec4 pattern_to = u_pattern_to;
     fragment: r"#ifdef GL_ES
 precision highp float;
 #endif
-
-layout (std140) uniform FillOutlinePatternTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    lowp float u_sdf;
-    lowp float tileprops_pad2;
-};
-
-layout (std140) uniform FillEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_outline_color;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-};
-
-uniform sampler2D u_image;
 
 in vec2 v_pos_a;
 in vec2 v_pos_b;
@@ -2005,75 +1379,28 @@ highp vec4 pattern_to = u_pattern_to;
 };
 
 pub(crate) const FILL_OUTLINE_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform FillOutlineDrawableUBO {
-    highp mat4 u_matrix;
-    // Interpolations
-    highp float u_outline_color_t;
-    highp float u_opacity_t;
-    lowp float drawable_pad1;
-    lowp float drawable_pad2;
-};
-
-layout (std140) uniform FillEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_outline_color;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-};
-
-layout (location = 0) in vec2 a_pos;
-
-out vec2 v_pos;
+    vertex: r"out vec2 v_pos;
 
 #ifndef HAS_UNIFORM_u_outline_color
-layout (location = 1) in highp vec4 a_outline_color;
 out highp vec4 outline_color;
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-layout (location = 2) in lowp vec2 a_opacity;
 out lowp float opacity;
 #endif
 
 void main() {
     #ifndef HAS_UNIFORM_u_outline_color
 outline_color = unpack_mix_color(a_outline_color, u_outline_color_t);
-#else
-highp vec4 outline_color = u_outline_color;
 #endif
     #ifndef HAS_UNIFORM_u_opacity
 opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
-#else
-lowp float opacity = u_opacity;
 #endif
 
     gl_Position = projectTile(a_pos, a_pos);
     v_pos = (gl_Position.xy / gl_Position.w + 1.0) / 2.0 * u_world_size;
 }
 ",
-    fragment: r"layout (std140) uniform FillEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_outline_color;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-};
-
-in highp vec2 v_pos;
+    fragment: r"in highp vec2 v_pos;
 
 #ifndef HAS_UNIFORM_u_outline_color
 in highp vec4 outline_color;
@@ -2101,8 +1428,7 @@ lowp float opacity = u_opacity;
 ",
 };
 
-/// `outline_corner`, the corner of an instanced outline's quad, after the
-/// uniform blocks.
+/// `outline_corner`, the corner of an instanced outline's quad.
 macro_rules! outline_corner {
     () => {
         r"
@@ -2158,51 +1484,12 @@ vec4 outline_corner(highp vec4 start, highp vec4 end, vec2 corner, out highp vec
 
 pub(crate) const FILL_OUTLINE_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
-        r"layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform FillOutlineDrawableUBO {
-    highp mat4 u_matrix;
-    // Interpolations
-    highp float u_outline_color_t;
-    highp float u_opacity_t;
-    lowp float drawable_pad1;
-    lowp float drawable_pad2;
-};
-
-layout (std140) uniform FillEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_outline_color;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-};
-
-// The quad's corner: x picks the segment's start (0) or end (1), y its side.
-layout (location = 0) in vec2 a_pos;
-// Per instance: a vertex of the fill, and the end of the outline segment
-// that starts there.
-layout (location = 3) in vec2 a_outline_pos;
-layout (location = 4) in vec2 a_outline_end;
-
-out vec2 v_pos;
+        r"out vec2 v_pos;
 
 #ifndef HAS_UNIFORM_u_outline_color
-layout (location = 1) in highp vec4 a_outline_color;
 out highp vec4 outline_color;
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-layout (location = 2) in lowp vec2 a_opacity;
 out lowp float opacity;
 #endif
 ",
@@ -2211,13 +1498,9 @@ out lowp float opacity;
 void main() {
     #ifndef HAS_UNIFORM_u_outline_color
 outline_color = unpack_mix_color(a_outline_color, u_outline_color_t);
-#else
-highp vec4 outline_color = u_outline_color;
 #endif
     #ifndef HAS_UNIFORM_u_opacity
 opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
-#else
-lowp float opacity = u_opacity;
 #endif
 
     highp float t;
@@ -2230,75 +1513,20 @@ lowp float opacity = u_opacity;
 
 pub(crate) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
-        r"layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform FillOutlinePatternDrawableUBO {
-    highp mat4 u_matrix;
-    highp vec2 u_pixel_coord_upper;
-    highp vec2 u_pixel_coord_lower;
-    highp float u_tile_ratio;
-    // Interpolations
-    highp float u_pattern_from_t;
-    highp float u_pattern_to_t;
-    highp float u_opacity_t;
-    highp float u_color_t;
-    lowp float drawable_pad1;
-    lowp float drawable_pad2;
-    lowp float drawable_pad3;
-};
-
-layout (std140) uniform FillOutlinePatternTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    lowp float u_sdf;
-    lowp float tileprops_pad2;
-};
-
-layout (std140) uniform FillEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_outline_color;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-};
-
-// The quad's corner: x picks the segment's start (0) or end (1), y its side.
-layout (location = 0) in vec2 a_pos;
-// Per instance: a vertex of the fill, and the end of the outline segment
-// that starts there.
-layout (location = 5) in vec2 a_outline_pos;
-layout (location = 6) in vec2 a_outline_end;
-
-out vec2 v_pos_a;
+        r"out vec2 v_pos_a;
 out vec2 v_pos_b;
 out vec2 v_pos;
 
 #ifndef HAS_UNIFORM_u_color
-layout (location = 1) in highp vec4 a_color;
 out highp vec4 color;
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-layout (location = 2) in lowp vec2 a_opacity;
 out lowp float opacity;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 3) in highp vec4 a_pattern_from;
 flat out highp vec4 pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 4) in highp vec4 a_pattern_to;
 flat out highp vec4 pattern_to;
 #endif
 ",
@@ -2342,69 +1570,19 @@ highp vec4 pattern_to = u_pattern_to;
 };
 
 pub(crate) const FILL_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform FillPatternDrawableUBO {
-    highp mat4 u_matrix;
-    highp vec2 u_pixel_coord_upper;
-    highp vec2 u_pixel_coord_lower;
-    highp float u_tile_ratio;
-    // Interpolations
-    highp float u_pattern_from_t;
-    highp float u_pattern_to_t;
-    highp float u_opacity_t;
-    highp float u_color_t;
-    lowp float drawable_pad1;
-    lowp float drawable_pad2;
-    lowp float drawable_pad3;
-};
-
-layout (std140) uniform FillPatternTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    lowp float u_sdf;
-    lowp float tileprops_pad2;
-};
-
-layout (std140) uniform FillEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_outline_color;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-};
-
-layout (location = 0) in vec2 a_pos;
-
-out vec2 v_pos_a;
+    vertex: r"out vec2 v_pos_a;
 out vec2 v_pos_b;
 
 #ifndef HAS_UNIFORM_u_color
-layout (location = 1) in highp vec4 a_color;
 out highp vec4 color;
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-layout (location = 2) in lowp vec2 a_opacity;
 out lowp float opacity;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 3) in highp vec4 a_pattern_from;
 flat out highp vec4 pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 4) in highp vec4 a_pattern_to;
 flat out highp vec4 pattern_to;
 #endif
 
@@ -2451,25 +1629,6 @@ highp vec4 pattern_to = u_pattern_to;
     fragment: r"#ifdef GL_ES
 precision highp float;
 #endif
-
-layout (std140) uniform FillPatternTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    highp vec2 u_texsize;
-    lowp float u_sdf;
-    lowp float tileprops_pad2;
-};
-
-layout (std140) uniform FillEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_outline_color;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-};
-
-uniform sampler2D u_image;
 
 in vec2 v_pos_a;
 in vec2 v_pos_b;
@@ -2539,60 +1698,25 @@ highp vec4 pattern_to = u_pattern_to;
 };
 
 pub(crate) const FILL_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (std140) uniform FillDrawableUBO {
-    highp mat4 u_matrix;
-    // Interpolations
-    highp float u_color_t;
-    highp float u_opacity_t;
-    lowp float drawable_pad1;
-    lowp float drawable_pad2;
-};
-
-layout (std140) uniform FillEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_outline_color;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-};
-
-layout (location = 0) in vec2 a_pos;
-
-#ifndef HAS_UNIFORM_u_color
-layout (location = 1) in highp vec4 a_color;
+    vertex: r"#ifndef HAS_UNIFORM_u_color
 out highp vec4 color;
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-layout (location = 2) in lowp vec2 a_opacity;
 out lowp float opacity;
 #endif
 
 void main() {
     #ifndef HAS_UNIFORM_u_color
 color = unpack_mix_color(a_color, u_color_t);
-#else
-highp vec4 color = u_color;
 #endif
     #ifndef HAS_UNIFORM_u_opacity
 opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
-#else
-lowp float opacity = u_opacity;
 #endif
 
     gl_Position = projectTile(a_pos, a_pos);
 }
 ",
-    fragment: r"layout (std140) uniform FillEvaluatedPropsUBO {
-    highp vec4 u_color;
-    highp vec4 u_outline_color;
-    highp float u_opacity;
-    highp float u_fade;
-    highp float u_from_scale;
-    highp float u_to_scale;
-};
-
-#ifndef HAS_UNIFORM_u_color
+    fragment: r"#ifndef HAS_UNIFORM_u_color
 in highp vec4 color;
 #endif
 #ifndef HAS_UNIFORM_u_opacity
@@ -2617,9 +1741,7 @@ lowp float opacity = u_opacity;
 };
 
 pub(crate) const GLOBE_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (location = 0) in vec2 a_pos;
-
-void main() {
+    vertex: r"void main() {
     gl_Position = projectTileFor3D(a_pos, 0.0);
 }
 ",
@@ -2633,23 +1755,11 @@ void main() {
 /// texel for texel, with its opacity and, for the blend modes that no blend
 /// function expresses, against a copy of the frame (`u_backdrop`).
 pub(crate) const LAYER_COMPOSITE_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (location = 0) in vec2 a_pos;
-
-void main() {
+    vertex: r"void main() {
     gl_Position = vec4(a_pos * 2.0 - 1.0, 0.0, 1.0);
 }
 ",
-    fragment: r"uniform sampler2D u_image;
-uniform sampler2D u_backdrop;
-
-layout (std140) uniform LayerCompositeUBO {
-    highp float u_opacity;
-    highp int u_blend;
-    lowp float props_pad2;
-    lowp float props_pad3;
-};
-
-// The blend modes that no blend function expresses, of the W3C compositing
+    fragment: r"// The blend modes that no blend function expresses, of the W3C compositing
 // spec, on premultiplied colors.
 float lum(vec3 c) {
     return dot(c, vec3(0.3, 0.59, 0.11));
@@ -2709,10 +1819,7 @@ void main() {
 /// stage fetches.
 #[cfg(test)]
 pub(crate) const VERTEX_TEXEL_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (location = 0) in vec4 a_pos_texel;
-out vec4 v_color;
-
-uniform highp sampler2D u_image;
+    vertex: r"out vec4 v_color;
 
 void main() {
     v_color = texelFetch(u_image, ivec2(a_pos_texel.zw), 0);
@@ -2733,9 +1840,7 @@ void main() {
 /// which read the DEM with `texelFetch`.
 macro_rules! ground_height {
     () => {
-        r"uniform highp sampler2D u_ground_dem;
-
-// The height in meters of the DEM's bordered texel at `texel`, clamped to the
+        r"// The height in meters of the DEM's bordered texel at `texel`, clamped to the
 // texture, decoded by `unpack` and `unpack_scale`.
 highp float ground_texel_height(ivec2 texel, highp vec4 unpack, highp float unpack_scale) {
     ivec2 last = textureSize(u_ground_dem, 0) - 1;
@@ -2769,31 +1874,14 @@ highp float ground_height(highp vec2 pos, highp vec4 dem_coords, highp vec4 unpa
     };
 }
 
-/// How a hillshade shades its slopes: its tile and evaluated blocks, and
-/// `hillshade`, which writes to `fragColor` a slope shaded by the lights of
-/// `HillshadeEvaluatedPropsUBO`. A macro, so that `concat!` puts it in the
-/// fragment stages of the hillshade and of the terrain's surface, which
-/// shades a drape of a hillshade's slopes.
+/// How a hillshade shades its slopes: `hillshade`, which writes to
+/// `fragColor` a slope shaded by the lights of `HillshadeEvaluatedPropsUBO`.
+/// A macro, so that `concat!` puts it in the fragment stages of the
+/// hillshade and of the terrain's surface, which shades a drape of a
+/// hillshade's slopes.
 macro_rules! hillshade_shading {
     () => {
-        r#"layout(std140) uniform HillshadeTilePropsUBO {
-    highp vec2 u_latrange;
-    highp float u_exaggeration;
-    highp int u_method;           // Hillshade method (0: STANDARD, 1: COMBINED, 2: IGOR, 3: MULTIDIRECTIONAL, 4: BASIC)
-    highp int u_num_lights;       // Number of light sources (1-4)
-    highp float u_pad0;
-    highp float u_pad1;
-    highp float u_pad2;
-};
-layout(std140) uniform HillshadeEvaluatedPropsUBO {
-    highp vec4 u_accent;
-    highp vec4 u_altitudes;       // Up to 4 altitude values (in radians)
-    highp vec4 u_azimuths;        // Up to 4 azimuth values (in radians)
-    highp vec4 u_shadows[4];      // Shadow colors (up to 4 lights)
-    highp vec4 u_highlights[4];   // Highlight colors (up to 4 lights)
-};
-
-#define PI 3.141592653589793
+        r#"#define PI 3.141592653589793
 
 #define STANDARD 0
 #define COMBINED 1
@@ -2953,35 +2041,11 @@ void hillshade(vec2 deriv) {
     };
 }
 
-/// The terrain's uniform block, a `TerrainSurfaceUBO`.
-macro_rules! terrain_block {
-    () => {
-        r"layout (std140) uniform TerrainPropsUBO {
-    highp vec4 u_unpack;
-    highp float u_unpack_scale;
-    highp float u_terrain_exaggeration;
-    highp float u_skirt_length;
-    highp float props_pad0;
-    // The fog over the surface: its colors, linear and premultiplied, the
-    // distances along the view at which its depth is 0 and 1, and its
-    // blends.
-    highp vec4 u_fog_color;
-    highp vec4 u_horizon_color;
-    highp vec2 u_fog_depth_range;
-    highp float u_fog_ground_blend;
-    highp float u_horizon_fog_blend;
-};
-
-"
-    };
-}
-
-/// The surface's and the probe's vertex prelude: the terrain's uniform
-/// block, the height rule, and the height of the surface's vertices.
+/// The surface's and the probe's vertex prelude: the height rule, and the
+/// height of the surface's vertices.
 macro_rules! terrain_props {
     () => {
         concat!(
-            terrain_block!(),
             ground_height!(),
             r"// The height of the surface's vertex at `pos`, in tile units of a tile
 // that reads its DEM at `dem_coords`: the ground's, or sea level at a pole.
@@ -3004,18 +2068,11 @@ highp float surface_height(highp vec2 pos, highp vec4 dem_coords) {
 /// at `1 - v`.
 /// Where the tile's `HillshadeTilePropsUBO` has lights, the drape holds a
 /// hillshade's slopes, premultiplied by its coverage, which the surface
-/// shades with them. The fog of `TerrainPropsUBO` covers it.
+/// shades with them. The fog of `TerrainSurfaceUBO` covers it.
 pub(crate) const TERRAIN_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
         terrain_props!(),
-        r"// x and y in tile units, whether the vertex is a skirt's lower edge, 0.
-layout (location = 0) in vec4 a_pos;
-
-layout (std140) uniform TerrainDrawableUBO {
-    highp vec4 u_dem_coords;
-};
-
-out vec2 v_drape_pos;
+        r"out vec2 v_drape_pos;
 // How far along the view, in pixels: the clip w.
 out highp float v_view_depth;
 
@@ -3029,12 +2086,9 @@ void main() {
 "
     ),
     fragment: concat!(
-        terrain_block!(),
         hillshade_shading!(),
         r"in vec2 v_drape_pos;
 in highp float v_view_depth;
-
-uniform sampler2D u_drape;
 
 // `color`, premultiplied, of the surface `view_depth` pixels along the
 // view, covered by the fog, as GL JS's terrain is: mixed in linear
@@ -3042,15 +2096,15 @@ uniform sampler2D u_drape;
 // ground blend the fog's depth is. The fog's alpha weighs its color; the
 // coverage stays.
 highp vec4 fogged(highp vec4 color, highp float view_depth) {
-    highp float near = u_fog_depth_range.x;
-    highp float far = u_fog_depth_range.y;
+    highp float near = u_depth_range.x;
+    highp float far = u_depth_range.y;
     highp float depth = min(far / (far - near) * (1.0 - near / view_depth), 1.0);
-    if (u_fog_ground_blend >= 1.0 || depth <= u_fog_ground_blend || color.a == 0.0) {
+    if (u_ground_blend >= 1.0 || depth <= u_ground_blend || color.a == 0.0) {
         return color;
     }
-    highp float horizon = smoothstep(0.0, 1.0, (depth - u_horizon_fog_blend) / max(1.0 - u_horizon_fog_blend, 1e-6));
+    highp float horizon = smoothstep(0.0, 1.0, (depth - u_horizon_blend) / max(1.0 - u_horizon_blend, 1e-6));
     highp vec4 tint = mix(u_fog_color, u_horizon_color, horizon);
-    highp float along = (depth - u_fog_ground_blend) / (1.0 - u_fog_ground_blend);
+    highp float along = (depth - u_ground_blend) / (1.0 - u_ground_blend);
     highp float strength = along * along;
     highp vec3 surface = pow(color.rgb / color.a, vec3(2.2));
     highp vec3 mixed = surface * (1.0 - strength * tint.a) + tint.rgb * strength;
@@ -3080,14 +2134,7 @@ void main() {
 pub(crate) const TERRAIN_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
         terrain_props!(),
-        r"// x and y in tile units, whether the vertex is a skirt's lower edge, 0.
-layout (location = 0) in vec4 a_pos;
-
-layout (std140) uniform TerrainDrawableUBO {
-    highp vec4 u_dem_coords;
-};
-
-// The eye distance, which interpolates exactly across a triangle.
+        r"// The eye distance, which interpolates exactly across a triangle.
 out highp float v_distance;
 
 void main() {
@@ -3115,12 +2162,7 @@ void main() {
 pub(crate) const TERRAIN_PROBE_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
         terrain_props!(),
-        r"// Clip x and y, then where the height is read, in tile units.
-layout (location = 0) in vec4 a_pos;
-// The DEM uv's scale and offset, then the DEM's width in pixels.
-layout (location = 1) in vec4 a_dem_coords;
-
-flat out highp float v_height;
+        r"flat out highp float v_height;
 
 void main() {
     v_height = ground_height(a_pos.zw, a_dem_coords, u_unpack, u_unpack_scale, u_terrain_exaggeration);
@@ -3141,35 +2183,10 @@ void main() {
 };
 
 pub(crate) const HEATMAP_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r#"layout (location = 0) in vec2 a_pos;
-#ifdef TERRAIN
-// The height of the ground under the kernel's center.
-in highp float a_ground_height;
-#endif
-out vec2 v_extrude;
-
-layout (std140) uniform HeatmapDrawableUBO {
-    highp mat4 u_matrix;
-    highp float u_extrude_scale;
-    // Interpolations
-    lowp float u_weight_t;
-    lowp float u_radius_t;
-    highp float u_globe_extrude_scale;
-};
-
-layout (std140) uniform HeatmapEvaluatedPropsUBO {
-    highp float u_weight;
-    highp float u_radius;
-    highp float u_intensity;
-    lowp float props_pad1;
-};
+    vertex: r#"out vec2 v_extrude;
 
 #ifndef HAS_UNIFORM_u_weight
-layout (location = 1) in highp vec2 a_weight;
 out highp float weight;
-#endif
-#ifndef HAS_UNIFORM_u_radius
-layout (location = 2) in mediump vec2 a_radius;
 #endif
 
 // Effective "0" in the kernel density texture to adjust the kernel size to;
@@ -3239,13 +2256,6 @@ mediump float radius = u_radius;
 "#,
     fragment: r"in vec2 v_extrude;
 
-layout (std140) uniform HeatmapEvaluatedPropsUBO {
-    highp float u_weight;
-    highp float u_radius;
-    highp float u_intensity;
-    lowp float props_pad1;
-};
-
 #ifndef HAS_UNIFORM_u_weight
 in highp float weight;
 #endif
@@ -3272,28 +2282,7 @@ highp float weight = u_weight;
 };
 
 pub(crate) const HEATMAP_TEXTURE_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (location = 0) in vec2 a_pos;
-out vec2 v_pos;
-
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform HeatmapTexturePropsUBO {
-    highp mat4 u_matrix;
-    highp float u_opacity;
-    lowp float props_pad1;
-    lowp float props_pad2;
-    lowp float props_pad3;
-};
+    vertex: r"out vec2 v_pos;
 
 void main() {
     gl_Position = u_matrix * vec4(a_pos * u_world_size, 0, 1);
@@ -3303,16 +2292,6 @@ void main() {
 }
 ",
     fragment: r"in highp vec2 v_pos;
-uniform sampler2D u_image;
-uniform sampler2D u_color_ramp;
-
-layout (std140) uniform HeatmapTexturePropsUBO {
-    highp mat4 u_matrix;
-    highp float u_opacity;
-    lowp float props_pad1;
-    lowp float props_pad2;
-    lowp float props_pad3;
-};
 
 void main() {
     float t = texture(u_image, v_pos).r;
@@ -3327,25 +2306,7 @@ void main() {
 };
 
 pub(crate) const HILLSHADE_PREPARE_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (location = 0) in vec2 a_pos;
-layout (location = 1) in vec2 a_texture_pos;
-
-layout (std140) uniform HillshadePrepareDrawableUBO {
-    highp mat4 u_matrix;
-};
-
-layout (std140) uniform HillshadePrepareTilePropsUBO {
-    highp vec4 u_unpack;
-    highp vec2 u_dimension;
-    highp float u_zoom;
-    highp float u_maxzoom;
-    highp float u_unpack_scale;
-    highp float pad_tile0;
-    highp float pad_tile1;
-    highp float pad_tile2;
-};
-
-out vec2 v_pos;
+    vertex: r"out vec2 v_pos;
 
 void main() {
     gl_Position = u_matrix * vec4(a_pos, 0, 1);
@@ -3360,19 +2321,6 @@ precision highp float;
 #endif
 
 in vec2 v_pos;
-// highp: a sampler is lowp by default in GLSL ES, and a driver may then
-// read the DEM's bytes too coarsely to decode.
-uniform highp sampler2D u_image;
-layout (std140) uniform HillshadePrepareTilePropsUBO {
-    highp vec4 u_unpack;
-    highp vec2 u_dimension;
-    highp float u_zoom;
-    highp float u_maxzoom;
-    highp float u_unpack_scale;
-    highp float pad_tile0;
-    highp float pad_tile1;
-    highp float pad_tile2;
-};
 
 // The height in meters of the DEM at `coord`, by the rule of
 // `mln_util::dem`. The channels aren't rounded: the decode is linear in
@@ -3442,14 +2390,7 @@ void main() {
 };
 
 pub(crate) const HILLSHADE_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (location = 0) in vec2 a_pos;
-layout (location = 1) in vec2 a_texture_pos;
-
-layout (std140) uniform HillshadeDrawableUBO {
-    highp mat4 u_matrix;
-};
-
-out vec2 v_pos;
+    vertex: r"out vec2 v_pos;
 
 void main() {
     gl_Position = projectTile(a_pos, a_pos);
@@ -3459,7 +2400,6 @@ void main() {
     fragment: concat!(
         hillshade_shading!(),
         r#"in vec2 v_pos;
-uniform sampler2D u_image;
 
 void main() {
     vec4 pixel = texture(u_image, v_pos);
@@ -3503,52 +2443,6 @@ pub(crate) const LINE_GRADIENT_SDF_SHADER: GlslShaderSource = GlslShaderSource {
 // The gradient ramp is indexed by the ratio along the entire line, stored scaled to [0, 2^15).
 #define MAX_LINE_DISTANCE 32767.0
 
-layout (location = 0) in vec2 a_pos_normal;
-layout (location = 1) in vec4 a_data;
-
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform LineSDFDrawableUBO {
-    highp mat4 u_matrix;
-    highp vec2 u_patternscale_a;
-    highp vec2 u_patternscale_b;
-    highp float u_tex_y_a;
-    highp float u_tex_y_b;
-    mediump float u_ratio;
-    // Interpolations
-    lowp float u_color_t;
-    lowp float u_blur_t;
-    lowp float u_opacity_t;
-    lowp float u_gapwidth_t;
-    lowp float u_offset_t;
-    lowp float u_width_t;
-    lowp float u_floorwidth_t;
-    highp float u_atlas_height;
-    lowp float drawable_pad2;
-};
-
-layout (std140) uniform LineEvaluatedPropsUBO {
-    highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
-    lowp float u_floorwidth;
-    lowp float props_pad1;
-    lowp float props_pad2;
-};
-
 out vec2 v_normal;
 out vec2 v_width2;
 out highp vec2 v_tex_a;
@@ -3557,29 +2451,18 @@ out float v_gamma_scale;
 out highp float v_lineprogress;
 
 #ifndef HAS_UNIFORM_u_blur
-layout (location = 2) in lowp vec2 a_blur;
 out lowp float blur;
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-layout (location = 3) in lowp vec2 a_opacity;
 out lowp float opacity;
 #endif
-#ifndef HAS_UNIFORM_u_gapwidth
-layout (location = 4) in mediump vec2 a_gapwidth;
-#endif
-#ifndef HAS_UNIFORM_u_offset
-layout (location = 5) in mediump vec2 a_offset;
-#endif
 #ifndef HAS_UNIFORM_u_width
-layout (location = 6) in mediump vec2 a_width;
 out mediump float width;
 #endif
 #ifndef HAS_UNIFORM_u_floorwidth
-layout (location = 7) in lowp vec2 a_floorwidth;
 out lowp float floorwidth;
 #endif
 #ifndef HAS_UNIFORM_u_dasharray
-layout (location = 8) in highp vec4 a_dasharray;
 flat out highp float v_dash_width;
 #endif
 
@@ -3694,29 +2577,7 @@ lowp float floorwidth = u_floorwidth;
     v_width2 = vec2(outset, inset);
 }
 "#,
-    fragment: r"layout (std140) uniform LineEvaluatedPropsUBO {
-    highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
-    lowp float u_floorwidth;
-    lowp float props_pad1;
-    lowp float props_pad2;
-};
-
-layout (std140) uniform LineSDFTilePropsUBO {
-    highp float u_sdfgamma;
-    highp float u_mix;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
-};
-
-uniform sampler2D u_image;
-uniform sampler2D u_image_dash;
-
-in vec2 v_normal;
+    fragment: r"in vec2 v_normal;
 in vec2 v_width2;
 in highp vec2 v_tex_a;
 in highp vec2 v_tex_b;
@@ -3807,67 +2668,16 @@ pub(crate) const LINE_GRADIENT_SHADER: GlslShaderSource = GlslShaderSource {
 // #define scale 63.0
 #define scale 0.015873016
 
-layout (location = 0) in vec2 a_pos_normal;
-layout (location = 1) in vec4 a_data;
-
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform LineGradientDrawableUBO {
-    highp mat4 u_matrix;
-    mediump float u_ratio;
-    // Interpolations
-    lowp float u_blur_t;
-    lowp float u_opacity_t;
-    lowp float u_gapwidth_t;
-    lowp float u_offset_t;
-    lowp float u_width_t;
-    lowp float drawable_pad1;
-    lowp float drawable_pad2;
-};
-
-layout (std140) uniform LineEvaluatedPropsUBO {
-    highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
-    lowp float u_floorwidth;
-    lowp float props_pad1;
-    lowp float props_pad2;
-};
-
 out vec2 v_normal;
 out vec2 v_width2;
 out float v_gamma_scale;
 out highp float v_lineprogress;
 
 #ifndef HAS_UNIFORM_u_blur
-layout (location = 2) in lowp vec2 a_blur;
 out lowp float blur;
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-layout (location = 3) in lowp vec2 a_opacity;
 out lowp float opacity;
-#endif
-#ifndef HAS_UNIFORM_u_gapwidth
-layout (location = 4) in mediump vec2 a_gapwidth;
-#endif
-#ifndef HAS_UNIFORM_u_offset
-layout (location = 5) in lowp vec2 a_offset;
-#endif
-#ifndef HAS_UNIFORM_u_width
-layout (location = 6) in mediump vec2 a_width;
 #endif
 
 #ifdef PROJECTION_GLOBE
@@ -3960,21 +2770,7 @@ mediump float width = u_width;
     v_width2 = vec2(outset, inset);
 }
 "#,
-    fragment: r"layout (std140) uniform LineEvaluatedPropsUBO {
-    highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
-    lowp float u_floorwidth;
-    lowp float props_pad1;
-    lowp float props_pad2;
-};
-
-uniform sampler2D u_image;
-
-in vec2 v_width2;
+    fragment: r"in vec2 v_width2;
 in vec2 v_normal;
 in float v_gamma_scale;
 in highp float v_lineprogress;
@@ -4038,58 +2834,6 @@ pub(crate) const LINE_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
 // long distances for long segments. Use this value to unscale the distance.
 #define LINE_DISTANCE_SCALE 2.0
 
-layout (location = 0) in vec2 a_pos_normal;
-layout (location = 1) in vec4 a_data;
-
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-layout (std140) uniform LinePatternDrawableUBO {
-    highp mat4 u_matrix;
-    mediump float u_ratio;
-    // Interpolations
-    lowp float u_blur_t;
-    lowp float u_opacity_t;
-    lowp float u_gapwidth_t;
-    lowp float u_offset_t;
-    lowp float u_width_t;
-    lowp float u_pattern_from_t;
-    lowp float u_pattern_to_t;
-    lowp float u_floorwidth_t;
-    lowp float drawable_pad1;
-    lowp float drawable_pad2;
-    lowp float drawable_pad3;
-};
-
-layout (std140) uniform LinePatternTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    mediump vec4 u_scale;
-    highp vec2 u_texsize;
-    highp float u_fade;
-    lowp float tileprops_pad1;
-};
-
-layout (std140) uniform LineEvaluatedPropsUBO {
-    highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
-    lowp float u_floorwidth;
-    lowp float props_pad1;
-    lowp float props_pad2;
-};
-
 out vec2 v_normal;
 out vec2 v_width2;
 out float v_linesofar;
@@ -4097,28 +2841,15 @@ out float v_gamma_scale;
 out float v_floorwidth;
 
 #ifndef HAS_UNIFORM_u_blur
-layout (location = 2) in lowp vec2 a_blur;
 out lowp float blur;
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-layout (location = 3) in lowp vec2 a_opacity;
 out lowp float opacity;
 #endif
-#ifndef HAS_UNIFORM_u_offset
-layout (location = 4) in lowp vec2 a_offset;
-#endif
-#ifndef HAS_UNIFORM_u_gapwidth
-layout (location = 5) in mediump vec2 a_gapwidth;
-#endif
-#ifndef HAS_UNIFORM_u_width
-layout (location = 6) in mediump vec2 a_width;
-#endif
 #ifndef HAS_UNIFORM_u_pattern_from
-layout (location = 7) in highp vec4 a_pattern_from;
 flat out highp vec4 pattern_from;
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-layout (location = 8) in highp vec4 a_pattern_to;
 flat out highp vec4 pattern_to;
 #endif
 
@@ -4154,13 +2885,9 @@ mediump float width = u_width;
 #endif
     #ifndef HAS_UNIFORM_u_pattern_from
 pattern_from = a_pattern_from;
-#else
-highp vec4 pattern_from = u_pattern_from;
 #endif
     #ifndef HAS_UNIFORM_u_pattern_to
 pattern_to = a_pattern_to;
-#else
-highp vec4 pattern_to = u_pattern_to;
 #endif
 
 #ifndef HAS_UNIFORM_u_width
@@ -4231,29 +2958,6 @@ highp vec4 pattern_to = u_pattern_to;
     fragment: r"#ifdef GL_ES
 precision highp float;
 #endif
-
-layout (std140) uniform LinePatternTilePropsUBO {
-    highp vec4 u_pattern_from;
-    highp vec4 u_pattern_to;
-    mediump vec4 u_scale;
-    highp vec2 u_texsize;
-    highp float u_fade;
-    lowp float tileprops_pad1;
-};
-
-layout (std140) uniform LineEvaluatedPropsUBO {
-    highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
-    lowp float u_floorwidth;
-    lowp float props_pad1;
-    lowp float props_pad2;
-};
-
-uniform sampler2D u_image;
 
 in vec2 v_normal;
 in vec2 v_width2;
@@ -4370,52 +3074,6 @@ pub(crate) const LINE_SDF_SHADER: GlslShaderSource = GlslShaderSource {
 // long distances for long segments. Use this value to unscale the distance.
 #define LINE_DISTANCE_SCALE 2.0
 
-layout (location = 0) in vec2 a_pos_normal;
-layout (location = 1) in vec4 a_data;
-
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform LineSDFDrawableUBO {
-    highp mat4 u_matrix;
-    highp vec2 u_patternscale_a;
-    highp vec2 u_patternscale_b;
-    highp float u_tex_y_a;
-    highp float u_tex_y_b;
-    mediump float u_ratio;
-    // Interpolations
-    lowp float u_color_t;
-    lowp float u_blur_t;
-    lowp float u_opacity_t;
-    lowp float u_gapwidth_t;
-    lowp float u_offset_t;
-    lowp float u_width_t;
-    lowp float u_floorwidth_t;
-    highp float u_atlas_height;
-    lowp float drawable_pad2;
-};
-
-layout (std140) uniform LineEvaluatedPropsUBO {
-    highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
-    lowp float u_floorwidth;
-    lowp float props_pad1;
-    lowp float props_pad2;
-};
-
 out vec2 v_normal;
 out vec2 v_width2;
 out vec2 v_tex_a;
@@ -4423,33 +3081,21 @@ out vec2 v_tex_b;
 out float v_gamma_scale;
 
 #ifndef HAS_UNIFORM_u_color
-layout (location = 2) in highp vec4 a_color;
 out highp vec4 color;
 #endif
 #ifndef HAS_UNIFORM_u_blur
-layout (location = 3) in lowp vec2 a_blur;
 out lowp float blur;
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-layout (location = 4) in lowp vec2 a_opacity;
 out lowp float opacity;
 #endif
-#ifndef HAS_UNIFORM_u_gapwidth
-layout (location = 5) in mediump vec2 a_gapwidth;
-#endif
-#ifndef HAS_UNIFORM_u_offset
-layout (location = 6) in lowp vec2 a_offset;
-#endif
 #ifndef HAS_UNIFORM_u_width
-layout (location = 7) in mediump vec2 a_width;
 out mediump float width;
 #endif
 #ifndef HAS_UNIFORM_u_floorwidth
-layout (location = 8) in lowp vec2 a_floorwidth;
 out lowp float floorwidth;
 #endif
 #ifndef HAS_UNIFORM_u_dasharray
-layout (location = 9) in highp vec4 a_dasharray;
 flat out highp float v_dash_width;
 #endif
 
@@ -4568,28 +3214,7 @@ lowp float floorwidth = u_floorwidth;
     v_width2 = vec2(outset, inset);
 }
 "#,
-    fragment: r"layout (std140) uniform LineEvaluatedPropsUBO {
-    highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
-    lowp float u_floorwidth;
-    lowp float props_pad1;
-    lowp float props_pad2;
-};
-
-layout (std140) uniform LineSDFTilePropsUBO {
-    highp float u_sdfgamma;
-    highp float u_mix;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
-};
-
-uniform sampler2D u_image;
-
-in vec2 v_normal;
+    fragment: r"in vec2 v_normal;
 in vec2 v_width2;
 in highp vec2 v_tex_a;
 in highp vec2 v_tex_b;
@@ -4677,71 +3302,19 @@ pub(crate) const LINE_SHADER: GlslShaderSource = GlslShaderSource {
 // #define scale 63.0
 #define scale 0.015873016
 
-layout (location = 0) in vec2 a_pos_normal;
-layout (location = 1) in vec4 a_data;
-
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform LineDrawableUBO {
-    highp mat4 u_matrix;
-    mediump float u_ratio;
-    // Interpolations
-    lowp float u_color_t;
-    lowp float u_blur_t;
-    lowp float u_opacity_t;
-    lowp float u_gapwidth_t;
-    lowp float u_offset_t;
-    lowp float u_width_t;
-    lowp float drawable_pad1;
-};
-
-layout (std140) uniform LineEvaluatedPropsUBO {
-    highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
-    lowp float u_floorwidth;
-    lowp float props_pad1;
-    lowp float props_pad2;
-};
-
 out vec2 v_normal;
 out vec2 v_width2;
 out float v_gamma_scale;
 out highp float v_linesofar;
 
 #ifndef HAS_UNIFORM_u_color
-layout (location = 2) in highp vec4 a_color;
 out highp vec4 color;
 #endif
 #ifndef HAS_UNIFORM_u_blur
-layout (location = 3) in lowp vec2 a_blur;
 out lowp float blur;
 #endif
 #ifndef HAS_UNIFORM_u_opacity
-layout (location = 4) in lowp vec2 a_opacity;
 out lowp float opacity;
-#endif
-#ifndef HAS_UNIFORM_u_gapwidth
-layout (location = 5) in mediump vec2 a_gapwidth;
-#endif
-#ifndef HAS_UNIFORM_u_offset
-layout (location = 6) in lowp vec2 a_offset;
-#endif
-#ifndef HAS_UNIFORM_u_width
-layout (location = 7) in mediump vec2 a_width;
 #endif
 
 #ifdef PROJECTION_GLOBE
@@ -4839,19 +3412,7 @@ mediump float width = u_width;
     v_width2 = vec2(outset, inset);
 }
 "#,
-    fragment: r"layout (std140) uniform LineEvaluatedPropsUBO {
-    highp vec4 u_color;
-    lowp float u_blur;
-    lowp float u_opacity;
-    mediump float u_gapwidth;
-    lowp float u_offset;
-    mediump float u_width;
-    lowp float u_floorwidth;
-    lowp float props_pad1;
-    lowp float props_pad2;
-};
-
-in vec2 v_width2;
+    fragment: r"in vec2 v_width2;
 in vec2 v_normal;
 in float v_gamma_scale;
 
@@ -4991,18 +3552,6 @@ vec2 get_pattern_pos(const vec2 pixel_coord_upper, const vec2 pixel_coord_lower,
     return (tile_units_to_pixels * pos + offset) / pattern_size;
 }
 
-layout (std140) uniform ProjectionUBO {
-    highp mat4 u_projection_matrix;
-    highp mat4 u_projection_fallback_matrix;
-    highp vec4 u_projection_tile_mercator_coords;
-    highp vec4 u_projection_clipping_plane;
-    highp float u_projection_transition;
-    highp float u_projection_depth_offset;
-    highp vec2 u_projection_translate;
-    highp vec4 u_projection_anchor;
-    highp vec4 u_projection_anchor_angles;
-};
-
 // Pole vertices carry these sentinel Y values in their raw position.
 #define GLOBE_POLE_NORTH_Y -32767.5
 #define GLOBE_POLE_SOUTH_Y 32766.5
@@ -5050,28 +3599,28 @@ vec2 globeTurn(vec2 sc, float a) {
 // pole sentinels in rawPos map to the poles.
 vec3 projectToSphere(vec2 translatedPos, vec2 rawPos) {
     vec2 d = translatedPos - GLOBE_ANCHOR;
-    vec4 anchor = u_projection_anchor_angles;
-    float d_lng = d.x * u_projection_tile_mercator_coords.z * (2.0 * GLOBE_PI);
+    vec4 anchor = projection.anchor_angles;
+    float d_lng = d.x * projection.tile_mercator_coords.z * (2.0 * GLOBE_PI);
     // The latitude is 2 atan(e^m) - pi/2 of the Mercator exponent m = pi - 2 pi y; its change from the anchor's, as one
     // atan of e^(m - m_anchor) - 1.
-    float e = globeExpm1(d.y * u_projection_tile_mercator_coords.w * (-2.0 * GLOBE_PI));
+    float e = globeExpm1(d.y * projection.tile_mercator_coords.w * (-2.0 * GLOBE_PI));
     float d_lat = 2.0 * globeAtan(anchor.w * e / (2.0 + (1.0 + anchor.z) * e));
     vec2 lng = globeTurn(anchor.xy, d_lng);
     vec2 lat = globeTurn(anchor.zw, d_lat);
     float cos_lat = anchor.w + lat.y;
     vec3 offset = vec3(lng.x * cos_lat + anchor.x * lat.y, lat.x, lng.y * cos_lat + anchor.y * lat.y);
     if (rawPos.y < GLOBE_POLE_NORTH_Y) {
-        offset = vec3(0.0, 1.0, 0.0) - u_projection_anchor.xyz;
+        offset = vec3(0.0, 1.0, 0.0) - projection.anchor.xyz;
     }
     if (rawPos.y > GLOBE_POLE_SOUTH_Y) {
-        offset = vec3(0.0, -1.0, 0.0) - u_projection_anchor.xyz;
+        offset = vec3(0.0, -1.0, 0.0) - projection.anchor.xyz;
     }
     return offset;
 }
 
 // The point `angles` (radians right and up) from a point on the unit sphere, both as offsets from the tile's anchor.
 vec3 globeRotateVector(vec3 offset, vec2 angles) {
-    vec3 vec = u_projection_anchor.xyz + offset;
+    vec3 vec = projection.anchor.xyz + offset;
     vec3 axisRight = vec3(vec.z, 0.0, -vec.x);
     vec3 axisUp = cross(axisRight, vec);
     axisRight = normalize(axisRight);
@@ -5085,95 +3634,95 @@ vec3 globeRotateVector(vec3 offset, vec2 angles) {
 
 // cos(latitude) at a tile Y, from the same exp() form as projectToSphere.
 float circumferenceRatioAtTileY(float tileY) {
-    float mercator_pos_y = u_projection_tile_mercator_coords.y + u_projection_tile_mercator_coords.w * tileY;
+    float mercator_pos_y = projection.tile_mercator_coords.y + projection.tile_mercator_coords.w * tileY;
     float t = exp(GLOBE_PI - (mercator_pos_y * GLOBE_PI * 2.0));
     return (2.0 * t) / (t * t + 1.0);
 }
 
 float projectLineThickness(float tileY) {
     float thickness = 1.0 / circumferenceRatioAtTileY(tileY);
-    if (u_projection_transition < 0.999) {
-        return mix(1.0, thickness, u_projection_transition);
+    if (projection.projection_transition < 0.999) {
+        return mix(1.0, thickness, projection.projection_transition);
     }
     return thickness;
 }
 
 // The clipping plane's value at a point offset from the tile's anchor, off 1.
 float globeComputeClippingZ(vec3 offset) {
-    return 1.0 - (dot(offset, u_projection_clipping_plane.xyz) + u_projection_anchor.w);
+    return 1.0 - (dot(offset, projection.clipping_plane.xyz) + projection.anchor.w);
 }
 
 // A point on the unit sphere, offset from the tile's anchor, raised by `elevation` meters.
 vec3 globeElevate(vec3 offset, float elevation) {
-    return offset + (u_projection_anchor.xyz + offset) * (elevation / GLOBE_RADIUS);
+    return offset + (projection.anchor.xyz + offset) * (elevation / GLOBE_RADIUS);
 }
 
 // sphereOffset is projectToSphere's.
 vec4 interpolateProjection(vec2 posInTile, vec3 sphereOffset, float elevation) {
     vec3 elevatedOffset = globeElevate(sphereOffset, elevation);
-    vec4 globePosition = u_projection_matrix * vec4(elevatedOffset, 1.0);
+    vec4 globePosition = projection.matrix * vec4(elevatedOffset, 1.0);
     // Clip the far side of the globe through Z; the layer's depth shift keeps layer order.
-    globePosition.z = globeComputeClippingZ(elevatedOffset) * globePosition.w - u_projection_depth_offset;
+    globePosition.z = globeComputeClippingZ(elevatedOffset) * globePosition.w - projection.depth_offset;
 
-    if (u_projection_transition > 0.999) {
+    if (projection.projection_transition > 0.999) {
         return globePosition;
     }
 
-    vec4 flatPosition = u_projection_fallback_matrix * vec4(posInTile, elevation, 1.0);
+    vec4 flatPosition = projection.fallback_matrix * vec4(posInTile, elevation, 1.0);
     const float z_globeness_threshold = 0.2;
     vec4 result = globePosition;
-    result.z = mix(0.0, globePosition.z, clamp((u_projection_transition - z_globeness_threshold) / (1.0 - z_globeness_threshold), 0.0, 1.0));
-    result.xyw = mix(flatPosition.xyw, globePosition.xyw, u_projection_transition);
+    result.z = mix(0.0, globePosition.z, clamp((projection.projection_transition - z_globeness_threshold) / (1.0 - z_globeness_threshold), 0.0, 1.0));
+    result.xyw = mix(flatPosition.xyw, globePosition.xyw, projection.projection_transition);
     if ((posInTile.y < GLOBE_POLE_NORTH_Y) || (posInTile.y > GLOBE_POLE_SOUTH_Y)) {
         result = globePosition;
         const float poles_hidden_anim_percentage = 0.02;
-        result.z = mix(globePosition.z, 100.0, pow(max((1.0 - u_projection_transition) / poles_hidden_anim_percentage, 0.0), 8.0));
+        result.z = mix(globePosition.z, 100.0, pow(max((1.0 - projection.projection_transition) / poles_hidden_anim_percentage, 0.0), 8.0));
     }
     return result;
 }
 
 // Keeps the matrix Z, for geometry that needs the depth buffer.
 vec4 interpolateProjectionFor3D(vec2 posInTile, vec3 sphereOffset, float elevation) {
-    vec4 globePosition = u_projection_matrix * vec4(globeElevate(sphereOffset, elevation), 1.0);
-    if (u_projection_transition > 0.999) {
+    vec4 globePosition = projection.matrix * vec4(globeElevate(sphereOffset, elevation), 1.0);
+    if (projection.projection_transition > 0.999) {
         return globePosition;
     }
-    vec4 fallbackPosition = u_projection_fallback_matrix * vec4(posInTile, elevation, 1.0);
-    return mix(fallbackPosition, globePosition, u_projection_transition);
+    vec4 fallbackPosition = projection.fallback_matrix * vec4(posInTile, elevation, 1.0);
+    return mix(fallbackPosition, globePosition, projection.projection_transition);
 }
 
 vec4 projectTile(vec2 pos) {
-    return interpolateProjection(pos, projectToSphere(pos + u_projection_translate, vec2(0.0, 0.0)), 0.0);
+    return interpolateProjection(pos, projectToSphere(pos + projection.translate, vec2(0.0, 0.0)), 0.0);
 }
 
 // The zoom 0 tile's buffer wraps around the planet onto the tile itself, so the line shaders discard the fragments
 // beyond its X extent; every other tile (a mercator width below the whole world's) hands on a value inside it.
 float antimeridianClipX(vec2 posInTile) {
-    return u_projection_tile_mercator_coords.z * 8192.0 >= 1.0 ? posInTile.x : 0.0;
+    return projection.tile_mercator_coords.z * 8192.0 >= 1.0 ? posInTile.x : 0.0;
 }
 
 // The variant for geometry that can carry pole vertices; rawPos is the untranslated position.
 vec4 projectTile(vec2 pos, vec2 rawPos) {
-    return interpolateProjection(pos, projectToSphere(pos + u_projection_translate, rawPos), 0.0);
+    return interpolateProjection(pos, projectToSphere(pos + projection.translate, rawPos), 0.0);
 }
 
 vec4 projectTileWithElevation(vec2 pos, float elevation) {
-    return interpolateProjection(pos, projectToSphere(pos + u_projection_translate, vec2(0.0, 0.0)), elevation);
+    return interpolateProjection(pos, projectToSphere(pos + projection.translate, vec2(0.0, 0.0)), elevation);
 }
 
 vec4 projectTileFor3D(vec2 pos, float elevation) {
-    return interpolateProjectionFor3D(pos, projectToSphere(pos + u_projection_translate, pos), elevation);
+    return interpolateProjectionFor3D(pos, projectToSphere(pos + projection.translate, pos), elevation);
 }
 
 #else
 
 vec4 projectTile(vec2 pos) {
-    return u_projection_matrix * vec4(pos, 0.0, 1.0);
+    return projection.matrix * vec4(pos, 0.0, 1.0);
 }
 
 // Pole vertices only exist on the globe; put them behind the near plane so their triangles are clipped.
 vec4 projectTile(vec2 pos, vec2 rawPos) {
-    vec4 result = u_projection_matrix * vec4(pos, 0.0, 1.0);
+    vec4 result = projection.matrix * vec4(pos, 0.0, 1.0);
     if (rawPos.y < GLOBE_POLE_NORTH_Y || rawPos.y > GLOBE_POLE_SOUTH_Y) {
         result.z = -10000000.0;
     }
@@ -5181,11 +3730,11 @@ vec4 projectTile(vec2 pos, vec2 rawPos) {
 }
 
 vec4 projectTileWithElevation(vec2 pos, float elevation) {
-    return u_projection_matrix * vec4(pos, elevation, 1.0);
+    return projection.matrix * vec4(pos, elevation, 1.0);
 }
 
 vec4 projectTileFor3D(vec2 pos, float elevation) {
-    return u_projection_matrix * vec4(pos, elevation, 1.0);
+    return projection.matrix * vec4(pos, elevation, 1.0);
 }
 
 float projectLineThickness(float tileY) {
@@ -5237,31 +3786,7 @@ bool clippedAtAntimeridian(highp float tileX) {
 };
 
 pub(crate) const RASTER_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (std140) uniform RasterDrawableUBO {
-    highp mat4 u_matrix;
-};
-layout (std140) uniform RasterEvaluatedPropsUBO {
-    highp vec3 u_spin_weights;
-    highp vec2 u_tl_parent;
-    highp float u_scale_parent;
-    highp float u_buffer_scale;
-    highp float u_fade_t;
-    highp float u_opacity;
-    highp float u_brightness_low;
-    highp float u_brightness_high;
-    highp float u_saturation_factor;
-    highp float u_contrast_factor;
-    lowp float props_pad1;
-    lowp float props_pad2;
-    highp vec4 u_coords_top;
-    highp vec4 u_coords_bottom;
-    highp vec4 u_image_warp;
-};
-
-layout (location = 0) in vec2 a_pos;
-layout (location = 1) in vec2 a_texture_pos;
-
-out vec3 v_pos0;
+    vertex: r"out vec3 v_pos0;
 out vec3 v_pos1;
 
 void main() {
@@ -5294,27 +3819,7 @@ void main() {
     v_pos1 = vec3(pos1 * weight, weight);
 }
 ",
-    fragment: r"layout (std140) uniform RasterEvaluatedPropsUBO {
-    highp vec3 u_spin_weights;
-    highp vec2 u_tl_parent;
-    highp float u_scale_parent;
-    highp float u_buffer_scale;
-    highp float u_fade_t;
-    highp float u_opacity;
-    highp float u_brightness_low;
-    highp float u_brightness_high;
-    highp float u_saturation_factor;
-    highp float u_contrast_factor;
-    lowp float props_pad1;
-    lowp float props_pad2;
-    highp vec4 u_coords_top;
-    highp vec4 u_coords_bottom;
-    highp vec4 u_image_warp;
-};
-uniform sampler2D u_image0;
-uniform sampler2D u_image1;
-
-in highp vec3 v_pos0;
+    fragment: r"in highp vec3 v_pos0;
 in highp vec3 v_pos1;
 
 void main() {
@@ -5359,9 +3864,7 @@ void main() {
 };
 
 pub(crate) const SKY_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout(location = 0) in vec2 a_pos;
-
-out vec2 v_pos;
+    vertex: r"out vec2 v_pos;
 
 void main() {
     v_pos = a_pos;
@@ -5374,31 +3877,21 @@ precision highp float;
 
 in vec2 v_pos;
 
-layout(std140) uniform SkyPropsUBO {
-    vec4 sky_color;
-    vec4 horizon_color;
-    vec2 horizon;
-    vec2 horizon_normal;
-    vec2 viewport_size;
-    float sky_horizon_blend;
-    float sky_blend;
-} sky;
-
 void main() {
-    vec2 pixel = (v_pos * 0.5 + 0.5) * sky.viewport_size;
-    float distance_to_horizon = dot(pixel - sky.horizon, sky.horizon_normal);
+    vec2 pixel = (v_pos * 0.5 + 0.5) * u_viewport_size;
+    float distance_to_horizon = dot(pixel - u_horizon, u_horizon_normal);
     vec4 color = vec4(0.0);
 
     if (distance_to_horizon > 0.0) {
-        if (sky.sky_horizon_blend > 0.0 && distance_to_horizon < sky.sky_horizon_blend) {
-            float blend = 1.0 - distance_to_horizon / sky.sky_horizon_blend;
-            color = mix(sky.sky_color, sky.horizon_color, blend * blend);
+        if (u_sky_horizon_blend > 0.0 && distance_to_horizon < u_sky_horizon_blend) {
+            float blend = 1.0 - distance_to_horizon / u_sky_horizon_blend;
+            color = mix(u_sky_color, u_horizon_color, blend * blend);
         } else {
-            color = sky.sky_color;
+            color = u_sky_color;
         }
     }
 
-    fragColor = color * (1.0 - sky.sky_blend);
+    fragColor = color * (1.0 - u_sky_blend);
 }
 ",
 };
@@ -5406,86 +3899,12 @@ void main() {
 pub(crate) const SYMBOL_ICON_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
         ground_visibility!(),
-        r"layout (location = 0) in vec4 a_pos_offset;
-layout (location = 1) in vec4 a_data;
-layout (location = 2) in vec4 a_pixeloffset;
-layout (location = 3) in vec4 a_projected_pos;
-layout (location = 4) in float a_fade_opacity;
-layout (location = 6) in vec2 a_tex_origin;
-layout (location = 11) in float a_height_offset;
-
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform SymbolDrawableUBO {
-    highp mat4 u_matrix;
-    highp mat4 u_label_plane_matrix;
-    highp mat4 u_coord_matrix;
-
-    highp vec2 u_texsize;
-    highp vec2 u_texsize_icon;
-
-    bool u_is_text_prop;
-    bool u_rotate_symbol;
-    bool u_pitch_with_map;
-    bool u_is_size_zoom_constant;
-    bool u_is_size_feature_constant;
-    bool u_is_offset;
-
-    highp float u_size_t; // used to interpolate between zoom stops when size is a composite function
-    highp float u_size; // used when size is both zoom and feature constant
-
-    // Interpolations
-    highp float u_fill_color_t;
-    highp float u_halo_color_t;
-    highp float u_opacity_t;
-    highp float u_halo_width_t;
-    highp float u_halo_blur_t;
-
-    bool u_is_along_line;
-    bool u_is_variable_anchor;
-    highp float u_pitched_scale;
-    highp vec2 u_translation;
-    highp float u_gamma_scale;
-    bool u_is_halo_pass;
-};
-
-layout (std140) uniform SymbolEvaluatedPropsUBO {
-    highp vec4 u_text_fill_color;
-    highp vec4 u_text_halo_color;
-    highp float u_text_opacity;
-    highp float u_text_halo_width;
-    highp float u_text_halo_blur;
-    lowp float props_pad1;
-    highp vec4 u_icon_fill_color;
-    highp vec4 u_icon_halo_color;
-    highp float u_icon_opacity;
-    highp float u_icon_halo_width;
-    highp float u_icon_halo_blur;
-    lowp float props_pad2;
-};
-
-out highp vec2 v_tex;
+        r"out highp vec2 v_tex;
 flat out highp vec2 v_tex_origin;
 // The fade opacity, times the opacity when it's per vertex.
 out float v_fade_opacity;
 
-#ifndef HAS_UNIFORM_u_opacity
-layout (location = 5) in lowp vec2 a_opacity;
-#endif
-
 void main() {
-    highp float u_opacity = u_is_text_prop ? u_text_opacity : u_icon_opacity;
-
     // How much of the symbol the ground in front of its anchor leaves.
 #ifdef TERRAIN
     highp float ground_visible = ground_visibility(
@@ -5499,13 +3918,11 @@ void main() {
 #ifndef HAS_UNIFORM_u_opacity
     lowp float opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
     v_fade_opacity *= opacity;
-#else
-    lowp float opacity = u_opacity;
 #endif
 
     // A quad that draws nothing goes to one point off screen, so it's never
     // rasterized. All four vertices of a quad share its fade and opacity.
-    if (v_fade_opacity == 0.0 || opacity == 0.0) {
+    if (v_fade_opacity == 0.0) {
         gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
         return;
     }
@@ -5523,9 +3940,9 @@ void main() {
     highp float segment_angle = -a_projected_pos[2];
     float size;
 
-    if (!u_is_size_zoom_constant && !u_is_size_feature_constant) {
+    if (u_is_size_zoom_constant == 0 && u_is_size_feature_constant == 0) {
         size = mix(a_size_min, a_size[1], u_size_t) / 128.0;
-    } else if (u_is_size_zoom_constant && !u_is_size_feature_constant) {
+    } else if (u_is_size_zoom_constant != 0 && u_is_size_feature_constant == 0) {
         size = a_size_min / 128.0;
     } else {
         size = u_size;
@@ -5540,14 +3957,14 @@ void main() {
     // vertices go through the globe projection, which clips them.
     // A raised label is left to placement, which hides it once the planet
     // blocks the line of sight to it.
-    if (!u_pitch_with_map && a_height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (u_pitch_with_map == 0 && a_height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
         gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
         return;
     }
 #endif
     highp float camera_to_anchor_distance = projectedPoint.w;
     // See comments in symbol_sdf.vertex
-    highp float distance_ratio = u_pitch_with_map ?
+    highp float distance_ratio = u_pitch_with_map != 0 ?
         camera_to_anchor_distance / u_camera_to_center_distance :
         u_camera_to_center_distance / camera_to_anchor_distance;
     highp float perspective_ratio = clamp(
@@ -5555,14 +3972,14 @@ void main() {
             0.0, // Prevents oversized near-field symbols in pitched/overzoomed tiles
             4.0);
 
-    if (!u_is_offset) {
+    if (u_is_offset == 0) {
         size *= perspective_ratio;
     }
 
-    float fontScale = u_is_text_prop ? size / 24.0 : size;
+    float fontScale = u_is_text_prop != 0 ? size / 24.0 : size;
 
     highp float symbol_rotation = 0.0;
-    if (u_rotate_symbol) {
+    if (u_rotate_symbol != 0) {
         // See comments in symbol_sdf.vertex
         vec4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2(1, 0), a_height_offset);
 
@@ -5577,11 +3994,11 @@ void main() {
     mat2 rotation_matrix = mat2(angle_cos, -1.0 * angle_sin, angle_sin, angle_cos);
 
     vec4 projected_pos;
-    if (u_is_along_line || u_is_variable_anchor) {
+    if (u_is_along_line != 0 || u_is_variable_anchor != 0) {
         // A glyph along a line stands at its own height, which the label's
         // layout gives it; a label at a variable anchor at its anchor's.
-        projected_pos = vec4(a_projected_pos.xy, u_is_along_line ? a_projected_pos.w : a_height_offset, 1.0);
-    } else if (u_pitch_with_map) {
+        projected_pos = vec4(a_projected_pos.xy, u_is_along_line != 0 ? a_projected_pos.w : a_height_offset, 1.0);
+    } else if (u_pitch_with_map != 0) {
         projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, a_height_offset, 1.0);
     } else {
         projected_pos = u_label_plane_matrix * projectTileWithElevation(a_projected_pos.xy + u_translation, a_height_offset);
@@ -5590,14 +4007,14 @@ void main() {
 
     float projectionScaling = 1.0;
 #ifdef PROJECTION_GLOBE
-    if (u_pitch_with_map) {
+    if (u_pitch_with_map != 0) {
         float anchor_pos_tile_y = (u_coord_matrix * vec4(projected_pos.xy / projected_pos.w, z, 1.0)).y;
-        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y) * u_pitched_scale, u_projection_transition);
+        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y) * u_pitched_scale, projection.projection_transition);
     }
 #endif
 
     gl_Position = u_coord_matrix * vec4(projected_pos.xy / projected_pos.w + rotation_matrix * (a_offset / 32.0 * max(a_minFontScale, fontScale) + a_pxoffset / 16.0) * projectionScaling, z, 1.0);
-    if (u_pitch_with_map) {
+    if (u_pitch_with_map != 0) {
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z);
     }
 
@@ -5606,37 +4023,13 @@ void main() {
 }
 "
     ),
-    fragment: r"uniform sampler2D u_texture;
-
-layout (std140) uniform SymbolEvaluatedPropsUBO {
-    highp vec4 u_text_fill_color;
-    highp vec4 u_text_halo_color;
-    highp float u_text_opacity;
-    highp float u_text_halo_width;
-    highp float u_text_halo_blur;
-    lowp float props_pad1;
-    highp vec4 u_icon_fill_color;
-    highp vec4 u_icon_halo_color;
-    highp float u_icon_opacity;
-    highp float u_icon_halo_width;
-    highp float u_icon_halo_blur;
-    lowp float props_pad2;
-};
-
-layout (std140) uniform SymbolTilePropsUBO {
-    bool u_is_text;
-    bool u_is_halo;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
-};
-
-in highp vec2 v_tex;
+    fragment: r"in highp vec2 v_tex;
 flat in highp vec2 v_tex_origin;
 in float v_fade_opacity;
 
 void main() {
 #ifdef HAS_UNIFORM_u_opacity
-    lowp float alpha = (u_is_text ? u_text_opacity : u_icon_opacity) * v_fade_opacity;
+    lowp float alpha = (u_is_text != 0 ? u_text_opacity : u_icon_opacity) * v_fade_opacity;
 #else
     lowp float alpha = v_fade_opacity;
 #endif
@@ -5654,14 +4047,6 @@ pub(crate) const SYMBOL_SDF_SHADER: GlslShaderSource = GlslShaderSource {
         ground_visibility!(),
         r"#define SDF_PX 8.0
 
-layout (location = 0) in vec4 a_pos_offset;
-layout (location = 1) in vec4 a_data;
-layout (location = 2) in vec4 a_pixeloffset;
-layout (location = 3) in vec4 a_projected_pos;
-layout (location = 4) in float a_fade_opacity;
-layout (location = 10) in vec2 a_tex_origin;
-layout (location = 11) in float a_height_offset;
-
 // contents of a_size vary based on the type of property value
 // used for {text,icon}-size.
 // For constants, a_size is disabled.
@@ -5670,94 +4055,23 @@ layout (location = 11) in float a_height_offset;
 // [ text-size(lowerZoomStop, feature),
 //   text-size(upperZoomStop, feature) ]
 
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform SymbolDrawableUBO {
-    highp mat4 u_matrix;
-    highp mat4 u_label_plane_matrix;
-    highp mat4 u_coord_matrix;
-
-    highp vec2 u_texsize;
-    highp vec2 u_texsize_icon;
-
-    bool u_is_text_prop;
-    bool u_rotate_symbol;
-    bool u_pitch_with_map;
-    bool u_is_size_zoom_constant;
-    bool u_is_size_feature_constant;
-    bool u_is_offset;
-
-    highp float u_size_t; // used to interpolate between zoom stops when size is a composite function
-    highp float u_size; // used when size is both zoom and feature constant
-
-    // Interpolations
-    highp float u_fill_color_t;
-    highp float u_halo_color_t;
-    highp float u_opacity_t;
-    highp float u_halo_width_t;
-    highp float u_halo_blur_t;
-
-    bool u_is_along_line;
-    bool u_is_variable_anchor;
-    highp float u_pitched_scale;
-    highp vec2 u_translation;
-    highp float u_gamma_scale;
-    bool u_is_halo_pass;
-};
-
-layout (std140) uniform SymbolEvaluatedPropsUBO {
-    highp vec4 u_text_fill_color;
-    highp vec4 u_text_halo_color;
-    highp float u_text_opacity;
-    highp float u_text_halo_width;
-    highp float u_text_halo_blur;
-    lowp float props_pad1;
-    highp vec4 u_icon_fill_color;
-    highp vec4 u_icon_halo_color;
-    highp float u_icon_opacity;
-    highp float u_icon_halo_width;
-    highp float u_icon_halo_blur;
-    lowp float props_pad2;
-};
-
 out highp vec2 v_data0;
 flat out highp vec2 v_tex_origin;
 out vec3 v_data1;
 
 #ifndef HAS_UNIFORM_u_fill_color
-layout (location = 5) in highp vec4 a_fill_color;
 out highp vec4 fill_color;
 #endif
 #ifndef HAS_UNIFORM_u_halo_color
-layout (location = 6) in highp vec4 a_halo_color;
 out highp vec4 halo_color;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-layout (location = 7) in lowp vec2 a_opacity;
-#endif
-#ifndef HAS_UNIFORM_u_halo_width
-layout (location = 8) in lowp vec2 a_halo_width;
-#endif
-#ifndef HAS_UNIFORM_u_halo_blur
-layout (location = 9) in lowp vec2 a_halo_blur;
 #endif
 
 void main() {
-    highp vec4 u_fill_color = u_is_text_prop ? u_text_fill_color : u_icon_fill_color;
-    highp vec4 u_halo_color = u_is_text_prop ? u_text_halo_color : u_icon_halo_color;
-    highp float u_opacity = u_is_text_prop ? u_text_opacity : u_icon_opacity;
-    highp float u_halo_width = u_is_text_prop ? u_text_halo_width : u_icon_halo_width;
-    highp float u_halo_blur = u_is_text_prop ? u_text_halo_blur : u_icon_halo_blur;
+    highp vec4 u_fill_color = u_is_text_prop != 0 ? u_text_fill_color : u_icon_fill_color;
+    highp vec4 u_halo_color = u_is_text_prop != 0 ? u_text_halo_color : u_icon_halo_color;
+    highp float u_opacity = u_is_text_prop != 0 ? u_text_opacity : u_icon_opacity;
+    highp float u_halo_width = u_is_text_prop != 0 ? u_text_halo_width : u_icon_halo_width;
+    highp float u_halo_blur = u_is_text_prop != 0 ? u_text_halo_blur : u_icon_halo_blur;
 
     #ifndef HAS_UNIFORM_u_fill_color
 fill_color = unpack_mix_color(a_fill_color, u_fill_color_t);
@@ -5815,9 +4129,9 @@ lowp float halo_blur = u_halo_blur;
     highp float segment_angle = -a_projected_pos[2];
     float size;
 
-    if (!u_is_size_zoom_constant && !u_is_size_feature_constant) {
+    if (u_is_size_zoom_constant == 0 && u_is_size_feature_constant == 0) {
         size = mix(a_size_min, a_size[1], u_size_t) / 128.0;
-    } else if (u_is_size_zoom_constant && !u_is_size_feature_constant) {
+    } else if (u_is_size_zoom_constant != 0 && u_is_size_feature_constant == 0) {
         size = a_size_min / 128.0;
     } else {
         size = u_size;
@@ -5832,7 +4146,7 @@ lowp float halo_blur = u_halo_blur;
     // vertices go through the globe projection, which clips them.
     // A raised label is left to placement, which hides it once the planet
     // blocks the line of sight to it.
-    if (!u_pitch_with_map && a_height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (u_pitch_with_map == 0 && a_height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
         gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
         return;
     }
@@ -5844,7 +4158,7 @@ lowp float halo_blur = u_halo_blur;
     // If the label isn't pitched with the map, we do layout in viewport space,
     // which makes labels in the distance larger relative to the features around
     // them. We counteract part of that effect by dividing by the perspective ratio.
-    highp float distance_ratio = u_pitch_with_map ?
+    highp float distance_ratio = u_pitch_with_map != 0 ?
         camera_to_anchor_distance / u_camera_to_center_distance :
         u_camera_to_center_distance / camera_to_anchor_distance;
     highp float perspective_ratio = clamp(
@@ -5852,14 +4166,14 @@ lowp float halo_blur = u_halo_blur;
         0.0, // Prevents oversized near-field symbols in pitched/overzoomed tiles
         4.0);
 
-    if (!u_is_offset) {
+    if (u_is_offset == 0) {
         size *= perspective_ratio;
     }
 
-    float fontScale = u_is_text_prop ? size / 24.0 : size;
+    float fontScale = u_is_text_prop != 0 ? size / 24.0 : size;
 
     highp float symbol_rotation = 0.0;
-    if (u_rotate_symbol) {
+    if (u_rotate_symbol != 0) {
         // Point labels with 'rotation-alignment: map' are horizontal with respect to tile units
         // To figure out that angle in projected space, we draw a short horizontal line in tile
         // space, project it, and measure its angle in projected space.
@@ -5876,11 +4190,11 @@ lowp float halo_blur = u_halo_blur;
     mat2 rotation_matrix = mat2(angle_cos, -1.0 * angle_sin, angle_sin, angle_cos);
 
     vec4 projected_pos;
-    if (u_is_along_line || u_is_variable_anchor) {
+    if (u_is_along_line != 0 || u_is_variable_anchor != 0) {
         // A glyph along a line stands at its own height, which the label's
         // layout gives it; a label at a variable anchor at its anchor's.
-        projected_pos = vec4(a_projected_pos.xy, u_is_along_line ? a_projected_pos.w : a_height_offset, 1.0);
-    } else if (u_pitch_with_map) {
+        projected_pos = vec4(a_projected_pos.xy, u_is_along_line != 0 ? a_projected_pos.w : a_height_offset, 1.0);
+    } else if (u_pitch_with_map != 0) {
         projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, a_height_offset, 1.0);
     } else {
         projected_pos = u_label_plane_matrix * projectTileWithElevation(a_projected_pos.xy + u_translation, a_height_offset);
@@ -5889,21 +4203,21 @@ lowp float halo_blur = u_halo_blur;
 
     float projectionScaling = 1.0;
 #ifdef PROJECTION_GLOBE
-    if (u_pitch_with_map) {
+    if (u_pitch_with_map != 0) {
         float anchor_pos_tile_y = (u_coord_matrix * vec4(projected_pos.xy / projected_pos.w, z, 1.0)).y;
-        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y) * u_pitched_scale, u_projection_transition);
+        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y) * u_pitched_scale, projection.projection_transition);
     }
 #endif
 
     gl_Position = u_coord_matrix * vec4(projected_pos.xy / projected_pos.w + rotation_matrix * (a_offset / 32.0 * fontScale + a_pxoffset) * projectionScaling, z, 1.0);
-    if (u_pitch_with_map) {
+    if (u_pitch_with_map != 0) {
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z);
     }
     // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
     // halo: the same over a quad but for the clip w, which interpolates
     // linearly.
     float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
-    float halo_blur_gamma = u_is_halo_pass ? halo_blur * 1.19 / SDF_PX : 0.0;
+    float halo_blur_gamma = u_is_halo_pass != 0 ? halo_blur * 1.19 / SDF_PX : 0.0;
     float gamma_scaled = (halo_blur_gamma + EDGE_GAMMA) / (fontScale * u_gamma_scale) * gl_Position.w;
     float halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
 #ifndef HAS_UNIFORM_u_opacity
@@ -5918,30 +4232,6 @@ lowp float halo_blur = u_halo_blur;
     ),
     fragment: r"#define SDF_PX 8.0
 
-layout (std140) uniform SymbolEvaluatedPropsUBO {
-    highp vec4 u_text_fill_color;
-    highp vec4 u_text_halo_color;
-    highp float u_text_opacity;
-    highp float u_text_halo_width;
-    highp float u_text_halo_blur;
-    lowp float props_pad1;
-    highp vec4 u_icon_fill_color;
-    highp vec4 u_icon_halo_color;
-    highp float u_icon_opacity;
-    highp float u_icon_halo_width;
-    highp float u_icon_halo_blur;
-    lowp float props_pad2;
-};
-
-layout (std140) uniform SymbolTilePropsUBO {
-    bool u_is_text;
-    bool u_is_halo;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
-};
-
-uniform sampler2D u_texture;
-
 in highp vec2 v_data0;
 flat in highp vec2 v_tex_origin;
 in vec3 v_data1;
@@ -5954,9 +4244,9 @@ in highp vec4 halo_color;
 #endif
 
 void main() {
-    highp vec4 u_fill_color = u_is_text ? u_text_fill_color : u_icon_fill_color;
-    highp vec4 u_halo_color = u_is_text ? u_text_halo_color : u_icon_halo_color;
-    highp float u_opacity = u_is_text ? u_text_opacity : u_icon_opacity;
+    highp vec4 u_fill_color = u_is_text != 0 ? u_text_fill_color : u_icon_fill_color;
+    highp vec4 u_halo_color = u_is_text != 0 ? u_text_halo_color : u_icon_halo_color;
+    highp float u_opacity = u_is_text != 0 ? u_text_opacity : u_icon_opacity;
 
     #ifdef HAS_UNIFORM_u_fill_color
 highp vec4 fill_color = u_fill_color;
@@ -5977,14 +4267,14 @@ highp vec4 halo_color = u_halo_color;
 
     lowp vec4 color = fill_color;
     lowp float inner_edge = (256.0 - 64.0) / 256.0;
-    if (u_is_halo) {
+    if (u_is_halo != 0) {
         color = halo_color;
         inner_edge = inner_edge + gamma_scaled;
     }
 
     lowp float dist = texture(u_texture, tex).a;
     highp float alpha = smoothstep(inner_edge - gamma_scaled, inner_edge + gamma_scaled, dist);
-    if (u_is_halo) {
+    if (u_is_halo != 0) {
         // When drawing halos, we want the inside of the halo to be transparent as well
         // in case the text fill is transparent.
         alpha = min(smoothstep(halo_edge - gamma_scaled, halo_edge + gamma_scaled, dist), 1.0 - alpha);
@@ -6005,13 +4295,6 @@ pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: GlslShaderSource = GlslShaderSourc
         r"#define SDF_PX 8.0
 #define ICON 0.0
 
-layout (location = 0) in vec4 a_pos_offset;
-layout (location = 1) in vec4 a_data;
-layout (location = 2) in vec4 a_projected_pos;
-layout (location = 3) in float a_fade_opacity;
-layout (location = 9) in vec2 a_tex_origin;
-layout (location = 11) in float a_height_offset;
-
 // contents of a_size vary based on the type of property value
 // used for {text,icon}-size.
 // For constants, a_size is disabled.
@@ -6020,95 +4303,24 @@ layout (location = 11) in float a_height_offset;
 // [ text-size(lowerZoomStop, feature),
 //   text-size(upperZoomStop, feature) ]
 
-layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform SymbolDrawableUBO {
-    highp mat4 u_matrix;
-    highp mat4 u_label_plane_matrix;
-    highp mat4 u_coord_matrix;
-
-    highp vec2 u_texsize;
-    highp vec2 u_texsize_icon;
-
-    bool u_is_text_prop;
-    bool u_rotate_symbol;
-    bool u_pitch_with_map;
-    bool u_is_size_zoom_constant;
-    bool u_is_size_feature_constant;
-    bool u_is_offset;
-
-    highp float u_size_t; // used to interpolate between zoom stops when size is a composite function
-    highp float u_size; // used when size is both zoom and feature constant
-
-    // Interpolations
-    highp float u_fill_color_t;
-    highp float u_halo_color_t;
-    highp float u_opacity_t;
-    highp float u_halo_width_t;
-    highp float u_halo_blur_t;
-
-    bool u_is_along_line;
-    bool u_is_variable_anchor;
-    highp float u_pitched_scale;
-    highp vec2 u_translation;
-    highp float u_gamma_scale;
-    bool u_is_halo_pass;
-};
-
-layout (std140) uniform SymbolEvaluatedPropsUBO {
-    highp vec4 u_text_fill_color;
-    highp vec4 u_text_halo_color;
-    highp float u_text_opacity;
-    highp float u_text_halo_width;
-    highp float u_text_halo_blur;
-    lowp float props_pad1;
-    highp vec4 u_icon_fill_color;
-    highp vec4 u_icon_halo_color;
-    highp float u_icon_opacity;
-    highp float u_icon_halo_width;
-    highp float u_icon_halo_blur;
-    lowp float props_pad2;
-};
-
 out highp vec2 v_data0;
 flat out highp vec2 v_tex_origin;
 out vec3 v_data1;
 flat out lowp int v_is_icon;
 
 #ifndef HAS_UNIFORM_u_fill_color
-layout (location = 4) in highp vec4 a_fill_color;
 out highp vec4 fill_color;
 #endif
 #ifndef HAS_UNIFORM_u_halo_color
-layout (location = 5) in highp vec4 a_halo_color;
 out highp vec4 halo_color;
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-layout (location = 6) in lowp vec2 a_opacity;
-#endif
-#ifndef HAS_UNIFORM_u_halo_width
-layout (location = 7) in lowp vec2 a_halo_width;
-#endif
-#ifndef HAS_UNIFORM_u_halo_blur
-layout (location = 8) in lowp vec2 a_halo_blur;
 #endif
 
 void main() {
-    highp vec4 u_fill_color = u_is_text_prop ? u_text_fill_color : u_icon_fill_color;
-    highp vec4 u_halo_color = u_is_text_prop ? u_text_halo_color : u_icon_halo_color;
-    highp float u_opacity = u_is_text_prop ? u_text_opacity : u_icon_opacity;
-    highp float u_halo_width = u_is_text_prop ? u_text_halo_width : u_icon_halo_width;
-    highp float u_halo_blur = u_is_text_prop ? u_text_halo_blur : u_icon_halo_blur;
+    highp vec4 u_fill_color = u_is_text_prop != 0 ? u_text_fill_color : u_icon_fill_color;
+    highp vec4 u_halo_color = u_is_text_prop != 0 ? u_text_halo_color : u_icon_halo_color;
+    highp float u_opacity = u_is_text_prop != 0 ? u_text_opacity : u_icon_opacity;
+    highp float u_halo_width = u_is_text_prop != 0 ? u_text_halo_width : u_icon_halo_width;
+    highp float u_halo_blur = u_is_text_prop != 0 ? u_text_halo_blur : u_icon_halo_blur;
 
     #ifndef HAS_UNIFORM_u_fill_color
 fill_color = unpack_mix_color(a_fill_color, u_fill_color_t);
@@ -6166,9 +4378,9 @@ lowp float halo_blur = u_halo_blur;
     highp float segment_angle = -a_projected_pos[2];
     float size;
 
-    if (!u_is_size_zoom_constant && !u_is_size_feature_constant) {
+    if (u_is_size_zoom_constant == 0 && u_is_size_feature_constant == 0) {
         size = mix(a_size_min, a_size[1], u_size_t) / 128.0;
-    } else if (u_is_size_zoom_constant && !u_is_size_feature_constant) {
+    } else if (u_is_size_zoom_constant != 0 && u_is_size_feature_constant == 0) {
         size = a_size_min / 128.0;
     } else {
         size = u_size;
@@ -6183,7 +4395,7 @@ lowp float halo_blur = u_halo_blur;
     // vertices go through the globe projection, which clips them.
     // A raised label is left to placement, which hides it once the planet
     // blocks the line of sight to it.
-    if (!u_pitch_with_map && a_height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
+    if (u_pitch_with_map == 0 && a_height_offset <= 0.0 && projectedPoint.z > projectedPoint.w) {
         gl_Position = vec4(-2.0, -2.0, -2.0, 1.0);
         return;
     }
@@ -6195,7 +4407,7 @@ lowp float halo_blur = u_halo_blur;
     // If the label isn't pitched with the map, we do layout in viewport space,
     // which makes labels in the distance larger relative to the features around
     // them. We counteract part of that effect by dividing by the perspective ratio.
-    highp float distance_ratio = u_pitch_with_map ?
+    highp float distance_ratio = u_pitch_with_map != 0 ?
         camera_to_anchor_distance / u_camera_to_center_distance :
         u_camera_to_center_distance / camera_to_anchor_distance;
     highp float perspective_ratio = clamp(
@@ -6203,14 +4415,14 @@ lowp float halo_blur = u_halo_blur;
         0.0, // Prevents oversized near-field symbols in pitched/overzoomed tiles
         4.0);
 
-    if (!u_is_offset) {
+    if (u_is_offset == 0) {
         size *= perspective_ratio;
     }
 
     float fontScale = size / 24.0;
 
     highp float symbol_rotation = 0.0;
-    if (u_rotate_symbol) {
+    if (u_rotate_symbol != 0) {
         // Point labels with 'rotation-alignment: map' are horizontal with respect to tile units
         // To figure out that angle in projected space, we draw a short horizontal line in tile
         // space, project it, and measure its angle in projected space.
@@ -6227,11 +4439,11 @@ lowp float halo_blur = u_halo_blur;
     mat2 rotation_matrix = mat2(angle_cos, -1.0 * angle_sin, angle_sin, angle_cos);
 
     vec4 projected_pos;
-    if (u_is_along_line || u_is_variable_anchor) {
+    if (u_is_along_line != 0 || u_is_variable_anchor != 0) {
         // A glyph along a line stands at its own height, which the label's
         // layout gives it; a label at a variable anchor at its anchor's.
-        projected_pos = vec4(a_projected_pos.xy, u_is_along_line ? a_projected_pos.w : a_height_offset, 1.0);
-    } else if (u_pitch_with_map) {
+        projected_pos = vec4(a_projected_pos.xy, u_is_along_line != 0 ? a_projected_pos.w : a_height_offset, 1.0);
+    } else if (u_pitch_with_map != 0) {
         projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, a_height_offset, 1.0);
     } else {
         projected_pos = u_label_plane_matrix * projectTileWithElevation(a_projected_pos.xy + u_translation, a_height_offset);
@@ -6240,21 +4452,21 @@ lowp float halo_blur = u_halo_blur;
 
     float projectionScaling = 1.0;
 #ifdef PROJECTION_GLOBE
-    if (u_pitch_with_map && !u_is_along_line) {
+    if (u_pitch_with_map != 0 && u_is_along_line == 0) {
         float anchor_pos_tile_y = (u_coord_matrix * vec4(projected_pos.xy / projected_pos.w, z, 1.0)).y;
-        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y) * u_pitched_scale, u_projection_transition);
+        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y) * u_pitched_scale, projection.projection_transition);
     }
 #endif
 
     gl_Position = u_coord_matrix * vec4(projected_pos.xy / projected_pos.w + rotation_matrix * (a_offset / 32.0 * fontScale) * projectionScaling, z, 1.0);
-    if (u_pitch_with_map) {
+    if (u_pitch_with_map != 0) {
         gl_Position = projectTileWithElevation(gl_Position.xy, gl_Position.z);
     }
     // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
     // halo: the same over a quad but for the clip w, which interpolates
     // linearly.
     float EDGE_GAMMA = 0.105 / DEVICE_PIXEL_RATIO;
-    float halo_blur_gamma = u_is_halo_pass ? halo_blur * 1.19 / SDF_PX : 0.0;
+    float halo_blur_gamma = u_is_halo_pass != 0 ? halo_blur * 1.19 / SDF_PX : 0.0;
     float gamma_scaled = (halo_blur_gamma + EDGE_GAMMA) / (fontScale * u_gamma_scale) * gl_Position.w;
     float halo_edge = (6.0 - halo_width / fontScale) / SDF_PX;
 #ifndef HAS_UNIFORM_u_opacity
@@ -6272,31 +4484,6 @@ lowp float halo_blur = u_halo_blur;
     ),
     fragment: r"#define SDF_PX 8.0
 
-layout (std140) uniform SymbolEvaluatedPropsUBO {
-    highp vec4 u_text_fill_color;
-    highp vec4 u_text_halo_color;
-    highp float u_text_opacity;
-    highp float u_text_halo_width;
-    highp float u_text_halo_blur;
-    lowp float props_pad1;
-    highp vec4 u_icon_fill_color;
-    highp vec4 u_icon_halo_color;
-    highp float u_icon_opacity;
-    highp float u_icon_halo_width;
-    highp float u_icon_halo_blur;
-    lowp float props_pad2;
-};
-
-layout (std140) uniform SymbolTilePropsUBO {
-    bool u_is_text;
-    bool u_is_halo;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
-};
-
-uniform sampler2D u_texture;
-uniform sampler2D u_texture_icon;
-
 in highp vec2 v_data0;
 flat in highp vec2 v_tex_origin;
 in vec3 v_data1;
@@ -6310,9 +4497,9 @@ in highp vec4 halo_color;
 #endif
 
 void main() {
-    highp vec4 u_fill_color = u_is_text ? u_text_fill_color : u_icon_fill_color;
-    highp vec4 u_halo_color = u_is_text ? u_text_halo_color : u_icon_halo_color;
-    highp float u_opacity = u_is_text ? u_text_opacity : u_icon_opacity;
+    highp vec4 u_fill_color = u_is_text != 0 ? u_text_fill_color : u_icon_fill_color;
+    highp vec4 u_halo_color = u_is_text != 0 ? u_text_halo_color : u_icon_halo_color;
+    highp float u_opacity = u_is_text != 0 ? u_text_opacity : u_icon_opacity;
 
     #ifdef HAS_UNIFORM_u_fill_color
 highp vec4 fill_color = u_fill_color;
@@ -6344,14 +4531,14 @@ highp vec4 halo_color = u_halo_color;
 
     lowp vec4 color = fill_color;
     lowp float inner_edge = (256.0 - 64.0) / 256.0;
-    if (u_is_halo) {
+    if (u_is_halo != 0) {
         color = halo_color;
         inner_edge = inner_edge + gamma_scaled;
     }
 
     lowp float dist = texture(u_texture, tex).a;
     highp float alpha = smoothstep(inner_edge - gamma_scaled, inner_edge + gamma_scaled, dist);
-    if (u_is_halo) {
+    if (u_is_halo != 0) {
         // When drawing halos, we want the inside of the halo to be transparent as well
         // in case the text fill is transparent.
         alpha = min(smoothstep(halo_edge - gamma_scaled, halo_edge + gamma_scaled, dist), 1.0 - alpha);

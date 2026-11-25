@@ -30,7 +30,7 @@ use crate::bytes::Bytes;
 use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass, lend_context};
 use crate::enums::{self, AttributeFormat};
 use crate::renderer_backend::GlContext;
-use crate::shaders::glsl_sources::PRELUDE;
+use crate::shaders::declarations::Stage;
 use crate::shaders::shader_source::{BUILT_INS, ShaderSource, uniform_block};
 use crate::state::State;
 #[cfg(not(target_family = "wasm"))]
@@ -764,11 +764,18 @@ impl GlGpu {
             key.define_values().flat_map(|(name, value)| ["#define ", name, " ", value, "\n"]).collect();
         let fragment_defines = if highp_fragment { "#define HIGHP_FRAGMENT\n" } else { "" };
         let (gl, state) = self.context.parts();
-        let shader = |stage, stage_defines, prelude, glsl| {
+        let shader = |stage, stage_defines| {
+            let text = source
+                .compose(declared, stage, &[version, &defines, stage_defines].concat())
+                .map_err(|error| GpuError::Invalid(format!("{name}: {error}")))?;
+            let stage = match stage {
+                Stage::Vertex => glow::VERTEX_SHADER,
+                Stage::Fragment => glow::FRAGMENT_SHADER,
+            };
             // SAFETY: the shader is new, and deleted if it doesn't compile.
             unsafe {
                 let shader = gl.create_shader(stage).map_err(GpuError::Invalid)?;
-                gl.shader_source(shader, &[version, &defines, stage_defines, prelude, glsl].concat());
+                gl.shader_source(shader, &text);
                 gl.compile_shader(shader);
                 if gl.get_shader_compile_status(shader) {
                     return Ok(shader);
@@ -778,8 +785,8 @@ impl GlGpu {
                 Err(GpuError::Invalid(format!("{name} doesn't compile: {log}")))
             }
         };
-        let vertex: ShaderID = shader(glow::VERTEX_SHADER, "", PRELUDE.vertex, source.glsl.vertex)?;
-        let fragment = match shader(glow::FRAGMENT_SHADER, fragment_defines, PRELUDE.fragment, source.glsl.fragment) {
+        let vertex: ShaderID = shader(Stage::Vertex, "")?;
+        let fragment = match shader(Stage::Fragment, fragment_defines) {
             Ok(fragment) => fragment,
             Err(error) => {
                 // SAFETY: the shader is alive and no program has it.
