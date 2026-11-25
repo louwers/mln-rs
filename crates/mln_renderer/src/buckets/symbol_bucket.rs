@@ -8,10 +8,6 @@ use std::sync::Arc;
 
 use glam::Vec2;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_SYMBOL_COLOR_ATTRIBUTE, ID_SYMBOL_HALO_BLUR_ATTRIBUTE, ID_SYMBOL_HALO_COLOR_ATTRIBUTE,
-    ID_SYMBOL_HALO_WIDTH_ATTRIBUTE, ID_SYMBOL_OPACITY_ATTRIBUTE,
-};
 use mln_style::expression::EvaluationContext;
 use mln_style::feature::{GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
 use mln_style::layers::Symbol;
@@ -37,21 +33,21 @@ use crate::util::pool::PoolRange;
 
 crate::paint_property_binders!(
     pub struct SymbolIconBinders for SymbolPaintProperties::PossiblyEvaluated {
-        icon_opacity: PaintPropertyBinder<f32> => [ID_SYMBOL_OPACITY_ATTRIBUTE],
-        icon_color: PaintPropertyBinder<Color> => [ID_SYMBOL_COLOR_ATTRIBUTE],
-        icon_halo_color: PaintPropertyBinder<Color> => [ID_SYMBOL_HALO_COLOR_ATTRIBUTE],
-        icon_halo_width: PaintPropertyBinder<f32> => [ID_SYMBOL_HALO_WIDTH_ATTRIBUTE],
-        icon_halo_blur: PaintPropertyBinder<f32> => [ID_SYMBOL_HALO_BLUR_ATTRIBUTE],
+        icon_opacity: PaintPropertyBinder<f32> => ["opacity"],
+        icon_color: PaintPropertyBinder<Color> => ["fill_color"],
+        icon_halo_color: PaintPropertyBinder<Color> => ["halo_color"],
+        icon_halo_width: PaintPropertyBinder<f32> => ["halo_width"],
+        icon_halo_blur: PaintPropertyBinder<f32> => ["halo_blur"],
     }
 );
 
 crate::paint_property_binders!(
     pub struct SymbolTextBinders for SymbolPaintProperties::PossiblyEvaluated {
-        text_opacity: PaintPropertyBinder<f32> => [ID_SYMBOL_OPACITY_ATTRIBUTE],
-        text_color: PaintPropertyBinder<Color> => [ID_SYMBOL_COLOR_ATTRIBUTE],
-        text_halo_color: PaintPropertyBinder<Color> => [ID_SYMBOL_HALO_COLOR_ATTRIBUTE],
-        text_halo_width: PaintPropertyBinder<f32> => [ID_SYMBOL_HALO_WIDTH_ATTRIBUTE],
-        text_halo_blur: PaintPropertyBinder<f32> => [ID_SYMBOL_HALO_BLUR_ATTRIBUTE],
+        text_opacity: PaintPropertyBinder<f32> => ["opacity"],
+        text_color: PaintPropertyBinder<Color> => ["fill_color"],
+        text_halo_color: PaintPropertyBinder<Color> => ["halo_color"],
+        text_halo_width: PaintPropertyBinder<f32> => ["halo_width"],
+        text_halo_blur: PaintPropertyBinder<f32> => ["halo_blur"],
     }
 );
 

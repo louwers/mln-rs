@@ -1,6 +1,6 @@
 //! The fog over the terrain's surface, from the style's `sky`.
 
-use mln_gfx::shaders::terrain_ubo::TerrainFogUBO;
+use mln_gfx::shaders::terrain_ubo::TerrainFog;
 use mln_map_types::View;
 use mln_util::Color;
 
@@ -13,17 +13,17 @@ use crate::render_sky::EvaluatedSky;
 /// pitched less than 60° shows no horizon, and its far plane is just past
 /// the top of the view, so the fog fades in from 60° to 70°. It fades out
 /// as the view turns to the globe, whose atmosphere covers its limb.
-pub(crate) fn terrain_fog(sky: Option<&EvaluatedSky>, view: &View) -> TerrainFogUBO {
+pub(crate) fn terrain_fog(sky: Option<&EvaluatedSky>, view: &View) -> TerrainFog {
     let Some(sky) = sky else {
-        return TerrainFogUBO::NONE;
+        return TerrainFog::NONE;
     };
     let pitch = view.pitch().to_degrees();
     let opacity = ((pitch - 60.0) / 10.0).clamp(0.0, 1.0) * (1.0 - view.projection_transition()).clamp(0.0, 1.0);
     if opacity <= 0.0 {
-        return TerrainFogUBO::NONE;
+        return TerrainFog::NONE;
     }
     let opacity = opacity as f32;
-    TerrainFogUBO {
+    TerrainFog {
         fog_color: linear(sky.sky_fog_color.uniform(), opacity),
         horizon_color: linear(sky.sky_horizon_color.uniform(), opacity),
         depth_range: [view.camera_to_sea_level_distance() as f32, view.far_z() as f32],
@@ -76,7 +76,7 @@ mod tests {
         state
     }
 
-    fn opacity(fog: &TerrainFogUBO) -> f32 {
+    fn opacity(fog: &TerrainFog) -> f32 {
         fog.horizon_color[3]
     }
 
@@ -86,12 +86,12 @@ mod tests {
             let fog = terrain_fog(Some(&sky()), pitched(pitch).view());
             assert!((opacity(&fog) - expected).abs() < 1e-6, "{} at {pitch}°", opacity(&fog));
         }
-        assert_eq!(TerrainFogUBO::NONE, terrain_fog(Some(&sky()), pitched(30.0).view()));
+        assert_eq!(TerrainFog::NONE, terrain_fog(Some(&sky()), pitched(30.0).view()));
     }
 
     #[test]
     fn there_is_no_fog_without_a_sky() {
-        assert_eq!(TerrainFogUBO::NONE, terrain_fog(None, pitched(85.0).view()));
+        assert_eq!(TerrainFog::NONE, terrain_fog(None, pitched(85.0).view()));
     }
 
     #[test]
@@ -100,7 +100,7 @@ mod tests {
         state.set_projection_definition(&ProjectionDefinition::between_names("mercator", "vertical-perspective", 0.25));
         assert!((opacity(&terrain_fog(Some(&sky()), state.view())) - 0.75).abs() < 1e-6);
         state.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
-        assert_eq!(TerrainFogUBO::NONE, terrain_fog(Some(&sky()), state.view()));
+        assert_eq!(TerrainFog::NONE, terrain_fog(Some(&sky()), state.view()));
     }
 
     #[test]

@@ -1,47 +1,5 @@
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::programs;
-use mln_gfx::shaders::shader_defines::{
-    ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_IMAGE_TEXTURE, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE,
-    ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE, ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE, ID_CIRCLE_GROUND_HEIGHT_VERTEX_ATTRIBUTE,
-    ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE, ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE,
-    ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE, ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE,
-    ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE, ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE,
-    ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE,
-    ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE, ID_COLLISION_PLACED_VERTEX_ATTRIBUTE,
-    ID_COLLISION_POS_VERTEX_ATTRIBUTE, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE,
-    ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE, ID_COLOR_RELIEF_IMAGE_TEXTURE, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE,
-    ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_FILL_COLOR_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE,
-    ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_IMAGE_TEXTURE,
-    ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE,
-    ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_IMAGE_TEXTURE,
-    ID_FILL_OPACITY_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_END_ATTRIBUTE,
-    ID_FILL_OUTLINE_POS_ATTRIBUTE, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE,
-    ID_FILL_POS_VERTEX_ATTRIBUTE, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE, ID_GROUND_DEPTH_TEXTURE,
-    ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_GROUND_HEIGHT_VERTEX_ATTRIBUTE, ID_HEATMAP_IMAGE_TEXTURE,
-    ID_HEATMAP_POS_VERTEX_ATTRIBUTE, ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE,
-    ID_HILLSHADE_IMAGE_TEXTURE, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE,
-    ID_LAYER_COMPOSITE_BACKDROP_TEXTURE, ID_LAYER_COMPOSITE_IMAGE_TEXTURE, ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE,
-    ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DASH_TEXTURE,
-    ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE,
-    ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_IMAGE_TEXTURE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
-    ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE,
-    ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE, ID_RASTER_IMAGE0_TEXTURE,
-    ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
-    ID_SKY_POS_VERTEX_ATTRIBUTE, ID_SYMBOL_COLOR_ATTRIBUTE, ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE,
-    ID_SYMBOL_GROUND_DEPTH_TEXTURE, ID_SYMBOL_HALO_BLUR_ATTRIBUTE, ID_SYMBOL_HALO_COLOR_ATTRIBUTE,
-    ID_SYMBOL_HALO_WIDTH_ATTRIBUTE, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, ID_SYMBOL_IMAGE_ICON_TEXTURE,
-    ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_OPACITY_ATTRIBUTE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE,
-    ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
-    ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_DRAPE_TEXTURE, ID_TERRAIN_POS_VERTEX_ATTRIBUTE,
-};
-#[cfg(test)]
-use mln_gfx::shaders::shader_defines::{
-    ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE,
-    ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE, ID_VERTEX_TEXEL_TEXTURE,
-};
 
 use super::{fill_extrusion_wgsl, fill_outline_wgsl, wgsl_sources};
 
@@ -53,482 +11,128 @@ pub(crate) struct WgslShaderSource {
     pub(crate) prelude: Option<&'static str>,
 }
 
-/// A vertex input of a shader: its shader location, and the id the renderer
-/// names it by.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct AttributeInfo {
-    pub(crate) index: usize,
-    pub(crate) id: usize,
-}
-
-/// A texture of a shader: the binding of its sampler, the id the renderer
-/// names it by, and whether its format can be filtered, which an
-/// `Rgba32Float` one can't.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct TextureInfo {
-    pub(crate) index: usize,
-    pub(crate) id: usize,
-    pub(crate) filterable: bool,
-}
-
-/// A shader: its WGSL, and its per-vertex inputs, per-instance inputs and
-/// textures.
+/// A shader: its WGSL, and where its WGSL reads the program's attributes and
+/// textures, which it numbers its own way.
 #[derive(Debug)]
 pub(crate) struct ShaderSource {
     pub(crate) wgsl: &'static WgslShaderSource,
-    pub(crate) attributes: &'static [AttributeInfo],
-    pub(crate) instance_attributes: &'static [AttributeInfo],
-    pub(crate) textures: &'static [TextureInfo],
+    /// The shader location of each of the program's attributes, by the
+    /// program's location of it ([`Program::location`]).
+    pub(crate) locations: &'static [u32],
+    /// The binding of the sampler of each of the program's textures, by its
+    /// slot ([`Program::texture_slot`]): the texture binds there or at the
+    /// next binding.
+    pub(crate) texture_bindings: &'static [u32],
 }
 
-const BACKGROUND_ATTRIBUTES: &[AttributeInfo] = &[AttributeInfo { index: 3, id: ID_BACKGROUND_POS_VERTEX_ATTRIBUTE }];
-const BACKGROUND_PATTERN_TEXTURES: &[TextureInfo] = &[tex(0, ID_BACKGROUND_IMAGE_TEXTURE)];
-
-const CLIPPING_MASK_ATTRIBUTES: &[AttributeInfo] =
-    &[AttributeInfo { index: 2, id: ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE }];
-
-static BACKGROUND_SHADER: ShaderSource = ShaderSource {
-    wgsl: &wgsl_sources::BACKGROUND_SHADER,
-    attributes: BACKGROUND_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: &[],
-};
-
-static BACKGROUND_PATTERN_SHADER: ShaderSource = ShaderSource {
-    wgsl: &wgsl_sources::BACKGROUND_PATTERN_SHADER,
-    attributes: BACKGROUND_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: BACKGROUND_PATTERN_TEXTURES,
-};
-
-static CLIPPING_MASK_PROGRAM: ShaderSource = ShaderSource {
-    wgsl: &wgsl_sources::CLIPPING_MASK_PROGRAM,
-    attributes: CLIPPING_MASK_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: &[],
-};
-
-const fn attr(index: usize, id: usize) -> AttributeInfo {
-    AttributeInfo { index, id }
-}
-
-const fn tex(index: usize, id: usize) -> TextureInfo {
-    TextureInfo { index, id, filterable: true }
-}
-
-const fn unfilterable_tex(index: usize, id: usize) -> TextureInfo {
-    TextureInfo { index, id, filterable: false }
-}
-
-const CIRCLE_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(0, ID_CIRCLE_POS_VERTEX_ATTRIBUTE),
-    attr(1, ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE),
-    attr(2, ID_CIRCLE_RADIUS_VERTEX_ATTRIBUTE),
-    attr(3, ID_CIRCLE_BLUR_VERTEX_ATTRIBUTE),
-    attr(4, ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE),
-    attr(5, ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE),
-    attr(6, ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE),
-    attr(7, ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE),
-    attr(8, ID_CIRCLE_GROUND_HEIGHT_VERTEX_ATTRIBUTE),
-];
-
-const FILL_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(0, ID_FILL_POS_VERTEX_ATTRIBUTE),
-    attr(1, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-    attr(2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-];
-const FILL_OUTLINE_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(0, ID_FILL_POS_VERTEX_ATTRIBUTE),
-    attr(1, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
-    attr(2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-];
-const FILL_PATTERN_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(4, ID_FILL_POS_VERTEX_ATTRIBUTE),
-    attr(5, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-    attr(6, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    attr(7, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
-    attr(8, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-];
-const FILL_PATTERN_TEXTURES: &[TextureInfo] = &[tex(0, ID_FILL_IMAGE_TEXTURE)];
-// An instance of the instanced outline shaders is a segment of an outline:
-// a vertex and the end of its segment. The quad's corner is the vertex.
-const FILL_OUTLINE_INSTANCED_ATTRIBUTES: &[AttributeInfo] = &[attr(0, ID_FILL_POS_VERTEX_ATTRIBUTE)];
-const FILL_OUTLINE_INSTANCED_INSTANCE_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(1, ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE),
-    attr(2, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-    attr(3, ID_FILL_OUTLINE_POS_ATTRIBUTE),
-    attr(4, ID_FILL_OUTLINE_END_ATTRIBUTE),
-];
-const FILL_OUTLINE_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(5, ID_FILL_COLOR_VERTEX_ATTRIBUTE),
-    attr(6, ID_FILL_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    attr(7, ID_FILL_PATTERN_TO_VERTEX_ATTRIBUTE),
-    attr(8, ID_FILL_OPACITY_VERTEX_ATTRIBUTE),
-    attr(9, ID_FILL_OUTLINE_POS_ATTRIBUTE),
-    attr(10, ID_FILL_OUTLINE_END_ATTRIBUTE),
-];
-static FILL_OUTLINE_INSTANCED_SHADER: ShaderSource = ShaderSource {
-    wgsl: &fill_outline_wgsl::FILL_OUTLINE_INSTANCED_SHADER,
-    attributes: FILL_OUTLINE_INSTANCED_ATTRIBUTES,
-    instance_attributes: FILL_OUTLINE_INSTANCED_INSTANCE_ATTRIBUTES,
-    textures: &[],
-};
-static FILL_OUTLINE_PULLED_SHADER: ShaderSource = ShaderSource {
-    wgsl: &fill_outline_wgsl::FILL_OUTLINE_PULLED_SHADER,
-    attributes: &[],
-    instance_attributes: &[],
-    textures: &[],
-};
-static FILL_OUTLINE_PATTERN_INSTANCED_SHADER: ShaderSource = ShaderSource {
-    wgsl: &fill_outline_wgsl::FILL_OUTLINE_PATTERN_INSTANCED_SHADER,
-    attributes: FILL_OUTLINE_INSTANCED_ATTRIBUTES,
-    instance_attributes: FILL_OUTLINE_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES,
-    textures: FILL_PATTERN_TEXTURES,
-};
-
-const LINE_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(4, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-    attr(5, ID_LINE_DATA_VERTEX_ATTRIBUTE),
-    attr(6, ID_LINE_COLOR_VERTEX_ATTRIBUTE),
-    attr(7, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    attr(8, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    attr(9, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    attr(10, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    attr(11, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-];
-const LINE_GRADIENT_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(4, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-    attr(5, ID_LINE_DATA_VERTEX_ATTRIBUTE),
-    attr(6, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    attr(7, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    attr(8, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    attr(9, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    attr(10, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-];
-const LINE_IMAGE_TEXTURES: &[TextureInfo] = &[tex(0, ID_LINE_IMAGE_TEXTURE)];
-const LINE_PATTERN_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(4, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-    attr(5, ID_LINE_DATA_VERTEX_ATTRIBUTE),
-    attr(6, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    attr(7, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    attr(8, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    attr(9, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    attr(10, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-    attr(11, ID_LINE_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    attr(12, ID_LINE_PATTERN_TO_VERTEX_ATTRIBUTE),
-];
-const LINE_SDF_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(4, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-    attr(5, ID_LINE_DATA_VERTEX_ATTRIBUTE),
-    attr(6, ID_LINE_COLOR_VERTEX_ATTRIBUTE),
-    attr(7, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    attr(8, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    attr(9, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    attr(10, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    attr(11, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-    attr(12, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
-    attr(13, ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
-];
-const LINE_GRADIENT_SDF_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(4, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE),
-    attr(5, ID_LINE_DATA_VERTEX_ATTRIBUTE),
-    attr(6, ID_LINE_BLUR_VERTEX_ATTRIBUTE),
-    attr(7, ID_LINE_OPACITY_VERTEX_ATTRIBUTE),
-    attr(8, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE),
-    attr(9, ID_LINE_OFFSET_VERTEX_ATTRIBUTE),
-    attr(10, ID_LINE_WIDTH_VERTEX_ATTRIBUTE),
-    attr(11, ID_LINE_FLOOR_WIDTH_VERTEX_ATTRIBUTE),
-    attr(12, ID_LINE_DASHARRAY_VERTEX_ATTRIBUTE),
-];
-// A texture at location L binds its sampler at L and the texture at L + 1,
-// so the dash atlas sits at 2.
-const LINE_GRADIENT_SDF_TEXTURES: &[TextureInfo] = &[tex(0, ID_LINE_IMAGE_TEXTURE), tex(2, ID_LINE_DASH_TEXTURE)];
+/// The binding of an unused texture slot's sampler
+/// ([`ProgramTexture::UNUSED`](mln_gfx::shaders::program::ProgramTexture::UNUSED)),
+/// which no shader reads.
+const UNUSED: u32 = u32::MAX;
 
 macro_rules! shader_source {
-    ($name:ident, $wgsl:ident, $attrs:expr, $textures:expr) => {
-        static $name: ShaderSource = ShaderSource {
-            wgsl: &wgsl_sources::$wgsl,
-            attributes: $attrs,
-            instance_attributes: &[],
-            textures: $textures,
-        };
+    ($name:ident, $wgsl:expr, $locations:expr, $texture_bindings:expr) => {
+        static $name: ShaderSource =
+            ShaderSource { wgsl: &$wgsl, locations: &$locations, texture_bindings: &$texture_bindings };
     };
 }
 
-/// What the terrain variants of the circles read of the ground: its depth.
-const CIRCLE_TEXTURES: &[TextureInfo] = &[unfilterable_tex(2, ID_GROUND_DEPTH_TEXTURE)];
-shader_source!(CIRCLE_SHADER, CIRCLE_SHADER, CIRCLE_ATTRIBUTES, CIRCLE_TEXTURES);
-shader_source!(FILL_SHADER, FILL_SHADER, FILL_ATTRIBUTES, &[]);
-shader_source!(FILL_OUTLINE_SHADER, FILL_OUTLINE_SHADER, FILL_OUTLINE_ATTRIBUTES, &[]);
-shader_source!(FILL_PATTERN_SHADER, FILL_PATTERN_SHADER, FILL_PATTERN_ATTRIBUTES, FILL_PATTERN_TEXTURES);
+shader_source!(BACKGROUND_SHADER, wgsl_sources::BACKGROUND_SHADER, [3], []);
+shader_source!(BACKGROUND_PATTERN_SHADER, wgsl_sources::BACKGROUND_PATTERN_SHADER, [3], [0]);
+shader_source!(CLIPPING_MASK_PROGRAM, wgsl_sources::CLIPPING_MASK_PROGRAM, [2], []);
+shader_source!(CIRCLE_SHADER, wgsl_sources::CIRCLE_SHADER, [0, 1, 2, 3, 4, 5, 6, 7, 8], [UNUSED, 2]);
+shader_source!(FILL_SHADER, wgsl_sources::FILL_SHADER, [0, 1, 2], []);
+shader_source!(FILL_OUTLINE_SHADER, wgsl_sources::FILL_OUTLINE_SHADER, [0, 1, 2], []);
+shader_source!(FILL_PATTERN_SHADER, wgsl_sources::FILL_PATTERN_SHADER, [4, 5, 6, 7, 8], [0]);
+shader_source!(FILL_OUTLINE_PATTERN_SHADER, wgsl_sources::FILL_OUTLINE_PATTERN_SHADER, [4, 5, 6, 7, 8], [0]);
+// An instance of the instanced outline shaders is a segment of an outline:
+// a vertex and the end of its segment. The quad's corner is the vertex.
+shader_source!(FILL_OUTLINE_INSTANCED_SHADER, fill_outline_wgsl::FILL_OUTLINE_INSTANCED_SHADER, [0, 1, 2, 3, 4], []);
+shader_source!(FILL_OUTLINE_PULLED_SHADER, fill_outline_wgsl::FILL_OUTLINE_PULLED_SHADER, [], []);
 shader_source!(
-    FILL_OUTLINE_PATTERN_SHADER,
-    FILL_OUTLINE_PATTERN_SHADER,
-    FILL_PATTERN_ATTRIBUTES,
-    FILL_PATTERN_TEXTURES
+    FILL_OUTLINE_PATTERN_INSTANCED_SHADER,
+    fill_outline_wgsl::FILL_OUTLINE_PATTERN_INSTANCED_SHADER,
+    [0, 5, 6, 7, 8, 9, 10],
+    [0]
 );
-shader_source!(LINE_SHADER, LINE_SHADER, LINE_ATTRIBUTES, &[]);
-shader_source!(LINE_GRADIENT_SHADER, LINE_GRADIENT_SHADER, LINE_GRADIENT_ATTRIBUTES, LINE_IMAGE_TEXTURES);
-shader_source!(LINE_PATTERN_SHADER, LINE_PATTERN_SHADER, LINE_PATTERN_ATTRIBUTES, LINE_IMAGE_TEXTURES);
-shader_source!(LINE_SDF_SHADER, LINE_SDF_SHADER, LINE_SDF_ATTRIBUTES, LINE_IMAGE_TEXTURES);
+shader_source!(LINE_SHADER, wgsl_sources::LINE_SHADER, [4, 5, 6, 7, 8, 9, 10, 11], []);
+shader_source!(LINE_GRADIENT_SHADER, wgsl_sources::LINE_GRADIENT_SHADER, [4, 5, 6, 7, 8, 9, 10], [0]);
+shader_source!(LINE_PATTERN_SHADER, wgsl_sources::LINE_PATTERN_SHADER, [4, 5, 6, 7, 8, 9, 10, 11, 12], [0]);
+shader_source!(LINE_SDF_SHADER, wgsl_sources::LINE_SDF_SHADER, [4, 5, 6, 7, 8, 9, 10, 11, 12, 13], [0]);
+// A texture's sampler binds at its binding and the texture at the next, so
+// the dash atlas's sampler binds at 2.
 shader_source!(
     LINE_GRADIENT_SDF_SHADER,
-    LINE_GRADIENT_SDF_SHADER,
-    LINE_GRADIENT_SDF_ATTRIBUTES,
-    LINE_GRADIENT_SDF_TEXTURES
+    wgsl_sources::LINE_GRADIENT_SDF_SHADER,
+    [4, 5, 6, 7, 8, 9, 10, 11, 12],
+    [0, 2]
 );
-
-const RASTER_ATTRIBUTES: &[AttributeInfo] =
-    &[attr(0, ID_RASTER_POS_VERTEX_ATTRIBUTE), attr(1, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE)];
-const RASTER_TEXTURES: &[TextureInfo] = &[tex(0, ID_RASTER_IMAGE0_TEXTURE), tex(1, ID_RASTER_IMAGE1_TEXTURE)];
-shader_source!(RASTER_SHADER, RASTER_SHADER, RASTER_ATTRIBUTES, RASTER_TEXTURES);
-
-const HEATMAP_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(0, ID_HEATMAP_POS_VERTEX_ATTRIBUTE),
-    attr(1, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE),
-    attr(2, ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE),
-    attr(3, ID_HEATMAP_GROUND_HEIGHT_VERTEX_ATTRIBUTE),
-];
-shader_source!(HEATMAP_SHADER, HEATMAP_SHADER, HEATMAP_ATTRIBUTES, &[]);
-const HEATMAP_TEXTURE_ATTRIBUTES: &[AttributeInfo] = &[attr(5, ID_HEATMAP_POS_VERTEX_ATTRIBUTE)];
-const HEATMAP_TEXTURE_TEXTURES: &[TextureInfo] =
-    &[tex(0, ID_HEATMAP_IMAGE_TEXTURE), tex(1, ID_HEATMAP_COLOR_RAMP_TEXTURE)];
-shader_source!(HEATMAP_TEXTURE_SHADER, HEATMAP_TEXTURE_SHADER, HEATMAP_TEXTURE_ATTRIBUTES, HEATMAP_TEXTURE_TEXTURES);
-const HILLSHADE_ATTRIBUTES: &[AttributeInfo] =
-    &[attr(5, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE), attr(6, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE)];
-const HILLSHADE_TEXTURES: &[TextureInfo] = &[tex(0, ID_HILLSHADE_IMAGE_TEXTURE)];
-shader_source!(HILLSHADE_SHADER, HILLSHADE_SHADER, HILLSHADE_ATTRIBUTES, HILLSHADE_TEXTURES);
-shader_source!(HILLSHADE_PREPARE_SHADER, HILLSHADE_PREPARE_SHADER, HILLSHADE_ATTRIBUTES, HILLSHADE_TEXTURES);
-const COLOR_RELIEF_ATTRIBUTES: &[AttributeInfo] =
-    &[attr(5, ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE), attr(6, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE)];
-const COLOR_RELIEF_TEXTURES: &[TextureInfo] = &[
-    tex(0, ID_COLOR_RELIEF_IMAGE_TEXTURE),
-    unfilterable_tex(2, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE),
-    tex(4, ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE),
-];
-shader_source!(COLOR_RELIEF_SHADER, COLOR_RELIEF_SHADER, COLOR_RELIEF_ATTRIBUTES, COLOR_RELIEF_TEXTURES);
-
+shader_source!(RASTER_SHADER, wgsl_sources::RASTER_SHADER, [0, 1], [0, 1]);
+shader_source!(HEATMAP_SHADER, wgsl_sources::HEATMAP_SHADER, [0, 1, 2, 3], []);
+shader_source!(HEATMAP_TEXTURE_SHADER, wgsl_sources::HEATMAP_TEXTURE_SHADER, [5], [0, 1]);
+shader_source!(HILLSHADE_SHADER, wgsl_sources::HILLSHADE_SHADER, [5, 6], [0]);
+shader_source!(HILLSHADE_PREPARE_SHADER, wgsl_sources::HILLSHADE_PREPARE_SHADER, [5, 6], [0]);
+shader_source!(COLOR_RELIEF_SHADER, wgsl_sources::COLOR_RELIEF_SHADER, [5, 6], [0, 2, 4]);
 // The fill extrusions' (fill_extrusion_wgsl.rs): the roofs, and the walls
-// with their instances.
-const FILL_EXTRUSION_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(0, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
-    attr(1, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    attr(2, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-    attr(3, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    attr(4, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-    attr(10, ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
-];
-const FILL_EXTRUSION_INSTANCED_ATTRIBUTES: &[AttributeInfo] = &[attr(0, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE)];
-const FILL_EXTRUSION_INSTANCED_INSTANCE_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(1, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
-    attr(2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    attr(3, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
-    attr(4, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
-    attr(5, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-    attr(6, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    attr(7, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-    attr(10, ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
-];
-const FILL_EXTRUSION_PATTERN_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(0, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
-    attr(1, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    attr(2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    attr(3, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-    attr(4, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    attr(5, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
-    attr(10, ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
-];
-const FILL_EXTRUSION_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(1, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
-    attr(2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    attr(3, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
-    attr(4, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
-    attr(5, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    attr(6, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-    attr(7, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    attr(8, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
-    attr(10, ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
-];
-// The wall shaders run the instanced walls' WGSL with every attribute per
-// vertex, for walls whose quads are in the vertex buffer.
-const FILL_EXTRUSION_WALL_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(0, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
-    attr(1, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
-    attr(2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    attr(3, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
-    attr(4, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
-    attr(5, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-    attr(6, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    attr(7, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-    attr(10, ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
-];
-const FILL_EXTRUSION_PATTERN_WALL_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(0, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
-    attr(1, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
-    attr(2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    attr(3, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
-    attr(4, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
-    attr(5, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    attr(6, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-    attr(7, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    attr(8, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
-    attr(10, ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
-];
-const FILL_EXTRUSION_PATTERN_TEXTURES: &[TextureInfo] = &[tex(0, ID_FILL_EXTRUSION_IMAGE_TEXTURE)];
-static FILL_EXTRUSION_SHADER: ShaderSource = ShaderSource {
-    wgsl: &fill_extrusion_wgsl::FILL_EXTRUSION_SHADER,
-    attributes: FILL_EXTRUSION_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: &[],
-};
-static FILL_EXTRUSION_INSTANCED_SHADER: ShaderSource = ShaderSource {
-    wgsl: &fill_extrusion_wgsl::FILL_EXTRUSION_INSTANCED_SHADER,
-    attributes: FILL_EXTRUSION_INSTANCED_ATTRIBUTES,
-    instance_attributes: FILL_EXTRUSION_INSTANCED_INSTANCE_ATTRIBUTES,
-    textures: &[],
-};
-static FILL_EXTRUSION_PATTERN_SHADER: ShaderSource = ShaderSource {
-    wgsl: &fill_extrusion_wgsl::FILL_EXTRUSION_PATTERN_SHADER,
-    attributes: FILL_EXTRUSION_PATTERN_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: FILL_EXTRUSION_PATTERN_TEXTURES,
-};
-static FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: ShaderSource = ShaderSource {
-    wgsl: &fill_extrusion_wgsl::FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
-    attributes: FILL_EXTRUSION_INSTANCED_ATTRIBUTES,
-    instance_attributes: FILL_EXTRUSION_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES,
-    textures: FILL_EXTRUSION_PATTERN_TEXTURES,
-};
-static FILL_EXTRUSION_WALL_SHADER: ShaderSource = ShaderSource {
-    wgsl: &fill_extrusion_wgsl::FILL_EXTRUSION_INSTANCED_SHADER,
-    attributes: FILL_EXTRUSION_WALL_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: &[],
-};
-static FILL_EXTRUSION_PULLED_SHADER: ShaderSource = ShaderSource {
-    wgsl: &fill_extrusion_wgsl::FILL_EXTRUSION_PULLED_SHADER,
-    attributes: &[],
-    instance_attributes: &[],
-    textures: &[],
-};
-static FILL_EXTRUSION_PATTERN_WALL_SHADER: ShaderSource = ShaderSource {
-    wgsl: &fill_extrusion_wgsl::FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
-    attributes: FILL_EXTRUSION_PATTERN_WALL_ATTRIBUTES,
-    instance_attributes: &[],
-    textures: FILL_EXTRUSION_PATTERN_TEXTURES,
-};
-
-const SYMBOL_ICON_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(3, ID_SYMBOL_POS_OFFSET_ATTRIBUTE),
-    attr(4, ID_SYMBOL_DATA_ATTRIBUTE),
-    attr(5, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE),
-    attr(6, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE),
-    attr(7, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE),
-    attr(8, ID_SYMBOL_OPACITY_ATTRIBUTE),
-    attr(9, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
-    attr(10, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
-];
-const SYMBOL_ICON_TEXTURES: &[TextureInfo] =
-    &[tex(0, ID_SYMBOL_IMAGE_TEXTURE), unfilterable_tex(4, ID_SYMBOL_GROUND_DEPTH_TEXTURE)];
-const SYMBOL_SDF_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(3, ID_SYMBOL_POS_OFFSET_ATTRIBUTE),
-    attr(4, ID_SYMBOL_DATA_ATTRIBUTE),
-    attr(5, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE),
-    attr(6, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE),
-    attr(7, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE),
-    attr(8, ID_SYMBOL_COLOR_ATTRIBUTE),
-    attr(9, ID_SYMBOL_HALO_COLOR_ATTRIBUTE),
-    attr(10, ID_SYMBOL_OPACITY_ATTRIBUTE),
-    attr(11, ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
-    attr(12, ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
-    attr(13, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
-    attr(14, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
-];
-const SYMBOL_SDF_TEXTURES: &[TextureInfo] =
-    &[tex(0, ID_SYMBOL_IMAGE_TEXTURE), unfilterable_tex(4, ID_SYMBOL_GROUND_DEPTH_TEXTURE)];
-const SYMBOL_TEXT_AND_ICON_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(3, ID_SYMBOL_POS_OFFSET_ATTRIBUTE),
-    attr(4, ID_SYMBOL_DATA_ATTRIBUTE),
-    attr(5, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE),
-    attr(6, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE),
-    attr(7, ID_SYMBOL_COLOR_ATTRIBUTE),
-    attr(8, ID_SYMBOL_HALO_COLOR_ATTRIBUTE),
-    attr(9, ID_SYMBOL_OPACITY_ATTRIBUTE),
-    attr(10, ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
-    attr(11, ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
-    attr(12, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
-    attr(13, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE),
-];
-const SYMBOL_TEXT_AND_ICON_TEXTURES: &[TextureInfo] = &[
-    tex(0, ID_SYMBOL_IMAGE_TEXTURE),
-    tex(2, ID_SYMBOL_IMAGE_ICON_TEXTURE),
-    unfilterable_tex(4, ID_SYMBOL_GROUND_DEPTH_TEXTURE),
-];
-shader_source!(SYMBOL_ICON_SHADER, SYMBOL_ICON_SHADER, SYMBOL_ICON_ATTRIBUTES, SYMBOL_ICON_TEXTURES);
-shader_source!(SYMBOL_SDF_SHADER, SYMBOL_SDF_SHADER, SYMBOL_SDF_ATTRIBUTES, SYMBOL_SDF_TEXTURES);
+// with their instances. The wall shaders run the instanced walls' WGSL with
+// every attribute per vertex, for walls whose quads are in the vertex buffer.
+shader_source!(FILL_EXTRUSION_SHADER, fill_extrusion_wgsl::FILL_EXTRUSION_SHADER, [0, 1, 2, 3, 4, 10], []);
+shader_source!(
+    FILL_EXTRUSION_INSTANCED_SHADER,
+    fill_extrusion_wgsl::FILL_EXTRUSION_INSTANCED_SHADER,
+    [0, 1, 2, 5, 6, 7, 3, 4, 10],
+    []
+);
+shader_source!(
+    FILL_EXTRUSION_WALL_SHADER,
+    fill_extrusion_wgsl::FILL_EXTRUSION_INSTANCED_SHADER,
+    [0, 1, 2, 5, 6, 7, 3, 4, 10],
+    []
+);
+shader_source!(FILL_EXTRUSION_PULLED_SHADER, fill_extrusion_wgsl::FILL_EXTRUSION_PULLED_SHADER, [], []);
+shader_source!(
+    FILL_EXTRUSION_PATTERN_SHADER,
+    fill_extrusion_wgsl::FILL_EXTRUSION_PATTERN_SHADER,
+    [0, 1, 2, 3, 4, 5, 10],
+    [0]
+);
+shader_source!(
+    FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
+    fill_extrusion_wgsl::FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
+    [0, 1, 2, 5, 6, 7, 8, 3, 4, 10],
+    [0]
+);
+shader_source!(
+    FILL_EXTRUSION_PATTERN_WALL_SHADER,
+    fill_extrusion_wgsl::FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
+    [0, 1, 2, 5, 6, 7, 8, 3, 4, 10],
+    [0]
+);
+shader_source!(SYMBOL_ICON_SHADER, wgsl_sources::SYMBOL_ICON_SHADER, [3, 4, 5, 6, 7, 8, 9, 10], [0, UNUSED, 4]);
+shader_source!(
+    SYMBOL_SDF_SHADER,
+    wgsl_sources::SYMBOL_SDF_SHADER,
+    [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+    [0, UNUSED, 4]
+);
 shader_source!(
     SYMBOL_TEXT_AND_ICON_SHADER,
-    SYMBOL_TEXT_AND_ICON_SHADER,
-    SYMBOL_TEXT_AND_ICON_ATTRIBUTES,
-    SYMBOL_TEXT_AND_ICON_TEXTURES
+    wgsl_sources::SYMBOL_TEXT_AND_ICON_SHADER,
+    [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+    [0, 2, 4]
 );
-
-const COLLISION_BOX_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(3, ID_COLLISION_POS_VERTEX_ATTRIBUTE),
-    attr(4, ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE),
-    attr(5, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE),
-    attr(6, ID_COLLISION_PLACED_VERTEX_ATTRIBUTE),
-    attr(7, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE),
-    attr(8, ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE),
-];
-const COLLISION_CIRCLE_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(3, ID_COLLISION_POS_VERTEX_ATTRIBUTE),
-    attr(4, ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE),
-    attr(5, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE),
-    attr(6, ID_COLLISION_PLACED_VERTEX_ATTRIBUTE),
-];
-shader_source!(COLLISION_BOX_SHADER, COLLISION_BOX_SHADER, COLLISION_BOX_ATTRIBUTES, &[]);
-shader_source!(COLLISION_CIRCLE_SHADER, COLLISION_CIRCLE_SHADER, COLLISION_CIRCLE_ATTRIBUTES, &[]);
-
-const SKY_ATTRIBUTES: &[AttributeInfo] = &[attr(0, ID_SKY_POS_VERTEX_ATTRIBUTE)];
-shader_source!(SKY_SHADER, SKY_SHADER, SKY_ATTRIBUTES, &[]);
-const ATMOSPHERE_ATTRIBUTES: &[AttributeInfo] = &[attr(0, ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE)];
-shader_source!(ATMOSPHERE_SHADER, ATMOSPHERE_SHADER, ATMOSPHERE_ATTRIBUTES, &[]);
-
-const GLOBE_DEPTH_ATTRIBUTES: &[AttributeInfo] = &[attr(0, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE)];
-shader_source!(GLOBE_DEPTH_SHADER, GLOBE_DEPTH_SHADER, GLOBE_DEPTH_ATTRIBUTES, &[]);
-
-const LAYER_COMPOSITE_ATTRIBUTES: &[AttributeInfo] = &[attr(0, ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE)];
-const LAYER_COMPOSITE_TEXTURES: &[TextureInfo] =
-    &[tex(0, ID_LAYER_COMPOSITE_IMAGE_TEXTURE), tex(1, ID_LAYER_COMPOSITE_BACKDROP_TEXTURE)];
-shader_source!(LAYER_COMPOSITE_SHADER, LAYER_COMPOSITE_SHADER, LAYER_COMPOSITE_ATTRIBUTES, LAYER_COMPOSITE_TEXTURES);
-
-const TERRAIN_ATTRIBUTES: &[AttributeInfo] = &[attr(0, ID_TERRAIN_POS_VERTEX_ATTRIBUTE)];
-const TERRAIN_TEXTURES: &[TextureInfo] =
-    &[tex(2, ID_TERRAIN_DRAPE_TEXTURE), unfilterable_tex(4, ID_TERRAIN_DEM_TEXTURE)];
-shader_source!(TERRAIN_SHADER, TERRAIN_SHADER, TERRAIN_ATTRIBUTES, TERRAIN_TEXTURES);
-shader_source!(
-    TERRAIN_DEPTH_SHADER,
-    TERRAIN_DEPTH_SHADER,
-    TERRAIN_ATTRIBUTES,
-    &[unfilterable_tex(4, ID_TERRAIN_DEM_TEXTURE)]
-);
-
+shader_source!(COLLISION_BOX_SHADER, wgsl_sources::COLLISION_BOX_SHADER, [3, 4, 5, 6, 7, 8], []);
+shader_source!(COLLISION_CIRCLE_SHADER, wgsl_sources::COLLISION_CIRCLE_SHADER, [3, 4, 5, 6], []);
+shader_source!(SKY_SHADER, wgsl_sources::SKY_SHADER, [0], []);
+shader_source!(ATMOSPHERE_SHADER, wgsl_sources::ATMOSPHERE_SHADER, [0], []);
+shader_source!(GLOBE_DEPTH_SHADER, wgsl_sources::GLOBE_DEPTH_SHADER, [0], []);
+shader_source!(LAYER_COMPOSITE_SHADER, wgsl_sources::LAYER_COMPOSITE_SHADER, [0], [0, 1]);
+shader_source!(TERRAIN_SHADER, wgsl_sources::TERRAIN_SHADER, [0], [UNUSED, 2, 4]);
+shader_source!(TERRAIN_DEPTH_SHADER, wgsl_sources::TERRAIN_DEPTH_SHADER, [0], [UNUSED, UNUSED, 4]);
 #[cfg(test)]
-const VERTEX_TEXEL_ATTRIBUTES: &[AttributeInfo] = &[attr(0, ID_VERTEX_TEXEL_POS_TEXEL_VERTEX_ATTRIBUTE)];
+shader_source!(VERTEX_TEXEL_SHADER, wgsl_sources::VERTEX_TEXEL_SHADER, [0], [0]);
 #[cfg(test)]
-shader_source!(VERTEX_TEXEL_SHADER, VERTEX_TEXEL_SHADER, VERTEX_TEXEL_ATTRIBUTES, &[tex(0, ID_VERTEX_TEXEL_TEXTURE)]);
-
-#[cfg(test)]
-const TERRAIN_PROBE_ATTRIBUTES: &[AttributeInfo] =
-    &[attr(0, ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE), attr(1, ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE)];
-#[cfg(test)]
-shader_source!(
-    TERRAIN_PROBE_SHADER,
-    TERRAIN_PROBE_SHADER,
-    TERRAIN_PROBE_ATTRIBUTES,
-    &[unfilterable_tex(4, ID_TERRAIN_DEM_TEXTURE)]
-);
+shader_source!(TERRAIN_PROBE_SHADER, wgsl_sources::TERRAIN_PROBE_SHADER, [0, 1], [UNUSED, UNUSED, 4]);
 
 /// The source of each built-in program that has WGSL.
 pub(crate) static BUILT_INS: &[(&Program, &ShaderSource)] = &[

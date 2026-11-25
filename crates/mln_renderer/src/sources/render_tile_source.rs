@@ -11,16 +11,11 @@ use geometry::Point;
 use glam::Vec2;
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::line_layer_ubo::{LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO};
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO,
-    ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
-    ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
-    ID_PROJECTION_UBO,
-};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::MapDebugOptions;
 use mln_style::Source;
@@ -56,6 +51,10 @@ use crate::tile::tile::TileKind;
 use crate::tile_matrix::{projection_data, to_projection_ubo};
 use crate::tile_parameters::TileParameters;
 use crate::util::subdivision::subdivide_vertex_line;
+
+/// The ids of the buffers that the draws bind.
+const LINE_DRAWABLE_ID: usize = programs::LINE.buffer_id("drawableVector");
+const LINE_PROPS_ID: usize = programs::LINE.buffer_id("props");
 
 /// The line properties of a debug overlay's polylines: red tile borders, and
 /// black text over a white outline.
@@ -105,8 +104,8 @@ fn polyline_objects(
     let mut attrs = VertexAttributeArray::new();
     // The position and normal, then the extrusion data.
     for (id, offset, data_type) in [
-        (ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, offset_of!(LineLayoutVertex, a1) as u32, AttributeDataType::Short2),
-        (ID_LINE_DATA_VERTEX_ATTRIBUTE, offset_of!(LineLayoutVertex, a2) as u32, AttributeDataType::UByte4),
+        ("pos_normal", offset_of!(LineLayoutVertex, a1) as u32, AttributeDataType::Short2),
+        ("data", offset_of!(LineLayoutVertex, a2) as u32, AttributeDataType::UByte4),
     ] {
         attrs.set_shared(id, SharedAttribute::new(shared.clone(), data_type, offset, stride));
     }
@@ -255,9 +254,9 @@ impl DebugLayer {
 
         let properties = &self.properties;
         let replaced = self.draw_list.finish(&mut self.frame, gpu, parameters.context, |writer| {
-            writer.uniform(ID_LINE_EVALUATED_PROPS_UBO, properties);
-            writer.storage(ID_LINE_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-            writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+            writer.uniform(LINE_PROPS_ID, properties);
+            writer.storage(LINE_DRAWABLE_ID, |uniforms| uniforms.draw_ubo);
+            writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
         });
         if replaced {
             for draw in &mut self.draws {
@@ -416,14 +415,7 @@ impl RenderSource for RenderTileSource {
         let globe = parameters.view.is_globe();
         let projection_variant = if globe { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
 
-        let uniforms = [
-            ID_LINE_COLOR_VERTEX_ATTRIBUTE,
-            ID_LINE_BLUR_VERTEX_ATTRIBUTE,
-            ID_LINE_OPACITY_VERTEX_ATTRIBUTE,
-            ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE,
-            ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
-            ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
-        ];
+        let uniforms = ["color", "blur", "opacity", "gapwidth", "offset", "width"];
         let polyline_shader =
             parameters.context.shader_key(&programs::LINE, uniforms.into_iter().collect(), projection_variant);
 

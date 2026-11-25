@@ -31,7 +31,7 @@ use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass, lend_context};
 use crate::enums::{self, AttributeFormat};
 use crate::renderer_backend::GlContext;
 use crate::shaders::glsl_sources::PRELUDE;
-use crate::shaders::shader_source::{BUILT_INS, ShaderSource};
+use crate::shaders::shader_source::{BUILT_INS, ShaderSource, uniform_block};
 use crate::state::State;
 #[cfg(not(target_family = "wasm"))]
 use crate::types::FenceID;
@@ -202,12 +202,13 @@ pub(crate) struct Program {
     name: &'static str,
     object: ProgramID,
     pub(crate) blocks: Vec<Block>,
-    /// The ids of the textures it samples. A texture's sampler reads the
-    /// texture unit of its id.
+    /// The slots of the textures it samples. A texture's sampler reads the
+    /// texture unit of its slot.
     pub(crate) textures: Vec<usize>,
-    /// The location of each per-vertex attribute, by id.
+    /// The GL location of each per-vertex attribute, by the program's
+    /// location of it.
     pub(crate) vertex_locations: Vec<(u32, u32)>,
-    /// The location of each per-instance attribute, by id.
+    /// The GL location of each per-instance attribute, likewise.
     instance_locations: Vec<(u32, u32)>,
 }
 
@@ -220,12 +221,14 @@ pub(crate) struct FramebufferTextures {
 }
 
 impl Program {
-    fn location(&self, step: VertexStep, id: u32) -> Option<u32> {
+    /// The GL location of the attribute at the program's `location`, which
+    /// steps by `step`.
+    fn location(&self, step: VertexStep, location: u32) -> Option<u32> {
         let locations = match step {
             VertexStep::Vertex => &self.vertex_locations,
             VertexStep::Instance => &self.instance_locations,
         };
-        locations.iter().find(|&&(attribute, _)| attribute == id).map(|&(_, location)| location)
+        locations.iter().find(|&&(attribute, _)| attribute == location).map(|&(_, gl_location)| gl_location)
     }
 }
 
@@ -741,8 +744,9 @@ impl GlGpu {
     /// shader defaults to highp floats if `highp_fragment`, and to mediump
     /// otherwise.
     fn compile(&mut self, key: &ShaderKey, highp_fragment: bool) -> Result<Program, GpuError> {
-        let source = self.sources.get(key.program())?;
-        let name = key.program().name;
+        let declared = key.program();
+        let source = self.sources.get(declared)?;
+        let name = declared.name;
         // Desktop OpenGL compiles GLSL ES 3.00 only with
         // `GL_ARB_ES3_compatibility`, and every 3.3 context the GLSL 3.30
         // that the shaders are as well: what they use of GLSL ES is in it,
@@ -797,10 +801,10 @@ impl GlGpu {
         let mut program = Program {
             name,
             object,
-            blocks: Vec::with_capacity(source.uniform_blocks.len()),
-            textures: Vec::with_capacity(source.textures.len()),
-            vertex_locations: Vec::with_capacity(source.attributes.len()),
-            instance_locations: Vec::with_capacity(source.instance_attributes.len()),
+            blocks: Vec::new(),
+            textures: Vec::with_capacity(declared.textures.len()),
+            vertex_locations: Vec::with_capacity(declared.attributes.len()),
+            instance_locations: Vec::with_capacity(declared.instance_attributes.len()),
         };
         // A closure, so that its early returns reach the program's deletion
         // below.
@@ -811,10 +815,9 @@ impl GlGpu {
                 let block_count = gl.get_program_parameter_i32(object, glow::ACTIVE_UNIFORM_BLOCKS).max(0) as u32;
                 (0..block_count).try_for_each(|index| {
                     let block_name = gl.get_active_uniform_block_name(object, index);
-                    let info =
-                        source.uniform_blocks.iter().find(|info| info.name == block_name).ok_or_else(|| {
-                            GpuError::Invalid(format!("{name}'s uniform block {block_name} has no id"))
-                        })?;
+                    let info = uniform_block(declared, &block_name).ok_or_else(|| {
+                        GpuError::Invalid(format!("{name}'s uniform block {block_name} has no buffer"))
+                    })?;
                     let size = gl.get_active_uniform_block_parameter_i32(object, index, glow::UNIFORM_BLOCK_DATA_SIZE);
                     gl.uniform_block_binding(object, index, info.id as u32);
                     program.blocks.push(Block {
@@ -826,23 +829,23 @@ impl GlGpu {
                 })?;
 
                 state.use_program(gl, Some(object));
-                for info in source.textures {
-                    if let Some(location) = gl.get_uniform_location(object, info.name) {
-                        if info.id >= MAX_ACTIVE_TEXTURE_UNITS as usize {
-                            return Err(GpuError::Unsupported(format!("{name} samples texture id {}", info.id)));
+                for (slot, texture) in declared.textures.iter().enumerate().filter(|(_, texture)| !texture.is_unused())
+                {
+                    if let Some(location) = gl.get_uniform_location(object, &format!("u_{}", texture.name)) {
+                        if slot >= MAX_ACTIVE_TEXTURE_UNITS as usize {
+                            return Err(GpuError::Unsupported(format!("{name} samples texture slot {slot}")));
                         }
-                        gl.uniform_1_i32(Some(&location), info.id as i32);
-                        program.textures.push(info.id);
+                        gl.uniform_1_i32(Some(&location), slot as i32);
+                        program.textures.push(slot);
                     }
                 }
-                for (infos, locations) in [
-                    (source.attributes, &mut program.vertex_locations),
-                    (source.instance_attributes, &mut program.instance_locations),
-                ] {
-                    for info in infos {
-                        if let Some(location) = gl.get_attrib_location(object, info.name) {
-                            locations.push((info.id as u32, location));
-                        }
+                for (location, step, attribute) in declared.locations() {
+                    if let Some(gl_location) = gl.get_attrib_location(object, &format!("a_{}", attribute.name)) {
+                        let locations = match step {
+                            VertexStep::Vertex => &mut program.vertex_locations,
+                            VertexStep::Instance => &mut program.instance_locations,
+                        };
+                        locations.push((location as u32, gl_location));
                     }
                 }
                 Ok(())
@@ -1076,7 +1079,7 @@ fn attribute_pointers(
         };
         for attribute in &layout.attributes {
             // The program reads no such attribute, or optimized it out.
-            let Some(location) = program.location(layout.step, attribute.id) else {
+            let Some(location) = program.location(layout.step, attribute.location) else {
                 continue;
             };
             let format = enums::attribute_format(attribute.format)
@@ -1084,10 +1087,9 @@ fn attribute_pointers(
             let start = offset as i64 + i64::from(attribute.offset) + i64::from(layout.stride) * first;
             // OpenGL ES 3.0 can't read before where the pointer starts, as
             // a negative base vertex would.
-            let start = i32::try_from(start)
-                .ok()
-                .filter(|&start| start >= 0)
-                .ok_or_else(|| GpuError::Invalid(format!("vertex attribute {} at offset {start}", attribute.id)))?;
+            let start = i32::try_from(start).ok().filter(|&start| start >= 0).ok_or_else(|| {
+                GpuError::Invalid(format!("vertex attribute {} at offset {start}", attribute.location))
+            })?;
             pointers.push(AttributePointer {
                 location,
                 buffer: object,
@@ -1374,10 +1376,9 @@ impl Gpu for GlGpu {
             [(VertexStep::Vertex, &program.vertex_locations), (VertexStep::Instance, &program.instance_locations)]
         {
             for &(id, _) in locations {
-                let given = desc
-                    .vertex_buffers
-                    .iter()
-                    .any(|layout| layout.step == step && layout.attributes.iter().any(|attribute| attribute.id == id));
+                let given = desc.vertex_buffers.iter().any(|layout| {
+                    layout.step == step && layout.attributes.iter().any(|attribute| attribute.location == id)
+                });
                 if !given {
                     return Err(GpuError::Invalid(format!(
                         "{} reads attribute {id}, which no buffer gives",
@@ -1400,7 +1401,7 @@ impl Gpu for GlGpu {
             id: block.id as u32,
             min_size: if block.element_size > 0 { block.element_size } else { block.size } as u64,
         });
-        let textures = program.textures.iter().map(|&id| ShaderBinding::Texture { id: id as u32 });
+        let textures = program.textures.iter().map(|&slot| ShaderBinding::Texture { slot: slot as u32 });
         let reads: Vec<ShaderBinding> = blocks.chain(textures).collect();
         let elements = {
             let (buffer, texture) = self.lookup();
@@ -1446,21 +1447,21 @@ impl Gpu for GlGpu {
             blocks.push(BlockBinding { id: block.id, range, size: block.size });
         }
         let mut textures = Vec::with_capacity(program.textures.len());
-        for &texture_id in &program.textures {
+        for &texture_slot in &program.textures {
             let (texture, sampler) = desc
                 .entries
                 .iter()
                 .find_map(|entry| match *entry {
-                    BindGroupEntry::Texture { id, texture, sampler } if id as usize == texture_id => {
+                    BindGroupEntry::Texture { slot, texture, sampler } if slot as usize == texture_slot => {
                         Some((texture, sampler))
                     }
                     _ => None,
                 })
                 .ok_or_else(|| {
-                    GpuError::Invalid(format!("{} samples texture {texture_id}, which no entry binds", program.name))
+                    GpuError::Invalid(format!("{} samples texture {texture_slot}, which no entry binds", program.name))
                 })?;
             textures.push(TextureBinding {
-                unit: texture_id as u32,
+                unit: texture_slot as u32,
                 texture: self.textures.get(texture).ok_or(GpuError::UnknownId("texture"))?.object.name(),
                 sampler: *self.samplers.get(sampler).ok_or(GpuError::UnknownId("sampler"))?,
             });

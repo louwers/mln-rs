@@ -1,30 +1,25 @@
-use bytemuck::{Pod, Zeroable};
+use crate::shaders::block::uniform_block;
 
-/// The sky properties uniform block (64 bytes). The colors are premultiplied
-/// r, g, b, a floats.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-#[repr(C, align(16))]
-pub struct SkyPropsUBO {
-    /*  0 */ pub sky_color: [f32; 4],
-    /* 16 */ pub horizon_color: [f32; 4],
-    /* 32 */ pub horizon: [f32; 2],
-    /* 40 */ pub horizon_normal: [f32; 2],
-    /* 48 */ pub viewport_size: [f32; 2],
-    /* 56 */ pub sky_horizon_blend: f32,
-    /* 60 */ pub sky_blend: f32,
-    /* 64 */
+uniform_block! {
+    /// The sky properties uniform block. The colors are premultiplied
+    /// r, g, b, a floats.
+    pub struct SkyPropsUBO {
+        pub sky_color: [f32; 4],
+        pub horizon_color: [f32; 4],
+        pub horizon: [f32; 2],
+        pub horizon_normal: [f32; 2],
+        pub viewport_size: [f32; 2],
+        pub sky_horizon_blend: f32,
+        pub sky_blend: f32,
+    }
 }
-const _: () = assert!(size_of::<SkyPropsUBO>() == 4 * 16);
 
-/// The atmosphere properties uniform block (96 bytes).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
-#[repr(C, align(16))]
-pub struct AtmospherePropsUBO {
-    /*  0 */ pub inv_view_projection: [f32; 4 * 4],
-    /* 64 */ pub camera_position: [f32; 4],
-    /// The fourth component stores the evaluated atmosphere blend.
-    /* 80 */
-    pub sun_position: [f32; 4],
-    /* 96 */
+uniform_block! {
+    /// The atmosphere properties uniform block.
+    pub struct AtmospherePropsUBO {
+        pub inv_view_projection: [f32; 4 * 4],
+        pub camera_position: [f32; 4],
+        /// The fourth component stores the evaluated atmosphere blend.
+        pub sun_position: [f32; 4],
+    }
 }
-const _: () = assert!(size_of::<AtmospherePropsUBO>() == 6 * 16);

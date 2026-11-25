@@ -9,14 +9,11 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_PROJECTION_UBO, ID_RASTER_DRAWABLE_UBO, ID_RASTER_EVALUATED_PROPS_UBO, ID_RASTER_IMAGE0_TEXTURE,
-    ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE, ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
-};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -54,6 +51,14 @@ use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
 use crate::sources::render_image_source::{ImageQuad, ImageSourceRenderData};
 use crate::tile_matrix::{projection_data, to_projection_ubo};
+
+/// The ids of the buffers that the draws bind.
+const DRAWABLE_ID: usize = programs::RASTER.buffer_id("drawableVector");
+const PROPS_ID: usize = programs::RASTER.buffer_id("props");
+
+/// The slots of the programs' textures that the draws bind.
+const IMAGE0_SLOT: usize = programs::RASTER.texture_slot("image0");
+const IMAGE1_SLOT: usize = programs::RASTER.texture_slot("image1");
 
 /// What the layer keeps of a tile: its draw, and the generation of the
 /// bucket's geometry it was built of.
@@ -349,9 +354,9 @@ impl RenderRasterLayer {
                 coords_bottom: quad.coords_bottom,
                 image_warp: quad.warp,
             };
-            writer.uniform(ID_RASTER_EVALUATED_PROPS_UBO, &props);
-            writer.storage(ID_RASTER_DRAWABLE_UBO, |(draw_ubo, _)| *draw_ubo);
-            writer.storage(ID_PROJECTION_UBO, |(_, projection)| *projection);
+            writer.uniform(PROPS_ID, &props);
+            writer.storage(DRAWABLE_ID, |(draw_ubo, _)| *draw_ubo);
+            writer.storage(PROJECTION_ID, |(_, projection)| *projection);
         });
         if replaced {
             let objects = &mut self.drawing.objects;
@@ -387,8 +392,8 @@ fn new_objects(
     texture: Option<&SharedTexture>,
 ) -> DrawObjects {
     let mut textures = Textures::default();
-    textures[ID_RASTER_IMAGE0_TEXTURE] = texture.cloned();
-    textures[ID_RASTER_IMAGE1_TEXTURE] = texture.cloned();
+    textures[IMAGE0_SLOT] = texture.cloned();
+    textures[IMAGE1_SLOT] = texture.cloned();
     DrawObjects::new(shader.clone(), color_mode, CullFaceMode::disabled(), geometry, textures)
 }
 
@@ -415,7 +420,7 @@ fn raster_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
     let mut attrs = VertexAttributeArray::new();
     let stride = size_of::<RasterLayoutVertex>() as u32;
     attrs.set_shared(
-        ID_RASTER_POS_VERTEX_ATTRIBUTE,
+        "pos",
         SharedAttribute::new(
             vertices.clone(),
             AttributeDataType::Short2,
@@ -424,7 +429,7 @@ fn raster_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
         ),
     );
     attrs.set_shared(
-        ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
+        "texture_pos",
         SharedAttribute::new(
             vertices.clone(),
             AttributeDataType::Short2,

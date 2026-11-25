@@ -126,7 +126,7 @@ impl StandingDraw {
         StandingDraw { objects, heights: GroundHeights::default() }
     }
 
-    /// Over `ground`, has the attribute `id` of the draw's vertices read the
+    /// Over `ground`, has the attribute `name` of the draw's vertices read the
     /// heights of the ground under `centers`, the center of each vertex's
     /// point in `tile`: those of the ground they were of while it stays the
     /// frame's, else written again, through `context`.
@@ -135,7 +135,7 @@ impl StandingDraw {
         context: &mut Context,
         ground: Option<&FrameGround>,
         tile: UnwrappedTileID,
-        id: usize,
+        name: &'static str,
         centers: &[[i16; 2]],
     ) {
         let Some(ground) = ground.filter(|ground| !self.heights.are_of(ground)) else {
@@ -145,7 +145,7 @@ impl StandingDraw {
         let heights: Vec<f32> =
             centers.iter().map(|&[x, y]| tile_ground.height(glam::Vec2::new(f32::from(x), f32::from(y)))).collect();
         if let Some(vertices) = self.heights.write(context, ground, &heights) {
-            self.objects.vertex_attributes_mut().set_shared(id, height_attribute(&vertices));
+            self.objects.vertex_attributes_mut().set_shared(name, height_attribute(&vertices));
         }
     }
 }

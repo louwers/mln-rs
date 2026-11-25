@@ -36,10 +36,10 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPropsUBO};
+use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::programs;
-use mln_gfx::shaders::shader_defines::{ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
 use mln_util::Color;
@@ -207,11 +207,11 @@ impl Scene {
         let parameters = ProgramParameters::new(1.0, false);
         let key = program.variant_key(&parameters, [], ProjectionVariant::Mercator);
         let shader = gpu.create_shader(&key).expect("the shader");
-        let (attribute, _) = program.attributes[0];
+        let location = program.location("pos") as u32;
         let layouts = [VertexBufferLayout {
             stride: 4,
             step: VertexStep::Vertex,
-            attributes: vec![VertexAttribute { id: attribute as u32, format: AttributeDataType::Short2, offset: 0 }],
+            attributes: vec![VertexAttribute { location, format: AttributeDataType::Short2, offset: 0 }],
         }];
         let tile_vertices: [[i16; 2]; 4] = [[0, 0], [EXTENT, 0], [0, EXTENT], [EXTENT, EXTENT]];
         let tile_indexes: [u16; 6] = [0, 1, 2, 1, 2, 3];
@@ -225,9 +225,13 @@ impl Scene {
             size: size as u64,
         };
         let entries = [
-            entry(ID_BACKGROUND_PROPS_UBO, props, size_of::<BackgroundPropsUBO>()),
-            entry(ID_BACKGROUND_DRAWABLE_UBO, drawable, size_of::<BackgroundDrawableUnionUBO>()),
-            entry(ID_PROJECTION_UBO, projection, size_of::<ProjectionUBO>()),
+            entry(const { programs::BACKGROUND.buffer_id("props") }, props, size_of::<BackgroundPropsUBO>()),
+            entry(
+                const { programs::BACKGROUND.buffer_id("drawableVector") },
+                drawable,
+                size_of::<BackgroundDrawableUnionUBO>(),
+            ),
+            entry(PROJECTION_ID, projection, size_of::<ProjectionUBO>()),
         ];
         let vertices = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&tile_vertices));
         let indexes = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&tile_indexes));

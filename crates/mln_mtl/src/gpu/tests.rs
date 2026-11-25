@@ -124,15 +124,14 @@ fragment half4 fragmentMain() { return half4(1.0); }
     let program = &programs::FILL_EXTRUSION_INSTANCED;
     let (vertex, fragment) =
         compile(device.device(), "direct read", MSL, "vertexMain", "fragmentMain", [], true).expect("the MSL compiles");
-    let source = gpu.sources.get(program).expect("the table");
     let active_attributes = active_attributes(&vertex);
-    let shader = gpu.shaders.insert(Shader { program, source, vertex, active_attributes, fragment, table: None });
+    let shader = gpu.shaders.insert(Shader { program, vertex, active_attributes, fragment, table: None });
     let unblended = mln_gfx::color_mode::ColorMode::unblended();
     let layouts = [VertexBufferLayout {
         stride: 4,
         step: VertexStep::Vertex,
         attributes: vec![GpuVertexAttribute {
-            id: mln_gfx::shaders::shader_defines::ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE as u32,
+            location: program.location("pos") as u32,
             format: AttributeDataType::Short2,
             offset: 0,
         }],

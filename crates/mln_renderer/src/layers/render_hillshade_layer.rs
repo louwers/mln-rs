@@ -16,6 +16,7 @@ use glam::dcamera::rh::proj::opengl::orthographic;
 use glam::{DMat4, DVec3};
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::hillshade_layer_ubo::{
     HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO, MAX_ILLUMINATION_SOURCES,
 };
@@ -23,11 +24,6 @@ use mln_gfx::shaders::hillshade_prepare_layer_ubo::{HillshadePrepareDrawableUBO,
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_HILLSHADE_DRAWABLE_UBO, ID_HILLSHADE_EVALUATED_PROPS_UBO, ID_HILLSHADE_IMAGE_TEXTURE,
-    ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_PREPARE_DRAWABLE_UBO, ID_HILLSHADE_PREPARE_TILE_PROPS_UBO,
-    ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_TILE_PROPS_UBO, ID_PROJECTION_UBO,
-};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -71,6 +67,16 @@ use crate::render_target::RenderTarget;
 use crate::render_tile::FrameTile;
 use crate::terrain::SurfaceLight;
 use crate::tile_matrix::{bind_no_projection, projection_data, to_projection_ubo};
+
+/// The ids of the buffers that the draws bind.
+const DRAWABLE_ID: usize = programs::HILLSHADE.buffer_id("drawableVector");
+const TILE_PROPS_ID: usize = programs::HILLSHADE.buffer_id("tilePropsVector");
+const PROPS_ID: usize = programs::HILLSHADE.buffer_id("props");
+const PREPARE_DRAWABLE_ID: usize = programs::HILLSHADE_PREPARE.buffer_id("drawable");
+const PREPARE_TILE_PROPS_ID: usize = programs::HILLSHADE_PREPARE.buffer_id("tileProps");
+
+/// The slots of the programs' textures that the draws bind.
+const IMAGE_SLOT: usize = programs::HILLSHADE.texture_slot("image");
 
 impl LayerType for Hillshade {
     type Layout = NoLayout;
@@ -237,20 +243,12 @@ fn pack_evaluated_props(illumination: &IlluminationProperties, accent_color: &Co
         ubo.azimuths[i] = azimuth;
     }
 
-    // Pack shadow colors (4 colors * 4 components = 16 floats)
-    for (i, color) in illumination.shadow_colors.iter().take(4).enumerate() {
-        ubo.shadows[i * 4] = color.r;
-        ubo.shadows[i * 4 + 1] = color.g;
-        ubo.shadows[i * 4 + 2] = color.b;
-        ubo.shadows[i * 4 + 3] = color.a;
+    // Pack shadow and highlight colors (up to 4)
+    for (shadow, color) in ubo.shadows.iter_mut().zip(&illumination.shadow_colors) {
+        *shadow = [color.r, color.g, color.b, color.a];
     }
-
-    // Pack highlight colors (4 colors * 4 components = 16 floats)
-    for (i, color) in illumination.highlight_colors.iter().take(4).enumerate() {
-        ubo.highlights[i * 4] = color.r;
-        ubo.highlights[i * 4 + 1] = color.g;
-        ubo.highlights[i * 4 + 2] = color.b;
-        ubo.highlights[i * 4 + 3] = color.a;
+    for (highlight, color) in ubo.highlights.iter_mut().zip(&illumination.highlight_colors) {
+        *highlight = [color.r, color.g, color.b, color.a];
     }
 
     ubo
@@ -275,7 +273,7 @@ fn hillshade_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArra
     let mut attrs = VertexAttributeArray::new();
     let stride = size_of::<RasterLayoutVertex>() as u32;
     attrs.set_shared(
-        ID_HILLSHADE_POS_VERTEX_ATTRIBUTE,
+        "pos",
         SharedAttribute::new(
             vertices.clone(),
             AttributeDataType::Short2,
@@ -284,7 +282,7 @@ fn hillshade_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArra
         ),
     );
     attrs.set_shared(
-        ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE,
+        "texture_pos",
         SharedAttribute::new(
             vertices.clone(),
             AttributeDataType::Short2,
@@ -472,11 +470,11 @@ impl TypedLayer for RenderHillshadeLayer {
                 }
                 // The bucket's render target is made again with its
                 // generation.
-                cached.draw.objects.set_texture(ID_HILLSHADE_IMAGE_TEXTURE, Some(render_target_texture));
+                cached.draw.objects.set_texture(IMAGE_SLOT, Some(render_target_texture));
                 cached
             } else {
                 let mut textures = Textures::default();
-                textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(render_target_texture.clone());
+                textures[IMAGE_SLOT] = Some(render_target_texture.clone());
                 let objects = DrawObjects::new(
                     hillshade_shader.clone(),
                     color_mode,
@@ -498,11 +496,11 @@ impl TypedLayer for RenderHillshadeLayer {
 
         self.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
             if let Some(Illumination { props, .. }) = &illumination {
-                writer.uniform(ID_HILLSHADE_EVALUATED_PROPS_UBO, props);
+                writer.uniform(PROPS_ID, props);
             }
-            writer.storage(ID_HILLSHADE_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-            writer.storage(ID_HILLSHADE_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
-            writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+            writer.storage(DRAWABLE_ID, |uniforms| uniforms.draw_ubo);
+            writer.storage(TILE_PROPS_ID, |uniforms| uniforms.tile_props);
+            writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
         });
     }
 
@@ -615,7 +613,7 @@ impl BucketTarget {
             instances: None,
         };
         let mut textures = Textures::default();
-        textures[ID_HILLSHADE_IMAGE_TEXTURE] = Some(dem.clone());
+        textures[IMAGE_SLOT] = Some(dem.clone());
         let objects =
             DrawObjects::new(shader.clone(), ColorMode::unblended(), CullFaceMode::disabled(), geometry, textures);
         let mut prepare = SingleDraw::new(objects, FrameDraw::new(None, SimpleIdentity::new()));
@@ -624,7 +622,7 @@ impl BucketTarget {
             orthographic(0.0, extent, -extent, 0.0, -1.0, 1.0) * DMat4::from_translation(DVec3::new(0.0, -extent, 0.0));
         bind_no_projection(gpu, &mut prepare.frame.uniform_buffers, context);
         let draw_ubo = HillshadePrepareDrawableUBO { matrix: cast_matrix(&m) };
-        prepare.write_pod(gpu, ID_HILLSHADE_PREPARE_DRAWABLE_UBO, &draw_ubo, context);
+        prepare.write_pod(gpu, PREPARE_DRAWABLE_ID, &draw_ubo, context);
         let unpack = DemUnpack::of(encoding);
         let tile_props = HillshadePrepareTilePropsUBO {
             unpack: unpack.weights_and_base(),
@@ -634,7 +632,7 @@ impl BucketTarget {
             unpack_scale: unpack.scale,
             ..HillshadePrepareTilePropsUBO::default()
         };
-        prepare.write_pod(gpu, ID_HILLSHADE_PREPARE_TILE_PROPS_UBO, &tile_props, context);
+        prepare.write_pod(gpu, PREPARE_TILE_PROPS_ID, &tile_props, context);
 
         BucketTarget {
             render_target,

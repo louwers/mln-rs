@@ -30,7 +30,7 @@ mod sources;
 pub mod variants;
 
 pub use front_end::{Module, ResourceUse, Stage};
-pub use program::{AttributeInfo, BUILT_INS, ShaderSource, TextureInfo};
+pub use program::{BUILT_INS, ShaderSource};
 
 #[cfg(test)]
 mod tests;

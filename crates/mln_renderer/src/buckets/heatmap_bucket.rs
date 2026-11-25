@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use geometry::Point;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE, ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE};
 use mln_map_types::MapMode;
 use mln_style::expression::Value;
 use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
@@ -28,8 +27,8 @@ use crate::util::tessellator::Tessellator;
 
 crate::paint_property_binders!(
     pub struct HeatmapBinders for HeatmapPaintProperties::PossiblyEvaluated {
-        heatmap_radius: PaintPropertyBinder<f32> => [ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE],
-        heatmap_weight: PaintPropertyBinder<f32> => [ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE],
+        heatmap_radius: PaintPropertyBinder<f32> => ["radius"],
+        heatmap_weight: PaintPropertyBinder<f32> => ["weight"],
     }
 );
 

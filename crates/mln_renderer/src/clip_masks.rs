@@ -6,12 +6,10 @@ use mln_gfx::gpu::{
     VertexAttribute, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::{BUFFER_IDS, PROJECTION_ID};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO, MAX_UBO_COUNT_PER_SHADER,
-};
 use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::StencilOpType;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMode, DrawModeType, StencilMode};
@@ -33,7 +31,7 @@ fn layout() -> VertexBufferLayout {
         stride: 4,
         step: VertexStep::Vertex,
         attributes: vec![VertexAttribute {
-            id: ID_CLIPPING_MASK_POS_VERTEX_ATTRIBUTE as u32,
+            location: const { programs::CLIPPING_MASK.location("pos") as u32 },
             format: AttributeDataType::Short2,
             offset: 0,
         }],
@@ -238,8 +236,8 @@ impl ClipMasks {
             let stride = size.next_multiple_of(context.caps().buffer_offset_alignment as usize);
             for slot in 0..projections.size() / stride {
                 let mut entries = Entries::new();
-                for id in 0..MAX_UBO_COUNT_PER_SHADER {
-                    let (buffer, offset, size) = if id == ID_PROJECTION_UBO {
+                for id in 0..BUFFER_IDS {
+                    let (buffer, offset, size) = if id == PROJECTION_ID {
                         (projections, (slot * stride) as u64, size as u64)
                     } else if let Some(buffer) = global.get(id) {
                         (buffer, 0, buffer.size() as u64)

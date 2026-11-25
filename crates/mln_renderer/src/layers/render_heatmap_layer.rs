@@ -9,16 +9,12 @@ use std::sync::Arc;
 use glam::dcamera::rh::proj::opengl::orthographic;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::heatmap_layer_ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO};
 use mln_gfx::shaders::heatmap_texture_layer_ubo::HeatmapTexturePropsUBO;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO,
-    ID_HEATMAP_GROUND_HEIGHT_VERTEX_ATTRIBUTE, ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
-    ID_HEATMAP_TEXTURE_PROPS_UBO, ID_PROJECTION_UBO,
-};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -60,6 +56,15 @@ use crate::render_target::RenderTarget;
 use crate::render_tile::FrameTile;
 use crate::terrain::StandingDraw;
 use crate::tile_matrix::{bind_no_projection, globe_extrude_scale, projection_data, to_projection_ubo};
+
+/// The ids of the buffers that the draws bind.
+const DRAWABLE_ID: usize = programs::HEATMAP.buffer_id("drawableVector");
+const PROPS_ID: usize = programs::HEATMAP.buffer_id("props");
+const TEXTURE_PROPS_ID: usize = programs::HEATMAP_TEXTURE.buffer_id("ubo");
+
+/// The slots of the programs' textures that the draws bind.
+const COLOR_RAMP_SLOT: usize = programs::HEATMAP_TEXTURE.texture_slot("color_ramp");
+const IMAGE_SLOT: usize = programs::HEATMAP_TEXTURE.texture_slot("image");
 
 /// The pass the layer's draws draw in, onto the frame and into its render
 /// target.
@@ -375,7 +380,7 @@ impl RenderHeatmapLayer {
                 binders.bind(evaluated, paint(context).as_ref(), &mut attrs, &mut uniforms);
                 let shader = context.shader_key(&programs::HEATMAP, uniforms, base.projection_variant);
                 attrs.set_shared(
-                    ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
+                    "pos",
                     SharedAttribute::new(
                         vertices,
                         AttributeDataType::Short2,
@@ -409,7 +414,7 @@ impl RenderHeatmapLayer {
             // GL JS's does.
             let ground = paint_parameters.ground.as_deref();
             let centers = &bucket.centers;
-            draw.stand(context, ground, tile_id.to_unwrapped(), ID_HEATMAP_GROUND_HEIGHT_VERTEX_ATTRIBUTE, centers);
+            draw.stand(context, ground, tile_id.to_unwrapped(), "ground_height", centers);
             let draw = FrameDraw { depth: DrawDepth::Off, ..FrameDraw::new(Some(tile_id), order) };
             tile_draws.push(draw, Self::tile_uniforms(&tile_id, binders, paint_parameters));
         }
@@ -467,9 +472,9 @@ impl RenderHeatmapLayer {
             intensity: *evaluated.heatmap_intensity.uniform(),
             padding: 0.0,
         };
-        writer.uniform(ID_HEATMAP_EVALUATED_PROPS_UBO, &props);
-        writer.storage(ID_HEATMAP_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-        writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+        writer.uniform(PROPS_ID, &props);
+        writer.storage(DRAWABLE_ID, |uniforms| uniforms.draw_ubo);
+        writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
     }
 
     /// Makes the layer's draw of the frame, which colors the heat of the
@@ -502,15 +507,15 @@ impl RenderHeatmapLayer {
         let render_target_texture = render_target.texture();
         if let Some(draw) = &mut drawing.texture {
             // The render target's texture is made again with its size.
-            draw.objects.set_texture(ID_HEATMAP_IMAGE_TEXTURE, Some(render_target_texture));
-            draw.objects.set_texture(ID_HEATMAP_COLOR_RAMP_TEXTURE, color_ramp);
+            draw.objects.set_texture(IMAGE_SLOT, Some(render_target_texture));
+            draw.objects.set_texture(COLOR_RAMP_SLOT, color_ramp);
         } else {
             let vertices = shared_texture_vertices
                 .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::heatmap_texture_vertices()))
                 .clone();
             let mut attrs = VertexAttributeArray::new();
             attrs.set_shared(
-                ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
+                "pos",
                 SharedAttribute::new(
                     vertices,
                     AttributeDataType::Short2,
@@ -527,8 +532,8 @@ impl RenderHeatmapLayer {
                 instances: None,
             };
             let mut textures = Textures::default();
-            textures[ID_HEATMAP_IMAGE_TEXTURE] = Some(render_target_texture.clone());
-            textures[ID_HEATMAP_COLOR_RAMP_TEXTURE] = color_ramp.cloned();
+            textures[IMAGE_SLOT] = Some(render_target_texture.clone());
+            textures[COLOR_RAMP_SLOT] = color_ramp.cloned();
             let objects = DrawObjects::new(
                 heatmap_texture_shader,
                 context.color_mode(ColorMode::alpha_blended()),
@@ -553,7 +558,7 @@ impl RenderHeatmapLayer {
             pad3: 0.0,
         };
         let context = &mut *paint_parameters.context;
-        if frame.uniform_buffers.write_pod(gpu, ID_HEATMAP_TEXTURE_PROPS_UBO, &props, context.device())
+        if frame.uniform_buffers.write_pod(gpu, TEXTURE_PROPS_ID, &props, context.device())
             && let Some(texture) = &mut drawing.texture
         {
             texture.objects.drop_bindings();

@@ -44,6 +44,19 @@ pub(crate) struct FeatureSelection<'a> {
     pub(crate) feature_state: Option<&'a SourceFeatureState>,
 }
 
+/// The ground a frame drew of the terrain, which a query finds the features
+/// of some layers on.
+#[derive(Clone, Copy)]
+pub(crate) struct QueryGround<'a> {
+    pub(crate) elevation: &'a crate::terrain::TerrainElevation,
+    /// Whether the layers' points stand on the ground, rather than their
+    /// features lying on it. A point that stands shows raised, where the
+    /// query's lines of sight can meet the ground far beyond it, or not at
+    /// all, so every feature of a rendered tile is a candidate, and the
+    /// layer's hit test decides.
+    pub(crate) standing: bool,
+}
+
 /// Where a query looks in a tile: its geometry in tile units, seen through
 /// the camera.
 #[derive(Clone, Copy)]
@@ -55,6 +68,9 @@ pub(crate) struct QueryRegion<'a> {
     /// Over terrain, the ground the frame drew under the tile, where the
     /// lines of sight meet it at `geometry`, for the layers that stand on it.
     pub(crate) ground: Option<crate::terrain::TileGround<'a>>,
+    /// Whether every feature of the tile is a candidate, rather than those
+    /// around `geometry` ([`QueryGround::standing`]).
+    pub(crate) whole_tile: bool,
     pub(crate) view: &'a View,
     pub(crate) projector: &'a TileProjector<'a>,
     pub(crate) pixels_to_tile_units: f32,
@@ -306,7 +322,12 @@ impl FeatureIndex {
         };
 
         let additional_padding = (region.padding * region.pixels_to_tile_units).min(constants::EXTENT as f32) as i16;
-        let Some((min, max)) = envelope(region.geometry.iter().copied()) else {
+        let whole_tile = || {
+            let extent = constants::EXTENT as i16;
+            (GeometryCoordinate::new(0, 0), GeometryCoordinate::new(extent, extent))
+        };
+        let candidates = if region.whole_tile { Some(whole_tile()) } else { envelope(region.geometry.iter().copied()) };
+        let Some((min, max)) = candidates else {
             return Ok(());
         };
         // The padded box's corners are tile coordinates, which wrap in i16.

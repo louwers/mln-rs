@@ -3,6 +3,8 @@
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::{BufferId, Gpu, GpuError};
+use mln_gfx::shaders::bindings::MAX_ATTRIBUTES;
+use mln_gfx::shaders::program::Attribute;
 
 use crate::gfx::context::Context;
 use crate::gfx::owned::Held;
@@ -40,25 +42,58 @@ impl PartialEq for AttributeBinding {
 /// A draw's attribute bindings, indexed by the shader's attribute index.
 pub(crate) type AttributeBindingArray = Vec<AttributeBinding>;
 
+/// Where a shader's attributes are in a draw's [`VertexAttributeArray`]: the
+/// slot of each, by the shader's attribute index, which it finds by name
+/// only where the array's layout isn't the one it found them in.
+#[derive(Default)]
+pub(crate) struct AttributeSlots {
+    /// The array's [`layout`](VertexAttributeArray::layout) when the slots
+    /// were found.
+    layout: Option<u64>,
+    /// The slot of each of the shader's attributes that the array has.
+    slots: [Option<u8>; MAX_ATTRIBUTES],
+}
+
+impl AttributeSlots {
+    /// Finds the slots of `attributes` in `array` again, where its layout
+    /// isn't the one it found them in.
+    fn update(&mut self, attributes: &[Attribute], array: &VertexAttributeArray) {
+        if self.layout == Some(array.layout()) {
+            return;
+        }
+        self.slots = [None; MAX_ATTRIBUTES];
+        for (slot, attribute) in self.slots.iter_mut().zip(attributes) {
+            *slot = array.slot_of(attribute.name).and_then(|slot| u8::try_from(slot).ok());
+        }
+        self.layout = Some(array.layout());
+    }
+
+    /// The slot of the shader's attribute at `index`.
+    fn get(&self, index: usize) -> Option<usize> {
+        self.slots.get(index).copied().flatten().map(usize::from)
+    }
+}
+
 /// Makes `bindings` the vertex bindings of a draw, indexed by shader
-/// attribute index: one for each of the shader's `attributes`, its id and
-/// the format of its default, read from the draw's attribute of that id in
-/// `overrides` where it has one. An attribute the draw doesn't have, or has
-/// no data for, binds a buffer of its default's value for `vertex_count`
-/// vertices. Returns whether a binding changed; after an error, some may
-/// have.
+/// attribute index: one for each of the shader's `attributes`, read from the
+/// draw's attribute of its name in `overrides` where it has one, which
+/// `slots` finds. An attribute the draw doesn't have, or has no data for,
+/// binds a buffer of its default's value for `vertex_count` vertices.
+/// Returns whether a binding changed; after an error, some may have.
 pub(crate) fn update_attribute_bindings(
     gpu: &mut dyn Gpu,
     context: &mut Context,
-    attributes: &[(usize, AttributeDataType)],
+    attributes: &[Attribute],
     overrides: &mut VertexAttributeArray,
+    slots: &mut AttributeSlots,
     vertex_count: usize,
     bindings: &mut AttributeBindingArray,
 ) -> Result<bool, GpuError> {
     bindings.reserve_exact(attributes.len().saturating_sub(bindings.len()));
+    slots.update(attributes, overrides);
     let mut changed = false;
-    for (index, &(id, default)) in attributes.iter().enumerate() {
-        let binding = match overrides.get_mut(id) {
+    for (index, &Attribute { format: default, .. }) in attributes.iter().enumerate() {
+        let binding = match slots.get(index).and_then(|slot| overrides.at_mut(slot)) {
             Some(attribute) => attribute.binding(gpu, context)?,
             None => None,
         };
@@ -89,15 +124,16 @@ pub(crate) fn update_attribute_bindings(
     Ok(changed)
 }
 
-/// Whether the next upload writes what one of `overrides`' attributes
-/// that the shader's `attributes` read
-/// ([`VertexAttribute::needs_upload`]).
+/// Whether the next upload writes what one of `overrides`' attributes that
+/// the shader reads, at `slots`, reads
+/// ([`VertexAttribute::needs_upload`]), as of the last
+/// [`update_attribute_bindings`].
 ///
 /// [`VertexAttribute::needs_upload`]: crate::gfx::vertex_attribute::VertexAttribute::needs_upload
-pub(crate) fn needs_upload(
-    context: &Context,
-    attributes: &[(usize, AttributeDataType)],
-    overrides: &VertexAttributeArray,
-) -> bool {
-    attributes.iter().any(|&(id, _)| overrides.get(id).is_some_and(|attribute| attribute.needs_upload(context)))
+pub(crate) fn needs_upload(context: &Context, overrides: &VertexAttributeArray, slots: &AttributeSlots) -> bool {
+    slots
+        .slots
+        .iter()
+        .flatten()
+        .any(|&slot| overrides.at(usize::from(slot)).is_some_and(|attribute| attribute.needs_upload(context)))
 }

@@ -24,13 +24,10 @@ use mln_gfx::gpu::{
     VertexAttribute, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::{BUFFER_IDS, PROJECTION_ID};
 use mln_gfx::shaders::layer_composite_ubo::{LayerCompositeBlendMode, LayerCompositeUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
-use mln_gfx::shaders::shader_defines::{
-    ID_LAYER_COMPOSITE_BACKDROP_TEXTURE, ID_LAYER_COMPOSITE_IMAGE_TEXTURE, ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE,
-    ID_LAYER_COMPOSITE_UBO, ID_PROJECTION_UBO, MAX_UBO_COUNT_PER_SHADER,
-};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::ColorBlendFactorType;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMode, DrawModeType, StencilMode};
@@ -48,12 +45,19 @@ use crate::gfx::vertex_attribute::Uniforms;
 use crate::paint_parameters::{DrawTarget, OpenPass};
 use crate::render_static_data::RenderStaticData;
 
+/// The ids of the buffers that the draws bind.
+const PROPS_ID: usize = programs::LAYER_COMPOSITE.buffer_id("props");
+
 /// The format of the texture a composited layer draws into: its colors are
 /// premultiplied, as the frame's are.
 const COLOR: TextureFormat = TextureFormat::Rgba8Unorm;
 /// The format of its depth and stencil, which the layer's tile clipping and
 /// depth tests read as they would the frame's.
 const DEPTH_STENCIL: TextureFormat = TextureFormat::Depth24PlusStencil8;
+
+/// The slots of the layer's texture and of the frame's behind it.
+const IMAGE_SLOT: usize = programs::LAYER_COMPOSITE.texture_slot("image");
+const BACKDROP_SLOT: usize = programs::LAYER_COMPOSITE.texture_slot("backdrop");
 
 /// The vertex layout of the quad that covers the frame: a corner of the unit
 /// square in two shorts.
@@ -62,7 +66,7 @@ fn layout() -> VertexBufferLayout {
         stride: 4,
         step: VertexStep::Vertex,
         attributes: vec![VertexAttribute {
-            id: ID_LAYER_COMPOSITE_POS_VERTEX_ATTRIBUTE as u32,
+            location: const { programs::LAYER_COMPOSITE.location("pos") as u32 },
             format: AttributeDataType::Short2,
             offset: 0,
         }],
@@ -485,10 +489,10 @@ impl LayerComposite {
                     None => (layer, layer),
                 };
                 let mut entries = Entries::new();
-                for id in 0..MAX_UBO_COUNT_PER_SHADER {
+                for id in 0..BUFFER_IDS {
                     let (buffer, offset, size) = match id {
-                        ID_LAYER_COMPOSITE_UBO => (uniforms, (slot * stride) as u64, size as u64),
-                        ID_PROJECTION_UBO => (projection, 0, projection.size() as u64),
+                        PROPS_ID => (uniforms, (slot * stride) as u64, size as u64),
+                        PROJECTION_ID => (projection, 0, projection.size() as u64),
                         _ => match global.get(id) {
                             Some(buffer) => (buffer, 0, buffer.size() as u64),
                             None => continue,
@@ -496,11 +500,9 @@ impl LayerComposite {
                     };
                     entries.push(BindGroupEntry::Buffer { id: id as u32, buffer: buffer.id(), offset, size });
                 }
-                for (id, texture) in
-                    [(ID_LAYER_COMPOSITE_IMAGE_TEXTURE, image), (ID_LAYER_COMPOSITE_BACKDROP_TEXTURE, backdrop)]
-                {
+                for (slot, texture) in [(IMAGE_SLOT, image), (BACKDROP_SLOT, backdrop)] {
                     entries.push(BindGroupEntry::Texture {
-                        id: id as u32,
+                        slot: slot as u32,
                         texture: texture.id(),
                         sampler: texture.sampler,
                     });

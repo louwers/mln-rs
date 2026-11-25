@@ -471,7 +471,7 @@ impl GeometryContents {
         id: &OverscaledTileID,
         result: &mut QueryResults,
         query_geometry: &mln_style::feature::GeometryCoordinates,
-        (screen, ground): (&[mln_util::geo::ScreenCoordinate], Option<&crate::terrain::TerrainElevation>),
+        (screen, ground): (&[mln_util::geo::ScreenCoordinate], Option<crate::geometry::feature_index::QueryGround<'_>>),
         view: &mln_map_types::View,
         layers: &QueryLayers<'_>,
         options: &RenderedQueryOptions,
@@ -495,7 +495,8 @@ impl GeometryContents {
         let region = QueryRegion {
             geometry: query_geometry,
             screen,
-            ground: ground.map(|ground| crate::terrain::TileGround::new(ground, id.to_unwrapped())),
+            ground: ground.map(|ground| crate::terrain::TileGround::new(ground.elevation, id.to_unwrapped())),
+            whole_tile: ground.is_some_and(|ground| ground.standing),
             view,
             projector: &projector,
             pixels_to_tile_units: (f64::from(mln_util::constants::EXTENT) / tile_size / scale) as f32,

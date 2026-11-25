@@ -34,6 +34,7 @@ use std::mem::offset_of;
 use std::sync::Arc;
 
 use mln_gfx::gpu::{Gpu, ShaderKey};
+use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::fill_extrusion_layer_ubo::{
     FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO,
 };
@@ -41,15 +42,6 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_DRAWABLE_UBO, ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE,
-    ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_IMAGE_TEXTURE,
-    ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE,
-    ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO,
-    ID_FILL_EXTRUSION_TILE_PROPS_UBO, ID_FILL_EXTRUSION_WALL_HEIGHTS, ID_FILL_EXTRUSION_WALL_PAINT,
-    ID_FILL_EXTRUSION_WALL_VERTICES, ID_PROJECTION_UBO,
-};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::View;
 use mln_style::layer::LayerStyle;
@@ -98,6 +90,17 @@ use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
 use crate::terrain::{FrameGround, GroundHeights, height_attribute};
 use crate::tile_matrix::{projection_data, to_projection_ubo};
+
+/// The ids of the buffers that the draws bind.
+const DRAWABLE_ID: usize = programs::FILL_EXTRUSION.buffer_id("drawableVector");
+const TILE_PROPS_ID: usize = programs::FILL_EXTRUSION_PATTERN.buffer_id("tilePropsVector");
+const PROPS_ID: usize = programs::FILL_EXTRUSION.buffer_id("props");
+const WALL_VERTICES_ID: usize = programs::FILL_EXTRUSION_PULLED.buffer_id("wallVertices");
+const WALL_PAINT_ID: usize = programs::FILL_EXTRUSION_PULLED.buffer_id("wallPaint");
+const WALL_HEIGHTS_ID: usize = programs::FILL_EXTRUSION_PULLED.buffer_id("wallHeights");
+
+/// The slots of the programs' textures that the draws bind.
+const IMAGE_SLOT: usize = programs::FILL_EXTRUSION_PATTERN.texture_slot("image");
 
 /// The pass the layer's draws draw in.
 const RENDER_PASS: RenderPass = RenderPass::Translucent;
@@ -181,15 +184,13 @@ impl ExtrusionTile {
             match (draw.walls, walls) {
                 (true, Walls::Pulled) => {
                     if let Some(heights) = &heights {
-                        draw.objects.read_as_storage(ID_FILL_EXTRUSION_WALL_HEIGHTS, Some(heights.clone()));
+                        draw.objects.read_as_storage(WALL_HEIGHTS_ID, Some(heights.clone()));
                     }
                 }
                 (true, Walls::Quads) => {
                     if let Some(quad_heights) = &quad_heights {
                         let attribute = height_attribute(quad_heights);
-                        draw.objects
-                            .paint_attributes_mut()
-                            .set_shared(ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE, attribute);
+                        draw.objects.paint_attributes_mut().set_shared("ground_height", attribute);
                     }
                 }
                 // The roofs read them per vertex, the instanced walls per
@@ -197,9 +198,7 @@ impl ExtrusionTile {
                 _ => {
                     if let Some(heights) = &heights {
                         let attribute = height_attribute(heights);
-                        draw.objects
-                            .paint_attributes_mut()
-                            .set_shared(ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE, attribute);
+                        draw.objects.paint_attributes_mut().set_shared("ground_height", attribute);
                     }
                 }
             }
@@ -275,14 +274,10 @@ impl Walls {
 /// the vertices that `attrs`, the paint attributes, read
 /// (`FillExtrusionDrawableUBO::paint_layout`).
 pub(crate) fn paint_layout(attrs: &VertexAttributeArray) -> u32 {
-    let (base, height, color) = (
-        ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE,
-        ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
-        ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
-    );
-    let shared = |id: usize| attrs.get(id).and_then(|attribute| attribute.shared());
+    let (base, height, color) = ("base", "height", "color");
+    let shared = |name: &str| attrs.get(name).and_then(|attribute| attribute.shared());
     let words = |bytes: u32| (bytes / 4) & 0xff;
-    let offset = |id: usize| shared(id).map_or(0, |attribute| words(attribute.offset));
+    let offset = |name: &str| shared(name).map_or(0, |attribute| words(attribute.offset));
     let stride = [base, height, color].into_iter().find_map(shared).map_or(0, |attribute| words(attribute.stride));
     stride | offset(base) << 8 | offset(height) << 16 | offset(color) << 24
 }
@@ -304,14 +299,14 @@ fn read_wall_quads(attrs: &mut VertexAttributeArray, quads: &SharedVertices) {
     let corner = offset_of!(FillExtrusionWallVertex, corner) as u32;
     let pos = offset_of!(FillExtrusionWallVertex, vertex) as u32;
     let decimals_ed = pos + offset_of!(FillExtrusionLayoutVertex, a2) as u32;
-    for (id, offset, vertex_offset, type_) in [
-        (ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, corner, 0, AttributeDataType::Short2),
-        (ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, pos, 0, AttributeDataType::Short2),
-        (ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, decimals_ed, 0, AttributeDataType::UShort2),
-        (ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, pos, 4, AttributeDataType::Short2),
-        (ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, decimals_ed, 4, AttributeDataType::UShort2),
+    for (name, offset, vertex_offset, type_) in [
+        ("pos", corner, 0, AttributeDataType::Short2),
+        ("outline_pos", pos, 0, AttributeDataType::Short2),
+        ("decimals_ed", decimals_ed, 0, AttributeDataType::UShort2),
+        ("next_outline_pos", pos, 4, AttributeDataType::Short2),
+        ("next_decimals_ed", decimals_ed, 4, AttributeDataType::UShort2),
     ] {
-        attrs.set_shared(id, SharedAttribute::new(quads.clone(), type_, offset, stride).starting_at(vertex_offset));
+        attrs.set_shared(name, SharedAttribute::new(quads.clone(), type_, offset, stride).starting_at(vertex_offset));
     }
 }
 
@@ -324,22 +319,18 @@ fn read_wall_instances(
     vertices: &SharedVertices,
 ) {
     let static_stride = size_of::<FillExtrusionStaticVertex>() as u32;
-    attrs.set_shared(
-        ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE,
-        SharedAttribute::new(corners.clone(), AttributeDataType::Short2, 0, static_stride),
-    );
+    attrs.set_shared("pos", SharedAttribute::new(corners.clone(), AttributeDataType::Short2, 0, static_stride));
     let stride = size_of::<FillExtrusionLayoutVertex>() as u32;
     // An instance's outline vertex, then the next one.
-    for (vertex_offset, pos_id, decimals_ed_id) in [
-        (0, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-        (1, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
-    ] {
+    for (vertex_offset, pos, decimals_ed) in
+        [(0, "outline_pos", "decimals_ed"), (1, "next_outline_pos", "next_decimals_ed")]
+    {
         instance_attrs.set_shared(
-            pos_id,
+            pos,
             SharedAttribute::new(vertices.clone(), AttributeDataType::Short2, 0, stride).starting_at(vertex_offset),
         );
         instance_attrs.set_shared(
-            decimals_ed_id,
+            decimals_ed,
             SharedAttribute::new(vertices.clone(), AttributeDataType::UShort2, 4, stride).starting_at(vertex_offset),
         );
     }
@@ -695,7 +686,7 @@ impl TileBuilder<'_> {
 
         let stride = size_of::<FillExtrusionLayoutVertex>() as u32;
         vertex_attrs.set_shared(
-            ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE,
+            "pos",
             SharedAttribute::new(
                 vertices.clone(),
                 AttributeDataType::Short2,
@@ -704,7 +695,7 @@ impl TileBuilder<'_> {
             ),
         );
         vertex_attrs.set_shared(
-            ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE,
+            "decimals_ed",
             SharedAttribute::new(
                 vertices.clone(),
                 AttributeDataType::UShort2,
@@ -717,7 +708,7 @@ impl TileBuilder<'_> {
             AtlasBinding::new(
                 Some(atlases.clone()),
                 None,
-                Some(ID_FILL_EXTRUSION_IMAGE_TEXTURE),
+                Some(IMAGE_SLOT),
                 /*is_text=*/ false,
                 false,
                 AlignmentType::Auto,
@@ -759,8 +750,8 @@ impl TileBuilder<'_> {
         }
         if self.walls == Walls::Pulled {
             for draw in draws.iter_mut().filter(|draw| draw.walls) {
-                draw.objects.read_as_storage(ID_FILL_EXTRUSION_WALL_VERTICES, Some(vertices.clone()));
-                draw.objects.read_as_storage(ID_FILL_EXTRUSION_WALL_PAINT, paint.cloned());
+                draw.objects.read_as_storage(WALL_VERTICES_ID, Some(vertices.clone()));
+                draw.objects.read_as_storage(WALL_PAINT_ID, paint.cloned());
             }
         }
 
@@ -816,7 +807,7 @@ impl TileBuilder<'_> {
             }
             if self.walls == Walls::Pulled && draw.walls {
                 cached.paint_layout = paint_layout(attrs);
-                draw.objects.read_as_storage(ID_FILL_EXTRUSION_WALL_PAINT, paint.clone());
+                draw.objects.read_as_storage(WALL_PAINT_ID, paint.clone());
             }
         }
     }
@@ -883,10 +874,7 @@ impl RenderFillExtrusionLayer {
         let num_tiles = 2f64.powi(i32::from(tile_id.canonical.z));
         let height_factor = (-num_tiles / TILE_SIZE_D / 8.0) as f32;
 
-        let texture = draw
-            .objects
-            .texture(ID_FILL_EXTRUSION_IMAGE_TEXTURE)
-            .and_then(|texture| parameters.context.texture(texture));
+        let texture = draw.objects.texture(IMAGE_SLOT).and_then(|texture| parameters.context.texture(texture));
         let texture_size = texture.map_or(Size::new(0, 0), Texture2D::size);
         let pattern = evaluated.fill_extrusion_pattern.faded();
         let tlbr = |id: &str| tile_bucket.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
@@ -950,10 +938,10 @@ impl RenderFillExtrusionLayer {
             to_scale: crossfade.to_scale,
             pad2: 0.0,
         };
-        writer.uniform(ID_FILL_EXTRUSION_PROPS_UBO, &props);
-        writer.storage(ID_FILL_EXTRUSION_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-        writer.storage(ID_FILL_EXTRUSION_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
-        writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+        writer.uniform(PROPS_ID, &props);
+        writer.storage(DRAWABLE_ID, |uniforms| uniforms.draw_ubo);
+        writer.storage(TILE_PROPS_ID, |uniforms| uniforms.tile_props);
+        writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
     }
 }
 

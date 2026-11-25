@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::fill_layer_ubo::{
     FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO,
     FillPatternTilePropsUBO, FillTilePropsUnionUBO,
@@ -11,12 +12,6 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::{
-    ID_FILL_DRAWABLE_UBO, ID_FILL_EVALUATED_PROPS_UBO, ID_FILL_IMAGE_TEXTURE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE,
-    ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OUTLINE_END_ATTRIBUTE, ID_FILL_OUTLINE_ENDS, ID_FILL_OUTLINE_PAINT,
-    ID_FILL_OUTLINE_POS_ATTRIBUTE, ID_FILL_OUTLINE_VERTICES, ID_FILL_POS_VERTEX_ATTRIBUTE, ID_FILL_TILE_PROPS_UBO,
-    ID_PROJECTION_UBO,
-};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_style::PropertyEvaluationParameters;
 use mln_style::layer::LayerStyle;
@@ -53,6 +48,17 @@ use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
 use crate::tile_matrix::{projection_data, to_projection_ubo};
+
+/// The ids of the buffers that the draws bind.
+const DRAWABLE_ID: usize = programs::FILL.buffer_id("drawableVector");
+const TILE_PROPS_ID: usize = programs::FILL_PATTERN.buffer_id("tilePropsVector");
+const PROPS_ID: usize = programs::FILL.buffer_id("props");
+const OUTLINE_VERTICES_ID: usize = programs::FILL_OUTLINE_PULLED.buffer_id("outlineVertices");
+const OUTLINE_ENDS_ID: usize = programs::FILL_OUTLINE_PULLED.buffer_id("outlineEnds");
+const OUTLINE_PAINT_ID: usize = programs::FILL_OUTLINE_PULLED.buffer_id("outlinePaint");
+
+/// The slots of the programs' textures that the draws bind.
+const IMAGE_SLOT: usize = programs::FILL_PATTERN.texture_slot("image");
 
 /// The outlines' line width, which the style spec doesn't give. The render
 /// tests' expected images have outlines of 1 px and of 2 px; the outline
@@ -106,10 +112,10 @@ impl Outlines {
 /// the vertices that `attrs`, the paint attributes, read
 /// (`FillOutlineDrawableUBO::paint_layout`).
 pub(crate) fn outline_paint_layout(attrs: &VertexAttributeArray) -> u32 {
-    let (color, opacity) = (ID_FILL_OUTLINE_COLOR_VERTEX_ATTRIBUTE, ID_FILL_OPACITY_VERTEX_ATTRIBUTE);
-    let shared = |id: usize| attrs.get(id).and_then(|attribute| attribute.shared());
+    let (color, opacity) = ("outline_color", "opacity");
+    let shared = |name: &str| attrs.get(name).and_then(|attribute| attribute.shared());
     let words = |bytes: u32| (bytes / 4) & 0xff;
-    let offset = |id: usize| shared(id).map_or(0, |attribute| words(attribute.offset));
+    let offset = |name: &str| shared(name).map_or(0, |attribute| words(attribute.offset));
     let stride = [color, opacity].into_iter().find_map(shared).map_or(0, |attribute| words(attribute.stride));
     stride | offset(color) << 8 | offset(opacity) << 16
 }
@@ -231,10 +237,7 @@ impl OutlineQuad {
         let mut attributes = VertexAttributeArray::new();
         {
             let stride = size_of::<[i16; 2]>() as u32;
-            attributes.set_shared(
-                ID_FILL_POS_VERTEX_ATTRIBUTE,
-                SharedAttribute::new(vertices, AttributeDataType::Short2, 0, stride),
-            );
+            attributes.set_shared("pos", SharedAttribute::new(vertices, AttributeDataType::Short2, 0, stride));
         }
         OutlineQuad { vertex_count, indexes, attributes }
     }
@@ -281,7 +284,7 @@ impl TileBuilder<'_> {
         let fill_vertex_count = bucket.vertices.len();
         if let Some(vertices) = bucket_vertices(geometry, &bucket.vertices) {
             vertex_attrs.set_shared(
-                ID_FILL_POS_VERTEX_ATTRIBUTE,
+                "pos",
                 SharedAttribute::new(
                     vertices,
                     AttributeDataType::Short2,
@@ -317,7 +320,7 @@ impl TileBuilder<'_> {
             AtlasBinding::new(
                 Some(atlases.clone()),
                 None,
-                Some(ID_FILL_IMAGE_TEXTURE),
+                Some(IMAGE_SLOT),
                 /*is_text*/ false,
                 /*sdf_icons*/ true, // to force linear filter
                 AlignmentType::Auto,
@@ -358,24 +361,21 @@ impl TileBuilder<'_> {
                     quad_geometry,
                     atlases.as_ref(),
                 );
-                for (id, vertices) in
-                    [(ID_FILL_OUTLINE_VERTICES, &bucket.vertices), (ID_FILL_OUTLINE_ENDS, &bucket.outline_ends)]
+                for (id, vertices) in [(OUTLINE_VERTICES_ID, &bucket.vertices), (OUTLINE_ENDS_ID, &bucket.outline_ends)]
                 {
                     draw.objects.read_as_storage(id, Some(bucket_vertices(geometry, vertices)?));
                 }
-                draw.objects.read_as_storage(ID_FILL_OUTLINE_PAINT, paint.clone());
+                draw.objects.read_as_storage(OUTLINE_PAINT_ID, paint.clone());
                 draw.paint_layout = Some(outline_paint_layout(&vertex_attrs));
                 Some(draw)
             } else if let Some(quad) = self.outline_quad {
                 let stride = size_of::<FillLayoutVertex>() as u32;
                 let mut instance_attrs = VertexAttributeArray::new();
                 binders.bind(evaluated, paint.as_ref(), &mut instance_attrs, &mut Uniforms::default());
-                for (id, ends) in [
-                    (ID_FILL_OUTLINE_POS_ATTRIBUTE, &bucket.vertices),
-                    (ID_FILL_OUTLINE_END_ATTRIBUTE, &bucket.outline_ends),
-                ] {
+                for (name, ends) in [("outline_pos", &bucket.vertices), ("outline_end", &bucket.outline_ends)] {
                     if let Some(ends) = bucket_vertices(geometry, ends) {
-                        instance_attrs.set_shared(id, SharedAttribute::new(ends, AttributeDataType::Short2, 0, stride));
+                        instance_attrs
+                            .set_shared(name, SharedAttribute::new(ends, AttributeDataType::Short2, 0, stride));
                     }
                 }
                 let quad_geometry = DrawGeometry {
@@ -569,8 +569,7 @@ impl RenderFillLayer {
 
         let faded = evaluated.fill_pattern.faded();
         let tlbr = |id: &str| tile_bucket.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
-        let texture =
-            draw.objects.texture(ID_FILL_IMAGE_TEXTURE).and_then(|texture| parameters.context.texture(texture));
+        let texture = draw.objects.texture(IMAGE_SLOT).and_then(|texture| parameters.context.texture(texture));
         let texture_size = texture.map_or(Size::new(0, 0), Texture2D::size);
         // A pattern has nothing to sample before its tile has an atlas, and
         // the shaders divide by the atlas size.
@@ -601,10 +600,10 @@ impl RenderFillLayer {
             from_scale: layer.crossfade.from_scale,
             to_scale: layer.crossfade.to_scale,
         };
-        writer.uniform(ID_FILL_EVALUATED_PROPS_UBO, &props);
-        writer.storage(ID_FILL_DRAWABLE_UBO, |uniforms| uniforms.draw_ubo);
-        writer.storage(ID_FILL_TILE_PROPS_UBO, |uniforms| uniforms.tile_props);
-        writer.storage(ID_PROJECTION_UBO, |uniforms| uniforms.projection);
+        writer.uniform(PROPS_ID, &props);
+        writer.storage(DRAWABLE_ID, |uniforms| uniforms.draw_ubo);
+        writer.storage(TILE_PROPS_ID, |uniforms| uniforms.tile_props);
+        writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
     }
 }
 
@@ -748,7 +747,7 @@ impl TypedLayer for RenderFillLayer {
                             if changes.paint {
                                 let mut attrs = VertexAttributeArray::new();
                                 let paint = refresh(&mut attrs);
-                                outline.objects.read_as_storage(ID_FILL_OUTLINE_PAINT, paint);
+                                outline.objects.read_as_storage(OUTLINE_PAINT_ID, paint);
                                 outline.paint_layout = Some(outline_paint_layout(&attrs));
                             }
                         }

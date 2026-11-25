@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::{GpuError, ShaderKey};
 use mln_gfx::shaders::program::Program;
-use mln_glsl::{AttributeInfo, Module, ResourceUse, ShaderSource, Stage};
+use mln_glsl::{Module, ResourceUse, ShaderSource, Stage};
 use mln_util::hash::HashMap;
 use parking_lot::Mutex;
 
@@ -25,12 +25,13 @@ pub struct ShaderCompiler {
 #[derive(Debug)]
 pub struct CompiledProgram {
     pub name: &'static str,
+    /// The program it is compiled from, and its GLSL.
+    pub program: &'static Program,
+    pub source: &'static ShaderSource,
     pub vertex: Vec<u8>,
     pub fragment: Vec<u8>,
     /// The resources the stages use, each once.
     pub resources: Vec<ResourceUse>,
-    pub attributes: &'static [AttributeInfo],
-    pub instance_attributes: &'static [AttributeInfo],
     /// Whether the vertex stage reads the vertex index, which includes the
     /// base vertex in naga's special constants.
     pub reads_vertex_index: bool,
@@ -101,14 +102,6 @@ impl ShaderCompiler {
         };
         let vertex = compile(Stage::Vertex)?;
         let fragment = compile(Stage::Fragment)?;
-        Ok(CompiledProgram {
-            name: program.name,
-            vertex,
-            fragment,
-            resources,
-            attributes: source.attributes,
-            instance_attributes: source.instance_attributes,
-            reads_vertex_index,
-        })
+        Ok(CompiledProgram { name: program.name, program, source, vertex, fragment, resources, reads_vertex_index })
     }
 }

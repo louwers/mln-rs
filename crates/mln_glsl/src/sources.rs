@@ -3942,47 +3942,29 @@ void main() {
 ",
 };
 
-/// How the terrain's DEM decodes: a `TerrainPropsUBO`.
-macro_rules! terrain_props_struct {
-    () => {
-        r"
-
-// How the terrain's DEM decodes, its exaggeration and its skirts' length.
-struct TerrainProps {
-    vec4 unpack;
-    float unpack_scale;
-    float exaggeration;
-    float skirt_length;
-    float pad0;
-};
-"
-    };
-}
-
 /// The height rule of `mln_util::dem`, over the DEM tile a draw reads: its
-/// RGBA8 texels behind a one-texel border, decoded by a `TerrainProps`. A
-/// macro, so that `concat!` puts it in the vertex stages that read the DEM:
-/// a fragment stage would need a sampler for the texture.
+/// RGBA8 texels behind a one-texel border, decoded by the terrain's uniform
+/// block, which comes before it. A macro, so that `concat!` puts it in the
+/// vertex stages that read the DEM: a fragment stage would need a sampler
+/// for the texture.
 macro_rules! ground_height {
     () => {
-        concat!(
-            terrain_props_struct!(),
-            r"
+        r"
 layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 2) uniform texture2D ground_dem_texture;
 
 // The height in meters of the DEM's bordered texel at `texel`, clamped to the
-// texture, decoded by `props`.
-float ground_texel_height(const ivec2 texel, const TerrainProps props) {
+// texture, decoded by `terrain_props`.
+float ground_texel_height(const ivec2 texel) {
     const ivec2 last = textureSize(ground_dem_texture, 0) - 1;
     const vec3 rgb = round(texelFetch(ground_dem_texture, clamp(texel, ivec2(0), last), 0).rgb * 255.0);
-    const vec4 unpack = props.unpack;
-    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * props.unpack_scale;
+    const vec4 unpack = terrain_props.unpack;
+    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * terrain_props.unpack_scale;
 }
 
 // The height in meters, exaggerated, at `pos` in tile units of a tile that
 // reads its DEM at `dem_coords`: the DEM uv's scale and offset, then the
 // DEM's width in pixels, 0 for flat ground.
-float ground_height(const vec2 pos, const vec4 dem_coords, const TerrainProps props) {
+float ground_height(const vec2 pos, const vec4 dem_coords) {
     const float dim = dem_coords.w;
     if (dim == 0.0) {
         return 0.0;
@@ -3991,27 +3973,31 @@ float ground_height(const vec2 pos, const vec4 dem_coords, const TerrainProps pr
     const vec2 first = floor(coord);
     const vec2 f = coord - first;
     const ivec2 texel = ivec2(first);
-    const float tl = ground_texel_height(texel, props);
-    const float tr = ground_texel_height(texel + ivec2(1, 0), props);
-    const float bl = ground_texel_height(texel + ivec2(0, 1), props);
-    const float br = ground_texel_height(texel + ivec2(1, 1), props);
+    const float tl = ground_texel_height(texel);
+    const float tr = ground_texel_height(texel + ivec2(1, 0));
+    const float bl = ground_texel_height(texel + ivec2(0, 1));
+    const float br = ground_texel_height(texel + ivec2(1, 1));
     const float top = tl * (1.0 - f.x) + tr * f.x;
     const float bottom = bl * (1.0 - f.x) + br * f.x;
-    return (top * (1.0 - f.y) + bottom * f.y) * props.exaggeration;
+    return (top * (1.0 - f.y) + bottom * f.y) * terrain_props.exaggeration;
 }
 "
-        )
     };
 }
 
-/// The terrain's uniform block, a `TerrainSurfaceUBO`, after a
-/// `TerrainProps`, and `fogged`, which covers a color of the surface with
-/// its fog.
+/// The terrain's uniform block, a `TerrainSurfaceUBO`, and `fogged`, which
+/// covers a color of the surface with its fog.
 macro_rules! terrain_block {
     () => {
         r"
-// The fog over the surface: a `TerrainFogUBO`.
-struct TerrainFog {
+// How the terrain's DEM decodes, its exaggeration and its skirts' length,
+// then the fog over the surface.
+layout(std140, set = LAYER_SET_INDEX, binding = idTerrainPropsUBO) uniform TerrainPropsUBO {
+    vec4 unpack;
+    float unpack_scale;
+    float exaggeration;
+    float skirt_length;
+    float pad0;
     // Linear and premultiplied.
     vec4 fog_color;
     vec4 horizon_color;
@@ -4019,27 +4005,23 @@ struct TerrainFog {
     vec2 depth_range;
     float ground_blend;
     float horizon_blend;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idTerrainPropsUBO) uniform TerrainPropsUBO {
-    TerrainProps props;
-    TerrainFog fog;
 } terrain_props;
 
 // `color`, premultiplied, of the surface `view_depth` pixels along the
-// view, covered by `fog`, as GL JS's terrain is: mixed in linear components
-// toward the fog's color by the square of how far past the ground blend the
-// fog's depth is. The fog's alpha weighs its color; the coverage stays.
-vec4 fogged(const vec4 color, const float view_depth, const TerrainFog fog) {
-    const float near = fog.depth_range.x;
-    const float far = fog.depth_range.y;
+// view, covered by the fog of `terrain_props`, as GL JS's terrain is: mixed
+// in linear components toward the fog's color by the square of how far past
+// the ground blend the fog's depth is. The fog's alpha weighs its color; the
+// coverage stays.
+vec4 fogged(const vec4 color, const float view_depth) {
+    const float near = terrain_props.depth_range.x;
+    const float far = terrain_props.depth_range.y;
     const float depth = min(far / (far - near) * (1.0 - near / view_depth), 1.0);
-    if (fog.ground_blend >= 1.0 || depth <= fog.ground_blend || color.a == 0.0) {
+    if (terrain_props.ground_blend >= 1.0 || depth <= terrain_props.ground_blend || color.a == 0.0) {
         return color;
     }
-    const float horizon = smoothstep(0.0, 1.0, (depth - fog.horizon_blend) / max(1.0 - fog.horizon_blend, 1e-6));
-    const vec4 tint = mix(fog.fog_color, fog.horizon_color, horizon);
-    const float along = (depth - fog.ground_blend) / (1.0 - fog.ground_blend);
+    const float horizon = smoothstep(0.0, 1.0, (depth - terrain_props.horizon_blend) / max(1.0 - terrain_props.horizon_blend, 1e-6));
+    const vec4 tint = mix(terrain_props.fog_color, terrain_props.horizon_color, horizon);
+    const float along = (depth - terrain_props.ground_blend) / (1.0 - terrain_props.ground_blend);
     const float strength = along * along;
     const vec3 surface = pow(color.rgb / color.a, vec3(2.2));
     const vec3 mixed = surface * (1.0 - strength * tint.a) + tint.rgb * strength;
@@ -4049,22 +4031,22 @@ vec4 fogged(const vec4 color, const float view_depth, const TerrainFog fog) {
     };
 }
 
-/// The surface's and the probe's vertex prelude: the height rule, the
-/// terrain's uniform block, and the height of the surface's vertices.
+/// The surface's and the probe's vertex prelude: the terrain's uniform
+/// block, the height rule, and the height of the surface's vertices.
 macro_rules! terrain_props {
     () => {
         concat!(
-            ground_height!(),
             terrain_block!(),
+            ground_height!(),
             r"
 
 // The height of the surface's vertex at `pos`, in tile units of a tile that
 // reads its DEM at `dem_coords`: the ground's, or sea level at a pole.
-float surface_height(const vec2 pos, const vec4 dem_coords, const TerrainProps props) {
+float surface_height(const vec2 pos, const vec4 dem_coords) {
     if (pos.y < GLOBE_POLE_NORTH_Y || pos.y > GLOBE_POLE_SOUTH_Y) {
         return 0.0;
     }
-    return ground_height(pos, dem_coords, props);
+    return ground_height(pos, dem_coords);
 }
 "
         )
@@ -4304,15 +4286,14 @@ void main() {
     const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
     const vec2 pos = vec2(in_pos.xy);
     const float skirt = float(in_pos.z);
-    const float height = surface_height(pos, drawable.dem_coords, terrain_props.props);
-    gl_Position = projectTileFor3D(pos, height - skirt * terrain_props.props.skirt_length, projection);
+    const float height = surface_height(pos, drawable.dem_coords);
+    gl_Position = projectTileFor3D(pos, height - skirt * terrain_props.skirt_length, projection);
     frag_drape_pos = clamp(pos / 8192.0, vec2(0.0), vec2(1.0));
     frag_view_depth = gl_Position.w;
 }
 "
     ),
     fragment: concat!(
-        terrain_props_struct!(),
         terrain_block!(),
         r"
 
@@ -4335,7 +4316,7 @@ void main() {
     const vec4 color = texture(sampler2D(drape_texture, drape_sampler), frag_drape_pos);
     const HillshadeTilePropsUBO light = tilePropsVector.tile_props_ubo[constant.ubo_index];
     if (light.num_lights == 0 || color.a == 0.0) {
-        out_color = fogged(color, frag_view_depth, terrain_props.fog);
+        out_color = fogged(color, frag_view_depth);
         return;
     }
     // The tile's latitudes run from its north edge, where the drape's rows
@@ -4343,7 +4324,7 @@ void main() {
     const float latitude = mix(light.latrange.x, light.latrange.y, frag_drape_pos.y);
     const vec2 deriv = ((color.rg / color.a) * 8.0 - 4.0) / cos(radians(latitude));
     hillshade(deriv, light);
-    out_color = fogged(out_color * color.a, frag_view_depth, terrain_props.fog);
+    out_color = fogged(out_color * color.a, frag_view_depth);
 }
 "
     ),
@@ -4385,8 +4366,8 @@ void main() {
     const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
     const vec2 pos = vec2(in_pos.xy);
     const float skirt = float(in_pos.z);
-    const float height = surface_height(pos, drawable.dem_coords, terrain_props.props);
-    gl_Position = projectTileFor3D(pos, height - skirt * terrain_props.props.skirt_length, projection);
+    const float height = surface_height(pos, drawable.dem_coords);
+    gl_Position = projectTileFor3D(pos, height - skirt * terrain_props.skirt_length, projection);
     frag_distance = gl_Position.w;
 }
 "
@@ -4424,7 +4405,7 @@ layout(location = 1) in vec4 in_dem_coords;
 layout(location = 0) flat out float frag_height;
 
 void main() {
-    frag_height = ground_height(in_pos.zw, in_dem_coords, terrain_props.props);
+    frag_height = ground_height(in_pos.zw, in_dem_coords);
     gl_Position = vec4(in_pos.xy, 0.0, 1.0);
 }
 "

@@ -7,7 +7,7 @@ use mln_util::dem::{self, DemCoords, DemUnpack};
 use mln_util::size::Size;
 use mln_util::tileset::RasterEncoding;
 
-use super::{EXTENT, buffer, draw, dynamic, fixed, whole};
+use super::{EXTENT, buffer, draw, dynamic, fixed, location, slot, whole};
 use crate::color_mode::ColorMode;
 use crate::gfx_types::AttributeDataType;
 use crate::gpu::{
@@ -15,13 +15,10 @@ use crate::gpu::{
     LoadOp, PassDesc, PipelineDesc, Scissor, ShaderId, ShaderKey, StencilState, TargetFormats, TextureDesc,
     TextureFormat, TextureRegion, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep, read_texels,
 };
+use crate::shaders::bindings::PROJECTION_ID;
 use crate::shaders::layer_ubo::ProjectionUBO;
 use crate::shaders::programs;
-use crate::shaders::shader_defines::{
-    ID_PROJECTION_UBO, ID_TERRAIN_DEM_TEXTURE, ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE,
-    ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE, ID_TERRAIN_PROPS_UBO,
-};
-use crate::shaders::terrain_ubo::{TerrainFogUBO, TerrainPropsUBO, TerrainSurfaceUBO};
+use crate::shaders::terrain_ubo::TerrainSurfaceUBO;
 use crate::stencil_mode::StencilMode;
 use crate::texture2d::SamplerState;
 
@@ -231,13 +228,10 @@ fn probe(
     gpu.write_texture(texture, TextureRegion::whole(Size::new(side, side)), &dem.texels)?;
     let sampler = gpu.create_sampler(&SamplerState::default())?;
     let props = TerrainSurfaceUBO {
-        props: TerrainPropsUBO {
-            unpack: dem.unpack.weights_and_base(),
-            unpack_scale: dem.unpack.scale,
-            exaggeration: dem.exaggeration,
-            ..TerrainPropsUBO::default()
-        },
-        fog: TerrainFogUBO::NONE,
+        unpack: dem.unpack.weights_and_base(),
+        unpack_scale: dem.unpack.scale,
+        exaggeration: dem.exaggeration,
+        ..TerrainSurfaceUBO::default()
     };
     let props = bytemuck::bytes_of(&props);
     let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
@@ -250,9 +244,9 @@ fn probe(
         label: "terrain probes",
         shader,
         entries: &[
-            BindGroupEntry::Texture { id: ID_TERRAIN_DEM_TEXTURE as u32, texture, sampler },
-            whole(ID_TERRAIN_PROPS_UBO, props_buffer, props),
-            whole(ID_PROJECTION_UBO, projection_buffer, projection),
+            BindGroupEntry::Texture { slot: slot(&programs::TERRAIN_PROBE, "ground_dem"), texture, sampler },
+            whole(const { programs::TERRAIN_PROBE.buffer_id("terrain") }, props_buffer, props),
+            whole(PROJECTION_ID, projection_buffer, projection),
         ],
     })?;
 
@@ -273,14 +267,15 @@ fn probe(
     let vertices = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&vertices))?;
     let index_count = indices.len() as u32;
     let indices = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&indices))?;
-    let attribute = |id: usize, offset| VertexAttribute { id: id as u32, format: AttributeDataType::Float4, offset };
+    let attribute = |name, offset| VertexAttribute {
+        location: location(&programs::TERRAIN_PROBE, name),
+        format: AttributeDataType::Float4,
+        offset,
+    };
     let layouts = [VertexBufferLayout {
         stride: 32,
         step: VertexStep::Vertex,
-        attributes: vec![
-            attribute(ID_TERRAIN_PROBE_POS_VERTEX_ATTRIBUTE, 0),
-            attribute(ID_TERRAIN_PROBE_DEM_COORDS_VERTEX_ATTRIBUTE, 16),
-        ],
+        attributes: vec![attribute("pos", 0), attribute("dem_coords", 16)],
     }];
     let geometry = gpu.create_geometry(&GeometryDesc {
         shader,
