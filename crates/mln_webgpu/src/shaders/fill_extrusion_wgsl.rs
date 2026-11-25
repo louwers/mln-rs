@@ -19,7 +19,7 @@
 use super::shader_source::WgslShaderSource;
 use super::wgsl_sources;
 
-/// The vertex output, UBOs and bindings of the plain shaders.
+/// The vertex output and the lighting of the plain shaders.
 macro_rules! plain_declarations {
     () => {
         r#"
@@ -27,44 +27,6 @@ struct VertexOutput {
     @builtin(position) @invariant position: vec4<f32>,
     @location(0) color: vec4<f32>,
 };
-
-struct FillExtrusionDrawableUBO {
-    matrix: mat4x4<f32>,
-    pixel_coord_upper: vec2<f32>,
-    pixel_coord_lower: vec2<f32>,
-    height_factor: f32,
-    tile_ratio: f32,
-    base_t: f32,
-    height_t: f32,
-    color_t: f32,
-    pattern_from_t: f32,
-    pattern_to_t: f32,
-    paint_layout: u32,
-};
-
-struct FillExtrusionPropsUBO {
-    color: vec4<f32>,
-    light_color_pad: vec4<f32>,
-    light_position_base: vec4<f32>,
-    height: f32,
-    light_intensity: f32,
-    vertical_gradient: f32,
-    opacity: f32,
-    fade: f32,
-    from_scale: f32,
-    to_scale: f32,
-    pad2: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-@group(0) @binding(2) var<storage, read> drawableVector: array<FillExtrusionDrawableUBO>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
-@group(0) @binding(6) var<uniform> props: FillExtrusionPropsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 
 // The color of a surface facing `normal`, at `t` (0 at the base, 1 at the
 // top) of a wall.
@@ -74,7 +36,7 @@ fn lit_color(in_color: vec4<f32>, normal: vec3<f32>, t: f32, baseValue: f32, hei
     let luminance = dot(in_color.rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
     let color = in_color + vec4<f32>(0.03, 0.03, 0.03, 1.0);
 
-    let directionalFraction = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    let directionalFraction = clamp(dot(normal, props.light_position), 0.0, 1.0);
     let minDirectional = 1.0 - props.light_intensity;
     let maxDirectional = max(1.0 - luminance + props.light_intensity, 1.0);
     var directional = mix(minDirectional, maxDirectional, directionalFraction);
@@ -85,7 +47,7 @@ fn lit_color(in_color: vec4<f32>, normal: vec3<f32>, t: f32, baseValue: f32, hei
         directional *= (1.0 - props.vertical_gradient) + props.vertical_gradient * factor;
     }
 
-    let lightColor = props.light_color_pad.xyz;
+    let lightColor = props.light_color;
     let minLight = mix(vec3<f32>(0.0), vec3<f32>(0.3), 1.0 - lightColor);
     let lit = clamp(color.rgb * directional * lightColor, minLight, vec3<f32>(1.0));
 
@@ -97,7 +59,7 @@ fn lit_color(in_color: vec4<f32>, normal: vec3<f32>, t: f32, baseValue: f32, hei
     };
 }
 
-/// The vertex output, UBOs and bindings of the pattern shaders.
+/// The vertex output, the lighting and the pattern of the pattern shaders.
 macro_rules! pattern_declarations {
     () => {
         r#"
@@ -114,71 +76,11 @@ struct VertexOutput {
 #endif
 };
 
-struct FillExtrusionPatternDrawableUBO {
-    matrix: mat4x4<f32>,
-    pixel_coord_upper: vec2<f32>,
-    pixel_coord_lower: vec2<f32>,
-    height_factor: f32,
-    tile_ratio: f32,
-    base_t: f32,
-    height_t: f32,
-    color_t: f32,
-    pattern_from_t: f32,
-    pattern_to_t: f32,
-    pad1: f32,
-};
-
-struct FillExtrusionPatternTilePropsUBO {
-    pattern_from: vec4<f32>,
-    pattern_to: vec4<f32>,
-    texsize: vec2<f32>,
-    pad1: f32,
-    pad2: f32,
-};
-
-struct FillExtrusionPropsUBO {
-    color: vec4<f32>,
-    light_color_pad: vec4<f32>,
-    light_position_base: vec4<f32>,
-    height: f32,
-    light_intensity: f32,
-    vertical_gradient: f32,
-    opacity: f32,
-    fade: f32,
-    from_scale: f32,
-    to_scale: f32,
-    pad2: f32,
-};
-
-struct GlobalPaintParamsUBO {
-    pattern_atlas_texsize: vec2<f32>,
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    symbol_fade_change: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    map_zoom: f32,
-    pad1: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
-@group(0) @binding(2) var<storage, read> drawableVector: array<FillExtrusionPatternDrawableUBO>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
-@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillExtrusionPatternTilePropsUBO>;
-@group(0) @binding(6) var<uniform> props: FillExtrusionPropsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
-
 // The lighting of a surface facing `normal`, at `t` (0 at the base, 1 at the
 // top) of a wall.
 fn lighting_of(normal: vec3<f32>, t: f32, baseValue: f32, heightValue: f32) -> vec4<f32> {
     var lighting = vec4<f32>(0.0, 0.0, 0.0, 1.0);
-    var directional = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    var directional = clamp(dot(normal, props.light_position), 0.0, 1.0);
     directional = mix(1.0 - props.light_intensity, max(0.5 + props.light_intensity, 1.0), directional);
 
     if (normal.z == 0.0) {
@@ -187,7 +89,7 @@ fn lighting_of(normal: vec3<f32>, t: f32, baseValue: f32, heightValue: f32) -> v
         directional *= (1.0 - props.vertical_gradient) + props.vertical_gradient * factor;
     }
 
-    let lightColor = props.light_color_pad.xyz;
+    let lightColor = props.light_color;
     let lit = clamp(directional * lightColor,
                     mix(vec3<f32>(0.0), vec3<f32>(0.3), 1.0 - lightColor),
                     vec3<f32>(1.0));
@@ -197,7 +99,7 @@ fn lighting_of(normal: vec3<f32>, t: f32, baseValue: f32, heightValue: f32) -> v
 
 // Sets the output's pattern positions and data-driven patterns for the point
 // `patternPos` of the pattern's plane.
-fn set_pattern(out: ptr<function, VertexOutput>, drawable: FillExtrusionPatternDrawableUBO,
+fn set_pattern(out: ptr<function, VertexOutput>, drawable: FillExtrusionDrawableUBO,
                patternFrom: vec4<f32>, patternTo: vec4<f32>, patternPos: vec2<f32>) {
 #ifndef HAS_UNIFORM_u_pattern_from
     (*out).pattern_from = patternFrom;
@@ -235,7 +137,7 @@ macro_rules! base_and_height {
 #ifndef HAS_UNIFORM_u_base
     let baseValue = max(unpack_mix_float(in.base, drawable.base_t), 0.0);
 #else
-    let baseValue = max(props.light_position_base.w, 0.0);
+    let baseValue = max(props.base, 0.0);
 #endif
 
 #ifndef HAS_UNIFORM_u_height
@@ -317,14 +219,14 @@ macro_rules! wall {
     let edge = normalize(p2 - p1);
     let own = vec2<f32>(-edge.y, edge.x);
     let normal = vec3<f32>(
-        select(wall_normal(in.next_decimals_ed.x, own), wall_normal(in.decimals_ed.x, own), in.position.x == 0),
+        select(wall_normal(in.next_decimals_ed.x, own), wall_normal(in.decimals_ed.x, own), in.pos.x == 0),
         0.0,
     );
 
-    let t = f32(in.position.y);
+    let t = f32(in.pos.y);
     let z = select(baseZ, heightZ, t > 0.0);
 
-    out.position = projectTileFor3D(select(p2, p1, in.position.x == 0), z, projectionVector[globalIndex.value]);
+    out.position = projectTileFor3D(select(p2, p1, in.pos.x == 0), z, projectionVector[globalIndex.value]);
 "#
     };
 }
@@ -333,22 +235,6 @@ macro_rules! wall {
 pub(crate) const FILL_EXTRUSION_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(concat!(
         r#"
-struct VertexInput {
-    @location(0) position: vec2<i32>,
-    @location(1) decimals_ed: vec2<u32>,
-#ifndef HAS_UNIFORM_u_color
-    @location(2) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_base
-    @location(3) base: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_height
-    @location(4) height: vec2<f32>,
-#endif
-#ifdef TERRAIN
-    @location(10) ground_height: f32,
-#endif
-};
 "#,
         plain_declarations!(),
         r#"
@@ -360,7 +246,7 @@ fn main(in: VertexInput) -> VertexOutput {
         base_and_height!(),
         stand!(),
         r#"
-    out.position = projectTileFor3D(vec2<f32>(in.position), heightZ, projectionVector[globalIndex.value]);
+    out.position = projectTileFor3D(vec2<f32>(in.pos), heightZ, projectionVector[globalIndex.value]);
 
 #ifdef OVERDRAW_INSPECTOR
     out.color = vec4<f32>(1.0, 1.0, 1.0, 1.0);
@@ -385,25 +271,6 @@ fn main(in: VertexInput) -> VertexOutput {
 pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(concat!(
         r#"
-struct VertexInput {
-    @location(0) position: vec2<i32>,
-    @location(1) outline_pos: vec2<i32>,
-    @location(2) decimals_ed: vec2<u32>,
-    @location(3) next_outline_pos: vec2<i32>,
-    @location(4) next_decimals_ed: vec2<u32>,
-#ifndef HAS_UNIFORM_u_color
-    @location(5) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_base
-    @location(6) base: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_height
-    @location(7) height: vec2<f32>,
-#endif
-#ifdef TERRAIN
-    @location(10) ground_height: f32,
-#endif
-};
 "#,
         plain_declarations!(),
         wall_normal!(),
@@ -436,33 +303,13 @@ fn main(in: VertexInput) -> VertexOutput {
     prelude: None,
 };
 
-/// The paint values' buffer of the pulled walls, where a paint property is
-/// data-driven.
-macro_rules! wall_paint {
-    () => {
-        r#"
-#ifndef HAS_UNIFORM_u_color
-@group(0) @binding(8) var<storage, read> wallPaint: array<f32>;
-#else
-#ifndef HAS_UNIFORM_u_base
-@group(0) @binding(8) var<storage, read> wallPaint: array<f32>;
-#else
-#ifndef HAS_UNIFORM_u_height
-@group(0) @binding(8) var<storage, read> wallPaint: array<f32>;
-#endif
-#endif
-#endif
-"#
-    };
-}
-
 /// The pulled fill extrusion walls.
 pub(crate) const FILL_EXTRUSION_PULLED_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(concat!(
         r#"
 // What the instanced walls read as attributes.
 struct VertexInput {
-    position: vec2<i32>,
+    pos: vec2<i32>,
     outline_pos: vec2<i32>,
     decimals_ed: vec2<u32>,
     next_outline_pos: vec2<i32>,
@@ -484,17 +331,10 @@ struct VertexInput {
         plain_declarations!(),
         wall_normal!(),
         r#"
-// The bucket's vertices, two words each: the position's x and y in the
-// halves of the first, `decimals_ed`'s in those of the second.
-@group(0) @binding(7) var<storage, read> wallVertices: array<u32>;
-#ifdef TERRAIN
-// Over terrain, the height of the ground under each of the bucket's
-// vertices' polygon's centroid.
-@group(0) @binding(9) var<storage, read> wallHeights: array<f32>;
-#endif
-"#,
-        wall_paint!(),
-        r#"
+// `wallVertices` holds the bucket's vertices, two words each: the
+// position's x and y in the halves of the first, `decimals_ed`'s in those
+// of the second. Over terrain, `wallHeights` holds the height of the ground
+// under each of the bucket's vertices' polygon's centroid.
 @vertex
 fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     var out: VertexOutput;
@@ -510,7 +350,7 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     let next_decimals_ed = wallVertices[vertex + 3u];
 
     var in: VertexInput;
-    in.position = vec2<i32>(i32(corner < 2u), i32(corner & 1u));
+    in.pos = vec2<i32>(i32(corner < 2u), i32(corner & 1u));
     in.outline_pos = vec2<i32>(i32(pos << 16u) >> 16u, i32(pos) >> 16u);
     in.decimals_ed = vec2<u32>(decimals_ed & 0xffffu, decimals_ed >> 16u);
     in.next_outline_pos = vec2<i32>(i32(next_pos << 16u) >> 16u, i32(next_pos) >> 16u);
@@ -563,25 +403,6 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(concat!(
         r#"
-struct VertexInput {
-    @location(0) position: vec2<i32>,
-    @location(1) decimals_ed: vec2<u32>,
-#ifndef HAS_UNIFORM_u_base
-    @location(2) base: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_height
-    @location(3) height: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-    @location(4) pattern_from: vec4<u32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-    @location(5) pattern_to: vec4<u32>,
-#endif
-#ifdef TERRAIN
-    @location(10) ground_height: f32,
-#endif
-};
 "#,
         pattern_declarations!(),
         r#"
@@ -594,10 +415,10 @@ fn main(in: VertexInput) -> VertexOutput {
         patterns!(),
         stand!(),
         r#"
-    out.position = projectTileFor3D(vec2<f32>(in.position), heightZ, projectionVector[globalIndex.value]);
+    out.position = projectTileFor3D(vec2<f32>(in.pos), heightZ, projectionVector[globalIndex.value]);
 
     out.lighting = lighting_of(vec3<f32>(0.0, 0.0, 1.0), 1.0, baseValue, heightValue);
-    set_pattern(&out, drawable, patternFrom, patternTo, vec2<f32>(in.position));
+    set_pattern(&out, drawable, patternFrom, patternTo, vec2<f32>(in.pos));
     return out;
 }
 "#
@@ -610,28 +431,6 @@ fn main(in: VertexInput) -> VertexOutput {
 pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(concat!(
         r#"
-struct VertexInput {
-    @location(0) position: vec2<i32>,
-    @location(1) outline_pos: vec2<i32>,
-    @location(2) decimals_ed: vec2<u32>,
-    @location(3) next_outline_pos: vec2<i32>,
-    @location(4) next_decimals_ed: vec2<u32>,
-#ifndef HAS_UNIFORM_u_base
-    @location(5) base: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_height
-    @location(6) height: vec2<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-    @location(7) pattern_from: vec4<u32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-    @location(8) pattern_to: vec4<u32>,
-#endif
-#ifdef TERRAIN
-    @location(10) ground_height: f32,
-#endif
-};
 "#,
         pattern_declarations!(),
         wall_normal!(),
@@ -648,7 +447,7 @@ fn main(in: VertexInput) -> VertexOutput {
         r#"
     // The pattern runs along the outline: p1's side is at the next vertex's
     // edge distance.
-    let edgedistance = f32(select(in.decimals_ed.y, in.next_decimals_ed.y, in.position.x == 0));
+    let edgedistance = f32(select(in.decimals_ed.y, in.next_decimals_ed.y, in.pos.x == 0));
 
     out.lighting = lighting_of(normal, t, baseValue, heightValue);
     set_pattern(&out, drawable, patternFrom, patternTo, vec2<f32>(edgedistance, z * drawable.height_factor));

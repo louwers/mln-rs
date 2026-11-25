@@ -1,24 +1,31 @@
 // Compiles every built-in program's WGSL as `WebGpu::create_shader` does, in
 // both projection variants, with and without the overdraw inspector, with
 // every property it declares read per vertex and with every one read from
-// its uniform.
+// its uniform, and makes a pipeline of each, whose layouts are its
+// declaration's.
 
 use std::collections::BTreeSet;
 
+use mln_gfx::color_mode::ColorMode;
+use mln_gfx::cull_face_mode::CullFaceMode;
+use mln_gfx::depth_mode::DepthMode;
+use mln_gfx::gfx_types::DrawModeType;
+use mln_gfx::gpu::{DepthState, FixedState, StencilState, VertexAttribute, VertexBufferLayout, VertexStep};
 use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_gfx::stencil_mode::StencilMode;
 
 use crate::gpu::VERTEX_STAGE_STORAGE_BUFFERS;
 use crate::index_table::IndexTable;
 use crate::shaders::shader_program::compile;
-use crate::shaders::shader_source::{BUILT_INS, ShaderSource, prelude};
+use crate::shaders::shader_source::{BUILT_INS, WgslShaderSource, prelude};
 
 /// The names after the `HAS_UNIFORM_u_` that `source`'s WGSL tests.
-fn uniforms(source: &ShaderSource) -> BTreeSet<String> {
+fn uniforms(source: &WgslShaderSource) -> BTreeSet<String> {
     const PREFIX: &str = "HAS_UNIFORM_u_";
-    let wgsl = source.wgsl;
     let mut names = BTreeSet::new();
-    for text in [wgsl.prelude, wgsl.vertex, wgsl.fragment].into_iter().flatten() {
+    for text in [source.prelude, source.vertex, source.fragment].into_iter().flatten() {
         for (start, _) in text.match_indices(PREFIX) {
             let rest = &text[start + PREFIX.len()..];
             let end = rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_').unwrap_or(rest.len());
@@ -26,16 +33,6 @@ fn uniforms(source: &ShaderSource) -> BTreeSet<String> {
         }
     }
     names
-}
-
-/// The WGSL has a location for each of the program's attributes and a
-/// binding for each of its texture slots.
-#[test]
-fn every_program_has_wgsl_locations_of_its_attributes_and_textures() {
-    for &(program, source) in BUILT_INS {
-        assert_eq!(source.locations.len(), program.locations().count(), "{}", program.name);
-        assert_eq!(source.texture_bindings.len(), program.textures.len(), "{}", program.name);
-    }
 }
 
 /// A variant's defines read a property from its uniform only where the
@@ -73,7 +70,7 @@ fn every_layer_program_shows_the_overdraw_inspector() {
     for &(program, source) in BUILT_INS {
         if !not_layers.contains(&program) {
             assert!(
-                [source.wgsl.prelude, source.wgsl.vertex, source.wgsl.fragment]
+                [source.prelude, source.vertex, source.fragment]
                     .into_iter()
                     .flatten()
                     .any(|text| text.contains("OVERDRAW_INSPECTOR")),
@@ -82,6 +79,27 @@ fn every_layer_program_shows_the_overdraw_inspector() {
             );
         }
     }
+}
+
+/// A vertex buffer for each step of `program`'s attributes, of all of
+/// those that step by it, in their declared formats.
+fn vertex_layouts(program: &Program) -> Vec<VertexBufferLayout> {
+    [VertexStep::Vertex, VertexStep::Instance]
+        .into_iter()
+        .filter_map(|step| {
+            let mut stride = 0;
+            let attributes: Vec<VertexAttribute> = program
+                .locations()
+                .filter(|&(_, at, _)| at == step)
+                .map(|(location, _, attribute)| {
+                    let offset = stride;
+                    stride += attribute.format.stride() as u32;
+                    VertexAttribute { location: location as u32, format: attribute.format, offset }
+                })
+                .collect();
+            (!attributes.is_empty()).then_some(VertexBufferLayout { stride, step, attributes })
+        })
+        .collect()
 }
 
 #[test]
@@ -93,6 +111,14 @@ fn every_program_compiles() {
     let index_table = IndexTable::new(device);
     let mut failed = Vec::new();
     let parameters = [false, true].map(|overdraw| ProgramParameters::new(1.0, overdraw));
+    let state = FixedState {
+        primitive: DrawModeType::Triangles,
+        cull: CullFaceMode::disabled(),
+        blend: ColorMode::alpha_blended().blend_function,
+        color_mask: ColorMode::alpha_blended().mask,
+        depth: DepthState::from(&DepthMode::disabled()),
+        stencil: StencilState::from(&StencilMode::disabled()),
+    };
     for &(program, source) in BUILT_INS {
         for parameters in &parameters {
             for &variant in ProjectionVariant::of(program) {
@@ -100,8 +126,7 @@ fn every_program_compiles() {
                     let key = program.variant_key(parameters, uniforms, variant);
                     match compile(device, index_table.layout(), &key, source) {
                         Ok(compiled) => {
-                            let wgsl = source.wgsl;
-                            let text = [Some(prelude()), wgsl.prelude, wgsl.vertex, wgsl.fragment];
+                            let text = [Some(prelude()), source.prelude, source.vertex, source.fragment];
                             assert_eq!(
                                 compiled.index_group().is_some(),
                                 text.into_iter().flatten().any(|text| text.contains("globalIndex")),
@@ -113,6 +138,12 @@ fn every_program_compiles() {
                                 "{}'s vertex stage reads more than VERTEX_STAGE_STORAGE_BUFFERS storage buffers",
                                 program.name
                             );
+                            let color = Some(wgpu::TextureFormat::Rgba8Unorm);
+                            let depth = Some(wgpu::TextureFormat::Depth24PlusStencil8);
+                            if let Err(error) = compiled.render_pipeline(&vertex_layouts(program), &state, color, depth)
+                            {
+                                failed.push(format!("{} ({variant:?}, {:?}): {error}", program.name, key.defines()));
+                            }
                         }
                         Err(error) => {
                             failed.push(format!("{} ({variant:?}, {:?}): {error}", program.name, key.defines()));

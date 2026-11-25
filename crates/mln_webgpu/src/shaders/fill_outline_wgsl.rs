@@ -78,7 +78,7 @@ fn outline_corner(start: vec4<f32>, end: vec4<f32>, corner: vec2<i32>) -> Outlin
     };
 }
 
-/// The vertex output, UBOs and bindings of the outlines without a pattern.
+/// The vertex output of the outlines without a pattern.
 macro_rules! plain_declarations {
     () => {
         r#"
@@ -92,52 +92,6 @@ struct VertexOutput {
 #endif
     @location(2) pos: vec2<f32>,
 };
-
-struct FillOutlineDrawableUBO {
-    matrix: mat4x4<f32>,
-    outline_color_t: f32,
-    opacity_t: f32,
-    paint_layout: u32,
-    pad2: f32,
-};
-
-struct FillOutlineDrawableUnionUBO {
-    fill: FillOutlineDrawableUBO,
-    padding1: vec4<f32>,
-    padding2: vec4<f32>,
-};
-
-struct GlobalPaintParamsUBO {
-    pattern_atlas_texsize: vec2<f32>,
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    symbol_fade_change: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    map_zoom: f32,
-    pad1: f32,
-};
-
-struct FillOutlineEvaluatedPropsUBO {
-    color: vec4<f32>,
-    outline_color: vec4<f32>,
-    opacity: f32,
-    fade: f32,
-    from_scale: f32,
-    to_scale: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
-@group(0) @binding(2) var<storage, read> drawableVector: array<FillOutlineDrawableUnionUBO>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
-@group(0) @binding(6) var<uniform> props: FillOutlineEvaluatedPropsUBO;
 "#
     };
 }
@@ -146,17 +100,6 @@ struct GlobalIndexUBO {
 pub(crate) const FILL_OUTLINE_INSTANCED_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(concat!(
         r#"
-struct VertexInput {
-    @location(0) corner: vec2<i32>,
-    @location(3) outline_pos: vec2<i32>,
-    @location(4) outline_end: vec2<i32>,
-#ifndef HAS_UNIFORM_u_outline_color
-    @location(1) outline_color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(2) opacity: vec2<f32>,
-#endif
-};
 "#,
         plain_declarations!(),
         outline_corner!(),
@@ -165,12 +108,12 @@ struct VertexInput {
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
-    let drawable = drawableVector[globalIndex.value].fill;
+    let drawable = drawableVector[globalIndex.value];
     let projection = projectionVector[globalIndex.value];
     let start = vec2<f32>(in.outline_pos);
     let end = vec2<f32>(in.outline_end);
     let corner = outline_corner(projectTileWithPoles(start, start, projection),
-                                projectTileWithPoles(end, end, projection), in.corner);
+                                projectTileWithPoles(end, end, projection), in.pos);
     out.position = corner.position;
     out.pos = corner.pos;
 
@@ -194,18 +137,9 @@ pub(crate) const FILL_OUTLINE_PULLED_SHADER: WgslShaderSource = WgslShaderSource
     vertex: Some(concat!(
         plain_declarations!(),
         r#"
-// The fill's vertices and the ends of the outline segments that start at
-// them, a word each: x and y in its halves.
-@group(0) @binding(7) var<storage, read> outlineVertices: array<u32>;
-@group(0) @binding(8) var<storage, read> outlineEnds: array<u32>;
-#ifndef HAS_UNIFORM_u_outline_color
-@group(0) @binding(9) var<storage, read> outlinePaint: array<f32>;
-#else
-#ifndef HAS_UNIFORM_u_opacity
-@group(0) @binding(9) var<storage, read> outlinePaint: array<f32>;
-#endif
-#endif
-
+// `outlineVertices` and `outlineEnds` hold the fill's vertices and the ends
+// of the outline segments that start at them, a word each: x and y in its
+// halves.
 fn tile_position(word: u32) -> vec2<f32> {
     return vec2<f32>(vec2<i32>(i32(word << 16u) >> 16u, i32(word) >> 16u));
 }
@@ -216,7 +150,7 @@ fn tile_position(word: u32) -> vec2<f32> {
 fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     var out: VertexOutput;
 
-    let drawable = drawableVector[globalIndex.value].fill;
+    let drawable = drawableVector[globalIndex.value];
     let projection = projectionVector[globalIndex.value];
     // Four vertices a segment, in the order of the instanced quad's corners.
     let segment = vertex_index / 4u;
@@ -256,24 +190,6 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 pub(crate) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(concat!(
         r#"
-struct VertexInput {
-    @location(0) corner: vec2<i32>,
-    @location(9) outline_pos: vec2<i32>,
-    @location(10) outline_end: vec2<i32>,
-#ifndef HAS_UNIFORM_u_color
-    @location(5) color: vec4<f32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_from
-    @location(6) pattern_from: vec4<u32>,
-#endif
-#ifndef HAS_UNIFORM_u_pattern_to
-    @location(7) pattern_to: vec4<u32>,
-#endif
-#ifndef HAS_UNIFORM_u_opacity
-    @location(8) opacity: vec2<f32>,
-#endif
-};
-
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) v_pos_a: vec2<f32>,
@@ -292,61 +208,6 @@ struct VertexOutput {
     @location(6) opacity: f32,
 #endif
 };
-
-struct FillOutlinePatternDrawableUBO {
-    matrix: mat4x4<f32>,
-    pixel_coord_upper: vec2<f32>,
-    pixel_coord_lower: vec2<f32>,
-    tile_ratio: f32,
-    pattern_from_t: f32,
-    pattern_to_t: f32,
-    opacity_t: f32,
-    color_t: f32,
-    pad1: f32,
-    pad2: f32,
-    pad3: f32,
-};
-
-struct FillOutlinePatternTilePropsUBO {
-    pattern_from: vec4<f32>,
-    pattern_to: vec4<f32>,
-    texsize: vec2<f32>,
-    sdf: f32,
-    pad2: f32,
-};
-
-struct FillEvaluatedPropsUBO {
-    color: vec4<f32>,
-    outline_color: vec4<f32>,
-    opacity: f32,
-    fade: f32,
-    from_scale: f32,
-    to_scale: f32,
-};
-
-struct GlobalPaintParamsUBO {
-    pattern_atlas_texsize: vec2<f32>,
-    units_to_pixels: vec2<f32>,
-    world_size: vec2<f32>,
-    camera_to_center_distance: f32,
-    symbol_fade_change: f32,
-    aspect_ratio: f32,
-    pixel_ratio: f32,
-    map_zoom: f32,
-    pad1: f32,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-@group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
-@group(0) @binding(2) var<storage, read> drawableVector: array<FillOutlinePatternDrawableUBO>;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
-@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillOutlinePatternTilePropsUBO>;
-@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 "#,
         outline_corner!(),
         r#"
@@ -379,7 +240,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let start = vec2<f32>(in.outline_pos);
     let end = vec2<f32>(in.outline_end);
     let corner = outline_corner(projectTileWithPoles(start, start, projection),
-                                projectTileWithPoles(end, end, projection), in.corner);
+                                projectTileWithPoles(end, end, projection), in.pos);
     let pos = mix(start, end, corner.t);
 
     out.position = corner.position;

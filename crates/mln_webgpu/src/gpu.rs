@@ -22,8 +22,9 @@ use mln_util::size::Size;
 
 use crate::index_table::IndexTable;
 use crate::mipmaps::Mipmapper;
+use crate::shaders::declaration;
 use crate::shaders::shader_program::{self, BindingType, ShaderProgram, validated};
-use crate::shaders::shader_source::{BUILT_INS, ShaderSource};
+use crate::shaders::shader_source::{BUILT_INS, WgslShaderSource};
 use crate::writes::Writes;
 use crate::{CustomLayerEncoder, CustomLayerPass, Device};
 
@@ -199,7 +200,7 @@ pub struct WebGpu {
     textures: SlotMap<TextureId, Texture>,
     samplers: SlotMap<SamplerId, wgpu::Sampler>,
     /// The source each program compiles from.
-    sources: Sources<ShaderSource>,
+    sources: Sources<WgslShaderSource>,
     shaders: SlotMap<ShaderId, Shader>,
     layout_tags: LayoutTags,
     pipelines: SlotMap<PipelineId, Pipeline>,
@@ -528,7 +529,7 @@ fn texture_format(format: TextureFormat) -> wgpu::TextureFormat {
 }
 
 /// What `shader` reads from its bindings, by the shaders' ids.
-fn shader_bindings(shader: &ShaderProgram) -> Result<Vec<ShaderBinding>, GpuError> {
+fn shader_bindings(shader: &ShaderProgram) -> Vec<ShaderBinding> {
     let mut bindings = Vec::new();
     for &group in shader.bind_group_order() {
         if Some(group) == shader.index_group() {
@@ -536,22 +537,14 @@ fn shader_bindings(shader: &ShaderProgram) -> Result<Vec<ShaderBinding>, GpuErro
         }
         for info in shader.binding_infos(group) {
             let binding = match info.type_ {
-                BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer | BindingType::StorageBuffer => {
-                    ShaderBinding::Buffer { id: info.binding, min_size: shader.buffer_size(group, info.binding) }
+                BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer => {
+                    ShaderBinding::Buffer { id: info.binding, min_size: info.min_size }
                 }
                 BindingType::Sampler
                 | BindingType::NonFilteringSampler
                 | BindingType::Texture
                 | BindingType::UnfilterableTexture => {
-                    let sampler = matches!(info.type_, BindingType::Sampler | BindingType::NonFilteringSampler);
-                    let slot = shader.texture_at(info.binding, sampler).ok_or_else(|| {
-                        GpuError::Invalid(format!(
-                            "{} reads binding {}, which is no texture of its program",
-                            shader.name(),
-                            info.binding
-                        ))
-                    })?;
-                    ShaderBinding::Texture { slot: slot as u32 }
+                    ShaderBinding::Texture { slot: declaration::texture_slot(info.binding) as u32 }
                 }
             };
             if !bindings.contains(&binding) {
@@ -559,7 +552,7 @@ fn shader_bindings(shader: &ShaderProgram) -> Result<Vec<ShaderBinding>, GpuErro
             }
         }
     }
-    Ok(bindings)
+    bindings
 }
 
 /// The format of `format`, `None` for a format the interface has no name
@@ -824,7 +817,7 @@ impl Gpu for WebGpu {
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
         let source = self.sources.get(key.program())?;
         let program = shader_program::compile(self.device.device(), self.index_table.layout(), key, source)?;
-        let reads = shader_bindings(&program)?;
+        let reads = shader_bindings(&program);
         Ok(self.shaders.insert(Shader { program, reads }))
     }
 
@@ -860,9 +853,9 @@ impl Gpu for WebGpu {
         let program = &shader.program;
         let mut groups = Vec::new();
         let mut index_slot = None;
-        for (slot, &group) in program.bind_group_order().iter().enumerate() {
+        for &group in program.bind_group_order() {
             if Some(group) == program.index_group() {
-                index_slot = Some(slot as u32);
+                index_slot = Some(group);
                 continue;
             }
             let layout = program.bind_group_layout(group).ok_or(GpuError::UnknownId("bind group layout"))?;
@@ -877,7 +870,7 @@ impl Gpu for WebGpu {
                     ))
                 };
                 let resource = match info.type_ {
-                    BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer | BindingType::StorageBuffer => {
+                    BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer => {
                         let (buffer, offset, size) = desc
                             .entries
                             .iter()
@@ -900,7 +893,7 @@ impl Gpu for WebGpu {
                     | BindingType::Texture
                     | BindingType::UnfilterableTexture => {
                         let sampler = matches!(info.type_, BindingType::Sampler | BindingType::NonFilteringSampler);
-                        let texture_slot = program.texture_at(info.binding, sampler).ok_or_else(missing)? as u32;
+                        let texture_slot = declaration::texture_slot(info.binding) as u32;
                         let (texture, texture_sampler) = desc
                             .entries
                             .iter()
@@ -924,14 +917,14 @@ impl Gpu for WebGpu {
                 };
                 entries.push(wgpu::BindGroupEntry { binding: info.binding, resource });
             }
-            let group = self.validated(desc.label, |device| {
+            let bind_group = self.validated(desc.label, |device| {
                 device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some(desc.label),
                     layout,
                     entries: &entries,
                 })
             })?;
-            groups.push((slot as u32, group));
+            groups.push((group, bind_group));
         }
         let tags = BindingsTags { shader: desc.shader, elements };
         let id = self.bindings.insert(Bindings { groups, index_slot, tags });
