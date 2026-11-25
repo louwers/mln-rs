@@ -121,6 +121,8 @@ fn still(
         response.data = Some(Arc::new(dem_tile(z, x, y, &height)));
         Some(response)
     });
+    file_source
+        .set_response(Kind::Glyphs, |_| Some(crate::support::file_response("test/fixtures/resources/glyphs.pbf")));
     let options = MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() };
     let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
     frontend.attach(&mut map);
@@ -492,6 +494,40 @@ fn a_rendered_query_finds_a_translated_icon_where_it_draws() {
     let options = RenderedQueryOptions::new(Some(vec!["icons".to_owned()]), None);
     let found = frontend.renderer().query_rendered_features_at_point(&ScreenCoordinate::new(x, y), &options);
     assert_eq!(1, found.unwrap().len(), "the icon where it draws, at {x}, {y}");
+}
+
+/// A label at a variable anchor, aligned with the viewport and turned with
+/// the map, on ground that climbs steeply east through its anchor, shifts
+/// along the east the view shows at its anchor's height, as the shaders turn
+/// it and placement turns its box: a rendered query finds it where it draws.
+#[test]
+fn a_rendered_query_finds_a_label_at_a_variable_anchor_on_a_slope_where_it_draws() {
+    use mln_renderer::query::RenderedQueryOptions;
+    use mln_util::geo::ScreenCoordinate;
+
+    let (lng, lat) = (0.0105, 0.004);
+    let slope = move |x: f64, _: f64| ((x - lng) * 500_000.0).clamp(-1000.0, 1000.0);
+    let layer = r#"{"id": "labels", "type": "symbol", "source": "points",
+        "layout": {"text-field": "WWWW", "text-size": 24, "text-variable-anchor": ["left"], "text-radial-offset": 2,
+            "text-rotation-alignment": "map", "text-pitch-alignment": "viewport",
+            "text-allow-overlap": true, "text-ignore-placement": true},
+        "paint": {"text-color": "lime"}}"#;
+    let style = style(true, "mercator", [lng, lat, 12.0, 60.0], &[[lng, lat]], layer).replacen(
+        r#""sources": {"#,
+        r#""glyphs": "glyphs/{fontstack}/{range}.pbf", "sources": {"#,
+        1,
+    );
+    let Some((image, mut frontend)) = still(&style, slope) else {
+        return;
+    };
+    let (count, Some((x, y))) = lime_center(&image) else {
+        panic!("the label shows");
+    };
+    assert!(count > 16, "the label shows: {count} px");
+    let options = RenderedQueryOptions::new(Some(vec!["labels".to_owned()]), None);
+    let found = frontend.renderer().query_rendered_features_at_point(&ScreenCoordinate::new(x, y), &options);
+    assert_eq!(1, found.unwrap().len(), "the label where it draws, at {x}, {y}");
+    assert!(x > 128.0 + 24.0 && (y - 128.0).abs() < 24.0, "the label shifts east of its anchor, to {x}, {y}");
 }
 
 /// A rendered query over terrain finds a circle that stands on a plateau

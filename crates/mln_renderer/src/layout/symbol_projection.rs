@@ -237,14 +237,24 @@ impl<'a> LabelPlaneProjector<'a> {
 
     /// The height above sea level, in meters, that a symbol stands at over
     /// `tile_point`, before its translation, which moves it on screen only.
-    fn elevation(&self, tile_point: Vec2) -> f64 {
-        f64::from(self.heights.at(tile_point, self.height_offset))
+    #[must_use]
+    pub(crate) fn elevation(&self, tile_point: Vec2) -> f32 {
+        self.heights.at(tile_point, self.height_offset)
     }
 
-    /// Tile units to the label plane; distance and occlusion come from the
-    /// projection.
+    /// Tile units to the label plane, at the height of the ground under
+    /// `tile_point`: a point of the geometry a label is laid out along.
+    /// Distance and occlusion come from the projection.
     #[must_use]
     pub(crate) fn project(&self, tile_point: Vec2) -> ProjectedPoint {
+        self.project_at(tile_point, self.elevation(tile_point))
+    }
+
+    /// Tile units to the label plane, at `elevation` meters above sea
+    /// level: for a probe of a direction from an anchor, which the shaders
+    /// take at the anchor's height.
+    #[must_use]
+    pub(crate) fn project_at(&self, tile_point: Vec2, elevation: f32) -> ProjectedPoint {
         let translated = tile_point + self.translation;
         if self.pitch_with_map {
             let pos = self.pitched * translated.as_dvec2().extend(0.0).extend(1.0);
@@ -254,7 +264,7 @@ impl<'a> LabelPlaneProjector<'a> {
                 occluded: false,
             };
         }
-        let projected = self.tile.project(&tile_point_f64(translated), self.elevation(tile_point));
+        let projected = self.tile.project(&tile_point_f64(translated), f64::from(elevation));
         let clip = DVec2::new(projected.point.x, projected.point.y);
         ProjectedPoint {
             point: ((clip * DVec2::new(0.5, -0.5) + 0.5) * self.viewport.as_dvec2()).as_vec2(),
@@ -291,7 +301,7 @@ impl<'a> LabelPlaneProjector<'a> {
     /// Tile units straight to clip space.
     #[must_use]
     pub(crate) fn to_clip_space_from_tile(&self, tile_point: Vec2) -> ProjectedPoint {
-        self.tile.project(&tile_point_f64(tile_point), self.elevation(tile_point)).into()
+        self.tile.project(&tile_point_f64(tile_point), f64::from(self.elevation(tile_point))).into()
     }
 }
 

@@ -352,8 +352,9 @@ impl Placement {
                 label_plane.project(tile_anchor + (east * shift.x + south * shift.y) * correction).point
             } else if rotate_with_map {
                 // Viewport labels stay east-west aligned, so the shift
-                // follows the projected east.
-                let east = label_plane.project(tile_anchor + Vec2::X).point;
+                // follows the projected east, at the anchor's height, as
+                // the shaders and the collision box turn it.
+                let east = label_plane.project_at(tile_anchor + Vec2::X, label_plane.elevation(tile_anchor)).point;
                 let to_east = east - projected_anchor;
                 let angle = (to_east.y / to_east.x).atan() + if to_east.x < 0.0 { std::f32::consts::PI } else { 0.0 };
                 projected_anchor + Vec2::from_angle(angle).rotate(shift)
