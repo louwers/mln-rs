@@ -51,6 +51,8 @@ choice of `projection` and switches for `compare`, `debug` and `freeBearing`.
 The style picker's Satellite 3D and Liberty 3D are VersaTiles' Satellite and
 OpenFreeMap's Liberty with [Mapterhorn](https://mapterhorn.com)'s terrain added
 once they load, and Liberty 3D with a hillshade of it and a sky (web/styles.ts).
+The camera tilts up to 85°, past the map's default of 60°, to look across
+terrain.
 
 ## How it runs
 

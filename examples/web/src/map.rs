@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use mln_gestures::{GestureEvent, GestureRecognizer, Input, Modes, PointerKind};
-use mln_map::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, MapEvent};
+use mln_map::{AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, MapEvent};
 use mln_runtime::{
     AttachOptions, DemandMode, Error, EventMask, EventType, FrameDemand, FrameDisposition, LogicalExtent, Map,
     MapOptions, RenderSession, RenderTarget, Runtime, RuntimeEvent, RuntimeEventKind, RuntimeOptions, Surface,
@@ -194,6 +194,8 @@ impl WebMap {
             ..Default::default()
         };
         let (map, created) = runtime.create_map(options).map_err(js_error)?;
+        // Past the map's default of 60°, to look across terrain.
+        sent(map.set_bounds(BoundOptions { max_pitch: Some(MAX_PITCH), ..Default::default() }));
 
         let redraw = Arc::new(AtomicBool::new(true));
         let redraw_wake = Arc::clone(&redraw);
@@ -651,6 +653,10 @@ fn sent<T>(result: Result<T, Error>) -> Option<T> {
 fn log_refused(error: &Error) {
     Log::error(Event::General, format!("the map refused a command: {error}"));
 }
+
+/// How far the page lets the camera tilt, in degrees; compare.ts's GL JS
+/// map tilts as far.
+const MAX_PITCH: f64 = 85.0;
 
 /// web/styles.ts's `Terrain`.
 #[derive(Clone)]

@@ -134,6 +134,8 @@ export function compare(
     zoom,
     bearing,
     pitch,
+    // The page's map's (map.rs's MAX_PITCH).
+    maxPitch: 85,
     // The page shows the style's attribution for both maps.
     attributionControl: false,
   });
