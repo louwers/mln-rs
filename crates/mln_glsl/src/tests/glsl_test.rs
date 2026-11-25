@@ -1,8 +1,9 @@
 //! Parses and validates every program's GLSL with naga, as the backends
 //! compose it: `#version 450`, the `ProgramParameters` defines, a
 //! `HAS_UNIFORM_u_<name>` define per property passed as a uniform,
-//! `PROJECTION_GLOBE` for the globe variant, then the stage's prelude, the
-//! shader's prelude and the stage's source. Also checks that the buffers,
+//! `PROJECTION_GLOBE` for the globe variant, then the engine's declarations,
+//! the stage's prelude, the program's declarations and the stage's source.
+//! Also checks that the buffers,
 //! textures, samplers and vertex inputs the GLSL declares are the ones the
 //! descriptor set layouts and the program's declaration describe, that
 //! the buffers have the sizes of what the renderer binds there, and that the
@@ -17,7 +18,7 @@ use mln_gfx::shaders::bindings::{
     FIRST_UNIFORM_ID, FRAGMENT_DRAW_ID, MAX_ATTRIBUTES, PAINT_PARAMS_ID, PROJECTION_ID, VERTEX_DRAW_ID,
 };
 use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
-use mln_gfx::shaders::program::{Attribute, BufferKind, PAINT_PARAMS, Program};
+use mln_gfx::shaders::program::{Attribute, BufferKind, PAINT_PARAMS, Program, Variants};
 use mln_gfx::shaders::programs::{self, STANDING};
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
 
@@ -44,7 +45,7 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
     const PREFIX: &str = "HAS_UNIFORM_u_";
     for (program, source) in programs() {
         let mut tested = BTreeSet::new();
-        for text in [source.glsl.prelude, source.glsl.vertex, source.glsl.fragment] {
+        for text in [source.vertex, source.fragment] {
             for (start, _) in text.match_indices(PREFIX) {
                 let rest = &text[start + PREFIX.len()..];
                 let end = rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_').unwrap_or(rest.len());
@@ -81,9 +82,7 @@ fn every_layer_program_shows_the_overdraw_inspector() {
     for &(program, source) in BUILT_INS {
         if !not_layers.contains(&program) {
             assert!(
-                [source.glsl.prelude, source.glsl.vertex, source.glsl.fragment]
-                    .iter()
-                    .any(|text| text.contains("OVERDRAW_INSPECTOR")),
+                [source.vertex, source.fragment].iter().any(|text| text.contains("OVERDRAW_INSPECTOR")),
                 "{}",
                 program.name
             );
@@ -93,7 +92,9 @@ fn every_layer_program_shows_the_overdraw_inspector() {
 
 /// The module of a stage of `source` with `defines`, unvalidated.
 fn module(program: &Program, source: &ShaderSource, stage: Stage, defines: &str) -> Module {
-    parse(stage, &source.compose(stage, defines))
+    source
+        .compose(program, stage, defines)
+        .and_then(|composed| parse(stage, &composed))
         .unwrap_or_else(|error| panic!("{} ({stage:?}):\n{error}", program.name))
 }
 
@@ -107,7 +108,10 @@ fn every_stage_validates() {
     for (program, source) in programs() {
         for variant in variants(program, true) {
             for stage in STAGES {
-                match crate::Module::parse(stage, &source.compose(stage, &variant.defines)) {
+                match source
+                    .compose(program, stage, &variant.defines)
+                    .and_then(|composed| crate::Module::parse(stage, &composed))
+                {
                     Ok(_) => validated += 1,
                     Err(error) => failures.push(format!("{} ({}, {stage:?}):\n{error}", program.name, variant.name)),
                 }
@@ -152,7 +156,8 @@ impl Buffer {
 /// buffer (the union of the layer's blocks where it has several, a word of a
 /// vertex buffer).
 fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
-    let buffers = std::iter::once(&PAINT_PARAMS).chain(program.projection_buffer()).chain(program.buffers);
+    let paint_params = program.paint_params.map(|_| &PAINT_PARAMS);
+    let buffers = paint_params.into_iter().chain(program.projection_buffer()).chain(program.buffers);
     buffers
         .map(|buffer| {
             let at = match buffer.kind {
@@ -254,9 +259,9 @@ fn check_layout(set: u32, binding: u32, resource: Resource) -> Result<(), String
 
 // Every resource a stage declares has a binding of its kind in the
 // descriptor set layouts, the global set holds the paint parameters alone,
-// the stages declare the program's textures between them, a
-// fragment stage each of its own with its sampler and a vertex stage none,
-// since it fetches texels, and the push constants are the general pipeline
+// the stages declare the program's textures between them, each with its
+// sampler but those whose texels they read, and the push constants are the
+// general pipeline
 // layout's index or, for the clipping mask, its matrices.
 #[test]
 fn resources_are_in_the_descriptor_set_layouts() {
@@ -309,12 +314,11 @@ fn resources_are_in_the_descriptor_set_layouts() {
                 if !textures.is_subset(&table) {
                     fail(format!("textures at {textures:?}, the table has {table:?}"));
                 }
-                let sampled: BTreeSet<u32> = match stage {
-                    Stage::Vertex => BTreeSet::new(),
-                    Stage::Fragment => {
-                        textures.iter().map(|&binding| image_sampler_binding(binding as usize)).collect()
-                    }
-                };
+                let sampled: BTreeSet<u32> = textures
+                    .iter()
+                    .filter(|&&binding| program.textures[binding as usize].sampled())
+                    .map(|&binding| image_sampler_binding(binding as usize))
+                    .collect();
                 if samplers != sampled {
                     fail(format!("samplers at {samplers:?}, not {sampled:?}"));
                 }
@@ -339,6 +343,42 @@ fn resources_are_in_the_descriptor_set_layouts() {
                     "{} ({}): textures at {declared:?}, the table has {table:?}",
                     program.name, variant.name
                 ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The resources a program declares in a stage that doesn't read them: the
+/// collision boxes' tile properties, which have the id of a block that both
+/// stages read.
+const UNREAD_RESOURCES: &[(&str, Stage, (u32, u32))] = &[("CollisionBoxShader", Stage::Fragment, (2, 3))];
+
+// The stages that the program says read each of its buffers and textures, and
+// the paint parameters, read it in some variant: a stage declares only what
+// it reads.
+#[test]
+fn every_stage_reads_what_it_declares() {
+    let mut failures = Vec::new();
+    for (program, source) in programs() {
+        for stage in STAGES {
+            let (mut declared, mut read) = (BTreeSet::new(), BTreeSet::new());
+            for variant in variants(program, true) {
+                let module = source
+                    .compose(program, stage, &variant.defines)
+                    .and_then(|composed| crate::Module::parse(stage, &composed))
+                    .unwrap_or_else(|error| panic!("{} ({stage:?}): {error}", program.name));
+                let resources = resources(&module.module).unwrap_or_else(|message| panic!("{message}"));
+                declared.extend(resources.bindings.into_keys());
+                read.extend(module.resources().unwrap().iter().map(|resource| (resource.set, resource.binding)));
+            }
+            let unread: Vec<(u32, u32)> = declared
+                .difference(&read)
+                .copied()
+                .filter(|&binding| !UNREAD_RESOURCES.contains(&(program.name, stage, binding)))
+                .collect();
+            if !unread.is_empty() {
+                failures.push(format!("{} ({stage:?}): declares {unread:?} and reads none of them", program.name));
             }
         }
     }
@@ -461,17 +501,8 @@ fn stage_outputs(module: &Module) -> BTreeMap<u32, Varying> {
     outputs
 }
 
-/// The attributes a program has that its GLSL doesn't read, by program and
-/// location: the color relief's texture position, which its vertex stage
-/// works out from the position.
-const UNREAD_ATTRIBUTES: &[(&str, usize)] = &[("ColorReliefShader", 1)];
-
-/// The attribute only the variants that stand on terrain read: the height of
-/// the ground under their points.
-const STANDING_ATTRIBUTE: &str = "ground_height";
-
 // The inputs of a vertex stage are the program's vertex and instance
-// attributes, at their locations (`ShaderSource::location`) and in the types
+// attributes, at their locations (`Program::location`) and in the types
 // that read their formats, or, for a property's attribute, which may come as
 // one value instead of two, in types of as many components or more. With a
 // property as a uniform, the stage reads a subset of them.
@@ -484,17 +515,15 @@ fn vertex_inputs_are_the_programs_attributes() {
             let property = program.properties.iter().any(|property| property.name == attribute.name);
             declared_kind == kind && (declared == components || property && declared < components)
         };
-        let locations: BTreeSet<u32> = program.locations().map(|(location, ..)| source.location(location)).collect();
+        let locations: BTreeSet<u32> = program.locations().map(|(location, ..)| location as u32).collect();
         assert_eq!(locations.len(), program.locations().count(), "{}: attribute locations repeat", program.name);
         for variant in variants(program, true) {
-            let unread = |location: usize, attribute: &Attribute| {
-                UNREAD_ATTRIBUTES.contains(&(program.name, location))
-                    || (!variant.projection.stands() && attribute.name == STANDING_ATTRIBUTE)
-            };
+            let unread =
+                |attribute: &Attribute| attribute.variants == Variants::Standing && !variant.projection.stands();
             let table: BTreeMap<u32, &Attribute> = program
                 .locations()
-                .filter(|&(location, _, attribute)| !unread(location, attribute))
-                .map(|(location, _, attribute)| (source.location(location), attribute))
+                .filter(|&(_, _, attribute)| !unread(attribute))
+                .map(|(location, _, attribute)| (location as u32, attribute))
                 .collect();
             let inputs: BTreeMap<u32, (ScalarKind, u32)> =
                 stage_inputs(&module(program, source, Stage::Vertex, &variant.defines))
@@ -625,17 +654,13 @@ fn bindings_follow_from_the_packed_ids() {
     assert_eq!(image_sampler_binding(0), 3);
 }
 
-// No program has more attributes and textures than a shader can have, and a
-// GLSL that reads its attributes at locations of its own has one for each.
-// Only the fill extrusion walls and the instanced fill outlines have instance
+// No program has more attributes and textures than a shader can have. Only
+// the fill extrusion walls and the instanced fill outlines have instance
 // attributes.
 #[test]
 fn the_programs_fit_a_shader() {
-    for (program, source) in programs() {
+    for (program, _) in programs() {
         assert!(program.locations().count() <= MAX_ATTRIBUTES, "{}", program.name);
-        if let Some(locations) = source.locations {
-            assert_eq!(locations.len(), program.locations().count(), "{}", program.name);
-        }
         assert!(program.textures.len() <= IMAGE_TEXTURE_COUNT, "{}", program.name);
         let instanced = matches!(
             program.name,
@@ -674,7 +699,7 @@ fn every_property_binds_an_attribute_of_its_name() {
 #[test]
 fn no_stage_flips_y() {
     for (program, source) in programs() {
-        let text: String = source.glsl.vertex.chars().filter(|c| !c.is_whitespace()).collect();
+        let text: String = source.vertex.chars().filter(|c| !c.is_whitespace()).collect();
         assert!(!text.contains("gl_Position.y*=-1"), "{}", program.name);
         assert!(!text.contains("applySurfaceTransform"), "{}", program.name);
     }

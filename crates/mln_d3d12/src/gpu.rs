@@ -1910,7 +1910,7 @@ fn create_pipeline_state(
             elements.push(D3D12_INPUT_ELEMENT_DESC {
                 // naga's HLSL names a vertex input of location N `LOC`N.
                 SemanticName: s!("LOC"),
-                SemanticIndex: program.source.location(location as usize),
+                SemanticIndex: location,
                 Format: format,
                 InputSlot: slot as u32,
                 AlignedByteOffset: attribute.offset,

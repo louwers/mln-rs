@@ -180,7 +180,6 @@ enum Binding {
 /// A compiled program.
 pub(crate) struct Shader {
     program: &'static Program,
-    source: &'static ShaderSource,
     vertex: vk::ShaderModule,
     fragment: vk::ShaderModule,
     /// The bindings its stages use, by descriptor set.
@@ -190,11 +189,11 @@ pub(crate) struct Shader {
 }
 
 impl Shader {
-    /// The location the GLSL reads the program's attribute at `location` at,
-    /// if it steps by `step`.
+    /// `location`, where the program has an attribute there that steps by
+    /// `step`.
     fn location(&self, step: VertexStep, location: u32) -> Result<u32, GpuError> {
         match self.program.attribute_at(location as usize) {
-            Some((at, _)) if at == step => Ok(self.source.location(location as usize)),
+            Some((at, _)) if at == step => Ok(location),
             _ => Err(GpuError::Invalid(format!("{} has no {step:?} attribute at {location}", self.program.name))),
         }
     }
@@ -1086,8 +1085,9 @@ impl VulkanGpu {
             }
         };
         for stage in [Stage::Vertex, Stage::Fragment] {
-            let composed = source.compose(stage, &defines);
-            let result = shaders::compile_program(stage, &composed)
+            let result = source
+                .compose(key.program(), stage, &defines)
+                .and_then(|composed| shaders::compile_program(stage, &composed))
                 .map_err(|error| GpuError::Invalid(format!("{name}: {error}")))
                 .and_then(|compiled| {
                     for &ResourceUse { set, binding, size } in &compiled.resources {
@@ -1115,7 +1115,7 @@ impl VulkanGpu {
         }
         self.device.set_debug_name(modules[0], &format!("{name}.vert"));
         self.device.set_debug_name(modules[1], &format!("{name}.frag"));
-        Ok(Shader { program: key.program(), source, vertex: modules[0], fragment: modules[1], bindings, reads })
+        Ok(Shader { program: key.program(), vertex: modules[0], fragment: modules[1], bindings, reads })
     }
 
     /// The render pass of `key`, made on first use.

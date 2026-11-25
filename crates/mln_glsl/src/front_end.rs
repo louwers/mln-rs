@@ -35,9 +35,10 @@ impl Stage {
 }
 
 /// The source of a stage: the version, the program's defines (`#define`
-/// lines), the stage's prelude, and the shader's own prelude and source.
-pub(crate) fn compose(stage: Stage, defines: &str, shader_prelude: &str, source: &str) -> String {
-    format!("#version {GLSL_VERSION}\n{defines}\n{}\n{shader_prelude}\n{source}", stage.prelude())
+/// lines), the engine's declarations, the stage's prelude, which reads them,
+/// and the program's declarations and source.
+pub(crate) fn compose(stage: Stage, defines: &str, engine: &str, declarations: &str, source: &str) -> String {
+    format!("#version {GLSL_VERSION}\n{defines}\n{engine}{}\n{declarations}{source}", stage.prelude())
 }
 
 /// A resource that a stage's entry point uses.

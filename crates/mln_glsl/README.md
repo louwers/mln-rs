@@ -5,8 +5,8 @@
 > other mln-rs crates depend on it, and its API can change in any release
 > without notice. mln-rs doesn't re-export it.
 
-The GLSL that the Vulkan and D3D12 backends draw with, the tables of its vertex
-inputs and textures, its binding layout, and naga's front end for it. It is
+The GLSL that the Vulkan and D3D12 backends draw with, the declarations it
+writes from each program, its binding layout, and naga's front end for it. It is
 empty on Apple platforms and in the browser build.
 
 Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the

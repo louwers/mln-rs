@@ -3,7 +3,9 @@
 //!
 //! The GLSL (`sources`) is MapLibre Native's Vulkan GLSL, written for naga's
 //! GLSL front end ([`Module::parse`]). Its clip space is y-up, as naga's IR
-//! is: a back end for a y-down clip space flips Y.
+//! is: a back end for a y-down clip space flips Y. A program's declarations,
+//! what each stage reads of its buffers, textures and attributes, come from
+//! the program ([`ShaderSource::compose`]).
 //!
 //! The descriptor sets ([`layout`]) are the global uniform buffers, a layer's
 //! buffers, a drawable's uniform buffers with the vertex buffers its shader
@@ -20,6 +22,7 @@
 )]
 #![cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
 
+mod declarations;
 mod front_end;
 pub mod layout;
 mod program;

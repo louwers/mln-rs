@@ -25,9 +25,8 @@ pub struct ShaderCompiler {
 #[derive(Debug)]
 pub struct CompiledProgram {
     pub name: &'static str,
-    /// The program it is compiled from, and its GLSL.
+    /// The program it is compiled from.
     pub program: &'static Program,
-    pub source: &'static ShaderSource,
     pub vertex: Vec<u8>,
     pub fragment: Vec<u8>,
     /// The resources the stages use, each once.
@@ -86,7 +85,7 @@ impl ShaderCompiler {
         let mut resources: Vec<ResourceUse> = Vec::new();
         let mut reads_vertex_index = false;
         let mut compile = |stage| -> Result<Vec<u8>, String> {
-            let module = Module::parse(stage, &source.compose(stage, defines))?;
+            let module = Module::parse(stage, &source.compose(program, stage, defines)?)?;
             reads_vertex_index |= module.module.entry_points.iter().any(|entry_point| {
                 entry_point.function.arguments.iter().any(|argument| {
                     matches!(argument.binding, Some(naga::Binding::BuiltIn(naga::BuiltIn::VertexIndex)))
@@ -102,6 +101,6 @@ impl ShaderCompiler {
         };
         let vertex = compile(Stage::Vertex)?;
         let fragment = compile(Stage::Fragment)?;
-        Ok(CompiledProgram { name: program.name, program, source, vertex, fragment, resources, reads_vertex_index })
+        Ok(CompiledProgram { name: program.name, program, vertex, fragment, resources, reads_vertex_index })
     }
 }

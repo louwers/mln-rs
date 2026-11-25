@@ -18,10 +18,8 @@
 //   include/mln/shaders/vulkan/symbol.hpp
 // with the port's changes, so that it reads the vertices and UBOs its
 // renderer makes, and compiles with naga's GLSL front end:
-// - The buffers bind where `layout` puts the renderer's packed ids: a
-//   drawable's uniform buffers from binding 0, and the evaluated properties
-//   of the fill, fill extrusion and color relief layers one binding after
-//   the other layers'. There is no `GlobalPlatformParamsUBO`.
+// - The stages read what their programs declare (`declarations`) by its
+//   names there. There is no `GlobalPlatformParamsUBO`.
 // - A texture and its sampler are two bindings, `<name>_texture` and
 //   `<name>_sampler`, combined where they are sampled.
 // - Symbols read vertex attributes, with the port's `tex_origin` and
@@ -47,25 +45,15 @@
 // - Clip space is y-up, as in OpenGL, Metal, D3D and naga's IR: no stage
 //   flips Y (`applySurfaceTransform`), the SPIR-V back end does for Vulkan.
 
-use crate::program::GlslShaderSource;
+use crate::program::ShaderSource;
 
 /// What the terrain variant of a program that hides behind the ground in
 /// front of it reads of the ground's depth, within `#ifdef TERRAIN` of its
 /// vertex stage: whether that ground hides a point (`ground_visibility`).
-/// The texture is at binding 1, or at the binding given, of a program
-/// whose own textures take binding 1.
 macro_rules! ground_visibility {
     () => {
-        ground_visibility!("1")
-    };
-    ($binding:literal) => {
-        concat!(
-            r"
+        r"
 #ifdef TERRAIN
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = ",
-            $binding,
-            r") uniform texture2D ground_depth_texture;
-
 // GL JS's `depthOpacity`: 1 where a point `w` from the eye, at `ndc`, is in
 // front of the ground drawn there, fading to 0 behind it over GL JS's ramp
 // of its NDC depth, which `depth_factor` scales; 1 where no ground is drawn
@@ -105,7 +93,6 @@ float ground_visibility(const vec4 clip, const float view_height) {
 }
 #endif
 "
-        )
     };
 }
 
@@ -199,44 +186,6 @@ vec2 unpack_uint(uint value) {
 
     return vec2(low, high);
 }
-
-#define GLOBAL_SET_INDEX                    0
-#define LAYER_SET_INDEX                     1
-#define DRAWABLE_UBO_SET_INDEX              2
-#define DRAWABLE_IMAGE_SET_INDEX            3
-
-#define layerSSBOStartId                    0
-#define layerUBOStartId                     4
-#define drawableUBOStartId                  0
-
-#define idDrawableReservedVertexOnlyUBO     layerSSBOStartId
-#define idDrawableReservedFragmentOnlyUBO   idDrawableReservedVertexOnlyUBO + 1
-#define idProjectionUBO                     idDrawableReservedFragmentOnlyUBO + 1
-#define drawableReservedUBOCount            idProjectionUBO + 1
-
-layout(set = GLOBAL_SET_INDEX, binding = 0) uniform GlobalPaintParamsUBO {
-    vec2 pattern_atlas_texsize;
-    vec2 units_to_pixels;
-    vec2 world_size;
-    float camera_to_center_distance;
-    float symbol_fade_change;
-    float aspect_ratio;
-    float pixel_ratio;
-    float map_zoom;
-    float pad1;
-} paintParams;
-
-struct ProjectionUBO {
-    mat4 matrix;
-    mat4 fallback_matrix;
-    vec4 tile_mercator_coords;
-    vec4 clipping_plane;
-    float projection_transition;
-    float depth_offset;
-    vec2 translate;
-    vec4 anchor;
-    vec4 anchor_angles;
-};
 
 // Pole vertices carry these sentinel Y values in their raw position.
 #define GLOBE_POLE_NORTH_Y -32767.5
@@ -442,33 +391,6 @@ bool clippedAtAntimeridian(float tileX) {
 }
 #endif
 
-#define GLOBAL_SET_INDEX                    0
-#define LAYER_SET_INDEX                     1
-#define DRAWABLE_UBO_SET_INDEX              2
-#define DRAWABLE_IMAGE_SET_INDEX            3
-
-#define layerSSBOStartId                    0
-#define layerUBOStartId                     4
-#define drawableUBOStartId                  0
-#define samplerBindingStartId               3
-
-#define idDrawableReservedVertexOnlyUBO     layerSSBOStartId
-#define idDrawableReservedFragmentOnlyUBO   idDrawableReservedVertexOnlyUBO + 1
-#define idProjectionUBO                     idDrawableReservedFragmentOnlyUBO + 1
-#define drawableReservedUBOCount            idProjectionUBO + 1
-
-layout(set = GLOBAL_SET_INDEX, binding = 0) uniform GlobalPaintParamsUBO {
-    vec2 pattern_atlas_texsize;
-    vec2 units_to_pixels;
-    vec2 world_size;
-    float camera_to_center_distance;
-    float symbol_fade_change;
-    float aspect_ratio;
-    float pixel_ratio;
-    float map_zoom;
-    float pad1;
-} paintParams;
-
 // The atlas texture coordinate of an image's origin plus an offset from it,
 // both normalized by a power-of-two atlas size. Snapping the offset to 2^-24
 // makes the sum exact, so the sampled position, and the pixels, don't depend
@@ -481,53 +403,17 @@ vec2 atlas_pos(const vec2 origin, const vec2 offset) {
 
 ";
 
-pub(crate) const BACKGROUND_SHADER_PRELUDE: &str = r"
-
-#define idBackgroundDrawableUBO     idDrawableReservedVertexOnlyUBO
-#define idBackgroundPropsUBO        layerUBOStartId
-
-";
-
-pub(crate) const BACKGROUND_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: BACKGROUND_SHADER_PRELUDE,
+pub(crate) const BACKGROUND_SHADER: ShaderSource = ShaderSource {
     vertex: r"
 
-layout(location = 0) in ivec2 in_position;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct BackgroundDrawableUBO {
-    mat4 matrix;
-    vec4 pad1;
-    vec4 pad2;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idBackgroundDrawableUBO) readonly buffer BackgroundDrawableUBOVector {
-    BackgroundDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
 void main() {
-    const BackgroundDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const BackgroundDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_pos), vec2(in_pos), projectionVector.elements[constant.ubo_index]);
 }
 ",
     fragment: r"
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idBackgroundPropsUBO) uniform BackgroundPropsUBO {
-    vec4 color;
-    float opacity;
-    float pad1;
-    float pad2;
-    float pad3;
-} props;
 
 void main() {
 
@@ -541,64 +427,27 @@ void main() {
 ",
 };
 
-pub(crate) const BACKGROUND_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: BACKGROUND_SHADER_PRELUDE,
+pub(crate) const BACKGROUND_PATTERN_SHADER: ShaderSource = ShaderSource {
     vertex: r"
-layout(location = 0) in ivec2 in_position;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct BackgroundPatternDrawableUBO {
-    mat4 matrix;
-    vec2 pixel_coord_upper;
-    vec2 pixel_coord_lower;
-    float tile_units_to_pixels;
-    float pad1;
-    float pad2;
-    float pad3;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idBackgroundDrawableUBO) readonly buffer BackgroundPatternDrawableUBOVector {
-    BackgroundPatternDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-layout(set = LAYER_SET_INDEX, binding = idBackgroundPropsUBO) uniform BackgroundPatternPropsUBO {
-    vec2 pattern_tl_a;
-    vec2 pattern_br_a;
-    vec2 pattern_tl_b;
-    vec2 pattern_br_b;
-    vec2 pattern_size_a;
-    vec2 pattern_size_b;
-    float scale_a;
-    float scale_b;
-    float mix;
-    float opacity;
-} props;
 
 layout(location = 0) out vec2 frag_pos_a;
 layout(location = 1) out vec2 frag_pos_b;
 
 void main() {
-    const BackgroundPatternDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const BackgroundPatternDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
 
     frag_pos_a = get_pattern_pos(drawable.pixel_coord_upper,
                                  drawable.pixel_coord_lower,
                                  props.scale_a * props.pattern_size_a,
                                  drawable.tile_units_to_pixels,
-                                 in_position);
+                                 in_pos);
     frag_pos_b = get_pattern_pos(drawable.pixel_coord_upper,
                                  drawable.pixel_coord_lower,
                                  props.scale_b * props.pattern_size_b,
                                  drawable.tile_units_to_pixels,
-                                 in_position);
+                                 in_pos);
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_pos), vec2(in_pos), projectionVector.elements[constant.ubo_index]);
 }
 ",
     fragment: r"
@@ -606,22 +455,6 @@ layout(location = 0) in vec2 frag_pos_a;
 layout(location = 1) in vec2 frag_pos_b;
 
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idBackgroundPropsUBO) uniform BackgroundPatternLayerUBO {
-    vec2 pattern_tl_a;
-    vec2 pattern_br_a;
-    vec2 pattern_tl_b;
-    vec2 pattern_br_b;
-    vec2 pattern_size_a;
-    vec2 pattern_size_b;
-    float scale_a;
-    float scale_b;
-    float mix;
-    float opacity;
-} props;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;
 
 void main() {
 
@@ -652,94 +485,10 @@ void main() {
 ",
 };
 
-pub(crate) const CIRCLE_SHADER_PRELUDE: &str = r"
-
-#define idCircleDrawableUBO         idDrawableReservedVertexOnlyUBO
-#define idCircleEvaluatedPropsUBO   layerUBOStartId
-
-";
-
-pub(crate) const CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: CIRCLE_SHADER_PRELUDE,
+pub(crate) const CIRCLE_SHADER: ShaderSource = ShaderSource {
     vertex: concat!(
         ground_visibility!(),
         r"
-
-layout(location = 0) in ivec2 in_position;
-
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 1) in vec4 in_color;
-#endif
-
-#if !defined(HAS_UNIFORM_u_radius)
-layout(location = 2) in vec2 in_radius;
-#endif
-
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 3) in vec2 in_blur;
-#endif
-
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 4) in vec2 in_opacity;
-#endif
-
-#if !defined(HAS_UNIFORM_u_stroke_color)
-layout(location = 5) in vec4 in_stroke_color;
-#endif
-
-#if !defined(HAS_UNIFORM_u_stroke_width)
-layout(location = 6) in vec2 in_stroke_width;
-#endif
-
-#if !defined(HAS_UNIFORM_u_stroke_opacity)
-layout(location = 7) in vec2 in_stroke_opacity;
-#endif
-
-#ifdef TERRAIN
-// The height of the ground under the circle's center.
-layout(location = 8) in float in_ground_height;
-#endif
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct CircleDrawableUBO {
-    mat4 matrix;
-    vec2 extrude_scale;
-    // Interpolations
-    float color_t;
-    float radius_t;
-    float blur_t;
-    float opacity_t;
-    float stroke_color_t;
-    float stroke_width_t;
-    float stroke_opacity_t;
-    float globe_extrude_scale;
-    float pad2;
-    float pad3;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idCircleDrawableUBO) readonly buffer CircleDrawableUBOVector {
-    CircleDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-layout(set = LAYER_SET_INDEX, binding = idCircleEvaluatedPropsUBO) uniform CircleEvaluatedPropsUBO {
-    vec4 color;
-    vec4 stroke_color;
-    float radius;
-    float blur;
-    float opacity;
-    float stroke_width;
-    float stroke_opacity;
-    int scale_with_map;
-    int pitch_with_map;
-    float pad1;
-} props;
 
 layout(location = 0) out vec2 frag_extrude;
 layout(location = 1) out float frag_antialiasblur;
@@ -778,7 +527,7 @@ layout(location = 9) out float frag_visibility;
 #endif
 
 void main() {
-    const CircleDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const CircleDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_radius)
     const float radius = props.radius;
@@ -793,13 +542,13 @@ void main() {
 #endif
 
     // unencode the extrusion vector that we snuck into the a_pos vector
-    const vec2 extrude = mod(in_position, 2.0) * 2.0 - 1.0;
+    const vec2 extrude = mod(in_pos, 2.0) * 2.0 - 1.0;
     const vec2 scaled_extrude = extrude * drawable.extrude_scale;
 
     // multiply a_pos by 0.5, since we had it * 2 in order to sneak in extrusion data
-    const vec2 circle_center = floor(in_position * 0.5);
+    const vec2 circle_center = floor(in_pos * 0.5);
 
-    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector.elements[constant.ubo_index];
     // Over terrain, the circle stands on the ground under its center.
 #ifdef TERRAIN
     const float ele = in_ground_height;
@@ -933,19 +682,6 @@ layout(location = 9) in float frag_visibility;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = LAYER_SET_INDEX, binding = idCircleEvaluatedPropsUBO) uniform CircleEvaluatedPropsUBO {
-    vec4 color;
-    vec4 stroke_color;
-    float radius;
-    float blur;
-    float opacity;
-    float stroke_width;
-    float stroke_opacity;
-    int scale_with_map;
-    int pitch_with_map;
-    float pad1;
-} props;
-
 void main() {
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -1003,17 +739,10 @@ void main() {
 ",
 };
 
-pub(crate) const CLIPPING_MASK_PROGRAM: GlslShaderSource = GlslShaderSource {
-    prelude: "",
+pub(crate) const CLIPPING_MASK_PROGRAM: ShaderSource = ShaderSource {
     vertex: r"
-        layout(location = 0) in ivec2 position;
-
-        layout(std140, set = DRAWABLE_UBO_SET_INDEX, binding = drawableUBOStartId + 2) uniform ClipMaskProjectionUBO {
-            ProjectionUBO projection;
-        } clip;
-
         void main() {
-            gl_Position = projectTile(vec2(position), vec2(position), clip.projection);
+            gl_Position = projectTile(vec2(in_pos), vec2(in_pos), projection);
         }
     ",
     fragment: r"
@@ -1025,38 +754,8 @@ pub(crate) const CLIPPING_MASK_PROGRAM: GlslShaderSource = GlslShaderSource {
     ",
 };
 
-pub(crate) const COLLISION_SHADER_PRELUDE: &str = r"
-
-#define idCollisionDrawableUBO      drawableUBOStartId
-#define idCollisionTilePropsUBO     drawableUBOStartId + 3
-#define idCollisionProjectionUBO    drawableUBOStartId + 2
-
-";
-
-pub(crate) const COLLISION_BOX_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: COLLISION_SHADER_PRELUDE,
+pub(crate) const COLLISION_BOX_SHADER: ShaderSource = ShaderSource {
     vertex: r"
-
-layout(location = 0) in ivec2 in_position;
-layout(location = 1) in ivec2 in_anchor_position;
-layout(location = 2) in ivec2 in_extrude;
-layout(location = 3) in uvec2 in_placed;
-layout(location = 4) in vec2 in_shift;
-layout(location = 5) in float in_height_offset;
-
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionDrawableUBO) uniform CollisionDrawableUBO {
-    mat4 matrix;
-} drawable;
-
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionTilePropsUBO) uniform CollisionTilePropsUBO {
-    vec2 extrude_scale;
-    float overscale_factor;
-    float pad1;
-} tileProps;
-
-layout(std140, set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionProjectionUBO) uniform CollisionProjectionUBO {
-    ProjectionUBO projection;
-} collisionProjection;
 
 layout(location = 0) out float frag_placed;
 layout(location = 1) out float frag_notUsed;
@@ -1064,9 +763,9 @@ layout(location = 1) out float frag_notUsed;
 void main() {
 
 #ifdef PROJECTION_GLOBE
-    vec4 projectedPoint = projectTileWithElevation(vec2(in_anchor_position), in_height_offset, collisionProjection.projection);
+    vec4 projectedPoint = projectTileWithElevation(vec2(in_anchor_pos), in_height_offset, projection);
 #else
-    vec4 projectedPoint = drawable.matrix * vec4(in_anchor_position, in_height_offset, 1.0);
+    vec4 projectedPoint = drawable.matrix * vec4(in_anchor_pos, in_height_offset, 1.0);
 #endif
     float camera_to_anchor_distance = projectedPoint.w;
     float collision_perspective_ratio = clamp(
@@ -1075,15 +774,15 @@ void main() {
         4.0);
 
 #ifdef PROJECTION_GLOBE
-    gl_Position = projectTileWithElevation(vec2(in_position), in_height_offset, collisionProjection.projection);
+    gl_Position = projectTileWithElevation(vec2(in_pos), in_height_offset, projection);
     // Boxes just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
     if (gl_Position.z / gl_Position.w < 1.1) {
         gl_Position.z = 0.0;
     }
 #else
-    gl_Position = drawable.matrix * vec4(in_position, in_height_offset, 1.0);
+    gl_Position = drawable.matrix * vec4(in_pos, in_height_offset, 1.0);
 #endif
-    gl_Position.xy += (in_extrude + in_shift) * tileProps.extrude_scale * gl_Position.w * collision_perspective_ratio;
+    gl_Position.xy += (in_extrude + in_shift) * tile_props.extrude_scale * gl_Position.w * collision_perspective_ratio;
 
     frag_placed = in_placed.x;
     frag_notUsed = in_placed.y;
@@ -1118,28 +817,8 @@ void main() {
 ",
 };
 
-pub(crate) const COLLISION_CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: COLLISION_SHADER_PRELUDE,
+pub(crate) const COLLISION_CIRCLE_SHADER: ShaderSource = ShaderSource {
     vertex: r"
-
-layout(location = 0) in ivec2 in_position;
-layout(location = 1) in ivec2 in_anchor_position;
-layout(location = 2) in ivec2 in_extrude;
-layout(location = 3) in uvec2 in_placed;
-
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionDrawableUBO) uniform CollisionDrawableUBO {
-    mat4 matrix;
-} drawable;
-
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionTilePropsUBO) uniform CollisionTilePropsUBO {
-    vec2 extrude_scale;
-    float overscale_factor;
-    float pad1;
-} tileProps;
-
-layout(std140, set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionProjectionUBO) uniform CollisionProjectionUBO {
-    ProjectionUBO projection;
-} collisionProjection;
 
 layout(location = 0) out float frag_placed;
 layout(location = 1) out float frag_notUsed;
@@ -1150,9 +829,9 @@ layout(location = 4) out vec2 frag_extrude_scale;
 void main() {
 
 #ifdef PROJECTION_GLOBE
-    vec4 projectedPoint = projectTile(vec2(in_anchor_position), collisionProjection.projection);
+    vec4 projectedPoint = projectTile(vec2(in_anchor_pos), projection);
 #else
-    vec4 projectedPoint = drawable.matrix * vec4(in_anchor_position, 0, 1);
+    vec4 projectedPoint = drawable.matrix * vec4(in_anchor_pos, 0, 1);
 #endif
     float camera_to_anchor_distance = projectedPoint.w;
     float collision_perspective_ratio = clamp(
@@ -1162,21 +841,21 @@ void main() {
 
     float padding_factor = 1.2; // Pad the vertices slightly to make room for anti-alias blur
 #ifdef PROJECTION_GLOBE
-    gl_Position = projectTile(vec2(in_position), collisionProjection.projection);
+    gl_Position = projectTile(vec2(in_pos), projection);
     // Circles just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
     if (gl_Position.z / gl_Position.w < 1.1) {
         gl_Position.z = 0.0;
     }
 #else
-    gl_Position = drawable.matrix * vec4(in_position, 0.0, 1.0);
+    gl_Position = drawable.matrix * vec4(in_pos, 0.0, 1.0);
 #endif
-    gl_Position.xy += in_extrude * tileProps.extrude_scale * padding_factor * gl_Position.w * collision_perspective_ratio;
+    gl_Position.xy += in_extrude * tile_props.extrude_scale * padding_factor * gl_Position.w * collision_perspective_ratio;
 
     frag_placed = in_placed.x;
     frag_notUsed = in_placed.y;
     frag_radius = abs(float(in_extrude.y)); // We don't pitch the circles, so both units of the extrusion vector are equal in magnitude to the radius
     frag_extrude = in_extrude * padding_factor;
-    frag_extrude_scale = tileProps.extrude_scale * paintParams.camera_to_center_distance * collision_perspective_ratio;
+    frag_extrude_scale = tile_props.extrude_scale * paintParams.camera_to_center_distance * collision_perspective_ratio;
 }
 ",
     fragment: r"
@@ -1188,12 +867,6 @@ layout(location = 3) in vec2 frag_extrude;
 layout(location = 4) in vec2 frag_extrude_scale;
 
 layout(location = 0) out vec4 out_color;
-
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idCollisionTilePropsUBO) uniform CollisionTilePropsUBO {
-    vec2 extrude_scale;
-    float overscale_factor;
-    float pad1;
-} tileProps;
 
 void main() {
 
@@ -1214,7 +887,7 @@ void main() {
 
     float extrude_scale_length = length(frag_extrude_scale);
     float extrude_length = length(frag_extrude) * extrude_scale_length;
-    float stroke_width = 15.0 * extrude_scale_length / tileProps.overscale_factor;
+    float stroke_width = 15.0 * extrude_scale_length / tile_props.overscale_factor;
     float radius = frag_radius * extrude_scale_length;
 
     float distance_to_edge = abs(extrude_length - radius);
@@ -1225,97 +898,30 @@ void main() {
 ",
 };
 
-pub(crate) const COLOR_RELIEF_SHADER_PRELUDE: &str = r"
-
-#define idColorReliefDrawableUBO        idDrawableReservedVertexOnlyUBO
-#define idColorReliefTilePropsUBO       drawableReservedUBOCount
-#define idColorReliefEvaluatedPropsUBO  layerUBOStartId + 1
-
-";
-
-pub(crate) const COLOR_RELIEF_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: COLOR_RELIEF_SHADER_PRELUDE,
+pub(crate) const COLOR_RELIEF_SHADER: ShaderSource = ShaderSource {
     vertex: r"
-
-layout(location = 0) in ivec2 in_position;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct ColorReliefDrawableUBO {
-    mat4 matrix;
-};
-
-struct ColorReliefTilePropsUBO {
-    vec4 unpack;
-    vec2 dimension;
-    int color_ramp_size;
-    float unpack_scale;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idColorReliefDrawableUBO) readonly buffer ColorReliefDrawableUBOVector {
-    ColorReliefDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idColorReliefTilePropsUBO) readonly buffer ColorReliefTilePropsUBOVector {
-    ColorReliefTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
 
 layout(location = 0) out vec2 frag_position;
 
 void main() {
-    const ColorReliefDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-    const ColorReliefTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const ColorReliefDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
+    const ColorReliefTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_pos), vec2(in_pos), projectionVector.elements[constant.ubo_index]);
 
     vec2 epsilon = 1.0 / tileProps.dimension;
     float scale = (tileProps.dimension.x - 2.0) / tileProps.dimension.x;
-    frag_position = (vec2(in_position) / 8192.0) * scale + epsilon;
+    frag_position = (vec2(in_pos) / 8192.0) * scale + epsilon;
 
-    // Handle poles (use in_position to match GLSL a_pos)
-    if (float(in_position.y) < -32767.5) frag_position.y = 0.0;
-    if (float(in_position.y) > 32766.5) frag_position.y = 1.0;
+    // Handle poles (use in_pos to match GLSL a_pos)
+    if (float(in_pos.y) < -32767.5) frag_position.y = 0.0;
+    if (float(in_pos.y) > 32766.5) frag_position.y = 1.0;
 }
 ",
     fragment: r"
 
 layout(location = 0) in vec2 frag_position;
 layout(location = 0) out vec4 out_color;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct ColorReliefTilePropsUBO {
-    vec4 unpack;
-    vec2 dimension;
-    int color_ramp_size;
-    float unpack_scale;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idColorReliefTilePropsUBO) readonly buffer ColorReliefTilePropsUBOVector {
-    ColorReliefTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idColorReliefEvaluatedPropsUBO) uniform ColorReliefEvaluatedPropsUBO {
-    float opacity;
-    float pad_eval0;
-    float pad_eval1;
-    float pad_eval2;
-} props;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 1) uniform texture2D elevation_stops_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId + 1) uniform sampler elevation_stops_sampler;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 2) uniform texture2D color_stops_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId + 2) uniform sampler color_stops_sampler;
 
 // The height in meters of the DEM at `coord`, by the rule of
 // `mln_util::dem`. The channels aren't rounded: the decode is linear in
@@ -1344,7 +950,7 @@ void main() {
     return;
 #else
 
-    const ColorReliefTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const ColorReliefTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
     float el = getElevation(frag_position, tileProps.unpack, tileProps.unpack_scale);
 
@@ -1392,53 +998,8 @@ void main() {
 ",
 };
 
-pub(crate) const FILL_SHADER_PRELUDE: &str = r"
-
-#define idFillDrawableUBO           idDrawableReservedVertexOnlyUBO
-#define idFillTilePropsUBO          drawableReservedUBOCount
-#define idFillEvaluatedPropsUBO     layerUBOStartId + 1
-#define idFillOutlineVertices       drawableUBOStartId + 5
-#define idFillOutlineEnds           drawableUBOStartId + 6
-#define idFillOutlinePaint          drawableUBOStartId + 7
-
-";
-
-pub(crate) const FILL_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: FILL_SHADER_PRELUDE,
+pub(crate) const FILL_SHADER: ShaderSource = ShaderSource {
     vertex: r"
-
-layout(location = 0) in ivec2 in_position;
-
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 1) in vec4 in_color;
-#endif
-
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 2) in vec2 in_opacity;
-#endif
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct FillDrawableUBO {
-    mat4 matrix;
-    // Interpolations
-    float color_t;
-    float opacity_t;
-    float pad1;
-    float pad2;
-    vec4 pad3;
-    vec4 pad4;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillDrawableUBOVector {
-    FillDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
 
 #if !defined(HAS_UNIFORM_u_color)
 layout(location = 0) out vec4 frag_color;
@@ -1449,7 +1010,7 @@ layout(location = 1) out float frag_opacity;
 #endif
 
 void main() {
-    const FillDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const FillDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
 
 #if !defined(HAS_UNIFORM_u_color)
     frag_color = vec4(unpack_mix_color(in_color, drawable.color_t));
@@ -1459,7 +1020,7 @@ void main() {
     frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
 #endif
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_pos), vec2(in_pos), projectionVector.elements[constant.ubo_index]);
 }
 ",
     fragment: r"
@@ -1473,15 +1034,6 @@ layout(location = 1) in float frag_opacity;
 #endif
 
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBO {
-    vec4 color;
-    vec4 outline_color;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-} props;
 
 void main() {
 
@@ -1507,42 +1059,8 @@ void main() {
 ",
 };
 
-pub(crate) const FILL_OUTLINE_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: FILL_SHADER_PRELUDE,
+pub(crate) const FILL_OUTLINE_SHADER: ShaderSource = ShaderSource {
     vertex: r"
-
-layout(location = 0) in ivec2 in_position;
-
-#if !defined(HAS_UNIFORM_u_outline_color)
-layout(location = 1) in vec4 in_color;
-#endif
-
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 2) in vec2 in_opacity;
-#endif
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct FillOutlineDrawableUBO {
-    mat4 matrix;
-    // Interpolations
-    float outline_color_t;
-    float opacity_t;
-    float pad1;
-    float pad2;
-    vec4 pad3;
-    vec4 pad4;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillOutlineDrawableUBOVector {
-    FillOutlineDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
 
 #if !defined(HAS_UNIFORM_u_outline_color)
 layout(location = 0) out vec4 frag_color;
@@ -1555,17 +1073,17 @@ layout(location = 1) out float frag_opacity;
 layout(location = 2) out vec2 frag_position;
 
 void main() {
-    const FillOutlineDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const FillOutlineDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
 
 #if !defined(HAS_UNIFORM_u_outline_color)
-    frag_color = vec4(unpack_mix_color(in_color, drawable.outline_color_t));
+    frag_color = vec4(unpack_mix_color(in_outline_color, drawable.outline_color_t));
 #endif
 
 #if !defined(HAS_UNIFORM_u_opacity)
     frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
 #endif
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_pos), vec2(in_pos), projectionVector.elements[constant.ubo_index]);
 
     // From the top left, as gl_FragCoord is.
     frag_position = (vec2(1.0, -1.0) * gl_Position.xy / gl_Position.w + 1.0) / 2.0 * paintParams.world_size;
@@ -1584,15 +1102,6 @@ layout(location = 1) in float frag_opacity;
 layout(location = 2) in vec2 frag_position;
 
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBO {
-    vec4 color;
-    vec4 outline_color;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-} props;
 
 void main() {
 
@@ -1620,75 +1129,8 @@ void main() {
 ",
 };
 
-pub(crate) const FILL_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: FILL_SHADER_PRELUDE,
+pub(crate) const FILL_PATTERN_SHADER: ShaderSource = ShaderSource {
     vertex: r"
-
-layout(location = 0) in ivec2 in_position;
-
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 1) in vec4 in_color;
-#endif
-
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 2) in uvec4 in_pattern_from;
-#endif
-
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 3) in uvec4 in_pattern_to;
-#endif
-
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 4) in vec2 in_opacity;
-#endif
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct FillPatternDrawableUBO {
-    mat4 matrix;
-    vec2 pixel_coord_upper;
-    vec2 pixel_coord_lower;
-    float tile_ratio;
-    // Interpolations
-    float pattern_from_t;
-    float pattern_to_t;
-    float opacity_t;
-    float color_t;
-    float pad1;
-    float pad2;
-    float pad3;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillPatternDrawableUBOVector {
-    FillPatternDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-struct FillPatternTilePropsUBO {
-    vec4 pattern_from;
-    vec4 pattern_to;
-    vec2 texsize;
-    float sdf;
-    float pad2;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillTilePropsUBO) readonly buffer FillPatternTilePropsUBOVector {
-    FillPatternTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBO {
-    vec4 color;
-    vec4 outline_color;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-} props;
 
 layout(location = 0) out vec2 frag_pos_a;
 layout(location = 1) out vec2 frag_pos_b;
@@ -1710,8 +1152,8 @@ layout(location = 5) out float frag_opacity;
 #endif
 
 void main() {
-    const FillPatternDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-    const FillPatternTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const FillPatternDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
+    const FillPatternTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
 #if !defined(HAS_UNIFORM_u_color)
     frag_color = unpack_mix_color(in_color, drawable.color_t);
@@ -1746,10 +1188,10 @@ void main() {
     const vec2 display_size_a = vec2((pattern_br_a.x - pattern_tl_a.x) / pixelRatio, (pattern_br_a.y - pattern_tl_a.y) / pixelRatio);
     const vec2 display_size_b = vec2((pattern_br_b.x - pattern_tl_b.x) / pixelRatio, (pattern_br_b.y - pattern_tl_b.y) / pixelRatio);
 
-    frag_pos_a = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, in_position),
-    frag_pos_b = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, in_position),
+    frag_pos_a = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, in_pos),
+    frag_pos_b = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, in_pos),
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_pos), vec2(in_pos), projectionVector.elements[constant.ubo_index]);
 }
 ",
     fragment: r"
@@ -1775,34 +1217,6 @@ layout(location = 5) in float frag_opacity;
 
 layout(location = 0) out vec4 out_color;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct FillPatternTilePropsUBO {
-    vec4 pattern_from;
-    vec4 pattern_to;
-    vec2 texsize;
-    float sdf;
-    float pad2;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillTilePropsUBO) readonly buffer FillPatternTilePropsUBOVector {
-    FillPatternTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBO {
-    vec4 color;
-    vec4 outline_color;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-} props;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
-
 void main() {
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -1810,7 +1224,7 @@ void main() {
     return;
 #else
 
-    const FillPatternTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const FillPatternTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_pattern_from)
     const vec4 pattern_from = tileProps.pattern_from;
@@ -1846,13 +1260,13 @@ void main() {
     if (props.fade < 1.0) {
         const vec2 imagecoord = mod(frag_pos_a, 1.0);
         const vec2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
-        color1 = texture(sampler2D(image0_texture, image0_sampler), pos);
+        color1 = texture(sampler2D(image_texture, image_sampler), pos);
     }
     vec4 color2 = vec4(0.0);
     if (props.fade > 0.0) {
         const vec2 imagecoord_b = mod(frag_pos_b, 1.0);
         const vec2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
-        color2 = texture(sampler2D(image0_texture, image0_sampler), pos2);
+        color2 = texture(sampler2D(image_texture, image_sampler), pos2);
     }
 
     if (tileProps.sdf > 0.5) {
@@ -1870,75 +1284,8 @@ void main() {
 ",
 };
 
-pub(crate) const FILL_OUTLINE_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: FILL_SHADER_PRELUDE,
+pub(crate) const FILL_OUTLINE_PATTERN_SHADER: ShaderSource = ShaderSource {
     vertex: r"
-
-layout(location = 0) in ivec2 in_position;
-
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 1) in vec4 in_color;
-#endif
-
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 2) in uvec4 in_pattern_from;
-#endif
-
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 3) in uvec4 in_pattern_to;
-#endif
-
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 4) in vec2 in_opacity;
-#endif
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct FillOutlinePatternDrawableUBO {
-    mat4 matrix;
-    vec2 pixel_coord_upper;
-    vec2 pixel_coord_lower;
-    float tile_ratio;
-    // Interpolations
-    float pattern_from_t;
-    float pattern_to_t;
-    float opacity_t;
-    float color_t;
-    float pad1;
-    float pad2;
-    float pad3;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillOutlinePatternDrawableUBOVector {
-    FillOutlinePatternDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-struct FillOutlinePatternTilePropsUBO {
-    vec4 pattern_from;
-    vec4 pattern_to;
-    vec2 texsize;
-    float sdf;
-    float pad2;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillTilePropsUBO) readonly buffer FillOutlinePatternTilePropsUBOVector {
-    FillOutlinePatternTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBO {
-    vec4 color;
-    vec4 outline_color;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-} props;
 
 layout(location = 0) out vec2 frag_pos_a;
 layout(location = 1) out vec2 frag_pos_b;
@@ -1961,8 +1308,8 @@ layout(location = 6) out float frag_opacity;
 #endif
 
 void main() {
-    const FillOutlinePatternDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-    const FillOutlinePatternTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const FillPatternDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
+    const FillPatternTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
 #if !defined(HAS_UNIFORM_u_color)
     frag_color = unpack_mix_color(in_color, drawable.color_t);
@@ -1997,8 +1344,8 @@ void main() {
     const vec2 display_size_a = vec2((pattern_br_a.x - pattern_tl_a.x) / pixelRatio, (pattern_br_a.y - pattern_tl_a.y) / pixelRatio);
     const vec2 display_size_b = vec2((pattern_br_b.x - pattern_tl_b.x) / pixelRatio, (pattern_br_b.y - pattern_tl_b.y) / pixelRatio);
 
-    const vec2 position2 = in_position.xy;
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
+    const vec2 position2 = in_pos.xy;
+    gl_Position = projectTile(vec2(in_pos), vec2(in_pos), projectionVector.elements[constant.ubo_index]);
 
     frag_pos_a = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, position2),
     frag_pos_b = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, position2),
@@ -2030,34 +1377,6 @@ layout(location = 6) in float frag_opacity;
 
 layout(location = 0) out vec4 out_color;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct FillOutlinePatternTilePropsUBO {
-    vec4 pattern_from;
-    vec4 pattern_to;
-    vec2 texsize;
-    float sdf;
-    float pad2;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillTilePropsUBO) readonly buffer FillOutlinePatternTilePropsUBOVector {
-    FillOutlinePatternTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBO {
-    vec4 color;
-    vec4 outline_color;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-} props;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
-
 void main() {
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -2065,7 +1384,7 @@ void main() {
     return;
 #else
 
-    const FillOutlinePatternTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const FillPatternTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_pattern_from)
     const vec4 pattern_from = tileProps.pattern_from;
@@ -2101,13 +1420,13 @@ void main() {
     if (props.fade < 1.0) {
         const vec2 imagecoord = mod(frag_pos_a, 1.0);
         const vec2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
-        color1 = texture(sampler2D(image0_texture, image0_sampler), pos);
+        color1 = texture(sampler2D(image_texture, image_sampler), pos);
     }
     vec4 color2 = vec4(0.0);
     if (props.fade > 0.0) {
         const vec2 imagecoord_b = mod(frag_pos_b, 1.0);
         const vec2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
-        color2 = texture(sampler2D(image0_texture, image0_sampler), pos2);
+        color2 = texture(sampler2D(image_texture, image_sampler), pos2);
     }
 
     const float dist = length(frag_pos - gl_FragCoord.xy);
@@ -2184,48 +1503,9 @@ vec4 outline_corner(vec4 start, vec4 end, vec2 corner, out vec2 pos, out float t
     };
 }
 
-pub(crate) const FILL_OUTLINE_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: FILL_SHADER_PRELUDE,
+pub(crate) const FILL_OUTLINE_INSTANCED_SHADER: ShaderSource = ShaderSource {
     vertex: concat!(
         r"
-
-// The quad's corner: x picks the segment's start (0) or end (1), y its side.
-layout(location = 0) in ivec2 in_position;
-// Per instance: a vertex of the fill, and the end of the outline segment that
-// starts there.
-layout(location = 3) in ivec2 in_outline_pos;
-layout(location = 4) in ivec2 in_outline_end;
-
-#if !defined(HAS_UNIFORM_u_outline_color)
-layout(location = 1) in vec4 in_color;
-#endif
-
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 2) in vec2 in_opacity;
-#endif
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct FillOutlineDrawableUBO {
-    mat4 matrix;
-    // Interpolations
-    float outline_color_t;
-    float opacity_t;
-    float pad1;
-    float pad2;
-    vec4 pad3;
-    vec4 pad4;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillOutlineDrawableUBOVector {
-    FillOutlineDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
 
 #if !defined(HAS_UNIFORM_u_outline_color)
 layout(location = 0) out vec4 frag_color;
@@ -2240,22 +1520,22 @@ layout(location = 2) out vec2 frag_position;
         outline_corner!(),
         r"
 void main() {
-    const FillOutlineDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const FillOutlineDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
 
 #if !defined(HAS_UNIFORM_u_outline_color)
-    frag_color = vec4(unpack_mix_color(in_color, drawable.outline_color_t));
+    frag_color = vec4(unpack_mix_color(in_outline_color, drawable.outline_color_t));
 #endif
 
 #if !defined(HAS_UNIFORM_u_opacity)
     frag_opacity = unpack_mix_float(in_opacity, drawable.opacity_t);
 #endif
 
-    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector.elements[constant.ubo_index];
     const vec2 start = vec2(in_outline_pos);
     const vec2 end = vec2(in_outline_end);
     vec2 pos;
     float t;
-    gl_Position = outline_corner(projectTile(start, start, projection), projectTile(end, end, projection), vec2(in_position), pos, t);
+    gl_Position = outline_corner(projectTile(start, start, projection), projectTile(end, end, projection), vec2(in_pos), pos, t);
 
     // From the top left, as gl_FragCoord is.
     frag_position = vec2(pos.x, paintParams.world_size.y - pos.y);
@@ -2265,81 +1545,9 @@ void main() {
     fragment: FILL_OUTLINE_SHADER.fragment,
 };
 
-pub(crate) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: FILL_SHADER_PRELUDE,
+pub(crate) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: ShaderSource = ShaderSource {
     vertex: concat!(
         r"
-
-// The quad's corner: x picks the segment's start (0) or end (1), y its side.
-layout(location = 0) in ivec2 in_position;
-// Per instance: a vertex of the fill, and the end of the outline segment that
-// starts there.
-layout(location = 5) in ivec2 in_outline_pos;
-layout(location = 6) in ivec2 in_outline_end;
-
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 1) in vec4 in_color;
-#endif
-
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 2) in uvec4 in_pattern_from;
-#endif
-
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 3) in uvec4 in_pattern_to;
-#endif
-
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 4) in vec2 in_opacity;
-#endif
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct FillOutlinePatternDrawableUBO {
-    mat4 matrix;
-    vec2 pixel_coord_upper;
-    vec2 pixel_coord_lower;
-    float tile_ratio;
-    // Interpolations
-    float pattern_from_t;
-    float pattern_to_t;
-    float opacity_t;
-    float color_t;
-    float pad1;
-    float pad2;
-    float pad3;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillOutlinePatternDrawableUBOVector {
-    FillOutlinePatternDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-struct FillOutlinePatternTilePropsUBO {
-    vec4 pattern_from;
-    vec4 pattern_to;
-    vec2 texsize;
-    float sdf;
-    float pad2;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillTilePropsUBO) readonly buffer FillOutlinePatternTilePropsUBOVector {
-    FillOutlinePatternTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillEvaluatedPropsUBO) uniform FillEvaluatedPropsUBO {
-    vec4 color;
-    vec4 outline_color;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-} props;
 
 layout(location = 0) out vec2 frag_pos_a;
 layout(location = 1) out vec2 frag_pos_b;
@@ -2364,8 +1572,8 @@ layout(location = 6) out float frag_opacity;
         outline_corner!(),
         r"
 void main() {
-    const FillOutlinePatternDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-    const FillOutlinePatternTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const FillPatternDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
+    const FillPatternTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
 #if !defined(HAS_UNIFORM_u_color)
     frag_color = unpack_mix_color(in_color, drawable.color_t);
@@ -2390,12 +1598,12 @@ void main() {
     const vec2 display_size_a = (frag_pattern_from.zw - frag_pattern_from.xy) / paintParams.pixel_ratio;
     const vec2 display_size_b = (frag_pattern_to.zw - frag_pattern_to.xy) / paintParams.pixel_ratio;
 
-    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector.elements[constant.ubo_index];
     const vec2 start = vec2(in_outline_pos);
     const vec2 end = vec2(in_outline_end);
     vec2 pos;
     float t;
-    gl_Position = outline_corner(projectTile(start, start, projection), projectTile(end, end, projection), vec2(in_position), pos, t);
+    gl_Position = outline_corner(projectTile(start, start, projection), projectTile(end, end, projection), vec2(in_pos), pos, t);
 
     const vec2 position = mix(start, end, t);
     frag_pos_a = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, props.from_scale * display_size_a, drawable.tile_ratio, position);
@@ -2411,51 +1619,9 @@ void main() {
 /// Port-only: the outlines of the instanced outlines as quads without vertex
 /// inputs. A vertex reads its segment's ends and paint values from storage
 /// buffers, by its index.
-pub(crate) const FILL_OUTLINE_PULLED_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: FILL_SHADER_PRELUDE,
+pub(crate) const FILL_OUTLINE_PULLED_SHADER: ShaderSource = ShaderSource {
     vertex: concat!(
         r"
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct FillOutlineDrawableUBO {
-    mat4 matrix;
-    // Interpolations
-    float outline_color_t;
-    float opacity_t;
-    // Where a vertex's paint values are.
-    uint paint_layout;
-    float pad2;
-    vec4 pad3;
-    vec4 pad4;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillDrawableUBO) readonly buffer FillOutlineDrawableUBOVector {
-    FillOutlineDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-// The fill's vertices and the ends of the outline segments that start at
-// them, a word each: x and y in its halves.
-layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillOutlineVertices) readonly buffer FillOutlineVertices {
-    uint vertices[];
-} outlineVertices;
-
-layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillOutlineEnds) readonly buffer FillOutlineEnds {
-    uint ends[];
-} outlineEnds;
-
-#if !defined(HAS_UNIFORM_u_outline_color) || !defined(HAS_UNIFORM_u_opacity)
-// The fill's paint values, interleaved as the fill reads them.
-layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillOutlinePaint) readonly buffer FillOutlinePaint {
-    float paint[];
-} outlinePaint;
-#endif
 
 #if !defined(HAS_UNIFORM_u_outline_color)
 layout(location = 0) out vec4 frag_color;
@@ -2474,7 +1640,7 @@ vec2 tile_position(const uint word) {
         outline_corner!(),
         r"
 void main() {
-    const FillOutlineDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const FillOutlineDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
 
     // Four vertices a segment, in the order of the instanced quad's corners.
     const uint segment = uint(gl_VertexIndex) / 4u;
@@ -2485,20 +1651,22 @@ void main() {
     const uint paint = segment * (paint_layout & 0xffu);
 #if !defined(HAS_UNIFORM_u_outline_color)
     const uint color_at = paint + ((paint_layout >> 8u) & 0xffu);
-    const vec4 outline_color = vec4(outlinePaint.paint[color_at], outlinePaint.paint[color_at + 1u],
-                                    outlinePaint.paint[color_at + 2u], outlinePaint.paint[color_at + 3u]);
+    const vec4 outline_color = vec4(outlinePaint.words[color_at], outlinePaint.words[color_at + 1u],
+                                    outlinePaint.words[color_at + 2u], outlinePaint.words[color_at + 3u]);
     frag_color = vec4(unpack_mix_color(outline_color, drawable.outline_color_t));
 #endif
 
 #if !defined(HAS_UNIFORM_u_opacity)
     const uint opacity_at = paint + ((paint_layout >> 16u) & 0xffu);
-    const vec2 opacity = vec2(outlinePaint.paint[opacity_at], outlinePaint.paint[opacity_at + 1u]);
+    const vec2 opacity = vec2(outlinePaint.words[opacity_at], outlinePaint.words[opacity_at + 1u]);
     frag_opacity = unpack_mix_float(opacity, drawable.opacity_t);
 #endif
 
-    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
-    const vec2 start = tile_position(outlineVertices.vertices[segment]);
-    const vec2 end = tile_position(outlineEnds.ends[segment]);
+    const ProjectionUBO projection = projectionVector.elements[constant.ubo_index];
+    // The fill's vertices and the ends of the outline segments that start at
+    // them, a word each: x and y in its halves.
+    const vec2 start = tile_position(outlineVertices.words[segment]);
+    const vec2 end = tile_position(outlineEnds.words[segment]);
     const vec2 corner = vec2(float(quad_corner >> 1u), float(quad_corner & 1u));
     vec2 pos;
     float t;
@@ -2512,90 +1680,17 @@ void main() {
     fragment: FILL_OUTLINE_SHADER.fragment,
 };
 
-pub(crate) const FILL_EXTRUSION_SHADER_PRELUDE: &str = r"
-
-#define idFillExtrusionDrawableUBO              idDrawableReservedVertexOnlyUBO
-#define idFillExtrusionTilePropsUBO             drawableReservedUBOCount
-#define idFillExtrusionPropsUBO                 layerUBOStartId + 1
-#define idFillExtrusionWallVertices             drawableUBOStartId + 5
-#define idFillExtrusionWallPaint                drawableUBOStartId + 6
-#define idFillExtrusionWallHeights              drawableUBOStartId + 7
-
-";
-
-pub(crate) const FILL_EXTRUSION_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: FILL_EXTRUSION_SHADER_PRELUDE,
+pub(crate) const FILL_EXTRUSION_SHADER: ShaderSource = ShaderSource {
     vertex: r"
 invariant gl_Position;
-
-layout(location = 0) in ivec2 in_position;
-layout(location = 1) in uvec2 in_decimals_ed;
-
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 2) in vec4 in_color;
-#endif
-
-#if !defined(HAS_UNIFORM_u_base)
-layout(location = 3) in vec2 in_base;
-#endif
-
-#if !defined(HAS_UNIFORM_u_height)
-layout(location = 4) in vec2 in_height;
-#endif
-
-#ifdef TERRAIN
-// The height of the ground under its polygon's centroid.
-layout(location = 10) in float in_ground_height;
-#endif
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct FillExtrusionDrawableUBO {
-    mat4 matrix;
-    vec2 pixel_coord_upper;
-    vec2 pixel_coord_lower;
-    float height_factor;
-    float tile_ratio;
-    // Interpolations
-    float base_t;
-    float height_t;
-    float color_t;
-    float pattern_from_t;
-    float pattern_to_t;
-    float pad1;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
-    FillExtrusionDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBO {
-    vec4 color;
-    vec4 light_color_pad;
-    vec4 light_position_base;
-    float height;
-    float light_intensity;
-    float vertical_gradient;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-    float pad2;
-} props;
 
 layout(location = 0) out vec4 frag_color;
 
 void main() {
-    const FillExtrusionDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const FillExtrusionDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_base)
-    const float base = max(props.light_position_base.w, 0.0);
+    const float base = max(props.base, 0.0);
 #else
     const float base = max(unpack_mix_float(in_base, drawable.base_t), 0.0);
 #endif
@@ -2623,7 +1718,7 @@ void main() {
 #else
     const float z = t > 0.0 ? height : base;
 #endif
-    gl_Position = projectTileFor3D(vec2(in_position), z, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTileFor3D(vec2(in_pos), z, projectionVector.elements[constant.ubo_index]);
 
 #if defined(OVERDRAW_INSPECTOR)
     frag_color = vec4(1.0);
@@ -2639,7 +1734,7 @@ void main() {
     color += vec4(0.03, 0.03, 0.03, 1.0);
 
     // Calculate cos(theta), where theta is the angle between surface normal and diffuse light ray
-    const float directionalFraction = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    const float directionalFraction = clamp(dot(normal, props.light_position), 0.0, 1.0);
 
     // Adjust directional so that the range of values for highlight/shading is
     // narrower with lower light intensity and with lighter/brighter surface colors
@@ -2661,7 +1756,7 @@ void main() {
     // Assign final color based on surface + ambient light color, diffuse light directional,
     // and light color with lower bounds adjusted to hue of light so that shading is tinted
     // with the complementary (opposite) color to the light color
-    const vec3 light_color = props.light_color_pad.rgb;
+    const vec3 light_color = props.light_color;
     const vec3 minLight = mix(vec3(0.0), vec3(0.3), 1.0 - light_color.rgb);
     vcolor += vec4(clamp(color.rgb * directional * light_color.rgb, minLight, vec3(1.0)), 0.0);
 
@@ -2679,60 +1774,8 @@ void main() {
 ",
 };
 
-/// The declarations of the fill extrusion walls' vertex stages.
-macro_rules! fill_extrusion_wall_declarations {
-    () => {
-        r"
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct FillExtrusionDrawableUBO {
-    mat4 matrix;
-    vec2 pixel_coord_upper;
-    vec2 pixel_coord_lower;
-    float height_factor;
-    float tile_ratio;
-    // Interpolations
-    float base_t;
-    float height_t;
-    float color_t;
-    float pattern_from_t;
-    float pattern_to_t;
-    // Where the pulled walls find a vertex's paint values.
-    uint paint_layout;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
-    FillExtrusionDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBO {
-    vec4 color;
-    vec4 light_color_pad;
-    vec4 light_position_base;
-    float height;
-    float light_intensity;
-    float vertical_gradient;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-    float pad2;
-} props;
-
-layout(location = 0) out vec4 frag_color;
-
-"
-    };
-}
-
 /// The body of the fill extrusion walls' vertex stages, which reads its
-/// wall's corner, outline vertices and paint values from `in_position`,
+/// wall's corner, outline vertices and paint values from `in_pos`,
 /// `in_outline_pos`, `in_decimals_ed`, `in_next_outline_pos`,
 /// `in_next_decimals_ed`, `in_color`, `in_base` and `in_height`.
 macro_rules! fill_extrusion_wall_main {
@@ -2742,10 +1785,10 @@ macro_rules! fill_extrusion_wall_main {
     const vec2 instancePos = vec2(in_outline_pos);
     const vec2 instanceDecimalsEd = vec2(in_decimals_ed);
 
-    const FillExtrusionDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const FillExtrusionDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_base)
-    const float base = max(props.light_position_base.w, 0.0);
+    const float base = max(props.base, 0.0);
 #else
     const float base = max(unpack_mix_float(in_base, drawable.base_t), 0.0);
 #endif
@@ -2776,8 +1819,8 @@ macro_rules! fill_extrusion_wall_main {
     const vec2 edgevector = normalize(p2 - p1);
     const vec2 own = vec2(-edgevector.y, edgevector.x);
 
-    const vec3 normal = vec3(in_position.x == 0.0 ? wall_normal(in_decimals_ed.x, own) : wall_normal(in_next_decimals_ed.x, own), 0.0);
-    const float t = float(in_position.y);
+    const vec3 normal = vec3(in_pos.x == 0.0 ? wall_normal(in_decimals_ed.x, own) : wall_normal(in_next_decimals_ed.x, own), 0.0);
+    const float t = float(in_pos.y);
     // Over terrain, the extrusion stands on the ground under its polygon's
     // centroid, as GL JS raises it, its base 10 m lower where it is at the
     // ground, so that it meets a slope.
@@ -2788,7 +1831,7 @@ macro_rules! fill_extrusion_wall_main {
     const float z = t > 0.0 ? height : base;
 #endif
 
-    gl_Position = projectTileFor3D(in_position.x == 0.0 ? p1 : p2, z, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTileFor3D(in_pos.x == 0.0 ? p1 : p2, z, projectionVector.elements[constant.ubo_index]);
 
 #if defined(OVERDRAW_INSPECTOR)
     frag_color = vec4(1.0);
@@ -2804,7 +1847,7 @@ macro_rules! fill_extrusion_wall_main {
     color += vec4(0.03, 0.03, 0.03, 1.0);
 
     // Calculate cos(theta), where theta is the angle between surface normal and diffuse light ray
-    const float directionalFraction = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    const float directionalFraction = clamp(dot(normal, props.light_position), 0.0, 1.0);
 
     // Adjust directional so that the range of values for highlight/shading is
     // narrower with lower light intensity and with lighter/brighter surface colors
@@ -2826,7 +1869,7 @@ macro_rules! fill_extrusion_wall_main {
     // Assign final color based on surface + ambient light color, diffuse light directional,
     // and light color with lower bounds adjusted to hue of light so that shading is tinted
     // with the complementary (opposite) color to the light color
-    const vec3 light_color = props.light_color_pad.rgb;
+    const vec3 light_color = props.light_color;
     const vec3 minLight = mix(vec3(0.0), vec3(0.3), 1.0 - light_color.rgb);
     vcolor += vec4(clamp(color.rgb * directional * light_color.rgb, minLight, vec3(1.0)), 0.0);
 
@@ -2835,41 +1878,13 @@ macro_rules! fill_extrusion_wall_main {
     };
 }
 
-pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: FILL_EXTRUSION_SHADER_PRELUDE,
+pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: ShaderSource = ShaderSource {
     vertex: concat!(
         r"
 invariant gl_Position;
 
-layout(location = 0) in ivec2 in_position;
+layout(location = 0) out vec4 frag_color;
 
-// An instance: an outline vertex, and the one after it, which the same buffer
-// bound a vertex further on provides.
-layout(location = 1) in ivec2 in_outline_pos;
-layout(location = 2) in uvec2 in_decimals_ed;
-layout(location = 6) in ivec2 in_next_outline_pos;
-layout(location = 7) in uvec2 in_next_decimals_ed;
-
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 3) in vec4 in_color;
-#endif
-
-#if !defined(HAS_UNIFORM_u_base)
-layout(location = 4) in vec2 in_base;
-#endif
-
-#if !defined(HAS_UNIFORM_u_height)
-layout(location = 5) in vec2 in_height;
-#endif
-
-#ifdef TERRAIN
-// The height of the ground under its polygon's centroid.
-layout(location = 10) in float in_ground_height;
-#endif
-
-",
-        fill_extrusion_wall_declarations!(),
-        r"
 void main() {
 ",
         fill_extrusion_wall_main!(),
@@ -2890,70 +1905,50 @@ void main() {
 /// Port-only: the walls of the instanced walls as quads without vertex
 /// inputs. A vertex reads its wall's outline vertices and paint values from
 /// storage buffers, by its index.
-pub(crate) const FILL_EXTRUSION_PULLED_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: FILL_EXTRUSION_SHADER_PRELUDE,
+pub(crate) const FILL_EXTRUSION_PULLED_SHADER: ShaderSource = ShaderSource {
     vertex: concat!(
         r"
 invariant gl_Position;
 
-",
-        fill_extrusion_wall_declarations!(),
-        r"
-// The bucket's vertices, two words each: the position's x and y in the
-// halves of the first, decimals_ed's in those of the second.
-layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillExtrusionWallVertices) readonly buffer FillExtrusionWallVertices {
-    uint vertices[];
-} wallVertices;
-
-#if !defined(HAS_UNIFORM_u_color) || !defined(HAS_UNIFORM_u_base) || !defined(HAS_UNIFORM_u_height)
-// The bucket's paint values, interleaved as the roofs read them.
-layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillExtrusionWallPaint) readonly buffer FillExtrusionWallPaint {
-    float paint[];
-} wallPaint;
-#endif
-
-#ifdef TERRAIN
-// The heights of the ground under the bucket's vertices' polygons'
-// centroids.
-layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillExtrusionWallHeights) readonly buffer FillExtrusionWallHeights {
-    float heights[];
-} wallHeights;
-#endif
+layout(location = 0) out vec4 frag_color;
 
 void main() {
     // Four vertices a wall, in the order of the static quad's corners.
     const uint wall = uint(gl_VertexIndex) / 4u;
     const uint corner = uint(gl_VertexIndex) % 4u;
-    const uint pos = wallVertices.vertices[2u * wall];
-    const uint decimals_ed = wallVertices.vertices[2u * wall + 1u];
-    const uint next_pos = wallVertices.vertices[2u * wall + 2u];
-    const uint next_decimals_ed = wallVertices.vertices[2u * wall + 3u];
+    // The bucket's vertices, two words each: the position's x and y in the
+    // halves of the first, decimals_ed's in those of the second.
+    const uint pos = wallVertices.words[2u * wall];
+    const uint decimals_ed = wallVertices.words[2u * wall + 1u];
+    const uint next_pos = wallVertices.words[2u * wall + 2u];
+    const uint next_decimals_ed = wallVertices.words[2u * wall + 3u];
 
     // What the instanced walls read as vertex inputs.
-    const ivec2 in_position = ivec2(corner < 2u ? 1 : 0, int(corner & 1u));
+    const ivec2 in_pos = ivec2(corner < 2u ? 1 : 0, int(corner & 1u));
     const ivec2 in_outline_pos = ivec2(int(pos << 16u) >> 16, int(pos) >> 16);
     const uvec2 in_decimals_ed = uvec2(decimals_ed & 0xffffu, decimals_ed >> 16u);
     const ivec2 in_next_outline_pos = ivec2(int(next_pos << 16u) >> 16, int(next_pos) >> 16);
     const uvec2 in_next_decimals_ed = uvec2(next_decimals_ed & 0xffffu, next_decimals_ed >> 16u);
 #ifdef TERRAIN
-    const float in_ground_height = wallHeights.heights[wall];
+    // The height of the ground under the wall's polygon's centroid.
+    const float in_ground_height = wallHeights.words[wall];
 #endif
 
     // The wall's paint values are its outline vertex's.
-    const uint paint_layout = drawableVector.drawable_ubo[constant.ubo_index].paint_layout;
+    const uint paint_layout = drawableVector.elements[constant.ubo_index].paint_layout;
     const uint paint = wall * (paint_layout & 0xffu);
 #if !defined(HAS_UNIFORM_u_base)
     const uint base_at = paint + ((paint_layout >> 8u) & 0xffu);
-    const vec2 in_base = vec2(wallPaint.paint[base_at], wallPaint.paint[base_at + 1u]);
+    const vec2 in_base = vec2(wallPaint.words[base_at], wallPaint.words[base_at + 1u]);
 #endif
 #if !defined(HAS_UNIFORM_u_height)
     const uint height_at = paint + ((paint_layout >> 16u) & 0xffu);
-    const vec2 in_height = vec2(wallPaint.paint[height_at], wallPaint.paint[height_at + 1u]);
+    const vec2 in_height = vec2(wallPaint.words[height_at], wallPaint.words[height_at + 1u]);
 #endif
 #if !defined(HAS_UNIFORM_u_color)
     const uint color_at = paint + (paint_layout >> 24u);
-    const vec4 in_color = vec4(wallPaint.paint[color_at], wallPaint.paint[color_at + 1u],
-                               wallPaint.paint[color_at + 2u], wallPaint.paint[color_at + 3u]);
+    const vec4 in_color = vec4(wallPaint.words[color_at], wallPaint.words[color_at + 1u],
+                               wallPaint.words[color_at + 2u], wallPaint.words[color_at + 3u]);
 #endif
 ",
         fill_extrusion_wall_main!(),
@@ -2963,87 +1958,9 @@ void main() {
     fragment: FILL_EXTRUSION_INSTANCED_SHADER.fragment,
 };
 
-pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: FILL_EXTRUSION_SHADER_PRELUDE,
+pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: ShaderSource = ShaderSource {
     vertex: r"
 invariant gl_Position;
-
-layout(location = 0) in ivec2 in_position;
-layout(location = 1) in uvec2 in_decimals_ed;
-
-#if !defined(HAS_UNIFORM_u_base)
-layout(location = 2) in vec2 in_base;
-#endif
-
-#if !defined(HAS_UNIFORM_u_height)
-layout(location = 3) in vec2 in_height;
-#endif
-
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 4) in uvec4 in_pattern_from;
-#endif
-
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 5) in uvec4 in_pattern_to;
-#endif
-
-#ifdef TERRAIN
-// The height of the ground under its polygon's centroid.
-layout(location = 10) in float in_ground_height;
-#endif
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct FillExtrusionDrawableUBO {
-    mat4 matrix;
-    vec2 pixel_coord_upper;
-    vec2 pixel_coord_lower;
-    float height_factor;
-    float tile_ratio;
-    // Interpolations
-    float base_t;
-    float height_t;
-    float color_t;
-    float pattern_from_t;
-    float pattern_to_t;
-    float pad1;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
-    FillExtrusionDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-struct FillExtrusionTilePropsUBO {
-    vec4 pattern_from;
-    vec4 pattern_to;
-    vec2 texsize;
-    float pad1;
-    float pad2;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionTilePropsUBO) readonly buffer FillExtrusionTilePropsUBOVector {
-    FillExtrusionTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBO {
-    vec4 color;
-    vec4 light_color_pad;
-    vec4 light_position_base;
-    float height;
-    float light_intensity;
-    float vertical_gradient;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-    float pad2;
-} props;
 
 layout(location = 0) out vec4 frag_lighting;
 layout(location = 1) out vec2 frag_pos_a;
@@ -3058,11 +1975,11 @@ layout(location = 4) flat out vec4 frag_pattern_to;
 #endif
 
 void main() {
-    const FillExtrusionDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-    const FillExtrusionTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const FillExtrusionDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
+    const FillExtrusionTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_base)
-    const float base = max(props.light_position_base.w, 0.0);
+    const float base = max(props.base, 0.0);
 #else
     const float base = max(unpack_mix_float(in_base, drawable.base_t), 0.0);
 #endif
@@ -3084,7 +2001,7 @@ void main() {
 #else
     const float z = t > 0.0 ? height : base;
 #endif
-    gl_Position = projectTileFor3D(vec2(in_position), z, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTileFor3D(vec2(in_pos), z, projectionVector.elements[constant.ubo_index]);
 
 #if defined(OVERDRAW_INSPECTOR)
     frag_lighting = vec4(1.0);
@@ -3126,10 +2043,10 @@ void main() {
     const vec2 display_size_a = vec2((pattern_br_a.x - pattern_tl_a.x) / pixelRatio, (pattern_br_a.y - pattern_tl_a.y) / pixelRatio);
     const vec2 display_size_b = vec2((pattern_br_b.x - pattern_tl_b.x) / pixelRatio, (pattern_br_b.y - pattern_tl_b.y) / pixelRatio);
 
-    const vec2 pos = vec2(in_position); // extrusion top
+    const vec2 pos = vec2(in_pos); // extrusion top
 
     vec4 lighting = vec4(0.0, 0.0, 0.0, 1.0);
-    float directional = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    float directional = clamp(dot(normal, props.light_position), 0.0, 1.0);
     directional = mix((1.0 - props.light_intensity), max((0.5 + props.light_intensity), 1.0), directional);
 
     if (normal.z == 0.0) {
@@ -3141,7 +2058,7 @@ void main() {
         const float factor = clamp((t + base) * pow(height / 150.0, 0.5), fMin, 1.0);
         directional *= (1.0 - props.vertical_gradient) + (props.vertical_gradient * factor);    }
 
-    lighting.rgb += clamp(directional * props.light_color_pad.rgb, mix(vec3(0.0), vec3(0.3), 1.0 - props.light_color_pad.rgb), vec3(1.0));
+    lighting.rgb += clamp(directional * props.light_color, mix(vec3(0.0), vec3(0.3), 1.0 - props.light_color), vec3(1.0));
     lighting *= props.opacity;
 
     frag_lighting = lighting;
@@ -3174,39 +2091,6 @@ layout(location = 4) flat in vec4 frag_pattern_to;
 
 layout(location = 0) out vec4 out_color;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct FillExtrusionTilePropsUBO {
-    vec4 pattern_from;
-    vec4 pattern_to;
-    vec2 texsize;
-    float pad1;
-    float pad2;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionTilePropsUBO) readonly buffer FillExtrusionTilePropsUBOVector {
-    FillExtrusionTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBO {
-    vec4 color;
-    vec4 light_color_pad;
-    vec4 light_position_base;
-    float height;
-    float light_intensity;
-    float vertical_gradient;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-    float pad2;
-} props;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
-
 void main() {
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -3214,7 +2098,7 @@ void main() {
     return;
 #else
 
-    const FillExtrusionTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const FillExtrusionTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_pattern_from)
     const vec4 pattern_from = tileProps.pattern_from;
@@ -3237,13 +2121,13 @@ void main() {
     if (props.fade < 1.0) {
         const vec2 imagecoord = mod(frag_pos_a, 1.0);
         const vec2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
-        color1 = texture(sampler2D(image0_texture, image0_sampler), pos);
+        color1 = texture(sampler2D(image_texture, image_sampler), pos);
     }
     vec4 color2 = vec4(0.0);
     if (props.fade > 0.0) {
         const vec2 imagecoord_b = mod(frag_pos_b, 1.0);
         const vec2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
-        color2 = texture(sampler2D(image0_texture, image0_sampler), pos2);
+        color2 = texture(sampler2D(image_texture, image_sampler), pos2);
     }
 
     out_color = mix(color1, color2, props.fade) * frag_lighting;
@@ -3252,93 +2136,9 @@ void main() {
 ",
 };
 
-pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: FILL_EXTRUSION_SHADER_PRELUDE,
+pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: ShaderSource = ShaderSource {
     vertex: r"
 invariant gl_Position;
-
-layout(location = 0) in ivec2 in_position;
-
-// An instance: an outline vertex, and the one after it, which the same buffer
-// bound a vertex further on provides.
-layout(location = 1) in ivec2 in_outline_pos;
-layout(location = 2) in uvec2 in_decimals_ed;
-layout(location = 7) in ivec2 in_next_outline_pos;
-layout(location = 8) in uvec2 in_next_decimals_ed;
-
-#if !defined(HAS_UNIFORM_u_base)
-layout(location = 3) in vec2 in_base;
-#endif
-
-#if !defined(HAS_UNIFORM_u_height)
-layout(location = 4) in vec2 in_height;
-#endif
-
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 5) in uvec4 in_pattern_from;
-#endif
-
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 6) in uvec4 in_pattern_to;
-#endif
-
-#ifdef TERRAIN
-// The height of the ground under its polygon's centroid.
-layout(location = 10) in float in_ground_height;
-#endif
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct FillExtrusionDrawableUBO {
-    mat4 matrix;
-    vec2 pixel_coord_upper;
-    vec2 pixel_coord_lower;
-    float height_factor;
-    float tile_ratio;
-    // Interpolations
-    float base_t;
-    float height_t;
-    float color_t;
-    float pattern_from_t;
-    float pattern_to_t;
-    float pad1;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionDrawableUBO) readonly buffer FillExtrusionDrawableUBOVector {
-    FillExtrusionDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-struct FillExtrusionTilePropsUBO {
-    vec4 pattern_from;
-    vec4 pattern_to;
-    vec2 texsize;
-    float pad1;
-    float pad2;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionTilePropsUBO) readonly buffer FillExtrusionTilePropsUBOVector {
-    FillExtrusionTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBO {
-    vec4 color;
-    vec4 light_color_pad;
-    vec4 light_position_base;
-    float height;
-    float light_intensity;
-    float vertical_gradient;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-    float pad2;
-} props;
 
 layout(location = 0) out vec4 frag_lighting;
 layout(location = 1) out vec2 frag_pos_a;
@@ -3356,11 +2156,11 @@ void main() {
     const vec2 instancePos = vec2(in_outline_pos);
     const vec2 instanceDecimalsEd = vec2(in_decimals_ed);
 
-    const FillExtrusionDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-    const FillExtrusionTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const FillExtrusionDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
+    const FillExtrusionTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_base)
-    const float base = max(props.light_position_base.w, 0.0);
+    const float base = max(props.base, 0.0);
 #else
     const float base = max(unpack_mix_float(in_base, drawable.base_t), 0.0);
 #endif
@@ -3384,9 +2184,9 @@ void main() {
     const vec2 edgevector = normalize(p2 - p1);
     const vec2 own = vec2(-edgevector.y, edgevector.x);
 
-    const vec3 normal = vec3(in_position.x == 0.0 ? wall_normal(in_decimals_ed.x, own) : wall_normal(in_next_decimals_ed.x, own), 0.0);
-    const float edgedistance = in_position.x == 0.0 ? nextInstanceDecimalsEd.y : instanceDecimalsEd.y;
-    const float t = float(in_position.y);
+    const vec3 normal = vec3(in_pos.x == 0.0 ? wall_normal(in_decimals_ed.x, own) : wall_normal(in_next_decimals_ed.x, own), 0.0);
+    const float edgedistance = in_pos.x == 0.0 ? nextInstanceDecimalsEd.y : instanceDecimalsEd.y;
+    const float t = float(in_pos.y);
     // Over terrain, the extrusion stands on the ground under its polygon's
     // centroid, as GL JS raises it, its base 10 m lower where it is at the
     // ground, so that it meets a slope.
@@ -3397,7 +2197,7 @@ void main() {
     const float z = t > 0.0 ? height : base;
 #endif
 
-    gl_Position = projectTileFor3D(in_position.x == 0.0 ? p1 : p2, z, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTileFor3D(in_pos.x == 0.0 ? p1 : p2, z, projectionVector.elements[constant.ubo_index]);
 
 #if defined(OVERDRAW_INSPECTOR)
     frag_lighting = vec4(1.0);
@@ -3442,7 +2242,7 @@ void main() {
     const vec2 pos = vec2(edgedistance, z * drawable.height_factor); // extrusion side
 
     vec4 lighting = vec4(0.0, 0.0, 0.0, 1.0);
-    float directional = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    float directional = clamp(dot(normal, props.light_position), 0.0, 1.0);
     directional = mix((1.0 - props.light_intensity), max((0.5 + props.light_intensity), 1.0), directional);
 
     if (normal.z == 0.0) {
@@ -3455,7 +2255,7 @@ void main() {
         directional *= (1.0 - props.vertical_gradient) + (props.vertical_gradient * factor);
     }
 
-    lighting.rgb += clamp(directional * props.light_color_pad.rgb, mix(vec3(0.0), vec3(0.3), 1.0 - props.light_color_pad.rgb), vec3(1.0));
+    lighting.rgb += clamp(directional * props.light_color, mix(vec3(0.0), vec3(0.3), 1.0 - props.light_color), vec3(1.0));
     lighting *= props.opacity;
 
     frag_lighting = lighting;
@@ -3488,39 +2288,6 @@ layout(location = 4) flat in vec4 frag_pattern_to;
 
 layout(location = 0) out vec4 out_color;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct FillExtrusionTilePropsUBO {
-    vec4 pattern_from;
-    vec4 pattern_to;
-    vec2 texsize;
-    float pad1;
-    float pad2;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idFillExtrusionTilePropsUBO) readonly buffer FillExtrusionTilePropsUBOVector {
-    FillExtrusionTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idFillExtrusionPropsUBO) uniform FillExtrusionPropsUBO {
-    vec4 color;
-    vec4 light_color_pad;
-    vec4 light_position_base;
-    float height;
-    float light_intensity;
-    float vertical_gradient;
-    float opacity;
-    float fade;
-    float from_scale;
-    float to_scale;
-    float pad2;
-} props;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
-
 void main() {
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -3528,7 +2295,7 @@ void main() {
     return;
 #else
 
-    const FillExtrusionTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const FillExtrusionTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_pattern_from)
     const vec4 pattern_from = tileProps.pattern_from;
@@ -3551,13 +2318,13 @@ void main() {
     if (props.fade < 1.0) {
         const vec2 imagecoord = mod(frag_pos_a, 1.0);
         const vec2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
-        color1 = texture(sampler2D(image0_texture, image0_sampler), pos);
+        color1 = texture(sampler2D(image_texture, image_sampler), pos);
     }
     vec4 color2 = vec4(0.0);
     if (props.fade > 0.0) {
         const vec2 imagecoord_b = mod(frag_pos_b, 1.0);
         const vec2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
-        color2 = texture(sampler2D(image0_texture, image0_sampler), pos2);
+        color2 = texture(sampler2D(image_texture, image_sampler), pos2);
     }
 
     out_color = mix(color1, color2, props.fade) * frag_lighting;
@@ -3566,22 +2333,11 @@ void main() {
 ",
 };
 
-pub(crate) const GLOBE_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: "",
+pub(crate) const GLOBE_DEPTH_SHADER: ShaderSource = ShaderSource {
     vertex: r"
 
-layout(location = 0) in ivec2 in_position;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
 void main() {
-    gl_Position = projectTileFor3D(vec2(in_position), 0.0, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTileFor3D(vec2(in_pos), 0.0, projectionVector.elements[constant.ubo_index]);
 }
 ",
     fragment: r"
@@ -3593,15 +2349,7 @@ void main() {
 ",
 };
 
-pub(crate) const HEATMAP_SHADER_PRELUDE: &str = r"
-
-#define idHeatmapDrawableUBO        idDrawableReservedVertexOnlyUBO
-#define idHeatmapEvaluatedPropsUBO  layerUBOStartId
-
-";
-
-pub(crate) const HEATMAP_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: HEATMAP_SHADER_PRELUDE,
+pub(crate) const HEATMAP_SHADER: ShaderSource = ShaderSource {
     vertex: r#"
 
 // Effective "0" in the kernel density texture to adjust the kernel size to;
@@ -3612,56 +2360,13 @@ const float ZERO = 1.0 / 255.0 / 16.0;
 // Gaussian kernel coefficient: 1 / sqrt(2 * PI)
 #define GAUSS_COEF 0.3989422804014327
 
-layout(location = 0) in ivec2 in_position;
-
-#if !defined(HAS_UNIFORM_u_weight)
-layout(location = 1) in vec2 in_weight;
-#endif
-
-#if !defined(HAS_UNIFORM_u_radius)
-layout(location = 2) in vec2 in_radius;
-#endif
-
-#ifdef TERRAIN
-// The height of the ground under the kernel's center.
-layout(location = 3) in float in_ground_height;
-#endif
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct HeatmapDrawableUBO {
-    mat4 matrix;
-    float extrude_scale;
-    // Interpolations
-    float weight_t;
-    float radius_t;
-    float globe_extrude_scale;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idHeatmapDrawableUBO) readonly buffer HeatmapDrawableUBOVector {
-    HeatmapDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-layout(set = LAYER_SET_INDEX, binding = idHeatmapEvaluatedPropsUBO) uniform HeatmapEvaluatedPropsUBO {
-    float weight;
-    float radius;
-    float intensity;
-    float pad1;
-} props;
-
 #if !defined(HAS_UNIFORM_u_weight)
 layout(location = 0) out float frag_weight;
 #endif
 layout(location = 1) out vec2 frag_extrude;
 
 void main() {
-    const HeatmapDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const HeatmapDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_weight)
     const float weight = props.weight;
@@ -3676,7 +2381,7 @@ void main() {
 #endif
 
     // unencode the extrusion vector that we snuck into the a_pos vector
-    const vec2 unscaled_extrude = mod(in_position, 2.0) * 2.0 - 1.0;
+    const vec2 unscaled_extrude = mod(in_pos, 2.0) * 2.0 - 1.0;
 
     // This 'extrude' comes in ranging from [-1, -1], to [1, 1].  We'll use
     // it to produce the vertices of a square mesh framing the point feature
@@ -3700,8 +2405,8 @@ void main() {
 
     // multiply a_pos by 0.5, since we had it * 2 in order to sneak
     // in extrusion data
-    const vec2 circle_center = floor(in_position * 0.5);
-    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const vec2 circle_center = floor(in_pos * 0.5);
+    const ProjectionUBO projection = projectionVector.elements[constant.ubo_index];
     // Over terrain, the kernel lies flat at the height of the ground under
     // its center. The ground in front of it doesn't hide it: its density
     // adds up in screen space, as GL JS's does.
@@ -3736,13 +2441,6 @@ layout(location = 1) in vec2 frag_extrude;
 
 layout(location = 0) out vec4 out_color;
 
-layout(set = LAYER_SET_INDEX, binding = idHeatmapEvaluatedPropsUBO) uniform HeatmapEvaluatedPropsUBO {
-    float weight;
-    float radius;
-    float intensity;
-    float pad1;
-} props;
-
 void main() {
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -3764,48 +2462,22 @@ void main() {
 ",
 };
 
-pub(crate) const HEATMAP_TEXTURE_SHADER_PRELUDE: &str = r"#define idHeatmapTexturePropsUBO    layerUBOStartId";
-
-pub(crate) const HEATMAP_TEXTURE_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: HEATMAP_TEXTURE_SHADER_PRELUDE,
+pub(crate) const HEATMAP_TEXTURE_SHADER: ShaderSource = ShaderSource {
     vertex: r"
-
-layout(location = 0) in ivec2 in_position;
-
-layout(set = LAYER_SET_INDEX, binding = idHeatmapTexturePropsUBO) uniform HeatmapTexturePropsUBO {
-    mat4 matrix;
-    float opacity;
-    float pad1;
-    float pad2;
-    float pad3;
-} props;
 
 layout(location = 0) out vec2 frag_position;
 
 void main() {
 
-    gl_Position = props.matrix * vec4(in_position * paintParams.world_size, 0, 1);
+    gl_Position = ubo.matrix * vec4(in_pos * paintParams.world_size, 0, 1);
 
-    frag_position = in_position;
+    frag_position = in_pos;
 }
 ",
     fragment: r"
 
 layout(location = 0) in vec2 frag_position;
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idHeatmapTexturePropsUBO) uniform HeatmapTexturePropsUBO {
-    mat4 matrix;
-    float opacity;
-    float pad1;
-    float pad2;
-    float pad3;
-} props;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 1) uniform texture2D color_ramp_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId + 1) uniform sampler color_ramp_sampler;
 
 void main() {
 
@@ -3816,41 +2488,24 @@ void main() {
 
     const float t = texture(sampler2D(image_texture, image_sampler), frag_position).r;
     const vec4 color = texture(sampler2D(color_ramp_texture, color_ramp_sampler), vec2(t, 0.5));
-    out_color = color * props.opacity;
+    out_color = color * ubo.opacity;
 }
 ",
 };
 
-pub(crate) const LAYER_COMPOSITE_SHADER_PRELUDE: &str = r"#define idLayerCompositeUBO    layerUBOStartId";
-
 /// Port-only: a layer's texture, the size of the frame, composited onto it
 /// texel for texel, with its opacity and, for the blend modes that no blend
 /// function expresses, against a copy of the frame (`backdrop_texture`).
-pub(crate) const LAYER_COMPOSITE_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: LAYER_COMPOSITE_SHADER_PRELUDE,
+pub(crate) const LAYER_COMPOSITE_SHADER: ShaderSource = ShaderSource {
     vertex: r"
 
-layout(location = 0) in ivec2 in_position;
-
 void main() {
-    gl_Position = vec4(vec2(in_position) * 2.0 - 1.0, 0.0, 1.0);
+    gl_Position = vec4(vec2(in_pos) * 2.0 - 1.0, 0.0, 1.0);
 }
 ",
     fragment: r"
 
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idLayerCompositeUBO) uniform LayerCompositeUBO {
-    float opacity;
-    int blend;
-    float pad2;
-    float pad3;
-} props;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 1) uniform texture2D backdrop_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId + 1) uniform sampler backdrop_sampler;
 
 // The blend modes that no blend function expresses, of the W3C compositing
 // spec, on premultiplied colors.
@@ -3895,7 +2550,7 @@ vec4 composite(vec4 src, vec4 dst, int mode) {
 
 void main() {
     const ivec2 texel = ivec2(gl_FragCoord.xy);
-    const vec4 color = texelFetch(sampler2D(image_texture, image_sampler), texel, 0);
+    const vec4 color = texelFetch(image_texture, texel, 0);
 
 #if defined(OVERDRAW_INSPECTOR)
     out_color = color;
@@ -3904,7 +2559,7 @@ void main() {
     if (props.blend == 0) {
         out_color = src;
     } else {
-        out_color = composite(src, texelFetch(sampler2D(backdrop_texture, backdrop_sampler), texel, 0), props.blend);
+        out_color = composite(src, texelFetch(backdrop_texture, texel, 0), props.blend);
     }
 #endif
 }
@@ -3915,15 +2570,10 @@ void main() {
 /// each vertex colored by the texel of `image_texture` it names, which the
 /// vertex stage fetches without a sampler.
 #[cfg(any(test, feature = "gpu-conformance"))]
-pub(crate) const VERTEX_TEXEL_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: "",
+pub(crate) const VERTEX_TEXEL_SHADER: ShaderSource = ShaderSource {
     vertex: r"
 
-layout(location = 0) in ivec4 in_pos_texel;
-
 layout(location = 0) out vec4 frag_color;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
 
 void main() {
     frag_color = texelFetch(image_texture, in_pos_texel.zw, 0);
@@ -3944,21 +2594,19 @@ void main() {
 
 /// The height rule of `mln_util::dem`, over the DEM tile a draw reads: its
 /// RGBA8 texels behind a one-texel border, decoded by the terrain's uniform
-/// block, which comes before it. A macro, so that `concat!` puts it in the
-/// vertex stages that read the DEM: a fragment stage would need a sampler
-/// for the texture.
+/// block, `terrain`. A macro, so that `concat!` puts it in the vertex stages
+/// that read the DEM.
 macro_rules! ground_height {
     () => {
         r"
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 2) uniform texture2D ground_dem_texture;
 
 // The height in meters of the DEM's bordered texel at `texel`, clamped to the
-// texture, decoded by `terrain_props`.
+// texture, decoded by `terrain`.
 float ground_texel_height(const ivec2 texel) {
     const ivec2 last = textureSize(ground_dem_texture, 0) - 1;
     const vec3 rgb = round(texelFetch(ground_dem_texture, clamp(texel, ivec2(0), last), 0).rgb * 255.0);
-    const vec4 unpack = terrain_props.unpack;
-    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * terrain_props.unpack_scale;
+    const vec4 unpack = terrain.unpack;
+    return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * terrain.unpack_scale;
 }
 
 // The height in meters, exaggerated, at `pos` in tile units of a tile that
@@ -3979,49 +2627,33 @@ float ground_height(const vec2 pos, const vec4 dem_coords) {
     const float br = ground_texel_height(texel + ivec2(1, 1));
     const float top = tl * (1.0 - f.x) + tr * f.x;
     const float bottom = bl * (1.0 - f.x) + br * f.x;
-    return (top * (1.0 - f.y) + bottom * f.y) * terrain_props.exaggeration;
+    return (top * (1.0 - f.y) + bottom * f.y) * terrain.exaggeration;
 }
 "
     };
 }
 
-/// The terrain's uniform block, a `TerrainSurfaceUBO`, and `fogged`, which
-/// covers a color of the surface with its fog.
-macro_rules! terrain_block {
+/// `fogged`, which covers a color of the surface with the fog of the
+/// terrain's uniform block, `terrain`.
+macro_rules! terrain_fog {
     () => {
         r"
-// How the terrain's DEM decodes, its exaggeration and its skirts' length,
-// then the fog over the surface.
-layout(std140, set = LAYER_SET_INDEX, binding = idTerrainPropsUBO) uniform TerrainPropsUBO {
-    vec4 unpack;
-    float unpack_scale;
-    float exaggeration;
-    float skirt_length;
-    float pad0;
-    // Linear and premultiplied.
-    vec4 fog_color;
-    vec4 horizon_color;
-    // The distances along the view at which the fog's depth is 0 and 1.
-    vec2 depth_range;
-    float ground_blend;
-    float horizon_blend;
-} terrain_props;
 
 // `color`, premultiplied, of the surface `view_depth` pixels along the
-// view, covered by the fog of `terrain_props`, as GL JS's terrain is: mixed
+// view, covered by the fog of `terrain`, as GL JS's terrain is: mixed
 // in linear components toward the fog's color by the square of how far past
 // the ground blend the fog's depth is. The fog's alpha weighs its color; the
 // coverage stays.
 vec4 fogged(const vec4 color, const float view_depth) {
-    const float near = terrain_props.depth_range.x;
-    const float far = terrain_props.depth_range.y;
+    const float near = terrain.depth_range.x;
+    const float far = terrain.depth_range.y;
     const float depth = min(far / (far - near) * (1.0 - near / view_depth), 1.0);
-    if (terrain_props.ground_blend >= 1.0 || depth <= terrain_props.ground_blend || color.a == 0.0) {
+    if (terrain.ground_blend >= 1.0 || depth <= terrain.ground_blend || color.a == 0.0) {
         return color;
     }
-    const float horizon = smoothstep(0.0, 1.0, (depth - terrain_props.horizon_blend) / max(1.0 - terrain_props.horizon_blend, 1e-6));
-    const vec4 tint = mix(terrain_props.fog_color, terrain_props.horizon_color, horizon);
-    const float along = (depth - terrain_props.ground_blend) / (1.0 - terrain_props.ground_blend);
+    const float horizon = smoothstep(0.0, 1.0, (depth - terrain.horizon_blend) / max(1.0 - terrain.horizon_blend, 1e-6));
+    const vec4 tint = mix(terrain.fog_color, terrain.horizon_color, horizon);
+    const float along = (depth - terrain.ground_blend) / (1.0 - terrain.ground_blend);
     const float strength = along * along;
     const vec3 surface = pow(color.rgb / color.a, vec3(2.2));
     const vec3 mixed = surface * (1.0 - strength * tint.a) + tint.rgb * strength;
@@ -4031,12 +2663,12 @@ vec4 fogged(const vec4 color, const float view_depth) {
     };
 }
 
-/// The surface's and the probe's vertex prelude: the terrain's uniform
-/// block, the height rule, and the height of the surface's vertices.
+/// The surface's and the probe's vertex prelude: the terrain's fog, the
+/// height rule, and the height of the surface's vertices.
 macro_rules! terrain_props {
     () => {
         concat!(
-            terrain_block!(),
+            terrain_fog!(),
             ground_height!(),
             r"
 
@@ -4053,10 +2685,9 @@ float surface_height(const vec2 pos, const vec4 dem_coords) {
     };
 }
 
-/// How a hillshade shades its slopes: its tile and evaluated blocks, bound
-/// at `idHillshadeTilePropsUBO` and `idHillshadeEvaluatedPropsUBO`, and
-/// `hillshade`, which writes to `out_color` a slope shaded by the lights of
-/// `props`. A macro, so that `concat!` puts it in the fragment stages of the
+/// How a hillshade shades its slopes: `hillshade`, which writes to
+/// `out_color` a slope shaded by the lights of `props`, a
+/// `HillshadeEvaluatedPropsUBO`. A macro, so that `concat!` puts it in the fragment stages of the
 /// hillshade and of the terrain's surface, which shades a drape of a
 /// hillshade's slopes.
 macro_rules! hillshade_shading {
@@ -4068,28 +2699,6 @@ macro_rules! hillshade_shading {
 #define IGOR 2
 #define MULTIDIRECTIONAL 3
 #define BASIC 4
-
-struct HillshadeTilePropsUBO {
-    vec2 latrange;
-    float exaggeration;
-    int method;
-    int num_lights;
-    float pad0;
-    float pad1;
-    float pad2;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idHillshadeTilePropsUBO) readonly buffer HillshadeTilePropsUBOVector {
-    HillshadeTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idHillshadeEvaluatedPropsUBO) uniform HillshadeEvaluatedPropsUBO {
-    vec4 accent;
-    vec4 altitudes;
-    vec4 azimuths;
-    vec4 shadows[4];
-    vec4 highlights[4];
-} props;
 
 float get_aspect(vec2 deriv) {
     return deriv.x != 0.0 ? atan(deriv.y, -deriv.x) : PI / 2.0 * (deriv.y > 0.0 ? 1.0 : -1.0);
@@ -4234,16 +2843,6 @@ void hillshade(vec2 deriv, const HillshadeTilePropsUBO tileProps) {
     };
 }
 
-pub(crate) const TERRAIN_SHADER_PRELUDE: &str = r"
-
-#define idTerrainDrawableUBO    idDrawableReservedVertexOnlyUBO
-#define idTerrainPropsUBO       layerUBOStartId
-// The light of the tile's drape, as a hillshade's.
-#define idHillshadeTilePropsUBO         idDrawableReservedFragmentOnlyUBO
-#define idHillshadeEvaluatedPropsUBO    layerUBOStartId + 1
-
-";
-
 /// The terrain's surface: a tile's grid, raised to the heights of the tile's
 /// DEM with its skirts lowered and projected through the tile's entry of
 /// `projectionVector`, in the colors of the tile's drape. A pole's vertices
@@ -4251,50 +2850,30 @@ pub(crate) const TERRAIN_SHADER_PRELUDE: &str = r"
 /// the back end's flip of Y puts its rows north first.
 /// Where the tile's entry of `tilePropsVector` has lights, the drape holds a
 /// hillshade's slopes, premultiplied by its coverage, which the surface
-/// shades with them. The fog of `terrain_props` covers it.
-pub(crate) const TERRAIN_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: TERRAIN_SHADER_PRELUDE,
+/// shades with them. The fog of `terrain` covers it.
+pub(crate) const TERRAIN_SHADER: ShaderSource = ShaderSource {
     vertex: concat!(
         terrain_props!(),
         r"
-
-// x and y in tile units, whether the vertex is a skirt's lower edge, 0.
-layout(location = 0) in ivec4 in_pos;
 
 layout(location = 0) out vec2 frag_drape_pos;
 // How far along the view, in pixels: the clip w.
 layout(location = 1) out float frag_view_depth;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct TerrainDrawableUBO {
-    vec4 dem_coords;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idTerrainDrawableUBO) readonly buffer TerrainDrawableUBOVector {
-    TerrainDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
 void main() {
-    const TerrainDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const TerrainDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector.elements[constant.ubo_index];
     const vec2 pos = vec2(in_pos.xy);
     const float skirt = float(in_pos.z);
     const float height = surface_height(pos, drawable.dem_coords);
-    gl_Position = projectTileFor3D(pos, height - skirt * terrain_props.skirt_length, projection);
+    gl_Position = projectTileFor3D(pos, height - skirt * terrain.skirt_length, projection);
     frag_drape_pos = clamp(pos / 8192.0, vec2(0.0), vec2(1.0));
     frag_view_depth = gl_Position.w;
 }
 "
     ),
     fragment: concat!(
-        terrain_block!(),
+        terrain_fog!(),
         r"
 
 layout(location = 0) in vec2 frag_drape_pos;
@@ -4302,19 +2881,12 @@ layout(location = 1) in float frag_view_depth;
 
 layout(location = 0) out vec4 out_color;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 1) uniform texture2D drape_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId + 1) uniform sampler drape_sampler;
-
 ",
         hillshade_shading!(),
         r"
 void main() {
     const vec4 color = texture(sampler2D(drape_texture, drape_sampler), frag_drape_pos);
-    const HillshadeTilePropsUBO light = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const HillshadeTilePropsUBO light = lightVector.elements[constant.ubo_index];
     if (light.num_lights == 0 || color.a == 0.0) {
         out_color = fogged(color, frag_view_depth);
         return;
@@ -4333,41 +2905,21 @@ void main() {
 /// The ground's depth: the surface's grid, raised and projected as
 /// `TERRAIN_SHADER` does, writing each pixel's eye distance, an `f32`'s bits,
 /// least significant byte first, as the texel's channels.
-pub(crate) const TERRAIN_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: TERRAIN_SHADER_PRELUDE,
+pub(crate) const TERRAIN_DEPTH_SHADER: ShaderSource = ShaderSource {
     vertex: concat!(
         terrain_props!(),
         r"
 
-// x and y in tile units, whether the vertex is a skirt's lower edge, 0.
-layout(location = 0) in ivec4 in_pos;
-
 // The eye distance, which interpolates exactly across a triangle.
 layout(location = 0) out float frag_distance;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct TerrainDrawableUBO {
-    vec4 dem_coords;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idTerrainDrawableUBO) readonly buffer TerrainDrawableUBOVector {
-    TerrainDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
 void main() {
-    const TerrainDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const TerrainDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector.elements[constant.ubo_index];
     const vec2 pos = vec2(in_pos.xy);
     const float skirt = float(in_pos.z);
     const float height = surface_height(pos, drawable.dem_coords);
-    gl_Position = projectTileFor3D(pos, height - skirt * terrain_props.skirt_length, projection);
+    gl_Position = projectTileFor3D(pos, height - skirt * terrain.skirt_length, projection);
     frag_distance = gl_Position.w;
 }
 "
@@ -4391,16 +2943,10 @@ void main() {
 /// the height at a place of a tile, and whose fragments write that height's
 /// bits, least significant byte first, as the texel's channels.
 #[cfg(any(test, feature = "gpu-conformance"))]
-pub(crate) const TERRAIN_PROBE_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: TERRAIN_SHADER_PRELUDE,
+pub(crate) const TERRAIN_PROBE_SHADER: ShaderSource = ShaderSource {
     vertex: concat!(
         terrain_props!(),
         r"
-
-// Clip x and y, then where the height is read, in tile units.
-layout(location = 0) in vec4 in_pos;
-// The DEM uv's scale and offset, then the DEM's width in pixels.
-layout(location = 1) in vec4 in_dem_coords;
 
 layout(location = 0) flat out float frag_height;
 
@@ -4424,45 +2970,17 @@ void main() {
 ",
 };
 
-pub(crate) const HILLSHADE_SHADER_PRELUDE: &str = r"
-
-#define idHillshadeDrawableUBO          idDrawableReservedVertexOnlyUBO
-#define idHillshadeTilePropsUBO         idDrawableReservedFragmentOnlyUBO
-#define idHillshadeEvaluatedPropsUBO    layerUBOStartId
-
-";
-
-pub(crate) const HILLSHADE_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: HILLSHADE_SHADER_PRELUDE,
+pub(crate) const HILLSHADE_SHADER: ShaderSource = ShaderSource {
     vertex: r"
-
-layout(location = 0) in ivec2 in_position;
-layout(location = 1) in ivec2 in_texture_position;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct HillshadeDrawableUBO {
-    mat4 matrix;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idHillshadeDrawableUBO) readonly buffer HillshadeDrawableUBOVector {
-    HillshadeDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
 
 layout(location = 0) out vec2 frag_position;
 
 void main() {
-    const HillshadeDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const HillshadeDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
 
-    gl_Position = projectTile(vec2(in_position), vec2(in_position), projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(vec2(in_pos), vec2(in_pos), projectionVector.elements[constant.ubo_index]);
 
-    frag_position = vec2(in_texture_position) / 8192.0;
+    frag_position = vec2(in_texture_pos) / 8192.0;
     frag_position.y = 1.0 - frag_position.y;
 }
 ",
@@ -4471,13 +2989,6 @@ void main() {
 
 layout(location = 0) in vec2 frag_position;
 layout(location = 0) out vec4 out_color;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;
 
 ",
         hillshade_shading!(),
@@ -4489,7 +3000,7 @@ void main() {
     return;
 #endif
 
-    const HillshadeTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const HillshadeTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
     vec4 pixel = texture(sampler2D(image_texture, image_sampler), frag_position);
     // Without lights, the slopes as they were prepared, which the terrain's
@@ -4512,64 +3023,24 @@ void main() {
     ),
 };
 
-pub(crate) const HILLSHADE_PREPARE_SHADER_PRELUDE: &str = r"
-
-#define idHillshadePrepareDrawableUBO       drawableUBOStartId
-#define idHillshadePrepareTilePropsUBO      drawableUBOStartId + 3
-
-";
-
-pub(crate) const HILLSHADE_PREPARE_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: HILLSHADE_PREPARE_SHADER_PRELUDE,
+pub(crate) const HILLSHADE_PREPARE_SHADER: ShaderSource = ShaderSource {
     vertex: r"
-
-layout(location = 0) in ivec2 in_position;
-layout(location = 1) in ivec2 in_texture_position;
-
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idHillshadePrepareDrawableUBO) uniform HillshadePrepareDrawableUBO {
-    mat4 matrix;
-} drawable;
-
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idHillshadePrepareTilePropsUBO) uniform HillshadePrepareTilePropsUBO {
-    vec4 unpack;
-    vec2 dimension;
-    float zoom;
-    float maxzoom;
-    float unpack_scale;
-    float pad0;
-    float pad1;
-    float pad2;
-} tileProps;
 
 layout(location = 0) out vec2 frag_position;
 
 void main() {
 
-    gl_Position = drawable.matrix * vec4(in_position, 0.0, 1.0);
+    gl_Position = drawable.matrix * vec4(in_pos, 0.0, 1.0);
 
     const vec2 epsilon = vec2(1.0) / tileProps.dimension;
     const float scale = (tileProps.dimension.x - 2.0) / tileProps.dimension.x;
-    frag_position = in_texture_position / 8192.0 * scale + epsilon;
+    frag_position = in_texture_pos / 8192.0 * scale + epsilon;
 }
 ",
     fragment: r"
 
 layout(location = 0) in vec2 frag_position;
 layout(location = 0) out vec4 out_color;
-
-layout(set = DRAWABLE_UBO_SET_INDEX, binding = idHillshadePrepareTilePropsUBO) uniform HillshadePrepareTilePropsUBO {
-    vec4 unpack;
-    vec2 dimension;
-    float zoom;
-    float maxzoom;
-    float unpack_scale;
-    float pad0;
-    float pad1;
-    float pad2;
-} tileProps;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image_sampler;
 
 // The height in meters of the DEM at `coord`, by the rule of
 // `mln_util::dem`. The channels aren't rounded: the decode is linear in
@@ -4641,83 +3112,8 @@ void main() {
 ",
 };
 
-pub(crate) const LINE_SHADE_PRELUDE: &str = r"
-
-#define idLineDrawableUBO           idDrawableReservedVertexOnlyUBO
-#define idLineTilePropsUBO          idDrawableReservedFragmentOnlyUBO
-#define idLineEvaluatedPropsUBO     layerUBOStartId
-
-";
-
-pub(crate) const LINE_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: LINE_SHADE_PRELUDE,
+pub(crate) const LINE_SHADER: ShaderSource = ShaderSource {
     vertex: r"
-
-layout(location = 0) in ivec2 in_pos_normal;
-layout(location = 1) in uvec4 in_data;
-
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 2) in vec4 in_color;
-#endif
-
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 3) in vec2 in_blur;
-#endif
-
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 4) in vec2 in_opacity;
-#endif
-
-#if !defined(HAS_UNIFORM_u_gapwidth)
-layout(location = 5) in vec2 in_gapwidth;
-#endif
-
-#if !defined(HAS_UNIFORM_u_offset)
-layout(location = 6) in vec2 in_offset;
-#endif
-
-#if !defined(HAS_UNIFORM_u_width)
-layout(location = 7) in vec2 in_width;
-#endif
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct LineDrawableUBO {
-    mat4 matrix;
-    float ratio;
-    // Interpolations
-    float color_t;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pad1;
-    vec4 pad2;
-    vec4 pad3;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LineDrawableUBOVector {
-    LineDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
-    vec4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-} props;
 
 layout(location = 0) out vec2 frag_normal;
 layout(location = 1) out vec2 frag_width2;
@@ -4740,7 +3136,7 @@ layout(location = 6) out float frag_tile_x;
 #endif
 
 void main() {
-    const LineDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const LineDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
 
 #ifndef HAS_UNIFORM_u_color
     frag_color = unpack_mix_color(in_color, drawable.color_t);
@@ -4806,11 +3202,11 @@ void main() {
     vec2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * frag_normal.y * mat2(t, -u, u, t);
 
 #ifdef PROJECTION_GLOBE
-    const float adjustedThickness = projectLineThickness(pos.y, projectionVector.projection_ubo[constant.ubo_index]);
-    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector.projection_ubo[constant.ubo_index]);
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector.elements[constant.ubo_index]);
+    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector.elements[constant.ubo_index]);
     const vec2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    gl_Position = projectTile(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
-    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(extrudedPos, projectionVector.elements[constant.ubo_index]);
+    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector.elements[constant.ubo_index]);
     vec4 projected_extrude = gl_Position - projected_no_extrude;
 #else
     vec4 projected_extrude = drawable.matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
@@ -4844,18 +3240,6 @@ layout(location = 5) in float frag_opacity;
 #endif
 
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
-    vec4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-} props;
 
 #ifdef PROJECTION_GLOBE
 layout(location = 6) in float frag_tile_x;
@@ -4905,71 +3289,8 @@ void main() {
 ",
 };
 
-pub(crate) const LINE_GRADIENT_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: LINE_SHADE_PRELUDE,
+pub(crate) const LINE_GRADIENT_SHADER: ShaderSource = ShaderSource {
     vertex: r"
-
-layout(location = 0) in ivec2 in_pos_normal;
-layout(location = 1) in uvec4 in_data;
-
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 2) in vec2 in_blur;
-#endif
-
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 3) in vec2 in_opacity;
-#endif
-
-#if !defined(HAS_UNIFORM_u_gapwidth)
-layout(location = 4) in vec2 in_gapwidth;
-#endif
-
-#if !defined(HAS_UNIFORM_u_offset)
-layout(location = 5) in vec2 in_offset;
-#endif
-
-#if !defined(HAS_UNIFORM_u_width)
-layout(location = 6) in vec2 in_width;
-#endif
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct LineGradientDrawableUBO {
-    mat4 matrix;
-    float ratio;
-    // Interpolations
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pad1;
-    float pad2;
-    vec4 pad3;
-    vec4 pad4;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LineGradientDrawableUBOVector {
-    LineGradientDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
-    vec4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-} props;
 
 layout(location = 0) out vec2 frag_normal;
 layout(location = 1) out vec2 frag_width2;
@@ -4989,7 +3310,7 @@ layout(location = 6) out float frag_tile_x;
 #endif
 
 void main() {
-    const LineGradientDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const LineGradientDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
 
 #ifndef HAS_UNIFORM_u_blur
     frag_blur = unpack_mix_float(in_blur, drawable.blur_t);
@@ -5052,11 +3373,11 @@ void main() {
     vec2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * frag_normal.y * mat2(t, -u, u, t);
 
 #ifdef PROJECTION_GLOBE
-    const float adjustedThickness = projectLineThickness(pos.y, projectionVector.projection_ubo[constant.ubo_index]);
-    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector.projection_ubo[constant.ubo_index]);
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector.elements[constant.ubo_index]);
+    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector.elements[constant.ubo_index]);
     const vec2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    gl_Position = projectTile(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
-    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(extrudedPos, projectionVector.elements[constant.ubo_index]);
+    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector.elements[constant.ubo_index]);
     vec4 projected_extrude = gl_Position - projected_no_extrude;
 #else
     vec4 projected_extrude = drawable.matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
@@ -5086,22 +3407,7 @@ layout(location = 4) in float frag_blur;
 layout(location = 5) in float frag_opacity;
 #endif
 
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
-
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
-    vec4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-} props;
 
 #ifdef PROJECTION_GLOBE
 layout(location = 6) in float frag_tile_x;
@@ -5142,89 +3448,15 @@ void main() {
 
     // For gradient lines, lineprogress is the ratio along the entire line,
     // scaled to [0, 2^15), and the gradient ramp is stored in a texture.
-    const vec4 color = texture(sampler2D(image0_texture, image0_sampler), vec2(frag_lineprogress, 0.5));
+    const vec4 color = texture(sampler2D(image_texture, image_sampler), vec2(frag_lineprogress, 0.5));
 
     out_color = color * (alpha * opacity);
 }
 ",
 };
 
-pub(crate) const LINE_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: LINE_SHADE_PRELUDE,
+pub(crate) const LINE_PATTERN_SHADER: ShaderSource = ShaderSource {
     vertex: r"
-
-layout(location = 0) in ivec2 in_pos_normal;
-layout(location = 1) in uvec4 in_data;
-
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 2) in vec2 in_blur;
-#endif
-
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 3) in vec2 in_opacity;
-#endif
-
-#if !defined(HAS_UNIFORM_u_gapwidth)
-layout(location = 4) in vec2 in_gapwidth;
-#endif
-
-#if !defined(HAS_UNIFORM_u_offset)
-layout(location = 5) in vec2 in_offset;
-#endif
-
-#if !defined(HAS_UNIFORM_u_width)
-layout(location = 6) in vec2 in_width;
-#endif
-
-#if !defined(HAS_UNIFORM_u_pattern_from)
-layout(location = 7) in uvec4 in_pattern_from;
-#endif
-
-#if !defined(HAS_UNIFORM_u_pattern_to)
-layout(location = 8) in uvec4 in_pattern_to;
-#endif
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct LinePatternDrawableUBO {
-    mat4 matrix;
-    float ratio;
-    // Interpolations
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float pattern_from_t;
-    float pattern_to_t;
-    float floorwidth_t;
-    float pad1;
-    float pad2;
-    float pad3;
-    vec4 pad4;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LinePatternDrawableUBOVector {
-    LinePatternDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
-    vec4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-} props;
 
 layout(location = 0) out vec2 frag_normal;
 layout(location = 1) out vec2 frag_width2;
@@ -5255,7 +3487,7 @@ layout(location = 9) out float frag_tile_x;
 #endif
 
 void main() {
-    const LinePatternDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const LinePatternDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
 
 #ifndef HAS_UNIFORM_u_blur
     frag_blur = unpack_mix_float(in_blur, drawable.blur_t);
@@ -5329,11 +3561,11 @@ void main() {
     vec2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * frag_normal.y * mat2(t, -u, u, t);
 
 #ifdef PROJECTION_GLOBE
-    const float adjustedThickness = projectLineThickness(pos.y, projectionVector.projection_ubo[constant.ubo_index]);
-    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector.projection_ubo[constant.ubo_index]);
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector.elements[constant.ubo_index]);
+    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector.elements[constant.ubo_index]);
     const vec2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    gl_Position = projectTile(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
-    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(extrudedPos, projectionVector.elements[constant.ubo_index]);
+    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector.elements[constant.ubo_index]);
     vec4 projected_extrude = gl_Position - projected_no_extrude;
 #else
     vec4 projected_extrude = drawable.matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
@@ -5377,38 +3609,6 @@ layout(location = 8) in float frag_floorwidth;
 
 layout(location = 0) out vec4 out_color;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct LinePatternTilePropertiesUBO {
-    vec4 pattern_from;
-    vec4 pattern_to;
-    vec4 scale;
-    vec2 texsize;
-    float fade;
-    float pad1;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idLineTilePropsUBO) readonly buffer LinePatternTilePropertiesUBOVector {
-    LinePatternTilePropertiesUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
-    vec4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-} props;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
-
 #ifdef PROJECTION_GLOBE
 layout(location = 9) in float frag_tile_x;
 #endif
@@ -5425,7 +3625,7 @@ void main() {
     return;
 #else
 
-    const LinePatternTilePropertiesUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const LinePatternTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
 #ifdef HAS_UNIFORM_u_blur
     const float blur = props.blur;
@@ -5494,14 +3694,14 @@ void main() {
         const float x_a = mod(frag_linesofar / pattern_size_a.x * aspect_a, 1.0);
         vec2 pos_a = atlas_pos((pattern_tl_a - 1.0) * texel_size, (pattern_br_a - pattern_tl_a + 2.0) * texel_size * vec2(x_a, y));
         pos_a = clamp(pos_a, (pattern_tl_a - 1.0) * texel_size + half_texel, (pattern_br_a + 1.0) * texel_size - half_texel);
-        color_a = texture(sampler2D(image0_texture, image0_sampler), pos_a);
+        color_a = texture(sampler2D(image_texture, image_sampler), pos_a);
     }
     vec4 color_b = vec4(0.0);
     if (tileProps.fade > 0.0) {
         const float x_b = mod(frag_linesofar / pattern_size_b.x * aspect_b, 1.0);
         vec2 pos_b = atlas_pos((pattern_tl_b - 1.0) * texel_size, (pattern_br_b - pattern_tl_b + 2.0) * texel_size * vec2(x_b, y));
         pos_b = clamp(pos_b, (pattern_tl_b - 1.0) * texel_size + half_texel, (pattern_br_b + 1.0) * texel_size - half_texel);
-        color_b = texture(sampler2D(image0_texture, image0_sampler), pos_b);
+        color_b = texture(sampler2D(image_texture, image_sampler), pos_b);
     }
 
     const vec4 color = mix(color_a, color_b, tileProps.fade);
@@ -5512,87 +3712,8 @@ void main() {
 ",
 };
 
-pub(crate) const LINE_SDF_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: LINE_SHADE_PRELUDE,
+pub(crate) const LINE_SDF_SHADER: ShaderSource = ShaderSource {
     vertex: r"
-
-layout(location = 0) in ivec2 in_pos_normal;
-layout(location = 1) in uvec4 in_data;
-
-#if !defined(HAS_UNIFORM_u_color)
-layout(location = 2) in vec4 in_color;
-#endif
-
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 3) in vec2 in_blur;
-#endif
-
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 4) in vec2 in_opacity;
-#endif
-
-#if !defined(HAS_UNIFORM_u_gapwidth)
-layout(location = 5) in vec2 in_gapwidth;
-#endif
-
-#if !defined(HAS_UNIFORM_u_offset)
-layout(location = 6) in vec2 in_offset;
-#endif
-
-#if !defined(HAS_UNIFORM_u_width)
-layout(location = 7) in vec2 in_width;
-#endif
-
-#if !defined(HAS_UNIFORM_u_floorwidth)
-layout(location = 8) in vec2 in_floorwidth;
-#endif
-
-#if !defined(HAS_UNIFORM_u_dasharray)
-layout(location = 9) in vec4 in_dasharray;
-#endif
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct LineSDFDrawableUBO {
-    mat4 matrix;
-    vec2 patternscale_a;
-    vec2 patternscale_b;
-    float tex_y_a;
-    float tex_y_b;
-    float ratio;
-    // Interpolations
-    float color_t;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float floorwidth_t;
-    float atlas_height;
-    float pad2;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LineSDFDrawableUBOVector {
-    LineSDFDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
-    vec4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-} props;
 
 layout(location = 0) out vec2 frag_normal;
 layout(location = 1) out vec2 frag_width2;
@@ -5625,7 +3746,7 @@ layout(location = 10) flat out float frag_dash_width;
 #endif
 
 void main() {
-    const LineSDFDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const LineSDFDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
 
 #ifndef HAS_UNIFORM_u_color
     frag_color = unpack_mix_color(in_color, drawable.color_t);
@@ -5700,11 +3821,11 @@ void main() {
     vec2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * frag_normal.y * mat2(t, -u, u, t);
 
 #ifdef PROJECTION_GLOBE
-    const float adjustedThickness = projectLineThickness(pos.y, projectionVector.projection_ubo[constant.ubo_index]);
-    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector.projection_ubo[constant.ubo_index]);
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector.elements[constant.ubo_index]);
+    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector.elements[constant.ubo_index]);
     const vec2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    gl_Position = projectTile(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
-    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(extrudedPos, projectionVector.elements[constant.ubo_index]);
+    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector.elements[constant.ubo_index]);
     vec4 projected_extrude = gl_Position - projected_no_extrude;
 #else
     vec4 projected_extrude = drawable.matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
@@ -5761,39 +3882,6 @@ layout(location = 8) in float frag_floorwidth;
 
 layout(location = 0) out vec4 out_color;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct LineSDFTilePropsUBO {
-    float sdfgamma;
-    float mix;
-    float pad1;
-    float pad2;
-    vec4 pad3;
-    vec4 pad4;
-    vec4 pad5;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idLineTilePropsUBO) readonly buffer LineSDFTilePropsUBOVector {
-    LineSDFTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
-    vec4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-} props;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
-
 #ifdef PROJECTION_GLOBE
 layout(location = 9) in float frag_tile_x;
 #endif
@@ -5814,7 +3902,7 @@ void main() {
     return;
 #endif
 
-    const LineSDFTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const LineSDFTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
 #ifdef HAS_UNIFORM_u_color
     const vec4 color = props.color;
@@ -5847,8 +3935,8 @@ void main() {
     // line in case of an offset line (`v_width2.y`) or when fading out (`v_width2.x`)
     const float blur2 = (blur + 1.0 / DEVICE_PIXEL_RATIO) * frag_gamma_scale;
 
-    const float sdfdist_a = texture(sampler2D(image0_texture, image0_sampler), frag_tex_a).a;
-    const float sdfdist_b = texture(sampler2D(image0_texture, image0_sampler), frag_tex_b).a;
+    const float sdfdist_a = texture(sampler2D(image_texture, image_sampler), frag_tex_a).a;
+    const float sdfdist_b = texture(sampler2D(image_texture, image_sampler), frag_tex_b).a;
     const float sdfdist = mix(sdfdist_a, sdfdist_b, tileProps.mix);
 #ifdef HAS_UNIFORM_u_dasharray
     const float sdfgamma = tileProps.sdfgamma;
@@ -5863,83 +3951,8 @@ void main() {
 ",
 };
 
-pub(crate) const LINE_GRADIENT_SDF_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: LINE_SHADE_PRELUDE,
+pub(crate) const LINE_GRADIENT_SDF_SHADER: ShaderSource = ShaderSource {
     vertex: r"
-
-layout(location = 0) in ivec2 in_pos_normal;
-layout(location = 1) in uvec4 in_data;
-
-#if !defined(HAS_UNIFORM_u_blur)
-layout(location = 2) in vec2 in_blur;
-#endif
-
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 3) in vec2 in_opacity;
-#endif
-
-#if !defined(HAS_UNIFORM_u_gapwidth)
-layout(location = 4) in vec2 in_gapwidth;
-#endif
-
-#if !defined(HAS_UNIFORM_u_offset)
-layout(location = 5) in vec2 in_offset;
-#endif
-
-#if !defined(HAS_UNIFORM_u_width)
-layout(location = 6) in vec2 in_width;
-#endif
-
-#if !defined(HAS_UNIFORM_u_floorwidth)
-layout(location = 7) in vec2 in_floorwidth;
-#endif
-
-#if !defined(HAS_UNIFORM_u_dasharray)
-layout(location = 8) in vec4 in_dasharray;
-#endif
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct LineSDFDrawableUBO {
-    mat4 matrix;
-    vec2 patternscale_a;
-    vec2 patternscale_b;
-    float tex_y_a;
-    float tex_y_b;
-    float ratio;
-    // Interpolations
-    float color_t;
-    float blur_t;
-    float opacity_t;
-    float gapwidth_t;
-    float offset_t;
-    float width_t;
-    float floorwidth_t;
-    float atlas_height;
-    float pad2;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idLineDrawableUBO) readonly buffer LineSDFDrawableUBOVector {
-    LineSDFDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
-    vec4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-} props;
 
 layout(location = 0) out vec2 frag_normal;
 layout(location = 1) out vec2 frag_width2;
@@ -5969,7 +3982,7 @@ layout(location = 10) flat out float frag_dash_width;
 #endif
 
 void main() {
-    const LineSDFDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const LineSDFDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
 
 #ifndef HAS_UNIFORM_u_blur
     frag_blur = unpack_mix_float(in_blur, drawable.blur_t);
@@ -6041,11 +4054,11 @@ void main() {
     vec2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * frag_normal.y * mat2(t, -u, u, t);
 
 #ifdef PROJECTION_GLOBE
-    const float adjustedThickness = projectLineThickness(pos.y, projectionVector.projection_ubo[constant.ubo_index]);
-    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector.projection_ubo[constant.ubo_index]);
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector.elements[constant.ubo_index]);
+    const vec4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector.elements[constant.ubo_index]);
     const vec2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
-    gl_Position = projectTile(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
-    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(extrudedPos, projectionVector.elements[constant.ubo_index]);
+    frag_tile_x = antimeridianClipX(extrudedPos, projectionVector.elements[constant.ubo_index]);
     vec4 projected_extrude = gl_Position - projected_no_extrude;
 #else
     vec4 projected_extrude = drawable.matrix * vec4(dist / drawable.ratio, 0.0, 0.0);
@@ -6107,41 +4120,6 @@ layout(location = 10) flat in float frag_dash_width;
 
 layout(location = 0) out vec4 out_color;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct LineSDFTilePropsUBO {
-    float sdfgamma;
-    float mix;
-    float pad1;
-    float pad2;
-    vec4 pad3;
-    vec4 pad4;
-    vec4 pad5;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idLineTilePropsUBO) readonly buffer LineSDFTilePropsUBOVector {
-    LineSDFTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idLineEvaluatedPropsUBO) uniform LineEvaluatedPropsUBO {
-    vec4 color;
-    float blur;
-    float opacity;
-    float gapwidth;
-    float offset;
-    float width;
-    float floorwidth;
-    float pad0;
-    float pad1;
-} props;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 1) uniform texture2D image1_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId + 1) uniform sampler image1_sampler;
-
 void main() {
 #ifdef PROJECTION_GLOBE
     if (clippedAtAntimeridian(frag_tile_x)) {
@@ -6154,7 +4132,7 @@ void main() {
     return;
 #endif
 
-    const LineSDFTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const LineSDFTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
 #ifdef HAS_UNIFORM_u_blur
     const float blur = props.blur;
@@ -6181,8 +4159,8 @@ void main() {
     // line in case of an offset line (`v_width2.y`) or when fading out (`v_width2.x`)
     const float blur2 = (blur + 1.0 / DEVICE_PIXEL_RATIO) * frag_gamma_scale;
 
-    const float sdfdist_a = texture(sampler2D(image1_texture, image1_sampler), frag_tex_a).a;
-    const float sdfdist_b = texture(sampler2D(image1_texture, image1_sampler), frag_tex_b).a;
+    const float sdfdist_a = texture(sampler2D(image_dash_texture, image_dash_sampler), frag_tex_a).a;
+    const float sdfdist_b = texture(sampler2D(image_dash_texture, image_dash_sampler), frag_tex_b).a;
     const float sdfdist = mix(sdfdist_a, sdfdist_b, tileProps.mix);
 #ifdef HAS_UNIFORM_u_dasharray
     const float sdfgamma = tileProps.sdfgamma;
@@ -6193,71 +4171,26 @@ void main() {
                         smoothstep(0.5 - sdfgamma / floorwidth, 0.5 + sdfgamma / floorwidth, sdfdist);
 
     // The gradient ramp is stored in a texture indexed by the ratio along the entire line.
-    const vec4 color = texture(sampler2D(image0_texture, image0_sampler), vec2(frag_lineprogress, 0.5));
+    const vec4 color = texture(sampler2D(image_texture, image_sampler), vec2(frag_lineprogress, 0.5));
 
     out_color = color * (alpha * opacity);
 }
 ",
 };
 
-pub(crate) const RASTER_SHADER_PRELUDE: &str = r"
-
-#define idRasterDrawableUBO         idDrawableReservedVertexOnlyUBO
-#define idRasterEvaluatedPropsUBO   layerUBOStartId
-
-";
-
-pub(crate) const RASTER_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: RASTER_SHADER_PRELUDE,
+pub(crate) const RASTER_SHADER: ShaderSource = ShaderSource {
     vertex: r"
-
-layout(location = 0) in ivec2 in_position;
-layout(location = 1) in ivec2 in_texture_position;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct RasterDrawableUBO {
-    mat4 matrix;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idRasterDrawableUBO) readonly buffer RasterDrawableUBOVector {
-    RasterDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-layout(set = LAYER_SET_INDEX, binding = idRasterEvaluatedPropsUBO) uniform RasterEvaluatedPropsUBO {
-    vec4 spin_weights;
-    vec2 tl_parent;
-    float scale_parent;
-    float buffer_scale;
-    float fade_t;
-    float opacity;
-    float brightness_low;
-    float brightness_high;
-    float saturation_factor;
-    float contrast_factor;
-    float pad1;
-    float pad2;
-    vec4 coords_top;
-    vec4 coords_bottom;
-    vec4 image_warp;
-} props;
 
 layout(location = 0) out vec3 frag_position0;
 layout(location = 1) out vec3 frag_position1;
 
 void main() {
-    const RasterDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const RasterDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
 
     // The vertices span the unit square, which the warp puts on the quad
     // of the corners: blended from the projective warp towards the
     // bilinear one, whose homogeneous denominator is one at the top left.
-    vec2 fractional = vec2(in_position) / 8192.0;
+    vec2 fractional = vec2(in_pos) / 8192.0;
     vec2 top_left = props.coords_top.xy;
     vec2 top_right = props.coords_top.zw;
     vec2 bottom_left = props.coords_bottom.xy;
@@ -6268,14 +4201,14 @@ void main() {
     vec2 down_left = bottom_left - top_left + props.image_warp.y * bottom_left;
     vec2 projective = (across_top * fractional.x + down_left * fractional.y + top_left) / denominator;
     vec2 position = mix(projective, bilinear, props.image_warp.z);
-    gl_Position = projectTile(position, position, projectionVector.projection_ubo[constant.ubo_index]);
+    gl_Position = projectTile(position, position, projectionVector.elements[constant.ubo_index]);
 
     // We are using Int16 for texture position coordinates to give us enough precision for
     // fractional coordinates. We use 8192 to scale the texture coordinates in the buffer
     // as an arbitrarily high number to preserve adequate precision when rendering.
     // This is also the same value as the EXTENT we are using for our tile buffer pos coordinates,
     // so math for modifying either is consistent.
-    vec2 position0 = (((in_texture_position / 8192.0) - 0.5) / props.buffer_scale ) + 0.5;
+    vec2 position0 = (((in_texture_pos / 8192.0) - 0.5) / props.buffer_scale ) + 0.5;
     vec2 position1 = (position0 * props.scale_parent) + props.tl_parent;
     // The texture coordinates weighted by the reciprocal of the
     // denominator, blended as the position is, interpolate projectively.
@@ -6290,29 +4223,6 @@ layout(location = 0) in vec3 frag_position0;
 layout(location = 1) in vec3 frag_position1;
 
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idRasterEvaluatedPropsUBO) uniform RasterEvaluatedPropsUBO {
-    vec4 spin_weights;
-    vec2 tl_parent;
-    float scale_parent;
-    float buffer_scale;
-    float fade_t;
-    float opacity;
-    float brightness_low;
-    float brightness_high;
-    float saturation_factor;
-    float contrast_factor;
-    float pad1;
-    float pad2;
-    vec4 coords_top;
-    vec4 coords_bottom;
-    vec4 image_warp;
-} props;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 1) uniform texture2D image1_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId + 1) uniform sampler image1_sampler;
 
 void main() {
 
@@ -6356,37 +4266,18 @@ void main() {
 ",
 };
 
-pub(crate) const SKY_SHADER_PRELUDE: &str = r"
-
-#define idSkyPropsUBO layerUBOStartId
-#define idAtmospherePropsUBO layerUBOStartId
-
-";
-
-pub(crate) const SKY_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: SKY_SHADER_PRELUDE,
+pub(crate) const SKY_SHADER: ShaderSource = ShaderSource {
     vertex: r"
-layout(location = 0) in ivec2 in_position;
 layout(location = 0) out vec2 frag_pos;
 
 void main() {
-    frag_pos = vec2(in_position);
+    frag_pos = vec2(in_pos);
     gl_Position = vec4(frag_pos, 1.0, 1.0);
 }
 ",
     fragment: r"
 layout(location = 0) in vec2 frag_pos;
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idSkyPropsUBO) uniform SkyPropsUBO {
-    vec4 sky_color;
-    vec4 horizon_color;
-    vec2 horizon;
-    vec2 horizon_normal;
-    vec2 viewport_size;
-    float sky_horizon_blend;
-    float sky_blend;
-} sky;
 
 void main() {
     vec2 pixel = (frag_pos * 0.5 + 0.5) * sky.viewport_size;
@@ -6405,20 +4296,12 @@ void main() {
 ",
 };
 
-pub(crate) const ATMOSPHERE_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: SKY_SHADER_PRELUDE,
+pub(crate) const ATMOSPHERE_SHADER: ShaderSource = ShaderSource {
     vertex: r"
-layout(location = 0) in ivec2 in_position;
 layout(location = 0) out vec3 frag_view_direction;
 
-layout(set = LAYER_SET_INDEX, binding = idAtmospherePropsUBO) uniform AtmospherePropsUBO {
-    mat4 inv_view_projection;
-    vec4 camera_position;
-    vec4 sun_position;
-} atmosphere;
-
 void main() {
-    vec2 pos = vec2(in_position);
+    vec2 pos = vec2(in_pos);
     vec4 target = atmosphere.inv_view_projection * vec4(pos, 0.0, 1.0);
     frag_view_direction = target.xyz / target.w - atmosphere.camera_position.xyz;
     // Vulkan uses a zero-to-one NDC depth range, so 0.5 matches WebGL's
@@ -6429,12 +4312,6 @@ void main() {
     fragment: r"
 layout(location = 0) in vec3 frag_view_direction;
 layout(location = 0) out vec4 out_color;
-
-layout(set = LAYER_SET_INDEX, binding = idAtmospherePropsUBO) uniform AtmospherePropsUBO {
-    mat4 inv_view_projection;
-    vec4 camera_position;
-    vec4 sun_position;
-} atmosphere;
 
 const float PI = 3.141592653589793;
 const int PRIMARY_STEPS = 5;
@@ -6523,81 +4400,10 @@ void main() {
 ",
 };
 
-pub(crate) const SYMBOL_SHADER_PRELUDE: &str = r"
-
-#define idSymbolDrawableUBO         idDrawableReservedVertexOnlyUBO
-#define idSymbolTilePropsUBO        idDrawableReservedFragmentOnlyUBO
-#define idSymbolEvaluatedPropsUBO   layerUBOStartId
-
-#define SDF_PX 8.0
-
-";
-
-pub(crate) const SYMBOL_ICON_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: SYMBOL_SHADER_PRELUDE,
+pub(crate) const SYMBOL_ICON_SHADER: ShaderSource = ShaderSource {
     vertex: concat!(
-        ground_visibility!("2"),
+        ground_visibility!(),
         r"
-
-layout(location = 0) in ivec4 in_pos_offset;
-layout(location = 1) in uvec4 in_data;
-layout(location = 2) in ivec4 in_pixeloffset;
-layout(location = 3) in vec4 in_projected_pos;
-layout(location = 4) in float in_fade_opacity;
-
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 5) in vec2 in_opacity;
-#endif
-
-// The top-left of the quad's atlas rectangle.
-layout(location = 6) in uvec2 in_tex_origin;
-// The symbol's symbol-height-offset, in meters.
-layout(location = 7) in float in_height_offset;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct SymbolDrawableUBO {
-    mat4 matrix;
-    mat4 label_plane_matrix;
-    mat4 coord_matrix;
-
-    vec2 texsize;
-    vec2 texsize_icon;
-
-    int is_text_prop;
-	int rotate_symbol;
-    int pitch_with_map;
-    int is_size_zoom_constant;
-    int is_size_feature_constant;
-    int is_offset;
-
-    float size_t;
-    float size;
-
-    // Interpolations
-    float fill_color_t;
-    float halo_color_t;
-    float opacity_t;
-    float halo_width_t;
-    float halo_blur_t;
-
-    int is_along_line;
-    int is_variable_anchor;
-    float pitched_scale;
-    vec2 translation;
-    float gamma_scale;
-    int is_halo;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idSymbolDrawableUBO) readonly buffer SymbolDrawableUBOVector {
-    SymbolDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
 
 layout(location = 0) out vec2 frag_tex;
 layout(location = 1) out float frag_opacity;
@@ -6607,8 +4413,8 @@ layout(location = 1) out float frag_opacity;
 layout(location = 2) flat out vec2 frag_tex_origin;
 
 void main() {
-    const SymbolDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const SymbolDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector.elements[constant.ubo_index];
 
     // How much of the symbol the ground in front of its anchor leaves.
 #ifdef TERRAIN
@@ -6744,46 +4550,13 @@ layout(location = 2) flat in vec2 frag_tex_origin;
 
 layout(location = 0) out vec4 out_color;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct SymbolTilePropsUBO {
-    int is_text;
-    int is_halo;
-    float pad1;
-    float pad2;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idSymbolTilePropsUBO) readonly buffer SymbolTilePropsUBOVector {
-    SymbolTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBO {
-    vec4 text_fill_color;
-    vec4 text_halo_color;
-    float text_opacity;
-    float text_halo_width;
-    float text_halo_blur;
-    float pad1;
-    vec4 icon_fill_color;
-    vec4 icon_halo_color;
-    float icon_opacity;
-    float icon_halo_width;
-    float icon_halo_blur;
-    float pad2;
-} props;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
-
 void main() {
 #if defined(OVERDRAW_INSPECTOR)
     out_color = vec4(1.0);
     return;
 #else
 
-    const SymbolTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const SymbolTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_opacity)
     const float opacity = (tileProps.is_text != 0 ? props.text_opacity : props.icon_opacity) * frag_opacity;
@@ -6791,108 +4564,18 @@ void main() {
     const float opacity = frag_opacity; // fade_opacity is baked in for this case
 #endif
 
-    out_color = texture(sampler2D(image0_texture, image0_sampler), atlas_pos(frag_tex_origin, frag_tex)) * opacity;
+    out_color = texture(sampler2D(texture_texture, texture_sampler), atlas_pos(frag_tex_origin, frag_tex)) * opacity;
 #endif
 }
 ",
 };
 
-pub(crate) const SYMBOL_SDF_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: SYMBOL_SHADER_PRELUDE,
+pub(crate) const SYMBOL_SDF_SHADER: ShaderSource = ShaderSource {
     vertex: concat!(
-        ground_visibility!("2"),
+        ground_visibility!(),
         r"
 
-layout(location = 0) in ivec4 in_pos_offset;
-layout(location = 1) in uvec4 in_data;
-layout(location = 2) in ivec4 in_pixeloffset;
-layout(location = 3) in vec4 in_projected_pos;
-layout(location = 4) in float in_fade_opacity;
-
-#if !defined(HAS_UNIFORM_u_fill_color)
-layout(location = 5) in vec4 in_fill_color;
-#endif
-
-#if !defined(HAS_UNIFORM_u_halo_color)
-layout(location = 6) in vec4 in_halo_color;
-#endif
-
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 7) in vec2 in_opacity;
-#endif
-
-#if !defined(HAS_UNIFORM_u_halo_width)
-layout(location = 8) in vec2 in_halo_width;
-#endif
-
-#if !defined(HAS_UNIFORM_u_halo_blur)
-layout(location = 9) in vec2 in_halo_blur;
-#endif
-
-// The top-left of the quad's atlas rectangle.
-layout(location = 10) in uvec2 in_tex_origin;
-// The symbol's symbol-height-offset, in meters.
-layout(location = 11) in float in_height_offset;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct SymbolDrawableUBO {
-    mat4 matrix;
-    mat4 label_plane_matrix;
-    mat4 coord_matrix;
-
-    vec2 texsize;
-    vec2 texsize_icon;
-
-    int is_text_prop;
-	int rotate_symbol;
-    int pitch_with_map;
-    int is_size_zoom_constant;
-    int is_size_feature_constant;
-    int is_offset;
-
-    float size_t;
-    float size;
-
-    // Interpolations
-    float fill_color_t;
-    float halo_color_t;
-    float opacity_t;
-    float halo_width_t;
-    float halo_blur_t;
-
-    int is_along_line;
-    int is_variable_anchor;
-    float pitched_scale;
-    vec2 translation;
-    float gamma_scale;
-    int is_halo;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idSymbolDrawableUBO) readonly buffer SymbolDrawableUBOVector {
-    SymbolDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBO {
-    vec4 text_fill_color;
-    vec4 text_halo_color;
-    float text_opacity;
-    float text_halo_width;
-    float text_halo_blur;
-    float pad1;
-    vec4 icon_fill_color;
-    vec4 icon_halo_color;
-    float icon_opacity;
-    float icon_halo_width;
-    float icon_halo_blur;
-    float pad2;
-} props;
+#define SDF_PX 8.0
 
 layout(location = 0) out vec2 frag_tex;
 // The fade opacity, times the opacity when it's per vertex.
@@ -6915,8 +4598,8 @@ layout(location = 5) out vec4 frag_halo_color;
 layout(location = 9) flat out vec2 frag_tex_origin;
 
 void main() {
-    const SymbolDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const SymbolDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector.elements[constant.ubo_index];
 
     // How much of the symbol the ground in front of its anchor leaves.
 #ifdef TERRAIN
@@ -7093,39 +4776,6 @@ layout(location = 9) flat in vec2 frag_tex_origin;
 
 layout(location = 0) out vec4 out_color;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct SymbolTilePropsUBO {
-    int is_text;
-    int is_halo;
-    float pad1;
-    float pad2;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idSymbolTilePropsUBO) readonly buffer SymbolTilePropsUBOVector {
-    SymbolTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBO {
-    vec4 text_fill_color;
-    vec4 text_halo_color;
-    float text_opacity;
-    float text_halo_width;
-    float text_halo_blur;
-    float pad1;
-    vec4 icon_fill_color;
-    vec4 icon_halo_color;
-    float icon_opacity;
-    float icon_halo_width;
-    float icon_halo_blur;
-    float pad2;
-} props;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D image0_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler image0_sampler;
-
 void main() {
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -7133,7 +4783,7 @@ void main() {
     return;
 #else
 
-    const SymbolTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const SymbolTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_fill_color)
     const vec4 fill_color = tileProps.is_text != 0 ? props.text_fill_color : props.icon_fill_color;
@@ -7156,7 +4806,7 @@ void main() {
     // A halo's inner edge sits a gamma outside the fill's.
     const float fillInnerEdge = (256.0 - 64.0) / 256.0;
     const float innerEdge = tileProps.is_halo != 0 ? fillInnerEdge + gammaScaled : fillInnerEdge;
-    const float dist = texture(sampler2D(image0_texture, image0_sampler), atlas_pos(frag_tex_origin, frag_tex)).a;
+    const float dist = texture(sampler2D(texture_texture, texture_sampler), atlas_pos(frag_tex_origin, frag_tex)).a;
     float alpha = smoothstep(innerEdge - gammaScaled, innerEdge + gammaScaled, dist);
     if (tileProps.is_halo != 0) {
         // When drawing halos, if the fill is translucent we want
@@ -7170,104 +4820,14 @@ void main() {
 ",
 };
 
-pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: GlslShaderSource = GlslShaderSource {
-    prelude: SYMBOL_SHADER_PRELUDE,
+pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: ShaderSource = ShaderSource {
     vertex: concat!(
-        ground_visibility!("2"),
+        ground_visibility!(),
         r"
 
 #define SDF 1.0
 #define ICON 0.0
-
-layout(location = 0) in ivec4 in_pos_offset;
-layout(location = 1) in uvec4 in_data;
-layout(location = 2) in vec4 in_projected_pos;
-layout(location = 3) in float in_fade_opacity;
-
-#if !defined(HAS_UNIFORM_u_fill_color)
-layout(location = 4) in vec4 in_fill_color;
-#endif
-
-#if !defined(HAS_UNIFORM_u_halo_color)
-layout(location = 5) in vec4 in_halo_color;
-#endif
-
-#if !defined(HAS_UNIFORM_u_opacity)
-layout(location = 6) in vec2 in_opacity;
-#endif
-
-#if !defined(HAS_UNIFORM_u_halo_width)
-layout(location = 7) in vec2 in_halo_width;
-#endif
-
-#if !defined(HAS_UNIFORM_u_halo_blur)
-layout(location = 8) in vec2 in_halo_blur;
-#endif
-
-// The top-left of the quad's atlas rectangle.
-layout(location = 9) in uvec2 in_tex_origin;
-// The symbol's symbol-height-offset, in meters.
-layout(location = 10) in float in_height_offset;
-
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct SymbolDrawableUBO {
-    mat4 matrix;
-    mat4 label_plane_matrix;
-    mat4 coord_matrix;
-
-    vec2 texsize;
-    vec2 texsize_icon;
-
-    int is_text_prop;
-	int rotate_symbol;
-    int pitch_with_map;
-    int is_size_zoom_constant;
-    int is_size_feature_constant;
-    int is_offset;
-
-    float size_t;
-    float size;
-
-    // Interpolations
-    float fill_color_t;
-    float halo_color_t;
-    float opacity_t;
-    float halo_width_t;
-    float halo_blur_t;
-
-    int is_along_line;
-    int is_variable_anchor;
-    float pitched_scale;
-    vec2 translation;
-    float gamma_scale;
-    int is_halo;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idSymbolDrawableUBO) readonly buffer SymbolDrawableUBOVector {
-    SymbolDrawableUBO drawable_ubo[];
-} drawableVector;
-
-layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
-    ProjectionUBO projection_ubo[];
-} projectionVector;
-
-layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBO {
-    vec4 text_fill_color;
-    vec4 text_halo_color;
-    float text_opacity;
-    float text_halo_width;
-    float text_halo_blur;
-    float pad1;
-    vec4 icon_fill_color;
-    vec4 icon_halo_color;
-    float icon_opacity;
-    float icon_halo_width;
-    float icon_halo_blur;
-    float pad2;
-} props;
+#define SDF_PX 8.0
 
 layout(location = 0) out vec2 frag_tex;
 // The fade opacity, times the opacity when it's per vertex.
@@ -7292,8 +4852,8 @@ layout(location = 9) flat out int frag_is_icon;
 layout(location = 10) flat out vec2 frag_tex_origin;
 
 void main() {
-    const SymbolDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
-    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const SymbolDrawableUBO drawable = drawableVector.elements[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector.elements[constant.ubo_index];
 
     // How much of the symbol the ground in front of its anchor leaves.
 #ifdef TERRAIN
@@ -7476,48 +5036,13 @@ layout(location = 10) flat in vec2 frag_tex_origin;
 
 layout(location = 0) out vec4 out_color;
 
-layout(push_constant) uniform Constants {
-    int ubo_index;
-} constant;
-
-struct SymbolTilePropsUBO {
-    int is_text;
-    int is_halo;
-    float pad1;
-    float pad2;
-};
-
-layout(std140, set = LAYER_SET_INDEX, binding = idSymbolTilePropsUBO) readonly buffer SymbolTilePropsUBOVector {
-    SymbolTilePropsUBO tile_props_ubo[];
-} tilePropsVector;
-
-layout(set = LAYER_SET_INDEX, binding = idSymbolEvaluatedPropsUBO) uniform SymbolEvaluatedPropsUBO {
-    vec4 text_fill_color;
-    vec4 text_halo_color;
-    float text_opacity;
-    float text_halo_width;
-    float text_halo_blur;
-    float pad1;
-    vec4 icon_fill_color;
-    vec4 icon_halo_color;
-    float icon_opacity;
-    float icon_halo_width;
-    float icon_halo_blur;
-    float pad2;
-} props;
-
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 0) uniform texture2D glyph_image_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId) uniform sampler glyph_image_sampler;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 1) uniform texture2D icon_image_texture;
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = samplerBindingStartId + 1) uniform sampler icon_image_sampler;
-
 void main() {
 #if defined(OVERDRAW_INSPECTOR)
     out_color = vec4(1.0);
     return;
 #else
 
-    const SymbolTilePropsUBO tileProps = tilePropsVector.tile_props_ubo[constant.ubo_index];
+    const SymbolTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_fill_color)
     const vec4 fill_color = tileProps.is_text != 0 ? props.text_fill_color : props.icon_fill_color;
@@ -7538,7 +5063,7 @@ void main() {
     const vec2 pos = atlas_pos(frag_tex_origin, frag_tex);
 
     if (bool(frag_is_icon)) {
-        out_color = texture(sampler2D(icon_image_texture, icon_image_sampler), pos) * opacity;
+        out_color = texture(sampler2D(texture_icon_texture, texture_icon_sampler), pos) * opacity;
         return;
     }
 
@@ -7547,7 +5072,7 @@ void main() {
     // A halo's inner edge sits a gamma outside the fill's.
     const float fillInnerEdge = (256.0 - 64.0) / 256.0;
     const float innerEdge = tileProps.is_halo != 0 ? fillInnerEdge + gammaScaled : fillInnerEdge;
-    const float dist = texture(sampler2D(glyph_image_texture, glyph_image_sampler), pos).a;
+    const float dist = texture(sampler2D(texture_texture, texture_sampler), pos).a;
     float alpha = smoothstep(innerEdge - gammaScaled, innerEdge + gammaScaled, dist);
     if (tileProps.is_halo != 0) {
         // When drawing halos, if the fill is translucent we want
