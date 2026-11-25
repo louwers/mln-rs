@@ -11,12 +11,11 @@ use geometry::Point;
 use mln_util::geometry::{FeatureType, to_feature_type};
 use mln_util::logging::{Event, Log};
 
+use super::within::BoundaryMode;
 use crate::conversion::{Convertible, Error};
 use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::{EvalResult, EvaluationContext, EvaluationError, Expr, Node};
 use crate::feature::{CanonicalTileID, GeometryTileFeature, convert_geometry};
-
-use super::within::BoundaryMode;
 
 // The algorithms work on `mapbox::geometry`'s shapes, as in C++: a polygon
 // is its rings, the exterior first. `Geometry::from_geo` converts to them.
