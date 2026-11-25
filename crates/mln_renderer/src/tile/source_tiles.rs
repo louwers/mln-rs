@@ -225,6 +225,9 @@ struct CoverContext<'s, 'a, 'p> {
     retain: &'s mut BTreeSet<OverscaledTileID>,
     style: &'s Arc<SourceStyle>,
     update: &'s CoverUpdate<'a, 'p>,
+    /// The tiles the passes cover: the coarse cover's, the terrain's reads
+    /// and the view's.
+    pass_tiles: &'s HashSet<OverscaledTileID>,
     tile_range: Option<TileRange>,
     needs_relayout: bool,
     minimum_update_interval: std::time::Duration,
@@ -316,10 +319,12 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
             return;
         }
         let first = self.retain.insert(*key);
-        // A tile the terrain reads is required, also where another read
-        // reaches it first as a fallback: its necessity is set only once a
-        // pass, and an optional one would stop it loading.
-        let necessity = if self.update.terrain_reads.contains(key) { TileNecessity::Required } else { necessity };
+        // A tile that a pass covers is required, also where a pass reaches
+        // it first as a fallback, such as a view's tile that stands in for
+        // the coarse tile above it until that loads: its necessity is set
+        // only once a pass, and an optional one would stop it loading and
+        // drop the request that keeps its data fresh.
+        let necessity = if self.pass_tiles.contains(key) { TileNecessity::Required } else { necessity };
         if first {
             // The pan pass comes first, so a tile of both covers loads with
             // the coarse ones.
@@ -766,6 +771,8 @@ impl SourceTiles {
         let mut previously_rendered = std::mem::take(&mut self.rendered);
 
         let style = self.source_style(update.layers, parameters);
+        let pass_tiles: HashSet<OverscaledTileID> =
+            pan_tiles.iter().chain(update.terrain_reads).chain(&ideal_tiles).copied().collect();
         {
             let mut cover = CoverContext {
                 source: self,
@@ -774,6 +781,7 @@ impl SourceTiles {
                 retain: &mut retain,
                 style: &style,
                 update,
+                pass_tiles: &pass_tiles,
                 tile_range,
                 needs_relayout: relayout,
                 minimum_update_interval,

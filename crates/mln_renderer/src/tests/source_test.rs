@@ -442,6 +442,86 @@ fn tile_out_of_view_keeps_loading() {
     assert!(cancelled.lock().is_empty(), "no request is cancelled");
 }
 
+/// A file source whose tile requests stay open: it answers those it is told
+/// to, and records each cancellation.
+#[derive(Default)]
+struct OpenTileSource {
+    /// Each request's zoom level, and its responder.
+    open: Mutex<Vec<(i8, Responder)>>,
+    cancelled: Arc<Mutex<Vec<(i8, i32, i32)>>>,
+}
+
+impl OpenTileSource {
+    /// Answers the open requests of the tiles at `z` with a 1x1 image.
+    fn answer_zoom(&self, z: i8) {
+        let mut response = Response::new();
+        let image = mln_util::image::PremultipliedImage::new(Size::new(1, 1));
+        response.data = Some(Arc::new(mln_image::encode_png(&image)));
+        let open: Vec<Responder> =
+            self.open.lock().iter().filter(|(zoom, _)| *zoom == z).map(|(_, responder)| responder.clone()).collect();
+        for responder in open {
+            responder.send(response.clone());
+        }
+    }
+}
+
+impl FileSource for OpenTileSource {
+    fn load(&self, resource: &Resource, responder: Responder) {
+        let data = resource.tile_data.as_ref().expect("only tiles are requested");
+        let tile = (data.z, data.x, data.y);
+        let cancelled = Arc::clone(&self.cancelled);
+        responder.on_cancel(move || cancelled.lock().push(tile));
+        self.open.lock().push((data.z, responder));
+    }
+
+    fn can_request(&self, _resource: &Resource) -> bool {
+        true
+    }
+}
+
+/// A view's tiles that load before the coarse tile prefetched for them keep
+/// their requests, which the file source answers again as their data
+/// expires: they stand in for the coarse tile until it loads, but they stay
+/// the view's own.
+#[test]
+fn view_tiles_loaded_before_their_prefetched_parent_keep_their_requests() {
+    let mut test = SourceTest::new();
+    test.transform.jump_to(&CameraOptions { zoom: Some(1.0), ..Default::default() });
+    let file_source = Arc::new(OpenTileSource::default());
+    let layers = Tiled::Raster.layers();
+    let source = crate::tests::ready(Tiled::Raster.source(None, tiles_tileset()));
+    let mut store = test.store();
+    let mut render_source = crate::tests::create_render_source(&source, &mut store);
+    let key = render_source.tiles().expect("a tiled source");
+    let fs: Arc<dyn FileSource> = Arc::<OpenTileSource>::clone(&file_source);
+    let mut update = |test: &SourceTest, store: &mut TileStore, needs_relayout: bool| {
+        let mut parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
+        parameters.prefetch_zoom_delta = 4;
+        render_source.update(store, source.clone(), &layers, true, needs_relayout, &parameters);
+    };
+    let ideal_renderable = |store: &TileStore| {
+        let tiles = store.source(key).expect("the source's tiles");
+        let ideal: Vec<&crate::tile::tile::Tile> = tiles.cover().filter(|tile| tile.id.overscaled_z == 1).collect();
+        !ideal.is_empty() && ideal.iter().all(|tile| tile.is_renderable())
+    };
+
+    update(&test, &mut store, true);
+    let requested: Vec<i8> = file_source.open.lock().iter().map(|(zoom, _)| *zoom).collect();
+    assert!(requested.contains(&0) && requested.contains(&1), "the view's tiles and their prefetched parent load");
+
+    // The view's tiles load; their parent doesn't yet.
+    file_source.answer_zoom(1);
+    let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
+    while !ideal_renderable(&store) {
+        assert!(mln_util::time::Instant::now() < deadline, "the view's tiles didn't load");
+        crate::tests::update(&mut store);
+        std::thread::yield_now();
+    }
+    update(&test, &mut store, false);
+
+    assert!(file_source.cancelled.lock().is_empty(), "no request is cancelled");
+}
+
 /// The requests for a view's tiles stand in the order the view needs them:
 /// the coarse cover's, then the ideal cover's from the centre outwards. A
 /// tile that leaves the view while it loads, and goes on loading next to it,
