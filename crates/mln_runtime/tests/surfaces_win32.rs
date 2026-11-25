@@ -260,11 +260,12 @@ fn clear_frame<B: mln_gfx::RendererBackend>(
 
 // A Vulkan target finds a minimized window out through its surface alone,
 // without the window's state: no target is made on a surface of an empty
-// extent, and a target whose window is minimized finds its swapchain out of
-// date, can't make it again, and takes no frame until the window is restored.
-// The driver may first report the swapchain as suboptimal, as Wine does,
-// which has the target rebuild it a few frames later, so some frames may
-// present before the target finds out.
+// extent, and a target whose window is minimized takes no frame until the
+// window is restored, whether or not the WSI finds its swapchain out of date
+// (Mesa's software one may go on presenting to it). The driver may first
+// report the swapchain as suboptimal, as Wine does, which has the target
+// rebuild it a few frames later, so some frames may present before the
+// target finds out.
 #[cfg(feature = "vulkan")]
 #[test]
 fn a_vulkan_target_takes_no_frame_once_its_window_is_minimized() {

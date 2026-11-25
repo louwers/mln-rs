@@ -12,8 +12,11 @@
 //   window's is (`on_surface`). Once a target's surface has such an extent,
 //   the frame whose acquire or present finds the swapchain out of date has
 //   its rebuild fail and presents nothing, and the target takes no frame
-//   until the surface has an extent again (`begin_frame`). The extent is
-//   asked for only then: on X11 the query is a round trip to the server.
+//   until the surface has an extent again (`begin_frame`). On Windows the
+//   extent is asked for before each frame too, since a WSI may go on
+//   presenting to a minimized window, as Mesa's software one can; elsewhere
+//   only when the swapchain is gone, since on X11 the query is a round trip
+//   to the server.
 // - `request_readback` copies a presented frame into an image, and
 //   `set_overlay` draws over each frame before it is presented, such as an
 //   app's controls over the map.
@@ -333,16 +336,17 @@ impl FrameTarget for SurfaceTarget {
     }
 
     /// Acquires the frame's image. No frame is drawn into an empty
-    /// framebuffer. A swapchain that couldn't be made, as for a surface of
-    /// an empty extent, such as a minimized window's, is made again before
-    /// the frame, once the surface has an extent.
+    /// framebuffer, nor on Windows to a surface of an empty extent, such as
+    /// a minimized window's. A swapchain that couldn't be made, as for such
+    /// a surface, is made again before the frame, once the surface has an
+    /// extent.
     fn begin_frame(&mut self, gpu: &mut VulkanGpu) -> Option<FrameImage> {
         let size = self.size;
         if size.width == 0 || size.height == 0 {
             return None;
         }
         let unbuilt = self.resource.get_image_count() == 0;
-        if unbuilt && self.resource.current_extent().is_some_and(is_empty) {
+        if (unbuilt || cfg!(windows)) && self.resource.current_extent().is_some_and(is_empty) {
             return None;
         }
         if std::mem::take(&mut self.rebuild) || unbuilt {
