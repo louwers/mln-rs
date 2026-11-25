@@ -26,7 +26,9 @@ use crate::shaders::line_layer_ubo::{
     LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
     LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO,
 };
-use crate::shaders::program::{Attribute, Program, ProgramBuffer, ProgramTexture, Projection, Property, Stages};
+use crate::shaders::program::{
+    Attribute, Program, ProgramBuffer, ProgramTexture, Projection, Property, Stages, Variants, VertexWord,
+};
 use crate::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use crate::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use crate::shaders::symbol_layer_ubo::{
@@ -35,34 +37,35 @@ use crate::shaders::symbol_layer_ubo::{
 use crate::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainSurfaceUBO};
 
 const POS: Attribute = Attribute::new("pos", Short2);
-const IMAGE: ProgramTexture = ProgramTexture::new("image");
+const IMAGE: ProgramTexture = ProgramTexture::new("image", Stages::Fragment);
 /// Over terrain, the height of the ground under a feature's anchor, in
 /// meters with the exaggeration, which the terrain variants of the programs
 /// that stand on it read.
-const GROUND_HEIGHT: Attribute = Attribute::new("ground_height", Float);
+const GROUND_HEIGHT: Attribute = Attribute::new("ground_height", Float).only_in(Variants::Standing);
 /// The ground's depth: each pixel's eye distance to the nearest ground drawn
 /// there, the bits of an `f32`, least significant byte first, in an RGBA8
 /// texel; 0 where none is. The terrain variants of the programs that hide
 /// behind the ground read it, in the slot their own textures leave free.
-const GROUND_DEPTH: ProgramTexture = ProgramTexture::unfilterable("ground_depth");
+const GROUND_DEPTH: ProgramTexture = ProgramTexture::texels("ground_depth", Stages::Vertex).only_in(Variants::Standing);
 
 /// The background's buffers: a background and a background pattern draw
 /// write one buffer of draws.
 const BACKGROUND_BUFFERS: &[ProgramBuffer] = &[
     ProgramBuffer::union_storage::<BackgroundDrawableUBO, BackgroundDrawableUnionUBO>("drawableVector", Stages::Vertex),
-    ProgramBuffer::uniform::<BackgroundPropsUBO>("props", 0),
+    ProgramBuffer::uniform::<BackgroundPropsUBO>("props", 0, Stages::Fragment),
 ];
 const BACKGROUND_PATTERN_BUFFERS: &[ProgramBuffer] = &[
     ProgramBuffer::union_storage::<BackgroundPatternDrawableUBO, BackgroundDrawableUnionUBO>(
         "drawableVector",
         Stages::Vertex,
     ),
-    ProgramBuffer::uniform::<BackgroundPatternPropsUBO>("props", 0),
+    ProgramBuffer::uniform::<BackgroundPatternPropsUBO>("props", 0, Stages::Both),
 ];
 
 pub static BACKGROUND: Program = Program {
     name: "BackgroundShader",
     buffers: BACKGROUND_BUFFERS,
+    paint_params: None,
     projection: Projection::PerDraw,
     attributes: &[POS],
     instance_attributes: &[],
@@ -73,6 +76,7 @@ pub static BACKGROUND: Program = Program {
 pub static BACKGROUND_PATTERN: Program = Program {
     name: "BackgroundPatternShader",
     buffers: BACKGROUND_PATTERN_BUFFERS,
+    paint_params: Some(Stages::Fragment),
     projection: Projection::PerDraw,
     attributes: &[POS],
     instance_attributes: &[],
@@ -84,8 +88,9 @@ pub static CIRCLE: Program = Program {
     name: "CircleShader",
     buffers: &[
         ProgramBuffer::storage::<CircleDrawableUBO>("drawableVector", Stages::Vertex),
-        ProgramBuffer::uniform::<CircleEvaluatedPropsUBO>("props", 0),
+        ProgramBuffer::uniform::<CircleEvaluatedPropsUBO>("props", 0, Stages::Both),
     ],
+    paint_params: Some(Stages::Vertex),
     projection: Projection::PerDraw,
     attributes: &[
         POS,
@@ -114,6 +119,7 @@ pub static CIRCLE: Program = Program {
 pub static CLIPPING_MASK: Program = Program {
     name: "ClippingMaskProgram",
     buffers: &[],
+    paint_params: None,
     projection: Projection::Own,
     attributes: &[POS],
     instance_attributes: &[],
@@ -123,8 +129,8 @@ pub static CLIPPING_MASK: Program = Program {
 
 /// The fills' buffers: the draws of a layer's fill programs write one buffer
 /// of draws and one of tiles. The tiles' buffer takes the uniform block's
-/// slot 0.
-const FILL_PROPS: ProgramBuffer = ProgramBuffer::uniform::<FillEvaluatedPropsUBO>("props", 1);
+/// slot 0. The patterns' vertex stages read the uniform block too.
+const FILL_PROPS: ProgramBuffer = ProgramBuffer::uniform::<FillEvaluatedPropsUBO>("props", 1, Stages::Fragment);
 const FILL_BUFFERS: &[ProgramBuffer] = &[
     ProgramBuffer::union_storage::<FillDrawableUBO, FillDrawableUnionUBO>("drawableVector", Stages::Vertex),
     FILL_PROPS,
@@ -136,7 +142,7 @@ const FILL_OUTLINE_BUFFERS: &[ProgramBuffer] = &[
 const FILL_PATTERN_BUFFERS: &[ProgramBuffer] = &[
     ProgramBuffer::union_storage::<FillPatternDrawableUBO, FillDrawableUnionUBO>("drawableVector", Stages::Vertex),
     ProgramBuffer::union_storage::<FillPatternTilePropsUBO, FillTilePropsUnionUBO>("tilePropsVector", Stages::Both),
-    FILL_PROPS,
+    ProgramBuffer { stages: Stages::Both, ..FILL_PROPS },
 ];
 const FILL_COLOR: Attribute = Attribute::new("color", Float4);
 const FILL_OPACITY: Attribute = Attribute::new("opacity", Float2);
@@ -154,6 +160,7 @@ const FILL_PATTERN_PROPERTIES: &[Property] =
 pub static FILL: Program = Program {
     name: "FillShader",
     buffers: FILL_BUFFERS,
+    paint_params: None,
     projection: Projection::PerDraw,
     attributes: &[POS, FILL_COLOR, FILL_OPACITY],
     instance_attributes: &[],
@@ -164,6 +171,7 @@ pub static FILL: Program = Program {
 pub static FILL_OUTLINE: Program = Program {
     name: "FillOutlineShader",
     buffers: FILL_OUTLINE_BUFFERS,
+    paint_params: Some(Stages::Vertex),
     projection: Projection::PerDraw,
     attributes: &[POS, FILL_OUTLINE_COLOR, FILL_OPACITY],
     instance_attributes: &[],
@@ -174,6 +182,7 @@ pub static FILL_OUTLINE: Program = Program {
 pub static FILL_PATTERN: Program = Program {
     name: "FillPatternShader",
     buffers: FILL_PATTERN_BUFFERS,
+    paint_params: Some(Stages::Vertex),
     projection: Projection::PerDraw,
     attributes: &[POS, FILL_COLOR, FILL_PATTERN_FROM, FILL_PATTERN_TO, FILL_OPACITY],
     instance_attributes: &[],
@@ -184,6 +193,7 @@ pub static FILL_PATTERN: Program = Program {
 pub static FILL_OUTLINE_PATTERN: Program = Program {
     name: "FillOutlinePatternShader",
     buffers: FILL_PATTERN_BUFFERS,
+    paint_params: Some(Stages::Vertex),
     projection: Projection::PerDraw,
     attributes: &[POS, FILL_COLOR, FILL_PATTERN_FROM, FILL_PATTERN_TO, FILL_OPACITY],
     instance_attributes: &[],
@@ -194,6 +204,7 @@ pub static FILL_OUTLINE_PATTERN: Program = Program {
 pub static FILL_OUTLINE_INSTANCED: Program = Program {
     name: "FillOutlineInstancedShader",
     buffers: FILL_OUTLINE_BUFFERS,
+    paint_params: Some(Stages::Vertex),
     projection: Projection::PerDraw,
     attributes: &[POS],
     instance_attributes: &[FILL_OUTLINE_COLOR, FILL_OPACITY, FILL_OUTLINE_POS, FILL_OUTLINE_END],
@@ -209,10 +220,11 @@ pub static FILL_OUTLINE_PULLED: Program = Program {
     buffers: &[
         FILL_OUTLINE_BUFFERS[0],
         FILL_OUTLINE_BUFFERS[1],
-        ProgramBuffer::vertices("outlineVertices", 0),
-        ProgramBuffer::vertices("outlineEnds", 1),
-        ProgramBuffer::vertices("outlinePaint", 2),
+        ProgramBuffer::vertices("outlineVertices", 0, VertexWord::Uint),
+        ProgramBuffer::vertices("outlineEnds", 1, VertexWord::Uint),
+        ProgramBuffer::vertices("outlinePaint", 2, VertexWord::Float).only_in(Variants::PerVertex),
     ],
+    paint_params: Some(Stages::Vertex),
     projection: Projection::PerDraw,
     attributes: &[],
     instance_attributes: &[],
@@ -223,6 +235,7 @@ pub static FILL_OUTLINE_PULLED: Program = Program {
 pub static FILL_OUTLINE_PATTERN_INSTANCED: Program = Program {
     name: "FillOutlinePatternInstancedShader",
     buffers: FILL_PATTERN_BUFFERS,
+    paint_params: Some(Stages::Vertex),
     projection: Projection::PerDraw,
     attributes: &[POS],
     instance_attributes: &[
@@ -248,7 +261,7 @@ const fn line_drawable<T: UniformBlock>() -> ProgramBuffer {
 const fn line_tile_props<T: UniformBlock>() -> ProgramBuffer {
     ProgramBuffer::union_storage::<T, LineTilePropsUnionUBO>("tilePropsVector", Stages::Fragment)
 }
-const LINE_PROPS: ProgramBuffer = ProgramBuffer::uniform::<LineEvaluatedPropsUBO>("props", 0);
+const LINE_PROPS: ProgramBuffer = ProgramBuffer::uniform::<LineEvaluatedPropsUBO>("props", 0, Stages::Both);
 
 const LINE_POS_NORMAL: Attribute = Attribute::new("pos_normal", Short2);
 /// A vertex's extrusion, direction and distance along the line.
@@ -268,6 +281,7 @@ const LINE_DASHARRAY: Attribute = Attribute::new("dasharray", Float4);
 pub static LINE: Program = Program {
     name: "LineShader",
     buffers: &[line_drawable::<LineDrawableUBO>(), LINE_PROPS],
+    paint_params: Some(Stages::Vertex),
     projection: Projection::PerDraw,
     attributes: &[
         LINE_POS_NORMAL,
@@ -294,6 +308,7 @@ pub static LINE: Program = Program {
 pub static LINE_GRADIENT: Program = Program {
     name: "LineGradientShader",
     buffers: &[line_drawable::<LineGradientDrawableUBO>(), LINE_PROPS],
+    paint_params: Some(Stages::Vertex),
     projection: Projection::PerDraw,
     attributes: &[LINE_POS_NORMAL, LINE_DATA, LINE_BLUR, LINE_OPACITY, LINE_GAP_WIDTH, LINE_OFFSET, LINE_WIDTH],
     instance_attributes: &[],
@@ -310,6 +325,7 @@ pub static LINE_GRADIENT: Program = Program {
 pub static LINE_PATTERN: Program = Program {
     name: "LinePatternShader",
     buffers: &[line_drawable::<LinePatternDrawableUBO>(), line_tile_props::<LinePatternTilePropsUBO>(), LINE_PROPS],
+    paint_params: Some(Stages::Vertex),
     projection: Projection::PerDraw,
     attributes: &[
         LINE_POS_NORMAL,
@@ -338,6 +354,7 @@ pub static LINE_PATTERN: Program = Program {
 pub static LINE_SDF: Program = Program {
     name: "LineSDFShader",
     buffers: &[line_drawable::<LineSDFDrawableUBO>(), line_tile_props::<LineSDFTilePropsUBO>(), LINE_PROPS],
+    paint_params: Some(Stages::Vertex),
     projection: Projection::PerDraw,
     attributes: &[
         LINE_POS_NORMAL,
@@ -368,6 +385,7 @@ pub static LINE_SDF: Program = Program {
 pub static LINE_GRADIENT_SDF: Program = Program {
     name: "LineGradientSDFShader",
     buffers: &[line_drawable::<LineSDFDrawableUBO>(), line_tile_props::<LineSDFTilePropsUBO>(), LINE_PROPS],
+    paint_params: Some(Stages::Vertex),
     projection: Projection::PerDraw,
     attributes: &[
         LINE_POS_NORMAL,
@@ -381,7 +399,7 @@ pub static LINE_GRADIENT_SDF: Program = Program {
         LINE_DASHARRAY,
     ],
     instance_attributes: &[],
-    textures: &[IMAGE, ProgramTexture::new("image_dash")],
+    textures: &[IMAGE, ProgramTexture::new("image_dash", Stages::Fragment)],
     properties: &[
         Property::new("blur"),
         Property::new("opacity"),
@@ -400,25 +418,27 @@ pub static RASTER: Program = Program {
     name: "RasterShader",
     buffers: &[
         ProgramBuffer::storage::<RasterDrawableUBO>("drawableVector", Stages::Vertex),
-        ProgramBuffer::uniform::<RasterEvaluatedPropsUBO>("props", 0),
+        ProgramBuffer::uniform::<RasterEvaluatedPropsUBO>("props", 0, Stages::Both),
     ],
+    paint_params: None,
     projection: Projection::PerDraw,
     attributes: &[POS, TEXTURE_POS],
     instance_attributes: &[],
-    textures: &[ProgramTexture::new("image0"), ProgramTexture::new("image1")],
+    textures: &[ProgramTexture::new("image0", Stages::Fragment), ProgramTexture::new("image1", Stages::Fragment)],
     properties: &[],
 };
 
 /// The fill extrusions' buffers. The uniform block is at slot 1, which
-/// leaves slot 0 for the pattern's tiles.
+/// leaves slot 0 for the pattern's tiles. The patterns' fragment stages read
+/// the uniform block too.
 const FILL_EXTRUSION_DRAWABLE: ProgramBuffer =
     ProgramBuffer::storage::<FillExtrusionDrawableUBO>("drawableVector", Stages::Vertex);
-const FILL_EXTRUSION_PROPS: ProgramBuffer = ProgramBuffer::uniform::<FillExtrusionPropsUBO>("props", 1);
+const FILL_EXTRUSION_PROPS: ProgramBuffer = ProgramBuffer::uniform::<FillExtrusionPropsUBO>("props", 1, Stages::Vertex);
 const FILL_EXTRUSION_BUFFERS: &[ProgramBuffer] = &[FILL_EXTRUSION_DRAWABLE, FILL_EXTRUSION_PROPS];
 const FILL_EXTRUSION_PATTERN_BUFFERS: &[ProgramBuffer] = &[
     FILL_EXTRUSION_DRAWABLE,
     ProgramBuffer::storage::<FillExtrusionTilePropsUBO>("tilePropsVector", Stages::Both),
-    FILL_EXTRUSION_PROPS,
+    ProgramBuffer { stages: Stages::Both, ..FILL_EXTRUSION_PROPS },
 ];
 const FILL_EXTRUSION_DECIMALS_ED: Attribute = Attribute::new("decimals_ed", UShort2);
 const FILL_EXTRUSION_BASE: Attribute = Attribute::new("base", Float2);
@@ -438,6 +458,7 @@ const FILL_EXTRUSION_PATTERN_PROPERTIES: &[Property] =
 pub static FILL_EXTRUSION: Program = Program {
     name: "FillExtrusionShader",
     buffers: FILL_EXTRUSION_BUFFERS,
+    paint_params: None,
     projection: Projection::PerDraw,
     attributes: &[
         POS,
@@ -455,6 +476,7 @@ pub static FILL_EXTRUSION: Program = Program {
 pub static FILL_EXTRUSION_INSTANCED: Program = Program {
     name: "FillExtrusionInstancedShader",
     buffers: FILL_EXTRUSION_BUFFERS,
+    paint_params: None,
     projection: Projection::PerDraw,
     attributes: &[POS],
     instance_attributes: &[
@@ -476,6 +498,7 @@ pub static FILL_EXTRUSION_INSTANCED: Program = Program {
 pub static FILL_EXTRUSION_WALL: Program = Program {
     name: "FillExtrusionWallShader",
     buffers: FILL_EXTRUSION_BUFFERS,
+    paint_params: None,
     projection: Projection::PerDraw,
     attributes: &[
         POS,
@@ -501,10 +524,11 @@ pub static FILL_EXTRUSION_PULLED: Program = Program {
     buffers: &[
         FILL_EXTRUSION_BUFFERS[0],
         FILL_EXTRUSION_BUFFERS[1],
-        ProgramBuffer::vertices("wallVertices", 0),
-        ProgramBuffer::vertices("wallPaint", 1),
-        ProgramBuffer::vertices("wallHeights", 2),
+        ProgramBuffer::vertices("wallVertices", 0, VertexWord::Uint),
+        ProgramBuffer::vertices("wallPaint", 1, VertexWord::Float).only_in(Variants::PerVertex),
+        ProgramBuffer::vertices("wallHeights", 2, VertexWord::Float).only_in(Variants::Standing),
     ],
+    paint_params: None,
     projection: Projection::PerDraw,
     attributes: &[],
     instance_attributes: &[],
@@ -515,6 +539,7 @@ pub static FILL_EXTRUSION_PULLED: Program = Program {
 pub static FILL_EXTRUSION_PATTERN: Program = Program {
     name: "FillExtrusionPatternShader",
     buffers: FILL_EXTRUSION_PATTERN_BUFFERS,
+    paint_params: Some(Stages::Vertex),
     projection: Projection::PerDraw,
     attributes: &[
         POS,
@@ -533,6 +558,7 @@ pub static FILL_EXTRUSION_PATTERN: Program = Program {
 pub static FILL_EXTRUSION_PATTERN_INSTANCED: Program = Program {
     name: "FillExtrusionPatternInstancedShader",
     buffers: FILL_EXTRUSION_PATTERN_BUFFERS,
+    paint_params: Some(Stages::Vertex),
     projection: Projection::PerDraw,
     attributes: &[POS],
     instance_attributes: &[
@@ -554,6 +580,7 @@ pub static FILL_EXTRUSION_PATTERN_INSTANCED: Program = Program {
 pub static FILL_EXTRUSION_PATTERN_WALL: Program = Program {
     name: "FillExtrusionPatternWallShader",
     buffers: FILL_EXTRUSION_PATTERN_BUFFERS,
+    paint_params: Some(Stages::Vertex),
     projection: Projection::PerDraw,
     attributes: &[
         POS,
@@ -576,8 +603,9 @@ pub static HEATMAP: Program = Program {
     name: "HeatmapShader",
     buffers: &[
         ProgramBuffer::storage::<HeatmapDrawableUBO>("drawableVector", Stages::Vertex),
-        ProgramBuffer::uniform::<HeatmapEvaluatedPropsUBO>("props", 0),
+        ProgramBuffer::uniform::<HeatmapEvaluatedPropsUBO>("props", 0, Stages::Both),
     ],
+    paint_params: None,
     projection: Projection::PerDraw,
     attributes: &[POS, Attribute::new("weight", Float2), Attribute::new("radius", Float2), GROUND_HEIGHT],
     instance_attributes: &[],
@@ -587,11 +615,12 @@ pub static HEATMAP: Program = Program {
 
 pub static HEATMAP_TEXTURE: Program = Program {
     name: "HeatmapTextureShader",
-    buffers: &[ProgramBuffer::uniform::<HeatmapTexturePropsUBO>("ubo", 0)],
+    buffers: &[ProgramBuffer::uniform::<HeatmapTexturePropsUBO>("ubo", 0, Stages::Both)],
+    paint_params: Some(Stages::Vertex),
     projection: Projection::None,
     attributes: &[POS],
     instance_attributes: &[],
-    textures: &[IMAGE, ProgramTexture::new("color_ramp")],
+    textures: &[IMAGE, ProgramTexture::new("color_ramp", Stages::Fragment)],
     properties: &[],
 };
 
@@ -600,8 +629,9 @@ pub static HILLSHADE: Program = Program {
     buffers: &[
         ProgramBuffer::storage::<HillshadeDrawableUBO>("drawableVector", Stages::Vertex),
         ProgramBuffer::storage::<HillshadeTilePropsUBO>("tilePropsVector", Stages::Fragment),
-        ProgramBuffer::uniform::<HillshadeEvaluatedPropsUBO>("props", 0),
+        ProgramBuffer::uniform::<HillshadeEvaluatedPropsUBO>("props", 0, Stages::Fragment),
     ],
+    paint_params: None,
     projection: Projection::PerDraw,
     attributes: &[POS, TEXTURE_POS],
     instance_attributes: &[],
@@ -615,6 +645,7 @@ pub static HILLSHADE_PREPARE: Program = Program {
         ProgramBuffer::draw_uniform::<HillshadePrepareDrawableUBO>("drawable", Stages::Vertex),
         ProgramBuffer::draw_uniform::<HillshadePrepareTilePropsUBO>("tileProps", Stages::Both),
     ],
+    paint_params: None,
     projection: Projection::None,
     attributes: &[POS, TEXTURE_POS],
     instance_attributes: &[],
@@ -627,19 +658,24 @@ pub static COLOR_RELIEF: Program = Program {
     buffers: &[
         ProgramBuffer::storage::<ColorReliefDrawableUBO>("drawableVector", Stages::Vertex),
         ProgramBuffer::storage::<ColorReliefTilePropsUBO>("tilePropsVector", Stages::Both),
-        ProgramBuffer::uniform::<ColorReliefEvaluatedPropsUBO>("props", 1),
+        ProgramBuffer::uniform::<ColorReliefEvaluatedPropsUBO>("props", 1, Stages::Fragment),
     ],
+    paint_params: None,
     projection: Projection::PerDraw,
     attributes: &[POS, TEXTURE_POS],
     instance_attributes: &[],
-    textures: &[IMAGE, ProgramTexture::unfilterable("elevation_stops"), ProgramTexture::new("color_stops")],
+    textures: &[
+        IMAGE,
+        ProgramTexture::unfilterable("elevation_stops", Stages::Fragment),
+        ProgramTexture::new("color_stops", Stages::Fragment),
+    ],
     properties: &[],
 };
 
 const SYMBOL_BUFFERS: &[ProgramBuffer] = &[
     ProgramBuffer::storage::<SymbolDrawableUBO>("drawableVector", Stages::Vertex),
     ProgramBuffer::storage::<SymbolTilePropsUBO>("tilePropsVector", Stages::Fragment),
-    ProgramBuffer::uniform::<SymbolEvaluatedPropsUBO>("props", 0),
+    ProgramBuffer::uniform::<SymbolEvaluatedPropsUBO>("props", 0, Stages::Both),
 ];
 const SYMBOL_POS_OFFSET: Attribute = Attribute::new("pos_offset", Short4);
 const SYMBOL_DATA: Attribute = Attribute::new("data", UShort4);
@@ -663,11 +699,13 @@ const SYMBOL_SDF_PROPERTIES: &[Property] = &[
     Property::new("halo_blur"),
 ];
 /// The glyphs' or icons' atlas.
-const SYMBOL_TEXTURE: ProgramTexture = ProgramTexture::new("texture");
+const SYMBOL_TEXTURE: ProgramTexture = ProgramTexture::new("texture", Stages::Fragment);
 
 pub static SYMBOL_ICON: Program = Program {
     name: "SymbolIconShader",
-    buffers: SYMBOL_BUFFERS,
+    // Only the icons' fragment stage reads the uniform block.
+    buffers: &[SYMBOL_BUFFERS[0], SYMBOL_BUFFERS[1], ProgramBuffer { stages: Stages::Fragment, ..SYMBOL_BUFFERS[2] }],
+    paint_params: Some(Stages::Vertex),
     projection: Projection::PerDraw,
     attributes: &[
         SYMBOL_POS_OFFSET,
@@ -687,6 +725,7 @@ pub static SYMBOL_ICON: Program = Program {
 pub static SYMBOL_SDF: Program = Program {
     name: "SymbolSDFShader",
     buffers: SYMBOL_BUFFERS,
+    paint_params: Some(Stages::Vertex),
     projection: Projection::PerDraw,
     attributes: &[
         SYMBOL_POS_OFFSET,
@@ -710,6 +749,7 @@ pub static SYMBOL_SDF: Program = Program {
 pub static SYMBOL_TEXT_AND_ICON: Program = Program {
     name: "SymbolTextAndIconShader",
     buffers: SYMBOL_BUFFERS,
+    paint_params: Some(Stages::Vertex),
     projection: Projection::PerDraw,
     attributes: &[
         SYMBOL_POS_OFFSET,
@@ -725,11 +765,13 @@ pub static SYMBOL_TEXT_AND_ICON: Program = Program {
         SYMBOL_HEIGHT_OFFSET,
     ],
     instance_attributes: &[],
-    textures: &[SYMBOL_TEXTURE, ProgramTexture::new("texture_icon"), GROUND_DEPTH],
+    textures: &[SYMBOL_TEXTURE, ProgramTexture::new("texture_icon", Stages::Fragment), GROUND_DEPTH],
     properties: SYMBOL_SDF_PROPERTIES,
 };
 
-/// The collision boxes' and circles' buffers, each of a draw's own.
+/// The collision boxes' and circles' buffers, each of a draw's own. The
+/// tile properties have the id of a block that both stages read, though
+/// only the circles' fragment stage reads them.
 const COLLISION_BUFFERS: &[ProgramBuffer] = &[
     ProgramBuffer::draw_uniform::<CollisionDrawableUBO>("drawable", Stages::Vertex),
     ProgramBuffer::draw_uniform::<CollisionTilePropsUBO>("tile_props", Stages::Both),
@@ -741,6 +783,7 @@ const COLLISION_PLACED: Attribute = Attribute::new("placed", UShort2);
 pub static COLLISION_BOX: Program = Program {
     name: "CollisionBoxShader",
     buffers: COLLISION_BUFFERS,
+    paint_params: Some(Stages::Vertex),
     projection: Projection::Own,
     attributes: &[
         POS,
@@ -759,6 +802,7 @@ pub static COLLISION_BOX: Program = Program {
 pub static COLLISION_CIRCLE: Program = Program {
     name: "CollisionCircleShader",
     buffers: COLLISION_BUFFERS,
+    paint_params: Some(Stages::Vertex),
     projection: Projection::Own,
     attributes: &[POS, COLLISION_ANCHOR_POS, COLLISION_EXTRUDE, COLLISION_PLACED],
     instance_attributes: &[],
@@ -769,6 +813,7 @@ pub static COLLISION_CIRCLE: Program = Program {
 pub static GLOBE_DEPTH: Program = Program {
     name: "GlobeDepthShader",
     buffers: &[],
+    paint_params: None,
     projection: Projection::PerDraw,
     attributes: &[POS],
     instance_attributes: &[],
@@ -778,7 +823,8 @@ pub static GLOBE_DEPTH: Program = Program {
 
 pub static SKY: Program = Program {
     name: "SkyShader",
-    buffers: &[ProgramBuffer::uniform::<SkyPropsUBO>("sky", 0)],
+    buffers: &[ProgramBuffer::uniform::<SkyPropsUBO>("sky", 0, Stages::Fragment)],
+    paint_params: None,
     projection: Projection::None,
     attributes: &[POS],
     instance_attributes: &[],
@@ -788,7 +834,8 @@ pub static SKY: Program = Program {
 
 pub static ATMOSPHERE: Program = Program {
     name: "AtmosphereShader",
-    buffers: &[ProgramBuffer::uniform::<AtmospherePropsUBO>("atmosphere", 0)],
+    buffers: &[ProgramBuffer::uniform::<AtmospherePropsUBO>("atmosphere", 0, Stages::Both)],
+    paint_params: None,
     projection: Projection::None,
     attributes: &[POS],
     instance_attributes: &[],
@@ -799,11 +846,15 @@ pub static ATMOSPHERE: Program = Program {
 /// A layer drawn into a texture, composited onto the frame.
 pub static LAYER_COMPOSITE: Program = Program {
     name: "LayerCompositeShader",
-    buffers: &[ProgramBuffer::uniform::<LayerCompositeUBO>("props", 0)],
+    buffers: &[ProgramBuffer::uniform::<LayerCompositeUBO>("props", 0, Stages::Fragment)],
+    paint_params: None,
     projection: Projection::None,
     attributes: &[POS],
     instance_attributes: &[],
-    textures: &[IMAGE, ProgramTexture::new("backdrop")],
+    textures: &[
+        ProgramTexture::texels("image", Stages::Fragment),
+        ProgramTexture::texels("backdrop", Stages::Fragment),
+    ],
     properties: &[],
 };
 
@@ -811,11 +862,11 @@ pub static LAYER_COMPOSITE: Program = Program {
 /// reads texel by texel, without a sampler. It is at slot 2, which the
 /// sources name, so that a program that reads the ground keeps slots 0 and 1
 /// for its own textures.
-const GROUND_DEM: ProgramTexture = ProgramTexture::unfilterable("ground_dem");
+const GROUND_DEM: ProgramTexture = ProgramTexture::texels("ground_dem", Stages::Vertex);
 
 const TERRAIN_DRAWABLE: ProgramBuffer = ProgramBuffer::storage::<TerrainDrawableUBO>("drawableVector", Stages::Vertex);
 /// How the terrain's surface stands, and its fog.
-const TERRAIN_SURFACE: ProgramBuffer = ProgramBuffer::uniform::<TerrainSurfaceUBO>("terrain", 0);
+const TERRAIN_SURFACE: ProgramBuffer = ProgramBuffer::uniform::<TerrainSurfaceUBO>("terrain", 0, Stages::Vertex);
 
 /// The terrain's surface: a grid over a tile, raised by its DEM, with the
 /// tile's drape over it, which the fragment stage samples.
@@ -824,15 +875,16 @@ pub static TERRAIN: Program = Program {
     buffers: &[
         TERRAIN_DRAWABLE,
         ProgramBuffer::storage::<HillshadeTilePropsUBO>("lightVector", Stages::Fragment),
-        TERRAIN_SURFACE,
-        ProgramBuffer::uniform::<HillshadeEvaluatedPropsUBO>("props", 1),
+        ProgramBuffer { stages: Stages::Both, ..TERRAIN_SURFACE },
+        ProgramBuffer::uniform::<HillshadeEvaluatedPropsUBO>("props", 1, Stages::Fragment),
     ],
+    paint_params: None,
     projection: Projection::PerDraw,
     // A grid vertex: x and y in tile units, whether it is a skirt's lower
     // edge, and 0.
     attributes: &[Attribute::new("pos", Short4)],
     instance_attributes: &[],
-    textures: &[ProgramTexture::UNUSED, ProgramTexture::new("drape"), GROUND_DEM],
+    textures: &[ProgramTexture::UNUSED, ProgramTexture::new("drape", Stages::Fragment), GROUND_DEM],
     properties: &[],
 };
 
@@ -859,6 +911,7 @@ pub static STANDING: &[&Program] = &[
 pub static TERRAIN_DEPTH: Program = Program {
     name: "TerrainDepthShader",
     buffers: &[TERRAIN_DRAWABLE, TERRAIN_SURFACE],
+    paint_params: None,
     projection: Projection::PerDraw,
     attributes: &[Attribute::new("pos", Short4)],
     instance_attributes: &[],
@@ -872,10 +925,11 @@ pub static TERRAIN_DEPTH: Program = Program {
 pub static VERTEX_TEXEL: Program = Program {
     name: "VertexTexelShader",
     buffers: &[],
+    paint_params: None,
     projection: Projection::None,
     attributes: &[Attribute::new("pos_texel", Short4)],
     instance_attributes: &[],
-    textures: &[IMAGE],
+    textures: &[ProgramTexture::texels("image", Stages::Vertex)],
     properties: &[],
 };
 
@@ -886,6 +940,7 @@ pub static VERTEX_TEXEL: Program = Program {
 pub static TERRAIN_PROBE: Program = Program {
     name: "TerrainProbeShader",
     buffers: &[TERRAIN_SURFACE],
+    paint_params: None,
     projection: Projection::None,
     attributes: &[
         // Where a probe draws, in clip x and y, then where it reads the

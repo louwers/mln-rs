@@ -160,7 +160,7 @@ fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
                 BufferKind::Uniform(_) => Buffer::LayerUniform(buffer.id),
                 BufferKind::DrawUniform(_) => Buffer::DrawableUniform(buffer.id),
                 BufferKind::Storage { .. } => Buffer::LayerStorage(buffer.id),
-                BufferKind::Vertices => Buffer::DrawableVertex(buffer.id),
+                BufferKind::Vertices(_) => Buffer::DrawableVertex(buffer.id),
             };
             let size = buffer.stride().or(buffer.block().map(|block| block.size)).unwrap_or(size_of::<u32>());
             (at, size)

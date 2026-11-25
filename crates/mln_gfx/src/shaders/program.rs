@@ -25,10 +25,13 @@ use crate::shaders::program_parameters::ProgramParameters;
 /// a program from by it.
 ///
 /// A buffer binds at the id of its [`ProgramBuffer`]
-/// ([`buffer_id`](Program::buffer_id)). Any program may read the engine's
-/// paint parameters ([`PAINT_PARAMS`]) and the draw's index, which it lists
-/// none of, and reads its projection as its
-/// [`projection`](Program::projection) says. An attribute's location is its
+/// ([`buffer_id`](Program::buffer_id)). A program reads the engine's paint
+/// parameters ([`PAINT_PARAMS`]) as its
+/// [`paint_params`](Program::paint_params) says, its projection as its
+/// [`projection`](Program::projection) says, and the draw's index where it
+/// reads a storage buffer. Each buffer, texture and attribute says which
+/// stages read it, and which of the program's variants do ([`Variants`]).
+/// An attribute's location is its
 /// index in [`attributes`](Program::attributes), or, past the vertex
 /// attributes', in [`instance_attributes`](Program::instance_attributes),
 /// and a texture's slot its index in [`textures`](Program::textures): a draw
@@ -41,6 +44,9 @@ pub struct Program {
     pub name: &'static str,
     /// The buffers of its own that its shaders read.
     pub buffers: &'static [ProgramBuffer],
+    /// The stages that read the engine's paint parameters
+    /// ([`PAINT_PARAMS`]), if any. The renderer binds them for every draw.
+    pub paint_params: Option<Stages>,
     /// How its vertex stage reads the draw's projection.
     pub projection: Projection,
     /// The attributes that step once a vertex.
@@ -89,6 +95,10 @@ pub struct ProgramBuffer {
     /// array of its elements or of the vertices.
     pub name: &'static str,
     pub kind: BufferKind,
+    /// The stages that read it.
+    pub stages: Stages,
+    /// The variants that read it.
+    pub variants: Variants,
 }
 
 /// How a program reads a [`ProgramBuffer`].
@@ -104,16 +114,26 @@ pub enum BufferKind {
     /// larger than the block's size is that of a union of the blocks of the
     /// layer's programs, whose draws write one buffer.
     Storage { block: &'static Block, stride: usize },
-    /// A vertex buffer, which the vertex stage reads as a storage buffer, by
-    /// vertex index, where the backend binds one
+    /// A vertex buffer, which the vertex stage reads as a storage buffer of
+    /// 32-bit words, by vertex index, where the backend binds one
     /// ([`Caps::binds_vertex_buffers`](crate::gpu::Caps::binds_vertex_buffers)).
-    Vertices,
+    Vertices(VertexWord),
 }
 
-/// The stages of a program that read a block of each draw's values, which
-/// give the block its id. A program has one such block for each, and the
-/// block that both stages read takes the id of uniform slot 0, so a program
-/// with one has its uniform block at slot 1.
+/// The 32-bit words that a vertex stage reads a
+/// [`Vertices`](BufferKind::Vertices) buffer as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VertexWord {
+    /// `u32`s, which pack integers.
+    Uint,
+    /// `f32`s.
+    Float,
+}
+
+/// The stages of a program that read an item of it. Those that read a block
+/// of each draw's values give the block its id: a program has one such
+/// block for each, and the block that both stages read takes the id of
+/// uniform slot 0, so a program with one has its uniform block at slot 1.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stages {
     /// Only the vertex stage.
@@ -125,6 +145,18 @@ pub enum Stages {
 }
 
 impl Stages {
+    /// Whether the vertex stage is one of these.
+    #[must_use]
+    pub const fn vertex(self) -> bool {
+        matches!(self, Stages::Vertex | Stages::Both)
+    }
+
+    /// Whether the fragment stage is one of these.
+    #[must_use]
+    pub const fn fragment(self) -> bool {
+        matches!(self, Stages::Fragment | Stages::Both)
+    }
+
     /// The id of a block of each draw's values that these stages read.
     #[must_use]
     pub const fn id(self) -> usize {
@@ -136,20 +168,33 @@ impl Stages {
     }
 }
 
+/// The variants of a program that read an item of it, which a backend's
+/// source declares it in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Variants {
+    /// All of them.
+    All,
+    /// Those that stand on terrain ([`TERRAIN_DEFINE`]).
+    Standing,
+    /// Those that read some of the program's properties per vertex: not
+    /// every one from its uniform.
+    PerVertex,
+}
+
 impl ProgramBuffer {
     /// The uniform block `name` of a `T`, which all the draws of a layer
-    /// share, at uniform block slot `slot`, 0 or 1.
+    /// share, at uniform block slot `slot`, 0 or 1, and which `stages` read.
     #[must_use]
-    pub const fn uniform<T: UniformBlock>(name: &'static str, slot: usize) -> ProgramBuffer {
+    pub const fn uniform<T: UniformBlock>(name: &'static str, slot: usize, stages: Stages) -> ProgramBuffer {
         assert!(slot < UNIFORM_SLOTS, "a program has two uniform block slots");
-        ProgramBuffer { id: FIRST_UNIFORM_ID + slot, name, kind: BufferKind::Uniform(T::BLOCK) }
+        ProgramBuffer::new(FIRST_UNIFORM_ID + slot, name, BufferKind::Uniform(T::BLOCK), stages)
     }
 
     /// The uniform block `name` of a `T` of a draw's own values, which
     /// `stages` read.
     #[must_use]
     pub const fn draw_uniform<T: UniformBlock>(name: &'static str, stages: Stages) -> ProgramBuffer {
-        ProgramBuffer { id: stages.id(), name, kind: BufferKind::DrawUniform(T::BLOCK) }
+        ProgramBuffer::new(stages.id(), name, BufferKind::DrawUniform(T::BLOCK), stages)
     }
 
     /// The storage buffer `name` of a `T` per draw, which `stages` read.
@@ -164,15 +209,26 @@ impl ProgramBuffer {
     #[must_use]
     pub const fn union_storage<T: UniformBlock, U: bytemuck::Pod>(name: &'static str, stages: Stages) -> ProgramBuffer {
         assert!(size_of::<T>() <= size_of::<U>(), "a union is as large as its blocks");
-        ProgramBuffer { id: stages.id(), name, kind: BufferKind::Storage { block: T::BLOCK, stride: size_of::<U>() } }
+        let kind = BufferKind::Storage { block: T::BLOCK, stride: size_of::<U>() };
+        ProgramBuffer::new(stages.id(), name, kind, stages)
     }
 
     /// The vertex buffer `name`, which the vertex stage reads as a storage
-    /// buffer, at vertex buffer slot `slot`, 0, 1 or 2.
+    /// buffer of `word`s, at vertex buffer slot `slot`, 0, 1 or 2.
     #[must_use]
-    pub const fn vertices(name: &'static str, slot: usize) -> ProgramBuffer {
+    pub const fn vertices(name: &'static str, slot: usize, word: VertexWord) -> ProgramBuffer {
         assert!(slot < VERTICES_SLOTS, "a program has three vertex buffer slots");
-        ProgramBuffer { id: FIRST_VERTICES_ID + slot, name, kind: BufferKind::Vertices }
+        ProgramBuffer::new(FIRST_VERTICES_ID + slot, name, BufferKind::Vertices(word), Stages::Vertex)
+    }
+
+    const fn new(id: usize, name: &'static str, kind: BufferKind, stages: Stages) -> ProgramBuffer {
+        ProgramBuffer { id, name, kind, stages, variants: Variants::All }
+    }
+
+    /// It, read only in `variants`.
+    #[must_use]
+    pub const fn only_in(self, variants: Variants) -> ProgramBuffer {
+        ProgramBuffer { variants, ..self }
     }
 
     /// The block the shaders read of it, or of each of its elements; `None`
@@ -183,7 +239,7 @@ impl ProgramBuffer {
             BufferKind::Uniform(block) | BufferKind::DrawUniform(block) | BufferKind::Storage { block, .. } => {
                 Some(block)
             }
-            BufferKind::Vertices => None,
+            BufferKind::Vertices(_) => None,
         }
     }
 
@@ -198,64 +254,115 @@ impl ProgramBuffer {
     }
 }
 
-/// The paint parameters' block, which the renderer binds for every draw.
+/// The paint parameters' block, which the renderer binds for every draw, and
+/// which the stages that a program's
+/// [`paint_params`](Program::paint_params) names read.
 pub const PAINT_PARAMS: ProgramBuffer =
-    ProgramBuffer { id: PAINT_PARAMS_ID, name: "paintParams", kind: BufferKind::Uniform(GlobalPaintParamsUBO::BLOCK) };
+    ProgramBuffer::new(PAINT_PARAMS_ID, "paintParams", BufferKind::Uniform(GlobalPaintParamsUBO::BLOCK), Stages::Both);
 
 /// The projection of each draw, a storage buffer that a layer writes from
 /// the tile projections of its draws.
-pub const PROJECTION: ProgramBuffer = ProgramBuffer {
-    id: PROJECTION_ID,
-    name: "projectionVector",
-    kind: BufferKind::Storage { block: ProjectionUBO::BLOCK, stride: size_of::<ProjectionUBO>() },
-};
+pub const PROJECTION: ProgramBuffer = ProgramBuffer::new(
+    PROJECTION_ID,
+    "projectionVector",
+    BufferKind::Storage { block: ProjectionUBO::BLOCK, stride: size_of::<ProjectionUBO>() },
+    Stages::Vertex,
+);
 
 /// The projection of a draw's own.
 pub const OWN_PROJECTION: ProgramBuffer =
-    ProgramBuffer { id: PROJECTION_ID, name: "projection", kind: BufferKind::DrawUniform(ProjectionUBO::BLOCK) };
+    ProgramBuffer::new(PROJECTION_ID, "projection", BufferKind::DrawUniform(ProjectionUBO::BLOCK), Stages::Vertex);
 
-/// A vertex or instance attribute of a program, which GLSL ES reads as
-/// `a_<name>`: of a paint property's values where it has the property's
-/// name.
+/// A vertex or instance attribute of a program, which its vertex stage
+/// reads, and GLSL ES as `a_<name>`: of a paint property's values where it
+/// has the property's name, which only the variants that read the property
+/// per vertex read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Attribute {
     pub name: &'static str,
     /// The format a draw without data for it binds.
     pub format: AttributeDataType,
+    /// The variants that read it.
+    pub variants: Variants,
 }
 
 impl Attribute {
     #[must_use]
     pub const fn new(name: &'static str, format: AttributeDataType) -> Attribute {
-        Attribute { name, format }
+        Attribute { name, format, variants: Variants::All }
+    }
+
+    /// It, read only in `variants`.
+    #[must_use]
+    pub const fn only_in(self, variants: Variants) -> Attribute {
+        Attribute { variants, ..self }
     }
 }
 
-/// A texture a program samples, which GLSL ES reads as the sampler
+/// A texture a program reads, which GLSL ES reads as the sampler
 /// `u_<name>`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProgramTexture {
     pub name: &'static str,
-    /// Whether a shader may filter it: not one whose shaders only read its
-    /// texels, or of a format that can't be filtered, as `Rgba32Float`.
-    pub filterable: bool,
+    pub read: TextureRead,
+    /// The stages that read it.
+    pub stages: Stages,
+    /// The variants that read it.
+    pub variants: Variants,
+}
+
+/// How a program's shaders read a [`ProgramTexture`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextureRead {
+    /// With a sampler, which may filter it.
+    Filtered,
+    /// With a sampler that doesn't filter it: of a format that can't be
+    /// filtered, as `Rgba32Float`.
+    Unfiltered,
+    /// Texel by texel, without a sampler.
+    Texels,
 }
 
 impl ProgramTexture {
     /// A slot that the program's shaders don't read, which keeps the
     /// textures after it at the slots their sources name.
-    pub const UNUSED: ProgramTexture = ProgramTexture { name: "", filterable: true };
+    pub const UNUSED: ProgramTexture =
+        ProgramTexture { name: "", read: TextureRead::Filtered, stages: Stages::Both, variants: Variants::All };
 
-    /// The filterable texture `name`.
+    /// The texture `name`, which `stages` sample and may filter.
     #[must_use]
-    pub const fn new(name: &'static str) -> ProgramTexture {
-        ProgramTexture { name, filterable: true }
+    pub const fn new(name: &'static str, stages: Stages) -> ProgramTexture {
+        ProgramTexture { name, read: TextureRead::Filtered, stages, variants: Variants::All }
     }
 
-    /// The unfilterable texture `name`.
+    /// The texture `name`, which `stages` sample without filtering it.
     #[must_use]
-    pub const fn unfilterable(name: &'static str) -> ProgramTexture {
-        ProgramTexture { name, filterable: false }
+    pub const fn unfilterable(name: &'static str, stages: Stages) -> ProgramTexture {
+        ProgramTexture { name, read: TextureRead::Unfiltered, stages, variants: Variants::All }
+    }
+
+    /// The texture `name`, whose texels `stages` read.
+    #[must_use]
+    pub const fn texels(name: &'static str, stages: Stages) -> ProgramTexture {
+        ProgramTexture { name, read: TextureRead::Texels, stages, variants: Variants::All }
+    }
+
+    /// It, read only in `variants`.
+    #[must_use]
+    pub const fn only_in(self, variants: Variants) -> ProgramTexture {
+        ProgramTexture { variants, ..self }
+    }
+
+    /// Whether a shader may filter it.
+    #[must_use]
+    pub const fn filterable(&self) -> bool {
+        matches!(self.read, TextureRead::Filtered)
+    }
+
+    /// Whether its shaders read it with a sampler.
+    #[must_use]
+    pub const fn sampled(&self) -> bool {
+        !matches!(self.read, TextureRead::Texels)
     }
 
     /// Whether it is [`UNUSED`](Self::UNUSED).

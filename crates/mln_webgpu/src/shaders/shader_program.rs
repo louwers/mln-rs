@@ -340,7 +340,7 @@ impl ShaderProgram {
                 BindingType::Texture => false,
                 _ => continue,
             };
-            if texture_at(program, source, info.binding, sampler).is_some_and(|(_, texture)| !texture.filterable) {
+            if texture_at(program, source, info.binding, sampler).is_some_and(|(_, texture)| !texture.filterable()) {
                 info.type_ = if sampler { BindingType::NonFilteringSampler } else { BindingType::UnfilterableTexture };
             }
         }
