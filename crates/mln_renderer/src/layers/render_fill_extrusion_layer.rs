@@ -1,9 +1,9 @@
 // Each tile draws its roofs from the bucket's triangles and its walls as
-// instances of one static quad, an instance per bucket vertex. The WebGPU
-// and Vulkan walls also read the next vertex as attributes of their own
-// (`ID_FILL_EXTRUSION_NEXT_*`), from the same buffer one vertex further on,
-// so a tile draws an instance for every vertex but the last, which ends a
-// ring and has no wall.
+// instances of one static quad, an instance per bucket vertex. The walls
+// also read the next vertex as attributes of their own (`next_outline_pos`
+// and `next_decimals_ed`), from the same buffer one vertex further on, so a
+// tile draws an instance for every vertex but the last, which ends a ring and
+// has no wall.
 //
 // A device that rasterizes on the CPU runs its vertex pipeline once per
 // instance, so there each wall is a quad of its own in the vertex buffer:
