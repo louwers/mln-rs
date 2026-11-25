@@ -31,6 +31,7 @@ use crate::geometry::feature_index::FeatureIndex;
 use crate::layer_drawing::{BucketChanges, ChangedBuckets};
 use crate::layout::symbol_instance::SymbolInstance;
 use crate::render_layer::{BucketKey, BucketPlacementData, RenderLayer, SymbolBuckets};
+use crate::terrain::TerrainElevation;
 use crate::text::collision_grid::{Aabb, Shape};
 use crate::text::collision_index::CollisionIndex;
 use crate::tile::job::SourceKey;
@@ -178,9 +179,26 @@ pub(crate) struct PlacementInputs {
     transition_options: TransitionOptions,
     cross_source_collisions: bool,
     show_collision_boxes: bool,
+    /// The ground the symbols stand on, where terrain draws.
+    ground: PlacedGround,
     /// The buckets in the order placement places them: the layers'
     /// buckets, topmost layer first.
     buckets: Vec<PlacedBucket>,
+}
+
+/// The ground a placement's symbols stand on: the renderer's ground of the
+/// frame, which is a new one once it draws a different surface, so it
+/// equals only itself.
+#[derive(Clone, Default)]
+struct PlacedGround(Option<Arc<TerrainElevation>>);
+
+impl PartialEq for PlacedGround {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.0, &other.0) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            (a, b) => a.is_none() && b.is_none(),
+        }
+    }
 }
 
 /// A bucket a placement places.
@@ -196,10 +214,12 @@ struct PlacedBucket {
 }
 
 impl PlacementInputs {
-    /// The inputs for placing, at `update_parameters`, the buckets in
-    /// `buckets` that `layers` place, which are ordered bottom to top.
+    /// The inputs for placing, at `update_parameters` and on `ground` where
+    /// terrain draws, the buckets in `buckets` that `layers` place, which
+    /// are ordered bottom to top.
     pub(crate) fn new<B: SymbolBuckets + ?Sized>(
         update_parameters: &UpdateParameters,
+        ground: Option<&Arc<TerrainElevation>>,
         layers: &[&dyn RenderLayer],
         buckets: &B,
     ) -> Self {
@@ -220,6 +240,7 @@ impl PlacementInputs {
             transition_options: update_parameters.style.get_transition_options(),
             cross_source_collisions: update_parameters.cross_source_collisions,
             show_collision_boxes: update_parameters.debug_options.contains(MapDebugOptions::COLLISION),
+            ground: PlacedGround(ground.cloned()),
             buckets: placed.collect(),
         }
     }
@@ -452,6 +473,11 @@ impl Placement {
         self.prev_placement.as_deref()
     }
 
+    /// The ground the placement's symbols stand on, where terrain draws.
+    pub(crate) fn ground(&self) -> Option<&TerrainElevation> {
+        self.inputs.as_ref()?.ground.0.as_deref()
+    }
+
     pub(crate) fn collision_index(&self) -> &CollisionIndex {
         &self.collision_index
     }
@@ -510,7 +536,7 @@ impl Placement {
             avoid_edges,
             debug: self.show_collision_boxes,
         };
-        PlacementContext::new(data, bucket, &inputs.view, self.placement_zoom, options)
+        PlacementContext::new(data, bucket, &inputs.view, inputs.ground.0.as_deref(), self.placement_zoom, options)
     }
 
     /// Places the symbols of `ctx`'s bucket that no bucket of their layer
@@ -659,7 +685,7 @@ impl Placement {
             let Some(bucket) = buckets.get_mut(&data.bucket) else {
                 continue;
             };
-            let sorted = update_opacities && self.update_bucket_opacities(bucket, view, &mut seen_cross_tile_ids);
+            let sorted = update_opacities && self.update_bucket_opacities(bucket, view, data, &mut seen_cross_tile_ids);
             let dynamic = self.update_bucket_positions(bucket, view, data, None);
             if update_opacities || dynamic {
                 bucket.base.uploaded = false;
@@ -801,6 +827,7 @@ mod tests {
             transition_options: TransitionOptions::default(),
             cross_source_collisions: true,
             show_collision_boxes: false,
+            ground: PlacedGround::default(),
             buckets: Vec::new(),
         }
     }

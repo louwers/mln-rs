@@ -49,6 +49,66 @@
 
 use crate::program::GlslShaderSource;
 
+/// What the terrain variant of a program that hides behind the ground in
+/// front of it reads of the ground's depth, within `#ifdef TERRAIN` of its
+/// vertex stage: whether that ground hides a point (`ground_visibility`).
+/// The texture is at binding 1, or at the binding given, of a program
+/// whose own textures take binding 1.
+macro_rules! ground_visibility {
+    () => {
+        ground_visibility!("1")
+    };
+    ($binding:literal) => {
+        concat!(
+            r"
+#ifdef TERRAIN
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = ",
+            $binding,
+            r") uniform texture2D ground_depth_texture;
+
+// GL JS's `depthOpacity`: 1 where a point `w` from the eye, at `ndc`, is in
+// front of the ground drawn there, fading to 0 behind it over GL JS's ramp
+// of its NDC depth, which `depth_factor` scales; 1 where no ground is drawn
+// there or `ndc` is outside the view. The texels' rows run from the top.
+float ground_depth_opacity(const vec2 ndc, const float w, const float depth_factor) {
+    if (any(greaterThan(abs(ndc), vec2(1.0)))) {
+        return 1.0;
+    }
+    const ivec2 size = textureSize(ground_depth_texture, 0);
+    const vec2 pos = (vec2(ndc.x, -ndc.y) * 0.5 + 0.5) * vec2(size);
+    const ivec2 texel = clamp(ivec2(floor(pos)), ivec2(0), size - 1);
+    const uvec4 bytes = uvec4(round(texelFetch(ground_depth_texture, texel, 0) * 255.0));
+    const float ground = uintBitsToFloat(bytes.x | (bytes.y << 8u) | (bytes.z << 16u) | (bytes.w << 24u));
+    if (!(ground > 0.0)) {
+        return 1.0;
+    }
+    const float d = depth_factor * (1.0 / w - 1.0 / ground) + 0.0001;
+    return 1.0 - clamp(-500.0 * d, 0.0, 1.0);
+}
+
+// GL JS's `calculate_visibility` of the point at `clip`: 1 where the ground
+// drawn in front doesn't hide it, 0 where it does, averaged with the point
+// 0.01 NDC above it where it is partly hidden. The ramp's scale is GL JS's:
+// `2n` of a near plane `n` a fiftieth of the view's height, in pixels, a
+// `GlobalPaintParamsUBO`'s `world_size.y / pixel_ratio`.
+float ground_visibility(const vec4 clip, const float view_height) {
+    if (clip.w <= 0.0) {
+        return 1.0;
+    }
+    const vec2 ndc = clip.xy / clip.w;
+    const float depth_factor = view_height / 25.0;
+    const float visibility = ground_depth_opacity(ndc, clip.w, depth_factor);
+    if (visibility > 0.95) {
+        return 1.0;
+    }
+    return (visibility + ground_depth_opacity(ndc + vec2(0.0, 0.01), clip.w, depth_factor)) / 2.0;
+}
+#endif
+"
+        )
+    };
+}
+
 /// The start of every vertex stage.
 pub(crate) const PRELUDE_VERTEX: &str = r#"
 
@@ -601,7 +661,9 @@ pub(crate) const CIRCLE_SHADER_PRELUDE: &str = r"
 
 pub(crate) const CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: CIRCLE_SHADER_PRELUDE,
-    vertex: r"
+    vertex: concat!(
+        ground_visibility!(),
+        r"
 
 layout(location = 0) in ivec2 in_position;
 
@@ -631,6 +693,11 @@ layout(location = 6) in vec2 in_stroke_width;
 
 #if !defined(HAS_UNIFORM_u_stroke_opacity)
 layout(location = 7) in vec2 in_stroke_opacity;
+#endif
+
+#ifdef TERRAIN
+// The height of the ground under the circle's center.
+layout(location = 8) in float in_ground_height;
 #endif
 
 layout(push_constant) uniform Constants {
@@ -705,6 +772,11 @@ layout(location = 7) out float frag_stroke_width;
 layout(location = 8) out float frag_stroke_opacity;
 #endif
 
+#ifdef TERRAIN
+// How much of the circle the ground in front of its center leaves.
+layout(location = 9) out float frag_visibility;
+#endif
+
 void main() {
     const CircleDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
 
@@ -727,8 +799,18 @@ void main() {
     // multiply a_pos by 0.5, since we had it * 2 in order to sneak in extrusion data
     const vec2 circle_center = floor(in_position * 0.5);
 
-#ifdef PROJECTION_GLOBE
     const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    // Over terrain, the circle stands on the ground under its center.
+#ifdef TERRAIN
+    const float ele = in_ground_height;
+    const float view_height = paintParams.world_size.y / paintParams.pixel_ratio;
+#ifdef PROJECTION_GLOBE
+    frag_visibility = ground_visibility(projectTileWithElevation(circle_center, ele, projection), view_height);
+#else
+    frag_visibility = ground_visibility(drawable.matrix * vec4(circle_center, ele, 1.0), view_height);
+#endif
+#else
+    const float ele = 0.0;
 #endif
     if (props.pitch_with_map != 0) {
 #ifdef PROJECTION_GLOBE
@@ -746,10 +828,10 @@ void main() {
             // To counteract the effect for pitch-scale: viewport, we rescale the
             // whole circle based on the pitch scaling effect at its central point
 #ifdef PROJECTION_GLOBE
-            const vec4 projected_center = interpolateProjection(circle_center, center_vector, 0.0, projection);
+            const vec4 projected_center = interpolateProjection(circle_center, center_vector, ele, projection);
             angle_scale *= (radius + stroke_width) * (projected_center.w / paintParams.camera_to_center_distance);
 #else
-            const vec4 projected_center = drawable.matrix * vec4(circle_center, 0, 1);
+            const vec4 projected_center = drawable.matrix * vec4(circle_center, ele, 1);
 #endif
             corner_position += scaled_extrude * (radius + stroke_width) *
                                (projected_center.w / paintParams.camera_to_center_distance);
@@ -757,18 +839,18 @@ void main() {
 
 #ifdef PROJECTION_GLOBE
         const vec3 corner_vector = globeRotateVector(center_vector, extrude * angle_scale, projection);
-        gl_Position = interpolateProjection(corner_position, corner_vector, 0.0, projection);
+        gl_Position = interpolateProjection(corner_position, corner_vector, ele, projection);
 #else
-        gl_Position = drawable.matrix * vec4(corner_position, 0, 1);
+        gl_Position = drawable.matrix * vec4(corner_position, ele, 1);
 #endif
     } else {
 #ifdef PROJECTION_GLOBE
-        gl_Position = projectTile(circle_center, projection);
+        gl_Position = projectTileWithElevation(circle_center, ele, projection);
         if (gl_Position.z / gl_Position.w > 1.0) {
             gl_Position.xy = vec2(10000.0);
         }
 #else
-        gl_Position = drawable.matrix * vec4(circle_center, 0, 1);
+        gl_Position = drawable.matrix * vec4(circle_center, ele, 1);
 #endif
 
         const float factor = props.scale_with_map != 0 ? paintParams.camera_to_center_distance : gl_Position.w;
@@ -810,7 +892,8 @@ void main() {
     frag_stroke_opacity = unpack_mix_float(in_stroke_opacity, drawable.stroke_opacity_t);
 #endif
 }
-",
+"
+    ),
     fragment: r"
 
 layout(location = 0) in vec2 frag_extrude;
@@ -842,6 +925,10 @@ layout(location = 7) in float frag_stroke_width;
 
 #if !defined(HAS_UNIFORM_u_stroke_opacity)
 layout(location = 8) in float frag_stroke_opacity;
+#endif
+
+#ifdef TERRAIN
+layout(location = 9) in float frag_visibility;
 #endif
 
 layout(location = 0) out vec4 out_color;
@@ -909,6 +996,9 @@ void main() {
         smoothstep(antialiased_blur, 0.0, extrude_length - radius / (radius + stroke_width));
 
     out_color = opacity_t * mix(color * opacity, stroke_color * stroke_opacity, color_t);
+#ifdef TERRAIN
+    out_color *= frag_visibility;
+#endif
 }
 ",
 };
@@ -2429,6 +2519,7 @@ pub(crate) const FILL_EXTRUSION_SHADER_PRELUDE: &str = r"
 #define idFillExtrusionPropsUBO                 layerUBOStartId + 1
 #define idFillExtrusionWallVertices             drawableUBOStartId + 5
 #define idFillExtrusionWallPaint                drawableUBOStartId + 6
+#define idFillExtrusionWallHeights              drawableUBOStartId + 7
 
 ";
 
@@ -2450,6 +2541,11 @@ layout(location = 3) in vec2 in_base;
 
 #if !defined(HAS_UNIFORM_u_height)
 layout(location = 4) in vec2 in_height;
+#endif
+
+#ifdef TERRAIN
+// The height of the ground under its polygon's centroid.
+layout(location = 10) in float in_ground_height;
 #endif
 
 layout(push_constant) uniform Constants {
@@ -2518,7 +2614,15 @@ void main() {
 
     const vec3 normal = vec3(0.0, 0.0, 1.0);
     const float t = 1.0;
+    // Over terrain, the extrusion stands on the ground under its polygon's
+    // centroid, as GL JS raises it, its base 10 m lower where it is at the
+    // ground, so that it meets a slope.
+#ifdef TERRAIN
+    const float ele = in_ground_height;
+    const float z = t > 0.0 ? height + ele : base + ele - (base > 0.0 ? 0.0 : 10.0);
+#else
     const float z = t > 0.0 ? height : base;
+#endif
     gl_Position = projectTileFor3D(vec2(in_position), z, projectionVector.projection_ubo[constant.ubo_index]);
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -2674,7 +2778,15 @@ macro_rules! fill_extrusion_wall_main {
 
     const vec3 normal = vec3(in_position.x == 0.0 ? wall_normal(in_decimals_ed.x, own) : wall_normal(in_next_decimals_ed.x, own), 0.0);
     const float t = float(in_position.y);
+    // Over terrain, the extrusion stands on the ground under its polygon's
+    // centroid, as GL JS raises it, its base 10 m lower where it is at the
+    // ground, so that it meets a slope.
+#ifdef TERRAIN
+    const float ele = in_ground_height;
+    const float z = t > 0.0 ? height + ele : base + ele - (base > 0.0 ? 0.0 : 10.0);
+#else
     const float z = t > 0.0 ? height : base;
+#endif
 
     gl_Position = projectTileFor3D(in_position.x == 0.0 ? p1 : p2, z, projectionVector.projection_ubo[constant.ubo_index]);
 
@@ -2750,6 +2862,11 @@ layout(location = 4) in vec2 in_base;
 layout(location = 5) in vec2 in_height;
 #endif
 
+#ifdef TERRAIN
+// The height of the ground under its polygon's centroid.
+layout(location = 10) in float in_ground_height;
+#endif
+
 ",
         fill_extrusion_wall_declarations!(),
         r"
@@ -2795,6 +2912,14 @@ layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillExtrusionWallPaint)
 } wallPaint;
 #endif
 
+#ifdef TERRAIN
+// The heights of the ground under the bucket's vertices' polygons'
+// centroids.
+layout(std430, set = DRAWABLE_UBO_SET_INDEX, binding = idFillExtrusionWallHeights) readonly buffer FillExtrusionWallHeights {
+    float heights[];
+} wallHeights;
+#endif
+
 void main() {
     // Four vertices a wall, in the order of the static quad's corners.
     const uint wall = uint(gl_VertexIndex) / 4u;
@@ -2810,6 +2935,9 @@ void main() {
     const uvec2 in_decimals_ed = uvec2(decimals_ed & 0xffffu, decimals_ed >> 16u);
     const ivec2 in_next_outline_pos = ivec2(int(next_pos << 16u) >> 16, int(next_pos) >> 16);
     const uvec2 in_next_decimals_ed = uvec2(next_decimals_ed & 0xffffu, next_decimals_ed >> 16u);
+#ifdef TERRAIN
+    const float in_ground_height = wallHeights.heights[wall];
+#endif
 
     // The wall's paint values are its outline vertex's.
     const uint paint_layout = drawableVector.drawable_ubo[constant.ubo_index].paint_layout;
@@ -2857,6 +2985,11 @@ layout(location = 4) in uvec4 in_pattern_from;
 
 #if !defined(HAS_UNIFORM_u_pattern_to)
 layout(location = 5) in uvec4 in_pattern_to;
+#endif
+
+#ifdef TERRAIN
+// The height of the ground under its polygon's centroid.
+layout(location = 10) in float in_ground_height;
 #endif
 
 layout(push_constant) uniform Constants {
@@ -2942,7 +3075,15 @@ void main() {
 
     const vec3 normal = vec3(0.0, 0.0, 1.0);
     const float t = 1.0;
+    // Over terrain, the extrusion stands on the ground under its polygon's
+    // centroid, as GL JS raises it, its base 10 m lower where it is at the
+    // ground, so that it meets a slope.
+#ifdef TERRAIN
+    const float ele = in_ground_height;
+    const float z = t > 0.0 ? height + ele : base + ele - (base > 0.0 ? 0.0 : 10.0);
+#else
     const float z = t > 0.0 ? height : base;
+#endif
     gl_Position = projectTileFor3D(vec2(in_position), z, projectionVector.projection_ubo[constant.ubo_index]);
 
 #if defined(OVERDRAW_INSPECTOR)
@@ -3141,6 +3282,11 @@ layout(location = 5) in uvec4 in_pattern_from;
 layout(location = 6) in uvec4 in_pattern_to;
 #endif
 
+#ifdef TERRAIN
+// The height of the ground under its polygon's centroid.
+layout(location = 10) in float in_ground_height;
+#endif
+
 layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
@@ -3241,7 +3387,15 @@ void main() {
     const vec3 normal = vec3(in_position.x == 0.0 ? wall_normal(in_decimals_ed.x, own) : wall_normal(in_next_decimals_ed.x, own), 0.0);
     const float edgedistance = in_position.x == 0.0 ? nextInstanceDecimalsEd.y : instanceDecimalsEd.y;
     const float t = float(in_position.y);
+    // Over terrain, the extrusion stands on the ground under its polygon's
+    // centroid, as GL JS raises it, its base 10 m lower where it is at the
+    // ground, so that it meets a slope.
+#ifdef TERRAIN
+    const float ele = in_ground_height;
+    const float z = t > 0.0 ? height + ele : base + ele - (base > 0.0 ? 0.0 : 10.0);
+#else
     const float z = t > 0.0 ? height : base;
+#endif
 
     gl_Position = projectTileFor3D(in_position.x == 0.0 ? p1 : p2, z, projectionVector.projection_ubo[constant.ubo_index]);
 
@@ -3468,6 +3622,11 @@ layout(location = 1) in vec2 in_weight;
 layout(location = 2) in vec2 in_radius;
 #endif
 
+#ifdef TERRAIN
+// The height of the ground under the kernel's center.
+layout(location = 3) in float in_ground_height;
+#endif
+
 layout(push_constant) uniform Constants {
     int ubo_index;
 } constant;
@@ -3541,13 +3700,22 @@ void main() {
 
     // multiply a_pos by 0.5, since we had it * 2 in order to sneak
     // in extrusion data
-#ifdef PROJECTION_GLOBE
     const vec2 circle_center = floor(in_position * 0.5);
-    const vec3 center_vector = projectToSphere(circle_center, vec2(0.0, 0.0), projectionVector.projection_ubo[constant.ubo_index]);
-    const vec3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale, projectionVector.projection_ubo[constant.ubo_index]);
-    gl_Position = interpolateProjection(circle_center + scaled_extrude, corner_vector, 0.0, projectionVector.projection_ubo[constant.ubo_index]);
+    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    // Over terrain, the kernel lies flat at the height of the ground under
+    // its center. The ground in front of it doesn't hide it: its density
+    // adds up in screen space, as GL JS's does.
+#ifdef TERRAIN
+    const float ele = in_ground_height;
 #else
-    gl_Position = drawable.matrix * vec4(floor(in_position * 0.5) + scaled_extrude, 0, 1);
+    const float ele = 0.0;
+#endif
+#ifdef PROJECTION_GLOBE
+    const vec3 center_vector = projectToSphere(circle_center, vec2(0.0, 0.0), projection);
+    const vec3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale, projection);
+    gl_Position = interpolateProjection(circle_center + scaled_extrude, corner_vector, ele, projection);
+#else
+    gl_Position = drawable.matrix * vec4(circle_center + scaled_extrude, ele, 1);
 #endif
 
 #if !defined(HAS_UNIFORM_u_weight)
@@ -4179,6 +4347,62 @@ void main() {
 }
 "
     ),
+};
+
+/// The ground's depth: the surface's grid, raised and projected as
+/// `TERRAIN_SHADER` does, writing each pixel's eye distance, an `f32`'s bits,
+/// least significant byte first, as the texel's channels.
+pub(crate) const TERRAIN_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
+    prelude: TERRAIN_SHADER_PRELUDE,
+    vertex: concat!(
+        terrain_props!(),
+        r"
+
+// x and y in tile units, whether the vertex is a skirt's lower edge, 0.
+layout(location = 0) in ivec4 in_pos;
+
+// The eye distance, which interpolates exactly across a triangle.
+layout(location = 0) out float frag_distance;
+
+layout(push_constant) uniform Constants {
+    int ubo_index;
+} constant;
+
+struct TerrainDrawableUBO {
+    vec4 dem_coords;
+};
+
+layout(std140, set = LAYER_SET_INDEX, binding = idTerrainDrawableUBO) readonly buffer TerrainDrawableUBOVector {
+    TerrainDrawableUBO drawable_ubo[];
+} drawableVector;
+
+layout(std140, set = LAYER_SET_INDEX, binding = idProjectionUBO) readonly buffer ProjectionUBOVector {
+    ProjectionUBO projection_ubo[];
+} projectionVector;
+
+void main() {
+    const TerrainDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
+    const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
+    const vec2 pos = vec2(in_pos.xy);
+    const float skirt = float(in_pos.z);
+    const float height = surface_height(pos, drawable.dem_coords, terrain_props.props);
+    gl_Position = projectTileFor3D(pos, height - skirt * terrain_props.props.skirt_length, projection);
+    frag_distance = gl_Position.w;
+}
+"
+    ),
+    fragment: r"
+
+layout(location = 0) in float frag_distance;
+
+layout(location = 0) out vec4 out_color;
+
+void main() {
+    const uint bits = floatBitsToUint(frag_distance);
+    const uvec4 bytes = uvec4(bits, bits >> 8u, bits >> 16u, bits >> 24u) & uvec4(255u);
+    out_color = vec4(bytes) / 255.0;
+}
+",
 };
 
 /// Port-only, for the backend conformance cases: probes of the terrain's
@@ -6330,12 +6554,14 @@ pub(crate) const SYMBOL_SHADER_PRELUDE: &str = r"
 
 pub(crate) const SYMBOL_ICON_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: SYMBOL_SHADER_PRELUDE,
-    vertex: r"
+    vertex: concat!(
+        ground_visibility!("2"),
+        r"
 
 layout(location = 0) in ivec4 in_pos_offset;
 layout(location = 1) in uvec4 in_data;
 layout(location = 2) in ivec4 in_pixeloffset;
-layout(location = 3) in vec3 in_projected_pos;
+layout(location = 3) in vec4 in_projected_pos;
 layout(location = 4) in float in_fade_opacity;
 
 #if !defined(HAS_UNIFORM_u_opacity)
@@ -6403,9 +6629,17 @@ void main() {
     const SymbolDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
     const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
 
+    // How much of the symbol the ground in front of its anchor leaves.
+#ifdef TERRAIN
+    const float ground_visible = ground_visibility(
+        projectTileWithElevation(vec2(in_pos_offset.xy) + drawable.translation, in_height_offset, projection),
+        paintParams.world_size.y / paintParams.pixel_ratio);
+#else
+    const float ground_visible = 1.0;
+#endif
     const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
-    const float fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
+    const float fade_opacity = max(0.0, min(ground_visible, raw_fade_opacity[0] + fade_change));
 #if defined(HAS_UNIFORM_u_opacity)
     const float visibility = fade_opacity;
 #else
@@ -6486,7 +6720,10 @@ void main() {
     const vec2 projected_pos_xy = in_projected_pos.xy;
     vec4 projected_pos;
     if (drawable.is_along_line != 0 || drawable.is_variable_anchor != 0) {
-        projected_pos = vec4(projected_pos_xy, in_height_offset, 1.0);
+        // A glyph along a line stands at its own height, which the label's
+        // layout gives it; a label at a variable anchor at its anchor's.
+        const float height = drawable.is_along_line != 0 ? in_projected_pos.w : in_height_offset;
+        projected_pos = vec4(projected_pos_xy, height, 1.0);
     } else if (drawable.pitch_with_map != 0) {
         projected_pos = drawable.label_plane_matrix * vec4(projected_pos_xy + drawable.translation, in_height_offset, 1.0);
     } else {
@@ -6513,7 +6750,8 @@ void main() {
 
     frag_opacity = visibility;
 }
-",
+"
+    ),
     fragment: r"
 
 layout(location = 0) in vec2 frag_tex;
@@ -6580,12 +6818,14 @@ void main() {
 
 pub(crate) const SYMBOL_SDF_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: SYMBOL_SHADER_PRELUDE,
-    vertex: r"
+    vertex: concat!(
+        ground_visibility!("2"),
+        r"
 
 layout(location = 0) in ivec4 in_pos_offset;
 layout(location = 1) in uvec4 in_data;
 layout(location = 2) in ivec4 in_pixeloffset;
-layout(location = 3) in vec3 in_projected_pos;
+layout(location = 3) in vec4 in_projected_pos;
 layout(location = 4) in float in_fade_opacity;
 
 #if !defined(HAS_UNIFORM_u_fill_color)
@@ -6697,9 +6937,17 @@ void main() {
     const SymbolDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
     const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
 
+    // How much of the symbol the ground in front of its anchor leaves.
+#ifdef TERRAIN
+    const float ground_visible = ground_visibility(
+        projectTileWithElevation(vec2(in_pos_offset.xy) + drawable.translation, in_height_offset, projection),
+        paintParams.world_size.y / paintParams.pixel_ratio);
+#else
+    const float ground_visible = 1.0;
+#endif
     const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
-    const float fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
+    const float fade_opacity = max(0.0, min(ground_visible, raw_fade_opacity[0] + fade_change));
 #if defined(HAS_UNIFORM_u_opacity)
     const float visibility = fade_opacity;
 #else
@@ -6786,7 +7034,10 @@ void main() {
     const vec2 projected_pos_xy = in_projected_pos.xy;
     vec4 projected_pos;
     if (drawable.is_along_line != 0 || drawable.is_variable_anchor != 0) {
-        projected_pos = vec4(projected_pos_xy, in_height_offset, 1.0);
+        // A glyph along a line stands at its own height, which the label's
+        // layout gives it; a label at a variable anchor at its anchor's.
+        const float height = drawable.is_along_line != 0 ? in_projected_pos.w : in_height_offset;
+        projected_pos = vec4(projected_pos_xy, height, 1.0);
     } else if (drawable.pitch_with_map != 0) {
         projected_pos = drawable.label_plane_matrix * vec4(projected_pos_xy + drawable.translation, in_height_offset, 1.0);
     } else {
@@ -6838,7 +7089,8 @@ void main() {
     frag_halo_color = unpack_mix_color(in_halo_color, drawable.halo_color_t);
 #endif
 }
-",
+"
+    ),
     fragment: r"
 
 layout(location = 0) in vec2 frag_tex;
@@ -6939,14 +7191,16 @@ void main() {
 
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: SYMBOL_SHADER_PRELUDE,
-    vertex: r"
+    vertex: concat!(
+        ground_visibility!("2"),
+        r"
 
 #define SDF 1.0
 #define ICON 0.0
 
 layout(location = 0) in ivec4 in_pos_offset;
 layout(location = 1) in uvec4 in_data;
-layout(location = 2) in vec3 in_projected_pos;
+layout(location = 2) in vec4 in_projected_pos;
 layout(location = 3) in float in_fade_opacity;
 
 #if !defined(HAS_UNIFORM_u_fill_color)
@@ -7060,9 +7314,17 @@ void main() {
     const SymbolDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
     const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
 
+    // How much of the symbol the ground in front of its anchor leaves.
+#ifdef TERRAIN
+    const float ground_visible = ground_visibility(
+        projectTileWithElevation(vec2(in_pos_offset.xy) + drawable.translation, in_height_offset, projection),
+        paintParams.world_size.y / paintParams.pixel_ratio);
+#else
+    const float ground_visible = 1.0;
+#endif
     const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
-    const float fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
+    const float fade_opacity = max(0.0, min(ground_visible, raw_fade_opacity[0] + fade_change));
 #if defined(HAS_UNIFORM_u_opacity)
     const float visibility = fade_opacity;
 #else
@@ -7149,7 +7411,10 @@ void main() {
     const vec2 projected_pos_xy = in_projected_pos.xy;
     vec4 projected_pos;
     if (drawable.is_along_line != 0 || drawable.is_variable_anchor != 0) {
-        projected_pos = vec4(projected_pos_xy, in_height_offset, 1.0);
+        // A glyph along a line stands at its own height, which the label's
+        // layout gives it; a label at a variable anchor at its anchor's.
+        const float height = drawable.is_along_line != 0 ? in_projected_pos.w : in_height_offset;
+        projected_pos = vec4(projected_pos_xy, height, 1.0);
     } else if (drawable.pitch_with_map != 0) {
         projected_pos = drawable.label_plane_matrix * vec4(projected_pos_xy + drawable.translation, in_height_offset, 1.0);
     } else {
@@ -7205,7 +7470,8 @@ void main() {
     frag_halo_color = unpack_mix_color(in_halo_color, drawable.halo_color_t);
 #endif
 }
-",
+"
+    ),
     fragment: r"
 
 layout(location = 0) in vec2 frag_tex;

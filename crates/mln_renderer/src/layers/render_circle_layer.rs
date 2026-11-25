@@ -2,16 +2,18 @@ use std::mem::offset_of;
 use std::sync::Arc;
 
 use geometry::Point;
+use glam::Vec2;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::circle_layer_ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
-    ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO, ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_PROJECTION_UBO,
+    ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO, ID_CIRCLE_GROUND_HEIGHT_VERTEX_ATTRIBUTE,
+    ID_CIRCLE_POS_VERTEX_ATTRIBUTE, ID_GROUND_DEPTH_TEXTURE, ID_PROJECTION_UBO,
 };
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
-use mln_map_types::TileProjector;
+use mln_map_types::{TileCoordinate, TileProjector};
 use mln_style::expression::EvaluationContext;
 use mln_style::layer::LayerStyle;
 use mln_style::layers::Circle;
@@ -19,6 +21,7 @@ use mln_style::types::{AlignmentType, CirclePitchScaleType};
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
 use mln_util::error::Error;
+use mln_util::geo::WrapMode;
 
 use super::{cast_matrix, refresh_paint_attributes};
 use crate::bucket::Bucket;
@@ -37,18 +40,22 @@ use crate::render_layer::{
 };
 use crate::render_pass::RenderPass;
 use crate::render_tile::{FrameTile, RenderTile};
+use crate::terrain::{FrameGround, StandingDraw, TileGround};
 use crate::tile_matrix::{globe_extrude_scale, projection_data, to_projection_ubo};
 
 /// The pass the layer's draws draw in.
 const RENDER_PASS: RenderPass = RenderPass::Translucent;
 
 // query
+/// Where `p`, in tile units of the tile `projector` projects, `elevation`
+/// meters up, shows in a view of `size`, in pixels from its bottom left.
 fn project_point(
     p: mln_style::feature::GeometryCoordinate,
+    elevation: f64,
     projector: &TileProjector<'_>,
     size: mln_util::size::Size,
 ) -> mln_style::feature::GeometryCoordinate {
-    let pos = projector.project(&Point::new(f64::from(p.x), f64::from(p.y)), 0.0).point;
+    let pos = projector.project(&Point::new(f64::from(p.x), f64::from(p.y)), elevation).point;
     // `(float(pos.x) + 1) * size.width * 0.5`: float, then double.
     mln_style::feature::GeometryCoordinate::new(
         (f64::from((pos.x as f32 + 1.0) * size.width as f32) * 0.5) as i16,
@@ -56,12 +63,46 @@ fn project_point(
     )
 }
 
+/// `translated`, `query_geometry` moved by a circle's translation, in tile
+/// units of the tile `projector` projects, where it shows in a view of
+/// `size`: over `ground`, at the height of the ground under
+/// `query_geometry`, which lies on it.
 fn project_query_geometry(
     query_geometry: &mln_style::feature::GeometryCoordinates,
+    translated: &mln_style::feature::GeometryCoordinates,
+    ground: Option<TileGround<'_>>,
     projector: &TileProjector<'_>,
     size: mln_util::size::Size,
 ) -> mln_style::feature::GeometryCoordinates {
-    query_geometry.iter().map(|p| project_point(*p, projector, size)).collect()
+    let height = |p: &mln_style::feature::GeometryCoordinate| ground_height(ground, *p);
+    query_geometry.iter().zip(translated).map(|(p, t)| project_point(*t, height(p), projector, size)).collect()
+}
+
+/// The height of `ground` under `p`, in tile units of its tile, in meters;
+/// 0 without ground.
+fn ground_height(ground: Option<TileGround<'_>>, p: mln_style::feature::GeometryCoordinate) -> f64 {
+    ground.map_or(0.0, |ground| f64::from(ground.height(Vec2::new(f32::from(p.x), f32::from(p.y)))))
+}
+
+/// Where the lines of sight through `screen`, points from the top left of
+/// `view`, meet the plane `elevation` meters up, in tile units of the tile
+/// `projector` projects.
+fn plane_geometry(
+    screen: &[mln_util::geo::ScreenCoordinate],
+    elevation: f64,
+    view: &mln_map_types::View,
+    projector: &TileProjector<'_>,
+) -> mln_style::feature::GeometryCoordinates {
+    let height = f64::from(view.size().height);
+    screen
+        .iter()
+        .filter_map(|p| {
+            let up = mln_util::geo::ScreenCoordinate::new(p.x, height - p.y);
+            let location = view.screen_coordinate_to_lat_lng_at(&up, elevation, WrapMode::Unwrapped).ok()?;
+            let world = TileCoordinate::from_lat_lng(0.0, &location).p;
+            Some(TileCoordinate::to_geometry_coordinate(projector.tile_id(), &world))
+        })
+        .collect()
 }
 
 impl LayerType for Circle {
@@ -89,7 +130,7 @@ impl LayerType for Circle {
 pub(crate) struct RenderCircleLayer {
     base: RenderLayerBase,
     values: LayerValues<Circle>,
-    drawing: TileDraws<DrawObjects>,
+    drawing: TileDraws<StandingDraw>,
     /// The frame's draws as the update makes them.
     draw_list: DrawList<CircleUniforms>,
 }
@@ -181,7 +222,10 @@ struct CircleUniforms {
 
 impl TypedLayer for RenderCircleLayer {
     type Type = Circle;
-    type Drawing = TileDraws<DrawObjects>;
+    type Drawing = TileDraws<StandingDraw>;
+
+    const STANDS: bool = true;
+    const HIDES_BEHIND_GROUND: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -218,6 +262,9 @@ impl TypedLayer for RenderCircleLayer {
         let layer_id = self.base.style.base().id.as_str();
         let layer = &*self.values.evaluated;
         let evaluated = &layer.paint;
+        // Over terrain, the circles stand on the frame's ground and hide
+        // behind it.
+        let ground = paint_parameters.ground.clone();
         // The draws keep the order they're pushed in, the tiles'.
         let order = self.drawing.frame_mut().id();
         for tile in render_tiles {
@@ -253,7 +300,7 @@ impl TypedLayer for RenderCircleLayer {
             let changes = entry.take_changes();
             let context = &mut *paint_parameters.context;
             if let Some(cached) = entry.value.as_mut() {
-                refresh_paint_attributes(cached, changes, |attrs| {
+                refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
                     binders.bind(evaluated, paint(context).as_ref(), attrs, &mut Uniforms::default());
                 });
             } else if !bucket.vertices.is_empty()
@@ -287,12 +334,21 @@ impl TypedLayer for RenderCircleLayer {
                     },
                     Textures::default(),
                 );
-                *entry.value = Some(objects);
+                *entry.value = Some(StandingDraw::new(objects));
             }
 
-            if entry.value.is_none() {
+            let Some(draw) = entry.value.as_mut() else {
                 continue;
-            }
+            };
+            let ground = ground.as_deref();
+            draw.stand(
+                context,
+                ground,
+                tile_id.to_unwrapped(),
+                ID_CIRCLE_GROUND_HEIGHT_VERTEX_ATTRIBUTE,
+                &bucket.centers,
+            );
+            draw.objects.set_texture(ID_GROUND_DEPTH_TEXTURE, ground.and_then(FrameGround::depth));
             let draw = FrameDraw::new(Some(tile_id), order);
             self.draw_list.push(draw, Self::uniforms(layer, &tile_id, binders, paint_parameters));
         }
@@ -314,7 +370,8 @@ impl RenderLayer for RenderCircleLayer {
     ) -> bool {
         use crate::geometry::feature_index::FeatureIndex;
 
-        let QueryRegion { geometry: query_geometry, view, projector, pixels_to_tile_units, .. } = *region;
+        let QueryRegion { geometry: query_geometry, screen, ground, view, projector, pixels_to_tile_units, .. } =
+            *region;
         let zoom = view.zoom() as f32;
         let evaluated = &self.values.evaluated.paint;
         // Translate query geometry
@@ -346,12 +403,18 @@ impl RenderLayer for RenderCircleLayer {
         // in tile space as it moves into the distance A circle with fixed scaling
         // relative to the map gets smaller in viewport space as it moves into the
         // distance
+        //
+        // Over terrain, a circle stands at the height of the ground under its
+        // center: aligned with the map, it lies in the plane at that height,
+        // where the query's lines of sight meet it; aligned with the
+        // viewport, the query's points show where they lie on the ground.
         let align_with_map = *evaluated.circle_pitch_alignment.uniform() == AlignmentType::Map;
         let projected;
-        let transformed_query_geometry = if align_with_map {
+        let viewport_query_geometry = if align_with_map {
             translated_query_geometry
         } else {
-            projected = project_query_geometry(translated_query_geometry, projector, view.size());
+            projected =
+                project_query_geometry(query_geometry, translated_query_geometry, ground, projector, view.size());
             &projected
         };
         let transformed_size = if align_with_map { size * pixels_to_tile_units } else { size };
@@ -367,23 +430,33 @@ impl RenderLayer for RenderCircleLayer {
         );
         for ring in geometry.iter() {
             for point in ring {
-                if view.is_globe()
-                    && projector
-                        .project_as_drawn(
-                            &Point::new(
-                                f64::from(f32::from(point.x) + drawn_translation[0]),
-                                f64::from(f32::from(point.y) + drawn_translation[1]),
-                            ),
-                            0.0,
-                        )
-                        .occluded
-                {
+                let elevation = ground_height(ground, *point);
+                let drawn = Point::new(
+                    f64::from(f32::from(point.x) + drawn_translation[0]),
+                    f64::from(f32::from(point.y) + drawn_translation[1]),
+                );
+                if view.is_globe() && projector.project_as_drawn(&drawn, elevation).occluded {
                     continue;
                 }
+                let plane;
+                let transformed_query_geometry = if align_with_map && ground.is_some() {
+                    let at_elevation = plane_geometry(screen, elevation, view, projector);
+                    plane = FeatureIndex::translate_query_geometry(
+                        &at_elevation,
+                        *evaluated.circle_translate.uniform(),
+                        *evaluated.circle_translate_anchor.uniform(),
+                        view.angle() as f32,
+                        pixels_to_tile_units,
+                    )
+                    .unwrap_or(at_elevation);
+                    &plane
+                } else {
+                    viewport_query_geometry
+                };
                 let transformed_point =
-                    if align_with_map { *point } else { project_point(*point, projector, view.size()) };
+                    if align_with_map { *point } else { project_point(*point, elevation, projector, view.size()) };
 
-                let projected = projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), 0.0);
+                let projected = projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), elevation);
                 let mut adjusted_size = transformed_size;
                 let w = projected.signed_distance_from_camera;
                 let pitch_scale = &evaluated.circle_pitch_scale;

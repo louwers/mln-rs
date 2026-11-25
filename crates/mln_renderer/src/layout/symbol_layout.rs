@@ -1282,7 +1282,7 @@ fn add_quad(buffer: &mut Buffer, run: &RunInfo, quad: &SymbolQuad) -> usize {
         .extend(corners.map(|corner| SymbolBucket::layout_vertex(anchor, quad, corner, run.size, run.height_offset)));
     // Placement writes these before the quad draws; until then they agree
     // in count with the layout vertices.
-    buffer.dynamic_attribute_data.extend([SymbolBucket::dynamic_layout_attributes(anchor, 0.0); 4]);
+    buffer.dynamic_attribute_data.extend([SymbolBucket::dynamic_layout_attributes(anchor, 0.0, 0.0); 4]);
     buffer.opacity_attribute_data.extend([SymbolBucket::opacity_attributes(true, 1.0); 4]);
     let mut triangles = Indexed { indexes: &mut buffer.triangles, segments: &mut buffer.segments };
     triangles.add_keyed(buffer.attribute_data.get_mut(), first, run.sort_key, [[0, 1, 2], [1, 2, 3]])

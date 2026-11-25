@@ -247,6 +247,26 @@ macro_rules! base_and_height {
     };
 }
 
+/// The heights the extrusion's base and roof stand at, `baseZ` and
+/// `heightZ`: over terrain, raised by `in.ground_height`, the ground's under
+/// its polygon's centroid, as GL JS raises them, and its base 10 m lower
+/// where it is at the ground, so that it meets a slope; else `baseValue` and
+/// `heightValue`.
+macro_rules! stand {
+    () => {
+        r#"
+#ifdef TERRAIN
+    let ele = in.ground_height;
+    let baseZ = baseValue + ele - select(10.0, 0.0, baseValue > 0.0);
+    let heightZ = heightValue + ele;
+#else
+    let baseZ = baseValue;
+    let heightZ = heightValue;
+#endif
+"#
+    };
+}
+
 /// The pattern positions in the atlas, of the attributes or the tile props.
 macro_rules! patterns {
     () => {
@@ -302,7 +322,7 @@ macro_rules! wall {
     );
 
     let t = f32(in.position.y);
-    let z = select(baseValue, heightValue, t > 0.0);
+    let z = select(baseZ, heightZ, t > 0.0);
 
     out.position = projectTileFor3D(select(p2, p1, in.position.x == 0), z, projectionVector[globalIndex.value]);
 "#
@@ -325,6 +345,9 @@ struct VertexInput {
 #ifndef HAS_UNIFORM_u_height
     @location(4) height: vec2<f32>,
 #endif
+#ifdef TERRAIN
+    @location(10) ground_height: f32,
+#endif
 };
 "#,
         plain_declarations!(),
@@ -335,8 +358,9 @@ fn main(in: VertexInput) -> VertexOutput {
     let drawable = drawableVector[globalIndex.value];
 "#,
         base_and_height!(),
+        stand!(),
         r#"
-    out.position = projectTileFor3D(vec2<f32>(in.position), heightValue, projectionVector[globalIndex.value]);
+    out.position = projectTileFor3D(vec2<f32>(in.position), heightZ, projectionVector[globalIndex.value]);
 
 #ifdef OVERDRAW_INSPECTOR
     out.color = vec4<f32>(1.0, 1.0, 1.0, 1.0);
@@ -376,6 +400,9 @@ struct VertexInput {
 #ifndef HAS_UNIFORM_u_height
     @location(7) height: vec2<f32>,
 #endif
+#ifdef TERRAIN
+    @location(10) ground_height: f32,
+#endif
 };
 "#,
         plain_declarations!(),
@@ -387,6 +414,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let drawable = drawableVector[globalIndex.value];
 "#,
         base_and_height!(),
+        stand!(),
         wall!(),
         r#"
 #ifdef OVERDRAW_INSPECTOR
@@ -448,6 +476,9 @@ struct VertexInput {
 #ifndef HAS_UNIFORM_u_height
     height: vec2<f32>,
 #endif
+#ifdef TERRAIN
+    ground_height: f32,
+#endif
 };
 "#,
         plain_declarations!(),
@@ -456,6 +487,11 @@ struct VertexInput {
 // The bucket's vertices, two words each: the position's x and y in the
 // halves of the first, `decimals_ed`'s in those of the second.
 @group(0) @binding(7) var<storage, read> wallVertices: array<u32>;
+#ifdef TERRAIN
+// Over terrain, the height of the ground under each of the bucket's
+// vertices' polygon's centroid.
+@group(0) @binding(9) var<storage, read> wallHeights: array<f32>;
+#endif
 "#,
         wall_paint!(),
         r#"
@@ -479,6 +515,9 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     in.decimals_ed = vec2<u32>(decimals_ed & 0xffffu, decimals_ed >> 16u);
     in.next_outline_pos = vec2<i32>(i32(next_pos << 16u) >> 16u, i32(next_pos) >> 16u);
     in.next_decimals_ed = vec2<u32>(next_decimals_ed & 0xffffu, next_decimals_ed >> 16u);
+#ifdef TERRAIN
+    in.ground_height = wallHeights[wall];
+#endif
 
     // The wall's paint values are its outline vertex's.
     let paint_layout = drawable.paint_layout;
@@ -498,6 +537,7 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 #endif
 "#,
         base_and_height!(),
+        stand!(),
         wall!(),
         r#"
 #ifdef OVERDRAW_INSPECTOR
@@ -538,6 +578,9 @@ struct VertexInput {
 #ifndef HAS_UNIFORM_u_pattern_to
     @location(5) pattern_to: vec4<u32>,
 #endif
+#ifdef TERRAIN
+    @location(10) ground_height: f32,
+#endif
 };
 "#,
         pattern_declarations!(),
@@ -549,8 +592,9 @@ fn main(in: VertexInput) -> VertexOutput {
 "#,
         base_and_height!(),
         patterns!(),
+        stand!(),
         r#"
-    out.position = projectTileFor3D(vec2<f32>(in.position), heightValue, projectionVector[globalIndex.value]);
+    out.position = projectTileFor3D(vec2<f32>(in.position), heightZ, projectionVector[globalIndex.value]);
 
     out.lighting = lighting_of(vec3<f32>(0.0, 0.0, 1.0), 1.0, baseValue, heightValue);
     set_pattern(&out, drawable, patternFrom, patternTo, vec2<f32>(in.position));
@@ -584,6 +628,9 @@ struct VertexInput {
 #ifndef HAS_UNIFORM_u_pattern_to
     @location(8) pattern_to: vec4<u32>,
 #endif
+#ifdef TERRAIN
+    @location(10) ground_height: f32,
+#endif
 };
 "#,
         pattern_declarations!(),
@@ -596,6 +643,7 @@ fn main(in: VertexInput) -> VertexOutput {
 "#,
         base_and_height!(),
         patterns!(),
+        stand!(),
         wall!(),
         r#"
     // The pattern runs along the outline: p1's side is at the next vertex's

@@ -1,8 +1,9 @@
 // The depth that frames hand the host, and the projection that they report:
 // a fill extrusion's roof has the depth that the frame's projection gives
 // its points, on every backend, and the ground in front of it a 2D layer's,
-// between the projection's far depth and 1. A backend that this build or
-// machine lacks skips its cases.
+// between the projection's far depth and 1. Over terrain, the extrusion
+// stands on the ground, and the ground has the depth that the projection
+// gives it too. A backend that this build or machine lacks skips its cases.
 
 use glam::{DMat4, DVec4};
 use mln_map::{CameraOptions, CameraUpdate, MapMode};
@@ -14,20 +15,31 @@ use mln_runtime::{
 use mln_util::geo::{EdgeInsets, LatLng};
 use mln_util::size::Size;
 
-use crate::support::{eventually, wait};
+use crate::support::{eventually, serve_level_dem, wait};
 
 const SIZE: Size = Size { width: 64, height: 48 };
 /// The longitude of the extrusion's east wall: it covers the map west of it.
 const WALL: f64 = -74.0;
 /// The extrusion's height, in meters.
 const HEIGHT: f64 = 4.0;
+/// The height of [`serve_level_dem`]'s ground, in meters, which the
+/// extrusion stands on over terrain.
+const LEVEL_GROUND: f64 = 1000.0;
 
 /// An opaque fill, the ground, under a fill extrusion that covers the map
-/// west of `WALL`.
-fn style() -> String {
+/// west of `WALL`, over [`serve_level_dem`]'s terrain if `terrain`.
+fn style(terrain: bool) -> String {
+    let (terrain, dem) = if terrain {
+        (
+            r#""terrain":{"source":"dem"},"#,
+            r#""dem":{"type":"raster-dem","tiles":["custom://dem/{z}/{x}/{y}.png"],"maxzoom":0},"#,
+        )
+    } else {
+        ("", "")
+    };
     format!(
-        r##"{{"version":8,"transition":{{"duration":0,"delay":0}},
-        "sources":{{
+        r##"{{"version":8,"transition":{{"duration":0,"delay":0}},{terrain}
+        "sources":{{{dem}
           "block":{{"type":"geojson","data":{{"type":"Feature","properties":{{}},
             "geometry":{{"type":"Polygon","coordinates":[[[-74.1,40.6],[{WALL},40.6],[{WALL},40.8],[-74.1,40.8],[-74.1,40.6]]]}}}}}},
           "ground":{{"type":"geojson","data":{{"type":"Feature","properties":{{}},
@@ -41,15 +53,18 @@ fn style() -> String {
 }
 
 /// A map that looks at the wall from its east, with padding, roll, pitch
-/// and bearing.
-fn map_of(runtime: &Runtime) -> Map {
+/// and bearing, over [`serve_level_dem`]'s terrain if `terrain`.
+fn map_of(runtime: &Runtime, terrain: bool) -> Map {
+    if terrain {
+        serve_level_dem(runtime);
+    }
     let options = MapOptions {
         map: mln_map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();
     created.wait().unwrap();
-    wait(map.set_style_json(style()));
+    wait(map.set_style_json(style(terrain)));
     let camera = CameraOptions {
         center: Some(LatLng::new(40.7, WALL + 0.0001).unwrap()),
         zoom: Some(17.0),
@@ -130,8 +145,10 @@ fn ray_at(projection: &FrameProjection, x: u32, y: u32, z: f64) -> Point {
 
 /// Checks the depth that `depth_at` reads at each pixel, from the top left,
 /// against `projection`: the roof's where the ray meets it west of the wall,
-/// and a 2D layer's where it meets the ground east of the wall.
-fn check_depth(backend: &str, projection: &FrameProjection, depth_at: impl Fn(u32, u32) -> f64) {
+/// and a 2D layer's where it meets the ground east of the wall. Over terrain
+/// level at `terrain` meters, the extrusion stands on it, and the ground
+/// east of the wall has the depth that `projection` gives it.
+fn check_depth(backend: &str, projection: &FrameProjection, terrain: Option<f64>, depth_at: impl Fn(u32, u32) -> f64) {
     assert!(!projection.globe);
     assert!(projection.far_depth > 0.99 && projection.far_depth < 1.0, "{backend}: {projection:?}");
     let wall = (WALL + 180.0) / 360.0;
@@ -141,8 +158,9 @@ fn check_depth(backend: &str, projection: &FrameProjection, depth_at: impl Fn(u3
     for y in (1..SIZE.height).step_by(3) {
         for x in (1..SIZE.width).step_by(3) {
             let depth = depth_at(x, y);
-            let on_roof = ray_at(projection, x, y, HEIGHT);
-            let on_ground = ray_at(projection, x, y, 0.0);
+            let floor = terrain.unwrap_or(0.0);
+            let on_roof = ray_at(projection, x, y, floor + HEIGHT);
+            let on_ground = ray_at(projection, x, y, floor);
             if on_roof[0] < wall - margin {
                 let expected = depth_of(projection, on_roof);
                 assert!(
@@ -151,10 +169,18 @@ fn check_depth(backend: &str, projection: &FrameProjection, depth_at: impl Fn(u3
                 );
                 roof += 1;
             } else if on_roof[0] > wall + margin && on_ground[0] > wall + margin {
-                assert!(
-                    depth > projection.far_depth && depth < 1.0,
-                    "{backend}: the ground at ({x}, {y}) has depth {depth}, outside its layer's"
-                );
+                if terrain.is_some() {
+                    let expected = depth_of(projection, on_ground);
+                    assert!(
+                        (depth - expected).abs() < 2e-4,
+                        "{backend}: the terrain at ({x}, {y}) has depth {depth}, not {expected}"
+                    );
+                } else {
+                    assert!(
+                        depth > projection.far_depth && depth < 1.0,
+                        "{backend}: the ground at ({x}, {y}) has depth {depth}, outside its layer's"
+                    );
+                }
                 ground += 1;
             }
         }
@@ -419,7 +445,7 @@ mod vulkan {
             }),
         });
         let runtime = runtime();
-        let map = map_of(&runtime);
+        let map = map_of(&runtime, false);
         let target = RenderTarget::Borrowed { size: SIZE, ring, device };
         let session = attach(&map, target, AttachOptions::default());
         let (frame, result) = loaded_frame(&session);
@@ -431,7 +457,7 @@ mod vulkan {
         };
         assert_eq!(depths[frame.slot()].image.as_raw(), image);
         let depth = host.read_depth(depths[frame.slot()].image, format, vk::ImageLayout::TRANSFER_SRC_OPTIMAL, false);
-        check_depth("a Vulkan ring", &projection, |x, y| depth[(y * SIZE.width + x) as usize]);
+        check_depth("a Vulkan ring", &projection, None, |x, y| depth[(y * SIZE.width + x) as usize]);
         drop(frame);
         wait(session.detach());
     }
@@ -454,7 +480,7 @@ mod vulkan {
             keep_depth: true,
         };
         let runtime = runtime();
-        let map = map_of(&runtime);
+        let map = map_of(&runtime, false);
         let target = RenderTarget::Exported { size: SIZE, ring, device: Some(device) };
         let session = attach(&map, target, AttachOptions::default());
         let (frame, result) = loaded_frame(&session);
@@ -471,7 +497,7 @@ mod vulkan {
         assert_eq!(vk::ImageLayout::GENERAL.as_raw(), layout);
         let depth =
             host.read_depth(vk::Image::from_raw(image), vk::Format::from_raw(format), vk::ImageLayout::GENERAL, true);
-        check_depth("a Vulkan exported ring", &projection, |x, y| depth[(y * SIZE.width + x) as usize]);
+        check_depth("a Vulkan exported ring", &projection, None, |x, y| depth[(y * SIZE.width + x) as usize]);
         drop(frame);
         wait(session.detach());
     }
@@ -492,7 +518,7 @@ mod vulkan {
             keep_depth: false,
         };
         let runtime = runtime();
-        let map = map_of(&runtime);
+        let map = map_of(&runtime, false);
         let target = RenderTarget::Exported { size: SIZE, ring, device: Some(device) };
         let session = attach(&map, target, AttachOptions::default());
         let (frame, _) = loaded_frame(&session);
@@ -508,6 +534,21 @@ mod vulkan {
 #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
 #[test]
 fn a_webgpu_rings_depth_textures_hold_the_frames_depth() {
+    webgpu_ring_depth(false);
+}
+
+// Over terrain, the frame's projection is the one that the terrain's
+// surface and the extrusion standing on it write depth with.
+#[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+#[test]
+fn a_webgpu_rings_depth_over_terrain_holds_the_frames_depth() {
+    webgpu_ring_depth(true);
+}
+
+/// Checks the depth that a frame of a WebGPU ring holds, of the map over
+/// [`serve_level_dem`]'s terrain if `terrain`.
+#[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+fn webgpu_ring_depth(terrain: bool) {
     use crate::support::runtime;
 
     let Some(device) = device_of(mln_runtime::BackendType::WebGPU) else { return };
@@ -538,7 +579,7 @@ fn a_webgpu_rings_depth_textures_hold_the_frames_depth() {
         depth_textures: depths.clone(),
     });
     let runtime = runtime();
-    let map = map_of(&runtime);
+    let map = map_of(&runtime, terrain);
     let target = RenderTarget::Borrowed { size: SIZE, ring, device: device.clone() };
     let session = attach(&map, target, AttachOptions::default());
     let (frame, result) = loaded_frame(&session);
@@ -574,7 +615,8 @@ fn a_webgpu_rings_depth_textures_hold_the_frames_depth() {
     let data = buffer.slice(..).get_mapped_range().unwrap();
     let depth: Vec<f64> = data.as_chunks::<4>().0.iter().map(|bytes| f64::from(f32::from_le_bytes(*bytes))).collect();
     drop(data);
-    check_depth("a WebGPU ring", &projection, |x, y| depth[(y * SIZE.width + x) as usize]);
+    let ground = terrain.then_some(LEVEL_GROUND);
+    check_depth("a WebGPU ring", &projection, ground, |x, y| depth[(y * SIZE.width + x) as usize]);
     drop(frame);
     wait(session.detach());
 }
@@ -796,7 +838,7 @@ mod gl {
             depth_textures: depths.iter().map(|texture| texture.0.get()).collect(),
         });
         let runtime = runtime();
-        let map = map_of(&runtime);
+        let map = map_of(&runtime, false);
         let target = RenderTarget::Borrowed { size: SIZE, ring, device: host.device() };
         let session = attach(&map, target, AttachOptions::default());
         let (frame, result) = loaded_frame(&session);
@@ -806,7 +848,9 @@ mod gl {
         // reads the frame's depth does.
         let depth = host.read_depth(depths[frame.slot()]);
         // OpenGL's rows start at the bottom.
-        check_depth("an OpenGL ring", &projection, |x, y| depth[((SIZE.height - 1 - y) * SIZE.width + x) as usize]);
+        check_depth("an OpenGL ring", &projection, None, |x, y| {
+            depth[((SIZE.height - 1 - y) * SIZE.width + x) as usize]
+        });
         drop(frame);
         wait(session.detach());
     }
@@ -835,7 +879,7 @@ mod gl {
             keep_depth: true,
         };
         let runtime = runtime();
-        let map = map_of(&runtime);
+        let map = map_of(&runtime, false);
         let target = RenderTarget::Exported { size: SIZE, ring, device: Some(device) };
         let session = attach(&map, target, AttachOptions::default());
         let (frame, result) = loaded_frame(&session);
@@ -849,7 +893,7 @@ mod gl {
         };
         assert_eq!(glow::DEPTH24_STENCIL8, internal_format);
         let depth = host.read_depth(glow::NativeTexture(std::num::NonZeroU32::new(name).unwrap()));
-        check_depth("an OpenGL exported ring", &projection, |x, y| depth[(y * SIZE.width + x) as usize]);
+        check_depth("an OpenGL exported ring", &projection, None, |x, y| depth[(y * SIZE.width + x) as usize]);
         drop(frame);
         wait(session.detach());
     }

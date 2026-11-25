@@ -19,10 +19,10 @@ use mln_gfx::shaders::shader_defines::{
     ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE, ID_COLLISION_PLACED_VERTEX_ATTRIBUTE,
     ID_COLLISION_POS_VERTEX_ATTRIBUTE, ID_COLLISION_PROJECTION_UBO, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE,
     ID_COLLISION_TILE_PROPS_UBO, ID_PROJECTION_UBO, ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_DRAWABLE_UBO,
-    ID_SYMBOL_EVALUATED_PROPS_UBO, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE,
-    ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE,
-    ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
-    ID_SYMBOL_TILE_PROPS_UBO,
+    ID_SYMBOL_EVALUATED_PROPS_UBO, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, ID_SYMBOL_GROUND_DEPTH_TEXTURE,
+    ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE, ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE,
+    ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE,
+    ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, ID_SYMBOL_TILE_PROPS_UBO,
 };
 use mln_gfx::shaders::symbol_layer_ubo::{
     CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
@@ -56,7 +56,7 @@ use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
-use crate::gfx::vertices::TypedVertices;
+use crate::gfx::vertices::{SharedVertices, TypedVertices};
 use crate::layer_drawing::{
     BucketChanges, DrawDepth, DrawGroup, DrawList, DrawObjectsMut, DrawOrder, FrameDraw, KeptDraw, LayerDrawing,
     LayerDraws, TileMap, UniformWriter,
@@ -73,6 +73,7 @@ use crate::render_layer::{
 use crate::render_pass::RenderPass;
 use crate::render_source::{RenderSource, TileOrder};
 use crate::render_tile::{FrameTile, RenderTile};
+use crate::terrain::FrameGround;
 use crate::tile_matrix::{projection_data, to_projection_ubo};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -172,6 +173,7 @@ fn update_tile_attributes(
     set_layout_attributes(geometry, buffer, attribs);
     set_projected_pos_attribute(context, buffer, layer_id, attribs, &mut placed.projected);
     set_fade_opacity_attribute(context, buffer, attribs, &mut placed.opacity);
+    set_elevation_attribute(context, geometry, buffer, attribs, &mut placed.elevation);
     placed
 }
 
@@ -220,10 +222,44 @@ fn set_layout_attributes(geometry: &BucketGeometry, buffer: &Buffer, attribs: &m
         ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
         SharedAttribute::new(layout_data.clone(), AttributeDataType::UShort2, 24, layout_size),
     );
+    set_height_offset_attribute(layout_data, attribs);
+}
+
+/// Sets the symbols' heights to the layout vertices' `symbol-height-offset`s,
+/// of `layout_data`.
+fn set_height_offset_attribute(layout_data: SharedVertices, attribs: &mut VertexAttributeArray) {
+    let layout_size = size_of::<crate::buckets::symbol_bucket::SymbolLayoutVertex>() as u32;
     attribs.set_shared(
         ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE,
         SharedAttribute::new(layout_data, AttributeDataType::Float, 28, layout_size),
     );
+}
+
+/// Sets the symbols' heights to the heights placement gave them over the
+/// ground ([`Buffer::elevation_attribute_data`]), into `placed`, or, where
+/// it gave none, to their `symbol-height-offset`s.
+fn set_elevation_attribute(
+    context: &mut Context,
+    geometry: &BucketGeometry,
+    buffer: &Buffer,
+    attribs: &mut VertexAttributeArray,
+    placed: &mut Option<TypedVertices<f32>>,
+) {
+    let elevations = &buffer.elevation_attribute_data;
+    if !elevations.is_empty() {
+        set_placed_attribute(
+            context,
+            attribs,
+            ID_SYMBOL_HEIGHT_OFFSET_ATTRIBUTE,
+            elevations,
+            AttributeDataType::Float,
+            placed,
+        );
+    } else if placed.take().is_some()
+        && let Some(layout_data) = bucket_vertices(geometry, &buffer.attribute_data)
+    {
+        set_height_offset_attribute(layout_data, attribs);
+    }
 }
 
 /// Sets the dynamic layout vertices, which placement updates: the layer's
@@ -241,7 +277,7 @@ fn set_projected_pos_attribute(
         attribs,
         ID_SYMBOL_PROJECTED_POS_ATTRIBUTE,
         vertices,
-        AttributeDataType::Float3,
+        AttributeDataType::Float4,
         placed,
     );
 }
@@ -286,11 +322,13 @@ fn set_placed_attribute<V: bytemuck::Pod>(
 
 /// The vertices that placement lays out, which the draws of a tile that read
 /// the same attributes share, of their positions along lines or at variable
-/// anchors and of their opacities.
+/// anchors, of their opacities and of their heights.
 #[derive(Clone, Default)]
 struct PlacedVertices {
     projected: Option<TypedVertices<SymbolDynamicLayoutVertex>>,
     opacity: Option<TypedVertices<SymbolOpacityVertex>>,
+    /// The heights over the ground, where placement gives them.
+    elevation: Option<TypedVertices<f32>>,
 }
 
 /// A draw the layer keeps of a tile: the halo or the fill of the text or the
@@ -527,6 +565,7 @@ fn refresh_draw(
         }
         if refresh.opacity {
             set_fade_opacity_attribute(context, buffer, attrs, &mut draw.placed.opacity);
+            set_elevation_attribute(context, geometry, buffer, attrs, &mut draw.placed.elevation);
         }
         if refresh.paint
             && let Some(paint_props) = bucket.paint_properties.get(layer_id)
@@ -1002,17 +1041,22 @@ impl RenderSymbolLayer {
     }
 
     /// Makes the frame's draws of the layer's draws of `tiles` that show any
-    /// symbols, in `passes`, and of their collision boxes and circles, and
-    /// writes the buffers they read.
+    /// symbols, in `passes`, which hide behind the ground in front of them
+    /// where they draw with a variant that stands on terrain (`stands`), and
+    /// of their collision boxes and circles, and writes the buffers they
+    /// read.
     fn make_frame_draws(
         &mut self,
         gpu: &mut dyn Gpu,
         tiles: &[FrameTile<'_, Symbol>],
         passes: RenderPass,
+        stands: bool,
         paint_parameters: &mut PaintParameters<'_>,
     ) {
         let layer_id = self.base.style.base().id.as_str();
         let layer = &*self.values.evaluated;
+        let ground = paint_parameters.ground.clone().filter(|_| stands);
+        let depth = ground.as_deref().and_then(FrameGround::depth);
         for tile in tiles {
             let tile_id = tile.id();
             let Some(cached) = self.drawing.tiles.get_mut(&tile_id) else {
@@ -1020,12 +1064,15 @@ impl RenderSymbolLayer {
             };
             let bucket = tile.bucket().map(|bucket| bucket.bucket);
             debug_assert!(bucket.is_some() || cached.draws.is_empty());
-            for (index, draw) in cached.draws.iter().enumerate().filter(|(_, draw)| draw.visible) {
+            for (index, draw) in cached.draws.iter_mut().enumerate().filter(|(_, draw)| draw.visible) {
                 let Some(uniforms) =
                     bucket.and_then(|bucket| Self::uniforms(layer_id, layer, &tile_id, bucket, draw, paint_parameters))
                 else {
                     continue;
                 };
+                if let Some(depth) = depth {
+                    draw.objects.set_texture(ID_SYMBOL_GROUND_DEPTH_TEXTURE, Some(depth));
+                }
                 let frame_draw = FrameDraw { pass: passes, ..FrameDraw::new(Some(tile_id), draw.id) };
                 self.draw_list.push_part(frame_draw, index, uniforms);
             }
@@ -1142,10 +1189,14 @@ fn collision_vertex_attributes(context: &mut Context, buffer: &CollisionBuffer) 
         ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE,
         SharedAttribute::new(layout.clone(), AttributeDataType::Short2, 8, layout_stride),
     );
-    attrs.set_shared(
-        ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE,
-        SharedAttribute::new(layout, AttributeDataType::Float, 12, layout_stride),
-    );
+    // Over the ground, the heights placement gave the boxes.
+    let height = if buffer.elevations.is_empty() {
+        SharedAttribute::new(layout, AttributeDataType::Float, 12, layout_stride)
+    } else {
+        let elevations = copied_vertices(context, &buffer.elevations);
+        SharedAttribute::new(elevations, AttributeDataType::Float, 0, size_of::<f32>() as u32)
+    };
+    attrs.set_shared(ID_COLLISION_HEIGHT_OFFSET_VERTEX_ATTRIBUTE, height);
     attrs.set_shared(
         ID_COLLISION_PLACED_VERTEX_ATTRIBUTE,
         SharedAttribute::new(dynamic.clone(), AttributeDataType::UShort2, 0, dynamic_stride),
@@ -1164,6 +1215,12 @@ impl TypedLayer for RenderSymbolLayer {
     /// Symbols draw the lower of two tiles' overlapping symbols over the
     /// higher's.
     const TILE_ORDER: TileOrder = TileOrder::ByY;
+
+    /// Over terrain, the symbols stand on the ground under their anchors,
+    /// which placement gives them from the surface the frame drew, and hide
+    /// behind the ground in front.
+    const STANDS: bool = true;
+    const HIDES_BEHIND_GROUND: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -1516,7 +1573,7 @@ impl TypedLayer for RenderSymbolLayer {
         }
 
         self.renderable_segments = renderable_segments;
-        self.make_frame_draws(gpu, render_tiles, passes, paint_parameters);
+        self.make_frame_draws(gpu, render_tiles, passes, symbol_projection_variant.stands(), paint_parameters);
     }
 
     /// Collects the symbol buckets of the tiles the layer places, and of

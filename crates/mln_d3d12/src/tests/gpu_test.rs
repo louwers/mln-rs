@@ -131,7 +131,7 @@ fn every_program_compiles_for_gpu() {
     let mut gpu = gpu();
     let parameters = ProgramParameters::new(1.0, false);
     for &(program, _) in BUILT_INS {
-        for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
+        for &variant in ProjectionVariant::of(program) {
             for uniforms in [&[][..], program.properties] {
                 let key = program.variant_key(&parameters, uniforms, variant);
                 if let Err(error) = gpu.create_shader(&key) {

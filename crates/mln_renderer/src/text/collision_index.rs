@@ -12,7 +12,7 @@ use mln_util::intersection_tests::polygon_intersects_polygon;
 use crate::buckets::symbol_bucket::{PlacedSymbol, PlacedSymbolPools};
 use crate::geometry::feature_index::IndexedSubfeature;
 use crate::layout::symbol_projection::{
-    LabelPlaneProjector, LineLabel, LinePlacer, PlacedGlyph, TileDistance, tile_skew_vectors,
+    LabelPlaneProjector, LineLabel, LinePlacer, PlacedGlyph, SymbolHeights, TileDistance, tile_skew_vectors,
 };
 use crate::text::collision_feature::{CollisionBox, CollisionFeature};
 use crate::text::collision_grid::{Aabb, Grid, Shape};
@@ -129,6 +129,8 @@ struct ProjectedBox {
 pub(crate) struct PartCollision<'a> {
     pub(crate) tile_projector: &'a TileProjector<'a>,
     pub(crate) label_plane: &'a LabelPlaneProjector<'a>,
+    /// What the symbols stand on.
+    pub(crate) heights: SymbolHeights<'a>,
     /// `*-translate`, in tile units.
     pub(crate) translation: Vec2,
     /// Tile units to pixels at the tile's own zoom.
@@ -342,9 +344,12 @@ impl CollisionIndex {
         let Some(box_) = boxes.first() else {
             return PlacedFeatureResult::default();
         };
-        let elevation = run.symbol.height_offset;
-        let projected_point =
-            self.project_and_get_perspective_ratio(part.tile_projector, box_.anchor + part.translation, elevation);
+        let anchor = box_.anchor + part.translation;
+        // The symbol stands on the ground under its anchor, which
+        // `*-translate` moves on screen only, and a pitched box's corners
+        // stand at its anchor's height, as the shaders draw the symbol.
+        let elevation = part.heights.at(box_.anchor, run.symbol.height_offset);
+        let projected_point = self.project_and_get_perspective_ratio(part.tile_projector, anchor, elevation);
         let mut occluded = projected_point.occluded;
         let collision_boundaries = if part.pitch_with_map || part.rotate_with_map {
             let tile_to_viewport = part.pixel_ratio * projected_point.perspective_ratio;
@@ -386,8 +391,9 @@ impl CollisionIndex {
     ) -> PlacedFeatureResult {
         let symbol = run.symbol;
         let tile_unit_anchor_point = symbol.anchor_point;
-        // Line labels are never raised.
-        let anchor = self.project_and_get_perspective_ratio(part.tile_projector, tile_unit_anchor_point, 0.0);
+        // Line labels stand on the ground, never higher.
+        let elevation = part.heights.at(tile_unit_anchor_point, 0.0);
+        let anchor = self.project_and_get_perspective_ratio(part.tile_projector, tile_unit_anchor_point, elevation);
         if anchor.occluded {
             return PlacedFeatureResult { placed: false, offscreen: false, occluded: true };
         }
@@ -404,9 +410,9 @@ impl CollisionIndex {
         } else {
             run.font_size
         };
-        let first_and_last_glyph = LinePlacer::new(part.label_plane)
-            .begin(LineLabel::new(symbol, run.pools), font_size)
-            .first_and_last_glyph(false);
+        let mut placer = LinePlacer::new(part.label_plane);
+        let mut label = placer.begin(LineLabel::new(symbol, run.pools), font_size);
+        let first_and_last_glyph = label.first_and_last_glyph(false);
 
         let tile_to_viewport = anchor.perspective_ratio * part.pixel_ratio;
         // Translates line geometry to tile units, so it takes the scale but
@@ -445,7 +451,11 @@ impl CollisionIndex {
                 previous_center = None;
                 continue;
             }
-            let center = self.project_point_with_projector(part.tile_projector, circle.anchor + part.translation);
+            // The circle stands on the label's path, at its height there,
+            // as its glyphs are laid out.
+            let height = label.line_height(circle.signed_distance_from_anchor);
+            let center =
+                self.project_point_with_projector(part.tile_projector, circle.anchor + part.translation, height);
             let radius = (circle.x2 - circle.x1) / 2.0 * tile_to_viewport;
             // Circles closer than √2 radii to the last one placed are skipped,
             // which thins them as much as can be with small gaps, unless it is
@@ -559,7 +569,7 @@ impl CollisionIndex {
         result
     }
 
-    /// Projects `point`, `elevation` meters above the ground, to the
+    /// Projects `point`, `elevation` meters above sea level, to the
     /// viewport.
     fn project_and_get_perspective_ratio(
         &self,
@@ -590,8 +600,11 @@ impl CollisionIndex {
         }
     }
 
-    fn project_point_with_projector(&self, tile_projector: &TileProjector<'_>, point: Vec2) -> Vec2 {
-        let projected = tile_projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), 0.0);
+    /// Projects `point`, `elevation` meters above sea level, to the
+    /// viewport.
+    fn project_point_with_projector(&self, tile_projector: &TileProjector<'_>, point: Vec2, elevation: f32) -> Vec2 {
+        let projected =
+            tile_projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), f64::from(elevation));
         let size = self.view.size();
         let viewport_padding = f64::from(self.viewport_padding);
         Vec2::new(

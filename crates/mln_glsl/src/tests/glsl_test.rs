@@ -32,6 +32,7 @@ use mln_gfx::shaders::layer_composite_ubo::LayerCompositeUBO;
 use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
 use mln_gfx::shaders::line_layer_ubo::{LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineTilePropsUnionUBO};
 use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::programs::{self, STANDING};
 use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
@@ -81,8 +82,8 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
     use mln_gfx::shaders::programs::{
-        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_PROBE,
-        VERTEX_TEXEL,
+        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_DEPTH,
+        TERRAIN_PROBE, VERTEX_TEXEL,
     };
     // The terrain shows its drapes, where the draped layers count their
     // draws.
@@ -94,6 +95,7 @@ fn every_layer_program_shows_the_overdraw_inspector() {
         &SKY,
         &ATMOSPHERE,
         &TERRAIN,
+        &TERRAIN_DEPTH,
         &VERTEX_TEXEL,
         &TERRAIN_PROBE,
     ];
@@ -233,6 +235,7 @@ fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
             (LayerUniform(ID_FILL_EXTRUSION_PROPS_UBO), size_of::<FillExtrusionPropsUBO>()),
             (DrawableVertex(ID_FILL_EXTRUSION_WALL_VERTICES), size_of::<u32>()),
             (DrawableVertex(ID_FILL_EXTRUSION_WALL_PAINT), size_of::<f32>()),
+            (DrawableVertex(ID_FILL_EXTRUSION_WALL_HEIGHTS), size_of::<f32>()),
         ],
         "FillExtrusionPatternShader" | "FillExtrusionPatternInstancedShader" | "FillExtrusionPatternWallShader" => {
             vec![
@@ -259,6 +262,11 @@ fn buffers(program: &Program) -> Vec<(Buffer, usize)> {
             (LayerStorage(ID_TERRAIN_LIGHT_TILE_UBO), size_of::<HillshadeTilePropsUBO>()),
             (LayerUniform(ID_TERRAIN_PROPS_UBO), size_of::<TerrainSurfaceUBO>()),
             (LayerUniform(ID_TERRAIN_LIGHT_UBO), size_of::<HillshadeEvaluatedPropsUBO>()),
+        ],
+        "TerrainDepthShader" => vec![
+            (LayerStorage(ID_TERRAIN_DRAWABLE_UBO), size_of::<TerrainDrawableUBO>()),
+            projection,
+            (LayerUniform(ID_TERRAIN_PROPS_UBO), size_of::<TerrainSurfaceUBO>()),
         ],
         "TerrainProbeShader" => vec![(LayerUniform(ID_TERRAIN_PROPS_UBO), size_of::<TerrainSurfaceUBO>())],
         "HillshadeShader" => vec![
@@ -451,7 +459,18 @@ fn resources_are_in_the_descriptor_set_layouts() {
                     fail(format!("push constants of {push_constants:?} bytes, not {expected_push_constants:?}"));
                 }
             }
-            if declared != table {
+            // A variant that doesn't stand on terrain reads none of the
+            // ground's depth, which the symbols read in a slot of their own.
+            let symbols = [&programs::SYMBOL_ICON, &programs::SYMBOL_SDF, &programs::SYMBOL_TEXT_AND_ICON];
+            let depth =
+                if symbols.contains(&program) { ID_SYMBOL_GROUND_DEPTH_TEXTURE } else { ID_GROUND_DEPTH_TEXTURE };
+            let ground = [depth].map(image_texture_binding);
+            let expected: BTreeSet<u32> = if variant.projection.stands() || !STANDING.contains(&program) {
+                table.clone()
+            } else {
+                table.iter().copied().filter(|binding| !ground.contains(binding)).collect()
+            };
+            if declared != expected {
                 failures.push(format!(
                     "{} ({}): textures at {declared:?}, the table has {table:?}",
                     program.name, variant.name
@@ -588,6 +607,19 @@ fn all_attributes(source: &ShaderSource) -> impl Iterator<Item = &AttributeInfo>
 /// out from the position.
 const UNREAD_ATTRIBUTES: &[(&str, usize)] = &[("ColorReliefShader", 1)];
 
+/// The attributes only the variants that stand on terrain read, by shader
+/// and attribute id: the heights of the ground under their points.
+const STANDING_ATTRIBUTES: &[(&str, usize)] = &[
+    ("CircleShader", ID_CIRCLE_GROUND_HEIGHT_VERTEX_ATTRIBUTE),
+    ("HeatmapShader", ID_HEATMAP_GROUND_HEIGHT_VERTEX_ATTRIBUTE),
+    ("FillExtrusionShader", ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
+    ("FillExtrusionInstancedShader", ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
+    ("FillExtrusionWallShader", ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
+    ("FillExtrusionPatternShader", ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
+    ("FillExtrusionPatternInstancedShader", ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
+    ("FillExtrusionPatternWallShader", ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE),
+];
+
 // The inputs of a vertex stage are the vertex and instance attributes of the
 // shader's tables, at the locations of their indices and in the types that
 // read their formats. With a property as a uniform, the stage reads a subset
@@ -599,8 +631,12 @@ fn vertex_inputs_are_the_attribute_tables() {
         let indices: BTreeSet<usize> = all_attributes(source).map(|attr| attr.index).collect();
         assert_eq!(indices.len(), all_attributes(source).count(), "{}: attribute indices repeat", program.name);
         for variant in variants(program, true) {
+            let unread = |attr: &&AttributeInfo| {
+                UNREAD_ATTRIBUTES.contains(&(program.name, attr.index))
+                    || (!variant.projection.stands() && STANDING_ATTRIBUTES.contains(&(program.name, attr.id)))
+            };
             let table: BTreeMap<u32, (ScalarKind, u32)> = all_attributes(source)
-                .filter(|attr| !UNREAD_ATTRIBUTES.contains(&(program.name, attr.index)))
+                .filter(|attr| !unread(attr))
                 .map(|attr| (attr.index as u32, input_type(attr.data_type)))
                 .collect();
             let inputs: BTreeMap<u32, (ScalarKind, u32)> =

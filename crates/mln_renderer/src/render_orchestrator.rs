@@ -37,7 +37,7 @@ use crate::layers::render_custom_layer::EndedHosts;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
-use crate::render_layer::{Atlases, FrameSourceTiles, LayerSource, LayerUpdateParameters, RenderLayer};
+use crate::render_layer::{Atlases, FrameSourceTiles, LayerParts, LayerSource, LayerUpdateParameters, RenderLayer};
 use crate::render_pass::RenderPass;
 use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
 use crate::render_tile::{FoundTile, RenderTile};
@@ -1004,6 +1004,7 @@ impl RenderOrchestrator {
                 *layer,
                 longitude,
                 &update_parameters.view,
+                self.terrain.ground().map(|ground| &**ground),
                 &mut self.tile_store,
             );
             if continuous {
@@ -1037,7 +1038,12 @@ impl RenderOrchestrator {
             // that wait for placements to fade their symbols out. Until it
             // may, the frame says when, rather than asking for frames that
             // would show the same.
-            let inputs = PlacementInputs::new(update_parameters, &layers_need_placement, &self.tile_store);
+            let inputs = PlacementInputs::new(
+                update_parameters,
+                self.terrain.ground(),
+                &layers_need_placement,
+                &self.tile_store,
+            );
             let stale = self.placement_controller.is_stale(&inputs) || self.tile_store.has_fading_tiles();
             let next_placement_at = self
                 .placement_controller
@@ -1066,7 +1072,12 @@ impl RenderOrchestrator {
                 // queries don't find its symbols.
                 frame.placement_changed = self.placement_controller.reset();
             } else {
-                let inputs = PlacementInputs::new(update_parameters, &layers_need_placement, &self.tile_store);
+                let inputs = PlacementInputs::new(
+                    update_parameters,
+                    self.terrain.ground(),
+                    &layers_need_placement,
+                    &self.tile_store,
+                );
                 let mut placement = Placement::create(Arc::new(inputs), update_parameters.time_point, None);
                 placement.collect_placed_symbol_data(self.placed_symbol_data_collected);
                 placement.place(&mut self.tile_store);
@@ -1341,7 +1352,9 @@ impl RenderOrchestrator {
 
     /// Makes the draws of the layers the frame draws, of the terrain, and of
     /// the sky and globe depth passes. Over terrain, the layers that drape
-    /// over it make theirs in the terrain's drapes rather than in the frame.
+    /// over it make theirs in the terrain's drapes rather than in the frame,
+    /// and those that stand on it stand on the frame's ground, whose depth
+    /// draws first where a layer hides behind it.
     pub(crate) fn update_layer_draws(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -1349,6 +1362,10 @@ impl RenderOrchestrator {
         paint_parameters: &mut PaintParameters<'_>,
         frame: &Frame,
     ) {
+        let layers = || frame.layers.keys().map(|&index| &*self.layers[index as usize]);
+        let stands = frame.terrain && layers().any(LayerParts::stands);
+        let hides = layers().any(LayerParts::hides_behind_ground);
+        paint_parameters.ground = self.terrain.update_ground(paint_parameters, stands, hides);
         // Whether a 3D layer draws before the terrain's first surface, which
         // writes the depth of the ground and of the planet.
         let mut needs_depth = false;
@@ -1426,7 +1443,8 @@ impl RenderOrchestrator {
         let needs_globe_depth = (needs_depth || self.sky_pass.has_atmosphere()) && !surface;
         self.globe_depth_pass.update(gpu, context, state, update_parameters, needs_globe_depth);
         let fog = crate::terrain::terrain_fog(frame.sky.as_ref(), paint_parameters.view);
-        self.terrain.update_draws(gpu, paint_parameters, &self.stacks, fog, needs_depth && surface);
+        let ground = paint_parameters.ground.as_ref().is_some_and(|ground| ground.depth().is_some());
+        self.terrain.update_draws(gpu, paint_parameters, &self.stacks, fog, (needs_depth && surface, ground));
     }
 
     /// The render layer at `index` in the drawing order.
@@ -1553,10 +1571,10 @@ impl RenderOrchestrator {
 
         let proj_matrix = self.view.projection_matrix_with(self.view.near_z(), false);
 
-        // Over terrain, a layer that drapes is found on the ground the frame
-        // drew, where the query's lines of sight meet it; the others draw
-        // flat, at sea level, and are found there.
-        let ground = self.terrain.ground().map(|ground| -> &dyn mln_map_types::Elevation { ground });
+        // Over terrain, a layer that drapes or stands on the ground is found
+        // on the ground the frame drew, where the query's lines of sight
+        // meet it; the others draw flat, at sea level, and are found there.
+        let ground = self.terrain.ground().map(|ground| &**ground);
         // Traced once for every source. Symbols are found where they were
         // placed, on the screen, so they take the geometry as it is.
         let traced = crate::geometry::feature_index::query_screen_geometry(&self.view, geometry, ground.is_some());
@@ -1564,7 +1582,7 @@ impl RenderOrchestrator {
         for on_ground in [false, true] {
             let layers: crate::geometry::feature_index::QueryLayers<'_> = filtered_layers
                 .iter()
-                .filter(|(_, layer)| (ground.is_some() && layer.drapes()) == on_ground)
+                .filter(|(_, layer)| (ground.is_some() && (layer.drapes() || layer.stands())) == on_ground)
                 .map(|(id, layer)| (id.clone(), *layer))
                 .collect();
             if layers.is_empty() {

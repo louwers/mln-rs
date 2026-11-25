@@ -70,6 +70,9 @@ pub const ID_CIRCLE_OPACITY_VERTEX_ATTRIBUTE: usize = 4;
 pub const ID_CIRCLE_STROKE_COLOR_VERTEX_ATTRIBUTE: usize = 5;
 pub const ID_CIRCLE_STROKE_WIDTH_VERTEX_ATTRIBUTE: usize = 6;
 pub const ID_CIRCLE_STROKE_OPACITY_VERTEX_ATTRIBUTE: usize = 7;
+/// Over terrain, the height of the ground under the circle's center, in
+/// meters with the exaggeration: the terrain variant's.
+pub const ID_CIRCLE_GROUND_HEIGHT_VERTEX_ATTRIBUTE: usize = 8;
 
 pub const ID_FILL_POS_VERTEX_ATTRIBUTE: usize = 0;
 // Data driven
@@ -123,7 +126,14 @@ pub const FILL_EXTRUSION_LAYER_UBO_COUNT: usize = ID_FILL_EXTRUSION_PROPS_UBO + 
 // buffers, whose ids follow the uniform buffers'.
 pub const ID_FILL_EXTRUSION_WALL_VERTICES: usize = MAX_UBO_COUNT_PER_SHADER;
 pub const ID_FILL_EXTRUSION_WALL_PAINT: usize = MAX_UBO_COUNT_PER_SHADER + 1;
+/// Over terrain, the height of the ground under each of the bucket's
+/// vertices' polygon's centroid, which the pulled walls read by vertex.
+pub const ID_FILL_EXTRUSION_WALL_HEIGHTS: usize = MAX_UBO_COUNT_PER_SHADER + 2;
 pub const ID_FILL_EXTRUSION_IMAGE_TEXTURE: usize = 0;
+/// Over terrain, the height of the ground under the centroid of a vertex's
+/// polygon, in meters with the exaggeration, which the extrusion stands on:
+/// the terrain variants'.
+pub const ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE: usize = 10;
 pub const ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE: usize = 1;
 /// `MLN_USE_FILL_EXTRUSION_INSTANCING`
@@ -177,6 +187,14 @@ pub const ID_TERRAIN_DEM_TEXTURE: usize = 2;
 /// The tile's drape, which the fragment stage samples.
 pub const ID_TERRAIN_DRAPE_TEXTURE: usize = 1;
 
+// --- the ground that the terrain variants of the programs that hide behind
+// it read (`ProjectionVariant::stands`), in the texture slot the programs
+// keep free for it.
+/// The ground's depth: each pixel's eye distance to the nearest ground drawn
+/// there, the bits of an `f32`, least significant byte first, in an RGBA8
+/// texel; 0 where none is.
+pub const ID_GROUND_DEPTH_TEXTURE: usize = 1;
+
 // --- terrain probe (port-only): the conformance case's probes of the height
 // rule, which read the terrain's props and DEM texture.
 /// Where a probe draws, in clip x and y, then where it reads the height, in
@@ -206,6 +224,9 @@ pub const ID_HEATMAP_POS_VERTEX_ATTRIBUTE: usize = 0;
 // Data driven
 pub const ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE: usize = 1;
 pub const ID_HEATMAP_RADIUS_VERTEX_ATTRIBUTE: usize = 2;
+/// Over terrain, the height of the ground under the kernel's center, in
+/// meters with the exaggeration: the terrain variant's.
+pub const ID_HEATMAP_GROUND_HEIGHT_VERTEX_ATTRIBUTE: usize = 3;
 
 pub const ID_HILLSHADE_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
 pub const ID_HILLSHADE_TILE_PROPS_UBO: usize = ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO; // SSBO
@@ -242,6 +263,9 @@ pub const ID_COLLISION_PROJECTION_UBO: usize = ID_PROJECTION_UBO; // packed
 pub const COLLISION_UBO_COUNT: usize = ID_COLLISION_TILE_PROPS_UBO + 1; // packed
 pub const ID_SYMBOL_IMAGE_TEXTURE: usize = 0;
 pub const ID_SYMBOL_IMAGE_ICON_TEXTURE: usize = 1;
+/// The ground's depth, as [`ID_GROUND_DEPTH_TEXTURE`], in the slot that the
+/// symbols' own textures leave free: symbols read no DEM.
+pub const ID_SYMBOL_GROUND_DEPTH_TEXTURE: usize = 2;
 pub const ID_COLLISION_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE: usize = 1;
 pub const ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE: usize = 2;

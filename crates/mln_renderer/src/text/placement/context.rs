@@ -12,9 +12,10 @@ use mln_util::constants::{EXTENT, TILE_SIZE_D};
 use mln_vec_map::VecMap;
 
 use crate::buckets::symbol_bucket::{SymbolBucket, ZoomEvaluatedSize, symbols_by_viewport_y};
-use crate::layout::symbol_projection::LabelPlaneProjector;
+use crate::layout::symbol_projection::{LabelPlaneProjector, SymbolHeights};
 use crate::render_layer::{BucketPlacementData, PlacedTile, SymbolTranslate};
 use crate::render_tile::RenderTile;
+use crate::terrain::TerrainElevation;
 use crate::text::collision_index::{CollisionBoundaries, OverlapMode, PartCollision};
 
 /// The collision groups of the sources: with cross-source collisions, every
@@ -94,6 +95,8 @@ pub(crate) struct PlacementContext<'a> {
     pub(crate) tile_projector: TileProjector<'a>,
     text_plane: LabelPlaneProjector<'a>,
     icon_plane: LabelPlaneProjector<'a>,
+    /// What the bucket's symbols stand on.
+    heights: SymbolHeights<'a>,
     // Labels collide where `*-translate` puts them, line labels' circles
     // included.
     text_translation: Vec2,
@@ -119,10 +122,13 @@ pub(crate) struct PlacementContext<'a> {
 }
 
 impl<'a> PlacementContext<'a> {
+    /// The context for placing `bucket`, `data`'s bucket, seen from `view`,
+    /// its symbols standing on `ground` where terrain draws.
     pub(crate) fn new(
         data: &'a BucketPlacementData,
         bucket: &'a SymbolBucket,
         view: &'a View,
+        ground: Option<&'a TerrainElevation>,
         placement_zoom: f32,
         options: BucketOptions,
     ) -> Self {
@@ -144,8 +150,9 @@ impl<'a> PlacementContext<'a> {
         let icon_translation = translation(&tile.id, &data.icon_translate, view, screen_space);
         let projection = if screen_space { without_horizon(tile.projection) } else { tile.projection };
         let tile_projector = TileProjector::with_data(view, &tile.id, projection);
+        let heights = SymbolHeights::new(ground, tile.id, layout);
         let plane = |pitch, rotate, translation| {
-            LabelPlaneProjector::new(&tile_projector, pitch, rotate, pixels_to_tile_units, translation)
+            LabelPlaneProjector::new(&tile_projector, heights, pitch, rotate, pixels_to_tile_units, translation)
         };
 
         let text_overlap_mode = OverlapMode::text(layout);
@@ -165,6 +172,7 @@ impl<'a> PlacementContext<'a> {
             pitch_text_with_map,
             text_plane: plane(pitch_text_with_map, rotate_text_with_map, text_translation),
             icon_plane: plane(pitch_icon_with_map, rotate_icon_with_map, icon_translation),
+            heights,
             tile_projector,
             text_translation,
             icon_translation,
@@ -211,6 +219,7 @@ impl<'a> PlacementContext<'a> {
         PartCollision {
             tile_projector: &self.tile_projector,
             label_plane,
+            heights: self.heights,
             translation,
             pixel_ratio: self.pixel_ratio,
             scale: self.scale,

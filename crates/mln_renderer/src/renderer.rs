@@ -655,8 +655,8 @@ impl Encoder {
         // size, which the draw groups' count sets, and custom layers record
         // their work with the projection that the frame's result reports.
         let depth_range_size = draw_groups.depth_range_size();
-        let frame_projection =
-            frame_projection::compute(&frame.transform, depth_range_size, parameters.context.caps().clip_depth);
+        let clip_depth = parameters.context.caps().clip_depth;
+        let frame_projection = frame_projection::compute(&frame.transform, depth_range_size, clip_depth, frame.terrain);
         parameters.custom_layer_frame = Some(CustomLayerFrame {
             view: state.map_view(pixel_ratio),
             projection: frame_projection,
@@ -783,6 +783,12 @@ fn draw(
     for &index in frame.layers.keys() {
         orchestrator.layer_mut(index as usize).prerender(gpu, parameters);
     }
+
+    // The ground's depth, which the layers that stand on terrain hide
+    // behind, in a pass of its own.
+    parameters.pass = RenderPass::Translucent;
+    parameters.depth_range_size = depth_range_size;
+    orchestrator.terrain().render_ground(gpu, parameters);
 
     // The 3D pass: the 3D layers draw bottom to top. No pass is open, so
     // the draw groups draw nothing but into their own targets.

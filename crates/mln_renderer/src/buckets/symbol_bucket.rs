@@ -76,7 +76,10 @@ pub(crate) struct SymbolLayoutVertex {
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub(crate) struct SymbolDynamicLayoutVertex {
-    pub(crate) a1: [f32; 3],
+    /// Where the glyph draws, its angle, and, for a label along a line
+    /// pitched with the map, the height above sea level, in meters, that
+    /// the shaders raise the glyph to.
+    pub(crate) a1: [f32; 4],
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
@@ -328,6 +331,12 @@ pub(crate) struct Buffer {
     pub(crate) layer_dynamic_attribute_data: BTreeMap<String, Vec<SymbolDynamicLayoutVertex>>,
     #[wire(with = "pod")]
     pub(crate) opacity_attribute_data: Vec<SymbolOpacityVertex>,
+    /// The height above sea level, in meters, of each vertex's symbol, where
+    /// the placement's symbols stand on the ground over terrain: the ground
+    /// under the symbol's anchor and its `symbol-height-offset`. Empty
+    /// otherwise, where the layout vertices' offsets are the heights.
+    #[wire(skip)]
+    pub(crate) elevation_attribute_data: Vec<f32>,
     /// Three indices per triangle.
     #[wire(with = "pod")]
     pub(crate) triangles: Vec<u16>,
@@ -412,6 +421,11 @@ pub(crate) struct CollisionBuffer {
     pub(crate) vertices: Vec<CollisionBoxLayoutVertex>,
     #[wire(with = "pod")]
     pub(crate) dynamic_vertices: Vec<CollisionBoxDynamicVertex>,
+    /// The height above sea level, in meters, of each box vertex's symbol,
+    /// as [`Buffer::elevation_attribute_data`]; empty where its layout
+    /// vertices' offsets are the heights, and for circles.
+    #[wire(skip)]
+    pub(crate) elevations: Vec<f32>,
     pub(crate) segments: Vec<SegmentBase>,
     /// `lines` (box buffers: 2 per line) or `triangles` (circle buffers: 3
     /// per triangle).
@@ -705,8 +719,12 @@ impl SymbolBucket {
     }
 
     #[must_use]
-    pub(crate) fn dynamic_layout_attributes(anchor_point: Vec2, label_angle: f32) -> SymbolDynamicLayoutVertex {
-        SymbolDynamicLayoutVertex { a1: [anchor_point.x, anchor_point.y, label_angle] }
+    pub(crate) fn dynamic_layout_attributes(
+        anchor_point: Vec2,
+        label_angle: f32,
+        height: f32,
+    ) -> SymbolDynamicLayoutVertex {
+        SymbolDynamicLayoutVertex { a1: [anchor_point.x, anchor_point.y, label_angle, height] }
     }
 
     #[must_use]

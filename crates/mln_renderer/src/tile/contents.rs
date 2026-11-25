@@ -460,16 +460,18 @@ impl GeometryContents {
     }
 
     /// Adds the rendered features of tile `id` in `query_geometry` to
-    /// `result`.
+    /// `result`. Over `ground`, where the query's `screen` points meet it,
+    /// the features of layers that stand on it are found where they stand.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the results, tile, query geometry, camera, layers, options, global and feature state and projection of a feature query"
+        reason = "the results, tile, query geometry, screen points and ground, camera, layers, options, global and feature state and projection of a feature query"
     )]
     pub(crate) fn query_rendered_features(
         &self,
         id: &OverscaledTileID,
         result: &mut QueryResults,
         query_geometry: &mln_style::feature::GeometryCoordinates,
+        (screen, ground): (&[mln_util::geo::ScreenCoordinate], Option<&crate::terrain::TerrainElevation>),
         view: &mln_map_types::View,
         layers: &QueryLayers<'_>,
         options: &RenderedQueryOptions,
@@ -492,6 +494,8 @@ impl GeometryContents {
         let scale = 2f64.powf(view.zoom() - f64::from(id.overscaled_z));
         let region = QueryRegion {
             geometry: query_geometry,
+            screen,
+            ground: ground.map(|ground| crate::terrain::TileGround::new(ground, id.to_unwrapped())),
             view,
             projector: &projector,
             pixels_to_tile_units: (f64::from(mln_util::constants::EXTENT) / tile_size / scale) as f32,

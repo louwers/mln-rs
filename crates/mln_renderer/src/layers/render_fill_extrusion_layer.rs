@@ -19,6 +19,11 @@
 // roofs read, by the vertex's index. A layer with a pattern draws instances
 // there too.
 //
+// Over terrain, each extrusion stands on the ground under its polygon's
+// centroid: the tile keeps that height for each of its bucket's vertices,
+// which the roofs and instanced walls read as an attribute, the walls'
+// quads in a copy four times over, and the pulled walls by index.
+//
 // A translucent layer blends only its nearest surface over each pixel. Where
 // the layer composite's texture can draw with the frame's depth, the layer
 // draws into it once, opaque, and composites at its opacity. Elsewhere, and
@@ -38,11 +43,12 @@ use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
     ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_DRAWABLE_UBO, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE,
-    ID_FILL_EXTRUSION_IMAGE_TEXTURE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE,
-    ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE,
-    ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO, ID_FILL_EXTRUSION_TILE_PROPS_UBO,
-    ID_FILL_EXTRUSION_WALL_PAINT, ID_FILL_EXTRUSION_WALL_VERTICES, ID_PROJECTION_UBO,
+    ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_DRAWABLE_UBO, ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE,
+    ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_IMAGE_TEXTURE,
+    ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE,
+    ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_PROPS_UBO,
+    ID_FILL_EXTRUSION_TILE_PROPS_UBO, ID_FILL_EXTRUSION_WALL_HEIGHTS, ID_FILL_EXTRUSION_WALL_PAINT,
+    ID_FILL_EXTRUSION_WALL_VERTICES, ID_PROJECTION_UBO,
 };
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::View;
@@ -50,7 +56,7 @@ use mln_style::layer::LayerStyle;
 use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionPaintProperties;
 use mln_style::types::{AlignmentType, LayerBlendType};
-use mln_tile_id::OverscaledTileID;
+use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::clip_depth::ClipDepthRange;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::error::Error;
@@ -90,6 +96,7 @@ use crate::render_light::EvaluatedLight;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
+use crate::terrain::{FrameGround, GroundHeights, height_attribute};
 use crate::tile_matrix::{projection_data, to_projection_ubo};
 
 /// The pass the layer's draws draw in.
@@ -133,6 +140,71 @@ pub(crate) struct ExtrusionTile {
     paint_layout: u32,
     /// Gives the pattern draws the texture of the tile's icon atlas.
     atlases: Option<AtlasBinding>,
+    /// Over terrain, the height of the ground under each bucket vertex's
+    /// polygon, and for walls that draw as quads of their own, each four
+    /// times over, as the quads' vertices.
+    heights: GroundHeights,
+    quad_heights: GroundHeights,
+}
+
+impl ExtrusionTile {
+    /// Over `ground`, has the draws read the height of the ground under the
+    /// centroid of each vertex's polygon in `tile`, from `centroids`
+    /// ([`FillExtrusionBucket::centroids`]), drawing their walls as `walls`
+    /// says: those of the ground they were of while it stays the frame's,
+    /// else written again, through `context`.
+    fn stand(
+        &mut self,
+        context: &mut Context,
+        ground: &FrameGround,
+        tile: UnwrappedTileID,
+        centroids: &[([i16; 2], u32)],
+        walls: Walls,
+    ) {
+        if self.heights.are_of(ground) {
+            return;
+        }
+        let tile_ground = ground.tile(tile);
+        let heights: Vec<f32> = centroids
+            .iter()
+            .flat_map(|&([x, y], count)| {
+                let height = tile_ground.height(glam::Vec2::new(f32::from(x), f32::from(y)));
+                std::iter::repeat_n(height, count as usize)
+            })
+            .collect();
+        let quad_heights = (walls == Walls::Quads)
+            .then(|| heights.iter().flat_map(|&height| [height; 4]).collect::<Vec<f32>>())
+            .and_then(|quad_heights| self.quad_heights.write(context, ground, &quad_heights));
+        let heights = self.heights.write(context, ground, &heights);
+        // Draws read heights that were written over still.
+        for draw in &mut self.draws {
+            match (draw.walls, walls) {
+                (true, Walls::Pulled) => {
+                    if let Some(heights) = &heights {
+                        draw.objects.read_as_storage(ID_FILL_EXTRUSION_WALL_HEIGHTS, Some(heights.clone()));
+                    }
+                }
+                (true, Walls::Quads) => {
+                    if let Some(quad_heights) = &quad_heights {
+                        let attribute = height_attribute(quad_heights);
+                        draw.objects
+                            .paint_attributes_mut()
+                            .set_shared(ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE, attribute);
+                    }
+                }
+                // The roofs read them per vertex, the instanced walls per
+                // instance.
+                _ => {
+                    if let Some(heights) = &heights {
+                        let attribute = height_attribute(heights);
+                        draw.objects
+                            .paint_attributes_mut()
+                            .set_shared(ID_FILL_EXTRUSION_GROUND_HEIGHT_ATTRIBUTE, attribute);
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl TileObjects for ExtrusionTile {
@@ -369,6 +441,8 @@ impl TypedLayer for RenderFillExtrusionLayer {
     type Type = FillExtrusion;
     type Drawing = TileDraws<ExtrusionTile>;
 
+    const STANDS: bool = true;
+
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
     }
@@ -434,6 +508,8 @@ impl TypedLayer for RenderFillExtrusionLayer {
 
         let layer = &*self.values.evaluated;
         let cull_face_mode = paint_parameters.cull_back_faces();
+        // Over terrain, the extrusions stand on the frame's ground.
+        let ground = paint_parameters.ground.clone();
         for tile in render_tiles {
             let tile_id = tile.id();
             let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
@@ -464,6 +540,9 @@ impl TypedLayer for RenderFillExtrusionLayer {
                 }
                 None => entry.value.insert(builder.build(context, render_data, binders, &layer.paint)),
             };
+            if let Some(ground) = ground.as_deref() {
+                cached.stand(context, ground, tile_id.to_unwrapped(), &bucket.centroids, walls);
+            }
             for (index, draw) in cached.draws.iter_mut().enumerate() {
                 draw.objects.set_cull_face_mode(cull_face_mode);
                 let frame_draw = FrameDraw {
@@ -552,7 +631,13 @@ impl TileBuilder<'_> {
         let (Some(vertices), Some(triangles)) =
             (bucket_vertices(geometry, &bucket.vertices), bucket_indexes(geometry, &bucket.triangles))
         else {
-            return ExtrusionTile { draws: Vec::new(), paint_layout: 0, atlases: None };
+            return ExtrusionTile {
+                draws: Vec::new(),
+                paint_layout: 0,
+                atlases: None,
+                heights: GroundHeights::default(),
+                quad_heights: GroundHeights::default(),
+            };
         };
         let vertex_count = bucket.vertices.len();
         // A wall from each vertex to the next, but from the last, which
@@ -679,7 +764,13 @@ impl TileBuilder<'_> {
             }
         }
 
-        ExtrusionTile { draws, paint_layout, atlases }
+        ExtrusionTile {
+            draws,
+            paint_layout,
+            atlases,
+            heights: GroundHeights::default(),
+            quad_heights: GroundHeights::default(),
+        }
     }
 }
 
@@ -746,7 +837,11 @@ impl RenderFillExtrusionLayer {
         parameters: &PaintParameters<'_>,
     ) -> ExtrusionUniforms {
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
-        const NEAR_CLIPPED: bool = true;
+        // The near-clipped projection keeps the depth buffer's precision for
+        // the extrusions, but over terrain they test the frame's depth of the
+        // ground, which the surface's projection draws, and the frame reports
+        // that projection (`frame_projection::compute`).
+        let near_clipped = !parameters.terrain;
         let evaluated = &layer.paint;
         let state = parameters.view;
         let zoom = state.zoom() as f32;
@@ -757,7 +852,7 @@ impl RenderFillExtrusionLayer {
             parameters,
             *evaluated.fill_extrusion_translate.uniform(),
             *evaluated.fill_extrusion_translate_anchor.uniform(),
-            NEAR_CLIPPED,
+            near_clipped,
             IN_VIEWPORT_PIXEL_UNITS,
             None,
             false,

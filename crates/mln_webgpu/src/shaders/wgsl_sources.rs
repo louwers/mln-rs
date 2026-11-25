@@ -2,6 +2,67 @@
 
 use super::shader_source::WgslShaderSource;
 
+/// What the terrain variant of a program that hides behind the ground in
+/// front of it reads of the ground's depth, within `#ifdef TERRAIN` of its
+/// vertex stage: whether that ground hides a point (`ground_visibility`).
+/// The texture is at binding 3, or at the binding given, of a program
+/// whose own textures take binding 3.
+macro_rules! ground_visibility {
+    () => {
+        ground_visibility!("3")
+    };
+    ($binding:literal) => {
+        concat!(
+            r"
+#ifdef TERRAIN
+@group(1) @binding(",
+            $binding,
+            r") var ground_depth_texture: texture_2d<f32>;
+
+// GL JS's `depthOpacity`: 1 where a point `w` from the eye, at `ndc`, is in
+// front of the ground drawn there, fading to 0 behind it over GL JS's ramp
+// of its NDC depth, which `depth_factor` scales; 1 where no ground is drawn
+// there or `ndc` is outside the view.
+fn ground_depth_opacity(ndc: vec2<f32>, w: f32, depth_factor: f32) -> f32 {
+    if (any(abs(ndc) > vec2<f32>(1.0))) {
+        return 1.0;
+    }
+    let size = vec2<i32>(textureDimensions(ground_depth_texture));
+    // The texels' rows run from the top.
+    let pos = (vec2<f32>(ndc.x, -ndc.y) * 0.5 + 0.5) * vec2<f32>(size);
+    let texel = clamp(vec2<i32>(floor(pos)), vec2<i32>(0), size - 1);
+    let bytes = vec4<u32>(round(textureLoad(ground_depth_texture, texel, 0) * 255.0));
+    let ground = bitcast<f32>(bytes.x | (bytes.y << 8u) | (bytes.z << 16u) | (bytes.w << 24u));
+    if (!(ground > 0.0)) {
+        return 1.0;
+    }
+    let d = depth_factor * (1.0 / w - 1.0 / ground) + 0.0001;
+    return 1.0 - clamp(-500.0 * d, 0.0, 1.0);
+}
+
+// GL JS's `calculate_visibility` of the point at `clip`: 1 where the ground
+// drawn in front doesn't hide it, 0 where it does, averaged with the point
+// 0.01 NDC above it where it is partly hidden. The ramp's scale is GL JS's:
+// `2n` of a near plane `n` a fiftieth of the view's height, in pixels, a
+// `GlobalPaintParamsUBO`'s `world_size.y / pixel_ratio`.
+fn ground_visibility(clip: vec4<f32>, view_height: f32) -> f32 {
+    if (clip.w <= 0.0) {
+        return 1.0;
+    }
+    let ndc = clip.xy / clip.w;
+    let depth_factor = view_height / 25.0;
+    let visibility = ground_depth_opacity(ndc, clip.w, depth_factor);
+    if (visibility > 0.95) {
+        return 1.0;
+    }
+    return (visibility + ground_depth_opacity(ndc + vec2<f32>(0.0, 0.01), clip.w, depth_factor)) / 2.0;
+}
+#endif
+"
+        )
+    };
+}
+
 pub(crate) const ATMOSPHERE_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(
         r"
@@ -364,7 +425,8 @@ fn main() -> @location(0) vec4<f32> {
 };
 
 pub(crate) const CIRCLE_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        ground_visibility!(),
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
@@ -392,6 +454,10 @@ struct VertexInput {
 #ifndef HAS_UNIFORM_u_stroke_opacity
     @location(7) stroke_opacity: vec2<f32>,
 #endif
+#ifdef TERRAIN
+    // The height of the ground under the circle's center.
+    @location(8) ground_height: f32,
+#endif
 };
 
 struct VertexOutput {
@@ -418,6 +484,10 @@ struct VertexOutput {
 #endif
 #ifndef HAS_UNIFORM_u_stroke_opacity
     @location(8) stroke_opacity: f32,
+#endif
+#ifdef TERRAIN
+    // How much of the circle the ground in front of its center leaves.
+    @location(9) visibility: f32,
 #endif
 };
 
@@ -467,6 +537,18 @@ fn main(in: VertexInput) -> VertexOutput {
     let radius_with_stroke = radius + stroke_width;
 
     let projection = projectionVector[globalIndex.value];
+    // Over terrain, the circle stands on the ground under its center.
+#ifdef TERRAIN
+    let ele = in.ground_height;
+    let view_height = paintParams.world_size.y / paintParams.pixel_ratio;
+#ifdef PROJECTION_GLOBE
+    out.visibility = ground_visibility(projectTileWithElevation(circle_center, ele, projection), view_height);
+#else
+    out.visibility = ground_visibility(drawable.matrix * vec4<f32>(circle_center, ele, 1.0), view_height);
+#endif
+#else
+    let ele = 0.0;
+#endif
     var position: vec4<f32>;
     if (pitch_with_map) {
 #ifdef PROJECTION_GLOBE
@@ -481,29 +563,29 @@ fn main(in: VertexInput) -> VertexOutput {
 #endif
         } else {
 #ifdef PROJECTION_GLOBE
-            let projected_center = interpolateProjection(circle_center, center_vector, 0.0, projection);
+            let projected_center = interpolateProjection(circle_center, center_vector, ele, projection);
             angle_scale *= radius_with_stroke * (projected_center.w / paintParams.camera_to_center_distance);
 #else
-            let projected_center = drawable.matrix * vec4<f32>(circle_center, 0.0, 1.0);
+            let projected_center = drawable.matrix * vec4<f32>(circle_center, ele, 1.0);
 #endif
             corner_position += scaled_extrude * radius_with_stroke *
                                (projected_center.w / paintParams.camera_to_center_distance);
         }
 #ifdef PROJECTION_GLOBE
         let corner_vector = globeRotateVector(center_vector, extrude * angle_scale, projection);
-        position = interpolateProjection(corner_position, corner_vector, 0.0, projection);
+        position = interpolateProjection(corner_position, corner_vector, ele, projection);
 #else
-        position = drawable.matrix * vec4<f32>(corner_position, 0.0, 1.0);
+        position = drawable.matrix * vec4<f32>(corner_position, ele, 1.0);
 #endif
     } else {
 #ifdef PROJECTION_GLOBE
-        position = projectTile(circle_center, projection);
+        position = projectTileWithElevation(circle_center, ele, projection);
         if (position.z / position.w > 1.0) {
             position.x = 10000.0;
             position.y = 10000.0;
         }
 #else
-        position = drawable.matrix * vec4<f32>(circle_center, 0.0, 1.0);
+        position = drawable.matrix * vec4<f32>(circle_center, ele, 1.0);
 #endif
         var factor = position.w;
         if (scale_with_map) {
@@ -521,8 +603,8 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-",
-    ),
+"
+    )),
     fragment: Some(
         r"
 struct FragmentInput {
@@ -548,6 +630,9 @@ struct FragmentInput {
 #endif
 #ifndef HAS_UNIFORM_u_stroke_opacity
     @location(8) stroke_opacity: f32,
+#endif
+#ifdef TERRAIN
+    @location(9) visibility: f32,
 #endif
 };
 
@@ -606,7 +691,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     }
 
     let final_color = mix(color * opacity, stroke_color * stroke_opacity, color_t);
+#ifdef TERRAIN
+    return opacity_t * final_color * in.visibility;
+#else
     return opacity_t * final_color;
+#endif
 }
 ",
     ),
@@ -2448,6 +2537,10 @@ struct VertexInput {
 #ifndef HAS_UNIFORM_u_radius
     @location(2) radius: vec2<f32>,
 #endif
+#ifdef TERRAIN
+    // The height of the ground under the kernel's center.
+    @location(3) ground_height: f32,
+#endif
 };
 
 struct VertexOutput {
@@ -2513,12 +2606,21 @@ fn main(in: VertexInput) -> VertexOutput {
     let scaled_extrude = extrude * radius * drawable.extrude_scale;
 
     let base = floor(pos * 0.5);
-#ifdef PROJECTION_GLOBE
-    let center_vector = projectToSphere(base, vec2<f32>(0.0, 0.0), projectionVector[globalIndex.value]);
-    let corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale, projectionVector[globalIndex.value]);
-    out.position = interpolateProjection(base + scaled_extrude, corner_vector, 0.0, projectionVector[globalIndex.value]);
+    let projection = projectionVector[globalIndex.value];
+    // Over terrain, the kernel lies flat at the height of the ground under
+    // its center. The ground in front of it doesn't hide it: its density
+    // adds up in screen space, as GL JS's does.
+#ifdef TERRAIN
+    let ele = in.ground_height;
 #else
-    out.position = drawable.matrix * vec4<f32>(base + scaled_extrude, 0.0, 1.0);
+    let ele = 0.0;
+#endif
+#ifdef PROJECTION_GLOBE
+    let center_vector = projectToSphere(base, vec2<f32>(0.0, 0.0), projection);
+    let corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale, projection);
+    out.position = interpolateProjection(base + scaled_extrude, corner_vector, ele, projection);
+#else
+    out.position = drawable.matrix * vec4<f32>(base + scaled_extrude, ele, 1.0);
 #endif
 #ifndef HAS_UNIFORM_u_weight
     out.weight = weight;
@@ -3120,6 +3222,63 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 }
 "
     )),
+    prelude: Some(TERRAIN_PRELUDE),
+};
+
+/// The ground's depth: the surface's grid, raised and projected as
+/// `TERRAIN_SHADER` does, writing each pixel's eye distance, an `f32`'s bits,
+/// least significant byte first, as the texel's channels.
+pub(crate) const TERRAIN_DEPTH_SHADER: WgslShaderSource = WgslShaderSource {
+    vertex: Some(
+        r"
+struct VertexInput {
+    // x and y in tile units, whether the vertex is a skirt's lower edge, 0.
+    @location(0) pos: vec4<i32>,
+};
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    // The eye distance, which interpolates exactly across a triangle.
+    @location(0) distance: f32,
+};
+
+struct TerrainDrawableUBO {
+    dem_coords: vec4<f32>,
+};
+
+struct GlobalIndexUBO {
+    value: u32,
+    pad0: vec3<u32>,
+};
+
+@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
+@group(0) @binding(2) var<storage, read> drawableVector: array<TerrainDrawableUBO>;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+
+@vertex
+fn main(in: VertexInput) -> VertexOutput {
+    let drawable = drawableVector[globalIndex.value];
+    let projection = projectionVector[globalIndex.value];
+    let pos = vec2<f32>(in.pos.xy);
+    let skirt = f32(in.pos.z);
+    let height = surface_height(pos, drawable.dem_coords, terrain.props);
+    var out: VertexOutput;
+    out.position = projectTileFor3D(pos, height - skirt * terrain.props.skirt_length, projection);
+    out.distance = out.position.w;
+    return out;
+}
+",
+    ),
+    fragment: Some(
+        r"
+@fragment
+fn main(@location(0) distance: f32) -> @location(0) vec4<f32> {
+    let bits = bitcast<u32>(distance);
+    let bytes = vec4<u32>(bits, bits >> 8u, bits >> 16u, bits >> 24u) & vec4<u32>(255u);
+    return vec4<f32>(bytes) / 255.0;
+}
+",
+    ),
     prelude: Some(TERRAIN_PRELUDE),
 };
 
@@ -5594,13 +5753,14 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const SYMBOL_ICON_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        ground_visibility!("5"),
         r"
 struct VertexInput {
     @location(3) pos_offset: vec4<i32>,
     @location(4) data: vec4<u32>,
     @location(5) pixeloffset: vec4<i32>,
-    @location(6) projected_pos: vec3<f32>,
+    @location(6) projected_pos: vec4<f32>,
     @location(7) fade_opacity: f32,
 #ifndef HAS_UNIFORM_u_opacity
     @location(8) opacity: vec2<f32>,
@@ -5630,9 +5790,18 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let drawable = drawableVector[globalIndex.value];
 
+    // How much of the symbol the ground in front of its anchor leaves.
+#ifdef TERRAIN
+    let ground_anchor = vec2<f32>(f32(in.pos_offset.x), f32(in.pos_offset.y)) + drawable.translation;
+    let ground_clip = projectTileWithElevation(ground_anchor, in.height_offset, projectionVector[globalIndex.value]);
+    let ground_visible = ground_visibility(ground_clip, paintParams.world_size.y / paintParams.pixel_ratio);
+#else
+    let ground_visible = 1.0;
+#endif
+
     let raw_fade_opacity = unpack_opacity(in.fade_opacity);
     let fade_change = select(-paintParams.symbol_fade_change, paintParams.symbol_fade_change, raw_fade_opacity.y > 0.5);
-    let fade_opacity = max(0.0, min(1.0, raw_fade_opacity.x + fade_change));
+    let fade_opacity = max(0.0, min(ground_visible, raw_fade_opacity.x + fade_change));
 
 #ifdef HAS_UNIFORM_u_opacity
     let final_opacity = fade_opacity;
@@ -5719,7 +5888,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var projected_pos: vec4<f32>;
     if (drawable.is_along_line != 0u || drawable.is_variable_anchor != 0u) {
-        projected_pos = vec4<f32>(in.projected_pos.xy, in.height_offset, 1.0);
+        // A glyph along a line stands at its own height, which the label's
+        // layout gives it; a label at a variable anchor at its anchor's.
+        let height = select(in.height_offset, in.projected_pos.w, drawable.is_along_line != 0u);
+        projected_pos = vec4<f32>(in.projected_pos.xy, height, 1.0);
     } else if (drawable.pitch_with_map != 0u) {
         projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, in.height_offset, 1.0);
     } else {
@@ -5752,7 +5924,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
+    )),
     fragment: Some(
         r"
 struct FragmentInput {
@@ -5876,13 +6048,14 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 };
 
 pub(crate) const SYMBOL_SDF_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        ground_visibility!("5"),
         r"
 struct VertexInput {
     @location(3) pos_offset: vec4<i32>,
     @location(4) data: vec4<u32>,
     @location(5) pixeloffset: vec4<i32>,
-    @location(6) projected_pos: vec3<f32>,
+    @location(6) projected_pos: vec4<f32>,
     @location(7) fade_opacity: f32,
 #ifndef HAS_UNIFORM_u_fill_color
     @location(8) fill_color: vec4<f32>,
@@ -5930,9 +6103,18 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let drawable = drawableVector[globalIndex.value];
 
+    // How much of the symbol the ground in front of its anchor leaves.
+#ifdef TERRAIN
+    let ground_anchor = vec2<f32>(f32(in.pos_offset.x), f32(in.pos_offset.y)) + drawable.translation;
+    let ground_clip = projectTileWithElevation(ground_anchor, in.height_offset, projectionVector[globalIndex.value]);
+    let ground_visible = ground_visibility(ground_clip, paintParams.world_size.y / paintParams.pixel_ratio);
+#else
+    let ground_visible = 1.0;
+#endif
+
     let fade_opacity = unpack_opacity(in.fade_opacity);
     let fade_change = select(-paintParams.symbol_fade_change, paintParams.symbol_fade_change, fade_opacity.y > 0.5);
-    let fo = max(0.0, min(1.0, fade_opacity.x + fade_change));
+    let fo = max(0.0, min(ground_visible, fade_opacity.x + fade_change));
 
 #ifdef HAS_UNIFORM_u_opacity
     let visibility = fo;
@@ -6018,7 +6200,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var projected_pos: vec4<f32>;
     if (drawable.is_along_line != 0u || drawable.is_variable_anchor != 0u) {
-        projected_pos = vec4<f32>(in.projected_pos.xy, in.height_offset, 1.0);
+        // A glyph along a line stands at its own height, which the label's
+        // layout gives it; a label at a variable anchor at its anchor's.
+        let height = select(in.height_offset, in.projected_pos.w, drawable.is_along_line != 0u);
+        projected_pos = vec4<f32>(in.projected_pos.xy, height, 1.0);
     } else if (drawable.pitch_with_map != 0u) {
         projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, in.height_offset, 1.0);
     } else {
@@ -6077,7 +6262,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
+    )),
     fragment: Some(
         r"
 struct FragmentInput {
@@ -6237,12 +6422,13 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 };
 
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        ground_visibility!("5"),
         r"
 struct VertexInput {
     @location(3) pos_offset: vec4<i32>,
     @location(4) data: vec4<u32>,
-    @location(5) projected_pos: vec3<f32>,
+    @location(5) projected_pos: vec4<f32>,
     @location(6) fade_opacity: f32,
 #ifndef HAS_UNIFORM_u_fill_color
     @location(7) fill_color: vec4<f32>,
@@ -6294,9 +6480,18 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let drawable = drawableVector[globalIndex.value];
 
+    // How much of the symbol the ground in front of its anchor leaves.
+#ifdef TERRAIN
+    let ground_anchor = vec2<f32>(f32(in.pos_offset.x), f32(in.pos_offset.y)) + drawable.translation;
+    let ground_clip = projectTileWithElevation(ground_anchor, in.height_offset, projectionVector[globalIndex.value]);
+    let ground_visible = ground_visibility(ground_clip, paintParams.world_size.y / paintParams.pixel_ratio);
+#else
+    let ground_visible = 1.0;
+#endif
+
     let fade_opacity = unpack_opacity(in.fade_opacity);
     let fade_change = select(-paintParams.symbol_fade_change, paintParams.symbol_fade_change, fade_opacity.y > 0.5);
-    let fo = max(0.0, min(1.0, fade_opacity.x + fade_change));
+    let fo = max(0.0, min(ground_visible, fade_opacity.x + fade_change));
 
 #ifdef HAS_UNIFORM_u_opacity
     let visibility = fo;
@@ -6381,7 +6576,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var projected_pos: vec4<f32>;
     if (drawable.is_along_line != 0u || drawable.is_variable_anchor != 0u) {
-        projected_pos = vec4<f32>(in.projected_pos.xy, in.height_offset, 1.0);
+        // A glyph along a line stands at its own height, which the label's
+        // layout gives it; a label at a variable anchor at its anchor's.
+        let height = select(in.height_offset, in.projected_pos.w, drawable.is_along_line != 0u);
+        projected_pos = vec4<f32>(in.projected_pos.xy, height, 1.0);
     } else if (drawable.pitch_with_map != 0u) {
         projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, in.height_offset, 1.0);
     } else {
@@ -6445,7 +6643,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
+    )),
     fragment: Some(
         r"
 struct FragmentInput {

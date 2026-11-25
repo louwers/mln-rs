@@ -35,7 +35,9 @@ use mln_vec_map::{VecMap, VecSet};
 
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools};
+use crate::layout::symbol_projection::SymbolHeights;
 use crate::render_layer::{RenderLayer, SymbolBuckets};
+use crate::terrain::TerrainElevation;
 
 /// What adding a layer to the index changed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -61,12 +63,14 @@ pub(crate) struct CrossTileSymbolIndex {
 impl CrossTileSymbolIndex {
     /// Gives the symbols of the buckets `layer` places, in `buckets`, their
     /// cross-tile ids, and forgets the buckets of the layer it no longer
-    /// places. `lng` is the view's unwrapped longitude.
+    /// places. `lng` is the view's unwrapped longitude, and `ground` the
+    /// ground the symbols stand on, where terrain draws.
     pub(crate) fn index_layer(
         &mut self,
         layer: &dyn RenderLayer,
         lng: f32,
         view: &View,
+        ground: Option<&TerrainElevation>,
         buckets: &mut (impl SymbolBuckets + ?Sized),
     ) -> AddLayerResult {
         let index = self.layers.get_or_insert_with(layer.id(), LayerIndex::default);
@@ -84,7 +88,8 @@ impl CrossTileSymbolIndex {
             }
             let tile = &item.tile;
             let projector = TileProjector::with_data(view, &tile.id, tile.projection);
-            buckets_added |= index.add_bucket(tile.overscaled_id, &projector, bucket, &mut self.ids);
+            let heights = SymbolHeights::new(ground, tile.id, &bucket.layout);
+            buckets_added |= index.add_bucket(tile.overscaled_id, &projector, bucket, &mut self.ids, heights);
             self.current_bucket_ids.insert(bucket.bucket_instance_id);
         }
         let buckets_removed = index.remove_stale_buckets(&self.current_bucket_ids);
@@ -96,7 +101,7 @@ impl CrossTileSymbolIndex {
     #[cfg(feature = "bench")]
     pub(crate) fn add_layer(&mut self, layer: &dyn RenderLayer, lng: f32, view: &View) -> AddLayerResult {
         let mut buckets = crate::render_layer::HeldBuckets::take();
-        let result = self.index_layer(layer, lng, view, &mut buckets);
+        let result = self.index_layer(layer, lng, view, None, &mut buckets);
         buckets.restore();
         result
     }
@@ -161,13 +166,14 @@ impl LayerIndex {
     /// Gives `bucket`'s symbols, in `tile`, their ids, and indexes them in
     /// place of the bucket indexed for `tile` before. Returns whether it
     /// indexed the bucket: not when it is indexed already with every symbol
-    /// in view.
+    /// in view, standing at `heights`.
     fn add_bucket(
         &mut self,
         tile: OverscaledTileID,
         projector: &TileProjector<'_>,
         bucket: &mut SymbolBucket,
         ids: &mut IdAllocator,
+        heights: SymbolHeights<'_>,
     ) -> bool {
         let previous = match self.position(&tile) {
             Ok(at) => Some(at),
@@ -197,8 +203,9 @@ impl LayerIndex {
         let check_viewport = tile.overscale_factor() > 1;
         for (i, symbol) in symbols.iter_mut().enumerate() {
             // An overscaled tile might be only partly in view: the symbols
-            // out of view wait for a later add.
-            if check_viewport && !is_in_viewport(projector, symbol.anchor().point, symbol.height_offset()) {
+            // out of view, where they stand, wait for a later add.
+            let point = symbol.anchor().point;
+            if check_viewport && !is_in_viewport(projector, point, heights.at(point, symbol.height_offset())) {
                 changed |= set_id(symbol, None);
                 state.has_uninitialized_symbols = true;
             } else {
@@ -284,7 +291,7 @@ fn set_id(symbol: &mut SymbolInstance, id: Option<NonZeroU32>) -> bool {
     changed
 }
 
-/// Whether `point`, `elevation` meters above the ground, is in the viewport
+/// Whether `point`, `elevation` meters above sea level, is in the viewport
 /// or within a viewport's width or height of it, which covers the area of
 /// the zoom below.
 fn is_in_viewport(projector: &TileProjector<'_>, point: Vec2, elevation: f32) -> bool {
@@ -479,6 +486,7 @@ mod tests {
             &TileProjector::new(&any_camera, &main_id.to_unwrapped()),
             &mut main_bucket,
             &mut ids,
+            SymbolHeights::default(),
         );
 
         // Assigned new IDs
@@ -501,6 +509,7 @@ mod tests {
             &TileProjector::new(&any_camera, &child_id.to_unwrapped()),
             &mut child_bucket,
             &mut ids,
+            SymbolHeights::default(),
         );
 
         // matched parent tile
@@ -520,6 +529,7 @@ mod tests {
             &TileProjector::new(&any_camera, &parent_id.to_unwrapped()),
             &mut parent_bucket,
             &mut ids,
+            SymbolHeights::default(),
         );
 
         // matched child tile
@@ -539,6 +549,7 @@ mod tests {
             &TileProjector::new(&any_camera, &grandchild_id.to_unwrapped()),
             &mut grandchild_bucket,
             &mut ids,
+            SymbolHeights::default(),
         );
 
         // Matches the symbol in the main bucket.
@@ -559,7 +570,13 @@ mod tests {
         let mut bucket = make_bucket(vec![(1000.0, 1000.0, "Detroit"), (2000.0, 2000.0, "Toronto")], 1);
 
         let id = OverscaledTileID::with_zxy(0, 0, 0, 0, 0);
-        assert!(index.add_bucket(id, &TileProjector::new(&any_camera, &id.to_unwrapped()), &mut bucket, &mut ids));
+        assert!(index.add_bucket(
+            id,
+            &TileProjector::new(&any_camera, &id.to_unwrapped()),
+            &mut bucket,
+            &mut ids,
+            SymbolHeights::default()
+        ));
         assert_eq!(cross_tile_id(&bucket, 0), Some(1));
         assert_eq!(cross_tile_id(&bucket, 1), Some(2));
 
@@ -568,7 +585,8 @@ mod tests {
             moved,
             &TileProjector::new(&any_camera, &moved.to_unwrapped()),
             &mut bucket,
-            &mut ids
+            &mut ids,
+            SymbolHeights::default()
         ));
         assert_eq!(cross_tile_id(&bucket, 0), Some(1));
         assert_eq!(cross_tile_id(&bucket, 1), Some(2));
@@ -595,6 +613,7 @@ mod tests {
             &TileProjector::new(&any_camera, &main_id.to_unwrapped()),
             &mut main_bucket,
             &mut ids,
+            SymbolHeights::default(),
         );
         assert_eq!(cross_tile_id(&main_bucket, 0), Some(1));
 
@@ -608,6 +627,7 @@ mod tests {
             &TileProjector::new(&any_camera, &child_id.to_unwrapped()),
             &mut child_bucket,
             &mut ids,
+            SymbolHeights::default(),
         );
         assert_eq!(cross_tile_id(&child_bucket, 0), Some(2));
 
@@ -617,6 +637,7 @@ mod tests {
             &TileProjector::new(&any_camera, &main_id.to_unwrapped()),
             &mut main_bucket,
             &mut ids,
+            SymbolHeights::default(),
         );
         assert_eq!(cross_tile_id(&main_bucket, 0), Some(2));
     }
@@ -653,6 +674,7 @@ mod tests {
             &TileProjector::new(&any_camera, &main_id.to_unwrapped()),
             &mut main_bucket,
             &mut ids,
+            SymbolHeights::default(),
         );
         assert_eq!(cross_tile_id(&main_bucket, 0), Some(1));
         assert_eq!(cross_tile_id(&main_bucket, 1), Some(2));
@@ -663,6 +685,7 @@ mod tests {
             &TileProjector::new(&any_camera, &child_id.to_unwrapped()),
             &mut child_bucket,
             &mut ids,
+            SymbolHeights::default(),
         );
         assert_eq!(cross_tile_id(&child_bucket, 0), Some(1)); // A' copies from A
         assert_eq!(cross_tile_id(&child_bucket, 1), Some(2)); // B' copies from B
@@ -700,6 +723,7 @@ mod tests {
             &TileProjector::new(&any_camera, &tile_id.to_unwrapped()),
             &mut first_bucket,
             &mut ids,
+            SymbolHeights::default(),
         );
         assert_eq!(cross_tile_id(&first_bucket, 0), Some(1));
         assert_eq!(cross_tile_id(&first_bucket, 1), Some(2));
@@ -710,6 +734,7 @@ mod tests {
             &TileProjector::new(&any_camera, &tile_id.to_unwrapped()),
             &mut second_bucket,
             &mut ids,
+            SymbolHeights::default(),
         );
         assert_eq!(cross_tile_id(&second_bucket, 0), Some(1)); // A' copies from A
         assert_eq!(cross_tile_id(&second_bucket, 1), Some(2)); // B' copies from B
@@ -723,13 +748,25 @@ mod tests {
         let tile_id = OverscaledTileID::with_zxy(7, 0, 6, 18, 24);
         let mut symbol_bucket = make_bucket(vec![(1000.0, 1000.0, "Washington"), (2000.0, 2000.0, "Richmond")], 1);
         let away = camera_at(60.0, 25.0, 7.0, globe);
-        index.add_bucket(tile_id, &TileProjector::new(&away, &tile_id.to_unwrapped()), &mut symbol_bucket, &mut ids);
+        index.add_bucket(
+            tile_id,
+            &TileProjector::new(&away, &tile_id.to_unwrapped()),
+            &mut symbol_bucket,
+            &mut ids,
+            SymbolHeights::default(),
+        );
 
         assert_eq!(cross_tile_id(&symbol_bucket, 0), None);
         assert_eq!(cross_tile_id(&symbol_bucket, 1), None);
 
         let over = camera_at(39.0, -76.0, 7.0, globe);
-        index.add_bucket(tile_id, &TileProjector::new(&over, &tile_id.to_unwrapped()), &mut symbol_bucket, &mut ids);
+        index.add_bucket(
+            tile_id,
+            &TileProjector::new(&over, &tile_id.to_unwrapped()),
+            &mut symbol_bucket,
+            &mut ids,
+            SymbolHeights::default(),
+        );
 
         assert_eq!(cross_tile_id(&symbol_bucket, 0), Some(1));
         assert_eq!(cross_tile_id(&symbol_bucket, 1), Some(2));
@@ -750,7 +787,7 @@ mod tests {
         let away = camera_at(60.0, 25.0, 7.0, false);
         let mut register = |camera: &View| {
             let projector = TileProjector::new(camera, &tile_id.to_unwrapped());
-            assert!(index.add_bucket(tile_id, &projector, &mut symbol_bucket, &mut ids));
+            assert!(index.add_bucket(tile_id, &projector, &mut symbol_bucket, &mut ids, SymbolHeights::default()));
             let ids = (cross_tile_id(&symbol_bucket, 0), cross_tile_id(&symbol_bucket, 1));
             (ids, symbol_bucket.state.cross_tile_ids_revision)
         };
