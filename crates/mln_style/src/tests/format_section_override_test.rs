@@ -21,9 +21,10 @@ use crate::expression::parse::ParsingContext;
 use crate::expression::type_::Type;
 use crate::expression::value::{ObjectType, Value};
 use crate::expression::{Dependency, EvaluationContext, Expr, Functions, GlobalStateMap};
-use crate::format_section_override::{format_section_override as new_override, set_overrides};
-use crate::layer_type::LayerStyle;
-use crate::layers::symbol_layer::SymbolLayerPaintPropertyOverrides as MockOverrides;
+use crate::layer::LayerStyle;
+use crate::layers::symbol_layer::{
+    SymbolLayerPaintPropertyOverrides as MockOverrides, format_section_override as new_override, set_overrides,
+};
 use crate::layers::{Symbol, SymbolLayoutProperties, SymbolPaintProperties};
 use crate::property::evaluated::Evaluated;
 use crate::property::expression::PropertyExpression;

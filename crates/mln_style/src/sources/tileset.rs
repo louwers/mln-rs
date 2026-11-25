@@ -12,8 +12,8 @@ use mln_util::tileset::{PartialTileset, Tileset, VectorEncoding};
 use crate::conversion::tileset::{convert_tileset, optional_member};
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
-use crate::layer_type::SourceKind;
-use crate::source_type::{
+use crate::layer::SourceKind;
+use crate::source::{
     Data, Described, Fetch, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,
 };
 

@@ -29,7 +29,7 @@ use mln_gfx::shaders::symbol_layer_ubo::{
 };
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{Projection, ProjectionData};
-use mln_style::layer_type::{ErasedLayerStyle as _, LayerStyle};
+use mln_style::layer::{ErasedLayerStyle as _, LayerStyle};
 use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
 use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
@@ -1181,7 +1181,7 @@ impl TypedLayer for RenderSymbolLayer {
         evaluated: &mut EvaluatedLayer<Symbol>,
     ) {
         if SymbolLayerPaintPropertyOverrides::has_overrides(&self.values.style.layout.text_field) {
-            mln_style::format_section_override::set_overrides(
+            mln_style::layers::symbol_layer::set_overrides(
                 &self.values.style.layout,
                 &mut evaluated.paint,
                 &self.values.unevaluated,

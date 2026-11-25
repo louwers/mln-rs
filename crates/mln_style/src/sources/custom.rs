@@ -9,8 +9,8 @@ use mln_util::range::Range;
 
 use super::geojson::TileFeatures;
 use crate::custom_tile_loader::CustomProvider;
-use crate::layer_type::SourceKind;
-use crate::source_type::{Data, SourceData, SourceTypeInfo, StyleSourceType};
+use crate::layer::SourceKind;
+use crate::source::{Data, SourceData, SourceTypeInfo, StyleSourceType};
 
 /// How the host's GeoJSON is cut into tiles, as for a GeoJSON source.
 #[derive(Clone, Debug, PartialEq)]

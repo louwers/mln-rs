@@ -46,8 +46,7 @@ pub(crate) fn add_layer(style: &mut Style, json: &str) -> Result<(), MapError> {
         Err(e) => return Err(MapError::Conversion(e.to_string())),
     };
     let mut error = mln_style::conversion::Error::default();
-    let Some(layer) = mln_style::conversion::convert_layer(style.registry(), &Convertible::from(&value), &mut error)
-    else {
+    let Some(layer) = mln_style::layer::convert_layer(style.registry(), &Convertible::from(&value), &mut error) else {
         return Err(MapError::Conversion(error.message));
     };
     // C++ Style::addLayer throws (uncaught by the runner) on a duplicate id.
@@ -63,7 +62,7 @@ pub(crate) fn set_layer_filter(
 ) -> Result<(), MapError> {
     let mut error = mln_style::conversion::Error::default();
     let Some(filter) =
-        mln_style::conversion::convert_filter(&Convertible::from(filter), style.registry().functions(), &mut error)
+        mln_style::filter::convert_filter(&Convertible::from(filter), style.registry().functions(), &mut error)
     else {
         return Err(MapError::Conversion(error.message));
     };
@@ -93,8 +92,7 @@ pub(crate) fn add_source(map: &mut Map, source_name: &str, json: &str) -> Result
     };
     let mut error = mln_style::conversion::Error::default();
     let registry = map.style().registry();
-    let Some(source) =
-        mln_style::conversion::convert_source(&Convertible::from(&value), &mut error, source_name, registry)
+    let Some(source) = mln_style::source::convert_source(&Convertible::from(&value), &mut error, source_name, registry)
     else {
         return Err(MapError::Conversion(error.message));
     };
@@ -110,7 +108,7 @@ pub(crate) fn set_light(style: &mut Style, json: &str) -> Result<(), MapError> {
     };
     let mut error = mln_style::conversion::Error::default();
     let Some(light) =
-        mln_style::conversion::convert_light(&Convertible::from(&value), style.registry().functions(), &mut error)
+        mln_style::light::convert_light(&Convertible::from(&value), style.registry().functions(), &mut error)
     else {
         return Err(MapError::Conversion(error.message));
     };

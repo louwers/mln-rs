@@ -11,7 +11,7 @@
 //!
 //! The loader watches each version of the style ([`StyleLoader::watch_sources`])
 //! and loads the description of each source whose instance or
-//! [`load`](mln_style::source_type::SourceData::load) it hasn't seen, as the
+//! [`load`](mln_style::source::SourceData::load) it hasn't seen, as the
 //! source's type says. What a load finds goes back into the style as an
 //! [`Edit::SetSourceDescription`].
 
@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use mln_sprite::load_sprite;
 use mln_storage::{Data, FileSource, FileSourceExt, Request, Resource, ResourceError, Response};
-use mln_style::source_type::{Described, ErasedDescription, Fetch, Load};
+use mln_style::source::{Described, ErasedDescription, Fetch, Load};
 use mln_style::sprite::Sprite;
 use mln_style::{Edit, SourceInstance, Style, StyleLoadError, StyleRegistry, image};
 use mln_text::glyph::FontFaces;
@@ -46,7 +46,7 @@ pub(crate) enum Reply {
 }
 
 /// A load of a source's description: the source's id and instance, and the
-/// [`load`](mln_style::source_type::SourceData::load) of its data.
+/// [`load`](mln_style::source::SourceData::load) of its data.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SourceLoadId {
     pub(crate) id: Arc<str>,

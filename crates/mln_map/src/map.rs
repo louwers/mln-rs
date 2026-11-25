@@ -19,7 +19,8 @@ use mln_renderer::{
 use mln_storage::FileSource;
 #[cfg(not(target_family = "wasm"))]
 use mln_storage::{Loader, ResourceOptions};
-use mln_style::conversion::{Convertible, convert_source};
+use mln_style::conversion::Convertible;
+use mln_style::source::convert_source;
 use mln_style::{Edit, Source, Style, StyleRegistry};
 use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::error::Error;
@@ -1064,7 +1065,7 @@ impl Map {
     /// `json` isn't such an array. Without a font-face shaper, the map ignores
     /// them, as it ignores a style's `font-faces`.
     pub fn set_fallback_font_faces(&mut self, json: &str) -> Result<(), Error> {
-        let faces = mln_style::parser::parse_fallback_font_faces(json)?;
+        let faces = mln_style::parse_fallback_font_faces(json)?;
         self.set_fallback_font_face_list(faces);
         Ok(())
     }

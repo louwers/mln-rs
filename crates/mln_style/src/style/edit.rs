@@ -15,9 +15,7 @@ use crate::light::Light;
 use crate::projection::Projection;
 use crate::property::transition::TransitionOptions;
 use crate::sky::Sky;
-use crate::source_type::{
-    Described, ErasedDescription, Source, SourceCommon, SourceData, SourceInstance, StyleSourceType,
-};
+use crate::source::{Described, ErasedDescription, Source, SourceCommon, SourceData, SourceInstance, StyleSourceType};
 use crate::terrain::Terrain;
 
 /// A change to a style, which [`Style::apply`](crate::Style::apply) makes.

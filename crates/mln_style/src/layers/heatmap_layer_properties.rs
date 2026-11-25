@@ -3,7 +3,7 @@
 
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
-use crate::layer_type::LayerStyle;
+use crate::layer::LayerStyle;
 use crate::layers::Heatmap;
 use crate::property::color_ramp::{ColorRampPropertyValue, convert_color_ramp_property_value};
 use crate::property::table::{PropertyInfo, PropertyTable, PropertyVisitor};

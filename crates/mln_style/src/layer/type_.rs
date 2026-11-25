@@ -26,7 +26,7 @@ use crate::property::table::{
 };
 use crate::property::transition::TransitionParameters;
 use crate::property::value::PropertyValue;
-use crate::serialization::optional_expression;
+use crate::wire::optional_expression;
 
 /// Where a layer type's layers get their data.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

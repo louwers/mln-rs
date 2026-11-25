@@ -1,4 +1,4 @@
-use crate::source_type::Source;
+use crate::source::Source;
 
 /// A style's sources in the order they were added, found by id. Ids are
 /// unique. A change to a source replaces its value, so two lists whose

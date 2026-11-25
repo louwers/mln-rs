@@ -679,7 +679,7 @@ fn the_ranges_outlive_the_dem_tiles() {
 /// source no longer holds, and keep those of the tiles it does.
 #[test]
 fn the_ranges_forget_the_dem_tiles_let_go_past_their_bound() {
-    use mln_style::source_type::SourceData;
+    use mln_style::source::SourceData;
     use mln_style::sources::RasterDemSourceType;
 
     use crate::terrain::{ElevationRanges, REMEMBERED_RANGES};

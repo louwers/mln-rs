@@ -7,7 +7,7 @@ use std::sync::{Arc, Weak};
 use geojson::{GeoJson, GeometryValue};
 use mln_style::expression::Functions;
 use mln_style::image::Impl as StyleImage;
-use mln_style::source_type::{SourceData, StyleSourceType};
+use mln_style::source::{SourceData, StyleSourceType};
 use mln_style::sources::custom_geometry_source::{self, TileOptions};
 use mln_style::sources::geojson::{GeoJSONData, GeoJSONDataBuilder};
 use mln_style::sources::image::ImageSourceOptions;

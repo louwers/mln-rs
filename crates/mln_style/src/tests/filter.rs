@@ -2,9 +2,9 @@ use feature::{Identifier, Value};
 use mln_util::geometry::FeatureType;
 
 use super::util::{StubGeometryTileFeature, parse_json, property_map};
-use crate::conversion::{Convertible, Error, convert_filter};
+use crate::conversion::{Convertible, Error};
 use crate::expression::{EvaluationContext, Functions};
-use crate::filter::Filter;
+use crate::filter::{Filter, convert_filter};
 
 fn convert_json(json: &str, error: &mut Error) -> Option<Filter> {
     let value = parse_json(json);

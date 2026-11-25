@@ -32,7 +32,7 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_math::deg2radf;
-use mln_style::layer_type::LayerStyle;
+use mln_style::layer::LayerStyle;
 use mln_style::layers::Hillshade;
 use mln_style::layers::hillshade_layer_properties::HillshadePaintProperties;
 use mln_style_types::{HillshadeIlluminationAnchorType, HillshadeMethodType, ResamplingType, TranslateAnchorType};

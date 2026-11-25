@@ -23,16 +23,14 @@ use mln_storage::{
     Cache, DatabaseFileSource, FileSource, Kind, Loader, LoadingMethod, Resource, ResourceOptions, Response,
     StoragePolicy, TileFormat,
 };
-use mln_style::conversion::layer::convert_layer;
 use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::custom_tile_loader::TileFunction;
 use mln_style::expression::{Formatted, FormattedSection, Functions, Image};
-use mln_style::layer::Layer;
-use mln_style::layer_type::LayerStyle;
+use mln_style::layer::{Layer, LayerStyle, convert_layer};
 use mln_style::layers::symbol_layer::Symbol;
 use mln_style::projection::Projection;
 use mln_style::property::table::Kind as StylePropertyKind;
-use mln_style::source_type::SourceData;
+use mln_style::source::SourceData;
 use mln_style::sources::custom_geometry_source::{
     self, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions,
 };
@@ -98,7 +96,7 @@ fn vector_source(id: &str, tiles: &str) -> Source {
 }
 
 /// `source` with `change` made to its common members.
-fn with_common(source: &Source, change: impl FnOnce(&mut mln_style::source_type::SourceCommon)) -> Source {
+fn with_common(source: &Source, change: impl FnOnce(&mut mln_style::source::SourceCommon)) -> Source {
     let mut common = *source.common();
     change(&mut common);
     source.with_common(common)

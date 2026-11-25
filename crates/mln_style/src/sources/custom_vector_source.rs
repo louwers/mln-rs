@@ -13,7 +13,7 @@ use mln_util::range::Range;
 pub use super::custom::{CustomVectorProvider, CustomVectorTileData, TileDataFormat};
 use super::custom::{CustomVectorSourceOptions, CustomVectorSourceType};
 use crate::custom_tile_loader::{CustomProvider, TileFunction};
-use crate::source_type::{Data, Source, SourceData};
+use crate::source::{Data, Source, SourceData};
 
 #[derive(Clone)]
 pub struct Options {

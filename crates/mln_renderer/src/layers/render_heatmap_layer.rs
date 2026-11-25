@@ -22,7 +22,7 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
-use mln_style::layer_type::LayerStyle;
+use mln_style::layer::LayerStyle;
 use mln_style::layers::Heatmap;
 use mln_style::layers::heatmap_layer_properties::{HeatmapPaintProperties, default_heatmap_color};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};

@@ -1,4 +1,4 @@
-use crate::layer_type::{LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType};
+use crate::layer::{LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType};
 use crate::layers::line_layer_properties::{self, LineLayoutProperties, LinePaintProperties};
 use crate::property::table::{PropertyTable, PropertyVisitor};
 

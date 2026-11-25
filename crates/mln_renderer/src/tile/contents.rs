@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use glam::DMat4;
 use mln_style::expression::GlobalStateMap;
-use mln_style::layer_type::ErasedLayerStyle;
+use mln_style::layer::ErasedLayerStyle;
 use mln_style_types::image::{ImagePositions, ImageType};
 use mln_text::glyph::{GlyphID, GlyphPositions};
 use mln_text::tagged_string::font_stack_hash;

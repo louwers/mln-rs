@@ -50,7 +50,7 @@ use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::hillshade_layer_ubo::{HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO};
 use mln_gfx::shaders::terrain_ubo::{TerrainFogUBO, TerrainPropsUBO};
 use mln_map_types::{MapMode, TerrainSkirtLength};
-use mln_style::source_type::SourceData;
+use mln_style::source::SourceData;
 use mln_style::sources::RasterDemSourceType;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::constants;

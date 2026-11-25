@@ -14,7 +14,8 @@ use geo_types::{Geometry, Point};
 use mln_map_types::MapMode;
 use mln_storage::FileSource;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
+use mln_style::conversion::{Convertible, Error as ConversionError};
+use mln_style::layer::convert_layer;
 use mln_style::property::evaluation::PropertyEvaluationParameters;
 use mln_style_types::image::Impl as ImageImpl;
 use mln_tile::TileData;
@@ -537,16 +538,16 @@ fn a_missing_image_a_relayout_drops_resolves_when_used_again() {
 
 /// Evaluated values of no layer type: a bug that panics when the layout
 /// asks for their type.
-struct Mistyped(Arc<dyn mln_style::layer_type::ErasedLayerStyle>);
+struct Mistyped(Arc<dyn mln_style::layer::ErasedLayerStyle>);
 
 impl ErasedEvaluatedLayer for Mistyped {
     fn entry(&self) -> &'static dyn crate::layer_type::ErasedLayerType {
         panic!("evaluated values of no layer type")
     }
-    fn style(&self) -> &dyn mln_style::layer_type::ErasedLayerStyle {
+    fn style(&self) -> &dyn mln_style::layer::ErasedLayerStyle {
         &*self.0
     }
-    fn shared_style(&self) -> Arc<dyn mln_style::layer_type::ErasedLayerStyle> {
+    fn shared_style(&self) -> Arc<dyn mln_style::layer::ErasedLayerStyle> {
         Arc::clone(&self.0)
     }
     fn constants_mask(&self) -> u64 {

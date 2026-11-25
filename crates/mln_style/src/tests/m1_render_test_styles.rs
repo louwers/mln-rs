@@ -18,7 +18,7 @@ use mln_util::{Color, UnitBezier};
 
 use super::util::FixtureLog;
 use crate::expression::Functions;
-use crate::layer_type::LayerStyle;
+use crate::layer::LayerStyle;
 use crate::layers::{Background, BackgroundPaintProperties};
 use crate::property::evaluation::{PropertyEvaluationParameters, ZoomHistory};
 use crate::property::transition::{TransitionOptions, TransitionParameters};

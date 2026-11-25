@@ -6,12 +6,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use feature::{Value, ValueObject};
-use mln_style::conversion::{Convertible, Error, convert_sky};
+use mln_style::conversion::{Convertible, Error};
 use mln_style::expression::Functions;
 use mln_style::property::table::Kind;
 use mln_style::property::transition::TransitionOptions;
 use mln_style::property::value::PropertyValue;
-use mln_style::sky::Sky;
+use mln_style::sky::{Sky, convert_sky};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_util::Color;
 use mln_util::time::Instant;

@@ -10,19 +10,17 @@ use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::error::Error;
 
 use crate::conversion::borrowed::{Json, borrowed_json_to_value, member, members};
-use crate::conversion::{
-    Converter, Convertible, convert_layer, convert_light, convert_projection, convert_sky, convert_terrain,
-    value_to_json,
-};
-use crate::edit::Edit;
+use crate::conversion::{Converter, Convertible, value_to_json};
 use crate::expression::GlobalStateMap;
-use crate::layer::Layer;
-use crate::layer_type::SourceKind;
-use crate::light::Light;
-use crate::projection::Projection;
+use crate::layer::{Layer, SourceKind, convert_layer};
+use crate::light::{Light, convert_light};
+use crate::projection::{Projection, convert_projection};
 use crate::property::table::{Kind, Properties, StyleProperty, defined_properties};
 use crate::property::transition::TransitionOptions;
+use crate::sky::convert_sky;
 use crate::style::Style;
+use crate::style::edit::Edit;
+use crate::terrain::convert_terrain;
 
 impl Style {
     /// Adds the [layer](https://maplibre.org/maplibre-style-spec/layers/)

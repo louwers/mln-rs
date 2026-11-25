@@ -18,7 +18,7 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, global_state_refs_intersect};
-use mln_style::layer_type::LayerStyle;
+use mln_style::layer::LayerStyle;
 use mln_style::layers::Line;
 use mln_style::layers::line_layer_properties::LinePaintProperties;
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};

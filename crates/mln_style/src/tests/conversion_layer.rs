@@ -4,10 +4,10 @@ use feature::Value;
 
 use super::util::{parse_json, style_of, value_to_json};
 use crate::StyleRegistry;
-use crate::conversion::{Convertible, Error, convert_filter, convert_layer};
+use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
-use crate::filter::Filter;
-use crate::layer::Layer;
+use crate::filter::{Filter, convert_filter};
+use crate::layer::{Layer, convert_layer};
 use crate::layers::Background;
 
 fn parse_layer(src: &str) -> Option<Layer> {

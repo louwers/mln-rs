@@ -344,7 +344,7 @@ pub(crate) fn style(
 
 /// Port-only: the render layer of the layer `style`, of a built-in type.
 pub(crate) fn render_layer(
-    style: &std::sync::Arc<dyn mln_style::layer_type::ErasedLayerStyle>,
+    style: &std::sync::Arc<dyn mln_style::layer::ErasedLayerStyle>,
 ) -> Box<dyn crate::render_layer::RenderLayer> {
     let registry = crate::Registry::with_builtins();
     let layer_type = registry.layer_type(style.info().name).expect("a built-in layer type");
@@ -364,7 +364,7 @@ pub(crate) fn create_render_source(
 /// as the tileset a style lists, as the map's loader gives it.
 pub(crate) fn ready(source: mln_style::Source) -> mln_style::Source {
     match source.data().plan_load() {
-        mln_style::source_type::Load::Ready(description) => {
+        mln_style::source::Load::Ready(description) => {
             source.with_description(Some(description)).expect("a description of the source's type")
         }
         _ => source,

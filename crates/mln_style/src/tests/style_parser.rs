@@ -7,8 +7,8 @@ use mln_vec_map::VecSet;
 use super::util::FixtureLog;
 use crate::StyleRegistry;
 use crate::layer::FontStack;
-use crate::parser::Parser;
 use crate::property::table::Kind;
+use crate::style::parse::Parser;
 
 fn fixtures_dir() -> PathBuf {
     std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata/test/fixtures/style_parser")
@@ -292,7 +292,7 @@ fn font_face_unicode_range_with_multibyte_character() {
 fn fallback_font_faces() {
     use mln_text::glyph::GlyphIDType;
 
-    use crate::parser::parse_fallback_font_faces;
+    use crate::style::parse::parse_fallback_font_faces;
 
     let faces = parse_fallback_font_faces(
         r#"[{"url": "a.ttf", "unicode-range": ["U+1000-109F", "U+A9E0-A9FF"]}, {"url": "b.ttf"}]"#,

@@ -11,12 +11,11 @@ use mln_util::serialization::shared;
 
 use super::util::{parse_json, style_of};
 use crate::StyleRegistry;
-use crate::conversion::{Convertible, Error, convert_layer};
+use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
-use crate::layer::Layer;
-use crate::layer_type::ErasedLayerStyle;
+use crate::layer::{ErasedLayerStyle, Layer, convert_layer};
 use crate::layers::FillExtrusion;
-use crate::serialization::SharedLayer;
+use crate::wire::SharedLayer;
 
 fn parse(json: &serde_json::Value) -> Layer {
     let mut error = Error::default();
@@ -185,7 +184,7 @@ fn boolean_filters() {
     let mut error = Error::default();
     // What `setFilter(null)` sets.
     let filter =
-        crate::conversion::convert_filter(&Convertible::from(&Value::Null), &Functions::with_builtins(), &mut error)
+        crate::filter::convert_filter(&Convertible::from(&Value::Null), &Functions::with_builtins(), &mut error)
             .unwrap_or_else(|| panic!("{}", error.message));
     fill.set_filter(&filter);
     round_trip(&fill);

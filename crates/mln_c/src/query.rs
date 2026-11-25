@@ -106,13 +106,9 @@ unsafe fn filter(view: mln_buffer_view, functions: &Arc<Functions>) -> Result<Op
         let document: serde_json::Value = serde_json::from_str(&json)
             .map_err(|error| Error::invalid_argument(format!("query filter is not valid JSON: {error}")))?;
         let mut error = mln_style::conversion::Error::default();
-        mln_style::conversion::convert_filter(
-            &mln_style::conversion::Convertible::from(&document),
-            &functions,
-            &mut error,
-        )
-        .map(Some)
-        .ok_or_else(|| Error::invalid_argument(format!("query filter is invalid: {}", error.message)))
+        mln_style::filter::convert_filter(&mln_style::conversion::Convertible::from(&document), &functions, &mut error)
+            .map(Some)
+            .ok_or_else(|| Error::invalid_argument(format!("query filter is invalid: {}", error.message)))
     })?
 }
 

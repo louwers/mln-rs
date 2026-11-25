@@ -3,8 +3,8 @@ use std::sync::Arc;
 use mln_util::Color;
 use mln_vec_map::VecSet;
 
+use crate::conversion::to_value::make_color_ramp_style_property;
 use crate::conversion::{Convertible, Error};
-use crate::conversion_impl::make_color_ramp_style_property;
 use crate::expression::value::from_expression_value;
 use crate::expression::{
     Dependency, EvaluationContext, Expr, Functions, GlobalStateMap, ParsingContext, Type, collect_global_state_refs,
@@ -14,7 +14,7 @@ use crate::property::evaluated::{Evaluated, Evaluation};
 use crate::property::evaluation::PropertyEvaluationParameters;
 use crate::property::table::{PropertyInfo, StyleProperty};
 use crate::property::value::StyleValue;
-use crate::serialization::optional_expression;
+use crate::wire::optional_expression;
 
 /// Special-case implementation of (a subset of) the `PropertyValue<T>`
 /// interface used for building the paint property traits classes for

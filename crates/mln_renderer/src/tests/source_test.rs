@@ -12,10 +12,9 @@ use mln_map_types::{
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, FileSourceExt, Kind, RequestOrder, Resource, Responder, Response};
-use mln_style::layer::Layer;
-use mln_style::layer_type::LayerStyle;
+use mln_style::layer::{Layer, LayerStyle};
 use mln_style::layers::{Circle, Hillshade, Line, Raster};
-use mln_style::source_type::{Fetch, Load, SourceData};
+use mln_style::source::{Fetch, Load, SourceData};
 use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
 use mln_style::sources::custom_vector_source::{self, Options as CustomVectorSourceOptions, TileDataFormat};
 use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, create_geojson_data, geojson_source};

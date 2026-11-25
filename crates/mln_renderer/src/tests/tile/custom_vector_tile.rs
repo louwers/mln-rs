@@ -5,8 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_style::custom_tile_loader::{CustomProvider, CustomTileSubscriber, TileFunction};
-use mln_style::layer::Layer;
-use mln_style::layer_type::LayerStyle;
+use mln_style::layer::{Layer, LayerStyle};
 use mln_style::layers::Fill;
 use mln_style::sources::custom_vector_source::{CustomVectorProvider, CustomVectorTileData, TileDataFormat};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};

@@ -14,7 +14,7 @@ use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_map_types::{ProjectionData, View};
 use mln_style::expression::Dependency;
-use mln_style::layer_type::{ErasedLayerStyle, LayerStyle, PaintSet, SourceKind, StyleLayerType};
+use mln_style::layer::{ErasedLayerStyle, LayerStyle, PaintSet, SourceKind, StyleLayerType};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_style_types::image::ImagePosition;
 use mln_style_types::{TranslateAnchorType, VisibilityType};

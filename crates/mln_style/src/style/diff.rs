@@ -7,9 +7,8 @@ use std::sync::Arc;
 use mln_vec_map::VecMap;
 
 use crate::image;
-use crate::layer_list::LayerList;
-use crate::source_list::SourceList;
-use crate::source_type::Source;
+use crate::layer::LayerList;
+use crate::source::{Source, SourceList};
 use crate::style::Style;
 
 /// How a layer differs between two layer lists.

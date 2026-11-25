@@ -18,8 +18,8 @@ use crate::Edit;
 use crate::conversion::geojson::convert_json_geojson;
 use crate::conversion::{Convertible, Error as ConversionError};
 use crate::expression::{Expr, Functions, evaluate_accumulated, from_expression_value};
-use crate::layer_type::SourceKind;
-use crate::source_type::{
+use crate::layer::SourceKind;
+use crate::source::{
     Data, Described, Fetch, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,
 };
 
@@ -455,7 +455,7 @@ pub fn geojson_data(source: &Source) -> Option<&Arc<dyn GeoJSONData>> {
 }
 
 // Debug is not a supertrait, for the reason at
-// `impl Debug for dyn ErasedLayerStyle` (layer_type.rs).
+// `impl Debug for dyn ErasedLayerStyle` (layer/type_.rs).
 impl std::fmt::Debug for dyn GeoJSONData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GeoJSONData").finish_non_exhaustive()

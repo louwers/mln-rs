@@ -17,7 +17,7 @@ pub use super::custom::{CustomGeometryProvider, TileOptions};
 use super::custom::{CustomGeometrySourceOptions, CustomGeometrySourceType};
 use super::geojson::TileFeatures;
 use crate::custom_tile_loader::{CustomProvider, TileFunction};
-use crate::source_type::{Source, SourceData};
+use crate::source::{Source, SourceData};
 
 #[derive(Clone)]
 pub struct Options {

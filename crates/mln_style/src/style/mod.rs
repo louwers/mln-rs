@@ -6,23 +6,25 @@ use mln_util::geo::LatLng;
 use mln_util::logging::{Event, Log};
 
 use crate::conversion::Convertible;
-use crate::edit::Edit;
 use crate::expression::GlobalStateMap;
 use crate::filter::Filter;
 use crate::image;
-use crate::layer::Layer;
-use crate::layer_list::LayerList;
-use crate::layer_type::SourceKind;
+use crate::layer::{Layer, LayerList, SourceKind};
 use crate::light::Light;
-use crate::parser::Parser;
 use crate::projection::Projection;
 use crate::property::transition::TransitionOptions;
 use crate::registry::StyleRegistry;
 use crate::sky::Sky;
-use crate::source_list::SourceList;
-use crate::source_type::Source;
+use crate::source::{Source, SourceList};
 use crate::sprite::Sprite;
+use crate::style::edit::Edit;
+use crate::style::parse::Parser;
 use crate::terrain::Terrain;
+
+pub mod diff;
+pub(crate) mod edit;
+pub(crate) mod json;
+pub(crate) mod parse;
 
 /// The camera that a style's root properties set: `center`, `centerAltitude`,
 /// `zoom`, `bearing`, `pitch` and `roll`. A parsed style sets every member,

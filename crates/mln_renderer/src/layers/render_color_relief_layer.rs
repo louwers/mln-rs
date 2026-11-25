@@ -27,7 +27,7 @@ use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::expression::{
     Dependency, EvaluationContext, GlobalStateMap, from_expression_value, global_state_refs_intersect,
 };
-use mln_style::layer_type::LayerStyle;
+use mln_style::layer::LayerStyle;
 use mln_style::layers::ColorRelief;
 use mln_style::property::color_ramp::ColorRampPropertyValue;
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};

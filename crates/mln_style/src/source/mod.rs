@@ -26,8 +26,14 @@ use mln_util::tileset::{Tileset, VectorEncoding};
 
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
-use crate::layer_type::SourceKind;
+use crate::layer::SourceKind;
 use crate::sources::geojson::GeoJSONOptions;
+
+mod convert;
+mod list;
+
+pub use convert::convert_source;
+pub use list::SourceList;
 
 /// What the engine needs to know about a source type besides its data. The
 /// name identifies the type: two registries that agree on a name agree on
@@ -487,7 +493,7 @@ impl Source {
 }
 
 // Debug is not a supertrait, for the reason at
-// `impl Debug for dyn ErasedLayerStyle` (layer_type.rs).
+// `impl Debug for dyn ErasedLayerStyle` (layer/type_.rs).
 impl std::fmt::Debug for Source {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Source")

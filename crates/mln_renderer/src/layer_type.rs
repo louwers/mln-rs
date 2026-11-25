@@ -12,10 +12,8 @@ use std::sync::Arc;
 
 use mln_style::CrossfadeParameters;
 use mln_style::expression::Dependency;
-use mln_style::layer_type::{
-    ErasedLayerStyle, ErasedStyleLayerType, LayerStyle, LayerTypeEntry, PaintSet, StyleLayerType,
-};
-use mln_style::serialization::SharedLayer;
+use mln_style::layer::{ErasedLayerStyle, ErasedStyleLayerType, LayerStyle, LayerTypeEntry, PaintSet, StyleLayerType};
+use mln_style::wire::SharedLayer;
 use mln_util::error::Error;
 use mln_util::serialization::shared;
 use mln_vec_map::VecSet;

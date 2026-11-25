@@ -22,11 +22,11 @@
 //!
 //! Layers:
 //! - `layer::Layer` is a layer of any type. Its style data is an
-//!   `Arc<dyn layer_type::ErasedLayerStyle>`, a `layer_type::LayerStyle<T>`
-//!   of its type `T`; `layer_type::LayerBase` holds the members every layer
+//!   `Arc<dyn layer::ErasedLayerStyle>`, a `layer::LayerStyle<T>`
+//!   of its type `T`; `layer::LayerBase` holds the members every layer
 //!   type has.
 //! - Each layer type is a marker type that implements
-//!   `layer_type::StyleLayerType`, such as `layers::Background`, with
+//!   `layer::StyleLayerType`, such as `layers::Background`, with
 //!   property sets such as
 //!   `layers::BackgroundPaintProperties::{Transitionable, Unevaluated, PossiblyEvaluated, Evaluated}`.
 //! - Each layer type, the light and the sky have a property table, which
@@ -36,41 +36,30 @@
 //!   spec.
 
 pub mod conversion;
-mod conversion_impl;
 pub mod custom_tile_loader;
-pub mod diff;
-pub mod edit;
 pub mod expression;
 pub mod filter;
-pub mod format_section_override;
 pub mod image;
 pub mod layer;
-pub mod layer_list;
-pub mod layer_type;
 pub mod layers;
 pub mod light;
 #[rustfmt::skip]
 mod light_properties;
-pub mod parser;
 pub mod projection;
 pub mod property;
 pub mod registry;
-pub mod serialization;
 pub mod sky;
 #[rustfmt::skip]
 mod sky_properties;
-pub mod source_list;
-pub mod source_type;
+pub mod source;
 pub mod sources;
 pub mod sprite;
 mod style;
-mod style_json;
 pub mod terrain;
+#[doc(hidden)]
+pub mod wire;
 
-pub use edit::Edit;
-pub use layer::Layer;
-pub use layer_list::LayerList;
-pub use layer_type::LayerTypeInfo;
+pub use layer::{Layer, LayerList, LayerTypeInfo};
 pub use property::evaluation::{CrossfadeParameters, PropertyEvaluationParameters};
 // The property macros, at the root so that the generated code and the
 // macros themselves name them as `crate::name!`.
@@ -80,9 +69,10 @@ pub(crate) use property::set::{
 pub use property::transition::{GlobalStateChange, TransitionOptions, TransitionParameters};
 pub use property::value::{PropertyValue, StyleValue};
 pub use registry::StyleRegistry;
-pub use source_list::SourceList;
-pub use source_type::{Source, SourceInstance, SourceTypeInfo};
-pub use style::{Style, StyleCamera, StyleLoadError};
+pub use source::{Source, SourceInstance, SourceList, SourceTypeInfo};
+pub use style::edit::{Edit, SourceUpdate};
+pub use style::parse::{Parser, parse_fallback_font_faces};
+pub use style::{Style, StyleCamera, StyleLoadError, diff};
 
 #[cfg(test)]
 mod tests;
