@@ -11,13 +11,19 @@
 #   check-commit-authors.sh --message <file>   a message being committed,
 #                                              with the commit's identities
 #                                              (hk's commit-msg hook)
+#   check-commit-authors.sh --author <identity>
+#                         a pull request's author, whom its squash merge may
+#                         credit ("<id+login@users.noreply.github.com>")
+#   check-commit-authors.sh --squash-message <file>
+#                         the message auto-merge saved for a squash merge
 #
 # It exits 1 and lists what it rejects when it rejects anything.
 
 set -euo pipefail
 
 usage() {
-    echo "usage: $0 <revision-range> | --message <commit-message-file>" >&2
+    echo "usage: $0 <revision-range> | --message <commit-message-file>" \
+        "| --author <identity> | --squash-message <file>" >&2
     exit 2
 }
 
@@ -34,6 +40,16 @@ if [[ $# -eq 2 && $1 == --message ]]; then
         # What git strips from the message: comment lines, and everything
         # below `git commit --verbose`'s scissors line.
         sed -e '/^# -* >8 -*$/,$d' -e '/^#/d' "$message"
+        printf '\036'
+    }
+elif [[ $# -eq 2 && $1 == --author ]]; then
+    author=$2
+    commits() { printf 'pull request\037%s\037\037\036' "$author"; }
+elif [[ $# -eq 2 && $1 == --squash-message ]]; then
+    message=$2
+    commits() {
+        printf 'squash message\037\037\037'
+        cat "$message"
         printf '\036'
     }
 elif [[ $# -eq 1 && $1 != -* ]]; then

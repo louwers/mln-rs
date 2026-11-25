@@ -523,9 +523,10 @@ jobs:
           echo "Cloudflare Pages preview: ${url}" >> "$GITHUB_STEP_SUMMARY"
 
   # That no commit credits an AI tool as its author, committer or co-author
-  # (tools/check-commit-authors.sh): a pull request's own commits,
-  # whose authors a squash merge makes co-authors, and on main the pushed
-  # commits, whose messages the merge dialog may have changed.
+  # (tools/check-commit-authors.sh): a pull request's own commits, whose
+  # authors a squash merge makes co-authors, and its author, whom the squash
+  # commit may credit; on main, the pushed commits, whose messages the merge
+  # dialog may have changed. `ci-passed` checks auto-merge's saved message.
   commits:
     if: github.event.pull_request.state != 'closed'
     runs-on: blacksmith-2vcpu-ubuntu-2604
@@ -538,7 +539,20 @@ jobs:
           filter: blob:none
           persist-credentials: false
 
-      - env:
+      - name: Check the pull request's author
+        if: github.event_name == 'pull_request'
+        env:
+          LOGIN: ${{ github.event.pull_request.user.login }}
+          ID: ${{ github.event.pull_request.user.id }}
+        run: |
+          tools/check-commit-authors.sh --author \
+            "<$ID+$LOGIN@users.noreply.github.com>" || {
+            echo "::error::A person should open this pull request, so that its squash merge credits them."
+            exit 1
+          }
+
+      - name: Check the commits
+        env:
           BEFORE: ${{ github.event.before }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
@@ -571,8 +585,38 @@ jobs:
     if: always() && github.event.pull_request.state != 'closed'
     runs-on: blacksmith-2vcpu-ubuntu-2604
     timeout-minutes: 5
-    permissions: {}
+    permissions:
+      contents: read # check out tools/check-commit-authors.sh
+      pull-requests: read # read the message auto-merge saved
     steps:
+      # GitHub fixes a squash commit's message when auto-merge is enabled,
+      # from the commits and description of that moment, and merges with it
+      # once this check passes. Read it live in the last job, so that one
+      # saved before commits it lists were rewritten is checked too. One
+      # saved after this step reads it goes unchecked.
+      - name: Check out the author check
+        if: github.event_name == 'pull_request'
+        uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1.8.3
+        with:
+          persist-credentials: false
+          sparse-checkout: tools/check-commit-authors.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Check auto-merge's squash message
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          message=$(mktemp)
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" \
+            --jq '.auto_merge // empty | "\(.commit_title)\n\n\(.commit_message)"' \
+            >"$message"
+          tools/check-commit-authors.sh --squash-message "$message" || {
+            echo "::error::Disable auto-merge, enable it again with a message that credits AI tools with Assisted-by: trailers, then rerun this job."
+            exit 1
+          }
+
       - name: Require plan and every planned job
         env:
           PLAN: ${{ needs.plan.result }}
