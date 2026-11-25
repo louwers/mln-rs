@@ -10,6 +10,8 @@ mod bucket_geometry;
 mod bucket_parameters;
 mod buckets;
 mod clip_masks;
+#[cfg(feature = "gpu-conformance")]
+pub mod conformance;
 mod draw;
 mod frame;
 mod frame_projection;

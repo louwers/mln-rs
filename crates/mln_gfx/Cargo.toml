@@ -28,8 +28,9 @@ slotmap.workspace = true
 thiserror.workspace = true
 
 [features]
-# `gpu::conformance`, the frames that the backends' tests draw through their
-# `Gpu`.
+# The programs that only the GPU conformance cases (mln_renderer's
+# `conformance`) draw with, for the backends' tests: `VERTEX_TEXEL` and
+# `TERRAIN_PROBE` in `shaders::programs`.
 gpu-conformance = []
 
 [lints]

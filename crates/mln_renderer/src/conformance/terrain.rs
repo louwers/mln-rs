@@ -2,25 +2,25 @@
 
 use std::cell::Cell;
 
+use mln_gfx::color_mode::ColorMode;
+use mln_gfx::gfx_types::AttributeDataType;
+use mln_gfx::gpu::{
+    BindGroupEntry, BindingsDesc, BufferUsage, ColorAttachment, Draw, DynamicState, GeometryDesc, Gpu, GpuError,
+    LoadOp, PassDesc, PipelineDesc, Scissor, ShaderId, ShaderKey, StencilState, TargetFormats, TextureDesc,
+    TextureFormat, TextureRegion, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep, read_texels,
+};
+use mln_gfx::shaders::bindings::PROJECTION_ID;
+use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::programs;
+use mln_gfx::shaders::terrain_ubo::TerrainSurfaceUBO;
+use mln_gfx::stencil_mode::StencilMode;
+use mln_gfx::texture2d::SamplerState;
 use mln_util::Color;
 use mln_util::dem::{self, DemCoords, DemUnpack};
 use mln_util::size::Size;
 use mln_util::tileset::RasterEncoding;
 
 use super::{EXTENT, buffer, draw, dynamic, fixed, location, slot, whole};
-use crate::color_mode::ColorMode;
-use crate::gfx_types::AttributeDataType;
-use crate::gpu::{
-    BindGroupEntry, BindingsDesc, BufferUsage, ColorAttachment, Draw, DynamicState, GeometryDesc, Gpu, GpuError,
-    LoadOp, PassDesc, PipelineDesc, Scissor, ShaderId, ShaderKey, StencilState, TargetFormats, TextureDesc,
-    TextureFormat, TextureRegion, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep, read_texels,
-};
-use crate::shaders::bindings::PROJECTION_ID;
-use crate::shaders::layer_ubo::ProjectionUBO;
-use crate::shaders::programs;
-use crate::shaders::terrain_ubo::TerrainSurfaceUBO;
-use crate::stencil_mode::StencilMode;
-use crate::texture2d::SamplerState;
 
 /// The most probes a frame draws, one per texel of a one-row target, which
 /// every backend's textures are wide enough for.

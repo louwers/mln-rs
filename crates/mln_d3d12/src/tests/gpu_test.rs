@@ -1,12 +1,12 @@
-use mln_gfx::gpu::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, imported_textures,
-    instanced_walls, invalid_calls, mipmapped_targets, pulled_walls, readbacks, resources_in_use, terrain_heights,
-    topologies, transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
-};
 use mln_gfx::gpu::{Gpu as _, GpuError};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_glsl::BUILT_INS;
+use mln_renderer::conformance::{
+    clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, imported_textures,
+    instanced_walls, invalid_calls, mipmapped_targets, pulled_walls, readbacks, resources_in_use, terrain_heights,
+    topologies, transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
+};
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_UNKNOWN};
 
 use crate::{D3d12Gpu, Device};

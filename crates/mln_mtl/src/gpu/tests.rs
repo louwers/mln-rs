@@ -1,13 +1,13 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use mln_gfx::gpu::conformance::{
+use mln_gfx::gpu::{BufferUsage, ColorAttachment};
+use mln_gfx::shaders::programs;
+use mln_renderer::conformance::{
     clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, imported_textures,
     instanced_walls, invalid_calls, mipmapped_targets, pulled_walls, readbacks, resources_in_use, terrain_heights,
     topologies, transparent_replace, vertex_layouts, written_vertex_texels,
 };
-use mln_gfx::gpu::{BufferUsage, ColorAttachment};
-use mln_gfx::shaders::programs;
 use mln_util::Color;
 use objc2::runtime::NSObjectProtocol as _;
 use objc2::{msg_send, sel};

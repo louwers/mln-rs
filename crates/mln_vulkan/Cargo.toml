@@ -40,11 +40,13 @@ windows.workspace = true
 [target.'cfg(all(unix, not(any(target_vendor = "apple", target_family = "wasm"))))'.dependencies]
 libc.workspace = true
 
-# The conformance suite that `VulkanGpu`'s tests run, and the sets of defines
-# they compile the programs with.
+# The conformance cases that `VulkanGpu`'s tests run, and the test-only
+# programs' sources and the sets of defines they compile the programs with.
 [target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dev-dependencies]
-mln_gfx = { workspace = true, features = ["gpu-conformance"] }
 mln_glsl = { workspace = true, features = ["gpu-conformance", "variants"] }
+mln_renderer = { package = "mln-rs-renderer", path = "../mln_renderer", features = [
+  "gpu-conformance",
+] }
 
 [lints]
 workspace = true

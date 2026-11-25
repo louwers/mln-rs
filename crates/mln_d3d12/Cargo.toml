@@ -36,11 +36,13 @@ windows = { workspace = true, features = [
   "Win32_System_Threading",
 ] }
 
-# The conformance suite that `D3d12Gpu`'s tests run, and the sets of defines
-# they compile the programs with.
+# The conformance cases that `D3d12Gpu`'s tests run, and the test-only
+# programs' sources and the sets of defines they compile the programs with.
 [target.'cfg(windows)'.dev-dependencies]
-mln_gfx = { workspace = true, features = ["gpu-conformance"] }
 mln_glsl = { workspace = true, features = ["gpu-conformance", "variants"] }
+mln_renderer = { package = "mln-rs-renderer", path = "../mln_renderer", features = [
+  "gpu-conformance",
+] }
 
 [lints]
 workspace = true

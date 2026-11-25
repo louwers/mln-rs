@@ -18,8 +18,6 @@
 //! backend maps them to its own slots, groups, descriptor sets or shader
 //! locations.
 
-#[cfg(feature = "gpu-conformance")]
-pub mod conformance;
 mod ids;
 pub mod validation;
 

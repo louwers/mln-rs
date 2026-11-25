@@ -45,8 +45,13 @@ objc2-quartz-core.workspace = true
 parking_lot.workspace = true
 raw-window-metal.workspace = true
 
+# The test-only programs, which the tests compile and draw with, and the
+# conformance cases that `MetalGpu`'s tests run.
 [target.'cfg(target_vendor = "apple")'.dev-dependencies]
 mln_gfx = { workspace = true, features = ["gpu-conformance"] }
+mln_renderer = { package = "mln-rs-renderer", path = "../mln_renderer", features = [
+  "gpu-conformance",
+] }
 
 [lints]
 workspace = true

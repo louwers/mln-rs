@@ -1,6 +1,6 @@
-//! The check of the browser's GPU that check/check.mjs runs: `mln_gfx`'s
-//! conformance cases of writes from JS arrays (`conformance::host_writes`)
-//! and of writes while the instance's memory grows
+//! The check of the browser's GPU that check/check.mjs runs:
+//! `mln_renderer`'s conformance cases of writes from JS arrays
+//! (`conformance::host_writes`) and of writes while the instance's memory grows
 //! (`conformance::memory_growth`), on a `Gpu` of the map's backend made for
 //! the check alone, since the map's own is its render session's. The cases
 //! test how the backend takes bytes, not the map.
@@ -10,7 +10,8 @@ use std::future::Future;
 use std::rc::Rc;
 
 use mln_gfx::RendererBackend as _;
-use mln_gfx::gpu::{Gpu as _, ReadbackId, ResourceId, conformance, destroy_unused};
+use mln_gfx::gpu::{Gpu as _, ReadbackId, ResourceId, destroy_unused};
+use mln_renderer::conformance;
 use mln_util::error::Error;
 use wasm_bindgen::{JsCast as _, JsValue};
 

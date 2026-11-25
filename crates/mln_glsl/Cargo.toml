@@ -27,8 +27,8 @@ mln_gfx = { workspace = true, features = ["gpu-conformance"] }
 # `variants`, the sets of defines that the backends' tests compile each
 # program with.
 variants = []
-# The programs that only `mln_gfx::gpu::conformance` draws with, for the
-# backends' tests.
+# The programs that only the GPU conformance cases (mln_renderer's
+# `conformance`) draw with, for the backends' tests.
 gpu-conformance = ["mln_gfx/gpu-conformance"]
 
 [lints]

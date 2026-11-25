@@ -30,6 +30,9 @@ font-face-shaper = []
 # `bench`, the entry points to internal stages that the benchmarks
 # (tools/bench) measure. Not API: hidden from the documentation.
 bench = []
+# `conformance`, the frames that the backends' tests draw through their
+# `Gpu`.
+gpu-conformance = ["mln_gfx/gpu-conformance"]
 
 [dependencies]
 bytemuck = { workspace = true, features = ["extern_crate_alloc"] }

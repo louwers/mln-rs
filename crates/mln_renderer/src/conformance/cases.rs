@@ -3,33 +3,33 @@
 
 use std::any::Any;
 
-use mln_util::Color;
-use mln_util::size::Size;
-
-use super::{EXTENT, SIZE, buffer, draw, dynamic, fixed, location, position_layout, quad, slot, tile_matrix, whole};
-use crate::color_mode::ColorMode;
-use crate::gfx_types::{AttributeDataType, DrawModeType};
-use crate::gpu::{
+use mln_gfx::color_mode::ColorMode;
+use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
+use mln_gfx::gpu::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferDesc, BufferId, BufferUsage, ColorAttachment, DepthState,
     DepthStencilAttachment, Draw, DynamicState, GeometryDesc, GeometryId, Gpu, GpuError, LoadOp, PassDesc,
     PipelineDesc, PipelineId, ResourceId, Scissor, ShaderId, ShaderKey, StencilState, TargetFormats, TextureDesc,
     TextureFormat, TextureId, TextureRegion, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
     read_texels,
 };
-use crate::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
-use crate::shaders::bindings::{PAINT_PARAMS_ID, PROJECTION_ID};
-use crate::shaders::fill_extrusion_layer_ubo::{
+use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
+use mln_gfx::shaders::bindings::{PAINT_PARAMS_ID, PROJECTION_ID};
+use mln_gfx::shaders::fill_extrusion_layer_ubo::{
     FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO,
 };
-use crate::shaders::fill_layer_ubo::{FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO};
-use crate::shaders::heatmap_texture_layer_ubo::HeatmapTexturePropsUBO;
-use crate::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
-use crate::shaders::program::Program;
-use crate::shaders::programs;
-use crate::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
-use crate::stencil_mode::StencilMode;
-use crate::texture2d::SamplerState;
-use crate::types::{DepthFunctionType, TextureFilterType};
+use mln_gfx::shaders::fill_layer_ubo::{FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO};
+use mln_gfx::shaders::heatmap_texture_layer_ubo::HeatmapTexturePropsUBO;
+use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
+use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::programs;
+use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
+use mln_gfx::stencil_mode::StencilMode;
+use mln_gfx::texture2d::SamplerState;
+use mln_gfx::types::{DepthFunctionType, TextureFilterType};
+use mln_util::Color;
+use mln_util::size::Size;
+
+use super::{EXTENT, SIZE, buffer, draw, dynamic, fixed, location, position_layout, quad, slot, tile_matrix, whole};
 
 const BLACK: Color = Color::black();
 const RGBA8: TargetFormats = TargetFormats { color: Some(TextureFormat::Rgba8Unorm), depth_stencil: None };
@@ -160,7 +160,7 @@ fn invalid<T>(result: &Result<T, GpuError>) -> bool {
 }
 
 /// Checks that `gpu` rejects calls that break the rules of
-/// [`validation`](crate::gpu::validation) and the calls' own, as
+/// [`validation`](mln_gfx::gpu::validation) and the calls' own, as
 /// [`GpuError::Invalid`], and takes the same calls without the fault.
 /// Returns the error of a call that should succeed.
 ///
@@ -360,7 +360,7 @@ pub(super) fn texel(pixels: &[u8], x: u32, y: u32) -> [u8; 4] {
     [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
 }
 
-/// Checks that [`BlendFunction::Replace`](crate::color_mode::BlendFunction)
+/// Checks that [`BlendFunction::Replace`](mln_gfx::color_mode::BlendFunction)
 /// writes a translucent color as it is, over opaque black. Returns the
 /// error of a call that should succeed.
 ///
@@ -1073,7 +1073,7 @@ pub fn wall_quads(gpu: &mut impl Gpu) -> Result<(), GpuError> {
 ///
 /// Where a check doesn't hold.
 ///
-/// [`Caps::binds_vertex_buffers`]: crate::gpu::Caps::binds_vertex_buffers
+/// [`Caps::binds_vertex_buffers`]: mln_gfx::gpu::Caps::binds_vertex_buffers
 pub fn pulled_walls(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let outline = wall_outline();
     let outline: &[u8] = bytemuck::cast_slice(&outline);
@@ -1389,7 +1389,7 @@ pub fn custom_layers(
 pub fn host_writes<G: Gpu + ?Sized>(
     gpu: &mut G,
     host: impl Fn(&[u8]) -> mln_util::host_bytes::HostBytes,
-) -> Result<crate::gpu::ReadbackId, GpuError> {
+) -> Result<mln_gfx::gpu::ReadbackId, GpuError> {
     let target = target(gpu, TextureFormat::Rgba8Unorm)?;
     let (quad, indices) = quad(gpu)?;
     let shader = gpu.create_shader(&ShaderKey::new(&programs::BACKGROUND, []))?;
@@ -1499,7 +1499,7 @@ const GROWTH_BOX: u32 = 8;
 /// [`check_memory_growth`] checks once the backend has them, or the error
 /// of a call that should succeed.
 #[cfg(target_family = "wasm")]
-pub fn memory_growth(gpu: &mut impl Gpu, mut arm: impl FnMut(usize)) -> Result<crate::gpu::ReadbackId, GpuError> {
+pub fn memory_growth(gpu: &mut impl Gpu, mut arm: impl FnMut(usize)) -> Result<mln_gfx::gpu::ReadbackId, GpuError> {
     let target = target(gpu, TextureFormat::Rgba8Unorm)?;
     let size = Size::new(2, 2);
     let texture = gpu.create_texture(&TextureDesc {
