@@ -144,7 +144,7 @@ mod versions {
         "layers":[{"id":"bg","type":"background"},{"id":"dots","type":"circle","source":"a"}]}"#;
 
     fn style() -> crate::Style {
-        crate::Style::from_json(&StyleRegistry::with_builtins(), STYLE, None).unwrap()
+        crate::Style::from_json(&StyleRegistry::with_builtins(), STYLE).unwrap()
     }
 
     fn vector(id: &str) -> crate::Source {

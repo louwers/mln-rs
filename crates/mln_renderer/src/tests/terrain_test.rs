@@ -73,6 +73,7 @@ fn update_parameters(style: Style, transform: &Transform, mode: MapMode) -> Upda
         max_zoom: 22.0,
         camera_moving: false,
         style: Arc::new(style),
+        font_faces: None,
         sprite_loaded: true,
         feature_states: Arc::default(),
         file_source: None,

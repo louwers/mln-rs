@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use mln_text::glyph::{FontFace, FontFaces};
 use mln_tile_id::CanonicalTileID;
 
 use crate::conversion::Convertible;
@@ -9,6 +8,7 @@ use crate::expression::value::Value;
 use crate::expression::{
     EvaluationContext, Expr, FeatureState, Functions, GlobalStateMap, dsl, evaluate_feature_with_context, is_expression,
 };
+use crate::font_face::{FontFace, FontFaces};
 
 /// A path relative to the C++ repository, in the copy of the files these
 /// tests read (testdata/).
@@ -109,7 +109,11 @@ fn is_supported_script_accepts_scripts_that_font_faces_cover() {
         let context = EvaluationContext::default().with_font_faces(font_faces).with_global_state(Some(&state));
         parsed.evaluate(&context) == Ok(Value::Bool(true))
     };
-    let myanmar = vec![FontFace::new("Noto Sans Regular", "myanmar.ttf", vec![(0x1000, 0x109F)])];
+    let myanmar = vec![FontFace {
+        name: "Noto Sans Regular".to_owned(),
+        url: "myanmar.ttf".to_owned(),
+        ranges: vec![(0x1000, 0x109F)],
+    }];
 
     assert!(!evaluate("မြန်မာ", None));
     assert!(evaluate("မြန်မာ", Some(&myanmar)));

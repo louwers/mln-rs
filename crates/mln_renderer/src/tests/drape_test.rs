@@ -294,7 +294,7 @@ const TWO_STACKS: &str = r#"{
 /// that has a texture then.
 fn textured_drapes(style: &str) -> BTreeSet<(OverscaledTileID, usize)> {
     let registry = Registry::with_builtins();
-    let parsed = Style::from_json(registry.style(), style, None).expect("the style");
+    let parsed = Style::from_json(registry.style(), style).expect("the style");
     let mut style = Style::new(Arc::clone(registry.style()));
     for source in parsed.get_sources().iter() {
         style.apply(Edit::AddSource(crate::tests::ready(source.clone()))).unwrap();
@@ -336,6 +336,7 @@ fn textured_drapes(style: &str) -> BTreeSet<(OverscaledTileID, usize)> {
             max_zoom: 22.0,
             camera_moving: false,
             style: Arc::clone(&style),
+            font_faces: None,
             sprite_loaded: true,
             feature_states: Arc::default(),
             file_source: Some(Arc::clone(&file_source)),

@@ -297,7 +297,7 @@ impl RenderOrchestrator {
         let style = &update_parameters.style;
 
         self.tile_store.glyphs().set_url(style.get_glyph_url());
-        self.tile_store.glyphs().set_font_faces(style.get_font_faces().cloned());
+        self.tile_store.glyphs().set_font_faces(update_parameters.font_faces.clone());
         self.tile_store.set_file_source(update_parameters.file_source.clone());
 
         // What arrived for the tiles before the sources update, so that a
@@ -849,7 +849,7 @@ impl RenderOrchestrator {
             subdivision_granularity: update_parameters.subdivision_granularity,
             global_state: self.global_state.clone(),
             is_update_synchronous: false,
-            font_faces: update_parameters.style.get_font_faces().cloned(),
+            font_faces: update_parameters.font_faces.clone(),
             glyph_pbfs: !update_parameters.style.get_glyph_url().is_empty(),
             placement_commits: self.placement_controller.commits(),
             terrain: self.terrain.cover(),

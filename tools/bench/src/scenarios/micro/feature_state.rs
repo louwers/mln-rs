@@ -87,7 +87,7 @@ fn selectable(fixtures: &Fixtures) -> Style {
         selectable += 1;
     }
     assert!(selectable > 0, "Liberty colors its roads and buildings");
-    with_sprite(fixtures, Style::from_json(&registry(), &style.to_string(), None).expect("the style parses"))
+    with_sprite(fixtures, Style::from_json(&registry(), &style.to_string()).expect("the style parses"))
 }
 
 /// A state for each road and building of `data`, every other one selected,

@@ -118,7 +118,7 @@ impl Tiles {
 /// The style of `json`, with what its sources' types know without a fetch.
 fn style_of(json: &str) -> Style {
     let registry = Registry::with_builtins();
-    let parsed = Style::from_json(registry.style(), json, None).expect("the style");
+    let parsed = Style::from_json(registry.style(), json).expect("the style");
     let mut style = Style::new(Arc::clone(registry.style()));
     for source in parsed.get_sources().iter() {
         style.apply(Edit::AddSource(crate::tests::ready(source.clone()))).unwrap();
@@ -231,6 +231,7 @@ impl DrapedMap {
             max_zoom: 22.0,
             camera_moving: false,
             style: Arc::clone(&self.style),
+            font_faces: None,
             sprite_loaded: true,
             feature_states: Arc::default(),
             file_source: Some(file_source),
@@ -318,7 +319,7 @@ impl DrapedMap {
     /// Adds the first layer of `json`, a style's, with its sources, before
     /// the layer `before` or on top.
     fn add_layer(&mut self, json: &str, before: Option<&str>) {
-        let parsed = Style::from_json(Registry::with_builtins().style(), json, None).expect("the style");
+        let parsed = Style::from_json(Registry::with_builtins().style(), json).expect("the style");
         for source in parsed.get_sources().iter() {
             self.edit(Edit::AddSource(crate::tests::ready(source.clone())));
         }

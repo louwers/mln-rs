@@ -169,7 +169,7 @@ impl crate::Style {
     /// Replaces the style with the one `json` describes, as a map's loader
     /// does; a document that doesn't parse leaves the style as it was.
     pub(crate) fn load_json(&mut self, json: &str) {
-        if let Ok(parsed) = Self::from_json(&Arc::clone(self.registry()), json, None) {
+        if let Ok(parsed) = Self::from_json(&Arc::clone(self.registry()), json) {
             *self = parsed;
         }
     }

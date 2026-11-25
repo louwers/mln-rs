@@ -23,6 +23,7 @@ use mln_style::conversion::Convertible;
 use mln_style::source::convert_source;
 use mln_style::{Edit, Source, Style, StyleRegistry};
 use mln_style_types::{ProjectionDefinition, ProjectionType};
+use mln_text::glyph::{FontFace, FontFaces};
 use mln_util::error::Error;
 use mln_util::event_queue::{EventQueue, Waker};
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
@@ -114,6 +115,9 @@ pub struct Map {
     rendering_stats_view: Option<RenderingStatsView>,
     /// The current version of the style.
     style: Arc<Style>,
+    /// The faces that the map draws the style's text with: its
+    /// `font-faces`, then the fallback faces in effect when it parsed.
+    font_faces: Option<Arc<FontFaces>>,
     /// Loads the style's document, its sprites and its sources'
     /// descriptions.
     loader: StyleLoader,
@@ -220,6 +224,7 @@ impl Map {
             debug_options: MapDebugOptions::NO_DEBUG,
             rendering_stats_view: None,
             style,
+            font_faces: None,
             loader,
             feature_state: FeatureStateStore::default(),
             camera_mutated: false,
@@ -407,8 +412,9 @@ impl Map {
                     self.renderer_fully_loaded = false;
                     self.emit(MapEvent::LoadingStarted);
                 }
-                LoadEvent::Parsed(style) => {
+                LoadEvent::Parsed(style, font_faces) => {
                     self.style = Arc::new(style);
+                    self.font_faces = font_faces;
                     self.watch_sources();
                     // A style that loads takes every source's feature state
                     // with it.
@@ -700,6 +706,7 @@ impl Map {
             max_zoom: self.transform.state().limits().max_zoom,
             camera_moving: self.transform.is_camera_moving(),
             style: Arc::clone(&self.style),
+            font_faces: self.font_faces.clone(),
             sprite_loaded: self.loader.sprites_loaded(),
             feature_states: self.feature_state.shared(),
             file_source: self.file_source.clone(),
@@ -1066,7 +1073,7 @@ impl Map {
     /// them, as it ignores a style's `font-faces`.
     pub fn set_fallback_font_faces(&mut self, json: &str) -> Result<(), Error> {
         let faces = mln_style::parse_fallback_font_faces(json)?;
-        self.set_fallback_font_face_list(faces);
+        self.set_fallback_font_face_list(faces.iter().map(FontFace::from).collect());
         Ok(())
     }
 
@@ -1074,7 +1081,7 @@ impl Map {
     /// an app has made, such as `FontFace::fallback(url, ranges).with_data(bytes)`
     /// for a font file it holds in memory, or `FontFace::system`, for the
     /// device's fonts that the renderer's `LocalGlyphs::chooser` chooses.
-    pub fn set_fallback_font_face_list(&mut self, faces: mln_text::glyph::FontFaces) {
+    pub fn set_fallback_font_face_list(&mut self, faces: FontFaces) {
         self.loader.set_fallback_font_faces(Some(Arc::new(faces)));
     }
 

@@ -22,7 +22,7 @@ use mln_storage::{Data, FileSource, FileSourceExt, Request, Resource, ResourceEr
 use mln_style::source::{Described, ErasedDescription, Fetch, Load};
 use mln_style::sprite::Sprite;
 use mln_style::{Edit, SourceInstance, Style, StyleLoadError, StyleRegistry, image};
-use mln_text::glyph::FontFaces;
+use mln_text::glyph::{FontFaces, style_font_faces};
 use mln_util::error::Error;
 use mln_util::event_queue::{EventQueue, Waker};
 use mln_util::hash::HashMap;
@@ -70,8 +70,9 @@ pub(crate) enum SpritePart {
 pub(crate) enum LoadEvent {
     /// A load began.
     Loading,
-    /// A style document parsed, which replaces the style.
-    Parsed(Style),
+    /// A style document parsed, which replaces the style, with the faces
+    /// the map draws its text with.
+    Parsed(Style, Option<Arc<FontFaces>>),
     /// The style and its sprite requests are in place.
     Loaded,
     /// The style document failed to load or parse.
@@ -430,7 +431,7 @@ impl StyleLoader {
 
     /// Parses `json` against `registry` and requests its sprites.
     fn parse(&mut self, registry: &Arc<StyleRegistry>, json: &str, events: &mut Vec<LoadEvent>) {
-        let parsed = match Style::from_json(registry, json, self.fallback_font_faces.as_ref()) {
+        let parsed = match Style::from_json(registry, json) {
             Ok(parsed) => parsed,
             Err(error) => {
                 let message = format!("Failed to parse style: {error}");
@@ -465,7 +466,9 @@ impl StyleLoader {
         }
         // The map publishes the parsed style once it knows where its sprites
         // stand.
-        events.push(LoadEvent::Parsed(parsed));
+        let font_faces =
+            style_font_faces(parsed.get_font_faces().map(|faces| &**faces), self.fallback_font_faces.as_deref());
+        events.push(LoadEvent::Parsed(parsed, font_faces));
         events.extend(sprite_events);
         events.push(LoadEvent::Loaded);
     }

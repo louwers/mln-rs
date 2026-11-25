@@ -791,8 +791,7 @@ fn an_edit_replaces_only_the_part_it_changes() {
         Edit::SetGlobalStateDefaults(crate::expression::GlobalStateMap::new()),
         &["global state", "global state defaults"],
     );
-    let other =
-        Style::from_json(style.registry(), r#"{"version":8,"name":"other","sources":{},"layers":[]}"#, None).unwrap();
+    let other = Style::from_json(style.registry(), r#"{"version":8,"name":"other","sources":{},"layers":[]}"#).unwrap();
     assert!(!style.is_same_version(&other));
     assert!(style.is_same_version(&style.clone()));
 }

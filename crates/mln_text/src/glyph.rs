@@ -264,7 +264,7 @@ impl Shaping {
     }
 }
 
-pub type FontFaceRange = (u32, u32);
+pub use mln_style::font_face::FontFaceRange;
 
 /// The bytes of a font file that an app already holds, such as a
 /// memory-mapped file, shared without a copy, and which of its faces to use.
@@ -430,7 +430,40 @@ impl FontFace {
     }
 }
 
+/// A style's face, or an app's fallback face without a name, with its glyph
+/// type.
+impl From<&mln_style::font_face::FontFace> for FontFace {
+    fn from(face: &mln_style::font_face::FontFace) -> Self {
+        FontFace {
+            type_: face_type(&face.url, &face.name, &face.ranges),
+            ..FontFace::new(&face.name, &face.url, face.ranges.clone())
+        }
+    }
+}
+
+impl mln_style::font_face::FontCoverage for FontFace {
+    fn covers(&self, c: char) -> bool {
+        mln_style::font_face::ranges_cover(&self.ranges, c)
+    }
+}
+
 pub type FontFaces = Vec<FontFace>;
+
+/// The faces that a map draws a style's text with: the style's own
+/// `font-faces`, then `fallback`, the app's. `None` when the style has no
+/// `font-faces` and the app no fallback faces.
+#[must_use]
+pub fn style_font_faces(
+    style: Option<&mln_style::font_face::FontFaces>,
+    fallback: Option<&FontFaces>,
+) -> Option<Arc<FontFaces>> {
+    let fallback = fallback.filter(|faces| !faces.is_empty());
+    if style.is_none() && fallback.is_none() {
+        return None;
+    }
+    let style = style.into_iter().flatten().map(FontFace::from);
+    Some(Arc::new(style.chain(fallback.into_iter().flatten().cloned()).collect()))
+}
 
 /// The texts that each font face of each font stack shapes.
 pub type ShapeRequests = VecMap<FontStack, VecMap<GlyphIDType, BTreeSet<Vec<char>>>>;
@@ -520,5 +553,25 @@ mod tests {
         assert_eq!(a, b);
         assert_ne!(a, c);
         assert_ne!(a, GlyphIDType::FontPBF);
+    }
+
+    #[test]
+    fn style_faces_come_before_fallback_faces() {
+        let style_face = mln_style::font_face::FontFace {
+            name: "Noto Sans Regular".to_owned(),
+            url: "local://a.ttf".to_owned(),
+            ranges: vec![(0x1000, 0x109F)],
+        };
+        let fallback = vec![FontFace::system(vec![(0x0900, 0x097F)])];
+
+        assert_eq!(style_font_faces(None, None), None);
+        assert_eq!(style_font_faces(None, Some(&Vec::new())), None);
+        assert_eq!(style_font_faces(Some(&Vec::new()), None), Some(Arc::new(Vec::new())));
+
+        let faces = style_font_faces(Some(&vec![style_face.clone()]), Some(&fallback)).unwrap();
+        assert_eq!(faces.len(), 2);
+        assert_eq!(faces[0].name, style_face.name);
+        assert_eq!(faces[0].type_, face_type(&style_face.url, &style_face.name, &style_face.ranges));
+        assert_eq!(faces[1], fallback[0]);
     }
 }

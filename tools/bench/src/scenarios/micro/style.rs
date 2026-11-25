@@ -62,7 +62,7 @@ fn parse(bench: &mut Bench, copies: usize) {
     let json = liberty(&fixtures, copies);
     let registry = registry();
     for _ in 0..PARSES {
-        let style = bench.measure(|| Style::from_json(&registry, black_box(&json), None).expect("Liberty parses"));
+        let style = bench.measure(|| Style::from_json(&registry, black_box(&json)).expect("Liberty parses"));
         drop(black_box(style));
     }
     bench.per("parse", PARSES);

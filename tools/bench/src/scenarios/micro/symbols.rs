@@ -155,6 +155,7 @@ fn update(style: &Style, state: &TransformState) -> UpdateParameters {
         max_zoom: state.limits().max_zoom,
         camera_moving: false,
         style: Arc::new(style.clone()),
+        font_faces: None,
         sprite_loaded: true,
         feature_states: Arc::default(),
         file_source: None,

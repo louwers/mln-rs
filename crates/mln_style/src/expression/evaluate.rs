@@ -5,7 +5,6 @@ use std::borrow::Cow;
 use std::fmt;
 
 use feature::{Feature, Identifier as FeatureIdentifier, Value as MbglValue, ValueObject};
-use mln_text::glyph::FontFaces;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::geometry::{FeatureType, to_feature_type};
@@ -15,6 +14,7 @@ use crate::expression::Expr;
 use crate::expression::forms::image::UnavailableImages;
 use crate::expression::type_::Type;
 use crate::expression::value::{Value, from_mbgl_value, type_of};
+use crate::font_face::FontCoverage;
 
 pub type FeatureState = ValueObject;
 pub type GlobalStateMap = ValueObject;
@@ -80,9 +80,9 @@ pub struct EvaluationContext<'a> {
     pub unavailable_images: Option<&'a UnavailableImages>,
     pub canonical: Option<&'a CanonicalTileID>,
     pub global_state: Option<&'a GlobalStateMap>,
-    /// The style's font faces, which let "is-supported-script" accept the
-    /// scripts that they cover.
-    pub font_faces: Option<&'a FontFaces>,
+    /// The fonts the map draws text with, which let "is-supported-script"
+    /// accept the scripts that they cover.
+    pub font_faces: Option<&'a dyn FontCoverage>,
 }
 
 impl<'a> EvaluationContext<'a> {
@@ -171,8 +171,8 @@ impl<'a> EvaluationContext<'a> {
     }
 
     #[must_use]
-    pub fn with_font_faces(mut self, font_faces: Option<&'a FontFaces>) -> Self {
-        self.font_faces = font_faces;
+    pub fn with_font_faces(mut self, font_faces: Option<&'a impl FontCoverage>) -> Self {
+        self.font_faces = font_faces.map(|faces| -> &dyn FontCoverage { faces });
         self
     }
 }

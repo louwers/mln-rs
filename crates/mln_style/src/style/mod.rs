@@ -8,6 +8,7 @@ use mln_util::logging::{Event, Log};
 use crate::conversion::Convertible;
 use crate::expression::GlobalStateMap;
 use crate::filter::Filter;
+use crate::font_face::FontFaces;
 use crate::image;
 use crate::layer::{Layer, LayerList, SourceKind};
 use crate::light::Light;
@@ -99,9 +100,8 @@ pub struct Style {
     global_state_defaults: Arc<GlobalStateMap>,
     sprites: Arc<[Sprite]>,
     glyph_url: Arc<str>,
-    /// The document's font faces, followed by the fallback faces given to
-    /// the parse.
-    font_faces: Option<Arc<mln_text::glyph::FontFaces>>,
+    /// The document's `font-faces`, if it has them.
+    font_faces: Option<Arc<FontFaces>>,
 }
 
 // The map and a renderer on another thread share versions.
@@ -147,13 +147,8 @@ impl Style {
     }
 
     /// The style that the style document `json` describes, parsed against
-    /// `registry`, with `fallback_font_faces` after the document's font
-    /// faces. Fails with why `json` isn't a style.
-    pub fn from_json(
-        registry: &Arc<StyleRegistry>,
-        json: &str,
-        fallback_font_faces: Option<&Arc<mln_text::glyph::FontFaces>>,
-    ) -> Result<Style, Error> {
+    /// `registry`. Fails with why `json` isn't a style.
+    pub fn from_json(registry: &Arc<StyleRegistry>, json: &str) -> Result<Style, Error> {
         let mut parser = Parser::new(registry);
         parser.parse(json)?;
 
@@ -218,12 +213,6 @@ impl Style {
         style.sprites = Arc::from(std::mem::take(&mut parser.sprites));
         style.glyph_url = Arc::from(parser.glyph_url.as_str());
         style.font_faces = parser.font_faces.take();
-        if let Some(fallback) = fallback_font_faces.filter(|faces| !faces.is_empty()) {
-            // The style's own faces come first, so they win where both cover a font.
-            let mut merged = style.font_faces.as_deref().cloned().unwrap_or_default();
-            merged.extend(fallback.iter().cloned());
-            style.font_faces = Some(Arc::new(merged));
-        }
         Ok(style)
     }
 
@@ -260,7 +249,7 @@ impl Style {
     }
 
     #[must_use]
-    pub fn get_font_faces(&self) -> Option<&Arc<mln_text::glyph::FontFaces>> {
+    pub fn get_font_faces(&self) -> Option<&Arc<FontFaces>> {
         self.font_faces.as_ref()
     }
 

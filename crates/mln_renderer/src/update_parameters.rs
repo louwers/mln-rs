@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use mln_map_types::{Elevation, MapDebugOptions, MapMode, TerrainOptions, TileLodMode, View};
 use mln_style::Style;
+use mln_text::glyph::FontFaces;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::time::Instant;
 
@@ -26,6 +27,10 @@ pub struct UpdateParameters {
     /// The version of the style to draw. A renderer compares it with the
     /// version it drew last ([`mln_style::diff::StyleDiff`]).
     pub style: Arc<Style>,
+    /// The faces that the style's text draws with: the style's own
+    /// `font-faces`, then the app's fallback faces
+    /// ([`style_font_faces`](mln_text::glyph::style_font_faces)).
+    pub font_faces: Option<Arc<FontFaces>>,
     pub sprite_loaded: bool,
     /// The map's feature state. Each render source takes its own, in place
     /// of what it held.

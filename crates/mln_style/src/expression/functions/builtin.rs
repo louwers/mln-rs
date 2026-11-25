@@ -303,15 +303,10 @@ fn has_object(args: &[Expr], cx: &EvaluationContext<'_>) -> EvalResult<bool> {
 
 fn is_supported_script(args: &[Expr], cx: &EvaluationContext<'_>) -> EvalResult<bool> {
     let x = args[0].eval_str(cx)?;
-    let Some(font_faces) = cx.font_faces.filter(|faces| !faces.is_empty()) else {
+    let Some(font_faces) = cx.font_faces else {
         return Ok(i18n::is_string_in_supported_script(&x));
     };
-    Ok(x.chars().all(|chr| {
-        i18n::char_in_supported_script(chr)
-            || font_faces
-                .iter()
-                .any(|face| face.ranges.iter().any(|range| u32::from(chr) >= range.0 && u32::from(chr) <= range.1))
-    }))
+    Ok(x.chars().all(|chr| i18n::char_in_supported_script(chr) || font_faces.covers(chr)))
 }
 
 // Strings.

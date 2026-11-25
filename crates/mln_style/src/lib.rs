@@ -39,6 +39,7 @@ pub mod conversion;
 pub mod custom_tile_loader;
 pub mod expression;
 pub mod filter;
+pub mod font_face;
 pub mod image;
 pub mod layer;
 pub mod layers;

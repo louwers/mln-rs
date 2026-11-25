@@ -14,6 +14,7 @@ use mln_vec_map::VecSet;
 use crate::conversion::borrowed::{Json, JsonObject, borrowed_json_to_value, member, members};
 use crate::conversion::{Convertible, Error, convert};
 use crate::expression::GlobalStateMap;
+use crate::font_face::{FontFace, FontFaceRange, FontFaces};
 use crate::layer::{FontStack, InvalidProperty, Layer, convert_layer_with, set_paint_properties};
 use crate::light::{Light, convert_light};
 use crate::projection::{Projection, convert_projection};
@@ -34,7 +35,7 @@ pub struct Parser {
     registry: Arc<StyleRegistry>,
     pub sprites: Vec<Sprite>,
     pub glyph_url: String,
-    pub font_faces: Option<Arc<mln_text::glyph::FontFaces>>,
+    pub font_faces: Option<Arc<FontFaces>>,
     pub sources: Vec<Source>,
     pub(crate) layers: Vec<Layer>,
 
@@ -475,12 +476,8 @@ fn format_json_parse_error(error: &serde_json::Error) -> String {
 /// Parses a font file of a font face: an object with a `url`, and with an
 /// optional `unicode-range` that limits the code points the font draws. Adds a
 /// warning for each range it can't read, and skips the range.
-fn parse_font_file(
-    face_name: &str,
-    font_file: &JsonObject<'_>,
-    warnings: &mut Vec<String>,
-) -> mln_text::glyph::FontFace {
-    let mut font_face = mln_text::glyph::FontFace::new(face_name, "", vec![(0, 0x0010_FFFF)]);
+fn parse_font_file(face_name: &str, font_file: &JsonObject<'_>, warnings: &mut Vec<String>) -> FontFace {
+    let mut font_face = FontFace { name: face_name.to_owned(), url: String::new(), ranges: vec![ALL_CODE_POINTS] };
 
     if let Some(url) = member(font_file, "url").and_then(Json::as_str) {
         font_face.url = url.to_owned();
@@ -524,14 +521,14 @@ fn parse_font_file(
 /// of a font face in a style's `font-faces`, without a font name. It fails with
 /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if `json` isn't such an
 /// array.
-pub fn parse_fallback_font_faces(json: &str) -> Result<mln_text::glyph::FontFaces, mln_util::Error> {
+pub fn parse_fallback_font_faces(json: &str) -> Result<FontFaces, mln_util::Error> {
     let document: Json<'_> = serde_json::from_str(json)
         .map_err(|error| mln_util::Error::invalid_argument(format_json_parse_error(&error)))?;
     let Some(files) = document.as_array() else {
         return Err(mln_util::Error::invalid_argument("fallback font faces must be an array"));
     };
 
-    let mut font_faces = mln_text::glyph::FontFaces::new();
+    let mut font_faces = FontFaces::new();
     for font_file in files {
         let Some(font_file) = font_file.as_object() else {
             return Err(mln_util::Error::invalid_argument("each fallback font face must be an object"));
@@ -547,15 +544,14 @@ pub fn parse_fallback_font_faces(json: &str) -> Result<mln_text::glyph::FontFace
         if font_face.ranges.is_empty() {
             return Err(mln_util::Error::invalid_argument("each fallback font face must cover a unicode-range"));
         }
-        font_faces.push(mln_text::glyph::FontFace::fallback(&font_face.url, font_face.ranges));
+        font_faces.push(font_face);
     }
     Ok(font_faces)
 }
 
 /// The "font-faces" block of `Parser::parse` (`MLN_TEXT_SHAPING_HARFBUZZ`).
-fn parse_font_faces(faces: &JsonObject<'_>) -> mln_text::glyph::FontFaces {
-    use mln_text::glyph::{FontFace, face_type};
-    let mut font_faces = mln_text::glyph::FontFaces::new();
+fn parse_font_faces(faces: &JsonObject<'_>) -> FontFaces {
+    let mut font_faces = FontFaces::new();
     for (face_name, face_value) in members(faces) {
         if let Some(files) = face_value.as_array() {
             // If the face is an array, we assume it is a list of font file
@@ -565,27 +561,29 @@ fn parse_font_faces(faces: &JsonObject<'_>) -> mln_text::glyph::FontFaces {
                     continue;
                 };
                 let mut warnings = Vec::new();
-                let mut font_face = parse_font_file(face_name, font_file, &mut warnings);
+                let font_face = parse_font_file(face_name, font_file, &mut warnings);
                 for warning in warnings {
                     Log::warning(Event::ParseStyle, warning);
                 }
 
-                // If valid, generate a unique glyph ID type for this font
-                // face and add it to the font faces list.
-                if font_face.valid() {
-                    font_face.type_ = face_type(&font_face.url, &font_face.name, &font_face.ranges);
+                if !font_face.name.is_empty() && !font_face.url.is_empty() && !font_face.ranges.is_empty() {
                     font_faces.push(font_face);
                 } else {
                     Log::warning(Event::ParseStyle, format!("Invalid font-face definition for: {face_name}"));
                 }
             }
         } else if let Some(url) = face_value.as_str() {
-            let mut font_face = FontFace::new(face_name, url, vec![(0, 0x0010_FFFF)]);
-            font_face.type_ = face_type(&font_face.url, &font_face.name, &font_face.ranges);
-            font_faces.push(font_face);
+            font_faces.push(FontFace {
+                name: face_name.to_owned(),
+                url: url.to_owned(),
+                ranges: vec![ALL_CODE_POINTS],
+            });
         } else {
             Log::warning(Event::ParseStyle, "font-face must be an object or array");
         }
     }
     font_faces
 }
+
+/// The range of a font face without a `unicode-range`: every code point.
+const ALL_CODE_POINTS: FontFaceRange = (0, 0x0010_FFFF);

@@ -81,7 +81,7 @@ pub(crate) fn liberty(fixtures: &Fixtures, copies: usize) -> String {
 
 /// [`liberty`], parsed.
 pub(crate) fn parse_liberty(fixtures: &Fixtures, copies: usize) -> Style {
-    Style::from_json(&registry(), &liberty(fixtures, copies), None).expect("Liberty parses")
+    Style::from_json(&registry(), &liberty(fixtures, copies)).expect("Liberty parses")
 }
 
 /// Liberty as a map holds it once it has loaded: [`parse_liberty`], with

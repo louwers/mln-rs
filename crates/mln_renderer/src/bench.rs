@@ -17,7 +17,7 @@ use mln_style::Style;
 use mln_style::property::evaluation::PropertyEvaluationParameters;
 use mln_style_types::VisibilityType;
 use mln_style_types::image::{ImageMap, ImageType};
-use mln_text::glyph::{GlyphMap, get_glyph_range};
+use mln_text::glyph::{GlyphMap, get_glyph_range, style_font_faces};
 use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::tagged_string::font_stack_hash;
 use mln_tile::TileData;
@@ -122,7 +122,7 @@ impl TileLayout {
                 version: 0,
                 layers,
                 global_state: Some(Arc::clone(style.get_global_state())),
-                font_faces: style.get_font_faces().cloned(),
+                font_faces: style_font_faces(style.get_font_faces().map(|faces| &**faces), None),
                 glyph_pbfs: !style.get_glyph_url().is_empty(),
             }),
             available_images: Arc::new(style.get_images().iter().map(|image| image.id.clone()).collect()),
@@ -616,7 +616,6 @@ mod tests {
                      "layout": {"text-field": ["get", "name"], "text-font": ["Test"]}}
                 ]
             }"#,
-            None,
         )
         .unwrap()
     }
@@ -638,6 +637,7 @@ mod tests {
             max_zoom: state.limits().max_zoom,
             camera_moving: false,
             style: Arc::new(style.clone()),
+            font_faces: None,
             sprite_loaded: true,
             feature_states: Arc::default(),
             file_source: None,
