@@ -6,7 +6,7 @@ use super::shader_source::MslShaderSource;
 /// What the terrain variant of a program that hides behind the ground in
 /// front of it reads of the ground's depth, within `#if defined(TERRAIN)`:
 /// whether that ground hides a point (`ground_visibility`). Its vertex
-/// function takes the ground's depth at `[[texture(1)]]`.
+/// function reads the ground's depth from the program's `ground_depth`.
 macro_rules! ground_visibility {
     () => {
         r#"
@@ -53,10 +53,14 @@ static float ground_visibility(float4 clip, float view_height, texture2d<float, 
     };
 }
 
-/// The start of every shader's source.
-pub(crate) const PRELUDE: &str = r#"
+/// The start of every shader's source, before the structs of its blocks.
+pub(crate) const HEADER: &str = r"
 #include <metal_stdlib>
 using namespace metal;
+";
+
+/// What every shader's source has after the structs of its blocks.
+pub(crate) const PRELUDE: &str = r#"
 
 // The maximum allowed miter limit is 2.0 at the moment. the extrude normal is stored
 // in a byte (-128..127). We scale regular normals up to length 63, but there are also
@@ -138,35 +142,6 @@ inline float2 get_pattern_pos(const float2 pixel_coord_upper, const float2 pixel
 inline float2 atlas_pos(const float2 origin, const float2 offset) {
     return origin + rint(offset * 16777216.0) / 16777216.0;
 }
-
-
-struct alignas(16) GlobalPaintParamsUBO {
-    /*  0 */ float2 pattern_atlas_texsize;
-    /*  8 */ float2 units_to_pixels;
-    /* 16 */ float2 world_size;
-    /* 24 */ float camera_to_center_distance;
-    /* 28 */ float symbol_fade_change;
-    /* 32 */ float aspect_ratio;
-    /* 36 */ float pixel_ratio;
-    /* 40 */ float map_zoom;
-    /* 44 */ float pad1;
-    /* 48 */
-};
-static_assert(sizeof(GlobalPaintParamsUBO) == 3 * 16, "wrong size");
-
-struct alignas(16) ProjectionUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float4x4 fallback_matrix;
-    /* 128 */ float4 tile_mercator_coords;
-    /* 144 */ float4 clipping_plane;
-    /* 160 */ float projection_transition;
-    /* 164 */ float depth_offset;
-    /* 168 */ float2 translate;
-    /* 176 */ float4 anchor;
-    /* 192 */ float4 anchor_angles;
-    /* 208 */
-};
-static_assert(sizeof(ProjectionUBO) == 13 * 16, "wrong size");
 
 // Pole vertices carry these sentinel Y values in their raw position.
 #define GLOBE_POLE_NORTH_Y -32767.5
@@ -366,68 +341,20 @@ inline float projectLineThickness(float, device const ProjectionUBO&) {
 
 #endif
 
-enum {
-    idGlobalPaintParamsUBO,
-    idGlobalUBOIndex,
-    globalUBOCount,
-};
-
-enum {
-    idDrawableReservedVertexOnlyUBO = globalUBOCount,
-    idDrawableReservedFragmentOnlyUBO,
-    idProjectionUBO,
-    drawableReservedUBOCount
-};
-
 "#;
 
 pub(crate) const ATMOSPHERE_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
-
-enum {
-    idSkyPropsUBO = drawableReservedUBOCount,
-    skyUBOCount
-};
-
-enum {
-    idAtmospherePropsUBO = drawableReservedUBOCount,
-    atmosphereUBOCount
-};
-
-struct alignas(16) SkyPropsUBO {
-    float4 sky_color;
-    float4 horizon_color;
-    float2 horizon;
-    float2 horizon_normal;
-    float2 viewport_size;
-    float sky_horizon_blend;
-    float sky_blend;
-};
-
-struct alignas(16) AtmospherePropsUBO {
-    float4x4 inv_view_projection;
-    float4 camera_position;
-    float4 sun_position;
-};
-
-",
     source: r"
-
-struct AtmosphereVertexStage {
-    short2 position [[attribute(0)]];
-};
 
 struct AtmosphereFragmentStage {
     float4 position [[position, invariant]];
     float3 view_direction;
 };
 
-AtmosphereFragmentStage vertex vertexMain(
-    AtmosphereVertexStage in [[stage_in]],
-    device const AtmospherePropsUBO& atmosphere [[buffer(idAtmospherePropsUBO)]]) {
-    const float2 pos = float2(in.position);
+AtmosphereFragmentStage vertex vertexMain(VertexStage in [[stage_in]] MLN_VERTEX_BINDINGS) {
+    const float2 pos = float2(in.pos);
     const float4 target = atmosphere.inv_view_projection * float4(pos, 0.0, 1.0);
     return {
         // Metal uses a zero-to-one NDC depth range, so 0.5 matches WebGL's
@@ -525,9 +452,7 @@ float4 atmosphereScatter(float3 direction, float3 origin, float3 sun) {
     return float4(color, opacity);
 }
 
-half4 fragment fragmentMain(
-    AtmosphereFragmentStage in [[stage_in]],
-    device const AtmospherePropsUBO& atmosphere [[buffer(idAtmospherePropsUBO)]]) {
+half4 fragment fragmentMain(AtmosphereFragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
     const float3 camera = atmosphere.camera_position.xyz * EarthRadius;
     float4 color = atmosphereScatter(in.view_direction, camera, atmosphere.sun_position.xyz);
     color.rgb = 1.0 - exp(-color.rgb);
@@ -540,76 +465,7 @@ half4 fragment fragmentMain(
 pub(crate) const BACKGROUND_PATTERN_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idBackgroundDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idBackgroundPropsUBO = drawableReservedUBOCount,
-    backgroundUBOCount
-};
-
-//
-// Background
-
-struct alignas(16) BackgroundDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */
-};
-static_assert(sizeof(BackgroundDrawableUBO) == 4 * 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) BackgroundPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float opacity;
-    /* 20 */ float pad1;
-    /* 24 */ float pad2;
-    /* 28 */ float pad3;
-    /* 32 */
-};
-static_assert(sizeof(BackgroundPropsUBO) == 2 * 16, "wrong size");
-
-//
-// Background pattern
-
-struct alignas(16) BackgroundPatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float2 pixel_coord_upper;
-    /* 72 */ float2 pixel_coord_lower;
-    /* 80 */ float tile_units_to_pixels;
-    /* 84 */ float pad1;
-    /* 88 */ float pad2;
-    /* 92 */ float pad3;
-    /* 96 */
-};
-static_assert(sizeof(BackgroundPatternDrawableUBO) == 6 * 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) BackgroundPatternPropsUBO {
-    /*  0 */ float2 pattern_tl_a;
-    /*  8 */ float2 pattern_br_a;
-    /* 16 */ float2 pattern_tl_b;
-    /* 24 */ float2 pattern_br_b;
-    /* 32 */ float2 pattern_size_a;
-    /* 40 */ float2 pattern_size_b;
-    /* 48 */ float scale_a;
-    /* 52 */ float scale_b;
-    /* 56 */ float mix;
-    /* 60 */ float opacity;
-    /* 64 */
-};
-static_assert(sizeof(BackgroundPatternPropsUBO) == 4 * 16, "wrong size");
-
-union BackgroundDrawableUnionUBO {
-    BackgroundDrawableUBO backgroundDrawableUBO;
-    BackgroundPatternDrawableUBO backgroundPatternDrawableUBO;
-};
-
-"#,
     source: r"
-
-struct VertexStage {
-    short2 position [[attribute(0)]];
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -617,15 +473,11 @@ struct FragmentStage {
     float2 pos_b;
 };
 
-FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const BackgroundDrawableUnionUBO* drawableVector [[buffer(idBackgroundDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const BackgroundPatternPropsUBO& props [[buffer(idBackgroundPropsUBO)]]) {
+FragmentStage vertex vertexMain(VertexStage in [[stage_in]] MLN_VERTEX_BINDINGS) {
 
-    device const BackgroundPatternDrawableUBO& drawable = drawableVector[uboIndex].backgroundPatternDrawableUBO;
+    device const BackgroundPatternDrawableUBO& drawable = drawableVector[uboIndex];
 
-    const float2 pos = float2(in.position);
+    const float2 pos = float2(in.pos);
     const float2 pos_a = get_pattern_pos(drawable.pixel_coord_upper,
                                          drawable.pixel_coord_lower,
                                          props.scale_a * props.pattern_size_a,
@@ -637,22 +489,18 @@ FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
                                          drawable.tile_units_to_pixels,
                                          pos);
     return {
-        .position = projectTile(float2(in.position.xy), float2(in.position.xy), projectionVector[uboIndex]),
+        .position = projectTile(float2(in.pos.xy), float2(in.pos.xy), projectionVector[uboIndex]),
         .pos_a = pos_a,
         .pos_b = pos_b,
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const GlobalPaintParamsUBO& paintParamsUBO [[buffer(idGlobalPaintParamsUBO)]],
-                            device const BackgroundPatternPropsUBO& props [[buffer(idBackgroundPropsUBO)]],
-                            texture2d<float, access::sample> image [[texture(0)]],
-                            sampler image_sampler [[sampler(0)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
 
-    const float2 texsize = paintParamsUBO.pattern_atlas_texsize;
+    const float2 texsize = paintParams.pattern_atlas_texsize;
     // A crossfade at 0 or 1 shows one pattern, so skip the other.
     float4 color1 = float4(0.0);
     if (props.mix < 1.0) {
@@ -675,95 +523,22 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const BACKGROUND_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idBackgroundDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idBackgroundPropsUBO = drawableReservedUBOCount,
-    backgroundUBOCount
-};
-
-//
-// Background
-
-struct alignas(16) BackgroundDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */
-};
-static_assert(sizeof(BackgroundDrawableUBO) == 4 * 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) BackgroundPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float opacity;
-    /* 20 */ float pad1;
-    /* 24 */ float pad2;
-    /* 28 */ float pad3;
-    /* 32 */
-};
-static_assert(sizeof(BackgroundPropsUBO) == 2 * 16, "wrong size");
-
-//
-// Background pattern
-
-struct alignas(16) BackgroundPatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float2 pixel_coord_upper;
-    /* 72 */ float2 pixel_coord_lower;
-    /* 80 */ float tile_units_to_pixels;
-    /* 84 */ float pad1;
-    /* 88 */ float pad2;
-    /* 92 */ float pad3;
-    /* 96 */
-};
-static_assert(sizeof(BackgroundPatternDrawableUBO) == 6 * 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) BackgroundPatternPropsUBO {
-    /*  0 */ float2 pattern_tl_a;
-    /*  8 */ float2 pattern_br_a;
-    /* 16 */ float2 pattern_tl_b;
-    /* 24 */ float2 pattern_br_b;
-    /* 32 */ float2 pattern_size_a;
-    /* 40 */ float2 pattern_size_b;
-    /* 48 */ float scale_a;
-    /* 52 */ float scale_b;
-    /* 56 */ float mix;
-    /* 60 */ float opacity;
-    /* 64 */
-};
-static_assert(sizeof(BackgroundPatternPropsUBO) == 4 * 16, "wrong size");
-
-union BackgroundDrawableUnionUBO {
-    BackgroundDrawableUBO backgroundDrawableUBO;
-    BackgroundPatternDrawableUBO backgroundPatternDrawableUBO;
-};
-
-"#,
     source: r"
-
-struct VertexStage {
-    short2 position [[attribute(0)]];
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
 };
 
-FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const BackgroundDrawableUnionUBO* drawableVector [[buffer(idBackgroundDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
+FragmentStage vertex vertexMain(VertexStage in [[stage_in]] MLN_VERTEX_BINDINGS) {
 
-    device const BackgroundDrawableUBO& drawable = drawableVector[uboIndex].backgroundDrawableUBO;
+    device const BackgroundDrawableUBO& drawable = drawableVector[uboIndex];
 
     return {
-        .position = projectTile(float2(in.position.xy), float2(in.position.xy), projectionVector[uboIndex])
+        .position = projectTile(float2(in.pos.xy), float2(in.pos.xy), projectionVector[uboIndex])
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const BackgroundPropsUBO& props [[buffer(idBackgroundPropsUBO)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -776,83 +551,9 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const CIRCLE_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idCircleDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idCircleEvaluatedPropsUBO = drawableReservedUBOCount,
-    circleUBOCount
-};
-
-struct alignas(16) CircleDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float2 extrude_scale;
-
-    // Interpolations
-    /*  72 */ float color_t;
-    /*  76 */ float radius_t;
-    /*  80 */ float blur_t;
-    /*  84 */ float opacity_t;
-    /*  88 */ float stroke_color_t;
-    /*  92 */ float stroke_width_t;
-    /*  96 */ float stroke_opacity_t;
-    /* 100 */ float globe_extrude_scale;
-    /* 104 */ float pad2;
-    /* 108 */ float pad3;
-    /* 112 */
-};
-static_assert(sizeof(CircleDrawableUBO) == 7 * 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) CircleEvaluatedPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float4 stroke_color;
-    /* 32 */ float radius;
-    /* 36 */ float blur;
-    /* 40 */ float opacity;
-    /* 44 */ float stroke_width;
-    /* 48 */ float stroke_opacity;
-    /* 52 */ int scale_with_map;
-    /* 56 */ int pitch_with_map;
-    /* 60 */ float pad1;
-    /* 64 */
-};
-static_assert(sizeof(CircleEvaluatedPropsUBO) == 4 * 16, "wrong size");
-
-"#,
     source: concat!(
         ground_visibility!(),
         r"
-
-struct VertexStage {
-    short2 position [[attribute(0)]];
-
-#if !defined(HAS_UNIFORM_u_color)
-    float4 color [[attribute(1)]];
-#endif
-#if !defined(HAS_UNIFORM_u_radius)
-    float2 radius [[attribute(2)]];
-#endif
-#if !defined(HAS_UNIFORM_u_blur)
-    float2 blur [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(4)]];
-#endif
-#if !defined(HAS_UNIFORM_u_stroke_color)
-    float4 stroke_color [[attribute(5)]];
-#endif
-#if !defined(HAS_UNIFORM_u_stroke_width)
-    float2 stroke_width [[attribute(6)]];
-#endif
-#if !defined(HAS_UNIFORM_u_stroke_opacity)
-    float2 stroke_opacity [[attribute(7)]];
-#endif
-#if defined(TERRAIN)
-    // The height of the ground under the circle's center.
-    float ground_height [[attribute(8)]];
-#endif
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -886,16 +587,7 @@ struct FragmentStage {
 #endif
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const CircleDrawableUBO* drawableVector [[buffer(idCircleDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const CircleEvaluatedPropsUBO& props [[buffer(idCircleEvaluatedPropsUBO)]]
-#if defined(TERRAIN)
-                                , texture2d<float, access::read> ground_depth [[texture(1)]]
-#endif
-                                ) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
     device const CircleDrawableUBO& drawable = drawableVector[uboIndex];
 
@@ -912,11 +604,11 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #endif
 
     // unencode the extrusion vector that we snuck into the a_pos vector
-    const float2 extrude = glMod(float2(vertx.position), 2.0) * 2.0 - 1.0;
+    const float2 extrude = glMod(float2(vertx.pos), 2.0) * 2.0 - 1.0;
     const float2 scaled_extrude = extrude * drawable.extrude_scale;
 
     // multiply a_pos by 0.5, since we had it * 2 in order to sneak in extrusion data
-    const float2 circle_center = floor(float2(vertx.position) * 0.5);
+    const float2 circle_center = floor(float2(vertx.pos) * 0.5);
 
     // Over terrain, the circle stands on the ground under its center.
     device const ProjectionUBO& projection = projectionVector[uboIndex];
@@ -1015,8 +707,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const CircleEvaluatedPropsUBO& props [[buffer(idCircleEvaluatedPropsUBO)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -1076,18 +767,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const CLIPPING_MASK_PROGRAM: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
-
-enum {
-    clippingMaskUBOCount = drawableReservedUBOCount
-};
-
-",
     source: r"
-
-struct VertexStage {
-    short2 position [[attribute(0)]];
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -1098,12 +778,11 @@ struct FragmentResult {
     half4 color [[color(0)]];
 };
 
-FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
-                                device const ProjectionUBO& projection [[buffer(idProjectionUBO)]]) {
-    return { projectTile(float2(in.position.xy), float2(in.position.xy), projection) };
+FragmentStage vertex vertexMain(VertexStage in [[stage_in]] MLN_VERTEX_BINDINGS) {
+    return { projectTile(float2(in.pos.xy), float2(in.pos.xy), projection) };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
     return half4(1.0);
 }
 ",
@@ -1112,41 +791,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(crate) const COLLISION_BOX_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idCollisionDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idCollisionProjectionUBO = idProjectionUBO,
-    // The highest id, so that the vertex buffers start after it.
-    idCollisionTilePropsUBO = drawableReservedUBOCount,
-    collisionUBOCount
-};
-
-struct alignas(16) CollisionDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */
-};
-static_assert(sizeof(CollisionDrawableUBO) == 4 * 16, "wrong size");
-
-struct alignas(16) CollisionTilePropsUBO {
-    /*  0 */ float2 extrude_scale;
-    /*  8 */ float overscale_factor;
-    /* 12 */ float pad1;
-    /* 16 */
-};
-static_assert(sizeof(CollisionTilePropsUBO) == 16, "wrong size");
-
-"#,
     source: r"
-
-struct VertexStage {
-    short2 pos [[attribute(0)]];
-    short2 anchor_pos [[attribute(1)]];
-    short2 extrude [[attribute(2)]];
-    ushort2 placed [[attribute(3)]];
-    float2 shift [[attribute(4)]];
-    float height_offset [[attribute(5)]];
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -1154,11 +799,7 @@ struct FragmentStage {
     float notUsed;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                                device const CollisionDrawableUBO& drawable [[buffer(idCollisionDrawableUBO)]],
-                                device const CollisionTilePropsUBO& tileProps [[buffer(idCollisionTilePropsUBO)]],
-                                device const ProjectionUBO& projection [[buffer(idCollisionProjectionUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
 #if defined(PROJECTION_GLOBE)
     float4 projectedPoint = projectTileWithElevation(float2(vertx.anchor_pos), vertx.height_offset, projection);
@@ -1180,7 +821,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #else
     float4 position = drawable.matrix * float4(float2(vertx.pos), vertx.height_offset, 1.0);
 #endif
-    position.xy += (float2(vertx.extrude) + vertx.shift) * tileProps.extrude_scale * position.w * collision_perspective_ratio;
+    position.xy += (float2(vertx.extrude) + vertx.shift) * tile_props.extrude_scale * position.w * collision_perspective_ratio;
 
     float placed = float(vertx.placed.x);
     float notUsed = float(vertx.placed.y);
@@ -1192,7 +833,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 
     float alpha = 0.5;
 
@@ -1217,39 +858,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(crate) const COLLISION_CIRCLE_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idCollisionDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idCollisionProjectionUBO = idProjectionUBO,
-    // The highest id, so that the vertex buffers start after it.
-    idCollisionTilePropsUBO = drawableReservedUBOCount,
-    collisionUBOCount
-};
-
-struct alignas(16) CollisionDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */
-};
-static_assert(sizeof(CollisionDrawableUBO) == 4 * 16, "wrong size");
-
-struct alignas(16) CollisionTilePropsUBO {
-    /*  0 */ float2 extrude_scale;
-    /*  8 */ float overscale_factor;
-    /* 12 */ float pad1;
-    /* 16 */
-};
-static_assert(sizeof(CollisionTilePropsUBO) == 16, "wrong size");
-
-"#,
     source: r"
-
-struct VertexStage {
-    short2 pos [[attribute(0)]];
-    short2 anchor_pos [[attribute(1)]];
-    short2 extrude [[attribute(2)]];
-    ushort2 placed [[attribute(3)]];
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -1260,11 +869,7 @@ struct FragmentStage {
     float2 extrude_scale;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                                device const CollisionDrawableUBO& drawable [[buffer(idCollisionDrawableUBO)]],
-                                device const CollisionTilePropsUBO& tileProps [[buffer(idCollisionTilePropsUBO)]],
-                                device const ProjectionUBO& projection [[buffer(idCollisionProjectionUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
 #if defined(PROJECTION_GLOBE)
     float4 projectedPoint = projectTile(float2(vertx.anchor_pos), projection);
@@ -1288,14 +893,14 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 #endif
 
     float padding_factor = 1.2; // Pad the vertices slightly to make room for anti-alias blur
-    position.xy += float2(vertx.extrude) * tileProps.extrude_scale * padding_factor * position.w * collision_perspective_ratio;
+    position.xy += float2(vertx.extrude) * tile_props.extrude_scale * padding_factor * position.w * collision_perspective_ratio;
 
     float placed = float(vertx.placed.x);
     float notUsed = float(vertx.placed.y);
     float radius = abs(float(vertx.extrude.y)); // We don't pitch the circles, so both units of the extrusion vector are equal in magnitude to the radius
 
     float2 extrude = float2(vertx.extrude) * padding_factor;
-    float2 extrude_scale = tileProps.extrude_scale * paintParams.camera_to_center_distance * collision_perspective_ratio;
+    float2 extrude_scale = tile_props.extrude_scale * paintParams.camera_to_center_distance * collision_perspective_ratio;
 
     return {
         .position       = position,
@@ -1307,8 +912,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const CollisionTilePropsUBO& tileProps [[buffer(idCollisionTilePropsUBO)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 
     float alpha = 0.5;
 
@@ -1327,7 +931,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     float extrude_scale_length = length(in.extrude_scale);
     float extrude_length = length(in.extrude) * extrude_scale_length;
-    float stroke_width = 15.0 * extrude_scale_length / tileProps.overscale_factor;
+    float stroke_width = 15.0 * extrude_scale_length / tile_props.overscale_factor;
     float radius = in.radius * extrude_scale_length;
 
     float distance_to_edge = abs(extrude_length - radius);
@@ -1341,57 +945,14 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const COLOR_RELIEF_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idColorReliefDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idColorReliefTilePropsUBO = drawableReservedUBOCount,
-    idColorReliefEvaluatedPropsUBO,
-    colorReliefUBOCount
-};
-
-struct alignas(16) ColorReliefDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */
-};
-static_assert(sizeof(ColorReliefDrawableUBO) == 4 * 16, "wrong size");
-
-struct alignas(16) ColorReliefTilePropsUBO {
-    /*  0 */ float4 unpack;
-    /* 16 */ float2 dimension;
-    /* 24 */ int32_t color_ramp_size;
-    /* 28 */ float unpack_scale;
-    /* 32 */
-};
-static_assert(sizeof(ColorReliefTilePropsUBO) == 2 * 16, "wrong size");
-
-struct alignas(16) ColorReliefEvaluatedPropsUBO {
-    /*  0 */ float opacity;
-    /*  4 */ float pad_eval0;
-    /*  8 */ float pad_eval1;
-    /* 12 */ float pad_eval2;
-    /* 16 */
-};
-static_assert(sizeof(ColorReliefEvaluatedPropsUBO) == 16, "wrong size");
-
-"#,
     source: r"
-
-struct VertexStage {
-    short2 pos [[attribute(0)]];
-    short2 texture_pos [[attribute(1)]];
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
     float2 pos;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const ColorReliefDrawableUBO* drawableVector [[buffer(idColorReliefDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const ColorReliefTilePropsUBO* tilePropsVector [[buffer(idColorReliefTilePropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
     device const ColorReliefDrawableUBO& drawable = drawableVector[uboIndex];
     device const ColorReliefTilePropsUBO& tileProps = tilePropsVector[uboIndex];
@@ -1436,16 +997,7 @@ float4 getColorStop(int stop, int color_ramp_size, texture2d<float, access::samp
     return colorStops.sample(color_sampler, float2(x, 0.5));
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                            device const ColorReliefTilePropsUBO* tilePropsVector [[buffer(idColorReliefTilePropsUBO)]],
-                            device const ColorReliefEvaluatedPropsUBO& props [[buffer(idColorReliefEvaluatedPropsUBO)]],
-                            texture2d<float, access::sample> image [[texture(0)]],
-                            texture2d<float, access::sample> elevationStops [[texture(1)]],
-                            texture2d<float, access::sample> colorStops [[texture(2)]],
-                            sampler image_sampler [[sampler(0)]],
-                            sampler elevation_stops_sampler [[sampler(1)]],
-                            sampler color_stops_sampler [[sampler(2)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -1465,7 +1017,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     // Perform binary search
     while (r - l > 1) {
         int m = (r + l) / 2;
-        float el_m = getElevationStop(m, tileProps.color_ramp_size, elevationStops, elevation_stops_sampler);
+        float el_m = getElevationStop(m, tileProps.color_ramp_size, elevation_stops, elevation_stops_sampler);
 
         if (el < el_m) {
             r = m;
@@ -1479,14 +1031,14 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     // The search never reads the ramp's ends, so read an end that l or r
     // still is.
     if (l == 0) {
-        el_l = getElevationStop(0, tileProps.color_ramp_size, elevationStops, elevation_stops_sampler);
+        el_l = getElevationStop(0, tileProps.color_ramp_size, elevation_stops, elevation_stops_sampler);
     }
     if (r == tileProps.color_ramp_size - 1) {
-        el_r = getElevationStop(r, tileProps.color_ramp_size, elevationStops, elevation_stops_sampler);
+        el_r = getElevationStop(r, tileProps.color_ramp_size, elevation_stops, elevation_stops_sampler);
     }
 
-    float4 color_l = getColorStop(l, tileProps.color_ramp_size, colorStops, color_stops_sampler);
-    float4 color_r = getColorStop(r, tileProps.color_ramp_size, colorStops, color_stops_sampler);
+    float4 color_l = getColorStop(l, tileProps.color_ramp_size, color_stops, color_stops_sampler);
+    float4 color_r = getColorStop(r, tileProps.color_ramp_size, color_stops, color_stops_sampler);
 
     // 4. Interpolate color based on elevation
     // Guard against division by zero when el_r == el_l
@@ -1532,7 +1084,7 @@ FragmentStage wall(thread const Vertex& vertx,
     }
 
 #if defined(HAS_UNIFORM_u_base)
-    const auto base   = max(props.light_position_base.w, 0.0);
+    const auto base   = max(props.base, 0.0);
 #else
     const auto base   = max(unpack_mix_float(vertx.base, drawable.base_t), 0.0);
 #endif
@@ -1583,7 +1135,7 @@ FragmentStage wall(thread const Vertex& vertx,
     color += min(float4(0.03, 0.03, 0.03, 1.0), float4(1.0));
 
     // Calculate cos(theta), where theta is the angle between surface normal and diffuse light ray
-    const float directionalFraction = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    const float directionalFraction = clamp(dot(normal, float3(props.light_position)), 0.0, 1.0);
 
     // Adjust directional so that the range of values for highlight/shading is
     // narrower with lower light intensity and with lighter/brighter surface colors
@@ -1605,7 +1157,7 @@ FragmentStage wall(thread const Vertex& vertx,
     // Assign final color based on surface + ambient light color, diffuse light directional,
     // and light color with lower bounds adjusted to hue of light so that shading is tinted
     // with the complementary (opposite) color to the light color
-    const float3 light_color = props.light_color_pad.rgb;
+    const float3 light_color = float3(props.light_color);
     const float3 minLight = mix(0.0, 0.3, 1.0 - light_color.rgb);
     vcolor += float4(clamp(color.rgb * directional * light_color.rgb, minLight, 1.0), 0.0);
 
@@ -1615,7 +1167,7 @@ FragmentStage wall(thread const Vertex& vertx,
     };
 }
 
-fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
+fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
     return { in.color/*, in.position.z*/ };
 }
 "
@@ -1625,94 +1177,13 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
 pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idFillExtrusionDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idFillExtrusionTilePropsUBO = drawableReservedUBOCount,
-    idFillExtrusionPropsUBO,
-    fillExtrusionUBOCount
-};
-
-struct alignas(16) FillExtrusionDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float2 pixel_coord_upper;
-    /*  72 */ float2 pixel_coord_lower;
-    /*  80 */ float height_factor;
-    /*  84 */ float tile_ratio;
-
-    // Interpolations
-    /*  88 */ float base_t;
-    /*  92 */ float height_t;
-    /*  96 */ float color_t;
-    /* 100 */ float pattern_from_t;
-    /* 104 */ float pattern_to_t;
-    /* 108 */ uint32_t paint_layout;
-    /* 112 */
-};
-static_assert(sizeof(FillExtrusionDrawableUBO) == 7 * 16, "wrong size");
-
-struct alignas(16) FillExtrusionTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float pad1;
-    /* 44 */ float pad2;
-    /* 48 */
-};
-static_assert(sizeof(FillExtrusionTilePropsUBO) == 3 * 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) FillExtrusionPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float4 light_color_pad;
-    /* 32 */ float4 light_position_base;
-    /* 48 */ float height;
-    /* 52 */ float light_intensity;
-    /* 56 */ float vertical_gradient;
-    /* 60 */ float opacity;
-    /* 64 */ float fade;
-    /* 68 */ float from_scale;
-    /* 72 */ float to_scale;
-    /* 76 */ float pad2;
-    /* 80 */
-};
-static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
-
-"#,
     source: concat!(
         r"
-
-struct VertexStage {
-    short2 pos [[attribute(0)]];
-    short2 outline_pos [[attribute(1)]];
-    ushort2 decimals_ed [[attribute(2)]];
-    short2 next_outline_pos [[attribute(6)]];
-    ushort2 next_decimals_ed [[attribute(7)]];
-
-#if !defined(HAS_UNIFORM_u_color)
-    float4 color [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_base)
-    float2 base [[attribute(4)]];
-#endif
-#if !defined(HAS_UNIFORM_u_height)
-    float2 height [[attribute(5)]];
-#endif
-#if defined(TERRAIN)
-    // The height of the ground under its polygon's centroid.
-    float ground_height [[attribute(8)]];
-#endif
-};
 
 ",
         extrusion_wall!(),
         r"
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
     return wall(vertx, drawableVector[uboIndex], projectionVector[uboIndex], props);
 }
 
@@ -1723,15 +1194,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 pub(crate) const FILL_EXTRUSION_PULLED_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: FILL_EXTRUSION_INSTANCED_SHADER.prelude,
     source: concat!(
         r"
-
-enum {
-    idFillExtrusionWallVertices = 7,
-    idFillExtrusionWallPaint,
-    idFillExtrusionWallHeights
-};
 
 // A vertex of the bucket, which the walls read by index.
 struct BucketVertex {
@@ -1762,24 +1226,15 @@ struct WallVertex {
 ",
         extrusion_wall!(),
         r"
-FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]],
-                                device const BucketVertex* wallVertices [[buffer(idFillExtrusionWallVertices)]],
-                                device const float* wallPaint [[buffer(idFillExtrusionWallPaint)]]
-#if defined(TERRAIN)
-                                , device const float* wallHeights [[buffer(idFillExtrusionWallHeights)]]
-#endif
-                                ) {
+FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]] MLN_VERTEX_BINDINGS) {
     device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
 
     // Four vertices a wall, in the order of the static quad's corners.
     const uint wall_index = vertex_id / 4;
     const uint corner = vertex_id % 4;
-    const BucketVertex outline = wallVertices[wall_index];
-    const BucketVertex next = wallVertices[wall_index + 1];
+    device const BucketVertex* bucket = (device const BucketVertex*)wallVertices;
+    const BucketVertex outline = bucket[wall_index];
+    const BucketVertex next = bucket[wall_index + 1];
 
     WallVertex vertx;
     vertx.pos = short2(corner < 2 ? 1 : 0, corner & 1);
@@ -1791,8 +1246,10 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
     // The wall's paint values are its outline vertex's, where the drawable's
     // `paint_layout` says: the floats a vertex takes, then the offsets of
     // base, height and color, a byte each from the lowest.
+#if !defined(HAS_UNIFORM_u_base) || !defined(HAS_UNIFORM_u_color) || !defined(HAS_UNIFORM_u_height)
     const uint paint_layout = drawable.paint_layout;
     device const float* paint = wallPaint + wall_index * (paint_layout & 0xff);
+#endif
 #if !defined(HAS_UNIFORM_u_base)
     vertx.base = float2(*(device const packed_float2*)(paint + ((paint_layout >> 8) & 0xff)));
 #endif
@@ -1815,87 +1272,7 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
 pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idFillExtrusionDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idFillExtrusionTilePropsUBO = drawableReservedUBOCount,
-    idFillExtrusionPropsUBO,
-    fillExtrusionUBOCount
-};
-
-struct alignas(16) FillExtrusionDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float2 pixel_coord_upper;
-    /*  72 */ float2 pixel_coord_lower;
-    /*  80 */ float height_factor;
-    /*  84 */ float tile_ratio;
-
-    // Interpolations
-    /*  88 */ float base_t;
-    /*  92 */ float height_t;
-    /*  96 */ float color_t;
-    /* 100 */ float pattern_from_t;
-    /* 104 */ float pattern_to_t;
-    /* 108 */ uint32_t paint_layout;
-    /* 112 */
-};
-static_assert(sizeof(FillExtrusionDrawableUBO) == 7 * 16, "wrong size");
-
-struct alignas(16) FillExtrusionTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float pad1;
-    /* 44 */ float pad2;
-    /* 48 */
-};
-static_assert(sizeof(FillExtrusionTilePropsUBO) == 3 * 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) FillExtrusionPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float4 light_color_pad;
-    /* 32 */ float4 light_position_base;
-    /* 48 */ float height;
-    /* 52 */ float light_intensity;
-    /* 56 */ float vertical_gradient;
-    /* 60 */ float opacity;
-    /* 64 */ float fade;
-    /* 68 */ float from_scale;
-    /* 72 */ float to_scale;
-    /* 76 */ float pad2;
-    /* 80 */
-};
-static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
-
-"#,
     source: r"
-
-struct VertexStage {
-    short2 pos [[attribute(0)]];
-    short2 outline_pos [[attribute(1)]];
-    ushort2 decimals_ed [[attribute(2)]];
-    short2 next_outline_pos [[attribute(7)]];
-    ushort2 next_decimals_ed [[attribute(8)]];
-
-#if !defined(HAS_UNIFORM_u_base)
-    float2 base [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_height)
-    float2 height [[attribute(4)]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_from)
-    ushort4 pattern_from [[attribute(5)]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
-    ushort4 pattern_to [[attribute(6)]];
-#endif
-#if defined(TERRAIN)
-    // The height of the ground under its polygon's centroid.
-    float ground_height [[attribute(9)]];
-#endif
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -1916,13 +1293,7 @@ struct FragmentOutput {
     //float depth [[depth(less)]]; // Write depth value if it's less than what's already there
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const FillExtrusionTilePropsUBO* tilePropsVector [[buffer(idFillExtrusionTilePropsUBO)]],
-                                device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
     bool isDiscarded = glMod(float(vertx.decimals_ed.x), 2.0) > 0.0;
     if (isDiscarded) {
@@ -1945,7 +1316,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     device const FillExtrusionTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_base)
-    const auto base   = max(props.light_position_base.w, 0.0);
+    const auto base   = max(props.base, 0.0);
 #else
     const auto base   = max(unpack_mix_float(vertx.base, drawable.base_t), 0.0);
 #endif
@@ -2018,7 +1389,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 pos = float2(edgedistance, z * drawable.height_factor); // extrusion side
 
     float4 lighting = float4(0.0, 0.0, 0.0, 1.0);
-    float directional = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    float directional = clamp(dot(normal, float3(props.light_position)), 0.0, 1.0);
     directional = mix((1.0 - props.light_intensity), max((0.5 + props.light_intensity), 1.0), directional);
 
     if (normal.z == 0.0) {
@@ -2031,7 +1402,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         directional *= (1.0 - props.vertical_gradient) + (props.vertical_gradient * factor);
     }
 
-    lighting.rgb += clamp(directional * props.light_color_pad.rgb, mix(float3(0.0), float3(0.3), 1.0 - props.light_color_pad.rgb), float3(1.0));
+    lighting.rgb += clamp(directional * float3(props.light_color), mix(float3(0.0), float3(0.3), 1.0 - float3(props.light_color)), float3(1.0));
     lighting *= props.opacity;
 
     return {
@@ -2049,12 +1420,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
-                                     device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                     device const FillExtrusionTilePropsUBO* tilePropsVector [[buffer(idFillExtrusionTilePropsUBO)]],
-                                     device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]],
-                                     texture2d<float, access::sample> image0 [[texture(0)]],
-                                     sampler image0_sampler [[sampler(0)]]) {
+fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 #if defined(OVERDRAW_INSPECTOR)
     return {half4(1.0)/*, in.position.z*/};
 #endif
@@ -2082,13 +1448,13 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
     if (props.fade < 1.0) {
         const float2 imagecoord = glMod(in.pos_a, 1.0);
         const float2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
-        color1 = image0.sample(image0_sampler, pos);
+        color1 = image.sample(image_sampler, pos);
     }
     float4 color2 = float4(0.0);
     if (props.fade > 0.0) {
         const float2 imagecoord_b = glMod(in.pos_b, 1.0);
         const float2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
-        color2 = image0.sample(image0_sampler, pos2);
+        color2 = image.sample(image_sampler, pos2);
     }
 
     return {half4(mix(color1, color2, props.fade) * in.lighting)/*, in.position.z*/};
@@ -2099,84 +1465,7 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idFillExtrusionDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idFillExtrusionTilePropsUBO = drawableReservedUBOCount,
-    idFillExtrusionPropsUBO,
-    fillExtrusionUBOCount
-};
-
-struct alignas(16) FillExtrusionDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float2 pixel_coord_upper;
-    /*  72 */ float2 pixel_coord_lower;
-    /*  80 */ float height_factor;
-    /*  84 */ float tile_ratio;
-
-    // Interpolations
-    /*  88 */ float base_t;
-    /*  92 */ float height_t;
-    /*  96 */ float color_t;
-    /* 100 */ float pattern_from_t;
-    /* 104 */ float pattern_to_t;
-    /* 108 */ uint32_t paint_layout;
-    /* 112 */
-};
-static_assert(sizeof(FillExtrusionDrawableUBO) == 7 * 16, "wrong size");
-
-struct alignas(16) FillExtrusionTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float pad1;
-    /* 44 */ float pad2;
-    /* 48 */
-};
-static_assert(sizeof(FillExtrusionTilePropsUBO) == 3 * 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) FillExtrusionPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float4 light_color_pad;
-    /* 32 */ float4 light_position_base;
-    /* 48 */ float height;
-    /* 52 */ float light_intensity;
-    /* 56 */ float vertical_gradient;
-    /* 60 */ float opacity;
-    /* 64 */ float fade;
-    /* 68 */ float from_scale;
-    /* 72 */ float to_scale;
-    /* 76 */ float pad2;
-    /* 80 */
-};
-static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
-
-"#,
     source: r"
-
-struct VertexStage {
-    short2 pos [[attribute(0)]];
-    ushort2 decimals_ed [[attribute(1)]];
-
-#if !defined(HAS_UNIFORM_u_base)
-    float2 base [[attribute(2)]];
-#endif
-#if !defined(HAS_UNIFORM_u_height)
-    float2 height [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_from)
-    ushort4 pattern_from [[attribute(4)]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
-    ushort4 pattern_to [[attribute(5)]];
-#endif
-#if defined(TERRAIN)
-    // The height of the ground under its polygon's centroid.
-    float ground_height [[attribute(6)]];
-#endif
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -2197,19 +1486,13 @@ struct FragmentOutput {
     //float depth [[depth(less)]]; // Write depth value if it's less than what's already there
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const FillExtrusionTilePropsUBO* tilePropsVector [[buffer(idFillExtrusionTilePropsUBO)]],
-                                device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
     device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
     device const FillExtrusionTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_base)
-    const auto base   = max(props.light_position_base.w, 0.0);
+    const auto base   = max(props.base, 0.0);
 #else
     const auto base   = max(unpack_mix_float(vertx.base, drawable.base_t), 0.0);
 #endif
@@ -2274,7 +1557,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 pos = float2(vertx.pos); // extrusion top
 
     float4 lighting = float4(0.0, 0.0, 0.0, 1.0);
-    float directional = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    float directional = clamp(dot(normal, float3(props.light_position)), 0.0, 1.0);
     directional = mix((1.0 - props.light_intensity), max((0.5 + props.light_intensity), 1.0), directional);
 
     if (normal.z == 0.0) {
@@ -2287,7 +1570,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         directional *= (1.0 - props.vertical_gradient) + (props.vertical_gradient * factor);
     }
 
-    lighting.rgb += clamp(directional * props.light_color_pad.rgb, mix(float3(0.0), float3(0.3), 1.0 - props.light_color_pad.rgb), float3(1.0));
+    lighting.rgb += clamp(directional * float3(props.light_color), mix(float3(0.0), float3(0.3), 1.0 - float3(props.light_color)), float3(1.0));
     lighting *= props.opacity;
 
     return {
@@ -2304,12 +1587,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
-                                     device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                     device const FillExtrusionTilePropsUBO* tilePropsVector [[buffer(idFillExtrusionTilePropsUBO)]],
-                                     device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]],
-                                     texture2d<float, access::sample> image0 [[texture(0)]],
-                                     sampler image0_sampler [[sampler(0)]]) {
+fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 #if defined(OVERDRAW_INSPECTOR)
     return {half4(1.0)/*, in.position.z*/};
 #endif
@@ -2337,13 +1615,13 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
     if (props.fade < 1.0) {
         const float2 imagecoord = glMod(in.pos_a, 1.0);
         const float2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
-        color1 = image0.sample(image0_sampler, pos);
+        color1 = image.sample(image_sampler, pos);
     }
     float4 color2 = float4(0.0);
     if (props.fade > 0.0) {
         const float2 imagecoord_b = glMod(in.pos_b, 1.0);
         const float2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
-        color2 = image0.sample(image0_sampler, pos2);
+        color2 = image.sample(image_sampler, pos2);
     }
 
     return {half4(mix(color1, color2, props.fade) * in.lighting)/*, in.position.z*/};
@@ -2354,81 +1632,7 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const FILL_EXTRUSION_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idFillExtrusionDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idFillExtrusionTilePropsUBO = drawableReservedUBOCount,
-    idFillExtrusionPropsUBO,
-    fillExtrusionUBOCount
-};
-
-struct alignas(16) FillExtrusionDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float2 pixel_coord_upper;
-    /*  72 */ float2 pixel_coord_lower;
-    /*  80 */ float height_factor;
-    /*  84 */ float tile_ratio;
-
-    // Interpolations
-    /*  88 */ float base_t;
-    /*  92 */ float height_t;
-    /*  96 */ float color_t;
-    /* 100 */ float pattern_from_t;
-    /* 104 */ float pattern_to_t;
-    /* 108 */ uint32_t paint_layout;
-    /* 112 */
-};
-static_assert(sizeof(FillExtrusionDrawableUBO) == 7 * 16, "wrong size");
-
-struct alignas(16) FillExtrusionTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float pad1;
-    /* 44 */ float pad2;
-    /* 48 */
-};
-static_assert(sizeof(FillExtrusionTilePropsUBO) == 3 * 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) FillExtrusionPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float4 light_color_pad;
-    /* 32 */ float4 light_position_base;
-    /* 48 */ float height;
-    /* 52 */ float light_intensity;
-    /* 56 */ float vertical_gradient;
-    /* 60 */ float opacity;
-    /* 64 */ float fade;
-    /* 68 */ float from_scale;
-    /* 72 */ float to_scale;
-    /* 76 */ float pad2;
-    /* 80 */
-};
-static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
-
-"#,
     source: r"
-
-struct VertexStage {
-    short2 pos [[attribute(0)]];
-    ushort2 decimals_ed [[attribute(1)]];
-
-#if !defined(HAS_UNIFORM_u_color)
-    float4 color [[attribute(2)]];
-#endif
-#if !defined(HAS_UNIFORM_u_base)
-    float2 base [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_height)
-    float2 height [[attribute(4)]];
-#endif
-#if defined(TERRAIN)
-    // The height of the ground under its polygon's centroid.
-    float ground_height [[attribute(5)]];
-#endif
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -2440,16 +1644,12 @@ struct FragmentOutput {
     //float depth [[depth(less)]]; // Write depth value if it's less than what's already there
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
     device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_base)
-    const auto base   = max(props.light_position_base.w, 0.0);
+    const auto base   = max(props.base, 0.0);
 #else
     const auto base   = max(unpack_mix_float(vertx.base, drawable.base_t), 0.0);
 #endif
@@ -2494,7 +1694,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     color += min(float4(0.03, 0.03, 0.03, 1.0), float4(1.0));
 
     // Calculate cos(theta), where theta is the angle between surface normal and diffuse light ray
-    const float directionalFraction = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
+    const float directionalFraction = clamp(dot(normal, float3(props.light_position)), 0.0, 1.0);
 
     // Adjust directional so that the range of values for highlight/shading is
     // narrower with lower light intensity and with lighter/brighter surface colors
@@ -2516,7 +1716,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     // Assign final color based on surface + ambient light color, diffuse light directional,
     // and light color with lower bounds adjusted to hue of light so that shading is tinted
     // with the complementary (opposite) color to the light color
-    const float3 light_color = props.light_color_pad.rgb;
+    const float3 light_color = float3(props.light_color);
     const float3 minLight = mix(0.0, 0.3, 1.0 - light_color.rgb);
     vcolor += float4(clamp(color.rgb * directional * light_color.rgb, minLight, 1.0), 0.0);
 
@@ -2526,7 +1726,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
+fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
     return { in.color/*, in.position.z*/ };
 }
 ",
@@ -2597,156 +1797,8 @@ OutlineCorner outline_corner(float4 start, float4 end, short2 corner, float2 wor
 pub(crate) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idFillDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idFillTilePropsUBO = drawableReservedUBOCount,
-    idFillEvaluatedPropsUBO,
-    fillUBOCount
-};
-
-//
-// Fill
-
-struct alignas(16) FillDrawableUBO {
-    /*  0 */ float4x4 matrix;
-
-    // Interpolations
-    /* 64 */ float color_t;
-    /* 68 */ float opacity_t;
-    /* 72 */ float pad1;
-    /* 76 */ float pad2;
-    /* 80 */
-};
-static_assert(sizeof(FillDrawableUBO) == 5 * 16, "wrong size");
-
-//
-// Fill outline
-
-struct alignas(16) FillOutlineDrawableUBO {
-    /*  0 */ float4x4 matrix;
-
-    // Interpolations
-    /* 64 */ float outline_color_t;
-    /* 68 */ float opacity_t;
-    /* 72 */ uint32_t paint_layout;
-    /* 76 */ float pad2;
-    /* 80 */
-};
-static_assert(sizeof(FillOutlineDrawableUBO) == 5 * 16, "wrong size");
-
-//
-// Fill pattern
-
-struct alignas(16) FillPatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float2 pixel_coord_upper;
-    /* 72 */ float2 pixel_coord_lower;
-    /* 80 */ float tile_ratio;
-
-    // Interpolations
-    /* 84 */ float pattern_from_t;
-    /* 88 */ float pattern_to_t;
-    /* 92 */ float opacity_t;
-    /* 96 */ float color_t;
-    /*100 */ float pad1;
-    /*104 */ float pad2;
-    /*108 */ float pad3;
-    /*112 */
-};
-static_assert(sizeof(FillPatternDrawableUBO) == 7 * 16, "wrong size");
-
-struct alignas(16) FillPatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float sdf;
-    /* 44 */ float pad2;
-    /* 48 */
-};
-static_assert(sizeof(FillPatternTilePropsUBO) == 3 * 16, "wrong size");
-
-//
-// Fill pattern outline
-
-struct alignas(16) FillOutlinePatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float2 pixel_coord_upper;
-    /* 72 */ float2 pixel_coord_lower;
-    /* 80 */ float tile_ratio;
-
-    // Interpolations
-    /* 84 */ float pattern_from_t;
-    /* 88 */ float pattern_to_t;
-    /* 92 */ float opacity_t;
-    /* 96 */ float color_t;
-    /*100 */ float pad1;
-    /*104 */ float pad2;
-    /*108 */ float pad3;
-    /*112 */
-};
-static_assert(sizeof(FillOutlinePatternDrawableUBO) == 7 * 16, "wrong size");
-
-struct alignas(16) FillOutlinePatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float sdf;
-    /* 44 */ float pad2;
-    /* 48 */
-};
-static_assert(sizeof(FillOutlinePatternTilePropsUBO) == 3 * 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) FillEvaluatedPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float4 outline_color;
-    /* 32 */ float opacity;
-    /* 36 */ float fade;
-    /* 40 */ float from_scale;
-    /* 44 */ float to_scale;
-    /* 48 */
-};
-static_assert(sizeof(FillEvaluatedPropsUBO) == 3 * 16, "wrong size");
-
-union FillDrawableUnionUBO {
-    FillDrawableUBO fillDrawableUBO;
-    FillOutlineDrawableUBO fillOutlineDrawableUBO;
-    FillPatternDrawableUBO fillPatternDrawableUBO;
-    FillOutlinePatternDrawableUBO fillOutlinePatternDrawableUBO;
-};
-
-union FillTilePropsUnionUBO {
-    FillPatternTilePropsUBO fillPatternTilePropsUBO;
-    FillOutlinePatternTilePropsUBO fillOutlinePatternTilePropsUBO;
-};
-
-"#,
     source: concat!(
         r"
-
-struct VertexStage {
-    // The quad's corner: x picks the segment's start (0) or end (1), y its side.
-    short2 position [[attribute(0)]];
-    // Per instance: a vertex of the fill, and the end of the outline segment
-    // that starts there.
-    short2 outline_pos [[attribute(5)]];
-    short2 outline_end [[attribute(6)]];
-
-#if !defined(HAS_UNIFORM_u_color)
-    float4 color [[attribute(1)]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_from)
-    ushort4 pattern_from [[attribute(2)]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
-    ushort4 pattern_to [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(4)]];
-#endif
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -2770,16 +1822,10 @@ struct FragmentStage {
 ",
         outline_corner!(),
         r"
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const FillTilePropsUnionUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
-                                device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
-    device const FillOutlinePatternDrawableUBO& drawable = drawableVector[uboIndex].fillOutlinePatternDrawableUBO;
-    device const FillOutlinePatternTilePropsUBO& tileProps = tilePropsVector[uboIndex].fillOutlinePatternTilePropsUBO;
+    device const FillPatternDrawableUBO& drawable = drawableVector[uboIndex];
+    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_pattern_from)
     const auto pattern_from = tileProps.pattern_from;
@@ -2813,7 +1859,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 end = float2(vertx.outline_end);
     const OutlineCorner corner = outline_corner(projectTile(start, start, projectionVector[uboIndex]),
                                                 projectTile(end, end, projectionVector[uboIndex]),
-                                                vertx.position, paintParams.world_size);
+                                                vertx.pos, paintParams.world_size);
     const float2 pos2 = mix(start, end, corner.t);
 
     return {
@@ -2837,17 +1883,12 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                            device const FillTilePropsUnionUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
-                            device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]],
-                            texture2d<float, access::sample> image0 [[texture(0)]],
-                            sampler image0_sampler [[sampler(0)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
 
-    device const FillOutlinePatternTilePropsUBO& tileProps = tilePropsVector[uboIndex].fillOutlinePatternTilePropsUBO;
+    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_pattern_from)
     const auto pattern_from   = float4(tileProps.pattern_from);
@@ -2883,13 +1924,13 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     if (props.fade < 1.0) {
         const float2 imagecoord = glMod(in.v_pos_a, 1.0);
         const float2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
-        color1 = image0.sample(image0_sampler, pos);
+        color1 = image.sample(image_sampler, pos);
     }
     float4 color2 = float4(0.0);
     if (props.fade > 0.0) {
         const float2 imagecoord_b = glMod(in.v_pos_b, 1.0);
         const float2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
-        color2 = image0.sample(image0_sampler, pos2);
+        color2 = image.sample(image_sampler, pos2);
     }
 
     // TODO: Should triangate the lines into triangles to support thick line and edge antialiased.
@@ -2932,8 +1973,7 @@ struct FragmentStage {
 ",
             outline_corner!(),
             r"
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -2965,162 +2005,21 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const FILL_OUTLINE_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idFillDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idFillTilePropsUBO = drawableReservedUBOCount,
-    idFillEvaluatedPropsUBO,
-    fillUBOCount
-};
-
-//
-// Fill
-
-struct alignas(16) FillDrawableUBO {
-    /*  0 */ float4x4 matrix;
-
-    // Interpolations
-    /* 64 */ float color_t;
-    /* 68 */ float opacity_t;
-    /* 72 */ float pad1;
-    /* 76 */ float pad2;
-    /* 80 */
-};
-static_assert(sizeof(FillDrawableUBO) == 5 * 16, "wrong size");
-
-//
-// Fill outline
-
-struct alignas(16) FillOutlineDrawableUBO {
-    /*  0 */ float4x4 matrix;
-
-    // Interpolations
-    /* 64 */ float outline_color_t;
-    /* 68 */ float opacity_t;
-    /* 72 */ uint32_t paint_layout;
-    /* 76 */ float pad2;
-    /* 80 */
-};
-static_assert(sizeof(FillOutlineDrawableUBO) == 5 * 16, "wrong size");
-
-//
-// Fill pattern
-
-struct alignas(16) FillPatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float2 pixel_coord_upper;
-    /* 72 */ float2 pixel_coord_lower;
-    /* 80 */ float tile_ratio;
-
-    // Interpolations
-    /* 84 */ float pattern_from_t;
-    /* 88 */ float pattern_to_t;
-    /* 92 */ float opacity_t;
-    /* 96 */ float color_t;
-    /*100 */ float pad1;
-    /*104 */ float pad2;
-    /*108 */ float pad3;
-    /*112 */
-};
-static_assert(sizeof(FillPatternDrawableUBO) == 7 * 16, "wrong size");
-
-struct alignas(16) FillPatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float sdf;
-    /* 44 */ float pad2;
-    /* 48 */
-};
-static_assert(sizeof(FillPatternTilePropsUBO) == 3 * 16, "wrong size");
-
-//
-// Fill pattern outline
-
-struct alignas(16) FillOutlinePatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float2 pixel_coord_upper;
-    /* 72 */ float2 pixel_coord_lower;
-    /* 80 */ float tile_ratio;
-
-    // Interpolations
-    /* 84 */ float pattern_from_t;
-    /* 88 */ float pattern_to_t;
-    /* 92 */ float opacity_t;
-    /* 96 */ float color_t;
-    /*100 */ float pad1;
-    /*104 */ float pad2;
-    /*108 */ float pad3;
-    /*112 */
-};
-static_assert(sizeof(FillOutlinePatternDrawableUBO) == 7 * 16, "wrong size");
-
-struct alignas(16) FillOutlinePatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float sdf;
-    /* 44 */ float pad2;
-    /* 48 */
-};
-static_assert(sizeof(FillOutlinePatternTilePropsUBO) == 3 * 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) FillEvaluatedPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float4 outline_color;
-    /* 32 */ float opacity;
-    /* 36 */ float fade;
-    /* 40 */ float from_scale;
-    /* 44 */ float to_scale;
-    /* 48 */
-};
-static_assert(sizeof(FillEvaluatedPropsUBO) == 3 * 16, "wrong size");
-
-union FillDrawableUnionUBO {
-    FillDrawableUBO fillDrawableUBO;
-    FillOutlineDrawableUBO fillOutlineDrawableUBO;
-    FillPatternDrawableUBO fillPatternDrawableUBO;
-    FillOutlinePatternDrawableUBO fillOutlinePatternDrawableUBO;
-};
-
-union FillTilePropsUnionUBO {
-    FillPatternTilePropsUBO fillPatternTilePropsUBO;
-    FillOutlinePatternTilePropsUBO fillOutlinePatternTilePropsUBO;
-};
-
-"#,
     source: concat!(
         r"
-
-struct VertexStage {
-    // The quad's corner: x picks the segment's start (0) or end (1), y its side.
-    short2 position [[attribute(0)]];
-    float4 outline_color [[attribute(1)]];
-    float2 opacity [[attribute(2)]];
-    // Per instance: a vertex of the fill, and the end of the outline segment
-    // that starts there.
-    short2 outline_pos [[attribute(3)]];
-    short2 outline_end [[attribute(4)]];
-};
 
 ",
         outline_stages!(),
         r"
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
-    device const FillOutlineDrawableUBO& drawable = drawableVector[uboIndex].fillOutlineDrawableUBO;
+    device const FillOutlineDrawableUBO& drawable = drawableVector[uboIndex];
 
     const float2 start = float2(vertx.outline_pos);
     const float2 end = float2(vertx.outline_end);
     const OutlineCorner corner = outline_corner(projectTile(start, start, projectionVector[uboIndex]),
                                                 projectTile(end, end, projectionVector[uboIndex]),
-                                                vertx.position, paintParams.world_size);
+                                                vertx.pos, paintParams.world_size);
     return {
         .position       = corner.position,
         .pos            = corner.pos,
@@ -3140,35 +2039,19 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 pub(crate) const FILL_OUTLINE_PULLED_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: FILL_OUTLINE_INSTANCED_SHADER.prelude,
     source: concat!(
-        r"
-
-enum {
-    idFillOutlineVertices = 7,
-    idFillOutlineEnds,
-    idFillOutlinePaint
-};
-",
         outline_stages!(),
         r"
-FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const short2* outlineVertices [[buffer(idFillOutlineVertices)]],
-                                device const short2* outlineEnds [[buffer(idFillOutlineEnds)]],
-                                device const float* outlinePaint [[buffer(idFillOutlinePaint)]]) {
+FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]] MLN_VERTEX_BINDINGS) {
 
-    device const FillOutlineDrawableUBO& drawable = drawableVector[uboIndex].fillOutlineDrawableUBO;
+    device const FillOutlineDrawableUBO& drawable = drawableVector[uboIndex];
 
     // Four vertices a segment, in the order of the instanced quad's corners:
     // a vertex of the fill and the end of the segment that starts there.
     const uint segment = vertex_id / 4;
     const uint quad_corner = vertex_id % 4;
-    const float2 start = float2(outlineVertices[segment]);
-    const float2 end = float2(outlineEnds[segment]);
+    const float2 start = float2(as_type<short2>(outlineVertices[segment]));
+    const float2 end = float2(as_type<short2>(outlineEnds[segment]));
     const OutlineCorner corner = outline_corner(projectTile(start, start, projectionVector[uboIndex]),
                                                 projectTile(end, end, projectionVector[uboIndex]),
                                                 short2(quad_corner >> 1, quad_corner & 1), paintParams.world_size);
@@ -3176,8 +2059,10 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
     // The segment's paint values are its start's, where the drawable's
     // `paint_layout` says: the floats a vertex takes, then the offsets of
     // the outline color and the opacity, a byte each from the lowest.
+#if !defined(HAS_UNIFORM_u_opacity) || !defined(HAS_UNIFORM_u_outline_color)
     const uint paint_layout = drawable.paint_layout;
     device const float* paint = outlinePaint + segment * (paint_layout & 0xff);
+#endif
     return {
         .position       = corner.position,
         .pos            = corner.pos,
@@ -3198,150 +2083,7 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]],
 pub(crate) const FILL_PATTERN_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idFillDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idFillTilePropsUBO = drawableReservedUBOCount,
-    idFillEvaluatedPropsUBO,
-    fillUBOCount
-};
-
-//
-// Fill
-
-struct alignas(16) FillDrawableUBO {
-    /*  0 */ float4x4 matrix;
-
-    // Interpolations
-    /* 64 */ float color_t;
-    /* 68 */ float opacity_t;
-    /* 72 */ float pad1;
-    /* 76 */ float pad2;
-    /* 80 */
-};
-static_assert(sizeof(FillDrawableUBO) == 5 * 16, "wrong size");
-
-//
-// Fill outline
-
-struct alignas(16) FillOutlineDrawableUBO {
-    /*  0 */ float4x4 matrix;
-
-    // Interpolations
-    /* 64 */ float outline_color_t;
-    /* 68 */ float opacity_t;
-    /* 72 */ uint32_t paint_layout;
-    /* 76 */ float pad2;
-    /* 80 */
-};
-static_assert(sizeof(FillOutlineDrawableUBO) == 5 * 16, "wrong size");
-
-//
-// Fill pattern
-
-struct alignas(16) FillPatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float2 pixel_coord_upper;
-    /* 72 */ float2 pixel_coord_lower;
-    /* 80 */ float tile_ratio;
-
-    // Interpolations
-    /* 84 */ float pattern_from_t;
-    /* 88 */ float pattern_to_t;
-    /* 92 */ float opacity_t;
-    /* 96 */ float color_t;
-    /*100 */ float pad1;
-    /*104 */ float pad2;
-    /*108 */ float pad3;
-    /*112 */
-};
-static_assert(sizeof(FillPatternDrawableUBO) == 7 * 16, "wrong size");
-
-struct alignas(16) FillPatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float sdf;
-    /* 44 */ float pad2;
-    /* 48 */
-};
-static_assert(sizeof(FillPatternTilePropsUBO) == 3 * 16, "wrong size");
-
-//
-// Fill pattern outline
-
-struct alignas(16) FillOutlinePatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float2 pixel_coord_upper;
-    /* 72 */ float2 pixel_coord_lower;
-    /* 80 */ float tile_ratio;
-
-    // Interpolations
-    /* 84 */ float pattern_from_t;
-    /* 88 */ float pattern_to_t;
-    /* 92 */ float opacity_t;
-    /* 96 */ float color_t;
-    /*100 */ float pad1;
-    /*104 */ float pad2;
-    /*108 */ float pad3;
-    /*112 */
-};
-static_assert(sizeof(FillOutlinePatternDrawableUBO) == 7 * 16, "wrong size");
-
-struct alignas(16) FillOutlinePatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float sdf;
-    /* 44 */ float pad2;
-    /* 48 */
-};
-static_assert(sizeof(FillOutlinePatternTilePropsUBO) == 3 * 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) FillEvaluatedPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float4 outline_color;
-    /* 32 */ float opacity;
-    /* 36 */ float fade;
-    /* 40 */ float from_scale;
-    /* 44 */ float to_scale;
-    /* 48 */
-};
-static_assert(sizeof(FillEvaluatedPropsUBO) == 3 * 16, "wrong size");
-
-union FillDrawableUnionUBO {
-    FillDrawableUBO fillDrawableUBO;
-    FillOutlineDrawableUBO fillOutlineDrawableUBO;
-    FillPatternDrawableUBO fillPatternDrawableUBO;
-    FillOutlinePatternDrawableUBO fillOutlinePatternDrawableUBO;
-};
-
-union FillTilePropsUnionUBO {
-    FillPatternTilePropsUBO fillPatternTilePropsUBO;
-    FillOutlinePatternTilePropsUBO fillOutlinePatternTilePropsUBO;
-};
-
-"#,
     source: r"
-
-struct VertexStage {
-    short2 position [[attribute(0)]];
-
-#if !defined(HAS_UNIFORM_u_color)
-    float4 color [[attribute(1)]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_from)
-    ushort4 pattern_from [[attribute(2)]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
-    ushort4 pattern_to [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(4)]];
-#endif
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -3362,16 +2104,10 @@ struct FragmentStage {
 #endif
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const FillTilePropsUnionUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
-                                device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
-    device const FillPatternDrawableUBO& drawable = drawableVector[uboIndex].fillPatternDrawableUBO;
-    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex].fillPatternTilePropsUBO;
+    device const FillPatternDrawableUBO& drawable = drawableVector[uboIndex];
+    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_pattern_from)
     const auto pattern_from = float4(tileProps.pattern_from);
@@ -3397,7 +2133,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     const float2 display_size_a = float2((pattern_br_a.x - pattern_tl_a.x) / pixelRatio, (pattern_br_a.y - pattern_tl_a.y) / pixelRatio);
     const float2 display_size_b = float2((pattern_br_b.x - pattern_tl_b.x) / pixelRatio, (pattern_br_b.y - pattern_tl_b.y) / pixelRatio);
-    const float2 postion = float2(vertx.position);
+    const float2 postion = float2(vertx.pos);
 
     return {
         .position       = projectTile(postion, postion, projectionVector[uboIndex]),
@@ -3418,17 +2154,12 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                            device const FillTilePropsUnionUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
-                            device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]],
-                            texture2d<float, access::sample> image0 [[texture(0)]],
-                            sampler image0_sampler [[sampler(0)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
 
-    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex].fillPatternTilePropsUBO;
+    device const FillPatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_pattern_from)
     const auto pattern_from   = float4(tileProps.pattern_from);
@@ -3464,13 +2195,13 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     if (props.fade < 1.0) {
         const float2 imagecoord = glMod(in.v_pos_a, 1.0);
         const float2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
-        color1 = image0.sample(image0_sampler, pos);
+        color1 = image.sample(image_sampler, pos);
     }
     float4 color2 = float4(0.0);
     if (props.fade > 0.0) {
         const float2 imagecoord_b = glMod(in.v_pos_b, 1.0);
         const float2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
-        color2 = image0.sample(image0_sampler, pos2);
+        color2 = image.sample(image_sampler, pos2);
     }
 
     if (tileProps.sdf > 0.5) {
@@ -3489,144 +2220,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const FILL_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idFillDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idFillTilePropsUBO = drawableReservedUBOCount,
-    idFillEvaluatedPropsUBO,
-    fillUBOCount
-};
-
-//
-// Fill
-
-struct alignas(16) FillDrawableUBO {
-    /*  0 */ float4x4 matrix;
-
-    // Interpolations
-    /* 64 */ float color_t;
-    /* 68 */ float opacity_t;
-    /* 72 */ float pad1;
-    /* 76 */ float pad2;
-    /* 80 */
-};
-static_assert(sizeof(FillDrawableUBO) == 5 * 16, "wrong size");
-
-//
-// Fill outline
-
-struct alignas(16) FillOutlineDrawableUBO {
-    /*  0 */ float4x4 matrix;
-
-    // Interpolations
-    /* 64 */ float outline_color_t;
-    /* 68 */ float opacity_t;
-    /* 72 */ uint32_t paint_layout;
-    /* 76 */ float pad2;
-    /* 80 */
-};
-static_assert(sizeof(FillOutlineDrawableUBO) == 5 * 16, "wrong size");
-
-//
-// Fill pattern
-
-struct alignas(16) FillPatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float2 pixel_coord_upper;
-    /* 72 */ float2 pixel_coord_lower;
-    /* 80 */ float tile_ratio;
-
-    // Interpolations
-    /* 84 */ float pattern_from_t;
-    /* 88 */ float pattern_to_t;
-    /* 92 */ float opacity_t;
-    /* 96 */ float color_t;
-    /*100 */ float pad1;
-    /*104 */ float pad2;
-    /*108 */ float pad3;
-    /*112 */
-};
-static_assert(sizeof(FillPatternDrawableUBO) == 7 * 16, "wrong size");
-
-struct alignas(16) FillPatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float sdf;
-    /* 44 */ float pad2;
-    /* 48 */
-};
-static_assert(sizeof(FillPatternTilePropsUBO) == 3 * 16, "wrong size");
-
-//
-// Fill pattern outline
-
-struct alignas(16) FillOutlinePatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float2 pixel_coord_upper;
-    /* 72 */ float2 pixel_coord_lower;
-    /* 80 */ float tile_ratio;
-
-    // Interpolations
-    /* 84 */ float pattern_from_t;
-    /* 88 */ float pattern_to_t;
-    /* 92 */ float opacity_t;
-    /* 96 */ float color_t;
-    /*100 */ float pad1;
-    /*104 */ float pad2;
-    /*108 */ float pad3;
-    /*112 */
-};
-static_assert(sizeof(FillOutlinePatternDrawableUBO) == 7 * 16, "wrong size");
-
-struct alignas(16) FillOutlinePatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float2 texsize;
-    /* 40 */ float sdf;
-    /* 44 */ float pad2;
-    /* 48 */
-};
-static_assert(sizeof(FillOutlinePatternTilePropsUBO) == 3 * 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) FillEvaluatedPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float4 outline_color;
-    /* 32 */ float opacity;
-    /* 36 */ float fade;
-    /* 40 */ float from_scale;
-    /* 44 */ float to_scale;
-    /* 48 */
-};
-static_assert(sizeof(FillEvaluatedPropsUBO) == 3 * 16, "wrong size");
-
-union FillDrawableUnionUBO {
-    FillDrawableUBO fillDrawableUBO;
-    FillOutlineDrawableUBO fillOutlineDrawableUBO;
-    FillPatternDrawableUBO fillPatternDrawableUBO;
-    FillOutlinePatternDrawableUBO fillOutlinePatternDrawableUBO;
-};
-
-union FillTilePropsUnionUBO {
-    FillPatternTilePropsUBO fillPatternTilePropsUBO;
-    FillOutlinePatternTilePropsUBO fillOutlinePatternTilePropsUBO;
-};
-
-"#,
     source: r"
-
-struct VertexStage {
-    short2 position [[attribute(0)]];
-
-#if !defined(HAS_UNIFORM_u_color)
-    float4 color [[attribute(1)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(2)]];
-#endif
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -3639,15 +2233,12 @@ struct FragmentStage {
 #endif
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
-    device const FillDrawableUBO& drawable = drawableVector[uboIndex].fillDrawableUBO;
+    device const FillDrawableUBO& drawable = drawableVector[uboIndex];
 
     return {
-        .position = projectTile(float2(vertx.position), float2(vertx.position), projectionVector[uboIndex]),
+        .position = projectTile(float2(vertx.pos), float2(vertx.pos), projectionVector[uboIndex]),
 #if !defined(HAS_UNIFORM_u_color)
         .color    = half4(unpack_mix_color(vertx.color, drawable.color_t)),
 #endif
@@ -3657,8 +2248,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -3683,32 +2273,19 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const GLOBE_DEPTH_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
-
-enum {
-    globeDepthUBOCount = drawableReservedUBOCount
-};
-
-",
     source: r"
-
-struct VertexStage {
-    short2 position [[attribute(0)]];
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
 };
 
-FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
+FragmentStage vertex vertexMain(VertexStage in [[stage_in]] MLN_VERTEX_BINDINGS) {
     return {
-        .position = projectTileFor3D(float2(in.position.xy), 0.0, projectionVector[uboIndex])
+        .position = projectTileFor3D(float2(in.pos.xy), 0.0, projectionVector[uboIndex])
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
     return half4(0.0);
 }
 ",
@@ -3717,53 +2294,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(crate) const HEATMAP_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idHeatmapDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idHeatmapEvaluatedPropsUBO = drawableReservedUBOCount,
-    heatmapUBOCount
-};
-
-struct alignas(16) HeatmapDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float extrude_scale;
-
-    // Interpolations
-    /* 68 */ float weight_t;
-    /* 72 */ float radius_t;
-    /* 76 */ float globe_extrude_scale;
-    /* 80 */
-};
-static_assert(sizeof(HeatmapDrawableUBO) == 5 * 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) HeatmapEvaluatedPropsUBO {
-    /*  0 */ float weight;
-    /*  4 */ float radius;
-    /*  8 */ float intensity;
-    /* 12 */ float padding;
-    /* 16 */
-};
-static_assert(sizeof(HeatmapEvaluatedPropsUBO) == 16, "wrong size");
-
-"#,
     source: r#"
-
-struct VertexStage {
-    short2 pos [[attribute(0)]];
-
-#if !defined(HAS_UNIFORM_u_weight)
-    float2 weight [[attribute(1)]];
-#endif
-#if !defined(HAS_UNIFORM_u_radius)
-    float2 radius [[attribute(2)]];
-#endif
-#if defined(TERRAIN)
-    // The height of the ground under the kernel's center.
-    float ground_height [[attribute(3)]];
-#endif
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -3781,11 +2312,7 @@ constant const float ZERO = 1.0 / 255.0 / 16.0;
 // Gaussian kernel coefficient: 1 / sqrt(2 * PI)
 #define GAUSS_COEF 0.3989422804014327
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const HeatmapDrawableUBO* drawableVector [[buffer(idHeatmapDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const HeatmapEvaluatedPropsUBO& props [[buffer(idHeatmapEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
     device const HeatmapDrawableUBO& drawable = drawableVector[uboIndex];
 
@@ -3852,8 +2379,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const HeatmapEvaluatedPropsUBO& props [[buffer(idHeatmapEvaluatedPropsUBO)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -3875,41 +2401,17 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const HEATMAP_TEXTURE_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idHeatmapTexturePropsUBO = drawableReservedUBOCount,
-    heatmapTextureUBOCount
-};
-
-struct alignas(16) HeatmapTexturePropsUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float opacity;
-    /* 68 */ float pad1;
-    /* 72 */ float pad2;
-    /* 76 */ float pad3;
-    /* 80 */
-};
-static_assert(sizeof(HeatmapTexturePropsUBO) == 5 * 16, "wrong size");
-
-"#,
     source: r"
-
-struct VertexStage {
-    short2 pos [[attribute(0)]];
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
     float2 pos;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                                device const HeatmapTexturePropsUBO& props [[buffer(idHeatmapTexturePropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
     const float2 pos = float2(vertx.pos);
-    const float4 position = props.matrix * float4(pos * paintParams.world_size, 0, 1);
+    const float4 position = ubo.matrix * float4(pos * paintParams.world_size, 0, 1);
 
     return {
         .position    = position,
@@ -3917,12 +2419,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const HeatmapTexturePropsUBO& props [[buffer(idHeatmapTexturePropsUBO)]],
-                            texture2d<float, access::sample> image [[texture(0)]],
-                            texture2d<float, access::sample> color_ramp [[texture(1)]],
-                            sampler image_sampler [[sampler(0)]],
-                            sampler color_ramp_sampler [[sampler(1)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
@@ -3930,7 +2427,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     float t = image.sample(image_sampler, in.pos).r;
     float4 color = color_ramp.sample(color_ramp_sampler, float2(t, 0.5));
-    return half4(color * props.opacity);
+    return half4(color * ubo.opacity);
 }
 ",
 };
@@ -3941,34 +2438,13 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const LAYER_COMPOSITE_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idLayerCompositeUBO = drawableReservedUBOCount,
-    layerCompositeUBOCount
-};
-
-struct alignas(16) LayerCompositeUBO {
-    /*  0 */ float opacity;
-    /*  4 */ int blend;
-    /*  8 */ float pad2;
-    /* 12 */ float pad3;
-    /* 16 */
-};
-static_assert(sizeof(LayerCompositeUBO) == 16, "wrong size");
-
-"#,
     source: r"
-
-struct VertexStage {
-    short2 pos [[attribute(0)]];
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
     return {
         .position = float4(float2(vertx.pos) * 2.0 - 1.0, 0.0, 1.0),
     };
@@ -4015,10 +2491,7 @@ static float4 composite(float4 src, float4 dst, int mode) {
     return float4(co, src.a + dst.a * inv_src_a);
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const LayerCompositeUBO& props [[buffer(idLayerCompositeUBO)]],
-                            texture2d<float, access::sample> image [[texture(0)]],
-                            texture2d<float, access::sample> backdrop [[texture(1)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
     const uint2 texel = uint2(in.position.xy);
     const float4 color = image.read(texel);
 
@@ -4042,33 +2515,21 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const VERTEX_TEXEL_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
-
-enum {
-    vertexTexelUBOCount = drawableReservedUBOCount
-};
-
-",
     source: r"
-
-struct VertexStage {
-    short4 pos_texel [[attribute(0)]];
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
     float4 color;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                texture2d<float, access::read> image [[texture(0)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
     return {
         .position = float4(float2(vertx.pos_texel.xy), 0.0, 1.0),
         .color = image.read(uint2(vertx.pos_texel.zw)),
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
     return half4(in.color);
 }
 ",
@@ -4113,39 +2574,6 @@ static float ground_height(float2 pos, float4 dem_coords, texture2d<float, acces
     const float bottom = bl * (1.0 - f.x) + br * f.x;
     return (top * (1.0 - f.y) + bottom * f.y) * props.exaggeration;
 }
-
-"#
-    };
-}
-
-/// The blocks of a hillshade's per-tile values and of its lights. A macro,
-/// so that `concat!` puts it in the preludes of the hillshade and of the
-/// terrain's surface, which shades a drape of a hillshade's slopes.
-macro_rules! hillshade_blocks {
-    () => {
-        r#"
-struct alignas(16) HillshadeTilePropsUBO {
-    /*  0 */ float2 latrange;
-    /*  8 */ float exaggeration;
-    /* 12 */ int32_t method;
-    /* 16 */ int32_t num_lights;
-    /* 20 */ float pad0;
-    /* 24 */ float pad1;
-    /* 28 */ float pad2;
-    /* 32 */
-};
-static_assert(sizeof(HillshadeTilePropsUBO) == 2 * 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) HillshadeEvaluatedPropsUBO {
-    /*  0 */ float4 accent;
-    /* 16 */ float4 altitudes;       // Up to 4 altitude values (in radians)
-    /* 32 */ float4 azimuths;        // Up to 4 azimuth values (in radians)
-    /* 48 */ float4 shadows[4];      // Shadow colors (up to 4 lights)
-    /* 112 */ float4 highlights[4];  // Highlight colors (up to 4 lights)
-    /* 176 */
-};
-static_assert(sizeof(HillshadeEvaluatedPropsUBO) == 11 * 16, "wrong size");
 
 "#
     };
@@ -4310,47 +2738,6 @@ static half4 hillshade_color(float2 deriv, device const HillshadeTilePropsUBO& t
     };
 }
 
-/// The UBO ids and structs of the terrain's shaders.
-const TERRAIN_PRELUDE: &str = concat!(
-    hillshade_blocks!(),
-    r#"
-
-enum {
-    idTerrainDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idTerrainLightTileUBO = idDrawableReservedFragmentOnlyUBO,
-    idTerrainPropsUBO = drawableReservedUBOCount,
-    idTerrainLightUBO,
-    terrainUBOCount
-};
-
-struct alignas(16) TerrainDrawableUBO {
-    /*  0 */ float4 dem_coords;
-    /* 16 */
-};
-static_assert(sizeof(TerrainDrawableUBO) == 16, "wrong size");
-
-// How the terrain's DEM decodes, its exaggeration and its skirts' length,
-// then the fog over the surface.
-struct alignas(16) TerrainSurfaceUBO {
-    /*  0 */ float4 unpack;
-    /* 16 */ float unpack_scale;
-    /* 20 */ float exaggeration;
-    /* 24 */ float skirt_length;
-    /* 28 */ float pad0;
-    // Linear and premultiplied.
-    /* 32 */ float4 fog_color;
-    /* 48 */ float4 horizon_color;
-    // The distances along the view at which the fog's depth is 0 and 1.
-    /* 64 */ float2 depth_range;
-    /* 72 */ float ground_blend;
-    /* 76 */ float horizon_blend;
-    /* 80 */
-};
-static_assert(sizeof(TerrainSurfaceUBO) == 5 * 16, "wrong size");
-
-"#
-);
-
 /// The terrain's surface: a tile's grid, raised to the heights of the tile's
 /// DEM with its skirts lowered and projected through the tile's entry of
 /// `projectionVector`, in the colors of the tile's drape. A pole's vertices
@@ -4362,7 +2749,6 @@ static_assert(sizeof(TerrainSurfaceUBO) == 5 * 16, "wrong size");
 pub(crate) const TERRAIN_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: TERRAIN_PRELUDE,
     source: concat!(
         ground_height!(),
         hillshade_shading!(),
@@ -4376,11 +2762,6 @@ static float surface_height(float2 pos, float4 dem_coords, texture2d<float, acce
     }
     return ground_height(pos, dem_coords, dem, props);
 }
-
-struct VertexStage {
-    // x and y in tile units, whether the vertex is a skirt's lower edge, 0.
-    short4 pos [[attribute(0)]];
-};
 
 // `color`, premultiplied, of the surface `view_depth` pixels along the
 // view, covered by `fog`, as GL JS's terrain is: mixed in linear components
@@ -4409,17 +2790,12 @@ struct FragmentStage {
     float view_depth;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const TerrainDrawableUBO* drawableVector [[buffer(idTerrainDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const TerrainSurfaceUBO& terrain [[buffer(idTerrainPropsUBO)]],
-                                texture2d<float, access::read> dem [[texture(2)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
     device const TerrainDrawableUBO& drawable = drawableVector[uboIndex];
     device const ProjectionUBO& projection = projectionVector[uboIndex];
     const float2 pos = float2(vertx.pos.xy);
     const float skirt = float(vertx.pos.z);
-    const float height = surface_height(pos, drawable.dem_coords, dem, terrain);
+    const float height = surface_height(pos, drawable.dem_coords, ground_dem, terrain);
     const float4 position = projectTileFor3D(pos, height - skirt * terrain.skirt_length, projection);
     return {
         .position = position,
@@ -4428,13 +2804,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                            device const HillshadeTilePropsUBO* lightVector [[buffer(idTerrainLightTileUBO)]],
-                            device const TerrainSurfaceUBO& terrain [[buffer(idTerrainPropsUBO)]],
-                            device const HillshadeEvaluatedPropsUBO& props [[buffer(idTerrainLightUBO)]],
-                            texture2d<float, access::sample> drape [[texture(1)]],
-                            sampler drape_sampler [[sampler(1)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
     const float4 color = drape.sample(drape_sampler, in.drape_pos);
     device const HillshadeTilePropsUBO& light = lightVector[uboIndex];
     if (light.num_lights == 0 || color.a == 0.0) {
@@ -4457,7 +2827,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const TERRAIN_DEPTH_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: TERRAIN_PRELUDE,
     source: concat!(
         ground_height!(),
         r"
@@ -4471,36 +2840,26 @@ static float surface_height(float2 pos, float4 dem_coords, texture2d<float, acce
     return ground_height(pos, dem_coords, dem, props);
 }
 
-struct VertexStage {
-    // x and y in tile units, whether the vertex is a skirt's lower edge, 0.
-    short4 pos [[attribute(0)]];
-};
-
 struct FragmentStage {
     float4 position [[position, invariant]];
     // The eye distance, which interpolates exactly across a triangle.
     float distance;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const TerrainDrawableUBO* drawableVector [[buffer(idTerrainDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const TerrainSurfaceUBO& props [[buffer(idTerrainPropsUBO)]],
-                                texture2d<float, access::read> dem [[texture(2)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
     device const TerrainDrawableUBO& drawable = drawableVector[uboIndex];
     device const ProjectionUBO& projection = projectionVector[uboIndex];
     const float2 pos = float2(vertx.pos.xy);
     const float skirt = float(vertx.pos.z);
-    const float height = surface_height(pos, drawable.dem_coords, dem, props);
-    const float4 position = projectTileFor3D(pos, height - skirt * props.skirt_length, projection);
+    const float height = surface_height(pos, drawable.dem_coords, ground_dem, terrain);
+    const float4 position = projectTileFor3D(pos, height - skirt * terrain.skirt_length, projection);
     return {
         .position = position,
         .distance = position.w,
     };
 }
 
-float4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
+float4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
     const uint bits = as_type<uint>(in.distance);
     const uint4 bytes = uint4(bits, bits >> 8, bits >> 16, bits >> 24) & uint4(255);
     return float4(bytes) / 255.0;
@@ -4517,33 +2876,23 @@ float4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(crate) const TERRAIN_PROBE_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: TERRAIN_PRELUDE,
     source: concat!(
         ground_height!(),
         r"
-
-struct VertexStage {
-    // Clip x and y, then where the height is read, in tile units.
-    float4 pos [[attribute(0)]];
-    // The DEM uv's scale and offset, then the DEM's width in pixels.
-    float4 dem_coords [[attribute(1)]];
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
     float height [[flat]];
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const TerrainSurfaceUBO& props [[buffer(idTerrainPropsUBO)]],
-                                texture2d<float, access::read> dem [[texture(2)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
     return {
         .position = float4(vertx.pos.xy, 0.0, 1.0),
-        .height = ground_height(vertx.pos.zw, vertx.dem_coords, dem, props),
+        .height = ground_height(vertx.pos.zw, vertx.dem_coords, ground_dem, terrain),
     };
 }
 
-float4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
+float4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
     const uint bits = as_type<uint>(in.height);
     const uint4 bytes = uint4(bits, bits >> 8, bits >> 16, bits >> 24) & uint4(255);
     return float4(bytes) / 255.0;
@@ -4555,49 +2904,14 @@ float4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 pub(crate) const HILLSHADE_PREPARE_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idHillshadePrepareDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idHillshadePrepareTilePropsUBO = drawableReservedUBOCount,
-    hillshadePrepareUBOCount
-};
-
-struct alignas(16) HillshadePrepareDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */
-};
-static_assert(sizeof(HillshadePrepareDrawableUBO) == 4 * 16, "wrong size");
-
-struct alignas(16) HillshadePrepareTilePropsUBO {
-    /*  0 */ float4 unpack;
-    /* 16 */ float2 dimension;
-    /* 24 */ float zoom;
-    /* 28 */ float maxzoom;
-    /* 32 */ float unpack_scale;
-    /* 36 */ float pad0;
-    /* 40 */ float pad1;
-    /* 44 */ float pad2;
-    /* 48 */
-};
-static_assert(sizeof(HillshadePrepareTilePropsUBO) == 3 * 16, "wrong size");
-
-"#,
     source: r"
-
-struct VertexStage {
-    short2 pos [[attribute(0)]];
-    short2 texture_pos [[attribute(1)]];
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
     float2 pos;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const HillshadePrepareDrawableUBO& drawable [[buffer(idHillshadePrepareDrawableUBO)]],
-                                device const HillshadePrepareTilePropsUBO& tileProps [[buffer(idHillshadePrepareTilePropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
     const float4 position = drawable.matrix * float4(float2(vertx.pos), 0, 1);
 
@@ -4621,10 +2935,7 @@ float getElevation(float2 coord, texture2d<float, access::sample> image, sampler
     return (rgb.r * unpack.x + rgb.g * unpack.y + rgb.b * unpack.z + unpack.w) * unpack_scale;
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const HillshadePrepareTilePropsUBO& tileProps [[buffer(idHillshadePrepareTilePropsUBO)]],
-                            texture2d<float, access::sample> image [[texture(0)]],
-                            sampler image_sampler [[sampler(0)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -4685,43 +2996,16 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const HILLSHADE_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: concat!(
-        hillshade_blocks!(),
-        r#"
-
-enum {
-    idHillshadeDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idHillshadeTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
-    idHillshadeEvaluatedPropsUBO = drawableReservedUBOCount,
-    hillshadeUBOCount
-};
-
-struct alignas(16) HillshadeDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */
-};
-static_assert(sizeof(HillshadeDrawableUBO) == 4 * 16, "wrong size");
-
-"#
-    ),
     source: concat!(
         hillshade_shading!(),
         r"
-
-struct VertexStage {
-    short2 pos [[attribute(0)]];
-    short2 texture_pos [[attribute(1)]];
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
     float2 pos;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const HillshadeDrawableUBO* drawableVector [[buffer(idHillshadeDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
     device const HillshadeDrawableUBO& drawable = drawableVector[uboIndex];
 
@@ -4737,12 +3021,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                            device const HillshadeTilePropsUBO* tilePropsVector [[buffer(idHillshadeTilePropsUBO)]],
-                            device const HillshadeEvaluatedPropsUBO& props [[buffer(idHillshadeEvaluatedPropsUBO)]],
-                            texture2d<float, access::sample> image [[texture(0)]],
-                            sampler image_sampler [[sampler(0)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -4773,177 +3052,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const LINE_GRADIENT_SDF_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idLineTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
-    idLineEvaluatedPropsUBO = drawableReservedUBOCount,
-    lineUBOCount
-};
-
-//
-// Line
-
-struct alignas(16) LineDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float color_t;
-    /* 72 */ float blur_t;
-    /* 76 */ float opacity_t;
-    /* 80 */ float gapwidth_t;
-    /* 84 */ float offset_t;
-    /* 88 */ float width_t;
-    /* 92 */ float pad1;
-    /* 96 */
-};
-static_assert(sizeof(LineDrawableUBO) == 6 * 16, "wrong size");
-
-//
-// Line gradient
-
-struct alignas(16) LineGradientDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float blur_t;
-    /* 72 */ float opacity_t;
-    /* 76 */ float gapwidth_t;
-    /* 80 */ float offset_t;
-    /* 84 */ float width_t;
-    /* 88 */ float pad1;
-    /* 92 */ float pad2;
-    /* 96 */
-};
-static_assert(sizeof(LineGradientDrawableUBO) == 6 * 16, "wrong size");
-
-//
-// Line pattern
-
-struct alignas(16) LinePatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float blur_t;
-    /* 72 */ float opacity_t;
-    /* 76 */ float gapwidth_t;
-    /* 80 */ float offset_t;
-    /* 84 */ float width_t;
-    /* 88 */ float pattern_from_t;
-    /* 92 */ float pattern_to_t;
-    /* 96 */ float floorwidth_t;
-    /* 100 */ float pad1;
-    /* 104 */ float pad2;
-    /* 108 */ float pad3;
-    /* 112 */
-};
-static_assert(sizeof(LinePatternDrawableUBO) == 7 * 16, "wrong size");
-
-struct alignas(16) LinePatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float4 scale;
-    /* 48 */ float2 texsize;
-    /* 56 */ float fade;
-    /* 60 */ float pad2;
-    /* 64 */
-};
-static_assert(sizeof(LinePatternTilePropsUBO) == 4 * 16, "wrong size");
-
-//
-// Line SDF
-
-struct alignas(16) LineSDFDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float2 patternscale_a;
-    /*  72 */ float2 patternscale_b;
-    /*  80 */ float tex_y_a;
-    /*  84 */ float tex_y_b;
-    /*  88 */ float ratio;
-
-    // Interpolations
-    /*  92 */ float color_t;
-    /*  96 */ float blur_t;
-    /* 100 */ float opacity_t;
-    /* 104 */ float gapwidth_t;
-    /* 108 */ float offset_t;
-    /* 112 */ float width_t;
-    /* 116 */ float floorwidth_t;
-    /* 120 */ float atlas_height;
-    /* 124 */ float pad2;
-    /* 128 */
-};
-static_assert(sizeof(LineSDFDrawableUBO) == 8 * 16, "wrong size");
-
-struct alignas(16) LineSDFTilePropsUBO {
-    /* 0 */ float sdfgamma;
-    /* 4 */ float mix;
-    /* 8 */ float pad1;
-    /* 12 */ float pad2;
-    /* 16 */
-};
-static_assert(sizeof(LineSDFTilePropsUBO) == 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) LineEvaluatedPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float blur;
-    /* 20 */ float opacity;
-    /* 24 */ float gapwidth;
-    /* 28 */ float offset;
-    /* 32 */ float width;
-    /* 36 */ float floorwidth;
-    /* 40 */ float pad0;
-    /* 44 */ float pad1;
-    /* 48 */
-};
-static_assert(sizeof(LineEvaluatedPropsUBO) == 3 * 16, "wrong size");
-
-union LineDrawableUnionUBO {
-    LineDrawableUBO lineDrawableUBO;
-    LineGradientDrawableUBO lineGradientDrawableUBO;
-    LinePatternDrawableUBO linePatternDrawableUBO;
-    LineSDFDrawableUBO lineSDFDrawableUBO;
-};
-
-union LineTilePropsUnionUBO {
-    LinePatternTilePropsUBO linePatternTilePropsUBO;
-    LineSDFTilePropsUBO lineSDFTilePropsUBO;
-};
-
-"#,
     source: r"
-
-struct VertexStage {
-    short2 pos_normal [[attribute(0)]];
-    uchar4 data [[attribute(1)]];
-
-#if !defined(HAS_UNIFORM_u_blur)
-    float2 blur [[attribute(2)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_gapwidth)
-    float2 gapwidth [[attribute(4)]];
-#endif
-#if !defined(HAS_UNIFORM_u_offset)
-    float2 offset [[attribute(5)]];
-#endif
-#if !defined(HAS_UNIFORM_u_width)
-    float2 width [[attribute(6)]];
-#endif
-#if !defined(HAS_UNIFORM_u_floorwidth)
-    float2 floorwidth [[attribute(7)]];
-#endif
-#if !defined(HAS_UNIFORM_u_dasharray)
-    float4 dasharray [[attribute(8)]];
-#endif
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -4971,14 +3080,9 @@ struct FragmentStage {
 #endif
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
-    device const LineSDFDrawableUBO& drawable = drawableVector[uboIndex].lineSDFDrawableUBO;
+    device const LineSDFDrawableUBO& drawable = drawableVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_gapwidth)
     const auto gapwidth = props.gapwidth / 2.0;
@@ -5091,15 +3195,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                            device const LineTilePropsUnionUBO* tilePropsVector [[buffer(idLineTilePropsUBO)]],
-                            device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
-                            texture2d<float, access::sample> gradientTexture [[texture(0)]],
-                            texture2d<float, access::sample> dashTexture [[texture(1)]],
-                            sampler gradientSampler [[sampler(0)]],
-                            sampler dashSampler [[sampler(1)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 #if defined(PROJECTION_GLOBE)
     if (clippedAtAntimeridian(in.tile_x)) {
         discard_fragment();
@@ -5110,7 +3206,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     return half4(1.0);
 #endif
 
-    device const LineSDFTilePropsUBO& tileProps = tilePropsVector[uboIndex].lineSDFTilePropsUBO;
+    device const LineSDFTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_blur)
     const float blur = props.blur;
@@ -5137,8 +3233,8 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     // line in case of an offset line (`v_width2.y`) or when fading out (`v_width2.x`)
     const float blur2 = (blur + 1.0 / DEVICE_PIXEL_RATIO) * in.gamma_scale;
 
-    const float sdfdist_a = dashTexture.sample(dashSampler, in.tex_a).a;
-    const float sdfdist_b = dashTexture.sample(dashSampler, in.tex_b).a;
+    const float sdfdist_a = image_dash.sample(image_dash_sampler, in.tex_a).a;
+    const float sdfdist_b = image_dash.sample(image_dash_sampler, in.tex_b).a;
     const float sdfdist = mix(sdfdist_a, sdfdist_b, tileProps.mix);
 #if defined(HAS_UNIFORM_u_dasharray)
     const float sdfgamma = tileProps.sdfgamma;
@@ -5149,7 +3245,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
                         smoothstep(0.5 - sdfgamma / floorwidth, 0.5 + sdfgamma / floorwidth, sdfdist);
 
     // The gradient ramp is stored in a texture indexed by the ratio along the entire line.
-    const float4 color = gradientTexture.sample(gradientSampler, float2(in.lineprogress, 0.5));
+    const float4 color = image.sample(image_sampler, float2(in.lineprogress, 0.5));
 
     return half4(color * (alpha * opacity));
 }
@@ -5159,170 +3255,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const LINE_GRADIENT_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idLineTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
-    idLineEvaluatedPropsUBO = drawableReservedUBOCount,
-    lineUBOCount
-};
-
-//
-// Line
-
-struct alignas(16) LineDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float color_t;
-    /* 72 */ float blur_t;
-    /* 76 */ float opacity_t;
-    /* 80 */ float gapwidth_t;
-    /* 84 */ float offset_t;
-    /* 88 */ float width_t;
-    /* 92 */ float pad1;
-    /* 96 */
-};
-static_assert(sizeof(LineDrawableUBO) == 6 * 16, "wrong size");
-
-//
-// Line gradient
-
-struct alignas(16) LineGradientDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float blur_t;
-    /* 72 */ float opacity_t;
-    /* 76 */ float gapwidth_t;
-    /* 80 */ float offset_t;
-    /* 84 */ float width_t;
-    /* 88 */ float pad1;
-    /* 92 */ float pad2;
-    /* 96 */
-};
-static_assert(sizeof(LineGradientDrawableUBO) == 6 * 16, "wrong size");
-
-//
-// Line pattern
-
-struct alignas(16) LinePatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float blur_t;
-    /* 72 */ float opacity_t;
-    /* 76 */ float gapwidth_t;
-    /* 80 */ float offset_t;
-    /* 84 */ float width_t;
-    /* 88 */ float pattern_from_t;
-    /* 92 */ float pattern_to_t;
-    /* 96 */ float floorwidth_t;
-    /* 100 */ float pad1;
-    /* 104 */ float pad2;
-    /* 108 */ float pad3;
-    /* 112 */
-};
-static_assert(sizeof(LinePatternDrawableUBO) == 7 * 16, "wrong size");
-
-struct alignas(16) LinePatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float4 scale;
-    /* 48 */ float2 texsize;
-    /* 56 */ float fade;
-    /* 60 */ float pad2;
-    /* 64 */
-};
-static_assert(sizeof(LinePatternTilePropsUBO) == 4 * 16, "wrong size");
-
-//
-// Line SDF
-
-struct alignas(16) LineSDFDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float2 patternscale_a;
-    /*  72 */ float2 patternscale_b;
-    /*  80 */ float tex_y_a;
-    /*  84 */ float tex_y_b;
-    /*  88 */ float ratio;
-
-    // Interpolations
-    /*  92 */ float color_t;
-    /*  96 */ float blur_t;
-    /* 100 */ float opacity_t;
-    /* 104 */ float gapwidth_t;
-    /* 108 */ float offset_t;
-    /* 112 */ float width_t;
-    /* 116 */ float floorwidth_t;
-    /* 120 */ float pad1;
-    /* 124 */ float pad2;
-    /* 128 */
-};
-static_assert(sizeof(LineSDFDrawableUBO) == 8 * 16, "wrong size");
-
-struct alignas(16) LineSDFTilePropsUBO {
-    /* 0 */ float sdfgamma;
-    /* 4 */ float mix;
-    /* 8 */ float pad1;
-    /* 12 */ float pad2;
-    /* 16 */
-};
-static_assert(sizeof(LineSDFTilePropsUBO) == 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) LineEvaluatedPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float blur;
-    /* 20 */ float opacity;
-    /* 24 */ float gapwidth;
-    /* 28 */ float offset;
-    /* 32 */ float width;
-    /* 36 */ float floorwidth;
-    /* 40 */ float pad0;
-    /* 44 */ float pad1;
-    /* 48 */
-};
-static_assert(sizeof(LineEvaluatedPropsUBO) == 3 * 16, "wrong size");
-
-union LineDrawableUnionUBO {
-    LineDrawableUBO lineDrawableUBO;
-    LineGradientDrawableUBO lineGradientDrawableUBO;
-    LinePatternDrawableUBO linePatternDrawableUBO;
-    LineSDFDrawableUBO lineSDFDrawableUBO;
-};
-
-union LineTilePropsUnionUBO {
-    LinePatternTilePropsUBO linePatternTilePropsUBO;
-    LineSDFTilePropsUBO lineSDFTilePropsUBO;
-};
-
-"#,
     source: r"
-
-struct VertexStage {
-    short2 pos_normal [[attribute(0)]];
-    uchar4 data [[attribute(1)]];
-#if !defined(HAS_UNIFORM_u_blur)
-    float2 blur [[attribute(2)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_gapwidth)
-    float2 gapwidth [[attribute(4)]];
-#endif
-#if !defined(HAS_UNIFORM_u_offset)
-    float2 offset [[attribute(5)]];
-#endif
-#if !defined(HAS_UNIFORM_u_width)
-    float2 width [[attribute(6)]];
-#endif
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -5342,14 +3275,9 @@ struct FragmentStage {
 #endif
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
-    device const LineGradientDrawableUBO& drawable = drawableVector[uboIndex].lineGradientDrawableUBO;
+    device const LineGradientDrawableUBO& drawable = drawableVector[uboIndex];
 
 #if !defined(HAS_UNIFORM_u_blur)
     const auto blur     = unpack_mix_float(vertx.blur,     drawable.blur_t);
@@ -5437,9 +3365,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
-                            texture2d<float, access::sample> gradientTexture [[texture(0)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 #if defined(PROJECTION_GLOBE)
     if (clippedAtAntimeridian(in.tile_x)) {
         discard_fragment();
@@ -5472,7 +3398,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     // For gradient lines, v_lineprogress is the ratio along the entire line,
     // scaled to [0, 2^15), and the gradient ramp is stored in a texture.
     constexpr sampler sampler2d(coord::normalized, filter::linear);
-    const float4 color = gradientTexture.sample(sampler2d, float2(in.lineprogress, 0.5));
+    const float4 color = image.sample(sampler2d, float2(in.lineprogress, 0.5));
 
     return half4(color * (alpha * opacity));
 }
@@ -5482,177 +3408,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const LINE_PATTERN_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idLineTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
-    idLineEvaluatedPropsUBO = drawableReservedUBOCount,
-    lineUBOCount
-};
-
-//
-// Line
-
-struct alignas(16) LineDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float color_t;
-    /* 72 */ float blur_t;
-    /* 76 */ float opacity_t;
-    /* 80 */ float gapwidth_t;
-    /* 84 */ float offset_t;
-    /* 88 */ float width_t;
-    /* 92 */ float pad1;
-    /* 96 */
-};
-static_assert(sizeof(LineDrawableUBO) == 6 * 16, "wrong size");
-
-//
-// Line gradient
-
-struct alignas(16) LineGradientDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float blur_t;
-    /* 72 */ float opacity_t;
-    /* 76 */ float gapwidth_t;
-    /* 80 */ float offset_t;
-    /* 84 */ float width_t;
-    /* 88 */ float pad1;
-    /* 92 */ float pad2;
-    /* 96 */
-};
-static_assert(sizeof(LineGradientDrawableUBO) == 6 * 16, "wrong size");
-
-//
-// Line pattern
-
-struct alignas(16) LinePatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float blur_t;
-    /* 72 */ float opacity_t;
-    /* 76 */ float gapwidth_t;
-    /* 80 */ float offset_t;
-    /* 84 */ float width_t;
-    /* 88 */ float pattern_from_t;
-    /* 92 */ float pattern_to_t;
-    /* 96 */ float floorwidth_t;
-    /* 100 */ float pad1;
-    /* 104 */ float pad2;
-    /* 108 */ float pad3;
-    /* 112 */
-};
-static_assert(sizeof(LinePatternDrawableUBO) == 7 * 16, "wrong size");
-
-struct alignas(16) LinePatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float4 scale;
-    /* 48 */ float2 texsize;
-    /* 56 */ float fade;
-    /* 60 */ float pad2;
-    /* 64 */
-};
-static_assert(sizeof(LinePatternTilePropsUBO) == 4 * 16, "wrong size");
-
-//
-// Line SDF
-
-struct alignas(16) LineSDFDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float2 patternscale_a;
-    /*  72 */ float2 patternscale_b;
-    /*  80 */ float tex_y_a;
-    /*  84 */ float tex_y_b;
-    /*  88 */ float ratio;
-
-    // Interpolations
-    /*  92 */ float color_t;
-    /*  96 */ float blur_t;
-    /* 100 */ float opacity_t;
-    /* 104 */ float gapwidth_t;
-    /* 108 */ float offset_t;
-    /* 112 */ float width_t;
-    /* 116 */ float floorwidth_t;
-    /* 120 */ float pad1;
-    /* 124 */ float pad2;
-    /* 128 */
-};
-static_assert(sizeof(LineSDFDrawableUBO) == 8 * 16, "wrong size");
-
-struct alignas(16) LineSDFTilePropsUBO {
-    /* 0 */ float sdfgamma;
-    /* 4 */ float mix;
-    /* 8 */ float pad1;
-    /* 12 */ float pad2;
-    /* 16 */
-};
-static_assert(sizeof(LineSDFTilePropsUBO) == 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) LineEvaluatedPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float blur;
-    /* 20 */ float opacity;
-    /* 24 */ float gapwidth;
-    /* 28 */ float offset;
-    /* 32 */ float width;
-    /* 36 */ float floorwidth;
-    /* 40 */ float pad0;
-    /* 44 */ float pad1;
-    /* 48 */
-};
-static_assert(sizeof(LineEvaluatedPropsUBO) == 3 * 16, "wrong size");
-
-union LineDrawableUnionUBO {
-    LineDrawableUBO lineDrawableUBO;
-    LineGradientDrawableUBO lineGradientDrawableUBO;
-    LinePatternDrawableUBO linePatternDrawableUBO;
-    LineSDFDrawableUBO lineSDFDrawableUBO;
-};
-
-union LineTilePropsUnionUBO {
-    LinePatternTilePropsUBO linePatternTilePropsUBO;
-    LineSDFTilePropsUBO lineSDFTilePropsUBO;
-};
-
-"#,
     source: r"
-
-struct VertexStage {
-    short2 pos_normal [[attribute(0)]];
-    uchar4 data [[attribute(1)]];
-
-#if !defined(HAS_UNIFORM_u_blur)
-    float2 blur [[attribute(2)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_gapwidth)
-    float2 gapwidth [[attribute(4)]];
-#endif
-#if !defined(HAS_UNIFORM_u_offset)
-    float2 offset [[attribute(5)]];
-#endif
-#if !defined(HAS_UNIFORM_u_width)
-    float2 width [[attribute(6)]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_from)
-    ushort4 pattern_from [[attribute(7)]];
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
-    ushort4 pattern_to [[attribute(8)]];
-#endif
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -5681,14 +3437,9 @@ struct FragmentStage {
 #endif
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
-    device const LinePatternDrawableUBO& drawable = drawableVector[uboIndex].linePatternDrawableUBO;
+    device const LinePatternDrawableUBO& drawable = drawableVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_gapwidth)
     const auto gapwidth = props.gapwidth / 2;
@@ -5786,13 +3537,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                            device const LineTilePropsUnionUBO* tilePropsVector [[buffer(idLineTilePropsUBO)]],
-                            device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
-                            texture2d<float, access::sample> image0 [[texture(0)]],
-                            sampler image0_sampler [[sampler(0)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 
 #if defined(PROJECTION_GLOBE)
     if (clippedAtAntimeridian(in.tile_x)) {
@@ -5804,7 +3549,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     return half4(1.0);
 #endif
 
-    device const LinePatternTilePropsUBO& tileProps = tilePropsVector[uboIndex].linePatternTilePropsUBO;
+    device const LinePatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_blur)
     const float blur = props.blur;
@@ -5873,14 +3618,14 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
         const float x_a = glMod(in.linesofar / pattern_size_a.x * aspect_a, 1.0);
         float2 pos_a = atlas_pos((pattern_tl_a - 1.0) * texel_size, (pattern_br_a - pattern_tl_a + 2.0) * texel_size * float2(x_a, y));
         pos_a = clamp(pos_a, (pattern_tl_a - 1.0) * texel_size + half_texel, (pattern_br_a + 1.0) * texel_size - half_texel);
-        color_a = image0.sample(image0_sampler, pos_a);
+        color_a = image.sample(image_sampler, pos_a);
     }
     float4 color_b = float4(0.0);
     if (tileProps.fade > 0.0) {
         const float x_b = glMod(in.linesofar / pattern_size_b.x * aspect_b, 1.0);
         float2 pos_b = atlas_pos((pattern_tl_b - 1.0) * texel_size, (pattern_br_b - pattern_tl_b + 2.0) * texel_size * float2(x_b, y));
         pos_b = clamp(pos_b, (pattern_tl_b - 1.0) * texel_size + half_texel, (pattern_br_b + 1.0) * texel_size - half_texel);
-        color_b = image0.sample(image0_sampler, pos_b);
+        color_b = image.sample(image_sampler, pos_b);
     }
 
     const float4 color = mix(color_a, color_b, tileProps.fade);
@@ -5893,180 +3638,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const LINE_SDF_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idLineTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
-    idLineEvaluatedPropsUBO = drawableReservedUBOCount,
-    lineUBOCount
-};
-
-//
-// Line
-
-struct alignas(16) LineDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float color_t;
-    /* 72 */ float blur_t;
-    /* 76 */ float opacity_t;
-    /* 80 */ float gapwidth_t;
-    /* 84 */ float offset_t;
-    /* 88 */ float width_t;
-    /* 92 */ float pad1;
-    /* 96 */
-};
-static_assert(sizeof(LineDrawableUBO) == 6 * 16, "wrong size");
-
-//
-// Line gradient
-
-struct alignas(16) LineGradientDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float blur_t;
-    /* 72 */ float opacity_t;
-    /* 76 */ float gapwidth_t;
-    /* 80 */ float offset_t;
-    /* 84 */ float width_t;
-    /* 88 */ float pad1;
-    /* 92 */ float pad2;
-    /* 96 */
-};
-static_assert(sizeof(LineGradientDrawableUBO) == 6 * 16, "wrong size");
-
-//
-// Line pattern
-
-struct alignas(16) LinePatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float blur_t;
-    /* 72 */ float opacity_t;
-    /* 76 */ float gapwidth_t;
-    /* 80 */ float offset_t;
-    /* 84 */ float width_t;
-    /* 88 */ float pattern_from_t;
-    /* 92 */ float pattern_to_t;
-    /* 96 */ float floorwidth_t;
-    /* 100 */ float pad1;
-    /* 104 */ float pad2;
-    /* 108 */ float pad3;
-    /* 112 */
-};
-static_assert(sizeof(LinePatternDrawableUBO) == 7 * 16, "wrong size");
-
-struct alignas(16) LinePatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float4 scale;
-    /* 48 */ float2 texsize;
-    /* 56 */ float fade;
-    /* 60 */ float pad2;
-    /* 64 */
-};
-static_assert(sizeof(LinePatternTilePropsUBO) == 4 * 16, "wrong size");
-
-//
-// Line SDF
-
-struct alignas(16) LineSDFDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float2 patternscale_a;
-    /*  72 */ float2 patternscale_b;
-    /*  80 */ float tex_y_a;
-    /*  84 */ float tex_y_b;
-    /*  88 */ float ratio;
-
-    // Interpolations
-    /*  92 */ float color_t;
-    /*  96 */ float blur_t;
-    /* 100 */ float opacity_t;
-    /* 104 */ float gapwidth_t;
-    /* 108 */ float offset_t;
-    /* 112 */ float width_t;
-    /* 116 */ float floorwidth_t;
-    /* 120 */ float atlas_height;
-    /* 124 */ float pad2;
-    /* 128 */
-};
-static_assert(sizeof(LineSDFDrawableUBO) == 8 * 16, "wrong size");
-
-struct alignas(16) LineSDFTilePropsUBO {
-    /* 0 */ float sdfgamma;
-    /* 4 */ float mix;
-    /* 8 */ float pad1;
-    /* 12 */ float pad2;
-    /* 16 */
-};
-static_assert(sizeof(LineSDFTilePropsUBO) == 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) LineEvaluatedPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float blur;
-    /* 20 */ float opacity;
-    /* 24 */ float gapwidth;
-    /* 28 */ float offset;
-    /* 32 */ float width;
-    /* 36 */ float floorwidth;
-    /* 40 */ float pad0;
-    /* 44 */ float pad1;
-    /* 48 */
-};
-static_assert(sizeof(LineEvaluatedPropsUBO) == 3 * 16, "wrong size");
-
-union LineDrawableUnionUBO {
-    LineDrawableUBO lineDrawableUBO;
-    LineGradientDrawableUBO lineGradientDrawableUBO;
-    LinePatternDrawableUBO linePatternDrawableUBO;
-    LineSDFDrawableUBO lineSDFDrawableUBO;
-};
-
-union LineTilePropsUnionUBO {
-    LinePatternTilePropsUBO linePatternTilePropsUBO;
-    LineSDFTilePropsUBO lineSDFTilePropsUBO;
-};
-
-"#,
     source: r"
-
-struct VertexStage {
-    short2 pos_normal [[attribute(0)]];
-    uchar4 data [[attribute(1)]];
-
-#if !defined(HAS_UNIFORM_u_color)
-    float4 color [[attribute(2)]];
-#endif
-#if !defined(HAS_UNIFORM_u_blur)
-    float2 blur [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(4)]];
-#endif
-#if !defined(HAS_UNIFORM_u_gapwidth)
-    float2 gapwidth [[attribute(5)]];
-#endif
-#if !defined(HAS_UNIFORM_u_offset)
-    float2 offset [[attribute(6)]];
-#endif
-#if !defined(HAS_UNIFORM_u_width)
-    float2 width [[attribute(7)]];
-#endif
-#if !defined(HAS_UNIFORM_u_floorwidth)
-    float2 floorwidth [[attribute(8)]];
-#endif
-#if !defined(HAS_UNIFORM_u_dasharray)
-    float4 dasharray [[attribute(9)]];
-#endif
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -6096,14 +3668,9 @@ struct FragmentStage {
 #endif
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
-    device const LineSDFDrawableUBO& drawable = drawableVector[uboIndex].lineSDFDrawableUBO;
+    device const LineSDFDrawableUBO& drawable = drawableVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_gapwidth)
     const auto gapwidth = props.gapwidth / 2.0;
@@ -6217,13 +3784,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                            device const LineTilePropsUnionUBO* tilePropsVector [[buffer(idLineTilePropsUBO)]],
-                            device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
-                            texture2d<float, access::sample> image0 [[texture(0)]],
-                            sampler image0_sampler [[sampler(0)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 
 #if defined(PROJECTION_GLOBE)
     if (clippedAtAntimeridian(in.tile_x)) {
@@ -6235,7 +3796,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     return half4(1.0);
 #endif
 
-    device const LineSDFTilePropsUBO& tileProps = tilePropsVector[uboIndex].lineSDFTilePropsUBO;
+    device const LineSDFTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_color)
     const auto color     = props.color;
@@ -6268,8 +3829,8 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     // line in case of an offset line (`v_width2.y`) or when fading out (`v_width2.x`)
     const float blur2 = (blur + 1.0 / DEVICE_PIXEL_RATIO) * in.gamma_scale;
 
-    const float sdfdist_a = image0.sample(image0_sampler, in.tex_a).a;
-    const float sdfdist_b = image0.sample(image0_sampler, in.tex_b).a;
+    const float sdfdist_a = image.sample(image_sampler, in.tex_a).a;
+    const float sdfdist_b = image.sample(image_sampler, in.tex_b).a;
     const float sdfdist = mix(sdfdist_a, sdfdist_b, tileProps.mix);
 #if defined(HAS_UNIFORM_u_dasharray)
     const float sdfgamma = tileProps.sdfgamma;
@@ -6287,174 +3848,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const LINE_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idLineDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idLineTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
-    idLineEvaluatedPropsUBO = drawableReservedUBOCount,
-    lineUBOCount
-};
-
-//
-// Line
-
-struct alignas(16) LineDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float color_t;
-    /* 72 */ float blur_t;
-    /* 76 */ float opacity_t;
-    /* 80 */ float gapwidth_t;
-    /* 84 */ float offset_t;
-    /* 88 */ float width_t;
-    /* 92 */ float pad1;
-    /* 96 */
-};
-static_assert(sizeof(LineDrawableUBO) == 6 * 16, "wrong size");
-
-//
-// Line gradient
-
-struct alignas(16) LineGradientDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float blur_t;
-    /* 72 */ float opacity_t;
-    /* 76 */ float gapwidth_t;
-    /* 80 */ float offset_t;
-    /* 84 */ float width_t;
-    /* 88 */ float pad1;
-    /* 92 */ float pad2;
-    /* 96 */
-};
-static_assert(sizeof(LineGradientDrawableUBO) == 6 * 16, "wrong size");
-
-//
-// Line pattern
-
-struct alignas(16) LinePatternDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float ratio;
-
-    // Interpolations
-    /* 68 */ float blur_t;
-    /* 72 */ float opacity_t;
-    /* 76 */ float gapwidth_t;
-    /* 80 */ float offset_t;
-    /* 84 */ float width_t;
-    /* 88 */ float pattern_from_t;
-    /* 92 */ float pattern_to_t;
-    /* 96 */ float floorwidth_t;
-    /* 100 */ float pad1;
-    /* 104 */ float pad2;
-    /* 108 */ float pad3;
-    /* 112 */
-};
-static_assert(sizeof(LinePatternDrawableUBO) == 7 * 16, "wrong size");
-
-struct alignas(16) LinePatternTilePropsUBO {
-    /*  0 */ float4 pattern_from;
-    /* 16 */ float4 pattern_to;
-    /* 32 */ float4 scale;
-    /* 48 */ float2 texsize;
-    /* 56 */ float fade;
-    /* 60 */ float pad2;
-    /* 64 */
-};
-static_assert(sizeof(LinePatternTilePropsUBO) == 4 * 16, "wrong size");
-
-//
-// Line SDF
-
-struct alignas(16) LineSDFDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float2 patternscale_a;
-    /*  72 */ float2 patternscale_b;
-    /*  80 */ float tex_y_a;
-    /*  84 */ float tex_y_b;
-    /*  88 */ float ratio;
-
-    // Interpolations
-    /*  92 */ float color_t;
-    /*  96 */ float blur_t;
-    /* 100 */ float opacity_t;
-    /* 104 */ float gapwidth_t;
-    /* 108 */ float offset_t;
-    /* 112 */ float width_t;
-    /* 116 */ float floorwidth_t;
-    /* 120 */ float pad1;
-    /* 124 */ float pad2;
-    /* 128 */
-};
-static_assert(sizeof(LineSDFDrawableUBO) == 8 * 16, "wrong size");
-
-struct alignas(16) LineSDFTilePropsUBO {
-    /* 0 */ float sdfgamma;
-    /* 4 */ float mix;
-    /* 8 */ float pad1;
-    /* 12 */ float pad2;
-    /* 16 */
-};
-static_assert(sizeof(LineSDFTilePropsUBO) == 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) LineEvaluatedPropsUBO {
-    /*  0 */ float4 color;
-    /* 16 */ float blur;
-    /* 20 */ float opacity;
-    /* 24 */ float gapwidth;
-    /* 28 */ float offset;
-    /* 32 */ float width;
-    /* 36 */ float floorwidth;
-    /* 40 */ float pad0;
-    /* 44 */ float pad1;
-    /* 48 */
-};
-static_assert(sizeof(LineEvaluatedPropsUBO) == 3 * 16, "wrong size");
-
-union LineDrawableUnionUBO {
-    LineDrawableUBO lineDrawableUBO;
-    LineGradientDrawableUBO lineGradientDrawableUBO;
-    LinePatternDrawableUBO linePatternDrawableUBO;
-    LineSDFDrawableUBO lineSDFDrawableUBO;
-};
-
-union LineTilePropsUnionUBO {
-    LinePatternTilePropsUBO linePatternTilePropsUBO;
-    LineSDFTilePropsUBO lineSDFTilePropsUBO;
-};
-
-"#,
     source: r"
-
-struct VertexStage {
-    short2 pos_normal [[attribute(0)]];
-    uchar4 data [[attribute(1)]];
-
-#if !defined(HAS_UNIFORM_u_color)
-    float4 color [[attribute(2)]];
-#endif
-#if !defined(HAS_UNIFORM_u_blur)
-    float2 blur [[attribute(3)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(4)]];
-#endif
-#if !defined(HAS_UNIFORM_u_gapwidth)
-    float2 gapwidth [[attribute(5)]];
-#endif
-#if !defined(HAS_UNIFORM_u_offset)
-    float2 offset [[attribute(6)]];
-#endif
-#if !defined(HAS_UNIFORM_u_width)
-    float2 width [[attribute(7)]];
-#endif
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -6476,14 +3870,9 @@ struct FragmentStage {
 #endif
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
-    device const LineDrawableUBO& drawable = drawableVector[uboIndex].lineDrawableUBO;
+    device const LineDrawableUBO& drawable = drawableVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_gapwidth)
     const auto gapwidth = props.gapwidth / 2;
@@ -6568,9 +3957,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                            device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 #if defined(PROJECTION_GLOBE)
     if (clippedAtAntimeridian(in.tile_x)) {
         discard_fragment();
@@ -6615,48 +4002,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const RASTER_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idRasterDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idRasterEvaluatedPropsUBO = drawableReservedUBOCount,
-    rasterUBOCount
-};
-
-struct alignas(16) RasterDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */
-};
-static_assert(sizeof(RasterDrawableUBO) == 4 * 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) RasterEvaluatedPropsUBO {
-    /*  0 */ float4 spin_weights;
-    /* 16 */ float2 tl_parent;
-    /* 24 */ float scale_parent;
-    /* 28 */ float buffer_scale;
-    /* 32 */ float fade_t;
-    /* 36 */ float opacity;
-    /* 40 */ float brightness_low;
-    /* 44 */ float brightness_high;
-    /* 48 */ float saturation_factor;
-    /* 52 */ float contrast_factor;
-    /* 56 */ float pad1;
-    /* 60 */ float pad2;
-    /* 64 */ float4 coords_top;
-    /* 80 */ float4 coords_bottom;
-    /* 96 */ float4 image_warp;
-    /* 112 */
-};
-static_assert(sizeof(RasterEvaluatedPropsUBO) == 7 * 16, "wrong size");
-
-"#,
     source: r"
-
-struct VertexStage {
-    short2 pos [[attribute(0)]];
-    short2 texture_pos [[attribute(1)]];
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -6664,11 +4010,7 @@ struct FragmentStage {
     float3 pos1;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const RasterDrawableUBO* drawableVector [[buffer(idRasterDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const RasterEvaluatedPropsUBO& props [[buffer(idRasterEvaluatedPropsUBO)]]) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
     device const RasterDrawableUBO& drawable = drawableVector[uboIndex];
 
@@ -6706,12 +4048,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const RasterEvaluatedPropsUBO& props [[buffer(idRasterEvaluatedPropsUBO)]],
-                            texture2d<float, access::sample> image0 [[texture(0)]],
-                            texture2d<float, access::sample> image1 [[texture(1)]],
-                            sampler image0_sampler [[sampler(0)]],
-                            sampler image1_sampler [[sampler(1)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -6754,56 +4091,22 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const SKY_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r"
-
-enum {
-    idSkyPropsUBO = drawableReservedUBOCount,
-    skyUBOCount
-};
-
-enum {
-    idAtmospherePropsUBO = drawableReservedUBOCount,
-    atmosphereUBOCount
-};
-
-struct alignas(16) SkyPropsUBO {
-    float4 sky_color;
-    float4 horizon_color;
-    float2 horizon;
-    float2 horizon_normal;
-    float2 viewport_size;
-    float sky_horizon_blend;
-    float sky_blend;
-};
-
-struct alignas(16) AtmospherePropsUBO {
-    float4x4 inv_view_projection;
-    float4 camera_position;
-    float4 sun_position;
-};
-
-",
     source: r"
-
-struct SkyVertexStage {
-    short2 position [[attribute(0)]];
-};
 
 struct SkyFragmentStage {
     float4 position [[position, invariant]];
     float2 pos;
 };
 
-SkyFragmentStage vertex vertexMain(SkyVertexStage in [[stage_in]]) {
-    const float2 pos = float2(in.position);
+SkyFragmentStage vertex vertexMain(VertexStage in [[stage_in]] MLN_VERTEX_BINDINGS) {
+    const float2 pos = float2(in.pos);
     return {
         .position = float4(pos, 1.0, 1.0),
         .pos = pos,
     };
 }
 
-half4 fragment fragmentMain(SkyFragmentStage in [[stage_in]],
-                            device const SkyPropsUBO& sky [[buffer(idSkyPropsUBO)]]) {
+half4 fragment fragmentMain(SkyFragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
     const float2 pixel = (in.pos * 0.5 + 0.5) * sky.viewport_size;
     const float distanceToHorizon = dot(pixel - sky.horizon, sky.horizon_normal);
     float4 color = float4(0.0);
@@ -6825,99 +4128,11 @@ half4 fragment fragmentMain(SkyFragmentStage in [[stage_in]],
 pub(crate) const SYMBOL_ICON_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idSymbolDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idSymbolTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
-    idSymbolEvaluatedPropsUBO = drawableReservedUBOCount,
-    symbolUBOCount
-};
-
-struct alignas(16) SymbolDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float4x4 label_plane_matrix;
-    /* 128 */ float4x4 coord_matrix;
-
-    /* 192 */ float2 texsize;
-    /* 200 */ float2 texsize_icon;
-
-    /* 208 */ /*bool*/ int is_text_prop;
-    /* 212 */ /*bool*/ int rotate_symbol;
-    /* 216 */ /*bool*/ int pitch_with_map;
-    /* 220 */ /*bool*/ int is_size_zoom_constant;
-    /* 224 */ /*bool*/ int is_size_feature_constant;
-    /* 228 */ /*bool*/ int is_offset;
-
-    /* 232 */ float size_t;
-    /* 236 */ float size;
-
-    // Interpolations
-    /* 240 */ float fill_color_t;
-    /* 244 */ float halo_color_t;
-    /* 248 */ float opacity_t;
-    /* 252 */ float halo_width_t;
-    /* 256 */ float halo_blur_t;
-    /* 260 */ /*bool*/ int is_along_line;
-    /* 264 */ /*bool*/ int is_variable_anchor;
-    /* 268 */ float pitched_scale;
-    /* 272 */ float2 translation;
-    /* 280 */ float gamma_scale;
-    /* 284 */ /*bool*/ int is_halo;
-    /* 288 */
-};
-static_assert(sizeof(SymbolDrawableUBO) == 18 * 16, "wrong size");
-
-struct alignas(16) SymbolTilePropsUBO {
-    /*  0 */ /*bool*/ int is_text;
-    /*  4 */ /*bool*/ int is_halo;
-    /*  8 */ float pad1;
-    /* 12 */ float pad2;
-    /* 16 */
-};
-static_assert(sizeof(SymbolTilePropsUBO) == 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) SymbolEvaluatedPropsUBO {
-    /*  0 */ float4 text_fill_color;
-    /* 16 */ float4 text_halo_color;
-    /* 32 */ float text_opacity;
-    /* 36 */ float text_halo_width;
-    /* 40 */ float text_halo_blur;
-    /* 44 */ float pad1;
-    /* 48 */ float4 icon_fill_color;
-    /* 64 */ float4 icon_halo_color;
-    /* 80 */ float icon_opacity;
-    /* 84 */ float icon_halo_width;
-    /* 88 */ float icon_halo_blur;
-    /* 92 */ float pad2;
-    /* 96 */
-};
-static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
-
-#define c_offscreen_degenerate_triangle_location -2.0
-
-"#,
     source: concat!(
         ground_visibility!(),
         r"
 
-struct VertexStage {
-    short4 pos_offset [[attribute(0)]];
-    ushort4 data [[attribute(1)]];
-    short4 pixeloffset [[attribute(2)]];
-    float4 projected_pos [[attribute(3)]];
-    float fade_opacity [[attribute(4)]];
-
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(5)]];
-#endif
-
-    // The top-left of the quad's atlas rectangle.
-    ushort2 tex_origin [[attribute(6)]];
-    // The symbol's symbol-height-offset, in meters.
-    float height_offset [[attribute(7)]];
-};
+#define c_offscreen_degenerate_triangle_location -2.0
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -6935,15 +4150,7 @@ struct FragmentStage {
 #endif
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]
-#if defined(TERRAIN)
-                                , texture2d<float, access::read> ground_depth [[texture(2)]]
-#endif
-                                ) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
     device const ProjectionUBO& projection = projectionVector[uboIndex];
@@ -7080,12 +4287,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                            device const SymbolTilePropsUBO* tilePropsVector [[buffer(idSymbolTilePropsUBO)]],
-                            device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]],
-                            texture2d<float, access::sample> image [[texture(0)]],
-                            sampler image_sampler [[sampler(0)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -7097,7 +4299,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const float opacity = in.opacity; // fade_opacity is baked in for this case
 #endif
 
-    return half4(image.sample(image_sampler, atlas_pos(in.tex_origin, in.tex)) * opacity);
+    return half4(texture.sample(texture_sampler, atlas_pos(in.tex_origin, in.tex)) * opacity);
 }
 "
     ),
@@ -7106,111 +4308,11 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const SYMBOL_SDF_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idSymbolDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idSymbolTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
-    idSymbolEvaluatedPropsUBO = drawableReservedUBOCount,
-    symbolUBOCount
-};
-
-struct alignas(16) SymbolDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float4x4 label_plane_matrix;
-    /* 128 */ float4x4 coord_matrix;
-
-    /* 192 */ float2 texsize;
-    /* 200 */ float2 texsize_icon;
-
-    /* 208 */ /*bool*/ int is_text_prop;
-    /* 212 */ /*bool*/ int rotate_symbol;
-    /* 216 */ /*bool*/ int pitch_with_map;
-    /* 220 */ /*bool*/ int is_size_zoom_constant;
-    /* 224 */ /*bool*/ int is_size_feature_constant;
-    /* 228 */ /*bool*/ int is_offset;
-
-    /* 232 */ float size_t;
-    /* 236 */ float size;
-
-    // Interpolations
-    /* 240 */ float fill_color_t;
-    /* 244 */ float halo_color_t;
-    /* 248 */ float opacity_t;
-    /* 252 */ float halo_width_t;
-    /* 256 */ float halo_blur_t;
-    /* 260 */ /*bool*/ int is_along_line;
-    /* 264 */ /*bool*/ int is_variable_anchor;
-    /* 268 */ float pitched_scale;
-    /* 272 */ float2 translation;
-    /* 280 */ float gamma_scale;
-    /* 284 */ /*bool*/ int is_halo;
-    /* 288 */
-};
-static_assert(sizeof(SymbolDrawableUBO) == 18 * 16, "wrong size");
-
-struct alignas(16) SymbolTilePropsUBO {
-    /*  0 */ /*bool*/ int is_text;
-    /*  4 */ /*bool*/ int is_halo;
-    /*  8 */ float pad1;
-    /* 12 */ float pad2;
-    /* 16 */
-};
-static_assert(sizeof(SymbolTilePropsUBO) == 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) SymbolEvaluatedPropsUBO {
-    /*  0 */ float4 text_fill_color;
-    /* 16 */ float4 text_halo_color;
-    /* 32 */ float text_opacity;
-    /* 36 */ float text_halo_width;
-    /* 40 */ float text_halo_blur;
-    /* 44 */ float pad1;
-    /* 48 */ float4 icon_fill_color;
-    /* 64 */ float4 icon_halo_color;
-    /* 80 */ float icon_opacity;
-    /* 84 */ float icon_halo_width;
-    /* 88 */ float icon_halo_blur;
-    /* 92 */ float pad2;
-    /* 96 */
-};
-static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
-
-#define c_offscreen_degenerate_triangle_location -2.0
-
-"#,
     source: concat!(
         ground_visibility!(),
         r"
 
-struct VertexStage {
-    short4 pos_offset [[attribute(0)]];
-    ushort4 data [[attribute(1)]];
-    short4 pixeloffset [[attribute(2)]];
-    float4 projected_pos [[attribute(3)]];
-    float fade_opacity [[attribute(4)]];
-
-#if !defined(HAS_UNIFORM_u_fill_color)
-    float4 fill_color [[attribute(5)]];
-#endif
-#if !defined(HAS_UNIFORM_u_halo_color)
-    float4 halo_color [[attribute(6)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(7)]];
-#endif
-#if !defined(HAS_UNIFORM_u_halo_width)
-    float2 halo_width [[attribute(8)]];
-#endif
-#if !defined(HAS_UNIFORM_u_halo_blur)
-    float2 halo_blur [[attribute(9)]];
-#endif
-
-    // The top-left of the quad's atlas rectangle.
-    ushort2 tex_origin [[attribute(10)]];
-    // The symbol's symbol-height-offset, in meters.
-    float height_offset [[attribute(11)]];
-};
+#define c_offscreen_degenerate_triangle_location -2.0
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -7235,16 +4337,7 @@ struct FragmentStage {
 
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]]
-#if defined(TERRAIN)
-                                , texture2d<float, access::read> ground_depth [[texture(2)]]
-#endif
-                                ) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
     device const ProjectionUBO& projection = projectionVector[uboIndex];
@@ -7414,12 +4507,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                            device const SymbolTilePropsUBO* tilePropsVector [[buffer(idSymbolTilePropsUBO)]],
-                            device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]],
-                            texture2d<float, access::sample> image [[texture(0)]],
-                            sampler image_sampler [[sampler(0)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -7447,7 +4535,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     // A halo's inner edge sits a gamma outside the fill's.
     const float fillInnerEdge = (256.0 - 64.0) / 256.0;
     const float innerEdge = tileProps.is_halo ? fillInnerEdge + gammaScaled : fillInnerEdge;
-    const float dist = image.sample(image_sampler, atlas_pos(in.tex_origin, in.tex)).a;
+    const float dist = texture.sample(texture_sampler, atlas_pos(in.tex_origin, in.tex)).a;
 
     float alpha = smoothstep(innerEdge - gammaScaled, innerEdge + gammaScaled, dist);
     if (tileProps.is_halo) {
@@ -7465,113 +4553,14 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idSymbolDrawableUBO = idDrawableReservedVertexOnlyUBO,
-    idSymbolTilePropsUBO = idDrawableReservedFragmentOnlyUBO,
-    idSymbolEvaluatedPropsUBO = drawableReservedUBOCount,
-    symbolUBOCount
-};
-
-struct alignas(16) SymbolDrawableUBO {
-    /*   0 */ float4x4 matrix;
-    /*  64 */ float4x4 label_plane_matrix;
-    /* 128 */ float4x4 coord_matrix;
-
-    /* 192 */ float2 texsize;
-    /* 200 */ float2 texsize_icon;
-
-    /* 208 */ /*bool*/ int is_text_prop;
-    /* 212 */ /*bool*/ int rotate_symbol;
-    /* 216 */ /*bool*/ int pitch_with_map;
-    /* 220 */ /*bool*/ int is_size_zoom_constant;
-    /* 224 */ /*bool*/ int is_size_feature_constant;
-    /* 228 */ /*bool*/ int is_offset;
-
-    /* 232 */ float size_t;
-    /* 236 */ float size;
-
-    // Interpolations
-    /* 240 */ float fill_color_t;
-    /* 244 */ float halo_color_t;
-    /* 248 */ float opacity_t;
-    /* 252 */ float halo_width_t;
-    /* 256 */ float halo_blur_t;
-    /* 260 */ /*bool*/ int is_along_line;
-    /* 264 */ /*bool*/ int is_variable_anchor;
-    /* 268 */ float pitched_scale;
-    /* 272 */ float2 translation;
-    /* 280 */ float gamma_scale;
-    /* 284 */ /*bool*/ int is_halo;
-    /* 288 */
-};
-static_assert(sizeof(SymbolDrawableUBO) == 18 * 16, "wrong size");
-
-struct alignas(16) SymbolTilePropsUBO {
-    /*  0 */ /*bool*/ int is_text;
-    /*  4 */ /*bool*/ int is_halo;
-    /*  8 */ float pad1;
-    /* 12 */ float pad2;
-    /* 16 */
-};
-static_assert(sizeof(SymbolTilePropsUBO) == 16, "wrong size");
-
-/// Evaluated properties that do not depend on the tile
-struct alignas(16) SymbolEvaluatedPropsUBO {
-    /*  0 */ float4 text_fill_color;
-    /* 16 */ float4 text_halo_color;
-    /* 32 */ float text_opacity;
-    /* 36 */ float text_halo_width;
-    /* 40 */ float text_halo_blur;
-    /* 44 */ float pad1;
-    /* 48 */ float4 icon_fill_color;
-    /* 64 */ float4 icon_halo_color;
-    /* 80 */ float icon_opacity;
-    /* 84 */ float icon_halo_width;
-    /* 88 */ float icon_halo_blur;
-    /* 92 */ float pad2;
-    /* 96 */
-};
-static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
-
-#define c_offscreen_degenerate_triangle_location -2.0
-
-"#,
     source: concat!(
         ground_visibility!(),
         r"
 
+#define c_offscreen_degenerate_triangle_location -2.0
+
 #define SDF 1.0
 #define ICON 0.0
-
-struct VertexStage {
-    short4 pos_offset [[attribute(0)]];
-    ushort4 data [[attribute(1)]];
-    float4 projected_pos [[attribute(2)]];
-    float fade_opacity [[attribute(3)]];
-
-#if !defined(HAS_UNIFORM_u_fill_color)
-    float4 fill_color [[attribute(4)]];
-#endif
-#if !defined(HAS_UNIFORM_u_halo_color)
-    float4 halo_color [[attribute(5)]];
-#endif
-#if !defined(HAS_UNIFORM_u_opacity)
-    float2 opacity [[attribute(6)]];
-#endif
-#if !defined(HAS_UNIFORM_u_halo_width)
-    float2 halo_width [[attribute(7)]];
-#endif
-#if !defined(HAS_UNIFORM_u_halo_blur)
-    float2 halo_blur [[attribute(8)]];
-#endif
-
-    // The top-left of the quad's atlas rectangle.
-    ushort2 tex_origin [[attribute(9)]];
-    // The symbol's symbol-height-offset, in meters.
-    float height_offset [[attribute(10)]];
-};
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -7598,16 +4587,7 @@ struct FragmentStage {
     bool is_icon;
 };
 
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]]
-#if defined(TERRAIN)
-                                , texture2d<float, access::read> ground_depth [[texture(2)]]
-#endif
-                                ) {
+FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
 
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
     device const ProjectionUBO& projection = projectionVector[uboIndex];
@@ -7781,14 +4761,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     };
 }
 
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                            device const SymbolTilePropsUBO* tilePropsVector [[buffer(idSymbolTilePropsUBO)]],
-                            device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]],
-                            texture2d<float, access::sample> glyph_image [[texture(0)]],
-                            texture2d<float, access::sample> icon_image [[texture(1)]],
-                            sampler glyph_sampler [[sampler(0)]],
-                            sampler icon_sampler [[sampler(1)]]) {
+half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -7814,7 +4787,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     const float2 pos = atlas_pos(in.tex_origin, in.tex);
 
     if (in.is_icon) {
-        return half4(icon_image.sample(icon_sampler, pos) * float(opacity));
+        return half4(texture_icon.sample(texture_icon_sampler, pos) * float(opacity));
     }
 
     const float gammaScaled = in.gamma_scaled;
@@ -7822,7 +4795,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     // A halo's inner edge sits a gamma outside the fill's.
     const float fillInnerEdge = (256.0 - 64.0) / 256.0;
     const float innerEdge = tileProps.is_halo ? fillInnerEdge + gammaScaled : fillInnerEdge;
-    const float dist = glyph_image.sample(glyph_sampler, pos).a;
+    const float dist = texture.sample(texture_sampler, pos).a;
 
     float alpha = smoothstep(innerEdge - gammaScaled, innerEdge + gammaScaled, dist);
     if (tileProps.is_halo) {

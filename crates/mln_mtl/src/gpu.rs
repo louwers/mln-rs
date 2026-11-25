@@ -50,7 +50,6 @@ use parking_lot::{Condvar, Mutex};
 
 use crate::custom_layer::{AttachmentFormats, CustomLayerEncoder, CustomLayerPass};
 use crate::readback::{buffer_bytes, encode_region_copy};
-use crate::shaders::msl_sources::PRELUDE;
 use crate::shaders::shader_source::{BUILT_INS, ShaderSource, first_vertex_buffer};
 use crate::{Device, Id};
 
@@ -1401,11 +1400,12 @@ impl Gpu for MetalGpu {
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
         let program = key.program();
         let source = self.sources.get(program)?;
+        let text = source.compose(program)?;
         let (vertex, fragment) = autoreleasepool(|_| {
             compile(
                 self.device.device(),
                 program.name,
-                &format!("{PRELUDE}{}{}", source.msl.prelude, source.msl.source),
+                &text,
                 source.msl.vertex_main_function,
                 source.msl.fragment_main_function,
                 key.define_values(),

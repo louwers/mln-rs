@@ -1,23 +1,25 @@
 // A program's MSL reads the program's attribute at location `l` as
 // `[[attribute(l)]]`, and its texture at slot `s` and the texture's sampler
-// as `[[texture(s)]]` and `[[sampler(s)]]`, and its buffers at their ids.
-// Its vertex buffers bind after those (`first_vertex_buffer`), one at each
-// index.
+// as `[[texture(s)]]` and `[[sampler(s)]]`, and its buffers at their ids
+// (`declarations`). Its vertex buffers bind after those
+// (`first_vertex_buffer`), one at each index.
 
+use mln_gfx::gpu::GpuError;
 use mln_gfx::shaders::bindings::GLOBAL_INDEX_ID;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::programs;
 
+use super::declarations::{self, FRAGMENT_BINDINGS, Stage, VERTEX_BINDINGS};
 use super::msl_sources;
 
-/// The MSL of a shader. Its library compiles from
-/// `msl_sources::PRELUDE + prelude + source`.
+/// The MSL of a shader: its main functions and what they call. Each main
+/// function's parameters end with a placeholder, `MLN_VERTEX_BINDINGS` or
+/// `MLN_FRAGMENT_BINDINGS`, where the parameters of what its stage reads
+/// go ([`ShaderSource::compose`]).
 #[derive(Debug)]
 pub(crate) struct MslShaderSource {
     pub(crate) vertex_main_function: &'static str,
     pub(crate) fragment_main_function: &'static str,
-    /// The shader's own prelude constant (its UBO ids and structs), "" if none.
-    pub(crate) prelude: &'static str,
     pub(crate) source: &'static str,
 }
 
@@ -28,6 +30,40 @@ pub(crate) struct ShaderSource {
     /// Whether its library compiles with fast math, Metal's default, which
     /// lets the compiler fuse and reorder floating-point operations.
     pub(crate) fast_math: bool,
+}
+
+impl ShaderSource {
+    /// The MSL that `program`'s library compiles from: `msl_sources::HEADER`,
+    /// the structs of the blocks `program` reads, `msl_sources::PRELUDE`,
+    /// its vertex stage's input, and the source with the parameters of what
+    /// each stage reads in place of the stage's placeholder. Fails where the
+    /// source doesn't name the placeholder of each of its main functions
+    /// once, or where the program declares what MSL can't read.
+    pub(crate) fn compose(&self, program: &Program) -> Result<String, GpuError> {
+        let mut source = self.msl.source.to_owned();
+        let stages = [
+            (self.msl.vertex_main_function, VERTEX_BINDINGS, Stage::Vertex),
+            (self.msl.fragment_main_function, FRAGMENT_BINDINGS, Stage::Fragment),
+        ];
+        for (function, placeholder, stage) in stages {
+            if function.is_empty() {
+                continue;
+            }
+            if source.matches(placeholder).count() != 1 {
+                return Err(GpuError::Invalid(format!("{}'s MSL names {placeholder} other than once", program.name)));
+            }
+            let parameters = declarations::parameters(program, stage);
+            let parameters = if parameters.is_empty() { parameters } else { format!("\n{parameters}") };
+            source = source.replacen(placeholder, &parameters, 1);
+        }
+        Ok(format!(
+            "{}{}{}{}{source}",
+            msl_sources::HEADER,
+            declarations::blocks(program)?,
+            msl_sources::PRELUDE,
+            declarations::vertex_input(program)?
+        ))
+    }
 }
 
 /// The buffer index of `program`'s first vertex buffer, past the indexes of
