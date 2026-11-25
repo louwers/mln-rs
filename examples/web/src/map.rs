@@ -659,6 +659,8 @@ struct Terrain {
     source: String,
     exaggeration: f64,
     hillshade: Option<Hillshade>,
+    /// The style's `sky` where it has none, as JSON.
+    sky: Option<String>,
 }
 
 /// A hillshade layer of a [`Terrain`]'s source.
@@ -688,10 +690,12 @@ impl Terrain {
                 before: hillshade.get("before").as_str().map(str::to_owned),
             }
         });
+        let sky = value.get("sky");
         Ok(Terrain {
             source: json(source),
             exaggeration: value.get("exaggeration").as_f64().ok_or("terrain: no exaggeration")?,
             hillshade,
+            sky: sky.is_object().then(|| json(sky)),
         })
     }
 }
@@ -700,8 +704,8 @@ impl Terrain {
 const TERRAIN_SOURCE: &str = "terrain";
 
 /// Adds `terrain` to the style that `map` loaded, unless it has the source
-/// already: the source, the style's `terrain` on it and the hillshade, if
-/// any. Fails while no style is loaded.
+/// already: the source, the style's `terrain` on it, the hillshade, if any,
+/// and the sky, if any and the style has none. Fails while no style is loaded.
 fn add_terrain(map: &mut mln_map::Map, terrain: &Terrain) -> Result<(), Error> {
     if map.source(TERRAIN_SOURCE).is_some() {
         return Ok(());
@@ -717,7 +721,11 @@ fn add_terrain(map: &mut mln_map::Map, terrain: &Terrain) -> Result<(), Error> {
             style.add_layer_json(&layer, before)?;
         }
         let root = format!(r#"{{"source":"{TERRAIN_SOURCE}","exaggeration":{}}}"#, terrain.exaggeration);
-        style.set_root_property_json("terrain", &root)
+        style.set_root_property_json("terrain", &root)?;
+        match &terrain.sky {
+            Some(sky) if style.get_sky().is_none() => style.set_root_property_json("sky", sky),
+            _ => Ok(()),
+        }
     })
 }
 

@@ -117,8 +117,9 @@ fn satellite_3d_adds_mapterhorn_terrain_to_satellite() {
     }
 }
 
-/// Liberty 3D: Liberty, then a Mapterhorn DEM, the style's terrain on it, and
-/// a hillshade of it right under Liberty's buildings.
+/// Liberty 3D: Liberty, then a Mapterhorn DEM, the style's terrain on it, a
+/// hillshade of it right under Liberty's buildings, and a sky, which Liberty
+/// lacks.
 #[test]
 #[ignore = "needs network access"]
 fn liberty_3d_shades_the_ground_under_libertys_buildings() {
@@ -135,4 +136,12 @@ fn liberty_3d_shades_the_ground_under_libertys_buildings() {
     let json = map.style_root_property("terrain").and_then(Completion::wait).unwrap().unwrap();
     let set: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!(set["source"], styles::TERRAIN_SOURCE);
+    // The catalog's sky: the properties it sets, whose colors the style
+    // writes back as `rgba` expressions.
+    let json = map.style_root_property("sky").and_then(Completion::wait).unwrap().expect("Liberty 3D's sky");
+    let keys = |json: &str| {
+        let sky: serde_json::Map<String, serde_json::Value> = serde_json::from_str(json).unwrap();
+        sky.into_iter().map(|(key, _)| key).collect::<std::collections::BTreeSet<_>>()
+    };
+    assert_eq!(keys(&json), keys(&terrain.sky.unwrap()), "{json}");
 }

@@ -73,6 +73,7 @@ function withTerrain(
     );
   }
   next.terrain = { source: "terrain", exaggeration: terrain.exaggeration };
+  next.sky ??= terrain.sky;
   return next;
 }
 
