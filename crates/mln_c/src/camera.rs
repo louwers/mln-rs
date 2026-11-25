@@ -9,7 +9,7 @@ use std::time::Duration;
 use ::mln_map::{
     AnimationOptions, BoundOptions, Camera, CameraDelta, CameraOptions, CameraUpdate, CameraUpdateMode, ConstrainMode,
     FreeCameraOptions, GesturePhase, MapDebugOptions, NorthOrientation, ProjectionMode, TileLodMode, TransitionEnd,
-    TransitionOutcome, ViewportMode,
+    TransitionOutcome, ViewportMode, AxonometricMode,
 };
 use mln_runtime::{Applied, CameraFitArea, CameraFitOptions, CameraFitUpdate, TileOptions, ViewportOptions};
 use mln_util::UnitBezier;
@@ -1054,7 +1054,7 @@ fn projection_mode(options: &mln_projection_mode_options) -> Result<ProjectionMo
         return Err(Error::invalid_argument("projection skew values must be finite"));
     }
     Ok(ProjectionMode {
-        axonometric: fields.get(MLN_PROJECTION_MODE_OPTION_AXONOMETRIC, options.axonometric),
+        axonometric: fields.get(MLN_PROJECTION_MODE_OPTION_AXONOMETRIC, options.axonometric).map(AxonometricMode::from),
         x_skew,
         y_skew,
     })

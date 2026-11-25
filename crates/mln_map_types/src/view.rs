@@ -20,7 +20,7 @@ use crate::camera_pose::CameraPose;
 use crate::map_view::{Camera, LogicalExtent, MapView, Viewport};
 use crate::mode::{ConstrainMode, ViewportMode};
 use crate::projection::{ProjectionData, mercator_tile_matrix};
-use crate::projection_mode::ProjectionMode;
+use crate::projection_mode::{ProjectionMode, AxonometricMode};
 use crate::tile_coordinate::TileCoordinate;
 use crate::vertical_perspective_projection::VerticalPerspectiveProjection;
 
@@ -444,7 +444,7 @@ impl View {
     #[must_use]
     pub fn projection_mode(&self) -> ProjectionMode {
         ProjectionMode {
-            axonometric: Some(self.params.axonometric),
+            axonometric: Some(AxonometricMode::from(self.params.axonometric)),
             x_skew: Some(self.params.x_skew),
             y_skew: Some(self.params.y_skew),
         }

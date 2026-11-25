@@ -666,7 +666,7 @@ impl Transform {
             self.state.set_y_skew(y_skew);
         }
         if let Some(axonometric) = options.axonometric {
-            self.state.set_axonometric(axonometric);
+            self.state.set_axonometric(axonometric.as_bool());
         }
     }
 

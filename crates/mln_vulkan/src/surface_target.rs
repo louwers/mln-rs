@@ -80,6 +80,13 @@ pub trait Overlay {
     fn destroy(&mut self, gpu: &mut VulkanGpu);
 }
 
+/// The frame rate capping mode: either capped to the display's refresh or uncapped.
+#[derive(Clone, Copy)]
+pub(crate) enum FrameRateMode {
+    Capped,
+    Uncapped,
+}
+
 /// The mode a surface that has the modes `available` presents in: without
 /// tearing when the frame rate is capped, and otherwise without waiting for
 /// the display, tearing (immediate) rather than not (mailbox). Every surface
@@ -89,11 +96,10 @@ pub trait Overlay {
 /// FIFO blocks acquiring and presenting on Wayland while the window isn't
 /// visible, which stalls the thread that renders.
 #[must_use]
-pub(crate) fn present_mode(cap_frame_rate: bool, available: &[vk::PresentModeKHR]) -> vk::PresentModeKHR {
-    let preferred: &[vk::PresentModeKHR] = if cap_frame_rate {
-        &[vk::PresentModeKHR::MAILBOX]
-    } else {
-        &[vk::PresentModeKHR::IMMEDIATE, vk::PresentModeKHR::MAILBOX]
+pub(crate) fn present_mode(mode: FrameRateMode, available: &[vk::PresentModeKHR]) -> vk::PresentModeKHR {
+    let preferred: &[vk::PresentModeKHR] = match mode {
+        FrameRateMode::Capped => &[vk::PresentModeKHR::MAILBOX],
+        FrameRateMode::Uncapped => &[vk::PresentModeKHR::IMMEDIATE, vk::PresentModeKHR::MAILBOX],
     };
     preferred.iter().copied().find(|mode| available.contains(mode)).unwrap_or(vk::PresentModeKHR::FIFO)
 }
@@ -123,7 +129,8 @@ impl SurfaceTarget {
         cap_frame_rate: bool,
     ) -> Result<(RendererBackend, SurfaceTarget), Error> {
         let provider = Box::new(WindowSurface::new(window)?);
-        Self::with_backend_from_provider(device, provider, framebuffer_size, cap_frame_rate)
+        let frame_rate_mode = if cap_frame_rate { FrameRateMode::Capped } else { FrameRateMode::Uncapped };
+        Self::with_backend_from_provider(device, provider, framebuffer_size, frame_rate_mode)
     }
 
     /// [`with_backend`](Self::with_backend) for the surfaces `provider`
@@ -132,10 +139,10 @@ impl SurfaceTarget {
         device: &Device,
         provider: Box<dyn SurfaceProvider>,
         framebuffer_size: Size,
-        cap_frame_rate: bool,
+        frame_rate_mode: FrameRateMode,
     ) -> Result<(RendererBackend, SurfaceTarget), Error> {
         let mut backend = RendererBackend::presenting(device)?;
-        let target = Self::from_provider(&mut backend, provider, framebuffer_size, cap_frame_rate)?;
+        let target = Self::from_provider(&mut backend, provider, framebuffer_size, frame_rate_mode)?;
         Ok((backend, target))
     }
 
@@ -155,7 +162,8 @@ impl SurfaceTarget {
         cap_frame_rate: bool,
     ) -> Result<SurfaceTarget, Error> {
         let provider = Box::new(WindowSurface::new(window)?);
-        Self::from_provider(backend, provider, framebuffer_size, cap_frame_rate)
+        let frame_rate_mode = if cap_frame_rate { FrameRateMode::Capped } else { FrameRateMode::Uncapped };
+        Self::from_provider(backend, provider, framebuffer_size, frame_rate_mode)
     }
 
     /// [`new`](Self::new) for the surfaces `provider` makes.
@@ -163,7 +171,7 @@ impl SurfaceTarget {
         backend: &mut RendererBackend,
         provider: Box<dyn SurfaceProvider>,
         framebuffer_size: Size,
-        cap_frame_rate: bool,
+        frame_rate_mode: FrameRateMode,
     ) -> Result<SurfaceTarget, Error> {
         let shared = &backend.device().shared;
         let missing = provider.instance_extensions().into_iter().find(|name| !shared.has_instance_extension(name));
@@ -171,7 +179,7 @@ impl SurfaceTarget {
             return Err(Error::unsupported(format!("The Vulkan instance lacks {}", name.to_string_lossy())));
         }
         let surface = provider.create_surface(shared.entry(), shared.instance())?;
-        Self::on_surface(backend, surface, Some(provider), framebuffer_size, cap_frame_rate)
+        Self::on_surface(backend, surface, Some(provider), framebuffer_size, frame_rate_mode)
     }
 
     /// A target on `backend`, a presenting backend, that presents to the
@@ -190,7 +198,8 @@ impl SurfaceTarget {
         framebuffer_size: Size,
         cap_frame_rate: bool,
     ) -> Result<SurfaceTarget, Error> {
-        Self::on_surface(backend, surface.0, None, framebuffer_size, cap_frame_rate)
+        let frame_rate_mode = if cap_frame_rate { FrameRateMode::Capped } else { FrameRateMode::Uncapped };
+        Self::on_surface(backend, surface.0, None, framebuffer_size, frame_rate_mode)
     }
 
     /// A target that presents to `surface`, which the target owns when
@@ -203,7 +212,7 @@ impl SurfaceTarget {
         surface: vk::SurfaceKHR,
         provider: Option<Box<dyn SurfaceProvider>>,
         framebuffer_size: Size,
-        cap_frame_rate: bool,
+        frame_rate_mode: FrameRateMode,
     ) -> Result<SurfaceTarget, Error> {
         let device = backend.device();
         let shared = &device.shared;
@@ -247,7 +256,7 @@ impl SurfaceTarget {
             framebuffer_size,
             surface,
             provider,
-            present_mode(cap_frame_rate, &present_modes),
+            present_mode(frame_rate_mode, &present_modes),
         );
         if !resource.has_platform_surface() {
             return Err(Error::native("The window has no Vulkan surface"));

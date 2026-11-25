@@ -30,7 +30,7 @@ use mln_vec_map::VecMap;
 use crate::bucket::{Bucket, BucketBase, FeatureStates, UploadNeeds};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::layer_type::EvaluatedLayer;
-use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools, WritingModes};
+use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools, WritingMode};
 use crate::paint_property_binder::PaintPropertyBinder;
 use crate::text::quads::SymbolQuad;
 use crate::util::pool::PoolRange;
@@ -122,10 +122,17 @@ pub(crate) struct SortKeyRange {
     pub(crate) end: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub(crate) enum SizeConstancy {
+    #[default]
+    Both,
+    Zoom,
+    Neither,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct ZoomEvaluatedSize {
-    pub(crate) is_zoom_constant: bool,
-    pub(crate) is_feature_constant: bool,
+    pub(crate) constancy: SizeConstancy,
     pub(crate) size_t: f32,
     pub(crate) size: f32,
     pub(crate) layout_size: f32,
@@ -228,30 +235,26 @@ impl SymbolSizeBinder {
         match self {
             SymbolSizeBinder::Constant { layout_size, covering_ranges, expression } => {
                 let mut size = *layout_size;
-                let is_zoom_constant = !(covering_ranges.is_some() || expression.is_some());
+                let constancy = if covering_ranges.is_some() || expression.is_some() {
+                    SizeConstancy::Zoom
+                } else {
+                    SizeConstancy::Both
+                };
                 if let (Some((zoom_levels, size_levels)), Some(expression)) = (covering_ranges, expression) {
-                    // Even though we could get the exact value of the camera
-                    // function at the current zoom, we intentionally do not:
-                    // instead, we interpolate between the camera function
-                    // values at a pair of zoom stops covering [tile zoom,
-                    // tile zoom + 1] in order to be consistent with this
-                    // restriction on composite functions.
                     let t = mln_math::clamp_f32(expression.interpolation_factor(*zoom_levels, current_zoom), 0.0, 1.0);
                     size = size_levels.min + t * (size_levels.max - size_levels.min);
                 } else if let Some(expression) = expression {
                     size = expression.evaluate(&EvaluationContext::new(current_zoom), 0.0);
                 }
                 ZoomEvaluatedSize {
-                    is_zoom_constant,
-                    is_feature_constant: true,
+                    constancy,
                     size_t: unused,
                     size,
                     layout_size: *layout_size,
                 }
             }
             SymbolSizeBinder::SourceFunction { .. } => ZoomEvaluatedSize {
-                is_zoom_constant: true,
-                is_feature_constant: false,
+                constancy: SizeConstancy::Zoom,
                 size_t: unused,
                 size: unused,
                 layout_size: unused,
@@ -260,8 +263,7 @@ impl SymbolSizeBinder {
                 let size_interpolation_t =
                     mln_math::clamp_f32(expression.interpolation_factor(*covering_zoom_stops, current_zoom), 0.0, 1.0);
                 ZoomEvaluatedSize {
-                    is_zoom_constant: false,
-                    is_feature_constant: false,
+                    constancy: SizeConstancy::Neither,
                     size_t: size_interpolation_t,
                     size: unused,
                     layout_size: unused,
@@ -280,7 +282,7 @@ pub(crate) struct PlacedSymbol {
     pub(crate) lower_size: f32,
     pub(crate) upper_size: f32,
     pub(crate) line_offset: [f32; 2],
-    pub(crate) writing_modes: WritingModes,
+    pub(crate) writing_modes: WritingMode,
     /// The line the symbol is placed along, in its buffer's `pools.lines`.
     pub(crate) line: PoolRange,
     /// The distance along `line` from the anchor to each vertex, in its

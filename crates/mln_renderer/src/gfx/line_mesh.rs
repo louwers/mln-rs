@@ -9,6 +9,32 @@ use mln_util::constants::{EXTENT, TILE_SIZE_D};
 
 use crate::gfx::mesh::Indexed;
 
+/// Whether a vertex is rounded or sharp.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VertexRound {
+    Sharp,
+    Round,
+}
+
+impl From<VertexRound> for bool {
+    fn from(r: VertexRound) -> bool {
+        matches!(r, VertexRound::Round)
+    }
+}
+
+/// Which side of the line a vertex is on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VertexSide {
+    Left,
+    Right,
+}
+
+impl From<VertexSide> for bool {
+    fn from(s: VertexSide) -> bool {
+        matches!(s, VertexSide::Right)
+    }
+}
+
 /// A vertex of a line mesh: its position, doubled, with the round and up
 /// flags in the low bits, then its extrusion and distance along the line.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
@@ -20,18 +46,20 @@ pub(crate) struct LineLayoutVertex {
 
 impl LineLayoutVertex {
     /// The vertex at `at` that the shader moves by `extrude` times half the
-    /// line's width. `round` marks a round cap or join, `up` the side of the
-    /// line, and the sign of `end` which way the vertex is moved along the
-    /// line, which turns the line's offset with it. `distance` is in the
-    /// buffer's units, [`LINE_DISTANCE_SCALE`] of the distance along the
-    /// line.
-    fn new(at: Point<i16>, extrude: DVec2, round: bool, up: bool, end: f64, distance: u32) -> Self {
+    /// line's width. `round` marks a round cap or join, `side` distinguishes
+    /// the two vertices at this point, and the sign of `end` indicates which
+    /// way the vertex is moved along the line. `distance` is in the buffer's
+    /// units, [`LINE_DISTANCE_SCALE`] of the distance along the line.
+    fn new(at: Point<i16>, extrude: DVec2, round: VertexRound, side: VertexSide, end: f64, distance: u32) -> Self {
         // The direction, -1, 0 or 1, plus 1.
         let dir = u8::from(end >= 0.0) + u8::from(end > 0.0);
         // A byte with 128 for 0, in units of 1/63.
         let byte = |v: f64| ((v * 63.0).round() + 128.0).clamp(0.0, 255.0) as u8;
         LineLayoutVertex {
-            a1: [at.x.wrapping_mul(2) | i16::from(round), at.y.wrapping_mul(2) | i16::from(up)],
+            a1: [
+                at.x.wrapping_mul(2) | i16::from(bool::from(round)),
+                at.y.wrapping_mul(2) | i16::from(bool::from(side)),
+            ],
             // The direction in the low two bits, then the distance's low 6
             // bits, and its high 8 bits.
             a2: [byte(extrude.x), byte(extrude.y), dir | ((distance & 0x3F) << 2) as u8, (distance >> 6) as u8],
@@ -258,7 +286,7 @@ impl Strip<'_> {
                 if sharp && i > 0 && distance(from, at) > 2.0 * sharp_corner_offset {
                     let before = toward(at, from, sharp_corner_offset);
                     self.distance += distance(from, before);
-                    self.add_pair(before, prev_normal, 0.0, 0.0, false);
+                    self.add_pair(before, prev_normal, 0.0, 0.0, VertexRound::Sharp);
                     from = before;
                 }
                 self.distance += distance(from, at);
@@ -275,7 +303,7 @@ impl Strip<'_> {
             {
                 let after = toward(at, next, sharp_corner_offset);
                 self.distance += distance(at, after);
-                self.add_pair(after, next_normal, 0.0, 0.0, false);
+                self.add_pair(after, next_normal, 0.0, 0.0, VertexRound::Sharp);
                 prev = Some(after);
             }
             prev_normal = next_normal;
@@ -288,7 +316,7 @@ impl Strip<'_> {
     fn add_corner(&mut self, corner: Corner, at: Point<i16>, ends: bool, starts: bool, turn: &Turn) {
         let Turn { prev_normal, next_normal, join_normal, miter_length, .. } = *turn;
         match corner {
-            Corner::Miter => self.add_pair(at, join_normal * miter_length, 0.0, 0.0, false),
+            Corner::Miter => self.add_pair(at, join_normal * miter_length, 0.0, 0.0, VertexRound::Sharp),
             Corner::FlipBevel => {
                 let normal = if miter_length > 100.0 {
                     // The segments are almost parallel.
@@ -299,27 +327,27 @@ impl Strip<'_> {
                         miter_length * (prev_normal + next_normal).length() / (prev_normal - next_normal).length();
                     join_normal.perp() * bevel_length * direction
                 };
-                self.add_pair(at, normal, 0.0, 0.0, false);
-                self.add_pair(at, -normal, 0.0, 0.0, false);
+                self.add_pair(at, normal, 0.0, 0.0, VertexRound::Sharp);
+                self.add_pair(at, -normal, 0.0, 0.0, VertexRound::Sharp);
             }
             Corner::Bevel | Corner::FakeRound => {
                 let turns_left = turn.turns_left();
                 let offset = -(miter_length * miter_length - 1.0).sqrt();
                 let (left, right) = if turns_left { (offset, 0.0) } else { (0.0, offset) };
                 if ends {
-                    self.add_pair(at, prev_normal, left, right, false);
+                    self.add_pair(at, prev_normal, left, right, VertexRound::Sharp);
                 }
                 if corner == Corner::FakeRound {
                     self.add_pie_slices(at, turn);
                 }
-                self.add_pair(at, next_normal, -left, -right, false);
+                self.add_pair(at, next_normal, -left, -right, VertexRound::Sharp);
             }
             Corner::Butt | Corner::Square | Corner::Round => {
-                let round = corner == Corner::Round;
+                let round = if corner == Corner::Round { VertexRound::Round } else { VertexRound::Sharp };
                 let end = if corner == Corner::Butt { 0.0 } else { 1.0 };
                 if ends {
-                    if round {
-                        self.add_pair(at, prev_normal, 0.0, 0.0, false);
+                    if round == VertexRound::Round {
+                        self.add_pair(at, prev_normal, 0.0, 0.0, VertexRound::Sharp);
                     }
                     self.add_pair(at, prev_normal, end, end, round);
                     if end != 0.0 {
@@ -329,8 +357,8 @@ impl Strip<'_> {
                 }
                 if starts {
                     self.add_pair(at, next_normal, -end, -end, round);
-                    if round {
-                        self.add_pair(at, next_normal, 0.0, 0.0, false);
+                    if round == VertexRound::Round {
+                        self.add_pair(at, next_normal, 0.0, 0.0, VertexRound::Sharp);
                     }
                 }
             }
@@ -344,7 +372,7 @@ impl Strip<'_> {
         let slices = (approx_angle.to_degrees() / DEGREES_PER_SLICE).round() as u32;
         let cos_angle = turn.prev_normal.dot(turn.next_normal);
         let turns_left = turn.turns_left();
-        let side = if turns_left { -1.0 } else { 1.0 };
+        let side = if turns_left { VertexSide::Right } else { VertexSide::Left };
         for m in 1..slices {
             let mut t = f64::from(m) / f64::from(slices);
             if t != 0.5 {
@@ -356,7 +384,7 @@ impl Strip<'_> {
                 t += t * t2 * (t - 1.0) * (a * t2 * t2 + b);
             }
             let normal = turn.prev_normal.lerp(turn.next_normal, t).normalize();
-            let slice = self.push(at, normal * side, false, turns_left, 0.0);
+            let slice = self.push(at, normal, VertexRound::Sharp, side, 0.0);
             // Each slice fans out from the vertex on the inside of the turn.
             self.last[usize::from(turns_left)] = Some(slice);
         }
@@ -365,12 +393,13 @@ impl Strip<'_> {
     /// Adds a vertex on each side of the line at `at`, extruded along
     /// `normal`, and moved back along the line by `end_left` and `end_right`
     /// times the extrusion: forward for a negative one.
-    fn add_pair(&mut self, at: Point<i16>, normal: DVec2, end_left: f64, end_right: f64, round: bool) {
+    fn add_pair(&mut self, at: Point<i16>, normal: DVec2, end_left: f64, end_right: f64, round: VertexRound) {
         let along = normal.perp();
-        for (extrude, up, end) in
-            [(normal - along * end_left, false, end_left), (-normal - along * end_right, true, -end_right)]
-        {
-            let vertex = self.push(at, extrude, round, up, end);
+        for (extrude, side, end) in [
+            (normal - along * end_left, VertexSide::Left, end_left),
+            (-normal - along * end_right, VertexSide::Right, -end_right),
+        ] {
+            let vertex = self.push(at, extrude, round, side, end);
             self.last = [self.last[1], Some(vertex)];
         }
 
@@ -384,7 +413,7 @@ impl Strip<'_> {
 
     /// Pushes a vertex, makes a triangle of it and the strip's last two,
     /// and returns its index in the line.
-    fn push(&mut self, at: Point<i16>, extrude: DVec2, round: bool, up: bool, end: f64) -> u32 {
+    fn push(&mut self, at: Point<i16>, extrude: DVec2, round: VertexRound, side: VertexSide, end: f64) -> u32 {
         let distance = match self.clip {
             // The fraction of the whole line, in the buffer's range.
             Some(clip) => {
@@ -393,7 +422,14 @@ impl Strip<'_> {
             }
             None => self.distance,
         };
-        self.vertices.push(LineLayoutVertex::new(at, extrude, round, up, end, (distance * LINE_DISTANCE_SCALE) as u32));
+        self.vertices.push(LineLayoutVertex::new(
+            at,
+            extrude,
+            round,
+            side,
+            end,
+            (distance * LINE_DISTANCE_SCALE) as u32,
+        ));
         let vertex = (self.vertices.len() - 1 - self.first) as u32;
         if let [Some(a), Some(b)] = self.last {
             self.triangles.push([a, b, vertex]);

@@ -28,13 +28,23 @@ use super::msl_sources::PRELUDE;
 use super::shader_source::{AttributeInfo, BUILT_INS, ShaderSource};
 use crate::Id;
 
+#[derive(Clone, Copy)]
+enum Projection {
+    Mercator,
+    Globe,
+}
+
+#[derive(Clone, Copy)]
+enum Overdraw {
+    Off,
+    On,
+}
+
 fn sources() -> impl Iterator<Item = (&'static Program, &'static ShaderSource)> {
     BUILT_INS.iter().copied()
 }
 
-/// The projection variants of a program: its name, and whether it defines
-/// `PROJECTION_GLOBE`.
-const PROJECTIONS: [(&str, bool); 2] = [("Mercator", false), ("globe", true)];
+const PROJECTIONS: [(&str, Projection); 2] = [("Mercator", Projection::Mercator), ("globe", Projection::Globe)];
 
 fn device() -> Id<dyn MTLDevice> {
     MTLCreateSystemDefaultDevice().expect("no Metal device")
@@ -87,14 +97,14 @@ fn uniform_properties(text: &str) -> BTreeSet<String> {
     names
 }
 
-/// ProgramParameters(1.0, overdraw), the globe define if `globe`, and a
+/// ProgramParameters(1.0, overdraw), the globe define if `Projection::Globe`, and a
 /// uniform define per name.
-fn defines<'a>(overdraw: bool, globe: bool, uniforms: impl IntoIterator<Item = &'a String>) -> Vec<(String, String)> {
+fn defines<'a>(overdraw: Overdraw, projection: Projection, uniforms: impl IntoIterator<Item = &'a String>) -> Vec<(String, String)> {
     let mut defines = vec![("DEVICE_PIXEL_RATIO".to_owned(), "1.0".to_owned())];
-    if overdraw {
+    if matches!(overdraw, Overdraw::On) {
         defines.push(("OVERDRAW_INSPECTOR".to_owned(), String::new()));
     }
-    if globe {
+    if matches!(projection, Projection::Globe) {
         defines.push((GLOBE_DEFINE.to_owned(), String::new()));
     }
     defines.extend(uniforms.into_iter().map(|name| (format!("HAS_UNIFORM_u_{name}"), String::new())));
@@ -143,16 +153,16 @@ fn every_shader_source_compiles() {
             "{}: the properties its MSL reads from uniforms",
             program.name
         );
-        for (projection, globe) in PROJECTIONS {
+        for (projection, proj) in PROJECTIONS {
             // Every property per vertex, every property as a uniform, each one
             // alone as a uniform, and the overdraw inspector.
             let mut variants = vec![
-                ("no uniforms".to_owned(), defines(false, globe, [])),
-                ("all uniforms".to_owned(), defines(false, globe, &properties)),
-                ("overdraw inspector".to_owned(), defines(true, globe, [])),
-                ("overdraw inspector, all uniforms".to_owned(), defines(true, globe, &properties)),
+                ("no uniforms".to_owned(), defines(Overdraw::Off, proj, [])),
+                ("all uniforms".to_owned(), defines(Overdraw::Off, proj, &properties)),
+                ("overdraw inspector".to_owned(), defines(Overdraw::On, proj, [])),
+                ("overdraw inspector, all uniforms".to_owned(), defines(Overdraw::On, proj, &properties)),
             ];
-            variants.extend(properties.iter().map(|name| (format!("uniform {name}"), defines(false, globe, [name]))));
+            variants.extend(properties.iter().map(|name| (format!("uniform {name}"), defines(Overdraw::Off, proj, [name]))));
             for (variant, defines) in variants {
                 match compile(&device, &text, &defines, source.fast_math) {
                     Ok(library) => {
@@ -414,7 +424,7 @@ fn ubo_ids_and_sizes_are_the_renderers() {
         }
         text.push_str(&asserts);
         for (projection, globe) in PROJECTIONS {
-            if let Err(error) = compile(&device, &text, &defines(false, globe, []), source.fast_math) {
+            if let Err(error) = compile(&device, &text, &defines(Overdraw::Off, globe, []), source.fast_math) {
                 failures.push(format!("{} ({projection}):\n{error}", program.name));
             }
         }
@@ -506,8 +516,8 @@ fn pipelines_build_with_the_tables_vertex_layout() {
         ];
         let variants = PROJECTIONS.iter().flat_map(|&(projection, globe)| {
             [
-                (format!("{projection}, no uniforms"), defines(false, globe, [])),
-                (format!("{projection}, all uniforms"), defines(false, globe, &properties)),
+                (format!("{projection}, no uniforms"), defines(Overdraw::Off, globe, [])),
+                (format!("{projection}, all uniforms"), defines(Overdraw::Off, globe, &properties)),
             ]
         });
         for (variant, defines) in variants {

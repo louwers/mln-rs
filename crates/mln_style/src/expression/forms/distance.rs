@@ -16,6 +16,8 @@ use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::{EvalResult, EvaluationContext, EvaluationError, Expr, Node};
 use crate::feature::{CanonicalTileID, GeometryTileFeature, convert_geometry};
 
+use super::within::BoundaryMode;
+
 // The algorithms work on `mapbox::geometry`'s shapes, as in C++: a polygon
 // is its rings, the exterior first. `Geometry::from_geo` converts to them.
 type LineString<T> = Vec<Point<T>>;
@@ -156,13 +158,13 @@ fn segment_intersect_segment(a: &Point<f64>, b: &Point<f64>, c: &Point<f64>, d: 
 
 /// Ray casting algorithm for detecting if point is in polygon. A ring with
 /// fewer than two points has no edges.
-fn point_within_polygon(point: &Point<f64>, polygon: &Polygon<f64>, true_on_boundary: bool) -> bool {
+fn point_within_polygon(point: &Point<f64>, polygon: &Polygon<f64>, boundary_mode: BoundaryMode) -> bool {
     let mut within = false;
     for ring in polygon {
         // loop through every edge of the ring
         for edge in ring.windows(2) {
             if point_on_boundary(point, &edge[0], &edge[1]) {
-                return true_on_boundary;
+                return boundary_mode == BoundaryMode::Inside;
             }
             if ray_intersect(point, &edge[0], &edge[1]) {
                 within = !within;
@@ -366,7 +368,7 @@ fn points_to_points_range_distance(
 }
 
 fn point_to_polygon_distance(point: &Point<f64>, polygon: &Polygon<f64>, ruler: &Ruler) -> f64 {
-    if point_within_polygon(point, polygon, true) {
+    if point_within_polygon(point, polygon, BoundaryMode::Inside) {
         return 0.0;
     }
     let mut dist = INFINITE_DISTANCE;
@@ -403,7 +405,7 @@ fn line_to_polygon_range_distance(
     }
     let line = &line[range.0..=range.1];
 
-    if line.iter().any(|p| point_within_polygon(p, polygon, true)) {
+    if line.iter().any(|p| point_within_polygon(p, polygon, BoundaryMode::Inside)) {
         return Some(0.0);
     }
 
@@ -433,7 +435,7 @@ fn polygon_to_polygon_distance(
         return Some(current_mini_dist);
     }
     let polygon_intersect = |poly1: &Polygon<f64>, poly2: &Polygon<f64>| {
-        poly1.iter().flatten().any(|p| point_within_polygon(p, poly2, true))
+        poly1.iter().flatten().any(|p| point_within_polygon(p, poly2, BoundaryMode::Inside))
     };
     if box_within_box(&bbox1, &bbox2) {
         if polygon_intersect(polygon1, polygon2) {

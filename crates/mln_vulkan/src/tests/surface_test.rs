@@ -48,7 +48,7 @@ use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
 use crate::renderer_backend::SurfaceProvider;
-use crate::surface_target::{Overlay, OverlayTarget, present_mode};
+use crate::surface_target::{Overlay, OverlayTarget, FrameRateMode, present_mode};
 use crate::{Device, RendererBackend, SurfaceTarget, VulkanGpu};
 
 const EXTENT: i16 = 8192;
@@ -159,8 +159,9 @@ fn surface_backend_on(provider: HeadlessSurface, size: Size, cap_frame_rate: boo
         return None;
     }
     let device = Device::new(None).expect("Vulkan device");
+    let frame_rate_mode = if cap_frame_rate { crate::surface_target::FrameRateMode::Capped } else { crate::surface_target::FrameRateMode::Uncapped };
     let (backend, target) =
-        SurfaceTarget::with_backend_from_provider(&device, Box::new(provider), size, cap_frame_rate)
+        SurfaceTarget::with_backend_from_provider(&device, Box::new(provider), size, frame_rate_mode)
             .expect("Vulkan backend");
     eprintln!("rendering with {}", backend.get_device_name());
     Some(Window { backend, target })
@@ -411,16 +412,17 @@ fn frame_color(frame: u32, offset: u32) -> Color {
 #[test]
 fn present_mode_follows_the_frame_rate_cap() {
     use vk::PresentModeKHR as Mode;
+    use crate::surface_target::FrameRateMode;
     let all = [Mode::FIFO, Mode::FIFO_RELAXED, Mode::MAILBOX, Mode::IMMEDIATE];
     // Capped: mailbox, else the mode every surface has; never tearing.
-    assert_eq!(present_mode(true, &all), Mode::MAILBOX);
-    assert_eq!(present_mode(true, &[Mode::FIFO, Mode::IMMEDIATE]), Mode::FIFO);
-    assert_eq!(present_mode(true, &[]), Mode::FIFO);
+    assert_eq!(present_mode(FrameRateMode::Capped, &all), Mode::MAILBOX);
+    assert_eq!(present_mode(FrameRateMode::Capped, &[Mode::FIFO, Mode::IMMEDIATE]), Mode::FIFO);
+    assert_eq!(present_mode(FrameRateMode::Capped, &[]), Mode::FIFO);
     // Uncapped: immediate, else mailbox, else the mode every surface has.
-    assert_eq!(present_mode(false, &all), Mode::IMMEDIATE);
-    assert_eq!(present_mode(false, &[Mode::FIFO, Mode::MAILBOX]), Mode::MAILBOX);
-    assert_eq!(present_mode(false, &[Mode::FIFO, Mode::FIFO_RELAXED]), Mode::FIFO);
-    assert_eq!(present_mode(false, &[]), Mode::FIFO);
+    assert_eq!(present_mode(FrameRateMode::Uncapped, &all), Mode::IMMEDIATE);
+    assert_eq!(present_mode(FrameRateMode::Uncapped, &[Mode::FIFO, Mode::MAILBOX]), Mode::MAILBOX);
+    assert_eq!(present_mode(FrameRateMode::Uncapped, &[Mode::FIFO, Mode::FIFO_RELAXED]), Mode::FIFO);
+    assert_eq!(present_mode(FrameRateMode::Uncapped, &[]), Mode::FIFO);
 }
 
 #[test]
@@ -768,7 +770,7 @@ fn a_new_target_on_the_backend_presents() {
     // they were.
     render_frame(&mut window, Some(&scene), set(red), clear, false);
     let target =
-        SurfaceTarget::from_provider(&mut window.backend, Box::new(provider.clone()), size, true).expect("target");
+        SurfaceTarget::from_provider(&mut window.backend, Box::new(provider.clone()), size, FrameRateMode::Capped).expect("target");
     window.set_target(target);
     assert_eq!(provider.made.get(), 2);
     let image = render_frame(&mut window, Some(&scene), Change::default(), clear, true).unwrap();
@@ -777,14 +779,14 @@ fn a_new_target_on_the_backend_presents() {
     // At another size.
     let size = Size::new(80, 24);
     let target =
-        SurfaceTarget::from_provider(&mut window.backend, Box::new(provider.clone()), size, true).expect("target");
+        SurfaceTarget::from_provider(&mut window.backend, Box::new(provider.clone()), size, FrameRateMode::Capped).expect("target");
     window.set_target(target);
     let image = render_frame(&mut window, Some(&scene), set(green), clear, true).unwrap();
     check_halves(&image, size, clear, green, "new target at another size");
 
     // A surface that can't be made leaves the target the window has.
     provider.fail.set(true);
-    assert!(SurfaceTarget::from_provider(&mut window.backend, Box::new(provider.clone()), size, true).is_err());
+    assert!(SurfaceTarget::from_provider(&mut window.backend, Box::new(provider.clone()), size, FrameRateMode::Capped).is_err());
     provider.fail.set(false);
     let image = render_frame(&mut window, Some(&scene), set(red), clear, true).unwrap();
     check_halves(&image, size, clear, red, "after a failed target");

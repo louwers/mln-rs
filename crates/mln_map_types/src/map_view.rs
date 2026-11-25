@@ -10,7 +10,7 @@ use mln_util::size::Size;
 use crate::camera::CameraOptions;
 use crate::camera_limits::{CameraLimits, MAX_FIELD_OF_VIEW, MIN_FIELD_OF_VIEW};
 use crate::mode::{ConstrainMode, ViewportMode};
-use crate::projection_mode::ProjectionMode;
+use crate::projection_mode::{AxonometricMode, ProjectionMode};
 use crate::transform_state::TransformState;
 use crate::view::{View, ViewParams, map_offset, zoom_scale};
 
@@ -160,7 +160,7 @@ impl MapView {
             fov: mln_math::deg2rad(camera.fov),
             x_skew: self.projection_mode.x_skew.unwrap_or(0.0),
             y_skew: self.projection_mode.y_skew.unwrap_or(1.0),
-            axonometric: self.projection_mode.axonometric.unwrap_or(false),
+            axonometric: self.projection_mode.axonometric.is_some_and(AxonometricMode::as_bool),
             center_wrap: WrapMode::Unwrapped,
             terrain_min_elevation: None,
         };

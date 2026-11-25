@@ -32,7 +32,7 @@ pub use map_view::{Camera, LogicalExtent, MapView, Viewport};
 pub use mode::{
     ConstrainMode, MapDebugOptions, MapMode, TerrainOptions, TerrainSkirtLength, TileLodMode, ViewportMode,
 };
-pub use projection_mode::ProjectionMode;
+pub use projection_mode::{ProjectionMode, AxonometricMode};
 mod camera_pose;
 pub mod tile_coordinate;
 mod tile_projector;

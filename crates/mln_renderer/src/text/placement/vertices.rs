@@ -28,20 +28,34 @@ fn extend<T: Copy>(v: &mut Vec<T>, n: usize, value: T) {
     v.extend(std::iter::repeat_n(value, n));
 }
 
+/// Whether a label follows a line or sits at a point.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LabelPlacement {
+    AlongLine,
+    Point,
+}
+
+/// The type of content (text or icon) for collision detection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CollisionContent {
+    Text,
+    Icon,
+}
+
 /// The collision debug buffer a feature of `symbol` draws in.
-fn collision_buffer(state: &mut SymbolBucketState, along_line: bool, text: bool) -> Option<&mut CollisionBuffer> {
-    match (along_line, text) {
-        (true, true) => state.text_collision_circle.as_mut(),
-        (true, false) => state.icon_collision_circle.as_mut(),
-        (false, true) => state.text_collision_box.as_mut(),
-        (false, false) => state.icon_collision_box.as_mut(),
+fn collision_buffer(state: &mut SymbolBucketState, placement: LabelPlacement, content: CollisionContent) -> Option<&mut CollisionBuffer> {
+    match (placement, content) {
+        (LabelPlacement::AlongLine, CollisionContent::Text) => state.text_collision_circle.as_mut(),
+        (LabelPlacement::AlongLine, CollisionContent::Icon) => state.icon_collision_circle.as_mut(),
+        (LabelPlacement::Point, CollisionContent::Text) => state.text_collision_box.as_mut(),
+        (LabelPlacement::Point, CollisionContent::Icon) => state.icon_collision_box.as_mut(),
     }
     .filter(|buffer| !buffer.segments.is_empty())
 }
 
-/// The orientation a run of `vertical` text or its icon shows in.
-fn orientation(vertical: bool) -> TextWritingModeType {
-    if vertical { TextWritingModeType::Vertical } else { TextWritingModeType::Horizontal }
+/// The orientation a run shows in.
+fn orientation(mode: TextWritingModeType) -> TextWritingModeType {
+    mode
 }
 
 impl Placement {
@@ -67,7 +81,8 @@ impl Placement {
         vertical: bool,
     ) -> bool {
         let shown = self.orientation_of(allow_vertical, id);
-        if allow_vertical && shown != Some(orientation(vertical)) {
+        let mode = if vertical { TextWritingModeType::Vertical } else { TextWritingModeType::Horizontal };
+        if allow_vertical && shown != Some(orientation(mode)) {
             return false;
         }
         let Some(offset) = id.and_then(|id| self.variable_offsets.get(&id)) else {
@@ -155,7 +170,9 @@ impl Placement {
             let text_shift = offset
                 .map_or(Vec2::ZERO, |offset| offset.screen_shift(rotate_with_map, pitch_with_map, view.angle() as f32));
             for (feature, is_text) in symbol.collision_features() {
-                let Some(buffer) = collision_buffer(state, feature.along_line, is_text) else {
+                let placement = if feature.along_line { LabelPlacement::AlongLine } else { LabelPlacement::Point };
+                let content = if is_text { CollisionContent::Text } else { CollisionContent::Icon };
+                let Some(buffer) = collision_buffer(state, placement, content) else {
                     continue;
                 };
                 let placed = if is_text { opacity.text.placed } else { opacity.icon.placed };
@@ -429,7 +446,8 @@ impl Placement {
             positions.clear();
             for (shown, run_index, vertical) in runs {
                 let run = &placed[run_index];
-                if run.hidden || shown != Some(orientation(vertical)) {
+                let mode = if vertical { TextWritingModeType::Vertical } else { TextWritingModeType::Horizontal };
+                if run.hidden || shown != Some(orientation(mode)) {
                     hide_glyphs(run.glyph_offsets.len(), positions);
                 } else {
                     for _ in 0..run.glyph_offsets.len() {

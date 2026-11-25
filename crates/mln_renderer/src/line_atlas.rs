@@ -24,12 +24,32 @@ pub(crate) enum LinePatternCap {
     Round = 1,
 }
 
+/// The kind of content in a dash range.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RangeContent {
+    Dash,
+    Gap,
+    ZeroLengthDash,
+    ZeroLengthGap,
+}
+
+impl RangeContent {
+    /// Whether this range represents a dash (as opposed to a gap).
+    fn is_dash(self) -> bool {
+        matches!(self, RangeContent::Dash | RangeContent::ZeroLengthDash)
+    }
+
+    /// Whether this range has zero length.
+    fn is_zero_length(self) -> bool {
+        matches!(self, RangeContent::ZeroLengthDash | RangeContent::ZeroLengthGap)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct DashRange {
     pub(crate) left: f32,
     pub(crate) right: f32,
-    pub(crate) is_dash: bool,
-    pub(crate) is_zero_length: bool,
+    pub(crate) content: RangeContent,
 }
 
 fn dash_ranges(dasharray: &[f32], stretch: f32) -> Vec<DashRange> {
@@ -42,7 +62,12 @@ fn dash_ranges(dasharray: &[f32], stretch: f32) -> Vec<DashRange> {
     let mut is_dash = true;
 
     let mut ranges = Vec::with_capacity(dasharray.len());
-    ranges.push(DashRange { left, right, is_dash, is_zero_length: dasharray[0] == 0.0 });
+    let content = if dasharray[0] == 0.0 {
+        if is_dash { RangeContent::ZeroLengthDash } else { RangeContent::ZeroLengthGap }
+    } else {
+        if is_dash { RangeContent::Dash } else { RangeContent::Gap }
+    };
+    ranges.push(DashRange { left, right, content });
 
     let mut current_dash_length = dasharray[0];
     for &dash_length in &dasharray[1..] {
@@ -52,7 +77,12 @@ fn dash_ranges(dasharray: &[f32], stretch: f32) -> Vec<DashRange> {
         current_dash_length += dash_length;
         right = current_dash_length * stretch;
 
-        ranges.push(DashRange { left, right, is_dash, is_zero_length: dash_length == 0.0 });
+        let content = if dash_length == 0.0 {
+            if is_dash { RangeContent::ZeroLengthDash } else { RangeContent::ZeroLengthGap }
+        } else {
+            if is_dash { RangeContent::Dash } else { RangeContent::Gap }
+        };
+        ranges.push(DashRange { left, right, content });
     }
 
     ranges
@@ -96,7 +126,7 @@ fn add_round_dash(ranges: &[DashRange], y_offset: u32, stretch: f32, n: i32, ima
             let min_dist = mln_math::fminf(dist_left, dist_right);
 
             let dist_middle = y as f32 / n as f32 * (half_stretch + 1.0);
-            let signed_distance = if range.is_dash {
+            let signed_distance = if range.content.is_dash() {
                 let dist_edge = half_stretch - dist_middle.abs();
                 (min_dist * min_dist + dist_edge * dist_edge).sqrt()
             } else {
@@ -110,7 +140,7 @@ fn add_round_dash(ranges: &[DashRange], y_offset: u32, stretch: f32, n: i32, ima
 
 fn add_regular_dash(ranges: &mut Vec<DashRange>, y_offset: u32, image: &mut AlphaImage) {
     // Collapse any zero-length range
-    ranges.retain(|range| !range.is_zero_length);
+    ranges.retain(|range| !range.content.is_zero_length());
 
     if ranges.is_empty() {
         return;
@@ -121,7 +151,7 @@ fn add_regular_dash(ranges: &mut Vec<DashRange>, y_offset: u32, image: &mut Alph
         let mut curr = 0;
         let mut next = 1;
         while next != ranges.len() {
-            if ranges[next].is_dash == ranges[curr].is_dash {
+            if ranges[next].content.is_dash() == ranges[curr].content.is_dash() {
                 ranges[next].left = ranges[curr].left;
                 ranges.remove(curr);
             } else {
@@ -133,7 +163,7 @@ fn add_regular_dash(ranges: &mut Vec<DashRange>, y_offset: u32, image: &mut Alph
 
     let width = image.size.width;
     let last_index = ranges.len() - 1;
-    if ranges[0].is_dash == ranges[last_index].is_dash {
+    if ranges[0].content.is_dash() == ranges[last_index].content.is_dash() {
         // `last.left - image.size.width` (float - uint32_t: float)
         ranges[0].left = ranges[last_index].left - width as f32;
         ranges[last_index].right = ranges[0].right + width as f32;
@@ -154,7 +184,7 @@ fn add_regular_dash(ranges: &mut Vec<DashRange>, y_offset: u32, image: &mut Alph
         let dist_left = (x as f32 - range.left).abs();
         let dist_right = (x as f32 - range.right).abs();
         let min_dist = mln_math::fminf(dist_left, dist_right);
-        let signed_distance = if range.is_dash { min_dist } else { -min_dist };
+        let signed_distance = if range.content.is_dash() { min_dist } else { -min_dist };
 
         image.data[(index + x) as usize] = to_alpha(signed_distance + 128.0);
     }

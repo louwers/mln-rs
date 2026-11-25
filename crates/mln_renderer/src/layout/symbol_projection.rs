@@ -14,7 +14,7 @@ use mln_util::constants::ONE_EM;
 use crate::buckets::symbol_bucket::{
     PlacedSymbol, PlacedSymbolPools, SymbolBucket, SymbolDynamicLayoutVertex, SymbolSizeBinder, ZoomEvaluatedSize,
 };
-use crate::layout::symbol_instance::WritingModes;
+use crate::layout::symbol_instance::WritingMode;
 
 /// The directions on screen that a pitched, unrotated label's east and south
 /// axes take, as unit vectors, or zero where an axis is edge-on.
@@ -90,12 +90,11 @@ pub(crate) fn gl_coord_matrix(
 /// for.
 #[must_use]
 pub(crate) fn evaluate_size_for_feature(size: &ZoomEvaluatedSize, symbol: &PlacedSymbol) -> f32 {
-    if size.is_feature_constant {
-        size.size
-    } else if size.is_zoom_constant {
-        symbol.lower_size
-    } else {
-        symbol.lower_size + size.size_t * (symbol.upper_size - symbol.lower_size)
+    use crate::buckets::symbol_bucket::SizeConstancy;
+    match size.constancy {
+        SizeConstancy::Both => size.size,
+        SizeConstancy::Zoom => symbol.lower_size,
+        SizeConstancy::Neither => symbol.lower_size + size.size_t * (symbol.upper_size - symbol.lower_size),
     }
 }
 
@@ -257,7 +256,7 @@ pub(crate) struct LineLabel<'a> {
     glyph_offsets: &'a [f32],
     /// `text-offset` or `icon-offset`, in units of a `ONE_EM` font.
     line_offset: Vec2,
-    writing_modes: WritingModes,
+    writing_modes: WritingMode,
 }
 
 impl<'a> LineLabel<'a> {
@@ -488,7 +487,7 @@ impl LabelPlacer<'_, '_> {
     /// itself could show both or neither.
     fn check_upright(&self, first: Vec2, last: Vec2) -> Result<(), Unplaced> {
         let writing_modes = self.label.writing_modes;
-        if writing_modes == WritingModes::BOTH {
+        if writing_modes == WritingMode::BOTH {
             let aspect_ratio = self.label_plane.viewport.x / self.label_plane.viewport.y;
             let rise = (last.y - first.y).abs();
             let run = (last.x - first.x).abs() * aspect_ratio;
@@ -496,7 +495,7 @@ impl LabelPlacer<'_, '_> {
                 return Err(Unplaced::UseVertical);
             }
         }
-        let upside_down = if writing_modes == WritingModes::VERTICAL { first.y < last.y } else { first.x > last.x };
+        let upside_down = if writing_modes == WritingMode::VERTICAL { first.y < last.y } else { first.x > last.x };
         if upside_down { Err(Unplaced::NeedsFlipping) } else { Ok(()) }
     }
 }
@@ -572,7 +571,7 @@ pub(crate) fn reproject_line_labels(
     for symbol in symbols {
         let glyph_count = symbol.glyph_offsets.len();
         let vertical_shows = std::mem::take(&mut show_vertical);
-        if symbol.hidden || (symbol.writing_modes == WritingModes::VERTICAL && !vertical_shows) {
+        if symbol.hidden || (symbol.writing_modes == WritingMode::VERTICAL && !vertical_shows) {
             hide_glyphs(glyph_count, vertices);
             continue;
         }
@@ -627,7 +626,7 @@ mod tests {
 
     use super::{
         LabelPlaneProjector, LineLabel, LineLabelAlignment, LinePlacer, PlacedGlyph, PlacedSymbol, PlacedSymbolPools,
-        SymbolSizeBinder, TileDistance, Unplaced, WritingModes, reproject_line_labels,
+        SymbolSizeBinder, TileDistance, Unplaced, WritingMode, reproject_line_labels,
     };
     use crate::util::pool::PoolRange;
 
@@ -652,7 +651,7 @@ mod tests {
             tile_distances,
             glyph_offsets,
             line_offset: Vec2::ZERO,
-            writing_modes: WritingModes { horizontal: true, vertical: false },
+            writing_modes: WritingMode::Horizontal,
         }
     }
 
@@ -739,7 +738,7 @@ mod tests {
             lower_size: 24.0,
             upper_size: 24.0,
             line_offset: [0.0; 2],
-            writing_modes: WritingModes { horizontal: true, vertical: false },
+            writing_modes: WritingMode::Horizontal,
             line: PoolRange::extend(&mut pools.lines, line.iter().copied()),
             tile_distances: PoolRange::extend(&mut pools.tile_distances, vertices.iter().map(|v| v.distance(anchor))),
             glyph_offsets: PoolRange::extend(&mut pools.glyph_offsets, glyph_offsets.iter().copied()),

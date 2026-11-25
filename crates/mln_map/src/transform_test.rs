@@ -14,7 +14,7 @@ use std::time::Duration;
 use glam::{DMat4, DQuat, DVec3, DVec4, EulerRot, dvec3};
 use mln_map_types::{
     CameraDelta, CameraError, CameraMomentum, CameraUpdate, CameraUpdateMode, CameraVelocity, GesturePhase,
-    MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumGlide, MomentumSnap, TileProjector, TransitionOutcome,
+    MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumGlide, MomentumSnap, TileProjector, TransitionOutcome, AxonometricMode,
 };
 use mln_math::deg2rad;
 use mln_style::types::ProjectionType;
@@ -937,7 +937,7 @@ fn projection_mode() {
     transform.set_projection_mode(&ProjectionMode::default().with_axonometric(true).with_x_skew(1.0).with_y_skew(0.0));
     let options = transform.view().projection_mode();
 
-    assert!(options.axonometric.unwrap());
+    assert_eq!(options.axonometric.unwrap(), AxonometricMode::Enabled);
     assert_eq!(options.x_skew.unwrap(), 1.0);
     assert_eq!(options.y_skew.unwrap(), 0.0);
 }

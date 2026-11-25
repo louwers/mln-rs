@@ -14,7 +14,7 @@ use geojson::{GeoJson, Geometry};
 use mln_headless::HeadlessFrontend;
 use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions, MapProjection,
-    NorthOrientation, ProjectionMode, RenderFrameStatus, RenderMode, TileLodMode, TileSettings, Viewport, ViewportMode,
+    NorthOrientation, ProjectionMode, RenderFrameStatus, RenderMode, TileLodMode, TileSettings, Viewport, ViewportMode, AxonometricMode,
 };
 use mln_renderer::{OverscaledTileID, Registry, TileOperation, UpdateParameters, UpdateReader};
 use mln_storage::response::{Reason, ResourceError};
@@ -732,7 +732,7 @@ fn projection_mode() {
     test.map().set_projection_mode(&ProjectionMode::default().with_axonometric(true).with_x_skew(1.0).with_y_skew(0.0));
     let options = test.map().snapshot().view.projection_mode;
 
-    assert!(options.axonometric.unwrap());
+    assert_eq!(options.axonometric.unwrap(), AxonometricMode::Enabled);
     assert_eq!(options.x_skew.unwrap(), 1.0);
     assert_eq!(options.y_skew.unwrap(), 0.0);
 }

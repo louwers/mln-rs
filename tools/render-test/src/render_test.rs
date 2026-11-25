@@ -355,7 +355,14 @@ pub(crate) fn run_test(
         run_with_alternate_sources(runner, &mut metadata, &mut errored, &mut passed);
     }
 
-    finish_test(&mut metadata, ignore_reason.as_deref(), errored, passed);
+    let status = if passed {
+        TestStatus::Passed
+    } else if errored {
+        TestStatus::Errored
+    } else {
+        TestStatus::Failed
+    };
+    finish_test(&mut metadata, ignore_reason.as_deref(), status);
     Some(metadata)
 }
 
@@ -389,13 +396,23 @@ pub(crate) fn prepare_test(
     Some((metadata, ignore_reason))
 }
 
+/// How a test that ran ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TestStatus {
+    Passed,
+    /// It rendered, but not as expected.
+    Failed,
+    /// It couldn't render or measure.
+    Errored,
+}
+
 /// The end of the `runRenderTests` loop body: the status and color of a
 /// test that ran, and its printed result. The statistics and the return
 /// code follow from the status (`tally`).
-pub(crate) fn finish_test(metadata: &mut TestMetadata, ignore_reason: Option<&str>, errored: bool, passed: bool) {
+pub(crate) fn finish_test(metadata: &mut TestMetadata, ignore_reason: Option<&str>, status: TestStatus) {
     let id = metadata.id.clone();
     if let Some(ignore_reason) = ignore_reason {
-        if passed {
+        if status == TestStatus::Passed {
             metadata.status = "ignored passed".to_string();
             metadata.color = "#E8A408".to_string();
             // A stale ignore: say so, so a run's log names it.
@@ -407,12 +424,12 @@ pub(crate) fn finish_test(metadata: &mut TestMetadata, ignore_reason: Option<&st
             println!("{ANSI_COLOR_LIGHT_GRAY}* ignore {id} ({ignore_reason}){ANSI_COLOR_RESET}");
             log::info(Event::General, &format!("* ignore {id} ({ignore_reason})"));
         }
-    } else if passed {
+    } else if status == TestStatus::Passed {
         metadata.status = "passed".to_string();
         metadata.color = "green".to_string();
         println!("{ANSI_COLOR_GREEN}* passed {id}{ANSI_COLOR_RESET}");
         log::info(Event::General, &format!("* passed {id}"));
-    } else if errored {
+    } else if status == TestStatus::Errored {
         metadata.status = "errored".to_string();
         metadata.color = "red".to_string();
         println!("{ANSI_COLOR_RED}* errored {id}{ANSI_COLOR_RESET}");

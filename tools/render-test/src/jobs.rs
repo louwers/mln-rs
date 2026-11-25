@@ -37,7 +37,7 @@ use crate::file_source::ProxyFileSource;
 use crate::log::{self, Event};
 use crate::manifest_parser::{Manifest, ManifestParser};
 use crate::metadata::{TestMetadata, TestPaths};
-use crate::render_test::{Arguments, create_runner, finish_test, prepare_test, run_test};
+use crate::render_test::{Arguments, TestStatus, create_runner, finish_test, prepare_test, run_test};
 use crate::runner::ImplFactory;
 
 /// The hidden option that makes `render-test` a worker:
@@ -107,7 +107,7 @@ pub(crate) fn run_jobs(
         if let Some((mut metadata, ignore_reason)) = prepare_test(test_path, ignores, root_length) {
             metadata.error_message = error;
             metadata.render_errored += 1;
-            finish_test(&mut metadata, ignore_reason.as_deref(), true, false);
+            finish_test(&mut metadata, ignore_reason.as_deref(), TestStatus::Errored);
             metadatas.push(metadata);
         }
     }

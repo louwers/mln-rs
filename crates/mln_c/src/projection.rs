@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use ::mln_map::MapProjection;
-use mln_map_types::{Camera, ConstrainMode, LogicalExtent, MapView, ProjectionMode, Viewport, ViewportMode};
+use mln_map_types::{Camera, ConstrainMode, LogicalExtent, MapView, ProjectionMode, Viewport, ViewportMode, AxonometricMode};
 use mln_style::types::{ProjectionDefinition, ProjectionType};
 use mln_util::geo::{NorthOrientation, WrapMode};
 use mln_util::projection::{ProjectedMeters, Projection};
@@ -85,7 +85,7 @@ fn map_view(view: &mln_map_view) -> Result<MapView, Error> {
             scale_factor: view.extent.scale_factor,
         },
         projection_mode: ProjectionMode {
-            axonometric: Some(view.projection_mode.axonometric),
+            axonometric: Some(AxonometricMode::from(view.projection_mode.axonometric)),
             x_skew: Some(view.projection_mode.x_skew),
             y_skew: Some(view.projection_mode.y_skew),
         },
@@ -142,7 +142,7 @@ pub(crate) fn from_map_view(view: &MapView) -> mln_map_view {
             scale_factor: view.extent.scale_factor,
         },
         projection_mode: mln_projection_mode {
-            axonometric: mode.axonometric.unwrap_or_default(),
+            axonometric: mode.axonometric.unwrap_or_default().as_bool(),
             x_skew: mode.x_skew.unwrap_or_default(),
             y_skew: mode.y_skew.unwrap_or_default(),
         },

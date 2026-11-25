@@ -52,7 +52,7 @@ use crate::layout::merge_lines::merge_lines;
 use crate::layout::symbol_feature::SymbolFeature;
 use crate::layout::symbol_instance::{
     IconPart, Justification, LaidOutSymbol, ShapedTextOrientations, SymbolInstance, SymbolInstancePools, SymbolQuadSet,
-    TextPart, TextRuns, WritingModes,
+    TextPart, TextRuns, WritingMode,
 };
 use crate::layout::tile_layout::Resolved;
 use crate::text::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature};
@@ -1113,7 +1113,7 @@ struct RunInfo {
     height_offset: f32,
     size: Range<f32>,
     offset: [f32; 2],
-    writing_modes: WritingModes,
+    writing_modes: WritingMode,
     angle: f32,
     line: PoolRange,
     tile_distances: PoolRange,
@@ -1132,7 +1132,7 @@ impl BucketWriter<'_> {
             size,
             offset,
             writing_modes,
-            angle: if allow_vertical_placement && writing_modes == WritingModes::VERTICAL {
+            angle: if allow_vertical_placement && writing_modes == WritingMode::VERTICAL {
                 std::f32::consts::FRAC_PI_2
             } else {
                 0.0
@@ -1151,8 +1151,8 @@ impl BucketWriter<'_> {
                 let info = run(size, icon_offset, writing_modes, line, PoolRange::default());
                 add_run(buffer, &info, run_quads, |_, _| {})
             };
-            icon.run = add(quads.icon.as_deref().unwrap_or_default(), WritingModes::NONE);
-            icon.vertical_run = quads.vertical_icon.as_deref().map(|run_quads| add(run_quads, WritingModes::VERTICAL));
+            icon.run = add(quads.icon.as_deref().unwrap_or_default(), WritingMode::NONE);
+            icon.vertical_run = quads.vertical_icon.as_deref().map(|run_quads| add(run_quads, WritingMode::VERTICAL));
             let length = buffer.attribute_data.len();
             for binders in self.paint_properties.values_mut() {
                 binders.icon_binders.populate_vertex_vectors(
@@ -1218,7 +1218,7 @@ impl BucketWriter<'_> {
                 }
             }
             if !quads.vertical.is_empty() {
-                text.runs.vertical = Some(add(&quads.vertical, WritingModes::VERTICAL));
+                text.runs.vertical = Some(add(&quads.vertical, WritingMode::VERTICAL));
             }
             let length = buffer.attribute_data.len();
             populate_section(section.unwrap_or(0), length);

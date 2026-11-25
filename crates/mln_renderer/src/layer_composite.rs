@@ -24,10 +24,7 @@ use mln_gfx::gpu::{
     VertexAttribute, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::layer_composite_ubo::{
-    LAYER_COMPOSITE_BLEND_COLOR, LAYER_COMPOSITE_BLEND_LUMINOSITY, LAYER_COMPOSITE_BLEND_MULTIPLY,
-    LAYER_COMPOSITE_BLEND_NONE, LAYER_COMPOSITE_BLEND_OVERLAY, LayerCompositeUBO,
-};
+use mln_gfx::shaders::layer_composite_ubo::{LayerCompositeBlendMode, LayerCompositeUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::programs;
 use mln_gfx::shaders::shader_defines::{
@@ -97,19 +94,19 @@ impl Composite {
 
     /// The blend the shader computes: none for the blends a blend function
     /// expresses.
-    fn shader_blend(self) -> i32 {
+    fn shader_blend(self) -> LayerCompositeBlendMode {
         match self.blend {
-            LayerBlendType::Normal | LayerBlendType::Screen | LayerBlendType::PlusLighter => LAYER_COMPOSITE_BLEND_NONE,
-            LayerBlendType::Multiply => LAYER_COMPOSITE_BLEND_MULTIPLY,
-            LayerBlendType::Overlay => LAYER_COMPOSITE_BLEND_OVERLAY,
-            LayerBlendType::Color => LAYER_COMPOSITE_BLEND_COLOR,
-            LayerBlendType::Luminosity => LAYER_COMPOSITE_BLEND_LUMINOSITY,
+            LayerBlendType::Normal | LayerBlendType::Screen | LayerBlendType::PlusLighter => LayerCompositeBlendMode::None,
+            LayerBlendType::Multiply => LayerCompositeBlendMode::Multiply,
+            LayerBlendType::Overlay => LayerCompositeBlendMode::Overlay,
+            LayerBlendType::Color => LayerCompositeBlendMode::Color,
+            LayerBlendType::Luminosity => LayerCompositeBlendMode::Luminosity,
         }
     }
 
     /// Whether the shader blends with the backdrop, a copy of the frame.
     fn reads_backdrop(self) -> bool {
-        self.shader_blend() != LAYER_COMPOSITE_BLEND_NONE
+        self.shader_blend() != LayerCompositeBlendMode::None
     }
 
     /// The blend function that composites the shader's color: on premultiplied
@@ -247,7 +244,7 @@ impl LayerComposite {
         for (slot, composite) in self.groups.iter().map(|&(_, composite)| composite).chain([copy]).enumerate() {
             let ubo = LayerCompositeUBO {
                 opacity: composite.opacity,
-                blend: composite.shader_blend(),
+                blend: composite.shader_blend() as i32,
                 ..LayerCompositeUBO::default()
             };
             self.bytes[slot * stride..][..size].copy_from_slice(bytemuck::bytes_of(&ubo));

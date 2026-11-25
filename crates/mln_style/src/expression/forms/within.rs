@@ -26,6 +26,13 @@ const DEFAULT_WITHIN_BBOX: WithinBBox = [i64::MAX, i64::MAX, i64::MIN, i64::MIN]
 
 type TilePolygon = Vec<Vec<Point<i64>>>;
 
+/// Whether a point on a polygon's boundary is within it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum BoundaryMode {
+    Inside,
+    Outside,
+}
+
 fn update_bbox(bbox: &mut WithinBBox, p: &Point<i64>) {
     bbox[0] = bbox[0].min(p.x);
     bbox[1] = bbox[1].min(p.y);
@@ -114,13 +121,13 @@ fn line_intersect_polygon(p1: &Point<i64>, p2: &Point<i64>, polygon: &TilePolygo
 }
 
 /// Ray casting algorithm for detecting if point is in polygon.
-fn point_within_polygon(point: &Point<i64>, polygon: &TilePolygon, true_on_boundary: bool) -> bool {
+fn point_within_polygon(point: &Point<i64>, polygon: &TilePolygon, boundary_mode: BoundaryMode) -> bool {
     let mut within = false;
     for ring in polygon {
         // loop through every edge of the ring
         for edge in ring.windows(2) {
             if point_on_boundary(point, &edge[0], &edge[1]) {
-                return true_on_boundary;
+                return boundary_mode == BoundaryMode::Inside;
             }
             if ray_intersect(point, &edge[0], &edge[1]) {
                 within = !within;
@@ -130,13 +137,13 @@ fn point_within_polygon(point: &Point<i64>, polygon: &TilePolygon, true_on_bound
     within
 }
 
-fn point_within_polygons(point: &Point<i64>, polygons: &[TilePolygon], true_on_boundary: bool) -> bool {
-    polygons.iter().any(|polygon| point_within_polygon(point, polygon, true_on_boundary))
+fn point_within_polygons(point: &Point<i64>, polygons: &[TilePolygon], boundary_mode: BoundaryMode) -> bool {
+    polygons.iter().any(|polygon| point_within_polygon(point, polygon, boundary_mode))
 }
 
 fn line_string_within_polygon(line: &[Point<i64>], polygon: &TilePolygon) -> bool {
     // First, check if geometry points of line segments are all inside polygon
-    if !line.iter().all(|point| point_within_polygon(point, polygon, false)) {
+    if !line.iter().all(|point| point_within_polygon(point, polygon, BoundaryMode::Outside)) {
         return false;
     }
 
@@ -296,7 +303,7 @@ fn feature_within_polygons(
                 return false;
             }
 
-            points.iter().all(|p| point_within_polygons(p, &polygons, false))
+            points.iter().all(|p| point_within_polygons(p, &polygons, BoundaryMode::Outside))
         }
         FeatureType::LineString => {
             let mut line_bbox = DEFAULT_WITHIN_BBOX;

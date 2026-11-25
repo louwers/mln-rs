@@ -357,17 +357,28 @@ struct RenderedFrame {
     slot: Option<(usize, Option<Published>)>,
 }
 
+/// How a frame that was drawn for a still image ended.
+#[derive(Clone, Copy, Debug)]
+enum FrameOutcome {
+    /// The frame went through its handoff.
+    Handed,
+    /// The frame was drawn for a host's demand.
+    ForDemand,
+    /// A surface dropped the frame.
+    Dropped,
+}
+
 /// Takes the still image off the reports in `events` of a frame that ends
 /// none: one drawn for a host's demand, or one that a surface `dropped`,
 /// which has no picture to complete it with. A dropped frame that failed
 /// keeps it, so that its error fails the still image it was drawn for.
-fn disown_still(events: &mut [RendererEvent], for_demand: bool, dropped: bool) {
-    if !for_demand && !dropped {
+fn disown_still(events: &mut [RendererEvent], outcome: FrameOutcome) {
+    if matches!(outcome, FrameOutcome::Handed) {
         return;
     }
     for event in events {
         if let RendererEvent::RenderFrameFinished { still_image_request_id, error, .. } = event
-            && (for_demand || (dropped && error.is_none()))
+            && (matches!(outcome, FrameOutcome::ForDemand) || error.is_none())
         {
             *still_image_request_id = 0;
         }
@@ -1050,7 +1061,14 @@ impl Worker {
         }
         let mut events = self.renderer_events.take();
         let dropped = gfx.target.is_presenting() && matches!(handoff, Some(Handoff::Dropped));
-        disown_still(&mut events, token.is_some(), dropped);
+        let outcome = if token.is_some() {
+            FrameOutcome::ForDemand
+        } else if dropped {
+            FrameOutcome::Dropped
+        } else {
+            FrameOutcome::Handed
+        };
+        disown_still(&mut events, outcome);
         if dropped {
             let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
             return RenderedFrame { result, events, slot: None };
@@ -1731,11 +1749,11 @@ mod tests {
     use mln_renderer::RendererEvent;
     use mln_util::error::Error;
 
-    use super::disown_still;
+    use super::{FrameOutcome, disown_still};
 
     /// The still image that a frame of the image's update, failed or not,
     /// ends once its report reaches the map.
-    fn still_ended(failed: bool, for_demand: bool, dropped: bool) -> u64 {
+    fn still_ended(failed: bool, outcome: FrameOutcome) -> u64 {
         let mut events = [RendererEvent::RenderFrameFinished {
             mode: RenderMode::Full,
             needs_repaint: false,
@@ -1746,7 +1764,7 @@ mod tests {
             stats: Arc::default(),
             error: failed.then(|| Box::new(Error::native("the device was reset"))),
         }];
-        disown_still(&mut events, for_demand, dropped);
+        disown_still(&mut events, outcome);
         let [RendererEvent::RenderFrameFinished { still_image_request_id, .. }] = events else { unreachable!() };
         still_image_request_id
     }
@@ -1755,18 +1773,18 @@ mod tests {
     /// a surface dropped it, so that the still fails rather than waits.
     #[test]
     fn a_failed_frame_of_the_still_ends_it_whatever_its_handoff() {
-        assert_eq!(7, still_ended(true, false, false));
-        assert_eq!(7, still_ended(true, false, true));
+        assert_eq!(7, still_ended(true, FrameOutcome::Handed));
+        assert_eq!(7, still_ended(true, FrameOutcome::Dropped));
     }
 
     /// A dropped frame that drew ends no still, which is drawn again, and a
     /// frame for a host's demand ends none, failed or not.
     #[test]
     fn a_dropped_frame_that_drew_or_a_frame_for_a_demand_ends_no_still() {
-        assert_eq!(7, still_ended(false, false, false));
-        assert_eq!(0, still_ended(false, false, true));
-        for (failed, dropped) in [(false, false), (true, false), (false, true), (true, true)] {
-            assert_eq!(0, still_ended(failed, true, dropped), "failed {failed}, dropped {dropped}");
+        assert_eq!(7, still_ended(false, FrameOutcome::Handed));
+        assert_eq!(0, still_ended(false, FrameOutcome::Dropped));
+        for failed in [false, true] {
+            assert_eq!(0, still_ended(failed, FrameOutcome::ForDemand), "failed {failed}");
         }
     }
 }

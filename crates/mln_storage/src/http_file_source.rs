@@ -29,6 +29,7 @@
 // ureq sends `Accept-Encoding: gzip` and decodes gzip. Dates are read in the
 // three formats of RFC 9110 only.
 
+use std::str::FromStr;
 use std::sync::Arc;
 
 use mln_util::chrono::{now, parse_http_date};
@@ -346,6 +347,37 @@ fn warn_of_other_vector_format(resource: &Resource, content_type: &str) {
     }
 }
 
+/// URL scheme for HTTP(S) requests.
+#[cfg(not(target_family = "wasm"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UrlScheme {
+    Http,
+    Https,
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl FromStr for UrlScheme {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "http" => Ok(Self::Http),
+            "https" => Ok(Self::Https),
+            _ => Err(()),
+        }
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl UrlScheme {
+    fn default_port(self) -> u16 {
+        match self {
+            Self::Http => 80,
+            Self::Https => 443,
+        }
+    }
+}
+
 /// Whether two absolute `http` or `https` URLs have the same origin: scheme,
 /// host and port, the scheme's default port when there's none, ignoring
 /// letter case. False when either isn't such a URL.
@@ -358,12 +390,9 @@ pub(crate) fn same_origin(left: &str, right: &str) -> bool {
 #[cfg(not(target_family = "wasm"))]
 fn origin(url: &str) -> Option<(String, String, u16)> {
     let (scheme, rest) = url.split_once("://")?;
-    let scheme = scheme.to_ascii_lowercase();
-    let default_port = match scheme.as_str() {
-        "http" => 80,
-        "https" => 443,
-        _ => return None,
-    };
+    let scheme_lower = scheme.to_ascii_lowercase();
+    let url_scheme = scheme_lower.parse::<UrlScheme>().ok()?;
+    let default_port = url_scheme.default_port();
     let authority = &rest[..rest.find(['/', '?', '#']).unwrap_or(rest.len())];
     let host_and_port = authority.rsplit_once('@').map_or(authority, |(_, host_and_port)| host_and_port);
     let (host, port) = match host_and_port.strip_prefix('[') {
@@ -381,7 +410,7 @@ fn origin(url: &str) -> Option<(String, String, u16)> {
         None | Some("") => default_port,
         Some(port) => port.parse().ok()?,
     };
-    (!host.is_empty()).then(|| (scheme, host.to_ascii_lowercase(), port))
+    (!host.is_empty()).then(|| (scheme_lower, host.to_ascii_lowercase(), port))
 }
 
 /// Plain HTTP(S) requests, used by the `OnlineFileSource`.

@@ -20,7 +20,7 @@ pub use map_options::MapOptions;
 pub use map_projection::MapProjection;
 pub use map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
 pub use mln_map_types::{
-    AnchoredMomentum, AnimationOptions, BoundOptions, Camera, CameraDelta, CameraError, CameraLimits, CameraMomentum,
+    AnchoredMomentum, AnimationOptions, AxonometricMode, BoundOptions, Camera, CameraDelta, CameraError, CameraLimits, CameraMomentum,
     CameraOptions, CameraUpdate, CameraUpdateMode, CameraVelocity, ConstrainMode, Elevation, FreeCameraOptions,
     GesturePhase, InvalidMomentum, LogicalExtent, MapDebugOptions, MapMode, MapView, MomentumDecay, MomentumDecayModel,
     MomentumEasing, MomentumGlide, MomentumSnap, NorthOrientation, ProjectionMode, TerrainOptions, TerrainSkirtLength,

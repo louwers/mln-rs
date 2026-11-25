@@ -25,9 +25,24 @@ use crate::geometry_tile_data::fixup_polygons;
 use crate::tile_data::FeatureGroups;
 
 /// The MVT geometry types, as fast-mvt reads a feature's type.
-const POINT: i32 = 1;
-const LINESTRING: i32 = 2;
-const POLYGON: i32 = 3;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(i32)]
+enum MvtGeometryType {
+    Point = 1,
+    LineString = 2,
+    Polygon = 3,
+}
+
+impl MvtGeometryType {
+    fn from_i32(value: i32) -> Option<Self> {
+        match value {
+            1 => Some(MvtGeometryType::Point),
+            2 => Some(MvtGeometryType::LineString),
+            3 => Some(MvtGeometryType::Polygon),
+            _ => None,
+        }
+    }
+}
 
 /// A layer of the tile: its name and its message, as ranges of the tile's
 /// bytes.
@@ -199,11 +214,11 @@ impl MvtFeature<'_> {
     }
 
     pub(crate) fn get_type(&self) -> FeatureType {
-        match self.feature.geom_type_value() {
-            Some(POINT) => FeatureType::Point,
-            Some(LINESTRING) => FeatureType::LineString,
-            Some(POLYGON) => FeatureType::Polygon,
-            _ => FeatureType::Unknown,
+        match self.feature.geom_type_value().and_then(MvtGeometryType::from_i32) {
+            Some(MvtGeometryType::Point) => FeatureType::Point,
+            Some(MvtGeometryType::LineString) => FeatureType::LineString,
+            Some(MvtGeometryType::Polygon) => FeatureType::Polygon,
+            None => FeatureType::Unknown,
         }
     }
 
@@ -241,7 +256,7 @@ impl MvtFeature<'_> {
         let lines = GeometryCollection::from(
             decode_geometry(self.feature.geometry_commands(), scale).map_err(TileError::Geometry)?,
         );
-        Ok(if self.layer.version() < 2 && self.feature.geom_type_value() == Some(POLYGON) {
+        Ok(if self.layer.version() < 2 && self.feature.geom_type_value().and_then(MvtGeometryType::from_i32) == Some(MvtGeometryType::Polygon) {
             fixup_polygons(&lines)
         } else {
             lines
@@ -271,9 +286,25 @@ fn decode_geometry(
     mut commands: impl Iterator<Item = MvtResult<u32>>,
     scale: f32,
 ) -> Result<Vec<Vec<Point<i16>>>, String> {
-    const MOVE_TO: u32 = 1;
-    const LINE_TO: u32 = 2;
-    const CLOSE_PATH: u32 = 7;
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    #[repr(u32)]
+    enum MvtCommand {
+        MoveTo = 1,
+        LineTo = 2,
+        ClosePath = 7,
+    }
+
+    impl MvtCommand {
+        fn from_u32(value: u32) -> Option<Self> {
+            match value {
+                1 => Some(MvtCommand::MoveTo),
+                2 => Some(MvtCommand::LineTo),
+                7 => Some(MvtCommand::ClosePath),
+                _ => None,
+            }
+        }
+    }
+
     /// The most points a command reserves room for: its count comes from
     /// the tile, unchecked (C++ caps it the same way).
     const MAX_RESERVE: usize = 1024 * 1024 / 16;
@@ -285,9 +316,9 @@ fn decode_geometry(
     let (mut x, mut y) = (0i64, 0i64);
     while let Some(command) = next()? {
         let count = (command >> 3) as usize;
-        match command & 0x7 {
-            id @ (MOVE_TO | LINE_TO) => {
-                if id == LINE_TO {
+        match MvtCommand::from_u32(command & 0x7) {
+            Some(id @ (MvtCommand::MoveTo | MvtCommand::LineTo)) => {
+                if id == MvtCommand::LineTo {
                     // Room for the ClosePath of a polygon ring.
                     ring.reserve(count.min(MAX_RESERVE) + 1);
                 }
@@ -295,7 +326,7 @@ fn decode_geometry(
                     let (Some(dx), Some(dy)) = (next()?, next()?) else {
                         return Err("geometry command parameters past the end".to_owned());
                     };
-                    if id == MOVE_TO && !ring.is_empty() {
+                    if id == MvtCommand::MoveTo && !ring.is_empty() {
                         rings.push(std::mem::take(&mut ring));
                     }
                     x = x.wrapping_add(i64::from(zigzag(dx)));
@@ -309,12 +340,12 @@ fn decode_geometry(
                     ring.push(Point::new(px as i16, py as i16));
                 }
             }
-            CLOSE_PATH => {
+            Some(MvtCommand::ClosePath) => {
                 if let Some(&first) = ring.first() {
                     ring.push(first);
                 }
             }
-            _ => return Err("unknown command".to_owned()),
+            None => return Err("unknown command".to_owned()),
         }
     }
     rings.push(ring);

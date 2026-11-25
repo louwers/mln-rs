@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
@@ -10,6 +11,37 @@ use mln_util::tileset::Scheme;
 use mln_util::token::replace_tokens;
 
 use crate::response::{Caching, Data, Response};
+
+/// Token that may appear in a tile URL template.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TileTemplateToken {
+    Z,
+    X,
+    Y,
+    Quadkey,
+    Bbox,
+    BboxEpsg3857,
+    Prefix,
+    Ratio,
+}
+
+impl FromStr for TileTemplateToken {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "z" => Ok(Self::Z),
+            "x" => Ok(Self::X),
+            "y" => Ok(Self::Y),
+            "quadkey" => Ok(Self::Quadkey),
+            "bbox" => Ok(Self::Bbox),
+            "bbox-epsg-3857" => Ok(Self::BboxEpsg3857),
+            "prefix" => Ok(Self::Prefix),
+            "ratio" => Ok(Self::Ratio),
+            _ => Err(()),
+        }
+    }
+}
 
 /// The kind of a resource. The values are stored in the offline database.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -327,20 +359,19 @@ impl Resource {
         }
         let hex = b"0123456789abcdef";
         let url = replace_tokens(url_template, |token: &str| -> Option<String> {
-            match token {
-                "z" => Some(z.to_string()),
-                "x" => Some(x.to_string()),
-                "y" => Some(y.to_string()),
-                "quadkey" => Some(get_quad_key(x, y, z)),
-                // The spec defines `{bbox}` as `{bbox-epsg-3857}` under every
-                // projection mln-rs has: mercator, globe and vertical-perspective.
-                "bbox" | "bbox-epsg-3857" => Some(get_tile_bbox(x, y, z)),
-                "prefix" => Some(
-                    [hex[x.rem_euclid(16) as usize] as char, hex[y.rem_euclid(16) as usize] as char].iter().collect(),
-                ),
-                "ratio" => Some(if pixel_ratio > 1.0 { "@2x".to_owned() } else { String::new() }),
-                _ => None,
-            }
+            token.parse::<TileTemplateToken>().ok().map(|token| {
+                match token {
+                    TileTemplateToken::Z => z.to_string(),
+                    TileTemplateToken::X => x.to_string(),
+                    TileTemplateToken::Y => y.to_string(),
+                    TileTemplateToken::Quadkey => get_quad_key(x, y, z),
+                    // The spec defines `{bbox}` as `{bbox-epsg-3857}` under every
+                    // projection mln-rs has: mercator, globe and vertical-perspective.
+                    TileTemplateToken::Bbox | TileTemplateToken::BboxEpsg3857 => get_tile_bbox(x, y, z),
+                    TileTemplateToken::Prefix => [hex[x.rem_euclid(16) as usize] as char, hex[y.rem_euclid(16) as usize] as char].iter().collect(),
+                    TileTemplateToken::Ratio => if pixel_ratio > 1.0 { "@2x".to_owned() } else { String::new() },
+                }
+            })
         });
         Resource::with_tile_data(
             Kind::Tile,

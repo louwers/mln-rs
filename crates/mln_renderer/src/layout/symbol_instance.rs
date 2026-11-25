@@ -17,15 +17,18 @@ use crate::util::pool::PoolRange;
 
 /// The writing modes that a symbol's text, or a run of its quads, shows in.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, mln_wire::Wire)]
-pub(crate) struct WritingModes {
-    pub(crate) horizontal: bool,
-    pub(crate) vertical: bool,
+pub(crate) enum WritingMode {
+    #[default]
+    None,
+    Horizontal,
+    Vertical,
+    Both,
 }
 
-impl WritingModes {
-    pub(crate) const NONE: WritingModes = WritingModes { horizontal: false, vertical: false };
-    pub(crate) const VERTICAL: WritingModes = WritingModes { horizontal: false, vertical: true };
-    pub(crate) const BOTH: WritingModes = WritingModes { horizontal: true, vertical: true };
+impl WritingMode {
+    pub(crate) const NONE: WritingMode = WritingMode::None;
+    pub(crate) const VERTICAL: WritingMode = WritingMode::Vertical;
+    pub(crate) const BOTH: WritingMode = WritingMode::Both;
 }
 
 /// The collision boxes and keys of a bucket's symbol instances, which they
@@ -134,14 +137,18 @@ pub(crate) struct SymbolQuadSet {
 
 impl SymbolQuadSet {
     pub(crate) fn has_text(&self) -> bool {
-        self.text_writing_modes() != WritingModes::NONE
+        self.text_writing_modes() != WritingMode::NONE
     }
 
     /// The writing modes the text has quads in.
-    pub(crate) fn text_writing_modes(&self) -> WritingModes {
-        WritingModes {
-            horizontal: self.horizontal.iter().any(|quads| !quads.is_empty()),
-            vertical: !self.vertical.is_empty(),
+    pub(crate) fn text_writing_modes(&self) -> WritingMode {
+        let horizontal = self.horizontal.iter().any(|quads| !quads.is_empty());
+        let vertical = !self.vertical.is_empty();
+        match (horizontal, vertical) {
+            (false, false) => WritingMode::None,
+            (true, false) => WritingMode::Horizontal,
+            (false, true) => WritingMode::Vertical,
+            (true, true) => WritingMode::Both,
         }
     }
 }
@@ -192,8 +199,15 @@ impl TextRuns {
         self.horizontal().map(|run| (run, false)).chain(self.vertical.map(|run| (run as usize, true)))
     }
 
-    pub(crate) fn writing_modes(&self) -> WritingModes {
-        WritingModes { horizontal: self.horizontal.iter().any(Option::is_some), vertical: self.vertical.is_some() }
+    pub(crate) fn writing_modes(&self) -> WritingMode {
+        let horizontal = self.horizontal.iter().any(Option::is_some);
+        let vertical = self.vertical.is_some();
+        match (horizontal, vertical) {
+            (false, false) => WritingMode::None,
+            (true, false) => WritingMode::Horizontal,
+            (false, true) => WritingMode::Vertical,
+            (true, true) => WritingMode::Both,
+        }
     }
 }
 

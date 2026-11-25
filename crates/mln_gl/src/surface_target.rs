@@ -198,6 +198,27 @@ impl Drop for DisplayUse {
     }
 }
 
+/// The EGL context state during a render cycle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ContextState {
+    /// Not presenting: context is current without a surface (if supported) or not at all.
+    Idle,
+    /// Presenting to a surface: context is current on the window surface.
+    PresentingOnSurface,
+    /// Presenting without a surface: context is current without one (EGL_KHR_surfaceless_context).
+    PresentingSurfaceless,
+}
+
+impl ContextState {
+    fn is_presenting(self) -> bool {
+        matches!(self, ContextState::PresentingOnSurface | ContextState::PresentingSurfaceless)
+    }
+
+    fn is_on_surface(self) -> bool {
+        matches!(self, ContextState::PresentingOnSurface)
+    }
+}
+
 /// The context, and the window surface it is current on, which the
 /// backend's platform context owns.
 pub(crate) struct EglWindow {
@@ -212,22 +233,13 @@ pub(crate) struct EglWindow {
     /// The size of the window's surface.
     size: Size,
     swap_interval: egl::Int,
-    /// Whether the context is current on the window's surface: from a
-    /// frame's beginning until it is presented, or always where EGL makes
-    /// no context current without a surface. Between frames it is current
-    /// without one, because EGL may pick the surface's next buffer, at the
-    /// window's size then, as soon as the context is made current on it: a
-    /// resize has to reach the window before that.
-    presenting: bool,
     /// Whether EGL makes the context current without a surface
     /// (`EGL_KHR_surfaceless_context`).
     surfaceless: bool,
     /// Made when the context is first made current to present.
     surface: Option<egl::Surface>,
-    /// Whether the context is current on `surface`. It isn't when EGL can
-    /// make no surface of the window, or when the window went away under
-    /// the surface, as an `OpenHarmony` window does with its consumer.
-    on_surface: bool,
+    /// The EGL context state: idle between frames, or presenting.
+    context_state: ContextState,
     wl_egl_window: *mut c_void,
     /// The display's use, given up after the context is gone.
     _display_use: DisplayUse,
@@ -325,10 +337,9 @@ impl EglWindow {
             // window. OpenHarmony's compositor queues them as Android's does,
             // and the host paces its frames to the display.
             swap_interval: egl::Int::from(cap_frame_rate && matches!(handle, WindowHandle::Xlib { .. })),
-            presenting: false,
             surfaceless: true,
             surface: None,
-            on_surface: false,
+            context_state: ContextState::Idle,
             wl_egl_window: std::ptr::null_mut(),
             _display_use: display_use,
             _window: window,
@@ -380,14 +391,17 @@ impl EglWindow {
     /// is the context's to present to, and without a surface while it isn't
     /// (which needs `EGL_KHR_surfaceless_context`).
     fn make_current(&mut self) -> Result<(), egl::Error> {
-        self.on_surface = false;
-        if !self.presenting {
+        if !self.context_state.is_presenting() {
+            self.context_state = ContextState::Idle;
             return self.egl.make_current(self.display, None, None, Some(self.context));
         }
         let first = self.surface.is_none();
         let surface = self.surface();
         self.egl.make_current(self.display, surface, surface, Some(self.context))?;
-        self.on_surface = surface.is_some();
+        self.context_state = match surface {
+            Some(_) => ContextState::PresentingOnSurface,
+            None => ContextState::PresentingSurfaceless,
+        };
         if first && surface.is_some() {
             let _ = self.egl.swap_interval(self.display, self.swap_interval);
         }
@@ -430,7 +444,7 @@ impl EglWindow {
 
     /// Makes no context current on this thread.
     fn clear_current(&mut self) -> Result<(), egl::Error> {
-        self.on_surface = false;
+        self.context_state = ContextState::Idle;
         self.egl.make_current(self.display, None, None, None)
     }
 
@@ -438,7 +452,7 @@ impl EglWindow {
     /// context leaves first, staying current without a surface where it is
     /// `current`.
     fn release_surface(&mut self, current: bool) {
-        self.presenting = false;
+        self.context_state = ContextState::Idle;
         let left = if current { self.make_current() } else { self.clear_current() };
         if let Err(e) = left {
             Log::error(Event::GraphicsBackend, format!("Leaving the window's surface failed: {e}"));
@@ -529,7 +543,7 @@ impl SurfaceTarget {
         // a surface where EGL can, which leaves the window alone.
         if window.make_current().is_err() {
             window.surfaceless = false;
-            window.presenting = true;
+            window.context_state = ContextState::PresentingSurfaceless;
             window.make_current().map_err(|e| Error::native(format!("Switching OpenGL context failed: {e}")))?;
         }
         // SAFETY: the context is current, and EGL gives the functions of its
@@ -596,15 +610,15 @@ impl FrameTarget for SurfaceTarget {
             if window.size != size {
                 window.resize(size);
             }
-            if !window.presenting {
+            if !window.context_state.is_presenting() {
                 // The context is current without a surface: make it current
                 // on the window's.
-                window.presenting = true;
+                window.context_state = ContextState::PresentingOnSurface;
                 if let Err(e) = window.make_current() {
                     Log::error(Event::GraphicsBackend, format!("Switching OpenGL context failed: {e}"));
                 }
             }
-            window.on_surface
+            window.context_state.is_on_surface()
         };
         if !self.in_frame && !on_surface {
             return None;
@@ -637,7 +651,11 @@ impl FrameTarget for SurfaceTarget {
             return Handoff::Dropped;
         };
         let swapped = window.swap();
-        window.presenting = !window.surfaceless;
+        window.context_state = if window.surfaceless {
+            ContextState::PresentingSurfaceless
+        } else {
+            ContextState::Idle
+        };
         if swapped { Handoff::Presented } else { Handoff::Dropped }
     }
 
