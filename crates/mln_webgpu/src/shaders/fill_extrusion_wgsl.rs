@@ -17,7 +17,7 @@
 //! that hold them for the roofs, bound as storage buffers.
 
 use super::shader_source::WgslShaderSource;
-use super::wgsl_sources;
+use super::wgsl_sources::{self, pattern_pos};
 
 /// The vertex output and the lighting of the plain shaders.
 macro_rules! plain_declarations {
@@ -402,6 +402,7 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 /// The fill extrusion pattern roofs.
 pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(concat!(
+        pattern_pos!(),
         r#"
 "#,
         pattern_declarations!(),
@@ -430,6 +431,7 @@ fn main(in: VertexInput) -> VertexOutput {
 /// The instanced fill extrusion pattern walls.
 pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(concat!(
+        pattern_pos!(),
         r#"
 "#,
         pattern_declarations!(),

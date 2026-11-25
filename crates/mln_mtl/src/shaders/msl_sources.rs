@@ -59,18 +59,9 @@ pub(crate) const HEADER: &str = r"
 using namespace metal;
 ";
 
-/// What every shader's source has after the structs of its blocks.
-pub(crate) const PRELUDE: &str = r#"
-
-// The maximum allowed miter limit is 2.0 at the moment. the extrude normal is stored
-// in a byte (-128..127). We scale regular normals up to length 63, but there are also
-// "special" normals that have a bigger length (of up to 126 in this case).
-#define LINE_NORMAL_SCALE (1.0 / (127 / 2))
-
-// The attribute conveying progress along a line is scaled to [0, 2^15).
-#define MAX_LINE_DISTANCE 32767.0
-
-#define SDF_PX 8.0
+/// What every shader's source has after the structs of its blocks: the
+/// engine's helpers, which any program can use.
+pub(crate) const PRELUDE: &str = r"
 
 // OpenGL `mod` is `x-y*floor(x/y)` where `floor` rounds down.
 // Metal `fmod` is `x-y*trunc(x/y)` where `trunc` rounds toward zero.
@@ -89,19 +80,6 @@ float2 unpack_float(const float packedValue) {
     const int packedIntValue = int(packedValue);
     const int v0 = packedIntValue / 256;
     return float2(v0, packedIntValue - v0 * 256);
-}
-// The normal at the end of a fill extrusion wall from its outline vertex's
-// packed decimals_ed.x: the one the walls there share, whose angle from -pi
-// its bits 2 to 15 hold where bit 1 is set, or else `own`, the wall's.
-float2 wall_normal(const uint bits, const float2 own) {
-    if ((bits & 2u) == 0u) {
-        return own;
-    }
-    const float angle = float(bits >> 2) * (2.0 * M_PI_F / 16384.0) - M_PI_F;
-    return float2(metal::cos(angle), metal::sin(angle));
-}
-float2 unpack_opacity(const float packedOpacity) {
-    return float2(float(int(packedOpacity) / 2) / 127.0, glMod(packedOpacity, 2.0));
 }
 // To minimize the number of attributes needed, we encode a 4-component
 // color into a pair of floats (i.e. a vec2) as follows:
@@ -124,13 +102,6 @@ float4 unpack_mix_color(device const float packedColors[4], const float t) {
 float4 unpack_mix_color(const float4 packedColors, const float t) {
     return mix(decode_color(float2(packedColors[0], packedColors[1])),
                decode_color(float2(packedColors[2], packedColors[3])), t);
-}
-
-// Unpack pattern position
-inline float2 get_pattern_pos(const float2 pixel_coord_upper, const float2 pixel_coord_lower,
-                     const float2 pattern_size, const float tile_units_to_pixels, const float2 pos) {
-    const float2 offset = glMod(glMod(glMod(pixel_coord_upper, pattern_size) * 256.0, pattern_size) * 256.0 + pixel_coord_lower, pattern_size);
-    return (tile_units_to_pixels * pos + offset) / pattern_size;
 }
 
 // The atlas texture coordinate of an image's origin plus an offset from it,
@@ -341,7 +312,7 @@ inline float projectLineThickness(float, device const ProjectionUBO&) {
 
 #endif
 
-"#;
+";
 
 pub(crate) const ATMOSPHERE_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
@@ -462,10 +433,27 @@ half4 fragment fragmentMain(AtmosphereFragmentStage in [[stage_in]] MLN_FRAGMENT
 ",
 };
 
+/// `get_pattern_pos`, the position in a pattern of a point in a tile, for
+/// the programs that draw a pattern.
+macro_rules! pattern_pos {
+    () => {
+        r"
+// Unpack pattern position
+inline float2 get_pattern_pos(const float2 pixel_coord_upper, const float2 pixel_coord_lower,
+                     const float2 pattern_size, const float tile_units_to_pixels, const float2 pos) {
+    const float2 offset = glMod(glMod(glMod(pixel_coord_upper, pattern_size) * 256.0, pattern_size) * 256.0 + pixel_coord_lower, pattern_size);
+    return (tile_units_to_pixels * pos + offset) / pattern_size;
+}
+"
+    };
+}
+
 pub(crate) const BACKGROUND_PATTERN_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    source: r"
+    source: concat!(
+        pattern_pos!(),
+        r"
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -518,6 +506,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS)
     return half4(mix(color1, color2, props.mix) * props.opacity);
 }
 ",
+    ),
 };
 
 pub(crate) const BACKGROUND_SHADER: MslShaderSource = MslShaderSource {
@@ -1054,6 +1043,26 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS)
 ",
 };
 
+/// `wall_normal`, the normal at a wall's end from its outline vertex's
+/// `decimals_ed.x`: the one the walls there share, or else `own`, the
+/// wall's own.
+macro_rules! wall_normal {
+    () => {
+        r"
+// The normal at the end of a fill extrusion wall from its outline vertex's
+// packed decimals_ed.x: the one the walls there share, whose angle from -pi
+// its bits 2 to 15 hold where bit 1 is set, or else `own`, the wall's.
+float2 wall_normal(const uint bits, const float2 own) {
+    if ((bits & 2u) == 0u) {
+        return own;
+    }
+    const float angle = float(bits >> 2) * (2.0 * M_PI_F / 16384.0) - M_PI_F;
+    return float2(metal::cos(angle), metal::sin(angle));
+}
+"
+    };
+}
+
 // The walls' fragment stage, and `wall`, the vertex of a wall, which reads
 // the instanced walls' attributes as the fields of `vertx`.
 macro_rules! extrusion_wall {
@@ -1178,6 +1187,7 @@ pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: MslShaderSource = MslShaderSou
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     source: concat!(
+        wall_normal!(),
         r"
 
 ",
@@ -1195,6 +1205,7 @@ pub(crate) const FILL_EXTRUSION_PULLED_SHADER: MslShaderSource = MslShaderSource
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     source: concat!(
+        wall_normal!(),
         r"
 
 // A vertex of the bucket, which the walls read by index.
@@ -1272,7 +1283,10 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]] MLN_VERTEX_BINDINGS
 pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    source: r"
+    source: concat!(
+        pattern_pos!(),
+        wall_normal!(),
+        r"
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -1460,12 +1474,15 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_
     return {half4(mix(color1, color2, props.fade) * in.lighting)/*, in.position.z*/};
 }
 ",
+    ),
 };
 
 pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    source: r"
+    source: concat!(
+        pattern_pos!(),
+        r"
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -1627,6 +1644,7 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_
     return {half4(mix(color1, color2, props.fade) * in.lighting)/*, in.position.z*/};
 }
 ",
+    ),
 };
 
 pub(crate) const FILL_EXTRUSION_SHADER: MslShaderSource = MslShaderSource {
@@ -1798,6 +1816,7 @@ pub(crate) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: MslShaderSource = MslSha
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     source: concat!(
+        pattern_pos!(),
         r"
 
 struct FragmentStage {
@@ -2083,7 +2102,9 @@ FragmentStage vertex vertexMain(uint vertex_id [[vertex_id]] MLN_VERTEX_BINDINGS
 pub(crate) const FILL_PATTERN_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    source: r"
+    source: concat!(
+        pattern_pos!(),
+        r"
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -2215,6 +2236,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS)
     return half4(mix(color1, color2, props.fade) * opacity);
 }
 ",
+    ),
 };
 
 pub(crate) const FILL_SHADER: MslShaderSource = MslShaderSource {
@@ -3049,10 +3071,27 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS)
     ),
 };
 
+/// The line programs' `LINE_NORMAL_SCALE` and `MAX_LINE_DISTANCE`.
+macro_rules! line_constants {
+    () => {
+        r#"
+// The maximum allowed miter limit is 2.0 at the moment. the extrude normal is stored
+// in a byte (-128..127). We scale regular normals up to length 63, but there are also
+// "special" normals that have a bigger length (of up to 126 in this case).
+#define LINE_NORMAL_SCALE (1.0 / (127 / 2))
+
+// The attribute conveying progress along a line is scaled to [0, 2^15).
+#define MAX_LINE_DISTANCE 32767.0
+"#
+    };
+}
+
 pub(crate) const LINE_GRADIENT_SDF_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    source: r"
+    source: concat!(
+        line_constants!(),
+        r"
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -3250,12 +3289,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS)
     return half4(color * (alpha * opacity));
 }
 ",
+    ),
 };
 
 pub(crate) const LINE_GRADIENT_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    source: r"
+    source: concat!(
+        line_constants!(),
+        r"
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -3403,12 +3445,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS)
     return half4(color * (alpha * opacity));
 }
 ",
+    ),
 };
 
 pub(crate) const LINE_PATTERN_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    source: r"
+    source: concat!(
+        line_constants!(),
+        r"
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -3633,12 +3678,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS)
     return half4(color * alpha * opacity);
 }
 ",
+    ),
 };
 
 pub(crate) const LINE_SDF_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    source: r"
+    source: concat!(
+        line_constants!(),
+        r"
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -3843,12 +3891,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS)
     return half4(color * (alpha * opacity));
 }
 ",
+    ),
 };
 
 pub(crate) const LINE_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
-    source: r"
+    source: concat!(
+        line_constants!(),
+        r"
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -3997,6 +4048,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS)
     return half4(color * (alpha * opacity));
 }
 ",
+    ),
 };
 
 pub(crate) const RASTER_SHADER: MslShaderSource = MslShaderSource {
@@ -4125,10 +4177,22 @@ half4 fragment fragmentMain(SkyFragmentStage in [[stage_in]] MLN_FRAGMENT_BINDIN
 ",
 };
 
+/// `unpack_opacity`, a symbol's fade opacity from its packed attribute.
+macro_rules! unpack_opacity {
+    () => {
+        r"
+float2 unpack_opacity(const float packedOpacity) {
+    return float2(float(int(packedOpacity) / 2) / 127.0, glMod(packedOpacity, 2.0));
+}
+"
+    };
+}
+
 pub(crate) const SYMBOL_ICON_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     source: concat!(
+        unpack_opacity!(),
         ground_visibility!(),
         r"
 
@@ -4309,10 +4373,13 @@ pub(crate) const SYMBOL_SDF_SHADER: MslShaderSource = MslShaderSource {
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     source: concat!(
+        unpack_opacity!(),
         ground_visibility!(),
         r"
 
 #define c_offscreen_degenerate_triangle_location -2.0
+
+#define SDF_PX 8.0
 
 struct FragmentStage {
     float4 position [[position, invariant]];
@@ -4554,10 +4621,13 @@ pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: MslShaderSource = MslShaderSource 
     vertex_main_function: r"vertexMain",
     fragment_main_function: r"fragmentMain",
     source: concat!(
+        unpack_opacity!(),
         ground_visibility!(),
         r"
 
 #define c_offscreen_degenerate_triangle_location -2.0
+
+#define SDF_PX 8.0
 
 #define SDF 1.0
 #define ICON 0.0

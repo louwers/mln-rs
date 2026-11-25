@@ -14,7 +14,7 @@
 //! hold them for the fill, bound as storage buffers.
 
 use super::shader_source::WgslShaderSource;
-use super::wgsl_sources;
+use super::wgsl_sources::{self, pattern_pos};
 
 /// `outline_corner`, the quad's corner of the attributes' segment.
 macro_rules! outline_corner {
@@ -189,6 +189,7 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 /// The instanced fill outlines of a pattern.
 pub(crate) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(concat!(
+        pattern_pos!(),
         r#"
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,

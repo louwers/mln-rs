@@ -96,18 +96,11 @@ float ground_visibility(const vec4 clip, const float view_height) {
     };
 }
 
-/// The start of every vertex stage.
-pub(crate) const PRELUDE_VERTEX: &str = r#"
+/// The start of every vertex stage: the engine's helpers, which any program
+/// can use.
+pub(crate) const PRELUDE_VERTEX: &str = r"
 
 #define M_PI 3.1415926535897932384626433832795
-
-// The maximum allowed miter limit is 2.0 at the moment. the extrude normal is stored
-// in a byte (-128..127). We scale regular normals up to length 63, but there are also
-// "special" normals that have a bigger length (of up to 126 in this case).
-#define LINE_NORMAL_SCALE (1.0 / (127 / 2))
-
-// The attribute conveying progress along a line is scaled to [0, 2^15).
-#define MAX_LINE_DISTANCE 32767.0
 
 // Unpack a pair of values that have been packed into a single float.
 // The packed values are assumed to be 8-bit unsigned integers, and are
@@ -117,22 +110,6 @@ vec2 unpack_float(const float packedValue) {
     int packedIntValue = int(packedValue);
     int v0 = packedIntValue / 256;
     return vec2(v0, packedIntValue - v0 * 256);
-}
-
-// The normal at the end of a fill extrusion wall from its outline vertex's
-// packed decimals_ed.x: the one the walls there share, whose angle from -pi
-// its bits 2 to 15 hold where bit 1 is set, or else `own`, the wall's.
-vec2 wall_normal(const uint bits, const vec2 own) {
-    if ((bits & 2u) == 0u) {
-        return own;
-    }
-    const float angle = float(bits >> 2u) * (6.283185307179586 / 16384.0) - 3.141592653589793;
-    return vec2(cos(angle), sin(angle));
-}
-
-vec2 unpack_opacity(const float packedOpacity) {
-    int intOpacity = int(packedOpacity) / 2;
-    return vec2(float(intOpacity) / 127.0, mod(packedOpacity, 2.0));
 }
 
 // To minimize the number of attributes needed, we encode a 4-component
@@ -164,13 +141,6 @@ vec4 unpack_mix_color(const vec4 packedColors, const float t) {
     vec4 minColor = decode_color(vec2(packedColors[0], packedColors[1]));
     vec4 maxColor = decode_color(vec2(packedColors[2], packedColors[3]));
     return mix(minColor, maxColor, t);
-}
-
-// unpack pattern position
-vec2 get_pattern_pos(const vec2 pixel_coord_upper, const vec2 pixel_coord_lower,
-                        const vec2 pattern_size, const float tile_units_to_pixels, const vec2 pos) {
-    const vec2 offset = mod(mod(mod(pixel_coord_upper, pattern_size) * 256.0, pattern_size) * 256.0 + pixel_coord_lower, pattern_size);
-    return (tile_units_to_pixels * pos + offset) / pattern_size;
 }
 
 vec2 unpack_int(int value) {
@@ -377,9 +347,10 @@ float projectLineThickness(float tileY, ProjectionUBO projection) {
 
 #endif
 
-"#;
+";
 
-/// The start of every fragment stage.
+/// The start of every fragment stage: the engine's helpers, which any
+/// program can use.
 pub(crate) const PRELUDE_FRAGMENT: &str = r"
 
 #define M_PI 3.1415926535897932384626433832795
@@ -427,8 +398,25 @@ void main() {
 ",
 };
 
+/// `get_pattern_pos`, the position in a pattern of a point in a tile, for
+/// the programs that draw a pattern.
+macro_rules! pattern_pos {
+    () => {
+        r"
+// unpack pattern position
+vec2 get_pattern_pos(const vec2 pixel_coord_upper, const vec2 pixel_coord_lower,
+                        const vec2 pattern_size, const float tile_units_to_pixels, const vec2 pos) {
+    const vec2 offset = mod(mod(mod(pixel_coord_upper, pattern_size) * 256.0, pattern_size) * 256.0 + pixel_coord_lower, pattern_size);
+    return (tile_units_to_pixels * pos + offset) / pattern_size;
+}
+"
+    };
+}
+
 pub(crate) const BACKGROUND_PATTERN_SHADER: ShaderSource = ShaderSource {
-    vertex: r"
+    vertex: concat!(
+        pattern_pos!(),
+        r"
 
 layout(location = 0) out vec2 frag_pos_a;
 layout(location = 1) out vec2 frag_pos_b;
@@ -450,6 +438,7 @@ void main() {
     gl_Position = projectTile(vec2(in_pos), vec2(in_pos), projectionVector.elements[constant.ubo_index]);
 }
 ",
+    ),
     fragment: r"
 layout(location = 0) in vec2 frag_pos_a;
 layout(location = 1) in vec2 frag_pos_b;
@@ -1130,7 +1119,9 @@ void main() {
 };
 
 pub(crate) const FILL_PATTERN_SHADER: ShaderSource = ShaderSource {
-    vertex: r"
+    vertex: concat!(
+        pattern_pos!(),
+        r"
 
 layout(location = 0) out vec2 frag_pos_a;
 layout(location = 1) out vec2 frag_pos_b;
@@ -1194,6 +1185,7 @@ void main() {
     gl_Position = projectTile(vec2(in_pos), vec2(in_pos), projectionVector.elements[constant.ubo_index]);
 }
 ",
+    ),
     fragment: r"
 
 layout(location = 0) in vec2 frag_pos_a;
@@ -1285,7 +1277,9 @@ void main() {
 };
 
 pub(crate) const FILL_OUTLINE_PATTERN_SHADER: ShaderSource = ShaderSource {
-    vertex: r"
+    vertex: concat!(
+        pattern_pos!(),
+        r"
 
 layout(location = 0) out vec2 frag_pos_a;
 layout(location = 1) out vec2 frag_pos_b;
@@ -1353,6 +1347,7 @@ void main() {
     frag_pos = (vec2(1.0, -1.0) * gl_Position.xy / gl_Position.w + 1.0) / 2.0 * paintParams.world_size;
 }
 ",
+    ),
     fragment: r"
 
 layout(location = 0) in vec2 frag_pos_a;
@@ -1547,6 +1542,7 @@ void main() {
 
 pub(crate) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: ShaderSource = ShaderSource {
     vertex: concat!(
+        pattern_pos!(),
         r"
 
 layout(location = 0) out vec2 frag_pos_a;
@@ -1679,6 +1675,26 @@ void main() {
     ),
     fragment: FILL_OUTLINE_SHADER.fragment,
 };
+
+/// `wall_normal`, the normal at a wall's end from its outline vertex's
+/// `decimals_ed.x`: the one the walls there share, or else `own`, the
+/// wall's own.
+macro_rules! wall_normal {
+    () => {
+        r"
+// The normal at the end of a fill extrusion wall from its outline vertex's
+// packed decimals_ed.x: the one the walls there share, whose angle from -pi
+// its bits 2 to 15 hold where bit 1 is set, or else `own`, the wall's.
+vec2 wall_normal(const uint bits, const vec2 own) {
+    if ((bits & 2u) == 0u) {
+        return own;
+    }
+    const float angle = float(bits >> 2u) * (6.283185307179586 / 16384.0) - 3.141592653589793;
+    return vec2(cos(angle), sin(angle));
+}
+"
+    };
+}
 
 pub(crate) const FILL_EXTRUSION_SHADER: ShaderSource = ShaderSource {
     vertex: r"
@@ -1880,6 +1896,7 @@ macro_rules! fill_extrusion_wall_main {
 
 pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: ShaderSource = ShaderSource {
     vertex: concat!(
+        wall_normal!(),
         r"
 invariant gl_Position;
 
@@ -1907,6 +1924,7 @@ void main() {
 /// storage buffers, by its index.
 pub(crate) const FILL_EXTRUSION_PULLED_SHADER: ShaderSource = ShaderSource {
     vertex: concat!(
+        wall_normal!(),
         r"
 invariant gl_Position;
 
@@ -1959,7 +1977,9 @@ void main() {
 };
 
 pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: ShaderSource = ShaderSource {
-    vertex: r"
+    vertex: concat!(
+        pattern_pos!(),
+        r"
 invariant gl_Position;
 
 layout(location = 0) out vec4 frag_lighting;
@@ -2075,6 +2095,7 @@ void main() {
 #endif
 }
 ",
+    ),
     fragment: r"
 
 layout(location = 0) in vec4 frag_lighting;
@@ -2137,7 +2158,10 @@ void main() {
 };
 
 pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: ShaderSource = ShaderSource {
-    vertex: r"
+    vertex: concat!(
+        pattern_pos!(),
+        wall_normal!(),
+        r"
 invariant gl_Position;
 
 layout(location = 0) out vec4 frag_lighting;
@@ -2272,6 +2296,7 @@ void main() {
 #endif
 }
 ",
+    ),
     fragment: r"
 
 layout(location = 0) in vec4 frag_lighting;
@@ -3112,8 +3137,25 @@ void main() {
 ",
 };
 
+/// The line programs' `LINE_NORMAL_SCALE` and `MAX_LINE_DISTANCE`.
+macro_rules! line_constants {
+    () => {
+        r#"
+// The maximum allowed miter limit is 2.0 at the moment. the extrude normal is stored
+// in a byte (-128..127). We scale regular normals up to length 63, but there are also
+// "special" normals that have a bigger length (of up to 126 in this case).
+#define LINE_NORMAL_SCALE (1.0 / (127 / 2))
+
+// The attribute conveying progress along a line is scaled to [0, 2^15).
+#define MAX_LINE_DISTANCE 32767.0
+"#
+    };
+}
+
 pub(crate) const LINE_SHADER: ShaderSource = ShaderSource {
-    vertex: r"
+    vertex: concat!(
+        line_constants!(),
+        r"
 
 layout(location = 0) out vec2 frag_normal;
 layout(location = 1) out vec2 frag_width2;
@@ -3221,6 +3263,7 @@ void main() {
     frag_width2 = vec2(outset, inset);
 }
 ",
+    ),
     fragment: r"
 
 layout(location = 0) in vec2 frag_normal;
@@ -3290,7 +3333,9 @@ void main() {
 };
 
 pub(crate) const LINE_GRADIENT_SHADER: ShaderSource = ShaderSource {
-    vertex: r"
+    vertex: concat!(
+        line_constants!(),
+        r"
 
 layout(location = 0) out vec2 frag_normal;
 layout(location = 1) out vec2 frag_width2;
@@ -3392,6 +3437,7 @@ void main() {
     frag_width2 = vec2(outset, inset);
 }
 ",
+    ),
     fragment: r"
 
 layout(location = 0) in vec2 frag_normal;
@@ -3456,7 +3502,9 @@ void main() {
 };
 
 pub(crate) const LINE_PATTERN_SHADER: ShaderSource = ShaderSource {
-    vertex: r"
+    vertex: concat!(
+        line_constants!(),
+        r"
 
 layout(location = 0) out vec2 frag_normal;
 layout(location = 1) out vec2 frag_width2;
@@ -3581,6 +3629,7 @@ void main() {
     frag_linesofar = (floor(in_data.z / 4.0) + in_data.w * 64.0) * LINE_DISTANCE_SCALE;
 }
 ",
+    ),
     fragment: r"
 
 layout(location = 0) in vec2 frag_normal;
@@ -3713,7 +3762,9 @@ void main() {
 };
 
 pub(crate) const LINE_SDF_SHADER: ShaderSource = ShaderSource {
-    vertex: r"
+    vertex: concat!(
+        line_constants!(),
+        r"
 
 layout(location = 0) out vec2 frag_normal;
 layout(location = 1) out vec2 frag_width2;
@@ -3856,6 +3907,7 @@ void main() {
     frag_tex_b = vec2(linesofar * patternscale_b.x / floorwidth, frag_normal.y * patternscale_b.y + tex_y_b);
 }
 ",
+    ),
     fragment: r"
 
 layout(location = 0) in vec2 frag_normal;
@@ -3952,7 +4004,9 @@ void main() {
 };
 
 pub(crate) const LINE_GRADIENT_SDF_SHADER: ShaderSource = ShaderSource {
-    vertex: r"
+    vertex: concat!(
+        line_constants!(),
+        r"
 
 layout(location = 0) out vec2 frag_normal;
 layout(location = 1) out vec2 frag_width2;
@@ -4089,6 +4143,7 @@ void main() {
     frag_tex_b = vec2(linesofar * patternscale_b.x / floorwidth, frag_normal.y * patternscale_b.y + tex_y_b);
 }
 ",
+    ),
     fragment: r"
 
 layout(location = 0) in vec2 frag_normal;
@@ -4400,8 +4455,21 @@ void main() {
 ",
 };
 
+/// `unpack_opacity`, a symbol's fade opacity from its packed attribute.
+macro_rules! unpack_opacity {
+    () => {
+        r"
+vec2 unpack_opacity(const float packedOpacity) {
+    int intOpacity = int(packedOpacity) / 2;
+    return vec2(float(intOpacity) / 127.0, mod(packedOpacity, 2.0));
+}
+"
+    };
+}
+
 pub(crate) const SYMBOL_ICON_SHADER: ShaderSource = ShaderSource {
     vertex: concat!(
+        unpack_opacity!(),
         ground_visibility!(),
         r"
 
@@ -4572,6 +4640,7 @@ void main() {
 
 pub(crate) const SYMBOL_SDF_SHADER: ShaderSource = ShaderSource {
     vertex: concat!(
+        unpack_opacity!(),
         ground_visibility!(),
         r"
 
@@ -4822,6 +4891,7 @@ void main() {
 
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: ShaderSource = ShaderSource {
     vertex: concat!(
+        unpack_opacity!(),
         ground_visibility!(),
         r"
 

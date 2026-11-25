@@ -175,8 +175,27 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
+/// `get_pattern_pos`, the position in a pattern of a point in a tile, for
+/// the programs that draw a pattern.
+macro_rules! pattern_pos {
+    () => {
+        r"
+// Get pattern position for texture atlas lookups
+fn get_pattern_pos(pixel_coord_upper: vec2<f32>, pixel_coord_lower: vec2<f32>,
+                   pattern_size: vec2<f32>, tile_units_to_pixels: f32, pos: vec2<f32>) -> vec2<f32> {
+    let offset_a = gl_mod(pixel_coord_upper, pattern_size) * 256.0;
+    let offset_b = gl_mod(offset_a, pattern_size) * 256.0 + pixel_coord_lower;
+    let offset = gl_mod(offset_b, pattern_size);
+    return (tile_units_to_pixels * pos + offset) / pattern_size;
+}
+"
+    };
+}
+pub(crate) use pattern_pos;
+
 pub(crate) const BACKGROUND_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        pattern_pos!(),
         r"
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -214,7 +233,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
+    )),
     fragment: Some(
         r"
 struct FragmentInput {
@@ -851,7 +870,8 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        pattern_pos!(),
         r"
 struct VertexOutput {
     @builtin(position) @invariant position: vec4<f32>,
@@ -961,7 +981,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
+    )),
     fragment: Some(
         r"
 struct FragmentInput {
@@ -1108,7 +1128,8 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const FILL_OUTLINE_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        pattern_pos!(),
         r"
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -1207,7 +1228,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
+    )),
     fragment: Some(
         r"
 struct FragmentInput {
@@ -1388,7 +1409,8 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const FILL_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        pattern_pos!(),
         r"
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
@@ -1481,7 +1503,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
+    )),
     fragment: Some(
         r"
 struct FragmentInput {
@@ -2418,8 +2440,19 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
+/// The line programs' `LINE_NORMAL_SCALE` and `MAX_LINE_DISTANCE`.
+macro_rules! line_constants {
+    () => {
+        r"
+const LINE_NORMAL_SCALE: f32 = 1.0 / 63.0;  // 1.0 / (127 / 2)
+const MAX_LINE_DISTANCE: f32 = 32767.0;
+"
+    };
+}
+
 pub(crate) const LINE_GRADIENT_SDF_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        line_constants!(),
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
@@ -2565,7 +2598,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
+    )),
     fragment: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -2653,7 +2686,8 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const LINE_GRADIENT_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        line_constants!(),
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
@@ -2757,7 +2791,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
+    )),
     fragment: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -2819,7 +2853,8 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const LINE_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        line_constants!(),
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
@@ -2935,7 +2970,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
+    )),
     fragment: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -3063,7 +3098,8 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const LINE_SDF_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        line_constants!(),
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
@@ -3211,7 +3247,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
+    )),
     fragment: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -3303,7 +3339,8 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const LINE_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        line_constants!(),
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
 override DEVICE_PIXEL_RATIO: f32 = 1.0;
@@ -3409,7 +3446,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
+    )),
     fragment: Some(
         r"
 // The key's DEVICE_PIXEL_RATIO, which the pipeline sets.
@@ -3475,6 +3512,8 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
+/// The start of every program's stages: the engine's helpers, which any
+/// program can use.
 pub(crate) const PRELUDE: WgslShaderSource = WgslShaderSource {
     vertex: None,
     fragment: None,
@@ -3482,9 +3521,6 @@ pub(crate) const PRELUDE: WgslShaderSource = WgslShaderSource {
         r"
 // Constants
 const PI: f32 = 3.14159265358979323846;
-const LINE_NORMAL_SCALE: f32 = 1.0 / 63.0;  // 1.0 / (127 / 2)
-const MAX_LINE_DISTANCE: f32 = 32767.0;
-const SDF_PX: f32 = 8.0;
 
 // WebGPU equivalent of GLSL mod function
 fn glMod(x: f32, y: f32) -> f32 {
@@ -3516,11 +3552,6 @@ fn unpack_float(packedValue: f32) -> vec2<f32> {
     return vec2<f32>(f32(v0), f32(packedIntValue - v0 * 256));
 }
 
-fn unpack_opacity(packedOpacity: f32) -> vec2<f32> {
-    let intOpacity = i32(packedOpacity) / 2;
-    return vec2<f32>(f32(intOpacity) / 127.0, glMod(packedOpacity, 2.0));
-}
-
 // Decode a color that has been packed into two floats
 fn decode_color(encoded: vec2<f32>) -> vec4<f32> {
     let e0 = unpack_float(encoded[0]) / 255.0;
@@ -3538,15 +3569,6 @@ fn unpack_mix_color(packedColors: vec4<f32>, t: f32) -> vec4<f32> {
     let minColor = decode_color(vec2<f32>(packedColors[0], packedColors[1]));
     let maxColor = decode_color(vec2<f32>(packedColors[2], packedColors[3]));
     return mix(minColor, maxColor, t);
-}
-
-// Get pattern position for texture atlas lookups
-fn get_pattern_pos(pixel_coord_upper: vec2<f32>, pixel_coord_lower: vec2<f32>,
-                   pattern_size: vec2<f32>, tile_units_to_pixels: f32, pos: vec2<f32>) -> vec2<f32> {
-    let offset_a = gl_mod(pixel_coord_upper, pattern_size) * 256.0;
-    let offset_b = gl_mod(offset_a, pattern_size) * 256.0 + pixel_coord_lower;
-    let offset = gl_mod(offset_b, pattern_size);
-    return (tile_units_to_pixels * pos + offset) / pattern_size;
 }
 
 // Pole vertices carry these sentinel Y values in their raw position.
@@ -3902,8 +3924,21 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
+/// `unpack_opacity`, a symbol's fade opacity from its packed attribute.
+macro_rules! unpack_opacity {
+    () => {
+        r"
+fn unpack_opacity(packedOpacity: f32) -> vec2<f32> {
+    let intOpacity = i32(packedOpacity) / 2;
+    return vec2<f32>(f32(intOpacity) / 127.0, glMod(packedOpacity, 2.0));
+}
+"
+    };
+}
+
 pub(crate) const SYMBOL_ICON_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(concat!(
+        unpack_opacity!(),
         ground_visibility!(),
         r"
 struct VertexOutput {
@@ -4095,6 +4130,7 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 
 pub(crate) const SYMBOL_SDF_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(concat!(
+        unpack_opacity!(),
         ground_visibility!(),
         r"
 struct VertexOutput {
@@ -4345,12 +4381,14 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: Some(
         r"
 const c_offscreen_degenerate_triangle_location: f32 = -2.0;
+const SDF_PX: f32 = 8.0;
 ",
     ),
 };
 
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: WgslShaderSource = WgslShaderSource {
     vertex: Some(concat!(
+        unpack_opacity!(),
         ground_visibility!(),
         r"
 struct VertexOutput {
@@ -4617,6 +4655,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: Some(
         r"
 const c_offscreen_degenerate_triangle_location: f32 = -2.0;
+const SDF_PX: f32 = 8.0;
 ",
     ),
 };

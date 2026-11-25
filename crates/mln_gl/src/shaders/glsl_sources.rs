@@ -232,8 +232,36 @@ void main() {
 ",
 };
 
+/// `get_pattern_pos`, the position in a pattern of a point in a tile, for
+/// the programs that draw a pattern.
+macro_rules! pattern_pos {
+    () => {
+        r"
+// The offset depends on how many pixels are between the world origin and the edge of the tile:
+// vec2 offset = mod(pixel_coord, size)
+//
+// At high zoom levels there are a ton of pixels between the world origin and the edge of the tile.
+// The glsl spec only guarantees 16 bits of precision for highp floats. We need more than that.
+//
+// The pixel_coord is passed in as two 16 bit values:
+// pixel_coord_upper = floor(pixel_coord / 2^16)
+// pixel_coord_lower = mod(pixel_coord, 2^16)
+//
+// The offset is calculated in a series of steps that should preserve this precision:
+vec2 get_pattern_pos(const vec2 pixel_coord_upper, const vec2 pixel_coord_lower,
+    const vec2 pattern_size, const float tile_units_to_pixels, const vec2 pos) {
+
+    vec2 offset = mod(mod(mod(pixel_coord_upper, pattern_size) * 256.0, pattern_size) * 256.0 + pixel_coord_lower, pattern_size);
+    return (tile_units_to_pixels * pos + offset) / pattern_size;
+}
+"
+    };
+}
+
 pub(crate) const BACKGROUND_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"out mediump vec2 v_pos_a;
+    vertex: concat!(
+        pattern_pos!(),
+        r"out mediump vec2 v_pos_a;
 out mediump vec2 v_pos_b;
 
 void main() {
@@ -243,6 +271,7 @@ void main() {
     v_pos_b = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, u_scale_b * u_pattern_size_b, u_tile_units_to_pixels, a_pos);
 }
 ",
+    ),
     fragment: r"in mediump vec2 v_pos_a;
 in mediump vec2 v_pos_b;
 
@@ -731,8 +760,30 @@ void main() {
 ",
 };
 
+/// `wall_normal`, the normal at a wall's end from its outline vertex's
+/// `decimals_ed.x`: the one the walls there share, or else `own`, the
+/// wall's own.
+macro_rules! wall_normal {
+    () => {
+        r"
+// The normal at the end of a fill extrusion wall from its outline vertex's
+// packed decimals_ed.x: the one the walls there share, whose angle from -pi
+// its bits 2 to 15 hold where bit 1 is set, or else `own`, the wall's.
+vec2 wall_normal(const float bits, const vec2 own) {
+    if (mod(floor(bits / 2.0), 2.0) == 0.0) {
+        return own;
+    }
+    float angle = floor(bits / 4.0) * (2.0 * PI / 16384.0) - PI;
+    return vec2(cos(angle), sin(angle));
+}
+"
+    };
+}
+
 pub(crate) const FILL_EXTRUSION_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"invariant gl_Position;
+    vertex: concat!(
+        wall_normal!(),
+        r"invariant gl_Position;
 
 out vec4 v_color;
 
@@ -816,6 +867,7 @@ highp vec4 color = u_color;
     v_color *= u_opacity;
 }
 ",
+    ),
     fragment: r"in vec4 v_color;
 
 void main() {
@@ -829,7 +881,10 @@ void main() {
 };
 
 pub(crate) const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"invariant gl_Position;
+    vertex: concat!(
+        pattern_pos!(),
+        wall_normal!(),
+        r"invariant gl_Position;
 
 out vec2 v_pos_a;
 out vec2 v_pos_b;
@@ -933,6 +988,7 @@ highp vec4 pattern_to = u_pattern_to;
     v_lighting *= u_opacity;
 }
 ",
+    ),
     fragment: r"#ifdef GL_ES
 precision highp float;
 #endif
@@ -999,7 +1055,9 @@ highp vec4 pattern_to = u_pattern_to;
 };
 
 pub(crate) const FILL_EXTRUSION_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"invariant gl_Position;
+    vertex: concat!(
+        pattern_pos!(),
+        r"invariant gl_Position;
 
 out vec2 v_pos_a;
 out vec2 v_pos_b;
@@ -1090,6 +1148,7 @@ highp vec4 pattern_to = u_pattern_to;
     v_lighting *= u_opacity;
 }
 ",
+    ),
     fragment: r"#ifdef GL_ES
 precision highp float;
 #endif
@@ -1240,7 +1299,9 @@ void main() {
 };
 
 pub(crate) const FILL_OUTLINE_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"out vec2 v_pos_a;
+    vertex: concat!(
+        pattern_pos!(),
+        r"out vec2 v_pos_a;
 out vec2 v_pos_b;
 out vec2 v_pos;
 
@@ -1300,6 +1361,7 @@ highp vec4 pattern_to = u_pattern_to;
     v_pos = (gl_Position.xy / gl_Position.w + 1.0) / 2.0 * u_world_size;
 }
 ",
+    ),
     fragment: r"#ifdef GL_ES
 precision highp float;
 #endif
@@ -1513,6 +1575,7 @@ opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
 
 pub(crate) const FILL_OUTLINE_PATTERN_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
+        pattern_pos!(),
         r"out vec2 v_pos_a;
 out vec2 v_pos_b;
 out vec2 v_pos;
@@ -1570,7 +1633,9 @@ highp vec4 pattern_to = u_pattern_to;
 };
 
 pub(crate) const FILL_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"out vec2 v_pos_a;
+    vertex: concat!(
+        pattern_pos!(),
+        r"out vec2 v_pos_a;
 out vec2 v_pos_b;
 
 #ifndef HAS_UNIFORM_u_color
@@ -1626,6 +1691,7 @@ highp vec4 pattern_to = u_pattern_to;
     v_pos_b = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, toScale * display_size_b, tileZoomRatio, a_pos);
 }
 ",
+    ),
     fragment: r"#ifdef GL_ES
 precision highp float;
 #endif
@@ -3464,6 +3530,9 @@ lowp float opacity = u_opacity;
 ",
 };
 
+/// The start of every program's shaders, after the version, the defines and
+/// the engine's declarations: the engine's helpers, which any program can
+/// use.
 pub(crate) const PRELUDE: GlslShaderSource = GlslShaderSource {
     vertex: r"#ifdef GL_ES
 precision highp float;
@@ -3495,22 +3564,6 @@ vec2 unpack_float(const float packedValue) {
     return vec2(v0, packedIntValue - v0 * 256);
 }
 
-// The normal at the end of a fill extrusion wall from its outline vertex's
-// packed decimals_ed.x: the one the walls there share, whose angle from -pi
-// its bits 2 to 15 hold where bit 1 is set, or else `own`, the wall's.
-vec2 wall_normal(const float bits, const vec2 own) {
-    if (mod(floor(bits / 2.0), 2.0) == 0.0) {
-        return own;
-    }
-    float angle = floor(bits / 4.0) * (2.0 * PI / 16384.0) - PI;
-    return vec2(cos(angle), sin(angle));
-}
-
-vec2 unpack_opacity(const float packedOpacity) {
-    int intOpacity = int(packedOpacity) / 2;
-    return vec2(float(intOpacity) / 127.0, mod(packedOpacity, 2.0));
-}
-
 // To minimize the number of attributes needed, we encode a 4-component
 // color into a pair of floats (i.e. a vec2) as follows:
 // [ floor(color.r * 255) * 256 + color.g * 255,
@@ -3532,24 +3585,6 @@ vec4 unpack_mix_color(const vec4 packedColors, const float t) {
     vec4 minColor = decode_color(vec2(packedColors[0], packedColors[1]));
     vec4 maxColor = decode_color(vec2(packedColors[2], packedColors[3]));
     return mix(minColor, maxColor, t);
-}
-
-// The offset depends on how many pixels are between the world origin and the edge of the tile:
-// vec2 offset = mod(pixel_coord, size)
-//
-// At high zoom levels there are a ton of pixels between the world origin and the edge of the tile.
-// The glsl spec only guarantees 16 bits of precision for highp floats. We need more than that.
-//
-// The pixel_coord is passed in as two 16 bit values:
-// pixel_coord_upper = floor(pixel_coord / 2^16)
-// pixel_coord_lower = mod(pixel_coord, 2^16)
-//
-// The offset is calculated in a series of steps that should preserve this precision:
-vec2 get_pattern_pos(const vec2 pixel_coord_upper, const vec2 pixel_coord_lower,
-    const vec2 pattern_size, const float tile_units_to_pixels, const vec2 pos) {
-
-    vec2 offset = mod(mod(mod(pixel_coord_upper, pattern_size) * 256.0, pattern_size) * 256.0 + pixel_coord_lower, pattern_size);
-    return (tile_units_to_pixels * pos + offset) / pattern_size;
 }
 
 // Pole vertices carry these sentinel Y values in their raw position.
@@ -3896,8 +3931,21 @@ void main() {
 ",
 };
 
+/// `unpack_opacity`, a symbol's fade opacity from its packed attribute.
+macro_rules! unpack_opacity {
+    () => {
+        r"
+vec2 unpack_opacity(const float packedOpacity) {
+    int intOpacity = int(packedOpacity) / 2;
+    return vec2(float(intOpacity) / 127.0, mod(packedOpacity, 2.0));
+}
+"
+    };
+}
+
 pub(crate) const SYMBOL_ICON_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
+        unpack_opacity!(),
         ground_visibility!(),
         r"out highp vec2 v_tex;
 flat out highp vec2 v_tex_origin;
@@ -4044,6 +4092,7 @@ void main() {
 
 pub(crate) const SYMBOL_SDF_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
+        unpack_opacity!(),
         ground_visibility!(),
         r"#define SDF_PX 8.0
 
@@ -4291,6 +4340,7 @@ highp vec4 halo_color = u_halo_color;
 
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: GlslShaderSource = GlslShaderSource {
     vertex: concat!(
+        unpack_opacity!(),
         ground_visibility!(),
         r"#define SDF_PX 8.0
 #define ICON 0.0
