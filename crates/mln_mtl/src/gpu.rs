@@ -21,7 +21,7 @@ use mln_gfx::gpu::{
     VertexBufferLayout, VertexStep,
 };
 use mln_gfx::shaders::bindings::GLOBAL_INDEX_ID;
-use mln_gfx::shaders::program::{Program, Sources};
+use mln_gfx::shaders::program::Program;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{
@@ -50,7 +50,7 @@ use parking_lot::{Condvar, Mutex};
 
 use crate::custom_layer::{AttachmentFormats, CustomLayerEncoder, CustomLayerPass};
 use crate::readback::{buffer_bytes, encode_region_copy};
-use crate::shaders::shader_source::{BUILT_INS, ShaderSource, first_vertex_buffer};
+use crate::shaders::shader_source::{compose, first_vertex_buffer};
 use crate::{Device, Id};
 
 /// The entries of a stage's buffer argument table.
@@ -334,8 +334,6 @@ pub struct MetalGpu {
     buffers: SlotMap<BufferId, Buffer>,
     textures: SlotMap<TextureId, Texture>,
     samplers: SlotMap<SamplerId, Id<dyn MTLSamplerState>>,
-    /// The source each program compiles from.
-    sources: Sources<ShaderSource>,
     shaders: SlotMap<ShaderId, Shader>,
     layout_tags: LayoutTags,
     depth_stencil_states: HashMap<(DepthState, StencilState, Option<TextureFormat>), Id<dyn MTLDepthStencilState>>,
@@ -393,7 +391,6 @@ impl MetalGpu {
             buffers: SlotMap::with_key(),
             textures: SlotMap::with_key(),
             samplers: SlotMap::with_key(),
-            sources: Sources::new(BUILT_INS),
             shaders: SlotMap::with_key(),
             layout_tags: LayoutTags::default(),
             depth_stencil_states: HashMap::default(),
@@ -1399,15 +1396,16 @@ impl Gpu for MetalGpu {
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
         let program = key.program();
-        let source = self.sources.get(program)?;
-        let text = source.compose(program)?;
+        let source =
+            program.sources.msl.ok_or_else(|| GpuError::Unsupported(format!("{} has no MSL", program.name)))?;
+        let text = compose(source, program)?;
         let (vertex, fragment) = autoreleasepool(|_| {
             compile(
                 self.device.device(),
                 program.name,
                 &text,
-                source.msl.vertex_main_function,
-                source.msl.fragment_main_function,
+                source.vertex_main_function,
+                source.fragment_main_function,
                 key.define_values(),
                 source.fast_math,
             )

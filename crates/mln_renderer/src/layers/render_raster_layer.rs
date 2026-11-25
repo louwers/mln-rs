@@ -11,8 +11,6 @@ use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs;
-use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
@@ -41,6 +39,8 @@ use crate::layer_drawing::{
     DrawGroup, DrawList, DrawObjectsMut, DrawOrder, FrameDraw, KeptDraw, LayerDrawing, LayerDraws, TileMap,
 };
 use crate::layer_type::{EvaluatedLayer, LayerType};
+use crate::layers::raster::programs;
+use crate::layers::raster::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{

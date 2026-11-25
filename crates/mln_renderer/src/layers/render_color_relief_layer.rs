@@ -11,11 +11,7 @@ use std::sync::Arc;
 use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::PROJECTION_ID;
-use mln_gfx::shaders::color_relief_layer_ubo::{
-    ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO,
-};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
@@ -49,6 +45,8 @@ use crate::gfx::vertices::SharedVertices;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_drawing::{DrawList, DrawObjectsMut, KeptDraw, TileDraws, TileObjects};
 use crate::layer_type::{EvaluatedLayer, LayerType};
+use crate::layers::color_relief::programs;
+use crate::layers::color_relief::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{

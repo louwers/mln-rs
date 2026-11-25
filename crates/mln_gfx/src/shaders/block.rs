@@ -124,6 +124,7 @@ impl<const N: usize> MemberValue for [[f32; 4]; N] {
 ///     }
 /// }
 /// ```
+#[macro_export]
 macro_rules! uniform_block {
     (
         $(#[$meta:meta])*
@@ -165,7 +166,7 @@ macro_rules! uniform_block {
     };
 }
 
-pub(crate) use uniform_block;
+pub use crate::uniform_block;
 
 #[cfg(test)]
 mod tests {

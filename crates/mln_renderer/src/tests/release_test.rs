@@ -6,13 +6,13 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs;
 use mln_util::Color;
 use mln_util::size::Size;
 
 use super::with_context;
 use crate::gfx::indexes::{DrawIndexes, Indexes};
 use crate::gfx::owned::Held;
+use crate::shaders::programs;
 
 // A texture that a resize replaced, and vertices and indexes of the
 // context's stores that their owners let go of, stay while the bindings and

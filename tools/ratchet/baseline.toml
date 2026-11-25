@@ -19,7 +19,6 @@
 "crates/mln_text/src/shaper.rs" = 1
 "crates/mln_util/src/image.rs" = 1
 "crates/mln_vec_map/src/lib.rs" = 1
-"crates/mln_webgpu/src/shaders/shader_source.rs" = 1
 
 [borrow]
 "crates/mln_c/src/render_session.rs" = 3

@@ -8,7 +8,6 @@ use mln_gfx::gpu::{
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::{BUFFER_IDS, PROJECTION_ID};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::StencilOpType;
@@ -24,6 +23,7 @@ use crate::gfx::vertex_attribute::Uniforms;
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
 use crate::paint_parameters::DrawTarget;
 use crate::render_static_data::RenderStaticData;
+use crate::shaders::programs;
 
 /// The vertex layout of the masks' meshes: a tile position of two shorts.
 fn layout() -> VertexBufferLayout {

@@ -23,7 +23,7 @@ bench = []
 [dependencies]
 bytemuck.workspace = true
 glow.workspace = true
-mln_gfx.workspace = true
+mln_gfx = { workspace = true, features = ["glsl-es"] }
 mln_tile_id.workspace = true
 mln_util.workspace = true
 parking_lot.workspace = true
@@ -56,10 +56,9 @@ web-sys = { workspace = true, features = [
   "WebGlContextAttributes",
 ] }
 
-# The test-only programs, which the tests compile and draw with, and the
-# conformance cases that `GlGpu`'s tests run.
+# The programs, which the tests compile and draw with, and the conformance
+# cases that `GlGpu`'s tests run.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-mln_gfx = { workspace = true, features = ["gpu-conformance"] }
 mln_renderer = { package = "mln-rs-renderer", path = "../mln_renderer", features = [
   "gpu-conformance",
 ] }

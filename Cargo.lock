@@ -2785,6 +2785,7 @@ name = "mln-rs-glsl"
 version = "0.0.15"
 dependencies = [
  "mln-rs-gfx",
+ "mln-rs-renderer",
  "naga",
 ]
 

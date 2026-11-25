@@ -1,7 +1,14 @@
-use mln_glsl::BUILT_INS;
+use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::source::GlslSource;
 use mln_glsl::variants::variants;
+use mln_renderer::shaders::{PROGRAMS, projection_variants};
 
 use crate::ShaderCompiler;
+
+/// Every program the renderer draws with that has GLSL, with its GLSL.
+fn programs() -> impl Iterator<Item = (&'static Program, &'static GlslSource)> {
+    PROGRAMS.iter().filter_map(|&program| Some((program, program.sources.glsl?)))
+}
 
 /// The first bytes of a DXIL container.
 const DXIL_MAGIC: &[u8] = b"DXBC";
@@ -18,8 +25,8 @@ fn every_program_compiles_to_dxil() {
     let compiler = compiler();
     let mut failures = Vec::new();
     let mut compiled = 0;
-    for &(program, source) in BUILT_INS {
-        for variant in variants(program, true) {
+    for (program, source) in programs() {
+        for variant in variants(program, projection_variants(program), true) {
             let at = format!("{} ({})", program.name, variant.name);
             match compiler.compile_source(program, source, &variant.defines) {
                 Ok(program) if program.vertex.starts_with(DXIL_MAGIC) && program.fragment.starts_with(DXIL_MAGIC) => {
@@ -40,8 +47,8 @@ fn every_program_compiles_to_dxil() {
 #[test]
 fn only_the_pulled_programs_read_the_vertex_index() {
     let compiler = compiler();
-    for &(program, source) in BUILT_INS {
-        for variant in variants(program, false) {
+    for (program, source) in programs() {
+        for variant in variants(program, projection_variants(program), false) {
             let compiled = compiler.compile_source(program, source, &variant.defines).expect("the program");
             let pulled = program.name.contains("Pulled");
             assert_eq!(compiled.reads_vertex_index, pulled, "{} ({})", program.name, variant.name);

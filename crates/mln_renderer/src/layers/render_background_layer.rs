@@ -2,13 +2,8 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::background_layer_ubo::{
-    BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO,
-    BackgroundPropsUBO,
-};
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
@@ -30,6 +25,11 @@ use crate::gfx::vertex_attribute::Uniforms;
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, TileDraws, TileObjects};
 use crate::layer_type::{EvaluatedLayer, LayerType};
+use crate::layers::background::programs;
+use crate::layers::background::ubo::{
+    BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO,
+    BackgroundPropsUBO,
+};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{

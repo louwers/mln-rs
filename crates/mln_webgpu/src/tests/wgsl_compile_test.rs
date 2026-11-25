@@ -11,18 +11,24 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gfx_types::DrawModeType;
 use mln_gfx::gpu::{DepthState, FixedState, StencilState, VertexAttribute, VertexBufferLayout, VertexStep};
-use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_gfx::shaders::source::WgslSource;
 use mln_gfx::stencil_mode::StencilMode;
+use mln_renderer::shaders::{PROGRAMS, projection_variants};
 
 use crate::gpu::VERTEX_STAGE_STORAGE_BUFFERS;
 use crate::index_table::IndexTable;
+use crate::shaders::prelude::PRELUDE;
 use crate::shaders::shader_program::compile;
-use crate::shaders::shader_source::{BUILT_INS, WgslShaderSource, prelude};
+
+/// Every program the renderer draws with that has WGSL, with its WGSL.
+fn programs() -> impl Iterator<Item = (&'static Program, &'static WgslSource)> {
+    PROGRAMS.iter().filter_map(|&program| Some((program, program.sources.wgsl?)))
+}
 
 /// The names after the `HAS_UNIFORM_u_` that `source`'s WGSL tests.
-fn uniforms(source: &WgslShaderSource) -> BTreeSet<String> {
+fn uniforms(source: &WgslSource) -> BTreeSet<String> {
     const PREFIX: &str = "HAS_UNIFORM_u_";
     let mut names = BTreeSet::new();
     for text in [source.prelude, source.vertex, source.fragment].into_iter().flatten() {
@@ -39,7 +45,7 @@ fn uniforms(source: &WgslShaderSource) -> BTreeSet<String> {
 /// program declares it.
 #[test]
 fn every_program_declares_the_properties_its_wgsl_reads_from_uniforms() {
-    for &(program, source) in BUILT_INS {
+    for (program, source) in programs() {
         let declared: BTreeSet<String> = program.properties.iter().map(|property| property.name.to_owned()).collect();
         assert_eq!(uniforms(source), declared, "{}", program.name);
     }
@@ -49,10 +55,10 @@ fn every_program_declares_the_properties_its_wgsl_reads_from_uniforms() {
 /// inspector, which counts its draws.
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
-    use mln_gfx::shaders::programs::{
-        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_DEPTH,
-        TERRAIN_PROBE, VERTEX_TEXEL,
-    };
+    use mln_renderer::conformance::programs::{TERRAIN_PROBE, VERTEX_TEXEL};
+    use mln_renderer::layers::symbol::programs::{COLLISION_BOX, COLLISION_CIRCLE};
+    use mln_renderer::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, GLOBE_DEPTH, SKY};
+    use mln_renderer::shaders::terrain::programs::{TERRAIN, TERRAIN_DEPTH};
     // The terrain shows its drapes, where the draped layers count their
     // draws.
     let not_layers = [
@@ -67,7 +73,7 @@ fn every_layer_program_shows_the_overdraw_inspector() {
         &VERTEX_TEXEL,
         &TERRAIN_PROBE,
     ];
-    for &(program, source) in BUILT_INS {
+    for (program, source) in programs() {
         if !not_layers.contains(&program) {
             assert!(
                 [source.prelude, source.vertex, source.fragment]
@@ -119,14 +125,14 @@ fn every_program_compiles() {
         depth: DepthState::from(&DepthMode::disabled()),
         stencil: StencilState::from(&StencilMode::disabled()),
     };
-    for &(program, source) in BUILT_INS {
+    for (program, source) in programs() {
         for parameters in &parameters {
-            for &variant in ProjectionVariant::of(program) {
+            for &variant in projection_variants(program) {
                 for uniforms in [&[][..], program.properties] {
                     let key = program.variant_key(parameters, uniforms, variant);
                     match compile(device, index_table.layout(), &key, source) {
                         Ok(compiled) => {
-                            let text = [Some(prelude()), source.prelude, source.vertex, source.fragment];
+                            let text = [Some(PRELUDE), source.prelude, source.vertex, source.fragment];
                             assert_eq!(
                                 compiled.index_group().is_some(),
                                 text.into_iter().flatten().any(|text| text.contains("globalIndex")),

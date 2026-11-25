@@ -1,6 +1,6 @@
 //! Compiles every built-in program's MSL with the system's
-//! Metal compiler, the way `MetalGpu` does: as `ShaderSource::compose`
-//! writes it, MSL 2.4, fast math unless the program's table turns it off,
+//! Metal compiler, the way `MetalGpu` does: as `compose` writes it, MSL
+//! 2.4, fast math unless the program's MSL turns it off,
 //! the `ProgramParameters` defines, a
 //! `HAS_UNIFORM_u_<name>` define per property passed as a uniform, and
 //! `PROJECTION_GLOBE` for the globe variant. Also checks that the shaders'
@@ -13,6 +13,8 @@ use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::VertexStep;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program::{GLOBE_DEFINE, Program, TERRAIN_DEFINE};
+use mln_gfx::shaders::source::MslSource;
+use mln_renderer::shaders::{PROGRAMS, projection_variants};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::{NSDictionary, NSObject, NSString};
@@ -21,7 +23,7 @@ use objc2_metal::{
     MTLPixelFormat, MTLRenderPipelineDescriptor, MTLVertexDescriptor, MTLVertexFormat, MTLVertexStepFunction,
 };
 
-use super::shader_source::{BUILT_INS, ShaderSource, first_vertex_buffer};
+use super::shader_source::{compose, first_vertex_buffer};
 use crate::Id;
 
 #[derive(Clone, Copy)]
@@ -30,8 +32,9 @@ enum Overdraw {
     On,
 }
 
-fn sources() -> impl Iterator<Item = (&'static Program, &'static ShaderSource)> {
-    BUILT_INS.iter().copied()
+/// Every program the renderer draws with that has MSL, with its MSL.
+fn sources() -> impl Iterator<Item = (&'static Program, &'static MslSource)> {
+    PROGRAMS.iter().filter_map(|&program| Some((program, program.sources.msl?)))
 }
 
 fn device() -> Id<dyn MTLDevice> {
@@ -67,8 +70,8 @@ fn compile(
         .map_err(|error| error.localizedDescription().to_string())
 }
 
-fn full_source(program: &Program, source: &ShaderSource) -> String {
-    source.compose(program).unwrap_or_else(|error| panic!("{error}"))
+fn full_source(program: &Program, source: &MslSource) -> String {
+    compose(source, program).unwrap_or_else(|error| panic!("{error}"))
 }
 
 /// The `<name>`s of the `HAS_UNIFORM_u_<name>` the shader tests.
@@ -110,10 +113,10 @@ fn defines<'a>(
 /// inspector, which counts its draws.
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
-    use mln_gfx::shaders::programs::{
-        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_DEPTH,
-        TERRAIN_PROBE, VERTEX_TEXEL,
-    };
+    use mln_renderer::conformance::programs::{TERRAIN_PROBE, VERTEX_TEXEL};
+    use mln_renderer::layers::symbol::programs::{COLLISION_BOX, COLLISION_CIRCLE};
+    use mln_renderer::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, GLOBE_DEPTH, SKY};
+    use mln_renderer::shaders::terrain::programs::{TERRAIN, TERRAIN_DEPTH};
     // The terrain shows its drapes, where the draped layers count their
     // draws.
     let not_layers = [
@@ -128,7 +131,7 @@ fn every_layer_program_shows_the_overdraw_inspector() {
         &VERTEX_TEXEL,
         &TERRAIN_PROBE,
     ];
-    for &(program, source) in BUILT_INS {
+    for (program, source) in sources() {
         if !not_layers.contains(&program) {
             assert!(full_source(program, source).contains("OVERDRAW_INSPECTOR"), "{}", program.name);
         }
@@ -149,7 +152,7 @@ fn every_shader_source_compiles() {
             "{}: the properties its MSL reads from uniforms",
             program.name
         );
-        for &projection in ProjectionVariant::of(program) {
+        for &projection in projection_variants(program) {
             // Every property per vertex, every property as a uniform, each one
             // alone as a uniform, and the overdraw inspector.
             let mut variants = vec![
@@ -165,7 +168,7 @@ fn every_shader_source_compiles() {
                 match compile(&device, &text, &defines, source.fast_math) {
                     Ok(library) => {
                         compiled += 1;
-                        for function in [source.msl.vertex_main_function, source.msl.fragment_main_function] {
+                        for function in [source.vertex_main_function, source.fragment_main_function] {
                             if library.newFunctionWithName(&NSString::from_str(function)).is_none() {
                                 failures.push(format!(
                                     "{} ({projection:?}, {variant}): no function {function}",
@@ -256,7 +259,7 @@ fn pipelines_build_with_the_programs_attributes() {
             ("declared formats", vertex_descriptor(program, |data_type| data_type)),
             ("single-value formats", vertex_descriptor(program, narrow)),
         ];
-        let variants = ProjectionVariant::of(program).iter().flat_map(|&projection| {
+        let variants = projection_variants(program).iter().flat_map(|&projection| {
             [
                 (format!("{projection:?}, no uniforms"), defines(Overdraw::Off, projection, [])),
                 (format!("{projection:?}, all uniforms"), defines(Overdraw::Off, projection, &properties)),
@@ -266,8 +269,8 @@ fn pipelines_build_with_the_programs_attributes() {
             let library = compile(&device, &text, &defines, source.fast_math)
                 .unwrap_or_else(|error| panic!("{} ({variant}): {error}", program.name));
             let function = |name: &str| library.newFunctionWithName(&NSString::from_str(name)).unwrap();
-            let vertex = function(source.msl.vertex_main_function);
-            let fragment = function(source.msl.fragment_main_function);
+            let vertex = function(source.vertex_main_function);
+            let fragment = function(source.fragment_main_function);
             // A vertex function without `[[stage_in]]` has no attributes.
             let attributes = vertex.vertexAttributes().map(|attributes| attributes.to_vec()).unwrap_or_default();
             for attribute in attributes.iter().filter(|attribute| attribute.isActive()) {

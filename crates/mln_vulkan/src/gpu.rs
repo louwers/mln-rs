@@ -22,14 +22,14 @@ use mln_gfx::gpu::{
     TextureRegion, TextureUsage, VertexStep,
 };
 use mln_gfx::shaders::bindings::{FIRST_UNIFORM_ID, VERTEX_DRAW_ID};
-use mln_gfx::shaders::program::{Program, Sources};
+use mln_gfx::shaders::program::Program;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{DepthFunctionType, TextureFilterType, TextureWrapType};
 use mln_glsl::layout::{
     DescriptorSetType, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE,
     image_sampler_binding, image_texture_binding,
 };
-use mln_glsl::{BUILT_INS, ResourceUse, ShaderSource, Stage};
+use mln_glsl::{ResourceUse, Stage};
 use mln_util::hash::HashMap;
 use mln_util::size::Size;
 
@@ -375,8 +375,6 @@ pub struct VulkanGpu {
     buffers: SlotMap<BufferId, Buffer>,
     textures: SlotMap<TextureId, Texture>,
     samplers: SlotMap<SamplerId, vk::Sampler>,
-    /// The source each program compiles from.
-    sources: Sources<ShaderSource>,
     shaders: SlotMap<ShaderId, Shader>,
     layout_tags: LayoutTags,
     pipelines: SlotMap<PipelineId, Pipeline>,
@@ -643,7 +641,6 @@ impl VulkanGpu {
             buffers: SlotMap::with_key(),
             textures: SlotMap::with_key(),
             samplers: SlotMap::with_key(),
-            sources: Sources::new(BUILT_INS),
             shaders: SlotMap::with_key(),
             layout_tags: LayoutTags::default(),
             pipelines: SlotMap::with_key(),
@@ -1067,7 +1064,7 @@ impl VulkanGpu {
     /// Compiles the program of `key`.
     fn compile(&self, key: &ShaderKey) -> Result<Shader, GpuError> {
         let name = key.program().name;
-        let source = self.sources.get(key.program())?;
+        let source = key.program().sources.glsl.ok_or_else(|| GpuError::Unsupported(format!("{name} has no GLSL")))?;
         let mut defines = String::new();
         for (name, value) in key.define_values() {
             let _ = writeln!(defines, "#define {name} {value}");
@@ -1085,8 +1082,7 @@ impl VulkanGpu {
             }
         };
         for stage in [Stage::Vertex, Stage::Fragment] {
-            let result = source
-                .compose(key.program(), stage, &defines)
+            let result = mln_glsl::compose(source, key.program(), stage, &defines)
                 .and_then(|composed| shaders::compile_program(stage, &composed))
                 .map_err(|error| GpuError::Invalid(format!("{name}: {error}")))
                 .and_then(|compiled| {

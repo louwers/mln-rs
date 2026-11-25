@@ -5,11 +5,6 @@ use std::sync::Arc;
 use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::line_layer_ubo::{
-    LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
-    LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO,
-};
-use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
@@ -41,6 +36,11 @@ use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArr
 use crate::layer_composite::Composite;
 use crate::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, TileDraws, TileObjects, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
+use crate::layers::line::programs;
+use crate::layers::line::ubo::{
+    LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
+    LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO,
+};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{LineLayoutSpec, PatternLayout, uses_pattern};
 use crate::line_atlas::{LineAtlas, LinePatternCap};

@@ -1,10 +1,12 @@
 // A program's GL ES declarations, written from the program: the std140
 // uniform blocks of the engine's and the program's buffers that each stage
 // reads, its textures' samplers and its attributes, in the variants that
-// read each, at the precisions of `precision`.
+// read each, at the precisions of `precision`, which the program's GL ES
+// declarations (`GlslEsDeclarations`) give.
 //
 // - A block is anonymous, as GL JS's are, so that its members are the
-//   program's uniforms, `u_<member>`, but where `NAMES` says otherwise, and
+//   program's uniforms, `u_<member>`, but where the program's GL ES
+//   declarations name them otherwise, and
 //   a pad `<buffer>_<pad>`. The engine's projection, which every vertex
 //   stage declares for its prelude, is the instance `projection` instead:
 //   the programs' own blocks have its members' names (`matrix`).
@@ -25,8 +27,7 @@ use std::fmt::Write as _;
 use mln_gfx::shaders::block::{Block, Member, MemberType, UniformBlock};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::{Attribute, PAINT_PARAMS, Program, ProgramBuffer, Stages, TERRAIN_DEFINE, Variants};
-use mln_gfx::shaders::symbol_layer_ubo::SymbolDrawableUBO;
-use mln_gfx::shaders::terrain_ubo::TerrainSurfaceUBO;
+use mln_gfx::shaders::source::GlslEsDeclarations;
 
 use super::precision;
 use crate::enums::attribute_format;
@@ -38,16 +39,6 @@ pub(crate) enum Stage {
     Fragment,
 }
 
-/// The GL ES names of the members whose `u_<member>` another block of a
-/// program that has theirs has too.
-const NAMES: &[(&Block, &str, &str)] = &[
-    // The symbols' tile properties have `is_halo` too.
-    (SymbolDrawableUBO::BLOCK, "is_halo", "u_is_halo_pass"),
-    // The terrain reads the hillshade's tile properties, which have
-    // `exaggeration` too.
-    (TerrainSurfaceUBO::BLOCK, "exaggeration", "u_terrain_exaggeration"),
-];
-
 /// The engine's declarations that `stage`'s prelude reads: the projection
 /// block, in a vertex stage.
 pub(crate) fn engine(stage: Stage) -> String {
@@ -56,7 +47,7 @@ pub(crate) fn engine(stage: Stage) -> String {
         let block = ProjectionUBO::BLOCK;
         let _ = writeln!(out, "layout(std140) uniform {} {{", block.name);
         for member in block.members {
-            declare_member(&mut out, block, member, member.name);
+            declare_member(&mut out, &GlslEsDeclarations::DEFAULT, block, member, member.name);
         }
         out.push_str("} projection;\n");
     }
@@ -64,15 +55,16 @@ pub(crate) fn engine(stage: Stage) -> String {
 }
 
 /// The declarations of what `stage` of `program` reads: its attributes, its
-/// blocks, with the paint parameters', and its textures' samplers. Fails for
-/// an attribute of a format that GL can't bind and for a vertex buffer,
-/// which GL ES binds as attributes.
-pub(crate) fn program(program: &Program, stage: Stage) -> Result<String, String> {
+/// blocks, with the paint parameters', and its textures' samplers, as the
+/// program's GL ES `declarations` qualify and name them. Fails for an
+/// attribute of a format that GL can't bind and for a vertex buffer, which
+/// GL ES binds as attributes.
+pub(crate) fn program(program: &Program, declarations: &GlslEsDeclarations, stage: Stage) -> Result<String, String> {
     let mut out = String::new();
     if stage == Stage::Vertex {
         for (location, _, attribute) in program.locations() {
             let ty = input_type(program, attribute)?;
-            let precision = precision::attribute(program, attribute).qualifier();
+            let precision = precision::attribute(declarations, attribute).qualifier();
             conditional(&mut out, attribute_condition(program, attribute).as_deref(), |out| {
                 let _ = writeln!(out, "layout(location = {location}) in {precision} {ty} a_{};", attribute.name);
             });
@@ -85,7 +77,7 @@ pub(crate) fn program(program: &Program, stage: Stage) -> Result<String, String>
         conditional(&mut out, condition(program, buffer.variants).as_deref(), |out| {
             let _ = writeln!(out, "layout(std140) uniform {} {{", block.name);
             for member in block.members {
-                declare_member(out, block, member, &member_name(buffer, block, member));
+                declare_member(out, declarations, block, member, &member_name(declarations, buffer, block, member));
             }
             out.push_str("};\n");
         });
@@ -94,7 +86,7 @@ pub(crate) fn program(program: &Program, stage: Stage) -> Result<String, String>
         if texture.is_unused() || !reads(texture.stages, stage) {
             continue;
         }
-        let precision = precision::sampler(program, texture)
+        let precision = precision::sampler(declarations, texture)
             .map_or(String::new(), |precision| format!("{} ", precision.qualifier()));
         conditional(&mut out, condition(program, texture.variants).as_deref(), |out| {
             let _ = writeln!(out, "uniform {precision}sampler2D u_{};", texture.name);
@@ -117,20 +109,22 @@ fn block(buffer: &ProgramBuffer) -> Result<&'static Block, String> {
     buffer.block().ok_or_else(|| format!("GL ES binds vertex buffer {} as attributes", buffer.name))
 }
 
-/// The GL ES name of `member` of `buffer`'s `block`, an anonymous block.
-fn member_name(buffer: &ProgramBuffer, block: &Block, member: &Member) -> String {
+/// The GL ES name of `member` of `buffer`'s `block`, an anonymous block,
+/// of a program of `declarations`.
+fn member_name(declarations: &GlslEsDeclarations, buffer: &ProgramBuffer, block: &Block, member: &Member) -> String {
     if precision::is_pad(member) {
         return format!("{}_{}", buffer.name, member.name);
     }
-    match NAMES.iter().find(|&&(of, name, _)| of.name == block.name && name == member.name) {
+    match declarations.names.iter().find(|&&(of, name, _)| of.name == block.name && name == member.name) {
         Some(&(_, _, name)) => name.to_owned(),
         None => format!("u_{}", member.name),
     }
 }
 
-/// Writes the declaration of `member` of `block` as `name`.
-fn declare_member(out: &mut String, block: &Block, member: &Member, name: &str) {
-    let precision = precision::member(block, member).qualifier();
+/// Writes the declaration of `member` of `block`, of a program of
+/// `declarations`, as `name`.
+fn declare_member(out: &mut String, declarations: &GlslEsDeclarations, block: &Block, member: &Member, name: &str) {
+    let precision = precision::member(declarations, block, member).qualifier();
     let _ = match member.ty {
         MemberType::Float => writeln!(out, "    {precision} float {name};"),
         MemberType::Int => writeln!(out, "    {precision} int {name};"),
@@ -216,8 +210,16 @@ fn input_type(program: &Program, attribute: &Attribute) -> Result<&'static str, 
 mod tests {
     use std::collections::BTreeSet;
 
+    use mln_gfx::shaders::source::GlslEsSource;
+    use mln_renderer::shaders::PROGRAMS;
+
     use super::*;
-    use crate::shaders::shader_source::BUILT_INS;
+
+    /// Every program the renderer draws with that has GLSL ES, with its
+    /// GLSL ES.
+    fn programs() -> impl Iterator<Item = (&'static Program, &'static GlslEsSource)> {
+        PROGRAMS.iter().filter_map(|&program| Some((program, program.sources.glsl_es?)))
+    }
 
     /// The blocks of `program`'s buffers.
     fn program_blocks(program: &Program) -> Vec<(&ProgramBuffer, &'static Block)> {
@@ -228,28 +230,33 @@ mod tests {
     /// members of a program's blocks have one name.
     #[test]
     fn the_members_of_a_programs_blocks_have_names_of_their_own() {
-        for &(program, _) in BUILT_INS {
+        for (program, source) in programs() {
             let mut names = BTreeSet::new();
             for (buffer, block) in program_blocks(program) {
                 for member in block.members {
-                    let name = member_name(buffer, block, member);
+                    let name = member_name(source.declarations, buffer, block, member);
                     assert!(names.insert(name.clone()), "{}: two members are {name}", program.name);
                 }
             }
         }
     }
 
-    /// Each of `NAMES` is of a member whose `u_<member>` another block of a
-    /// program that has its block has too.
+    /// Each member that a program's declarations name otherwise is of a
+    /// block whose member's `u_<member>` another block of a program that
+    /// has its block has too.
     #[test]
     fn every_member_named_otherwise_needs_it() {
-        for &(of, member, _) in NAMES {
-            let needed = BUILT_INS.iter().any(|(program, _)| {
-                let blocks = program_blocks(program);
-                blocks.iter().any(|&(_, block)| block == of)
-                    && blocks.iter().any(|&(_, block)| block != of && block.members.iter().any(|m| m.name == member))
-            });
-            assert!(needed, "{}::{member}", of.name);
+        for (_, source) in programs() {
+            for &(of, member, _) in source.declarations.names {
+                let needed = programs().any(|(program, _)| {
+                    let blocks = program_blocks(program);
+                    blocks.iter().any(|&(_, block)| block == of)
+                        && blocks
+                            .iter()
+                            .any(|&(_, block)| block != of && block.members.iter().any(|m| m.name == member))
+                });
+                assert!(needed, "{}::{member}", of.name);
+            }
         }
     }
 }

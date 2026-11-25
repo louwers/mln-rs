@@ -19,7 +19,8 @@ use mln_gfx::shaders::bindings::{
 };
 use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
 use mln_gfx::shaders::program::{Attribute, BufferKind, PAINT_PARAMS, Program, Variants};
-use mln_gfx::shaders::programs::{self, STANDING};
+use mln_gfx::shaders::source::GlslSource;
+use mln_renderer::shaders::{PROGRAMS, STANDING, projection_variants};
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
 
 use crate::front_end::parse;
@@ -30,10 +31,11 @@ use crate::layout::{
     image_texture_binding, layer_storage_binding, layer_uniform_binding,
 };
 use crate::variants::variants;
-use crate::{BUILT_INS, ShaderSource, Stage, sources};
+use crate::{Stage, compose, prelude};
 
-fn programs() -> impl Iterator<Item = (&'static Program, &'static ShaderSource)> {
-    BUILT_INS.iter().copied()
+/// Every program the renderer draws with that has GLSL, with its GLSL.
+fn programs() -> impl Iterator<Item = (&'static Program, &'static GlslSource)> {
+    PROGRAMS.iter().filter_map(|&program| Some((program, program.sources.glsl?)))
 }
 
 const STAGES: [Stage; 2] = [Stage::Vertex, Stage::Fragment];
@@ -61,10 +63,10 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
 /// inspector, which counts its draws.
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
-    use mln_gfx::shaders::programs::{
-        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_DEPTH,
-        TERRAIN_PROBE, VERTEX_TEXEL,
-    };
+    use mln_renderer::conformance::programs::{TERRAIN_PROBE, VERTEX_TEXEL};
+    use mln_renderer::layers::symbol::programs::{COLLISION_BOX, COLLISION_CIRCLE};
+    use mln_renderer::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, GLOBE_DEPTH, SKY};
+    use mln_renderer::shaders::terrain::programs::{TERRAIN, TERRAIN_DEPTH};
     // The terrain shows its drapes, where the draped layers count their
     // draws.
     let not_layers = [
@@ -79,7 +81,7 @@ fn every_layer_program_shows_the_overdraw_inspector() {
         &VERTEX_TEXEL,
         &TERRAIN_PROBE,
     ];
-    for &(program, source) in BUILT_INS {
+    for (program, source) in programs() {
         if !not_layers.contains(&program) {
             assert!(
                 [source.vertex, source.fragment].iter().any(|text| text.contains("OVERDRAW_INSPECTOR")),
@@ -91,9 +93,8 @@ fn every_layer_program_shows_the_overdraw_inspector() {
 }
 
 /// The module of a stage of `source` with `defines`, unvalidated.
-fn module(program: &Program, source: &ShaderSource, stage: Stage, defines: &str) -> Module {
-    source
-        .compose(program, stage, defines)
+fn module(program: &Program, source: &GlslSource, stage: Stage, defines: &str) -> Module {
+    compose(source, program, stage, defines)
         .and_then(|composed| parse(stage, &composed))
         .unwrap_or_else(|error| panic!("{} ({stage:?}):\n{error}", program.name))
 }
@@ -106,10 +107,9 @@ fn every_stage_validates() {
     let mut failures = Vec::new();
     let mut validated = 0;
     for (program, source) in programs() {
-        for variant in variants(program, true) {
+        for variant in variants(program, projection_variants(program), true) {
             for stage in STAGES {
-                match source
-                    .compose(program, stage, &variant.defines)
+                match compose(source, program, stage, &variant.defines)
                     .and_then(|composed| crate::Module::parse(stage, &composed))
                 {
                     Ok(_) => validated += 1,
@@ -279,7 +279,7 @@ fn resources_are_in_the_descriptor_set_layouts() {
             .filter(|(_, texture)| !texture.is_unused())
             .map(|(slot, _)| image_texture_binding(slot))
             .collect();
-        for variant in variants(program, false) {
+        for variant in variants(program, projection_variants(program), false) {
             let mut declared = BTreeSet::new();
             for stage in STAGES {
                 let mut fail = |message: String| {
@@ -363,9 +363,8 @@ fn every_stage_reads_what_it_declares() {
     for (program, source) in programs() {
         for stage in STAGES {
             let (mut declared, mut read) = (BTreeSet::new(), BTreeSet::new());
-            for variant in variants(program, true) {
-                let module = source
-                    .compose(program, stage, &variant.defines)
+            for variant in variants(program, projection_variants(program), true) {
+                let module = compose(source, program, stage, &variant.defines)
                     .and_then(|composed| crate::Module::parse(stage, &composed))
                     .unwrap_or_else(|error| panic!("{} ({stage:?}): {error}", program.name));
                 let resources = resources(&module.module).unwrap_or_else(|message| panic!("{message}"));
@@ -409,7 +408,7 @@ fn buffers_are_the_renderers() {
         assert_eq!(expected.len(), buffers(program).len(), "{}: two buffers at a binding", program.name);
 
         let mut declared = BTreeSet::new();
-        for variant in variants(program, false) {
+        for variant in variants(program, projection_variants(program), false) {
             for stage in STAGES {
                 let at = format!("{} ({}, {stage:?})", program.name, variant.name);
                 let resources = resources(&module(program, source, stage, &variant.defines))
@@ -517,7 +516,7 @@ fn vertex_inputs_are_the_programs_attributes() {
         };
         let locations: BTreeSet<u32> = program.locations().map(|(location, ..)| location as u32).collect();
         assert_eq!(locations.len(), program.locations().count(), "{}: attribute locations repeat", program.name);
-        for variant in variants(program, true) {
+        for variant in variants(program, projection_variants(program), true) {
             let unread =
                 |attribute: &Attribute| attribute.variants == Variants::Standing && !variant.projection.stands();
             let table: BTreeMap<u32, &Attribute> = program
@@ -569,7 +568,7 @@ fn a_walls_next_outline_vertex_has_the_formats_of_its_outline_vertex() {
 fn stages_agree_on_what_passes_between_them() {
     let mut failures = Vec::new();
     for (program, source) in programs() {
-        for variant in variants(program, true) {
+        for variant in variants(program, projection_variants(program), true) {
             let at = format!("{} ({})", program.name, variant.name);
             let outputs = stage_outputs(&module(program, source, Stage::Vertex, &variant.defines));
             let fragment = module(program, source, Stage::Fragment, &variant.defines);
@@ -593,6 +592,20 @@ fn stages_agree_on_what_passes_between_them() {
 // the offsets the shader preludes add, and `samplerBindingStartId`.
 #[test]
 fn bindings_follow_from_the_packed_ids() {
+    use mln_renderer::layers::background::programs::BACKGROUND;
+    use mln_renderer::layers::circle::programs::CIRCLE;
+    use mln_renderer::layers::color_relief::programs::COLOR_RELIEF;
+    use mln_renderer::layers::fill::programs::{FILL, FILL_OUTLINE_PULLED, FILL_PATTERN};
+    use mln_renderer::layers::fill_extrusion::programs::{
+        FILL_EXTRUSION, FILL_EXTRUSION_PATTERN, FILL_EXTRUSION_PULLED,
+    };
+    use mln_renderer::layers::heatmap::programs::{HEATMAP, HEATMAP_TEXTURE};
+    use mln_renderer::layers::hillshade::programs::{HILLSHADE, HILLSHADE_PREPARE};
+    use mln_renderer::layers::line::programs::LINE;
+    use mln_renderer::layers::raster::programs::RASTER;
+    use mln_renderer::layers::symbol::programs::{COLLISION_BOX, SYMBOL_SDF};
+    use mln_renderer::shaders::programs::{ATMOSPHERE, SKY};
+
     assert_eq!(global_uniform_binding(PAINT_PARAMS_ID), Some(0));
 
     // idDrawableReservedVertexOnlyUBO, idDrawableReservedFragmentOnlyUBO,
@@ -602,9 +615,9 @@ fn bindings_follow_from_the_packed_ids() {
     assert_eq!(layer_storage_binding(PROJECTION_ID), Some(2));
     assert_eq!(layer_storage_binding(FIRST_UNIFORM_ID), Some(3));
     for id in [
-        programs::FILL_PATTERN.buffer_id("tilePropsVector"),
-        programs::FILL_EXTRUSION_PATTERN.buffer_id("tilePropsVector"),
-        programs::COLOR_RELIEF.buffer_id("tilePropsVector"),
+        FILL_PATTERN.buffer_id("tilePropsVector"),
+        FILL_EXTRUSION_PATTERN.buffer_id("tilePropsVector"),
+        COLOR_RELIEF.buffer_id("tilePropsVector"),
     ] {
         assert_eq!(layer_storage_binding(id), Some(3));
     }
@@ -612,41 +625,37 @@ fn bindings_follow_from_the_packed_ids() {
 
     // layerUBOStartId.
     for id in [
-        programs::BACKGROUND.buffer_id("props"),
-        programs::CIRCLE.buffer_id("props"),
-        programs::HEATMAP.buffer_id("props"),
-        programs::HEATMAP_TEXTURE.buffer_id("ubo"),
-        programs::HILLSHADE.buffer_id("props"),
-        programs::LINE.buffer_id("props"),
-        programs::RASTER.buffer_id("props"),
-        programs::SYMBOL_SDF.buffer_id("props"),
-        programs::SKY.buffer_id("sky"),
-        programs::ATMOSPHERE.buffer_id("atmosphere"),
+        BACKGROUND.buffer_id("props"),
+        CIRCLE.buffer_id("props"),
+        HEATMAP.buffer_id("props"),
+        HEATMAP_TEXTURE.buffer_id("ubo"),
+        HILLSHADE.buffer_id("props"),
+        LINE.buffer_id("props"),
+        RASTER.buffer_id("props"),
+        SYMBOL_SDF.buffer_id("props"),
+        SKY.buffer_id("sky"),
+        ATMOSPHERE.buffer_id("atmosphere"),
     ] {
         assert_eq!(layer_uniform_binding(id), Some(4));
     }
     // layerUBOStartId + 1: the layers with a tile properties storage buffer.
-    for id in [
-        programs::FILL.buffer_id("props"),
-        programs::FILL_EXTRUSION.buffer_id("props"),
-        programs::COLOR_RELIEF.buffer_id("props"),
-    ] {
+    for id in [FILL.buffer_id("props"), FILL_EXTRUSION.buffer_id("props"), COLOR_RELIEF.buffer_id("props")] {
         assert_eq!(layer_uniform_binding(id), Some(5));
     }
 
     // drawableUBOStartId and its offsets.
-    assert_eq!(drawable_uniform_binding(programs::COLLISION_BOX.buffer_id("drawable")), Some(0));
+    assert_eq!(drawable_uniform_binding(COLLISION_BOX.buffer_id("drawable")), Some(0));
     assert_eq!(drawable_uniform_binding(PROJECTION_ID), Some(2));
-    assert_eq!(drawable_uniform_binding(programs::COLLISION_BOX.buffer_id("tile_props")), Some(3));
-    assert_eq!(drawable_uniform_binding(programs::HILLSHADE_PREPARE.buffer_id("drawable")), Some(0));
-    assert_eq!(drawable_uniform_binding(programs::HILLSHADE_PREPARE.buffer_id("tileProps")), Some(3));
+    assert_eq!(drawable_uniform_binding(COLLISION_BOX.buffer_id("tile_props")), Some(3));
+    assert_eq!(drawable_uniform_binding(HILLSHADE_PREPARE.buffer_id("drawable")), Some(0));
+    assert_eq!(drawable_uniform_binding(HILLSHADE_PREPARE.buffer_id("tileProps")), Some(3));
     // The pulled shaders' vertex buffers, from drawableUBOStartId + 5.
     assert_eq!(DRAWABLE_UNIFORM_COUNT, 5);
-    assert_eq!(drawable_vertex_binding(programs::FILL_EXTRUSION_PULLED.buffer_id("wallVertices")), Some(5));
-    assert_eq!(drawable_vertex_binding(programs::FILL_EXTRUSION_PULLED.buffer_id("wallPaint")), Some(6));
-    assert_eq!(drawable_vertex_binding(programs::FILL_OUTLINE_PULLED.buffer_id("outlineVertices")), Some(5));
-    assert_eq!(drawable_vertex_binding(programs::FILL_OUTLINE_PULLED.buffer_id("outlineEnds")), Some(6));
-    assert_eq!(drawable_vertex_binding(programs::FILL_OUTLINE_PULLED.buffer_id("outlinePaint")), Some(7));
+    assert_eq!(drawable_vertex_binding(FILL_EXTRUSION_PULLED.buffer_id("wallVertices")), Some(5));
+    assert_eq!(drawable_vertex_binding(FILL_EXTRUSION_PULLED.buffer_id("wallPaint")), Some(6));
+    assert_eq!(drawable_vertex_binding(FILL_OUTLINE_PULLED.buffer_id("outlineVertices")), Some(5));
+    assert_eq!(drawable_vertex_binding(FILL_OUTLINE_PULLED.buffer_id("outlineEnds")), Some(6));
+    assert_eq!(drawable_vertex_binding(FILL_OUTLINE_PULLED.buffer_id("outlinePaint")), Some(7));
 
     // samplerBindingStartId.
     assert_eq!(IMAGE_SAMPLER_START, 3);
@@ -703,5 +712,5 @@ fn no_stage_flips_y() {
         assert!(!text.contains("gl_Position.y*=-1"), "{}", program.name);
         assert!(!text.contains("applySurfaceTransform"), "{}", program.name);
     }
-    assert!(!sources::PRELUDE_VERTEX.contains("applySurfaceTransform"));
+    assert!(!prelude::PRELUDE_VERTEX.contains("applySurfaceTransform"));
 }

@@ -42,14 +42,15 @@ fn defines<'a>(overdraw: Overdraw, variant: ProjectionVariant, uniforms: impl In
     defines
 }
 
-/// In each projection variant of `program`: every property of `program` per
-/// vertex and every one as a uniform; with `all`, also these two with the
-/// overdraw inspector, and each property alone as a uniform.
+/// In each of `projections`, the projection variants of `program`: every
+/// property of `program` per vertex and every one as a uniform; with `all`,
+/// also these two with the overdraw inspector, and each property alone as a
+/// uniform.
 #[must_use]
-pub fn variants(program: &Program, all: bool) -> Vec<Variant> {
+pub fn variants(program: &Program, projections: &[ProjectionVariant], all: bool) -> Vec<Variant> {
     let properties: Vec<&str> = program.properties.iter().map(|property| property.name).collect();
     let mut variants = Vec::new();
-    for &projection in ProjectionVariant::of(program) {
+    for &projection in projections {
         let mut push = |name: &str, per_vertex: bool, defines: String| {
             variants.push(Variant { name: format!("{projection:?}, {name}"), projection, per_vertex, defines });
         };

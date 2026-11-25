@@ -17,12 +17,7 @@ use glam::{DMat4, DVec3};
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::PROJECTION_ID;
-use mln_gfx::shaders::hillshade_layer_ubo::{
-    HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO, MAX_ILLUMINATION_SOURCES,
-};
-use mln_gfx::shaders::hillshade_prepare_layer_ubo::{HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
@@ -55,6 +50,8 @@ use crate::gfx::vertices::SharedVertices;
 use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, KeptDraw, SingleDraw, TileDraws, TileObjects};
 use crate::layer_type::{EvaluatedLayer, LayerType};
+use crate::layers::hillshade::programs;
+use crate::layers::hillshade::ubo::{HillshadeDrawableUBO, HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO};
 use crate::layout::layout::NoLayout;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
@@ -66,6 +63,7 @@ use crate::render_static_data::RenderStaticData;
 use crate::render_target::RenderTarget;
 use crate::render_tile::FrameTile;
 use crate::terrain::SurfaceLight;
+use crate::terrain::ubo::{HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO, MAX_ILLUMINATION_SOURCES};
 use crate::tile_matrix::{bind_no_projection, projection_data, to_projection_ubo};
 
 /// The ids of the buffers that the draws bind.

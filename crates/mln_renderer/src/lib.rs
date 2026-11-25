@@ -24,7 +24,10 @@ mod image_store;
 mod layer_composite;
 mod layer_drawing;
 mod layer_type;
-mod layers;
+// Each layer type's programs and the engine's, public for the backends'
+// tests, which compile them. Not API.
+#[doc(hidden)]
+pub mod layers;
 mod layout;
 mod line_atlas;
 mod paint_parameters;
@@ -44,6 +47,10 @@ mod render_target;
 mod render_tile;
 mod renderer;
 mod renderer_event;
+// Each layer type's programs and the engine's, public for the backends'
+// tests, which compile them. Not API.
+#[doc(hidden)]
+pub mod shaders;
 mod sky_pass;
 pub mod source_state;
 mod source_type;

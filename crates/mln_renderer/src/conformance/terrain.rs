@@ -11,8 +11,6 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs;
-use mln_gfx::shaders::terrain_ubo::TerrainSurfaceUBO;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::SamplerState;
 use mln_util::Color;
@@ -21,6 +19,8 @@ use mln_util::size::Size;
 use mln_util::tileset::RasterEncoding;
 
 use super::{EXTENT, buffer, draw, dynamic, fixed, location, slot, whole};
+use crate::conformance::programs;
+use crate::terrain::ubo::TerrainSurfaceUBO;
 
 /// The most probes a frame draws, one per texel of a one-row target, which
 /// every backend's textures are wide enough for.

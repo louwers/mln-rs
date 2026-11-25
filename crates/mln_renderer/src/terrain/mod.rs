@@ -41,9 +41,18 @@ mod drapes;
 mod draws;
 mod elevation;
 mod fog;
+#[rustfmt::skip]
+pub(crate) mod glsl;
+#[rustfmt::skip]
+pub(crate) mod glsl_es;
 mod ground;
 mod mesh;
+#[rustfmt::skip]
+pub(crate) mod msl;
+pub mod programs;
 mod stacks;
+pub mod ubo;
+pub(crate) mod wgsl;
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -56,8 +65,6 @@ pub(crate) use elevation::{TerrainElevation, TileGround};
 pub(crate) use fog::terrain_fog;
 pub(crate) use ground::{FrameGround, GroundHeights, StandingDraw, height_attribute, point_center};
 use mln_gfx::gpu::Gpu;
-use mln_gfx::shaders::hillshade_layer_ubo::{HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO};
-use mln_gfx::shaders::terrain_ubo::{TerrainFog, TerrainProps};
 use mln_map_types::{MapMode, TerrainSkirtLength};
 use mln_style::source::SourceData;
 use mln_style::sources::RasterDemSourceType;
@@ -77,6 +84,7 @@ use crate::terrain::cover::dem_bucket;
 use crate::terrain::dem_textures::DemTextures;
 use crate::terrain::draws::TerrainDraws;
 use crate::terrain::ground::GroundDepth;
+use crate::terrain::ubo::{HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO, TerrainFog, TerrainProps};
 use crate::tile::source_tiles::SourceTiles;
 use crate::update_parameters::UpdateParameters;
 

@@ -1,8 +1,9 @@
-//! The OpenGL shaders: their GLSL, sources, programs and shader groups.
+//! The OpenGL shaders: the engine's GLSL ES prelude, and the declarations
+//! written from the programs, which precede their GLSL ES.
 
-/// The GLSL of every shader.
-#[rustfmt::skip]
-pub(crate) mod glsl_sources;
 pub(crate) mod declarations;
 pub(crate) mod precision;
+/// The engine's GLSL ES helpers.
+#[rustfmt::skip]
+pub(crate) mod prelude;
 pub(crate) mod shader_source;

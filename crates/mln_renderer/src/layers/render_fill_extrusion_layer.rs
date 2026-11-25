@@ -35,12 +35,8 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::shaders::bindings::PROJECTION_ID;
-use mln_gfx::shaders::fill_extrusion_layer_ubo::{
-    FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO,
-};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::View;
@@ -78,6 +74,8 @@ use crate::layer_drawing::{
     DrawDepth, DrawList, DrawObjectsMut, DrawPriority, FrameDraw, TileDraws, TileObjects, UniformWriter,
 };
 use crate::layer_type::{EvaluatedLayer, LayerType};
+use crate::layers::fill_extrusion::programs;
+use crate::layers::fill_extrusion::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{PatternLayout, uses_pattern};
 use crate::paint_parameters::PaintParameters;

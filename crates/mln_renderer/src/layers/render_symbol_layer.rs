@@ -13,11 +13,7 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::symbol_layer_ubo::{
-    CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
-};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{Projection, ProjectionData};
 use mln_style::layer::{ErasedLayerStyle as _, LayerStyle};
@@ -53,6 +49,10 @@ use crate::layer_drawing::{
     LayerDraws, TileMap, UniformWriter,
 };
 use crate::layer_type::{EvaluatedLayer, LayerType};
+use crate::layers::symbol::programs;
+use crate::layers::symbol::ubo::{
+    CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
+};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::symbol_layout::SymbolLayout;
 use crate::layout::symbol_projection::{gl_coord_matrix, label_plane_matrix};

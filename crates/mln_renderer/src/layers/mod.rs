@@ -1,4 +1,17 @@
-//! The render layers.
+//! The render layers, and each built-in layer type's programs, the blocks
+//! they read and their text in each language.
+
+pub mod background;
+pub mod circle;
+pub mod color_relief;
+pub mod fill;
+pub mod fill_extrusion;
+pub mod heatmap;
+pub mod hillshade;
+pub mod line;
+mod pattern;
+pub mod raster;
+pub mod symbol;
 
 pub(crate) mod render_background_layer;
 pub(crate) mod render_circle_layer;

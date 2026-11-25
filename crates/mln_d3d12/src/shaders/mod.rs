@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::{GpuError, ShaderKey};
 use mln_gfx::shaders::program::Program;
-use mln_glsl::{Module, ResourceUse, ShaderSource, Stage};
+use mln_gfx::shaders::source::GlslSource;
+use mln_glsl::{Module, ResourceUse, Stage};
 use mln_util::hash::HashMap;
 use parking_lot::Mutex;
 
@@ -47,7 +48,7 @@ impl ShaderCompiler {
     /// The program of `key` with its defines, compiled from `source` once a
     /// process: it doesn't depend on the device, and every renderer compiles
     /// the same.
-    pub fn compile(&self, key: &ShaderKey, source: &'static ShaderSource) -> Result<Arc<CompiledProgram>, GpuError> {
+    pub fn compile(&self, key: &ShaderKey, source: &'static GlslSource) -> Result<Arc<CompiledProgram>, GpuError> {
         static PROGRAMS: Mutex<Option<HashMap<ShaderKey, Arc<CompiledProgram>>>> = Mutex::new(None);
         if let Some(program) = PROGRAMS.lock().get_or_insert_default().get(key) {
             return Ok(Arc::clone(program));
@@ -57,7 +58,7 @@ impl ShaderCompiler {
         Ok(program)
     }
 
-    fn compile_uncached(&self, key: &ShaderKey, source: &'static ShaderSource) -> Result<CompiledProgram, GpuError> {
+    fn compile_uncached(&self, key: &ShaderKey, source: &'static GlslSource) -> Result<CompiledProgram, GpuError> {
         let program = key.program();
         let mut defines = String::new();
         for (name, value) in key.define_values() {
@@ -79,13 +80,13 @@ impl ShaderCompiler {
     pub(crate) fn compile_source(
         &self,
         program: &'static Program,
-        source: &'static ShaderSource,
+        source: &'static GlslSource,
         defines: &str,
     ) -> Result<CompiledProgram, String> {
         let mut resources: Vec<ResourceUse> = Vec::new();
         let mut reads_vertex_index = false;
         let mut compile = |stage| -> Result<Vec<u8>, String> {
-            let module = Module::parse(stage, &source.compose(program, stage, defines)?)?;
+            let module = Module::parse(stage, &mln_glsl::compose(source, program, stage, defines)?)?;
             reads_vertex_index |= module.module.entry_points.iter().any(|entry_point| {
                 entry_point.function.arguments.iter().any(|argument| {
                     matches!(argument.binding, Some(naga::Binding::BuiltIn(naga::BuiltIn::VertexIndex)))

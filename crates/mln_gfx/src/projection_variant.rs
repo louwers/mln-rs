@@ -16,19 +16,6 @@ pub enum ProjectionVariant {
 }
 
 impl ProjectionVariant {
-    /// The variants of `program`: those that stand on terrain too, for one
-    /// of [`STANDING`](crate::shaders::programs::STANDING).
-    #[must_use]
-    pub fn of(program: &crate::shaders::program::Program) -> &'static [ProjectionVariant] {
-        const ALL: [ProjectionVariant; 4] = [
-            ProjectionVariant::Mercator,
-            ProjectionVariant::Globe,
-            ProjectionVariant::Terrain,
-            ProjectionVariant::GlobeTerrain,
-        ];
-        if crate::shaders::programs::STANDING.contains(&program) { &ALL } else { &ALL[..2] }
-    }
-
     /// The variant on the globe if `globe`, standing on terrain if `stands`.
     #[must_use]
     pub fn new(globe: bool, stands: bool) -> ProjectionVariant {

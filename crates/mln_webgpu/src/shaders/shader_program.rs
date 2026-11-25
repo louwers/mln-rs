@@ -9,6 +9,7 @@ use mln_gfx::color_mode::BlendFunction;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
 use mln_gfx::gpu::{FixedState, GpuError, ShaderKey, VertexBufferLayout, VertexStep};
 use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::source::WgslSource;
 use mln_gfx::types::{
     ColorBlendEquationType, ColorBlendFactorType, CullFaceSideType, CullFaceWindingType, DepthFunctionType,
     StencilFunctionType, StencilOpType,
@@ -17,7 +18,7 @@ use mln_util::hash::HashMap;
 use mln_vec_map::VecMap;
 
 use crate::shaders::declaration::Declaration;
-use crate::shaders::shader_source::{WgslShaderSource, prelude};
+use crate::shaders::prelude::PRELUDE;
 use crate::shaders::wgsl_preprocessor::{is_space, preprocess_wgsl};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -586,7 +587,7 @@ pub(crate) fn compile(
     device: &wgpu::Device,
     index_layout: &wgpu::BindGroupLayout,
     key: &ShaderKey,
-    source: &'static WgslShaderSource,
+    source: &'static WgslSource,
 ) -> Result<ShaderProgram, GpuError> {
     let declaration = Declaration::new(key)?;
     // The common prelude goes through the preprocessor with the program, so
@@ -594,8 +595,8 @@ pub(crate) fn compile(
     let shader_prelude = source.prelude.unwrap_or("");
     let declarations = &declaration.declarations;
     let vertex_input = &declaration.vertex_input;
-    let vertex = format!("{}\n{declarations}{vertex_input}{shader_prelude}{}", prelude(), source.vertex.unwrap_or(""));
-    let fragment = format!("{}\n{declarations}{shader_prelude}{}", prelude(), source.fragment.unwrap_or(""));
+    let vertex = format!("{PRELUDE}\n{declarations}{vertex_input}{shader_prelude}{}", source.vertex.unwrap_or(""));
+    let fragment = format!("{PRELUDE}\n{declarations}{shader_prelude}{}", source.fragment.unwrap_or(""));
     // WGSL reads no define's value; the pixel ratio's is an override's.
     let defines: HashMap<String, bool> = key.define_values().map(|(name, _)| (name.to_owned(), true)).collect();
     let vertex_source = preprocess_wgsl(&vertex, &defines);

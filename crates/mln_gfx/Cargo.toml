@@ -28,10 +28,13 @@ slotmap.workspace = true
 thiserror.workspace = true
 
 [features]
-# The programs that only the GPU conformance cases (mln_renderer's
-# `conformance`) draw with, for the backends' tests: `VERTEX_TEXEL` and
-# `TERRAIN_PROBE` in `shaders::programs`.
-gpu-conformance = []
+# The shading languages whose text the programs keep
+# (`shaders::source::Sources`): each backend turns on the language it
+# compiles, and a build without a language's feature leaves its text out.
+wgsl = []
+msl = []
+glsl = []
+glsl-es = []
 
 [lints]
 workspace = true

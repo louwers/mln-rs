@@ -274,7 +274,9 @@ fn input_type(attribute: &Attribute, property: bool) -> Result<&'static str, Gpu
 
 #[cfg(test)]
 mod tests {
-    use mln_gfx::shaders::programs::{CIRCLE, FILL_EXTRUSION_PULLED, FILL_OUTLINE_INSTANCED};
+    use mln_renderer::layers::circle::programs::CIRCLE;
+    use mln_renderer::layers::fill::programs::FILL_OUTLINE_INSTANCED;
+    use mln_renderer::layers::fill_extrusion::programs::FILL_EXTRUSION_PULLED;
 
     use super::*;
 

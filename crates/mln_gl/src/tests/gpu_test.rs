@@ -10,10 +10,8 @@ use mln_gfx::gpu::{
     TextureFormat, TextureId, TextureRegion, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
     read_texels,
 };
-use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
 use mln_renderer::conformance::{
@@ -21,6 +19,8 @@ use mln_renderer::conformance::{
     instanced_walls, invalid_calls, mipmapped_targets, pulled_walls, readbacks, resources_in_use, terrain_heights,
     topologies, transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
 };
+use mln_renderer::layers::background::programs::BACKGROUND;
+use mln_renderer::layers::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use mln_util::Color;
 use mln_util::size::Size;
 
@@ -209,7 +209,7 @@ fn layouts() -> [VertexBufferLayout; 1] {
         stride: 4,
         step: VertexStep::Vertex,
         attributes: vec![VertexAttribute {
-            location: const { programs::BACKGROUND.location("pos") as u32 },
+            location: const { BACKGROUND.location("pos") as u32 },
             format: AttributeDataType::Short2,
             offset: 0,
         }],
@@ -262,7 +262,7 @@ impl Background {
 }
 
 fn background(gpu: &mut GlGpu, props: &BackgroundPropsUBO) -> Background {
-    let shader = gpu.create_shader(&ShaderKey::new(&programs::BACKGROUND, [])).unwrap();
+    let shader = gpu.create_shader(&ShaderKey::new(&BACKGROUND, [])).unwrap();
     let quad = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&[[-1i16, -1], [1, -1], [-1, 1], [1, 1]]));
     let indices = buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(&[0u16, 1, 2, 1, 2, 3]));
     let projection = [ProjectionUBO {
@@ -281,8 +281,8 @@ fn background(gpu: &mut GlGpu, props: &BackgroundPropsUBO) -> Background {
             shader,
             entries: &[
                 whole(PROJECTION_ID, projection_buffer, projection),
-                whole(const { programs::BACKGROUND.buffer_id("drawableVector") }, drawable_buffer, drawable),
-                whole(const { programs::BACKGROUND.buffer_id("props") }, props_buffer, bytemuck::bytes_of(props)),
+                whole(const { BACKGROUND.buffer_id("drawableVector") }, drawable_buffer, drawable),
+                whole(const { BACKGROUND.buffer_id("props") }, props_buffer, bytemuck::bytes_of(props)),
             ],
         })
         .unwrap();

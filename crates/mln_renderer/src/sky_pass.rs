@@ -5,9 +5,7 @@ use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_map_types::View;
 use mln_style::types::LightAnchorType;
@@ -24,6 +22,8 @@ use crate::layer_drawing::{DrawDepth, FrameDraw, SingleDraw};
 use crate::render_light::EvaluatedLight;
 use crate::render_sky::EvaluatedSky;
 use crate::render_static_data::RenderStaticData;
+use crate::shaders::programs;
+use crate::shaders::ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use crate::tile_matrix::bind_no_projection;
 
 /// The ids of the buffers that the draws bind.

@@ -17,7 +17,6 @@ use mln_gfx::gpu::{
     PipelineDesc, PipelineId, ReadbackId, ResourceId, SamplerId, ShaderId, ShaderKey, SlotMap, StencilState,
     TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
 };
-use mln_gfx::shaders::program::Sources;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::{MAX_ACTIVE_TEXTURE_UNITS, SamplerState};
 use mln_gfx::types::{DepthMaskType, TextureFilterType};
@@ -31,7 +30,7 @@ use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass, lend_context};
 use crate::enums::{self, AttributeFormat};
 use crate::renderer_backend::GlContext;
 use crate::shaders::declarations::Stage;
-use crate::shaders::shader_source::{BUILT_INS, ShaderSource, uniform_block};
+use crate::shaders::shader_source::{compose, uniform_block};
 use crate::state::State;
 #[cfg(not(target_family = "wasm"))]
 use crate::types::FenceID;
@@ -460,8 +459,6 @@ pub struct GlGpu {
     elements: SlotMap<ElementsId, Elements>,
     textures: SlotMap<TextureId, Texture>,
     samplers: SlotMap<SamplerId, Sampler>,
-    /// The source each program compiles from.
-    sources: Sources<ShaderSource>,
     shaders: SlotMap<ShaderId, Program>,
     layout_tags: LayoutTags,
     pipelines: SlotMap<PipelineId, Pipeline>,
@@ -550,7 +547,6 @@ impl GlGpu {
             elements: SlotMap::with_key(),
             textures: SlotMap::with_key(),
             samplers: SlotMap::with_key(),
-            sources: Sources::new(BUILT_INS),
             shaders: SlotMap::with_key(),
             layout_tags: LayoutTags::default(),
             pipelines: SlotMap::with_key(),
@@ -753,8 +749,8 @@ impl GlGpu {
     /// otherwise.
     fn compile(&mut self, key: &ShaderKey, highp_fragment: bool) -> Result<Program, GpuError> {
         let declared = key.program();
-        let source = self.sources.get(declared)?;
         let name = declared.name;
+        let source = declared.sources.glsl_es.ok_or_else(|| GpuError::Unsupported(format!("{name} has no GLSL ES")))?;
         // Desktop OpenGL compiles GLSL ES 3.00 only with
         // `GL_ARB_ES3_compatibility`, and every 3.3 context the GLSL 3.30
         // that the shaders are as well: what they use of GLSL ES is in it,
@@ -765,8 +761,7 @@ impl GlGpu {
         let fragment_defines = if highp_fragment { "#define HIGHP_FRAGMENT\n" } else { "" };
         let (gl, state) = self.context.parts();
         let shader = |stage, stage_defines| {
-            let text = source
-                .compose(declared, stage, &[version, &defines, stage_defines].concat())
+            let text = compose(source, declared, stage, &[version, &defines, stage_defines].concat())
                 .map_err(|error| GpuError::Invalid(format!("{name}: {error}")))?;
             let stage = match stage {
                 Stage::Vertex => glow::VERTEX_SHADER,

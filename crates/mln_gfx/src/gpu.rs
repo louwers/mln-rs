@@ -729,14 +729,32 @@ pub fn destroy_unused(gpu: &mut (impl Gpu + ?Sized), resources: impl IntoIterato
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shaders::programs;
+    use crate::shaders::program::Projection;
+    use crate::shaders::source::Sources;
+
+    const fn program(name: &'static str) -> Program {
+        Program {
+            name,
+            buffers: &[],
+            paint_params: None,
+            projection: Projection::None,
+            attributes: &[],
+            instance_attributes: &[],
+            textures: &[],
+            properties: &[],
+            sources: Sources::NONE,
+        }
+    }
+
+    static A: Program = program("A");
+    static B: Program = program("B");
 
     #[test]
     fn shader_keys_ignore_define_order_and_repeats() {
-        let key = |defines: &[&str]| ShaderKey::new(&programs::FILL, defines.iter().map(|&d| d.to_owned()));
+        let key = |defines: &[&str]| ShaderKey::new(&A, defines.iter().map(|&d| d.to_owned()));
         assert_eq!(key(&["B", "A", "B"]), key(&["A", "B"]));
         assert_eq!(key(&["B", "A"]).defines(), ["A", "B"]);
-        assert_ne!(key(&["A"]), ShaderKey::new(&programs::LINE, ["A".to_owned()]));
+        assert_ne!(key(&["A"]), ShaderKey::new(&B, ["A".to_owned()]));
         assert_eq!(key(&["B=2.0", "A"]).define_values().collect::<Vec<_>>(), [("A", ""), ("B", "2.0")]);
     }
 

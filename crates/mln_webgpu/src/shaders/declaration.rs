@@ -281,10 +281,12 @@ impl Structs {
 #[cfg(test)]
 mod tests {
     use mln_gfx::projection_variant::ProjectionVariant;
-    use mln_gfx::shaders::fill_layer_ubo::FillDrawableUBO;
     use mln_gfx::shaders::program::Property;
     use mln_gfx::shaders::program_parameters::ProgramParameters;
-    use mln_gfx::shaders::programs::{CIRCLE, CLIPPING_MASK, FILL_EXTRUSION_PULLED};
+    use mln_renderer::layers::circle::programs::CIRCLE;
+    use mln_renderer::layers::fill::ubo::FillDrawableUBO;
+    use mln_renderer::layers::fill_extrusion::programs::FILL_EXTRUSION_PULLED;
+    use mln_renderer::shaders::programs::CLIPPING_MASK;
 
     use super::*;
 

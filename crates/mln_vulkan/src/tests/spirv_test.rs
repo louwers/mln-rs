@@ -1,7 +1,15 @@
+use mln_gfx::shaders::program::Program;
+use mln_gfx::shaders::source::GlslSource;
 use mln_glsl::variants::variants;
-use mln_glsl::{BUILT_INS, Stage};
+use mln_glsl::{Stage, compose};
+use mln_renderer::shaders::{PROGRAMS, projection_variants};
 
 use crate::shaders::compile_program;
+
+/// Every program the renderer draws with that has GLSL, with its GLSL.
+fn programs() -> impl Iterator<Item = (&'static Program, &'static GlslSource)> {
+    PROGRAMS.iter().filter_map(|&program| Some((program, program.sources.glsl?)))
+}
 
 /// The first word of a SPIR-V module.
 const SPIRV_MAGIC: u32 = 0x0723_0203;
@@ -13,12 +21,11 @@ const SPIRV_MAGIC: u32 = 0x0723_0203;
 fn every_program_compiles_to_spirv() {
     let mut failures = Vec::new();
     let mut compiled = 0;
-    for &(program, source) in BUILT_INS {
-        for variant in variants(program, true) {
+    for (program, source) in programs() {
+        for variant in variants(program, projection_variants(program), true) {
             for stage in [Stage::Vertex, Stage::Fragment] {
                 let at = format!("{} ({}, {stage:?})", program.name, variant.name);
-                match source
-                    .compose(program, stage, &variant.defines)
+                match compose(source, program, stage, &variant.defines)
                     .and_then(|composed| compile_program(stage, &composed))
                 {
                     Ok(compiled_stage) if compiled_stage.spirv.first() == Some(&SPIRV_MAGIC) => compiled += 1,

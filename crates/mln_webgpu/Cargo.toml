@@ -21,7 +21,7 @@ doctest = false
 bench = []
 
 [dependencies]
-mln_gfx.workspace = true
+mln_gfx = { workspace = true, features = ["wgsl"] }
 mln_util.workspace = true
 mln_vec_map.workspace = true
 parking_lot.workspace = true
@@ -32,10 +32,9 @@ wgpu.workspace = true
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 wgpu = { workspace = true, features = ["naga-ir"] }
 
-# The test-only programs, which the tests compile and draw with, and the
-# conformance cases that `WebGpu`'s tests run.
+# The programs, which the tests compile and draw with, and the conformance
+# cases that `WebGpu`'s tests run.
 [dev-dependencies]
-mln_gfx = { workspace = true, features = ["gpu-conformance"] }
 mln_renderer = { package = "mln-rs-renderer", path = "../mln_renderer", features = [
   "gpu-conformance",
 ] }

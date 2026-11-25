@@ -1,10 +1,10 @@
-// naga's GLSL front end takes GLSL 4.50 for Vulkan, less what `sources`
-// avoids: combined image samplers, `bool` members of buffers, precision
+// naga's GLSL front end takes GLSL 4.50 for Vulkan, less what the
+// programs' GLSL avoids: combined image samplers, `bool` members of buffers, precision
 // qualifiers and samplers as function parameters.
 
 use naga::valid::{Capabilities, ModuleInfo, ValidationFlags, Validator};
 
-use crate::sources::{PRELUDE_FRAGMENT, PRELUDE_VERTEX};
+use crate::prelude::{PRELUDE_FRAGMENT, PRELUDE_VERTEX};
 
 /// The GLSL version every source is compiled as.
 const GLSL_VERSION: u32 = 450;
@@ -60,7 +60,7 @@ pub struct Module {
 }
 
 impl Module {
-    /// Parses and validates GLSL, such as a `ShaderSource::compose`d stage.
+    /// Parses and validates GLSL, such as a [`compose`](crate::compose)d stage.
     pub fn parse(stage: Stage, source: &str) -> Result<Module, String> {
         let module = parse(stage, source)?;
         // Not the uniformity of control flow: it is WGSL's rule for

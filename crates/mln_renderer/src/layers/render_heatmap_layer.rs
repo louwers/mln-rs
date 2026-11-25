@@ -10,10 +10,7 @@ use glam::dcamera::rh::proj::opengl::orthographic;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::PROJECTION_ID;
-use mln_gfx::shaders::heatmap_layer_ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO};
-use mln_gfx::shaders::heatmap_texture_layer_ubo::HeatmapTexturePropsUBO;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
@@ -44,6 +41,8 @@ use crate::layer_drawing::{
     UniformWriter, finish_tiles, tile_objects,
 };
 use crate::layer_type::{EvaluatedLayer, LayerType};
+use crate::layers::heatmap::programs;
+use crate::layers::heatmap::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, HeatmapTexturePropsUBO};
 use crate::layout::heatmap_layout::HeatmapLayout;
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::paint_parameters::PaintParameters;

@@ -1,13 +1,11 @@
-//! What a program reads, the same on every backend. A backend compiles a
-//! program from the source registered for it.
+//! What a program reads, the same on every backend, and the text it
+//! compiles from in each language.
 
 use std::hash::{Hash, Hasher};
 use std::{fmt, ptr};
 
-use mln_util::hash::HashMap;
-
 use crate::gfx_types::AttributeDataType;
-use crate::gpu::{GpuError, ShaderKey, VertexStep};
+use crate::gpu::{ShaderKey, VertexStep};
 use crate::projection_variant::ProjectionVariant;
 use crate::shaders::bindings::{
     FIRST_UNIFORM_ID, FIRST_VERTICES_ID, FRAGMENT_DRAW_ID, PAINT_PARAMS_ID, PROJECTION_ID, UNIFORM_SLOTS,
@@ -16,13 +14,14 @@ use crate::shaders::bindings::{
 use crate::shaders::block::{Block, UniformBlock};
 use crate::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
 use crate::shaders::program_parameters::ProgramParameters;
+use crate::shaders::source::Sources;
 
 /// A program: the buffers, attributes, textures and paint properties its
-/// shader reads.
+/// shader reads, and the text its shaders compile from.
 ///
 /// A program is the `static` that declares it: two programs are equal only
-/// if they are the same `static`, and a backend finds the source it compiles
-/// a program from by it.
+/// if they are the same `static`. A backend compiles it from its text in the
+/// backend's language ([`sources`](Program::sources)).
 ///
 /// A buffer binds at the id of its [`ProgramBuffer`]
 /// ([`buffer_id`](Program::buffer_id)). A program reads the engine's paint
@@ -58,6 +57,8 @@ pub struct Program {
     /// The paint properties it reads: those whose `HAS_UNIFORM_u_<name>`
     /// its source tests, and no others, since a variant defines only these.
     pub properties: &'static [Property],
+    /// The text its shaders compile from, in each language it has.
+    pub sources: Sources,
 }
 
 /// How a [`Program`]'s vertex stage reads the draw's projection block, a
@@ -537,36 +538,5 @@ impl Hash for Program {
 impl fmt::Debug for Program {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.name)
-    }
-}
-
-/// The source of type `S` that a backend compiles each program from.
-pub struct Sources<S: 'static> {
-    sources: HashMap<&'static Program, &'static S>,
-}
-
-impl<S> Sources<S> {
-    /// The sources with each of `built_ins` registered.
-    #[must_use]
-    pub fn new(built_ins: &[(&'static Program, &'static S)]) -> Sources<S> {
-        let mut sources = Sources { sources: HashMap::default() };
-        for &(program, source) in built_ins {
-            sources.register(program, source);
-        }
-        sources
-    }
-
-    /// Registers `source` as `program`'s, in place of any before.
-    pub fn register(&mut self, program: &'static Program, source: &'static S) {
-        self.sources.insert(program, source);
-    }
-
-    /// The source of `program`. Fails with [`GpuError::Unsupported`] if it
-    /// has none.
-    pub fn get(&self, program: &'static Program) -> Result<&'static S, GpuError> {
-        self.sources
-            .get(program)
-            .copied()
-            .ok_or_else(|| GpuError::Unsupported(format!("no source for {}", program.name)))
     }
 }

@@ -1,10 +1,8 @@
-//! The WebGPU shaders: their WGSL and its preprocessor, the declarations
-//! written from their programs, and the programs compiled from them.
+//! The WebGPU shaders: the engine's WGSL prelude and the preprocessor, the
+//! declarations written from the programs, and the programs compiled from
+//! their WGSL.
 
 pub(crate) mod declaration;
-pub(crate) mod fill_extrusion_wgsl;
-pub(crate) mod fill_outline_wgsl;
+pub(crate) mod prelude;
 pub(crate) mod shader_program;
-pub(crate) mod shader_source;
 pub(crate) mod wgsl_preprocessor;
-pub(crate) mod wgsl_sources;

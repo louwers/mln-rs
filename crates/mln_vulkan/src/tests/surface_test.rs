@@ -35,13 +35,13 @@ use mln_gfx::gpu::{
     TextureRegion, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
 };
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::programs;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
+use mln_renderer::layers::background::programs::BACKGROUND;
+use mln_renderer::layers::background::ubo::{BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use mln_util::Color;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
@@ -203,7 +203,7 @@ fn buffer(gpu: &mut VulkanGpu, usage: BufferUsage, data: &[u8]) -> BufferId {
 impl Scene {
     fn new(backend: &mut Window) -> Scene {
         let gpu = backend.backend.gpu();
-        let program = &programs::BACKGROUND;
+        let program = &BACKGROUND;
         let parameters = ProgramParameters::new(1.0, false);
         let key = program.variant_key(&parameters, [], ProjectionVariant::Mercator);
         let shader = gpu.create_shader(&key).expect("the shader");
@@ -225,12 +225,8 @@ impl Scene {
             size: size as u64,
         };
         let entries = [
-            entry(const { programs::BACKGROUND.buffer_id("props") }, props, size_of::<BackgroundPropsUBO>()),
-            entry(
-                const { programs::BACKGROUND.buffer_id("drawableVector") },
-                drawable,
-                size_of::<BackgroundDrawableUnionUBO>(),
-            ),
+            entry(const { BACKGROUND.buffer_id("props") }, props, size_of::<BackgroundPropsUBO>()),
+            entry(const { BACKGROUND.buffer_id("drawableVector") }, drawable, size_of::<BackgroundDrawableUnionUBO>()),
             entry(PROJECTION_ID, projection, size_of::<ProjectionUBO>()),
         ];
         let vertices = buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(&tile_vertices));

@@ -4,13 +4,8 @@ use std::sync::Arc;
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::PROJECTION_ID;
-use mln_gfx::shaders::fill_layer_ubo::{
-    FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO,
-    FillPatternTilePropsUBO, FillTilePropsUnionUBO,
-};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_style::PropertyEvaluationParameters;
@@ -38,6 +33,11 @@ use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArr
 use crate::layer_composite::Composite;
 use crate::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, TileDraws, TileObjects, UniformWriter};
 use crate::layer_type::{EvaluatedLayer, LayerType};
+use crate::layers::fill::programs;
+use crate::layers::fill::ubo::{
+    FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO,
+    FillPatternTilePropsUBO, FillTilePropsUnionUBO,
+};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::{FillLayoutSpec, PatternLayout, uses_pattern};
 use crate::paint_parameters::PaintParameters;

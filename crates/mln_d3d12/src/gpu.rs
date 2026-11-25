@@ -17,10 +17,9 @@ use mln_gfx::gpu::{
     TextureUsage, VertexStep, destroy_unused,
 };
 use mln_gfx::shaders::bindings::{FIRST_UNIFORM_ID, VERTEX_DRAW_ID};
-use mln_gfx::shaders::program::{Program, Sources};
+use mln_gfx::shaders::program::Program;
 use mln_gfx::texture2d::SamplerState;
 use mln_glsl::layout::{DescriptorSetType, IMAGE_SAMPLER_START, LAYER_STORAGE_COUNT};
-use mln_glsl::{BUILT_INS, ShaderSource};
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::size::Size;
 use windows::Win32::Foundation::{HANDLE, RECT};
@@ -291,8 +290,6 @@ pub struct D3d12Gpu {
     /// The upload memory that holds each set of sampler indices bindings
     /// point at, kept as long as the `D3d12Gpu`, as there are few sets.
     sampler_indices: HashMap<[u32; TABLE_SIZE as usize], BufferMemory>,
-    /// The source each program compiles from.
-    sources: Sources<ShaderSource>,
     shaders: SlotMap<ShaderId, Shader>,
     layout_tags: LayoutTags,
     pipelines: SlotMap<PipelineId, Pipeline>,
@@ -481,7 +478,6 @@ impl D3d12Gpu {
             sampler_heap: SamplerHeap::new(d3d)?,
             samplers: SlotMap::with_key(),
             sampler_indices: HashMap::default(),
-            sources: Sources::new(BUILT_INS),
             shaders: SlotMap::with_key(),
             layout_tags: LayoutTags::default(),
             pipelines: SlotMap::with_key(),
@@ -1234,7 +1230,9 @@ impl Gpu for D3d12Gpu {
     }
 
     fn create_shader(&mut self, key: &ShaderKey) -> Result<ShaderId, GpuError> {
-        let source = self.sources.get(key.program())?;
+        let declared = key.program();
+        let source =
+            declared.sources.glsl.ok_or_else(|| GpuError::Unsupported(format!("{} has no GLSL", declared.name)))?;
         let program = self.compiler.compile(key, source)?;
         let mut reads: Vec<ShaderBinding> = Vec::new();
         let mut buffers = Vec::new();

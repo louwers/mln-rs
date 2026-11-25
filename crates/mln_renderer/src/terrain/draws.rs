@@ -14,11 +14,8 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::PROJECTION_ID;
-use mln_gfx::shaders::hillshade_layer_ubo::HillshadeTilePropsUBO;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::terrain_ubo::{TerrainDrawableUBO, TerrainFog, TerrainSurfaceUBO};
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_map_types::View;
 use mln_tile_id::CanonicalTileID;
@@ -37,6 +34,8 @@ use crate::gfx::vertices::SharedVertices;
 use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileMap, finish_tiles, tile_objects};
 use crate::layers::render_hillshade_layer::lat_range;
 use crate::paint_parameters::PaintParameters;
+use crate::terrain::programs;
+use crate::terrain::ubo::{HillshadeTilePropsUBO, TerrainDrawableUBO, TerrainFog, TerrainSurfaceUBO};
 use crate::tile_matrix::to_projection_ubo;
 
 /// The ids of the buffers that the draws bind.

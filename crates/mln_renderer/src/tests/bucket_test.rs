@@ -891,7 +891,7 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
 
     with_context(|gpu, context| {
         let variant = mln_gfx::projection_variant::ProjectionVariant::Mercator;
-        let shader = context.shader_key(&mln_gfx::shaders::programs::RASTER, Uniforms::default(), variant);
+        let shader = context.shader_key(&crate::layers::raster::programs::RASTER, Uniforms::default(), variant);
         let vertex = |x: i16| RasterLayoutVertex { a1: [x, x], a2: [0, 0] };
         let typed = context.add_dynamic_vertices(&[vertex(0), vertex(1), vertex(2)]);
         let stride = size_of::<RasterLayoutVertex>() as u32;
@@ -936,7 +936,7 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
 // buffer of its own, which its uploads write the vertices' updates to.
 #[test]
 fn a_draw_binds_the_vertices_it_reads_as_a_storage_buffer() {
-    const ID: usize = mln_gfx::shaders::programs::FILL_EXTRUSION_PULLED.buffer_id("wallVertices");
+    const ID: usize = crate::layers::fill_extrusion::programs::FILL_EXTRUSION_PULLED.buffer_id("wallVertices");
     use mln_gfx::{ColorMode, CullFaceMode, DrawMode};
 
     use crate::draw::{DrawGeometry, DrawObjects};
@@ -944,8 +944,11 @@ fn a_draw_binds_the_vertices_it_reads_as_a_storage_buffer() {
 
     with_context(|gpu, context| {
         let variant = mln_gfx::projection_variant::ProjectionVariant::Mercator;
-        let shader =
-            context.shader_key(&mln_gfx::shaders::programs::FILL_EXTRUSION_PULLED, Uniforms::default(), variant);
+        let shader = context.shader_key(
+            &crate::layers::fill_extrusion::programs::FILL_EXTRUSION_PULLED,
+            Uniforms::default(),
+            variant,
+        );
         let typed = context.add_dynamic_vertices(&[[0u32; 2], [1; 2]]);
         let geometry = DrawGeometry {
             vertices: VertexAttributeArray::new(),

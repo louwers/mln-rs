@@ -11,14 +11,14 @@ use std::collections::BTreeSet;
 
 use mln_gfx::RendererBackend as _;
 use mln_gfx::gpu::ShaderKey;
-use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_gfx::shaders::programs::STANDING;
+use mln_gfx::shaders::source::GlslEsSource;
+use mln_renderer::shaders::{PROGRAMS, STANDING, projection_variants};
 use mln_util::hash::HashSet;
 
 use crate::shaders::declarations::Stage;
-use crate::shaders::shader_source::{BUILT_INS, ShaderSource, UniformBlockInfo, uniform_block};
+use crate::shaders::shader_source::{UniformBlockInfo, compose, uniform_block};
 use crate::{Api, Device, DeviceOptions, RendererBackend};
 
 /// A backend on a device of `api`, or none where there is no EGL to make a
@@ -43,11 +43,17 @@ fn headless_backend(api: Api) -> Option<RendererBackend> {
     }
 }
 
+/// Every program the renderer draws with that has GLSL ES, with its GLSL
+/// ES.
+fn programs() -> impl Iterator<Item = (&'static Program, &'static GlslEsSource)> {
+    PROGRAMS.iter().filter_map(|&program| Some((program, program.sources.glsl_es?)))
+}
+
 /// The names after `HAS_UNIFORM_u_` in a shader's GLSL.
-fn uniforms(source: &ShaderSource) -> BTreeSet<String> {
+fn uniforms(source: &GlslEsSource) -> BTreeSet<String> {
     const PREFIX: &str = "HAS_UNIFORM_u_";
     let mut names = BTreeSet::new();
-    for glsl in [source.glsl.vertex, source.glsl.fragment] {
+    for glsl in [source.vertex, source.fragment] {
         for (start, _) in glsl.match_indices(PREFIX) {
             let rest = &glsl[start + PREFIX.len()..];
             let end = rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_').unwrap_or(rest.len());
@@ -61,7 +67,7 @@ fn uniforms(source: &ShaderSource) -> BTreeSet<String> {
 /// program declares it.
 #[test]
 fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
-    for &(program, source) in BUILT_INS {
+    for (program, source) in programs() {
         let declared: BTreeSet<String> = program.properties.iter().map(|property| property.name.to_owned()).collect();
         assert_eq!(uniforms(source), declared, "{}", program.name);
     }
@@ -71,10 +77,10 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
 /// inspector, which counts its draws.
 #[test]
 fn every_layer_program_shows_the_overdraw_inspector() {
-    use mln_gfx::shaders::programs::{
-        ATMOSPHERE, CLIPPING_MASK, COLLISION_BOX, COLLISION_CIRCLE, GLOBE_DEPTH, SKY, TERRAIN, TERRAIN_DEPTH,
-        TERRAIN_PROBE, VERTEX_TEXEL,
-    };
+    use mln_renderer::conformance::programs::{TERRAIN_PROBE, VERTEX_TEXEL};
+    use mln_renderer::layers::symbol::programs::{COLLISION_BOX, COLLISION_CIRCLE};
+    use mln_renderer::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, GLOBE_DEPTH, SKY};
+    use mln_renderer::shaders::terrain::programs::{TERRAIN, TERRAIN_DEPTH};
     // The terrain shows its drapes, where the draped layers count their
     // draws.
     let not_layers = [
@@ -89,10 +95,10 @@ fn every_layer_program_shows_the_overdraw_inspector() {
         &VERTEX_TEXEL,
         &TERRAIN_PROBE,
     ];
-    for &(program, source) in BUILT_INS {
+    for (program, source) in programs() {
         if !not_layers.contains(&program) {
             assert!(
-                [source.glsl.vertex, source.glsl.fragment].iter().any(|text| text.contains("OVERDRAW_INSPECTOR")),
+                [source.vertex, source.fragment].iter().any(|text| text.contains("OVERDRAW_INSPECTOR")),
                 "{}",
                 program.name
             );
@@ -123,7 +129,7 @@ fn variants(program: &'static Program) -> Vec<Variant> {
         property_sets.push(program.properties);
     }
     let mut variants = Vec::new();
-    for &variant in ProjectionVariant::of(program) {
+    for &variant in projection_variants(program) {
         for (i, &property_set) in property_sets.iter().enumerate() {
             variants.push(Variant {
                 what: format!("{} ({variant:?}, {})", program.name, ["attributes", "uniforms"][i]),
@@ -137,11 +143,11 @@ fn variants(program: &'static Program) -> Vec<Variant> {
 }
 
 /// The vertex and fragment stages of `source` for `key`'s program, as GL ES.
-fn stages(source: &ShaderSource, key: &ShaderKey) -> [String; 2] {
+fn stages(source: &GlslEsSource, key: &ShaderKey) -> [String; 2] {
     let defines: String = key.define_values().flat_map(|(name, value)| ["#define ", name, " ", value, "\n"]).collect();
     let header = ["#version 300 es\n", &defines].concat();
     [Stage::Vertex, Stage::Fragment].map(|stage| {
-        source.compose(key.program(), stage, &header).unwrap_or_else(|error| panic!("{}: {error}", key.program().name))
+        compose(source, key.program(), stage, &header).unwrap_or_else(|error| panic!("{}: {error}", key.program().name))
     })
 }
 
@@ -160,7 +166,7 @@ fn declared_blocks(glsl: &str) -> Vec<String> {
 
 /// The uniform blocks that the stages of `source` for `key` declare, by
 /// their names, with where each binds.
-fn uniform_blocks(source: &ShaderSource, key: &ShaderKey) -> Vec<(String, Option<UniformBlockInfo>)> {
+fn uniform_blocks(source: &GlslEsSource, key: &ShaderKey) -> Vec<(String, Option<UniformBlockInfo>)> {
     let names: BTreeSet<String> = stages(source, key).iter().flat_map(|glsl| declared_blocks(glsl)).collect();
     names.into_iter().map(|name| (name.clone(), uniform_block(key.program(), &name))).collect()
 }
@@ -170,7 +176,7 @@ fn uniform_blocks(source: &ShaderSource, key: &ShaderKey) -> Vec<(String, Option
 /// compilers. So every block a shader declares needs an id to bind at.
 #[test]
 fn every_declared_uniform_block_has_a_buffer() {
-    for &(program, source) in BUILT_INS {
+    for (program, source) in programs() {
         for variant in variants(program) {
             for (block, info) in uniform_blocks(source, &variant.key) {
                 assert!(info.is_some(), "{}: uniform block {block} has no buffer", variant.what);
@@ -184,7 +190,7 @@ fn every_declared_uniform_block_has_a_buffer() {
 /// first, in the vertex shader's order (maplibre/maplibre-native#4625).
 #[test]
 fn fragment_shaders_declare_shared_uniform_blocks_first() {
-    for &(program, source) in BUILT_INS {
+    for (program, source) in programs() {
         for variant in variants(program) {
             let [vertex, fragment] = stages(source, &variant.key).map(|glsl| declared_blocks(&glsl));
             let shared: Vec<&String> = vertex.iter().filter(|block| fragment.contains(block)).collect();
@@ -215,8 +221,8 @@ fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
     let version = glow::HasContext::version(backend.context().gl());
     println!("GL_RENDERER: {}, GL_VERSION: {}", backend.get_renderer_name(), version.vendor_info);
 
-    let mut programs = 0;
-    for &(program, source) in BUILT_INS {
+    let mut linked = 0;
+    for (program, source) in programs() {
         for Variant { what, key, uniforms, flat } in variants(program) {
             // Fragment shaders default to mediump on a GPU and to highp on a
             // CPU rasterizer, so both must link wherever this runs.
@@ -227,7 +233,7 @@ fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
             };
             compile(true);
             let compiled = compile(false);
-            programs += 1;
+            linked += 1;
 
             let blocks = uniform_blocks(source, &key);
             for block in &compiled.blocks {
@@ -261,5 +267,5 @@ fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
             }
         }
     }
-    assert!(programs >= 2 * BUILT_INS.len());
+    assert!(linked >= 2 * programs().count());
 }

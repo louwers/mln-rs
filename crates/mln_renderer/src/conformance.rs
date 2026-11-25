@@ -23,7 +23,15 @@
 //! height rule reads on the GPU, against the CPU's.
 
 mod cases;
+#[rustfmt::skip]
+mod glsl;
+#[rustfmt::skip]
+mod glsl_es;
+#[rustfmt::skip]
+mod msl;
+pub mod programs;
 mod terrain;
+mod wgsl;
 
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
@@ -35,11 +43,9 @@ use mln_gfx::gpu::{
     PipelineDesc, PipelineId, ResourceId, Scissor, ShaderId, ShaderKey, StencilState, TargetFormats, TextureDesc,
     TextureFormat, TextureId, TextureUsage, VertexAttribute, VertexBufferLayout, VertexStep,
 };
-use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::programs;
 use mln_gfx::stencil_mode::{StencilMode, Test};
 use mln_gfx::types::StencilOpType;
 use mln_util::Color;
@@ -47,6 +53,9 @@ use mln_util::size::Size;
 
 pub use self::cases::*;
 pub use self::terrain::terrain_heights;
+use crate::layers::background::programs::BACKGROUND;
+use crate::layers::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
+use crate::shaders::programs::CLIPPING_MASK;
 
 /// The size of the frame's color texture.
 pub const SIZE: Size = Size { width: 64, height: 32 };
@@ -228,8 +237,8 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
     };
     let (quad, indices) = quad(gpu)?;
 
-    let mask_shader = gpu.create_shader(&ShaderKey::new(&programs::CLIPPING_MASK, []))?;
-    let mask_layouts = [position_layout(&programs::CLIPPING_MASK)];
+    let mask_shader = gpu.create_shader(&ShaderKey::new(&CLIPPING_MASK, []))?;
+    let mask_layouts = [position_layout(&CLIPPING_MASK)];
     let mask_pipeline = gpu.create_pipeline(&PipelineDesc {
         shader: mask_shader,
         vertex_buffers: &mask_layouts,
@@ -257,8 +266,8 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
         index_buffer: indices,
     })?;
 
-    let background_shader = gpu.create_shader(&ShaderKey::new(&programs::BACKGROUND, []))?;
-    let background_layouts = [position_layout(&programs::BACKGROUND)];
+    let background_shader = gpu.create_shader(&ShaderKey::new(&BACKGROUND, []))?;
+    let background_layouts = [position_layout(&BACKGROUND)];
     let background_pipeline = gpu.create_pipeline(&PipelineDesc {
         shader: background_shader,
         vertex_buffers: &background_layouts,
@@ -290,8 +299,8 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
         shader: background_shader,
         entries: &[
             whole(PROJECTION_ID, projection_buffer, projections),
-            whole(const { programs::BACKGROUND.buffer_id("drawableVector") }, drawable_buffer, drawables),
-            whole(const { programs::BACKGROUND.buffer_id("props") }, props_buffer, props),
+            whole(const { BACKGROUND.buffer_id("drawableVector") }, drawable_buffer, drawables),
+            whole(const { BACKGROUND.buffer_id("props") }, props_buffer, props),
         ],
     })?;
     let background_geometry = gpu.create_geometry(&GeometryDesc {

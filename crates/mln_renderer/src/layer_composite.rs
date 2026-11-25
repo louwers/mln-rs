@@ -25,9 +25,7 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::{BUFFER_IDS, PROJECTION_ID};
-use mln_gfx::shaders::layer_composite_ubo::{LayerCompositeBlendMode, LayerCompositeUBO};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::programs;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::ColorBlendFactorType;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMode, DrawModeType, StencilMode};
@@ -44,6 +42,8 @@ use crate::gfx::resources::{GpuTexture, attachment_bytes};
 use crate::gfx::vertex_attribute::Uniforms;
 use crate::paint_parameters::{DrawTarget, OpenPass};
 use crate::render_static_data::RenderStaticData;
+use crate::shaders::programs;
+use crate::shaders::ubo::{LayerCompositeBlendMode, LayerCompositeUBO};
 
 /// The ids of the buffers that the draws bind.
 const PROPS_ID: usize = programs::LAYER_COMPOSITE.buffer_id("props");
