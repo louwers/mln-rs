@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use feature::Value;
-use mln_style_types::{ProjectionDefinition, VisibilityType};
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::tileset::PartialTileset;
@@ -21,6 +20,7 @@ use crate::sources::tileset::vector_source as tileset_vector_source;
 use crate::style::Style;
 use crate::style::edit::Edit;
 use crate::terrain::Terrain;
+use crate::types::{ProjectionDefinition, VisibilityType};
 use crate::{StyleRegistry, image};
 
 /// An empty style.

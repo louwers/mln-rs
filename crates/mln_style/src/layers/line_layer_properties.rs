@@ -15,7 +15,7 @@ crate::properties!(
         line_round_limit: data_driven f32 = 1.0_f32,
         line_sort_key: data_driven f32 = 0.0_f32,
     }
-    use mln_style_types::LineCapType, mln_style_types::LineJoinType;
+    use crate::types::LineCapType, crate::types::LineJoinType;
 );
 
 crate::properties!(
@@ -39,7 +39,7 @@ crate::properties!(
     derived {
         line_floor_width: integer_zoom f32 = 1.0_f32 => line_width,
     }
-    use crate::expression::Image, mln_style_types::LayerBlendType, mln_style_types::TranslateAnchorType, mln_util::Color;
+    use crate::expression::Image, crate::types::LayerBlendType, crate::types::TranslateAnchorType, mln_util::Color;
 );
 
 /// The properties, by slot.

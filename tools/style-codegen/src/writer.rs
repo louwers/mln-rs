@@ -128,6 +128,6 @@ fn type_path(name: &str) -> String {
     match name {
         "Color" | "Padding" => format!("mln_util::{name}"),
         "Image" | "Formatted" => format!("crate::expression::{name}"),
-        _ => format!("mln_style_types::{name}"),
+        _ => format!("crate::types::{name}"),
     }
 }

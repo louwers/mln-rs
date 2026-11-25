@@ -8,7 +8,7 @@ use std::num::NonZeroU32;
 use geometry::Point;
 use glam::Vec2;
 use mln_map_types::{TileProjector, View};
-use mln_style_types::{AlignmentType, IconTextFitType, TextRotationAlignmentType, TextWritingModeType};
+use mln_style::types::{AlignmentType, IconTextFitType, TextRotationAlignmentType, TextWritingModeType};
 use mln_util::constants::ONE_EM;
 
 use super::context::translation;
@@ -197,7 +197,7 @@ impl Placement {
     ) -> bool {
         let layout = &*bucket.layout;
         let tile = &data.tile;
-        let along_line = *layout.symbol_placement.uniform() != mln_style_types::SymbolPlacementType::Point;
+        let along_line = *layout.symbol_placement.uniform() != mln_style::types::SymbolPlacementType::Point;
         let has_text = bucket.has_text_data();
         let has_variable_anchors = bucket.has_variable_text_anchors() && has_text;
         let screen_space = *layout.symbol_screen_space.uniform();

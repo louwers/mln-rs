@@ -238,10 +238,9 @@ fn viewport_glyph_only_for_text_rotation_alignment() {
 /// evaluates to `ground` where a layer leaves it out.
 #[test]
 fn symbol_height_anchor_parses_and_evaluates() {
-    use mln_style_types::SymbolHeightAnchorType;
-
     use crate::layers::Symbol;
     use crate::property::evaluation::PropertyEvaluationParameters;
+    use crate::types::SymbolHeightAnchorType;
 
     let evaluate = |layout: &str, zoom: f32| {
         let src = format!(r#"{{"id": "symbol", "type": "symbol", "source": "s", "layout": {{{layout}}}}}"#);

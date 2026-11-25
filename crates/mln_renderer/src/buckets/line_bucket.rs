@@ -11,7 +11,7 @@ use mln_gfx::shaders::shader_defines::{
 use mln_style::expression::{EvaluationContext, Image, Value};
 use mln_style::layers::Line;
 use mln_style::layers::line_layer_properties::{LineLayoutProperties, LinePaintProperties};
-use mln_style_types::image::ImagePositions;
+use mln_text::atlas::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::Color;

@@ -1,1 +1,197 @@
-pub use mln_style_types::image::{Image, ImageContent, ImageStretch, ImageStretches, Impl, TextFit};
+//! A style's images: an icon or pattern with its pixels, pixel ratio,
+//! stretch areas and content box, from a sprite or added by the app.
+
+use std::sync::Arc;
+
+use mln_util::error::Error;
+use mln_util::image::PremultipliedImage;
+use mln_util::size::Size;
+
+pub type ImageStretch = (f32, f32);
+pub type ImageStretches = Vec<ImageStretch>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, mln_wire::Wire)]
+pub enum TextFit {
+    StretchOrShrink,
+    StretchOnly,
+    Proportional,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, mln_wire::Wire)]
+pub struct ImageContent {
+    pub left: f32,
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+}
+
+#[derive(Clone, Debug, mln_wire::Wire)]
+pub struct Impl {
+    pub id: String,
+    pub image: PremultipliedImage,
+    /// Pixel ratio of the sprite image.
+    pub pixel_ratio: f32,
+    /// Whether this image should be interpreted as a signed distance field
+    /// icon.
+    pub sdf: bool,
+    /// Stretch areas of this image.
+    pub stretch_x: ImageStretches,
+    pub stretch_y: ImageStretches,
+    /// The space where text can be fit into this image.
+    pub content: Option<ImageContent>,
+    /// If `icon-text-fit` is used in a layer with this image, this option
+    /// defines constraints on the horizontal scaling of the image.
+    pub text_fit_width: Option<TextFit>,
+    /// If `icon-text-fit` is used in a layer with this image, this option
+    /// defines constraints on the vertical scaling of the image.
+    pub text_fit_height: Option<TextFit>,
+    /// Whether the image stays in its style once no layer uses it, whatever
+    /// the map's policy for unused images says.
+    pub keep_unused: bool,
+}
+
+impl PartialEq for Impl {
+    /// Image impls compare by id, as in C++.
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+fn validate_stretch(stretches: &ImageStretches, size: f32) -> bool {
+    if stretches.is_empty() {
+        return true;
+    }
+    let mut last = 0.0f32;
+    for part in stretches {
+        if part.0 < last || part.1 < part.0 || size < part.1 {
+            return false;
+        }
+        last = part.1;
+    }
+    true
+}
+
+fn validate_content(content: &ImageContent, size: Size) -> bool {
+    let (width, height) = (size.width as f32, size.height as f32);
+    if content.left < 0.0 || width < content.left {
+        return false;
+    }
+    if content.top < 0.0 || height < content.top {
+        return false;
+    }
+    if content.right < 0.0 || width < content.right {
+        return false;
+    }
+    if content.bottom < 0.0 || height < content.bottom {
+        return false;
+    }
+    if content.right < content.left {
+        return false;
+    }
+    if content.bottom < content.top {
+        return false;
+    }
+    true
+}
+
+impl Impl {
+    /// Creates an image. Fails with
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty image,
+    /// a pixel ratio that isn't positive, or stretches or a content area
+    /// outside the image.
+    #[expect(clippy::too_many_arguments, reason = "each argument is a field of the image")]
+    pub fn new(
+        id: String,
+        image: PremultipliedImage,
+        pixel_ratio: f32,
+        sdf: bool,
+        stretch_x: ImageStretches,
+        stretch_y: ImageStretches,
+        content: Option<ImageContent>,
+        text_fit_width: Option<TextFit>,
+        text_fit_height: Option<TextFit>,
+    ) -> Result<Self, Error> {
+        if !image.valid() {
+            return Err(Error::invalid_argument("dimensions may not be zero"));
+        } else if pixel_ratio <= 0.0 {
+            return Err(Error::invalid_argument("pixelRatio may not be <= 0"));
+        } else if !validate_stretch(&stretch_x, image.size.width as f32) {
+            return Err(Error::invalid_argument("stretchX is out of bounds or overlapping"));
+        } else if !validate_stretch(&stretch_y, image.size.height as f32) {
+            return Err(Error::invalid_argument("stretchY is out of bounds or overlapping"));
+        } else if content.as_ref().is_some_and(|content| !validate_content(content, image.size)) {
+            return Err(Error::invalid_argument("content area is invalid"));
+        }
+        Ok(Impl {
+            id,
+            image,
+            pixel_ratio,
+            sdf,
+            stretch_x,
+            stretch_y,
+            content,
+            text_fit_width,
+            text_fit_height,
+            keep_unused: false,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Image {
+    pub base_impl: Arc<Impl>,
+}
+
+impl Image {
+    #[expect(clippy::too_many_arguments, reason = "each argument is a field of the image")]
+    pub fn new(
+        id: String,
+        image: PremultipliedImage,
+        pixel_ratio: f32,
+        sdf: bool,
+        stretch_x: ImageStretches,
+        stretch_y: ImageStretches,
+        content: Option<ImageContent>,
+        text_fit_width: Option<TextFit>,
+        text_fit_height: Option<TextFit>,
+    ) -> Result<Self, Error> {
+        Ok(Image {
+            base_impl: Arc::new(Impl::new(
+                id,
+                image,
+                pixel_ratio,
+                sdf,
+                stretch_x,
+                stretch_y,
+                content,
+                text_fit_width,
+                text_fit_height,
+            )?),
+        })
+    }
+
+    #[must_use]
+    pub fn get_image(&self) -> &PremultipliedImage {
+        &self.base_impl.image
+    }
+
+    #[must_use]
+    pub fn get_pixel_ratio(&self) -> f32 {
+        self.base_impl.pixel_ratio
+    }
+
+    #[must_use]
+    pub fn get_stretch_x(&self) -> &ImageStretches {
+        &self.base_impl.stretch_x
+    }
+
+    #[must_use]
+    pub fn get_stretch_y(&self) -> &ImageStretches {
+        &self.base_impl.stretch_y
+    }
+
+    #[must_use]
+    pub fn get_content(&self) -> &Option<ImageContent> {
+        &self.base_impl.content
+    }
+}

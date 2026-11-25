@@ -1,5 +1,3 @@
-use mln_style_types::{AnchorOffsetPair, SymbolAnchorType, VariableAnchorOffsetCollection};
-
 use super::util::parse_json;
 use crate::StyleRegistry;
 use crate::conversion::{Converter, Convertible, Error};
@@ -8,6 +6,7 @@ use crate::layer::convert_layer;
 use crate::property::convert::convert_property_value;
 use crate::property::expression::PropertyExpression;
 use crate::property::value::PropertyValue;
+use crate::types::{AnchorOffsetPair, SymbolAnchorType, VariableAnchorOffsetCollection};
 
 fn parse(src: &str, error: &mut Error) -> Option<VariableAnchorOffsetCollection> {
     let value = parse_json(src);

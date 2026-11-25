@@ -2,12 +2,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU16;
 use std::sync::Arc;
 
-use mln_style_types::image::RectU16;
 use mln_util::font_stack::FontStack;
 use mln_util::image::AlphaImage;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
 
+use crate::atlas::RectU16;
 use crate::tagged_string::FontStackHash;
 
 /// Where a glyph comes from: glyph PBFs, or a font file that shapes text,

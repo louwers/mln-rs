@@ -1,9 +1,10 @@
 use glam::Vec2;
 use mln_math::deg2radf;
+use mln_style::image::ImageStretch;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
-use mln_style_types::image::{ImagePosition, ImagePositions, ImageStretch, RectU16};
-use mln_style_types::{SymbolPlacementType, TextRotationAlignmentType};
+use mln_style::types::{SymbolPlacementType, TextRotationAlignmentType};
 use mln_text::PositionedIcon;
+use mln_text::atlas::{ImagePosition, ImagePositions, RectU16};
 use mln_text::glyph::Shaping;
 use mln_util::constants::ONE_EM;
 
@@ -322,8 +323,8 @@ pub(crate) fn glyph_quads(
 
 #[cfg(test)]
 mod tests {
-    use mln_style_types::image::Impl as ImageImpl;
-    use mln_style_types::{IconTextFitType, SymbolAnchorType};
+    use mln_style::image::Impl as ImageImpl;
+    use mln_style::types::{IconTextFitType, SymbolAnchorType};
     use mln_text::glyph::{Bounds, GlyphID, GlyphMetrics, PositionedGlyph, PositionedLine};
     use mln_util::image::PremultipliedImage;
     use mln_util::size::Size;
@@ -580,7 +581,7 @@ mod tests {
             false,
             vec![(2.0, 8.0)],
             vec![(2.0, 8.0)],
-            Some(mln_style_types::image::ImageContent { left: 2.0, top: 2.0, right: 8.0, bottom: 8.0 }),
+            Some(mln_style::image::ImageContent { left: 2.0, top: 2.0, right: 8.0, bottom: 8.0 }),
             None,
             None,
         )

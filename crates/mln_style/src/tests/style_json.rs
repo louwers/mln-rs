@@ -333,7 +333,7 @@ fn the_sky_and_the_projection_change_and_reset() {
     assert_eq!(root_property(&style, "projection").as_deref(), Some(r#"{"type":"globe"}"#));
     assert_eq!(
         style.get_projection().evaluate(0.0),
-        mln_style_types::ProjectionDefinition::new(mln_style_types::ProjectionType::VerticalPerspective)
+        crate::types::ProjectionDefinition::new(crate::types::ProjectionType::VerticalPerspective)
     );
 
     assert_fails(

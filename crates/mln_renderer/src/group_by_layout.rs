@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use mln_style::expression::Expr;
 use mln_style::layer::{ErasedLayerStyle, LayerTypeInfo};
-use mln_style_types::VisibilityType;
+use mln_style::types::VisibilityType;
 use mln_util::hash::{HashMap, RandomState};
 
 use crate::layer_type::ErasedEvaluatedLayer;

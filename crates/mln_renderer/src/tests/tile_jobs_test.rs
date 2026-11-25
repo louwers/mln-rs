@@ -15,9 +15,9 @@ use mln_map_types::MapMode;
 use mln_storage::FileSource;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::conversion::{Convertible, Error as ConversionError};
+use mln_style::image::Impl as ImageImpl;
 use mln_style::layer::convert_layer;
 use mln_style::property::evaluation::PropertyEvaluationParameters;
-use mln_style_types::image::Impl as ImageImpl;
 use mln_tile::TileData;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::hash::HashSet;
@@ -203,7 +203,7 @@ impl Test {
     fn bin_of(&mut self, id: &str) -> DynamicTextureBinId {
         let image = self.tile.store.images().image(id).cloned().expect("image");
         let icons = [(id.to_owned(), image)].into_iter().collect();
-        let page = self.tile.store.atlas().pack_images(&icons, &mln_style_types::image::ImageMap::default());
+        let page = self.tile.store.atlas().pack_images(&icons, &crate::image_store::ImageMap::default());
         page.lease.texture_handles()[0].id()
     }
 }

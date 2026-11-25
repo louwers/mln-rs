@@ -57,6 +57,7 @@ pub mod sources;
 pub mod sprite;
 mod style;
 pub mod terrain;
+pub mod types;
 #[doc(hidden)]
 pub mod wire;
 

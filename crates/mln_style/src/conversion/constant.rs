@@ -1,15 +1,15 @@
 use std::str::FromStr;
 
-use mln_style_types::{
+use mln_util::{Color, Padding};
+
+use super::{Converter, Convertible, Error, convert};
+use crate::types::{
     AlignmentType, AnchorOffsetPair, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType,
     IconOverlapType, IconTextFitType, LayerBlendType, LightAnchorType, LineCapType, LineJoinType, ProjectionDefinition,
     RasterResamplingType, ResamplingType, SymbolAnchorType, SymbolHeightAnchorType, SymbolPlacementType,
     SymbolZOrderType, TextJustifyType, TextRotationAlignmentType, TextTransformType, TextWritingModeType,
     TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType, projection_type_from_name,
 };
-use mln_util::{Color, Padding};
-
-use super::{Converter, Convertible, Error, convert};
 
 impl Converter for bool {
     fn convert(value: &Convertible<'_>, error: &mut Error) -> Option<bool> {

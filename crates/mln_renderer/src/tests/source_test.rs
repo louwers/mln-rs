@@ -22,8 +22,8 @@ use mln_style::sources::{
     CustomGeometrySourceHandle, CustomVectorSourceHandle, VectorSourceType, raster_dem_source, raster_source,
     vector_source,
 };
+use mln_style::types::ProjectionDefinition;
 use mln_style::{Edit, Source, Style};
-use mln_style_types::ProjectionDefinition;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::geo::LatLng;

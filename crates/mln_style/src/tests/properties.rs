@@ -160,13 +160,13 @@ fn transition_completes_and_drops_prior() {
 /// and the line bucket call it.
 #[test]
 fn possibly_evaluated_evaluate_per_feature() {
-    use mln_style_types::{AlignmentType, LineJoinType};
     use mln_tile_id::CanonicalTileID;
 
     use crate::expression::dsl::{get_str, number};
     use crate::layers::{CirclePaintProperties, LineLayoutProperties};
     use crate::property::expression::PropertyExpression;
     use crate::tests::util::{StubGeometryTileFeature, property_map};
+    use crate::types::{AlignmentType, LineJoinType};
 
     let feature = StubGeometryTileFeature::new(property_map(&[("r", Value::Double(7.5))]));
 

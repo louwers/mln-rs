@@ -23,7 +23,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 # The globe drag test's projection.
-mln_style_types = { package = "mln-rs-style-types", path = "../mln_style_types" }
+mln_style = { package = "mln-rs-style", path = "../mln_style" }
 
 [lints]
 workspace = true

@@ -29,7 +29,7 @@ crate::properties!(
         circle_translate: constant [f32; 2] = [0.0_f32, 0.0_f32],
         circle_translate_anchor: constant TranslateAnchorType = TranslateAnchorType::Map,
     }
-    use mln_style_types::AlignmentType, mln_style_types::CirclePitchScaleType, mln_style_types::TranslateAnchorType, mln_util::Color;
+    use crate::types::AlignmentType, crate::types::CirclePitchScaleType, crate::types::TranslateAnchorType, mln_util::Color;
 );
 
 /// The properties, by slot.

@@ -1,6 +1,5 @@
-use mln_style_types::Rotation;
-
 use super::{Converter, Convertible, Error};
+use crate::types::Rotation;
 
 impl Converter for Rotation {
     fn convert(value: &Convertible<'_>, error: &mut Error) -> Option<Rotation> {

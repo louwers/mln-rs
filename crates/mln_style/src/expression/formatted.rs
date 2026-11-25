@@ -1,10 +1,10 @@
 use std::fmt;
 
-use mln_style_types::types::VerticalAlign;
 use mln_util::Color;
 
 use crate::conversion::{Convertible, Error};
 use crate::expression::image::Image;
+use crate::types::VerticalAlign;
 
 pub(crate) const K_FORMATTED_SECTION_FONT_SCALE: &str = "font-scale";
 pub(crate) const K_FORMATTED_SECTION_TEXT_FONT: &str = "text-font";

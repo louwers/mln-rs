@@ -2,7 +2,7 @@ use geometry::Point;
 use glam::{DMat4, DVec4, Vec2};
 use mln_map_types::{MapMode, ProjectedTilePoint, TileProjector, View};
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
-use mln_style_types::IconOverlapType;
+use mln_style::types::IconOverlapType;
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::constants::EXTENT;
 use mln_util::geo::ScreenLineString;

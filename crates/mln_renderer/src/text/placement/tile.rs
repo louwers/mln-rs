@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use std::num::NonZeroU32;
 
 use glam::{DMat4, Vec2};
-use mln_style_types::{SymbolAnchorType, SymbolPlacementType};
+use mln_style::types::{SymbolAnchorType, SymbolPlacementType};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::EXTENT;
 use mln_util::hash::HashSet;

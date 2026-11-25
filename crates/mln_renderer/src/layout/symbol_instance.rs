@@ -4,7 +4,7 @@
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-use mln_style_types::{SymbolAnchorType, TextJustifyType, VariableAnchorOffsetCollection};
+use mln_style::types::{SymbolAnchorType, TextJustifyType, VariableAnchorOffsetCollection};
 use mln_text::anchor_justification;
 use mln_text::glyph::Shaping;
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;

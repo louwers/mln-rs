@@ -6,12 +6,13 @@
 use std::ops::Range;
 
 use glam::Vec2;
-use mln_style_types::image::{ImagePosition, ImagePositions, TextFit};
-use mln_style_types::types::{IconTextFitType, SymbolAnchorType, TextJustifyType, TextWritingModeType, VerticalAlign};
+use mln_style::image::TextFit;
+use mln_style::types::{IconTextFitType, SymbolAnchorType, TextJustifyType, TextWritingModeType, VerticalAlign};
 use mln_util::constants::ONE_EM;
 use mln_util::{Padding, i18n};
 use mln_vec_map::VecSet;
 
+use crate::atlas::{ImagePosition, ImagePositions};
 use crate::bidi;
 use crate::glyph::{
     Bounds, Glyph, GlyphID, GlyphIDType, GlyphMetrics, GlyphPositions, PositionedGlyph, PositionedLine, Shaping,

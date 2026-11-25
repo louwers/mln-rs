@@ -20,7 +20,7 @@ crate::properties!(
         raster_saturation: constant f32 = 0.0_f32,
         resampling: constant ResamplingType = ResamplingType::Linear,
     }
-    use mln_style_types::LayerBlendType, mln_style_types::RasterResamplingType, mln_style_types::ResamplingType;
+    use crate::types::LayerBlendType, crate::types::RasterResamplingType, crate::types::ResamplingType;
 );
 
 /// The properties, by slot.

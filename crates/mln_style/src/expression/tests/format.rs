@@ -1,9 +1,8 @@
-use mln_style_types::types::VerticalAlign;
-
 use crate::conversion::Convertible;
 use crate::expression::parse::ParsingContext;
 use crate::expression::value::{Value, to_mbgl_value};
 use crate::expression::{EvaluationContext, Functions};
+use crate::types::VerticalAlign;
 
 fn evaluate(document: &Convertible<'_>) -> Value {
     let mut ctx = ParsingContext::new(&Functions::with_builtins());

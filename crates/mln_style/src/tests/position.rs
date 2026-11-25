@@ -1,5 +1,5 @@
-use crate::Position;
 use crate::tests::assert_near;
+use crate::types::Position;
 
 #[track_caller]
 fn expect_array_eq(got: [f32; 3], expected: [f32; 3]) {

@@ -1,7 +1,8 @@
 use etagere::{AllocId, BucketedAtlasAllocator, size2};
 use geometry::Point;
 use mln_gfx::gpu::{Gpu, TextureFormat};
-use mln_style_types::image::{ImagePosition, Impl as ImageImpl, RectU16};
+use mln_style::image::Impl as ImageImpl;
+use mln_text::atlas::{ImagePosition, RectU16};
 use mln_util::hash::HashMap;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;

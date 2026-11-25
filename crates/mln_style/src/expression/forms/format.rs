@@ -1,5 +1,4 @@
 use feature::{Value as MbglValue, ValueObject};
-use mln_style_types::types::VerticalAlign;
 use mln_util::Color;
 
 use crate::conversion::Convertible;
@@ -11,6 +10,7 @@ use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::type_::Type;
 use crate::expression::value::{Value, from_expression_value, to_string};
 use crate::expression::{EvaluationContext, EvaluationError, EvaluationResult, Expr, Node};
+use crate::types::VerticalAlign;
 
 /// A section of a `format` expression: its content and options.
 #[derive(Clone, PartialEq, mln_wire::Wire)]

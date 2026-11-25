@@ -27,7 +27,7 @@ crate::properties!(
         fill_extrusion_translate_anchor: constant TranslateAnchorType = TranslateAnchorType::Map,
         fill_extrusion_vertical_gradient: constant bool = true,
     }
-    use crate::expression::Image, mln_style_types::TranslateAnchorType, mln_util::Color;
+    use crate::expression::Image, crate::types::TranslateAnchorType, mln_util::Color;
 );
 
 /// The properties, by slot.

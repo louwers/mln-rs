@@ -15,7 +15,7 @@ use mln_map_types::TileProjector;
 use mln_style::expression::EvaluationContext;
 use mln_style::layer::LayerStyle;
 use mln_style::layers::Circle;
-use mln_style_types::{AlignmentType, CirclePitchScaleType};
+use mln_style::types::{AlignmentType, CirclePitchScaleType};
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
 use mln_util::error::Error;

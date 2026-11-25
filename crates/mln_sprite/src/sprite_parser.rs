@@ -10,7 +10,7 @@ use std::sync::Arc;
 use geometry::Point;
 use mln_image::decoder;
 use mln_storage::Data;
-use mln_style_types::image::{Image, ImageContent, ImageStretches, Impl, TextFit};
+use mln_style::image::{Image, ImageContent, ImageStretches, Impl, TextFit};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};

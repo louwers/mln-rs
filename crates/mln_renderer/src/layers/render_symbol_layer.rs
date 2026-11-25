@@ -33,10 +33,10 @@ use mln_style::layer::{ErasedLayerStyle as _, LayerStyle};
 use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
 use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
-use mln_style::{PropertyEvaluationParameters, StyleValue as _};
-use mln_style_types::{
+use mln_style::types::{
     AlignmentType, IconTextFitType, SymbolPlacementType, TextRotationAlignmentType, TranslateAnchorType,
 };
+use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
 use mln_util::constants::EXTENT;

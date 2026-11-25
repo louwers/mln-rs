@@ -49,7 +49,7 @@ use mln_map_types::View;
 use mln_style::layer::LayerStyle;
 use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionPaintProperties;
-use mln_style_types::{AlignmentType, LayerBlendType};
+use mln_style::types::{AlignmentType, LayerBlendType};
 use mln_tile_id::OverscaledTileID;
 use mln_util::clip_depth::ClipDepthRange;
 use mln_util::constants::TILE_SIZE_D;

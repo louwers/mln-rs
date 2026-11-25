@@ -19,7 +19,7 @@ crate::properties!(
         hillshade_shadow_color: constant Vec<Color> = vec![Color::black()],
         resampling: constant ResamplingType = ResamplingType::Linear,
     }
-    use mln_style_types::HillshadeIlluminationAnchorType, mln_style_types::HillshadeMethodType, mln_style_types::ResamplingType, mln_util::Color;
+    use crate::types::HillshadeIlluminationAnchorType, crate::types::HillshadeMethodType, crate::types::ResamplingType, mln_util::Color;
 );
 
 /// The properties, by slot.

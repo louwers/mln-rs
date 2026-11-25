@@ -100,11 +100,10 @@ fn formatted_identity_function() {
 /// convert to the property's type, not only a missing one.
 #[test]
 fn identity_function_default_for_unconvertible_values() {
-    use mln_style_types::{LineJoinType, VariableAnchorOffsetCollection};
-
     use super::util::{StubGeometryTileFeature, property_map};
     use crate::conversion::convert;
     use crate::expression::EvaluationContext;
+    use crate::types::{LineJoinType, VariableAnchorOffsetCollection};
 
     let feature = StubGeometryTileFeature::new(property_map(&[("p", feature::Value::String("bogus".to_owned()))]));
     let context = EvaluationContext::from_feature(Some(&feature));

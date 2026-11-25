@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::sources::GeoJsonSourceType;
-use mln_style_types::{ProjectionDefinition, ProjectionType};
+use mln_style::types::{ProjectionDefinition, ProjectionType};
 use mln_util::error::ErrorKind;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::queue::Queue;

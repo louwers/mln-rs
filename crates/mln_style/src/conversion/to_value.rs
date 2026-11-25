@@ -1,5 +1,4 @@
 use feature::Value;
-use mln_style_types::{Position, ProjectionDefinition, Rotation, VariableAnchorOffsetCollection};
 use mln_util::{Color, Padding};
 
 use crate::expression::value::to_mbgl_value;
@@ -8,6 +7,7 @@ use crate::property::color_ramp::ColorRampPropertyValue;
 use crate::property::table::{Kind, StyleProperty};
 use crate::property::transition::TransitionOptions;
 use crate::property::value::PropertyValue;
+use crate::types::{Position, ProjectionDefinition, Rotation, VariableAnchorOffsetCollection};
 
 /// Makes a `Value` from a style value.
 pub(crate) trait ValueFactory {
@@ -133,28 +133,28 @@ macro_rules! enum_value_factory {
 }
 
 enum_value_factory!(
-    mln_style_types::AlignmentType,
-    mln_style_types::CirclePitchScaleType,
-    mln_style_types::HillshadeIlluminationAnchorType,
-    mln_style_types::HillshadeMethodType,
-    mln_style_types::IconOverlapType,
-    mln_style_types::IconTextFitType,
-    mln_style_types::LayerBlendType,
-    mln_style_types::LightAnchorType,
-    mln_style_types::LineCapType,
-    mln_style_types::LineJoinType,
-    mln_style_types::RasterResamplingType,
-    mln_style_types::ResamplingType,
-    mln_style_types::SymbolAnchorType,
-    mln_style_types::SymbolHeightAnchorType,
-    mln_style_types::SymbolPlacementType,
-    mln_style_types::SymbolZOrderType,
-    mln_style_types::TextJustifyType,
-    mln_style_types::TextRotationAlignmentType,
-    mln_style_types::TextTransformType,
-    mln_style_types::TextWritingModeType,
-    mln_style_types::TranslateAnchorType,
-    mln_style_types::VisibilityType,
+    crate::types::AlignmentType,
+    crate::types::CirclePitchScaleType,
+    crate::types::HillshadeIlluminationAnchorType,
+    crate::types::HillshadeMethodType,
+    crate::types::IconOverlapType,
+    crate::types::IconTextFitType,
+    crate::types::LayerBlendType,
+    crate::types::LightAnchorType,
+    crate::types::LineCapType,
+    crate::types::LineJoinType,
+    crate::types::RasterResamplingType,
+    crate::types::ResamplingType,
+    crate::types::SymbolAnchorType,
+    crate::types::SymbolHeightAnchorType,
+    crate::types::SymbolPlacementType,
+    crate::types::SymbolZOrderType,
+    crate::types::TextJustifyType,
+    crate::types::TextRotationAlignmentType,
+    crate::types::TextTransformType,
+    crate::types::TextWritingModeType,
+    crate::types::TranslateAnchorType,
+    crate::types::VisibilityType,
 );
 
 pub(crate) fn make_value<T: ValueFactory>(arg: &T) -> Value {

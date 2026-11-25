@@ -12,7 +12,7 @@ use geo_index::rtree::sort::HilbertSort;
 use geo_index::rtree::{RTree, RTreeBuilder, RTreeIndex};
 use mln_map_types::{TileProjector, VerticalPerspectiveProjection, View};
 use mln_style::expression::{EvaluationContext, FeatureState, GlobalStateMap};
-use mln_style_types::TranslateAnchorType;
+use mln_style::types::TranslateAnchorType;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_tile_id::geometry_tile_data::{

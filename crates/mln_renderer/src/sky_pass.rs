@@ -13,7 +13,7 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_map_types::View;
-use mln_style_types::LightAnchorType;
+use mln_style::types::LightAnchorType;
 use mln_util::Color;
 use mln_util::geo::WrapMode;
 use mln_util::identity::SimpleIdentity;
@@ -183,7 +183,7 @@ impl SkyPass {
 mod tests {
     use mln_map_types::{NorthOrientation, TransformState};
     use mln_style::property::evaluated::Evaluated;
-    use mln_style_types::Position;
+    use mln_style::types::Position;
     use mln_util::geo::LatLng;
 
     use super::*;

@@ -18,7 +18,7 @@ use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_style::layer::LayerStyle;
 use mln_style::layers::Background;
-use mln_style_types::TranslateAnchorType;
+use mln_style::types::TranslateAnchorType;
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
 use mln_util::constants::TILE_SIZE_D;

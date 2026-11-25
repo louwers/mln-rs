@@ -4,7 +4,7 @@
 use std::num::NonZeroU32;
 
 use glam::Vec2;
-use mln_style_types::{SymbolAnchorType, TextWritingModeType};
+use mln_style::types::{SymbolAnchorType, TextWritingModeType};
 use mln_text::anchor_alignment;
 
 use super::context::PlacementContext;

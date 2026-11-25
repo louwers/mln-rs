@@ -7,7 +7,7 @@ use std::sync::Arc;
 use mln_map_types::MapMode;
 use mln_style::expression::EvaluationContext;
 use mln_style::layers::Heatmap;
-use mln_style_types::image::ImagePositions;
+use mln_text::atlas::ImagePositions;
 use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::error::Error;
 use mln_vec_map::VecMap;

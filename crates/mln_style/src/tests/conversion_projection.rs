@@ -1,13 +1,14 @@
 use feature::Value;
-use mln_style_types::ProjectionDefinition;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
+use super::assert_near;
 use super::util::parse_json;
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
 use crate::projection::convert_projection;
 use crate::property::table::Kind;
 use crate::property::value::StyleValue as _;
+use crate::types::ProjectionDefinition;
 
 /// gtest's `FloatingPoint<T>::AlmostEquals` distance: sign-and-magnitude
 /// bits mapped to biased integers.
@@ -22,13 +23,6 @@ fn biased_f64(x: f64) -> u64 {
 fn assert_double_eq(val1: f64, val2: f64) {
     let equal = !val1.is_nan() && !val2.is_nan() && biased_f64(val1).abs_diff(biased_f64(val2)) <= 4;
     assert!(equal, "DOUBLE_EQ: {val1:?} vs {val2:?}");
-}
-
-/// `EXPECT_NEAR`.
-#[track_caller]
-fn assert_near(val1: f64, val2: f64, abs_error: f64) {
-    let diff = (val1 - val2).abs();
-    assert!(diff <= abs_error, "NEAR: |{val1:?} - {val2:?}| = {diff:?} > {abs_error:?}");
 }
 
 fn definition(name: &str) -> ProjectionDefinition {

@@ -13,7 +13,7 @@ use mln_storage::{ResourceError, Response};
 use mln_style::expression::Functions;
 use mln_style::sources::TileDataFormat;
 use mln_style::sources::custom_geometry_source::TileOptions;
-use mln_style_types::{ProjectionDefinition, ProjectionType};
+use mln_style::types::{ProjectionDefinition, ProjectionType};
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::range::Range;

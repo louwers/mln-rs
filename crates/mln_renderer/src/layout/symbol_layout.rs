@@ -16,13 +16,13 @@ use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::property::evaluated::Evaluated;
 use mln_style::property::value::PropertyValue;
-use mln_style::{PropertyEvaluationParameters, StyleValue as _};
-use mln_style_types::image::{ImagePositions, ImageType};
-use mln_style_types::{
+use mln_style::types::{
     AlignmentType, AnchorOffsetPair, IconTextFitType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType,
     TextJustifyType, TextRotationAlignmentType, TextTransformType, TextVariableAnchorType, TextWritingModeType,
     VariableAnchorOffsetCollection,
 };
+use mln_style::{PropertyEvaluationParameters, StyleValue as _};
+use mln_text::atlas::ImagePositions;
 use mln_text::glyph::{GlyphID, GlyphIDType, GlyphPositions, Shaping};
 use mln_text::shaping::{PositionedIcon, ShapingOptions, anchor_justification, shape_text};
 use mln_text::tagged_string::{SectionIndex, SectionOptions};
@@ -44,6 +44,7 @@ use crate::buckets::symbol_bucket::{
 use crate::geometry::anchor::Anchor;
 use crate::geometry::feature_index::{FeatureIndexBuilder, IndexedSubfeature};
 use crate::gfx::mesh::Indexed;
+use crate::image_store::ImageType;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::clip_lines::clip_lines;
 use crate::layout::layout::{BuildParams, Layout, LayoutParameters, SourceLayer, layers_by_id};

@@ -35,7 +35,7 @@ use mln_math::deg2radf;
 use mln_style::layer::LayerStyle;
 use mln_style::layers::Hillshade;
 use mln_style::layers::hillshade_layer_properties::HillshadePaintProperties;
-use mln_style_types::{HillshadeIlluminationAnchorType, HillshadeMethodType, ResamplingType, TranslateAnchorType};
+use mln_style::types::{HillshadeIlluminationAnchorType, HillshadeMethodType, ResamplingType, TranslateAnchorType};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
 use mln_util::constants::{self, EXTENT};

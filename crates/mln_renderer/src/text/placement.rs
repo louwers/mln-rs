@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use mln_map_types::{MapDebugOptions, MapMode, View};
 use mln_style::TransitionOptions;
-use mln_style_types::{SymbolAnchorType, TextWritingModeType};
+use mln_style::types::{SymbolAnchorType, TextWritingModeType};
 use mln_tile_id::OverscaledTileID;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::hash::{HashMap, HashSet};

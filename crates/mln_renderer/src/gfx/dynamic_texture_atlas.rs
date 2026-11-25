@@ -10,7 +10,8 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use geometry::Point;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::types::TexturePixelType;
-use mln_style_types::image::{ImageMap, ImagePosition, ImagePositions, ImageType, Impl as ImageImpl, RectU16};
+use mln_style::image::Impl as ImageImpl;
+use mln_text::atlas::{ImagePosition, ImagePositions, RectU16};
 use mln_text::glyph::{Glyph, GlyphID, GlyphMap, GlyphPosition, GlyphPositions};
 use mln_util::hash::{HashMap, RandomState};
 use mln_util::image::PremultipliedImage;
@@ -21,6 +22,7 @@ use super::dynamic_texture::QueuedPixels;
 use super::dynamic_texture::{DynamicTexture, DynamicTextureBinId, TextureHandle};
 use crate::gfx::context::Context;
 use crate::gfx::store::SharedTexture;
+use crate::image_store::{ImageMap, ImageType};
 
 const EXTRA_PADDING: u16 = 1;
 const PADDING: u16 = ImagePosition::PADDING + EXTRA_PADDING;

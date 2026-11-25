@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use feature::Value;
-use mln_style_types::VisibilityType;
 use mln_util::error::Error;
 
 use crate::expression::GlobalStateMap;
@@ -17,6 +16,7 @@ use crate::property::transition::TransitionOptions;
 use crate::sky::Sky;
 use crate::source::{Described, ErasedDescription, Source, SourceCommon, SourceData, SourceInstance, StyleSourceType};
 use crate::terrain::Terrain;
+use crate::types::VisibilityType;
 
 /// A change to a style, which [`Style::apply`](crate::Style::apply) makes.
 #[expect(clippy::large_enum_variant, reason = "an edit is made and applied at once, not stored")]

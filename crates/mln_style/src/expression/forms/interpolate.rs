@@ -1,5 +1,4 @@
 use feature::Value as MbglValue;
-use mln_style_types::VariableAnchorOffsetCollection;
 use mln_util::range::Range;
 use mln_util::{Color, ColorSpace, Padding};
 
@@ -10,6 +9,7 @@ use crate::expression::stops::{Stops, get_covering_stops};
 use crate::expression::type_::{self, Type};
 use crate::expression::value::{Value, type_of};
 use crate::expression::{EvalResult, EvaluationContext, EvaluationError, EvaluationResult, Expr, Node};
+use crate::types::VariableAnchorOffsetCollection;
 
 /// The `T` of `InterpolateImpl<T>`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, mln_wire::Wire)]

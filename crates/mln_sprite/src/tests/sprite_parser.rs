@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use mln_image::decode_image;
-use mln_style_types::image::{ImageContent, TextFit};
+use mln_style::image::{ImageContent, TextFit};
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity};
 
@@ -12,14 +12,7 @@ fn read_image(name: &str) -> PremultipliedImage {
     decode_image(&read_file(name)).unwrap()
 }
 
-fn create(
-    image: &PremultipliedImage,
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-    ratio: f64,
-) -> Option<mln_style_types::image::Image> {
+fn create(image: &PremultipliedImage, x: i32, y: i32, w: i32, h: i32, ratio: f64) -> Option<mln_style::image::Image> {
     create_style_image("test", image, x, y, w, h, ratio, false, Vec::new(), Vec::new(), None, None, None)
 }
 

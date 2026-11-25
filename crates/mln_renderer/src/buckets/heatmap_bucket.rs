@@ -11,7 +11,7 @@ use mln_map_types::MapMode;
 use mln_style::expression::Value;
 use mln_style::layers::Heatmap;
 use mln_style::layers::heatmap_layer_properties::HeatmapPaintProperties;
-use mln_style_types::image::ImagePositions;
+use mln_text::atlas::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
 use mln_util::constants::EXTENT;

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use mln_map_types::MapMode;
 use mln_style::expression::{GlobalStateMap, UnavailableImages};
-use mln_style_types::image::{ImageDependencies, ImagePositions, ImageType};
+use mln_text::atlas::ImagePositions;
 use mln_text::glyph::{FontFaces, GlyphDependencies, GlyphPositions};
 use mln_text::tagged_string::font_stack_hash;
 use mln_tile::TileData;
@@ -21,6 +21,7 @@ use mln_vec_map::VecSet;
 use crate::bucket_parameters::BucketParameters;
 use crate::geometry::feature_index::FeatureIndexBuilder;
 use crate::group_by_layout::group_layers;
+use crate::image_store::{ImageDependencies, ImageType};
 use crate::layer_type::{ErasedEvaluatedLayer, ErasedLayout};
 use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{BuildParams, LayoutParameters, SourceLayer};

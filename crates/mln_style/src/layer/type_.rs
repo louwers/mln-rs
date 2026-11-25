@@ -12,7 +12,6 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use feature::ValueObject;
-use mln_style_types::VisibilityType;
 use mln_vec_map::VecSet;
 use mln_wire::{Reader, Wire, Writer};
 
@@ -26,6 +25,7 @@ use crate::property::table::{
 };
 use crate::property::transition::TransitionParameters;
 use crate::property::value::PropertyValue;
+use crate::types::VisibilityType;
 use crate::wire::optional_expression;
 
 /// Where a layer type's layers get their data.

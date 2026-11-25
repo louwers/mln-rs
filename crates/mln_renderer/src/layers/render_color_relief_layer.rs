@@ -30,8 +30,8 @@ use mln_style::expression::{
 use mln_style::layer::LayerStyle;
 use mln_style::layers::ColorRelief;
 use mln_style::property::color_ramp::ColorRampPropertyValue;
+use mln_style::types::ResamplingType;
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
-use mln_style_types::ResamplingType;
 use mln_util::Color;
 use mln_util::dem::DemUnpack;
 use mln_util::hash::{HashMap, HashSet};

@@ -562,7 +562,6 @@ mln_sprite.workspace = true
 mln_storage = { workspace = true, features = ["sqlite"] }
 mln_storage_offline.workspace = true
 mln_style.workspace = true
-mln_style_types.workspace = true
 mln_system_fonts.workspace = true
 mln_text.workspace = true
 mln_tile.workspace = true

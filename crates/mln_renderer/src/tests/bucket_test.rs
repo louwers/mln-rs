@@ -15,7 +15,7 @@ use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::layers::{Fill, Line};
 use mln_style::property::evaluated::Evaluated;
 use mln_style::property::value::PropertyValue;
-use mln_style_types::image::ImagePositions;
+use mln_text::atlas::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::geometry::FeatureType;

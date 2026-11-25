@@ -397,7 +397,7 @@ mod tests {
 
     use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
     use mln_style::property::value::PropertyValue;
-    use mln_style_types::ProjectionDefinition;
+    use mln_style::types::ProjectionDefinition;
     use mln_util::geo::LatLng;
     use mln_util::size::Size;
 

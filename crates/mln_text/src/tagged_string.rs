@@ -1,7 +1,7 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
-use mln_style_types::types::VerticalAlign;
+use mln_style::types::VerticalAlign;
 use mln_util::font_stack::FontStack;
 use mln_util::logging::{Event, Log};
 use mln_util::{Color, i18n};

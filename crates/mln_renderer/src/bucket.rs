@@ -8,7 +8,7 @@
 
 use std::any::Any;
 
-use mln_style_types::image::ImagePositions;
+use mln_text::atlas::ImagePositions;
 use mln_tile::TileLayer;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};

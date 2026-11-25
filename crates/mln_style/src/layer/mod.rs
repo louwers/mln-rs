@@ -11,7 +11,6 @@
 use std::sync::Arc;
 
 use feature::{Value, ValueObject};
-use mln_style_types::VisibilityType;
 use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
 
@@ -24,6 +23,7 @@ use crate::layers::Custom;
 use crate::layers::custom_layer::CustomLayerHost;
 use crate::property::table::{SetPropertyError, StyleProperty};
 use crate::registry::StyleRegistry;
+use crate::types::VisibilityType;
 
 mod convert;
 mod list;

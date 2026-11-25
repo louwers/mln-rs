@@ -7,7 +7,7 @@ use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
 use mln_map_types::{ProjectionData, View};
-use mln_style_types::TranslateAnchorType;
+use mln_style::types::TranslateAnchorType;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::{EXTENT, M2PI};
 

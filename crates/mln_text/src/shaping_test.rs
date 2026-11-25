@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
-use mln_style_types::image::{ImageContent, ImagePosition, ImagePositions, Impl, RectU16, TextFit};
-use mln_style_types::types::{IconTextFitType, SymbolAnchorType, TextJustifyType, TextWritingModeType, VerticalAlign};
+use mln_style::image::{ImageContent, Impl, TextFit};
+use mln_style::types::{IconTextFitType, SymbolAnchorType, TextJustifyType, TextWritingModeType, VerticalAlign};
 use mln_util::constants::ONE_EM;
 use mln_util::font_stack::FontStack;
 use mln_util::i18n;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
+use crate::atlas::{ImagePosition, ImagePositions, RectU16};
 use crate::glyph::{
     Bounds, GlyphID, GlyphIDType, GlyphMetrics, GlyphPosition, GlyphPositions, PositionedGlyph, PositionedLine,
     Shaping, face_type,

@@ -8,7 +8,7 @@
 
 use glam::{DMat4, Vec2};
 use mln_map_types::{MapDebugOptions, ProjectionData, View};
-use mln_style_types::TranslateAnchorType;
+use mln_style::types::TranslateAnchorType;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::identity::SimpleIdentity;
 

@@ -9,7 +9,6 @@ use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::layer::convert_layer;
 use mln_style::property::evaluation::PropertyEvaluationParameters;
-use mln_style_types::image::ImageType;
 use mln_text::glyph::GlyphID;
 use mln_tile::TileData;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
@@ -18,6 +17,7 @@ use mln_vec_map::VecSet;
 use serde_json::json;
 
 use crate::Registry;
+use crate::image_store::ImageType;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::{LayoutInput, LayoutParams, Resolved, build, discover};
 use crate::tile::job::{DataInput, DataKey, Job, JobId, JobResult, LayoutJob, Run, SourceKey, TileKey, run_job};

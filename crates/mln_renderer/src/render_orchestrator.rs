@@ -8,13 +8,13 @@ use mln_gfx::gpu::Gpu;
 use mln_map_types::{MapDebugOptions, MapMode, View};
 use mln_style::diff::{ItemChanges, LayerChange, LayerChanges, StyleDiff, sources_by_id};
 use mln_style::expression::{Dependency, GlobalStateMap};
+use mln_style::image::Impl as ImageImpl;
 use mln_style::layer::{ErasedLayerStyle, SourceKind};
 use mln_style::property::evaluation::ZoomHistory;
 use mln_style::{
     GlobalStateChange, Layer, LayerList, PropertyEvaluationParameters, Source, Style, TransitionOptions,
     TransitionParameters, layer,
 };
-use mln_style_types::image::Impl as ImageImpl;
 use mln_text::GlyphCache;
 use mln_text::local_fonts::LocalGlyphs;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
@@ -888,7 +888,7 @@ impl RenderOrchestrator {
                     if let Some(style_source) = &style_source
                         && render_source_id == Some(style.base().source.as_str())
                     {
-                        let layer_is_visible = style.base().visibility != mln_style_types::VisibilityType::None;
+                        let layer_is_visible = style.base().visibility != mln_style::types::VisibilityType::None;
                         let zoom_fits_layer = layer.supports_zoom(self.zoom_history.last_zoom);
                         let layer_id = layer.id().to_owned();
                         // A global state change requires a relayout of
@@ -937,7 +937,7 @@ impl RenderOrchestrator {
                 // Handle layers without source.
                 let is_first_source = source_index == 0;
                 if is_first_source
-                    && style.base().visibility != mln_style_types::VisibilityType::None
+                    && style.base().visibility != mln_style::types::VisibilityType::None
                     && layer.supports_zoom(self.zoom_history.last_zoom)
                 {
                     // On the globe the background is a sphere mesh, not the

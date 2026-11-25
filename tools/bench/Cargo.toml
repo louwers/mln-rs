@@ -56,7 +56,6 @@ mln_storage = { package = "mln-rs-storage", path = "../../crates/mln_storage", f
 mln_sprite = { package = "mln-rs-sprite", path = "../../crates/mln_sprite" }
 # The style, and its edits.
 mln_style = { package = "mln-rs-style", path = "../../crates/mln_style" }
-mln_style_types = { package = "mln-rs-style-types", path = "../../crates/mln_style_types" }
 # Glyphs and text shaping.
 mln_text = { package = "mln-rs-text", path = "../../crates/mln_text" }
 # The tiles that the decode and layout scenarios read.

@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use mln_style_types::{LineCapType, LineJoinType, TranslateAnchorType, VisibilityType};
 use mln_util::Color;
 
 use super::util::{new_layer, parse_json, style_of};
@@ -13,6 +12,7 @@ use crate::property::value::PropertyValue;
 use crate::registry::StyleRegistry;
 use crate::style::Style;
 use crate::style::edit::Edit;
+use crate::types::{LineCapType, LineJoinType, TranslateAnchorType, VisibilityType};
 
 fn color() -> Color {
     Color::new(1.0, 0.0, 0.0, 1.0)

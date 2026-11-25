@@ -1,7 +1,7 @@
 use mln_gfx::gpu::ShaderKey;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_style_types::AlignmentType;
+use mln_style::types::AlignmentType;
 
 use crate::draw::{DrawObjects, Textures};
 use crate::gfx::context::Context;

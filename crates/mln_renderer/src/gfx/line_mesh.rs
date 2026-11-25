@@ -4,7 +4,7 @@
 
 use geometry::Point;
 use glam::DVec2;
-use mln_style_types::{LineCapType, LineJoinType};
+use mln_style::types::{LineCapType, LineJoinType};
 use mln_util::constants::{EXTENT, TILE_SIZE_D};
 
 use crate::gfx::mesh::Indexed;

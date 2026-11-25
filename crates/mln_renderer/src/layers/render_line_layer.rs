@@ -21,8 +21,8 @@ use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, globa
 use mln_style::layer::LayerStyle;
 use mln_style::layers::Line;
 use mln_style::layers::line_layer_properties::LinePaintProperties;
+use mln_style::types::{AlignmentType, LayerBlendType, LineCapType, TranslateAnchorType};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
-use mln_style_types::{AlignmentType, LayerBlendType, LineCapType, TranslateAnchorType};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
 use mln_util::error::Error;

@@ -5,7 +5,7 @@ use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
 use mln_gfx::shaders::segment::MAX_SEGMENT_VERTICES;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionLayoutProperties;
-use mln_style_types::image::ImagePositions;
+use mln_text::atlas::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{
     GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileFeature,

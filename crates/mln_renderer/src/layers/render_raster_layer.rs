@@ -22,7 +22,7 @@ use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::layer::LayerStyle;
 use mln_style::layers::Raster;
-use mln_style_types::{LayerBlendType, RasterResamplingType, ResamplingType, TranslateAnchorType};
+use mln_style::types::{LayerBlendType, RasterResamplingType, ResamplingType, TranslateAnchorType};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;

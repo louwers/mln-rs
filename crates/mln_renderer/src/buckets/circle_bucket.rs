@@ -12,7 +12,7 @@ use mln_gfx::shaders::shader_defines::{
 use mln_map_types::MapMode;
 use mln_style::layers::Circle;
 use mln_style::layers::circle_layer_properties::CirclePaintProperties;
-use mln_style_types::image::ImagePositions;
+use mln_text::atlas::ImagePositions;
 use mln_util::Color;
 use mln_vec_map::VecMap;
 

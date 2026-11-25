@@ -18,8 +18,10 @@ mod format_section_override_test;
 mod layer_round_trip;
 mod layout_difference;
 mod m1_render_test_styles;
+mod position;
 mod properties;
 mod property_expression;
+mod rotation;
 mod source;
 mod style;
 mod style_image;
@@ -28,3 +30,10 @@ mod style_layer;
 mod style_parser;
 mod util;
 mod variable_anchor_offset_collection;
+
+/// gtest `EXPECT_NEAR(val1, val2, abs_error)` (in double).
+#[track_caller]
+fn assert_near(val1: f64, val2: f64, abs_error: f64) {
+    let diff = (val1 - val2).abs();
+    assert!(diff <= abs_error, "NEAR: |{val1:?} - {val2:?}| = {diff:?} > {abs_error:?}");
+}

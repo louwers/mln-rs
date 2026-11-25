@@ -8,7 +8,7 @@ use mln_gfx::shaders::shader_defines::{
 use mln_style::expression::{Image, Value};
 use mln_style::layers::Fill;
 use mln_style::layers::fill_layer_properties::{FillLayoutProperties, FillPaintProperties};
-use mln_style_types::image::ImagePositions;
+use mln_text::atlas::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
 use mln_util::Color;

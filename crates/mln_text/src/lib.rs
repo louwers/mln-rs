@@ -8,6 +8,7 @@
 mod arabic;
 #[rustfmt::skip]
 mod arabic_tables;
+pub mod atlas;
 mod bidi;
 #[rustfmt::skip]
 mod bidi_mirroring;

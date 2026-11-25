@@ -12,8 +12,8 @@ use mln_gfx::gfx_types::AttributeDataType;
 use mln_style::expression::{Dependency, EvaluationContext, Image, Value, ValueConverter};
 use mln_style::property::evaluated::{Evaluated, Faded};
 use mln_style::property::expression::PropertyExpression;
-use mln_style_types::LineCapType;
-use mln_style_types::image::ImagePositions;
+use mln_style::types::LineCapType;
+use mln_text::atlas::ImagePositions;
 use mln_tile::TileLayer;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::GeometryTileFeature;
@@ -840,7 +840,7 @@ macro_rules! paint_property_binders {
                 feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
                 length: usize,
                 index: usize,
-                pattern_positions: &mln_style_types::image::ImagePositions,
+                pattern_positions: &mln_text::atlas::ImagePositions,
                 pattern_dependencies: Option<&$crate::layout::pattern_layout::PatternDependency>,
                 canonical: &mln_tile_id::CanonicalTileID,
                 formatted_section: &mln_style::expression::Value,
@@ -871,7 +871,7 @@ macro_rules! paint_property_binders {
                 &mut self,
                 states: &$crate::bucket::FeatureStates,
                 layer: &mln_tile::TileLayer<'_>,
-                _image_positions: &mln_style_types::image::ImagePositions,
+                _image_positions: &mln_text::atlas::ImagePositions,
             ) {
                 // Values that moved to the render thread don't depend on
                 // feature state (`depends_on_feature_state`).

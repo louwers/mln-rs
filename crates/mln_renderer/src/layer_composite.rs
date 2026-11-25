@@ -37,7 +37,7 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::ColorBlendFactorType;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMode, DrawModeType, StencilMode};
-use mln_style_types::LayerBlendType;
+use mln_style::types::LayerBlendType;
 use mln_util::Color;
 use mln_util::identity::SimpleIdentity;
 use mln_util::size::Size;

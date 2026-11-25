@@ -9,10 +9,10 @@ use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, Tile
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Response};
 use mln_style::conversion::{Convertible, Error as ConversionError};
+use mln_style::image::Impl as ImageImpl;
 use mln_style::layer::{LayerStyle, convert_layer};
 use mln_style::layers::{Circle, Fill, FillExtrusion, Line, Symbol};
 use mln_style::sources::vector_source;
-use mln_style_types::image::Impl as ImageImpl;
 use mln_tile_id::OverscaledTileID;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;

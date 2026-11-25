@@ -17,8 +17,8 @@ use mln_style::expression::{Image, Value};
 use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::{FillExtrusionLayoutProperties, FillExtrusionPaintProperties};
 use mln_style::property::evaluated::Evaluated;
-use mln_style_types::LightAnchorType;
-use mln_style_types::image::ImagePositions;
+use mln_style::types::LightAnchorType;
+use mln_text::atlas::ImagePositions;
 use mln_tile::geometry_tile_data::{
     classify_rings, is_boundary_edge, is_entirely_outside, limit_holes, round_polygon_corners,
 };

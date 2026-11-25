@@ -12,8 +12,8 @@ use std::hint::black_box;
 use std::num::NonZeroU16;
 
 use feature::Value;
-use mln_style_types::image::ImagePositions;
-use mln_style_types::{SymbolAnchorType, TextJustifyType, TextWritingModeType};
+use mln_style::types::{SymbolAnchorType, TextJustifyType, TextWritingModeType};
+use mln_text::atlas::ImagePositions;
 use mln_text::glyph::{GlyphID, GlyphIDType, GlyphPosition, GlyphPositions, GlyphRange, get_glyph_range};
 use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::tagged_string::font_stack_hash;

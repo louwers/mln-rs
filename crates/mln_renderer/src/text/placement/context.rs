@@ -4,7 +4,7 @@
 use glam::Vec2;
 use mln_map_types::{ProjectionData, TileProjector, View};
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
-use mln_style_types::{
+use mln_style::types::{
     AlignmentType, IconTextFitType, SymbolPlacementType, SymbolZOrderType, TextRotationAlignmentType,
 };
 use mln_tile_id::UnwrappedTileID;

@@ -57,7 +57,6 @@ path = "tests/gtest_padding.rs"
 mln_style = { package = "mln-rs-style", path = "../mln_style", features = [
   "dsl",
 ] }
-mln_style_types = { package = "mln-rs-style-types", path = "../mln_style_types" }
 mln_tile_id = { package = "mln-rs-tile-id", path = "../mln_tile_id" }
 serde_json.workspace = true
 

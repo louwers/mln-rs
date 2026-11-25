@@ -4,11 +4,11 @@
 //! break. Of those places, the breaker picks the set whose lines come out
 //! closest to an even width.
 
-use mln_style_types::image::ImagePositions;
 use mln_util::i18n;
 use mln_vec_map::VecSet;
 use unicode_linebreak::{BreakOpportunity, linebreaks};
 
+use crate::atlas::ImagePositions;
 use crate::glyph::GlyphPositions;
 use crate::shaping::glyph_advances;
 use crate::tagged_string::{SHAPED_GLYPH, TaggedString};
@@ -183,7 +183,7 @@ pub(crate) fn determine_line_breaks(
 
 #[cfg(test)]
 mod tests {
-    use mln_style_types::types::VerticalAlign;
+    use mln_style::types::VerticalAlign;
 
     use super::*;
     use crate::glyph::GlyphIDType;

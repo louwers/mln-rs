@@ -19,7 +19,7 @@ use mln_map_types::{
     AnimationOptions, CameraLimits, CameraOptions, CenterAndBearing, ConstrainMode, FreeCameraOptions,
     NorthOrientation, ProjectionMode, TransformState, TransitionEnd, VerticalPerspectiveProjection, View, ViewportMode,
 };
-use mln_style_types::ProjectionDefinition;
+use mln_style::types::ProjectionDefinition;
 use mln_util::constants::M2PI;
 use mln_util::error::Error;
 use mln_util::geo::{EdgeInsets, LatLng, ScreenCoordinate, WrapMode};

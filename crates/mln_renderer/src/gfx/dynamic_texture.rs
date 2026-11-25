@@ -10,7 +10,7 @@ use etagere::{AllocId, AtlasAllocator, size2};
 use mln_gfx::gpu::Gpu;
 use mln_gfx::texture2d::{SamplerState, texture_format};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
-use mln_style_types::image::RectU16;
+use mln_text::atlas::RectU16;
 use mln_text::glyph::Glyph;
 use mln_util::hash::HashMap;
 use mln_util::image::AlphaImage;

@@ -48,7 +48,6 @@ pub use mln_sprite;
 pub use mln_storage;
 pub use mln_storage_offline;
 pub use mln_style;
-pub use mln_style_types;
 pub use mln_system_fonts;
 pub use mln_text;
 pub use mln_tile;

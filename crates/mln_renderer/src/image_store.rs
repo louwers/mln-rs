@@ -6,13 +6,31 @@
 
 use std::sync::Arc;
 
-use mln_style_types::image::{ImageDependencies, ImageMap, ImageType, Impl as ImageImpl};
+use mln_style::image::Impl as ImageImpl;
 use mln_util::constants::DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE;
-use mln_util::hash::HashSet;
+use mln_util::hash::{HashMap, HashSet};
 use mln_util::logging::{Event, Log};
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::renderer_event::RendererEvent;
+
+/// What a layout uses an image as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, mln_wire::Wire)]
+pub(crate) enum ImageType {
+    Icon,
+    Pattern,
+}
+
+/// Images by id.
+///
+/// A `VecMap` rather than a `HashMap`:
+/// `DynamicTextureAtlas::upload_icons_and_patterns` reserves atlas space in
+/// iteration order, and a `HashMap`'s order changes from process to process,
+/// which would move icons in the atlas and change rendered pixels between runs.
+pub(crate) type ImageMap = VecMap<String, Arc<ImageImpl>>;
+
+/// The images that a layout uses, by id.
+pub(crate) type ImageDependencies = HashMap<String, ImageType>;
 
 /// One wait for images, across the resolves it takes.
 #[derive(Clone, Copy, Debug, Default)]

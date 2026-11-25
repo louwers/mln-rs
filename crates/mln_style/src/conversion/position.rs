@@ -1,6 +1,5 @@
-use mln_style_types::Position;
-
 use super::{Converter, Convertible, Error, convert};
+use crate::types::Position;
 
 impl Converter for Position {
     fn convert(value: &Convertible<'_>, error: &mut Error) -> Option<Position> {

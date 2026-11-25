@@ -454,7 +454,7 @@ fn layer_info(layer: &mln_style::Layer) -> LayerInfo {
         source_layer: Some(layer.get_source_layer()).filter(|id| !id.is_empty()).map(str::to_owned),
         min_zoom: Some(f64::from(layer.get_min_zoom())).filter(|zoom| zoom.is_finite()),
         max_zoom: Some(f64::from(layer.get_max_zoom())).filter(|zoom| zoom.is_finite()),
-        visible: layer.get_visibility() != mln_style_types::VisibilityType::None,
+        visible: layer.get_visibility() != mln_style::types::VisibilityType::None,
     }
 }
 

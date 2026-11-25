@@ -25,8 +25,8 @@ use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_inters
 use mln_style::layer::LayerStyle;
 use mln_style::layers::Heatmap;
 use mln_style::layers::heatmap_layer_properties::{HeatmapPaintProperties, default_heatmap_color};
+use mln_style::types::TranslateAnchorType;
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
-use mln_style_types::TranslateAnchorType;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;

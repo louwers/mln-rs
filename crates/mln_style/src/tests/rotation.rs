@@ -1,7 +1,7 @@
 use mln_util::interpolate::Interpolate;
 
-use crate::Rotation;
 use crate::tests::assert_near;
+use crate::types::Rotation;
 
 // gtest: Rotation.Calculations
 #[test]

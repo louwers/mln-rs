@@ -5,13 +5,15 @@
 
 use std::sync::Arc;
 
-use mln_style_types::image::{ImageMap, ImagePosition, Impl as ImageImpl};
+use mln_style::image::Impl as ImageImpl;
+use mln_text::atlas::ImagePosition;
 use mln_text::glyph::{Glyph, GlyphID, GlyphMap, GlyphMetrics, Glyphs};
 use mln_util::image::{AlphaImage, PremultipliedImage};
 use mln_util::size::Size;
 
 use crate::gfx::dynamic_texture::{DynamicTextureBinId, QueuedPixels, TextureHandle};
 use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, GlyphPage, ImagePage};
+use crate::image_store::ImageMap;
 
 fn make_glyph(code: char) -> Arc<Glyph> {
     Arc::new(Glyph {
