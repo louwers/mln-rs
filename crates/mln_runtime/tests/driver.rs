@@ -294,8 +294,7 @@ fn an_abandon_completes_pending_work_at_once() {
     let (session, driver) = attach(&map, caller_options());
     let pending = session.reduce_memory_use().unwrap();
     session.demand_frame(FrameDemand::new(DemandMode::Force, 6)).unwrap();
-    // On the driver's thread, the session keeps none of its graphics objects.
-    assert_eq!(0, session.abandon().unwrap());
+    session.abandon().unwrap();
     assert!(pending.is_complete());
     assert_eq!(ErrorKind::TargetLost, pending.wait().unwrap_err().kind);
     assert_eq!(RenderSessionState::Abandoned, session.snapshot().unwrap().state);

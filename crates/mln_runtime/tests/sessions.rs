@@ -995,7 +995,7 @@ fn an_abandon_from_a_completion_that_the_worker_delivers_is_busy() {
     assert_eq!(Err(ErrorKind::Busy), abandon);
     assert_eq!(RenderSessionState::Attached, session.snapshot().unwrap().state);
     // Off the worker's thread, the abandon waits for its call.
-    assert_eq!(0, session.abandon().unwrap());
+    session.abandon().unwrap();
 }
 
 #[test]

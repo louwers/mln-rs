@@ -1630,6 +1630,9 @@ mod gl {
         a_ring_of_the_hosts_textures_hands_frames_back(egl::OPENGL_ES_API);
     }
 
+    // OpenHarmony's renderers take OpenGL ES contexts only, though its
+    // emulator's Mesa makes desktop ones.
+    #[cfg(not(target_env = "ohos"))]
     #[test]
     fn a_ring_of_a_desktop_hosts_textures_hands_frames_back_with_fences() {
         a_ring_of_the_hosts_textures_hands_frames_back(egl::OPENGL_API);
