@@ -55,6 +55,14 @@ declare -A allowed=(
     # drapes, sampled with mips and anisotropy as in terrain/default, half
     # each: 78 of 250000 on RADV and 81 on lavapipe and llvmpipe.
     [terrain/fill-extrusion-multipolygon]=0.00035
+    # The drapes' far texels, sampled with mips and anisotropy as in
+    # terrain/default, along the ridges at the horizon; the labels match
+    # GL JS's, those behind a ridge hidden: 175 of 262144 on RADV, 200 on
+    # lavapipe and 188 on llvmpipe.
+    [terrain/occlusion-debug]=0.0008
+    # As occlusion-debug, along the hillshade's highlighted crests at pitch
+    # 75: 373 of 262144 on RADV, 427 on lavapipe and 412 on llvmpipe.
+    [terrain/symbol-height-offset-occluded-ground]=0.0017
     # Terrain on the globe. The numbers here are WebGPU's, on RADV and on Mesa
     # 26.0.8's lavapipe, which CI runs (Mesa 26.2.5 with
     # `GALLIVM_PERF=no_lod_ellipse` gives the same).

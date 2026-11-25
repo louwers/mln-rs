@@ -6910,13 +6910,15 @@ static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
 #define c_offscreen_degenerate_triangle_location -2.0
 
 "#,
-    source: r"
+    source: concat!(
+        ground_visibility!(),
+        r"
 
 struct VertexStage {
     short4 pos_offset [[attribute(0)]];
     ushort4 data [[attribute(1)]];
     short4 pixeloffset [[attribute(2)]];
-    float3 projected_pos [[attribute(3)]];
+    float4 projected_pos [[attribute(3)]];
     float fade_opacity [[attribute(4)]];
 
 #if !defined(HAS_UNIFORM_u_opacity)
@@ -6949,14 +6951,26 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]
+#if defined(TERRAIN)
+                                , texture2d<float, access::read> ground_depth [[texture(2)]]
+#endif
+                                ) {
 
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
     device const ProjectionUBO& projection = projectionVector[uboIndex];
 
+    // How much of the symbol the ground in front of its anchor leaves.
+#if defined(TERRAIN)
+    const float ground_visible = ground_visibility(
+        projectTileWithElevation(float2(vertx.pos_offset.xy) + drawable.translation, vertx.height_offset, projection),
+        paintParams.world_size.y / paintParams.pixel_ratio, ground_depth);
+#else
+    const float ground_visible = 1.0;
+#endif
     const float2 raw_fade_opacity = unpack_opacity(vertx.fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
-    const float fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
+    const float fade_opacity = max(0.0, min(ground_visible, raw_fade_opacity[0] + fade_change));
 
 #if defined(HAS_UNIFORM_u_opacity)
     const half fo = half(fade_opacity);
@@ -7039,7 +7053,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 projected_pos_xy = vertx.projected_pos.xy;
     float4 projected_pos;
     if (drawable.is_along_line || drawable.is_variable_anchor) {
-        projected_pos = float4(projected_pos_xy, vertx.height_offset, 1.0);
+        // A glyph along a line stands at its own height, which the label's
+        // layout gives it; a label at a variable anchor at its anchor's.
+        const float height = drawable.is_along_line ? vertx.projected_pos.w : vertx.height_offset;
+        projected_pos = float4(projected_pos_xy, height, 1.0);
     } else if (drawable.pitch_with_map) {
         projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, vertx.height_offset, 1.0);
     } else {
@@ -7094,7 +7111,8 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(image.sample(image_sampler, atlas_pos(in.tex_origin, in.tex)) * opacity);
 }
-",
+"
+    ),
 };
 
 pub(crate) const SYMBOL_SDF_SHADER: MslShaderSource = MslShaderSource {
@@ -7173,13 +7191,15 @@ static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
 #define c_offscreen_degenerate_triangle_location -2.0
 
 "#,
-    source: r"
+    source: concat!(
+        ground_visibility!(),
+        r"
 
 struct VertexStage {
     short4 pos_offset [[attribute(0)]];
     ushort4 data [[attribute(1)]];
     short4 pixeloffset [[attribute(2)]];
-    float3 projected_pos [[attribute(3)]];
+    float4 projected_pos [[attribute(3)]];
     float fade_opacity [[attribute(4)]];
 
 #if !defined(HAS_UNIFORM_u_fill_color)
@@ -7232,14 +7252,26 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]]) {
+                                device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]]
+#if defined(TERRAIN)
+                                , texture2d<float, access::read> ground_depth [[texture(2)]]
+#endif
+                                ) {
 
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
     device const ProjectionUBO& projection = projectionVector[uboIndex];
 
+    // How much of the symbol the ground in front of its anchor leaves.
+#if defined(TERRAIN)
+    const float ground_visible = ground_visibility(
+        projectTileWithElevation(float2(vertx.pos_offset.xy) + drawable.translation, vertx.height_offset, projection),
+        paintParams.world_size.y / paintParams.pixel_ratio, ground_depth);
+#else
+    const float ground_visible = 1.0;
+#endif
     const float2 fade_opacity = unpack_opacity(vertx.fade_opacity);
     const float fade_change = (fade_opacity[1] > 0.5) ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
-    const half fo = half(max(0.0, min(1.0, fade_opacity[0] + fade_change)));
+    const half fo = half(max(0.0, min(ground_visible, fade_opacity[0] + fade_change)));
 #if defined(HAS_UNIFORM_u_opacity)
     const half visibility = fo;
 #else
@@ -7328,7 +7360,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 projected_pos_xy = vertx.projected_pos.xy;
     float4 projected_pos;
     if (drawable.is_along_line || drawable.is_variable_anchor) {
-        projected_pos = float4(projected_pos_xy, vertx.height_offset, 1.0);
+        // A glyph along a line stands at its own height, which the label's
+        // layout gives it; a label at a variable anchor at its anchor's.
+        const float height = drawable.is_along_line ? vertx.projected_pos.w : vertx.height_offset;
+        projected_pos = float4(projected_pos_xy, height, 1.0);
     } else if (drawable.pitch_with_map) {
         projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, vertx.height_offset, 1.0);
     } else {
@@ -7435,7 +7470,8 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(color * (alpha * opacity));
 }
-",
+"
+    ),
 };
 
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: MslShaderSource = MslShaderSource {
@@ -7514,7 +7550,9 @@ static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
 #define c_offscreen_degenerate_triangle_location -2.0
 
 "#,
-    source: r"
+    source: concat!(
+        ground_visibility!(),
+        r"
 
 #define SDF 1.0
 #define ICON 0.0
@@ -7522,7 +7560,7 @@ static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
 struct VertexStage {
     short4 pos_offset [[attribute(0)]];
     ushort4 data [[attribute(1)]];
-    float3 projected_pos [[attribute(2)]];
+    float4 projected_pos [[attribute(2)]];
     float fade_opacity [[attribute(3)]];
 
 #if !defined(HAS_UNIFORM_u_fill_color)
@@ -7577,14 +7615,26 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
                                 device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
-                                device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]]) {
+                                device const SymbolEvaluatedPropsUBO& props [[buffer(idSymbolEvaluatedPropsUBO)]]
+#if defined(TERRAIN)
+                                , texture2d<float, access::read> ground_depth [[texture(2)]]
+#endif
+                                ) {
 
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
     device const ProjectionUBO& projection = projectionVector[uboIndex];
 
+    // How much of the symbol the ground in front of its anchor leaves.
+#if defined(TERRAIN)
+    const float ground_visible = ground_visibility(
+        projectTileWithElevation(float2(vertx.pos_offset.xy) + drawable.translation, vertx.height_offset, projection),
+        paintParams.world_size.y / paintParams.pixel_ratio, ground_depth);
+#else
+    const float ground_visible = 1.0;
+#endif
     const float2 fade_opacity = unpack_opacity(vertx.fade_opacity);
     const float fade_change = (fade_opacity[1] > 0.5) ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
-    const half fo = half(max(0.0, min(1.0, fade_opacity[0] + fade_change)));
+    const half fo = half(max(0.0, min(ground_visible, fade_opacity[0] + fade_change)));
 #if defined(HAS_UNIFORM_u_opacity)
     const half visibility = fo;
 #else
@@ -7674,7 +7724,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 projected_pos_xy = vertx.projected_pos.xy;
     float4 projected_pos;
     if (drawable.is_along_line || drawable.is_variable_anchor) {
-        projected_pos = float4(projected_pos_xy, vertx.height_offset, 1.0);
+        // A glyph along a line stands at its own height, which the label's
+        // layout gives it; a label at a variable anchor at its anchor's.
+        const float height = drawable.is_along_line ? vertx.projected_pos.w : vertx.height_offset;
+        projected_pos = float4(projected_pos_xy, height, 1.0);
     } else if (drawable.pitch_with_map) {
         projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, vertx.height_offset, 1.0);
     } else {
@@ -7792,5 +7845,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(color * (alpha * opacity));
 }
-",
+"
+    ),
 };

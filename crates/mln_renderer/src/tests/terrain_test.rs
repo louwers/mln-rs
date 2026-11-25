@@ -1216,3 +1216,164 @@ fn the_surface_a_hair_west_of_a_copy_is_its_neighbors() {
     assert_eq!(edge, ground.surface_at(DVec2::new(-1e-17, y)));
     assert_eq!(ground.surface_at(DVec2::new(-1.0, y)), ground.surface_at(DVec2::new(-1.0 - 1e-17, y)));
 }
+
+/// A label along a line pitched with the map, over steep ground, draws each
+/// glyph at the height of the ground under it, and placement stands each of
+/// its collision circles on the ground under it too: every glyph draws
+/// inside a circle, where the label collides and a query finds it.
+#[test]
+fn a_pitched_line_label_draws_its_glyphs_where_its_circles_collide() {
+    use glam::{DMat4, Vec2};
+    use mln_map_types::TileProjector;
+    use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
+    use mln_util::constants::{EXTENT, TILE_SIZE_D};
+
+    use crate::buckets::symbol_bucket::{PlacedSymbol, PlacedSymbolPools, SymbolSizeBinder};
+    use crate::geometry::feature_index::IndexedSubfeature;
+    use crate::layout::symbol_instance::WritingModes;
+    use crate::layout::symbol_projection::{
+        LabelPlaneProjector, LineLabelAlignment, SymbolHeights, label_plane_matrix, reproject_line_labels,
+    };
+    use crate::text::collision_feature::{CollisionBox, CollisionFeature};
+    use crate::text::collision_grid::Shape;
+    use crate::text::collision_index::{CollisionIndex, LabelRun, OverlapMode, PartCollision};
+    use crate::util::pool::PoolRange;
+
+    let mut load = TerrainLoad::new((0, 14), 100.0);
+    load.transform.jump_to(&CameraOptions { pitch: Some(60.0), ..Default::default() });
+    load.frame();
+    load.answer(|_| Some(terrarium_slope()));
+    let ground = snapshot(&load, 100.0);
+    let view = load.transform.view().clone();
+    let tile = load.terrain.cover().unwrap().tiles[0].id;
+    let unwrapped = tile.to_unwrapped();
+    let zoom = view.zoom() as f32;
+    let layout = SymbolLayoutProperties::PossiblyEvaluated::default();
+    let heights = SymbolHeights::new(Some(&ground), unwrapped, &layout);
+    let projector = TileProjector::new(&view, &unwrapped);
+
+    // An east-west line across the tile's middle, up the DEM's slope, and a
+    // 24 px label of 41 glyphs, 480 px long, at its middle.
+    let (y, anchor) = (f32::from(EXTENT as i16) / 2.0, Vec2::splat(EXTENT as f32 / 2.0));
+    let line = [geometry::Point::new(200i16, y as i16), geometry::Point::new(EXTENT as i16 - 200, y as i16)];
+    let glyph_offsets: Vec<f32> = (-20..=20).map(|i| i as f32 * 12.0).collect();
+    let mut pools = PlacedSymbolPools::default();
+    let symbol = PlacedSymbol {
+        anchor_point: anchor,
+        segment: 0,
+        lower_size: 24.0,
+        upper_size: 24.0,
+        line_offset: [0.0; 2],
+        writing_modes: WritingModes { horizontal: true, vertical: false },
+        line: PoolRange::extend(&mut pools.lines, line.iter().copied()),
+        tile_distances: PoolRange::extend(
+            &mut pools.tile_distances,
+            line.iter().map(|p| Vec2::new(f32::from(p.x), f32::from(p.y)).distance(anchor)),
+        ),
+        glyph_offsets: PoolRange::extend(&mut pools.glyph_offsets, glyph_offsets.iter().copied()),
+        start_index: 0,
+        angle: 0.0,
+        height_offset: 0.0,
+        hidden: false,
+    };
+
+    // The glyphs as they draw, in the viewport.
+    let alignment = LineLabelAlignment { pitch_with_map: true, rotate_with_map: true, keep_upright: false };
+    let size = SymbolSizeBinder::Constant { layout_size: 24.0, covering_ranges: None, expression: None };
+    let mut vertices = Vec::new();
+    reproject_line_labels(
+        &mut vertices,
+        std::slice::from_ref(&symbol),
+        &pools,
+        &projector,
+        heights,
+        &size,
+        Vec2::ZERO,
+        alignment,
+    );
+    let pixels_to_tile_units = unwrapped.pixels_to_tile_units(1.0, zoom);
+    let to_tile = label_plane_matrix(true, true, &view, pixels_to_tile_units).inverse();
+    let index = CollisionIndex::new(&view, MapMode::Static);
+    let padding = index.viewport_padding();
+    let viewport = view.size();
+    let to_viewport = |clip: geometry::Point<f64>| {
+        Vec2::new(
+            (f64::midpoint(clip.x, 1.0) * f64::from(viewport.width)) as f32 + padding,
+            (f64::midpoint(-clip.y, 1.0) * f64::from(viewport.height)) as f32 + padding,
+        )
+    };
+    let glyphs: Vec<Vec2> = vertices
+        .iter()
+        .step_by(4)
+        .map(|vertex| {
+            let [x, y, _, height] = vertex.a1;
+            let tile_point = DMat4::mul_vec4(&to_tile, glam::DVec4::new(f64::from(x), f64::from(y), 0.0, 1.0));
+            let point = geometry::Point::new(tile_point.x / tile_point.w, tile_point.y / tile_point.w);
+            to_viewport(projector.project(&point, f64::from(height)).point)
+        })
+        .collect();
+    assert_eq!(glyph_offsets.len(), glyphs.len(), "every glyph draws");
+    let rise = glyphs.first().unwrap().distance(*glyphs.last().unwrap());
+    assert!(rise > 300.0, "the label spans {rise} px");
+
+    // Its collision circles, a radius apart along the line, as placement
+    // places them.
+    let radius = 12.0 * 16.0;
+    let count = ((EXTENT as f32 - 400.0) / radius) as usize;
+    let circles: Vec<CollisionBox> = (0..count)
+        .map(|i| 200.0 + i as f32 * radius)
+        .map(|x| CollisionBox {
+            anchor: Vec2::new(x, y),
+            x1: -radius,
+            y1: -radius,
+            x2: radius,
+            y2: radius,
+            signed_distance_from_anchor: x - anchor.x,
+        })
+        .collect();
+    let label_plane = LabelPlaneProjector::new(&projector, heights, true, true, pixels_to_tile_units, Vec2::ZERO);
+    let pixel_ratio = (TILE_SIZE_D * f64::from(tile.overscale_factor()) / f64::from(EXTENT)) as f32;
+    let part = PartCollision {
+        tile_projector: &projector,
+        label_plane: &label_plane,
+        heights,
+        translation: Vec2::ZERO,
+        pixel_ratio,
+        scale: (f64::from(zoom) - f64::from(tile.overscaled_z)).exp2() as f32,
+        overlap_mode: OverlapMode::Always,
+        pitch_with_map: true,
+        rotate_with_map: true,
+        avoid_edges: None,
+        collision_group: None,
+        debug: true,
+    };
+    let feature = CollisionFeature {
+        boxes: PoolRange::default(),
+        indexed_feature: IndexedSubfeature {
+            index: 0,
+            source_layer_name: Arc::from(""),
+            bucket_leader_id: Arc::from(""),
+            sort_index: 0,
+            bucket_instance_id: 0,
+            collision_group_id: 0,
+            overlap_mode: OverlapMode::Always,
+        },
+        along_line: true,
+    };
+    let run = LabelRun { symbol: &symbol, pools: &pools, font_size: 24.0 };
+    let mut shapes = Vec::new();
+    index.place_feature(&part, &feature, &circles, &run, None, &mut shapes);
+    let placed: Vec<(Vec2, f32)> = shapes
+        .iter()
+        .filter_map(|shape| match shape {
+            Some(Shape::Circle { center, radius }) => Some((*center, *radius)),
+            _ => None,
+        })
+        .collect();
+    assert!(placed.len() > 4, "the label's circles: {placed:?}");
+    for (i, glyph) in glyphs.iter().enumerate() {
+        let nearest =
+            placed.iter().map(|(center, radius)| center.distance(*glyph) - radius).fold(f32::INFINITY, f32::min);
+        assert!(nearest <= 0.0, "glyph {i} at {glyph} is {nearest} px outside every circle: {placed:?}");
+    }
+}

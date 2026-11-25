@@ -284,7 +284,7 @@ impl SymbolView {
         let previous = Placement::new_default();
         let layers: Vec<&dyn RenderLayer> = self.layers.iter().map(|layer| -> &dyn RenderLayer { layer }).collect();
         let mut buckets = crate::render_layer::HeldBuckets::take();
-        let inputs = PlacementInputs::new(&self.update, &layers, &buckets);
+        let inputs = PlacementInputs::new(&self.update, None, &layers, &buckets);
         let mut placement = Placement::create(Arc::new(inputs), self.update.time_point, Some(previous));
         placement.place(&mut buckets);
         buckets.restore();

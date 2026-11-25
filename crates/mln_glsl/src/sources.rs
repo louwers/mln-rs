@@ -52,11 +52,19 @@ use crate::program::GlslShaderSource;
 /// What the terrain variant of a program that hides behind the ground in
 /// front of it reads of the ground's depth, within `#ifdef TERRAIN` of its
 /// vertex stage: whether that ground hides a point (`ground_visibility`).
+/// The texture is at binding 1, or at the binding given, of a program
+/// whose own textures take binding 1.
 macro_rules! ground_visibility {
     () => {
-        r"
+        ground_visibility!("1")
+    };
+    ($binding:literal) => {
+        concat!(
+            r"
 #ifdef TERRAIN
-layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = 1) uniform texture2D ground_depth_texture;
+layout(set = DRAWABLE_IMAGE_SET_INDEX, binding = ",
+            $binding,
+            r") uniform texture2D ground_depth_texture;
 
 // GL JS's `depthOpacity`: 1 where a point `w` from the eye, at `ndc`, is in
 // front of the ground drawn there, fading to 0 behind it over GL JS's ramp
@@ -97,6 +105,7 @@ float ground_visibility(const vec4 clip, const float view_height) {
 }
 #endif
 "
+        )
     };
 }
 
@@ -6545,12 +6554,14 @@ pub(crate) const SYMBOL_SHADER_PRELUDE: &str = r"
 
 pub(crate) const SYMBOL_ICON_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: SYMBOL_SHADER_PRELUDE,
-    vertex: r"
+    vertex: concat!(
+        ground_visibility!("2"),
+        r"
 
 layout(location = 0) in ivec4 in_pos_offset;
 layout(location = 1) in uvec4 in_data;
 layout(location = 2) in ivec4 in_pixeloffset;
-layout(location = 3) in vec3 in_projected_pos;
+layout(location = 3) in vec4 in_projected_pos;
 layout(location = 4) in float in_fade_opacity;
 
 #if !defined(HAS_UNIFORM_u_opacity)
@@ -6618,9 +6629,17 @@ void main() {
     const SymbolDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
     const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
 
+    // How much of the symbol the ground in front of its anchor leaves.
+#ifdef TERRAIN
+    const float ground_visible = ground_visibility(
+        projectTileWithElevation(vec2(in_pos_offset.xy) + drawable.translation, in_height_offset, projection),
+        paintParams.world_size.y / paintParams.pixel_ratio);
+#else
+    const float ground_visible = 1.0;
+#endif
     const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
-    const float fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
+    const float fade_opacity = max(0.0, min(ground_visible, raw_fade_opacity[0] + fade_change));
 #if defined(HAS_UNIFORM_u_opacity)
     const float visibility = fade_opacity;
 #else
@@ -6701,7 +6720,10 @@ void main() {
     const vec2 projected_pos_xy = in_projected_pos.xy;
     vec4 projected_pos;
     if (drawable.is_along_line != 0 || drawable.is_variable_anchor != 0) {
-        projected_pos = vec4(projected_pos_xy, in_height_offset, 1.0);
+        // A glyph along a line stands at its own height, which the label's
+        // layout gives it; a label at a variable anchor at its anchor's.
+        const float height = drawable.is_along_line != 0 ? in_projected_pos.w : in_height_offset;
+        projected_pos = vec4(projected_pos_xy, height, 1.0);
     } else if (drawable.pitch_with_map != 0) {
         projected_pos = drawable.label_plane_matrix * vec4(projected_pos_xy + drawable.translation, in_height_offset, 1.0);
     } else {
@@ -6728,7 +6750,8 @@ void main() {
 
     frag_opacity = visibility;
 }
-",
+"
+    ),
     fragment: r"
 
 layout(location = 0) in vec2 frag_tex;
@@ -6795,12 +6818,14 @@ void main() {
 
 pub(crate) const SYMBOL_SDF_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: SYMBOL_SHADER_PRELUDE,
-    vertex: r"
+    vertex: concat!(
+        ground_visibility!("2"),
+        r"
 
 layout(location = 0) in ivec4 in_pos_offset;
 layout(location = 1) in uvec4 in_data;
 layout(location = 2) in ivec4 in_pixeloffset;
-layout(location = 3) in vec3 in_projected_pos;
+layout(location = 3) in vec4 in_projected_pos;
 layout(location = 4) in float in_fade_opacity;
 
 #if !defined(HAS_UNIFORM_u_fill_color)
@@ -6912,9 +6937,17 @@ void main() {
     const SymbolDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
     const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
 
+    // How much of the symbol the ground in front of its anchor leaves.
+#ifdef TERRAIN
+    const float ground_visible = ground_visibility(
+        projectTileWithElevation(vec2(in_pos_offset.xy) + drawable.translation, in_height_offset, projection),
+        paintParams.world_size.y / paintParams.pixel_ratio);
+#else
+    const float ground_visible = 1.0;
+#endif
     const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
-    const float fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
+    const float fade_opacity = max(0.0, min(ground_visible, raw_fade_opacity[0] + fade_change));
 #if defined(HAS_UNIFORM_u_opacity)
     const float visibility = fade_opacity;
 #else
@@ -7001,7 +7034,10 @@ void main() {
     const vec2 projected_pos_xy = in_projected_pos.xy;
     vec4 projected_pos;
     if (drawable.is_along_line != 0 || drawable.is_variable_anchor != 0) {
-        projected_pos = vec4(projected_pos_xy, in_height_offset, 1.0);
+        // A glyph along a line stands at its own height, which the label's
+        // layout gives it; a label at a variable anchor at its anchor's.
+        const float height = drawable.is_along_line != 0 ? in_projected_pos.w : in_height_offset;
+        projected_pos = vec4(projected_pos_xy, height, 1.0);
     } else if (drawable.pitch_with_map != 0) {
         projected_pos = drawable.label_plane_matrix * vec4(projected_pos_xy + drawable.translation, in_height_offset, 1.0);
     } else {
@@ -7053,7 +7089,8 @@ void main() {
     frag_halo_color = unpack_mix_color(in_halo_color, drawable.halo_color_t);
 #endif
 }
-",
+"
+    ),
     fragment: r"
 
 layout(location = 0) in vec2 frag_tex;
@@ -7154,14 +7191,16 @@ void main() {
 
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: GlslShaderSource = GlslShaderSource {
     prelude: SYMBOL_SHADER_PRELUDE,
-    vertex: r"
+    vertex: concat!(
+        ground_visibility!("2"),
+        r"
 
 #define SDF 1.0
 #define ICON 0.0
 
 layout(location = 0) in ivec4 in_pos_offset;
 layout(location = 1) in uvec4 in_data;
-layout(location = 2) in vec3 in_projected_pos;
+layout(location = 2) in vec4 in_projected_pos;
 layout(location = 3) in float in_fade_opacity;
 
 #if !defined(HAS_UNIFORM_u_fill_color)
@@ -7275,9 +7314,17 @@ void main() {
     const SymbolDrawableUBO drawable = drawableVector.drawable_ubo[constant.ubo_index];
     const ProjectionUBO projection = projectionVector.projection_ubo[constant.ubo_index];
 
+    // How much of the symbol the ground in front of its anchor leaves.
+#ifdef TERRAIN
+    const float ground_visible = ground_visibility(
+        projectTileWithElevation(vec2(in_pos_offset.xy) + drawable.translation, in_height_offset, projection),
+        paintParams.world_size.y / paintParams.pixel_ratio);
+#else
+    const float ground_visible = 1.0;
+#endif
     const vec2 raw_fade_opacity = unpack_opacity(in_fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
-    const float fade_opacity = max(0.0, min(1.0, raw_fade_opacity[0] + fade_change));
+    const float fade_opacity = max(0.0, min(ground_visible, raw_fade_opacity[0] + fade_change));
 #if defined(HAS_UNIFORM_u_opacity)
     const float visibility = fade_opacity;
 #else
@@ -7364,7 +7411,10 @@ void main() {
     const vec2 projected_pos_xy = in_projected_pos.xy;
     vec4 projected_pos;
     if (drawable.is_along_line != 0 || drawable.is_variable_anchor != 0) {
-        projected_pos = vec4(projected_pos_xy, in_height_offset, 1.0);
+        // A glyph along a line stands at its own height, which the label's
+        // layout gives it; a label at a variable anchor at its anchor's.
+        const float height = drawable.is_along_line != 0 ? in_projected_pos.w : in_height_offset;
+        projected_pos = vec4(projected_pos_xy, height, 1.0);
     } else if (drawable.pitch_with_map != 0) {
         projected_pos = drawable.label_plane_matrix * vec4(projected_pos_xy + drawable.translation, in_height_offset, 1.0);
     } else {
@@ -7420,7 +7470,8 @@ void main() {
     frag_halo_color = unpack_mix_color(in_halo_color, drawable.halo_color_t);
 #endif
 }
-",
+"
+    ),
     fragment: r"
 
 layout(location = 0) in vec2 frag_tex;

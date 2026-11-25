@@ -5,11 +5,19 @@ use super::shader_source::WgslShaderSource;
 /// What the terrain variant of a program that hides behind the ground in
 /// front of it reads of the ground's depth, within `#ifdef TERRAIN` of its
 /// vertex stage: whether that ground hides a point (`ground_visibility`).
+/// The texture is at binding 3, or at the binding given, of a program
+/// whose own textures take binding 3.
 macro_rules! ground_visibility {
     () => {
-        r"
+        ground_visibility!("3")
+    };
+    ($binding:literal) => {
+        concat!(
+            r"
 #ifdef TERRAIN
-@group(1) @binding(3) var ground_depth_texture: texture_2d<f32>;
+@group(1) @binding(",
+            $binding,
+            r") var ground_depth_texture: texture_2d<f32>;
 
 // GL JS's `depthOpacity`: 1 where a point `w` from the eye, at `ndc`, is in
 // front of the ground drawn there, fading to 0 behind it over GL JS's ramp
@@ -51,6 +59,7 @@ fn ground_visibility(clip: vec4<f32>, view_height: f32) -> f32 {
 }
 #endif
 "
+        )
     };
 }
 
@@ -5744,13 +5753,14 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 };
 
 pub(crate) const SYMBOL_ICON_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        ground_visibility!("5"),
         r"
 struct VertexInput {
     @location(3) pos_offset: vec4<i32>,
     @location(4) data: vec4<u32>,
     @location(5) pixeloffset: vec4<i32>,
-    @location(6) projected_pos: vec3<f32>,
+    @location(6) projected_pos: vec4<f32>,
     @location(7) fade_opacity: f32,
 #ifndef HAS_UNIFORM_u_opacity
     @location(8) opacity: vec2<f32>,
@@ -5780,9 +5790,18 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let drawable = drawableVector[globalIndex.value];
 
+    // How much of the symbol the ground in front of its anchor leaves.
+#ifdef TERRAIN
+    let ground_anchor = vec2<f32>(f32(in.pos_offset.x), f32(in.pos_offset.y)) + drawable.translation;
+    let ground_clip = projectTileWithElevation(ground_anchor, in.height_offset, projectionVector[globalIndex.value]);
+    let ground_visible = ground_visibility(ground_clip, paintParams.world_size.y / paintParams.pixel_ratio);
+#else
+    let ground_visible = 1.0;
+#endif
+
     let raw_fade_opacity = unpack_opacity(in.fade_opacity);
     let fade_change = select(-paintParams.symbol_fade_change, paintParams.symbol_fade_change, raw_fade_opacity.y > 0.5);
-    let fade_opacity = max(0.0, min(1.0, raw_fade_opacity.x + fade_change));
+    let fade_opacity = max(0.0, min(ground_visible, raw_fade_opacity.x + fade_change));
 
 #ifdef HAS_UNIFORM_u_opacity
     let final_opacity = fade_opacity;
@@ -5869,7 +5888,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var projected_pos: vec4<f32>;
     if (drawable.is_along_line != 0u || drawable.is_variable_anchor != 0u) {
-        projected_pos = vec4<f32>(in.projected_pos.xy, in.height_offset, 1.0);
+        // A glyph along a line stands at its own height, which the label's
+        // layout gives it; a label at a variable anchor at its anchor's.
+        let height = select(in.height_offset, in.projected_pos.w, drawable.is_along_line != 0u);
+        projected_pos = vec4<f32>(in.projected_pos.xy, height, 1.0);
     } else if (drawable.pitch_with_map != 0u) {
         projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, in.height_offset, 1.0);
     } else {
@@ -5902,7 +5924,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
+    )),
     fragment: Some(
         r"
 struct FragmentInput {
@@ -6026,13 +6048,14 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 };
 
 pub(crate) const SYMBOL_SDF_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        ground_visibility!("5"),
         r"
 struct VertexInput {
     @location(3) pos_offset: vec4<i32>,
     @location(4) data: vec4<u32>,
     @location(5) pixeloffset: vec4<i32>,
-    @location(6) projected_pos: vec3<f32>,
+    @location(6) projected_pos: vec4<f32>,
     @location(7) fade_opacity: f32,
 #ifndef HAS_UNIFORM_u_fill_color
     @location(8) fill_color: vec4<f32>,
@@ -6080,9 +6103,18 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let drawable = drawableVector[globalIndex.value];
 
+    // How much of the symbol the ground in front of its anchor leaves.
+#ifdef TERRAIN
+    let ground_anchor = vec2<f32>(f32(in.pos_offset.x), f32(in.pos_offset.y)) + drawable.translation;
+    let ground_clip = projectTileWithElevation(ground_anchor, in.height_offset, projectionVector[globalIndex.value]);
+    let ground_visible = ground_visibility(ground_clip, paintParams.world_size.y / paintParams.pixel_ratio);
+#else
+    let ground_visible = 1.0;
+#endif
+
     let fade_opacity = unpack_opacity(in.fade_opacity);
     let fade_change = select(-paintParams.symbol_fade_change, paintParams.symbol_fade_change, fade_opacity.y > 0.5);
-    let fo = max(0.0, min(1.0, fade_opacity.x + fade_change));
+    let fo = max(0.0, min(ground_visible, fade_opacity.x + fade_change));
 
 #ifdef HAS_UNIFORM_u_opacity
     let visibility = fo;
@@ -6168,7 +6200,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var projected_pos: vec4<f32>;
     if (drawable.is_along_line != 0u || drawable.is_variable_anchor != 0u) {
-        projected_pos = vec4<f32>(in.projected_pos.xy, in.height_offset, 1.0);
+        // A glyph along a line stands at its own height, which the label's
+        // layout gives it; a label at a variable anchor at its anchor's.
+        let height = select(in.height_offset, in.projected_pos.w, drawable.is_along_line != 0u);
+        projected_pos = vec4<f32>(in.projected_pos.xy, height, 1.0);
     } else if (drawable.pitch_with_map != 0u) {
         projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, in.height_offset, 1.0);
     } else {
@@ -6227,7 +6262,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
+    )),
     fragment: Some(
         r"
 struct FragmentInput {
@@ -6387,12 +6422,13 @@ const c_offscreen_degenerate_triangle_location: f32 = -2.0;
 };
 
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: WgslShaderSource = WgslShaderSource {
-    vertex: Some(
+    vertex: Some(concat!(
+        ground_visibility!("5"),
         r"
 struct VertexInput {
     @location(3) pos_offset: vec4<i32>,
     @location(4) data: vec4<u32>,
-    @location(5) projected_pos: vec3<f32>,
+    @location(5) projected_pos: vec4<f32>,
     @location(6) fade_opacity: f32,
 #ifndef HAS_UNIFORM_u_fill_color
     @location(7) fill_color: vec4<f32>,
@@ -6444,9 +6480,18 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let drawable = drawableVector[globalIndex.value];
 
+    // How much of the symbol the ground in front of its anchor leaves.
+#ifdef TERRAIN
+    let ground_anchor = vec2<f32>(f32(in.pos_offset.x), f32(in.pos_offset.y)) + drawable.translation;
+    let ground_clip = projectTileWithElevation(ground_anchor, in.height_offset, projectionVector[globalIndex.value]);
+    let ground_visible = ground_visibility(ground_clip, paintParams.world_size.y / paintParams.pixel_ratio);
+#else
+    let ground_visible = 1.0;
+#endif
+
     let fade_opacity = unpack_opacity(in.fade_opacity);
     let fade_change = select(-paintParams.symbol_fade_change, paintParams.symbol_fade_change, fade_opacity.y > 0.5);
-    let fo = max(0.0, min(1.0, fade_opacity.x + fade_change));
+    let fo = max(0.0, min(ground_visible, fade_opacity.x + fade_change));
 
 #ifdef HAS_UNIFORM_u_opacity
     let visibility = fo;
@@ -6531,7 +6576,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var projected_pos: vec4<f32>;
     if (drawable.is_along_line != 0u || drawable.is_variable_anchor != 0u) {
-        projected_pos = vec4<f32>(in.projected_pos.xy, in.height_offset, 1.0);
+        // A glyph along a line stands at its own height, which the label's
+        // layout gives it; a label at a variable anchor at its anchor's.
+        let height = select(in.height_offset, in.projected_pos.w, drawable.is_along_line != 0u);
+        projected_pos = vec4<f32>(in.projected_pos.xy, height, 1.0);
     } else if (drawable.pitch_with_map != 0u) {
         projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, in.height_offset, 1.0);
     } else {
@@ -6595,7 +6643,7 @@ fn main(in: VertexInput) -> VertexOutput {
     return out;
 }
 ",
-    ),
+    )),
     fragment: Some(
         r"
 struct FragmentInput {

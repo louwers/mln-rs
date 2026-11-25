@@ -9,12 +9,16 @@ use geometry::Point;
 use glam::{DMat4, DVec2, DVec3, DVec4, Vec2};
 use mln_map_types::{ProjectedTilePoint, TileProjector, View};
 use mln_style::feature::GeometryCoordinate;
+use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
+use mln_style::types::SymbolHeightAnchorType;
+use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::ONE_EM;
 
 use crate::buckets::symbol_bucket::{
     PlacedSymbol, PlacedSymbolPools, SymbolBucket, SymbolDynamicLayoutVertex, SymbolSizeBinder, ZoomEvaluatedSize,
 };
 use crate::layout::symbol_instance::WritingModes;
+use crate::terrain::{TerrainElevation, TileGround};
 
 /// The directions on screen that a pitched, unrotated label's east and south
 /// axes take, as unit vectors, or zero where an axis is edge-on.
@@ -99,14 +103,21 @@ pub(crate) fn evaluate_size_for_feature(size: &ZoomEvaluatedSize, symbol: &Place
     }
 }
 
-/// Appends the four vertices of a glyph at `anchor`, turned by `angle`.
-pub(crate) fn add_dynamic_attributes(anchor: Vec2, angle: f32, vertices: &mut Vec<SymbolDynamicLayoutVertex>) {
-    vertices.extend([SymbolBucket::dynamic_layout_attributes(anchor, angle); 4]);
+/// Appends the four vertices of a glyph at `anchor`, turned by `angle`,
+/// raised to `height` where it is of a label along a line pitched with the
+/// map.
+pub(crate) fn add_dynamic_attributes(
+    anchor: Vec2,
+    angle: f32,
+    height: f32,
+    vertices: &mut Vec<SymbolDynamicLayoutVertex>,
+) {
+    vertices.extend([SymbolBucket::dynamic_layout_attributes(anchor, angle, height); 4]);
 }
 
 /// Appends the vertices of `glyph_count` glyphs placed where nothing draws.
 pub(crate) fn hide_glyphs(glyph_count: usize, vertices: &mut Vec<SymbolDynamicLayoutVertex>) {
-    let hidden = SymbolBucket::dynamic_layout_attributes(Vec2::NEG_INFINITY, 0.0);
+    let hidden = SymbolBucket::dynamic_layout_attributes(Vec2::NEG_INFINITY, 0.0, 0.0);
     vertices.resize(vertices.len() + 4 * glyph_count, hidden);
 }
 
@@ -130,6 +141,44 @@ impl From<ProjectedTilePoint> for ProjectedPoint {
     }
 }
 
+/// How high a tile's symbols stand: over terrain, on the ground under their
+/// anchors, where `symbol-height-anchor` measures their
+/// `symbol-height-offset` from the ground; else on sea level.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct SymbolHeights<'a> {
+    ground: Option<TileGround<'a>>,
+}
+
+impl<'a> SymbolHeights<'a> {
+    /// The heights of the symbols of `layout` in `tile`, over `ground` where
+    /// terrain draws. Symbols drawn over the view (`symbol-screen-space`)
+    /// stand on nothing.
+    pub(crate) fn new(
+        ground: Option<&'a TerrainElevation>,
+        tile: UnwrappedTileID,
+        layout: &SymbolLayoutProperties::PossiblyEvaluated,
+    ) -> Self {
+        let from_ground = *layout.symbol_height_anchor.uniform() == SymbolHeightAnchorType::Ground
+            && !*layout.symbol_screen_space.uniform();
+        SymbolHeights { ground: ground.filter(|_| from_ground).map(|ground| TileGround::new(ground, tile)) }
+    }
+
+    /// Whether the symbols stand on the ground, rather than on sea level.
+    #[must_use]
+    pub(crate) fn on_ground(&self) -> bool {
+        self.ground.is_some()
+    }
+
+    /// The height above sea level, in meters, of a symbol `height_offset`
+    /// meters up from its anchor at `point`, in tile units, before
+    /// `*-translate`: the translation moves a symbol on screen, not over the
+    /// ground, as GL JS's shaders draw it.
+    #[must_use]
+    pub(crate) fn at(&self, point: Vec2, height_offset: f32) -> f32 {
+        self.ground.map_or(0.0, |ground| ground.height(point)) + height_offset
+    }
+}
+
 /// Projects tile points to the label plane a symbol is laid out in, through
 /// the tile's projection.
 #[derive(Clone)]
@@ -141,16 +190,19 @@ pub(crate) struct LabelPlaneProjector<'a> {
     pitched: DMat4,
     pitched_inverse: DMat4,
     viewport: Vec2,
-    /// The symbol's `symbol-height-offset`, in meters.
-    elevation: f64,
+    /// What the symbols stand on, and the symbol's `symbol-height-offset`,
+    /// in meters, above it.
+    heights: SymbolHeights<'a>,
+    height_offset: f32,
 }
 
 impl<'a> LabelPlaneProjector<'a> {
     /// A projector of `tile`'s points, moved by `translation` in tile
-    /// units, into the label plane.
+    /// units, into the label plane, for symbols that stand at `heights`.
     #[must_use]
     pub(crate) fn new(
         tile: &TileProjector<'a>,
+        heights: SymbolHeights<'a>,
         pitch_with_map: bool,
         rotate_with_map: bool,
         pixels_to_tile_units: f32,
@@ -170,16 +222,23 @@ impl<'a> LabelPlaneProjector<'a> {
             pitched,
             pitched_inverse,
             viewport: Vec2::new(size.width as f32, size.height as f32),
-            elevation: 0.0,
+            heights,
+            height_offset: 0.0,
         }
     }
 
-    /// This projector for a symbol `height_offset` meters above the ground.
-    /// The pitched label plane is the same at any height; the shaders raise
-    /// it.
+    /// This projector for a symbol `height_offset` meters up from its
+    /// anchor. The pitched label plane is the same at any height; the
+    /// shaders raise it.
     #[must_use]
     pub(crate) fn raised(&self, height_offset: f32) -> Self {
-        LabelPlaneProjector { elevation: f64::from(height_offset), ..self.clone() }
+        LabelPlaneProjector { height_offset, ..self.clone() }
+    }
+
+    /// The height above sea level, in meters, that a symbol stands at over
+    /// `tile_point`, before its translation, which moves it on screen only.
+    fn elevation(&self, tile_point: Vec2) -> f64 {
+        f64::from(self.heights.at(tile_point, self.height_offset))
     }
 
     /// Tile units to the label plane; distance and occlusion come from the
@@ -195,12 +254,27 @@ impl<'a> LabelPlaneProjector<'a> {
                 occluded: false,
             };
         }
-        let projected = self.tile.project(&tile_point_f64(translated), self.elevation);
+        let projected = self.tile.project(&tile_point_f64(translated), self.elevation(tile_point));
         let clip = DVec2::new(projected.point.x, projected.point.y);
         ProjectedPoint {
             point: ((clip * DVec2::new(0.5, -0.5) + 0.5) * self.viewport.as_dvec2()).as_vec2(),
             ..projected.into()
         }
+    }
+
+    /// The height above sea level, in meters, that a glyph at
+    /// `label_plane_point` stands at where the label plane is pitched with
+    /// the map, where the shaders raise it: that of the ground under it,
+    /// before the translation. 0 in the viewport's plane, whose points
+    /// project at the heights under them already.
+    #[must_use]
+    pub(crate) fn glyph_height(&self, label_plane_point: Vec2) -> f32 {
+        if !self.pitch_with_map || !label_plane_point.is_finite() {
+            return 0.0;
+        }
+        let pos = self.pitched_inverse * label_plane_point.as_dvec2().extend(0.0).extend(1.0);
+        let tile_point = (pos.truncate().truncate() / pos.w).as_vec2() - self.translation;
+        self.heights.at(tile_point, self.height_offset)
     }
 
     /// Label plane to clip space, for orientation checks.
@@ -217,7 +291,7 @@ impl<'a> LabelPlaneProjector<'a> {
     /// Tile units straight to clip space.
     #[must_use]
     pub(crate) fn to_clip_space_from_tile(&self, tile_point: Vec2) -> ProjectedPoint {
-        self.tile.project(&tile_point_f64(tile_point), self.elevation).into()
+        self.tile.project(&tile_point_f64(tile_point), self.elevation(tile_point)).into()
     }
 }
 
@@ -421,8 +495,10 @@ impl LabelPlacer<'_, '_> {
         vertices: &mut Vec<SymbolDynamicLayoutVertex>,
     ) -> Result<(), Unplaced> {
         let check_upright = keep_upright && !flip;
+        let label_plane = self.label_plane;
         let mut push = |glyph: PlacedGlyph| {
-            add_dynamic_attributes(glyph.point, if rotate_to_line { glyph.angle } else { 0.0 }, vertices);
+            let angle = if rotate_to_line { glyph.angle } else { 0.0 };
+            add_dynamic_attributes(glyph.point, angle, label_plane.glyph_height(glyph.point), vertices);
         };
         match self.label.glyph_offsets {
             // A label of glyphs that are all 0x0 has no vertices.
@@ -537,12 +613,15 @@ pub(crate) struct LineLabelAlignment {
 }
 
 /// Replaces `vertices` with those of each glyph of the line labels
-/// `symbols`, placed along their lines for `tile_projector`'s view.
+/// `symbols`, placed along their lines, which stand at `heights`, for
+/// `tile_projector`'s view.
+#[expect(clippy::too_many_arguments, reason = "the labels, their buffer's pools, and how they project")]
 pub(crate) fn reproject_line_labels(
     vertices: &mut Vec<SymbolDynamicLayoutVertex>,
     symbols: &[PlacedSymbol],
     pools: &PlacedSymbolPools,
     tile_projector: &TileProjector<'_>,
+    heights: SymbolHeights<'_>,
     size_binder: &SymbolSizeBinder,
     translation: Vec2,
     alignment: LineLabelAlignment,
@@ -558,6 +637,7 @@ pub(crate) fn reproject_line_labels(
     let pixels_to_tile_units = tile_projector.tile_id().pixels_to_tile_units(1.0, zoom);
     let label_plane = LabelPlaneProjector::new(
         tile_projector,
+        heights,
         alignment.pitch_with_map,
         alignment.rotate_with_map,
         pixels_to_tile_units,
@@ -578,7 +658,7 @@ pub(crate) fn reproject_line_labels(
         }
 
         let tile_anchor = tile_point_f64(symbol.anchor_point);
-        let anchor = tile_projector.project(&tile_anchor, 0.0);
+        let anchor = tile_projector.project(&tile_anchor, f64::from(heights.at(symbol.anchor_point, 0.0)));
         if anchor.occluded || !DVec2::new(anchor.point.x, anchor.point.y).abs().cmple(clip_extent).all() {
             hide_glyphs(glyph_count, vertices);
             continue;
@@ -627,7 +707,7 @@ mod tests {
 
     use super::{
         LabelPlaneProjector, LineLabel, LineLabelAlignment, LinePlacer, PlacedGlyph, PlacedSymbol, PlacedSymbolPools,
-        SymbolSizeBinder, TileDistance, Unplaced, WritingModes, reproject_line_labels,
+        SymbolHeights, SymbolSizeBinder, TileDistance, Unplaced, WritingModes, reproject_line_labels,
     };
     use crate::util::pool::PoolRange;
 
@@ -672,7 +752,7 @@ mod tests {
     fn glyphs_follow_the_line_around_corners_and_stop_at_its_ends() {
         let transform = transform();
         let tile = TileProjector::new(transform.view(), &UnwrappedTileID::new(0, 0, 0));
-        let label_plane = LabelPlaneProjector::new(&tile, false, true, 16.0, Vec2::ZERO);
+        let label_plane = LabelPlaneProjector::new(&tile, SymbolHeights::default(), false, true, 16.0, Vec2::ZERO);
         let mut placer = LinePlacer::new(&label_plane);
         // East from (128, 256) px to (256, 256), then south to (256, 384).
         let line = [Point::new(2048, 4096), Point::new(4096, 4096), Point::new(4096, 6144)];
@@ -696,7 +776,7 @@ mod tests {
     fn an_upright_label_on_a_line_drawn_westward_flips() {
         let transform = transform();
         let tile = TileProjector::new(transform.view(), &UnwrappedTileID::new(0, 0, 0));
-        let label_plane = LabelPlaneProjector::new(&tile, false, true, 16.0, Vec2::ZERO);
+        let label_plane = LabelPlaneProjector::new(&tile, SymbolHeights::default(), false, true, 16.0, Vec2::ZERO);
         let mut placer = LinePlacer::new(&label_plane);
         // West from (384, 256) px to (128, 256).
         let line = [Point::new(6144, 4096), Point::new(2048, 4096)];
@@ -770,6 +850,7 @@ mod tests {
             std::slice::from_ref(&symbol),
             &pools,
             &projector,
+            SymbolHeights::default(),
             &size,
             Vec2::ZERO,
             alignment,

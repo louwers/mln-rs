@@ -5404,10 +5404,12 @@ void main() {
 };
 
 pub(crate) const SYMBOL_ICON_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"layout (location = 0) in vec4 a_pos_offset;
+    vertex: concat!(
+        ground_visibility!(),
+        r"layout (location = 0) in vec4 a_pos_offset;
 layout (location = 1) in vec4 a_data;
 layout (location = 2) in vec4 a_pixeloffset;
-layout (location = 3) in vec3 a_projected_pos;
+layout (location = 3) in vec4 a_projected_pos;
 layout (location = 4) in float a_fade_opacity;
 layout (location = 6) in vec2 a_tex_origin;
 layout (location = 11) in float a_height_offset;
@@ -5484,9 +5486,16 @@ layout (location = 5) in lowp vec2 a_opacity;
 void main() {
     highp float u_opacity = u_is_text_prop ? u_text_opacity : u_icon_opacity;
 
+    // How much of the symbol the ground in front of its anchor leaves.
+#ifdef TERRAIN
+    highp float ground_visible = ground_visibility(
+        projectTileWithElevation(a_pos_offset.xy + u_translation, a_height_offset), u_world_size.y / u_pixel_ratio);
+#else
+    highp float ground_visible = 1.0;
+#endif
     vec2 fade_opacity = unpack_opacity(a_fade_opacity);
     float fade_change = fade_opacity[1] > 0.5 ? u_symbol_fade_change : -u_symbol_fade_change;
-    v_fade_opacity = max(0.0, min(1.0, fade_opacity[0] + fade_change));
+    v_fade_opacity = max(0.0, min(ground_visible, fade_opacity[0] + fade_change));
 #ifndef HAS_UNIFORM_u_opacity
     lowp float opacity = unpack_mix_vec2(a_opacity, u_opacity_t);
     v_fade_opacity *= opacity;
@@ -5569,7 +5578,9 @@ void main() {
 
     vec4 projected_pos;
     if (u_is_along_line || u_is_variable_anchor) {
-        projected_pos = vec4(a_projected_pos.xy, a_height_offset, 1.0);
+        // A glyph along a line stands at its own height, which the label's
+        // layout gives it; a label at a variable anchor at its anchor's.
+        projected_pos = vec4(a_projected_pos.xy, u_is_along_line ? a_projected_pos.w : a_height_offset, 1.0);
     } else if (u_pitch_with_map) {
         projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, a_height_offset, 1.0);
     } else {
@@ -5593,7 +5604,8 @@ void main() {
     v_tex = (a_tex - a_tex_origin) / u_texsize;
     v_tex_origin = a_tex_origin / u_texsize;
 }
-",
+"
+    ),
     fragment: r"uniform sampler2D u_texture;
 
 layout (std140) uniform SymbolEvaluatedPropsUBO {
@@ -5638,12 +5650,14 @@ void main() {
 };
 
 pub(crate) const SYMBOL_SDF_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"#define SDF_PX 8.0
+    vertex: concat!(
+        ground_visibility!(),
+        r"#define SDF_PX 8.0
 
 layout (location = 0) in vec4 a_pos_offset;
 layout (location = 1) in vec4 a_data;
 layout (location = 2) in vec4 a_pixeloffset;
-layout (location = 3) in vec3 a_projected_pos;
+layout (location = 3) in vec4 a_projected_pos;
 layout (location = 4) in float a_fade_opacity;
 layout (location = 10) in vec2 a_tex_origin;
 layout (location = 11) in float a_height_offset;
@@ -5771,9 +5785,16 @@ lowp float halo_blur = unpack_mix_vec2(a_halo_blur, u_halo_blur_t);
 lowp float halo_blur = u_halo_blur;
 #endif
 
+    // How much of the symbol the ground in front of its anchor leaves.
+#ifdef TERRAIN
+    highp float ground_visible = ground_visibility(
+        projectTileWithElevation(a_pos_offset.xy + u_translation, a_height_offset), u_world_size.y / u_pixel_ratio);
+#else
+    highp float ground_visible = 1.0;
+#endif
     vec2 fade_opacity = unpack_opacity(a_fade_opacity);
     float fade_change = fade_opacity[1] > 0.5 ? u_symbol_fade_change : -u_symbol_fade_change;
-    float interpolated_fade_opacity = max(0.0, min(1.0, fade_opacity[0] + fade_change));
+    float interpolated_fade_opacity = max(0.0, min(ground_visible, fade_opacity[0] + fade_change));
 
     // A quad that draws nothing goes to one point off screen, so it's never
     // rasterized. All four vertices of a quad share its fade and opacity.
@@ -5856,7 +5877,9 @@ lowp float halo_blur = u_halo_blur;
 
     vec4 projected_pos;
     if (u_is_along_line || u_is_variable_anchor) {
-        projected_pos = vec4(a_projected_pos.xy, a_height_offset, 1.0);
+        // A glyph along a line stands at its own height, which the label's
+        // layout gives it; a label at a variable anchor at its anchor's.
+        projected_pos = vec4(a_projected_pos.xy, u_is_along_line ? a_projected_pos.w : a_height_offset, 1.0);
     } else if (u_pitch_with_map) {
         projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, a_height_offset, 1.0);
     } else {
@@ -5891,7 +5914,8 @@ lowp float halo_blur = u_halo_blur;
     v_tex_origin = a_tex_origin / u_texsize;
     v_data1 = vec3(gamma_scaled, halo_edge, interpolated_fade_opacity);
 }
-",
+"
+    ),
     fragment: r"#define SDF_PX 8.0
 
 layout (std140) uniform SymbolEvaluatedPropsUBO {
@@ -5976,12 +6000,14 @@ highp vec4 halo_color = u_halo_color;
 };
 
 pub(crate) const SYMBOL_TEXT_AND_ICON_SHADER: GlslShaderSource = GlslShaderSource {
-    vertex: r"#define SDF_PX 8.0
+    vertex: concat!(
+        ground_visibility!(),
+        r"#define SDF_PX 8.0
 #define ICON 0.0
 
 layout (location = 0) in vec4 a_pos_offset;
 layout (location = 1) in vec4 a_data;
-layout (location = 2) in vec3 a_projected_pos;
+layout (location = 2) in vec4 a_projected_pos;
 layout (location = 3) in float a_fade_opacity;
 layout (location = 9) in vec2 a_tex_origin;
 layout (location = 11) in float a_height_offset;
@@ -6110,9 +6136,16 @@ lowp float halo_blur = unpack_mix_vec2(a_halo_blur, u_halo_blur_t);
 lowp float halo_blur = u_halo_blur;
 #endif
 
+    // How much of the symbol the ground in front of its anchor leaves.
+#ifdef TERRAIN
+    highp float ground_visible = ground_visibility(
+        projectTileWithElevation(a_pos_offset.xy + u_translation, a_height_offset), u_world_size.y / u_pixel_ratio);
+#else
+    highp float ground_visible = 1.0;
+#endif
     vec2 fade_opacity = unpack_opacity(a_fade_opacity);
     float fade_change = fade_opacity[1] > 0.5 ? u_symbol_fade_change : -u_symbol_fade_change;
-    float interpolated_fade_opacity = max(0.0, min(1.0, fade_opacity[0] + fade_change));
+    float interpolated_fade_opacity = max(0.0, min(ground_visible, fade_opacity[0] + fade_change));
 
     // A quad that draws nothing goes to one point off screen, so it's never
     // rasterized. All four vertices of a quad share its fade and opacity.
@@ -6195,7 +6228,9 @@ lowp float halo_blur = u_halo_blur;
 
     vec4 projected_pos;
     if (u_is_along_line || u_is_variable_anchor) {
-        projected_pos = vec4(a_projected_pos.xy, a_height_offset, 1.0);
+        // A glyph along a line stands at its own height, which the label's
+        // layout gives it; a label at a variable anchor at its anchor's.
+        projected_pos = vec4(a_projected_pos.xy, u_is_along_line ? a_projected_pos.w : a_height_offset, 1.0);
     } else if (u_pitch_with_map) {
         projected_pos = u_label_plane_matrix * vec4(a_projected_pos.xy + u_translation, a_height_offset, 1.0);
     } else {
@@ -6233,7 +6268,8 @@ lowp float halo_blur = u_halo_blur;
     v_data1 = vec3(gamma_scaled, halo_edge, interpolated_fade_opacity);
     v_is_icon = int(is_icon);
 }
-",
+"
+    ),
     fragment: r"#define SDF_PX 8.0
 
 layout (std140) uniform SymbolEvaluatedPropsUBO {

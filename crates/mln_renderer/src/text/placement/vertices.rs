@@ -16,8 +16,8 @@ use super::{JointOpacityState, Placement, VariableOffset};
 use crate::buckets::symbol_bucket::{Buffer, CollisionBuffer, SymbolBucket, SymbolBucketState};
 use crate::layout::symbol_instance::{Justification, SymbolInstance, TextPart};
 use crate::layout::symbol_projection::{
-    LabelPlaneProjector, LineLabelAlignment, add_dynamic_attributes, evaluate_size_for_feature, hide_glyphs,
-    reproject_line_labels, tile_skew_vectors,
+    LabelPlaneProjector, LineLabelAlignment, SymbolHeights, add_dynamic_attributes, evaluate_size_for_feature,
+    hide_glyphs, reproject_line_labels, tile_skew_vectors,
 };
 use crate::render_layer::BucketPlacementData;
 use crate::text::collision_index::OverlapMode;
@@ -77,13 +77,15 @@ impl Placement {
     }
 
     /// Sets the opacities of the bucket's symbols from the placement, and
-    /// returns whether sorting the symbols for the map's bearing changed the
-    /// order of the bucket's triangles. A symbol a bucket before it in the
-    /// layer has, by `seen_cross_tile_ids`, is a duplicate, and hides.
+    /// their heights where they stand on its ground, and returns whether
+    /// sorting the symbols for the map's bearing changed the order of the
+    /// bucket's triangles. A symbol a bucket before it in the layer has, by
+    /// `seen_cross_tile_ids`, is a duplicate, and hides.
     pub(crate) fn update_bucket_opacities(
         &self,
         bucket: &mut SymbolBucket,
         view: &View,
+        data: &BucketPlacementData,
         seen_cross_tile_ids: &mut BTreeSet<NonZeroU32>,
     ) -> bool {
         let layout = &*bucket.layout;
@@ -111,6 +113,7 @@ impl Placement {
         let state = &mut bucket.state;
         for buffer in [&mut state.text, &mut state.icon, &mut state.sdf_icon] {
             buffer.opacity_attribute_data.clear();
+            buffer.elevation_attribute_data.clear();
         }
         for buffer in [
             &mut state.text_collision_box,
@@ -122,7 +125,9 @@ impl Placement {
         .flatten()
         {
             buffer.dynamic_vertices.clear();
+            buffer.elevations.clear();
         }
+        let heights = SymbolHeights::new(self.ground(), data.tile.id, layout);
 
         let symbols = std::mem::take(&mut state.symbol_instances);
         for (index, symbol) in symbols.iter().enumerate() {
@@ -137,14 +142,14 @@ impl Placement {
             if let Some(text) = &symbol.text {
                 let vertex = SymbolBucket::opacity_attributes(opacity.text.placed, opacity.text.opacity);
                 for (run, _) in text.runs.all() {
-                    set_run_opacity(&mut state.text, run, hidden, vertex);
+                    set_run_opacity(&mut state.text, run, hidden, vertex, heights);
                 }
             }
             if let Some(icon) = &symbol.icon {
                 let vertex = SymbolBucket::opacity_attributes(opacity.icon.placed, opacity.icon.opacity);
                 let buffer = if icon.sdf { &mut state.sdf_icon } else { &mut state.icon };
                 for (run, _) in icon.runs() {
-                    set_run_opacity(buffer, run, hidden, vertex);
+                    set_run_opacity(buffer, run, hidden, vertex, heights);
                 }
             }
 
@@ -177,6 +182,10 @@ impl Placement {
                     let shift = if is_text || has_icon_text_fit { text_shift } else { Vec2::ZERO };
                     let vertex = SymbolBucket::collision_dynamic_vertex(placed, !used, shift);
                     extend(&mut buffer.dynamic_vertices, 4 * box_count, vertex);
+                    if heights.on_ground() {
+                        let elevation = heights.at(symbol.anchor().point, symbol.height_offset());
+                        extend(&mut buffer.elevations, 4 * box_count, elevation);
+                    }
                 }
             }
         }
@@ -221,6 +230,7 @@ impl Placement {
         }
 
         let tile_projector = TileProjector::with_data(view, &tile.id, tile.projection);
+        let heights = SymbolHeights::new(self.ground(), tile.id, layout);
         if along_line {
             let mut laid_out = false;
             if *layout.icon_rotation_alignment.uniform() == AlignmentType::Map {
@@ -239,6 +249,7 @@ impl Placement {
                         runs,
                         pools,
                         &tile_projector,
+                        heights,
                         &bucket.icon_size_binder,
                         icon_translation,
                         alignment,
@@ -254,6 +265,7 @@ impl Placement {
                     runs,
                     pools,
                     &tile_projector,
+                    heights,
                     &bucket.text_size_binder,
                     text_translation,
                     LineLabelAlignment {
@@ -298,8 +310,10 @@ impl Placement {
             && (bucket.has_icon_data() || bucket.has_sdf_icon_data());
         // The shader leaves the translation to us for variable anchors, so
         // the shifted anchor carries it.
+        let heights = SymbolHeights::new(self.ground(), tile.id, layout);
         let label_plane = LabelPlaneProjector::new(
             tile_projector,
+            heights,
             pitch_with_map,
             rotate_with_map,
             tile.id.pixels_to_tile_units(1.0, zoom),
@@ -384,7 +398,7 @@ impl Placement {
                     icon_anchor[usize::from(vertical)].get_or_insert(anchor);
                 }
                 for _ in 0..glyphs {
-                    add_dynamic_attributes(anchor, run.angle, positions);
+                    add_dynamic_attributes(anchor, run.angle, 0.0, positions);
                 }
             }
         }
@@ -406,7 +420,7 @@ impl Placement {
                     match icon_anchors[index][usize::from(vertical)].filter(|_| !run.hidden) {
                         Some(anchor) => {
                             for _ in 0..run.glyph_offsets.len() {
-                                add_dynamic_attributes(anchor, run.angle, positions);
+                                add_dynamic_attributes(anchor, run.angle, 0.0, positions);
                             }
                         }
                         None => hide_glyphs(run.glyph_offsets.len(), positions),
@@ -433,7 +447,7 @@ impl Placement {
                     hide_glyphs(run.glyph_offsets.len(), positions);
                 } else {
                     for _ in 0..run.glyph_offsets.len() {
-                        add_dynamic_attributes(run.anchor_point, run.angle, positions);
+                        add_dynamic_attributes(run.anchor_point, run.angle, 0.0, positions);
                     }
                 }
             }
@@ -468,14 +482,21 @@ impl Placement {
 }
 
 /// Sets run `run` of `buffer` hidden or not, and its vertices' opacity to
-/// `vertex`.
+/// `vertex` and, where its symbols stand on the ground, their height above
+/// sea level to that of its anchor standing at `heights`. The runs come in
+/// the order of their vertices, which these follow.
 fn set_run_opacity(
     buffer: &mut Buffer,
     run: usize,
     hidden: bool,
     vertex: crate::buckets::symbol_bucket::SymbolOpacityVertex,
+    heights: SymbolHeights<'_>,
 ) {
     let run = &mut buffer.placed_symbols[run];
     run.hidden = hidden;
-    extend(&mut buffer.opacity_attribute_data, 4 * run.glyph_offsets.len(), vertex);
+    let vertices = 4 * run.glyph_offsets.len();
+    extend(&mut buffer.opacity_attribute_data, vertices, vertex);
+    if heights.on_ground() {
+        extend(&mut buffer.elevation_attribute_data, vertices, heights.at(run.anchor_point, run.height_offset));
+    }
 }

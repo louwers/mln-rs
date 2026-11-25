@@ -32,7 +32,7 @@ use mln_gfx::shaders::layer_composite_ubo::LayerCompositeUBO;
 use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
 use mln_gfx::shaders::line_layer_ubo::{LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineTilePropsUnionUBO};
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::programs::STANDING;
+use mln_gfx::shaders::programs::{self, STANDING};
 use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::shaders::sky_ubo::{AtmospherePropsUBO, SkyPropsUBO};
@@ -460,8 +460,11 @@ fn resources_are_in_the_descriptor_set_layouts() {
                 }
             }
             // A variant that doesn't stand on terrain reads none of the
-            // ground's depth.
-            let ground = [ID_GROUND_DEPTH_TEXTURE].map(image_texture_binding);
+            // ground's depth, which the symbols read in a slot of their own.
+            let symbols = [&programs::SYMBOL_ICON, &programs::SYMBOL_SDF, &programs::SYMBOL_TEXT_AND_ICON];
+            let depth =
+                if symbols.contains(&program) { ID_SYMBOL_GROUND_DEPTH_TEXTURE } else { ID_GROUND_DEPTH_TEXTURE };
+            let ground = [depth].map(image_texture_binding);
             let expected: BTreeSet<u32> = if variant.projection.stands() || !STANDING.contains(&program) {
                 table.clone()
             } else {

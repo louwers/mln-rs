@@ -263,6 +263,9 @@ pub const ID_COLLISION_PROJECTION_UBO: usize = ID_PROJECTION_UBO; // packed
 pub const COLLISION_UBO_COUNT: usize = ID_COLLISION_TILE_PROPS_UBO + 1; // packed
 pub const ID_SYMBOL_IMAGE_TEXTURE: usize = 0;
 pub const ID_SYMBOL_IMAGE_ICON_TEXTURE: usize = 1;
+/// The ground's depth, as [`ID_GROUND_DEPTH_TEXTURE`], in the slot that the
+/// symbols' own textures leave free: symbols read no DEM.
+pub const ID_SYMBOL_GROUND_DEPTH_TEXTURE: usize = 2;
 pub const ID_COLLISION_POS_VERTEX_ATTRIBUTE: usize = 0;
 pub const ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE: usize = 1;
 pub const ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE: usize = 2;

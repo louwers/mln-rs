@@ -13,7 +13,6 @@ use mln_gfx::RendererBackend as _;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::programs::STANDING;
-use mln_gfx::shaders::shader_defines::ID_GROUND_DEPTH_TEXTURE;
 use mln_util::hash::HashSet;
 
 use crate::shaders::glsl_sources::PRELUDE;
@@ -217,8 +216,8 @@ fn every_program_links_and_matches_its_tables(backend: &mut RendererBackend) {
                     assert!(!locations.is_empty(), "{what}: no vertex attributes");
                 }
                 // A variant that doesn't stand on terrain doesn't read the
-                // ground's depth.
-                for info in source.textures.iter().filter(|info| !(flat && info.id == ID_GROUND_DEPTH_TEXTURE)) {
+                // ground's depth, whatever slot its program keeps for it.
+                for info in source.textures.iter().filter(|info| !(flat && info.name == "u_ground_depth")) {
                     assert!(program.textures.contains(&info.id), "{what}: no sampler {}", info.name);
                 }
             }

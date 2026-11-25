@@ -1004,6 +1004,7 @@ impl RenderOrchestrator {
                 *layer,
                 longitude,
                 &update_parameters.view,
+                self.terrain.ground().map(|ground| &**ground),
                 &mut self.tile_store,
             );
             if continuous {
@@ -1037,7 +1038,12 @@ impl RenderOrchestrator {
             // that wait for placements to fade their symbols out. Until it
             // may, the frame says when, rather than asking for frames that
             // would show the same.
-            let inputs = PlacementInputs::new(update_parameters, &layers_need_placement, &self.tile_store);
+            let inputs = PlacementInputs::new(
+                update_parameters,
+                self.terrain.ground(),
+                &layers_need_placement,
+                &self.tile_store,
+            );
             let stale = self.placement_controller.is_stale(&inputs) || self.tile_store.has_fading_tiles();
             let next_placement_at = self
                 .placement_controller
@@ -1066,7 +1072,12 @@ impl RenderOrchestrator {
                 // queries don't find its symbols.
                 frame.placement_changed = self.placement_controller.reset();
             } else {
-                let inputs = PlacementInputs::new(update_parameters, &layers_need_placement, &self.tile_store);
+                let inputs = PlacementInputs::new(
+                    update_parameters,
+                    self.terrain.ground(),
+                    &layers_need_placement,
+                    &self.tile_store,
+                );
                 let mut placement = Placement::create(Arc::new(inputs), update_parameters.time_point, None);
                 placement.collect_placed_symbol_data(self.placed_symbol_data_collected);
                 placement.place(&mut self.tile_store);
