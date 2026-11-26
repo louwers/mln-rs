@@ -7,7 +7,6 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
-use mln_style::color::Color;
 use mln_style::constants::TILE_SIZE_D;
 use mln_style::layer::LayerStyle;
 use mln_style::layers::Background;
@@ -22,10 +21,11 @@ use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::Uniforms;
 use crate::layer::bucket::NoBucket;
 use crate::layer::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, TileDraws, TileObjects};
-use crate::layer::layer_type::{EvaluatedLayer, LayerType};
+use crate::layer::layer_type::LayerType;
 use crate::layer::layout::NoLayout;
 use crate::layer::render_layer::{
-    LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    EvaluateCx, Evaluation, LayerUpdateParameters, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer,
+    RenderLayerBase, TypedLayer,
 };
 use crate::layers::background::pattern_atlas::PatternAtlas;
 use crate::layers::background::programs;
@@ -168,7 +168,7 @@ impl RenderBackgroundLayer {
 impl TypedLayer for RenderBackgroundLayer {
     type Type = Background;
     type Drawing = TileDraws<BackgroundTile>;
-    const DRAPES: bool = true;
+    const TERRAIN: OnTerrain = OnTerrain::Drapes;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -277,20 +277,23 @@ impl TypedLayer for RenderBackgroundLayer {
         });
     }
 
-    /// None where the layer is transparent, and the opaque pass too where
-    /// it is opaque, for the layers below the frame's opaque pass cutoff.
-    fn passes(&self, evaluated: &EvaluatedLayer<Background>) -> RenderPass {
-        let evaluated = &evaluated.paint;
-        if *evaluated.background_opacity.uniform() == 0.0 {
-            RenderPass::None
-        } else if !self.values.unevaluated.background_pattern.is_undefined()
-            || *evaluated.background_opacity.uniform() < 1.0
-            || evaluated.background_color.uniform().a < 1.0
-        {
-            RenderPass::Translucent
+    /// Draws nothing where the layer is transparent, and in the opaque pass
+    /// too where it is opaque, for the layers below the frame's opaque pass
+    /// cutoff. Without a pattern and where it shows, it is one solid color.
+    fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
+        let evaluated = &cx.evaluated.paint;
+        let opacity = *evaluated.background_opacity.uniform();
+        let color = *evaluated.background_color.uniform();
+        let evaluation = if opacity == 0.0 {
+            Evaluation::NONE
+        } else if !self.values.unevaluated.background_pattern.is_undefined() || opacity < 1.0 || color.a < 1.0 {
+            Evaluation::TRANSLUCENT
         } else {
-            RenderPass::Opaque | RenderPass::Translucent
-        }
+            Evaluation::OPAQUE
+        };
+        let pattern = !evaluated.background_pattern.faded().from.empty();
+        let solid = (!pattern && opacity > 0.0).then(|| color * opacity);
+        Evaluation { solid, ..evaluation }
     }
 
     /// Picks the tiles that cover the view, which the layer draws, having no
@@ -327,13 +330,4 @@ impl TypedLayer for RenderBackgroundLayer {
     }
 }
 
-impl RenderLayer for RenderBackgroundLayer {
-    fn solid_background(&self) -> Option<Color> {
-        let evaluated = &self.values.evaluated.paint;
-        if !evaluated.background_pattern.faded().from.empty() || *evaluated.background_opacity.uniform() <= 0.0 {
-            return None;
-        }
-
-        Some(*evaluated.background_color.uniform() * *evaluated.background_opacity.uniform())
-    }
-}
+impl RenderLayer for RenderBackgroundLayer {}
