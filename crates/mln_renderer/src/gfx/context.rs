@@ -224,7 +224,7 @@ impl Context {
     #[cfg(target_family = "wasm")]
     pub(crate) fn add_host_vertices<V: bytemuck::Pod>(
         &mut self,
-        bytes: mln_util::host_bytes::HostBytes,
+        bytes: mln_wire::host_bytes::HostBytes,
     ) -> SharedVertices {
         self.vertices.add_host::<V>(bytes, &self.device.queue)
     }

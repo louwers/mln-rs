@@ -1,14 +1,14 @@
 // How the members of the tile workers' messages that the derive can't
 // write cross (mod.rs): trait objects, as the types they can be, and the
 // values that cross once per worker instance, then by key
-// (mln_util::serialization::shared).
+// (mln_wire::shared).
 
 use std::sync::Arc;
 
 use mln_style::wire::{SharedExpression, SharedLayer};
 use mln_tile::cut::SharedAncestor;
-use mln_util::serialization::shared::{self, ErasedTable, Role, Table};
 use mln_vec_map::VecSet;
+use mln_wire::shared::{self, ErasedTable, Role, Table};
 use mln_wire::{Context, Reader, Request, Wire, Writer};
 
 use crate::Registry;

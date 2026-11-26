@@ -4,8 +4,8 @@
 use std::sync::Arc;
 
 use mln_util::error::Error;
-use mln_util::serialization::payload::Payloads;
-use mln_util::serialization::shared::Role;
+use mln_wire::payload::Payloads;
+use mln_wire::shared::Role;
 
 use super::envelope::{self, Encoded};
 use super::fields::Tables;

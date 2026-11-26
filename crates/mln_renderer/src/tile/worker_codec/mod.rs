@@ -9,11 +9,11 @@
 //!
 //! - Large byte arrays (encoded tiles, decoded images and DEMs, vertex and
 //!   index arrays) travel beside a frame's bytes as payloads (`Encoded`,
-//!   `mln_util::serialization::payload`), which a host transfers to the
-//!   other instance rather than copies.
+//!   `mln_wire::payload`), which a host transfers to the other instance
+//!   rather than copies.
 //! - What many jobs share crosses once per instance, then by key
-//!   (`mln_util::serialization::shared`): source styles, layers, their
-//!   evaluated properties and their expressions, and sets of images. A
+//!   (`mln_wire::shared`): source styles, layers, their evaluated
+//!   properties and their expressions, and sets of images. A
 //!   layout refers back to them (its buckets' binders hold the layers'
 //!   expressions, its render data the properties). Expressions cross as
 //!   their parsed node trees (`mln_style::wire`), and tile data as

@@ -1383,7 +1383,7 @@ pub fn custom_layers(
 #[cfg(target_family = "wasm")]
 pub fn host_writes<G: Gpu + ?Sized>(
     gpu: &mut G,
-    host: impl Fn(&[u8]) -> mln_util::host_bytes::HostBytes,
+    host: impl Fn(&[u8]) -> js_sys::Uint8Array,
 ) -> Result<mln_gfx::gpu::ReadbackId, GpuError> {
     let target = target(gpu, TextureFormat::Rgba8Unorm)?;
     let (quad, indices) = quad(gpu)?;

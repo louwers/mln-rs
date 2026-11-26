@@ -637,11 +637,12 @@ impl Gpu for WebGpu {
         &mut self,
         buffer: BufferId,
         offset: u64,
-        data: &mln_util::host_bytes::HostBytes,
+        data: &js_sys::Uint8Array,
     ) -> Result<(), GpuError> {
         let entry = self.buffers.get_mut(buffer).ok_or(GpuError::UnknownId("buffer"))?;
-        validation::check_write(offset, data.len().next_multiple_of(4), entry.size)?;
-        let len = data.len() as u64;
+        let len = data.length() as usize;
+        validation::check_write(offset, len.next_multiple_of(4), entry.size)?;
+        let len = len as u64;
         // A later write past these bytes pads only past them.
         if let Some(written) = &mut entry.written {
             *written = (*written).max(offset + len);
@@ -650,12 +651,10 @@ impl Gpu for WebGpu {
         let at = entry.offset + offset;
         let aligned = len & !(wgpu::COPY_BUFFER_ALIGNMENT - 1);
         self.writes.write_from_host(device, queue, &entry.buffer, at, data, aligned);
-        if aligned < len
-            && let Some(array) = data.array()
-        {
+        if aligned < len {
             // writeBuffer takes whole 4-byte words.
             let mut tail = [0u8; wgpu::COPY_BUFFER_ALIGNMENT as usize];
-            array.subarray(aligned as u32, len as u32).copy_to(&mut tail[..(len - aligned) as usize]);
+            data.subarray(aligned as u32, len as u32).copy_to(&mut tail[..(len - aligned) as usize]);
             self.writes.write_padded(device, queue, &entry.buffer, at + aligned, &tail, wgpu::COPY_BUFFER_ALIGNMENT);
         }
         Ok(())

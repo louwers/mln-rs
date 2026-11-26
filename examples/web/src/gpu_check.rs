@@ -54,7 +54,7 @@ impl GpuCheck {
         wasm_bindgen_futures::spawn_local(async move {
             let state = match backend().await {
                 Ok(mut backend) => {
-                    let host = |bytes: &[u8]| mln_util::host_bytes::HostBytes::new(js_sys::Uint8Array::from(bytes));
+                    let host = |bytes: &[u8]| js_sys::Uint8Array::from(bytes);
                     let ran = conformance::host_writes(&mut *backend.gpu(), host);
                     match ran {
                         Ok(readback) => State::Running { backend: Box::new(backend), case: Case::HostWrites, readback },

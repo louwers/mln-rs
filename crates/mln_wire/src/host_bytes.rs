@@ -1,8 +1,8 @@
 //! Port-only: bytes that stay in a JS `Uint8Array`, outside wasm memory.
 //!
 //! A tile worker's reply reaches the map's instance as JS arrays
-//! (`serialization::payload`). The vertex and index arrays among them can go
-//! from there to the GPU (`GPUQueue.writeBuffer`) without a copy in wasm
+//! ([`payload`](crate::payload)). The vertex and index arrays among them can
+//! go from there to the GPU (`GPUQueue.writeBuffer`) without a copy in wasm
 //! memory; a reader that needs the bytes themselves copies them in
 //! (`to_vec`, `to_pod_vec`).
 //!

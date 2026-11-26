@@ -19,8 +19,8 @@ use mln_text::atlas::ImagePositions;
 use mln_tile::TileLayer;
 use mln_util::Color;
 use mln_util::range::Range;
-use mln_util::serialization::payload::pod;
 use mln_vec_map::VecMap;
+use mln_wire::payload::pod;
 
 use crate::bucket::{Bucket, BucketBase, FeatureStates, UploadNeeds};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};

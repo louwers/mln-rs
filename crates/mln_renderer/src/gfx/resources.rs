@@ -97,11 +97,13 @@ impl Device {
         &mut self,
         gpu: &mut dyn Gpu,
         usage: BufferUsage,
-        data: &mln_util::host_bytes::HostBytes,
+        data: &mln_wire::host_bytes::HostBytes,
     ) -> Result<Buffer, GpuError> {
         let buffer = self.allocate(gpu, usage, data.len())?;
-        if !data.is_empty() {
-            gpu.write_buffer_from_host(buffer.id(), 0, data)?;
+        if !data.is_empty()
+            && let Some(array) = data.array()
+        {
+            gpu.write_buffer_from_host(buffer.id(), 0, &array)?;
         }
         Ok(buffer)
     }

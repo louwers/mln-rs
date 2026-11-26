@@ -10,13 +10,13 @@
 // across.
 //
 // Layers and expressions cross once per pair of sides, then by key
-// (mln_util::serialization::shared): every tile's layout job has the same
-// layers, and the buckets a worker sends back refer to the layers'
-// expressions through their binders.
+// (mln_wire::shared): every tile's layout job has the same layers, and the
+// buckets a worker sends back refer to the layers' expressions through their
+// binders.
 
 use std::sync::Arc;
 
-use mln_util::serialization::shared::{self, Kind};
+use mln_wire::shared::{self, Kind};
 use mln_wire::{Reader, Wire, Writer};
 
 use crate::StyleRegistry;

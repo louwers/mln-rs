@@ -4,8 +4,7 @@ use std::sync::Arc;
 use feature::{Identifier, PropertyMap, Value};
 use mln_style::feature::{GeometryCollection, GeometryTileFeature, to_geometry_collection};
 use mln_util::geometry::{FeatureType, to_feature_type};
-use mln_util::serialization::payload;
-use mln_wire::{Reader, Wire, Writer};
+use mln_wire::{Reader, Wire, Writer, payload};
 
 use crate::TileError;
 use crate::cut::{CutData, CutFeature, CutLayer};
@@ -20,8 +19,7 @@ pub type GeoJsonFeature = feature::Feature<i16, Arc<PropertyMap>>;
 /// made from, and what has been decoded of it.
 ///
 /// It is written (`mln_wire::Wire`) as what it is made from: the bytes of an
-/// MVT or MLT tile, as a payload (`mln_util::serialization::payload`), or the
-/// features.
+/// MVT or MLT tile, as a payload (`mln_wire::payload`), or the features.
 #[derive(Clone)]
 pub enum TileData {
     Mvt(MvtTile),

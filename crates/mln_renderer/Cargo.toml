@@ -32,7 +32,7 @@ font-face-shaper = []
 bench = []
 # `conformance`, the frames that the backends' tests draw through their
 # `Gpu`.
-gpu-conformance = []
+gpu-conformance = ["dep:js-sys"]
 
 [dependencies]
 bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
@@ -58,6 +58,10 @@ parking_lot.workspace = true
 polylabel.workspace = true
 smallvec.workspace = true
 mln_wire = { workspace = true, features = ["geo-types", "glam", "parking_lot"] }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+# `conformance::host_writes`: bytes in a JS array.
+js-sys = { workspace = true, optional = true }
 
 [dev-dependencies]
 geojson.workspace = true

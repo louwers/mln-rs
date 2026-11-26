@@ -15,16 +15,16 @@
 // the other already moved into the stores, freeing its own copy.
 //
 // In the browser, the arrays a bucket gets from a tile worker in another
-// wasm instance stay the JS arrays they arrived in (mln_util::host_bytes)
+// wasm instance stay the JS arrays they arrived in (mln_wire::host_bytes)
 // and move to the store as they are, which uploads them from there.
 // Anything that reads or changes them first copies them into wasm memory.
 
 use std::borrow::Cow;
 
-#[cfg(target_family = "wasm")]
-use mln_util::host_bytes::HostBytes;
 use mln_util::identity::SimpleIdentity;
-use mln_util::serialization::payload::{Payload, pod};
+#[cfg(target_family = "wasm")]
+use mln_wire::host_bytes::HostBytes;
+use mln_wire::payload::{Payload, pod};
 
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
@@ -185,7 +185,7 @@ impl<T> From<Vec<T>> for GeometryVec<T> {
 
 /// As the plain values' bytes (`payload::pod`). Workers send buckets before
 /// the render thread moves anything out. A payload the host kept in JS
-/// stays there (`mln_util::host_bytes`).
+/// stays there (`mln_wire::host_bytes`).
 impl<T: bytemuck::Pod> mln_wire::Wire for GeometryVec<T> {
     fn write(&self, w: &mut mln_wire::Writer) {
         debug_assert!(!self.is_moved());

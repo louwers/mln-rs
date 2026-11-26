@@ -21,8 +21,8 @@ use std::sync::{Arc, mpsc};
 
 use mln_util::hash::HashSet;
 use mln_util::logging::{Event, Log};
-use mln_util::serialization::payload::Payload;
 use mln_util::thread::Joined;
+use mln_wire::payload::Payload;
 
 use super::TileWorkerHost;
 use super::envelope::{self, Encoded};

@@ -10,14 +10,14 @@
 use std::time::Duration;
 
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
-use mln_util::serialization::payload::Payload;
+use mln_wire::payload::Payload;
 use mln_wire::{Context, Reader, Wire, Writer};
 
 use crate::tile::job::{JobId, JobTimes, SourceKey, TileKey};
 
 /// A frame as it crosses between instances: its bytes, and the byte arrays
-/// that travel beside them (`mln_util::serialization::payload`), which a host
-/// can transfer rather than copy.
+/// that travel beside them (`mln_wire::payload`), which a host can transfer
+/// rather than copy.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Encoded {
     pub bytes: Vec<u8>,

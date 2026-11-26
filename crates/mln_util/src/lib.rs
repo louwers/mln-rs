@@ -29,8 +29,6 @@ pub mod feature;
 pub mod font_stack;
 pub mod geometry;
 pub mod hash;
-#[cfg(target_family = "wasm")]
-pub mod host_bytes;
 pub mod http_header;
 pub mod i18n;
 pub mod identity;
@@ -43,7 +41,6 @@ pub mod pool;
 pub mod premultiply;
 pub mod projection;
 pub mod queue;
-pub mod serialization;
 pub mod size;
 pub mod subdivision_granularity;
 pub mod thread;

@@ -1,5 +1,4 @@
-//! Port-only: values behind an `Arc` that cross once, then by key
-//! (serialization/mod.rs).
+//! Port-only: values behind an `Arc` that cross once, then by key.
 //!
 //! The map side and a worker instance exchange many messages that refer to
 //! the same values: every tile's layout job has its source's style, its
@@ -25,9 +24,8 @@
 use std::marker::PhantomData;
 use std::sync::{Arc, Weak};
 
-use mln_wire::{Reader, Writer};
-
 use crate::hash::HashMap;
+use crate::{Reader, Writer};
 
 /// A type of value that crosses once, then by key, and how it is written
 /// in full.
@@ -129,7 +127,7 @@ pub enum Role {
 }
 
 /// One side's table of the values of kind `K`. A message written or read
-/// with it in its context ([`mln_wire::Context`]) refers to them by key.
+/// with it in its context ([`Context`](crate::Context)) refers to them by key.
 pub struct Table<K: Kind>(Side<K::Value>);
 
 enum Side<T: ?Sized> {
@@ -180,14 +178,14 @@ impl<K: Kind> Table<K> {
     }
 }
 
-impl<K: Kind> mln_wire::Context for Table<K> {
-    fn provide<'a>(&'a mut self, request: &mut mln_wire::Request<'a>) {
+impl<K: Kind> crate::Context for Table<K> {
+    fn provide<'a>(&'a mut self, request: &mut crate::Request<'a>) {
         request.give_mut(self);
     }
 }
 
 /// A table of any kind, as a side keeps its tables together.
-pub trait ErasedTable: mln_wire::Context + Send {
+pub trait ErasedTable: crate::Context + Send {
     /// Keeps the keys given since the last `commit` or `rollback`: the
     /// message that gave them was sent.
     fn commit(&mut self);
@@ -248,12 +246,12 @@ pub fn write<K: Kind>(value: &Arc<K::Value>, w: &mut Writer) {
     match how {
         How::Define(key) => {
             w.push(0);
-            mln_wire::write_varint(w, key);
+            crate::write_varint(w, key);
             K::write(value, w);
         }
         How::Ref(key) => {
             w.push(1);
-            mln_wire::write_varint(w, key);
+            crate::write_varint(w, key);
         }
         How::Inline => {
             w.push(2);
@@ -327,11 +325,11 @@ mod tests {
         type Value = str;
 
         fn write(value: &str, w: &mut Writer) {
-            mln_wire::write_str(w, value);
+            crate::write_str(w, value);
         }
 
         fn read(r: &mut Reader<'_>) -> Option<Arc<str>> {
-            mln_wire::read_str(r).map(Arc::from)
+            crate::read_str(r).map(Arc::from)
         }
     }
 

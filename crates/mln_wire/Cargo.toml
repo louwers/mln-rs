@@ -14,10 +14,16 @@ include.workspace = true
 name = "mln_wire"
 
 [dependencies]
+bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
+foldhash.workspace = true
 geo-types = { workspace = true, optional = true }
 glam = { workspace = true, optional = true }
 mln_wire_derive.workspace = true
 parking_lot = { workspace = true, optional = true }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+# host_bytes: tile workers' vertex and index arrays, kept in JS until upload.
+js-sys.workspace = true
 
 [lints]
 workspace = true

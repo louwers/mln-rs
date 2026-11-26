@@ -1,4 +1,4 @@
-//! Port-only: byte arrays that travel beside a message (serialization/mod.rs).
+//! Port-only: byte arrays that travel beside a message.
 //!
 //! In a message written with [`Payloads`] in its context, an array of at
 //! least `PAYLOAD_MIN` bytes is not written into the message: it is moved to
@@ -87,15 +87,15 @@ impl From<Vec<Payload>> for Payloads {
     }
 }
 
-impl mln_wire::Context for Payloads {
-    fn provide<'a>(&'a mut self, request: &mut mln_wire::Request<'a>) {
+impl crate::Context for Payloads {
+    fn provide<'a>(&'a mut self, request: &mut crate::Request<'a>) {
         request.give_mut(self);
     }
 }
 
 /// Writes an array: 0 and the bytes in the message, or 1 and the index of
 /// the payload it moved to.
-fn write(bytes: &[u8], w: &mut mln_wire::Writer) {
+fn write(bytes: &[u8], w: &mut crate::Writer) {
     let index = if bytes.len() >= PAYLOAD_MIN {
         w.context_mut::<Payloads>().map(|Payloads(payloads)| {
             payloads.push(Some(Payload::Bytes(bytes.to_vec())));
@@ -106,16 +106,16 @@ fn write(bytes: &[u8], w: &mut mln_wire::Writer) {
     };
     if let Some(index) = index {
         w.push(1);
-        mln_wire::write_varint(w, index as u64);
+        crate::write_varint(w, index as u64);
     } else {
         w.push(0);
-        mln_wire::write_varint(w, bytes.len() as u64);
+        crate::write_varint(w, bytes.len() as u64);
         w.extend_from_slice(bytes);
     }
 }
 
 /// Reads what `write` wrote.
-fn read_payload(r: &mut mln_wire::Reader<'_>) -> Option<Payload> {
+fn read_payload(r: &mut crate::Reader<'_>) -> Option<Payload> {
     match r.byte()? {
         0 => {
             let len = r.length()?;
@@ -131,17 +131,17 @@ fn read_payload(r: &mut mln_wire::Reader<'_>) -> Option<Payload> {
     }
 }
 
-fn read(r: &mut mln_wire::Reader<'_>) -> Option<Vec<u8>> {
+fn read(r: &mut crate::Reader<'_>) -> Option<Vec<u8>> {
     read_payload(r).map(Payload::into_vec)
 }
 
 /// A `Vec<u8>`.
 pub mod bytes {
-    pub fn write(bytes: &[u8], w: &mut mln_wire::Writer) {
+    pub fn write(bytes: &[u8], w: &mut crate::Writer) {
         super::write(bytes, w);
     }
 
-    pub fn read(r: &mut mln_wire::Reader<'_>) -> Option<Vec<u8>> {
+    pub fn read(r: &mut crate::Reader<'_>) -> Option<Vec<u8>> {
         super::read(r)
     }
 }
@@ -150,11 +150,11 @@ pub mod bytes {
 pub mod shared_bytes {
     use std::sync::Arc;
 
-    pub fn write(bytes: &Arc<Vec<u8>>, w: &mut mln_wire::Writer) {
+    pub fn write(bytes: &Arc<Vec<u8>>, w: &mut crate::Writer) {
         super::write(bytes, w);
     }
 
-    pub fn read(r: &mut mln_wire::Reader<'_>) -> Option<Arc<Vec<u8>>> {
+    pub fn read(r: &mut crate::Reader<'_>) -> Option<Arc<Vec<u8>>> {
         super::read(r).map(Arc::new)
     }
 
@@ -162,7 +162,7 @@ pub mod shared_bytes {
     pub mod option {
         use std::sync::Arc;
 
-        pub fn write(bytes: &Option<Arc<Vec<u8>>>, w: &mut mln_wire::Writer) {
+        pub fn write(bytes: &Option<Arc<Vec<u8>>>, w: &mut crate::Writer) {
             match bytes {
                 None => w.push(0),
                 Some(bytes) => {
@@ -172,7 +172,7 @@ pub mod shared_bytes {
             }
         }
 
-        pub fn read(r: &mut mln_wire::Reader<'_>) -> Option<Option<Arc<Vec<u8>>>> {
+        pub fn read(r: &mut crate::Reader<'_>) -> Option<Option<Arc<Vec<u8>>>> {
             match r.byte()? {
                 0 => Some(None),
                 1 => super::read(r).map(Some),
@@ -186,11 +186,11 @@ pub mod shared_bytes {
 pub mod pod {
     use super::Payload;
 
-    pub fn write<T: bytemuck::Pod>(values: &[T], w: &mut mln_wire::Writer) {
+    pub fn write<T: bytemuck::Pod>(values: &[T], w: &mut crate::Writer) {
         super::write(bytemuck::cast_slice(values), w);
     }
 
-    pub fn read<T: bytemuck::Pod>(r: &mut mln_wire::Reader<'_>) -> Option<Vec<T>> {
+    pub fn read<T: bytemuck::Pod>(r: &mut crate::Reader<'_>) -> Option<Vec<T>> {
         Some(match read_payload::<T>(r)? {
             Payload::Bytes(bytes) => bytemuck::pod_collect_to_vec(&bytes),
             #[cfg(target_family = "wasm")]
@@ -199,7 +199,7 @@ pub mod pod {
     }
 
     /// The values' bytes as they arrived, a whole number of `T`s.
-    pub fn read_payload<T: bytemuck::Pod>(r: &mut mln_wire::Reader<'_>) -> Option<Payload> {
+    pub fn read_payload<T: bytemuck::Pod>(r: &mut crate::Reader<'_>) -> Option<Payload> {
         let bytes = super::read_payload(r)?;
         if !bytes.len().is_multiple_of(size_of::<T>()) {
             return r.fail("bytes that are not a whole number of values");
@@ -212,7 +212,7 @@ pub mod pod {
 mod tests {
     use super::*;
 
-    #[derive(Debug, PartialEq, mln_wire::Wire)]
+    #[derive(Debug, PartialEq, crate::Wire)]
     struct Message {
         #[wire(with = "bytes")]
         small: Vec<u8>,
@@ -231,22 +231,22 @@ mod tests {
     #[test]
     fn large_arrays_travel_beside_the_message() {
         let mut payloads = Payloads::new();
-        let bytes = mln_wire::to_vec_in(&message(), &mut payloads).unwrap();
+        let bytes = crate::to_vec_in(&message(), &mut payloads).unwrap();
         let payloads = payloads.into_vec();
         assert_eq!(payloads.len(), 2);
         assert!(bytes.len() < 32);
-        let decoded: Message = mln_wire::from_slice_in(&bytes, Payloads::from(payloads)).unwrap();
+        let decoded: Message = crate::from_slice_in(&bytes, Payloads::from(payloads)).unwrap();
         assert_eq!(decoded, message());
 
-        let inline = mln_wire::to_vec(&message()).unwrap();
+        let inline = crate::to_vec(&message()).unwrap();
         assert!(inline.len() > 5 * PAYLOAD_MIN);
-        assert_eq!(mln_wire::from_slice::<Message>(&inline).unwrap(), message());
+        assert_eq!(crate::from_slice::<Message>(&inline).unwrap(), message());
     }
 
     /// A message that refers to a payload it doesn't have is malformed.
     #[test]
     fn missing_payloads_are_errors() {
-        let bytes = mln_wire::to_vec_in(&message(), Payloads::new()).unwrap();
-        assert!(mln_wire::from_slice_in::<Message>(&bytes, Payloads::new()).is_err());
+        let bytes = crate::to_vec_in(&message(), Payloads::new()).unwrap();
+        assert!(crate::from_slice_in::<Message>(&bytes, Payloads::new()).is_err());
     }
 }

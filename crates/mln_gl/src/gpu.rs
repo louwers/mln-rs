@@ -1227,19 +1227,20 @@ impl Gpu for GlGpu {
         &mut self,
         buffer: BufferId,
         offset: u64,
-        data: &mln_util::host_bytes::HostBytes,
+        data: &js_sys::Uint8Array,
     ) -> Result<(), GpuError> {
         let entry = self.buffers.get(buffer).ok_or(GpuError::UnknownId("buffer"))?;
-        validation::check_write(offset, data.len().next_multiple_of(4), entry.size)?;
-        let len = data.len() as u64;
+        let len = data.length() as usize;
+        validation::check_write(offset, len.next_multiple_of(4), entry.size)?;
+        let len = len as u64;
         let end = offset + len.next_multiple_of(4);
         let object = match entry.object {
             BufferObject::Buffer(object) => Some(object),
             BufferObject::Elements(_) => None,
         };
         let usage = entry.usage;
-        let (Some(object), Some(array)) = (object, data.array()) else {
-            let mut bytes = data.to_pod_vec::<u8>();
+        let Some(object) = object else {
+            let mut bytes = data.to_vec();
             bytes.resize(bytes.len().next_multiple_of(4), 0);
             return self.write_buffer(buffer, offset, &bytes);
         };
@@ -1248,7 +1249,7 @@ impl Gpu for GlGpu {
             let gl = gpu.context.gl();
             // SAFETY: the buffer is alive and holds the bytes written.
             unsafe { gl.bind_buffer(target, Some(object)) };
-            gpu.context.webgl2().buffer_sub_data_with_f64_and_array_buffer_view(target, offset as f64, &array);
+            gpu.context.webgl2().buffer_sub_data_with_f64_and_array_buffer_view(target, offset as f64, data);
             // Zeros over the rest of the last word, as the trait asks.
             let zeros = [0u8; 4];
             let tail = &zeros[..(end - offset - len) as usize];

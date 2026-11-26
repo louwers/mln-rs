@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use mln_util::range::Range;
-use mln_util::serialization::shared;
 use mln_vec_map::VecSet;
+use mln_wire::shared;
 
 use crate::expression::value::from_expression_values;
 use crate::expression::{

@@ -16,8 +16,28 @@
 //! A value that needs more than its bytes to cross, such as the registry
 //! that a name resolves against, gets it from the [`Context`] that the
 //! writer or reader was made with.
+//!
+//! Fields opt in to how some values cross:
+//!
+//! - [`payload`]: large byte arrays (pixels, vertices, indices) travel beside
+//!   a message rather than in it, so that a host can transfer them.
+//! - [`shared`]: a value behind an `Arc` that several messages refer to (a
+//!   layer, an expression, an image) travels once per pair of sides and then
+//!   by key.
+//! - [`sorted`]: hash maps and sets in key order, so that a value always
+//!   encodes to the same bytes.
+//!
+//! The first two only change how a value is written when the message is
+//! written with their tables in its context; otherwise the value is written
+//! in full, in the message.
 
 extern crate self as mln_wire;
+
+#[cfg(target_family = "wasm")]
+pub mod host_bytes;
+pub mod payload;
+pub mod shared;
+pub mod sorted;
 
 use std::any::{Any, TypeId};
 use std::collections::{BTreeMap, BTreeSet};
@@ -610,8 +630,7 @@ impl<T: Wire> Wire for Box<T> {
     }
 }
 
-/// In full: values that cross once and then by key opt in with
-/// `mln_util::serialization::shared`.
+/// In full: values that cross once and then by key opt in with [`shared`].
 impl<T: Wire> Wire for Arc<T> {
     fn write(&self, w: &mut Writer) {
         (**self).write(w);
@@ -692,15 +711,25 @@ impl<K: Wire + Ord, V: Wire> Wire for BTreeMap<K, V> {
 }
 
 /// Hash maps and sets of any hasher, in iteration order, which differs
-/// between maps of the same entries: `mln_util::serialization::sorted` writes
-/// one in key order.
+/// between maps of the same entries: [`sorted`] writes one in key order.
+/// And the map of this crate's own tables.
 mod hash {
     #![expect(clippy::disallowed_types, reason = "impls for every hasher, mln_util's among them")]
 
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashSet;
     use std::hash::{BuildHasher, Hash};
 
     use super::{Reader, Wire, Writer, write_len};
+
+    /// foldhash's hasher, with a fixed seed in the benchmarks' builds, as
+    /// `mln_util::hash`'s.
+    #[cfg(not(mln_bench_fixed_hash))]
+    type Hasher = foldhash::fast::RandomState;
+    #[cfg(mln_bench_fixed_hash)]
+    type Hasher = foldhash::fast::FixedState;
+
+    /// std's map, with foldhash's hasher for this crate's own tables.
+    pub(crate) type HashMap<K, V, S = Hasher> = std::collections::HashMap<K, V, S>;
 
     impl<K: Wire + Eq + Hash, V: Wire, S: BuildHasher + Default> Wire for HashMap<K, V, S> {
         fn write(&self, w: &mut Writer) {

@@ -14,9 +14,9 @@ use mln_text::tagged_string::font_stack_hash;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
-use mln_util::serialization::sorted;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
+use mln_wire::sorted;
 
 use crate::bucket_parameters::BucketParameters;
 use crate::geometry::feature_index::FeatureIndexBuilder;

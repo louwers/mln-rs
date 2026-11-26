@@ -72,12 +72,12 @@ pub struct Image<M: AlphaMode> {
 impl<M: AlphaMode> mln_wire::Wire for Image<M> {
     fn write(&self, w: &mut mln_wire::Writer) {
         self.size.write(w);
-        crate::serialization::payload::bytes::write(&self.data, w);
+        mln_wire::payload::bytes::write(&self.data, w);
     }
 
     fn read(r: &mut mln_wire::Reader<'_>) -> Option<Self> {
         let size = Size::read(r)?;
-        let data = crate::serialization::payload::bytes::read(r)?;
+        let data = mln_wire::payload::bytes::read(r)?;
         Image::try_from(ImageParts { size, data }).ok().or_else(|| r.fail("pixels that don't fill their image"))
     }
 }

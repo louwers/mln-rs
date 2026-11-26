@@ -33,6 +33,10 @@ wgpu.workspace = true
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 wgpu = { workspace = true, features = ["naga-ir"] }
 
+# `write_buffer_from_host`: bytes in a JS array.
+[target.'cfg(target_family = "wasm")'.dependencies]
+js-sys.workspace = true
+
 # The programs, which the tests compile and draw with, and the conformance
 # cases that `WebGpu`'s tests run.
 [dev-dependencies]

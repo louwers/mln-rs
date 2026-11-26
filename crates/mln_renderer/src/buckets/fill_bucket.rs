@@ -9,9 +9,9 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::Color;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::logging::{Event, Log};
-use mln_util::serialization::sorted;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
+use mln_wire::sorted;
 
 use crate::bucket::{Bucket, BucketBase, UploadNeeds};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};

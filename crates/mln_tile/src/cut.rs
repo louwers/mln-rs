@@ -15,8 +15,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::constants::EXTENT;
 use mln_util::geometry::FeatureType;
 use mln_util::hash::HashMap;
-use mln_util::serialization::shared;
-use mln_wire::{Reader, Wire, Writer};
+use mln_wire::{Reader, Wire, Writer, shared};
 use parking_lot::Mutex;
 
 use crate::TileError;

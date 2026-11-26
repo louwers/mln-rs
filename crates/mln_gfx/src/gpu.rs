@@ -595,9 +595,9 @@ pub trait Gpu {
         &mut self,
         buffer: BufferId,
         offset: u64,
-        data: &mln_util::host_bytes::HostBytes,
+        data: &js_sys::Uint8Array,
     ) -> Result<(), GpuError> {
-        let mut bytes = data.to_pod_vec::<u8>();
+        let mut bytes = data.to_vec();
         bytes.resize(bytes.len().next_multiple_of(4), 0);
         self.write_buffer(buffer, offset, &bytes)
     }

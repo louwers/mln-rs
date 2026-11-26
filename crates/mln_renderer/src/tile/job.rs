@@ -22,11 +22,11 @@ use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::image::PremultipliedImage;
-use mln_util::serialization::payload::shared_bytes;
-use mln_util::serialization::shared;
 use mln_util::tileset::RasterEncoding;
 use mln_util::time::Instant;
 use mln_vec_map::VecSet;
+use mln_wire::payload::shared_bytes;
+use mln_wire::shared;
 use parking_lot::Mutex;
 
 use crate::geometry::dem_data::DEMData;

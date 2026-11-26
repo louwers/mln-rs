@@ -9,7 +9,7 @@
 //! the writes are gathered, merged where they touch or overlap in one buffer
 //! (the later write's bytes winning), and uploaded with one
 //! `Queue::write_buffer` into a staging buffer that is kept while it's big
-//! enough. Bytes that are still in a JS array (`mln_util::host_bytes`) go to
+//! enough. Bytes that are still in a JS array (`write_buffer_from_host`) go to
 //! `GPUQueue.writeBuffer` from there instead, without a copy in wasm
 //! memory.
 
@@ -214,7 +214,7 @@ impl Writes {
         queue: &wgpu::Queue,
         buffer: &wgpu::Buffer,
         offset: u64,
-        data: &mln_util::host_bytes::HostBytes,
+        data: &js_sys::Uint8Array,
         len: u64,
     ) {
         if len == 0 {
@@ -226,11 +226,11 @@ impl Writes {
         {
             queue.submit([writes]);
         }
-        let (Some(queue), Some(buffer), Some(array)) = (queue.as_webgpu(), buffer.as_webgpu(), data.array()) else {
+        let (Some(queue), Some(buffer)) = (queue.as_webgpu(), buffer.as_webgpu()) else {
             return;
         };
         if let Err(error) =
-            queue.write_buffer_with_f64_and_u8_array_and_u32_and_u32(buffer, offset as f64, &array, 0, len as u32)
+            queue.write_buffer_with_f64_and_u8_array_and_u32_and_u32(buffer, offset as f64, data, 0, len as u32)
         {
             log::error!(target: crate::log_target::RENDER, "writing a buffer from a JS array: {error:?}");
         }

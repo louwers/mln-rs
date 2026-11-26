@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use feature::Value;
-use mln_util::serialization::shared;
+use mln_wire::shared;
 
 use super::util::{parse_json, style_of};
 use crate::StyleRegistry;

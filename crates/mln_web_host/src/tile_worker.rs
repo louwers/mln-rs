@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use mln_renderer::Registry;
 use mln_renderer::tile::worker_codec::{Encoded, TileWorkerHost};
-use mln_util::serialization::payload::Payload;
+use mln_wire::payload::Payload;
 use parking_lot::Mutex;
 use wasm_bindgen::prelude::*;
 

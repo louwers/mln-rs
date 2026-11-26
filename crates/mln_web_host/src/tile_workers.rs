@@ -5,7 +5,7 @@
 //! A request goes as its bytes, transferred. A batch of replies comes back
 //! as an array, each reply an array of `Uint8Array`s: its bytes, then its
 //! payloads (pixels, vertices, indices), which the map takes as they are
-//! (`mln_util::host_bytes`). A Web Worker whose instance panicked sends
+//! (`mln_wire::host_bytes`). A Web Worker whose instance panicked sends
 //! `{fatal: message}` instead: its jobs are lost, and a new Web Worker takes
 //! its place if the map side can start one.
 
@@ -14,8 +14,8 @@ use std::sync::Arc;
 
 use mln_renderer::Registry;
 use mln_renderer::tile::worker_codec::{Encoded, RemoteWorkers, ReplySink, WorkerInstances};
-use mln_util::host_bytes::HostBytes;
-use mln_util::serialization::payload::Payload;
+use mln_wire::host_bytes::HostBytes;
+use mln_wire::payload::Payload;
 use wasm_bindgen::prelude::*;
 
 /// Tile workers in the Web Workers at the other end of `ports` (at least

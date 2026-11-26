@@ -2756,6 +2756,7 @@ version = "0.0.15"
 dependencies = [
  "bytemuck",
  "foldhash 0.2.0",
+ "js-sys",
  "log",
  "mln-rs-util",
  "raw-window-handle",
@@ -2963,6 +2964,7 @@ dependencies = [
  "geo-types",
  "geojson",
  "glam",
+ "js-sys",
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-gfx",
@@ -3227,14 +3229,12 @@ dependencies = [
 name = "mln-rs-util"
 version = "0.0.15"
 dependencies = [
- "bytemuck",
  "flate2",
  "foldhash 0.2.0",
  "geo-types",
  "glam",
  "httpdate",
  "jni",
- "js-sys",
  "libc",
  "mln-rs-feature",
  "mln-rs-geometry",
@@ -3314,6 +3314,7 @@ dependencies = [
  "mln-rs-renderer",
  "mln-rs-text",
  "mln-rs-util",
+ "mln-rs-wire",
  "parking_lot",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -3333,6 +3334,7 @@ dependencies = [
 name = "mln-rs-webgpu"
 version = "0.0.15"
 dependencies = [
+ "js-sys",
  "log",
  "mln-rs-gfx",
  "mln-rs-renderer",
@@ -3347,8 +3349,11 @@ dependencies = [
 name = "mln-rs-wire"
 version = "0.0.15"
 dependencies = [
+ "bytemuck",
+ "foldhash 0.2.0",
  "geo-types",
  "glam",
+ "js-sys",
  "mln-rs-wire-derive",
  "parking_lot",
 ]

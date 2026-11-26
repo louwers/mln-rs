@@ -6,7 +6,7 @@
 
 use mln_gfx::gpu::{BufferId, BufferUsage, Gpu, GpuError};
 #[cfg(target_family = "wasm")]
-use mln_util::host_bytes::HostBytes;
+use mln_wire::host_bytes::HostBytes;
 
 use crate::gfx::buffer::Buffer;
 use crate::gfx::context::Context;

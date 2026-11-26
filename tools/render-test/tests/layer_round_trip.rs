@@ -14,7 +14,7 @@ use mln_style::StyleRegistry;
 use mln_style::conversion::{Convertible, Error};
 use mln_style::layer::{ErasedLayerStyle, Layer, convert_layer};
 use mln_style::wire::SharedLayer;
-use mln_util::serialization::shared;
+use mln_wire::shared;
 
 #[derive(mln_wire::Wire)]
 struct Crossing(#[wire(with = "shared::ByKey::<SharedLayer>")] Arc<dyn ErasedLayerStyle>);
