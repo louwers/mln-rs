@@ -189,7 +189,7 @@ fn native_kind(texture: NativeTexture, device: &Device) -> Option<FrameTextureKi
         #[cfg(all(feature = "metal", target_vendor = "apple"))]
         (NativeTexture::Metal { texture, pixel_format }, Device::Metal(device)) => Some(FrameTextureKind::Metal {
             texture,
-            device: mln_mtl::objc2::rc::Retained::as_ptr(device.device()) as usize as u64,
+            device: objc2::rc::Retained::as_ptr(device.device()) as usize as u64,
             pixel_format,
         }),
         (NativeTexture::OpenGl { texture, target, .. }, _) => Some(FrameTextureKind::OpenGl { texture, target }),
@@ -386,10 +386,7 @@ impl BorrowedRing {
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
             (RingKind::Metal(textures), RingKind::Metal(others)) => {
                 textures.textures.get(slot).zip(others.textures.get(other_slot)).is_some_and(|(texture, other)| {
-                    std::ptr::eq(
-                        mln_mtl::objc2::rc::Retained::as_ptr(texture),
-                        mln_mtl::objc2::rc::Retained::as_ptr(other),
-                    )
+                    std::ptr::eq(objc2::rc::Retained::as_ptr(texture), objc2::rc::Retained::as_ptr(other))
                 })
             }
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]

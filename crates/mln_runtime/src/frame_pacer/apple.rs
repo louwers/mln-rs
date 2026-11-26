@@ -353,7 +353,7 @@ pub(crate) mod display_link {
                     .call(move || {
                         let link = new_link(vsyncs, limit, None)?;
                         link.add_to_current_run_loop();
-                        Ok(link)
+                        Ok::<_, Error>(link)
                     })
                     .ok_or_else(failed)??
             };
