@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.0.17](https://github.com/maplibre/mln-rs/compare/v0.0.16...v0.0.17) - 2026-11-26
+
+- chore(deps): take mlt-core 0.24 so dependents on 0.24 build one copy ([#977](https://github.com/maplibre/mln-rs/pull/977))
+- refactor!: log through the log crate everywhere ([#975](https://github.com/maplibre/mln-rs/pull/975))
+
 ## [0.0.16](https://github.com/maplibre/mln-rs/compare/v0.0.15...v0.0.16) - 2026-11-26
 
 - refactor(wire)!: keep the codec's helpers in mln_wire ([#965](https://github.com/maplibre/mln-rs/pull/965))

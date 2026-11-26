@@ -28,7 +28,7 @@ exclude = ["patches/*"]
 # Every package is published at this version. The release pull request
 # bumps it here and in the in-repo [workspace.dependencies] below
 # (RELEASING.md).
-version = "0.0.16"
+version = "0.0.17"
 edition = "2024"
 # The oldest Rust the packages build with (mlt-core 0.24 needs 1.98). CI's
 # msrv job builds the workspace with it.
@@ -47,48 +47,48 @@ categories = ["graphics", "science::geo"]
 
 [workspace.dependencies]
 # In-repo libraries. The exact version keeps a release's packages together.
-feature = { package = "mln-rs-feature", path = "vendor/feature", version = "=0.0.16" }
-geometry = { package = "mln-rs-geometry", path = "vendor/geometry", version = "=0.0.16" }
-mln_d3d12 = { package = "mln-rs-d3d12", path = "crates/mln_d3d12", version = "=0.0.16" }
+feature = { package = "mln-rs-feature", path = "vendor/feature", version = "=0.0.17" }
+geometry = { package = "mln-rs-geometry", path = "vendor/geometry", version = "=0.0.17" }
+mln_d3d12 = { package = "mln-rs-d3d12", path = "crates/mln_d3d12", version = "=0.0.17" }
 mln_bench_workload = { package = "mln-rs-bench-workload", path = "tools/bench/workload" }
-mln_frame_pacer = { package = "mln-rs-frame-pacer", path = "crates/mln_frame_pacer", version = "=0.0.16" }
-mln_gestures = { package = "mln-rs-gestures", path = "crates/mln_gestures", version = "=0.0.16" }
-mln_geojson = { package = "mln-rs-geojson", path = "crates/mln_geojson", version = "=0.0.16" }
-mln_gfx = { package = "mln-rs-gfx", path = "crates/mln_gfx", version = "=0.0.16" }
-mln_gl = { package = "mln-rs-gl", path = "crates/mln_gl", version = "=0.0.16" }
-mln_glsl = { package = "mln-rs-glsl", path = "crates/mln_glsl", version = "=0.0.16" }
-mln_headless = { package = "mln-rs-headless", path = "crates/mln_headless", version = "=0.0.16" }
-mln_image = { package = "mln-rs-image", path = "crates/mln_image", version = "=0.0.16" }
-mln_map = { package = "mln-rs-map", path = "crates/mln_map", version = "=0.0.16" }
-mln_map_types = { package = "mln-rs-map-types", path = "crates/mln_map_types", version = "=0.0.16" }
-mln_math = { package = "mln-rs-math", path = "crates/mln_math", version = "=0.0.16" }
-mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.16" }
+mln_frame_pacer = { package = "mln-rs-frame-pacer", path = "crates/mln_frame_pacer", version = "=0.0.17" }
+mln_gestures = { package = "mln-rs-gestures", path = "crates/mln_gestures", version = "=0.0.17" }
+mln_geojson = { package = "mln-rs-geojson", path = "crates/mln_geojson", version = "=0.0.17" }
+mln_gfx = { package = "mln-rs-gfx", path = "crates/mln_gfx", version = "=0.0.17" }
+mln_gl = { package = "mln-rs-gl", path = "crates/mln_gl", version = "=0.0.17" }
+mln_glsl = { package = "mln-rs-glsl", path = "crates/mln_glsl", version = "=0.0.17" }
+mln_headless = { package = "mln-rs-headless", path = "crates/mln_headless", version = "=0.0.17" }
+mln_image = { package = "mln-rs-image", path = "crates/mln_image", version = "=0.0.17" }
+mln_map = { package = "mln-rs-map", path = "crates/mln_map", version = "=0.0.17" }
+mln_map_types = { package = "mln-rs-map-types", path = "crates/mln_map_types", version = "=0.0.17" }
+mln_math = { package = "mln-rs-math", path = "crates/mln_math", version = "=0.0.17" }
+mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.17" }
 # Without its default feature, the in-process font-face shaper: the packages
 # that render turn it on (crates/mln_renderer/Cargo.toml).
-mln_renderer = { package = "mln-rs-renderer", path = "crates/mln_renderer", version = "=0.0.16", default-features = false }
+mln_renderer = { package = "mln-rs-renderer", path = "crates/mln_renderer", version = "=0.0.17", default-features = false }
 # Without its backends (its default features) unless a package asks for
 # them, so that a browser build of mln_c carries one.
-mln_runtime = { package = "mln-rs-runtime", path = "crates/mln_runtime", version = "=0.0.16", default-features = false }
-mln_sprite = { package = "mln-rs-sprite", path = "crates/mln_sprite", version = "=0.0.16" }
+mln_runtime = { package = "mln-rs-runtime", path = "crates/mln_runtime", version = "=0.0.17", default-features = false }
+mln_sprite = { package = "mln-rs-sprite", path = "crates/mln_sprite", version = "=0.0.17" }
 # Without SQLite (its `sqlite` feature) unless a package asks for it, so
 # that examples/web leaves it out.
-mln_storage = { package = "mln-rs-storage", path = "crates/mln_storage", version = "=0.0.16", default-features = false }
-mln_storage_offline = { package = "mln-rs-storage-offline", path = "crates/mln_storage_offline", version = "=0.0.16" }
-mln_style = { package = "mln-rs-style", path = "crates/mln_style", version = "=0.0.16" }
-mln_system_fonts = { package = "mln-rs-system-fonts", path = "crates/mln_system_fonts", version = "=0.0.16" }
-mln_text = { package = "mln-rs-text", path = "crates/mln_text", version = "=0.0.16" }
-mln_tile = { package = "mln-rs-tile", path = "crates/mln_tile", version = "=0.0.16" }
-mln_tile_id = { package = "mln-rs-tile-id", path = "crates/mln_tile_id", version = "=0.0.16" }
-mln_util = { package = "mln-rs-util", path = "crates/mln_util", version = "=0.0.16" }
-mln_vec_map = { package = "mln-rs-vec-map", path = "crates/mln_vec_map", version = "=0.0.16" }
-mln_vulkan = { package = "mln-rs-vulkan", path = "crates/mln_vulkan", version = "=0.0.16" }
-mln_wire = { package = "mln-rs-wire", path = "crates/mln_wire", version = "=0.0.16" }
-mln_wire_derive = { package = "mln-rs-wire-derive", path = "crates/mln_wire_derive", version = "=0.0.16" }
-mln_web_host = { package = "mln-rs-web-host", path = "crates/mln_web_host", version = "=0.0.16" }
-mln_webgpu = { package = "mln-rs-webgpu", path = "crates/mln_webgpu", version = "=0.0.16" }
-pixelmatch = { package = "mln-rs-pixelmatch", path = "vendor/pixelmatch", version = "=0.0.16" }
-polylabel = { package = "mln-rs-polylabel", path = "vendor/polylabel", version = "=0.0.16" }
-style_codegen = { package = "mln-rs-style-codegen", path = "tools/style-codegen", version = "=0.0.16" }
+mln_storage = { package = "mln-rs-storage", path = "crates/mln_storage", version = "=0.0.17", default-features = false }
+mln_storage_offline = { package = "mln-rs-storage-offline", path = "crates/mln_storage_offline", version = "=0.0.17" }
+mln_style = { package = "mln-rs-style", path = "crates/mln_style", version = "=0.0.17" }
+mln_system_fonts = { package = "mln-rs-system-fonts", path = "crates/mln_system_fonts", version = "=0.0.17" }
+mln_text = { package = "mln-rs-text", path = "crates/mln_text", version = "=0.0.17" }
+mln_tile = { package = "mln-rs-tile", path = "crates/mln_tile", version = "=0.0.17" }
+mln_tile_id = { package = "mln-rs-tile-id", path = "crates/mln_tile_id", version = "=0.0.17" }
+mln_util = { package = "mln-rs-util", path = "crates/mln_util", version = "=0.0.17" }
+mln_vec_map = { package = "mln-rs-vec-map", path = "crates/mln_vec_map", version = "=0.0.17" }
+mln_vulkan = { package = "mln-rs-vulkan", path = "crates/mln_vulkan", version = "=0.0.17" }
+mln_wire = { package = "mln-rs-wire", path = "crates/mln_wire", version = "=0.0.17" }
+mln_wire_derive = { package = "mln-rs-wire-derive", path = "crates/mln_wire_derive", version = "=0.0.17" }
+mln_web_host = { package = "mln-rs-web-host", path = "crates/mln_web_host", version = "=0.0.17" }
+mln_webgpu = { package = "mln-rs-webgpu", path = "crates/mln_webgpu", version = "=0.0.17" }
+pixelmatch = { package = "mln-rs-pixelmatch", path = "vendor/pixelmatch", version = "=0.0.17" }
+polylabel = { package = "mln-rs-polylabel", path = "vendor/polylabel", version = "=0.0.17" }
+style_codegen = { package = "mln-rs-style-codegen", path = "tools/style-codegen", version = "=0.0.17" }
 
 # Third-party crates, for both builds (Cargo.lock pins their versions). Only
 # add a crate when nothing in the C++ core has to be ported for it.
