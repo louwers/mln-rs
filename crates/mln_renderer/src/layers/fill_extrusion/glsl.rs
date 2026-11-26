@@ -64,11 +64,6 @@ void main() {
 #endif
     gl_Position = projectTileFor3D(vec2(in_pos), z, projectionVector.elements[constant.ubo_index]);
 
-#if defined(OVERDRAW_INSPECTOR)
-    frag_color = vec4(1.0);
-    return;
-#endif
-
     // Relative luminance (how dark/bright is the surface color?)
     const float luminance = color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722;
 
@@ -176,11 +171,6 @@ macro_rules! fill_extrusion_wall_main {
 #endif
 
     gl_Position = projectTileFor3D(in_pos.x == 0.0 ? p1 : p2, z, projectionVector.elements[constant.ubo_index]);
-
-#if defined(OVERDRAW_INSPECTOR)
-    frag_color = vec4(1.0);
-    return;
-#endif
 
     // Relative luminance (how dark/bright is the surface color?)
     const float luminance = color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722;
@@ -351,19 +341,6 @@ void main() {
 #endif
     gl_Position = projectTileFor3D(vec2(in_pos), z, projectionVector.elements[constant.ubo_index]);
 
-#if defined(OVERDRAW_INSPECTOR)
-    frag_lighting = vec4(1.0);
-    frag_pos_a = vec2(0.0);
-    frag_pos_b = vec2(0.0);
-#if !defined(HAS_UNIFORM_u_pattern_from)
-    frag_pattern_from = vec4(0.0);
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
-    frag_pattern_to = vec4(0.0);
-#endif
-    return;
-#else
-
 #if defined(HAS_UNIFORM_u_pattern_from)
     const vec4 pattern_from = tileProps.pattern_from;
 #else
@@ -420,7 +397,6 @@ void main() {
 #if !defined(HAS_UNIFORM_u_pattern_to)
     frag_pattern_to = in_pattern_to;
 #endif
-#endif
 }
 ",
     ),
@@ -441,11 +417,6 @@ layout(location = 4) flat in vec4 frag_pattern_to;
 layout(location = 0) out vec4 out_color;
 
 void main() {
-
-#if defined(OVERDRAW_INSPECTOR)
-    out_color = vec4(1.0);
-    return;
-#else
 
     const FillExtrusionTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
@@ -480,7 +451,6 @@ void main() {
     }
 
     out_color = mix(color1, color2, props.fade) * frag_lighting;
-#endif
 }
 ",
 };
@@ -551,19 +521,6 @@ void main() {
 
     gl_Position = projectTileFor3D(in_pos.x == 0.0 ? p1 : p2, z, projectionVector.elements[constant.ubo_index]);
 
-#if defined(OVERDRAW_INSPECTOR)
-    frag_lighting = vec4(1.0);
-    frag_pos_a = vec2(0.0);
-    frag_pos_b = vec2(0.0);
-#if !defined(HAS_UNIFORM_u_pattern_from)
-    frag_pattern_from = vec4(0.0);
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
-    frag_pattern_to = vec4(0.0);
-#endif
-    return;
-#else
-
 #if defined(HAS_UNIFORM_u_pattern_from)
     const vec4 pattern_from = tileProps.pattern_from;
 #else
@@ -621,7 +578,6 @@ void main() {
 #if !defined(HAS_UNIFORM_u_pattern_to)
     frag_pattern_to = in_pattern_to;
 #endif
-#endif
 }
 ",
     ),
@@ -642,11 +598,6 @@ layout(location = 4) flat in vec4 frag_pattern_to;
 layout(location = 0) out vec4 out_color;
 
 void main() {
-
-#if defined(OVERDRAW_INSPECTOR)
-    out_color = vec4(1.0);
-    return;
-#else
 
     const FillExtrusionTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
@@ -681,7 +632,6 @@ void main() {
     }
 
     out_color = mix(color1, color2, props.fade) * frag_lighting;
-#endif
 }
 ",
 };

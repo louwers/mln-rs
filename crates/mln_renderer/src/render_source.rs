@@ -5,26 +5,22 @@
 
 use std::sync::Arc;
 
-use mln_map_types::MapDebugOptions;
 use mln_style::Source;
 use mln_util::error::Error;
 
 use crate::bucket::UploadNeeds;
 use crate::gfx::context::Context;
 use crate::layer_type::ErasedEvaluatedLayer;
-use crate::paint_parameters::{PaintParameters, TransformParameters};
+use crate::paint_parameters::TransformParameters;
 use crate::registry::Registry;
 use crate::render_tile::RenderTile;
 use crate::sources::render_image_source::ImageSourceRenderData;
-use crate::sources::render_tile_source::DebugLayers;
 use crate::tile::job::SourceKey;
 use crate::tile::store::TileStore;
 use crate::tile_parameters::TileParameters;
 
 pub(crate) struct RenderTileParameters<'a> {
     pub(crate) transform: &'a TransformParameters,
-    pub(crate) debug_options: MapDebugOptions,
-    pub(crate) source_name: String,
     /// Whether a layer of the frame draws the source's tiles in
     /// [`TileOrder::ByY`], which `update_render_tiles` then sorts them in.
     pub(crate) sort_by_y: bool,
@@ -74,10 +70,6 @@ pub(crate) trait RenderSource {
     /// draws, which read what `needs` says, uploading their indexes through
     /// `context`.
     fn upload(&mut self, store: &mut TileStore, context: &mut Context, needs: UploadNeeds);
-
-    /// Updates the source's draws of the debug overlays; a no-op for the
-    /// sources that have none (the image source).
-    fn update_debug_draws(&self, _debug_layers: &mut DebugLayers, _parameters: &mut PaintParameters<'_>) {}
 
     /// Releases the render data from the last `update_render_tiles` while
     /// the source is disabled.

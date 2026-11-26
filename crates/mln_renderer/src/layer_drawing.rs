@@ -776,8 +776,7 @@ impl FrameDraws {
         let draws = if drawing { &self.draws[..] } else { &[] };
         // A draw for both the opaque and the translucent pass draws in one:
         // the opaque where its layer draws there, and the translucent
-        // otherwise. Drawn in both, it would cover itself, which the overdraw
-        // inspector shows.
+        // otherwise. Drawn in both, it would cover itself.
         let both = RenderPass::Opaque | RenderPass::Translucent;
         let drawn_in =
             if parameters.opaque_pass_enabled_for_layer() { RenderPass::Opaque } else { RenderPass::Translucent };

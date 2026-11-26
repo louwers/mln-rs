@@ -27,23 +27,6 @@ pub(crate) enum TerrainSkirtLength {
     None = 1,
 }
 
-/// The map's debug overlays, a bit set.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub(crate) struct MapDebugOptions(pub(crate) u32);
-
-impl MapDebugOptions {
-    pub(crate) const NO_DEBUG: MapDebugOptions = MapDebugOptions(0);
-    pub(crate) const TILE_BORDERS: MapDebugOptions = MapDebugOptions(1 << 1);
-    pub(crate) const COLLISION: MapDebugOptions = MapDebugOptions(1 << 4);
-    pub(crate) const OVERDRAW: MapDebugOptions = MapDebugOptions(1 << 5);
-}
-
-impl std::ops::BitOrAssign for MapDebugOptions {
-    fn bitor_assign(&mut self, rhs: Self) {
-        self.0 |= rhs.0;
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ScreenBox {
     pub(crate) min: Point<f64>,
@@ -224,7 +207,6 @@ pub struct TestMetadata {
     pub(crate) threshold: f64,
     pub(crate) description: String,
     pub(crate) map_mode: MapMode,
-    pub(crate) debug: MapDebugOptions,
     pub(crate) cross_source_collisions: bool,
     pub(crate) terrain_skirt_length: TerrainSkirtLength,
     pub(crate) axonometric: bool,
@@ -280,7 +262,6 @@ impl Default for TestMetadata {
             threshold: 0.1285,
             description: String::new(),
             map_mode: MapMode::Static,
-            debug: MapDebugOptions::NO_DEBUG,
             cross_source_collisions: true,
             terrain_skirt_length: TerrainSkirtLength::Auto,
             axonometric: false,

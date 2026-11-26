@@ -84,23 +84,6 @@ pub(crate) struct SymbolOpacityVertex {
     pub(crate) a1: [f32; 1],
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
-#[repr(C)]
-pub(crate) struct CollisionBoxLayoutVertex {
-    pub(crate) a1: [i16; 2],
-    pub(crate) a2: [i16; 2],
-    pub(crate) a3: [i16; 2],
-    /// The symbol's `symbol-height-offset`, in meters.
-    pub(crate) a4: f32,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
-#[repr(C)]
-pub(crate) struct CollisionBoxDynamicVertex {
-    pub(crate) a1: [u16; 2],
-    pub(crate) a2: [f32; 2],
-}
-
 /// A corner of a quad: its offset from the anchor, its texture coordinate
 /// and its pixel offset.
 #[derive(Clone, Copy, Debug)]
@@ -410,25 +393,6 @@ impl Buffer {
     }
 }
 
-/// The vertices and indices of a symbol bucket's collision boxes or circles.
-#[derive(Clone, Debug, Default, mln_wire::Wire)]
-pub(crate) struct CollisionBuffer {
-    #[wire(with = "pod")]
-    pub(crate) vertices: Vec<CollisionBoxLayoutVertex>,
-    #[wire(with = "pod")]
-    pub(crate) dynamic_vertices: Vec<CollisionBoxDynamicVertex>,
-    /// The height above sea level, in meters, of each box vertex's symbol,
-    /// as [`Buffer::elevation_attribute_data`]; empty where its layout
-    /// vertices' offsets are the heights, and for circles.
-    #[wire(skip)]
-    pub(crate) elevations: Vec<f32>,
-    pub(crate) segments: Vec<SegmentBase>,
-    /// `lines` (box buffers: 2 per line) or `triangles` (circle buffers: 3
-    /// per triangle).
-    #[wire(with = "pod")]
-    pub(crate) indices: Vec<u16>,
-}
-
 /// The paint property binders of one layer.
 #[derive(Clone, Debug, mln_wire::Wire)]
 pub(crate) struct PaintProperties {
@@ -459,11 +423,6 @@ pub(crate) struct SymbolBucketState {
     pub(crate) text: Buffer,
     pub(crate) icon: Buffer,
     pub(crate) sdf_icon: Buffer,
-
-    pub(crate) icon_collision_box: Option<CollisionBuffer>,
-    pub(crate) text_collision_box: Option<CollisionBuffer>,
-    pub(crate) icon_collision_circle: Option<CollisionBuffer>,
-    pub(crate) text_collision_circle: Option<CollisionBuffer>,
 
     pub(crate) feature_sort_order: Option<Arc<Vec<usize>>>,
 }
@@ -592,18 +551,6 @@ impl SymbolBucket {
     pub(crate) fn has_sdf_icon_data(&self) -> bool {
         !self.state.sdf_icon.segments.is_empty()
     }
-    pub(crate) fn has_icon_collision_box_data(&self) -> bool {
-        self.state.icon_collision_box.as_ref().is_some_and(|b| !b.segments.is_empty())
-    }
-    pub(crate) fn has_icon_collision_circle_data(&self) -> bool {
-        self.state.icon_collision_circle.as_ref().is_some_and(|b| !b.segments.is_empty())
-    }
-    pub(crate) fn has_text_collision_box_data(&self) -> bool {
-        self.state.text_collision_box.as_ref().is_some_and(|b| !b.segments.is_empty())
-    }
-    pub(crate) fn has_text_collision_circle_data(&self) -> bool {
-        self.state.text_collision_circle.as_ref().is_some_and(|b| !b.segments.is_empty())
-    }
 
     pub(crate) fn has_format_section_overrides(&self) -> bool {
         SymbolLayerPaintPropertyOverrides::has_overrides(&self.layout.text_field)
@@ -727,26 +674,6 @@ impl SymbolBucket {
     pub(crate) fn opacity_attributes(placed: bool, opacity: f32) -> SymbolOpacityVertex {
         SymbolOpacityVertex { a1: [((u32::from((opacity * 127.0) as u8) << 1) | u32::from(placed)) as f32] }
     }
-
-    #[must_use]
-    pub(crate) fn collision_layout_vertex(
-        a: Vec2,
-        anchor: Vec2,
-        o: Vec2,
-        height_offset: f32,
-    ) -> CollisionBoxLayoutVertex {
-        CollisionBoxLayoutVertex {
-            a1: [a.x as i16, a.y as i16],
-            a2: [anchor.x as i16, anchor.y as i16],
-            a3: [o.x.round() as i16, o.y.round() as i16],
-            a4: height_offset,
-        }
-    }
-
-    #[must_use]
-    pub(crate) fn collision_dynamic_vertex(placed: bool, not_used: bool, shift: Vec2) -> CollisionBoxDynamicVertex {
-        CollisionBoxDynamicVertex { a1: [u16::from(placed), u16::from(not_used)], a2: [shift.x, shift.y] }
-    }
 }
 
 /// The highest `symbol-height-offset` of `symbol_instances`, and 0 for none.
@@ -804,13 +731,7 @@ impl Bucket for SymbolBucket {
     }
 
     fn has_data(&self) -> bool {
-        self.has_text_data()
-            || self.has_icon_data()
-            || self.has_sdf_icon_data()
-            || self.has_icon_collision_box_data()
-            || self.has_text_collision_box_data()
-            || self.has_icon_collision_circle_data()
-            || self.has_text_collision_circle_data()
+        self.has_text_data() || self.has_icon_data() || self.has_sdf_icon_data()
     }
 
     fn write_wire(&self, w: &mut mln_wire::Writer) {

@@ -221,11 +221,8 @@ impl TypedLayer for RenderBackgroundLayer {
         }
 
         let variant = base.projection_variant;
-        let color_mode = paint_parameters.context.color_mode(if draw_passes == RenderPass::Translucent {
-            ColorMode::alpha_blended()
-        } else {
-            ColorMode::unblended()
-        });
+        let color_mode =
+            if draw_passes == RenderPass::Translucent { ColorMode::alpha_blended() } else { ColorMode::unblended() };
         for (tile_id, entry) in drawing.tiles_mut().entries() {
             if entry.value.as_ref().is_some_and(|cached| cached.built_for != built_for) {
                 *entry.value = None;

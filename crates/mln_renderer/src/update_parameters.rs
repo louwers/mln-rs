@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use mln_map_types::{Elevation, MapDebugOptions, MapMode, TerrainOptions, TileLodMode, View};
+use mln_map_types::{Elevation, MapMode, TerrainOptions, TileLodMode, View};
 use mln_style::Style;
 use mln_text::glyph::FontFaces;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -11,7 +11,6 @@ pub struct UpdateParameters {
     pub style_loaded: bool,
     pub mode: MapMode,
     pub pixel_ratio: f32,
-    pub debug_options: MapDebugOptions,
     /// The frame's time; `None` in still modes, which have no clock and show
     /// every transition and fade as ended.
     pub time_point: Option<Instant>,

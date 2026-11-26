@@ -33,7 +33,6 @@ use crate::tile::contents::LayoutBuckets;
 pub(crate) struct LayoutParams {
     pub(crate) mode: MapMode,
     pub(crate) pixel_ratio: f32,
-    pub(crate) show_collision_boxes: bool,
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
     /// Whether the tile has had no layout yet.
     pub(crate) first_load: bool,
@@ -214,8 +213,8 @@ pub(crate) fn build(discovered: Discovered, input: &LayoutInput<'_>, resolved: &
     };
     // Room for every layer of the groups, of which those with data keep it.
     built.buckets = LayoutBuckets::with_capacity(groups.iter().map(|group| group.layers.len()).sum());
-    let LayoutParams { first_load, show_collision_boxes, .. } = input.params;
-    let build = BuildParams { first_load, show_collision_boxes, canonical: input.id.canonical };
+    let LayoutParams { first_load, .. } = input.params;
+    let build = BuildParams { first_load, canonical: input.id.canonical };
     let bucket_parameters = input.bucket_parameters();
 
     let mut waiting = Vec::new();

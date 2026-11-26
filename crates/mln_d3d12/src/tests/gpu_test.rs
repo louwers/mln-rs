@@ -128,7 +128,7 @@ fn imported_textures_through_gpu() {
 #[test]
 fn every_program_compiles_for_gpu() {
     let mut gpu = gpu();
-    let parameters = ProgramParameters::new(1.0, false);
+    let parameters = ProgramParameters::new(1.0);
     for program in PROGRAMS.iter().copied().filter(|program| program.sources.glsl.is_some()) {
         for &variant in projection_variants(program) {
             for uniforms in [&[][..], program.properties] {

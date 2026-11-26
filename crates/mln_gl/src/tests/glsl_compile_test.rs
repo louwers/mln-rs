@@ -73,39 +73,6 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
     }
 }
 
-/// Every program that draws a layer outputs white for the overdraw
-/// inspector, which counts its draws.
-#[test]
-fn every_layer_program_shows_the_overdraw_inspector() {
-    use mln_renderer::conformance::programs::{TERRAIN_PROBE, VERTEX_TEXEL};
-    use mln_renderer::layers::symbol::programs::{COLLISION_BOX, COLLISION_CIRCLE};
-    use mln_renderer::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, GLOBE_DEPTH, SKY};
-    use mln_renderer::shaders::terrain::programs::{TERRAIN, TERRAIN_DEPTH};
-    // The terrain shows its drapes, where the draped layers count their
-    // draws.
-    let not_layers = [
-        &CLIPPING_MASK,
-        &COLLISION_BOX,
-        &COLLISION_CIRCLE,
-        &GLOBE_DEPTH,
-        &SKY,
-        &ATMOSPHERE,
-        &TERRAIN,
-        &TERRAIN_DEPTH,
-        &VERTEX_TEXEL,
-        &TERRAIN_PROBE,
-    ];
-    for (program, source) in programs() {
-        if !not_layers.contains(&program) {
-            assert!(
-                [source.vertex, source.fragment].iter().any(|text| text.contains("OVERDRAW_INSPECTOR")),
-                "{}",
-                program.name
-            );
-        }
-    }
-}
-
 /// A variant of a program that the tests compile.
 struct Variant {
     /// The program and variant, for messages.
@@ -123,7 +90,7 @@ struct Variant {
 /// variant, with every property read per vertex and with every one read
 /// from its uniform.
 fn variants(program: &'static Program) -> Vec<Variant> {
-    let parameters = ProgramParameters::new(1.0, false);
+    let parameters = ProgramParameters::new(1.0);
     let mut property_sets = vec![&[][..]];
     if !program.properties.is_empty() {
         property_sets.push(program.properties);

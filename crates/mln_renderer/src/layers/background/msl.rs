@@ -40,10 +40,6 @@ FragmentStage vertex vertexMain(VertexStage in [[stage_in]] MLN_VERTEX_BINDINGS)
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
-#if defined(OVERDRAW_INSPECTOR)
-    return half4(1.0);
-#endif
-
     const float2 texsize = paintParams.pattern_atlas_texsize;
     // A crossfade at 0 or 1 shows one pattern, so skip the other.
     float4 color1 = float4(0.0);
@@ -85,10 +81,6 @@ FragmentStage vertex vertexMain(VertexStage in [[stage_in]] MLN_VERTEX_BINDINGS)
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
-#if defined(OVERDRAW_INSPECTOR)
-    return half4(1.0);
-#endif
-
     return half4(props.color * props.opacity);
 }
 ",

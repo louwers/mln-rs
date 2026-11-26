@@ -160,11 +160,6 @@ void main() {
     }
 #endif
 
-#ifdef OVERDRAW_INSPECTOR
-    out_color = vec4(1.0);
-    return;
-#endif
-
 #ifdef HAS_UNIFORM_u_color
     vec4 color = props.color;
 #else
@@ -329,11 +324,6 @@ void main() {
     if (clippedAtAntimeridian(frag_tile_x)) {
         discard;
     }
-#endif
-
-#ifdef OVERDRAW_INSPECTOR
-    out_color = vec4(1.0);
-    return;
 #endif
 
 #ifdef HAS_UNIFORM_u_blur
@@ -534,11 +524,6 @@ void main() {
     }
 #endif
 
-#ifdef OVERDRAW_INSPECTOR
-    out_color = vec4(1.0);
-    return;
-#else
-
     const LinePatternTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
 #ifdef HAS_UNIFORM_u_blur
@@ -621,7 +606,6 @@ void main() {
     const vec4 color = mix(color_a, color_b, tileProps.fade);
 
     out_color = color * (alpha * opacity);
-#endif
 }
 ",
 };
@@ -812,11 +796,6 @@ void main() {
     if (clippedAtAntimeridian(frag_tile_x)) {
         discard;
     }
-#endif
-
-#ifdef OVERDRAW_INSPECTOR
-    out_color = vec4(1.0);
-    return;
 #endif
 
     const LineSDFTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
@@ -1045,11 +1024,6 @@ void main() {
     if (clippedAtAntimeridian(frag_tile_x)) {
         discard;
     }
-#endif
-
-#ifdef OVERDRAW_INSPECTOR
-    out_color = vec4(1.0);
-    return;
 #endif
 
     const LineSDFTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];

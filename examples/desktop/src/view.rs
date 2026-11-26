@@ -41,8 +41,7 @@ use std::time::{Duration, Instant};
 use mln_frame_pacer::{FramePacer, RefreshWaiter};
 use mln_gestures::{GestureEvent, GestureRecognizer, Input, Modes, NextTick, PinchPhase, PointerKind};
 use mln_map::{
-    AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, MapDebugOptions,
-    MapEvent, RenderMode,
+    AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, MapEvent, RenderMode,
 };
 use mln_runtime::{
     CacheDatabaseOperation, Completion, DemandMode, Device, ErrorKind, EventMask, EventType, FrameDemand,
@@ -189,7 +188,6 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
         }
     };
     log_failure(map.update_camera(CameraUpdate { camera, ..Default::default() }));
-    log_failure(map.set_debug_flags(MapDebugOptions(settings.debug)));
     log_failure(map.set_viewport_options(free_bearing_options(settings.free_bearing)));
 
     let paint = Rc::new(RefCell::new(Paint::default()));
@@ -825,7 +823,6 @@ impl View {
             bearing: camera.map_or(0.0, |camera| camera.bearing),
             pitch: camera.map_or(0.0, |camera| camera.pitch),
             attributions: &self.style_info.attributions,
-            debug: snapshot.as_ref().map_or_else(MapDebugOptions::default, |snapshot| snapshot.debug),
             projection: self.projection,
             free_bearing: snapshot.as_ref().is_some_and(|snapshot| snapshot.view.viewport.globe_free_bearing),
             network: self.network,
@@ -878,7 +875,6 @@ impl View {
                     self.load_style(style);
                 }
             }
-            Action::SetDebug(debug) => log_failure(self.map.set_debug_flags(debug)),
             Action::SetProjection(projection) => {
                 self.projection = projection;
                 log_edit_failure(self.map.with_core(move |map| projection.apply(map)));
@@ -1155,17 +1151,11 @@ impl View {
             11 => ("compass (reset north and tilt, animated)", vec![], vec![], vec![Action::ResetNorth]),
             12 => ("key - (zoom out, animated)", vec![], vec![KeyCode::Minus], vec![]),
             13 => ("zoom in button (animated)", vec![], vec![], vec![Action::ZoomIn]),
-            14 => (
-                "debug overlays: tile borders and parse status",
-                vec![],
-                vec![],
-                vec![Action::SetDebug(MapDebugOptions::TILE_BORDERS | MapDebugOptions::PARSE_STATUS)],
-            ),
-            15 => {
+            14 => {
                 let _ = self.proxy.send_event(UserEvent::RequestSize(LogicalSize::new(800.0, 600.0)));
                 ("window resize to 800x600", vec![], vec![], vec![])
             }
-            step if Kind::ALL.len() > 1 && (16..16 + Kind::ALL.len()).contains(&step) => {
+            step if Kind::ALL.len() > 1 && (15..15 + Kind::ALL.len()).contains(&step) => {
                 let next = self.kind.next();
                 ("switch to the next backend", vec![], vec![], vec![Action::SetBackend(next)])
             }

@@ -535,7 +535,7 @@ impl RenderHeatmapLayer {
             textures[COLOR_RAMP_SLOT] = color_ramp.cloned();
             let objects = DrawObjects::new(
                 heatmap_texture_shader,
-                context.color_mode(ColorMode::alpha_blended()),
+                ColorMode::alpha_blended(),
                 CullFaceMode::disabled(),
                 geometry,
                 textures,

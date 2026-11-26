@@ -10,7 +10,6 @@ mod map_options;
 mod map_snapshot;
 // gtests-core: MapProjection (test/map/map.test.cpp).
 mod map_projection;
-mod rendering_stats_view;
 mod style_loader;
 pub mod transform;
 
@@ -22,7 +21,7 @@ pub use map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
 pub use mln_map_types::{
     AnchoredMomentum, AnimationOptions, AxonometricMode, BoundOptions, Camera, CameraDelta, CameraError, CameraLimits,
     CameraMomentum, CameraOptions, CameraUpdate, CameraUpdateMode, CameraVelocity, ConstrainMode, Elevation,
-    FreeCameraOptions, GesturePhase, InvalidMomentum, LogicalExtent, MapDebugOptions, MapMode, MapView, MomentumDecay,
+    FreeCameraOptions, GesturePhase, InvalidMomentum, LogicalExtent, MapMode, MapView, MomentumDecay,
     MomentumDecayModel, MomentumEasing, MomentumGlide, MomentumSnap, NorthOrientation, ProjectionMode, TerrainOptions,
     TerrainSkirtLength, TileLodMode, TransformState, TransitionEnd, TransitionOutcome, View, Viewport, ViewportMode,
 };

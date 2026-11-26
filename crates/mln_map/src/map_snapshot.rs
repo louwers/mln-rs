@@ -2,7 +2,7 @@
 //! takes.
 
 use glam::{DQuat, DVec3};
-use mln_map_types::{BoundOptions, FreeCameraOptions, MapDebugOptions, MapView, TileLodMode};
+use mln_map_types::{BoundOptions, FreeCameraOptions, MapView, TileLodMode};
 use mln_util::geo::LatLngBounds;
 
 /// A map's state at one moment.
@@ -14,7 +14,6 @@ pub struct MapSnapshot {
     /// Counts the updates that the map has sent to its renderer. A frame shows
     /// the map's state as of this snapshot once it renders this update.
     pub update_generation: u64,
-    pub debug: MapDebugOptions,
     /// Whether the style and every resource that the view needs have loaded,
     /// and the renderer has drawn them.
     pub fully_loaded: bool,

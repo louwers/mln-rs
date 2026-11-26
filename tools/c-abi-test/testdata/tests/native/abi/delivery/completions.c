@@ -187,8 +187,8 @@ static void a_command_validates_a_present_completion(void) {
   mln_map map = mln_test_create_map(runtime);
 
   const mln_completion completion = {.size = sizeof(mln_completion)};
-  MLN_TEST_INVALID(mln_map_set_debug_flags(map, 0, &completion, NULL));
-  MLN_TEST_OK(mln_map_set_debug_flags(map, 0, NULL, NULL));
+  MLN_TEST_INVALID(mln_map_cancel_camera_transitions(map, &completion, NULL));
+  MLN_TEST_OK(mln_map_cancel_camera_transitions(map, NULL, NULL));
   mln_test_destroy_map(map);
   mln_test_destroy_runtime(runtime);
 }
@@ -207,10 +207,10 @@ static void a_later_completion_follows_earlier_queued_completions(void) {
   MLN_TEST_OK(
     mln_map_set_style_json(map, mln_test_background_style_json, &command, NULL)
   );
-  MLN_TEST_OK(mln_map_set_debug_flags(map, 0, NULL, NULL));
+  MLN_TEST_OK(mln_map_cancel_camera_transitions(map, NULL, NULL));
   const mln_completion later =
     mln_test_queue_completion(queue.handle, &later_tag);
-  MLN_TEST_OK(mln_map_set_debug_flags(map, 0, &later, NULL));
+  MLN_TEST_OK(mln_map_cancel_camera_transitions(map, &later, NULL));
 
   mln_test_dispatch_until_calls(queue.handle, 2);
   TEST_ASSERT_EQUAL_size_t(2, mln_test_calls.count);

@@ -207,16 +207,14 @@ pub(crate) struct LayerComposite {
 impl LayerComposite {
     /// Makes what the frame composites `groups` with, each a draw group and
     /// how it composites, onto a frame of `size` whose color is of `format`,
-    /// and drops it where there are none. With `overdraw`, the overdraw
-    /// inspector's, every group blends as `normal`, and without `format` so
-    /// does every group that blends in the shader.
+    /// and drops it where there are none. Without `format`, every group
+    /// that blends in the shader blends as `normal`.
     pub(crate) fn update(
         &mut self,
         gpu: &mut dyn Gpu,
         context: &mut Context,
         size: Size,
         format: Option<TextureFormat>,
-        overdraw: bool,
         groups: &[(SimpleIdentity, Composite)],
     ) {
         self.groups.clear();
@@ -229,7 +227,7 @@ impl LayerComposite {
             context.shader_key(&programs::LAYER_COMPOSITE, Uniforms::default(), ProjectionVariant::Mercator)
         });
         for &(group, mut composite) in groups {
-            if overdraw || (format.is_none() && composite.reads_backdrop()) {
+            if format.is_none() && composite.reads_backdrop() {
                 composite.blend = LayerBlendType::Normal;
             }
             self.groups.push((group, composite));

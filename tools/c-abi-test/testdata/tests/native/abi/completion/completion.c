@@ -89,11 +89,14 @@ static void discarded_commands_publish_state_and_events_before_a_later_query(
   camera.animation.end_handler = mln_test_transition_end_handler(&end);
   camera.camera.fields = MLN_CAMERA_OPTION_ZOOM;
   camera.camera.zoom = 4;
+  const mln_map_tile_options tile = {
+    .size = sizeof(tile),
+    .fields = MLN_MAP_TILE_OPTION_PREFETCH_ZOOM_DELTA,
+    .prefetch_zoom_delta = 2
+  };
   MLN_TEST_OK(mln_map_begin_command_group(map, NULL, NULL));
   MLN_TEST_OK(mln_map_resize(map, extent, NULL, NULL));
-  MLN_TEST_OK(
-    mln_map_set_debug_flags(map, MLN_MAP_DEBUG_TILE_BORDERS, NULL, NULL)
-  );
+  MLN_TEST_OK(mln_map_set_tile_options(map, &tile, NULL, NULL));
   MLN_TEST_OK(mln_map_update_camera(map, &camera, NULL, NULL));
   MLN_TEST_OK(mln_map_end_command_group(map, NULL, NULL));
   MLN_TEST_OK(mln_map_request_repaint(map, NULL, NULL));
@@ -105,7 +108,7 @@ static void discarded_commands_publish_state_and_events_before_a_later_query(
   TEST_ASSERT_GREATER_THAN_UINT64(before.generation, after.generation);
   TEST_ASSERT_EQUAL_UINT32(96, after.view.extent.width);
   TEST_ASSERT_EQUAL_UINT32(80, after.view.extent.height);
-  TEST_ASSERT_EQUAL_UINT32(MLN_MAP_DEBUG_TILE_BORDERS, after.debug_flags);
+  TEST_ASSERT_EQUAL_UINT32(2, after.tile.prefetch_zoom_delta);
   mln_camera observed;
   MLN_TEST_OK(mln_test_map_get_camera(map, &observed));
   TEST_ASSERT_EQUAL_DOUBLE(4, observed.zoom);
@@ -119,15 +122,18 @@ static void discarded_commands_publish_state_and_events_before_a_later_query(
 static void a_later_command_completion_fences_discarded_commands(void) {
   mln_runtime runtime = mln_test_create_runtime();
   mln_map map = mln_test_create_map(runtime);
+  const mln_map_tile_options tile = {
+    .size = sizeof(tile),
+    .fields = MLN_MAP_TILE_OPTION_PREFETCH_ZOOM_DELTA,
+    .prefetch_zoom_delta = 2
+  };
   MLN_TEST_OK(mln_map_set_event_mask(map, 0, NULL, NULL));
-  MLN_TEST_OK(
-    mln_map_set_debug_flags(map, MLN_MAP_DEBUG_TILE_BORDERS, NULL, NULL)
-  );
+  MLN_TEST_OK(mln_map_set_tile_options(map, &tile, NULL, NULL));
   MLN_TEST_AWAIT_OK(mln_map_request_repaint(map, &completion.descriptor, NULL));
   mln_map_snapshot snapshot = {.size = sizeof(snapshot)};
   MLN_TEST_OK(mln_map_get_snapshot(map, &snapshot, NULL));
   TEST_ASSERT_EQUAL_UINT64(0, snapshot.event_mask);
-  TEST_ASSERT_EQUAL_UINT32(MLN_MAP_DEBUG_TILE_BORDERS, snapshot.debug_flags);
+  TEST_ASSERT_EQUAL_UINT32(2, snapshot.tile.prefetch_zoom_delta);
   mln_test_destroy_map(map);
   mln_test_destroy_runtime(runtime);
 }

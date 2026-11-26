@@ -124,7 +124,6 @@ impl OneTile {
         crate::layout::tile_layout::LayoutParams {
             mode: self.mode,
             pixel_ratio: 1.0,
-            show_collision_boxes: false,
             subdivision_granularity: mln_util::subdivision_granularity::SubdivisionGranularitySetting::none(),
             first_load: true,
         }

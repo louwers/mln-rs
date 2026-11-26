@@ -162,8 +162,7 @@ fn create_bucket(properties: &Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> Bo
     )]);
     let resolved = Resolved { icons: image_positions.clone(), patterns: image_positions, ..Resolved::default() };
     let mut built = Built { buckets: LayoutBuckets::default(), feature_index: FeatureIndexBuilder::new(Some(data)) };
-    let build =
-        BuildParams { first_load: true, show_collision_boxes: false, canonical: bucket_parameters.tile_id.canonical };
+    let build = BuildParams { first_load: true, canonical: bucket_parameters.tile_id.canonical };
     layout.create_bucket(Some(&resolved), &mut built, &build).unwrap();
     built.buckets.into_bucket(&layer_id).unwrap()
 }

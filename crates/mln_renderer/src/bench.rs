@@ -129,7 +129,6 @@ impl TileLayout {
             params: LayoutParams {
                 mode: MapMode::Continuous,
                 pixel_ratio: 1.0,
-                show_collision_boxes: false,
                 subdivision_granularity: style.get_projection().get_subdivision_granularity(),
                 first_load: true,
             },
@@ -587,7 +586,7 @@ mod tests {
 
     use feature::{Feature, Identifier, PropertyMap, Value};
     use geo_types::{Geometry, LineString, Point};
-    use mln_map_types::{MapDebugOptions, TerrainOptions, TileLodMode, TransformState};
+    use mln_map_types::{TerrainOptions, TileLodMode, TransformState};
     use mln_util::geo::LatLng;
     use mln_util::size::Size;
     use mln_util::time::Instant;
@@ -630,7 +629,6 @@ mod tests {
             style_loaded: true,
             mode: MapMode::Continuous,
             pixel_ratio: 1.0,
-            debug_options: MapDebugOptions::NO_DEBUG,
             time_point: Some(Instant::now()),
             view: state.view().clone(),
             min_zoom: state.min_zoom(),

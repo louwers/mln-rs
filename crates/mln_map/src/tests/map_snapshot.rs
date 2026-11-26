@@ -16,8 +16,8 @@ use mln_util::size::Size;
 use crate::map_snapshot::{CameraBounds, FreeCamera, TileSettings};
 use crate::{
     AnimationOptions, BoundOptions, CameraDelta, CameraOptions, CameraUpdate, CameraUpdateMode, ConstrainMode,
-    FreeCameraOptions, GesturePhase, Map, MapDebugOptions, MapMode, MapOptions, MapProjection, MapView,
-    NorthOrientation, ProjectionMode, TileLodMode, UpdateReader, Viewport, ViewportMode,
+    FreeCameraOptions, GesturePhase, Map, MapMode, MapOptions, MapProjection, MapView, NorthOrientation,
+    ProjectionMode, TileLodMode, UpdateReader, Viewport, ViewportMode,
 };
 
 fn map(options: MapOptions, run_loop: &Queue<()>) -> Map {
@@ -55,7 +55,6 @@ fn snapshot_reports_every_member() {
     );
 
     let snapshot = map.snapshot();
-    assert_eq!(snapshot.debug, MapDebugOptions::NO_DEBUG);
     assert!(!snapshot.fully_loaded);
     assert!(!snapshot.gesture_in_progress);
     assert!(!snapshot.transition_in_progress);
@@ -72,7 +71,6 @@ fn snapshot_reports_every_member() {
         max_pitch: Some(50.0),
     })
     .unwrap();
-    map.set_debug(MapDebugOptions::TILE_BORDERS | MapDebugOptions::COLLISION | MapDebugOptions::RENDERING_STATS);
     map.set_tile_settings(&TileSettings {
         prefetch_zoom_delta: 2,
         lod_min_radius: 2.5,
@@ -114,10 +112,6 @@ fn snapshot_reports_every_member() {
     });
 
     let snapshot = map.snapshot();
-    assert_eq!(
-        snapshot.debug,
-        MapDebugOptions::TILE_BORDERS | MapDebugOptions::COLLISION | MapDebugOptions::RENDERING_STATS
-    );
     assert!(snapshot.gesture_in_progress);
     assert!(snapshot.transition_in_progress);
     assert!(!snapshot.fully_loaded);
@@ -216,14 +210,10 @@ fn generation_grows_with_each_change() {
     assert_changed(&map, true, "set_tile_settings");
     map.set_tile_settings(&tile);
     assert_changed(&map, false, "set_tile_settings to the same settings");
-    map.set_debug(MapDebugOptions::OVERDRAW);
-    assert_changed(&map, true, "set_debug");
     map.set_bounds(&BoundOptions { min_pitch: Some(10.0), ..Default::default() }).unwrap();
     assert_changed(&map, true, "set_bounds");
     map.set_bounds(&BoundOptions::default()).unwrap();
     assert_changed(&map, false, "set_bounds with no limits");
-    map.set_debug(MapDebugOptions::RENDERING_STATS);
-    assert_changed(&map, true, "set_debug with the rendering stats");
     map.load_style_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     assert_changed(&map, true, "load_json");
     map.set_free_camera_options(&FreeCameraOptions { position: Some(glam::dvec3(0.4, 0.4, 0.1)), orientation: None });
@@ -288,7 +278,6 @@ fn a_static_map_changes_without_publishing_updates() {
 
     let before = map.snapshot();
     map.jump_to(&CameraOptions { zoom: Some(2.0), ..Default::default() });
-    map.set_debug(MapDebugOptions::TILE_BORDERS);
     let after = map.snapshot();
     assert!(after.generation > before.generation);
     assert_eq!(after.update_generation, 0);

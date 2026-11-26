@@ -172,10 +172,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS)
     }
 #endif
 
-#if defined(OVERDRAW_INSPECTOR)
-    return half4(1.0);
-#endif
-
     device const LineSDFTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_blur)
@@ -344,10 +340,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS)
     if (clippedAtAntimeridian(in.tile_x)) {
         discard_fragment();
     }
-#endif
-
-#if defined(OVERDRAW_INSPECTOR)
-    return half4(1.0);
 #endif
 
 #if defined(HAS_UNIFORM_u_blur)
@@ -521,10 +513,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS)
     if (clippedAtAntimeridian(in.tile_x)) {
         discard_fragment();
     }
-#endif
-
-#if defined(OVERDRAW_INSPECTOR)
-    return half4(1.0);
 #endif
 
     device const LinePatternTilePropsUBO& tileProps = tilePropsVector[uboIndex];
@@ -774,10 +762,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS)
     }
 #endif
 
-#if defined(OVERDRAW_INSPECTOR)
-    return half4(1.0);
-#endif
-
     device const LineSDFTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_color)
@@ -948,10 +932,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS)
     if (clippedAtAntimeridian(in.tile_x)) {
         discard_fragment();
     }
-#endif
-
-#if defined(OVERDRAW_INSPECTOR)
-    return half4(1.0);
 #endif
 
 #if defined(HAS_UNIFORM_u_color)

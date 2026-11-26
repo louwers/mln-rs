@@ -197,9 +197,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         discard;
     }
 #endif
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
-#endif
     let tileProps = tilePropsVector[globalIndex.value];
 #ifdef HAS_UNIFORM_u_blur
     let blur = props.blur;
@@ -381,9 +378,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     if (clippedAtAntimeridian(in.v_tile_x)) {
         discard;
     }
-#endif
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
 #ifdef HAS_UNIFORM_u_blur
     let blur = props.blur;
@@ -569,9 +563,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     if (clippedAtAntimeridian(in.v_tile_x)) {
         discard;
     }
-#endif
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
     let tileProps = tilePropsVector[globalIndex.value];
 
@@ -848,9 +839,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         discard;
     }
 #endif
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
-#endif
     let tileProps = tilePropsVector[globalIndex.value];
 #ifdef HAS_UNIFORM_u_color
     let color = props.color;
@@ -1038,9 +1026,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     if (clippedAtAntimeridian(in.v_tile_x)) {
         discard;
     }
-#endif
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
 #endif
 #ifdef HAS_UNIFORM_u_color
     let color = props.color;

@@ -42,10 +42,6 @@ fn getElevation(coord: vec2<f32>) -> f32 {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
-#endif
-
     let epsilon = vec2<f32>(1.0, 1.0) / tileProps.dimension;
     let tileSize = tileProps.dimension.x - 2.0;
 
@@ -118,10 +114,6 @@ struct FragmentInput {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
-#endif
-
     let tileProps = tilePropsVector[globalIndex.value];
     let pixel = textureSample(image, image_sampler, in.tex_coord);
     // Without lights, the slopes as they were prepared, which the terrain's

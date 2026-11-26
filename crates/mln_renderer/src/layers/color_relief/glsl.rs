@@ -49,11 +49,6 @@ vec4 getColorStop(int stop, int color_ramp_size) {
 
 void main() {
 
-#if defined(OVERDRAW_INSPECTOR)
-    out_color = vec4(1.0);
-    return;
-#else
-
     const ColorReliefTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
     float el = getElevation(frag_position, tileProps.unpack, tileProps.unpack_scale);
@@ -97,7 +92,6 @@ void main() {
     float t = (abs(denom) < 0.0001) ? 0.0 : clamp((el - el_l) / denom, 0.0, 1.0);
 
     out_color = props.opacity * mix(color_l, color_r, t);
-#endif
 }
 ",
 };

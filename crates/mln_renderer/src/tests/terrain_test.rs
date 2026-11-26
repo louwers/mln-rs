@@ -7,8 +7,7 @@ use std::sync::Arc;
 use glam::DVec2;
 use mln_map::transform::Transform;
 use mln_map_types::{
-    CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TerrainOptions, TerrainSkirtLength, TileLodMode,
-    ViewportMode,
+    CameraOptions, ConstrainMode, Elevation, MapMode, TerrainOptions, TerrainSkirtLength, TileLodMode, ViewportMode,
 };
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Resource, Responder, Response};
@@ -66,7 +65,6 @@ fn update_parameters(style: Style, transform: &Transform, mode: MapMode) -> Upda
         style_loaded: true,
         mode,
         pixel_ratio: 1.0,
-        debug_options: MapDebugOptions::NO_DEBUG,
         time_point: None,
         view: transform.view().clone(),
         min_zoom: 0.0,
@@ -345,7 +343,6 @@ impl TerrainLoad {
         let file_source: Arc<dyn FileSource> = Arc::<DemTiles>::clone(&self.tiles);
         let tile_parameters = TileParameters {
             pixel_ratio: 1.0,
-            debug_options: MapDebugOptions::NO_DEBUG,
             view: &parameters.view,
             min_zoom: 0.0,
             max_zoom: 22.0,
@@ -1370,7 +1367,6 @@ fn assert_glyphs_draw_in_circles(dem: fn() -> Response, pitch_with_map: bool) {
         rotate_with_map: true,
         avoid_edges: None,
         collision_group: None,
-        debug: true,
     };
     let feature = CollisionFeature {
         boxes: PoolRange::default(),

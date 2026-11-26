@@ -50,11 +50,6 @@ layout(location = 0) out vec4 out_color;
 
 void main() {
 
-#if defined(OVERDRAW_INSPECTOR)
-    out_color = vec4(1.0);
-    return;
-#endif
-
     // read and cross-fade colors from the main and parent tiles
     vec4 color0 = texture(sampler2D(image0_texture, image0_sampler), frag_position0.xy / frag_position0.z);
     vec4 color1 = texture(sampler2D(image1_texture, image1_sampler), frag_position1.xy / frag_position1.z);

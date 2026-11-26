@@ -59,39 +59,6 @@ fn every_program_declares_the_properties_its_glsl_reads_from_uniforms() {
     }
 }
 
-/// Every program that draws a layer outputs white for the overdraw
-/// inspector, which counts its draws.
-#[test]
-fn every_layer_program_shows_the_overdraw_inspector() {
-    use mln_renderer::conformance::programs::{TERRAIN_PROBE, VERTEX_TEXEL};
-    use mln_renderer::layers::symbol::programs::{COLLISION_BOX, COLLISION_CIRCLE};
-    use mln_renderer::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, GLOBE_DEPTH, SKY};
-    use mln_renderer::shaders::terrain::programs::{TERRAIN, TERRAIN_DEPTH};
-    // The terrain shows its drapes, where the draped layers count their
-    // draws.
-    let not_layers = [
-        &CLIPPING_MASK,
-        &COLLISION_BOX,
-        &COLLISION_CIRCLE,
-        &GLOBE_DEPTH,
-        &SKY,
-        &ATMOSPHERE,
-        &TERRAIN,
-        &TERRAIN_DEPTH,
-        &VERTEX_TEXEL,
-        &TERRAIN_PROBE,
-    ];
-    for (program, source) in programs() {
-        if !not_layers.contains(&program) {
-            assert!(
-                [source.vertex, source.fragment].iter().any(|text| text.contains("OVERDRAW_INSPECTOR")),
-                "{}",
-                program.name
-            );
-        }
-    }
-}
-
 /// The module of a stage of `source` with `defines`, unvalidated.
 fn module(program: &Program, source: &GlslSource, stage: Stage, defines: &str) -> Module {
     compose(source, program, stage, defines)
@@ -100,8 +67,8 @@ fn module(program: &Program, source: &GlslSource, stage: Stage, defines: &str) -
 }
 
 // Every stage parses and validates, with every property per vertex, every
-// property as a uniform, each property alone as a uniform, and with the
-// overdraw inspector, in both projections.
+// property as a uniform, and each property alone as a uniform, in both
+// projections.
 #[test]
 fn every_stage_validates() {
     let mut failures = Vec::new();
@@ -349,11 +316,6 @@ fn resources_are_in_the_descriptor_set_layouts() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// The resources a program declares in a stage that doesn't read them: the
-/// collision boxes' tile properties, which have the id of a block that both
-/// stages read.
-const UNREAD_RESOURCES: &[(&str, Stage, (u32, u32))] = &[("CollisionBoxShader", Stage::Fragment, (2, 3))];
-
 // The stages that the program says read each of its buffers and textures, and
 // the paint parameters, read it in some variant: a stage declares only what
 // it reads.
@@ -371,11 +333,7 @@ fn every_stage_reads_what_it_declares() {
                 declared.extend(resources.bindings.into_keys());
                 read.extend(module.resources().unwrap().iter().map(|resource| (resource.set, resource.binding)));
             }
-            let unread: Vec<(u32, u32)> = declared
-                .difference(&read)
-                .copied()
-                .filter(|&binding| !UNREAD_RESOURCES.contains(&(program.name, stage, binding)))
-                .collect();
+            let unread: Vec<(u32, u32)> = declared.difference(&read).copied().collect();
             if !unread.is_empty() {
                 failures.push(format!("{} ({stage:?}): declares {unread:?} and reads none of them", program.name));
             }
@@ -603,7 +561,7 @@ fn bindings_follow_from_the_packed_ids() {
     use mln_renderer::layers::hillshade::programs::{HILLSHADE, HILLSHADE_PREPARE};
     use mln_renderer::layers::line::programs::LINE;
     use mln_renderer::layers::raster::programs::RASTER;
-    use mln_renderer::layers::symbol::programs::{COLLISION_BOX, SYMBOL_SDF};
+    use mln_renderer::layers::symbol::programs::SYMBOL_SDF;
     use mln_renderer::shaders::programs::{ATMOSPHERE, SKY};
 
     assert_eq!(global_uniform_binding(PAINT_PARAMS_ID), Some(0));
@@ -644,9 +602,7 @@ fn bindings_follow_from_the_packed_ids() {
     }
 
     // drawableUBOStartId and its offsets.
-    assert_eq!(drawable_uniform_binding(COLLISION_BOX.buffer_id("drawable")), Some(0));
     assert_eq!(drawable_uniform_binding(PROJECTION_ID), Some(2));
-    assert_eq!(drawable_uniform_binding(COLLISION_BOX.buffer_id("tile_props")), Some(3));
     assert_eq!(drawable_uniform_binding(HILLSHADE_PREPARE.buffer_id("drawable")), Some(0));
     assert_eq!(drawable_uniform_binding(HILLSHADE_PREPARE.buffer_id("tileProps")), Some(3));
     // The pulled shaders' vertex buffers, from drawableUBOStartId + 5.

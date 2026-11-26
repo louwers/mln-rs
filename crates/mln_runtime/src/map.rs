@@ -5,8 +5,8 @@ use std::sync::{Arc, OnceLock, Weak};
 
 use mln_map::{
     BoundOptions, Camera, CameraCommandId, CameraDelta, CameraOptions, CameraUpdate, Elevation, FrameClock,
-    FreeCameraOptions, LogicalExtent, MapDebugOptions, MapEvent, MapMode, MapProjection, MapSnapshot, MapView,
-    ProjectionMode, StyleLoadError, TransitionEnd, TransitionOutcome,
+    FreeCameraOptions, LogicalExtent, MapEvent, MapMode, MapProjection, MapSnapshot, MapView, ProjectionMode,
+    StyleLoadError, TransitionEnd, TransitionOutcome,
 };
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_renderer::{Custom, CustomLayerHost, Registry, UpdateReader};
@@ -1464,14 +1464,6 @@ impl Map {
     pub fn set_projection_mode(&self, mode: ProjectionMode) -> Result<Completion<Applied>, Error> {
         self.command(move |map| {
             map.set_projection_mode(&mode);
-            Ok(())
-        })
-    }
-
-    /// Selects the debug overlays that the map draws.
-    pub fn set_debug_flags(&self, flags: MapDebugOptions) -> Result<Completion<Applied>, Error> {
-        self.command(move |map| {
-            map.set_debug(flags);
             Ok(())
         })
     }

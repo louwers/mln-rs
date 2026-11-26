@@ -68,7 +68,6 @@ pub(crate) trait Layout<T: LayerType>: Send + 'static {
 pub(crate) struct BuildParams {
     /// Whether the tile has had no layout yet.
     pub(crate) first_load: bool,
-    pub(crate) show_collision_boxes: bool,
     pub(crate) canonical: CanonicalTileID,
 }
 

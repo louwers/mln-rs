@@ -309,10 +309,6 @@ lowp float floorwidth = u_floorwidth;
     vec4 color = texture(u_image, vec2(v_lineprogress, 0.5));
 
     fragColor = color * (alpha * opacity);
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &LINE_GRADIENT_SDF_DECLARATIONS,
@@ -476,10 +472,6 @@ lowp float opacity = u_opacity;
     vec4 color = texture(u_image, vec2(v_lineprogress, 0.5));
 
     fragColor = color * (alpha * opacity);
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &LINE_GRADIENT_DECLARATIONS,
@@ -717,10 +709,6 @@ lowp float opacity = u_opacity;
     vec4 color = mix(color_a, color_b, u_fade);
 
     fragColor = color * alpha * opacity;
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &LINE_PATTERN_DECLARATIONS,
@@ -950,10 +938,6 @@ lowp float floorwidth = u_floorwidth;
     alpha *= smoothstep(0.5 - sdfgamma / floorwidth, 0.5 + sdfgamma / floorwidth, sdfdist);
 
     fragColor = color * (alpha * opacity);
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &LINE_SDF_DECLARATIONS,
@@ -1122,10 +1106,6 @@ lowp float opacity = u_opacity;
     float alpha = clamp(min(dist - (v_width2.t - blur2), v_width2.s - dist) / blur2, 0.0, 1.0);
 
     fragColor = color * (alpha * opacity);
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &LINE_DECLARATIONS,

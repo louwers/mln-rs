@@ -71,8 +71,6 @@ pub(crate) struct BucketOptions {
     /// The tile's borders, in tile mode.
     pub(crate) tile_borders: Option<CollisionBoundaries>,
     pub(crate) avoid_edges: Option<CollisionBoundaries>,
-    /// Debug drawing shows the collision boxes.
-    pub(crate) debug: bool,
 }
 
 /// What placing the symbols of one bucket reads.
@@ -118,7 +116,6 @@ pub(crate) struct PlacementContext<'a> {
     pub(crate) tile_borders: Option<CollisionBoundaries>,
     /// The tile borders the symbols stay inside, in tile mode.
     pub(crate) avoid_edges: Option<CollisionBoundaries>,
-    debug: bool,
 }
 
 impl<'a> PlacementContext<'a> {
@@ -132,7 +129,7 @@ impl<'a> PlacementContext<'a> {
         placement_zoom: f32,
         options: BucketOptions,
     ) -> Self {
-        let BucketOptions { just_reloaded, collision_group, tile_borders, avoid_edges, debug } = options;
+        let BucketOptions { just_reloaded, collision_group, tile_borders, avoid_edges } = options;
         let tile = &data.tile;
         let overscaled_id = tile.overscaled_id;
         let pixels_to_tile_units = tile.id.pixels_to_tile_units(1.0, placement_zoom);
@@ -187,7 +184,6 @@ impl<'a> PlacementContext<'a> {
             has_icon_text_fit: *layout.icon_text_fit.uniform() != IconTextFitType::None,
             tile_borders,
             avoid_edges,
-            debug,
         }
     }
 
@@ -228,7 +224,6 @@ impl<'a> PlacementContext<'a> {
             rotate_with_map: self.rotate_text_with_map,
             avoid_edges: self.avoid_edges.as_ref(),
             collision_group: self.collision_group,
-            debug: self.debug,
         }
     }
 

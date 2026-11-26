@@ -203,11 +203,6 @@ layout(location = 0) out vec4 out_color;
 
 void main() {
 
-#if defined(OVERDRAW_INSPECTOR)
-    out_color = vec4(1.0);
-    return;
-#endif
-
 #if defined(HAS_UNIFORM_u_color)
     const vec4 color = props.color;
 #else

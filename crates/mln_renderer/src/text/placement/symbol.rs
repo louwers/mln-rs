@@ -8,7 +8,7 @@ use mln_style::types::{SymbolAnchorType, TextWritingModeType};
 use mln_text::anchor_alignment;
 
 use super::context::PlacementContext;
-use super::{CircleKey, JointPlacement, Placement, VariableOffset};
+use super::{JointPlacement, Placement, VariableOffset};
 use crate::layout::symbol_instance::{IconPart, SymbolInstance, TextPart};
 use crate::layout::symbol_projection::evaluate_size_for_feature;
 use crate::text::collision_feature::CollisionFeature;
@@ -67,13 +67,8 @@ fn orientation(vertical: bool) -> TextWritingModeType {
 }
 
 impl Placement {
-    /// Places `symbol`, the bucket's symbol `index`, and records where.
-    pub(super) fn place_symbol(
-        &mut self,
-        index: usize,
-        symbol: &SymbolInstance,
-        ctx: &PlacementContext<'_>,
-    ) -> JointPlacement {
+    /// Places `symbol`, a symbol of `ctx`'s bucket, and records where.
+    pub(super) fn place_symbol(&mut self, symbol: &SymbolInstance, ctx: &PlacementContext<'_>) -> JointPlacement {
         let Some(id) = symbol.cross_tile_id else {
             return JointPlacement::UNPLACED;
         };
@@ -128,23 +123,6 @@ impl Placement {
                 bucket_instance_id,
                 group,
             );
-        }
-
-        // Debug drawing shows which of a line label's circles it used.
-        let along_line = |feature: Option<&CollisionFeature>| feature.is_some_and(|feature| feature.along_line);
-        if ctx.bucket.has_text_collision_circle_data()
-            && along_line(symbol.text.as_ref().map(|text| &text.collision))
-            && !self.text_boxes.is_empty()
-        {
-            let key = CircleKey { bucket_instance_id, symbol: index, text: true };
-            self.collision_circles.insert(key, self.text_boxes.clone());
-        }
-        if ctx.bucket.has_icon_collision_circle_data()
-            && along_line(symbol.icon.as_ref().map(|icon| &icon.collision))
-            && !self.icon_boxes.is_empty()
-        {
-            let key = CircleKey { bucket_instance_id, symbol: index, text: false };
-            self.collision_circles.insert(key, self.icon_boxes.clone());
         }
 
         // A symbol behind the planet's horizon stays hidden even where it

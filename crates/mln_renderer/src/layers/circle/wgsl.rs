@@ -189,10 +189,6 @@ struct FragmentInput {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
-#endif
-
     let extrude_length = length(in.extrude);
     let antialiasblur = in.antialiasblur;
 #ifdef HAS_UNIFORM_u_color

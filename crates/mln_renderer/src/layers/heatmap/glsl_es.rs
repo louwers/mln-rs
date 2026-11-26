@@ -104,10 +104,6 @@ highp float weight = u_weight;
     float val = weight * u_intensity * GAUSS_COEF * exp(d);
 
     fragColor = vec4(val, 1.0, 1.0, 1.0);
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &HEATMAP_DECLARATIONS,
@@ -129,10 +125,6 @@ void main() {
     float t = texture(u_image, v_pos).r;
     vec4 color = texture(u_color_ramp, vec2(t, 0.5));
     fragColor = color * u_opacity;
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &GlslEsDeclarations::DEFAULT,

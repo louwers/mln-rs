@@ -81,9 +81,6 @@ const GAUSS_COEF: f32 = 0.3989422804014327;
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
-#else
     let d = -0.5 * 3.0 * 3.0 * dot(in.extrude, in.extrude);
 #ifdef HAS_UNIFORM_u_weight
     let weight = props.weight;
@@ -92,7 +89,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #endif
     let val = weight * props.intensity * GAUSS_COEF * exp(d);
     return vec4<f32>(val, 1.0, 1.0, 1.0);
-#endif
 }
 ",
     ),
@@ -129,10 +125,6 @@ struct FragmentInput {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
-#endif
-
     let t = textureSample(image, image_sampler, in.tex_coord).r;
     let color = textureSample(color_ramp, color_ramp_sampler, vec2<f32>(t, 0.5));
     return color * ubo.opacity;

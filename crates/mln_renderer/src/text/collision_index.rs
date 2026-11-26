@@ -145,9 +145,6 @@ pub(crate) struct PartCollision<'a> {
     /// The group whose symbols alone these collide with; `None` for every
     /// group.
     pub(crate) collision_group: Option<u16>,
-    /// Debug drawing shows the collision circles, so a line label finds all
-    /// it uses.
-    pub(crate) debug: bool,
 }
 
 /// The run a feature is placed for: the glyphs a line label lays out along
@@ -440,7 +437,6 @@ impl CollisionIndex {
             -first <= circle.signed_distance_from_anchor && circle.signed_distance_from_anchor <= last
         };
 
-        let mut collision_detected = false;
         let mut in_grid = false;
         let mut entirely_offscreen = true;
         let mut previous_center: Option<Vec2> = None;
@@ -480,16 +476,11 @@ impl CollisionIndex {
             if part.avoid_edges.is_some_and(|edges| !Self::is_inside_tile(&collision_boundaries, edges))
                 || self.collides(part.overlap_mode, part.collision_group, &circle)
             {
-                // Debug drawing shows which circles are used, so it keeps
-                // going.
-                if !part.debug {
-                    return PlacedFeatureResult::default();
-                }
-                collision_detected = true;
+                return PlacedFeatureResult::default();
             }
         }
 
-        PlacedFeatureResult { placed: !collision_detected && in_grid, offscreen: entirely_offscreen, occluded: false }
+        PlacedFeatureResult { placed: in_grid, offscreen: entirely_offscreen, occluded: false }
     }
 
     /// Whether a box placed with `overlap_mode` collides with a symbol in the

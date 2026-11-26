@@ -18,7 +18,6 @@ pub(crate) struct Settings {
     pub roll: f64,
     pub fov: f64,
     pub max_pitch: f64,
-    pub debug: u32,
     pub network: Network,
     /// Don't keep what the map loads in the cache database.
     pub cache_disabled: bool,
@@ -39,7 +38,6 @@ impl Default for Settings {
             fov: mln_math::rad2deg(DEFAULT_FOV),
             // Past the map's default of 60°, to look across terrain.
             max_pitch: 85.0,
-            debug: 0,
             network: Network::Online,
             cache_disabled: false,
             free_bearing: false,

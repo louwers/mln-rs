@@ -5,7 +5,6 @@ use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetF
 use mln_gfx::rendering_stats::{RenderingStats, TerrainStats};
 use mln_gfx::shaders::bindings::PAINT_PARAMS_ID;
 use mln_gfx::{FrameImage, Handoff, ScissorRect};
-use mln_map_types::MapDebugOptions;
 use mln_text::GlyphCache;
 use mln_text::local_fonts::LocalGlyphs;
 use mln_util::Color;
@@ -134,7 +133,7 @@ struct Encoder {
     /// frames.
     layer_composite: LayerComposite,
     /// Whether the context's shaders and pipelines are of an earlier pixel
-    /// ratio or overdraw setting, which the next update's render layers no
+    /// ratio, which the next update's render layers no
     /// longer draw with.
     shaders_replaced: bool,
     render_state: RenderState,
@@ -240,17 +239,16 @@ impl Renderer {
         }
         // The shaders build the pixel ratio in on some backends, so a new
         // ratio takes new shaders, and new draws that use them.
-        self.replace_shaders(pixel_ratio, self.encoder.context.overdraw());
+        self.replace_shaders(pixel_ratio);
     }
 
-    /// Compiles the shaders at `pixel_ratio`, with the overdraw inspector if
-    /// `overdraw`, from the next update on. The render layers' draws go with
+    /// Compiles the shaders at `pixel_ratio` from the next update on. The render layers' draws go with
     /// that update, which makes the layers again, and the old shaders after
     /// it.
-    fn replace_shaders(&mut self, pixel_ratio: f32, overdraw: bool) {
+    fn replace_shaders(&mut self, pixel_ratio: f32) {
         let encoder = &mut self.encoder;
         encoder.pixel_ratio = pixel_ratio;
-        encoder.context.set_program_parameters(pixel_ratio, overdraw);
+        encoder.context.set_program_parameters(pixel_ratio);
         encoder.clip_masks = ClipMasks::default();
         encoder.layer_composite = LayerComposite::default();
         encoder.shaders_replaced = true;
@@ -293,11 +291,6 @@ impl Renderer {
     /// loaded yet. Custom layers that the update removed or gave a new host
     /// end on `gpu`.
     pub fn update(&mut self, gpu: &mut dyn Gpu, update_parameters: &Arc<UpdateParameters>) -> Option<UpdatedFrame> {
-        // The overdraw inspector takes shaders and color modes of its own.
-        let overdraw = update_parameters.debug_options.contains(MapDebugOptions::OVERDRAW);
-        if overdraw != self.encoder.context.overdraw() {
-            self.replace_shaders(self.encoder.pixel_ratio, overdraw);
-        }
         let orchestrator = &mut self.orchestrator;
         // Whether terrain draws depends on whether the backend has its shader.
         orchestrator.terrain().make_shader(gpu, &mut self.encoder.context, update_parameters);
@@ -611,11 +604,10 @@ impl Encoder {
         orchestrator.upload_sources(parameters.context);
 
         // - DRAW UPDATE ---------------------------------------------------
-        // The layers' draws of the frame, and those of the debug overlays.
+        // The layers' draws of the frame.
         let uploaded = Instant::now();
         orchestrator.update_layer_draws(gpu, &update_parameters, &mut parameters, &frame);
         let layers_updated = Instant::now();
-        orchestrator.update_debug_layers(gpu, &mut parameters);
 
         // What the frame's update and draw update replaced goes before the
         // uploads make what replaces it.
@@ -639,7 +631,6 @@ impl Encoder {
             parameters.context,
             image.size,
             image.targets.color,
-            parameters.debug_options.contains(MapDebugOptions::OVERDRAW),
             &draw_groups.composited,
         );
         let global_paint_params_ubo = parameters.global_paint_params(orchestrator.atlases().pattern.pixel_size());
@@ -805,11 +796,7 @@ fn draw(
 
     // The frame's pass, cleared to the backdrop, which shows where there are
     // no tiles.
-    let color = if parameters.debug_options.contains(MapDebugOptions::OVERDRAW) {
-        Color::black()
-    } else {
-        frame.background_color
-    };
+    let color = frame.background_color;
     let pass = OpenPass {
         label: "main buffer",
         color: Some(ColorAttachment {
@@ -865,13 +852,6 @@ fn draw(
         parameters.depth_range_size = depth_range_size;
         parameters.current_layer = num_draw_groups as u32 + 1;
         atmosphere.render(gpu, parameters);
-    }
-
-    // The debug overlays.
-    parameters.current_layer = 0;
-    for debug in orchestrator.debug_layers() {
-        debug.render(gpu, parameters);
-        parameters.current_layer += 1;
     }
 
     // The frame, where it drew into the layer composite's texture, copied

@@ -52,10 +52,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
-#if defined(OVERDRAW_INSPECTOR)
-    return half4(1.0);
-#endif
-
     // read and cross-fade colors from the main and parent tiles
     float4 color0 = image0.sample(image0_sampler, in.pos0.xy / in.pos0.z);
     float4 color1 = image1.sample(image1_sampler, in.pos1.xy / in.pos1.z);

@@ -152,10 +152,6 @@ highp vec4 pattern_to = u_pattern_to;
     } else {
         fragColor = mix(color1, color2, u_fade) * alpha * opacity;
     }
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &FILL_PATTERN_DECLARATIONS,
@@ -203,10 +199,6 @@ lowp float opacity = u_opacity;
     float dist = length(v_pos - gl_FragCoord.xy);
     float alpha = 1.0 - smoothstep(0.0, 1.0, dist);
     fragColor = outline_color * (alpha * opacity);
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &FILL_DECLARATIONS,
@@ -479,10 +471,6 @@ highp vec4 pattern_to = u_pattern_to;
     } else {
         fragColor = mix(color1, color2, u_fade) * opacity;
     }
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &FILL_PATTERN_DECLARATIONS,
@@ -523,10 +511,6 @@ lowp float opacity = u_opacity;
 #endif
 
     fragColor = color * opacity;
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &FILL_DECLARATIONS,

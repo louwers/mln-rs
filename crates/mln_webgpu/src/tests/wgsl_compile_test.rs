@@ -1,6 +1,5 @@
 // Compiles every built-in program's WGSL as `WebGpu::create_shader` does, in
-// both projection variants, with and without the overdraw inspector, with
-// every property it declares read per vertex and with every one read from
+// both projection variants, with every property it declares read per vertex and with every one read from
 // its uniform, and makes a pipeline of each, whose layouts are its
 // declaration's.
 
@@ -51,42 +50,6 @@ fn every_program_declares_the_properties_its_wgsl_reads_from_uniforms() {
     }
 }
 
-/// Every program that draws a layer outputs white for the overdraw
-/// inspector, which counts its draws.
-#[test]
-fn every_layer_program_shows_the_overdraw_inspector() {
-    use mln_renderer::conformance::programs::{TERRAIN_PROBE, VERTEX_TEXEL};
-    use mln_renderer::layers::symbol::programs::{COLLISION_BOX, COLLISION_CIRCLE};
-    use mln_renderer::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, GLOBE_DEPTH, SKY};
-    use mln_renderer::shaders::terrain::programs::{TERRAIN, TERRAIN_DEPTH};
-    // The terrain shows its drapes, where the draped layers count their
-    // draws.
-    let not_layers = [
-        &CLIPPING_MASK,
-        &COLLISION_BOX,
-        &COLLISION_CIRCLE,
-        &GLOBE_DEPTH,
-        &SKY,
-        &ATMOSPHERE,
-        &TERRAIN,
-        &TERRAIN_DEPTH,
-        &VERTEX_TEXEL,
-        &TERRAIN_PROBE,
-    ];
-    for (program, source) in programs() {
-        if !not_layers.contains(&program) {
-            assert!(
-                [source.prelude, source.vertex, source.fragment]
-                    .into_iter()
-                    .flatten()
-                    .any(|text| text.contains("OVERDRAW_INSPECTOR")),
-                "{}",
-                program.name
-            );
-        }
-    }
-}
-
 /// A vertex buffer for each step of `program`'s attributes, of all of
 /// those that step by it, in their declared formats.
 fn vertex_layouts(program: &Program) -> Vec<VertexBufferLayout> {
@@ -116,7 +79,7 @@ fn every_program_compiles() {
     let device = device.device();
     let index_table = IndexTable::new(device);
     let mut failed = Vec::new();
-    let parameters = [false, true].map(|overdraw| ProgramParameters::new(1.0, overdraw));
+    let parameters = ProgramParameters::new(1.0);
     let state = FixedState {
         primitive: DrawModeType::Triangles,
         cull: CullFaceMode::disabled(),
@@ -126,34 +89,31 @@ fn every_program_compiles() {
         stencil: StencilState::from(&StencilMode::disabled()),
     };
     for (program, source) in programs() {
-        for parameters in &parameters {
-            for &variant in projection_variants(program) {
-                for uniforms in [&[][..], program.properties] {
-                    let key = program.variant_key(parameters, uniforms, variant);
-                    match compile(device, index_table.layout(), &key, source) {
-                        Ok(compiled) => {
-                            let text = [Some(PRELUDE), source.prelude, source.vertex, source.fragment];
-                            assert_eq!(
-                                compiled.index_group().is_some(),
-                                text.into_iter().flatten().any(|text| text.contains("globalIndex")),
-                                "{} binds globalIndex in a group of its own",
-                                program.name
-                            );
-                            assert!(
-                                compiled.vertex_storage_buffers() <= VERTEX_STAGE_STORAGE_BUFFERS,
-                                "{}'s vertex stage reads more than VERTEX_STAGE_STORAGE_BUFFERS storage buffers",
-                                program.name
-                            );
-                            let color = Some(wgpu::TextureFormat::Rgba8Unorm);
-                            let depth = Some(wgpu::TextureFormat::Depth24PlusStencil8);
-                            if let Err(error) = compiled.render_pipeline(&vertex_layouts(program), &state, color, depth)
-                            {
-                                failed.push(format!("{} ({variant:?}, {:?}): {error}", program.name, key.defines()));
-                            }
-                        }
-                        Err(error) => {
+        for &variant in projection_variants(program) {
+            for uniforms in [&[][..], program.properties] {
+                let key = program.variant_key(&parameters, uniforms, variant);
+                match compile(device, index_table.layout(), &key, source) {
+                    Ok(compiled) => {
+                        let text = [Some(PRELUDE), source.prelude, source.vertex, source.fragment];
+                        assert_eq!(
+                            compiled.index_group().is_some(),
+                            text.into_iter().flatten().any(|text| text.contains("globalIndex")),
+                            "{} binds globalIndex in a group of its own",
+                            program.name
+                        );
+                        assert!(
+                            compiled.vertex_storage_buffers() <= VERTEX_STAGE_STORAGE_BUFFERS,
+                            "{}'s vertex stage reads more than VERTEX_STAGE_STORAGE_BUFFERS storage buffers",
+                            program.name
+                        );
+                        let color = Some(wgpu::TextureFormat::Rgba8Unorm);
+                        let depth = Some(wgpu::TextureFormat::Depth24PlusStencil8);
+                        if let Err(error) = compiled.render_pipeline(&vertex_layouts(program), &state, color, depth) {
                             failed.push(format!("{} ({variant:?}, {:?}): {error}", program.name, key.defines()));
                         }
+                    }
+                    Err(error) => {
+                        failed.push(format!("{} ({variant:?}, {:?}): {error}", program.name, key.defines()));
                     }
                 }
             }

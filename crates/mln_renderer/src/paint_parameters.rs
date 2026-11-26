@@ -8,7 +8,7 @@ use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::{CullFaceWindingType, DepthFunctionType, StencilOpType};
 use mln_gfx::{DepthMaskType, DepthMode, ScissorRect, StencilMode};
-use mln_map_types::{MapDebugOptions, ProjectionData, View, ViewportMode};
+use mln_map_types::{ProjectionData, View, ViewportMode};
 use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
 use mln_util::constants::EXTENT;
 use mln_util::identity::SimpleIdentity;
@@ -195,7 +195,6 @@ pub(crate) struct PaintParameters<'a> {
     pub(crate) static_data: &'a RenderStaticData,
 
     pub(crate) pass: RenderPass,
-    pub(crate) debug_options: MapDebugOptions,
 
     pub(crate) pixel_ratio: f32,
     pub(crate) renderable_size: Size,
@@ -282,7 +281,6 @@ impl<'a> PaintParameters<'a> {
             static_data,
             light: &frame.light,
             pass: RenderPass::Opaque,
-            debug_options: frame.debug_options,
             pixel_ratio,
             renderable_size,
             pixels_to_gl_units,
@@ -343,7 +341,6 @@ impl<'a> PaintParameters<'a> {
             light: self.light,
             static_data: self.static_data,
             pass: RenderPass::Opaque,
-            debug_options: self.debug_options,
             pixel_ratio: self.pixel_ratio,
             renderable_size: size,
             pixels_to_gl_units: [proj_matrix.x_axis.x as f32, proj_matrix.y_axis.y as f32],

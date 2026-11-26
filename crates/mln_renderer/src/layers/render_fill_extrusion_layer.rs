@@ -680,7 +680,7 @@ impl TileBuilder<'_> {
 
         let shader = context.shader_key(self.program, uniforms, self.projection_variant);
         let wall_shader = context.shader_key(self.wall_program, wall_uniforms, self.projection_variant);
-        let color = Some(context.color_mode(ColorMode::alpha_blended()));
+        let color = Some(ColorMode::alpha_blended());
 
         let stride = size_of::<FillExtrusionLayoutVertex>() as u32;
         vertex_attrs.set_shared(

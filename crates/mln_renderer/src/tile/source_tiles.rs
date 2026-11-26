@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, VerticalPerspectiveProjection};
+use mln_map_types::{MapMode, TileLodMode, VerticalPerspectiveProjection};
 use mln_style::Source;
 use mln_style::property::value::PropertyValue;
 use mln_tile_id::tile_range::TileRange;
@@ -141,7 +141,6 @@ pub(crate) struct RenderedTile<'a> {
     pub(crate) slot: usize,
     /// The entry is no longer ideal, and stays so that its symbols fade out.
     pub(crate) hold_for_fade: bool,
-    pub(crate) needs_rendering: bool,
 }
 
 pub(crate) struct SourceTiles {
@@ -293,7 +292,6 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
         let params = LayoutParams {
             mode: parameters.mode,
             pixel_ratio: parameters.pixel_ratio,
-            show_collision_boxes: parameters.debug_options.contains(MapDebugOptions::COLLISION),
             subdivision_granularity: parameters.subdivision_granularity,
             first_load: true,
         };
@@ -881,13 +879,6 @@ impl SourceTiles {
             }
         }
 
-        let show_collision_boxes = parameters.debug_options.contains(MapDebugOptions::COLLISION);
-        self.update_each(
-            ctx,
-            |slot| !slot.place.is_cached(),
-            |tile| tile.set_show_collision_boxes(show_collision_boxes),
-        );
-
         let SourceTiles { tiles, rendered, .. } = self;
         for entry in rendered.values_mut() {
             entry.needs_rendering = false;
@@ -1120,13 +1111,7 @@ impl SourceTiles {
         self.rendered.iter().filter_map(|(id, entry)| {
             let slot = self.tiles.index_of(&entry.key)?;
             let tile = &self.tiles.get_index(slot)?.1.tile;
-            Some(RenderedTile {
-                id,
-                tile,
-                slot,
-                hold_for_fade: entry.is_held(),
-                needs_rendering: entry.needs_rendering,
-            })
+            Some(RenderedTile { id, tile, slot, hold_for_fade: entry.is_held() })
         })
     }
 

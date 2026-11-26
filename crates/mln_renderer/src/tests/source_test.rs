@@ -6,9 +6,7 @@ use std::time::Duration;
 
 use geojson::GeoJson;
 use mln_map::transform::Transform;
-use mln_map_types::{
-    CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, TransformState, ViewportMode,
-};
+use mln_map_types::{CameraOptions, ConstrainMode, MapMode, TileLodMode, TransformState, ViewportMode};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, FileSourceExt, Kind, RequestOrder, Resource, Responder, Response};
@@ -59,7 +57,6 @@ fn tile_parameters(
 ) -> TileParameters<'_> {
     TileParameters {
         pixel_ratio: 1.0,
-        debug_options: MapDebugOptions::NO_DEBUG,
         view: state.view(),
         min_zoom: state.min_zoom(),
         max_zoom: state.limits().max_zoom,

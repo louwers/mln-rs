@@ -204,7 +204,7 @@ impl Scene {
     fn new(backend: &mut Window) -> Scene {
         let gpu = backend.backend.gpu();
         let program = &BACKGROUND;
-        let parameters = ProgramParameters::new(1.0, false);
+        let parameters = ProgramParameters::new(1.0);
         let key = program.variant_key(&parameters, [], ProjectionVariant::Mercator);
         let shader = gpu.create_shader(&key).expect("the shader");
         let location = program.location("pos") as u32;

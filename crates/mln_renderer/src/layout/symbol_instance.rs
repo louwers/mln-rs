@@ -302,12 +302,4 @@ impl SymbolInstance {
     pub(crate) fn has_icon(&self) -> bool {
         self.icon.is_some()
     }
-
-    /// The collision features debug drawing shows, with whether each is
-    /// the text's.
-    pub(crate) fn collision_features(&self) -> impl Iterator<Item = (&CollisionFeature, bool)> {
-        let text = self.text.iter().flat_map(|text| std::iter::once(&text.collision).chain(&text.vertical_collision));
-        let icon = self.icon.iter().flat_map(|icon| std::iter::once(&icon.collision).chain(&icon.vertical_collision));
-        text.map(|feature| (feature, true)).chain(icon.map(|feature| (feature, false)))
-    }
 }

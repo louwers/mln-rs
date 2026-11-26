@@ -37,10 +37,6 @@ void main() {
     }
 
     fragColor = mix(color1, color2, u_mix) * u_opacity;
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &GlslEsDeclarations::DEFAULT,
@@ -53,9 +49,6 @@ pub(crate) const BACKGROUND: GlslEsSource = GlslEsSource {
 ",
     fragment: r"void main() {
     fragColor = u_color * u_opacity;
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &GlslEsDeclarations::DEFAULT,

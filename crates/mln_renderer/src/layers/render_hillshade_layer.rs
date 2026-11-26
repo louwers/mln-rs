@@ -359,7 +359,7 @@ impl TypedLayer for RenderHillshadeLayer {
             context.shader_key(&programs::HILLSHADE_PREPARE, Uniforms::default(), ProjectionVariant::Mercator);
         let hillshade_shader =
             context.shader_key(&programs::HILLSHADE, Uniforms::default(), self.base.projection_variant);
-        let color_mode = context.color_mode(ColorMode::alpha_blended());
+        let color_mode = ColorMode::alpha_blended();
         let static_data_shared_vertices = &*self
             .static_data_shared_vertices
             .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::raster_vertices()));

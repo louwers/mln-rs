@@ -1,5 +1,5 @@
-//! `camera.h`: the camera's commands and queries, the map's viewport, tile and
-//! debug settings, and the camera that shows one tile.
+//! `camera.h`: the camera's commands and queries, the map's viewport and tile
+//! settings, its debug logs, and the camera that shows one tile.
 
 use core::ffi::c_void;
 use std::sync::Arc;
@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use ::mln_map::{
     AnimationOptions, AxonometricMode, BoundOptions, Camera, CameraDelta, CameraOptions, CameraUpdate,
-    CameraUpdateMode, ConstrainMode, FreeCameraOptions, GesturePhase, MapDebugOptions, NorthOrientation,
-    ProjectionMode, TileLodMode, TransitionEnd, TransitionOutcome, ViewportMode,
+    CameraUpdateMode, ConstrainMode, FreeCameraOptions, GesturePhase, NorthOrientation, ProjectionMode, TileLodMode,
+    TransitionEnd, TransitionOutcome, ViewportMode,
 };
 use mln_runtime::{Applied, CameraFitArea, CameraFitOptions, CameraFitUpdate, TileOptions, ViewportOptions};
 use mln_util::UnitBezier;
@@ -36,8 +36,6 @@ use crate::generated::types::{
     MLN_CAMERA_TRANSITION_OUTCOME_REPLACED, MLN_CAMERA_UPDATE_MODE_EASE, MLN_CAMERA_UPDATE_MODE_FLY,
     MLN_CAMERA_UPDATE_MODE_JUMP, MLN_CONSTRAIN_MODE_HEIGHT_ONLY, MLN_CONSTRAIN_MODE_NONE, MLN_CONSTRAIN_MODE_SCREEN,
     MLN_CONSTRAIN_MODE_WIDTH_AND_HEIGHT, MLN_FREE_CAMERA_OPTION_ORIENTATION, MLN_FREE_CAMERA_OPTION_POSITION,
-    MLN_MAP_DEBUG_COLLISION, MLN_MAP_DEBUG_DEPTH_BUFFER, MLN_MAP_DEBUG_OVERDRAW, MLN_MAP_DEBUG_PARSE_STATUS,
-    MLN_MAP_DEBUG_RENDERING_STATS, MLN_MAP_DEBUG_STENCIL_CLIP, MLN_MAP_DEBUG_TILE_BORDERS, MLN_MAP_DEBUG_TIMESTAMPS,
     MLN_MAP_TILE_OPTION_LOD_MIN_RADIUS, MLN_MAP_TILE_OPTION_LOD_MODE, MLN_MAP_TILE_OPTION_LOD_PITCH_THRESHOLD,
     MLN_MAP_TILE_OPTION_LOD_SCALE, MLN_MAP_TILE_OPTION_LOD_ZOOM_SHIFT, MLN_MAP_TILE_OPTION_PREFETCH_ZOOM_DELTA,
     MLN_MAP_VIEWPORT_OPTION_CENTER_CLAMPED_TO_GROUND, MLN_MAP_VIEWPORT_OPTION_CONSTRAIN_MODE,
@@ -50,8 +48,7 @@ use crate::generated::types::{
     mln_camera_fit_update, mln_camera_options, mln_camera_query_result, mln_camera_transition_end,
     mln_camera_transition_handler, mln_camera_update, mln_canonical_tile_id, mln_completion, mln_diagnostic,
     mln_edge_insets, mln_free_camera_options, mln_lat_lng, mln_lat_lng_bounds, mln_logical_size, mln_map,
-    mln_map_debug_flags, mln_map_tile_options, mln_map_viewport_options, mln_projection_mode_options, mln_screen_point,
-    mln_status,
+    mln_map_tile_options, mln_map_viewport_options, mln_projection_mode_options, mln_screen_point, mln_status,
 };
 use crate::map::{command, query};
 use crate::{buffer, geo, handles};
@@ -362,36 +359,6 @@ fn update_mode(mode: u32) -> Option<CameraUpdateMode> {
 }
 
 // MARK: - Settings
-
-const KNOWN_DEBUG_FLAGS: u32 = MLN_MAP_DEBUG_TILE_BORDERS
-    | MLN_MAP_DEBUG_PARSE_STATUS
-    | MLN_MAP_DEBUG_TIMESTAMPS
-    | MLN_MAP_DEBUG_COLLISION
-    | MLN_MAP_DEBUG_OVERDRAW
-    | MLN_MAP_DEBUG_STENCIL_CLIP
-    | MLN_MAP_DEBUG_DEPTH_BUFFER
-    | MLN_MAP_DEBUG_RENDERING_STATS;
-
-/// `mln_map_set_debug_flags()`.
-///
-/// # Safety
-///
-/// Each pointer is null or valid for the header's use of it.
-#[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn mln_map_set_debug_flags(
-    map: mln_map,
-    flags: mln_map_debug_flags,
-    completion: *const mln_completion,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    export!(out_diagnostic, {
-        if flags & !KNOWN_DEBUG_FLAGS != 0 {
-            return Err(Error::invalid_argument("debug flags contain unknown bits"));
-        }
-        // SAFETY: the caller's contract.
-        unsafe { command(map, completion, |map| map.set_debug_flags(MapDebugOptions(flags))) }
-    })
-}
 
 /// `mln_map_dump_debug_logs()`.
 ///

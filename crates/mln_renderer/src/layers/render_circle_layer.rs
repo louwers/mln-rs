@@ -332,7 +332,7 @@ impl TypedLayer for RenderCircleLayer {
                 let vertex_count = if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() };
                 let objects = DrawObjects::new(
                     context.shader_key(&programs::CIRCLE, uniforms, self.base.projection_variant),
-                    context.color_mode(ColorMode::alpha_blended()),
+                    ColorMode::alpha_blended(),
                     CullFaceMode::disabled(),
                     DrawGeometry {
                         vertices: attrs,

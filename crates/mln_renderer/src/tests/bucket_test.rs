@@ -475,10 +475,6 @@ fn symbol_bucket() {
     assert!(!bucket.has_icon_data());
     assert!(!bucket.has_sdf_icon_data());
     assert!(!bucket.has_text_data());
-    assert!(!bucket.has_icon_collision_box_data());
-    assert!(!bucket.has_text_collision_box_data());
-    assert!(!bucket.has_icon_collision_circle_data());
-    assert!(!bucket.has_text_collision_circle_data());
     assert!(!bucket.has_data());
     assert!(!bucket.needs_upload());
 

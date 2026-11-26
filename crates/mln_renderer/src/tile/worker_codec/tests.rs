@@ -91,7 +91,6 @@ fn job(style: &Arc<SourceStyle>, data: DataInput, resolved: Resolved) -> Run {
         params: LayoutParams {
             mode: MapMode::Static,
             pixel_ratio: 1.0,
-            show_collision_boxes: false,
             subdivision_granularity: SubdivisionGranularitySetting::none(),
             first_load: true,
         },

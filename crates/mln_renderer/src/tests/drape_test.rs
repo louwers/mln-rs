@@ -12,7 +12,7 @@ use mln_gfx::offscreen_target::OffscreenTarget;
 use mln_gfx::{RendererBackend as _, ScissorRect};
 use mln_map::transform::Transform;
 use mln_map_types::{
-    CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TerrainOptions, TileLodMode, View, ViewportMode,
+    CameraOptions, ConstrainMode, Elevation, MapMode, TerrainOptions, TileLodMode, View, ViewportMode,
 };
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::layers::Raster;
@@ -102,7 +102,7 @@ fn a_drape_projects_its_tile_onto_the_whole_target() {
 fn a_drape_clears_its_stencil_over_its_whole_target() {
     with_context(|_, context| {
         let view = view(0.0, 0.0);
-        let frame = Frame::new(&view, false, MapDebugOptions::NO_DEBUG);
+        let frame = Frame::new(&view, false);
         let static_data = RenderStaticData::default();
         let (mut clip_masks, mut layer_composite) = (ClipMasks::default(), LayerComposite::default());
         let size = Size::new(512, 512);
@@ -329,7 +329,6 @@ fn textured_drapes(style: &str) -> Option<BTreeSet<(OverscaledTileID, usize)>> {
             style_loaded: true,
             mode: MapMode::Continuous,
             pixel_ratio: 1.0,
-            debug_options: MapDebugOptions::NO_DEBUG,
             time_point: None,
             view: transform.view().clone(),
             min_zoom: 0.0,

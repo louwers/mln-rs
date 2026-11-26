@@ -29,11 +29,6 @@ layout(location = 0) out vec4 out_color;
         r"
 void main() {
 
-#if defined(OVERDRAW_INSPECTOR)
-    out_color = vec4(1.0);
-    return;
-#endif
-
     const HillshadeTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
     vec4 pixel = texture(sampler2D(image_texture, image_sampler), frag_position);
@@ -88,11 +83,6 @@ float getElevation(vec2 coord) {
 
 void main() {
 
-#if defined(OVERDRAW_INSPECTOR)
-    out_color = vec4(1.0);
-    return;
-#else
-
     const vec2 epsilon = 1.0 / tileProps.dimension;
     const float tileSize = tileProps.dimension.x - 2.0;
 
@@ -141,7 +131,6 @@ void main() {
         deriv.y / 8.0 + 0.5,
         1.0,
         1.0), 0.0, 1.0);
-#endif
 }
 ",
 };

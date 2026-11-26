@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
 use mln_map::transform::Transform;
-use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
+use mln_map_types::{CameraOptions, ConstrainMode, MapMode, TileLodMode, ViewportMode};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::Source;
@@ -280,7 +280,6 @@ impl Scene {
         let file_source: Arc<dyn FileSource> = Arc::<Network>::clone(&self.network);
         let parameters = TileParameters {
             pixel_ratio: 1.0,
-            debug_options: MapDebugOptions::NO_DEBUG,
             view: self.transform.view(),
             min_zoom: self.transform.state().min_zoom(),
             max_zoom: self.transform.state().limits().max_zoom,

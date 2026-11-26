@@ -115,7 +115,6 @@ impl TestRunnerImpl for Impl {
                 .with_x_skew(metadata.x_skew)
                 .with_y_skew(metadata.y_skew),
         );
-        self.map.set_debug(mln_map::MapDebugOptions(metadata.debug.0));
         // A test that unclamps the center leaves the map to the next one.
         self.map.set_center_clamped_to_ground(true);
         self.map.load_style_json(&metadata.document_json);

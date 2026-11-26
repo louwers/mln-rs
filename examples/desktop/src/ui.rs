@@ -1,8 +1,8 @@
 // The controls over the map, in egui, after the web demo's
 // (examples/web/web/index.html and page.css): the style picker, zoom, a
 // compass, the sources' attributions, the renderer's backend, which a click
-// switches where there are two, and a panel with the gestures, the debug
-// overlays and the renderer's status. `Controls::show` lays them out and
+// switches where there are two, and a panel with the gestures and the
+// renderer's status. `Controls::show` lays them out and
 // returns what the user asked of the map; the view (view.rs) carries it out.
 //
 // The WebGPU logo (assets/webgpu.svg) is W3C's, under CC BY 4.0, which the
@@ -19,7 +19,6 @@ use egui::{
     Align2, Color32, CornerRadius, CursorIcon, Frame, Id, LayerId, Margin, Order, Rect, Response, RichText, Sense,
     Shadow, Shape, Stroke, StrokeKind, Ui, Vec2, pos2, vec2,
 };
-use mln_map::MapDebugOptions;
 use mln_util::geo::ScreenCoordinate;
 
 use crate::backend::Kind;
@@ -35,7 +34,6 @@ pub(crate) enum Action {
     ResetNorth,
     /// Load the style at this index of `Shown::styles`.
     PickStyle(usize),
-    SetDebug(MapDebugOptions),
     /// Draw the map with this projection, in place of the style's own.
     SetProjection(Projection),
     /// Let drags and zooms on the globe turn the bearing with the planet.
@@ -61,7 +59,6 @@ pub(crate) struct Shown<'a> {
     pub pitch: f64,
     /// The sources' attributions, as HTML.
     pub attributions: &'a [String],
-    pub debug: MapDebugOptions,
     /// The projection the map draws with.
     pub projection: Projection,
     /// Whether drags and zooms on the globe turn the bearing.
@@ -353,15 +350,6 @@ fn style_row(ui: &mut Ui, palette: &Palette, style: &Style, show_provider: bool,
     response
 }
 
-/// The debug overlays the panel switches.
-const DEBUG_OVERLAYS: [(&str, MapDebugOptions); 5] = [
-    ("Tile borders", MapDebugOptions::TILE_BORDERS),
-    ("Parse status", MapDebugOptions::PARSE_STATUS),
-    ("Timestamps", MapDebugOptions::TIMESTAMPS),
-    ("Collision boxes", MapDebugOptions::COLLISION),
-    ("Overdraw", MapDebugOptions::OVERDRAW),
-];
-
 const GESTURES: [(&str, &str); 5] = [
     ("Pan", "Drag, or the arrow keys"),
     ("Zoom", "Scroll, pinch, double-click, or + and −"),
@@ -386,17 +374,6 @@ fn about_panel(ctx: &egui::Context, palette: &Palette, shown: &Shown<'_>, action
                 }
             });
             ui.add_space(8.0);
-            ui.label(RichText::new("Debug overlays").strong());
-            let mut debug = shown.debug;
-            for (name, option) in DEBUG_OVERLAYS {
-                let mut on = debug.contains(option);
-                if ui.checkbox(&mut on, name).changed() {
-                    debug = if on { debug | option } else { MapDebugOptions(debug.0 & !option.0) };
-                }
-            }
-            if debug != shown.debug {
-                actions.push(Action::SetDebug(debug));
-            }
             ui.horizontal_wrapped(|ui| {
                 ui.label("Projection");
                 for projection in Projection::ALL {

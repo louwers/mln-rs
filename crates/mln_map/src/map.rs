@@ -10,8 +10,7 @@ use geo_types::Geometry;
 use glam::{DMat4, DVec3};
 use mln_map_types::{
     AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraLimits, CameraOptions, CameraUpdate, Elevation,
-    MapDebugOptions, MapMode, ProjectionMode, TerrainOptions, TileLodMode, TransformState,
-    VerticalPerspectiveProjection, Viewport,
+    MapMode, ProjectionMode, TerrainOptions, TileLodMode, TransformState, VerticalPerspectiveProjection, Viewport,
 };
 use mln_renderer::{
     Registry, RendererEvent, RendererEvents, RenderingStats, UpdateParameters, UpdateReader, UpdateSlot,
@@ -38,7 +37,6 @@ use crate::feature_state::FeatureStateStore;
 use crate::map_event::{MapEvent, RenderFrameStatus};
 use crate::map_options::{MapOptions, UnusedStyleImagePolicy};
 use crate::map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
-use crate::rendering_stats_view::{RenderingStatsView, RenderingStatsViewOptions};
 use crate::style_loader::{LoadEvent, StyleLoader};
 use crate::transform::{CameraCommandId, CommandEnd, FrameClock, TerrainGround, Transform, TransformEvent};
 
@@ -111,8 +109,6 @@ pub struct Map {
     /// The terrain's moves of the camera while the still image waits.
     ground_moves: u32,
 
-    debug_options: MapDebugOptions,
-    rendering_stats_view: Option<RenderingStatsView>,
     /// The current version of the style.
     style: Arc<Style>,
     /// The faces that the map draws the style's text with: its
@@ -221,8 +217,6 @@ impl Map {
             terrain: map_options.terrain,
             elevation: None,
             ground_moves: 0,
-            debug_options: MapDebugOptions::NO_DEBUG,
-            rendering_stats_view: None,
             style,
             font_faces: None,
             loader,
@@ -617,11 +611,6 @@ impl Map {
             self.changed();
         }
 
-        if let Some(mut view) = self.rendering_stats_view.take() {
-            view.update(self, &stats);
-            self.rendering_stats_view = Some(view);
-        }
-
         if self.mode == MapMode::Continuous {
             self.emit(MapEvent::RenderFrameFinished(RenderFrameStatus {
                 mode,
@@ -699,7 +688,6 @@ impl Map {
             style_loaded: self.style_loaded(),
             mode: self.mode,
             pixel_ratio: self.pixel_ratio,
-            debug_options: self.debug_options,
             time_point,
             view: self.transform.state().view().clone(),
             min_zoom: self.transform.state().min_zoom(),
@@ -1618,32 +1606,6 @@ impl Map {
         self.elevation.clone().filter(|_| self.terrain_applies())
     }
 
-    // MARK: - Debug
-
-    /// Sets the debug overlays. [`MapDebugOptions::RENDERING_STATS`] adds
-    /// a symbol layer (and its source) to the style, which stays there
-    /// while the flag does, even when the style is replaced; its text needs
-    /// the style's glyphs.
-    pub fn set_debug(&mut self, debug_options: MapDebugOptions) {
-        self.debug_options = debug_options;
-        self.show_rendering_stats(debug_options.contains(MapDebugOptions::RENDERING_STATS));
-        self.on_update();
-    }
-
-    /// Adds or removes the rendering stats view's layer and source.
-    fn show_rendering_stats(&mut self, value: bool) {
-        if value {
-            if self.rendering_stats_view.is_some() {
-                return;
-            }
-            let view = RenderingStatsView::new(RenderingStatsViewOptions::default());
-            view.create(self);
-            self.rendering_stats_view = Some(view);
-        } else if let Some(view) = self.rendering_stats_view.take() {
-            view.destroy(self);
-        }
-    }
-
     /// Grows with each change to the map's state: each call that changes it,
     /// and each change that loading, rendering and animations make.
     #[must_use]
@@ -1677,7 +1639,6 @@ impl Map {
         MapSnapshot {
             generation: self.generation,
             update_generation: self.updates.generation(),
-            debug: self.debug_options,
             fully_loaded: self.is_fully_loaded(),
             gesture_in_progress: transform.is_gesture_in_progress(),
             transition_in_progress: transform.in_transition(),

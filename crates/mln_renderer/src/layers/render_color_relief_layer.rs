@@ -536,7 +536,7 @@ impl TypedLayer for RenderColorReliefLayer {
                     }
                     let objects = DrawObjects::new(
                         color_relief_shader.clone(),
-                        context.color_mode(ColorMode::alpha_blended()),
+                        ColorMode::alpha_blended(),
                         CullFaceMode::disabled(),
                         geometry,
                         draw_textures,

@@ -7,18 +7,16 @@
 // the frame's update, before the layers read them.
 
 use glam::{DMat4, Vec2};
-use mln_map_types::{MapDebugOptions, ProjectionData, View};
+use mln_map_types::{ProjectionData, View};
 use mln_style::types::TranslateAnchorType;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::identity::SimpleIdentity;
 
-use crate::buckets::debug_bucket::DebugBucket;
 use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::buckets::raster_bucket::RasterBucket;
 use crate::layer_type::LayerType;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render_pass::RenderPass;
-use crate::render_source::RenderTileParameters;
 use crate::tile::contents::Contents;
 use crate::tile::tile::Tile;
 
@@ -27,8 +25,6 @@ pub(crate) struct RenderTile {
     /// The projection contract for this tile; `matrix` is its main matrix.
     pub(crate) projection: ProjectionData,
     pub(crate) matrix: DMat4,
-    /// The tile's debug overlay, when the map's debug options show one.
-    pub(crate) debug_bucket: Option<Box<DebugBucket>>,
 
     /// `tile.id`.
     tile_id: OverscaledTileID,
@@ -36,7 +32,6 @@ pub(crate) struct RenderTile {
     /// Where the tile is among its source's, which finds its contents
     /// first; `None` for a tile that isn't among a source's.
     slot: Option<usize>,
-    needs_rendering: bool,
 }
 
 impl RenderTile {
@@ -57,8 +52,6 @@ impl RenderTile {
             tile_id,
             tile_hold_for_fade: hold_for_fade,
             slot: None,
-            needs_rendering: false,
-            debug_bucket: None,
         }
     }
 
@@ -93,44 +86,6 @@ impl RenderTile {
     #[must_use]
     pub(crate) fn hold_for_fade(&self) -> bool {
         self.tile_hold_for_fade
-    }
-
-    #[must_use]
-    pub(crate) fn needs_rendering(&self) -> bool {
-        self.needs_rendering
-    }
-
-    /// Updates the render tile for the frame; `tile` is the tile it was
-    /// created for.
-    pub(crate) fn update(&mut self, tile: &Tile, needs_rendering: bool, parameters: &RenderTileParameters<'_>) {
-        self.needs_rendering = needs_rendering;
-        let (modified, expires) = tile.load.freshness();
-
-        let needs_debug_bucket = match &self.debug_bucket {
-            None => true,
-            Some(debug_bucket) => {
-                debug_bucket.renderable != tile.is_renderable()
-                    || debug_bucket.complete != tile.is_complete()
-                    || debug_bucket.modified != modified
-                    || debug_bucket.expires != expires
-                    || debug_bucket.debug_mode != parameters.debug_options
-            }
-        };
-        if parameters.debug_options != MapDebugOptions::NO_DEBUG && needs_debug_bucket {
-            self.debug_bucket = Some(Box::new(DebugBucket::new(
-                &tile.id,
-                tile.is_renderable(),
-                tile.is_complete(),
-                modified,
-                expires,
-                parameters.debug_options,
-                &parameters.source_name,
-            )));
-        } else if parameters.debug_options == MapDebugOptions::NO_DEBUG {
-            self.debug_bucket = None;
-        }
-
-        self.set_projection(parameters.transform);
     }
 
     /// Sets the tile's projection and its standard matrix for `transform`.

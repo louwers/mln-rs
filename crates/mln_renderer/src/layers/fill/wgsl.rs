@@ -142,10 +142,6 @@ struct FragmentInput {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
-#endif
-
     let tileProps = tilePropsVector[globalIndex.value];
 
     let pattern_from =
@@ -269,10 +265,6 @@ struct FragmentInput {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
-#endif
-
     var color: vec4<f32>;
 #ifdef HAS_UNIFORM_u_outline_color
     color = props.outline_color;
@@ -415,10 +407,6 @@ struct FragmentInput {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
-#endif
-
     let tileProps = tilePropsVector[globalIndex.value];
 
     let pattern_from =
@@ -532,10 +520,6 @@ struct FragmentInput {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
-#endif
-
     var color: vec4<f32>;
 #ifdef HAS_UNIFORM_u_color
     color = props.color;

@@ -62,10 +62,6 @@ fn getColorStop(stop: i32, color_ramp_size: i32) -> vec4<f32> {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
-#endif
-
     let tileProps = tilePropsVector[globalIndex.value];
     let el = getElevation(in.frag_position, tileProps.unpack, tileProps.unpack_scale);
 

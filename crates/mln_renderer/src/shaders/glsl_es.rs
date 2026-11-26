@@ -196,12 +196,8 @@ void main() {
     ivec2 texel = ivec2(gl_FragCoord.xy);
     vec4 color = texelFetch(u_image, texel, 0);
 
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = color;
-#else
     vec4 src = color * u_opacity;
     fragColor = u_blend == 0 ? src : composite(src, texelFetch(u_backdrop, texel, 0), u_blend);
-#endif
 }
 ",
     declarations: &GlslEsDeclarations::DEFAULT,

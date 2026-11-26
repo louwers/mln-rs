@@ -12,7 +12,7 @@
 
 use std::sync::Arc;
 
-use mln_map::{MapDebugOptions, MapMode, TileLodMode, TransformState};
+use mln_map::{MapMode, TileLodMode, TransformState};
 use mln_renderer::UpdateParameters;
 use mln_renderer::bench::{LaidOut, SymbolIndex, SymbolView};
 use mln_style::Style;
@@ -148,7 +148,6 @@ fn update(style: &Style, state: &TransformState) -> UpdateParameters {
         style_loaded: true,
         mode: MapMode::Continuous,
         pixel_ratio: 1.0,
-        debug_options: MapDebugOptions::NO_DEBUG,
         time_point: Some(Instant::now()),
         view: state.view().clone(),
         min_zoom: state.min_zoom(),

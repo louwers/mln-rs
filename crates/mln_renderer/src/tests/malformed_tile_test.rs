@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mln_map::transform::Transform;
-use mln_map_types::{CameraOptions, ConstrainMode, MapDebugOptions, MapMode, TileLodMode, ViewportMode};
+use mln_map_types::{CameraOptions, ConstrainMode, MapMode, TileLodMode, ViewportMode};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Response};
 use mln_style::conversion::{Convertible, Error as ConversionError};
@@ -90,7 +90,6 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
         true,
         &TileParameters {
             pixel_ratio: 1.0,
-            debug_options: MapDebugOptions::NO_DEBUG,
             view: transform.view(),
             min_zoom: transform.state().min_zoom(),
             max_zoom: transform.state().limits().max_zoom,

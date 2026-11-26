@@ -21,8 +21,8 @@ static void the_wake_fires_once_per_empty_to_nonempty_transition(void) {
     mln_test_queue_completion(queue.handle, (void*)1);
   const mln_completion second =
     mln_test_queue_completion(queue.handle, (void*)2);
-  MLN_TEST_OK(mln_map_set_debug_flags(map, 0, &first, NULL));
-  MLN_TEST_OK(mln_map_set_debug_flags(map, 0, &second, NULL));
+  MLN_TEST_OK(mln_map_cancel_camera_transitions(map, &first, NULL));
+  MLN_TEST_OK(mln_map_cancel_camera_transitions(map, &second, NULL));
   MLN_TEST_OK(mln_test_map_fence(map));
   TEST_ASSERT_EQUAL_INT(1, atomic_load(&queue.wakes));
 
@@ -35,7 +35,7 @@ static void the_wake_fires_once_per_empty_to_nonempty_transition(void) {
   // The dispatch re-armed the wake.
   const mln_completion third =
     mln_test_queue_completion(queue.handle, (void*)3);
-  MLN_TEST_OK(mln_map_set_debug_flags(map, 0, &third, NULL));
+  MLN_TEST_OK(mln_map_cancel_camera_transitions(map, &third, NULL));
   MLN_TEST_OK(mln_test_map_fence(map));
   TEST_ASSERT_EQUAL_INT(2, atomic_load(&queue.wakes));
 
@@ -191,7 +191,7 @@ static void null_options_make_a_queue_without_a_wake(void) {
   mln_map map = mln_test_create_map(runtime);
 
   const mln_completion completion = mln_test_queue_completion(queue, (void*)1);
-  MLN_TEST_OK(mln_map_set_debug_flags(map, 0, &completion, NULL));
+  MLN_TEST_OK(mln_map_cancel_camera_transitions(map, &completion, NULL));
   MLN_TEST_OK(mln_test_map_fence(map));
   TEST_ASSERT_EQUAL_size_t(0, mln_test_calls.count);
   MLN_TEST_OK(mln_delivery_queue_dispatch(queue, NULL));

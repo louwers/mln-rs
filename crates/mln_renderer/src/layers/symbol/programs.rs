@@ -1,14 +1,11 @@
-//! The symbols' programs, and their collision boxes' and circles'.
+//! The symbols' programs.
 
-use mln_gfx::gfx_types::AttributeDataType::{Float, Float2, Float4, Short2, Short4, UShort2, UShort4};
+use mln_gfx::gfx_types::AttributeDataType::{Float, Float4, Short4, UShort2, UShort4};
 use mln_gfx::shaders::program::{Attribute, Program, ProgramBuffer, ProgramTexture, Projection, Property, Stages};
 use mln_gfx::shaders::source::Sources;
 
-use super::ubo::{
-    CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
-};
+use super::ubo::{SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
-use crate::shaders::programs::POS;
 use crate::terrain::programs::GROUND_DEPTH;
 
 const SYMBOL_BUFFERS: &[ProgramBuffer] = &[
@@ -135,58 +132,4 @@ pub static SYMBOL_TEXT_AND_ICON: Program = Program {
         .msl(&msl::SYMBOL_TEXT_AND_ICON)
         .glsl(&glsl::SYMBOL_TEXT_AND_ICON)
         .glsl_es(&glsl_es::SYMBOL_TEXT_AND_ICON),
-};
-
-/// The collision boxes' and circles' buffers, each of a draw's own. The
-/// tile properties have the id of a block that both stages read, though
-/// only the circles' fragment stage reads them.
-const COLLISION_BUFFERS: &[ProgramBuffer] = &[
-    ProgramBuffer::draw_uniform::<CollisionDrawableUBO>("drawable", Stages::Vertex),
-    ProgramBuffer::draw_uniform::<CollisionTilePropsUBO>("tile_props", Stages::Both),
-];
-
-const COLLISION_ANCHOR_POS: Attribute = Attribute::new("anchor_pos", Short2);
-
-const COLLISION_EXTRUDE: Attribute = Attribute::new("extrude", Short2);
-
-const COLLISION_PLACED: Attribute = Attribute::new("placed", UShort2);
-
-pub static COLLISION_BOX: Program = Program {
-    name: "CollisionBoxShader",
-    buffers: COLLISION_BUFFERS,
-    paint_params: Some(Stages::Vertex),
-    projection: Projection::Own,
-    attributes: &[
-        POS,
-        COLLISION_ANCHOR_POS,
-        COLLISION_EXTRUDE,
-        COLLISION_PLACED,
-        Attribute::new("shift", Float2),
-        // The symbol's `symbol-height-offset` (`CollisionBoxLayoutVertex::a4`).
-        Attribute::new("height_offset", Float),
-    ],
-    instance_attributes: &[],
-    textures: &[],
-    properties: &[],
-    sources: Sources::NONE
-        .wgsl(&wgsl::COLLISION_BOX)
-        .msl(&msl::COLLISION_BOX)
-        .glsl(&glsl::COLLISION_BOX)
-        .glsl_es(&glsl_es::COLLISION_BOX),
-};
-
-pub static COLLISION_CIRCLE: Program = Program {
-    name: "CollisionCircleShader",
-    buffers: COLLISION_BUFFERS,
-    paint_params: Some(Stages::Vertex),
-    projection: Projection::Own,
-    attributes: &[POS, COLLISION_ANCHOR_POS, COLLISION_EXTRUDE, COLLISION_PLACED],
-    instance_attributes: &[],
-    textures: &[],
-    properties: &[],
-    sources: Sources::NONE
-        .wgsl(&wgsl::COLLISION_CIRCLE)
-        .msl(&msl::COLLISION_CIRCLE)
-        .glsl(&glsl::COLLISION_CIRCLE)
-        .glsl_es(&glsl_es::COLLISION_CIRCLE),
 };

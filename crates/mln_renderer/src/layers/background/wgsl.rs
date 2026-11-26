@@ -54,10 +54,6 @@ struct FragmentInput {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
-#endif
-
     let texsize = paintParams.pattern_atlas_texsize;
 
     // A crossfade at 0 or 1 shows one pattern, so skip the other.
@@ -104,10 +100,6 @@ fn main(in: VertexInput) -> VertexOutput {
         r"
 @fragment
 fn main() -> @location(0) vec4<f32> {
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
-#endif
-
     return props.color * props.opacity;
 }
 ",

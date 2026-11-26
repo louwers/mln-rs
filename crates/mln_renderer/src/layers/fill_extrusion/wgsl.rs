@@ -35,10 +35,6 @@ struct FragmentInput {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
-#endif
-
     let tileProps = tilePropsVector[globalIndex.value];
 
 #ifdef HAS_UNIFORM_u_pattern_from
@@ -318,11 +314,6 @@ fn main(in: VertexInput) -> VertexOutput {
         r#"
     out.position = projectTileFor3D(vec2<f32>(in.pos), heightZ, projectionVector[globalIndex.value]);
 
-#ifdef OVERDRAW_INSPECTOR
-    out.color = vec4<f32>(1.0, 1.0, 1.0, 1.0);
-    return out;
-#endif
-
 #ifndef HAS_UNIFORM_u_color
     let color = unpack_mix_color(in.color, drawable.color_t);
 #else
@@ -354,10 +345,6 @@ fn main(in: VertexInput) -> VertexOutput {
         stand!(),
         wall!(),
         r#"
-#ifdef OVERDRAW_INSPECTOR
-    out.color = vec4<f32>(1.0, 1.0, 1.0, 1.0);
-    return out;
-#endif
 
 #ifndef HAS_UNIFORM_u_color
     let color = unpack_mix_color(in.color, drawable.color_t);
@@ -450,10 +437,6 @@ fn main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
         stand!(),
         wall!(),
         r#"
-#ifdef OVERDRAW_INSPECTOR
-    out.color = vec4<f32>(1.0, 1.0, 1.0, 1.0);
-    return out;
-#endif
 
 #ifndef HAS_UNIFORM_u_color
     let color = unpack_mix_color(in.color, drawable.color_t);

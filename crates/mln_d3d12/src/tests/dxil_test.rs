@@ -18,8 +18,8 @@ fn compiler() -> ShaderCompiler {
 }
 
 // Every program compiles to DXIL, with every property per vertex, every
-// property as a uniform, each property alone as a uniform, and with the
-// overdraw inspector, in both projections.
+// property as a uniform, and each property alone as a uniform, in both
+// projections.
 #[test]
 fn every_program_compiles_to_dxil() {
     let compiler = compiler();

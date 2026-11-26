@@ -91,10 +91,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
-#if defined(OVERDRAW_INSPECTOR)
-    return half4(1.0);
-#endif
-
     // Kernel density estimation with a Gaussian kernel of size 5x5
     const float d = -0.5 * 3.0 * 3.0 * dot(in.extrude, in.extrude);
 #if defined(HAS_UNIFORM_u_weight)
@@ -132,10 +128,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
-
-#if defined(OVERDRAW_INSPECTOR)
-    return half4(1.0);
-#endif
 
     float t = image.sample(image_sampler, in.pos).r;
     float4 color = color_ramp.sample(color_ramp_sampler, float2(t, 0.5));

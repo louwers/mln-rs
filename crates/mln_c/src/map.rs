@@ -316,7 +316,6 @@ fn from_snapshot(snapshot: &MapSnapshot, event_mask: mln_runtime_event_flags) ->
     let [qx, qy, qz, qw] = snapshot.free_camera.orientation.to_array();
     mln_map_snapshot {
         size: size_of::<mln_map_snapshot>() as u32,
-        debug_flags: snapshot.debug.0,
         generation: snapshot.generation,
         fully_loaded: snapshot.fully_loaded,
         gesture_in_progress: snapshot.gesture_in_progress,

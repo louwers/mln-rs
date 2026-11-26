@@ -96,11 +96,6 @@ layout(location = 0) out vec4 out_color;
 
 void main() {
 
-#if defined(OVERDRAW_INSPECTOR)
-    out_color = vec4(1.0);
-    return;
-#endif
-
     // Kernel density estimation with a Gaussian kernel of size 5x5
     const float d = -0.5 * 3.0 * 3.0 * dot(frag_extrude, frag_extrude);
 #if defined(HAS_UNIFORM_u_weight)
@@ -133,11 +128,6 @@ layout(location = 0) in vec2 frag_position;
 layout(location = 0) out vec4 out_color;
 
 void main() {
-
-#if defined(OVERDRAW_INSPECTOR)
-    out_color = vec4(1.0);
-    return;
-#endif
 
     const float t = texture(sampler2D(image_texture, image_sampler), frag_position).r;
     const vec4 color = texture(sampler2D(color_ramp_texture, color_ramp_sampler), vec2(t, 0.5));

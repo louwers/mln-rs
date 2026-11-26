@@ -1,7 +1,6 @@
 //! The bucket types: the vertex and index data a tile's layers draw.
 
 pub(crate) mod circle_bucket;
-pub(crate) mod debug_bucket; // layers: debug
 pub(crate) mod fill_bucket;
 pub(crate) mod fill_extrusion_bucket;
 pub(crate) mod heatmap_bucket; // dem-heatmap

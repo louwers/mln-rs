@@ -102,21 +102,6 @@ typedef enum MLN_BINDING(
 /** A set of mln_projection_mode_option_field bits. */
 typedef uint32_t mln_projection_mode_option_fields;
 
-/** A debug overlay that the map draws. */
-typedef enum MLN_BINDING("kind=bitmask") mln_map_debug_flag : uint32_t {
-  MLN_MAP_DEBUG_TILE_BORDERS = 1U << 1U,
-  MLN_MAP_DEBUG_PARSE_STATUS = 1U << 2U,
-  MLN_MAP_DEBUG_TIMESTAMPS = 1U << 3U,
-  MLN_MAP_DEBUG_COLLISION = 1U << 4U,
-  MLN_MAP_DEBUG_OVERDRAW = 1U << 5U,
-  MLN_MAP_DEBUG_STENCIL_CLIP = 1U << 6U,
-  MLN_MAP_DEBUG_DEPTH_BUFFER = 1U << 7U,
-  MLN_MAP_DEBUG_RENDERING_STATS = 1U << 8U,
-} mln_map_debug_flag;
-
-/** A set of mln_map_debug_flag bits. */
-typedef uint32_t mln_map_debug_flags;
-
 /** The screen direction that north points to when the bearing is 0. */
 typedef enum mln_north_orientation : uint32_t {
   MLN_NORTH_ORIENTATION_UP = 0,
@@ -1248,7 +1233,6 @@ typedef struct mln_map_tile_settings {
 /** A map's state, as mln_map_get_snapshot() reads it. */
 typedef struct mln_map_snapshot {
   uint32_t size;
-  mln_map_debug_flags debug_flags;
   /** Grows with each change to the map's state. */
   uint64_t generation;
   /** Whether the style and every resource that the view needs have loaded. */

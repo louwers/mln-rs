@@ -39,10 +39,6 @@ float getElevation(float2 coord, texture2d<float, access::sample> image, sampler
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
-#if defined(OVERDRAW_INSPECTOR)
-    return half4(1.0);
-#endif
-
     float2 epsilon = 1.0 / tileProps.dimension;
     float tileSize = tileProps.dimension.x - 2.0;
 
@@ -126,10 +122,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
-#if defined(OVERDRAW_INSPECTOR)
-    return half4(1.0);
-#endif
-
     device const HillshadeTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
     float4 pixel = image.sample(image_sampler, in.pos);

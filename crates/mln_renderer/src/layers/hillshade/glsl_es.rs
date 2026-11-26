@@ -85,9 +85,6 @@ void main() {
         deriv.y / 8.0 + 0.5,
         1.0,
         1.0), 0.0, 1.0);
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &HILLSHADE_PREPARE_DECLARATIONS,
@@ -123,9 +120,6 @@ void main() {
         hillshade(deriv);
     }
 
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 "#
     ),

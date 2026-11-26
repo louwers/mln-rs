@@ -21,8 +21,8 @@ use crate::file_source::ProxyFileSource;
 use crate::filesystem;
 use crate::log::{self, Event};
 use crate::metadata::{
-    FileSizeProbe, GfxProbe, GfxProbeMemory, MapDebugOptions, MapMode, MemoryProbe, NetworkProbe, TerrainSkirtLength,
-    TestMetadata, TestMetrics, TestPaths, TestStatistics,
+    FileSizeProbe, GfxProbe, GfxProbeMemory, MapMode, MemoryProbe, NetworkProbe, TerrainSkirtLength, TestMetadata,
+    TestMetrics, TestPaths, TestStatistics,
 };
 use crate::runner::{CameraOptions, MapError, TestContext, TestOperation, TestOperations};
 
@@ -386,18 +386,6 @@ pub(crate) fn parse_test_metadata(paths: &TestPaths) -> TestMetadata {
     }
 
     // Test operations handled in runner.cpp.
-
-    if has("debug") {
-        metadata.debug |= MapDebugOptions::TILE_BORDERS;
-    }
-
-    if has("collisionDebug") {
-        metadata.debug |= MapDebugOptions::COLLISION;
-    }
-
-    if has("showOverdrawInspector") {
-        metadata.debug |= MapDebugOptions::OVERDRAW;
-    }
 
     if has("crossSourceCollisions") {
         metadata.cross_source_collisions = get_bool(member(test_value, "crossSourceCollisions"));

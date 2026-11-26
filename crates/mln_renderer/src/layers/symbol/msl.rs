@@ -1,164 +1,8 @@
-//! The MSL of the symbols' programs and their collision boxes' and circles'.
+//! The MSL of the symbols' programs.
 
 use mln_gfx::shaders::source::MslSource;
 
 use crate::terrain::msl::ground_visibility;
-
-pub(crate) const COLLISION_BOX: MslSource = MslSource {
-    vertex_main_function: r"vertexMain",
-    fragment_main_function: r"fragmentMain",
-    source: r"
-
-struct FragmentStage {
-    float4 position [[position, invariant]];
-    float placed;
-    float notUsed;
-};
-
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
-
-#if defined(PROJECTION_GLOBE)
-    float4 projectedPoint = projectTileWithElevation(float2(vertx.anchor_pos), vertx.height_offset, projection);
-#else
-    float4 projectedPoint = drawable.matrix * float4(float2(vertx.anchor_pos), vertx.height_offset, 1);
-#endif
-    float camera_to_anchor_distance = projectedPoint.w;
-    float collision_perspective_ratio = clamp(
-        0.5 + 0.5 * (paintParams.camera_to_center_distance / camera_to_anchor_distance),
-        0.0, // Prevents oversized near-field boxes in pitched/overzoomed tiles
-        4.0);
-
-#if defined(PROJECTION_GLOBE)
-    float4 position = projectTileWithElevation(float2(vertx.pos), vertx.height_offset, projection);
-    // Boxes just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
-    if (position.z / position.w < 1.1) {
-        position.z = 0.0;
-    }
-#else
-    float4 position = drawable.matrix * float4(float2(vertx.pos), vertx.height_offset, 1.0);
-#endif
-    position.xy += (float2(vertx.extrude) + vertx.shift) * tile_props.extrude_scale * position.w * collision_perspective_ratio;
-
-    float placed = float(vertx.placed.x);
-    float notUsed = float(vertx.placed.y);
-
-    return {
-        .position       = position,
-        .placed         = placed,
-        .notUsed        = notUsed,
-    };
-}
-
-half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
-
-    float alpha = 0.5;
-
-    // Red = collision, hide label
-    float4 color = float4(1.0, 0.0, 0.0, 1.0) * alpha;
-
-    // Blue = no collision, label is showing
-    if (in.placed > 0.5) {
-        color = float4(0.0, 0.0, 1.0, 0.5) * alpha;
-    }
-
-    if (in.notUsed > 0.5) {
-        // This box not used, fade it out
-        color *= 0.1;
-    }
-
-    return half4(color);
-}
-",
-    fast_math: true,
-};
-
-pub(crate) const COLLISION_CIRCLE: MslSource = MslSource {
-    vertex_main_function: r"vertexMain",
-    fragment_main_function: r"fragmentMain",
-    source: r"
-
-struct FragmentStage {
-    float4 position [[position, invariant]];
-    float placed;
-    float notUsed;
-    float radius;
-    float2 extrude;
-    float2 extrude_scale;
-};
-
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_VERTEX_BINDINGS) {
-
-#if defined(PROJECTION_GLOBE)
-    float4 projectedPoint = projectTile(float2(vertx.anchor_pos), projection);
-#else
-    float4 projectedPoint = drawable.matrix * float4(float2(vertx.anchor_pos), 0, 1);
-#endif
-    float camera_to_anchor_distance = projectedPoint.w;
-    float collision_perspective_ratio = clamp(
-        0.5 + 0.5 * (paintParams.camera_to_center_distance / camera_to_anchor_distance),
-        0.0, // Prevents oversized near-field circles in pitched/overzoomed tiles
-        4.0);
-
-#if defined(PROJECTION_GLOBE)
-    float4 position = projectTile(float2(vertx.pos), projection);
-    // Circles just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
-    if (position.z / position.w < 1.1) {
-        position.z = 0.0;
-    }
-#else
-    float4 position = drawable.matrix * float4(float2(vertx.pos), 0.0, 1.0);
-#endif
-
-    float padding_factor = 1.2; // Pad the vertices slightly to make room for anti-alias blur
-    position.xy += float2(vertx.extrude) * tile_props.extrude_scale * padding_factor * position.w * collision_perspective_ratio;
-
-    float placed = float(vertx.placed.x);
-    float notUsed = float(vertx.placed.y);
-    float radius = abs(float(vertx.extrude.y)); // We don't pitch the circles, so both units of the extrusion vector are equal in magnitude to the radius
-
-    float2 extrude = float2(vertx.extrude) * padding_factor;
-    float2 extrude_scale = tile_props.extrude_scale * paintParams.camera_to_center_distance * collision_perspective_ratio;
-
-    return {
-        .position       = position,
-        .placed         = placed,
-        .notUsed        = notUsed,
-        .radius         = radius,
-        .extrude        = extrude,
-        .extrude_scale  = extrude_scale,
-    };
-}
-
-half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
-
-    float alpha = 0.5;
-
-    // Red = collision, hide label
-    float4 color = float4(1.0, 0.0, 0.0, 1.0) * alpha;
-
-    // Blue = no collision, label is showing
-    if (in.placed > 0.5) {
-        color = float4(0.0, 0.0, 1.0, 0.5) * alpha;
-    }
-
-    if (in.notUsed > 0.5) {
-        // This box not used, fade it out
-        color *= 0.2;
-    }
-
-    float extrude_scale_length = length(in.extrude_scale);
-    float extrude_length = length(in.extrude) * extrude_scale_length;
-    float stroke_width = 15.0 * extrude_scale_length / tile_props.overscale_factor;
-    float radius = in.radius * extrude_scale_length;
-
-    float distance_to_edge = abs(extrude_length - radius);
-    float opacity_t = smoothstep(-stroke_width, 0.0, -distance_to_edge);
-
-    return half4(opacity_t * color);
-}
-",
-    fast_math: true,
-};
 
 /// `unpack_opacity`, a symbol's fade opacity from its packed attribute.
 macro_rules! unpack_opacity {
@@ -335,10 +179,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
-#if defined(OVERDRAW_INSPECTOR)
-    return half4(1.0);
-#endif
-
 #if defined(HAS_UNIFORM_u_opacity)
     device const SymbolTilePropsUBO& tileProps = tilePropsVector[uboIndex];
     const float opacity = (tileProps.is_text ? props.text_opacity : props.icon_opacity) * in.fade_opacity;
@@ -559,10 +399,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
-#if defined(OVERDRAW_INSPECTOR)
-    return half4(1.0);
-#endif
-
     device const SymbolTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_fill_color)
@@ -631,7 +467,6 @@ struct FragmentStage {
     // atlas_pos adds back.
     float2 tex;
     float2 tex_origin [[flat]];
-
 
     // A glyph's edge's gamma, scaled by clip w, and the inner edge of its
     // halo.
@@ -817,10 +652,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_
 }
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
-#if defined(OVERDRAW_INSPECTOR)
-    return half4(1.0);
-#endif
-
     device const SymbolTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_fill_color)

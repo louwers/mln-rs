@@ -1288,51 +1288,6 @@ fn add_quad(buffer: &mut Buffer, run: &RunInfo, quad: &SymbolQuad) -> usize {
     triangles.add_keyed(buffer.attribute_data.get_mut(), first, run.sort_key, [[0, 1, 2], [1, 2, 3]])
 }
 
-/// Adds the debug geometry of the collision boxes and circles of `state`'s
-/// symbols.
-fn add_collision_geometry(state: &mut SymbolBucketState) {
-    let SymbolBucketState {
-        symbol_instances,
-        symbol_instance_pools,
-        text_collision_box,
-        icon_collision_box,
-        text_collision_circle,
-        icon_collision_circle,
-        ..
-    } = state;
-    for symbol in symbol_instances.iter() {
-        for (feature, is_text) in symbol.collision_features() {
-            let buffer = match (feature.along_line, is_text) {
-                (true, true) => &mut *text_collision_circle,
-                (true, false) => &mut *icon_collision_circle,
-                (false, true) => &mut *text_collision_box,
-                (false, false) => &mut *icon_collision_box,
-            }
-            .get_or_insert_with(Default::default);
-            for b in symbol_instance_pools.boxes(feature) {
-                let first = buffer.vertices.len();
-                buffer.vertices.extend([(b.x1, b.y1), (b.x2, b.y1), (b.x2, b.y2), (b.x1, b.y2)].map(|corner| {
-                    SymbolBucket::collision_layout_vertex(
-                        b.anchor,
-                        symbol.anchor.point,
-                        Vec2::from(corner),
-                        symbol.height_offset,
-                    )
-                }));
-                // Placement writes these before the box draws.
-                buffer.dynamic_vertices.extend([SymbolBucket::collision_dynamic_vertex(false, false, Vec2::ZERO); 4]);
-                // A circle along a line draws filled, and a box as its outline.
-                let mut primitives = Indexed { indexes: &mut buffer.indices, segments: &mut buffer.segments };
-                if feature.along_line {
-                    primitives.add(&mut buffer.vertices, first, [[0, 1, 2], [0, 2, 3]]);
-                } else {
-                    primitives.add(&mut buffer.vertices, first, [[0, 1], [1, 2], [2, 3], [3, 0]]);
-                }
-            }
-        }
-    }
-}
-
 impl Layout<Symbol> for SymbolLayout {
     fn has_dependencies(&self) -> bool {
         !self.features.is_empty()
@@ -1355,7 +1310,7 @@ impl Layout<Symbol> for SymbolLayout {
                 return Ok(None);
             }
         }
-        Ok(Some(self.build_bucket(build.first_load, build.show_collision_boxes, &build.canonical)))
+        Ok(Some(self.build_bucket(build.first_load, &build.canonical)))
     }
 
     fn layers(&self) -> &VecMap<String, Arc<EvaluatedLayer<Symbol>>> {
@@ -1654,12 +1609,7 @@ impl SymbolLayout {
         self.compare_text.clear();
     }
 
-    fn build_bucket(
-        &mut self,
-        first_load: bool,
-        show_collision_boxes: bool,
-        canonical: &CanonicalTileID,
-    ) -> SymbolBucket {
+    fn build_bucket(&mut self, first_load: bool, canonical: &CanonicalTileID) -> SymbolBucket {
         let style = SymbolBucketStyle {
             layout: Arc::clone(&self.layout),
             paint_properties: &self.layer_paint_properties,
@@ -1698,9 +1648,6 @@ impl SymbolLayout {
             .collect();
         bucket.max_height_offset = max_height_offset(&symbols);
         state.symbol_instances = symbols;
-        if show_collision_boxes {
-            add_collision_geometry(&mut state);
-        }
         state.just_reloaded = !first_load;
         bucket.state = state;
         bucket.paint_properties = paint_properties;

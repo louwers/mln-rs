@@ -211,7 +211,7 @@ impl Placement {
             if symbol.cross_tile_id.is_some_and(|id| seen_cross_tile_ids.contains(&id)) {
                 continue;
             }
-            let placement = self.place_symbol(intersection.symbol, symbol, ctx);
+            let placement = self.place_symbol(symbol, ctx);
             if !self.should_retry_placement(placement, ctx)
                 && let Some(id) = symbol.cross_tile_id
             {

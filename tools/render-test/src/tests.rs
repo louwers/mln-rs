@@ -12,7 +12,7 @@ use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
 use crate::manifest_parser::ManifestParser;
-use crate::metadata::{MapDebugOptions, MapMode, TerrainSkirtLength, TestMetadata};
+use crate::metadata::{MapMode, TerrainSkirtLength, TestMetadata};
 use crate::parser::{parse_test_metadata, parse_test_operations};
 use crate::render_test::{Arguments, RunResult, parse_arguments, run_render_tests_with};
 use crate::runner::{ImplFactory, ImplOptions, MapError, ResourceOptions, TestContext, TestRunner, TestRunnerImpl};
@@ -247,7 +247,6 @@ fn parses_test_metadata() {
     let tile = parse_test_metadata(&style_paths("render-tests/symbol-placement/line-center-tile-map-mode"));
     assert_eq!(tile.map_mode, MapMode::Tile);
     assert_eq!(tile.size, Size::new(512, 512));
-    assert_eq!(tile.debug, MapDebugOptions(MapDebugOptions::TILE_BORDERS.0 | MapDebugOptions::COLLISION.0));
 
     let retina = parse_test_metadata(&style_paths("render-tests/runtime-styling/image-add-1x-image-2x-screen"));
     assert_eq!(retina.pixel_ratio, 2.0);

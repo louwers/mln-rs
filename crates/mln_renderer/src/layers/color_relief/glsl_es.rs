@@ -88,10 +88,6 @@ void main() {
     float denom = el_r - el_l;
     float t = (abs(denom) < 0.0001) ? 0.0 : clamp((el - el_l) / denom, 0.0, 1.0);
     fragColor = u_opacity * mix(color_l, color_r, t);
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &COLOR_RELIEF_DECLARATIONS,

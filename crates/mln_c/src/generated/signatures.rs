@@ -639,12 +639,6 @@ const _: unsafe extern "C" fn(
 ) -> mln_status = crate::style::mln_map_set_custom_vector_source_tile_error;
 const _: unsafe extern "C" fn(
     mln_map,
-    mln_map_debug_flags,
-    *const mln_completion,
-    *mut mln_diagnostic,
-) -> mln_status = crate::camera::mln_map_set_debug_flags;
-const _: unsafe extern "C" fn(
-    mln_map,
     mln_runtime_event_flags,
     *const mln_completion,
     *mut mln_diagnostic,

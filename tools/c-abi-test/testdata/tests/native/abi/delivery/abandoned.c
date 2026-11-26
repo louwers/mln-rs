@@ -117,7 +117,7 @@ static void release_reports_each_abandoned_user_data_once(void) {
 
   const mln_completion completion =
     mln_test_queue_completion(queue.handle, &delivered);
-  MLN_TEST_OK(mln_map_set_debug_flags(map, 0, &completion, NULL));
+  MLN_TEST_OK(mln_map_cancel_camera_transitions(map, &completion, NULL));
   MLN_TEST_OK(mln_test_map_fence(map));
 
   const mln_runtime_event_handler handler = {
@@ -197,8 +197,8 @@ static void a_release_inside_dispatch_reports_the_calls_after_it(void) {
     .release_user_data = mln_test_record_release,
     .queue = queue.handle,
   };
-  MLN_TEST_OK(mln_map_set_debug_flags(map, 0, &releasing, NULL));
-  MLN_TEST_OK(mln_map_set_debug_flags(map, 0, &later, NULL));
+  MLN_TEST_OK(mln_map_cancel_camera_transitions(map, &releasing, NULL));
+  MLN_TEST_OK(mln_map_cancel_camera_transitions(map, &later, NULL));
   MLN_TEST_OK(mln_test_map_fence(map));
 
   MLN_TEST_OK(mln_delivery_queue_dispatch(queue.handle, NULL));

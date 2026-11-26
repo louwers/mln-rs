@@ -92,16 +92,12 @@ void main() {
     const ivec2 texel = ivec2(gl_FragCoord.xy);
     const vec4 color = texelFetch(image_texture, texel, 0);
 
-#if defined(OVERDRAW_INSPECTOR)
-    out_color = color;
-#else
     const vec4 src = color * props.opacity;
     if (props.blend == 0) {
         out_color = src;
     } else {
         out_color = composite(src, texelFetch(backdrop_texture, texel, 0), props.blend);
     }
-#endif
 }
 ",
 };

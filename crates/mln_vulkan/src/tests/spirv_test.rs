@@ -15,8 +15,8 @@ fn programs() -> impl Iterator<Item = (&'static Program, &'static GlslSource)> {
 const SPIRV_MAGIC: u32 = 0x0723_0203;
 
 // Every stage compiles to a SPIR-V module, with every property per vertex,
-// every property as a uniform, each property alone as a uniform, and with
-// the overdraw inspector, in both projections.
+// every property as a uniform, and each property alone as a uniform, in both
+// projections.
 #[test]
 fn every_program_compiles_to_spirv() {
     let mut failures = Vec::new();

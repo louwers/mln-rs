@@ -343,12 +343,6 @@ impl<'a> TileMut<'a> {
         });
     }
 
-    pub(crate) fn set_show_collision_boxes(&mut self, show: bool) {
-        if self.tile.pipeline.layout().is_some_and(|layout| layout.params.show_collision_boxes != show) {
-            self.change_layout(|layout| layout.params.show_collision_boxes = show);
-        }
-    }
-
     /// Lays the tile out again if the images in `changed` touch what it shows
     /// or its work. A first try's reply tells for itself.
     pub(crate) fn images_changed(&mut self, changed: &HashSet<String>, available: &VecSet<String>) {

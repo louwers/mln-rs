@@ -1,153 +1,8 @@
-//! The GLSL, for Vulkan and D3D12, of the symbols' programs and their
-//! collision boxes' and circles'.
+//! The GLSL, for Vulkan and D3D12, of the symbols' programs.
 
 use mln_gfx::shaders::source::GlslSource;
 
 use crate::terrain::glsl::ground_visibility;
-
-pub(crate) const COLLISION_BOX: GlslSource = GlslSource {
-    vertex: r"
-
-layout(location = 0) out float frag_placed;
-layout(location = 1) out float frag_notUsed;
-
-void main() {
-
-#ifdef PROJECTION_GLOBE
-    vec4 projectedPoint = projectTileWithElevation(vec2(in_anchor_pos), in_height_offset, projection);
-#else
-    vec4 projectedPoint = drawable.matrix * vec4(in_anchor_pos, in_height_offset, 1.0);
-#endif
-    float camera_to_anchor_distance = projectedPoint.w;
-    float collision_perspective_ratio = clamp(
-        0.5 + 0.5 * (paintParams.camera_to_center_distance / camera_to_anchor_distance),
-        0.0, // Prevents oversized near-field boxes in pitched/overzoomed tiles
-        4.0);
-
-#ifdef PROJECTION_GLOBE
-    gl_Position = projectTileWithElevation(vec2(in_pos), in_height_offset, projection);
-    // Boxes just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
-    if (gl_Position.z / gl_Position.w < 1.1) {
-        gl_Position.z = 0.0;
-    }
-#else
-    gl_Position = drawable.matrix * vec4(in_pos, in_height_offset, 1.0);
-#endif
-    gl_Position.xy += (in_extrude + in_shift) * tile_props.extrude_scale * gl_Position.w * collision_perspective_ratio;
-
-    frag_placed = in_placed.x;
-    frag_notUsed = in_placed.y;
-}
-",
-    fragment: r"
-
-layout(location = 0) in float frag_placed;
-layout(location = 1) in float frag_notUsed;
-
-layout(location = 0) out vec4 out_color;
-
-void main() {
-
-    float alpha = 0.5;
-
-    // Red = collision, hide label
-    vec4 color = vec4(1.0, 0.0, 0.0, 1.0) * alpha;
-
-    // Blue = no collision, label is showing
-    if (frag_placed > 0.5) {
-        color = vec4(0.0, 0.0, 1.0, 0.5) * alpha;
-    }
-
-    if (frag_notUsed > 0.5) {
-        // This box not used, fade it out
-        color *= 0.1;
-    }
-
-    out_color = color;
-}
-",
-};
-
-pub(crate) const COLLISION_CIRCLE: GlslSource = GlslSource {
-    vertex: r"
-
-layout(location = 0) out float frag_placed;
-layout(location = 1) out float frag_notUsed;
-layout(location = 2) out float frag_radius;
-layout(location = 3) out vec2 frag_extrude;
-layout(location = 4) out vec2 frag_extrude_scale;
-
-void main() {
-
-#ifdef PROJECTION_GLOBE
-    vec4 projectedPoint = projectTile(vec2(in_anchor_pos), projection);
-#else
-    vec4 projectedPoint = drawable.matrix * vec4(in_anchor_pos, 0, 1);
-#endif
-    float camera_to_anchor_distance = projectedPoint.w;
-    float collision_perspective_ratio = clamp(
-        0.5 + 0.5 * (paintParams.camera_to_center_distance / camera_to_anchor_distance),
-        0.0, // Prevents oversized near-field circles in pitched/overzoomed tiles
-        4.0);
-
-    float padding_factor = 1.2; // Pad the vertices slightly to make room for anti-alias blur
-#ifdef PROJECTION_GLOBE
-    gl_Position = projectTile(vec2(in_pos), projection);
-    // Circles just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
-    if (gl_Position.z / gl_Position.w < 1.1) {
-        gl_Position.z = 0.0;
-    }
-#else
-    gl_Position = drawable.matrix * vec4(in_pos, 0.0, 1.0);
-#endif
-    gl_Position.xy += in_extrude * tile_props.extrude_scale * padding_factor * gl_Position.w * collision_perspective_ratio;
-
-    frag_placed = in_placed.x;
-    frag_notUsed = in_placed.y;
-    frag_radius = abs(float(in_extrude.y)); // We don't pitch the circles, so both units of the extrusion vector are equal in magnitude to the radius
-    frag_extrude = in_extrude * padding_factor;
-    frag_extrude_scale = tile_props.extrude_scale * paintParams.camera_to_center_distance * collision_perspective_ratio;
-}
-",
-    fragment: r"
-
-layout(location = 0) in float frag_placed;
-layout(location = 1) in float frag_notUsed;
-layout(location = 2) in float frag_radius;
-layout(location = 3) in vec2 frag_extrude;
-layout(location = 4) in vec2 frag_extrude_scale;
-
-layout(location = 0) out vec4 out_color;
-
-void main() {
-
-    float alpha = 0.5;
-
-    // Red = collision, hide label
-    vec4 color = vec4(1.0, 0.0, 0.0, 1.0) * alpha;
-
-    // Blue = no collision, label is showing
-    if (frag_placed > 0.5) {
-        color = vec4(0.0, 0.0, 1.0, 0.5) * alpha;
-    }
-
-    if (frag_notUsed > 0.5) {
-        // This box not used, fade it out
-        color *= 0.2;
-    }
-
-    float extrude_scale_length = length(frag_extrude_scale);
-    float extrude_length = length(frag_extrude) * extrude_scale_length;
-    float stroke_width = 15.0 * extrude_scale_length / tile_props.overscale_factor;
-    float radius = frag_radius * extrude_scale_length;
-
-    float distance_to_edge = abs(extrude_length - radius);
-    float opacity_t = smoothstep(-stroke_width, 0.0, -distance_to_edge);
-
-    out_color = color * opacity_t;
-}
-",
-};
 
 /// `unpack_opacity`, a symbol's fade opacity from its packed attribute.
 macro_rules! unpack_opacity {
@@ -313,10 +168,6 @@ layout(location = 2) flat in vec2 frag_tex_origin;
 layout(location = 0) out vec4 out_color;
 
 void main() {
-#if defined(OVERDRAW_INSPECTOR)
-    out_color = vec4(1.0);
-    return;
-#else
 
     const SymbolTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
@@ -327,7 +178,6 @@ void main() {
 #endif
 
     out_color = texture(sampler2D(texture_texture, texture_sampler), atlas_pos(frag_tex_origin, frag_tex)) * opacity;
-#endif
 }
 ",
 };
@@ -541,11 +391,6 @@ layout(location = 0) out vec4 out_color;
 
 void main() {
 
-#if defined(OVERDRAW_INSPECTOR)
-    out_color = vec4(1.0);
-    return;
-#else
-
     const SymbolTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_fill_color)
@@ -578,7 +423,6 @@ void main() {
     }
 
     out_color = color * (alpha * opacity);
-#endif
 }
 ",
 };
@@ -801,10 +645,6 @@ layout(location = 10) flat in vec2 frag_tex_origin;
 layout(location = 0) out vec4 out_color;
 
 void main() {
-#if defined(OVERDRAW_INSPECTOR)
-    out_color = vec4(1.0);
-    return;
-#else
 
     const SymbolTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
@@ -845,7 +685,6 @@ void main() {
     }
 
     out_color = color * (alpha * opacity);
-#endif
 }
 ",
 };

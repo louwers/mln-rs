@@ -116,10 +116,6 @@ highp vec4 color = u_color;
 
 void main() {
     fragColor = v_color;
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &GlslEsDeclarations::DEFAULT,
@@ -291,10 +287,6 @@ highp vec4 pattern_to = u_pattern_to;
     vec4 mixedColor = mix(color1, color2, u_fade);
 
     fragColor = mixedColor * v_lighting;
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &GlslEsDeclarations::DEFAULT,
@@ -452,10 +444,6 @@ highp vec4 pattern_to = u_pattern_to;
     vec4 mixedColor = mix(color1, color2, u_fade);
 
     fragColor = mixedColor * v_lighting;
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &GlslEsDeclarations::DEFAULT,
@@ -537,10 +525,6 @@ highp vec4 color = u_color;
 
 void main() {
     fragColor = v_color;
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &GlslEsDeclarations::DEFAULT,

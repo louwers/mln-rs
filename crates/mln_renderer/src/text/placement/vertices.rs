@@ -13,7 +13,7 @@ use mln_util::constants::ONE_EM;
 
 use super::context::translation;
 use super::{JointOpacityState, Placement, VariableOffset};
-use crate::buckets::symbol_bucket::{Buffer, CollisionBuffer, SymbolBucket, SymbolBucketState};
+use crate::buckets::symbol_bucket::{Buffer, SymbolBucket, SymbolBucketState};
 use crate::layout::symbol_instance::{Justification, SymbolInstance, TextPart};
 use crate::layout::symbol_projection::{
     LabelPlaneProjector, LineLabelAlignment, SymbolHeights, add_dynamic_attributes, evaluate_size_for_feature,
@@ -21,40 +21,10 @@ use crate::layout::symbol_projection::{
 };
 use crate::render_layer::BucketPlacementData;
 use crate::text::collision_index::OverlapMode;
-use crate::text::placement::CircleKey;
 
 /// Appends `n` copies of `value` to `v`.
 fn extend<T: Copy>(v: &mut Vec<T>, n: usize, value: T) {
     v.extend(std::iter::repeat_n(value, n));
-}
-
-/// Whether a label follows a line or sits at a point.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LabelPlacement {
-    AlongLine,
-    Point,
-}
-
-/// The type of content (text or icon) for collision detection.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CollisionContent {
-    Text,
-    Icon,
-}
-
-/// The collision debug buffer a feature of `symbol` draws in.
-fn collision_buffer(
-    state: &mut SymbolBucketState,
-    placement: LabelPlacement,
-    content: CollisionContent,
-) -> Option<&mut CollisionBuffer> {
-    match (placement, content) {
-        (LabelPlacement::AlongLine, CollisionContent::Text) => state.text_collision_circle.as_mut(),
-        (LabelPlacement::AlongLine, CollisionContent::Icon) => state.icon_collision_circle.as_mut(),
-        (LabelPlacement::Point, CollisionContent::Text) => state.text_collision_box.as_mut(),
-        (LabelPlacement::Point, CollisionContent::Icon) => state.icon_collision_box.as_mut(),
-    }
-    .filter(|buffer| !buffer.segments.is_empty())
 }
 
 impl Placement {
@@ -103,15 +73,10 @@ impl Placement {
         seen_cross_tile_ids: &mut BTreeSet<NonZeroU32>,
     ) -> bool {
         let layout = &*bucket.layout;
-        let variable_placement = bucket.has_variable_text_anchors();
-        let has_icon_text_fit = *layout.icon_text_fit.uniform() != IconTextFitType::None;
-        let rotate_with_map = *layout.text_rotation_alignment.uniform() == TextRotationAlignmentType::Map;
-        let pitch_with_map = *layout.text_pitch_alignment.uniform() == AlignmentType::Map;
         let text_always = OverlapMode::text(layout) == OverlapMode::Always;
         let icon_always = OverlapMode::icon(layout) == OverlapMode::Always;
         let has_text = bucket.has_text_data();
         let has_icons = bucket.has_icon_data() || bucket.has_sdf_icon_data();
-        let bucket_instance_id = bucket.bucket_instance_id;
 
         // A symbol that always overlaps shows before placement reaches it,
         // unless it waits for a part that may not overlap, so it doesn't
@@ -129,22 +94,10 @@ impl Placement {
             buffer.opacity_attribute_data.clear();
             buffer.elevation_attribute_data.clear();
         }
-        for buffer in [
-            &mut state.text_collision_box,
-            &mut state.icon_collision_box,
-            &mut state.text_collision_circle,
-            &mut state.icon_collision_circle,
-        ]
-        .into_iter()
-        .flatten()
-        {
-            buffer.dynamic_vertices.clear();
-            buffer.elevations.clear();
-        }
         let heights = SymbolHeights::new(self.ground(), data.tile.id, layout);
 
         let symbols = std::mem::take(&mut state.symbol_instances);
-        for (index, symbol) in symbols.iter().enumerate() {
+        for symbol in &symbols {
             let id = symbol.cross_tile_id;
             let opacity = match id {
                 Some(id) if seen_cross_tile_ids.insert(id) => {
@@ -164,44 +117,6 @@ impl Placement {
                 let buffer = if icon.sdf { &mut state.sdf_icon } else { &mut state.icon };
                 for (run, _) in icon.runs() {
                     set_run_opacity(buffer, run, hidden, vertex, heights);
-                }
-            }
-
-            // Debug boxes show where a variable label last went, so a label
-            // that just disappeared shows what it collided with; one never
-            // placed shows its center box, unused.
-            let offset = id.filter(|_| variable_placement).and_then(|id| self.variable_offsets.get(&id));
-            let text_shift = offset
-                .map_or(Vec2::ZERO, |offset| offset.screen_shift(rotate_with_map, pitch_with_map, view.angle() as f32));
-            for (feature, is_text) in symbol.collision_features() {
-                let placement = if feature.along_line { LabelPlacement::AlongLine } else { LabelPlacement::Point };
-                let content = if is_text { CollisionContent::Text } else { CollisionContent::Icon };
-                let Some(buffer) = collision_buffer(state, placement, content) else {
-                    continue;
-                };
-                let placed = if is_text { opacity.text.placed } else { opacity.icon.placed };
-                let box_count = feature.boxes.len();
-                if feature.along_line {
-                    let key = CircleKey { bucket_instance_id, symbol: index, text: is_text };
-                    if let Some(circles) = self.collision_circles.get(&key) {
-                        for circle in circles {
-                            let vertex = SymbolBucket::collision_dynamic_vertex(placed, circle.is_none(), Vec2::ZERO);
-                            extend(&mut buffer.dynamic_vertices, 4, vertex);
-                        }
-                    } else {
-                        // Not placed: not loaded yet, or from a fading tile.
-                        let vertex = SymbolBucket::collision_dynamic_vertex(placed, false, Vec2::ZERO);
-                        extend(&mut buffer.dynamic_vertices, 4 * box_count, vertex);
-                    }
-                } else {
-                    let used = !is_text || !variable_placement || offset.is_some();
-                    let shift = if is_text || has_icon_text_fit { text_shift } else { Vec2::ZERO };
-                    let vertex = SymbolBucket::collision_dynamic_vertex(placed, !used, shift);
-                    extend(&mut buffer.dynamic_vertices, 4 * box_count, vertex);
-                    if heights.on_ground() {
-                        let elevation = heights.at(symbol.anchor().point, symbol.height_offset());
-                        extend(&mut buffer.elevations, 4 * box_count, elevation);
-                    }
                 }
             }
         }

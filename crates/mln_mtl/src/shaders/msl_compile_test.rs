@@ -26,12 +26,6 @@ use objc2_metal::{
 use super::shader_source::{compose, first_vertex_buffer};
 use crate::Id;
 
-#[derive(Clone, Copy)]
-enum Overdraw {
-    Off,
-    On,
-}
-
 /// Every program the renderer draws with that has MSL, with its MSL.
 fn sources() -> impl Iterator<Item = (&'static Program, &'static MslSource)> {
     PROGRAMS.iter().filter_map(|&program| Some((program, program.sources.msl?)))
@@ -88,17 +82,10 @@ fn uniform_properties(text: &str) -> BTreeSet<String> {
     names
 }
 
-/// ProgramParameters(1.0, overdraw), the projection defines, and a uniform
-/// define per name.
-fn defines<'a>(
-    overdraw: Overdraw,
-    projection: ProjectionVariant,
-    uniforms: impl IntoIterator<Item = &'a String>,
-) -> Vec<(String, String)> {
+/// ProgramParameters(1.0), the projection defines, and a uniform define per
+/// name.
+fn defines<'a>(projection: ProjectionVariant, uniforms: impl IntoIterator<Item = &'a String>) -> Vec<(String, String)> {
     let mut defines = vec![("DEVICE_PIXEL_RATIO".to_owned(), "1.0".to_owned())];
-    if matches!(overdraw, Overdraw::On) {
-        defines.push(("OVERDRAW_INSPECTOR".to_owned(), String::new()));
-    }
     if projection.is_globe() {
         defines.push((GLOBE_DEFINE.to_owned(), String::new()));
     }
@@ -107,35 +94,6 @@ fn defines<'a>(
     }
     defines.extend(uniforms.into_iter().map(|name| (format!("HAS_UNIFORM_u_{name}"), String::new())));
     defines
-}
-
-/// Every program that draws a layer outputs white for the overdraw
-/// inspector, which counts its draws.
-#[test]
-fn every_layer_program_shows_the_overdraw_inspector() {
-    use mln_renderer::conformance::programs::{TERRAIN_PROBE, VERTEX_TEXEL};
-    use mln_renderer::layers::symbol::programs::{COLLISION_BOX, COLLISION_CIRCLE};
-    use mln_renderer::shaders::programs::{ATMOSPHERE, CLIPPING_MASK, GLOBE_DEPTH, SKY};
-    use mln_renderer::shaders::terrain::programs::{TERRAIN, TERRAIN_DEPTH};
-    // The terrain shows its drapes, where the draped layers count their
-    // draws.
-    let not_layers = [
-        &CLIPPING_MASK,
-        &COLLISION_BOX,
-        &COLLISION_CIRCLE,
-        &GLOBE_DEPTH,
-        &SKY,
-        &ATMOSPHERE,
-        &TERRAIN,
-        &TERRAIN_DEPTH,
-        &VERTEX_TEXEL,
-        &TERRAIN_PROBE,
-    ];
-    for (program, source) in sources() {
-        if !not_layers.contains(&program) {
-            assert!(full_source(program, source).contains("OVERDRAW_INSPECTOR"), "{}", program.name);
-        }
-    }
 }
 
 #[test]
@@ -153,17 +111,13 @@ fn every_shader_source_compiles() {
             program.name
         );
         for &projection in projection_variants(program) {
-            // Every property per vertex, every property as a uniform, each one
-            // alone as a uniform, and the overdraw inspector.
+            // Every property per vertex, every property as a uniform, and each
+            // one alone as a uniform.
             let mut variants = vec![
-                ("no uniforms".to_owned(), defines(Overdraw::Off, projection, [])),
-                ("all uniforms".to_owned(), defines(Overdraw::Off, projection, &properties)),
-                ("overdraw inspector".to_owned(), defines(Overdraw::On, projection, [])),
-                ("overdraw inspector, all uniforms".to_owned(), defines(Overdraw::On, projection, &properties)),
+                ("no uniforms".to_owned(), defines(projection, [])),
+                ("all uniforms".to_owned(), defines(projection, &properties)),
             ];
-            variants.extend(
-                properties.iter().map(|name| (format!("uniform {name}"), defines(Overdraw::Off, projection, [name]))),
-            );
+            variants.extend(properties.iter().map(|name| (format!("uniform {name}"), defines(projection, [name]))));
             for (variant, defines) in variants {
                 match compile(&device, &text, &defines, source.fast_math) {
                     Ok(library) => {
@@ -261,8 +215,8 @@ fn pipelines_build_with_the_programs_attributes() {
         ];
         let variants = projection_variants(program).iter().flat_map(|&projection| {
             [
-                (format!("{projection:?}, no uniforms"), defines(Overdraw::Off, projection, [])),
-                (format!("{projection:?}, all uniforms"), defines(Overdraw::Off, projection, &properties)),
+                (format!("{projection:?}, no uniforms"), defines(projection, [])),
+                (format!("{projection:?}, all uniforms"), defines(projection, &properties)),
             ]
         });
         for (variant, defines) in variants {

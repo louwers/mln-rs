@@ -642,20 +642,6 @@ impl DrawObjects {
         self.bindings = None;
     }
 
-    /// Writes `value` to the draw's own uniform buffer `id`, as
-    /// [`UniformBufferArray::write_pod`] does.
-    pub(crate) fn write_pod<T: bytemuck::Pod>(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        id: usize,
-        value: &T,
-        context: &mut Context,
-    ) {
-        if self.uniform_buffers.write_pod(gpu, id, value, context.device()) {
-            self.drop_bindings();
-        }
-    }
-
     #[must_use]
     pub(crate) fn shader(&self) -> &ShaderKey {
         &self.shader

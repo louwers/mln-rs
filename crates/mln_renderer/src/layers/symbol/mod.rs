@@ -1,5 +1,5 @@
-//! The symbols' programs and their collision boxes' and circles', the
-//! blocks they read, and their text in each language.
+//! The symbols' programs, the blocks they read, and their text in each
+//! language.
 
 #[rustfmt::skip]
 mod glsl;

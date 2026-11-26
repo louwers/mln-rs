@@ -17,7 +17,7 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_map_types::{MapDebugOptions, MapMode, View};
+use mln_map_types::{MapMode, View};
 use mln_style::TransitionOptions;
 use mln_style::types::{SymbolAnchorType, TextWritingModeType};
 use mln_tile_id::OverscaledTileID;
@@ -178,7 +178,6 @@ pub(crate) struct PlacementInputs {
     view: View,
     transition_options: TransitionOptions,
     cross_source_collisions: bool,
-    show_collision_boxes: bool,
     /// The ground the symbols stand on, where terrain draws.
     ground: PlacedGround,
     /// The buckets in the order placement places them: the layers'
@@ -239,7 +238,6 @@ impl PlacementInputs {
             view: update_parameters.view.clone(),
             transition_options: update_parameters.style.get_transition_options(),
             cross_source_collisions: update_parameters.cross_source_collisions,
-            show_collision_boxes: update_parameters.debug_options.contains(MapDebugOptions::COLLISION),
             ground: PlacedGround(ground.cloned()),
             buckets: placed.collect(),
         }
@@ -349,15 +347,6 @@ enum PlacementKind {
     Tile(Box<TilePlacementState>),
 }
 
-/// A symbol's text or icon feature, whose projected collision circles debug
-/// drawing shows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct CircleKey {
-    bucket_instance_id: u32,
-    symbol: usize,
-    text: bool,
-}
-
 /// How long after `since` `now` is: zero if it is before, and
 /// `Duration::MAX` without either time, as for a time long ago.
 fn elapsed(now: Option<Instant>, since: Option<Instant>) -> Duration {
@@ -398,7 +387,6 @@ pub(crate) struct Placement {
     /// The collision index of the placement this one replaced, which its
     /// commit no longer reads; the next placement reuses its grids.
     spare_collision_index: Option<CollisionIndex>,
-    show_collision_boxes: bool,
     /// Every symbol's opacity was at the end of its fade when the
     /// placement was made.
     settled: bool,
@@ -407,8 +395,6 @@ pub(crate) struct Placement {
     /// symbols for their allocations.
     text_boxes: Vec<Option<Shape>>,
     icon_boxes: Vec<Option<Shape>>,
-    /// The projected circles of line labels, for debug drawing.
-    collision_circles: HashMap<CircleKey, Vec<Option<Shape>>>,
 }
 
 impl Placement {
@@ -440,11 +426,9 @@ impl Placement {
             collision_groups: CollisionGroups::new(inputs.as_ref().is_none_or(|inputs| inputs.cross_source_collisions)),
             prev_placement: prev_placement.map(Box::new),
             spare_collision_index: None,
-            show_collision_boxes: inputs.as_ref().is_some_and(|inputs| inputs.show_collision_boxes),
             settled: false,
             text_boxes: Vec::new(),
             icon_boxes: Vec::new(),
-            collision_circles: HashMap::default(),
             inputs,
         }
     }
@@ -534,7 +518,6 @@ impl Placement {
             collision_group: self.collision_groups.get(&data.source_id),
             tile_borders,
             avoid_edges,
-            debug: self.show_collision_boxes,
         };
         PlacementContext::new(data, bucket, &inputs.view, inputs.ground.0.as_deref(), self.placement_zoom, options)
     }
@@ -553,7 +536,7 @@ impl Placement {
             if symbol.cross_tile_id.is_some_and(|id| seen_cross_tile_ids.contains(&id)) {
                 continue;
             }
-            self.place_symbol(index, symbol, ctx);
+            self.place_symbol(symbol, ctx);
             // A symbol of a tile held to fade out doesn't keep the tile that
             // replaces it from placing the symbol.
             if let Some(id) = symbol.cross_tile_id
@@ -826,7 +809,6 @@ mod tests {
             view: View::default(),
             transition_options: TransitionOptions::default(),
             cross_source_collisions: true,
-            show_collision_boxes: false,
             ground: PlacedGround::default(),
             buckets: Vec::new(),
         }

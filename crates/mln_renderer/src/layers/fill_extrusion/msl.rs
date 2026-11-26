@@ -83,13 +83,6 @@ FragmentStage wall(thread const Vertex& vertx,
 
     const float4 position = projectTileFor3D(vertx.pos.x == 0.0 ? p1 : p2, z, projection);
 
-#if defined(OVERDRAW_INSPECTOR)
-    return {
-        .position = position,
-        .color    = half4(1.0),
-    };
-#endif
-
 #if defined(HAS_UNIFORM_u_color)
     auto color = props.color;
 #else
@@ -328,22 +321,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_
 
     const float4 position = projectTileFor3D(vertx.pos.x == 0.0 ? p1 : p2, z, projectionVector[uboIndex]);
 
-#if defined(OVERDRAW_INSPECTOR)
-    return {
-        .position       = position,
-        .lighting       = float4(1.0),
-        .pos_a          = float2(1.0),
-        .pos_b          = float2(1.0),
-
-#if !defined(HAS_UNIFORM_u_pattern_from)
-        .pattern_from   = float4(1.0),
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
-        .pattern_to     = float4(1.0),
-#endif
-    };
-#endif
-
 #if defined(HAS_UNIFORM_u_pattern_from)
     const auto pattern_from = tileProps.pattern_from;
 #else
@@ -403,10 +380,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_
 }
 
 fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
-#if defined(OVERDRAW_INSPECTOR)
-    return {half4(1.0)/*, in.position.z*/};
-#endif
-
     device const FillExtrusionTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_pattern_from)
@@ -501,21 +474,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_
 #endif
     const float4 position = projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]);
 
-#if defined(OVERDRAW_INSPECTOR)
-    return {
-        .position       = position,
-        .lighting       = float4(1.0),
-        .pos_a          = float2(1.0),
-        .pos_b          = float2(1.0),
-#if !defined(HAS_UNIFORM_u_pattern_from)
-        .pattern_from   = float4(1.0),
-#endif
-#if !defined(HAS_UNIFORM_u_pattern_to)
-        .pattern_to     = float4(1.0),
-#endif
-    };
-#endif
-
 #if defined(HAS_UNIFORM_u_pattern_from)
     const auto pattern_from = tileProps.pattern_from;
 #else
@@ -574,10 +532,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_
 }
 
 fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS) {
-#if defined(OVERDRAW_INSPECTOR)
-    return {half4(1.0)/*, in.position.z*/};
-#endif
-
     device const FillExtrusionTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
 #if defined(HAS_UNIFORM_u_pattern_from)
@@ -659,13 +613,6 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_
     const float z = (t != 0.0) ? height : base;
 #endif
     const float4 position = projectTileFor3D(float2(vertx.pos), z, projectionVector[uboIndex]);
-
-#if defined(OVERDRAW_INSPECTOR)
-    return {
-        .position = position,
-        .color    = half4(1.0),
-    };
-#endif
 
 #if defined(HAS_UNIFORM_u_color)
     auto color = props.color;

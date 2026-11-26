@@ -1,182 +1,8 @@
-//! The WGSL of the symbols' programs and their collision boxes' and circles'.
+//! The WGSL of the symbols' programs.
 
 use mln_gfx::shaders::source::WgslSource;
 
 use crate::terrain::wgsl::ground_visibility;
-
-pub(crate) const COLLISION_BOX: WgslSource = WgslSource {
-    vertex: Some(
-        r"
-struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) placed: f32,
-    @location(1) not_used: f32,
-};
-
-@vertex
-fn main(in: VertexInput) -> VertexOutput {
-    var out: VertexOutput;
-
-#ifdef PROJECTION_GLOBE
-    let projected_point = projectTileWithElevation(vec2<f32>(f32(in.anchor_pos.x), f32(in.anchor_pos.y)), in.height_offset, projection);
-#else
-    let projected_point = drawable.matrix * vec4<f32>(f32(in.anchor_pos.x), f32(in.anchor_pos.y), in.height_offset, 1.0);
-#endif
-    let camera_to_anchor_distance = projected_point.w;
-
-    let collision_perspective_ratio = clamp(
-        0.5 + 0.5 * (paintParams.camera_to_center_distance / camera_to_anchor_distance),
-        0.0,
-        4.0);
-
-#ifdef PROJECTION_GLOBE
-    out.position = projectTileWithElevation(vec2<f32>(f32(in.pos.x), f32(in.pos.y)), in.height_offset, projection);
-    // Boxes just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
-    if (out.position.z / out.position.w < 1.1) {
-        out.position.z = 0.0;
-    }
-#else
-    out.position = drawable.matrix * vec4<f32>(f32(in.pos.x), f32(in.pos.y), in.height_offset, 1.0);
-#endif
-    let extrude_shift = vec2<f32>(f32(in.extrude.x), f32(in.extrude.y)) + in.shift;
-    out.position.x += extrude_shift.x * tile_props.extrude_scale.x * out.position.w * collision_perspective_ratio;
-    out.position.y += extrude_shift.y * tile_props.extrude_scale.y * out.position.w * collision_perspective_ratio;
-
-    out.placed = f32(in.placed.x);
-    out.not_used = f32(in.placed.y);
-
-    return out;
-}
-",
-    ),
-    fragment: Some(
-        r"
-struct FragmentInput {
-    @location(0) placed: f32,
-    @location(1) not_used: f32,
-};
-
-@fragment
-fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-    let alpha = 0.5;
-
-    // Red = collision, hide label
-    var color = vec4<f32>(1.0, 0.0, 0.0, 1.0) * alpha;
-
-    // Blue = no collision, label is showing
-    if (in.placed > 0.5) {
-        color = vec4<f32>(0.0, 0.0, 1.0, 0.5) * alpha;
-    }
-
-    if (in.not_used > 0.5) {
-        // This box not used, fade it out
-        color = color * 0.1;
-    }
-
-    return color;
-}
-",
-    ),
-    prelude: None,
-};
-
-pub(crate) const COLLISION_CIRCLE: WgslSource = WgslSource {
-    vertex: Some(
-        r"
-struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) placed: f32,
-    @location(1) not_used: f32,
-    @location(2) radius: f32,
-    @location(3) extrude: vec2<f32>,
-    @location(4) extrude_scale: vec2<f32>,
-};
-
-@vertex
-fn main(in: VertexInput) -> VertexOutput {
-    var out: VertexOutput;
-
-
-
-#ifdef PROJECTION_GLOBE
-    let projected_point = projectTile(vec2<f32>(f32(in.anchor_pos.x), f32(in.anchor_pos.y)), projection);
-#else
-    let projected_point = drawable.matrix * vec4<f32>(f32(in.anchor_pos.x), f32(in.anchor_pos.y), 0.0, 1.0);
-#endif
-    let camera_to_anchor_distance = projected_point.w;
-
-    let perspective = max(camera_to_anchor_distance, 1e-6);
-    let collision_perspective_ratio = clamp(
-        0.5 + 0.5 * (paintParams.camera_to_center_distance / perspective),
-        0.0,
-        4.0);
-
-#ifdef PROJECTION_GLOBE
-    var position = projectTile(vec2<f32>(f32(in.pos.x), f32(in.pos.y)), projection);
-    // Circles just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
-    if (position.z / position.w < 1.1) {
-        position.z = 0.0;
-    }
-#else
-    var position = drawable.matrix * vec4<f32>(f32(in.pos.x), f32(in.pos.y), 0.0, 1.0);
-#endif
-    let padding_factor = 1.2;
-    let extrude_vec = vec2<f32>(f32(in.extrude.x), f32(in.extrude.y));
-    position.x += extrude_vec.x * tile_props.extrude_scale.x * padding_factor * position.w * collision_perspective_ratio;
-    position.y += extrude_vec.y * tile_props.extrude_scale.y * padding_factor * position.w * collision_perspective_ratio;
-
-    out.position = position;
-
-    out.placed = f32(in.placed.x);
-    out.not_used = f32(in.placed.y);
-    out.radius = abs(f32(in.extrude.y));
-    out.extrude = extrude_vec * padding_factor;
-    out.extrude_scale = tile_props.extrude_scale * paintParams.camera_to_center_distance * collision_perspective_ratio;
-    return out;
-}
-",
-    ),
-    fragment: Some(
-        r"
-struct FragmentInput {
-    @location(0) placed: f32,
-    @location(1) not_used: f32,
-    @location(2) radius: f32,
-    @location(3) extrude: vec2<f32>,
-    @location(4) extrude_scale: vec2<f32>,
-};
-
-@fragment
-fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-    let alpha = 0.5;
-
-    // Red = collision, hide label
-    var color = vec4<f32>(1.0, 0.0, 0.0, 1.0) * alpha;
-
-    // Blue = no collision, label is showing
-    if (in.placed > 0.5) {
-        color = vec4<f32>(0.0, 0.0, 1.0, 0.5) * alpha;
-    }
-
-    if (in.not_used > 0.5) {
-        color = color * 0.2;
-    }
-
-    // Add circle outline effect
-    let extrude_scale_length = max(length(in.extrude_scale), 1e-6);
-    let extrude_length = length(in.extrude) * extrude_scale_length;
-    let overscale = max(tile_props.overscale_factor, 1.0);
-    let stroke_width = 15.0 * extrude_scale_length / overscale;
-    let radius = in.radius * extrude_scale_length;
-    let distance_to_edge = abs(extrude_length - radius);
-    let opacity_t = smoothstep(-stroke_width, 0.0, -distance_to_edge);
-
-    return opacity_t * color;
-}
-",
-    ),
-    prelude: None,
-};
 
 /// `unpack_opacity`, a symbol's fade opacity from its packed attribute.
 macro_rules! unpack_opacity {
@@ -359,10 +185,6 @@ struct FragmentInput {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
-#endif
-
     let tileProps = tilePropsVector[globalIndex.value];
 #ifdef HAS_UNIFORM_u_opacity
     let base_opacity = select(props.icon_opacity, props.text_opacity, tileProps.is_text != 0);
@@ -586,10 +408,6 @@ struct FragmentInput {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
-#endif
-
     let tileProps = tilePropsVector[globalIndex.value];
 #ifndef HAS_UNIFORM_u_fill_color
     let fill_color = in.fill_color;
@@ -853,10 +671,6 @@ struct FragmentInput {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
-#endif
-
     let tileProps = tilePropsVector[globalIndex.value];
 #ifndef HAS_UNIFORM_u_fill_color
     let fill_color = in.fill_color;
@@ -902,7 +716,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let outAlpha = color.a * coverage;
 
     return vec4<f32>(color.rgb * coverage, outAlpha);
-
 }
 ",
     ),

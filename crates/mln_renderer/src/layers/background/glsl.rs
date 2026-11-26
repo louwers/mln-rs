@@ -18,11 +18,6 @@ layout(location = 0) out vec4 out_color;
 
 void main() {
 
-#if defined(OVERDRAW_INSPECTOR)
-    out_color = vec4(1.0);
-    return;
-#endif
-
     out_color = props.color * props.opacity;
 }
 ",
@@ -62,11 +57,6 @@ layout(location = 0) out vec4 out_color;
 
 void main() {
 
-#if defined(OVERDRAW_INSPECTOR)
-    out_color = vec4(1.0);
-    return;
-#else
-
     const vec2 texsize = paintParams.pattern_atlas_texsize;
 
     // A crossfade at 0 or 1 shows one pattern, so skip the other.
@@ -84,7 +74,6 @@ void main() {
     }
 
     out_color = mix(color1, color2, props.mix) * props.opacity;
-#endif
 }
 ",
 };

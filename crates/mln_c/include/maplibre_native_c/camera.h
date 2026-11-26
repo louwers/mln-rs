@@ -18,16 +18,6 @@
 extern "C" {
 #endif
 
-/**
- * Draws debugging overlays, such as tile borders, on the map.
- *
- * `flags` replaces the overlays set before.
- */
-MLN_BINDING("execution=command")
-MLN_API mln_status mln_map_set_debug_flags(
-  mln_map map, mln_map_debug_flags flags, const mln_completion* completion,
-  mln_diagnostic* out_diagnostic
-) MLN_NOEXCEPT;
 /** Logs debugging information about the map's style and sources. */
 MLN_BINDING("execution=command")
 MLN_API mln_status mln_map_dump_debug_logs(

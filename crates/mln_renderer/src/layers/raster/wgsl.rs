@@ -53,10 +53,6 @@ struct FragmentInput {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-#ifdef OVERDRAW_INSPECTOR
-    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
-#endif
-
     var color0 = textureSample(image0, image0_sampler, in.pos0.xy / in.pos0.z);
     var color1 = textureSample(image1, image1_sampler, in.pos1.xy / in.pos1.z);
 

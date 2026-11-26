@@ -486,14 +486,6 @@ impl Load {
         matches!(&self.origin, OriginLoad::Tileset(tileset) if tileset.cache_answered)
     }
 
-    /// When the last data was modified, and when it expires.
-    pub(crate) fn freshness(&self) -> (Option<Timestamp>, Option<Timestamp>) {
-        match &self.origin {
-            OriginLoad::Tileset(tileset) => (tileset.modified, tileset.caching.expires),
-            OriginLoad::GeoJson { .. } | OriginLoad::Custom(_) => (None, None),
-        }
-    }
-
     /// Whether the tile's data may be used at `now`, if the tile comes back
     /// from the cache. Only a tileset's data expires.
     pub(crate) fn is_usable(&self, now: Timestamp) -> bool {

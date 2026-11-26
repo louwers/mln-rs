@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mln_gfx::gpu::Gpu;
-use mln_map_types::{MapDebugOptions, MapMode, View};
+use mln_map_types::{MapMode, View};
 use mln_style::diff::{ItemChanges, LayerChange, LayerChanges, StyleDiff, sources_by_id};
 use mln_style::expression::{Dependency, GlobalStateMap};
 use mln_style::image::Impl as ImageImpl;
@@ -23,7 +23,7 @@ use mln_util::hash::{HashMap, HashSet};
 use mln_util::logging::{Event, Log};
 use mln_util::pool::{Pool, TaskGroup};
 use mln_util::time::Instant;
-use mln_vec_map::{VecMap, VecSet};
+use mln_vec_map::VecSet;
 use smallvec::SmallVec;
 
 use crate::Registry;
@@ -42,7 +42,6 @@ use crate::render_pass::RenderPass;
 use crate::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
 use crate::render_tile::{FoundTile, RenderTile};
 use crate::renderer_event::RendererEvent;
-use crate::sources::render_tile_source::{DebugLayer, DebugLayers};
 use crate::terrain::{DrapeStacks, Draped, RenderTerrain};
 use crate::text::glyph_store::GlyphStore;
 use crate::text::placement::{Placement, PlacementInputs};
@@ -188,9 +187,6 @@ pub(crate) struct RenderOrchestrator {
 
     global_state: Option<Arc<GlobalStateMap>>,
 
-    /// The debug overlays.
-    debug_layers: DebugLayers,
-
     globe_depth_pass: GlobeDepthPass,
     sky_pass: crate::sky_pass::SkyPass,
     terrain: RenderTerrain,
@@ -258,7 +254,6 @@ impl RenderOrchestrator {
             sky_pass: crate::sky_pass::SkyPass::default(),
             terrain: RenderTerrain::default(),
             stacks: DrapeStacks::default(),
-            debug_layers: VecMap::new(),
         }
     }
 
@@ -291,8 +286,7 @@ impl RenderOrchestrator {
     /// only what draws it on the GPU, uploading the atlases and the tiles'
     /// buckets and making the layers' draws.
     pub(crate) fn update(&mut self, update_parameters: &Arc<UpdateParameters>) -> Option<Frame> {
-        let mut frame =
-            Frame::new(&update_parameters.view, update_parameters.camera_moving, update_parameters.debug_options);
+        let mut frame = Frame::new(&update_parameters.view, update_parameters.camera_moving);
         let mut clock = self.advance_clock(update_parameters);
         let style = &update_parameters.style;
 
@@ -477,8 +471,6 @@ impl RenderOrchestrator {
                     &mut self.tile_store,
                     &RenderTileParameters {
                         transform: &frame.transform,
-                        debug_options: frame.debug_options,
-                        source_name: name.clone(),
                         sort_by_y: sorted_by_y.contains(&name.as_str()),
                     },
                 );
@@ -834,7 +826,6 @@ impl RenderOrchestrator {
     ) -> Vec<bool> {
         let mut tile_parameters = TileParameters {
             pixel_ratio: update_parameters.pixel_ratio,
-            debug_options: update_parameters.debug_options,
             view: &update_parameters.view,
             min_zoom: update_parameters.min_zoom,
             max_zoom: update_parameters.max_zoom,
@@ -942,13 +933,11 @@ impl RenderOrchestrator {
                 {
                     // On the globe the background is a sphere mesh, not the
                     // backdrop, and over terrain it drapes, so it stays a
-                    // layer, as it does for the overdraw inspector, which
-                    // counts its draw.
+                    // layer.
                     if self.background_layer_as_color
                         && frame.sky.is_none()
                         && !update_parameters.view.is_globe()
                         && !frame.terrain
-                        && !update_parameters.debug_options.contains(MapDebugOptions::OVERDRAW)
                         && layers.first().is_some_and(|first| Arc::ptr_eq(style, first.style()))
                     {
                         let solid_background = layer.solid_background();
@@ -1135,7 +1124,6 @@ impl RenderOrchestrator {
         self.style = None;
         self.sources_by_id.clear();
 
-        self.debug_layers.clear();
         self.render_sources.clear();
         self.tile_store.clear();
         self.leave_layers();
@@ -1155,14 +1143,12 @@ impl RenderOrchestrator {
     }
 
     /// Drops what holds the renderer's shaders: the sky and globe depth
-    /// passes, the terrain's draws and the debug overlays now, and the render
-    /// layers in the next
+    /// passes and the terrain's draws now, and the render layers in the next
     /// update, which makes them again. The draws made after that use the
     /// shaders the renderer has then. The sources keep their tiles, and the
     /// tiles their layout.
     pub(crate) fn release_shaders(&mut self) {
         self.remake_render_layers = true;
-        self.debug_layers.clear();
         self.sky_pass = crate::sky_pass::SkyPass::default();
         self.globe_depth_pass = GlobeDepthPass::default();
         self.terrain.release_shaders();
@@ -1228,8 +1214,7 @@ impl RenderOrchestrator {
 
     /// The number of the frame's draw groups above those of its lowest 3D
     /// layer that draws, which draw without a depth test; 0 without one. A
-    /// layer may have no draw group or several, such as a symbol layer's
-    /// collision boxes.
+    /// layer may have no draw group or several.
     pub(crate) fn opaque_pass_cutoff(&self) -> u32 {
         let mut above: Option<u32> = None;
         for layer in &self.layers {
@@ -1246,8 +1231,7 @@ impl RenderOrchestrator {
 
     /// Uploads the GPU objects of the frame's draws: the layers' draw
     /// groups in drawing order, the globe's depth, the terrain, the sky and
-    /// the atmosphere, what draws into the layers' render targets, and the
-    /// debug overlays.
+    /// the atmosphere, and what draws into the layers' render targets.
     pub(crate) fn upload_draws(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         for layer in &mut self.layers {
             layer.upload(gpu, context);
@@ -1262,9 +1246,6 @@ impl RenderOrchestrator {
         }
         for layer in &mut self.layers {
             layer.upload_render_targets(gpu, context);
-        }
-        for debug in self.debug_layers.values_mut() {
-            debug.upload(gpu, context);
         }
     }
 
@@ -1310,24 +1291,6 @@ impl RenderOrchestrator {
                 source.upload(&mut self.tile_store, context, needs);
             }
         }
-    }
-
-    /// Updates the debug overlays' draws from the sources' tiles, and makes
-    /// their draws of the frame.
-    pub(crate) fn update_debug_layers(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        for source in self.render_sources.values() {
-            if source.is_enabled() {
-                source.update_debug_draws(&mut self.debug_layers, parameters);
-            }
-        }
-        for debug in self.debug_layers.values_mut() {
-            debug.update_draws(gpu, parameters);
-        }
-    }
-
-    /// The debug overlays, in `DebugType` order.
-    pub(crate) fn debug_layers(&mut self) -> impl Iterator<Item = &mut DebugLayer> {
-        self.debug_layers.values_mut()
     }
 
     /// Makes every render layer leave, and drops them.

@@ -13,9 +13,7 @@ use mln_gfx::RendererBackend as _;
 use mln_gfx::frame::FrameTarget;
 use mln_gfx::offscreen_target::OffscreenTarget;
 use mln_map::transform::Transform;
-use mln_map_types::{
-    CameraOptions, ConstrainMode, Elevation, MapDebugOptions, MapMode, TerrainOptions, TileLodMode, ViewportMode,
-};
+use mln_map_types::{CameraOptions, ConstrainMode, Elevation, MapMode, TerrainOptions, TileLodMode, ViewportMode};
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::feature::FeatureState;
 use mln_style::sources::{GeoJSONOptions, GeoJsonSourceType};
@@ -224,7 +222,6 @@ impl DrapedMap {
             style_loaded: true,
             mode: MapMode::Continuous,
             pixel_ratio: 1.0,
-            debug_options: MapDebugOptions::NO_DEBUG,
             time_point: None,
             view: self.transform.view().clone(),
             min_zoom: 0.0,

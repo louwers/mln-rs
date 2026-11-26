@@ -291,7 +291,7 @@ mod tests {
     use super::*;
 
     fn declaration(program: &'static Program, uniforms: &[Property], variant: ProjectionVariant) -> Declaration {
-        let key = program.variant_key(&ProgramParameters::new(1.0, false), uniforms, variant);
+        let key = program.variant_key(&ProgramParameters::new(1.0), uniforms, variant);
         Declaration::new(&key).unwrap()
     }
 

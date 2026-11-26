@@ -72,10 +72,6 @@ void main() {
     vec3 u_low_vec = vec3(u_brightness_high, u_brightness_high, u_brightness_high);
 
     fragColor = vec4(mix(u_high_vec, u_low_vec, rgb) * alpha, alpha);
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &GlslEsDeclarations::DEFAULT,

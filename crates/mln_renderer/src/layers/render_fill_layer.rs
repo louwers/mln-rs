@@ -297,7 +297,7 @@ impl TileBuilder<'_> {
         // The outline draws in the fill color unless it has one of its own,
         // which a pattern doesn't default to.
         let do_outline = *evaluated.fill_antialias.uniform() && (!self.pattern || self.outline_is_fill_color);
-        let color_mode = context.color_mode(ColorMode::alpha_blended());
+        let color_mode = ColorMode::alpha_blended();
         let fill_shader = context.shader_key(self.fill_program, uniforms, self.projection_variant);
         let outline_shader =
             do_outline.then(|| context.shader_key(self.outline_program, uniforms, self.projection_variant));

@@ -50,7 +50,7 @@ use mln_gfx::shaders::bindings::PAINT_PARAMS_ID;
 use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_map_types::{MapDebugOptions, View};
+use mln_map_types::View;
 use mln_style::layer::ErasedLayerStyle;
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
@@ -583,13 +583,12 @@ impl Drapes {
                 to_projection_ubo(&transform.projection_data_for_tile(tile, false))
             });
         }
-        let overdraw = parameters.debug_options.contains(MapDebugOptions::OVERDRAW);
         for targets in &mut self.targets {
             let redrawn =
                 self.drapes.iter().flat_map(|drape| &drape.stacks).filter(|drape| redraws_at(drape, targets.side));
             let composited: Vec<_> = redrawn.flat_map(|drape| drape.groups.composited.iter().copied()).collect();
             let size = Size::new(targets.side, targets.side);
-            targets.layer_composite.update(gpu, parameters.context, size, Some(COLOR), overdraw, &composited);
+            targets.layer_composite.update(gpu, parameters.context, size, Some(COLOR), &composited);
         }
     }
 

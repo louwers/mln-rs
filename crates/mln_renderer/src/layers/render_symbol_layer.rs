@@ -12,7 +12,6 @@ use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{Projection, ProjectionData};
@@ -20,9 +19,7 @@ use mln_style::layer::{ErasedLayerStyle as _, LayerStyle};
 use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
 use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
-use mln_style::types::{
-    AlignmentType, IconTextFitType, SymbolPlacementType, TextRotationAlignmentType, TranslateAnchorType,
-};
+use mln_style::types::{AlignmentType, IconTextFitType, SymbolPlacementType, TextRotationAlignmentType};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
@@ -33,26 +30,23 @@ use mln_util::identity::SimpleIdentity;
 
 use super::cast_matrix;
 use crate::bucket::Bucket;
-use crate::bucket_geometry::{BucketGeometry, bucket_vertices, copied_indexes, copied_vertices, paint_vertices};
+use crate::bucket_geometry::{BucketGeometry, bucket_vertices, copied_indexes, paint_vertices};
 use crate::buckets::symbol_bucket::{
-    Buffer, CollisionBoxDynamicVertex, CollisionBoxLayoutVertex, CollisionBuffer, PaintProperties, SymbolBucket,
-    SymbolDynamicLayoutVertex, SymbolOpacityVertex,
+    Buffer, PaintProperties, SymbolBucket, SymbolDynamicLayoutVertex, SymbolOpacityVertex,
 };
-use crate::draw::{DrawGeometry, DrawObjects, Textures, copy_shared_attributes};
+use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::{SharedVertices, TypedVertices};
 use crate::layer_drawing::{
-    BucketChanges, DrawDepth, DrawGroup, DrawList, DrawObjectsMut, DrawOrder, FrameDraw, KeptDraw, LayerDrawing,
-    LayerDraws, TileMap, UniformWriter,
+    BucketChanges, DrawGroup, DrawList, DrawObjectsMut, DrawOrder, FrameDraw, LayerDrawing, LayerDraws, TileMap,
+    UniformWriter,
 };
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layers::symbol::programs;
-use crate::layers::symbol::ubo::{
-    CollisionDrawableUBO, CollisionTilePropsUBO, SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO,
-};
+use crate::layers::symbol::ubo::{SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO};
 use crate::layout::layout::{LayoutParameters, SourceLayer};
 use crate::layout::symbol_layout::SymbolLayout;
 use crate::layout::symbol_projection::{gl_coord_matrix, label_plane_matrix};
@@ -71,8 +65,6 @@ use crate::tile_matrix::{projection_data, to_projection_ubo};
 const DRAWABLE_ID: usize = programs::SYMBOL_SDF.buffer_id("drawableVector");
 const TILE_PROPS_ID: usize = programs::SYMBOL_SDF.buffer_id("tilePropsVector");
 const PROPS_ID: usize = programs::SYMBOL_SDF.buffer_id("props");
-const COLLISION_DRAWABLE_ID: usize = programs::COLLISION_BOX.buffer_id("drawable");
-const COLLISION_TILE_PROPS_ID: usize = programs::COLLISION_BOX.buffer_id("tile_props");
 
 /// The slots of the programs' textures that the draws bind.
 const GROUND_DEPTH_SLOT: usize = programs::SYMBOL_SDF.texture_slot("ground_depth");
@@ -93,8 +85,6 @@ pub(crate) struct SymbolPropertyValues {
     pub(crate) rotation_alignment: AlignmentType,
     /// Whether the symbols' glyphs or icons are placed along their lines.
     pub(crate) along_line: bool,
-    pub(crate) translate: [f32; 2],
-    pub(crate) translate_anchor: TranslateAnchorType,
 }
 
 /// What a symbol draw draws, which its uniforms read.
@@ -114,26 +104,18 @@ struct SymbolDrawData {
 }
 
 #[must_use]
-pub(crate) fn icon_property_values(
-    evaluated: &SymbolPaintProperties::PossiblyEvaluated,
-    layout: &SymbolLayoutProperties::PossiblyEvaluated,
-) -> SymbolPropertyValues {
+pub(crate) fn icon_property_values(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> SymbolPropertyValues {
     let rotation_alignment = *layout.icon_rotation_alignment.uniform();
     SymbolPropertyValues {
         pitch_alignment: *layout.icon_pitch_alignment.uniform(),
         rotation_alignment,
         along_line: rotation_alignment == AlignmentType::Map
             && *layout.symbol_placement.uniform() != SymbolPlacementType::Point,
-        translate: *evaluated.icon_translate.uniform(),
-        translate_anchor: *evaluated.icon_translate_anchor.uniform(),
     }
 }
 
 #[must_use]
-pub(crate) fn text_property_values(
-    evaluated: &SymbolPaintProperties::PossiblyEvaluated,
-    layout: &SymbolLayoutProperties::PossiblyEvaluated,
-) -> SymbolPropertyValues {
+pub(crate) fn text_property_values(layout: &SymbolLayoutProperties::PossiblyEvaluated) -> SymbolPropertyValues {
     let rotation_alignment = *layout.text_rotation_alignment.uniform();
     SymbolPropertyValues {
         pitch_alignment: *layout.text_pitch_alignment.uniform(),
@@ -144,8 +126,6 @@ pub(crate) fn text_property_values(
         },
         along_line: rotation_alignment != TextRotationAlignmentType::Viewport
             && *layout.symbol_placement.uniform() != SymbolPlacementType::Point,
-        translate: *evaluated.text_translate.uniform(),
-        translate_anchor: *evaluated.text_translate_anchor.uniform(),
     }
 }
 
@@ -333,22 +313,18 @@ impl SymbolDraw {
 }
 
 /// What the layer keeps of a tile: its draws, as they were built for the
-/// tile's bucket, and those of its collision boxes and circles.
+/// tile's bucket.
 #[derive(Default)]
 pub(crate) struct SymbolTile {
     draws: Vec<SymbolDraw>,
-    collision: Vec<CollisionDraw>,
 }
 
-/// The layer's drawing: what it keeps of each tile, its draws of the frame,
-/// each of the draw at its index among its tile's, and as its overlay those
-/// of the tiles' collision boxes and circles, from the first tile that has
-/// any, each of the collision draw at its index among its tile's.
+/// The layer's drawing: what it keeps of each tile, and its draws of the
+/// frame, each of the draw at its index among its tile's.
 #[derive(Default)]
 pub(crate) struct SymbolDrawing {
     tiles: TileMap<SymbolTile>,
     frame: Option<LayerDraws<usize>>,
-    overlay: Option<LayerDraws<usize>>,
 }
 
 impl SymbolDrawing {
@@ -359,27 +335,10 @@ impl SymbolDrawing {
         Some(DrawObjectsMut { objects: &mut draw.objects, atlases: Some(&draw.atlases) })
     }
 
-    /// The GPU objects of `draw`, the collision draw at `index` of its tile.
-    fn collision_objects<'a>(
-        tiles: &'a mut TileMap<SymbolTile>,
-        draw: &FrameDraw,
-        index: usize,
-    ) -> Option<DrawObjectsMut<'a>> {
-        Some((&mut tiles.get_mut(&draw.tile?)?.collision.get_mut(index)?.draw.objects).into())
-    }
-
     /// Draws the pass's draws of the layer's draw group, if it has it.
     fn render_frame(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
         if let Some(frame) = &self.frame {
             frame.render(&mut self.tiles, Self::objects, gpu, parameters);
-            order.step(parameters);
-        }
-    }
-
-    /// Draws the pass's draws of the overlay, if the layer has it.
-    fn render_overlay(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
-        if let Some(overlay) = &self.overlay {
-            overlay.render(&mut self.tiles, Self::collision_objects, gpu, parameters);
             order.step(parameters);
         }
     }
@@ -393,8 +352,8 @@ impl LayerDrawing for SymbolDrawing {
     }
 
     fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
-        for draws in [&self.frame, &self.overlay].into_iter().flatten() {
-            visit(DrawGroup::Draws(draws.frame()));
+        if let Some(frame) = &self.frame {
+            visit(DrawGroup::Draws(frame.frame()));
         }
     }
 
@@ -408,8 +367,8 @@ impl LayerDrawing for SymbolDrawing {
     }
 
     fn clear_frame(&mut self) {
-        for draws in [&mut self.frame, &mut self.overlay].into_iter().flatten() {
-            draws.clear();
+        if let Some(frame) = &mut self.frame {
+            frame.clear();
         }
     }
 
@@ -417,31 +376,11 @@ impl LayerDrawing for SymbolDrawing {
         if let Some(frame) = &self.frame {
             frame.upload(gpu, &mut self.tiles, Self::objects, context);
         }
-        if let Some(overlay) = &self.overlay {
-            overlay.upload(gpu, &mut self.tiles, Self::collision_objects, context);
-        }
     }
 
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
-        match order {
-            DrawOrder::BottomUp => {
-                self.render_frame(gpu, parameters, order);
-                self.render_overlay(gpu, parameters, order);
-            }
-            DrawOrder::TopDown => {
-                self.render_overlay(gpu, parameters, order);
-                self.render_frame(gpu, parameters, order);
-            }
-        }
+        self.render_frame(gpu, parameters, order);
     }
-}
-
-/// A draw of a tile's collision boxes or circles, with the translation of
-/// the symbols they belong to.
-struct CollisionDraw {
-    draw: KeptDraw,
-    translate: [f32; 2],
-    translate_anchor: TranslateAnchorType,
 }
 
 /// A draw's entries in the layer's storage buffers.
@@ -626,8 +565,6 @@ pub(crate) struct RenderSymbolLayer {
     drawing: SymbolDrawing,
     /// The frame's draws as the update makes them.
     draw_list: DrawList<SymbolUniforms, usize>,
-    /// The overlay's draws as the update makes them.
-    collision_list: DrawList<(), usize>,
     /// The segments of the tiles the update builds draws of, as it sorts
     /// them, kept from frame to frame for their memory.
     renderable_segments: Vec<SegmentGroup>,
@@ -776,7 +713,6 @@ impl RenderSymbolLayer {
             values,
             drawing: SymbolDrawing::default(),
             draw_list: DrawList::default(),
-            collision_list: DrawList::default(),
             renderable_segments: Vec::new(),
             placement_data: Vec::new(),
             follower_data: Vec::new(),
@@ -787,96 +723,6 @@ impl RenderSymbolLayer {
             #[cfg(feature = "bench")]
             held: Vec::new(),
         }
-    }
-
-    /// Builds the tile's collision draws anew, and makes the overlay for the
-    /// first tile that has collision boxes or circles.
-    fn rebuild_collision(
-        &mut self,
-        context: &mut Context,
-        tile_id: &OverscaledTileID,
-        bucket: &SymbolBucket,
-        evaluated: &SymbolPaintProperties::PossiblyEvaluated,
-    ) {
-        let mut collision = Vec::new();
-        let mut has_collision = false;
-        for is_text in [false, true] {
-            has_collision |= self.add_collision_draws(context, &mut collision, bucket, evaluated, is_text);
-        }
-        if has_collision {
-            self.drawing.overlay.get_or_insert_default();
-            if let Some(entry) = self.drawing.tiles.entry(tile_id) {
-                entry.value.get_or_insert_with(SymbolTile::default).collision = collision;
-            }
-        } else if let Some(cached) = self.drawing.tiles.get_mut(tile_id) {
-            cached.collision.clear();
-        }
-    }
-
-    /// Adds the draws of the collision boxes and circles of the bucket's
-    /// text or icons to `collision`. Returns whether it has any.
-    fn add_collision_draws(
-        &self,
-        context: &mut Context,
-        collision: &mut Vec<CollisionDraw>,
-        bucket: &SymbolBucket,
-        evaluated: &SymbolPaintProperties::PossiblyEvaluated,
-        is_text: bool,
-    ) -> bool {
-        let (has_collision_box, has_collision_circle) = if is_text {
-            (bucket.has_text_collision_box_data(), bucket.has_text_collision_circle_data())
-        } else {
-            (bucket.has_icon_collision_box_data(), bucket.has_icon_collision_circle_data())
-        };
-        if !has_collision_box && !has_collision_circle {
-            return false;
-        }
-
-        let values = if is_text {
-            text_property_values(evaluated, &bucket.layout)
-        } else {
-            icon_property_values(evaluated, &bucket.layout)
-        };
-        let state = &bucket.state;
-        let mut add = |buffer: &CollisionBuffer, program: &'static Program, mode: DrawMode| {
-            if buffer.vertices.is_empty() || buffer.indices.is_empty() {
-                return;
-            }
-            let geometry = DrawGeometry {
-                vertices: collision_vertex_attributes(context, buffer),
-                vertex_count: buffer.vertices.len(),
-                mode,
-                indexes: copied_indexes(&buffer.indices),
-                segments: buffer.segments.iter().map(SegmentBase::copy).collect(),
-                instances: None,
-            };
-            let objects = DrawObjects::new(
-                context.shader_key(program, Uniforms::default(), self.base.projection_variant),
-                ColorMode::alpha_blended(),
-                CullFaceMode::disabled(),
-                geometry,
-                Textures::default(),
-            );
-            collision.push(CollisionDraw {
-                draw: KeptDraw::new(objects),
-                translate: values.translate,
-                translate_anchor: values.translate_anchor,
-            });
-        };
-
-        if has_collision_box {
-            let collision_box = if is_text { &state.text_collision_box } else { &state.icon_collision_box };
-            if let Some(collision_box) = collision_box {
-                add(collision_box, &programs::COLLISION_BOX, DrawMode::Lines(1.0));
-            }
-        }
-        if has_collision_circle {
-            let collision_circle = if is_text { &state.text_collision_circle } else { &state.icon_collision_circle };
-            if let Some(collision_circle) = collision_circle {
-                add(collision_circle, &programs::COLLISION_CIRCLE, DrawMode::Triangles());
-            }
-        }
-        true
     }
 
     /// The entries in the layer's storage buffers of `draw`, of the tile
@@ -1017,8 +863,7 @@ impl RenderSymbolLayer {
     /// Makes the frame's draws of the layer's draws of `tiles` that show any
     /// symbols, in `passes`, which hide behind the ground in front of them
     /// where they draw with a variant that stands on terrain (`stands`), and
-    /// of their collision boxes and circles, and writes the buffers they
-    /// read.
+    /// writes the buffers they read.
     fn make_frame_draws(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -1050,12 +895,6 @@ impl RenderSymbolLayer {
                 let frame_draw = FrameDraw { pass: passes, ..FrameDraw::new(Some(tile_id), draw.id) };
                 self.draw_list.push_part(frame_draw, index, uniforms);
             }
-            for (index, draw) in cached.collision.iter_mut().enumerate() {
-                write_collision_uniforms(gpu, draw, &tile_id, paint_parameters);
-                let frame_draw =
-                    FrameDraw { pass: passes, depth: DrawDepth::Off, ..FrameDraw::new(Some(tile_id), draw.draw.id) };
-                self.collision_list.push_part(frame_draw, index, ());
-            }
         }
 
         if let Some(frame) = &mut self.drawing.frame {
@@ -1069,13 +908,6 @@ impl RenderSymbolLayer {
             }
         } else {
             self.draw_list.clear();
-        }
-        // Each collision draw has its own GPU objects and buffers, so no two
-        // share an order, and the overlay's buffers are none.
-        if let Some(overlay) = &mut self.drawing.overlay {
-            let _ = self.collision_list.finish(overlay, gpu, paint_parameters.context, |_| {});
-        } else {
-            self.collision_list.clear();
         }
     }
 }
@@ -1104,67 +936,6 @@ fn write_uniforms(
     writer.storage(DRAWABLE_ID, |uniforms| uniforms.draw_ubo);
     writer.storage(TILE_PROPS_ID, |uniforms| uniforms.tile_props);
     writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
-}
-
-/// Writes the buffers of a collision draw of the tile `tile_id`: its matrix,
-/// and the scale of its boxes' and circles' extrusions.
-fn write_collision_uniforms(
-    gpu: &mut dyn Gpu,
-    draw: &mut CollisionDraw,
-    tile_id: &OverscaledTileID,
-    parameters: &mut PaintParameters<'_>,
-) {
-    const NEAR_CLIPPED: bool = false;
-    const IN_VIEWPORT_PIXEL_UNITS: bool = false;
-    let unwrapped = tile_id.to_unwrapped();
-    let projection = projection_data(
-        &unwrapped,
-        parameters,
-        draw.translate,
-        draw.translate_anchor,
-        NEAR_CLIPPED,
-        IN_VIEWPORT_PIXEL_UNITS,
-        None,
-        false,
-    );
-
-    let zoom = parameters.view.zoom();
-    let pixel_ratio = unwrapped.pixels_to_tile_units(1.0, zoom as f32);
-    let scale = 2f64.powf(zoom - f64::from(tile_id.overscaled_z)) as f32;
-    let extrude_scale = [
-        parameters.pixels_to_gl_units[0] / (pixel_ratio * scale),
-        parameters.pixels_to_gl_units[1] / (pixel_ratio * scale),
-    ];
-    let draw_ubo = CollisionDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) };
-    let tile_props_ubo =
-        CollisionTilePropsUBO { extrude_scale, overscale_factor: tile_id.overscale_factor() as f32, pad1: 0.0 };
-    let objects = &mut draw.draw.objects;
-    let context = &mut *parameters.context;
-    objects.write_pod(gpu, COLLISION_DRAWABLE_ID, &draw_ubo, context);
-    objects.write_pod(gpu, COLLISION_TILE_PROPS_ID, &tile_props_ubo, context);
-    objects.write_pod(gpu, PROJECTION_ID, &to_projection_ubo(&projection), context);
-}
-
-fn collision_vertex_attributes(context: &mut Context, buffer: &CollisionBuffer) -> VertexAttributeArray {
-    let mut attrs = VertexAttributeArray::new();
-    let layout_stride = size_of::<CollisionBoxLayoutVertex>() as u32;
-    let layout = copied_vertices(context, &buffer.vertices);
-    let dynamic_stride = size_of::<CollisionBoxDynamicVertex>() as u32;
-    let dynamic = copied_vertices(context, &buffer.dynamic_vertices);
-    attrs.set_shared("pos", SharedAttribute::new(layout.clone(), AttributeDataType::Short2, 0, layout_stride));
-    attrs.set_shared("anchor_pos", SharedAttribute::new(layout.clone(), AttributeDataType::Short2, 4, layout_stride));
-    attrs.set_shared("extrude", SharedAttribute::new(layout.clone(), AttributeDataType::Short2, 8, layout_stride));
-    // Over the ground, the heights placement gave the boxes.
-    let height = if buffer.elevations.is_empty() {
-        SharedAttribute::new(layout, AttributeDataType::Float, 12, layout_stride)
-    } else {
-        let elevations = copied_vertices(context, &buffer.elevations);
-        SharedAttribute::new(elevations, AttributeDataType::Float, 0, size_of::<f32>() as u32)
-    };
-    attrs.set_shared("height_offset", height);
-    attrs.set_shared("placed", SharedAttribute::new(dynamic.clone(), AttributeDataType::UShort2, 0, dynamic_stride));
-    attrs.set_shared("shift", SharedAttribute::new(dynamic, AttributeDataType::Float2, 4, dynamic_stride));
-    attrs
 }
 
 impl TypedLayer for RenderSymbolLayer {
@@ -1224,8 +995,7 @@ impl TypedLayer for RenderSymbolLayer {
 
     /// Makes the frame's draws of the layer: those of each of its tiles,
     /// which it builds for a tile it keeps none of and refreshes where the
-    /// tile's bucket changed, and the collision boxes and circles it draws
-    /// over them, and writes the buffers they read.
+    /// tile's bucket changed, and writes the buffers they read.
     fn update_draws(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -1300,7 +1070,6 @@ impl TypedLayer for RenderSymbolLayer {
                 for draws in cached.draws.chunk_by_mut(|a, b| a.attributes_key() == b.attributes_key()) {
                     refresh_draws(context, draws, geometry, bucket, layer_id, evaluated, refresh);
                 }
-                self.rebuild_collision(paint_parameters.context, &tile_id, bucket, evaluated);
                 continue;
             }
 
@@ -1354,8 +1123,6 @@ impl TypedLayer for RenderSymbolLayer {
             if !state.text.segments.is_empty() && has_glyph_texture {
                 add_renderables(&state.text, SymbolType::Text);
             }
-
-            self.rebuild_collision(paint_parameters.context, &tile_id, bucket, evaluated);
         }
 
         // A stable sort keeps segments of the same order in the order they
@@ -1373,13 +1140,11 @@ impl TypedLayer for RenderSymbolLayer {
         // Renderables come across tiles, out of order, so the atlases' textures
         // given to a tile's draws are kept by tile.
         let mut tile_atlases: HashMap<UnwrappedTileID, TileAtlases> = HashMap::default();
-        let color_mode = paint_parameters.context.color_mode(
-            if (passes.underlying_type() & RenderPass::Translucent.underlying_type()) != 0 {
-                ColorMode::alpha_blended()
-            } else {
-                ColorMode::unblended()
-            },
-        );
+        let color_mode = if (passes.underlying_type() & RenderPass::Translucent.underlying_type()) != 0 {
+            ColorMode::alpha_blended()
+        } else {
+            ColorMode::unblended()
+        };
 
         for group in &renderable_segments {
             let is_text = group.type_ == SymbolType::Text;
@@ -1414,11 +1179,8 @@ impl TypedLayer for RenderSymbolLayer {
             };
 
             let bucket_layout = &*bucket.layout;
-            let values = if is_text {
-                text_property_values(evaluated, bucket_layout)
-            } else {
-                icon_property_values(evaluated, bucket_layout)
-            };
+            let values =
+                if is_text { text_property_values(bucket_layout) } else { icon_property_values(bucket_layout) };
 
             let atlases = render_data.atlas_textures();
 

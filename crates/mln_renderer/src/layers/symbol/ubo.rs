@@ -1,4 +1,4 @@
-//! The symbols' blocks, and their collision boxes' and circles'.
+//! The symbols' blocks.
 
 use mln_gfx::shaders::block::uniform_block;
 
@@ -58,19 +58,5 @@ uniform_block! {
         pub icon_halo_width: f32,
         pub icon_halo_blur: f32,
         pub pad2: f32,
-    }
-}
-
-uniform_block! {
-    pub struct CollisionDrawableUBO {
-        pub matrix: [f32; 4 * 4],
-    }
-}
-
-uniform_block! {
-    pub struct CollisionTilePropsUBO {
-        pub extrude_scale: [f32; 2],
-        pub overscale_factor: f32,
-        pub pad1: f32,
     }
 }

@@ -43,11 +43,6 @@ layout(location = 0) out vec4 out_color;
 
 void main() {
 
-#if defined(OVERDRAW_INSPECTOR)
-    out_color = vec4(1.0);
-    return;
-#endif
-
 #if defined(HAS_UNIFORM_u_color)
     const vec4 color = props.color;
 #else
@@ -110,11 +105,6 @@ layout(location = 2) in vec2 frag_position;
 layout(location = 0) out vec4 out_color;
 
 void main() {
-
-#if defined(OVERDRAW_INSPECTOR)
-    out_color = vec4(1.0);
-    return;
-#endif
 
 #if defined(HAS_UNIFORM_u_outline_color)
     const vec4 color = props.outline_color;
@@ -228,11 +218,6 @@ layout(location = 0) out vec4 out_color;
 
 void main() {
 
-#if defined(OVERDRAW_INSPECTOR)
-    out_color = vec4(1.0);
-    return;
-#else
-
     const FillPatternTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_pattern_from)
@@ -288,7 +273,6 @@ void main() {
     } else {
         out_color = mix(color1, color2, props.fade) * opacity;
     }
-#endif
 }
 ",
 };
@@ -391,11 +375,6 @@ layout(location = 0) out vec4 out_color;
 
 void main() {
 
-#if defined(OVERDRAW_INSPECTOR)
-    out_color = vec4(1.0);
-    return;
-#else
-
     const FillPatternTilePropsUBO tileProps = tilePropsVector.elements[constant.ubo_index];
 
 #if defined(HAS_UNIFORM_u_pattern_from)
@@ -454,7 +433,6 @@ void main() {
     } else {
         out_color = mix(color1, color2, props.fade) * alpha * opacity;
     }
-#endif
 }
 ",
 };

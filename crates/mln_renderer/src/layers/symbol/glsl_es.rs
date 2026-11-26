@@ -1,5 +1,4 @@
-//! The GLSL ES, for OpenGL, of the symbols' programs and their collision
-//! boxes' and circles'.
+//! The GLSL ES, for OpenGL, of the symbols' programs.
 
 use mln_gfx::shaders::block::{Block, UniformBlock};
 use mln_gfx::shaders::source::Precision::Low;
@@ -25,137 +24,6 @@ const SYMBOL_SDF_DECLARATIONS: GlslEsDeclarations = GlslEsDeclarations {
     attributes: &[(Low, &["halo_blur", "halo_width", "opacity"])],
     highp_samplers: &["ground_depth"],
     names: SYMBOL_NAMES,
-};
-
-pub(crate) const COLLISION_BOX: GlslEsSource = GlslEsSource {
-    vertex: r"out float v_placed;
-out float v_notUsed;
-
-void main() {
-#ifdef PROJECTION_GLOBE
-    vec4 projectedPoint = projectTileWithElevation(a_anchor_pos, a_height_offset);
-#else
-    vec4 projectedPoint = u_matrix * vec4(a_anchor_pos, a_height_offset, 1);
-#endif
-    highp float camera_to_anchor_distance = projectedPoint.w;
-    highp float collision_perspective_ratio = clamp(
-        0.5 + 0.5 * (u_camera_to_center_distance / camera_to_anchor_distance),
-        0.0, // Prevents oversized near-field boxes in pitched/overzoomed tiles
-        4.0);
-
-#ifdef PROJECTION_GLOBE
-    gl_Position = projectTileWithElevation(a_pos, a_height_offset);
-    // Boxes just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
-    if (gl_Position.z / gl_Position.w < 1.1) {
-        gl_Position.z = 0.0;
-    }
-#else
-    gl_Position = u_matrix * vec4(a_pos, a_height_offset, 1.0);
-#endif
-    gl_Position.xy += (a_extrude + a_shift) * u_extrude_scale * gl_Position.w * collision_perspective_ratio;
-
-    v_placed = a_placed.x;
-    v_notUsed = a_placed.y;
-}
-",
-    fragment: r"in float v_placed;
-in float v_notUsed;
-
-void main() {
-
-    float alpha = 0.5;
-
-    // Red = collision, hide label
-    fragColor = vec4(1.0, 0.0, 0.0, 1.0) * alpha;
-
-    // Blue = no collision, label is showing
-    if (v_placed > 0.5) {
-        fragColor = vec4(0.0, 0.0, 1.0, 0.5) * alpha;
-    }
-
-    if (v_notUsed > 0.5) {
-        // This box not used, fade it out
-        fragColor *= .1;
-    }
-}
-",
-    declarations: &GlslEsDeclarations::DEFAULT,
-};
-
-pub(crate) const COLLISION_CIRCLE: GlslEsSource = GlslEsSource {
-    vertex: r"out float v_placed;
-out float v_notUsed;
-out float v_radius;
-out highp vec2 v_extrude;
-out vec2 v_extrude_scale;
-
-void main() {
-#ifdef PROJECTION_GLOBE
-    vec4 projectedPoint = projectTile(a_anchor_pos);
-#else
-    vec4 projectedPoint = u_matrix * vec4(a_anchor_pos, 0, 1);
-#endif
-    highp float camera_to_anchor_distance = projectedPoint.w;
-    highp float collision_perspective_ratio = clamp(
-        0.5 + 0.5 * (u_camera_to_center_distance / camera_to_anchor_distance),
-        0.0, // Prevents oversized near-field circles in pitched/overzoomed tiles
-        4.0);
-
-#ifdef PROJECTION_GLOBE
-    gl_Position = projectTile(a_pos);
-    // Circles just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
-    if (gl_Position.z / gl_Position.w < 1.1) {
-        gl_Position.z = 0.0;
-    }
-#else
-    gl_Position = u_matrix * vec4(a_pos, 0.0, 1.0);
-#endif
-
-    highp float padding_factor = 1.2; // Pad the vertices slightly to make room for anti-alias blur
-    gl_Position.xy += a_extrude * u_extrude_scale * padding_factor * gl_Position.w * collision_perspective_ratio;
-
-    v_placed = a_placed.x;
-    v_notUsed = a_placed.y;
-    v_radius = abs(a_extrude.y); // We don't pitch the circles, so both units of the extrusion vector are equal in magnitude to the radius
-
-    v_extrude = a_extrude * padding_factor;
-    v_extrude_scale = u_extrude_scale * u_camera_to_center_distance * collision_perspective_ratio;
-}
-",
-    fragment: r"in float v_placed;
-in float v_notUsed;
-in float v_radius;
-in highp vec2 v_extrude;
-in vec2 v_extrude_scale;
-
-void main() {
-    float alpha = 0.5;
-
-    // Red = collision, hide label
-    vec4 color = vec4(1.0, 0.0, 0.0, 1.0) * alpha;
-
-    // Blue = no collision, label is showing
-    if (v_placed > 0.5) {
-        color = vec4(0.0, 0.0, 1.0, 0.5) * alpha;
-    }
-
-    if (v_notUsed > 0.5) {
-        // This box not used, fade it out
-        color *= .2;
-    }
-
-    float extrude_scale_length = length(v_extrude_scale);
-    float extrude_length = length(v_extrude) * extrude_scale_length;
-    float stroke_width = 15.0 * extrude_scale_length / u_overscale_factor;
-    float radius = v_radius * extrude_scale_length;
-
-    float distance_to_edge = abs(extrude_length - radius);
-    float opacity_t = smoothstep(-stroke_width, 0.0, -distance_to_edge);
-
-    fragColor = opacity_t * color;
-}
-",
-    declarations: &GlslEsDeclarations::DEFAULT,
 };
 
 /// `unpack_opacity`, a symbol's fade opacity from its packed attribute.
@@ -309,10 +177,6 @@ void main() {
     lowp float alpha = v_fade_opacity;
 #endif
     fragColor = texture(u_texture, atlas_pos(v_tex_origin, v_tex)) * alpha;
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &SYMBOL_ICON_DECLARATIONS,
@@ -558,10 +422,6 @@ highp vec4 halo_color = u_halo_color;
     }
 
     fragColor = color * (alpha * opacity * fade_opacity);
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &SYMBOL_SDF_DECLARATIONS,
@@ -802,9 +662,6 @@ highp vec4 halo_color = u_halo_color;
         lowp float alpha = opacity * fade_opacity;
         fragColor = texture(u_texture_icon, tex) * alpha;
 
-#ifdef OVERDRAW_INSPECTOR
-        fragColor = vec4(1.0);
-#endif
         return;
     }
 
@@ -824,10 +681,6 @@ highp vec4 halo_color = u_halo_color;
     }
 
     fragColor = color * (alpha * opacity * fade_opacity);
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &SYMBOL_SDF_DECLARATIONS,

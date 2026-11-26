@@ -32,8 +32,7 @@
 // - A texture and its sampler are two bindings, `<name>_texture` and
 //   `<name>_sampler`, combined where they are sampled.
 // - Symbols read vertex attributes, with the port's `tex_origin` and
-//   `height_offset`, where C++ reads per-instance storage buffers. The
-//   collision boxes read `height_offset` too.
+//   `height_offset`, where C++ reads per-instance storage buffers.
 // - A fill extrusion wall reads its outline vertex and the next one as
 //   instance attributes, where C++ indexes a storage buffer of the outline
 //   with `gl_InstanceIndex`. The port's pulled walls and outlines have no
@@ -48,9 +47,8 @@
 //   which the projection matrix carries, so float32 keeps them exact close
 //   in (`projectToSphere`).
 // - What naga doesn't take is written another way: no precision qualifiers,
-//   `int` for the `bool` members of buffers, no sampler parameters, `flat` on
-//   an integer output, and an `#else` after the overdraw inspector's early
-//   return where a function call follows it.
+//   `int` for the `bool` members of buffers, no sampler parameters, and
+//   `flat` on an integer output.
 // - Clip space is y-up, as in OpenGL, Metal, D3D and naga's IR: no stage
 //   flips Y (`applySurfaceTransform`), the SPIR-V back end does for Vulkan.
 //
@@ -60,8 +58,6 @@
 //   include/mln/shaders/gl/background_pattern.hpp
 //   include/mln/shaders/gl/circle.hpp
 //   include/mln/shaders/gl/clipping_mask.hpp
-//   include/mln/shaders/gl/collision_box.hpp
-//   include/mln/shaders/gl/collision_circle.hpp
 //   include/mln/shaders/gl/color_relief.hpp
 //   include/mln/shaders/gl/fill.hpp
 //   include/mln/shaders/gl/fill_extrusion.hpp
@@ -96,8 +92,8 @@
 //   in the pattern and symbol shaders, and the pattern rectangles and the
 //   symbols' atlas origins reach the fragment shaders `flat`.
 // - The symbol shaders read `a_tex_origin`, the atlas origin of a quad's
-//   image, and the symbol and collision box shaders read `a_height_offset`,
-//   the symbol's `symbol-height-offset`, as GL JS's do.
+//   image, and the symbol shaders read `a_height_offset`, the symbol's
+//   `symbol-height-offset`, as GL JS's do.
 // - On the globe, the symbol shaders drop a screen-aligned label whose anchor
 //   is behind the horizon, unless the label is raised.
 // - The fill extrusion shaders declare `gl_Position` invariant. Their vertex
@@ -176,8 +172,6 @@ pub static PROGRAMS: &[&Program] = &[
     &symbol::programs::SYMBOL_ICON,
     &symbol::programs::SYMBOL_SDF,
     &symbol::programs::SYMBOL_TEXT_AND_ICON,
-    &symbol::programs::COLLISION_BOX,
-    &symbol::programs::COLLISION_CIRCLE,
     &programs::GLOBE_DEPTH,
     &programs::SKY,
     &programs::ATMOSPHERE,

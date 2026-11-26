@@ -295,7 +295,7 @@ impl RenderRasterLayer {
         while objects.images.len() < tile_ids.len() {
             let draw_geometry =
                 raster_geometry(&quads.vertices, quads.vertices.count(), quads.indexes.clone().into(), &quads.segments);
-            let color_mode = paint_parameters.context.color_mode(ColorMode::alpha_blended());
+            let color_mode = ColorMode::alpha_blended();
             objects.images.push(KeptDraw::new(new_objects(
                 &raster_shader,
                 color_mode,
@@ -544,7 +544,7 @@ impl TypedLayer for RenderRasterLayer {
                         &static_geometry.segments,
                     )
                 };
-                let color_mode = context.color_mode(ColorMode::alpha_blended());
+                let color_mode = ColorMode::alpha_blended();
                 let objects = new_objects(&raster_shader, color_mode, draw_geometry, texture.as_ref());
                 let built = RasterTile { draw: KeptDraw::new(objects), geometry_generation };
                 *entry.value = Some(built);

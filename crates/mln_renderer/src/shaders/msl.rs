@@ -232,15 +232,11 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS)
     const uint2 texel = uint2(in.position.xy);
     const float4 color = image.read(texel);
 
-#if defined(OVERDRAW_INSPECTOR)
-    return half4(color);
-#else
     const float4 src = color * props.opacity;
     if (props.blend == 0) {
         return half4(src);
     }
     return half4(composite(src, backdrop.read(texel), props.blend));
-#endif
 }
 ",
     fast_math: true,

@@ -98,7 +98,7 @@ pub(crate) fn in_assets_suite(style_path: &str, asset_path: &str) -> bool {
 pub trait TestRunnerImpl {
     /// Prepares the map for a test: clears the renderer's data, sets the
     /// frontend's and the map's size, the map's projection mode (axonometric,
-    /// x and y skew) and debug options from `metadata`, and loads its style.
+    /// x and y skew) from `metadata`, and loads its style.
     fn reset_context(&mut self, metadata: &TestMetadata) -> Result<(), MapError>;
 
     fn jump_to_default_camera(&mut self) -> Result<(), MapError>;

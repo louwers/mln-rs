@@ -233,10 +233,6 @@ lowp float stroke_opacity = u_stroke_opacity;
 #ifdef TERRAIN
     fragColor *= v_visibility;
 #endif
-
-#ifdef OVERDRAW_INSPECTOR
-    fragColor = vec4(1.0);
-#endif
 }
 ",
     declarations: &CIRCLE_DECLARATIONS,

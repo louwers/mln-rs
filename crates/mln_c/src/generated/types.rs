@@ -960,18 +960,6 @@ pub const MLN_PROJECTION_MODE_OPTION_Y_SKEW: mln_projection_mode_option_field = 
 pub type mln_projection_mode_option_field = u32;
 /// A set of mln_projection_mode_option_field bits.
 pub type mln_projection_mode_option_fields = u32;
-pub const MLN_MAP_DEBUG_TILE_BORDERS: mln_map_debug_flag = 2;
-pub const MLN_MAP_DEBUG_PARSE_STATUS: mln_map_debug_flag = 4;
-pub const MLN_MAP_DEBUG_TIMESTAMPS: mln_map_debug_flag = 8;
-pub const MLN_MAP_DEBUG_COLLISION: mln_map_debug_flag = 16;
-pub const MLN_MAP_DEBUG_OVERDRAW: mln_map_debug_flag = 32;
-pub const MLN_MAP_DEBUG_STENCIL_CLIP: mln_map_debug_flag = 64;
-pub const MLN_MAP_DEBUG_DEPTH_BUFFER: mln_map_debug_flag = 128;
-pub const MLN_MAP_DEBUG_RENDERING_STATS: mln_map_debug_flag = 256;
-/// A debug overlay that the map draws.
-pub type mln_map_debug_flag = u32;
-/// A set of mln_map_debug_flag bits.
-pub type mln_map_debug_flags = u32;
 pub const MLN_NORTH_ORIENTATION_UP: mln_north_orientation = 0;
 pub const MLN_NORTH_ORIENTATION_RIGHT: mln_north_orientation = 1;
 pub const MLN_NORTH_ORIENTATION_DOWN: mln_north_orientation = 2;
@@ -1763,7 +1751,6 @@ pub struct mln_map_tile_settings {
 #[derive(Debug, Copy, Clone)]
 pub struct mln_map_snapshot {
     pub size: u32,
-    pub debug_flags: mln_map_debug_flags,
     /// Grows with each change to the map's state.
     pub generation: u64,
     /// Whether the style and every resource that the view needs have loaded.
