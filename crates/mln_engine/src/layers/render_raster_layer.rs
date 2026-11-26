@@ -31,7 +31,6 @@ use crate::draw::store::SharedTexture;
 use crate::draw::uniform_buffer::UniformBufferArray;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
-use crate::layer::bucket::NoBucket;
 use crate::layer::bucket_geometry::copied_vertices;
 use crate::layer::layer_drawing::{
     DrawGroup, DrawList, DrawObjectsMut, DrawOrder, FrameDraw, KeptDraw, LayerDrawing, LayerDraws, TileMap,
@@ -176,7 +175,6 @@ impl StaticGeometry {
 
 impl LayerType for Raster {
     type Layout = NoLayout;
-    type Bucket = NoBucket;
     type TileBucket<'a> = &'a RasterContents;
 
     fn render_layer(style: Arc<LayerStyle<Raster>>) -> Box<dyn RenderLayer> {
