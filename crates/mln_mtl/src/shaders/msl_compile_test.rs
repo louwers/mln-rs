@@ -9,12 +9,12 @@
 
 use std::collections::BTreeSet;
 
+use mln_engine::shaders::{PROGRAMS, projection_variants};
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::VertexStep;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program::{GLOBE_DEFINE, Program, TERRAIN_DEFINE};
 use mln_gfx::shaders::source::MslSource;
-use mln_renderer::shaders::{PROGRAMS, projection_variants};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::{NSDictionary, NSObject, NSString};

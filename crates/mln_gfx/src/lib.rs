@@ -6,7 +6,7 @@
 //! A backend's `RendererBackend` owns its `Gpu` and lends it, to the
 //! renderer and to the `FrameTarget` that the renderer draws into; the `Gpu`
 //! owns the renderer's buffers, textures and the groups of buffers its
-//! draws bind, which the renderer keeps in `mln_renderer`. The targets that
+//! draws bind, which the renderer keeps in `mln_engine`. The targets that
 //! draw into rings of the host's textures, or of images they export, are
 //! generic over each backend's part, in [`ring`]. What each program reads, and
 //! the text it compiles from, is in `shaders::program`; the renderer

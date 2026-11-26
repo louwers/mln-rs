@@ -372,7 +372,7 @@ fn lime_center(image: &PremultipliedImage) -> (usize, Option<(f64, f64)>) {
 /// view.
 #[test]
 fn a_rendered_query_finds_a_standing_icon_where_it_draws() {
-    use mln_renderer::query::RenderedQueryOptions;
+    use mln_engine::query::RenderedQueryOptions;
     use mln_util::geo::ScreenCoordinate;
 
     let cases = [("mercator", [0.0, 0.0, 12.0, 60.0], 0.01, 1000.0), ("globe", [0.0, 0.0, 6.0, 50.0], 0.5, 20000.0)];
@@ -479,7 +479,7 @@ fn lime_blobs(image: &PremultipliedImage) -> usize {
 /// as GL JS draws it: a rendered query finds it where it draws.
 #[test]
 fn a_rendered_query_finds_a_translated_icon_where_it_draws() {
-    use mln_renderer::query::RenderedQueryOptions;
+    use mln_engine::query::RenderedQueryOptions;
     use mln_util::geo::ScreenCoordinate;
 
     let camera = [0.0, 0.0, 12.0, 60.0];
@@ -502,7 +502,7 @@ fn a_rendered_query_finds_a_translated_icon_where_it_draws() {
 /// it and placement turns its box: a rendered query finds it where it draws.
 #[test]
 fn a_rendered_query_finds_a_label_at_a_variable_anchor_on_a_slope_where_it_draws() {
-    use mln_renderer::query::RenderedQueryOptions;
+    use mln_engine::query::RenderedQueryOptions;
     use mln_util::geo::ScreenCoordinate;
 
     let (lng, lat) = (0.0105, 0.004);
@@ -534,7 +534,7 @@ fn a_rendered_query_finds_a_label_at_a_variable_anchor_on_a_slope_where_it_draws
 /// where it draws, on Mercator and on the globe.
 #[test]
 fn a_rendered_query_finds_a_standing_circle_where_it_draws() {
-    use mln_renderer::query::RenderedQueryOptions;
+    use mln_engine::query::RenderedQueryOptions;
     use mln_util::geo::ScreenCoordinate;
 
     let cases = [("mercator", [0.0, 0.0, 12.0, 60.0], 2000.0), ("globe", [0.0, 0.0, 6.0, 50.0], 40000.0)];
@@ -565,7 +565,7 @@ fn a_rendered_query_finds_a_standing_circle_where_it_draws() {
 /// level, farther from the camera.
 #[test]
 fn a_rendered_query_finds_a_standing_circle_within_its_radius() {
-    use mln_renderer::query::RenderedQueryOptions;
+    use mln_engine::query::RenderedQueryOptions;
     use mln_util::geo::ScreenCoordinate;
 
     const RADIUS: f64 = 20.0;
@@ -595,7 +595,7 @@ fn a_rendered_query_finds_a_standing_circle_within_its_radius() {
 /// meet its plane, not the slope.
 #[test]
 fn a_rendered_query_finds_a_circle_on_a_slope_within_its_edges() {
-    use mln_renderer::query::RenderedQueryOptions;
+    use mln_engine::query::RenderedQueryOptions;
     use mln_util::geo::ScreenCoordinate;
 
     let layer = r#"{"id": "circles", "type": "circle", "source": "points", "paint": {"circle-color": "lime",
@@ -706,7 +706,7 @@ fn lime_ish(image: &PremultipliedImage) -> usize {
 /// one.
 #[test]
 fn a_rendered_query_finds_a_circle_where_it_shows_past_a_ridge() {
-    use mln_renderer::query::RenderedQueryOptions;
+    use mln_engine::query::RenderedQueryOptions;
     use mln_util::geo::ScreenCoordinate;
 
     let layer = r#"{"id": "circles", "type": "circle", "source": "points",

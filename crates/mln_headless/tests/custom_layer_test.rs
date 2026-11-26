@@ -5,9 +5,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use mln_engine::{Custom, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 use mln_headless::HeadlessFrontend;
 use mln_map::{Map, MapMode, MapOptions};
-use mln_renderer::{Custom, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 use mln_runtime::{BackendType, Device, DeviceOptions};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::ErrorKind;
@@ -138,7 +138,7 @@ fn check(backend: BackendType, host: impl Fn() -> (Arc<dyn CustomLayerHost>, Arc
 }
 
 mod webgpu {
-    use mln_renderer::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
+    use mln_engine::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 
     use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, QUAD_WGSL, check};
 
@@ -213,7 +213,7 @@ mod webgpu {
 #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
 #[expect(unsafe_code, reason = "the host draws through ash")]
 mod vulkan {
-    use mln_renderer::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
+    use mln_engine::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
     use mln_vulkan::ash::{self, vk};
 
     use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, QUAD_WGSL, check};
@@ -371,9 +371,9 @@ mod gl {
 
     use glow::HasContext as _;
     use khronos_egl as egl;
+    use mln_engine::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
     use mln_headless::HeadlessFrontend;
     use mln_map::Map;
-    use mln_renderer::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
     use mln_style::Edit;
 
     use super::{Arc, BackendType, Calls, Custom, CustomLayerHost, Mutex, Ordering, Queue, check, session};
@@ -520,7 +520,7 @@ void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
 mod metal {
     use std::sync::atomic::AtomicUsize;
 
-    use mln_renderer::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
+    use mln_engine::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
     use objc2::rc::Retained;
     use objc2::runtime::ProtocolObject;
     use objc2_foundation::NSString;
@@ -640,7 +640,7 @@ mod d3d12 {
     };
     use mln_d3d12::windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC};
     use mln_d3d12::{ShaderCompiler, ShaderStage};
-    use mln_renderer::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
+    use mln_engine::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 
     use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, check};
 

@@ -1,8 +1,8 @@
+use mln_engine::shaders::{PROGRAMS, projection_variants};
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::source::GlslSource;
 use mln_glsl::variants::variants;
 use mln_glsl::{Stage, compose};
-use mln_renderer::shaders::{PROGRAMS, projection_variants};
 
 use crate::shaders::compile_program;
 

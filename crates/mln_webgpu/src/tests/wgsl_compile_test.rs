@@ -5,6 +5,7 @@
 
 use std::collections::BTreeSet;
 
+use mln_engine::shaders::{PROGRAMS, projection_variants};
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
@@ -14,7 +15,6 @@ use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::source::WgslSource;
 use mln_gfx::stencil_mode::StencilMode;
-use mln_renderer::shaders::{PROGRAMS, projection_variants};
 
 use crate::gpu::VERTEX_STAGE_STORAGE_BUFFERS;
 use crate::index_table::IndexTable;

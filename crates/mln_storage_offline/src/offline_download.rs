@@ -13,7 +13,7 @@ use std::collections::VecDeque;
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
-use mln_renderer::util::tile_cover::{TileCover, covering_zoom_level, tile_count_bounds, tile_count_geometry};
+use mln_engine::tile_store::tile_cover::{TileCover, covering_zoom_level, tile_count_bounds, tile_count_geometry};
 use mln_storage::offline::{
     OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionObserver, OfflineRegionStatus,
 };

@@ -1,5 +1,5 @@
 //! Port-only: a compact binary encoding for the values that cross between
-//! wasm instances (`mln_renderer`'s `tile/worker_codec`).
+//! wasm instances (`mln_engine`'s `tile/worker_codec`).
 //!
 //! A [`Wire`] type writes itself to a byte vector and reads itself from a
 //! [`Reader`] over a slice. Both are concrete, so each type compiles to one

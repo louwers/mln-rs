@@ -19,7 +19,7 @@ doctest = false
 
 [dependencies]
 feature.workspace = true
-mln_renderer.workspace = true
+mln_engine.workspace = true
 # OfflineDownload writes the region into OfflineDatabase.
 mln_storage = { workspace = true, features = ["sqlite"] }
 mln_style.workspace = true

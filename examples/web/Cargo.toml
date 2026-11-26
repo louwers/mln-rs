@@ -11,7 +11,7 @@ include.workspace = true
 # wasm instance of the same module with its own memory
 # (wasm32-unknown-unknown, no atomics). `mise run web:build` builds it into
 # web/pkg, with the font-face shaper the map loads for styles with font faces
-# (crates/mln_web_shaper; mln_renderer's in-process shaper stays off here); never
+# (crates/mln_web_shaper; mln_engine's in-process shaper stays off here); never
 # released.
 publish = false
 autotests = false
@@ -39,7 +39,7 @@ mln_gl = { workspace = true, optional = true }
 mln_map.workspace = true
 # gpu-conformance: the host writes and memory growth cases, which
 # check/check.mjs runs on a backend of the map's kind (src/gpu_check.rs).
-mln_renderer = { workspace = true, features = ["gpu-conformance"] }
+mln_engine = { workspace = true, features = ["gpu-conformance"] }
 mln_runtime.workspace = true
 mln_storage.workspace = true
 mln_style.workspace = true

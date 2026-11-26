@@ -210,8 +210,8 @@ fn input_type(program: &Program, attribute: &Attribute) -> Result<&'static str, 
 mod tests {
     use std::collections::BTreeSet;
 
+    use mln_engine::shaders::PROGRAMS;
     use mln_gfx::shaders::source::GlslEsSource;
-    use mln_renderer::shaders::PROGRAMS;
 
     use super::*;
 

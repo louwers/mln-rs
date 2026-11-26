@@ -49,6 +49,7 @@ changelog_update = true
 # The commits of every published package: mln-rs re-exports the libraries.
 changelog_include = [
   "mln-rs-d3d12",
+  "mln-rs-engine",
   "mln-rs-feature",
   "mln-rs-frame-pacer",
   "mln-rs-geojson",
@@ -62,7 +63,6 @@ changelog_include = [
   "mln-rs-map-types",
   "mln-rs-mtl",
   "mln-rs-polylabel",
-  "mln-rs-renderer",
   "mln-rs-runtime",
   "mln-rs-shelf-pack",
   "mln-rs-sprite",

@@ -34,7 +34,7 @@ mln_image.workspace = true
 mln_map.workspace = true
 # Only for its feature: the sessions shape the style's font faces, and the
 # system's fonts that the map falls back to, in-process.
-mln_renderer = { workspace = true, features = ["font-face-shaper"] }
+mln_engine = { workspace = true, features = ["font-face-shaper"] }
 mln_runtime = { workspace = true, features = ["default", "webgpu"] }
 # The responses of the offline mode's resource provider.
 mln_storage.workspace = true
@@ -85,7 +85,7 @@ path = "tests/liberty_style_test.rs"
 
 # The renderer is a dependency for its feature only.
 [package.metadata.cargo-udeps.ignore]
-normal = ["mln_renderer"]
+normal = ["mln_engine"]
 
 [lints]
 workspace = true

@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
+use mln_engine::Registry;
+use mln_engine::worker::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
 use mln_headless::HeadlessFrontend;
 use mln_map::{BoundOptions, Map, MapOptions, ProjectionMode};
-use mln_renderer::Registry;
-use mln_renderer::tile::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
 use mln_storage::{FileSource, FileSourceExt};
 use mln_style::Edit;
 use mln_style::bitmap::PremultipliedImage;
@@ -169,7 +169,7 @@ impl TestRunnerImpl for Impl {
             ..Default::default()
         };
         let bounds = self.map.lat_lng_bounds_for_camera(&camera).map_err(|e| MapError::Exception(e.to_string()))?;
-        Ok(mln_renderer::util::tile_cover::tile_cover_bounds(&bounds, zoom)
+        Ok(mln_engine::tile_store::tile_cover::tile_cover_bounds(&bounds, zoom)
             .into_iter()
             .map(|id| crate::runner::TileId { z: id.canonical.z, x: id.canonical.x, y: id.canonical.y, wrap: id.wrap })
             .collect())
@@ -180,7 +180,7 @@ impl TestRunnerImpl for Impl {
     }
 
     fn get_placed_symbols_data(&mut self) -> Vec<crate::runner::PlacedSymbol> {
-        let to_box = |b: &mln_renderer::text::Aabb| [b.min.x, b.min.y, b.max.x, b.max.y];
+        let to_box = |b: &mln_engine::placement::Aabb| [b.min.x, b.min.y, b.max.x, b.max.y];
         self.frontend
             .renderer()
             .placed_symbols_data()
@@ -311,7 +311,7 @@ impl TestRunnerImpl for Impl {
             }
             None => None,
         };
-        let options = mln_renderer::query::RenderedQueryOptions::new(options.layer_ids.clone(), filter);
+        let options = mln_engine::query::RenderedQueryOptions::new(options.layer_ids.clone(), filter);
         let renderer = self.frontend.renderer();
         match geometry {
             QueryGeometry::Point(point) => renderer.query_rendered_features_at_point(point, &options),

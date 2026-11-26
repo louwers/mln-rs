@@ -15,7 +15,7 @@ builds use Emscripten's threads.
   slices of a few milliseconds that never block it.
 - `tile_workers` and `tile_worker`: the two sides of tile workers in other Web
   Workers, which talk to the map's instance only through bytes over
-  `MessagePort`s (mln_renderer's `RemoteWorkers` and `TileWorkerHost`).
+  `MessagePort`s (mln_engine's `RemoteWorkers` and `TileWorkerHost`).
 - `shaper`: the font-face shaper as a second module (`crates/mln_web_shaper`),
   which the map's instance loads the first time a style declares font faces.
 

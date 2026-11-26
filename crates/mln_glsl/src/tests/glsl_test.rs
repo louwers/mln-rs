@@ -13,6 +13,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::mem::size_of;
 
+use mln_engine::shaders::{PROGRAMS, STANDING, projection_variants};
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::bindings::{
     FIRST_UNIFORM_ID, FRAGMENT_DRAW_ID, MAX_ATTRIBUTES, PAINT_PARAMS_ID, PROJECTION_ID, VERTEX_DRAW_ID,
@@ -20,7 +21,6 @@ use mln_gfx::shaders::bindings::{
 use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
 use mln_gfx::shaders::program::{Attribute, BufferKind, PAINT_PARAMS, Program, Variants};
 use mln_gfx::shaders::source::GlslSource;
-use mln_renderer::shaders::{PROGRAMS, STANDING, projection_variants};
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
 
 use crate::front_end::parse;
@@ -550,19 +550,17 @@ fn stages_agree_on_what_passes_between_them() {
 // the offsets the shader preludes add, and `samplerBindingStartId`.
 #[test]
 fn bindings_follow_from_the_packed_ids() {
-    use mln_renderer::layers::background::programs::BACKGROUND;
-    use mln_renderer::layers::circle::programs::CIRCLE;
-    use mln_renderer::layers::color_relief::programs::COLOR_RELIEF;
-    use mln_renderer::layers::fill::programs::{FILL, FILL_OUTLINE_PULLED, FILL_PATTERN};
-    use mln_renderer::layers::fill_extrusion::programs::{
-        FILL_EXTRUSION, FILL_EXTRUSION_PATTERN, FILL_EXTRUSION_PULLED,
-    };
-    use mln_renderer::layers::heatmap::programs::{HEATMAP, HEATMAP_TEXTURE};
-    use mln_renderer::layers::hillshade::programs::{HILLSHADE, HILLSHADE_PREPARE};
-    use mln_renderer::layers::line::programs::LINE;
-    use mln_renderer::layers::raster::programs::RASTER;
-    use mln_renderer::layers::symbol::programs::SYMBOL_SDF;
-    use mln_renderer::shaders::programs::{ATMOSPHERE, SKY};
+    use mln_engine::layers::background::programs::BACKGROUND;
+    use mln_engine::layers::circle::programs::CIRCLE;
+    use mln_engine::layers::color_relief::programs::COLOR_RELIEF;
+    use mln_engine::layers::fill::programs::{FILL, FILL_OUTLINE_PULLED, FILL_PATTERN};
+    use mln_engine::layers::fill_extrusion::programs::{FILL_EXTRUSION, FILL_EXTRUSION_PATTERN, FILL_EXTRUSION_PULLED};
+    use mln_engine::layers::heatmap::programs::{HEATMAP, HEATMAP_TEXTURE};
+    use mln_engine::layers::hillshade::programs::{HILLSHADE, HILLSHADE_PREPARE};
+    use mln_engine::layers::line::programs::LINE;
+    use mln_engine::layers::raster::programs::RASTER;
+    use mln_engine::layers::symbol::programs::SYMBOL_SDF;
+    use mln_engine::shaders::programs::{ATMOSPHERE, SKY};
 
     assert_eq!(global_uniform_binding(PAINT_PARAMS_ID), Some(0));
 

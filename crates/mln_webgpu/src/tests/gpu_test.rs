@@ -1,10 +1,10 @@
-use mln_gfx::Size;
-use mln_gfx::gpu::{Gpu, TextureDesc, TextureFormat, TextureRegion, TextureUsage};
-use mln_renderer::conformance::{
+use mln_engine::conformance::{
     clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, imported_textures,
     instanced_walls, invalid_calls, mipmapped_targets, mipmapped_targets_of, pulled_walls, readbacks, resources_in_use,
     terrain_heights, topologies, transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
 };
+use mln_gfx::Size;
+use mln_gfx::gpu::{Gpu, TextureDesc, TextureFormat, TextureRegion, TextureUsage};
 
 use crate::{CustomLayerEncoder, CustomLayerPass, Device, WebGpu};
 

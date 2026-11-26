@@ -4,8 +4,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use mln_renderer::bucket::LayerFeatureStates;
-use mln_renderer::source_state::{FeatureStatesBySource, SourceFeatureStates};
+use mln_engine::layer::bucket::LayerFeatureStates;
+use mln_engine::source::source_state::{FeatureStatesBySource, SourceFeatureStates};
 use mln_style::feature::FeatureState;
 
 /// A map's feature state, by source, source layer and feature ID, where the

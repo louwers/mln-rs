@@ -4,9 +4,9 @@
 //! browser build, where each instance has a memory of its own.
 //!
 //! The codec is the renderer's, reached through its `bench` entry points
-//! (`mln_renderer::bench`).
+//! (`mln_engine::bench`).
 
-use mln_renderer::bench::Codec;
+use mln_engine::bench::Codec;
 
 use super::{DENSE, SPARSE, StreetLayout, StreetTile, loaded_liberty};
 use crate::scenario::{Bench, Kind, Scenario};

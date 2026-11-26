@@ -4,7 +4,7 @@ mod spirv_test;
 // through the swapchain, resizes, the overlay, readback, two frames in
 // flight.
 mod surface_test;
-// mln_renderer::conformance's frame through `VulkanGpu`, and its shaders
+// mln_engine::conformance's frame through `VulkanGpu`, and its shaders
 // and texture writes.
 mod gpu_test;
 // A library device logs the GPU it is on, as maplibre-native-ffi's graphics

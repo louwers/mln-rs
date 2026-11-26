@@ -601,7 +601,7 @@ impl WebMap {
         self.force = true;
     }
 
-    /// Starts `mln_renderer`'s conformance cases of writes from JS arrays, and
+    /// Starts `mln_engine`'s conformance cases of writes from JS arrays, and
     /// of writes while the instance's memory grows, on a `Gpu` of the map's
     /// backend made for the check, whose frames `take_gpu_check` checks.
     /// Only check/check.mjs asks for it.

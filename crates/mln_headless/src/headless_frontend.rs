@@ -9,9 +9,9 @@
 
 use std::sync::Arc;
 
+use mln_engine::{Renderer, RendererEvent, RendererEvents, UpdateParameters, UpdateReader};
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_map::Map;
-use mln_renderer::{Renderer, RendererEvent, RendererEvents, UpdateParameters, UpdateReader};
 use mln_runtime::{BackendRef, BackendType, Device, DeviceOptions, GlApi, LocalTarget};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::Error;

@@ -1,5 +1,5 @@
 // Port-only: layers' style data and their expressions in the `mln_wire`
-// encoding, for a tile worker in another wasm instance (mln_renderer's
+// encoding, for a tile worker in another wasm instance (mln_engine's
 // tile/worker_codec).
 //
 // A layer's style data crosses as its type's name, then the value, and the

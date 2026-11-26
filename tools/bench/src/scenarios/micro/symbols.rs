@@ -8,13 +8,13 @@
 //! tile laid out at zoom 15, with the symbol layers that start there.
 //!
 //! Both stages are the renderer's, reached through its `bench` entry points
-//! (`mln_renderer::bench`).
+//! (`mln_engine::bench`).
 
 use std::sync::Arc;
 
+use mln_engine::UpdateParameters;
+use mln_engine::bench::{LaidOut, SymbolIndex, SymbolView};
 use mln_map::{MapMode, TileLodMode, TransformState};
-use mln_renderer::UpdateParameters;
-use mln_renderer::bench::{LaidOut, SymbolIndex, SymbolView};
 use mln_style::Style;
 use mln_style::size::Size;
 use mln_style::time::Instant;

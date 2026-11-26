@@ -274,5 +274,5 @@ fn incompatible_layer() {
     }
 }
 
-// Layer.SymbolLayerOverrides needs mln_renderer's FormatSectionOverride
-// (set_overrides): it is in crates/mln_renderer/tests/format_section_override_test.rs.
+// Layer.SymbolLayerOverrides needs mln_engine's FormatSectionOverride
+// (set_overrides): it is in crates/mln_engine/tests/format_section_override_test.rs.

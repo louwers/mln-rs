@@ -7,9 +7,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use mln_engine::Registry;
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{CameraOptions, Map, MapMode, MapOptions, RenderMode};
-use mln_renderer::Registry;
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::Edit;

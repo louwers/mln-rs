@@ -55,7 +55,7 @@ mln_frame_pacer.workspace = true
 mln_gestures.workspace = true
 mln_gfx.workspace = true
 mln_map.workspace = true
-mln_renderer.workspace = true
+mln_engine.workspace = true
 mln_storage.workspace = true
 mln_style.workspace = true
 mln_system_fonts.workspace = true
@@ -75,7 +75,7 @@ mln_storage = { workspace = true, features = ["sqlite"] }
 mln_storage_offline.workspace = true
 # Font faces, the device's fonts among them, shaped in-process: natively
 # there is no second module to load a shaper from.
-mln_renderer = { workspace = true, features = ["font-face-shaper"] }
+mln_engine = { workspace = true, features = ["font-face-shaper"] }
 
 # The browser build's instance: its pump, tile workers in Web Workers and
 # canvases.

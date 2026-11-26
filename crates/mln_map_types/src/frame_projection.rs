@@ -1,6 +1,6 @@
 //! Where a frame drew the map, for a host that draws into the frame
 //! depth-tested against it. The renderer computes it
-//! (`mln_renderer::frame_projection`); it lives here so that the style's
+//! (`mln_engine::render::frame_projection`); it lives here so that the style's
 //! custom layers, which get it with each frame, can name it.
 
 use glam::DMat4;

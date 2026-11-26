@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::thread::ThreadId;
 
-use mln_renderer::Registry;
-use mln_renderer::text::font_face_engine::FontFaceEngine;
+use mln_engine::Registry;
+use mln_engine::text::font_face_engine::FontFaceEngine;
 use mln_storage::http_header_transform::{HttpHeaderTransform, HttpHeaders};
 use mln_storage::network_status::NetworkStatus;
 use mln_storage::resource::Kind;
@@ -259,7 +259,7 @@ fn no_database() -> Error {
 
 #[cfg(not(target_family = "wasm"))]
 fn font_face_engine() -> Arc<dyn FontFaceEngine> {
-    mln_renderer::text::font_face_engine::default_engine()
+    mln_engine::text::font_face_engine::default_engine()
 }
 
 #[cfg(target_family = "wasm")]

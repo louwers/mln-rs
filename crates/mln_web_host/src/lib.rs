@@ -7,7 +7,7 @@
 //!   task of its own, so that input, worker replies and animation frames
 //!   get in between.
 //! - `tile_workers`: the map side of tile workers in other Web Workers,
-//!   for `mln_renderer`'s `RemoteWorkers`, over a `MessagePort` to each.
+//!   for `mln_engine`'s `RemoteWorkers`, over a `MessagePort` to each.
 //! - `tile_worker`: the side of a Web Worker that runs tile workers, one
 //!   `TileWorkerHost` per port that a map connected. The app's module
 //!   exports its entry point, so that the Web Worker lays out with the

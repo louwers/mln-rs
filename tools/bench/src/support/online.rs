@@ -1,11 +1,11 @@
 //! A map that loads over the simulated network ([`super::network`]), and
 //! what a user sees of it frame by frame: how much of the view each frame
-//! shows, from the renderer's covers (`mln_renderer::bench::Coverage`).
+//! shows, from the renderer's covers (`mln_engine::bench::Coverage`).
 
 use std::sync::Arc;
 
+use mln_engine::bench::Coverage;
 use mln_map::{CameraOptions, MapMode, RenderFrameStatus, RenderMode};
-use mln_renderer::bench::Coverage;
 use mln_storage::Cache;
 
 use super::cache::DiskCache;
@@ -115,7 +115,7 @@ impl OnlineMap {
         cache: Option<Arc<DiskCache>>,
         camera: &CameraOptions,
     ) -> OnlineMap {
-        mln_renderer::bench::measure_coverage();
+        mln_engine::bench::measure_coverage();
         let file_source = network.file_source(frontend.pool(), cache.map(|cache| -> Arc<dyn Cache> { cache }));
         let mut map = HeadlessMap::new(frontend, MapMode::Continuous, file_source);
         map.jump(camera);
@@ -139,7 +139,7 @@ impl OnlineMap {
     /// showed. The network's clock moves on outside the part.
     pub(crate) fn frame(&mut self, bench: &mut Bench) -> RenderFrameStatus {
         let status = bench.measure(|| self.step());
-        self.sight.observe(status.mode == RenderMode::Full, mln_renderer::bench::take_coverage());
+        self.sight.observe(status.mode == RenderMode::Full, mln_engine::bench::take_coverage());
         self.network.advance();
         status
     }
@@ -149,7 +149,7 @@ impl OnlineMap {
     pub(crate) fn settle(&mut self) {
         for _ in 0..SETTLE_LIMIT {
             let status = self.step();
-            mln_renderer::bench::take_coverage();
+            mln_engine::bench::take_coverage();
             self.network.advance();
             if status.mode == RenderMode::Full && !status.needs_repaint && self.network.is_idle() {
                 return;

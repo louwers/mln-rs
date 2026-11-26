@@ -174,8 +174,8 @@ mod tests {
     #[test]
     fn paths_drop_generics_and_follow_the_self_type() {
         assert_eq!(
-            path("<mln_renderer::layers::Fill as mln_renderer::RenderLayer>::update", Some("mln_renderer")),
-            ["mln_renderer", "layers", "Fill", "update"]
+            path("<mln_engine::layers::Fill as mln_engine::RenderLayer>::update", Some("mln_engine")),
+            ["mln_engine", "layers", "Fill", "update"]
         );
         assert_eq!(
             path("core::ptr::drop_glue::<mln_map::map::Map>", Some("mln_map")),

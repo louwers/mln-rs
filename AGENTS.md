@@ -45,7 +45,7 @@ Run the cheapest check that covers the change first, and widen it only as far as
 the change reaches:
 
 - The touched crate's tests: `cargo nextest run -p <package>`, such as
-  `-p mln-rs-renderer`, before the whole suite.
+  `-p mln-rs-engine`, before the whole suite.
 - The render tests the change affects: from `tools/render-test`, run the runner
   with your OS and backend's manifest and a regex over the tests' paths, e.g.
   `cargo run -p mln-rs-render-test -- --manifestPath manifests/macos-wgpu.json --filter "/render-tests/line-dasharray/" --jobs 0 --output <dir>`.

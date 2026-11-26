@@ -595,13 +595,13 @@ fn a_continuous_map_over_terrain_goes_idle_on_the_ground() {
     frontend.draw(&Arc::new(UpdateParameters { elevation: None, ..(*latest.parameters).clone() }));
     map.process_events();
     let events = map.drain_events();
-    let modes: Vec<mln_renderer::RenderMode> = events
+    let modes: Vec<mln_engine::RenderMode> = events
         .iter()
         .filter_map(|event| match event {
             mln_map::MapEvent::RenderFrameFinished(status) => Some(status.mode),
             _ => None,
         })
         .collect();
-    assert_eq!(vec![mln_renderer::RenderMode::Partial], modes);
+    assert_eq!(vec![mln_engine::RenderMode::Partial], modes);
     assert!(!events.iter().any(|event| matches!(event, mln_map::MapEvent::Idle)));
 }

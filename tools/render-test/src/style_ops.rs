@@ -134,7 +134,7 @@ pub(crate) fn remove_source(map: &mut Map, source_name: &str) -> bool {
 mod tests {
     use std::sync::Arc;
 
-    use mln_renderer::Registry;
+    use mln_engine::Registry;
 
     use super::*;
 

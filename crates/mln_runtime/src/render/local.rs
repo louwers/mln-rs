@@ -21,6 +21,7 @@
 
 use std::sync::Arc;
 
+use mln_engine::{Renderer, UpdateParameters};
 use mln_gfx::gpu::Gpu;
 #[cfg(not(target_family = "wasm"))]
 use mln_gfx::offscreen_target::OffscreenTarget;
@@ -30,7 +31,6 @@ use mln_gfx::{
     ConsumerSync, ExportKind, ExportedFrame, ExportedRing, FrameImage, FrameTarget, GpuSync, Handoff, RendererBackend,
     SyncKind, Window,
 };
-use mln_renderer::{Renderer, UpdateParameters};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::Error;
 use mln_style::size::Size;

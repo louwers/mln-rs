@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use httpmock::MockServer;
+use mln_engine::RendererEvent;
 use mln_map::MapEvent;
-use mln_renderer::RendererEvent;
 use mln_runtime::{ErrorKind, EventMask, EventSource, EventType, MapOptions, RuntimeEvent, RuntimeEventKind};
 use parking_lot::Mutex;
 

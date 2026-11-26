@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use mln_renderer::{FontStack, GlyphRange, OverscaledTileID, RenderMode, RenderingStats, TileOperation};
+use mln_engine::{FontStack, GlyphRange, OverscaledTileID, RenderMode, RenderingStats, TileOperation};
 use mln_style::StyleLoadError;
 use mln_style::error::Error;
 use mln_style::sprite::Sprite;

@@ -112,7 +112,7 @@ export type ToMap =
   | { type: "preload"; style: StyleSource; ratio: number; zoom: number }
   | Start
   | { type: "readPixels" }
-  // Run mln_renderer's conformance cases of writes from JS arrays, and of
+  // Run mln_engine's conformance cases of writes from JS arrays, and of
   // writes while the instance's memory grows, on a GPU of the map's backend
   // (WebMap::start_gpu_check), for check/check.mjs.
   | { type: "checkGpu" }

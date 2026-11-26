@@ -7,7 +7,7 @@
 // an error, or when a view's tiles got no worker replies. The interaction
 // views drag on the map back and forth before their frame, over a slow
 // network, and log the URLs the map fetched again. It also runs
-// mln_renderer's conformance cases of writes from JS arrays, and of writes
+// mln_engine's conformance cases of writes from JS arrays, and of writes
 // while the instance's memory grows, on a GPU of the map's
 // backend (the page's `checkGpu`), makes the map's wasm instance and a tile worker's
 // panic (the page's `panic`), and fails unless the page stops and shows the

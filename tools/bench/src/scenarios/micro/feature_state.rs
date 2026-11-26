@@ -3,9 +3,9 @@
 //! state, as a tile does when an application sets its features' state.
 //!
 //! The buckets are the renderer's, reached through its `bench` entry points
-//! (`mln_renderer::bench`).
+//! (`mln_engine::bench`).
 
-use mln_renderer::bucket::LayerFeatureStates;
+use mln_engine::layer::bucket::LayerFeatureStates;
 use mln_style::Style;
 use mln_style::feature::GeometryTileFeature;
 use mln_tile::TileData;

@@ -34,6 +34,7 @@ pub use glam;
 /// Empty except on Windows.
 #[cfg(feature = "d3d12")]
 pub use mln_d3d12;
+pub use mln_engine;
 pub use mln_frame_pacer;
 pub use mln_geojson;
 pub use mln_gestures;
@@ -46,7 +47,6 @@ pub use mln_map_types;
 /// Empty except on Apple platforms.
 #[cfg(feature = "metal")]
 pub use mln_mtl;
-pub use mln_renderer;
 // Every runtime type is at the root, so the root can't miss one that a
 // root type's methods take or return.
 pub use mln_runtime::{self, *};

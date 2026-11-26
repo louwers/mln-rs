@@ -10,8 +10,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use mln_engine::{CustomLayerHost, CustomLayerRenderParameters};
 use mln_map::{MapEvent, MapMode, RenderMode};
-use mln_renderer::{CustomLayerHost, CustomLayerRenderParameters};
 use mln_runtime::{
     AttachOptions, BackendType, DemandMode, Device, DeviceOptions, ErrorKind, FrameDemand, FrameDisposition,
     FrameResult, LogicalExtent, Map, MapOptions, RenderSession, RenderTarget, Runtime, RuntimeEventKind,

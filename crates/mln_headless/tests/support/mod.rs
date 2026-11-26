@@ -25,9 +25,9 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use mln_engine::{FontStack, GlyphRange, OverscaledTileID, TileOperation, UpdateReader};
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{Map, MapEvent, MapMode, MapOptions, RenderFrameStatus};
-use mln_renderer::{FontStack, GlyphRange, OverscaledTileID, TileOperation, UpdateReader};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Resource, Responder, Response};
 use mln_style::bitmap::PremultipliedImage;

@@ -15,7 +15,7 @@ pub(crate) mod worker_codec;
 
 use std::sync::Arc;
 
-use mln_renderer::bench::{LaidOut, TileLayout};
+use mln_engine::bench::{LaidOut, TileLayout};
 use mln_style::{Edit, Style, StyleRegistry};
 use mln_tile::{MltTile, MvtTile, TileData};
 
@@ -56,7 +56,7 @@ pub(crate) fn tile_data(tiles: Tiles, bytes: &Arc<Vec<u8>>) -> TileData {
 
 /// What a map's styles parse against.
 pub(crate) fn registry() -> Arc<StyleRegistry> {
-    Arc::clone(mln_renderer::Registry::with_builtins().style())
+    Arc::clone(mln_engine::Registry::with_builtins().style())
 }
 
 /// The Liberty style over the street tiles, as JSON, with its layers

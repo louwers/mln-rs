@@ -11,13 +11,13 @@ use std::time::Duration;
 use feature::Value;
 use geo_types::{LineString, Point};
 use geojson::{GeoJson, Geometry};
+use mln_engine::{OverscaledTileID, Registry, TileOperation, UpdateParameters, UpdateReader};
 use mln_headless::HeadlessFrontend;
 use mln_map::{
     AnimationOptions, AxonometricMode, BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions,
     MapProjection, NorthOrientation, ProjectionMode, RenderFrameStatus, RenderMode, TileLodMode, TileSettings,
     Viewport, ViewportMode,
 };
-use mln_renderer::{OverscaledTileID, Registry, TileOperation, UpdateParameters, UpdateReader};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{
@@ -2515,7 +2515,7 @@ fn keep_render_data() {
 #[test]
 #[ignore = "DISABLED_ in C++ (no symbol placement occurs in the MapTiler streets style fixture)"]
 fn disabled_placed_symbol_data() {
-    fn is_inside_tile(box_: &mln_renderer::text::Aabb, padding: f32, viewport_size: Size) -> bool {
+    fn is_inside_tile(box_: &mln_engine::placement::Aabb, padding: f32, viewport_size: Size) -> bool {
         if box_.min.x - padding < 0.0 {
             return false;
         }
@@ -2556,7 +2556,7 @@ fn disabled_placed_symbol_data() {
     test.render();
 
     let placed_symbols = test.frontend().renderer().placed_symbols_data();
-    assert_ne!(placed_symbols, Vec::<mln_renderer::text::placement::PlacedSymbolData>::new());
+    assert_ne!(placed_symbols, Vec::<mln_engine::placement::PlacedSymbolData>::new());
 
     let mut placed_text_inside_tile = 0;
     let mut placed_text = 0;
@@ -2604,10 +2604,7 @@ fn disabled_placed_symbol_data() {
     test.frontend().renderer().collect_placed_symbol_data(false);
     test.render();
 
-    assert_eq!(
-        test.frontend().renderer().placed_symbols_data(),
-        Vec::<mln_renderer::text::placement::PlacedSymbolData>::new()
-    );
+    assert_eq!(test.frontend().renderer().placed_symbols_data(), Vec::<mln_engine::placement::PlacedSymbolData>::new());
 }
 
 // gtest: Map.VolatileSource
@@ -2799,7 +2796,7 @@ fn still_image_retries_failed_glyph_range() {
     let labels = |test: &MapTest| {
         let size = test.frontend().size();
         let center = ScreenCoordinate::new(f64::from(size.width) / 2.0, f64::from(size.height) / 2.0);
-        let options = mln_renderer::query::RenderedQueryOptions::default();
+        let options = mln_engine::query::RenderedQueryOptions::default();
         test.frontend().renderer().query_rendered_features_at_point(&center, &options).unwrap().len()
     };
 

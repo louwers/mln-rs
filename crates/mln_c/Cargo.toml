@@ -42,7 +42,7 @@ mln_gfx.workspace = true
 mln_map.workspace = true
 mln_map_types.workspace = true
 # The custom layer type.
-mln_renderer.workspace = true
+mln_engine.workspace = true
 mln_runtime.workspace = true
 mln_storage.workspace = true
 mln_style.workspace = true
@@ -84,11 +84,11 @@ mln_vulkan = { workspace = true, optional = true }
 mln_d3d12 = { workspace = true, optional = true }
 
 # A style's font faces, shaped in-process. The browser build leaves the
-# shaper to a module of its own (crates/mln_renderer/Cargo.toml). The C
+# shaper to a module of its own (crates/mln_engine/Cargo.toml). The C
 # runtime: its atexit, which marks the start of process exit.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 libc.workspace = true
-mln_renderer = { workspace = true, features = ["font-face-shaper"] }
+mln_engine = { workspace = true, features = ["font-face-shaper"] }
 
 # The X11 windows of the window target test.
 [target.'cfg(target_os = "linux")'.dev-dependencies]

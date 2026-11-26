@@ -40,7 +40,7 @@ windows = { workspace = true, features = [
 # the sets of defines they compile the programs with.
 [target.'cfg(windows)'.dev-dependencies]
 mln_glsl = { workspace = true, features = ["variants"] }
-mln_renderer = { package = "mln-rs-renderer", path = "../mln_renderer", features = [
+mln_engine = { package = "mln-rs-engine", path = "../mln_engine", features = [
   "gpu-conformance",
 ] }
 

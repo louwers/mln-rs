@@ -47,7 +47,7 @@ raw-window-metal.workspace = true
 # The programs, which the tests compile and draw with, and the conformance
 # cases that `MetalGpu`'s tests run.
 [target.'cfg(target_vendor = "apple")'.dev-dependencies]
-mln_renderer = { package = "mln-rs-renderer", path = "../mln_renderer", features = [
+mln_engine = { package = "mln-rs-engine", path = "../mln_engine", features = [
   "gpu-conformance",
 ] }
 

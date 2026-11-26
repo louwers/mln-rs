@@ -129,8 +129,8 @@ doesn't have. `--module` picks mln_web_webgl or mln_web_shaper instead.
 It fails when a frame differs too much, when the page or a worker logs an error,
 or when a view's tiles get no worker replies. Two views also drag and pinch the
 map over a slow network first, and log the URLs it fetches again
-(`crates/mln_renderer/src/tests/fast_camera_test.rs` tests the gestures' tile
-requests on a modeled network). It also runs mln_renderer's conformance cases of
+(`crates/mln_engine/src/tests/fast_camera_test.rs` tests the gestures' tile
+requests on a modeled network). It also runs mln_engine's conformance cases of
 writes from JS arrays, and of writes while the instance's memory grows, on a GPU
 of the map's backend, and checks that a panic stops the page, and that the GL JS
 comparison lines up. The page's WebGPU frames come from SwiftShader, its WebGL2

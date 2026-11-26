@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use mln_renderer::Registry;
+use mln_engine::Registry;
 use mln_style::StyleRegistry;
 use mln_style::conversion::{Convertible, Error};
 use mln_style::layer::{ErasedLayerStyle, Layer, convert_layer};

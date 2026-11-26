@@ -2,9 +2,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use geojson::{Feature, Geometry};
+use mln_engine::Registry;
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapMode, MapOptions, TileSettings};
-use mln_renderer::Registry;
 use mln_storage::ResourceOptions;
 use mln_style::Edit;
 use mln_style::conversion::Convertible;

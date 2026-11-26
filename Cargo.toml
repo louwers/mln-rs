@@ -51,6 +51,9 @@ feature = { package = "mln-rs-feature", path = "vendor/feature", version = "=0.0
 geometry = { package = "mln-rs-geometry", path = "vendor/geometry", version = "=0.0.17" }
 mln_d3d12 = { package = "mln-rs-d3d12", path = "crates/mln_d3d12", version = "=0.0.17" }
 mln_bench_workload = { package = "mln-rs-bench-workload", path = "tools/bench/workload" }
+# Without its default feature, the in-process font-face shaper: the packages
+# that render turn it on (crates/mln_engine/Cargo.toml).
+mln_engine = { package = "mln-rs-engine", path = "crates/mln_engine", version = "=0.0.17", default-features = false }
 mln_frame_pacer = { package = "mln-rs-frame-pacer", path = "crates/mln_frame_pacer", version = "=0.0.17" }
 mln_gestures = { package = "mln-rs-gestures", path = "crates/mln_gestures", version = "=0.0.17" }
 mln_geojson = { package = "mln-rs-geojson", path = "crates/mln_geojson", version = "=0.0.17" }
@@ -62,9 +65,6 @@ mln_image = { package = "mln-rs-image", path = "crates/mln_image", version = "=0
 mln_map = { package = "mln-rs-map", path = "crates/mln_map", version = "=0.0.17" }
 mln_map_types = { package = "mln-rs-map-types", path = "crates/mln_map_types", version = "=0.0.17" }
 mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.17" }
-# Without its default feature, the in-process font-face shaper: the packages
-# that render turn it on (crates/mln_renderer/Cargo.toml).
-mln_renderer = { package = "mln-rs-renderer", path = "crates/mln_renderer", version = "=0.0.17", default-features = false }
 # Without its backends (its default features) unless a package asks for
 # them, so that a browser build of mln_c carries one.
 mln_runtime = { package = "mln-rs-runtime", path = "crates/mln_runtime", version = "=0.0.17", default-features = false }
@@ -134,7 +134,7 @@ libloading = { version = "0.8.9" }
 # and mln_c forwards to the C API's log callback.
 log = { version = "0.4.35" }
 memmap2 = { version = "0.9.12" }
-# Polygon triangulation (mln_renderer's fills and fill extrusions), a port of
+# Polygon triangulation (mln_engine's fills and fill extrusions), a port of
 # earcut.js, the triangulation GL JS uses.
 earcut = { version = "0.4.5" }
 # MLT decoding: the Rust implementation of the MapLibre Tile spec, instead of
@@ -143,7 +143,7 @@ mlt-core = { version = "0.24.0" }
 # The even-odd union that repairs the polygons of version 1 vector tiles,
 # instead of porting wagyu. mlt-core already depends on it through geo.
 i_overlay = { version = "4.5.2", default-features = false }
-# 2D vector maths (mln_renderer's symbol layout, placement and collision).
+# 2D vector maths (mln_engine's symbol layout, placement and collision).
 glam = { version = "0.34.3", default-features = false, features = [
   "std",
   "f64",
@@ -172,7 +172,7 @@ buffa = { version = "0.9.2", default-features = false }
 # its arithmetic in a different order, so a distance can differ from the C++
 # one in the last bits.
 cheap-ruler = { version = "0.4.0" }
-# Packs the glyph, icon and pattern atlases (mln_renderer).
+# Packs the glyph, icon and pattern atlases (mln_engine).
 etagere = { version = "0.3.0", default-features = false }
 # PMTiles archives (mln_storage's PMTilesFileSource): their header,
 # directories and tile IDs, in place of a port of the C++ core's vendored
@@ -187,7 +187,7 @@ foldhash = { version = "0.2.0" }
 parking_lot = { version = "0.12.5" }
 png = { version = "0.18.1" }
 pollster = { version = "1.0.1" }
-# The property tests that decode malformed tiles (mln_tile, mln_renderer).
+# The property tests that decode malformed tiles (mln_tile, mln_engine).
 proptest = { version = "1.12.0" }
 # The windows of window targets (mln_gfx::Window), as winit and others hand them out.
 # `alloc`: an `Arc` of a window is one too.
@@ -555,7 +555,7 @@ mln_image.workspace = true
 mln_map.workspace = true
 mln_map_types.workspace = true
 mln_mtl = { workspace = true, optional = true }
-mln_renderer = { workspace = true, features = ["font-face-shaper"] }
+mln_engine = { workspace = true, features = ["font-face-shaper"] }
 mln_runtime.workspace = true
 mln_sprite.workspace = true
 # The ambient cache, offline regions and mbtiles:// sources, as in C++.

@@ -405,7 +405,7 @@ fn query_style(globe: bool) -> String {
 /// draws too.
 #[test]
 fn a_rendered_query_over_terrain_finds_a_draped_fill_where_it_draws() {
-    use mln_renderer::query::RenderedQueryOptions;
+    use mln_engine::query::RenderedQueryOptions;
     use mln_util::geo::ScreenCoordinate;
 
     for globe in [true, false] {
@@ -451,7 +451,7 @@ fn corner_blocks_png(tile: &TileData) -> Vec<u8> {
 /// box's east edge draws.
 #[test]
 fn a_box_query_over_uneven_terrain_finds_a_fill_inside_it() {
-    use mln_renderer::query::RenderedQueryOptions;
+    use mln_engine::query::RenderedQueryOptions;
     use mln_util::geo::ScreenCoordinate;
 
     for globe in [true, false] {

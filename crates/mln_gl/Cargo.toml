@@ -58,7 +58,7 @@ web-sys = { workspace = true, features = [
 # The programs, which the tests compile and draw with, and the conformance
 # cases that `GlGpu`'s tests run.
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-mln_renderer = { package = "mln-rs-renderer", path = "../mln_renderer", features = [
+mln_engine = { package = "mln-rs-engine", path = "../mln_engine", features = [
   "gpu-conformance",
 ] }
 

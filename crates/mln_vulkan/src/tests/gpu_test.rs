@@ -2,18 +2,18 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use ash::vk;
+use mln_engine::conformance::{
+    clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, imported_textures,
+    instanced_walls, invalid_calls, mipmapped_targets, pulled_walls, readbacks, resources_in_use, terrain_heights,
+    topologies, transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
+};
+use mln_engine::shaders::{PROGRAMS, projection_variants};
 use mln_gfx::gpu::{
     ColorAttachment, Gpu as _, GpuError, LoadOp, PassDesc, TextureDesc, TextureFormat, TextureRegion, TextureUsage,
     read_texels,
 };
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::{Rgba, Size};
-use mln_renderer::conformance::{
-    clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, imported_textures,
-    instanced_walls, invalid_calls, mipmapped_targets, pulled_walls, readbacks, resources_in_use, terrain_heights,
-    topologies, transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
-};
-use mln_renderer::shaders::{PROGRAMS, projection_variants};
 
 use crate::{ImportedImage, VulkanGpu};
 

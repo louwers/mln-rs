@@ -3,13 +3,13 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 
+use mln_engine::text::font_face_engine::FontFaceEngine;
+use mln_engine::{Custom, CustomLayerHost, Registry, UpdateReader};
 use mln_map::{
     BoundOptions, Camera, CameraCommandId, CameraDelta, CameraOptions, CameraUpdate, Elevation, FrameClock,
     FreeCameraOptions, LogicalExtent, MapEvent, MapMode, MapProjection, MapSnapshot, MapView, ProjectionMode,
     StyleLoadError, TransitionEnd, TransitionOutcome,
 };
-use mln_renderer::text::font_face_engine::FontFaceEngine;
-use mln_renderer::{Custom, CustomLayerHost, Registry, UpdateReader};
 use mln_style::Edit;
 use mln_style::error::{Error, ErrorKind};
 use mln_style::geo::LatLngBounds;

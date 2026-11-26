@@ -22,7 +22,7 @@ naga.workspace = true
 
 # The programs, which the tests compile.
 [target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dev-dependencies]
-mln_renderer = { package = "mln-rs-renderer", path = "../mln_renderer", features = [
+mln_engine = { package = "mln-rs-engine", path = "../mln_engine", features = [
   "gpu-conformance",
 ] }
 

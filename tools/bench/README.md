@@ -491,9 +491,9 @@ micro scenario uses, such as the tiles they read, in `src/scenarios/micro/`.
 A micro scenario calls a stage as a function over data. Where the stage is
 internal to its library, the library has a `bench` feature, off by default, and
 behind it a module `bench` (`src/bench.rs`) that is hidden from the
-documentation: `mln_renderer::bench::TileLayout` runs a tile's layout job, for
+documentation: `mln_engine::bench::TileLayout` runs a tile's layout job, for
 instance. Macro scenarios reach internals the same way:
-`mln_renderer::bench::take_coverage` reports what an update's tiles drew, and
+`mln_engine::bench::take_coverage` reports what an update's tiles drew, and
 `mln_storage::bench::online_file_source` makes the online file source that the
 simulated network carries. The harness turns the feature on in its `Cargo.toml`,
 so builds without the harness leave the module out.

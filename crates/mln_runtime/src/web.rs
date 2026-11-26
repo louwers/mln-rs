@@ -20,8 +20,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_renderer::Registry;
-use mln_renderer::tile::worker_codec::RemoteWorkers;
+use mln_engine::Registry;
+use mln_engine::worker::worker_codec::RemoteWorkers;
 use mln_storage::OnlineFileSource;
 use mln_storage::network_status::NetworkStatus;
 use mln_style::hash::HashMap;

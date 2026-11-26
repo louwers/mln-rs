@@ -42,8 +42,8 @@ pub(crate) fn sampler(declarations: &GlslEsDeclarations, texture: &ProgramTextur
 
 #[cfg(test)]
 mod tests {
+    use mln_engine::shaders::PROGRAMS;
     use mln_gfx::shaders::program::{PAINT_PARAMS, ProgramBuffer};
-    use mln_renderer::shaders::PROGRAMS;
 
     /// Every member, attribute and texture a program's declarations name is
     /// one of the program's, so that none of them goes stale.

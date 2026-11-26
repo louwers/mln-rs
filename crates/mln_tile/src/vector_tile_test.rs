@@ -1,6 +1,6 @@
 // VectorTile.setError, VectorTile.onError and VectorTile.Issue8542 need
 // VectorMVTTile, TileParameters and the renderer: they are in
-// crates/mln_renderer/tests/vector_tile_test.rs.
+// crates/mln_engine/tests/vector_tile_test.rs.
 
 use std::path::Path;
 use std::sync::Arc;

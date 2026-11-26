@@ -72,9 +72,9 @@ ci:
         - if:
             files:
               - crates/mln_mtl/**
-              - crates/mln_renderer/src/**/msl.rs
-              - crates/mln_renderer/src/conformance.rs
-              - crates/mln_renderer/src/conformance/**
+              - crates/mln_engine/src/**/msl.rs
+              - crates/mln_engine/src/conformance.rs
+              - crates/mln_engine/src/conformance/**
           then: apply
     android:
       covers: >-
@@ -121,9 +121,9 @@ ci:
         - if:
             files:
               - crates/mln_mtl/**
-              - crates/mln_renderer/src/**/msl.rs
-              - crates/mln_renderer/src/conformance.rs
-              - crates/mln_renderer/src/conformance/**
+              - crates/mln_engine/src/**/msl.rs
+              - crates/mln_engine/src/conformance.rs
+              - crates/mln_engine/src/conformance/**
               - mise.target-apple.*
           then: apply
     ios-device-farm:
@@ -154,8 +154,8 @@ ci:
         - if:
             files:
               - crates/mln_d3d12/**
-              - crates/mln_renderer/src/conformance.rs
-              - crates/mln_renderer/src/conformance/**
+              - crates/mln_engine/src/conformance.rs
+              - crates/mln_engine/src/conformance/**
               - .github/actions/setup-windows-*/**
           then: apply
     freebsd:

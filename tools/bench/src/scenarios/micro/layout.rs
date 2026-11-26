@@ -3,7 +3,7 @@
 //! their vertices, indices and paint data built, with the feature index.
 //!
 //! The layout is the renderer's, reached through its `bench` entry points
-//! (`mln_renderer::bench`).
+//! (`mln_engine::bench`).
 
 use super::{DENSE, SPARSE, StreetLayout, StreetTile, loaded_liberty};
 use crate::scenario::{Bench, Kind, Scenario};

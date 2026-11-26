@@ -9,7 +9,7 @@
 // - `--jobs=<n>`: runs the tests in n worker processes (jobs.rs), which run
 //   each test with the same `run_test` as the loop here.
 // - `--tileWorkerCodec=<n>`: puts the maps' tile workers in n worker
-//   instances that the map reaches only through bytes (mln_renderer's
+//   instances that the map reaches only through bytes (mln_engine's
 //   worker_codec, as the browser build does), so the suites run through the
 //   codec.
 
