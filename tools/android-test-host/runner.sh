@@ -23,19 +23,27 @@ else
     out=${CARGO_TARGET_DIR:-$(cd "$here/../.." && pwd)/target}/android-test-host
     mkdir -p "$out"
 
-    # The test host, named for its sources: concurrent tests build it once, an
-    # edit builds it again, and the link to a finished build is made atomically.
+    # The test host, named for its sources, links to a finished build: one
+    # that has its launcher, which build.sh writes last. A runner that finds
+    # none builds one, and links to it unless another runner linked to a
+    # finished build meanwhile, by renaming a new link over the old one, so
+    # the name always resolves and no build that a link named goes away. The
+    # old link may name an emptied build: rust-cache, in CI, keeps the link
+    # but deletes the build's files.
     key=$(cat "$here/build.sh" "$here/launcher.sh" "$here/test-host.c" "$here/org/maplibre/mlnrs/TestHost.java" |
         cksum | cut -d ' ' -f 1)
     host=$out/$abi-$key
-    # A build is finished once it has its launcher, which build.sh writes
-    # last. A link to an unfinished one goes: rust-cache, in CI, keeps the
-    # link but empties the build it points to.
     if [[ ! -e $host/launcher.sh ]]; then
-        rm -f "$host"
         build=$(mktemp -d "$out/build.XXXXXX")
         "$here/build.sh" "$abi" "$build"
-        ln -sn "${build##*/}" "$host" 2> /dev/null || rm -rf "$build"
+        if [[ -e $host/launcher.sh ]]; then
+            rm -rf "$build"
+        else
+            link=$build.link
+            ln -s "${build##*/}" "$link"
+            # GNU mv takes -T, BSD mv -h, to replace the link itself.
+            mv -T "$link" "$host" 2> /dev/null || mv -h "$link" "$host"
+        fi
     fi
 fi
 
