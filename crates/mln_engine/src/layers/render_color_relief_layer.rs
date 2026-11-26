@@ -15,6 +15,7 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
+use mln_style::StyleValue as _;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::color::Color;
 use mln_style::expression::{
@@ -26,7 +27,6 @@ use mln_style::layers::ColorRelief;
 use mln_style::property::color_ramp::ColorRampPropertyValue;
 use mln_style::size::Size;
 use mln_style::types::ResamplingType;
-use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 
 use super::cast_matrix;
 use crate::buckets::raster_bucket::{MaskQuads, RasterLayoutVertex};
@@ -40,17 +40,17 @@ use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket::NoBucket;
 use crate::layer::bucket_geometry::copied_vertices;
 use crate::layer::layer_drawing::{DrawList, DrawObjectsMut, KeptDraw, TileDraws, TileObjects};
-use crate::layer::layer_type::{EvaluatedLayer, LayerType};
+use crate::layer::layer_type::LayerType;
 use crate::layer::layout::NoLayout;
 use crate::layer::render_layer::{
-    LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    EvaluateCx, Evaluation, LayerUpdateParameters, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer,
+    RenderLayerBase, TypedLayer,
 };
 use crate::layers::color_relief::programs;
 use crate::layers::color_relief::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
 use crate::log_target;
 use crate::render::globe::globe_tile_mesh::GlobeTileMeshCache;
 use crate::render::paint_parameters::PaintParameters;
-use crate::render::pass::RenderPass;
 use crate::render::static_data::RenderStaticData;
 use crate::render::tile::FrameTile;
 use crate::render::tile_matrix::to_projection_ubo;
@@ -299,7 +299,7 @@ fn color_relief_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeA
 impl TypedLayer for RenderColorReliefLayer {
     type Type = ColorRelief;
     type Drawing = TileDraws<ReliefTile>;
-    const DRAPES: bool = true;
+    const TERRAIN: OnTerrain = OnTerrain::Drapes;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -316,11 +316,8 @@ impl TypedLayer for RenderColorReliefLayer {
         }
     }
 
-    fn complete_evaluation(
-        &mut self,
-        parameters: &PropertyEvaluationParameters,
-        _evaluated: &mut EvaluatedLayer<ColorRelief>,
-    ) {
+    fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
+        let parameters = cx.parameters;
         // Build the ramp here rather than in transition(), which has no global
         // state. A new or changed layer always needs one; otherwise only a
         // change to a state key that the ramp reads does.
@@ -341,10 +338,8 @@ impl TypedLayer for RenderColorReliefLayer {
         if ramp_affected {
             self.update_color_ramp();
         }
-    }
-
-    fn passes(&self, evaluated: &EvaluatedLayer<ColorRelief>) -> RenderPass {
-        if *evaluated.paint.color_relief_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None }
+        let evaluated = &*cx.evaluated;
+        if *evaluated.paint.color_relief_opacity.uniform() > 0.0 { Evaluation::TRANSLUCENT } else { Evaluation::NONE }
     }
 
     /// Makes the frame's draws of the layer, those of each of its tiles,
