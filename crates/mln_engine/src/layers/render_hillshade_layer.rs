@@ -41,7 +41,6 @@ use crate::draw::segment::SegmentBase;
 use crate::draw::store::SharedTexture;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
-use crate::layer::bucket::NoBucket;
 use crate::layer::bucket_geometry::copied_vertices;
 use crate::layer::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, KeptDraw, SingleDraw, TileDraws, TileObjects};
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
@@ -77,7 +76,6 @@ const IMAGE_SLOT: usize = programs::HILLSHADE.texture_slot("image");
 
 impl LayerType for Hillshade {
     type Layout = NoLayout;
-    type Bucket = NoBucket;
     type TileBucket<'a> = &'a DemContents;
 
     fn render_layer(style: Arc<LayerStyle<Hillshade>>) -> Box<dyn RenderLayer> {
