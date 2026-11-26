@@ -8,6 +8,7 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
+use mln_style::StyleValue as _;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::color::Color;
 use mln_style::error::Error;
@@ -16,8 +17,7 @@ use mln_style::layer::LayerStyle;
 use mln_style::layers::Line;
 use mln_style::layers::line_layer_properties::LinePaintProperties;
 use mln_style::size::Size;
-use mln_style::types::{AlignmentType, LayerBlendType, LineCapType, TranslateAnchorType};
-use mln_style::{PropertyEvaluationParameters, StyleValue as _};
+use mln_style::types::{AlignmentType, LineCapType, TranslateAnchorType};
 
 use super::{cast_matrix, refresh_paint_attributes};
 use crate::buckets::line_bucket::{LineBinders, LineBucket};
@@ -36,7 +36,8 @@ use crate::layer::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, TileDraws
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::layout::{LayoutParameters, SourceLayer};
 use crate::layer::render_layer::{
-    LayerBucket, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    EvaluateCx, Evaluation, LayerBucket, LayerUpdateParameters, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer,
+    RenderLayerBase, TypedLayer,
 };
 use crate::layers::line::dashes::{LineAtlas, LinePatternCap};
 use crate::layers::line::programs;
@@ -324,7 +325,7 @@ fn offset_line(
 impl TypedLayer for RenderLineLayer {
     type Type = Line;
     type Drawing = TileDraws<LineTile>;
-    const DRAPES: bool = true;
+    const TERRAIN: OnTerrain = OnTerrain::Drapes;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -334,11 +335,8 @@ impl TypedLayer for RenderLineLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
-    fn complete_evaluation(
-        &mut self,
-        parameters: &PropertyEvaluationParameters,
-        _evaluated: &mut EvaluatedLayer<Line>,
-    ) {
+    fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
+        let parameters = cx.parameters;
         // Build the ramp here rather than in transition(), which has no global
         // state. A new or changed layer always needs one; otherwise only a
         // change to a state key that the ramp reads does.
@@ -359,29 +357,19 @@ impl TypedLayer for RenderLineLayer {
         if ramp_affected {
             self.update_color_ramp();
         }
-    }
-
-    fn drapes_by_bearing(&self, evaluated: &EvaluatedLayer<Line>) -> bool {
-        let paint = &evaluated.paint;
-        *paint.line_translate_anchor.uniform() == TranslateAnchorType::Viewport
-            && *paint.line_translate.uniform() != [0.0, 0.0]
-    }
-
-    fn blends(&self, evaluated: &EvaluatedLayer<Line>) -> bool {
-        *evaluated.paint.line_layer_blend.uniform() != LayerBlendType::Normal
-    }
-
-    fn passes(&self, evaluated: &EvaluatedLayer<Line>) -> RenderPass {
-        let evaluated = &evaluated.paint;
-        if *evaluated.line_layer_opacity.uniform() > 0.0
+        let evaluated = &cx.evaluated.paint;
+        let drapes_by_bearing = *evaluated.line_translate_anchor.uniform() == TranslateAnchorType::Viewport
+            && *evaluated.line_translate.uniform() != [0.0, 0.0];
+        let evaluation = if *evaluated.line_layer_opacity.uniform() > 0.0
             && evaluated.line_opacity.constant_or(&1.0) > 0.0
             && evaluated.line_color.constant_or(&Color::black()).a > 0.0
             && evaluated.line_width.constant_or(&1.0) > 0.0
         {
-            RenderPass::Translucent
+            Evaluation::TRANSLUCENT
         } else {
-            RenderPass::None
-        }
+            Evaluation::NONE
+        };
+        Evaluation { drapes_by_bearing, ..evaluation }
     }
 
     /// Makes the frame's draws of the layer, those of each of its tiles,
