@@ -262,7 +262,7 @@ pub(crate) fn probe(device: &Device) -> ExportKinds {
         match ExportedMemory::new(device, extent, &Layout::AndroidHardwareBuffer { usage: 0 }) {
             Ok(_) => kinds = kinds.with(ExportKind::AndroidHardwareBuffer),
             Err(error) => {
-                log::info!(target: log_target::RENDER, "The Vulkan device exports no hardware buffers: {error}")
+                log::info!(target: log_target::RENDER, "The Vulkan device exports no hardware buffers: {error}");
             }
         }
     }

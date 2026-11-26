@@ -42,13 +42,13 @@ use mln_d3d12::windows::Win32::Graphics::Dxgi::Common::{
 };
 use mln_d3d12::windows::core::{PCSTR, s};
 use mln_d3d12::{CustomLayerPass, D3d12Gpu, Overlay, OverlayTarget, ShaderCompiler, ShaderStage};
+use mln_gfx::Size;
 use mln_gfx::gpu::{
     BufferDesc, BufferId, BufferUsage, Gpu as _, GpuError, ResourceId, TextureDesc, TextureFormat, TextureId,
     TextureRegion, TextureUsage, destroy_unused,
 };
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
-use mln_util::size::Size;
 
 use crate::overlay::Paint;
 
