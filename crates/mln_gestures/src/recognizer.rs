@@ -9,7 +9,7 @@ use mln_map::{
     AnchoredMomentum, AnimationOptions, CameraDelta, CameraMomentum, CameraOptions, CameraUpdate, CameraUpdateMode,
     CameraVelocity, GesturePhase, MomentumGlide, TransitionOutcome,
 };
-use mln_util::UnitBezier;
+use mln_style::unitbezier::UnitBezier;
 use mln_util::geo::ScreenCoordinate;
 
 use crate::camera::{GestureCamera, PendingEnd};

@@ -17,7 +17,7 @@ pub(crate) mod display_link {
     use std::thread::{self, ThreadId};
     use std::time::Duration;
 
-    use mln_util::Error;
+    use mln_style::error::Error;
     use objc2::rc::{Retained, autoreleasepool};
     use objc2::runtime::{AnyObject, NSObject};
     use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send, sel};

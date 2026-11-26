@@ -68,9 +68,10 @@ pub(crate) fn zero_to_one_clip_z(matrix: &mut DMat4) {
 #[cfg(test)]
 mod tests {
     use mln_map_types::{Camera, LogicalExtent, MapView, ProjectionMode, Viewport};
+    use mln_style::geo::LatLng;
+    use mln_style::size::Size;
     use mln_style::types::ProjectionDefinition;
-    use mln_util::geo::{EdgeInsets, LatLng};
-    use mln_util::size::Size;
+    use mln_util::geo::EdgeInsets;
 
     use super::*;
 

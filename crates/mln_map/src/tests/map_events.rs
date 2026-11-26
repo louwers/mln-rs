@@ -9,12 +9,12 @@ use mln_renderer::RendererEvent;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Response};
 use mln_style::Edit;
-use mln_util::error::{Error, ErrorKind};
-use mln_util::geo::LatLng;
-use mln_util::image::PremultipliedImage;
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::error::{Error, ErrorKind};
+use mln_style::geo::LatLng;
+use mln_style::size::Size;
+use mln_style::time::Instant;
 use mln_util::queue::Queue;
-use mln_util::size::Size;
-use mln_util::time::Instant;
 
 use crate::map_options::UnusedStyleImagePolicy;
 use crate::{

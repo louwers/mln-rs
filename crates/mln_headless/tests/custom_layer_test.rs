@@ -9,11 +9,11 @@ use mln_headless::HeadlessFrontend;
 use mln_map::{Map, MapMode, MapOptions};
 use mln_renderer::{Custom, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 use mln_runtime::{BackendType, Device, DeviceOptions};
-use mln_util::error::ErrorKind;
-use mln_util::image::PremultipliedImage;
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::error::ErrorKind;
+use mln_style::size::Size;
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
-use mln_util::size::Size;
 use parking_lot::Mutex;
 
 const SIDE: u32 = 64;

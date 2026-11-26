@@ -1,14 +1,16 @@
 use std::f64::consts::PI;
 
+use constants::TILE_SIZE_D;
 use geometry::Point;
 use glam::{DQuat, DVec3};
+use mln_style::constants;
+use mln_style::error::Error;
+use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
+use mln_style::size::Size;
 use mln_style::types::ProjectionDefinition;
-use mln_util::constants;
-use mln_util::constants::{M2PI, TILE_SIZE_D};
-use mln_util::error::Error;
-use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
+use mln_util::constants::M2PI;
+use mln_util::geo::{EdgeInsets, ScreenCoordinate};
 use mln_util::projection::Projection;
-use mln_util::size::Size;
 
 use crate::camera::{CameraOptions, FreeCameraOptions};
 use crate::camera_limits::CameraLimits;
@@ -20,7 +22,7 @@ use crate::view::{NorthOrientation, View, ViewParams, map_offset, max_mercator_h
 
 fn lat_lng_from_mercator(mercator_coordinate: Point<f64>, wrap_mode: WrapMode) -> Result<LatLng, Error> {
     LatLng::with_mode(
-        mln_math::rad2deg(2.0 * (PI - mercator_coordinate.y * 2.0 * PI).exp().atan() - (PI / 2.0)),
+        mln_style::math::rad2deg(2.0 * (PI - mercator_coordinate.y * 2.0 * PI).exp().atan() - (PI / 2.0)),
         mercator_coordinate.x * 360.0 - 180.0,
         wrap_mode,
     )
@@ -108,7 +110,7 @@ impl TransformState {
         let DVec3 { x: dx, y: dy, z: dz } = camera.forward();
 
         let (new_roll, mut new_pitch, new_bearing) = camera.orientation_angles();
-        new_pitch = mln_math::clamp_f64(new_pitch, self.limits.min_pitch, self.limits.max_pitch);
+        new_pitch = mln_style::math::clamp_f64(new_pitch, self.limits.min_pitch, self.limits.max_pitch);
 
         // The zoom from the camera's altitude, and how far along its line of
         // sight the ground is.
@@ -120,7 +122,7 @@ impl TransformState {
             travel = -position.z / dz;
         } else {
             zoom = 14.0;
-            let new_scale = mln_math::clamp_f64(2.0f64.powf(zoom), self.min_scale(), self.max_scale());
+            let new_scale = mln_style::math::clamp_f64(2.0f64.powf(zoom), self.min_scale(), self.max_scale());
             travel = center_distance / new_scale / TILE_SIZE_D;
         }
 
@@ -153,7 +155,7 @@ impl TransformState {
         Some(DVec3::new(
             position.x,
             position.y,
-            mln_math::clamp_f64(position.z, dist_to_center / max_world_size, dist_to_center / min_world_size),
+            mln_style::math::clamp_f64(position.z, dist_to_center / max_world_size, dist_to_center / min_world_size),
         ))
     }
 
@@ -278,10 +280,10 @@ impl TransformState {
         }
         let max_latitude = VerticalPerspectiveProjection::max_latitude(
             &self.view,
-            mln_math::clamp_f64(zoom, self.min_zoom_at_latitude(lat_lng.latitude()), self.limits.max_zoom),
+            mln_style::math::clamp_f64(zoom, self.min_zoom_at_latitude(lat_lng.latitude()), self.limits.max_zoom),
         );
         LatLng::saturating(
-            mln_math::clamp_f64(lat_lng.latitude(), -max_latitude, max_latitude),
+            mln_style::math::clamp_f64(lat_lng.latitude(), -max_latitude, max_latitude),
             lat_lng.longitude(),
             WrapMode::Unwrapped,
         )
@@ -426,8 +428,8 @@ impl TransformState {
         // range toward a pole as far as the zoom allows.
         if self.view.is_globe() {
             let max_latitude = VerticalPerspectiveProjection::max_latitude(&self.view, scale_zoom(scale));
-            let max_y = Projection::world_size(scale) / M2PI * mln_math::deg2rad(max_latitude).tan().asinh();
-            y = mln_math::clamp_f64(y, -max_y, max_y);
+            let max_y = Projection::world_size(scale) / M2PI * mln_style::math::deg2rad(max_latitude).tan().asinh();
+            y = mln_style::math::clamp_f64(y, -max_y, max_y);
             return (scale, x, y);
         }
 
@@ -438,7 +440,7 @@ impl TransformState {
         // Constrain scale to avoid zooming out far enough to show off-world
         // areas on the Y axis.
         let ratio_y = (if self.rotated_north() { width } else { height }) / TILE_SIZE_D;
-        scale = mln_math::fmax(scale, ratio_y);
+        scale = mln_style::math::fmax(scale, ratio_y);
 
         // Constrain min/max pan to avoid showing off-world areas on the Y axis.
         let max_y = (scale * TILE_SIZE_D - (if self.rotated_north() { width } else { height })) / 2.0;
@@ -618,7 +620,7 @@ impl TransformState {
 
     /// Recenter the map so that the given coordinate is located at the given
     /// point on screen.
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a
     /// NaN or infinite anchor.
     pub fn move_lat_lng(&mut self, lat_lng: &LatLng, anchor: &ScreenCoordinate) -> Result<(), Error> {
         self.move_lat_lng_at(lat_lng, anchor, 0.0)
@@ -731,7 +733,7 @@ impl TransformState {
         } else {
             self.constrained_min_scale()
         };
-        let new_scale = mln_math::clamp_f64(zoom_scale(zoom), min_scale, self.max_scale());
+        let new_scale = mln_style::math::clamp_f64(zoom_scale(zoom), min_scale, self.max_scale());
         let (x, y) = map_offset(&constrained, new_scale, globe);
         // A far unwrapped longitude can overflow the point.
         if !x.is_finite() || !y.is_finite() {
@@ -788,7 +790,7 @@ impl TransformState {
         if raised == 0.0 {
             return false;
         }
-        let pitch = mln_math::clamp_f64(across.atan2(up), self.limits.min_pitch, self.limits.max_pitch);
+        let pitch = mln_style::math::clamp_f64(across.atan2(up), self.limits.min_pitch, self.limits.max_pitch);
         let zoom = view.zoom() + (distance / raised).log2();
         let center = view.center(WrapMode::Unwrapped);
         let before = *view.params();

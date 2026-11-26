@@ -6,22 +6,22 @@ use std::time::Duration;
 
 use mln_gfx::gpu::Gpu;
 use mln_map_types::{MapMode, View};
+use mln_style::constants::DEFAULT_TRANSITION_DURATION;
 use mln_style::diff::{ItemChanges, LayerChange, LayerChanges, StyleDiff, sources_by_id};
+use mln_style::error::Error;
 use mln_style::expression::{Dependency, GlobalStateMap};
+use mln_style::hash::{HashMap, HashSet};
 use mln_style::image::Impl as ImageImpl;
 use mln_style::layer::{ErasedLayerStyle, SourceKind};
 use mln_style::property::evaluation::ZoomHistory;
+use mln_style::time::Instant;
 use mln_style::{
     GlobalStateChange, Layer, LayerList, PropertyEvaluationParameters, Source, Style, TransitionOptions,
     TransitionParameters, layer,
 };
 use mln_text::GlyphCache;
 use mln_text::local_fonts::LocalGlyphs;
-use mln_util::constants::DEFAULT_TRANSITION_DURATION;
-use mln_util::error::Error;
-use mln_util::hash::{HashMap, HashSet};
 use mln_util::pool::{Pool, TaskGroup};
-use mln_util::time::Instant;
 use mln_vec_map::VecSet;
 use smallvec::SmallVec;
 
@@ -374,7 +374,7 @@ impl RenderOrchestrator {
         // The sources' tiles are in other world copies once the center has
         // crossed the antimeridian (`SourceTiles::handle_wrap_jump`), and
         // the layers' draws go with them.
-        let longitude = update_parameters.view.center(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
+        let longitude = update_parameters.view.center(mln_style::geo::WrapMode::Unwrapped).longitude() as f32;
         let wrap_delta = ((longitude - self.longitude) / 360.0).round() as i16;
         self.longitude = longitude;
         if wrap_delta != 0 {
@@ -986,7 +986,7 @@ impl RenderOrchestrator {
         let mut symbol_buckets_changed = false;
         let mut symbol_buckets_added = false;
         let mut used_symbol_layers: VecSet<String> = VecSet::new();
-        let longitude = update_parameters.view.center(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
+        let longitude = update_parameters.view.center(mln_style::geo::WrapMode::Unwrapped).longitude() as f32;
         for layer in layers_need_placement.iter().rev() {
             let result = self.cross_tile_symbol_index.index_layer(
                 *layer,

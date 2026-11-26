@@ -10,14 +10,14 @@ use mln_runtime::{
 };
 use mln_storage::response::Reason;
 use mln_storage::{ResourceError, Response};
+use mln_style::bitmap::PremultipliedImage;
 use mln_style::expression::Functions;
+use mln_style::geo::LatLng;
+use mln_style::range::Range;
+use mln_style::size::Size;
 use mln_style::sources::TileDataFormat;
 use mln_style::sources::custom_geometry_source::TileOptions;
 use mln_style::types::{ProjectionDefinition, ProjectionType};
-use mln_util::geo::LatLng;
-use mln_util::image::PremultipliedImage;
-use mln_util::range::Range;
-use mln_util::size::Size;
 
 use crate::support::{EMPTY_STYLE, TestRuntime, map, runtime, wait, wait_err};
 
@@ -328,7 +328,7 @@ fn a_custom_source_drops_its_callbacks_once_it_leaves_the_style() {
 fn tile_commands_check_the_kind_of_their_source() {
     let (_runtime, map) = styled_map();
     add_geometry(&map, "geometry", &Probe::default()).unwrap();
-    let tile = mln_tile_id::CanonicalTileID::new(0, 0, 0);
+    let tile = mln_style::tile_id::CanonicalTileID::new(0, 0, 0);
     wait(map.set_custom_geometry_source_tile_data("geometry", tile, r#"{"type":"Point","coordinates":[0,0]}"#));
     wait(map.invalidate_custom_geometry_source_tile("geometry", tile));
     let wrong = wait_err(map.set_custom_vector_source_tile_data("geometry", tile, None, TileDataFormat::default()));

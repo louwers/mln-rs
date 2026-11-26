@@ -4,12 +4,13 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use mln_style::error::Error;
+use mln_style::geo::{LatLng, LatLngBounds};
 use mln_style::layer::{Layer, LayerStyle};
 use mln_style::layers::Fill;
 use mln_style::sources::custom_vector_source::{CustomVectorTileData, TileDataFormat};
-use mln_tile_id::{CanonicalTileID, OverscaledTileID};
-use mln_util::error::Error;
-use mln_util::geo::{LatLng, LatLngBounds};
+use mln_style::tile_id::CanonicalTileID;
+use mln_tile_id::OverscaledTileID;
 use parking_lot::Mutex;
 
 use super::RasterTileTest;

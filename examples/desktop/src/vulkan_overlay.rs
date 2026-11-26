@@ -21,7 +21,7 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_util::hash::HashMap;
+use mln_style::hash::HashMap;
 use mln_vulkan::{Overlay, OverlayTarget, ShaderStage, VulkanGpu, compile_glsl};
 
 use crate::overlay::Paint;

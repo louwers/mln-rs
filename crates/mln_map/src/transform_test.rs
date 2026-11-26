@@ -17,13 +17,15 @@ use mln_map_types::{
     GesturePhase, MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumGlide, MomentumSnap, TileProjector,
     TransitionOutcome,
 };
-use mln_math::deg2rad;
+use mln_style::constants::{EXTENT, LATITUDE_MAX, LONGITUDE_MAX, TILE_SIZE_D};
+use mln_style::geo::LatLngBounds;
+use mln_style::math::deg2rad;
+use mln_style::tile_id::CanonicalTileID;
+use mln_style::time::Instant;
 use mln_style::types::ProjectionType;
-use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
-use mln_util::UnitBezier;
-use mln_util::constants::{EXTENT, LATITUDE_MAX, LONGITUDE_MAX, MAX_ZOOM, TILE_SIZE_D};
-use mln_util::geo::LatLngBounds;
-use mln_util::time::Instant;
+use mln_style::unitbezier::UnitBezier;
+use mln_tile_id::UnwrappedTileID;
+use mln_util::constants::MAX_ZOOM;
 
 use super::momentum::GlidePlan;
 use super::*;
@@ -3621,7 +3623,7 @@ fn free_bearing_drag_keeps_the_location_under_the_cursor() {
         if free_bearing {
             assert!(max_slip < 1e-6, "{max_slip}");
             assert_near(80.0, transform.view().center(WrapMode::Wrapped).longitude(), 1e-6);
-            assert_near(180.0, mln_math::rad2deg(transform.view().angle()).abs(), 1e-6);
+            assert_near(180.0, mln_style::math::rad2deg(transform.view().angle()).abs(), 1e-6);
         } else {
             assert!(max_slip > 4.0, "{max_slip}");
             assert_eq!(90.0, transform.view().center(WrapMode::Wrapped).latitude());
@@ -3677,7 +3679,7 @@ fn free_bearing_zoom_around_the_pole_keeps_the_views_orientation() {
         transform.jump_to(&CameraOptions { zoom: Some(1.6), anchor: Some(anchor), ..Default::default() });
         let point = transform.lat_lng_to_screen_coordinate(&location);
         let beside_point = transform.lat_lng_to_screen_coordinate(&beside);
-        let turn = mln_math::rad2deg((beside_point.y - point.y).atan2(beside_point.x - point.x));
+        let turn = mln_style::math::rad2deg((beside_point.y - point.y).atan2(beside_point.x - point.x));
         if free_bearing {
             assert_near(anchor.x, point.x, 1e-6);
             assert_near(anchor.y, point.y, 1e-6);
@@ -3715,10 +3717,10 @@ fn free_bearing_fling_carries_on_over_the_pole() {
         if free_bearing {
             assert!(transform.view().center(WrapMode::Wrapped).latitude() < 85.0);
             assert_near(80.0, transform.view().center(WrapMode::Wrapped).longitude(), 1e-6);
-            assert_near(180.0, mln_math::rad2deg(transform.view().angle()).abs(), 1e-6);
+            assert_near(180.0, mln_style::math::rad2deg(transform.view().angle()).abs(), 1e-6);
         } else {
             assert_eq!(90.0, transform.view().center(WrapMode::Wrapped).latitude());
-            assert_near(0.0, mln_math::rad2deg(transform.view().angle()), 1e-9);
+            assert_near(0.0, mln_style::math::rad2deg(transform.view().angle()), 1e-9);
         }
     }
 }
@@ -4057,7 +4059,7 @@ fn nan_screen_coordinates_are_errors() {
     transform.resize(Size::new(1000, 1000)).unwrap();
     let nan = sc(f64::NAN, 500.0);
     let error = transform.screen_coordinate_to_lat_lng(&nan, WrapMode::Wrapped).unwrap_err();
-    assert_eq!(error.kind, mln_util::ErrorKind::InvalidArgument);
+    assert_eq!(error.kind, mln_style::error::ErrorKind::InvalidArgument);
     assert!(error.message.ends_with("must not be NaN"), "{error}");
     let center = transform.view().center(WrapMode::Wrapped);
     assert!(transform.move_by(&nan, &AnimationOptions::default()).is_err());
@@ -4076,7 +4078,7 @@ fn nan_screen_coordinates_are_errors_on_the_globe() {
     set_up_globe_camera(&mut transform, &ll(10.0, 10.0), 3.0);
     let nan = sc(f64::NAN, 0.0);
     let error = transform.screen_coordinate_to_lat_lng(&nan, WrapMode::Wrapped).unwrap_err();
-    assert_eq!(error.kind, mln_util::ErrorKind::InvalidArgument);
+    assert_eq!(error.kind, mln_style::error::ErrorKind::InvalidArgument);
     assert!(error.message.ends_with("must not be NaN"), "{error}");
     let center = transform.view().center(WrapMode::Wrapped);
     assert!(transform.move_by(&nan, &AnimationOptions::default()).is_err());
@@ -4119,7 +4121,7 @@ fn counting_end(options: &mut AnimationOptions) -> EndLog {
 }
 
 fn bearing_degrees(transform: &Transform) -> f64 {
-    mln_math::rad2deg(-transform.view().angle())
+    mln_style::math::rad2deg(-transform.view().angle())
 }
 
 // gtest: Transform.IndependentCameraTracks
@@ -4233,7 +4235,7 @@ fn flight_and_anchor_couple_center_with_their_properties() {
         false,
     );
     transform.update_transitions(Some(start + Duration::from_secs(1)));
-    assert_near(mln_math::rad2deg(transform.view().roll()), 5.0, 1e-5);
+    assert_near(mln_style::math::rad2deg(transform.view().roll()), 5.0, 1e-5);
     let center = transform.view().center(WrapMode::Wrapped);
     transform.jump_to(&CameraOptions { zoom: Some(10.0), ..Default::default() });
     assert_eq!(flight_finished.count(&transform), 0); // Roll remains after the coupled flight ends.
@@ -4241,7 +4243,7 @@ fn flight_and_anchor_couple_center_with_their_properties() {
     assert_near(transform.view().center(WrapMode::Wrapped).latitude(), center.latitude(), 1e-5);
     assert_near(transform.view().center(WrapMode::Wrapped).longitude(), center.longitude(), 1e-5);
     assert_near(transform.view().zoom(), 10.0, 1e-5);
-    assert_near(mln_math::rad2deg(transform.view().roll()), 20.0, 1e-5);
+    assert_near(mln_style::math::rad2deg(transform.view().roll()), 20.0, 1e-5);
     assert_eq!(flight_finished.count(&transform), 1);
 
     let mut anchor_animation = AnimationOptions::new(Duration::from_secs(4));
@@ -4292,7 +4294,7 @@ fn compose_padding_pitch_and_field_of_view() {
     let end = start + Duration::from_secs(4);
     transform.update_transitions(Some(end));
     assert_eq!(transform.state().view().padding(), insets(300.0, 20.0, 0.0, 0.0));
-    assert_near(mln_math::rad2deg(transform.view().fov()), 45.0, 1e-5);
+    assert_near(mln_style::math::rad2deg(transform.view().fov()), 45.0, 1e-5);
     let max_pitch =
         transform.state().limits().max_pitch + deg2rad(45.0) / 2.0 - (1.3 * (deg2rad(45.0) / 2.0).tan()).atan();
     assert!(max_pitch < deg2rad(60.0));
@@ -4562,7 +4564,7 @@ fn record_end() -> (AnimationOptions, EndLog) {
 }
 
 fn pitch_degrees(transform: &Transform) -> f64 {
-    mln_math::rad2deg(transform.view().pitch())
+    mln_style::math::rad2deg(transform.view().pitch())
 }
 
 // gtest: Transform.MomentumSlowsEachPartByFriction

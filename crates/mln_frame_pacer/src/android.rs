@@ -24,7 +24,7 @@ pub(crate) mod choreographer {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
-    use mln_util::Error;
+    use mln_style::error::Error;
     use parking_lot::Mutex;
 
     use crate::{Limit, VsyncSource, Vsyncs};
@@ -439,7 +439,7 @@ pub(crate) mod choreographer {
         use std::cell::Cell;
         use std::sync::mpsc;
 
-        use mln_util::ErrorKind;
+        use mln_style::error::ErrorKind;
 
         use super::*;
         use crate::{FramePacer, RefreshWaiter};

@@ -27,7 +27,7 @@ crate::properties!(
         fill_translate: constant [f32; 2] = [0.0_f32, 0.0_f32],
         fill_translate_anchor: constant TranslateAnchorType = TranslateAnchorType::Map,
     }
-    use crate::expression::Image, crate::types::LayerBlendType, crate::types::TranslateAnchorType, mln_util::Color;
+    use crate::color::Color, crate::expression::Image, crate::types::LayerBlendType, crate::types::TranslateAnchorType;
 );
 
 /// The properties, by slot.

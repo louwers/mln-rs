@@ -25,7 +25,7 @@ use crate::glyph::{FontFace, Glyph, GlyphID};
 /// block on the platform's font matcher and read font files, so the glyph
 /// store calls it on its thread pool, never on the render thread.
 ///
-/// [`i18n::extends_previous`]: mln_util::i18n::extends_previous
+/// [`i18n::extends_previous`]: mln_style::i18n::extends_previous
 pub trait FontChooser: Send + Sync {
     /// The device's font that draws `cluster` in a label of `font_stack`: the
     /// first font the stack names that the device has and that draws all of

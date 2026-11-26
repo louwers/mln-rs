@@ -2,7 +2,7 @@
 // the Felzenszwalb/Huttenlocher distance transform paper
 // (https://cs.brown.edu/~pff/papers/dt-final.pdf).
 
-use crate::image::AlphaImage;
+use mln_style::bitmap::AlphaImage;
 
 // The distances are `f32`, where C++'s are `double`: that is faster, and
 // rounds a rare pixel one level away from C++'s.
@@ -144,8 +144,9 @@ fn round_to_alpha(x: f64) -> u8 {
 
 #[cfg(test)]
 mod tests {
+    use mln_style::size::Size;
+
     use super::*;
-    use crate::size::Size;
 
     #[test]
     fn solid_and_empty() {

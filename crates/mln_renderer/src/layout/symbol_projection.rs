@@ -758,9 +758,10 @@ mod tests {
     use glam::Vec2;
     use mln_map::transform::Transform;
     use mln_map_types::{ConstrainMode, TileProjector, TransformState, View, ViewportMode};
-    use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
-    use mln_util::geo::LatLng;
-    use mln_util::size::Size;
+    use mln_style::geo::LatLng;
+    use mln_style::size::Size;
+    use mln_style::tile_id::CanonicalTileID;
+    use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 
     use super::{
         LabelPlaneProjector, LineLabel, LineLabelAlignment, LinePlacer, PlacedGlyph, PlacedSymbol, PlacedSymbolPools,

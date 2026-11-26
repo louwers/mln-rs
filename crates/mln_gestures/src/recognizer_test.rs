@@ -9,12 +9,11 @@ use std::time::Duration;
 
 use mln_map::transform::{CameraCommandId, Transform, TransformEvent};
 use mln_map::{CameraChangeSource, CameraLimits, ConstrainMode, MomentumDecay, MomentumSnap, ViewportMode};
+use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
+use mln_style::hash::HashMap;
+use mln_style::size::Size;
+use mln_style::time::Instant;
 use mln_style::types::ProjectionDefinition;
-use mln_util::LatLng;
-use mln_util::geo::{LatLngBounds, WrapMode};
-use mln_util::hash::HashMap;
-use mln_util::size::Size;
-use mln_util::time::Instant;
 
 use super::*;
 use crate::{Axis, InvalidGestureOptions, Modes, NextTick, Notch};

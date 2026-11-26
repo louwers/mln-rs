@@ -3,11 +3,11 @@
 // too large for 64 bits).
 
 use geo_types::Geometry;
-use mln_util::chrono::Timestamp;
-use mln_util::error::Error;
+use mln_style::error::Error;
 #[cfg(any(test, feature = "sqlite"))]
-use mln_util::geo::LatLng;
-use mln_util::geo::LatLngBounds;
+use mln_style::geo::LatLng;
+use mln_style::geo::LatLngBounds;
+use mln_util::chrono::Timestamp;
 #[cfg(any(test, feature = "sqlite"))]
 use serde_json::{Map, Value as Json};
 
@@ -44,7 +44,7 @@ pub struct OfflineTilePyramidRegionDefinition {
 }
 
 impl OfflineTilePyramidRegionDefinition {
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a
     /// negative or reversed zoom range, or a negative or infinite pixel ratio.
     pub fn new(
         style_url: impl Into<String>,
@@ -87,7 +87,7 @@ pub struct OfflineGeometryRegionDefinition {
 }
 
 impl OfflineGeometryRegionDefinition {
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a
     /// negative or reversed zoom range, or a negative or infinite pixel ratio.
     pub fn new(
         style_url: impl Into<String>,
@@ -174,7 +174,7 @@ impl OfflineRegionDefinition {
 }
 
 /// Decodes a region definition from JSON. A definition that isn't one fails
-/// with [`ErrorKind::Native`](mln_util::ErrorKind), and one
+/// with [`ErrorKind::Native`](mln_style::error::ErrorKind), and one
 /// with invalid values with the constructors' error.
 #[cfg(any(test, feature = "sqlite"))]
 pub(crate) fn decode_offline_region_definition(region: &[u8]) -> Result<OfflineRegionDefinition, Error> {

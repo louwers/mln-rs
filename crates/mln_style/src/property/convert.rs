@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
-use mln_util::Color;
-
+use crate::color::Color;
 use crate::conversion::{Converter, Convertible, Error, convert};
 use crate::expression::{Functions, ParsingContext, Type, ValueConverter, is_expression};
 use crate::property::expression::PropertyExpression;

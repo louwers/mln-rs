@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use mln_image::encode_png;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::size::Size;
 
 use crate::manifest_parser::ManifestParser;
 use crate::metadata::{MapMode, TerrainSkirtLength, TestMetadata};

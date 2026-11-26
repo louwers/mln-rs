@@ -1,4 +1,4 @@
-use mln_math::deg2rad;
+use mln_style::math::deg2rad;
 
 use crate::util::tile_lod::{self, TileZoomFunction};
 

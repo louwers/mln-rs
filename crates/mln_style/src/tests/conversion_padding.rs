@@ -1,7 +1,6 @@
-use mln_util::Padding;
-
 use super::util::parse_json;
 use crate::conversion::{Converter, Convertible, Error};
+use crate::padding::Padding;
 
 // gtest: StyleConversion.Padding
 #[test]

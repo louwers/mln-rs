@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use feature::Value;
-use mln_util::error::Error;
-use mln_util::geo::LatLng;
 
 use crate::conversion::Convertible;
+use crate::error::Error;
 use crate::expression::GlobalStateMap;
 use crate::filter::Filter;
 use crate::font_face::FontFaces;
+use crate::geo::LatLng;
 use crate::layer::{Layer, LayerList, SourceKind};
 use crate::light::Light;
 use crate::projection::Projection;
@@ -334,7 +334,7 @@ impl Style {
         self.layers.get(layer_id)
     }
 
-    /// Makes `edit`. Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind)
+    /// Makes `edit`. Fails with [`ErrorKind::NotFound`](crate::error::ErrorKind)
     /// for a layer the style lacks, with `AlreadyExists` for a layer id it
     /// has, and with `InvalidArgument` for a value that doesn't fit, and
     /// leaves the style as it was when it fails. An edit that changes

@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU16;
 use std::sync::Arc;
 
+use mln_style::bitmap::AlphaImage;
 use mln_util::font_stack::FontStack;
-use mln_util::image::AlphaImage;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
 

@@ -8,15 +8,16 @@ use mln_renderer::query::{FeatureExtensionValue, RenderedQueryOptions, SourceQue
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::conversion::{Convertible, Error};
+use mln_style::error::ErrorKind;
 use mln_style::expression::dsl::{eq, get_str, gt, id, literal, literal_str, ne, number};
 use mln_style::expression::{Functions, Value as ExpressionValue};
 use mln_style::feature::FeatureState;
 use mln_style::filter::{Filter, convert_filter};
+use mln_style::geo::LatLng;
 use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType};
 use mln_style::{Edit, Layer};
-use mln_util::ErrorKind;
 use mln_util::feature::Feature;
-use mln_util::geo::{LatLng, ScreenCoordinate};
+use mln_util::geo::ScreenCoordinate;
 use serde_json::json;
 
 use crate::gtest_api::{set, style_image};

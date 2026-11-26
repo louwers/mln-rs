@@ -1,7 +1,7 @@
 //! The fog over the terrain's surface, from the style's `sky`.
 
 use mln_map_types::View;
-use mln_util::Color;
+use mln_style::color::Color;
 
 use crate::render_sky::EvaluatedSky;
 use crate::terrain::ubo::TerrainFog;
@@ -46,10 +46,10 @@ fn linear(color: &Color, opacity: f32) -> [f32; 4] {
 #[cfg(test)]
 mod tests {
     use mln_map_types::TransformState;
+    use mln_style::geo::LatLng;
     use mln_style::property::evaluated::Evaluated;
+    use mln_style::size::Size;
     use mln_style::types::ProjectionDefinition;
-    use mln_util::geo::LatLng;
-    use mln_util::size::Size;
 
     use super::*;
 

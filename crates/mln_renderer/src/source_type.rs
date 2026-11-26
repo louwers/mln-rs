@@ -12,18 +12,17 @@ use std::sync::{Arc, Weak};
 
 use mln_map_types::MapMode;
 use mln_storage::FileSource;
-use mln_style::Source;
+use mln_style::error::Error;
+use mln_style::geo::LatLngBounds;
 use mln_style::layer::SourceKind;
+use mln_style::range::Range;
 use mln_style::source::{ErasedStyleSourceType, SourceData, SourceTypeEntry, StyleSourceType};
 use mln_style::sources::geojson::GeoJSONData;
 use mln_style::sources::tileset::{TilesetKind, TilesetSourceType};
 use mln_style::sources::{CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType};
-use mln_util::constants;
-use mln_util::error::Error;
-use mln_util::geo::LatLngBounds;
+use mln_style::tileset::{RasterEncoding, Tileset, VectorEncoding};
+use mln_style::{Source, constants};
 use mln_util::pool::{Pool, TaskGroup};
-use mln_util::range::Range;
-use mln_util::tileset::{RasterEncoding, Tileset, VectorEncoding};
 
 use crate::query::FeatureExtensionValue;
 use crate::render_source::RenderSource;
@@ -90,7 +89,7 @@ pub(crate) trait TileOrigin {
 
     /// The highest zoom level that has tiles, as far as the origin knows.
     fn max_zoom(&self) -> u8 {
-        constants::TERRAIN_RGB_MAXZOOM
+        mln_util::constants::TERRAIN_RGB_MAXZOOM
     }
 }
 
@@ -207,7 +206,7 @@ impl<K: TilesetKind> TileOrigin for TilesetOrigin<K> {
     }
 
     fn max_zoom(&self) -> u8 {
-        self.tileset.as_ref().map_or(constants::TERRAIN_RGB_MAXZOOM, |tileset| tileset.zoom_range.max)
+        self.tileset.as_ref().map_or(mln_util::constants::TERRAIN_RGB_MAXZOOM, |tileset| tileset.zoom_range.max)
     }
 }
 

@@ -9,10 +9,10 @@
 // Neither applies gamma, sRGB or ICC profile conversions (libpng only does when
 // asked). Interlaced images are deinterlaced by both.
 
-use mln_util::error::Error;
-use mln_util::image::{PremultipliedImage, UnassociatedImage};
+use mln_style::bitmap::{PremultipliedImage, UnassociatedImage};
+use mln_style::error::Error;
+use mln_style::size::Size;
 use mln_util::premultiply::premultiply;
-use mln_util::size::Size;
 
 pub fn decode_png(data: &[u8]) -> Result<PremultipliedImage, Error> {
     const SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'];

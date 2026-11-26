@@ -1,8 +1,8 @@
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::error::Error;
+use mln_style::size::Size;
+use mln_style::tileset::RasterEncoding;
 use mln_tile_id::OverscaledTileID;
-use mln_util::error::Error;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
-use mln_util::tileset::RasterEncoding;
 
 use super::{RasterTileTest, png};
 use crate::geometry::dem_data::DEMData;

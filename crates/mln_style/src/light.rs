@@ -12,7 +12,7 @@ crate::properties!(
         light_color: constant Color = Color::white(),
         light_intensity: constant f32 = 0.5_f32,
     }
-    use crate::types::LightAnchorType, crate::types::Position, mln_util::Color;
+    use crate::types::LightAnchorType, crate::types::Position, crate::color::Color;
 );
 
 /// The style's light.

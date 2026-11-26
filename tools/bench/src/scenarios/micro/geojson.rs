@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_style::sources::geojson::{GeoJSONOptions, create_geojson_data};
-use mln_tile_id::CanonicalTileID;
+use mln_style::tile_id::CanonicalTileID;
 
 use crate::scenario::{Bench, Kind, Scenario};
 use crate::support::fixtures::Fixtures;

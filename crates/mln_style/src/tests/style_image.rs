@@ -1,7 +1,6 @@
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
-
+use crate::bitmap::PremultipliedImage;
 use crate::image::{Image, ImageContent, ImageStretches};
+use crate::size::Size;
 
 /// A style image of the given size, without `sdf`.
 fn image(

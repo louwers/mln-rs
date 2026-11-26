@@ -1,10 +1,9 @@
-use mln_util::geo::{LatLng, LatLngBounds};
-use mln_util::tileset::{PartialTileset, Scheme};
-
 use super::util::parse_json;
 use crate::conversion::Convertible;
 use crate::conversion::tileset::convert_tileset;
+use crate::geo::{LatLng, LatLngBounds};
 use crate::layer::SourceKind;
+use crate::tileset::{PartialTileset, Scheme};
 
 fn convert_json(json: &str) -> Result<PartialTileset, String> {
     convert_tileset(&Convertible::from(&parse_json(json)), SourceKind::Geometry)

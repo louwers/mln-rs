@@ -1,5 +1,4 @@
 use feature::Value as MbglValue;
-use mln_util::range::Range;
 
 use crate::conversion::Convertible;
 use crate::expression::forms::interpolate::parse_stop_label;
@@ -7,6 +6,7 @@ use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::stops::{Stops, get_covering_stops};
 use crate::expression::type_::Type;
 use crate::expression::{EvalResult, EvaluationContext, EvaluationError, Expr, Node, Output};
+use crate::range::Range;
 
 /// `["step", input, output, label, output, ...]`.
 #[derive(Clone, PartialEq, mln_wire::Wire)]

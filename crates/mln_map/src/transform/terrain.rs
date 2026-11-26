@@ -34,8 +34,8 @@ use std::sync::Arc;
 
 use glam::DVec3;
 use mln_map_types::{CameraOptions, Elevation, View};
-use mln_util::geo::WrapMode;
-use mln_util::time::Instant;
+use mln_style::geo::WrapMode;
+use mln_style::time::Instant;
 
 use super::transition::Transition;
 use super::{CENTER, Transform, flip_y};

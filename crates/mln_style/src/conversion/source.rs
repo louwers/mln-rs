@@ -71,9 +71,9 @@ pub(crate) fn convert_image_source(value: &Convertible<'_>, error: &mut Error) -
         return None;
     }
 
-    let mut coordinates = [mln_util::LatLng::default(); 4];
+    let mut coordinates = [crate::geo::LatLng::default(); 4];
     for (i, coordinate) in coordinates.iter_mut().enumerate() {
-        let lat_lng = super::convert::<mln_util::LatLng>(&coordinates_value.array_member(i), error)?;
+        let lat_lng = super::convert::<crate::geo::LatLng>(&coordinates_value.array_member(i), error)?;
         *coordinate = lat_lng;
     }
     Some(SourceData::new(ImageSourceOptions { url: url_string, coordinates }))

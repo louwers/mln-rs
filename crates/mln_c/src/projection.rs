@@ -7,10 +7,11 @@ use ::mln_map::MapProjection;
 use mln_map_types::{
     AxonometricMode, Camera, ConstrainMode, LogicalExtent, MapView, ProjectionMode, Viewport, ViewportMode,
 };
+use mln_style::geo::WrapMode;
+use mln_style::size::Size;
 use mln_style::types::{ProjectionDefinition, ProjectionType};
-use mln_util::geo::{NorthOrientation, WrapMode};
+use mln_util::geo::NorthOrientation;
 use mln_util::projection::{ProjectedMeters, Projection};
-use mln_util::size::Size;
 use parking_lot::Mutex;
 
 use crate::error::Error;

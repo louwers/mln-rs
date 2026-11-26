@@ -1,4 +1,5 @@
-use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
+use mln_style::tile_id::CanonicalTileID;
+use mln_tile_id::UnwrappedTileID;
 
 use crate::tile_mask::TileMask;
 

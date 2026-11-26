@@ -3,12 +3,12 @@
 
 use glam::Vec2;
 use mln_map_types::{ProjectionData, TileProjector, View};
+use mln_style::constants::{EXTENT, TILE_SIZE_D};
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::types::{
     AlignmentType, IconTextFitType, SymbolPlacementType, SymbolZOrderType, TextRotationAlignmentType,
 };
 use mln_tile_id::UnwrappedTileID;
-use mln_util::constants::{EXTENT, TILE_SIZE_D};
 use mln_vec_map::VecMap;
 
 use crate::buckets::symbol_bucket::{SymbolBucket, ZoomEvaluatedSize, symbols_by_viewport_y};

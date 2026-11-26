@@ -17,7 +17,7 @@
 "crates/mln_storage/src/ureq_transport.rs" = 1
 "crates/mln_style/src/layers/heatmap_layer_properties.rs" = 1
 "crates/mln_text/src/shaper.rs" = 1
-"crates/mln_util/src/image.rs" = 1
+"crates/mln_style/src/bitmap.rs" = 1
 "crates/mln_vec_map/src/lib.rs" = 1
 
 [borrow]

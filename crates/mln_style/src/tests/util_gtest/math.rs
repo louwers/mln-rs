@@ -1,19 +1,7 @@
-use mln_math::{clamp_f64, wrap};
+// Ported C++ gtests of test/math.
 
-/// gtest `ASSERT_DOUBLE_EQ`: equal within 4 ULPs.
-fn assert_double_eq(expected: f64, actual: f64) {
-    fn biased(f: f64) -> u64 {
-        let bits = f.to_bits();
-        if bits & (1 << 63) != 0 { !bits + 1 } else { bits | (1 << 63) }
-    }
-    let ok = if expected.is_nan() || actual.is_nan() {
-        false
-    } else {
-        let (a, b) = (biased(expected), biased(actual));
-        a.abs_diff(b) <= 4
-    };
-    assert!(ok, "expected {expected:e}, got {actual:e}");
-}
+use super::assert_double_eq;
+use crate::math::{clamp_f64, wrap};
 
 // gtest: Math.ClampFloatingPoint
 #[test]

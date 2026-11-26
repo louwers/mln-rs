@@ -21,6 +21,7 @@ js-sys.workspace = true
 log.workspace = true
 mln_renderer.workspace = true
 mln_text.workspace = true
+mln_style.workspace = true
 mln_util.workspace = true
 mln_wire.workspace = true
 parking_lot.workspace = true

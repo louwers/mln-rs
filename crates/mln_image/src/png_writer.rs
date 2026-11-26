@@ -2,8 +2,8 @@
 // IDAT chunk with filter type 0 on every scanline, zlib-compressed by
 // `util::compress`.
 
+use mln_style::bitmap::PremultipliedImage;
 use mln_util::compression::compress;
-use mln_util::image::PremultipliedImage;
 use mln_util::premultiply::unpremultiply;
 
 fn network_byte_u32(value: u32) -> [u8; 4] {
@@ -66,7 +66,7 @@ pub fn encode_png(pre: &PremultipliedImage) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     // Ports the PNG cases of test/util/image.test.cpp that need no fixtures.
-    use mln_util::size::Size;
+    use mln_style::size::Size;
 
     use super::*;
     use crate::image::decode_image;

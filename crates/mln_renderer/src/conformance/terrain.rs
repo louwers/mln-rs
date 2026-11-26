@@ -14,8 +14,8 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::{Rgba, Size};
+use mln_style::tileset::RasterEncoding;
 use mln_util::dem::{self, DemCoords, DemUnpack};
-use mln_util::tileset::RasterEncoding;
 
 use super::{EXTENT, buffer, draw, dynamic, fixed, location, slot, whole};
 use crate::conformance::programs;

@@ -12,8 +12,8 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use mln_util::ErrorKind;
-use mln_util::hash::HashMap;
+use mln_style::error::ErrorKind;
+use mln_style::hash::HashMap;
 use parking_lot::Mutex;
 
 use crate::callback::{UserData, Wake};

@@ -11,10 +11,10 @@ use std::any::Any;
 use std::sync::Arc;
 
 use mln_style::CrossfadeParameters;
+use mln_style::error::Error;
 use mln_style::expression::Dependency;
 use mln_style::layer::{ErasedLayerStyle, ErasedStyleLayerType, LayerStyle, LayerTypeEntry, PaintSet, StyleLayerType};
 use mln_style::wire::SharedLayer;
-use mln_util::error::Error;
 use mln_vec_map::VecSet;
 use mln_wire::{Reader, Wire, Writer, shared};
 use smallvec::SmallVec;
@@ -332,9 +332,9 @@ pub(crate) const fn entry<T: LayerType>() -> &'static dyn ErasedLayerType {
 #[cfg(test)]
 mod tests {
     use mln_map_types::MapMode;
+    use mln_style::color::Color;
     use mln_style::layers::{Background, BackgroundPaintProperties, Circle, Symbol};
     use mln_style::property::evaluated::Evaluated;
-    use mln_util::Color;
     use mln_vec_map::VecMap;
 
     use super::*;

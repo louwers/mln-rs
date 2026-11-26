@@ -6,10 +6,11 @@
 use std::ops::Range;
 
 use glam::Vec2;
+use mln_style::i18n;
 use mln_style::image::TextFit;
+use mln_style::padding::Padding;
 use mln_style::types::{IconTextFitType, SymbolAnchorType, TextJustifyType, TextWritingModeType, VerticalAlign};
 use mln_util::constants::ONE_EM;
-use mln_util::{Padding, i18n};
 use mln_vec_map::VecSet;
 
 use crate::atlas::{ImagePosition, ImagePositions};

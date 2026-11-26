@@ -9,8 +9,9 @@
 //! center where it draws.
 
 use mln_map_types::{VerticalPerspectiveProjection, View};
-use mln_util::error::Error;
-use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
+use mln_style::error::Error;
+use mln_style::geo::{LatLng, WrapMode};
+use mln_util::geo::ScreenCoordinate;
 
 use super::{Transform, flip_y};
 

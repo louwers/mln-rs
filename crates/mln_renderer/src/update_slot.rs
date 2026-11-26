@@ -13,7 +13,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use mln_util::error::Error;
+use mln_style::error::Error;
 use mln_util::event_queue::Waker;
 use parking_lot::Mutex;
 
@@ -127,7 +127,7 @@ impl UpdateSlot {
 
     /// Closes the innermost command group. When it was the outermost, the
     /// latest update published inside it shows. Fails with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) when no group is
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) when no group is
     /// open.
     pub fn end_group(&self) -> Result<(), Error> {
         let shown = {

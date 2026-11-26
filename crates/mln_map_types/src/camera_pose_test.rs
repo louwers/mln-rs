@@ -1,7 +1,8 @@
 use std::f64::consts::SQRT_2;
 
 use glam::dvec3;
-use mln_util::constants::{EARTH_RADIUS_M, LATITUDE_MAX};
+use mln_style::constants::LATITUDE_MAX;
+use mln_util::constants::EARTH_RADIUS_M;
 
 use super::*;
 
@@ -63,14 +64,14 @@ fn set_location() {
 
     options.set_location(&LatLngAltitude {
         location: ll(LATITUDE_MAX, 0.0),
-        altitude: EARTH_RADIUS_M * PI * mln_math::deg2rad(LATITUDE_MAX).cos(),
+        altitude: EARTH_RADIUS_M * PI * mln_style::math::deg2rad(LATITUDE_MAX).cos(),
     });
     assert!(options.position.is_some());
     assert_vec3_near_1e7(options.position.unwrap(), dvec3(0.5, 0.0, 0.5));
 
     options.set_location(&LatLngAltitude {
         location: ll(-LATITUDE_MAX, 0.0),
-        altitude: EARTH_RADIUS_M * PI * mln_math::deg2rad(-LATITUDE_MAX).cos(),
+        altitude: EARTH_RADIUS_M * PI * mln_style::math::deg2rad(-LATITUDE_MAX).cos(),
     });
     assert!(options.position.is_some());
     assert_vec3_near_1e7(options.position.unwrap(), dvec3(0.5, 1.0, 0.5));
@@ -284,8 +285,8 @@ fn set_roll_pitch_bearing() {
     assert_vec3_near_1e7(up, dvec3(0.0, 1.0, 0.0));
     assert_vec3_near_1e7(forward, dvec3(0.0, 0.0, -1.0));
 
-    let cos60 = mln_math::deg2rad(60.0).cos();
-    let sin60 = mln_math::deg2rad(60.0).sin();
+    let cos60 = mln_style::math::deg2rad(60.0).cos();
+    let sin60 = mln_style::math::deg2rad(60.0).sin();
 
     options.set_roll_pitch_bearing(0.0, 60.0, 0.0);
     assert!(options.orientation.is_some());

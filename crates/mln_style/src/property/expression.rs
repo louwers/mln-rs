@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use mln_util::range::Range;
 use mln_vec_map::VecSet;
 use mln_wire::shared;
 
@@ -9,6 +8,7 @@ use crate::expression::{
     Dependency, EvaluationContext, Expr, GlobalStateMap, Value, ValueConverter, ZoomCurvePtr,
     collect_global_state_refs, find_zoom_curve_checked,
 };
+use crate::range::Range;
 use crate::wire::SharedExpression;
 
 fn collect_global_state_refs_shared(expression: &Expr) -> Option<Arc<VecSet<String>>> {

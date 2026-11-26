@@ -714,7 +714,7 @@ impl<K: Wire + Ord, V: Wire> Wire for BTreeMap<K, V> {
 /// between maps of the same entries: [`sorted`] writes one in key order.
 /// And the map of this crate's own tables.
 mod hash {
-    #![expect(clippy::disallowed_types, reason = "impls for every hasher, mln_util's among them")]
+    #![expect(clippy::disallowed_types, reason = "impls for every hasher, mln_style's among them")]
 
     use std::collections::HashSet;
     use std::hash::{BuildHasher, Hash};
@@ -722,7 +722,7 @@ mod hash {
     use super::{Reader, Wire, Writer, write_len};
 
     /// foldhash's hasher, with a fixed seed in the benchmarks' builds, as
-    /// `mln_util::hash`'s.
+    /// `mln_style::hash`'s.
     #[cfg(not(mln_bench_fixed_hash))]
     type Hasher = foldhash::fast::RandomState;
     #[cfg(mln_bench_fixed_hash)]

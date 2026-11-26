@@ -1,5 +1,5 @@
+use mln_style::constants::EXTENT;
 use mln_style::feature::GeometryCoordinate;
-use mln_util::constants::EXTENT;
 
 use crate::geometry::anchor::{Anchor, line_length, segments};
 use crate::text::check_max_angle::check_max_angle;

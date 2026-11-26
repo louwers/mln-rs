@@ -2,8 +2,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_style::tileset::Scheme;
 use mln_util::constants::{FILE_PROTOCOL, PMTILES_PROTOCOL};
-use mln_util::tileset::Scheme;
 
 use super::{LocalRequests, TestLoop, cpp_path, req};
 use crate::file_source::FileSource;

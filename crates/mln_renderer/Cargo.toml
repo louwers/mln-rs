@@ -47,7 +47,6 @@ mln_gfx.workspace = true
 mln_image.workspace = true
 mln_map_types.workspace = true
 glam.workspace = true
-mln_math.workspace = true
 mln_storage.workspace = true
 mln_style.workspace = true
 mln_text.workspace = true

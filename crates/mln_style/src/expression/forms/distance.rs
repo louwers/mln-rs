@@ -8,14 +8,15 @@ use cheap_ruler::{CheapRuler, DistanceUnit};
 use feature::Value as MbglValue;
 use geojson::GeoJson;
 use geometry::Point;
-use mln_util::geometry::{FeatureType, to_feature_type};
 
 use super::within::BoundaryMode;
 use crate::conversion::{Convertible, Error};
 use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::{EvalResult, EvaluationContext, EvaluationError, Expr, Node};
-use crate::feature::{CanonicalTileID, GeometryTileFeature, convert_geometry};
+use crate::feature::{GeometryTileFeature, convert_geometry};
+use crate::geometry::{FeatureType, to_feature_type};
 use crate::log_target;
+use crate::tile_id::CanonicalTileID;
 
 // The algorithms work on `mapbox::geometry`'s shapes, as in C++: a polygon
 // is its rings, the exterior first. `Geometry::from_geo` converts to them.
@@ -1119,7 +1120,7 @@ mod tests {
             Identifier::Null
         }
 
-        fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_util::error::Error> {
+        fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, crate::error::Error> {
             Ok(Cow::Borrowed(&self.geometry))
         }
     }

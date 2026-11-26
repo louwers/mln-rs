@@ -8,7 +8,7 @@ use mln_storage::http_header_transform::HttpHeaders;
 use mln_storage::resource::Kind;
 use mln_storage::response::Reason;
 use mln_storage::{FileSource, OnlineFileSource, Resource, ResourceError, Responder, Response};
-use mln_util::error::Error;
+use mln_style::error::Error;
 use parking_lot::{Mutex, RwLock};
 
 /// Serves a runtime's network requests in place of the library.
@@ -316,9 +316,9 @@ impl ResourceRequest {
 
     /// Calls `on_cancel`, on the requesting thread, if the library cancels
     /// the request before it is answered. Fails with
-    /// [`ErrorKind::Cancelled`](mln_util::ErrorKind::Cancelled) when the
+    /// [`ErrorKind::Cancelled`](mln_style::error::ErrorKind::Cancelled) when the
     /// library already cancelled it, and
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind::InvalidState) when
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind::InvalidState) when
     /// the request has a cancel callback already.
     pub fn on_cancel(&self, on_cancel: impl FnOnce() + Send + 'static) -> Result<(), Error> {
         let Some(shared) = &self.shared else {
@@ -336,7 +336,7 @@ impl ResourceRequest {
     }
 
     /// Answers the request with `response`. Fails with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind::InvalidState) when
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind::InvalidState) when
     /// the library cancelled the request.
     pub fn respond(mut self, response: Response) -> Result<(), Error> {
         self.answer(move |target| target.respond(response))
@@ -344,7 +344,7 @@ impl ResourceRequest {
 
     /// Hands the request back to the library, which loads it from the
     /// network as it would without a provider. Fails with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind::InvalidState) when
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind::InvalidState) when
     /// the library cancelled the request.
     pub fn pass_through(mut self) -> Result<(), Error> {
         self.answer(RequestShared::pass_through)

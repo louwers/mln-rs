@@ -1,5 +1,6 @@
+use mln_style::constants::DEFAULT_MAX_ZOOM;
+
 use super::*;
-use crate::constants::DEFAULT_MAX_ZOOM;
 
 /// gtest `EXPECT_DOUBLE_EQ`: within 4 ULPs, NaN never equal.
 fn double_eq(a: f64, b: f64) -> bool {

@@ -2,9 +2,9 @@
 // their key in the caller's tile storage (the `OverscaledTileID` the tile
 // was stored under).
 
+use mln_style::hash::HashSet;
+use mln_style::range::Range;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
-use mln_util::hash::HashSet;
-use mln_util::range::Range;
 
 use crate::tile::tile::TileNecessity;
 

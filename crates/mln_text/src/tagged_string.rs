@@ -1,9 +1,10 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
+use mln_style::color::Color;
+use mln_style::i18n;
 use mln_style::types::VerticalAlign;
 use mln_util::font_stack::FontStack;
-use mln_util::{Color, i18n};
 
 use crate::glyph::GlyphIDType;
 use crate::log_target;

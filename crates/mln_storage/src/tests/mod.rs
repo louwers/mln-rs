@@ -24,7 +24,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Once, mpsc};
 
-use mln_util::hash::HashMap;
+use mln_style::hash::HashMap;
 use mln_util::queue::{Queue, WeakQueue};
 use parking_lot::Mutex;
 

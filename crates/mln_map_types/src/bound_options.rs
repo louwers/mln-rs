@@ -1,4 +1,4 @@
-use mln_util::geo::LatLngBounds;
+use mln_style::geo::LatLngBounds;
 
 /// Holds options to limit what parts of a map are visible. All fields are
 /// optional.

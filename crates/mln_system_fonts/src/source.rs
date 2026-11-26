@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use memmap2::Mmap;
+use mln_style::hash::HashMap;
 use mln_text::glyph::FontData;
-use mln_util::hash::HashMap;
 use skrifa::raw::tables::cmap::Cmap;
 use skrifa::raw::tables::fvar::Fvar;
 use skrifa::raw::tables::name::Name;

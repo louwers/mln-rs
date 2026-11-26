@@ -1,4 +1,4 @@
-use mln_util::interpolate::Interpolate;
+use crate::interpolate::Interpolate;
 
 // Could be made a template class if needed
 // template <size_t Period>
@@ -11,7 +11,7 @@ pub struct Rotation {
 impl Rotation {
     #[must_use]
     pub fn new(angle: f64) -> Self {
-        Rotation { angle: mln_math::wrap(angle, 0.0, Self::PERIOD) }
+        Rotation { angle: crate::math::wrap(angle, 0.0, Self::PERIOD) }
     }
 
     const PERIOD: f64 = 360.0;

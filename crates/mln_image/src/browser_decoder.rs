@@ -8,10 +8,10 @@
 //! readback are Orbis's (github.com/sargunv/orbis, crates/orb-web's host).
 
 use js_sys::{Reflect, Uint8Array};
-use mln_util::error::Error;
-use mln_util::image::{PremultipliedImage, UnassociatedImage};
+use mln_style::bitmap::{PremultipliedImage, UnassociatedImage};
+use mln_style::error::Error;
+use mln_style::size::Size;
 use mln_util::premultiply::premultiply;
-use mln_util::size::Size;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 

@@ -13,7 +13,8 @@ use mln_map::{
 use mln_runtime::{
     CameraFitArea, CameraFitOptions, CameraFitUpdate, ErrorKind, EventMask, TileOptions, ViewportOptions,
 };
-use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds};
+use mln_style::geo::{LatLng, LatLngBounds};
+use mln_util::geo::EdgeInsets;
 
 use crate::support::{map, runtime, wait, wait_err};
 

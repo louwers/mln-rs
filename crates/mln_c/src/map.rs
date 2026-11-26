@@ -6,8 +6,8 @@ use std::sync::Arc;
 use ::mln_map::{MapMode, MapSnapshot, TerrainOptions, TerrainSkirtLength};
 use ::mln_runtime::{Applied, EventMask, FeatureState, FeatureStateSelector, MapOptions};
 use feature::{Identifier, Value};
-use mln_util::geo::LatLngBounds;
-use mln_util::size::Size;
+use mln_style::geo::LatLngBounds;
+use mln_style::size::Size;
 
 use crate::buffer::LentText;
 use crate::completion::{self, CompletionValue, Generations, PendingCompletion};
@@ -64,7 +64,7 @@ pub(crate) fn snapshot_generations(map: &::mln_runtime::Map) -> Generations {
 
 /// The generations that a command's completion reports: those it applied
 /// at, or for a failure, those of the map's latest snapshot.
-pub(crate) fn generations(map: &::mln_runtime::Map, result: &Result<Applied, mln_util::Error>) -> Generations {
+pub(crate) fn generations(map: &::mln_runtime::Map, result: &Result<Applied, mln_style::error::Error>) -> Generations {
     match result {
         Ok(applied) => Generations { snapshot: applied.generation, render_update: applied.render_update_generation },
         Err(_) => snapshot_generations(map),
@@ -79,7 +79,7 @@ pub(crate) fn generations(map: &::mln_runtime::Map, result: &Result<Applied, mln
 pub(crate) unsafe fn command(
     map: mln_map,
     completion: *const mln_completion,
-    send: impl FnOnce(&::mln_runtime::Map) -> Result<::mln_runtime::Completion<Applied>, mln_util::Error>,
+    send: impl FnOnce(&::mln_runtime::Map) -> Result<::mln_runtime::Completion<Applied>, mln_style::error::Error>,
 ) -> Result<(), Error> {
     let object = resolve(map)?;
     // SAFETY: the caller's contract.
@@ -105,7 +105,7 @@ pub(crate) unsafe fn command(
 pub(crate) unsafe fn query<T: Send + 'static, V: CompletionValue>(
     map: mln_map,
     completion: *const mln_completion,
-    send: impl FnOnce(&::mln_runtime::Map) -> Result<::mln_runtime::Completion<T>, mln_util::Error>,
+    send: impl FnOnce(&::mln_runtime::Map) -> Result<::mln_runtime::Completion<T>, mln_style::error::Error>,
     value: impl FnOnce(T) -> V + Send + 'static,
 ) -> Result<(), Error> {
     let object = resolve(map)?;

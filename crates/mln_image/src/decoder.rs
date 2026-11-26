@@ -6,8 +6,8 @@
 // the browser's on wasm, which answers later from the event loop, on the
 // thread that asked.
 
-use mln_util::error::Error;
-use mln_util::image::PremultipliedImage;
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::error::Error;
 
 use crate::image::{ImageType, UNSUPPORTED, image_type};
 
@@ -67,7 +67,7 @@ mod tests {
     fn native_decoder_answers_at_once() {
         assert_eq!(decode_now(b"GIF89a").unwrap_err().message, UNSUPPORTED);
         let png =
-            crate::encode_png(&PremultipliedImage::from_vec(mln_util::size::Size::new(1, 1), vec![64, 0, 0, 128]));
+            crate::encode_png(&PremultipliedImage::from_vec(mln_style::size::Size::new(1, 1), vec![64, 0, 0, 128]));
         let image = decode_now(&png).unwrap();
         assert_eq!(image.data, vec![64, 0, 0, 128]);
     }

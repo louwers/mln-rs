@@ -19,8 +19,8 @@ pub use mln_gfx::{
     ConsumerSync, DepthStencilFormat, DepthStencilFormats, DmaBufFormat, DmaBufPlane, ExportKind, ExportKinds,
     ExportedImage, ExportedRing, FrameDepth, GpuSync, NativeTexture, SyncKind, SyncKinds,
 };
-use mln_util::error::Error;
-use mln_util::size::Size;
+use mln_style::error::Error;
+use mln_style::size::Size;
 
 // The browser's one device of a backend crate is WebGPU's, which
 // `request_web_gpu` makes.
@@ -629,11 +629,18 @@ impl Surface {
     /// with the browser's WebGPU where the build has it, and with WebGL2
     /// otherwise.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for
     /// anything else.
     ///
     /// A WebGPU session configures the canvas with `format`, or else with a
     /// format that its device's adapter prefers. Other backends ignore it.
+    ///
+    /// When the browser loses a WebGPU session's device, the session fails
+    /// with [`ErrorKind::TargetLost`](mln_util::ErrorKind), and once it is
+    /// released, a new session can attach to the canvas. After Chromium's GPU
+    /// process restarts, though, an `OffscreenCanvas` in a Web Worker shows no
+    /// new frames, and the worker gets no more animation frames: the page has
+    /// to load again.
     #[cfg(target_family = "wasm")]
     pub fn web_canvas(canvas: wasm_bindgen::JsValue, format: Option<CanvasFormat>) -> Result<Surface, Error> {
         use wasm_bindgen::JsCast as _;
@@ -688,7 +695,7 @@ impl Surface {
     /// the surface there, and attach it with [`Driver::CallerThread`],
     /// serviced on that thread. A session that makes its swap chain on
     /// another thread fails with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind).
+    /// [`ErrorKind::Unsupported`](mln_style::error::ErrorKind).
     #[cfg(all(feature = "d3d12", windows))]
     #[must_use]
     pub fn d3d12_composition(composition: mln_d3d12::Composition) -> Surface {
@@ -720,7 +727,7 @@ impl Surface {
         Some(Surface { kind, cap_frame_rate: self.cap_frame_rate })
     }
 
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) for a
     /// window that has no area to present to: a minimized Win32 window, or
     /// one whose client area is empty ([`mln_gfx::window::has_area`]).
     pub(crate) fn check_area(&self) -> Result<(), Error> {
@@ -732,7 +739,7 @@ impl Surface {
         Ok(())
     }
 
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a
     /// Win32 window whose pixel format isn't the library's when OpenGL
     /// presents to it: on `device`, or without a device, in a build whose
     /// first backend is OpenGL. Windows doesn't let a pixel format change.
@@ -821,7 +828,7 @@ impl SentSurface {
     }
 
     /// The surface, on the session's thread. In the browser, fails with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) when its canvas no
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) when its canvas no
     /// longer waits there.
     #[cfg_attr(
         not(target_family = "wasm"),
@@ -1036,7 +1043,7 @@ impl SurfaceType {
 /// may take its place.
 #[cfg(not(target_family = "wasm"))]
 fn missing(error: &Error) -> bool {
-    error.kind == mln_util::ErrorKind::Unsupported
+    error.kind == mln_style::error::ErrorKind::Unsupported
 }
 
 /// A session's hold on what its [`Device`] shares with the host: a Vulkan
@@ -1119,11 +1126,11 @@ impl Device {
     /// display renders on, at index 0.
     /// So is OpenGL where it can't render with `options.gl_api`.
     ///
-    /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) when
+    /// Fails with [`ErrorKind::NotFound`](mln_style::error::ErrorKind) when
     /// the options name no GPU, with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) when no backend has a
+    /// [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) when no backend has a
     /// GPU or in the browser, where a session renders on the page's device,
-    /// and with [`ErrorKind::Native`](mln_util::ErrorKind) when the GPU
+    /// and with [`ErrorKind::Native`](mln_style::error::ErrorKind) when the GPU
     /// can't create the device.
     pub fn new(options: DeviceOptions) -> Result<Device, Error> {
         #[cfg(target_family = "wasm")]
@@ -1148,7 +1155,7 @@ impl Device {
     /// The library's device on `backend`.
     ///
     /// Fails as [`new`](Self::new) does, and with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a backend that
+    /// [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) for a backend that
     /// isn't in this build or on this platform.
     ///
     /// In the browser, only OpenGL's: `Device::WebGl`. The browser makes
@@ -1212,7 +1219,7 @@ impl Device {
     /// on the device (the producer's), and with which a session waits for
     /// the host's reads (the consumer's).
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+    /// Fails with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) when the
     /// device can't render into the ring: one of another backend, or one the
     /// device lacks a feature for.
     pub fn borrowed_sync_kinds(&self, ring: &BorrowedRing) -> Result<(SyncKinds, SyncKinds), Error> {
@@ -1309,7 +1316,7 @@ impl Device {
     /// the kinds of sync with which the host can wait for a frame (the
     /// producer's) and a session for the host's reads (the consumer's).
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+    /// Fails with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) when the
     /// device exports none of the ring's kinds.
     pub fn export_plan(&self, ring: &ExportedRing) -> Result<(ExportKind, SyncKinds, SyncKinds), Error> {
         match self {
@@ -1368,7 +1375,7 @@ impl Device {
     /// The library's device for `ring`: on the first of [`new`](Self::new)'s
     /// backends whose device exports one of the ring's kinds.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when no
+    /// Fails with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) when no
     /// backend's device does, and as [`new`](Self::new) does.
     pub fn for_exported_ring(ring: &ExportedRing) -> Result<Device, Error> {
         #[cfg(target_family = "wasm")]
@@ -1475,7 +1482,7 @@ impl Device {
     /// ([`Surface::web_canvas`]). A session on another canvas renders with
     /// that canvas's context.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) when
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) when
     /// `context` isn't a `WebGL2RenderingContext`.
     #[cfg(all(feature = "gl", target_family = "wasm"))]
     pub fn web_gl(context: &wasm_bindgen::JsValue) -> Result<Device, Error> {

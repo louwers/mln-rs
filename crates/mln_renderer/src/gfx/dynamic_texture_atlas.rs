@@ -10,12 +10,12 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use geometry::Point;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::types::TexturePixelType;
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::hash::{HashMap, RandomState};
 use mln_style::image::Impl as ImageImpl;
+use mln_style::size::Size;
 use mln_text::atlas::{ImagePosition, ImagePositions, RectU16};
 use mln_text::glyph::{Glyph, GlyphID, GlyphMap, GlyphPosition, GlyphPositions};
-use mln_util::hash::{HashMap, RandomState};
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
 
 #[cfg(test)]
 use super::dynamic_texture::QueuedPixels;

@@ -46,7 +46,7 @@ pub(crate) fn warm_up(binary: &Path, scenarios: &[&Scenario]) -> Result<Vec<Run>
 /// Fails unless this binary was built as `profile.toml` builds it, with the
 /// libraries' hash maps seeded alike in every process.
 pub(crate) fn check_build() -> Result<(), String> {
-    if mln_util::hash::SEED_IS_FIXED {
+    if mln_style::hash::SEED_IS_FIXED {
         Ok(())
     } else {
         Err("this build lacks tools/bench/profile.toml's `--cfg mln_bench_fixed_hash`, without which hash maps \

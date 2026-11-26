@@ -8,10 +8,10 @@ use mln_storage::ResourceOptions;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::Edit;
 use mln_style::conversion::Convertible;
+use mln_style::geo::{LatLng, LatLngBounds};
 use mln_style::layer::Layer;
 use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
 use mln_style::sources::geojson::GeoJSONOptions;
-use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::pool::Pool;
 use serde_json::json;
 
@@ -20,7 +20,7 @@ use crate::support::*;
 #[must_use]
 pub(crate) fn style_image(
     id: &str,
-    image: mln_util::image::PremultipliedImage,
+    image: mln_style::bitmap::PremultipliedImage,
     pixel_ratio: f32,
 ) -> Arc<mln_style::image::Impl> {
     Arc::new(

@@ -42,6 +42,7 @@ mln_map.workspace = true
 mln_renderer = { workspace = true, features = ["gpu-conformance"] }
 mln_runtime.workspace = true
 mln_storage.workspace = true
+mln_style.workspace = true
 mln_util.workspace = true
 mln_web_host.workspace = true
 mln_webgpu = { workspace = true, optional = true }

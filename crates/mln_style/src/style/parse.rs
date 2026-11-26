@@ -5,15 +5,15 @@
 
 use std::sync::Arc;
 
-use mln_util::LatLng;
-use mln_util::constants::DEFAULT_TRANSITION_DURATION;
-use mln_util::hash::{HashMap, HashSet};
 use mln_vec_map::VecSet;
 
+use crate::constants::DEFAULT_TRANSITION_DURATION;
 use crate::conversion::borrowed::{Json, JsonObject, borrowed_json_to_value, member, members};
 use crate::conversion::{Convertible, Error, convert};
 use crate::expression::GlobalStateMap;
 use crate::font_face::{FontFace, FontFaceRange, FontFaces};
+use crate::geo::LatLng;
+use crate::hash::{HashMap, HashSet};
 use crate::layer::{FontStack, InvalidProperty, Layer, convert_layer_with, set_paint_properties};
 use crate::light::{Light, convert_light};
 use crate::log_target;
@@ -26,8 +26,8 @@ use crate::sprite::Sprite;
 use crate::terrain::{Terrain, convert_terrain};
 
 /// What `Parser::parse` returns: a style that isn't one fails with
-/// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind).
-pub(crate) type StyleParseResult = Result<(), mln_util::Error>;
+/// [`ErrorKind::InvalidArgument`](crate::error::ErrorKind).
+pub(crate) type StyleParseResult = Result<(), crate::error::Error>;
 
 /// Reads a style's JSON, against the expression functions and layer types of
 /// a [`StyleRegistry`].
@@ -98,11 +98,11 @@ impl Parser {
     pub fn parse(&mut self, json: &str) -> StyleParseResult {
         let document: Json<'_> = match serde_json::from_str(json) {
             Ok(document) => document,
-            Err(error) => return Err(mln_util::Error::invalid_argument(format_json_parse_error(&error))),
+            Err(error) => return Err(crate::error::Error::invalid_argument(format_json_parse_error(&error))),
         };
 
         let Some(object) = document.as_object() else {
-            return Err(mln_util::Error::invalid_argument("style must be an object"));
+            return Err(crate::error::Error::invalid_argument("style must be an object"));
         };
 
         if let Some(version_value) = member(object, "version") {
@@ -521,30 +521,30 @@ fn parse_font_file(face_name: &str, font_file: &JsonObject<'_>, warnings: &mut V
 
 /// Parses fallback font faces from `json`, an array of font files in the format
 /// of a font face in a style's `font-faces`, without a font name. It fails with
-/// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if `json` isn't such an
+/// [`ErrorKind::InvalidArgument`](crate::error::ErrorKind) if `json` isn't such an
 /// array.
-pub fn parse_fallback_font_faces(json: &str) -> Result<FontFaces, mln_util::Error> {
+pub fn parse_fallback_font_faces(json: &str) -> Result<FontFaces, crate::error::Error> {
     let document: Json<'_> = serde_json::from_str(json)
-        .map_err(|error| mln_util::Error::invalid_argument(format_json_parse_error(&error)))?;
+        .map_err(|error| crate::error::Error::invalid_argument(format_json_parse_error(&error)))?;
     let Some(files) = document.as_array() else {
-        return Err(mln_util::Error::invalid_argument("fallback font faces must be an array"));
+        return Err(crate::error::Error::invalid_argument("fallback font faces must be an array"));
     };
 
     let mut font_faces = FontFaces::new();
     for font_file in files {
         let Some(font_file) = font_file.as_object() else {
-            return Err(mln_util::Error::invalid_argument("each fallback font face must be an object"));
+            return Err(crate::error::Error::invalid_argument("each fallback font face must be an object"));
         };
         let mut warnings = Vec::new();
         let font_face = parse_font_file("", font_file, &mut warnings);
         if let Some(warning) = warnings.into_iter().next() {
-            return Err(mln_util::Error::invalid_argument(warning));
+            return Err(crate::error::Error::invalid_argument(warning));
         }
         if font_face.url.is_empty() {
-            return Err(mln_util::Error::invalid_argument("each fallback font face must have a url"));
+            return Err(crate::error::Error::invalid_argument("each fallback font face must have a url"));
         }
         if font_face.ranges.is_empty() {
-            return Err(mln_util::Error::invalid_argument("each fallback font face must cover a unicode-range"));
+            return Err(crate::error::Error::invalid_argument("each fallback font face must cover a unicode-range"));
         }
         font_faces.push(font_face);
     }

@@ -16,8 +16,8 @@ use mln_map::{MapMode, TileLodMode, TransformState};
 use mln_renderer::UpdateParameters;
 use mln_renderer::bench::{LaidOut, SymbolIndex, SymbolView};
 use mln_style::Style;
-use mln_util::size::Size;
-use mln_util::time::Instant;
+use mln_style::size::Size;
+use mln_style::time::Instant;
 
 use super::{DENSE, SPARSE, StreetLayout, StreetTile, loaded_liberty};
 use crate::scenario::{Bench, Kind, Scenario};

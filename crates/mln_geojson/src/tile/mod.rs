@@ -23,13 +23,13 @@ use parking_lot::{Mutex, RwLock};
 use crate::TileFeatures;
 
 /// foldhash's hasher, with a fixed seed in the benchmarks' builds, as
-/// `mln_util::hash`'s.
+/// `mln_style::hash`'s.
 #[cfg(not(mln_bench_fixed_hash))]
 type Hasher = foldhash::fast::RandomState;
 #[cfg(mln_bench_fixed_hash)]
 type Hasher = foldhash::fast::FixedState;
 
-#[expect(clippy::disallowed_types, reason = "mln_util::hash's map, which this crate doesn't depend on")]
+#[expect(clippy::disallowed_types, reason = "mln_style::hash's map, which this crate doesn't depend on")]
 type HashMap<K, V> = std::collections::HashMap<K, V, Hasher>;
 
 /// How tiles are cut and written.

@@ -9,10 +9,10 @@
 use std::cell::RefCell;
 
 use mln_renderer::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
+use mln_style::bitmap::AlphaImage;
+use mln_style::size::Size;
 use mln_text::glyph::{FontData, Glyph, GlyphID, GlyphIDType, GlyphMetrics};
 use mln_text::{GlyphAdjust, ShapedText};
-use mln_util::image::AlphaImage;
-use mln_util::size::Size;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 

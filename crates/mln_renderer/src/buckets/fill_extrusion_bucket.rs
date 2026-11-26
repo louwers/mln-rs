@@ -7,18 +7,19 @@ use std::sync::Arc;
 use geometry::Point;
 use mln_map_types::View;
 use mln_style::PropertyEvaluationParameters;
+use mln_style::color::Color;
+use mln_style::constants::EXTENT;
 use mln_style::expression::{Image, Value};
 use mln_style::feature::{GeometryCollection, GeometryCoordinates, GeometryTileFeature, classify_rings};
 use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::{FillExtrusionLayoutProperties, FillExtrusionPaintProperties};
 use mln_style::property::evaluated::Evaluated;
+use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::LightAnchorType;
 use mln_text::atlas::ImagePositions;
 use mln_tile::geometry_tile_data::{is_boundary_edge, is_entirely_outside, limit_holes, round_polygon_corners};
-use mln_tile_id::CanonicalTileID;
-use mln_util::Color;
-use mln_util::constants::{EARTH_RADIUS_M, EXTENT, M2PI};
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_util::constants::{EARTH_RADIUS_M, M2PI};
 use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketBase, UploadNeeds};
@@ -179,7 +180,7 @@ fn shared_wall_normals(
             };
             let (a, b) = (incoming?, outgoing?);
             let (len_a, len_b) = (a.x.hypot(a.y), b.x.hypot(b.y));
-            if a.x * b.x + a.y * b.y < mln_math::deg2rad(35.0).cos() * len_a * len_b {
+            if a.x * b.x + a.y * b.y < mln_style::math::deg2rad(35.0).cos() * len_a * len_b {
                 None
             } else if len_a >= 2.0 * len_b {
                 Some(a)

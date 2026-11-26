@@ -30,10 +30,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
+use mln_style::time::Instant;
 use mln_util::chrono::{Timestamp, now};
 use mln_util::constants::{ASSET_PROTOCOL, DEFAULT_MAXIMUM_CONCURRENT_REQUESTS, FILE_PROTOCOL};
 use mln_util::queue::{Queue, TimedTask};
-use mln_util::time::Instant;
 use mln_vec_map::VecMap;
 #[cfg(not(target_family = "wasm"))]
 use parking_lot::Mutex;

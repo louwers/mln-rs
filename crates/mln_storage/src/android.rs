@@ -11,7 +11,7 @@ use std::sync::{Arc, OnceLock};
 use jni::errors::Error as JniError;
 use jni::objects::{Global, JObject};
 use jni::{EnvUnowned, Outcome, jni_sig, jni_str};
-use mln_util::error::Error;
+use mln_style::error::Error;
 
 use crate::local_file_request::read_range;
 use crate::response::{Reason, ResourceError, Response};
@@ -61,7 +61,7 @@ static ASSETS: OnceLock<AssetManager> = OnceLock::new();
 /// nothing. Without it, app assets fail, and HTTP requests fail unless the
 /// process has a Java VM of its own.
 ///
-/// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when JNI fails,
+/// Fails with [`ErrorKind::Native`](mln_style::error::ErrorKind) when JNI fails,
 /// such as for a `context` that is no `Context`, and leaves no Java exception
 /// pending.
 ///
@@ -79,7 +79,7 @@ pub unsafe fn init(jni_env: *mut c_void, context: *mut c_void) -> Result<(), Err
             let context = unsafe { JObject::from_raw(env, context.cast()) };
             let initialized = (|| {
                 retain_assets(env, &context)?;
-                // Records the VM as jni's, for mln_util::android::java_vm.
+                // Records the VM as jni's, for mln_style::android::java_vm.
                 env.get_java_vm()?;
                 Ok(())
             })();

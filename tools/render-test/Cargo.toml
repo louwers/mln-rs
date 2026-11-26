@@ -32,7 +32,6 @@ mln_headless.workspace = true
 mln_image.workspace = true
 mln_map.workspace = true
 mln_map_types.workspace = true
-mln_math.workspace = true
 mln_renderer = { workspace = true, features = ["font-face-shaper"] }
 # The ambient cache (cache_path) and mbtiles:// sources, as in C++.
 mln_storage = { workspace = true, features = ["sqlite"] }

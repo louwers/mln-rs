@@ -12,8 +12,9 @@ use mln_runtime::{
     FrameDisposition, FrameProjection, FrameResult, Map, MapOptions, RenderSession, RenderTarget, Runtime, SyncKind,
     SyncKinds,
 };
-use mln_util::geo::{EdgeInsets, LatLng};
-use mln_util::size::Size;
+use mln_style::geo::LatLng;
+use mln_style::size::Size;
+use mln_util::geo::EdgeInsets;
 
 use crate::support::{eventually, serve_level_dem, wait};
 

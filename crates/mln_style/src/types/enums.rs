@@ -3,7 +3,7 @@
 
 use std::str::FromStr;
 
-use mln_util::ParseEnumError;
+use crate::error::ParseEnumError;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]
 #[repr(u8)]
@@ -430,7 +430,7 @@ style_spec_names!(HillshadeMethodType {
 /// interpolation returns the first value.
 macro_rules! uninterpolated_enums {
     ($($t:ty),* $(,)?) => {
-        $(impl mln_util::interpolate::Interpolate for $t {
+        $(impl crate::interpolate::Interpolate for $t {
             fn interpolate(&self, _to: &Self, _t: f64) -> Self {
                 *self
             }

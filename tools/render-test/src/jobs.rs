@@ -29,7 +29,7 @@ use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 
-use mln_util::size::Size;
+use mln_style::size::Size;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 

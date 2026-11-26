@@ -6,14 +6,16 @@ use std::f64::consts::PI;
 use geometry::Point;
 use glam::dcamera::rh::proj::opengl::perspective;
 use glam::{DMat4, DVec2, DVec3, DVec4};
+use mln_style::constants::TILE_SIZE_D;
+use mln_style::error::Error;
+use mln_style::geo::{LatLng, WrapMode};
+use mln_style::size::Size;
 use mln_style::types::ProjectionDefinition;
 use mln_tile_id::UnwrappedTileID;
-use mln_util::constants::{DEFAULT_FOV, M2PI, TILE_SIZE_D};
-use mln_util::error::Error;
+use mln_util::constants::{DEFAULT_FOV, M2PI};
 pub use mln_util::geo::NorthOrientation;
-use mln_util::geo::{EdgeInsets, LatLng, ScreenCoordinate, WrapMode};
+use mln_util::geo::{EdgeInsets, ScreenCoordinate};
 use mln_util::projection::Projection;
-use mln_util::size::Size;
 
 use crate::camera::FreeCameraOptions;
 use crate::camera_pose::CameraPose;
@@ -28,7 +30,7 @@ use crate::vertical_perspective_projection::VerticalPerspectiveProjection;
 /// it the distance to the horizon grows without bound, and with it the tiles
 /// the view needs.
 pub(crate) fn max_mercator_horizon_angle() -> f64 {
-    mln_math::deg2rad(89.25)
+    mln_style::math::deg2rad(89.25)
 }
 
 /// `x` rounded to the nearest integer when it is within a billionth of it,
@@ -56,9 +58,9 @@ pub fn scale_zoom(scale: f64) -> f64 {
 /// center can be on a pole, which Mercator's stops short of.
 pub(crate) fn map_offset(center: &LatLng, scale: f64, globe: bool) -> (f64, f64) {
     let world_size = Projection::world_size(scale);
-    let latitude = mln_math::deg2rad(center.latitude());
+    let latitude = mln_style::math::deg2rad(center.latitude());
     let m = 1.0 - 1e-15;
-    let f = mln_math::clamp_f64(latitude.sin(), -m, m);
+    let f = mln_style::math::clamp_f64(latitude.sin(), -m, m);
     let x = -center.longitude() * (world_size / 360.0);
     let cc = world_size / M2PI;
     let y = if globe { cc * latitude.tan().asinh() } else { 0.5 * cc * ((1.0 + f) / (1.0 - f)).ln() };
@@ -311,7 +313,7 @@ impl View {
     pub fn center(&self, wrap_mode: WrapMode) -> LatLng {
         let world_size = Projection::world_size(self.params.scale);
         LatLng::saturating(
-            mln_math::rad2deg(2.0 * (self.params.y / (world_size / M2PI)).exp().atan() - 0.5 * PI),
+            mln_style::math::rad2deg(2.0 * (self.params.y / (world_size / M2PI)).exp().atan() - 0.5 * PI),
             -self.params.x / (world_size / 360.0),
             wrap_mode,
         )
@@ -458,10 +460,10 @@ impl View {
             center_altitude: self.center_altitude(),
             padding: self.params.padding,
             zoom: self.zoom(),
-            bearing: mln_math::rad2deg(-self.params.angle),
-            pitch: mln_math::rad2deg(self.params.pitch),
-            roll: mln_math::rad2deg(self.params.roll),
-            fov: mln_math::rad2deg(self.params.fov),
+            bearing: mln_style::math::rad2deg(-self.params.angle),
+            pitch: mln_style::math::rad2deg(self.params.pitch),
+            roll: mln_style::math::rad2deg(self.params.roll),
+            fov: mln_style::math::rad2deg(self.params.fov),
         }
     }
 
@@ -663,12 +665,13 @@ impl View {
     fn flat_far_z(&self) -> f64 {
         let camera_to_center_distance = self.camera_to_center_distance();
 
-        let limited_pitch = mln_math::clamp_f64(self.params.pitch, 0.0, max_mercator_horizon_angle());
+        let limited_pitch = mln_style::math::clamp_f64(self.params.pitch, 0.0, max_mercator_horizon_angle());
         let camera_to_sea_level_distance =
             camera_to_center_distance + self.center_altitude_pixels().abs() / limited_pitch.cos();
 
-        let tan_multiple = mln_math::clamp_f64(self.tan_fov_above_center() * limited_pitch.tan(), 0.0, 0.99);
-        let horizon_multiple = mln_math::clamp_f64(self.fov_center_to_horizon().tan() * limited_pitch.tan(), 0.0, 0.99);
+        let tan_multiple = mln_style::math::clamp_f64(self.tan_fov_above_center() * limited_pitch.tan(), 0.0, 0.99);
+        let horizon_multiple =
+            mln_style::math::clamp_f64(self.fov_center_to_horizon().tan() * limited_pitch.tan(), 0.0, 0.99);
 
         // The distance to the farthest fragment that is drawn, and a little
         // more, for the precision of a fragment exactly there.
@@ -717,7 +720,7 @@ impl View {
         // triangle of the camera, the center and that point.
         let ground_angle = PI / 2.0 + params.pitch;
         let distance_past_center = |angle: f64| {
-            angle.sin() * lowest_plane / mln_math::clamp_f64(PI - ground_angle - angle, 0.01, PI - 0.01).sin()
+            angle.sin() * lowest_plane / mln_style::math::clamp_f64(PI - ground_angle - angle, 0.01, PI - 0.01).sin()
         };
         let top_half_distance = distance_past_center(self.tan_fov_above_center().atan())
             .min(distance_past_center(self.fov_center_to_horizon()));
@@ -759,7 +762,7 @@ impl View {
         let offset = self.center_offset();
         let offset_up = DVec2::new(-offset.x, offset.y).dot(self.up_the_map());
         let farthest = camera_to_center * (max_mercator_horizon_angle() - self.params.pitch).tan();
-        (mln_math::clamp_f64(horizon + offset_up, 0.0, farthest) / camera_to_center).atan()
+        (mln_style::math::clamp_f64(horizon + offset_up, 0.0, farthest) / camera_to_center).atan()
     }
 
     /// The unit direction up the map in the view, x right and y up, which
@@ -999,7 +1002,7 @@ impl View {
     }
 
     /// The location under `point`, measured from the bottom edge (y up).
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a
     /// NaN or infinite point.
     pub fn screen_coordinate_to_lat_lng(&self, point: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
         self.screen_coordinate_to_lat_lng_at(point, 0.0, wrap_mode)

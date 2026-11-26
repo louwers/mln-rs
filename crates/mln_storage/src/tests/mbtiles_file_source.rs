@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mln_util::tileset::Scheme;
+use mln_style::tileset::Scheme;
 
 use super::{LocalRequests, TestLoop, cpp_path, req, temp_path};
 use crate::file_source::FileSource;

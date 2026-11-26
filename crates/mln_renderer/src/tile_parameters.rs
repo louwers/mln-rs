@@ -3,8 +3,8 @@ use std::sync::Arc;
 use mln_map_types::{MapMode, TileLodMode, View};
 use mln_storage::FileSource;
 use mln_style::expression::GlobalStateMap;
+use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_text::glyph::FontFaces;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::terrain::TerrainCover;
 

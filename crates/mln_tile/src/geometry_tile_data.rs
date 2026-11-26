@@ -10,10 +10,9 @@ use i_overlay::core::fill_rule::FillRule;
 use i_overlay::core::overlay::{Overlay, ShapeType};
 use i_overlay::core::overlay_rule::OverlayRule;
 use i_overlay::i_float::int::point::IntPoint;
-use mln_style::feature::{
-    CanonicalTileID, GeometryCollection, GeometryCoordinates, GeometryTileFeature, convert_geometry, signed_area,
-};
-use mln_util::constants::EXTENT;
+use mln_style::constants::EXTENT;
+use mln_style::feature::{GeometryCollection, GeometryCoordinates, GeometryTileFeature, convert_geometry, signed_area};
+use mln_style::tile_id::CanonicalTileID;
 
 use crate::TileError;
 
@@ -172,7 +171,7 @@ fn append_round_corner(
     let ub = Point::new(b.x / len_b, b.y / len_b);
 
     let dot = ua.x * ub.x + ua.y * ub.y;
-    if dot.abs() > mln_math::deg2rad(5.0).cos() {
+    if dot.abs() > mln_style::math::deg2rad(5.0).cos() {
         ring.push(c);
         return;
     }

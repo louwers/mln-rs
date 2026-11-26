@@ -1,5 +1,5 @@
-use mln_util::error::Error;
-use mln_util::image::PremultipliedImage;
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::error::Error;
 
 /// The image formats `decode_image` recognizes, by their magic bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,8 +51,8 @@ pub(crate) const UNSUPPORTED: &str = "unsupported image type";
 
 /// Decodes `data`, choosing the format by its magic bytes. Data of no type
 /// it recognizes fails with
-/// [`ErrorKind::Unsupported`](mln_util::ErrorKind), and an image that
-/// doesn't decode with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind).
+/// [`ErrorKind::Unsupported`](mln_style::error::ErrorKind), and an image that
+/// doesn't decode with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind).
 pub fn decode_image(data: &[u8]) -> Result<PremultipliedImage, Error> {
     match image_type(data) {
         Some(ImageType::Webp) => Ok(crate::webp_reader::decode_webp(data)),

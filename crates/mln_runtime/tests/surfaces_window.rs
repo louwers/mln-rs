@@ -15,7 +15,7 @@ use mln_runtime::{
     AttachOptions, DemandMode, Driver, DriverWork, FrameDemand, FrameDisposition, FrameResult, Map, MapOptions,
     RenderSession, RenderTarget, Runtime, Surface,
 };
-use mln_util::size::Size;
+use mln_style::size::Size;
 use winit::dpi::PhysicalSize;
 use winit::event_loop::EventLoop;
 use winit::platform::x11::EventLoopBuilderExtX11;

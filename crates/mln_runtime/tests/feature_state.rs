@@ -8,8 +8,8 @@ use mln_runtime::{
     AttachOptions, DemandMode, ErrorKind, FeatureState, FeatureStateSelector, FrameDemand, FrameDisposition, Map,
     RenderSession, RenderTarget, RenderedQueryGeometry, RenderedQueryOptions,
 };
+use mln_style::size::Size;
 use mln_util::geo::ScreenCoordinate;
-use mln_util::size::Size;
 
 use crate::support::{EMPTY_STYLE, eventually, map, runtime, wait, wait_err};
 

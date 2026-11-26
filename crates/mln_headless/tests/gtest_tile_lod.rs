@@ -8,9 +8,9 @@ use mln_renderer::Registry;
 use mln_storage::ResourceOptions;
 use mln_style::Edit;
 use mln_style::conversion::Convertible;
+use mln_style::geo::LatLngBounds;
 use mln_style::layer::Layer;
 use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
-use mln_util::geo::LatLngBounds;
 use mln_util::pool::Pool;
 
 use crate::support::*;
@@ -145,7 +145,7 @@ fn scale() {
 
     set_tile(&mut test.map, |tile| tile.lod_min_radius = 1.0);
     set_tile(&mut test.map, |tile| tile.lod_scale = 0.4);
-    set_tile(&mut test.map, |tile| tile.lod_pitch_threshold = mln_math::rad2deg(-1.0));
+    set_tile(&mut test.map, |tile| tile.lod_pitch_threshold = mln_style::math::rad2deg(-1.0));
 
     set_tile(&mut test.map, |tile| tile.lod_zoom_shift = 5.0);
 
@@ -160,7 +160,7 @@ fn radius() {
 
     set_tile(&mut test.map, |tile| tile.lod_min_radius = 5.0);
     set_tile(&mut test.map, |tile| tile.lod_scale = 1.0);
-    set_tile(&mut test.map, |tile| tile.lod_pitch_threshold = mln_math::rad2deg(-1.0));
+    set_tile(&mut test.map, |tile| tile.lod_pitch_threshold = mln_style::math::rad2deg(-1.0));
 
     set_tile(&mut test.map, |tile| tile.lod_zoom_shift = 5.0);
 

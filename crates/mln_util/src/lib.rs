@@ -1,37 +1,22 @@
-//! Utilities shared by the other crates: geometry, math, colors, images,
-//! time, strings, URLs, threading helpers and more, one module per
-//! file.
+//! The engine's utilities: the camera's geometry and math, threads, task
+//! queues and pools, HTTP headers and dates, compression, SDF glyphs and
+//! more, one module per file. The vocabulary the engine shares with the
+//! style, such as errors, colors, sizes, coordinates and tilesets, is
+//! `mln_style`'s.
 
-#[cfg(target_os = "android")]
-pub mod android;
-mod color;
 pub mod compression;
 pub mod constants;
 pub mod dem;
 pub mod geo;
-pub mod interpolate;
-mod padding;
-pub mod range;
-pub mod string;
-mod unitbezier;
 
-pub use color::{Color, ColorSpace};
-pub use error::{Error, ErrorKind, ParseEnumError};
-pub use geo::{EdgeInsets, LatLng, LatLngBounds};
-pub use padding::Padding;
-pub use unitbezier::UnitBezier;
+pub use geo::EdgeInsets;
 pub mod bounding_volumes;
 pub mod chrono;
-pub mod error;
 pub mod event_queue;
 pub mod feature;
 pub mod font_stack;
-pub mod geometry;
-pub mod hash;
 pub mod http_header;
-pub mod i18n;
 pub mod identity;
-pub mod image;
 pub mod intersection_tests;
 pub mod math;
 pub mod panic;
@@ -39,11 +24,7 @@ pub mod pool;
 pub mod premultiply;
 pub mod projection;
 pub mod queue;
-pub mod size;
-pub mod subdivision_granularity;
 pub mod thread;
-pub mod tileset;
-pub mod time;
 pub mod tiny_sdf;
 pub mod token;
 
@@ -53,6 +34,3 @@ mod log_target {
     #[cfg(not(target_family = "wasm"))]
     pub(crate) const GENERAL: &str = "mln_util::general";
 }
-
-#[cfg(test)]
-mod tests;

@@ -13,7 +13,7 @@ crate::properties!(
         color_relief_opacity: constant f32 = 1.0_f32,
         resampling: constant ResamplingType = ResamplingType::Linear,
     }
-    use crate::types::ResamplingType, mln_util::Color;
+    use crate::color::Color, crate::types::ResamplingType;
 );
 
 /// The properties, by slot.

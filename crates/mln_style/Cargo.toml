@@ -29,10 +29,6 @@ geo-types.workspace = true
 geometry.workspace = true
 log.workspace = true
 mln_geojson.workspace = true
-mln_image.workspace = true
-mln_math.workspace = true
-mln_tile_id.workspace = true
-mln_util.workspace = true
 mln_vec_map.workspace = true
 parking_lot.workspace = true
 mln_wire.workspace = true
@@ -41,6 +37,8 @@ serde_json.workspace = true
 serde_json_borrow.workspace = true
 smallvec.workspace = true
 thiserror.workspace = true
+unicode-properties.workspace = true
+web-time.workspace = true
 
 # The locale services of the locale-sensitive expressions
 # (src/expression/locale): the platform's where it has them (Foundation and
@@ -56,8 +54,11 @@ objc2-foundation = { workspace = true, features = [
   "NSString",
 ] }
 
+# android: the Java VM of the crates' Android services, which the locale
+# services call too.
 [target.'cfg(target_os = "android")'.dependencies]
 jni.workspace = true
+libc.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 js-sys.workspace = true

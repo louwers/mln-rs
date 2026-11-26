@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use mln_storage::Data;
+use mln_style::tileset::RasterEncoding;
 use mln_tile::TileData;
-use mln_util::tileset::RasterEncoding;
 use mln_vec_map::VecSet;
 
 use crate::image_store::ImageWait;

@@ -18,7 +18,7 @@ crate::properties!(
         heatmap_radius: data_driven f32 = 30.0_f32,
         heatmap_weight: data_driven f32 = 1.0_f32,
     }
-    use mln_util::Color;
+    use crate::color::Color;
 );
 
 /// The properties, by slot.

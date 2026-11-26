@@ -126,7 +126,8 @@ pub(crate) fn imports_for<'a>(properties: impl Iterator<Item = &'a Property>, wi
 
 fn type_path(name: &str) -> String {
     match name {
-        "Color" | "Padding" => format!("mln_util::{name}"),
+        "Color" => "crate::color::Color".into(),
+        "Padding" => "crate::padding::Padding".into(),
         "Image" | "Formatted" => format!("crate::expression::{name}"),
         _ => format!("crate::types::{name}"),
     }

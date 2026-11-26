@@ -4,11 +4,11 @@
 
 use std::sync::Arc;
 
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::hash::HashSet;
 use mln_style::image::Impl as ImageImpl;
+use mln_style::size::Size;
 use mln_util::constants::DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE;
-use mln_util::hash::HashSet;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
 
 use crate::image_store::{ImageDependencies, ImageStore, ImageType, ImageWait};
 use crate::renderer_event::RendererEvent;

@@ -31,9 +31,9 @@ use mln_gfx::{
     SyncKind, Window,
 };
 use mln_renderer::{Renderer, UpdateParameters};
-use mln_util::error::Error;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::error::Error;
+use mln_style::size::Size;
 
 use super::target::{
     BorrowedRing, Device, DeviceOptions, FrameTexture, RingKind, Surface, SurfaceKind, SurfaceOverlay,
@@ -1045,11 +1045,11 @@ impl LocalTarget {
     /// device the surface's kind takes
     /// ([`RenderTarget::Surface`](super::RenderTarget::Surface)).
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a
     /// surface that the host made without the host's device, with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a window or
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) for a window or
     /// surface without an area to present to, such as a minimized window,
-    /// with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the device
+    /// with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) when the device
     /// can't present to the surface or draw the overlay, and with the error
     /// of the device or the window's surface.
     pub fn surface(
@@ -1071,7 +1071,7 @@ impl LocalTarget {
     /// A target of `size` pixels on `device` that renders into the host's
     /// `ring`, and hands each frame over with sync of the kind `producer`.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+    /// Fails with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) when the
     /// device can't render into the ring with `producer`, and with the
     /// backend's error.
     pub fn borrowed(device: Device, ring: BorrowedRing, producer: SyncKind) -> Result<LocalTarget, Error> {
@@ -1084,7 +1084,7 @@ impl LocalTarget {
     /// [`Device::export_plan`] picked, and hands each frame over with sync of
     /// the kind `producer`.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+    /// Fails with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) when the
     /// device can't export `kind` or hand frames over with `producer`, and
     /// with the backend's error.
     pub fn exported(
@@ -1248,7 +1248,7 @@ impl LocalTarget {
     /// Returns whether the ring has new images, which it doesn't when they
     /// have `size` already.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) for a
     /// target that isn't an exported ring, and with the backend's error, when
     /// the ring keeps its images.
     pub fn resize_exported(&mut self, size: Size, held: &[usize]) -> Result<bool, Error> {
@@ -1267,7 +1267,7 @@ impl LocalTarget {
     /// let go of: of the target's producer kind, or
     /// [`SyncKind::CpuComplete`] when it had none since a release.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) for a
     /// target that isn't a ring, or a ring of another format, and with the
     /// backend's error. The target then keeps its textures.
     pub(crate) fn set_ring(&mut self, ring: BorrowedRing) -> Result<GpuSync, Error> {
@@ -1281,10 +1281,10 @@ impl LocalTarget {
 
     /// The last frame's pixels.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) for a
     /// target that presents its frames, with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) before a frame, and
-    /// with [`ErrorKind::Native`](mln_util::ErrorKind) where the backend
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) before a frame, and
+    /// with [`ErrorKind::Native`](mln_style::error::ErrorKind) where the backend
     /// reads nothing back.
     pub fn read_image(&mut self) -> Result<PremultipliedImage, Error> {
         self.gfx.read_image()
@@ -1294,7 +1294,7 @@ impl LocalTarget {
     /// returns, for a ring, the sync after which the host may use them. The
     /// backend and its renderer stay.
     ///
-    /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when a ring
+    /// Fails with [`ErrorKind::Native`](mln_style::error::ErrorKind) when a ring
     /// can't submit its work on the textures, which it keeps then.
     pub(crate) fn release_surface(&mut self) -> Result<Option<GpuSync>, Error> {
         let sync = self.gfx.release_surface()?;
@@ -1312,7 +1312,7 @@ impl LocalTarget {
     /// torn down with it, and the target has none until one is made again
     /// on the new backend ([`renderer_or`](Self::renderer_or)).
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for an
+    /// Fails with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) for an
     /// offscreen target or when the device can't present to `surface`, and
     /// as [`surface`](Self::surface) does. The target then keeps what it
     /// had.
@@ -1331,7 +1331,7 @@ impl LocalTarget {
         let size = gfx_size(size);
         let new_backend = match self.gfx.set_surface(surface, overlay, size) {
             Ok(()) => false,
-            Err(error) if error.kind == mln_util::ErrorKind::Unsupported => {
+            Err(error) if error.kind == mln_style::error::ErrorKind::Unsupported => {
                 let surface = retry.ok_or(error)?;
                 self.gfx = surface_backend(&self.device, surface, None, size)?;
                 true

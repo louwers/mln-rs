@@ -1,10 +1,9 @@
-use mln_util::tileset::{PartialTileset, RasterEncoding, VectorEncoding};
-
 use super::util::parse_json;
 use crate::conversion::tileset::convert_tileset;
 use crate::conversion::{Convertible, Error};
 use crate::layer::SourceKind;
 use crate::source::{Source, convert_source};
+use crate::tileset::{PartialTileset, RasterEncoding, VectorEncoding};
 
 fn convert_json(json: &str, tiles: SourceKind) -> Result<PartialTileset, String> {
     convert_tileset(&Convertible::from(&parse_json(json)), tiles)

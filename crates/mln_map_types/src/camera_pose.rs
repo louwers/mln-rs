@@ -7,9 +7,11 @@ use std::f64::consts::PI;
 
 use glam::{DMat4, DQuat, DVec3};
 #[cfg(test)]
+use mln_style::geo::LatLng;
+#[cfg(test)]
 use mln_util::constants::M2PI;
 #[cfg(test)]
-use mln_util::geo::{LatLng, LatLngAltitude};
+use mln_util::geo::LatLngAltitude;
 use mln_util::projection::Projection;
 
 use crate::camera::FreeCameraOptions;
@@ -26,7 +28,7 @@ fn mercator_y_from_lat(lat: f64) -> f64 {
 
 #[cfg(test)]
 fn lat_from_mercator_y(y: f64) -> f64 {
-    mln_math::rad2deg(2.0 * (PI - y * M2PI).exp().atan() - (PI / 2.0))
+    mln_style::math::rad2deg(2.0 * (PI - y * M2PI).exp().atan() - (PI / 2.0))
 }
 
 #[cfg(test)]
@@ -184,9 +186,9 @@ impl FreeCameraOptions {
     #[cfg(test)]
     pub(crate) fn set_roll_pitch_bearing(&mut self, roll: f64, pitch: f64, bearing: f64) {
         self.orientation = Some(orientation_from_roll_pitch_bearing(
-            mln_math::deg2rad(roll),
-            mln_math::deg2rad(pitch),
-            mln_math::deg2rad(bearing),
+            mln_style::math::deg2rad(roll),
+            mln_style::math::deg2rad(pitch),
+            mln_style::math::deg2rad(bearing),
         ));
     }
 }

@@ -10,30 +10,31 @@ use std::sync::Arc;
 use geometry::Point;
 use glam::Vec2;
 use mln_map_types::MapMode;
+use mln_style::constants::{EXTENT, TILE_SIZE_D};
+use mln_style::error::Error;
 use mln_style::expression::formatted::K_FORMATTED_SECTION_TEXT_COLOR;
 use mln_style::expression::{EvaluationContext, GlobalStateMap, Value};
 use mln_style::feature::{GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
+use mln_style::geometry::FeatureType;
 use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
+use mln_style::padding::Padding;
 use mln_style::property::evaluated::Evaluated;
 use mln_style::property::value::PropertyValue;
+use mln_style::range::Range;
+use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::{
     AlignmentType, AnchorOffsetPair, IconTextFitType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType,
     TextJustifyType, TextRotationAlignmentType, TextTransformType, TextVariableAnchorType, TextWritingModeType,
     VariableAnchorOffsetCollection,
 };
-use mln_style::{PropertyEvaluationParameters, StyleValue as _};
+use mln_style::{PropertyEvaluationParameters, StyleValue as _, i18n};
 use mln_text::atlas::ImagePositions;
 use mln_text::glyph::{GlyphID, GlyphIDType, GlyphPositions, Shaping};
 use mln_text::shaping::{PositionedIcon, ShapingOptions, anchor_justification, shape_text};
 use mln_text::tagged_string::{SectionIndex, SectionOptions};
 use mln_text::{ShapedText, TaggedString, shape_arabic, starts_right_to_left};
-use mln_tile_id::CanonicalTileID;
-use mln_util::constants::{EXTENT, ONE_EM, TILE_SIZE_D};
-use mln_util::error::Error;
-use mln_util::geometry::FeatureType;
-use mln_util::range::Range;
-use mln_util::{Padding, i18n};
+use mln_util::constants::ONE_EM;
 use mln_vec_map::VecMap;
 
 use crate::bucket_parameters::BucketParameters;
@@ -266,7 +267,7 @@ const BASELINE_OFFSET: f32 = 7.0;
 
 fn evaluate_radial_offset(anchor: SymbolAnchorType, radial_offset: f32) -> [f32; 2] {
     let mut result = [0.0_f32, 0.0_f32];
-    let radial_offset = mln_math::fmaxf(radial_offset, 0.0); // Ignore negative offset.
+    let radial_offset = mln_style::math::fmaxf(radial_offset, 0.0); // Ignore negative offset.
     // Solve for r where r^2 + r^2 = radial_offset^2.
     let hypotenuse = radial_offset / std::f32::consts::SQRT_2;
 
@@ -1659,8 +1660,8 @@ impl SymbolLayout {
 mod tests {
     use std::num::NonZeroU16;
 
+    use mln_style::i18n::char_in_supported_script;
     use mln_text::glyph::{FontFace, FontFaces, GlyphIDType};
-    use mln_util::i18n::char_in_supported_script;
 
     use super::{BASELINE_OFFSET, GlyphTypeTable, SymbolAnchorType, SymbolLayout, evaluate_radial_offset};
 
@@ -1696,8 +1697,8 @@ mod tests {
 
     /// The faces' rule, read off them for each character.
     fn scan(c: char, stack: &[String], faces: &FontFaces, glyph_pbfs: bool, previous: GlyphIDType) -> GlyphIDType {
-        if mln_util::i18n::is_variation_selector(c)
-            || (previous != GlyphIDType::FontPBF && mln_util::i18n::extends_previous(c))
+        if mln_style::i18n::is_variation_selector(c)
+            || (previous != GlyphIDType::FontPBF && mln_style::i18n::extends_previous(c))
         {
             return previous;
         }
@@ -1708,7 +1709,7 @@ mod tests {
         let fallbacks =
             faces.iter().filter(|face| face.name.is_empty() && !(glyph_pbfs && char_in_supported_script(c)));
         let system = !glyph_pbfs && faces.iter().any(|face| face.type_ == GlyphIDType::SYSTEM);
-        let rest = if system && !mln_util::i18n::breaks_or_stands_upright(c) {
+        let rest = if system && !mln_style::i18n::breaks_or_stands_upright(c) {
             GlyphIDType::SYSTEM
         } else {
             GlyphIDType::FontPBF

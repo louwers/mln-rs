@@ -11,18 +11,19 @@ use mln_map_types::{
 };
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Resource, Responder, Response};
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::geo::{LatLng, WrapMode};
+use mln_style::size::Size;
 use mln_style::sources::raster_dem_source;
+use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::terrain::Terrain;
+use mln_style::tile_id::CanonicalTileID;
+use mln_style::tileset::{PartialTileset, RasterEncoding};
 use mln_style::types::ProjectionDefinition;
 use mln_style::{Edit, Source, Style};
-use mln_tile_id::{CanonicalTileID, OverscaledTileID};
+use mln_tile_id::OverscaledTileID;
 use mln_util::dem::{DemCoords, DemUnpack};
-use mln_util::geo::{LatLng, WrapMode};
-use mln_util::image::PremultipliedImage;
 use mln_util::pool::TaskGroup;
-use mln_util::size::Size;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_util::tileset::{PartialTileset, RasterEncoding};
 use parking_lot::Mutex;
 
 use crate::Registry;
@@ -85,7 +86,7 @@ fn update_parameters(style: Style, transform: &Transform, mode: MapMode) -> Upda
         elevation: None,
         tile_lod_min_radius: 3.0,
         tile_lod_scale: 1.0,
-        tile_lod_pitch_threshold: mln_math::deg2rad(60.0),
+        tile_lod_pitch_threshold: mln_style::math::deg2rad(60.0),
         tile_lod_zoom_shift: 0.0,
         tile_lod_mode: TileLodMode::Default,
         subdivision_granularity: SubdivisionGranularitySetting::none(),
@@ -351,7 +352,7 @@ impl TerrainLoad {
             prefetch_zoom_delta: 0,
             tile_lod_min_radius: 3.0,
             tile_lod_scale: 1.0,
-            tile_lod_pitch_threshold: mln_math::deg2rad(60.0),
+            tile_lod_pitch_threshold: mln_style::math::deg2rad(60.0),
             tile_lod_zoom_shift: 0.0,
             tile_lod_mode: TileLodMode::Default,
             subdivision_granularity: SubdivisionGranularitySetting::none(),
@@ -462,7 +463,7 @@ fn a_missing_dem_tile_settles() {
 /// The terrain tile under the view's center, which the camera stands on.
 fn center_tile(load: &TerrainLoad) -> OverscaledTileID {
     let center = load.transform.view().center(WrapMode::Wrapped);
-    let world = mln_util::projection::Projection::project(&center, 1.0 / mln_util::constants::TILE_SIZE_D);
+    let world = mln_util::projection::Projection::project(&center, 1.0 / mln_style::constants::TILE_SIZE_D);
     let cover = load.terrain.cover().expect("terrain draws");
     let holds = |id: &OverscaledTileID| {
         let tiles = f64::from(1u32 << id.canonical.z);
@@ -617,7 +618,7 @@ fn ranges_come_from_the_loaded_dem_tiles() {
     // Raised ground in front of the camera, below the bottom edge of the
     // view, rises into it.
     let center = LatLng::new(45.0, 10.0).unwrap();
-    let center_y = mln_util::projection::Projection::project(&center, 1.0 / mln_util::constants::TILE_SIZE_D).y;
+    let center_y = mln_util::projection::Projection::project(&center, 1.0 / mln_style::constants::TILE_SIZE_D).y;
     let added: Vec<OverscaledTileID> = cover.tiles.iter().map(|tile| tile.id).filter(|id| !flat.contains(id)).collect();
     assert_ne!(Vec::<OverscaledTileID>::new(), added);
     for tile in added {
@@ -719,7 +720,7 @@ fn the_ground_the_map_stands_on_is_the_height_rule_on_the_drawn_dem() {
     let ground = load.ground_events().pop().flatten().expect("the ground");
 
     let center = LatLng::new(45.0, 10.0).unwrap();
-    let world = mln_util::projection::Projection::project(&center, 1.0 / mln_util::constants::TILE_SIZE_D);
+    let world = mln_util::projection::Projection::project(&center, 1.0 / mln_style::constants::TILE_SIZE_D);
     let cover = load.terrain.cover().unwrap();
     let (tile, uv) = cover
         .tiles
@@ -752,7 +753,7 @@ fn the_ground_the_map_stands_on_is_the_height_rule_on_the_drawn_dem() {
     assert_eq!(None, ground.surface_at(DVec2::new(world.x - 2.0, world.y)));
     // Ground far from the view, where no tile drew.
     let far = LatLng::new(-45.0, -170.0).unwrap();
-    let far_world = mln_util::projection::Projection::project(&far, 1.0 / mln_util::constants::TILE_SIZE_D);
+    let far_world = mln_util::projection::Projection::project(&far, 1.0 / mln_style::constants::TILE_SIZE_D);
     assert_eq!((None, None), (ground.at(far), ground.surface_at(DVec2::new(far_world.x, far_world.y))));
 
     load.seen = Some(ground);
@@ -781,7 +782,7 @@ fn an_update_is_grounded_when_it_carries_the_current_ground() {
     // The tiles draw flat while their DEM loads, and the center stands on
     // what they draw.
     let center = load.transform.view().center(WrapMode::Wrapped);
-    let world = mln_util::projection::Projection::project(&center, 1.0 / mln_util::constants::TILE_SIZE_D);
+    let world = mln_util::projection::Projection::project(&center, 1.0 / mln_style::constants::TILE_SIZE_D);
     assert_eq!((Some(0.0), Some(0.0)), (loading.at(center), loading.surface_at(DVec2::new(world.x, world.y))));
     load.seen = Some(Arc::clone(&loading));
     load.frame();
@@ -832,7 +833,7 @@ fn a_camera_below_the_ground_stands_on_the_dem_under_its_center() {
     let center = LatLng::new(45.0, 10.0).unwrap();
     assert_eq!(Some(3_000_000.0), ground.at(center));
     // No surface drew there.
-    let world = mln_util::projection::Projection::project(&center, 1.0 / mln_util::constants::TILE_SIZE_D);
+    let world = mln_util::projection::Projection::project(&center, 1.0 / mln_style::constants::TILE_SIZE_D);
     assert_eq!(None, ground.surface_at(DVec2::new(world.x, world.y)));
 }
 
@@ -846,8 +847,8 @@ fn snapshot(load: &TerrainLoad, exaggeration: f32) -> TerrainElevation {
 
 /// The location of `world`, a Web Mercator point at zoom 0.
 fn location_of(world: DVec2) -> LatLng {
-    let point = mln_util::geometry::Point::new(world.x, world.y);
-    mln_util::projection::Projection::unproject(&point, 1.0 / mln_util::constants::TILE_SIZE_D, WrapMode::Unwrapped)
+    let point = mln_style::geometry::Point::new(world.x, world.y);
+    mln_util::projection::Projection::unproject(&point, 1.0 / mln_style::constants::TILE_SIZE_D, WrapMode::Unwrapped)
         .unwrap()
 }
 
@@ -1207,7 +1208,7 @@ fn the_surface_a_hair_west_of_a_copy_is_its_neighbors() {
     let ground = snapshot(&load, 1.0);
     let y = mln_util::projection::Projection::project(
         &LatLng::new(45.0, -179.99).unwrap(),
-        1.0 / mln_util::constants::TILE_SIZE_D,
+        1.0 / mln_style::constants::TILE_SIZE_D,
     )
     .y;
     let edge = ground.surface_at(DVec2::new(0.0, y));
@@ -1256,8 +1257,8 @@ fn a_line_label_over_ridges_draws_its_glyphs_where_its_circles_collide() {
 fn assert_glyphs_draw_in_circles(dem: fn() -> Response, pitch_with_map: bool) {
     use glam::Vec2;
     use mln_map_types::TileProjector;
+    use mln_style::constants::{EXTENT, TILE_SIZE_D};
     use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
-    use mln_util::constants::{EXTENT, TILE_SIZE_D};
 
     use crate::buckets::symbol_bucket::{PlacedSymbol, PlacedSymbolPools, SymbolSizeBinder};
     use crate::geometry::feature_index::IndexedSubfeature;

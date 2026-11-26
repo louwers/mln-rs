@@ -2,11 +2,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use feature::{Value, ValueObject};
-use mln_util::time::Instant;
 use mln_vec_map::VecSet;
 
 use crate::conversion::{Converter, Convertible, Error};
 use crate::expression::GlobalStateMap;
+use crate::time::Instant;
 
 #[derive(Clone, Copy, Debug, PartialEq, mln_wire::Wire)]
 pub struct TransitionOptions {

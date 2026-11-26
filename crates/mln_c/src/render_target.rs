@@ -7,8 +7,8 @@ use core::ptr::NonNull;
 use ::mln_runtime::{
     BorrowedRing, DmaBufFormat, ExportKind, ExportKinds, ExportedRing, RenderTarget, Surface, SurfaceType,
 };
-use mln_util::ErrorKind;
-use mln_util::size::Size;
+use mln_style::error::ErrorKind;
+use mln_style::size::Size;
 use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle, WindowHandle,
 };

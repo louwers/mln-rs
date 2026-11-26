@@ -387,7 +387,7 @@ unsafe fn host_response(response: *const mln_resource_response) -> Result<Respon
 /// cancelled it.
 fn answer(
     handle: mln_resource_request,
-    answer: impl FnOnce(ResourceRequest) -> Result<(), mln_util::Error>,
+    answer: impl FnOnce(ResourceRequest) -> Result<(), mln_style::error::Error>,
 ) -> Result<(), Error> {
     let object = REQUESTS.remove(handle)?;
     let request = object.request.lock().take();
@@ -499,7 +499,7 @@ pub(crate) unsafe extern "C" fn mln_resource_request_set_cancel_callback(
         };
         let registered = match object.request.lock().as_ref() {
             Some(request) => request.on_cancel(on_cancel),
-            None => Err(mln_util::Error::invalid_state("the resource request was answered")),
+            None => Err(mln_style::error::Error::invalid_state("the resource request was answered")),
         };
         let cancelled = match registered {
             Ok(()) => {
@@ -510,7 +510,7 @@ pub(crate) unsafe extern "C" fn mln_resource_request_set_cancel_callback(
             }
             // The callback never runs, and the user data stays with the
             // caller.
-            Err(error) if error.kind == mln_util::ErrorKind::Cancelled => true,
+            Err(error) if error.kind == mln_style::error::ErrorKind::Cancelled => true,
             Err(error) => return Err(error.into()),
         };
         // SAFETY: non-null, and the caller's contract.

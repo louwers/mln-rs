@@ -26,13 +26,13 @@ doc-valid-idents = [
 ]
 
 # parking_lot's locks don't poison: a panic while a lock is held doesn't make
-# every later lock panic or need unwrapping. mln_util::hash's maps and sets
+# every later lock panic or need unwrapping. mln_style::hash's maps and sets
 # hash faster than std's SipHash, with a random seed all the same; the crates
-# mln_util depends on use foldhash's, the same types, and mln_gfx and the
+# mln_style depends on use foldhash's, the same types, and mln_gfx and the
 # backends mln_gfx::util_hash's.
 disallowed-types = [
-  { path = "std::collections::HashMap", reason = "use mln_util::hash::HashMap, or mln_gfx::util_hash::HashMap in gfx and the backends" },
-  { path = "std::collections::HashSet", reason = "use mln_util::hash::HashSet, or mln_gfx::util_hash::HashSet in gfx and the backends" },
+  { path = "std::collections::HashMap", reason = "use mln_style::hash::HashMap, or mln_gfx::util_hash::HashMap in gfx and the backends" },
+  { path = "std::collections::HashSet", reason = "use mln_style::hash::HashSet, or mln_gfx::util_hash::HashSet in gfx and the backends" },
   { path = "std::sync::Condvar", reason = "use parking_lot::Condvar" },
   { path = "std::sync::Mutex", reason = "use parking_lot::Mutex, which doesn't poison" },
   { path = "std::sync::RwLock", reason = "use parking_lot::RwLock, which doesn't poison" },

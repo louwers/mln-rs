@@ -6,9 +6,9 @@
 
 use std::sync::Arc;
 
+use mln_style::hash::{HashMap, HashSet};
 use mln_style::image::Impl as ImageImpl;
 use mln_util::constants::DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE;
-use mln_util::hash::{HashMap, HashSet};
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::log_target;

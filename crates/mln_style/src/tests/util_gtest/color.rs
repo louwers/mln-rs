@@ -1,5 +1,5 @@
+use super::{assert_double_eq, assert_float_eq, assert_near};
 use crate::color::{Color, ColorSpace};
-use crate::tests::gtest::{assert_double_eq, assert_float_eq, assert_near};
 
 fn test_cases() -> Vec<(&'static str, Option<Color>)> {
     vec![

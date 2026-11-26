@@ -1,6 +1,6 @@
 use std::num::NonZeroU32;
 
-use crate::image::{PremultipliedImage, UnassociatedImage};
+use mln_style::bitmap::{PremultipliedImage, UnassociatedImage};
 
 /// Multiplies each color channel by alpha: `c = (c * a + 127) / 255` in
 /// integer arithmetic.
@@ -37,8 +37,9 @@ pub fn unpremultiply(src: PremultipliedImage) -> UnassociatedImage {
 
 #[cfg(test)]
 mod tests {
+    use mln_style::size::Size;
+
     use super::*;
-    use crate::size::Size;
 
     // Ports TEST(Image, Premultiply) from test/util/image.test.cpp.
     // gtest: Image.Premultiply

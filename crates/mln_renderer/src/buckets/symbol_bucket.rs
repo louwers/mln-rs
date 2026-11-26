@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use glam::Vec2;
+use mln_style::color::Color;
 use mln_style::expression::EvaluationContext;
 use mln_style::feature::{GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
 use mln_style::layers::Symbol;
@@ -14,11 +15,10 @@ use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
 use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
 use mln_style::property::expression::PropertyExpression;
 use mln_style::property::value::PropertyValue;
+use mln_style::range::Range;
 use mln_style::types::TextWritingModeType;
 use mln_text::atlas::ImagePositions;
 use mln_tile::TileLayer;
-use mln_util::Color;
-use mln_util::range::Range;
 use mln_vec_map::VecMap;
 use mln_wire::payload::pod;
 
@@ -245,7 +245,11 @@ impl SymbolSizeBinder {
                     // values at a pair of zoom stops covering [tile zoom,
                     // tile zoom + 1] in order to be consistent with this
                     // restriction on composite functions.
-                    let t = mln_math::clamp_f32(expression.interpolation_factor(*zoom_levels, current_zoom), 0.0, 1.0);
+                    let t = mln_style::math::clamp_f32(
+                        expression.interpolation_factor(*zoom_levels, current_zoom),
+                        0.0,
+                        1.0,
+                    );
                     size = size_levels.min + t * (size_levels.max - size_levels.min);
                 } else if let Some(expression) = expression {
                     size = expression.evaluate(&EvaluationContext::new(current_zoom), 0.0);
@@ -256,8 +260,11 @@ impl SymbolSizeBinder {
                 ZoomEvaluatedSize { kind: SizeKind::Source, size_t: unused, size: unused, layout_size: unused }
             }
             SymbolSizeBinder::CompositeFunction { expression, covering_zoom_stops, .. } => {
-                let size_interpolation_t =
-                    mln_math::clamp_f32(expression.interpolation_factor(*covering_zoom_stops, current_zoom), 0.0, 1.0);
+                let size_interpolation_t = mln_style::math::clamp_f32(
+                    expression.interpolation_factor(*covering_zoom_stops, current_zoom),
+                    0.0,
+                    1.0,
+                );
                 ZoomEvaluatedSize {
                     kind: SizeKind::Composite,
                     size_t: size_interpolation_t,

@@ -1,8 +1,7 @@
 // Functions that build expressions for tests: they check little of what they
 // build. Dependents' tests reach them through the `dsl` feature.
 
-use mln_util::ColorSpace;
-
+use crate::color::ColorSpace;
 use crate::expression::Expr;
 use crate::expression::formatted::Formatted;
 use crate::expression::forms::assertion::Assertion;

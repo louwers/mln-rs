@@ -10,7 +10,7 @@ use mln_runtime::{Completion, ResourceRequest, Runtime};
 use mln_storage::network_status::NetworkStatus;
 use mln_storage::response::Reason;
 use mln_storage::{FileSource, OnlineFileSource, Request, ResourceError, Response};
-use mln_util::error::Error;
+use mln_style::error::Error;
 use parking_lot::Mutex;
 
 /// The bytes of a response's status line and headers.

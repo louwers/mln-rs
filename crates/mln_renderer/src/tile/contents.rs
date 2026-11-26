@@ -9,15 +9,15 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use glam::DMat4;
+use mln_style::error::Error;
 use mln_style::expression::GlobalStateMap;
+use mln_style::hash::HashMap;
 use mln_style::layer::ErasedLayerStyle;
 use mln_text::atlas::ImagePositions;
 use mln_text::glyph::{GlyphID, GlyphPositions};
 use mln_text::tagged_string::font_stack_hash;
 use mln_tile_id::OverscaledTileID;
-use mln_util::error::Error;
 use mln_util::feature::Feature;
-use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 use mln_util::pool::TaskGroup;
 use mln_vec_map::{VecMap, VecSet};
@@ -490,7 +490,7 @@ impl GeometryContents {
         );
         let selection =
             FeatureSelection { layers, options, global_state, tile_id: id, feature_state: Some(feature_state) };
-        let tile_size = mln_util::constants::TILE_SIZE_D * f64::from(id.overscale_factor());
+        let tile_size = mln_style::constants::TILE_SIZE_D * f64::from(id.overscale_factor());
         let scale = 2f64.powf(view.zoom() - f64::from(id.overscaled_z));
         let region = QueryRegion {
             geometry: query_geometry,
@@ -499,7 +499,7 @@ impl GeometryContents {
             whole_tile: ground.is_some_and(|ground| ground.standing),
             view,
             projector: &projector,
-            pixels_to_tile_units: (f64::from(mln_util::constants::EXTENT) / tile_size / scale) as f32,
+            pixels_to_tile_units: (f64::from(mln_style::constants::EXTENT) / tile_size / scale) as f32,
             padding: query_padding * view.max_pitch_scale_factor() as f32,
         };
         self.result.feature_index.query(result, &selection, &region)

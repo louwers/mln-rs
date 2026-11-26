@@ -14,10 +14,9 @@ use std::collections::{BinaryHeap, VecDeque};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
+use mln_style::hash::HashMap;
+use mln_style::time::Instant;
 use parking_lot::{Condvar, Mutex};
-
-use crate::hash::HashMap;
-use crate::time::Instant;
 
 /// A task that runs with the queue's state.
 type Task<S> = Box<dyn FnOnce(&mut S) + Send>;

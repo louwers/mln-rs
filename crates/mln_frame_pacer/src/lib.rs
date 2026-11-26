@@ -12,7 +12,7 @@
 use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 
-use mln_util::Error;
+use mln_style::error::Error;
 use parking_lot::Mutex;
 
 #[cfg_attr(target_os = "android", expect(unsafe_code, reason = "the choreographer and its looper are the FFI here"))]
@@ -182,11 +182,11 @@ impl FramePacer {
     /// A pacer on the platform's main display. It calls back on a thread of
     /// its own, or on Android, on the calling thread's looper.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) elsewhere,
+    /// Fails with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) elsewhere,
     /// including before macOS 14, with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) on Android when the
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) on Android when the
     /// calling thread has no `ALooper`, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) without a display.
+    /// [`ErrorKind::Native`](mln_style::error::ErrorKind) without a display.
     pub fn new(limit: Option<Limit>) -> Result<Arc<Self>, Error> {
         #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
         let source = |vsyncs, limit| apple::display_link::DisplayLinkSource::new(vsyncs, limit, None);
@@ -208,9 +208,9 @@ impl FramePacer {
     /// A pacer on the display that `view`'s window is on. On iOS and tvOS,
     /// make a new one when the scene moves to another screen.
     ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) off the
+    /// Fails with [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) off the
     /// main thread or for a `UIView` in no window, and with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) before macOS 14.
+    /// [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) before macOS 14.
     ///
     /// # Safety
     ///

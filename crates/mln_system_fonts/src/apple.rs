@@ -10,7 +10,7 @@
 use std::hash::{Hash, Hasher};
 use std::ptr::NonNull;
 
-use mln_util::hash::HashMap;
+use mln_style::hash::HashMap;
 use objc2_core_foundation::{CFArray, CFRetained, CFString};
 use objc2_core_text::{CTFont, CTFontDescriptor, CTFontSymbolicTraits, CTFontTableOptions, CTFontUIFontType};
 

@@ -6,10 +6,10 @@ use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 use geometry::Point;
-use mln_util::constants;
-use mln_util::hash::{HashMap, HashSet};
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::constants;
+use mln_style::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
-use mln_util::image::PremultipliedImage;
 
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{Indexes, SharedIndexes};

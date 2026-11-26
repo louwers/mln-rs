@@ -1,8 +1,8 @@
 use mln_map::Map;
 use mln_map_types::CameraOptions;
 use mln_style::conversion::Convertible;
+use mln_style::error::ErrorKind;
 use mln_style::{Edit, Style};
-use mln_util::ErrorKind;
 
 use crate::runner::MapError;
 

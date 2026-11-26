@@ -10,12 +10,13 @@ use std::time::Duration;
 
 use glam::{DVec2, DVec3};
 use mln_map_types::{CameraLimits, ConstrainMode, Elevation, View, ViewportMode};
-use mln_util::constants::DEFAULT_TRANSITION_EASE;
-use mln_util::geo::{LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
+use mln_style::constants::DEFAULT_TRANSITION_EASE;
+use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
+use mln_style::size::Size;
+use mln_style::time::Instant;
+use mln_util::geo::ScreenCoordinate;
 use mln_util::projection::Projection;
 use mln_util::queue::Queue;
-use mln_util::size::Size;
-use mln_util::time::Instant;
 
 use super::ground::{Slope, flat, ground_event, report, world};
 use super::terrain_camera::{FRAME, Hill, frames, map_over, meters, pixel, start};

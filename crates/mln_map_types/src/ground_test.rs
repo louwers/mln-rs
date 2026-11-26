@@ -1,8 +1,9 @@
 use glam::DVec2;
+use mln_style::geo::{LatLng, WrapMode};
+use mln_style::size::Size;
 use mln_style::types::ProjectionDefinition;
-use mln_util::geo::{EdgeInsets, LatLng, ScreenCoordinate, WrapMode};
+use mln_util::geo::{EdgeInsets, ScreenCoordinate};
 use mln_util::projection::Projection;
-use mln_util::size::Size;
 
 use crate::{Camera, Elevation, LogicalExtent, MapView, ProjectionMode, View, ViewportMode};
 
@@ -10,7 +11,7 @@ const CENTER: (f64, f64) = (46.5, 7.9);
 
 /// The Web Mercator point at zoom 0 of `location`.
 fn world(location: &LatLng) -> DVec2 {
-    let point = Projection::project(location, 1.0 / mln_util::constants::TILE_SIZE_D);
+    let point = Projection::project(location, 1.0 / mln_style::constants::TILE_SIZE_D);
     DVec2::new(point.x, point.y)
 }
 
@@ -413,7 +414,7 @@ fn a_globe_ray_meets_a_polar_cap_at_sea_level() {
     for pixel in pixels() {
         let Some(hit) = view.ground_under(&pixel, &ground) else { continue };
         let sea = view.screen_coordinate_to_lat_lng_at(&pixel, 0.0, WrapMode::Unwrapped).unwrap();
-        if sea.latitude() > mln_util::constants::LATITUDE_MAX + 0.01 {
+        if sea.latitude() > mln_style::constants::LATITUDE_MAX + 0.01 {
             assert_eq!(0.0, hit.height, "{pixel:?}");
             let location = hit.location(WrapMode::Unwrapped);
             let off = meters_apart(&location, &sea, 0.0);
@@ -445,7 +446,7 @@ fn the_globe_s_eye_and_near_plane_over_a_polar_cap_keep_their_latitudes() {
     let on_sphere =
         |point: glam::DVec3| VerticalPerspectiveProjection::surface_vector_to_lat_lng(point.normalize()).unwrap();
     let expected = on_sphere(view.globe_camera_position());
-    assert!(expected.latitude() > mln_util::constants::LATITUDE_MAX + 1.0, "the eye is over {expected:?}");
+    assert!(expected.latitude() > mln_style::constants::LATITUDE_MAX + 1.0, "the eye is over {expected:?}");
     let eye = location(view.eye_position());
     assert!(meters_apart(&eye, &expected, 0.0) < 0.01, "the eye is over {eye:?}, not {expected:?}");
 

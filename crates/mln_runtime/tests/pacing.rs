@@ -10,7 +10,7 @@ use mln_frame_pacer::{FramePacer, Limit, VsyncSource, Vsyncs};
 use mln_runtime::{
     AttachOptions, DemandMode, ErrorKind, FrameDemand, FrameDisposition, FrameResult, Map, RenderSession, RenderTarget,
 };
-use mln_util::size::Size;
+use mln_style::size::Size;
 use parking_lot::{Condvar, Mutex};
 use support::{TIMEOUT, map, result_of, runtime, wait};
 
@@ -60,7 +60,7 @@ impl FakeDisplay {
     fn pacer(self: &Arc<Self>, limit: Option<Limit>) -> Arc<FramePacer> {
         FramePacer::with_source(limit, |vsyncs, _| {
             let _ = self.vsyncs.set(vsyncs);
-            Ok::<_, mln_util::Error>(FakeSource(Arc::clone(self)))
+            Ok::<_, mln_style::error::Error>(FakeSource(Arc::clone(self)))
         })
         .unwrap()
     }

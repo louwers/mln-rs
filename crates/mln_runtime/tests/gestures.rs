@@ -3,7 +3,8 @@
 
 use mln_gestures::{GestureCamera, GestureRecognizer, Input, Modes, PointerKind};
 use mln_map::{CameraOptions, CameraUpdate};
-use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
+use mln_style::geo::{LatLng, WrapMode};
+use mln_util::geo::ScreenCoordinate;
 
 use crate::support::{level_terrain_map, map, runtime, serve_level_dem, wait};
 

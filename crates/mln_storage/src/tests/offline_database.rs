@@ -9,10 +9,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use geo_types::{Geometry, Point};
+use mln_style::geo::{LatLng, LatLngBounds};
+use mln_style::tileset::Scheme;
 use mln_util::chrono::{Timestamp, now};
 use mln_util::constants::DEFAULT_MAX_CACHE_SIZE;
-use mln_util::geo::{LatLng, LatLngBounds};
-use mln_util::tileset::Scheme;
 use rusqlite::{Connection, OpenFlags, ffi};
 
 use super::{

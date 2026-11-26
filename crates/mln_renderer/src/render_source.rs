@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use mln_style::Source;
-use mln_util::error::Error;
+use mln_style::error::Error;
 
 use crate::bucket::UploadNeeds;
 use crate::gfx::context::Context;

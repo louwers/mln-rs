@@ -6,10 +6,10 @@ use std::collections::BTreeSet;
 use std::num::NonZeroU32;
 
 use glam::{DMat4, Vec2};
+use mln_style::constants::EXTENT;
+use mln_style::hash::HashSet;
 use mln_style::types::{SymbolAnchorType, SymbolPlacementType};
 use mln_tile_id::UnwrappedTileID;
-use mln_util::constants::EXTENT;
-use mln_util::hash::HashSet;
 
 use super::context::PlacementContext;
 use super::{JointPlacement, PlacedSymbolData, Placement, PlacementInputs, PlacementKind, VariableOffset};

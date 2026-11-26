@@ -61,7 +61,6 @@ mln_headless = { package = "mln-rs-headless", path = "crates/mln_headless", vers
 mln_image = { package = "mln-rs-image", path = "crates/mln_image", version = "=0.0.17" }
 mln_map = { package = "mln-rs-map", path = "crates/mln_map", version = "=0.0.17" }
 mln_map_types = { package = "mln-rs-map-types", path = "crates/mln_map_types", version = "=0.0.17" }
-mln_math = { package = "mln-rs-math", path = "crates/mln_math", version = "=0.0.17" }
 mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.17" }
 # Without its default feature, the in-process font-face shaper: the packages
 # that render turn it on (crates/mln_renderer/Cargo.toml).
@@ -179,7 +178,7 @@ etagere = { version = "0.3.0", default-features = false }
 # directories and tile IDs, in place of a port of the C++ core's vendored
 # pmtiles.hpp. The archive reading stays the port's.
 pmtiles = { version = "0.28.1", default-features = false }
-# The hasher of mln-rs's hash maps and sets (mln_util::hash). Faster than
+# The hasher of mln-rs's hash maps and sets (mln_style::hash). Faster than
 # std's SipHash, and seeded per process, so keys from styles and tiles can't
 # be crafted to collide. hashbrown already depends on it.
 foldhash = { version = "0.2.0" }
@@ -243,7 +242,7 @@ wasmparser = { version = "0.263.0", default-features = false, features = [
 unicode-bidi = { version = "0.3.18" }
 # Where label text may break into lines (mln_text's line_breaks): UAX #14.
 unicode-linebreak = { version = "0.1.5" }
-# General_Category (mln_text's script runs, mln_util's i18n), in the Unicode
+# General_Category (mln_text's script runs, mln_style's i18n), in the Unicode
 # version of harfrust's own tables.
 unicode-properties = { version = "0.1.5", default-features = false, features = [
   "general-category",
@@ -376,7 +375,7 @@ web-sys = { version = "0.3.107", features = [
   "TextMetrics",
   "console",
 ] }
-# std::time's clocks, which panic on wasm32-unknown-unknown (mln_util::time):
+# std::time's clocks, which panic on wasm32-unknown-unknown (mln_style::time):
 # performance.now() and Date.now() there, std::time everywhere else.
 web-time = { version = "1.1.0" }
 # Ports the C++ WebGPU backend (src/mln/webgpu, which runs on Dawn or
@@ -555,7 +554,6 @@ mln_gl = { workspace = true, optional = true }
 mln_image.workspace = true
 mln_map.workspace = true
 mln_map_types.workspace = true
-mln_math.workspace = true
 mln_mtl = { workspace = true, optional = true }
 mln_renderer = { workspace = true, features = ["font-face-shaper"] }
 mln_runtime.workspace = true

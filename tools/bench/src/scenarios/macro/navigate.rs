@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use mln_map::CameraOptions;
-use mln_util::geo::LatLng;
+use mln_style::geo::LatLng;
 
 use super::VIEW;
 use crate::scenario::{Bench, Kind, Scenario};

@@ -7,7 +7,7 @@ use feature::{Feature, Identifier, Value, ValueObject};
 use mln_style::conversion::Convertible;
 use mln_style::expression::type_::{self, Type};
 use mln_style::expression::{Dependency, Expr, Functions, ParsingContext};
-use mln_tile_id::CanonicalTileID;
+use mln_style::tile_id::CanonicalTileID;
 use mln_vec_map::VecSet;
 
 pub(crate) struct Input {

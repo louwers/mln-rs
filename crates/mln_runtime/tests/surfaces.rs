@@ -7,7 +7,7 @@ use mln_map::MapMode;
 use mln_runtime::{
     AttachOptions, Driver, ErrorKind, Map, MapOptions, RenderSessionState, RenderTarget, Runtime, Surface,
 };
-use mln_util::size::Size;
+use mln_style::size::Size;
 
 use crate::support::{runtime, wait};
 

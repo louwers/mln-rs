@@ -13,13 +13,13 @@ use glam::DMat4;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_map_types::{ProjectionData, View};
+use mln_style::color::Color;
 use mln_style::expression::Dependency;
 use mln_style::layer::{ErasedLayerStyle, LayerStyle, PaintSet, SourceKind, StyleLayerType};
 use mln_style::types::{TranslateAnchorType, VisibilityType};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_text::atlas::ImagePosition;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
-use mln_util::Color;
 use smallvec::SmallVec;
 
 use crate::bucket::Bucket;

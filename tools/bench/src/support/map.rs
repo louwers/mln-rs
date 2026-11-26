@@ -15,10 +15,10 @@ use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
 use mln_runtime::{BackendRef, Device};
 use mln_storage::FileSource;
+use mln_style::size::Size;
 use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, create_geojson_data, geojson_source};
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
-use mln_util::size::Size;
 use mln_webgpu::bench::PipelineStatistics;
 
 use super::fixtures::Fixtures;
@@ -324,7 +324,7 @@ impl HeadlessMap {
     /// Renders a still image of a static or tile map, waiting for the
     /// workers between the renderer's updates, and reads it back from the
     /// GPU.
-    pub(crate) fn render_still(&mut self) -> mln_util::image::PremultipliedImage {
+    pub(crate) fn render_still(&mut self) -> mln_style::bitmap::PremultipliedImage {
         self.map.render_still().expect("a still image starts");
         loop {
             self.map.process_events();
@@ -376,7 +376,7 @@ impl HeadlessMap {
     }
 
     /// The last frame, read back from the GPU.
-    pub(crate) fn image(&mut self) -> mln_util::image::PremultipliedImage {
+    pub(crate) fn image(&mut self) -> mln_style::bitmap::PremultipliedImage {
         self.frontend.frontend.read_still_image()
     }
 
@@ -436,6 +436,6 @@ impl Drapes {
 }
 
 /// Writes `image` as a PNG to `path`.
-pub(crate) fn save_png(image: &mln_util::image::PremultipliedImage, path: &Path) {
+pub(crate) fn save_png(image: &mln_style::bitmap::PremultipliedImage, path: &Path) {
     std::fs::write(path, mln_image::encode_png(image)).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
 }

@@ -3,9 +3,9 @@
 
 use std::sync::Arc;
 
-use mln_util::error::Error;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
+use crate::bitmap::PremultipliedImage;
+use crate::error::Error;
+use crate::size::Size;
 
 pub type ImageStretch = (f32, f32);
 pub type ImageStretches = Vec<ImageStretch>;
@@ -96,7 +96,7 @@ fn validate_content(content: &ImageContent, size: Size) -> bool {
 
 impl Impl {
     /// Creates an image. Fails with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty image,
+    /// [`ErrorKind::InvalidArgument`](crate::error::ErrorKind) for an empty image,
     /// a pixel ratio that isn't positive, or stretches or a content area
     /// outside the image.
     #[expect(clippy::too_many_arguments, reason = "each argument is a field of the image")]

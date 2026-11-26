@@ -745,7 +745,7 @@ impl FileSource for PMTilesFileSource {
 
 #[cfg(test)]
 mod tests {
-    use mln_util::tileset::Scheme;
+    use mln_style::tileset::Scheme;
 
     use super::*;
     use crate::local_file_request::read_file;

@@ -125,7 +125,7 @@ impl OneTile {
         crate::layout::tile_layout::LayoutParams {
             mode: self.mode,
             pixel_ratio: 1.0,
-            subdivision_granularity: mln_util::subdivision_granularity::SubdivisionGranularitySetting::none(),
+            subdivision_granularity: mln_style::subdivision_granularity::SubdivisionGranularitySetting::none(),
             first_load: true,
         }
     }
@@ -299,13 +299,13 @@ impl OneTile {
     ///
     /// If they don't complete within 30 seconds.
     pub(crate) fn settle(&mut self, ids: &[mln_tile_id::OverscaledTileID]) {
-        let deadline = mln_util::time::Instant::now() + std::time::Duration::from_secs(30);
+        let deadline = mln_style::time::Instant::now() + std::time::Duration::from_secs(30);
         loop {
             self.update();
             if ids.iter().all(|id| self.tile_at(id).is_complete()) {
                 return;
             }
-            assert!(mln_util::time::Instant::now() < deadline, "the tiles didn't complete");
+            assert!(mln_style::time::Instant::now() < deadline, "the tiles didn't complete");
             std::thread::yield_now();
         }
     }

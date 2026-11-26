@@ -5,10 +5,11 @@ use std::f64::consts::PI;
 
 use geo_types::{Coord, CoordNum, Geometry, LineString, MultiLineString, MultiPolygon, Polygon};
 use geometry::Point;
-use mln_util::constants::EXTENT;
-use mln_util::geometry::FeatureType;
 
-use super::{CanonicalTileID, GeometryCollection};
+use super::GeometryCollection;
+use crate::constants::EXTENT;
+use crate::geometry::FeatureType;
+use crate::tile_id::CanonicalTileID;
 
 /// An index past the end of a vector, with the message libstdc++'s
 /// `std::vector::at` throws.

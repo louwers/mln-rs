@@ -6,7 +6,7 @@ use std::sync::{Arc, LazyLock};
 
 use ::mln_runtime::{CacheDatabaseOperation, MapId, Runtime, RuntimeEvent, RuntimeOptions};
 use mln_storage::network_status::{NetworkStatus, Status};
-use mln_util::hash::HashMap;
+use mln_style::hash::HashMap;
 use parking_lot::Mutex;
 
 use crate::callback::Registration;
@@ -144,7 +144,7 @@ pub(crate) fn dispose(runtime: mln_runtime) -> Result<(), Error> {
 
 /// Sends a runtime command's result to its optional completion.
 pub(crate) fn complete_command(
-    command: Result<::mln_runtime::Completion<()>, mln_util::Error>,
+    command: Result<::mln_runtime::Completion<()>, mln_style::error::Error>,
     pending: Option<PendingCompletion>,
 ) -> Result<(), Error> {
     let command = command?;

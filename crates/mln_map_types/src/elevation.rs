@@ -1,7 +1,7 @@
 use std::fmt;
 
 use glam::DVec2;
-use mln_util::geo::LatLng;
+use mln_style::geo::LatLng;
 
 /// The ground of a terrain as a frame drew it, which the map's camera
 /// stands on. A renderer makes it and hands it to the map; it doesn't change

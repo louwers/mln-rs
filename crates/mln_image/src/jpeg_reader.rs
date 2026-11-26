@@ -11,9 +11,9 @@
 // decoder runs in strict mode, which fails where libjpeg warns (truncated
 // data, stray bytes or markers).
 
-use mln_util::error::Error;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::error::Error;
+use mln_style::size::Size;
 use zune_jpeg::JpegDecoder;
 use zune_jpeg::errors::DecodeErrors;
 use zune_jpeg::zune_core::bytestream::ZCursor;

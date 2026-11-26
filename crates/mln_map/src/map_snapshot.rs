@@ -3,7 +3,7 @@
 
 use glam::{DQuat, DVec3};
 use mln_map_types::{BoundOptions, FreeCameraOptions, MapView, TileLodMode};
-use mln_util::geo::LatLngBounds;
+use mln_style::geo::LatLngBounds;
 
 /// A map's state at one moment.
 #[derive(Clone, Copy, Debug, PartialEq)]

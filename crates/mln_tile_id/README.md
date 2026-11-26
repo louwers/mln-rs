@@ -6,7 +6,8 @@
 > Depend on [`mln-rs`](https://crates.io/crates/mln-rs) instead: it re-exports
 > this crate as `mln_rs::mln_tile_id`.
 
-Ports tile IDs (`include/mln/tile/tile_id.hpp`) and tile ranges.
+Ports the unwrapped and overscaled tile IDs (`include/mln/tile/tile_id.hpp`) and
+tile ranges. The canonical tile ID is `mln_style::tile_id`'s.
 
 Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering

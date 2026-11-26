@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{Data, Kind, Resource, Response};
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::size::Size;
 
 use crate::support::*;
 

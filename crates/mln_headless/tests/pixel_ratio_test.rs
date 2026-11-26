@@ -6,9 +6,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_map::MapMode;
 use mln_storage::{Kind, Response};
-use mln_util::ErrorKind;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::error::ErrorKind;
+use mln_style::size::Size;
 use parking_lot::Mutex;
 
 use crate::support::*;

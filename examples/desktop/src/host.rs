@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 use mln_frame_pacer::FramePacer;
 use mln_gestures::{Input, Modes, PinchPhase, PointerKind};
 use mln_map::MapEvent;
-use mln_util::error::Error;
+use mln_style::error::Error;
 use mln_util::geo::ScreenCoordinate;
 use parking_lot::{Condvar, Mutex};
 use winit::application::ApplicationHandler;

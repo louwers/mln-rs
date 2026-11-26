@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use mln_renderer::{FontStack, GlyphRange, OverscaledTileID, RenderMode, RenderingStats, TileOperation};
 use mln_style::StyleLoadError;
+use mln_style::error::Error;
 use mln_style::sprite::Sprite;
-use mln_util::error::Error;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[repr(u32)]

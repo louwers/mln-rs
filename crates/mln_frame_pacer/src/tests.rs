@@ -277,7 +277,7 @@ fn a_dropped_pacer_drops_its_source_and_ignores_its_refreshes() {
 #[test]
 fn a_platform_without_a_display_source_makes_no_pacer() {
     let error = FramePacer::new(None).err().unwrap();
-    assert_eq!(error.kind, mln_util::ErrorKind::Unsupported);
+    assert_eq!(error.kind, mln_style::error::ErrorKind::Unsupported);
 }
 
 /// The platform's display link calls back at its refreshes, on macOS from a
@@ -310,5 +310,5 @@ fn a_pacer_for_a_view_needs_the_main_thread() {
     let view = core::ptr::NonNull::<u8>::dangling().cast();
     // SAFETY: the pacer checks the thread before it uses the view.
     let error = unsafe { FramePacer::for_view(view, None) }.err().unwrap();
-    assert_eq!(error.kind, mln_util::ErrorKind::InvalidState);
+    assert_eq!(error.kind, mln_style::error::ErrorKind::InvalidState);
 }

@@ -22,7 +22,7 @@ use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::TextureChannelDataType;
-use mln_util::hash::HashMap;
+use mln_style::hash::HashMap;
 
 use crate::gfx::buffer::{self, Buffer};
 use crate::gfx::indexes::{Indexes, SharedIndexes};

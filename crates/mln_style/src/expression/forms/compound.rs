@@ -6,8 +6,8 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use feature::Value as MbglValue;
-use mln_util::Color;
 
+use crate::color::Color;
 use crate::conversion::Convertible;
 use crate::expression::functions::{Eval, FunctionDef, Overload, Params, Role, decoding_overload};
 use crate::expression::parse::{ParseResult, ParsingContext};

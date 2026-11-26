@@ -408,9 +408,12 @@ const DOTS: &str = r#"{"id":"dots","type":"circle","source":"points"}"#;
 fn edits_fail_while_the_style_is_not_loaded() {
     let (mut map, _run_loop) = map_with_style_response(|_| None);
     assert!(!map.style_document_loaded());
-    let not_loaded = |result: Result<(), mln_util::Error>| {
+    let not_loaded = |result: Result<(), mln_style::error::Error>| {
         let error = result.expect_err("the edit should fail");
-        assert_eq!((mln_util::ErrorKind::InvalidState, "style is not loaded"), (error.kind, error.message.as_str()));
+        assert_eq!(
+            (mln_style::error::ErrorKind::InvalidState, "style is not loaded"),
+            (error.kind, error.message.as_str())
+        );
     };
     not_loaded(map.edit_loaded_style(|style| style.add_layer_json(DOTS, None)));
     not_loaded(map.edit_loaded_style(|style| style.set_layer_property_json("dots", "circle-radius", "4")));
@@ -454,7 +457,7 @@ fn edits_fail_during_a_url_load_and_the_old_version_stays_published() {
     map.load_style_url("http://some-url");
     assert!(!map.style_document_loaded());
     let error = map.edit_loaded_style(|style| style.add_layer_json(r#"{"id":"paper","type":"background"}"#, None));
-    assert_eq!(mln_util::ErrorKind::InvalidState, error.unwrap_err().kind);
+    assert_eq!(mln_style::error::ErrorKind::InvalidState, error.unwrap_err().kind);
     // The version from before the load stays, and stays published.
     assert!(Arc::ptr_eq(&local, map.style()));
     assert!(Arc::ptr_eq(&local, &published));

@@ -11,7 +11,7 @@ use mln_runtime::{
     RuntimeEvent, RuntimeOptions,
 };
 use mln_storage::Response;
-use mln_util::size::Size;
+use mln_style::size::Size;
 use parking_lot::{Condvar, Mutex};
 
 pub(crate) const TIMEOUT: Duration = Duration::from_secs(10);
@@ -80,7 +80,7 @@ pub(crate) const LEVEL_TERRAIN_STYLE: &str = r##"{"version":8,"center":[20,10],"
 /// 1000 m high everywhere, in the Mapbox encoding:
 /// (1 · 65536 + 173 · 256 + 176) · 0.1 − 10000.
 pub(crate) fn serve_level_dem(runtime: &Runtime) {
-    let mut dem = mln_util::image::PremultipliedImage::new(Size::new(4, 4));
+    let mut dem = mln_style::bitmap::PremultipliedImage::new(Size::new(4, 4));
     for pixel in dem.data.as_chunks_mut::<4>().0 {
         pixel.copy_from_slice(&[1, 173, 176, 255]);
     }

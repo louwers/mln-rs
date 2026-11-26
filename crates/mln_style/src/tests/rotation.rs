@@ -1,5 +1,4 @@
-use mln_util::interpolate::Interpolate;
-
+use crate::interpolate::Interpolate;
 use crate::tests::assert_near;
 use crate::types::Rotation;
 

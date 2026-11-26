@@ -8,8 +8,8 @@ use std::borrow::Cow;
 use feature::{Identifier, PropertyMap, Value};
 use mln_style::expression::image::Image;
 use mln_style::feature::{GeometryCollection, GeometryTileFeature};
+use mln_style::geometry::FeatureType;
 use mln_text::TaggedString;
-use mln_util::geometry::FeatureType;
 
 #[derive(Clone, Debug)]
 pub(crate) struct SymbolFeature {
@@ -61,7 +61,7 @@ impl GeometryTileFeature for SymbolFeature {
         self.id.clone()
     }
 
-    fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_util::error::Error> {
+    fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_style::error::Error> {
         Ok(Cow::Borrowed(&self.original_geometry))
     }
 }

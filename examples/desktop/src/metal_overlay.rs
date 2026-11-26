@@ -10,7 +10,7 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 
 use mln_mtl::surface_target::{Overlay, OverlayTarget};
-use mln_util::hash::HashMap;
+use mln_style::hash::HashMap;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSString;

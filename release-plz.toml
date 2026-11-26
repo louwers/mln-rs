@@ -60,7 +60,6 @@ changelog_include = [
   "mln-rs-image",
   "mln-rs-map",
   "mln-rs-map-types",
-  "mln-rs-math",
   "mln-rs-mtl",
   "mln-rs-polylabel",
   "mln-rs-renderer",

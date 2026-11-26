@@ -1,13 +1,13 @@
 //! Math helpers: angle conversion, clamping, wrapping, and floating-point
 //! minimum and maximum.
 //!
-//! The floating-point minimum and maximum are `fmin`/`fmax`, as C++'s
-//! `util::min`/`util::max` are. Their NaN handling is specified, their
-//! choice between `-0.0` and `+0.0` is not; `fmin`/`fmax` here implement
-//! glibc's (and clang's inline `llvm.minnum`/`llvm.maxnum` lowering on
-//! x86-64): the first argument when the two compare equal. Don't use
-//! `f64::min`/`f64::max` where signed zeros matter: Rust leaves that choice
-//! unspecified.
+//! The floating-point minimum and maximum are `fmin`/`fmax` and
+//! `fminf`/`fmaxf`, as C++'s `util::min`/`util::max` are. Their NaN handling
+//! is specified, their choice between `-0.0` and `+0.0` is not; these
+//! implement glibc's (and clang's inline `llvm.minnum`/`llvm.maxnum` lowering
+//! on x86-64): the first argument when the two compare equal. Don't use
+//! `f64::min`/`f64::max` or `f32::min`/`f32::max` where signed zeros matter:
+//! Rust leaves that choice unspecified.
 
 use std::f64::consts::PI;
 
@@ -57,7 +57,7 @@ pub fn fmin(a: f64, b: f64) -> f64 {
     }
 }
 
-/// glibc `fmaxf`.
+/// glibc `fmaxf`: NaN loses; equal operands (±0) return `a`.
 #[must_use]
 pub fn fmaxf(a: f32, b: f32) -> f32 {
     if a.is_nan() {
@@ -69,7 +69,7 @@ pub fn fmaxf(a: f32, b: f32) -> f32 {
     }
 }
 
-/// glibc `fminf`.
+/// glibc `fminf`: NaN loses; equal operands (±0) return `a`.
 #[must_use]
 pub fn fminf(a: f32, b: f32) -> f32 {
     if a.is_nan() {

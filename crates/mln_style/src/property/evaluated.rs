@@ -1,10 +1,10 @@
 //! A property's value for a frame: what is left of it once the zoom, the
 //! global state and the time are known.
 
-use mln_util::interpolate::Interpolate;
 use mln_vec_map::VecSet;
 
 use crate::expression::{Dependency, EvaluationContext, ValueConverter};
+use crate::interpolate::Interpolate;
 use crate::property::evaluation::PropertyEvaluationParameters;
 use crate::property::expression::PropertyExpression;
 use crate::property::value::PropertyValue;

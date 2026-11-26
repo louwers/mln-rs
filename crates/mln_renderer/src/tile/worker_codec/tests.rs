@@ -9,12 +9,13 @@ use mln_style::layer::{Layer, convert_layer};
 use mln_style::layers::Fill;
 use mln_style::property::evaluation::PropertyEvaluationParameters;
 use mln_style::property::transition::{TransitionOptions, TransitionParameters};
+use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_style::tile_id::CanonicalTileID;
 use mln_text::glyph::{GlyphIDType, GlyphMap, GlyphRange};
 use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::tagged_string::font_stack_hash;
 use mln_tile::{MltTile, MvtTile, TileData};
-use mln_tile_id::{CanonicalTileID, OverscaledTileID};
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_tile_id::OverscaledTileID;
 use mln_vec_map::VecSet;
 
 use super::map_side::MapCodec;
@@ -486,7 +487,7 @@ fn properties_cross_while_a_paint_property_transitions() {
     use std::time::Duration;
 
     use mln_style::property::evaluation::ZoomHistory;
-    use mln_util::time::Instant;
+    use mln_style::time::Instant;
 
     let constant = FILL.replace(r#"["case", ["has", "class"], "red", "rgba(0, 0, 255, 0.678)"]"#, r#""red""#);
     let mut render_layer = crate::tests::render_layer(convert(FILL).style());
@@ -736,7 +737,7 @@ fn an_ancestor_crosses_once_for_its_cut_tiles() {
 
 /// A PNG of opaque pixels that differ from their neighbours.
 fn png(width: u32, height: u32) -> Arc<Vec<u8>> {
-    let mut image = mln_util::image::PremultipliedImage::new(mln_util::size::Size::new(width, height));
+    let mut image = mln_style::bitmap::PremultipliedImage::new(mln_style::size::Size::new(width, height));
     for (i, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         *pixel = [(i % 251) as u8, (i / 7 % 253) as u8, (i * 3 % 255) as u8, 255];
     }
@@ -782,7 +783,7 @@ fn raster_decodes_cross() {
 /// and the `DEMData` constructor's error crosses as the tile's.
 #[test]
 fn dem_decodes_cross() {
-    use mln_util::tileset::RasterEncoding;
+    use mln_style::tileset::RasterEncoding;
     let custom = RasterEncoding::Custom { red_factor: 0.0, green_factor: 25.6, blue_factor: 0.1, base_shift: 3446.4 };
     for encoding in [RasterEncoding::Mapbox, RasterEncoding::Terrarium, custom] {
         let dem = || decode_job(Job::Dem { data: png(16, 16), encoding });
@@ -808,9 +809,9 @@ fn dem_decodes_cross() {
 /// counts overflow 32 bits, or members `DEMData::new` can't make.
 #[test]
 fn malformed_dems_fail() {
-    use mln_util::image::PremultipliedImage;
-    use mln_util::size::Size;
-    use mln_util::tileset::RasterEncoding;
+    use mln_style::bitmap::PremultipliedImage;
+    use mln_style::size::Size;
+    use mln_style::tileset::RasterEncoding;
 
     /// What a `JobResult::Dem` crosses as, with a `DEMData` of any members.
     #[derive(mln_wire::Wire)]

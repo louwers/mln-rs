@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use glam::DVec2;
 use mln_map_types::{Elevation, View};
-use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
+use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
+use mln_util::geo::{EdgeInsets, ScreenCoordinate};
 use mln_util::queue::Queue;
 
 use super::ground::{STYLE, assert_near, flat, ground_event, pitchable, report, world};
@@ -249,7 +250,7 @@ fn a_projection_reads_the_height_of_its_ground() {
     let at = |pixels_south: f64| {
         let point = world(&center()) + DVec2::new(0.0, pixels_south * PIXEL);
         let point = geometry::Point::new(point.x, point.y);
-        mln_util::projection::Projection::unproject(&point, 1.0 / mln_util::constants::TILE_SIZE_D, WrapMode::Wrapped)
+        mln_util::projection::Projection::unproject(&point, 1.0 / mln_style::constants::TILE_SIZE_D, WrapMode::Wrapped)
             .unwrap()
     };
     assert_near(Ridge::PEAK, from_map.elevation(&at(100.0)).unwrap(), 1e-6, "the peak");
@@ -439,7 +440,8 @@ fn a_pixel_on_a_polar_cap_converts_on_sea_level() {
         (0..16).map(move |column| ScreenCoordinate::new(16.0 + 32.0 * f64::from(column), 16.0 + 32.0 * f64::from(row)))
     }) {
         let Ok(sea_level) = flat_globe.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped) else { continue };
-        if sea_level.latitude() < mln_util::constants::LATITUDE_MAX + 0.5 || flat_globe.is_location_occluded(&sea_level)
+        if sea_level.latitude() < mln_style::constants::LATITUDE_MAX + 0.5
+            || flat_globe.is_location_occluded(&sea_level)
         {
             continue;
         }

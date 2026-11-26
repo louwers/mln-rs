@@ -122,7 +122,7 @@ fn worker(requests: &Mutex<mpsc::Receiver<TransferRequest>>) {
         if request.is_cancelled() {
             continue;
         }
-        let transfer = match mln_util::android::java_vm() {
+        let transfer = match mln_style::android::java_vm() {
             Some(vm) => transfer(&vm, &request),
             None => Err(Box::new(ResourceError::new(Reason::Other, "HTTP requests need Android initialization"))),
         };
@@ -362,7 +362,7 @@ fn close(env: &mut Env<'_>, stream: &JObject<'_>) {
 /// Disconnects `connection`, from any thread, which ends a transfer in
 /// flight with an exception.
 fn disconnect(connection: &Global<JObject<'static>>) {
-    let Some(vm) = mln_util::android::java_vm() else { return };
+    let Some(vm) = mln_style::android::java_vm() else { return };
     let _ = vm.attach_current_thread(|env| -> Result<(), JniError> {
         if env.call_method(connection, jni_str!("disconnect"), jni_sig!("()V"), &[]).is_err() {
             env.exception_clear();

@@ -14,15 +14,16 @@ use glam::{DMat4, DVec4};
 use mln_map_types::{MapMode, View};
 use mln_storage::Resource;
 use mln_style::Style;
+use mln_style::constants::EXTENT;
+use mln_style::error::Error;
 use mln_style::property::evaluation::PropertyEvaluationParameters;
+use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::VisibilityType;
 use mln_text::glyph::{GlyphMap, get_glyph_range, style_font_faces};
 use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::tagged_string::font_stack_hash;
 use mln_tile::TileData;
-use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
-use mln_util::constants::EXTENT;
-use mln_util::error::Error;
+use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_vec_map::VecSet;
 use parking_lot::Mutex;
 
@@ -262,7 +263,7 @@ impl SymbolView {
     /// drops the buckets of each layer that the view no longer has. Returns
     /// how many layers added a bucket.
     pub fn index(&self, index: &mut SymbolIndex) -> Result<usize, Error> {
-        let longitude = self.update.view.center(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
+        let longitude = self.update.view.center(mln_style::geo::WrapMode::Unwrapped).longitude() as f32;
         let mut added = 0;
         for layer in self.layers.iter().rev() {
             let result = index.0.add_layer(layer, longitude, &self.update.view);
@@ -587,9 +588,9 @@ mod tests {
     use feature::{Feature, Identifier, PropertyMap, Value};
     use geo_types::{Geometry, LineString, Point};
     use mln_map_types::{TerrainOptions, TileLodMode, TransformState};
-    use mln_util::geo::LatLng;
-    use mln_util::size::Size;
-    use mln_util::time::Instant;
+    use mln_style::geo::LatLng;
+    use mln_style::size::Size;
+    use mln_style::time::Instant;
 
     use super::*;
 
@@ -649,7 +650,7 @@ mod tests {
             elevation: None,
             tile_lod_min_radius: 3.0,
             tile_lod_scale: 1.0,
-            tile_lod_pitch_threshold: mln_math::deg2rad(60.0),
+            tile_lod_pitch_threshold: mln_style::math::deg2rad(60.0),
             tile_lod_zoom_shift: 0.0,
             tile_lod_mode: TileLodMode::Default,
             subdivision_granularity: style.get_projection().get_subdivision_granularity(),

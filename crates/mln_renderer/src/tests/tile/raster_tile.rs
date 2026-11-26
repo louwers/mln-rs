@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::error::Error;
+use mln_style::size::Size;
 use mln_tile_id::OverscaledTileID;
-use mln_util::error::Error;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
 
 use super::{RasterTileTest, png};
 use crate::tests::OneTile;

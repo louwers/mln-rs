@@ -11,8 +11,8 @@
 //! gives an empty glyph.
 
 use ab_glyph_rasterizer::{Point, Rasterizer, point};
-use mln_util::image::AlphaImage;
-use mln_util::size::Size;
+use mln_style::bitmap::AlphaImage;
+use mln_style::size::Size;
 use skrifa::{DrawMemory, GlyphId, PathSink};
 
 use crate::face::{Face, SDF_FONT_SIZE};

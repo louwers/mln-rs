@@ -314,7 +314,8 @@ mod tests {
     use std::sync::Arc;
 
     use ::mln_map::{RenderFrameStatus, RenderingStats};
-    use ::mln_tile_id::{CanonicalTileID, OverscaledTileID};
+    use ::mln_style::tile_id::CanonicalTileID;
+    use ::mln_tile_id::OverscaledTileID;
     use mln_storage::ResourceError;
 
     use super::*;
@@ -357,7 +358,7 @@ mod tests {
                 RuntimeEventKind::Map(MapEvent::GlyphsError {
                     font_stack: vec!["Open Sans".into(), "Noto".into()],
                     range: GlyphRange::new(256, 511, GlyphIDType::FontPBF),
-                    error: mln_util::Error::native("no glyphs"),
+                    error: mln_style::error::Error::native("no glyphs"),
                 }),
             ),
             event(

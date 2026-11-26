@@ -47,7 +47,7 @@ use mln_gfx::gpu::{
     BufferDesc, BufferId, BufferUsage, Gpu as _, GpuError, ResourceId, TextureDesc, TextureFormat, TextureId,
     TextureRegion, TextureUsage, destroy_unused,
 };
-use mln_util::hash::HashMap;
+use mln_style::hash::HashMap;
 
 use crate::overlay::Paint;
 

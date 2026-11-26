@@ -1,6 +1,6 @@
 use mln_map_types::MapMode;
+use mln_style::error::Error;
 use mln_tile_id::OverscaledTileID;
-use mln_util::error::Error;
 use mln_util::pool::TaskGroup;
 
 use crate::query::SourceQueryOptions;

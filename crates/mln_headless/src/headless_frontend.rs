@@ -13,14 +13,14 @@ use mln_gfx::rendering_stats::RenderingStats;
 use mln_map::Map;
 use mln_renderer::{Renderer, RendererEvent, RendererEvents, UpdateParameters, UpdateReader};
 use mln_runtime::{BackendRef, BackendType, Device, DeviceOptions, GlApi, LocalTarget};
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::error::Error;
+use mln_style::size::Size;
 use mln_text::GlyphCache;
 use mln_text::local_fonts::LocalGlyphs;
-use mln_util::error::Error;
 use mln_util::event_queue::Waker;
-use mln_util::image::PremultipliedImage;
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
-use mln_util::size::Size;
 use parking_lot::Mutex;
 
 /// A still image, and the stats of the renderer that drew it.
@@ -285,7 +285,7 @@ impl HeadlessFrontend {
         }
 
         let queue = self.queue.clone();
-        let mut idle_since = mln_util::time::Instant::now();
+        let mut idle_since = mln_style::time::Instant::now();
         let image = loop {
             map.process_events();
             // C++ reads the image inside the callback, which runs at the end
@@ -301,7 +301,7 @@ impl HeadlessFrontend {
             // first.
             let drew = self.render_update();
             if queue.run_once(&mut ()) || drew {
-                idle_since = mln_util::time::Instant::now();
+                idle_since = mln_style::time::Instant::now();
             } else if idle_since.elapsed() >= SPIN {
                 queue.park();
             }

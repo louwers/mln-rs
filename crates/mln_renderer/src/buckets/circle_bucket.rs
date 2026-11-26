@@ -4,10 +4,10 @@
 use std::sync::Arc;
 
 use mln_map_types::MapMode;
+use mln_style::color::Color;
 use mln_style::layers::Circle;
 use mln_style::layers::circle_layer_properties::CirclePaintProperties;
 use mln_text::atlas::ImagePositions;
-use mln_util::Color;
 use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketBase, UploadNeeds};

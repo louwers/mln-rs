@@ -13,7 +13,7 @@ crate::properties!(
         background_opacity: constant f32 = 1.0_f32,
         background_pattern: cross_faded Image = Image::default(),
     }
-    use crate::expression::Image, mln_util::Color;
+    use crate::color::Color, crate::expression::Image;
 );
 
 /// The properties, by slot.

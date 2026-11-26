@@ -1,8 +1,9 @@
 use feature::Value;
-use mln_util::{Color, Padding};
 
+use crate::color::Color;
 use crate::expression::value::to_mbgl_value;
 use crate::expression::{Formatted, Image, Value as ExpressionValue};
+use crate::padding::Padding;
 use crate::property::color_ramp::ColorRampPropertyValue;
 use crate::property::table::{Kind, StyleProperty};
 use crate::property::transition::TransitionOptions;

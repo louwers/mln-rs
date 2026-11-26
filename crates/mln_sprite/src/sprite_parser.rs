@@ -10,12 +10,12 @@ use std::sync::Arc;
 use geometry::Point;
 use mln_image::decoder;
 use mln_storage::Data;
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::error::Error;
 use mln_style::image::{Image, ImageContent, ImageStretches, Impl, TextFit};
-use mln_util::error::Error;
-use mln_util::image::PremultipliedImage;
+use mln_style::size::Size;
+use mln_style::string::to_string_double;
 use mln_util::pool::Respond;
-use mln_util::size::Size;
-use mln_util::string::to_string_double;
 use serde_json::{Map, Value as JSValue};
 
 use crate::log_target;

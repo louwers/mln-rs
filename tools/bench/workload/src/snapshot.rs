@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use mln_util::geo::LatLng;
+use mln_style::geo::LatLng;
 
 use crate::manifest::{CACHE_VARIABLE, Manifest, TileSet, cache_root};
 

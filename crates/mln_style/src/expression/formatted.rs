@@ -1,7 +1,6 @@
 use std::fmt;
 
-use mln_util::Color;
-
+use crate::color::Color;
 use crate::conversion::{Convertible, Error};
 use crate::expression::image::Image;
 use crate::types::VerticalAlign;

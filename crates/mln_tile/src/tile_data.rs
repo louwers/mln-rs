@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
 use mln_style::feature::{GeometryCollection, GeometryTileFeature, to_geometry_collection};
-use mln_util::geometry::{FeatureType, to_feature_type};
+use mln_style::geometry::{FeatureType, to_feature_type};
 use mln_wire::{Reader, Wire, Writer, payload};
 
 use crate::TileError;
@@ -78,13 +78,13 @@ impl TileLayer<'_> {
     }
 
     /// The units across the tile of the layer as encoded; its features'
-    /// geometry is in [`EXTENT`](mln_util::constants::EXTENT)'s.
+    /// geometry is in [`EXTENT`](mln_style::constants::EXTENT)'s.
     #[must_use]
     pub fn extent(&self) -> u32 {
         match self {
             TileLayer::Mvt(layer) => layer.extent(),
             TileLayer::Mlt(layer) => layer.extent(),
-            TileLayer::Features(_) | TileLayer::Cut(_) => mln_util::constants::EXTENT as u32,
+            TileLayer::Features(_) | TileLayer::Cut(_) => mln_style::constants::EXTENT as u32,
         }
     }
 
@@ -205,7 +205,7 @@ impl GeometryTileFeature for Feature<'_> {
         }
     }
 
-    fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_util::error::Error> {
+    fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_style::error::Error> {
         match self {
             Feature::Cut(feature) => feature.get_geometries(),
             Feature::Mvt(_) | Feature::Mlt(_) | Feature::Features(_) => Ok(Cow::Owned(self.geometry()?)),

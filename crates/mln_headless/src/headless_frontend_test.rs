@@ -469,8 +469,8 @@ fn far_dem() -> (Arc<mln_storage::stub_file_source::StubFileSource>, Requests) {
     };
     let (low, high) = (terrarium(0), terrarium(20_000));
     let center_y = mln_util::projection::Projection::project(
-        &mln_util::geo::LatLng::new(45.0, 10.0).unwrap(),
-        1.0 / mln_util::constants::TILE_SIZE_D,
+        &mln_style::geo::LatLng::new(45.0, 10.0).unwrap(),
+        1.0 / mln_style::constants::TILE_SIZE_D,
     )
     .y;
     let requests = Requests::default();

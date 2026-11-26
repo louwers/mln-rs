@@ -13,7 +13,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_util::error::Error;
+use mln_style::error::Error;
 
 use super::envelope::{self, Encoded};
 use super::worker_side::WorkerCodec;

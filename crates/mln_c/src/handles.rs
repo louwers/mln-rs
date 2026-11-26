@@ -16,7 +16,7 @@
 use std::fmt::Write as _;
 use std::sync::Arc;
 
-use mln_util::ErrorKind;
+use mln_style::error::ErrorKind;
 use parking_lot::Mutex;
 
 use crate::error::Error;

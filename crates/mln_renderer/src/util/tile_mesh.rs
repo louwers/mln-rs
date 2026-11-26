@@ -1,4 +1,4 @@
-use mln_util::constants::EXTENT;
+use mln_style::constants::EXTENT;
 
 use crate::util::subdivision::{NORTH_POLE_Y, SOUTH_POLE_Y};
 

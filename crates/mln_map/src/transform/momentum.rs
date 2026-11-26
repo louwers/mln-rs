@@ -8,10 +8,11 @@ use mln_map_types::{
     MomentumDecayModel, MomentumEasing, MomentumGlide, MomentumSnap, TransformState, TransitionOutcome,
     VerticalPerspectiveProjection,
 };
-use mln_util::UnitBezier;
-use mln_util::constants::DEFAULT_TRANSITION_EASE;
-use mln_util::geo::{LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
-use mln_util::time::Instant;
+use mln_style::constants::DEFAULT_TRANSITION_EASE;
+use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
+use mln_style::time::Instant;
+use mln_style::unitbezier::UnitBezier;
+use mln_util::geo::ScreenCoordinate;
 
 use super::anchor::sees_plane;
 use super::transition::Transition;
@@ -259,8 +260,8 @@ fn snap_delta(value: f64, snap: &MomentumSnap, circular: bool) -> f64 {
 fn momentum_value(state: &TransformState, part: usize) -> f64 {
     match part {
         MOMENTUM_ZOOM => state.view().zoom(),
-        MOMENTUM_BEARING => -mln_math::rad2deg(state.view().angle()),
-        _ => mln_math::rad2deg(state.view().pitch()),
+        MOMENTUM_BEARING => -mln_style::math::rad2deg(state.view().angle()),
+        _ => mln_style::math::rad2deg(state.view().pitch()),
     }
 }
 
@@ -463,7 +464,11 @@ impl Transform {
                 let t = if duration.is_zero() || now.is_none() {
                     1.0
                 } else {
-                    mln_math::clamp_f64(elapsed.saturating_sub(part.snap_start).div_duration_f64(duration), 0.0, 1.0)
+                    mln_style::math::clamp_f64(
+                        elapsed.saturating_sub(part.snap_start).div_duration_f64(duration),
+                        0.0,
+                        1.0,
+                    )
                 };
                 let eased = if t >= 1.0 { 1.0 } else { DEFAULT_TRANSITION_EASE.solve(t, 0.001) };
                 let fraction = eased - part.snap_applied;
@@ -585,7 +590,7 @@ impl Transform {
                 center.latitude(),
             );
         if let Some(bearing) = bearing {
-            self.state.set_angle(mln_math::deg2rad(-bearing));
+            self.state.set_angle(mln_style::math::deg2rad(-bearing));
         }
         self.state.set_lat_lng_zoom(&center, zoom);
     }
@@ -594,7 +599,7 @@ impl Transform {
         let before = self.state.view().zoom();
         let anchor = self.momentum_anchor(anchor);
         let center = self.view().center(WrapMode::Unwrapped);
-        let mut target = mln_math::clamp_f64(
+        let mut target = mln_style::math::clamp_f64(
             before + zoom,
             self.state.min_zoom_at_latitude(center.latitude()),
             self.state.limits().max_zoom,
@@ -624,7 +629,11 @@ impl Transform {
 
     fn step_bearing(&mut self, bearing: f64, anchor: Option<ScreenCoordinate>) {
         let anchor = self.momentum_anchor(anchor);
-        self.state.set_angle(mln_math::wrap(self.state.view().angle() - mln_math::deg2rad(bearing), -PI, PI));
+        self.state.set_angle(mln_style::math::wrap(
+            self.state.view().angle() - mln_style::math::deg2rad(bearing),
+            -PI,
+            PI,
+        ));
         self.hold_momentum_anchor(anchor);
     }
 
@@ -632,8 +641,8 @@ impl Transform {
         let anchor = self.momentum_anchor(anchor);
         let before = self.state.view().pitch();
         let max_pitch = max_pitch_for_padding(&self.state, &self.state.view().padding());
-        self.state.set_pitch(mln_math::clamp_f64(
-            before + mln_math::deg2rad(pitch),
+        self.state.set_pitch(mln_style::math::clamp_f64(
+            before + mln_style::math::deg2rad(pitch),
             self.state.limits().min_pitch,
             max_pitch,
         ));

@@ -13,10 +13,10 @@
 use std::cell::RefCell;
 
 use js_sys::Reflect;
+use mln_style::bitmap::AlphaImage;
+use mln_style::size::Size;
 use mln_util::constants::ONE_EM;
 use mln_util::font_stack::FontStack;
-use mln_util::image::AlphaImage;
-use mln_util::size::Size;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{OffscreenCanvas, OffscreenCanvasRenderingContext2d};
 

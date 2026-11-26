@@ -22,8 +22,8 @@ use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthMaskType;
+use mln_style::hash::HashMap;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
-use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
 
 use crate::draw::DrawObjects;

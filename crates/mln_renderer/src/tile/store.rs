@@ -12,10 +12,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_storage::FileSource;
+use mln_style::error::Error;
+use mln_style::hash::{HashMap, HashSet};
 use mln_style::layers::Symbol;
 use mln_tile_id::OverscaledTileID;
-use mln_util::error::Error;
-use mln_util::hash::{HashMap, HashSet};
 use mln_util::pool::TaskGroup;
 
 use crate::bucket::UploadNeeds;

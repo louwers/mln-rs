@@ -6,12 +6,13 @@ use std::time::Duration;
 
 use glam::{DVec2, DVec3, DVec4};
 use mln_map_types::{ConstrainMode, Elevation, View, ViewportMode};
-use mln_util::constants::DEFAULT_TRANSITION_EASE;
-use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
+use mln_style::constants::DEFAULT_TRANSITION_EASE;
+use mln_style::geo::{LatLng, WrapMode};
+use mln_style::size::Size;
+use mln_style::time::Instant;
+use mln_util::geo::ScreenCoordinate;
 use mln_util::projection::Projection;
 use mln_util::queue::Queue;
-use mln_util::size::Size;
-use mln_util::time::Instant;
 
 use super::ground::{STYLE, Slope, assert_near, flat, ground, ground_event, pitchable, report, world};
 use super::terrain_rest::picture_moved;
@@ -266,7 +267,7 @@ fn an_anchored_ease_on_a_steep_slope_ends_at_rest() {
             &CameraOptions {
                 zoom: Some(transform.view().zoom() + 1.0),
                 pitch: Some(pitch),
-                bearing: Some(-mln_math::rad2deg(transform.view().angle()) - 20.0),
+                bearing: Some(-mln_style::math::rad2deg(transform.view().angle()) - 20.0),
                 anchor: Some(ScreenCoordinate::new(anchor.0, anchor.1)),
                 ..Default::default()
             },
@@ -437,7 +438,7 @@ fn an_overshooting_ease_climbs_onto_the_ground_without_a_jump() {
         camera: CameraOptions { center: Some(destination()), ..Default::default() },
         animation: AnimationOptions {
             duration: Some(DURATION),
-            easing: Some(mln_util::UnitBezier::new(1.0 / 3.0, 0.0, 2.0 / 3.0, 2.0)),
+            easing: Some(mln_style::unitbezier::UnitBezier::new(1.0 / 3.0, 0.0, 2.0 / 3.0, 2.0)),
             ..Default::default()
         },
         ..Default::default()

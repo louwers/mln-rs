@@ -9,9 +9,9 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use mln_style::expression::Expr;
+use mln_style::hash::{HashMap, RandomState};
 use mln_style::layer::{ErasedLayerStyle, LayerTypeInfo};
 use mln_style::types::VisibilityType;
-use mln_util::hash::{HashMap, RandomState};
 
 use crate::layer_type::ErasedEvaluatedLayer;
 
@@ -253,7 +253,7 @@ mod tests {
         assert_eq!(groups.len(), 50);
         assert_eq!(groups, grouped_by_comparison(&layers));
         // Each group's key hashes apart from the others.
-        let hashes: mln_util::hash::HashSet<u64> =
+        let hashes: mln_style::hash::HashSet<u64> =
             layers.iter().map(|l| create_group_key(&l.shared_style()).hash).collect();
         assert_eq!(hashes.len(), 50);
     }

@@ -43,7 +43,6 @@ pub use mln_gl;
 pub use mln_image;
 pub use mln_map;
 pub use mln_map_types;
-pub use mln_math;
 /// Empty except on Apple platforms.
 #[cfg(feature = "metal")]
 pub use mln_mtl;

@@ -4,8 +4,8 @@
 use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_util::image::AlphaImage;
-use mln_util::size::Size;
+use mln_style::bitmap::AlphaImage;
+use mln_style::size::Size;
 
 use crate::gfx::context::Context;
 use crate::gfx::store::SharedTexture;
@@ -89,7 +89,7 @@ fn dash_ranges(dasharray: &[f32], stretch: f32) -> Vec<DashRange> {
 }
 
 fn to_alpha(v: f32) -> u8 {
-    mln_math::fmaxf(0.0, mln_math::fminf(255.0, v)) as u8
+    mln_style::math::fmaxf(0.0, mln_style::math::fminf(255.0, v)) as u8
 }
 
 fn add_round_dash(ranges: &[DashRange], y_offset: u32, stretch: f32, n: i32, image: &mut AlphaImage) {
@@ -123,7 +123,7 @@ fn add_round_dash(ranges: &[DashRange], y_offset: u32, stretch: f32, n: i32, ima
 
             let dist_left = (x as f32 - range.left).abs();
             let dist_right = (x as f32 - range.right).abs();
-            let min_dist = mln_math::fminf(dist_left, dist_right);
+            let min_dist = mln_style::math::fminf(dist_left, dist_right);
 
             let dist_middle = y as f32 / n as f32 * (half_stretch + 1.0);
             let signed_distance = if range.content.is_dash() {
@@ -183,7 +183,7 @@ fn add_regular_dash(ranges: &mut Vec<DashRange>, y_offset: u32, image: &mut Alph
 
         let dist_left = (x as f32 - range.left).abs();
         let dist_right = (x as f32 - range.right).abs();
-        let min_dist = mln_math::fminf(dist_left, dist_right);
+        let min_dist = mln_style::math::fminf(dist_left, dist_right);
         let signed_distance = if range.content.is_dash() { min_dist } else { -min_dist };
 
         image.data[(index + x) as usize] = to_alpha(signed_distance + 128.0);

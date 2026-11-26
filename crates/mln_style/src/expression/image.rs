@@ -54,7 +54,7 @@ pub fn convert_image(value: &Convertible<'_>, error: &mut Error) -> Option<Image
 }
 
 /// Images don't interpolate: the result is `self`.
-impl mln_util::interpolate::Interpolate for Image {
+impl crate::interpolate::Interpolate for Image {
     fn interpolate(&self, _to: &Self, _t: f64) -> Self {
         self.clone()
     }

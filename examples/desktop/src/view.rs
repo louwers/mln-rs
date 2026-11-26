@@ -47,10 +47,11 @@ use mln_runtime::{
     CacheDatabaseOperation, Completion, DemandMode, Device, ErrorKind, EventMask, EventType, FrameDemand,
     FrameDisposition, LogicalExtent, Map, MapOptions, Runtime, RuntimeEventKind, RuntimeOptions, ViewportOptions,
 };
+use mln_style::error::Error;
+use mln_style::geo::LatLng;
+use mln_style::size::Size;
 use mln_util::constants::DEFAULT_MAX_CACHE_SIZE;
-use mln_util::error::Error;
-use mln_util::geo::{LatLng, ScreenCoordinate};
-use mln_util::size::Size;
+use mln_util::geo::ScreenCoordinate;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event_loop::EventLoopProxy;
 use winit::keyboard::{KeyCode, ModifiersState};

@@ -1,5 +1,5 @@
 use geo_types::{Geometry, Point};
-use mln_util::geo::{LatLng, LatLngBounds};
+use mln_style::geo::{LatLng, LatLngBounds};
 
 use crate::offline::{
     OfflineGeometryRegionDefinition, OfflineRegionDefinition, OfflineTilePyramidRegionDefinition,

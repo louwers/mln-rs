@@ -14,8 +14,8 @@ use std::mem::discriminant;
 use std::sync::Arc;
 
 use feature::Value as MbglValue;
-use mln_util::Color;
 
+use crate::color::Color;
 use crate::expression::forms::assertion::Assertion;
 use crate::expression::forms::at::At;
 use crate::expression::forms::case::Case;

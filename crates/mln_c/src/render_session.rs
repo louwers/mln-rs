@@ -13,9 +13,9 @@ use ::mln_runtime::{
     AttachOptions, ClipDepthRange, DemandMode, Driver, DriverWork, FrameDemand, FrameDisposition, FrameProjection,
     FrameResult, LogicalExtent, RenderSession, RenderSessionState, RenderTarget,
 };
-use mln_util::ErrorKind;
-use mln_util::hash::HashMap;
-use mln_util::size::Size;
+use mln_style::error::ErrorKind;
+use mln_style::hash::HashMap;
+use mln_style::size::Size;
 use parking_lot::Mutex;
 
 use crate::abi::{self, Fields};
@@ -229,7 +229,7 @@ fn state(state: RenderSessionState) -> u32 {
 }
 
 /// The status that a session's failure reports.
-fn failure_status(failure: Option<&mln_util::Error>) -> mln_status {
+fn failure_status(failure: Option<&mln_style::error::Error>) -> mln_status {
     match failure {
         None => MLN_STATUS_OK,
         Some(error) if error.kind == ErrorKind::TargetLost => MLN_STATUS_TARGET_LOST,
@@ -548,7 +548,7 @@ pub(crate) fn release_batch(batch: mln_render_frame_batch) -> Result<(), Error> 
 pub(crate) unsafe fn operation<T: Send + 'static, V: CompletionValue>(
     session: mln_render_session,
     completion: *const mln_completion,
-    send: impl FnOnce(&RenderSession) -> Result<::mln_runtime::Completion<T>, mln_util::Error>,
+    send: impl FnOnce(&RenderSession) -> Result<::mln_runtime::Completion<T>, mln_style::error::Error>,
     value: impl FnOnce(T) -> V + Send + 'static,
 ) -> Result<(), Error> {
     let object = resolve(session)?;
@@ -573,9 +573,9 @@ pub(crate) unsafe fn operation<T: Send + 'static, V: CompletionValue>(
 /// a failure is logged, as [`completion::forward`] logs one.
 pub(crate) fn send_then<T: Send + 'static, V: CompletionValue>(
     session: &RenderSession,
-    send: impl FnOnce(&RenderSession) -> Result<::mln_runtime::Completion<T>, mln_util::Error>,
+    send: impl FnOnce(&RenderSession) -> Result<::mln_runtime::Completion<T>, mln_style::error::Error>,
     pending: Option<PendingCompletion>,
-    finish: impl FnOnce(Result<T, mln_util::Error>) -> (Result<V, Error>, Generations) + Send + 'static,
+    finish: impl FnOnce(Result<T, mln_style::error::Error>) -> (Result<V, Error>, Generations) + Send + 'static,
 ) -> Result<(), Error> {
     // The callback runs once when the send succeeds, and is dropped unrun,
     // with the completion unaccepted, when it fails.
@@ -1148,11 +1148,12 @@ pub(crate) mod tests {
     fn a_session_command_without_a_completion_logs_its_failure_as_a_warning() {
         let (runtime, map, session) = rendered_session();
         let object = resolve(session).unwrap();
-        let finish = |result: Result<(), mln_util::Error>| (result.map_err(Error::from), Generations::default());
+        let finish =
+            |result: Result<(), mln_style::error::Error>| (result.map_err(Error::from), Generations::default());
         // A command that fails without the session's thread completes on
         // this one, whose warnings the test reads.
         let fail = |_: &RenderSession| {
-            let lost = mln_util::Error::new(ErrorKind::TargetLost, "the target is gone");
+            let lost = mln_style::error::Error::new(ErrorKind::TargetLost, "the target is gone");
             Ok(::mln_runtime::Completion::ready(Err(lost)))
         };
         let warnings = discard_warnings(|| assert!(send_then(&object.session, fail, None, finish).is_ok()));

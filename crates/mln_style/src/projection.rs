@@ -1,13 +1,12 @@
 use std::sync::Arc;
 
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
-
 use crate::conversion::to_value::make_style_property;
 use crate::conversion::{Convertible, Error};
 use crate::expression::{EvaluationContext, Functions};
 use crate::property::convert::convert_property_value;
 use crate::property::table::StyleProperty;
 use crate::property::value::{PropertyValue, StyleValue as _};
+use crate::subdivision_granularity::SubdivisionGranularitySetting;
 use crate::types::{ProjectionDefinition, ProjectionType};
 
 /// The style's root `projection` object.

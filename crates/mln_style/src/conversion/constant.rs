@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
-use mln_util::{Color, Padding};
-
 use super::{Converter, Convertible, Error, convert};
+use crate::color::Color;
+use crate::padding::Padding;
 use crate::types::{
     AlignmentType, AnchorOffsetPair, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType,
     IconOverlapType, IconTextFitType, LayerBlendType, LightAnchorType, LineCapType, LineJoinType, ProjectionDefinition,

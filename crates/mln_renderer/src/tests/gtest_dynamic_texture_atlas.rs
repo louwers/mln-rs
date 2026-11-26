@@ -5,11 +5,11 @@
 
 use std::sync::Arc;
 
+use mln_style::bitmap::{AlphaImage, PremultipliedImage};
 use mln_style::image::Impl as ImageImpl;
+use mln_style::size::Size;
 use mln_text::atlas::ImagePosition;
 use mln_text::glyph::{Glyph, GlyphID, GlyphMap, GlyphMetrics, Glyphs};
-use mln_util::image::{AlphaImage, PremultipliedImage};
-use mln_util::size::Size;
 
 use crate::gfx::dynamic_texture::{DynamicTextureBinId, QueuedPixels, TextureHandle};
 use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, GlyphPage, ImagePage};
@@ -269,7 +269,7 @@ fn updated_icon_gets_fresh_allocation() {
 fn many_live_icon_revisions_get_their_own_allocations() {
     const REVISIONS: u32 = 64;
     let mut test = DynamicTextureAtlasTest::new();
-    let ids: mln_util::hash::HashSet<DynamicTextureBinId> =
+    let ids: mln_style::hash::HashSet<DynamicTextureBinId> =
         (0..REVISIONS).map(|_| handle(test.upload_icon(&make_image("marker", false))).id()).collect();
     assert_eq!(ids.len(), REVISIONS as usize);
 }

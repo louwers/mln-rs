@@ -8,10 +8,11 @@ use mln_map_types::{
     AnimationOptions, CameraOptions, CameraVelocity, Elevation, TransformState, TransitionEnd, TransitionOutcome,
     VerticalPerspectiveProjection,
 };
-use mln_util::constants::{DEFAULT_TRANSITION_EASE, TILE_SIZE_D};
-use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
+use mln_style::constants::{DEFAULT_TRANSITION_EASE, TILE_SIZE_D};
+use mln_style::geo::{LatLng, WrapMode};
+use mln_style::time::Instant;
+use mln_util::geo::ScreenCoordinate;
 use mln_util::projection::Projection;
-use mln_util::time::Instant;
 
 use super::anchor::sees_plane;
 use super::momentum::MomentumState;
@@ -157,9 +158,11 @@ impl Transition {
     fn progress(&self, now: Option<Instant>) -> f64 {
         let duration = self.duration;
         match now {
-            Some(now) if !duration.is_zero() => {
-                mln_math::clamp_f64(now.saturating_duration_since(self.start).div_duration_f64(duration), 0.0, 1.0)
-            }
+            Some(now) if !duration.is_zero() => mln_style::math::clamp_f64(
+                now.saturating_duration_since(self.start).div_duration_f64(duration),
+                0.0,
+                1.0,
+            ),
             _ => 1.0,
         }
     }
@@ -239,16 +242,16 @@ fn place(state: &mut TransformState, current: &CameraOptions, camera: &mut Camer
     let padding = camera.padding.unwrap_or_default();
     state.set_padding(&padding);
     if let Some(fov) = camera.fov.filter(|_| camera.fov != current.fov) {
-        state.set_fov(mln_math::deg2rad(fov));
+        state.set_fov(mln_style::math::deg2rad(fov));
     }
     if let Some(bearing) = camera.bearing.filter(|_| camera.bearing != current.bearing) {
-        state.set_angle(mln_math::deg2rad(-bearing));
+        state.set_angle(mln_style::math::deg2rad(-bearing));
     }
     if let Some(roll) = camera.roll.filter(|_| camera.roll != current.roll) {
-        state.set_roll(mln_math::deg2rad(roll));
+        state.set_roll(mln_style::math::deg2rad(roll));
     }
     let pitch = match camera.pitch.filter(|_| camera.pitch != current.pitch) {
-        Some(pitch) => mln_math::deg2rad(pitch),
+        Some(pitch) => mln_style::math::deg2rad(pitch),
         None => state.view().pitch(),
     };
     state.set_pitch(f64::min(max_pitch_for_padding(state, &padding), pitch));
@@ -358,7 +361,7 @@ impl Transform {
         let target = frame(&self.state, 1.0);
         let panning = flight || anchor.is_some() || camera.center != Some(self.view().center(WrapMode::Unwrapped));
         let scaling = flight || target.zoom != Some(self.view().zoom());
-        let rotating = target.bearing != Some(-mln_math::rad2deg(self.view().angle()));
+        let rotating = target.bearing != Some(-mln_style::math::rad2deg(self.view().angle()));
         let moving_fields = (if panning { CENTER } else { 0 })
             | (if scaling { ZOOM } else { 0 })
             | (if rotating { BEARING } else { 0 });
