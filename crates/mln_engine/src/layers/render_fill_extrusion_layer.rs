@@ -69,7 +69,10 @@ use crate::layer::layer_drawing::{
 };
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::layout::{LayoutParameters, SourceLayer};
-use crate::layer::render_layer::{LayerBucket, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::layer::render_layer::{
+    EvaluateCx, Evaluation, LayerBucket, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer, RenderLayerBase,
+    TypedLayer,
+};
 use crate::layers::fill_extrusion::programs;
 use crate::layers::fill_extrusion::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
 use crate::layout::pattern_layout::{PatternLayout, uses_pattern};
@@ -426,7 +429,8 @@ impl TypedLayer for RenderFillExtrusionLayer {
     type Type = FillExtrusion;
     type Drawing = TileDraws<ExtrusionTile>;
 
-    const STANDS: bool = true;
+    const TERRAIN: OnTerrain = OnTerrain::Stands { hides_behind_ground: false };
+    const VOLUME: bool = true;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -436,8 +440,9 @@ impl TypedLayer for RenderFillExtrusionLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
-    fn passes(&self, evaluated: &EvaluatedLayer<FillExtrusion>) -> RenderPass {
-        if opacity(evaluated) > 0.0 { RenderPass::Translucent } else { RenderPass::None }
+    fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
+        let evaluated = &*cx.evaluated;
+        if opacity(evaluated) > 0.0 { Evaluation::TRANSLUCENT } else { Evaluation::NONE }
     }
 
     /// Makes the frame's draws of the layer, those of each of its tiles,
@@ -556,10 +561,6 @@ impl TypedLayer for RenderFillExtrusionLayer {
 }
 
 impl RenderLayer for RenderFillExtrusionLayer {
-    fn is_3d(&self) -> bool {
-        true
-    }
-
     // query
     fn query_intersects_feature(
         &self,
