@@ -10,6 +10,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use mln_engine::map::{Map, MapEvent, MapMode, MapOptions};
 use mln_engine::{Renderer, RendererEvent};
 use mln_gfx::RendererBackend as _;
 use mln_gfx::frame::FrameTarget as _;
@@ -20,7 +21,6 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::offscreen_target::OffscreenTarget;
 use mln_headless::HeadlessFrontend;
-use mln_map::{Map, MapEvent, MapMode, MapOptions};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
 use mln_style::bitmap::PremultipliedImage;
@@ -275,7 +275,7 @@ impl FailingMap {
         );
         renderer.set_event_queue(Some(events));
         map.load_style_json(style);
-        let camera = mln_map::style_camera(map.style());
+        let camera = mln_engine::map::style_camera(map.style());
         map.jump_to(&camera);
         let target = OffscreenTarget::new(mln_gfx::Size::new(size.width, size.height));
         Some(FailingMap { map, backend, target, renderer, drawn: 0, fail, failing: 0, shown: None, _pool: pool })
@@ -479,7 +479,7 @@ fn a_continuous_map_whose_draw_always_fails_shows_the_rest_and_goes_idle() {
     let frames = map.frames();
     let (events, _) = map.run(Duration::from_millis(1500), |_| false);
     assert!(frames == map.frames() && events.is_empty(), "the idle map drew: {events:?}");
-    map.map.jump_to(&mln_map::CameraOptions { zoom: Some(2.5), ..Default::default() });
+    map.map.jump_to(&mln_engine::camera::CameraOptions { zoom: Some(2.5), ..Default::default() });
     let (events, went_idle) = map.run(Duration::from_secs(10), idle);
     assert!(went_idle && map.frames() > frames, "{events:?}");
     assert_eq!(0, errors(&events), "the same failure reported again");

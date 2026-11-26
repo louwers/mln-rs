@@ -5,7 +5,8 @@
 
 use std::sync::Arc;
 
-use mln_map::{CameraOptions, CameraUpdate, MapMode};
+use mln_engine::camera::{CameraOptions, CameraUpdate};
+use mln_engine::map::MapMode;
 use mln_runtime::{AttachOptions, MapOptions, RenderTarget, Runtime, RuntimeOptions};
 use mln_style::geo::LatLng;
 use mln_style::size::Size;
@@ -271,7 +272,12 @@ fn runtime(bench: &mut Bench) {
     let options =
         RuntimeOptions { asset_path: Some(fixtures.dir().to_owned()), cache_path: None, network_status: None };
     let map_options = MapOptions {
-        map: mln_map::MapOptions { size: VIEW, pixel_ratio: 1.0, map_mode: MapMode::Static, ..Default::default() },
+        map: mln_engine::map::MapOptions {
+            size: VIEW,
+            pixel_ratio: 1.0,
+            map_mode: MapMode::Static,
+            ..Default::default()
+        },
         // The fonts of the machine would make the work differ between
         // machines: the snapshot's glyphs have every label's.
         system_fonts: false,

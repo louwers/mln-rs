@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use mln_map::CameraOptions;
+use mln_engine::camera::CameraOptions;
 use mln_style::geo::LatLng;
 
 use super::VIEW;

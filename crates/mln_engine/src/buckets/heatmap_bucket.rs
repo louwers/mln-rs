@@ -5,7 +5,6 @@
 use std::sync::Arc;
 
 use geometry::Point;
-use mln_map_types::MapMode;
 use mln_style::constants::EXTENT;
 use mln_style::expression::Value;
 use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
@@ -22,6 +21,7 @@ use crate::layer::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::layer::layer_type::EvaluatedLayer;
 use crate::layer::paint_property_binder::PaintPropertyBinder;
 use crate::layout::pattern_layout::PatternLayerMap;
+use crate::map::MapMode;
 use crate::render::terrain::point_center;
 use crate::util::tessellator::Tessellator;
 

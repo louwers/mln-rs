@@ -10,10 +10,6 @@ use glam::DVec4;
 use mln_gfx::frame::FrameTarget;
 use mln_gfx::offscreen_target::OffscreenTarget;
 use mln_gfx::{RendererBackend as _, ScissorRect};
-use mln_map::transform::Transform;
-use mln_map_types::{
-    CameraOptions, ConstrainMode, Elevation, MapMode, TerrainOptions, TileLodMode, View, ViewportMode,
-};
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::constants::EXTENT;
@@ -26,7 +22,10 @@ use mln_style::{Edit, Style};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 
 use super::with_context;
+use crate::camera::transform::Transform;
+use crate::camera::{CameraOptions, ConstrainMode, Elevation, View, ViewportMode};
 use crate::layer::render_layer::FrameSourceTiles;
+use crate::map::{MapMode, TerrainOptions};
 use crate::render::clip_masks::ClipMasks;
 use crate::render::frame::Frame;
 use crate::render::layer_composite::LayerComposite;
@@ -35,6 +34,7 @@ use crate::render::static_data::RenderStaticData;
 use crate::render::tile::{FoundTile, RenderTile};
 use crate::render::update_parameters::UpdateParameters;
 use crate::source::render_image_source::{ImageQuad, ImageSourceRenderData};
+use crate::tile_store::TileLodMode;
 use crate::{Registry, RenderMode, Renderer, RendererEvent, RendererEvents};
 
 /// A camera pitched by `pitch` and turned to `bearing`, in degrees, over a

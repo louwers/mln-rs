@@ -11,7 +11,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use glam::{DMat4, DVec4};
-use mln_map_types::{MapMode, View};
 use mln_storage::Resource;
 use mln_style::Style;
 use mln_style::constants::EXTENT;
@@ -28,6 +27,7 @@ use mln_vec_map::VecSet;
 use parking_lot::Mutex;
 
 use crate::Registry;
+use crate::camera::View;
 use crate::draw::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::image::image_store::{ImageMap, ImageType};
 use crate::layer::bucket::LayerFeatureStates;
@@ -35,6 +35,7 @@ use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::layer::render_layer::{LayerParts, RenderLayer};
 use crate::layer::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::layers::render_symbol_layer::RenderSymbolLayer;
+use crate::map::MapMode;
 use crate::placement::{Placement, PlacementInputs};
 use crate::render::paint_parameters::TransformParameters;
 use crate::render::tile::RenderTile;
@@ -587,12 +588,14 @@ mod tests {
 
     use feature::{Feature, Identifier, PropertyMap, Value};
     use geo_types::{Geometry, LineString, Point};
-    use mln_map_types::{TerrainOptions, TileLodMode, TransformState};
     use mln_style::geo::LatLng;
     use mln_style::size::Size;
     use mln_style::time::Instant;
 
     use super::*;
+    use crate::camera::TransformState;
+    use crate::map::TerrainOptions;
+    use crate::tile_store::TileLodMode;
 
     fn feature(id: u64, geometry: Geometry<i16>) -> Feature<i16, Arc<PropertyMap>> {
         let mut properties = PropertyMap::new();

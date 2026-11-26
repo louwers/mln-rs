@@ -548,10 +548,10 @@ impl RenderFillLayer {
         let int_zoom = state.integer_zoom();
         let tile_ratio = 1.0f32 / tile_id.pixels_to_tile_units(1.0, f32::from(int_zoom));
         let tile_size_at_nearest_zoom =
-            (TILE_SIZE_D * mln_map_types::zoom_scale(f64::from(int_zoom) - f64::from(tile_id.canonical.z))) as i32;
+            (TILE_SIZE_D * crate::camera::zoom_scale(f64::from(int_zoom) - f64::from(tile_id.canonical.z))) as i32;
         let pixel_x = (f64::from(tile_size_at_nearest_zoom)
             * (f64::from(tile_id.canonical.x)
-                + f64::from(tile_id.wrap) * mln_map_types::zoom_scale(f64::from(tile_id.canonical.z))))
+                + f64::from(tile_id.wrap) * crate::camera::zoom_scale(f64::from(tile_id.canonical.z))))
             as i32;
         let pixel_y = tile_size_at_nearest_zoom.wrapping_mul(tile_id.canonical.y as i32);
         uniforms.draw_ubo.set_fill_pattern(&FillPatternDrawableUBO {

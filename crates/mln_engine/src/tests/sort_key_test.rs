@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use feature::{Feature, Identifier, PropertyMap, Value};
 use geo_types::{Geometry, LineString, Point, Polygon};
-use mln_map_types::MapMode;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::expression::UnavailableImages;
@@ -29,6 +28,7 @@ use crate::layer::filter_groups::FilterGroups;
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::layer::layout::{BuildParams, LayoutParameters, SourceLayer};
 use crate::layer::tile_layout::{Built, Resolved};
+use crate::map::MapMode;
 use crate::query::feature_index::FeatureIndexBuilder;
 use crate::tile_store::contents::LayoutBuckets;
 

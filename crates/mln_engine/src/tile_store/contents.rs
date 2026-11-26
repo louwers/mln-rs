@@ -472,7 +472,7 @@ impl GeometryContents {
         result: &mut QueryResults,
         query_geometry: &mln_style::feature::GeometryCoordinates,
         (screen, ground): (&[mln_util::geo::ScreenCoordinate], Option<crate::query::feature_index::QueryGround<'_>>),
-        view: &mln_map_types::View,
+        view: &crate::camera::View,
         layers: &QueryLayers<'_>,
         options: &RenderedQueryOptions,
         global_state: Option<&GlobalStateMap>,
@@ -483,7 +483,7 @@ impl GeometryContents {
             return Ok(());
         }
         let query_padding = self.query_padding(layers);
-        let projector = mln_map_types::TileProjector::with_data(
+        let projector = crate::camera::TileProjector::with_data(
             view,
             &id.to_unwrapped(),
             view.projection_data_with(&id.to_unwrapped(), proj_matrix),

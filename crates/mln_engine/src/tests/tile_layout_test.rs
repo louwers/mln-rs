@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use feature::{Feature, Identifier, PropertyMap};
 use geo_types::{Geometry, LineString, Polygon};
-use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::layer::convert_layer;
 use mln_style::property::evaluation::PropertyEvaluationParameters;
@@ -21,6 +20,7 @@ use crate::Registry;
 use crate::image::image_store::ImageType;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::layer::tile_layout::{LayoutInput, LayoutParams, Resolved, build, discover};
+use crate::map::MapMode;
 use crate::worker::job::{DataInput, DataKey, Job, JobId, JobResult, LayoutJob, Run, SourceKey, TileKey, run_job};
 use crate::worker::tile_workers::InlineWorkers;
 

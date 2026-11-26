@@ -8,10 +8,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use mln_engine::camera::CameraOptions;
+use mln_engine::map::{Map, MapMode, MapOptions};
 use mln_headless::HeadlessFrontend;
 use mln_image::{decode_image, encode_png};
-use mln_map::{Map, MapMode, MapOptions};
-use mln_map_types::CameraOptions;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Resource, Response};
 use mln_style::bitmap::PremultipliedImage;

@@ -11,13 +11,14 @@ use std::time::Duration;
 use feature::Value;
 use geo_types::{LineString, Point};
 use geojson::{GeoJson, Geometry};
-use mln_engine::{OverscaledTileID, Registry, TileOperation, UpdateParameters, UpdateReader};
-use mln_headless::HeadlessFrontend;
-use mln_map::{
-    AnimationOptions, AxonometricMode, BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions,
-    MapProjection, NorthOrientation, ProjectionMode, RenderFrameStatus, RenderMode, TileLodMode, TileSettings,
-    Viewport, ViewportMode,
+use mln_engine::camera::{
+    AnimationOptions, AxonometricMode, BoundOptions, CameraOptions, ConstrainMode, MapProjection, NorthOrientation,
+    ProjectionMode, Viewport, ViewportMode,
 };
+use mln_engine::map::{Map, MapMode, MapOptions, RenderFrameStatus, TileSettings};
+use mln_engine::tile_store::TileLodMode;
+use mln_engine::{OverscaledTileID, Registry, RenderMode, TileOperation, UpdateParameters, UpdateReader};
+use mln_headless::HeadlessFrontend;
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{
@@ -351,11 +352,11 @@ fn fly_too_slow_to_time_jumps_and_the_map_goes_idle() {
     assert!(run_until_idle());
 
     let target = CameraOptions { center: Some(ll(40.0, -74.0)), zoom: Some(10.0), ..Default::default() };
-    test.map().update_camera(&mln_map::CameraUpdate {
-        mode: mln_map::CameraUpdateMode::Fly,
+    test.map().update_camera(&mln_engine::camera::CameraUpdate {
+        mode: mln_engine::camera::CameraUpdateMode::Fly,
         camera: target,
         animation: AnimationOptions { velocity: Some(f64::from_bits(1)), ..AnimationOptions::default() },
-        ..mln_map::CameraUpdate::default()
+        ..mln_engine::camera::CameraUpdate::default()
     });
     assert!(!test.map().snapshot().transition_in_progress);
     assert_near(CameraOptions::from(test.map().snapshot().view.camera).zoom.unwrap(), 10.0, 1e-9);
@@ -367,19 +368,22 @@ fn fly_too_slow_to_time_jumps_and_the_map_goes_idle() {
 fn free_camera_options_place_the_camera_and_cancel_commands() {
     let test = MapTest::new();
     let animation = AnimationOptions::new(Duration::from_secs(10));
-    let command = test.map().update_camera(&mln_map::CameraUpdate {
-        mode: mln_map::CameraUpdateMode::Ease,
+    let command = test.map().update_camera(&mln_engine::camera::CameraUpdate {
+        mode: mln_engine::camera::CameraUpdateMode::Ease,
         camera: CameraOptions { zoom: Some(10.0), ..Default::default() },
         animation,
-        ..mln_map::CameraUpdate::default()
+        ..mln_engine::camera::CameraUpdate::default()
     });
     assert!(test.map().snapshot().transition_in_progress);
 
     let position = glam::dvec3(0.25, 0.25, 0.01);
-    test.map().set_free_camera_options(&mln_map::FreeCameraOptions { position: Some(position), orientation: None });
+    test.map().set_free_camera_options(&mln_engine::camera::FreeCameraOptions {
+        position: Some(position),
+        orientation: None,
+    });
     let ended: Vec<_> =
         test.map().drain_command_ends().filter(|end| end.command == command).map(|end| end.end.outcome).collect();
-    assert_eq!(ended, [mln_map::TransitionOutcome::Cancelled]);
+    assert_eq!(ended, [mln_engine::camera::TransitionOutcome::Cancelled]);
     assert!(!test.map().snapshot().transition_in_progress);
     let placed = test.map().snapshot().free_camera.position;
     for (placed, wanted) in placed.to_array().into_iter().zip(position.to_array()) {
@@ -392,7 +396,7 @@ fn free_camera_options_place_the_camera_and_cancel_commands() {
     assert!(center.latitude() > 0.0);
 
     // A NaN position is ignored.
-    test.map().set_free_camera_options(&mln_map::FreeCameraOptions {
+    test.map().set_free_camera_options(&mln_engine::camera::FreeCameraOptions {
         position: Some(glam::dvec3(f64::NAN, 0.0, 0.0)),
         orientation: None,
     });
@@ -597,11 +601,11 @@ fn pixel_for_lat_lng_during_a_fling_across_the_antimeridian() {
 
     let degree = 512.0 * 16.0 / 360.0;
     test.map()
-        .apply_camera_delta(&mln_map::CameraDelta {
+        .apply_camera_delta(&mln_engine::camera::CameraDelta {
             offset: Some(ScreenCoordinate::new(-2.0 * degree, 0.0)),
             animation: AnimationOptions::new(Duration::from_secs(10)),
-            phase: mln_map::GesturePhase::Begin,
-            ..mln_map::CameraDelta::default()
+            phase: mln_engine::camera::GesturePhase::Begin,
+            ..mln_engine::camera::CameraDelta::default()
         })
         .unwrap();
     let center = CameraOptions::from(test.map().snapshot().view.camera).center.unwrap().longitude();
@@ -719,7 +723,7 @@ fn set_style_default_camera() {
     camera = CameraOptions::from(test.map().snapshot().view.camera);
     assert_double_eq(camera.zoom.unwrap(), 0.0);
 
-    let default_camera = mln_map::style_camera(test.map().style());
+    let default_camera = mln_engine::map::style_camera(test.map().style());
     test.map().jump_to(&default_camera);
     camera = CameraOptions::from(test.map().snapshot().view.camera);
     assert_double_eq(camera.zoom.unwrap(), 0.5);
@@ -833,7 +837,7 @@ fn set_style_invalid_json() {
     let serde_error = serde_json::from_str::<serde_json::Value>("invalid").unwrap_err();
     assert_eq!(
         1,
-        log.count(log::Level::Error, "mln_map::parse_style", &format!("Failed to parse style: {serde_error}"))
+        log.count(log::Level::Error, "mln_engine::parse_style", &format!("Failed to parse style: {serde_error}"))
     );
     let unchecked = log.unchecked();
     assert!(unchecked.is_empty(), "{unchecked:?}");
@@ -1828,7 +1832,7 @@ fn no_hang_on_missing_image() {
     test.render();
 
     test.load_json(style);
-    let default_camera = mln_map::style_camera(test.map().style());
+    let default_camera = mln_engine::map::style_camera(test.map().style());
     test.map().jump_to(&default_camera);
     // The test passes if the following call does not hang.
     test.render();

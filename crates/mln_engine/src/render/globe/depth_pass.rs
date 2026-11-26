@@ -11,10 +11,10 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
-use mln_map_types::View;
 use mln_style::range::Range;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 
+use crate::camera::View;
 use crate::draw::context::Context;
 use crate::draw::indexes::DrawIndexes;
 use crate::draw::objects::{DrawGeometry, DrawObjects, Textures, raw_vertices};

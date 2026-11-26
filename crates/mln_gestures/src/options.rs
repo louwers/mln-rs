@@ -1,7 +1,7 @@
 //! How gestures move each part of the camera, and the recognizer's rates and
 //! thresholds.
 
-use mln_map::{InvalidMomentum, MomentumDecay, MomentumSnap};
+use mln_engine::camera::{InvalidMomentum, MomentumDecay, MomentumSnap};
 
 /// Values every `spacing` from `offset`, in the part's unit, that report a
 /// [`GestureEvent::Notch`](crate::GestureEvent::Notch) as a gesture moves the
@@ -136,7 +136,7 @@ pub struct GestureOptions {
     /// Whether a press stops every camera animation, as GL JS and the
     /// MapLibre Native SDKs do, or only the recognizer's own.
     pub(crate) interrupt_animations: bool,
-    /// The [`AnimationOptions::transition_id`](mln_map::AnimationOptions::transition_id)
+    /// The [`AnimationOptions::transition_id`](mln_engine::camera::AnimationOptions::transition_id)
     /// of the eases and momentum the recognizer starts.
     pub(crate) transition_id: u64,
 }

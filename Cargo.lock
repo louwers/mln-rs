@@ -2484,8 +2484,6 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-image",
- "mln-rs-map",
- "mln-rs-map-types",
  "mln-rs-mtl",
  "mln-rs-polylabel",
  "mln-rs-runtime",
@@ -2517,7 +2515,6 @@ dependencies = [
  "mln-rs-gl",
  "mln-rs-headless",
  "mln-rs-image",
- "mln-rs-map",
  "mln-rs-mtl",
  "mln-rs-runtime",
  "mln-rs-sprite",
@@ -2554,7 +2551,7 @@ dependencies = [
 name = "mln-rs-bench-workload"
 version = "0.0.17"
 dependencies = [
- "mln-rs-map",
+ "mln-rs-engine",
  "mln-rs-style",
  "serde",
  "serde_json",
@@ -2578,8 +2575,6 @@ dependencies = [
  "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",
- "mln-rs-map",
- "mln-rs-map-types",
  "mln-rs-mtl",
  "mln-rs-runtime",
  "mln-rs-storage",
@@ -2655,7 +2650,6 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-image",
- "mln-rs-map",
  "mln-rs-mtl",
  "mln-rs-runtime",
  "mln-rs-storage",
@@ -2692,8 +2686,6 @@ dependencies = [
  "mln-rs-geometry",
  "mln-rs-gfx",
  "mln-rs-image",
- "mln-rs-map",
- "mln-rs-map-types",
  "mln-rs-pixelmatch",
  "mln-rs-polylabel",
  "mln-rs-sprite",
@@ -2711,6 +2703,7 @@ dependencies = [
  "proptest",
  "serde_json",
  "smallvec",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2776,7 +2769,7 @@ dependencies = [
 name = "mln-rs-gestures"
 version = "0.0.17"
 dependencies = [
- "mln-rs-map",
+ "mln-rs-engine",
  "mln-rs-style",
  "mln-rs-util",
  "parking_lot",
@@ -2841,8 +2834,6 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-image",
- "mln-rs-map",
- "mln-rs-map-types",
  "mln-rs-mtl",
  "mln-rs-pixelmatch",
  "mln-rs-runtime",
@@ -2876,43 +2867,6 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "zune-jpeg",
-]
-
-[[package]]
-name = "mln-rs-map"
-version = "0.0.17"
-dependencies = [
- "geo-types",
- "geojson",
- "glam",
- "log",
- "mln-rs-engine",
- "mln-rs-feature",
- "mln-rs-geometry",
- "mln-rs-image",
- "mln-rs-map-types",
- "mln-rs-sprite",
- "mln-rs-storage",
- "mln-rs-style",
- "mln-rs-text",
- "mln-rs-tile-id",
- "mln-rs-util",
- "parking_lot",
- "serde_json",
-]
-
-[[package]]
-name = "mln-rs-map-types"
-version = "0.0.17"
-dependencies = [
- "glam",
- "mln-rs-geometry",
- "mln-rs-gfx",
- "mln-rs-style",
- "mln-rs-tile-id",
- "mln-rs-util",
- "mln-rs-wire",
- "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2967,8 +2921,6 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-headless",
  "mln-rs-image",
- "mln-rs-map",
- "mln-rs-map-types",
  "mln-rs-pixelmatch",
  "mln-rs-storage",
  "mln-rs-style",
@@ -3002,7 +2954,6 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-image",
- "mln-rs-map",
  "mln-rs-mtl",
  "mln-rs-storage",
  "mln-rs-storage-offline",
@@ -3077,7 +3028,6 @@ dependencies = [
  "mln-rs-engine",
  "mln-rs-feature",
  "mln-rs-headless",
- "mln-rs-map",
  "mln-rs-storage",
  "mln-rs-style",
  "mln-rs-text",
@@ -3273,7 +3223,6 @@ dependencies = [
  "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",
- "mln-rs-map",
  "mln-rs-runtime",
  "mln-rs-storage",
  "mln-rs-style",

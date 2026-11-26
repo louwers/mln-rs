@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
-use mln_map_types::MapMode;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::feature::{GeometryCollection, GeometryTileFeature};
@@ -38,6 +37,7 @@ use crate::layer::bucket_geometry::{BucketGeometry, GeometryUpload, bucket_index
 use crate::layer::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::layout::symbol_instance::SymbolInstancePools;
+use crate::map::MapMode;
 use crate::tests::fixture_log::FixtureLog;
 use crate::tile_store::raster::Masking;
 use crate::tile_store::tile_mask::TileMask;

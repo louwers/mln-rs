@@ -2,7 +2,7 @@
 //! pinch and other camera input turned into camera moves on a
 //! [`GestureCamera`], such as `mln_runtime::Map`, through the map's camera
 //! calls with their gesture phases
-//! ([`Map::apply_camera_delta`](mln_map::Map::apply_camera_delta)), and
+//! ([`Map::apply_camera_delta`](mln_engine::map::Map::apply_camera_delta)), and
 //! releases continued with the map's momentum. Hosts translate each platform
 //! event into an [`Input`]: which buttons and keys select which [`Modes`],
 //! and how far a wheel, a dial or a key moves the camera. The recognizer

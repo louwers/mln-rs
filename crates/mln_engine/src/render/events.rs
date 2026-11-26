@@ -6,7 +6,6 @@
 use std::sync::Arc;
 
 pub use mln_gfx::rendering_stats::RenderingStats;
-use mln_map_types::Elevation;
 use mln_style::error::Error;
 use mln_style::time::Instant;
 pub use mln_text::glyph::GlyphRange;
@@ -14,6 +13,7 @@ pub use mln_tile_id::OverscaledTileID;
 use mln_util::event_queue::EventQueue;
 pub use mln_util::font_stack::FontStack;
 
+use crate::camera::Elevation;
 pub use crate::tile_store::TileOperation;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

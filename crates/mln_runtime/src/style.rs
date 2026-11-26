@@ -403,7 +403,7 @@ fn quote(id: &str) -> String {
     format!("\"{id}\"")
 }
 
-fn require_loaded(map: &mln_map::Map) -> Result<(), Error> {
+fn require_loaded(map: &mln_engine::map::Map) -> Result<(), Error> {
     if map.style_document_loaded() { Ok(()) } else { Err(style_not_loaded()) }
 }
 
@@ -411,7 +411,7 @@ fn source_not_found(id: &str) -> Error {
     Error::not_found(format!("source {} does not exist", quote(id)))
 }
 
-fn find_source<'a>(map: &'a mln_map::Map, id: &str) -> Result<&'a Source, Error> {
+fn find_source<'a>(map: &'a mln_engine::map::Map, id: &str) -> Result<&'a Source, Error> {
     map.source(id).ok_or_else(|| source_not_found(id))
 }
 
@@ -422,16 +422,16 @@ fn not_a(id: &str, kind: &str) -> Error {
 }
 
 /// The data of the source `id`, a GeoJSON source.
-fn geojson_data<'a>(map: &'a mln_map::Map, id: &str) -> Result<&'a SourceData<GeoJsonSourceType>, Error> {
+fn geojson_data<'a>(map: &'a mln_engine::map::Map, id: &str) -> Result<&'a SourceData<GeoJsonSourceType>, Error> {
     SourceData::recover(find_source(map, id)?).ok_or_else(|| not_a(id, "a GeoJSON source"))
 }
 
 /// The data of the source `id`, an image source.
-fn image_data<'a>(map: &'a mln_map::Map, id: &str) -> Result<&'a SourceData<ImageSourceType>, Error> {
+fn image_data<'a>(map: &'a mln_engine::map::Map, id: &str) -> Result<&'a SourceData<ImageSourceType>, Error> {
     SourceData::recover(find_source(map, id)?).ok_or_else(|| not_a(id, "an image source"))
 }
 
-fn require_new_source(map: &mln_map::Map, id: &str) -> Result<(), Error> {
+fn require_new_source(map: &mln_engine::map::Map, id: &str) -> Result<(), Error> {
     require_loaded(map)?;
     if map.source(id).is_some() {
         return Err(Error::already_exists(format!("source {} already exists", quote(id))));
@@ -1175,7 +1175,11 @@ fn start_geojson(
 
 /// The builder and the data's load of the source `id`, if it's the GeoJSON
 /// source `instance`.
-fn current_geojson(map: &mln_map::Map, id: &str, instance: SourceInstance) -> Option<(GeoJSONDataBuilder, u64)> {
+fn current_geojson(
+    map: &mln_engine::map::Map,
+    id: &str,
+    instance: SourceInstance,
+) -> Option<(GeoJSONDataBuilder, u64)> {
     let source = map.source(id).filter(|source| source.instance() == instance)?;
     let data = SourceData::<GeoJsonSourceType>::recover(source)?;
     Some((data.options.data_builder(), data.load))

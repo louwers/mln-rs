@@ -7,6 +7,7 @@
 #[doc(hidden)]
 pub mod bench;
 mod buckets;
+pub mod camera;
 #[cfg(feature = "gpu-conformance")]
 pub mod conformance;
 mod draw;
@@ -20,6 +21,7 @@ pub mod layer;
 pub mod layers;
 mod layout;
 mod line_atlas;
+pub mod map;
 mod pattern_atlas;
 pub mod placement;
 pub mod query;
@@ -43,7 +45,6 @@ pub use registry::{Registry, RegistryBuilder, register_builtins};
 pub use render::events::{
     FontStack, GlyphRange, OverscaledTileID, RenderMode, RendererEvent, RendererEvents, RenderingStats, TileOperation,
 };
-pub use render::frame_projection::{ClipDepthRange, FrameProjection};
 pub use render::renderer::{DrawnFrame, RenderTimings, Renderer, UpdatedFrame};
 pub use render::update_parameters::UpdateParameters;
 pub use render::update_slot::{Update, UpdateReader, UpdateSlot};
@@ -52,6 +53,8 @@ pub use render::update_slot::{Update, UpdateReader, UpdateSlot};
 /// `mln_c` reports the record under (`mln_c::logging`).
 mod log_target {
     pub(crate) const GENERAL: &str = "mln_engine::general";
+    pub(crate) const SETUP: &str = "mln_engine::setup";
+    pub(crate) const PARSE_STYLE: &str = "mln_engine::parse_style";
     pub(crate) const RENDER: &str = "mln_engine::render";
     pub(crate) const STYLE: &str = "mln_engine::style";
     pub(crate) const GLYPH: &str = "mln_engine::glyph";

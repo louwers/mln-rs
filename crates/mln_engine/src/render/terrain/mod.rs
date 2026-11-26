@@ -65,7 +65,6 @@ pub(crate) use elevation::{TerrainElevation, TileGround};
 pub(crate) use fog::terrain_fog;
 pub(crate) use ground::{FrameGround, GroundHeights, StandingDraw, height_attribute, point_center};
 use mln_gfx::gpu::Gpu;
-use mln_map_types::{MapMode, TerrainSkirtLength};
 use mln_style::hash::HashMap;
 use mln_style::source::SourceData;
 use mln_style::sources::RasterDemSourceType;
@@ -79,6 +78,7 @@ pub(crate) use stacks::{DrapeStacks, Draped};
 use crate::draw::context::Context;
 use crate::draw::store::SharedTexture;
 use crate::layer::layer_drawing::ChangedBuckets;
+use crate::map::{MapMode, TerrainSkirtLength};
 use crate::render::events::RendererEvent;
 use crate::render::paint_parameters::PaintParameters;
 use crate::render::terrain::cover::dem_contents;
@@ -187,7 +187,7 @@ pub(crate) struct RenderTerrain {
     /// The most bytes the drapes hold, the map's
     /// [`TerrainOptions::drape_memory_limit`], or `None` for no limit.
     ///
-    /// [`TerrainOptions::drape_memory_limit`]: mln_map_types::TerrainOptions::drape_memory_limit
+    /// [`TerrainOptions::drape_memory_limit`]: crate::map::TerrainOptions::drape_memory_limit
     drape_memory_limit: Option<u64>,
 }
 

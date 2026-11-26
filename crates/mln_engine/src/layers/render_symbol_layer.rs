@@ -13,7 +13,6 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
-use mln_map_types::{Projection, ProjectionData};
 use mln_style::color::Color;
 use mln_style::constants::EXTENT;
 use mln_style::error::Error;
@@ -31,6 +30,7 @@ use super::cast_matrix;
 use crate::buckets::symbol_bucket::{
     Buffer, PaintProperties, SymbolBucket, SymbolDynamicLayoutVertex, SymbolOpacityVertex,
 };
+use crate::camera::{Projection, ProjectionData};
 use crate::draw::atlas_binding::AtlasBinding;
 use crate::draw::context::Context;
 use crate::draw::objects::{DrawGeometry, DrawObjects, copy_shared_attributes};

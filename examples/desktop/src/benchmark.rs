@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use mln_bench_workload::Snapshot;
 use mln_bench_workload::paths::{FRAMES, Path};
-use mln_map::CameraOptions;
+use mln_engine::camera::CameraOptions;
 
 /// What the benchmark mode draws, and the frames it has timed.
 pub(crate) struct Benchmark {

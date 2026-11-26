@@ -41,7 +41,7 @@
 //! its mips, so a blend's backdrop is the drape's own texels.
 //!
 //! [`LayerParts::update_drape_draws`]: crate::layer::render_layer::LayerParts::update_drape_draws
-//! [`TerrainOptions::drape_memory_limit`]: mln_map_types::TerrainOptions::drape_memory_limit
+//! [`TerrainOptions::drape_memory_limit`]: crate::map::TerrainOptions::drape_memory_limit
 
 use std::sync::Arc;
 
@@ -51,12 +51,12 @@ use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{Rgba, Size};
-use mln_map_types::View;
 use mln_style::layer::ErasedLayerStyle;
 use mln_tile_id::OverscaledTileID;
 use smallvec::SmallVec;
 
 use super::TerrainCover;
+use crate::camera::View;
 use crate::draw::context::Context;
 use crate::draw::resources::{GpuTexture, attachment_bytes};
 use crate::draw::store::SharedTexture;
@@ -698,13 +698,13 @@ fn drape_texture(context: &mut Context, side: u32) -> SharedTexture {
 
 #[cfg(test)]
 mod tests {
-    use mln_map::transform::Transform;
-    use mln_map_types::{CameraOptions, ConstrainMode, ViewportMode};
     use mln_style::geo::LatLng;
     use mln_style::tile_id::CanonicalTileID;
     use mln_style::types::ProjectionDefinition;
 
     use super::*;
+    use crate::camera::transform::Transform;
+    use crate::camera::{CameraOptions, ConstrainMode, ViewportMode};
     use crate::render::terrain::{ElevationRanges, TerrainTile};
 
     /// A view of the globe at `zoom` over 512 by 512 pixels.

@@ -5,7 +5,7 @@
 //! through a [`Completion`], and the [`RenderSession`]s that draw them.
 //!
 //! The library crates of <https://github.com/maplibre/mln-rs> are re-exported
-//! here under their crate names: `mln_rs::mln_map`, `mln_rs::mln_util`,
+//! here under their crate names: `mln_rs::mln_engine`, `mln_rs::mln_util`,
 //! `mln_rs::mln_geojson`, and so on. They are published as the `mln-rs-*`
 //! packages, which only exist for this crate. The tile worker codec's
 //! encoding (`mln_wire`) is internal to the port and not re-exported.
@@ -42,8 +42,6 @@ pub use mln_gfx;
 #[cfg(feature = "gl")]
 pub use mln_gl;
 pub use mln_image;
-pub use mln_map;
-pub use mln_map_types;
 /// Empty except on Apple platforms.
 #[cfg(feature = "metal")]
 pub use mln_mtl;

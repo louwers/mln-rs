@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
-use ::mln_map::MapProjection;
-use mln_map_types::{
+use ::mln_engine::camera::MapProjection;
+use mln_engine::camera::{
     AxonometricMode, Camera, ConstrainMode, LogicalExtent, MapView, ProjectionMode, Viewport, ViewportMode,
 };
 use mln_style::geo::WrapMode;

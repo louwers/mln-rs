@@ -23,7 +23,6 @@ doctest = false
 [dependencies]
 log.workspace = true
 mln_gfx.workspace = true
-mln_map.workspace = true
 mln_engine.workspace = true
 # The devices and offscreen targets the frontend renders on, of every
 # backend.
@@ -45,7 +44,6 @@ geo-types.workspace = true
 geojson.workspace = true
 glam.workspace = true
 mln_image = { package = "mln-rs-image", path = "../mln_image" }
-mln_map_types = { package = "mln-rs-map-types", path = "../mln_map_types" }
 # system_fonts_test shapes text with mln_text's Shaper in-process.
 mln_engine = { workspace = true, features = ["font-face-shaper"] }
 mln_storage = { workspace = true, features = ["sqlite", "stub-file-source"] }

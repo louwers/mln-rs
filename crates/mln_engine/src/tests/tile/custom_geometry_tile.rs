@@ -65,7 +65,7 @@ fn recorder() -> (Arc<Mutex<Vec<CanonicalTileID>>>, TileFunction) {
 fn tiles(test: &RasterTileTest, ids: &[OverscaledTileID], loader: Arc<CustomGeometryProvider>) -> OneTile {
     let store = crate::tests::tile_store(&test.thread_pool, Box::new(InlineWorkers));
     let origin = DataOrigin::Custom { loader, fast_pfor_enabled: false };
-    OneTile::with_origin(store, TileKind::Geometry, true, origin, ids, mln_map_types::MapMode::Static)
+    OneTile::with_origin(store, TileKind::Geometry, true, origin, ids, crate::map::MapMode::Static)
 }
 
 /// The root tile's id.

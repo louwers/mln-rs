@@ -6,7 +6,7 @@
 
 #![expect(unsafe_code, reason = "the tests import the exported images through each backend's API")]
 
-use mln_map::MapMode;
+use mln_engine::map::MapMode;
 use mln_runtime::{
     AcquiredFrame, AttachOptions, BackendType, ConsumerSync, DemandMode, Device, DeviceOptions, DmaBufFormat,
     ErrorKind, ExportKind, ExportKinds, ExportedImage, ExportedRing, FrameDemand, FrameDisposition, FrameTextureKind,
@@ -30,7 +30,7 @@ fn style(color: &str) -> String {
 
 fn red_map(runtime: &Runtime) -> Map {
     let options = MapOptions {
-        map: mln_map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
+        map: mln_engine::map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();
@@ -490,7 +490,7 @@ mod linux {
 
     fn session_map(runtime: &Runtime, style: &str) -> Map {
         let options = MapOptions {
-            map: mln_map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
+            map: mln_engine::map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
             ..Default::default()
         };
         let (map, created) = runtime.create_map(options).unwrap();
@@ -1035,7 +1035,7 @@ mod android {
             return None;
         }
         let options = MapOptions {
-            map: mln_map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
+            map: mln_engine::map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
             ..Default::default()
         };
         let (map, created) = runtime.create_map(options).unwrap();

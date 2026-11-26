@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use mln_engine::Registry;
+use mln_engine::camera::{BoundOptions, ProjectionMode};
+use mln_engine::map::{Map, MapOptions};
 use mln_engine::worker::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
 use mln_headless::HeadlessFrontend;
-use mln_map::{BoundOptions, Map, MapOptions, ProjectionMode};
 use mln_storage::{FileSource, FileSourceExt};
 use mln_style::Edit;
 use mln_style::bitmap::PremultipliedImage;
@@ -18,18 +19,18 @@ use crate::runner::{
 };
 use crate::style_ops;
 
-fn terrain_skirt_length(length: TerrainSkirtLength) -> mln_map::TerrainSkirtLength {
+fn terrain_skirt_length(length: TerrainSkirtLength) -> mln_engine::map::TerrainSkirtLength {
     match length {
-        TerrainSkirtLength::Auto => mln_map::TerrainSkirtLength::Auto,
-        TerrainSkirtLength::None => mln_map::TerrainSkirtLength::None,
+        TerrainSkirtLength::Auto => mln_engine::map::TerrainSkirtLength::Auto,
+        TerrainSkirtLength::None => mln_engine::map::TerrainSkirtLength::None,
     }
 }
 
-fn map_mode(mode: MapMode) -> mln_map::MapMode {
+fn map_mode(mode: MapMode) -> mln_engine::map::MapMode {
     match mode {
-        MapMode::Continuous => mln_map::MapMode::Continuous,
-        MapMode::Static => mln_map::MapMode::Static,
-        MapMode::Tile => mln_map::MapMode::Tile,
+        MapMode::Continuous => mln_engine::map::MapMode::Continuous,
+        MapMode::Static => mln_engine::map::MapMode::Static,
+        MapMode::Tile => mln_engine::map::MapMode::Tile,
     }
 }
 
@@ -78,7 +79,7 @@ impl Impl {
                 size: metadata.size,
                 pixel_ratio: metadata.pixel_ratio,
                 cross_source_collisions: metadata.cross_source_collisions,
-                terrain: mln_map::TerrainOptions {
+                terrain: mln_engine::map::TerrainOptions {
                     skirt_length: terrain_skirt_length(metadata.terrain_skirt_length),
                     ..Default::default()
                 },
@@ -97,7 +98,7 @@ impl Impl {
     }
 
     /// Changes the map's tile settings.
-    fn set_tile(&mut self, change: impl FnOnce(&mut mln_map::TileSettings)) {
+    fn set_tile(&mut self, change: impl FnOnce(&mut mln_engine::map::TileSettings)) {
         let mut tile = self.map.snapshot().tile;
         change(&mut tile);
         self.map.set_tile_settings(&tile);
@@ -159,7 +160,7 @@ impl TestRunnerImpl for Impl {
         camera: &CameraOptions,
         zoom: u8,
     ) -> Result<Vec<crate::runner::TileId>, MapError> {
-        let camera = mln_map::CameraOptions {
+        let camera = mln_engine::camera::CameraOptions {
             center: camera.center,
             center_altitude: camera.center_altitude,
             zoom: camera.zoom,
@@ -199,7 +200,7 @@ impl TestRunnerImpl for Impl {
     }
 
     fn jump_to(&mut self, camera: &CameraOptions) -> Result<(), MapError> {
-        let camera = mln_map::CameraOptions {
+        let camera = mln_engine::camera::CameraOptions {
             center: camera.center,
             center_altitude: camera.center_altitude,
             zoom: camera.zoom,
@@ -347,8 +348,8 @@ impl TestRunnerImpl for Impl {
     fn set_tile_lod_mode(&mut self, mode: crate::parser::TileLodMode) -> Result<(), MapError> {
         self.set_tile(|tile| {
             tile.lod_mode = match mode {
-                crate::parser::TileLodMode::Default => mln_map::TileLodMode::Default,
-                crate::parser::TileLodMode::Distance => mln_map::TileLodMode::Distance,
+                crate::parser::TileLodMode::Default => mln_engine::tile_store::TileLodMode::Default,
+                crate::parser::TileLodMode::Distance => mln_engine::tile_store::TileLodMode::Distance,
             };
         });
         Ok(())

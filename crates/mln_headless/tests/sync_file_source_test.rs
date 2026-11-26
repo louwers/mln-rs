@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
+use mln_engine::map::{Map, MapOptions};
 use mln_headless::HeadlessFrontend;
-use mln_map::{Map, MapOptions};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::hash::HashMap;

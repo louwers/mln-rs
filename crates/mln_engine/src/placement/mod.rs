@@ -21,7 +21,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub use collision_grid::Aabb;
-use mln_map_types::{MapMode, View};
 use mln_style::TransitionOptions;
 use mln_style::constants::DEFAULT_TRANSITION_DURATION;
 use mln_style::hash::{HashMap, HashSet};
@@ -31,9 +30,11 @@ use mln_tile_id::OverscaledTileID;
 
 use self::context::{BucketOptions, CollisionGroups, PlacementContext};
 use self::tile::TilePlacementState;
+use crate::camera::View;
 use crate::layer::layer_drawing::{BucketChanges, ChangedBuckets};
 use crate::layer::render_layer::{BucketKey, BucketPlacementData, RenderLayer, SymbolBuckets};
 use crate::layout::symbol_instance::SymbolInstance;
+use crate::map::MapMode;
 use crate::placement::collision_grid::Shape;
 use crate::placement::collision_index::CollisionIndex;
 use crate::query::feature_index::FeatureIndex;

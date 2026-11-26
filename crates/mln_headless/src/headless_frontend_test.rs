@@ -2,7 +2,8 @@
 // tree tests this through test/api/*.test.cpp and the render tests), and of
 // the frames the frontend draws when asked.
 
-use mln_map::{CameraOptions, MapMode, MapOptions};
+use mln_engine::camera::CameraOptions;
+use mln_engine::map::{MapMode, MapOptions};
 use mln_util::pool::Pool;
 
 use super::*;
@@ -52,7 +53,7 @@ fn background_style(color: &str) -> String {
 
 /// How many frames the map's renderer finished since the last call.
 fn frames(map: &mut Map) -> usize {
-    map.drain_events().iter().filter(|event| matches!(event, mln_map::MapEvent::RenderFrameFinished(_))).count()
+    map.drain_events().iter().filter(|event| matches!(event, mln_engine::map::MapEvent::RenderFrameFinished(_))).count()
 }
 
 #[test]
@@ -539,7 +540,7 @@ fn a_continuous_map_over_far_dem_tiles_that_flip_settles() {
     let run = |map: &mut Map, frontend: &mut HeadlessFrontend, iterations: usize| {
         (0..iterations).any(|_| {
             map.process_events();
-            if map.drain_events().iter().any(|event| matches!(event, mln_map::MapEvent::Idle)) {
+            if map.drain_events().iter().any(|event| matches!(event, mln_engine::map::MapEvent::Idle)) {
                 return true;
             }
             if !frontend.render_update() && !run_loop.run_once(&mut ()) {
@@ -572,7 +573,7 @@ fn a_continuous_map_over_terrain_goes_idle_on_the_ground() {
     map.load_style_json(TERRAIN_STYLE);
     let idle = (0..10_000).any(|_| {
         map.process_events();
-        if map.drain_events().iter().any(|event| matches!(event, mln_map::MapEvent::Idle)) {
+        if map.drain_events().iter().any(|event| matches!(event, mln_engine::map::MapEvent::Idle)) {
             // The last frame drew the map's last update, whose camera stands
             // on the ground.
             let latest = map.update_reader().latest().expect("an update");
@@ -598,10 +599,10 @@ fn a_continuous_map_over_terrain_goes_idle_on_the_ground() {
     let modes: Vec<mln_engine::RenderMode> = events
         .iter()
         .filter_map(|event| match event {
-            mln_map::MapEvent::RenderFrameFinished(status) => Some(status.mode),
+            mln_engine::map::MapEvent::RenderFrameFinished(status) => Some(status.mode),
             _ => None,
         })
         .collect();
     assert_eq!(vec![mln_engine::RenderMode::Partial], modes);
-    assert!(!events.iter().any(|event| matches!(event, mln_map::MapEvent::Idle)));
+    assert!(!events.iter().any(|event| matches!(event, mln_engine::map::MapEvent::Idle)));
 }

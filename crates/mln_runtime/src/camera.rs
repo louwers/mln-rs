@@ -2,9 +2,10 @@
 //! calls: fitting an area, the viewport and the tile settings.
 
 use geo_types::Geometry;
-use mln_map::{
-    AnimationOptions, CameraOptions, CameraUpdateMode, ConstrainMode, NorthOrientation, TileLodMode, ViewportMode,
+use mln_engine::camera::{
+    AnimationOptions, CameraOptions, CameraUpdateMode, ConstrainMode, NorthOrientation, ViewportMode,
 };
+use mln_engine::tile_store::TileLodMode;
 use mln_style::error::Error;
 use mln_style::geo::{LatLng, LatLngBounds};
 use mln_style::geometry::for_each_point;
@@ -34,7 +35,7 @@ pub struct CameraFitOptions {
     pub pitch: Option<f64>,
 }
 
-/// Moves the camera to fit an area: [`CameraUpdate`](mln_map::CameraUpdate)'s
+/// Moves the camera to fit an area: [`CameraUpdate`](mln_engine::camera::CameraUpdate)'s
 /// counterpart for [`Map::fit_camera`](crate::Map::fit_camera).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CameraFitUpdate {
@@ -51,9 +52,9 @@ pub struct ViewportOptions {
     pub constrain_mode: Option<ConstrainMode>,
     pub viewport_mode: Option<ViewportMode>,
     pub frustum_offset: Option<EdgeInsets>,
-    /// As `mln_map::Viewport::center_clamped_to_ground`.
+    /// As `mln_engine::camera::Viewport::center_clamped_to_ground`.
     pub center_clamped_to_ground: Option<bool>,
-    /// As `mln_map::Viewport::globe_free_bearing`.
+    /// As `mln_engine::camera::Viewport::globe_free_bearing`.
     pub globe_free_bearing: Option<bool>,
 }
 
@@ -76,7 +77,7 @@ pub struct TileOptions {
 /// and for padding that leaves no room for it, for which the core would keep
 /// the zoom.
 pub(crate) fn camera_for(
-    map: &mln_map::Map,
+    map: &mln_engine::map::Map,
     area: &CameraFitArea,
     options: &CameraFitOptions,
 ) -> Result<CameraOptions, Error> {
@@ -103,7 +104,7 @@ pub(crate) fn camera_for(
     }
 }
 
-pub(crate) fn set_viewport(map: &mut mln_map::Map, options: &ViewportOptions) {
+pub(crate) fn set_viewport(map: &mut mln_engine::map::Map, options: &ViewportOptions) {
     let mut viewport = map.snapshot().view.viewport;
     viewport.north_orientation = options.north_orientation.unwrap_or(viewport.north_orientation);
     viewport.constrain_mode = options.constrain_mode.unwrap_or(viewport.constrain_mode);
@@ -114,7 +115,7 @@ pub(crate) fn set_viewport(map: &mut mln_map::Map, options: &ViewportOptions) {
     map.set_viewport(&viewport);
 }
 
-pub(crate) fn set_tile_options(map: &mut mln_map::Map, options: &TileOptions) {
+pub(crate) fn set_tile_options(map: &mut mln_engine::map::Map, options: &TileOptions) {
     let mut tile = map.snapshot().tile;
     tile.prefetch_zoom_delta = options.prefetch_zoom_delta.unwrap_or(tile.prefetch_zoom_delta);
     tile.lod_min_radius = options.lod_min_radius.unwrap_or(tile.lod_min_radius);

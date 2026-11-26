@@ -134,3 +134,13 @@ mod tests {
         assert!(!desired.is_nan() && desired >= 13.0, "desired zoom: {desired}");
     }
 }
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum TileLodMode {
+    /// Default `TileLOD` algorithm
+    #[default]
+    Default,
+    /// Distance-based `TileLOD` algorithm
+    Distance,
+}

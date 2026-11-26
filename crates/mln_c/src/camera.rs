@@ -6,11 +6,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use ::mln_map::{
+use ::mln_engine::camera::{
     AnimationOptions, AxonometricMode, BoundOptions, Camera, CameraDelta, CameraOptions, CameraUpdate,
-    CameraUpdateMode, ConstrainMode, FreeCameraOptions, GesturePhase, NorthOrientation, ProjectionMode, TileLodMode,
-    TransitionEnd, TransitionOutcome, ViewportMode,
+    CameraUpdateMode, ConstrainMode, FreeCameraOptions, GesturePhase, NorthOrientation, ProjectionMode, TransitionEnd,
+    TransitionOutcome, ViewportMode,
 };
+use ::mln_engine::tile_store::TileLodMode;
 use mln_runtime::{Applied, CameraFitArea, CameraFitOptions, CameraFitUpdate, TileOptions, ViewportOptions};
 use mln_style::constants::{TILE_SIZE_D, TILE_SIZE_I};
 use mln_style::geo::{LatLngBounds, WrapMode};

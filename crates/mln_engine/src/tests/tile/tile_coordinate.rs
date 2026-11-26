@@ -1,14 +1,15 @@
 use geometry::Point;
-use mln_map::transform::{Transform, TransformEvent};
-use mln_map::{CameraChange, CameraChangeMode};
-use mln_map_types::tile_coordinate::TileCoordinate;
-use mln_map_types::{ConstrainMode, ViewportMode};
 use mln_style::constants;
 use mln_style::geo::LatLng;
 use mln_style::size::Size;
 use mln_style::tile_id::CanonicalTileID;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::geo::ScreenCoordinate;
+
+use crate::camera::tile_coordinate::TileCoordinate;
+use crate::camera::transform::{Transform, TransformEvent};
+use crate::camera::{ConstrainMode, ViewportMode};
+use crate::map::{CameraChange, CameraChangeMode};
 
 /// gtest's `ASSERT_DOUBLE_EQ`: equal within 4 ULPs.
 fn assert_double_eq(actual: f64, expected: f64) {

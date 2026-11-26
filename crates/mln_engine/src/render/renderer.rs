@@ -13,13 +13,14 @@ use mln_text::local_fonts::LocalGlyphs;
 use mln_util::event_queue::Waker;
 use mln_util::pool::Pool;
 
+use crate::camera::FrameProjection;
 use crate::draw::context::Context;
 use crate::layer::layer_drawing::{DrawGroups, DrawOrder};
 use crate::layers::custom::{CustomLayerFrame, end_hosts};
 use crate::render::clip_masks::ClipMasks;
 use crate::render::events::{RenderMode, RendererEvent, RendererEvents};
 use crate::render::frame::Frame;
-use crate::render::frame_projection::{self, FrameProjection};
+use crate::render::frame_projection;
 use crate::render::layer_composite::LayerComposite;
 use crate::render::orchestrator::RenderOrchestrator;
 use crate::render::paint_parameters::{OpenPass, PaintParameters};

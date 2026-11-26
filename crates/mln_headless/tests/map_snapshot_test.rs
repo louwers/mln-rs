@@ -1,7 +1,7 @@
 //! What rendering changes in `Map::snapshot`.
 
+use mln_engine::map::{Map, MapMode, MapOptions};
 use mln_headless::HeadlessFrontend;
-use mln_map::{Map, MapMode, MapOptions};
 use mln_style::size::Size;
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;

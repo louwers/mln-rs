@@ -7,7 +7,6 @@ use std::iter;
 
 use geometry::Point;
 use glam::{DMat4, DVec2, DVec3, DVec4, Vec2};
-use mln_map_types::{ProjectedTilePoint, TileProjector, View};
 use mln_style::feature::GeometryCoordinate;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::types::SymbolHeightAnchorType;
@@ -17,6 +16,7 @@ use mln_util::constants::ONE_EM;
 use crate::buckets::symbol_bucket::{
     PlacedSymbol, PlacedSymbolPools, SymbolBucket, SymbolDynamicLayoutVertex, SymbolSizeBinder, ZoomEvaluatedSize,
 };
+use crate::camera::{ProjectedTilePoint, TileProjector, View};
 use crate::layout::symbol_instance::WritingMode;
 use crate::render::terrain::{TerrainElevation, TileGround};
 
@@ -756,8 +756,6 @@ mod tests {
 
     use geometry::Point;
     use glam::Vec2;
-    use mln_map::transform::Transform;
-    use mln_map_types::{ConstrainMode, TileProjector, TransformState, View, ViewportMode};
     use mln_style::geo::LatLng;
     use mln_style::size::Size;
     use mln_style::tile_id::CanonicalTileID;
@@ -767,6 +765,8 @@ mod tests {
         LabelPlaneProjector, LineLabel, LineLabelAlignment, LinePlacer, PlacedGlyph, PlacedSymbol, PlacedSymbolPools,
         SymbolHeights, SymbolSizeBinder, TileDistance, Unplaced, WritingMode, reproject_line_labels,
     };
+    use crate::camera::transform::Transform;
+    use crate::camera::{ConstrainMode, TileProjector, TransformState, View, ViewportMode};
     use crate::util::pool::PoolRange;
 
     /// A 512 px square map at zoom 0, where tile 0/0/0 fills the viewport

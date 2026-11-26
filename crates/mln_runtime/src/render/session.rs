@@ -9,9 +9,9 @@ use std::sync::{Arc, OnceLock, Weak};
 use std::thread::ThreadId;
 use std::time::Duration;
 
+use mln_engine::camera::LogicalExtent;
 use mln_engine::query::{RenderedQueryOptions, SourceQueryOptions};
 use mln_frame_pacer::{FramePacer, RefreshWaiter};
-use mln_map::LogicalExtent;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::Error;
 use mln_style::size::Size;

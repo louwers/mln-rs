@@ -2,7 +2,6 @@
 //! layer.
 
 use glam::Vec2;
-use mln_map_types::{ProjectionData, TileProjector, View};
 use mln_style::constants::{EXTENT, TILE_SIZE_D};
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::types::{
@@ -12,6 +11,7 @@ use mln_tile_id::UnwrappedTileID;
 use mln_vec_map::VecMap;
 
 use crate::buckets::symbol_bucket::{SymbolBucket, ZoomEvaluatedSize, symbols_by_viewport_y};
+use crate::camera::{ProjectionData, TileProjector, View};
 use crate::layer::render_layer::{BucketPlacementData, PlacedTile, SymbolTranslate};
 use crate::layout::symbol_projection::{LabelPlaneProjector, SymbolHeights};
 use crate::placement::collision_index::{CollisionBoundaries, OverlapMode, PartCollision};

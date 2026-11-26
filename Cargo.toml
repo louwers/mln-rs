@@ -62,8 +62,6 @@ mln_gl = { package = "mln-rs-gl", path = "crates/mln_gl", version = "=0.0.17" }
 mln_glsl = { package = "mln-rs-glsl", path = "crates/mln_glsl", version = "=0.0.17" }
 mln_headless = { package = "mln-rs-headless", path = "crates/mln_headless", version = "=0.0.17" }
 mln_image = { package = "mln-rs-image", path = "crates/mln_image", version = "=0.0.17" }
-mln_map = { package = "mln-rs-map", path = "crates/mln_map", version = "=0.0.17" }
-mln_map_types = { package = "mln-rs-map-types", path = "crates/mln_map_types", version = "=0.0.17" }
 mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.17" }
 # Without its backends (its default features) unless a package asks for
 # them, so that a browser build of mln_c carries one.
@@ -552,8 +550,6 @@ mln_gestures.workspace = true
 mln_gfx.workspace = true
 mln_gl = { workspace = true, optional = true }
 mln_image.workspace = true
-mln_map.workspace = true
-mln_map_types.workspace = true
 mln_mtl = { workspace = true, optional = true }
 mln_engine = { workspace = true, features = ["font-face-shaper"] }
 mln_runtime.workspace = true

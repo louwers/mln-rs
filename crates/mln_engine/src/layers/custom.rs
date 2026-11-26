@@ -31,11 +31,11 @@ use std::any::Any;
 use std::sync::{Arc, Weak};
 
 use mln_gfx::gpu::Gpu;
-use mln_map_types::{FrameProjection, MapView};
 use mln_style::StyleRegistry;
 use mln_style::layer::{Layer, LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 use mln_style::property::table::{PropertyTable, PropertyVisitor};
 
+use crate::camera::{FrameProjection, MapView};
 use crate::draw::context::Context;
 use crate::layer::bucket::NoBucket;
 use crate::layer::layer_drawing::{DrawGroup, DrawOrder, LayerDrawing, TileMap};

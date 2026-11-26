@@ -39,8 +39,6 @@ log = { workspace = true, features = ["kv"] }
 mln_frame_pacer.workspace = true
 mln_gestures.workspace = true
 mln_gfx.workspace = true
-mln_map.workspace = true
-mln_map_types.workspace = true
 # The custom layer type.
 mln_engine.workspace = true
 mln_runtime.workspace = true

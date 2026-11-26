@@ -14,8 +14,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use mln_engine::camera::{AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase};
+use mln_engine::map::MapEvent;
 use mln_gestures::{GestureEvent, GestureRecognizer, Input, Modes, PointerKind};
-use mln_map::{AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, MapEvent};
 use mln_runtime::{
     AttachOptions, DemandMode, Error, ErrorKind, EventMask, EventType, FrameDemand, FrameDisposition, LogicalExtent,
     Map, MapOptions, RenderSession, RenderTarget, Runtime, RuntimeEvent, RuntimeEventKind, RuntimeOptions, Surface,
@@ -182,7 +183,7 @@ impl WebMap {
 
         let size = Size::new(width.max(1), height.max(1));
         let options = MapOptions {
-            map: mln_map::MapOptions { size, pixel_ratio: pixel_ratio as f32, ..Default::default() },
+            map: mln_engine::map::MapOptions { size, pixel_ratio: pixel_ratio as f32, ..Default::default() },
             event_mask: EventMask::NONE
                 .with(EventType::MapStyleLoaded)
                 .with(EventType::MapLoadingFinished)
@@ -307,7 +308,7 @@ impl WebMap {
 
     /// Lets drags and zooms on the globe turn the bearing with the planet,
     /// so that a drag carries on over a pole
-    /// (`mln_map::Viewport::globe_free_bearing`). Off, as the map starts,
+    /// (`mln_engine::camera::Viewport::globe_free_bearing`). Off, as the map starts,
     /// they keep north up.
     pub fn set_globe_free_bearing(&self, free_bearing: bool) {
         let options = ViewportOptions { globe_free_bearing: Some(free_bearing), ..Default::default() };
@@ -724,7 +725,7 @@ const TERRAIN_SOURCE: &str = "terrain";
 /// Adds `terrain` to the style that `map` loaded, unless it has the source
 /// already: the source, the style's `terrain` on it, the hillshade, if any,
 /// and the sky, if any and the style has none. Fails while no style is loaded.
-fn add_terrain(map: &mut mln_map::Map, terrain: &Terrain) -> Result<(), Error> {
+fn add_terrain(map: &mut mln_engine::map::Map, terrain: &Terrain) -> Result<(), Error> {
     if map.source(TERRAIN_SOURCE).is_some() {
         return Ok(());
     }
@@ -751,7 +752,7 @@ fn add_terrain(map: &mut mln_map::Map, terrain: &Terrain) -> Result<(), Error> {
 /// back to the style document's own. Does nothing while no style is loaded:
 /// the map sets it once one loads. Fails for a type other than `mercator`,
 /// `vertical-perspective` and `globe`.
-fn set_projection(map: &mut mln_map::Map, projection: Option<&str>) -> Result<(), Error> {
+fn set_projection(map: &mut mln_engine::map::Map, projection: Option<&str>) -> Result<(), Error> {
     if !map.style_document_loaded() {
         return Ok(());
     }

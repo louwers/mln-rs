@@ -7,13 +7,13 @@ use std::num::NonZeroU32;
 
 use geometry::Point;
 use glam::Vec2;
-use mln_map_types::{TileProjector, View};
 use mln_style::types::{AlignmentType, IconTextFitType, TextRotationAlignmentType, TextWritingModeType};
 use mln_util::constants::ONE_EM;
 
 use super::context::translation;
 use super::{JointOpacityState, Placement, VariableOffset};
 use crate::buckets::symbol_bucket::{Buffer, SymbolBucket, SymbolBucketState};
+use crate::camera::{TileProjector, View};
 use crate::layer::render_layer::BucketPlacementData;
 use crate::layout::symbol_instance::{Justification, SymbolInstance, TextPart};
 use crate::layout::symbol_projection::{

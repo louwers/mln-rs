@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
 
-use mln_map::{CameraOptions, CameraUpdate};
+use mln_engine::camera::{CameraOptions, CameraUpdate};
 use mln_runtime::{ErrorKind, LogicalExtent, MapOptions, ResourceRequest, Runtime, RuntimeOptions};
 use mln_style::size::Size;
 use parking_lot::Mutex;
@@ -163,11 +163,13 @@ fn a_map_that_fails_to_build_fails_its_commands() {
 #[test]
 fn creation_rejects_options_that_no_map_can_have() {
     let runtime = runtime();
-    let empty =
-        MapOptions { map: mln_map::MapOptions { size: Size::new(0, 10), ..Default::default() }, ..Default::default() };
+    let empty = MapOptions {
+        map: mln_engine::map::MapOptions { size: Size::new(0, 10), ..Default::default() },
+        ..Default::default()
+    };
     assert_eq!(ErrorKind::InvalidArgument, runtime.create_map(empty).unwrap_err().kind);
     let scale = MapOptions {
-        map: mln_map::MapOptions { pixel_ratio: f32::INFINITY, ..Default::default() },
+        map: mln_engine::map::MapOptions { pixel_ratio: f32::INFINITY, ..Default::default() },
         ..Default::default()
     };
     assert_eq!(ErrorKind::InvalidArgument, runtime.create_map(scale).unwrap_err().kind);
@@ -400,8 +402,10 @@ fn a_resize_sets_the_scale_factor_and_rejects_one_that_isnt_positive() {
 fn only_a_continuous_map_repaints() {
     let runtime = runtime();
     let options = map_options();
-    let still =
-        MapOptions { map: mln_map::MapOptions { map_mode: mln_map::MapMode::Static, ..options.map }, ..options };
+    let still = MapOptions {
+        map: mln_engine::map::MapOptions { map_mode: mln_engine::map::MapMode::Static, ..options.map },
+        ..options
+    };
     let (map, created) = runtime.create_map(still).unwrap();
     created.wait().unwrap();
     assert_eq!(ErrorKind::InvalidState, map.request_repaint().unwrap_err().kind);

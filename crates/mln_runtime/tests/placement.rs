@@ -1,7 +1,8 @@
 // A frame whose symbols wait for a placement that isn't due yet asks for no
 // update, and the runtime repaints the map once the placement is due.
 
-use mln_map::{CameraOptions, CameraUpdate, RenderMode};
+use mln_engine::RenderMode;
+use mln_engine::camera::{CameraOptions, CameraUpdate};
 use mln_runtime::{AttachOptions, DemandMode, FrameDemand, FrameDisposition, FrameResult, RenderSession, RenderTarget};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::geo::LatLng;

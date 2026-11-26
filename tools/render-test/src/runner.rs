@@ -1,7 +1,7 @@
 // C++ `TestRunner::Impl` holds the `HeadlessFrontend`,
 // `FileSource` and `Map` of one map configuration, and the operations reach
 // them through `TestContext::getFrontend()` / `getMap()`. Here that pair is
-// the `TestRunnerImpl` trait: map.rs implements it over `mln_map::Map` +
+// the `TestRunnerImpl` trait: map.rs implements it over `mln_engine::map::Map` +
 // `mln_headless::HeadlessFrontend`, the tests over a mock map, and
 // `--self-check` replaces rendering with the test's expected image.
 

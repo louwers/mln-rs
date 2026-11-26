@@ -4,7 +4,6 @@ use std::fmt;
 use std::sync::Arc;
 
 use glam::DVec2;
-use mln_map_types::{Elevation, TileCoordinate};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::geo::LatLng;
 use mln_style::hash::HashMap;
@@ -12,6 +11,7 @@ use mln_style::tile_id::CanonicalTileID;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::dem::{self, DemCoords, DemUnpack};
 
+use crate::camera::{Elevation, TileCoordinate};
 use crate::render::terrain::cover::{TerrainCover, dem_contents, place_in, world_copy};
 use crate::tile_store::source_tiles::SourceTiles;
 

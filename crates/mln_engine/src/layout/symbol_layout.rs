@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use geometry::Point;
 use glam::Vec2;
-use mln_map_types::MapMode;
 use mln_style::constants::{EXTENT, TILE_SIZE_D};
 use mln_style::error::Error;
 use mln_style::expression::formatted::K_FORMATTED_SECTION_TEXT_COLOR;
@@ -55,6 +54,7 @@ use crate::layout::symbol_instance::{
     IconPart, Justification, LaidOutSymbol, ShapedTextOrientations, SymbolInstance, SymbolInstancePools, SymbolQuadSet,
     TextPart, TextRuns, WritingMode,
 };
+use crate::map::MapMode;
 use crate::placement::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature};
 use crate::placement::collision_index::OverlapMode;
 use crate::query::feature_index::{FeatureIndexBuilder, IndexedSubfeature};

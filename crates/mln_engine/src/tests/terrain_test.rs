@@ -5,10 +5,6 @@ use std::ops::Not;
 use std::sync::Arc;
 
 use glam::DVec2;
-use mln_map::transform::Transform;
-use mln_map_types::{
-    CameraOptions, ConstrainMode, Elevation, MapMode, TerrainOptions, TerrainSkirtLength, TileLodMode, ViewportMode,
-};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::bitmap::PremultipliedImage;
@@ -27,10 +23,14 @@ use mln_util::pool::TaskGroup;
 use parking_lot::Mutex;
 
 use crate::Registry;
+use crate::camera::transform::Transform;
+use crate::camera::{CameraOptions, ConstrainMode, Elevation, ViewportMode};
+use crate::map::{MapMode, TerrainOptions, TerrainSkirtLength};
 use crate::render::events::RendererEvent;
 use crate::render::terrain::{RenderTerrain, TerrainCover, TerrainElevation};
 use crate::render::update_parameters::UpdateParameters;
 use crate::source::render_source::RenderSource;
+use crate::tile_store::TileLodMode;
 use crate::tile_store::contents::Contents;
 use crate::tile_store::store::{StoreEvent, TileStore};
 use crate::tile_store::tile::Tile;
@@ -1256,11 +1256,11 @@ fn a_line_label_over_ridges_draws_its_glyphs_where_its_circles_collide() {
 /// placed collision circles.
 fn assert_glyphs_draw_in_circles(dem: fn() -> Response, pitch_with_map: bool) {
     use glam::Vec2;
-    use mln_map_types::TileProjector;
     use mln_style::constants::{EXTENT, TILE_SIZE_D};
     use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 
     use crate::buckets::symbol_bucket::{PlacedSymbol, PlacedSymbolPools, SymbolSizeBinder};
+    use crate::camera::TileProjector;
     use crate::layout::symbol_instance::WritingMode;
     use crate::layout::symbol_projection::{
         LabelPlaneProjector, LineLabelAlignment, SymbolHeights, reproject_line_labels,

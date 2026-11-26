@@ -1,8 +1,8 @@
 //! The fog over the terrain's surface, from the style's `sky`.
 
-use mln_map_types::View;
 use mln_style::color::Color;
 
+use crate::camera::View;
 use crate::render::sky::EvaluatedSky;
 use crate::render::terrain::ubo::TerrainFog;
 
@@ -45,13 +45,13 @@ fn linear(color: &Color, opacity: f32) -> [f32; 4] {
 
 #[cfg(test)]
 mod tests {
-    use mln_map_types::TransformState;
     use mln_style::geo::LatLng;
     use mln_style::property::evaluated::Evaluated;
     use mln_style::size::Size;
     use mln_style::types::ProjectionDefinition;
 
     use super::*;
+    use crate::camera::TransformState;
 
     /// A sky of a translucent orange fog that starts halfway through the
     /// depth, toward a blue horizon from 0.8.

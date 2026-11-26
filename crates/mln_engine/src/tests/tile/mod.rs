@@ -1,5 +1,5 @@
 // Ported gtests of test/tile/*.test.cpp that need the renderer's tiles or
-// mln_map's Transform (above mln_engine), one module per C++ file. The
+// the camera's transform, one module per C++ file. The
 // other test/tile files are ported elsewhere: geojson_tile (geojson_tile_test),
 // vector_tile (vector_tile_test, mln_tile), geometry_tile_data (mln_tile),
 // tile_cache (source_test), tile_id (mln_tile_id), tile_lod (render_test,
@@ -13,10 +13,10 @@ mod tile_coordinate;
 
 use std::sync::Arc;
 
-use mln_map_types::MapMode;
 use mln_tile_id::OverscaledTileID;
 use mln_util::pool::{Pool, TaskGroup};
 
+use crate::map::MapMode;
 use crate::tests::OneTile;
 use crate::tile_store::tile::TileKind;
 use crate::worker::tile_workers::TileWorkers;

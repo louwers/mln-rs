@@ -3,19 +3,19 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 
+use mln_engine::camera::{
+    BoundOptions, Camera, CameraCommandId, CameraDelta, CameraOptions, CameraUpdate, Elevation, FrameClock,
+    FreeCameraOptions, LogicalExtent, MapProjection, MapView, ProjectionMode, TransitionEnd, TransitionOutcome,
+};
+use mln_engine::map::{MapEvent, MapMode, MapSnapshot};
 use mln_engine::text::font_face_engine::FontFaceEngine;
 use mln_engine::{Custom, CustomLayerHost, Registry, UpdateReader};
-use mln_map::{
-    BoundOptions, Camera, CameraCommandId, CameraDelta, CameraOptions, CameraUpdate, Elevation, FrameClock,
-    FreeCameraOptions, LogicalExtent, MapEvent, MapMode, MapProjection, MapSnapshot, MapView, ProjectionMode,
-    StyleLoadError, TransitionEnd, TransitionOutcome,
-};
-use mln_style::Edit;
 use mln_style::error::{Error, ErrorKind};
 use mln_style::geo::LatLngBounds;
 use mln_style::hash::HashMap;
 use mln_style::size::Size;
 use mln_style::time::Instant;
+use mln_style::{Edit, StyleLoadError};
 use mln_text::GlyphCache;
 use mln_text::local_fonts::LocalGlyphs;
 use mln_util::event_queue::Waker;
@@ -40,7 +40,7 @@ pub struct MapId(pub u64);
 /// How to create a map.
 #[derive(Clone, Debug)]
 pub struct MapOptions {
-    pub map: mln_map::MapOptions,
+    pub map: mln_engine::map::MapOptions,
     /// The events that the map reports.
     pub event_mask: EventMask,
     /// JSON text of the font faces that the map falls back to for the text
@@ -74,7 +74,7 @@ pub struct MapOptions {
 impl Default for MapOptions {
     fn default() -> Self {
         MapOptions {
-            map: mln_map::MapOptions::default(),
+            map: mln_engine::map::MapOptions::default(),
             event_mask: EventMask::default(),
             fallback_font_faces: None,
             system_fonts: true,
@@ -99,7 +99,11 @@ pub struct Applied {
 }
 
 /// Moves `map`'s camera to the one that fits `area`.
-fn fit(map: &mut mln_map::Map, area: &CameraFitArea, update: CameraFitUpdate) -> Result<CameraCommandId, Error> {
+fn fit(
+    map: &mut mln_engine::map::Map,
+    area: &CameraFitArea,
+    update: CameraFitUpdate,
+) -> Result<CameraCommandId, Error> {
     let CameraFitUpdate { mode, fit, animation } = update;
     let camera = camera::camera_for(map, area, &fit)?;
     Ok(map.update_camera(&CameraUpdate { mode, camera, animation, ..CameraUpdate::default() }))
@@ -142,7 +146,7 @@ pub(crate) struct Published {
 /// The map's state as of a flush.
 struct PublishedState {
     snapshot: MapSnapshot,
-    /// The ground the map draws (`mln_map::Map::ground`).
+    /// The ground the map draws (`mln_engine::map::Map::ground`).
     ground: Option<Arc<dyn Elevation>>,
 }
 
@@ -464,12 +468,12 @@ impl Map {
 
     /// A projection of `view`, or of the map's view as of
     /// [`snapshot`](Self::snapshot) for `None`, on the ground the map drew
-    /// then (`mln_map::Map::ground`): it converts as the map does, over
+    /// then (`mln_engine::map::Map::ground`): it converts as the map does, over
     /// terrain on the ground the renderer drew, else on the flat map. It is
     /// the caller's, and doesn't follow the map.
     ///
     /// Fails as [`snapshot`](Self::snapshot) does, and for `view` as
-    /// [`MapView::to_state`](mln_map::MapView::to_state).
+    /// [`MapView::to_state`](mln_engine::camera::MapView::to_state).
     pub fn projection(&self, view: Option<&MapView>) -> Result<MapProjection, Error> {
         let (snapshot_view, ground) = self.published(|state| (state.snapshot.view, state.ground.clone()))?;
         Ok(MapProjection::from_view(view.unwrap_or(&snapshot_view))?.with_ground(ground))
@@ -506,7 +510,7 @@ impl Map {
     /// A command that changes the map.
     pub(crate) fn command(
         &self,
-        apply: impl FnOnce(&mut mln_map::Map) -> Result<(), Error> + Send + 'static,
+        apply: impl FnOnce(&mut mln_engine::map::Map) -> Result<(), Error> + Send + 'static,
     ) -> Result<Completion<Applied>, Error> {
         self.send(move |entry, _| apply(&mut entry.core), |(), entry| entry.applied())
     }
@@ -514,7 +518,7 @@ impl Map {
     /// A command that reads the map.
     pub(crate) fn query<T: Send + 'static>(
         &self,
-        read: impl FnOnce(&mut mln_map::Map) -> Result<T, Error> + Send + 'static,
+        read: impl FnOnce(&mut mln_engine::map::Map) -> Result<T, Error> + Send + 'static,
     ) -> Result<Completion<T>, Error> {
         self.send(move |entry, _| read(&mut entry.core), |value, _| value)
     }
@@ -525,7 +529,7 @@ impl Map {
     /// before the completion.
     pub fn with_core<R: Send + 'static>(
         &self,
-        f: impl FnOnce(&mut mln_map::Map) -> R + Send + 'static,
+        f: impl FnOnce(&mut mln_engine::map::Map) -> R + Send + 'static,
     ) -> Result<Completion<R>, Error> {
         self.query(move |map| Ok(f(map)))
     }
@@ -649,7 +653,7 @@ impl Map {
     /// began. Completes with [`ErrorKind::InvalidState`](mln_style::error::ErrorKind)
     /// when no group is open.
     pub fn end_command_group(&self) -> Result<Completion<Applied>, Error> {
-        self.command(mln_map::Map::end_command_group)
+        self.command(mln_engine::map::Map::end_command_group)
     }
 
     /// Begins a command group that ends when the guard drops, or with
@@ -1122,7 +1126,7 @@ impl Map {
     }
 
     /// Adds a source to the style from its JSON. See
-    /// `mln_map::Map::add_source_json` for the errors.
+    /// `mln_engine::map::Map::add_source_json` for the errors.
     pub fn add_style_source_json(
         &self,
         source_id: impl Into<String>,
@@ -1272,7 +1276,7 @@ impl Map {
     /// whose end nobody waits for.
     fn camera_command(
         &self,
-        apply: impl FnOnce(&mut mln_map::Map) -> Result<CameraCommandId, Error> + Send + 'static,
+        apply: impl FnOnce(&mut mln_engine::map::Map) -> Result<CameraCommandId, Error> + Send + 'static,
     ) -> Result<Completion<Applied>, Error> {
         self.send_camera(apply, None)
     }
@@ -1283,7 +1287,7 @@ impl Map {
     /// [`ErrorKind::Cancelled`](mln_style::error::ErrorKind) when the send fails.
     fn camera_command_then(
         &self,
-        apply: impl FnOnce(&mut mln_map::Map) -> Result<CameraCommandId, Error> + Send + 'static,
+        apply: impl FnOnce(&mut mln_engine::map::Map) -> Result<CameraCommandId, Error> + Send + 'static,
         on_end: impl FnOnce(Result<TransitionEnd, Error>) + Send + 'static,
     ) -> Result<Completion<Applied>, Error> {
         let (ended, end) = self.shared.runtime.completion();
@@ -1295,7 +1299,7 @@ impl Map {
     /// failure ends it as cancelled.
     fn send_camera(
         &self,
-        apply: impl FnOnce(&mut mln_map::Map) -> Result<CameraCommandId, Error> + Send + 'static,
+        apply: impl FnOnce(&mut mln_engine::map::Map) -> Result<CameraCommandId, Error> + Send + 'static,
         end: Option<Resolver<TransitionEnd>>,
     ) -> Result<Completion<Applied>, Error> {
         self.send(
@@ -1560,7 +1564,7 @@ fn still_image_error(error: Error) -> Error {
 
 /// A map on the runtime's thread.
 pub(crate) struct MapEntry {
-    pub(crate) core: mln_map::Map,
+    pub(crate) core: mln_engine::map::Map,
     published: Arc<Published>,
     mask: EventMask,
     /// The sequence number of the last command that ran.
@@ -1583,7 +1587,7 @@ pub(crate) struct MapEntry {
     /// The GeoJSON data that commands set and that is still being built.
     pub(crate) geojson_updates: GeoJsonUpdates,
     /// The repaint posted for when the map changes next on its own
-    /// ([`mln_map::Map::repaint_at`]).
+    /// ([`mln_engine::map::Map::repaint_at`]).
     repaint: Option<(Instant, TimedTask)>,
 }
 
@@ -1642,10 +1646,11 @@ pub(crate) fn create(
     outbox: &mut Outbox,
 ) {
     let registry = Arc::clone(core.registry.style());
-    let mut map = match mln_map::Map::with_registry(Arc::clone(core.loader()), options.map, registry, &core.pool) {
-        Ok(map) => map,
-        Err(error) => return outbox.resolve(resolver, Err(error)),
-    };
+    let mut map =
+        match mln_engine::map::Map::with_registry(Arc::clone(core.loader()), options.map, registry, &core.pool) {
+            Ok(map) => map,
+            Err(error) => return outbox.resolve(resolver, Err(error)),
+        };
     if let Some(json) = &options.fallback_font_faces {
         if let Err(error) = map.set_fallback_font_faces(json) {
             return outbox.resolve(resolver, Err(error));

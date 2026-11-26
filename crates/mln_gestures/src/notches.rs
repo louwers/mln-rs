@@ -2,7 +2,7 @@
 //! feedback, from MapLibre Compose's `BearingHapticDetector`, for every
 //! axis.
 
-use mln_map::CameraOptions;
+use mln_engine::camera::CameraOptions;
 
 use crate::input::GestureEvent;
 use crate::options::{Axis, GestureOptions, Notch};

@@ -21,3 +21,4 @@ pub(crate) mod update_renderables;
 pub(crate) mod update_tile_masks;
 
 pub use tile::TileOperation;
+pub use tile_lod::TileLodMode;

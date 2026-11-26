@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use feature::Feature;
 use geo_types::Point;
-use mln_map_types::MapMode;
 use mln_style::error::Error;
 use mln_style::layer::{Layer, LayerStyle};
 use mln_style::layers::Circle;
@@ -14,6 +13,7 @@ use mln_util::pool::TaskGroup;
 
 use crate::Registry;
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
+use crate::map::MapMode;
 use crate::tests::{OneTile, style};
 use crate::tile_store::loading::DataOrigin;
 use crate::tile_store::tile::TileKind;

@@ -6,7 +6,8 @@
 // gives it too. A backend that this build or machine lacks skips its cases.
 
 use glam::{DMat4, DVec4};
-use mln_map::{CameraOptions, CameraUpdate, MapMode};
+use mln_engine::camera::{CameraOptions, CameraUpdate};
+use mln_engine::map::MapMode;
 use mln_runtime::{
     AcquiredFrame, AttachOptions, ClipDepthRange, DemandMode, Device, DeviceOptions, ErrorKind, FrameDemand,
     FrameDisposition, FrameProjection, FrameResult, Map, MapOptions, RenderSession, RenderTarget, Runtime, SyncKind,
@@ -62,7 +63,7 @@ fn map_of(runtime: &Runtime, terrain: bool) -> Map {
         serve_level_dem(runtime);
     }
     let options = MapOptions {
-        map: mln_map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
+        map: mln_engine::map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();
@@ -100,7 +101,7 @@ fn loaded_frame(session: &RenderSession) -> (AcquiredFrame, FrameResult) {
         }
         let Some(frame) = session.acquire_frame().unwrap() else { return false };
         let result = *frame.result();
-        if result.disposition == FrameDisposition::Rendered && result.mode == mln_map::RenderMode::Full {
+        if result.disposition == FrameDisposition::Rendered && result.mode == mln_engine::RenderMode::Full {
             loaded = Some((frame, result));
             return true;
         }

@@ -1,12 +1,12 @@
 //! The events of a runtime and its maps as the C structs that an event
 //! handler receives: a batch that owns its text and lends views of it.
 
-use ::mln_map::{
-    CameraChange, CameraChangeMode, CameraChangeSource, MapEvent, RenderMode, StyleLoadError, TileOperation,
-};
+use ::mln_engine::map::{CameraChange, CameraChangeMode, CameraChangeSource, MapEvent};
+use ::mln_engine::{RenderMode, TileOperation};
 use ::mln_runtime::{EventSource, MapId, RuntimeEvent, RuntimeEventKind};
 use mln_storage::offline::{OfflineRegionDownloadState, OfflineRegionStatus};
 use mln_storage::response::Reason;
+use mln_style::StyleLoadError;
 use mln_style::sprite::Sprite;
 use mln_text::glyph::{GlyphIDType, GlyphRange};
 
@@ -313,7 +313,8 @@ pub(crate) fn offline_status(status: &OfflineRegionStatus) -> mln_offline_region
 mod tests {
     use std::sync::Arc;
 
-    use ::mln_map::{RenderFrameStatus, RenderingStats};
+    use ::mln_engine::RenderingStats;
+    use ::mln_engine::map::RenderFrameStatus;
     use ::mln_style::tile_id::CanonicalTileID;
     use ::mln_tile_id::OverscaledTileID;
     use mln_storage::ResourceError;

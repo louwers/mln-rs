@@ -2,7 +2,6 @@
 //! elevation ranges that cull them and every source's tiles while terrain
 //! draws.
 
-use mln_map_types::{TileCoordinate, View};
 use mln_style::constants;
 use mln_style::geo::WrapMode;
 use mln_style::hash::{HashMap, HashSet};
@@ -12,6 +11,7 @@ use mln_style::tileset::Tileset;
 use mln_tile_id::OverscaledTileID;
 use mln_util::dem::DemCoords;
 
+use crate::camera::{TileCoordinate, View};
 use crate::geometry::dem_data::DEMData;
 use crate::tile_store::contents::Contents;
 use crate::tile_store::dem::DemContents;

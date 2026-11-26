@@ -12,7 +12,6 @@ use std::sync::Arc;
 use glam::DMat4;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_map_types::{ProjectionData, View};
 use mln_style::color::Color;
 use mln_style::expression::Dependency;
 use mln_style::layer::{ErasedLayerStyle, LayerStyle, PaintSet, SourceKind, StyleLayerType};
@@ -23,6 +22,7 @@ use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use smallvec::SmallVec;
 
 use crate::buckets::symbol_bucket::SymbolBucket;
+use crate::camera::{ProjectionData, View};
 use crate::draw::context::Context;
 use crate::draw::tile_render_data::TileAtlasTextures;
 use crate::layer::bucket::Bucket;

@@ -12,8 +12,6 @@ use std::time::Duration;
 use mln_gfx::RendererBackend as _;
 use mln_gfx::frame::FrameTarget;
 use mln_gfx::offscreen_target::OffscreenTarget;
-use mln_map::transform::Transform;
-use mln_map_types::{CameraOptions, ConstrainMode, Elevation, MapMode, TerrainOptions, TileLodMode, ViewportMode};
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::feature::FeatureState;
@@ -27,9 +25,13 @@ use mln_tile_id::OverscaledTileID;
 use parking_lot::Mutex;
 
 use crate::Registry;
+use crate::camera::transform::Transform;
+use crate::camera::{CameraOptions, ConstrainMode, Elevation, ViewportMode};
+use crate::map::{MapMode, TerrainOptions};
 use crate::render::events::{RenderMode, RendererEvent, RendererEvents};
 use crate::render::renderer::Renderer;
 use crate::render::update_parameters::UpdateParameters;
+use crate::tile_store::TileLodMode;
 use crate::tile_store::tile::TileOperation;
 
 const SIDE: u32 = 256;

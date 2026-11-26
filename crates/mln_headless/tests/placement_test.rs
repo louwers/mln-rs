@@ -9,8 +9,10 @@ use std::time::{Duration, Instant};
 
 use feature::Value;
 use geojson::GeoJson;
+use mln_engine::RenderMode;
+use mln_engine::camera::CameraOptions;
+use mln_engine::map::{Map, MapMode, MapOptions, RenderFrameStatus};
 use mln_headless::HeadlessFrontend;
-use mln_map::{CameraOptions, Map, MapMode, MapOptions, RenderFrameStatus, RenderMode};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::Edit;
 use mln_style::bitmap::PremultipliedImage;

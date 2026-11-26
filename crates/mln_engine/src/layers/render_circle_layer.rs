@@ -7,7 +7,6 @@ use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
-use mln_map_types::{TileCoordinate, TileProjector};
 use mln_style::color::Color;
 use mln_style::error::Error;
 use mln_style::expression::EvaluationContext;
@@ -19,6 +18,7 @@ use mln_tile_id::OverscaledTileID;
 
 use super::{cast_matrix, refresh_paint_attributes};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
+use crate::camera::{TileCoordinate, TileProjector};
 use crate::draw::objects::{DrawGeometry, DrawObjects, Textures};
 use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
@@ -100,7 +100,7 @@ fn ground_height(ground: Option<TileGround<'_>>, p: mln_style::feature::Geometry
 fn plane_geometry(
     screen: &[mln_util::geo::ScreenCoordinate],
     elevation: f64,
-    view: &mln_map_types::View,
+    view: &crate::camera::View,
     projector: &TileProjector<'_>,
 ) -> mln_style::feature::GeometryCoordinates {
     let height = f64::from(view.size().height);

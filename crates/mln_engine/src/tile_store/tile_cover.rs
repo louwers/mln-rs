@@ -11,7 +11,6 @@
 use geo_types::{Coord, Geometry, LineString, Polygon};
 use geometry::Point;
 use glam::DVec3;
-use mln_map_types::{TileCoordinate, TileLodMode, View, ViewportMode};
 use mln_style::constants;
 use mln_style::error::Error;
 use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
@@ -23,7 +22,9 @@ use mln_util::bounding_volumes::{AABB, Frustum, IntersectionResult};
 use mln_util::geo::ScreenCoordinate;
 use mln_util::projection::Projection;
 
+use crate::camera::{TileCoordinate, View, ViewportMode};
 use crate::render::terrain::ElevationRanges;
+use crate::tile_store::TileLodMode;
 use crate::tile_store::tile_cover_impl::Impl;
 use crate::tile_store::tile_lod::{TileZoomFunction, elevation_for_tile_culling};
 
@@ -281,7 +282,6 @@ mod globe {
 
     use geometry::Point;
     use glam::{DVec3, DVec4, Vec4Swizzles};
-    use mln_map_types::VerticalPerspectiveProjection;
     use mln_style::constants;
     use mln_style::range::Range;
     use mln_style::tile_id::CanonicalTileID;
@@ -290,6 +290,7 @@ mod globe {
     use mln_util::projection::Projection;
 
     use super::TileCoverParameters;
+    use crate::camera::VerticalPerspectiveProjection;
     use crate::render::terrain::ElevationRanges;
     use crate::tile_store::tile_lod::{TileZoomFunction, elevation_for_tile_culling};
 

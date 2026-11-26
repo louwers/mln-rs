@@ -4,8 +4,8 @@
 
 use std::sync::Arc;
 
+use mln_engine::map::{Map, MapMode, MapOptions};
 use mln_headless::HeadlessFrontend;
-use mln_map::{Map, MapMode, MapOptions};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
 use mln_style::bitmap::PremultipliedImage;
@@ -133,7 +133,7 @@ fn still(
     }
     let icon = crate::gtest_api::style_image(LIME_ICON, icon, 1.0);
     map.edit_style(|style| style.apply(mln_style::Edit::AddImage(icon))).expect("the icon");
-    let camera = mln_map::style_camera(map.style());
+    let camera = mln_engine::map::style_camera(map.style());
     map.jump_to(&camera);
     let image = frontend.render(&mut map).expect("the still image").image;
     Some((image, frontend))

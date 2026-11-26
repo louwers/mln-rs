@@ -13,8 +13,6 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
-use mln_map::transform::Transform;
-use mln_map_types::{CameraOptions, ConstrainMode, MapMode, TileLodMode, ViewportMode};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::Source;
@@ -32,8 +30,12 @@ use mln_util::queue::Queue;
 use parking_lot::Mutex;
 
 use crate::Registry;
+use crate::camera::transform::Transform;
+use crate::camera::{CameraOptions, ConstrainMode, ViewportMode};
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
+use crate::map::MapMode;
 use crate::source::render_source::RenderSource;
+use crate::tile_store::TileLodMode;
 use crate::tile_store::source_tiles::SourceTiles;
 use crate::tile_store::store::TileStore;
 use crate::tile_store::tile_parameters::TileParameters;

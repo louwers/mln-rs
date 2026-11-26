@@ -1,6 +1,5 @@
 use geometry::Point;
 use glam::{DMat4, DVec4, Vec2};
-use mln_map_types::{MapMode, ProjectedTilePoint, TileProjector, View};
 use mln_style::constants::EXTENT;
 use mln_style::feature::GeometryCoordinates;
 use mln_style::hash::{HashMap, HashSet};
@@ -10,9 +9,11 @@ use mln_util::geo::ScreenLineString;
 use mln_util::intersection_tests::polygon_intersects_polygon;
 
 use crate::buckets::symbol_bucket::{PlacedSymbol, PlacedSymbolPools};
+use crate::camera::{ProjectedTilePoint, TileProjector, View};
 use crate::layout::symbol_projection::{
     LabelPlaneProjector, LineLabel, LinePlacer, PlacedGlyph, SymbolHeights, TileDistance, tile_skew_vectors,
 };
+use crate::map::MapMode;
 use crate::placement::collision_feature::{CollisionBox, CollisionFeature};
 use crate::placement::collision_grid::{Aabb, Grid, Shape};
 use crate::query::feature_index::IndexedSubfeature;
@@ -797,7 +798,7 @@ mod tests {
     }
 
     fn collision_index() -> CollisionIndex {
-        let mut state = mln_map_types::TransformState::default();
+        let mut state = crate::camera::TransformState::default();
         state.set_size(Size::new(512, 512));
         CollisionIndex::new(state.view(), MapMode::Static)
     }

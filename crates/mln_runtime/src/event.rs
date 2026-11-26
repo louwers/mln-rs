@@ -3,7 +3,7 @@
 use std::ops::{BitOr, BitOrAssign};
 use std::sync::Arc;
 
-use mln_map::MapEvent;
+use mln_engine::map::MapEvent;
 use mln_storage::ResourceError;
 use mln_storage::offline::OfflineRegionStatus;
 

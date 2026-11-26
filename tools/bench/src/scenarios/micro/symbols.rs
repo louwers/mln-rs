@@ -14,7 +14,9 @@ use std::sync::Arc;
 
 use mln_engine::UpdateParameters;
 use mln_engine::bench::{LaidOut, SymbolIndex, SymbolView};
-use mln_map::{MapMode, TileLodMode, TransformState};
+use mln_engine::camera::TransformState;
+use mln_engine::map::MapMode;
+use mln_engine::tile_store::TileLodMode;
 use mln_style::Style;
 use mln_style::size::Size;
 use mln_style::time::Instant;
@@ -164,7 +166,7 @@ fn update(style: &Style, state: &TransformState) -> UpdateParameters {
         update_id: 0,
         cross_source_collisions: true,
         fast_pfor_enabled: false,
-        terrain: mln_map::TerrainOptions::default(),
+        terrain: mln_engine::map::TerrainOptions::default(),
         elevation: None,
         tile_lod_min_radius: 3.0,
         tile_lod_scale: 1.0,

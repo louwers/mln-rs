@@ -3,8 +3,9 @@
 
 use std::sync::Arc;
 
+use mln_engine::camera::CameraOptions;
+use mln_engine::map::{Map, MapMode, MapOptions};
 use mln_headless::HeadlessFrontend;
-use mln_map::{CameraOptions, Map, MapMode, MapOptions};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
 use mln_style::bitmap::PremultipliedImage;

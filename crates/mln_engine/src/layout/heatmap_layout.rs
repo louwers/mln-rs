@@ -4,7 +4,6 @@
 
 use std::sync::Arc;
 
-use mln_map_types::MapMode;
 use mln_style::error::Error;
 use mln_style::expression::EvaluationContext;
 use mln_style::feature::GeometryTileFeature;
@@ -20,6 +19,7 @@ use crate::layer::layer_type::EvaluatedLayer;
 use crate::layer::layout::{BuildParams, Layout, SourceLayer, layers_by_id};
 use crate::layer::tile_layout::Resolved;
 use crate::layout::pattern_layout::PatternLayerMap;
+use crate::map::MapMode;
 use crate::query::feature_index::FeatureIndexBuilder;
 use crate::util::tessellator::Tessellator;
 

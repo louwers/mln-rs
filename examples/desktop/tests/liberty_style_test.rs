@@ -19,7 +19,7 @@ const LIBERTY: &str = "https://tiles.openfreemap.org/styles/liberty";
 fn map() -> (Runtime, mln_runtime::Map) {
     let runtime = Runtime::new(&RuntimeOptions::default()).unwrap();
     let options = MapOptions {
-        map: mln_map::MapOptions { size: Size::new(256, 256), pixel_ratio: 1.0, ..Default::default() },
+        map: mln_engine::map::MapOptions { size: Size::new(256, 256), pixel_ratio: 1.0, ..Default::default() },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();

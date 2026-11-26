@@ -12,7 +12,7 @@
 //! or on the host's graphics thread through its [`DriverWork`].
 //!
 //! The synchronous, single-thread core that these handles drive is
-//! `mln_map`'s; [`Map::with_core`] runs a closure on it.
+//! `mln_engine::map`'s; [`Map::with_core`] runs a closure on it.
 //!
 //! Sessions render with the backends of the crate's features: `metal`,
 //! `vulkan`, `d3d12` and `gl`, on by default, and `webgpu`, each where its
@@ -73,9 +73,9 @@ pub use completion::Completion;
 pub use event::{EventHandler, EventMask, EventSource, EventType, RuntimeEvent, RuntimeEventKind};
 pub use feature_state::{FeatureState, FeatureStateSelector};
 pub use map::{Applied, CameraQuery, CommandGroup, Map, MapId, MapOptions};
+pub use mln_engine::camera::{ClipDepthRange, FrameProjection, LogicalExtent};
+pub use mln_engine::map::MapSnapshot;
 pub use mln_engine::query::{RenderedQueryOptions, SourceQueryOptions};
-pub use mln_engine::{ClipDepthRange, FrameProjection};
-pub use mln_map::{LogicalExtent, MapSnapshot};
 pub use mln_style::error::{Error, ErrorKind};
 pub use offline::Offline;
 pub use render::{

@@ -38,11 +38,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use mln_engine::RenderMode;
+use mln_engine::camera::{AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase};
+use mln_engine::map::MapEvent;
 use mln_frame_pacer::{FramePacer, RefreshWaiter};
 use mln_gestures::{GestureEvent, GestureRecognizer, Input, Modes, NextTick, PinchPhase, PointerKind};
-use mln_map::{
-    AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, MapEvent, RenderMode,
-};
 use mln_runtime::{
     CacheDatabaseOperation, Completion, DemandMode, Device, ErrorKind, EventMask, EventType, FrameDemand,
     FrameDisposition, LogicalExtent, Map, MapOptions, Runtime, RuntimeEventKind, RuntimeOptions, ViewportOptions,
@@ -109,7 +109,7 @@ pub(crate) struct StyleInfo {
 
 impl StyleInfo {
     /// Reads the style of `map`, on the runtime's thread.
-    fn read(map: &mut mln_map::Map) -> StyleInfo {
+    fn read(map: &mut mln_engine::map::Map) -> StyleInfo {
         let style = map.style();
         let attributions = style
             .get_sources()
@@ -165,7 +165,7 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
 
     let map_size = logical_size(size, pixel_ratio);
     let options = MapOptions {
-        map: mln_map::MapOptions { size: map_size, pixel_ratio: pixel_ratio as f32, ..Default::default() },
+        map: mln_engine::map::MapOptions { size: map_size, pixel_ratio: pixel_ratio as f32, ..Default::default() },
         event_mask: EventMask::NONE | EventType::MapStyleLoaded | EventType::MapIdle | EventType::MapSourceChanged,
         system_fonts: !args.no_system_fonts && benchmark.is_none(),
         ..MapOptions::default()

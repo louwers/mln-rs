@@ -10,7 +10,6 @@
 use std::marker::PhantomData;
 use std::sync::{Arc, Weak};
 
-use mln_map_types::MapMode;
 use mln_storage::FileSource;
 use mln_style::error::Error;
 use mln_style::geo::LatLngBounds;
@@ -24,6 +23,7 @@ use mln_style::tileset::{RasterEncoding, Tileset, VectorEncoding};
 use mln_style::{Source, constants};
 use mln_util::pool::{Pool, TaskGroup};
 
+use crate::map::MapMode;
 use crate::query::FeatureExtensionValue;
 use crate::source::render_image_source::RenderImageSource;
 use crate::source::render_source::RenderSource;

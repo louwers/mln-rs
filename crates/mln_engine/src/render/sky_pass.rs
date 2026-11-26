@@ -6,12 +6,12 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
-use mln_map_types::View;
 use mln_style::color::Color;
 use mln_style::geo::WrapMode;
 use mln_style::types::LightAnchorType;
 use mln_util::identity::SimpleIdentity;
 
+use crate::camera::View;
 use crate::draw::context::Context;
 use crate::draw::indexes::DrawIndexes;
 use crate::draw::objects::{DrawGeometry, DrawObjects, Textures, raw_vertices};
@@ -177,12 +177,12 @@ impl SkyPass {
 
 #[cfg(test)]
 mod tests {
-    use mln_map_types::{NorthOrientation, TransformState};
     use mln_style::geo::LatLng;
     use mln_style::property::evaluated::Evaluated;
     use mln_style::types::Position;
 
     use super::*;
+    use crate::camera::{NorthOrientation, TransformState};
 
     fn light(anchor: LightAnchorType, position: [f32; 3]) -> EvaluatedLight {
         EvaluatedLight {

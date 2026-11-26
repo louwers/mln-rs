@@ -1,10 +1,13 @@
 use std::sync::Arc;
 
-use mln_map_types::{Elevation, MapMode, TerrainOptions, TileLodMode, View};
 use mln_style::Style;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::time::Instant;
 use mln_text::glyph::FontFaces;
+
+use crate::camera::{Elevation, View};
+use crate::map::{MapMode, TerrainOptions};
+use crate::tile_store::TileLodMode;
 
 #[derive(Clone)]
 pub struct UpdateParameters {

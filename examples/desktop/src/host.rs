@@ -27,9 +27,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use mln_engine::map::MapEvent;
 use mln_frame_pacer::FramePacer;
 use mln_gestures::{Input, Modes, PinchPhase, PointerKind};
-use mln_map::MapEvent;
 use mln_style::error::Error;
 use mln_util::geo::ScreenCoordinate;
 use parking_lot::{Condvar, Mutex};

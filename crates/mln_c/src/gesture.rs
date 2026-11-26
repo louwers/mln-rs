@@ -7,7 +7,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use ::mln_map::{MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumSnap};
+use ::mln_engine::camera::{MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumSnap};
 use mln_gestures::{
     AxisOptions, GestureEvent, GestureOptions, GestureRecognizer, Input, Modes, NextTick, Notch, PinchPhase,
     PointerKind,

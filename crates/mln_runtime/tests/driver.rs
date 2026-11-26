@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 
-use mln_map::MapMode;
+use mln_engine::map::MapMode;
 use mln_runtime::{
     AttachOptions, BackendType, Completion, DemandMode, Device, DeviceOptions, Driver, DriverWork, ErrorKind,
     FrameDemand, FrameDisposition, FrameResult, LogicalExtent, Map, MapOptions, RenderSession, RenderSessionState,
@@ -28,7 +28,11 @@ fn style(color: &str) -> String {
 /// A continuous map with a style of one color.
 fn map_of(runtime: &Runtime, color: &str) -> Map {
     let options = MapOptions {
-        map: mln_map::MapOptions { size: Size::new(256, 256), map_mode: MapMode::Continuous, ..Default::default() },
+        map: mln_engine::map::MapOptions {
+            size: Size::new(256, 256),
+            map_mode: MapMode::Continuous,
+            ..Default::default()
+        },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();
@@ -102,7 +106,7 @@ fn center_pixel(driver: &DriverWork, session: &RenderSession) -> [u8; 4] {
 fn a_demand_made_while_attaching_fails_when_the_map_cant_bind_the_session() {
     let runtime = runtime();
     let options = MapOptions {
-        map: mln_map::MapOptions { size: Size::new(256, 256), ..Default::default() },
+        map: mln_engine::map::MapOptions { size: Size::new(256, 256), ..Default::default() },
         fallback_font_faces: Some("not font faces".to_owned()),
         ..Default::default()
     };
@@ -754,7 +758,7 @@ fn each_still_image_ends_its_own_demand() {
         let _ = request.respond(response);
     }));
     let options = MapOptions {
-        map: mln_map::MapOptions { size: SIZE, map_mode: MapMode::Static, ..Default::default() },
+        map: mln_engine::map::MapOptions { size: SIZE, map_mode: MapMode::Static, ..Default::default() },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();

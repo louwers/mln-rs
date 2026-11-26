@@ -53,7 +53,7 @@ fn render(session: &RenderSession) -> mln_runtime::FrameResult {
 fn render_loaded(session: &RenderSession) {
     let loaded = eventually(|| {
         let frame = render(session);
-        frame.mode == mln_map::RenderMode::Full && !frame.needs_repaint
+        frame.mode == mln_engine::RenderMode::Full && !frame.needs_repaint
     });
     assert!(loaded, "the map never loaded");
 }

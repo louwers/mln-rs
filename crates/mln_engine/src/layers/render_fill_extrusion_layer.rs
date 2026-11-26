@@ -38,7 +38,6 @@ use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
-use mln_map_types::View;
 use mln_style::constants::TILE_SIZE_D;
 use mln_style::error::Error;
 use mln_style::layer::LayerStyle;
@@ -53,6 +52,7 @@ use crate::buckets::fill_extrusion_bucket::{
     FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutSpec, FillExtrusionLayoutVertex,
     FillExtrusionStaticVertex, FillExtrusionWallVertex, wall_quad_paint,
 };
+use crate::camera::View;
 use crate::draw::atlas_binding::AtlasBinding;
 use crate::draw::context::Context;
 use crate::draw::indexes::{Indexes, SharedIndexes};
@@ -861,8 +861,8 @@ impl RenderFillExtrusionLayer {
 
         let int_zoom = state.integer_zoom();
         let tile_ratio = 1.0f32 / tile_id.pixels_to_tile_units(1.0, f32::from(int_zoom));
-        let zoom_scale = mln_map_types::zoom_scale(f64::from(tile_id.canonical.z));
-        let nearest_zoom_scale = mln_map_types::zoom_scale(f64::from(int_zoom) - f64::from(tile_id.canonical.z));
+        let zoom_scale = crate::camera::zoom_scale(f64::from(tile_id.canonical.z));
+        let nearest_zoom_scale = crate::camera::zoom_scale(f64::from(int_zoom) - f64::from(tile_id.canonical.z));
         let tile_size_at_nearest_zoom = (TILE_SIZE_D * nearest_zoom_scale).floor();
         let pixel_x = (tile_size_at_nearest_zoom
             * (f64::from(tile_id.canonical.x) + f64::from(tile_id.wrap) * zoom_scale)) as i32;

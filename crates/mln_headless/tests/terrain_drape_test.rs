@@ -4,8 +4,9 @@
 
 use std::sync::Arc;
 
+use mln_engine::camera::{BoundOptions, ViewportMode};
+use mln_engine::map::{Map, MapMode, MapOptions};
 use mln_headless::HeadlessFrontend;
-use mln_map::{BoundOptions, Map, MapMode, MapOptions, ViewportMode};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
 use mln_style::bitmap::PremultipliedImage;
@@ -143,7 +144,7 @@ fn render(style: &str, viewport_mode: ViewportMode) -> Option<(PremultipliedImag
     frontend.attach(&mut map);
     map.set_bounds(&BoundOptions { max_pitch: Some(85.0), ..Default::default() }).unwrap();
     map.load_style_json(style);
-    let camera = mln_map::style_camera(map.style());
+    let camera = mln_engine::map::style_camera(map.style());
     map.jump_to(&camera);
     let result = frontend.render(&mut map).expect("the still image");
     Some((result.image, result.stats.mem_textures))

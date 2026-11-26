@@ -5,8 +5,6 @@
 use std::sync::Arc;
 
 use geometry::Point;
-use mln_map_types::TileCoordinate;
-use mln_map_types::tile_coordinate::TileCoordinatePoint;
 use mln_style::feature::GeometryCoordinates;
 use mln_style::geo::LatLngBounds;
 use mln_style::range::Range;
@@ -17,6 +15,8 @@ use mln_style::{Source, constants};
 use mln_tile_id::UnwrappedTileID;
 
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
+use crate::camera::TileCoordinate;
+use crate::camera::tile_coordinate::TileCoordinatePoint;
 use crate::draw::context::Context;
 use crate::draw::segment::SegmentBase;
 use crate::layer::bucket::UploadNeeds;

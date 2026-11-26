@@ -4,7 +4,7 @@
 
 #![expect(unsafe_code, reason = "the tests make and wrap the host's devices and targets through each backend's API")]
 
-use mln_map::MapMode;
+use mln_engine::map::MapMode;
 use mln_runtime::{
     Adapter, AttachOptions, BackendType, BorrowedRing, ConsumerSync, DemandMode, Device, DeviceOptions, ErrorKind,
     FrameDemand, FrameDisposition, GlApi, GpuSync, Map, MapOptions, RenderSession, RenderTarget, Runtime, SyncKind,
@@ -26,7 +26,7 @@ fn style(color: &str) -> String {
 
 fn map_of(runtime: &Runtime, color: &str) -> Map {
     let options = MapOptions {
-        map: mln_map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
+        map: mln_engine::map::MapOptions { size: SIZE, map_mode: MapMode::Continuous, ..Default::default() },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();
@@ -1835,7 +1835,7 @@ fn a_still_image_renders_into_a_new_ring_after_a_release() {
     let Some((device, textures)) = webgpu_ring(1) else { return };
     let runtime = runtime();
     let options = MapOptions {
-        map: mln_map::MapOptions { size: SIZE, map_mode: MapMode::Static, ..Default::default() },
+        map: mln_engine::map::MapOptions { size: SIZE, map_mode: MapMode::Static, ..Default::default() },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();

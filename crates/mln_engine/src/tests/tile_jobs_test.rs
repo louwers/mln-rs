@@ -11,7 +11,6 @@ use std::sync::Arc;
 
 use feature::{Feature, PropertyMap};
 use geo_types::{Geometry, Point};
-use mln_map_types::MapMode;
 use mln_storage::FileSource;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::bitmap::PremultipliedImage;
@@ -34,6 +33,7 @@ use crate::Registry;
 use crate::draw::dynamic_texture::DynamicTextureBinId;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::layer::tile_layout::LayoutParams;
+use crate::map::MapMode;
 use crate::render::events::RendererEvent;
 use crate::tests::tile::png;
 use crate::tests::{OneTile, style, tile_store};

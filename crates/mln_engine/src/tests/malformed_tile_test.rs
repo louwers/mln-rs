@@ -4,8 +4,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_map::transform::Transform;
-use mln_map_types::{CameraOptions, ConstrainMode, MapMode, TileLodMode, ViewportMode};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Response};
 use mln_style::bitmap::PremultipliedImage;
@@ -25,7 +23,11 @@ use proptest::prelude::*;
 use serde_json::json;
 
 use crate::Registry;
+use crate::camera::transform::Transform;
+use crate::camera::{CameraOptions, ConstrainMode, ViewportMode};
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
+use crate::map::MapMode;
+use crate::tile_store::TileLodMode;
 use crate::tile_store::store::StoreEvent;
 use crate::tile_store::tile_parameters::TileParameters;
 

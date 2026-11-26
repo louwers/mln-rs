@@ -54,7 +54,6 @@ log.workspace = true
 mln_frame_pacer.workspace = true
 mln_gestures.workspace = true
 mln_gfx.workspace = true
-mln_map.workspace = true
 mln_engine.workspace = true
 mln_storage.workspace = true
 mln_style.workspace = true

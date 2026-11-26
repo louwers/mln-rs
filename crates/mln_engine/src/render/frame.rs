@@ -1,10 +1,10 @@
 //! What a frame's update hands its encode.
 
-use mln_map_types::View;
 use mln_style::color::Color;
 use mln_style::time::Instant;
 use mln_vec_map::VecMap;
 
+use crate::camera::View;
 use crate::render::light::EvaluatedLight;
 use crate::render::paint_parameters::TransformParameters;
 use crate::render::sky::EvaluatedSky;

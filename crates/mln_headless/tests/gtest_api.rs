@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use geojson::{Feature, GeoJson, Geometry};
 use mln_engine::Registry;
+use mln_engine::camera::CameraOptions;
+use mln_engine::map::{Map, MapMode, MapOptions};
 use mln_headless::HeadlessFrontend;
-use mln_map::{CameraOptions, Map, MapMode, MapOptions};
 use mln_storage::ResourceOptions;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::Edit;

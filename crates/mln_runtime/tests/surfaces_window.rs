@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use mln_map::MapMode;
+use mln_engine::map::MapMode;
 use mln_runtime::{
     AttachOptions, DemandMode, Driver, DriverWork, FrameDemand, FrameDisposition, FrameResult, Map, MapOptions,
     RenderSession, RenderTarget, Runtime, Surface,
@@ -28,7 +28,11 @@ const STYLE: &str =
 
 fn map(runtime: &Runtime) -> Map {
     let options = MapOptions {
-        map: mln_map::MapOptions { size: Size::new(256, 256), map_mode: MapMode::Continuous, ..Default::default() },
+        map: mln_engine::map::MapOptions {
+            size: Size::new(256, 256),
+            map_mode: MapMode::Continuous,
+            ..Default::default()
+        },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();

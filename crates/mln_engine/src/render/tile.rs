@@ -7,11 +7,11 @@
 // the frame's update, before the layers read them.
 
 use glam::{DMat4, Vec2};
-use mln_map_types::{ProjectionData, View};
 use mln_style::types::TranslateAnchorType;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::identity::SimpleIdentity;
 
+use crate::camera::{ProjectionData, View};
 use crate::layer::layer_type::LayerType;
 use crate::render::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render::pass::RenderPass;

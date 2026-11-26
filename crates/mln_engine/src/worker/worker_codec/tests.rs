@@ -3,7 +3,6 @@
 
 use std::sync::Arc;
 
-use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::layer::{Layer, convert_layer};
 use mln_style::layers::Fill;
@@ -26,6 +25,7 @@ use crate::draw::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::image::image_store::{ImageMap, ImageType};
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::layer::tile_layout::{Dependencies, LayoutParams, Resolved};
+use crate::map::MapMode;
 use crate::text::glyph_store::ShapeResults;
 use crate::tile_store::contents::LayoutResult;
 use crate::worker::job::{

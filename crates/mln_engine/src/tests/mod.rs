@@ -9,7 +9,7 @@ mod gtest_sky;
 mod gtest_subdivision;
 mod sort_key_test;
 // gtests-data: the test/tile gtests that need the renderer's tiles or
-// mln_map's Transform (tests/tile/main.rs lists them).
+// the camera's transform (tests/tile/main.rs lists them).
 mod tile;
 // gtests-data: the test/text gtests that need mln_engine (GlyphStore,
 // SymbolLayout) or mln_style's Formatted (tests/text/main.rs lists them).
@@ -28,11 +28,10 @@ mod gtest_update_renderables;
 mod gtest_line_atlas;
 // Ports test/util/tile_range.test.cpp (marker `// gtest: Group.Name`).
 mod gtest_tile_range;
-// test/util/tile_cover.test.cpp: needs mln_map's Transform, which is above
-// this crate, so it is an integration test rather than a unit test.
+// test/util/tile_cover.test.cpp: needs the camera's transform.
 mod tile_cover_test;
 // test/tile/geojson_tile.test.cpp and the GeoJSON parts of
-// test/style/source.test.cpp: need mln_map's Transform (above this crate).
+// test/style/source.test.cpp: need the camera's transform.
 mod geojson_tile_test;
 mod source_test;
 // The terrain's drapes: their projection, their stencil, the tiles a drape
@@ -104,7 +103,7 @@ pub(crate) struct OneTile {
     pub(crate) store: crate::tile_store::store::TileStore,
     pub(crate) key: crate::worker::job::SourceKey,
     pub(crate) id: mln_tile_id::OverscaledTileID,
-    mode: mln_map_types::MapMode,
+    mode: crate::map::MapMode,
 }
 
 impl OneTile {
@@ -113,7 +112,7 @@ impl OneTile {
         mut store: crate::tile_store::store::TileStore,
         kind: crate::tile_store::tile::TileKind,
         id: mln_tile_id::OverscaledTileID,
-        mode: mln_map_types::MapMode,
+        mode: crate::map::MapMode,
     ) -> Self {
         let key = store.add_source("s".to_owned(), kind, false);
         let mut tiles = OneTile { store, key, id, mode };
@@ -139,7 +138,7 @@ impl OneTile {
         single_layer: bool,
         origin: crate::tile_store::loading::DataOrigin,
         ids: &[mln_tile_id::OverscaledTileID],
-        mode: mln_map_types::MapMode,
+        mode: crate::map::MapMode,
     ) -> Self {
         let key = store.add_source("source".to_owned(), kind, single_layer);
         let mut tiles = OneTile { store, key, id: ids[0], mode };

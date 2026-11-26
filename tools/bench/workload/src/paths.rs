@@ -3,7 +3,7 @@
 //! once, headless; the desktop example's benchmark mode draws it in a window,
 //! lap after lap.
 
-use mln_map::CameraOptions;
+use mln_engine::camera::CameraOptions;
 use mln_style::geo::LatLng;
 use mln_style::size::Size;
 

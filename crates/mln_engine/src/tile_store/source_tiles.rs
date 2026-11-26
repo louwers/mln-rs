@@ -6,7 +6,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use mln_map_types::{MapMode, TileLodMode, VerticalPerspectiveProjection};
 use mln_style::geo::{LatLngBounds, WrapMode};
 use mln_style::hash::HashSet;
 use mln_style::property::value::PropertyValue;
@@ -19,6 +18,7 @@ use mln_util::projection::Projection;
 use mln_vec_map::VecMap;
 use smallvec::SmallVec;
 
+use crate::camera::VerticalPerspectiveProjection;
 use crate::draw::context::Context;
 use crate::draw::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layer::bucket::UploadNeeds;
@@ -27,8 +27,8 @@ use crate::layer::layer_drawing::ChangedBuckets;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::layer::tile_layout::LayoutParams;
 use crate::log_target;
+use crate::map::MapMode;
 use crate::tile_store::contents::Contents;
-use crate::tile_store::dem;
 use crate::tile_store::store::{SourceInfo, StoreContext};
 use crate::tile_store::tile::{Tile, TileKind, TileLoadOrder, TileNecessity, TileUpdateParameters};
 use crate::tile_store::tile_cover::{
@@ -38,6 +38,7 @@ use crate::tile_store::tile_mut::{TileMut, WorldCopy, retire};
 use crate::tile_store::tile_parameters::TileParameters;
 use crate::tile_store::update_renderables::{PrefetchedTile, RenderablesContext, update_renderables};
 use crate::tile_store::update_tile_masks::update_tile_masks;
+use crate::tile_store::{TileLodMode, dem};
 use crate::worker::job::SourceStyle;
 
 /// How many times the tiles in view the cache keeps, at least.
@@ -1140,13 +1141,13 @@ impl SourceTiles {
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
         ground: Option<crate::query::feature_index::QueryGround<'_>>,
-        view: &mln_map_types::View,
+        view: &crate::camera::View,
         layers: &crate::query::feature_index::QueryLayers<'_>,
         options: &crate::query::RenderedQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
         proj_matrix: &glam::DMat4,
     ) -> Result<crate::query::feature_index::QueryResults, mln_style::error::Error> {
-        use mln_map_types::tile_coordinate::TileCoordinate;
+        use crate::camera::tile_coordinate::TileCoordinate;
 
         let feature_state = &self.info.feature_state;
 

@@ -5,7 +5,6 @@ use std::f64::consts::PI;
 use std::sync::Arc;
 
 use geometry::Point;
-use mln_map_types::View;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::color::Color;
 use mln_style::constants::EXTENT;
@@ -22,6 +21,7 @@ use mln_tile::geometry_tile_data::{is_boundary_edge, is_entirely_outside, limit_
 use mln_util::constants::{EARTH_RADIUS_M, M2PI};
 use mln_vec_map::VecMap;
 
+use crate::camera::View;
 use crate::draw::mesh::Indexed;
 use crate::draw::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use crate::layer::bucket::{Bucket, BucketBase, UploadNeeds};

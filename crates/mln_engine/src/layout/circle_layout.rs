@@ -5,7 +5,6 @@
 use std::sync::Arc;
 
 use geometry::Point;
-use mln_map_types::MapMode;
 use mln_style::constants::EXTENT;
 use mln_style::error::Error;
 use mln_style::expression::{EvaluationContext, Value};
@@ -23,6 +22,7 @@ use crate::layer::filter_groups::FilterGroups;
 use crate::layer::layer_type::EvaluatedLayer;
 use crate::layer::layout::{BuildParams, Layout, SourceLayer, layers_by_id};
 use crate::layer::tile_layout::Resolved;
+use crate::map::MapMode;
 use crate::query::feature_index::FeatureIndexBuilder;
 
 /// A feature the filter accepted, by index (see the file comment).

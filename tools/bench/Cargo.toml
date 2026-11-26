@@ -33,7 +33,6 @@ mln_gl = { package = "mln-rs-gl", path = "../../crates/mln_gl" }
 mln_headless = { package = "mln-rs-headless", path = "../../crates/mln_headless" }
 # The PNG files of the scenarios' last images (`mln-bench run --images`).
 mln_image = { package = "mln-rs-image", path = "../../crates/mln_image" }
-mln_map = { package = "mln-rs-map", path = "../../crates/mln_map" }
 # The renderer's internal stages, through its `bench` entry points, and the
 # font-face shaper that the packages that render turn on.
 mln_engine = { package = "mln-rs-engine", path = "../../crates/mln_engine", default-features = false, features = [

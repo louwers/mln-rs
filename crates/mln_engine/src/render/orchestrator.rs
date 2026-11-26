@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mln_gfx::gpu::Gpu;
-use mln_map_types::{MapMode, View};
 use mln_style::constants::DEFAULT_TRANSITION_DURATION;
 use mln_style::diff::{ItemChanges, LayerChange, LayerChanges, StyleDiff, sources_by_id};
 use mln_style::error::Error;
@@ -25,6 +24,7 @@ use mln_util::pool::{Pool, TaskGroup};
 use mln_vec_map::VecSet;
 use smallvec::SmallVec;
 
+use crate::camera::View;
 use crate::draw::context::Context;
 use crate::image::image_store::ImageStore;
 use crate::layer::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, SingleDraw};
@@ -34,6 +34,7 @@ use crate::layer::render_layer::{
 };
 use crate::layers::custom::EndedHosts;
 use crate::line_atlas::LineAtlas;
+use crate::map::MapMode;
 use crate::pattern_atlas::PatternAtlas;
 use crate::placement::{Placement, PlacementInputs};
 use crate::render::events::RendererEvent;

@@ -4,13 +4,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_map_types::MapMode;
 use mln_storage::Data;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 
 use crate::layer::tile_layout::Dependencies;
 use crate::log_target;
+use crate::map::MapMode;
 use crate::tile_store::contents::Contents;
 use crate::tile_store::loading::Load;
 use crate::tile_store::pipeline::{Layout, Pipeline};

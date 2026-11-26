@@ -6,10 +6,10 @@
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
-use mln_map::{
-    AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, NorthOrientation, TileLodMode, TransitionEnd,
-    TransitionOutcome,
+use mln_engine::camera::{
+    AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, NorthOrientation, TransitionEnd, TransitionOutcome,
 };
+use mln_engine::tile_store::TileLodMode;
 use mln_runtime::{
     CameraFitArea, CameraFitOptions, CameraFitUpdate, ErrorKind, EventMask, TileOptions, ViewportOptions,
 };

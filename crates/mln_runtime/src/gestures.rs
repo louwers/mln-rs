@@ -2,8 +2,9 @@
 //! map's published snapshot and ground, and sends camera commands, without
 //! waiting for them.
 
+use mln_engine::camera::{CameraDelta, CameraOptions, CameraUpdate};
+use mln_engine::map::MapSnapshot;
 use mln_gestures::{GestureCamera, PendingEnd};
-use mln_map::{CameraDelta, CameraOptions, CameraUpdate, MapSnapshot};
 use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
 use mln_util::geo::ScreenCoordinate;
 
@@ -40,7 +41,7 @@ impl GestureCamera for Map {
             return (snapshot.bounds.min_zoom, snapshot.bounds.max_zoom);
         };
         let bounds = snapshot.bounds;
-        let limits = mln_map::CameraLimits {
+        let limits = mln_engine::camera::CameraLimits {
             bounds: bounds.bounds.unwrap_or_else(LatLngBounds::infinite),
             min_zoom: bounds.min_zoom,
             max_zoom: bounds.max_zoom,

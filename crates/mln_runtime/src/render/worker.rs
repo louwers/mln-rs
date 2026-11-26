@@ -13,9 +13,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
 use mln_engine::text::font_face_engine::FontFaceEngine;
-use mln_engine::{Registry, Renderer, RendererEvent, RendererEvents, Update, UpdateReader};
+use mln_engine::{Registry, RenderMode, Renderer, RendererEvent, RendererEvents, Update, UpdateReader};
 use mln_gfx::{ConsumerSync, GpuSync, Handoff, SyncKind};
-use mln_map::RenderMode;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::Error;
 use mln_style::size::Size;
@@ -1745,8 +1744,7 @@ impl Worker {
 mod tests {
     use std::sync::Arc;
 
-    use mln_engine::RendererEvent;
-    use mln_map::RenderMode;
+    use mln_engine::{RenderMode, RendererEvent};
     use mln_style::error::Error;
 
     use super::{FrameOutcome, disown_still};

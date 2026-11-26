@@ -11,8 +11,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 pub(crate) use mln_bench_workload::paths::{tile_at, tile_center};
+use mln_engine::RenderMode;
+use mln_engine::camera::CameraOptions;
+use mln_engine::map::{Map, MapEvent, MapMode, MapOptions, RenderFrameStatus};
 use mln_headless::HeadlessFrontend;
-use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
 use mln_runtime::{BackendRef, Device};
 use mln_storage::FileSource;
 use mln_style::size::Size;

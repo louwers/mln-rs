@@ -59,8 +59,6 @@ changelog_include = [
   "mln-rs-gl",
   "mln-rs-glsl",
   "mln-rs-image",
-  "mln-rs-map",
-  "mln-rs-map-types",
   "mln-rs-mtl",
   "mln-rs-polylabel",
   "mln-rs-runtime",

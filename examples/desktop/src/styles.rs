@@ -159,7 +159,7 @@ const TERRAIN_HILLSHADE: &str = "terrain-hillshade";
 /// Adds `terrain` to the style that `map` loaded, unless it has the source
 /// already: the source, the style's `terrain` on it, the hillshade, if any,
 /// and the sky, if any and the style has none. Fails while no style is loaded.
-pub(crate) fn add_terrain(map: &mut mln_map::Map, terrain: &Terrain) -> Result<(), Error> {
+pub(crate) fn add_terrain(map: &mut mln_engine::map::Map, terrain: &Terrain) -> Result<(), Error> {
     if map.source(TERRAIN_SOURCE).is_some() {
         return Ok(());
     }
@@ -222,7 +222,7 @@ impl Projection {
     /// Sets the style's `projection` to this one: for `Style`, back to the
     /// style document's own. Does nothing while no style is loaded; the app
     /// sets it again once one loads.
-    pub(crate) fn apply(self, map: &mut mln_map::Map) -> Result<(), Error> {
+    pub(crate) fn apply(self, map: &mut mln_engine::map::Map) -> Result<(), Error> {
         if !map.style_document_loaded() {
             return Ok(());
         }

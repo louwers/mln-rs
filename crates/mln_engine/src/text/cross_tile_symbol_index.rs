@@ -27,7 +27,6 @@ use std::sync::Arc;
 
 use geometry::Point;
 use glam::{I64Vec2, Vec2};
-use mln_map_types::{TileProjector, View};
 use mln_style::constants::EXTENT;
 use mln_style::hash::HashSet;
 use mln_style::tile_id::CanonicalTileID;
@@ -35,6 +34,7 @@ use mln_tile_id::OverscaledTileID;
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::buckets::symbol_bucket::SymbolBucket;
+use crate::camera::{TileProjector, View};
 use crate::layer::render_layer::{RenderLayer, SymbolBuckets};
 use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools};
 use crate::layout::symbol_projection::SymbolHeights;
@@ -455,7 +455,7 @@ mod tests {
     }
 
     fn camera_at(lat: f64, lon: f64, zoom: f64, globe: bool) -> View {
-        let mut state = mln_map_types::TransformState::default();
+        let mut state = crate::camera::TransformState::default();
         state.set_size(Size { width: 512, height: 512 });
         if globe {
             state.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));

@@ -4,7 +4,7 @@ The root `Cargo.toml` is the workspace that goes to crates.io, all at one
 version:
 
 - **mln-rs**, the package in the repository root. It re-exports the libraries
-  under their crate names: `mln_rs::mln_map`, `mln_rs::mln_util`,
+  under their crate names: `mln_rs::mln_engine`, `mln_rs::mln_util`,
   `mln_rs::polylabel`, and so on. Users depend on this one.
 - **`mln-rs-<name>`**, one package per library under `crates/` and `vendor/`
   (for example `mln-rs-util` for `mln_util`, `mln-rs-polylabel` for

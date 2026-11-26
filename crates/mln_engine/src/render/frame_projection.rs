@@ -9,9 +9,9 @@
 //! backend.
 
 use glam::{DMat4, DVec3};
-pub use mln_map_types::{ClipDepthRange, FrameProjection};
 use mln_util::projection::Projection;
 
+use crate::camera::{ClipDepthRange, FrameProjection};
 use crate::render::paint_parameters::TransformParameters;
 
 /// The projection of a frame that drew with `transform`, its 3D layers into
@@ -67,13 +67,13 @@ pub(crate) fn zero_to_one_clip_z(matrix: &mut DMat4) {
 
 #[cfg(test)]
 mod tests {
-    use mln_map_types::{Camera, LogicalExtent, MapView, ProjectionMode, Viewport};
     use mln_style::geo::LatLng;
     use mln_style::size::Size;
     use mln_style::types::ProjectionDefinition;
     use mln_util::geo::EdgeInsets;
 
     use super::*;
+    use crate::camera::{Camera, LogicalExtent, MapView, ProjectionMode, Viewport};
 
     const SIZE: Size = Size { width: 300, height: 200 };
 

@@ -2,8 +2,6 @@
 // modules `tile_cover`, `tile_cover_stream` and `tile_count`.
 
 use geo_types::{Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
-use mln_map::transform::Transform;
-use mln_map_types::{CameraLimits, CameraOptions, ConstrainMode, TileLodMode, ViewportMode};
 use mln_style::constants;
 use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
 use mln_style::range::Range;
@@ -13,6 +11,9 @@ use mln_style::types::ProjectionDefinition;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::geo::EdgeInsets;
 
+use crate::camera::transform::Transform;
+use crate::camera::{CameraLimits, CameraOptions, ConstrainMode, ViewportMode};
+use crate::tile_store::TileLodMode;
 use crate::tile_store::tile_cover::{
     TileCover, TileCoverParameters, covering_zoom_level, tile_count_bounds, tile_cover, tile_cover_bounds,
     tile_cover_geometry,
@@ -1584,8 +1585,9 @@ mod terrain_cover {
     /// tiles under them.
     #[test]
     fn the_globe_cover_keeps_mountains_past_the_horizon() {
-        use mln_map_types::VerticalPerspectiveProjection;
         use mln_util::projection::Projection;
+
+        use crate::camera::VerticalPerspectiveProjection;
 
         let options = Options { min_zoom: 0, max_zoom: 22, tile_size: 512, reparse_overscaled: false };
         let mut transform = Camera { pitch: 80.0, ..Camera::new((512, 512), (10.0, 45.0), 10.0) }.transform();

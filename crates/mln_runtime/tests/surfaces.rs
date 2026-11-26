@@ -2,8 +2,8 @@
 // has no surface to give, and what an offscreen session refuses. A window
 // that presents frames is in surfaces_window.rs, which needs a display.
 
+use mln_engine::map::MapMode;
 use mln_gfx::window::raw_window_handle::{DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle};
-use mln_map::MapMode;
 use mln_runtime::{
     AttachOptions, Driver, ErrorKind, Map, MapOptions, RenderSessionState, RenderTarget, Runtime, Surface,
 };
@@ -30,7 +30,11 @@ impl HasDisplayHandle for GoneWindow {
 
 fn map(runtime: &Runtime) -> Map {
     let options = MapOptions {
-        map: mln_map::MapOptions { size: Size::new(256, 256), map_mode: MapMode::Continuous, ..Default::default() },
+        map: mln_engine::map::MapOptions {
+            size: Size::new(256, 256),
+            map_mode: MapMode::Continuous,
+            ..Default::default()
+        },
         ..Default::default()
     };
     let (map, created) = runtime.create_map(options).unwrap();

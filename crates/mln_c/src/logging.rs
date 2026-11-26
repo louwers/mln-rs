@@ -703,9 +703,9 @@ pub(crate) mod tests {
     #[test]
     fn every_event_has_its_own_target() {
         for (name, value, platform) in EVENTS {
-            assert_eq!(event(&format!("mln_map::{name}")), (value, platform));
+            assert_eq!(event(&format!("mln_engine::{name}")), (value, platform));
         }
-        assert_eq!(event("mln_map::transform"), (MLN_LOG_EVENT_GENERAL, "General"));
+        assert_eq!(event("mln_engine::transform"), (MLN_LOG_EVENT_GENERAL, "General"));
         assert_eq!(event("naga::front"), (MLN_LOG_EVENT_GRAPHICS_BACKEND, "GraphicsBackend"));
     }
 

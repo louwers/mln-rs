@@ -1,5 +1,5 @@
-use mln_map::Map;
-use mln_map_types::CameraOptions;
+use mln_engine::camera::CameraOptions;
+use mln_engine::map::Map;
 use mln_style::conversion::Convertible;
 use mln_style::error::ErrorKind;
 use mln_style::{Edit, Style};
@@ -8,7 +8,7 @@ use crate::runner::MapError;
 
 #[must_use]
 pub(crate) fn default_camera(style: &Style) -> CameraOptions {
-    mln_map::style_camera(style)
+    mln_engine::map::style_camera(style)
 }
 
 /// Sets the paint or layout property `property_name` of the layer

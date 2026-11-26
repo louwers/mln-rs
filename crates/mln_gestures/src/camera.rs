@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use mln_map::{CameraDelta, CameraOptions, CameraUpdate, TransformState, TransitionEnd};
+use mln_engine::camera::{CameraDelta, CameraOptions, CameraUpdate, TransformState, TransitionEnd};
 use mln_style::geo::LatLng;
 use mln_util::geo::ScreenCoordinate;
 use parking_lot::Mutex;
@@ -21,7 +21,7 @@ pub trait GestureCamera {
     /// [`zoom_range`]).
     fn zoom_range(&self) -> (f64, f64);
     fn lat_lng_for_pixel(&self, pixel: ScreenCoordinate) -> Option<LatLng>;
-    /// Applies a delta as [`Map::apply_camera_delta`](mln_map::Map::apply_camera_delta)
+    /// Applies a delta as [`Map::apply_camera_delta`](mln_engine::map::Map::apply_camera_delta)
     /// does. The recognizer only sends valid deltas.
     fn apply_camera_delta(&mut self, delta: &CameraDelta);
     /// Applies a gesture's last delta, as `apply_camera_delta` does, and

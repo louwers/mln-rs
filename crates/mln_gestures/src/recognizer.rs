@@ -5,7 +5,7 @@
 use std::ops::{Add, AddAssign, Div, Mul, Sub};
 use std::time::Duration;
 
-use mln_map::{
+use mln_engine::camera::{
     AnchoredMomentum, AnimationOptions, CameraDelta, CameraMomentum, CameraOptions, CameraUpdate, CameraUpdateMode,
     CameraVelocity, GesturePhase, MomentumGlide, TransitionOutcome,
 };

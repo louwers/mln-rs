@@ -36,7 +36,6 @@ log.workspace = true
 mln_gestures.workspace = true
 mln_gfx.workspace = true
 mln_gl = { workspace = true, optional = true }
-mln_map.workspace = true
 # gpu-conformance: the host writes and memory growth cases, which
 # check/check.mjs runs on a backend of the map's kind (src/gpu_check.rs).
 mln_engine = { workspace = true, features = ["gpu-conformance"] }

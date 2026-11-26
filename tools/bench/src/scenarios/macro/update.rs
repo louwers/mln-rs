@@ -8,7 +8,8 @@
 use std::sync::Arc;
 
 use feature::Value;
-use mln_map::{CameraOptions, MapMode};
+use mln_engine::camera::CameraOptions;
+use mln_engine::map::MapMode;
 use mln_style::Edit;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::feature::FeatureState;

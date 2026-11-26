@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use mln_map::MapMode;
+use mln_engine::map::MapMode;
 use mln_runtime::{
     AttachOptions, Completion, Error, Map, MapOptions, RenderSession, RenderTarget, ResourceRequest, Runtime,
     RuntimeEvent, RuntimeOptions,
@@ -62,7 +62,10 @@ impl Drop for TestRuntime {
 }
 
 pub(crate) fn map_options() -> MapOptions {
-    MapOptions { map: mln_map::MapOptions { size: Size::new(256, 256), ..Default::default() }, ..Default::default() }
+    MapOptions {
+        map: mln_engine::map::MapOptions { size: Size::new(256, 256), ..Default::default() },
+        ..Default::default()
+    }
 }
 
 /// A map that the runtime has built.
@@ -96,7 +99,7 @@ pub(crate) fn serve_level_dem(runtime: &Runtime) {
 /// It has drawn none yet.
 pub(crate) fn level_terrain_map(runtime: &Runtime) -> (Map, RenderSession) {
     let options = MapOptions {
-        map: mln_map::MapOptions {
+        map: mln_engine::map::MapOptions {
             size: Size::new(256, 256),
             map_mode: MapMode::Static,
             center_clamped_to_ground: false,

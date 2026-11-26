@@ -7,8 +7,9 @@
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
-use mln_map::transform::{CameraCommandId, Transform, TransformEvent};
-use mln_map::{CameraChangeSource, CameraLimits, ConstrainMode, MomentumDecay, MomentumSnap, ViewportMode};
+use mln_engine::camera::transform::{CameraCommandId, Transform, TransformEvent};
+use mln_engine::camera::{CameraLimits, ConstrainMode, MomentumDecay, MomentumSnap, ViewportMode};
+use mln_engine::map::CameraChangeSource;
 use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
 use mln_style::hash::HashMap;
 use mln_style::size::Size;
@@ -1062,7 +1063,7 @@ fn zoom_and_pitch_settle_only_when_their_snaps_are_set() {
 
 #[test]
 fn gestures_and_their_steps_report_themselves_as_gestures() {
-    use mln_map::CameraChangeSource::{Gesture, Momentum};
+    use mln_engine::map::CameraChangeSource::{Gesture, Momentum};
     let mut rig = Rig::new();
     let take = |rig: &mut Rig| std::mem::take(&mut rig.input.camera.sources);
 

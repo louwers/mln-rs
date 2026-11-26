@@ -4,8 +4,10 @@
 
 use std::sync::Arc;
 
+use mln_engine::RenderMode;
 use mln_engine::bench::Coverage;
-use mln_map::{CameraOptions, MapMode, RenderFrameStatus, RenderMode};
+use mln_engine::camera::CameraOptions;
+use mln_engine::map::{MapMode, RenderFrameStatus};
 use mln_storage::Cache;
 
 use super::cache::DiskCache;

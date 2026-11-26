@@ -6,7 +6,6 @@
 
 use std::sync::Arc;
 
-use mln_map_types::MapMode;
 use mln_style::error::Error;
 use mln_style::expression::{GlobalStateMap, UnavailableImages};
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
@@ -24,6 +23,7 @@ use crate::layer::filter_groups::FilterGroups;
 use crate::layer::group_by_layout::group_layers;
 use crate::layer::layer_type::{ErasedEvaluatedLayer, ErasedLayout};
 use crate::layer::layout::{BuildParams, LayoutParameters, SourceLayer};
+use crate::map::MapMode;
 use crate::query::feature_index::FeatureIndexBuilder;
 use crate::text::glyph_store::ShapeResults;
 use crate::tile_store::contents::LayoutBuckets;

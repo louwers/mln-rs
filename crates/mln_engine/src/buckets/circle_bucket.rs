@@ -3,7 +3,6 @@
 
 use std::sync::Arc;
 
-use mln_map_types::MapMode;
 use mln_style::color::Color;
 use mln_style::layers::Circle;
 use mln_style::layers::circle_layer_properties::CirclePaintProperties;
@@ -15,6 +14,7 @@ use crate::layer::bucket::{Bucket, BucketBase, UploadNeeds};
 use crate::layer::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::layer::layer_type::EvaluatedLayer;
 use crate::layer::paint_property_binder::PaintPropertyBinder;
+use crate::map::MapMode;
 use crate::render::terrain::point_center;
 
 crate::paint_property_binders!(

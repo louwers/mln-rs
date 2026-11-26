@@ -41,11 +41,12 @@ etagere.workspace = true
 feature.workspace = true
 geo-types.workspace = true
 geo-index.workspace = true
+geojson.workspace = true
 geometry.workspace = true
 log.workspace = true
 mln_gfx.workspace = true
 mln_image.workspace = true
-mln_map_types.workspace = true
+mln_sprite.workspace = true
 glam.workspace = true
 mln_storage.workspace = true
 mln_style.workspace = true
@@ -56,7 +57,9 @@ mln_util.workspace = true
 mln_vec_map.workspace = true
 parking_lot.workspace = true
 polylabel.workspace = true
+serde_json.workspace = true
 smallvec.workspace = true
+thiserror.workspace = true
 mln_wire = { workspace = true, features = ["geo-types", "glam", "parking_lot"] }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
@@ -64,15 +67,11 @@ mln_wire = { workspace = true, features = ["geo-types", "glam", "parking_lot"] }
 js-sys = { workspace = true, optional = true }
 
 [dev-dependencies]
-geojson.workspace = true
-mln_map = { package = "mln-rs-map", path = "../mln_map" }
-mln_sprite = { package = "mln-rs-sprite", path = "../mln_sprite" }
 mln_storage = { workspace = true, features = ["stub-file-source"] }
 mln_webgpu = { package = "mln-rs-webgpu", path = "../mln_webgpu" }
 mlt-core.workspace = true
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
 proptest.workspace = true
-serde_json.workspace = true
 
 [lints]
 workspace = true

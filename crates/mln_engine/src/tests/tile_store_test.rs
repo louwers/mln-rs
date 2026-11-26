@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use feature::{Feature, PropertyMap};
 use geo_types::{Geometry, Point};
-use mln_map_types::MapMode;
 use mln_storage::resource::{Priority, TileFormat};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, LoadingMethod, Resource, Responder, Response};
@@ -24,6 +23,7 @@ use super::tile_jobs_test::{Manual, icons, layer, points};
 use crate::geometry::dem_data::DEMData;
 use crate::layer::layer_drawing::ChangedBuckets;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
+use crate::map::MapMode;
 use crate::query::SourceQueryOptions;
 use crate::tests::tile::{dem_png, png};
 use crate::tests::{OneTile, style, tile_store};

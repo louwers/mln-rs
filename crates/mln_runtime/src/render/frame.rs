@@ -1,7 +1,7 @@
 //! Frame demands and the results that they finish with.
 
-use mln_engine::FrameProjection;
-use mln_map::{MapView, RenderMode};
+use mln_engine::RenderMode;
+use mln_engine::camera::{FrameProjection, MapView};
 
 /// When a demand draws a frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
