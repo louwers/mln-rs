@@ -9,7 +9,6 @@ impl StyleLayerType for Heatmap {
     const INFO: LayerTypeInfo = LayerTypeInfo {
         name: "heatmap",
         source: SourceKind::Geometry,
-        pass_3d: true,
         fading_tiles: false,
         cross_tile_index: false,
         from_json: true,

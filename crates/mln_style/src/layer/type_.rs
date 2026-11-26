@@ -25,7 +25,7 @@ use crate::property::table::{
 };
 use crate::property::transition::TransitionParameters;
 use crate::property::value::PropertyValue;
-use crate::types::VisibilityType;
+use crate::types::{LayerBlendType, VisibilityType};
 use crate::wire::optional_expression;
 
 /// Where a layer type's layers get their data.
@@ -47,8 +47,6 @@ pub struct LayerTypeInfo {
     /// The layer type as style JSON names it.
     pub name: &'static str,
     pub source: SourceKind,
-    /// Whether the type's layers draw in the 3D pass.
-    pub pass_3d: bool,
     /// Whether the type's layers draw on tiles that are fading out.
     pub fading_tiles: bool,
     /// Whether the type's layers take part in cross-tile indexing and
@@ -198,6 +196,13 @@ pub trait StyleLayerType: Sized + Send + Sync + 'static {
     /// ground, if the type has one.
     fn content_elevation(_style: &LayerStyle<Self>) -> Option<&PropertyValue<f32>> {
         None
+    }
+
+    /// How a layer of the type with the paint values `paint` composites
+    /// onto what is drawn beneath it: its `*-layer-blend`, or `normal` for a
+    /// type without one.
+    fn layer_blend(_paint: &<Self::PaintProperties as PaintSet>::Evaluated) -> LayerBlendType {
+        LayerBlendType::Normal
     }
 }
 

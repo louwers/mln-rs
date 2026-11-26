@@ -28,7 +28,6 @@ impl StyleLayerType for Symbol {
     const INFO: LayerTypeInfo = LayerTypeInfo {
         name: "symbol",
         source: SourceKind::Geometry,
-        pass_3d: false,
         fading_tiles: true,
         cross_tile_index: true,
         from_json: true,

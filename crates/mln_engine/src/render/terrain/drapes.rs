@@ -306,7 +306,7 @@ impl Drapes {
         lit: bool,
     ) {
         let base = layer.base();
-        let by_bearing = !lit && layer.drapes_by_bearing();
+        let by_bearing = !lit && layer.base().evaluation.drapes_by_bearing;
         for drape in &mut self.drapes {
             let Some(StackDrape { key, .. }) = drape.stacks.get_mut(stack) else {
                 continue;

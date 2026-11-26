@@ -24,8 +24,6 @@ pub(crate) struct Frame {
     pub(crate) camera_moving: bool,
     pub(crate) light: EvaluatedLight,
     pub(crate) sky: Option<EvaluatedSky>,
-    /// Whether a layer draws in the 3D pass.
-    pub(crate) has_3d: bool,
     /// Whether the frame draws terrain, which the layers that drape over it
     /// don't draw onto, and under which the other 2D layers draw without
     /// depth.
@@ -60,7 +58,6 @@ impl Frame {
             camera_moving,
             light: EvaluatedLight::default(),
             sky: None,
-            has_3d: false,
             terrain: false,
             background_color: Color::new_unchecked(0.0, 0.0, 0.0, 0.0),
             symbol_fade_change: 0.0,

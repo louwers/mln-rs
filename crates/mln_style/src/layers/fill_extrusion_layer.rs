@@ -11,7 +11,6 @@ impl StyleLayerType for FillExtrusion {
     const INFO: LayerTypeInfo = LayerTypeInfo {
         name: "fill-extrusion",
         source: SourceKind::Geometry,
-        pass_3d: true,
         fading_tiles: false,
         cross_tile_index: false,
         from_json: true,

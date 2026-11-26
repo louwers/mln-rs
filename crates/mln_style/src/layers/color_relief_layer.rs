@@ -9,7 +9,6 @@ impl StyleLayerType for ColorRelief {
     const INFO: LayerTypeInfo = LayerTypeInfo {
         name: "color-relief",
         source: SourceKind::RasterDem,
-        pass_3d: false,
         fading_tiles: false,
         cross_tile_index: false,
         from_json: true,

@@ -780,15 +780,6 @@ fn draw(
     parameters.depth_range_size = depth_range_size;
     orchestrator.terrain().render_ground(gpu, parameters);
 
-    // The 3D pass: the 3D layers draw bottom to top. No pass is open, so
-    // the draw groups draw nothing but into their own targets.
-    if frame.has_3d {
-        parameters.pass = RenderPass::Pass3D;
-        parameters.depth_range_size = depth_range_size;
-        parameters.current_layer = (num_draw_groups as u32).wrapping_sub(1);
-        orchestrator.render_draw_groups(gpu, parameters, DrawOrder::BottomUp);
-    }
-
     // The layers' render targets, which the passes sample, and the
     // terrain's drapes.
     orchestrator.visit_render_layers(|layer| layer.render_targets(gpu, parameters));

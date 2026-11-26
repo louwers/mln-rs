@@ -9,7 +9,6 @@ impl StyleLayerType for Hillshade {
     const INFO: LayerTypeInfo = LayerTypeInfo {
         name: "hillshade",
         source: SourceKind::RasterDem,
-        pass_3d: true,
         fading_tiles: false,
         cross_tile_index: false,
         from_json: true,

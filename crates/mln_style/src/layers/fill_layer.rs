@@ -1,6 +1,7 @@
 use crate::layer::{LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType};
 use crate::layers::fill_layer_properties::{self, FillLayoutProperties, FillPaintProperties};
 use crate::property::table::{PropertyTable, PropertyVisitor};
+use crate::types::LayerBlendType;
 
 /// The `fill` layer type.
 pub struct Fill;
@@ -9,7 +10,6 @@ impl StyleLayerType for Fill {
     const INFO: LayerTypeInfo = LayerTypeInfo {
         name: "fill",
         source: SourceKind::Geometry,
-        pass_3d: false,
         fading_tiles: false,
         cross_tile_index: false,
         from_json: true,
@@ -22,5 +22,9 @@ impl StyleLayerType for Fill {
 
     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {
         fill_layer_properties::visit(slot, visitor)
+    }
+
+    fn layer_blend(paint: &FillPaintProperties::PossiblyEvaluated) -> LayerBlendType {
+        *paint.fill_layer_blend.uniform()
     }
 }

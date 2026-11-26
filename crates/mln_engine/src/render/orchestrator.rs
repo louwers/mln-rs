@@ -27,7 +27,7 @@ use crate::exec::pool::{Pool, TaskGroup};
 use crate::image::image_store::ImageStore;
 use crate::layer::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, SingleDraw};
 use crate::layer::layer_type::ErasedEvaluatedLayer;
-use crate::layer::render_layer::{FrameSourceTiles, LayerParts, LayerSource, LayerUpdateParameters, RenderLayer};
+use crate::layer::render_layer::{FrameSourceTiles, LayerSource, LayerUpdateParameters, OnTerrain, RenderLayer};
 use crate::layers::custom::EndedHosts;
 use crate::map::MapMode;
 use crate::placement::{Placement, PlacementInputs};
@@ -857,7 +857,6 @@ impl RenderOrchestrator {
             for (index, layer) in self.layers.iter().enumerate() {
                 let style = &layer.base().style;
                 let layer_info = style.info();
-                frame.has_3d |= layer_info.pass_3d;
 
                 if layer_info.source != SourceKind::None {
                     // Every source's pass sees every layer, so the cheap
@@ -925,13 +924,11 @@ impl RenderOrchestrator {
                         && !update_parameters.view.is_globe()
                         && !frame.terrain
                         && layers.first().is_some_and(|first| Arc::ptr_eq(style, first.style()))
+                        && let Some(solid_background) = layer.base().evaluation.solid
                     {
-                        let solid_background = layer.solid_background();
-                        if let Some(solid_background) = solid_background {
-                            frame.background_color = solid_background;
-                            continue; // This layer is shown with background color,
-                            // and it shall not be added to render items.
-                        }
+                        frame.background_color = solid_background;
+                        continue; // This layer is shown with background color,
+                        // and it shall not be added to render items.
                     }
                     frame.layers.entry(index as u32).or_insert_with(|| FrameLayer { source: None });
                     will_render[index] = true;
@@ -1200,7 +1197,7 @@ impl RenderOrchestrator {
             layer.visit_draw_groups(&mut |_| groups += 1);
             match &mut above {
                 Some(above) => *above += groups,
-                None if groups > 0 && layer.is_3d() => above = Some(0),
+                None if groups > 0 && layer.volume() => above = Some(0),
                 None => {}
             }
         }
@@ -1304,8 +1301,8 @@ impl RenderOrchestrator {
         frame: &Frame,
     ) {
         let layers = || frame.layers.keys().map(|&index| &*self.layers[index as usize]);
-        let stands = frame.terrain && layers().any(LayerParts::stands);
-        let hides = layers().any(LayerParts::hides_behind_ground);
+        let stands = frame.terrain && layers().any(|layer| layer.terrain().stands());
+        let hides = layers().any(|layer| layer.terrain().hides_behind_ground());
         paint_parameters.ground = self.terrain.update_ground(paint_parameters, stands, hides);
         // Whether a 3D layer draws before the terrain's first surface, which
         // writes the depth of the ground and of the planet.
@@ -1317,19 +1314,19 @@ impl RenderOrchestrator {
             let layer_source =
                 layer_source(frame_layer, &self.render_sources, &self.tile_store, &self.found_tiles, &mut contents);
             // Over terrain, a layer that drapes draws nothing onto the frame.
-            if frame.terrain && render_layer.drapes() {
+            if frame.terrain && render_layer.terrain().drapes() {
                 render_layer.remove_all_draws();
                 surface = true;
                 continue;
             }
             render_layer.update_draws(gpu, paint_parameters, layer_source);
-            needs_depth = needs_depth || (render_layer.needs_globe_depth() && !surface);
+            needs_depth = needs_depth || (render_layer.volume() && !surface);
         }
         self.stacks = if frame.terrain {
             let layers = &mut self.layers;
             let draped = |&index: &u32| {
                 let layer = &mut layers[index as usize];
-                let draped = layer.drapes().then(|| match layer.surface_light(paint_parameters) {
+                let draped = layer.terrain().drapes().then(|| match layer.surface_light(paint_parameters) {
                     Some(light) => Draped::Lit(light),
                     None if layer.blends() => Draped::Blends,
                     None => Draped::Plain,
@@ -1520,8 +1517,9 @@ impl RenderOrchestrator {
         // found there.
         let elevation = self.terrain.ground().map(|ground| &**ground);
         let ground_of = |layer: &dyn RenderLayer| {
-            let elevation = elevation.filter(|_| layer.drapes() || layer.stands())?;
-            let standing = layer.stands() && !layer.is_3d();
+            let terrain = layer.terrain();
+            let elevation = elevation.filter(|_| terrain != OnTerrain::Flat)?;
+            let standing = terrain.stands() && !layer.volume();
             Some(crate::query::feature_index::QueryGround { elevation, standing })
         };
         // Traced once for every source. Symbols are found where they were

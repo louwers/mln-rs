@@ -15,7 +15,7 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_style::color::Color;
 use mln_style::expression::Dependency;
 use mln_style::layer::{ErasedLayerStyle, LayerStyle, PaintSet, SourceKind, StyleLayerType};
-use mln_style::types::{TranslateAnchorType, VisibilityType};
+use mln_style::types::{LayerBlendType, TranslateAnchorType, VisibilityType};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use smallvec::SmallVec;
 
@@ -442,6 +442,8 @@ pub(crate) struct RenderLayerBase {
     pub(crate) style: Arc<dyn ErasedLayerStyle>,
 
     pub(crate) passes: RenderPass,
+    /// What the layer's last evaluation said of how it draws.
+    pub(crate) evaluation: Evaluation,
     pub(crate) style_dependencies: Dependency,
     /// Whether the frame draws the layer.
     pub(crate) is_renderable: bool,
@@ -461,6 +463,7 @@ impl RenderLayerBase {
             evaluated_properties: properties,
             style,
             passes: RenderPass::None,
+            evaluation: Evaluation::NONE,
             style_dependencies: Dependency::NONE,
             is_renderable: false,
             projection_variant: ProjectionVariant::Mercator,
@@ -509,6 +512,86 @@ impl<T: LayerType> LayerValues<T> {
     }
 }
 
+/// What a layer's evaluation says of how it draws with its values.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct Evaluation {
+    /// Whether the layer draws anything.
+    pub(crate) draws: bool,
+    /// Whether the layer may draw in the opaque pass, which the frame draws
+    /// front to back before it blends the rest.
+    pub(crate) opaque: bool,
+    /// The one solid color the layer is, which the frame clears to instead
+    /// of drawing the layer when it is the style's bottom layer.
+    pub(crate) solid: Option<Color>,
+    /// Whether the layer draws a drape by the map's bearing: something of
+    /// it is anchored to the viewport.
+    pub(crate) drapes_by_bearing: bool,
+}
+
+impl Evaluation {
+    /// The layer draws nothing.
+    pub(crate) const NONE: Evaluation =
+        Evaluation { draws: false, opaque: false, solid: None, drapes_by_bearing: false };
+    /// The layer draws, translucent.
+    pub(crate) const TRANSLUCENT: Evaluation = Evaluation { draws: true, ..Evaluation::NONE };
+    /// The layer draws, and may draw in the opaque pass.
+    pub(crate) const OPAQUE: Evaluation = Evaluation { opaque: true, ..Evaluation::TRANSLUCENT };
+
+    /// The passes a layer of this evaluation draws in.
+    fn passes(self) -> RenderPass {
+        match self {
+            Evaluation { draws: false, .. } => RenderPass::None,
+            Evaluation { opaque: true, .. } => RenderPass::Opaque | RenderPass::Translucent,
+            Evaluation { opaque: false, .. } => RenderPass::Translucent,
+        }
+    }
+}
+
+/// What a layer's [`TypedLayer::evaluate`] reads and completes.
+pub(crate) struct EvaluateCx<'a, L: TypedLayer + ?Sized> {
+    /// What the values were evaluated for.
+    pub(crate) parameters: &'a PropertyEvaluationParameters,
+    /// The new evaluation of the values, which becomes the layer's once the
+    /// hook returns.
+    pub(crate) evaluated: &'a mut EvaluatedLayer<L::Type>,
+}
+
+/// How a layer type meets terrain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OnTerrain {
+    /// The layer draws flat, at sea level.
+    Flat,
+    /// The layer drapes over terrain: it draws flat into the terrain tiles'
+    /// textures ([`LayerParts::update_drape_draws`]) rather than onto the
+    /// frame.
+    Drapes,
+    /// The layer stands on terrain: over terrain, its draws are of the
+    /// terrain variant ([`ProjectionVariant::stands`]), and their points
+    /// stand on the frame's ground ([`PaintParameters::ground`]). One that
+    /// `hides_behind_ground` hides its points behind the ground in front of
+    /// them, which reads the ground's depth ([`FrameGround::depth`]).
+    ///
+    /// [`FrameGround::depth`]: crate::render::terrain::FrameGround::depth
+    Stands { hides_behind_ground: bool },
+}
+
+impl OnTerrain {
+    /// Whether the layer drapes over terrain.
+    pub(crate) fn drapes(self) -> bool {
+        self == OnTerrain::Drapes
+    }
+
+    /// Whether the layer stands on terrain.
+    pub(crate) fn stands(self) -> bool {
+        matches!(self, OnTerrain::Stands { .. })
+    }
+
+    /// Whether the layer hides behind the ground in front of it.
+    pub(crate) fn hides_behind_ground(self) -> bool {
+        self == OnTerrain::Stands { hides_behind_ground: true }
+    }
+}
+
 /// The parts of a render layer of a [`TypedLayer`] `L`.
 pub(crate) struct Parts<'a, L: TypedLayer + ?Sized> {
     pub(crate) base: &'a RenderLayerBase,
@@ -534,52 +617,24 @@ pub(crate) trait TypedLayer {
     /// The order the layer draws its source's tiles in.
     const TILE_ORDER: TileOrder = TileOrder::ById;
 
-    /// Whether the layer drapes over terrain: it draws flat into the
-    /// terrain tiles' textures ([`LayerParts::update_drape_draws`]) rather
-    /// than onto the frame.
-    const DRAPES: bool = false;
+    /// How the layer meets terrain.
+    const TERRAIN: OnTerrain = OnTerrain::Flat;
 
-    /// Whether the layer stands on terrain: over terrain, its draws are of
-    /// the terrain variant ([`ProjectionVariant::stands`]), and their points
-    /// stand on the frame's ground ([`PaintParameters::ground`]).
-    const STANDS: bool = false;
-
-    /// Whether the layer, standing on terrain, hides its points behind the
-    /// ground in front of them, which reads the ground's depth
-    /// ([`FrameGround::depth`]).
-    ///
-    /// [`FrameGround::depth`]: crate::render::terrain::FrameGround::depth
-    const HIDES_BEHIND_GROUND: bool = false;
+    /// Whether the layer draws 3D geometry, whose depth it writes in the
+    /// range of [`PaintParameters::depth_mode_for_3d`]. The layers above the
+    /// lowest such layer that draws draw without a depth test, and on the
+    /// globe the planet's depth hides its geometry behind the horizon.
+    const VOLUME: bool = false;
 
     fn parts(&self) -> Parts<'_, Self>;
     fn parts_mut(&mut self) -> PartsMut<'_, Self>;
 
-    /// Called once the layer's paint values are evaluated for a frame of
-    /// `parameters`, before they become the layer's: the layer derives the
-    /// values of `evaluated` that its type derives from others, and remakes
-    /// what it makes of them, such as a color ramp.
-    fn complete_evaluation(
-        &mut self,
-        _parameters: &PropertyEvaluationParameters,
-        _evaluated: &mut EvaluatedLayer<Self::Type>,
-    ) {
-    }
-
-    /// The passes the layer draws in with `evaluated`, its paint values of
-    /// a frame.
-    fn passes(&self, evaluated: &EvaluatedLayer<Self::Type>) -> RenderPass;
-
-    /// Whether the layer draws a drape with its values `evaluated` by the
-    /// map's bearing: something of it is anchored to the viewport.
-    fn drapes_by_bearing(&self, _evaluated: &EvaluatedLayer<Self::Type>) -> bool {
-        false
-    }
-
-    /// Whether the layer, with its values `evaluated`, blends with what is
-    /// under it otherwise than by covering it: a layer blend other than
-    /// `normal`.
-    fn blends(&self, _evaluated: &EvaluatedLayer<Self::Type>) -> bool {
-        false
+    /// Called once the layer's paint values are evaluated for a frame,
+    /// before they become the layer's: the layer derives the values of
+    /// `cx.evaluated` that its type derives from others, remakes what it
+    /// makes of them, such as a color ramp, and says how it draws with them.
+    fn evaluate(&mut self, _cx: EvaluateCx<'_, Self>) -> Evaluation {
+        Evaluation::TRANSLUCENT
     }
 
     /// The light that the terrain's surface can shade the layer's drapes
@@ -676,9 +731,8 @@ pub(crate) trait LayerParts {
     fn transition(&mut self, parameters: &TransitionParameters);
 
     /// Evaluates the layer's paint values for a frame of `parameters`,
-    /// which the layer completes ([`TypedLayer::complete_evaluation`]), and
-    /// sets the passes the layer draws in with them
-    /// ([`TypedLayer::passes`]).
+    /// which the layer completes ([`TypedLayer::evaluate`]), and sets the
+    /// passes the layer draws in with them.
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters);
 
     /// Whether a paint value of the layer is still in transition.
@@ -713,22 +767,15 @@ pub(crate) trait LayerParts {
         source: Option<LayerSource<'_>>,
     );
 
-    /// Whether the layer drapes over terrain ([`TypedLayer::DRAPES`]).
-    fn drapes(&self) -> bool;
+    /// How the layer meets terrain ([`TypedLayer::TERRAIN`]).
+    fn terrain(&self) -> OnTerrain;
 
-    /// Whether the layer stands on terrain ([`TypedLayer::STANDS`]).
-    fn stands(&self) -> bool;
-
-    /// Whether the layer hides behind the ground in front of it
-    /// ([`TypedLayer::HIDES_BEHIND_GROUND`]).
-    fn hides_behind_ground(&self) -> bool;
-
-    /// Whether the layer draws a drape by the map's bearing, with its values
-    /// of the frame ([`TypedLayer::drapes_by_bearing`]).
-    fn drapes_by_bearing(&self) -> bool;
+    /// Whether the layer draws 3D geometry ([`TypedLayer::VOLUME`]).
+    fn volume(&self) -> bool;
 
     /// Whether the layer blends with what is under it otherwise than by
-    /// covering it, with its values of the frame ([`TypedLayer::blends`]).
+    /// covering it, with its values of the frame: a layer blend
+    /// ([`StyleLayerType::layer_blend`]) other than `normal`.
     fn blends(&self) -> bool;
 
     /// The light the terrain's surface can shade the layer's drapes with
@@ -866,10 +913,10 @@ impl<L: TypedLayer> LayerParts for L {
 
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
         let mut evaluated = self.parts_mut().values.evaluate(parameters);
-        self.complete_evaluation(parameters, &mut evaluated);
-        let passes = self.passes(&evaluated);
+        let evaluation = TypedLayer::evaluate(self, EvaluateCx { parameters, evaluated: &mut evaluated });
         let PartsMut { base, values, .. } = self.parts_mut();
-        base.passes = passes;
+        base.passes = evaluation.passes();
+        base.evaluation = evaluation;
         values.set_evaluated(base, evaluated);
     }
 
@@ -908,7 +955,7 @@ impl<L: TypedLayer> LayerParts for L {
         parameters: &mut PaintParameters<'_>,
         source: Option<LayerSource<'_>>,
     ) {
-        let stands = L::STANDS && parameters.ground.is_some();
+        let stands = L::TERRAIN.stands() && parameters.ground.is_some();
         use_projection_variant(self, ProjectionVariant::new(parameters.view.is_globe(), stands));
         if <L::Type as StyleLayerType>::INFO.source == SourceKind::None {
             // A layer that keeps tiles draws those its update picked.
@@ -937,24 +984,16 @@ impl<L: TypedLayer> LayerParts for L {
         }
     }
 
-    fn drapes(&self) -> bool {
-        L::DRAPES
+    fn terrain(&self) -> OnTerrain {
+        L::TERRAIN
     }
 
-    fn stands(&self) -> bool {
-        L::STANDS
-    }
-
-    fn hides_behind_ground(&self) -> bool {
-        L::HIDES_BEHIND_GROUND
-    }
-
-    fn drapes_by_bearing(&self) -> bool {
-        TypedLayer::drapes_by_bearing(self, &self.parts().values.evaluated)
+    fn volume(&self) -> bool {
+        L::VOLUME
     }
 
     fn blends(&self) -> bool {
-        TypedLayer::blends(self, &self.parts().values.evaluated)
+        L::Type::layer_blend(&self.parts().values.evaluated.paint) != LayerBlendType::Normal
     }
 
     fn surface_light(&mut self, parameters: &PaintParameters<'_>) -> Option<SurfaceLight> {
@@ -963,7 +1002,7 @@ impl<L: TypedLayer> LayerParts for L {
 
     fn new_drape_drawing(&self) -> Option<DrapeDrawing> {
         // Only a layer that drapes builds the code of a drawing in a drape.
-        L::DRAPES.then(|| DrapeDrawing::new(L::Drawing::default()))
+        L::TERRAIN.drapes().then(|| DrapeDrawing::new(L::Drawing::default()))
     }
 
     fn update_drape_draws(
@@ -974,7 +1013,7 @@ impl<L: TypedLayer> LayerParts for L {
         drape: (OverscaledTileID, bool),
         drawing: &mut DrapeDrawing,
     ) {
-        let Some(drawing) = drawing.downcast_mut::<L::Drawing>().filter(|_| L::DRAPES) else {
+        let Some(drawing) = drawing.downcast_mut::<L::Drawing>().filter(|_| L::TERRAIN.drapes()) else {
             debug_assert!(false, "a drape's drawing of another layer's type");
             return;
         };
@@ -1132,24 +1171,6 @@ fn begin_frame<L: TypedLayer + ?Sized>(layer: &mut L) -> bool {
 /// What a layer type does that the engine can't do for it, whatever the
 /// type: the hooks the engine calls on the layers it holds.
 pub(crate) trait RenderLayer: LayerParts {
-    /// Whether the layer draws 3D geometry, whose depth it writes in the
-    /// range of [`PaintParameters::depth_mode_for_3d`].
-    fn is_3d(&self) -> bool {
-        false
-    }
-
-    /// Returns true if the layer may draw depth-tested 3D geometry, which the
-    /// planet's depth hides behind the horizon.
-    fn needs_globe_depth(&self) -> bool {
-        self.is_3d()
-    }
-
-    /// A background layer's color, where it is a solid color the frame can
-    /// clear to instead of drawing the layer.
-    fn solid_background(&self) -> Option<Color> {
-        None
-    }
-
     /// Uploads what draws into the layer's render targets, which draw before
     /// the frame's passes.
     fn upload_render_targets(&mut self, _gpu: &mut dyn Gpu, _context: &mut Context) {}
