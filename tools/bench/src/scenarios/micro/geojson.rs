@@ -5,7 +5,7 @@ use std::hint::black_box;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use mln_style::sources::geojson::{GeoJSONOptions, TileFeatures, create_geojson_data};
+use mln_style::sources::geojson::{GeoJSONOptions, create_geojson_data};
 use mln_tile_id::CanonicalTileID;
 
 use crate::scenario::{Bench, Kind, Scenario};
@@ -106,12 +106,9 @@ fn cut(bench: &mut Bench, every: usize) {
     let data = bench.measure(|| {
         let data = create_geojson_data(geojson, &options).expect("GeoJSON data");
         for tile in &tiles {
-            let features = Arc::clone(&features);
-            let cut = move |tile: Arc<TileFeatures>| {
-                features.fetch_add(tile.len(), Ordering::Relaxed);
-                drop(black_box(tile));
-            };
-            data.get_tile(tile, Box::new(cut), None);
+            let tile = data.get_tile(tile);
+            features.fetch_add(tile.len(), Ordering::Relaxed);
+            drop(black_box(tile));
         }
         data
     });

@@ -22,15 +22,15 @@ use std::cell::{Cell, RefCell, RefMut};
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, OnceLock};
 
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{Map, MapEvent, MapMode, MapOptions, RenderFrameStatus};
 use mln_renderer::{FontStack, GlyphRange, OverscaledTileID, TileOperation, UpdateReader};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Resource, Responder, Response};
-use mln_style::custom_tile_loader::TileFunction;
+use mln_style::sources::custom::TileFunction;
 use mln_style::sources::custom_geometry_source::CustomGeometrySourceHandle;
 use mln_style::sprite::Sprite;
 use mln_tile_id::CanonicalTileID;
@@ -158,17 +158,13 @@ pub(crate) fn center_pixel(image: &PremultipliedImage) -> [u8; 4] {
 // MARK: - Custom geometry sources
 
 /// A custom geometry source's fetch function that answers with `features`
-/// through the handle in `handle`, once it's set, as the C++ tests answer
-/// through `getSource("custom")`.
+/// through the handle it gets, as the C++ tests answer through
+/// `getSource("custom")`.
 pub(crate) fn answer_with(
-    handle: &Arc<OnceLock<CustomGeometrySourceHandle>>,
     features: impl Fn(&CanonicalTileID) -> Vec<geojson::Feature> + Send + Sync + 'static,
-) -> TileFunction {
-    let handle = Arc::clone(handle);
-    Arc::new(move |tile_id: &CanonicalTileID| {
-        if let Some(handle) = handle.get() {
-            handle.set_tile_data(*tile_id, geojson::GeoJson::from(features(tile_id)));
-        }
+) -> TileFunction<geojson::GeoJson> {
+    Arc::new(move |tile_id: &CanonicalTileID, handle: &CustomGeometrySourceHandle| {
+        handle.set_tile_data(*tile_id, geojson::GeoJson::from(features(tile_id)));
     })
 }
 

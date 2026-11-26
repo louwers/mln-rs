@@ -8,7 +8,6 @@ use std::time::Duration;
 use mln_storage::resource::{Priority, TileFormat};
 use mln_storage::response::{Caching, Reason};
 use mln_storage::{Data, FileSource, LoadingMethod, Request, Resource, Response, StoragePolicy};
-use mln_style::custom_tile_loader::{CustomProvider, CustomTileSubscriber, SubscriberKey};
 use mln_style::sources::custom::{CustomVectorTileData, TileDataFormat};
 use mln_style::sources::geojson::{GeoJSONData, TileFeatures};
 use mln_tile::TileData;
@@ -17,10 +16,11 @@ use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::chrono::Timestamp;
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
-use mln_util::pool::Pool;
+use mln_util::pool::TaskGroup;
 use mln_util::tileset::Tileset;
 use parking_lot::Mutex;
 
+use crate::tile::custom_tile_loader::{CustomProvider, CustomTileSubscriber, SubscriberKey};
 use crate::tile::inbox::{InboxSender, SourceData, TileEvent};
 use crate::tile::job::TileKey;
 use crate::tile::tile::{TileInput, TileKind, TileLoadOrder, TileNecessity, TileUpdateParameters};
@@ -49,12 +49,12 @@ pub(crate) enum DataOrigin {
         file_source: Option<Arc<dyn FileSource>>,
         ancestors: Ancestors,
     },
-    GeoJson(Arc<dyn GeoJSONData>),
+    /// `cuts` is where tiles of data that cuts them on demand are cut, off
+    /// the tiles' thread: a lane of its own, which takes turns with the
+    /// workers' other work.
+    GeoJson { data: Arc<dyn GeoJSONData>, cuts: TaskGroup },
     /// Fetches only the tiles that are required.
-    Custom {
-        loader: Arc<dyn CustomLoader>,
-        fast_pfor_enabled: bool,
-    },
+    Custom { loader: Arc<dyn CustomLoader>, fast_pfor_enabled: bool },
 }
 
 impl DataOrigin {
@@ -75,7 +75,7 @@ impl DataOrigin {
     ) -> (TileInput, Option<Arc<Ancestor>>) {
         let sparse = match self {
             DataOrigin::Tileset { tileset, .. } => tileset.sparse,
-            DataOrigin::GeoJson(_) | DataOrigin::Custom { .. } => false,
+            DataOrigin::GeoJson { .. } | DataOrigin::Custom { .. } => false,
         };
         let not_found = res.tile_not_found || res.error.as_ref().is_some_and(|e| e.reason == Reason::NotFound);
         let empty = res.no_content || not_found;
@@ -121,7 +121,7 @@ impl DataOrigin {
                     None => (encoding.decode(data), None),
                 }
             }
-            DataOrigin::GeoJson(_) | DataOrigin::Custom { .. } => (VectorTileEncoding::Mvt.decode(data), None),
+            DataOrigin::GeoJson { .. } | DataOrigin::Custom { .. } => (VectorTileEncoding::Mvt.decode(data), None),
         }
     }
 
@@ -436,7 +436,7 @@ impl Load {
                     data_hash: None,
                 }))
             }
-            DataOrigin::GeoJson(_) => OriginLoad::GeoJson { load: None },
+            DataOrigin::GeoJson { .. } => OriginLoad::GeoJson { load: None },
             DataOrigin::Custom { .. } => OriginLoad::Custom(CustomLoad::Unsubscribed),
         };
         Load { necessity: TileNecessity::Optional, origin }
@@ -585,40 +585,40 @@ pub(crate) struct TilesetAnswered {
     data_hash: Option<u64>,
 }
 
-/// Asks GeoJSON `data` for `tile`'s features, as load `load`, cut on `pool`
-/// if there is one: returns them if they answer before this returns, else
-/// they go to `inbox`.
+/// Asks GeoJSON `data` for `tile`'s features, as load `load`, cut in `cuts`
+/// if there is one and the data cuts its tiles on demand: returns them if
+/// they answer before this returns, else they go to `inbox`.
 pub(crate) fn request_geojson_tile(
     data: &Arc<dyn GeoJSONData>,
     tile: TileKey,
     load: u64,
     inbox: &InboxSender,
-    pool: Option<&Pool>,
+    cuts: Option<&TaskGroup>,
 ) -> Option<TileData> {
+    let Some(cuts) = cuts.filter(|_| data.cuts_on_demand()) else {
+        return Some(TileData::Features(data.get_tile(&tile.id.canonical)));
+    };
     let slot: Arc<Mutex<Answered>> = Arc::default();
-    let callback_slot = Arc::clone(&slot);
-    let inbox = inbox.clone();
-    data.get_tile(
-        &tile.id.canonical,
-        Box::new(move |features: Arc<TileFeatures>| {
-            let data = TileData::Features(features);
-            let mut slot = callback_slot.lock();
-            if matches!(*slot, Answered::Later) {
-                drop(slot);
-                inbox.send(TileEvent::Data { tile, load, data: SourceData::Data(Some(data)) });
-            } else {
-                *slot = Answered::Now(data);
-            }
-        }),
-        pool,
-    );
+    let task_slot = Arc::clone(&slot);
+    let (data_for_task, inbox) = (Arc::clone(data), inbox.clone());
+    cuts.spawn(move || {
+        let data = TileData::Features(data_for_task.get_tile(&tile.id.canonical));
+        let mut slot = task_slot.lock();
+        if matches!(*slot, Answered::Later) {
+            drop(slot);
+            inbox.send(TileEvent::Data { tile, load, data: SourceData::Data(Some(data)) });
+        } else {
+            *slot = Answered::Now(data);
+        }
+    });
     match std::mem::replace(&mut *slot.lock(), Answered::Later) {
         Answered::Now(data) => Some(data),
         Answered::Pending | Answered::Later => None,
     }
 }
 
-/// When GeoJSON data answered: before `get_tile` returned, or after.
+/// When a tile cut off the tiles' thread answered: before its request
+/// returned, or after.
 #[derive(Default)]
 enum Answered {
     #[default]

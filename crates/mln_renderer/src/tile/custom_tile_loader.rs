@@ -1,11 +1,16 @@
 //! The provider of a custom source's tile data: [`CustomProvider`] asks the
 //! host for each canonical tile that a tile needs, and hands the host's
 //! answers to the tiles. It is generic over the data it hands them, and
-//! reaches a tile through [`CustomTileSubscriber`], since the tiles live in
-//! `mln_renderer`.
+//! reaches a tile through [`CustomTileSubscriber`].
 
 use std::sync::{Arc, Weak};
 
+use mln_style::sources::custom::{
+    CustomGeometrySourceOptions, CustomSourceHandle, CustomTileResponder, CustomVectorSourceOptions,
+    CustomVectorTileData, TileFunction, TileFunctions,
+};
+use mln_style::sources::custom_geometry_source::tile_features;
+use mln_style::sources::geojson::TileFeatures;
 use mln_tile_id::tile_range::TileRange;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
@@ -14,14 +19,18 @@ use mln_util::hash::HashMap;
 use mln_util::pool::{Pool, TaskGroup};
 use parking_lot::Mutex;
 
-/// Called with the canonical ID of a tile that the map needs, or no longer
-/// needs. It runs on a pool thread (see [`CustomProvider`]).
-pub type TileFunction = Arc<dyn Fn(&CanonicalTileID) + Send + Sync>;
+/// One of the host's tile functions, as the provider calls it: with the
+/// canonical ID of a tile that the map needs, or no longer needs. It runs on
+/// a pool thread (see [`CustomProvider`]).
+pub(crate) type HostFunction = Box<dyn Fn(&CanonicalTileID) + Send + Sync>;
+
+/// The host's fetch and cancel functions.
+pub(crate) type HostFunctions = (Option<HostFunction>, Option<HostFunction>);
 
 /// A tile that receives a canonical tile's data from a custom source's
 /// provider. Each call sends a message to the tile, which runs it on the
 /// tile's own thread.
-pub trait CustomTileSubscriber<D>: Send {
+pub(crate) trait CustomTileSubscriber<D>: Send {
     fn set_tile_data(&self, data: D);
     fn set_tile_error(&self, error: Error);
     /// Marks the tile's data stale, so that it fetches again when it is next
@@ -32,7 +41,7 @@ pub trait CustomTileSubscriber<D>: Send {
 /// Identifies a tile to the provider. Wrapped and overscaled tiles share their
 /// canonical tile's data, and `TilePyramid` changes the wrap of a tile's ID,
 /// so a tile is identified by this key rather than by its ID.
-pub type SubscriberKey = u64;
+pub(crate) type SubscriberKey = u64;
 
 /// A tile that receives a canonical tile's data.
 struct Subscriber<D> {
@@ -244,58 +253,65 @@ impl<D: Clone> CustomTileLoader<D> {
 /// answer from inside its fetch function, on any thread: the answer runs
 /// after the fetch. A call that runs after the provider is gone does
 /// nothing.
-pub struct CustomProvider<D: Clone + Send + 'static> {
-    fetch_tile_function: Option<TileFunction>,
-    cancel_tile_function: Option<TileFunction>,
+pub(crate) struct CustomProvider<D: Clone + Send + 'static> {
+    fetch_tile_function: Option<HostFunction>,
+    cancel_tile_function: Option<HostFunction>,
     loader: Mutex<CustomTileLoader<D>>,
     calls: TaskGroup,
     this: Weak<Self>,
 }
 
 impl<D: Clone + Send + 'static> CustomProvider<D> {
-    /// A provider whose host functions run on `pool`.
+    /// A provider whose host functions, which `host` makes for it, run on
+    /// `pool`. `host` gets the provider, for the handle that the functions
+    /// give the host.
     #[must_use]
-    pub fn new(
-        fetch_tile_function: Option<TileFunction>,
-        cancel_tile_function: Option<TileFunction>,
-        pool: &Pool,
-    ) -> Arc<Self> {
-        Arc::new_cyclic(|this| CustomProvider {
-            fetch_tile_function,
-            cancel_tile_function,
-            loader: Mutex::new(CustomTileLoader::new()),
-            calls: TaskGroup::serial(pool),
-            this: Weak::clone(this),
+    pub(crate) fn new(pool: &Pool, host: impl FnOnce(&Weak<Self>) -> HostFunctions) -> Arc<Self> {
+        Arc::new_cyclic(|this| {
+            let (fetch_tile_function, cancel_tile_function) = host(this);
+            CustomProvider {
+                fetch_tile_function,
+                cancel_tile_function,
+                loader: Mutex::new(CustomTileLoader::new()),
+                calls: TaskGroup::serial(pool),
+                this: Weak::clone(this),
+            }
         })
     }
 
     /// Records that the tile `key`, `tile_id`, needs its data, which goes to
     /// `tile`: the cached data if there is any, or else the host's answer.
-    pub fn fetch_tile(&self, tile_id: OverscaledTileID, key: SubscriberKey, tile: Box<dyn CustomTileSubscriber<D>>) {
+    pub(crate) fn fetch_tile(
+        &self,
+        tile_id: OverscaledTileID,
+        key: SubscriberKey,
+        tile: Box<dyn CustomTileSubscriber<D>>,
+    ) {
         self.with_loader(move |loader| loader.fetch_tile(&tile_id, key, tile));
     }
 
     /// Records that the tile no longer needs its data. It stays subscribed,
     /// so it fetches again when it is next needed.
-    pub fn cancel_tile(&self, tile_id: OverscaledTileID, key: SubscriberKey) {
+    pub(crate) fn cancel_tile(&self, tile_id: OverscaledTileID, key: SubscriberKey) {
         self.with_loader(move |loader| loader.cancel_tile(&tile_id, key));
     }
 
     /// Forgets a tile that is gone. The cached data goes with the last tile
     /// that shares it.
-    pub fn remove_tile(&self, tile_id: OverscaledTileID, key: SubscriberKey) {
+    pub(crate) fn remove_tile(&self, tile_id: OverscaledTileID, key: SubscriberKey) {
         self.with_loader(move |loader| loader.remove_tile(&tile_id, key));
     }
 
     /// Hands over the host's data for a tile. It is dropped unless a tile
     /// needs it.
-    pub fn set_tile_data(&self, tile_id: CanonicalTileID, data: D) {
+    #[cfg(test)]
+    pub(crate) fn set_tile_data(&self, tile_id: CanonicalTileID, data: D) {
         self.with_loader(move |loader| loader.set_tile_data(&tile_id, data));
     }
 
     /// Hands over the data that `make` makes, in the provider's turn and
     /// outside the lock, if a tile needs the canonical tile's data.
-    pub fn set_tile_data_with(&self, tile_id: CanonicalTileID, make: impl FnOnce() -> D + Send + 'static) {
+    pub(crate) fn set_tile_data_with(&self, tile_id: CanonicalTileID, make: impl FnOnce() -> D + Send + 'static) {
         self.call(move |provider| {
             if provider.loader.lock().is_required(&tile_id) {
                 let data = make();
@@ -307,18 +323,18 @@ impl<D: Clone + Send + 'static> CustomProvider<D> {
     /// Reports that the host failed to load a tile. The tiles stay
     /// subscribed, so invalidating the tile or needing it again fetches it
     /// again.
-    pub fn set_tile_error(&self, tile_id: CanonicalTileID, error: Error) {
+    pub(crate) fn set_tile_error(&self, tile_id: CanonicalTileID, error: Error) {
         self.with_loader(move |loader| loader.set_tile_error(&tile_id, &error));
     }
 
     /// Drops the tile's data, and asks the host for it again if a tile
     /// needs it.
-    pub fn invalidate_tile(&self, tile_id: CanonicalTileID) {
+    pub(crate) fn invalidate_tile(&self, tile_id: CanonicalTileID) {
         self.with_loader(move |loader| loader.invalidate_tile(&tile_id));
     }
 
     /// Invalidates each tile that `bounds` intersect, at the tile's own zoom.
-    pub fn invalidate_region(&self, bounds: LatLngBounds) {
+    pub(crate) fn invalidate_region(&self, bounds: LatLngBounds) {
         self.with_loader(move |loader| loader.invalidate_region(&bounds));
     }
 
@@ -359,9 +375,96 @@ impl<D: Clone + Send + 'static> CustomProvider<D> {
     }
 }
 
+/// The provider of a custom geometry source: it hands tiles their features,
+/// cut from the host's GeoJSON.
+pub(crate) type CustomGeometryProvider = CustomProvider<Arc<TileFeatures>>;
+
+/// The provider of a custom vector source.
+pub(crate) type CustomVectorProvider = CustomProvider<CustomVectorTileData>;
+
+impl CustomGeometryProvider {
+    /// The provider of the tiles of a source of `options`, whose host
+    /// functions run on `pool`. It cuts the host's GeoJSON in its turn,
+    /// only for a tile that needs it.
+    pub(crate) fn of_source(options: &CustomGeometrySourceOptions, pool: &Pool) -> Arc<Self> {
+        let tile_options = Arc::clone(&options.tile_options);
+        CustomProvider::new(pool, |provider| {
+            let make: MakeData<_, Arc<TileFeatures>> = Arc::new(move |geojson, tile_id: &CanonicalTileID| {
+                Arc::new(tile_features(geojson, tile_id, &tile_options))
+            });
+            host_functions(&options.tile_functions, Responder { provider: Weak::clone(provider), make })
+        })
+    }
+}
+
+impl CustomVectorProvider {
+    /// The provider of the tiles of a source of `options`, whose host
+    /// functions run on `pool`.
+    pub(crate) fn of_source(options: &CustomVectorSourceOptions, pool: &Pool) -> Arc<Self> {
+        CustomProvider::new(pool, |provider| {
+            let make: MakeData<CustomVectorTileData, CustomVectorTileData> = Arc::new(|data, _| data);
+            host_functions(&options.tile_functions, Responder { provider: Weak::clone(provider), make })
+        })
+    }
+}
+
+/// The tiles' data of the host's answer `A` for a tile.
+type MakeData<A, D> = Arc<dyn Fn(A, &CanonicalTileID) -> D + Send + Sync>;
+
+/// The host's `functions` as a provider calls them, each with a handle
+/// over `responder`.
+fn host_functions<A: 'static>(
+    functions: &TileFunctions<A>,
+    responder: impl CustomTileResponder<A> + 'static,
+) -> HostFunctions {
+    let handle = CustomSourceHandle::new(Arc::new(responder));
+    let bind = |function: &Option<TileFunction<A>>| -> Option<HostFunction> {
+        let (function, handle) = (Arc::clone(function.as_ref()?), handle.clone());
+        Some(Box::new(move |tile_id: &CanonicalTileID| function(tile_id, &handle)))
+    };
+    (bind(&functions.fetch_tile), bind(&functions.cancel_tile))
+}
+
+/// What a custom source's handle reaches: a provider, while it lives, and
+/// how it makes the tiles' data of the host's answers.
+struct Responder<A, D: Clone + Send + 'static> {
+    provider: Weak<CustomProvider<D>>,
+    make: MakeData<A, D>,
+}
+
+impl<A: Send + 'static, D: Clone + Send + 'static> CustomTileResponder<A> for Responder<A, D> {
+    fn set_tile_data(&self, tile_id: CanonicalTileID, data: A) {
+        if let Some(provider) = self.provider.upgrade() {
+            let make = Arc::clone(&self.make);
+            provider.set_tile_data_with(tile_id, move || make(data, &tile_id));
+        }
+    }
+
+    fn set_tile_error(&self, tile_id: CanonicalTileID, error: Error) {
+        if let Some(provider) = self.provider.upgrade() {
+            provider.set_tile_error(tile_id, error);
+        }
+    }
+
+    fn invalidate_tile(&self, tile_id: CanonicalTileID) {
+        if let Some(provider) = self.provider.upgrade() {
+            provider.invalidate_tile(tile_id);
+        }
+    }
+
+    fn invalidate_region(&self, bounds: LatLngBounds) {
+        if let Some(provider) = self.provider.upgrade() {
+            provider.invalidate_region(bounds);
+        }
+    }
+
+    fn is_closed(&self) -> bool {
+        self.provider.strong_count() == 0
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::sync::OnceLock;
     use std::thread::ThreadId;
 
     use super::*;
@@ -383,18 +486,16 @@ mod tests {
     fn host_calls_run_off_the_calling_thread_in_order_and_may_reenter() {
         let pool = Pool::new(4);
         let fetches: Arc<Mutex<Vec<(ThreadId, CanonicalTileID)>>> = Arc::default();
-        let provider_cell: Arc<OnceLock<Weak<CustomProvider<u32>>>> = Arc::default();
-        let fetch: TileFunction = {
-            let (fetches, provider_cell) = (Arc::clone(&fetches), Arc::clone(&provider_cell));
-            Arc::new(move |tile_id: &CanonicalTileID| {
+        let provider = CustomProvider::new(&pool, |provider: &Weak<CustomProvider<u32>>| {
+            let (fetches, provider) = (Arc::clone(&fetches), Weak::clone(provider));
+            let fetch: HostFunction = Box::new(move |tile_id: &CanonicalTileID| {
                 fetches.lock().push((std::thread::current().id(), *tile_id));
-                if let Some(provider) = provider_cell.get().and_then(Weak::upgrade) {
+                if let Some(provider) = provider.upgrade() {
                     provider.set_tile_data(*tile_id, tile_id.x);
                 }
-            })
-        };
-        let provider = CustomProvider::new(Some(fetch), None, &pool);
-        let _ = provider_cell.set(Arc::downgrade(&provider));
+            });
+            (Some(fetch), None)
+        });
 
         let received: Arc<Mutex<Vec<u32>>> = Arc::default();
         let tiles: Vec<_> = (0..8).map(|x| CanonicalTileID::new(3, x, 0)).collect();

@@ -1,21 +1,17 @@
 //! Custom geometry sources, whose tiles' GeoJSON the host gives on demand.
 //! The host answers its tile functions, which run on a pool thread, through
-//! a [`CustomGeometrySourceHandle`].
+//! the [`CustomGeometrySourceHandle`] they get.
 
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 
 use geojson::GeoJson;
 use mln_util::constants;
-use mln_util::error::Error;
-use mln_util::geo::LatLngBounds;
 use mln_util::logging::{Event, Log};
-use mln_util::pool::Pool;
 use mln_util::range::Range;
 
-pub use super::custom::{CustomGeometryProvider, TileOptions};
-use super::custom::{CustomGeometrySourceOptions, CustomGeometrySourceType};
+pub use super::custom::{CustomGeometrySourceHandle, TileOptions};
+use super::custom::{CustomGeometrySourceOptions, CustomGeometrySourceType, TileFunction, TileFunctions};
 use super::geojson::TileFeatures;
-use crate::custom_tile_loader::{CustomProvider, TileFunction};
 use crate::feature::CanonicalTileID;
 use crate::source::{Source, SourceData};
 
@@ -23,9 +19,9 @@ use crate::source::{Source, SourceData};
 pub struct Options {
     /// Asks the host for a tile's data, which it gives with
     /// [`CustomGeometrySourceHandle::set_tile_data`].
-    pub fetch_tile_function: Option<TileFunction>,
+    pub fetch_tile_function: Option<TileFunction<GeoJson>>,
     /// Tells the host that no tile needs a tile's data any more.
-    pub cancel_tile_function: Option<TileFunction>,
+    pub cancel_tile_function: Option<TileFunction<GeoJson>>,
     pub zoom_range: Range<u8>,
     pub tile_options: TileOptions,
 }
@@ -61,10 +57,12 @@ pub enum CustomGeometrySourceError {
     InvalidTileSize(u16),
 }
 
-/// Cuts the host's GeoJSON for a tile, as `CustomGeometryTile::setTileData`
-/// does. Anything but a non-empty feature collection is an empty tile, and
-/// so is one whose geometry `geo_types` can't hold, which is logged.
-fn tile_features(geojson: GeoJson, tile_id: &CanonicalTileID, options: &TileOptions) -> TileFeatures {
+/// Cuts the host's GeoJSON for tile `tile_id` with a source's `options`, as
+/// `CustomGeometryTile::setTileData` does. Anything but a non-empty feature
+/// collection is an empty tile, and so is one whose geometry `geo_types`
+/// can't hold, which is logged.
+#[must_use]
+pub fn tile_features(geojson: GeoJson, tile_id: &CanonicalTileID, options: &TileOptions) -> TileFeatures {
     if !matches!(&geojson, GeoJson::FeatureCollection(c) if !c.features.is_empty()) {
         return TileFeatures::new();
     }
@@ -86,77 +84,19 @@ fn tile_features(geojson: GeoJson, tile_id: &CanonicalTileID, options: &TileOpti
     mln_geojson::tile::cut_tile(&features, tile_id.z, tile_id.x, tile_id.y, &tile_options, options.wrap, options.clip)
 }
 
-/// A `Send` handle to a custom geometry source's provider, for the host to
-/// answer its tile functions from any thread. It does nothing once the
-/// source is gone.
-#[derive(Clone)]
-pub struct CustomGeometrySourceHandle {
-    provider: Weak<CustomGeometryProvider>,
-    tile_options: Arc<TileOptions>,
-}
-
-impl std::fmt::Debug for CustomGeometrySourceHandle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CustomGeometrySourceHandle").finish_non_exhaustive()
-    }
-}
-
-impl CustomGeometrySourceHandle {
-    /// The handle of `source`, if it's a custom geometry source.
-    #[must_use]
-    pub fn of(source: &Source) -> Option<Self> {
-        let data = SourceData::<CustomGeometrySourceType>::recover(source)?;
-        Some(CustomGeometrySourceHandle {
-            provider: Arc::downgrade(&data.options.provider),
-            tile_options: Arc::clone(&data.options.tile_options),
-        })
-    }
-
-    /// Hands over the tile's features. The GeoJSON is cut to the tile on the
-    /// provider's pool thread, and only if a tile needs it.
-    pub fn set_tile_data(&self, tile_id: CanonicalTileID, data: GeoJson) {
-        if let Some(provider) = self.provider.upgrade() {
-            let options = Arc::clone(&self.tile_options);
-            provider.set_tile_data_with(tile_id, move || Arc::new(tile_features(data, &tile_id, &options)));
-        }
-    }
-
-    /// Reports that the host failed to load the tile. Invalidating the tile, or
-    /// needing it again, asks for it again.
-    pub fn set_tile_error(&self, tile_id: CanonicalTileID, error: Error) {
-        if let Some(provider) = self.provider.upgrade() {
-            provider.set_tile_error(tile_id, error);
-        }
-    }
-
-    /// Drops the tile's data, and asks the host for it again if a tile needs
-    /// it.
-    pub fn invalidate_tile(&self, tile_id: CanonicalTileID) {
-        if let Some(provider) = self.provider.upgrade() {
-            provider.invalidate_tile(tile_id);
-        }
-    }
-
-    /// Invalidates every tile that `bounds` intersect.
-    pub fn invalidate_region(&self, bounds: LatLngBounds) {
-        if let Some(provider) = self.provider.upgrade() {
-            provider.invalidate_region(bounds);
-        }
-    }
-}
-
-/// The custom geometry source `id`, whose tile functions run on `pool`.
-/// Fails for a tile size that isn't a power of two up to the tile extent.
-pub fn create(id: &str, options: Options, pool: &Pool) -> Result<Source, CustomGeometrySourceError> {
+/// The custom geometry source `id`. Fails for a tile size that isn't a power
+/// of two up to the tile extent.
+pub fn create(id: &str, options: Options) -> Result<Source, CustomGeometrySourceError> {
     let tile_size = options.tile_options.tile_size;
     if !tile_size.is_power_of_two() || i32::from(tile_size) > constants::EXTENT {
         return Err(CustomGeometrySourceError::InvalidTileSize(tile_size));
     }
-    let provider = CustomProvider::new(options.fetch_tile_function, options.cancel_tile_function, pool);
+    let tile_functions =
+        TileFunctions { fetch_tile: options.fetch_tile_function, cancel_tile: options.cancel_tile_function };
     let options = CustomGeometrySourceOptions {
         tile_options: Arc::new(options.tile_options),
         zoom_range: options.zoom_range,
-        provider,
+        tile_functions: Arc::new(tile_functions),
     };
     Ok(Source::new(id, SourceData::<CustomGeometrySourceType>::new(options)))
 }
@@ -168,7 +108,7 @@ mod tests {
     fn with_tile_size(tile_size: u16) -> Result<Source, CustomGeometrySourceError> {
         let mut options = Options::default();
         options.tile_options.tile_size = tile_size;
-        create("custom", options, &Pool::local())
+        create("custom", options)
     }
 
     #[test]

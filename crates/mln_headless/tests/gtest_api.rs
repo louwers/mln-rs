@@ -1,4 +1,4 @@
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use geojson::{Feature, GeoJson, Geometry};
 use mln_headless::HeadlessFrontend;
@@ -9,7 +9,6 @@ use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::Edit;
 use mln_style::conversion::Convertible;
 use mln_style::layer::Layer;
-use mln_style::sources::CustomGeometrySourceHandle;
 use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
 use mln_style::sources::geojson::GeoJSONOptions;
 use mln_util::geo::{LatLng, LatLngBounds};
@@ -61,9 +60,8 @@ fn grid() {
         ..Default::default()
     });
 
-    let handle = Arc::new(OnceLock::new());
     let options = CustomGeometrySourceOptions {
-        fetch_tile_function: Some(answer_with(&handle, |tile_id| {
+        fetch_tile_function: Some(answer_with(|tile_id| {
             let grid_spacing = 0.1;
             let mut features = Vec::new();
             let bounds = LatLngBounds::from_canonical_tile(tile_id.z, tile_id.x, tile_id.y);
@@ -85,8 +83,7 @@ fn grid() {
         ..Default::default()
     };
 
-    let source = custom_geometry_source::create("custom", options, &pool).unwrap();
-    handle.set(CustomGeometrySourceHandle::of(&source).unwrap()).unwrap();
+    let source = custom_geometry_source::create("custom", options).unwrap();
     map.add_source(source).unwrap();
 
     let mut fill_layer = Layer::new(Registry::with_builtins().style(), "fill", "landcover", "mapbox").unwrap();

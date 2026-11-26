@@ -15,13 +15,13 @@ use mln_storage::FileSource;
 use mln_style::Source;
 use mln_style::layer::SourceKind;
 use mln_style::source::{ErasedStyleSourceType, SourceData, SourceTypeEntry, StyleSourceType};
-use mln_style::sources::custom::{CustomGeometryProvider, CustomVectorProvider};
 use mln_style::sources::geojson::GeoJSONData;
 use mln_style::sources::tileset::{TilesetKind, TilesetSourceType};
 use mln_style::sources::{CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType};
 use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::geo::LatLngBounds;
+use mln_util::pool::{Pool, TaskGroup};
 use mln_util::range::Range;
 use mln_util::tileset::{RasterEncoding, Tileset, VectorEncoding};
 
@@ -29,6 +29,7 @@ use crate::query::FeatureExtensionValue;
 use crate::render_source::RenderSource;
 use crate::sources::render_image_source::RenderImageSource;
 use crate::sources::render_tile_source::RenderTileSource;
+use crate::tile::custom_tile_loader::{CustomGeometryProvider, CustomVectorProvider};
 use crate::tile::loading::{Ancestors, CustomLoader, DataOrigin, VectorTileEncoding};
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::{StoreContext, TileStore};
@@ -265,19 +266,21 @@ impl TileOrigin for GeoJsonOrigin {
         let previous = self.data.as_ref().and_then(Weak::upgrade);
         if !same_data(previous.as_ref(), data.as_ref()) {
             self.data = data.as_ref().map(Arc::downgrade);
-            tiles.info.origin = data.as_ref().map(|data| DataOrigin::GeoJson(Arc::clone(data)));
+            tiles.info.origin = data
+                .as_ref()
+                .map(|data| DataOrigin::GeoJson { data: Arc::clone(data), cuts: TaskGroup::new(ctx.pool.pool()) });
             tiles.info.synchronous = parameters.is_update_synchronous;
             if parameters.mode != MapMode::Continuous {
                 // Clearing the tiles in order to avoid render tests being
                 // flaky.
                 tiles.clear_all(ctx);
-            } else if let Some(data) = &data {
+            } else if data.is_some() {
                 tiles.reduce_memory_use(ctx);
                 let max_z = source.options.get_zoom_range().max;
                 tiles.update_each(
                     ctx,
                     |slot| !slot.place().is_cached() && slot.tile.id.canonical.z <= max_z,
-                    |tile| tile.load_geojson(data, update.needs_relayout),
+                    |tile| tile.load_geojson(update.needs_relayout),
                 );
             }
         }
@@ -356,45 +359,75 @@ impl SourceType for ImageSourceType {
 
 impl SourceType for CustomGeometrySourceType {
     fn render_source(source: &Source, store: &mut TileStore) -> Box<dyn RenderSource> {
-        Box::new(RenderTileSource::new(source.clone(), TileKind::Geometry, true, Box::new(CustomGeometryOrigin), store))
+        let origin = CustomOrigin::<Self>::new();
+        Box::new(RenderTileSource::new(source.clone(), TileKind::Geometry, true, Box::new(origin), store))
     }
 }
 
 impl SourceType for CustomVectorSourceType {
     fn render_source(source: &Source, store: &mut TileStore) -> Box<dyn RenderSource> {
-        Box::new(RenderTileSource::new(source.clone(), TileKind::Geometry, false, Box::new(CustomVectorOrigin), store))
+        let origin = CustomOrigin::<Self>::new();
+        Box::new(RenderTileSource::new(source.clone(), TileKind::Geometry, false, Box::new(origin), store))
     }
 }
 
-/// Points the tiles of a custom source at its provider. New options, zoom
-/// range or provider clear them.
-fn update_custom<T: StyleSourceType>(
-    previous: &Source,
-    source: &Source,
-    tiles: &mut SourceTiles,
-    ctx: &mut StoreContext,
-    update: &OriginUpdate<'_, '_>,
-    differs: impl FnOnce(&SourceData<T>, &SourceData<T>) -> bool,
-    parts: impl FnOnce(&SourceData<T>) -> (Arc<dyn CustomLoader>, u16, Range<u8>),
-) -> Option<Cover> {
-    let data = SourceData::<T>::recover(source)?;
-    let same = Source::ptr_eq(previous, source);
-    let differs = SourceData::<T>::recover(previous).is_none_or(|previous| differs(data, previous));
-    if !same && differs {
-        tiles.clear_all(ctx);
-    }
-    let (loader, tile_size, zoom_range) = parts(data);
-    if tiles.info.origin.is_none() || !same {
-        tiles.info.origin = Some(DataOrigin::Custom { loader, fast_pfor_enabled: update.fast_pfor_enabled });
-    }
-    Some(Cover { tile_size, zoom_range, bounds: None })
+/// A custom source type: what of its data decides its tiles, and the
+/// provider of their data.
+trait CustomSource: StyleSourceType {
+    /// Whether tiles made for `a` don't suit `b`.
+    fn differs(a: &SourceData<Self>, b: &SourceData<Self>) -> bool;
+
+    /// A new provider of `data`'s tiles, whose host functions run on `pool`.
+    fn provider(data: &SourceData<Self>, pool: &Pool) -> Arc<dyn CustomLoader>;
+
+    /// The size of `data`'s tiles and their zoom range.
+    fn cover(data: &SourceData<Self>) -> (u16, Range<u8>);
 }
 
-/// A custom geometry source's tiles, which take their features from its
-/// provider.
-struct CustomGeometryOrigin;
+impl CustomSource for CustomGeometrySourceType {
+    fn differs(a: &SourceData<Self>, b: &SourceData<Self>) -> bool {
+        a.differs(b)
+    }
 
-impl TileOrigin for CustomGeometryOrigin {
+    fn provider(data: &SourceData<Self>, pool: &Pool) -> Arc<dyn CustomLoader> {
+        CustomGeometryProvider::of_source(&data.options, pool)
+    }
+
+    fn cover(data: &SourceData<Self>) -> (u16, Range<u8>) {
+        (data.options.tile_options.tile_size, data.options.zoom_range)
+    }
+}
+
+impl CustomSource for CustomVectorSourceType {
+    fn differs(a: &SourceData<Self>, b: &SourceData<Self>) -> bool {
+        a.differs(b)
+    }
+
+    fn provider(data: &SourceData<Self>, pool: &Pool) -> Arc<dyn CustomLoader> {
+        CustomVectorProvider::of_source(&data.options, pool)
+    }
+
+    fn cover(data: &SourceData<Self>) -> (u16, Range<u8>) {
+        (constants::TILE_SIZE_I, data.options.zoom_range)
+    }
+}
+
+/// A custom source's tiles, which take their data from the provider that
+/// the origin keeps for the source's tile functions.
+struct CustomOrigin<T> {
+    provider: Option<Arc<dyn CustomLoader>>,
+    source_type: PhantomData<fn() -> T>,
+}
+
+impl<T> CustomOrigin<T> {
+    fn new() -> Self {
+        CustomOrigin { provider: None, source_type: PhantomData }
+    }
+}
+
+impl<T: CustomSource> TileOrigin for CustomOrigin<T> {
+    /// Points the tiles at the source's provider. New options, zoom range or
+    /// tile functions clear them, and get a new provider.
     fn update(
         &mut self,
         previous: &Source,
@@ -403,46 +436,19 @@ impl TileOrigin for CustomGeometryOrigin {
         ctx: &mut StoreContext,
         update: &OriginUpdate<'_, '_>,
     ) -> Option<Cover> {
-        update_custom::<CustomGeometrySourceType>(
-            previous,
-            source,
-            tiles,
-            ctx,
-            update,
-            SourceData::<CustomGeometrySourceType>::differs,
-            |data| {
-                let options = &data.options;
-                let provider: Arc<dyn CustomLoader> = Arc::<CustomGeometryProvider>::clone(&options.provider);
-                (provider, options.tile_options.tile_size, options.zoom_range)
-            },
-        )
-    }
-}
-
-/// A custom vector source's tiles, which decode the bytes its provider
-/// gives.
-struct CustomVectorOrigin;
-
-impl TileOrigin for CustomVectorOrigin {
-    fn update(
-        &mut self,
-        previous: &Source,
-        source: &Source,
-        tiles: &mut SourceTiles,
-        ctx: &mut StoreContext,
-        update: &OriginUpdate<'_, '_>,
-    ) -> Option<Cover> {
-        update_custom::<CustomVectorSourceType>(
-            previous,
-            source,
-            tiles,
-            ctx,
-            update,
-            SourceData::<CustomVectorSourceType>::differs,
-            |data| {
-                let provider: Arc<dyn CustomLoader> = Arc::<CustomVectorProvider>::clone(&data.options.provider);
-                (provider, constants::TILE_SIZE_I, data.options.zoom_range)
-            },
-        )
+        let data = SourceData::<T>::recover(source)?;
+        let same = Source::ptr_eq(previous, source);
+        let differs = SourceData::<T>::recover(previous).is_none_or(|previous| T::differs(data, previous));
+        if !same && differs {
+            tiles.clear_all(ctx);
+            self.provider = None;
+        }
+        let provider = self.provider.get_or_insert_with(|| T::provider(data, ctx.pool.pool()));
+        if tiles.info.origin.is_none() || !same {
+            let loader = Arc::clone(provider);
+            tiles.info.origin = Some(DataOrigin::Custom { loader, fast_pfor_enabled: update.fast_pfor_enabled });
+        }
+        let (tile_size, zoom_range) = T::cover(data);
+        Some(Cover { tile_size, zoom_range, bounds: None })
     }
 }

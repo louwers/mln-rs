@@ -2,8 +2,8 @@
 //!
 //! Each type's module ([`tileset`], [`geojson`], [`image`], [`custom`]) is
 //! canonical for its marker type, options and data, and makes its sources.
-//! The custom sources' modules hold the handles that their hosts answer
-//! tile requests through, and re-export the types their callers name.
+//! The custom sources' modules re-export the types their callers name, such
+//! as the handles that their hosts answer tile requests through.
 
 pub mod custom;
 pub mod custom_geometry_source;
@@ -12,9 +12,10 @@ pub mod geojson;
 pub mod image;
 pub mod tileset;
 
-pub use custom::{CustomGeometrySourceType, CustomVectorSourceType, TileDataFormat};
-pub use custom_geometry_source::CustomGeometrySourceHandle;
-pub use custom_vector_source::CustomVectorSourceHandle;
+pub use custom::{
+    CustomGeometrySourceHandle, CustomGeometrySourceType, CustomSourceHandle, CustomVectorSourceHandle,
+    CustomVectorSourceType, TileDataFormat,
+};
 pub use geojson::{GeoJSONData, GeoJSONOptions, GeoJsonSourceType, geojson_source};
 pub use image::{ImageSourceType, image_source};
 pub use tileset::{

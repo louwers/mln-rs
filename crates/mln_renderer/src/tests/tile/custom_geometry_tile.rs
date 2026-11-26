@@ -8,10 +8,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use feature::Feature;
 use geo_types::Point;
-use mln_style::custom_tile_loader::{CustomProvider, TileFunction};
 use mln_style::layer::{Layer, LayerStyle};
 use mln_style::layers::Circle;
-use mln_style::sources::custom_geometry_source::CustomGeometryProvider;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use parking_lot::Mutex;
@@ -22,10 +20,14 @@ use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::query::SourceQueryOptions;
 use crate::tests::OneTile;
 use crate::tile::contents::Contents;
+use crate::tile::custom_tile_loader::{CustomGeometryProvider, CustomProvider, HostFunction};
 use crate::tile::loading::DataOrigin;
 use crate::tile::store::StoreEvent;
 use crate::tile::tile::{TileKind, TileNecessity, TileOperation};
 use crate::tile::tile_workers::InlineWorkers;
+
+/// A host's tile function, as the tests share it.
+type TileFunction = Arc<dyn Fn(&CanonicalTileID) + Send + Sync>;
 
 /// The provider, whose calls run on `pool`.
 fn loader(
@@ -33,7 +35,10 @@ fn loader(
     fetch: Option<TileFunction>,
     cancel: Option<TileFunction>,
 ) -> Arc<CustomGeometryProvider> {
-    CustomProvider::new(fetch, cancel, pool)
+    let host = |function: Option<TileFunction>| -> Option<HostFunction> {
+        function.map(|function| -> HostFunction { Box::new(move |tile_id| function(tile_id)) })
+    };
+    CustomProvider::new(pool, |_| (host(fetch), host(cancel)))
 }
 
 /// A tile function that counts its calls.

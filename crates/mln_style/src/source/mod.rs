@@ -21,7 +21,6 @@ use std::time::Duration;
 
 use mln_util::constants;
 use mln_util::logging::{Event, Log};
-use mln_util::pool::Respond;
 use mln_util::tileset::{Tileset, VectorEncoding};
 
 use crate::conversion::{Convertible, Error};
@@ -34,6 +33,10 @@ mod list;
 
 pub use convert::convert_source;
 pub use list::SourceList;
+
+/// Where a job hands its result: called at most once, from any thread,
+/// while the job runs or later. Dropping it uncalled drops the result.
+pub type Respond<R> = Box<dyn FnOnce(R) + Send>;
 
 /// What the engine needs to know about a source type besides its data. The
 /// name identifies the type: two registries that agree on a name agree on

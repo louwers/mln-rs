@@ -6,7 +6,7 @@ use mln_map_types::MapMode;
 use mln_style::layer::{Layer, LayerStyle};
 use mln_style::layers::Circle;
 use mln_style::property::evaluation::PropertyEvaluationParameters;
-use mln_style::sources::geojson::{Features, GeoJSONData, TileCallback, TileFeatures};
+use mln_style::sources::geojson::{Features, GeoJSONData, TileFeatures};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::pool::TaskGroup;
@@ -38,8 +38,8 @@ impl GeoJSONTileTest {
         synchronous: bool,
     ) -> OneTile {
         let store = crate::tests::tile_store(&self.thread_pool, workers);
-        let mut tiles =
-            OneTile::with_origin(store, TileKind::Geometry, true, DataOrigin::GeoJson(data), ids, MapMode::Continuous);
+        let origin = DataOrigin::GeoJson { data, cuts: TaskGroup::new(self.thread_pool.pool()) };
+        let mut tiles = OneTile::with_origin(store, TileKind::Geometry, true, origin, ids, MapMode::Continuous);
         let key = tiles.key;
         tiles.store.source_mut(key).expect("the source").0.info.synchronous = synchronous;
         tiles
@@ -62,8 +62,8 @@ struct FakeGeoJSONData {
 }
 
 impl GeoJSONData for FakeGeoJSONData {
-    fn get_tile(&self, _id: &CanonicalTileID, callback: TileCallback, _pool: Option<&mln_util::pool::Pool>) {
-        callback(Arc::clone(&self.features));
+    fn get_tile(&self, _id: &CanonicalTileID) -> Arc<TileFeatures> {
+        Arc::clone(&self.features)
     }
 
     fn get_children(&self, _cluster_id: u32) -> Result<Features, Error> {
@@ -114,7 +114,7 @@ fn issue_7648() {
     tiles.settle(&[root()]);
     assert!(tiles.changes() >= 1);
 
-    tiles.with(|tile| tile.load_geojson(&data, false));
+    tiles.with(|tile| tile.load_geojson(false));
     // Once present, the bucket should never "disappear", which would cause
     // flickering.
     while !tiles.tile().is_complete() {
@@ -183,8 +183,11 @@ fn update_through_the_codec() {
         assert!(tiles.with_at(id, |tile| tile.parts().1.layer_properties_updated(&layer_properties)));
     }
 
-    let data = point_data();
-    tiles.with_at(&ids[0], |tile| tile.load_geojson(&data, false));
+    let origin = DataOrigin::GeoJson { data: point_data(), cuts: TaskGroup::new(test.thread_pool.pool()) };
+    tiles.with_at(&ids[0], |tile| {
+        tile.parts().0.origin = Some(origin);
+        tile.load_geojson(false);
+    });
     assert!(!tiles.tile_at(&ids[0]).is_complete());
     tiles.settle(&ids[..1]);
     assert!(tiles.tile_at(&ids[0]).is_renderable());

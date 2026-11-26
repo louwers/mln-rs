@@ -1,5 +1,5 @@
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, OnceLock};
 
 use geojson::{Feature, Geometry};
 use mln_headless::HeadlessFrontend;
@@ -9,7 +9,6 @@ use mln_storage::ResourceOptions;
 use mln_style::Edit;
 use mln_style::conversion::Convertible;
 use mln_style::layer::Layer;
-use mln_style::sources::CustomGeometrySourceHandle;
 use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
 use mln_util::geo::LatLngBounds;
 use mln_util::pool::Pool;
@@ -54,18 +53,16 @@ impl TileLODTest {
         map.load_style_json(&read_file("test/fixtures/api/empty.json"));
 
         let tile_count = Arc::new(AtomicU32::new(0));
-        let handle = Arc::new(OnceLock::new());
         let counted = Arc::clone(&tile_count);
         let options = CustomGeometrySourceOptions {
-            fetch_tile_function: Some(answer_with(&handle, move |tile_id| {
+            fetch_tile_function: Some(answer_with(move |tile_id| {
                 let center = LatLngBounds::from_canonical_tile(tile_id.z, tile_id.x, tile_id.y).center();
                 counted.fetch_add(1, Ordering::SeqCst);
                 vec![Feature::from(Geometry::new_point([center.longitude(), center.latitude()]))]
             })),
             ..Default::default()
         };
-        let source = custom_geometry_source::create("custom", options, &pool).unwrap();
-        handle.set(CustomGeometrySourceHandle::of(&source).unwrap()).unwrap();
+        let source = custom_geometry_source::create("custom", options).unwrap();
         map.add_source(source).unwrap();
 
         let mut layer = Layer::new(Registry::with_builtins().style(), "circle", "circles", "custom").unwrap();

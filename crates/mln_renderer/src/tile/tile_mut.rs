@@ -10,8 +10,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use mln_storage::response::Reason;
 use mln_storage::{Request, Response};
-use mln_style::custom_tile_loader::SubscriberKey;
-use mln_style::sources::geojson::GeoJSONData;
 use mln_util::error::Error;
 use mln_util::hash::{HashSet, hash_bytes};
 use mln_util::logging::{Event, Log};
@@ -25,6 +23,7 @@ use crate::layout::tile_layout::{Dependencies, LayoutParams};
 use crate::render_orchestrator::drop_on_workers;
 use crate::text::glyph_store::GlyphRanges;
 use crate::tile::contents::{Contents, GeometryContents, LayoutResult, release};
+use crate::tile::custom_tile_loader::SubscriberKey;
 use crate::tile::inbox::{SourceData, TileEvent};
 use crate::tile::job::{DataInput, DataKey, Job, JobId, JobResult, LayoutJob, LayoutOutput, Run, SourceStyle};
 use crate::tile::loading::{
@@ -86,10 +85,7 @@ impl<'a> TileMut<'a> {
                     self.request(Method::Cache);
                 }
             }
-            Some(DataOrigin::GeoJson(data)) => {
-                let data = Arc::clone(data);
-                self.load_geojson(&data, false);
-            }
+            Some(DataOrigin::GeoJson { .. }) => self.load_geojson(false),
             Some(DataOrigin::Custom { .. }) | None => {}
         }
     }
@@ -263,8 +259,14 @@ impl<'a> TileMut<'a> {
         }
     }
 
-    /// With `relayout`, the tile first drops its data and style.
-    pub(crate) fn load_geojson(&mut self, data: &Arc<dyn GeoJSONData>, relayout: bool) {
+    /// Loads the tile from its source's GeoJSON data: on the workers unless
+    /// the source updates synchronously. With `relayout`, the tile first
+    /// drops its data and style.
+    pub(crate) fn load_geojson(&mut self, relayout: bool) {
+        let Some(DataOrigin::GeoJson { data, cuts }) = &self.source.origin else {
+            return;
+        };
+        let (data, cuts) = (Arc::clone(data), (!self.source.synchronous).then(|| cuts.clone()));
         if relayout {
             self.reset();
         }
@@ -273,13 +275,7 @@ impl<'a> TileMut<'a> {
             *current = Some(load);
         }
         let key = self.source.tile_key(self.tile);
-        if let Some(data) = loading::request_geojson_tile(
-            data,
-            key,
-            load,
-            &self.store.inbox,
-            (!self.source.synchronous).then(|| self.store.pool.pool()),
-        ) {
+        if let Some(data) = loading::request_geojson_tile(&data, key, load, &self.store.inbox, cuts.as_ref()) {
             self.take_input(TileInput::Geometry { data: Some(data), missing: false });
         }
     }
@@ -803,7 +799,7 @@ impl<'a> TileMut<'a> {
     fn custom_loader(&self) -> Option<(Arc<dyn CustomLoader>, bool)> {
         match &self.source.origin {
             Some(DataOrigin::Custom { loader, fast_pfor_enabled }) => Some((Arc::clone(loader), *fast_pfor_enabled)),
-            Some(DataOrigin::Tileset { .. } | DataOrigin::GeoJson(_)) | None => None,
+            Some(DataOrigin::Tileset { .. } | DataOrigin::GeoJson { .. }) | None => None,
         }
     }
 

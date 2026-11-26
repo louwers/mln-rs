@@ -4,10 +4,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use mln_style::custom_tile_loader::{CustomProvider, CustomTileSubscriber, TileFunction};
 use mln_style::layer::{Layer, LayerStyle};
 use mln_style::layers::Fill;
-use mln_style::sources::custom_vector_source::{CustomVectorProvider, CustomVectorTileData, TileDataFormat};
+use mln_style::sources::custom_vector_source::{CustomVectorTileData, TileDataFormat};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, LatLngBounds};
@@ -19,9 +18,13 @@ use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::query::SourceQueryOptions;
 use crate::tests::OneTile;
 use crate::tile::contents::Contents;
+use crate::tile::custom_tile_loader::{CustomProvider, CustomTileSubscriber, CustomVectorProvider, HostFunction};
 use crate::tile::loading::DataOrigin;
 use crate::tile::tile::{TileKind, TileNecessity};
 use crate::tile::tile_workers::InlineWorkers;
+
+/// A host's tile function, as the tests share it.
+type TileFunction = Arc<dyn Fn(&CanonicalTileID) + Send + Sync>;
 
 /// The provider, whose calls run on `pool`.
 fn loader(
@@ -29,7 +32,10 @@ fn loader(
     fetch: Option<TileFunction>,
     cancel: Option<TileFunction>,
 ) -> Arc<CustomVectorProvider> {
-    CustomProvider::new(fetch, cancel, pool)
+    let host = |function: Option<TileFunction>| -> Option<HostFunction> {
+        function.map(|function| -> HostFunction { Box::new(move |tile_id| function(tile_id)) })
+    };
+    CustomProvider::new(pool, |_| (host(fetch), host(cancel)))
 }
 
 /// A tile function that counts its calls.

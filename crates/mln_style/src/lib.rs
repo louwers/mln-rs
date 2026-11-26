@@ -37,7 +37,6 @@
 //!   spec.
 
 pub mod conversion;
-pub mod custom_tile_loader;
 pub mod expression;
 pub mod feature;
 pub mod filter;

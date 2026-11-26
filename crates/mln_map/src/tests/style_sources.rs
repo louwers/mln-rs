@@ -157,15 +157,8 @@ fn geojson_points(count: usize) -> Vec<u8> {
 /// The number of features in tile 0/0/0 of the data of `map`'s GeoJSON
 /// source `id`.
 fn feature_count(map: &Map, id: &str) -> usize {
-    let Some(data) = map.source(id).and_then(geojson_data).cloned() else { return 0 };
-    let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let counted = Arc::clone(&count);
-    data.get_tile(
-        &CanonicalTileID::new(0, 0, 0),
-        Box::new(move |features| counted.store(features.len(), std::sync::atomic::Ordering::Relaxed)),
-        None,
-    );
-    count.load(std::sync::atomic::Ordering::Relaxed)
+    let Some(data) = map.source(id).and_then(geojson_data) else { return 0 };
+    data.get_tile(&CanonicalTileID::new(0, 0, 0)).len()
 }
 
 fn set_geojson_url(map: &mut Map, id: &str, url: &str) {

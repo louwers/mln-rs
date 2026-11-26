@@ -1,14 +1,17 @@
 //! Custom geometry and custom vector sources: tiles whose data the host
-//! gives on demand, through tile functions that run on a pool thread. Both
-//! types' sources hold a [`CustomProvider`] of their data.
+//! gives on demand. Both types' sources hold the host's tile functions,
+//! which the engine calls on a pool thread with a [`CustomSourceHandle`] that
+//! the host answers through.
 
 use std::sync::Arc;
 
+use geojson::GeoJson;
 use mln_util::constants;
+use mln_util::error::Error;
+use mln_util::geo::LatLngBounds;
 use mln_util::range::Range;
 
-use super::geojson::TileFeatures;
-use crate::custom_tile_loader::CustomProvider;
+use crate::feature::CanonicalTileID;
 use crate::layer::SourceKind;
 use crate::source::{Data, SourceData, SourceTypeInfo, StyleSourceType};
 
@@ -43,12 +46,113 @@ pub enum TileDataFormat {
 /// The data a custom vector tile gets: its bytes, if any, and their format.
 pub type CustomVectorTileData = (Option<Data>, TileDataFormat);
 
-/// The provider of a custom geometry source: it hands tiles their features,
-/// cut from the host's GeoJSON.
-pub type CustomGeometryProvider = CustomProvider<Arc<TileFeatures>>;
+/// Called with the canonical ID of a tile that the map needs, or no longer
+/// needs, and the handle that the host answers through. It runs on a pool
+/// thread, one call at a time, in the order the tiles asked, so a host may
+/// answer from inside it: the answer takes effect after the call.
+pub type TileFunction<D> = Arc<dyn Fn(&CanonicalTileID, &CustomSourceHandle<D>) + Send + Sync>;
 
-/// The provider of a custom vector source.
-pub type CustomVectorProvider = CustomProvider<CustomVectorTileData>;
+/// A custom source's tile functions, which take answers of type `D`.
+pub struct TileFunctions<D> {
+    /// Asks the host for a tile's data, which it gives with
+    /// [`CustomSourceHandle::set_tile_data`].
+    pub fetch_tile: Option<TileFunction<D>>,
+    /// Tells the host that no tile needs a tile's data any more.
+    pub cancel_tile: Option<TileFunction<D>>,
+}
+
+impl<D> std::fmt::Debug for TileFunctions<D> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TileFunctions")
+            .field("fetch_tile", &self.fetch_tile.is_some())
+            .field("cancel_tile", &self.cancel_tile.is_some())
+            .finish()
+    }
+}
+
+/// What a custom source's handle reaches: the engine's provider of the
+/// source's tiles, which an engine implements.
+pub trait CustomTileResponder<D>: Send + Sync {
+    /// Hands over the tile's data. It is dropped unless a tile needs it.
+    fn set_tile_data(&self, tile_id: CanonicalTileID, data: D);
+    /// Reports that the host failed to load the tile.
+    fn set_tile_error(&self, tile_id: CanonicalTileID, error: Error);
+    /// Drops the tile's data, and asks the host for it again if a tile needs
+    /// it.
+    fn invalidate_tile(&self, tile_id: CanonicalTileID);
+    /// Invalidates every tile that `bounds` intersect, at its own zoom.
+    fn invalidate_region(&self, bounds: LatLngBounds);
+    /// Whether the provider is gone, so that the calls above do nothing.
+    fn is_closed(&self) -> bool;
+}
+
+/// A `Send` handle to the engine's provider of a custom source's tiles,
+/// which the provider hands to the host's tile functions. The host answers
+/// through it, from any thread; it does nothing once the provider is gone.
+/// Clones reach the same provider.
+pub struct CustomSourceHandle<D>(Arc<dyn CustomTileResponder<D>>);
+
+/// The handle of a custom geometry source, which takes the tiles' GeoJSON.
+pub type CustomGeometrySourceHandle = CustomSourceHandle<GeoJson>;
+
+/// The handle of a custom vector source, which takes the tiles' encoded
+/// bytes.
+pub type CustomVectorSourceHandle = CustomSourceHandle<CustomVectorTileData>;
+
+impl<D> Clone for CustomSourceHandle<D> {
+    fn clone(&self) -> Self {
+        CustomSourceHandle(Arc::clone(&self.0))
+    }
+}
+
+impl<D> std::fmt::Debug for CustomSourceHandle<D> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CustomSourceHandle").finish_non_exhaustive()
+    }
+}
+
+impl<D> CustomSourceHandle<D> {
+    /// The handle of the provider behind `responder`.
+    #[must_use]
+    pub fn new(responder: Arc<dyn CustomTileResponder<D>>) -> Self {
+        CustomSourceHandle(responder)
+    }
+
+    /// Hands over the tile's data. The source ignores data for a tile it
+    /// hasn't asked for, or has since cancelled.
+    pub fn set_tile_data(&self, tile_id: CanonicalTileID, data: D) {
+        self.0.set_tile_data(tile_id, data);
+    }
+
+    /// Reports that the host failed to load the tile. Invalidating the tile,
+    /// or needing it again, asks for it again.
+    pub fn set_tile_error(&self, tile_id: CanonicalTileID, error: Error) {
+        self.0.set_tile_error(tile_id, error);
+    }
+
+    /// Drops the tile's data, and asks the host for it again if a tile needs
+    /// it.
+    pub fn invalidate_tile(&self, tile_id: CanonicalTileID) {
+        self.0.invalidate_tile(tile_id);
+    }
+
+    /// Invalidates every tile that `bounds` intersect.
+    pub fn invalidate_region(&self, bounds: LatLngBounds) {
+        self.0.invalidate_region(bounds);
+    }
+
+    /// Whether the provider is gone, so that the handle does nothing.
+    #[must_use]
+    pub fn is_closed(&self) -> bool {
+        self.0.is_closed()
+    }
+
+    /// Whether both handles reach the same provider.
+    #[must_use]
+    pub fn ptr_eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
 
 /// The custom geometry source type, whose tiles' GeoJSON the host gives.
 pub struct CustomGeometrySourceType;
@@ -58,8 +162,8 @@ pub struct CustomGeometrySourceType;
 pub struct CustomGeometrySourceOptions {
     pub tile_options: Arc<TileOptions>,
     pub zoom_range: Range<u8>,
-    /// The provider of the source's tiles' data.
-    pub provider: Arc<CustomGeometryProvider>,
+    /// The host's functions that give the tiles' GeoJSON.
+    pub tile_functions: Arc<TileFunctions<GeoJson>>,
 }
 
 impl std::fmt::Debug for CustomGeometrySourceOptions {
@@ -67,7 +171,8 @@ impl std::fmt::Debug for CustomGeometrySourceOptions {
         f.debug_struct("CustomGeometrySourceOptions")
             .field("tile_options", &self.tile_options)
             .field("zoom_range", &self.zoom_range)
-            .finish_non_exhaustive()
+            .field("tile_functions", &self.tile_functions)
+            .finish()
     }
 }
 
@@ -82,7 +187,7 @@ impl StyleSourceType for CustomGeometrySourceType {
     };
 
     type Options = CustomGeometrySourceOptions;
-    /// None: the provider gives the source's data.
+    /// None: the host's tile functions give the source's data.
     type Description = ();
 }
 
@@ -92,7 +197,7 @@ impl SourceData<CustomGeometrySourceType> {
     pub fn differs(&self, other: &Self) -> bool {
         !Arc::ptr_eq(&self.options.tile_options, &other.options.tile_options)
             || self.options.zoom_range != other.options.zoom_range
-            || !Arc::ptr_eq(&self.options.provider, &other.options.provider)
+            || !Arc::ptr_eq(&self.options.tile_functions, &other.options.tile_functions)
     }
 }
 
@@ -103,13 +208,16 @@ pub struct CustomVectorSourceType;
 #[derive(Clone)]
 pub struct CustomVectorSourceOptions {
     pub zoom_range: Range<u8>,
-    /// The provider of the source's tiles' data.
-    pub provider: Arc<CustomVectorProvider>,
+    /// The host's functions that give the tiles' bytes.
+    pub tile_functions: Arc<TileFunctions<CustomVectorTileData>>,
 }
 
 impl std::fmt::Debug for CustomVectorSourceOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CustomVectorSourceOptions").field("zoom_range", &self.zoom_range).finish_non_exhaustive()
+        f.debug_struct("CustomVectorSourceOptions")
+            .field("zoom_range", &self.zoom_range)
+            .field("tile_functions", &self.tile_functions)
+            .finish()
     }
 }
 
@@ -124,7 +232,7 @@ impl StyleSourceType for CustomVectorSourceType {
     };
 
     type Options = CustomVectorSourceOptions;
-    /// None: the provider gives the source's data.
+    /// None: the host's tile functions give the source's data.
     type Description = ();
 }
 
@@ -133,6 +241,6 @@ impl SourceData<CustomVectorSourceType> {
     #[must_use]
     pub fn differs(&self, other: &Self) -> bool {
         self.options.zoom_range != other.options.zoom_range
-            || !Arc::ptr_eq(&self.options.provider, &other.options.provider)
+            || !Arc::ptr_eq(&self.options.tile_functions, &other.options.tile_functions)
     }
 }

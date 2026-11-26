@@ -725,12 +725,16 @@ fn raster_dem_tile_attribution() {
     tile_attribution(Tiled::RasterDEM, mapbox);
 }
 
-/// A loaded custom geometry source "source", a line layer for it, and its
-/// render source after one update of `store`.
-fn custom_geometry_case(test: &SourceTest, store: &mut TileStore) -> (Source, Box<dyn RenderSource>) {
-    let source =
-        custom_geometry_source::create("source", CustomGeometrySourceOptions::default(), test.thread_pool.pool())
-            .unwrap();
+/// A loaded custom geometry source "source" whose host answers each fetch
+/// with `answer`, a line layer for it, and its render source after one
+/// update of `store`.
+fn custom_geometry_case(
+    test: &SourceTest,
+    store: &mut TileStore,
+    answer: impl Fn(&CanonicalTileID, &CustomGeometrySourceHandle) + Send + Sync + 'static,
+) -> (Source, Box<dyn RenderSource>) {
+    let options = CustomGeometrySourceOptions { fetch_tile_function: Some(Arc::new(answer)), ..Default::default() };
+    let source = custom_geometry_source::create("source", options).unwrap();
 
     let mut layer = Layer::new(Registry::with_builtins().style(), "line", "id", "source").unwrap();
     layer.set_source_layer("water");
@@ -755,12 +759,9 @@ fn custom_geometry_source_set_tile_data() {
     *observer.tile_error.borrow_mut() = Some(Box::new(|_, _, _| panic!("Should never be called")));
 
     let mut store = test.store();
-    let (source, _render_source) = custom_geometry_case(&test, &mut store);
-
-    let handle = CustomGeometrySourceHandle::of(&source).unwrap();
-    test.run_loop.post(move |()| {
-        // Set Tile Data
-        handle.set_tile_data(CanonicalTileID::new(0, 0, 0), GeoJson::from(Vec::<geojson::Feature>::new()));
+    let _case = custom_geometry_case(&test, &mut store, |tile_id, handle| {
+        assert_eq!(CanonicalTileID::new(0, 0, 0), *tile_id);
+        handle.set_tile_data(*tile_id, GeoJson::from(Vec::<geojson::Feature>::new()));
     });
 
     test.run_observed(&mut store, &observer);
@@ -782,11 +783,8 @@ fn custom_geometry_source_set_tile_error() {
     }
 
     let mut store = test.store();
-    let (source, _render_source) = custom_geometry_case(&test, &mut store);
-
-    let handle = CustomGeometrySourceHandle::of(&source).unwrap();
-    test.run_loop.post(move |()| {
-        handle.set_tile_error(CanonicalTileID::new(0, 0, 0), Error::native("failed"));
+    let _case = custom_geometry_case(&test, &mut store, |tile_id, handle| {
+        handle.set_tile_error(*tile_id, Error::native("failed"));
     });
 
     test.run_observed(&mut store, &observer);
@@ -804,7 +802,14 @@ fn custom_vector_source_set_tile_data() {
     }
     *observer.tile_error.borrow_mut() = Some(Box::new(|_, _, _| panic!("Should never be called")));
 
-    let source = custom_vector_source::create("source", CustomVectorSourceOptions::default(), test.thread_pool.pool());
+    let options = CustomVectorSourceOptions {
+        fetch_tile_function: Some(Arc::new(|tile_id: &CanonicalTileID, handle: &CustomVectorSourceHandle| {
+            assert_eq!(CanonicalTileID::new(0, 0, 0), *tile_id);
+            handle.set_tile_data(*tile_id, (None, TileDataFormat::Mvt));
+        })),
+        ..Default::default()
+    };
+    let source = custom_vector_source::create("source", options);
 
     let mut layer = Layer::new(Registry::with_builtins().style(), "line", "id", "source").unwrap();
     layer.set_source_layer("water");
@@ -821,9 +826,6 @@ fn custom_vector_source_set_tile_data() {
         true,
         &test.tile_parameters(MapMode::Continuous),
     );
-
-    let handle = CustomVectorSourceHandle::of(&source).unwrap();
-    test.run_loop.post(move |()| handle.set_tile_data(CanonicalTileID::new(0, 0, 0), None, TileDataFormat::Mvt));
 
     test.run_observed(&mut store, &observer);
 }

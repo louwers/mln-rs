@@ -5,6 +5,7 @@
 pub(crate) mod tile;
 
 pub(crate) mod contents;
+pub(crate) mod custom_tile_loader;
 pub(crate) mod dem;
 pub(crate) mod inbox;
 pub(crate) mod job;

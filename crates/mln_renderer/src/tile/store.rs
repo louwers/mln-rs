@@ -179,7 +179,7 @@ impl SourceInfo {
     pub(crate) fn file_source(&self) -> Option<Arc<dyn FileSource>> {
         match &self.origin {
             Some(DataOrigin::Tileset { file_source, .. }) => file_source.clone(),
-            Some(DataOrigin::GeoJson(_) | DataOrigin::Custom { .. }) | None => None,
+            Some(DataOrigin::GeoJson { .. } | DataOrigin::Custom { .. }) | None => None,
         }
     }
 

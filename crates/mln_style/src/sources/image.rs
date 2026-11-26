@@ -6,14 +6,14 @@ use std::sync::Arc;
 use mln_image::decoder;
 use mln_util::LatLng;
 use mln_util::image::PremultipliedImage;
-use mln_util::pool::Respond;
 
 use crate::Edit;
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
 use crate::layer::SourceKind;
 use crate::source::{
-    Data, Described, Fetch, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,
+    Data, Described, Fetch, Load, OfflineResources, Respond, Source, SourceData, SourceSummary, SourceTypeInfo,
+    StyleSourceType,
 };
 
 /// The image source type.
