@@ -2,21 +2,22 @@ use std::sync::Arc;
 
 use feature::Feature;
 use geo_types::Point;
+use mln_style::Source;
 use mln_style::error::Error;
 use mln_style::layer::{Layer, LayerStyle};
 use mln_style::layers::Circle;
 use mln_style::property::evaluation::PropertyEvaluationParameters;
-use mln_style::sources::geojson::{Features, GeoJSONData, TileFeatures};
+use mln_style::source::SourceData;
+use mln_style::sources::GeoJsonSourceType;
+use mln_style::sources::geojson::{Features, GeoJSONData, GeoJsonSourceOptions, TileFeatures};
 use mln_style::tile_id::CanonicalTileID;
 
 use crate::Registry;
 use crate::exec::pool::TaskGroup;
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::map::MapMode;
-use crate::tests::{OneTile, style};
+use crate::tests::{OneTile, map_settings, style};
 use crate::tile::OverscaledTileID;
-use crate::tile_store::loading::DataOrigin;
-use crate::tile_store::tile::TileKind;
 use crate::worker::tile_workers::TileWorkers;
 
 struct GeoJSONTileTest {
@@ -39,8 +40,8 @@ impl GeoJSONTileTest {
         synchronous: bool,
     ) -> OneTile {
         let store = crate::tests::tile_store(&self.thread_pool, workers);
-        let origin = DataOrigin::GeoJson { data, cuts: TaskGroup::new(self.thread_pool.pool()) };
-        let mut tiles = OneTile::with_origin(store, TileKind::Geometry, true, origin, ids, MapMode::Continuous);
+        let source = geojson_source(data, synchronous);
+        let mut tiles = OneTile::with_origin(store, &source, None, ids, MapMode::Continuous);
         let key = tiles.key;
         tiles.store.source_mut(key).expect("the source").0.info.synchronous = synchronous;
         tiles
@@ -49,6 +50,21 @@ impl GeoJSONTileTest {
     fn pool(&self) -> Box<dyn TileWorkers> {
         Box::new(crate::worker::tile_workers::PoolWorkers::new(self.thread_pool.clone(), 8))
     }
+}
+
+/// A GeoJSON source of `data`, whose tiles lay out as they take it in with
+/// `synchronous` updates.
+fn geojson_source(data: Arc<dyn GeoJSONData>, synchronous: bool) -> Source {
+    let options = GeoJsonSourceOptions { synchronous_update: synchronous, ..GeoJsonSourceOptions::new(Arc::default()) };
+    Source::new("source", SourceData::<GeoJsonSourceType>::with_description(options, data))
+}
+
+/// Gives the GeoJSON source of `tiles` new data, `data`, as `setData` does
+/// on a continuous map: its tiles load it again.
+fn set_data(tiles: &mut OneTile, data: Arc<dyn GeoJSONData>) {
+    let source = geojson_source(data, false);
+    let (tiles_of_source, ctx) = tiles.store.source_mut(tiles.key).expect("the source");
+    tiles_of_source.update_origin(&source, ctx, &map_settings(MapMode::Continuous, None), false).expect("a cover");
 }
 
 impl Drop for GeoJSONTileTest {
@@ -115,7 +131,7 @@ fn issue_7648() {
     tiles.settle(&[root()]);
     assert!(tiles.changes() >= 1);
 
-    tiles.with(|tile| tile.load_geojson(false));
+    set_data(&mut tiles, point_data());
     // Once present, the bucket should never "disappear", which would cause
     // flickering.
     while !tiles.tile().is_complete() {
@@ -184,11 +200,7 @@ fn update_through_the_codec() {
         assert!(tiles.with_at(id, |tile| tile.parts().1.layer_properties_updated(&layer_properties)));
     }
 
-    let origin = DataOrigin::GeoJson { data: point_data(), cuts: TaskGroup::new(test.thread_pool.pool()) };
-    tiles.with_at(&ids[0], |tile| {
-        tile.parts().0.origin = Some(origin);
-        tile.load_geojson(false);
-    });
+    set_data(&mut tiles, point_data());
     assert!(!tiles.tile_at(&ids[0]).is_complete());
     tiles.settle(&ids[..1]);
     assert!(tiles.tile_at(&ids[0]).is_renderable());

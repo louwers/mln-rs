@@ -97,6 +97,90 @@ pub(crate) fn update(store: &mut crate::tile_store::store::TileStore) -> bool {
     store.drive()
 }
 
+/// Port-only: an origin whose tiles load nothing themselves: the test gives
+/// them their data, at once or as a reply to a load it began, which
+/// delivers the item it holds. Its tiles cover 512-pixel tiles of every
+/// zoom.
+pub(crate) struct Given<K>(std::marker::PhantomData<fn() -> K>);
+
+impl<K: crate::source::TileKind> crate::source::DataOrigin for Given<K>
+where
+    K::Item: Send,
+{
+    type Data = K;
+    type Tile = ();
+    type Reply = Option<K::Item>;
+
+    fn update(&mut self, _: &mut crate::source::OriginUpdate<'_, Self>) -> Option<crate::source::Cover> {
+        Some(given_cover())
+    }
+
+    fn start(&mut self, _: &mut crate::source::LoadContext<'_, '_, Self>, _: Option<crate::source::WorldCopy<'_, ()>>) {
+    }
+
+    fn receive(&mut self, (): &mut (), item: Option<K::Item>, cx: &mut crate::source::LoadContext<'_, '_, Self>) {
+        cx.deliver(item);
+    }
+}
+
+/// What a [`Given`] origin's tiles cover.
+fn given_cover() -> crate::source::Cover {
+    crate::source::Cover {
+        tile_size: mln_style::constants::TILE_SIZE_I,
+        zoom_range: mln_style::range::Range::new(0, 22),
+        bounds: None,
+    }
+}
+
+/// Port-only: a [`Given`] origin of tiles of `kind`.
+pub(crate) fn given(kind: mln_style::layer::SourceKind) -> Box<dyn crate::source::erased::ErasedOrigin> {
+    use mln_style::layer::SourceKind;
+    match kind {
+        SourceKind::Geometry | SourceKind::None => {
+            Box::new(Given::<crate::source::GeometryTiles>(std::marker::PhantomData))
+        }
+        SourceKind::Raster => Box::new(Given::<crate::source::RasterTiles>(std::marker::PhantomData)),
+        SourceKind::RasterDem => Box::new(Given::<crate::source::DemTiles>(std::marker::PhantomData)),
+    }
+}
+
+/// Port-only: the origin that the built-in type of `source` supplies.
+pub(crate) fn origin_of(source: &mln_style::Source) -> Box<dyn crate::source::erased::ErasedOrigin> {
+    let registry = crate::Registry::with_builtins();
+    let source_type = registry.source_type(source.info().name).expect("a built-in source type");
+    match source_type.supply(source) {
+        crate::source::Supplied::Tiles(origin) => origin,
+        crate::source::Supplied::Image(_) => panic!("a source with tiles"),
+    }
+}
+
+/// Port-only: how the built-in type of `source`, an image source, reads its
+/// image.
+pub(crate) fn image_of(source: &mln_style::Source) -> crate::source::ImageOf {
+    let registry = crate::Registry::with_builtins();
+    let source_type = registry.source_type(source.info().name).expect("a built-in source type");
+    match source_type.supply(source) {
+        crate::source::Supplied::Image(image_of) => image_of,
+        crate::source::Supplied::Tiles(_) => panic!("an image source"),
+    }
+}
+
+/// Port-only: the tileset origin's state of `tile`, a tile of a tileset
+/// source.
+pub(crate) fn tileset_tile(tile: &crate::tile_store::tile::Tile) -> &crate::source::tileset::TilesetTile {
+    let state = tile.load.state.as_deref().expect("the origin's state of the tile");
+    state.downcast_ref().expect("a tileset tile")
+}
+
+/// Port-only: what a test's map says of its tiles: drawn for `mode`, loaded
+/// through `file_source`.
+pub(crate) fn map_settings(
+    mode: crate::map::MapMode,
+    file_source: Option<std::sync::Arc<dyn crate::storage::FileSource>>,
+) -> crate::source::MapSettings {
+    crate::source::MapSettings { mode, pixel_ratio: 1.0, max_zoom: 22.0, file_source, fast_pfor_enabled: false }
+}
+
 /// Port-only: one tile of a source of its own in a store, driven as the
 /// renderer drives it, whose data the test gives it.
 pub(crate) struct OneTile {
@@ -110,11 +194,13 @@ impl OneTile {
     /// Tile `id` of kind `kind` in `store`, laid out for `mode`.
     pub(crate) fn new(
         mut store: crate::tile_store::store::TileStore,
-        kind: crate::tile_store::tile::TileKind,
+        kind: mln_style::layer::SourceKind,
         id: crate::tile::OverscaledTileID,
         mode: crate::map::MapMode,
     ) -> Self {
-        let key = store.add_source("s".to_owned(), kind, false);
+        let key = store.add_source("s".to_owned(), given(kind));
+        let (source, _) = store.source_mut(key).expect("the source");
+        source.info.cover = Some(given_cover());
         let mut tiles = OneTile { store, key, id, mode };
         tiles.add(id);
         tiles
@@ -129,28 +215,25 @@ impl OneTile {
         }
     }
 
-    /// Tiles `ids` of a source of `kind` whose data comes from `origin`, in
-    /// `store`, laid out for `mode`; `single_layer` for a source whose data
-    /// has one layer. Their loads start as a cover starts them.
+    /// Tiles `ids` of `source`, in `store`, whose data comes from the
+    /// origin its built-in type supplies, loaded through `file_source` and
+    /// laid out for `mode`. The origin takes in `source`, then the tiles'
+    /// loads start as a cover starts them.
     pub(crate) fn with_origin(
         mut store: crate::tile_store::store::TileStore,
-        kind: crate::tile_store::tile::TileKind,
-        single_layer: bool,
-        origin: crate::tile_store::loading::DataOrigin,
+        source: &mln_style::Source,
+        file_source: Option<std::sync::Arc<dyn crate::storage::FileSource>>,
         ids: &[crate::tile::OverscaledTileID],
         mode: crate::map::MapMode,
     ) -> Self {
-        let key = store.add_source("source".to_owned(), kind, single_layer);
+        let key = store.add_source("source".to_owned(), origin_of(source));
         let mut tiles = OneTile { store, key, id: ids[0], mode };
         let params = tiles.params();
-        let (source, ctx) = tiles.store.source_mut(key).expect("the source");
-        source.info.origin = Some(origin);
+        let (tiles_of_source, ctx) = tiles.store.source_mut(key).expect("the source");
+        let cover = tiles_of_source.update_origin(source, ctx, &map_settings(mode, file_source), false);
+        assert!(cover.is_some(), "the source has tiles");
         for id in ids {
-            let tile = source.info.new_tile(*id, params).expect("a tile");
-            source.insert(tile);
-            source.update(id, ctx, |tile| {
-                tile.start_load();
-            });
+            tiles_of_source.add_tile(*id, params, false, ctx).expect("a tile");
         }
         tiles
     }
@@ -185,17 +268,19 @@ impl OneTile {
             .count()
     }
 
+    /// Adds another tile, `id`, to the source, which its origin starts.
+    pub(crate) fn start(&mut self, id: crate::tile::OverscaledTileID) {
+        let params = self.params();
+        let (source, ctx) = self.store.source_mut(self.key).expect("the source");
+        source.add_tile(id, params, false, ctx).expect("a tile");
+    }
+
     /// Adds another tile, `id`, to the source, which loads nothing itself.
     pub(crate) fn add(&mut self, id: crate::tile::OverscaledTileID) {
         let params = self.params();
         let (source, _) = self.store.source_mut(self.key).expect("the source");
-        let generation = source.info.next();
-        let load = crate::tile_store::loading::Load {
-            necessity: crate::tile_store::tile::TileNecessity::Optional,
-            origin: crate::tile_store::loading::OriginLoad::GeoJson { load: None },
-        };
-        let pipeline = crate::tile_store::pipeline::Pipeline::new(source.info.kind, generation, params);
-        let tile = crate::tile_store::tile::Tile::new(id, load, pipeline);
+        let mut tile = source.info.new_tile(id, params).expect("a tile");
+        tile.load.state = Some(Box::new(()));
         source.insert(tile);
     }
 
@@ -240,26 +325,20 @@ impl OneTile {
 
     /// Gives a geometry tile `data`, as a load of its own.
     pub(crate) fn set_data(&mut self, data: Option<crate::tile::TileData>) {
-        self.with(|tile| tile.take_input(crate::tile_store::tile::TileInput::Geometry { data, missing: false }));
+        self.with(|tile| tile.take_data(data, false));
     }
 
     /// Gives raster tile `id` the image `data`, as a load of its own.
     pub(crate) fn set_image(&mut self, id: &crate::tile::OverscaledTileID, data: Option<crate::storage::Data>) {
-        self.with_at(id, |tile| tile.take_input(crate::tile_store::tile::TileInput::Image { data, missing: false }));
+        self.with_at(id, |tile| tile.take_image(data, false));
     }
 
     /// Gives tile `id` no data, as a load that finds the tileset has no
     /// tile there.
     pub(crate) fn set_missing(&mut self, id: &crate::tile::OverscaledTileID) {
-        let input = match self.store.source(self.key).expect("the source").info.kind {
-            crate::tile_store::tile::TileKind::Geometry => {
-                crate::tile_store::tile::TileInput::Geometry { data: None, missing: true }
-            }
-            crate::tile_store::tile::TileKind::Raster | crate::tile_store::tile::TileKind::Dem(_) => {
-                crate::tile_store::tile::TileInput::Image { data: None, missing: true }
-            }
-        };
-        self.with_at(id, |tile| tile.take_input(input));
+        self.with_at(id, |tile| {
+            tile.take_missing();
+        });
     }
 
     /// What the store reported its tiles went through since the last call.

@@ -1,5 +1,6 @@
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::Error;
+use mln_style::layer::SourceKind;
 use mln_style::size::Size;
 use mln_style::tileset::RasterEncoding;
 
@@ -8,11 +9,10 @@ use crate::tests::OneTile;
 use crate::tile::OverscaledTileID;
 use crate::tile::dem_data::DEMData;
 use crate::tile_store::contents::Contents;
-use crate::tile_store::tile::TileKind;
 use crate::worker::job::JobResult;
 use crate::worker::tile_workers::InlineWorkers;
 
-const DEM: TileKind = TileKind::Dem(RasterEncoding::Mapbox);
+const DEM: SourceKind = SourceKind::RasterDem;
 
 fn tiles(test: &RasterTileTest) -> OneTile {
     test.tiles(DEM, OverscaledTileID::from_zxy(0, 0, 0), Box::new(InlineWorkers))

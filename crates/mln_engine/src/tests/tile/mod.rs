@@ -12,12 +12,17 @@ mod raster_tile;
 mod tile_coordinate;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use mln_style::layer::SourceKind;
+use mln_style::sources::CustomSourceHandle;
+use mln_style::tile_id::CanonicalTileID;
+use parking_lot::Mutex;
 
 use crate::exec::pool::{Pool, TaskGroup};
 use crate::map::MapMode;
 use crate::tests::OneTile;
 use crate::tile::OverscaledTileID;
-use crate::tile_store::tile::TileKind;
 use crate::worker::tile_workers::TileWorkers;
 
 /// The fixture shared by `RasterTileTest` and `RasterDEMTileTest`
@@ -36,20 +41,20 @@ impl RasterTileTest {
     }
 
     /// Tile `id` of `kind`, whose jobs run on `workers`.
-    pub(crate) fn tiles(&self, kind: TileKind, id: OverscaledTileID, workers: Box<dyn TileWorkers>) -> OneTile {
+    pub(crate) fn tiles(&self, kind: SourceKind, id: OverscaledTileID, workers: Box<dyn TileWorkers>) -> OneTile {
         let store = crate::tests::tile_store(&self.thread_pool, workers);
         OneTile::new(store, kind, id, MapMode::Static)
     }
 
     /// Tile 0/0/0 of `kind`, whose jobs run on the thread pool.
-    pub(crate) fn pool_tiles(&self, kind: TileKind) -> OneTile {
+    pub(crate) fn pool_tiles(&self, kind: SourceKind) -> OneTile {
         let store = crate::tests::pool_store(&self.thread_pool);
         OneTile::new(store, kind, OverscaledTileID::from_zxy(0, 0, 0), MapMode::Static)
     }
 
     /// Tiles 1/0/0 and 1/1/0 of `kind`, whose jobs run in `count` worker
     /// instances on threads, reached only through the worker codec.
-    pub(crate) fn remote_tiles(&self, kind: TileKind, count: usize) -> OneTile {
+    pub(crate) fn remote_tiles(&self, kind: SourceKind, count: usize) -> OneTile {
         let workers = Box::new(remote_workers(count));
         let mut tiles = self.tiles(kind, OverscaledTileID::from_zxy(1, 0, 0), workers);
         tiles.add(OverscaledTileID::from_zxy(1, 1, 0));
@@ -61,6 +66,71 @@ impl Default for RasterTileTest {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// A host's tile function, as the custom source tests share it.
+pub(crate) type TileFunction = Arc<dyn Fn(&CanonicalTileID) + Send + Sync>;
+
+/// Port-only: the host of a custom source, whose tile functions keep the
+/// handle that the source's provider calls them with, which the test
+/// answers through.
+pub(crate) struct Host<D> {
+    handle: Arc<Mutex<Option<CustomSourceHandle<D>>>>,
+}
+
+impl<D: 'static> Host<D> {
+    pub(crate) fn new() -> Self {
+        Host { handle: Arc::default() }
+    }
+
+    /// A tile function of the host that keeps the handle, then calls
+    /// `function`, if there is one.
+    pub(crate) fn function(&self, function: Option<TileFunction>) -> mln_style::sources::custom::TileFunction<D> {
+        let kept = Arc::clone(&self.handle);
+        Arc::new(move |tile_id, handle| {
+            kept.lock().get_or_insert_with(|| handle.clone());
+            if let Some(function) = &function {
+                function(tile_id);
+            }
+        })
+    }
+
+    /// The handle of the source's provider.
+    ///
+    /// # Panics
+    ///
+    /// If the provider hasn't called a tile function yet.
+    pub(crate) fn handle(&self) -> CustomSourceHandle<D> {
+        self.handle.lock().clone().expect("the provider called a tile function")
+    }
+}
+
+/// A tile function that counts its calls.
+pub(crate) fn counter() -> (Arc<AtomicUsize>, TileFunction) {
+    let count = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&count);
+    (
+        count,
+        Arc::new(move |_: &CanonicalTileID| {
+            counted.fetch_add(1, Ordering::SeqCst);
+        }),
+    )
+}
+
+/// A tile function that records the tiles it's called with.
+pub(crate) fn recorder() -> (Arc<Mutex<Vec<CanonicalTileID>>>, TileFunction) {
+    let ids = Arc::new(Mutex::new(Vec::new()));
+    let recorded = Arc::clone(&ids);
+    (ids, Arc::new(move |id: &CanonicalTileID| recorded.lock().push(*id)))
+}
+
+/// Tiles `ids` of the custom source `source`, whose jobs run on this
+/// thread, and whose store, with the provider of the source's tiles, runs
+/// its calls on the test's local pool.
+pub(crate) fn custom_tiles(test: &RasterTileTest, source: &mln_style::Source, ids: &[OverscaledTileID]) -> OneTile {
+    let pool = TaskGroup::new(&test.local_pool);
+    let store = crate::tests::tile_store(&pool, Box::new(crate::worker::tile_workers::InlineWorkers));
+    OneTile::with_origin(store, source, None, ids, MapMode::Static)
 }
 
 /// Port-only: workers in `count` worker instances on threads, reached only

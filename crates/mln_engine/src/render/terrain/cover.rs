@@ -7,7 +7,6 @@ use mln_style::geo::WrapMode;
 use mln_style::hash::{HashMap, HashSet};
 use mln_style::range::Range;
 use mln_style::tile_id::CanonicalTileID;
-use mln_style::tileset::Tileset;
 
 use crate::camera::{TileCoordinate, View};
 use crate::tile::OverscaledTileID;
@@ -15,10 +14,10 @@ use crate::tile::dem::DemCoords;
 use crate::tile::dem_data::DEMData;
 use crate::tile_store::contents::Contents;
 use crate::tile_store::dem::DemContents;
-use crate::tile_store::loading::DataOrigin;
 use crate::tile_store::source_tiles::SourceTiles;
 use crate::tile_store::tile::Tile;
 use crate::tile_store::tile_cover::{TileCoverParameters, covering_zoom_level, terrain_tile_cover};
+use crate::worker::job::SourceKey;
 
 /// The zoom levels terrain tiles have (GL JS's terrain tile manager's).
 const TERRAIN_ZOOM_RANGE: Range<u8> = Range::new(0, 22);
@@ -105,8 +104,9 @@ pub(crate) const REMEMBERED_RANGES: usize = 8192;
 /// as they are read.
 #[derive(Debug)]
 pub(crate) struct ElevationRanges {
-    /// The tileset of the DEM tiles whose ranges it holds.
-    tileset: Option<Tileset>,
+    /// The source of the DEM tiles whose ranges it holds, and the version
+    /// of its data ([`SourceInfo::data_version`]).
+    made_of: Option<(SourceKey, u64)>,
     /// The lowest and highest elevation of each DEM tile.
     dem_tiles: HashMap<CanonicalTileID, (f32, f32)>,
     /// The zoom levels of the DEM.
@@ -118,7 +118,7 @@ impl Default for ElevationRanges {
     /// No ranges, of a DEM of every zoom.
     fn default() -> Self {
         ElevationRanges {
-            tileset: None,
+            made_of: None,
             dem_tiles: HashMap::default(),
             dem_zooms: TERRAIN_ZOOM_RANGE,
             exaggeration: 1.0,
@@ -128,26 +128,15 @@ impl Default for ElevationRanges {
 
 impl ElevationRanges {
     /// Takes in the ranges of the tiles of `dem` that have DEM data, cached
-    /// ones too, of the DEM `tileset`, and reads them all exaggerated by
-    /// `exaggeration`. It forgets those it holds of another tileset, and
-    /// takes in none from tiles of another, which their source lets go of
-    /// as it updates.
-    pub(crate) fn update(&mut self, tileset: &Tileset, dem: Option<&SourceTiles>, exaggeration: f64) {
-        if self.tileset.as_ref() != Some(tileset) {
-            *self = ElevationRanges {
-                tileset: Some(tileset.clone()),
-                dem_zooms: tileset.zoom_range,
-                ..ElevationRanges::default()
-            };
+    /// ones too, of a DEM of the zoom levels `dem_zooms`, and reads them all
+    /// exaggerated by `exaggeration`. It forgets those it holds of another
+    /// source, or of data that the source's tiles let go of since.
+    pub(crate) fn update(&mut self, dem: &SourceTiles, dem_zooms: Range<u8>, exaggeration: f64) {
+        let made_of = (dem.info.key, dem.info.data_version);
+        if self.made_of != Some(made_of) || self.dem_zooms != dem_zooms {
+            *self = ElevationRanges { made_of: Some(made_of), dem_zooms, ..ElevationRanges::default() };
         }
         self.exaggeration = exaggeration;
-        let made_from = |dem: &&SourceTiles| match &dem.info.origin {
-            Some(DataOrigin::Tileset { tileset: made_from, .. }) => made_from == tileset,
-            _ => false,
-        };
-        let Some(dem) = dem.filter(made_from) else {
-            return;
-        };
         if self.dem_tiles.len() > REMEMBERED_RANGES {
             self.dem_tiles.clear();
         }

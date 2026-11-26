@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use mln_style::geo::{LatLngBounds, WrapMode};
 use mln_style::hash::HashSet;
+use mln_style::layer::SourceKind;
 use mln_style::property::value::PropertyValue;
 use mln_style::range::Range;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
@@ -26,15 +27,17 @@ use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::layer::tile_layout::LayoutParams;
 use crate::log_target;
 use crate::map::MapMode;
+use crate::source::erased::UpdateParts;
+use crate::source::{Cover, MapSettings};
 use crate::tile::tile_range::TileRange;
 use crate::tile::{OverscaledTileID, UnwrappedTileID};
 use crate::tile_store::contents::Contents;
 use crate::tile_store::store::{SourceInfo, StoreContext};
-use crate::tile_store::tile::{Tile, TileKind, TileLoadOrder, TileNecessity, TileUpdateParameters};
+use crate::tile_store::tile::{Tile, TileLoadOrder, TileNecessity};
 use crate::tile_store::tile_cover::{
     TileCoverParameters, covering_zoom_level, globe_level_cover, terrain_tile_cover, tile_cover,
 };
-use crate::tile_store::tile_mut::{TileMut, WorldCopy, retire};
+use crate::tile_store::tile_mut::{CopyStart, TileMut, retire};
 use crate::tile_store::tile_parameters::TileParameters;
 use crate::tile_store::update_renderables::{PrefetchedTile, RenderablesContext, update_renderables};
 use crate::tile_store::update_tile_masks::update_tile_masks;
@@ -229,8 +232,6 @@ struct CoverContext<'s, 'a, 'p> {
     pass_tiles: &'s HashSet<OverscaledTileID>,
     tile_range: Option<TileRange>,
     needs_relayout: bool,
-    minimum_update_interval: std::time::Duration,
-    is_volatile: bool,
     /// The ideal pass renders; the pan pass doesn't.
     render: bool,
     /// The tiles the pass has retained, nearest the view's centre first,
@@ -295,18 +296,12 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
             subdivision_granularity: parameters.subdivision_granularity,
             first_load: true,
         };
-        let tile = self.source.info.new_tile(*id, params)?;
         // A flat map draws each world copy of a tile from a tile of its own,
         // which starts from a loaded copy rather than leave its world bare
         // until it has loaded and laid out the same data.
-        let copy = if parameters.view.is_globe() { None } else { self.source.world_copy(id) };
-        self.source.insert(tile);
+        self.source.add_tile(*id, params, !parameters.view.is_globe(), self.ctx)?;
         let style = self.style;
         self.source.update(id, self.ctx, |tile| {
-            match copy {
-                Some(copy) => tile.start_as_copy(copy),
-                None => tile.start_load(),
-            }
             tile.set_style(style, params.pixel_ratio, params.subdivision_granularity);
         });
         Some(*id)
@@ -333,15 +328,10 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
                 slot.set_place(Place::Cover { order });
             }
         }
-        let update_parameters = TileUpdateParameters {
-            minimum_update_interval: self.minimum_update_interval,
-            is_volatile: self.is_volatile,
-        };
         let parameters = self.update.parameters;
         let (style, needs_relayout) = (self.style, self.needs_relayout);
         self.source.update(key, self.ctx, |tile| {
             if first {
-                tile.set_update_parameters(update_parameters);
                 tile.set_necessity(necessity);
             }
             // A new pixel ratio lays the tile out again, without the
@@ -380,7 +370,7 @@ impl RenderablesContext for CoverContext<'_, '_, '_> {
     }
 
     fn has_tried_cache(&self, key: &OverscaledTileID) -> bool {
-        self.tile(key).is_some_and(|tile| tile.load.has_tried_cache())
+        self.tile(key).is_some_and(|tile| tile.load.tried_optional)
     }
 
     fn is_loaded(&self, key: &OverscaledTileID) -> bool {
@@ -488,7 +478,36 @@ impl SourceTiles {
     /// among them if there is one. The tiles are in order of zoom, then
     /// world copy, then place, so each world copy's tile is a search away.
     fn same_place(&self, id: &OverscaledTileID) -> SmallVec<[usize; 4]> {
-        let keys = self.tiles.keys().as_slice();
+        same_place(&self.tiles, id)
+    }
+
+    /// Adds a new tile `id` to the cover, laid out with `params`, which its
+    /// origin starts before it joins the tiles: from its copy in another
+    /// world copy, if `from_copy` and one is renderable. `None` while the
+    /// source has no origin.
+    pub(crate) fn add_tile(
+        &mut self,
+        id: OverscaledTileID,
+        params: LayoutParams,
+        from_copy: bool,
+        store: &mut StoreContext,
+    ) -> Option<()> {
+        let mut tile = self.info.new_tile(id, params)?;
+        let SourceTiles { info, tiles, .. } = self;
+        let copy = if from_copy { Self::world_copy(tiles, &id) } else { None };
+        let ((), installed) = TileMut::with(info, &mut tile, store, |tile| tile.start(copy));
+        self.insert(tile);
+        if installed {
+            self.contents_installed(&id);
+        }
+        Some(())
+    }
+}
+
+/// The indexes in `tiles` of the tiles at `id`'s place in each world copy.
+fn same_place(tiles: &VecMap<OverscaledTileID, Slot>, id: &OverscaledTileID) -> SmallVec<[usize; 4]> {
+    {
+        let keys = tiles.keys().as_slice();
         let mut found = SmallVec::new();
         let mut at = keys.partition_point(|key| key.overscaled_z < id.overscaled_z);
         while let Some(&OverscaledTileID { overscaled_z, wrap, .. }) = keys.get(at) {
@@ -505,7 +524,9 @@ impl SourceTiles {
         }
         found
     }
+}
 
+impl SourceTiles {
     pub(crate) fn slots(&self) -> impl Iterator<Item = &Slot> + '_ {
         self.tiles.values()
     }
@@ -561,7 +582,7 @@ impl SourceTiles {
     }
 
     fn contents_installed(&mut self, id: &OverscaledTileID) {
-        let dem = matches!(self.info.kind, TileKind::Dem(_));
+        let dem = self.info.kind == SourceKind::RasterDem;
         if !dem || !self.tile(id).is_some_and(Tile::is_renderable) {
             return;
         }
@@ -614,7 +635,7 @@ impl SourceTiles {
             self.rendered.clear();
             #[cfg(feature = "bench")]
             self.ideal.clear();
-            if self.info.kind != TileKind::Geometry {
+            if self.info.kind != SourceKind::Geometry {
                 std::mem::swap(&mut self.masked, &mut self.masked_before);
                 self.masked.clear();
                 self.unmask_stopped();
@@ -640,8 +661,6 @@ impl SourceTiles {
 
         let source_prefetch_zoom_delta = style_source.common().prefetch_zoom_delta;
         let max_parent_tile_overscale_factor = style_source.common().max_overscale_factor;
-        let minimum_update_interval = style_source.common().minimum_tile_update_interval;
-        let is_volatile = style_source.common().volatile;
 
         let mut ideal_tiles: Vec<OverscaledTileID> = Vec::new();
         let mut pan_tiles: Vec<OverscaledTileID> = Vec::new();
@@ -778,8 +797,6 @@ impl SourceTiles {
                 pass_tiles: &pass_tiles,
                 tile_range,
                 needs_relayout: relayout,
-                minimum_update_interval,
-                is_volatile,
                 render: false,
                 pass_rank: 0,
             };
@@ -855,7 +872,7 @@ impl SourceTiles {
             };
             let renderable = tile.is_renderable();
             let loading_near =
-                tile.load.necessity == TileNecessity::Required && !tile.load.has_failed() && wanted.is_near(&id);
+                tile.load.necessity == TileNecessity::Required && !tile.load.failed && wanted.is_near(&id);
             if relayout {
                 self.release(&id, ctx);
             } else if renderable {
@@ -892,7 +909,7 @@ impl SourceTiles {
             }
         }
 
-        if self.info.kind != TileKind::Geometry {
+        if self.info.kind != SourceKind::Geometry {
             let renderables: Vec<(UnwrappedTileID, bool)> =
                 self.rendered.iter().map(|(id, entry)| (*id, entry.needs_rendering)).collect();
             let masks = update_tile_masks(&renderables);
@@ -1017,7 +1034,7 @@ impl SourceTiles {
         let Some(slot) = self.tiles.get_mut(id).filter(|slot| slot.place.is_cached()) else {
             return false;
         };
-        if !slot.tile.load.is_usable(crate::storage::chrono::now()) {
+        if !slot.tile.load.times.is_usable(crate::storage::chrono::now()) {
             self.evict(id, ctx);
             return false;
         }
@@ -1030,16 +1047,15 @@ impl SourceTiles {
     /// (`cache_pop`). The copy's buckets, copies of the tile's, draw the
     /// geometry that the first of either to upload moves into the context's
     /// stores (`upload_at`).
-    pub(crate) fn world_copy(&self, id: &OverscaledTileID) -> Option<WorldCopy> {
+    fn world_copy<'a>(tiles: &'a VecMap<OverscaledTileID, Slot>, id: &OverscaledTileID) -> Option<CopyStart<'a>> {
         let now = crate::storage::chrono::now();
-        let tile = self
-            .same_place(id)
+        let tile = same_place(tiles, id)
             .into_iter()
-            .filter_map(|at| Some(self.tiles.get_index(at)?.1))
-            .filter(|slot| !slot.place.is_cached() || slot.tile.load.is_usable(now))
+            .filter_map(|at| Some(tiles.get_index(at)?.1))
+            .filter(|slot| !slot.place.is_cached() || slot.tile.load.times.is_usable(now))
             .map(|slot| &slot.tile)
             .find(|tile| tile.id.wrap != id.wrap && tile.is_renderable())?;
-        WorldCopy::of(tile)
+        CopyStart::of(tile)
     }
 
     /// Moves the tile cached under any wrap of `id` into the cover under
@@ -1092,9 +1108,7 @@ impl SourceTiles {
             .tiles
             .values()
             .filter(|slot| {
-                slot.place.is_cached()
-                    && !slot.tile.is_renderable()
-                    && (slot.tile.load.has_failed() || !keep(&slot.tile.id))
+                slot.place.is_cached() && !slot.tile.is_renderable() && (slot.tile.load.failed || !keep(&slot.tile.id))
             })
             .map(|slot| slot.tile.id)
             .collect();
@@ -1386,7 +1400,7 @@ impl SourceTiles {
         let mut result = Vec::new();
         for tile in self.cover() {
             if let Some(contents) = tile.contents().and_then(Contents::geometry) {
-                contents.query_source_features(&tile.id, self.info.single_layer, &mut result, options, global_state)?;
+                contents.query_source_features(&tile.id, &mut result, options, global_state)?;
             }
         }
         Ok(result)
@@ -1534,7 +1548,24 @@ impl SourceTiles {
         }
     }
 
+    /// Has the origin take in `source` as the style has it now, and keeps
+    /// the cover it returns.
+    pub(crate) fn update_origin(
+        &mut self,
+        source: &Source,
+        ctx: &mut StoreContext,
+        map: &MapSettings,
+        needs_relayout: bool,
+    ) -> Option<Cover> {
+        let mut origin = self.info.origin.take()?;
+        let cover = origin.update(UpdateParts { source, tiles: self, ctx, map, needs_relayout });
+        self.info.origin = Some(origin);
+        self.info.cover = cover;
+        cover
+    }
+
     pub(crate) fn clear_all(&mut self, ctx: &mut StoreContext) {
+        self.info.data_version += 1;
         self.max_content_elevation = 0.0;
         self.rendered.clear();
         for (_, slot) in std::mem::take(&mut self.tiles) {

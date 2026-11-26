@@ -23,7 +23,8 @@ use mln_vec_map::VecMap;
 
 use crate::layer::layer_type::{ErasedLayerType, LayerType, entry};
 use crate::layers::custom::Custom;
-use crate::source::source_type::{self, ErasedSourceType, SourceType};
+use crate::source::erased::{self, ErasedSourceType};
+use crate::source::{SourceType, kind};
 
 /// What a [`Registry`] is built from.
 #[derive(Default)]
@@ -63,13 +64,21 @@ impl RegistryBuilder {
         Ok(())
     }
 
-    /// Adds the source type `T`. Fails for a name that an earlier type took.
-    pub(crate) fn add_source_type<T: SourceType>(&mut self) -> Result<(), RegisterError> {
+    /// Adds the source type `T`, both its halves. Fails for a name that an
+    /// earlier type took. A type whose halves name different kinds of data
+    /// doesn't compile.
+    pub fn add_source_type<T: SourceType>(&mut self) -> Result<(), RegisterError> {
+        const {
+            assert!(
+                T::INFO.layer_kind as u8 == <T::Data as kind::Deliver>::KIND as u8,
+                "a source type's halves name the same kind of data"
+            );
+        }
         let name = T::INFO.name;
         if self.source_types.contains_key(name) {
             return Err(RegisterError::Duplicate(name.to_owned()));
         }
-        self.source_types.insert(name, source_type::entry::<T>());
+        self.source_types.insert(name, erased::entry::<T>());
         Ok(())
     }
 

@@ -8,7 +8,11 @@ use std::sync::Arc;
 
 use feature::{Feature, PropertyMap};
 use geo_types::{Geometry, Point};
-use mln_style::tileset::{RasterEncoding, Tileset};
+use mln_style::Source;
+use mln_style::layer::SourceKind;
+use mln_style::source::SourceData;
+use mln_style::sources::tileset::{TilesetSourceOptions, TilesetSourceType, VectorKind, VectorSourceType};
+use mln_style::tileset::{PartialTileset, Tileset, VectorEncoding};
 use parking_lot::Mutex;
 use serde_json::json;
 
@@ -23,14 +27,13 @@ use crate::storage::resource::{Priority, TileFormat};
 use crate::storage::response::{Reason, ResourceError};
 use crate::storage::{FileSource, LoadingMethod, Resource, Responder, Response};
 use crate::tests::tile::{dem_png, png};
-use crate::tests::{OneTile, style, tile_store};
+use crate::tests::{OneTile, map_settings, origin_of, style, tile_store, tileset_tile};
 use crate::tile::dem_data::DEMData;
 use crate::tile::{OverscaledTileID, TileData};
 use crate::tile_store::contents::Contents;
-use crate::tile_store::inbox::{SourceData, TileEvent};
-use crate::tile_store::loading::{Ancestors, DataOrigin, Fetch, Load, OriginLoad, VectorTileEncoding};
+use crate::tile_store::inbox::TileEvent;
 use crate::tile_store::pipeline::LayoutWork;
-use crate::tile_store::tile::{TileInput, TileKind, TileNecessity, TileOperation};
+use crate::tile_store::tile::{TileNecessity, TileOperation};
 use crate::worker::job::{DataInput, Job, Run, TileKey};
 use crate::worker::tile_workers::{InlineWorkers, TileWorkers};
 
@@ -160,20 +163,15 @@ impl Test {
 
     fn tileset_tile_from(&self, file_source: Arc<dyn FileSource>, workers: Box<dyn TileWorkers>) -> OneTile {
         let store = tile_store(&self.pool, workers);
-        let origin = DataOrigin::Tileset {
-            tileset: Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() },
-            encoding: VectorTileEncoding::Mvt,
-            file_source: Some(file_source),
-            ancestors: Ancestors::default(),
-        };
+        let source = vector_source(Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() });
         let id = OverscaledTileID::from_zxy(0, 0, 0);
-        OneTile::with_origin(store, TileKind::Geometry, false, origin, &[id], MapMode::Static)
+        OneTile::with_origin(store, &source, Some(file_source), &[id], MapMode::Static)
     }
 
     /// Tile 0/0/0 of a source of its own, whose jobs run on `workers`.
     fn tile(&self, workers: Box<dyn TileWorkers>) -> OneTile {
         let store = tile_store(&self.pool, workers);
-        OneTile::new(store, TileKind::Geometry, OverscaledTileID::from_zxy(0, 0, 0), MapMode::Static)
+        OneTile::new(store, SourceKind::Geometry, OverscaledTileID::from_zxy(0, 0, 0), MapMode::Static)
     }
 }
 
@@ -183,25 +181,38 @@ impl Drop for Test {
     }
 }
 
+/// A vector source of `tileset`, which it lists.
+fn vector_source(tileset: Tileset) -> Source {
+    let options = TilesetSourceOptions {
+        url: None,
+        tileset: PartialTileset::default(),
+        tile_size: mln_style::constants::TILE_SIZE_I,
+    };
+    Source::new("source", SourceData::<VectorSourceType>::with_description(options, tileset))
+}
+
 /// Whether `tile`'s tileset load waits for a network-only request, or (with
 /// `false`) for no request at all.
 fn requesting_network(tile: &OneTile, pending: bool) -> bool {
-    match &tile.tile().load.origin {
-        OriginLoad::Tileset(tileset) if pending => matches!(tileset.fetch, Fetch::Network { .. }),
-        OriginLoad::Tileset(tileset) => tileset.is_idle(),
-        OriginLoad::GeoJson { .. } | OriginLoad::Custom(_) => false,
-    }
+    let tileset = tileset_tile(tile.tile());
+    if pending { tileset.is_requesting_network() } else { tileset.is_idle() }
 }
 
-/// Starts a load of `tile`, as a GeoJSON source's `setData` does, and
+/// Begins a load of `tile`, as a GeoJSON source's `setData` does, and
 /// returns it.
-fn start_geojson_load(tile: &mut OneTile) -> u64 {
+fn begin_load(tile: &mut OneTile) -> u64 {
     tile.with(|tile| {
         let (info, tile) = tile.parts();
         let load = info.next();
-        tile.load.origin = OriginLoad::GeoJson { load: Some(load) };
+        tile.load.current = Some(load);
         load
     })
+}
+
+/// A reply to load `load` of tile `id` of source `key` that gives the tile
+/// `data`.
+fn data_reply(key: crate::worker::job::SourceKey, id: OverscaledTileID, load: u64, data: TileData) -> TileEvent {
+    TileEvent::Load { tile: TileKey { source: key, id }, load, reply: Box::new(Some(data)) }
 }
 
 /// The style of a layout job.
@@ -316,13 +327,14 @@ fn fresh_data_is_kept_when_required_again() {
         tile.set_necessity(&id, TileNecessity::Optional);
         tile.set_necessity(&id, TileNecessity::Required);
         assert_eq!(file_source.pending(), usize::from(expires.is_some()), "a request only for data that expires");
-        let OriginLoad::Tileset(tileset) = &tile.tile().load.origin else { unreachable!() };
+        let tileset = tileset_tile(tile.tile());
         assert_eq!(tileset.resource.prior_caching.expires, expires, "held until the data expires");
         assert!(tile.tile().is_complete());
         // Expired, so the next round requests it again.
         tile.with(|tile| {
-            let OriginLoad::Tileset(tileset) = &mut tile.parts().1.load.origin else { unreachable!() };
-            tileset.caching.expires = Some(Timestamp::from_secs(0));
+            let state = tile.parts().1.load.state.as_mut().expect("the tile's state");
+            let tileset = state.downcast_mut::<crate::source::tileset::TilesetTile>().expect("a tileset tile");
+            tileset.caching_mut().expires = Some(Timestamp::from_secs(0));
         });
     }
     assert_eq!(manual.submitted(), 2, "one layout per response");
@@ -337,19 +349,14 @@ fn a_cut_tile_takes_a_fresh_ancestor_from_memory() {
     for (response, requests) in [(water(), 0), (expired(water()), 1)] {
         let file_source = Arc::new(Held::default());
         let file_source_dyn: Arc<dyn FileSource> = Arc::<Held>::clone(&file_source);
-        let origin = DataOrigin::Tileset {
-            tileset: Tileset {
-                tiles: vec!["tiles".to_owned()],
-                zoom_range: mln_style::range::Range::new(0, 0),
-                ..Default::default()
-            },
-            encoding: VectorTileEncoding::Mvt,
-            file_source: Some(file_source_dyn),
-            ancestors: Ancestors::default(),
-        };
+        let source = vector_source(Tileset {
+            tiles: vec!["tiles".to_owned()],
+            zoom_range: mln_style::range::Range::new(0, 0),
+            ..Default::default()
+        });
         let (left, right) = (OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0));
         let store = tile_store(&test.pool, Box::new(InlineWorkers));
-        let mut tiles = OneTile::with_origin(store, TileKind::Geometry, false, origin, &[left, right], MapMode::Static);
+        let mut tiles = OneTile::with_origin(store, &source, Some(file_source_dyn), &[left, right], MapMode::Static);
         let (styled, params) = (style(&[water_layer("water", "red")]), tiles.tile_params());
         for id in [left, right] {
             tiles.with_at(&id, |tile| tile.set_style(&styled, params.pixel_ratio, params.subdivision_granularity));
@@ -380,18 +387,13 @@ fn a_tile_at_the_last_zoom_and_its_cut_tiles_share_their_data() {
     for (first, second) in [(whole, cut), (cut, whole)] {
         let file_source = Arc::new(Held::default());
         let file_source_dyn: Arc<dyn FileSource> = Arc::<Held>::clone(&file_source);
-        let origin = DataOrigin::Tileset {
-            tileset: Tileset {
-                tiles: vec!["tiles".to_owned()],
-                zoom_range: mln_style::range::Range::new(0, 0),
-                ..Default::default()
-            },
-            encoding: VectorTileEncoding::Mvt,
-            file_source: Some(file_source_dyn),
-            ancestors: Ancestors::default(),
-        };
+        let source = vector_source(Tileset {
+            tiles: vec!["tiles".to_owned()],
+            zoom_range: mln_style::range::Range::new(0, 0),
+            ..Default::default()
+        });
         let store = tile_store(&test.pool, Box::new(InlineWorkers));
-        let mut tiles = OneTile::with_origin(store, TileKind::Geometry, false, origin, &[whole, cut], MapMode::Static);
+        let mut tiles = OneTile::with_origin(store, &source, Some(file_source_dyn), &[whole, cut], MapMode::Static);
         let (styled, params) = (style(&[water_layer("water", "red")]), tiles.tile_params());
         for id in [whole, cut] {
             tiles.with_at(&id, |tile| tile.set_style(&styled, params.pixel_ratio, params.subdivision_granularity));
@@ -418,30 +420,28 @@ fn a_cut_tile_takes_no_ancestor_of_another_url() {
     let test = Test::new();
     let file_source = Arc::new(Held::default());
     let file_source_dyn: Arc<dyn FileSource> = Arc::<Held>::clone(&file_source);
-    let origin = DataOrigin::Tileset {
-        tileset: Tileset {
-            tiles: vec!["tiles{ratio}".to_owned()],
-            zoom_range: mln_style::range::Range::new(0, 0),
-            ..Default::default()
-        },
-        encoding: VectorTileEncoding::Mvt,
-        file_source: Some(file_source_dyn),
-        ancestors: Ancestors::default(),
-    };
+    let source = vector_source(Tileset {
+        tiles: vec!["tiles{ratio}".to_owned()],
+        zoom_range: mln_style::range::Range::new(0, 0),
+        ..Default::default()
+    });
     let (left, right) = (OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0));
     let store = tile_store(&test.pool, Box::new(InlineWorkers));
-    let mut tiles = OneTile::with_origin(store, TileKind::Geometry, false, origin, &[left], MapMode::Static);
+    let mut tiles = OneTile::with_origin(store, &source, Some(Arc::clone(&file_source_dyn)), &[left], MapMode::Static);
     tiles.set_necessity(&left, TileNecessity::Required);
     file_source.respond(water());
     tiles.update();
 
+    // The map's pixel ratio changes, and a new tile is made at it.
     let params = crate::layer::tile_layout::LayoutParams { pixel_ratio: 2.0, ..tiles.tile_params() };
-    let (source, _) = tiles.store.source_mut(tiles.key).expect("the source");
-    let tile = source.info.new_tile(right, params).expect("a tile");
-    source.insert(tile);
+    let map = crate::source::MapSettings { pixel_ratio: 2.0, ..map_settings(MapMode::Static, Some(file_source_dyn)) };
+    let (tiles_of_source, ctx) = tiles.store.source_mut(tiles.key).expect("the source");
+    tiles_of_source.update_origin(&source, ctx, &map, false).expect("a cover");
+    assert!(tiles_of_source.tile(&left).is_some(), "the same tileset keeps its tiles");
+    tiles_of_source.add_tile(right, params, false, ctx).expect("a tile");
     tiles.set_necessity(&right, TileNecessity::Required);
     assert_eq!(file_source.pending(), 1, "the @2x ancestor is requested");
-    let OriginLoad::Tileset(tileset) = &tiles.tile_at(&right).load.origin else { unreachable!() };
+    let tileset = tileset_tile(tiles.tile_at(&right));
     assert_eq!(tileset.resource.url, "tiles@2x");
     assert_eq!(tileset.resource.prior_etag, None, "no validators of the 1x response");
 }
@@ -603,23 +603,18 @@ fn source_data_racing_eviction() {
     let key = tile.key;
     tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
     // A load under way, as a GeoJSON source's `setData` starts.
-    let old_load = start_geojson_load(&mut tile);
+    let old_load = begin_load(&mut tile);
     tile.drop_tile();
     tile.add(id);
     tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
-    let new_load = start_geojson_load(&mut tile);
+    let new_load = begin_load(&mut tile);
 
     let inbox = tile.store.inbox().clone();
-    let event = |load, ids: &[u64]| TileEvent::Data {
-        tile: TileKey { source: key, id },
-        load,
-        data: SourceData::Data(Some(features(ids))),
-    };
-    inbox.send(event(old_load, &[1]));
+    inbox.send(data_reply(key, id, old_load, features(&[1])));
     tile.update();
     assert!(tile.layout().data.as_ref().is_none(), "the old tile's data goes nowhere");
-    inbox.send(TileEvent::Data { tile: TileKey { source: key, id }, load: old_load, data: SourceData::Stale });
-    inbox.send(event(new_load, &[2]));
+    inbox.send(data_reply(key, id, new_load, features(&[2])));
+    inbox.send(data_reply(key, id, old_load, features(&[3])));
     // One update starts the layout, whose reply the next takes in.
     tile.update();
     tile.update();
@@ -660,27 +655,20 @@ fn style_replaced_mid_load() {
     tile.store.remove_source(old_key);
     assert!(old_job.superseded.load(std::sync::atomic::Ordering::Relaxed));
     assert!(reload.is_cancelled(), "the old tile's request goes with it");
-    let new_key = tile.store.add_source("source".to_owned(), TileKind::Geometry, false);
+    let new_source = vector_source(Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() });
+    let new_key = tile.store.add_source("source".to_owned(), origin_of(&new_source));
     assert_ne!(new_key, old_key, "keys aren't reused");
     let (source, ctx) = tile.store.source_mut(new_key).expect("the source");
     let file_source_dyn: Arc<dyn FileSource> = Arc::<Held>::clone(&file_source);
-    source.info.origin = Some(DataOrigin::Tileset {
-        tileset: Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() },
-        encoding: VectorTileEncoding::Mvt,
-        file_source: Some(file_source_dyn),
-        ancestors: Ancestors::default(),
-    });
-    let new_tile = source.info.new_tile(id, params).expect("a tile");
-    source.insert(new_tile);
-    source.update(&id, ctx, |tile| {
-        tile.start_load();
-    });
+    source.update_origin(&new_source, ctx, &map_settings(MapMode::Static, Some(file_source_dyn)), false);
+    source.add_tile(id, params, false, ctx).expect("a tile");
     tile.key = new_key;
     tile.set_style(&style(&layers));
 
     // The old job's reply, and an old response sent before the cancel.
     manual.reply(InlineWorkers::run(old_job));
-    tile.store.inbox().send(TileEvent::Response { tile: TileKey { source: old_key, id }, load: 1, response: water() });
+    let old_response = TileEvent::Load { tile: TileKey { source: old_key, id }, load: 1, reply: Box::new(water()) };
+    tile.store.inbox().send(old_response);
     tile.update();
     assert!(tile.store.source(old_key).is_none());
     assert!(
@@ -704,7 +692,7 @@ fn dem_backfill_as_dems_arrive() {
     let test = Test::new();
     let store = tile_store(&test.pool, Box::new(InlineWorkers));
     let (left, right) = (OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0));
-    let mut tiles = OneTile::new(store, TileKind::Dem(RasterEncoding::Mapbox), right, MapMode::Static);
+    let mut tiles = OneTile::new(store, SourceKind::RasterDem, right, MapMode::Static);
     tiles.add(left);
     // Each update starts the decode, whose reply the next takes in.
     tiles.set_image(&right, Some(png(16, 16)));
@@ -720,7 +708,7 @@ fn dem_backfill_as_dems_arrive() {
     // The world's one tile at zoom 0 is in the first and the last row.
     let store = tile_store(&test.pool, Box::new(InlineWorkers));
     let root = OverscaledTileID::from_zxy(0, 0, 0);
-    let mut root_tile = OneTile::new(store, TileKind::Dem(RasterEncoding::Mapbox), root, MapMode::Static);
+    let mut root_tile = OneTile::new(store, SourceKind::RasterDem, root, MapMode::Static);
     root_tile.set_image(&root, Some(png(16, 16)));
     root_tile.update();
     root_tile.update();
@@ -752,7 +740,7 @@ fn a_reloaded_dem_refills_both_borders() {
     let test = Test::new();
     let store = tile_store(&test.pool, Box::new(InlineWorkers));
     let (left, right) = (OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0));
-    let mut tiles = OneTile::new(store, TileKind::Dem(RasterEncoding::Mapbox), right, MapMode::Static);
+    let mut tiles = OneTile::new(store, SourceKind::RasterDem, right, MapMode::Static);
     tiles.add(left);
     for id in [left, right] {
         tiles.set_image(&id, Some(dem_png(1)));
@@ -781,7 +769,7 @@ fn dem_borders_across_the_antimeridian_at_zoom_1() {
     let store = tile_store(&test.pool, Box::new(InlineWorkers));
     let west = OverscaledTileID::with_zxy(1, -1, 1, 1, 0);
     let east = OverscaledTileID::from_zxy(1, 0, 0);
-    let mut tiles = OneTile::new(store, TileKind::Dem(RasterEncoding::Mapbox), east, MapMode::Static);
+    let mut tiles = OneTile::new(store, SourceKind::RasterDem, east, MapMode::Static);
     tiles.add(west);
     for (id, seed) in [(west, 1), (east, 2)] {
         tiles.set_image(&id, Some(dem_png(seed)));
@@ -800,15 +788,10 @@ fn data_from_the_inbox_starts_a_job_at_once() {
     let mut tile = test.tile(Box::new(manual.clone()));
     let (id, key) = (tile.id, tile.key);
     tile.set_style(&style(&[layer(json!({"id": "dots", "type": "circle"}))]));
-    let load = start_geojson_load(&mut tile);
+    let load = begin_load(&mut tile);
     let inbox = tile.store.inbox().clone();
     // From another thread, as a GeoJSON source's tiles cut on a pool answer.
-    std::thread::spawn(move || {
-        let data = SourceData::Data(Some(features(&[1])));
-        inbox.send(TileEvent::Data { tile: TileKey { source: key, id }, load, data });
-    })
-    .join()
-    .unwrap();
+    std::thread::spawn(move || inbox.send(data_reply(key, id, load, features(&[1])))).join().unwrap();
     tile.update();
     assert_eq!(manual.submitted(), 1);
     let run = manual.take();
@@ -974,7 +957,7 @@ fn a_tile_lays_out_again_once_a_failed_glyph_range_loads() {
     let store = tile_store(&test.pool, Box::new(InlineWorkers));
     let first = OverscaledTileID::from_zxy(1, 0, 0);
     let second = OverscaledTileID::from_zxy(1, 1, 0);
-    let mut tiles = OneTile::new(store, TileKind::Geometry, first, MapMode::Continuous);
+    let mut tiles = OneTile::new(store, SourceKind::Geometry, first, MapMode::Continuous);
     tiles.add(second);
     let glyph_source: Arc<dyn FileSource> = Arc::<Held>::clone(&file_source);
     tiles.store.set_file_source(Some(glyph_source));
@@ -1002,7 +985,7 @@ fn a_tile_lays_out_again_once_a_failed_glyph_range_loads() {
 
     tiles.with_at(&second, |tile| {
         tile.set_style(&labels, 1.0, mln_style::subdivision_granularity::SubdivisionGranularitySetting::none());
-        tile.take_input(TileInput::Geometry { data: Some(points()), missing: false });
+        tile.take_data(Some(points()), false);
     });
     tiles.update();
     tiles.update();
@@ -1084,27 +1067,27 @@ fn a_stale_copy_shows_until_it_revalidates() {
     assert_eq!(tile.actions(), [Error]);
 }
 
-/// The format that a request for a tile of a source of `kind` tiles, with
-/// `encoding`, names.
-fn requested_format(kind: TileKind, encoding: VectorTileEncoding) -> Option<TileFormat> {
-    let origin = DataOrigin::Tileset {
-        tileset: Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() },
-        encoding,
-        file_source: None,
-        ancestors: Ancestors::default(),
-    };
-    match Load::new(&origin, kind, &OverscaledTileID::from_zxy(0, 0, 0), 1.0).origin {
-        OriginLoad::Tileset(load) => load.resource.tile_data.map(|tile| tile.format),
-        OriginLoad::GeoJson { .. } | OriginLoad::Custom(_) => None,
-    }
+/// The format that a request for a tile of a tileset source of the kind
+/// `K`, whose tileset names `encoding`, names.
+fn requested_format<K: mln_style::sources::tileset::TilesetKind>(
+    encoding: Option<VectorEncoding>,
+) -> Option<TileFormat> {
+    let test = Test::new();
+    let tileset = Tileset { tiles: vec!["tiles".to_owned()], vector_encoding: encoding, ..Default::default() };
+    let options = TilesetSourceOptions { url: None, tileset: PartialTileset::default(), tile_size: 512 };
+    let source = Source::new("source", SourceData::<TilesetSourceType<K>>::with_description(options, tileset));
+    let store = tile_store(&test.pool, Box::new(InlineWorkers));
+    let id = OverscaledTileID::from_zxy(0, 0, 0);
+    let tiles = OneTile::with_origin(store, &source, None, &[id], MapMode::Static);
+    tileset_tile(tiles.tile()).resource.tile_data.as_ref().map(|tile| tile.format)
 }
 
 #[test]
 fn a_tile_request_names_the_format_its_source_decodes() {
-    let mlt = VectorTileEncoding::Mlt { fast_pfor_enabled: false };
-    assert_eq!(Some(TileFormat::Mvt), requested_format(TileKind::Geometry, VectorTileEncoding::Mvt));
-    assert_eq!(Some(TileFormat::Mlt), requested_format(TileKind::Geometry, mlt));
-    assert_eq!(Some(TileFormat::Image), requested_format(TileKind::Raster, VectorTileEncoding::Mvt));
-    let dem = TileKind::Dem(RasterEncoding::Mapbox);
-    assert_eq!(Some(TileFormat::Image), requested_format(dem, VectorTileEncoding::Mvt));
+    use mln_style::sources::tileset::{RasterDemKind, RasterKind};
+
+    assert_eq!(Some(TileFormat::Mvt), requested_format::<VectorKind>(None));
+    assert_eq!(Some(TileFormat::Mlt), requested_format::<VectorKind>(Some(VectorEncoding::MLT)));
+    assert_eq!(Some(TileFormat::Image), requested_format::<RasterKind>(None));
+    assert_eq!(Some(TileFormat::Image), requested_format::<RasterDemKind>(None));
 }

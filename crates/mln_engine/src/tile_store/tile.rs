@@ -2,23 +2,26 @@
 //! newer data or work is pending.
 
 use std::sync::Arc;
-use std::time::Duration;
+
+use mln_style::layer::SourceKind;
 
 use crate::layer::tile_layout::Dependencies;
 use crate::log_target;
 use crate::map::MapMode;
-use crate::storage::Data;
-use crate::tile::{OverscaledTileID, TileData};
+use crate::tile::OverscaledTileID;
 use crate::tile_store::contents::Contents;
 use crate::tile_store::loading::Load;
 use crate::tile_store::pipeline::{Layout, Pipeline};
 
-/// An optional tile only takes low-cost actions to get its data, such as
-/// loading stale data from the cache; a required one loads it from the
-/// network and keeps it fresh.
+/// How much the view needs a tile: a required tile is one the view
+/// needs; an optional one is only a fallback or a prefetch the view can do
+/// without, or waits in the cache. An origin may only take low-cost
+/// actions to get an optional tile's data, such as looking in a cache.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TileNecessity {
+pub enum TileNecessity {
+    /// Only a fallback, a prefetch or a cached tile.
     Optional,
+    /// A tile the view needs.
     Required,
 }
 
@@ -81,27 +84,6 @@ pub enum TileOperation {
     Cancelled,
     /// No operation has taken place
     NullOp,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct TileUpdateParameters {
-    pub(crate) minimum_update_interval: Duration,
-    pub(crate) is_volatile: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum TileKind {
-    Geometry,
-    Raster,
-    Dem(mln_style::tileset::RasterEncoding),
-}
-
-/// What a load delivers. `data` is `None` for a tile without any (204, no
-/// tile in an archive); `missing`, the tileset has no tile here, so a tile
-/// of another zoom level draws in its place.
-pub(crate) enum TileInput {
-    Geometry { data: Option<TileData>, missing: bool },
-    Image { data: Option<Data>, missing: bool },
 }
 
 pub(crate) struct Shown {
@@ -211,11 +193,11 @@ impl Tile {
         self.shown.as_mut().is_some_and(|shown| shown.contents.layer_properties_updated(layer_properties))
     }
 
-    pub(crate) fn dump_debug_logs(&self, kind: TileKind) {
+    pub(crate) fn dump_debug_logs(&self, kind: SourceKind) {
         let kind = match kind {
-            TileKind::Geometry => "Geometry",
-            TileKind::Raster => "Raster",
-            TileKind::Dem(_) => "RasterDEM",
+            SourceKind::Geometry | SourceKind::None => "Geometry",
+            SourceKind::Raster => "Raster",
+            SourceKind::RasterDem => "RasterDEM",
         };
         let yes = |value: bool| if value { "yes" } else { "no" };
         log::info!(target: log_target::GENERAL, "Tile::Kind: {kind}");

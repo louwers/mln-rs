@@ -1249,7 +1249,8 @@ impl TurningSource {
         let cached: Vec<_> = self.pyramid().slots().filter(|slot| slot.place().is_cached()).collect();
         for slot in &cached {
             assert_eq!(slot.place().order(), unwanted, "tile {}'s jobs", slot.tile.id);
-            assert_eq!(slot.tile.load.request_order(), Some(unwanted.value()), "tile {}'s request", slot.tile.id);
+            let request = &crate::tests::tileset_tile(&slot.tile).resource.order;
+            assert_eq!(request.get(), unwanted.value(), "tile {}'s request", slot.tile.id);
         }
         cached.len()
     }
@@ -1690,7 +1691,8 @@ fn image_seen_by(test: &SourceTest, west: f64, east: f64) -> crate::source::rend
     let image = mln_style::bitmap::PremultipliedImage::from_vec(Size::new(1, 1), vec![255, 0, 0, 255]);
     let source = edited(&image_source("image", corners), ImageSourceType::set_image("image", image));
     let mut store = test.store();
-    let mut render_source = crate::source::render_image_source::RenderImageSource::new(source.clone());
+    let mut render_source =
+        crate::source::render_image_source::RenderImageSource::new(source.clone(), crate::tests::image_of(&source));
     render_source.update(&mut store, source, &[], true, false, &test.tile_parameters(MapMode::Static));
     render_source
 }

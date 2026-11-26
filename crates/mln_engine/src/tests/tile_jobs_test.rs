@@ -15,7 +15,7 @@ use mln_style::bitmap::PremultipliedImage;
 use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::hash::HashSet;
 use mln_style::image::Impl as ImageImpl;
-use mln_style::layer::convert_layer;
+use mln_style::layer::{SourceKind, convert_layer};
 use mln_style::property::evaluation::PropertyEvaluationParameters;
 use mln_style::size::Size;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
@@ -38,7 +38,6 @@ use crate::tests::{OneTile, style, tile_store};
 use crate::tile::{OverscaledTileID, TileData};
 use crate::tile_store::contents::Contents;
 use crate::tile_store::inbox::{Inbox, InboxSender, TileEvent};
-use crate::tile_store::tile::TileKind;
 use crate::worker::job::{DataInput, Job, JobId, JobResult, JobTimes, LayoutJob, Reply, Run};
 use crate::worker::tile_workers::{InlineWorkers, Lane, PoolWorkers, ReplyBody, TileWorkers};
 use crate::worker::worker_codec::{Encoded, RemoteWorkers, ReplySink, TileWorkerHost, WorkerInstances};
@@ -163,7 +162,7 @@ impl Test {
         }
         store.images_mut().set_loaded(true);
         let id = OverscaledTileID::new(0, 0, CanonicalTileID::new(0, 0, 0));
-        let tile = OneTile::new(store, TileKind::Geometry, id, MapMode::Static);
+        let tile = OneTile::new(store, SourceKind::Geometry, id, MapMode::Static);
         Test { thread_pool, tile, asked: Vec::new(), resource_events: Vec::new() }
     }
 
@@ -815,7 +814,7 @@ fn a_newer_generation_supersedes_the_job_in_flight() {
 
 /// A raster tile of `kind`, `x`/0 of zoom 1, and a second one at `x + 1`,
 /// whose jobs run on `workers`.
-fn raster_tiles(pool: &TaskGroup, workers: Box<dyn TileWorkers>, kind: TileKind) -> OneTile {
+fn raster_tiles(pool: &TaskGroup, workers: Box<dyn TileWorkers>, kind: SourceKind) -> OneTile {
     let store = tile_store(pool, workers);
     let mut tiles = OneTile::new(store, kind, OverscaledTileID::from_zxy(1, 0, 0), MapMode::Static);
     tiles.add(OverscaledTileID::from_zxy(1, 1, 0));
@@ -837,7 +836,7 @@ fn raster_size(tiles: &OneTile, x: u32) -> Option<Size> {
 fn raster_decodes_apply_in_any_order() {
     let pool = TaskGroup::new(&crate::tests::pool());
     let manual = Manual::default();
-    let mut tiles = raster_tiles(&pool, Box::new(manual.clone()), TileKind::Raster);
+    let mut tiles = raster_tiles(&pool, Box::new(manual.clone()), SourceKind::Raster);
     let ids = [OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0)];
     for (id, size) in ids.iter().zip([16, 32]) {
         tiles.set_image(id, Some(png(size, size)));
@@ -876,7 +875,7 @@ fn raster_decodes_apply_in_any_order() {
 fn a_worker_lost_during_a_decode() {
     let pool = TaskGroup::new(&crate::tests::pool());
     let instances = Instances::new(1);
-    let kind = TileKind::Dem(mln_style::tileset::RasterEncoding::Mapbox);
+    let kind = SourceKind::RasterDem;
     let mut tiles = raster_tiles(&pool, instances.workers(), kind);
     let id = tiles.id;
     tiles.set_image(&id, Some(png(16, 16)));
@@ -913,14 +912,13 @@ fn a_tiles_upload_frees_the_data_its_world_copy_copied() {
     let id = OverscaledTileID::new(0, 0, CanonicalTileID::new(0, 0, 0));
     let copy_id = OverscaledTileID::new(0, 1, CanonicalTileID::new(0, 0, 0));
     let mut tiles =
-        OneTile::new(tile_store(&thread_pool, Box::new(InlineWorkers)), TileKind::Geometry, id, MapMode::Continuous);
+        OneTile::new(tile_store(&thread_pool, Box::new(InlineWorkers)), SourceKind::Geometry, id, MapMode::Continuous);
     tiles.set_style(&style(&[layer(json!({"id": "circles", "type": "circle"}))]));
     tiles.set_data(Some(points()));
     tiles.settle(&[id]);
-    tiles.add(copy_id);
+    let params = tiles.tile_params();
     let (source, ctx) = tiles.store.source_mut(tiles.key).expect("the source");
-    let copy = source.world_copy(&copy_id).expect("a copy of the tile");
-    source.update(&copy_id, ctx, |tile| tile.start_as_copy(copy));
+    source.add_tile(copy_id, params, true, ctx).expect("a copy of the tile");
     // Whether the circles' vertices of tile `id` moved out of its bucket and
     // its data is gone, and the stored vertices they moved into.
     let circles = |source: &SourceTiles, id: &OverscaledTileID| {

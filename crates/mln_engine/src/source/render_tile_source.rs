@@ -9,22 +9,24 @@ use crate::layer::bucket::UploadNeeds;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::query::FeatureExtensionValue;
 use crate::render::tile::RenderTile;
+use crate::render::update_parameters::UpdateParameters;
+use crate::source::MapSettings;
+use crate::source::erased::ErasedOrigin;
 use crate::source::render_source::{RenderSource, RenderSourceBase, RenderTileParameters, TileOrder};
-use crate::source::source_type::{OriginUpdate, TileOrigin};
 use crate::tile_store::source_tiles::{CoverUpdate, SourceTiles};
 use crate::tile_store::store::TileStore;
-use crate::tile_store::tile::TileKind;
 use crate::tile_store::tile_parameters::TileParameters;
 use crate::worker::job::SourceKey;
 
 /// The render source of a source with tiles: a view into the tile store,
-/// which keeps the tiles, with the render tiles of the last
+/// which keeps the tiles and their origin, with the render tiles of the last
 /// `update_render_tiles`.
 pub(crate) struct RenderTileSource {
     pub(crate) base: RenderSourceBase,
     key: SourceKey,
-    origin: Box<dyn TileOrigin>,
     fast_pfor_enabled: bool,
+    /// The deepest zoom of the last cover's tiles.
+    max_zoom: u8,
     render_tiles: Vec<RenderTile>,
     /// The render tiles in [`TileOrder::ById`], as indexes into them.
     order_by_id: Vec<usize>,
@@ -50,25 +52,31 @@ impl RenderTileSource {
         });
     }
 
-    /// The render source of `style_source`, whose tiles of `kind` go in `store`
-    /// and get their data through `origin`. A tile of a `single_layer`
-    /// source holds one source layer.
-    pub(crate) fn new(
-        style_source: Source,
-        kind: TileKind,
-        single_layer: bool,
-        origin: Box<dyn TileOrigin>,
-        store: &mut TileStore,
-    ) -> Self {
-        let key = store.add_source(style_source.id().to_owned(), kind, single_layer);
+    /// The render source of `style_source`, whose tiles go in `store` and
+    /// get their data through `origin`.
+    pub(crate) fn new(style_source: Source, origin: Box<dyn ErasedOrigin>, store: &mut TileStore) -> Self {
+        let key = store.add_source(style_source.id().to_owned(), origin);
         RenderTileSource {
             base: RenderSourceBase::new(style_source),
             key,
-            origin,
             fast_pfor_enabled: false,
+            max_zoom: crate::tile::dem::TERRAIN_RGB_MAXZOOM,
             render_tiles: Vec::new(),
             order_by_id: Vec::new(),
             order_by_y: Vec::new(),
+        }
+    }
+}
+
+impl RenderTileSource {
+    /// What the map says of the source's tiles, for its origin.
+    fn map_settings(&self, parameters: &TileParameters<'_>) -> MapSettings {
+        MapSettings {
+            mode: parameters.mode,
+            pixel_ratio: parameters.pixel_ratio,
+            max_zoom: parameters.max_zoom,
+            file_source: parameters.file_source.clone(),
+            fast_pfor_enabled: self.fast_pfor_enabled,
         }
     }
 }
@@ -91,15 +99,16 @@ impl RenderSource for RenderTileSource {
         needs_relayout: bool,
         parameters: &TileParameters<'_>,
     ) {
-        let previous = std::mem::replace(&mut self.base.style_source, style_source);
+        self.base.style_source = style_source;
         self.base.enabled = needs_rendering;
+        let map = self.map_settings(parameters);
         let Some((source, ctx)) = store.source_mut(self.key) else {
             return;
         };
-        let origin_update = OriginUpdate { parameters, needs_relayout, fast_pfor_enabled: self.fast_pfor_enabled };
-        let Some(cover) = self.origin.update(&previous, &self.base.style_source, source, ctx, &origin_update) else {
+        let Some(cover) = source.update_origin(&self.base.style_source, ctx, &map, needs_relayout) else {
             return;
         };
+        self.max_zoom = cover.zoom_range.max;
         let source_id = self.base.style_source.id();
         let terrain_reads = parameters.terrain.filter(|terrain| terrain.source_id == source_id);
         let update = CoverUpdate {
@@ -168,7 +177,20 @@ impl RenderSource for RenderTileSource {
         extension_field: &str,
         args: Option<&feature::PropertyMap>,
     ) -> Result<FeatureExtensionValue, Error> {
-        self.origin.query_feature_extensions(feature, extension, extension_field, args)
+        crate::source::query_feature_extensions(&self.base.style_source, feature, extension, extension_field, args)
+    }
+
+    fn update_origin(&mut self, store: &mut TileStore, style_source: &Source, parameters: &UpdateParameters) {
+        let map = MapSettings {
+            mode: parameters.mode,
+            pixel_ratio: parameters.pixel_ratio,
+            max_zoom: parameters.max_zoom,
+            file_source: parameters.file_source.clone(),
+            fast_pfor_enabled: self.fast_pfor_enabled,
+        };
+        if let Some((source, ctx)) = store.source_mut(self.key) {
+            source.update_origin(style_source, ctx, &map, false);
+        }
     }
 
     fn set_fast_pfor_enabled(&mut self, enable: bool) {
@@ -178,6 +200,6 @@ impl RenderSource for RenderTileSource {
     fn dump_debug_logs(&self) {}
 
     fn max_zoom(&self) -> Option<u8> {
-        Some(self.origin.max_zoom())
+        Some(self.max_zoom)
     }
 }

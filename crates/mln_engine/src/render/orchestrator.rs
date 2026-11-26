@@ -348,6 +348,15 @@ impl RenderOrchestrator {
         }
         self.view = update_parameters.view.clone();
 
+        // The terrain's cover is made of its DEM's, which the DEM's origin
+        // makes of its source as the style has it now.
+        let style = &update_parameters.style;
+        if let Some(terrain) = style.get_terrain()
+            && let Some(style_source) = style.get_source(&terrain.source)
+            && let Some(source) = self.render_sources.get_mut(&terrain.source)
+        {
+            source.update_origin(&mut self.tile_store, style_source, update_parameters);
+        }
         let (store, render_sources) = (&self.tile_store, &self.render_sources);
         let dem = |id: &str| store.source(render_sources.get(id)?.tiles()?);
         frame.terrain = self.terrain.update(update_parameters, dem).is_some();

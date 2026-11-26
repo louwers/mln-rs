@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::Error;
+use mln_style::layer::SourceKind;
 use mln_style::size::Size;
 
 use super::{RasterTileTest, png};
@@ -9,12 +10,11 @@ use crate::tests::OneTile;
 use crate::tests::tile_jobs_test::Manual;
 use crate::tile::OverscaledTileID;
 use crate::tile_store::contents::Contents;
-use crate::tile_store::tile::TileKind;
 use crate::worker::job::JobResult;
 use crate::worker::tile_workers::InlineWorkers;
 
 fn tiles(test: &RasterTileTest) -> OneTile {
-    test.tiles(TileKind::Raster, OverscaledTileID::from_zxy(0, 0, 0), Box::new(InlineWorkers))
+    test.tiles(SourceKind::Raster, OverscaledTileID::from_zxy(0, 0, 0), Box::new(InlineWorkers))
 }
 
 /// The size of the image tile `id` shows.
@@ -94,7 +94,7 @@ fn on_parsed_empty() {
 #[test]
 fn missing_and_empty() {
     let test = RasterTileTest::new();
-    let mut tiles = test.pool_tiles(TileKind::Raster);
+    let mut tiles = test.pool_tiles(SourceKind::Raster);
     let id = tiles.id;
 
     tiles.set_image(&id, Some(png(16, 16)));
@@ -119,7 +119,7 @@ fn missing_and_empty() {
 fn decode_through_the_codec() {
     let test = RasterTileTest::new();
     // Two tiles, so both instances get one.
-    let mut tiles = test.remote_tiles(TileKind::Raster, 2);
+    let mut tiles = test.remote_tiles(SourceKind::Raster, 2);
     let ids = [OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0)];
     for (id, size) in ids.iter().zip([16, 32]) {
         tiles.set_image(id, Some(png(size, size)));
@@ -145,7 +145,7 @@ fn decode_through_the_codec() {
 fn an_empty_load_during_a_decode_keeps_one_decode_in_flight() {
     let test = RasterTileTest::new();
     let manual = Manual::default();
-    let mut tiles = test.tiles(TileKind::Raster, OverscaledTileID::from_zxy(0, 0, 0), Box::new(manual.clone()));
+    let mut tiles = test.tiles(SourceKind::Raster, OverscaledTileID::from_zxy(0, 0, 0), Box::new(manual.clone()));
     let id = tiles.id;
     tiles.set_image(&id, Some(png(16, 16)));
     tiles.update();

@@ -14,7 +14,10 @@ use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::registry::Registry;
 use crate::render::paint_parameters::TransformParameters;
 use crate::render::tile::RenderTile;
-use crate::source::render_image_source::ImageSourceRenderData;
+use crate::render::update_parameters::UpdateParameters;
+use crate::source::Supplied;
+use crate::source::render_image_source::{ImageSourceRenderData, RenderImageSource};
+use crate::source::render_tile_source::RenderTileSource;
 use crate::tile_store::store::TileStore;
 use crate::tile_store::tile_parameters::TileParameters;
 use crate::worker::job::SourceKey;
@@ -109,6 +112,11 @@ pub(crate) trait RenderSource {
         Ok(crate::query::FeatureExtensionValue::default())
     }
 
+    /// Has the source's origin take in `style_source`, as `update` does
+    /// first, so that its tiles' cover is of that version: for a source
+    /// another part of the update reads before the sources update.
+    fn update_origin(&mut self, _store: &mut TileStore, _style_source: &Source, _parameters: &UpdateParameters) {}
+
     fn set_fast_pfor_enabled(&mut self, _enable: bool) {}
 
     fn dump_debug_logs(&self);
@@ -128,7 +136,12 @@ pub(crate) trait RenderSource {
 /// renderer register the same types.
 pub(crate) fn create(registry: &Registry, source: &Source, store: &mut TileStore) -> Option<Box<dyn RenderSource>> {
     let name = source.info().name;
-    let render_source = registry.source_type(name).map(|source_type| source_type.create_render_source(source, store));
+    let render_source = registry.source_type(name).map(|source_type| -> Box<dyn RenderSource> {
+        match source_type.supply(source) {
+            Supplied::Tiles(origin) => Box::new(RenderTileSource::new(source.clone(), origin, store)),
+            Supplied::Image(image_of) => Box::new(RenderImageSource::new(source.clone(), image_of)),
+        }
+    });
     debug_assert!(render_source.is_some(), "the renderer's registry has no source type '{name}'");
     render_source
 }

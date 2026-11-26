@@ -66,8 +66,7 @@ pub(crate) use fog::terrain_fog;
 pub(crate) use ground::{FrameGround, GroundHeights, StandingDraw, height_attribute, point_center};
 use mln_gfx::gpu::Gpu;
 use mln_style::hash::HashMap;
-use mln_style::source::SourceData;
-use mln_style::sources::RasterDemSourceType;
+use mln_style::layer::SourceKind;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::RasterEncoding;
 pub(crate) use stacks::{DrapeStacks, Draped};
@@ -214,20 +213,18 @@ impl RenderTerrain {
         if parameters.mode == MapMode::Tile || self.draws.failed() {
             return None;
         }
-        // Terrain draws only once its source's tileset has loaded, and not at
-        // all from a source that isn't raster-dem.
-        let source = style.get_source(&terrain.source)?;
-        let data = SourceData::<RasterDemSourceType>::recover(source)?;
-        let tileset = data.description.as_ref().filter(|tileset| !tileset.tiles.is_empty())?;
+        // Terrain draws only once its source's tiles have a cover, and not
+        // at all from a source whose tiles aren't raster-dem.
+        let dem = dem(&terrain.source).filter(|dem| dem.info.kind == SourceKind::RasterDem)?;
+        let cover = dem.info.cover?;
 
-        let encoding = tileset.raster_encoding.unwrap_or(RasterEncoding::Mapbox);
         let skirt_length = skirt_length(parameters.terrain.skirt_length, parameters.view.zoom());
-        self.surface = Surface::new(encoding, terrain.exaggeration, skirt_length);
+        self.surface = Surface::new(dem.info.dem_encoding, terrain.exaggeration, skirt_length);
         self.drape_memory_limit = parameters.terrain.drape_memory_limit;
 
-        let dem_zooms = tileset.zoom_range;
-        ranges.update(tileset, dem(&terrain.source), f64::from(terrain.exaggeration));
-        let tile_size = data.options.tile_size;
+        let dem_zooms = cover.zoom_range;
+        ranges.update(dem, dem_zooms, f64::from(terrain.exaggeration));
+        let tile_size = cover.tile_size;
         let view = &parameters.view;
         self.cover = Some(TerrainCover::new(view, &terrain.source, tile_size, dem_zooms, ranges));
         self.cover.as_ref()

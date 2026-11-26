@@ -93,11 +93,33 @@ fn update_parameters(style: Style, transform: &Transform, mode: MapMode) -> Upda
     }
 }
 
+/// Updates `terrain` for `parameters`, whose terrain's source has tiles in
+/// a store of their own, whose origin took in the source as the style has
+/// it, as the renderer's update does first. Returns the cover while terrain
+/// draws.
+fn update_terrain<'t>(terrain: &'t mut RenderTerrain, parameters: &UpdateParameters) -> Option<&'t TerrainCover> {
+    let pool = TaskGroup::new(&crate::tests::pool());
+    let mut store = crate::tests::tile_store(&pool, Box::new(InlineWorkers));
+    let style = &parameters.style;
+    let source = style.get_terrain().and_then(|terrain| style.get_source(&terrain.source));
+    let render_source = source.map(|source| {
+        let mut render_source = crate::tests::create_render_source(source, &mut store);
+        render_source.update_origin(&mut store, source, parameters);
+        render_source
+    });
+    let dem = |id: &str| {
+        let render_source =
+            render_source.as_ref().filter(|render_source| render_source.base().style_source.id() == id)?;
+        store.source(render_source.tiles()?)
+    };
+    terrain.update(parameters, dem)
+}
+
 /// The zoom levels of the terrain's tiles for `style`, or `None` where
 /// terrain doesn't draw.
 fn terrain_zooms(style: Style, transform: &Transform, mode: MapMode) -> Option<Vec<u8>> {
     let mut terrain = RenderTerrain::default();
-    let cover = terrain.update(&update_parameters(style, transform, mode), |_| None)?;
+    let cover = update_terrain(&mut terrain, &update_parameters(style, transform, mode))?;
     let mut zooms: Vec<u8> = cover.tiles.iter().map(|tile| tile.id.canonical.z).collect();
     zooms.dedup();
     Some(zooms)
@@ -146,7 +168,7 @@ fn the_surface_decodes_the_dem_as_its_tileset_says_and_hangs_the_skirts_the_map_
             ..update_parameters(style.clone(), &transform, MapMode::Static)
         };
         let mut terrain = RenderTerrain::default();
-        terrain.update(&parameters, |_| None).expect("terrain draws");
+        update_terrain(&mut terrain, &parameters).expect("terrain draws");
         terrain.surface()
     };
 
@@ -335,13 +357,17 @@ impl TerrainLoad {
     /// One update, as a frame's.
     fn update(&mut self) {
         crate::tests::update(&mut self.store);
+        let file_source: Arc<dyn FileSource> = Arc::<DemTiles>::clone(&self.tiles);
         let parameters = UpdateParameters {
             elevation: self.seen.clone(),
+            file_source: Some(Arc::clone(&file_source)),
             ..update_parameters(self.style.clone(), &self.transform, MapMode::Static)
         };
+        // The terrain's cover is made of its DEM's, which the DEM's origin
+        // makes of its source as the style has it.
+        self.render_source.update_origin(&mut self.store, &self.source, &parameters);
         let (store, render_source) = (&self.store, &self.render_source);
         self.terrain.update(&parameters, |_| store.source(render_source.tiles()?));
-        let file_source: Arc<dyn FileSource> = Arc::<DemTiles>::clone(&self.tiles);
         let tile_parameters = TileParameters {
             pixel_ratio: 1.0,
             view: &parameters.view,
@@ -687,21 +713,21 @@ fn the_ranges_forget_the_dem_tiles_let_go_past_their_bound() {
     load.frame();
     load.answer(|_| Some(terrarium_png(425)));
     let tile = load.frame().tiles[0].id.canonical;
-    let source = load.store.source(load.render_source.tiles().unwrap());
+    let source = load.store.source(load.render_source.tiles().unwrap()).unwrap();
     let data = SourceData::<RasterDemSourceType>::recover(&load.source).unwrap();
-    let tileset = data.description.as_ref().unwrap();
+    let dem_zooms = data.description.as_ref().unwrap().zoom_range;
 
     let mut ranges = ElevationRanges::default();
-    ranges.update(tileset, source, 1.0);
+    ranges.update(source, dem_zooms, 1.0);
     let held = ranges.len();
     let let_go = |i: usize| CanonicalTileID::new(14, i as u32, 0);
     for i in held..REMEMBERED_RANGES {
         ranges.insert(let_go(i), 0.0, 1.0);
     }
-    ranges.update(tileset, source, 1.0);
+    ranges.update(source, dem_zooms, 1.0);
     assert_eq!(REMEMBERED_RANGES, ranges.len(), "the ranges within their bound");
     ranges.insert(let_go(REMEMBERED_RANGES), 0.0, 1.0);
-    ranges.update(tileset, source, 1.0);
+    ranges.update(source, dem_zooms, 1.0);
     assert_eq!(held, ranges.len());
     assert_eq!(Some((425.0, 425.0)), ranges.range(tile));
     assert_eq!(None, ranges.range(CanonicalTileID::new(15, 0, 0)));

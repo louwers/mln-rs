@@ -13,7 +13,9 @@ use std::sync::Arc;
 
 use mln_style::error::Error;
 use mln_style::hash::{HashMap, HashSet};
+use mln_style::layer::SourceKind;
 use mln_style::layers::Symbol;
+use mln_style::tileset::RasterEncoding;
 
 use crate::draw::context::Context;
 use crate::draw::dynamic_texture_atlas::DynamicTextureAtlas;
@@ -26,6 +28,8 @@ use crate::layer::tile_layout::{LayoutParams, Resolved};
 use crate::render::events::RendererEvent;
 use crate::render::orchestrator::drop_on_workers;
 use crate::render::tile::RenderTile;
+use crate::source::Cover;
+use crate::source::erased::ErasedOrigin;
 use crate::source::source_state::SourceFeatureState;
 use crate::storage::FileSource;
 use crate::symbol::bucket::SymbolBucket;
@@ -33,10 +37,10 @@ use crate::text::glyph_store::GlyphStore;
 use crate::tile::OverscaledTileID;
 use crate::tile_store::contents::{Answer, TileAtlases};
 use crate::tile_store::inbox::{Inbox, InboxSender, TileEvent, Waker};
-use crate::tile_store::loading::{DataOrigin, Load};
+use crate::tile_store::loading::Load;
 use crate::tile_store::pipeline::{Pipeline, Resume, Waiting};
 use crate::tile_store::source_tiles::{Slot, SourceTiles};
-use crate::tile_store::tile::{Tile, TileKind, TileLoadOrder, TileOperation};
+use crate::tile_store::tile::{Tile, TileLoadOrder, TileOperation};
 use crate::worker::job::{SourceKey, TileKey};
 use crate::worker::tile_workers::{Jobs, TileWorkers};
 
@@ -139,28 +143,39 @@ impl StoreContext {
 pub(crate) struct SourceInfo {
     pub(crate) key: SourceKey,
     pub(crate) id: String,
-    pub(crate) kind: TileKind,
-    pub(crate) origin: Option<DataOrigin>,
+    /// The kind of data the origin delivers.
+    pub(crate) kind: SourceKind,
+    /// Where the tiles get their data; `None` only while one of its hooks
+    /// has it.
+    pub(crate) origin: Option<Box<dyn ErasedOrigin>>,
+    /// What the tiles covered as the origin last said, or `None` while it
+    /// has nothing to make tiles from.
+    pub(crate) cover: Option<Cover>,
+    /// How a raster-dem source's pixels encode elevations, as its origin
+    /// last set it.
+    pub(crate) dem_encoding: RasterEncoding,
+    /// Grows each time the tiles are all let go of: those after are of
+    /// another version of the source's data.
+    pub(crate) data_version: u64,
     /// Loads and generations share it, so no two share a value.
     counter: u64,
     /// The tiles' jobs run on the render thread as soon as they're ready.
     pub(crate) synchronous: bool,
-    /// The data has one layer, which a source query gets whatever source
-    /// layer it names.
-    pub(crate) single_layer: bool,
     pub(crate) feature_state: SourceFeatureState,
 }
 
 impl SourceInfo {
-    pub(crate) fn new(key: SourceKey, id: String, kind: TileKind, single_layer: bool) -> Self {
+    pub(crate) fn new(key: SourceKey, id: String, origin: Box<dyn ErasedOrigin>) -> Self {
         SourceInfo {
             key,
             id,
-            kind,
-            origin: None,
+            kind: origin.kind(),
+            origin: Some(origin),
+            cover: None,
+            dem_encoding: RasterEncoding::Mapbox,
+            data_version: 0,
             counter: 0,
             synchronous: false,
-            single_layer,
             feature_state: SourceFeatureState::new(),
         }
     }
@@ -170,17 +185,12 @@ impl SourceInfo {
         self.counter
     }
 
+    /// A new tile `id`, which its origin has yet to start; `None` while the
+    /// source has nothing to make tiles from.
     pub(crate) fn new_tile(&mut self, id: OverscaledTileID, params: LayoutParams) -> Option<Tile> {
-        let load = Load::new(self.origin.as_ref()?, self.kind, &id, params.pixel_ratio);
+        self.cover?;
         let generation = self.next();
-        Some(Tile::new(id, load, Pipeline::new(self.kind, generation, params)))
-    }
-
-    pub(crate) fn file_source(&self) -> Option<Arc<dyn FileSource>> {
-        match &self.origin {
-            Some(DataOrigin::Tileset { file_source, .. }) => file_source.clone(),
-            Some(DataOrigin::GeoJson { .. } | DataOrigin::Custom { .. }) | None => None,
-        }
+        Some(Tile::new(id, Load::new(), Pipeline::new(self.kind, self.dem_encoding, generation, params)))
     }
 
     pub(crate) fn tile_key(&self, tile: &Tile) -> TileKey {
@@ -280,11 +290,12 @@ impl TileStore {
         }
     }
 
-    /// Adds a source after the others in the style's order.
-    pub(crate) fn add_source(&mut self, id: String, kind: TileKind, single_layer: bool) -> SourceKey {
+    /// Adds a source after the others in the style's order, whose tiles get
+    /// their data from `origin`.
+    pub(crate) fn add_source(&mut self, id: String, origin: Box<dyn ErasedOrigin>) -> SourceKey {
         self.next_source += 1;
         let key = SourceKey(self.next_source);
-        let mut source = SourceTiles::new(SourceInfo::new(key, id, kind, single_layer));
+        let mut source = SourceTiles::new(SourceInfo::new(key, id, origin));
         source.set_cache_enabled(self.cache_enabled);
         self.sources.insert(key, source);
         self.order.push(key);
@@ -374,15 +385,9 @@ impl TileStore {
     /// Takes in one event for the tiles.
     fn take(&mut self, event: TileEvent) {
         match event {
-            TileEvent::Response { tile, load, response } => {
-                let awaits = |tile: &Tile| tile.load.awaits_response(load);
-                if let Some((source, tile)) = find(&mut self.sources, tile, awaits) {
-                    source.update(&tile, &mut self.ctx, |tile| tile.apply_response(load, &response));
-                }
-            }
-            TileEvent::Data { tile, load, data } => {
-                if let Some((source, tile)) = find(&mut self.sources, tile, |tile| tile.load.accepts(load)) {
-                    source.update(&tile, &mut self.ctx, |tile| tile.apply_source_data(load, data));
+            TileEvent::Load { tile, load, reply } => {
+                if let Some((source, tile)) = find(&mut self.sources, tile, |tile| tile.load.awaits(load)) {
+                    source.update(&tile, &mut self.ctx, |tile| tile.receive(reply));
                 }
             }
             TileEvent::Reply { lane, id, body, times } => {

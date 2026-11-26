@@ -5,6 +5,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use mln_style::layer::SourceKind;
 use mln_style::tileset::RasterEncoding;
 use mln_vec_map::VecSet;
 
@@ -14,7 +15,6 @@ use crate::storage::Data;
 use crate::text::glyph_store::GlyphWait;
 use crate::tile::TileData;
 use crate::tile_store::contents::Answer;
-use crate::tile_store::tile::TileKind;
 use crate::worker::job::{DataKey, JobId, JobResult, SourceStyle};
 use crate::worker::tile_workers::Lane;
 
@@ -125,18 +125,20 @@ pub(crate) fn outdated_by(result: &JobResult, then: &VecSet<String>, now: &VecSe
 }
 
 impl Pipeline {
-    pub(crate) fn new(kind: TileKind, generation: u64, params: LayoutParams) -> Self {
+    /// The pipeline of a tile of a source of `kind`, whose elevations, for
+    /// a raster-dem source, are of `encoding`.
+    pub(crate) fn new(kind: SourceKind, encoding: RasterEncoding, generation: u64, params: LayoutParams) -> Self {
         let decode = |dem| Pipeline::Decode(Decode { generation, dem, work: DecodeWork::Current });
         match kind {
-            TileKind::Geometry => Pipeline::Layout(Box::new(Layout {
+            SourceKind::Geometry | SourceKind::None => Pipeline::Layout(Box::new(Layout {
                 generation,
                 data: None,
                 style: None,
                 params,
                 work: LayoutWork::Outdated,
             })),
-            TileKind::Raster => decode(None),
-            TileKind::Dem(encoding) => decode(Some(encoding)),
+            SourceKind::Raster => decode(None),
+            SourceKind::RasterDem => decode(Some(encoding)),
         }
     }
 
