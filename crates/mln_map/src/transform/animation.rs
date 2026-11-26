@@ -86,20 +86,20 @@ impl Transform {
         );
 
         let mut bearing = match camera.bearing {
-            Some(b) => mln_math::deg2rad(-b),
+            Some(b) => mln_style::math::deg2rad(-b),
             None => self.view().angle(),
         };
         let mut pitch = match camera.pitch {
-            Some(p) => mln_math::deg2rad(p),
+            Some(p) => mln_style::math::deg2rad(p),
             None => self.view().pitch(),
         };
         let mut fov = match camera.fov {
-            Some(f) => mln_math::deg2rad(f),
+            Some(f) => mln_style::math::deg2rad(f),
             None => self.view().fov(),
         };
         let center_alt = camera.center_altitude.unwrap_or(self.state.view().center_altitude());
         let roll = match camera.roll {
-            Some(r) => mln_math::deg2rad(r),
+            Some(r) => mln_style::math::deg2rad(r),
             None => self.view().roll(),
         };
 
@@ -303,19 +303,19 @@ impl Transform {
         );
         let center_alt = camera.center_altitude.unwrap_or(self.state.view().center_altitude());
         let mut bearing = match camera.bearing {
-            Some(b) => mln_math::deg2rad(-b),
+            Some(b) => mln_style::math::deg2rad(-b),
             None => self.view().angle(),
         };
         let mut pitch = match camera.pitch {
-            Some(p) => mln_math::deg2rad(p),
+            Some(p) => mln_style::math::deg2rad(p),
             None => self.view().pitch(),
         };
         let roll = match camera.roll {
-            Some(r) => mln_math::deg2rad(r),
+            Some(r) => mln_style::math::deg2rad(r),
             None => self.view().roll(),
         };
         let mut fov = match camera.fov {
-            Some(f) => mln_math::deg2rad(f),
+            Some(f) => mln_style::math::deg2rad(f),
             None => self.view().fov(),
         };
 

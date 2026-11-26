@@ -30,7 +30,7 @@ use crate::vertical_perspective_projection::VerticalPerspectiveProjection;
 /// it the distance to the horizon grows without bound, and with it the tiles
 /// the view needs.
 pub(crate) fn max_mercator_horizon_angle() -> f64 {
-    mln_math::deg2rad(89.25)
+    mln_style::math::deg2rad(89.25)
 }
 
 /// `x` rounded to the nearest integer when it is within a billionth of it,
@@ -58,7 +58,7 @@ pub fn scale_zoom(scale: f64) -> f64 {
 /// center can be on a pole, which Mercator's stops short of.
 pub(crate) fn map_offset(center: &LatLng, scale: f64, globe: bool) -> (f64, f64) {
     let world_size = Projection::world_size(scale);
-    let latitude = mln_math::deg2rad(center.latitude());
+    let latitude = mln_style::math::deg2rad(center.latitude());
     let m = 1.0 - 1e-15;
     let f = mln_style::math::clamp_f64(latitude.sin(), -m, m);
     let x = -center.longitude() * (world_size / 360.0);

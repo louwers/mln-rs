@@ -245,7 +245,11 @@ impl SymbolSizeBinder {
                     // values at a pair of zoom stops covering [tile zoom,
                     // tile zoom + 1] in order to be consistent with this
                     // restriction on composite functions.
-                    let t = mln_math::clamp_f32(expression.interpolation_factor(*zoom_levels, current_zoom), 0.0, 1.0);
+                    let t = mln_style::math::clamp_f32(
+                        expression.interpolation_factor(*zoom_levels, current_zoom),
+                        0.0,
+                        1.0,
+                    );
                     size = size_levels.min + t * (size_levels.max - size_levels.min);
                 } else if let Some(expression) = expression {
                     size = expression.evaluate(&EvaluationContext::new(current_zoom), 0.0);
@@ -256,8 +260,11 @@ impl SymbolSizeBinder {
                 ZoomEvaluatedSize { kind: SizeKind::Source, size_t: unused, size: unused, layout_size: unused }
             }
             SymbolSizeBinder::CompositeFunction { expression, covering_zoom_stops, .. } => {
-                let size_interpolation_t =
-                    mln_math::clamp_f32(expression.interpolation_factor(*covering_zoom_stops, current_zoom), 0.0, 1.0);
+                let size_interpolation_t = mln_style::math::clamp_f32(
+                    expression.interpolation_factor(*covering_zoom_stops, current_zoom),
+                    0.0,
+                    1.0,
+                );
                 ZoomEvaluatedSize {
                     kind: SizeKind::Composite,
                     size_t: size_interpolation_t,

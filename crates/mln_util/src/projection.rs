@@ -1,11 +1,10 @@
 use std::f64::consts::PI;
 
 use geometry::Point;
-use mln_math::deg2rad;
 use mln_style::constants::{DEGREES_MAX, LATITUDE_MAX, LONGITUDE_MAX, TILE_SIZE_D};
 use mln_style::error::Error;
 use mln_style::geo::{LatLng, WrapMode};
-use mln_style::math::{clamp_f64, rad2deg};
+use mln_style::math::{clamp_f64, deg2rad, rad2deg};
 
 use crate::constants::{EARTH_RADIUS_M, M2PI, MAX_ZOOM, MIN_ZOOM};
 

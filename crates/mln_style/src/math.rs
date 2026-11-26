@@ -1,17 +1,23 @@
 //! Math helpers: angle conversion, clamping, wrapping, and floating-point
 //! minimum and maximum.
 //!
-//! The floating-point minimum and maximum are `fmin`/`fmax`, as C++'s
-//! `util::min`/`util::max` are. Their NaN handling is specified, their
-//! choice between `-0.0` and `+0.0` is not; `fmin`/`fmax` here implement
-//! glibc's (and clang's inline `llvm.minnum`/`llvm.maxnum` lowering on
-//! x86-64): the first argument when the two compare equal. Don't use
-//! `f64::min`/`f64::max` where signed zeros matter: Rust leaves that choice
-//! unspecified.
+//! The floating-point minimum and maximum are `fmin`/`fmax` and
+//! `fminf`/`fmaxf`, as C++'s `util::min`/`util::max` are. Their NaN handling
+//! is specified, their choice between `-0.0` and `+0.0` is not; these
+//! implement glibc's (and clang's inline `llvm.minnum`/`llvm.maxnum` lowering
+//! on x86-64): the first argument when the two compare equal. Don't use
+//! `f64::min`/`f64::max` or `f32::min`/`f32::max` where signed zeros matter:
+//! Rust leaves that choice unspecified.
 
 use std::f64::consts::PI;
 
 // --- Angles ---
+
+/// Converts degrees to radians.
+#[must_use]
+pub const fn deg2rad(deg: f64) -> f64 {
+    deg * PI / 180.0
+}
 
 /// Converts degrees to radians (f32).
 #[must_use]
@@ -51,6 +57,30 @@ pub fn fmin(a: f64, b: f64) -> f64 {
     }
 }
 
+/// glibc `fmaxf`: NaN loses; equal operands (±0) return `a`.
+#[must_use]
+pub fn fmaxf(a: f32, b: f32) -> f32 {
+    if a.is_nan() {
+        b
+    } else if b.is_nan() || a >= b {
+        a
+    } else {
+        b
+    }
+}
+
+/// glibc `fminf`: NaN loses; equal operands (±0) return `a`.
+#[must_use]
+pub fn fminf(a: f32, b: f32) -> f32 {
+    if a.is_nan() {
+        b
+    } else if b.is_nan() || a <= b {
+        a
+    } else {
+        b
+    }
+}
+
 // --- Clamp ---
 // `max(min_, min(max_, value))` over util::min/max, i.e. fmin/fmax for
 // floats. That means `clamp(NaN, a, b) == b`; keep it.
@@ -59,6 +89,12 @@ pub fn fmin(a: f64, b: f64) -> f64 {
 #[must_use]
 pub fn clamp_f64(value: f64, min_: f64, max_: f64) -> f64 {
     fmax(min_, fmin(max_, value))
+}
+
+/// Clamp for f32, with the C++ `fmax(min, fmin(max, value))` semantics.
+#[must_use]
+pub fn clamp_f32(value: f32, min_: f32, max_: f32) -> f32 {
+    fmaxf(min_, fminf(max_, value))
 }
 
 // --- Wrap ---

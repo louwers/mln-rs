@@ -180,7 +180,7 @@ fn shared_wall_normals(
             };
             let (a, b) = (incoming?, outgoing?);
             let (len_a, len_b) = (a.x.hypot(a.y), b.x.hypot(b.y));
-            if a.x * b.x + a.y * b.y < mln_math::deg2rad(35.0).cos() * len_a * len_b {
+            if a.x * b.x + a.y * b.y < mln_style::math::deg2rad(35.0).cos() * len_a * len_b {
                 None
             } else if len_a >= 2.0 * len_b {
                 Some(a)

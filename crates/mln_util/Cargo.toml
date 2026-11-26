@@ -23,7 +23,6 @@ geometry.workspace = true
 glam.workspace = true
 httpdate.workspace = true
 log.workspace = true
-mln_math.workspace = true
 mln_style.workspace = true
 parking_lot.workspace = true
 

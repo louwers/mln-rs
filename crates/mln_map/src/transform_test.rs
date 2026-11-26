@@ -17,9 +17,9 @@ use mln_map_types::{
     GesturePhase, MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumGlide, MomentumSnap, TileProjector,
     TransitionOutcome,
 };
-use mln_math::deg2rad;
 use mln_style::constants::{EXTENT, LATITUDE_MAX, LONGITUDE_MAX, TILE_SIZE_D};
 use mln_style::geo::LatLngBounds;
+use mln_style::math::deg2rad;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::time::Instant;
 use mln_style::types::ProjectionType;

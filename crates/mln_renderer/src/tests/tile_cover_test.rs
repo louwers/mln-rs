@@ -231,7 +231,7 @@ mod tile_cover {
             ..Default::default()
         });
         // Top padding of 376 leads to capped pitch. See Transform::getMaxPitchForEdgeInsets.
-        assert!(transform.view().pitch() + 0.001 <= mln_math::deg2rad(60.0));
+        assert!(transform.view().pitch() + 0.001 <= mln_style::math::deg2rad(60.0));
 
         assert_eq!(
             vec![os(3, 4, 3), os(3, 3, 3), os(3, 4, 4), os(3, 3, 4)],
@@ -775,7 +775,7 @@ mod tile_cover {
         transform.resize(size).unwrap();
         transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
         transform
-            .set_limits(CameraLimits { max_pitch: mln_math::deg2rad(80.0), ..*transform.state().limits() })
+            .set_limits(CameraLimits { max_pitch: mln_style::math::deg2rad(80.0), ..*transform.state().limits() })
             .unwrap();
         transform.jump_to(&CameraOptions {
             center: Some(center),
@@ -1264,7 +1264,7 @@ mod terrain_cover {
         fn transform(&self) -> Transform {
             let mut transform = transform(self.size.0, self.size.1);
             transform
-                .set_limits(CameraLimits { max_pitch: mln_math::deg2rad(85.0), ..*transform.state().limits() })
+                .set_limits(CameraLimits { max_pitch: mln_style::math::deg2rad(85.0), ..*transform.state().limits() })
                 .unwrap();
             transform.jump_to(&CameraOptions {
                 center: Some(ll(self.center.1, self.center.0)),

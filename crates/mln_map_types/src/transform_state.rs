@@ -428,7 +428,7 @@ impl TransformState {
         // range toward a pole as far as the zoom allows.
         if self.view.is_globe() {
             let max_latitude = VerticalPerspectiveProjection::max_latitude(&self.view, scale_zoom(scale));
-            let max_y = Projection::world_size(scale) / M2PI * mln_math::deg2rad(max_latitude).tan().asinh();
+            let max_y = Projection::world_size(scale) / M2PI * mln_style::math::deg2rad(max_latitude).tan().asinh();
             y = mln_style::math::clamp_f64(y, -max_y, max_y);
             return (scale, x, y);
         }

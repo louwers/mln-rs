@@ -186,9 +186,9 @@ impl FreeCameraOptions {
     #[cfg(test)]
     pub(crate) fn set_roll_pitch_bearing(&mut self, roll: f64, pitch: f64, bearing: f64) {
         self.orientation = Some(orientation_from_roll_pitch_bearing(
-            mln_math::deg2rad(roll),
-            mln_math::deg2rad(pitch),
-            mln_math::deg2rad(bearing),
+            mln_style::math::deg2rad(roll),
+            mln_style::math::deg2rad(pitch),
+            mln_style::math::deg2rad(bearing),
         ));
     }
 }

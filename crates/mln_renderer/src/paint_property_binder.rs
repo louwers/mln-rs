@@ -386,9 +386,9 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
                 let possibly_rounded_zoom =
                     if expression.get_use_integer_zoom() { current_zoom.floor() } else { current_zoom };
 
-                mln_math::fmaxf(
+                mln_style::math::fmaxf(
                     0.0,
-                    mln_math::fminf(1.0, expression.interpolation_factor(*zoom_range, possibly_rounded_zoom)),
+                    mln_style::math::fminf(1.0, expression.interpolation_factor(*zoom_range, possibly_rounded_zoom)),
                 )
             }
         }

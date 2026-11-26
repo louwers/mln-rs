@@ -243,7 +243,7 @@ impl DrapedMap {
             elevation: self.elevation.clone(),
             tile_lod_min_radius: 3.0,
             tile_lod_scale: 1.0,
-            tile_lod_pitch_threshold: mln_math::deg2rad(60.0),
+            tile_lod_pitch_threshold: mln_style::math::deg2rad(60.0),
             tile_lod_zoom_shift: 0.0,
             tile_lod_mode: TileLodMode::Default,
             subdivision_granularity: SubdivisionGranularitySetting::none(),

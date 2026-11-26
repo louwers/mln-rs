@@ -709,7 +709,7 @@ impl Map {
             elevation: self.elevation.clone(),
             tile_lod_min_radius: self.tile.lod_min_radius,
             tile_lod_scale: self.tile.lod_scale,
-            tile_lod_pitch_threshold: mln_math::deg2rad(self.tile.lod_pitch_threshold),
+            tile_lod_pitch_threshold: mln_style::math::deg2rad(self.tile.lod_pitch_threshold),
             tile_lod_zoom_shift: self.tile.lod_zoom_shift,
             tile_lod_mode: self.tile.lod_mode,
             subdivision_granularity: if self.mode == MapMode::Tile {
@@ -1340,8 +1340,8 @@ impl Map {
             bounds: options.bounds.unwrap_or(current.bounds),
             min_zoom: options.min_zoom.unwrap_or(current.min_zoom),
             max_zoom: options.max_zoom.unwrap_or(current.max_zoom),
-            min_pitch: options.min_pitch.map_or(current.min_pitch, mln_math::deg2rad),
-            max_pitch: options.max_pitch.map_or(current.max_pitch, mln_math::deg2rad),
+            min_pitch: options.min_pitch.map_or(current.min_pitch, mln_style::math::deg2rad),
+            max_pitch: options.max_pitch.map_or(current.max_pitch, mln_style::math::deg2rad),
         };
         self.transform.set_limits(limits)?;
         if *options != BoundOptions::default() {

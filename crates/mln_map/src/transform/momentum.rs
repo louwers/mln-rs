@@ -590,7 +590,7 @@ impl Transform {
                 center.latitude(),
             );
         if let Some(bearing) = bearing {
-            self.state.set_angle(mln_math::deg2rad(-bearing));
+            self.state.set_angle(mln_style::math::deg2rad(-bearing));
         }
         self.state.set_lat_lng_zoom(&center, zoom);
     }
@@ -629,7 +629,11 @@ impl Transform {
 
     fn step_bearing(&mut self, bearing: f64, anchor: Option<ScreenCoordinate>) {
         let anchor = self.momentum_anchor(anchor);
-        self.state.set_angle(mln_style::math::wrap(self.state.view().angle() - mln_math::deg2rad(bearing), -PI, PI));
+        self.state.set_angle(mln_style::math::wrap(
+            self.state.view().angle() - mln_style::math::deg2rad(bearing),
+            -PI,
+            PI,
+        ));
         self.hold_momentum_anchor(anchor);
     }
 
@@ -638,7 +642,7 @@ impl Transform {
         let before = self.state.view().pitch();
         let max_pitch = max_pitch_for_padding(&self.state, &self.state.view().padding());
         self.state.set_pitch(mln_style::math::clamp_f64(
-            before + mln_math::deg2rad(pitch),
+            before + mln_style::math::deg2rad(pitch),
             self.state.limits().min_pitch,
             max_pitch,
         ));

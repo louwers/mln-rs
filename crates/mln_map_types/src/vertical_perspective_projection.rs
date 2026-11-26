@@ -160,7 +160,7 @@ impl VerticalPerspectiveProjection {
     /// past it the globe keeps its size there.
     #[must_use]
     pub(crate) fn planet_scale(center_latitude: f64) -> f64 {
-        mln_math::deg2rad(f64::min(center_latitude.abs(), LATITUDE_MAX)).cos()
+        mln_style::math::deg2rad(f64::min(center_latitude.abs(), LATITUDE_MAX)).cos()
     }
 
     /// The unit-sphere position of a point in tile units.
@@ -225,8 +225,8 @@ impl VerticalPerspectiveProjection {
             * DMat4::from_rotation_x(-view.pitch())
             * DMat4::from_rotation_z(-view.angle())
             * DMat4::from_translation(DVec3::new(0.0, 0.0, -radius * center_radius))
-            * DMat4::from_rotation_x(mln_math::deg2rad(center.latitude()))
-            * DMat4::from_rotation_y(-mln_math::deg2rad(center.longitude()))
+            * DMat4::from_rotation_x(mln_style::math::deg2rad(center.latitude()))
+            * DMat4::from_rotation_y(-mln_style::math::deg2rad(center.longitude()))
             * DMat4::from_scale(DVec3::splat(radius))
     }
 
@@ -247,8 +247,8 @@ impl VerticalPerspectiveProjection {
 
         let center = view.center(WrapMode::Unwrapped);
         plane = rotate_z(plane, view.angle());
-        plane = rotate_x(plane, -mln_math::deg2rad(center.latitude()));
-        plane = rotate_y(plane, mln_math::deg2rad(center.longitude()));
+        plane = rotate_x(plane, -mln_style::math::deg2rad(center.latitude()));
+        plane = rotate_y(plane, mln_style::math::deg2rad(center.longitude()));
 
         plane.extend(-tangent_plane_distance_to_c) / plane.length()
     }
@@ -263,14 +263,14 @@ impl VerticalPerspectiveProjection {
         position = rotate_x(position, view.pitch());
         position = rotate_z(position, view.angle());
         position += DVec3::Z * Self::center_radius(view);
-        position = rotate_x(position, -mln_math::deg2rad(center.latitude()));
-        rotate_y(position, mln_math::deg2rad(center.longitude()))
+        position = rotate_x(position, -mln_style::math::deg2rad(center.latitude()));
+        rotate_y(position, mln_style::math::deg2rad(center.longitude()))
     }
 
     #[must_use]
     pub fn surface_vector(lat_lng: &LatLng) -> DVec3 {
-        let lng = mln_math::deg2rad(lat_lng.longitude());
-        let lat = mln_math::deg2rad(lat_lng.latitude());
+        let lng = mln_style::math::deg2rad(lat_lng.longitude());
+        let lat = mln_style::math::deg2rad(lat_lng.latitude());
         let len = lat.cos();
         DVec3::new(lng.sin() * len, lat.sin(), lng.cos() * len)
     }
@@ -300,7 +300,7 @@ impl VerticalPerspectiveProjection {
         let latitude = location.latitude();
         // `Projection::project`'s formula, without its clamp.
         let y = if latitude.abs() > LATITUDE_MAX {
-            (180.0 - mln_style::math::rad2deg((PI / 4.0 + mln_math::deg2rad(latitude) / 2.0).tan().ln())) / 360.0
+            (180.0 - mln_style::math::rad2deg((PI / 4.0 + mln_style::math::deg2rad(latitude) / 2.0).tan().ln())) / 360.0
         } else {
             world.y
         };
@@ -399,8 +399,8 @@ impl VerticalPerspectiveProjection {
         let vec_to_target = Self::surface_vector(lat_lng);
 
         let rotated_pixel_vector = rotate_x(
-            rotate_y(vec_to_pixel_current, -mln_math::deg2rad(center.longitude())),
-            mln_math::deg2rad(center.latitude()),
+            rotate_y(vec_to_pixel_current, -mln_style::math::deg2rad(center.longitude())),
+            mln_style::math::deg2rad(center.latitude()),
         );
 
         let vec_to_target_xz_length_squared = vec_to_target.xz().length_squared();
@@ -435,8 +435,8 @@ impl VerticalPerspectiveProjection {
         let valid_b = (-LIMIT..=LIMIT).contains(&lat_b);
 
         let (lng, lat) = if valid_a && valid_b {
-            let center_lng = mln_math::deg2rad(center.longitude());
-            let center_lat = mln_math::deg2rad(center.latitude());
+            let center_lng = mln_style::math::deg2rad(center.longitude());
+            let center_lat = mln_style::math::deg2rad(center.latitude());
             let distance_a =
                 distance_of_angles_radians(lng_a, center_lng) + distance_of_angles_radians(lat_a, center_lat);
             let distance_b =
@@ -482,7 +482,7 @@ impl VerticalPerspectiveProjection {
         // A location on a pole has no longitude of its own, so the zoom keeps
         // the center's meridian rather than turning the planet about the pole
         // towards the longitude the location was given.
-        let on_pole = mln_math::deg2rad(zoom_location.latitude()).cos() <= POLE_AXIS_DISTANCE;
+        let on_pole = mln_style::math::deg2rad(zoom_location.latitude()).cos() <= POLE_AXIS_DISTANCE;
         let d_lng_raw = if on_pole {
             0.0
         } else {
@@ -572,7 +572,7 @@ impl VerticalPerspectiveProjection {
     /// reaches the pole only while that area fits in the view, and eases back
     /// to the edge of the range as the area outgrows the view.
     pub(crate) fn max_latitude(view: &View, zoom: f64) -> f64 {
-        let area_radians = mln_math::deg2rad(90.0 - LATITUDE_MAX);
+        let area_radians = mln_style::math::deg2rad(90.0 - LATITUDE_MAX);
         let area_pixels =
             Self::globe_radius_pixels(Projection::world_size(2.0f64.powf(zoom)), LATITUDE_MAX) * area_radians;
         let size = view.size();
@@ -654,7 +654,8 @@ impl VerticalPerspectiveProjection {
         let degrees_per_pixel =
             360.0 / (2.0 * PI * Self::globe_radius_pixels(Projection::world_size(view.scale()), lat_lng.latitude()));
         center_and_bearing(
-            camera_orientation(view) * rotation(axis, mln_math::deg2rad(f64::min(pixels * degrees_per_pixel, 179.5))),
+            camera_orientation(view)
+                * rotation(axis, mln_style::math::deg2rad(f64::min(pixels * degrees_per_pixel, 179.5))),
             &lat_lng,
         )
     }
@@ -761,8 +762,8 @@ impl VerticalPerspectiveProjection {
         // A pixel of cursor travel turns the center 1 / (cos(latitude) *
         // cos(longitude from the center)) times as far as it does for a
         // location at the center.
-        let gain = mln_math::deg2rad(location.latitude()).cos()
-            * mln_math::deg2rad(location.longitude() - held.longitude()).cos();
+        let gain = mln_style::math::deg2rad(location.latitude()).cos()
+            * mln_style::math::deg2rad(location.longitude() - held.longitude()).cos();
         if gain.abs() * DRAG_HOLD_MAX_GAIN < 1.0 {
             return None;
         }
@@ -804,9 +805,12 @@ impl VerticalPerspectiveProjection {
             return LatLng::saturating(latitude, start.longitude() + delta_longitude * t, WrapMode::Unwrapped);
         }
         let on_different_hemispheres = sign(end_latitude) != sign(start_latitude);
-        let sample_start =
-            mln_math::deg2rad(if on_different_hemispheres { -start_latitude.abs() } else { start_latitude.abs() });
-        let sample_end = mln_math::deg2rad(end_latitude.abs());
+        let sample_start = mln_style::math::deg2rad(if on_different_hemispheres {
+            -start_latitude.abs()
+        } else {
+            start_latitude.abs()
+        });
+        let sample_end = mln_style::math::deg2rad(end_latitude.abs());
         let value_start = integrate_secant(sample_start);
         let value_end = integrate_secant(sample_end);
         let value_t = integrate_secant(sample_start + t * (sample_end - sample_start));
@@ -830,9 +834,9 @@ const DRAG_HOLD_MAX_GAIN: f64 = 2.5;
 fn orientation_from_lat_lng_bearing(center: &LatLng, bearing_degrees: f64) -> DQuat {
     DQuat::from_euler(
         EulerRot::ZYX,
-        mln_math::deg2rad(bearing_degrees),
-        mln_math::deg2rad(-center.latitude()),
-        mln_math::deg2rad(-center.longitude()),
+        mln_style::math::deg2rad(bearing_degrees),
+        mln_style::math::deg2rad(-center.latitude()),
+        mln_style::math::deg2rad(-center.longitude()),
     )
 }
 
@@ -1007,7 +1011,7 @@ fn zoom_turning_the_planet(
     let zoom =
         state.view().zoom() + VerticalPerspectiveProjection::zoom_adjustment(center.latitude(), constrained.latitude());
     state.set_lat_lng_zoom(&constrained, zoom);
-    state.set_angle(-mln_math::deg2rad(camera.bearing));
+    state.set_angle(-mln_style::math::deg2rad(camera.bearing));
 }
 
 impl VerticalPerspectiveProjection {

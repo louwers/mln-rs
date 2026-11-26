@@ -61,7 +61,6 @@ mln_headless = { package = "mln-rs-headless", path = "crates/mln_headless", vers
 mln_image = { package = "mln-rs-image", path = "crates/mln_image", version = "=0.0.17" }
 mln_map = { package = "mln-rs-map", path = "crates/mln_map", version = "=0.0.17" }
 mln_map_types = { package = "mln-rs-map-types", path = "crates/mln_map_types", version = "=0.0.17" }
-mln_math = { package = "mln-rs-math", path = "crates/mln_math", version = "=0.0.17" }
 mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.17" }
 # Without its default feature, the in-process font-face shaper: the packages
 # that render turn it on (crates/mln_renderer/Cargo.toml).
@@ -555,7 +554,6 @@ mln_gl = { workspace = true, optional = true }
 mln_image.workspace = true
 mln_map.workspace = true
 mln_map_types.workspace = true
-mln_math.workspace = true
 mln_mtl = { workspace = true, optional = true }
 mln_renderer = { workspace = true, features = ["font-face-shaper"] }
 mln_runtime.workspace = true

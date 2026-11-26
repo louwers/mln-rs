@@ -171,7 +171,7 @@ fn append_round_corner(
     let ub = Point::new(b.x / len_b, b.y / len_b);
 
     let dot = ua.x * ub.x + ua.y * ub.y;
-    if dot.abs() > mln_math::deg2rad(5.0).cos() {
+    if dot.abs() > mln_style::math::deg2rad(5.0).cos() {
         ring.push(c);
         return;
     }

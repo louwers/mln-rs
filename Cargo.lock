@@ -2485,7 +2485,6 @@ dependencies = [
  "mln-rs-image",
  "mln-rs-map",
  "mln-rs-map-types",
- "mln-rs-math",
  "mln-rs-mtl",
  "mln-rs-polylabel",
  "mln-rs-renderer",
@@ -2853,7 +2852,6 @@ dependencies = [
  "mln-rs-geometry",
  "mln-rs-image",
  "mln-rs-map-types",
- "mln-rs-math",
  "mln-rs-renderer",
  "mln-rs-sprite",
  "mln-rs-storage",
@@ -2872,17 +2870,12 @@ dependencies = [
  "glam",
  "mln-rs-geometry",
  "mln-rs-gfx",
- "mln-rs-math",
  "mln-rs-style",
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-wire",
  "thiserror 2.0.21",
 ]
-
-[[package]]
-name = "mln-rs-math"
-version = "0.0.17"
 
 [[package]]
 name = "mln-rs-mtl"
@@ -2969,7 +2962,6 @@ dependencies = [
  "mln-rs-image",
  "mln-rs-map",
  "mln-rs-map-types",
- "mln-rs-math",
  "mln-rs-pixelmatch",
  "mln-rs-polylabel",
  "mln-rs-sprite",
@@ -3010,7 +3002,6 @@ dependencies = [
  "mln-rs-gl",
  "mln-rs-image",
  "mln-rs-map",
- "mln-rs-math",
  "mln-rs-mtl",
  "mln-rs-renderer",
  "mln-rs-storage",
@@ -3175,7 +3166,6 @@ dependencies = [
  "harfrust 0.15.0",
  "js-sys",
  "log",
- "mln-rs-math",
  "mln-rs-style",
  "mln-rs-util",
  "mln-rs-vec-map",
@@ -3201,7 +3191,6 @@ dependencies = [
  "log",
  "mln-rs-feature",
  "mln-rs-geometry",
- "mln-rs-math",
  "mln-rs-style",
  "mln-rs-wire",
  "mlt-core",
@@ -3238,7 +3227,6 @@ dependencies = [
  "log",
  "mln-rs-feature",
  "mln-rs-geometry",
- "mln-rs-math",
  "mln-rs-style",
  "parking_lot",
 ]

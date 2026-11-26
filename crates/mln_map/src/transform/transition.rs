@@ -242,16 +242,16 @@ fn place(state: &mut TransformState, current: &CameraOptions, camera: &mut Camer
     let padding = camera.padding.unwrap_or_default();
     state.set_padding(&padding);
     if let Some(fov) = camera.fov.filter(|_| camera.fov != current.fov) {
-        state.set_fov(mln_math::deg2rad(fov));
+        state.set_fov(mln_style::math::deg2rad(fov));
     }
     if let Some(bearing) = camera.bearing.filter(|_| camera.bearing != current.bearing) {
-        state.set_angle(mln_math::deg2rad(-bearing));
+        state.set_angle(mln_style::math::deg2rad(-bearing));
     }
     if let Some(roll) = camera.roll.filter(|_| camera.roll != current.roll) {
-        state.set_roll(mln_math::deg2rad(roll));
+        state.set_roll(mln_style::math::deg2rad(roll));
     }
     let pitch = match camera.pitch.filter(|_| camera.pitch != current.pitch) {
-        Some(pitch) => mln_math::deg2rad(pitch),
+        Some(pitch) => mln_style::math::deg2rad(pitch),
         None => state.view().pitch(),
     };
     state.set_pitch(f64::min(max_pitch_for_padding(state, &padding), pitch));

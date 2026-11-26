@@ -76,7 +76,7 @@ fn padding_moves_the_map_s_end_with_the_sky_s_horizon() {
         state.set_padding(&EdgeInsets::new(top, 0.0, bottom, 0.0));
         let view = state.view();
         let center_row = 256.0 + (top - bottom) / 2.0;
-        let farthest = view.camera_to_center_distance() * mln_math::deg2rad(89.25 - 85.0).tan();
+        let farthest = view.camera_to_center_distance() * mln_style::math::deg2rad(89.25 - 85.0).tan();
         let up = center_row - (256.0 - view.mercator_horizon());
         let end_row = center_row - mln_style::math::clamp_f64(up, 0.0, farthest);
         for min_elevation in [None, Some(0.0)] {
@@ -109,7 +109,7 @@ fn the_map_fills_the_view_at_lower_pitch() {
 #[test]
 fn globe_and_mercator_latitude_to_y_agree() {
     for latitude in [-LATITUDE_MAX, -60.0, -1e-9, 0.0, 30.0, 80.0, LATITUDE_MAX] {
-        let phi = mln_math::deg2rad(latitude);
+        let phi = mln_style::math::deg2rad(latitude);
         let globe = phi.tan().asinh();
         let f = phi.sin();
         let mercator = 0.5 * ((1.0 + f) / (1.0 - f)).ln();
@@ -618,14 +618,14 @@ fn the_camera_to_sea_level_distance_is_gl_js_s() {
     // GL JS's `pixelsPerMeter`: the world's pixels over the circumference at
     // the latitude, on the WGS84 radius that heights scale on.
     let pixels_per_meter =
-        512.0 * 2f64.powf(zoom) / (2.0 * std::f64::consts::PI * 6_378_137.0 * mln_math::deg2rad(latitude).cos());
+        512.0 * 2f64.powf(zoom) / (2.0 * std::f64::consts::PI * 6_378_137.0 * mln_style::math::deg2rad(latitude).cos());
     for (pitch, altitude) in [(60.0, 1200.0), (60.0, 0.0), (60.0, -400.0), (60.0, -30_000.0), (89.9, 1200.0)] {
         let mut state = pitched(pitch);
         state.set_lat_lng_zoom(&LatLng::new(latitude, 7.9).unwrap(), zoom);
         state.set_center_altitude(altitude);
         let view = state.view();
         let camera_to_center = view.camera_to_center_distance();
-        let limited_pitch = mln_math::deg2rad(f64::min(pitch, 89.25));
+        let limited_pitch = mln_style::math::deg2rad(f64::min(pitch, 89.25));
         let expected =
             f64::max(camera_to_center / 2.0, camera_to_center + altitude * pixels_per_meter / limited_pitch.cos());
         let distance = view.camera_to_sea_level_distance();
@@ -871,7 +871,7 @@ fn raising_the_eye_keeps_its_place_and_the_center() {
     let meters_per_pixel = view.meters_per_pixel();
     let world_size = Projection::world_size(view.scale());
     let eye = view.eye_position();
-    let rise = mln_math::deg2rad(70.0).cos() * view.camera_to_center_distance() * meters_per_pixel;
+    let rise = mln_style::math::deg2rad(70.0).cos() * view.camera_to_center_distance() * meters_per_pixel;
     assert!((eye.z - (1000.0 + rise)).abs() < 1e-6, "{eye}");
     let middle = view.near_plane_points()[4];
     let to_middle = DVec3::new(
@@ -880,7 +880,7 @@ fn raising_the_eye_keeps_its_place_and_the_center() {
         (middle.z - eye.z) / meters_per_pixel,
     );
     assert!((to_middle.length() - view.near_z()).abs() < 1e-6, "{to_middle}");
-    assert!((to_middle.z / to_middle.length() + mln_math::deg2rad(70.0).cos()).abs() < 1e-9, "{to_middle}");
+    assert!((to_middle.z / to_middle.length() + mln_style::math::deg2rad(70.0).cos()).abs() < 1e-9, "{to_middle}");
 
     assert!(state.raise_eye(500.0));
     let raised = state.view();
@@ -901,12 +901,12 @@ fn raising_the_eye_keeps_its_place_and_the_center() {
 fn an_eye_raised_level_with_the_center_looks_level() {
     let mut state = pitched(95.0);
     state.set_limits(CameraLimits { max_pitch: mln_util::constants::PITCH_MAX, ..*state.limits() }).unwrap();
-    state.set_pitch(mln_math::deg2rad(95.0));
+    state.set_pitch(mln_style::math::deg2rad(95.0));
     let eye = state.view().eye_position();
     assert!(eye.z < 0.0, "{eye}");
     assert!(state.raise_eye(-eye.z));
-    assert!((state.view().pitch() - mln_math::deg2rad(90.0)).abs() < 1e-12);
-    let zoom = 5.0 + (1.0 / mln_math::deg2rad(95.0).sin()).log2();
+    assert!((state.view().pitch() - mln_style::math::deg2rad(90.0)).abs() < 1e-12);
+    let zoom = 5.0 + (1.0 / mln_style::math::deg2rad(95.0).sin()).log2();
     assert!((state.view().zoom() - zoom).abs() < 1e-12, "{}", state.view().zoom());
 }
 
@@ -1049,7 +1049,7 @@ fn the_globe_eye_and_near_plane_are_the_cameras() {
     let view = state.view();
     let radius = globe_radius_px(view);
     let distance = view.camera_to_center_distance() / radius;
-    let pitch = mln_math::deg2rad(70.0);
+    let pitch = mln_style::math::deg2rad(70.0);
     // Looking north, the eye is south of the center, on its meridian.
     let (south, up) = (pitch.sin() * distance, 1.0 + 1500.0 / GLOBE_RADIUS + pitch.cos() * distance);
     let center = view.center(mln_style::geo::WrapMode::Unwrapped);

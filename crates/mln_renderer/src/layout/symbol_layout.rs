@@ -267,7 +267,7 @@ const BASELINE_OFFSET: f32 = 7.0;
 
 fn evaluate_radial_offset(anchor: SymbolAnchorType, radial_offset: f32) -> [f32; 2] {
     let mut result = [0.0_f32, 0.0_f32];
-    let radial_offset = mln_math::fmaxf(radial_offset, 0.0); // Ignore negative offset.
+    let radial_offset = mln_style::math::fmaxf(radial_offset, 0.0); // Ignore negative offset.
     // Solve for r where r^2 + r^2 = radial_offset^2.
     let hypotenuse = radial_offset / std::f32::consts::SQRT_2;
 

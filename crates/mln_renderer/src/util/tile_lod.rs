@@ -1,6 +1,6 @@
 // The C++ `TileZoomFunction::operator()` is `TileZoomFunction::call`.
 
-use mln_math::deg2rad;
+use mln_style::math::deg2rad;
 
 /// The pitch at which Mercator's horizon reaches the top of the screen, in
 /// degrees.
