@@ -7,14 +7,13 @@ use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
-use mln_style::PropertyEvaluationParameters;
 use mln_style::color::Color;
 use mln_style::constants::TILE_SIZE_D;
 use mln_style::error::Error;
 use mln_style::layer::LayerStyle;
 use mln_style::layers::Fill;
 use mln_style::layers::fill_layer_properties::FillPaintProperties;
-use mln_style::types::{AlignmentType, LayerBlendType, TranslateAnchorType};
+use mln_style::types::{AlignmentType, TranslateAnchorType};
 
 use super::{cast_matrix, refresh_paint_attributes};
 use crate::buckets::fill_bucket::{FillBinders, FillBucket, FillLayoutVertex};
@@ -33,7 +32,10 @@ use crate::layer::layer_drawing::{
 };
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::layout::{LayoutParameters, SourceLayer};
-use crate::layer::render_layer::{LayerBucket, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::layer::render_layer::{
+    EvaluateCx, Evaluation, LayerBucket, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer, RenderLayerBase,
+    TypedLayer,
+};
 use crate::layers::fill::programs;
 use crate::layers::fill::ubo::{
     FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO,
@@ -609,7 +611,7 @@ impl RenderFillLayer {
 impl TypedLayer for RenderFillLayer {
     type Type = Fill;
     type Drawing = TileDraws<FillTile>;
-    const DRAPES: bool = true;
+    const TERRAIN: OnTerrain = OnTerrain::Drapes;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -619,41 +621,28 @@ impl TypedLayer for RenderFillLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
-    /// An undefined outline color is the fill color.
-    fn complete_evaluation(
-        &mut self,
-        _parameters: &PropertyEvaluationParameters,
-        evaluated: &mut EvaluatedLayer<Fill>,
-    ) {
-        let evaluated = &mut evaluated.paint;
+    /// An undefined outline color is the fill color. The layer draws in the
+    /// opaque pass too where it is opaque, and a drape by the map's bearing
+    /// where it is translated in the viewport.
+    fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
+        let evaluated = &mut cx.evaluated.paint;
         if self.values.unevaluated.fill_outline_color.is_undefined() {
             evaluated.fill_outline_color = evaluated.fill_color.clone();
         }
-    }
-
-    fn drapes_by_bearing(&self, evaluated: &EvaluatedLayer<Fill>) -> bool {
-        let paint = &evaluated.paint;
-        *paint.fill_translate_anchor.uniform() == TranslateAnchorType::Viewport
-            && *paint.fill_translate.uniform() != [0.0, 0.0]
-    }
-
-    fn blends(&self, evaluated: &EvaluatedLayer<Fill>) -> bool {
-        *evaluated.paint.fill_layer_blend.uniform() != LayerBlendType::Normal
-    }
-
-    fn passes(&self, evaluated: &EvaluatedLayer<Fill>) -> RenderPass {
-        let evaluated = &evaluated.paint;
         let opaque = self.values.unevaluated.fill_pattern.is_undefined()
             && evaluated.fill_color.constant_or(&Color::default()).a >= 1.0
             && evaluated.fill_opacity.constant_or(&0.0) >= 1.0;
         let shows = *evaluated.fill_layer_opacity.uniform() > 0.0;
-        if shows && opaque {
-            RenderPass::Translucent | RenderPass::Opaque
+        let evaluation = if shows && opaque {
+            Evaluation::OPAQUE
         } else if shows {
-            RenderPass::Translucent
+            Evaluation::TRANSLUCENT
         } else {
-            RenderPass::None
-        }
+            Evaluation::NONE
+        };
+        let drapes_by_bearing = *evaluated.fill_translate_anchor.uniform() == TranslateAnchorType::Viewport
+            && *evaluated.fill_translate.uniform() != [0.0, 0.0];
+        Evaluation { drapes_by_bearing, ..evaluation }
     }
 
     /// Makes the frame's draws of the layer, those of each of its tiles,
