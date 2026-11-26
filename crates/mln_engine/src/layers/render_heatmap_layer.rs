@@ -16,7 +16,6 @@ use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType}
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::StyleValue as _;
 use mln_style::bitmap::PremultipliedImage;
-use mln_style::error::Error;
 use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
 use mln_style::layer::LayerStyle;
 use mln_style::layers::Heatmap;
@@ -26,7 +25,7 @@ use mln_style::types::TranslateAnchorType;
 
 use super::render_line_layer::apply_color_ramp;
 use super::{cast_matrix, refresh_paint_attributes};
-use crate::buckets::heatmap_bucket::{HeatmapBinders, HeatmapBucket, HeatmapLayoutVertex};
+use crate::buckets::heatmap_bucket::{HeatmapBinders, HeatmapLayoutVertex};
 use crate::draw::context::Context;
 use crate::draw::indexes::DrawIndexes;
 use crate::draw::objects::{DrawGeometry, DrawObjects, Textures};
@@ -39,8 +38,8 @@ use crate::layer::layer_drawing::{
     DrawDepth, DrawGroup, DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap,
     UniformWriter, finish_tiles, tile_objects,
 };
-use crate::layer::layer_type::{EvaluatedLayer, LayerType};
-use crate::layer::layout::{LayoutParameters, SourceLayer};
+use crate::layer::layer_type::LayerType;
+use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
     EvaluateCx, Evaluation, LayerBucket, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer, RenderLayerBase,
     TypedLayer,
@@ -166,16 +165,7 @@ impl LayerDrawing for HeatmapDrawing {
 
 impl LayerType for Heatmap {
     type Layout = HeatmapLayout;
-    type Bucket = HeatmapBucket;
     type TileBucket<'a> = LayerBucket<'a, Heatmap>;
-
-    fn create_layout(
-        group: &[Arc<EvaluatedLayer<Heatmap>>],
-        parameters: &mut LayoutParameters<'_>,
-        source_layer: SourceLayer,
-    ) -> Result<Option<HeatmapLayout>, Error> {
-        HeatmapLayout::new(parameters.bucket_parameters, group, source_layer, parameters.filter_groups).map(Some)
-    }
 
     fn render_layer(style: Arc<LayerStyle<Heatmap>>) -> Box<dyn RenderLayer> {
         Box::new(RenderHeatmapLayer::new(style))
@@ -351,7 +341,7 @@ impl RenderHeatmapLayer {
                 continue;
             };
             // A draw built from another bucket goes.
-            entry.set_bucket(bucket.base.bucket_id);
+            entry.set_bucket(render_data.id);
 
             // The draw's attributes read the bucket's vertices in the
             // context's store, which upload again when they change.
