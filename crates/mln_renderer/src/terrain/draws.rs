@@ -11,14 +11,13 @@ use std::mem::size_of;
 
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
-use mln_gfx::gpu::{Gpu, ShaderKey};
+use mln_gfx::gpu::{ClipDepthRange, Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_map_types::View;
 use mln_tile_id::CanonicalTileID;
-use mln_util::clip_depth::ClipDepthRange;
 use mln_util::logging::{Event, Log};
 
 use super::mesh::{TerrainMesh, TerrainVertex};

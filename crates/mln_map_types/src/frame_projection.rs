@@ -4,7 +4,7 @@
 //! custom layers, which get it with each frame, can name it.
 
 use glam::DMat4;
-pub use mln_util::clip_depth::ClipDepthRange;
+pub use mln_gfx::gpu::ClipDepthRange;
 
 /// Where a frame drew the map, and the depth its 3D layers wrote there.
 #[derive(Clone, Copy, Debug, PartialEq)]
