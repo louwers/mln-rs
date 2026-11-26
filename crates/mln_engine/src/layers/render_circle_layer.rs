@@ -8,7 +8,6 @@ use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::color::Color;
-use mln_style::error::Error;
 use mln_style::expression::EvaluationContext;
 use mln_style::geo::WrapMode;
 use mln_style::layer::LayerStyle;
@@ -21,11 +20,10 @@ use crate::camera::{TileCoordinate, TileProjector};
 use crate::draw::objects::{DrawGeometry, DrawObjects, Textures};
 use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
-use crate::layer::bucket::Bucket;
 use crate::layer::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::layer::layer_drawing::{DrawList, FrameDraw, TileDraws, UniformWriter};
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
-use crate::layer::layout::{LayoutParameters, SourceLayer};
+use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
     EvaluateCx, Evaluation, LayerBucket, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer, RenderLayerBase,
     TypedLayer,
@@ -118,16 +116,7 @@ fn plane_geometry(
 
 impl LayerType for Circle {
     type Layout = CircleLayout;
-    type Bucket = CircleBucket;
     type TileBucket<'a> = LayerBucket<'a, Circle>;
-
-    fn create_layout(
-        group: &[Arc<EvaluatedLayer<Circle>>],
-        parameters: &mut LayoutParameters<'_>,
-        source_layer: SourceLayer,
-    ) -> Result<Option<CircleLayout>, Error> {
-        CircleLayout::new(parameters.bucket_parameters, group, source_layer, parameters.filter_groups).map(Some)
-    }
 
     fn query_radius(bucket: &CircleBucket, layer: &EvaluatedLayer<Circle>) -> f32 {
         bucket.query_radius(layer)
@@ -283,7 +272,7 @@ impl TypedLayer for RenderCircleLayer {
             };
 
             let render_data = tile.bucket_for_pass(RENDER_PASS);
-            let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
+            let Some(render_data) = render_data else {
                 *entry.value = None;
                 continue;
             };
@@ -302,7 +291,7 @@ impl TypedLayer for RenderCircleLayer {
             };
 
             // A draw built from another bucket goes.
-            entry.set_bucket(bucket.base.bucket_id);
+            entry.set_bucket(render_data.id);
 
             // The draw's attributes read the bucket's vertices in the
             // context's store, which upload again when they change.
