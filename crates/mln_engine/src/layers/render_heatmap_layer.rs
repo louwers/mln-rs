@@ -14,6 +14,7 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
+use mln_style::StyleValue as _;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::Error;
 use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
@@ -22,7 +23,6 @@ use mln_style::layers::Heatmap;
 use mln_style::layers::heatmap_layer_properties::{HeatmapPaintProperties, default_heatmap_color};
 use mln_style::size::Size;
 use mln_style::types::TranslateAnchorType;
-use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 
 use super::render_line_layer::apply_color_ramp;
 use super::{cast_matrix, refresh_paint_attributes};
@@ -41,7 +41,10 @@ use crate::layer::layer_drawing::{
 };
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::layout::{LayoutParameters, SourceLayer};
-use crate::layer::render_layer::{LayerBucket, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::layer::render_layer::{
+    EvaluateCx, Evaluation, LayerBucket, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer, RenderLayerBase,
+    TypedLayer,
+};
 use crate::layers::heatmap::programs;
 use crate::layers::heatmap::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, HeatmapTexturePropsUBO};
 use crate::layout::heatmap_layout::HeatmapLayout;
@@ -229,7 +232,7 @@ impl TypedLayer for RenderHeatmapLayer {
     type Type = Heatmap;
     type Drawing = HeatmapDrawing;
 
-    const STANDS: bool = true;
+    const TERRAIN: OnTerrain = OnTerrain::Stands { hides_behind_ground: false };
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -239,11 +242,8 @@ impl TypedLayer for RenderHeatmapLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
-    fn complete_evaluation(
-        &mut self,
-        parameters: &PropertyEvaluationParameters,
-        _evaluated: &mut EvaluatedLayer<Heatmap>,
-    ) {
+    fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
+        let parameters = cx.parameters;
         // Build the ramp here rather than in transition(), which has no global
         // state. A new or changed layer always needs one; otherwise only a
         // change to a state key that the ramp reads does.
@@ -264,14 +264,8 @@ impl TypedLayer for RenderHeatmapLayer {
         if ramp_affected {
             self.update_color_ramp();
         }
-    }
-
-    fn passes(&self, evaluated: &EvaluatedLayer<Heatmap>) -> RenderPass {
-        if *evaluated.paint.heatmap_opacity.uniform() > 0.0 {
-            RenderPass::Translucent | RenderPass::Pass3D
-        } else {
-            RenderPass::None
-        }
+        let evaluated = &*cx.evaluated;
+        if *evaluated.paint.heatmap_opacity.uniform() > 0.0 { Evaluation::TRANSLUCENT } else { Evaluation::NONE }
     }
 
     /// Makes the tiles' draws into the render target, which it builds for a
