@@ -260,7 +260,7 @@ impl FileSource for SeaLevel {
             *texel = [1, 134, 160, 255];
         }
         let mut response = Response::new();
-        response.data = Some(Arc::new(mln_image::encode_png(&image)));
+        response.data = Some(Arc::new(crate::image::encode_png(&image)));
         responder.send(response);
     }
 
@@ -312,7 +312,7 @@ fn textured_drapes(style: &str) -> Option<BTreeSet<(OverscaledTileID, usize)>> {
     let mut target = OffscreenTarget::<mln_webgpu::WebGpu>::new(mln_gfx::Size::new(size.width, size.height));
     let pool = crate::tests::pool();
     let mut renderer =
-        Renderer::new(backend.gpu(), 1.0, mln_text::local_fonts::LocalGlyphs::default(), Arc::new(|| {}), &pool);
+        Renderer::new(backend.gpu(), 1.0, crate::text::local_fonts::LocalGlyphs::default(), Arc::new(|| {}), &pool);
     let events = RendererEvents::new();
     renderer.set_event_queue(Some(events.clone()));
     let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);

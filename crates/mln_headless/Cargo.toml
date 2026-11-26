@@ -27,7 +27,6 @@ mln_engine.workspace = true
 # The devices and offscreen targets the frontend renders on, of every
 # backend.
 mln_runtime = { workspace = true, features = ["default", "webgpu"] }
-mln_text.workspace = true
 mln_style.workspace = true
 mln_util.workspace = true
 parking_lot.workspace = true
@@ -43,15 +42,13 @@ feature = { package = "mln-rs-feature", path = "../../vendor/feature" }
 geo-types.workspace = true
 geojson.workspace = true
 glam.workspace = true
-mln_image = { package = "mln-rs-image", path = "../mln_image" }
-# system_fonts_test shapes text with mln_text's Shaper in-process.
+# system_fonts_test shapes text with the engine's Shaper in-process.
 mln_engine = { workspace = true, features = [
   "font-face-shaper",
   "sqlite",
   "stub-file-source",
 ] }
 mln_style = { workspace = true, features = ["dsl"] }
-mln_text = { package = "mln-rs-text", path = "../mln_text" }
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
 serde_json.workspace = true
 # The custom layer test's hosts, which draw with each backend's own API.

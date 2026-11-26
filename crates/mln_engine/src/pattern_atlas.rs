@@ -5,11 +5,11 @@ use mln_style::bitmap::PremultipliedImage;
 use mln_style::hash::HashMap;
 use mln_style::image::Impl as ImageImpl;
 use mln_style::size::Size;
-use mln_text::atlas::{ImagePosition, RectU16};
 
 use crate::draw::context::Context;
 use crate::draw::store::SharedTexture;
 use crate::draw::texture_size;
+use crate::text::atlas::{ImagePosition, RectU16};
 
 /// When copied into the atlas texture, image data is padded by one pixel on
 /// each side. Pattern images are padded with a copy of the image data

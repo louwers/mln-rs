@@ -439,5 +439,6 @@ impl Drapes {
 
 /// Writes `image` as a PNG to `path`.
 pub(crate) fn save_png(image: &mln_style::bitmap::PremultipliedImage, path: &Path) {
-    std::fs::write(path, mln_image::encode_png(image)).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    std::fs::write(path, mln_engine::image::encode_png(image))
+        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
 }

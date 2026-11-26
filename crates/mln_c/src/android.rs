@@ -31,7 +31,7 @@ pub(crate) unsafe extern "C" fn mln_android_init(
         #[cfg(target_os = "android")]
         {
             // SAFETY: the caller's contract.
-            unsafe { mln_system_fonts::android::init(jni_env) };
+            unsafe { mln_engine::text::system_fonts::android::init(jni_env) };
             // SAFETY: the caller's contract.
             unsafe { mln_engine::storage::android::init(jni_env, context) }.map_err(Error::from)
         }

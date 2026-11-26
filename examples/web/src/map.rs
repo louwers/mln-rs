@@ -2,7 +2,7 @@
 //! render session presents to the page's canvas (an `OffscreenCanvas`), with
 //! the browser's WebGPU or, in the `webgl` build of the module, its WebGL2.
 //! Its tile workers are in other Web Workers, and the page's input moves it
-//! through a gesture recognizer (`mln_gestures`).
+//! through a gesture recognizer (`mln_engine::gestures`).
 //!
 //! The runtime and the session run on this Web Worker's one thread, in the
 //! slices of `mln_web_host`'s pump: a command or a frame demand runs in a
@@ -15,8 +15,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use mln_engine::camera::{AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase};
+use mln_engine::gestures::{GestureEvent, GestureRecognizer, Input, Modes, PointerKind};
 use mln_engine::map::MapEvent;
-use mln_gestures::{GestureEvent, GestureRecognizer, Input, Modes, PointerKind};
 use mln_runtime::{
     AttachOptions, DemandMode, Error, ErrorKind, EventMask, EventType, FrameDemand, FrameDisposition, LogicalExtent,
     Map, MapOptions, RenderSession, RenderTarget, Runtime, RuntimeEvent, RuntimeEventKind, RuntimeOptions, Surface,

@@ -1,6 +1,6 @@
 //! `gesture.h`: a gesture recognizer that moves a map's camera.
 //!
-//! Each recognizer is an `mln_gestures::GestureRecognizer` with the runtime
+//! Each recognizer is an `mln_engine::gestures::GestureRecognizer` with the runtime
 //! map it moves, behind a lock: calls run on the caller's thread, and the
 //! camera moves they make go to the map as commands.
 
@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use ::mln_engine::camera::{MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumSnap};
-use mln_gestures::{
+use mln_engine::gestures::{
     AxisOptions, GestureEvent, GestureOptions, GestureRecognizer, Input, Modes, NextTick, Notch, PinchPhase,
     PointerKind,
 };
@@ -371,9 +371,9 @@ fn event(event: GestureEvent) -> mln_gesture_event {
         }
         GestureEvent::Notch { axis, value, kind } => {
             let axis = match axis {
-                mln_gestures::Axis::Zoom => MLN_GESTURE_AXIS_ZOOM,
-                mln_gestures::Axis::Bearing => MLN_GESTURE_AXIS_BEARING,
-                mln_gestures::Axis::Pitch => MLN_GESTURE_AXIS_PITCH,
+                mln_engine::gestures::Axis::Zoom => MLN_GESTURE_AXIS_ZOOM,
+                mln_engine::gestures::Axis::Bearing => MLN_GESTURE_AXIS_BEARING,
+                mln_engine::gestures::Axis::Pitch => MLN_GESTURE_AXIS_PITCH,
             };
             (MLN_GESTURE_EVENT_NOTCH, mln_gesture_event_data { notch: mln_gesture_notch_event { axis, kind, value } })
         }

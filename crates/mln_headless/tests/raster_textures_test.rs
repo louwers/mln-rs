@@ -37,7 +37,7 @@ fn tile_png(z: i8, y: i32) -> Vec<u8> {
         let value = ((height + 10000.0) * 10.0).round() as u32;
         *pixel = [(value >> 16) as u8, (value >> 8) as u8, value as u8, 255];
     }
-    mln_image::encode_png(&image)
+    mln_engine::image::encode_png(&image)
 }
 
 /// A map of a layer of `layer_type` over a source bounded to a few degrees

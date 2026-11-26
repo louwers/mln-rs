@@ -8,7 +8,6 @@ use std::sync::Arc;
 use mln_style::error::Error;
 use mln_style::expression::UnavailableImages;
 use mln_style::tile_id::CanonicalTileID;
-use mln_text::glyph::GlyphDependencies;
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::image::image_store::ImageDependencies;
@@ -17,6 +16,7 @@ use crate::layer::filter_groups::FilterGroups;
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::tile_layout::Resolved;
 use crate::query::feature_index::FeatureIndexBuilder;
+use crate::text::glyph::GlyphDependencies;
 use crate::tile::{TileData, TileLayer};
 
 /// The layer a layout reads: its tile data and its name.
@@ -105,7 +105,7 @@ pub(crate) fn layers_by_id<T: LayerType>(group: &[Arc<EvaluatedLayer<T>>]) -> Ve
 pub(crate) struct LayoutParameters<'a> {
     pub(crate) bucket_parameters: &'a BucketParameters,
     /// The style's font faces, and its fallback faces after them.
-    pub(crate) font_faces: Option<Arc<mln_text::glyph::FontFaces>>,
+    pub(crate) font_faces: Option<Arc<crate::text::glyph::FontFaces>>,
     /// Whether the style has a `glyphs` URL.
     pub(crate) glyph_pbfs: bool,
     pub(crate) glyph_dependencies: &'a mut GlyphDependencies,

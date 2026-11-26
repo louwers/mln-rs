@@ -54,7 +54,7 @@ fn sprite_image(ratio: u32) -> Vec<u8> {
             data.extend_from_slice(&[shade, shade / 2, 255 - shade, 255]);
         }
     }
-    mln_image::encode_png(&PremultipliedImage::from_vec(Size::new(side, side), data))
+    mln_engine::image::encode_png(&PremultipliedImage::from_vec(Size::new(side, side), data))
 }
 
 fn sprite_json(ratio: u32) -> Vec<u8> {

@@ -53,7 +53,7 @@ fn tile_png(tile: &TileData, size: u32, pixel: impl Fn(f64, f64) -> [u8; 4]) -> 
         let (north, east) = meters_from_center(pixel_location(tile, size, column, row));
         *texel = pixel(north, east);
     }
-    mln_image::encode_png(&image)
+    mln_engine::image::encode_png(&image)
 }
 
 /// The height of the ground `north` meters north of the center: a ridge
@@ -87,7 +87,7 @@ fn sea_level_png(_tile: &TileData) -> Vec<u8> {
     for pixel in image.data.as_chunks_mut::<4>().0 {
         *pixel = [1, 134, 160, 255];
     }
-    mln_image::encode_png(&image)
+    mln_engine::image::encode_png(&image)
 }
 
 /// The squares the raster draws: their colors and where they are, north
@@ -184,7 +184,7 @@ fn still(
             *pixel = [0, 0, 255, 255];
         }
         let mut response = Response::new();
-        response.data = Some(Arc::new(mln_image::encode_png(&image)));
+        response.data = Some(Arc::new(mln_engine::image::encode_png(&image)));
         Some(response)
     });
     let options = MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() };
@@ -256,7 +256,7 @@ fn half_png(tile: &TileData) -> Vec<u8> {
     for pixel in image.data.as_chunks_mut::<4>().0 {
         *pixel = if east { [0, 0, 255, 255] } else { [255, 0, 0, 255] };
     }
-    mln_image::encode_png(&image)
+    mln_engine::image::encode_png(&image)
 }
 
 /// Near the antimeridian at zoom 1, a raster drapes on both sides of it, on
@@ -310,7 +310,7 @@ fn plateau_png(_tile: &TileData) -> Vec<u8> {
     for pixel in image.data.as_chunks_mut::<4>().0 {
         *pixel = [(value >> 16) as u8, (value >> 8) as u8, value as u8, 255];
     }
-    mln_image::encode_png(&image)
+    mln_engine::image::encode_png(&image)
 }
 
 /// The plateau's height, in meters: above the eye of a camera at zoom 13,
@@ -323,7 +323,7 @@ fn green_png(_tile: &TileData) -> Vec<u8> {
     for pixel in image.data.as_chunks_mut::<4>().0 {
         *pixel = [0, 255, 0, 255];
     }
-    mln_image::encode_png(&image)
+    mln_engine::image::encode_png(&image)
 }
 
 /// Under `vertical-perspective` at zoom 13, a camera pitched over a 4,000 m

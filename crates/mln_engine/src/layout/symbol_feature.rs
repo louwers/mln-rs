@@ -9,7 +9,8 @@ use feature::{Identifier, PropertyMap, Value};
 use mln_style::expression::image::Image;
 use mln_style::feature::{GeometryCollection, GeometryTileFeature};
 use mln_style::geometry::FeatureType;
-use mln_text::TaggedString;
+
+use crate::text::TaggedString;
 
 #[derive(Clone, Debug)]
 pub(crate) struct SymbolFeature {

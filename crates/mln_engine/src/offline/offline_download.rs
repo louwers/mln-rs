@@ -21,10 +21,6 @@ use mln_style::source::{OfflineResources, SourceTypeInfo};
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::{Tileset, VectorEncoding};
 use mln_style::{Parser, StyleRegistry};
-use mln_text::glyph::{
-    GLYPH_RANGES_PER_FONT_STACK, GLYPHS_PER_GLYPH_RANGE, GlyphID, NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK,
-    get_glyph_range,
-};
 use mln_util::chrono::now;
 use mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
 use mln_vec_map::VecMap;
@@ -36,6 +32,10 @@ use crate::storage::offline_database::{DatabaseError, OfflineDatabase};
 use crate::storage::resource::{Priority, TileFormat, Usage};
 use crate::storage::response::{Caching, Reason, ResourceError};
 use crate::storage::{FileSource, Kind, LoadingMethod, Request, Resource, Response};
+use crate::text::glyph::{
+    GLYPH_RANGES_PER_FONT_STACK, GLYPHS_PER_GLYPH_RANGE, GlyphID, NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK,
+    get_glyph_range,
+};
 use crate::tile_store::tile_cover::{TileCover, covering_zoom_level, tile_count_bounds, tile_count_geometry};
 
 const K_RESOURCES_BATCH_SIZE: usize = 64;

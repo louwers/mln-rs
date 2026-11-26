@@ -13,12 +13,12 @@ use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType
 use mln_style::bitmap::AlphaImage;
 use mln_style::hash::HashMap;
 use mln_style::size::Size;
-use mln_text::atlas::RectU16;
-use mln_text::glyph::Glyph;
 
 use crate::draw::context::Context;
 use crate::draw::store::SharedTexture;
 use crate::draw::texture_size;
+use crate::text::atlas::RectU16;
+use crate::text::glyph::Glyph;
 
 /// Identifies a bin within a dynamic texture.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

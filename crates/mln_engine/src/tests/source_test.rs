@@ -455,7 +455,7 @@ impl OpenTileSource {
     fn answer_zoom(&self, z: i8) {
         let mut response = Response::new();
         let image = mln_style::bitmap::PremultipliedImage::new(Size::new(1, 1));
-        response.data = Some(Arc::new(mln_image::encode_png(&image)));
+        response.data = Some(Arc::new(crate::image::encode_png(&image)));
         let open: Vec<Responder> =
             self.open.lock().iter().filter(|(zoom, _)| *zoom == z).map(|(_, responder)| responder.clone()).collect();
         for responder in open {

@@ -10,14 +10,14 @@
 use std::sync::Arc;
 
 use mln_engine::map::Map;
+use mln_engine::text::GlyphCache;
+use mln_engine::text::local_fonts::LocalGlyphs;
 use mln_engine::{Renderer, RendererEvent, RendererEvents, UpdateParameters, UpdateReader};
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_runtime::{BackendRef, BackendType, Device, DeviceOptions, GlApi, LocalTarget};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::Error;
 use mln_style::size::Size;
-use mln_text::GlyphCache;
-use mln_text::local_fonts::LocalGlyphs;
 use mln_util::event_queue::Waker;
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;

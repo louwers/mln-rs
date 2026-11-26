@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 include.workspace = true
 # The browser build's second module: a style's font faces shaped and
-# rasterized with mln_text's Shaper (HarfRust, skrifa and the glyph
+# rasterized with mln_engine's Shaper (HarfRust, skrifa and the glyph
 # rasterizer), which the map's Web Worker loads the first time a style declares
 # font faces, so the main module (examples/web) leaves them out. `mise run
 # web:build` builds it into examples/web/web/pkg beside it; never released.
@@ -22,7 +22,7 @@ crate-type = ["cdylib"]
 # Only the browser target has anything to build.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys.workspace = true
-mln_text.workspace = true
+mln_engine.workspace = true
 wasm-bindgen.workspace = true
 
 [lints]

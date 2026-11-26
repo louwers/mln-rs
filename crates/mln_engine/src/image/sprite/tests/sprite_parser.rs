@@ -1,10 +1,10 @@
 use std::collections::BTreeSet;
 
-use mln_image::decode_image;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::image::{ImageContent, TextFit};
 
 use super::{FixtureLog, read_file};
+use crate::image::decode_image;
 use crate::image::sprite::sprite_parser::{create_style_image, parse_sprite};
 
 fn read_image(name: &str) -> PremultipliedImage {

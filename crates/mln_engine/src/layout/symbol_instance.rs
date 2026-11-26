@@ -6,12 +6,12 @@ use std::sync::Arc;
 
 use mln_style::feature::GeometryCoordinates;
 use mln_style::types::{SymbolAnchorType, TextJustifyType, TextWritingModeType, VariableAnchorOffsetCollection};
-use mln_text::anchor_justification;
-use mln_text::glyph::Shaping;
 use mln_wire::payload::pod;
 
 use crate::geometry::anchor::Anchor;
 use crate::placement::collision_feature::{CollisionBox, CollisionFeature};
+use crate::text::anchor_justification;
+use crate::text::glyph::Shaping;
 use crate::text::quads::SymbolQuads;
 use crate::util::pool::PoolRange;
 

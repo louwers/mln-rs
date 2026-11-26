@@ -10,7 +10,7 @@ use jni::JavaVM;
 use jni::sys::{JNI_OK, jint, jsize};
 
 /// The Java VM: the one that Android initialization recorded as `jni`'s
-/// (`mln_android_init()`, or `mln_engine::storage`'s and `mln_system_fonts`' `init`),
+/// (`mln_android_init()`, or `mln_engine::storage`'s and `mln_engine::text::system_fonts`' `init`),
 /// or else the process's own, such as an app's that didn't initialize the
 /// library, or that of a test that runs in a Java VM's process. `None` in a
 /// process without one.

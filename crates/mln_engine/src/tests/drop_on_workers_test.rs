@@ -26,7 +26,7 @@ impl Drop for Recorder {
 fn orchestrator(pool: &Pool) -> RenderOrchestrator {
     RenderOrchestrator::new(
         true,
-        mln_text::local_fonts::LocalGlyphs::default(),
+        crate::text::local_fonts::LocalGlyphs::default(),
         Arc::default(),
         crate::text::font_face_engine::default_engine(),
         crate::Registry::with_builtins(),

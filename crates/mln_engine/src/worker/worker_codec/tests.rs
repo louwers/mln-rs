@@ -10,9 +10,6 @@ use mln_style::property::evaluation::PropertyEvaluationParameters;
 use mln_style::property::transition::{TransitionOptions, TransitionParameters};
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
-use mln_text::glyph::{GlyphIDType, GlyphMap, GlyphRange};
-use mln_text::glyph_pbf::parse_glyph_pbf;
-use mln_text::tagged_string::font_stack_hash;
 use mln_vec_map::VecSet;
 
 use super::map_side::MapCodec;
@@ -24,7 +21,10 @@ use crate::image::image_store::{ImageMap, ImageType};
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::layer::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::map::MapMode;
+use crate::text::glyph::{GlyphIDType, GlyphMap, GlyphRange};
+use crate::text::glyph_pbf::parse_glyph_pbf;
 use crate::text::glyph_store::ShapeResults;
+use crate::text::tagged_string::font_stack_hash;
 use crate::tile::{MltTile, MvtTile, OverscaledTileID, TileData};
 use crate::tile_store::contents::LayoutResult;
 use crate::worker::job::{
@@ -119,7 +119,7 @@ fn answer(dependencies: &Dependencies) -> Resolved {
     }
     let sprite = crate::image::sprite::sprite_parser::parse_sprite(
         "default",
-        &mln_image::decode_image(&fixture("test/fixtures/annotations/emerald.png")).unwrap(),
+        &crate::image::decode_image(&fixture("test/fixtures/annotations/emerald.png")).unwrap(),
         &fixture("test/fixtures/annotations/emerald.json"),
     )
     .unwrap();
@@ -587,9 +587,9 @@ fn data_input(data: &DataInput) -> DataInput {
 #[test]
 fn answers_cross_without_pixels() {
     let mut map = MapCodec::new(Registry::with_builtins());
-    let ids = (0..256).map(mln_text::glyph::GlyphID::new).collect();
+    let ids = (0..256).map(crate::text::glyph::GlyphID::new).collect();
     let dependencies = Dependencies {
-        glyphs: mln_text::glyph::GlyphDependencies {
+        glyphs: crate::text::glyph::GlyphDependencies {
             glyphs: [(vec!["Open Sans Regular".to_owned()], ids)].into_iter().collect(),
             shapes: mln_vec_map::VecMap::default(),
         },
@@ -740,7 +740,7 @@ fn png(width: u32, height: u32) -> Arc<Vec<u8>> {
     for (i, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         *pixel = [(i % 251) as u8, (i / 7 % 253) as u8, (i * 3 % 255) as u8, 255];
     }
-    Arc::new(mln_image::encode_png(&image))
+    Arc::new(crate::image::encode_png(&image))
 }
 
 /// A decode job of tile 0/0/0.

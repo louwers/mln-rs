@@ -3,10 +3,10 @@ use std::sync::Arc;
 use mln_style::Style;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::time::Instant;
-use mln_text::glyph::FontFaces;
 
 use crate::camera::{Elevation, View};
 use crate::map::{MapMode, TerrainOptions};
+use crate::text::glyph::FontFaces;
 use crate::tile_store::TileLodMode;
 
 #[derive(Clone)]
@@ -31,7 +31,7 @@ pub struct UpdateParameters {
     pub style: Arc<Style>,
     /// The faces that the style's text draws with: the style's own
     /// `font-faces`, then the app's fallback faces
-    /// ([`style_font_faces`](mln_text::glyph::style_font_faces)).
+    /// ([`style_font_faces`](crate::text::glyph::style_font_faces)).
     pub font_faces: Option<Arc<FontFaces>>,
     pub sprite_loaded: bool,
     /// The map's feature state. Each render source takes its own, in place

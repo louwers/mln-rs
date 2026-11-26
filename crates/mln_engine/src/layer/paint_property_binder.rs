@@ -17,7 +17,6 @@ use mln_style::property::expression::PropertyExpression;
 use mln_style::range::Range;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::LineCapType;
-use mln_text::atlas::ImagePositions;
 use mln_util::feature::feature_id_to_string;
 use mln_vec_map::VecMap;
 
@@ -27,6 +26,7 @@ use crate::layer::bucket_geometry::GeometryVec;
 use crate::layer::paint_property_statistics::{PaintPropertyStatistics, StatisticValue};
 use crate::layout::pattern_layout::PatternDependency;
 use crate::line_atlas::{DashAtlas, LinePatternCap};
+use crate::text::atlas::ImagePositions;
 use crate::tile::TileLayer;
 
 /// Maps vertex range to feature index.
@@ -840,7 +840,7 @@ macro_rules! paint_property_binders {
                 feature: &dyn mln_style::feature::GeometryTileFeature,
                 length: usize,
                 index: usize,
-                pattern_positions: &mln_text::atlas::ImagePositions,
+                pattern_positions: &crate::text::atlas::ImagePositions,
                 pattern_dependencies: Option<&$crate::layout::pattern_layout::PatternDependency>,
                 canonical: &mln_style::tile_id::CanonicalTileID,
                 formatted_section: &mln_style::expression::Value,
@@ -871,7 +871,7 @@ macro_rules! paint_property_binders {
                 &mut self,
                 states: &$crate::layer::bucket::FeatureStates,
                 layer: &crate::tile::TileLayer<'_>,
-                _image_positions: &mln_text::atlas::ImagePositions,
+                _image_positions: &crate::text::atlas::ImagePositions,
             ) {
                 // Values that moved to the render thread don't depend on
                 // feature state (`depends_on_feature_state`).

@@ -4,7 +4,9 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description.workspace = true
-license.workspace = true
+# The Unicode tables of text/ (arabic_tables.rs, bidi_mirroring.rs) are
+# generated from the Unicode Character Database.
+license = "BSD-2-Clause AND Unicode-3.0"
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
@@ -18,8 +20,8 @@ name = "mln_engine"
 doctest = false
 
 [features]
-default = ["font-face-shaper", "sqlite"]
-# The style's font faces shaped in-process with mln_text's Shaper
+default = ["font-face-shaper", "sqlite", "system-fonts"]
+# The style's font faces shaped in-process with `text::Shaper`
 # (HarfRust), the default FontFaceEngine (src/text/font_face_engine.rs). The
 # workspace's packages depend on this crate without its default features,
 # and those that render natively (mln-rs-runtime, and mln-rs,
@@ -44,28 +46,43 @@ bench = ["mln_util/bench"]
 # `conformance`, the frames that the backends' tests draw through their
 # `Gpu`.
 gpu-conformance = []
+# `text::system_fonts`: the device's fonts, found through fontconfig,
+# Android's font matcher, CoreText or DirectWrite, as font faces for the
+# glyphs that no style font has.
+system-fonts = [
+  "dep:libloading",
+  "dep:memmap2",
+  "dep:objc2-core-foundation",
+  "dep:objc2-core-text",
+  "dep:sys-locale",
+  "dep:windows",
+  "dep:windows-core",
+]
 # StubFileSource, the file source that the tests of this crate's dependents
 # answer requests with.
 stub-file-source = []
 
 [dependencies]
+ab_glyph_rasterizer.workspace = true
 bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
+buffa.workspace = true
 bytes.workspace = true
 earcut.workspace = true
 etagere.workspace = true
 fast-mvt.workspace = true
+flate2.workspace = true
 feature.workspace = true
 geo-types.workspace = true
 geo-index.workspace = true
 geojson.workspace = true
 geometry.workspace = true
 glam.workspace = true
+harfrust.workspace = true
 i_overlay.workspace = true
+image-webp.workspace = true
 log = { workspace = true, features = ["kv"] }
 mln_gfx.workspace = true
-mln_image.workspace = true
 mln_style.workspace = true
-mln_text.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true
 mln_wire = { workspace = true, features = ["geo-types", "glam", "parking_lot"] }
@@ -73,11 +90,17 @@ mlt-core.workspace = true
 parking_lot.workspace = true
 percent-encoding.workspace = true
 pmtiles.workspace = true
+png.workspace = true
 polylabel.workspace = true
 rusqlite = { workspace = true, optional = true }
 serde_json.workspace = true
+skrifa.workspace = true
 smallvec.workspace = true
 thiserror.workspace = true
+unicode-bidi.workspace = true
+unicode-linebreak.workspace = true
+unicode-properties.workspace = true
+wuff.workspace = true
 
 # Apple's platforms come with SQLite, and an app that links its own copy uses
 # its filesystem probes, which Apple counts as disk-space APIs whose use an
@@ -92,9 +115,24 @@ rusqlite = { workspace = true, optional = true, features = ["bundled"] }
 block2.workspace = true
 objc2.workspace = true
 objc2-foundation.workspace = true
+# The system fonts, through CoreText.
+objc2-core-foundation = { workspace = true, optional = true, features = [
+  "CFArray",
+  "CFData",
+  "CFString",
+] }
+objc2-core-text = { workspace = true, optional = true, features = [
+  "CTFontTraits",
+] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 ureq = { workspace = true, features = ["gzip", "native-tls-no-default"] }
+# The system fonts, through DirectWrite's font fallback.
+windows = { workspace = true, optional = true, features = [
+  "Win32_Graphics_DirectWrite",
+] }
+# For the code that windows' #[implement] generates.
+windows-core = { workspace = true, optional = true }
 
 [target.'cfg(not(any(target_family = "wasm", target_vendor = "apple", target_os = "windows", target_os = "android")))'.dependencies]
 rustls.workspace = true
@@ -104,7 +142,20 @@ ureq = { workspace = true, features = [
   "rustls-no-provider",
 ] }
 
-# HttpURLConnection and the app's assets, through the app's Java VM.
+# JPEG decoding, which the browser does on wasm, and the system fonts' files
+# and the device's languages.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+memmap2 = { workspace = true, optional = true }
+sys-locale = { workspace = true, optional = true }
+zune-jpeg.workspace = true
+
+# The system fonts: fontconfig, and Android's font matcher, loaded at run
+# time.
+[target.'cfg(all(unix, not(target_vendor = "apple")))'.dependencies]
+libloading = { workspace = true, optional = true }
+
+# HttpURLConnection and the app's assets, and the app's languages for the
+# system fonts, through the app's Java VM.
 [target.'cfg(target_os = "android")'.dependencies]
 jni.workspace = true
 

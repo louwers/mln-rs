@@ -6,9 +6,9 @@ use ::mln_engine::{RenderMode, TileOperation};
 use ::mln_runtime::{EventSource, MapId, RuntimeEvent, RuntimeEventKind};
 use mln_engine::storage::offline::{OfflineRegionDownloadState, OfflineRegionStatus};
 use mln_engine::storage::response::Reason;
+use mln_engine::text::glyph::{GlyphIDType, GlyphRange};
 use mln_style::StyleLoadError;
 use mln_style::sprite::Sprite;
-use mln_text::glyph::{GlyphIDType, GlyphRange};
 
 use crate::buffer::LentText;
 use crate::generated::types::{

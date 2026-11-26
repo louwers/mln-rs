@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use mln_style::bitmap::AlphaImage;
 use mln_style::size::Size;
-use mln_text::glyph::{Glyph, GlyphID, GlyphIDType, GlyphMetrics, GlyphRange};
-use mln_text::glyph_cache::{GlyphCache, GlyphCacheRange};
-use mln_text::glyph_pbf::parse_glyph_pbf;
 
 use super::read_file;
+use crate::text::glyph::{Glyph, GlyphID, GlyphIDType, GlyphMetrics, GlyphRange};
+use crate::text::glyph_cache::{GlyphCache, GlyphCacheRange};
+use crate::text::glyph_pbf::parse_glyph_pbf;
 
 fn glyph(id: char, value: u8) -> Glyph {
     let mut bitmap = AlphaImage::new(Size::new(4, 4));

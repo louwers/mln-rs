@@ -6,7 +6,6 @@ use std::sync::Arc;
 use mln_style::color::Color;
 use mln_style::layers::Circle;
 use mln_style::layers::circle_layer_properties::CirclePaintProperties;
-use mln_text::atlas::ImagePositions;
 use mln_vec_map::VecMap;
 
 use crate::draw::segment::SegmentBase;
@@ -16,6 +15,7 @@ use crate::layer::layer_type::EvaluatedLayer;
 use crate::layer::paint_property_binder::PaintPropertyBinder;
 use crate::map::MapMode;
 use crate::render::terrain::point_center;
+use crate::text::atlas::ImagePositions;
 
 crate::paint_property_binders!(
     pub struct CircleBinders for CirclePaintProperties::PossiblyEvaluated {

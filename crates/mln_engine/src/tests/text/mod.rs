@@ -1,8 +1,8 @@
-// Ported gtests of test/text/*.test.cpp that need mln_engine (GlyphStore,
-// SymbolLayout), sit above mln_text (Formatted is mln_style's) or read
-// its fixtures (GlyphCache), one module per C++ file. The others are ported next to their code: bidi,
-// tagged_string, glyph_pbf and shaping in mln_text;
-// quads, get_anchors and cross_tile_symbol_index in crate::text;
+// Ported gtests of test/text/*.test.cpp that need the glyph store or symbol
+// layout (GlyphStore, SymbolLayout), mln_style's Formatted, or the text
+// fixtures (GlyphCache), one module per C++ file. The others are ported next
+// to their code in crate::text: bidi, tagged_string, glyph_pbf, shaping,
+// quads, get_anchors and cross_tile_symbol_index;
 // local_glyph_rasterizer in render_test (it renders a map).
 
 mod calculate_tile_distances;

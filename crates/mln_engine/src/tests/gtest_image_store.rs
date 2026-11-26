@@ -84,7 +84,7 @@ fn basic() {
 
     let images = crate::image::sprite::sprite_parser::parse_sprite(
         "default",
-        &mln_image::decode_image(&read_file("test/fixtures/annotations/emerald.png")).unwrap(),
+        &crate::image::decode_image(&read_file("test/fixtures/annotations/emerald.png")).unwrap(),
         &read_file("test/fixtures/annotations/emerald.json"),
     )
     .expect("parseSprite");

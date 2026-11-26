@@ -68,8 +68,8 @@ page (main thread, no wasm)
 - The page compiles the wasm module once and sends it to each worker, which
   instantiates it with its own memory. The page transfers its canvas to the map
   worker as an OffscreenCanvas, and forwards pointer, wheel, keyboard and focus
-  events to it. The map worker's gesture recognizer (mln_gestures) turns them
-  into camera moves.
+  events to it. The map worker's gesture recognizer (mln_engine::gestures) turns
+  them into camera moves.
 - The map worker drives the map through mln_runtime, as any host does: a
   `Runtime` and its `Map`, and a `RenderSession` that presents to the canvas.
   The runtime's and the session's work runs in short tasks as it arrives, and

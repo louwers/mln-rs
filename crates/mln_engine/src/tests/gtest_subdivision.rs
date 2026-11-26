@@ -9,7 +9,6 @@ use mln_style::geometry::FeatureType;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionLayoutProperties;
 use mln_style::subdivision_granularity::{SubdivisionGranularityExpression, SubdivisionGranularitySetting};
 use mln_style::tile_id::CanonicalTileID;
-use mln_text::atlas::ImagePositions;
 use mln_vec_map::VecMap;
 
 use super::with_context;
@@ -23,6 +22,7 @@ use crate::render::globe::subdivision::{
     subdivide_vertex_line,
 };
 use crate::render::globe::tile_mesh::{TileMeshOptions, create_tile_mesh};
+use crate::text::atlas::ImagePositions;
 use crate::tile_store::tile_mask::TileMask;
 use crate::util::tessellator::Tessellator;
 

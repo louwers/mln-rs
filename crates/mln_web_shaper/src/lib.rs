@@ -1,4 +1,4 @@
-//! The browser build's font-face shaper: `mln_text`'s `Shaper` in a wasm
+//! The browser build's font-face shaper: `mln_engine`'s `Shaper` in a wasm
 //! module of its own. The map's Web Worker (examples/web) imports it the
 //! first time a style declares font faces, a second instance beside its own,
 //! and calls it through JavaScript as its map's `FontFaceEngine`
@@ -9,8 +9,8 @@
 
 use std::num::NonZeroU16;
 
-use mln_text::glyph::{FontData, GlyphID, GlyphIDType};
-use mln_text::{ShapedText, Shaper};
+use mln_engine::text::glyph::{FontData, GlyphID, GlyphIDType};
+use mln_engine::text::{ShapedText, Shaper};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]

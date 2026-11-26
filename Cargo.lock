@@ -2480,16 +2480,12 @@ dependencies = [
  "mln-rs-frame-pacer",
  "mln-rs-geojson",
  "mln-rs-geometry",
- "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",
- "mln-rs-image",
  "mln-rs-mtl",
  "mln-rs-polylabel",
  "mln-rs-runtime",
  "mln-rs-style",
- "mln-rs-system-fonts",
- "mln-rs-text",
  "mln-rs-util",
  "mln-rs-vec-map",
  "mln-rs-vulkan",
@@ -2509,11 +2505,9 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-headless",
- "mln-rs-image",
  "mln-rs-mtl",
  "mln-rs-runtime",
  "mln-rs-style",
- "mln-rs-text",
  "mln-rs-util",
  "mln-rs-vulkan",
  "mln-rs-webgpu",
@@ -2564,14 +2558,11 @@ dependencies = [
  "mln-rs-engine",
  "mln-rs-feature",
  "mln-rs-frame-pacer",
- "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-mtl",
  "mln-rs-runtime",
  "mln-rs-style",
- "mln-rs-system-fonts",
- "mln-rs-text",
  "mln-rs-util",
  "mln-rs-vec-map",
  "mln-rs-vulkan",
@@ -2636,10 +2627,8 @@ dependencies = [
  "mln-rs-d3d12",
  "mln-rs-engine",
  "mln-rs-frame-pacer",
- "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",
- "mln-rs-image",
  "mln-rs-mtl",
  "mln-rs-runtime",
  "mln-rs-style",
@@ -2662,51 +2651,68 @@ dependencies = [
 name = "mln-rs-engine"
 version = "0.0.17"
 dependencies = [
+ "ab_glyph_rasterizer",
  "block2 0.6.2",
+ "buffa",
  "bytemuck",
  "bytes",
  "earcut",
  "etagere",
  "fast-mvt 0.7.3",
+ "flate2",
  "geo-index",
  "geo-types",
  "geojson",
  "glam",
+ "harfrust 0.15.0",
  "httpmock",
  "i_overlay",
+ "image-webp",
  "jni",
  "js-sys",
+ "libloading",
  "log",
+ "memmap2",
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-gfx",
  "mln-rs-headless",
- "mln-rs-image",
  "mln-rs-pixelmatch",
  "mln-rs-polylabel",
  "mln-rs-style",
- "mln-rs-text",
  "mln-rs-util",
  "mln-rs-vec-map",
  "mln-rs-webgpu",
  "mln-rs-wire",
  "mlt-core",
  "objc2 0.6.5",
+ "objc2-core-foundation",
+ "objc2-core-text",
  "objc2-foundation 0.3.2",
  "parking_lot",
  "percent-encoding",
  "pmtiles",
+ "png 0.18.1",
  "proptest",
  "rusqlite",
  "rustls",
  "serde_json",
+ "skrifa 0.49.0",
  "smallvec",
+ "sys-locale",
  "tempfile",
  "thiserror 2.0.21",
+ "unicode-bidi",
+ "unicode-linebreak",
+ "unicode-properties",
  "ureq",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "windows",
+ "windows-core",
+ "wuff",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -2769,17 +2775,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mln-rs-gestures"
-version = "0.0.17"
-dependencies = [
- "mln-rs-engine",
- "mln-rs-style",
- "mln-rs-util",
- "parking_lot",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "mln-rs-gfx"
 version = "0.0.17"
 dependencies = [
@@ -2836,12 +2831,10 @@ dependencies = [
  "mln-rs-feature",
  "mln-rs-gfx",
  "mln-rs-gl",
- "mln-rs-image",
  "mln-rs-mtl",
  "mln-rs-pixelmatch",
  "mln-rs-runtime",
  "mln-rs-style",
- "mln-rs-text",
  "mln-rs-util",
  "mln-rs-vulkan",
  "mln-rs-webgpu",
@@ -2852,23 +2845,6 @@ dependencies = [
  "parking_lot",
  "serde_json",
  "wgpu",
-]
-
-[[package]]
-name = "mln-rs-image"
-version = "0.0.17"
-dependencies = [
- "flate2",
- "image-webp",
- "js-sys",
- "log",
- "mln-rs-style",
- "mln-rs-util",
- "png 0.18.1",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "zune-jpeg",
 ]
 
 [[package]]
@@ -2922,7 +2898,6 @@ dependencies = [
  "mln-rs-geometry",
  "mln-rs-gfx",
  "mln-rs-headless",
- "mln-rs-image",
  "mln-rs-pixelmatch",
  "mln-rs-style",
  "mln-rs-util",
@@ -2951,14 +2926,10 @@ dependencies = [
  "mln-rs-engine",
  "mln-rs-feature",
  "mln-rs-frame-pacer",
- "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",
- "mln-rs-image",
  "mln-rs-mtl",
  "mln-rs-style",
- "mln-rs-system-fonts",
- "mln-rs-text",
  "mln-rs-util",
  "mln-rs-vulkan",
  "mln-rs-web-host",
@@ -3022,53 +2993,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mln-rs-system-fonts"
-version = "0.0.17"
-dependencies = [
- "jni",
- "libloading",
- "log",
- "memmap2",
- "mln-rs-style",
- "mln-rs-text",
- "mln-rs-util",
- "objc2-core-foundation",
- "objc2-core-text",
- "parking_lot",
- "skrifa 0.49.0",
- "sys-locale",
- "tempfile",
- "windows",
- "windows-core",
-]
-
-[[package]]
-name = "mln-rs-text"
-version = "0.0.17"
-dependencies = [
- "ab_glyph_rasterizer",
- "buffa",
- "flate2",
- "glam",
- "harfrust 0.15.0",
- "js-sys",
- "log",
- "mln-rs-style",
- "mln-rs-util",
- "mln-rs-vec-map",
- "mln-rs-wire",
- "parking_lot",
- "skrifa 0.49.0",
- "thiserror 2.0.21",
- "unicode-bidi",
- "unicode-linebreak",
- "unicode-properties",
- "wasm-bindgen",
- "web-sys",
- "wuff",
-]
-
-[[package]]
 name = "mln-rs-unicode-tables"
 version = "0.0.17"
 dependencies = [
@@ -3129,7 +3053,6 @@ dependencies = [
  "js-sys",
  "log",
  "mln-rs-engine",
- "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-runtime",
@@ -3153,7 +3076,6 @@ dependencies = [
  "log",
  "mln-rs-engine",
  "mln-rs-style",
- "mln-rs-text",
  "mln-rs-util",
  "mln-rs-wire",
  "parking_lot",
@@ -3167,7 +3089,7 @@ name = "mln-rs-web-shaper"
 version = "0.0.17"
 dependencies = [
  "js-sys",
- "mln-rs-text",
+ "mln-rs-engine",
  "wasm-bindgen",
 ]
 

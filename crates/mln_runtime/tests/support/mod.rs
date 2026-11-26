@@ -87,7 +87,7 @@ pub(crate) fn serve_level_dem(runtime: &Runtime) {
     for pixel in dem.data.as_chunks_mut::<4>().0 {
         pixel.copy_from_slice(&[1, 173, 176, 255]);
     }
-    let dem = Arc::new(mln_image::encode_png(&dem));
+    let dem = Arc::new(mln_engine::image::encode_png(&dem));
     wait(runtime.set_resource_provider(move |request: ResourceRequest| {
         let _ = request.respond(Response { data: Some(Arc::clone(&dem)), ..Response::default() });
     }));

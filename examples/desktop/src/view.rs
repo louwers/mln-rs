@@ -18,7 +18,7 @@
 // takes none, as for a hidden window, they come at the refresh interval.
 //
 // Mouse, touch, wheel, trackpad and the arrow, `+` and `-` keys go to a
-// `GestureRecognizer` (mln_gestures), which moves the map's camera and
+// `GestureRecognizer` (mln_engine::gestures), which moves the map's camera and
 // continues releases with the map's momentum.
 //
 // The controls lay out in egui on this thread, in the frames that have their
@@ -40,9 +40,9 @@ use std::time::{Duration, Instant};
 
 use mln_engine::RenderMode;
 use mln_engine::camera::{AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase};
+use mln_engine::gestures::{GestureEvent, GestureRecognizer, Input, Modes, NextTick, PinchPhase, PointerKind};
 use mln_engine::map::MapEvent;
 use mln_frame_pacer::{FramePacer, RefreshWaiter};
-use mln_gestures::{GestureEvent, GestureRecognizer, Input, Modes, NextTick, PinchPhase, PointerKind};
 use mln_runtime::{
     CacheDatabaseOperation, Completion, DemandMode, Device, ErrorKind, EventMask, EventType, FrameDemand,
     FrameDisposition, LogicalExtent, Map, MapOptions, Runtime, RuntimeEventKind, RuntimeOptions, ViewportOptions,
@@ -1041,7 +1041,7 @@ impl View {
         self.close_window();
         match backend::read_offscreen(&self.map, device.clone(), self.size, &self.inbox, READBACK_TIMEOUT) {
             Ok(image) => {
-                let png = mln_image::encode_png(&image);
+                let png = mln_engine::image::encode_png(&image);
                 match std::fs::write(&path, png) {
                     Ok(()) => log::info!(
                         "Read back the map ({}x{}) to {}",

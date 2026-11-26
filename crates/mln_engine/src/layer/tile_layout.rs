@@ -9,9 +9,6 @@ use std::sync::Arc;
 use mln_style::error::Error;
 use mln_style::expression::{GlobalStateMap, UnavailableImages};
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_text::atlas::ImagePositions;
-use mln_text::glyph::{FontFaces, GlyphDependencies, GlyphPositions};
-use mln_text::tagged_string::font_stack_hash;
 use mln_vec_map::VecSet;
 use mln_wire::sorted;
 
@@ -23,7 +20,10 @@ use crate::layer::layer_type::{ErasedEvaluatedLayer, ErasedLayout};
 use crate::layer::layout::{BuildParams, LayoutParameters, SourceLayer};
 use crate::map::MapMode;
 use crate::query::feature_index::FeatureIndexBuilder;
+use crate::text::atlas::ImagePositions;
+use crate::text::glyph::{FontFaces, GlyphDependencies, GlyphPositions};
 use crate::text::glyph_store::ShapeResults;
+use crate::text::tagged_string::font_stack_hash;
 use crate::tile::{OverscaledTileID, TileData};
 use crate::tile_store::contents::LayoutBuckets;
 

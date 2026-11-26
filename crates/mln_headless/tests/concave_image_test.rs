@@ -26,7 +26,7 @@ fn render(coordinates: [[f64; 2]; 4]) -> (PremultipliedImage, [ScreenCoordinate;
     let file_source = Arc::new(StubFileSource::new(ResponseType::Synchronous));
     let mut white = PremultipliedImage::new(Size::new(8, 8));
     white.data.fill(255);
-    let png = Arc::new(mln_image::encode_png(&white));
+    let png = Arc::new(mln_engine::image::encode_png(&white));
     file_source.set_response(Kind::Image, move |_: &Resource| {
         let mut response = Response::new();
         response.data = Some(Arc::clone(&png));

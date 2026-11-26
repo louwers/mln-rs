@@ -6,7 +6,7 @@ rust-version.workspace = true
 description.workspace = true
 license.workspace = true
 repository.workspace = true
-# Writes mln_text's tables from the Unicode Character Database
+# Writes mln_engine's text tables from the Unicode Character Database
 # (`mise run generate:unicode-tables`); never released.
 publish = false
 
@@ -15,7 +15,7 @@ name = "unicode-tables"
 path = "src/main.rs"
 
 [dependencies]
-# The Unicode version of its tables, which mln_text's must match.
+# The Unicode version of its tables, which mln_engine's must match.
 unicode-bidi.workspace = true
 
 [lints]

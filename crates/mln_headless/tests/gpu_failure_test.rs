@@ -38,7 +38,7 @@ fn sea_level_png() -> Vec<u8> {
     for pixel in image.data.as_chunks_mut::<4>().0 {
         pixel.copy_from_slice(&[1, 134, 160, 255]);
     }
-    mln_image::encode_png(&image)
+    mln_engine::image::encode_png(&image)
 }
 
 /// A white map with a red square around the center, a blue line across it
@@ -269,7 +269,7 @@ impl FailingMap {
         let mut renderer = Renderer::new(
             backend.gpu(),
             1.0,
-            mln_text::local_fonts::LocalGlyphs::default(),
+            mln_engine::text::local_fonts::LocalGlyphs::default(),
             Arc::new(move || invalidate.push(RendererEvent::Invalidate)),
             &pool,
         );

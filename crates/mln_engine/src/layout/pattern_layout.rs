@@ -20,7 +20,6 @@ use mln_style::property::evaluated::Evaluated;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
-use mln_text::atlas::ImagePositions;
 use mln_vec_map::VecMap;
 
 use crate::buckets::fill_bucket::FillBucket;
@@ -31,6 +30,7 @@ use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::layout::{BuildParams, Layout, LayoutParameters, SourceLayer, layers_by_id};
 use crate::layer::tile_layout::Resolved;
 use crate::query::feature_index::FeatureIndexBuilder;
+use crate::text::atlas::ImagePositions;
 use crate::util::tessellator::Tessellator;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

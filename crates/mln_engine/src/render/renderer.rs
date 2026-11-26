@@ -8,8 +8,6 @@ use mln_gfx::{FrameImage, Handoff, Rgba, ScissorRect};
 use mln_style::color::Color;
 use mln_style::error::Error;
 use mln_style::time::Instant;
-use mln_text::GlyphCache;
-use mln_text::local_fonts::LocalGlyphs;
 use mln_util::event_queue::Waker;
 use mln_util::pool::Pool;
 
@@ -28,6 +26,8 @@ use crate::render::pass::RenderPass;
 use crate::render::static_data::RenderStaticData;
 use crate::render::tile_matrix::to_projection_ubo;
 use crate::render::update_parameters::UpdateParameters;
+use crate::text::GlyphCache;
+use crate::text::local_fonts::LocalGlyphs;
 use crate::worker::worker_codec::RemoteWorkers;
 use crate::{Registry, log_target};
 

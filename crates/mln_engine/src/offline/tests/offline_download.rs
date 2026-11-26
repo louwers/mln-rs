@@ -10,7 +10,6 @@ use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 
 use mln_style::geo::{LatLng, LatLngBounds};
 use mln_style::tileset::Scheme;
-use mln_text::glyph::NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK;
 use mln_util::chrono::{Timestamp, now};
 use mln_util::compression::compress;
 use mln_util::queue::Queue;
@@ -28,6 +27,7 @@ use crate::storage::resource::{Priority, Usage};
 use crate::storage::response::{Reason, ResourceError};
 use crate::storage::stub_file_source::{ResponseType, StubFileSource};
 use crate::storage::{FileSource, Kind, LoadingMethod, Resource, Responder, Response, TileFormat};
+use crate::text::glyph::NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK;
 
 /// The database and its downloads, which the test's thread owns as a
 /// database's worker does.

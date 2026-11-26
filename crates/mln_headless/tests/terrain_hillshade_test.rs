@@ -30,7 +30,7 @@ fn hill_png(z: i8, x: i32, y: i32) -> Vec<u8> {
         let value = ((height + 10000.0) * 10.0).round() as u32;
         *pixel = [(value >> 16) as u8, (value >> 8) as u8, value as u8, 255];
     }
-    mln_image::encode_png(&image)
+    mln_engine::image::encode_png(&image)
 }
 
 /// The still image, seen from above at `bearing`, of the hill over terrain

@@ -37,11 +37,9 @@ pub use mln_d3d12;
 pub use mln_engine;
 pub use mln_frame_pacer;
 pub use mln_geojson;
-pub use mln_gestures;
 pub use mln_gfx;
 #[cfg(feature = "gl")]
 pub use mln_gl;
-pub use mln_image;
 /// Empty except on Apple platforms.
 #[cfg(feature = "metal")]
 pub use mln_mtl;
@@ -49,8 +47,6 @@ pub use mln_mtl;
 // root type's methods take or return.
 pub use mln_runtime::{self, *};
 pub use mln_style;
-pub use mln_system_fonts;
-pub use mln_text;
 pub use mln_util;
 pub use mln_vec_map;
 /// Empty on Apple platforms and in the browser build.

@@ -60,7 +60,7 @@ fn green_png() -> Vec<u8> {
     for pixel in image.data.as_chunks_mut::<4>().0 {
         pixel.copy_from_slice(&GREEN);
     }
-    mln_image::encode_png(&image)
+    mln_engine::image::encode_png(&image)
 }
 
 /// How tile 1/0/0 answers.

@@ -14,7 +14,6 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-use mln_image::decoder;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::Error;
 use mln_style::expression::GlobalStateMap;
@@ -22,14 +21,15 @@ use mln_style::hash::HashMap;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::RasterEncoding;
 use mln_style::time::Instant;
-use mln_text::glyph::FontFaces;
 use mln_vec_map::VecSet;
 use mln_wire::payload::shared_bytes;
 use mln_wire::shared;
 use parking_lot::Mutex;
 
+use crate::image::decoder;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::layer::tile_layout::{Dependencies, Discovered, LayoutInput, LayoutParams, Resolved, build, discover};
+use crate::text::glyph::FontFaces;
 use crate::tile::dem_data::DEMData;
 use crate::tile::{OverscaledTileID, TileData};
 use crate::tile_store::contents::LayoutResult;

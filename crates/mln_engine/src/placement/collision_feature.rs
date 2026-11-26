@@ -2,11 +2,11 @@ use glam::Vec2;
 use mln_style::feature::GeometryCoordinate;
 use mln_style::math::deg2radf;
 use mln_style::padding::Padding;
-use mln_text::PositionedIcon;
-use mln_text::glyph::Shaping;
 
 use crate::geometry::anchor::{Anchor, segments, vertex_behind};
 use crate::query::feature_index::IndexedSubfeature;
+use crate::text::PositionedIcon;
+use crate::text::glyph::Shaping;
 use crate::util::pool::PoolRange;
 
 #[derive(Clone, Copy, Debug, PartialEq, mln_wire::Wire)]

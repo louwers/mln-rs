@@ -1,4 +1,4 @@
-//! The tables that `mln_text`'s Arabic shaping reads (`src/arabic_tables.rs`):
+//! The tables that `mln_engine`'s Arabic shaping reads (`src/text/arabic_tables.rs`):
 //! the presentation forms from the `<isolated>`, `<final>`, `<initial>` and
 //! `<medial>` decompositions in `UnicodeData.txt`, checked against the joining
 //! types in `ArabicShaping.txt`.

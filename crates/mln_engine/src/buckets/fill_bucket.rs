@@ -8,7 +8,6 @@ use mln_style::layers::Fill;
 use mln_style::layers::fill_layer_properties::{FillLayoutProperties, FillPaintProperties};
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
-use mln_text::atlas::ImagePositions;
 use mln_vec_map::VecMap;
 use mln_wire::sorted;
 
@@ -21,6 +20,7 @@ use crate::layer::layer_type::EvaluatedLayer;
 use crate::layer::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::log_target;
+use crate::text::atlas::ImagePositions;
 use crate::util::tessellator::Tessellator;
 
 crate::paint_property_binders!(

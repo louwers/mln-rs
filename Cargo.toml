@@ -57,20 +57,16 @@ mln_bench_workload = { package = "mln-rs-bench-workload", path = "tools/bench/wo
 # (crates/mln_engine/Cargo.toml).
 mln_engine = { package = "mln-rs-engine", path = "crates/mln_engine", version = "=0.0.17", default-features = false }
 mln_frame_pacer = { package = "mln-rs-frame-pacer", path = "crates/mln_frame_pacer", version = "=0.0.17" }
-mln_gestures = { package = "mln-rs-gestures", path = "crates/mln_gestures", version = "=0.0.17" }
 mln_geojson = { package = "mln-rs-geojson", path = "crates/mln_geojson", version = "=0.0.17" }
 mln_gfx = { package = "mln-rs-gfx", path = "crates/mln_gfx", version = "=0.0.17" }
 mln_gl = { package = "mln-rs-gl", path = "crates/mln_gl", version = "=0.0.17" }
 mln_glsl = { package = "mln-rs-glsl", path = "crates/mln_glsl", version = "=0.0.17" }
 mln_headless = { package = "mln-rs-headless", path = "crates/mln_headless", version = "=0.0.17" }
-mln_image = { package = "mln-rs-image", path = "crates/mln_image", version = "=0.0.17" }
 mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.17" }
 # Without its backends (its default features) unless a package asks for
 # them, so that a browser build of mln_c carries one.
 mln_runtime = { package = "mln-rs-runtime", path = "crates/mln_runtime", version = "=0.0.17", default-features = false }
 mln_style = { package = "mln-rs-style", path = "crates/mln_style", version = "=0.0.17" }
-mln_system_fonts = { package = "mln-rs-system-fonts", path = "crates/mln_system_fonts", version = "=0.0.17" }
-mln_text = { package = "mln-rs-text", path = "crates/mln_text", version = "=0.0.17" }
 mln_util = { package = "mln-rs-util", path = "crates/mln_util", version = "=0.0.17" }
 mln_vec_map = { package = "mln-rs-vec-map", path = "crates/mln_vec_map", version = "=0.0.17" }
 mln_vulkan = { package = "mln-rs-vulkan", path = "crates/mln_vulkan", version = "=0.0.17" }
@@ -85,7 +81,7 @@ style_codegen = { package = "mln-rs-style-codegen", path = "tools/style-codegen"
 # Third-party crates, for both builds (Cargo.lock pins their versions). Only
 # add a crate when nothing in the C++ core has to be ported for it.
 #
-# The coverage of the font-face glyphs' outlines (mln_text's rasterize.rs).
+# The coverage of the font-face glyphs' outlines (mln_engine's text/rasterize.rs).
 ab_glyph_rasterizer = { version = "0.1.10" }
 # min_const_generics: Pod for any array length (mln_gfx's UBOs).
 bytemuck = { version = "1.25.2", features = ["derive", "min_const_generics"] }
@@ -229,13 +225,13 @@ thiserror = "2.0.21"
 wasmparser = { version = "0.263.0", default-features = false, features = [
   "std",
 ] }
-# The Unicode bidi algorithm (mln_text's bidi.rs). mln_text's mirroring and
+# The Unicode bidi algorithm (mln_engine's text/bidi.rs). Its mirroring and
 # Arabic tables come from the same Unicode version: mise.toml's
 # unicode_version, which a bump changes with them.
 unicode-bidi = { version = "0.3.18" }
-# Where label text may break into lines (mln_text's line_breaks): UAX #14.
+# Where label text may break into lines (mln_engine's text/line_breaks.rs): UAX #14.
 unicode-linebreak = { version = "0.1.5" }
-# General_Category (mln_text's script runs, mln_style's i18n), in the Unicode
+# General_Category (mln_engine's script runs, mln_style's i18n), in the Unicode
 # version of harfrust's own tables.
 unicode-properties = { version = "0.1.5", default-features = false, features = [
   "general-category",
@@ -254,8 +250,8 @@ icu_locale = { version = "2.4.0" }
 icu_plurals = { version = "2.4.0" }
 icu_provider = { version = "2.4.0" }
 writeable = { version = "0.6.4" }
-# WOFF and WOFF2 font faces (mln_text's woff): pure Rust, no unsafe. Only its
-# Brotli decoder: mln_text hands it the workspace's flate2 for WOFF's zlib.
+# WOFF and WOFF2 font faces (mln_engine's text/woff.rs): pure Rust, no unsafe. Only its
+# Brotli decoder: mln_engine hands it the workspace's flate2 for WOFF's zlib.
 wuff = { version = "0.2.10", default-features = false, features = ["brotli"] }
 # decodeJPEG (platform/default/src/mln/util/jpeg_reader.cpp) natively; pure
 # Rust. The browser build decodes JPEG with the browser instead.
@@ -392,7 +388,7 @@ ash = { version = "0.38.0" }
 # The Vulkan backend on Windows: its D3D12 fences, and the D3D11 textures of
 # its exported rings on the DXGI adapter of the Vulkan GPU, at wgpu's version.
 # The D3D12 backend (crates/mln_d3d12): D3D12, DXGI and DXC.
-# mln_system_fonts: DirectWrite's font fallback.
+# mln_engine's system fonts: DirectWrite's font fallback.
 windows = { version = "0.62.2", features = [
   "Win32_Foundation",
   "Win32_Graphics_Direct3D",
@@ -541,18 +537,18 @@ glam.workspace = true
 mln_d3d12 = { workspace = true, optional = true }
 mln_frame_pacer.workspace = true
 mln_geojson.workspace = true
-mln_gestures.workspace = true
 mln_gfx.workspace = true
 mln_gl = { workspace = true, optional = true }
-mln_image.workspace = true
 mln_mtl = { workspace = true, optional = true }
 # SQLite: the ambient cache, offline regions and mbtiles:// sources, as in
 # C++.
-mln_engine = { workspace = true, features = ["font-face-shaper", "sqlite"] }
+mln_engine = { workspace = true, features = [
+  "font-face-shaper",
+  "sqlite",
+  "system-fonts",
+] }
 mln_runtime.workspace = true
 mln_style.workspace = true
-mln_system_fonts.workspace = true
-mln_text.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true
 mln_vulkan = { workspace = true, optional = true }

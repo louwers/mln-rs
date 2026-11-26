@@ -1,6 +1,3 @@
-// In mln_engine rather than mln_text: it requests through `storage`
-// (mln_text stays free of it).
-//
 // The store lives on the render thread, owned by the tile store. Tiles
 // don't register with it: a tile waiting for glyphs asks it to `resolve`
 // them again after it changes (`revision`). A tile laid out without a range
@@ -30,7 +27,7 @@
 // Font faces: the style's "font-faces" are fetched as font files
 // (`Resource::font_face`), or read from the bytes a face holds (an app's
 // fallback faces can), and shaped here, on the render thread, with the
-// `FontFaceEngine` (font_face_engine.rs): mln_text's Shaper (HarfRust)
+// `FontFaceEngine` (font_face_engine.rs): `Shaper` (HarfRust)
 // natively, ready at once. An engine that needs time to get ready (the
 // browser build loads its shaper as a second wasm module) is asked to as
 // soon as the style has font faces; a font file that arrives before it is
@@ -53,16 +50,6 @@ use std::sync::Arc;
 use mln_style::error::Error;
 use mln_style::hash::HashMap;
 use mln_style::i18n;
-use mln_text::glyph::{
-    FontData, FontFace, FontFaces, Glyph, GlyphDependencies, GlyphID, GlyphIDType, GlyphMap, GlyphRange, ShapeRequests,
-    get_glyph_range,
-};
-use mln_text::glyph_cache::{GlyphCache, GlyphCacheRange};
-use mln_text::glyph_pbf::parse_glyph_pbf;
-use mln_text::local_fonts::LocalGlyphs;
-use mln_text::tagged_string::font_stack_hash;
-use mln_text::weight::REGULAR_WEIGHT;
-use mln_text::{BiDiRun, ShapedText, visual_runs};
 use mln_util::font_stack::FontStack;
 use mln_util::pool::TaskGroup;
 use mln_util::tiny_sdf::transform_raster_to_sdf;
@@ -73,6 +60,16 @@ use crate::log_target;
 use crate::render::events::RendererEvent;
 use crate::storage::{FileSource, Request, Resource, Response};
 use crate::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
+use crate::text::glyph::{
+    FontData, FontFace, FontFaces, Glyph, GlyphDependencies, GlyphID, GlyphIDType, GlyphMap, GlyphRange, ShapeRequests,
+    get_glyph_range,
+};
+use crate::text::glyph_cache::{GlyphCache, GlyphCacheRange};
+use crate::text::glyph_pbf::parse_glyph_pbf;
+use crate::text::local_fonts::LocalGlyphs;
+use crate::text::tagged_string::font_stack_hash;
+use crate::text::weight::REGULAR_WEIGHT;
+use crate::text::{BiDiRun, ShapedText, visual_runs};
 use crate::tile_store::inbox::{InboxSender, TileEvent, Waker};
 
 /// Each font-face text of each font stack, shaped by its face.

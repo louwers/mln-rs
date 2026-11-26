@@ -1,5 +1,5 @@
-//! `unicode-tables <directory>`: writes the tables that `mln_text` reads from
-//! the Unicode Character Database, `crates/mln_text/src/arabic_tables.rs` and
+//! `unicode-tables <directory>`: writes the tables that `mln_engine` reads from
+//! the Unicode Character Database, `crates/mln_engine/src/text/arabic_tables.rs` and
 //! `bidi_mirroring.rs`, from the directory's `ArabicShaping.txt`,
 //! `UnicodeData.txt` and `BidiMirroring.txt`.
 //! `mise run generate:unicode-tables` runs it on the files that `mise deps`
@@ -44,7 +44,7 @@ fn run() -> Result<(), String> {
     };
     let arabic_tables = arabic_shaping::table(&read("ArabicShaping.txt")?, &read("UnicodeData.txt")?)?;
     let bidi_mirroring = bidi_mirroring::table(&read("BidiMirroring.txt")?)?;
-    let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/mln_text/src");
+    let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/mln_engine/src/text");
     for (file, table) in [("arabic_tables.rs", arabic_tables), ("bidi_mirroring.rs", bidi_mirroring)] {
         let path = out.join(file);
         std::fs::write(&path, table).map_err(|error| format!("{}: {error}", path.display()))?;

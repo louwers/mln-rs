@@ -75,7 +75,7 @@ outputs = [
 run = 'curl -fsSL --fail-early --remove-on-error --create-dirs --output-dir "{{ vars.ucd }}" --remote-name-all "https://www.unicode.org/Public/{{ vars.unicode_version }}/ucd/{ArabicShaping,UnicodeData,BidiMirroring}.txt"'
 
 [vars]
-# The Unicode version of unicode-bidi's tables, which mln_text's tables must
+# The Unicode version of unicode-bidi's tables, which mln_engine's text tables must
 # match: bump it with the crate, then run `mise run generate:unicode-tables`
 # (tools/unicode-tables rejects files of another version).
 unicode_version = "16.0.0"
@@ -157,7 +157,7 @@ run = "cargo run -q -p mln-rs-c-abi-gen"
 
 # From the files of deps.ucd, which it downloads first if `mise deps` hasn't.
 [tasks."generate:unicode-tables"]
-description = "Regenerate mln_text's Arabic presentation forms and Bidi_Mirroring_Glyph table from the Unicode Character Database"
+description = "Regenerate mln_engine's Arabic presentation forms and Bidi_Mirroring_Glyph table from the Unicode Character Database"
 run = [
   "mise deps install ucd",
   'cargo run -q -p mln-rs-unicode-tables -- "{{ vars.ucd }}"',

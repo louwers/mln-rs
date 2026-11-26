@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use feature::Value;
 use geometry::Point;
-use mln_image::{decode_image, encode_png};
+use mln_engine::image::{decode_image, encode_png};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::geo::LatLng;
 use mln_style::hash::HashMap;

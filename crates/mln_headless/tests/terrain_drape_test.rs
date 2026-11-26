@@ -35,7 +35,7 @@ fn solid_png(pixel: [u8; 4]) -> Vec<u8> {
     for texel in image.data.as_chunks_mut::<4>().0 {
         *texel = pixel;
     }
-    mln_image::encode_png(&image)
+    mln_engine::image::encode_png(&image)
 }
 
 /// The members of a style at zoom 2 over the center, seen from above, with a

@@ -11,7 +11,6 @@ use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryTileFea
 use mln_style::layers::Heatmap;
 use mln_style::layers::heatmap_layer_properties::HeatmapPaintProperties;
 use mln_style::tile_id::CanonicalTileID;
-use mln_text::atlas::ImagePositions;
 use mln_vec_map::VecMap;
 
 use crate::draw::mesh::{Indexed, add_point_quads};
@@ -23,6 +22,7 @@ use crate::layer::paint_property_binder::PaintPropertyBinder;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::map::MapMode;
 use crate::render::terrain::point_center;
+use crate::text::atlas::ImagePositions;
 use crate::util::tessellator::Tessellator;
 
 crate::paint_property_binders!(

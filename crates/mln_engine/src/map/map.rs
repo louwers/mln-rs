@@ -18,7 +18,6 @@ use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::time::Instant;
 use mln_style::types::{ProjectionDefinition, ProjectionType};
 use mln_style::{Edit, Source, Style, StyleRegistry};
-use mln_text::glyph::{FontFace, FontFaces};
 use mln_util::event_queue::{EventQueue, Waker};
 use mln_util::geo::{EdgeInsets, ScreenCoordinate};
 use mln_util::pool::Pool;
@@ -37,6 +36,7 @@ use crate::map::{MapMode, TerrainOptions};
 use crate::storage::FileSource;
 #[cfg(not(target_family = "wasm"))]
 use crate::storage::{Loader, ResourceOptions};
+use crate::text::glyph::{FontFace, FontFaces};
 use crate::tile_store::TileLodMode;
 use crate::{
     Registry, RendererEvent, RendererEvents, RenderingStats, UpdateParameters, UpdateReader, UpdateSlot, log_target,

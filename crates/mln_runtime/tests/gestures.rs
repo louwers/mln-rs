@@ -1,8 +1,8 @@
-// A runtime map as the camera that mln_gestures' recognizer moves: its reads
+// A runtime map as the camera that mln_engine::gestures' recognizer moves: its reads
 // come from the published snapshot, and its commands go out without waiting.
 
 use mln_engine::camera::{CameraOptions, CameraUpdate};
-use mln_gestures::{GestureCamera, GestureRecognizer, Input, Modes, PointerKind};
+use mln_engine::gestures::{GestureCamera, GestureRecognizer, Input, Modes, PointerKind};
 use mln_style::geo::{LatLng, WrapMode};
 use mln_util::geo::ScreenCoordinate;
 

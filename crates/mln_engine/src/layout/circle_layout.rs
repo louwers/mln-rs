@@ -12,7 +12,6 @@ use mln_style::feature::{GeometryCollection, GeometryTileFeature};
 use mln_style::layers::{Circle, CircleLayoutProperties};
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
-use mln_text::atlas::ImagePositions;
 use mln_vec_map::VecMap;
 
 use crate::buckets::circle_bucket::{CircleBucket, CircleLayoutVertex};
@@ -24,6 +23,7 @@ use crate::layer::layout::{BuildParams, Layout, SourceLayer, layers_by_id};
 use crate::layer::tile_layout::Resolved;
 use crate::map::MapMode;
 use crate::query::feature_index::FeatureIndexBuilder;
+use crate::text::atlas::ImagePositions;
 
 /// A feature the filter accepted, by index (see the file comment).
 #[derive(Clone, Copy, Debug)]

@@ -16,7 +16,6 @@ use mln_style::property::evaluated::Evaluated;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::LightAnchorType;
-use mln_text::atlas::ImagePositions;
 use mln_util::constants::{EARTH_RADIUS_M, M2PI};
 use mln_vec_map::VecMap;
 
@@ -30,6 +29,7 @@ use crate::layer::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPr
 use crate::layout::pattern_layout::{PatternLayerMap, PatternLayoutSpec};
 use crate::render::globe::subdivision::{SubdividedPolygon, subdivide_polygon, subdivide_vertex_line};
 use crate::render::static_data::RenderStaticData;
+use crate::text::atlas::ImagePositions;
 use crate::tile::geometry_tile_data::{is_boundary_edge, is_entirely_outside, limit_holes, round_polygon_corners};
 use crate::util::tessellator::Tessellator;
 

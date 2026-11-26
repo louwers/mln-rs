@@ -52,12 +52,10 @@ geo-types.workspace = true
 geojson.workspace = true
 log.workspace = true
 mln_frame_pacer.workspace = true
-mln_gestures.workspace = true
 mln_gfx.workspace = true
-mln_engine.workspace = true
+# The device's fonts (`text::system_fonts`).
+mln_engine = { workspace = true, features = ["system-fonts"] }
 mln_style.workspace = true
-mln_system_fonts.workspace = true
-mln_text.workspace = true
 mln_gl = { workspace = true, optional = true }
 mln_util.workspace = true
 mln_webgpu = { workspace = true, optional = true }
@@ -102,8 +100,6 @@ mln_d3d12 = { workspace = true, optional = true }
 
 [dev-dependencies]
 glam.workspace = true
-# The DEM tiles of the tests over terrain.
-mln_image.workspace = true
 # Serves the styles of the resource tests.
 httpmock.workspace = true
 pollster.workspace = true

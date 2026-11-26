@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 
-use mln_image::decode_image;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::image::Impl as ImageImpl;
 use mln_style::size::Size;
 
+use crate::image::decode_image;
 use crate::pattern_atlas::PatternAtlas;
 
 /// The path of `test/fixtures/...` in the copy of the C++ files (testdata/).

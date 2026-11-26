@@ -8,7 +8,7 @@
 "crates/mln_style/src/expression/forms/comparison.rs" = 1
 "crates/mln_style/src/expression/dsl.rs" = 1
 "crates/mln_style/src/expression/forms/match_.rs" = 2
-"crates/mln_image/src/png_writer.rs" = 1
+"crates/mln_engine/src/image/png_writer.rs" = 1
 "crates/mln_engine/src/layers/render_symbol_layer.rs" = 1
 "crates/mln_engine/src/layout/symbol_layout.rs" = 2
 "crates/mln_engine/src/image/sprite/sprite_parser.rs" = 1
@@ -16,7 +16,7 @@
 "crates/mln_engine/src/storage/stub_file_source.rs" = 1
 "crates/mln_engine/src/storage/ureq_transport.rs" = 1
 "crates/mln_style/src/layers/heatmap_layer_properties.rs" = 1
-"crates/mln_text/src/shaper.rs" = 1
+"crates/mln_engine/src/text/shaper.rs" = 1
 "crates/mln_style/src/bitmap.rs" = 1
 "crates/mln_vec_map/src/lib.rs" = 1
 

@@ -39,7 +39,7 @@ fn dem_tile(z: u8, x: u32, y: u32, height: &dyn Fn(f64, f64) -> f64) -> Vec<u8> 
         let lat = (std::f64::consts::PI * (1.0 - 2.0 * wy)).sinh().atan().to_degrees();
         *texel = mapbox(height(lng, lat));
     }
-    mln_image::encode_png(&image)
+    mln_engine::image::encode_png(&image)
 }
 
 /// The `z`, `x` and `y` of a DEM tile's URL, `dem/{z}/{x}/{y}.png`.

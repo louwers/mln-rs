@@ -22,6 +22,7 @@ use mln_engine::storage::{
     Cache, DatabaseFileSource, FileSource, Kind, Loader, LoadingMethod, Resource, ResourceOptions, Response,
     StoragePolicy, TileFormat,
 };
+use mln_engine::text::glyph::{GlyphIDType, GlyphRange};
 use mln_engine::tile::OverscaledTileID;
 use mln_engine::tile_store::TileLodMode;
 use mln_engine::{Registry, RenderMode, TileOperation, UpdateParameters, UpdateReader};
@@ -50,7 +51,6 @@ use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::{PartialTileset, Scheme};
 use mln_style::types::{ProjectionDefinition, ProjectionType, VisibilityType};
 use mln_style::{Edit, PropertyValue, Source, TransitionOptions};
-use mln_text::glyph::{GlyphIDType, GlyphRange};
 use mln_util::chrono::Timestamp;
 use mln_util::geo::{EdgeInsets, ScreenCoordinate};
 use mln_util::pool::Pool;
@@ -4787,7 +4787,7 @@ fn color_ramp_renders_current_state_after_unrelated_state_change(type_: &str) {
             dem.data[i] = 255;
         }
         let mut response = Response::new();
-        response.data = Some(Arc::new(mln_image::encode_png(&dem)));
+        response.data = Some(Arc::new(mln_engine::image::encode_png(&dem)));
         Some(response)
     });
     test.load_json(
@@ -5019,7 +5019,7 @@ fn releases_tiles_outside_zoom_range(param: InactiveLayerCase) {
     test.map().set_tile_settings(&tile);
     test.frontend().renderer().set_tile_cache_enabled(false);
     test.file_source.set_response(Kind::Glyphs, |_| Some(file_response("test/fixtures/resources/glyphs.pbf")));
-    let small_tile = Arc::new(mln_image::encode_png(&PremultipliedImage::new(Size::new(4, 4))));
+    let small_tile = Arc::new(mln_engine::image::encode_png(&PremultipliedImage::new(Size::new(4, 4))));
     let large_tile = Arc::new(read_bytes("test/fixtures/resources/raster.tile"));
     test.file_source.set_response(Kind::Tile, move |resource: &Resource| {
         let tile = resource.tile_data.as_ref().expect("a tile resource");

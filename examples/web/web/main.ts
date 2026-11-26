@@ -54,7 +54,7 @@
 // the camera and puts the style's key in `?style=`.
 //
 // Input: the canvas's pointer, wheel, key and focus events go to the map's
-// Web Worker, whose gesture recognizer (mln_gestures) moves the camera: drag
+// Web Worker, whose gesture recognizer (mln_engine::gestures) moves the camera: drag
 // to pan, right- or Ctrl-drag to rotate and tilt, Shift-drag to zoom to a
 // box, the wheel or a trackpad to zoom, double-click or double-tap to zoom
 // in (Shift: out), two fingers to pinch, twist and tilt, and the arrow,

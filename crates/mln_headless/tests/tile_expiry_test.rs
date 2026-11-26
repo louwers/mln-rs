@@ -22,7 +22,7 @@ fn png(color: [u8; 4]) -> Response {
         pixel.copy_from_slice(&color);
     }
     let mut response = Response::new();
-    response.data = Some(Arc::new(mln_image::encode_png(&image)));
+    response.data = Some(Arc::new(mln_engine::image::encode_png(&image)));
     response
 }
 

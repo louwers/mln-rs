@@ -14,8 +14,6 @@ use mln_style::bitmap::PremultipliedImage;
 use mln_style::hash::{HashMap, RandomState};
 use mln_style::image::Impl as ImageImpl;
 use mln_style::size::Size;
-use mln_text::atlas::{ImagePosition, ImagePositions, RectU16};
-use mln_text::glyph::{Glyph, GlyphID, GlyphMap, GlyphPosition, GlyphPositions};
 
 #[cfg(test)]
 use super::dynamic_texture::QueuedPixels;
@@ -23,6 +21,8 @@ use super::dynamic_texture::{DynamicTexture, DynamicTextureBinId, TextureHandle}
 use crate::draw::context::Context;
 use crate::draw::store::SharedTexture;
 use crate::image::image_store::{ImageMap, ImageType};
+use crate::text::atlas::{ImagePosition, ImagePositions, RectU16};
+use crate::text::glyph::{Glyph, GlyphID, GlyphMap, GlyphPosition, GlyphPositions};
 
 const EXTRA_PADDING: u16 = 1;
 const PADDING: u16 = ImagePosition::PADDING + EXTRA_PADDING;

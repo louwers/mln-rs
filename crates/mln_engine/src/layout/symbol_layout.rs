@@ -28,11 +28,6 @@ use mln_style::types::{
     VariableAnchorOffsetCollection,
 };
 use mln_style::{PropertyEvaluationParameters, StyleValue as _, i18n};
-use mln_text::atlas::ImagePositions;
-use mln_text::glyph::{GlyphID, GlyphIDType, GlyphPositions, Shaping};
-use mln_text::shaping::{PositionedIcon, ShapingOptions, anchor_justification, shape_text};
-use mln_text::tagged_string::{SectionIndex, SectionOptions};
-use mln_text::{ShapedText, TaggedString, shape_arabic, starts_right_to_left};
 use mln_util::constants::ONE_EM;
 use mln_vec_map::VecMap;
 
@@ -58,9 +53,14 @@ use crate::map::MapMode;
 use crate::placement::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature};
 use crate::placement::collision_index::OverlapMode;
 use crate::query::feature_index::{FeatureIndexBuilder, IndexedSubfeature};
+use crate::text::atlas::ImagePositions;
 use crate::text::get_anchors::{LineLabel, get_anchors, get_center_anchor};
+use crate::text::glyph::{GlyphID, GlyphIDType, GlyphPositions, Shaping};
 use crate::text::glyph_store::ShapeResults;
 use crate::text::quads::{SymbolQuad, SymbolQuads, glyph_quads, icon_quads};
+use crate::text::shaping::{PositionedIcon, ShapingOptions, anchor_justification, shape_text};
+use crate::text::tagged_string::{SectionIndex, SectionOptions};
+use crate::text::{ShapedText, TaggedString, shape_arabic, starts_right_to_left};
 use crate::util::pool::PoolRange;
 
 /// Whether `text-field` is set: a constant that is not empty, or an
@@ -90,7 +90,7 @@ struct GlyphTypeSpan {
 /// faces, which have no name, come before the PBFs only for the text they
 /// can't shape (`i18n::char_in_supported_script`); in a style without PBFs,
 /// they and then the device's fonts draw the rest, if the faces include
-/// them ([`FontFace::system`](mln_text::glyph::FontFace::system)), except
+/// them ([`FontFace::system`](crate::text::glyph::FontFace::system)), except
 /// the characters that line breaking and vertical writing place on their
 /// own, such as spaces and CJK (`i18n::breaks_or_stands_upright`). Else the
 /// rest takes its glyphs one at a time, from PBFs or local fonts
@@ -108,11 +108,11 @@ struct GlyphTypeTable {
 }
 
 impl GlyphTypeTable {
-    fn new(stack: &[String], faces: &mln_text::glyph::FontFaces, glyph_pbfs: bool) -> Self {
+    fn new(stack: &[String], faces: &crate::text::glyph::FontFaces, glyph_pbfs: bool) -> Self {
         let named =
             stack.iter().flat_map(|name| faces.iter().filter(move |face| !name.is_empty() && face.name == *name));
         let fallbacks = faces.iter().filter(|face| face.name.is_empty());
-        let candidates: Vec<&mln_text::glyph::FontFace> = named.chain(fallbacks).collect();
+        let candidates: Vec<&crate::text::glyph::FontFace> = named.chain(fallbacks).collect();
         // The ranges as far as a code point reaches.
         let ranges = || {
             candidates.iter().flat_map(|face| &face.ranges).filter_map(|&(first, last)| {
@@ -179,13 +179,13 @@ impl GlyphTypeTable {
 /// The glyph type tables of the font stacks that one layout's text uses, a
 /// few at most, so it searches them in order.
 struct GlyphTypeTables {
-    faces: Option<Arc<mln_text::glyph::FontFaces>>,
+    faces: Option<Arc<crate::text::glyph::FontFaces>>,
     glyph_pbfs: bool,
     tables: Vec<(Vec<String>, GlyphTypeTable)>,
 }
 
 impl GlyphTypeTables {
-    fn new(faces: Option<Arc<mln_text::glyph::FontFaces>>, glyph_pbfs: bool) -> Self {
+    fn new(faces: Option<Arc<crate::text::glyph::FontFaces>>, glyph_pbfs: bool) -> Self {
         GlyphTypeTables { faces: faces.filter(|faces| !faces.is_empty()), glyph_pbfs, tables: Vec::new() }
     }
 
@@ -1661,9 +1661,9 @@ mod tests {
     use std::num::NonZeroU16;
 
     use mln_style::i18n::char_in_supported_script;
-    use mln_text::glyph::{FontFace, FontFaces, GlyphIDType};
 
     use super::{BASELINE_OFFSET, GlyphTypeTable, SymbolAnchorType, SymbolLayout, evaluate_radial_offset};
+    use crate::text::glyph::{FontFace, FontFaces, GlyphIDType};
 
     #[test]
     fn variable_offset_distinguishes_cartesian_and_radial_offsets() {

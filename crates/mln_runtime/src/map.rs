@@ -8,7 +8,9 @@ use mln_engine::camera::{
     FreeCameraOptions, LogicalExtent, MapProjection, MapView, ProjectionMode, TransitionEnd, TransitionOutcome,
 };
 use mln_engine::map::{MapEvent, MapMode, MapSnapshot};
+use mln_engine::text::GlyphCache;
 use mln_engine::text::font_face_engine::FontFaceEngine;
+use mln_engine::text::local_fonts::LocalGlyphs;
 use mln_engine::{Custom, CustomLayerHost, Registry, UpdateReader};
 use mln_style::error::{Error, ErrorKind};
 use mln_style::geo::LatLngBounds;
@@ -16,8 +18,6 @@ use mln_style::hash::HashMap;
 use mln_style::size::Size;
 use mln_style::time::Instant;
 use mln_style::{Edit, StyleLoadError};
-use mln_text::GlyphCache;
-use mln_text::local_fonts::LocalGlyphs;
 use mln_util::event_queue::Waker;
 use mln_util::pool::Pool;
 use mln_util::queue::TimedTask;
@@ -52,10 +52,10 @@ pub struct MapOptions {
     /// Whether the map draws from the system's fonts what the style's fonts
     /// and `fallback_font_faces` don't. It shapes with them the scripts that
     /// glyph PBFs can't shape, and all the text of a style without PBFs
-    /// (`mln_system_fonts::font_face`), from the fonts the labels'
+    /// (`mln_engine::text::system_fonts::font_face`), from the fonts the labels'
     /// `text-font` names first; and draws from them the glyphs a style's
     /// PBFs lack, and with `local_ideographs`, CJK
-    /// (`mln_system_fonts::SystemFonts`). On by default. The first map that
+    /// (`mln_engine::text::system_fonts::SystemFonts`). On by default. The first map that
     /// uses them waits for the platform's font matcher to load. In the
     /// browser, which has no font files to read, the browser draws each
     /// glyph of that text in the font stack's families, then its sans-serif
@@ -819,13 +819,14 @@ impl Map {
         if self.shared.system_fonts {
             #[cfg(not(target_family = "wasm"))]
             {
-                local.chooser = Some(Arc::new(mln_system_fonts::SystemFonts));
+                local.chooser = Some(Arc::new(mln_engine::text::system_fonts::SystemFonts));
             }
             #[cfg(target_family = "wasm")]
             {
                 let font_family = "sans-serif".to_owned();
-                local.rasterizer =
-                    Some(Arc::new(mln_text::browser_glyph_rasterizer::BrowserGlyphRasterizer::new(font_family)));
+                local.rasterizer = Some(Arc::new(
+                    mln_engine::text::browser_glyph_rasterizer::BrowserGlyphRasterizer::new(font_family),
+                ));
             }
         }
         local
@@ -1656,7 +1657,7 @@ pub(crate) fn create(
             return outbox.resolve(resolver, Err(error));
         }
     } else if options.system_fonts {
-        map.set_fallback_font_face_list(mln_system_fonts::font_face().into_iter().collect());
+        map.set_fallback_font_face_list(mln_engine::text::system_fonts::font_face().into_iter().collect());
     }
     let _ = published.updates.set(map.update_reader());
     let _ = published.frame_clock.set(map.frame_clock());

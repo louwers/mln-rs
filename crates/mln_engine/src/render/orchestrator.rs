@@ -18,8 +18,6 @@ use mln_style::{
     GlobalStateChange, Layer, LayerList, PropertyEvaluationParameters, Source, Style, TransitionOptions,
     TransitionParameters, layer,
 };
-use mln_text::GlyphCache;
-use mln_text::local_fonts::LocalGlyphs;
 use mln_util::pool::{Pool, TaskGroup};
 use mln_vec_map::VecSet;
 use smallvec::SmallVec;
@@ -46,7 +44,9 @@ use crate::render::terrain::{DrapeStacks, Draped, RenderTerrain};
 use crate::render::tile::{FoundTile, RenderTile};
 use crate::render::update_parameters::UpdateParameters;
 use crate::source::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
+use crate::text::GlyphCache;
 use crate::text::glyph_store::GlyphStore;
+use crate::text::local_fonts::LocalGlyphs;
 use crate::tile_store::contents::Contents;
 use crate::tile_store::inbox::Waker;
 use crate::tile_store::source_tiles::SourceTiles;

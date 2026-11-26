@@ -171,7 +171,7 @@ fn a_viewport_lit_hillshade_turns_its_lights_with_the_map() {
         let x = (index % 256) as u8;
         pixel.copy_from_slice(&[128, x, 0, 255]);
     }
-    let dem = Arc::new(mln_image::encode_png(&dem));
+    let dem = Arc::new(mln_engine::image::encode_png(&dem));
     let style = r#"{
         "version": 8,
         "zoom": 2,
@@ -218,7 +218,7 @@ fn a_hillshade_prepares_its_slopes_once() {
     for (index, pixel) in dem.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         pixel.copy_from_slice(&[128, (index % 256) as u8, 0, 255]);
     }
-    let dem = Arc::new(mln_image::encode_png(&dem));
+    let dem = Arc::new(mln_engine::image::encode_png(&dem));
     let file_source = Arc::new(StubFileSource::new(ResponseType::Synchronous));
     file_source.set_response(Kind::Tile, move |_: &Resource| {
         let mut response = Response::new();
@@ -267,7 +267,7 @@ fn dem_source(found: bool) -> Arc<mln_engine::storage::stub_file_source::StubFil
     for pixel in dem.data.as_chunks_mut::<4>().0 {
         pixel.copy_from_slice(&[1, 173, 176, 255]);
     }
-    let dem = Arc::new(mln_image::encode_png(&dem));
+    let dem = Arc::new(mln_engine::image::encode_png(&dem));
     let file_source = Arc::new(StubFileSource::new(ResponseType::Synchronous));
     file_source.set_response(Kind::Tile, move |_: &Resource| {
         let mut response = Response::new();
@@ -466,7 +466,7 @@ fn far_dem() -> (Arc<mln_engine::storage::stub_file_source::StubFileSource>, Req
         for pixel in dem.data.as_chunks_mut::<4>().0 {
             pixel.copy_from_slice(&[hi, lo, 0, 255]);
         }
-        Arc::new(mln_image::encode_png(&dem))
+        Arc::new(mln_engine::image::encode_png(&dem))
     };
     let (low, high) = (terrarium(0), terrarium(20_000));
     let center_y = mln_util::projection::Projection::project(

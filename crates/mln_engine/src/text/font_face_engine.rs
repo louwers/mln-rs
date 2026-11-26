@@ -1,8 +1,8 @@
-// What GlyphStore shapes and rasterizes font files with: mln_text's Shaper
+// What GlyphStore shapes and rasterizes font files with: `Shaper`
 // behind a trait, so that a host can load it elsewhere.
 //
 // Natively, and for any build with the `font-face-shaper` feature, the
-// engine is mln_text's Shaper in-process, ready at once. The browser build
+// engine is `Shaper` in-process, ready at once. The browser build
 // (examples/web) turns the feature off, which leaves HarfRust, skrifa and
 // the glyph rasterizer out of its module, and sets an engine that loads them
 // as a second wasm module the first time a style declares font faces
@@ -10,8 +10,8 @@
 
 use std::sync::Arc;
 
-use mln_text::ShapedText;
-use mln_text::glyph::{FontData, Glyph, GlyphID, GlyphIDType};
+use crate::text::ShapedText;
+use crate::text::glyph::{FontData, Glyph, GlyphID, GlyphIDType};
 
 /// A font file loaded for shaping: what `Shaper` does for `GlyphStore`.
 pub trait FontFaceShaper {
@@ -42,7 +42,7 @@ pub trait FontFaceEngine: Send + Sync {
 }
 
 /// The engine of a renderer that wasn't given one
-/// (`Renderer::set_font_face_engine`): `mln_text`'s `Shaper` with the
+/// (`Renderer::set_font_face_engine`): `Shaper` with the
 /// `font-face-shaper` feature, else one that loads nothing.
 #[cfg(feature = "font-face-shaper")]
 #[must_use]
@@ -73,12 +73,11 @@ pub fn default_engine() -> Arc<dyn FontFaceEngine> {
 
 #[cfg(feature = "font-face-shaper")]
 mod in_process {
-    use mln_text::glyph::{FontData, Glyph, GlyphID, GlyphIDType};
-    use mln_text::{ShapedText, Shaper};
-
     use super::{FontFaceEngine, FontFaceShaper};
+    use crate::text::glyph::{FontData, Glyph, GlyphID, GlyphIDType};
+    use crate::text::{ShapedText, Shaper};
 
-    /// `mln_text`'s `Shaper` in this thread.
+    /// `Shaper` in this thread.
     pub(super) struct ShaperEngine;
 
     impl FontFaceEngine for ShaperEngine {

@@ -21,7 +21,7 @@ function swing(ms) {
  * user's (Playwright's mouse, and the DevTools protocol's touch events),
  * one move a frame, and releases where it started:
  * - `rotate`: a right-drag from the center, which turns the map between
- *   -90° and 90° (mln_gestures' 0.5° a pixel);
+ *   -90° and 90° (mln_engine::gestures' 0.5° a pixel);
  * - `pan-zoom`: a two-finger pinch that pans the map 0.65 of a tile east
  *   and west of where it started while it zooms out by 0.9 at each end.
  * It holds still before the release, longer than the recognizer's 40 ms,

@@ -31,8 +31,6 @@ mln_gfx = { package = "mln-rs-gfx", path = "../../crates/mln_gfx" }
 # The OpenGL backend's renderer name (support/map.rs).
 mln_gl = { package = "mln-rs-gl", path = "../../crates/mln_gl" }
 mln_headless = { package = "mln-rs-headless", path = "../../crates/mln_headless" }
-# The PNG files of the scenarios' last images (`mln-bench run --images`).
-mln_image = { package = "mln-rs-image", path = "../../crates/mln_image" }
 # The engine's internal stages, through its `bench` entry points (with the
 # online file source over the simulated network, support/network.rs), and
 # the font-face shaper that the packages that render turn on.
@@ -49,8 +47,6 @@ mln_runtime = { package = "mln-rs-runtime", path = "../../crates/mln_runtime", f
 ] }
 # The style, and its edits.
 mln_style = { package = "mln-rs-style", path = "../../crates/mln_style" }
-# Glyphs and text shaping.
-mln_text = { package = "mln-rs-text", path = "../../crates/mln_text" }
 mln_util = { package = "mln-rs-util", path = "../../crates/mln_util" }
 # What the GPU's pipeline ran, where the device counts it (support/map.rs).
 mln_webgpu = { package = "mln-rs-webgpu", path = "../../crates/mln_webgpu", features = [

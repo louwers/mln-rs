@@ -238,7 +238,7 @@ fn terrarium_png(height: u16) -> Response {
         *pixel = [hi, lo, 0, 255];
     }
     let mut response = Response::new();
-    response.data = Some(Arc::new(mln_image::encode_png(&image)));
+    response.data = Some(Arc::new(crate::image::encode_png(&image)));
     response
 }
 
@@ -252,7 +252,7 @@ fn terrarium_slope() -> Response {
         *pixel = [hi, lo, 0, 255];
     }
     let mut response = Response::new();
-    response.data = Some(Arc::new(mln_image::encode_png(&image)));
+    response.data = Some(Arc::new(crate::image::encode_png(&image)));
     response
 }
 
@@ -1110,7 +1110,7 @@ fn the_terrain_lets_go_of_the_map_data() {
     let pool = crate::tests::pool();
     let mut orchestrator = crate::render::orchestrator::RenderOrchestrator::new(
         true,
-        mln_text::local_fonts::LocalGlyphs::default(),
+        crate::text::local_fonts::LocalGlyphs::default(),
         Arc::default(),
         crate::text::font_face_engine::default_engine(),
         Registry::with_builtins(),
@@ -1144,7 +1144,7 @@ fn a_renderer_without_terrain_tells_a_grounded_map_there_is_no_ground() {
     let pool = crate::tests::pool();
     let mut orchestrator = crate::render::orchestrator::RenderOrchestrator::new(
         true,
-        mln_text::local_fonts::LocalGlyphs::default(),
+        crate::text::local_fonts::LocalGlyphs::default(),
         Arc::default(),
         crate::text::font_face_engine::default_engine(),
         Registry::with_builtins(),
@@ -1227,7 +1227,7 @@ fn terrarium_ridges() -> Response {
         *pixel = [hi, lo, 0, 255];
     }
     let mut response = Response::new();
-    response.data = Some(Arc::new(mln_image::encode_png(&image)));
+    response.data = Some(Arc::new(crate::image::encode_png(&image)));
     response
 }
 

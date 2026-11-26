@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use mln_image::encode_png;
+use mln_engine::image::encode_png;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::size::Size;
 

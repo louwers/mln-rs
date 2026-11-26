@@ -16,10 +16,10 @@ use mln_engine::storage::network_status::NetworkStatus;
 use mln_engine::storage::resource::Kind;
 use mln_engine::storage::resource_transform::{FinishedCallback, ResourceTransform};
 use mln_engine::storage::{FileSource, Loader, OnlineFileSource, ResourceOptions};
+use mln_engine::text::GlyphCache;
 use mln_engine::text::font_face_engine::FontFaceEngine;
 use mln_style::error::Error;
 use mln_style::time::Instant;
-use mln_text::GlyphCache;
 use mln_util::pool::Pool;
 use mln_util::queue::{Queue, TimedTask};
 use mln_util::thread::Joined;
@@ -808,7 +808,7 @@ impl Runtime {
             lifecycle.live_maps += 1;
         }
         if options.system_fonts {
-            mln_system_fonts::prefetch();
+            mln_engine::text::system_fonts::prefetch();
         }
         let id = MapId(self.shared.next_map_id.fetch_add(1, Ordering::Relaxed));
         let published = Arc::new(Published::new(options.event_mask));

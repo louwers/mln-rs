@@ -8,7 +8,6 @@ use mln_style::error::Error;
 use mln_style::expression::EvaluationContext;
 use mln_style::feature::GeometryTileFeature;
 use mln_style::layers::Heatmap;
-use mln_text::atlas::ImagePositions;
 use mln_vec_map::VecMap;
 
 use crate::buckets::heatmap_bucket::HeatmapBucket;
@@ -21,6 +20,7 @@ use crate::layer::tile_layout::Resolved;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::map::MapMode;
 use crate::query::feature_index::FeatureIndexBuilder;
+use crate::text::atlas::ImagePositions;
 use crate::util::tessellator::Tessellator;
 
 pub(crate) struct HeatmapLayout {

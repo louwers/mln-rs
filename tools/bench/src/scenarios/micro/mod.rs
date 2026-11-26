@@ -94,7 +94,7 @@ pub(crate) fn loaded_liberty(fixtures: &Fixtures) -> Style {
 pub(crate) fn with_sprite(fixtures: &Fixtures, mut style: Style) -> Style {
     let sprite = style.get_sprites().first().expect("Liberty has a sprite").sprite_url.clone();
     let path = asset_path(&sprite);
-    let png = mln_image::decode_png(&fixtures.read(&format!("{path}.png"))).expect("the sprite's image");
+    let png = mln_engine::image::decode_png(&fixtures.read(&format!("{path}.png"))).expect("the sprite's image");
     let index = fixtures.read(&format!("{path}.json"));
     let images = mln_engine::image::sprite::parse_sprite("default", &png, &index).expect("the sprite's index");
     style.apply(Edit::AddImages(images)).expect("the sprite's images");

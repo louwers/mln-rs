@@ -1,10 +1,10 @@
-//! A map as the camera that `mln_gestures`' recognizer moves: it reads the
+//! A map as the camera that `mln_engine::gestures`' recognizer moves: it reads the
 //! map's published snapshot and ground, and sends camera commands, without
 //! waiting for them.
 
 use mln_engine::camera::{CameraDelta, CameraOptions, CameraUpdate};
+use mln_engine::gestures::{GestureCamera, PendingEnd};
 use mln_engine::map::MapSnapshot;
-use mln_gestures::{GestureCamera, PendingEnd};
 use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
 use mln_util::geo::ScreenCoordinate;
 
@@ -50,7 +50,7 @@ impl GestureCamera for Map {
         if state.set_limits(limits).is_err() {
             return (bounds.min_zoom, bounds.max_zoom);
         }
-        mln_gestures::zoom_range(&state, snapshot.view.camera.center.latitude())
+        mln_engine::gestures::zoom_range(&state, snapshot.view.camera.center.latitude())
     }
 
     /// On the ground the map draws, so that a box zoom over terrain centers

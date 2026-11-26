@@ -1,5 +1,5 @@
-//! The `Bidi_Mirroring_Glyph` table that `mln_text`'s BiDi reads
-//! (`src/bidi_mirroring.rs`), from `BidiMirroring.txt`.
+//! The `Bidi_Mirroring_Glyph` table that `mln_engine`'s BiDi reads
+//! (`src/text/bidi_mirroring.rs`), from `BidiMirroring.txt`.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;

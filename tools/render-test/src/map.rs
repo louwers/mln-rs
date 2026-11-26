@@ -410,7 +410,7 @@ impl TestRunnerImpl for Impl {
 
         // C++ `decodeImage` and the `style::Image` constructor throw (not
         // caught by the runner).
-        let image = mln_image::decode_image(&bytes).map_err(|e| MapError::Exception(e.to_string()))?;
+        let image = mln_engine::image::decode_image(&bytes).map_err(|e| MapError::Exception(e.to_string()))?;
         let image = mln_style::image::Impl::new(
             name.to_string(),
             image,

@@ -3,10 +3,11 @@ use mln_style::image::ImageStretch;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::math::deg2radf;
 use mln_style::types::{SymbolPlacementType, TextRotationAlignmentType};
-use mln_text::PositionedIcon;
-use mln_text::atlas::{ImagePosition, ImagePositions, RectU16};
-use mln_text::glyph::Shaping;
 use mln_util::constants::ONE_EM;
+
+use crate::text::PositionedIcon;
+use crate::text::atlas::{ImagePosition, ImagePositions, RectU16};
+use crate::text::glyph::Shaping;
 
 /// A glyph's or an icon's quad, relative to its symbol's anchor.
 #[derive(Clone, Debug, PartialEq)]
@@ -327,9 +328,9 @@ mod tests {
     use mln_style::image::Impl as ImageImpl;
     use mln_style::size::Size;
     use mln_style::types::{IconTextFitType, SymbolAnchorType};
-    use mln_text::glyph::{Bounds, GlyphID, GlyphMetrics, PositionedGlyph, PositionedLine};
 
     use super::*;
+    use crate::text::glyph::{Bounds, GlyphID, GlyphMetrics, PositionedGlyph, PositionedLine};
 
     /// gtest `EXPECT_FLOAT_EQ`: within 4 ULPs.
     fn assert_float_eq(actual: f32, expected: f32) {

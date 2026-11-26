@@ -16,15 +16,6 @@ use mln_style::bitmap::AlphaImage;
 use mln_style::error::Error;
 use mln_style::i18n;
 use mln_style::size::Size;
-use mln_text::glyph::{
-    FontData, FontFace, GLYPH_RANGES_PER_FONT_STACK, GLYPHS_PER_GLYPH_RANGE, Glyph, GlyphDependencies, GlyphID,
-    GlyphIDType, GlyphIDs, GlyphMap, GlyphMetrics, GlyphRange, NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK,
-    ShapeRequests, get_glyph_range,
-};
-use mln_text::glyph_cache::GlyphCache;
-use mln_text::local_fonts::{FontChooser, LocalGlyphRasterizer, LocalGlyphs};
-use mln_text::tagged_string::font_stack_hash;
-use mln_text::{GlyphAdjust, ShapedText};
 use mln_util::font_stack::FontStack;
 use mln_util::pool::{Pool, TaskGroup};
 use mln_util::queue::Queue;
@@ -38,7 +29,16 @@ use crate::storage::response::{Reason, ResourceError};
 use crate::storage::stub_file_source::{ResponseType, StubFileSource};
 use crate::storage::{FileSource, Kind, Resource, Response};
 use crate::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
+use crate::text::glyph::{
+    FontData, FontFace, GLYPH_RANGES_PER_FONT_STACK, GLYPHS_PER_GLYPH_RANGE, Glyph, GlyphDependencies, GlyphID,
+    GlyphIDType, GlyphIDs, GlyphMap, GlyphMetrics, GlyphRange, NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK,
+    ShapeRequests, get_glyph_range,
+};
+use crate::text::glyph_cache::GlyphCache;
 use crate::text::glyph_store::{GlyphRanges, GlyphStore, GlyphWait, ShapeResults};
+use crate::text::local_fonts::{FontChooser, LocalGlyphRasterizer, LocalGlyphs};
+use crate::text::tagged_string::font_stack_hash;
+use crate::text::{GlyphAdjust, ShapedText};
 use crate::tile_store::inbox::{Inbox, TileEvent};
 
 fn stub_glyph(glyph_id: GlyphID) -> Glyph {

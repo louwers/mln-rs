@@ -12,6 +12,7 @@ pub mod camera;
 pub mod conformance;
 mod draw;
 mod geometry;
+pub mod gestures;
 mod gfx;
 pub mod image;
 pub mod layer;
@@ -60,6 +61,7 @@ mod log_target {
     #[cfg_attr(not(feature = "sqlite"), expect(dead_code, reason = "only the database logs"))]
     pub(crate) const DATABASE: &str = "mln_engine::database";
     pub(crate) const HTTP_REQUEST: &str = "mln_engine::http_request";
+    pub(crate) const IMAGE: &str = "mln_engine::image";
     pub(crate) const PARSE_TILE: &str = "mln_engine::parse_tile";
     pub(crate) const SPRITE: &str = "mln_engine::sprite";
     pub(crate) const SETUP: &str = "mln_engine::setup";

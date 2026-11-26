@@ -16,7 +16,6 @@ use mln_style::layers::{Fill, Line};
 use mln_style::property::evaluated::Evaluated;
 use mln_style::property::value::PropertyValue;
 use mln_style::tile_id::CanonicalTileID;
-use mln_text::atlas::ImagePositions;
 use mln_util::identity::SimpleIdentity;
 use mln_vec_map::VecMap;
 
@@ -39,6 +38,7 @@ use crate::layout::pattern_layout::PatternLayerMap;
 use crate::layout::symbol_instance::SymbolInstancePools;
 use crate::map::MapMode;
 use crate::tests::fixture_log::FixtureLog;
+use crate::text::atlas::ImagePositions;
 use crate::tile_store::raster::Masking;
 use crate::tile_store::tile_mask::TileMask;
 use crate::util::tessellator::Tessellator;

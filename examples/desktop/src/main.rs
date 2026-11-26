@@ -24,7 +24,7 @@
 // see view.rs), --quit-after SECONDS, --gesture-test (scripted input through
 // the view's handlers) and --no-system-fonts: without it, the map falls back
 // to system fonts for the scripts that its glyph PBFs can't shape, for the
-// glyphs its PBFs lack, and for CJK (mln_system_fonts).
+// glyphs its PBFs lack, and for CJK (mln_engine::text::system_fonts).
 
 mod backend;
 mod benchmark;

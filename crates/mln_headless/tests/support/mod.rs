@@ -83,7 +83,7 @@ pub(crate) fn set_geojson(map: &mut Map, id: &str, geojson: geojson::GeoJson) {
 }
 
 pub(crate) fn decode_image(path: &str) -> PremultipliedImage {
-    mln_image::decode_image(&read_bytes(path)).unwrap_or_else(|e| panic!("{path}: {e}"))
+    mln_engine::image::decode_image(&read_bytes(path)).unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
 /// A `Response` with `data` = the fixture's bytes.
@@ -98,7 +98,7 @@ pub(crate) fn file_response(path: &str) -> Response {
 fn write_output(base: &str, name: &str, image: &PremultipliedImage) {
     let dir = mln_headless::test_output_dir(env!("CARGO_TARGET_TMPDIR")).join(base);
     if std::fs::create_dir_all(&dir).is_ok() {
-        let _ = std::fs::write(dir.join(name), mln_image::encode_png(image));
+        let _ = std::fs::write(dir.join(name), mln_engine::image::encode_png(image));
     }
 }
 
