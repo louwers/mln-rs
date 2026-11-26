@@ -19,7 +19,6 @@ use crate::draw::indexes::DrawIndexes;
 use crate::draw::objects::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::Uniforms;
-use crate::layer::bucket::NoBucket;
 use crate::layer::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, TileDraws, TileObjects};
 use crate::layer::layer_type::LayerType;
 use crate::layer::layout::NoLayout;
@@ -48,7 +47,6 @@ const PROPS_ID: usize = programs::BACKGROUND.buffer_id("props");
 
 impl LayerType for Background {
     type Layout = NoLayout;
-    type Bucket = NoBucket;
     type TileBucket<'a> = NoTileBucket;
     const CROSSFADES: bool = true;
 
