@@ -212,7 +212,9 @@ export type FromMap =
   // The map stopped: a panic, or it failed to start.
   | { type: "fatal"; message: string }
   // The map didn't start: the browser's API couldn't draw it.
-  | { type: "unsupported"; message: string };
+  | { type: "unsupported"; message: string }
+  // The map lost its device, as when the browser's GPU process restarts.
+  | { type: "lost"; message: string };
 
 /** From the page to a tile workers' Web Worker. */
 export interface StartTileWorker {

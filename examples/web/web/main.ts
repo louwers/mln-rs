@@ -296,7 +296,7 @@ function showBanner(text: string) {
   banner.hidden = false;
 }
 
-// The browser's API couldn't start the map. The tab remembers that, and the
+// The browser's API couldn't draw the map. The tab remembers that, and the
 // page loads again with the other backend unless it can't draw either.
 function unsupported(message: string) {
   const other = OTHER_BACKEND[backend];
@@ -321,6 +321,33 @@ function unsupported(message: string) {
   // Replacing a URL with itself and a hash wouldn't load the page again.
   if (url.href === location.href) location.reload();
   else location.replace(url);
+}
+
+// When the map last lost its device in this tab, and how soon after that
+// another loss counts as a backend that can't keep its device.
+const LOST_KEY = "mln-lost-device";
+const LOST_AGAIN_MS = 60_000;
+
+// The map lost its device. The page loads again, at the camera that the
+// hash keeps, written first, rather than giving the map a new device: once
+// Chromium's GPU process restarts, the worker's canvas shows no new frames,
+// and the worker gets no animation frames. A second loss within a minute,
+// or one the tab has no storage to remember, counts as a backend that can't
+// draw the map, since some browsers lose every new device at its first
+// frame.
+function lost(message: string) {
+  history.replaceState(history.state, "", hashFromCamera(latestCamera));
+  try {
+    const last = Number(sessionStorage.getItem(LOST_KEY));
+    if (Date.now() - last >= LOST_AGAIN_MS) {
+      sessionStorage.setItem(LOST_KEY, String(Date.now()));
+      location.reload();
+      return;
+    }
+  } catch {
+    // no storage for this page
+  }
+  unsupported(message);
 }
 
 let markLoaded: (loaded: Loaded) => void = () => {};
@@ -403,6 +430,9 @@ map.onmessage = ({ data }: MessageEvent<FromMap>) => {
       break;
     case "unsupported":
       unsupported(data.message);
+      break;
+    case "lost":
+      lost(data.message);
       break;
     case "camera":
       showCamera(data.camera);

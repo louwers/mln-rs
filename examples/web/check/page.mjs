@@ -217,6 +217,106 @@ export async function checkPanic(context, view, where) {
 }
 
 /**
+ * Loads `view` and, once the map is loaded, crashes the browser's GPU
+ * process (`crashGpuProcess`), which loses the map's WebGPU device, then
+ * crashes it again; returns how the page failed to load again by itself and
+ * draw the frame it drew before with WebGPU, then to load again with WebGL2,
+ * or reported another error, if it did.
+ */
+export async function checkLostDevice(context, view) {
+  const session = await context.browser.open(pageUrl(context, view));
+  const { page } = session;
+  // The backend and the frame, once the map is loaded and still and its
+  // labels faded in.
+  const settled = () =>
+    session.evaluate(
+      `(async () => {
+        const deadline = performance.now() + 60000;
+        while (!window.mln) {
+          if (performance.now() > deadline) throw new Error('the page did not start');
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        const within = (promise, what) => Promise.race([
+          promise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error(what + ' after 60 s')), 60000)),
+        ]);
+        await within(window.mln.loaded, 'not loaded');
+        await within(window.mln.idle(), 'not idle');
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const { pixels } = await within(window.mln.readPixels(), 'no frame');
+        let binary = '';
+        for (let i = 0; i < pixels.length; i += 0x8000) {
+          binary += String.fromCharCode(...pixels.subarray(i, i + 0x8000));
+        }
+        return { backend: window.mln.backend, pixels: btoa(binary) };
+      })()`,
+    );
+  const lost = (error) => error.includes("the WebGPU device was lost");
+  // Crashes the GPU process; returns how the page failed to load again
+  // within a minute, if it did. The map finds its device lost at the next
+  // frame it draws.
+  const crash = async () => {
+    let done = false;
+    const reloaded = page
+      .waitForEvent("load", { timeout: 60000 })
+      .then(
+        () => true,
+        () => false,
+      )
+      .finally(() => (done = true));
+    await context.browser.crashGpuProcess();
+    while (!done) {
+      await Promise.race([
+        reloaded,
+        session
+          .evaluate("window.mln.readPixels().then(() => null)")
+          .catch(() => new Promise((resolve) => setTimeout(resolve, 100))),
+      ]);
+    }
+    if (await reloaded) return null;
+    const banner = await session.evaluate(
+      "(({ hidden, textContent }) => (hidden ? '' : textContent))(document.getElementById('error'))",
+    );
+    return `the page didn't load again within 60 s${banner ? `, and shows ${JSON.stringify(banner)}` : ""}`;
+  };
+  try {
+    // The page loads again at the camera in its hash, which rounds the
+    // view's, so the frame to match is the one drawn from the hash.
+    await settled();
+    await page.reload();
+    const before = Buffer.from((await settled()).pixels, "base64");
+    const first = await crash();
+    if (first) return first;
+    const { backend, pixels } = await settled();
+    if (!session.errors.some(lost)) return "the map lost no device";
+    if (backend !== "webgpu")
+      return `the page loaded again with ${backend}, not webgpu`;
+    const after = Buffer.from(pixels, "base64");
+    if (after.length !== before.length)
+      return `the frame has ${after.length} bytes, not ${before.length}`;
+    let differing = 0;
+    for (let i = 0; i < before.length; i += 4) {
+      if (before.readUInt32LE(i) !== after.readUInt32LE(i)) differing++;
+    }
+    if (differing > 0)
+      return `${differing} of ${before.length / 4} pixels differ from the frame before`;
+    // A second loss within a minute counts as no working WebGPU.
+    const second = await crash();
+    if (second) return `after a second crash, ${second}`;
+    const fallback = (await settled()).backend;
+    if (fallback !== "webgl2")
+      return `after a second crash, the page loaded again with ${fallback}, not webgl2`;
+    const other = session.errors.find((error) => !lost(error));
+    if (other) return `the page reported ${firstLines(other)}`;
+    return null;
+  } catch (error) {
+    return firstLines(error.message);
+  } finally {
+    await session.close();
+  }
+}
+
+/**
  * Loads `view` in the whole window with a comparison with GL JS (the page's
  * `compare`); returns how GL JS's map failed to cover the page's map, or to
  * take the input right of the divider, if it did.

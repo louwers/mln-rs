@@ -17,8 +17,8 @@ use std::time::Duration;
 use mln_gestures::{GestureEvent, GestureRecognizer, Input, Modes, PointerKind};
 use mln_map::{AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, MapEvent};
 use mln_runtime::{
-    AttachOptions, DemandMode, Error, EventMask, EventType, FrameDemand, FrameDisposition, LogicalExtent, Map,
-    MapOptions, RenderSession, RenderTarget, Runtime, RuntimeEvent, RuntimeEventKind, RuntimeOptions, Surface,
+    AttachOptions, DemandMode, Error, ErrorKind, EventMask, EventType, FrameDemand, FrameDisposition, LogicalExtent,
+    Map, MapOptions, RenderSession, RenderTarget, Runtime, RuntimeEvent, RuntimeEventKind, RuntimeOptions, Surface,
     ViewportOptions,
 };
 use mln_util::LatLng;
@@ -213,11 +213,7 @@ impl WebMap {
         let (session, attached) =
             map.attach(RenderTarget::Surface { size, surface, device: None }, options).map_err(js_error)?;
         created.await.map_err(js_error)?;
-        attached.await.map_err(|error| {
-            let error = js_sys::Error::new(&format!("the map can't draw: {error}"));
-            error.set_name("NotSupportedError");
-            JsValue::from(error)
-        })?;
+        attached.await.map_err(|error| not_supported(&error))?;
 
         Ok(WebMap {
             session,
@@ -427,12 +423,16 @@ impl WebMap {
 
     /// Takes the session's frame results, which `on_frame` announced;
     /// returns how many of them rendered a frame. Fails once the session
-    /// failed, with why.
+    /// failed, with why: with an error named `DeviceLostError` when it lost
+    /// its device, as a browser's session does when its GPU process restarts.
     pub fn drain_frames(&mut self) -> Result<u32, JsValue> {
         let results = self.session.drain_frame_results().map_err(js_error)?;
         if results.iter().any(|result| result.disposition == FrameDisposition::Failed) {
             let failure = self.session.snapshot().ok().and_then(|snapshot| snapshot.failure);
-            return Err(js_error(failure.map_or_else(|| "the render session failed".to_owned(), |e| e.to_string())));
+            return Err(match failure {
+                Some(failure) if failure.kind == ErrorKind::TargetLost => named_error("DeviceLostError", &failure),
+                failure => js_error(failure.map_or_else(|| "the render session failed".to_owned(), |e| e.to_string())),
+            });
         }
         let rendered = results.iter().filter(|result| result.disposition == FrameDisposition::Rendered).count() as u32;
         self.rendered += rendered;
@@ -651,6 +651,19 @@ fn sent<T>(result: Result<T, Error>) -> Option<T> {
 
 fn log_refused(error: &Error) {
     log::error!("the map refused a command: {error}");
+}
+
+/// An error named `name`, which web/map-worker.ts tells apart from the
+/// others by its name.
+fn named_error(name: &str, message: &impl std::fmt::Display) -> JsValue {
+    let error = js_sys::Error::new(&message.to_string());
+    error.set_name(name);
+    error.into()
+}
+
+/// The browser's API can't draw the map, because of `reason`.
+fn not_supported(reason: &impl std::fmt::Display) -> JsValue {
+    named_error("NotSupportedError", &format!("the map can't draw: {reason}"))
 }
 
 /// How far the page lets the camera tilt, in degrees; compare.ts's GL JS

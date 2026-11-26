@@ -13,7 +13,10 @@
 // panic (the page's `panic`), and fails unless the page stops and shows the
 // panic, and opens a comparison with GL JS (the page's `compare`), and
 // fails unless GL JS's map covers the page's and takes the input right of
-// the divider. CI runs it (the
+// the divider. Last, in Chromium with WebGPU, it crashes the browser's GPU
+// process under a loaded map, and fails unless the page loads again by
+// itself and draws the same frame with WebGPU, then loads again with WebGL2
+// after a second crash. CI runs it (the
 // `web` job); see ../README.md.
 //
 //   node examples/web/check/check.mjs [options]
@@ -61,6 +64,7 @@ import { renderNative, writeTest } from "./native.mjs";
 import {
   checkCompare,
   checkGpu,
+  checkLostDevice,
   checkPanic,
   firstLines,
   load,
@@ -153,6 +157,16 @@ try {
     `a comparison with GL JS: ${comparing ?? "GL JS's map covers the page's, right of the divider"}`,
   );
   if (comparing) failures.push(`a comparison with GL JS: ${comparing}`);
+  // Last, since it leaves the browser on a new GPU process.
+  if (browser.crashGpuProcess && options.backend === "webgpu") {
+    const losing = await checkLostDevice(context, views[0]);
+    console.log(
+      `a lost WebGPU device: ${losing ?? "the page loaded again and drew the same frame, and with WebGL2 after a second loss"}`,
+    );
+    if (losing) failures.push(`a lost WebGPU device: ${losing}`);
+  } else {
+    console.log("a lost WebGPU device: skipped, it needs Chromium and WebGPU");
+  }
 } finally {
   await browser.close();
   server.close();

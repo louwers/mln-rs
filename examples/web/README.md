@@ -99,6 +99,9 @@ page (main thread, no wasm)
   SQLite, so there's no cache database, no offline packs and no `mbtiles://`.
 - A panic traps the wasm instance it happens in. If that's the map's or a tile
   worker's, the map stops and the page shows the panic message.
+- When the browser loses the map's WebGPU device, as when its GPU process
+  restarts, the page loads again at the same camera. A second loss within a
+  minute counts as no working WebGPU, and the page loads again with WebGL2.
 
 ## Size
 
@@ -136,6 +139,10 @@ lavapipe, which match in most views. Where lavapipe isn't installed
 (`/usr/share/vulkan/icd.d/lvp_icd.x86_64.json`) and `VK_DRIVER_FILES` isn't set,
 the native runner draws on the machine's default device, and the check says so.
 check/check.mjs documents the options, and check/views.mjs lists the views.
+
+Last, the check crashes Chromium's GPU process under a map drawn with WebGPU,
+and fails unless the page loads again by itself and draws the same frame with
+WebGPU, then crashes it again and fails unless the page loads again with WebGL2.
 
 `--browser firefox` or `webkit` runs the check in Playwright's Firefox or WebKit
 (`playwright-core install firefox webkit`), and `--channel chrome`, `msedge` or

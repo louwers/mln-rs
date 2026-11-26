@@ -22,7 +22,8 @@
 //
 // The page names this worker `webgl2` where the map draws with WebGL2: it
 // then runs that build of the module (pkg/webgl). When the browser's API
-// can't start the map, the worker says `unsupported` rather than `fatal`.
+// can't start the map, the worker says `unsupported` rather than `fatal`,
+// and when the map lost its device, `lost` (src/map.rs's `drain_frames`).
 
 import type { WebMap } from "./pkg/mln_web.js";
 import type {
@@ -131,13 +132,30 @@ function fatal(where: string, error: unknown): undefined {
   });
 }
 
+// Stops the map, for the page to start it again, when `error` is WebMap's
+// `NotSupportedError` or `DeviceLostError` (src/map.rs); returns whether it
+// is either.
+function stopToRestart(error: unknown): boolean {
+  if (self.mlnPanic !== undefined || !(error instanceof Error)) return false;
+  let type: "unsupported" | "lost";
+  if (error.name === "NotSupportedError") type = "unsupported";
+  else if (error.name === "DeviceLostError") type = "lost";
+  else return false;
+  if (!stopped) {
+    stopped = true;
+    stopPump();
+    post({ type, message: error.message });
+  }
+  return true;
+}
+
 // Calls into the instance, unless the map has stopped.
 function guard(f: () => void) {
   if (stopped) return;
   try {
     f();
   } catch (error) {
-    fatal("map", error);
+    if (!stopToRestart(error)) fatal("map", error);
   }
 }
 
@@ -391,11 +409,7 @@ async function run({
       onFrame,
     );
   } catch (error) {
-    if (self.mlnPanic !== undefined) throw error;
-    if (!(error instanceof Error && error.name === "NotSupportedError"))
-      throw error;
-    stopped = true;
-    post({ type: "unsupported", message: error.message });
+    if (!stopToRestart(error)) throw error;
     return () => {};
   }
   rendering = map;

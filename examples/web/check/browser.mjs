@@ -43,7 +43,9 @@ const offline = "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1";
  * Chromium draws its WebGPU on SwiftShader unless `onGpu`; the others draw on the
  * machine's GPU, and only Chromium is kept offline. Returns the browser,
  * whose `open(url)` opens a tab in a window as large as the largest view,
- * and `swiftshader`, whether its WebGPU should be SwiftShader.
+ * and `swiftshader`, whether its WebGPU should be SwiftShader. Chromium's
+ * also has `crashGpuProcess()`, which crashes its GPU process: every tab
+ * loses its WebGPU devices and WebGL contexts, and Chromium starts another.
  */
 export async function launch({ browser, channel, executable, onGpu }) {
   const type = browsers[browser];
@@ -68,6 +70,16 @@ export async function launch({ browser, channel, executable, onGpu }) {
     swiftshader: isChromium && !onGpu,
     open: (url) => open(context, url),
     close: () => instance.close(),
+    crashGpuProcess: isChromium
+      ? async () => {
+          const cdp = await instance.newBrowserCDPSession();
+          try {
+            await cdp.send("Browser.crashGpuProcess");
+          } finally {
+            await cdp.detach();
+          }
+        }
+      : undefined,
   };
 }
 
